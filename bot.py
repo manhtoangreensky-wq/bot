@@ -2184,7 +2184,7 @@ DUB_AUDIO_FALLBACK_GAIN_DB = env_float("DUB_AUDIO_FALLBACK_GAIN_DB", 8.0)
 SUBDUB_DUB_VOICE_GAIN = max(1.0, min(4.0, env_float("SUBDUB_DUB_VOICE_GAIN", 2.0)))
 SUBDUB_DUB_LOUDNESS_NORMALIZE = env_flag("SUBDUB_DUB_LOUDNESS_NORMALIZE", "true")
 SUBDUB_DUB_MAX_PEAK_DB = max(-6.0, min(-0.1, env_float("SUBDUB_DUB_MAX_PEAK_DB", -1.0)))
-SUBDUB_DUB_DEFAULT_SPEECH_RATE = max(0.7, min(1.0, env_float("SUBDUB_DUB_DEFAULT_SPEECH_RATE", 1.0)))
+SUBDUB_DUB_DEFAULT_SPEECH_RATE = max(0.7, min(1.0, env_float("SUBDUB_DUB_DEFAULT_SPEECH_RATE", 0.95)))
 SUBDUB_DUB_MAX_SPEECH_RATE = max(SUBDUB_DUB_DEFAULT_SPEECH_RATE, min(1.0, env_float("SUBDUB_DUB_MAX_SPEECH_RATE", 1.0)))
 SUBDUB_DUB_MAX_START_EARLY_MS = max(0, env_int("SUBDUB_DUB_MAX_START_EARLY_MS", 0))
 ORIGINAL_AUDIO_MIX_VOLUME = max(0.0, min(1.0, env_float("ORIGINAL_AUDIO_MIX_VOLUME", 0.15)))
@@ -11040,6 +11040,51 @@ async def handle_product_progress_callback(update: Update, context: ContextTypes
             job_id,
             query.from_user.id if getattr(query, "from_user", None) else 0,
         ) or job
+    if canonical == "subdub" and job:
+        registry_present = subdub_persisted_job_registry_present(job)
+        recovery_key, job = subdub_rehydrate_terminal_job(job)
+        if recovery_key:
+            if subdub_should_terminalize_interrupted_persisted_job(job, registry_present=registry_present):
+                job = subdub_terminalize_interrupted_persisted_job(recovery_key, job)
+            if not subdub_terminal_delivery_evidence(job):
+                await subdub_recover_existing_mp4_delivery(
+                    query,
+                    context,
+                    recovery_key,
+                    job,
+                    lang,
+                )
+                job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(recovery_key) or job)
+            if subdub_terminal_delivery_evidence(job):
+                resolved_job_id = str(
+                    job.get("job_id")
+                    or job.get("internal_job_id")
+                    or job.get("public_code")
+                    or job_id
+                )
+                finalized_panel = await subdub_finalize_delivered_panel(
+                    query,
+                    context,
+                    recovery_key,
+                    resolved_job_id,
+                    lang,
+                    job,
+                )
+                if finalized_panel is not None:
+                    receipt_text = video_dubbing_receipt_text(job, job, lang)
+                    origin = str(
+                        job.get("menu_origin")
+                        or job.get("origin")
+                        or "translate"
+                    )
+                    sent_receipt = await subdub_send_success_receipt_once(
+                        query.message,
+                        recovery_key,
+                        receipt_text,
+                        reply_markup=video_dubbing_receipt_keyboard(lang, origin, job),
+                    )
+                    return sent_receipt or finalized_panel
+
     if canonical in {"music_bg", "music_song"} and job_id and job_id != "latest":
         delivered = await maybe_deliver_music_progress_job(
             query,
@@ -61960,8 +62005,15 @@ async def minimax_audio_reference_to_bytes(value) -> tuple[bytes, str]:
             return audio_bytes, encoding
     return b"", "empty_demo_audio"
 
-async def key4u_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED, allow_admin: bool = False) -> tuple[str, bytes, str, int]:
-    if not key4u_minimax_tts_configured(require_public=not allow_admin):
+async def key4u_minimax_tts_bytes(
+    text: str,
+    voice_id: str = "",
+    voice_style: str = "",
+    voice_speed: str = VOICE_TTS_DEFAULT_SPEED,
+    allow_admin: bool = False,
+    allow_confirmed_product: bool = False,
+) -> tuple[str, bytes, str, int]:
+    if not key4u_minimax_tts_configured(require_public=not (allow_admin or allow_confirmed_product)):
         return "MISSING", b"", "KEY4U_ENABLED/KEY4U_API_KEY/KEY4U_TTS_ENDPOINT/KEY4U_TTS_MODEL missing", 0
     provider = key4u_provider_instance()
     selected_voice_id = str(voice_id or default_tts_voice_id("male"))
@@ -62063,11 +62115,30 @@ async def direct_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: s
     except Exception as exc:
         return "FAIL_PROVIDER_ERROR", b"", shopaikey_sanitize_error(str(exc)), 0
 
-async def call_key4u_minimax_tts_bytes_with_speed(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED, allow_admin: bool = False) -> tuple[str, bytes, str, int]:
+async def call_key4u_minimax_tts_bytes_with_speed(
+    text: str,
+    voice_id: str = "",
+    voice_style: str = "",
+    voice_speed: str = VOICE_TTS_DEFAULT_SPEED,
+    allow_admin: bool = False,
+    allow_confirmed_product: bool = False,
+) -> tuple[str, bytes, str, int]:
     try:
-        return await key4u_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed, allow_admin=allow_admin)
+        return await key4u_minimax_tts_bytes(
+            text,
+            voice_id=voice_id,
+            voice_style=voice_style,
+            voice_speed=voice_speed,
+            allow_admin=allow_admin,
+            allow_confirmed_product=allow_confirmed_product,
+        )
     except TypeError:
-        return await key4u_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, allow_admin=allow_admin)
+        return await key4u_minimax_tts_bytes(
+            text,
+            voice_id=voice_id,
+            voice_style=voice_style,
+            allow_admin=allow_admin,
+        )
 
 async def call_shopaikey_minimax_tts_bytes_with_speed(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED) -> tuple[str, bytes, str, int]:
     try:
@@ -62491,13 +62562,21 @@ def video_asr_provider_available_for(public: bool = True) -> bool:
     except TypeError:
         return bool(video_asr_provider_available())
 
-async def video_dubbing_transcribe_bytes(audio_bytes: bytes, context: ContextTypes.DEFAULT_TYPE, content_type: str = "application/octet-stream", allow_admin: bool = False, updated_by="") -> tuple[str, str, str]:
+async def video_dubbing_transcribe_bytes(
+    audio_bytes: bytes,
+    context: ContextTypes.DEFAULT_TYPE,
+    content_type: str = "application/octet-stream",
+    allow_admin: bool = False,
+    updated_by="",
+    allow_confirmed_product: bool = False,
+) -> tuple[str, str, str]:
     result = await asr_transcribe_audio(
         audio_bytes,
         content_type,
         language="auto",
         allow_admin=allow_admin,
         allow_subdub_public=True,
+        allow_confirmed_product=allow_confirmed_product,
         updated_by=updated_by,
         context=context,
     )
@@ -62513,6 +62592,7 @@ async def asr_transcribe_audio(
     *,
     allow_admin: bool = False,
     allow_subdub_public: bool = False,
+    allow_confirmed_product: bool = False,
     updated_by="",
     context: ContextTypes.DEFAULT_TYPE | None = None,
 ) -> dict:
@@ -62529,7 +62609,14 @@ async def asr_transcribe_audio(
         if (
             route == "key4u"
             and key4u_asr_configured()
-            and (allow_admin or KEY4U_PUBLIC_ENABLED or (allow_subdub_public and subdub_public_force_override_active()))
+            and (
+                allow_admin
+                or KEY4U_PUBLIC_ENABLED
+                or (
+                    allow_subdub_public
+                    and (subdub_public_force_override_active() or allow_confirmed_product)
+                )
+            )
         ):
             result = await openai_compatible_asr_transcribe(
                 audio_bytes,
@@ -62556,7 +62643,11 @@ async def asr_transcribe_audio(
             if result.get("ok") and transcript:
                 return {**result, "provider": "key4u_audio"}
             errors.append(f"Key4U={status}")
-        elif route == "shopaikey" and SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT and (allow_admin or shopaikey_stt_public_ready()):
+        elif route == "shopaikey" and SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT and (
+            allow_admin
+            or shopaikey_stt_public_ready()
+            or (allow_subdub_public and allow_confirmed_product)
+        ):
             result = await openai_compatible_asr_transcribe(
                 audio_bytes,
                 content_type,
@@ -126414,7 +126505,13 @@ def subdub_translation_provider_name() -> str:
         return "deepl" if DEEPL_API_KEY else ""
     return provider if provider in {"deepl", "key4u", "shopaikey"} else ""
 
-async def translate_subtitle_text(text: str, target_lang: str = "vi", allow_admin: bool = False, updated_by="") -> dict:
+async def translate_subtitle_text(
+    text: str,
+    target_lang: str = "vi",
+    allow_admin: bool = False,
+    updated_by="",
+    allow_confirmed_product: bool = False,
+) -> dict:
     target = resolve_translate_target(target_lang)
     source_text = str(text or "").strip()[:6000]
     if not source_text:
@@ -126428,7 +126525,9 @@ async def translate_subtitle_text(text: str, target_lang: str = "vi", allow_admi
                 raise RuntimeError("deepl_not_configured")
             translated = str(await translate_with_deepl(source_text, target) or "").strip()
         elif provider == "key4u":
-            if not key4u_subtitle_translation_configured() or (not allow_admin and not KEY4U_PUBLIC_ENABLED):
+            if not key4u_subtitle_translation_configured() or (
+                not allow_admin and not allow_confirmed_product and not KEY4U_PUBLIC_ENABLED
+            ):
                 raise RuntimeError("key4u_translation_not_allowed")
             result = await key4u_provider_instance().translate(
                 source_text,
@@ -126440,7 +126539,9 @@ async def translate_subtitle_text(text: str, target_lang: str = "vi", allow_admi
                 raise RuntimeError(str(result.get("status") or "key4u_translation_failed"))
             translated = str(result.get("text") or "").strip()
         else:
-            if not shopaikey_public_chat_fallback_enabled() or (not allow_admin and SHOPAIKEY_ADMIN_ONLY):
+            if not shopaikey_public_chat_fallback_enabled() or (
+                not allow_admin and not allow_confirmed_product and SHOPAIKEY_ADMIN_ONLY
+            ):
                 raise RuntimeError("shopaikey_translation_not_allowed")
             models = list(shopaikey_chat_model_sequence())
             if not models:
@@ -162526,10 +162627,13 @@ def can_user_access_product_engine(
     confirm_paid: bool = False,
     admin_interactive_confirm: bool = False,
     state: dict | None = None,
+    confirmed_product: bool = False,
 ) -> dict:
     admin = is_admin_user(user_id)
     effective_confirm_paid = bool(confirm_paid or (admin and admin_interactive_confirm and is_provider_call))
     state_for_readiness = dict(state or {})
+    if confirmed_product:
+        state_for_readiness[SUBDUB_FINAL_CONFIRM_STATE_KEY] = True
     if admin and is_provider_call and effective_confirm_paid:
         state_for_readiness.update({
             "admin_real_test": True,
@@ -162619,6 +162723,20 @@ def evaluate_engine_gate(feature: str, params: dict | None = None, context: dict
         or (entry_source == ENGINE_ENTRY_SOURCE_PRODUCT and context.get("confirm_paid"))
     )
     is_paid_job = bool(context.get("is_paid_job", is_admin_user(uid)))
+    confirmed_product = bool(
+        context.get("confirmed_product")
+        or (
+            entry_source == ENGINE_ENTRY_SOURCE_PRODUCT
+            and context.get("confirm_paid")
+            and normalize_engine_feature(feature) in {
+                "subtitle_asr",
+                "subtitle_auto",
+                "subtitle_translate",
+                "video_dub",
+                "subtitle_plus_dub",
+            }
+        )
+    )
     decision = can_user_access_product_engine(
         uid,
         engine_feature_product_area(feature),
@@ -162628,6 +162746,7 @@ def evaluate_engine_gate(feature: str, params: dict | None = None, context: dict
         confirm_paid=bool(context.get("confirm_paid")),
         admin_interactive_confirm=admin_interactive_confirm,
         state=dict(params.get("state") or context.get("state") or {}),
+        confirmed_product=confirmed_product,
     )
     decision["engine_feature"] = normalize_engine_feature(feature)
     decision["entry_source"] = entry_source
@@ -163477,10 +163596,24 @@ def video_dubbing_asr_ready_for_state(mode: str, state: dict | None = None, publ
         return bool(readiness.get("supports_audio"))
     return bool(readiness.get("supports_audio"))
 
-def video_dubbing_public_processing_ready(mode: str, state: dict | None = None) -> bool:
+def video_dubbing_public_processing_ready(
+    mode: str,
+    state: dict | None = None,
+    *,
+    confirmed_product: bool = False,
+) -> bool:
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
-    return bool(mode and video_dubbing_configured_readiness(mode, state, public=True).get("ok"))
+    confirmed_product = bool(confirmed_product or subdub_final_confirmed_state(state))
+    return bool(
+        mode
+        and video_dubbing_configured_readiness(
+            mode,
+            state,
+            public=True,
+            confirmed_product=confirmed_product,
+        ).get("ok")
+    )
 
 def video_dubbing_product_area_for_mode(mode: str) -> str:
     mode = normalize_video_translate_mode(mode)
@@ -163500,24 +163633,36 @@ def video_dubbing_engine_access_decision(
     is_paid_job: bool = False,
     confirm_paid: bool = False,
     admin_interactive_confirm: bool = False,
+    confirmed_product: bool = False,
 ) -> dict:
     mode = normalize_video_translate_mode(mode)
+    state = dict(state or {})
+    confirmed_product = bool(confirmed_product or subdub_final_confirmed_state(state))
     admin = is_admin_user(user_id)
     if not admin:
+        try:
+            public_ready = video_dubbing_public_processing_ready(
+                mode,
+                state,
+                confirmed_product=confirmed_product,
+            )
+        except TypeError:
+            public_ready = video_dubbing_public_processing_ready(mode, state)
         readiness = {
-            "configured": True,
-            "public_ready": bool(video_dubbing_public_processing_ready(mode, state)),
+            "configured": bool(public_ready),
+            "public_ready": bool(public_ready),
             "missing": [],
-            "reason": "public ready",
+            "reason": "public ready" if public_ready else "public processing guarded",
+            "confirmed_product": confirmed_product,
         }
         if not readiness["public_ready"]:
-            readiness["reason"] = "public processing guarded"
             return {
                 "allowed": False,
                 "status": "blocked_public_maintenance",
                 "reason": readiness["reason"],
                 "message": video_dubbing_guard_text(mode, state, get_user_language(user_id) or "vi", admin=False),
                 "readiness": readiness,
+                "confirmed_product": confirmed_product,
             }
         if is_paid_job and not confirm_paid:
             return {
@@ -163526,8 +163671,16 @@ def video_dubbing_engine_access_decision(
                 "reason": "missing final confirmation",
                 "message": video_dubbing_guard_text(mode, state, get_user_language(user_id) or "vi", admin=False),
                 "readiness": readiness,
+                "confirmed_product": confirmed_product,
             }
-        return {"allowed": True, "status": "allowed_public", "reason": "public ready", "message": "", "readiness": readiness}
+        return {
+            "allowed": True,
+            "status": "allowed_public",
+            "reason": "public ready",
+            "message": "",
+            "readiness": readiness,
+            "confirmed_product": confirmed_product,
+        }
     return can_user_access_product_engine(
         user_id,
         video_dubbing_product_area_for_mode(mode),
@@ -163537,6 +163690,7 @@ def video_dubbing_engine_access_decision(
         confirm_paid=confirm_paid,
         admin_interactive_confirm=admin_interactive_confirm,
         state=state,
+        confirmed_product=confirmed_product,
     )
 
 def is_ai_video_ready() -> bool:
@@ -202221,6 +202375,7 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "source_rights_confirmed", "link_import_job_id", "link_import_status",
             "link_import_charged_xu", "output_type", "output_label",
             "voice_speed", "voice_volume", "source_audio_volume", "smart_voice",
+            "subdub_final_confirmed", "subdub_confirmation_source", "subdub_confirmed_at_ts",
             "subtitle_lines", "subtitle_draft", "subtitle_edit_line",
             "subtitle_find_text", "subtitle_replace_text", "subtitle_time_shift_ms",
             "requested_mode", "preview_seen", "preview_guard_acknowledged",
@@ -205045,43 +205200,52 @@ def subdub_duration_validation_allows_success(payload: dict | None = None) -> bo
     return True
 
 
-def subdub_result_has_delivered_video(result: dict | None = None) -> bool:
-    current = dict(result or {})
-    if not subdub_duration_validation_allows_success(current):
-        return False
-    message_id = str(
-        current.get("video_delivery_message_id")
-        or current.get("final_video_message_id")
-        or current.get("subdub_final_video_message_id")
-        or current.get("telegram_message_id")
-        or current.get("delivery_message_id")
-        or ""
-    ).strip()
-    sent_video_count = max(
-        _safe_int(current.get("sent_video"), 0),
-        _safe_int(current.get("sent_video_document"), 0),
-    )
-    return bool(
-        truthy_value(current.get("video_delivered"), False)
-        or truthy_value(current.get("final_mp4_delivered"), False)
-        or truthy_value(current.get("delivery_succeeded"), False)
-        or truthy_value(current.get("delivery_success"), False)
-        or bool(message_id)
-        or sent_video_count > 0
-    )
-
-
 SUBDUB_VIDEO_DELIVERY_MESSAGE_ID_KEYS = (
     "video_delivery_message_id",
     "final_video_message_id",
     "subdub_final_video_message_id",
-    "telegram_message_id",
-    "delivery_message_id",
+)
+
+SUBDUB_SUBTITLE_DELIVERY_MESSAGE_ID_KEYS = (
+    "srt_delivery_message_id",
+    "subtitle_delivery_message_id",
 )
 
 
-def subdub_video_delivery_message_id(*payloads: dict | None) -> str:
-    """Return concrete Telegram video-delivery evidence, never a status flag."""
+def subdub_payload_requires_final_mp4(payload: dict | None = None) -> bool:
+    """Resolve the lane contract before accepting a delivery artifact."""
+    current = dict(payload or {})
+    candidates = [current]
+    nested_state = current.get("state")
+    if isinstance(nested_state, dict):
+        candidates.append(nested_state)
+    for candidate in candidates:
+        mode_values = (
+            candidate.get("mode"),
+            candidate.get("mapped_mode"),
+            candidate.get("video_processing_mode"),
+            candidate.get("requested_mode"),
+        )
+        product_values = (
+            candidate.get("product_type"),
+            candidate.get("mapped_product_type"),
+        )
+        if any(
+            subdub_video_requires_final_mp4(mode, product)
+            for mode in mode_values
+            for product in product_values
+        ):
+            return True
+        if any(subdub_video_requires_final_mp4(mode) for mode in mode_values):
+            return True
+        if any(subdub_video_requires_final_mp4("", product) for product in product_values):
+            return True
+    return False
+
+
+def subdub_terminal_delivery_evidence(*payloads: dict | None) -> dict:
+    """Return lane-specific Telegram evidence, never generic success flags."""
+    requires_final_mp4 = any(subdub_payload_requires_final_mp4(payload) for payload in payloads)
     for payload in payloads:
         current = dict(payload or {})
         nested_state = current.get("state")
@@ -205090,10 +205254,289 @@ def subdub_video_delivery_message_id(*payloads: dict | None) -> str:
             candidates.append(nested_state)
         for candidate in candidates:
             for key in SUBDUB_VIDEO_DELIVERY_MESSAGE_ID_KEYS:
-                value = str(candidate.get(key) or "").strip()
-                if value:
-                    return value
+                message_id = str(candidate.get(key) or "").strip()
+                if message_id and subdub_duration_validation_allows_success({**current, **candidate}):
+                    return {
+                        "artifact_type": "video",
+                        "is_video": True,
+                        "message_id": message_id,
+                        "message_id_key": key,
+                    }
+            if not requires_final_mp4:
+                for key in SUBDUB_SUBTITLE_DELIVERY_MESSAGE_ID_KEYS:
+                    message_id = str(candidate.get(key) or "").strip()
+                    if message_id:
+                        return {
+                            "artifact_type": "subtitle",
+                            "is_video": False,
+                            "message_id": message_id,
+                            "message_id_key": key,
+                        }
+    return {}
+
+
+def subdub_confirmed_video_delivery_message_id(*payloads: dict | None) -> str:
+    evidence = subdub_terminal_delivery_evidence(*payloads)
+    if not evidence.get("is_video"):
+        return ""
+    return str(evidence.get("message_id") or "").strip()
+
+
+def subdub_result_has_delivered_video(result: dict | None = None) -> bool:
+    return bool(subdub_confirmed_video_delivery_message_id(result))
+
+
+def subdub_registry_terminal_state(result: dict | None = None) -> str:
+    current = dict(result or {})
+    evidence = subdub_terminal_delivery_evidence(current)
+    if evidence:
+        return "delivered"
+    if current.get("partial_audio_delivered") or current.get("delivery_partial_result"):
+        return "needs_admin_review"
+    return "failed_no_charge"
+
+
+def subdub_rehydrate_terminal_job(job: dict | None = None) -> tuple[str, dict]:
+    """Restore delivered registry state without submitting or reprocessing work."""
+    current = dict(job or {})
+    identity = str(
+        current.get("job_key")
+        or current.get("internal_job_id")
+        or current.get("job_id")
+        or current.get("public_code")
+        or ""
+    ).strip()
+    if not identity:
+        return "", current
+    key = str(current.get("job_key") or f"persisted_subdub:{identity}")
+    existing = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {})
+    nonempty_existing = {
+        field: value
+        for field, value in existing.items()
+        if value not in (None, "", [], {})
+    }
+    restored = subdub_enrich_job_identity(
+        {**current, **nonempty_existing, "job_key": key},
+        job_key=key,
+        mode=str(current.get("mode") or current.get("mapped_mode") or ""),
+        state=current,
+    )
+    SUBTITLE_DUB_PIPELINE_JOBS[key] = restored
+    return key, dict(restored)
+
+
+def subdub_persisted_job_registry_present(job: dict | None = None) -> bool:
+    current = dict(job or {})
+    key = str(current.get("job_key") or "").strip()
+    if key and key in SUBTITLE_DUB_PIPELINE_JOBS:
+        return True
+    wanted = subdub_job_identifier_variants(current)
+    if not wanted:
+        return False
+    return any(
+        bool(wanted & subdub_job_identifier_variants(candidate))
+        for candidate in SUBTITLE_DUB_PIPELINE_JOBS.values()
+    )
+
+
+def subdub_panel_edit_already_terminal(error: Exception | None = None) -> bool:
+    """Telegram uses this error when the stored panel is already identical."""
+    token = " ".join(
+        part
+        for part in (
+            str(error or ""),
+            str(getattr(error, "message", "") or ""),
+        )
+        if part
+    ).strip().lower()
+    return "message is not modified" in token or "message_not_modified" in token
+
+
+def subdub_should_terminalize_interrupted_persisted_job(
+    job: dict | None = None,
+    *,
+    registry_present: bool = False,
+) -> bool:
+    current = dict(job or {})
+    if not current or registry_present:
+        return False
+    if str(current.get("lookup_store_hit") or "") not in {
+        "engine_async_direct",
+        "engine_async_feature_index",
+        "engine_async_persisted_scan",
+    }:
+        return False
+    if subdub_terminal_delivery_evidence(current) or subdub_existing_mp4_recovery_candidate(current):
+        return False
+    terminal = str(current.get("terminal_state") or "").strip().lower()
+    if terminal in SUBDUB_TERMINAL_STATES:
+        return False
+    status = str(current.get("status") or "").strip().lower()
+    progress = _safe_int(current.get("progress_percent"), 0)
+    active = status in {"", "queued", "running", "processing", "submitted"} and 0 < progress < 100
+    return bool(active and current.get("pipeline_started"))
+
+
+def subdub_terminalize_interrupted_persisted_job(
+    job_key: str,
+    job: dict | None = None,
+) -> dict:
+    current = dict(job or {})
+    stage = subdub_canonical_lifecycle_state(
+        current.get("progress_stage")
+        or current.get("current_stage")
+        or current.get("lifecycle_state")
+        or "saved_input"
+    )
+    if stage in SUBDUB_TERMINAL_STATES:
+        stage = "saved_input"
+    progress = max(
+        5,
+        _safe_int(current.get("progress_percent"), 0),
+        subdub_progress_percent_for_lifecycle(stage, "failed_no_charge"),
+    )
+    return update_subtitle_dub_pipeline_job(
+        job_key,
+        status="failed_no_charge",
+        terminal_state="failed_no_charge",
+        lifecycle_state=stage,
+        current_stage=stage,
+        progress_stage=stage,
+        progress_percent=progress,
+        completed_steps=subdub_completed_steps_for_lifecycle(stage, "failed_no_charge"),
+        charge_status="not_charged",
+        charged_xu=0,
+        no_charge_reason="interrupted_after_restart_no_artifact",
+        pipeline_blocker="interrupted_after_restart_no_artifact",
+        provider_resubmit_prevented=True,
+        provider_replay_count=0,
+        status_panel_terminalized=True,
+        refresh_stopped_after_terminal=True,
+        panel_finalized=True,
+        panel_final_percent=progress,
+        delivery_success=False,
+        delivery_succeeded=False,
+        final_mp4_delivered=False,
+    )
+
+
+def subdub_existing_mp4_recovery_candidate(job: dict | None = None) -> str:
+    current = dict(job or {})
+    if subdub_terminal_delivery_evidence(current):
+        return ""
+    if (
+        truthy_value(current.get("delivery_attempted"), False)
+        or truthy_value(current.get("delivery_started"), False)
+        or _safe_int(current.get("delivery_attempts"), 0) > 0
+    ):
+        return ""
+    if not bool(
+        truthy_value(current.get("final_mp4_validated"), False)
+        or truthy_value(current.get("output_validated"), False)
+    ):
+        return ""
+    for key in ("canonical_final_artifact_path", "final_mp4_path", "output_video_path", "final_video_path"):
+        path = str(current.get(key) or "").strip()
+        if path and os.path.exists(path):
+            try:
+                if os.path.getsize(path) > 0:
+                    return path
+            except OSError:
+                pass
     return ""
+
+
+async def subdub_recover_existing_mp4_delivery(
+    query,
+    context,
+    job_key: str,
+    job: dict | None = None,
+    lang: str = "vi",
+) -> dict:
+    del context
+    current = dict(job or {})
+    path = subdub_existing_mp4_recovery_candidate(current)
+    if not job_key or not path or not getattr(query, "message", None):
+        return {}
+    update_subtitle_dub_pipeline_job(
+        job_key,
+        delivery_attempted=True,
+        delivery_started=True,
+        delivery_attempts=max(1, _safe_int(current.get("delivery_attempts"), 0) + 1),
+        delivery_recovery_started=True,
+        delivery_recovery_started_at=time.time(),
+    )
+    try:
+        delivery = await send_public_subtitle_dub_final_outputs(
+            query.message,
+            mode=str(current.get("mode") or current.get("mapped_mode") or ""),
+            active_flow=str(current.get("active_flow") or ""),
+            requested_mode=str(current.get("requested_mode") or ""),
+            subtitle_items=[],
+            srt_text="",
+            audio_bytes=b"",
+            video_bytes=b"",
+            lang=lang,
+            include_subtitle_outputs=False,
+            strict_validation=True,
+            job_key=job_key,
+            expected_duration_seconds=float(current.get("expected_duration") or current.get("source_duration") or 0.0),
+            canonical_video_path=path,
+        )
+    except Exception as exc:
+        update_subtitle_dub_pipeline_job(
+            job_key,
+            status="failed_no_charge",
+            terminal_state="failed_no_charge",
+            lifecycle_state="failed_no_charge",
+            current_stage="failed_no_charge",
+            progress_stage="failed_no_charge",
+            progress_percent=subdub_progress_percent_for_lifecycle("failed_no_charge", "failed_no_charge"),
+            charge_status="not_charged",
+            no_charge_reason="existing_mp4_delivery_failed",
+            delivery_recovery_failed=True,
+            delivery_attempt_uncertain=subdub_receipt_send_is_uncertain(exc),
+        )
+        return {}
+    message_id = subdub_confirmed_video_delivery_message_id(delivery)
+    if not message_id:
+        update_subtitle_dub_pipeline_job(
+            job_key,
+            status="failed_no_charge",
+            terminal_state="failed_no_charge",
+            lifecycle_state="failed_no_charge",
+            current_stage="failed_no_charge",
+            progress_stage="failed_no_charge",
+            progress_percent=subdub_progress_percent_for_lifecycle("failed_no_charge", "failed_no_charge"),
+            charge_status="not_charged",
+            no_charge_reason="existing_mp4_delivery_unconfirmed",
+            delivery_recovery_failed=True,
+        )
+        return dict(delivery)
+    mark_subtitle_dub_pipeline_output_sent(
+        job_key,
+        terminal_state="delivered",
+        delivery_message_id=message_id,
+        terminal_artifact_type="video",
+        video_delivery_message_id=message_id,
+    )
+    update_subtitle_dub_pipeline_job(
+        job_key,
+        delivery_recovery_succeeded=True,
+        delivery_recovery_completed_at=time.time(),
+        video_delivery_message_id=message_id,
+        final_video_message_id=message_id,
+        subdub_final_video_message_id=message_id,
+        final_mp4_delivered=True,
+        delivery_success=True,
+        delivery_succeeded=True,
+    )
+    return {**current, **delivery, "video_delivery_message_id": message_id}
+
+
+def subdub_video_delivery_message_id(*payloads: dict | None) -> str:
+    """Return concrete Telegram video-delivery evidence, never a status flag."""
+    return subdub_confirmed_video_delivery_message_id(*payloads)
 
 
 def subdub_reconcile_delivered_video_result(
@@ -205391,6 +205834,16 @@ def video_dubbing_mode_flag(mode: str) -> bool:
     }.get(normalize_video_translate_mode(mode), False)
 
 SUBDUB_PUBLIC_OVERRIDE_PREFIX = "subdub_public_override"
+SUBDUB_FINAL_CONFIRM_STATE_KEY = "subdub_final_confirmed"
+SUBDUB_FINAL_CONFIRM_SOURCE = "videodub|final"
+
+
+def subdub_final_confirmed_state(state: dict | None = None) -> bool:
+    """Return whether this state was admitted through the final SubDub edge."""
+    value = (state or {}).get(SUBDUB_FINAL_CONFIRM_STATE_KEY)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 def subdub_public_override_value(name: str) -> str:
@@ -205740,9 +206193,11 @@ def get_subdub_lane_readiness(
     public: bool,
     admin_smoke: bool = False,
     admin_interactive_confirm: bool = False,
+    confirmed_product: bool = False,
 ) -> dict:
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
+    confirmed_product = bool(confirmed_product or subdub_final_confirmed_state(state))
     force_open = bool(public and subdub_public_force_override_active())
     admin_interactive_confirm = bool(admin_interactive_confirm and not public)
     if admin_interactive_confirm:
@@ -205791,11 +206246,12 @@ def get_subdub_lane_readiness(
     blockers: list[str] = []
     if not mode:
         blockers.append("mode_missing")
-    if public and not video_dubbing_public_flag(mode):
+    if public and not video_dubbing_public_flag(mode) and not confirmed_product:
         blockers.append("public_flag_off")
     if (
         freeze.get("global_provider_freeze")
         and not admin_interactive_confirm
+        and not confirmed_product
         and not subdub_public_freeze_override_active()
     ):
         blockers.append("provider_freeze")
@@ -205808,27 +206264,27 @@ def get_subdub_lane_readiness(
             blockers.append("asr_provider_policy_required")
         elif not asr_configured:
             blockers.append("asr_not_configured")
-        elif public and not asr_public_allowed:
+        elif public and not asr_public_allowed and not confirmed_product:
             blockers.append("asr_public_not_allowed")
-        elif not admin_smoke and not force_open and not provider_status_is_pass(asr_smoke_status):
+        elif not admin_smoke and not force_open and not confirmed_product and not provider_status_is_pass(asr_smoke_status):
             blockers.append("asr_smoke_not_pass")
     if translation_required:
         if translation_provider not in {"deepl", "key4u", "shopaikey"}:
             blockers.append("translation_provider_policy_required")
         elif not translation_configured:
             blockers.append("translation_not_configured")
-        elif public and not translation_public_allowed:
+        elif public and not translation_public_allowed and not confirmed_product:
             blockers.append("translation_public_not_allowed")
-        elif not admin_smoke and not force_open and not provider_status_is_pass(translation_smoke_status):
+        elif not admin_smoke and not force_open and not confirmed_product and not provider_status_is_pass(translation_smoke_status):
             blockers.append("translation_smoke_not_pass")
     if tts_required:
         if tts_provider not in {"direct_minimax", "key4u_minimax", "shopaikey_minimax"}:
             blockers.append("tts_provider_policy_required")
         elif not tts_configured:
             blockers.append("tts_not_configured")
-        elif public and not tts_public_allowed:
+        elif public and not tts_public_allowed and not confirmed_product:
             blockers.append("tts_public_not_allowed")
-        elif not admin_smoke and not force_open and not provider_status_is_pass(tts_smoke_status):
+        elif not admin_smoke and not force_open and not confirmed_product and not provider_status_is_pass(tts_smoke_status):
             blockers.append("tts_smoke_not_pass")
     blockers = list(dict.fromkeys(blockers))
     return {
@@ -205853,7 +206309,8 @@ def get_subdub_lane_readiness(
         "tts_configured": tts_configured,
         "tts_smoke_status": tts_smoke_status,
         "public_force_open": force_open,
-        "smoke_hard_lock": not force_open,
+        "confirmed_product": confirmed_product,
+        "smoke_hard_lock": not (force_open or confirmed_product),
         "tts_public_allowed": tts_public_allowed,
         "effective_ready": not blockers,
         "blockers": blockers,
@@ -205867,9 +206324,11 @@ def video_dubbing_configured_readiness(
     public: bool = True,
     asr_readiness: dict | None = None,
     admin_interactive_confirm: bool = False,
+    confirmed_product: bool = False,
 ) -> dict:
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
+    confirmed_product = bool(confirmed_product or subdub_final_confirmed_state(state))
     del asr_readiness
     readiness = get_subdub_lane_readiness(
         mode,
@@ -205877,6 +206336,7 @@ def video_dubbing_configured_readiness(
         public=public,
         admin_smoke=bool(state.get("admin_real_test") or state.get("admin_smoke")),
         admin_interactive_confirm=admin_interactive_confirm,
+        confirmed_product=confirmed_product,
     )
     blockers = list(readiness.get("blockers") or [])
     missing: list[str] = []
@@ -205906,9 +206366,10 @@ def video_dubbing_configured_readiness(
         "canonical_readiness": readiness,
     }
 
-def video_dubbing_capability(mode: str, state: dict | None = None, public: bool = True) -> dict:
+def video_dubbing_capability(mode: str, state: dict | None = None, public: bool = True, *, confirmed_product: bool = False) -> dict:
     mode = normalize_video_translate_mode(mode)
     state = state or {}
+    confirmed_product = bool(confirmed_product or subdub_final_confirmed_state(state))
     if not mode:
         return {"ok": False, "reason": "invalid_mode", "missing": ["mode"]}
     readiness = get_subdub_lane_readiness(
@@ -205916,6 +206377,7 @@ def video_dubbing_capability(mode: str, state: dict | None = None, public: bool 
         state,
         public=public,
         admin_smoke=bool((state or {}).get("admin_real_test") or (state or {}).get("admin_smoke")),
+        confirmed_product=confirmed_product,
     )
     missing = list(readiness.get("blockers") or [])
     return {
@@ -206879,36 +207341,7 @@ def subdub_final_video_artifact_exists(job: dict | None = None) -> bool:
     )
 
 def subdub_job_video_delivery_succeeded(job: dict | None = None) -> bool:
-    current = dict(job or {})
-    if not subdub_duration_validation_allows_success(current):
-        return False
-    terminal = str(current.get("terminal_state") or "").strip().lower()
-    outcome = str(current.get("terminal_public_outcome_type") or "").strip().lower()
-    message_id = str(
-        current.get("final_video_message_id")
-        or current.get("subdub_final_video_message_id")
-        or current.get("video_delivery_message_id")
-        or current.get("delivery_message_id")
-        or current.get("telegram_message_id")
-        or ""
-    ).strip()
-    terminal_success = bool(
-        current.get("terminal_public_outcome_sent")
-        and outcome == "success"
-    )
-    return bool(
-        terminal == "delivered"
-        or truthy_value(current.get("delivery_succeeded"), False)
-        or truthy_value(current.get("delivery_success"), False)
-        or truthy_value(current.get("public_success_sent"), False)
-        or truthy_value(current.get("output_sent"), False)
-        or truthy_value(current.get("final_mp4_delivered"), False)
-        or terminal_success
-        or bool(message_id)
-        or current.get("subdub_delivered_at")
-        or current.get("delivered_at")
-        or current.get("subdub_success_message_id")
-    )
+    return bool(subdub_confirmed_video_delivery_message_id(job))
 
 
 def subdub_restore_delivered_video_result(
@@ -207553,6 +207986,140 @@ async def subdub_send_progress_update(
             logger.warning("subtitle/dub progress update skipped | %s", sanitize_log_text(str(exc))[:120])
 
 
+async def subdub_finalize_delivered_panel(
+    query,
+    context,
+    job_key: str,
+    job_id: str,
+    lang: str,
+    result: dict | None = None,
+) -> object | None:
+    """Render the terminal 100% panel only after artifact-specific delivery."""
+    key = str(job_key or "")
+    current = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {})
+    evidence = subdub_terminal_delivery_evidence(result, current)
+    if not key or not evidence:
+        return None
+
+    panel_text = subdub_progress_text("delivered", job_id, lang)
+    panel_markup = subdub_progress_keyboard(job_id, lang)
+    panel_message_id = str(current.get("status_panel_message_id") or "").strip()
+    panel_chat_id = str(
+        current.get("status_panel_chat_id")
+        or current.get("chat_id")
+        or getattr(getattr(query, "message", None), "chat_id", "")
+        or ""
+    ).strip()
+    bot_client = getattr(context, "bot", None)
+    if bot_client is None and hasattr(query, "get_bot"):
+        try:
+            bot_client = query.get_bot()
+        except Exception:
+            bot_client = None
+
+    rendered = None
+    edit_method = ""
+    edit_error = ""
+    if bot_client is not None and panel_message_id and panel_chat_id:
+        try:
+            rendered = await bot_client.edit_message_text(
+                chat_id=_safe_int(panel_chat_id, panel_chat_id),
+                message_id=_safe_int(panel_message_id, panel_message_id),
+                text=panel_text,
+                parse_mode="HTML",
+                reply_markup=panel_markup,
+            )
+            edit_method = "stored_message_id"
+        except Exception as exc:
+            if subdub_panel_edit_already_terminal(exc):
+                rendered = getattr(query, "message", None) or object()
+                edit_method = "stored_message_already_terminal"
+            else:
+                edit_error = sanitize_log_text(type(exc).__name__)[:120]
+
+    if rendered is None:
+        message = getattr(query, "message", None)
+        if message is None or not hasattr(message, "reply_text"):
+            update_subtitle_dub_pipeline_job(
+                key,
+                status_panel_terminalized=False,
+                status_panel_terminal_edit_confirmed=False,
+                status_panel_terminal_edit_failed=True,
+                status_panel_terminal_edit_error=edit_error or "panel_message_unavailable",
+            )
+            return None
+        try:
+            rendered = await message.reply_text(
+                panel_text,
+                parse_mode="HTML",
+                reply_markup=panel_markup,
+            )
+            edit_method = "replacement_status_message"
+        except Exception as exc:
+            update_subtitle_dub_pipeline_job(
+                key,
+                status_panel_terminalized=False,
+                status_panel_terminal_edit_confirmed=False,
+                status_panel_terminal_edit_failed=True,
+                status_panel_terminal_edit_error=sanitize_log_text(type(exc).__name__)[:120],
+            )
+            return None
+
+    rendered_message_id = str(getattr(rendered, "message_id", "") or panel_message_id).strip()
+    rendered_chat_id = str(
+        getattr(rendered, "chat_id", "")
+        or getattr(getattr(query, "message", None), "chat_id", "")
+        or panel_chat_id
+    ).strip()
+    artifact_type = str(evidence.get("artifact_type") or "").strip()
+    message_id = str(evidence.get("message_id") or "").strip()
+    delivery_fields = {
+        "terminal_artifact_type": artifact_type,
+        "delivery_message_id": message_id,
+    }
+    if artifact_type == "video":
+        delivery_fields.update(
+            {
+                "video_delivery_message_id": message_id,
+                "final_video_message_id": message_id,
+                "subdub_final_video_message_id": message_id,
+                "final_mp4_delivered": True,
+                "delivery_success": True,
+                "delivery_succeeded": True,
+            }
+        )
+    elif artifact_type == "subtitle":
+        delivery_fields["srt_delivery_message_id"] = message_id
+
+    update_subtitle_dub_pipeline_job(
+        key,
+        status="completed",
+        terminal_state="delivered",
+        lifecycle_state="delivered",
+        current_stage="delivered",
+        progress_stage="delivered",
+        progress_percent=100,
+        completed_steps=subdub_completed_steps_for_lifecycle("delivered", "delivered"),
+        panel_finalized=True,
+        panel_final_percent=100,
+        panel_final_message_id=rendered_message_id,
+        status_panel_message_id=rendered_message_id,
+        status_panel_chat_id=rendered_chat_id,
+        status_panel_terminalized=True,
+        status_panel_terminal_edit_confirmed=True,
+        status_panel_terminal_edit_failed=False,
+        status_panel_terminal_edit_error="",
+        status_panel_terminal_edit_method=edit_method,
+        status_panel_replacement_sent=edit_method == "replacement_status_message",
+        refresh_stopped_after_terminal=True,
+        terminal_public_outcome_type="success",
+        terminal_public_outcome_sent=True,
+        terminal_public_outcome_message_id=message_id,
+        **delivery_fields,
+    )
+    return rendered
+
+
 def subdub_mark_delivered_terminal(job_key: str, result: dict | None = None) -> dict:
     """Persist the delivered terminal before nonessential Telegram UI work."""
     current = dict(result or {})
@@ -207606,9 +208173,23 @@ async def subdub_send_success_receipt_once(
 ) -> object | None:
     """Send one receipt after real video delivery without risking duplicate timeout retries."""
     job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
-    delivery_message_id = subdub_video_delivery_message_id(job)
+    evidence = subdub_terminal_delivery_evidence(job)
+    delivery_message_id = str(evidence.get("message_id") or "").strip()
     existing_receipt_id = str(job.get("subdub_success_message_id") or job.get("receipt_message_id") or "").strip()
     if not message or not job_key or not delivery_message_id:
+        return None
+    panel_confirmed = bool(job.get("status_panel_terminal_edit_confirmed"))
+    legacy_without_stored_panel = bool(
+        not str(job.get("status_panel_message_id") or "").strip()
+        and not str(job.get("status_panel_chat_id") or "").strip()
+    )
+    if not panel_confirmed and not legacy_without_stored_panel:
+        update_subtitle_dub_pipeline_job(
+            job_key,
+            receipt_sent_once=False,
+            receipt_send_state="blocked_until_terminal_panel",
+            receipt_blocked_reason="terminal_panel_not_confirmed",
+        )
         return None
     if existing_receipt_id or truthy_value(job.get("receipt_sent_once"), False):
         update_subtitle_dub_pipeline_job(
@@ -207616,6 +208197,15 @@ async def subdub_send_success_receipt_once(
             receipt_sent_once=True,
             duplicate_receipt_prevented=True,
             receipt_message_id=existing_receipt_id,
+        )
+        return None
+    receipt_send_state = str(job.get("receipt_send_state") or "").strip().lower()
+    if receipt_send_state == "unknown" or truthy_value(job.get("receipt_send_uncertain"), False):
+        update_subtitle_dub_pipeline_job(
+            job_key,
+            duplicate_receipt_prevented=True,
+            receipt_send_state="unknown",
+            receipt_send_uncertain=True,
         )
         return None
     update_subtitle_dub_pipeline_job(
@@ -209059,6 +209649,11 @@ def video_dubbing_product_gate_matrix(
     state = dict(state or {})
     mode = normalize_video_translate_mode(mode)
     access = dict(access or {})
+    confirmed_product = bool(
+        subdub_final_confirmed_state(state)
+        or access.get("confirmed_product")
+        or dict(access.get("readiness") or {}).get("confirmed_product")
+    )
     wants_video_output = mode in {
         VIDEO_SUBTITLE_MODE_CREATE,
         VIDEO_SUBTITLE_MODE_TRANSLATE,
@@ -209086,6 +209681,7 @@ def video_dubbing_product_gate_matrix(
         public=not product_is_admin,
         asr_readiness=asr_readiness,
         admin_interactive_confirm=bool(product_is_admin and access.get("allowed")),
+        confirmed_product=confirmed_product,
     )
     readiness = dict(
         access.get("readiness")
@@ -209188,6 +209784,7 @@ def video_dubbing_product_gate_matrix(
         "public_blockers": list(readiness.get("public_blockers") or []),
         "access_status": str(access.get("status") or ""),
         "access_allowed": bool(access.get("allowed")),
+        "confirmed_product": confirmed_product,
         "gate_overridden_for_product": bool(not access.get("allowed") and product_route_allowed),
         "input_file_id": str(input_save.get("file_id") or state.get("source_file_id") or state.get("video_file_id") or ""),
         "input_file_saved": bool(input_save.get("file_saved")),
@@ -212216,6 +212813,7 @@ async def translate_subtitle_segments(
     *,
     allow_admin: bool = False,
     updated_by="",
+    allow_confirmed_product: bool = False,
 ) -> dict:
     translated_segments = []
     providers = []
@@ -212230,6 +212828,7 @@ async def translate_subtitle_segments(
                 target_language,
                 allow_admin=allow_admin,
                 updated_by=updated_by,
+                allow_confirmed_product=allow_confirmed_product,
             )
         except Exception:
             translated = {}
@@ -212285,6 +212884,7 @@ async def transcribe_media_to_segments(
     max_seconds: int = 0,
     allow_admin: bool = False,
     updated_by="",
+    allow_confirmed_product: bool = False,
     progress_callback=None,
 ) -> dict:
     source_bytes = b""
@@ -212375,6 +212975,7 @@ async def transcribe_media_to_segments(
                         context,
                         chunk_content_type,
                         allow_admin=allow_admin,
+                        allow_confirmed_product=allow_confirmed_product,
                         updated_by=updated_by,
                     )
                 except TypeError:
@@ -212397,6 +212998,7 @@ async def transcribe_media_to_segments(
                 language=source_language,
                 allow_admin=allow_admin,
                 allow_subdub_public=True,
+                allow_confirmed_product=allow_confirmed_product,
                 updated_by=updated_by,
                 context=context,
             )
@@ -212490,6 +213092,7 @@ async def transcribe_media_to_segments(
                     context,
                     audio_content_type,
                     allow_admin=allow_admin,
+                    allow_confirmed_product=allow_confirmed_product,
                     updated_by=updated_by,
                 )
             except TypeError:
@@ -212513,6 +213116,7 @@ async def transcribe_media_to_segments(
                 language=source_language,
                 allow_admin=allow_admin,
                 allow_subdub_public=True,
+                allow_confirmed_product=allow_confirmed_product,
                 updated_by=updated_by,
                 context=context,
             )
@@ -212584,6 +213188,7 @@ async def video_dubbing_resolve_source_script(
     max_seconds: int = 0,
     allow_admin: bool = False,
     updated_by="",
+    allow_confirmed_product: bool = False,
     file_name: str = "",
     media_kind: str = "",
     source_language: str = "auto",
@@ -212657,6 +213262,7 @@ async def video_dubbing_resolve_source_script(
         max_seconds=max_seconds,
         source_language=source_language,
         allow_admin=allow_admin,
+        allow_confirmed_product=allow_confirmed_product,
         updated_by=updated_by,
         progress_callback=progress_callback,
     )
@@ -213039,7 +213645,17 @@ async def execute_video_dubbing_preview(
         )
     return {"ok": True, "preview_seconds": preview_seconds, "preview_text": preview_text[:700]}
 
-async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: str = "", voice_speed: str = "1.0", allow_admin: bool = False, tts_language_code: str = "auto", tts_language_boost: str = "auto", edge_voice_id: str = "") -> tuple[str, bytes, str]:
+async def video_dubbing_tts_bytes(
+    text: str,
+    voice_style: str = "",
+    voice_id: str = "",
+    voice_speed: str = "1.0",
+    allow_admin: bool = False,
+    tts_language_code: str = "auto",
+    tts_language_boost: str = "auto",
+    edge_voice_id: str = "",
+    allow_confirmed_product: bool = False,
+) -> tuple[str, bytes, str]:
     provider = subdub_tts_provider_name()
     if provider not in {"direct_minimax", "key4u_minimax", "shopaikey_minimax"}:
         raise RuntimeError("tts_provider_policy_required")
@@ -213062,13 +213678,20 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
     force_open = subdub_public_force_override_active()
     key4u_ready = bool(
         key4u_minimax_tts_configured(require_public=False)
-        and (allow_admin or force_open or (VIDEO_DUB_TTS_ENABLED and KEY4U_PUBLIC_ENABLED))
+        and (allow_admin or force_open or allow_confirmed_product or (VIDEO_DUB_TTS_ENABLED and KEY4U_PUBLIC_ENABLED))
     )
     shopaikey_ready = bool(
         shopaikey_minimax_tts_configured()
-        and (allow_admin or (VIDEO_DUB_TTS_ENABLED and not SHOPAIKEY_ADMIN_ONLY))
+        and (
+            allow_admin
+            or allow_confirmed_product
+            or (VIDEO_DUB_TTS_ENABLED and not SHOPAIKEY_ADMIN_ONLY)
+        )
     )
-    direct_ready = bool(direct_minimax_tts_configured() and (allow_admin or VIDEO_DUB_TTS_ENABLED))
+    direct_ready = bool(
+        direct_minimax_tts_configured()
+        and (allow_admin or allow_confirmed_product or VIDEO_DUB_TTS_ENABLED)
+    )
     shopaikey_fallback_ready = bool(SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY and SHOPAIKEY_DUBBING_TTS_ENDPOINT) if allow_admin else shopaikey_tts_fallback_public_ready()
 
     async def _key4u_minimax_candidate(value: str):
@@ -213078,6 +213701,7 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
             "voice_style": voice_style,
             "voice_speed": voice_speed,
             "allow_admin": bool(allow_admin or force_open),
+            "allow_confirmed_product": bool(allow_confirmed_product),
         }
         try:
             parameters = inspect.signature(candidate).parameters
@@ -213087,6 +213711,8 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
             )
             if accepts_extra_kwargs or "tts_language_code" in parameters:
                 kwargs["tts_language_code"] = tts_language_code
+            if accepts_extra_kwargs or "allow_confirmed_product" in parameters:
+                kwargs["allow_confirmed_product"] = allow_confirmed_product
             if accepts_extra_kwargs or "tts_language_boost" in parameters:
                 kwargs["tts_language_boost"] = tts_language_boost
         except (TypeError, ValueError):
@@ -213203,6 +213829,7 @@ async def synthesize_dub_segment_chunks(
     base_speed: float = 1.0,
     max_speed: float = 1.0,
     allow_admin: bool = False,
+    allow_confirmed_product: bool = False,
     tts_language_code: str = "auto",
     tts_language_boost: str = "auto",
     edge_voice_id: str = "",
@@ -213228,6 +213855,7 @@ async def synthesize_dub_segment_chunks(
                 voice_id,
                 str(speed),
                 allow_admin=allow_admin,
+                allow_confirmed_product=allow_confirmed_product,
                 tts_language_code=tts_language_code,
                 tts_language_boost=tts_language_boost,
                 edge_voice_id=edge_voice_id,
@@ -213427,6 +214055,7 @@ async def video_dubbing_prepare_subtitles(
     user_id,
     allow_admin: bool = False,
     progress_callback=None,
+    allow_confirmed_product: bool = False,
 ) -> dict:
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
@@ -213493,6 +214122,7 @@ async def video_dubbing_prepare_subtitles(
             resolve_kwargs = {
                 "duration_seconds": duration_hint,
                 "allow_admin": allow_admin,
+                "allow_confirmed_product": allow_confirmed_product,
                 "updated_by": user_id,
                 "file_name": str(state.get("source_file_name") or ""),
                 "media_kind": str(state.get("source_media_type") or state.get("media_kind") or ""),
@@ -213572,6 +214202,7 @@ async def video_dubbing_prepare_subtitles(
                 target_language,
                 allow_admin=allow_admin,
                 updated_by=user_id,
+                allow_confirmed_product=allow_confirmed_product,
             )
             output_segments = list(translated.get("segments") or [])
             translation_provider = str(translated.get("provider") or "")
@@ -213653,6 +214284,7 @@ async def _execute_video_dubbing_pipeline_core(
 ) -> dict:
     uid = query.from_user.id
     state = subdub_blackboxes.normalize_standalone_video_lane_entry_state(state)
+    confirmed_product = subdub_final_confirmed_state(state)
     mode = subdub_resolved_route_mode("", state) or normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
@@ -213825,8 +214457,10 @@ async def _execute_video_dubbing_pipeline_core(
         uid,
         mode,
         state,
-        is_paid_job=bool(is_admin_user(uid)),
+        is_paid_job=bool(is_admin_user(uid) or confirmed_product),
+        confirm_paid=bool(confirmed_product),
         admin_interactive_confirm=admin_interactive_confirm,
+        confirmed_product=confirmed_product,
     )
     gate_matrix = video_dubbing_product_gate_matrix(uid, mode, state, access=access, input_save=input_save)
     public_failure = video_dubbing_product_public_failure_text(mode, state, gate_matrix, lang)
@@ -214033,6 +214667,7 @@ async def _execute_video_dubbing_pipeline_core(
             context,
             service_state,
             uid,
+            allow_confirmed_product=confirmed_product,
             **prepare_kwargs,
         )
         prepared_dict = dict(prepared or {})
@@ -214059,7 +214694,12 @@ async def _execute_video_dubbing_pipeline_core(
         speech_config = subdub_dub_speech_config(state, kwargs.get("base_speed") or state.get("voice_speed") or "1.0")
         kwargs["base_speed"] = float(speech_config.get("dub_speech_rate") or SUBDUB_DUB_DEFAULT_SPEECH_RATE)
         kwargs["max_speed"] = float(speech_config.get("dub_max_speech_rate") or SUBDUB_DUB_MAX_SPEECH_RATE)
-        result = await synthesize_dub_segment_chunks(*args, allow_admin=is_admin_user(uid), **kwargs)
+        result = await synthesize_dub_segment_chunks(
+            *args,
+            allow_admin=is_admin_user(uid),
+            allow_confirmed_product=confirmed_product,
+            **kwargs,
+        )
         if isinstance(result, dict):
             result.update({
                 **speech_config,
@@ -218747,14 +219387,26 @@ async def handle_video_dubbing_callback(
             state = set_video_dubbing_pending(uid, "voice")
             return await safe_edit_or_send(query, video_dubbing_voice_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_keyboard(lang, state))
         if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and not state.get("voice_speed"):
-            state = set_video_dubbing_pending(uid, "confirm", voice_speed="1.0")
+            state = set_video_dubbing_pending(uid, "confirm", voice_speed=str(SUBDUB_DUB_DEFAULT_SPEECH_RATE))
+        confirmed_product = bool(action == "final")
+        if confirmed_product:
+            state = set_video_dubbing_pending(
+                uid,
+                state.get("step") or "confirm",
+                subdub_final_confirmed=True,
+                subdub_confirmation_source=SUBDUB_FINAL_CONFIRM_SOURCE,
+                subdub_confirmed_at_ts=int(time.time()),
+                pending_video_action=action,
+            )
         feature = video_dubbing_product_area_for_mode(mode)
         access = video_dubbing_engine_access_decision(
             uid,
             mode,
             state,
-            is_paid_job=bool(is_admin_user(uid)),
+            is_paid_job=bool(is_admin_user(uid) or confirmed_product),
+            confirm_paid=bool(confirmed_product),
             admin_interactive_confirm=True,
+            confirmed_product=confirmed_product,
         )
         confirm_readiness = get_subdub_lane_readiness(
             mode,
@@ -218762,6 +219414,7 @@ async def handle_video_dubbing_callback(
             public=not is_admin_user(uid),
             admin_smoke=bool(is_admin_user(uid) and state.get("admin_real_test")),
             admin_interactive_confirm=bool(is_admin_user(uid)),
+            confirmed_product=confirmed_product,
         )
         if not access.get("allowed") or not confirm_readiness.get("effective_ready"):
             set_video_dubbing_pending(
@@ -219158,15 +219811,21 @@ async def handle_video_dubbing_callback(
                 or ""
             )
             subdub_mark_delivered_terminal(pipeline_job_key, result)
-            delivered_panel_text = subdub_progress_text("delivered", completed_job_id, lang)
-            await subdub_send_progress_update(
+            finalized_panel = await subdub_finalize_delivered_panel(
                 query,
+                context,
                 pipeline_job_key,
                 completed_job_id,
-                "delivered",
                 lang,
-                rendered_text=delivered_panel_text,
+                result,
             )
+            if finalized_panel is None:
+                update_subtitle_dub_pipeline_job(
+                    pipeline_job_key,
+                    receipt_send_state="blocked_until_terminal_panel",
+                    receipt_blocked_reason="terminal_panel_not_confirmed",
+                )
+                return None
             receipt_text = video_dubbing_receipt_text(completed_state, result, lang)
             # The helper persists subdub_success_message_id and
             # success_sent_count=max(1, ...) only after Telegram returns an ID.
