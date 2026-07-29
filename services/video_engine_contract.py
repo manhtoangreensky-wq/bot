@@ -350,8 +350,18 @@ _PROFILE_ONLY_PRODUCTS = frozenset(
 )
 
 
-def product_route_contract(product: VideoProduct | str) -> dict[str, Any]:
+def product_route_contract(
+    product: VideoProduct | str,
+    *,
+    environ: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     item = _product(product)
+    if item is VideoProduct.PRODUCT_VIDEO:
+        from services import product_video_one_scene_engine
+
+        flags = product_video_one_scene_engine.product_video_one_scene_flags(environ)
+        if flags["PRODUCT_VIDEO_ONE_SCENE_ENGINE_ENABLED"]:
+            return product_video_one_scene_engine.shared_product_video_one_scene_route()
     if item in _PROFILE_ONLY_PRODUCTS:
         return {
             "product": item.value,
@@ -521,8 +531,9 @@ def evaluate_readiness(
     *,
     manifest: Mapping[str, Any],
     runtime_sha: str,
+    environ: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    route = product_route_contract(request.product_type)
+    route = product_route_contract(request.product_type, environ=environ)
     supported_products = tuple(manifest.get("supported_products") or ())
     supported_modes = tuple(manifest.get("supported_modes") or ())
     capabilities = set(manifest.get("capabilities") or ())
@@ -605,13 +616,19 @@ def guarded_submit(
     runtime_sha: str,
     jobs_by_idempotency: MutableMapping[str, VideoEngineJob],
     submitter: Callable[[VideoEngineRequest, Mapping[str, Any]], VideoEngineJob | Mapping[str, Any]],
+    environ: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     existing = jobs_by_idempotency.get(request.idempotency_key)
     if existing is not None:
         job = _coerce_job(existing)
-        route = product_route_contract(request.product_type)
+        route = product_route_contract(request.product_type, environ=environ)
         if not route["connected"]:
-            readiness = evaluate_readiness(request, manifest=manifest, runtime_sha=runtime_sha)
+            readiness = evaluate_readiness(
+                request,
+                manifest=manifest,
+                runtime_sha=runtime_sha,
+                environ=environ,
+            )
             return {
                 "submitted": False,
                 "submit_allowed": False,
@@ -641,9 +658,19 @@ def guarded_submit(
             "idempotent_replay": True,
             "blocker": "",
             "job": job,
-            "readiness": evaluate_readiness(request, manifest=manifest, runtime_sha=runtime_sha),
+            "readiness": evaluate_readiness(
+                request,
+                manifest=manifest,
+                runtime_sha=runtime_sha,
+                environ=environ,
+            ),
         }
-    readiness = evaluate_readiness(request, manifest=manifest, runtime_sha=runtime_sha)
+    readiness = evaluate_readiness(
+        request,
+        manifest=manifest,
+        runtime_sha=runtime_sha,
+        environ=environ,
+    )
     if not readiness["submit_allowed"]:
         return {
             "submitted": False,
