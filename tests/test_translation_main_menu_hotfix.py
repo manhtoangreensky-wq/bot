@@ -115,6 +115,57 @@ def test_translation_text_pending_routes_without_charging(monkeypatch):
     assert "spend_" not in handler_source
 
 
+def test_translation_text_confirm_keeps_pending_until_executor(monkeypatch):
+    user_id = 812350
+    bot.clear_translation_menu_pending(user_id)
+    bot.set_translation_menu_pending(
+        user_id,
+        "text_confirm",
+        target_language="en",
+        source_text="Xin chao khach hang",
+        confirm_token="confirm-token",
+    )
+    executed = {}
+
+    class Query:
+        data = "menu|translation_text_confirm"
+        from_user = SimpleNamespace(id=user_id)
+        message = SimpleNamespace(chat_id=user_id)
+
+        def __init__(self):
+            self.edits = []
+
+        async def answer(self, *args, **kwargs):
+            return None
+
+        async def edit_message_text(self, text, **kwargs):
+            self.edits.append((text, kwargs))
+
+    async def fake_run(update, context, source_text, target):
+        executed.update(source_text=source_text, target=target)
+        return "translation-executed"
+
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(bot, "run_translate_text_to_target", fake_run)
+    query = Query()
+
+    result = asyncio.run(
+        bot.handle_menu_callback(
+            SimpleNamespace(callback_query=query),
+            SimpleNamespace(),
+        )
+    )
+
+    assert result == "translation-executed"
+    assert executed == {
+        "source_text": "Xin chao khach hang",
+        "target": "en",
+    }
+    assert not bot.get_translation_menu_pending(user_id)
+    assert query.edits == []
+
+
 def test_language_menu_remains_accessible_from_translation_and_account():
     translation_callbacks = _callbacks(bot.translation_language_options_keyboard("vi"))
     assert "menu|translation_auto_target" in translation_callbacks

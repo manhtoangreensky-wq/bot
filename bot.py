@@ -59849,7 +59849,7 @@ def clear_shopaikey_pending_confirmations_for_user(user_id) -> bool:
             cleared = True
     return cleared
 
-def clear_media_creator_pending_states(user_id) -> bool:
+def clear_media_creator_pending_states(user_id, preserve_translation_menu: bool = False) -> bool:
     free_hub_cleared = clear_free_hub_pending(user_id)
     support_cleared = clear_support_ticket_pending(user_id)
     quick_cleared = clear_quick_media_pending(user_id)
@@ -59869,7 +59869,7 @@ def clear_media_creator_pending_states(user_id) -> bool:
     developing_video_cleared = clear_developing_video_pending(user_id)
     product_context_cleared = clear_product_context(user_id)
     music_guided_cleared = clear_music_guided_pending(user_id)
-    translation_menu_cleared = clear_translation_menu_pending(user_id)
+    translation_menu_cleared = False if preserve_translation_menu else clear_translation_menu_pending(user_id)
     video_editor_cleared = clear_video_editor_pending(user_id)
     video_downloader_cleared = clear_video_downloader_pending(user_id)
     video_dubbing_cleared = clear_video_dubbing_pending(user_id)
@@ -62652,6 +62652,15 @@ async def asr_transcribe_audio(
             )
             if result.get("ok") and transcript:
                 return {**result, "provider": "key4u_audio"}
+            if subdub_long_media.is_no_speech_result(result, transcript):
+                return {
+                    **result,
+                    "ok": False,
+                    "status": str(result.get("status") or "empty_transcript"),
+                    "provider": "key4u_audio",
+                    "text": "",
+                    "segments": [],
+                }
             errors.append(f"Key4U={status}")
         elif route == "shopaikey" and SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT and (
             allow_admin
@@ -62682,6 +62691,15 @@ async def asr_transcribe_audio(
             )
             if result.get("ok") and transcript:
                 return {**result, "provider": "shopaikey_audio"}
+            if subdub_long_media.is_no_speech_result(result, transcript):
+                return {
+                    **result,
+                    "ok": False,
+                    "status": str(result.get("status") or "empty_transcript"),
+                    "provider": "shopaikey_audio",
+                    "text": "",
+                    "segments": [],
+                }
             errors.append(f"ShopAIKey={status}")
         elif route == "deepgram" and DEEPGRAM_API_KEY:
             result = await deepgram_asr_adapter(audio_bytes, content_type)
@@ -62717,6 +62735,15 @@ async def asr_transcribe_audio(
                 {"called": True, "provider": "deepgram", "route": "listen", "status": status, "error": str(result.get("detail") or "")[:180]},
                 updated_by,
             )
+            if subdub_long_media.is_no_speech_result(result, transcript):
+                return {
+                    **result,
+                    "ok": False,
+                    "status": str(result.get("status") or "deepgram_empty_transcript"),
+                    "provider": "deepgram",
+                    "text": "",
+                    "segments": [],
+                }
             errors.append(f"Deepgram={status}")
     if not errors:
         save_provider_attempt(
@@ -110830,7 +110857,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if user_is_admin:
         clear_broadcast_lite_pending(query.from_user.id)
     lang = get_user_language(query.from_user.id) or "vi"
-    if action not in {"translation_text", "translation_transcript"} and not action.startswith("translation_text_target_"):
+    preserve_translation_menu = action == "translation_text_confirm"
+    if not preserve_translation_menu and action not in {"translation_text", "translation_transcript"} and not action.startswith("translation_text_target_"):
         clear_translation_menu_pending(query.from_user.id)
     keep_translation_session = (
         action == "translate"
@@ -110842,7 +110870,10 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         enter_product_context(query.from_user.id, PRODUCT_CONTEXT_SHOWROOM, origin_screen="menu|translate", product_area="translation")
     if not keep_translation_session:
         clear_translation_session(query.from_user.id)
-    clear_media_creator_pending_states(query.from_user.id)
+    clear_media_creator_pending_states(
+        query.from_user.id,
+        preserve_translation_menu=preserve_translation_menu,
+    )
     clear_support_ticket_pending(query.from_user.id)
     if action != "finance_compliance_update":
         clear_finance_compliance_pending(query.from_user.id)
@@ -206016,6 +206047,12 @@ async def subdub_recover_existing_mp4_delivery(
             job_key=job_key,
             expected_duration_seconds=float(current.get("expected_duration") or current.get("source_duration") or 0.0),
             canonical_video_path=path,
+            require_final_audio=bool(
+                truthy_value(current.get("final_audio_required"), False)
+                or truthy_value(current.get("source_has_audio"), False)
+                or normalize_video_translate_mode(current.get("mode") or current.get("mapped_mode") or "")
+                in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+            ),
         )
     except Exception as exc:
         update_subtitle_dub_pipeline_job(
@@ -208284,13 +208321,76 @@ async def send_subdub_fail_once(
         if reason_token in {"ffmpeg_missing", "ffprobe_missing", "media_runtime_missing"}
         else subdub_mode_fail_text(mode, lang)
     )
+    sent_msg = None
     message_id = ""
+    terminal_panel_confirmed = False
+    terminal_edit_method = ""
+    terminal_edit_error = ""
+    reply_target = getattr(message, "message", None)
+    if reply_target is None and callable(getattr(message, "reply_text", None)):
+        reply_target = message
+
     if callable(getattr(message, "edit_message_text", None)):
-        sent_msg = await safe_edit_or_send(message, text, parse_mode="HTML", reply_markup=reply_markup)
-        message_id = str(getattr(sent_msg, "message_id", "") or "")
-    elif callable(getattr(message, "reply_text", None)):
-        sent_msg = await message.reply_text(text, parse_mode="HTML", reply_markup=reply_markup)
-        message_id = str(getattr(sent_msg, "message_id", "") or "")
+        try:
+            sent_msg = await message.edit_message_text(
+                text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+            terminal_panel_confirmed = True
+            terminal_edit_method = "status_panel_edit"
+        except Exception as exc:
+            if subdub_panel_edit_already_terminal(exc):
+                terminal_panel_confirmed = True
+                terminal_edit_method = "stored_message_already_terminal"
+            else:
+                terminal_edit_error = sanitize_log_text(type(exc).__name__)[:120]
+
+    if not terminal_panel_confirmed and callable(getattr(reply_target, "reply_text", None)):
+        try:
+            sent_msg = await reply_target.reply_text(
+                text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+            terminal_panel_confirmed = True
+            terminal_edit_method = "replacement_status_message"
+            terminal_edit_error = ""
+        except Exception as exc:
+            terminal_edit_error = sanitize_log_text(type(exc).__name__)[:120]
+
+    if not terminal_panel_confirmed:
+        bot_client = getattr(message, "bot", None)
+        if bot_client is None and reply_target is not None and callable(getattr(reply_target, "get_bot", None)):
+            try:
+                bot_client = reply_target.get_bot()
+            except Exception:
+                bot_client = None
+        chat_id = getattr(reply_target, "chat_id", None) if reply_target is not None else None
+        if bot_client is not None and chat_id is not None:
+            try:
+                sent_msg = await bot_client.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    parse_mode="HTML",
+                    reply_markup=reply_markup,
+                )
+                terminal_panel_confirmed = True
+                terminal_edit_method = "replacement_bot_message"
+                terminal_edit_error = ""
+            except Exception as exc:
+                terminal_edit_error = sanitize_log_text(type(exc).__name__)[:120]
+
+    message_id = str(
+        getattr(sent_msg, "message_id", "")
+        or (
+            getattr(reply_target, "message_id", "")
+            if terminal_panel_confirmed and terminal_edit_method != "replacement_status_message"
+            else ""
+        )
+        or (job.get("status_panel_message_id") if terminal_panel_confirmed else "")
+        or ""
+    )
     if key:
         input_save_fail = subdub_input_save_failure_detected(
             {
@@ -208319,12 +208419,12 @@ async def send_subdub_fail_once(
             progress_stage=fail_stage,
             progress_percent=fail_percent,
             completed_steps=subdub_completed_steps_for_lifecycle(fail_stage, "failed_no_charge"),
-            public_error_sent=True,
-            public_failure_sent=True,
-            terminal_public_outcome_sent=True,
-            terminal_public_outcome_type="failure",
+            public_error_sent=terminal_panel_confirmed,
+            public_failure_sent=terminal_panel_confirmed,
+            terminal_public_outcome_sent=terminal_panel_confirmed,
+            terminal_public_outcome_type="failure" if terminal_panel_confirmed else "",
             terminal_public_outcome_message_id=message_id,
-            public_error_sent_count=1,
+            public_error_sent_count=1 if terminal_panel_confirmed else 0,
             success_sent_count=0,
             duplicate_error_prevented=False,
             duplicate_success_prevented=False,
@@ -208334,11 +208434,16 @@ async def send_subdub_fail_once(
             pipeline_blocker=str(reason or "subdub_failed")[:180],
             charge_status="not_charged",
             no_charge_reason=str(reason or "subdub_failed")[:180],
-            status_panel_terminalized=True,
+            status_panel_terminalized=terminal_panel_confirmed,
+            status_panel_terminal_edit_confirmed=terminal_panel_confirmed,
+            status_panel_terminal_edit_failed=not terminal_panel_confirmed,
+            status_panel_terminal_edit_error="" if terminal_panel_confirmed else (terminal_edit_error or "terminal_panel_send_failed"),
+            status_panel_terminal_edit_method=terminal_edit_method,
+            status_panel_replacement_sent=terminal_edit_method in {"replacement_status_message", "replacement_bot_message"},
             refresh_stopped_after_terminal=True,
-            panel_finalized=True,
+            panel_finalized=terminal_panel_confirmed,
             panel_final_percent=fail_percent,
-            panel_final_message_id=message_id or str(job.get("status_panel_message_id") or ""),
+            panel_final_message_id=message_id if terminal_panel_confirmed else "",
             validation_started=bool(subdub_canonical_lifecycle_state(job.get("progress_stage") or "") == "validating_output"),
             validation_passed=False,
             delivery_started=bool(job.get("delivery_attempted")),
@@ -208348,7 +208453,12 @@ async def send_subdub_fail_once(
             success_cost_line="",
             cost_line_reason="failed_no_charge",
         )
-    return {"sent": True, "suppressed": False, "reason": reason}
+    return {
+        "sent": terminal_panel_confirmed,
+        "suppressed": False,
+        "reason": reason,
+        "status_panel_terminal_edit_method": terminal_edit_method,
+    }
 
 def subtitle_dub_find_pipeline_job_for_user(user_id, job_id: str = "") -> dict:
     wanted = str(job_id or "").strip()
@@ -210375,6 +210485,11 @@ def video_dubbing_pipeline_blocker(
     keyword_blockers = (
         ("duplicate", "duplicate_lock"),
         ("unsupported", "unsupported_input"),
+        ("long_media_no_speech", "long_media_no_speech"),
+        ("empty_transcript", "no_speech_detected"),
+        ("no_speech", "no_speech_detected"),
+        ("source_audio_missing", "source_audio_missing"),
+        ("audio_stream_missing", "final_audio_missing"),
         ("ffmpeg", "ffmpeg_missing"),
         ("asr", "asr_missing"),
         ("transcri", "asr_missing"),
@@ -210469,6 +210584,8 @@ def subtitle_dub_debug_job_payload(
         "progress_percent": subdub_progress_percent_for_lifecycle(state.get("progress_stage") or stage, state.get("_subdub_terminal_state") or ""),
         "input_duration": int(state.get("input_duration") or input_save.get("input_duration") or input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
         "input_duration_seconds": int(state.get("input_duration_seconds") or state.get("input_duration") or input_save.get("duration") or 0),
+        "source_has_audio": bool(state.get("source_has_audio")),
+        "final_audio_required": bool(state.get("final_audio_required")),
         "detected_duration_source": str(state.get("detected_duration_source") or input_save.get("detected_duration_source") or ""),
         "telegram_duration": int(state.get("telegram_duration") or input_save.get("telegram_duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
         "ffprobe_duration": int(state.get("ffprobe_duration") or input_save.get("ffprobe_duration") or 0),
@@ -210490,6 +210607,9 @@ def subtitle_dub_debug_job_payload(
         "charge_status": str(state.get("charge_status") or ("charged" if int(charged or 0) > 0 else "not_charged")),
         "chunking_enabled": bool(state.get("chunking_enabled")),
         "chunk_count": int(state.get("chunk_count") or 0),
+        "skipped_chunk_count": int(state.get("skipped_chunk_count") or 0),
+        "skipped_chunk_indices": list(state.get("skipped_chunk_indices") or []),
+        "speech_chunk_count": int(state.get("speech_chunk_count") or 0),
         "chunk_seconds": int(state.get("chunk_seconds") or SUBDUB_LONG_CHUNK_SECONDS),
         "chunk_ranges": list(state.get("chunk_ranges") or []),
         "chunk_strategy": str(state.get("chunk_strategy") or ("asr_audio_chunks" if state.get("chunking_enabled") else "single_pass")),
@@ -210596,6 +210716,11 @@ def subtitle_dub_debug_job_payload(
         "panel_final_percent": int(state.get("panel_final_percent") or state.get("progress_percent") or 0),
         "panel_final_message_id": str(state.get("panel_final_message_id") or state.get("status_panel_message_id") or ""),
         "status_panel_terminalized": bool(state.get("status_panel_terminalized")),
+        "status_panel_terminal_edit_confirmed": bool(state.get("status_panel_terminal_edit_confirmed")),
+        "status_panel_terminal_edit_failed": bool(state.get("status_panel_terminal_edit_failed")),
+        "status_panel_terminal_edit_error": str(state.get("status_panel_terminal_edit_error") or ""),
+        "status_panel_terminal_edit_method": str(state.get("status_panel_terminal_edit_method") or ""),
+        "status_panel_replacement_sent": bool(state.get("status_panel_replacement_sent")),
         "refresh_stopped_after_terminal": bool(state.get("refresh_stopped_after_terminal")),
         "terminal_state": str(state.get("_subdub_terminal_state") or ""),
         "terminal_state_history": list(state.get("terminal_state_history") or []),
@@ -212155,6 +212280,15 @@ def subdub_mode_requires_final_video(mode: str = "", state: dict | None = None, 
         return output in {"burn", "both", "video", "video_subtitle", "mp4"}
     return output in {"burn", "both", "video", "video_subtitle", "mp4"}
 
+
+def subdub_final_video_audio_required(mode: str = "", source_probe: dict | None = None) -> bool:
+    """Dub lanes always need audio; subtitle lanes must preserve source audio."""
+    normalized_mode = normalize_video_translate_mode(mode)
+    return bool(
+        normalized_mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+        or dict(source_probe or {}).get("has_audio") is True
+    )
+
 def subdub_video_fit_mode() -> str:
     mode = str(SUBDUB_VIDEO_FIT_MODE or "cover").strip().lower()
     if mode not in {"cover", "fill", "original"}:
@@ -212266,6 +212400,7 @@ async def send_public_subtitle_dub_final_outputs(
     job_key: str = "",
     expected_duration_seconds: float = 0.0,
     canonical_video_path: str = "",
+    require_final_audio: bool | None = None,
 ) -> dict:
     mode = normalize_video_translate_mode(mode)
     requested_mode = normalize_video_translate_mode(requested_mode)
@@ -212273,6 +212408,12 @@ async def send_public_subtitle_dub_final_outputs(
     requires_final_mp4 = subdub_video_requires_final_mp4(mode)
     expected_duration_seconds = max(0.0, float(expected_duration_seconds or 0.0))
     canonical_video_path = str(canonical_video_path or "").strip()
+    if require_final_audio is None:
+        require_final_audio = bool(
+            mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+            and audio_bytes
+        )
+    require_final_audio = bool(require_final_audio)
     if canonical_video_path:
         try:
             with open(canonical_video_path, "rb") as handle:
@@ -212319,6 +212460,7 @@ async def send_public_subtitle_dub_final_outputs(
         "source_duration": expected_duration_seconds,
         "expected_duration": expected_duration_seconds,
         "duration_coverage_ok": False,
+        "final_audio_required": require_final_audio,
         "canonical_final_artifact_path": canonical_video_path,
         "canonical_final_artifact_source": "workspace_final_mp4" if canonical_video_path else "pipeline_video_output",
     }
@@ -212326,7 +212468,7 @@ async def send_public_subtitle_dub_final_outputs(
         if metadata_enabled:
             sent.update({"output_validation": {}})
         filename, caption, _button = video_dubbing_final_video_label(mode, lang)
-        require_audio = mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and bool(audio_bytes)
+        require_audio = require_final_audio
         validation = (
             await subdub_validate_video_output(
                 video_bytes,
@@ -213558,6 +213700,36 @@ async def transcribe_media_to_segments(
             "confidence": 0.0,
             "provider": "",
         }
+    source_video_probe = {}
+    if is_video:
+        try:
+            source_video_probe = dict(await subdub_probe_video_bytes(source_bytes) or {})
+        except Exception as exc:
+            source_video_probe = {
+                "ok": False,
+                "detail": f"video_probe_exception:{type(exc).__name__}",
+            }
+        if (
+            source_video_probe.get("ok")
+            and source_video_probe.get("has_video")
+            and source_video_probe.get("has_audio") is False
+        ):
+            return {
+                "output_valid": False,
+                "status": "source_audio_missing",
+                "detail": "video_has_no_audio_stream",
+                "transcript_text": "",
+                "segments": [],
+                "detected_language": "",
+                "duration_seconds": int(duration_seconds or source_video_probe.get("duration") or 0),
+                "confidence": 0.0,
+                "provider": "",
+                "chunk_count": 0,
+                "chunk_strategy": "audio_stream_probe",
+                "global_timing_preserved": True,
+                "source_probe_ok": True,
+                "source_has_audio": False,
+            }
     long_plan = subdub_long_video_chunk_plan(duration_seconds)
     asr_progress_emitted = False
 
@@ -213635,7 +213807,10 @@ async def transcribe_media_to_segments(
                 "provider": str(chunk_result.get("provider") or ""),
                 "chunk_count": int(chunk_result.get("chunk_count") or long_plan.get("chunk_count") or 0),
                 "chunk_strategy": str(chunk_result.get("chunk_strategy") or "asr_audio_chunks"),
-                "global_timing_preserved": False,
+                "global_timing_preserved": bool(chunk_result.get("global_timing_preserved", False)),
+                "skipped_chunk_count": int(chunk_result.get("skipped_chunk_count") or 0),
+                "skipped_chunk_indices": list(chunk_result.get("skipped_chunk_indices") or []),
+                "speech_chunk_count": int(chunk_result.get("speech_chunk_count") or 0),
             }
         transcript = str(chunk_result.get("text") or "").strip()
         segments = video_dubbing_qc_segments(
@@ -213659,6 +213834,9 @@ async def transcribe_media_to_segments(
             "chunk_count": int(chunk_result.get("chunk_count") or long_plan.get("chunk_count") or 0),
             "chunk_strategy": str(chunk_result.get("chunk_strategy") or "asr_audio_chunks"),
             "global_timing_preserved": bool(chunk_result.get("global_timing_preserved")),
+            "skipped_chunk_count": int(chunk_result.get("skipped_chunk_count") or 0),
+            "skipped_chunk_indices": list(chunk_result.get("skipped_chunk_indices") or []),
+            "speech_chunk_count": int(chunk_result.get("speech_chunk_count") or 0),
         }
     audio_bytes = source_bytes
     audio_content_type = content_type
@@ -213895,6 +214073,9 @@ async def video_dubbing_resolve_source_script(
         "chunk_count": int(result.get("chunk_count") or (1 if duration_seconds else 0)),
         "chunk_strategy": str(result.get("chunk_strategy") or "single_pass"),
         "global_timing_preserved": bool(result.get("global_timing_preserved", True)),
+        "skipped_chunk_count": int(result.get("skipped_chunk_count") or 0),
+        "skipped_chunk_indices": list(result.get("skipped_chunk_indices") or []),
+        "speech_chunk_count": int(result.get("speech_chunk_count") or 0),
         "subtitle_timing_source": str(result.get("subtitle_timing_source") or ""),
     }
 
@@ -214874,6 +215055,9 @@ async def video_dubbing_prepare_subtitles(
         "chunk_count": int(source_info.get("chunk_count") or state.get("chunk_count") or (1 if duration_hint else 0)),
         "chunk_strategy": str(source_info.get("chunk_strategy") or state.get("chunk_strategy") or "single_pass"),
         "global_timing_preserved": bool(source_info.get("global_timing_preserved", state.get("global_timing_preserved", True))),
+        "skipped_chunk_count": int(source_info.get("skipped_chunk_count") or state.get("skipped_chunk_count") or 0),
+        "skipped_chunk_indices": list(source_info.get("skipped_chunk_indices") or state.get("skipped_chunk_indices") or []),
+        "speech_chunk_count": int(source_info.get("speech_chunk_count") or state.get("speech_chunk_count") or 0),
         "subtitle_timing_source": "original_cues" if needs_translation else str(source_info.get("subtitle_timing_source") or ("embedded_subtitle" if source_info.get("source_kind") == "embedded_subtitle" else "source_cues")),
         "source_subtitle_timing_source": str(source_info.get("subtitle_timing_source") or source_info.get("source_kind") or "source_cues"),
         "visual_ocr_frame_count": int(source_info.get("visual_ocr_frame_count") or 0),
@@ -215287,6 +215471,9 @@ async def _execute_video_dubbing_pipeline_core(
             "chunk_count": int(prepared_dict.get("chunk_count") or prepared_state.get("chunk_count") or 0),
             "chunk_strategy": str(prepared_dict.get("chunk_strategy") or prepared_state.get("chunk_strategy") or "single_pass"),
             "global_timing_preserved": bool(prepared_dict.get("global_timing_preserved", prepared_state.get("global_timing_preserved", True))),
+            "skipped_chunk_count": int(prepared_dict.get("skipped_chunk_count") or prepared_state.get("skipped_chunk_count") or 0),
+            "skipped_chunk_indices": list(prepared_dict.get("skipped_chunk_indices") or prepared_state.get("skipped_chunk_indices") or []),
+            "speech_chunk_count": int(prepared_dict.get("speech_chunk_count") or prepared_state.get("speech_chunk_count") or 0),
         })
         prepared_dict["state"] = prepared_state
         route_attempts["asr"] = bool(prepared_dict.get("asr_provider"))
@@ -215617,6 +215804,12 @@ async def _execute_video_dubbing_pipeline_core(
     partial_reason = str(product_result.get("partial_reason") or "")
     final_video_required = subdub_mode_requires_final_video(mode, state, content_type, str(product_result.get("output_type") or state.get("output_type") or ""))
     source_video_probe = await subdub_probe_video_bytes(video_bytes) if video_bytes else {}
+    final_audio_required = subdub_final_video_audio_required(mode, source_video_probe)
+    state = {
+        **state,
+        "source_has_audio": bool(source_video_probe.get("has_audio")),
+        "final_audio_required": bool(final_audio_required),
+    }
     source_duration_seconds = max(
         0.0,
         float(source_video_probe.get("duration") or 0.0),
@@ -215673,7 +215866,7 @@ async def _execute_video_dubbing_pipeline_core(
     if final_video_required and video_output:
         final_output_validation = await subdub_validate_video_output(
             video_output,
-            require_audio=mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB},
+            require_audio=final_audio_required,
             expected_duration=source_duration_seconds,
         )
         if not final_output_validation.get("ok"):
@@ -215706,6 +215899,8 @@ async def _execute_video_dubbing_pipeline_core(
         "_subdub_subtitle_readability": dict(subtitle_readability),
         "_subdub_output_validation": dict(final_output_validation),
         "source_duration": source_duration_seconds,
+        "source_has_audio": bool(source_video_probe.get("has_audio")),
+        "final_audio_required": bool(final_audio_required),
         "input_duration_seconds": source_duration_seconds,
         "final_mp4_duration": float(final_output_validation.get("actual_duration") or final_output_validation.get("duration") or 0.0),
         "duration_coverage_ratio": float(final_output_validation.get("duration_coverage_ratio") or 0.0),
@@ -215777,7 +215972,7 @@ async def _execute_video_dubbing_pipeline_core(
                 canonical_video_output = b""
             canonical_validation = await subdub_validate_video_output(
                 canonical_video_output,
-                require_audio=mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB},
+                require_audio=final_audio_required,
                 expected_duration=source_duration_seconds,
             )
             if not canonical_validation.get("ok"):
@@ -215968,6 +216163,7 @@ async def _execute_video_dubbing_pipeline_core(
             job_key=delivery_job_key,
             expected_duration_seconds=source_duration_seconds,
             canonical_video_path=canonical_final_artifact_path,
+            require_final_audio=final_audio_required,
         )
         state = {
             **state,
