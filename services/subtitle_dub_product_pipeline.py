@@ -445,9 +445,27 @@ async def process_subtitle_dub_job(
             }
         tts_mixed_segments = tts_generated_segments
         generated_audio_duration = max(0.0, float(tts_audio_qc.get("duration") or 0.0))
+        tts_timeline_duration = max(tts_timeline_duration, generated_audio_duration)
 
     wants_subtitle_video = output_type in {"burn", "both", "video_subtitle"}
     wants_final_video = _video_output_requested(mode, output_type, content_type)
+    source_video_duration = max(
+        0.0,
+        float(
+            pipeline_state.get("input_duration_seconds")
+            or pipeline_state.get("input_duration")
+            or pipeline_state.get("video_duration")
+            or pipeline_state.get("source_duration")
+            or 0.0
+        ),
+    )
+    final_video_expected_duration = source_video_duration
+    if _mode_needs_dub(mode):
+        final_video_expected_duration = max(
+            source_video_duration,
+            tts_timeline_duration,
+            generated_audio_duration,
+        )
     video_output = b""
     partial_result = False
     partial_reason = ""
@@ -461,6 +479,7 @@ async def process_subtitle_dub_job(
                         dubbed_audio=audio_bytes,
                         subtitle_bytes=srt_bytes if wants_subtitle_video else b"",
                         keep_original_audio=bool(dub_audio_policy.get("keep_original_audio")),
+                        target_duration_seconds=final_video_expected_duration,
                     )
                 )
             except Exception as exc:
@@ -527,6 +546,7 @@ async def process_subtitle_dub_job(
         "tts_audio_qc": tts_audio_qc,
         "tts_audio_bytes": len(audio_bytes or b""),
         "generated_audio_duration": generated_audio_duration,
+        "final_video_expected_duration": final_video_expected_duration,
         "tts_cue_qc": [dict(item.get("audio_qc") or {}) for item in tts_chunks],
         "raw_audio_bytes": raw_audio_bytes,
         "audio_bytes": audio_bytes,
