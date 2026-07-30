@@ -357,6 +357,17 @@ def product_route_contract(
     environ: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     item = _product(product)
+    if item is VideoProduct.ANIMATED_VIDEO:
+        selected_mode = _mode(mode) if mode is not None else None
+        if selected_mode in {
+            VideoEngineMode.SINGLE_SCENE,
+            VideoEngineMode.MULTI_SCENE,
+        }:
+            from services import animated_video_engine
+
+            flags = animated_video_engine.animated_video_engine_flags(environ)
+            if flags["ANIMATED_VIDEO_ENGINE_ENABLED"]:
+                return animated_video_engine.shared_animated_video_engine_route()
     if item is VideoProduct.PRODUCT_VIDEO:
         from services import product_video_one_scene_engine
 
@@ -565,6 +576,21 @@ def evaluate_readiness(
     local_capabilities = _normalized_flag_map(manifest.get("local_capabilities"))
     provider_availability = _normalized_flag_map(manifest.get("provider_availability"))
     blocker = ""
+    if (
+        request.product_type is VideoProduct.ANIMATED_VIDEO
+        and route["connected"]
+        and request.mode in {
+            VideoEngineMode.SINGLE_SCENE,
+            VideoEngineMode.MULTI_SCENE,
+        }
+    ):
+        from services import animated_video_engine
+
+        animated_flags = animated_video_engine.animated_video_engine_flags(environ)
+        if animated_flags["ANIMATED_VIDEO_AUTO_RETRY"]:
+            blocker = "automatic_retry_forbidden"
+        elif animated_flags["ANIMATED_VIDEO_AUTO_FALLBACK"]:
+            blocker = "automatic_fallback_forbidden"
     if (
         request.product_type is VideoProduct.FRAME_VIDEO
         and request.mode in {

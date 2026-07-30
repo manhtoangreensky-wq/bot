@@ -1007,6 +1007,7 @@ def mux_final_multiscene_video(
     logo_text: str | None = None,
     burn_subtitles: bool = True,
     logo_position: str = "top-right",
+    watermark_position: str | None = None,
     preserve_master_audio: bool = False,
     audio_sample_rate: int = DEFAULT_AUDIO_SAMPLE_RATE,
     audio_channels: int = DEFAULT_AUDIO_CHANNELS,
@@ -1043,7 +1044,7 @@ def mux_final_multiscene_video(
         video_map = "vsub"
     clean_logo_text = _drawtext_escape(logo_text or "")
     if clean_logo_text:
-        x_expr, y_expr = _drawtext_expr(logo_position)
+        x_expr, y_expr = _drawtext_expr(watermark_position or logo_position)
         input_label = f"[{video_map}]"
         filters.append(
             f"{input_label}drawtext=text='{clean_logo_text}':{ffmpeg_text.DRAWTEXT_NO_EXPANSION}:fontcolor=white:"
@@ -1122,9 +1123,7 @@ def mux_final_multiscene_video(
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output]
     result = safe_run_ffmpeg(cmd, timeout=300)
     if result.returncode != 0:
-        if output != master:
-            shutil.copyfile(master, output)
-        return ensure_video_output(output)
+        raise RuntimeError(f"ffmpeg_mux_failed:{(result.stderr or result.stdout or '')[-500:]}")
     return ensure_video_output(output)
 
 
@@ -1153,6 +1152,7 @@ def finalize_multiscene_scene_clips(
     enable_logo: bool = False,
     logo_text: str | None = None,
     logo_position: str = "bottom_right",
+    watermark_position: str | None = None,
     final_duration_tolerance_sec: float | None = None,
     output_width: int | None = None,
     output_height: int | None = None,
@@ -1411,6 +1411,7 @@ def finalize_multiscene_scene_clips(
         logo_text=logo_text if enable_logo else None,
         burn_subtitles=bool(enable_subtitle),
         logo_position=logo_position,
+        watermark_position=watermark_position,
         preserve_master_audio=preserve_scene_audio,
     )
     final_duration = probe_duration(final)
