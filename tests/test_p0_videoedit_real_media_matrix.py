@@ -7,6 +7,7 @@ inspect produced media rather than asserting command strings alone.
 from __future__ import annotations
 
 import subprocess
+from array import array
 from pathlib import Path
 
 import pytest
@@ -100,6 +101,41 @@ def _frame_mean_rgb(path: Path, *, at_seconds: float = 0.0) -> tuple[float, floa
     return tuple(sum(pixels[channel::3]) / count for channel in range(3))
 
 
+def _sine_frequency(path: Path, *, at_seconds: float) -> float:
+    ffmpeg, _ = _require_tools()
+    sample_rate = 8_000
+    completed = subprocess.run(
+        [
+            ffmpeg,
+            "-v",
+            "error",
+            "-ss",
+            f"{at_seconds:.3f}",
+            "-i",
+            str(path),
+            "-t",
+            "0.400",
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            str(sample_rate),
+            "-f",
+            "s16le",
+            "pipe:1",
+        ],
+        capture_output=True,
+        timeout=45,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")[-1200:]
+    samples = array("h")
+    samples.frombytes(completed.stdout)
+    assert len(samples) > sample_rate // 5
+    crossings = sum(1 for left, right in zip(samples, samples[1:]) if left <= 0 < right)
+    return crossings * sample_rate / len(samples)
+
+
 @pytest.fixture()
 def source_clip(tmp_path: Path) -> Path:
     source = tmp_path / "source-red.mp4"
@@ -172,3 +208,5 @@ def test_videoedit_concat_reorders_distinguishable_color_clips(tmp_path: Path) -
     assert red < blue, "reordered output should begin with the requested blue primary clip"
     red_late, _, blue_late = _frame_mean_rgb(output, at_seconds=2.2)
     assert red_late > blue_late, "reordered output should end with the appended red clip"
+    assert 780 <= _sine_frequency(output, at_seconds=0.4) <= 980
+    assert 340 <= _sine_frequency(output, at_seconds=2.0) <= 540
