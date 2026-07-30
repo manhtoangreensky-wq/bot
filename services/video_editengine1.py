@@ -228,6 +228,14 @@ def create_job(
 ) -> dict[str, Any]:
     """Create edit job, persistent outbox and worker queue row atomically."""
     ensure_schema(conn)
+    normalized_price = max(0, int(price_xu or 0))
+    # A zero-priced row is a local-free contract, never an incomplete paid
+    # quote.  Positive legacy rows remain readable for regression compatibility
+    # but the canonical public Video Edit path uses only this exact contract.
+    if normalized_price == 0 and (
+        str(quality_tier_id or "") != "local-free" or dict(tail or {})
+    ):
+        raise ValueError("local_free_contract_invalid")
     if not conn.in_transaction:
         conn.execute("BEGIN IMMEDIATE")
     token = stable_idempotency_key(
@@ -267,7 +275,7 @@ def create_job(
            VALUES (?,?,?,?,?,?,?,?,?,?)""",
         (
             str(user_id or ""), "video_editengine1", WORKER_JOB_TYPE, "queued", ENGINE_ROUTE,
-            _json(worker_payload), now, max(0, int(price_xu or 0)), 0, now,
+            _json(worker_payload), now, normalized_price, 0, now,
         ),
     )
     worker_job_id = int(cursor.lastrowid)
@@ -282,8 +290,8 @@ def create_job(
             ENGINE_ROUTE, OUTBOX_OWNER, str(edit_session_id or ""), "queued",
             str(source_file_id or ""), str(worker_payload.get("source_file_name") or "")[:240],
             str(worker_payload.get("source_video_hash") or worker_payload.get("source_sha256") or "")[:128],
-            _json(source_metadata or {}), _json(plan or {}), _json(tail or {}),
-            str(quality_tier_id or ""), max(0, int(price_xu or 0)), worker_job_id, now, now,
+             _json(source_metadata or {}), _json(plan or {}), _json(tail or {}),
+             str(quality_tier_id or ""), normalized_price, worker_job_id, now, now,
         ),
     )
     edit_job_id = int(cursor.lastrowid)
@@ -431,7 +439,8 @@ def claim_charge(conn, *, worker_job_id: Any) -> bool:
            WHERE local_worker_job_id=?
              AND status='delivered'
              AND receipt_state='created'
-             AND charge_state='not_charged'""",
+              AND charge_state='not_charged'
+              AND price_xu > 0""",
         (_now(), int(worker_job_id or 0)),
     )
     return int(cursor.rowcount or 0) == 1
