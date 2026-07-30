@@ -27,6 +27,37 @@ def _float(value: Any, default: float = 0.0) -> float:
         return float(default)
 
 
+_NO_SPEECH_STATUSES = frozenset(
+    {
+        "empty_transcript",
+        "deepgram_empty_transcript",
+        "long_media_chunk_asr_empty",
+        "asr_empty",
+        "no_speech",
+        "no_speech_detected",
+        "speech_not_detected",
+        "transcript_empty",
+    }
+)
+
+
+def is_no_speech_result(result: dict[str, Any], transcript: str = "") -> bool:
+    """Classify only explicit silence/empty-speech outcomes as skippable."""
+    current = dict(result or {})
+    status = str(current.get("status") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return bool(
+        current.get("no_speech")
+        or current.get("speech_detected") is False
+        or status in _NO_SPEECH_STATUSES
+        or (
+            current.get("ok") is True
+            and not transcript
+            and status in {"", "ok", "pass", "success"}
+            and not current.get("error")
+        )
+    )
+
+
 def build_long_project_plan(
     duration_seconds: float,
     *,
@@ -363,6 +394,8 @@ async def transcribe_long_media_chunks(
     providers: list[str] = []
     detected_languages: list[str] = []
     extraction_details: list[str] = []
+    skipped_chunk_indices: list[int] = []
+    skipped_chunk_details: list[str] = []
 
     for position, item in enumerate(ranges, start=1):
         chunk_index = int(item.get("index") or position)
@@ -423,15 +456,24 @@ async def transcribe_long_media_chunks(
             }
         transcript = str(result.get("text") or result.get("transcript") or "").strip()
         if not result.get("ok") or not transcript:
+            result_status = str(result.get("status") or "long_media_chunk_asr_empty")
+            if is_no_speech_result(result, transcript):
+                skipped_chunk_indices.append(chunk_index)
+                skipped_chunk_details.append(
+                    f"chunk={chunk_index}; status={result_status[:80]}"
+                )
+                continue
             return {
                 "ok": False,
-                "status": str(result.get("status") or "long_media_chunk_asr_empty"),
+                "status": result_status,
                 "detail": f"chunk={chunk_index}; {str(result.get('detail') or '')[:160]}",
                 "segments": [],
                 "text": "",
                 "failed_chunk_index": chunk_index,
                 "chunk_count": len(ranges),
                 "chunk_strategy": "asr_audio_chunks",
+                "skipped_chunk_count": len(skipped_chunk_indices),
+                "skipped_chunk_indices": skipped_chunk_indices,
             }
 
         absolute_segments = offset_chunk_segments(
@@ -450,11 +492,32 @@ async def transcribe_long_media_chunks(
                 "failed_chunk_index": chunk_index,
                 "chunk_count": len(ranges),
                 "chunk_strategy": "asr_audio_chunks",
+                "skipped_chunk_count": len(skipped_chunk_indices),
+                "skipped_chunk_indices": skipped_chunk_indices,
             }
         all_segments.extend(absolute_segments)
         transcripts.append(transcript)
         providers.append(str(result.get("provider") or ""))
         detected_languages.append(str(result.get("language") or result.get("detected_language") or ""))
+
+    if not all_segments:
+        return {
+            "ok": False,
+            "status": "long_media_no_speech",
+            "detail": f"chunks={len(ranges)}; skipped={','.join(str(item) for item in skipped_chunk_indices)}",
+            "segments": [],
+            "text": "",
+            "provider": "",
+            "language": "",
+            "duration_seconds": round(max(_float(input_duration_seconds), 0.0), 3),
+            "chunk_count": len(ranges),
+            "chunk_strategy": "asr_audio_chunks",
+            "global_timing_preserved": True,
+            "skipped_chunk_count": len(skipped_chunk_indices),
+            "skipped_chunk_indices": skipped_chunk_indices,
+            "skipped_chunk_details": skipped_chunk_details,
+            "speech_chunk_count": 0,
+        }
 
     all_segments.sort(key=lambda item: (_float(item.get("start")), _float(item.get("end"))))
     for index, item in enumerate(all_segments, start=1):
@@ -474,7 +537,15 @@ async def transcribe_long_media_chunks(
         "chunk_count": len(ranges),
         "chunk_strategy": "asr_audio_chunks",
         "global_timing_preserved": True,
-        "detail": f"chunks={len(ranges)}; extraction={','.join(item for item in extraction_details if item)}",
+        "detail": (
+            f"chunks={len(ranges)}; speech_chunks={len(transcripts)}; "
+            f"skipped={','.join(str(item) for item in skipped_chunk_indices)}; "
+            f"extraction={','.join(item for item in extraction_details if item)}"
+        ),
+        "skipped_chunk_count": len(skipped_chunk_indices),
+        "skipped_chunk_indices": skipped_chunk_indices,
+        "skipped_chunk_details": skipped_chunk_details,
+        "speech_chunk_count": len(transcripts),
     }
 
 
