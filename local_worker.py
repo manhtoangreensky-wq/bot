@@ -605,7 +605,16 @@ def video_editor_filter(payload: dict) -> tuple[str, bool]:
     return ",".join(part for part in filters if part), False
 
 
-def _local1_progress(job_id, stage: str, *, processed: int = 0, total: int = 1, delivered: int = 0, detail: str = "") -> None:
+def _local1_progress(
+    job_id,
+    stage: str,
+    *,
+    processed: int = 0,
+    total: int = 1,
+    delivered: int = 0,
+    detail: str = "",
+    artifact_receipts: list[dict] | None = None,
+) -> None:
     payload = {
         "local1": 1,
         "stage": str(stage or "processing_video")[:40],
@@ -615,6 +624,8 @@ def _local1_progress(job_id, stage: str, *, processed: int = 0, total: int = 1, 
         "detail": first_line(detail)[:120],
         "charge": 0,
     }
+    if artifact_receipts is not None:
+        payload["artifact_receipts"] = list(artifact_receipts)
     update_job(job_id, "running", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
 
 
@@ -667,6 +678,10 @@ def run_video_local_edit(job: dict) -> None:
     terminal_detail = "failed_no_charge"
     output_file_ids: list[str] = []
     terminal_receipt: dict = {}
+    delivery_receipts: list[dict] = []
+    expected_output_total = 0
+    source_video_path = ""
+    source_sha256 = ""
     try:
         payload = json.loads(str(job.get("input_file_id") or "") or "{}")
         if not isinstance(payload, dict):
@@ -741,7 +756,7 @@ def run_video_local_edit(job: dict) -> None:
             )
             outputs = list(result.get("outputs") or [])
             total = len(outputs)
-            delivery_receipts: list[dict] = []
+            expected_output_total = total
             for index, item in enumerate(outputs, start=1):
                 output_path = str(item.get("path") or "")
                 if not delivery_file_allowed(output_path, workspace=workspace):
@@ -763,12 +778,21 @@ def run_video_local_edit(job: dict) -> None:
                     raise LocalVideoEditError("delivery_receipt_missing")
                 output_file_ids.append(str(delivery.get("file_id") or ""))
                 delivery_receipts.append({
+                    "index": index,
                     "message_id": str(delivery.get("message_id") or ""),
                     "file_id": str(delivery.get("file_id") or ""),
                     "size": int(os.path.getsize(output_path)),
                     "sha256": video_ai_edit_validation.sha256_file(output_path),
                     "ffprobe": dict(item.get("validation") or {}),
                 })
+                _local1_progress(
+                    job_id,
+                    "delivering",
+                    processed=total,
+                    total=total,
+                    delivered=index,
+                    artifact_receipts=delivery_receipts,
+                )
             joined_hashes = "|".join(item["sha256"] for item in delivery_receipts)
             terminal_receipt = {
                 "delivery_message_id": ",".join(item["message_id"] for item in delivery_receipts),
@@ -780,6 +804,7 @@ def run_video_local_edit(job: dict) -> None:
                 "output_sha256": hashlib.sha256(joined_hashes.encode("utf-8")).hexdigest(),
                 "ffprobe": dict(delivery_receipts[0].get("ffprobe") or {}) if delivery_receipts else {},
                 "output_count": len(delivery_receipts),
+                "artifacts": delivery_receipts,
                 "charge_policy": charge_policy,
                 "charge_status": charge_status,
                 "charged_xu": charged_xu,
@@ -902,21 +927,69 @@ def run_video_local_edit(job: dict) -> None:
             }, ensure_ascii=False, separators=(",", ":"))
         terminal_status = "succeeded"
     except (LocalVideoEditError, LocalVideoValidationError) as exc:
-        terminal_detail = json.dumps({
-            "local1": 1,
-            "stage": "failed_no_charge",
-            "reason": str(getattr(exc, "reason", str(exc)))[:160],
-            "charge": 0,
-            "cleanup": "done",
-        }, ensure_ascii=False, separators=(",", ":"))
+        failure_reason = str(getattr(exc, "reason", str(exc)))[:160]
+        if delivery_receipts:
+            joined_hashes = "|".join(item["sha256"] for item in delivery_receipts)
+            terminal_receipt = {
+                "delivery_message_id": ",".join(item["message_id"] for item in delivery_receipts),
+                "delivery_file_id": str(delivery_receipts[0]["file_id"]),
+                "source_video_path": source_video_path,
+                "source_sha256": source_sha256,
+                "output_size_bytes": sum(int(item["size"]) for item in delivery_receipts),
+                "output_sha256": hashlib.sha256(joined_hashes.encode("utf-8")).hexdigest(),
+                "ffprobe": dict(delivery_receipts[0].get("ffprobe") or {}),
+                "output_count": expected_output_total,
+                "artifacts": delivery_receipts,
+            }
+            terminal_detail = json.dumps({
+                "local1": 1,
+                "stage": "delivery_unknown",
+                "reason": failure_reason,
+                "delivered": len(delivery_receipts),
+                "total": expected_output_total,
+                "charge": 0,
+                "cleanup": "done",
+            }, ensure_ascii=False, separators=(",", ":"))
+        else:
+            terminal_detail = json.dumps({
+                "local1": 1,
+                "stage": "failed_no_charge",
+                "reason": failure_reason,
+                "charge": 0,
+                "cleanup": "done",
+            }, ensure_ascii=False, separators=(",", ":"))
     except Exception as exc:
-        terminal_detail = json.dumps({
-            "local1": 1,
-            "stage": "failed_no_charge",
-            "reason": f"{type(exc).__name__}:{first_line(str(exc))}"[:160],
-            "charge": 0,
-            "cleanup": "done",
-        }, ensure_ascii=False, separators=(",", ":"))
+        failure_reason = f"{type(exc).__name__}:{first_line(str(exc))}"[:160]
+        if delivery_receipts:
+            joined_hashes = "|".join(item["sha256"] for item in delivery_receipts)
+            terminal_receipt = {
+                "delivery_message_id": ",".join(item["message_id"] for item in delivery_receipts),
+                "delivery_file_id": str(delivery_receipts[0]["file_id"]),
+                "source_video_path": source_video_path,
+                "source_sha256": source_sha256,
+                "output_size_bytes": sum(int(item["size"]) for item in delivery_receipts),
+                "output_sha256": hashlib.sha256(joined_hashes.encode("utf-8")).hexdigest(),
+                "ffprobe": dict(delivery_receipts[0].get("ffprobe") or {}),
+                "output_count": expected_output_total,
+                "artifacts": delivery_receipts,
+            }
+            terminal_detail = json.dumps({
+                "local1": 1,
+                "stage": "delivery_unknown",
+                "reason": failure_reason,
+                "delivered": len(delivery_receipts),
+                "total": expected_output_total,
+                "charge": 0,
+                "cleanup": "done",
+            }, ensure_ascii=False, separators=(",", ":"))
+        else:
+            terminal_detail = json.dumps({
+                "local1": 1,
+                "stage": "failed_no_charge",
+                "reason": failure_reason,
+                "charge": 0,
+                "cleanup": "done",
+            }, ensure_ascii=False, separators=(",", ":"))
     finally:
         cleanup = cleanup_job_workspace(workspace) if workspace else {"ok": True, "removed": False}
         if not cleanup.get("ok"):

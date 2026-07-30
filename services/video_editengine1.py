@@ -80,6 +80,8 @@ def ensure_schema(conn) -> None:
             ffprobe_json TEXT NOT NULL DEFAULT '{}',
             delivery_message_id TEXT NOT NULL DEFAULT '',
             delivery_file_id TEXT NOT NULL DEFAULT '',
+            artifact_receipts_json TEXT NOT NULL DEFAULT '[]',
+            delivery_cursor INTEGER NOT NULL DEFAULT 0,
             receipt_state TEXT NOT NULL DEFAULT 'not_created',
             charge_state TEXT NOT NULL DEFAULT 'not_charged',
             charged_xu INTEGER NOT NULL DEFAULT 0,
@@ -96,6 +98,8 @@ def ensure_schema(conn) -> None:
     _ensure_column(conn, "video_edit_jobs", "source_video_path", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(conn, "video_edit_jobs", "source_sha256", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(conn, "video_edit_jobs", "output_path", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "video_edit_jobs", "artifact_receipts_json", "TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(conn, "video_edit_jobs", "delivery_cursor", "INTEGER NOT NULL DEFAULT 0")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS video_edit_outbox (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,6 +166,39 @@ def stable_idempotency_key(
             "subtitle_source": {} if subtitle_source is _MISSING else subtitle_source or {},
         })
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _artifact_receipts(value: Any) -> list[dict[str, Any]]:
+    """Normalize complete per-artifact Telegram receipts in delivery order."""
+
+    if not isinstance(value, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    for position, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            return []
+        try:
+            index = int(item.get("index") or position)
+            size = int(item.get("size") or item.get("output_size_bytes") or 0)
+        except (TypeError, ValueError):
+            return []
+        message_id = str(item.get("message_id") or item.get("delivery_message_id") or "").strip()
+        file_id = str(item.get("file_id") or item.get("delivery_file_id") or "").strip()
+        sha256 = str(item.get("sha256") or item.get("output_sha256") or "").strip()
+        ffprobe = dict(item.get("ffprobe") or {})
+        if index != position or not message_id or not file_id or size <= 0 or len(sha256) != 64 or not ffprobe.get("ok"):
+            return []
+        normalized.append(
+            {
+                "index": index,
+                "message_id": message_id,
+                "file_id": file_id,
+                "size": size,
+                "sha256": sha256,
+                "ffprobe": ffprobe,
+            }
+        )
+    return normalized
 
 
 def preflight(state: dict, runtime: dict) -> dict[str, Any]:
@@ -390,7 +427,7 @@ def get_job_by_worker_id(conn, worker_job_id: Any) -> dict[str, Any]:
                   worker_owner,status,edit_session_id,quality_tier_id,price_xu,local_worker_job_id,
                   progress_percent,blocker,source_video_path,source_sha256,output_file_id,output_path,output_sha256,
                   output_size_bytes,ffprobe_json,delivery_message_id,delivery_file_id,
-                  receipt_state,charge_state,charged_xu,tail_json
+                  artifact_receipts_json,delivery_cursor,receipt_state,charge_state,charged_xu,tail_json
            FROM video_edit_jobs WHERE local_worker_job_id=?""",
         (int(worker_job_id or 0),),
     ).fetchone()
@@ -401,11 +438,12 @@ def get_job_by_worker_id(conn, worker_job_id: Any) -> dict[str, Any]:
         "engine_route", "worker_owner", "status", "edit_session_id", "quality_tier_id",
         "price_xu", "local_worker_job_id", "progress_percent", "blocker", "source_video_path",
         "source_sha256", "output_file_id", "output_path", "output_sha256", "output_size_bytes", "ffprobe_json",
-        "delivery_message_id", "delivery_file_id", "receipt_state", "charge_state",
-        "charged_xu", "tail_json",
+        "delivery_message_id", "delivery_file_id", "artifact_receipts_json", "delivery_cursor",
+        "receipt_state", "charge_state", "charged_xu", "tail_json",
     )
     result = dict(zip(fields, row))
     result["ffprobe"] = _load(result.pop("ffprobe_json"), {})
+    result["artifact_receipts"] = _load(result.pop("artifact_receipts_json"), [])
     result["tail"] = _load(result.pop("tail_json"), {})
     return result
 
@@ -421,12 +459,25 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
     status = str(worker_status or "").lower()
     detail = dict(detail or {})
     receipt = dict(receipt or {})
+    detail_artifacts = _artifact_receipts(detail.get("artifact_receipts"))
+    receipt_artifacts = _artifact_receipts(receipt.get("artifacts"))
+    incoming_artifacts = receipt_artifacts or detail_artifacts
+    current_artifacts = _artifact_receipts(current.get("artifact_receipts"))
+    if incoming_artifacts and current_artifacts:
+        if incoming_artifacts[: len(current_artifacts)] != current_artifacts:
+            status = "delivery_unknown"
+            detail = {**detail, "reason": "artifact_receipt_history_mismatch"}
+            incoming_artifacts = current_artifacts
+    artifact_json = _json(incoming_artifacts or current_artifacts)
+    artifact_cursor = len(incoming_artifacts or current_artifacts)
     if status == "running":
         stage = str(detail.get("stage") or "rendering")
         progress = {"inspecting_input": 25, "preparing_plan": 35, "processing_video": 55, "validating_output": 80, "delivering": 90}.get(stage, 40)
         conn.execute(
-            "UPDATE video_edit_jobs SET status='rendering',progress_percent=?,started_at=CASE WHEN started_at='' THEN ? ELSE started_at END,updated_at=? WHERE id=?",
-            (progress, now, now, int(current["id"])),
+            """UPDATE video_edit_jobs SET status='rendering',progress_percent=?,
+               artifact_receipts_json=?,delivery_cursor=?,
+               started_at=CASE WHEN started_at='' THEN ? ELSE started_at END,updated_at=? WHERE id=?""",
+            (progress, artifact_json, artifact_cursor, now, now, int(current["id"])),
         )
         conn.execute(
             "UPDATE video_edit_outbox SET status='running',attempt_count=CASE WHEN attempt_count=0 THEN 1 ELSE attempt_count END,updated_at=? WHERE edit_job_id=?",
@@ -436,9 +487,10 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
         reason = str(detail.get("reason") or "telegram_delivery_receipt_commit_uncertain")[:180]
         conn.execute(
             """UPDATE video_edit_jobs SET status='delivery_unknown',blocker=?,
+               artifact_receipts_json=?,delivery_cursor=?,
                receipt_state='delivery_unknown',charge_state='not_charged',charged_xu=0,
                finished_at=?,updated_at=? WHERE id=?""",
-            (reason, now, now, int(current["id"])),
+            (reason, artifact_json, artifact_cursor, now, now, int(current["id"])),
         )
         conn.execute(
             """UPDATE video_edit_outbox SET status='terminal_delivery_unknown',
@@ -446,8 +498,15 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
             (reason, now, int(current["id"])),
         )
     elif status == "succeeded":
+        try:
+            output_count = max(1, int(receipt.get("output_count") or 1))
+        except (TypeError, ValueError):
+            output_count = 0
+        artifacts_complete = output_count == 1 or len(receipt_artifacts) == output_count
         valid = bool(
-            detail.get("validation") == "passed"
+            output_count > 0
+            and artifacts_complete
+            and detail.get("validation") == "passed"
             and receipt.get("delivery_message_id")
             and receipt.get("delivery_file_id")
             and receipt.get("output_sha256")
@@ -458,7 +517,7 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
             conn.execute(
                 """UPDATE video_edit_jobs SET status='delivered',progress_percent=100,blocker='',
                    source_video_path=?,source_sha256=?,output_file_id=?,output_path=?,output_sha256=?,output_size_bytes=?,ffprobe_json=?,
-                   delivery_message_id=?,delivery_file_id=?,receipt_state='created',
+                   delivery_message_id=?,delivery_file_id=?,artifact_receipts_json=?,delivery_cursor=?,receipt_state='created',
                    delivered_at=?,finished_at=?,updated_at=? WHERE id=?""",
                 (
                     str(receipt.get("source_video_path") or current.get("source_video_path") or "")[:240],
@@ -470,6 +529,8 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
                     _json(receipt.get("ffprobe") or {}),
                     str(receipt.get("delivery_message_id") or "")[:900],
                     str(receipt.get("delivery_file_id") or "")[:500],
+                    artifact_json,
+                    artifact_cursor,
                     now, now, now, int(current["id"]),
                 ),
             )
