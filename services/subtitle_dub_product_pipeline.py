@@ -162,6 +162,7 @@ async def process_subtitle_dub_job(
     video_render_ready: Callable[[str], bool],
     ffmpeg_ready: Callable[[], bool],
     dub_mux_enabled: bool,
+    validate_audio: Callable[[bytes], Any] | None = None,
     is_admin: bool = False,
 ) -> dict[str, Any]:
     del is_admin
@@ -269,6 +270,9 @@ async def process_subtitle_dub_job(
     tts_dropped_segments = 0
     tts_timeline_duration = 0.0
     audio_padding_seconds = 0.0
+    timeline_detail = "not_requested"
+    tts_audio_qc: dict[str, Any] = {}
+    generated_audio_duration = 0.0
     selected_tts_voice_id = ""
     dub_audio_policy: dict[str, Any] = {}
     if _mode_needs_dub(mode):
@@ -374,7 +378,7 @@ async def process_subtitle_dub_job(
             default=0.0,
         )
         audio_padding_seconds = max(0.0, tts_timeline_duration - latest_audio_end)
-        raw_audio_bytes, _timeline_detail = await _maybe_await(build_timeline_audio(tts_chunks, timeline_duration))
+        raw_audio_bytes, timeline_detail = await _maybe_await(build_timeline_audio(tts_chunks, timeline_duration))
         if not raw_audio_bytes:
             return {
                 "ok": False,
@@ -385,7 +389,6 @@ async def process_subtitle_dub_job(
                 "created_files": [],
                 "route_attempts": route_attempts,
             }
-        tts_mixed_segments = tts_generated_segments
         audio_bytes, normalization_detail = await _maybe_await(normalize_audio(raw_audio_bytes))
         if not audio_bytes:
             return {
@@ -397,6 +400,38 @@ async def process_subtitle_dub_job(
                 "created_files": [],
                 "route_attempts": route_attempts,
             }
+        if validate_audio is not None:
+            tts_audio_qc = dict(await _maybe_await(validate_audio(audio_bytes)) or {})
+        else:
+            tts_audio_qc = {
+                "ok": bool(audio_bytes),
+                "detail": "basic_audio_bytes_only",
+                "audio_bytes": len(audio_bytes or b""),
+                "duration": float(tts_timeline_duration or 0.0),
+            }
+        if not tts_audio_qc.get("ok"):
+            return {
+                "ok": False,
+                "status": "TTS_AUDIO_QC_FAILED",
+                "error_code": str(tts_audio_qc.get("detail") or "tts_audio_qc_failed"),
+                "provider_called": True,
+                "charged": False,
+                "created_files": [],
+                "state": pipeline_state,
+                "prepared": prepared,
+                "product_type": _product_type_for_mode(mode),
+                "route_attempts": route_attempts,
+                "tts_provider": tts_provider,
+                "tts_expected_segments": tts_expected_segments,
+                "tts_generated_segments": tts_generated_segments,
+                "tts_mixed_segments": 0,
+                "tts_dropped_segments": tts_dropped_segments,
+                "tts_audio_qc": tts_audio_qc,
+                "tts_audio_bytes": len(audio_bytes or b""),
+                "timeline_detail": str(timeline_detail or ""),
+            }
+        tts_mixed_segments = tts_generated_segments
+        generated_audio_duration = max(0.0, float(tts_audio_qc.get("duration") or 0.0))
 
     wants_subtitle_video = output_type in {"burn", "both", "video_subtitle"}
     wants_final_video = _video_output_requested(mode, output_type, content_type)
@@ -475,6 +510,11 @@ async def process_subtitle_dub_job(
         "tts_overlap_resolutions": max(0, sum(1 for item in tts_chunks if float(item.get("audio_duration") or 0.0) > max(0.1, float(item.get("end") or 0.0) - float(item.get("start") or 0.0)))),
         "tts_timeline_duration": tts_timeline_duration,
         "audio_padding_seconds": audio_padding_seconds,
+        "timeline_detail": str(timeline_detail or ""),
+        "tts_audio_qc": tts_audio_qc,
+        "tts_audio_bytes": len(audio_bytes or b""),
+        "generated_audio_duration": generated_audio_duration,
+        "tts_cue_qc": [dict(item.get("audio_qc") or {}) for item in tts_chunks],
         "raw_audio_bytes": raw_audio_bytes,
         "audio_bytes": audio_bytes,
         "video_output": video_output,

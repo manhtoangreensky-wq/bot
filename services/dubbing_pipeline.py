@@ -122,7 +122,10 @@ def mux_final_video(
             command.extend(["-map", "0:v:0", "-map", "1:a:0"])
             if not replace_audio:
                 command.extend(["-map", "0:a?", "-disposition:a:0", "default"])
-            command.extend(["-c:v", video_codec, "-c:a", "aac", "-shortest", "final.mp4"])
+            # The audio timeline is already bounded by the source video.  Let
+            # the explicit stream maps and the source-duration contract decide
+            # the boundary; shortest-stream truncation can cut a valid video.
+            command.extend(["-c:v", video_codec, "-c:a", "aac", "-movflags", "+faststart", "final.mp4"])
             return command
 
         first_codec = "libx264" if subtitle_filter else "copy"

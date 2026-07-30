@@ -61104,7 +61104,13 @@ def voice_tts_format_xu(value: int | float) -> str:
     return f"{number:.2f}".rstrip("0").rstrip(".")
 
 
-def minimax_tts_payload(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED) -> dict:
+def minimax_tts_payload(
+    text: str,
+    voice_id: str = "",
+    voice_style: str = "",
+    voice_speed: str = VOICE_TTS_DEFAULT_SPEED,
+    tts_language_boost: str = "auto",
+) -> dict:
     selected_voice = str(voice_id or MINIMAX_DEFAULT_VOICE_ID or "male-qn-qingse").strip()
     text_value = str(text or "").strip()[:3500]
     payload = {
@@ -61122,7 +61128,7 @@ def minimax_tts_payload(text: str, voice_id: str = "", voice_style: str = "", vo
             "format": MINIMAX_AUDIO_FORMAT or "mp3",
             "channel": 1,
         },
-        "language_boost": "Vietnamese",
+        "language_boost": str(tts_language_boost or "auto").strip()[:64] or "auto",
         "stream": False,
         "subtitle_enable": False,
     }
@@ -61228,7 +61234,12 @@ def shopaikey_minimax_voice_id(voice_id: str = "") -> str:
         },
     )
 
-def shopaikey_official_tts_payload(text: str, voice_id: str = "", speed: float | str = 1.0) -> dict:
+def shopaikey_official_tts_payload(
+    text: str,
+    voice_id: str = "",
+    speed: float | str = 1.0,
+    tts_language_boost: str = "auto",
+) -> dict:
     selected_voice = shopaikey_minimax_voice_id(voice_id)
     parsed_speed = voice_tts_provider_speed(speed or VOICE_TTS_DEFAULT_SPEED)
     return {
@@ -61246,7 +61257,7 @@ def shopaikey_official_tts_payload(text: str, voice_id: str = "", speed: float |
             "format": "mp3",
             "channel": 1,
         },
-        "language_boost": "auto",
+        "language_boost": str(tts_language_boost or "auto").strip()[:64] or "auto",
         "stream": False,
         "subtitle_enable": False,
     }
@@ -62022,6 +62033,7 @@ async def key4u_minimax_tts_bytes(
     voice_speed: str = VOICE_TTS_DEFAULT_SPEED,
     allow_admin: bool = False,
     allow_confirmed_product: bool = False,
+    tts_language_boost: str = "auto",
 ) -> tuple[str, bytes, str, int]:
     if not key4u_minimax_tts_configured(require_public=not (allow_admin or allow_confirmed_product)):
         return "MISSING", b"", "KEY4U_ENABLED/KEY4U_API_KEY/KEY4U_TTS_ENDPOINT/KEY4U_TTS_MODEL missing", 0
@@ -62034,6 +62046,7 @@ async def key4u_minimax_tts_bytes(
         voice_id=str(voice_id or default_tts_voice_id("male")),
         speed=selected_speed,
         timeout_seconds=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60),
+        language_boost=str(tts_language_boost or "auto"),
     )
     status = str(result.get("status") or ("PASS" if result.get("ok") else "FAIL"))
     http_status = int(result.get("http_status") or 0)
@@ -62048,7 +62061,13 @@ async def key4u_minimax_tts_bytes(
     detail = sanitize_provider_error(result.get("error_message_safe") or status)[:240]
     return status or "FAIL", b"", detail, http_status
 
-async def shopaikey_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED) -> tuple[str, bytes, str, int]:
+async def shopaikey_minimax_tts_bytes(
+    text: str,
+    voice_id: str = "",
+    voice_style: str = "",
+    voice_speed: str = VOICE_TTS_DEFAULT_SPEED,
+    tts_language_boost: str = "auto",
+) -> tuple[str, bytes, str, int]:
     if not shopaikey_minimax_tts_configured():
         return "MISSING", b"", "SHOPAIKEY_API_KEY/SHOPAIKEY_TTS_BASE_URL/SHOPAIKEY_TTS_ENDPOINT/SHOPAIKEY_TTS_MODEL missing", 0
     endpoint = shopaikey_tts_final_url(SHOPAIKEY_TTS_ENDPOINT)
@@ -62058,7 +62077,12 @@ async def shopaikey_minimax_tts_bytes(text: str, voice_id: str = "", voice_style
         return "FAIL_BAD_REQUEST", b"", "empty_text", 0
     if not selected_voice:
         return "FAIL_BAD_REQUEST", b"", "shopaikey_voice_not_configured", 0
-    payload = shopaikey_official_tts_payload(text_value, voice_id=selected_voice, speed=voice_speed)
+    payload = shopaikey_official_tts_payload(
+        text_value,
+        voice_id=selected_voice,
+        speed=voice_speed,
+        tts_language_boost=tts_language_boost,
+    )
     try:
         async with httpx.AsyncClient(timeout=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60), follow_redirects=True) as client:
             res = await client.post(
@@ -62086,7 +62110,13 @@ async def shopaikey_minimax_tts_bytes(text: str, voice_id: str = "", voice_style
     except Exception as exc:
         return "FAIL_PROVIDER_ERROR", b"", shopaikey_sanitize_error(str(exc)), 0
 
-async def direct_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED) -> tuple[str, bytes, str, int]:
+async def direct_minimax_tts_bytes(
+    text: str,
+    voice_id: str = "",
+    voice_style: str = "",
+    voice_speed: str = VOICE_TTS_DEFAULT_SPEED,
+    tts_language_boost: str = "auto",
+) -> tuple[str, bytes, str, int]:
     if not direct_minimax_tts_configured():
         return "MISSING", b"", "MINIMAX_API_KEY/MINIMAX_GROUP_ID/MINIMAX_TTS_MODEL missing", 0
     selected_voice = str(voice_id or MINIMAX_DEFAULT_VOICE_ID or "male-qn-qingse").strip()
@@ -62094,7 +62124,13 @@ async def direct_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: s
     if not text_value:
         return "FAIL_BAD_REQUEST", b"", "empty_text", 0
     endpoint = direct_minimax_tts_url()
-    payload = minimax_tts_payload(text_value, voice_id=selected_voice, voice_style=voice_style, voice_speed=voice_speed)
+    payload = minimax_tts_payload(
+        text_value,
+        voice_id=selected_voice,
+        voice_style=voice_style,
+        voice_speed=voice_speed,
+        tts_language_boost=tts_language_boost,
+    )
     try:
         async with httpx.AsyncClient(timeout=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60), follow_redirects=True) as client:
             res = await client.post(
@@ -62132,6 +62168,7 @@ async def call_key4u_minimax_tts_bytes_with_speed(
     voice_speed: str = VOICE_TTS_DEFAULT_SPEED,
     allow_admin: bool = False,
     allow_confirmed_product: bool = False,
+    tts_language_boost: str = "auto",
 ) -> tuple[str, bytes, str, int]:
     try:
         return await key4u_minimax_tts_bytes(
@@ -62141,6 +62178,7 @@ async def call_key4u_minimax_tts_bytes_with_speed(
             voice_speed=voice_speed,
             allow_admin=allow_admin,
             allow_confirmed_product=allow_confirmed_product,
+            tts_language_boost=tts_language_boost,
         )
     except TypeError:
         return await key4u_minimax_tts_bytes(
@@ -62150,15 +62188,39 @@ async def call_key4u_minimax_tts_bytes_with_speed(
             allow_admin=allow_admin,
         )
 
-async def call_shopaikey_minimax_tts_bytes_with_speed(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED) -> tuple[str, bytes, str, int]:
+async def call_shopaikey_minimax_tts_bytes_with_speed(
+    text: str,
+    voice_id: str = "",
+    voice_style: str = "",
+    voice_speed: str = VOICE_TTS_DEFAULT_SPEED,
+    tts_language_boost: str = "auto",
+) -> tuple[str, bytes, str, int]:
     try:
-        return await shopaikey_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed)
+        return await shopaikey_minimax_tts_bytes(
+            text,
+            voice_id=voice_id,
+            voice_style=voice_style,
+            voice_speed=voice_speed,
+            tts_language_boost=tts_language_boost,
+        )
     except TypeError:
         return await shopaikey_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style)
 
-async def call_direct_minimax_tts_bytes_with_speed(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED) -> tuple[str, bytes, str, int]:
+async def call_direct_minimax_tts_bytes_with_speed(
+    text: str,
+    voice_id: str = "",
+    voice_style: str = "",
+    voice_speed: str = VOICE_TTS_DEFAULT_SPEED,
+    tts_language_boost: str = "auto",
+) -> tuple[str, bytes, str, int]:
     try:
-        return await direct_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed)
+        return await direct_minimax_tts_bytes(
+            text,
+            voice_id=voice_id,
+            voice_style=voice_style,
+            voice_speed=voice_speed,
+            tts_language_boost=tts_language_boost,
+        )
     except TypeError:
         return await direct_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style)
 
@@ -116639,7 +116701,7 @@ def subdub_voice_style_state_fields(
         "tts_payload_voice_id": str(tts_payload_voice_id or voice.get("tts_payload_voice_id") or selected_tts_voice_id or "")[:180],
         "selected_voice_gender": str(voice.get("selected_voice_gender") or current.get("selected_voice_gender") or "")[:40],
         "requested_voice_gender": str(voice.get("requested_voice_gender") or current.get("requested_voice_gender") or current.get("selected_voice_gender") or "")[:40],
-        "selected_voice_id": str(voice.get("selected_voice_id") or current.get("voice_id") or current.get("selected_voice_id") or "")[:180],
+        "selected_voice_id": str(voice.get("selected_voice_id") or current.get("voice_id") or current.get("selected_voice_id") or selected_tts_voice_id or "")[:180],
         "voice_provider": str(voice.get("voice_provider") or current.get("voice_provider") or TTS_PROVIDER or "")[:80],
         "resolved_voice_id": resolved_voice[:180],
         "resolved_gender": str(voice.get("resolved_gender") or current.get("resolved_gender") or "")[:40],
@@ -210640,7 +210702,7 @@ def subtitle_dub_debug_job_payload(
         "selected_tts_voice_id": str(state.get("selected_tts_voice_id") or state.get("tts_voice_id") or state.get("voice_id") or state.get("selected_voice_id") or ""),
         "selected_voice_label": str(state.get("voice_style") or state.get("voice_label") or state.get("selected_voice_label") or ""),
         "selected_voice_gender": str(voice_resolution.get("selected_voice_gender") or state.get("selected_voice_gender") or ""),
-        "selected_voice_id": str(voice_resolution.get("selected_voice_id") or state.get("selected_voice_id") or state.get("voice_id") or ""),
+        "selected_voice_id": str(voice_resolution.get("selected_voice_id") or state.get("selected_voice_id") or state.get("voice_id") or state.get("selected_tts_voice_id") or ""),
         "provider_voice_id": str(voice_resolution.get("provider_voice_id") or state.get("provider_voice_id") or state.get("selected_tts_voice_id") or ""),
         "tts_payload_voice_id": str(voice_resolution.get("tts_payload_voice_id") or state.get("tts_payload_voice_id") or state.get("selected_tts_voice_id") or ""),
         "resolved_voice_id": str(voice_resolution.get("resolved_voice_id") or voice_resolution.get("provider_voice_id") or state.get("provider_voice_id") or state.get("selected_tts_voice_id") or ""),
@@ -210655,6 +210717,11 @@ def subtitle_dub_debug_job_payload(
         "dubbed_audio_exists": bool(audio_path and os.path.exists(audio_path)),
         "generated_audio_path": audio_path,
         "generated_audio_duration": float(state.get("_subdub_generated_audio_duration") or 0.0),
+        "audio_bytes": int(state.get("tts_audio_bytes") or state.get("audio_bytes") or 0),
+        "tts_audio_qc": dict(state.get("tts_audio_qc") or {}),
+        "tts_cue_qc": list(state.get("tts_cue_qc") or []),
+        "tts_timeline_detail": str(state.get("tts_timeline_detail") or ""),
+        "tts_sequential": bool(state.get("tts_sequential")),
         "mux_render_called": bool(attempts.get("mux") or final_path),
         "final_mp4_path": final_path,
         "final_mp4_exists": bool(final_path and os.path.exists(final_path)),
@@ -214289,6 +214356,7 @@ async def build_subtitle_dubbed_video_pipeline(
             base_speed=1.0,
             max_speed=1.0,
             allow_admin=allow_admin,
+            require_speech_qc=True,
         )
         tts_chunks = list(tts_result.get("chunks") or [])
         tts_provider = str(tts_result.get("provider") or "")
@@ -214299,6 +214367,14 @@ async def build_subtitle_dubbed_video_pipeline(
         dubbed_audio, normalization_detail = await normalize_dub_audio_bytes(raw_audio)
         if not dubbed_audio:
             return {"ok": False, "status": "dub_normalization_failed", "detail": normalization_detail}
+        audio_qc = await subdub_validate_tts_timeline_audio_bytes(dubbed_audio)
+        if not audio_qc.get("ok"):
+            return {
+                "ok": False,
+                "status": "TTS_AUDIO_QC_FAILED",
+                "detail": str(audio_qc.get("detail") or "tts_audio_qc_failed"),
+                "tts_audio_qc": audio_qc,
+            }
     final_video = b""
     mux_detail = "not_requested"
     is_video = str(source_content_type or "").lower().startswith("video/")
@@ -214519,9 +214595,21 @@ async def video_dubbing_tts_bytes(
     if provider in {"auto", "minimax", "key4u_minimax", "minimax_voice"} and key4u_ready:
         candidates.append(("Key4U MiniMax", _key4u_minimax_candidate))
     if provider in {"auto", "minimax", "shopaikey_minimax", "minimax_voice"} and shopaikey_ready:
-        candidates.append(("ShopAIKey MiniMax", lambda value: call_shopaikey_minimax_tts_bytes_with_speed(value, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed)))
+        candidates.append(("ShopAIKey MiniMax", lambda value: call_shopaikey_minimax_tts_bytes_with_speed(
+            value,
+            voice_id=voice_id,
+            voice_style=voice_style,
+            voice_speed=voice_speed,
+            tts_language_boost=tts_language_boost,
+        )))
     if provider == "direct_minimax" and direct_ready:
-        candidates.append(("MiniMax", lambda value: call_direct_minimax_tts_bytes_with_speed(value, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed)))
+        candidates.append(("MiniMax", lambda value: call_direct_minimax_tts_bytes_with_speed(
+            value,
+            voice_id=voice_id,
+            voice_style=voice_style,
+            voice_speed=voice_speed,
+            tts_language_boost=tts_language_boost,
+        )))
     if provider in {"auto", "key4u", "openai", "openai_compatible"} and KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_AUDIO_SPEECH_ENDPOINT and (allow_admin or KEY4U_PUBLIC_ENABLED):
         openai_tts_candidates.append((
             "Key4U OpenAI TTS",
@@ -214613,6 +214701,207 @@ async def video_dubbing_audio_duration_seconds(audio_bytes: bytes, suffix: str =
         except Exception:
             return 0.0
 
+
+async def subdub_audio_activity_metrics(
+    audio_bytes: bytes,
+    suffix: str = ".mp3",
+    *,
+    duration: float = 0.0,
+) -> dict:
+    ffmpeg = frame_video_ffmpeg_path()
+    measured_duration = max(0.0, float(duration or 0.0))
+    if not ffmpeg:
+        return {
+            "ok": False,
+            "detail": "ffmpeg_unavailable",
+            "duration": measured_duration,
+            "non_silent_seconds": 0.0,
+            "active_ratio": 0.0,
+        }
+    if not audio_bytes:
+        return {
+            "ok": False,
+            "detail": "audio_empty",
+            "duration": measured_duration,
+            "non_silent_seconds": 0.0,
+            "active_ratio": 0.0,
+        }
+    safe_suffix = str(suffix or ".mp3").lower()
+    if safe_suffix not in {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"}:
+        safe_suffix = ".mp3"
+    if measured_duration <= 0:
+        measured_duration = await video_dubbing_audio_duration_seconds(audio_bytes, safe_suffix)
+    if measured_duration <= 0:
+        return {
+            "ok": False,
+            "detail": "audio_duration_unavailable",
+            "duration": 0.0,
+            "non_silent_seconds": 0.0,
+            "active_ratio": 0.0,
+        }
+    with tempfile.TemporaryDirectory(prefix="toanaas_tts_activity_") as tmpdir:
+        source_path = os.path.join(tmpdir, f"speech{safe_suffix}")
+        with open(source_path, "wb") as handle:
+            handle.write(bytes(audio_bytes))
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                ffmpeg,
+                "-hide_banner",
+                "-nostats",
+                "-v", "info",
+                "-i", source_path,
+                "-af", "silencedetect=noise=-50dB:d=0.06",
+                "-f", "null",
+                "-",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=45)
+        except asyncio.TimeoutError:
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                try:
+                    await asyncio.wait_for(proc.communicate(), timeout=5)
+                except Exception:
+                    pass
+            return {
+                "ok": False,
+                "detail": "audio_activity_probe_timeout",
+                "duration": measured_duration,
+                "non_silent_seconds": 0.0,
+                "active_ratio": 0.0,
+            }
+        except Exception as exc:
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+            return {
+                "ok": False,
+                "detail": f"audio_activity_probe_failed:{type(exc).__name__}",
+                "duration": measured_duration,
+                "non_silent_seconds": 0.0,
+                "active_ratio": 0.0,
+            }
+        if proc.returncode != 0:
+            return {
+                "ok": False,
+                "detail": "audio_decode_failed",
+                "duration": measured_duration,
+                "non_silent_seconds": 0.0,
+                "active_ratio": 0.0,
+            }
+        probe_text = stderr.decode("utf-8", errors="ignore")
+        silence_seconds = 0.0
+        silence_start = None
+        event_pattern = re.compile(
+            r"silence_start:\s*(-?\d+(?:\.\d+)?)|silence_end:\s*(-?\d+(?:\.\d+)?)",
+            re.IGNORECASE,
+        )
+        for event in event_pattern.finditer(probe_text):
+            if event.group(1) is not None:
+                silence_start = max(0.0, min(measured_duration, float(event.group(1))))
+                continue
+            if event.group(2) is None or silence_start is None:
+                continue
+            silence_end = max(silence_start, min(measured_duration, float(event.group(2))))
+            silence_seconds += silence_end - silence_start
+            silence_start = None
+        if silence_start is not None:
+            silence_seconds += max(0.0, measured_duration - silence_start)
+        silence_seconds = max(0.0, min(measured_duration, silence_seconds))
+        non_silent_seconds = max(0.0, measured_duration - silence_seconds)
+        return {
+            "ok": True,
+            "detail": "audio_decoded",
+            "duration": measured_duration,
+            "silence_seconds": silence_seconds,
+            "non_silent_seconds": non_silent_seconds,
+            "active_ratio": non_silent_seconds / measured_duration if measured_duration > 0 else 0.0,
+        }
+
+
+async def subdub_validate_tts_audio_bytes(
+    audio_bytes: bytes,
+    suffix: str = ".mp3",
+    *,
+    min_bytes: int = 512,
+    require_activity: bool = True,
+    minimum_active_ratio: float = 0.03,
+    minimum_active_seconds: float | None = None,
+) -> dict:
+    payload = bytes(audio_bytes or b"")
+    size = len(payload)
+    base = {
+        "ok": False,
+        "detail": "audio_empty",
+        "audio_bytes": size,
+        "duration": 0.0,
+        "non_silent_seconds": 0.0,
+        "active_ratio": 0.0,
+    }
+    if size < max(1, int(min_bytes or 1)):
+        return {**base, "detail": "audio_too_small"}
+    prefix = payload[:96].lstrip().lower()
+    if prefix.startswith((b"{", b"[", b"<html", b"<!doctype")):
+        return {**base, "detail": "invalid_audio_payload"}
+    duration = await video_dubbing_audio_duration_seconds(payload, suffix)
+    if duration <= 0:
+        return {**base, "detail": "audio_duration_unavailable"}
+    if not require_activity:
+        return {
+            **base,
+            "ok": True,
+            "detail": "audio_duration_ok",
+            "duration": float(duration),
+        }
+    activity = await subdub_audio_activity_metrics(payload, suffix, duration=duration)
+    if not activity.get("ok"):
+        return {
+            **base,
+            **dict(activity or {}),
+            "ok": False,
+            "audio_bytes": size,
+            "duration": float(activity.get("duration") or duration),
+        }
+    non_silent_seconds = max(0.0, float(activity.get("non_silent_seconds") or 0.0))
+    active_ratio = max(0.0, float(activity.get("active_ratio") or 0.0))
+    required_active_seconds = (
+        max(0.0, float(minimum_active_seconds))
+        if minimum_active_seconds is not None
+        else min(0.18, max(0.06, float(duration) * 0.08))
+    )
+    required_active_ratio = max(0.0, min(1.0, float(minimum_active_ratio or 0.0)))
+    if non_silent_seconds < required_active_seconds or active_ratio < required_active_ratio:
+        return {
+            **base,
+            **dict(activity or {}),
+            "ok": False,
+            "detail": "speech_activity_missing",
+            "audio_bytes": size,
+            "duration": float(duration),
+            "minimum_active_seconds": required_active_seconds,
+            "minimum_active_ratio": required_active_ratio,
+        }
+    return {
+        **base,
+        **dict(activity or {}),
+        "ok": True,
+        "detail": "speech_activity_ok",
+        "audio_bytes": size,
+        "duration": float(duration),
+        "minimum_active_seconds": required_active_seconds,
+        "minimum_active_ratio": required_active_ratio,
+    }
+
+
+async def subdub_validate_tts_timeline_audio_bytes(audio_bytes: bytes, suffix: str = ".mp3") -> dict:
+    return await subdub_validate_tts_audio_bytes(
+        audio_bytes,
+        suffix,
+        minimum_active_ratio=0.0,
+        minimum_active_seconds=0.06,
+    )
+
 async def synthesize_dub_segment_chunks(
     segments: list[dict],
     *,
@@ -214625,6 +214914,7 @@ async def synthesize_dub_segment_chunks(
     tts_language_code: str = "auto",
     tts_language_boost: str = "auto",
     edge_voice_id: str = "",
+    require_speech_qc: bool = False,
 ) -> dict:
     chunks = []
     providers = []
@@ -214659,12 +214949,23 @@ async def synthesize_dub_segment_chunks(
                 voice_id,
                 str(speed),
             )
-        duration = await video_dubbing_audio_duration_seconds(audio_bytes)
         if not audio_bytes:
             raise RuntimeError("tts_segment_empty")
+        segment_index = int((segment or {}).get("index") or index)
+        audio_qc = await subdub_validate_tts_audio_bytes(
+            audio_bytes,
+            min_bytes=512 if require_speech_qc else 1,
+            require_activity=bool(require_speech_qc),
+        )
+        if not audio_qc.get("ok"):
+            raise RuntimeError(
+                f"tts_segment_invalid:{segment_index}:"
+                f"{audio_qc.get('detail') or 'audio_qc_failed'}"
+            )
+        duration = float(audio_qc.get("duration") or 0.0)
         providers.append(provider)
         chunks.append({
-            "index": int((segment or {}).get("index") or index),
+            "index": segment_index,
             "start": start,
             "end": end,
             "text": text,
@@ -214673,81 +214974,206 @@ async def synthesize_dub_segment_chunks(
             "speed": round(speed, 3),
             "provider": provider,
             "detail": sanitize_log_text(str(detail or ""))[:180],
+            "audio_qc": dict(audio_qc),
         })
     if not chunks:
         raise RuntimeError("tts_segments_empty")
     return {"chunks": chunks, "provider": next((item for item in providers if item), "")}
+
+def subdub_atempo_filters(ratio: float) -> list[str]:
+    remaining = max(1.0, float(ratio or 1.0))
+    filters = []
+    while remaining > 2.0:
+        filters.append("atempo=2.0")
+        remaining /= 2.0
+    if remaining > 1.001:
+        filters.append(f"atempo={remaining:.6f}")
+    return filters
+
+
+def subdub_plan_dub_timeline(
+    chunks: list[dict],
+    total_duration: float,
+    *,
+    max_tempo_ratio: float = 1.15,
+) -> dict:
+    if not chunks:
+        return {"ok": False, "blocker": "tts_segments_empty", "scheduled": []}
+    ordered = sorted(
+        [dict(item or {}) for item in chunks],
+        key=lambda item: (float(item.get("start") or 0.0), int(item.get("index") or 0)),
+    )
+    timeline_end = max(
+        float(total_duration or 0.0),
+        max(float(item.get("end") or 0.0) for item in ordered),
+    )
+    if timeline_end <= 0:
+        return {"ok": False, "blocker": "tts_timeline_duration_invalid", "scheduled": []}
+    normalized = []
+    for position, item in enumerate(ordered, start=1):
+        cue_id = str(item.get("cue_id") or item.get("index") or position)
+        start = max(0.0, float(item.get("start") or 0.0))
+        end = max(start, float(item.get("end") or 0.0))
+        audio_duration = max(0.0, float(item.get("audio_duration") or 0.0))
+        if end <= start:
+            return {"ok": False, "blocker": f"tts_cue_window_invalid:{cue_id}", "scheduled": []}
+        if audio_duration <= 0:
+            return {"ok": False, "blocker": f"tts_audio_duration_unavailable:{cue_id}", "scheduled": []}
+        normalized.append({
+            **item,
+            "cue_id": cue_id,
+            "start": start,
+            "end": end,
+            "audio_duration": audio_duration,
+        })
+
+    def _schedule(tempo_ratio: float) -> tuple[list[dict], float, int]:
+        cursor = 0.0
+        shifted_count = 0
+        scheduled = []
+        for item in normalized:
+            scheduled_start = max(float(item["start"]), cursor)
+            if scheduled_start > float(item["start"]) + 0.001:
+                shifted_count += 1
+            scheduled_duration = float(item["audio_duration"]) / tempo_ratio
+            scheduled_end = scheduled_start + scheduled_duration
+            scheduled.append({
+                **item,
+                "scheduled_start": scheduled_start,
+                "scheduled_end": scheduled_end,
+                "scheduled_duration": scheduled_duration,
+                "tempo_ratio": tempo_ratio,
+            })
+            cursor = scheduled_end
+        return scheduled, cursor, shifted_count
+
+    maximum_tempo = max(1.0, min(1.15, float(max_tempo_ratio or 1.15)))
+    scheduled, final_end, shifted_count = _schedule(1.0)
+    tempo_ratio = 1.0
+    if final_end > timeline_end + 0.01:
+        _fastest, fastest_end, _fastest_shifted = _schedule(maximum_tempo)
+        if fastest_end > timeline_end + 0.01:
+            return {
+                "ok": False,
+                "blocker": (
+                    "tts_timeline_exceeds_source:"
+                    f"required_end={fastest_end:.3f};source_duration={timeline_end:.3f};"
+                    f"max_tempo={maximum_tempo:.3f}"
+                ),
+                "scheduled": [],
+            }
+        low, high = 1.0, maximum_tempo
+        for _ in range(40):
+            candidate = (low + high) / 2.0
+            _candidate_schedule, candidate_end, _candidate_shifted = _schedule(candidate)
+            if candidate_end > timeline_end:
+                low = candidate
+            else:
+                high = candidate
+        tempo_ratio = high
+        scheduled, final_end, shifted_count = _schedule(tempo_ratio)
+    return {
+        "ok": True,
+        "blocker": "",
+        "scheduled": scheduled,
+        "timeline_duration": timeline_end,
+        "final_audio_end": final_end,
+        "tempo_ratio": tempo_ratio,
+        "shifted_cue_count": shifted_count,
+        "overlap_count": 0,
+    }
+
 
 async def build_dub_timeline_audio(chunks: list[dict], total_duration: float = 0) -> tuple[bytes, str]:
     ffmpeg = frame_video_ffmpeg_path()
     if not chunks:
         return b"", "tts_segments_empty"
     if not ffmpeg:
-        if len(chunks) == 1 and float((chunks[0] or {}).get("start") or 0) <= 0.05:
-            audio_bytes = bytes((chunks[0] or {}).get("audio_bytes") or b"")
-            return (audio_bytes, "single_segment_audio_no_ffmpeg") if audio_bytes else (b"", "tts_segment_empty")
         return b"", "ffmpeg_unavailable"
-    ordered_chunks = sorted(
-        [dict(item or {}) for item in chunks],
-        key=lambda item: (float(item.get("start") or 0), int(item.get("index") or 0)),
-    )
-    timeline_end = max(
-        float(total_duration or 0),
-        max(float(item.get("end") or 0) for item in ordered_chunks),
-    )
+    plan = subdub_plan_dub_timeline(chunks, total_duration, max_tempo_ratio=1.15)
+    if not plan.get("ok"):
+        return b"", str(plan.get("blocker") or "tts_timeline_plan_failed")
+    scheduled_chunks = list(plan.get("scheduled") or [])
+    timeline_end = max(0.1, float(plan.get("timeline_duration") or 0.0))
     with tempfile.TemporaryDirectory(prefix="toanaas_dub_timeline_") as tmpdir:
         command = [ffmpeg, "-y"]
-        for index, item in enumerate(ordered_chunks):
+        for index, item in enumerate(scheduled_chunks):
+            audio_bytes = bytes(item.get("audio_bytes") or b"")
+            if not audio_bytes:
+                return b"", f"tts_segment_empty:{item.get('cue_id') or index + 1}"
             chunk_path = os.path.join(tmpdir, f"chunk_{index:03d}.mp3")
             with open(chunk_path, "wb") as handle:
-                handle.write(bytes(item.get("audio_bytes") or b""))
+                handle.write(audio_bytes)
             command.extend(["-i", chunk_path])
+
         filters = []
-        delayed_labels = []
-        for index, item in enumerate(ordered_chunks):
-            start = max(0.0, float(item.get("start") or 0))
-            cue_end = max(start + 0.1, float(item.get("end") or 0))
-            next_start = (
-                max(start + 0.1, float(ordered_chunks[index + 1].get("start") or 0))
-                if index + 1 < len(ordered_chunks)
-                else max(cue_end, float(total_duration or 0))
-            )
-            hard_end = max(start + 0.1, min(cue_end, next_start))
-            slot_seconds = max(0.1, hard_end - start)
-            audio_duration = max(0.0, float(item.get("audio_duration") or 0))
-            tempo = 1.0
-            if audio_duration > slot_seconds * 1.02:
-                tempo = min(1.15, max(1.0, audio_duration / slot_seconds))
-            delay_ms = max(0, int(start * 1000))
-            label = f"d{index}"
+        sequence_labels = []
+        cursor = 0.0
+        for index, item in enumerate(scheduled_chunks):
+            scheduled_start = max(cursor, float(item.get("scheduled_start") or 0.0))
+            gap = max(0.0, scheduled_start - cursor)
+            if gap > 0.001:
+                silence_label = f"silence_{index}"
+                filters.append(
+                    f"anullsrc=r=32000:cl=mono,atrim=duration={gap:.6f},"
+                    f"asetpts=PTS-STARTPTS[{silence_label}]"
+                )
+                sequence_labels.append(f"[{silence_label}]")
+            scheduled_duration = max(0.06, float(item.get("scheduled_duration") or 0.0))
+            tempo_ratio = max(1.0, float(item.get("tempo_ratio") or 1.0))
+            fade_duration = min(0.008, scheduled_duration / 4.0)
+            fade_out_start = max(0.0, scheduled_duration - fade_duration)
+            chain = [
+                "aformat=sample_fmts=fltp:sample_rates=32000:channel_layouts=mono",
+                *subdub_atempo_filters(tempo_ratio),
+                f"afade=t=in:st=0:d={fade_duration:.6f}",
+                f"afade=t=out:st={fade_out_start:.6f}:d={fade_duration:.6f}",
+                "asetpts=PTS-STARTPTS",
+            ]
+            cue_label = f"cue_{index}"
+            filters.append(f"[{index}:a]{','.join(chain)}[{cue_label}]")
+            sequence_labels.append(f"[{cue_label}]")
+            cursor = float(item.get("scheduled_end") or (scheduled_start + scheduled_duration))
+
+        final_gap = max(0.0, timeline_end - cursor)
+        if final_gap > 0.001:
             filters.append(
-                f"[{index}:a]atempo={tempo:.3f},atrim=duration={slot_seconds:.3f},"
-                f"asetpts=PTS-STARTPTS,adelay={delay_ms}|{delay_ms}[{label}]"
+                f"anullsrc=r=32000:cl=mono,atrim=duration={final_gap:.6f},"
+                "asetpts=PTS-STARTPTS[tail_silence]"
             )
-            delayed_labels.append(f"[{label}]")
+            sequence_labels.append("[tail_silence]")
+        if len(sequence_labels) == 1:
+            filters.append(f"{sequence_labels[0]}anull[sequence]")
+        else:
+            filters.append(
+                f"{''.join(sequence_labels)}concat=n={len(sequence_labels)}:v=0:a=1[sequence]"
+            )
         filters.append(
-            f"{''.join(delayed_labels)}amix=inputs={len(delayed_labels)}:duration=longest:dropout_transition=0,"
-            f"apad=whole_dur={max(0.1, timeline_end):.3f},"
-            f"atrim=duration={max(0.1, timeline_end):.3f}[mix]"
+            f"[sequence]apad=whole_dur={timeline_end:.3f},"
+            f"atrim=duration={timeline_end:.3f}[mix]"
         )
         output_path = os.path.join(tmpdir, "dub_timeline.mp3")
         command.extend([
             "-filter_complex", ";".join(filters),
             "-map", "[mix]",
-            "-t", f"{max(0.1, timeline_end):.3f}",
+            "-t", f"{timeline_end:.3f}",
             "-c:a", "libmp3lame",
             "-b:a", "160k",
             output_path,
         ])
-        ok, detail = await run_subdub_ffmpeg_command(command, timeout=max(180, len(ordered_chunks) * 30))
+        ok, detail = await run_subdub_ffmpeg_command(
+            command,
+            timeout=max(180, len(scheduled_chunks) * 30),
+        )
         if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
-            if len(chunks) == 1 and float((chunks[0] or {}).get("start") or 0) <= 0.05:
-                audio_bytes = bytes((chunks[0] or {}).get("audio_bytes") or b"")
-                if audio_bytes:
-                    return audio_bytes, "single_segment_audio_fallback_after_ffmpeg_failed"
             return b"", str(detail or "timeline_audio_failed")
         with open(output_path, "rb") as handle:
-            return handle.read(), "ffmpeg_timeline_audio"
+            return handle.read(), (
+                f"ffmpeg_sequential_timeline_audio:cues={len(scheduled_chunks)};"
+                f"duration={timeline_end:.3f};tempo={float(plan.get('tempo_ratio') or 1.0):.6f};"
+                f"shifted_cues={int(plan.get('shifted_cue_count') or 0)};"
+                "overlap_count=0;sequential=yes;boundary_fade=yes"
+            )
 
 def subdub_dub_audio_filter_chain(*, fallback: bool = False) -> str:
     gain = max(1.0, min(4.0, float(SUBDUB_DUB_VOICE_GAIN or 2.0)))
@@ -215492,6 +215918,7 @@ async def _execute_video_dubbing_pipeline_core(
         speech_config = subdub_dub_speech_config(state, kwargs.get("base_speed") or state.get("voice_speed") or "1.0")
         kwargs["base_speed"] = float(speech_config.get("dub_speech_rate") or SUBDUB_DUB_DEFAULT_SPEECH_RATE)
         kwargs["max_speed"] = float(speech_config.get("dub_max_speech_rate") or SUBDUB_DUB_MAX_SPEECH_RATE)
+        kwargs["require_speech_qc"] = True
         result = await synthesize_dub_segment_chunks(
             *args,
             allow_admin=is_admin_user(uid),
@@ -215647,6 +216074,7 @@ async def _execute_video_dubbing_pipeline_core(
         synthesize_segments=_synthesize_dub_segments_for_blackbox,
         build_timeline_audio=build_dub_timeline_audio,
         normalize_audio=normalize_dub_audio_bytes,
+        validate_audio=subdub_validate_tts_timeline_audio_bytes,
         render_video=_render_video_for_blackbox,
         video_render_ready=lambda output_type: video_dubbing_video_render_ready(output_type, subtitle=True),
         ffmpeg_ready=lambda: bool(frame_video_ffmpeg_path()),
@@ -215790,14 +216218,12 @@ async def _execute_video_dubbing_pipeline_core(
     selected_tts_voice_id = str(product_result.get("selected_tts_voice_id") or "")
     voice_resolution = dict(product_result.get("voice_resolution") or state.get("_subdub_voice_resolution") or {})
     tts_payload_voice_id = str(product_result.get("tts_payload_voice_id") or voice_resolution.get("tts_payload_voice_id") or selected_tts_voice_id)
+    tts_audio_qc = dict(product_result.get("tts_audio_qc") or {})
     generated_audio_duration = max(
-        (
-            float(chunk.get("end") or 0)
-            for chunk in tts_chunks
-            if isinstance(chunk, dict)
-        ),
-        default=0.0,
+        0.0,
+        float(product_result.get("generated_audio_duration") or tts_audio_qc.get("duration") or 0.0),
     )
+    tts_audio_bytes = int(product_result.get("tts_audio_bytes") or len(audio_bytes or b""))
     output_audio_source = str(product_result.get("output_audio_source") or ("generated_tts" if audio_bytes and tts_provider else ""))
     video_output = bytes(product_result.get("video_output") or b"")
     partial_result = bool(product_result.get("partial_result") or product_result.get("partial"))
@@ -215856,6 +216282,13 @@ async def _execute_video_dubbing_pipeline_core(
             "generated_tts_audio_missing",
             stage="audio",
         )
+    if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and "tts_audio_qc" in product_result and not tts_audio_qc.get("ok"):
+        return _failed_product_result(
+            "TTS_AUDIO_QC_FAILED",
+            subdub_voice_not_ready_text(lang),
+            str(tts_audio_qc.get("detail") or "tts_audio_qc_failed"),
+            stage="audio",
+        )
     if final_video_required and not video_output and not (partial_result and (audio_bytes or srt_bytes or subtitle_items)):
         return _failed_product_result(
             "FINAL_VIDEO_NOT_CREATED",
@@ -215890,6 +216323,11 @@ async def _execute_video_dubbing_pipeline_core(
             subtitle_style=subtitle_style,
         ),
         "_subdub_generated_audio_duration": generated_audio_duration,
+        "tts_audio_bytes": tts_audio_bytes,
+        "tts_audio_qc": tts_audio_qc,
+        "tts_cue_qc": [dict(item.get("audio_qc") or {}) for item in tts_chunks if isinstance(item, dict)],
+        "tts_timeline_detail": str(product_result.get("timeline_detail") or ""),
+        "tts_sequential": bool("sequential=yes" in str(product_result.get("timeline_detail") or "")),
         "_subdub_output_audio_source": output_audio_source,
         "_subdub_direct_dub_core_used": bool(
             product_result.get("direct_dub_core_used")
@@ -216316,6 +216754,11 @@ async def _execute_video_dubbing_pipeline_core(
             "product_type": subdub_product_type_from_mode(mode, state),
             "srt_blocks": srt_bytes.decode("utf-8", errors="ignore").count("-->") if srt_bytes else 0,
             "audio_bytes": len(audio_bytes or b""),
+            "tts_audio_qc": dict(tts_audio_qc),
+            "generated_audio_duration": generated_audio_duration,
+            "tts_cue_qc": list(state.get("tts_cue_qc") or []),
+            "tts_timeline_detail": str(state.get("tts_timeline_detail") or ""),
+            "tts_sequential": bool(state.get("tts_sequential")),
             "video_bytes": len(video_output or b""),
             "tts_segments": len(tts_chunks),
             "mux_status": mux_state,
@@ -216587,6 +217030,11 @@ async def _execute_video_dubbing_pipeline_core(
         "tts_overlap_resolutions": int(product_result.get("tts_overlap_resolutions") or 0),
         "tts_timeline_duration": float(product_result.get("tts_timeline_duration") or 0.0),
         "audio_padding_seconds": float(product_result.get("audio_padding_seconds") or 0.0),
+        "tts_audio_bytes": tts_audio_bytes,
+        "tts_audio_qc": tts_audio_qc,
+        "generated_audio_duration": generated_audio_duration,
+        "tts_timeline_detail": str(product_result.get("timeline_detail") or ""),
+        "tts_sequential": bool("sequential=yes" in str(product_result.get("timeline_detail") or "")),
         "delivery_status": "delivered" if delivered_video else result_terminal_state,
         "normalization_detail": normalization_detail,
         "workspace_artifacts": workspace_artifacts,

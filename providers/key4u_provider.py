@@ -1433,7 +1433,15 @@ class Key4UProvider:
         except Exception as exc:
             return _result(ok=False, capability="video_query", model=self.config.video_model, status="FAIL_EXCEPTION", task_id=safe_task_id, error_class=type(exc).__name__, error_message_safe=exc)
 
-    async def tts(self, text: str = "Xin chào TOAN AAS.", model: str = "", voice_id: str = "", speed: float = 1.0, timeout_seconds: float = 30.0) -> dict[str, Any]:
+    async def tts(
+        self,
+        text: str = "Xin chào TOAN AAS.",
+        model: str = "",
+        voice_id: str = "",
+        speed: float = 1.0,
+        timeout_seconds: float = 30.0,
+        language_boost: str = "auto",
+    ) -> dict[str, Any]:
         selected_model = model or self.config.tts_model
         if not self.is_configured():
             return self._missing_result("tts", selected_model)
@@ -1455,7 +1463,7 @@ class Key4UProvider:
                 "format": "mp3",
                 "channel": 1,
             },
-            "language_boost": "Vietnamese",
+            "language_boost": str(language_boost or "auto").strip()[:64] or "auto",
             "stream": False,
             "subtitle_enable": False,
         }
