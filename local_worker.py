@@ -41,6 +41,7 @@ from services.video_real_render_connector import (
 )
 from services.video_local_editing import (
     LocalVideoEditError,
+    available_ffmpeg_filters,
     default_manual_edit_plan,
     execute_manual_edit,
     execute_split_plan,
@@ -161,6 +162,21 @@ def http_json(method: str, path: str, payload: dict | None = None, timeout: int 
 
 
 def local_worker_heartbeat_payload(*, last_error: str = "", queue_depth: int = 0) -> dict:
+    try:
+        discovered_filters = available_ffmpeg_filters(LOCAL_FFMPEG_PATH)
+        video_edit_filters_known = True
+    except Exception:
+        discovered_filters = ()
+        video_edit_filters_known = False
+    video_edit_filters = sorted(
+        {
+            str(name)
+            for name in discovered_filters
+            if 0 < len(str(name)) <= 64
+            and str(name) == str(name).lower()
+            and str(name).replace("_", "").isalnum()
+        }
+    )
     return {
         "heartbeat_contract_version": 1,
         "worker_id": LOCAL_WORKER_ID,
@@ -177,6 +193,10 @@ def local_worker_heartbeat_payload(*, last_error: str = "", queue_depth: int = 0
         "last_error": str(last_error or "")[:500],
         "ffmpeg_path": LOCAL_FFMPEG_PATH,
         "ffprobe_path": find_ffprobe(ffmpeg_path=LOCAL_FFMPEG_PATH),
+        "video_edit_filters_known": video_edit_filters_known,
+        "video_edit_filters": video_edit_filters,
+        "video_edit_filter_worker_id": LOCAL_WORKER_ID,
+        "video_edit_filter_ffmpeg_path": LOCAL_FFMPEG_PATH,
         "comfy_enabled": LOCAL_COMFY_ENABLED,
     }
 
