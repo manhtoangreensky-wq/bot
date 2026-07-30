@@ -186,7 +186,7 @@ def test_subdub_status_update_button():
 
     assert "videodub|subdub_status|job123" in callbacks
     assert "videodub|source_upload" in callbacks
-    assert f"videodub|type|{bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}" in callbacks
+    assert "videodub|status_back_type" in callbacks
 
 
 def test_subdub_no_duplicate_terminal_messages():

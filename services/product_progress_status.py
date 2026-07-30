@@ -190,7 +190,7 @@ PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
         "send_label": "📤 Gửi video khác",
         "send_callback": "videodub|source_upload",
         "back_label": "⬅️ Phụ đề + Lồng tiếng",
-        "back_callback": "videodub|type|subtitle_plus_dub",
+        "back_callback": "videodub|status_back_type",
         "steps": [
             _stage("received_file", "Nhận video", "Đã nhận video", 5),
             _stage("extracting_audio", "Tách âm thanh", "Đang tách âm thanh", 20),
