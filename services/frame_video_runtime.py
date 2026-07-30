@@ -318,18 +318,23 @@ def canonical_config(state: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
-def validate_plan(state: dict[str, Any]) -> dict[str, Any]:
+def validate_plan(
+    state: dict[str, Any],
+    *,
+    min_images: int = FRAME_VIDEO_MIN_IMAGES,
+) -> dict[str, Any]:
     manifest = canonical_image_manifest(state.get("photos") or [])
     config = canonical_config({**state, "photos": manifest})
     errors: list[str] = []
+    minimum_images = max(1, min(FRAME_VIDEO_MAX_IMAGES, _safe_int(min_images, FRAME_VIDEO_MIN_IMAGES)))
     expected_image_count = max(0, _safe_int(state.get("image_count"), 0))
-    if len(manifest) < FRAME_VIDEO_MIN_IMAGES:
+    if len(manifest) < minimum_images:
         errors.append("not_enough_images")
     if len(manifest) > FRAME_VIDEO_MAX_IMAGES:
         errors.append("too_many_images")
     if (
         str(state.get("commercial_flow_version") or "") == "framevideo3"
-        and expected_image_count >= FRAME_VIDEO_MIN_IMAGES
+        and expected_image_count >= minimum_images
         and len(manifest) != expected_image_count
     ):
         errors.append("image_count_mismatch")
@@ -441,8 +446,16 @@ def build_ffmpeg_command(
     music_path: str = "",
     voice_path: str = "",
     logo_path: str = "",
+    min_images: int = FRAME_VIDEO_MIN_IMAGES,
 ) -> FrameVideoCommand:
-    plan = validate_plan({**state, "photos": state.get("photos") or [{"file_id": path} for path in image_paths]})
+    plan = validate_plan(
+        {
+            **state,
+            "photos": state.get("photos")
+            or [{"file_id": path} for path in image_paths],
+        },
+        min_images=min_images,
+    )
     if len(image_paths) != len(plan["manifest"]):
         raise ValueError("image_manifest_path_mismatch")
     if not plan["ok"]:
@@ -469,10 +482,15 @@ def build_ffmpeg_command(
         command.extend(["-i", voice_path])
 
     filters: list[str] = []
+    image_motions = dict(state.get("image_motions") or {})
     for idx, duration in enumerate(durations):
         fit_label = f"[fit{idx}]"
         filters.extend(_fit_filter(f"[{idx}:v]", fit_label, width, height, config["fit_mode"], config["background_color"], fps))
-        filters.append(_motion_filter(fit_label, f"[v{idx}]", width, height, fps, config["motion"], duration))
+        image_id = plan["manifest"][idx]["image_id"]
+        motion = _clean_token(image_motions.get(image_id), config["motion"])
+        if motion not in MOTIONS:
+            motion = config["motion"]
+        filters.append(_motion_filter(fit_label, f"[v{idx}]", width, height, fps, motion, duration))
 
     overlap = float(config["transition_seconds"])
     if len(image_paths) == 1:

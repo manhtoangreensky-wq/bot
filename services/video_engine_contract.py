@@ -391,6 +391,14 @@ def product_route_contract(
             "blocker": "independent_product_contract_missing",
         }
     if item is VideoProduct.FRAME_VIDEO:
+        selected_mode = _mode(mode) if mode is not None else None
+        if selected_mode in {
+            VideoEngineMode.SINGLE_SCENE,
+            VideoEngineMode.MULTI_SCENE,
+        }:
+            from services import frame_video_engine
+
+            return frame_video_engine.shared_frame_video_engine_route()
         return {
             "product": item.value,
             "state": VideoRouteState.CONNECTED.value,
@@ -557,54 +565,90 @@ def evaluate_readiness(
     local_capabilities = _normalized_flag_map(manifest.get("local_capabilities"))
     provider_availability = _normalized_flag_map(manifest.get("provider_availability"))
     blocker = ""
-    if not request.confirmed:
+    if (
+        request.product_type is VideoProduct.FRAME_VIDEO
+        and request.mode in {
+            VideoEngineMode.SINGLE_SCENE,
+            VideoEngineMode.MULTI_SCENE,
+        }
+    ):
+        from services import frame_video_engine
+
+        frame_flags = frame_video_engine.frame_video_engine_flags(environ)
+        if not frame_flags["FRAME_VIDEO_ENGINE_ENABLED"]:
+            blocker = "frame_video_engine_disabled"
+        elif frame_flags["FRAME_VIDEO_AUTO_RETRY"]:
+            blocker = "automatic_retry_forbidden"
+        elif frame_flags["FRAME_VIDEO_AUTO_FALLBACK"]:
+            blocker = "automatic_fallback_forbidden"
+    if not blocker and not request.confirmed:
         blocker = "confirmation_required"
-    elif not route["connected"]:
+    elif not blocker and not route["connected"]:
         blocker = str(route["blocker"] or "independent_product_contract_missing")
-    elif request.mode.value not in route["supported_modes"]:
+    elif not blocker and request.mode.value not in route["supported_modes"]:
         blocker = "product_mode_unsupported"
-    elif _clean_text(manifest.get("engine_contract_version")) != CONTRACT_VERSION:
+    elif not blocker and _clean_text(manifest.get("engine_contract_version")) != CONTRACT_VERSION:
         blocker = "worker_contract_version_mismatch"
-    elif not _clean_text(runtime_sha) or request.runtime_sha != _clean_text(runtime_sha):
+    elif not blocker and (
+        not _clean_text(runtime_sha)
+        or request.runtime_sha != _clean_text(runtime_sha)
+    ):
         blocker = "runtime_sha_mismatch"
-    elif (
+    elif not blocker and (
         _clean_text(manifest.get("worker_sha")) != _clean_text(runtime_sha)
         or request.expected_worker_sha != _clean_text(manifest.get("worker_sha"))
     ):
         blocker = "worker_sha_mismatch"
-    elif not _clean_text(manifest.get("worker_instance_id")):
+    elif not blocker and not _clean_text(manifest.get("worker_instance_id")):
         blocker = "worker_instance_missing"
-    elif not _as_bool(manifest.get("worker_connected")):
+    elif not blocker and not _as_bool(manifest.get("worker_connected")):
         blocker = "worker_disconnected"
-    elif not _as_bool(manifest.get("heartbeat_fresh")):
+    elif not blocker and not _as_bool(manifest.get("heartbeat_fresh")):
         blocker = "worker_heartbeat_stale"
-    elif not _as_bool(manifest.get("health_ok")):
+    elif not blocker and not _as_bool(manifest.get("health_ok")):
         blocker = "worker_unhealthy"
-    elif _clean_text(manifest.get("worker_status")).lower() not in {"healthy", "ready", "idle", "running"}:
+    elif not blocker and _clean_text(manifest.get("worker_status")).lower() not in {
+        "healthy",
+        "ready",
+        "idle",
+        "running",
+    }:
         blocker = "worker_status_not_ready"
-    elif not _as_bool(manifest.get("queue_ready")):
+    elif not blocker and not _as_bool(manifest.get("queue_ready")):
         blocker = "worker_queue_not_ready"
-    elif not _clean_text(manifest.get("renderer_name")):
+    elif not blocker and not _clean_text(manifest.get("renderer_name")):
         blocker = "worker_renderer_missing"
-    elif not _clean_text(manifest.get("renderer_version")):
+    elif not blocker and not _clean_text(manifest.get("renderer_version")):
         blocker = "worker_renderer_version_missing"
-    elif not _clean_text(manifest.get("ffmpeg_version")):
+    elif not blocker and not _clean_text(manifest.get("ffmpeg_version")):
         blocker = "worker_ffmpeg_missing"
-    elif request.product_type.value not in supported_products:
+    elif not blocker and request.product_type.value not in supported_products:
         blocker = "worker_product_unsupported"
-    elif request.mode.value not in supported_modes:
+    elif not blocker and request.mode.value not in supported_modes:
         blocker = "worker_mode_unsupported"
-    elif route["required_capability"] not in capabilities:
+    elif not blocker and route["required_capability"] not in capabilities:
         blocker = "worker_capability_mismatch"
-    elif route["local_enabled"] and not _as_bool(manifest.get("local_enabled")):
+    elif not blocker and route["local_enabled"] and not _as_bool(manifest.get("local_enabled")):
         blocker = "local_engine_disabled"
-    elif route["local_enabled"] and not local_capabilities.get(route["required_capability"], False):
+    elif (
+        not blocker
+        and route["local_enabled"]
+        and not local_capabilities.get(route["required_capability"], False)
+    ):
         blocker = "local_capability_disabled"
-    elif route["local_enabled"] and request.provider_selection != "local":
+    elif not blocker and route["local_enabled"] and request.provider_selection != "local":
         blocker = "provider_selection_mismatch"
-    elif route["provider_enabled"] and not _as_bool(manifest.get("provider_enabled")):
+    elif (
+        not blocker
+        and route["provider_enabled"]
+        and not _as_bool(manifest.get("provider_enabled"))
+    ):
         blocker = "provider_engine_disabled"
-    elif route["provider_enabled"] and not provider_availability.get(request.provider_selection, False):
+    elif (
+        not blocker
+        and route["provider_enabled"]
+        and not provider_availability.get(request.provider_selection, False)
+    ):
         blocker = "provider_unavailable"
     ready = not blocker
     return {
