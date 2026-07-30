@@ -368,6 +368,17 @@ def product_route_contract(
             flags = animated_video_engine.animated_video_engine_flags(environ)
             if flags["ANIMATED_VIDEO_ENGINE_ENABLED"]:
                 return animated_video_engine.shared_animated_video_engine_route()
+    if item is VideoProduct.HUMAN_AI_VIDEO:
+        selected_mode = _mode(mode) if mode is not None else None
+        if selected_mode in {
+            VideoEngineMode.SINGLE_SCENE,
+            VideoEngineMode.MULTI_SCENE,
+        }:
+            from services import human_ai_video_engine
+
+            flags = human_ai_video_engine.human_ai_video_engine_flags(environ)
+            if flags["HUMAN_AI_VIDEO_ENGINE_ENABLED"]:
+                return human_ai_video_engine.shared_human_ai_video_engine_route()
     if item is VideoProduct.PRODUCT_VIDEO:
         from services import product_video_one_scene_engine
 
@@ -590,6 +601,21 @@ def evaluate_readiness(
         if animated_flags["ANIMATED_VIDEO_AUTO_RETRY"]:
             blocker = "automatic_retry_forbidden"
         elif animated_flags["ANIMATED_VIDEO_AUTO_FALLBACK"]:
+            blocker = "automatic_fallback_forbidden"
+    if (
+        request.product_type is VideoProduct.HUMAN_AI_VIDEO
+        and route["connected"]
+        and request.mode in {
+            VideoEngineMode.SINGLE_SCENE,
+            VideoEngineMode.MULTI_SCENE,
+        }
+    ):
+        from services import human_ai_video_engine
+
+        human_flags = human_ai_video_engine.human_ai_video_engine_flags(environ)
+        if human_flags["HUMAN_AI_VIDEO_AUTO_RETRY"]:
+            blocker = "automatic_retry_forbidden"
+        elif human_flags["HUMAN_AI_VIDEO_AUTO_FALLBACK"]:
             blocker = "automatic_fallback_forbidden"
     if (
         request.product_type is VideoProduct.FRAME_VIDEO
