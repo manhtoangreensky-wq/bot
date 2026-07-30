@@ -381,6 +381,17 @@ def _drawtext_color(value: Any, fallback: str) -> str:
     return fallback
 
 
+def _fontfile_path(value: Any = "") -> str:
+    candidates = [
+        str(value or "").strip(),
+        str(os.environ.get("TOANAAS_FFMPEG_FONT") or "").strip(),
+        r"C:\Windows\Fonts\arial.ttf",
+        r"C:\Windows\Fonts\segoeui.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    return next((path for path in candidates if path and os.path.isfile(path)), "")
+
+
 def _background_color(value: Any, fallback: str = "#111111") -> str:
     token = str(value or "").strip().lower()
     if re.fullmatch(r"#[0-9a-f]{6}", token):
@@ -410,7 +421,17 @@ def _fit_filter(input_label: str, output_label: str, width: int, height: int, fi
     ]
 
 
-def _motion_filter(input_label: str, output_label: str, width: int, height: int, fps: int, motion: str, duration: float) -> str:
+def _motion_filter(
+    input_label: str,
+    output_label: str,
+    width: int,
+    height: int,
+    fps: int,
+    motion: str,
+    duration: float,
+    *,
+    continuous_still_motion: bool = False,
+) -> str:
     frames = max(1, int(math.ceil(duration * fps)))
     if motion == "zoom_in":
         expr = "z='min(zoom+0.0015,1.10)':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2'"
@@ -424,8 +445,9 @@ def _motion_filter(input_label: str, output_label: str, width: int, height: int,
         expr = f"z='min(zoom+0.0012,1.10)':x='(iw-iw/zoom)*on/{max(1, frames - 1)}':y='ih/2-ih/zoom/2'"
     else:
         return f"{input_label}trim=duration={duration:.3f},setpts=PTS-STARTPTS{output_label}"
+    output_frames = frames if continuous_still_motion else 1
     return (
-        f"{input_label}zoompan={expr}:d=1:s={width}x{height}:fps={fps},"
+        f"{input_label}zoompan={expr}:d={output_frames}:s={width}x{height}:fps={fps},"
         f"trim=duration={duration:.3f},setpts=PTS-STARTPTS{output_label}"
     )
 
@@ -447,6 +469,7 @@ def build_ffmpeg_command(
     voice_path: str = "",
     logo_path: str = "",
     min_images: int = FRAME_VIDEO_MIN_IMAGES,
+    continuous_still_motion: bool = False,
 ) -> FrameVideoCommand:
     plan = validate_plan(
         {
@@ -490,7 +513,18 @@ def build_ffmpeg_command(
         motion = _clean_token(image_motions.get(image_id), config["motion"])
         if motion not in MOTIONS:
             motion = config["motion"]
-        filters.append(_motion_filter(fit_label, f"[v{idx}]", width, height, fps, motion, duration))
+        filters.append(
+            _motion_filter(
+                fit_label,
+                f"[v{idx}]",
+                width,
+                height,
+                fps,
+                motion,
+                duration,
+                continuous_still_motion=continuous_still_motion,
+            )
+        )
 
     overlap = float(config["transition_seconds"])
     if len(image_paths) == 1:
@@ -511,6 +545,12 @@ def build_ffmpeg_command(
         video_label = previous
 
     text_filters: list[str] = []
+    font_path = _fontfile_path(state.get("font_path"))
+    font_prefix = (
+        f"fontfile='{ffmpeg_text.escape_filter_path(font_path)}':"
+        if font_path
+        else ""
+    )
     for item in list(state.get("text_overlays") or [])[:30]:
         content = _escape_drawtext(str((item or {}).get("content") or ""))
         if not content:
@@ -535,14 +575,14 @@ def build_ffmpeg_command(
             x = f"if(lt(t,{start + 0.35:.3f}),w-(w-({x}))*(t-{start:.3f})/0.35,{x})"
         text_filters.append(
             "drawtext="
-            f"text='{content}':{ffmpeg_text.DRAWTEXT_NO_EXPANSION}:fontcolor={font_color}:fontsize={size}:borderw=2:bordercolor=black@0.8:"
+            f"{font_prefix}text='{content}':{ffmpeg_text.DRAWTEXT_NO_EXPANSION}:fontcolor={font_color}:fontsize={size}:borderw=2:bordercolor=black@0.8:"
             f"box=1:boxcolor={box_color}:boxborderw=12:x={x}:y={y}:alpha='{alpha}':enable='between(t,{start:.3f},{end:.3f})'"
         )
     watermark = _escape_drawtext(str(state.get("watermark_text") or ""))
     if watermark:
         x, y = _position_xy(str(state.get("watermark_position") or "top_right"), margin=28)
         text_filters.append(
-            f"drawtext=text='{watermark}':{ffmpeg_text.DRAWTEXT_NO_EXPANSION}:fontcolor=white@0.68:fontsize={max(18, width // 34)}:borderw=1:bordercolor=black@0.45:x={x}:y={y}"
+            f"drawtext={font_prefix}text='{watermark}':{ffmpeg_text.DRAWTEXT_NO_EXPANSION}:fontcolor=white@0.68:fontsize={max(18, width // 34)}:borderw=1:bordercolor=black@0.45:x={x}:y={y}"
         )
     if text_filters:
         filters.append(f"{video_label}{','.join(text_filters)}[vtext]")
