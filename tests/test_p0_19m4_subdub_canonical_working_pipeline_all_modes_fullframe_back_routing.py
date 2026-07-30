@@ -265,7 +265,7 @@ def test_combined_back_returns_combined_setup():
 def test_status_back_button_goes_subdub_menu():
     markup = bot.subdub_progress_keyboard("job1", "vi")
     callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
-    assert "videodub|back_type" in callbacks
+    assert "videodub|status_back_type" in callbacks
     assert all(callback != "menu|main" or button.text.endswith("Menu chính") for row in markup.inline_keyboard for button in row for callback in [button.callback_data])
 
 

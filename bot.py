@@ -116851,7 +116851,7 @@ def subdub_back_route_audit_payload() -> dict:
     ]
     return {
         "routes": cases,
-        "status_back_callback": "videodub|back_type",
+        "status_back_callback": "videodub|status_back_type",
         "missing_origin_fallback": subdub_missing_origin_back_callback(),
         "missing_origin_count": 0,
     }
@@ -207810,7 +207810,7 @@ def subdub_progress_keyboard(job_id: str = "", lang: str = "vi") -> InlineKeyboa
             InlineKeyboardButton("📤 Gửi video khác" if is_vi else "📤 Send another", callback_data="videodub|source_upload"),
         ],
         [
-            InlineKeyboardButton("⬅️ Phụ đề + Lồng tiếng" if is_vi else "⬅️ Subtitle + Dub", callback_data="videodub|back_type"),
+            InlineKeyboardButton("⬅️ Phụ đề + Lồng tiếng" if is_vi else "⬅️ Subtitle + Dub", callback_data="videodub|status_back_type"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -210720,6 +210720,11 @@ def subtitle_dub_debug_job_payload(
         "audio_bytes": int(state.get("tts_audio_bytes") or state.get("audio_bytes") or 0),
         "tts_audio_qc": dict(state.get("tts_audio_qc") or {}),
         "tts_cue_qc": list(state.get("tts_cue_qc") or []),
+        "tts_expected_segments": int(state.get("tts_expected_segments") or 0),
+        "tts_generated_segments": int(state.get("tts_generated_segments") or 0),
+        "tts_mixed_segments": int(state.get("tts_mixed_segments") or 0),
+        "tts_dropped_segments": int(state.get("tts_dropped_segments") or 0),
+        "tts_timeline_duration": float(state.get("tts_timeline_duration") or 0.0),
         "tts_timeline_detail": str(state.get("tts_timeline_detail") or ""),
         "tts_sequential": bool(state.get("tts_sequential")),
         "mux_render_called": bool(attempts.get("mux") or final_path),
@@ -214823,7 +214828,7 @@ async def subdub_audio_activity_metrics(
         silence_seconds = sum(max(0.0, end - start) for start, end in silence_ranges)
         silence_seconds = max(0.0, min(measured_duration, silence_seconds))
         non_silent_seconds = max(0.0, measured_duration - silence_seconds)
-        boundary_tolerance = min(0.06, max(0.01, measured_duration * 0.02))
+        boundary_tolerance = 0.002
         leading_silence = 0.0
         trailing_silence = 0.0
         if silence_ranges and silence_ranges[0][0] <= boundary_tolerance:
@@ -216194,6 +216199,13 @@ async def _execute_video_dubbing_pipeline_core(
             "debug_job": debug_job,
             "pipeline_attempted": True,
             "provider_route": provider_route,
+            "state": dict(state),
+            "tts_expected_segments": int(state.get("tts_expected_segments") or 0),
+            "tts_generated_segments": int(state.get("tts_generated_segments") or 0),
+            "tts_mixed_segments": int(state.get("tts_mixed_segments") or 0),
+            "tts_dropped_segments": int(state.get("tts_dropped_segments") or 0),
+            "tts_timeline_duration": float(state.get("tts_timeline_duration") or 0.0),
+            "tts_timeline_detail": str(state.get("tts_timeline_detail") or ""),
             **subtitle_debug_fields,
         }
 
@@ -219396,6 +219408,13 @@ async def handle_video_dubbing_callback(
         origin = "translation"
     if origin not in {"translation", "video", "video_addon"}:
         origin = "video"
+    if action == "status_back_type":
+        return await safe_edit_or_send(
+            query,
+            video_dubbing_menu_text(lang, origin),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_menu_keyboard(lang, origin),
+        )
     if origin == "video_addon" and action not in {"return_origin"} and not video_dubbing_video_addon_session_ready(uid):
         clear_video_dubbing_pending(uid)
         return await safe_edit_or_send(

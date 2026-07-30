@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -539,14 +540,192 @@ def test_subdub_status_back_returns_to_four_lane_menu_without_ui_copy_change():
     keyboard = bot.subdub_progress_keyboard("ABC123", "vi")
 
     assert keyboard.inline_keyboard[1][0].text == "⬅️ Quay lại"
-    assert keyboard.inline_keyboard[1][0].callback_data == "videodub|back_type"
-    assert bot.product_progress_status.product_progress_spec("subdub")["back_callback"] == "videodub|back_type"
-    matching_edges = bot.workflow_graph_contract.build_p0_infra1_workflow_graph().matching_edges("videodub|back_type")
+    assert keyboard.inline_keyboard[1][0].callback_data == "videodub|status_back_type"
+    assert bot.product_progress_status.product_progress_spec("subdub")["back_callback"] == "videodub|status_back_type"
+    matching_edges = bot.workflow_graph_contract.build_p0_infra1_workflow_graph().matching_edges("videodub|status_back_type")
     assert any(
         edge.source_node == "subdub_status"
         and edge.target_node == "subdub_start"
+        and edge.action_type == "render_only"
         and not edge.provider_allowed
         and not edge.wallet_allowed
         and not edge.reprocess_allowed
         for edge in matching_edges
     )
+
+
+def test_subdub_status_back_preserves_pending_job_and_artifacts(monkeypatch):
+    user_id = 949494
+    pending_key = bot.video_dubbing_pending_key(user_id)
+    artifact_key = f"video_dubbing_artifact:{user_id}:source"
+    original_pending = {
+        "origin": "translation",
+        "mode": bot.VIDEO_SUBTITLE_MODE_DUB,
+        "source_file_id": "telegram-file",
+    }
+    bot.USER_PENDING[pending_key] = dict(original_pending)
+    bot.USER_PENDING[artifact_key] = {"bytes": b"source-video"}
+    captured = {}
+
+    class Query:
+        data = "videodub|status_back_type"
+        from_user = SimpleNamespace(id=user_id)
+        message = SimpleNamespace(chat_id=user_id)
+
+        async def answer(self, *_args, **_kwargs):
+            return None
+
+    async def fake_edit(_query, text, **kwargs):
+        captured["text"] = text
+        captured["markup"] = kwargs.get("reply_markup")
+        return "rendered"
+
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(bot, "safe_edit_or_send", fake_edit)
+    try:
+        result = asyncio.run(
+            bot.handle_video_dubbing_callback(
+                SimpleNamespace(callback_query=Query()),
+                SimpleNamespace(),
+            )
+        )
+
+        assert result == "rendered"
+        assert bot.USER_PENDING[pending_key] == original_pending
+        assert bot.USER_PENDING[artifact_key]["bytes"] == b"source-video"
+        callbacks = [
+            button.callback_data
+            for row in captured["markup"].inline_keyboard
+            for button in row
+        ]
+        assert "videodub|type|subtitle_create" in callbacks
+        assert "videodub|type|subtitle_translate" in callbacks
+        assert "videodub|type|dub" in callbacks
+        assert "videodub|type|subtitle_plus_dub" in callbacks
+    finally:
+        bot.USER_PENDING.pop(pending_key, None)
+        bot.USER_PENDING.pop(artifact_key, None)
+
+
+def test_tts_activity_does_not_trim_short_audible_boundary_markers(tmp_path):
+    ffmpeg = bot.frame_video_ffmpeg_path()
+    if not ffmpeg:
+        pytest.skip("ffmpeg unavailable")
+    output = tmp_path / "audible-boundary-markers.mp3"
+    subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=32000:duration=0.03",
+            "-f", "lavfi", "-i", "anullsrc=r=32000:cl=mono:d=0.25",
+            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=32000:duration=3.0",
+            "-f", "lavfi", "-i", "anullsrc=r=32000:cl=mono:d=0.25",
+            "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=32000:duration=0.03",
+            "-filter_complex", "[0:a][1:a][2:a][3:a][4:a]concat=n=5:v=0:a=1[out]",
+            "-map", "[out]",
+            "-c:a", "libmp3lame",
+            "-b:a", "128k",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    metrics = asyncio.run(bot.subdub_audio_activity_metrics(output.read_bytes()))
+
+    assert metrics["ok"] is True
+    assert metrics["leading_silence_seconds"] == 0.0
+    assert metrics["trailing_silence_seconds"] == 0.0
+
+
+def test_core_failure_persists_timeline_detail_and_cue_counts(monkeypatch, tmp_path):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    monkeypatch.setattr(bot, "video_dubbing_product_gate_matrix", lambda *_args, **_kwargs: {"product_route_allowed": True})
+    monkeypatch.setattr(bot, "video_dubbing_product_gate_allows_pipeline", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(bot, "video_dubbing_engine_access_decision", lambda *_args, **_kwargs: {"allowed": True})
+    monkeypatch.setattr(bot, "calculate_video_translate_price", lambda *_args, **_kwargs: {"total_price_xu": 0})
+    monkeypatch.setattr(bot, "video_dubbing_tts_price_estimate", lambda *_args, **_kwargs: {"price_xu": 0})
+    monkeypatch.setattr(bot, "apply_member_service_discount", lambda _uid, amount, _event: {"final_cost": amount})
+    monkeypatch.setattr(bot, "get_user", lambda _uid: (999999, 0, 0))
+
+    async def fake_save_input(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "path": str(source),
+            "source_bytes": b"video",
+            "content_type": "video/mp4",
+            "size": source.stat().st_size,
+            "duration": 2,
+            "file_saved": True,
+            "exists": True,
+        }
+
+    async def fake_duration_gate(*_args, **_kwargs):
+        return {
+            "input_duration": 2,
+            "telegram_duration": 2,
+            "ffprobe_duration": 2,
+            "detected_duration_source": "fixture",
+            "duration_gate_result": "pass",
+            "duration_limit": 3600,
+        }
+
+    async def fake_blackbox(**_kwargs):
+        return {
+            "ok": False,
+            "status": "NO_AUDIO_BYTES",
+            "error_code": "dub_audio_empty",
+            "timeline_detail": "tts_timeline_exceeds_source:required_end=3.478;source_duration=2.000;max_tempo=1.150",
+            "tts_provider": "key4u_minimax",
+            "tts_expected_segments": 2,
+            "tts_generated_segments": 2,
+            "tts_mixed_segments": 0,
+            "tts_dropped_segments": 0,
+            "tts_timeline_duration": 2.0,
+            "tts_cue_qc": [{"ok": True}, {"ok": True}],
+            "state": dict(_kwargs.get("state") or {}),
+            "route_attempts": {"tts": True, "mux": False},
+        }
+
+    monkeypatch.setattr(bot, "video_dubbing_save_input_for_pipeline", fake_save_input)
+    monkeypatch.setattr(bot, "subdub_duration_gate_payload_for_saved_input", fake_duration_gate)
+    monkeypatch.setattr(bot.subdub_blackboxes, "run_subdub_lane_blackbox", fake_blackbox)
+
+    class Query:
+        from_user = SimpleNamespace(id=949495)
+        message = SimpleNamespace(chat_id=949495)
+
+    state = {
+        "mode": bot.VIDEO_SUBTITLE_MODE_DUB,
+        "process_type": bot.VIDEO_SUBTITLE_MODE_DUB,
+        "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_DUB,
+        "source_file_id": "telegram-file",
+        "source_file_name": "source.mp4",
+        "source_mime_type": "video/mp4",
+        "media_kind": "video",
+        "video_duration": 2,
+        "source_duration": 2,
+        "target_language": "original",
+        "subdub_final_confirmed": True,
+        "_pipeline_workspace": str(tmp_path / "workspace"),
+    }
+
+    result = asyncio.run(
+        bot._execute_video_dubbing_pipeline_core(
+            Query(),
+            SimpleNamespace(),
+            state,
+            "vi",
+            admin_interactive_confirm=True,
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["detail"].startswith("tts_timeline_exceeds_source")
+    assert result["state"]["tts_expected_segments"] == 2
+    assert result["state"]["tts_generated_segments"] == 2
+    assert result["debug_job"]["tts_expected_segments"] == 2
+    assert result["debug_job"]["tts_generated_segments"] == 2
+    assert result["debug_job"]["tts_timeline_detail"].startswith("tts_timeline_exceeds_source")
