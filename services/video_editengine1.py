@@ -20,7 +20,12 @@ ENGINE_ROUTE = "local_worker_ffmpeg"
 OUTBOX_OWNER = "local_video_edit"
 WORKER_CAPABILITY = "video_edit"
 HEARTBEAT_TTL_SECONDS = 90
-TERMINAL_JOB_STATES = frozenset({"delivered", "charged", "failed_no_charge"})
+IDEMPOTENCY_SCHEMA_VERSION = "video-edit-job-identity-v2"
+PLAN_SCHEMA_VERSION = "video-edit-plan-v1"
+TERMINAL_JOB_STATES = frozenset({"delivered", "charged", "failed_no_charge", "delivery_unknown"})
+
+
+_MISSING = object()
 
 
 def _now() -> str:
@@ -111,13 +116,51 @@ def ensure_schema(conn) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_video_edit_outbox_owner_status ON video_edit_outbox(owner,status,available_at)")
 
 
-def stable_idempotency_key(*, user_id: Any, edit_session_id: Any, plan: dict, quality_tier_id: Any) -> str:
-    material = _json({
+def stable_idempotency_key(
+    *,
+    user_id: Any,
+    edit_session_id: Any,
+    plan: dict,
+    quality_tier_id: Any,
+    plan_schema_version: Any = _MISSING,
+    source_file_id: Any = _MISSING,
+    source_video_hash: Any = _MISSING,
+    source_manifest: Any = _MISSING,
+    concat_sources: Any = _MISSING,
+    logo_source: Any = _MISSING,
+    subtitle_source: Any = _MISSING,
+) -> str:
+    legacy_material = {
         "user_id": str(user_id or ""),
         "edit_session_id": str(edit_session_id or ""),
         "plan": dict(plan or {}),
         "quality_tier_id": str(quality_tier_id or ""),
-    })
+    }
+    identity_values = (
+        plan_schema_version,
+        source_file_id,
+        source_video_hash,
+        source_manifest,
+        concat_sources,
+        logo_source,
+        subtitle_source,
+    )
+    if all(value is _MISSING for value in identity_values):
+        material = _json(legacy_material)
+    else:
+        material = _json({
+            **legacy_material,
+            "idempotency_schema_version": IDEMPOTENCY_SCHEMA_VERSION,
+            "plan_schema_version": str(
+                PLAN_SCHEMA_VERSION if plan_schema_version is _MISSING else plan_schema_version or PLAN_SCHEMA_VERSION
+            ),
+            "source_file_id": str("" if source_file_id is _MISSING else source_file_id or ""),
+            "source_video_hash": str("" if source_video_hash is _MISSING else source_video_hash or ""),
+            "source_manifest": {} if source_manifest is _MISSING else source_manifest or {},
+            "concat_sources": [] if concat_sources is _MISSING else concat_sources or [],
+            "logo_source": {} if logo_source is _MISSING else logo_source or {},
+            "subtitle_source": {} if subtitle_source is _MISSING else subtitle_source or {},
+        })
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
@@ -238,11 +281,41 @@ def create_job(
         raise ValueError("local_free_contract_invalid")
     if not conn.in_transaction:
         conn.execute("BEGIN IMMEDIATE")
+    worker_payload = dict(worker_payload or {})
+    source_manifest = worker_payload.get("source_manifest")
+    if source_manifest is None:
+        source_manifest = dict(source_metadata or {}).get("source_manifest") or dict(source_metadata or {})
+    source_video_hash = (
+        worker_payload.get("source_video_hash")
+        or worker_payload.get("source_sha256")
+        or dict(source_metadata or {}).get("source_video_hash")
+        or dict(source_metadata or {}).get("source_sha256")
+        or dict(source_metadata or {}).get("sha256")
+        or ""
+    )
+    plan_schema_version = (
+        worker_payload.get("plan_schema_version")
+        or worker_payload.get("schema_version")
+        or dict(plan or {}).get("schema_version")
+        or dict(plan or {}).get("plan_version")
+        or (
+            f"local1-contract-{worker_payload.get('local1_contract')}"
+            if worker_payload.get("local1_contract") is not None
+            else PLAN_SCHEMA_VERSION
+        )
+    )
     token = stable_idempotency_key(
         user_id=user_id,
         edit_session_id=edit_session_id,
         plan=plan,
         quality_tier_id=quality_tier_id,
+        plan_schema_version=plan_schema_version,
+        source_file_id=source_file_id,
+        source_video_hash=source_video_hash,
+        source_manifest=source_manifest,
+        concat_sources=list(worker_payload.get("concat_sources") or []),
+        logo_source=dict(worker_payload.get("logo_source") or {}),
+        subtitle_source=dict(worker_payload.get("subtitle_source") or {}),
     )
     existing = conn.execute(
         "SELECT id,local_worker_job_id,status FROM video_edit_jobs WHERE idempotency_key=?",
@@ -262,7 +335,6 @@ def create_job(
             "idempotency_key": token,
         }
     now = _now()
-    worker_payload = dict(worker_payload or {})
     worker_payload["edit_idempotency_key"] = token
     worker_payload["product_type"] = PRODUCT_TYPE
     worker_payload["worker_job_type"] = WORKER_JOB_TYPE
@@ -359,6 +431,19 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
         conn.execute(
             "UPDATE video_edit_outbox SET status='running',attempt_count=CASE WHEN attempt_count=0 THEN 1 ELSE attempt_count END,updated_at=? WHERE edit_job_id=?",
             (now, int(current["id"])),
+        )
+    elif status == "delivery_unknown":
+        reason = str(detail.get("reason") or "telegram_delivery_receipt_commit_uncertain")[:180]
+        conn.execute(
+            """UPDATE video_edit_jobs SET status='delivery_unknown',blocker=?,
+               receipt_state='delivery_unknown',charge_state='not_charged',charged_xu=0,
+               finished_at=?,updated_at=? WHERE id=?""",
+            (reason, now, now, int(current["id"])),
+        )
+        conn.execute(
+            """UPDATE video_edit_outbox SET status='terminal_delivery_unknown',
+               terminal_reason=?,updated_at=? WHERE edit_job_id=?""",
+            (reason, now, int(current["id"])),
         )
     elif status == "succeeded":
         valid = bool(
