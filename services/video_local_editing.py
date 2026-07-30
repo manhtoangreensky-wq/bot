@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import math
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -53,12 +55,68 @@ OVERLAY_POSITIONS = {
 # valid, then normalize them to the same 3x3 placement contract as logos.
 TEXT_POSITIONS = OVERLAY_POSITIONS | {"top", "bottom"}
 LOGO_POSITIONS = set(OVERLAY_POSITIONS)
+AUDIO_NORMALIZATION_MODES = {"off", "loudnorm"}
+QUALITY_FILTER_KEYS = {"sharpen", "denoise"}
+LOCAL_EFFECT_KEYS = {"fade_in_ms", "fade_out_ms", "vignette", "slow_zoom"}
 
 
 class LocalVideoEditError(RuntimeError):
     def __init__(self, reason: str):
         super().__init__(reason)
         self.reason = reason
+
+
+def normalize_callback_plan_choice(kind: Any, value: Any) -> tuple[str, Any]:
+    """Validate one public ``videoedit|set`` value before state mutation."""
+    key = str(kind or "").strip().lower()
+    token = str(value or "").strip().lower()
+    try:
+        if key == "aspect":
+            normalized = token.replace("x", ":")
+            if normalized not in ASPECT_RATIOS:
+                raise ValueError
+            return key, normalized
+        if key == "aspect_mode":
+            if token not in {"crop", "fit"}:
+                raise ValueError
+            return key, token
+        if key == "resolution":
+            if token not in RESOLUTION_PRESETS:
+                raise ValueError
+            return key, token
+        if key == "rotation":
+            if not re.fullmatch(r"\d{1,3}", token):
+                raise ValueError
+            rotation = int(token)
+            if rotation not in ROTATIONS:
+                raise ValueError
+            return key, rotation
+        if key == "flip":
+            if token not in FLIP_MODES:
+                raise ValueError
+            return key, token
+        if key in {"speed", "volume", "logo_opacity"}:
+            number = float(token)
+            if not math.isfinite(number):
+                raise ValueError
+            if key == "speed" and number not in SPEED_PRESETS:
+                raise ValueError
+            if key == "volume" and number not in VOLUME_PRESETS:
+                raise ValueError
+            if key == "logo_opacity" and not 0.1 <= number <= 1.0:
+                raise ValueError
+            return key, number
+        if key == "color_preset":
+            if token not in COLOR_PRESETS:
+                raise ValueError
+            return key, token
+        if key == "logo_position":
+            if token not in LOGO_POSITIONS:
+                raise ValueError
+            return key, token
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise LocalVideoEditError("callback_choice_invalid") from exc
+    raise LocalVideoEditError("callback_choice_invalid")
 
 
 def _number(value: Any, default: float = 0.0) -> float:
@@ -134,6 +192,15 @@ def default_manual_edit_plan(input_video: str = "") -> dict[str, Any]:
         "logo_overlay": {},
         "subtitle_file": "",
         "color_preset": "keep",
+        "audio_normalization": "off",
+        "quality_filters": {"sharpen": False, "denoise": False},
+        "local_effects": {
+            "fade_in_ms": 0,
+            "fade_out_ms": 0,
+            "vignette": False,
+            "slow_zoom": False,
+        },
+        "remove_middle": {},
         "output_format": "mp4",
     }
 
@@ -147,7 +214,15 @@ def normalize_manual_edit_plan(
     source_duration_ms = max(0, int(source_duration_ms or 0))
     if source_duration_ms <= 0:
         raise LocalVideoEditError("source_duration_invalid")
-    raw = {**default_manual_edit_plan(), **dict(plan or {})}
+    try:
+        requested = dict(plan or {})
+    except (TypeError, ValueError) as exc:
+        raise LocalVideoEditError("edit_plan_invalid") from exc
+    allowed_fields = set(default_manual_edit_plan())
+    unknown_fields = sorted(set(requested) - allowed_fields)
+    if unknown_fields:
+        raise LocalVideoEditError(f"unknown_edit_plan_field:{unknown_fields[0]}")
+    raw = {**default_manual_edit_plan(), **requested}
     source = str(raw.get("input_video") or "").strip()
     if not source:
         raise LocalVideoEditError("input_video_missing")
@@ -198,6 +273,56 @@ def normalize_manual_edit_plan(
     color = str(raw.get("color_preset") or "keep").strip().lower()
     if color not in COLOR_PRESETS:
         raise LocalVideoEditError("color_preset_invalid")
+    audio_normalization = str(raw.get("audio_normalization") or "off").strip().lower()
+    if audio_normalization not in AUDIO_NORMALIZATION_MODES:
+        raise LocalVideoEditError("audio_normalization_invalid")
+    try:
+        quality = dict(raw.get("quality_filters") or {})
+    except (TypeError, ValueError) as exc:
+        raise LocalVideoEditError("quality_filter_invalid") from exc
+    if set(quality) - QUALITY_FILTER_KEYS or any(type(quality.get(key, False)) is not bool for key in QUALITY_FILTER_KEYS):
+        raise LocalVideoEditError("quality_filter_invalid")
+    quality = {key: bool(quality.get(key, False)) for key in ("sharpen", "denoise")}
+    try:
+        effects = dict(raw.get("local_effects") or {})
+    except (TypeError, ValueError) as exc:
+        raise LocalVideoEditError("local_effect_invalid") from exc
+    if set(effects) - LOCAL_EFFECT_KEYS:
+        raise LocalVideoEditError("local_effect_invalid")
+    if any(type(effects.get(key, False)) is not bool for key in ("vignette", "slow_zoom")):
+        raise LocalVideoEditError("local_effect_invalid")
+    fade_in_ms = _integer(effects.get("fade_in_ms"), 0)
+    fade_out_ms = _integer(effects.get("fade_out_ms"), 0)
+    if fade_in_ms < 0 or fade_out_ms < 0:
+        raise LocalVideoEditError("local_effect_duration_invalid")
+    remove_middle_raw = raw.get("remove_middle") or {}
+    try:
+        remove_middle = dict(remove_middle_raw)
+    except (TypeError, ValueError) as exc:
+        raise LocalVideoEditError("remove_middle_invalid") from exc
+    if remove_middle:
+        if set(remove_middle) != {"start_ms", "end_ms"}:
+            raise LocalVideoEditError("remove_middle_invalid")
+        remove_start_ms = _integer(remove_middle.get("start_ms"), -1)
+        remove_end_ms = _integer(remove_middle.get("end_ms"), -1)
+        if not (start_ms < remove_start_ms < remove_end_ms < end_ms):
+            raise LocalVideoEditError("remove_middle_invalid")
+        remove_middle = {"start_ms": remove_start_ms, "end_ms": remove_end_ms}
+    selected_after_removal_ms = end_ms - start_ms
+    if remove_middle:
+        selected_after_removal_ms -= int(remove_middle["end_ms"]) - int(remove_middle["start_ms"])
+    if (
+        fade_in_ms >= selected_after_removal_ms
+        or fade_out_ms >= selected_after_removal_ms
+        or fade_in_ms + fade_out_ms > selected_after_removal_ms
+    ):
+        raise LocalVideoEditError("local_effect_duration_invalid")
+    effects = {
+        "fade_in_ms": fade_in_ms,
+        "fade_out_ms": fade_out_ms,
+        "vignette": bool(effects.get("vignette", False)),
+        "slow_zoom": bool(effects.get("slow_zoom", False)),
+    }
     text = dict(raw.get("text_overlay") or {})
     if text:
         content = _safe_text(text.get("content"), 260)
@@ -254,6 +379,10 @@ def normalize_manual_edit_plan(
         "logo_overlay": logo,
         "subtitle_file": subtitle_file,
         "color_preset": color,
+        "audio_normalization": audio_normalization,
+        "quality_filters": quality,
+        "local_effects": effects,
+        "remove_middle": remove_middle,
         "output_format": "mp4",
     }
 
@@ -261,8 +390,75 @@ def normalize_manual_edit_plan(
 def expected_manual_duration_ms(plan: dict[str, Any]) -> int:
     trim = dict(plan.get("trim") or {})
     selected = max(0, int(trim.get("end_ms") or 0) - int(trim.get("start_ms") or 0))
+    remove_middle = dict(plan.get("remove_middle") or {})
+    if remove_middle:
+        selected -= max(0, int(remove_middle.get("end_ms") or 0) - int(remove_middle.get("start_ms") or 0))
     speed = max(0.01, float(plan.get("speed") or 1.0))
     return int(round(selected / speed))
+
+
+def required_optional_filters(plan: dict[str, Any], *, has_audio: bool) -> set[str]:
+    """Return every optional FFmpeg filter required by a normalized plan."""
+    required: set[str] = set()
+    quality = dict(plan.get("quality_filters") or {})
+    effects = dict(plan.get("local_effects") or {})
+    audible = bool(has_audio and float(plan.get("volume") or 0) > 0)
+    if quality.get("sharpen"):
+        required.add("unsharp")
+    if quality.get("denoise"):
+        required.add("hqdn3d")
+    if str(plan.get("audio_normalization") or "off") == "loudnorm":
+        if not audible:
+            raise LocalVideoEditError("audio_stream_required_for_loudnorm")
+        required.add("loudnorm")
+    if int(effects.get("fade_in_ms") or 0) or int(effects.get("fade_out_ms") or 0):
+        required.add("fade")
+        if audible:
+            required.add("afade")
+    if effects.get("vignette"):
+        required.add("vignette")
+    if effects.get("slow_zoom"):
+        required.add("zoompan")
+    return required
+
+
+def validate_required_optional_filters(
+    plan: dict[str, Any],
+    *,
+    available_filters: set[str],
+    has_audio: bool,
+) -> None:
+    missing = sorted(required_optional_filters(plan, has_audio=has_audio) - set(available_filters or set()))
+    if missing:
+        raise LocalVideoEditError(f"ffmpeg_filter_unavailable:{missing[0]}")
+
+
+@lru_cache(maxsize=8)
+def available_ffmpeg_filters(ffmpeg_path: str) -> frozenset[str]:
+    """Discover filters from the exact FFmpeg binary used by the worker."""
+    try:
+        result = subprocess.run(
+            [str(ffmpeg_path), "-hide_banner", "-filters"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise LocalVideoEditError("ffmpeg_filter_discovery_failed") from exc
+    if result.returncode != 0:
+        raise LocalVideoEditError("ffmpeg_filter_discovery_failed")
+    discovered: set[str] = set()
+    for line in str(result.stdout or "").splitlines():
+        # FFmpeg 8 prints two flag columns (for example ``TS``/``..``),
+        # while older builds commonly print three.  Parse the capability
+        # token by shape instead of pinning the worker to one FFmpeg release.
+        match = re.match(r"^\s*[A-Z\.]{2,4}\s+([A-Za-z0-9_]+)\s", line)
+        if match:
+            discovered.add(match.group(1))
+    if not discovered:
+        raise LocalVideoEditError("ffmpeg_filter_discovery_empty")
+    return frozenset(discovered)
 
 
 def _target_size(aspect: str, resolution: str, source_width: int, source_height: int) -> tuple[int, int]:
@@ -347,6 +543,8 @@ def build_manual_ffmpeg_command(
     source_probe: dict[str, Any],
     ffmpeg_path: str,
 ) -> list[str]:
+    if plan.get("remove_middle"):
+        raise LocalVideoEditError("remove_middle_requires_timeline_preparation")
     source = str(plan.get("input_video") or "")
     trim = dict(plan.get("trim") or {})
     start_seconds = int(trim.get("start_ms") or 0) / 1000
@@ -396,12 +594,35 @@ def build_manual_ffmpeg_command(
     speed = float(plan.get("speed") or 1.0)
     if speed != 1.0:
         filters.append(f"setpts=PTS/{speed:g}")
+    expected_output_seconds = selected_seconds / max(0.01, speed)
     color = COLOR_PRESETS.get(str(plan.get("color_preset") or "keep"), "")
     if color:
         filters.append(color)
     brightness_percent = int(plan.get("brightness_percent") or 100)
     if brightness_percent != 100:
         filters.append(f"eq=brightness={(brightness_percent - 100) / 200:.3f}")
+    quality = dict(plan.get("quality_filters") or {})
+    if quality.get("denoise"):
+        filters.append("hqdn3d=1.5:1.5:6:6")
+    if quality.get("sharpen"):
+        filters.append("unsharp=5:5:0.8:5:5:0.0")
+    effects = dict(plan.get("local_effects") or {})
+    if effects.get("slow_zoom"):
+        fps = max(1.0, min(60.0, float(source_probe.get("fps") or 30.0)))
+        filters.append(
+            "zoompan=z='min(max(zoom,pzoom)+0.0005,1.08)':"
+            "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"d=1:s={width}x{height}:fps={fps:g}"
+        )
+    if effects.get("vignette"):
+        filters.append("vignette=PI/5")
+    fade_in_seconds = int(effects.get("fade_in_ms") or 0) / 1000
+    fade_out_seconds = int(effects.get("fade_out_ms") or 0) / 1000
+    if fade_in_seconds > 0:
+        filters.append(f"fade=t=in:st=0:d={fade_in_seconds:.3f}")
+    if fade_out_seconds > 0:
+        fade_out_start = max(0.0, expected_output_seconds - fade_out_seconds)
+        filters.append(f"fade=t=out:st={fade_out_start:.3f}:d={fade_out_seconds:.3f}")
     text = _text_filter(dict(plan.get("text_overlay") or {}))
     if text:
         filters.append(text)
@@ -444,12 +665,18 @@ def build_manual_ffmpeg_command(
             audio_filters.append(f"atempo={speed:g}")
         if volume != 1.0:
             audio_filters.append(f"volume={volume:g}")
+        if str(plan.get("audio_normalization") or "off") == "loudnorm":
+            audio_filters.append("loudnorm=I=-16:LRA=11:TP=-1.5")
+        if fade_in_seconds > 0:
+            audio_filters.append(f"afade=t=in:st=0:d={fade_in_seconds:.3f}")
+        if fade_out_seconds > 0:
+            fade_out_start = max(0.0, expected_output_seconds - fade_out_seconds)
+            audio_filters.append(f"afade=t=out:st={fade_out_start:.3f}:d={fade_out_seconds:.3f}")
         if audio_filters:
             command.extend(["-af", ",".join(audio_filters)])
         command.extend(["-c:a", "aac", "-b:a", "160k", "-ar", "48000"])
     else:
         command.append("-an")
-    expected_output_seconds = selected_seconds / max(0.01, speed)
     command.extend([
         "-t", f"{expected_output_seconds:.3f}",
         "-c:v", "libx264",
@@ -566,6 +793,123 @@ def _normalize_concat_inputs(
     return str(concat_output), probe
 
 
+def _prepare_primary_timeline(
+    plan: dict[str, Any],
+    *,
+    source_probe: dict[str, Any],
+    workspace: Path,
+    ffmpeg_path: str,
+    ffprobe_path: str,
+    timeout: int,
+) -> tuple[str, dict[str, Any]]:
+    """Apply primary trim/remove-middle before any append operation."""
+    source = str(plan.get("input_video") or "")
+    trim = dict(plan.get("trim") or {})
+    remove_middle = dict(plan.get("remove_middle") or {})
+    start_ms = int(trim.get("start_ms") or 0)
+    end_ms = int(trim.get("end_ms") or 0)
+    source_duration_ms = int(source_probe.get("duration_ms") or 0)
+    needs_trim = start_ms > 0 or end_ms < source_duration_ms
+    if not needs_trim and not remove_middle:
+        return source, source_probe
+
+    start_seconds = start_ms / 1000
+    end_seconds = end_ms / 1000
+    has_audio = bool(source_probe.get("has_audio"))
+    video_parts: list[str] = []
+    audio_parts: list[str] = []
+    concat_inputs: list[str] = []
+    if remove_middle:
+        remove_start_seconds = int(remove_middle["start_ms"]) / 1000
+        remove_end_seconds = int(remove_middle["end_ms"]) / 1000
+        spans = ((start_seconds, remove_start_seconds), (remove_end_seconds, end_seconds))
+    else:
+        spans = ((start_seconds, end_seconds),)
+    for index, (span_start, span_end) in enumerate(spans):
+        video_parts.append(
+            f"[0:v]trim=start={span_start:.3f}:end={span_end:.3f},"
+            f"setpts=PTS-STARTPTS[v{index}]"
+        )
+        concat_inputs.append(f"[v{index}]")
+        if has_audio:
+            audio_parts.append(
+                f"[0:a]atrim=start={span_start:.3f}:end={span_end:.3f},"
+                f"asetpts=PTS-STARTPTS[a{index}]"
+            )
+            concat_inputs.append(f"[a{index}]")
+    if len(spans) == 1:
+        video_out = "[v0]"
+        audio_out = "[a0]" if has_audio else ""
+        filter_graph = ";".join([*video_parts, *audio_parts])
+    else:
+        video_out = "[v]"
+        audio_out = "[a]" if has_audio else ""
+        filter_graph = ";".join(
+            [
+                *video_parts,
+                *audio_parts,
+                "".join(concat_inputs)
+                + f"concat=n={len(spans)}:v=1:a={1 if has_audio else 0}[v]"
+                + ("[a]" if has_audio else ""),
+            ]
+        )
+    target = workspace / f"primary_timeline_{os.getpid()}.mp4"
+    command = [
+        ffmpeg_path,
+        "-y",
+        "-i",
+        source,
+        "-filter_complex",
+        filter_graph,
+        "-map",
+        video_out,
+    ]
+    if has_audio:
+        command.extend(["-map", audio_out, "-c:a", "aac", "-b:a", "160k", "-ar", "48000"])
+    else:
+        command.append("-an")
+    command.extend(
+        [
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "22",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            "-max_muxing_queue_size",
+            "2048",
+            str(target),
+        ]
+    )
+    try:
+        if target.exists():
+            target.unlink()
+        _run_checked(command, timeout=timeout)
+        expected_duration_ms = end_ms - start_ms
+        if remove_middle:
+            expected_duration_ms -= int(remove_middle["end_ms"]) - int(remove_middle["start_ms"])
+        validation = validate_mp4_output(
+            target,
+            expected_duration_ms=expected_duration_ms,
+            require_audio=has_audio,
+            ffprobe_path=ffprobe_path,
+        )
+        if not validation.get("ok"):
+            raise LocalVideoEditError(str(validation.get("reason") or "primary_timeline_invalid"))
+        prepared_probe = probe_video_file(target, ffprobe_path=ffprobe_path)
+        if not prepared_probe.get("ok"):
+            raise LocalVideoEditError(str(prepared_probe.get("reason") or "primary_timeline_probe_failed"))
+        return str(target), prepared_probe
+    except Exception:
+        if target.exists():
+            target.unlink()
+        raise
+
+
 def execute_manual_edit(
     plan: dict[str, Any],
     *,
@@ -590,8 +934,40 @@ def execute_manual_edit(
     if not source_probe.get("ok"):
         raise LocalVideoEditError(str(source_probe.get("reason") or "input_probe_failed"))
     normalized = normalize_manual_edit_plan(plan, source_duration_ms=int(source_probe.get("duration_ms") or 0), workspace=workspace_path)
+    required_filters = required_optional_filters(normalized, has_audio=bool(source_probe.get("has_audio")))
+    if required_filters:
+        validate_required_optional_filters(
+            normalized,
+            available_filters=set(available_ffmpeg_filters(ffmpeg)),
+            has_audio=bool(source_probe.get("has_audio")),
+        )
     if progress:
         progress({"stage": "preparing_plan", "processed": 0, "total": 1})
+    prepared_primary: Path | None = None
+    primary_trim = dict(normalized.get("trim") or {})
+    primary_needs_preparation = bool(
+        normalized.get("remove_middle")
+        or (
+            normalized.get("concat_inputs")
+            and (
+                int(primary_trim.get("start_ms") or 0) > 0
+                or int(primary_trim.get("end_ms") or 0) < int(source_probe.get("duration_ms") or 0)
+            )
+        )
+    )
+    if primary_needs_preparation:
+        source, source_probe = _prepare_primary_timeline(
+            normalized,
+            source_probe=source_probe,
+            workspace=workspace_path,
+            ffmpeg_path=ffmpeg,
+            ffprobe_path=probe_bin,
+            timeout=timeout,
+        )
+        prepared_primary = Path(source)
+        normalized["input_video"] = source
+        normalized["trim"] = {"start_ms": 0, "end_ms": int(source_probe.get("duration_ms") or 0)}
+        normalized["remove_middle"] = {}
     concat_sources = [normalized["input_video"], *normalized.get("concat_inputs", [])]
     if len(concat_sources) > 1:
         source, source_probe = _normalize_concat_inputs(
@@ -648,6 +1024,8 @@ def execute_manual_edit(
     finally:
         if staging.exists():
             staging.unlink()
+        if prepared_primary is not None and prepared_primary.exists():
+            prepared_primary.unlink()
 
 
 def execute_split_plan(
@@ -747,6 +1125,22 @@ def public_plan_summary(plan: dict[str, Any]) -> list[str]:
         lines.append("Chèn phụ đề SRT")
     if str(plan.get("color_preset") or "keep") != "keep":
         lines.append("Màu: " + str(plan.get("color_preset")))
+    if plan.get("remove_middle"):
+        lines.append("Bỏ đoạn giữa và nối lại thành một MP4")
+    quality = dict(plan.get("quality_filters") or {})
+    if quality.get("sharpen"):
+        lines.append("Làm rõ nhẹ")
+    if quality.get("denoise"):
+        lines.append("Giảm nhiễu nhẹ")
+    if str(plan.get("audio_normalization") or "off") == "loudnorm":
+        lines.append("Cân bằng âm lượng tự động")
+    effects = dict(plan.get("local_effects") or {})
+    if int(effects.get("fade_in_ms") or 0) or int(effects.get("fade_out_ms") or 0):
+        lines.append("Mờ vào / mờ ra")
+    if effects.get("vignette"):
+        lines.append("Viền tối nhẹ")
+    if effects.get("slow_zoom"):
+        lines.append("Zoom chậm")
     if plan.get("concat_inputs"):
         lines.append(f"Ghép {len(plan['concat_inputs']) + 1} video")
     return lines or ["Giữ nguyên hình và âm thanh"]

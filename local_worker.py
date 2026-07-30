@@ -951,8 +951,11 @@ def _aiedit_local_plan(payload: dict, source_path: str) -> dict:
     crop.update({"aspect_ratio": target_aspect, "mode": str(raw.get("crop_or_fit", {}).get("mode") or "fit")})
     plan["crop_or_fit"] = crop
     plan["color_preset"] = str(raw.get("color_preset") or "keep")
-    plan["sharpen"] = bool(raw.get("sharpen"))
-    plan["audio_normalize"] = bool(raw.get("audio_normalize"))
+    plan["quality_filters"] = {
+        "sharpen": bool(raw.get("sharpen")),
+        "denoise": bool(raw.get("denoise")),
+    }
+    plan["audio_normalization"] = "loudnorm" if bool(raw.get("audio_normalize")) else "off"
     return plan
 
 
