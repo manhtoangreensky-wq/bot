@@ -65,6 +65,17 @@ _SCREEN_CALLBACKS = {
     "review": "videoedit|review",
 }
 
+_ALLOWED_PARENT_CALLBACKS = frozenset(
+    {
+        "videoedit|hub",
+        *_LANE_CALLBACKS.values(),
+        *_SCREEN_CALLBACKS.values(),
+        *_SCREEN_PARENTS.values(),
+        "videoedit|options|manual",
+        "videoedit|options|split",
+    }
+)
+
 _COMPATIBILITY_ACTIONS = {
     "manual_info": "manual",
     "split_info": "split_from_manual",
@@ -142,7 +153,7 @@ def safe_parent_callback(value: Any, *, root: bool = False) -> str:
     """Return only a same-product parent or an explicitly allowed root exit."""
 
     callback = str(value or "").strip()
-    if callback.startswith("videoedit|") and callback.removeprefix("videoedit|").strip("|"):
+    if callback in _ALLOWED_PARENT_CALLBACKS:
         return callback
     if root and callback in {"menu|main_video", "menu|main"}:
         return callback
