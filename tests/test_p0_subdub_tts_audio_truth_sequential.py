@@ -362,3 +362,191 @@ def test_subdub_debug_persists_generated_audio_truth():
 
 def test_legacy_dubbing_mux_does_not_use_shortest():
     assert "-shortest" not in inspect.getsource(dubbing_pipeline.mux_final_video)
+
+
+def test_tts_activity_reports_leading_and_trailing_silence(tmp_path):
+    ffmpeg = bot.frame_video_ffmpeg_path()
+    if not ffmpeg:
+        pytest.skip("ffmpeg unavailable")
+    output = tmp_path / "speech-with-boundary-silence.mp3"
+    subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=32000:duration=0.5",
+            "-af",
+            "adelay=250|250,apad=whole_dur=1.100,atrim=duration=1.100",
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "128k",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    metrics = asyncio.run(bot.subdub_audio_activity_metrics(output.read_bytes()))
+
+    assert metrics["ok"] is True
+    assert metrics["leading_silence_seconds"] == pytest.approx(0.25, abs=0.10)
+    assert metrics["trailing_silence_seconds"] == pytest.approx(0.35, abs=0.12)
+
+
+def test_tts_chunks_use_spoken_window_without_cutting_speech(monkeypatch):
+    async def fake_tts(*_args, **_kwargs):
+        return "key4u_minimax", b"valid-audio", "http=200"
+
+    async def fake_qc(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "detail": "speech_activity_ok",
+            "duration": 2.0,
+            "leading_silence_seconds": 0.25,
+            "trailing_silence_seconds": 0.35,
+            "non_silent_seconds": 1.4,
+            "active_ratio": 0.7,
+        }
+
+    monkeypatch.setattr(bot, "video_dubbing_tts_bytes", fake_tts)
+    monkeypatch.setattr(bot, "subdub_validate_tts_audio_bytes", fake_qc)
+
+    result = asyncio.run(
+        bot.synthesize_dub_segment_chunks(
+            [{"index": 1, "start": 0.0, "end": 2.0, "text": "Xin chao"}],
+            voice_id="female-shaonv",
+            allow_admin=True,
+            require_speech_qc=True,
+        )
+    )
+
+    chunk = result["chunks"][0]
+    assert chunk["raw_audio_duration"] == pytest.approx(2.0)
+    assert chunk["trim_start"] == pytest.approx(0.21)
+    assert chunk["trim_end"] == pytest.approx(1.69)
+    assert chunk["audio_duration"] == pytest.approx(1.48)
+
+
+def test_dub_timeline_applies_boundary_trim_before_tempo(monkeypatch):
+    commands = []
+
+    async def fake_run(command, timeout=0):
+        del timeout
+        commands.append(list(command))
+        Path(command[-1]).write_bytes(b"trimmed-sequential-audio")
+        return True, "ok"
+
+    monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(bot, "run_subdub_ffmpeg_command", fake_run)
+
+    output, detail = asyncio.run(
+        bot.build_dub_timeline_audio(
+            [
+                {
+                    "cue_id": "cue-1",
+                    "start": 0.0,
+                    "end": 2.0,
+                    "raw_audio_duration": 2.0,
+                    "audio_duration": 1.48,
+                    "trim_start": 0.21,
+                    "trim_end": 1.69,
+                    "audio_bytes": b"voice",
+                }
+            ],
+            2.0,
+        )
+    )
+
+    assert output == b"trimmed-sequential-audio"
+    assert "sequential=yes" in detail
+    filter_graph = commands[-1][commands[-1].index("-filter_complex") + 1]
+    assert "atrim=start=0.210000:end=1.690000" in filter_graph
+    assert filter_graph.index("atrim=start=0.210000:end=1.690000") < filter_graph.index("afade=t=in")
+
+
+def test_product_pipeline_preserves_timeline_failure_evidence():
+    async def prepare(state):
+        segments = [{"index": 1, "start": 0.0, "end": 2.0, "text": "Xin chao"}]
+        return {
+            "state": state,
+            "source_bytes": b"source-video",
+            "content_type": "video/mp4",
+            "source_segments": segments,
+            "output_segments": segments,
+            "output_script": "Xin chao",
+        }
+
+    async def synthesize(*_args, **_kwargs):
+        return {
+            "provider": "key4u_minimax",
+            "chunks": [
+                {
+                    "index": 1,
+                    "start": 0.0,
+                    "end": 2.0,
+                    "audio_duration": 4.0,
+                    "audio_bytes": b"spoken-audio",
+                    "audio_qc": {"ok": True, "duration": 4.0},
+                }
+            ],
+        }
+
+    async def timeline(*_args, **_kwargs):
+        return b"", "tts_timeline_exceeds_source:required_end=3.478;source_duration=2.000;max_tempo=1.150"
+
+    async def normalize(*_args, **_kwargs):
+        raise AssertionError("normalization must not run without timeline audio")
+
+    async def render(*_args, **_kwargs):
+        raise AssertionError("render must not run without timeline audio")
+
+    result = asyncio.run(
+        subtitle_dub_product_pipeline.process_subtitle_dub_job(
+            mode=bot.VIDEO_SUBTITLE_MODE_DUB,
+            state={"video_duration": 2, "output_type": "video", "target_language": "original"},
+            user_id=42,
+            prepare_subtitles=prepare,
+            srt_from_text=bot.video_dubbing_srt_from_text,
+            segments_from_text=bot.video_dubbing_segments_from_text,
+            segments_from_subtitle=bot.video_dubbing_segments_from_subtitle,
+            subtitle_output_items=lambda *_args: [],
+            resolve_voice_id=lambda *_args: "female-shaonv",
+            parse_voice_speed=lambda *_args: 1.0,
+            synthesize_segments=synthesize,
+            build_timeline_audio=timeline,
+            normalize_audio=normalize,
+            validate_audio=lambda *_args: {"ok": True},
+            render_video=render,
+            video_render_ready=lambda *_args: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "NO_AUDIO_BYTES"
+    assert result["timeline_detail"].startswith("tts_timeline_exceeds_source")
+    assert result["tts_provider"] == "key4u_minimax"
+    assert result["tts_expected_segments"] == 1
+    assert result["tts_generated_segments"] == 1
+    assert result["tts_dropped_segments"] == 0
+
+
+def test_subdub_status_back_returns_to_four_lane_menu_without_ui_copy_change():
+    keyboard = bot.subdub_progress_keyboard("ABC123", "vi")
+
+    assert keyboard.inline_keyboard[1][0].text == "⬅️ Quay lại"
+    assert keyboard.inline_keyboard[1][0].callback_data == "videodub|back_type"
+    assert bot.product_progress_status.product_progress_spec("subdub")["back_callback"] == "videodub|back_type"
+    matching_edges = bot.workflow_graph_contract.build_p0_infra1_workflow_graph().matching_edges("videodub|back_type")
+    assert any(
+        edge.source_node == "subdub_status"
+        and edge.target_node == "subdub_start"
+        and not edge.provider_allowed
+        and not edge.wallet_allowed
+        and not edge.reprocess_allowed
+        for edge in matching_edges
+    )

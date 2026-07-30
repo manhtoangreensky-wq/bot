@@ -387,7 +387,20 @@ async def process_subtitle_dub_job(
                 "provider_called": True,
                 "charged": False,
                 "created_files": [],
+                "state": pipeline_state,
+                "prepared": prepared,
+                "product_type": _product_type_for_mode(mode),
                 "route_attempts": route_attempts,
+                "tts_provider": tts_provider,
+                "tts_chunks": tts_chunks,
+                "tts_expected_segments": tts_expected_segments,
+                "tts_generated_segments": tts_generated_segments,
+                "tts_mixed_segments": 0,
+                "tts_dropped_segments": tts_dropped_segments,
+                "tts_timeline_duration": tts_timeline_duration,
+                "audio_padding_seconds": audio_padding_seconds,
+                "timeline_detail": str(timeline_detail or ""),
+                "tts_cue_qc": [dict(item.get("audio_qc") or {}) for item in tts_chunks],
             }
         audio_bytes, normalization_detail = await _maybe_await(normalize_audio(raw_audio_bytes))
         if not audio_bytes:

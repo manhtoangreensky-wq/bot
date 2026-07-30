@@ -198,6 +198,7 @@ def build_p0_infra1_workflow_graph() -> WorkflowGraph:
         _edge("videodub|type|subtitle_translate", "subdub_start", "subdub_translate_video", "handle_video_dubbing_callback", WorkflowActionType.STATE_UPDATE),
         _edge("videodub|type|dub", "subdub_start", "subdub_dub_video", "handle_video_dubbing_callback", WorkflowActionType.STATE_UPDATE),
         _edge("videodub|type|subtitle_plus_dub", "subdub_start", "subdub_subtitle_dub_video", "handle_video_dubbing_callback", WorkflowActionType.STATE_UPDATE),
+        _edge("videodub|back_type", "subdub_status", "subdub_start", "handle_video_dubbing_callback", WorkflowActionType.STATE_UPDATE),
         _edge("videodub|confirm*", "subdub_confirm", "subdub_status", "handle_video_dubbing_callback", WorkflowActionType.SUBMIT_PROVIDER, provider=True, required=("final_confirmed", "idempotency_key")),
         _edge("videodub|subdub_status|*", "subdub_status", "subdub_status", "handle_video_dubbing_callback", WorkflowActionType.TERMINAL_REFRESH),
         _edge("videodub|delivered|*", "subdub_status", "subdub_delivered", "handle_video_dubbing_callback", WorkflowActionType.DELIVER_ARTIFACT, required=("valid_artifact",)),

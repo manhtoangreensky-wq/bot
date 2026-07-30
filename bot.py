@@ -116851,7 +116851,7 @@ def subdub_back_route_audit_payload() -> dict:
     ]
     return {
         "routes": cases,
-        "status_back_callback": f"videodub|type|{VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}",
+        "status_back_callback": "videodub|back_type",
         "missing_origin_fallback": subdub_missing_origin_back_callback(),
         "missing_origin_count": 0,
     }
@@ -207810,7 +207810,7 @@ def subdub_progress_keyboard(job_id: str = "", lang: str = "vi") -> InlineKeyboa
             InlineKeyboardButton("📤 Gửi video khác" if is_vi else "📤 Send another", callback_data="videodub|source_upload"),
         ],
         [
-            InlineKeyboardButton("⬅️ Phụ đề + Lồng tiếng" if is_vi else "⬅️ Subtitle + Dub", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}"),
+            InlineKeyboardButton("⬅️ Phụ đề + Lồng tiếng" if is_vi else "⬅️ Subtitle + Dub", callback_data="videodub|back_type"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -214717,6 +214717,8 @@ async def subdub_audio_activity_metrics(
             "duration": measured_duration,
             "non_silent_seconds": 0.0,
             "active_ratio": 0.0,
+            "leading_silence_seconds": 0.0,
+            "trailing_silence_seconds": 0.0,
         }
     if not audio_bytes:
         return {
@@ -214725,6 +214727,8 @@ async def subdub_audio_activity_metrics(
             "duration": measured_duration,
             "non_silent_seconds": 0.0,
             "active_ratio": 0.0,
+            "leading_silence_seconds": 0.0,
+            "trailing_silence_seconds": 0.0,
         }
     safe_suffix = str(suffix or ".mp3").lower()
     if safe_suffix not in {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac"}:
@@ -214738,6 +214742,8 @@ async def subdub_audio_activity_metrics(
             "duration": 0.0,
             "non_silent_seconds": 0.0,
             "active_ratio": 0.0,
+            "leading_silence_seconds": 0.0,
+            "trailing_silence_seconds": 0.0,
         }
     with tempfile.TemporaryDirectory(prefix="toanaas_tts_activity_") as tmpdir:
         source_path = os.path.join(tmpdir, f"speech{safe_suffix}")
@@ -214771,6 +214777,8 @@ async def subdub_audio_activity_metrics(
                 "duration": measured_duration,
                 "non_silent_seconds": 0.0,
                 "active_ratio": 0.0,
+                "leading_silence_seconds": 0.0,
+                "trailing_silence_seconds": 0.0,
             }
         except Exception as exc:
             if proc is not None and proc.returncode is None:
@@ -214781,6 +214789,8 @@ async def subdub_audio_activity_metrics(
                 "duration": measured_duration,
                 "non_silent_seconds": 0.0,
                 "active_ratio": 0.0,
+                "leading_silence_seconds": 0.0,
+                "trailing_silence_seconds": 0.0,
             }
         if proc.returncode != 0:
             return {
@@ -214789,9 +214799,11 @@ async def subdub_audio_activity_metrics(
                 "duration": measured_duration,
                 "non_silent_seconds": 0.0,
                 "active_ratio": 0.0,
+                "leading_silence_seconds": 0.0,
+                "trailing_silence_seconds": 0.0,
             }
         probe_text = stderr.decode("utf-8", errors="ignore")
-        silence_seconds = 0.0
+        silence_ranges: list[tuple[float, float]] = []
         silence_start = None
         event_pattern = re.compile(
             r"silence_start:\s*(-?\d+(?:\.\d+)?)|silence_end:\s*(-?\d+(?:\.\d+)?)",
@@ -214804,12 +214816,20 @@ async def subdub_audio_activity_metrics(
             if event.group(2) is None or silence_start is None:
                 continue
             silence_end = max(silence_start, min(measured_duration, float(event.group(2))))
-            silence_seconds += silence_end - silence_start
+            silence_ranges.append((silence_start, silence_end))
             silence_start = None
         if silence_start is not None:
-            silence_seconds += max(0.0, measured_duration - silence_start)
+            silence_ranges.append((silence_start, measured_duration))
+        silence_seconds = sum(max(0.0, end - start) for start, end in silence_ranges)
         silence_seconds = max(0.0, min(measured_duration, silence_seconds))
         non_silent_seconds = max(0.0, measured_duration - silence_seconds)
+        boundary_tolerance = min(0.06, max(0.01, measured_duration * 0.02))
+        leading_silence = 0.0
+        trailing_silence = 0.0
+        if silence_ranges and silence_ranges[0][0] <= boundary_tolerance:
+            leading_silence = max(0.0, min(measured_duration, silence_ranges[0][1]))
+        if silence_ranges and silence_ranges[-1][1] >= measured_duration - boundary_tolerance:
+            trailing_silence = max(0.0, measured_duration - silence_ranges[-1][0])
         return {
             "ok": True,
             "detail": "audio_decoded",
@@ -214817,6 +214837,8 @@ async def subdub_audio_activity_metrics(
             "silence_seconds": silence_seconds,
             "non_silent_seconds": non_silent_seconds,
             "active_ratio": non_silent_seconds / measured_duration if measured_duration > 0 else 0.0,
+            "leading_silence_seconds": leading_silence,
+            "trailing_silence_seconds": trailing_silence,
         }
 
 
@@ -214962,7 +214984,16 @@ async def synthesize_dub_segment_chunks(
                 f"tts_segment_invalid:{segment_index}:"
                 f"{audio_qc.get('detail') or 'audio_qc_failed'}"
             )
-        duration = float(audio_qc.get("duration") or 0.0)
+        raw_duration = max(0.0, float(audio_qc.get("duration") or 0.0))
+        leading_silence = max(0.0, min(raw_duration, float(audio_qc.get("leading_silence_seconds") or 0.0)))
+        trailing_silence = max(0.0, min(raw_duration, float(audio_qc.get("trailing_silence_seconds") or 0.0)))
+        trim_padding = 0.04
+        trim_start = max(0.0, leading_silence - trim_padding) if leading_silence else 0.0
+        trim_end = min(raw_duration, raw_duration - trailing_silence + trim_padding) if trailing_silence else raw_duration
+        if trim_end - trim_start < 0.06:
+            trim_start = 0.0
+            trim_end = raw_duration
+        duration = max(0.0, trim_end - trim_start)
         providers.append(provider)
         chunks.append({
             "index": segment_index,
@@ -214970,7 +215001,10 @@ async def synthesize_dub_segment_chunks(
             "end": end,
             "text": text,
             "audio_bytes": bytes(audio_bytes),
-            "audio_duration": float(duration or 0),
+            "raw_audio_duration": raw_duration,
+            "trim_start": trim_start,
+            "trim_end": trim_end,
+            "audio_duration": duration,
             "speed": round(speed, 3),
             "provider": provider,
             "detail": sanitize_log_text(str(detail or ""))[:180],
@@ -215123,13 +215157,23 @@ async def build_dub_timeline_audio(chunks: list[dict], total_duration: float = 0
             tempo_ratio = max(1.0, float(item.get("tempo_ratio") or 1.0))
             fade_duration = min(0.008, scheduled_duration / 4.0)
             fade_out_start = max(0.0, scheduled_duration - fade_duration)
-            chain = [
+            chain = []
+            raw_audio_duration = max(0.0, float(item.get("raw_audio_duration") or 0.0))
+            trim_start = max(0.0, float(item.get("trim_start") or 0.0))
+            trim_end = max(trim_start, float(item.get("trim_end") or raw_audio_duration or 0.0))
+            if raw_audio_duration > 0 and trim_end > trim_start:
+                trim_end = min(raw_audio_duration, trim_end)
+                chain.extend([
+                    f"atrim=start={trim_start:.6f}:end={trim_end:.6f}",
+                    "asetpts=PTS-STARTPTS",
+                ])
+            chain.extend([
                 "aformat=sample_fmts=fltp:sample_rates=32000:channel_layouts=mono",
                 *subdub_atempo_filters(tempo_ratio),
                 f"afade=t=in:st=0:d={fade_duration:.6f}",
                 f"afade=t=out:st={fade_out_start:.6f}:d={fade_duration:.6f}",
                 "asetpts=PTS-STARTPTS",
-            ]
+            ])
             cue_label = f"cue_{index}"
             filters.append(f"[{index}:a]{','.join(chain)}[{cue_label}]")
             sequence_labels.append(f"[{cue_label}]")
@@ -216154,7 +216198,24 @@ async def _execute_video_dubbing_pipeline_core(
         }
 
     if not product_result.get("ok"):
-        detail = sanitize_log_text(str(product_result.get("admin_debug_summary") or product_result.get("error_code") or ""))[:160]
+        state.update(dict(product_result.get("state") or {}))
+        timeline_failure_detail = sanitize_log_text(str(product_result.get("timeline_detail") or ""))[:180]
+        if timeline_failure_detail:
+            state.update({
+                "tts_timeline_detail": timeline_failure_detail,
+                "tts_expected_segments": int(product_result.get("tts_expected_segments") or 0),
+                "tts_generated_segments": int(product_result.get("tts_generated_segments") or 0),
+                "tts_mixed_segments": int(product_result.get("tts_mixed_segments") or 0),
+                "tts_dropped_segments": int(product_result.get("tts_dropped_segments") or 0),
+                "tts_timeline_duration": float(product_result.get("tts_timeline_duration") or 0.0),
+                "tts_cue_qc": list(product_result.get("tts_cue_qc") or []),
+            })
+        detail = sanitize_log_text(str(
+            product_result.get("admin_debug_summary")
+            or timeline_failure_detail
+            or product_result.get("error_code")
+            or ""
+        ))[:180]
         status = str(product_result.get("status") or "NO_OUTPUT_BYTES")
         current_voice_resolution = dict(voice_resolution_for_debug or state.get("_subdub_voice_resolution") or {})
         if (
