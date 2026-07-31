@@ -8,6 +8,11 @@
 
 **Tech Stack:** Python 3.11, python-telegram-bot callback handlers, SQLite job/outbox contracts, local worker, FFmpeg/ffprobe, pytest.
 
+**Interaction-reference boundary:** CapCut may inform only the familiar grouping
+of simple tools and the short select → review → run flow. Do not copy its
+timeline, keyframes, templates/assets, cloud AI, or app-only gestures into the
+Telegram bot.
+
 ---
 
 ## Research alignment and explicit deferrals
@@ -263,7 +268,7 @@ git commit -m "fix(video-edit): route legacy actions to real local tools"
         ("videoedit|manual_join", "videoedit|workspace"),
         ("videoedit|concat", "videoedit|join"),
         ("videoedit|reorder", "videoedit|join"),
-        ("videoedit|manual_rotate_flip", "videoedit|workspace"),
+        ("videoedit|manual_rotate_flip", "videoedit|transform"),
         ("videoedit|rotation", "videoedit|transform"),
         ("videoedit|manual_audio", "videoedit|workspace"),
         ("videoedit|audio_custom", "videoedit|audio"),
@@ -506,6 +511,11 @@ Expected failures: review enters `video_tail9`, submit rejects `price_xu <= 0`, 
 
 `videoedit|review` renders a Video Edit-specific summary. `videoedit|confirm_local` is the only creation edge and requires source, inspection, review state and unchanged revision.
 
+Intercept legacy `video_tail|` callbacks while their owner/route marker is
+Video Edit and migrate them to the canonical local Review/Status screen before
+any commercial invoice or balance gate. Stale markers without a source must
+show upload recovery and must not create editor state or enter Product Video.
+
 Call `video_editengine1.create_job` with:
 
 ```python
@@ -570,6 +580,18 @@ Run only transaction tests and record each expected failure reason.
 Store a bounded list of handled callback IDs only around the final confirm edge. Commit screen state after successful Telegram rendering. Preserve the database idempotency key as the authoritative duplicate guard. Status callbacks read the existing job and never submit, charge or deliver.
 
 For navigation callbacks, derive a candidate state first, render the candidate view, and persist it only after the Telegram edit/reply succeeds. Do not leave state on `brightness`, `await_*`, review or another child after a keyboard/render exception.
+
+Keep rollback local to `handle_video_editor_callback`; do not extend the shared
+Product Video failure guard. A successful Video Edit route must order its
+transaction as Telegram render → state commit/deletion → callback answer.
+
+Before queue insertion, require a non-empty matching worker/filter worker ID,
+matching normalized worker/filter FFmpeg path, valid local mode, an observable
+operation or structurally valid split ranges, and non-negative exact price
+truth. Duplicate idempotency hits must also match chat, tier, price, and tail.
+The final receipt must carry positive duration/dimensions, MP4 container, H.264,
+hash/size, Telegram IDs, and exact `free_local_tool` / `not_required_free` /
+`charged_xu=0` fields.
 
 - [ ] **Step 4: Verify GREEN and no fake success**
 

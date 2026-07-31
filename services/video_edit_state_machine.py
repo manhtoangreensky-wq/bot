@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Mapping
 
 
@@ -63,6 +64,32 @@ _SCREEN_CALLBACKS = {
     "effects": "videoedit|effects",
     "source_info": "videoedit|source_info",
     "review": "videoedit|review",
+    "confirmation": "videoedit|confirmation",
+}
+
+_PENDING_RESUME_CALLBACKS = {
+    "trim_edges": "videoedit|trim_edges",
+    "trim_range": "videoedit|trim_range",
+    "remove_middle": "videoedit|remove_middle",
+    "split_fixed": "videoedit|split_fixed",
+    "split_count": "videoedit|split_count",
+    "split_custom": "videoedit|split_custom",
+    "concat": "videoedit|concat",
+    "concat_order": "videoedit|reorder",
+    "text_overlay": "videoedit|text_overlay",
+    "logo": "videoedit|logo",
+    "srt": "videoedit|srt",
+}
+
+_SCREEN_RESUME_CALLBACKS = {
+    "choose_aspect": "videoedit|aspect",
+    "choose_resolution": "videoedit|resolution",
+    "choose_rotation": "videoedit|rotation",
+    "choose_flip": "videoedit|flip",
+    "choose_speed": "videoedit|speed",
+    "choose_volume": "videoedit|volume",
+    "choose_color_preset": "videoedit|color_preset",
+    "rotation_value": "videoedit|transform",
 }
 
 _ALLOWED_PARENT_CALLBACKS = frozenset(
@@ -71,8 +98,12 @@ _ALLOWED_PARENT_CALLBACKS = frozenset(
         *_LANE_CALLBACKS.values(),
         *_SCREEN_CALLBACKS.values(),
         *_SCREEN_PARENTS.values(),
+        *_PENDING_RESUME_CALLBACKS.values(),
+        *_SCREEN_RESUME_CALLBACKS.values(),
         "videoedit|options|manual",
         "videoedit|options|split",
+        "videoedit|ai_source",
+        "videoedit|quality_source",
     }
 )
 
@@ -139,6 +170,18 @@ _REQUESTED_GROUPS = {
     "review": "review",
 }
 
+_REQUESTED_GROUP_SCREENS = {
+    "cut": "cut",
+    "join": "join",
+    "frame": "frame",
+    "resolution": "resolution",
+    "audio": "audio",
+    "effects": "effects",
+    "overlay": "overlay",
+    "color": "color",
+    "review": "review",
+}
+
 
 def normalize_edit_mode(value: Any) -> str:
     mode = str(value or "").strip().lower()
@@ -147,6 +190,12 @@ def normalize_edit_mode(value: Any) -> str:
 
 def lane_callback(edit_mode: Any) -> str:
     return _LANE_CALLBACKS.get(normalize_edit_mode(edit_mode), "videoedit|hub")
+
+
+def requested_group_screen(value: Any) -> str:
+    """Return the exact post-upload screen for one legacy requested group."""
+
+    return _REQUESTED_GROUP_SCREENS.get(str(value or "").strip().lower(), "")
 
 
 def safe_parent_callback(value: Any, *, root: bool = False) -> str:
@@ -175,10 +224,37 @@ def parent_matrix() -> dict[str, str]:
     return dict(_SCREEN_PARENTS)
 
 
+def confirmation_token(edit_session_id: Any, review_revision: Any) -> str:
+    """Return a short opaque token for one review revision.
+
+    Telegram callback data must not carry the raw session identifier.  Binding
+    the token to both values prevents an old confirmation button from
+    submitting a later plan that happens to be in the same user state slot.
+    """
+
+    session = str(edit_session_id or "").strip()
+    try:
+        revision = int(review_revision or 0)
+    except (TypeError, ValueError):
+        revision = 0
+    material = f"videoedit-confirm-v1:{session}:{revision}".encode("utf-8")
+    return hashlib.sha256(material).hexdigest()[:16]
+
+
 def screen_callback(screen: Any) -> str:
     """Return the canonical callback that re-renders an existing screen."""
 
     return _SCREEN_CALLBACKS.get(str(screen or "").strip().lower(), "videoedit|workspace")
+
+
+def resume_callback(screen: Any, pending_field: Any = "") -> str:
+    """Return the exact callback that can reconstruct an interrupted input."""
+
+    pending = str(pending_field or "").strip().lower()
+    if pending in _PENDING_RESUME_CALLBACKS:
+        return _PENDING_RESUME_CALLBACKS[pending]
+    key = str(screen or "").strip().lower()
+    return _SCREEN_RESUME_CALLBACKS.get(key, screen_callback(key))
 
 
 def canonical_compatibility_action(value: Any) -> str:

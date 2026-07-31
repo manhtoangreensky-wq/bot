@@ -36,7 +36,7 @@ MAX_OUTPUT_WIDTH = 1920
 MAX_OUTPUT_HEIGHT = 1920
 
 ALLOWED_SOURCE_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
-ALLOWED_LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+ALLOWED_LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 ALLOWED_SUBTITLE_EXTENSIONS = {".srt"}
 ALLOWED_OUTPUT_EXTENSIONS = {".mp4"}
 FORBIDDEN_DELIVERY_EXTENSIONS = {".db", ".sqlite", ".sqlite3", ".env", ".log", ".bak"}

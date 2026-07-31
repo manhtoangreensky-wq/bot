@@ -20,7 +20,11 @@ def _function_source(name: str) -> str:
     start = BOT_SOURCE.find(async_marker)
     if start < 0:
         start = BOT_SOURCE.index(sync_marker)
-    candidates = [BOT_SOURCE.find("\ndef ", start + 1), BOT_SOURCE.find("\nasync def ", start + 1)]
+    candidates = [
+        BOT_SOURCE.find("\ndef ", start + 1),
+        BOT_SOURCE.find("\nasync def ", start + 1),
+        BOT_SOURCE.find("\n@", start + 1),
+    ]
     ends = [position for position in candidates if position >= 0]
     return BOT_SOURCE[start:min(ends) if ends else len(BOT_SOURCE)]
 
@@ -147,11 +151,12 @@ def test_video_brightness_is_visible_and_reaches_ffmpeg() -> None:
 
 def test_video_edit_callback_answer_failure_cannot_surface_generic_x() -> None:
     callback = _function_source("handle_video_editor_callback")
-    prologue = callback[: callback.index("    uid = query.from_user.id")]
-    assert "try:" in prologue
-    assert "await query.answer()" in prologue
-    assert "except Exception as exc:" in prologue
-    assert "videoedit callback answer skipped" in prologue
+    prologue = callback[: callback.index('    parts = str(query.data or "").split')]
+    assert "await query.answer()" not in prologue
+    safe_render = _function_source("safe_edit_or_send")
+    assert "await query.answer()" in safe_render
+    assert "videoedit callback answer skipped" in safe_render
+    assert "videoedit_telegram_render_failed" in safe_render
     assert "Có lỗi khi xử lý lệnh" not in callback
 
 

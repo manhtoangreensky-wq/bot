@@ -12,6 +12,8 @@ from services import video_edit_state_machine as machine
         "videoedit|manual",
         "videoedit|ai",
         "videoedit|restore",
+        "videoedit|ai_source",
+        "videoedit|quality_source",
         "videoedit|workspace",
         "videoedit|cut",
         "videoedit|split",
@@ -24,6 +26,7 @@ from services import video_edit_state_machine as machine
         "videoedit|effects",
         "videoedit|source_info",
         "videoedit|review",
+        "videoedit|confirmation",
         "videoedit|options|manual",
         "videoedit|options|split",
     ],
@@ -51,3 +54,16 @@ def test_videoedit_declared_parent_matrix_only_uses_allowed_callbacks() -> None:
     for parent in machine.parent_matrix().values():
         assert machine.safe_parent_callback(parent) == parent
 
+
+def test_confirmation_token_binds_session_and_review_revision_without_exposing_session_id() -> None:
+    first = machine.confirmation_token("session-secret-a", 3)
+    duplicate = machine.confirmation_token("session-secret-a", 3)
+    changed_revision = machine.confirmation_token("session-secret-a", 4)
+    changed_session = machine.confirmation_token("session-secret-b", 3)
+
+    assert first == duplicate
+    assert len(first) == 16
+    assert all(character in "0123456789abcdef" for character in first)
+    assert first != changed_revision
+    assert first != changed_session
+    assert "session-secret" not in first

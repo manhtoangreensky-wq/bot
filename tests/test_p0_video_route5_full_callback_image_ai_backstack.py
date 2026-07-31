@@ -22,7 +22,7 @@ def _function_source(name: str) -> str:
     start = min(position for position in positions if position >= 0)
     candidates = [
         position
-        for marker in ("\ndef ", "\nasync def ")
+        for marker in ("\ndef ", "\nasync def ", "\n@")
         if (position := BOT_SOURCE.find(marker, start + 1)) >= 0
     ]
     return BOT_SOURCE[start:min(candidates) if candidates else len(BOT_SOURCE)]

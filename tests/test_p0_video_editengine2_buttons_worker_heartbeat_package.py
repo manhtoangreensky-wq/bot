@@ -71,24 +71,18 @@ def _runtime(**overrides) -> dict:
 def test_video_edit_review_has_only_exact_product_buttons() -> None:
     section = _section(
         BOT_SOURCE,
-        "def video_tail9_video_edit_review_keyboard",
-        "def video_tail9_video_edit_operations_text",
+        "def video_local_review_keyboard",
+        "def video_editor_menu_text",
     )
     expected = {
-        "video_tail|review|operations",
-        "video_tail|review|edit_operation",
-        "video_tail|audio|open",
-        "video_tail|review|source",
-        "video_tail|logo|open",
-        "video_tail|summary|open",
-        "video_tail|review|back",
+        "videoedit|confirmation",
+        "videoedit|workspace",
+        "videoedit|confirm_local",
+        "videoedit|review",
         "menu|main",
     }
     assert all(callback in section for callback in expected)
-    assert "video_tail|quality|open" not in section
-    assert "review|scenes" not in section
-    assert "review|prompts" not in section
-    assert "review|redo" not in section
+    assert "video_tail|" not in section
 
 
 def test_video_edit_review_describes_cut_without_claiming_brightness() -> None:
@@ -123,13 +117,14 @@ def test_custom_brightness_200_keeps_video_edit_session_and_opens_review(monkeyp
         "source_duration_ms": 4_000,
     }
     saved: dict = {}
-    rendered: list[tuple[int, str, str]] = []
+    replies: list[tuple[str, dict]] = []
 
     class Message:
         text = "200"
 
-        async def reply_text(self, *_args, **_kwargs):
-            raise AssertionError("valid brightness must route directly to Video Edit Review")
+        async def reply_text(self, text: str, **kwargs):
+            replies.append((text, kwargs))
+            return True
 
     def update_pending(_uid: int, step: str = "", **fields) -> dict:
         saved.clear()
@@ -138,15 +133,10 @@ def test_custom_brightness_200_keeps_video_edit_session_and_opens_review(monkeyp
         saved["step"] = step
         return dict(saved)
 
-    async def render(target, user_id: int, _context, screen: str):
-        rendered.append((user_id, screen, str(getattr(target, "text", ""))))
-        return True
-
     monkeypatch.setattr(bot, "get_video_editor_pending", lambda _uid: dict(state))
     monkeypatch.setattr(bot, "update_video_editor_pending", update_pending)
     monkeypatch.setattr(bot, "clear_video_editor_competing_video_states", lambda *_args: {})
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
-    monkeypatch.setattr(bot, "video_tail9_render", render)
 
     update = SimpleNamespace(
         effective_user=SimpleNamespace(id=uid),
@@ -160,7 +150,16 @@ def test_custom_brightness_200_keeps_video_edit_session_and_opens_review(monkeyp
     assert saved["manual_edit_plan"]["brightness_percent"] == 200
     assert saved["current_screen"] == "review"
     assert saved["return_to"] == "brightness"
-    assert rendered == [(uid, "review", "200")]
+    assert len(replies) == 1
+    text, kwargs = replies[0]
+    assert "Xem lại kế hoạch chỉnh sửa local" in text
+    assert "0 Xu" in text
+    callbacks = [
+        button.callback_data
+        for row in kwargs["reply_markup"].inline_keyboard
+        for button in row
+    ]
+    assert callbacks == ["videoedit|confirmation", "videoedit|workspace", "menu|main"]
 
 
 def test_cut_input_keeps_cut_back_target_instead_of_default_brightness(monkeypatch) -> None:
@@ -237,9 +236,12 @@ def test_brightness_200_routes_directly_to_video_edit_review() -> None:
     assert '"brightness_percent": percent' in route
     assert '"operation": "brightness"' in route
     assert 'current_screen="review"' in route
-    assert 'return await video_tail9_render(query, uid, context, "review")' in route
-    review = _section(section, 'if action == "review":', 'if action == "start":')
-    assert 'video_tail9_render(query, uid, context, "review")' in review
+    assert 'video_local_confirmation_text(current, lang, stage="review")' in route
+    assert 'video_local_review_keyboard("manual", lang)' in route
+    assert "video_tail9_render" not in route
+    review = _section(section, 'if action == "review":', 'if action == "confirmation":')
+    assert 'video_local_confirmation_text(current, lang, stage="review")' in review
+    assert "video_tail9_render" not in review
 
 
 def test_video_intake_preserves_canonical_owner_and_source_state() -> None:
@@ -435,10 +437,17 @@ def test_create_job_stamps_worker_contract_even_when_caller_omits_it(tmp_path) -
         source_file_id="telegram-source",
         source_metadata={"ok": True, "duration_ms": 4_000, "has_audio": True},
         plan={"input_video": "source.mp4", "brightness_percent": 120},
-        tail={"quality_tier_id": "200"},
+        tail={"quality_tier_id": "200", "pricing_snapshot": {"total_xu": 200}},
         quality_tier_id="200",
         price_xu=200,
-        worker_payload={"local1_contract": 1, "source_file_id": "telegram-source"},
+        worker_payload={
+            "local1_contract": 1,
+            "source_file_id": "telegram-source",
+            "provider_call": False,
+            "charge_policy": "after_valid_mp4_delivery",
+            "price_xu": 200,
+            "quoted_price_xu": 200,
+        },
     )
     payload = json.loads(
         conn.execute(

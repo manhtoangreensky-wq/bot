@@ -121,7 +121,7 @@ def test_videoedit_workspace_exposes_every_real_local_group() -> None:
         ("videoedit|split_from_manual", "videoedit|cut"),
         ("videoedit|manual_join", "videoedit|workspace"),
         ("videoedit|concat", "videoedit|join"),
-        ("videoedit|manual_rotate_flip", "videoedit|workspace"),
+        ("videoedit|manual_rotate_flip", "videoedit|transform"),
         ("videoedit|rotation", "videoedit|transform"),
         ("videoedit|manual_audio", "videoedit|workspace"),
         ("videoedit|audio_custom", "videoedit|audio"),
@@ -147,4 +147,3 @@ def test_videoedit_source_info_returns_to_exact_join_caller() -> None:
         assert "videoedit|join" in _callbacks(_last_markup(query))
     finally:
         bot.clear_video_editor_pending(user_id)
-

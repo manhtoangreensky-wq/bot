@@ -20,6 +20,12 @@ The approved direction is a canonical local-first editor:
   SubDub, Frame Video, the top-level Video menu, shared product callbacks,
   Railway/VPS configuration, or another product's UI/UX.
 
+CapCut is used only as lightweight workflow inspiration: group familiar tools
+by Cut, Join, Frame, Transform, Audio, Color, Overlay, and Effects; show a short
+review before execution; keep one button to one action. This Telegram product
+does not copy an app timeline, keyframes, template/asset stores, cloud AI, or
+desktop/mobile interaction patterns that cannot work truthfully in chat.
+
 The implementation base is `origin/main` at
 `74f27da2d1d6227080931b881b59d2c6d121b495`.
 
@@ -249,6 +255,16 @@ When no source exists, compatibility callbacks request upload and persist the
 requested group. When a valid source exists, they open the exact group. They do
 not build duplicate callback rows and do not display the obsolete editor.
 
+Old generic `video_tail|` messages marked as Video Edit never re-enter the
+commercial invoice path. They return to the canonical local Review/Status
+screen before any balance, invoice, provider, or paid-submit check. A stale
+Video Edit route marker with no source shows the upload recovery screen without
+resurrecting deleted editor state or falling into Product Video.
+
+That compatibility branch is restricted to an exact `owner == "video_edit"`
+or persisted Video Edit route marker. It does not change routing, state, price,
+or submission behavior for any other shared-tail owner.
+
 ## Local confirmation, job, and accounting
 
 Video Edit uses a dedicated local confirmation view and does not enter the
@@ -271,11 +287,20 @@ requires a validated source, bounded workspace, FFmpeg/ffprobe, valid MP4 output
 and Telegram delivery receipt. A zero-priced delivered job records `charged_xu=0`
 without invoking wallet mutation. Failure records `failed_no_charge`.
 
+Admission requires the filter snapshot to name the same non-empty worker ID and
+the same normalized FFmpeg path as the executor heartbeat. Final receipts must
+include a positive duration, dimensions, MP4 container identity, H.264 video,
+hash/size, Telegram IDs, and exact free-charge truth. Missing or contradictory
+evidence fails closed before success is persisted.
+
 The shared `services/video_tail9.py` contract is not modified by this task.
 
 ## Error and transaction semantics
 
 - UI state is committed only after the Telegram edit/reply succeeds.
+- Video Edit uses its own state rollback guard; the shared Product Video
+  failure guard is not made responsible for Video Edit state.
+- Successful callback order is render → commit/delete state → answer callback.
 - Final confirmation uses an idempotency key and a callback claim; retries return
   the existing job/status and cannot create a second job.
 - Invalid media keeps the intake active with a Vietnamese corrective message.

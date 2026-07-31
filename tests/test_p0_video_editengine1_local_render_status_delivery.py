@@ -92,6 +92,9 @@ def _create(conn: sqlite3.Connection, *, session: str = "edit-session-1") -> dic
             "source_video_hash": "c" * 64,
             "manual_edit_plan": state["manual_edit_plan"],
             "provider_call": False,
+            "charge_policy": "after_valid_mp4_delivery",
+            "price_xu": 100,
+            "quoted_price_xu": 100,
         },
     )
 
@@ -101,7 +104,7 @@ def _receipt() -> dict:
         "delivery_message_id": "9001",
         "delivery_file_id": "telegram-output-file",
         "source_video_path": "source.mp4",
-        "source_sha256": "a" * 64,
+        "source_sha256": "c" * 64,
         "output_path": "toan_aas_video_edit_1.mp4",
         "output_sha256": "b" * 64,
         "output_size_bytes": 4096,
@@ -112,7 +115,14 @@ def _receipt() -> dict:
             "video_codec": "h264",
             "audio_codec": "aac",
             "duration_ms": 4_000,
+            "width": 640,
+            "height": 360,
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
         },
+        "output_count": 1,
+        "charge_policy": "after_valid_mp4_delivery",
+        "charge_status": "pending_post_delivery",
+        "charged_xu": 0,
     }
 
 
@@ -318,6 +328,32 @@ def test_editengine1_delivery_receipt_and_charge_are_once_only() -> None:
     assert duplicate["charged_xu"] == 100
 
 
+def test_editengine1_rejects_a_charge_result_with_the_wrong_amount() -> None:
+    conn = _conn()
+    created = _create(conn)
+    worker_job_id = created["local_worker_job_id"]
+    video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"validation": "passed"},
+        receipt=_receipt(),
+    )
+    assert video_editengine1.claim_charge(conn, worker_job_id=worker_job_id) is True
+
+    result = video_editengine1.mark_charge_result(
+        conn,
+        worker_job_id=worker_job_id,
+        ok=True,
+        charged_xu=99,
+    )
+
+    assert result["status"] == "delivered"
+    assert result["charge_state"] == "charge_failed"
+    assert result["charged_xu"] == 0
+    assert result["blocker"] == "charge_amount_mismatch"
+
+
 def test_editengine1_worker_failure_is_terminal_no_charge() -> None:
     conn = _conn()
     created = _create(conn)
@@ -469,7 +505,7 @@ def test_editengine1_worker_renders_and_delivers_one_real_mp4(tmp_path: Path, mo
 
     def fake_delivery(chat_id: str, output_path: str, caption: str = "", **_kwargs) -> dict:
         deliveries.append({"chat_id": chat_id, "output_path": output_path, "caption": caption})
-        return {"sent": True, "message_id": "delivery-901", "file_id": "telegram-output-901"}
+        return {"sent": True, "message_id": "901", "file_id": "telegram-output-901"}
 
     def capture_update(job_id, status: str, error_short: str = "", output_url: str = "", output_file_id: str = "", **_kwargs) -> None:
         updates.append({
@@ -508,11 +544,16 @@ def test_editengine1_worker_renders_and_delivers_one_real_mp4(tmp_path: Path, mo
             "engine_route": video_editengine1.ENGINE_ROUTE,
             "worker_owner": video_editengine1.OUTBOX_OWNER,
             "worker_capability": video_editengine1.WORKER_CAPABILITY,
+            "local1_mode": "manual",
             "source_file_id": "source-telegram-file",
             "source_file_name": "source.mp4",
             "chat_id": "88",
             "manual_edit_plan": plan,
             "price_xu": 300,
+            "quoted_price_xu": 300,
+            "quality_tier_id": "300",
+            "charge_policy": "after_valid_mp4_delivery",
+            "provider_call": False,
             "max_render_seconds": 45,
         }),
     })
@@ -523,7 +564,7 @@ def test_editengine1_worker_renders_and_delivers_one_real_mp4(tmp_path: Path, mo
     assert terminal["output_file_id"] == "telegram-output-901"
     assert json.loads(terminal["detail"])["validation"] == "passed"
     receipt = json.loads(terminal["output_url"])
-    assert receipt["delivery_message_id"] == "delivery-901"
+    assert receipt["delivery_message_id"] == "901"
     assert receipt["delivery_file_id"] == "telegram-output-901"
     assert receipt["ffprobe"]["ok"] is True
     assert receipt["ffprobe"]["video_codec"] == "h264"
@@ -666,8 +707,9 @@ def test_editengine1_worker_receipt_contains_real_delivery_and_validation_truth(
     source = WORKER_SOURCE[start:end]
     for required in (
         "telegram_send_video_receipt(",
-        'delivery.get("message_id")',
-        'delivery.get("file_id")',
+        "telegram_delivery_identity(delivery)",
+        '"message_id": message_id',
+        '"file_id": file_id',
         '"output_sha256"',
         '"output_size_bytes"',
         '"ffprobe"',

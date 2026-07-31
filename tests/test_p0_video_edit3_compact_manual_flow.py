@@ -75,7 +75,7 @@ def test_edit3_manual_submenus_are_complete_and_back_one_screen() -> None:
     assert all(callback in rotate for callback in (
         "videoedit|rotation",
         "videoedit|flip",
-        "videoedit|workspace",
+        "videoedit|transform",
     ))
     split = _between("def video_local_split_options_keyboard", "def video_local_choice_keyboard")
     assert all(callback in split for callback in (
@@ -87,7 +87,7 @@ def test_edit3_manual_submenus_are_complete_and_back_one_screen() -> None:
 
 def test_edit3_entry_clears_stale_product_video_session() -> None:
     handler = _between("async def handle_video_editor_callback", "async def handle_video_upload_callback")
-    hub = handler[handler.index('if raw_action in {"hub", "menu"}'):handler.index("requested_group = video_edit_state_machine.requested_group(raw_action)")]
+    hub = handler[handler.index('if raw_action == "hub":'):handler.index('if raw_action == "menu":')]
     assert hub.index("clear_video_session(uid)") < hub.index("clear_video_editor_pending(uid)")
     manual = handler[handler.index('if action == "manual"'):handler.index("state = dict(get_video_editor_pending(uid) or {})", handler.index('if action == "manual"'))]
     assert manual.index("clear_video_session(uid)") < manual.index("clear_video_editor_pending(uid)")

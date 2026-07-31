@@ -124,7 +124,7 @@ CAPABILITIES = (
     _capability(
         "audio_master_volume",
         "Âm lượng tổng",
-        "Chỉnh toàn bộ âm thanh gốc ở mức 20, 40, 60, 80, 100% hoặc mức tùy chọn.",
+        "Tắt tiếng hoặc chỉnh toàn bộ âm thanh gốc ở mức 20, 40, 60, 80, 100% hay mức tùy chọn.",
         section="audio",
         execution_owner="video_local_editing",
         local_or_provider="local",
@@ -164,8 +164,8 @@ CAPABILITIES = (
     ),
     _capability(
         "aspect_basic_crop",
-        "Crop theo khung",
-        "Crop hình học theo tỉ lệ đã chọn; không gọi là theo dõi chủ thể.",
+        "Cắt theo khung",
+        "Cắt hình theo tỉ lệ đã chọn; không gọi là theo dõi chủ thể.",
         section="aspect",
         execution_owner="video_local_editing",
         local_or_provider="local",
@@ -224,6 +224,17 @@ CAPABILITIES = (
         cost_policy="0 Xu",
     ),
     _capability(
+        "enhance_resolution_normalize",
+        "Chuẩn hóa độ phân giải",
+        "Đưa video về chuẩn 1080p local khi cần; đây là scale hình học, không phải AI upscale.",
+        section="restore",
+        execution_owner="video_local_editing",
+        local_or_provider="local",
+        enabled=True,
+        cost_policy="0 Xu",
+        risk_notes="Không tạo thêm chi tiết mới và không được gọi là nâng cấp AI.",
+    ),
+    _capability(
         "enhance_denoise",
         "Giảm nhiễu và nén vỡ",
         "Giảm nhiễu và artifact do nén bằng bộ lọc local hqdn3d đã kiểm tra.",
@@ -233,6 +244,17 @@ CAPABILITIES = (
         enabled=True,
         cost_policy="0 Xu",
         risk_notes="Có thể làm mất chi tiết nếu lọc quá mạnh; worker phải kiểm tra hqdn3d trước khi chạy.",
+    ),
+    _capability(
+        "enhance_soft_clean",
+        "Mềm và sạch",
+        "Giảm nhiễu nhẹ, cân màu dịu và tăng nét rất nhẹ bằng chuỗi lọc local.",
+        section="restore",
+        execution_owner="video_local_editing",
+        local_or_provider="local",
+        enabled=True,
+        cost_policy="0 Xu",
+        risk_notes="Chỉ mở khi worker xác nhận hqdn3d, eq và unsharp trên đúng FFmpeg đang chạy.",
     ),
     *(
         _capability(
@@ -257,18 +279,18 @@ CAPABILITIES = (
     _capability(
         "effect_fade",
         "Mờ vào / mờ ra",
-        "Thêm fade-in hoặc fade-out ngắn bằng bộ lọc local, giữ một MP4 đầu ra.",
+        "Thêm đoạn mờ dần ngắn lúc bắt đầu hoặc kết thúc bằng bộ lọc local, giữ một MP4 đầu ra.",
         section="effects",
         execution_owner="video_local_editing",
         local_or_provider="local",
         enabled=True,
         cost_policy="0 Xu",
-        risk_notes="Thời lượng fade được giới hạn theo thời lượng video đã kiểm tra.",
+        risk_notes="Thời lượng mờ dần được giới hạn theo thời lượng video đã kiểm tra.",
     ),
     _capability(
         "effect_vignette",
         "Viền tối nhẹ",
-        "Thêm vignette nhẹ để hướng mắt về trung tâm khung hình bằng FFmpeg local.",
+        "Thêm viền tối nhẹ để hướng mắt về trung tâm khung hình bằng FFmpeg local.",
         section="effects",
         execution_owner="video_local_editing",
         local_or_provider="local",
@@ -278,8 +300,8 @@ CAPABILITIES = (
     ),
     _capability(
         "effect_slow_zoom",
-        "Zoom chậm",
-        "Tạo zoom rất chậm, giới hạn biên độ và tốc độ bằng bộ lọc local.",
+        "Phóng chậm nhẹ",
+        "Phóng hình rất chậm, giới hạn biên độ và tốc độ bằng bộ lọc local.",
         section="effects",
         execution_owner="video_local_editing",
         local_or_provider="local",
@@ -327,7 +349,9 @@ LOCAL_PLAN_PATCHES: dict[str, dict[str, Any]] = {
     "aspect_keep_frame": {"crop_or_fit": {"aspect_ratio": "keep", "mode": "fit"}},
     "enhance_basic_sharpen": {"quality_filters": {"sharpen": True}},
     "enhance_light_color": {"color_preset": "bright_clear"},
+    "enhance_resolution_normalize": {"resolution": "1080p"},
     "enhance_denoise": {"quality_filters": {"denoise": True}},
+    "enhance_soft_clean": {"color_preset": "soft_clean"},
     "effect_fade": {"local_effects": {"fade_in_ms": 300, "fade_out_ms": 300}},
     "effect_vignette": {"local_effects": {"vignette": True}},
     "effect_slow_zoom": {"local_effects": {"slow_zoom": True}},
@@ -395,6 +419,112 @@ def merge_plan_patch(base: dict[str, Any] | None, patch: dict[str, Any] | None) 
     except (TypeError, ValueError):
         return deepcopy(dict(base or {})) if isinstance(base, dict) else {}
     return _merge_plan_patch(left, right)
+
+
+def runtime_capability_admission(
+    feature_key: str,
+    *,
+    available_filters: set[str] | list[str] | tuple[str, ...],
+    filters_known: bool,
+    has_audio: bool,
+    worker_id: str = "",
+    filter_worker_id: str = "",
+    ffmpeg_path: str = "",
+    filter_ffmpeg_path: str = "",
+    source_width: int = 0,
+    source_height: int = 0,
+    snapshot_age_seconds: int | float | None = None,
+    snapshot_ttl_seconds: int = 90,
+) -> dict[str, Any]:
+    """Return whether one public local capability is executable now.
+
+    Every FFmpeg filter emitted by the capability gates its public action. The
+    same complete set is checked again by engine and worker preflight.
+    """
+
+    patch = plan_patch(feature_key)
+    if not patch:
+        return {
+            "ready": False,
+            "reason": "capability_unavailable",
+            "required_filters": [],
+            "missing_filters": [],
+        }
+    normalized_worker_id = str(worker_id or "").strip()
+    normalized_filter_worker_id = str(filter_worker_id or "").strip()
+    if (
+        not normalized_worker_id
+        or not normalized_filter_worker_id
+        or normalized_worker_id != normalized_filter_worker_id
+    ):
+        return {
+            "ready": False,
+            "reason": "local_worker_filter_snapshot_owner_mismatch",
+            "required_filters": [],
+            "missing_filters": [],
+        }
+    normalized_ffmpeg_path = str(ffmpeg_path or "").strip().replace("\\", "/").rstrip("/").lower()
+    normalized_filter_ffmpeg_path = str(filter_ffmpeg_path or "").strip().replace("\\", "/").rstrip("/").lower()
+    if (
+        not normalized_ffmpeg_path
+        or not normalized_filter_ffmpeg_path
+        or normalized_ffmpeg_path != normalized_filter_ffmpeg_path
+    ):
+        return {
+            "ready": False,
+            "reason": "local_worker_filter_snapshot_path_mismatch",
+            "required_filters": [],
+            "missing_filters": [],
+        }
+    if snapshot_age_seconds is not None:
+        try:
+            age = float(snapshot_age_seconds)
+            ttl = max(1.0, float(snapshot_ttl_seconds or 90))
+        except (TypeError, ValueError, OverflowError):
+            age = ttl = -1.0
+        if age < 0 or age > ttl:
+            return {
+                "ready": False,
+                "reason": "local_worker_filter_snapshot_stale",
+                "required_filters": [],
+                "missing_filters": [],
+            }
+    from services import video_local_editing
+
+    plan = merge_plan_patch(video_local_editing.default_manual_edit_plan(""), patch)
+    try:
+        full_required = video_local_editing.required_optional_filters(
+            plan,
+            has_audio=bool(has_audio),
+            source_width=int(source_width or 0),
+            source_height=int(source_height or 0),
+        )
+        required = set(full_required)
+    except video_local_editing.LocalVideoEditError as exc:
+        return {
+            "ready": False,
+            "reason": str(exc.reason or "edit_plan_invalid"),
+            "required_filters": [],
+            "missing_filters": [],
+        }
+    available = {
+        str(item).strip()
+        for item in (available_filters or ())
+        if str(item).strip()
+    }
+    missing = sorted(required - available)
+    if required and not bool(filters_known):
+        reason = "filter_snapshot_missing"
+    elif missing:
+        reason = f"filter_missing:{missing[0]}"
+    else:
+        reason = "ok"
+    return {
+        "ready": reason == "ok",
+        "reason": reason,
+        "required_filters": sorted(required),
+        "missing_filters": missing,
+    }
 
 
 def _fold_vietnamese(value: Any) -> str:
@@ -487,7 +617,7 @@ def compile_local_intent(
             "Yêu cầu này cần năng lực chưa có trong bộ chỉnh sửa local ("
             + ", ".join(unsupported)
             + "). Chưa tạo tác vụ, chưa gọi provider và chưa trừ Xu. "
-            "Bạn có thể chọn làm sáng, làm rõ, giảm nhiễu, cân bằng âm lượng hoặc crop 9:16."
+            "Bạn có thể chọn làm sáng, làm rõ, giảm nhiễu, cân bằng âm lượng hoặc cắt khung 9:16."
         )
         return base
 

@@ -96,13 +96,32 @@ def test_edit2_capability_registry_is_complete_and_truthful() -> None:
         "aspect_blur_background",
         "aspect_safe_zone",
         "enhance_upscale",
-        "enhance_denoise",
         "enhance_motion_deblur",
         "enhance_stabilize",
         "enhance_frame_interpolation",
         "enhance_old_video",
     ):
         assert video_edit_capabilities.capability(unavailable)["enabled"] is False
+
+    denoise = video_edit_capabilities.capability("enhance_denoise")
+    assert denoise["enabled"] is True
+    assert denoise["execution_owner"] == "video_local_editing"
+    assert denoise["local_or_provider"] == "local"
+    assert video_edit_capabilities.plan_patch("enhance_denoise") == {
+        "quality_filters": {"denoise": True}
+    }
+    admission = video_edit_capabilities.runtime_capability_admission(
+        "enhance_denoise",
+        available_filters={"format"},
+        filters_known=True,
+        has_audio=True,
+        worker_id="worker-video-edit",
+        filter_worker_id="worker-video-edit",
+        ffmpeg_path="C:/ffmpeg/bin/ffmpeg.exe",
+        filter_ffmpeg_path="C:/ffmpeg/bin/ffmpeg.exe",
+    )
+    assert admission["ready"] is False
+    assert admission["reason"] == "filter_missing:hqdn3d"
 
 
 def test_edit2_smart_aspect_does_not_claim_unwired_ai_features() -> None:

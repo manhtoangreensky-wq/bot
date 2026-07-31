@@ -32,6 +32,55 @@ def _probe(*, duration_ms: int = 4_000, audio: bool = True) -> dict:
     }
 
 
+def test_public_plan_summary_uses_vietnamese_labels_not_internal_tokens() -> None:
+    summary = editing.public_plan_summary(
+        {
+            "crop_or_fit": {"aspect_ratio": "9:16", "mode": "fit"},
+            "resolution": "1080p",
+            "color_preset": "bright_clear",
+            "audio_normalization": "loudnorm",
+            "local_effects": {"slow_zoom": True},
+        }
+    )
+    rendered = " | ".join(summary)
+    assert "bright_clear" not in rendered
+    assert "loudnorm" not in rendered
+    assert "Sáng rõ" in rendered
+    assert "Cân bằng âm lượng tự động" in rendered
+    assert "Giữ toàn cảnh có viền" in rendered
+    assert "Phóng chậm nhẹ" in rendered
+    assert "Zoom chậm" not in rendered
+
+
+def test_full_source_trim_is_not_advertised_as_an_explicit_cut() -> None:
+    plan = editing.default_manual_edit_plan("")
+    plan["trim"] = {"start_ms": 0, "end_ms": 10_000}
+    assert "Cắt theo khoảng đã chọn" not in editing.public_plan_summary(
+        plan,
+        source_duration_ms=10_000,
+    )
+    plan["trim"] = {"start_ms": 1_000, "end_ms": 9_000}
+    assert "Cắt theo khoảng đã chọn" in editing.public_plan_summary(
+        plan,
+        source_duration_ms=10_000,
+    )
+
+
+def test_all_default_manual_plan_is_not_an_executable_edit() -> None:
+    plan = editing.default_manual_edit_plan("")
+    plan["trim"] = {"start_ms": 0, "end_ms": 10_000}
+    assert editing.manual_plan_has_effect(plan, source_duration_ms=10_000) is False
+
+    plan["brightness_percent"] = 110
+    assert editing.manual_plan_has_effect(plan, source_duration_ms=10_000) is True
+
+
+def test_changed_trim_is_an_executable_edit() -> None:
+    plan = editing.default_manual_edit_plan("")
+    plan["trim"] = {"start_ms": 1_000, "end_ms": 9_000}
+    assert editing.manual_plan_has_effect(plan, source_duration_ms=10_000) is True
+
+
 def test_videoedit_unknown_requested_plan_field_fails_closed(tmp_path: Path) -> None:
     plan = _source_plan(tmp_path)
     plan["provider_magic_effect"] = True
@@ -88,6 +137,104 @@ def test_videoedit_optional_local_fields_are_bounded(
         editing.normalize_manual_edit_plan(plan, source_duration_ms=4_000, workspace=tmp_path)
 
 
+@pytest.mark.parametrize(
+    ("patch", "reason"),
+    [
+        ({"rotation": "bad"}, "rotation_invalid"),
+        ({"rotation": 90.5}, "rotation_invalid"),
+        ({"speed": "nan"}, "speed_invalid"),
+        ({"volume": "inf"}, "volume_invalid"),
+        ({"brightness_percent": "bad"}, "brightness_invalid"),
+        ({"trim": {"start_ms": 0, "end_ms": 3_000, "provider_hint": True}}, "trim_range_invalid"),
+        ({"crop_or_fit": {"aspect_ratio": "9:16", "mode": "fit", "tracking": True}}, "crop_mode_invalid"),
+    ],
+)
+def test_videoedit_malformed_requested_scalars_and_nested_fields_never_fall_back_to_defaults(
+    tmp_path: Path,
+    patch: dict,
+    reason: str,
+) -> None:
+    plan = _source_plan(tmp_path)
+    plan.update(patch)
+    with pytest.raises(editing.LocalVideoEditError, match=reason):
+        editing.normalize_manual_edit_plan(plan, source_duration_ms=4_000, workspace=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("patch", "reason"),
+    [
+        (
+            {"remove_middle": {"start_ms": True, "end_ms": 2_500}},
+            "remove_middle_invalid",
+        ),
+        (
+            {"remove_middle": {"start_ms": 1_500, "end_ms": True}},
+            "remove_middle_invalid",
+        ),
+        (
+            {
+                "text_overlay": {
+                    "content": "Xin chào",
+                    "position": "bottom",
+                    "start_ms": True,
+                    "end_ms": 2_000,
+                }
+            },
+            "text_overlay_invalid",
+        ),
+        (
+            {
+                "text_overlay": {
+                    "content": "Xin chào",
+                    "position": "bottom",
+                    "start_ms": 0,
+                    "end_ms": True,
+                }
+            },
+            "text_overlay_invalid",
+        ),
+        (
+            {
+                "text_overlay": {
+                    "content": "Xin chào",
+                    "position": "bottom",
+                    "start_ms": 0,
+                    "end_ms": 2_000,
+                    "font_size": True,
+                }
+            },
+            "text_overlay_invalid",
+        ),
+        (
+            {
+                "text_overlay": {
+                    "content": "Xin chào",
+                    "position": "bottom",
+                    "start_ms": 0,
+                    "end_ms": 2_000,
+                    "outline": True,
+                }
+            },
+            "text_overlay_invalid",
+        ),
+    ],
+)
+def test_videoedit_boolean_numeric_plan_fields_fail_closed(
+    tmp_path: Path,
+    patch: dict,
+    reason: str,
+) -> None:
+    plan = _source_plan(tmp_path)
+    plan.update(patch)
+
+    with pytest.raises(editing.LocalVideoEditError, match=reason):
+        editing.normalize_manual_edit_plan(
+            plan,
+            source_duration_ms=4_000,
+            workspace=tmp_path,
+        )
+
+
 def test_videoedit_required_filter_matrix_is_exact(tmp_path: Path) -> None:
     plan = _source_plan(tmp_path)
     plan.update(
@@ -106,6 +253,7 @@ def test_videoedit_required_filter_matrix_is_exact(tmp_path: Path) -> None:
     assert editing.required_optional_filters(normalized, has_audio=True) == {
         "afade",
         "fade",
+        "format",
         "hqdn3d",
         "loudnorm",
         "unsharp",
@@ -119,7 +267,7 @@ def test_videoedit_requested_unavailable_filter_fails_before_ffmpeg(tmp_path: Pa
     plan["quality_filters"] = {"sharpen": True, "denoise": False}
     normalized = editing.normalize_manual_edit_plan(plan, source_duration_ms=4_000, workspace=tmp_path)
     with pytest.raises(editing.LocalVideoEditError, match="ffmpeg_filter_unavailable:unsharp"):
-        editing.validate_required_optional_filters(normalized, available_filters=set(), has_audio=True)
+        editing.validate_required_optional_filters(normalized, available_filters={"format"}, has_audio=True)
 
 
 def test_videoedit_command_contains_only_selected_optional_filters(tmp_path: Path) -> None:

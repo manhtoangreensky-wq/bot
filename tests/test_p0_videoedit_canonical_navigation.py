@@ -31,6 +31,10 @@ def test_videoedit_parent_matrix_is_exact() -> None:
     assert machine.parent_callback("confirmation") == "videoedit|review"
 
 
+def test_videoedit_confirmation_screen_has_an_exact_resume_callback() -> None:
+    assert machine.screen_callback("confirmation") == "videoedit|confirmation"
+
+
 def test_videoedit_parent_callback_fails_closed() -> None:
     assert machine.safe_parent_callback("videoedit|cut") == "videoedit|cut"
     assert machine.safe_parent_callback("videoedit|") == "videoedit|hub"
@@ -102,3 +106,34 @@ def test_videoedit_live_actions_are_not_rewritten_as_legacy_redirects() -> None:
         "review",
     ):
         assert machine.canonical_compatibility_action(action) == action
+
+
+def test_videoedit_source_info_resumes_the_exact_input_screen() -> None:
+    assert machine.resume_callback("trim_input", "trim_edges") == "videoedit|trim_edges"
+    assert machine.resume_callback("trim_input", "remove_middle") == "videoedit|remove_middle"
+    assert machine.resume_callback("split_input", "split_custom") == "videoedit|split_custom"
+    assert machine.resume_callback("concat_input", "concat") == "videoedit|concat"
+    assert machine.resume_callback("reorder_input", "concat_order") == "videoedit|reorder"
+    assert machine.resume_callback("text_input", "text_overlay") == "videoedit|text_overlay"
+    assert machine.resume_callback("logo_input", "logo") == "videoedit|logo"
+    assert machine.resume_callback("srt_input", "srt") == "videoedit|srt"
+    assert machine.resume_callback("choose_aspect") == "videoedit|aspect"
+    assert machine.resume_callback("choose_resolution") == "videoedit|resolution"
+    assert machine.resume_callback("rotation_value") == "videoedit|transform"
+
+
+def test_videoedit_requested_group_resumes_exact_screen_after_upload() -> None:
+    expected = {
+        "cut": "cut",
+        "join": "join",
+        "frame": "frame",
+        "resolution": "resolution",
+        "audio": "audio",
+        "effects": "effects",
+        "overlay": "overlay",
+        "color": "color",
+        "review": "review",
+    }
+    for group, screen in expected.items():
+        assert machine.requested_group_screen(group) == screen
+    assert machine.requested_group_screen("../../subdub") == ""
