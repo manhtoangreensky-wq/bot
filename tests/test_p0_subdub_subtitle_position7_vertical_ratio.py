@@ -226,6 +226,66 @@ def test_seven_ass_positions_are_centered_safe_and_evenly_spaced(monkeypatch):
     assert "; subtitle_position_slot: 4" in ass
 
 
+def test_subtitle_edge_slots_use_tiny_frame_relative_margins():
+    for width, height in ((1080, 1920), (1920, 1080), (1080, 1080)):
+        edge_margin = bot.subdub_subtitle_edge_margin_px(height)
+        bottom = bot.subdub_subtitle_position_point(
+            {
+                "video_width": width,
+                "video_height": height,
+                "subtitle_position_slot": 1,
+            }
+        )
+        top = bot.subdub_subtitle_position_point(
+            {
+                "video_width": width,
+                "video_height": height,
+                "subtitle_position_slot": 7,
+            }
+        )
+
+        assert edge_margin == max(6, min(16, int(round(height * 0.008))))
+        assert bottom == (width // 2, height - edge_margin)
+        assert top == (width // 2, edge_margin)
+
+
+def test_subtitle_edge_slots_anchor_the_box_to_the_selected_frame_edge(monkeypatch):
+    monkeypatch.setattr(
+        bot,
+        "resolve_subdub_subtitle_font",
+        lambda _style: {
+            "ok": True,
+            "family": "Arial",
+            "path": "fixture.ttf",
+            "blocker": "",
+        },
+    )
+    edge_margin = bot.subdub_subtitle_edge_margin_px(1920)
+    bottom_ass = bot.subdub_generate_ass_from_srt(
+        VALID_SRT,
+        {
+            "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+            "output_type": "burn",
+            "video_width": 1080,
+            "video_height": 1920,
+            "subtitle_position_slot": 1,
+        },
+    )
+    top_ass = bot.subdub_generate_ass_from_srt(
+        VALID_SRT,
+        {
+            "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+            "output_type": "burn",
+            "video_width": 1080,
+            "video_height": 1920,
+            "subtitle_position_slot": 7,
+        },
+    )
+
+    assert rf"\an2\pos(540,{1920 - edge_margin})" in bottom_ass
+    assert rf"\an8\pos(540,{edge_margin})" in top_ass
+
+
 def test_vertical_subtitle_font_is_exactly_two_points_larger_for_new_jobs_only(monkeypatch):
     monkeypatch.setattr(
         bot,

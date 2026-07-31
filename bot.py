@@ -211825,14 +211825,20 @@ def subdub_ass_alignment(position: str = "bottom", align: str = "center") -> tup
         return horizontal, 110
     return horizontal, 48
 
+
+def subdub_subtitle_edge_margin_px(play_res_y: int | float = 720) -> int:
+    height = max(1, int(play_res_y or 720))
+    return max(6, min(16, int(round(height * 0.008))))
+
+
 def subdub_subtitle_position_point(style_or_state: dict | None = None) -> tuple[int, int]:
     style = dict(style_or_state or {})
     play_res_x = max(480, int(style.get("play_res_x") or style.get("video_width") or 1280))
     play_res_y = max(480, int(style.get("play_res_y") or style.get("video_height") or 720))
-    font_size = max(24, int(style.get("render_size") or style.get("size") or 48))
     slot = subdub_subtitle_position_slot(style)
-    bottom_y = play_res_y - max(int(round(play_res_y * 0.035)), font_size)
-    top_y = max(int(round(play_res_y * 0.055)), int(round(font_size * 2.4)))
+    edge_margin = subdub_subtitle_edge_margin_px(play_res_y)
+    bottom_y = play_res_y - edge_margin
+    top_y = edge_margin
     progress = float(slot - 1) / float(max(1, SUBDUB_SUBTITLE_POSITION_COUNT - 1))
     y = int(round(bottom_y + ((top_y - bottom_y) * progress)))
     return int(round(play_res_x / 2.0)), max(1, min(play_res_y - 1, y))
@@ -211974,7 +211980,8 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     position_y = 0
     if position_slot:
         position_x, position_y = subdub_subtitle_position_point(style)
-        position_override = rf"{{\an2\pos({position_x},{position_y})}}"
+        position_alignment = 8 if position_slot == SUBDUB_SUBTITLE_POSITION_COUNT else 2
+        position_override = rf"{{\an{position_alignment}\pos({position_x},{position_y})}}"
     if style.get("cover_original") or style.get("hardsub_cover_enabled"):
         if style.get("m4live1_style_renderer_only"):
             if style.get("subtitle_margin_v_after") is not None:
@@ -212360,6 +212367,27 @@ def subdub_final_video_audio_required(mode: str = "", source_probe: dict | None 
         normalized_mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
         or dict(source_probe or {}).get("has_audio") is True
     )
+
+
+def subdub_final_expected_duration_seconds(
+    source_duration_seconds: int | float = 0.0,
+    mode: str = "",
+    product_result: dict | None = None,
+) -> float:
+    source_duration = max(0.0, float(source_duration_seconds or 0.0))
+    normalized_mode = normalize_video_translate_mode(mode)
+    result = dict(product_result or {})
+    if normalized_mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+        return source_duration
+    if not result.get("video_output"):
+        return source_duration
+    return max(
+        source_duration,
+        float(result.get("final_video_expected_duration") or 0.0),
+        float(result.get("tts_timeline_duration") or 0.0),
+        float(result.get("generated_audio_duration") or 0.0),
+    )
+
 
 def subdub_video_fit_mode() -> str:
     mode = str(SUBDUB_VIDEO_FIT_MODE or "cover").strip().lower()
@@ -214161,6 +214189,8 @@ async def video_dubbing_render_video(
     original_audio_mode: str = "",
     original_audio_volume_percent: int | float | str | None = None,
     dubbed_voice_volume_percent: int | float | str | None = None,
+    target_duration_seconds: int | float = 0.0,
+    preserve_source_duration: bool = True,
     require_audio: bool | None = None,
 ) -> tuple[bytes, str]:
     ffmpeg = frame_video_ffmpeg_path()
@@ -214185,6 +214215,11 @@ async def video_dubbing_render_video(
         source_has_audio = bool(source_probe.get("has_audio"))
         if dubbed_audio and source_duration <= 0:
             return b"", "source_video_duration_unavailable"
+        requested_duration = max(0.0, float(target_duration_seconds or 0.0))
+        render_duration = source_duration
+        if dubbed_audio and requested_duration > source_duration + 0.01:
+            render_duration = requested_duration
+        video_extension_seconds = max(0.0, render_duration - source_duration)
         command = [ffmpeg, "-y", "-i", source_path]
         if dubbed_audio:
             with open(audio_path, "wb") as handle:
@@ -214244,14 +214279,14 @@ async def video_dubbing_render_video(
             if not source_has_audio:
                 original_volume = 0.0
             dub_volume = subdub_percent_value(dubbed_voice_volume_percent, SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT, 0, 200) / 100.0
-            duration_filter = f"apad=whole_dur={source_duration:.3f},atrim=duration={source_duration:.3f}"
+            duration_filter = f"apad=whole_dur={render_duration:.3f},atrim=duration={render_duration:.3f}"
             if dubbed_audio and original_volume > 0:
                 command.extend([
                     "-filter_complex",
                     f"[0:a]volume={original_volume:.3f},{duration_filter}[original];"
                     f"[1:a]volume={dub_volume:.3f},{duration_filter}[dub];"
                     "[original][dub]amix=inputs=2:duration=longest:dropout_transition=0,"
-                    f"atrim=duration={source_duration:.3f},alimiter=limit=0.95[mixed]",
+                    f"atrim=duration={render_duration:.3f},alimiter=limit=0.95[mixed]",
                     "-map", "0:v:0", "-map", "[mixed]", "-c:a", "aac", "-b:a", "160k",
                 ])
             elif dubbed_audio and abs(dub_volume - 1.0) > 0.001:
@@ -214267,8 +214302,8 @@ async def video_dubbing_render_video(
                 ])
             else:
                 command.extend(["-map", "0:v:0", "-map", "0:a?", "-c:a", "copy"])
-            if dubbed_audio and source_duration > 0:
-                command.extend(["-t", f"{source_duration:.3f}"])
+            if dubbed_audio and render_duration > 0:
+                command.extend(["-t", f"{render_duration:.3f}"])
             command.extend(["-movflags", "+faststart", output_path])
             ok, detail = await run_subdub_ffmpeg_command(command, timeout=300)
             if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
@@ -214278,18 +214313,25 @@ async def video_dubbing_render_video(
             validation = await subdub_validate_video_output(
                 output_bytes,
                 require_audio=bool(dubbed_audio) if require_audio is None else bool(require_audio),
-                expected_duration=source_duration,
+                expected_duration=render_duration,
             )
             if not validation.get("ok"):
                 return b"", f"{label}_validation_failed:{sanitize_log_text(str(validation.get('detail') or 'video_output_invalid'))[:180]}"
             return output_bytes, (
                 f"ffmpeg_video_render_{label}:{validation.get('detail') or 'validated'};"
                 f"source_duration={source_duration:.3f};"
+                f"source_duration_preserved={source_duration:.3f};"
+                f"render_duration={render_duration:.3f};"
+                f"video_extended_by={video_extension_seconds:.3f};"
+                f"preserve_source_duration={'yes' if preserve_source_duration else 'no'};"
                 f"output_duration={float(validation.get('duration') or 0.0):.3f};"
                 "shortest_used=no"
             )
 
         fit_filters = subdub_video_fit_filters(subtitle_style)
+        if video_extension_seconds > 0.01:
+            # Keep every spoken sentence without resizing the source frame.
+            fit_filters.append(f"tpad=stop_mode=clone:stop_duration={video_extension_seconds:.3f}")
         # Keep the resolved Unicode ASS font even when the optional cover filter fails.
         # Falling back to raw SRT here silently returned to FFmpeg's default font and
         # produced tofu boxes for CJK/Thai/Arabic/Devanagari output.
@@ -215035,6 +215077,7 @@ def subdub_plan_dub_timeline(
     total_duration: float,
     *,
     max_tempo_ratio: float = 1.15,
+    max_output_duration: float = 0.0,
 ) -> dict:
     if not chunks:
         return {"ok": False, "blocker": "tts_segments_empty", "scheduled": []}
@@ -215042,11 +215085,11 @@ def subdub_plan_dub_timeline(
         [dict(item or {}) for item in chunks],
         key=lambda item: (float(item.get("start") or 0.0), int(item.get("index") or 0)),
     )
-    timeline_end = max(
+    source_timeline_end = max(
         float(total_duration or 0.0),
         max(float(item.get("end") or 0.0) for item in ordered),
     )
-    if timeline_end <= 0:
+    if source_timeline_end <= 0:
         return {"ok": False, "blocker": "tts_timeline_duration_invalid", "scheduled": []}
     normalized = []
     for position, item in enumerate(ordered, start=1):
@@ -215089,37 +215132,57 @@ def subdub_plan_dub_timeline(
     maximum_tempo = max(1.0, min(1.15, float(max_tempo_ratio or 1.15)))
     scheduled, final_end, shifted_count = _schedule(1.0)
     tempo_ratio = 1.0
-    if final_end > timeline_end + 0.01:
-        _fastest, fastest_end, _fastest_shifted = _schedule(maximum_tempo)
-        if fastest_end > timeline_end + 0.01:
-            return {
-                "ok": False,
-                "blocker": (
-                    "tts_timeline_exceeds_source:"
-                    f"required_end={fastest_end:.3f};source_duration={timeline_end:.3f};"
-                    f"max_tempo={maximum_tempo:.3f}"
-                ),
-                "scheduled": [],
-            }
-        low, high = 1.0, maximum_tempo
-        for _ in range(40):
-            candidate = (low + high) / 2.0
-            _candidate_schedule, candidate_end, _candidate_shifted = _schedule(candidate)
-            if candidate_end > timeline_end:
-                low = candidate
-            else:
-                high = candidate
-        tempo_ratio = high
-        scheduled, final_end, shifted_count = _schedule(tempo_ratio)
+    timeline_end = source_timeline_end
+    timeline_extended = False
+    if final_end > source_timeline_end + 0.01:
+        fastest, fastest_end, fastest_shifted = _schedule(maximum_tempo)
+        if fastest_end > source_timeline_end + 0.01:
+            output_limit = max(0.0, float(max_output_duration or 0.0))
+            if output_limit > 0 and fastest_end > output_limit + 0.01:
+                return {
+                    "ok": False,
+                    "blocker": (
+                        "tts_timeline_exceeds_output_limit:"
+                        f"required_end={fastest_end:.3f};source_duration={source_timeline_end:.3f};"
+                        f"max_output_duration={output_limit:.3f};max_tempo={maximum_tempo:.3f}"
+                    ),
+                    "scheduled": [],
+                }
+            scheduled = fastest
+            final_end = fastest_end
+            shifted_count = fastest_shifted
+            tempo_ratio = maximum_tempo
+            timeline_end = fastest_end
+            timeline_extended = True
+        else:
+            low, high = 1.0, maximum_tempo
+            for _ in range(40):
+                candidate = (low + high) / 2.0
+                _candidate_schedule, candidate_end, _candidate_shifted = _schedule(candidate)
+                if candidate_end > source_timeline_end:
+                    low = candidate
+                else:
+                    high = candidate
+            tempo_ratio = high
+            scheduled, final_end, shifted_count = _schedule(tempo_ratio)
+    if not scheduled:
+        return {
+            "ok": False,
+            "blocker": "tts_timeline_plan_empty",
+            "scheduled": [],
+        }
     return {
         "ok": True,
         "blocker": "",
         "scheduled": scheduled,
         "timeline_duration": timeline_end,
+        "source_duration": source_timeline_end,
         "final_audio_end": final_end,
         "tempo_ratio": tempo_ratio,
         "shifted_cue_count": shifted_count,
         "overlap_count": 0,
+        "timeline_extended": timeline_extended,
+        "extension_seconds": max(0.0, timeline_end - source_timeline_end),
     }
 
 
@@ -215129,7 +215192,12 @@ async def build_dub_timeline_audio(chunks: list[dict], total_duration: float = 0
         return b"", "tts_segments_empty"
     if not ffmpeg:
         return b"", "ffmpeg_unavailable"
-    plan = subdub_plan_dub_timeline(chunks, total_duration, max_tempo_ratio=1.15)
+    plan = subdub_plan_dub_timeline(
+        chunks,
+        total_duration,
+        max_tempo_ratio=1.15,
+        max_output_duration=SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS,
+    )
     if not plan.get("ok"):
         return b"", str(plan.get("blocker") or "tts_timeline_plan_failed")
     scheduled_chunks = list(plan.get("scheduled") or [])
@@ -215219,9 +215287,12 @@ async def build_dub_timeline_audio(chunks: list[dict], total_duration: float = 0
         with open(output_path, "rb") as handle:
             return handle.read(), (
                 f"ffmpeg_sequential_timeline_audio:cues={len(scheduled_chunks)};"
-                f"duration={timeline_end:.3f};tempo={float(plan.get('tempo_ratio') or 1.0):.6f};"
+                f"duration={timeline_end:.3f};source_duration={float(plan.get('source_duration') or timeline_end):.3f};"
+                f"timeline_extended={'yes' if plan.get('timeline_extended') else 'no'};"
+                f"extended_by={float(plan.get('extension_seconds') or 0.0):.3f};"
+                f"tempo={float(plan.get('tempo_ratio') or 1.0):.6f};"
                 f"shifted_cues={int(plan.get('shifted_cue_count') or 0)};"
-                "overlap_count=0;sequential=yes;boundary_fade=yes"
+                "overlap_count=0;sequential=yes;boundary_fade=yes;full_speech=yes"
             )
 
 def subdub_dub_audio_filter_chain(*, fallback: bool = False) -> str:
@@ -216319,11 +216390,16 @@ async def _execute_video_dubbing_pipeline_core(
         float(state.get("video_duration") or 0.0),
         float(state.get("source_duration") or 0.0),
     )
+    final_video_expected_duration_seconds = subdub_final_expected_duration_seconds(
+        source_duration_seconds,
+        mode,
+        product_result,
+    )
     final_output_validation: dict = {
         "ok": not final_video_required,
         "detail": "not_required" if not final_video_required else "not_validated",
         "source_duration": source_duration_seconds,
-        "expected_duration": source_duration_seconds,
+        "expected_duration": final_video_expected_duration_seconds,
         "duration_coverage_ok": not final_video_required,
     }
     subtitle_readability = {"ok": True, "blocker": "", "cue_count": 0, "broken_glyph_ratio": 0.0}
@@ -216373,7 +216449,7 @@ async def _execute_video_dubbing_pipeline_core(
         final_output_validation = await subdub_validate_video_output(
             video_output,
             require_audio=final_audio_required,
-            expected_duration=source_duration_seconds,
+            expected_duration=final_video_expected_duration_seconds,
         )
         if not final_output_validation.get("ok"):
             validation_detail = str(final_output_validation.get("detail") or "final_video_invalid")
@@ -216410,6 +216486,7 @@ async def _execute_video_dubbing_pipeline_core(
         "_subdub_subtitle_readability": dict(subtitle_readability),
         "_subdub_output_validation": dict(final_output_validation),
         "source_duration": source_duration_seconds,
+        "final_video_expected_duration": final_video_expected_duration_seconds,
         "source_has_audio": bool(source_video_probe.get("has_audio")),
         "final_audio_required": bool(final_audio_required),
         "input_duration_seconds": source_duration_seconds,
@@ -216484,7 +216561,7 @@ async def _execute_video_dubbing_pipeline_core(
             canonical_validation = await subdub_validate_video_output(
                 canonical_video_output,
                 require_audio=final_audio_required,
-                expected_duration=source_duration_seconds,
+                expected_duration=final_video_expected_duration_seconds,
             )
             if not canonical_validation.get("ok"):
                 validation_detail = str(canonical_validation.get("detail") or "canonical_final_mp4_invalid")
@@ -216672,7 +216749,7 @@ async def _execute_video_dubbing_pipeline_core(
             include_subtitle_outputs=include_subtitle_outputs,
             strict_validation=bool(render_supports_validation),
             job_key=delivery_job_key,
-            expected_duration_seconds=source_duration_seconds,
+            expected_duration_seconds=final_video_expected_duration_seconds,
             canonical_video_path=canonical_final_artifact_path,
             require_final_audio=final_audio_required,
         )

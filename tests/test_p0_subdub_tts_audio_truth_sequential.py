@@ -138,6 +138,26 @@ def test_dub_timeline_plan_waits_for_previous_sentence_without_overlap():
     assert plan["scheduled"][1]["scheduled_end"] == pytest.approx(4.3)
 
 
+def test_dub_timeline_refuses_to_extend_past_the_one_hour_output_limit():
+    plan = bot.subdub_plan_dub_timeline(
+        [
+            {
+                "cue_id": "last-cue",
+                "start": 3590.0,
+                "end": 3600.0,
+                "audio_duration": 20.0,
+            }
+        ],
+        3600.0,
+        max_output_duration=3600.0,
+    )
+
+    assert plan["ok"] is False
+    assert plan["scheduled"] == []
+    assert plan["blocker"].startswith("tts_timeline_exceeds_output_limit:")
+    assert "max_output_duration=3600.000" in plan["blocker"]
+
+
 def test_dub_timeline_uses_sequential_concat_and_boundary_fades(monkeypatch):
     commands = []
 
@@ -214,10 +234,13 @@ def test_dub_timeline_real_ffmpeg_fixture_is_decodable_and_source_bounded(tmp_pa
     assert qc["duration"] == pytest.approx(2.0, abs=0.08)
 
 
-def test_dub_timeline_does_not_cut_sentence_that_cannot_fit_naturally(monkeypatch):
+def test_dub_timeline_extends_output_instead_of_cutting_spoken_sentence(monkeypatch):
+    commands = []
+
     async def fake_run(command, timeout=0):
         del timeout
-        Path(command[-1]).write_bytes(b"must-not-be-accepted")
+        commands.append(list(command))
+        Path(command[-1]).write_bytes(b"full-spoken-sentence")
         return True, "ok"
 
     monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
@@ -230,9 +253,132 @@ def test_dub_timeline_does_not_cut_sentence_that_cannot_fit_naturally(monkeypatc
         )
     )
 
-    assert output == b""
-    assert "tts_timeline_exceeds_source" in detail
-    assert "max_tempo=1.150" in detail
+    assert output == b"full-spoken-sentence"
+    assert "timeline_extended=yes" in detail
+    assert "source_duration=2.000" in detail
+    assert "duration=4.348" in detail
+    assert "full_speech=yes" in detail
+    filter_graph = commands[-1][commands[-1].index("-filter_complex") + 1]
+    assert "atempo=1.150000" in filter_graph
+    assert "atrim=duration=2.000" not in filter_graph
+    assert commands[-1][commands[-1].index("-t") + 1] == "4.348"
+
+
+def test_subdub_renderer_freezes_last_frame_for_extended_dub_without_changing_ratio(monkeypatch):
+    commands = []
+
+    async def fake_probe(_payload):
+        return {
+            "ok": True,
+            "duration": 2.0,
+            "has_video": True,
+            "has_audio": True,
+            "width": 1080,
+            "height": 1920,
+        }
+
+    async def fake_run(command, timeout=0):
+        del timeout
+        commands.append(list(command))
+        Path(command[-1]).write_bytes(b"validated-mp4")
+        return True, "ok"
+
+    async def fake_validate(payload, *, require_audio=False, expected_duration=0.0, **_kwargs):
+        assert payload == b"validated-mp4"
+        assert require_audio is True
+        assert expected_duration == pytest.approx(4.348)
+        return {
+            "ok": True,
+            "detail": "ok",
+            "duration": 4.348,
+            "actual_duration": 4.348,
+            "has_video": True,
+            "has_audio": True,
+        }
+
+    monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(bot, "subdub_probe_video_bytes", fake_probe)
+    monkeypatch.setattr(bot, "run_subdub_ffmpeg_command", fake_run)
+    monkeypatch.setattr(bot, "subdub_validate_video_output", fake_validate)
+
+    output, detail = asyncio.run(
+        bot.video_dubbing_render_video(
+            b"source-video",
+            dubbed_audio=b"full-dub-audio",
+            subtitle_style={"show_subtitles": False},
+            target_duration_seconds=4.348,
+            require_audio=True,
+        )
+    )
+
+    assert output == b"validated-mp4"
+    command = commands[-1]
+    video_filter = command[command.index("-vf") + 1]
+    assert "tpad=stop_mode=clone:stop_duration=2.348" in video_filter
+    assert "scale=" not in video_filter
+    assert "-shortest" not in command
+    assert command[command.index("-t") + 1] == "4.348"
+    assert "source_duration=2.000" in detail
+    assert "render_duration=4.348" in detail
+    assert "video_extended_by=2.348" in detail
+
+
+def test_subdub_renderer_real_ffmpeg_extension_keeps_vertical_frame_and_audible_audio(tmp_path):
+    ffmpeg = bot.frame_video_ffmpeg_path()
+    if not ffmpeg:
+        pytest.skip("ffmpeg unavailable")
+    source = tmp_path / "source-vertical.mp4"
+    dub = tmp_path / "dub.mp3"
+    subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-f", "lavfi", "-i", "color=c=black:s=320x568:r=25:d=2",
+            "-f", "lavfi", "-i", "sine=frequency=330:sample_rate=32000:duration=2",
+            "-t", "2.000",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-f", "lavfi", "-i", "sine=frequency=660:sample_rate=32000:duration=4",
+            "-c:a", "libmp3lame",
+            "-b:a", "128k",
+            str(dub),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    output, detail = asyncio.run(
+        bot.video_dubbing_render_video(
+            source.read_bytes(),
+            dubbed_audio=dub.read_bytes(),
+            subtitle_style={"show_subtitles": False},
+            target_duration_seconds=4.0,
+            require_audio=True,
+        )
+    )
+    probe = asyncio.run(bot.subdub_probe_video_bytes(output))
+    activity = asyncio.run(bot.subdub_audio_activity_metrics(output))
+
+    assert output
+    assert probe["ok"] is True
+    assert probe["duration"] == pytest.approx(4.0, abs=0.12)
+    assert probe["width"] == 320
+    assert probe["height"] == 568
+    assert bot.subdub_aspect_ratio_close(320, 568, probe["width"], probe["height"])
+    assert probe["has_audio"] is True
+    assert activity["ok"] is True
+    assert activity["non_silent_seconds"] >= 3.5
+    assert "video_extended_by=2.000" in detail
 
 
 def test_product_pipeline_blocks_mp4_when_generated_tts_qc_fails():
@@ -294,6 +440,116 @@ def test_product_pipeline_blocks_mp4_when_generated_tts_qc_fails():
     assert result["status"] == "TTS_AUDIO_QC_FAILED"
     assert result["error_code"] == "speech_activity_missing"
     assert render_calls == []
+
+
+def test_product_pipeline_passes_full_spoken_timeline_to_subdub_renderer():
+    render_calls = []
+
+    async def prepare(state):
+        return {
+            "state": state,
+            "source_bytes": b"source-video",
+            "content_type": "video/mp4",
+            "source_segments": [{"index": 1, "start": 0.0, "end": 2.0, "text": "Hello"}],
+            "output_segments": [{"index": 1, "start": 0.0, "end": 2.0, "text": "Xin chao day la mot cau dai"}],
+            "output_script": "Xin chao day la mot cau dai",
+        }
+
+    async def synthesize(*_args, **_kwargs):
+        return {
+            "provider": "key4u_minimax",
+            "chunks": [
+                {
+                    "index": 1,
+                    "start": 0.0,
+                    "end": 2.0,
+                    "audio_duration": 5.0,
+                    "audio_bytes": b"spoken-sentence",
+                }
+            ],
+        }
+
+    async def timeline(*_args, **_kwargs):
+        return (
+            b"full-timeline-audio",
+            "ffmpeg_sequential_timeline_audio:cues=1;duration=4.348;"
+            "source_duration=2.000;timeline_extended=yes;full_speech=yes",
+        )
+
+    async def normalize(audio):
+        assert audio == b"full-timeline-audio"
+        return audio, "normalized"
+
+    async def validate_audio(audio):
+        assert audio == b"full-timeline-audio"
+        return {
+            "ok": True,
+            "detail": "speech_activity_ok",
+            "duration": 4.348,
+            "audio_bytes": len(audio),
+        }
+
+    async def render(_source, **kwargs):
+        render_calls.append(dict(kwargs))
+        return b"final-mp4", "rendered"
+
+    result = asyncio.run(
+        subtitle_dub_product_pipeline.process_subtitle_dub_job(
+            mode=bot.VIDEO_SUBTITLE_MODE_DUB,
+            state={"video_duration": 2, "output_type": "video", "target_language": "vi"},
+            user_id=42,
+            prepare_subtitles=prepare,
+            srt_from_text=bot.video_dubbing_srt_from_text,
+            segments_from_text=bot.video_dubbing_segments_from_text,
+            segments_from_subtitle=bot.video_dubbing_segments_from_subtitle,
+            subtitle_output_items=lambda *_args: [],
+            resolve_voice_id=lambda *_args: "Vietnamese_female_4_v1",
+            parse_voice_speed=lambda *_args: 1.0,
+            synthesize_segments=synthesize,
+            build_timeline_audio=timeline,
+            normalize_audio=normalize,
+            validate_audio=validate_audio,
+            render_video=render,
+            video_render_ready=lambda *_args: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["video_output"] == b"final-mp4"
+    assert result["tts_timeline_duration"] == pytest.approx(4.348)
+    assert result["final_video_expected_duration"] == pytest.approx(4.348)
+    assert render_calls[0]["target_duration_seconds"] == pytest.approx(4.348)
+
+
+def test_core_uses_extended_dub_duration_for_final_validation_and_delivery():
+    product_result = {
+        "video_output": b"final-mp4",
+        "final_video_expected_duration": 37.337,
+        "tts_timeline_duration": 37.337,
+    }
+
+    assert bot.subdub_final_expected_duration_seconds(
+        29.0,
+        bot.VIDEO_SUBTITLE_MODE_DUB,
+        product_result,
+    ) == pytest.approx(37.337)
+    assert bot.subdub_final_expected_duration_seconds(
+        29.0,
+        bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        product_result,
+    ) == pytest.approx(37.337)
+    assert bot.subdub_final_expected_duration_seconds(
+        29.0,
+        bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+        product_result,
+    ) == pytest.approx(29.0)
+
+    core_source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
+    assert "subdub_final_expected_duration_seconds(" in core_source
+    assert "expected_duration=final_video_expected_duration_seconds" in core_source
+    assert "expected_duration_seconds=final_video_expected_duration_seconds" in core_source
 
 
 def test_key4u_minimax_forwards_resolved_international_language_boost(monkeypatch):
