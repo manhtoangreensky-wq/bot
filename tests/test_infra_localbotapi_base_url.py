@@ -179,10 +179,10 @@ def test_local_base_raises_advertised_and_enforced_ceiling_together():
     assert fresh["local_enabled"] is True
     assert fresh["source"] == "local_bot_api"
     assert fresh["urls"] == ["https://tg.example.com/bot", "https://tg.example.com/file/bot"]
-    assert fresh["download_limit_mb"] == 300
-    assert fresh["max_input_mb"] == 300
+    assert fresh["download_limit_mb"] == 500
+    assert fresh["max_input_mb"] == 500
     # single source of truth: advertised == enforced == min(both)
-    assert fresh["effective_limit_mb"] == 300
+    assert fresh["effective_limit_mb"] == 500
 
 
 def test_local_base_ceiling_is_env_tunable_but_hard_capped():

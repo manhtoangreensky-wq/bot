@@ -414,14 +414,14 @@ def test_31_60_120_seconds_are_not_rejected_by_duration_alone():
         assert gate["input_size_bytes"] == 1024
 
 
-def test_chunk_plan_has_absolute_timeline_fields_and_balanced_tail():
-    plan = bot.subdub_long_video_chunk_plan(31)
+def test_chunk_plan_above_60_seconds_has_absolute_timeline_fields_and_balanced_tail():
+    plan = bot.subdub_long_video_chunk_plan(61)
     metadata = plan["chunk_metadata"]
 
     assert plan["chunking_enabled"] is True
-    assert [item["duration_ms"] for item in metadata] == [16000, 15000]
+    assert [item["duration_ms"] for item in metadata] == [20000, 21000, 20000]
     assert metadata[0]["source_start_ms"] == 0
-    assert metadata[1]["source_end_ms"] == 31000
+    assert metadata[-1]["source_end_ms"] == 61000
     assert all("overlap_left_ms" in item and "overlap_right_ms" in item for item in metadata)
 
 

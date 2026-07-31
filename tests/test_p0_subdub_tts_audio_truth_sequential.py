@@ -928,6 +928,24 @@ def test_core_failure_persists_timeline_detail_and_cue_counts(monkeypatch, tmp_p
             "duration_limit": 3600,
         }
 
+    async def fake_media_preflight(video_bytes, *, content_type="video/mp4"):
+        return {
+            "ok": True,
+            "normalized": False,
+            "normalization_count": 0,
+            "source_bytes": bytes(video_bytes),
+            "content_type": content_type,
+            "source_sha256": "fixture-source",
+            "normalized_sha256": "fixture-source",
+            "source_duration": 2.0,
+            "normalized_duration": 2.0,
+            "source_probe": {
+                "ok": True,
+                "duration": 2.0,
+                "normalization_required": False,
+            },
+        }
+
     async def fake_blackbox(**_kwargs):
         return {
             "ok": False,
@@ -946,6 +964,7 @@ def test_core_failure_persists_timeline_detail_and_cue_counts(monkeypatch, tmp_p
         }
 
     monkeypatch.setattr(bot, "video_dubbing_save_input_for_pipeline", fake_save_input)
+    monkeypatch.setattr(bot, "subdub_normalize_video_bytes_if_needed", fake_media_preflight)
     monkeypatch.setattr(bot, "subdub_duration_gate_payload_for_saved_input", fake_duration_gate)
     monkeypatch.setattr(bot.subdub_blackboxes, "run_subdub_lane_blackbox", fake_blackbox)
 
