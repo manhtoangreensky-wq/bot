@@ -153,8 +153,11 @@ def test_aiedit1_exact_back_routes():
 
 def test_aiedit1_no_job_before_final_confirm():
     callback = source_between(BOT_SOURCE, "async def handle_video_editor_callback", "async def handle_video_upload_callback")
-    assert callback.count("submit_video_ai_edit_job(update, context, state)") == 1
-    assert callback.index('action == "ai_confirm"') < callback.index("submit_video_ai_edit_job(update, context, state)")
+    assert callback.count("submit_video_edit_local_free_job(update, context, state)") == 1
+    assert callback.index('action == "ai_confirm"') < callback.index('action == "confirm_local"')
+    assert callback.index('action == "confirm_local"') < callback.index(
+        "submit_video_edit_local_free_job(update, context, state)"
+    )
 
 
 def test_aiedit1_no_outbox_before_final_confirm():
@@ -170,9 +173,10 @@ def test_aiedit1_no_provider_before_final_confirm():
 
 
 def test_aiedit1_no_charge_before_final_confirm():
-    submit = source_between(BOT_SOURCE, "async def submit_video_ai_edit_job", "async def submit_local_video_editor_job")
+    submit = source_between(BOT_SOURCE, "async def submit_video_edit_local_free_job", "async def submit_local_video_editor_job")
     assert "spend_fixed_credit_info(" not in submit
-    assert '"charge_policy": "after_valid_mp4_delivery"' in submit
+    assert '"charge_policy": "free_local_tool"' in submit
+    assert '"price_xu": 0' in submit
 
 
 def test_aiedit1_router_talking_head():

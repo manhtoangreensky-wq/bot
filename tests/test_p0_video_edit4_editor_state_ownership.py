@@ -144,6 +144,9 @@ def test_edit4_entering_two_means_two_parts_not_two_scenes() -> None:
             "safe_int": lambda value, default=0: int(value or default),
             "video_smart_splitter": video_smart_splitter,
             "update_video_editor_pending": update_pending,
+            "return_video_editor_workspace": lambda user_id, **fields: update_pending(
+                user_id, "options", **fields
+            ),
             "video_local_split_options_text": lambda current, _lang: f"Đã chia thành {current['split_part_count']} phần.",
             "video_local_split_options_keyboard": lambda _current, _lang: "split-keyboard",
         },

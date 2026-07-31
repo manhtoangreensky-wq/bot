@@ -21,7 +21,11 @@ def _function_source(name: str) -> str:
     start = BOT_SOURCE.find(async_marker)
     if start < 0:
         start = BOT_SOURCE.index(sync_marker)
-    candidates = [BOT_SOURCE.find("\ndef ", start + 1), BOT_SOURCE.find("\nasync def ", start + 1)]
+    candidates = [
+        BOT_SOURCE.find("\ndef ", start + 1),
+        BOT_SOURCE.find("\nasync def ", start + 1),
+        BOT_SOURCE.find("\n@", start + 1),
+    ]
     ends = [position for position in candidates if position >= 0]
     return BOT_SOURCE[start:min(ends) if ends else len(BOT_SOURCE)]
 
@@ -283,7 +287,7 @@ def test_video_brightness_validates_and_adds_ffmpeg_filter() -> None:
 
 
 def test_video_brightness_callbacks_and_back_are_exact() -> None:
-    keyboard = _function_source("video_local_manual_options_keyboard")
+    keyboard = _function_source("video_local_color_keyboard")
     brightness_keyboard = _function_source("video_local_brightness_keyboard")
     callback = _function_source("handle_video_editor_callback")
     pending = _function_source("handle_video_editor_pending_text")
@@ -292,7 +296,7 @@ def test_video_brightness_callbacks_and_back_are_exact() -> None:
     assert '"videoedit|brightness_set|120"' in brightness_keyboard
     assert '"videoedit|brightness_set|100"' in brightness_keyboard
     assert '"videoedit|brightness_custom"' in brightness_keyboard
-    assert '"videoedit|options|manual"' in brightness_keyboard
+    assert '"videoedit|color"' in brightness_keyboard
     assert 'if action == "brightness"' in callback
     assert 'if action == "brightness_set"' in callback
     assert 'if action == "brightness_custom"' in callback

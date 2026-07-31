@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,7 +21,11 @@ def _function_source(name: str) -> str:
     start = BOT_SOURCE.find(async_marker)
     if start < 0:
         start = BOT_SOURCE.index(sync_marker)
-    candidates = [BOT_SOURCE.find("\ndef ", start + 1), BOT_SOURCE.find("\nasync def ", start + 1)]
+    candidates = [
+        BOT_SOURCE.find("\ndef ", start + 1),
+        BOT_SOURCE.find("\nasync def ", start + 1),
+        BOT_SOURCE.find("\n@", start + 1),
+    ]
     ends = [position for position in candidates if position >= 0]
     return BOT_SOURCE[start:min(ends) if ends else len(BOT_SOURCE)]
 
@@ -63,7 +68,12 @@ def test_edit3_lane_state_has_one_canonical_contract(mode: str, ready: str) -> N
     assert complete["probe_count"] == 1
 
 
-def _run_canonical_upload(mode: str, *, valid: bool = True):
+def _run_canonical_upload(
+    mode: str,
+    *,
+    valid: bool = True,
+    active_product: str = "video_local_edit",
+):
     persisted = video_edit_state_machine.start_lane(mode)
     replies: list[dict] = []
     probes: list[str] = []
@@ -72,6 +82,7 @@ def _run_canonical_upload(mode: str, *, valid: bool = True):
         message_id = 901
         video = SimpleNamespace(
             file_id="video-file-901",
+            file_unique_id="telegram-opaque-901",
             file_name="source.mp4",
             mime_type="video/mp4",
             file_size=1_024,
@@ -101,6 +112,7 @@ def _run_canonical_upload(mode: str, *, valid: bool = True):
             "has_audio": True,
             "audio_stream_count": 1,
             "format_name": "mov,mp4",
+            "source_sha256": "a" * 64,
         }
 
     def save(_uid: int, state: dict) -> dict:
@@ -112,6 +124,7 @@ def _run_canonical_upload(mode: str, *, valid: bool = True):
         "handle_video_editor_pending_upload",
         {
             "get_video_editor_pending": lambda _uid: dict(persisted),
+            "get_video_session": lambda _uid: {"product_id": active_product},
             "video_edit_state_machine": video_edit_state_machine,
             "safe_int": lambda value, default=0: int(value or default),
             "save_video_edit_canonical_state": save,
@@ -119,6 +132,7 @@ def _run_canonical_upload(mode: str, *, valid: bool = True):
             "get_user_language": lambda _uid: "vi",
             "video_editor_source_from_update": lambda _update: {
                 "source_file_id": "video-file-901",
+                "source_file_unique_id": "telegram-opaque-901",
                 "source_file_name": "source.mp4",
                 "source_mime_type": "video/mp4",
                 "source_file_size": 1_024,
@@ -137,10 +151,10 @@ def _run_canonical_upload(mode: str, *, valid: bool = True):
             "cache_recent_media_state": lambda _update: "video",
             "video_local_editing": video_local_editing,
             "video_local_manual_options_text": lambda _state, _lang: "manual-screen",
-            "video_local_manual_options_keyboard": lambda _lang: "manual-keyboard",
+            "video_local_manual_options_keyboard": lambda _lang, _state=None: "manual-keyboard",
             "video_ai_edit_router": SimpleNamespace(DEFAULT_PRESERVE_CONTROLS={"identity": True}),
             "video_quality_enhance_source_text": lambda _state, _lang: "quality-screen",
-            "video_quality_enhance_source_keyboard": lambda _lang: "quality-keyboard",
+            "video_quality_enhance_source_keyboard": lambda _lang, _state=None: "quality-keyboard",
             "video_ai_edit_source_summary_text": lambda _state, _lang: "ai-screen",
             "video_ai_edit_source_summary_keyboard": lambda _lang, _state: "ai-keyboard",
         },
@@ -148,6 +162,104 @@ def _run_canonical_upload(mode: str, *, valid: bool = True):
     first = asyncio.run(handler(update, context))
     second = asyncio.run(handler(update, context))
     return first, second, persisted, replies, probes
+
+
+def test_edit3_telegram_unique_id_is_not_used_as_content_sha256() -> None:
+    extractor = _compile_function(
+        "video_editor_source_from_update",
+        {"safe_int": lambda value, default=0: int(value or default)},
+    )
+    media = SimpleNamespace(
+        file_id="telegram-file-id",
+        file_unique_id="opaque-telegram-identity",
+        file_name="source.mp4",
+        mime_type="video/mp4",
+        file_size=1024,
+        duration=8,
+        width=1280,
+        height=720,
+    )
+    update = SimpleNamespace(message=SimpleNamespace(video=media, document=None))
+
+    source = extractor(update)
+
+    assert source["source_file_unique_id"] == "opaque-telegram-identity"
+    assert source["source_video_hash"] == ""
+
+
+def test_edit3_opaque_telegram_identity_is_retained_as_separate_audit_field() -> None:
+    fields_start = BOT_SOURCE.index("VIDEO_EDITOR_TEXT_FIELDS = {")
+    fields_end = BOT_SOURCE.index("\n}", fields_start)
+    assert '"source_file_unique_id"' in BOT_SOURCE[fields_start:fields_end]
+
+
+def test_edit3_local_inspection_computes_real_content_sha256(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = b"actual-video-content-for-sha256"
+
+    class TelegramFile:
+        async def download_to_drive(self, *, custom_path: str) -> None:
+            Path(custom_path).write_bytes(payload)
+
+    async def get_file(_file_id: str):
+        return TelegramFile()
+
+    from services import video_local_validation
+
+    monkeypatch.setattr(
+        video_local_validation,
+        "probe_video_file",
+        lambda _path: {
+            "ok": True,
+            "bytes": len(payload),
+            "duration": 2.0,
+            "duration_ms": 2_000,
+            "width": 640,
+            "height": 360,
+            "has_video": True,
+            "has_audio": False,
+            "audio_stream_count": 0,
+            "format_name": "mov,mp4",
+        },
+    )
+    inspect_source = _compile_function(
+        "inspect_video_editor_source",
+        {
+            "video_local_validation": video_local_validation,
+            "safe_int": lambda value, default=0: int(value or default),
+            "tempfile": __import__("tempfile"),
+            "os": __import__("os"),
+            "hashlib": hashlib,
+            "asyncio": asyncio,
+        },
+    )
+
+    result = asyncio.run(
+        inspect_source(
+            SimpleNamespace(bot=SimpleNamespace(get_file=get_file)),
+            {
+                "source_file_id": "telegram-file-id",
+                "source_file_name": "source.mp4",
+                "source_file_size": len(payload),
+            },
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["source_sha256"] == hashlib.sha256(payload).hexdigest()
+
+
+def test_edit3_stale_state_cannot_consume_another_video_product_upload() -> None:
+    first, second, state, replies, probes = _run_canonical_upload(
+        "manual_edit",
+        active_product="product_video",
+    )
+
+    assert first is False and second is False
+    assert probes == []
+    assert replies == []
+    assert state == video_edit_state_machine.start_lane("manual_edit")
 
 
 @pytest.mark.parametrize(
@@ -168,7 +280,61 @@ def test_edit3_one_upload_probes_once_and_routes_to_exact_lane(mode: str, screen
     assert state["current_screen"] == mode
     assert state["awaiting_media"] is False
     assert state["source_file_id"] == "video-file-901"
+    assert state["source_file_unique_id"] == "telegram-opaque-901"
+    assert state["source_video_hash"] == "a" * 64
     assert state["probe_count"] == 1
+
+
+@pytest.mark.parametrize("legacy_step", ["await_concat", "await_logo", "await_srt"])
+def test_edit3_legacy_stale_state_cannot_consume_another_product_upload(
+    legacy_step: str,
+) -> None:
+    state = {
+        "step": legacy_step,
+        "selected_tool": "manual",
+        "source_file_id": "old-video",
+    }
+    replies: list[str] = []
+    clear_calls: list[int] = []
+
+    class Message:
+        message_id = 999
+        video = None
+        document = None
+        photo = []
+
+        async def reply_text(self, text: str, **_kwargs):
+            replies.append(text)
+            return True
+
+    recovery_mode = _compile_function(
+        "video_edit_recovery_mode",
+        {"video_edit_state_machine": video_edit_state_machine},
+    )
+    handler = _compile_function(
+        "handle_video_editor_pending_upload",
+        {
+            "get_video_editor_pending": lambda _uid: dict(state),
+            "get_video_session": lambda _uid: {"product_id": "product_video"},
+            "video_edit_recovery_mode": recovery_mode,
+            "video_edit_state_machine": video_edit_state_machine,
+            "safe_int": lambda value, default=0: int(value or default),
+            "clear_video_editor_competing_video_states": lambda uid, _context: clear_calls.append(uid),
+            "get_user_language": lambda _uid: "vi",
+            "video_editor_aux_source_from_update": lambda _update, _kind: {},
+            "video_editor_source_from_update": lambda _update: {},
+            "video_local_input_keyboard": lambda *_args, **_kwargs: "input-keyboard",
+            "video_local_public_error": lambda reason: reason,
+        },
+    )
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=78),
+        message=Message(),
+    )
+
+    assert asyncio.run(handler(update, SimpleNamespace(user_data={}))) is False
+    assert clear_calls == []
+    assert replies == []
 
 
 def test_edit3_invalid_upload_replies_once_and_keeps_active_lane() -> None:
@@ -246,12 +412,13 @@ def test_edit3_single_registered_video_media_gateway_and_read_only_legacy_callba
     assert BOT_SOURCE.count("async def handle_video_editor_pending_upload(") == 1
 
     callback = _function_source("handle_video_editor_callback")
-    legacy_start = callback.index('if raw_action in {"audio", "audio_upload"')
-    legacy_end = callback.index("action = video_editor_normalize_action(raw_action)")
-    legacy = callback[legacy_start:legacy_end]
-    assert "set_video_editor_pending" not in legacy
-    assert "update_video_editor_pending" not in legacy
-    assert "clear_video_editor_pending" not in legacy
+    compatibility_start = callback.index("requested_group = video_edit_state_machine.requested_group(raw_action)")
+    compatibility_end = callback.index("if action == \"guide\"")
+    compatibility = callback[compatibility_start:compatibility_end]
+    assert "canonical_compatibility_action(raw_action)" in compatibility
+    assert "set_video_editor_pending" not in compatibility
+    assert "update_video_editor_pending" not in compatibility
+    assert "clear_video_editor_pending" not in compatibility
 
 
 def test_edit3_probe_contract_exposes_required_local_metadata_without_side_effects() -> None:

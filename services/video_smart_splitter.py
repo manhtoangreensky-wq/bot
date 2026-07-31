@@ -111,7 +111,7 @@ def _validate_duration(source_duration_ms: int) -> int:
 
 def _validate_part_count(count: int, *, maximum: int = MAX_SPLIT_PARTS) -> int:
     count = int(count or 0)
-    if count <= 0:
+    if count < 2:
         raise SplitPlanError("part_count_invalid")
     if count > int(maximum):
         raise SplitPlanError("too_many_parts")
@@ -130,10 +130,19 @@ def split_fixed_duration(
     if segment < int(minimum_segment_ms):
         raise SplitPlanError("segment_too_short")
     count = _validate_part_count(math.ceil(duration / segment), maximum=maximum_parts)
-    return [
+    ranges = [
         SplitRange(index=index + 1, start_ms=index * segment, end_ms=min((index + 1) * segment, duration))
         for index in range(count)
     ]
+    if len(ranges) > 1 and ranges[-1].duration_ms < int(minimum_segment_ms):
+        previous = ranges[-2]
+        ranges[-2] = SplitRange(
+            index=previous.index,
+            start_ms=previous.start_ms,
+            end_ms=ranges[-1].end_ms,
+        )
+        ranges.pop()
+    return ranges
 
 
 def split_exact_count(
@@ -182,7 +191,10 @@ def split_custom_ranges(
         raw_items = [line.strip() for line in re.split(r"[\r\n;]+", ranges) if line.strip()]
     else:
         raw_items = list(ranges or [])
-    _validate_part_count(len(raw_items), maximum=maximum_parts)
+    if not raw_items:
+        _validate_part_count(0, maximum=maximum_parts)
+    if len(raw_items) > int(maximum_parts):
+        raise SplitPlanError("too_many_parts")
     parsed: list[tuple[int, int]] = []
     for item in raw_items:
         if isinstance(item, (tuple, list)) and len(item) == 2:
@@ -196,6 +208,7 @@ def split_custom_ranges(
         if end_ms - start_ms < int(minimum_segment_ms):
             raise SplitPlanError("segment_too_short")
         parsed.append((start_ms, end_ms))
+    _validate_part_count(len(parsed), maximum=maximum_parts)
     if len(set(parsed)) != len(parsed):
         raise SplitPlanError("duplicate_range")
     if sort_ranges:

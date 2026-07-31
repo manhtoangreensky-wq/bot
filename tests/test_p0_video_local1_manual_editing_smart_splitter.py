@@ -118,20 +118,34 @@ def test_local1_exact_back_from_options() -> None:
     manual = _between(BOT_SOURCE, "def video_local_manual_options_keyboard", "def video_local_split_options_text")
     split = _between(BOT_SOURCE, "def video_local_split_options_keyboard", "def video_local_choice_keyboard")
     assert '"videoedit|source_summary"' in manual
-    assert 'back_target = "videoedit|options|manual"' in split
+    assert 'safe_parent = getattr(state_machine, "safe_parent_callback"' in split
+    assert "back_target = safe_parent(" in split
+    assert '(state or {}).get("parent_callback") or "videoedit|cut"' in split
 
 
 def test_local1_exact_back_from_confirmation() -> None:
-    source = _between(BOT_SOURCE, "def video_local_confirmation_keyboard", "def video_editor_menu_text")
-    assert 'f"videoedit|options|{tool}"' in source
+    source = _between(BOT_SOURCE, "def video_local_review_keyboard", "def video_editor_menu_text")
+    assert '"videoedit|workspace"' in source
+    assert '"videoedit|review"' in source
+    assert 'f"videoedit|options|{tool}"' not in source
 
 
 def test_local1_no_processing_before_confirm() -> None:
     callback = _between(BOT_SOURCE, "async def handle_video_editor_callback", "async def handle_video_upload_callback")
-    tail_callback = _between(BOT_SOURCE, "async def handle_video_tail_callback", "async def handle_video_editor_callback")
     assert callback.count("submit_local_video_editor_job(") == 0
-    assert tail_callback.count("await submit_local_video_editor_job(") == 1
-    assert callback.index('if action == "start"') < callback.index('return await video_tail9_render(query, uid, context, "review")', callback.index('if action == "start"'))
+    assert callback.count("submit_video_edit_local_free_job(update, context, state)") == 1
+    confirm_start = callback.index('if action == "confirm_local":')
+    confirm_end = callback.find('\n    if action == "', confirm_start + 1)
+    confirm_block = callback[confirm_start:confirm_end if confirm_end >= 0 else len(callback)]
+    assert "submit_video_edit_local_free_job(update, context, state)" in confirm_block
+    for action in ("ai_confirm", "start"):
+        action_start = callback.index(f'if action == "{action}":')
+        next_action = callback.find('\n    if action == "', action_start + 1)
+        action_block = callback[action_start:next_action if next_action >= 0 else len(callback)]
+        assert "submit_video_edit_local_free_job(update, context, state)" not in action_block
+        assert "video_local_confirmation_text" in action_block
+        assert "video_local_confirmation_keyboard" in action_block
+    assert "video_tail9_render" not in callback[callback.index('if action == "review"'):]
     assert "subprocess.run" not in callback
     submit = _between(BOT_SOURCE, "async def submit_local_video_editor_job", "async def handle_video_editor_pending_upload")
     assert submit.count("video_editengine1.create_job(") == 1
@@ -167,7 +181,8 @@ def test_local1_concat_multiple_videos() -> None:
     source = inspect.getsource(editing._normalize_concat_inputs)
     assert "concat_normalized_" in source
     assert '"-f", "concat", "-safe", "0"' in source
-    assert "scale=1280:720" in source
+    assert "target_width" in source and "target_height" in source
+    assert "scale=1280:720" not in source
     assert "anullsrc" in source
 
 
@@ -187,12 +202,66 @@ def test_local1_concat_manifest_is_python311_safe_and_escapes_paths() -> None:
     assert "replace(chr(39)" not in source
 
 
+@pytest.mark.parametrize(
+    ("ranges", "duration_ms", "reason"),
+    [
+        (
+            [splitter.SplitRange(index=1, start_ms=0, end_ms=10_000)],
+            10_000,
+            "split_part_count_invalid",
+        ),
+        (
+            [splitter.SplitRange(index=1, start_ms=0, end_ms=5_000), splitter.SplitRange(index=1, start_ms=5_000, end_ms=10_000)],
+            10_000,
+            "split_index_invalid",
+        ),
+        (
+            [splitter.SplitRange(index=1, start_ms=0, end_ms=1_000), splitter.SplitRange(index=2, start_ms=1_000, end_ms=10_000)],
+            10_000,
+            "split_part_too_short",
+        ),
+        (
+            [splitter.SplitRange(index=index, start_ms=(index - 1) * 2_000, end_ms=index * 2_000) for index in range(1, 32)],
+            62_000,
+            "split_part_count_invalid",
+        ),
+    ],
+)
+def test_worker_split_contract_rejects_unsafe_ranges_before_ffmpeg(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    ranges: list[splitter.SplitRange],
+    duration_ms: int,
+    reason: str,
+) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    monkeypatch.setattr(editing, "find_ffmpeg", lambda _path="": "ffmpeg")
+    monkeypatch.setattr(editing, "find_ffprobe", lambda _path="", ffmpeg_path="": "ffprobe")
+    monkeypatch.setattr(editing, "probe_video_file", lambda *_args, **_kwargs: _probe(duration_ms))
+    monkeypatch.setattr(
+        editing,
+        "_run_checked",
+        lambda *_args, **_kwargs: pytest.fail("FFmpeg must not run for an invalid split contract"),
+    )
+
+    with pytest.raises(editing.LocalVideoEditError, match=reason):
+        editing.execute_split_plan(
+            str(source),
+            ranges,
+            workspace=tmp_path,
+            coverage_required=True,
+            ffmpeg_path="ffmpeg",
+            ffprobe_path="ffprobe",
+        )
+
+
 def test_local1_aspect_ratio_9_16(tmp_path: Path) -> None:
     plan = _plan(tmp_path)
     plan["crop_or_fit"] = {"aspect_ratio": "9:16", "mode": "crop"}
     command = _manual_command(tmp_path, plan)
-    assert "scale=1080:1920" in _joined(command)
-    assert "crop=1080:1920" in _joined(command)
+    assert "scale=608:1080" in _joined(command)
+    assert "crop=608:1080" in _joined(command)
 
 
 def test_local1_aspect_ratio_16_9(tmp_path: Path) -> None:
@@ -201,6 +270,51 @@ def test_local1_aspect_ratio_16_9(tmp_path: Path) -> None:
     command = _manual_command(tmp_path, plan)
     assert "scale=1920:1080" in _joined(command)
     assert "pad=1920:1080" in _joined(command)
+
+
+@pytest.mark.parametrize(
+    ("aspect", "resolution", "mode", "width", "height"),
+    [
+        ("16:9", "keep", "fit", 1920, 1080),
+        ("16:9", "720p", "crop", 1280, 720),
+        ("16:9", "1080p", "fit", 1920, 1080),
+        ("9:16", "keep", "fit", 608, 1080),
+        ("9:16", "720p", "crop", 720, 1280),
+        ("9:16", "1080p", "fit", 1080, 1920),
+        ("1:1", "keep", "fit", 1080, 1080),
+        ("1:1", "720p", "crop", 720, 720),
+        ("1:1", "1080p", "fit", 1080, 1080),
+        ("4:5", "keep", "fit", 864, 1080),
+        ("4:5", "720p", "crop", 720, 900),
+        ("4:5", "1080p", "fit", 1080, 1350),
+    ],
+)
+def test_local1_all_public_aspects_cover_keep_720p_and_1080p(
+    tmp_path: Path,
+    aspect: str,
+    resolution: str,
+    mode: str,
+    width: int,
+    height: int,
+) -> None:
+    plan = _plan(tmp_path)
+    plan["crop_or_fit"] = {"aspect_ratio": aspect, "mode": mode}
+    plan["resolution"] = resolution
+    command = _joined(_manual_command(tmp_path, plan))
+    geometry_filter = "crop" if mode == "crop" else "pad"
+    assert f"scale={width}:{height}" in command
+    assert f"{geometry_filter}={width}:{height}" in command
+
+
+def test_local1_keep_resolution_never_upscales_a_small_source_for_new_aspect(tmp_path: Path) -> None:
+    plan = _plan(tmp_path)
+    plan["crop_or_fit"] = {"aspect_ratio": "9:16", "mode": "fit"}
+    plan["resolution"] = "keep"
+    command = _joined(_manual_command(tmp_path, plan, probe=_probe(width=640, height=360)))
+
+    assert "scale=202:360" in command
+    assert "pad=202:360" in command
+    assert "1080:1920" not in command
 
 
 def test_local1_resize_720p(tmp_path: Path) -> None:
@@ -221,10 +335,32 @@ def test_local1_rotate(tmp_path: Path) -> None:
     assert "transpose=1" in _joined(_manual_command(tmp_path, plan))
 
 
+@pytest.mark.parametrize(
+    ("rotation", "expected_filters"),
+    [(90, ("transpose=1",)), (180, ("hflip", "vflip")), (270, ("transpose=2",))],
+)
+def test_local1_every_public_rotation_compiles(
+    tmp_path: Path,
+    rotation: int,
+    expected_filters: tuple[str, ...],
+) -> None:
+    plan = _plan(tmp_path)
+    plan["rotation"] = rotation
+    command = _joined(_manual_command(tmp_path, plan))
+    assert all(item in command for item in expected_filters)
+
+
 def test_local1_flip(tmp_path: Path) -> None:
     plan = _plan(tmp_path)
     plan["flip"] = "horizontal"
     assert "hflip" in _joined(_manual_command(tmp_path, plan))
+
+
+@pytest.mark.parametrize(("flip", "expected_filter"), [("horizontal", "hflip"), ("vertical", "vflip")])
+def test_local1_every_public_flip_compiles(tmp_path: Path, flip: str, expected_filter: str) -> None:
+    plan = _plan(tmp_path)
+    plan["flip"] = flip
+    assert expected_filter in _joined(_manual_command(tmp_path, plan))
 
 
 def test_local1_speed_video_and_audio_sync(tmp_path: Path) -> None:
@@ -263,8 +399,33 @@ def test_local1_logo_overlay(tmp_path: Path) -> None:
     plan = _plan(tmp_path)
     plan["logo_overlay"] = {"path": str(logo), "position": "top_right", "scale": 0.12, "opacity": 0.75}
     joined = _joined(_manual_command(tmp_path, plan))
-    assert "scale2ref" in joined and "overlay=" in joined
+    assert "scale=w=230:h=-2" in joined and "overlay=" in joined
+    assert "scale2ref" not in joined
     assert "aa=0.750" in joined
+
+
+def test_local1_logo_scale_uses_final_rotated_frame_width(tmp_path: Path) -> None:
+    logo = tmp_path / "logo.webp"
+    logo.write_bytes(b"logo")
+    plan = _plan(tmp_path)
+    plan["rotation"] = 90
+    plan["logo_overlay"] = {
+        "path": str(logo),
+        "position": "bottom_left",
+        "scale": 0.12,
+        "opacity": 1.0,
+    }
+
+    joined = _joined(_manual_command(tmp_path, plan, _probe(width=1920, height=1080)))
+
+    # Rotation swaps the final frame to 1080x1920, so 12% width rounds to 130px.
+    assert "scale=w=130:h=-2" in joined
+    assert "scale2ref" not in joined
+
+
+def test_local1_webp_logo_is_accepted_by_intake_and_worker_contract() -> None:
+    assert ".webp" in validation.ALLOWED_LOGO_EXTENSIONS
+    assert validation.validate_extension("brand.webp", validation.ALLOWED_LOGO_EXTENSIONS) == "brand.webp"
 
 
 def test_local1_burn_srt(tmp_path: Path) -> None:
@@ -282,6 +443,27 @@ def test_local1_color_preset(tmp_path: Path) -> None:
     plan = _plan(tmp_path)
     plan["color_preset"] = "warm"
     assert "colorbalance=" in _joined(_manual_command(tmp_path, plan))
+
+
+@pytest.mark.parametrize(
+    ("preset", "expected_filter"),
+    [
+        ("bright_clear", "eq=brightness=0.025"),
+        ("light_cinematic", "eq=brightness=-0.01"),
+        ("warm", "colorbalance=rs=0.06"),
+        ("cool", "colorbalance=rs=-0.04"),
+        ("high_contrast", "eq=contrast=1.25"),
+        ("black_white", "hue=s=0"),
+    ],
+)
+def test_local1_every_public_color_preset_compiles_to_ffmpeg(
+    tmp_path: Path,
+    preset: str,
+    expected_filter: str,
+) -> None:
+    plan = _plan(tmp_path)
+    plan["color_preset"] = preset
+    assert expected_filter in _joined(_manual_command(tmp_path, plan))
 
 
 def test_local1_no_shell_true() -> None:
@@ -306,6 +488,12 @@ def test_local1_split_fixed_duration_exact_coverage() -> None:
 def test_local1_split_fixed_duration_last_part_shorter() -> None:
     ranges = splitter.split_fixed_duration(95_000, 30_000)
     assert [item.duration_ms for item in ranges] == [30_000, 30_000, 30_000, 5_000]
+
+
+def test_local1_split_fixed_duration_merges_a_remainder_below_the_minimum() -> None:
+    ranges = splitter.split_fixed_duration(5_000, 2_000)
+    assert [item.duration_ms for item in ranges] == [2_000, 3_000]
+    assert splitter.validate_exact_coverage(ranges, 5_000)["ok"] is True
 
 
 def test_local1_split_exact_part_count() -> None:
@@ -349,13 +537,21 @@ def test_local1_split_reject_end_after_duration() -> None:
 
 
 def test_local1_split_short_video() -> None:
-    ranges = splitter.split_fixed_duration(3_000, 10_000)
-    assert len(ranges) == 1 and ranges[0].duration_ms == 3_000
+    with pytest.raises(splitter.SplitPlanError, match="part_count_invalid"):
+        splitter.split_fixed_duration(3_000, 10_000)
 
 
 def test_local1_split_one_part() -> None:
-    ranges = splitter.split_exact_count(60_000, 1)
-    assert ranges[0].start_ms == 0 and ranges[0].end_ms == 60_000
+    with pytest.raises(splitter.SplitPlanError, match="part_count_invalid"):
+        splitter.split_exact_count(60_000, 1)
+
+
+def test_local1_full_source_single_range_is_not_an_effective_edit() -> None:
+    assert editing.plan_has_effective_operation(
+        {},
+        source_duration_ms=60_000,
+        split_ranges=[{"index": 1, "start_ms": 0, "end_ms": 60_000}],
+    ) is False
 
 
 def test_local1_outputs_named_in_order() -> None:
@@ -497,7 +693,8 @@ def test_local1_split_progress_part_count() -> None:
 def test_local1_no_success_before_delivery() -> None:
     worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
     assert worker.index("telegram_send_video_receipt(") < worker.index('terminal_status = "succeeded"')
-    assert worker.index('if not delivery.get("sent")') < worker.index('terminal_status = "succeeded"')
+    assert worker.index("telegram_delivery_identity(delivery)") < worker.index('terminal_status = "succeeded"')
+    assert worker.index('if delivery.get("sent") is True') < worker.index('terminal_status = "succeeded"')
 
 
 def test_local1_single_terminal_outcome() -> None:
@@ -509,9 +706,12 @@ def test_local1_single_terminal_outcome() -> None:
 def test_local1_cleanup_failure_does_not_reverse_completed_delivery() -> None:
     worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
     finally_block = worker.split("finally:", 1)[1]
-    assert 'terminal_status == "succeeded" and output_file_ids' in finally_block
-    assert 'delivered_detail["cleanup"] = "failed"' in finally_block
-    assert finally_block.index('terminal_status == "succeeded"') < finally_block.rindex('terminal_status = "failed"')
+    helper = _between(WORKER_SOURCE, "def finalize_video_local_cleanup_state", "def run_video_local_edit")
+    assert "finalize_video_local_cleanup_state(" in finally_block
+    assert "if delivery_receipts or delivery_was_uncertain:" in helper
+    assert 'if str(detail.get("stage") or "").lower() != "delivered"' in helper
+    assert 'detail["cleanup"] = "failed"' in helper
+    assert 'return str(terminal_status or "failed"), detail' in helper
 
 
 def test_local1_no_duplicate_delivery() -> None:
@@ -737,9 +937,8 @@ def test_local1_real_ffmpeg_split_outputs_valid_ordered_mp4(tmp_path: Path) -> N
     )
     assert result["ok"] is True
     assert [Path(item["path"]).name for item in result["outputs"]] == [
-        "toan_aas_part_001_of_003.mp4",
-        "toan_aas_part_002_of_003.mp4",
-        "toan_aas_part_003_of_003.mp4",
+        "toan_aas_part_001_of_002.mp4",
+        "toan_aas_part_002_of_002.mp4",
     ]
     assert all(item["validation"]["ok"] and item["validation"]["has_audio"] for item in result["outputs"])
     assert abs(int(result["actual_total_duration_ms"]) - int(result["source_duration_ms"])) <= 2_500

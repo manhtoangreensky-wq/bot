@@ -373,7 +373,10 @@ def test_tail_context_hydrates_handoff_before_compiling_the_commercial_contract(
 def test_product_media_intake_failures_stay_inside_their_own_product_owner() -> None:
     assert "async def recover_product_video_media_failure(" in BOT_SOURCE
     assert "def product_video_media_failure_guard(media_handler):" in BOT_SOURCE
-    assert "@product_video_media_failure_guard\nasync def handle_video_editor_pending_upload" in BOT_SOURCE
+    assert (
+        "@product_video_media_failure_guard\n@video_editor_message_state_guard\n"
+        "async def handle_video_editor_pending_upload"
+    ) in BOT_SOURCE
     assert "@product_video_media_failure_guard\nasync def handle_frame_video_pending_media" in BOT_SOURCE
 
     recovery_start = BOT_SOURCE.index("async def recover_product_video_media_failure(")
@@ -382,7 +385,7 @@ def test_product_media_intake_failures_stay_inside_their_own_product_owner() -> 
     assert 'handler_name == "handle_video_editor_pending_upload"' in recovery
     assert 'handler_name == "handle_frame_video_pending_media"' in recovery
     assert "video_edit_lane_upload_keyboard(mode, lang)" in recovery
-    assert "video_local_manual_options_keyboard(lang)" in recovery
+    assert "video_local_manual_options_keyboard(lang, current)" in recovery
     assert "frame_video3_current_screen(state, lang)" in recovery
     assert "last_recovery_message_id" in recovery
     assert "last_media_recovery_message_id" in recovery

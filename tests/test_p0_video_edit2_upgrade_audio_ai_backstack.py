@@ -45,10 +45,12 @@ def test_edit2_manual_menu_exposes_only_truthful_operations() -> None:
     for label in (
         "Cắt & chia đoạn",
         "Ghép & sắp xếp",
-        "Chỉnh âm thanh",
-        "Hiệu ứng & chuyển động",
-        "Đổi tốc độ",
-        "Xoay / lật",
+        "Khung hình & kích thước",
+        "Tốc độ, xoay & lật",
+        "Âm thanh",
+        "Ánh sáng & màu",
+        "Chữ, logo & phụ đề",
+        "Hiệu ứng local",
         "Cắt đầu/cuối",
         "Bỏ đoạn giữa",
         "Chia thành nhiều đoạn",
@@ -60,8 +62,8 @@ def test_edit2_manual_menu_exposes_only_truthful_operations() -> None:
         assert label in block
     assert "Đặt lại thao tác" not in block
     assert "videoedit|reset_manual" not in block
-    for removed in ("aspect", "resolution", "volume", "srt", "text_overlay", "logo", "color_preset"):
-        assert f'videoedit|{removed}' not in block
+    for callback in ("aspect", "resolution", "srt", "text_overlay", "logo", "color_preset"):
+        assert f'videoedit|{callback}' in block
 
 
 def test_edit2_audio_truth_and_volume_choices() -> None:
@@ -94,13 +96,32 @@ def test_edit2_capability_registry_is_complete_and_truthful() -> None:
         "aspect_blur_background",
         "aspect_safe_zone",
         "enhance_upscale",
-        "enhance_denoise",
         "enhance_motion_deblur",
         "enhance_stabilize",
         "enhance_frame_interpolation",
         "enhance_old_video",
     ):
         assert video_edit_capabilities.capability(unavailable)["enabled"] is False
+
+    denoise = video_edit_capabilities.capability("enhance_denoise")
+    assert denoise["enabled"] is True
+    assert denoise["execution_owner"] == "video_local_editing"
+    assert denoise["local_or_provider"] == "local"
+    assert video_edit_capabilities.plan_patch("enhance_denoise") == {
+        "quality_filters": {"denoise": True}
+    }
+    admission = video_edit_capabilities.runtime_capability_admission(
+        "enhance_denoise",
+        available_filters={"format"},
+        filters_known=True,
+        has_audio=True,
+        worker_id="worker-video-edit",
+        filter_worker_id="worker-video-edit",
+        ffmpeg_path="C:/ffmpeg/bin/ffmpeg.exe",
+        filter_ffmpeg_path="C:/ffmpeg/bin/ffmpeg.exe",
+    )
+    assert admission["ready"] is False
+    assert admission["reason"] == "filter_missing:hqdn3d"
 
 
 def test_edit2_smart_aspect_does_not_claim_unwired_ai_features() -> None:
@@ -156,27 +177,15 @@ def test_edit2_back_stack_is_contextual() -> None:
 
 def test_edit2_legacy_callbacks_are_read_only_before_normalization() -> None:
     handler = _between("async def handle_video_editor_callback", "async def handle_video_upload_callback")
-    early = handler.index('if raw_action == "quick"')
+    early = handler.index("requested_group = video_edit_state_machine.requested_group(raw_action)")
     normalize = handler.index("action = video_editor_normalize_action(raw_action)")
-    old_mutating = handler.index('if action == "quick"')
-    assert early < normalize < old_mutating
-    read_only = handler[early:normalize]
+    first_action = handler.index('if action == "guide"')
+    assert early < normalize < first_action
+    read_only = handler[early:first_action]
+    assert "canonical_compatibility_action(raw_action)" in read_only
     assert "clear_video_editor_pending" not in read_only
     assert "set_video_editor_pending" not in read_only
     assert "submit" not in read_only.lower()
-    for removed in (
-        "aspect",
-        "resolution",
-        "volume",
-        "color_preset",
-        "text_overlay",
-        "logo",
-        "srt",
-        "compress",
-        "reset_manual",
-        "cut",
-    ):
-        assert f'"{removed}"' in read_only
 
 
 def test_edit2_local_suggestions_are_rule_based_default_off_and_side_effect_free() -> None:
