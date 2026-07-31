@@ -109,6 +109,227 @@ def _positive_user_id(value: Any) -> int:
 
 _AUTO_SELECTIONS = frozenset({"auto", "auto_product", "auto_provider"})
 
+DURABLE_ROUTE_SELECTION_VERSION = "videomenu_routeengine29m_v1"
+
+_DURABLE_EXPLICIT_ENGINE_PRODUCTS = {
+    "animated_video": VideoProduct.ANIMATED_VIDEO,
+    "human_ai_video": VideoProduct.HUMAN_AI_VIDEO,
+    "product_video": VideoProduct.PRODUCT_VIDEO,
+    "summary_video": VideoProduct.SUMMARY_VIDEO,
+    "podcast_video": VideoProduct.PODCAST_VIDEO,
+    "frame_video": VideoProduct.FRAME_VIDEO,
+    "video_editing": VideoProduct.VIDEO_EDITING,
+}
+_DURABLE_HUMAN_PRODUCT_TYPES = frozenset(
+    {"self_shot_scene_change", "self_shot_cinematic_transform"}
+)
+
+
+def _durable_selection_failure(blocker: str) -> dict[str, Any]:
+    return {
+        "selection_version": DURABLE_ROUTE_SELECTION_VERSION,
+        "selection_ok": False,
+        "engine_product": "",
+        "mode": "",
+        "scene_count": 0,
+        "public_product_type": "",
+        "selection_source": "",
+        "primary_profile": "",
+        "technical_profile": "",
+        "route_selection_sha256": "",
+        "blocker": _clean_text(blocker),
+    }
+
+
+def _durable_json_container(value: Any, expected_type: type) -> tuple[Any, bool]:
+    if value in (None, ""):
+        return expected_type(), True
+    if isinstance(value, expected_type):
+        if expected_type is dict:
+            return dict(value), True
+        return list(value), True
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return expected_type(), False
+    if not isinstance(parsed, expected_type):
+        return expected_type(), False
+    return parsed, True
+
+
+def _durable_engine_product_for_public_product(value: Any) -> VideoProduct | None:
+    token = _clean_text(value).lower().replace("-", "_")
+    if not token:
+        return None
+    explicit = _DURABLE_EXPLICIT_ENGINE_PRODUCTS.get(token)
+    if explicit is not None:
+        return explicit
+
+    from services import video_final_output, video_tail9
+
+    adapter_key = str(video_tail9.PRODUCT_ADAPTER_ALIASES.get(token, token))
+    adapter = video_tail9.PRODUCT_ADAPTERS.get(adapter_key)
+    if not isinstance(adapter, Mapping):
+        if token not in video_final_output.VIDEO_PRODUCT_ENGINE_ROUTES:
+            return None
+        if token == "video_local_edit":
+            return VideoProduct.VIDEO_EDITING
+        if token == "image_to_video":
+            return VideoProduct.FRAME_VIDEO
+        if token in _DURABLE_HUMAN_PRODUCT_TYPES:
+            return VideoProduct.HUMAN_AI_VIDEO
+        return VideoProduct.PRODUCT_VIDEO
+    if adapter_key == "video_local_edit":
+        return VideoProduct.VIDEO_EDITING
+    if (
+        str(adapter.get("pricing_mode") or "") == "frame_video"
+        or str(adapter.get("worker_owner") or "") == "frame_video"
+    ):
+        return VideoProduct.FRAME_VIDEO
+    if adapter_key in _DURABLE_HUMAN_PRODUCT_TYPES:
+        return VideoProduct.HUMAN_AI_VIDEO
+    return VideoProduct.PRODUCT_VIDEO
+
+
+def _durable_scene_count(
+    project: Mapping[str, Any],
+    asset_pack: Mapping[str, Any],
+    invoice: Mapping[str, Any],
+    scene_cards: list[Any],
+) -> tuple[int, str]:
+    counts: dict[str, int] = {}
+    for source, value in (
+        ("project", project.get("scene_count")),
+        ("asset_pack", asset_pack.get("scene_count")),
+        ("invoice", invoice.get("scene_count")),
+    ):
+        if value in (None, "", 0, "0"):
+            continue
+        if isinstance(value, bool):
+            return 0, "durable_scene_count_invalid"
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            return 0, "durable_scene_count_invalid"
+        if count <= 0 or str(value).strip() not in {str(count), f"+{count}"}:
+            return 0, "durable_scene_count_invalid"
+        counts[source] = count
+    if scene_cards:
+        counts["scene_cards"] = len(scene_cards)
+    if not counts:
+        return 0, "durable_scene_count_missing"
+    if len(set(counts.values())) != 1:
+        return 0, "durable_scene_count_mismatch"
+    return next(iter(counts.values())), ""
+
+
+def durable_video_product_route_selection(
+    project: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Select one engine product from immutable project data without side effects."""
+
+    if not isinstance(project, Mapping):
+        return _durable_selection_failure("durable_video_project_snapshot_invalid")
+
+    asset_pack, asset_ok = _durable_json_container(project.get("asset_pack_json"), dict)
+    invoice, invoice_ok = _durable_json_container(project.get("invoice_json"), dict)
+    story_bible, bible_ok = _durable_json_container(project.get("story_bible_json"), dict)
+    scene_cards, cards_ok = _durable_json_container(project.get("scene_cards_json"), list)
+    if not all((asset_ok, invoice_ok, bible_ok, cards_ok)):
+        return _durable_selection_failure("durable_video_project_snapshot_invalid")
+    if any(not isinstance(item, Mapping) for item in scene_cards):
+        return _durable_selection_failure("durable_video_project_snapshot_invalid")
+
+    candidates: list[tuple[str, str, VideoProduct]] = []
+    for source_name, source in (
+        ("asset_pack", asset_pack),
+        ("invoice", invoice),
+        ("story_bible", story_bible),
+        ("project", project),
+    ):
+        for field_name in ("public_product_type", "video_product_type", "product_type"):
+            value = _clean_text(source.get(field_name))
+            if not value:
+                continue
+            product = _durable_engine_product_for_public_product(value)
+            if product is None:
+                return _durable_selection_failure("durable_public_product_unsupported")
+            candidates.append((f"{source_name}.{field_name}", value, product))
+
+    if not candidates:
+        source = _clean_text(asset_pack.get("source") or invoice.get("source"))
+        if source != "product_video":
+            return _durable_selection_failure("durable_public_product_missing")
+        candidates.append(
+            (
+                "legacy_product_video_source",
+                "video_ai_prompt",
+                VideoProduct.PRODUCT_VIDEO,
+            )
+        )
+
+    products = {item[2] for item in candidates}
+    if len(products) != 1:
+        return _durable_selection_failure("durable_engine_product_mismatch")
+    engine_product = next(iter(products))
+    if engine_product is VideoProduct.VIDEO_EDITING:
+        return _durable_selection_failure("video_editing_scope_released")
+
+    public_product_type = candidates[0][1]
+    selection_source = (
+        "explicit_engine_product"
+        if public_product_type.lower().replace("-", "_")
+        in _DURABLE_EXPLICIT_ENGINE_PRODUCTS
+        else "locked_public_product"
+    )
+    primary_profile = _clean_text(
+        story_bible.get("primary_profile") or story_bible.get("primary_profile_key")
+    )
+    technical_profile = _clean_text(story_bible.get("technical_profile"))
+    if engine_product is VideoProduct.PRODUCT_VIDEO:
+        if primary_profile == "character_animation_vfx":
+            engine_product = VideoProduct.ANIMATED_VIDEO
+            selection_source = "primary_profile"
+        elif not primary_profile and technical_profile == "animation_2d_3d":
+            engine_product = VideoProduct.ANIMATED_VIDEO
+            selection_source = "legacy_technical_profile"
+
+    scene_count, count_blocker = _durable_scene_count(
+        project,
+        asset_pack,
+        invoice,
+        scene_cards,
+    )
+    if count_blocker:
+        return _durable_selection_failure(count_blocker)
+    mode = (
+        VideoEngineMode.SINGLE_SCENE
+        if scene_count == 1
+        else VideoEngineMode.MULTI_SCENE
+    )
+    material = {
+        "selection_version": DURABLE_ROUTE_SELECTION_VERSION,
+        "engine_product": engine_product.value,
+        "mode": mode.value,
+        "scene_count": scene_count,
+        "public_product_type": public_product_type,
+        "selection_source": selection_source,
+        "primary_profile": primary_profile,
+        "technical_profile": technical_profile,
+    }
+    encoded = json.dumps(
+        material,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return {
+        **material,
+        "selection_ok": True,
+        "route_selection_sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+        "blocker": "",
+    }
+
 
 @dataclass(frozen=True)
 class VideoEngineRequest:
