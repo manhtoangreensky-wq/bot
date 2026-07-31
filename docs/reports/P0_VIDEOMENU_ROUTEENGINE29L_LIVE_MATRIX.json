@@ -1,0 +1,620 @@
+{
+  "schema_version": "routeengine29l.v1",
+  "generated_from_main_sha": "94ad8a97d128cfcbbd3439ec602c5c2f9fbde225",
+  "locked_ui_milestone": "0cefd4b",
+  "scope": {
+    "included_products": [
+      "product_video",
+      "frame_video",
+      "animated_video",
+      "human_ai_video",
+      "summary_video",
+      "podcast_video"
+    ],
+    "excluded_products": {
+      "video_editing": {
+        "owner": "video_edit_task",
+        "reason": "Owner transferred the complete Video Edit route and engine scope to the dedicated Video Edit task.",
+        "route_engine_released": true,
+        "implementation_claimed_by_29l": false
+      }
+    }
+  },
+  "locked_flow_entry_mapping": {
+    "video_ai_realistic": {
+      "engine_product": "product_video",
+      "mode_policy": "single_or_multi",
+      "preserves_parent_state": true,
+      "public_flow_changed": false,
+      "back_route_changed": false
+    },
+    "video_trend": {
+      "engine_product": "product_video",
+      "mode_policy": "single_or_multi",
+      "preserves_parent_state": true,
+      "public_flow_changed": false,
+      "back_route_changed": false
+    },
+    "script_to_video": {
+      "engine_product": "product_video",
+      "mode_policy": "multi_scene_only",
+      "preserves_parent_state": true,
+      "public_flow_changed": false,
+      "back_route_changed": false
+    },
+    "storyboard_to_video": {
+      "engine_product": "product_video",
+      "mode_policy": "multi_scene_only",
+      "preserves_parent_state": true,
+      "public_flow_changed": false,
+      "back_route_changed": false
+    },
+    "video_idea": {
+      "engine_product": "product_video",
+      "mode_policy": "single_or_multi",
+      "preserves_parent_state": true,
+      "public_flow_changed": false,
+      "back_route_changed": false
+    },
+    "frame_to_video": {
+      "engine_product": "frame_video",
+      "mode_policy": "single_or_multi",
+      "preserves_parent_state": true,
+      "public_flow_changed": false,
+      "back_route_changed": false
+    },
+    "selfshot_scene_change": {
+      "engine_product": "human_ai_video",
+      "mode_policy": "owner_footage_single_or_multi",
+      "preserves_parent_state": true,
+      "public_flow_changed": false,
+      "back_route_changed": false
+    },
+    "selfshot_cinematic": {
+      "engine_product": "human_ai_video",
+      "mode_policy": "owner_footage_single_or_multi",
+      "preserves_parent_state": true,
+      "public_flow_changed": false,
+      "back_route_changed": false
+    },
+    "animated_video": {
+      "engine_product": "animated_video",
+      "mode_policy": "independent_default_off",
+      "preserves_parent_state": true,
+      "public_flow_changed": false,
+      "back_route_changed": false
+    },
+    "summary_video": {
+      "engine_product": "summary_video",
+      "mode_policy": "independent_default_off",
+      "preserves_parent_state": true,
+      "public_flow_changed": false,
+      "back_route_changed": false
+    },
+    "podcast_video": {
+      "engine_product": "podcast_video",
+      "mode_policy": "independent_default_off",
+      "preserves_parent_state": true,
+      "public_flow_changed": false,
+      "back_route_changed": false
+    }
+  },
+  "worker": {
+    "shared_contract_head_sha": "e4c5b043c33b76f878afa72af778df78732f874c",
+    "shared_contract_merge_sha": "518532bc9ecf9c3819a150859ff8587382be1c37",
+    "last_verified_worker_sha": "2622328872800abc08ec44372d49e05e8433618a",
+    "expected_runtime_sha": "94ad8a97d128cfcbbd3439ec602c5c2f9fbde225",
+    "current_worker_sha": null,
+    "worker_sha_match": "UNVERIFIED",
+    "heartbeat": "UNVERIFIED",
+    "dispatch_allowed": false,
+    "blocker": "worker_current_runtime_unverified"
+  },
+  "regression_evidence": {
+    "accepted_29b_29k_passed": 245,
+    "accepted_29b_29l_passed": 252,
+    "focused_29k_passed": 24,
+    "focused_29l_passed": 7,
+    "locked_ui_branch_passed": 144,
+    "locked_ui_clean_main_passed": 144,
+    "ffmpeg_security_output_passed": 102,
+    "new_failures": 0,
+    "snapshot_updates": 0,
+    "ui_files_changed": 0
+  },
+  "products": [
+    {
+      "product_type": "product_video",
+      "display_name": "Product Video",
+      "route_head_shas": [
+        "e4c5b043c33b76f878afa72af778df78732f874c",
+        "5673e20ad0df6b9afa73c859ec91bbabba3ba904",
+        "b7be4cad494f2f690f3091a40fb6b6042db5460a",
+        "7b5f1a1636a9854fbeda5b0701c3e112cd9f6dcf"
+      ],
+      "merge_shas": [
+        "518532bc9ecf9c3819a150859ff8587382be1c37",
+        "0a67763783620820a62dbd2328ea174b9703d12a",
+        "3344ce1228cc04769d8a9bbbd92b3899081f69c6",
+        "8e54a083407c893939c0ba2f3fcc7ee1d8457ccb"
+      ],
+      "engine_files": [
+        "services/product_video_one_scene_engine.py",
+        "services/product_video_poll_recovery.py",
+        "services/product_video_multiscene_engine.py"
+      ],
+      "modes": ["single_scene", "multi_scene"],
+      "flow_contract": [
+        "locked final confirmation",
+        "one durable job",
+        "explicit fixture or approved provider dispatch",
+        "poll the same accepted task",
+        "validate every required scene",
+        "compose once and validate final MP4",
+        "deliver, persist receipt, charge, and report exactly once"
+      ],
+      "prompt_contract": [
+        "original prompt and approved product profile",
+        "subject, product geometry, brand, and reference fingerprints",
+        "per-scene start state, complete action, and end state",
+        "camera, motion, duration, aspect ratio, audio, add-ons, logo, and watermark",
+        "explicit provider and model per scene with no automatic fallback"
+      ],
+      "offline_fixture": {
+        "status": "PASS",
+        "focused_tests": {"29c_one_scene": 34, "29d_recovery": 30, "29e_multi_scene": 60},
+        "artifact_kind": "real_local_mp4",
+        "mp4_bytes": "asserted_gt_zero_not_retained",
+        "duration_seconds": "asserted_positive_not_retained",
+        "codec": "ffprobe_validated_not_retained",
+        "resolution": "ffprobe_validated_not_retained",
+        "fixture_provider_calls": {"single_scene": 1, "multi_scene": "one_per_scene_for_2_and_3_scene_rehearsals"},
+        "real_provider_calls": 0,
+        "paid_provider_calls": 0,
+        "wallet_mutations": 0,
+        "production_telegram_deliveries": 0
+      },
+      "production": {
+        "route_state": "PROFILE_ONLY_DEFAULT_OFF",
+        "live_pass": false,
+        "deployment_id": null,
+        "admin_live_smoke_job": null,
+        "mp4_bytes": null,
+        "duration_seconds": null,
+        "codec": null,
+        "resolution": null,
+        "provider_submit_count": 0,
+        "real_provider_calls": 0,
+        "paid_provider_calls": 0,
+        "delivery_count": null,
+        "receipt_count": null,
+        "report_count": null,
+        "duplicate_submit": 0,
+        "duplicate_delivery": 0,
+        "stuck_jobs": 0,
+        "wallet_mutations": 0,
+        "admin_charge_xu": 0,
+        "blockers": [
+          "engine_public_and_real_provider_flags_default_off",
+          "worker_current_runtime_unverified",
+          "production_deployment_and_live_artifact_not_run"
+        ]
+      },
+      "rollback": {
+        "default_flags": {
+          "PRODUCT_VIDEO_ONE_SCENE_ENGINE_ENABLED": false,
+          "PRODUCT_VIDEO_ONE_SCENE_PUBLIC_ALLOWED": false,
+          "PRODUCT_VIDEO_ONE_SCENE_REAL_PROVIDER_ENABLED": false,
+          "PRODUCT_VIDEO_ONE_SCENE_AUTO_RETRY": false,
+          "PRODUCT_VIDEO_ONE_SCENE_AUTO_FALLBACK": false,
+          "PRODUCT_VIDEO_MULTISCENE_ENGINE_ENABLED": false,
+          "PRODUCT_VIDEO_MULTISCENE_PUBLIC_ALLOWED": false,
+          "PRODUCT_VIDEO_MULTISCENE_REAL_PROVIDER_ENABLED": false,
+          "PRODUCT_VIDEO_MULTISCENE_AUTO_RESUBMIT": false,
+          "PRODUCT_VIDEO_MULTISCENE_AUTO_FALLBACK": false
+        },
+        "provider_control": "explicit_default_off_flag",
+        "dispatch_allowed_by_default": false,
+        "automatic_paid_retry": false,
+        "automatic_paid_fallback": false
+      }
+    },
+    {
+      "product_type": "frame_video",
+      "display_name": "Frame Video",
+      "route_head_shas": [
+        "e4c5b043c33b76f878afa72af778df78732f874c",
+        "dbec053b1f7b1685646d35d9cb8e303d2a142d12"
+      ],
+      "merge_shas": [
+        "518532bc9ecf9c3819a150859ff8587382be1c37",
+        "5ba9a2dd8054f3cdaac380fc92b4866509d571f7"
+      ],
+      "engine_files": ["services/frame_video_engine.py", "services/frame_video_runtime.py"],
+      "modes": ["single_scene", "multi_scene"],
+      "flow_contract": [
+        "validate ordered rights-approved frames",
+        "freeze duration, fit or crop, motion, and transition per frame",
+        "render locally without a cloud provider",
+        "apply approved text, audio, logo, and watermark",
+        "validate frame coverage, order, audio promise, and full MP4 decode"
+      ],
+      "prompt_contract": [
+        "frame fingerprints and exact order",
+        "per-frame hold, motion, framing, and transition",
+        "aspect ratio, output profile, text, audio, and branding selections",
+        "no claim of unseen content, lip-sync, character animation, or true 3D orbit"
+      ],
+      "offline_fixture": {
+        "status": "PASS",
+        "focused_tests": {"29f_frame_engine": 21},
+        "artifact_kind": "real_local_mp4",
+        "mp4_bytes": "asserted_gt_zero_not_retained",
+        "duration_seconds": "asserted_positive_not_retained",
+        "codec": "ffprobe_validated_not_retained",
+        "resolution": "ffprobe_validated_not_retained",
+        "fixture_provider_calls": 0,
+        "real_provider_calls": 0,
+        "paid_provider_calls": 0,
+        "wallet_mutations": 0,
+        "production_telegram_deliveries": 0
+      },
+      "production": {
+        "route_state": "CONNECTED_ENGINE_DISABLED_DEFAULT_OFF",
+        "live_pass": false,
+        "deployment_id": null,
+        "admin_live_smoke_job": null,
+        "mp4_bytes": null,
+        "duration_seconds": null,
+        "codec": null,
+        "resolution": null,
+        "provider_submit_count": 0,
+        "real_provider_calls": 0,
+        "paid_provider_calls": 0,
+        "delivery_count": null,
+        "receipt_count": null,
+        "report_count": null,
+        "duplicate_submit": 0,
+        "duplicate_delivery": 0,
+        "stuck_jobs": 0,
+        "wallet_mutations": 0,
+        "admin_charge_xu": 0,
+        "blockers": ["engine_and_public_flags_default_off", "worker_current_runtime_unverified", "production_live_delivery_not_run"]
+      },
+      "rollback": {
+        "default_flags": {
+          "FRAME_VIDEO_ENGINE_ENABLED": false,
+          "FRAME_VIDEO_PUBLIC_ALLOWED": false,
+          "FRAME_VIDEO_AUTO_RETRY": false,
+          "FRAME_VIDEO_AUTO_FALLBACK": false
+        },
+        "provider_control": "local_only_no_provider",
+        "dispatch_allowed_by_default": false,
+        "automatic_paid_retry": false,
+        "automatic_paid_fallback": false
+      }
+    },
+    {
+      "product_type": "animated_video",
+      "display_name": "Animated Video",
+      "route_head_shas": [
+        "e4c5b043c33b76f878afa72af778df78732f874c",
+        "c4120e5ace3b75fc9f5c3a31820267dd02c90f6f"
+      ],
+      "merge_shas": [
+        "518532bc9ecf9c3819a150859ff8587382be1c37",
+        "8f7c3e3047469675ca3407865767f464198a1be1"
+      ],
+      "engine_files": ["services/animated_video_engine.py"],
+      "modes": ["single_scene", "multi_scene"],
+      "flow_contract": [
+        "validate character, style, and asset rights",
+        "freeze an ordered animation scene graph",
+        "render deterministic local motion per scene",
+        "compose scenes with continuity and approved audio or branding",
+        "validate motion, scene coverage, and full MP4 decode"
+      ],
+      "prompt_contract": [
+        "original intent and approved animation profile",
+        "character, prop, palette, lighting, and style bible",
+        "per-scene action, camera, motion, transition, and continuity state",
+        "asset fingerprints and rights receipts",
+        "no cloud generation or provider selection unless separately approved"
+      ],
+      "offline_fixture": {
+        "status": "PASS",
+        "focused_tests": {"29h_animated_engine": 12},
+        "artifact_kind": "real_local_mp4",
+        "mp4_bytes": "asserted_gt_zero_not_retained",
+        "duration_seconds": "asserted_positive_not_retained",
+        "codec": "ffprobe_validated_not_retained",
+        "resolution": "ffprobe_validated_not_retained",
+        "fixture_provider_calls": 0,
+        "real_provider_calls": 0,
+        "paid_provider_calls": 0,
+        "wallet_mutations": 0,
+        "production_telegram_deliveries": 0
+      },
+      "production": {
+        "route_state": "PROFILE_ONLY_DEFAULT_OFF",
+        "live_pass": false,
+        "deployment_id": null,
+        "admin_live_smoke_job": null,
+        "mp4_bytes": null,
+        "duration_seconds": null,
+        "codec": null,
+        "resolution": null,
+        "provider_submit_count": 0,
+        "real_provider_calls": 0,
+        "paid_provider_calls": 0,
+        "delivery_count": null,
+        "receipt_count": null,
+        "report_count": null,
+        "duplicate_submit": 0,
+        "duplicate_delivery": 0,
+        "stuck_jobs": 0,
+        "wallet_mutations": 0,
+        "admin_charge_xu": 0,
+        "blockers": ["engine_and_public_flags_default_off", "worker_current_runtime_unverified", "production_live_delivery_not_run"]
+      },
+      "rollback": {
+        "default_flags": {
+          "ANIMATED_VIDEO_ENGINE_ENABLED": false,
+          "ANIMATED_VIDEO_PUBLIC_ALLOWED": false,
+          "ANIMATED_VIDEO_AUTO_RETRY": false,
+          "ANIMATED_VIDEO_AUTO_FALLBACK": false
+        },
+        "provider_control": "local_only_no_provider",
+        "dispatch_allowed_by_default": false,
+        "automatic_paid_retry": false,
+        "automatic_paid_fallback": false
+      }
+    },
+    {
+      "product_type": "human_ai_video",
+      "display_name": "Human/AI Video",
+      "route_head_shas": [
+        "e4c5b043c33b76f878afa72af778df78732f874c",
+        "a66ebd5f24cc6c58e194710378d3b98626ced5ab"
+      ],
+      "merge_shas": [
+        "518532bc9ecf9c3819a150859ff8587382be1c37",
+        "f7975d785b34733e47d15e4ff906a0733bb9700d"
+      ],
+      "engine_files": ["services/human_ai_video_engine.py"],
+      "modes": ["single_scene", "multi_scene"],
+      "flow_contract": [
+        "validate owner footage and source fingerprint",
+        "require person, face, voice, and brand consent when applicable",
+        "materialize only approved source segments",
+        "normalize, compose, caption, and brand locally",
+        "block avatar, clone, lip-sync, or generative claims without capability"
+      ],
+      "prompt_contract": [
+        "source lineage and selected ranges",
+        "identity, subject, relationship, and world locks",
+        "rights and consent receipt IDs",
+        "per-scene prompt, source mapping, transition, audio, and output profile",
+        "unsupported AI transformations remain explicit blockers"
+      ],
+      "offline_fixture": {
+        "status": "PASS",
+        "focused_tests": {"29i_human_ai_engine": 11},
+        "artifact_kind": "real_local_mp4",
+        "mp4_bytes": "asserted_gt_zero_not_retained",
+        "duration_seconds": "asserted_positive_not_retained",
+        "codec": "ffprobe_validated_not_retained",
+        "resolution": "ffprobe_validated_not_retained",
+        "fixture_provider_calls": 0,
+        "real_provider_calls": 0,
+        "paid_provider_calls": 0,
+        "wallet_mutations": 0,
+        "production_telegram_deliveries": 0
+      },
+      "production": {
+        "route_state": "PROFILE_ONLY_DEFAULT_OFF",
+        "live_pass": false,
+        "deployment_id": null,
+        "admin_live_smoke_job": null,
+        "mp4_bytes": null,
+        "duration_seconds": null,
+        "codec": null,
+        "resolution": null,
+        "provider_submit_count": 0,
+        "real_provider_calls": 0,
+        "paid_provider_calls": 0,
+        "delivery_count": null,
+        "receipt_count": null,
+        "report_count": null,
+        "duplicate_submit": 0,
+        "duplicate_delivery": 0,
+        "stuck_jobs": 0,
+        "wallet_mutations": 0,
+        "admin_charge_xu": 0,
+        "blockers": ["engine_and_public_flags_default_off", "worker_current_runtime_unverified", "production_live_delivery_not_run"]
+      },
+      "rollback": {
+        "default_flags": {
+          "HUMAN_AI_VIDEO_ENGINE_ENABLED": false,
+          "HUMAN_AI_VIDEO_PUBLIC_ALLOWED": false,
+          "HUMAN_AI_VIDEO_AUTO_RETRY": false,
+          "HUMAN_AI_VIDEO_AUTO_FALLBACK": false
+        },
+        "provider_control": "local_only_no_provider",
+        "dispatch_allowed_by_default": false,
+        "automatic_paid_retry": false,
+        "automatic_paid_fallback": false
+      }
+    },
+    {
+      "product_type": "summary_video",
+      "display_name": "Summary Video",
+      "route_head_shas": [
+        "e4c5b043c33b76f878afa72af778df78732f874c",
+        "97814e6a2868dc583ca11ebaa747ee4accd8e12b"
+      ],
+      "merge_shas": [
+        "518532bc9ecf9c3819a150859ff8587382be1c37",
+        "86401d29784ef1bc1d68af4f14acab1b826294d9"
+      ],
+      "engine_files": ["services/summary_video_engine.py"],
+      "modes": ["single_scene", "multi_scene"],
+      "flow_contract": [
+        "validate source and completed extraction provenance",
+        "ground every summary unit in source evidence",
+        "map grounded units to ordered scenes",
+        "render approved visuals and compose locally",
+        "persist an admin source map and validate final MP4"
+      ],
+      "prompt_contract": [
+        "source fingerprint and exact extraction units",
+        "summary claims with page, range, section, or timestamp references",
+        "scene-to-claim and scene-to-source mappings",
+        "approved visual prompts, asset fingerprints, audio, and branding",
+        "no fabricated claim when extraction or evidence is missing"
+      ],
+      "offline_fixture": {
+        "status": "PASS",
+        "focused_tests": {"29j_summary_engine": 15},
+        "artifact_kind": "real_local_mp4",
+        "mp4_bytes": "asserted_gt_zero_not_retained",
+        "duration_seconds": "asserted_positive_not_retained",
+        "codec": "ffprobe_validated_not_retained",
+        "resolution": "ffprobe_validated_not_retained",
+        "fixture_provider_calls": 0,
+        "real_provider_calls": 0,
+        "paid_provider_calls": 0,
+        "wallet_mutations": 0,
+        "production_telegram_deliveries": 0
+      },
+      "production": {
+        "route_state": "PROFILE_ONLY_DEFAULT_OFF",
+        "live_pass": false,
+        "deployment_id": null,
+        "admin_live_smoke_job": null,
+        "mp4_bytes": null,
+        "duration_seconds": null,
+        "codec": null,
+        "resolution": null,
+        "provider_submit_count": 0,
+        "real_provider_calls": 0,
+        "paid_provider_calls": 0,
+        "delivery_count": null,
+        "receipt_count": null,
+        "report_count": null,
+        "duplicate_submit": 0,
+        "duplicate_delivery": 0,
+        "stuck_jobs": 0,
+        "wallet_mutations": 0,
+        "admin_charge_xu": 0,
+        "blockers": ["engine_and_public_flags_default_off", "worker_current_runtime_unverified", "production_source_intake_and_live_delivery_not_run"]
+      },
+      "rollback": {
+        "default_flags": {
+          "SUMMARY_VIDEO_ENGINE_ENABLED": false,
+          "SUMMARY_VIDEO_PUBLIC_ALLOWED": false,
+          "SUMMARY_VIDEO_AUTO_RETRY": false,
+          "SUMMARY_VIDEO_AUTO_FALLBACK": false
+        },
+        "provider_control": "local_only_no_provider",
+        "dispatch_allowed_by_default": false,
+        "automatic_paid_retry": false,
+        "automatic_paid_fallback": false
+      }
+    },
+    {
+      "product_type": "podcast_video",
+      "display_name": "Podcast Video",
+      "route_head_shas": [
+        "e4c5b043c33b76f878afa72af778df78732f874c",
+        "a580ae1b14302a6c6d6ce3354a8fccacda67c5bc"
+      ],
+      "merge_shas": [
+        "518532bc9ecf9c3819a150859ff8587382be1c37",
+        "a757df6b64fa5322529471be2008e6f1dd4746cf"
+      ],
+      "engine_files": ["services/podcast_video_engine.py"],
+      "modes": ["single_scene", "multi_scene"],
+      "flow_contract": [
+        "validate rights-approved audio or video source",
+        "freeze one canonical speech stream and completed transcript",
+        "validate speaker truth only when the layout depends on it",
+        "render ordered visual scenes, captions, waveform, and branding",
+        "mux canonical speech once and compare decoded source/output audio"
+      ],
+      "prompt_contract": [
+        "source audio fingerprint and selected stream index",
+        "transcript segment IDs, timestamps, language, and speaker IDs",
+        "scene time ranges with complete transcript coverage",
+        "rights-approved visual prompts and asset fingerprints",
+        "caption, waveform, audio continuity, logo, and watermark policy"
+      ],
+      "offline_fixture": {
+        "status": "PASS",
+        "focused_tests": {"29k_podcast_engine": 24},
+        "artifact_kind": "real_local_mp4",
+        "mp4_bytes": "asserted_gt_zero_not_retained",
+        "duration_seconds": "asserted_positive_not_retained",
+        "codec": "ffprobe_validated_not_retained",
+        "resolution": "ffprobe_validated_not_retained",
+        "fixture_provider_calls": 0,
+        "real_provider_calls": 0,
+        "paid_provider_calls": 0,
+        "wallet_mutations": 0,
+        "production_telegram_deliveries": 0
+      },
+      "production": {
+        "route_state": "PROFILE_ONLY_DEFAULT_OFF_AND_ENGINE_MISSING_WITHOUT_RUNTIME",
+        "live_pass": false,
+        "deployment_id": null,
+        "admin_live_smoke_job": null,
+        "mp4_bytes": null,
+        "duration_seconds": null,
+        "codec": null,
+        "resolution": null,
+        "provider_submit_count": 0,
+        "real_provider_calls": 0,
+        "paid_provider_calls": 0,
+        "delivery_count": null,
+        "receipt_count": null,
+        "report_count": null,
+        "duplicate_submit": 0,
+        "duplicate_delivery": 0,
+        "stuck_jobs": 0,
+        "wallet_mutations": 0,
+        "admin_charge_xu": 0,
+        "blockers": [
+          "engine_public_and_runtime_flags_default_off",
+          "podcast_runtime_entrypoint_missing",
+          "podcast_production_finalizer_missing",
+          "worker_current_runtime_unverified",
+          "production_live_delivery_not_run"
+        ]
+      },
+      "rollback": {
+        "default_flags": {
+          "PODCAST_VIDEO_ENGINE_ENABLED": false,
+          "PODCAST_VIDEO_RUNTIME_REGISTERED": false,
+          "PODCAST_VIDEO_PUBLIC_ALLOWED": false,
+          "PODCAST_VIDEO_AUTO_RETRY": false,
+          "PODCAST_VIDEO_AUTO_FALLBACK": false
+        },
+        "provider_control": "local_only_no_provider",
+        "dispatch_allowed_by_default": false,
+        "automatic_paid_retry": false,
+        "automatic_paid_fallback": false
+      }
+    }
+  ],
+  "aggregate": {
+    "all_video_menu_routes_live_pass": false,
+    "production_provider_submits": 0,
+    "real_provider_calls": 0,
+    "paid_provider_calls": 0,
+    "production_telegram_deliveries": 0,
+    "wallet_mutations": 0,
+    "fake_success": 0,
+    "automatic_paid_retry": 0,
+    "automatic_paid_fallback": 0
+  }
+}
