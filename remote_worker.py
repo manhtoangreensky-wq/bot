@@ -22,6 +22,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from services import product_video_public_seam
+
 WORKER_PARSER_VERSION = "r8d_product_video_canonical_parser"
 PRODUCT_VIDEO_CANONICAL_CAPABILITY = "canonical_multiscene_b13_r18c_v1"
 WORKER_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -569,6 +571,43 @@ def product_video_job_allowed(job: dict | None = None) -> bool:
     )
 
 
+def prepare_product_video_public_seam_job(
+    job: dict | None = None,
+    *,
+    environ: dict | None = None,
+) -> dict:
+    data = dict(job or {})
+    is_product_video = (
+        product_video_public_seam.product_video_public_seam_applies_to_worker_job(
+            data
+        )
+    )
+    exempt = bool(
+        data.get("claim_only_diagnostic")
+        or data.get("admin_video_delivery")
+        or data.get("worker_admin_canary")
+        or data.get("canary")
+    )
+    if not is_product_video or exempt:
+        return data
+    return product_video_public_seam.prepare_product_video_worker_job(
+        data,
+        environ=os.environ if environ is None else environ,
+    )
+
+
+def render_product_video_one_scene_route(job: dict, work_dir: str) -> str:
+    if job.get("product_video_runtime_lane") != "single_scene":
+        raise RuntimeError("product_video_one_scene_runtime_lane_mismatch")
+    return render_real_video(job, work_dir)
+
+
+def render_product_video_multiscene_route(job: dict, work_dir: str) -> str:
+    if job.get("product_video_runtime_lane") != "multi_scene":
+        raise RuntimeError("product_video_multiscene_runtime_lane_mismatch")
+    return render_real_video(job, work_dir)
+
+
 def product_video_provider_hint(job: dict | None = None) -> str:
     data = dict(job or {})
     for key in ("selected_provider", "submit_provider_key", "selected_provider_before_submit", "provider"):
@@ -995,6 +1034,7 @@ def process_claimed_job(job: dict) -> dict:
     job_id = str(job.get("job_id") or "")
     if not job_id:
         raise RuntimeError("job_id_missing")
+    job = prepare_product_video_public_seam_job(job)
     trace = worker_process_trace(job)
     if job.get("claim_only_diagnostic"):
         if str(job.get("source") or "") != REMOTE_WORKER_PRODUCT_VIDEO_SOURCE:
@@ -1061,7 +1101,22 @@ def process_claimed_job(job: dict) -> dict:
             f"provider={product_video_provider_hint(job) or '-'} "
             f"service_mode={trace.get('worker_service_mode') or '-'}"
         )
-        final_path = render_real_video(job, work_dir)
+        final_path = product_video_public_seam.execute_product_video_worker_route(
+            job,
+            environ=os.environ,
+            one_scene_executor=lambda prepared: render_product_video_one_scene_route(
+                prepared,
+                work_dir,
+            ),
+            multiscene_executor=lambda prepared: render_product_video_multiscene_route(
+                prepared,
+                work_dir,
+            ),
+            legacy_executor=lambda prepared: render_real_video(
+                prepared,
+                work_dir,
+            ),
+        )
         send_heartbeat(job_id, 80, "product video rendered")
         send_heartbeat(job_id, 88, "checking rendered video")
         connector_result = dict(LAST_REAL_VIDEO_RENDER_RESULT or {})

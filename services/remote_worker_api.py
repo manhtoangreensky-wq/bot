@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from services import video_project_queue, video_provider_router
+from services import video_engine_contract, video_project_queue, video_provider_router
 from services.video_provider_catalog import (
     model_interface_contract,
     model_metadata_from_resolution,
@@ -1148,6 +1148,14 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
             "final_video_bytes_gt_zero": True,
         },
     }
+    durable_selection = video_engine_contract.durable_video_product_route_selection(
+        project
+    )
+    if durable_selection.get("selection_ok"):
+        payload["product_video_public_seam_applicable"] = bool(
+            durable_selection.get("engine_product")
+            == video_engine_contract.VideoProduct.PRODUCT_VIDEO.value
+        )
     if is_remote_worker_canary_job(hydrated_job, project):
         safety = _canary_safety_flags(project)
         payload.update(
@@ -1429,6 +1437,60 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 ),
             }
         )
+        route_decision = persisted_result.get("product_video_route_decision")
+        route_marker_present = bool(
+            persisted_result.get("product_video_durable_public_seam")
+            or "product_video_route_decision" in persisted_result
+        )
+        if route_marker_present:
+            payload.update(
+                {
+                    "product_video_durable_public_seam": True,
+                    "product_video_route_decision_version": str(
+                        persisted_result.get("product_video_route_decision_version")
+                        or ""
+                    ),
+                    "product_video_route_decision": (
+                        strip_secret_fields(dict(route_decision))
+                        if isinstance(route_decision, dict)
+                        else None
+                    ),
+                    "product_video_route_decision_sha256": str(
+                        persisted_result.get("product_video_route_decision_sha256")
+                        or ""
+                    ),
+                    "product_video_route_selection_sha256": str(
+                        persisted_result.get("product_video_route_selection_sha256")
+                        or ""
+                    ),
+                    "product_video_engine_mode": str(
+                        persisted_result.get("product_video_engine_mode") or ""
+                    ),
+                    "scene_count": persisted_result.get("scene_count"),
+                    "route_id": str(persisted_result.get("route_id") or ""),
+                    "product_video_engine_adapter": str(
+                        persisted_result.get("product_video_engine_adapter") or ""
+                    ),
+                    "worker_job_type": str(
+                        persisted_result.get("worker_job_type") or ""
+                    ),
+                    "worker_owner": str(
+                        persisted_result.get("worker_owner") or ""
+                    ),
+                    "required_worker_capability": str(
+                        persisted_result.get("required_worker_capability") or ""
+                    ),
+                    "automatic_retry_allowed": persisted_result.get(
+                        "automatic_retry_allowed"
+                    ),
+                    "automatic_resubmit_allowed": persisted_result.get(
+                        "automatic_resubmit_allowed"
+                    ),
+                    "automatic_fallback_allowed": persisted_result.get(
+                        "automatic_fallback_allowed"
+                    ),
+                }
+            )
         payload["output_requirements"].update(
             {
                 "product_video_mp4": True,

@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from services import video_final_output
+from services import product_video_public_seam, video_final_output
 from services.video_provider_catalog import (
     model_metadata_from_resolution,
     resolve_product_video_model,
@@ -2858,6 +2858,13 @@ def product_video_premature_dispatch_failure_state(
     )
     recoverable_reason = bool(reason in PRODUCT_VIDEO_PREMATURE_DISPATCH_FAILURE_REASONS)
     already_recovered = bool(result.get("premature_dispatch_recovery_used"))
+    automatic_retry_forbidden = bool(
+        (
+            result.get("product_video_durable_public_seam")
+            or isinstance(result.get("product_video_route_decision"), dict)
+        )
+        and result.get("automatic_retry_allowed") is False
+    )
     recoverable = bool(
         str(job.get("status") or "").strip().lower() == "failed"
         and str(outbox.get("dispatch_status") or "").strip().lower() == "terminal_failed"
@@ -2869,19 +2876,23 @@ def product_video_premature_dispatch_failure_state(
         and not provider_task_exists
         and not charged
         and not already_recovered
+        and not automatic_retry_forbidden
     )
     return {
         "premature_dispatch_failure_recoverable": recoverable,
         "premature_dispatch_failure_reason": reason,
         "premature_dispatch_failure_reason_allowed": recoverable_reason,
         "premature_dispatch_recovery_used": already_recovered,
+        "premature_dispatch_automatic_retry_forbidden": automatic_retry_forbidden,
         "premature_dispatch_public_confirmed": public_confirmed,
         "premature_dispatch_worker_compatible": bool(worker_compatible),
         "premature_dispatch_provider_attempted": provider_attempted,
         "premature_dispatch_provider_task_exists": provider_task_exists,
         "premature_dispatch_charge_recorded": charged,
         "premature_dispatch_recovery_block_reason": "" if recoverable else (
-            "recovery_already_used"
+            "automatic_retry_forbidden"
+            if automatic_retry_forbidden
+            else "recovery_already_used"
             if already_recovered
             else "genuine_provider_terminal_failure"
             if provider_attempted or provider_task_exists
@@ -3504,7 +3515,9 @@ def _confirm_product_video_invoice_atomic(
     try:
         conn.execute("BEGIN IMMEDIATE")
         locked = conn.execute(
-            "SELECT status,user_id,job_id,asset_pack_json,invoice_json FROM video_projects WHERE project_id=?",
+            """SELECT status,user_id,job_id,asset_pack_json,invoice_json,
+                      story_bible_json,scene_cards_json,scene_count,profile_id
+                 FROM video_projects WHERE project_id=?""",
             (int(project["project_id"]),),
         ).fetchone()
         if not locked:
@@ -3523,6 +3536,10 @@ def _confirm_product_video_invoice_atomic(
             "job_id": int(locked[2] or 0),
             "asset_pack_json": str(locked[3] or ""),
             "invoice_json": str(locked[4] or ""),
+            "story_bible_json": str(locked[5] or ""),
+            "scene_cards_json": str(locked[6] or ""),
+            "scene_count": int(locked[7] or 0),
+            "profile_id": str(locked[8] or ""),
         }
         if require_authoritative_snapshot:
             boundary_state = product_video_assert_final_admission(
@@ -3564,6 +3581,32 @@ def _confirm_product_video_invoice_atomic(
                     "charge": 0,
                     "charged_xu": 0,
                 }
+            seam_state = product_video_public_seam.evaluate_product_video_public_seam(
+                locked_project,
+                environ=os.environ,
+            )
+            if seam_state.get("enabled") and not seam_state.get("ready"):
+                conn.rollback()
+                return {
+                    "ok": False,
+                    "reason": str(
+                        seam_state.get("blocker")
+                        or "product_video_public_seam_blocked"
+                    ),
+                    "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này.\nHệ thống chưa trừ Xu.\nAnh/chị vui lòng thử lại sau.",
+                    "job_created": False,
+                    "scene_records_created": False,
+                    "dispatch_outbox_created": False,
+                    "charge": 0,
+                    "charged_xu": 0,
+                }
+            decision = seam_state.get("route_decision")
+            if seam_state.get("enabled") and isinstance(decision, dict):
+                admission_state.update(
+                    product_video_public_seam.product_video_route_decision_payload(
+                        decision
+                    )
+                )
         if str(admission_state.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
             existing_job_id = int(locked[2] or 0)
             probation_lock = product_video_probation_lock_state(
@@ -3627,6 +3670,29 @@ def _confirm_product_video_invoice_atomic(
             active_payload = _json_loads(str(active.get("result_json") or ""), {})
             if not isinstance(active_payload, dict):
                 active_payload = {}
+            incoming_route_hash = str(
+                admission_state.get("product_video_route_decision_sha256") or ""
+            )
+            if incoming_route_hash:
+                active_route_hash = str(
+                    active_payload.get("product_video_route_decision_sha256") or ""
+                )
+                if not active_route_hash or active_route_hash != incoming_route_hash:
+                    conn.rollback()
+                    return {
+                        "ok": False,
+                        "reason": (
+                            "product_video_route_decision_conflict"
+                            if active_route_hash
+                            else "product_video_route_decision_missing_on_active_job"
+                        ),
+                        "public_message": "Yêu cầu tạo video đang được xử lý theo lựa chọn đã xác nhận. Hệ thống chưa trừ thêm Xu.",
+                        "job_created": False,
+                        "scene_records_created": False,
+                        "dispatch_outbox_created": False,
+                        "charge": 0,
+                        "charged_xu": 0,
+                    }
             existing_probation_started_at = str(active_payload.get("probation_started_at") or "")
             existing_probation_provider = str(active_payload.get("probation_candidate_key") or "")
             active_payload.update(admission_state)
@@ -3688,6 +3754,12 @@ def _confirm_product_video_invoice_atomic(
             invoice = {}
         asset_pack.update(admission_state)
         invoice.update(admission_state)
+        route_max_attempts = (
+            1
+            if admission_state.get("product_video_durable_public_seam")
+            and admission_state.get("automatic_retry_allowed") is False
+            else 3
+        )
         cursor = conn.execute(
             """INSERT INTO video_jobs
                (project_id,user_id,job_type,status,priority,attempts,max_attempts,result_json,
@@ -3700,7 +3772,7 @@ def _confirm_product_video_invoice_atomic(
                 "queued",
                 100,
                 0,
-                3,
+                route_max_attempts,
                 _json_dumps(admission_state),
                 10,
                 "dispatch_outbox_pending",
@@ -7239,7 +7311,41 @@ def complete_video_job(
     if not job:
         return {"ok": False, "reason": "job_not_found"}
     current = now_text()
+    persisted_payload = _json_loads(str(job.get("result_json") or ""), {})
+    if not isinstance(persisted_payload, dict):
+        persisted_payload = {}
+    has_route_marker = bool(
+        persisted_payload.get("product_video_durable_public_seam")
+        or isinstance(
+            persisted_payload.get("product_video_route_decision"),
+            dict,
+        )
+    )
+    route_validation = (
+        product_video_public_seam.validate_persisted_product_video_route_decision(
+            persisted_payload,
+            environ=os.environ,
+        )
+        if has_route_marker
+        else {"ready": True, "decision": None}
+    )
+    if has_route_marker and not route_validation.get("ready"):
+        return {
+            "ok": False,
+            "reason": str(
+                route_validation.get("blocker")
+                or "product_video_route_decision_invalid"
+            ),
+            "job": job,
+        }
     payload = dict(result or {})
+    route_decision = route_validation.get("decision")
+    if isinstance(route_decision, dict):
+        payload.update(
+            product_video_public_seam.product_video_route_decision_payload(
+                route_decision
+            )
+        )
     if final_video_path:
         payload["final_video_path"] = final_video_path
     if final_video_file_id:
@@ -7419,6 +7525,29 @@ def note_video_delivery_result(
     payload = _json_loads(job.get("result_json"), {})
     if not isinstance(payload, dict):
         payload = {}
+    has_route_marker = bool(
+        payload.get("product_video_durable_public_seam")
+        or isinstance(payload.get("product_video_route_decision"), dict)
+    )
+    route_validation = (
+        product_video_public_seam.validate_persisted_product_video_route_decision(
+            payload,
+            environ=os.environ,
+        )
+        if has_route_marker
+        else {"ready": True}
+    )
+    if has_route_marker and not route_validation.get("ready"):
+        return {
+            "ok": False,
+            "sent": False,
+            "reason": str(
+                route_validation.get("blocker")
+                or "product_video_route_decision_invalid"
+            ),
+            "job": job,
+            "project": project,
+        }
     already_delivered = bool(project.get("video_delivered_at") or project.get("video_delivery_message_id"))
     if already_delivered and sent:
         return {"ok": True, "duplicate_prevented": True, "job": job, "project": project}
@@ -7667,6 +7796,11 @@ def fail_video_job(conn: sqlite3.Connection, *, job_id: int, error: str, retry: 
     payload = _json_loads(job.get("result_json"), {})
     if not isinstance(payload, dict):
         payload = {}
+    if (
+        payload.get("product_video_durable_public_seam")
+        or isinstance(payload.get("product_video_route_decision"), dict)
+    ):
+        retry = False
     probation_mode = str(payload.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE
     if probation_mode:
         retry = False
@@ -7825,8 +7959,17 @@ def hydrate_video_job_payload(conn: sqlite3.Connection, job: dict[str, Any]) -> 
     if not job:
         return {}
     project_id = int(job.get("project_id") or 0)
+    persisted_payload = _json_loads(str(job.get("result_json") or ""), {})
+    if not isinstance(persisted_payload, dict):
+        persisted_payload = {}
+    route_payload = {
+        key: persisted_payload[key]
+        for key in product_video_public_seam.WORKER_ROUTE_PAYLOAD_KEYS
+        if key in persisted_payload
+    }
     return {
         **job,
+        **route_payload,
         "project": get_video_project(conn, project_id),
         "scenes": list_video_project_scenes(conn, project_id),
     }

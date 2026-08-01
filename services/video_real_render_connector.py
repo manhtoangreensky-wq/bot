@@ -916,6 +916,21 @@ def _provider_order(job: dict | None = None) -> list[str]:
     return result or ["shopaikey_video", "key4u_video", "toanaas_video", "veo", "kling", "generic_http"]
 
 
+def _durable_product_video_route_forbids(job: dict | None, policy_key: str) -> bool:
+    payload = dict(job or {})
+    decision = payload.get("product_video_route_decision")
+    marker = bool(
+        payload.get("product_video_durable_public_seam")
+        or isinstance(decision, dict)
+    )
+    if not marker:
+        return False
+    return bool(
+        payload.get(policy_key) is False
+        or (isinstance(decision, dict) and decision.get(policy_key) is False)
+    )
+
+
 def real_video_provider_readiness(job: dict | None = None, environ: dict[str, str] | None = None) -> dict:
     del job
     status = provider_status_payload(environ)
@@ -1203,6 +1218,24 @@ def _existing_scene_tasks(job: dict | None = None) -> list[dict[str, Any]]:
         if isinstance(value, list):
             result.extend(dict(item or {}) for item in value if isinstance(item, dict))
     return result
+
+
+def _scene_task_has_dispatch_attempt(item: dict | None = None) -> bool:
+    task = dict(item or {})
+    return bool(
+        _scene_task_has_provider_id(task)
+        or task.get("scene_dispatch_attempted")
+        or task.get("dispatch_attempted")
+        or task.get("provider_submit_called")
+        or task.get("provider_http_request_sent")
+        or _safe_int(
+            task.get("submit_http_status")
+            or task.get("provider_submit_http_status")
+            or task.get("provider_http_status"),
+            0,
+        )
+        > 0
+    )
 
 
 def _scene_task_index(item: dict | None = None, default: int = 1) -> int:
@@ -1562,6 +1595,10 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         ):
             continue
         fallback_chain.append(item)
+    automatic_fallback_forbidden = _durable_product_video_route_forbids(
+        job,
+        "automatic_fallback_allowed",
+    )
     fallback_allowed = bool(
         stalled
         and public_confirmed
@@ -1570,9 +1607,12 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         and fallback_chain
         and not delivered
         and not charged
+        and not automatic_fallback_forbidden
     )
     if result_url_valid:
         fallback_block_reason = "scene_already_has_valid_clip"
+    elif automatic_fallback_forbidden:
+        fallback_block_reason = "automatic_fallback_forbidden"
     elif not stalled:
         if is_not_start:
             fallback_block_reason = "not_start_under_threshold"
@@ -3773,6 +3813,13 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     pending_policy = product_video_scene_stall_policy(job, pending_scene_task, scene_index) if pending_matches_request else {}
     scene_fallback_order = list(pending_policy.get("fallback_provider_order") or [])
     scene_fallback_allowed = bool(pending_policy.get("fallback_allowed"))
+    automatic_fallback_forbidden = _durable_product_video_route_forbids(
+        job,
+        "automatic_fallback_allowed",
+    )
+    if automatic_fallback_forbidden:
+        scene_fallback_order = []
+        scene_fallback_allowed = False
     scene_stalled_not_start = bool(pending_policy.get("provider_stalled_not_start"))
     scene_provider_stalled = bool(pending_policy.get("provider_scene_stalled"))
     fallback_execution_tick_called = bool(pending_matches_request and scene_provider_stalled)
@@ -3975,8 +4022,30 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     )
     missing_scene_dispatch_recovered = bool(
         not pending_matches_request
-        and bool(_existing_scene_tasks(job))
+        and any(
+            _scene_task_index(item) == scene_index
+            and _scene_task_has_dispatch_attempt(item)
+            for item in _existing_scene_tasks(job)
+        )
     )
+    if missing_scene_dispatch_recovered and _durable_product_video_route_forbids(
+        job,
+        "automatic_resubmit_allowed",
+    ):
+        raise RealVideoRenderError(
+            "product_video_automatic_resubmit_forbidden",
+            diagnostics={
+                "ok": False,
+                "scene_index": scene_index,
+                "scene_id": scene_index,
+                "request_job_id": request_job_id,
+                "provider_error": "product_video_automatic_resubmit_forbidden",
+                "blocker": "product_video_automatic_resubmit_forbidden",
+                "provider_submit_called": False,
+                "automatic_resubmit_allowed": False,
+                "no_charge": True,
+            },
+        )
     request = VideoGenerationRequest(
         job_id=request_job_id,
         product_type=product_type or "video_ai_prompt",
@@ -4036,6 +4105,18 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "invoice_confirmed": invoice_confirmed,
             "project_is_confirmed": invoice_confirmed,
             "provider_submit_accepted_before": bool(pending_matches_request),
+            "product_video_durable_public_seam": bool(
+                (job or {}).get("product_video_durable_public_seam")
+            ),
+            "automatic_retry_allowed": (job or {}).get(
+                "automatic_retry_allowed"
+            ),
+            "automatic_resubmit_allowed": (job or {}).get(
+                "automatic_resubmit_allowed"
+            ),
+            "automatic_fallback_allowed": (job or {}).get(
+                "automatic_fallback_allowed"
+            ),
             "paid_fallback_confirmed": bool(scene_fallback_allowed or invoice_confirmed),
             "fallback_count": 1 if scene_fallback_allowed else _safe_int(pending_scene_task.get("fallback_count"), 0),
             "provider_fallback_count": 1 if scene_fallback_allowed else _safe_int(pending_scene_task.get("provider_fallback_count") or pending_scene_task.get("fallback_count"), 0),
@@ -4086,6 +4167,8 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     provider_env = dict(os.environ)
     if provider_order:
         provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(provider_order)
+    if automatic_fallback_forbidden and dispatch_provider_key:
+        provider_env["VIDEO_PROVIDER_CHAIN"] = dispatch_provider_key
     if scene_fallback_allowed and scene_fallback_order:
         provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(scene_fallback_order)
     provider_model_map = model_context.get("provider_model_map") if isinstance(model_context.get("provider_model_map"), dict) else {}
