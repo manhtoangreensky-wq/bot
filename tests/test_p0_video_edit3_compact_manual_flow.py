@@ -13,16 +13,22 @@ def _between(start: str, end: str) -> str:
     return BOT_SOURCE[begin:finish]
 
 
-def test_edit3_public_hub_has_only_four_clear_actions() -> None:
+def test_edit3_public_hub_keeps_four_primary_actions_then_one_status_action() -> None:
     keyboard = _between("def video_edit_hub_keyboard", "def video_edit_info_text")
-    expected = {
+    expected = (
         "videoedit|ai",
         "videoedit|manual",
         "videoedit|restore",
         "videoedit|guide",
-    }
+    )
     for callback in expected:
         assert keyboard.count(f'"{callback}"') == 1
+    assert keyboard.index('"videoedit|ai"') < keyboard.index('"videoedit|manual"')
+    assert keyboard.index('"videoedit|manual"') < keyboard.index('"videoedit|restore"')
+    assert keyboard.index('"videoedit|restore"') < keyboard.index('"videoedit|guide"')
+    assert keyboard.count('"videoedit|latest_status"') == 1
+    assert keyboard.index('"videoedit|guide"') < keyboard.index('"videoedit|latest_status"')
+    assert keyboard.index('"videoedit|latest_status"') < keyboard.index('"lvs27b|open"')
     for removed in (
         "videoedit|audio",
         "videoedit|timeline",
@@ -112,5 +118,5 @@ def test_edit3_legacy_buttons_are_read_only_and_cannot_reset_plan() -> None:
 
 def test_edit3_route_contract_matches_visible_hub() -> None:
     route = _between('"video_local_edit": {', "def video_public_route_for_tool")
-    assert '"expected_children": ("videoedit|ai", "videoedit|manual", "videoedit|restore", "videoedit|guide")' in route
+    assert '"expected_children": ("videoedit|ai", "videoedit|manual", "videoedit|restore", "videoedit|guide", "videoedit|latest_status")' in route
     assert '"back_target": "menu|main_video"' in route
