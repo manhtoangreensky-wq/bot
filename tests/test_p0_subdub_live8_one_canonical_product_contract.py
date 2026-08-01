@@ -310,10 +310,16 @@ def test_live8_scope_is_subdub_only():
         check=True,
     ).stdout.splitlines()
     allowed = {
+        ".env.example",
         "bot.py",
+        "docs/reports/P0_SUBDUB_LONGMEDIA32_LIMIT_MATRIX.md",
+        "docs/superpowers/plans/2026-07-31-p0-subdub-longmedia32.md",
         "services/subdub_blackbox_contracts.py",
         "services/subdub_canonical_cues.py",
+        "services/subdub_long_media.py",
+        "services/subdub_media_preflight.py",
         "services/subtitle_dub_product_pipeline.py",
+        "tests/test_infra_localbotapi_base_url.py",
         "tests/test_p0_subdub_live5_subtitle_combo_canonical_cue_restore.py",
         "tests/test_p0_subdub_live6_mp4_audio_cue_long_auto_subtitle.py",
         "tests/test_p0_subdub_live8_one_canonical_product_contract.py",
@@ -324,5 +330,9 @@ def test_live8_scope_is_subdub_only():
         "tests/test_p0_subdub_live14_blackbox_lane_language_contract.py",
         "tests/test_p0_19m6a_subdub_one_terminal_public_outcome_late_error_duplicate_fix.py",
         "tests/test_p0_subdub_live21_four_lane_media_pipeline_truth.py",
+        "tests/test_p0_subdub_long_media_no_speech_recovery.py",
+        "tests/test_p0_subdub_longmedia32_duration_size_status_report.py",
+        "tests/test_p0_subdub_longmedia32_real_media_matrix.py",
+        "tests/test_p0_subdub_tts_audio_truth_sequential.py",
     }
     assert set(changed) <= allowed

@@ -142,5 +142,6 @@ def test_long_media_network_exception_remains_terminal():
     )
 
     assert result["ok"] is False
-    assert result["status"] == "long_media_chunk_asr_failed"
+    assert result["status"] == "ACCEPTANCE_UNKNOWN"
+    assert "provider_acceptance_unknown" in result["detail"]
     assert result["failed_chunk_index"] == 1

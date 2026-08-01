@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import inspect
+import json
 import os
+import re
 import tempfile
+import time
 from typing import Any, Awaitable, Callable, Iterable
 
 
@@ -62,14 +67,14 @@ def build_long_project_plan(
     duration_seconds: float,
     *,
     part_seconds: int = 300,
-    max_parts: int = 12,
-    max_duration_seconds: int = 3600,
+    max_parts: int = 0,
+    max_duration_seconds: int = 0,
 ) -> dict[str, Any]:
-    """Plan bounded MP4 parts without changing the per-part pipeline limit."""
+    """Plan MP4 parts with optional positive operator capability limits."""
     duration = max(0, int(round(_float(duration_seconds))))
     part_size = max(30, int(part_seconds or 300))
-    part_limit = max(1, int(max_parts or 1))
-    duration_limit = max(part_size, int(max_duration_seconds or part_size))
+    part_limit = max(0, int(max_parts or 0))
+    duration_limit = max(0, int(max_duration_seconds or 0))
     ranges = []
     for start in range(0, duration, part_size):
         end = min(duration, start + part_size)
@@ -84,13 +89,13 @@ def build_long_project_plan(
     split_required = duration > part_size
     supported = bool(
         duration > 0
-        and duration <= duration_limit
-        and len(ranges) <= part_limit
+        and (duration_limit <= 0 or duration <= duration_limit)
+        and (part_limit <= 0 or len(ranges) <= part_limit)
     )
     blocker = ""
-    if duration > duration_limit:
+    if duration_limit > 0 and duration > duration_limit:
         blocker = "project_duration_limit_exceeded"
-    elif len(ranges) > part_limit:
+    elif part_limit > 0 and len(ranges) > part_limit:
         blocker = "project_part_limit_exceeded"
     return {
         "project_split_required": split_required,
@@ -375,8 +380,10 @@ async def transcribe_long_media_chunks(
     extract_chunk: ChunkExtractor,
     transcribe_chunk: ChunkTranscriber,
     input_duration_seconds: float = 0.0,
+    source_hash: str = "",
+    checkpoint_path: str = "",
 ) -> dict[str, Any]:
-    """Extract and transcribe each range, preserving absolute cue timestamps."""
+    """Transcribe deterministic audio chunks with durable, no-resubmit recovery."""
     ranges = [dict(item or {}) for item in (chunk_ranges or [])]
     if not source_bytes or not ranges:
         return {
@@ -389,18 +396,81 @@ async def transcribe_long_media_chunks(
             "chunk_strategy": "asr_audio_chunks",
         }
 
-    all_segments: list[dict[str, Any]] = []
-    transcripts: list[str] = []
+    source_fingerprint = str(source_hash or hashlib.sha256(bytes(source_bytes)).hexdigest())
+    checkpoint: dict[str, Any] = {
+        "schema_version": "subdub.asr_chunks.v1",
+        "source_hash": source_fingerprint,
+        "chunks": {},
+    }
+    if checkpoint_path and os.path.isfile(checkpoint_path):
+        try:
+            with open(checkpoint_path, "r", encoding="utf-8") as handle:
+                loaded = json.load(handle)
+            if (
+                isinstance(loaded, dict)
+                and str(loaded.get("source_hash") or "") == source_fingerprint
+                and isinstance(loaded.get("chunks"), dict)
+            ):
+                checkpoint = loaded
+        except (OSError, ValueError, TypeError):
+            checkpoint = {
+                "schema_version": "subdub.asr_chunks.v1",
+                "source_hash": source_fingerprint,
+                "chunks": {},
+            }
+
+    def _persist_checkpoint() -> None:
+        if not checkpoint_path:
+            return
+        directory = os.path.dirname(os.path.abspath(checkpoint_path))
+        os.makedirs(directory, exist_ok=True)
+        temporary = f"{checkpoint_path}.tmp"
+        with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(checkpoint, handle, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        os.replace(temporary, checkpoint_path)
+
+    def _chunk_bounds(item: dict[str, Any], position: int) -> dict[str, Any]:
+        chunk_index = int(item.get("index") or item.get("chunk_index") or position)
+        extract_start_ms = int(
+            item.get("extract_start_ms")
+            if item.get("extract_start_ms") is not None
+            else round(_float(item.get("start")) * 1000)
+        )
+        extract_end_ms = int(
+            item.get("extract_end_ms")
+            if item.get("extract_end_ms") is not None
+            else round(_float(item.get("end"), extract_start_ms / 1000.0) * 1000)
+        )
+        ownership_start_ms = int(item.get("ownership_start_ms", extract_start_ms))
+        ownership_end_ms = int(item.get("ownership_end_ms", extract_end_ms))
+        chunk_id = str(item.get("chunk_id") or "").strip()
+        if not chunk_id:
+            token = f"{source_fingerprint}:{chunk_index}:{ownership_start_ms}:{ownership_end_ms}"
+            chunk_id = hashlib.sha256(token.encode("utf-8")).hexdigest()[:24]
+        return {
+            "index": chunk_index,
+            "chunk_id": chunk_id,
+            "extract_start_ms": max(0, extract_start_ms),
+            "extract_end_ms": max(extract_start_ms, extract_end_ms),
+            "ownership_start_ms": max(0, ownership_start_ms),
+            "ownership_end_ms": max(ownership_start_ms, ownership_end_ms),
+        }
+
+    candidate_segments: list[dict[str, Any]] = []
     providers: list[str] = []
     detected_languages: list[str] = []
     extraction_details: list[str] = []
     skipped_chunk_indices: list[int] = []
     skipped_chunk_details: list[str] = []
+    provider_submit_count = 0
+    checkpoint_reused_count = 0
 
     for position, item in enumerate(ranges, start=1):
-        chunk_index = int(item.get("index") or position)
-        chunk_start = max(0.0, _float(item.get("start")))
-        chunk_end = max(chunk_start, _float(item.get("end"), chunk_start))
+        bounds = _chunk_bounds(item, position)
+        chunk_index = int(bounds["index"])
+        chunk_id = str(bounds["chunk_id"])
+        chunk_start = float(bounds["extract_start_ms"]) / 1000.0
+        chunk_end = float(bounds["extract_end_ms"]) / 1000.0
         chunk_duration = chunk_end - chunk_start
         if chunk_duration <= 0:
             return {
@@ -413,6 +483,43 @@ async def transcribe_long_media_chunks(
                 "chunk_count": len(ranges),
                 "chunk_strategy": "asr_audio_chunks",
             }
+        stored = dict((checkpoint.get("chunks") or {}).get(chunk_id) or {})
+        stored_status = str(stored.get("status") or "").upper()
+        if stored_status == "ACCEPTANCE_UNKNOWN":
+            return {
+                "ok": False,
+                "status": "ACCEPTANCE_UNKNOWN",
+                "detail": f"chunk={chunk_index}; acceptance_unknown_no_resubmit",
+                "segments": [],
+                "text": "",
+                "failed_chunk_index": chunk_index,
+                "chunk_count": len(ranges),
+                "chunk_strategy": "checkpointed_audio_chunks",
+                "provider_submit_count": provider_submit_count,
+                "checkpoint_reused_count": checkpoint_reused_count,
+                "global_timing_preserved": True,
+            }
+        if stored_status in {"COMPLETED", "NO_SPEECH"}:
+            checkpoint_reused_count += 1
+            if stored_status == "NO_SPEECH":
+                skipped_chunk_indices.append(chunk_index)
+                skipped_chunk_details.append(f"chunk={chunk_index}; status=checkpoint_no_speech")
+                continue
+            stored_segments = [dict(segment or {}) for segment in list(stored.get("segments") or [])]
+            for segment in stored_segments:
+                text_only_fallback = bool(segment.pop("_text_only_fallback", False))
+                segment.update({
+                    "_chunk_id": chunk_id,
+                    "_chunk_index": chunk_index,
+                    "_ownership_start_ms": int(bounds["ownership_start_ms"]),
+                    "_ownership_end_ms": int(bounds["ownership_end_ms"]),
+                    "_text_only_fallback": text_only_fallback,
+                })
+            candidate_segments.extend(stored_segments)
+            providers.append(str(stored.get("provider") or ""))
+            detected_languages.append(str(stored.get("language") or ""))
+            extraction_details.append("checkpoint_reused")
+            continue
         try:
             audio_bytes, audio_content_type, extraction_detail = await _maybe_await(
                 extract_chunk(source_bytes, content_type, chunk_start, chunk_duration)
@@ -442,7 +549,30 @@ async def transcribe_long_media_chunks(
         extraction_details.append(str(extraction_detail or ""))
 
         try:
+            provider_submit_count += 1
             result = dict(await _maybe_await(transcribe_chunk(bytes(audio_bytes), str(audio_content_type or "audio/mpeg"))) or {})
+        except asyncio.TimeoutError:
+            checkpoint.setdefault("chunks", {})[chunk_id] = {
+                **bounds,
+                "source_hash": source_fingerprint,
+                "status": "ACCEPTANCE_UNKNOWN",
+                "artifact_hash": hashlib.sha256(bytes(audio_bytes)).hexdigest(),
+                "updated_at": time.time(),
+            }
+            _persist_checkpoint()
+            return {
+                "ok": False,
+                "status": "ACCEPTANCE_UNKNOWN",
+                "detail": f"chunk={chunk_index}; provider_acceptance_unknown",
+                "segments": [],
+                "text": "",
+                "failed_chunk_index": chunk_index,
+                "chunk_count": len(ranges),
+                "chunk_strategy": "checkpointed_audio_chunks",
+                "provider_submit_count": provider_submit_count,
+                "checkpoint_reused_count": checkpoint_reused_count,
+                "global_timing_preserved": True,
+            }
         except Exception as exc:
             return {
                 "ok": False,
@@ -454,14 +584,49 @@ async def transcribe_long_media_chunks(
                 "chunk_count": len(ranges),
                 "chunk_strategy": "asr_audio_chunks",
             }
+        result_status = str(result.get("status") or "long_media_chunk_asr_empty").strip()
+        normalized_result_status = result_status.upper()
+        if (
+            normalized_result_status == "ACCEPTANCE_UNKNOWN"
+            or "TIMEOUT" in normalized_result_status
+        ):
+            checkpoint.setdefault("chunks", {})[chunk_id] = {
+                **bounds,
+                "source_hash": source_fingerprint,
+                "status": "ACCEPTANCE_UNKNOWN",
+                "provider_status": result_status,
+                "artifact_hash": hashlib.sha256(bytes(audio_bytes)).hexdigest(),
+                "updated_at": time.time(),
+            }
+            _persist_checkpoint()
+            return {
+                "ok": False,
+                "status": "ACCEPTANCE_UNKNOWN",
+                "detail": f"chunk={chunk_index}; provider_acceptance_unknown",
+                "segments": [],
+                "text": "",
+                "failed_chunk_index": chunk_index,
+                "chunk_count": len(ranges),
+                "chunk_strategy": "checkpointed_audio_chunks",
+                "provider_submit_count": provider_submit_count,
+                "checkpoint_reused_count": checkpoint_reused_count,
+                "global_timing_preserved": True,
+            }
         transcript = str(result.get("text") or result.get("transcript") or "").strip()
         if not result.get("ok") or not transcript:
-            result_status = str(result.get("status") or "long_media_chunk_asr_empty")
             if is_no_speech_result(result, transcript):
                 skipped_chunk_indices.append(chunk_index)
                 skipped_chunk_details.append(
                     f"chunk={chunk_index}; status={result_status[:80]}"
                 )
+                checkpoint.setdefault("chunks", {})[chunk_id] = {
+                    **bounds,
+                    "source_hash": source_fingerprint,
+                    "status": "NO_SPEECH",
+                    "artifact_hash": hashlib.sha256(bytes(audio_bytes)).hexdigest(),
+                    "updated_at": time.time(),
+                }
+                _persist_checkpoint()
                 continue
             return {
                 "ok": False,
@@ -476,10 +641,22 @@ async def transcribe_long_media_chunks(
                 "skipped_chunk_indices": skipped_chunk_indices,
             }
 
+        provider_segments = list(result.get("segments") or [])
+        text_only_fallback = not provider_segments
+        segment_window_start = (
+            float(bounds["ownership_start_ms"]) / 1000.0
+            if text_only_fallback
+            else chunk_start
+        )
+        segment_window_end = (
+            float(bounds["ownership_end_ms"]) / 1000.0
+            if text_only_fallback
+            else chunk_end
+        )
         absolute_segments = offset_chunk_segments(
-            result.get("segments") or [],
-            chunk_start=chunk_start,
-            chunk_end=chunk_end,
+            provider_segments,
+            chunk_start=segment_window_start,
+            chunk_end=segment_window_end,
             fallback_text=transcript,
         )
         if not absolute_segments:
@@ -495,10 +672,99 @@ async def transcribe_long_media_chunks(
                 "skipped_chunk_count": len(skipped_chunk_indices),
                 "skipped_chunk_indices": skipped_chunk_indices,
             }
-        all_segments.extend(absolute_segments)
-        transcripts.append(transcript)
+        stored_segments = []
+        for segment in absolute_segments:
+            public_segment = {
+                key: value
+                for key, value in dict(segment or {}).items()
+                if key in {"index", "start", "end", "text", "confidence", "speaker", "language"}
+            }
+            stored_segments.append({
+                **public_segment,
+                "_text_only_fallback": text_only_fallback,
+            })
+            candidate_segments.append({
+                **public_segment,
+                "_chunk_id": chunk_id,
+                "_chunk_index": chunk_index,
+                "_ownership_start_ms": int(bounds["ownership_start_ms"]),
+                "_ownership_end_ms": int(bounds["ownership_end_ms"]),
+                "_text_only_fallback": text_only_fallback,
+            })
         providers.append(str(result.get("provider") or ""))
         detected_languages.append(str(result.get("language") or result.get("detected_language") or ""))
+        checkpoint.setdefault("chunks", {})[chunk_id] = {
+            **bounds,
+            "source_hash": source_fingerprint,
+            "status": "COMPLETED",
+            "artifact_hash": hashlib.sha256(bytes(audio_bytes)).hexdigest(),
+            "transcript": transcript,
+            "segments": stored_segments,
+            "provider": str(result.get("provider") or ""),
+            "language": str(result.get("language") or result.get("detected_language") or ""),
+            "updated_at": time.time(),
+        }
+        _persist_checkpoint()
+
+    def _normalized_text(value: Any) -> str:
+        return re.sub(r"[^\w]+", " ", str(value or "").casefold()).strip()
+
+    def _trim_text_only_prefix(previous_text: Any, current_text: Any) -> tuple[str, int]:
+        previous_words = str(previous_text or "").split()
+        current_words = str(current_text or "").split()
+        previous_keys = [_normalized_text(word) for word in previous_words]
+        current_keys = [_normalized_text(word) for word in current_words]
+        maximum = min(12, len(previous_keys), len(current_keys))
+        for count in range(maximum, 0, -1):
+            if previous_keys[-count:] == current_keys[:count]:
+                return " ".join(current_words[count:]).strip(), count
+        return str(current_text or "").strip(), 0
+
+    candidate_segments.sort(key=lambda segment: (_float(segment.get("start")), _float(segment.get("end"))))
+    all_segments: list[dict[str, Any]] = []
+    overlap_duplicate_count = 0
+    for candidate in candidate_segments:
+        start = _float(candidate.get("start"))
+        end = max(start, _float(candidate.get("end"), start))
+        start_ms = int(round(start * 1000))
+        end_ms = int(round(end * 1000))
+        owner_start = int(candidate.get("_ownership_start_ms") or 0)
+        owner_end = int(candidate.get("_ownership_end_ms") or 0)
+        ownership_overlap_ms = max(
+            0,
+            min(end_ms, owner_end) - max(start_ms, owner_start),
+        )
+        owned = ownership_overlap_ms > 0
+        if not owned:
+            overlap_duplicate_count += 1
+            continue
+        if candidate.get("_text_only_fallback") and all_segments:
+            previous = all_segments[-1]
+            adjacent_chunks = int(candidate.get("_chunk_index") or 0) == int(
+                previous.get("_chunk_index") or 0
+            ) + 1
+            if adjacent_chunks and previous.get("_text_only_fallback"):
+                trimmed_text, removed_words = _trim_text_only_prefix(
+                    previous.get("text"),
+                    candidate.get("text"),
+                )
+                if removed_words > 0:
+                    overlap_duplicate_count += 1
+                    candidate["text"] = trimmed_text
+                    if not trimmed_text:
+                        continue
+        text_key = _normalized_text(candidate.get("text"))
+        duplicate = False
+        for existing in reversed(all_segments[-4:]):
+            existing_key = _normalized_text(existing.get("text"))
+            overlaps = min(end, _float(existing.get("end"))) > max(start, _float(existing.get("start")))
+            if text_key and text_key == existing_key and overlaps:
+                duplicate = True
+                break
+        if duplicate:
+            overlap_duplicate_count += 1
+            continue
+        all_segments.append(dict(candidate))
 
     if not all_segments:
         return {
@@ -517,8 +783,19 @@ async def transcribe_long_media_chunks(
             "skipped_chunk_indices": skipped_chunk_indices,
             "skipped_chunk_details": skipped_chunk_details,
             "speech_chunk_count": 0,
+            "provider_submit_count": provider_submit_count,
+            "checkpoint_reused_count": checkpoint_reused_count,
+            "overlap_duplicate_count": overlap_duplicate_count,
         }
 
+    all_segments = [
+        {
+            key: value
+            for key, value in item.items()
+            if not str(key).startswith("_")
+        }
+        for item in all_segments
+    ]
     all_segments.sort(key=lambda item: (_float(item.get("start")), _float(item.get("end"))))
     for index, item in enumerate(all_segments, start=1):
         item["index"] = index
@@ -529,23 +806,27 @@ async def transcribe_long_media_chunks(
     return {
         "ok": bool(all_segments),
         "status": "PASS" if all_segments else "long_media_segments_empty",
-        "text": " ".join(item for item in transcripts if item).strip(),
+        "text": " ".join(str(item.get("text") or "") for item in all_segments).strip(),
         "segments": all_segments,
         "provider": next((item for item in providers if item), ""),
         "language": next((item for item in detected_languages if item and item != "auto"), ""),
         "duration_seconds": round(duration, 3),
         "chunk_count": len(ranges),
-        "chunk_strategy": "asr_audio_chunks",
+        "chunk_strategy": "checkpointed_audio_chunks",
         "global_timing_preserved": True,
         "detail": (
-            f"chunks={len(ranges)}; speech_chunks={len(transcripts)}; "
+            f"chunks={len(ranges)}; speech_chunks={len(ranges) - len(skipped_chunk_indices)}; "
             f"skipped={','.join(str(item) for item in skipped_chunk_indices)}; "
             f"extraction={','.join(item for item in extraction_details if item)}"
         ),
         "skipped_chunk_count": len(skipped_chunk_indices),
         "skipped_chunk_indices": skipped_chunk_indices,
         "skipped_chunk_details": skipped_chunk_details,
-        "speech_chunk_count": len(transcripts),
+        "speech_chunk_count": len(ranges) - len(skipped_chunk_indices),
+        "provider_submit_count": provider_submit_count,
+        "checkpoint_reused_count": checkpoint_reused_count,
+        "overlap_duplicate_count": overlap_duplicate_count,
+        "checkpoint_path": str(checkpoint_path or ""),
     }
 
 
