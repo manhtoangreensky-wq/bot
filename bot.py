@@ -208644,6 +208644,11 @@ def subdub_validate_saved_input_for_pipeline(input_save: dict | None = None, sta
     state = dict(state or {})
     path = str(current.get("path") or "")
     size = int(current.get("size") or (os.path.getsize(path) if path and os.path.exists(path) else 0))
+    transport_input_size = int(
+        current.get("transport_input_size")
+        or current.get("telegram_file_size")
+        or size
+    )
     duration = _safe_int(current.get("duration") or state.get("video_duration") or state.get("source_duration"), 0)
     content_type = str(current.get("content_type") or state.get("source_mime_type") or "").lower()
     if not current.get("ok"):
@@ -208656,11 +208661,13 @@ def subdub_validate_saved_input_for_pipeline(input_save: dict | None = None, sta
         current.get("telegram_download_method")
         or ("source_bytes_override" if current.get("source_bytes") else "bot_api_direct")
     )
-    if size > subdub_input_limit_mb(
+    processing_limit_bytes = int(SUBDUB_PROCESSING_MAX_INPUT_MB) * 1024 * 1024
+    transport_limit_bytes = subdub_input_limit_mb(
         bool(state.get("_pipeline_is_admin")),
         intake_method=intake_method,
         local_api=telegram_local_api_enabled(),
-    ) * 1024 * 1024:
+    ) * 1024 * 1024
+    if size > processing_limit_bytes or transport_input_size > transport_limit_bytes:
         return {"ok": False, "blocker": "video_too_large", "duration": duration, "size": size}
     source_bytes = current.get("source_bytes")
     has_source_bytes = isinstance(source_bytes, (bytes, bytearray)) and len(source_bytes) > 0
@@ -209734,7 +209741,9 @@ def subdub_input_limit_mb(
     method = str(intake_method or "").strip().lower()
     if not method:
         return min(int(SUBDUB_MAX_INPUT_MB), int(SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB))
-    processing_limit = min(int(SUBDUB_PROCESSING_MAX_INPUT_MB), int(SUBDUB_MAX_INPUT_MB))
+    processing_limit = int(SUBDUB_PROCESSING_MAX_INPUT_MB)
+    if method in {"local_path_override", "source_bytes_override", "legal_fixture"}:
+        return processing_limit
     if method == "cloud_bot_api":
         return min(processing_limit, int(SUBDUB_TELEGRAM_CLOUD_DOWNLOAD_LIMIT_MB))
     if method == "bot_api_direct":
@@ -209745,8 +209754,6 @@ def subdub_input_limit_mb(
             else int(SUBDUB_TELEGRAM_CLOUD_DOWNLOAD_LIMIT_MB)
         )
         return min(processing_limit, transport_limit)
-    if method in {"local_path_override", "source_bytes_override", "legal_fixture"}:
-        return processing_limit
     return min(processing_limit, int(SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB))
 
 
@@ -209962,15 +209969,15 @@ async def subdub_duration_gate_payload_for_saved_input(
 ) -> dict:
     current = dict(input_save or {})
     content_type = str(current.get("content_type") or (state or {}).get("source_mime_type") or "").lower()
-    ffprobe_duration = 0
+    ffprobe_duration = 0.0
     source_bytes = current.get("source_bytes")
     if content_type.startswith("video/") and isinstance(source_bytes, (bytes, bytearray)) and source_bytes:
         try:
             probe = await subdub_probe_video_bytes(bytes(source_bytes))
             if probe.get("ok") or float(probe.get("duration") or 0) > 0:
-                ffprobe_duration = int(round(float(probe.get("duration") or 0)))
+                ffprobe_duration = float(probe.get("duration") or 0.0)
         except Exception:
-            ffprobe_duration = 0
+            ffprobe_duration = 0.0
     return subdub_duration_gate_payload(current, state, is_admin=is_admin, ffprobe_duration=ffprobe_duration)
 
 def subdub_lifecycle_debug_fields(stage: str = "", terminal_state: str = "") -> dict:
@@ -211001,6 +211008,7 @@ async def video_dubbing_save_input_for_pipeline(
         "path": "",
         "exists": False,
         "size": 0,
+        "transport_input_size": 0,
         "duration": _safe_int(state.get("video_duration") or state.get("source_duration"), 0),
         "content_type": str(state.get("source_mime_type") or "video/mp4"),
         "original_filename": str(state.get("source_file_name") or "source.mp4"),
@@ -211148,6 +211156,7 @@ async def video_dubbing_save_input_for_pipeline(
         "source_bytes": bytes(source_bytes),
         "content_type": str(content_type or result["content_type"]),
         "size": len(source_bytes),
+        "transport_input_size": len(source_bytes),
         "input_save_success": True,
     })
     if workspace and source_bytes:
@@ -212988,6 +212997,7 @@ async def run_subdub_ffmpeg_command(cmd: list[str], timeout: float = 120.0) -> t
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -213075,6 +213085,7 @@ async def subdub_probe_video_bytes(video_bytes: bytes) -> dict:
                     "stream_tags=rotate:stream_side_data=rotation"
                 ),
                 path,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -213266,6 +213277,7 @@ async def subdub_validate_video_output(
     min_bytes: int | None = None,
     expected_duration: float = 0.0,
     min_duration_coverage: float = 0.97,
+    max_duration_shortfall: float = 1.0,
     max_duration_overage: float = 1.0,
 ) -> dict:
     min_size = int(min_bytes or SUBDUB_MIN_VIDEO_OUTPUT_BYTES or 512)
@@ -213288,10 +213300,13 @@ async def subdub_validate_video_output(
     actual_duration = float(probe.get("duration") or 0.0)
     expected = max(0.0, float(expected_duration or 0.0))
     coverage_ratio = (actual_duration / expected) if expected > 0 else 1.0
+    coverage_floor = expected * max(0.01, float(min_duration_coverage or 0.97))
+    absolute_floor = max(0.0, expected - max(0.0, float(max_duration_shortfall)))
+    minimum_duration = max(coverage_floor, absolute_floor) if expected > 0 else 0.0
     duration_coverage_ok = bool(
         expected <= 0
         or (
-            actual_duration >= expected * max(0.01, float(min_duration_coverage or 0.97))
+            actual_duration >= minimum_duration
             and actual_duration <= expected + max(0.0, float(max_duration_overage or 1.0))
         )
     )
@@ -213301,7 +213316,8 @@ async def subdub_validate_video_output(
         "actual_duration": actual_duration,
         "duration_coverage_ratio": coverage_ratio,
         "duration_coverage_ok": duration_coverage_ok,
-        "duration_min_required": expected * max(0.01, float(min_duration_coverage or 0.97)) if expected > 0 else 0.0,
+        "duration_min_required": minimum_duration,
+        "duration_max_shortfall": max(0.0, float(max_duration_shortfall)),
         "duration_max_allowed": expected + max(0.0, float(max_duration_overage or 1.0)) if expected > 0 else 0.0,
     }
     if not duration_coverage_ok:
@@ -214862,11 +214878,25 @@ async def transcribe_media_to_segments(
             }
     if not source_hash:
         source_hash = hashlib.sha256(source_bytes).hexdigest()
-    long_plan = subdub_long_video_chunk_plan(
-        duration_seconds,
-        source_hash=source_hash,
-        direct_threshold_seconds=SUBDUB_DIRECT_ASR_MAX_SECONDS,
+    try:
+        chunk_plan_parameters = inspect.signature(subdub_long_video_chunk_plan).parameters
+    except (TypeError, ValueError):
+        chunk_plan_parameters = {}
+    chunk_plan_accepts_metadata = bool(
+        {"source_hash", "direct_threshold_seconds"} <= set(chunk_plan_parameters)
+        or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in chunk_plan_parameters.values()
+        )
     )
+    if chunk_plan_accepts_metadata:
+        long_plan = subdub_long_video_chunk_plan(
+            duration_seconds,
+            source_hash=source_hash,
+            direct_threshold_seconds=SUBDUB_DIRECT_ASR_MAX_SECONDS,
+        )
+    else:
+        long_plan = subdub_long_video_chunk_plan(duration_seconds)
     asr_progress_emitted = False
 
     async def _emit_asr_progress_once() -> None:

@@ -1,6 +1,6 @@
 # P0.SUBDUB.LONGMEDIA32 Limit And Failure Matrix
 
-Branch base: `9628961572a18af5cb0174563598237f527b77ae`
+Branch base: `4bf9154972bf9ba473a8a96ed5e51b837388cce9`
 
 Authoritative SubDub behavior baseline: PR #606, merge `94ad8a97d128cfcbbd3439ec602c5c2f9fbde225`, head `c16f931`. LONGMEDIA32 does not restore PR #400 wholesale and does not shorten the PR #606 dub/combo speech timeline.
 

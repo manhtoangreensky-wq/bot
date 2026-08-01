@@ -582,9 +582,36 @@ async def transcribe_long_media_chunks(
                 "chunk_count": len(ranges),
                 "chunk_strategy": "asr_audio_chunks",
             }
+        result_status = str(result.get("status") or "long_media_chunk_asr_empty").strip()
+        normalized_result_status = result_status.upper()
+        if (
+            normalized_result_status == "ACCEPTANCE_UNKNOWN"
+            or "TIMEOUT" in normalized_result_status
+        ):
+            checkpoint.setdefault("chunks", {})[chunk_id] = {
+                **bounds,
+                "source_hash": source_fingerprint,
+                "status": "ACCEPTANCE_UNKNOWN",
+                "provider_status": result_status,
+                "artifact_hash": hashlib.sha256(bytes(audio_bytes)).hexdigest(),
+                "updated_at": time.time(),
+            }
+            _persist_checkpoint()
+            return {
+                "ok": False,
+                "status": "ACCEPTANCE_UNKNOWN",
+                "detail": f"chunk={chunk_index}; provider_acceptance_unknown",
+                "segments": [],
+                "text": "",
+                "failed_chunk_index": chunk_index,
+                "chunk_count": len(ranges),
+                "chunk_strategy": "checkpointed_audio_chunks",
+                "provider_submit_count": provider_submit_count,
+                "checkpoint_reused_count": checkpoint_reused_count,
+                "global_timing_preserved": True,
+            }
         transcript = str(result.get("text") or result.get("transcript") or "").strip()
         if not result.get("ok") or not transcript:
-            result_status = str(result.get("status") or "long_media_chunk_asr_empty")
             if is_no_speech_result(result, transcript):
                 skipped_chunk_indices.append(chunk_index)
                 skipped_chunk_details.append(

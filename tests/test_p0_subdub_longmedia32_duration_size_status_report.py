@@ -129,6 +129,51 @@ def test_longmedia32_limit_policy_is_bound_to_intake_method(monkeypatch):
     assert bot.subdub_output_delivery_limit_mb("document", local_api=False) == 49
 
 
+def test_longmedia32_post_normalization_size_uses_processing_not_cloud_transport_limit(
+    tmp_path,
+    monkeypatch,
+):
+    source_path = tmp_path / "saved-source.mp4"
+    source_path.write_bytes(b"saved")
+    monkeypatch.setattr(bot, "SUBDUB_PROCESSING_MAX_INPUT_MB", 500, raising=False)
+    monkeypatch.setattr(bot, "SUBDUB_TELEGRAM_CLOUD_DOWNLOAD_LIMIT_MB", 20)
+    monkeypatch.setattr(bot, "SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB", 20)
+    monkeypatch.setattr(bot, "telegram_local_api_enabled", lambda: False)
+
+    normalized = bot.subdub_validate_saved_input_for_pipeline(
+        {
+            "ok": True,
+            "path": str(source_path),
+            "size": 25 * MIB,
+            "transport_input_size": 19 * MIB,
+            "telegram_file_size": 19 * MIB,
+            "duration": 61,
+            "content_type": "video/mp4",
+            "telegram_download_method": "bot_api_direct",
+            "media_normalized": True,
+        },
+        {},
+    )
+    processing_overflow = bot.subdub_validate_saved_input_for_pipeline(
+        {
+            "ok": True,
+            "path": str(source_path),
+            "size": 501 * MIB,
+            "transport_input_size": 19 * MIB,
+            "telegram_file_size": 19 * MIB,
+            "duration": 61,
+            "content_type": "video/mp4",
+            "telegram_download_method": "bot_api_direct",
+            "media_normalized": True,
+        },
+        {},
+    )
+
+    assert normalized["ok"] is True
+    assert processing_overflow["ok"] is False
+    assert processing_overflow["blocker"] == "video_too_large"
+
+
 def test_longmedia32_59_direct_61_chunked_and_one_hour_supported(monkeypatch):
     monkeypatch.setattr(bot, "SUBDUB_MAX_DURATION_SECONDS", 3600)
     monkeypatch.setattr(bot, "SUBDUB_DIRECT_ASR_MAX_SECONDS", 60, raising=False)
@@ -166,6 +211,40 @@ def test_longmedia32_fractional_duration_boundaries_fail_closed(monkeypatch):
 
     assert over_direct["input_duration_seconds"] == 61
     assert over_direct["is_long_media"] is True
+    assert over_direct["chunking_enabled"] is True
+    assert over_product["input_duration_seconds"] == 3601
+    assert over_product["duration_gate_result"] == "fail_over_limit"
+
+
+def test_longmedia32_saved_input_gate_keeps_fractional_ffprobe_duration(monkeypatch):
+    measured_duration = {"value": 60.001}
+
+    async def probe(_payload):
+        return {
+            "ok": True,
+            "duration": measured_duration["value"],
+            "has_video": True,
+            "has_audio": True,
+        }
+
+    monkeypatch.setattr(bot, "subdub_probe_video_bytes", probe)
+    monkeypatch.setattr(bot, "SUBDUB_DIRECT_ASR_MAX_SECONDS", 60, raising=False)
+    monkeypatch.setattr(bot, "SUBDUB_MAX_DURATION_SECONDS", 3600)
+    saved_input = {
+        "ok": True,
+        "source_bytes": b"fixture",
+        "content_type": "video/mp4",
+    }
+
+    over_direct = asyncio.run(
+        bot.subdub_duration_gate_payload_for_saved_input(saved_input, {})
+    )
+    measured_duration["value"] = 3600.001
+    over_product = asyncio.run(
+        bot.subdub_duration_gate_payload_for_saved_input(saved_input, {})
+    )
+
+    assert over_direct["input_duration_seconds"] == 61
     assert over_direct["chunking_enabled"] is True
     assert over_product["input_duration_seconds"] == 3601
     assert over_product["duration_gate_result"] == "fail_over_limit"
@@ -569,6 +648,70 @@ def test_longmedia32_acceptance_unknown_never_resubmits_chunk(tmp_path):
     assert second["provider_submit_count"] == 0
 
 
+def test_longmedia32_returned_provider_timeout_is_checkpointed_without_resubmit(tmp_path):
+    ranges = [
+        {
+            "index": 1,
+            "chunk_id": "returned-timeout",
+            "start": 0.0,
+            "end": 30.0,
+            "extract_start_ms": 0,
+            "extract_end_ms": 30_000,
+            "ownership_start_ms": 0,
+            "ownership_end_ms": 30_000,
+        }
+    ]
+    attempts = []
+
+    async def extract(*_args):
+        return b"audio", "audio/mpeg", "fixture"
+
+    async def returned_timeout(*_args):
+        attempts.append("submit")
+        return {
+            "ok": False,
+            "status": "FAIL_TIMEOUT",
+            "text": "",
+            "segments": [],
+            "detail": "request timed out after submit",
+        }
+
+    checkpoint = tmp_path / "returned-timeout.json"
+    first = asyncio.run(
+        subdub_long_media.transcribe_long_media_chunks(
+            b"source",
+            "video/mp4",
+            ranges,
+            extract_chunk=extract,
+            transcribe_chunk=returned_timeout,
+            input_duration_seconds=30,
+            source_hash="source-hash",
+            checkpoint_path=str(checkpoint),
+        )
+    )
+
+    async def must_not_submit(*_args):
+        raise AssertionError("returned provider timeout was resubmitted")
+
+    second = asyncio.run(
+        subdub_long_media.transcribe_long_media_chunks(
+            b"source",
+            "video/mp4",
+            ranges,
+            extract_chunk=extract,
+            transcribe_chunk=must_not_submit,
+            input_duration_seconds=30,
+            source_hash="source-hash",
+            checkpoint_path=str(checkpoint),
+        )
+    )
+
+    assert attempts == ["submit"]
+    assert first["status"] == "ACCEPTANCE_UNKNOWN"
+    assert second["status"] == "ACCEPTANCE_UNKNOWN"
+    assert second["provider_submit_count"] == 0
+
+
 def test_longmedia32_pr606_tts_timeline_preserves_full_speech_without_overlap():
     plan = bot.subdub_plan_dub_timeline(
         [
@@ -706,6 +849,32 @@ def test_longmedia32_renderer_keeps_source_and_extends_for_complete_pr606_tts(mo
     assert any("tpad=stop_mode=clone:stop_duration=2.348" in item for item in command)
     assert "render_duration=4.348" in detail
     assert "video_extended_by=2.348" in detail
+
+
+def test_longmedia32_output_validation_rejects_absolute_long_video_truncation(monkeypatch):
+    async def probe(_payload):
+        return {
+            "ok": True,
+            "detail": "ok",
+            "duration": 292.0,
+            "has_video": True,
+            "has_audio": True,
+            "size": 2048,
+        }
+
+    monkeypatch.setattr(bot, "subdub_probe_video_bytes", probe)
+    result = asyncio.run(
+        bot.subdub_validate_video_output(
+            b"x" * 2048,
+            require_audio=True,
+            min_bytes=16,
+            expected_duration=300.0,
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["detail"] == "video_duration_coverage_failed"
+    assert result["duration_min_required"] >= 299.0
 
 
 def test_longmedia32_translated_artifact_identity_rejects_source_and_missing_srt(tmp_path):
