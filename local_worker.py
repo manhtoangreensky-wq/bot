@@ -63,6 +63,7 @@ from services.video_local_validation import (
 )
 from services.video_smart_splitter import SplitRange
 from services import frame_video_commercial, frame_video_runtime, video_ai_edit_provider, video_ai_edit_status, video_ai_edit_validation, video_editengine1, video_local_validation
+from services import product_video_public_seam
 
 
 def load_dotenv(path: str) -> None:
@@ -1729,12 +1730,36 @@ def video_project_real_scene_renderer(job: dict | None = None):
         raise RuntimeError(f"{REAL_VIDEO_RENDER_UNAVAILABLE}:connector_failed:{type(exc).__name__}") from exc
 
 
+def prepare_product_video_public_seam_job(
+    job: dict | None = None,
+    *,
+    environ: dict | None = None,
+) -> dict:
+    data = dict(job or {})
+    is_product_video = (
+        product_video_public_seam.product_video_public_seam_applies_to_worker_job(
+            data
+        )
+    )
+    if not is_product_video or data.get("admin_video_delivery"):
+        return data
+    return product_video_public_seam.prepare_product_video_worker_job(
+        data,
+        environ=os.environ if environ is None else environ,
+    )
+
+
 def run_video_render_job(job: dict) -> None:
     job_id = job.get("id") or job.get("job_id")
-    project = job.get("project") or {}
     try:
         if not job_id:
             return
+        try:
+            job = prepare_product_video_public_seam_job(job)
+        except RuntimeError as exc:
+            update_video_render_job(job_id, "failed", str(exc))
+            return
+        project = job.get("project") or {}
         if not TELEGRAM_BOT_TOKEN:
             update_video_render_job(job_id, "failed", "telegram_token_missing_for_delivery")
             return
@@ -1802,22 +1827,37 @@ def run_video_render_job(job: dict) -> None:
             or "bottom_right"
         )
         logo_enabled = bool(logo_path or (addon_plan.get("logo_enabled") and logo_text) or watermark.get("enabled") and logo_text)
-        result = process_multiscene_video_pipeline(
-            user_id=user_id,
-            job_id=str(job_id),
-            user_prompt=prompt,
-            workspace_dir=workspace,
-            render_video_func=render_func,
-            llm_func=real_video_llm_func_from_job(job),
-            max_scenes=scene_count,
-            default_scene_duration=duration,
-            aspect_ratio=str(project.get("ratio") or "9:16"),
-            enable_voice=False,
-            enable_subtitle=bool(addon_plan.get("subtitle_enabled", True)),
-            logo_path=logo_path or None,
-            enable_logo=logo_enabled,
-            logo_text=logo_text,
-            logo_position=logo_position,
+        def _execute_pipeline(prepared: dict, routed_scene_count: int):
+            return process_multiscene_video_pipeline(
+                user_id=user_id,
+                job_id=str(job_id),
+                user_prompt=prompt,
+                workspace_dir=workspace,
+                render_video_func=render_func,
+                llm_func=real_video_llm_func_from_job(prepared),
+                max_scenes=routed_scene_count,
+                default_scene_duration=duration,
+                aspect_ratio=str(project.get("ratio") or "9:16"),
+                enable_voice=False,
+                enable_subtitle=bool(addon_plan.get("subtitle_enabled", True)),
+                logo_path=logo_path or None,
+                enable_logo=logo_enabled,
+                logo_text=logo_text,
+                logo_position=logo_position,
+            )
+
+        result = product_video_public_seam.execute_product_video_worker_route(
+            job,
+            environ=os.environ,
+            one_scene_executor=lambda prepared: _execute_pipeline(prepared, 1),
+            multiscene_executor=lambda prepared: _execute_pipeline(
+                prepared,
+                scene_count,
+            ),
+            legacy_executor=lambda prepared: _execute_pipeline(
+                prepared,
+                scene_count,
+            ),
         )
         final_path = str(result.get("final_video_path") or "")
         if not result.get("ok") or not final_path:
