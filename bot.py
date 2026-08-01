@@ -109433,22 +109433,59 @@ def storage_migration_records_for_query(query: str) -> list[dict]:
         conn.close()
 
 
+STORAGE_MIGRATION_BACKGROUND_TASK: asyncio.Task | None = None
+
+
+async def _run_storage_migration_background(update: Update) -> None:
+    global STORAGE_MIGRATION_BACKGROUND_TASK
+    try:
+        logger.info("storage_migration_background | status=started")
+        report = await asyncio.to_thread(run_storage_migration_report, confirm=True)
+        logger.info(
+            "storage_migration_background | status=completed uploaded=%s verified=%s deleted=%s errors=%s",
+            report.uploaded_files,
+            report.verified_files,
+            report.deleted_files,
+            len(report.errors),
+        )
+        await reply_html_lines(update, storage_migration_report_lines(report, mode="run"), limit=3900)
+    finally:
+        current = asyncio.current_task()
+        if STORAGE_MIGRATION_BACKGROUND_TASK is current:
+            STORAGE_MIGRATION_BACKGROUND_TASK = None
+
+
 async def cmd_storage_migrate_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
-    report = run_storage_migration_preview_report()
+    report = await asyncio.to_thread(run_storage_migration_preview_report)
     await reply_html_lines(update, storage_migration_report_lines(report, mode="preview"), limit=3900)
 
 
 async def cmd_storage_migrate_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global STORAGE_MIGRATION_BACKGROUND_TASK
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     args = list(getattr(context, "args", []) or [])
     if not args or str(args[0]).strip().lower() != "confirm":
-        report = run_storage_migration_preview_report()
+        report = await asyncio.to_thread(run_storage_migration_preview_report)
         return await reply_html_lines(update, storage_migration_report_lines(report, mode="confirm_missing"), limit=3900)
-    report = run_storage_migration_report(confirm=True)
-    await reply_html_lines(update, storage_migration_report_lines(report, mode="run"), limit=3900)
+    active_task = STORAGE_MIGRATION_BACKGROUND_TASK
+    if active_task is not None and not active_task.done():
+        logger.info("storage_migration_background | status=duplicate_ignored")
+        return None
+    runner = _run_storage_migration_background(update)
+    application = getattr(context, "application", None)
+    create_task = getattr(application, "create_task", None)
+    if callable(create_task):
+        try:
+            task = create_task(runner, update=update, name="storage-migration")
+        except TypeError:
+            task = create_task(runner)
+    else:
+        task = asyncio.create_task(runner, name="storage-migration")
+    STORAGE_MIGRATION_BACKGROUND_TASK = task
+    return None
 
 
 async def cmd_storage_backup_cleanup_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):

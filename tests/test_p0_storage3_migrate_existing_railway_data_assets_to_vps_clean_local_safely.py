@@ -208,6 +208,32 @@ def test_storage_audit_and_storage3_commands_registered():
     assert 'CommandHandler("storage_asset_refs", cmd_storage_asset_refs)' in source
 
 
+def test_storage_migration_commands_do_not_block_the_telegram_webhook_event_loop():
+    source = (REPO / "bot.py").read_text(encoding="utf-8")
+    preview = source[
+        source.index("async def cmd_storage_migrate_preview"):
+        source.index("async def cmd_storage_migrate_run")
+    ]
+    run = source[
+        source.index("async def cmd_storage_migrate_run"):
+        source.index("async def cmd_storage_backup_cleanup_preview")
+    ]
+    assert "async def _run_storage_migration_background" in source
+    background_start = source.index("async def _run_storage_migration_background")
+    background = source[
+        background_start:
+        source.index("async def cmd_storage_migrate_preview", background_start)
+    ]
+
+    assert "await asyncio.to_thread(run_storage_migration_preview_report)" in preview
+    assert "STORAGE_MIGRATION_BACKGROUND_TASK" in run
+    assert "_run_storage_migration_background(update)" in run
+    assert "asyncio.create_task" in run or "create_task(runner" in run
+    assert "await _run_storage_migration_background" not in run
+    assert "await asyncio.to_thread(run_storage_migration_report, confirm=True)" in background
+    assert "report = run_storage_migration_report(confirm=True)" not in run
+
+
 def test_storage3_does_not_touch_payos_wallet_pricing_static():
     service = (REPO / "services" / "storage_migration.py").read_text(encoding="utf-8").lower()
     assert "payos" not in service
