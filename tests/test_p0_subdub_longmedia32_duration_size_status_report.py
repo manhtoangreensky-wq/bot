@@ -111,20 +111,32 @@ def _unfamiliar_probe_payload() -> dict:
 
 
 def test_longmedia32_limit_policy_is_bound_to_intake_method(monkeypatch):
+    bot_source = Path(bot.__file__).read_text(encoding="utf-8")
+    processing_assignment = next(
+        line
+        for line in bot_source.splitlines()
+        if line.startswith("SUBDUB_PROCESSING_MAX_INPUT_MB =")
+    )
+    assert "min(500," not in processing_assignment
+    assert (
+        'env_int("SUBDUB_PROCESSING_MAX_INPUT_MB", '
+        "SUBDUB_LOCAL_API_MAX_INPUT_MB_DEFAULT)"
+    ) in processing_assignment
+
     monkeypatch.setattr(bot, "SUBDUB_MAX_INPUT_MB", 2000)
     monkeypatch.setattr(bot, "SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB", 2000)
     monkeypatch.setattr(bot, "SUBDUB_TELEGRAM_CLOUD_DOWNLOAD_LIMIT_MB", 20)
-    monkeypatch.setattr(bot, "SUBDUB_PROCESSING_MAX_INPUT_MB", 500, raising=False)
+    monkeypatch.setattr(bot, "SUBDUB_PROCESSING_MAX_INPUT_MB", 750, raising=False)
     monkeypatch.setattr(bot, "SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB", 45)
     monkeypatch.setattr(bot, "SUBDUB_TELEGRAM_DOCUMENT_MAX_MB", 49)
     monkeypatch.setattr(bot, "SUBDUB_TELEGRAM_LOCAL_DOWNLOAD_LIMIT_MAX_MB", 2000)
 
     assert bot.subdub_input_limit_mb(False, intake_method="cloud_bot_api") == 20
-    assert bot.subdub_input_limit_mb(False, intake_method="bot_api_direct", local_api=True) == 500
-    assert bot.subdub_input_limit_mb(False, intake_method="local_path_override") == 500
-    assert bot.subdub_input_limit_mb(False, intake_method="source_bytes_override") == 500
-    assert bot.subdub_output_delivery_limit_mb("video", local_api=True) == 500
-    assert bot.subdub_output_delivery_limit_mb("document", local_api=True) == 500
+    assert bot.subdub_input_limit_mb(False, intake_method="bot_api_direct", local_api=True) == 750
+    assert bot.subdub_input_limit_mb(False, intake_method="local_path_override") == 750
+    assert bot.subdub_input_limit_mb(False, intake_method="source_bytes_override") == 750
+    assert bot.subdub_output_delivery_limit_mb("video", local_api=True) == 750
+    assert bot.subdub_output_delivery_limit_mb("document", local_api=True) == 750
     assert bot.subdub_output_delivery_limit_mb("video", local_api=False) == 45
     assert bot.subdub_output_delivery_limit_mb("document", local_api=False) == 49
 
@@ -135,7 +147,7 @@ def test_longmedia32_post_normalization_size_uses_processing_not_cloud_transport
 ):
     source_path = tmp_path / "saved-source.mp4"
     source_path.write_bytes(b"saved")
-    monkeypatch.setattr(bot, "SUBDUB_PROCESSING_MAX_INPUT_MB", 500, raising=False)
+    monkeypatch.setattr(bot, "SUBDUB_PROCESSING_MAX_INPUT_MB", 750, raising=False)
     monkeypatch.setattr(bot, "SUBDUB_TELEGRAM_CLOUD_DOWNLOAD_LIMIT_MB", 20)
     monkeypatch.setattr(bot, "SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB", 20)
     monkeypatch.setattr(bot, "telegram_local_api_enabled", lambda: False)
@@ -158,7 +170,7 @@ def test_longmedia32_post_normalization_size_uses_processing_not_cloud_transport
         {
             "ok": True,
             "path": str(source_path),
-            "size": 501 * MIB,
+            "size": 751 * MIB,
             "transport_input_size": 19 * MIB,
             "telegram_file_size": 19 * MIB,
             "duration": 61,
@@ -174,15 +186,23 @@ def test_longmedia32_post_normalization_size_uses_processing_not_cloud_transport
     assert processing_overflow["blocker"] == "video_too_large"
 
 
-def test_longmedia32_59_direct_61_chunked_and_one_hour_supported(monkeypatch):
-    monkeypatch.setattr(bot, "SUBDUB_MAX_DURATION_SECONDS", 3600)
+def test_longmedia32_59_direct_61_chunked_and_unconfigured_duration_is_not_rejected(monkeypatch):
+    bot_source = Path(bot.__file__).read_text(encoding="utf-8")
+    assert "SUBDUB_PRODUCT_MAX_DURATION_SECONDS" not in bot_source
+    assert (
+        'SUBDUB_MAX_DURATION_SECONDS = max(0, env_int("SUBDUB_MAX_DURATION_SECONDS", 0))'
+        in bot_source
+    )
+
+    monkeypatch.setattr(bot, "SUBDUB_MAX_DURATION_SECONDS", 0)
+    monkeypatch.setattr(bot, "SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS", 0)
     monkeypatch.setattr(bot, "SUBDUB_DIRECT_ASR_MAX_SECONDS", 60, raising=False)
     monkeypatch.setattr(bot, "SUBDUB_LONG_CHUNK_SECONDS", 30)
 
     at_59 = bot.subdub_duration_gate_payload({"duration": 59}, {})
     at_61 = bot.subdub_duration_gate_payload({"duration": 61}, {})
     at_hour = bot.subdub_duration_gate_payload({"duration": 3600}, {})
-    over_hour = bot.subdub_duration_gate_payload({"duration": 3601}, {})
+    beyond_hour = bot.subdub_duration_gate_payload({"duration": 3601}, {})
 
     assert at_59["duration_gate_result"] == "pass"
     assert at_59["chunking_enabled"] is False
@@ -192,28 +212,81 @@ def test_longmedia32_59_direct_61_chunked_and_one_hour_supported(monkeypatch):
     assert at_61["chunk_strategy"] == "checkpointed_audio_chunks"
     assert at_hour["duration_gate_result"] == "pass_long"
     assert at_hour["long_media_allowed"] is True
-    assert over_hour["duration_gate_result"] == "fail_over_limit"
+    assert beyond_hour["duration_gate_result"] == "pass_long"
+    assert beyond_hour["long_media_allowed"] is True
+    assert beyond_hour["duration_limit_seconds"] == 0
+    assert bot.subtitle_plus_dub_exceeds_limits({"video_duration": 3601}) is False
+    assert "tối đa 0 giây" not in bot.subdub_media_limits_notice("vi")
+    monkeypatch.setattr(bot, "telegram_local_api_enabled", lambda: False)
+    monkeypatch.setattr(bot, "SUBDUB_TELEGRAM_CLOUD_DOWNLOAD_LIMIT_MB", 20)
+    cloud_notice = bot.subdub_media_limits_notice("en")
+    assert "Cloud Bot API transport limit: 20 MiB" in cloud_notice
+    assert "File limit: 20" not in cloud_notice
 
 
-def test_longmedia32_fractional_duration_boundaries_fail_closed(monkeypatch):
+def test_longmedia32_legacy_part_planner_has_no_implicit_hour_or_part_cap(monkeypatch):
+    bot_source = Path(bot.__file__).read_text(encoding="utf-8")
+    assert (
+        'SUBDUB_LONG_PROJECT_MAX_PARTS = max(0, env_int("SUBDUB_LONG_PROJECT_MAX_PARTS", 0))'
+        in bot_source
+    )
+    monkeypatch.setattr(bot, "SUBDUB_LONG_PROJECT_MAX_PARTS", 0)
+    monkeypatch.setattr(bot, "SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS", 0)
+    assert "1 phút" not in bot.subdub_long_project_over_limit_text("vi")
+
+    unbounded = subdub_long_media.build_long_project_plan(
+        7201,
+        part_seconds=300,
+        max_parts=0,
+        max_duration_seconds=0,
+    )
+    bounded = subdub_long_media.build_long_project_plan(
+        601,
+        part_seconds=300,
+        max_parts=2,
+        max_duration_seconds=600,
+    )
+
+    assert unbounded["project_supported"] is True
+    assert unbounded["project_blocker"] == ""
+    assert unbounded["project_max_parts"] == 0
+    assert unbounded["project_max_duration_seconds"] == 0
+    assert bounded["project_supported"] is False
+    assert bounded["project_blocker"] == "project_duration_limit_exceeded"
+
+    monkeypatch.setattr(bot, "SUBDUB_LONG_PROJECT_MAX_PARTS", 2)
+    parts_only = bot.subdub_long_project_over_limit_text("vi")
+    assert "2 phần" in parts_only
+    assert "1 phút" not in parts_only
+
+    monkeypatch.setattr(bot, "SUBDUB_LONG_PROJECT_MAX_PARTS", 0)
+    monkeypatch.setattr(bot, "SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS", 600)
+    duration_only = bot.subdub_long_project_over_limit_text("en")
+    assert "10 minutes" in duration_only
+    assert "0 parts" not in duration_only
+
+
+def test_longmedia32_fractional_duration_boundaries_honor_configured_cap(monkeypatch):
     monkeypatch.setattr(bot, "SUBDUB_DIRECT_ASR_MAX_SECONDS", 60, raising=False)
+    monkeypatch.setattr(bot, "SUBDUB_MAX_DURATION_SECONDS", 7200)
 
     over_direct = bot.subdub_duration_gate_payload(
         {"ffprobe_duration": 60.001},
         {},
         ffprobe_duration=60.001,
     )
-    over_product = bot.subdub_duration_gate_payload(
-        {"ffprobe_duration": 3600.001},
+    over_configured_cap = bot.subdub_duration_gate_payload(
+        {"ffprobe_duration": 7200.001},
         {},
-        ffprobe_duration=3600.001,
+        ffprobe_duration=7200.001,
     )
 
     assert over_direct["input_duration_seconds"] == 61
     assert over_direct["is_long_media"] is True
     assert over_direct["chunking_enabled"] is True
-    assert over_product["input_duration_seconds"] == 3601
-    assert over_product["duration_gate_result"] == "fail_over_limit"
+    assert over_configured_cap["input_duration_seconds"] == 7201
+    assert over_configured_cap["duration_gate_result"] == "fail_over_limit"
+    assert bot.subtitle_plus_dub_exceeds_limits({"video_duration": 7201}) is True
 
 
 def test_longmedia32_saved_input_gate_keeps_fractional_ffprobe_duration(monkeypatch):
@@ -229,7 +302,8 @@ def test_longmedia32_saved_input_gate_keeps_fractional_ffprobe_duration(monkeypa
 
     monkeypatch.setattr(bot, "subdub_probe_video_bytes", probe)
     monkeypatch.setattr(bot, "SUBDUB_DIRECT_ASR_MAX_SECONDS", 60, raising=False)
-    monkeypatch.setattr(bot, "SUBDUB_MAX_DURATION_SECONDS", 3600)
+    monkeypatch.setattr(bot, "SUBDUB_MAX_DURATION_SECONDS", 0)
+    monkeypatch.setattr(bot, "SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS", 0)
     saved_input = {
         "ok": True,
         "source_bytes": b"fixture",
@@ -240,14 +314,43 @@ def test_longmedia32_saved_input_gate_keeps_fractional_ffprobe_duration(monkeypa
         bot.subdub_duration_gate_payload_for_saved_input(saved_input, {})
     )
     measured_duration["value"] = 3600.001
-    over_product = asyncio.run(
+    beyond_hour = asyncio.run(
         bot.subdub_duration_gate_payload_for_saved_input(saved_input, {})
+    )
+
+    class FakeTelegramFile:
+        file_size = len(b"fixture-video")
+        file_path = ""
+
+        async def download_as_bytearray(self, **_kwargs):
+            return bytearray(b"fixture-video")
+
+    class FakeBot:
+        async def get_file(self, *_args, **_kwargs):
+            return FakeTelegramFile()
+
+    class FakeContext:
+        bot = FakeBot()
+
+    monkeypatch.setattr(bot, "telegram_local_api_enabled", lambda: False)
+    downloaded, content_type = asyncio.run(
+        bot.video_dubbing_download_source(
+            FakeContext(),
+            {
+                "video_file_id": "fixture-file",
+                "video_file_size": len(b"fixture-video"),
+                "video_duration": 3601,
+                "source_mime_type": "video/mp4",
+            },
+        )
     )
 
     assert over_direct["input_duration_seconds"] == 61
     assert over_direct["chunking_enabled"] is True
-    assert over_product["input_duration_seconds"] == 3601
-    assert over_product["duration_gate_result"] == "fail_over_limit"
+    assert beyond_hour["input_duration_seconds"] == 3601
+    assert beyond_hour["duration_gate_result"] == "pass_long"
+    assert downloaded == b"fixture-video"
+    assert content_type == "video/mp4"
 
 
 def test_longmedia32_public_core_never_delivers_split_video_parts():
@@ -385,9 +488,21 @@ def test_longmedia32_unfamiliar_input_is_normalized_once_and_revalidated(monkeyp
 )
 def test_longmedia32_timeouts_are_derived_from_measured_duration(stage, duration, minimum):
     preflight = _preflight_module()
-    timeout = preflight.timeout_for_stage(stage, duration_seconds=duration, size_bytes=75 * MIB)
+    timeout = preflight.timeout_for_stage(
+        stage,
+        duration_seconds=duration,
+        size_bytes=75 * MIB,
+        max_timeout_seconds=10_800,
+    )
     assert timeout >= minimum
-    assert timeout <= 7200
+    assert timeout <= 10_800
+    if stage == "render":
+        assert preflight.timeout_for_stage(
+            stage,
+            duration_seconds=1800,
+            size_bytes=75 * MIB,
+            max_timeout_seconds=10_800,
+        ) > 7200
 
 
 def test_longmedia32_chunk_plan_has_stable_ids_overlap_and_global_ownership(monkeypatch):
@@ -509,6 +624,35 @@ def test_longmedia32_asr_checkpoint_reuses_chunks_and_deduplicates_overlap(tmp_p
     assert second["ok"] is True
     assert second["checkpoint_reused_count"] == 2
     assert [item["text"] for item in second["segments"]] == ["intro", "boundary", "outro"]
+
+    text_only_checkpoint = tmp_path / "asr_text_only_chunks.json"
+
+    async def transcribe_text_only(payload, _content_type):
+        if payload == b"chunk-1":
+            return {"ok": True, "status": "PASS", "text": "intro shared boundary"}
+        return {"ok": True, "status": "PASS", "text": "shared boundary outro"}
+
+    text_only = asyncio.run(
+        subdub_long_media.transcribe_long_media_chunks(
+            b"source",
+            "video/mp4",
+            ranges,
+            extract_chunk=extract,
+            transcribe_chunk=transcribe_text_only,
+            input_duration_seconds=61,
+            source_hash="source-hash-text-only",
+            checkpoint_path=str(text_only_checkpoint),
+        )
+    )
+
+    assert text_only["ok"] is True
+    assert [item["text"] for item in text_only["segments"]] == [
+        "intro shared boundary",
+        "outro",
+    ]
+    assert text_only["segments"][0]["end"] <= text_only["segments"][1]["start"]
+    assert text_only["text"].casefold().split().count("shared") == 1
+    assert text_only["text"].casefold().split().count("boundary") == 1
 
 
 def test_longmedia32_overlap_jitter_cannot_drop_both_boundary_copies():
@@ -876,6 +1020,30 @@ def test_longmedia32_output_validation_rejects_absolute_long_video_truncation(mo
     assert result["detail"] == "video_duration_coverage_failed"
     assert result["duration_min_required"] >= 299.0
 
+    async def unavailable_probe(_payload):
+        return {
+            "ok": False,
+            "detail": "ffprobe_unavailable",
+            "duration": 0.0,
+            "has_video": False,
+            "has_audio": False,
+            "size": 2048,
+        }
+
+    monkeypatch.setattr(bot, "subdub_probe_video_bytes", unavailable_probe)
+    monkeypatch.setattr(bot, "SUBDUB_VALIDATE_ALLOW_FFPROBE_MISSING", True)
+    marker_payload = b"\x00\x00\x00\x18ftypmp42" + (b"x" * 2048)
+    unproven = asyncio.run(
+        bot.subdub_validate_video_output(
+            marker_payload,
+            require_audio=True,
+            min_bytes=16,
+            expected_duration=300.0,
+        )
+    )
+    assert unproven["ok"] is False
+    assert unproven["detail"] == "ffprobe_required_for_duration_or_audio_validation"
+
 
 def test_longmedia32_translated_artifact_identity_rejects_source_and_missing_srt(tmp_path):
     source_path = tmp_path / "source.mp4"
@@ -909,6 +1077,33 @@ def test_longmedia32_translated_artifact_identity_rejects_source_and_missing_srt
     )
     assert missing_srt["ok"] is False
     assert missing_srt["blocker"] == "translated_subtitle_artifact_missing"
+
+    incomplete = bot.subdub_validate_transformed_artifact_identity(
+        bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+        source_bytes=b"source-video",
+        final_bytes=b"translated-video",
+        subtitle_bytes=valid_srt,
+        source_subtitle_bytes=valid_srt,
+        source_language="en",
+        target_language="vi",
+        cue_count=1,
+        translation_missing_count=1,
+    )
+    assert incomplete["ok"] is False
+    assert incomplete["blocker"] == "translation_incomplete"
+
+    unchanged_translation = bot.subdub_validate_transformed_artifact_identity(
+        bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+        source_bytes=b"source-video",
+        final_bytes=b"translated-video",
+        subtitle_bytes=valid_srt,
+        source_subtitle_bytes=valid_srt,
+        source_language="en",
+        target_language="vi",
+        cue_count=1,
+    )
+    assert unchanged_translation["ok"] is False
+    assert unchanged_translation["blocker"] == "translated_subtitle_matches_source"
 
     valid = bot.subdub_validate_transformed_artifact_identity(
         bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
@@ -1015,6 +1210,23 @@ def test_longmedia32_four_lanes_share_one_canonical_final_report(mode):
         assert label in text
     assert "Kết quả đã gửi phía trên" not in text
     assert text.count("Mã xử lý:") == 1
+    if mode == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        staged_combo = bot.video_dubbing_receipt_text(
+            {
+                **state,
+                "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+                "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+                "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+            },
+            {
+                **result,
+                "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+                "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+            },
+            "vi",
+        )
+        assert "Loại: <b>Phụ đề + lồng tiếng</b>" in staged_combo
+        assert "Loại: <b>Dịch phụ đề</b>" not in staged_combo
 
 
 def test_longmedia32_international_report_uses_same_canonical_fields():

@@ -2103,20 +2103,20 @@ VIDEO_PROCESSING_MAX_INPUT_MB = max(1, env_int("VIDEO_PROCESSING_MAX_INPUT_MB", 
 PIPELINE_MAX_INPUT_MB_ADMIN = max(1, env_int("PIPELINE_MAX_INPUT_MB_ADMIN", 100))
 PIPELINE_MAX_INPUT_MB_PUBLIC = max(1, env_int("PIPELINE_MAX_INPUT_MB_PUBLIC", 50))
 # INFRA.LOCALBOTAPI: the cloud Bot API caps intake at ~20 MB (getFile), so the
-# pipeline cap stays at 50 MB there. With a local Bot API server the cap rises,
-# but stays deliberately below the protocol maximum (2000 MB) because the SubDub
-# intake path still buffers the file in memory on the bot host.
+# pipeline cap stays at 50 MB there. The processing default remains bounded
+# because SubDub buffers the file in memory, but operators may raise it to the
+# measured host capability; it is not a fixed product maximum.
 SUBDUB_LOCAL_API_MAX_INPUT_MB_DEFAULT = 500
-SUBDUB_PROCESSING_MAX_INPUT_MB = max(1, min(500, env_int("SUBDUB_PROCESSING_MAX_INPUT_MB", 500)))
+SUBDUB_PROCESSING_MAX_INPUT_MB = max(1, env_int("SUBDUB_PROCESSING_MAX_INPUT_MB", SUBDUB_LOCAL_API_MAX_INPUT_MB_DEFAULT))
 if telegram_local_api_enabled():
     SUBDUB_MAX_INPUT_MB = max(1, min(2000, env_int("SUBDUB_MAX_INPUT_MB", SUBDUB_LOCAL_API_MAX_INPUT_MB_DEFAULT)))
 else:
     SUBDUB_MAX_INPUT_MB = max(1, min(50, env_int("SUBDUB_MAX_INPUT_MB", 50)))
 PIPELINE_MAX_DURATION_SECONDS_ADMIN = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_ADMIN", 300))
 PIPELINE_MAX_DURATION_SECONDS_PUBLIC = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_PUBLIC", 300))
-SUBDUB_MAX_DURATION_SECONDS = max(1, env_int("SUBDUB_MAX_DURATION_SECONDS", PIPELINE_MAX_DURATION_SECONDS_PUBLIC))
-SUBDUB_PRODUCT_MAX_DURATION_SECONDS = 3600
-SUBDUB_MAX_DURATION_SECONDS = SUBDUB_PRODUCT_MAX_DURATION_SECONDS
+# Zero disables an application-level duration rejection. The 60-second direct
+# ASR threshold below selects whole-file versus chunked processing only.
+SUBDUB_MAX_DURATION_SECONDS = max(0, env_int("SUBDUB_MAX_DURATION_SECONDS", 0))
 SUBDUB_PREVIEW_DURATION_SECONDS = max(1, env_int("SUBDUB_PREVIEW_DURATION_SECONDS", 30))
 SUBDUB_DIRECT_ASR_MAX_SECONDS = max(30, min(60, env_int("SUBDUB_DIRECT_ASR_MAX_SECONDS", 60)))
 SUBDUB_LONG_CHUNK_SECONDS = max(10, min(30, env_int("SUBDUB_LONG_CHUNK_SECONDS", 30)))
@@ -2130,10 +2130,10 @@ SUBDUB_VISUAL_OCR_FPS = max(0.5, min(4.0, env_float("SUBDUB_VISUAL_OCR_FPS", 2.0
 SUBDUB_VISUAL_OCR_BOTTOM_RATIO = max(0.20, min(0.60, env_float("SUBDUB_VISUAL_OCR_BOTTOM_RATIO", 0.35)))
 SUBDUB_VISUAL_OCR_SIDE_MARGIN_RATIO = max(0.0, min(0.15, env_float("SUBDUB_VISUAL_OCR_SIDE_MARGIN_RATIO", 0.04)))
 SUBDUB_VISUAL_OCR_MAX_FRAMES = max(20, min(1200, env_int("SUBDUB_VISUAL_OCR_MAX_FRAMES", 1200)))
-SUBDUB_LONG_PROJECT_MAX_PARTS = max(1, min(48, env_int("SUBDUB_LONG_PROJECT_MAX_PARTS", 12)))
+SUBDUB_LONG_PROJECT_MAX_PARTS = max(0, env_int("SUBDUB_LONG_PROJECT_MAX_PARTS", 0))
 SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS = max(
     SUBDUB_MAX_DURATION_SECONDS,
-    env_int("SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS", 3600),
+    max(0, env_int("SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS", SUBDUB_MAX_DURATION_SECONDS)),
 )
 PIPELINE_MAX_TELEGRAM_OUTPUT_MB = max(1, env_int("PIPELINE_MAX_TELEGRAM_OUTPUT_MB", 49))
 TELEGRAM_VIDEO_PREVIEW_MAX_MB = max(1, env_int("TELEGRAM_VIDEO_PREVIEW_MAX_MB", 45))
@@ -2168,6 +2168,7 @@ SUBDUB_TELEGRAM_DELIVERY_TIMEOUT_SECONDS = max(
     min(300, env_int("SUBDUB_TELEGRAM_DELIVERY_TIMEOUT_SECONDS", 180)),
 )
 SUBDUB_MEDIA_BINARY_PROBE_TIMEOUT_SECONDS = max(1, min(15, env_int("SUBDUB_MEDIA_BINARY_PROBE_TIMEOUT_SECONDS", 5)))
+SUBDUB_STAGE_TIMEOUT_MAX_SECONDS = max(60, env_int("SUBDUB_STAGE_TIMEOUT_MAX_SECONDS", 7200))
 SUBDUB_COMPRESS_IF_OVER_MB = max(1, env_int("SUBDUB_COMPRESS_IF_OVER_MB", 40))
 SUBDUB_ENABLE_DOCUMENT_FALLBACK = env_flag("SUBDUB_ENABLE_DOCUMENT_FALLBACK", "true")
 SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK = env_flag("SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK", "false")
@@ -117523,6 +117524,7 @@ def subdub_duration_audit_payload() -> dict:
 
 def subdub_long_video_audit_payload() -> dict:
     full_limit = int(subdub_full_duration_limit_seconds(False))
+    duration_unbounded = full_limit <= 0
     preview_limit = int(subdub_preview_duration_seconds())
     source = "\n".join([
         inspect.getsource(subdub_duration_gate_payload),
@@ -117539,18 +117541,26 @@ def subdub_long_video_audit_payload() -> dict:
     hardcoded_30_full_job = any(re.search(pattern, source) for pattern in full_job_30_patterns)
     accepted_31 = subdub_duration_gate_payload({"duration": 31}, {}, is_admin=False)
     accepted_60 = subdub_duration_gate_payload({"duration": 60}, {}, is_admin=False)
-    accepted_299 = subdub_duration_gate_payload({"duration": min(299, full_limit)}, {}, is_admin=False)
-    over_limit = subdub_duration_gate_payload({"duration": full_limit + 1}, {}, is_admin=False)
+    accepted_299 = subdub_duration_gate_payload({"duration": 299}, {}, is_admin=False)
+    over_limit = (
+        subdub_duration_gate_payload({"duration": full_limit + 1}, {}, is_admin=False)
+        if not duration_unbounded
+        else {}
+    )
     long_stage_percent = subdub_progress_percent_for_lifecycle("extracting_audio")
     sample_public_text = subdub_progress_text("extracting_audio", "AUDITJOB", "vi")
     return {
         "preview_limit_seconds": preview_limit,
         "full_duration_limit_seconds": full_limit,
-        "preview_limit_separate_from_full_job": bool(preview_limit == 30 and full_limit > preview_limit),
+        "preview_limit_separate_from_full_job": bool(
+            preview_limit == 30 and (duration_unbounded or full_limit > preview_limit)
+        ),
         "supports_31s": bool(accepted_31.get("duration_gate_result") == "pass_long" and accepted_31.get("long_media_allowed")),
         "supports_60s": bool(accepted_60.get("duration_gate_result") == "pass_long" and accepted_60.get("long_media_allowed")),
         "supports_299s": bool(accepted_299.get("duration_gate_result") in {"pass_long", "pass"} and not str(accepted_299.get("duration_gate_result")).startswith("fail")),
-        "over_limit_fails_clean_no_charge": bool(over_limit.get("duration_gate_result") == "fail_over_limit"),
+        "over_limit_fails_clean_no_charge": bool(
+            duration_unbounded or over_limit.get("duration_gate_result") == "fail_over_limit"
+        ),
         "accepted_long_progress_beyond_5": bool(long_stage_percent > 5),
         "progress_registry_available": "SUBTITLE_DUB_PIPELINE_JOBS" in globals() and callable(subdub_progress_job_for_user),
         "status_refresh_uses_existing_job": "subdub_progress_job_for_user" in inspect.getsource(handle_video_dubbing_callback),
@@ -204118,7 +204128,10 @@ def subtitle_plus_dub_exceeds_limits(state: dict | None = None, *, admin: bool =
     max_duration = subdub_full_duration_limit_seconds(admin)
     file_size = _safe_int(state.get("video_file_size") or state.get("source_file_size"), 0)
     duration = _safe_int(state.get("video_duration") or state.get("source_duration"), 0)
-    return bool((file_size and file_size > max_bytes) or (duration and duration > max_duration))
+    return bool(
+        (file_size and file_size > max_bytes)
+        or (max_duration > 0 and duration and duration > max_duration)
+    )
 
 def subtitle_plus_dub_segment_count(state: dict | None = None, *, translated: bool = False) -> int:
     state = dict(state or {})
@@ -205216,17 +205229,45 @@ def video_dubbing_pricing_keyboard(lang: str = "vi", origin: str = "video") -> I
     ])
 
 def subdub_media_limits_notice(lang: str = "vi") -> str:
-    max_parts = int(SUBDUB_LONG_PROJECT_MAX_PARTS)
+    duration_limit = int(subdub_full_duration_limit_seconds(False))
+    direct_seconds = int(SUBDUB_DIRECT_ASR_MAX_SECONDS)
+    uses_local_api = telegram_local_api_enabled()
+    intake_limit = subdub_input_limit_mb(False)
     if normalize_user_language(lang) != "vi":
+        limit_text = (
+            f"Configured SubDub processing capacity: {intake_limit} MiB."
+            if uses_local_api
+            else (
+                f"Cloud Bot API transport limit: {intake_limit} MiB "
+                f"(configured as {intake_limit} MB)."
+            )
+        )
+        if duration_limit > 0:
+            return (
+                f"{limit_text} The configured duration capacity is {duration_limit} seconds; "
+                f"videos over {direct_seconds} seconds "
+                "use checkpointed audio chunks."
+            )
         return (
-            f"File limit: {subdub_input_limit_mb()} MB. Each result video is up to "
-            f"{SUBDUB_MAX_DURATION_SECONDS} seconds. Longer videos are split into up to "
-            f"{max_parts} parts and sent in order."
+            f"{limit_text} Videos over {direct_seconds} seconds "
+            "use checkpointed audio chunks; duration follows configured processing capacity."
+        )
+    limit_text = (
+        f"Năng lực xử lý SubDub đang cấu hình: {intake_limit} MiB."
+        if uses_local_api
+        else (
+            f"Giới hạn vận chuyển Cloud Bot API: {intake_limit} MiB "
+            f"(nhãn cấu hình {intake_limit} MB)."
+        )
+    )
+    if duration_limit > 0:
+        return (
+            f"Lưu ý: {limit_text} Năng lực thời lượng đang cấu hình "
+            f"là {duration_limit} giây; video trên {direct_seconds} giây được xử lý theo các đoạn audio có checkpoint."
         )
     return (
-        f"Lưu ý: File tối đa {subdub_input_limit_mb()} MB. Mỗi video kết quả tối đa "
-        f"{SUBDUB_MAX_DURATION_SECONDS} giây. Video dài hơn sẽ được chia tối đa "
-        f"{max_parts} phần và gửi lần lượt."
+        f"Lưu ý: {limit_text} Video trên {direct_seconds} giây "
+        "được xử lý theo các đoạn audio có checkpoint; thời lượng theo năng lực xử lý đã cấu hình."
     )
 
 def video_dubbing_upload_text(state: dict | None = None, lang: str = "vi") -> str:
@@ -206935,10 +206976,14 @@ def subdub_receipt_voice_label(state: dict | None = None, result: dict | None = 
 def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
     result = result or {}
-    mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode") or result.get("mode"))
+    receipt_context = {**state, **dict(result.get("state") or {}), **result}
+    mode = normalize_video_translate_mode(
+        receipt_context.get("requested_mode")
+        or receipt_context.get("mode")
+        or receipt_context.get("video_processing_mode")
+    )
     outcome_type = str(result.get("terminal_public_outcome_type") or state.get("terminal_public_outcome_type") or "").strip().lower()
     public_error_already_sent = bool(result.get("public_error_sent") or state.get("public_error_sent") or int(result.get("public_error_sent_count") or state.get("public_error_sent_count") or 0) > 0)
-    receipt_context = {**state, **dict(result.get("state") or {}), **result}
     duration_valid = subdub_duration_validation_allows_success(receipt_context)
     # Keep the historical result-only check for compatibility, then include
     # persisted state fields used by refreshed status/receipt rendering.
@@ -209777,9 +209822,8 @@ def pipeline_duration_limit_seconds(is_admin: bool = False) -> int:
     return PIPELINE_MAX_DURATION_SECONDS_ADMIN if is_admin else PIPELINE_MAX_DURATION_SECONDS_PUBLIC
 
 def subdub_full_duration_limit_seconds(is_admin: bool = False) -> int:
-    if is_admin:
-        return max(int(SUBDUB_MAX_DURATION_SECONDS), int(PIPELINE_MAX_DURATION_SECONDS_ADMIN))
-    return int(SUBDUB_MAX_DURATION_SECONDS)
+    del is_admin
+    return max(0, int(SUBDUB_MAX_DURATION_SECONDS))
 
 def subdub_preview_duration_seconds() -> int:
     return int(SUBDUB_PREVIEW_DURATION_SECONDS)
@@ -209904,7 +209948,7 @@ def subdub_duration_gate_payload(
     limit = subdub_full_duration_limit_seconds(is_admin)
     preview = subdub_preview_duration_seconds()
     direct_asr_limit = int(SUBDUB_DIRECT_ASR_MAX_SECONDS)
-    over_limit = bool(input_duration and input_duration > limit)
+    over_limit = bool(limit > 0 and input_duration and input_duration > limit)
     input_download_limit_bytes = int(SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB) * 1024 * 1024
     output_delivery_limit_bytes = max(
         subdub_output_delivery_limit_mb("video"),
@@ -209942,7 +209986,9 @@ def subdub_duration_gate_payload(
             and str(current.get("telegram_download_method") or "bot_api_direct") == "bot_api_direct"
             else ""
         ),
-        "duration_limit_source": "SUBDUB_MAX_DURATION_SECONDS",
+        "duration_limit_source": (
+            "SUBDUB_MAX_DURATION_SECONDS" if limit > 0 else "capability_config_unbounded"
+        ),
         "duration_gate_result": gate_result,
         "duration_guard_stage": "after_input_save",
         "is_long_media": is_long,
@@ -213092,6 +213138,7 @@ async def subdub_probe_video_bytes(video_bytes: bytes) -> dict:
             probe_timeout = subdub_media_preflight.timeout_for_stage(
                 "probe",
                 size_bytes=len(video_bytes),
+                max_timeout_seconds=SUBDUB_STAGE_TIMEOUT_MAX_SECONDS,
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=probe_timeout)
             if proc.returncode != 0:
@@ -213193,6 +213240,7 @@ async def subdub_normalize_video_bytes_if_needed(
             "normalize",
             duration_seconds=float(source_probe.get("duration") or 0.0),
             size_bytes=len(source),
+            max_timeout_seconds=SUBDUB_STAGE_TIMEOUT_MAX_SECONDS,
         )
         ok, detail = await run_subdub_ffmpeg_command(command, timeout=timeout)
         if not ok or not os.path.isfile(output_path) or os.path.getsize(output_path) <= 0:
@@ -213281,6 +213329,7 @@ async def subdub_validate_video_output(
     max_duration_overage: float = 1.0,
 ) -> dict:
     min_size = int(min_bytes or SUBDUB_MIN_VIDEO_OUTPUT_BYTES or 512)
+    expected = max(0.0, float(expected_duration or 0.0))
     if not video_bytes or len(video_bytes) < min_size:
         return {"ok": False, "detail": "video_too_small", "size": len(video_bytes or b""), "duration": 0.0, "has_video": False, "has_audio": False}
     probe = await subdub_probe_video_bytes(video_bytes)
@@ -213289,6 +213338,15 @@ async def subdub_validate_video_output(
         if detail == "ffprobe_unavailable" and SUBDUB_VALIDATE_ALLOW_FFPROBE_MISSING:
             basic = subdub_basic_mp4_validation(video_bytes, min_bytes=min_size)
             if basic.get("ok"):
+                if require_audio or expected > 0:
+                    return {
+                        **basic,
+                        "ok": False,
+                        "detail": "ffprobe_required_for_duration_or_audio_validation",
+                        "source_duration": expected,
+                        "expected_duration": expected,
+                        "duration_coverage_ok": False,
+                    }
                 return {**basic, "ok": True, "detail": "ffprobe_unavailable_basic_mp4_ok"}
         return {**probe, "ok": False, "detail": str(probe.get("detail") or "video_probe_failed")}
     if not probe.get("has_video"):
@@ -213298,7 +213356,6 @@ async def subdub_validate_video_output(
     if require_audio and not probe.get("has_audio"):
         return {**probe, "ok": False, "detail": "audio_stream_missing"}
     actual_duration = float(probe.get("duration") or 0.0)
-    expected = max(0.0, float(expected_duration or 0.0))
     coverage_ratio = (actual_duration / expected) if expected > 0 else 1.0
     coverage_floor = expected * max(0.01, float(min_duration_coverage or 0.97))
     absolute_floor = max(0.0, expected - max(0.0, float(max_duration_shortfall)))
@@ -213333,25 +213390,31 @@ def subdub_validate_transformed_artifact_identity(
     source_path: str = "",
     final_path: str = "",
     subtitle_bytes: bytes = b"",
+    source_subtitle_bytes: bytes = b"",
     source_language: str = "",
     target_language: str = "",
     cue_count: int = 0,
+    translation_missing_count: int = 0,
 ) -> dict:
     """Prove that a translated-subtitle success is not the source artifact."""
     normalized_mode = normalize_video_translate_mode(mode)
     source = bytes(source_bytes or b"")
     output = bytes(final_bytes or b"")
     subtitle = bytes(subtitle_bytes or b"")
+    source_subtitle = bytes(source_subtitle_bytes or b"")
     source_sha256 = hashlib.sha256(source).hexdigest() if source else ""
     output_sha256 = hashlib.sha256(output).hexdigest() if output else ""
     subtitle_sha256 = hashlib.sha256(subtitle).hexdigest() if subtitle else ""
+    source_subtitle_sha256 = hashlib.sha256(source_subtitle).hexdigest() if source_subtitle else ""
     result = {
         "ok": False,
         "blocker": "",
         "source_sha256": source_sha256,
         "output_sha256": output_sha256,
         "subtitle_sha256": subtitle_sha256,
+        "source_subtitle_sha256": source_subtitle_sha256,
         "cue_count": max(0, int(cue_count or 0)),
+        "translation_missing_count": max(0, int(translation_missing_count or 0)),
         "target_language": str(target_language or "").strip(),
     }
     if normalized_mode not in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
@@ -213368,6 +213431,21 @@ def subdub_validate_transformed_artifact_identity(
         return {**result, "blocker": "output_hash_matches_source"}
     if not subtitle or b"-->" not in subtitle or int(cue_count or 0) <= 0:
         return {**result, "blocker": "translated_subtitle_artifact_missing"}
+    if int(translation_missing_count or 0) > 0:
+        return {**result, "blocker": "translation_incomplete"}
+    if source_subtitle:
+        source_subtitle_text = re.sub(
+            r"\s+",
+            " ",
+            source_subtitle.decode("utf-8", errors="ignore"),
+        ).strip()
+        translated_subtitle_text = re.sub(
+            r"\s+",
+            " ",
+            subtitle.decode("utf-8", errors="ignore"),
+        ).strip()
+        if source_subtitle_text and translated_subtitle_text == source_subtitle_text:
+            return {**result, "blocker": "translated_subtitle_matches_source"}
     target = subdub_voice_text_normalized(target_language)
     source_token = subdub_voice_text_normalized(source_language)
     if not target or target in {"auto", "detect", "same", "source", "original"}:
@@ -213492,6 +213570,7 @@ async def subdub_compress_video_bytes(
             "compress",
             duration_seconds=float(expected_duration or 0.0),
             size_bytes=len(video_bytes),
+            max_timeout_seconds=SUBDUB_STAGE_TIMEOUT_MAX_SECONDS,
         )
         ok, detail = await run_subdub_ffmpeg_command(command, timeout=timeout)
         if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
@@ -213903,10 +213982,10 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
         intake_method="bot_api_direct",
         local_api=local_api,
     ) * 1024 * 1024
-    max_duration = int(SUBDUB_PRODUCT_MAX_DURATION_SECONDS)
+    max_duration = subdub_full_duration_limit_seconds(bool(state.get("_pipeline_is_admin")))
     file_size = _safe_int(state.get("video_file_size") or state.get("source_file_size"), 0)
     duration = _safe_int(state.get("video_duration") or state.get("source_duration"), 0)
-    if duration > max_duration:
+    if max_duration > 0 and duration > max_duration:
         raise RuntimeError("video_too_large")
     if file_size > max_bytes:
         raise RuntimeError("telegram_download_failed:file is too big")
@@ -214231,6 +214310,7 @@ async def video_dubbing_extract_audio(source_bytes: bytes, content_type: str = "
             "extract",
             duration_seconds=float(max_seconds or SUBDUB_DIRECT_ASR_MAX_SECONDS),
             size_bytes=len(source_bytes),
+            max_timeout_seconds=SUBDUB_STAGE_TIMEOUT_MAX_SECONDS,
         )
         ok, detail = await run_subdub_ffmpeg_command(command, timeout=timeout)
         if not ok or not os.path.exists(audio_path) or os.path.getsize(audio_path) <= 0:
@@ -214262,9 +214342,41 @@ def subdub_long_project_plan(duration_seconds: float | int = 0, *, is_admin: boo
     )
 
 def subdub_long_project_over_limit_text(lang: str = "vi") -> str:
-    max_minutes = max(1, int(SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS // 60))
+    duration_limit = int(SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS)
     max_parts = int(SUBDUB_LONG_PROJECT_MAX_PARTS)
-    if normalize_user_language(lang) != "vi":
+    is_vi = normalize_user_language(lang) == "vi"
+    if duration_limit <= 0 and max_parts <= 0:
+        if not is_vi:
+            return (
+                "This legacy project-part path has no application duration or part cap; "
+                "the public four-lane path still returns one validated artifact."
+            )
+        return (
+            "Năng lực thời lượng và số phần của helper cũ đang để theo cấu hình; "
+            "luồng bốn lane công khai vẫn trả về một artifact đã kiểm tra."
+        )
+    if duration_limit <= 0:
+        if not is_vi:
+            return (
+                f"This video exceeds the configured limit of {max_parts} parts. "
+                "TOAN AAS has not charged Xu."
+            )
+        return (
+            f"Video này vượt quá giới hạn {max_parts} phần đang cấu hình. "
+            "TOAN AAS chưa trừ Xu."
+        )
+    max_minutes = max(1, int(math.ceil(duration_limit / 60.0)))
+    if max_parts <= 0:
+        if not is_vi:
+            return (
+                f"This video exceeds the configured duration capacity of {max_minutes} minutes. "
+                "TOAN AAS has not charged Xu."
+            )
+        return (
+            f"Video này dài hơn năng lực thời lượng {max_minutes} phút đang cấu hình. "
+            "TOAN AAS chưa trừ Xu."
+        )
+    if not is_vi:
         return (
             f"This video exceeds the current limit of {max_minutes} minutes ({max_parts} parts). "
             "TOAN AAS has not charged Xu. Please send a shorter or smaller video."
@@ -215381,6 +215493,7 @@ async def video_dubbing_render_video(
                 "render",
                 duration_seconds=render_duration,
                 size_bytes=len(source_bytes) + len(dubbed_audio or b""),
+                max_timeout_seconds=SUBDUB_STAGE_TIMEOUT_MAX_SECONDS,
             )
             ok, detail = await run_subdub_ffmpeg_command(command, timeout=render_timeout)
             if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
@@ -215458,6 +215571,7 @@ async def build_subtitle_dubbed_video_pipeline(
         return {"ok": False, "status": "subtitle_generation_failed", "detail": "original_srt_empty"}
     output_segments = original_segments
     translation_provider = ""
+    translation_missing_count = 0
     translated_srt = original_srt
     if translate_requested and str(target_language or "").strip().lower() not in {"", "auto", "original", "same"}:
         translated = await translate_subtitle_segments(
@@ -215468,6 +215582,13 @@ async def build_subtitle_dubbed_video_pipeline(
         )
         output_segments = list(translated.get("segments") or [])
         translation_provider = str(translated.get("provider") or "")
+        translation_missing_count = int(translated.get("translation_missing_count") or 0)
+        if translation_missing_count > 0:
+            return {
+                "ok": False,
+                "status": "translation_incomplete",
+                "detail": f"translation_missing_count={translation_missing_count}",
+            }
         translated_srt = video_dubbing_srt_from_segments(output_segments)
     dubbed_audio = b""
     tts_provider = ""
@@ -215515,6 +215636,7 @@ async def build_subtitle_dubbed_video_pipeline(
         "status": "PASS" if original_srt and (not create_dub or dubbed_audio) else "NO_OUTPUT_BYTES",
         "asr_provider": str(transcribed.get("provider") or ""),
         "translation_provider": translation_provider,
+        "translation_missing_count": translation_missing_count,
         "tts_provider": tts_provider,
         "original_segments": original_segments,
         "translated_segments": output_segments,
@@ -216591,6 +216713,7 @@ async def video_dubbing_prepare_subtitles(
     output_subtitle = source_subtitle
     output_segments = list(source_segments)
     translation_provider = ""
+    translation_missing_count = 0
     translation_cache_hit = False
     if needs_translation:
         target_language = str(state.get("target_language") or "vi")
@@ -216633,7 +216756,8 @@ async def video_dubbing_prepare_subtitles(
             )
             output_segments = list(translated.get("segments") or [])
             translation_provider = str(translated.get("provider") or "")
-            if int(translated.get("translation_missing_count") or 0) > 0:
+            translation_missing_count = int(translated.get("translation_missing_count") or 0)
+            if translation_missing_count > 0:
                 raise RuntimeError("translation_incomplete")
             output_subtitle = str(translated.get("srt") or "").strip()
             if not output_subtitle:
@@ -216681,6 +216805,7 @@ async def video_dubbing_prepare_subtitles(
         "output_segments": output_segments,
         "output_script": output_script,
         "translation_provider": translation_provider,
+        "translation_missing_count": translation_missing_count,
         "asr_provider": str(source_info.get("asr_provider") or ("cached_subtitle" if source_subtitle else "")),
         "detected_language": str(source_info.get("detected_language") or subdub_detect_language_from_text(source_script, state.get("source_language") or "auto")),
         "target_language": str(state.get("target_language") or ""),
@@ -217697,9 +217822,11 @@ async def _execute_video_dubbing_pipeline_core(
             source_path=str(input_save.get("path") or workspace_artifacts.get("source") or ""),
             final_path=canonical_final_artifact_path,
             subtitle_bytes=srt_bytes or output_subtitle.encode("utf-8"),
+            source_subtitle_bytes=str(prepared.get("source_subtitle") or "").encode("utf-8"),
             source_language=str(state.get("source_language") or prepared.get("detected_language") or ""),
             target_language=str(state.get("target_language") or prepared.get("target_language") or ""),
             cue_count=len(output_segments),
+            translation_missing_count=int(prepared.get("translation_missing_count") or 0),
         )
         if not transformed_identity.get("ok"):
             return _failed_product_result(

@@ -6,7 +6,6 @@ from fractions import Fraction
 from typing import Any
 
 
-MAX_STAGE_TIMEOUT_SECONDS = 7200
 DEFAULT_DURATION_TOLERANCE_SECONDS = 0.35
 
 
@@ -174,7 +173,13 @@ def parse_ffprobe_payload(payload: dict[str, Any] | None, *, size_bytes: int = 0
     }
 
 
-def timeout_for_stage(stage: str, *, duration_seconds: float = 0.0, size_bytes: int = 0) -> int:
+def timeout_for_stage(
+    stage: str,
+    *,
+    duration_seconds: float = 0.0,
+    size_bytes: int = 0,
+    max_timeout_seconds: float = 0.0,
+) -> int:
     """Return a bounded timeout derived from measured work, not a fixture size."""
     duration = max(0.0, _float(duration_seconds))
     size_mib = max(0.0, float(size_bytes or 0) / (1024.0 * 1024.0))
@@ -187,7 +192,9 @@ def timeout_for_stage(stage: str, *, duration_seconds: float = 0.0, size_bytes: 
     }
     floor, duration_factor, size_factor = policies.get(str(stage or "").lower(), (120, 2.0, 1.0))
     estimate = max(float(floor), duration * duration_factor + size_mib * size_factor)
-    return int(min(MAX_STAGE_TIMEOUT_SECONDS, max(1, round(estimate))))
+    derived = max(1, int(round(estimate)))
+    configured_cap = max(0, int(round(_float(max_timeout_seconds))))
+    return min(derived, configured_cap) if configured_cap > 0 else derived
 
 
 def build_normalization_command(

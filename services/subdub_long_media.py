@@ -67,14 +67,14 @@ def build_long_project_plan(
     duration_seconds: float,
     *,
     part_seconds: int = 300,
-    max_parts: int = 12,
-    max_duration_seconds: int = 3600,
+    max_parts: int = 0,
+    max_duration_seconds: int = 0,
 ) -> dict[str, Any]:
-    """Plan bounded MP4 parts without changing the per-part pipeline limit."""
+    """Plan MP4 parts with optional positive operator capability limits."""
     duration = max(0, int(round(_float(duration_seconds))))
     part_size = max(30, int(part_seconds or 300))
-    part_limit = max(1, int(max_parts or 1))
-    duration_limit = max(part_size, int(max_duration_seconds or part_size))
+    part_limit = max(0, int(max_parts or 0))
+    duration_limit = max(0, int(max_duration_seconds or 0))
     ranges = []
     for start in range(0, duration, part_size):
         end = min(duration, start + part_size)
@@ -89,13 +89,13 @@ def build_long_project_plan(
     split_required = duration > part_size
     supported = bool(
         duration > 0
-        and duration <= duration_limit
-        and len(ranges) <= part_limit
+        and (duration_limit <= 0 or duration <= duration_limit)
+        and (part_limit <= 0 or len(ranges) <= part_limit)
     )
     blocker = ""
-    if duration > duration_limit:
+    if duration_limit > 0 and duration > duration_limit:
         blocker = "project_duration_limit_exceeded"
-    elif len(ranges) > part_limit:
+    elif part_limit > 0 and len(ranges) > part_limit:
         blocker = "project_part_limit_exceeded"
     return {
         "project_split_required": split_required,
@@ -507,11 +507,13 @@ async def transcribe_long_media_chunks(
                 continue
             stored_segments = [dict(segment or {}) for segment in list(stored.get("segments") or [])]
             for segment in stored_segments:
+                text_only_fallback = bool(segment.pop("_text_only_fallback", False))
                 segment.update({
                     "_chunk_id": chunk_id,
                     "_chunk_index": chunk_index,
                     "_ownership_start_ms": int(bounds["ownership_start_ms"]),
                     "_ownership_end_ms": int(bounds["ownership_end_ms"]),
+                    "_text_only_fallback": text_only_fallback,
                 })
             candidate_segments.extend(stored_segments)
             providers.append(str(stored.get("provider") or ""))
@@ -639,10 +641,22 @@ async def transcribe_long_media_chunks(
                 "skipped_chunk_indices": skipped_chunk_indices,
             }
 
+        provider_segments = list(result.get("segments") or [])
+        text_only_fallback = not provider_segments
+        segment_window_start = (
+            float(bounds["ownership_start_ms"]) / 1000.0
+            if text_only_fallback
+            else chunk_start
+        )
+        segment_window_end = (
+            float(bounds["ownership_end_ms"]) / 1000.0
+            if text_only_fallback
+            else chunk_end
+        )
         absolute_segments = offset_chunk_segments(
-            result.get("segments") or [],
-            chunk_start=chunk_start,
-            chunk_end=chunk_end,
+            provider_segments,
+            chunk_start=segment_window_start,
+            chunk_end=segment_window_end,
             fallback_text=transcript,
         )
         if not absolute_segments:
@@ -665,13 +679,17 @@ async def transcribe_long_media_chunks(
                 for key, value in dict(segment or {}).items()
                 if key in {"index", "start", "end", "text", "confidence", "speaker", "language"}
             }
-            stored_segments.append(public_segment)
+            stored_segments.append({
+                **public_segment,
+                "_text_only_fallback": text_only_fallback,
+            })
             candidate_segments.append({
                 **public_segment,
                 "_chunk_id": chunk_id,
                 "_chunk_index": chunk_index,
                 "_ownership_start_ms": int(bounds["ownership_start_ms"]),
                 "_ownership_end_ms": int(bounds["ownership_end_ms"]),
+                "_text_only_fallback": text_only_fallback,
             })
         providers.append(str(result.get("provider") or ""))
         detected_languages.append(str(result.get("language") or result.get("detected_language") or ""))
@@ -691,6 +709,17 @@ async def transcribe_long_media_chunks(
     def _normalized_text(value: Any) -> str:
         return re.sub(r"[^\w]+", " ", str(value or "").casefold()).strip()
 
+    def _trim_text_only_prefix(previous_text: Any, current_text: Any) -> tuple[str, int]:
+        previous_words = str(previous_text or "").split()
+        current_words = str(current_text or "").split()
+        previous_keys = [_normalized_text(word) for word in previous_words]
+        current_keys = [_normalized_text(word) for word in current_words]
+        maximum = min(12, len(previous_keys), len(current_keys))
+        for count in range(maximum, 0, -1):
+            if previous_keys[-count:] == current_keys[:count]:
+                return " ".join(current_words[count:]).strip(), count
+        return str(current_text or "").strip(), 0
+
     candidate_segments.sort(key=lambda segment: (_float(segment.get("start")), _float(segment.get("end"))))
     all_segments: list[dict[str, Any]] = []
     overlap_duplicate_count = 0
@@ -709,6 +738,21 @@ async def transcribe_long_media_chunks(
         if not owned:
             overlap_duplicate_count += 1
             continue
+        if candidate.get("_text_only_fallback") and all_segments:
+            previous = all_segments[-1]
+            adjacent_chunks = int(candidate.get("_chunk_index") or 0) == int(
+                previous.get("_chunk_index") or 0
+            ) + 1
+            if adjacent_chunks and previous.get("_text_only_fallback"):
+                trimmed_text, removed_words = _trim_text_only_prefix(
+                    previous.get("text"),
+                    candidate.get("text"),
+                )
+                if removed_words > 0:
+                    overlap_duplicate_count += 1
+                    candidate["text"] = trimmed_text
+                    if not trimmed_text:
+                        continue
         text_key = _normalized_text(candidate.get("text"))
         duplicate = False
         for existing in reversed(all_segments[-4:]):
@@ -720,11 +764,7 @@ async def transcribe_long_media_chunks(
         if duplicate:
             overlap_duplicate_count += 1
             continue
-        all_segments.append({
-            key: value
-            for key, value in candidate.items()
-            if not str(key).startswith("_")
-        })
+        all_segments.append(dict(candidate))
 
     if not all_segments:
         return {
@@ -748,6 +788,14 @@ async def transcribe_long_media_chunks(
             "overlap_duplicate_count": overlap_duplicate_count,
         }
 
+    all_segments = [
+        {
+            key: value
+            for key, value in item.items()
+            if not str(key).startswith("_")
+        }
+        for item in all_segments
+    ]
     all_segments.sort(key=lambda item: (_float(item.get("start")), _float(item.get("end"))))
     for index, item in enumerate(all_segments, start=1):
         item["index"] = index

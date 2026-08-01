@@ -4,7 +4,7 @@
 
 **Goal:** Preserve PR #606 and the passing four-lane short SubDub path while producing one complete, validated MP4 for supported long, large, and unfamiliar media with truthful progress and one canonical final report.
 
-**Architecture:** Keep the existing public callbacks and canonical SubDub runner. Add provider-neutral media preflight and deterministic stage artifacts, apply Telegram's 20 MiB limit only to cloud Bot API transport, use whole-file ASR through its measured capability and checkpointed audio chunks above it, and validate against the canonical final timeline. Subtitle-only lanes retain source duration; dub/combo preserve PR #606's complete sequential speech and may extend source frames within the one-hour product capability. Existing delivery and receipt idempotency remain authoritative.
+**Architecture:** Keep the existing public callbacks and canonical SubDub runner. Add provider-neutral media preflight and deterministic stage artifacts, apply Telegram's 20 MiB limit only to cloud Bot API transport, use whole-file ASR through its measured capability and checkpointed audio chunks above it, and validate against the canonical final timeline. Processing size uses an operator-configured memory capability whose default is 500 MB, not a fixed product maximum. Application duration rejection is disabled when its capability is `0`; a positive operator value enables the guard. Subtitle-only lanes retain source duration, while dub/combo preserve PR #606's complete sequential speech and may extend source frames within configured capacity. Existing delivery and receipt idempotency remain authoritative.
 
 **Tech Stack:** Python, python-telegram-bot, FFmpeg/FFprobe, SQLite's existing `system_settings` persistence, pytest.
 
@@ -17,8 +17,8 @@
 - Modify: `docs/reports/P0_SUBDUB_LONGMEDIA32_LIMIT_MATRIX.md`
 
 - [ ] Run the protected Restore400, international, terminal receipt, Local Bot API, and four-lane short selectors on clean latest main and record exact results.
-- [ ] Add RED tests proving 59 seconds stays direct, 61/90/180/300 seconds use deterministic chunks, and one hour is accepted without public video-part delivery.
-- [ ] Add RED tests proving cloud Bot API keeps its 20 MiB intake and 45/49 MiB delivery limits while local Bot API, local path, and legal byte fixtures use the bounded 500 MiB processing/delivery ceiling.
+- [ ] Add RED tests proving 59 seconds stays direct, 61/90/180/300 seconds use deterministic chunks, and media beyond one hour is not rejected when no duration capability is configured.
+- [ ] Add RED tests proving cloud Bot API keeps its 20 MiB intake and 45/49 MiB delivery limits while Local Bot API, local path, and legal byte fixtures use the operator-configured processing capability (500 MiB by default).
 - [ ] Add RED tests for unfamiliar probe metadata, duration-derived timeouts, PR #606 full-speech TTS/mux, transformed subtitle identity, monotonic terminal 100%, and one report shape for all four lanes.
 - [ ] Run only the new nodes and confirm each fails for the missing LONGMEDIA32 contract, not import or fixture errors.
 
@@ -42,8 +42,8 @@
 - Modify: `services/subdub_long_media.py`
 - Test: `tests/test_p0_subdub_longmedia32_duration_size_status_report.py`
 
-- [ ] Replace `subdub_input_limit_mb()` call sites with an intake-method contract: cloud direct download 20 MiB, Local Bot API/local path/legal fixture 500 MiB, all bounded before buffering.
-- [ ] Set the explicit SubDub product duration capability to one hour and remove the public multi-part delivery branch from the four-lane execution path.
+- [ ] Replace `subdub_input_limit_mb()` call sites with an intake-method contract: cloud direct download 20 MiB, Local Bot API bounded by transport plus configured processing capacity, and local path/legal fixture bounded only by configured processing capacity.
+- [ ] Make duration capability operator-configured with `0` meaning no application rejection, and remove the public multi-part delivery branch from the four-lane execution path.
 - [ ] Keep direct ASR through 60 seconds; above 60 seconds build stable source-hash chunk IDs with bounded overlap and global timestamp ownership.
 - [ ] Persist per-chunk extraction/ASR state and artifact hashes in the existing workspace; reuse completed chunks after restart and never auto-resubmit `ACCEPTANCE_UNKNOWN`.
 - [ ] Deduplicate overlap by stable normalized text/timestamp ownership and prove no duplicate or missing cues at boundaries.
@@ -58,7 +58,7 @@
 
 - [ ] Restore a canonical TTS cue checkpoint contract with stable cue IDs, hashes, one accepted request per cue, and same-runtime lease protection.
 - [ ] Preserve the PR #606 sequential timeline planner: prefer conservative tempo adjustment, never overlap or drop a sentence, and extend the final timeline when required.
-- [ ] Keep subtitle-only outputs at measured source duration and dub/combo outputs at the complete planned speech duration, bounded by the one-hour product capability.
+- [ ] Keep subtitle-only outputs at measured source duration and dub/combo outputs at the complete planned speech duration, bounded only when a positive operator capability is configured.
 - [ ] Force final `apad`, `atrim`, `amix`, and `-t` values to the canonical final timeline; never use `-shortest` or trim the video to a partial TTS track.
 - [ ] Compose combo once from the translated subtitle artifact and the complete dubbed audio timeline.
 
