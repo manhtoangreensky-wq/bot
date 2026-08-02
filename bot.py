@@ -96,7 +96,7 @@ from video_product_system import (
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subdub_long_media, subdub_media_preflight, subdub_provider_contract, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
-from services import ai_chatbot_copilot, telegram_business_support, telegram_transport
+from services import ai_chatbot_copilot, cskh_session_memory, telegram_business_support, telegram_transport
 from services import ffmpeg_text
 from services import voice_clone_pipeline
 from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_maintenance as storage_maintenance_service, storage_migration, video_final_output, video_provider_catalog, video_provider_router, worker_auth
@@ -5620,6 +5620,7 @@ def init_db():
     )
     video_profile_catalog.seed_catalog(conn)
     ensure_broadcast_lite_schema(conn)
+    cskh_session_memory.ensure_schema(conn)
     conn.commit()
     conn.close()
 
@@ -6082,6 +6083,395 @@ def set_system_setting(key, value, note="", updated_by=""):
     finally:
         if conn:
             conn.close()
+
+
+CSKH_SESSION_WINDOW_SETTING = "cskh_session_window_hours"
+CSKH_TURN_RETENTION_SETTING = "cskh_turn_retention_days"
+CSKH_RECENT_TURN_LIMIT_SETTING = "cskh_recent_turn_limit"
+CSKH_CONTEXT_CHARACTER_BUDGET_SETTING = "cskh_context_character_budget"
+CSKH_CLOSING_NOTICE_DELAY_SECONDS = 5 * 60
+CSKH_TURN_PURGE_INTERVAL_SECONDS = 60 * 60
+CSKH_CLOSING_NOTICE_TASKS: dict[str, asyncio.Task] = {}
+CSKH_LAST_SESSION_PURGE_AT = 0.0
+
+
+def cskh_runtime_setting_int(key, default, *, minimum=1, maximum=100_000):
+    """Read a bounded CSKH runtime setting without writing configuration."""
+    raw = get_system_setting(str(key), "")
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        value = int(default)
+    return max(int(minimum), min(int(maximum), value))
+
+
+def cskh_session_settings() -> dict:
+    return {
+        "session_window_hours": cskh_runtime_setting_int(
+            CSKH_SESSION_WINDOW_SETTING,
+            cskh_session_memory.DEFAULT_SESSION_WINDOW_HOURS,
+            minimum=1,
+            maximum=24 * 31,
+        ),
+        "retention_days": cskh_runtime_setting_int(
+            CSKH_TURN_RETENTION_SETTING,
+            cskh_session_memory.DEFAULT_RETENTION_DAYS,
+            minimum=1,
+            maximum=3650,
+        ),
+        "recent_turn_limit": cskh_runtime_setting_int(
+            CSKH_RECENT_TURN_LIMIT_SETTING,
+            cskh_session_memory.DEFAULT_RECENT_TURN_LIMIT,
+            minimum=1,
+            maximum=100,
+        ),
+        "character_budget": cskh_runtime_setting_int(
+            CSKH_CONTEXT_CHARACTER_BUDGET_SETTING,
+            cskh_session_memory.DEFAULT_CHARACTER_BUDGET,
+            minimum=200,
+            maximum=40_000,
+        ),
+    }
+
+
+def cskh_closing_notice_text(window_hours: int | None = None) -> str:
+    hours = int(window_hours or cskh_session_settings()["session_window_hours"])
+    return cskh_session_memory.closing_notice_text(hours)
+
+
+def cskh_shared_context(owner_id, chat_id, *, now=None, conn=None) -> dict:
+    """Read the active sanitized context, degrading safely on storage failure."""
+    owned_conn = conn is None
+    connection = conn
+    try:
+        connection = connection or db_connect()
+        settings = cskh_session_settings()
+        return cskh_session_memory.load_recent_session(
+            connection,
+            owner_id=str(owner_id or ""),
+            chat_id=str(chat_id or ""),
+            now=time.time() if now is None else now,
+            session_window_hours=settings["session_window_hours"],
+            recent_turn_limit=settings["recent_turn_limit"],
+            character_budget=settings["character_budget"],
+        )
+    except Exception as exc:
+        logger.warning("cskh shared context unavailable | error=%s", type(exc).__name__)
+        return {"session_id": "", "turns": [], "history_text": "", "truncated": False, "active": False}
+    finally:
+        if owned_conn and connection:
+            connection.close()
+
+
+def cskh_maybe_purge_session_turns(*, now=None, conn=None) -> int:
+    """Run the indexed retention purge at most once per process-hour."""
+    global CSKH_LAST_SESSION_PURGE_AT
+    timestamp = float(time.time() if now is None else now)
+    if timestamp - CSKH_LAST_SESSION_PURGE_AT < CSKH_TURN_PURGE_INTERVAL_SECONDS:
+        return 0
+    owned_conn = conn is None
+    connection = conn
+    try:
+        connection = connection or db_connect()
+        count = cskh_session_memory.purge_expired_turns(
+            connection,
+            now=timestamp,
+            retention_days=cskh_session_settings()["retention_days"],
+        )
+        connection.commit()
+        CSKH_LAST_SESSION_PURGE_AT = timestamp
+        return count
+    except Exception as exc:
+        logger.warning("cskh session purge skipped | error=%s", type(exc).__name__)
+        return 0
+    finally:
+        if owned_conn and connection:
+            connection.close()
+
+
+def cskh_record_exchange(
+    *,
+    owner_id,
+    chat_id,
+    surface,
+    user_content="",
+    assistant_content="",
+    assistant_delivery_confirmed=False,
+    source_message_id="",
+    context_event="",
+    now=None,
+    conn=None,
+) -> dict:
+    """Persist customer input and only an assistant reply confirmed as delivered.
+
+    Callers record the customer message before classification.  They must call
+    again with ``assistant_delivery_confirmed=True`` only after Telegram has
+    acknowledged the actual reply; this helper never treats draft copy as a
+    sent response.
+    """
+    timestamp = float(time.time() if now is None else now)
+    source = str(source_message_id or "").strip()
+    if not source:
+        return {"session_id": "", "user_inserted": False, "assistant_inserted": False}
+    owned_conn = conn is None
+    connection = conn
+    try:
+        connection = connection or db_connect()
+        settings = cskh_session_settings()
+        user_turn = None
+        assistant_turn = None
+        if str(user_content or "").strip():
+            user_turn = cskh_session_memory.record_turn(
+                connection,
+                owner_id=owner_id,
+                chat_id=chat_id,
+                surface=surface,
+                role="user",
+                content=user_content,
+                source_message_id=source,
+                now=timestamp,
+                session_window_hours=settings["session_window_hours"],
+            )
+        session_id = str(user_turn.session_id if user_turn else cskh_shared_context(owner_id, chat_id, now=timestamp, conn=connection).get("session_id") or "")
+        if str(assistant_content or "").strip() and assistant_delivery_confirmed is True and session_id:
+            assistant_turn = cskh_session_memory.record_turn(
+                connection,
+                owner_id=owner_id,
+                chat_id=chat_id,
+                surface=surface,
+                role="assistant",
+                content=assistant_content,
+                source_message_id=f"reply:{source}",
+                now=timestamp,
+                session_window_hours=settings["session_window_hours"],
+                session_id=session_id,
+            )
+        if str(context_event or "").strip() and session_id:
+            cskh_session_memory.record_turn(
+                connection,
+                owner_id=owner_id,
+                chat_id=chat_id,
+                surface=surface,
+                role="context_event",
+                content=context_event,
+                source_message_id=f"context:{source}",
+                now=timestamp,
+                session_window_hours=settings["session_window_hours"],
+                session_id=session_id,
+            )
+        connection.commit()
+        cskh_maybe_purge_session_turns(now=timestamp, conn=connection)
+        return {
+            "session_id": session_id,
+            "user_inserted": bool(user_turn and user_turn.inserted),
+            "assistant_inserted": bool(assistant_turn and assistant_turn.inserted),
+        }
+    except Exception as exc:
+        logger.warning("cskh exchange persistence skipped | error=%s", type(exc).__name__)
+        return {"session_id": "", "user_inserted": False, "assistant_inserted": False}
+    finally:
+        if owned_conn and connection:
+            connection.close()
+
+
+def cskh_record_customer_turn(
+    *,
+    owner_id,
+    chat_id,
+    surface,
+    user_content,
+    source_message_id,
+    context_event="",
+    now=None,
+    conn=None,
+) -> dict:
+    """Persist only the inbound customer turn before any reply is attempted."""
+    return cskh_record_exchange(
+        owner_id=owner_id,
+        chat_id=chat_id,
+        surface=surface,
+        user_content=user_content,
+        source_message_id=source_message_id,
+        context_event=context_event,
+        now=now,
+        conn=conn,
+    )
+
+
+def cskh_record_delivered_assistant_turn(
+    *,
+    owner_id,
+    chat_id,
+    surface,
+    assistant_content,
+    source_message_id,
+    now=None,
+    conn=None,
+) -> dict:
+    """Persist an assistant turn only after its Telegram send has succeeded."""
+    return cskh_record_exchange(
+        owner_id=owner_id,
+        chat_id=chat_id,
+        surface=surface,
+        assistant_content=assistant_content,
+        assistant_delivery_confirmed=True,
+        source_message_id=source_message_id,
+        now=now,
+        conn=conn,
+    )
+
+
+async def cskh_deliver_closing_notice_if_current(
+    *,
+    owner_id,
+    chat_id,
+    session_id,
+    source_message_id,
+    surface,
+    send_notice,
+    opt_out=False,
+    conn=None,
+    now=None,
+) -> bool:
+    """Send one closing note only after a durable cross-surface claim.
+
+    The claim is committed before transport.  Known transport failures release
+    it; once a transport is explicitly confirmed, a completion failure retains
+    the claim rather than risking a duplicate customer-visible message.
+    """
+    timestamp = float(time.time() if now is None else now)
+    owned_conn = conn is None
+    connection = conn
+    claimed = False
+    delivery_confirmed = False
+    try:
+        connection = connection or db_connect()
+        context = cskh_shared_context(owner_id, chat_id, now=timestamp, conn=connection)
+        if str(context.get("session_id") or "") != str(session_id or ""):
+            return False
+        if not cskh_session_memory.closing_notice_needed(
+            connection,
+            owner_id=owner_id,
+            chat_id=chat_id,
+            session_id=session_id,
+            source_message_id=source_message_id,
+            now=timestamp,
+            opt_out=opt_out,
+        ):
+            return False
+        claimed = cskh_session_memory.claim_closing_notice(
+            connection,
+            owner_id=owner_id,
+            chat_id=chat_id,
+            session_id=session_id,
+            source_message_id=source_message_id,
+            surface=surface,
+            now=timestamp,
+            opt_out=opt_out,
+        )
+        if not claimed:
+            return False
+        connection.commit()
+        notice = cskh_closing_notice_text(cskh_session_settings()["session_window_hours"])
+        sent = send_notice(notice)
+        if inspect.isawaitable(sent):
+            sent = await sent
+        delivery_confirmed = cskh_session_memory.notice_delivery_confirmed(sent)
+        if not delivery_confirmed:
+            cskh_session_memory.release_closing_notice_claim(
+                connection,
+                owner_id=owner_id,
+                chat_id=chat_id,
+                session_id=session_id,
+            )
+            connection.commit()
+            return False
+        completed = cskh_session_memory.complete_closing_notice_claim(
+            connection,
+            owner_id=owner_id,
+            chat_id=chat_id,
+            surface=surface,
+            content=notice,
+            confirmed_success=True,
+            now=timestamp,
+            session_id=session_id,
+        )
+        connection.commit()
+        return bool(completed)
+    except asyncio.CancelledError:
+        if claimed and not delivery_confirmed and connection:
+            cskh_session_memory.release_closing_notice_claim(
+                connection,
+                owner_id=owner_id,
+                chat_id=chat_id,
+                session_id=session_id,
+            )
+            connection.commit()
+        raise
+    except Exception as exc:
+        if claimed and not delivery_confirmed and connection:
+            try:
+                cskh_session_memory.release_closing_notice_claim(
+                    connection,
+                    owner_id=owner_id,
+                    chat_id=chat_id,
+                    session_id=session_id,
+                )
+                connection.commit()
+            except Exception:
+                pass
+        logger.warning("cskh closing notice skipped | error=%s", type(exc).__name__)
+        return False
+    finally:
+        if owned_conn and connection:
+            connection.close()
+
+
+def cskh_schedule_closing_notice(
+    *,
+    owner_id,
+    chat_id,
+    session_id,
+    source_message_id,
+    surface,
+    send_notice,
+    opt_out=False,
+    delay_seconds=CSKH_CLOSING_NOTICE_DELAY_SECONDS,
+) -> None:
+    """Replace an older idle timer for the same customer/chat with the latest one."""
+    owner = str(owner_id or "").strip()
+    chat = str(chat_id or "").strip()
+    if not owner or not chat or not str(session_id or "").strip() or not str(source_message_id or "").strip():
+        return
+    key = f"{owner}:{chat}"
+    previous = CSKH_CLOSING_NOTICE_TASKS.pop(key, None)
+    if previous and not previous.done():
+        previous.cancel()
+
+    async def runner():
+        try:
+            await asyncio.sleep(max(0, float(delay_seconds)))
+            await cskh_deliver_closing_notice_if_current(
+                owner_id=owner,
+                chat_id=chat,
+                session_id=session_id,
+                source_message_id=source_message_id,
+                surface=surface,
+                send_notice=send_notice,
+                opt_out=opt_out,
+            )
+        except asyncio.CancelledError:
+            raise
+        finally:
+            current = CSKH_CLOSING_NOTICE_TASKS.get(key)
+            if current is asyncio.current_task():
+                CSKH_CLOSING_NOTICE_TASKS.pop(key, None)
+
+    try:
+        CSKH_CLOSING_NOTICE_TASKS[key] = asyncio.create_task(runner())
+    except RuntimeError:
+        logger.warning("cskh closing notice schedule skipped: no running loop")
+
 
 CANONICAL_PRICE_SETTING_PREFIX = "canonical_price_xu:"
 CANONICAL_PRICE_KEYS = (

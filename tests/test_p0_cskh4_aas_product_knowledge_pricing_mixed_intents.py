@@ -373,6 +373,7 @@ def test_cskh4_no_payos_pricing_db_destructive_changes():
         CSKH4_TEST,
         "services/aas_shared_knowledge.py",
         "services/ai_chatbot_copilot.py",
+        "services/cskh_session_memory.py",
         "services/telegram_business_support.py",
         "tests/test_p0_aichat2_natural_context_pricing.py",
         "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",

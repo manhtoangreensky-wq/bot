@@ -135,6 +135,7 @@ def test_cskh6_scope_guard_cskh_only_no_locked_runtime_touched():
         "knowledge/toan_aas_cskh_aichat_context.md",
         "services/aas_shared_knowledge.py",
         "services/ai_chatbot_copilot.py",
+        "services/cskh_session_memory.py",
         "services/telegram_business_support.py",
         "config/cskh_playbook.json",
         "config/cskh_training_data.json",

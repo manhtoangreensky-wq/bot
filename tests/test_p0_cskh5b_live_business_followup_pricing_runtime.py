@@ -406,6 +406,7 @@ def test_cskh5b_no_locked_runtime_scope_changes():
         "knowledge/toan_aas_cskh_aichat_context.md",
         "services/aas_shared_knowledge.py",
         "services/ai_chatbot_copilot.py",
+        "services/cskh_session_memory.py",
         "services/telegram_business_support.py",
         "tests/test_p0_aichat1_copilot_consent.py",
         "tests/test_p0_aichat1b_free_tools_menu_cleanup.py",

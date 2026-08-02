@@ -88,6 +88,7 @@ def test_aichat1b_scope_guard_only_touches_menu_cleanup_files():
         "knowledge/toan_aas_cskh_aichat_context.md",
         "services/aas_shared_knowledge.py",
         "services/ai_chatbot_copilot.py",
+        "services/cskh_session_memory.py",
         "services/telegram_business_support.py",
         "tests/test_p0_aichat1_copilot_consent.py",
         "tests/test_p0_aichat1b_free_tools_menu_cleanup.py",
