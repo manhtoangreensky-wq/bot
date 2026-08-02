@@ -209,6 +209,36 @@ def test_cskh5c_same_real_message_replies_once_with_idempotency_key():
     assert len(bot.sent_messages) == 1
 
 
+def test_cskh5c_continuity_callbacks_skip_legacy_non_numeric_test_identifiers(monkeypatch):
+    state = _enabled_state()
+    observed = []
+    event = _event("giá video", message_id=1, chat_id="chat-1", from_user_id="user-1")
+    event.message_id = "m1"
+
+    async def delivered(*_args, **_kwargs):
+        return {"ok": True, "message": SimpleNamespace(message_id=9001), "payload": {}}
+
+    monkeypatch.setattr(cskh, "send_business_message", delivered)
+
+    result = _run(
+        cskh.process_business_event_runtime(
+            event,
+            SimpleNamespace(bot=FakeBot()),
+            state=state,
+            save_state_fn=_save_into(state),
+            bot_user_id="999",
+            allow_debounce=False,
+            shared_context_fn=lambda **kwargs: observed.append(("context", kwargs)),
+            record_customer_turn_fn=lambda **kwargs: observed.append(("customer", kwargs)),
+            record_delivered_assistant_turn_fn=lambda **kwargs: observed.append(("assistant", kwargs)),
+            schedule_closing_notice_fn=lambda **kwargs: observed.append(("schedule", kwargs)),
+        )
+    )
+
+    assert result["sent"] is True
+    assert observed == []
+
+
 def test_cskh5c_customer_reply_to_bot_with_text_is_allowed_but_quote_only_echo_is_ignored():
     state = _enabled_state()
     bot = FakeBot()

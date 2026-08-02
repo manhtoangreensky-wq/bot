@@ -4,6 +4,7 @@ import json
 import hashlib
 import html
 import asyncio
+import inspect
 import os
 import re
 import time
@@ -2479,6 +2480,80 @@ def _apply_shared_doc_answer(
     return result
 
 
+_CONTINUITY_VIDEO_PACKAGE_GUIDE_TOKENS = (
+    "huong dan tao video",
+    "chon video",
+    "chon goi",
+    "xem hoa don",
+)
+_CONTINUITY_VIDEO_PACKAGE_REPLY = (
+    "Dạ ở bước 2, anh/chị chọn gói video phù hợp nhu cầu. Bot sẽ hiện giá Xu và phần mô tả của từng gói để mình xem trước. "
+    "Khi chọn xong, bot mới đưa mình sang hóa đơn để tự xác nhận; ở bước này chưa tạo video và chưa trừ Xu ạ."
+)
+
+
+def _cross_surface_video_package_followup_requested(text: str, conversation_memory: dict | None) -> bool:
+    """Recognize one fixed, safe continuation without replaying stored text.
+
+    Recent turns are untrusted context.  This detector only accepts the exact
+    customer-facing video guide shape that this product itself previously sent,
+    then responds with fixed copy rather than incorporating any stored words.
+    """
+    folded = _fold(text)
+    if "buoc 2" not in folded or not any(term in folded for term in ("chua hieu", "khong hieu", "giai thich")):
+        return False
+    turns = (conversation_memory or {}).get("turns") if isinstance(conversation_memory, dict) else []
+    if not isinstance(turns, list):
+        return False
+    for turn in reversed(turns):
+        if not isinstance(turn, dict) or str(turn.get("role") or "") != "assistant":
+            continue
+        if str(turn.get("surface") or "") not in {"bot_menu", "cskh", "aichat"}:
+            continue
+        prior = _fold(str(turn.get("content") or ""))
+        if all(token in prior for token in _CONTINUITY_VIDEO_PACKAGE_GUIDE_TOKENS):
+            return True
+    return False
+
+
+def _apply_cross_surface_video_package_followup(result: dict, text: str, conversation_memory: dict | None) -> dict:
+    if not _cross_surface_video_package_followup_requested(text, conversation_memory):
+        return result
+    updated = dict(result)
+    updated.update(
+        {
+            "intent": "continuity_video_package_step",
+            "intent_id": "continuity_video_package_step",
+            "product": "product_video",
+            "primary_product": "product_video",
+            "secondary_products": [],
+            "mixed_intent": False,
+            "knowledge_entry_id": "",
+            "reply": _CONTINUITY_VIDEO_PACKAGE_REPLY,
+            "reply_preview": _CONTINUITY_VIDEO_PACKAGE_REPLY,
+            "reply_template_id": "continuity:video_package_step_2",
+            "confidence": "high",
+            "severity": "normal",
+            "handoff": False,
+            "handoff_required": False,
+            "ticket": False,
+            "ticket_required": False,
+            "learning_queue": False,
+            "would_queue_learning": False,
+            "context_carry_used": True,
+            "human_last_reply_required": True,
+            "previous_topic": "video",
+            "last_product_type": "product_video",
+        }
+    )
+    updated.pop("ticket_preview", None)
+    updated["source"] = list(dict.fromkeys([*(updated.get("source") or []), "cross_surface_continuity"]))
+    policy = detect_policy_claims(updated["reply"], pricing_source=str(updated.get("pricing_source") or "unknown"))
+    updated["playbook_policy_claims"] = policy
+    updated["public_safe"] = public_reply_is_safe(updated["reply"]) and not bool(policy.get("unsafe"))
+    return updated
+
+
 def classify_cskh_message(
     text: str = "",
     *,
@@ -2594,7 +2669,8 @@ def classify_cskh_message(
     elif result.get("ticket") or result.get("handoff"):
         result["ticket_preview"] = build_ticket_draft(result, text=text)
     result = _apply_pricing_table_thread_hint(text, result, runtime_facts=runtime_facts)
-    return _context_aware_greeting_reply(text, result, conversation_memory)
+    result = _context_aware_greeting_reply(text, result, conversation_memory)
+    return _apply_cross_surface_video_package_followup(result, text, conversation_memory)
 
 
 def classify_business_event(
@@ -2660,6 +2736,46 @@ def public_reply_is_safe(reply: str) -> bool:
     return not _PRIVATE_PATH_PATTERN.search(raw) and not any(term and term in folded for term in hard_forbidden)
 
 
+def _safe_telegram_numeric_id(value: Any, *, allow_negative: bool = False) -> str:
+    raw = str(value or "").strip()
+    pattern = r"-?[1-9]\d{0,19}" if allow_negative else r"[1-9]\d{0,19}"
+    return raw if re.fullmatch(pattern, raw) else ""
+
+
+def _business_continuity_identity(event: BusinessMessageEvent) -> dict:
+    """Return only numeric Telegram identifiers suitable for the shared store."""
+    owner_id = _safe_telegram_numeric_id(event.from_user_id)
+    chat_id = _safe_telegram_numeric_id(event.chat_id, allow_negative=True)
+    source_message_id = _safe_telegram_numeric_id(event.message_id)
+    if not owner_id or not chat_id or not source_message_id:
+        return {}
+    return {
+        "owner_id": owner_id,
+        "chat_id": chat_id,
+        "source_message_id": source_message_id,
+        "surface": "cskh",
+    }
+
+
+async def _invoke_continuity_callback(callback: Any, **kwargs):
+    if not callable(callback):
+        return None
+    try:
+        result = callback(**kwargs)
+        return await result if inspect.isawaitable(result) else result
+    except Exception:
+        return None
+
+
+def _business_transport_delivery_confirmed(send_result: Any) -> bool:
+    """Accept only an explicit successful Telegram send acknowledgement."""
+    if send_result is True:
+        return True
+    if isinstance(send_result, dict):
+        return send_result.get("ok") is True
+    return isinstance(getattr(send_result, "message_id", None), int) and getattr(send_result, "message_id", 0) > 0
+
+
 async def process_business_event_runtime(
     event: BusinessMessageEvent,
     context: Any,
@@ -2672,6 +2788,11 @@ async def process_business_event_runtime(
     schedule_buffer_fn: Any = None,
     notify_admin_fn: Any = None,
     runtime_facts: dict | None = None,
+    shared_context_fn: Any = None,
+    record_customer_turn_fn: Any = None,
+    record_delivered_assistant_turn_fn: Any = None,
+    schedule_closing_notice_fn: Any = None,
+    context_event_fn: Any = None,
 ) -> dict:
     clean = record_business_message_received(state, event)
     if clean.get("enabled"):
@@ -2697,7 +2818,18 @@ async def process_business_event_runtime(
         clean = record_suppressed(clean, event, classification, preliminary_guard)
         save_state_fn(clean)
         return {"sent": False, "classification": classification, "guard": preliminary_guard}
-    memory = get_conversation_memory(clean, chat_id)
+    continuity_identity = _business_continuity_identity(event) if preliminary_guard.get("allowed") else {}
+    customer_turn = None
+    if continuity_identity:
+        customer_turn = await _invoke_continuity_callback(
+            record_customer_turn_fn,
+            **continuity_identity,
+            user_content=event.text or event.caption,
+        )
+    shared_memory = None
+    if continuity_identity and callable(shared_context_fn):
+        shared_memory = await _invoke_continuity_callback(shared_context_fn, **continuity_identity)
+    memory = shared_memory if isinstance(shared_memory, dict) else get_conversation_memory(clean, chat_id)
     classification = classify_business_event(event, conversation_memory=memory, runtime_facts=runtime_facts)
     if str(classification.get("severity") or "") == "urgent" and clean.get("message_buffers", {}).get(chat_id):
         clean, _dropped = pop_message_buffer(clean, chat_id, force=True)
@@ -2751,6 +2883,18 @@ async def process_business_event_runtime(
         clean = update_conversation_memory(clean, event, classification)
         save_state_fn(clean)
         return {"sent": False, "classification": classification, "guard": failure_guard, "error": type(exc).__name__}
+    if not _business_transport_delivery_confirmed(send_result):
+        failure_guard = {
+            **guard,
+            "allowed": False,
+            "send_failed": True,
+            "block_reason": "send_failed",
+            "block_reason_detail": "unconfirmed_transport",
+        }
+        clean = record_suppressed(clean, event, classification, failure_guard)
+        clean = update_conversation_memory(clean, event, classification)
+        save_state_fn(clean)
+        return {"sent": False, "classification": classification, "guard": failure_guard, "send_result": send_result}
     clean = record_auto_reply(clean, event, classification, send_result, guard=guard)
     clean = update_conversation_memory(clean, event, classification, reply=reply)
     if should_queue_learning(classification, event.text or event.caption):
@@ -2764,6 +2908,28 @@ async def process_business_event_runtime(
     if classification.get("handoff"):
         clean = set_handoff(clean, event.chat_id, True, str(classification.get("intent_id") or "handoff"))
     save_state_fn(clean)
+    if continuity_identity:
+        context_event = await _invoke_continuity_callback(
+            context_event_fn,
+            event=event,
+            classification=classification,
+        )
+        delivered_turn = await _invoke_continuity_callback(
+            record_delivered_assistant_turn_fn,
+            **continuity_identity,
+            assistant_content=reply,
+            context_event=str(context_event or ""),
+        )
+        customer_session = customer_turn.get("session_id") if isinstance(customer_turn, dict) else ""
+        delivered_session = delivered_turn.get("session_id") if isinstance(delivered_turn, dict) else ""
+        session_id = str(delivered_session or customer_session or "")
+        if session_id:
+            await _invoke_continuity_callback(
+                schedule_closing_notice_fn,
+                **continuity_identity,
+                session_id=session_id,
+                delay_seconds=5 * 60,
+            )
     if classification.get("handoff") and notify_admin_fn:
         await notify_admin_fn(
             context,
@@ -3150,4 +3316,4 @@ async def send_business_message(
         return {"ok": True, "method": "ptb", "message": message, "payload": payload}
     except TypeError:
         raw = await raw_bot_api_request(bot, "sendMessage", payload)
-        return {"ok": bool(raw.get("ok", True)), "method": "raw", "message": raw, "payload": payload}
+        return {"ok": raw.get("ok") is True, "method": "raw", "message": raw, "payload": payload}

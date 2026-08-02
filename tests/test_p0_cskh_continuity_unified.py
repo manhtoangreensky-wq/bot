@@ -1,6 +1,7 @@
 import asyncio
 import importlib.util
 import inspect
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -53,6 +54,7 @@ def _bot_memory_helpers():
         "get_system_setting": lambda _key, _default="": "",
         "inspect": inspect,
         "logger": SimpleNamespace(warning=lambda *_args, **_kwargs: None),
+        "re": re,
         "time": time,
     }
     exec(compile(source[start:end], "bot.py:cskh-memory-helpers", "exec"), namespace)
@@ -813,3 +815,329 @@ def test_human_touch_prompt_caption_and_script_are_usable_drafts_without_side_ef
     for result in (prompt, caption, script):
         assert result["intent_id"] == "prompt_create_request"
         assert cskh.public_reply_is_safe(result["reply"])
+
+
+def _continuity_history_for_video_package(conn, *, surface: str, owner_id: str, chat_id: str) -> dict:
+    first = memory.record_turn(
+        conn,
+        owner_id=owner_id,
+        chat_id=chat_id,
+        surface=surface,
+        role="user",
+        content="Hướng dẫn giúp tôi tạo video.",
+        source_message_id="901",
+        now=1000,
+    )
+    memory.record_turn(
+        conn,
+        owner_id=owner_id,
+        chat_id=chat_id,
+        surface=surface,
+        role="assistant",
+        content="Hướng dẫn tạo video: 1. chọn Video, 2. chọn gói, 3. xem hóa đơn.",
+        source_message_id="reply:901",
+        session_id=first.session_id,
+        now=1001,
+    )
+    return memory.load_recent_session(
+        conn,
+        owner_id=owner_id,
+        chat_id=chat_id,
+        now=1002,
+        session_window_hours=48,
+        recent_turn_limit=8,
+        character_budget=1000,
+    )
+
+
+@pytest.mark.parametrize(
+    ("first_surface", "reply_surface"),
+    (
+        ("bot_menu", "cskh"),
+        ("bot_menu", "aichat"),
+        ("cskh", "aichat"),
+        ("aichat", "cskh"),
+        ("aichat", "aichat"),
+    ),
+)
+def test_integration_cross_surface_video_package_followup_is_safe_and_answer_only(first_surface, reply_surface):
+    conn = _memory_connection()
+    context = _continuity_history_for_video_package(
+        conn,
+        surface=first_surface,
+        owner_id="10001",
+        chat_id="20001",
+    )
+
+    if reply_surface == "aichat":
+        state = _enabled_aichat_state("10001")
+        _state, result = aichat.process_message(
+            state,
+            "10001",
+            "bước 2 tôi chưa hiểu",
+            queue_unknown=False,
+            entry_source="continuity_integration",
+            conversation_memory=context,
+            runtime_facts=RUNTIME_FACTS,
+        )
+    else:
+        result = cskh.classify_cskh_message(
+            "bước 2 tôi chưa hiểu",
+            conversation_memory=context,
+            runtime_facts=RUNTIME_FACTS,
+        )
+
+    assert result["intent_id"] == "continuity_video_package_step"
+    assert "chọn gói" in result["reply"].lower()
+    assert result["ticket"] is False
+    assert result["handoff"] is False
+    assert result["learning_queue"] is False
+    assert result.get("would_queue_learning") is False
+    assert result.get("provider_call_allowed", False) is False
+    assert result.get("xu_charge_allowed", False) is False
+    assert "provider" not in result["reply"].lower()
+    assert "job" not in result["reply"].lower()
+
+
+def _bot_live_pricing_helper():
+    source = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
+    start = source.index("def cskh_live_pricing_snapshot")
+    end = source.index("\ndef canonical_price_table", start)
+    namespace = {
+        "IMAGE_TIER_ORDER": ("low",),
+        "VIDEO_TIER_ORDER": ("basic",),
+        "MUSIC_PRODUCT_TIER_ORDER": ("music_tier_basic",),
+        "VOICE_PROFILE_FIRST_FREE": True,
+        "VOICE_PROFILE_PRICE_XU": 50,
+        "VOICE_TTS_PRODUCT_MIN_CHARGE_XU": 1,
+        "XU_TO_VND": 100,
+        "image_tier_pricing_payload": lambda: {"low": {"label": "Ảnh tiết kiệm", "cost": 51}},
+        "video_tier_pricing_payload": lambda: {"basic": {"label": "Cơ bản", "cost": 333}},
+        "music_product_tier_label": lambda _tier, _lang: "Cơ bản",
+        "music_product_tier_price_xu": lambda _tier, _mode: 100 if _mode == "background" else 200,
+        "canonical_price_xu": lambda key: {
+            "voice_tts_basic": 0.1,
+            "voice_clone_custom": 0.2,
+            "subtitle_translate_video": 0.1,
+            "dub_video": 0.1,
+        }[key],
+        "product_video_r9_scene_pricing": lambda _count: {"scene_seconds": 8},
+    }
+    exec(compile(source[start:end], "bot.py:cskh-live-pricing", "exec"), namespace)
+    return namespace
+
+
+def test_integration_runtime_pricing_snapshot_uses_only_canonical_helpers():
+    helper = _bot_live_pricing_helper()
+    facts = helper["cskh_live_pricing_snapshot"]()
+
+    assert facts["available"] is True
+    assert facts["source"] == "runtime_canonical"
+    assert facts["xu_to_vnd"] == 100
+    assert facts["image_tiers"] == [("Ảnh tiết kiệm", 51)]
+    assert facts["video_tiers"] == [("Cơ bản", 333)]
+    assert facts["music_background_tiers"] == [("Cơ bản", 100)]
+    assert facts["music_song_tiers"] == [("Cơ bản", 200)]
+    assert facts["voice_private_first_xu"] == 0
+    assert facts["voice_private_repeat_xu"] == 50
+    assert facts["subtitle_rate"] == facts["dub_rate"] == 0.1
+    assert facts["scene_seconds"] == 8
+
+
+def test_integration_runtime_context_rejects_callback_routes_and_raw_debug_payloads():
+    helpers = _bot_memory_helpers()
+    conn = _memory_connection()
+
+    callback = helpers["cskh_record_customer_turn"](
+        owner_id="10001",
+        chat_id="20001",
+        surface="bot_menu",
+        user_content="menu|open_video|basic",
+        source_message_id="905",
+        conn=conn,
+        now=1000,
+    )
+    raw_debug = helpers["cskh_record_customer_turn"](
+        owner_id="10001",
+        chat_id="20001",
+        surface="bot_menu",
+        user_content='{"provider":"internal", "task_id":"abc"}',
+        source_message_id="906",
+        conn=conn,
+        now=1001,
+    )
+    safe = helpers["cskh_record_customer_turn"](
+        owner_id="10001",
+        chat_id="20001",
+        surface="bot_menu",
+        user_content="Tôi cần hỏi giá tạo video.",
+        source_message_id="907",
+        conn=conn,
+        now=1002,
+    )
+    context = memory.load_recent_session(
+        conn,
+        owner_id="10001",
+        chat_id="20001",
+        now=1003,
+        session_window_hours=48,
+        recent_turn_limit=8,
+        character_budget=1000,
+    )
+
+    assert callback["user_inserted"] is False
+    assert raw_debug["user_inserted"] is False
+    assert safe["user_inserted"] is True
+    assert "open_video" not in context["history_text"]
+    assert "task_id" not in context["history_text"]
+
+
+def _numeric_business_event(*, message_id: str = "901"):
+    return cskh.BusinessMessageEvent(
+        update_type="business_message",
+        business_connection_id="bc-901",
+        chat_id="20001",
+        from_user_id="10001",
+        from_is_bot=False,
+        text="giá video",
+        caption="",
+        message_id=message_id,
+        timestamp=1000.0,
+        media_type="",
+    )
+
+
+def _business_state_for_continuity():
+    return {
+        **cskh.default_state(),
+        "enabled": True,
+        "connections": {"bc-901": {"id": "bc-901", "is_enabled": True, "user_id": "90001"}},
+    }
+
+
+def test_integration_business_runtime_records_after_customer_eligibility_and_success_only():
+    recorded = []
+
+    def save_state(_state):
+        return _state
+
+    def record_customer_turn(**kwargs):
+        recorded.append(("customer", kwargs))
+        return {"session_id": "session-901"}
+
+    def shared_context(**kwargs):
+        recorded.append(("context", kwargs))
+        return {
+            "active": True,
+            "session_id": "session-901",
+            "turns": [],
+            "history_text": "",
+            "truncated": False,
+        }
+
+    def record_delivered_assistant_turn(**kwargs):
+        recorded.append(("assistant", kwargs))
+        return {"session_id": "session-901"}
+
+    def schedule_closing_notice(**kwargs):
+        recorded.append(("schedule", kwargs))
+
+    class FakeBot:
+        async def send_message(self, **_kwargs):
+            return SimpleNamespace(message_id=902)
+
+    result = asyncio.run(
+        cskh.process_business_event_runtime(
+            _numeric_business_event(),
+            SimpleNamespace(bot=FakeBot()),
+            state=_business_state_for_continuity(),
+            save_state_fn=save_state,
+            bot_user_id="999",
+            allow_debounce=False,
+            runtime_facts=RUNTIME_FACTS,
+            shared_context_fn=shared_context,
+            record_customer_turn_fn=record_customer_turn,
+            record_delivered_assistant_turn_fn=record_delivered_assistant_turn,
+            schedule_closing_notice_fn=schedule_closing_notice,
+            context_event_fn=lambda **_kwargs: "Khách đang xem dịch vụ tạo video",
+        )
+    )
+
+    assert result["sent"] is True
+    assert [name for name, _payload in recorded] == ["customer", "context", "assistant", "schedule"]
+    assert recorded[0][1]["source_message_id"] == "901"
+    assert recorded[2][1]["assistant_content"] == result["classification"]["reply"]
+    assert recorded[2][1]["context_event"] == "Khách đang xem dịch vụ tạo video"
+    assert recorded[3][1]["delay_seconds"] == 5 * 60
+
+
+def test_integration_business_runtime_never_records_assistant_or_schedule_when_transport_is_unconfirmed(monkeypatch):
+    recorded = []
+
+    async def unconfirmed_send(*_args, **_kwargs):
+        return {"ok": False, "message": None, "payload": {}}
+
+    monkeypatch.setattr(cskh, "send_business_message", unconfirmed_send)
+    result = asyncio.run(
+        cskh.process_business_event_runtime(
+            _numeric_business_event(message_id="902"),
+            SimpleNamespace(bot=object()),
+            state=_business_state_for_continuity(),
+            save_state_fn=lambda state: state,
+            bot_user_id="999",
+            allow_debounce=False,
+            runtime_facts=RUNTIME_FACTS,
+            shared_context_fn=lambda **_kwargs: {"active": False, "turns": [], "history_text": ""},
+            record_customer_turn_fn=lambda **kwargs: recorded.append(("customer", kwargs)) or {"session_id": "session-902"},
+            record_delivered_assistant_turn_fn=lambda **kwargs: recorded.append(("assistant", kwargs)),
+            schedule_closing_notice_fn=lambda **kwargs: recorded.append(("schedule", kwargs)),
+        )
+    )
+
+    assert result["sent"] is False
+    assert [name for name, _payload in recorded] == ["customer"]
+
+
+def test_integration_business_runtime_does_not_persist_a_suppressed_customer_event():
+    recorded = []
+    result = asyncio.run(
+        cskh.process_business_event_runtime(
+            _numeric_business_event(message_id="903"),
+            SimpleNamespace(bot=object()),
+            state=cskh.default_state(),
+            save_state_fn=lambda state: state,
+            bot_user_id="999",
+            allow_debounce=False,
+            shared_context_fn=lambda **kwargs: recorded.append(("context", kwargs)),
+            record_customer_turn_fn=lambda **kwargs: recorded.append(("customer", kwargs)),
+            record_delivered_assistant_turn_fn=lambda **kwargs: recorded.append(("assistant", kwargs)),
+            schedule_closing_notice_fn=lambda **kwargs: recorded.append(("schedule", kwargs)),
+        )
+    )
+
+    assert result["sent"] is False
+    assert result["guard"]["block_reason"] == "disabled"
+    assert recorded == []
+
+
+def test_integration_runtime_handlers_use_shared_context_without_legacy_or_paid_fallbacks():
+    source = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
+    aichat_handler = source.split("async def handle_aichat_message", 1)[1].split("async def cmd_cskh_business_status", 1)[0]
+    business_wrapper = source.split("async def process_cskh_business_event", 1)[1].split("def support_admin_search_payload", 1)[0]
+    continuity_handler = source.split("async def handle_cskh_continuity_message", 1)[1].split("async def handle_support_ticket_attachment", 1)[0]
+    dispatch = source.split("async def handle_message", 1)[1].split("normalized_music_command", 1)[0]
+
+    assert aichat_handler.index("cskh_record_customer_turn") < aichat_handler.index("ai_chatbot_copilot.process_message")
+    assert "cskh_shared_context" in aichat_handler
+    assert "cskh_live_pricing_snapshot" in aichat_handler
+    assert "cskh_finalize_delivered_reply" in aichat_handler
+    assert "runtime_facts=cskh_live_pricing_snapshot()" in business_wrapper
+    assert "shared_context_fn=" in business_wrapper
+    assert "record_customer_turn_fn=" in business_wrapper
+    assert "record_delivered_assistant_turn_fn=" in business_wrapper
+    assert "schedule_closing_notice_fn=" in business_wrapper
+    assert "classify_support_message" not in continuity_handler
+    assert "create_or_append_support_ticket" not in continuity_handler
+    assert "add_learning_candidate" not in continuity_handler
+    assert "cskh_finalize_delivered_reply" in continuity_handler
+    assert dispatch.index("handle_cskh_continuity_message") < dispatch.index("handle_support_persona_message")
