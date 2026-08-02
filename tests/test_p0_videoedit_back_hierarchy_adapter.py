@@ -38,9 +38,28 @@ class _Query:
         return None
 
 
+class _StateChangingQuery(_Query):
+    def __init__(self, user_id: int, data: str, change_state) -> None:
+        super().__init__(user_id, data)
+        self._change_state = change_state
+
+    async def edit_message_text(self, text: str, **kwargs):
+        self.edits.append((text, kwargs))
+        self._change_state()
+        return None
+
+
 def _callbacks(markup) -> list[str]:
     return [
         str(button.callback_data or "")
+        for row in markup.inline_keyboard
+        for button in row
+    ]
+
+
+def _pairs(markup) -> list[tuple[str, str]]:
+    return [
+        (str(button.text or ""), str(button.callback_data or ""))
         for row in markup.inline_keyboard
         for button in row
     ]
@@ -52,6 +71,23 @@ def _last_markup(query: _Query):
     if query.message.replies:
         return query.message.replies[-1][1].get("reply_markup")
     return None
+
+
+def _single_callback_starting_with(markup, prefix: str) -> str:
+    matches = [
+        callback
+        for callback in _callbacks(markup)
+        if callback.startswith(prefix)
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _nested_value(payload: dict, path: tuple[str, ...]):
+    current = payload
+    for key in path:
+        current = current[key]
+    return current
 
 
 def _ready_state(user_id: int) -> None:
@@ -114,6 +150,35 @@ def test_videoedit_workspace_exposes_every_real_local_group() -> None:
 
 
 @pytest.mark.parametrize(
+    ("visible_callback", "expected_screen"),
+    [
+        ("videoedit|cut", "cut"),
+        ("videoedit|join", "join"),
+        ("videoedit|frame", "frame"),
+        ("videoedit|transform", "transform"),
+        ("videoedit|audio", "audio"),
+        ("videoedit|color", "color"),
+        ("videoedit|overlay", "overlay"),
+        ("videoedit|effects", "effects"),
+    ],
+)
+def test_videoedit_every_visible_workspace_group_opens_its_owned_screen(
+    visible_callback: str,
+    expected_screen: str,
+) -> None:
+    user_id = 88150 + sum(ord(char) for char in visible_callback)
+    _ready_state(user_id)
+    try:
+        query = _press(user_id, visible_callback)
+        current = dict(bot.get_video_editor_pending(user_id) or {})
+        assert _last_markup(query) is not None
+        assert current["current_screen"] == expected_screen
+        assert not query.answers or not query.answers[-1][1].get("show_alert")
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize(
     ("open_callback", "expected_back"),
     [
         ("videoedit|manual_cut", "videoedit|workspace"),
@@ -145,5 +210,1115 @@ def test_videoedit_source_info_returns_to_exact_join_caller() -> None:
         _press(user_id, "videoedit|manual_join")
         query = _press(user_id, "videoedit|source_info")
         assert "videoedit|join" in _callbacks(_last_markup(query))
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize(
+    ("open_callbacks", "expected_back"),
+    [
+        (("videoedit|cut", "videoedit|trim_edges"), "videoedit|cut"),
+        (("videoedit|cut", "videoedit|remove_middle"), "videoedit|cut"),
+        (("videoedit|join", "videoedit|concat"), "videoedit|join"),
+        (("videoedit|join", "videoedit|reorder"), "videoedit|join"),
+        (("videoedit|frame", "videoedit|aspect"), "videoedit|frame"),
+        (("videoedit|frame", "videoedit|resolution"), "videoedit|frame"),
+        (("videoedit|transform", "videoedit|speed"), "videoedit|transform"),
+        (
+            ("videoedit|transform", "videoedit|manual_rotate_flip", "videoedit|rotation"),
+            "videoedit|transform",
+        ),
+        (
+            ("videoedit|transform", "videoedit|manual_rotate_flip", "videoedit|flip"),
+            "videoedit|transform",
+        ),
+        (
+            ("videoedit|audio", "videoedit|audio_master"),
+            "videoedit|audio",
+        ),
+        (
+            ("videoedit|audio", "videoedit|audio_master", "videoedit|audio_custom"),
+            "videoedit|audio",
+        ),
+        (
+            ("videoedit|audio", "videoedit|audio_component|audio_dialogue"),
+            "videoedit|audio",
+        ),
+        (("videoedit|color", "videoedit|brightness"), "videoedit|color"),
+        (
+            ("videoedit|color", "videoedit|brightness", "videoedit|brightness_custom"),
+            "videoedit|brightness",
+        ),
+        (("videoedit|color", "videoedit|color_preset"), "videoedit|color"),
+        (("videoedit|overlay", "videoedit|text_overlay"), "videoedit|overlay"),
+        (("videoedit|overlay", "videoedit|logo"), "videoedit|overlay"),
+        (("videoedit|overlay", "videoedit|srt"), "videoedit|overlay"),
+        (("videoedit|effects",), "videoedit|workspace"),
+    ],
+)
+def test_videoedit_every_visible_nested_screen_renders_its_exact_back_without_cross_route(
+    open_callbacks: tuple[str, ...],
+    expected_back: str,
+) -> None:
+    user_id = 88250 + sum(ord(char) for char in "|".join(open_callbacks))
+    _ready_state(user_id)
+    try:
+        query = None
+        for callback in open_callbacks:
+            query = _press(user_id, callback)
+        assert query is not None
+        callbacks = _callbacks(_last_markup(query))
+        assert expected_back in callbacks
+        assert not any(
+            callback.startswith(
+                ("vproduct|", "framevideo|", "subdub|", "lvs27a|", "lvs27b|")
+            )
+            for callback in callbacks
+        )
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize(
+    (
+        "open_callbacks",
+        "choice_callbacks",
+        "plan_path",
+        "expected_value",
+        "review_fragment",
+    ),
+    [
+        (
+            ("videoedit|frame", "videoedit|aspect"),
+            ("videoedit|set|aspect|9x16", "videoedit|set|aspect_mode|crop"),
+            ("crop_or_fit", "mode"),
+            "crop",
+            "Tỉ lệ 9:16 · Cắt vừa khung",
+        ),
+        (
+            ("videoedit|frame", "videoedit|resolution"),
+            ("videoedit|set|resolution|720p",),
+            ("resolution",),
+            "720p",
+            "Độ phân giải 720p",
+        ),
+        (
+            ("videoedit|transform", "videoedit|manual_rotate_flip", "videoedit|rotation"),
+            ("videoedit|set|rotation|90",),
+            ("rotation",),
+            90,
+            "Xoay 90°",
+        ),
+        (
+            ("videoedit|transform", "videoedit|manual_rotate_flip", "videoedit|flip"),
+            ("videoedit|set|flip|horizontal",),
+            ("flip",),
+            "horizontal",
+            "Lật ngang",
+        ),
+        (
+            ("videoedit|transform", "videoedit|speed"),
+            ("videoedit|set|speed|1.5",),
+            ("speed",),
+            1.5,
+            "Tốc độ 1.5x",
+        ),
+        (
+            ("videoedit|audio", "videoedit|audio_master"),
+            ("videoedit|audio_set|60",),
+            ("volume",),
+            0.6,
+            "Âm lượng 60%",
+        ),
+        (
+            ("videoedit|color", "videoedit|brightness"),
+            ("videoedit|brightness_set|120",),
+            ("brightness_percent",),
+            120,
+            "Độ sáng 120%",
+        ),
+        (
+            ("videoedit|color", "videoedit|color_preset"),
+            ("videoedit|set|color_preset|warm",),
+            ("color_preset",),
+            "warm",
+            "Màu: Tông ấm",
+        ),
+        (
+            ("videoedit|audio",),
+            ("videoedit|audio_set|0",),
+            ("volume",),
+            0.0,
+            "Tắt tiếng",
+        ),
+    ],
+)
+def test_videoedit_direct_manual_choices_persist_and_are_visible_in_review(
+    open_callbacks: tuple[str, ...],
+    choice_callbacks: tuple[str, ...],
+    plan_path: tuple[str, ...],
+    expected_value,
+    review_fragment: str,
+) -> None:
+    user_id = 88450 + sum(ord(char) for char in "|".join(choice_callbacks))
+    _ready_state(user_id)
+    try:
+        for callback in open_callbacks:
+            _press(user_id, callback)
+        for callback in choice_callbacks:
+            _press(user_id, callback)
+
+        state = dict(bot.get_video_editor_pending(user_id) or {})
+        plan = dict(state.get("manual_edit_plan") or {})
+        assert _nested_value(plan, plan_path) == expected_value
+        assert review_fragment in "\n".join(
+            video_local_editing.public_plan_summary(
+                plan,
+                source_duration_ms=10_000,
+            )
+        )
+
+        review = _press(user_id, "videoedit|review")
+        assert review.edits
+        assert review_fragment in review.edits[-1][0]
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize(
+    ("open_callbacks", "expected_back"),
+    [
+        (("videoedit|color", "videoedit|brightness"), "videoedit|brightness"),
+        (
+            ("videoedit|transform", "videoedit|manual_rotate_flip", "videoedit|rotation"),
+            "videoedit|rotation",
+        ),
+        (
+            ("videoedit|transform", "videoedit|manual_rotate_flip", "videoedit|flip"),
+            "videoedit|flip",
+        ),
+    ],
+)
+def test_videoedit_source_info_returns_to_exact_brightness_rotate_or_flip_picker(
+    open_callbacks: tuple[str, ...],
+    expected_back: str,
+) -> None:
+    user_id = 88320 + sum(ord(char) for char in expected_back)
+    _ready_state(user_id)
+    try:
+        for callback in open_callbacks:
+            _press(user_id, callback)
+        summary = _press(user_id, "videoedit|source_info")
+        assert ("⬅️ Quay lại", expected_back) in _pairs(_last_markup(summary))
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_confirmation_source_info_back_preserves_exact_confirmation() -> None:
+    user_id = 88321
+    _ready_state(user_id)
+    try:
+        state = dict(bot.get_video_editor_pending(user_id) or {})
+        plan = dict(state.get("manual_edit_plan") or {})
+        plan["brightness_percent"] = 120
+        bot.update_video_editor_pending(user_id, manual_edit_plan=plan)
+        _press(user_id, "videoedit|review")
+        confirmation = _press(user_id, "videoedit|confirmation")
+        before = dict(bot.get_video_editor_pending(user_id) or {})
+        before_token = next(
+            callback
+            for _label, callback in _pairs(_last_markup(confirmation))
+            if callback.startswith("videoedit|confirm_local|")
+        )
+
+        source = _press(user_id, "videoedit|source_info")
+        assert dict(bot.get_video_editor_pending(user_id) or {}) == before
+        assert ("⬅️ Quay lại", "videoedit|confirmation") in _pairs(
+            _last_markup(source)
+        )
+
+        returned = _press(user_id, "videoedit|confirmation")
+        after = dict(bot.get_video_editor_pending(user_id) or {})
+        after_token = next(
+            callback
+            for _label, callback in _pairs(_last_markup(returned))
+            if callback.startswith("videoedit|confirm_local|")
+        )
+        assert after == before
+        assert after_token == before_token
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_public_vietnamese_labels_pair_with_their_exact_callbacks() -> None:
+    hub = _pairs(bot.video_edit_hub_keyboard("vi"))
+    assert ("✨ Chỉnh sửa theo mục tiêu", "videoedit|ai") in hub
+    assert ("✂️ Chỉnh sửa thủ công", "videoedit|manual") in hub
+
+    audio = _pairs(
+        bot.video_edit_audio_keyboard(
+            {
+                "source_file_id": "source",
+                "source_metadata": {"has_audio": True, "audio_stream_count": 1},
+                "manual_edit_plan": video_local_editing.default_manual_edit_plan(""),
+            },
+            "vi",
+        )
+    )
+    assert ("ℹ️ Giọng nói / đối thoại", "videoedit|audio_component|audio_dialogue") in audio
+    assert ("ℹ️ Nhạc nền", "videoedit|audio_component|audio_music") in audio
+    assert ("ℹ️ Âm thanh môi trường", "videoedit|audio_component|audio_ambience") in audio
+    assert ("ℹ️ Hiệu ứng âm thanh", "videoedit|audio_component|audio_sfx") in audio
+
+    overlay = _pairs(bot.video_local_overlay_keyboard("vi"))
+    assert ("🖼 Logo / watermark ảnh", "videoedit|logo") in overlay
+
+
+def test_videoedit_audio_component_copy_never_claims_an_unavailable_stem_control() -> None:
+    text = bot.video_edit_audio_component_text(
+        "audio_dialogue",
+        {
+            "source_metadata": {
+                "has_audio": True,
+                "audio_stream_count": 4,
+                "separate_audio_stems": True,
+                "named_audio_tracks": ["dialogue", "music", "ambience", "sfx"],
+            }
+        },
+    )
+    assert "nút thông tin" in text.lower()
+    assert "chưa mở điều khiển chỉnh riêng" in text.lower()
+    assert "có thể được chỉnh độc lập" not in text.lower()
+
+
+def test_videoedit_review_back_returns_to_the_saved_cut_parent() -> None:
+    user_id = 88302
+    _ready_state(user_id)
+    try:
+        state = dict(bot.get_video_editor_pending(user_id) or {})
+        plan = dict(state.get("manual_edit_plan") or {})
+        plan["trim"] = {"start_ms": 0, "end_ms": 9_000}
+        bot.update_video_editor_pending(user_id, manual_edit_plan=plan)
+        _press(user_id, "videoedit|manual_cut")
+        query = _press(user_id, "videoedit|review")
+        assert "videoedit|cut" in _callbacks(_last_markup(query))
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_brightness_direct_review_back_returns_to_brightness() -> None:
+    user_id = 88308
+    _ready_state(user_id)
+    try:
+        _press(user_id, "videoedit|color")
+        _press(user_id, "videoedit|brightness")
+        review = _press(user_id, "videoedit|brightness_set|120")
+        current = dict(bot.get_video_editor_pending(user_id) or {})
+        assert current["current_screen"] == "review"
+        assert current["return_to"] == "brightness"
+        review_pairs = _pairs(_last_markup(review))
+        assert ("⬅️ Quay lại", "videoedit|brightness") in review_pairs
+
+        back_callback = next(
+            callback
+            for label, callback in review_pairs
+            if label == "⬅️ Quay lại"
+        )
+        returned = _press(user_id, back_callback)
+        returned_state = dict(bot.get_video_editor_pending(user_id) or {})
+        assert (
+            "☀️ Tăng lên 120%",
+            "videoedit|brightness_set|120",
+        ) in _pairs(_last_markup(returned))
+        assert returned_state["return_to"] == "color"
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize(
+    ("open_callback", "expected_return_to", "expected_back"),
+    [
+        ("videoedit|manual_join", "join", "videoedit|join"),
+        ("videoedit|frame", "frame", "videoedit|frame"),
+        ("videoedit|transform", "transform", "videoedit|transform"),
+        ("videoedit|manual_audio", "audio", "videoedit|audio"),
+        ("videoedit|color", "color", "videoedit|color"),
+        ("videoedit|overlay", "overlay", "videoedit|overlay"),
+        ("videoedit|manual_effects", "effects", "videoedit|effects"),
+    ],
+)
+def test_videoedit_review_back_matrix_uses_the_group_that_opened_review(
+    open_callback: str,
+    expected_return_to: str,
+    expected_back: str,
+) -> None:
+    user_id = 88400 + sum(ord(char) for char in open_callback)
+    _ready_state(user_id)
+    try:
+        state = dict(bot.get_video_editor_pending(user_id) or {})
+        plan = dict(state.get("manual_edit_plan") or {})
+        plan["brightness_percent"] = 120
+        bot.update_video_editor_pending(user_id, manual_edit_plan=plan)
+
+        _press(user_id, open_callback)
+        opened = dict(bot.get_video_editor_pending(user_id) or {})
+        assert opened["return_to"] == expected_return_to
+        review = _press(user_id, "videoedit|review")
+        assert ("⬅️ Quay lại", expected_back) in _pairs(_last_markup(review))
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_split_review_back_preserves_split_state_and_ranges() -> None:
+    user_id = 88303
+    _ready_state(user_id)
+    try:
+        _press(user_id, "videoedit|split_from_manual")
+        opened = dict(bot.get_video_editor_pending(user_id) or {})
+        assert opened["return_to"] == "split"
+        assert opened["manual_edit_plan"] == video_local_editing.neutral_split_manual_plan()
+        ranges = [
+            {"index": 1, "start_ms": 0, "end_ms": 4_000},
+            {"index": 2, "start_ms": 4_000, "end_ms": 10_000},
+        ]
+        bot.update_video_editor_pending(
+            user_id,
+            "split",
+            selected_tool="split",
+            split_mode="custom",
+            split_ranges=ranges,
+            coverage_required=True,
+        )
+        review = _press(user_id, "videoedit|review")
+        assert "videoedit|split" in _callbacks(_last_markup(review))
+        _press(user_id, "videoedit|split")
+        state = dict(bot.get_video_editor_pending(user_id) or {})
+        assert state["selected_tool"] == "split"
+        assert state["split_ranges"] == ranges
+        assert state["return_to"] == "split"
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_legacy_options_split_cannot_bypass_the_explicit_reset() -> None:
+    user_id = 88333
+    _ready_state(user_id)
+    try:
+        state = dict(bot.get_video_editor_pending(user_id) or {})
+        plan = dict(state.get("manual_edit_plan") or {})
+        plan["brightness_percent"] = 130
+        bot.update_video_editor_pending(user_id, manual_edit_plan=plan)
+        before = dict(bot.get_video_editor_pending(user_id) or {})
+
+        warning = _press(user_id, "videoedit|options|split")
+        after = dict(bot.get_video_editor_pending(user_id) or {})
+
+        assert "kế hoạch chia riêng" in warning.edits[-1][0].lower()
+        assert after == before
+        reset_callback = _single_callback_starting_with(
+            _last_markup(warning),
+            "videoedit|split_reset_manual|",
+        )
+        assert (
+            "🧩 Bắt đầu kế hoạch chia riêng",
+            reset_callback,
+        ) in _pairs(_last_markup(warning))
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_stale_legacy_menu_cannot_escape_an_active_split_plan() -> None:
+    user_id = 88334
+    _ready_state(user_id)
+    try:
+        _press(user_id, "videoedit|split_from_manual")
+        ranges = [
+            {"index": 1, "start_ms": 0, "end_ms": 5_000},
+            {"index": 2, "start_ms": 5_000, "end_ms": 10_000},
+        ]
+        bot.update_video_editor_pending(
+            user_id,
+            "split",
+            current_screen="split",
+            selected_tool="split",
+            split_mode="custom",
+            split_ranges=ranges,
+        )
+        before = dict(bot.get_video_editor_pending(user_id) or {})
+
+        stale = _press(user_id, "videoedit|menu")
+
+        assert stale.answers[-1][1].get("show_alert") is True
+        assert dict(bot.get_video_editor_pending(user_id) or {}) == before
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_split_reupload_preserves_split_ownership_and_neutral_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = 88335
+    _ready_state(user_id)
+    metadata = {
+        "ok": True,
+        "duration": 10.137,
+        "duration_ms": 10_137,
+        "width": 1_280,
+        "height": 720,
+        "fps": 30.0,
+        "has_video": True,
+        "has_audio": True,
+        "audio_stream_count": 1,
+        "format_name": "mp4",
+        "bytes": 4_096,
+        "source_sha256": "a" * 64,
+    }
+
+    async def fake_inspect(_context, _source):
+        return dict(metadata)
+
+    monkeypatch.setattr(
+        bot,
+        "video_editor_source_from_update",
+        lambda _update: {
+            "source_file_id": "replacement-video",
+            "source_file_name": "replacement.mp4",
+            "source_file_size": 4_096,
+            "source_mime_type": "video/mp4",
+        },
+    )
+    monkeypatch.setattr(bot, "inspect_video_editor_source", fake_inspect)
+    monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
+    try:
+        _press(user_id, "videoedit|split_from_manual")
+        _press(user_id, "videoedit|upload|split")
+        intake = dict(bot.get_video_editor_pending(user_id) or {})
+        assert intake["edit_mode"] == "manual_edit"
+        assert intake["selected_tool"] == "split"
+        assert intake["entry_context"] == "split"
+        assert intake["manual_edit_plan"] == video_local_editing.neutral_split_manual_plan()
+
+        upload_message = _Message()
+        upload_message.message_id = 7_101
+        update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=user_id),
+            message=upload_message,
+            callback_query=None,
+        )
+        assert asyncio.run(
+            bot.handle_video_editor_pending_upload(update, SimpleNamespace())
+        ) is True
+
+        current = dict(bot.get_video_editor_pending(user_id) or {})
+        assert current["source_file_id"] == "replacement-video"
+        assert current["selected_tool"] == "split"
+        assert current["current_screen"] == "split"
+        assert current["manual_edit_plan"] == video_local_editing.neutral_split_manual_plan()
+        assert current["split_ranges"] == []
+        assert "videoedit|split_fixed" in _callbacks(
+            upload_message.replies[-1][1]["reply_markup"]
+        )
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_visible_split_back_exits_cleanly_without_mixing_manual_state() -> None:
+    user_id = 88331
+    _ready_state(user_id)
+    try:
+        ranges = [
+            {"index": 1, "start_ms": 0, "end_ms": 5_000},
+            {"index": 2, "start_ms": 5_000, "end_ms": 10_000},
+        ]
+        bot.update_video_editor_pending(
+            user_id,
+            "split",
+            current_screen="split",
+            parent_callback="videoedit|cut",
+            selected_tool="split",
+            split_mode="custom_ranges",
+            split_ranges=ranges,
+            split_part_count=2,
+            coverage_required=True,
+        )
+
+        query = _press(user_id, "videoedit|manual_cut")
+        state = dict(bot.get_video_editor_pending(user_id) or {})
+
+        assert not query.answers or not query.answers[-1][1].get("show_alert")
+        assert state["current_screen"] == "cut"
+        assert state["selected_tool"] == "manual"
+        assert state["split_ranges"] == []
+        assert state["split_mode"] == ""
+        assert state["split_part_count"] == 0
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_audio_reupload_opens_a_fresh_audio_intake() -> None:
+    user_id = 88304
+    _ready_state(user_id)
+    try:
+        state = dict(bot.get_video_editor_pending(user_id) or {})
+        metadata = dict(state.get("source_metadata") or {})
+        metadata.update({"has_audio": False, "audio_stream_count": 0})
+        stale_plan = dict(state.get("manual_edit_plan") or {})
+        stale_plan["brightness_percent"] = 135
+        bot.update_video_editor_pending(
+            user_id,
+            source_metadata=metadata,
+            manual_edit_plan=stale_plan,
+            concat_sources=[{"file_id": "old-concat"}],
+            logo_source={"file_id": "old-logo"},
+            subtitle_source={"file_id": "old-srt"},
+            split_ranges=[{"index": 1, "start_ms": 0, "end_ms": 10_000}],
+            state_revision=9,
+        )
+        _press(user_id, "videoedit|manual_audio")
+        query = _press(user_id, "videoedit|audio_upload")
+        current = dict(bot.get_video_editor_pending(user_id) or {})
+        assert "Gửi video" in query.edits[-1][0]
+        assert current["awaiting_media"] is True
+        assert current["source_file_id"] is None
+        assert current["requested_group"] == "audio"
+        assert current["current_screen"] == "manual_edit_upload"
+        assert current["return_to"] == "videoedit|hub"
+        assert current["state_revision"] == 1
+        assert not current.get("manual_edit_plan")
+        assert not current.get("concat_sources")
+        assert not current.get("logo_source")
+        assert not current.get("subtitle_source")
+        assert not current.get("split_ranges")
+        assert ("⬅️ Quay lại", "videoedit|hub") in _pairs(_last_markup(query))
+        fresh_snapshot = dict(current)
+        stale = _press(user_id, "videoedit|audio_upload")
+        assert stale.answers[-1][1].get("show_alert") is True
+        assert dict(bot.get_video_editor_pending(user_id) or {}) == fresh_snapshot
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_manual_to_split_requires_an_explicit_destructive_reset() -> None:
+    user_id = 88305
+    _ready_state(user_id)
+    try:
+        state = dict(bot.get_video_editor_pending(user_id) or {})
+        plan = dict(state.get("manual_edit_plan") or {})
+        plan["brightness_percent"] = 130
+        bot.update_video_editor_pending(
+            user_id,
+            manual_edit_plan=plan,
+            concat_sources=[{"file_id": "concat"}],
+            logo_source={"file_id": "logo"},
+            subtitle_source={"file_id": "srt"},
+        )
+        before_warning = dict(bot.get_video_editor_pending(user_id) or {})
+
+        warning = _press(user_id, "videoedit|split_from_manual")
+        warned_state = dict(bot.get_video_editor_pending(user_id) or {})
+        assert "kế hoạch chia riêng" in warning.edits[-1][0].lower()
+        reset_callback = _single_callback_starting_with(
+            _last_markup(warning),
+            "videoedit|split_reset_manual|",
+        )
+        assert (
+            "🧩 Bắt đầu kế hoạch chia riêng",
+            reset_callback,
+        ) in _pairs(_last_markup(warning))
+        for key in (
+            "manual_edit_plan",
+            "concat_sources",
+            "logo_source",
+            "subtitle_source",
+            "source_file_id",
+            "source_metadata",
+            "edit_session_id",
+            "state_revision",
+        ):
+            assert warned_state[key] == before_warning[key]
+        assert warned_state["selected_tool"] == "manual"
+
+        _press(user_id, reset_callback)
+        reset_state = dict(bot.get_video_editor_pending(user_id) or {})
+        assert reset_state["selected_tool"] == "split"
+        assert reset_state["return_to"] == "split"
+        assert reset_state["current_screen"] == "split"
+        assert reset_state["parent_callback"] == "videoedit|cut"
+        assert reset_state["source_file_id"] == before_warning["source_file_id"]
+        assert reset_state["source_metadata"] == before_warning["source_metadata"]
+        assert reset_state["edit_session_id"] == before_warning["edit_session_id"]
+        assert video_local_editing.plan_has_effective_operation(
+            reset_state["manual_edit_plan"], source_duration_ms=10_000
+        ) is False
+        assert reset_state["manual_edit_plan"]["trim"] == {
+            "start_ms": 0,
+            "end_ms": 0,
+        }
+        assert reset_state["concat_sources"] == []
+        assert reset_state["logo_source"] == {}
+        assert reset_state["subtitle_source"] == {}
+        assert reset_state["split_ranges"] == []
+        assert not reset_state.get("pending_field")
+        reset_snapshot = dict(reset_state)
+        duplicate = _press(user_id, reset_callback)
+        assert duplicate.answers[-1][1].get("show_alert") is True
+        assert dict(bot.get_video_editor_pending(user_id) or {}) == reset_snapshot
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize("replacement", ["deleted", "new_session"])
+def test_videoedit_split_reset_never_resurrects_or_overwrites_changed_state(
+    replacement: str,
+) -> None:
+    user_id = 88308
+    _ready_state(user_id)
+    try:
+        original = dict(bot.get_video_editor_pending(user_id) or {})
+        plan = dict(original.get("manual_edit_plan") or {})
+        plan["brightness_percent"] = 130
+        bot.update_video_editor_pending(user_id, manual_edit_plan=plan)
+        warning = _press(user_id, "videoedit|split_from_manual")
+        reset_callback = _single_callback_starting_with(
+            _last_markup(warning),
+            "videoedit|split_reset_manual|",
+        )
+
+        def change_state() -> None:
+            bot.clear_video_editor_pending(user_id)
+            if replacement == "new_session":
+                bot.start_video_edit_lane_state(
+                    user_id,
+                    "manual_edit",
+                    edit_session_id="replacement-session",
+                )
+
+        query = _StateChangingQuery(
+            user_id,
+            reset_callback,
+            change_state,
+        )
+        asyncio.run(
+            bot.handle_video_editor_callback(
+                SimpleNamespace(callback_query=query),
+                SimpleNamespace(),
+            )
+        )
+
+        current = dict(bot.get_video_editor_pending(user_id) or {})
+        if replacement == "deleted":
+            assert current == {}
+            assert query.edits[-1][0] == bot.video_edit_hub_text("vi")
+        else:
+            assert current["edit_session_id"] == "replacement-session"
+            assert current["selected_tool"] == "manual"
+            assert current["current_screen"] == "manual_edit_upload"
+            assert current["awaiting_media"] is True
+            assert current["source_file_id"] is None
+            assert query.edits[-1][0] == bot.video_edit_lane_upload_text(
+                "manual_edit", "vi"
+            )
+        assert query.answers[-1][1].get("show_alert") is True
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize("action", ["review", "confirmation"])
+def test_videoedit_post_render_commit_uses_full_state_cas_and_rerenders_current_state(
+    action: str,
+) -> None:
+    user_id = 88330 + len(action)
+    _ready_state(user_id)
+    try:
+        state = dict(bot.get_video_editor_pending(user_id) or {})
+        plan = dict(state.get("manual_edit_plan") or {})
+        plan["brightness_percent"] = 120
+        bot.update_video_editor_pending(user_id, manual_edit_plan=plan)
+        if action == "confirmation":
+            _press(user_id, "videoedit|review")
+
+        replacement: dict = {}
+
+        def change_state() -> None:
+            _ready_state(user_id)
+            replacement_plan = dict(
+                (bot.get_video_editor_pending(user_id) or {}).get("manual_edit_plan")
+                or {}
+            )
+            replacement_plan["color_preset"] = "warm"
+            replacement.update(
+                bot.update_video_editor_pending(
+                    user_id,
+                    "options",
+                    current_screen="workspace",
+                    edit_session_id="replacement-session",
+                    session_id="replacement-session",
+                    state_revision=77,
+                    revision=81,
+                    manual_edit_plan=replacement_plan,
+                )
+            )
+
+        query = _StateChangingQuery(
+            user_id,
+            f"videoedit|{action}",
+            change_state,
+        )
+        asyncio.run(
+            bot.handle_video_editor_callback(
+                SimpleNamespace(callback_query=query),
+                SimpleNamespace(),
+            )
+        )
+
+        assert dict(bot.get_video_editor_pending(user_id) or {}) == replacement
+        assert query.edits[-1][0] == bot.video_local_manual_options_text(
+            replacement, "vi"
+        )
+        assert query.answers[-1][1].get("show_alert") is True
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize(
+    ("state_patch", "expected_callback"),
+    [
+        ({"current_screen": "frame"}, "videoedit|aspect"),
+        ({"current_screen": "transform"}, "videoedit|speed"),
+        ({"current_screen": "color"}, "videoedit|brightness"),
+        ({"current_screen": "overlay"}, "videoedit|text_overlay"),
+        ({"current_screen": "cut"}, "videoedit|trim_edges"),
+        ({"current_screen": "join"}, "videoedit|concat"),
+        ({"current_screen": "audio"}, "videoedit|audio_component|audio_dialogue"),
+        (
+            {"current_screen": "ai_edit", "edit_mode": "ai_edit"},
+            "videoedit|ai_intent",
+        ),
+        (
+            {
+                "current_screen": "quality_enhance",
+                "edit_mode": "quality_enhance",
+            },
+            "videoedit|restore_limits",
+        ),
+        (
+            {
+                "current_screen": "trim_input",
+                "step": "await_trim_edges",
+                "pending_field": "trim_edges",
+            },
+            "videoedit|trim_edges",
+        ),
+    ],
+)
+def test_videoedit_stale_renderer_uses_the_exact_winning_screen(
+    state_patch: dict,
+    expected_callback: str,
+) -> None:
+    user_id = 88345 + sum(ord(char) for char in expected_callback)
+    _ready_state(user_id)
+    try:
+        state = dict(bot.get_video_editor_pending(user_id) or {})
+        state.update(state_patch)
+        _text, markup, _parse_mode = bot.video_editor_current_render_model(
+            state, "vi"
+        )
+        assert expected_callback in _callbacks(markup)
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize(
+    "callback",
+    [
+        "videoedit|frame",
+        "videoedit|aspect",
+        "videoedit|resolution",
+        "videoedit|rotation",
+        "videoedit|flip",
+        "videoedit|speed",
+        "videoedit|volume",
+        "videoedit|color_preset",
+        "videoedit|set|speed|2",
+        "videoedit|brightness_set|120",
+        "videoedit|options|manual",
+        "videoedit|manual_done",
+        "videoedit|trim_edges",
+        "videoedit|trim_range",
+        "videoedit|remove_middle",
+    ],
+)
+def test_videoedit_stale_manual_callbacks_cannot_mutate_split_owned_state(
+    callback: str,
+) -> None:
+    user_id = 88350 + sum(ord(char) for char in callback)
+    _ready_state(user_id)
+    try:
+        ranges = [
+            {"index": 1, "start_ms": 0, "end_ms": 5_000},
+            {"index": 2, "start_ms": 5_000, "end_ms": 10_000},
+        ]
+        before = bot.update_video_editor_pending(
+            user_id,
+            "split",
+            current_screen="split",
+            parent_callback="videoedit|cut",
+            selected_tool="split",
+            split_mode="custom_ranges",
+            split_ranges=ranges,
+            manual_edit_plan={},
+        )
+
+        query = _press(user_id, callback)
+
+        assert dict(bot.get_video_editor_pending(user_id) or {}) == before
+        assert query.answers[-1][1].get("show_alert") is True
+        assert "đã cũ" in str(query.answers[-1][0][0]).lower()
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_public_review_copy_is_fully_vietnamese_and_callbacks_stay_stable() -> None:
+    tail = {
+        "video_product_type": bot.video_editengine1.PRODUCT_TYPE,
+        "content_source": "manual",
+        "scene_count": 1,
+        "estimated_duration": 5,
+        "ratio": "16:9",
+        "audio_status": "skipped",
+    }
+    text = bot.video_tail9_video_edit_review_text(
+        tail,
+        {
+            "source_duration": 5,
+            "source_metadata": {"duration": 5, "has_audio": True},
+            "manual_edit_plan": {"brightness_percent": 120},
+        },
+    )
+    review_pairs = _pairs(bot.video_tail9_video_edit_review_keyboard())
+    summary_text = bot.video_tail9_summary_text(tail)
+    summary_pairs = _pairs(bot.video_tail9_summary_keyboard(tail))
+    recovery_text = bot.video_idea_prompt_owner_recovery_text({})
+    recovery_pairs = _pairs(bot.video_idea_prompt_owner_recovery_keyboard())
+    public_copy = "\n".join(
+        [
+            text,
+            summary_text,
+            recovery_text,
+            *(
+                label
+                for label, _callback in review_pairs + summary_pairs + recovery_pairs
+            ),
+        ]
+    )
+
+    for forbidden in (
+        "Review chỉnh sửa video",
+        "Quay lại Review",
+        "Logo/Watermark",
+        "Âm thanh & Add-on",
+        "Âm thanh/Add-on",
+        "Engine",
+        "Prompt video",
+        "owner",
+    ):
+        assert forbidden not in public_copy
+    assert ("🖼️ Logo và watermark", "videoedit|overlay") in review_pairs
+    assert ("➡️ Âm thanh và bổ sung", "videoedit|audio") in review_pairs
+    assert ("🖼️ Sửa logo và watermark", "videoedit|overlay") in summary_pairs
+    assert ("⬅️ Quay lại", "video_tail|review|open") in recovery_pairs
+
+
+def test_videoedit_logo_upload_and_source_info_return_to_existing_logo_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = 88306
+    _ready_state(user_id)
+    try:
+        _press(user_id, "videoedit|overlay")
+        _press(user_id, "videoedit|logo")
+        monkeypatch.setattr(
+            bot,
+            "video_editor_aux_source_from_update",
+            lambda _update, _kind: {
+                "file_id": "logo-image",
+                "file_name": "logo.png",
+                "mime_type": "image/png",
+                "file_size": 4_096,
+            },
+        )
+        upload_message = _Message()
+        upload_message.message_id = 7_001
+        upload = SimpleNamespace(
+            effective_user=SimpleNamespace(id=user_id),
+            message=upload_message,
+            callback_query=None,
+        )
+        assert asyncio.run(
+            bot.handle_video_editor_pending_upload(upload, SimpleNamespace())
+        ) is True
+        uploaded = dict(bot.get_video_editor_pending(user_id) or {})
+        assert uploaded["current_screen"] == "logo_options"
+        assert uploaded["parent_callback"] == "videoedit|overlay"
+        assert not uploaded.get("pending_field")
+        assert uploaded["logo_source"]["file_id"] == "logo-image"
+
+        summary = _press(user_id, "videoedit|source_summary")
+        assert ("⬅️ Quay lại", "videoedit|logo_options") in _pairs(
+            _last_markup(summary)
+        )
+        options = _press(user_id, "videoedit|logo_options")
+        option_callbacks = _callbacks(_last_markup(options))
+        assert "videoedit|set|logo_position|top_left" in option_callbacks
+        assert "videoedit|set|logo_opacity|0.75" in option_callbacks
+        assert not any("logo_scale" in callback for callback in option_callbacks)
+        _press(user_id, "videoedit|set|logo_position|bottom_left")
+        _press(user_id, "videoedit|set|logo_opacity|0.75")
+        changed = dict(bot.get_video_editor_pending(user_id) or {})
+        assert changed["current_screen"] == "logo_options"
+        assert changed["manual_edit_plan"]["logo_overlay"]["position"] == "bottom_left"
+        assert changed["manual_edit_plan"]["logo_overlay"]["opacity"] == 0.75
+
+        review = _press(user_id, "videoedit|review")
+        review_text = review.edits[-1][0]
+        assert "Logo / watermark" in review_text
+        assert "Dưới trái" in review_text
+        assert "75%" in review_text
+        _press(user_id, "videoedit|overlay")
+        stale = _press(user_id, "videoedit|set|logo_position|top_right")
+        assert stale.answers[-1][1].get("show_alert") is True
+        final_state = dict(bot.get_video_editor_pending(user_id) or {})
+        assert final_state["manual_edit_plan"]["logo_overlay"]["position"] == "bottom_left"
+        assert final_state["manual_edit_plan"]["logo_overlay"]["opacity"] == 0.75
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_concat_upload_is_immediately_bound_to_the_manual_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = 88336
+    _ready_state(user_id)
+
+    async def fake_inspect(_context, _source):
+        return {
+            "ok": True,
+            "duration": 5.0,
+            "duration_ms": 5_000,
+            "width": 640,
+            "height": 360,
+            "fps": 30.0,
+            "has_video": True,
+            "has_audio": True,
+            "audio_stream_count": 1,
+            "format_name": "mp4",
+            "bytes": 4_096,
+            "source_sha256": "b" * 64,
+        }
+
+    monkeypatch.setattr(
+        bot,
+        "video_editor_source_from_update",
+        lambda _update: {
+            "source_file_id": "concat-video",
+            "source_file_name": "concat.mp4",
+            "source_file_size": 4_096,
+            "source_mime_type": "video/mp4",
+        },
+    )
+    monkeypatch.setattr(bot, "inspect_video_editor_source", fake_inspect)
+    monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
+    try:
+        _press(user_id, "videoedit|manual_join")
+        _press(user_id, "videoedit|concat")
+        upload_message = _Message()
+        upload_message.message_id = 7_201
+        upload = SimpleNamespace(
+            effective_user=SimpleNamespace(id=user_id),
+            message=upload_message,
+            callback_query=None,
+        )
+
+        assert asyncio.run(
+            bot.handle_video_editor_pending_upload(upload, SimpleNamespace())
+        ) is True
+        uploaded = dict(bot.get_video_editor_pending(user_id) or {})
+        assert [item["file_id"] for item in uploaded["concat_sources"]] == [
+            "concat-video"
+        ]
+        assert uploaded["manual_edit_plan"]["concat_inputs"] == ["video_1"]
+
+        _press(user_id, "videoedit|manual_join")
+        review = _press(user_id, "videoedit|review")
+        reviewed = dict(bot.get_video_editor_pending(user_id) or {})
+        assert reviewed["current_screen"] == "review"
+        assert "Ghép 2 video" in review.edits[-1][0]
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_confirmation_uses_nested_concat_metadata_and_split_audio_truth() -> None:
+    manual = video_local_editing.default_manual_edit_plan("")
+    manual["trim"] = {"start_ms": 0, "end_ms": 10_000}
+    text = bot.video_local_confirmation_text(
+        {
+            "selected_tool": "manual",
+            "source_file_name": "source.mp4",
+            "source_duration_ms": 10_000,
+            "source_metadata": {"duration_ms": 10_000, "has_audio": True},
+            "manual_edit_plan": manual,
+            "concat_sources": [{"metadata": {"duration_ms": 5_000}}],
+        },
+        "vi",
+        stage="review",
+    )
+    assert "0:15" in text
+
+    manual["volume"] = 0.0
+    manual["audio_normalization"] = "loudnorm"
+    split = bot.video_local_confirmation_text(
+        {
+            "selected_tool": "split",
+            "source_file_name": "source.mp4",
+            "source_metadata": {"duration_ms": 10_000, "has_audio": True},
+            "manual_edit_plan": manual,
+            "split_ranges": [
+                {"index": 1, "start_ms": 0, "end_ms": 5_000},
+                {"index": 2, "start_ms": 5_000, "end_ms": 10_000},
+            ],
+        },
+        "vi",
+        stage="review",
+    )
+    assert "Giữ âm thanh nguồn trong từng phần" in split
+    assert "Tắt tiếng đầu ra" not in split
+
+
+def test_videoedit_mute_clears_loudnorm_and_loudnorm_is_blocked_while_muted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = 88307
+    _ready_state(user_id)
+    monkeypatch.setattr(
+        bot,
+        "video_edit_runtime_capability_admission",
+        lambda *_args, **_kwargs: {"ready": True, "reason": "ok"},
+    )
+    try:
+        state = dict(bot.get_video_editor_pending(user_id) or {})
+        plan = dict(state.get("manual_edit_plan") or {})
+        plan["audio_normalization"] = "loudnorm"
+        bot.update_video_editor_pending(user_id, manual_edit_plan=plan)
+
+        _press(user_id, "videoedit|audio_set|0")
+        muted = dict(bot.get_video_editor_pending(user_id) or {})
+        assert muted["manual_edit_plan"]["volume"] == 0.0
+        assert muted["manual_edit_plan"]["audio_normalization"] == "off"
+
+        blocked = _press(user_id, "videoedit|audio_loudnorm")
+        after = dict(bot.get_video_editor_pending(user_id) or {})
+        assert blocked.answers[-1][1].get("show_alert") is True
+        assert "tắt tiếng" in str(blocked.answers[-1][0][0]).lower()
+        assert after["manual_edit_plan"]["audio_normalization"] == "off"
     finally:
         bot.clear_video_editor_pending(user_id)

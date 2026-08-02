@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Mapping
 
+from . import video_local_editing
+
 
 EDIT_MODES = frozenset({"manual_edit", "ai_edit", "quality_enhance"})
 
@@ -36,6 +38,7 @@ _SCREEN_PARENTS = {
     "reorder_input": "videoedit|join",
     "frame": "videoedit|workspace",
     "transform": "videoedit|workspace",
+    "brightness": "videoedit|color",
     "rotation_value": "videoedit|transform",
     "audio": "videoedit|workspace",
     "audio_input": "videoedit|audio",
@@ -43,9 +46,15 @@ _SCREEN_PARENTS = {
     "overlay": "videoedit|workspace",
     "text_input": "videoedit|overlay",
     "logo_input": "videoedit|overlay",
+    "logo_options": "videoedit|overlay",
     "srt_input": "videoedit|overlay",
     "effects": "videoedit|workspace",
     "effect_detail": "videoedit|effects",
+    "ai_source_summary": "videoedit|ai",
+    "ai_suggestions": "videoedit|ai_source",
+    "ai_settings": "videoedit|ai_suggestions",
+    "ai_prompt": "videoedit|ai_settings",
+    "quality_enhance": "videoedit|restore",
     "source_info": "videoedit|workspace",
     "review": "videoedit|workspace",
     "confirmation": "videoedit|review",
@@ -58,10 +67,17 @@ _SCREEN_CALLBACKS = {
     "join": "videoedit|join",
     "frame": "videoedit|frame",
     "transform": "videoedit|transform",
+    "brightness": "videoedit|brightness",
     "audio": "videoedit|audio",
     "color": "videoedit|color",
     "overlay": "videoedit|overlay",
+    "logo_options": "videoedit|logo_options",
     "effects": "videoedit|effects",
+    "ai_source_summary": "videoedit|ai_source",
+    "ai_suggestions": "videoedit|ai_suggestions",
+    "ai_settings": "videoedit|ai_settings",
+    "ai_prompt": "videoedit|ai_prompt",
+    "quality_enhance": "videoedit|quality_source",
     "source_info": "videoedit|source_info",
     "review": "videoedit|review",
     "confirmation": "videoedit|confirmation",
@@ -79,6 +95,8 @@ _PENDING_RESUME_CALLBACKS = {
     "text_overlay": "videoedit|text_overlay",
     "logo": "videoedit|logo",
     "srt": "videoedit|srt",
+    "rotation": "videoedit|rotation",
+    "flip": "videoedit|flip",
 }
 
 _SCREEN_RESUME_CALLBACKS = {
@@ -112,7 +130,7 @@ _COMPATIBILITY_ACTIONS = {
     "split_info": "split_from_manual",
     "ai_info": "ai",
     "audio": "manual_audio",
-    "audio_upload": "manual",
+    "audio_upload": "audio_reupload",
     "timeline": "manual_join",
     "effects": "manual_effects",
     "plan": "review",
@@ -182,6 +200,33 @@ _REQUESTED_GROUP_SCREENS = {
     "review": "review",
 }
 
+_REVIEW_BACK_CALLBACKS = {
+    "brightness": "videoedit|brightness",
+    "frame": "videoedit|frame",
+    "transform": "videoedit|transform",
+    "color": "videoedit|color",
+    "cut": "videoedit|cut",
+    "join": "videoedit|join",
+    "audio": "videoedit|audio",
+    "overlay": "videoedit|overlay",
+    "effects": "videoedit|effects",
+    "split": "videoedit|split",
+    "ai_prompt": "videoedit|ai_prompt",
+    "ai_suggestions": "videoedit|ai_suggestions",
+    "ai_settings": "videoedit|ai_settings",
+    "ai_source_summary": "videoedit|ai_source",
+    "quality_enhance": "videoedit|quality_source",
+    "options": "videoedit|workspace",
+    "workspace": "videoedit|workspace",
+    # Compatibility for review states saved by the previous manual callbacks.
+    "manual_cut": "videoedit|cut",
+    "manual_join": "videoedit|join",
+    "manual_audio": "videoedit|audio",
+    "manual_effects": "videoedit|effects",
+    "manual_rotate_flip": "videoedit|transform",
+    "speed": "videoedit|transform",
+}
+
 
 def normalize_edit_mode(value: Any) -> str:
     mode = str(value or "").strip().lower()
@@ -247,6 +292,15 @@ def screen_callback(screen: Any) -> str:
     return _SCREEN_CALLBACKS.get(str(screen or "").strip().lower(), "videoedit|workspace")
 
 
+def review_back_callback(state: Mapping[str, Any] | None) -> str:
+    """Return the exact canonical screen that opened a review."""
+
+    return_to = str((state or {}).get("return_to") or "").strip().lower()
+    if return_to.startswith("videoedit|"):
+        return_to = return_to.split("|", 1)[1]
+    return _REVIEW_BACK_CALLBACKS.get(return_to, "videoedit|workspace")
+
+
 def resume_callback(screen: Any, pending_field: Any = "") -> str:
     """Return the exact callback that can reconstruct an interrupted input."""
 
@@ -299,6 +353,7 @@ def is_active_intake(state: Mapping[str, Any] | None) -> bool:
         normalize_edit_mode(current.get("edit_mode"))
         and current.get("step") == "await_edit_video"
         and current.get("awaiting_media") is True
+        and current.get("intake_in_progress") is not True
         and not current.get("source_file_id")
     )
 
@@ -355,7 +410,18 @@ def complete_intake(
     source_file_id = str((source or {}).get("source_file_id") or "").strip()
     if not mode or not source_file_id:
         raise ValueError("invalid_video_edit_completion")
+    try:
+        state_revision = max(0, int(current.get("state_revision") or 0))
+    except (TypeError, ValueError, OverflowError):
+        state_revision = 0
+    try:
+        revision = max(0, int(current.get("revision") or 0))
+    except (TypeError, ValueError, OverflowError):
+        revision = 0
     current.update(dict(source or {}))
+    source_duration_ms = max(0, int((metadata or {}).get("duration_ms") or 0))
+    manual_edit_plan = video_local_editing.default_manual_edit_plan("")
+    manual_edit_plan["trim"] = {"start_ms": 0, "end_ms": source_duration_ms}
     current.update({
         "step": _READY_SCREENS[mode],
         "edit_mode": mode,
@@ -364,8 +430,14 @@ def complete_intake(
         "awaiting_media": False,
         "intake_in_progress": False,
         "source_file_id": source_file_id,
+        "source_video_id": source_file_id,
+        "source_has_audio": bool((metadata or {}).get("has_audio")),
         "source_metadata": dict(metadata or {}),
+        "manual_edit_plan": manual_edit_plan,
         "inspection_complete": True,
+        "status": "source_ready",
+        "state_revision": state_revision + 1,
+        "revision": revision + 1,
         "probe_count": int(current.get("probe_count") or 0) + 1,
         "last_error": "",
     })

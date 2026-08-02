@@ -118,6 +118,47 @@ def _strict_nonnegative_int(value: Any, *, reason: str) -> int:
     return parsed
 
 
+def valid_local_free_rights_confirmation(
+    value: Any,
+    *,
+    user_id: Any,
+    expected_review_revision: Any,
+) -> bool:
+    """Validate the durable evidence produced by the final confirm edge."""
+
+    if not isinstance(value, dict):
+        return False
+    expected_keys = {
+        "confirmed",
+        "policy",
+        "user_id",
+        "review_revision",
+        "confirmed_at_unix",
+    }
+    if set(value) != expected_keys:
+        return False
+    review_revision = value.get("review_revision")
+    confirmed_at = value.get("confirmed_at_unix")
+    expected_revision_valid = bool(
+        isinstance(expected_review_revision, int)
+        and not isinstance(expected_review_revision, bool)
+        and expected_review_revision > 0
+    )
+    return bool(
+        value.get("confirmed") is True
+        and str(value.get("policy") or "") == "video_edit_rights_v1"
+        and str(value.get("user_id") or "") == str(user_id or "")
+        and isinstance(review_revision, int)
+        and not isinstance(review_revision, bool)
+        and review_revision > 0
+        and expected_revision_valid
+        and review_revision == expected_review_revision
+        and isinstance(confirmed_at, int)
+        and not isinstance(confirmed_at, bool)
+        and confirmed_at > 0
+    )
+
+
 def _telegram_message_id(value: Any) -> str:
     """Return one canonical positive Telegram message ID or an empty token."""
 
@@ -531,12 +572,26 @@ def preflight(state: dict, runtime: dict) -> dict[str, Any]:
             source_width=source_width,
             source_height=source_height,
             logo_source_present=bool(current.get("logo_source")),
+            concat_sources_present=bool(current.get("concat_sources")),
         )
         required_filters = set(contract.get("required_filters") or [])
-        if (
+        split_selected = bool(
             str(current.get("selected_tool") or "").strip().lower() == "split"
             and current.get("split_ranges")
-        ):
+        )
+        split_conflict = bool(
+            split_selected
+            and video_local_editing.split_plan_has_manual_conflict(
+                plan,
+                source_duration_ms=source_duration_ms,
+                concat_sources=current.get("concat_sources") or [],
+                logo_source=current.get("logo_source") or {},
+                subtitle_source=current.get("subtitle_source") or {},
+            )
+        )
+        if split_conflict:
+            plan_error = "local_free_split_manual_conflict"
+        elif split_selected:
             try:
                 from services.video_smart_splitter import SplitRange
 
@@ -568,7 +623,7 @@ def preflight(state: dict, runtime: dict) -> dict[str, Any]:
             # canonical local lane carries an explicit plan and is gated by
             # the complete worker filter snapshot below.
             required_filters = set()
-        if str(current.get("selected_tool") or "").strip().lower() == "split" and current.get("split_ranges"):
+        if split_selected:
             required_filters.update({"format", "scale", "setsar"})
         checks["operation"] = bool(
             str(current.get("selected_tool") or "").strip()
@@ -740,6 +795,17 @@ def create_job(
         else:
             worker_payload["local1_mode"] = str(paid_mode).strip().lower()
     submitted_plan = worker_payload.get("manual_edit_plan", _MISSING)
+    identity_mode = str(worker_payload.get("local1_mode") or "").strip().lower()
+    if normalized_price == 0 and identity_mode == "split":
+        from services import video_local_editing
+
+        if not video_local_editing.split_plan_has_manual_conflict(plan):
+            plan = video_local_editing.neutral_split_manual_plan()
+        if (
+            isinstance(submitted_plan, dict)
+            and not video_local_editing.split_plan_has_manual_conflict(submitted_plan)
+        ):
+            submitted_plan = video_local_editing.neutral_split_manual_plan()
     if submitted_plan is not _MISSING:
         if not isinstance(submitted_plan, dict):
             raise ValueError("worker_payload_identity_mismatch:manual_edit_plan")
@@ -829,6 +895,14 @@ def create_job(
         mode = str(worker_payload.get("local1_mode") or "").strip().lower()
         if mode not in {"manual", "split"}:
             raise ValueError("local_free_mode_invalid")
+        if not valid_local_free_rights_confirmation(
+            worker_payload.get("rights_confirmation"),
+            user_id=user_id,
+            expected_review_revision=worker_payload.get("state_revision"),
+        ):
+            raise ValueError("local_free_rights_confirmation_invalid")
+        from services import video_local_editing
+
         try:
             source_duration_ms = int(
                 dict(source_metadata or {}).get("duration_ms")
@@ -837,8 +911,6 @@ def create_job(
         except (TypeError, ValueError, OverflowError):
             source_duration_ms = 0
         if mode == "manual":
-            from services import video_local_editing
-
             if "source" in plan:
                 raise ValueError("local_free_legacy_plan_invalid")
 
@@ -857,6 +929,13 @@ def create_job(
                 or (raw_subtitle_source and not str(raw_subtitle_source.get("file_id") or "").strip())
             ):
                 raise ValueError("local_free_asset_contract_invalid")
+            if not video_local_editing.manual_plan_assets_match(
+                plan,
+                concat_sources=raw_concat_sources,
+                logo_source=raw_logo_source,
+                subtitle_source=raw_subtitle_source,
+            ):
+                raise ValueError("local_free_asset_contract_invalid")
             asset_operation = bool(
                 raw_concat_sources
                 or raw_logo_source.get("file_id")
@@ -870,6 +949,7 @@ def create_job(
                 source_width=int(dict(source_metadata or {}).get("width") or 0),
                 source_height=int(dict(source_metadata or {}).get("height") or 0),
                 logo_source_present=bool(raw_logo_source.get("file_id")),
+                concat_sources_present=bool(raw_concat_sources),
             )
             if not contract.get("ok"):
                 contract_reason = str(contract.get("reason") or "edit_plan_invalid")
@@ -882,6 +962,14 @@ def create_job(
             ):
                 raise ValueError("local_free_edit_operation_missing")
         else:
+            if video_local_editing.split_plan_has_manual_conflict(
+                plan,
+                source_duration_ms=source_duration_ms,
+                concat_sources=worker_payload.get("concat_sources") or [],
+                logo_source=worker_payload.get("logo_source") or {},
+                subtitle_source=worker_payload.get("subtitle_source") or {},
+            ):
+                raise ValueError("local_free_split_manual_conflict")
             try:
                 from services.video_local_editing import validate_split_ranges
                 from services.video_smart_splitter import SplitRange
@@ -1259,8 +1347,9 @@ def create_job(
     }
 
 
-def get_job_by_worker_id(conn, worker_job_id: Any) -> dict[str, Any]:
-    ensure_schema(conn)
+def get_job_by_worker_id_readonly(conn, worker_job_id: Any) -> dict[str, Any]:
+    """Read one canonical Video Edit receipt without performing schema writes."""
+
     row = conn.execute(
         """SELECT id,idempotency_key,user_id,chat_id,product_type,worker_job_type,engine_route,
                   worker_owner,status,edit_session_id,quality_tier_id,price_xu,local_worker_job_id,
@@ -1285,6 +1374,11 @@ def get_job_by_worker_id(conn, worker_job_id: Any) -> dict[str, Any]:
     result["artifact_receipts"] = _load(result.pop("artifact_receipts_json"), [])
     result["tail"] = _load(result.pop("tail_json"), {})
     return result
+
+
+def get_job_by_worker_id(conn, worker_job_id: Any) -> dict[str, Any]:
+    ensure_schema(conn)
+    return get_job_by_worker_id_readonly(conn, worker_job_id)
 
 
 def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail: dict, receipt: dict) -> dict[str, Any]:

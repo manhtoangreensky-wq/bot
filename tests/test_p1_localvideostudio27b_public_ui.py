@@ -23,6 +23,8 @@ PREFIX = 'lvs27b'
 STATE_KEY = 'local_video_studio27b_public'
 ENTRY_LABEL = '🧭 Lập kế hoạch dựng video'
 ENTRY_CALLBACK = 'lvs27b|open'
+STATUS_LABEL = '📊 Trạng thái chỉnh sửa'
+STATUS_CALLBACK = 'videoedit|latest_status'
 PUBLIC_READINESS = {'CONTRACT_ONLY', 'LOCAL_PLANNING_READY', 'REQUIRES_RUNTIME', 'REQUIRES_PLANNED_SHOOT', 'NOT_SUPPORTED'}
 GOAL_IDS = {'cut_pacing', 'reframe', 'transition_motion', 'sound_post'}
 
@@ -134,7 +136,7 @@ def test_flag_off_row_is_empty_and_flag_on_adds_exactly_one_secondary_action():
     assert 'videoedit|ai' in source and 'videoedit|manual' in source
 
 
-def test_video_edit_hub_runtime_shape_is_exact_when_off_and_additive_when_on():
+def test_video_edit_hub_runtime_shape_keeps_status_between_primary_actions_and_optional_planning():
     source = BOT_PATH.read_text(encoding='utf-8')
     start = source.index('def video_edit_hub_keyboard(')
     end = source.index('\ndef video_edit_info_text(', start)
@@ -164,6 +166,7 @@ def test_video_edit_hub_runtime_shape_is_exact_when_off_and_additive_when_on():
     assert [[button.callback_data for button in row] for row in off_rows] == [
         ['videoedit|ai', 'videoedit|manual'],
         ['videoedit|restore', 'videoedit|guide'],
+        [STATUS_CALLBACK],
         ['menu|main_video', 'menu|main'],
     ]
     enabled['value'] = True
@@ -172,8 +175,9 @@ def test_video_edit_hub_runtime_shape_is_exact_when_off_and_additive_when_on():
         ['videoedit|ai', 'videoedit|manual'],
         ['videoedit|restore', 'videoedit|guide'],
     ]
-    assert [(button.text, button.callback_data) for button in on_rows[2]] == [(ENTRY_LABEL, ENTRY_CALLBACK)]
-    assert [button.callback_data for button in on_rows[3]] == ['menu|main_video', 'menu|main']
+    assert [(button.text, button.callback_data) for button in on_rows[2]] == [(STATUS_LABEL, STATUS_CALLBACK)]
+    assert [(button.text, button.callback_data) for button in on_rows[3]] == [(ENTRY_LABEL, ENTRY_CALLBACK)]
+    assert [button.callback_data for button in on_rows[4]] == ['menu|main_video', 'menu|main']
 
 def test_canonical_index_is_reused_without_public_capability_data_copy():
     svc = service()

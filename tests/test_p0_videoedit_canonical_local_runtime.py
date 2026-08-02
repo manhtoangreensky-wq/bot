@@ -52,6 +52,12 @@ def test_public_plan_summary_uses_vietnamese_labels_not_internal_tokens() -> Non
     assert "Zoom chậm" not in rendered
 
 
+def test_public_plan_summary_includes_an_explicit_mute() -> None:
+    plan = editing.default_manual_edit_plan("")
+    plan["volume"] = 0.0
+    assert "Tắt tiếng" in editing.public_plan_summary(plan)
+
+
 def test_full_source_trim_is_not_advertised_as_an_explicit_cut() -> None:
     plan = editing.default_manual_edit_plan("")
     plan["trim"] = {"start_ms": 0, "end_ms": 10_000}
@@ -79,6 +85,74 @@ def test_changed_trim_is_an_executable_edit() -> None:
     plan = editing.default_manual_edit_plan("")
     plan["trim"] = {"start_ms": 1_000, "end_ms": 9_000}
     assert editing.manual_plan_has_effect(plan, source_duration_ms=10_000) is True
+
+
+def test_split_plan_requires_one_duration_independent_canonical_neutral_plan() -> None:
+    plan = editing.neutral_split_manual_plan()
+    assert plan["trim"] == {"start_ms": 0, "end_ms": 0}
+    assert editing.split_plan_has_manual_conflict(
+        plan,
+        source_duration_ms=10_000,
+    ) is False
+    assert editing.split_plan_has_manual_conflict(
+        plan,
+        source_duration_ms=10_137,
+    ) is False
+
+    intake_duration_plan = editing.default_manual_edit_plan("")
+    intake_duration_plan["trim"] = {"start_ms": 0, "end_ms": 10_000}
+    assert editing.split_plan_has_manual_conflict(
+        intake_duration_plan,
+        source_duration_ms=10_000,
+    ) is True
+
+    changed = dict(plan)
+    changed["brightness_percent"] = 120
+    assert editing.split_plan_has_manual_conflict(
+        changed,
+        source_duration_ms=10_000,
+    ) is True
+    assert editing.split_plan_has_manual_conflict(
+        plan,
+        source_duration_ms=10_000,
+        concat_sources=[{"file_id": "concat"}],
+    ) is True
+    assert editing.split_plan_has_manual_conflict(
+        plan,
+        source_duration_ms=10_000,
+        concat_sources=[None],
+    ) is True
+    assert editing.split_plan_has_manual_conflict(
+        plan,
+        source_duration_ms=10_000,
+        logo_source={"file_id": "logo"},
+    ) is True
+    assert editing.split_plan_has_manual_conflict(
+        plan,
+        source_duration_ms=10_000,
+        subtitle_source={"file_id": "srt"},
+    ) is True
+
+    unknown = dict(plan)
+    unknown["provider_magic_effect"] = True
+    assert editing.split_plan_has_manual_conflict(
+        unknown,
+        source_duration_ms=10_000,
+    ) is True
+
+    nested_unknown = dict(plan)
+    nested_unknown["trim"] = {
+        **dict(plan["trim"]),
+        "provider_hint": True,
+    }
+    assert editing.split_plan_has_manual_conflict(
+        nested_unknown,
+        source_duration_ms=10_000,
+    ) is True
+    assert editing.manual_plan_requires_split_reset(
+        nested_unknown,
+        source_duration_ms=10_000,
+    ) is True
 
 
 def test_videoedit_unknown_requested_plan_field_fails_closed(tmp_path: Path) -> None:
@@ -113,6 +187,228 @@ def test_videoedit_optional_local_fields_survive_normalization(tmp_path: Path) -
         "slow_zoom": True,
     }
     assert normalized["remove_middle"] == {"start_ms": 1_500, "end_ms": 2_500}
+
+
+def test_videoedit_fades_are_validated_against_post_speed_duration(tmp_path: Path) -> None:
+    plan = _source_plan(tmp_path)
+    plan["speed"] = 2.0
+    plan["local_effects"] = {
+        "fade_in_ms": 1_500,
+        "fade_out_ms": 600,
+        "vignette": False,
+        "slow_zoom": False,
+    }
+    with pytest.raises(editing.LocalVideoEditError, match="local_effect_duration_invalid"):
+        editing.normalize_manual_edit_plan(plan, source_duration_ms=4_000, workspace=tmp_path)
+
+
+def test_videoedit_text_wholly_after_post_speed_output_fails_closed(tmp_path: Path) -> None:
+    plan = _source_plan(tmp_path)
+    plan["speed"] = 2.0
+    plan["text_overlay"] = {
+        "content": "Chữ phải xuất hiện",
+        "position": "bottom",
+        "start_ms": 2_500,
+        "end_ms": 3_000,
+        "font_size": 42,
+        "outline": 2,
+    }
+    with pytest.raises(editing.LocalVideoEditError, match="text_overlay_outside_output"):
+        editing.normalize_manual_edit_plan(plan, source_duration_ms=4_000, workspace=tmp_path)
+
+
+def test_videoedit_srt_with_every_cue_after_output_fails_closed(tmp_path: Path) -> None:
+    subtitle = tmp_path / "late.srt"
+    subtitle.write_text(
+        "1\n00:00:03,000 --> 00:00:03,800\nPhụ đề quá muộn\n",
+        encoding="utf-8",
+    )
+    plan = _source_plan(tmp_path)
+    plan["speed"] = 2.0
+    plan["subtitle_file"] = str(subtitle)
+    with pytest.raises(editing.LocalVideoEditError, match="subtitle_outside_output"):
+        editing.normalize_manual_edit_plan(plan, source_duration_ms=4_000, workspace=tmp_path)
+
+
+def test_videoedit_srt_cue_uses_a_non_empty_output_intersection_contract(
+    tmp_path: Path,
+) -> None:
+    subtitle = tmp_path / "partial-overlap.srt"
+    subtitle.write_text(
+        (
+            "1\n00:00:01,800 --> 00:00:02,400\nPhụ đề giao biên\n\n"
+            "2\n00:00:03,000 --> 00:00:03,800\nPhụ đề ngoài đầu ra\n"
+        ),
+        encoding="utf-8",
+    )
+    plan = _source_plan(tmp_path)
+    plan["speed"] = 2.0
+    plan["subtitle_file"] = str(subtitle)
+
+    output_start_ms = 0
+    output_end_ms = 2_000
+    validation_result = validation.validate_srt_file(subtitle, workspace=tmp_path)
+    assert validation_result["ok"] is True
+    intersections = [
+        {
+            "start_ms": max(output_start_ms, cue["start_ms"]),
+            "end_ms": min(output_end_ms, cue["end_ms"]),
+        }
+        for cue in validation_result["cue_windows"]
+        if max(output_start_ms, cue["start_ms"])
+        < min(output_end_ms, cue["end_ms"])
+    ]
+    assert intersections == [{"start_ms": 1_800, "end_ms": 2_000}]
+
+    normalized = editing.normalize_manual_edit_plan(
+        plan,
+        source_duration_ms=4_000,
+        workspace=tmp_path,
+    )
+    assert normalized["subtitle_file"] == str(subtitle)
+
+
+def test_videoedit_srt_validation_returns_exact_positive_cue_windows(
+    tmp_path: Path,
+) -> None:
+    subtitle = tmp_path / "windows.srt"
+    subtitle.write_text(
+        (
+            "1\n00:00:00,200 --> 00:00:00,800\nMở đầu\n\n"
+            "2\n00:00:01,250 --> 00:00:02,500\nKết thúc\n"
+        ),
+        encoding="utf-8",
+    )
+    result = validation.validate_srt_file(subtitle, workspace=tmp_path)
+    assert result["ok"] is True
+    assert result["cue_windows"] == [
+        {"start_ms": 200, "end_ms": 800},
+        {"start_ms": 1_250, "end_ms": 2_500},
+    ]
+
+
+@pytest.mark.parametrize(
+    "timing",
+    [
+        "00:00:01,000 --> 00:00:01,000",
+        "00:00:02,000 --> 00:00:01,000",
+    ],
+)
+def test_videoedit_srt_validation_rejects_non_positive_cue_windows(
+    tmp_path: Path,
+    timing: str,
+) -> None:
+    subtitle = tmp_path / "invalid-window.srt"
+    subtitle.write_text(f"1\n{timing}\nKhông hợp lệ\n", encoding="utf-8")
+    result = validation.validate_srt_file(subtitle, workspace=tmp_path)
+    assert result == {"ok": False, "reason": "subtitle_timing_invalid"}
+
+
+def test_videoedit_concat_timing_is_validated_on_the_final_post_speed_timeline(
+    tmp_path: Path,
+) -> None:
+    subtitle = tmp_path / "concat-window.srt"
+    subtitle.write_text(
+        "1\n00:00:02,500 --> 00:00:03,200\nNằm trong phần ghép\n",
+        encoding="utf-8",
+    )
+    plan = _source_plan(tmp_path)
+    plan["concat_inputs"] = [str(tmp_path / "append.mp4")]
+    plan["speed"] = 2.0
+    plan["local_effects"] = {
+        "fade_in_ms": 2_500,
+        "fade_out_ms": 500,
+        "vignette": False,
+        "slow_zoom": False,
+    }
+    plan["text_overlay"] = {
+        "content": "Chữ ở phần ghép",
+        "position": "bottom",
+        "start_ms": 2_500,
+        "end_ms": 3_200,
+        "font_size": 42,
+        "outline": 2,
+    }
+    plan["subtitle_file"] = str(subtitle)
+
+    deferred = editing.normalize_manual_edit_plan(
+        plan,
+        source_duration_ms=4_000,
+        workspace=tmp_path,
+    )
+    final_plan = dict(deferred)
+    final_plan["concat_inputs"] = []
+    final_plan["trim"] = {"start_ms": 0, "end_ms": 8_000}
+    normalized = editing.normalize_manual_edit_plan(
+        final_plan,
+        source_duration_ms=8_000,
+        workspace=tmp_path,
+    )
+    assert normalized["local_effects"]["fade_in_ms"] == 2_500
+    assert normalized["text_overlay"]["start_ms"] == 2_500
+    assert normalized["subtitle_file"] == str(subtitle)
+
+
+def test_videoedit_execute_revalidates_timing_after_concat_establishes_final_timeline(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "concat-primary.mp4"
+    appended = tmp_path / "concat-appended.mp4"
+    ffmpeg, ffprobe = _real_fixture(source, duration_seconds=2)
+    _real_fixture(appended, duration_seconds=2)
+    plan = editing.default_manual_edit_plan(str(source))
+    plan["trim"] = {"start_ms": 0, "end_ms": 2_000}
+    plan["concat_inputs"] = [str(appended)]
+    plan["speed"] = 2.0
+    plan["text_overlay"] = {
+        "content": "Nằm ngoài timeline cuối",
+        "position": "bottom",
+        "start_ms": 2_200,
+        "end_ms": 2_600,
+        "font_size": 42,
+        "outline": 2,
+    }
+
+    with pytest.raises(editing.LocalVideoEditError, match="text_overlay_outside_output"):
+        editing.execute_manual_edit(
+            plan,
+            output_path=str(tmp_path / "concat-invalid-timing.mp4"),
+            workspace=tmp_path,
+            ffmpeg_path=ffmpeg,
+            ffprobe_path=ffprobe,
+            timeout=90,
+        )
+
+
+@pytest.mark.parametrize(
+    ("rotation", "expected_size"),
+    [(90, "s=180x320"), (270, "s=180x320")],
+)
+def test_videoedit_slow_zoom_keeps_post_rotation_dimensions(
+    tmp_path: Path,
+    rotation: int,
+    expected_size: str,
+) -> None:
+    plan = _source_plan(tmp_path)
+    plan["rotation"] = rotation
+    plan["local_effects"] = {
+        "fade_in_ms": 0,
+        "fade_out_ms": 0,
+        "vignette": False,
+        "slow_zoom": True,
+    }
+    normalized = editing.normalize_manual_edit_plan(
+        plan,
+        source_duration_ms=4_000,
+        workspace=tmp_path,
+    )
+    command = editing.build_manual_ffmpeg_command(
+        normalized,
+        output_path=str(tmp_path / f"rotated-{rotation}.mp4"),
+        source_probe=_probe(),
+        ffmpeg_path="ffmpeg",
+    )
+    assert expected_size in " ".join(command)
 
 
 @pytest.mark.parametrize(
@@ -294,6 +590,67 @@ def test_videoedit_command_contains_only_selected_optional_filters(tmp_path: Pat
     joined = " ".join(command)
     for token in ("unsharp", "hqdn3d", "fade=t=in", "fade=t=out", "vignette", "zoompan", "loudnorm", "afade=t=in", "afade=t=out"):
         assert token in joined
+
+
+def test_videoedit_final_timeline_duration_includes_concat_remove_and_speed() -> None:
+    plan = editing.default_manual_edit_plan("")
+    plan.update(
+        {
+            "trim": {"start_ms": 1_000, "end_ms": 9_000},
+            "remove_middle": {"start_ms": 3_000, "end_ms": 5_000},
+            "speed": 0.5,
+        }
+    )
+
+    assert editing.expected_final_timeline_duration_ms(
+        plan,
+        concat_sources=[
+            {"metadata": {"duration_ms": 3_000}},
+            {"source_metadata": {"duration_ms": 750}},
+            {"duration": 0.25},
+        ],
+    ) == 20_000
+
+
+def test_videoedit_speed_timestamp_runs_after_slow_zoom_before_timed_filters(
+    tmp_path: Path,
+) -> None:
+    plan = _source_plan(tmp_path)
+    plan.update(
+        {
+            "speed": 2.0,
+            "text_overlay": {
+                "content": "Mốc",
+                "position": "bottom",
+                "start_ms": 100,
+                "end_ms": 900,
+                "font_size": 42,
+                "outline": 2,
+            },
+            "local_effects": {
+                "fade_in_ms": 200,
+                "fade_out_ms": 200,
+                "vignette": False,
+                "slow_zoom": True,
+            },
+        }
+    )
+    normalized = editing.normalize_manual_edit_plan(
+        plan,
+        source_duration_ms=4_000,
+        workspace=tmp_path,
+    )
+    command = editing.build_manual_ffmpeg_command(
+        normalized,
+        output_path=str(tmp_path / "output.mp4"),
+        source_probe=_probe(),
+        ffmpeg_path="ffmpeg",
+    )
+    video_filter = command[command.index("-vf") + 1]
+
+    assert video_filter.index("zoompan=") < video_filter.index("setpts=PTS/2")
+    assert video_filter.index("setpts=PTS/2") < video_filter.index("fade=t=in")
+    assert video_filter.index("setpts=PTS/2") < video_filter.index("drawtext=")
 
 
 def _real_fixture(path: Path, *, duration_seconds: int = 4) -> tuple[str, str]:

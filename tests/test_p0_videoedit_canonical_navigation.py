@@ -3,6 +3,56 @@ from __future__ import annotations
 from services import video_edit_state_machine as machine
 
 
+def test_videoedit_complete_intake_promotes_authoritative_source_state() -> None:
+    state = machine.start_lane("manual_edit")
+    state.update({"state_revision": 7, "revision": 9})
+
+    completed = machine.complete_intake(
+        state,
+        {
+            "source_file_id": "telegram-source",
+            "source_file_name": "source.mp4",
+        },
+        {
+            "ok": True,
+            "duration": 4.0,
+            "duration_ms": 4_000,
+            "has_video": True,
+            "has_audio": True,
+        },
+    )
+
+    assert completed["source_file_id"] == "telegram-source"
+    assert completed["source_video_id"] == "telegram-source"
+    assert completed["source_has_audio"] is True
+    assert completed["status"] == "source_ready"
+    assert completed["state_revision"] == 8
+    assert completed["revision"] == 10
+
+
+def test_videoedit_ai_and_quality_intakes_seed_a_truthful_full_duration_plan() -> None:
+    for mode in ("ai_edit", "quality_enhance"):
+        completed = machine.complete_intake(
+            machine.start_lane(mode),
+            {
+                "source_file_id": f"telegram-{mode}",
+                "source_file_name": "source.mp4",
+            },
+            {
+                "ok": True,
+                "duration": 12.345,
+                "duration_ms": 12_345,
+                "has_video": True,
+                "has_audio": True,
+            },
+        )
+
+        plan = completed["manual_edit_plan"]
+        assert plan["trim"] == {"start_ms": 0, "end_ms": 12_345}
+        assert plan["speed"] == 1.0
+        assert plan["color_preset"] == "keep"
+
+
 def test_videoedit_parent_matrix_is_exact() -> None:
     assert machine.parent_callback("workspace", lane="manual_edit") == "videoedit|manual"
     assert machine.parent_callback("workspace", lane="ai_edit") == "videoedit|ai"
@@ -33,6 +83,39 @@ def test_videoedit_parent_matrix_is_exact() -> None:
 
 def test_videoedit_confirmation_screen_has_an_exact_resume_callback() -> None:
     assert machine.screen_callback("confirmation") == "videoedit|confirmation"
+
+
+def test_videoedit_review_back_uses_the_saved_exact_parent() -> None:
+    expected = {
+        "brightness": "videoedit|brightness",
+        "frame": "videoedit|frame",
+        "transform": "videoedit|transform",
+        "color": "videoedit|color",
+        "cut": "videoedit|cut",
+        "join": "videoedit|join",
+        "audio": "videoedit|audio",
+        "effects": "videoedit|effects",
+        "split": "videoedit|split",
+        "options": "videoedit|workspace",
+        "workspace": "videoedit|workspace",
+    }
+    for return_to, callback in expected.items():
+        assert machine.review_back_callback({"return_to": return_to}) == callback
+    assert machine.review_back_callback(
+        {"return_to": "videoedit|transform"}
+    ) == "videoedit|transform"
+    assert machine.review_back_callback({"return_to": "subdub|menu"}) == "videoedit|workspace"
+
+
+def test_videoedit_logo_options_is_a_canonical_resumable_screen() -> None:
+    assert machine.parent_callback("logo_options") == "videoedit|overlay"
+    assert machine.screen_callback("logo_options") == "videoedit|logo_options"
+    assert machine.resume_callback("logo_options", "") == "videoedit|logo_options"
+
+
+def test_videoedit_audio_upload_starts_a_fresh_audio_intake() -> None:
+    assert machine.canonical_compatibility_action("audio_upload") == "audio_reupload"
+    assert machine.requested_group("audio_upload") == "audio"
 
 
 def test_videoedit_parent_callback_fails_closed() -> None:

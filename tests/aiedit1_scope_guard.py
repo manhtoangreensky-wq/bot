@@ -11,6 +11,46 @@ ARCH1_TEST_FILE = "tests/test_p0_profile_arch1_architecture_interior_realestate_
 ARCH1_SCOPE_MARKER = "test_arch1_scope_lock"
 SCENE3UX2_BRANCH_PREFIX = "hotfix/p0-video-scene3ux2-"
 VIDEO_EDIT3_BRANCH_PREFIX = "hotfix/p0-video-edit3-"
+VIDEO_EDIT_COMPLETION_BRANCH_PREFIX = "fix/p0-videoedit-completion-"
+VIDEO_EDIT_COMPLETION_SCOPE_FILES = frozenset(
+    {
+        "bot.py",
+        "local_worker.py",
+        "services/video_edit_state_machine.py",
+        "services/video_edit_capabilities.py",
+        "services/video_editengine1.py",
+        "services/video_local_editing.py",
+        "services/video_local_validation.py",
+        "tests/aiedit1_scope_guard.py",
+        "tests/test_p0_video_aiedit1_blackbox_special_effects_transformation.py",
+        "tests/test_p0_video_editengine2_buttons_worker_heartbeat_package.py",
+        "tests/test_p0_video_edit3_compact_manual_flow.py",
+        "tests/test_p0_video_edit3_canonical_intake_route_state_machine.py",
+        "tests/test_p0_video_edit2_upgrade_audio_ai_backstack.py",
+        "tests/test_p0_video_finalflow12_golden_tail.py",
+        "tests/test_p0_video_knowledge1_profile_router_and_studio_menu.py",
+        "tests/test_p0_video_local1_manual_editing_smart_splitter.py",
+        "tests/test_p0_video_statusrestore18_old_status_only.py",
+        "tests/test_p0_video_tailflow16_dedupe_summary_audio_status.py",
+        "tests/test_p0_videoedit_back_hierarchy_adapter.py",
+        "tests/test_p0_videoedit_canonical_bot_routes.py",
+        "tests/test_p0_videoedit_canonical_local_runtime.py",
+        "tests/test_p0_videoedit_canonical_local_worker_receipt.py",
+        "tests/test_p0_videoedit_canonical_navigation.py",
+        "tests/test_p0_videoedit_job_safety.py",
+        "tests/test_p0_videoedit_latest_status_navigation.py",
+        "tests/test_p0_videoedit_local_free_job.py",
+        "tests/test_p0_videoedit_parent_allowlist.py",
+        "tests/test_p0_videoedit_real_media_matrix.py",
+        "tests/test_p0_videoedit_review_parent_hardening.py",
+        "tests/test_p0_videoedit_split_receipt_checkpoint.py",
+        "tests/test_p1_localvideostudio27b_public_ui.py",
+        "docs/superpowers/plans/2026-07-31-video-edit-completion-hardening.md",
+        "docs/superpowers/plans/2026-08-01-video-edit-latest-status.md",
+        "docs/superpowers/plans/2026-08-02-video-edit-cpu-verification-matrix.md",
+        "docs/superpowers/specs/2026-08-01-video-edit-latest-status-design.md",
+    }
+)
 VIDEO_EDIT3_SCOPE_FILES = frozenset(
     {
         "services/video_edit_state_machine.py",
@@ -158,6 +198,8 @@ def aiedit1_scope_files(paths=()):
         allowed.update(SCENE3UX2_SCOPE_FILES)
     if _current_branch().startswith(VIDEO_EDIT3_BRANCH_PREFIX):
         allowed.update(VIDEO_EDIT3_SCOPE_FILES)
+    if _current_branch().startswith(VIDEO_EDIT_COMPLETION_BRANCH_PREFIX):
+        allowed.update(VIDEO_EDIT_COMPLETION_SCOPE_FILES)
     marker_path = Path(__file__).resolve().parents[1] / LOCAL1_BOOT_COMPAT_TEST
     marker_present = (
         marker_path.is_file()

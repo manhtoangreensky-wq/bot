@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ import pytest
 import bot
 import local_worker
 from services import video_editengine1
+from services import video_local_editing
 from services import video_uifreeze1
 
 
@@ -25,6 +27,9 @@ def _section(source: str, start: str, end: str) -> str:
 
 
 def _state() -> dict:
+    plan = video_local_editing.default_manual_edit_plan("source.mp4")
+    plan["trim"] = {"start_ms": 0, "end_ms": 4_000}
+    plan["brightness_percent"] = 200
     return {
         "product_type": "video_edit",
         "flow_owner": "video_edit",
@@ -39,11 +44,7 @@ def _state() -> dict:
             "has_audio": True,
         },
         "selected_tool": "manual",
-        "manual_edit_plan": {
-            "source": "source.mp4",
-            "trim": {"start_ms": 0, "end_ms": 4_000},
-            "brightness_percent": 200,
-        },
+        "manual_edit_plan": plan,
         "video_tail9": {"audio_config": {}},
     }
 
@@ -63,6 +64,11 @@ def _runtime(**overrides) -> dict:
         "ffmpeg_path_configured": True,
         "ffprobe_path_configured": True,
         "delivery_configured": True,
+        "video_edit_filters_known": True,
+        "video_edit_filters": ["format", "eq"],
+        "video_edit_filter_worker_id": "video-edit-worker",
+        "ffmpeg_path": "C:/ffmpeg/bin/ffmpeg.exe",
+        "video_edit_filter_ffmpeg_path": "C:/ffmpeg/bin/ffmpeg.exe",
     }
     runtime.update(overrides)
     return runtime
@@ -152,14 +158,14 @@ def test_custom_brightness_200_keeps_video_edit_session_and_opens_review(monkeyp
     assert saved["return_to"] == "brightness"
     assert len(replies) == 1
     text, kwargs = replies[0]
-    assert "Xem lại kế hoạch chỉnh sửa local" in text
+    assert "Xem lại kế hoạch chỉnh sửa cục bộ" in text
     assert "0 Xu" in text
     callbacks = [
         button.callback_data
         for row in kwargs["reply_markup"].inline_keyboard
         for button in row
     ]
-    assert callbacks == ["videoedit|confirmation", "videoedit|workspace", "menu|main"]
+    assert callbacks == ["videoedit|confirmation", "videoedit|brightness", "menu|main"]
 
 
 def test_cut_input_keeps_cut_back_target_instead_of_default_brightness(monkeypatch) -> None:
@@ -237,10 +243,11 @@ def test_brightness_200_routes_directly_to_video_edit_review() -> None:
     assert '"operation": "brightness"' in route
     assert 'current_screen="review"' in route
     assert 'video_local_confirmation_text(current, lang, stage="review")' in route
-    assert 'video_local_review_keyboard("manual", lang)' in route
+    assert 'video_local_review_keyboard("manual", lang, current)' in route
     assert "video_tail9_render" not in route
     review = _section(section, 'if action == "review":', 'if action == "confirmation":')
-    assert 'video_local_confirmation_text(current, lang, stage="review")' in review
+    assert 'video_local_confirmation_text(candidate, lang, stage="review")' in review
+    assert "post_render=commit_review" in review
     assert "video_tail9_render" not in review
 
 
@@ -250,13 +257,12 @@ def test_video_intake_preserves_canonical_owner_and_source_state() -> None:
         "async def handle_video_editor_pending_upload",
         "async def handle_video_editor_invalid_intake_text",
     )
-    assert "set_video_editor_pending(" not in section
+    assert re.search(r"(?<![\w])set_video_editor_pending\(", section) is None
     assert section.count("update_video_editor_pending(") >= 2
-    assert "source_video_id=str(source.get(\"source_file_id\")" in section
-    assert "source_has_audio=bool(" in section
-    assert 'status="source_ready"' in section
-    assert "state_revision=" in section
-    assert "revision=" in section
+    assert "source = video_editor_source_from_update(update)" in section
+    assert "completed = video_edit_state_machine.complete_intake(state, source, metadata)" in section
+    assert "compare_and_set_video_editor_pending(" in section
+    assert "claimed_state, completed" in section
 
 
 def test_video_edit_owner_gets_exact_review_not_scene3_review() -> None:

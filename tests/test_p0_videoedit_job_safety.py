@@ -7,7 +7,7 @@ from copy import deepcopy
 
 import pytest
 
-from services import video_editengine1
+from services import video_editengine1, video_local_editing
 
 
 def _conn(path: str = ":memory:") -> sqlite3.Connection:
@@ -44,6 +44,9 @@ def _job_input() -> dict:
         "plan": {
             "trim": {"start_ms": 0, "end_ms": 4_000},
             "brightness_percent": 100,
+            "concat_inputs": ["concat_1.mp4", "concat_2.mp4"],
+            "logo_overlay": {"position": "top_right", "opacity": 1.0},
+            "subtitle_file": "subtitle.srt",
         },
         "tail": {},
         "quality_tier_id": "local-free",
@@ -65,6 +68,14 @@ def _job_input() -> dict:
             "charge_policy": "free_local_tool",
             "price_xu": 0,
             "quoted_price_xu": 0,
+            "state_revision": 3,
+            "rights_confirmation": {
+                "confirmed": True,
+                "policy": "video_edit_rights_v1",
+                "user_id": "701",
+                "review_revision": 3,
+                "confirmed_at_unix": 1_750_000_000,
+            },
         },
     }
 
@@ -467,10 +478,192 @@ def test_local_free_job_rejects_an_unknown_execution_mode() -> None:
     assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 0
 
 
+@pytest.mark.parametrize(
+    "rights",
+    [
+        None,
+        {},
+        {
+            "confirmed": False,
+            "policy": "video_edit_rights_v1",
+            "user_id": "701",
+            "review_revision": 3,
+            "confirmed_at_unix": 1_750_000_000,
+        },
+        {
+            "confirmed": True,
+            "policy": "wrong_policy",
+            "user_id": "701",
+            "review_revision": 3,
+            "confirmed_at_unix": 1_750_000_000,
+        },
+        {
+            "confirmed": True,
+            "policy": "video_edit_rights_v1",
+            "user_id": "999",
+            "review_revision": 3,
+            "confirmed_at_unix": 1_750_000_000,
+        },
+        {
+            "confirmed": True,
+            "policy": "video_edit_rights_v1",
+            "user_id": "701",
+            "review_revision": 0,
+            "confirmed_at_unix": 1_750_000_000,
+        },
+        {
+            "confirmed": True,
+            "policy": "video_edit_rights_v1",
+            "user_id": "701",
+            "review_revision": 3,
+            "confirmed_at_unix": 0,
+        },
+    ],
+)
+def test_local_free_job_requires_valid_durable_rights_confirmation(
+    rights: dict | None,
+) -> None:
+    conn = _conn()
+    payload = _job_input()
+    if rights is None:
+        payload["worker_payload"].pop("rights_confirmation")
+    else:
+        payload["worker_payload"]["rights_confirmation"] = rights
+
+    with pytest.raises(ValueError, match="local_free_rights_confirmation_invalid"):
+        video_editengine1.create_job(conn, **payload)
+
+    assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 0
+
+
+def test_local_free_rights_confirmation_is_bound_to_the_review_revision() -> None:
+    conn = _conn()
+    payload = _job_input()
+    payload["worker_payload"]["state_revision"] = 4
+
+    with pytest.raises(ValueError, match="local_free_rights_confirmation_invalid"):
+        video_editengine1.create_job(conn, **payload)
+
+    assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    ("plan_patch", "asset_patch"),
+    [
+        ({"brightness_percent": 120}, {}),
+        ({}, {"concat_sources": [{"file_id": "concat-only"}]}),
+        ({}, {"logo_source": {"file_id": "logo-only"}}),
+        ({}, {"subtitle_source": {"file_id": "subtitle-only"}}),
+    ],
+)
+def test_local_free_split_job_rejects_each_manual_operation_or_asset_independently(
+    plan_patch: dict,
+    asset_patch: dict,
+) -> None:
+    conn = _conn()
+    payload = _job_input()
+    payload["plan"] = video_local_editing.neutral_split_manual_plan()
+    payload["plan"].update(plan_patch)
+    payload["worker_payload"].update(
+        local1_mode="split",
+        manual_edit_plan=deepcopy(payload["plan"]),
+        concat_sources=[],
+        logo_source={},
+        subtitle_source={},
+        split_mode="custom",
+        split_ranges=[
+            {"index": 1, "start_ms": 0, "end_ms": 2_000},
+            {"index": 2, "start_ms": 2_000, "end_ms": 4_000},
+        ],
+        coverage_required=True,
+    )
+    payload["worker_payload"].update(asset_patch)
+
+    with pytest.raises(ValueError, match="local_free_split_manual_conflict"):
+        video_editengine1.create_job(conn, **payload)
+
+    assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 0
+
+
+def test_local_free_split_job_rejects_unknown_manual_plan_fields() -> None:
+    conn = _conn()
+    payload = _job_input()
+    payload["plan"] = video_local_editing.neutral_split_manual_plan()
+    payload["plan"]["unknown_split_operation"] = True
+    payload["worker_payload"].update(
+        local1_mode="split",
+        manual_edit_plan=deepcopy(payload["plan"]),
+        concat_sources=[],
+        logo_source={},
+        subtitle_source={},
+        split_mode="custom",
+        split_ranges=[
+            {"index": 1, "start_ms": 0, "end_ms": 2_000},
+            {"index": 2, "start_ms": 2_000, "end_ms": 4_000},
+        ],
+        coverage_required=True,
+    )
+
+    with pytest.raises(ValueError, match="local_free_split_manual_conflict"):
+        video_editengine1.create_job(conn, **payload)
+
+    assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    ("plan_patch", "asset_patch"),
+    [
+        ({"concat_inputs": ["video_1"]}, {}),
+        (
+            {"concat_inputs": ["video_1", "video_2"]},
+            {"concat_sources": [{"file_id": "concat-only"}]},
+        ),
+        ({"logo_overlay": {"position": "top_right", "opacity": 1.0}}, {}),
+        ({"subtitle_file": "subtitle.srt"}, {}),
+        ({}, {"concat_sources": [{"file_id": "concat-only"}]}),
+        ({}, {"logo_source": {"file_id": "logo-only"}}),
+        ({}, {"subtitle_source": {"file_id": "subtitle-only"}}),
+    ],
+)
+def test_local_free_manual_job_rejects_unbound_plan_assets(
+    plan_patch: dict,
+    asset_patch: dict,
+) -> None:
+    conn = _conn()
+    payload = _job_input()
+    payload["plan"] = {
+        "trim": {"start_ms": 0, "end_ms": 4_000},
+        "brightness_percent": 110,
+        **plan_patch,
+    }
+    payload["worker_payload"].update(
+        manual_edit_plan=deepcopy(payload["plan"]),
+        concat_sources=[],
+        logo_source={},
+        subtitle_source={},
+    )
+    payload["worker_payload"].update(asset_patch)
+
+    with pytest.raises(ValueError, match="local_free_asset_contract_invalid"):
+        video_editengine1.create_job(conn, **payload)
+
+    assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 0
+
+
 def test_local_free_manual_job_requires_an_observable_edit() -> None:
     conn = _conn()
     payload = _job_input()
+    payload["plan"] = {
+        "trim": {"start_ms": 0, "end_ms": 4_000},
+        "brightness_percent": 100,
+    }
     payload["worker_payload"].update(
+        manual_edit_plan=deepcopy(payload["plan"]),
         concat_sources=[],
         logo_source={},
         subtitle_source={},

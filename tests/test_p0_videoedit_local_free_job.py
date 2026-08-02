@@ -54,6 +54,14 @@ def _create(conn: sqlite3.Connection, *, session: str = "local-session") -> dict
             "quoted_price_xu": 0,
             "charge_policy": "free_local_tool",
             "provider_call": False,
+            "state_revision": 3,
+            "rights_confirmation": {
+                "confirmed": True,
+                "policy": "video_edit_rights_v1",
+                "user_id": "77",
+                "review_revision": 3,
+                "confirmed_at_unix": 1_750_000_000,
+            },
         },
     )
 
@@ -108,7 +116,7 @@ def test_split_ranges_are_part_of_the_job_idempotency_identity() -> None:
         "edit_session_id": "same-split-session",
         "source_file_id": "telegram-source",
         "source_metadata": {"ok": True, "duration_ms": 6_000, "has_audio": True},
-        "plan": {"input_video": "", "trim": {"start_ms": 0, "end_ms": 6_000}},
+        "plan": {"input_video": "", "trim": {"start_ms": 0, "end_ms": 0}},
         "tail": {},
         "quality_tier_id": "local-free",
         "price_xu": 0,
@@ -120,7 +128,7 @@ def test_split_ranges_are_part_of_the_job_idempotency_identity() -> None:
             "local1_mode": "split",
             "plan_schema_version": "video-edit-plan-v1",
             "source_file_id": "telegram-source",
-            "manual_edit_plan": common["plan"],
+            "manual_edit_plan": {},
             "split_mode": "custom",
             "split_ranges": ranges,
             "coverage_required": True,
@@ -128,6 +136,14 @@ def test_split_ranges_are_part_of_the_job_idempotency_identity() -> None:
             "quoted_price_xu": 0,
             "charge_policy": "free_local_tool",
             "provider_call": False,
+            "state_revision": 3,
+            "rights_confirmation": {
+                "confirmed": True,
+                "policy": "video_edit_rights_v1",
+                "user_id": "77",
+                "review_revision": 3,
+                "confirmed_at_unix": 1_750_000_000,
+            },
         }
 
     first = video_editengine1.create_job(
