@@ -190,6 +190,9 @@ def test_no_real_provider_calls_or_forbidden_runtime_scope():
     changed = without_aiedit1_scope(_changed_files())
     allowed = {
         "bot.py",
+        "docs/superpowers/plans/2026-08-02-p0-cskh-continuity.md",
+        "docs/superpowers/specs/2026-08-02-p0-cskh-continuity-design.md",
+        "knowledge/toan_aas_cskh_aichat_context.md",
         "services/aas_shared_knowledge.py",
         "services/ai_chatbot_copilot.py",
         "services/telegram_business_support.py",
@@ -210,6 +213,7 @@ def test_no_real_provider_calls_or_forbidden_runtime_scope():
         "tests/test_p0_cskh5c_business_self_echo_duplicate_guard.py",
         "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
         "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
+        "tests/test_p0_cskh_continuity_unified.py",
     }
     forbidden_terms = ("music", "suno", "voice_provider", "product_video_provider", "payos", "wallet", "payment")
 

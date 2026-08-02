@@ -49,6 +49,8 @@ File này là não ngữ cảnh chung cho AI Chatbot và CSKH Business support. 
 
 ## pricing_facts
 
+Lưu ý vận hành: các con số dưới đây là tài liệu tham khảo/kiểm thử tương thích, không phải nguồn giá để trả lời khách khi bot đang chạy. Khi có dữ liệu giá hiện tại từ hệ thống, CSKH và AI Chatbot chỉ dùng dữ liệu đó; nếu dữ liệu chưa đủ thì báo khách kiểm tra ở màn hóa đơn, không đoán hoặc dùng lại giá cũ.
+
 - 1 Xu = 100đ.
 - 100.000đ = 1.000 Xu.
 - Voice riêng đầu tiên tạo thành công: 0 Xu.
@@ -275,9 +277,9 @@ Xin lỗi, ghi nhận đúng lỗi, xin mã xử lý và nói sẽ chuyển admi
 ### complaint_charged_no_result
 
 - examples: bị trừ Xu mà không ra video, trừ Xu không có file
-- answer_policy: xin lỗi, xin mã xử lý, nói kiểm tra theo chính sách hoàn/no-charge.
+- answer_policy: xin lỗi, xin mã xử lý, đối soát kết quả thực tế trước khi kết luận hướng xử lý phần Xu.
 - required_context: hard_rules, usage_guides
-- response_template: Dạ nếu hệ thống đã trừ Xu nhưng không có kết quả hợp lệ, bên em sẽ kiểm tra và xử lý theo chính sách hoàn/no-charge. Anh/chị gửi giúp em mã xử lý để em kiểm tra chính xác ạ.
+- response_template: Dạ em xin lỗi anh/chị vì đã gặp tình huống này ạ. Bên em cần đối soát mã xử lý, thời gian và kết quả thực tế trước khi kết luận hướng xử lý phần Xu. Anh/chị gửi giúp em mã xử lý để em kiểm tra chính xác ạ.
 - follow_up_question: Anh/chị gửi giúp em mã xử lý hoặc ảnh màn hình trạng thái nha.
 - safety_notes: Không hứa hoàn ngay.
 
@@ -471,7 +473,7 @@ Bot: Dạ phần bonus phải theo cấu hình đang hiển thị trong bot. N�
 ### bị trừ Xu không có kết quả
 
 Khách: Bot trừ Xu mà không ra video.
-Bot: Dạ nếu hệ thống đã trừ Xu nhưng không có kết quả hợp lệ, bên em sẽ kiểm tra và xử lý theo chính sách hoàn/no-charge. Anh/chị gửi giúp em mã xử lý để em kiểm tra chính xác ạ.
+Bot: Dạ em xin lỗi anh/chị vì đã gặp tình huống này ạ. Bên em cần đối soát mã xử lý, thời gian và kết quả thực tế trước khi kết luận hướng xử lý phần Xu. Anh/chị gửi giúp em mã xử lý để em kiểm tra chính xác ạ.
 
 ### render quá lâu
 
@@ -549,6 +551,8 @@ Last reply template:
 
 “Anh/chị gửi thêm giúp em [thông tin cần thiết], em sẽ hỗ trợ tiếp cho mình nha.”
 
+Khi phiên hỗ trợ đã tạm dừng theo chính sách hiện hành, lời nhắc cần nói bằng ngôn ngữ dễ hiểu: nội dung trao đổi chỉ được giữ trong một khoảng thời gian nhất định; nếu anh/chị quay lại sau đó để hỏi việc cũ hoặc có việc mới, hãy nhắc ngắn lại nội dung để em hỗ trợ đúng hơn. Không dùng thuật ngữ kỹ thuật hoặc hứa lưu giữ lâu hơn chính sách.
+
 ## learning_policy
 
 - Ghi nhận câu hỏi mới/ý định mới vào learning queue.
@@ -566,5 +570,5 @@ Last reply template:
 - File without instruction: “Dạ em nhận được file rồi ạ. Anh/chị muốn em hỗ trợ tạo phụ đề, dịch/lồng tiếng, dùng làm tư liệu tạo video hay kiểm tra file này ạ?”
 - Price unknown safe: “Dạ phần này em cần kiểm tra theo hóa đơn trong bot để nói chính xác, vì giá cuối còn tùy gói/số lượng/nội dung. Anh/chị chọn tới màn hóa đơn, hệ thống sẽ hiện tổng Xu trước khi xác nhận ạ.”
 - Complaint: “Dạ em xin lỗi anh/chị vì trải nghiệm này chưa tốt ạ. Anh/chị gửi giúp em mã xử lý hoặc ID Telegram, em kiểm tra trạng thái và phần Xu cho mình ngay nha.”
-- Charged no result: “Dạ nếu hệ thống đã trừ Xu nhưng không có kết quả hợp lệ, bên em sẽ kiểm tra và xử lý theo chính sách hoàn/no-charge. Anh/chị gửi giúp em mã xử lý để em kiểm tra chính xác ạ.”
+- Charged no result: “Dạ em xin lỗi anh/chị vì đã gặp tình huống này ạ. Bên em cần đối soát mã xử lý, thời gian và kết quả thực tế trước khi kết luận hướng xử lý phần Xu. Anh/chị gửi giúp em mã xử lý để em kiểm tra chính xác ạ.”
 - Last reply: “Anh/chị gửi thêm giúp em [thông tin cần thiết], em sẽ hỗ trợ tiếp cho mình nha.”

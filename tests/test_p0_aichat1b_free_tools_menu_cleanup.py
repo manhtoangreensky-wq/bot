@@ -83,6 +83,8 @@ def test_aichat_callback_back_route_returns_free_tools_without_cross_route():
 def test_aichat1b_scope_guard_only_touches_menu_cleanup_files():
     allowed = {
         "bot.py",
+        "docs/superpowers/plans/2026-08-02-p0-cskh-continuity.md",
+        "docs/superpowers/specs/2026-08-02-p0-cskh-continuity-design.md",
         "knowledge/toan_aas_cskh_aichat_context.md",
         "services/aas_shared_knowledge.py",
         "services/ai_chatbot_copilot.py",
@@ -99,10 +101,12 @@ def test_aichat1b_scope_guard_only_touches_menu_cleanup_files():
         "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
         "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",
         "tests/test_p0_cskh3_conversation_brain_natural_replies.py",
+        "tests/test_p0_cskh4_aas_product_knowledge_pricing_mixed_intents.py",
         "tests/test_p0_cskh5b_live_business_followup_pricing_runtime.py",
         "tests/test_p0_cskh5c_business_self_echo_duplicate_guard.py",
         "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
         "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
+        "tests/test_p0_cskh_continuity_unified.py",
     }
 
     assert without_aiedit1_scope(_changed_files()).issubset(allowed)

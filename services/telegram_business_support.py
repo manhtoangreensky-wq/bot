@@ -56,6 +56,12 @@ PUBLIC_FORBIDDEN_TERMS = (
     "secret",
     "key",
     "endpoint",
+    "khong phai loi ben em",
+    "chac duoc hoan xu",
+    "em tang anh xu",
+    "anh bam sai roi",
+    "cho di",
+    "khong lam duoc",
 )
 UNSAFE_PROMISE_TERMS = (
     "da hoan tien",
@@ -73,7 +79,7 @@ POLICY_CLAIM_TYPES = {
     "policy_confirm_required",
     "never_auto_promise",
 }
-TRUSTED_PRICING_SOURCES = {"config", "pricing_doc", "guide_doc", "context_file"}
+TRUSTED_PRICING_SOURCES = {"config", "pricing_doc", "guide_doc", "context_file", "runtime_canonical"}
 URGENT_INTENTS = {
     "payment_xu_not_received",
     "payment_wrong_amount",
@@ -914,10 +920,21 @@ def should_debounce_message(state: dict, event: BusinessMessageEvent, classifica
     return False
 
 
-def classify_thread_messages(messages: list[str], *, variation_seed: str | int | None = None) -> dict:
+def classify_thread_messages(
+    messages: list[str],
+    *,
+    variation_seed: str | int | None = None,
+    conversation_memory: dict | None = None,
+    runtime_facts: dict | None = None,
+) -> dict:
     cleaned = [str(item or "").strip() for item in messages if str(item or "").strip()]
     combined = "\n".join(cleaned)
-    result = classify_cskh_message(combined, variation_seed=variation_seed or combined)
+    result = classify_cskh_message(
+        combined,
+        variation_seed=variation_seed or combined,
+        conversation_memory=conversation_memory,
+        runtime_facts=runtime_facts,
+    )
     result["combined_text"] = combined
     result["buffered"] = len(cleaned) > 1
     result["conversation_stage"] = conversation_stage_for_intent(str(result.get("intent_id") or ""))
@@ -2328,7 +2345,14 @@ def _context_aware_greeting_reply(text: str, classification: dict, conversation_
     return classification
 
 
-def _apply_pricing_table_thread_hint(text: str, classification: dict) -> dict:
+def _apply_pricing_table_thread_hint(
+    text: str,
+    classification: dict,
+    *,
+    runtime_facts: dict | None = None,
+) -> dict:
+    if runtime_facts is not None:
+        return classification
     folded = _fold(text)
     intent_id = str(classification.get("intent_id") or "")
     if "bang gia" not in folded or intent_id != "product_video_pricing":
@@ -2360,8 +2384,10 @@ def _result_sources_from_classification(classification: dict, *, fallback: bool 
         sources.append("pricing")
     elif pricing_source == "guide_doc":
         sources.append("guide_doc")
-    elif pricing_source in {"config", "runtime"} or classification.get("price_text"):
+    elif pricing_source in {"config", "runtime", "runtime_canonical"} or classification.get("price_text"):
         sources.append("pricing")
+        if pricing_source == "runtime_canonical":
+            sources.append("runtime_canonical")
     if fallback or str(classification.get("confidence") or "") == "low":
         sources.append("fallback")
     return list(dict.fromkeys(str(item) for item in sources if str(item or "").strip()))
@@ -2373,8 +2399,14 @@ def _apply_shared_doc_answer(
     conversation_memory: dict | None = None,
     *,
     media_type: str = "",
+    runtime_facts: dict | None = None,
 ) -> dict:
-    shared = aas_shared_knowledge.classify_shared_answer(text, conversation_memory=conversation_memory, media_type=media_type)
+    shared = aas_shared_knowledge.classify_shared_answer(
+        text,
+        conversation_memory=conversation_memory,
+        media_type=media_type,
+        runtime_facts=runtime_facts,
+    )
     if not shared.get("matched"):
         classification = dict(classification)
         classification["source"] = _result_sources_from_classification(
@@ -2405,7 +2437,7 @@ def _apply_shared_doc_answer(
             "primary_product": product,
             "knowledge_entry_id": str(shared.get("knowledge_entry_id") or (product if product != "general" else "")),
             "pricing_source": str(shared.get("pricing_source") or "pricing_doc"),
-            "price_text": str(shared.get("price_text") or result.get("price_text") or ""),
+            "price_text": str(shared.get("price_text") or "") if "price_text" in shared else str(result.get("price_text") or ""),
             "reply": str(shared.get("reply") or result.get("reply") or ""),
             "reply_preview": str(shared.get("reply_preview") or shared.get("reply") or result.get("reply_preview") or ""),
             "reply_template_id": str(shared.get("reply_template_id") or f"shared_knowledge:{intent_id}"),
@@ -2455,6 +2487,7 @@ def classify_cskh_message(
     training_data: dict | None = None,
     variation_seed: str | int | None = None,
     conversation_memory: dict | None = None,
+    runtime_facts: dict | None = None,
 ) -> dict:
     base = kb or load_knowledge_base()
     training = training_data or load_training_data()
@@ -2543,7 +2576,13 @@ def classify_cskh_message(
     else:
         result["playbook_policy_claims"] = detect_policy_claims(result.get("reply") or "", pricing_source=pricing_source)
         result["public_safe"] = public_reply_is_safe(result["reply"]) and not bool(result["playbook_policy_claims"].get("unsafe"))
-    result = _apply_shared_doc_answer(text, result, conversation_memory, media_type=media_type)
+    result = _apply_shared_doc_answer(
+        text,
+        result,
+        conversation_memory,
+        media_type=media_type,
+        runtime_facts=runtime_facts,
+    )
     result["would_queue_learning"] = bool(result.get("would_queue_learning") or result.get("learning_queue") or should_queue_learning(result, text))
     result["learning_queue"] = bool(result["would_queue_learning"])
     result["source"] = _result_sources_from_classification(
@@ -2554,12 +2593,23 @@ def classify_cskh_message(
         result["ticket_preview"] = build_ticket_draft(result, text=text)
     elif result.get("ticket") or result.get("handoff"):
         result["ticket_preview"] = build_ticket_draft(result, text=text)
-    result = _apply_pricing_table_thread_hint(text, result)
+    result = _apply_pricing_table_thread_hint(text, result, runtime_facts=runtime_facts)
     return _context_aware_greeting_reply(text, result, conversation_memory)
 
 
-def classify_business_event(event: BusinessMessageEvent, kb: dict | None = None, conversation_memory: dict | None = None) -> dict:
-    result = classify_cskh_message(event.text or event.caption, media_type=event.media_type, kb=kb, conversation_memory=conversation_memory)
+def classify_business_event(
+    event: BusinessMessageEvent,
+    kb: dict | None = None,
+    conversation_memory: dict | None = None,
+    runtime_facts: dict | None = None,
+) -> dict:
+    result = classify_cskh_message(
+        event.text or event.caption,
+        media_type=event.media_type,
+        kb=kb,
+        conversation_memory=conversation_memory,
+        runtime_facts=runtime_facts,
+    )
     if result.get("ticket") or result.get("handoff"):
         result["ticket_preview"] = build_ticket_draft(result, event, text=event.text or event.caption)
     return result
@@ -2597,10 +2647,17 @@ def playbook_test_message(text: str) -> dict:
     }
 
 
+_PRIVATE_PATH_PATTERN = re.compile(
+    r"(?:\b[a-z]:[\\/]|\\\\|(?:^|[\s\"'`])/(?:etc|home|root|var|usr|opt|tmp)(?:/|$))",
+    re.IGNORECASE,
+)
+
+
 def public_reply_is_safe(reply: str) -> bool:
-    folded = _fold(reply)
+    raw = str(reply or "")
+    folded = _fold(raw)
     hard_forbidden = tuple(_fold(term) for term in PUBLIC_FORBIDDEN_TERMS + UNSAFE_PROMISE_TERMS)
-    return not any(term and term in folded for term in hard_forbidden)
+    return not _PRIVATE_PATH_PATTERN.search(raw) and not any(term and term in folded for term in hard_forbidden)
 
 
 async def process_business_event_runtime(
@@ -2614,6 +2671,7 @@ async def process_business_event_runtime(
     allow_debounce: bool = True,
     schedule_buffer_fn: Any = None,
     notify_admin_fn: Any = None,
+    runtime_facts: dict | None = None,
 ) -> dict:
     clean = record_business_message_received(state, event)
     if clean.get("enabled"):
@@ -2640,7 +2698,7 @@ async def process_business_event_runtime(
         save_state_fn(clean)
         return {"sent": False, "classification": classification, "guard": preliminary_guard}
     memory = get_conversation_memory(clean, chat_id)
-    classification = classify_business_event(event, conversation_memory=memory)
+    classification = classify_business_event(event, conversation_memory=memory, runtime_facts=runtime_facts)
     if str(classification.get("severity") or "") == "urgent" and clean.get("message_buffers", {}).get(chat_id):
         clean, _dropped = pop_message_buffer(clean, chat_id, force=True)
     guard = evaluate_auto_reply_guard(clean, event, bot_user_id=bot_user_id, bot_username=bot_username, classification=classification)
