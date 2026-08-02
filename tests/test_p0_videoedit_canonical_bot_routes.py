@@ -55,6 +55,19 @@ def _compile_function(name: str, namespace: dict):
     return namespace[name]
 
 
+def _isolated_callback_flags() -> dict[str, ContextVar]:
+    return {
+        "_VIDEO_EDIT_CALLBACK_ANSWERED": ContextVar(
+            "test_video_edit_callback_answered",
+            default=False,
+        ),
+        "_VIDEO_EDIT_CALLBACK_TRANSACTIONAL": ContextVar(
+            "test_video_edit_callback_transactional",
+            default=False,
+        ),
+    }
+
+
 def _isolated_guard_dependencies(pending: dict) -> tuple[ContextVar, dict]:
     tracker = ContextVar("test_video_editor_state_write", default=None)
 
@@ -94,6 +107,7 @@ def _isolated_guard_dependencies(pending: dict) -> tuple[ContextVar, dict]:
         "get_user_language": lambda _uid: "vi",
         "_VIDEO_EDITOR_STATE_WRITE": tracker,
         "USER_PENDING": pending,
+        **_isolated_callback_flags(),
     }
 
 
@@ -812,8 +826,9 @@ def test_videoedit_callback_answers_exactly_at_the_final_route_not_before_valida
 
     safe_render = _function_source("safe_edit_or_send")
     assert 'startswith("videoedit|")' in safe_render
-    assert 'getattr(query, "_video_edit_callback_answered", False)' in safe_render
-    assert 'setattr(query, "_video_edit_callback_answered", True)' in safe_render
+    assert "_VIDEO_EDIT_CALLBACK_ANSWERED.get()" in safe_render
+    assert "_VIDEO_EDIT_CALLBACK_ANSWERED.set(True)" in safe_render
+    assert 'setattr(query, "_video_edit_callback_answered"' not in safe_render
 
 
 def test_videoedit_render_commit_and_callback_answer_follow_transaction_order() -> None:
@@ -835,6 +850,7 @@ def test_videoedit_render_commit_and_callback_answer_follow_transaction_order() 
             "is_soft_telegram_edit_error": lambda _error: False,
             "sanitize_log_text": str,
             "logger": logging.getLogger("videoedit-render-transaction"),
+            **_isolated_callback_flags(),
         },
     )
     query = Query(943, "videoedit|manual")
@@ -863,6 +879,7 @@ def test_legacy_videoedit_tail_uses_the_same_render_commit_answer_transaction() 
             events.append("answer")
             return await super().answer(*args, **kwargs)
 
+    callback_flags = _isolated_callback_flags()
     safe_render = _compile_function(
         "safe_edit_or_send",
         {
@@ -870,18 +887,21 @@ def test_legacy_videoedit_tail_uses_the_same_render_commit_answer_transaction() 
             "is_soft_telegram_edit_error": lambda _error: False,
             "sanitize_log_text": str,
             "logger": logging.getLogger("videoedit-legacy-render-transaction"),
+            **callback_flags,
         },
     )
     query = Query(944, "video_tail|review|open")
-    query._video_edit_transactional = True
-
-    asyncio.run(
-        safe_render(
-            query,
-            "review",
-            post_render=lambda: events.append("commit"),
+    transactional_token = callback_flags["_VIDEO_EDIT_CALLBACK_TRANSACTIONAL"].set(True)
+    try:
+        asyncio.run(
+            safe_render(
+                query,
+                "review",
+                post_render=lambda: events.append("commit"),
+            )
         )
-    )
+    finally:
+        callback_flags["_VIDEO_EDIT_CALLBACK_TRANSACTIONAL"].reset(transactional_token)
 
     assert events == ["render", "commit", "answer"]
     assert len(query.answers) == 1
@@ -1413,6 +1433,7 @@ def test_duplicate_legacy_videoedit_callback_migrates_only_once() -> None:
                 AssertionError("commercial tail save used for Video Edit")
             ),
             "logger": logging.getLogger("videoedit-legacy-claim-test"),
+            **_isolated_callback_flags(),
         },
     )
     query = _Query(user_id, "video_tail|review|open")
@@ -1431,7 +1452,8 @@ def test_legacy_shared_tail_failure_cannot_reenter_the_commercial_renderer() -> 
 
     assert "video_edit_legacy_tail_compatibility(" in redirect
     assert "except Exception" in redirect
-    assert 'setattr(query, "_video_edit_transactional", True)' in redirect
+    assert "_VIDEO_EDIT_CALLBACK_TRANSACTIONAL.set(True)" in redirect
+    assert 'setattr(query, "_video_edit_transactional"' not in redirect
     assert redirect.index("video_edit_legacy_tail_compatibility(") < redirect.index("show_alert=True")
     assert "await query.answer()" not in redirect[:redirect.index("video_edit_legacy_tail_compatibility(")]
     assert "video_tail9_render" not in redirect
