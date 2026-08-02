@@ -67058,7 +67058,12 @@ async def _local_video_studio_public_deliver(
     )
 
 
-async def handle_local_video_studio_public_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_local_video_studio_public_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    _transaction_locked: bool = False,
+):
     query = getattr(update, "callback_query", None)
     if not query:
         return None
@@ -67082,6 +67087,28 @@ async def handle_local_video_studio_public_callback(update: Update, context: Con
         if callable(responder):
             return await responder("Không xác định được phiên lập kế hoạch.", show_alert=True)
         return None
+
+    if not _transaction_locked:
+        try:
+            if _verb == "open":
+                transaction_lock = local_video_studio_public.open_transaction_lock(user_id, chat_id)
+            else:
+                transaction_lock = local_video_studio_public.session_transaction_lock(
+                    user_id,
+                    chat_id,
+                    _sid,
+                )
+        except local_video_studio_public.PreviewActionError:
+            responder = getattr(query, "answer", None)
+            if callable(responder):
+                return await responder("Thao tác lập kế hoạch không hợp lệ hoặc đã cũ.", show_alert=True)
+            return None
+        async with transaction_lock:
+            return await handle_local_video_studio_public_callback(
+                update,
+                context,
+                _transaction_locked=True,
+            )
 
     now = time.time()
     store = _local_video_studio_public_store(context, create=_verb == "open")
@@ -67249,11 +67276,19 @@ async def handle_local_video_studio_public_callback(update: Update, context: Con
         reply_only = False
 
     def commit_forward():
-        candidate = local_video_studio_public.commit_callback_id(
-            result["session"],
-            callback_id,
-            now=time.time(),
-        )
+        if saved_text:
+            candidate = local_video_studio_public.commit_saved_summary_delivery(
+                result["session"],
+                callback_id,
+                result.get("saved_fingerprint"),
+                now=time.time(),
+            )
+        else:
+            candidate = local_video_studio_public.commit_callback_id(
+                result["session"],
+                callback_id,
+                now=time.time(),
+            )
         local_video_studio_public.put_session(store, user_id, chat_id, candidate)
 
     return await _local_video_studio_public_deliver(

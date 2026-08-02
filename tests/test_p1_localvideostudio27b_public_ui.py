@@ -367,6 +367,410 @@ def test_selection_summary_contains_goal_ids_rights_and_next_step_without_privat
     assert saved['saved_text'] and saved['session'] == state
 
 
+def test_summary_save_is_semantically_idempotent_across_new_callback_ids():
+    svc = service()
+    state = apply(svc, svc.new_session('save-idem'), svc.callback_data('', 'open'))['session']
+    state = apply(svc, state, callback(svc, state, 'goal', 'sound_post'))['session']
+    state = apply(svc, state, callback(svc, state, 'detail', 'sound_design_pack', '0'))['session']
+    state = apply(svc, state, callback(svc, state, 'select', 'sound_design_pack', '0'))['session']
+    state = apply(svc, state, callback(svc, state, 'safety'))['session']
+    state = apply(svc, state, callback(svc, state, 'summary'))['session']
+    save_callback = callback(svc, state, 'save')
+    base = state['updated_at']
+
+    first = apply(svc, state, save_callback, callback_id='save-1', now=base)
+    assert first['saved_text']
+    assert first['saved_fingerprint']
+
+    # A failed delivery must not reserve the summary; a retry may still send it.
+    retry_before_commit = apply(svc, state, save_callback, callback_id='save-2', now=base + 1)
+    assert retry_before_commit['saved_text'] == first['saved_text']
+
+    committed = svc.commit_saved_summary_delivery(
+        first['session'],
+        'save-1',
+        first['saved_fingerprint'],
+        now=base + 2,
+    )
+    duplicate = apply(
+        svc,
+        committed,
+        save_callback,
+        callback_id='save-2',
+        now=base + 3,
+    )
+    assert duplicate['duplicate'] is True
+    assert duplicate['saved_text'] == ''
+
+
+def test_public_adapter_replies_with_same_summary_only_once_across_new_callback_ids():
+    svc = service()
+    handler = compile_public_adapter(svc, {'value': True})['handle_local_video_studio_public_callback']
+    state = svc.new_session('save-live')
+    state = apply(svc, state, callback(svc, state, 'goal', 'sound_post'))['session']
+    state = apply(svc, state, callback(svc, state, 'detail', 'sound_design_pack', '0'))['session']
+    state = apply(svc, state, callback(svc, state, 'select', 'sound_design_pack', '0'))['session']
+    state = apply(svc, state, callback(svc, state, 'safety'))['session']
+    state = apply(svc, state, callback(svc, state, 'summary'))['session']
+    store = svc.new_store()
+    svc.put_session(store, 11, 22, state)
+    context = SimpleNamespace(user_data={STATE_KEY: store})
+    events = []
+
+    class FakeMessage:
+        chat = SimpleNamespace(id=22)
+        chat_id = 22
+
+        async def reply_text(self, text, **_kwargs):
+            events.append(('reply', text))
+            return True
+
+    class FakeQuery:
+        def __init__(self, query_id):
+            self.id = query_id
+            self.data = callback(svc, state, 'save')
+            self.message = FakeMessage()
+            self.bot = None
+
+        async def edit_message_text(self, *_args, **_kwargs):
+            events.append(('edit', None))
+            return True
+
+        async def answer(self, text='', **_kwargs):
+            events.append(('answer', text))
+            return True
+
+    def update_for(query):
+        return SimpleNamespace(
+            callback_query=query,
+            effective_user=SimpleNamespace(id=11, language_code='vi'),
+            effective_chat=SimpleNamespace(id=22),
+        )
+
+    assert asyncio.run(handler(update_for(FakeQuery('save-live-1')), context)) is True
+    assert [event[0] for event in events] == ['reply', 'answer']
+
+    events.clear()
+    assert asyncio.run(handler(update_for(FakeQuery('save-live-2')), context)) is True
+    assert [event[0] for event in events] == ['answer']
+
+
+def _run_concurrent_open_race(svc, callback_ids):
+    handler = compile_public_adapter(svc, {'value': True})['handle_local_video_studio_public_callback']
+    context = SimpleNamespace(user_data={})
+    edits = []
+    answers = []
+
+    async def run_race():
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        second_started = asyncio.Event()
+
+        class FakeMessage:
+            chat = SimpleNamespace(id=22)
+            chat_id = 22
+
+        class FakeQuery:
+            def __init__(self, query_id, label):
+                self.id = query_id
+                self.data = svc.callback_data('', 'open')
+                self.message = FakeMessage()
+                self.bot = None
+                self.label = label
+
+            async def edit_message_text(self, *_args, **_kwargs):
+                edits.append(self.label)
+                if self.label == 'first':
+                    first_started.set()
+                    await release_first.wait()
+                else:
+                    second_started.set()
+                return True
+
+            async def answer(self, text='', **_kwargs):
+                answers.append((self.label, text))
+                return True
+
+        def update_for(query):
+            return SimpleNamespace(
+                callback_query=query,
+                effective_user=SimpleNamespace(id=11, language_code='vi'),
+                effective_chat=SimpleNamespace(id=22),
+            )
+
+        first = asyncio.create_task(handler(
+            update_for(FakeQuery(callback_ids[0], 'first')),
+            context,
+        ))
+        await first_started.wait()
+        second = asyncio.create_task(handler(
+            update_for(FakeQuery(callback_ids[1], 'second')),
+            context,
+        ))
+        second_entered_while_first_pending = False
+        try:
+            await asyncio.wait_for(second_started.wait(), timeout=0.1)
+            second_entered_while_first_pending = True
+        except asyncio.TimeoutError:
+            pass
+        release_first.set()
+        assert await first is True
+        assert await second is True
+        return second_entered_while_first_pending
+
+    entered_early = asyncio.run(run_race())
+    store = context.user_data[STATE_KEY]
+    return entered_early, edits, answers, store
+
+
+def test_public_adapter_serializes_same_callback_concurrent_open_once():
+    svc = service()
+    entered_early, edits, answers, store = _run_concurrent_open_race(
+        svc,
+        ('open-race-same', 'open-race-same'),
+    )
+
+    assert entered_early is False
+    assert edits == ['first']
+    assert len(store['sessions']) == 1
+    assert any(label == 'second' and 'đã được nhận' in text for label, text in answers)
+
+
+def test_public_adapter_serializes_distinct_concurrent_opens_without_store_loss():
+    svc = service()
+    entered_early, edits, _answers, store = _run_concurrent_open_race(
+        svc,
+        ('open-race-1', 'open-race-2'),
+    )
+
+    assert entered_early is False
+    assert edits == ['first', 'second']
+    assert len(store['sessions']) == 2
+
+
+def test_public_adapter_serializes_concurrent_summary_saves():
+    svc = service()
+    handler = compile_public_adapter(svc, {'value': True})['handle_local_video_studio_public_callback']
+    state = svc.new_session('save-race')
+    state = apply(svc, state, callback(svc, state, 'goal', 'sound_post'))['session']
+    state = apply(svc, state, callback(svc, state, 'detail', 'sound_design_pack', '0'))['session']
+    state = apply(svc, state, callback(svc, state, 'select', 'sound_design_pack', '0'))['session']
+    state = apply(svc, state, callback(svc, state, 'safety'))['session']
+    state = apply(svc, state, callback(svc, state, 'summary'))['session']
+    store = svc.new_store()
+    svc.put_session(store, 11, 22, state)
+    context = SimpleNamespace(user_data={STATE_KEY: store})
+    replies = []
+
+    async def run_race():
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        second_started = asyncio.Event()
+
+        class FakeMessage:
+            chat = SimpleNamespace(id=22)
+            chat_id = 22
+
+            def __init__(self, label):
+                self.label = label
+
+            async def reply_text(self, _text, **_kwargs):
+                replies.append(self.label)
+                if self.label == 'first':
+                    first_started.set()
+                    await release_first.wait()
+                else:
+                    second_started.set()
+                return True
+
+        class FakeQuery:
+            def __init__(self, query_id, label):
+                self.id = query_id
+                self.data = callback(svc, state, 'save')
+                self.message = FakeMessage(label)
+                self.bot = None
+
+            async def edit_message_text(self, *_args, **_kwargs):
+                return True
+
+            async def answer(self, _text='', **_kwargs):
+                return True
+
+        def update_for(query):
+            return SimpleNamespace(
+                callback_query=query,
+                effective_user=SimpleNamespace(id=11, language_code='vi'),
+                effective_chat=SimpleNamespace(id=22),
+            )
+
+        first = asyncio.create_task(handler(update_for(FakeQuery('save-race-1', 'first')), context))
+        await first_started.wait()
+        second = asyncio.create_task(handler(update_for(FakeQuery('save-race-2', 'second')), context))
+        second_entered_while_first_pending = False
+        try:
+            await asyncio.wait_for(second_started.wait(), timeout=0.1)
+            second_entered_while_first_pending = True
+        except asyncio.TimeoutError:
+            pass
+        release_first.set()
+        assert await first is True
+        assert await second is True
+        return second_entered_while_first_pending
+
+    assert asyncio.run(run_race()) is False
+    assert replies == ['first']
+
+
+def test_public_adapter_serializes_summary_save_and_back_without_stale_resurrection():
+    svc = service()
+    handler = compile_public_adapter(svc, {'value': True})['handle_local_video_studio_public_callback']
+    state = svc.new_session('save-back')
+    state = apply(svc, state, callback(svc, state, 'goal', 'sound_post'))['session']
+    state = apply(svc, state, callback(svc, state, 'detail', 'sound_design_pack', '0'))['session']
+    state = apply(svc, state, callback(svc, state, 'select', 'sound_design_pack', '0'))['session']
+    state = apply(svc, state, callback(svc, state, 'safety'))['session']
+    state = apply(svc, state, callback(svc, state, 'summary'))['session']
+    store = svc.new_store()
+    svc.put_session(store, 11, 22, state)
+    context = SimpleNamespace(user_data={STATE_KEY: store})
+
+    async def run_race():
+        save_started = asyncio.Event()
+        release_save = asyncio.Event()
+        back_edited = asyncio.Event()
+
+        class FakeMessage:
+            chat = SimpleNamespace(id=22)
+            chat_id = 22
+
+            def __init__(self, label):
+                self.label = label
+
+            async def reply_text(self, _text, **_kwargs):
+                if self.label == 'save':
+                    save_started.set()
+                    await release_save.wait()
+                return True
+
+        class FakeQuery:
+            def __init__(self, query_id, data, label):
+                self.id = query_id
+                self.data = data
+                self.message = FakeMessage(label)
+                self.bot = None
+                self.label = label
+
+            async def edit_message_text(self, *_args, **_kwargs):
+                if self.label == 'back':
+                    back_edited.set()
+                return True
+
+            async def answer(self, _text='', **_kwargs):
+                return True
+
+        def update_for(query):
+            return SimpleNamespace(
+                callback_query=query,
+                effective_user=SimpleNamespace(id=11, language_code='vi'),
+                effective_chat=SimpleNamespace(id=22),
+            )
+
+        save_task = asyncio.create_task(handler(update_for(FakeQuery(
+            'save-back-1', callback(svc, state, 'save'), 'save'
+        )), context))
+        await save_started.wait()
+        back_task = asyncio.create_task(handler(update_for(FakeQuery(
+            'save-back-2', callback(svc, state, 'back'), 'back'
+        )), context))
+        back_entered_while_save_pending = False
+        try:
+            await asyncio.wait_for(back_edited.wait(), timeout=0.1)
+            back_entered_while_save_pending = True
+        except asyncio.TimeoutError:
+            pass
+        release_save.set()
+        assert await save_task is True
+        assert await back_task is True
+        return back_entered_while_save_pending
+
+    assert asyncio.run(run_race()) is False
+    final = svc.get_session(store, 11, 22, state['session_id'])
+    assert final is not None
+    assert final['screen'] == 'safety'
+    assert final['saved_summary_fingerprint']
+
+
+def test_public_adapter_failed_summary_delivery_does_not_block_successful_retry():
+    svc = service()
+    handler = compile_public_adapter(svc, {'value': True})['handle_local_video_studio_public_callback']
+    state = svc.new_session('save-retry')
+    state = apply(svc, state, callback(svc, state, 'goal', 'sound_post'))['session']
+    state = apply(svc, state, callback(svc, state, 'detail', 'sound_design_pack', '0'))['session']
+    state = apply(svc, state, callback(svc, state, 'select', 'sound_design_pack', '0'))['session']
+    state = apply(svc, state, callback(svc, state, 'safety'))['session']
+    state = apply(svc, state, callback(svc, state, 'summary'))['session']
+    store = svc.new_store()
+    svc.put_session(store, 11, 22, state)
+    context = SimpleNamespace(user_data={STATE_KEY: store})
+    replies = []
+
+    class FakeMessage:
+        chat = SimpleNamespace(id=22)
+        chat_id = 22
+
+        def __init__(self, fail):
+            self.fail = fail
+
+        async def reply_text(self, _text, **_kwargs):
+            replies.append(self.fail)
+            if self.fail:
+                raise RuntimeError('reply failed')
+            return True
+
+    class FakeQuery:
+        def __init__(self, query_id, fail):
+            self.id = query_id
+            self.data = callback(svc, state, 'save')
+            self.message = FakeMessage(fail)
+            self.bot = None
+
+        async def edit_message_text(self, *_args, **_kwargs):
+            return True
+
+        async def answer(self, _text='', **_kwargs):
+            return True
+
+    def update_for(query):
+        return SimpleNamespace(
+            callback_query=query,
+            effective_user=SimpleNamespace(id=11, language_code='vi'),
+            effective_chat=SimpleNamespace(id=22),
+        )
+
+    assert asyncio.run(handler(update_for(FakeQuery('save-retry-1', True)), context)) is False
+    after_failure = svc.get_session(store, 11, 22, state['session_id'])
+    assert after_failure is not None
+    assert after_failure['saved_summary_fingerprint'] == ''
+    assert 'save-retry-1' not in after_failure['processed_callback_ids']
+
+    assert asyncio.run(handler(update_for(FakeQuery('save-retry-2', False)), context)) is True
+    after_retry = svc.get_session(store, 11, 22, state['session_id'])
+    assert after_retry is not None and after_retry['saved_summary_fingerprint']
+    assert replies == [True, False]
+
+
+def test_legacy_summary_session_migrates_and_malformed_fingerprint_fails_closed():
+    svc = service()
+    legacy = svc.new_session('legacy27b')
+    legacy.pop('saved_summary_fingerprint')
+    assert svc.normalize_session(legacy)['saved_summary_fingerprint'] == ''
+
+    malformed = svc.new_session('bad-hash')
+    malformed['saved_summary_fingerprint'] = 'not-a-sha256'
+    with pytest.raises(svc.PreviewActionError, match='fingerprint_invalid'):
+        svc.normalize_session(malformed)
+
+
 def test_public_copy_is_vietnamese_and_hides_runtime_delivery_telemetry():
     svc = service()
     assert dict(svc.GOAL_OPTIONS) == {
