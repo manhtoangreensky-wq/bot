@@ -682,6 +682,10 @@ def notice_delivery_confirmed(value: Any) -> bool:
         return True
     if isinstance(value, Mapping):
         message_id = value.get("message_id")
+        if not isinstance(message_id, int) and value.get("ok") is True:
+            nested = value.get("result")
+            if isinstance(nested, Mapping):
+                message_id = nested.get("message_id")
     else:
         message_id = getattr(value, "message_id", None)
     return isinstance(message_id, int) and message_id > 0

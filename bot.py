@@ -111259,8 +111259,11 @@ async def handle_support_persona_message(update: Update, context: ContextTypes.D
 
 CSKH_CONTINUITY_SAFE_INTENTS = {
     "ask_capabilities",
+    "continuity_charged_no_file_reference",
+    "continuity_cosmetics_pricing_clarifier",
     "continuity_video_package_step",
     "file_without_instruction",
+    "guide_video_three_steps",
     "guide_how_to",
     "image_ai_pricing",
     "image_create_request",
@@ -111293,6 +111296,9 @@ def cskh_continuity_reply_allowed(classification: dict | None) -> bool:
 async def handle_cskh_continuity_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Answer only a bounded, high-confidence CSKH continuation in private chat."""
     if not update.effective_user or not update.message or not update.message.text:
+        return False
+    chat_type = str(getattr(getattr(update, "effective_chat", None), "type", "") or "").lower()
+    if chat_type and chat_type != "private":
         return False
     text = update.message.text.strip()
     if not text or text.startswith("/"):
@@ -111342,7 +111348,7 @@ async def handle_cskh_continuity_message(update: Update, context: ContextTypes.D
             classification=classification,
             send_notice=send_closing_notice,
         )
-    return confirmed
+    return True
 
 async def handle_support_ticket_attachment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.effective_user or not update.message:
@@ -111898,7 +111904,7 @@ async def handle_aichat_message(update: Update, context: ContextTypes.DEFAULT_TY
                 classification=result,
                 send_notice=send_closing_notice,
             )
-        return confirmed
+        return True
     delivered_text = str(result.get("reply") or "")
     sent = await update.message.reply_text(
         delivered_text,
@@ -111918,7 +111924,7 @@ async def handle_aichat_message(update: Update, context: ContextTypes.DEFAULT_TY
             classification=result,
             send_notice=send_closing_notice,
         )
-    return confirmed
+    return True
 
 async def cmd_cskh_business_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not is_admin_user(update.effective_user.id):

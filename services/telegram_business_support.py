@@ -2481,14 +2481,29 @@ def _apply_shared_doc_answer(
 
 
 _CONTINUITY_VIDEO_PACKAGE_GUIDE_TOKENS = (
-    "huong dan tao video",
     "chon video",
     "chon goi",
     "xem hoa don",
 )
+_CONTINUITY_VIDEO_THREE_STEP_GUIDE_REPLY = (
+    "Dạ mình làm video theo 3 bước: 1. chọn Video và gửi mô tả hoặc ảnh; 2. chọn gói video; "
+    "3. xem hóa đơn rồi tự xác nhận. Chưa xác nhận thì bot chưa tạo video và chưa trừ Xu ạ."
+)
 _CONTINUITY_VIDEO_PACKAGE_REPLY = (
     "Dạ ở bước 2, anh/chị chọn gói video phù hợp nhu cầu. Bot sẽ hiện giá Xu và phần mô tả của từng gói để mình xem trước. "
     "Khi chọn xong, bot mới đưa mình sang hóa đơn để tự xác nhận; ở bước này chưa tạo video và chưa trừ Xu ạ."
+)
+_CONTINUITY_COSMETICS_PRICING_REPLY = (
+    "Dạ với sản phẩm mỹ phẩm, chi phí sẽ khác giữa làm video và tạo ảnh. "
+    "Anh/chị đang cần làm video hay tạo ảnh để em báo đúng giá Xu theo gói hiện tại ạ?"
+)
+_CONTINUITY_CHARGED_NO_FILE_REPLY = (
+    "Dạ em hiểu đây là mã cho việc anh/chị báo đã trừ Xu nhưng chưa có file. "
+    "Anh/chị giữ lại mã và thời gian xử lý để admin đối soát kết quả thực tế; em không tự hứa hoàn Xu trước khi kiểm tra ạ."
+)
+_CONTINUITY_CHARGED_NO_FILE_STATUS_REPLY = (
+    "Dạ em hiểu anh/chị vẫn đang chờ file sau khi đã báo bị trừ Xu. "
+    "Anh/chị giữ lại mã và thời gian xử lý để admin đối soát kết quả thực tế; em không tự hứa hoàn Xu trước khi kiểm tra ạ."
 )
 
 
@@ -2514,6 +2529,53 @@ def _cross_surface_video_package_followup_requested(text: str, conversation_memo
         if all(token in prior for token in _CONTINUITY_VIDEO_PACKAGE_GUIDE_TOKENS):
             return True
     return False
+
+
+def _three_step_video_guide_requested(text: str) -> bool:
+    folded = _fold(text)
+    return (
+        "video" in folded
+        and any(term in folded for term in ("huong dan", "cach lam", "lam sao"))
+        and any(term in folded for term in ("3 buoc", "ba buoc"))
+    )
+
+
+def _apply_three_step_video_guide(result: dict, text: str) -> dict:
+    if not _three_step_video_guide_requested(text):
+        return result
+    updated = dict(result)
+    updated.update(
+        {
+            "intent": "guide_video_three_steps",
+            "intent_id": "guide_video_three_steps",
+            "product": "product_video",
+            "primary_product": "product_video",
+            "secondary_products": [],
+            "mixed_intent": False,
+            "knowledge_entry_id": "",
+            "reply": _CONTINUITY_VIDEO_THREE_STEP_GUIDE_REPLY,
+            "reply_preview": _CONTINUITY_VIDEO_THREE_STEP_GUIDE_REPLY,
+            "reply_template_id": "continuity:video_three_steps",
+            "confidence": "high",
+            "severity": "normal",
+            "handoff": False,
+            "handoff_required": False,
+            "ticket": False,
+            "ticket_required": False,
+            "learning_queue": False,
+            "would_queue_learning": False,
+            "context_carry_used": False,
+            "human_last_reply_required": True,
+            "previous_topic": "video",
+            "last_product_type": "product_video",
+        }
+    )
+    updated.pop("ticket_preview", None)
+    updated["source"] = list(dict.fromkeys([*(updated.get("source") or []), "cross_surface_continuity"]))
+    policy = detect_policy_claims(updated["reply"], pricing_source=str(updated.get("pricing_source") or "unknown"))
+    updated["playbook_policy_claims"] = policy
+    updated["public_safe"] = public_reply_is_safe(updated["reply"]) and not bool(policy.get("unsafe"))
+    return updated
 
 
 def _apply_cross_surface_video_package_followup(result: dict, text: str, conversation_memory: dict | None) -> dict:
@@ -2544,6 +2606,174 @@ def _apply_cross_surface_video_package_followup(result: dict, text: str, convers
             "human_last_reply_required": True,
             "previous_topic": "video",
             "last_product_type": "product_video",
+        }
+    )
+    updated.pop("ticket_preview", None)
+    updated["source"] = list(dict.fromkeys([*(updated.get("source") or []), "cross_surface_continuity"]))
+    policy = detect_policy_claims(updated["reply"], pricing_source=str(updated.get("pricing_source") or "unknown"))
+    updated["playbook_policy_claims"] = policy
+    updated["public_safe"] = public_reply_is_safe(updated["reply"]) and not bool(policy.get("unsafe"))
+    return updated
+
+
+def _cross_surface_cosmetics_pricing_followup_requested(text: str, conversation_memory: dict | None) -> bool:
+    """Recognize one narrow cosmetics-price follow-up from a recent customer turn.
+
+    Stored turns remain untrusted. This accepts only a fixed product-category
+    token and returns fixed clarification copy; it never replays history or
+    interprets instructions from it.
+    """
+    folded = _fold(text)
+    if "gia" not in folded or not any(term in folded for term in ("sao", "bao nhieu", "bao gia", "phi")):
+        return False
+    turns = (conversation_memory or {}).get("turns") if isinstance(conversation_memory, dict) else []
+    if not isinstance(turns, list):
+        return False
+    for turn in reversed(turns):
+        if not isinstance(turn, dict) or str(turn.get("role") or "") != "user":
+            continue
+        if str(turn.get("surface") or "") not in {"bot_menu", "cskh", "aichat"}:
+            continue
+        if "my pham" in _fold(str(turn.get("content") or "")):
+            return True
+    return False
+
+
+def _continuity_minimum_xu(runtime_facts: dict | None, key: str) -> int | float | None:
+    facts = runtime_facts if isinstance(runtime_facts, dict) and runtime_facts.get("available") is True else {}
+    values = facts.get(key) if isinstance(facts, dict) else []
+    if not isinstance(values, (list, tuple)):
+        return None
+    amounts = []
+    for row in values:
+        try:
+            value = row[1] if isinstance(row, (list, tuple)) and len(row) > 1 else None
+            if value is not None and float(value) >= 0:
+                amounts.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    if not amounts:
+        return None
+    minimum = min(amounts)
+    return int(minimum) if minimum.is_integer() else minimum
+
+
+def _format_continuity_xu(value: int | float) -> str:
+    return f"{value:g} Xu"
+
+
+def _continuity_cosmetics_pricing_reply(runtime_facts: dict | None) -> str:
+    image_minimum = _continuity_minimum_xu(runtime_facts, "image_tiers")
+    video_minimum = _continuity_minimum_xu(runtime_facts, "video_tiers")
+    if image_minimum is None or video_minimum is None:
+        return _CONTINUITY_COSMETICS_PRICING_REPLY
+    return (
+        "Dạ với sản phẩm mỹ phẩm, giá hiện tại: tạo ảnh từ "
+        f"{_format_continuity_xu(image_minimum)}, làm video từ {_format_continuity_xu(video_minimum)}. "
+        "Anh/chị đang cần làm video hay tạo ảnh để em báo đúng giá Xu theo gói hiện tại ạ?"
+    )
+
+
+def _apply_cross_surface_cosmetics_pricing_followup(
+    result: dict,
+    text: str,
+    conversation_memory: dict | None,
+    runtime_facts: dict | None,
+) -> dict:
+    if not _cross_surface_cosmetics_pricing_followup_requested(text, conversation_memory):
+        return result
+    reply = _continuity_cosmetics_pricing_reply(runtime_facts)
+    pricing_source = str((runtime_facts or {}).get("source") or result.get("pricing_source") or "unknown")
+    updated = dict(result)
+    updated.update(
+        {
+            "intent": "continuity_cosmetics_pricing_clarifier",
+            "intent_id": "continuity_cosmetics_pricing_clarifier",
+            "product": "general",
+            "primary_product": "general",
+            "secondary_products": [],
+            "mixed_intent": False,
+            "knowledge_entry_id": "",
+            "reply": reply,
+            "reply_preview": reply,
+            "reply_template_id": "continuity:cosmetics_pricing_clarifier",
+            "pricing_source": pricing_source,
+            "confidence": "high",
+            "severity": "normal",
+            "handoff": False,
+            "handoff_required": False,
+            "ticket": False,
+            "ticket_required": False,
+            "learning_queue": False,
+            "would_queue_learning": False,
+            "context_carry_used": True,
+            "human_last_reply_required": True,
+            "previous_topic": "mỹ phẩm",
+            "last_product_type": "cosmetics",
+        }
+    )
+    updated.pop("ticket_preview", None)
+    updated["source"] = list(dict.fromkeys([*(updated.get("source") or []), "cross_surface_continuity"]))
+    policy = detect_policy_claims(updated["reply"], pricing_source=str(updated.get("pricing_source") or "unknown"))
+    updated["playbook_policy_claims"] = policy
+    updated["public_safe"] = public_reply_is_safe(updated["reply"]) and not bool(policy.get("unsafe"))
+    return updated
+
+
+def _cross_surface_charged_no_file_followup_requested(text: str, conversation_memory: dict | None) -> bool:
+    """Recognize a safe support-code/status follow-up for a prior no-file complaint."""
+    folded = _fold(text)
+    has_current_reference = (
+        ("ma" in folded and ("cua toi" in folded or "xu ly" in folded))
+        or "sao van chua co" in folded
+        or "van chua co" in folded
+    )
+    if not has_current_reference:
+        return False
+    turns = (conversation_memory or {}).get("turns") if isinstance(conversation_memory, dict) else []
+    if not isinstance(turns, list):
+        return False
+    for turn in reversed(turns):
+        if not isinstance(turn, dict) or str(turn.get("role") or "") != "user":
+            continue
+        if str(turn.get("surface") or "") not in {"bot_menu", "cskh", "aichat"}:
+            continue
+        prior = _fold(str(turn.get("content") or ""))
+        if "tru xu" in prior and any(token in prior for token in ("khong co file", "chua co file", "khong ra video", "chua thay video")):
+            return True
+    return False
+
+
+def _apply_cross_surface_charged_no_file_followup(result: dict, text: str, conversation_memory: dict | None) -> dict:
+    if not _cross_surface_charged_no_file_followup_requested(text, conversation_memory):
+        return result
+    folded = _fold(text)
+    reply = _CONTINUITY_CHARGED_NO_FILE_REPLY if "ma" in folded and ("cua toi" in folded or "xu ly" in folded) else _CONTINUITY_CHARGED_NO_FILE_STATUS_REPLY
+    updated = dict(result)
+    updated.update(
+        {
+            "intent": "continuity_charged_no_file_reference",
+            "intent_id": "continuity_charged_no_file_reference",
+            "product": "general",
+            "primary_product": "general",
+            "secondary_products": [],
+            "mixed_intent": False,
+            "knowledge_entry_id": "",
+            "reply": reply,
+            "reply_preview": reply,
+            "reply_template_id": "continuity:charged_no_file_reference",
+            "confidence": "high",
+            "severity": "normal",
+            "handoff": False,
+            "handoff_required": False,
+            "ticket": False,
+            "ticket_required": False,
+            "learning_queue": False,
+            "would_queue_learning": False,
+            "context_carry_used": True,
+            "human_last_reply_required": True,
+            "previous_topic": "charged_no_file",
+            "last_product_type": "support",
         }
     )
     updated.pop("ticket_preview", None)
@@ -2670,6 +2900,9 @@ def classify_cskh_message(
         result["ticket_preview"] = build_ticket_draft(result, text=text)
     result = _apply_pricing_table_thread_hint(text, result, runtime_facts=runtime_facts)
     result = _context_aware_greeting_reply(text, result, conversation_memory)
+    result = _apply_three_step_video_guide(result, text)
+    result = _apply_cross_surface_cosmetics_pricing_followup(result, text, conversation_memory, runtime_facts)
+    result = _apply_cross_surface_charged_no_file_followup(result, text, conversation_memory)
     return _apply_cross_surface_video_package_followup(result, text, conversation_memory)
 
 

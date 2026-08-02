@@ -282,6 +282,15 @@ def test_memory_closing_notice_is_plain_language_for_the_configured_window():
     assert "phiên" not in notice.lower()
 
 
+def test_memory_closing_notice_accepts_a_confirmed_nested_raw_business_message():
+    assert memory.notice_delivery_confirmed(
+        {"ok": True, "result": {"message_id": 2}}
+    )
+    assert not memory.notice_delivery_confirmed(
+        {"ok": False, "result": {"message_id": 2}}
+    )
+
+
 def test_memory_redacts_complete_private_paths_and_rejects_unsafe_source_keys():
     clean, redacted = memory.sanitize_content(
         "Đường dẫn /etc/ssh/ssh_host_ed25519_key; "
@@ -824,9 +833,13 @@ def _continuity_history_for_video_package(conn, *, surface: str, owner_id: str, 
         chat_id=chat_id,
         surface=surface,
         role="user",
-        content="Hướng dẫn giúp tôi tạo video.",
+        content="Hướng dẫn 3 bước tạo video.",
         source_message_id="901",
         now=1000,
+    )
+    guide = cskh.classify_cskh_message(
+        "Hướng dẫn 3 bước tạo video.",
+        runtime_facts=RUNTIME_FACTS,
     )
     memory.record_turn(
         conn,
@@ -834,7 +847,7 @@ def _continuity_history_for_video_package(conn, *, surface: str, owner_id: str, 
         chat_id=chat_id,
         surface=surface,
         role="assistant",
-        content="Hướng dẫn tạo video: 1. chọn Video, 2. chọn gói, 3. xem hóa đơn.",
+        content=guide["reply"],
         source_message_id="reply:901",
         session_id=first.session_id,
         now=1001,
@@ -897,6 +910,131 @@ def test_integration_cross_surface_video_package_followup_is_safe_and_answer_onl
     assert result.get("xu_charge_allowed", False) is False
     assert "provider" not in result["reply"].lower()
     assert "job" not in result["reply"].lower()
+
+
+def test_integration_cskh_to_aichat_carries_cosmetics_topic_before_a_price_followup():
+    conn = _memory_connection()
+    memory.record_turn(
+        conn,
+        owner_id="10002",
+        chat_id="20002",
+        surface="cskh",
+        role="user",
+        content="Tôi làm mỹ phẩm.",
+        source_message_id="911",
+        now=1000,
+    )
+    context = memory.load_recent_session(
+        conn,
+        owner_id="10002",
+        chat_id="20002",
+        now=1001,
+        session_window_hours=48,
+        recent_turn_limit=8,
+        character_budget=1000,
+    )
+
+    _state, result = aichat.process_message(
+        _enabled_aichat_state("10002"),
+        "10002",
+        "Vậy giá sao?",
+        queue_unknown=False,
+        entry_source="continuity_integration",
+        conversation_memory=context,
+        runtime_facts=RUNTIME_FACTS,
+    )
+
+    assert result["intent_id"] == "continuity_cosmetics_pricing_clarifier"
+    assert "mỹ phẩm" in result["reply"].lower()
+    assert "video" in result["reply"].lower()
+    assert "ảnh" in result["reply"].lower()
+    assert "51 Xu" in result["reply"]
+    assert "333 Xu" in result["reply"]
+    assert result["pricing_source"] == "runtime_canonical"
+    assert result["ticket"] is False
+    assert result["handoff"] is False
+    assert result.get("provider_call_allowed", False) is False
+    assert result.get("xu_charge_allowed", False) is False
+
+    bot_source = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
+    allowed_intents = bot_source.split("CSKH_CONTINUITY_SAFE_INTENTS =", 1)[1].split("def cskh_continuity_reply_allowed", 1)[0]
+    assert '"continuity_cosmetics_pricing_clarifier"' in allowed_intents
+
+
+def test_integration_aichat_to_cskh_keeps_a_charged_no_file_complaint_context():
+    conn = _memory_connection()
+    first = memory.record_turn(
+        conn,
+        owner_id="10003",
+        chat_id="20003",
+        surface="aichat",
+        role="user",
+        content="Bot trừ Xu mà không có file.",
+        source_message_id="921",
+        now=1000,
+    )
+    memory.record_turn(
+        conn,
+        owner_id="10003",
+        chat_id="20003",
+        surface="aichat",
+        role="assistant",
+        content="Dạ em xin lỗi, anh/chị gửi mã xử lý để kiểm tra giúp em ạ.",
+        source_message_id="reply:921",
+        session_id=first.session_id,
+        now=1001,
+    )
+    context = memory.load_recent_session(
+        conn,
+        owner_id="10003",
+        chat_id="20003",
+        now=1002,
+        session_window_hours=48,
+        recent_turn_limit=8,
+        character_budget=1000,
+    )
+
+    result = cskh.classify_cskh_message(
+        "Mã của tôi là #ABC-123.",
+        conversation_memory=context,
+        runtime_facts=RUNTIME_FACTS,
+    )
+
+    assert result["intent_id"] == "continuity_charged_no_file_reference"
+    assert "trừ xu" in result["reply"].lower()
+    assert "file" in result["reply"].lower()
+    assert "hứa hoàn xu" in result["reply"].lower()
+    assert result["ticket"] is False
+    assert result["handoff"] is False
+    assert result.get("provider_call_allowed", False) is False
+    assert result.get("xu_charge_allowed", False) is False
+
+    bot_source = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
+    allowed_intents = bot_source.split("CSKH_CONTINUITY_SAFE_INTENTS =", 1)[1].split("def cskh_continuity_reply_allowed", 1)[0]
+    assert '"continuity_charged_no_file_reference"' in allowed_intents
+
+
+def test_integration_charged_no_file_status_followup_does_not_claim_the_customer_sent_a_code():
+    context = {
+        "turns": [
+            {
+                "role": "user",
+                "surface": "aichat",
+                "content": "Bot trừ Xu mà không ra video.",
+            }
+        ]
+    }
+
+    result = cskh.classify_cskh_message(
+        "Sao vẫn chưa có?",
+        conversation_memory=context,
+        runtime_facts=RUNTIME_FACTS,
+    )
+
+    assert result["intent_id"] == "continuity_charged_no_file_reference"
+    assert "vẫn đang chờ file" in result["reply"].lower()
+    assert "đây là mã" not in result["reply"].lower()
+    assert "hứa hoàn xu" in result["reply"].lower()
 
 
 def _bot_live_pricing_helper():
@@ -1140,4 +1278,20 @@ def test_integration_runtime_handlers_use_shared_context_without_legacy_or_paid_
     assert "create_or_append_support_ticket" not in continuity_handler
     assert "add_learning_candidate" not in continuity_handler
     assert "cskh_finalize_delivered_reply" in continuity_handler
+    assert 'chat_type != "private"' in continuity_handler
     assert dispatch.index("handle_cskh_continuity_message") < dispatch.index("handle_support_persona_message")
+    assert dispatch.index("handle_support_pending_input") < dispatch.index("handle_cskh_continuity_message")
+
+
+def test_integration_private_handlers_consume_a_successful_reply_even_without_a_message_id():
+    source = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
+    aichat_handler = source.split("async def handle_aichat_message", 1)[1].split("async def cmd_cskh_business_status", 1)[0]
+    continuity_handler = source.split("async def handle_cskh_continuity_message", 1)[1].split("async def handle_support_ticket_attachment", 1)[0]
+
+    # A completed Telegram await is consumed. Durable CSKH persistence remains
+    # behind the stricter acknowledgement check, but lower handlers must not
+    # emit a second reply merely because a test/delivery wrapper omits message_id.
+    assert "return confirmed" not in continuity_handler
+    assert "return confirmed" not in aichat_handler
+    assert continuity_handler.rstrip().endswith("return True")
+    assert aichat_handler.rstrip().endswith("return True")
