@@ -4,7 +4,7 @@
 
 **Goal:** Add a read-only `📊 Trạng thái chỉnh sửa` entry inside Video Edit that reopens the requesting user's latest canonical local-edit job and keeps all status refresh callbacks usable without pending session state.
 
-**Architecture:** Reuse the existing Video Edit six-stage status renderer and exact-job refresh keyboard. Add one bounded database read helper filtered by `user_id` and `video_editengine1.WORKER_JOB_TYPE`, one hub callback, and Vietnamese empty/unavailable views. Keep `latest_status`, `status`, and legacy `ai_status` stateless and separate from Product Video status/state.
+**Architecture:** Reuse and localize the existing Video Edit six-stage status renderer and exact-job refresh keyboard. Add one bounded database read helper filtered by `user_id` and `video_editengine1.WORKER_JOB_TYPE`, revalidate ownership/type at the callback boundary, and provide localized empty/unavailable views. Keep `latest_status`, `status`, and legacy `ai_status` stateless and separate from Product Video status/state.
 
 **Tech Stack:** Python 3.12, python-telegram-bot inline callbacks, SQLite, pytest, existing TOAN AAS Video Edit state/engine contracts.
 
@@ -13,7 +13,8 @@
 ## File map
 
 - Modify `bot.py`: add the hub row, route contract child, latest-owned-job read helper, empty/unavailable renderer, and stateless callback routing.
-- Create `tests/test_p0_videoedit_latest_status_navigation.py`: focused runtime tests for layout, ownership, empty/error behavior, refresh after hub state clear, and zero-side-effect isolation.
+- Modify `services/video_editengine1.py`: split the existing canonical-job row decoder from schema preparation and expose a SELECT-only status reader.
+- Create `tests/test_p0_videoedit_latest_status_navigation.py`: focused runtime tests for layout, ownership and type revalidation, saved-language rendering, sanitized empty/error behavior, refresh after hub state clear, and zero-side-effect isolation.
 - Modify `tests/test_p0_video_edit3_compact_manual_flow.py`: update the exact public hub/route contract lock without weakening the four-primary-action invariant.
 - Modify `tests/test_p1_localvideostudio27b_public_ui.py`: preserve the exact flag-off/flag-on row matrix while accounting for the independent status row.
 - Modify `tests/test_p0_videoedit_canonical_bot_routes.py`: lock `status` and `ai_status` as read-only stateless callbacks.
@@ -344,6 +345,7 @@ git commit -m "test(video-edit): lock latest status navigation"
 
 **Files:**
 - Modify: `bot.py`
+- Modify: `services/video_editengine1.py`
 
 - [ ] **Step 1: Add the latest-owned-job query beside the existing worker-job readers**
 
@@ -370,6 +372,15 @@ def get_latest_video_editor_job(user_id) -> dict:
 
 This function has no mutation, no admin exception, no fallback job type, and no
 media/body read.
+
+- [ ] **Step 1a: Make canonical receipt lookup SELECT-only for status reads**
+
+Extract the row query/decoder currently inside `get_job_by_worker_id()` into one
+private helper. Keep `get_job_by_worker_id()` behavior unchanged by calling
+`ensure_schema()` before the private helper. Add
+`get_job_by_worker_id_readonly()` that calls only the private query/decoder and
+never `ensure_schema()`. Change `video_editengine1_job_for_worker()` to use this
+read-only function and keep its fail-closed SQLite error handling.
 
 - [ ] **Step 2: Add the secondary hub row and public route contract child**
 
@@ -460,8 +471,8 @@ if action == "latest_status":
         job = get_latest_video_editor_job(uid)
     except sqlite3.Error as exc:
         logger.warning(
-            "videoedit latest status lookup failed | error=%s",
-            sanitize_log_text(str(exc))[:180],
+            "videoedit latest status lookup failed | error_type=%s",
+            type(exc).__name__,
         )
         return await safe_edit_or_send(
             query,
@@ -469,7 +480,12 @@ if action == "latest_status":
             parse_mode="HTML",
             reply_markup=video_editor_latest_status_fallback_keyboard(lang),
         )
-    if not job:
+    if (
+        not job
+        or str(job.get("user_id") or "") != str(uid)
+        or str(job.get("job_type") or "") != video_editengine1.WORKER_JOB_TYPE
+        or safe_int(job.get("id"), 0) <= 0
+    ):
         return await safe_edit_or_send(
             query,
             video_editor_latest_status_empty_text(lang),
@@ -490,10 +506,41 @@ product's state, requeue work, deliver media, or change accounting.
 
 - [ ] **Step 6: Run focused GREEN tests**
 
+Before GREEN, add the saved-language test requiring the English six-stage
+equivalents and the defense-in-depth tests that inject a foreign-user row and a
+Product Video row directly at the callback seam. Also capture the warning call
+and require that the private SQLite path is absent from diagnostic text. Add a
+SELECT-trace test proving canonical receipt reads execute no DDL, plus a raw
+`delivered`-stage test requiring delivery-uncertain truth until the canonical
+receipt is complete.
+
 Run the exact Task 1 command again.
 
 Expected: all selected tests pass; there are no newly deselected or skipped
 nodes and the previously recorded failures are closed by production behavior.
+
+The minimal delivery truth rule is exact:
+
+```python
+delivered_truth = canonical_terminal and complete_canonical_receipt
+delivery_uncertain = (
+    canonical_status == "delivery_unknown"
+    or stage == "delivery_unknown"
+    or (stage == "delivered" and not delivered_truth)
+    or (canonical_status in {"delivered", "charged"} and not delivered_truth)
+)
+```
+
+When `delivery_uncertain` is true, clamp completed progress to five steps and
+mark only `Deliver result` / `Gửi kết quả` with `⚠️`. Never infer a percentage,
+completed sixth step, resend, retry, replay, job submit, or charge from raw
+worker progress.
+
+The English renderer must translate every user-visible element, not only the
+keyboard: title, public status, job code/confirmed-price labels, Progress,
+the six stage labels, split-part counters, result truth, no-charge/charge
+truth, and the waiting/failure/delivery-uncertain explanations. Internal
+contract values remain unchanged.
 
 - [ ] **Step 7: Commit the production implementation as the third task commit**
 
@@ -549,6 +596,13 @@ scans from the completion-hardening plan and require zero new findings.
 
 ### Task 4: Review, latest-main integration, and ship gate
 
+> **Owner follow-up (2026-08-02):** after the complete CPU queue is released,
+> the owner authorized batching the remaining verification gates, opening the
+> PR, waiting for CI, and merging the feature with a merge commit when every
+> gate is green. This follow-up supersedes the earlier stop-after-PR wording
+> below. The post-merge check remains navigation/read-only unless the owner
+> separately authorizes production media execution.
+
 **Files:**
 - Review all branch files; modify only in response to a proven Video Edit blocker.
 
@@ -563,7 +617,7 @@ before a fix.
 
 ```powershell
 git log --oneline --decorate origin/main..HEAD
-git show --stat --oneline b9aa99d
+git log --reverse --format="%H %s" origin/main..HEAD
 ```
 
 Expected logical commits:
@@ -595,8 +649,13 @@ Use `--force-with-lease` only if the already-published branch was rebased. Do
 not squash or merge. Record design/test/implementation SHAs, pushed PR head,
 changed-file scope, non-draft state, and the initial CI/check status honestly.
 
-- [ ] **Step 6: Stop after the PR opens**
+- [ ] **Step 6: Merge and perform the authorized safe live gate**
 
-Do not merge. Do not deploy Railway, change ENV, touch VPS/worker/webhook, run
-production Telegram smoke, upload media, call providers/workers, create jobs,
-mutate wallet/Xu, or deliver media unless the owner opens a separate gate.
+After the non-draft PR is open, require GitHub CI PASS on the exact head and
+verify the changed-file scope. Merge with a merge commit (never squash), then
+record the merge SHA, new main SHA, and two-parent ancestry. Allow Railway's
+normal post-merge deployment check only; do not manually redeploy or change
+ENV/VPS/worker/webhook. Run a read-only/navigation live smoke for the status
+entry and existing Video Edit Back hierarchy. Do not upload production media,
+call providers/workers, create jobs, mutate wallet/Xu, or deliver media unless
+the owner opens a separate execution gate.

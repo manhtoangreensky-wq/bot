@@ -13,9 +13,11 @@ This is a read-only navigation addition. Opening or refreshing status must not
 create a job, call a provider or worker, upload or deliver media, generate paid
 content, or mutate Xu/wallet state.
 
-Shipping is limited to one branch and one non-draft pull request. The task stops
-after opening the PR: no merge, deployment, ENV change, or production media
-smoke is authorized.
+Shipping is limited to one branch and one non-draft pull request. The original
+design gate stopped after opening the PR; a later owner decision authorizes a
+merge commit after CI and all regression gates pass. The post-merge check is
+read-only/navigation-only: no ENV change, manual deployment, production media,
+provider/worker execution, job creation, billing, wallet mutation, or delivery.
 
 ## Alternatives considered
 
@@ -62,6 +64,11 @@ When the user has a Video Edit job, the entry opens the existing
 - `🔄 Cập nhật trạng thái` for the exact job;
 - Back to `videoedit|hub`.
 
+Every status, empty, unavailable, refresh, and Back view follows the user's
+saved UI language. Vietnamese remains the default and canonical public copy;
+an account saved as English receives the equivalent English six-stage panel
+instead of a mixed-language screen.
+
 When no owned job exists, the bot shows a Vietnamese empty state explaining
 that no Video Edit task has been submitted yet. It provides Back to Video Edit
 and Main menu only. It does not redirect into upload, create editor state, or
@@ -78,6 +85,16 @@ constraints:
 - a limit of one row;
 - the same public row shape used by `get_local_worker_job()`;
 - database connection closed on success and failure.
+
+The canonical receipt lookup used by the six-stage renderer is also a strict
+`SELECT` path. It must not call `ensure_schema()`, execute DDL, create a table,
+or begin a write transaction merely because the user opens or refreshes
+status. Missing legacy tables/columns fail closed to non-completed truth.
+
+The callback revalidates the returned row's exact `user_id`, canonical Video
+Edit `job_type`, and positive job ID before rendering. This second boundary is
+deliberate defense in depth: a malformed row or future lookup regression is
+handled as the same private empty state and cannot become a cross-user view.
 
 An admin/owner pressing the hub entry still sees only their own latest job.
 Admin status access to an explicitly supplied job ID remains unchanged, but the
@@ -100,6 +117,11 @@ evidence: terminal canonical status, created receipt, Telegram delivery IDs,
 positive output size, output hash, and successful ffprobe evidence. Missing or
 contradictory evidence must not render a false success. The UI does not invent
 a percentage when the worker supplies only stage-level progress.
+
+A raw worker progress stage named `delivered` without that canonical evidence
+is not sufficient. It is rendered as delivery-uncertain, keeps the sixth
+`Gửi kết quả` step uncompleted/flagged, performs no resend, and performs no
+charge.
 
 ## Callback, state, and Back behavior
 
@@ -129,8 +151,9 @@ authorization for an exact ID); neither may create or restore editor state.
 
 ## Error handling and privacy
 
-- A missing table or database read failure is logged with sanitized context and
-  returns a generic Vietnamese unavailable message; raw SQL, paths, Telegram
+- A missing table or database read failure is logged with a bounded generic
+  error category and returns a generic localized unavailable message; raw SQL,
+  paths, Telegram
   IDs, secrets, or exception text are not exposed.
 - A missing job is a normal empty state, not an error.
 - A job belonging to another user is indistinguishable from no owned job.
@@ -154,10 +177,17 @@ behavior. Focused coverage includes:
 - admin/owner hub entry does not expose another user's job;
 - no-job and database-failure views are Vietnamese, bounded, and correctly
   back-routed;
+- saved Vietnamese/English UI language is preserved by the six-stage panel,
+  keyboard, empty state, and unavailable state;
+- a malformed foreign-user or non-Video-Edit row returned by the lookup is
+  rejected again by the callback;
 - repeated latest-status clicks are idempotent reads and do not create duplicate
   status panels/reports;
 - active, failed-no-charge, delivery-uncertain, delivered, and split-part
   progress render truthfully;
+- a raw delivered stage without canonical receipt evidence never completes the
+  sixth step;
+- canonical receipt status lookup executes SELECT only and never schema DDL;
 - refresh targets the exact job and performs no mutation;
 - callback-owner collision and cross-product-route counts remain zero;
 - provider/worker calls, created jobs, paid generations, wallet mutations, and
@@ -171,16 +201,24 @@ plus changed-file compile, `bot.py` tokenize/narrow AST, scope checks,
 
 ## Expected files
 
-The implementation is limited to:
+The latest-status feature delta is limited to:
 
 - `bot.py`: the Video Edit hub row, read-only latest-job helper, callback route,
   and empty/error copy;
+- `services/video_editengine1.py`: a SELECT-only receipt reader reused by the
+  status renderer without changing schema or write behavior;
 - focused Video Edit tests;
 - this design and its implementation plan.
 
 No database schema, service contract, worker, provider, wallet, deployment,
 Railway/VPS, webhook, Product Video, SubDub, Frame Video, or Local Video Studio
 source file is changed for this feature.
+
+The same owner branch also carries the already approved Video Edit completion-
+hardening work described in
+`docs/superpowers/plans/2026-07-31-video-edit-completion-hardening.md`; its
+worker/local-engine files are reviewed and verified as that earlier work, not
+as side effects of the status button.
 
 ## Completion criteria
 
