@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import copy
+import hashlib
 import html
 import inspect
 import math
 import re
 import time
 import uuid
+import weakref
 from typing import Any, Awaitable, Callable
 
 from services import local_video_studio_preview as catalog_source
@@ -72,6 +75,10 @@ _ALLOWED_VERBS = frozenset(
     {"open", "goal", "catalog", "detail", "select", "safety", "summary", "save", "back", "close"}
 )
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{4,12}$")
+_SUMMARY_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{64}$")
+_SESSION_TRANSACTION_LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+    weakref.WeakValueDictionary()
+)
 _SCREEN_HISTORY = {
     "goal": (),
     "catalog": ("goal",),
@@ -82,7 +89,7 @@ _SCREEN_HISTORY = {
 _SESSION_FIELDS = frozenset({
     "version", "session_id", "created_at", "updated_at", "screen", "history",
     "goal", "record_id", "selected_ids", "catalog_page", "detail_page",
-    "processed_callback_ids",
+    "processed_callback_ids", "saved_summary_fingerprint",
 })
 
 
@@ -179,6 +186,7 @@ def new_session(session_id: str | None = None, *, now: object | None = None) -> 
         "catalog_page": 0,
         "detail_page": 0,
         "processed_callback_ids": [],
+        "saved_summary_fingerprint": "",
     }
 
 
@@ -195,12 +203,32 @@ def session_store_key(user_id: object, chat_id: object, session_id: object) -> s
     return f"{uid}:{cid}:{sid}"
 
 
+def _transaction_lock(key: str) -> asyncio.Lock:
+    lock = _SESSION_TRANSACTION_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _SESSION_TRANSACTION_LOCKS[key] = lock
+    return lock
+
+
+def session_transaction_lock(
+    user_id: object,
+    chat_id: object,
+    session_id: object,
+) -> asyncio.Lock:
+    return _transaction_lock(f"session:{session_store_key(user_id, chat_id, session_id)}")
+
+
 def _active_chat_key(user_id: object, chat_id: object) -> str:
     uid = str(user_id or "").strip()
     cid = str(chat_id or "").strip()
     if not uid or not cid:
         raise PreviewActionError("chat_key_invalid")
     return f"{uid}:{cid}"
+
+
+def open_transaction_lock(user_id: object, chat_id: object) -> asyncio.Lock:
+    return _transaction_lock(f"open:{_active_chat_key(user_id, chat_id)}")
 
 
 def prune_store(
@@ -400,6 +428,11 @@ def _validate_state_shape(state: dict[str, object]) -> None:
         raise PreviewActionError("session_callback_history_invalid")
     if len(set(processed)) != len(processed):
         raise PreviewActionError("session_callback_history_duplicate")
+    saved_fingerprint = state.get("saved_summary_fingerprint")
+    if not isinstance(saved_fingerprint, str) or (
+        saved_fingerprint and not _SUMMARY_FINGERPRINT_RE.fullmatch(saved_fingerprint)
+    ):
+        raise PreviewActionError("session_saved_summary_fingerprint_invalid")
     created_at = _timestamp(state.get("created_at"))
     updated_at = _timestamp(state.get("updated_at"))
     if updated_at < created_at:
@@ -425,6 +458,8 @@ def normalize_session(session: object, *, now: object | None = None) -> dict[str
     if not isinstance(session, dict):
         raise PreviewActionError("session_invalid")
     state = copy.deepcopy(session)
+    # Preserve in-flight 27B sessions created before semantic report dedupe shipped.
+    state.setdefault("saved_summary_fingerprint", "")
     _validate_state_shape(state)
     if now is not None and not session_is_fresh(state, now=now):
         raise PublicSessionExpired("session_stale")
@@ -538,6 +573,10 @@ def _summary_payload(state: dict[str, object], payload: dict[str, object]) -> st
     return planning_summary_text(state, payload)
 
 
+def _summary_fingerprint(text: object) -> str:
+    return hashlib.sha256(str(text or "").encode("utf-8")).hexdigest()
+
+
 def apply_callback(
     session: object,
     callback_value: str,
@@ -577,6 +616,7 @@ def apply_callback(
         "exit_parent": False,
         "duplicate": False,
         "saved_text": "",
+        "saved_fingerprint": "",
         "feedback": "Đã cập nhật kế hoạch.",
     }
     if verb == "close":
@@ -682,7 +722,14 @@ def apply_callback(
     if verb == "save":
         if state["screen"] != "summary":
             raise PreviewActionError("save_step_invalid")
-        result["saved_text"] = _summary_payload(state, data)
+        saved_text = _summary_payload(state, data)
+        saved_fingerprint = _summary_fingerprint(saved_text)
+        if state["saved_summary_fingerprint"] == saved_fingerprint:
+            result["duplicate"] = True
+            result["feedback"] = "Bản tóm tắt này đã được gửi."
+            return result
+        result["saved_text"] = saved_text
+        result["saved_fingerprint"] = saved_fingerprint
         result["session"] = state
         result["feedback"] = "Đã gửi bản tóm tắt dạng text vào chat."
         return result
@@ -703,6 +750,23 @@ def commit_callback_id(
         state["processed_callback_ids"] = [*state["processed_callback_ids"], value][-64:]
         _touch(state, now)
     return state
+
+
+def commit_saved_summary_delivery(
+    session: object,
+    callback_id: object,
+    saved_fingerprint: object,
+    *,
+    now: object | None = None,
+) -> dict[str, object]:
+    state = normalize_session(session)
+    fingerprint = str(saved_fingerprint or "").strip()
+    if state["screen"] != "summary" or not _SUMMARY_FINGERPRINT_RE.fullmatch(fingerprint):
+        raise PreviewActionError("saved_summary_delivery_invalid")
+    state = commit_callback_id(state, callback_id, now=now)
+    state["saved_summary_fingerprint"] = fingerprint
+    _touch(state, now)
+    return normalize_session(state)
 
 
 def _label_for_goal(goal: str) -> str:
