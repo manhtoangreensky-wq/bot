@@ -325,7 +325,7 @@ Run:
 
 ```powershell
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
-C:\Users\toann\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m pytest -q --noconftest tests/test_p0_videoedit_latest_status_navigation.py tests/test_p0_video_edit3_compact_manual_flow.py tests/test_p1_localvideostudio27b_public_ui.py tests/test_p0_videoedit_canonical_bot_routes.py
+python -m pytest -q --noconftest tests/test_p0_videoedit_latest_status_navigation.py tests/test_p0_video_edit3_compact_manual_flow.py tests/test_p1_localvideostudio27b_public_ui.py tests/test_p0_videoedit_canonical_bot_routes.py
 ```
 
 Expected before implementation: failures specifically for missing
@@ -511,7 +511,7 @@ git commit -m "feat(video-edit): reopen latest job status"
 
 ```powershell
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
-C:\Users\toann\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m pytest -q --noconftest tests/test_p0_videoedit_latest_status_navigation.py tests/test_p0_videoedit_review_parent_hardening.py tests/test_p0_videoedit_canonical_bot_routes.py tests/test_p0_videoedit_canonical_navigation.py tests/test_p0_videoedit_back_hierarchy_adapter.py tests/test_p0_video_statusrestore18_old_status_only.py tests/test_p0_video_tailflow16_dedupe_summary_audio_status.py
+python -m pytest -q --noconftest tests/test_p0_videoedit_latest_status_navigation.py tests/test_p0_videoedit_review_parent_hardening.py tests/test_p0_videoedit_canonical_bot_routes.py tests/test_p0_videoedit_canonical_navigation.py tests/test_p0_videoedit_back_hierarchy_adapter.py tests/test_p0_video_statusrestore18_old_status_only.py tests/test_p0_video_tailflow16_dedupe_summary_audio_status.py
 ```
 
 Expected: PASS with no session-expiry failure for `latest_status`, `status`, or
@@ -522,7 +522,7 @@ remains green.
 
 ```powershell
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
-C:\Users\toann\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m pytest -q --noconftest tests/test_p0_video_editengine1_local_render_status_delivery.py tests/test_p0_video_editengine2_buttons_worker_heartbeat_package.py tests/test_p0_videoedit_canonical_local_runtime.py tests/test_p0_videoedit_canonical_local_worker_receipt.py tests/test_p0_videoedit_job_safety.py tests/test_p0_videoedit_local_free_job.py tests/test_p0_videoedit_split_receipt_checkpoint.py tests/test_p0_videoedit_real_media_matrix.py
+python -m pytest -q --noconftest tests/test_p0_video_editengine1_local_render_status_delivery.py tests/test_p0_video_editengine2_buttons_worker_heartbeat_package.py tests/test_p0_videoedit_canonical_local_runtime.py tests/test_p0_videoedit_canonical_local_worker_receipt.py tests/test_p0_videoedit_job_safety.py tests/test_p0_videoedit_local_free_job.py tests/test_p0_videoedit_split_receipt_checkpoint.py tests/test_p0_videoedit_real_media_matrix.py
 ```
 
 Expected: PASS; valid local media outputs and canonical receipt/delivery truth
@@ -538,8 +538,8 @@ comparators except for the intentionally added Video Edit status callback.
 - [ ] **Step 4: Run compile and static gates**
 
 ```powershell
-C:\Users\toann\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m py_compile bot.py local_worker.py services/video_edit_capabilities.py services/video_edit_state_machine.py services/video_editengine1.py services/video_local_editing.py services/video_local_validation.py
-C:\Users\toann\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -c "import pathlib,tokenize; f=pathlib.Path('bot.py').open('rb'); tokenize.tokenize(f.readline); f.close()"
+python -m py_compile bot.py local_worker.py services/video_edit_capabilities.py services/video_edit_state_machine.py services/video_editengine1.py services/video_local_editing.py services/video_local_validation.py
+python -c "import pathlib,tokenize; f=pathlib.Path('bot.py').open('rb'); tokenize.tokenize(f.readline); f.close()"
 git diff --check
 ```
 
@@ -589,14 +589,14 @@ this branch. Otherwise rebase without squashing and preserve all three commits.
 Expected: no new failure-set or collected-node delta versus the clean latest-main
 comparator; every intentionally changed exact-layout test is green.
 
-- [ ] **Step 5: Push, open PR, require CI PASS/CLEAN, and merge with a merge commit**
+- [ ] **Step 5: Push and open one non-draft PR**
 
 Use `--force-with-lease` only if the already-published branch was rebased. Do
-not squash. Record design/test/implementation SHAs, PR head, merge SHA, new main
-SHA, ancestry for all three commits, and two-parent merge proof.
+not squash or merge. Record design/test/implementation SHAs, pushed PR head,
+changed-file scope, non-draft state, and the initial CI/check status honestly.
 
-- [ ] **Step 6: Stop after merge**
+- [ ] **Step 6: Stop after the PR opens**
 
-Do not deploy Railway, change ENV, touch VPS/worker/webhook, run production
-Telegram smoke, upload media, call providers/workers, create jobs, mutate
-wallet/Xu, or deliver media unless the owner opens a separate deployment gate.
+Do not merge. Do not deploy Railway, change ENV, touch VPS/worker/webhook, run
+production Telegram smoke, upload media, call providers/workers, create jobs,
+mutate wallet/Xu, or deliver media unless the owner opens a separate gate.

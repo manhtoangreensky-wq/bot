@@ -2,10 +2,9 @@
 
 ## Approval and scope
 
-The owner requested that the useful video status/progress presentation also be
-available inside **Chỉnh sửa / Nâng cấp video**. The owner previously granted
-this task full authority over Video Edit and directed it to continue until the
-editor is genuinely useful. The selected design keeps status inside the
+The owner explicitly approved this design and requested that the useful video
+status/progress presentation also be available inside **Chỉnh sửa / Nâng cấp
+video**. The selected design keeps status inside the
 `videoedit|` namespace and does not change the top-level Video menu, Product
 Video, SubDub, Frame Video, Local Video Studio planning, provider routing,
 workers, accounting, deployment, or production configuration.
@@ -13,6 +12,10 @@ workers, accounting, deployment, or production configuration.
 This is a read-only navigation addition. Opening or refreshing status must not
 create a job, call a provider or worker, upload or deliver media, generate paid
 content, or mutate Xu/wallet state.
+
+Shipping is limited to one branch and one non-draft pull request. The task stops
+after opening the PR: no merge, deployment, ENV change, or production media
+smoke is authorized.
 
 ## Alternatives considered
 
@@ -107,7 +110,8 @@ a percentage when the worker supplies only stage-level progress.
 - it does not alter the canonical Video Edit pending session;
 - it cannot skip upload, review, confirmation, or execution;
 - it cannot accept a job ID supplied by the user;
-- duplicate clicks only repeat the same read and render;
+- duplicate clicks repeat the same deterministic read and edit the current
+  panel; they do not send or persist a second status report;
 - Back returns directly to `videoedit|hub`;
 - refresh continues to target the exact rendered job ID, so a newer job cannot
   silently replace the job while the user is inspecting it.
@@ -150,6 +154,8 @@ behavior. Focused coverage includes:
 - admin/owner hub entry does not expose another user's job;
 - no-job and database-failure views are Vietnamese, bounded, and correctly
   back-routed;
+- repeated latest-status clicks are idempotent reads and do not create duplicate
+  status panels/reports;
 - active, failed-no-charge, delivery-uncertain, delivered, and split-part
   progress render truthfully;
 - refresh targets the exact job and performs no mutation;
