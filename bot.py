@@ -9787,7 +9787,10 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
     if normalized_progress_type in product_progress_status.VIDEO_PROGRESS_TYPES:
         final_reconciled = safe_int((job or {}).get("final_progress_after_reconcile"), 0)
         if final_reconciled > 0:
-            payload["percent"] = final_reconciled
+            payload["percent"] = max(
+                safe_int(payload.get("percent"), 0),
+                final_reconciled,
+            )
         if (job or {}).get("provider_task_alive"):
             payload["current_stage"] = "generating_video"
             payload["terminal_state"] = ""
@@ -49974,6 +49977,8 @@ def video_render_debug_compact_text(
         f"• Job: <code>{safe_int(job_id, 0)}</code>",
         f"• Project: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
         f"• Product type: <code>{_video_debug_safe_value(product_type, 80)}</code>",
+        f"• final blocker: <code>{_video_debug_safe_value((result or {}).get('blocker') or (result or {}).get('provider_error') or (job or {}).get('last_error'), 180)}</code>",
+        f"• charge: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
         f"• Engine adapter: <code>{_video_debug_safe_value((engine_route or {}).get('adapter'), 100)}</code>",
         f"• orchestration mode: <code>{_video_debug_safe_value((result or {}).get('orchestration_mode'), 80)}</code>",
         f"• scene tasks: <code>{safe_int((result or {}).get('scene_tasks_submitted'), 0)}/{safe_int((result or {}).get('scene_tasks_total'), 0)}</code>",
@@ -50047,11 +50052,9 @@ def video_render_debug_compact_text(
         f"• poll skipped reason: <code>{_video_debug_safe_value((result or {}).get('poll_skipped_reason'), 100)}</code>",
         f"• provider error safe: <code>{_video_debug_safe_value((result or {}).get('provider_error_message_safe'), 180)}</code>",
         f"• provider error: <code>{_video_debug_safe_value((result or {}).get('provider_error'), 160)}</code>",
-        f"• final blocker: <code>{_video_debug_safe_value((result or {}).get('blocker') or (result or {}).get('provider_error') or (job or {}).get('last_error'), 180)}</code>",
         f"• visual source: <code>{_video_debug_safe_value((result or {}).get('visual_source'), 80)}</code>",
         f"• final classified as: <code>{_video_debug_safe_value((result or {}).get('visual_classification') or (result or {}).get('final_classification'), 80)}</code>",
         f"• terminal state: <code>{_video_debug_safe_value((project or {}).get('video_terminal_state') or (result or {}).get('terminal_state'), 80)}</code>",
-        f"• charge: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
         f"• artifact path: <code>{_video_debug_safe_value(final_path, 160)}</code>",
         f"• artifact exists: <code>{'yes' if (final_info or {}).get('exists') else 'no'}</code>",
         f"• artifact size: <code>{safe_int((final_info or {}).get('size'), 0)}</code>",
