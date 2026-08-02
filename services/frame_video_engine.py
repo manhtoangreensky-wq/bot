@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -101,8 +102,26 @@ def _mode(value: Any) -> str:
     return token
 
 
-def _aspect_ratio(value: Any) -> str:
+def _custom_dimensions(width: Any, height: Any) -> tuple[int, int]:
+    try:
+        parsed_width = int(width)
+        parsed_height = int(height)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("frame_custom_dimensions_invalid") from exc
+    if isinstance(width, bool) or isinstance(height, bool):
+        raise ValueError("frame_custom_dimensions_invalid")
+    parsed_width = min(4096, parsed_width) - min(4096, parsed_width) % 2
+    parsed_height = min(4096, parsed_height) - min(4096, parsed_height) % 2
+    if parsed_width < 100 or parsed_height < 100:
+        raise ValueError("frame_custom_dimensions_invalid")
+    return parsed_width, parsed_height
+
+
+def _aspect_ratio(value: Any, custom_width: Any = 0, custom_height: Any = 0) -> str:
     token = _clean(value).lower().replace("x", ":")
+    if token == "custom":
+        _custom_dimensions(custom_width, custom_height)
+        return token
     if token not in {"9:16", "16:9", "1:1", "4:5"}:
         raise ValueError("frame_aspect_ratio_unsupported")
     return token
@@ -113,9 +132,9 @@ def _duration(value: Any) -> float:
         raise ValueError("frame_duration_invalid")
     try:
         parsed = float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("frame_duration_invalid") from exc
-    if parsed < 0.5 or parsed > 30.0:
+    if not math.isfinite(parsed) or parsed < 0.5 or parsed > 30.0:
         raise ValueError("frame_duration_invalid")
     return round(parsed, 3)
 
@@ -192,6 +211,8 @@ class FrameVideoPlan:
     mode: str
     frames: tuple[FrameVideoFrame, ...]
     aspect_ratio: str
+    custom_width: int
+    custom_height: int
     transition: str
     transition_seconds: float
     transition_manifest: tuple[Mapping[str, Any], ...]
@@ -229,6 +250,8 @@ def _plan_material(plan: FrameVideoPlan) -> dict[str, Any]:
             for frame in plan.frames
         ],
         "aspect_ratio": plan.aspect_ratio,
+        "custom_width": plan.custom_width,
+        "custom_height": plan.custom_height,
         "transition": plan.transition,
         "transition_seconds": plan.transition_seconds,
         "transition_manifest": [_json_safe(item) for item in plan.transition_manifest],
@@ -249,6 +272,8 @@ def compile_frame_video_plan(
     frames: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
     mode: str,
     aspect_ratio: str = "9:16",
+    custom_width: Any = 0,
+    custom_height: Any = 0,
     transition: str = "fade",
     transition_seconds: float = 0.35,
     text_overlays: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]] = (),
@@ -277,9 +302,16 @@ def compile_frame_video_plan(
         if declared_index is not None:
             try:
                 parsed_index = int(declared_index)
-            except (TypeError, ValueError) as exc:
+            except (TypeError, ValueError, OverflowError) as exc:
                 raise ValueError("frame_order_invalid") from exc
-            if isinstance(declared_index, bool) or parsed_index != ordinal:
+            if (
+                isinstance(declared_index, bool)
+                or (
+                    isinstance(declared_index, float)
+                    and not declared_index.is_integer()
+                )
+                or parsed_index != ordinal
+            ):
                 raise ValueError("frame_order_invalid")
         asset_id = _clean(raw.get("asset_id"))
         if not asset_id:
@@ -303,7 +335,9 @@ def compile_frame_video_plan(
                 source_path=resolved,
                 source_sha256=fingerprint,
                 source_bytes=path.stat().st_size,
-                duration_seconds=_duration(raw.get("duration_seconds") or 3.0),
+                duration_seconds=_duration(
+                    raw["duration_seconds"] if "duration_seconds" in raw else 3.0
+                ),
                 motion=motion,
             )
         )
@@ -322,9 +356,9 @@ def compile_frame_video_plan(
     if len(compiled) > 1 and selected_transition != "none":
         try:
             requested_overlap = float(transition_seconds)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError("frame_transition_duration_invalid") from exc
-        if requested_overlap <= 0:
+        if not math.isfinite(requested_overlap) or requested_overlap <= 0:
             raise ValueError("frame_transition_duration_invalid")
         overlap = round(
             min(1.5, requested_overlap, min(item.duration_seconds for item in compiled) / 2.0),
@@ -352,10 +386,24 @@ def compile_frame_video_plan(
         sum(item.duration_seconds for item in compiled) - overlap * len(transitions),
         3,
     )
+    selected_aspect_ratio = _aspect_ratio(
+        aspect_ratio,
+        custom_width=custom_width,
+        custom_height=custom_height,
+    )
+    selected_custom_width = 0
+    selected_custom_height = 0
+    if selected_aspect_ratio == "custom":
+        selected_custom_width, selected_custom_height = _custom_dimensions(
+            custom_width,
+            custom_height,
+        )
     provisional = FrameVideoPlan(
         mode=selected_mode,
         frames=tuple(compiled),
-        aspect_ratio=_aspect_ratio(aspect_ratio),
+        aspect_ratio=selected_aspect_ratio,
+        custom_width=selected_custom_width,
+        custom_height=selected_custom_height,
         transition=selected_transition,
         transition_seconds=overlap,
         transition_manifest=transitions,
@@ -387,6 +435,25 @@ def validate_frame_video_plan(plan: FrameVideoPlan) -> dict[str, Any]:
         return {"ok": False, "blocker": "multi_frame_mode_requires_multiple_frames"}
     if count > frame_video_runtime.FRAME_VIDEO_MAX_IMAGES:
         return {"ok": False, "blocker": "too_many_frames"}
+    if plan.aspect_ratio == "custom":
+        try:
+            normalized_dimensions = _custom_dimensions(
+                plan.custom_width,
+                plan.custom_height,
+            )
+        except ValueError:
+            return {"ok": False, "blocker": "frame_custom_dimensions_invalid"}
+        if normalized_dimensions != (plan.custom_width, plan.custom_height):
+            return {"ok": False, "blocker": "frame_custom_dimensions_invalid"}
+    elif plan.custom_width or plan.custom_height:
+        return {"ok": False, "blocker": "frame_custom_dimensions_invalid"}
+    if (
+        not math.isfinite(plan.transition_seconds)
+        or plan.transition_seconds < 0
+        or not math.isfinite(plan.expected_duration_seconds)
+        or plan.expected_duration_seconds <= 0
+    ):
+        return {"ok": False, "blocker": "frame_duration_invalid"}
     if [frame.frame_index for frame in plan.frames] != list(range(1, count + 1)):
         return {"ok": False, "blocker": "frame_order_invalid"}
     asset_ids = [frame.asset_id for frame in plan.frames]
@@ -401,6 +468,8 @@ def validate_frame_video_plan(plan: FrameVideoPlan) -> dict[str, Any]:
     if expected_order_sha != plan.frame_order_sha256:
         return {"ok": False, "blocker": "frame_order_hash_mismatch"}
     for frame in plan.frames:
+        if not math.isfinite(frame.duration_seconds):
+            return {"ok": False, "blocker": "frame_duration_invalid"}
         path = Path(frame.source_path)
         if not path.is_file() or path.stat().st_size <= 0:
             return {"ok": False, "blocker": "frame_asset_missing"}
@@ -733,7 +802,9 @@ def _execution_result(
         "idempotent_replay": bool(idempotent_replay),
         "output_path": _clean(record.get("artifact_path")),
         "output_bytes": int(record.get("output_bytes") or 0),
+        "output_sha256": _clean(record.get("artifact_sha256")),
         "validation": validation,
+        "command": list(record.get("command") or []),
         **_ledger_counters(ledger),
     }
 
@@ -790,6 +861,10 @@ def execute_frame_video_local(
     asset_paths: Mapping[str, str],
     environ: Mapping[str, Any] | None,
     audio_path: str = "",
+    audio_paths: Mapping[str, str] | None = None,
+    logo_path: str = "",
+    render_state: Mapping[str, Any] | None = None,
+    output_path: str | Path | None = None,
     ffmpeg_path: str = "",
     ffprobe_path: str = "",
     public_request: bool = False,
@@ -852,16 +927,63 @@ def execute_frame_video_local(
         ordered_paths.append(str(path.resolve()))
 
     promised_audio = _audio_promise(plan)
-    selected_audio = ""
-    if promised_audio:
-        selected_audio = _clean(audio_path)
-        path = Path(selected_audio)
-        if not selected_audio or not path.is_file() or path.stat().st_size <= 0:
+    supplied_audio = {
+        _clean(kind).lower(): _clean(path)
+        for kind, path in dict(audio_paths or {}).items()
+        if _clean(kind)
+    }
+    selected_audio: dict[str, str] = {}
+    promised_components = [
+        dict(component)
+        for component in list(promised_audio.get("components") or [])
+        if isinstance(component, Mapping)
+    ]
+    if promised_components:
+        for component in promised_components:
+            kind = _clean(component.get("kind")).lower()
+            if kind not in {"music", "voice"} or kind in selected_audio:
+                return _fail_record(ledger, record, "promised_audio_component_invalid")
+            selected = supplied_audio.get(kind) or (
+                _clean(audio_path) if len(promised_components) == 1 else ""
+            )
+            path = Path(selected)
+            if not selected or not path.is_file() or path.stat().st_size <= 0:
+                return _fail_record(ledger, record, f"promised_{kind}_missing")
+            expected_audio_sha = _clean(component.get("sha256")).lower()
+            if expected_audio_sha and _sha256_file(path) != expected_audio_sha:
+                return _fail_record(
+                    ledger,
+                    record,
+                    f"promised_{kind}_fingerprint_mismatch",
+                )
+            selected_audio[kind] = str(path.resolve())
+    elif promised_audio:
+        selected = _clean(audio_path)
+        path = Path(selected)
+        if not selected or not path.is_file() or path.stat().st_size <= 0:
             return _fail_record(ledger, record, "promised_audio_missing")
         expected_audio_sha = _clean(promised_audio.get("sha256")).lower()
         if expected_audio_sha and _sha256_file(path) != expected_audio_sha:
             return _fail_record(ledger, record, "promised_audio_fingerprint_mismatch")
-        selected_audio = str(path.resolve())
+        selected_audio["voice"] = str(path.resolve())
+
+    selected_logo = _clean(logo_path)
+    logo_contract = next(
+        (
+            dict(item)
+            for item in plan.text_overlays
+            if _clean(item.get("kind")) == "frame_public_runtime_contract"
+        ),
+        {},
+    )
+    expected_logo_sha = _clean(logo_contract.get("logo_sha256")).lower()
+    if expected_logo_sha:
+        path = Path(selected_logo)
+        if not selected_logo or not path.is_file() or path.stat().st_size <= 0:
+            return _fail_record(ledger, record, "promised_logo_missing")
+        if _sha256_file(path) != expected_logo_sha:
+            return _fail_record(ledger, record, "promised_logo_fingerprint_mismatch")
+        selected_logo = str(path.resolve())
 
     ffmpeg = ffmpeg_path or shutil.which("ffmpeg") or ""
     ffprobe = ffprobe_path or shutil.which("ffprobe") or ""
@@ -890,36 +1012,50 @@ def execute_frame_video_local(
         row["image_id"]: frame.motion
         for row, frame in zip(runtime_manifest, plan.frames)
     }
-    state = {
+    state = dict(render_state or {})
+    state.update({
         "photos": photos,
         "image_count": len(photos),
         "ratio": plan.aspect_ratio,
-        "fit_mode": "contain",
-        "background_color": "#111111",
+        "custom_width": plan.custom_width,
+        "custom_height": plan.custom_height,
+        "fit_mode": _clean(state.get("fit_mode") or "contain"),
+        "background_color": _clean(state.get("background_color") or "#111111"),
         "seconds_per_image": plan.frames[0].duration_seconds,
         "image_durations": image_durations,
         "transition": plan.transition,
         "transition_seconds": plan.transition_seconds or 0.1,
         "motion": plan.frames[0].motion,
         "image_motions": image_motions,
-        "quality": "fast",
+        "quality": _clean(state.get("quality") or "fast"),
         "text_overlays": list(plan.text_overlays),
-    }
-    destination = Path(output_root) / record["job_id"]
-    destination.mkdir(parents=True, exist_ok=True)
-    output_path = destination / "final.mp4"
+    })
+    for component in promised_components:
+        kind = _clean(component.get("kind")).lower()
+        state[f"{kind}_volume_percent"] = component.get("volume_percent")
+        state[f"{kind}_fade_seconds"] = component.get("fade_seconds")
+    if output_path is None:
+        destination = Path(output_root) / record["job_id"]
+        destination.mkdir(parents=True, exist_ok=True)
+        selected_output_path = destination / "final.mp4"
+    else:
+        selected_output_path = Path(output_path)
+        selected_output_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         command = frame_video_runtime.build_ffmpeg_command(
             ordered_paths,
-            str(output_path),
+            str(selected_output_path),
             state,
             ffmpeg_path=ffmpeg,
-            voice_path=selected_audio,
+            music_path=selected_audio.get("music", ""),
+            voice_path=selected_audio.get("voice", ""),
+            logo_path=selected_logo,
             min_images=1,
         )
     except ValueError as exc:
         return _fail_record(ledger, record, _clean(exc) or "frame_plan_invalid")
 
+    record["command"] = list(command.command)
     ledger.render_count += 1
     ledger.compose_count += 1
     try:
@@ -938,7 +1074,7 @@ def execute_frame_video_local(
         return _fail_record(ledger, record, "frame_render_failed")
 
     probe = frame_video_runtime.probe_mp4(
-        str(output_path),
+        str(selected_output_path),
         command.expected_duration,
         expects_audio=bool(promised_audio),
         ffprobe_path=ffprobe,
@@ -957,7 +1093,7 @@ def execute_frame_video_local(
             record,
             _clean(probe.get("reason") or "frame_artifact_invalid"),
         )
-    decode = _full_decode(str(output_path), ffmpeg)
+    decode = _full_decode(str(selected_output_path), ffmpeg)
     if not decode.get("ok"):
         record["validation"] = {**probe, "ok": False, "full_decode": False}
         return _fail_record(
@@ -965,11 +1101,11 @@ def execute_frame_video_local(
             record,
             _clean(decode.get("blocker") or "frame_full_decode_failed"),
         )
-    artifact_sha = _sha256_file(output_path)
-    output_bytes = output_path.stat().st_size
+    artifact_sha = _sha256_file(selected_output_path)
+    output_bytes = selected_output_path.stat().st_size
     record.update(
         {
-            "artifact_path": str(output_path),
+            "artifact_path": str(selected_output_path),
             "artifact_sha256": artifact_sha,
             "output_bytes": output_bytes,
             "terminal_state": "rendered_validated",

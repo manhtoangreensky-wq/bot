@@ -111,7 +111,7 @@ from services import architecture_profile_router, architecture_profile_status
 from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit_router, video_ai_edit_status, video_ai_edit_validation
 from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
 from services import video_profile_context_engine
-from services import frame_video_commercial, frame_video_flow, frame_video_runtime
+from services import frame_video_commercial, frame_video_flow, frame_video_public_seam, frame_video_runtime
 from services import video_addon_planner, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_selfshot_local_analysis, video_selfshotflow4, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uifreeze1
 from services import ui_navigation
 from services import local_video_studio_preview
@@ -44955,10 +44955,27 @@ def update_local_worker_job(job_id, status: str, worker_id: str = "", error_shor
     job = get_local_worker_job(job_id)
     if not job:
         raise ValueError("local worker job not found")
+    frame_transition_blocker = frame_video_public_seam.frame_video_worker_transition_blocker(
+        job,
+        status,
+        worker_id,
+    )
+    if frame_transition_blocker:
+        raise ValueError(frame_transition_blocker)
+    frame_receipt_replay_blocker = (
+        frame_video_public_seam.frame_video_terminal_receipt_replay_blocker(
+            job,
+            status,
+            output_url=output_url,
+            output_file_id=output_file_id,
+        )
+    )
+    if frame_receipt_replay_blocker:
+        raise ValueError(frame_receipt_replay_blocker)
     now = now_text()
     job_type = str(job.get("job_type") or "")
     detail_limit = 128 * 1024 if job_type == "video_local_edit" else 4000 if job_type == "video_ai_edit" else 500
-    output_limit = 128 * 1024 if job_type == "video_local_edit" else 1000
+    output_limit = 128 * 1024 if job_type == "video_local_edit" else 16 * 1024 if job_type == "frame_video_render" else 1000
     started_at = job.get("started_at") or (now if status == "running" else "")
     finished_at = job.get("finished_at") or (now if status in {"succeeded", "failed", "cancelled"} else "")
     conn = db_connect()
@@ -45039,15 +45056,55 @@ def handle_frame_video_worker_job_update(previous_job: dict, updated_job: dict) 
             receipt = json.loads(str(updated_job.get("output_url") or "") or "{}")
         except Exception:
             receipt = {}
+        if frame_video_public_seam.frame_video_public_seam_applies_to_worker_job(payload):
+            attestation = frame_video_public_seam.validate_frame_video_worker_terminal(
+                payload,
+                receipt,
+                admitted_worker_id=str((previous_job or {}).get("worker_id") or ""),
+                reported_worker_id=str(updated_job.get("worker_id") or ""),
+                expected_local_worker_job_id=(previous_job or {}).get("id")
+                or (updated_job or {}).get("id"),
+            )
+            if not attestation.get("ok"):
+                blocker = str(attestation.get("blocker") or "worker_terminal_attestation_failed")
+                if frame_job_id:
+                    update_frame_video_job(
+                        frame_job_id,
+                        status="failed_no_charge",
+                        blocker="worker_terminal_attestation_failed",
+                        error_code=blocker,
+                        charge_state="not_charged",
+                        wallet_charge_amount_xu=0,
+                        lease_owner="",
+                        lease_expires_at="",
+                        finished_at=now_text(),
+                    )
+                set_frame_video_last_error(f"worker_terminal_attestation:{blocker}")
+                save_tool_test_result(
+                    "frame_video",
+                    "FAIL",
+                    f"local worker terminal attestation failed:{blocker}",
+                    user_id,
+                )
+                return
+            receipt = dict(attestation.get("receipt") or {})
         delivery_message_id = str(receipt.get("delivery_message_id") or "")
-        delivery_file_id = str(receipt.get("delivery_file_id") or updated_job.get("output_file_id") or "")
-        if not frame_job_id or not delivery_message_id:
+        delivery_file_id = str(receipt.get("delivery_file_id") or "")
+        delivery_blocker = (
+            frame_video_public_seam.frame_video_delivery_receipt_blocker(
+                delivery_message_id,
+                delivery_file_id,
+            )
+            if frame_video_public_seam.frame_video_public_seam_applies_to_worker_job(payload)
+            else ""
+        )
+        if not frame_job_id or delivery_blocker or (not delivery_message_id and not delivery_blocker):
             if frame_job_id:
                 update_frame_video_job(
                     frame_job_id,
                     status="failed_no_charge",
                     blocker="delivery_receipt_missing",
-                    error_code="worker_succeeded_without_delivery_message_id",
+                    error_code=delivery_blocker or "worker_succeeded_without_delivery_message_id",
                     charge_state="not_charged",
                     wallet_charge_amount_xu=0,
                     lease_owner="",
@@ -45079,7 +45136,13 @@ def handle_frame_video_worker_job_update(previous_job: dict, updated_job: dict) 
             output_path="",
             output_size_bytes=int(receipt.get("output_size_bytes") or 0),
             output_sha256=str(receipt.get("output_sha256") or ""),
-            ffprobe_json=json.dumps(receipt.get("ffprobe") or {}, ensure_ascii=False, separators=(",", ":")),
+            ffprobe_json=json.dumps(
+                frame_video_public_seam.compact_frame_video_probe(
+                    receipt.get("ffprobe") or {}
+                ),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
             delivery_status="sent",
             delivery_message_id=delivery_message_id,
             delivery_file_id=delivery_file_id,
@@ -45212,12 +45275,25 @@ def local_worker_status_payload() -> dict:
     counts = count_local_worker_jobs()
     ffmpeg_test = get_tool_test_result("ffmpeg_local")
     worker_test = get_tool_test_result("local_worker")
+    worker_sha = frame_video_public_seam.sanitize_frame_video_worker_sha(
+        get_system_setting("local_worker:worker_sha", "")
+    )
+    try:
+        worker_flags_raw = json.loads(
+            get_system_setting("local_worker:frame_video_engine_flags_json", "{}")
+            or "{}"
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        worker_flags_raw = {}
+    worker_flags = frame_video_public_seam.normalize_frame_video_worker_flags(worker_flags_raw)
     return {
         "enabled": LOCAL_WORKER_ENABLED,
         "poll_enabled": LOCAL_WORKER_POLL_ENABLED,
         "token_configured": bool(LOCAL_WORKER_TOKEN),
         "connected": bool(heartbeat.get("connected")),
         "worker_id": heartbeat.get("worker_id") or "",
+        "worker_sha": worker_sha,
+        "frame_video_engine_flags": worker_flags,
         "last_heartbeat": heartbeat.get("last_heartbeat") or "",
         "heartbeat_age_seconds": heartbeat.get("age_seconds"),
         "job_counts": counts,
@@ -149931,6 +150007,15 @@ def frame_video_runtime_guard(state: dict, user_id=0) -> dict:
     if not plan.get("ok"):
         reason = str((plan.get("errors") or ["invalid_plan"])[0])
         return {"ok": False, "action": "blocked", "reason": reason, "message": "⚠️ Kế hoạch ghép ảnh chưa hợp lệ. Anh/chị kiểm tra lại ảnh và thời lượng. Bot chưa trừ Xu.", "worker_connected": worker_connected}
+    seam_blocker = frame_video_public_seam.frame_video_public_seam_blocker()
+    if seam_blocker:
+        return {
+            "ok": False,
+            "action": "blocked",
+            "reason": seam_blocker,
+            "message": frame_video_maintenance_text(),
+            "worker_connected": worker_connected,
+        }
     preflight = frame_video_commercial_preflight(state, user_id)
     if not preflight.get("ok"):
         return {
@@ -149950,6 +150035,21 @@ def frame_video_runtime_guard(state: dict, user_id=0) -> dict:
             "ffprobe_path": str(preflight.get("ffprobe_path") or ""),
             "preflight": preflight,
         }
+    worker_admission = frame_video_public_seam.frame_video_worker_queue_admission(
+        local_worker_status_payload(),
+        expected_worker_sha=str(APP_BUILD_SHA or APP_BUILD or "").strip(),
+        environ=os.environ,
+    )
+    if not worker_admission.get("ok"):
+        return {
+            "ok": False,
+            "action": "blocked",
+            "reason": str(worker_admission.get("blocker") or "worker_admission_failed"),
+            "message": frame_video_maintenance_text(),
+            "worker_connected": worker_connected,
+            "preflight": preflight,
+            "worker_admission": worker_admission,
+        }
     return {
         "ok": True,
         "action": "worker_queue",
@@ -149957,6 +150057,7 @@ def frame_video_runtime_guard(state: dict, user_id=0) -> dict:
         "message": "",
         "worker_connected": True,
         "preflight": preflight,
+        "worker_admission": worker_admission,
     }
 
 def frame_video_worker_payload(frame_job_id: str, user_id, chat_id, state: dict, charged_amount: int = 0) -> str:
@@ -149997,6 +150098,11 @@ def frame_video_worker_payload(frame_job_id: str, user_id, chat_id, state: dict,
         "mode": str(clean_state.get("mode") or "existing_images"),
         "ai_video_provider_called": False,
         "storyboard_route_called": False,
+        "frame_video_durable_public_seam": bool(
+            frame_video_public_seam.frame_video_public_seam_enabled()
+        ),
+        "frame_video_runtime_sha": str(APP_BUILD_SHA or APP_BUILD or "local"),
+        "frame_video_expected_worker_sha": str(APP_BUILD_SHA or APP_BUILD or "local"),
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
@@ -150018,6 +150124,7 @@ def frame_video_preview_worker_payload(frame_job_id: str, user_id, chat_id, stat
         ),
         "paid_preview": True,
         "paid_preview_seconds": preview_seconds,
+        "frame_video_durable_public_seam": False,
     })
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
@@ -150239,7 +150346,10 @@ def reconcile_frame_video_jobs_once(now_dt: datetime | None = None) -> dict:
             worker_job = get_local_worker_job(int(local_worker_job_id or 0))
             worker_status = str((worker_job or {}).get("status") or "").lower()
             if worker_status in {"succeeded", "failed"}:
-                handle_frame_video_worker_job_update({"status": "running"}, worker_job)
+                handle_frame_video_worker_job_update(
+                    {**worker_job, "status": "running"},
+                    worker_job,
+                )
                 recovered += 1
                 continue
             if worker_status in {"queued", "running"}:
@@ -151993,7 +152103,7 @@ async def render_frame_video_paths(
 
 async def render_frame_video_from_state(context: ContextTypes.DEFAULT_TYPE, state: dict, output_path: str, tmpdir: str) -> tuple[bool, str]:
     result = await render_frame_video_canonical_from_state(context, state, output_path, tmpdir)
-    return bool(result.get("ok")), str(result.get("reason") or "ok")
+    return bool(result.get("ok")), str(result.get("reason") or result.get("blocker") or "ok")
 
 
 async def frame_video_materialize_file(context: ContextTypes.DEFAULT_TYPE, file_id: str, path: str) -> str:
@@ -152003,41 +152113,15 @@ async def frame_video_materialize_file(context: ContextTypes.DEFAULT_TYPE, file_
     return path if os.path.exists(path) and os.path.getsize(path) > 0 else ""
 
 
-async def render_frame_video_canonical_from_state(
-    context: ContextTypes.DEFAULT_TYPE,
-    state: dict,
+async def render_frame_video_legacy_from_materialized_paths(
+    image_paths: list[str],
     output_path: str,
-    tmpdir: str,
+    state: dict,
+    *,
+    music_path: str = "",
+    voice_path: str = "",
+    logo_path: str = "",
 ) -> dict:
-    state = dict(state or {})
-    state["photos"] = frame_video_runtime.canonical_image_manifest(state.get("photos") or [])
-    image_paths: list[str] = []
-    for idx, photo in enumerate(state["photos"][:FRAME_VIDEO_MAX_IMAGES], start=1):
-        file_id = str(photo.get("file_id") or "")
-        path = os.path.join(tmpdir, f"frame_input_{idx:02d}.img")
-        if file_id:
-            await telegram_file_to_path(context, file_id, path)
-            image_paths.append(path)
-            continue
-        image_url = str(photo.get("image_url") or photo.get("url") or "").strip()
-        if image_url:
-            await url_to_path(image_url, path, max_bytes=10 * 1024 * 1024)
-            image_paths.append(path)
-    logo_path = await frame_video_materialize_file(
-        context,
-        str(state.get("logo_file_id") or ""),
-        os.path.join(tmpdir, "frame_logo.img"),
-    )
-    music_path = await frame_video_materialize_file(
-        context,
-        str(state.get("music_file_id") or ""),
-        os.path.join(tmpdir, "frame_music.audio"),
-    )
-    voice_path = await frame_video_materialize_file(
-        context,
-        str(state.get("voice_file_id") or ""),
-        os.path.join(tmpdir, "frame_voice.audio"),
-    )
     try:
         command = frame_video_runtime.build_ffmpeg_command(
             image_paths,
@@ -152075,6 +152159,78 @@ async def render_frame_video_canonical_from_state(
         "output_sha256": digest.hexdigest(),
         "command": command.command,
     }
+
+
+async def render_frame_video_canonical_from_state(
+    context: ContextTypes.DEFAULT_TYPE,
+    state: dict,
+    output_path: str,
+    tmpdir: str,
+    *,
+    user_id: int = 0,
+    confirmation_id: str = "",
+    language: str = "vi",
+) -> dict:
+    state = dict(state or {})
+    state["photos"] = frame_video_runtime.canonical_image_manifest(state.get("photos") or [])
+    image_paths: list[str] = []
+    for idx, photo in enumerate(state["photos"][:FRAME_VIDEO_MAX_IMAGES], start=1):
+        file_id = str(photo.get("file_id") or "")
+        path = os.path.join(tmpdir, f"frame_input_{idx:02d}.img")
+        if file_id:
+            await telegram_file_to_path(context, file_id, path)
+            image_paths.append(path)
+            continue
+        image_url = str(photo.get("image_url") or photo.get("url") or "").strip()
+        if image_url:
+            await url_to_path(image_url, path, max_bytes=10 * 1024 * 1024)
+            image_paths.append(path)
+    logo_path = await frame_video_materialize_file(
+        context,
+        str(state.get("logo_file_id") or ""),
+        os.path.join(tmpdir, "frame_logo.img"),
+    )
+    music_path = await frame_video_materialize_file(
+        context,
+        str(state.get("music_file_id") or ""),
+        os.path.join(tmpdir, "frame_music.audio"),
+    )
+    voice_path = await frame_video_materialize_file(
+        context,
+        str(state.get("voice_file_id") or ""),
+        os.path.join(tmpdir, "frame_voice.audio"),
+    )
+    seam_result = await asyncio.to_thread(
+        frame_video_public_seam.render_frame_video_public,
+        state=state,
+        image_paths=image_paths,
+        output_path=output_path,
+        user_id=int(user_id or 0),
+        confirmation_id=str(confirmation_id or state.get("frame_video_job_id") or ""),
+        language=str(language or "vi"),
+        runtime_sha=str(APP_BUILD_SHA or APP_BUILD or "local"),
+        expected_worker_sha=str(APP_BUILD_SHA or APP_BUILD or "local"),
+        worker_sha=str(APP_BUILD_SHA or APP_BUILD or "local"),
+        worker_instance_id=f"railway-frame-public:{os.getpid()}",
+        ffmpeg_path=frame_video_ffmpeg_path(),
+        ffprobe_path=ffprobe_path_for_ffmpeg(frame_video_ffmpeg_path()),
+        music_path=music_path,
+        voice_path=voice_path,
+        logo_path=logo_path,
+        admin_no_charge=is_admin_user(int(user_id or 0)),
+        charge_plan={"policy": "post_delivery", "amount_xu": int(frame_video_planned_charge_xu(state, user_id) or 0)},
+        environ=os.environ,
+    )
+    if seam_result.get("enabled"):
+        return seam_result
+    return await render_frame_video_legacy_from_materialized_paths(
+        image_paths,
+        output_path,
+        state,
+        music_path=music_path,
+        voice_path=voice_path,
+        logo_path=logo_path,
+    )
 
 async def render_frame_video_preview_from_state(context: ContextTypes.DEFAULT_TYPE, state: dict, output_path: str, tmpdir: str) -> tuple[bool, str]:
     ratio = frame_video_ratio_payload(state.get("ratio") or "9x16")
@@ -174838,9 +174994,17 @@ async def handle_frame_video_final_confirm(
     progress_auto_refresh_register_message(waiting or query.message, context, product_type="frame_video", job_id=job_id, user_id=uid, lang=lang)
     with tempfile.TemporaryDirectory() as tmpdir:
         output_path = os.path.join(tmpdir, f"toan_aas_frame_video_{job_id}.mp4")
-        result = await render_frame_video_canonical_from_state(context, latest, output_path, tmpdir)
+        result = await render_frame_video_canonical_from_state(
+            context,
+            latest,
+            output_path,
+            tmpdir,
+            user_id=uid,
+            confirmation_id=job_id,
+            language=lang,
+        )
         if not result.get("ok"):
-            reason = sanitize_log_text(str(result.get("reason") or "render_failed"))[:300]
+            reason = sanitize_log_text(str(result.get("reason") or result.get("blocker") or "render_failed"))[:300]
             update_frame_video_job(
                 job_id,
                 status="failed_no_charge",
@@ -174871,7 +175035,9 @@ async def handle_frame_video_final_confirm(
                 text=fail_text,
                 reply_markup=frame_video_review_keyboard(invoice=True, state=latest) if is_frame_video3_state(latest) else frame_video_panel_keyboard(),
             )
-        probe = dict(result.get("probe") or {})
+        probe = frame_video_public_seam.compact_frame_video_probe(
+            result.get("probe") or {}
+        )
         update_frame_video_job(
             job_id,
             status="validating",
@@ -174919,12 +175085,21 @@ async def handle_frame_video_final_confirm(
             )
         delivery_message_id = str(getattr(sent, "message_id", "") or "")
         delivery_file_id = str(getattr(getattr(sent, "video", None), "file_id", "") or "")
-        if not delivery_message_id:
+        delivery_blocker = frame_video_public_seam.frame_video_delivery_receipt_blocker(
+            delivery_message_id,
+            delivery_file_id,
+        )
+        if delivery_blocker:
+            delivery_error_code = (
+                "telegram_message_id_missing"
+                if not delivery_message_id
+                else delivery_blocker
+            )
             update_frame_video_job(
                 job_id,
                 status="failed_no_charge",
                 blocker="delivery_receipt_missing",
-                error_code="telegram_message_id_missing",
+                error_code=delivery_error_code,
                 delivery_status="unverified",
                 charge_state="not_charged",
                 wallet_charge_amount_xu=0,
@@ -234300,6 +234475,22 @@ async def internal_worker_heartbeat(request: Request):
     worker_id = str(payload.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
     set_system_setting("local_worker:last_heartbeat", now_text(), "last local worker heartbeat", worker_id)
     set_system_setting("local_worker:worker_id", worker_id, "last local worker id", worker_id)
+    worker_sha = frame_video_public_seam.sanitize_frame_video_worker_sha(payload.get("worker_sha"))
+    set_system_setting(
+        "local_worker:worker_sha",
+        worker_sha,
+        "last local worker revision",
+        worker_id,
+    )
+    worker_flags = frame_video_public_seam.normalize_frame_video_worker_flags(
+        payload.get("frame_video_engine_flags")
+    )
+    set_system_setting(
+        "local_worker:frame_video_engine_flags_json",
+        json.dumps(worker_flags, ensure_ascii=True, separators=(",", ":")),
+        "last local Frame engine flag snapshot",
+        worker_id,
+    )
     ffmpeg_path = str(payload.get("ffmpeg_path") or "")
     if ffmpeg_path:
         set_system_setting("local_worker:ffmpeg_path_seen", ffmpeg_path[:500], "worker reported ffmpeg path", worker_id)
@@ -234452,7 +234643,60 @@ async def internal_worker_job_update(request: Request):
     worker_id = str(payload.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")
     previous_job = get_local_worker_job(job_id)
     video_edit_payload_limit = 128 * 1024
-    is_video_edit = str((previous_job or {}).get("job_type") or "") == video_editengine1.WORKER_JOB_TYPE
+    previous_job_type = str((previous_job or {}).get("job_type") or "")
+    is_video_edit = previous_job_type == video_editengine1.WORKER_JOB_TYPE
+    is_frame_video = previous_job_type == "frame_video_render"
+    if is_frame_video and status == "succeeded":
+        try:
+            frame_payload = json.loads(str((previous_job or {}).get("input_file_id") or "") or "{}")
+        except Exception:
+            frame_payload = {}
+        if frame_video_public_seam.frame_video_public_seam_applies_to_worker_job(frame_payload):
+            try:
+                frame_receipt = json.loads(str(payload.get("output_url") or "") or "{}")
+            except Exception:
+                frame_receipt = {}
+            if not isinstance(frame_receipt, dict):
+                frame_receipt = {}
+            previous_status = str((previous_job or {}).get("status") or "").lower()
+            if previous_status in {"succeeded", "failed", "cancelled"}:
+                try:
+                    stored_receipt = json.loads(
+                        str((previous_job or {}).get("output_url") or "")
+                    )
+                except Exception:
+                    stored_receipt = {}
+                if (
+                    not isinstance(stored_receipt, dict)
+                    or not stored_receipt
+                    or stored_receipt != frame_receipt
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="frame_terminal_receipt_conflict",
+                    )
+            attestation = frame_video_public_seam.validate_frame_video_worker_terminal(
+                frame_payload,
+                frame_receipt,
+                admitted_worker_id=str((previous_job or {}).get("worker_id") or ""),
+                reported_worker_id=worker_id,
+                expected_local_worker_job_id=(previous_job or {}).get("id") or job_id,
+            )
+            if not attestation.get("ok"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=str(attestation.get("blocker") or "worker_terminal_attestation_failed"),
+                )
+            attested_receipt = dict(attestation.get("receipt") or {})
+            payload["output_url"] = json.dumps(
+                attested_receipt,
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+            payload["output_file_id"] = str(
+                attested_receipt.get("delivery_file_id") or ""
+            )
+    output_payload_limit = video_edit_payload_limit if is_video_edit else 16 * 1024 if is_frame_video else 4000
     try:
         job = update_local_worker_job(
             job_id,
@@ -234460,7 +234704,7 @@ async def internal_worker_job_update(request: Request):
             worker_id=worker_id,
             error_short=str(payload.get("error_short") or "")[:video_edit_payload_limit if is_video_edit else 4000],
             output_file_id=str(payload.get("output_file_id") or "")[:500],
-            output_url=str(payload.get("output_url") or "")[:video_edit_payload_limit if is_video_edit else 4000],
+            output_url=str(payload.get("output_url") or "")[:output_payload_limit],
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -64,7 +64,7 @@ from services.video_local_validation import (
     ALLOWED_SUBTITLE_EXTENSIONS,
 )
 from services.video_smart_splitter import SplitRange
-from services import frame_video_commercial, frame_video_runtime, video_ai_edit_provider, video_ai_edit_status, video_ai_edit_validation, video_editengine1, video_local_validation
+from services import frame_video_commercial, frame_video_public_seam, frame_video_runtime, video_ai_edit_provider, video_ai_edit_status, video_ai_edit_validation, video_editengine1, video_local_validation
 from services import product_video_public_seam
 
 
@@ -186,6 +186,8 @@ def local_worker_heartbeat_payload(*, last_error: str = "", queue_depth: int = 0
     return {
         "heartbeat_contract_version": 1,
         "worker_id": LOCAL_WORKER_ID,
+        "worker_sha": local_worker_runtime_sha(),
+        "frame_video_engine_flags": frame_video_public_seam.frame_video_worker_flag_snapshot(os.environ),
         "worker_owner": VIDEO_EDIT_WORKER_OWNER,
         "engine_route": VIDEO_EDIT_ENGINE_ROUTE,
         # This worker executes both canonical local-edit and frame-video jobs.
@@ -325,6 +327,33 @@ def local_ffmpeg_path() -> str:
     if LOCAL_FFMPEG_PATH and os.path.exists(LOCAL_FFMPEG_PATH):
         return LOCAL_FFMPEG_PATH
     return shutil.which("ffmpeg") or LOCAL_FFMPEG_PATH
+
+
+def local_worker_runtime_sha() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=SCRIPT_DIR,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        value = str(result.stdout or "").strip()
+        if result.returncode == 0 and value:
+            return value
+    except Exception:
+        pass
+    for name in (
+        "FRAME_VIDEO_WORKER_SHA",
+        "RAILWAY_GIT_COMMIT_SHA",
+        "GIT_COMMIT_SHA",
+        "SOURCE_VERSION",
+    ):
+        value = str(os.environ.get(name) or "").strip()
+        if value:
+            return value
+    return "local"
 
 
 def run_ffmpeg_health(job: dict) -> None:
@@ -2027,31 +2056,72 @@ def run_frame_video_render(job: dict) -> None:
                 update_job(job_id, "failed", "image_count_mismatch_downloaded")
                 return
             output_path = os.path.join(tmpdir, "toan_aas_frame_video.mp4")
-            render = frame_video_runtime.build_ffmpeg_command(
-                image_paths,
-                output_path,
-                state,
-                ffmpeg_path=local_ffmpeg_path(),
-                music_path=music_path,
-                voice_path=voice_path,
-                logo_path=logo_path,
-            )
-            completed = subprocess.run(
-                render.command,
-                capture_output=True,
-                text=True,
-                timeout=min(LOCAL_WORKER_MAX_JOB_SECONDS, int(payload.get("max_render_seconds") or 180)),
-                check=False,
-            )
-            if completed.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
-                raise RuntimeError(first_line(completed.stderr or completed.stdout) or "frame_video_ffmpeg_failed")
-            probe = frame_video_runtime.probe_mp4(output_path, render.expected_duration, render.expects_audio)
-            if not probe.get("ok"):
-                raise RuntimeError(f"frame_video_validate:{probe.get('reason')}")
-            digest = hashlib.sha256()
-            with open(output_path, "rb") as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
+            actual_worker_sha = local_worker_runtime_sha()
+            public_result = None
+            if frame_video_public_seam.frame_video_public_seam_applies_to_worker_job(payload):
+                frame_job_id = str(payload.get("frame_job_id") or "").strip()
+                if not frame_job_id or not str(job_id or "").isdigit() or int(job_id) <= 0:
+                    raise RuntimeError("frame_video_job_identity_missing")
+                runtime_sha = str(
+                    payload.get("frame_video_runtime_sha")
+                    or payload.get("frame_video_expected_worker_sha")
+                    or "local"
+                ).strip()
+                expected_worker_sha = str(
+                    payload.get("frame_video_expected_worker_sha") or runtime_sha
+                ).strip()
+                public_result = frame_video_public_seam.render_frame_video_public(
+                    state=state,
+                    image_paths=image_paths,
+                    output_path=output_path,
+                    user_id=int(payload.get("user_id") or 0),
+                    confirmation_id=str(payload.get("frame_job_id") or job_id),
+                    language=str(payload.get("language") or "vi"),
+                    runtime_sha=runtime_sha,
+                    expected_worker_sha=expected_worker_sha,
+                    worker_sha=actual_worker_sha,
+                    worker_instance_id=LOCAL_WORKER_INSTANCE_ID,
+                    ffmpeg_path=local_ffmpeg_path(),
+                    ffprobe_path=find_ffprobe(ffmpeg_path=local_ffmpeg_path()),
+                    music_path=music_path,
+                    voice_path=voice_path,
+                    logo_path=logo_path,
+                    timeout_seconds=min(LOCAL_WORKER_MAX_JOB_SECONDS, int(payload.get("max_render_seconds") or 180)),
+                    environ=os.environ,
+                )
+                if not public_result.get("enabled"):
+                    raise RuntimeError("frame_video_public_seam_disabled")
+                if not public_result.get("ok"):
+                    raise RuntimeError(str(public_result.get("blocker") or "frame_video_public_seam_failed"))
+                probe = dict(public_result.get("probe") or {})
+                digest = str(public_result.get("output_sha256") or "")
+            else:
+                render = frame_video_runtime.build_ffmpeg_command(
+                    image_paths,
+                    output_path,
+                    state,
+                    ffmpeg_path=local_ffmpeg_path(),
+                    music_path=music_path,
+                    voice_path=voice_path,
+                    logo_path=logo_path,
+                )
+                completed = subprocess.run(
+                    render.command,
+                    capture_output=True,
+                    text=True,
+                    timeout=min(LOCAL_WORKER_MAX_JOB_SECONDS, int(payload.get("max_render_seconds") or 180)),
+                    check=False,
+                )
+                if completed.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+                    raise RuntimeError(first_line(completed.stderr or completed.stdout) or "frame_video_ffmpeg_failed")
+                probe = frame_video_runtime.probe_mp4(output_path, render.expected_duration, render.expects_audio)
+                if not probe.get("ok"):
+                    raise RuntimeError(f"frame_video_validate:{probe.get('reason')}")
+                digest_obj = hashlib.sha256()
+                with open(output_path, "rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        digest_obj.update(chunk)
+                digest = digest_obj.hexdigest()
             chat_id = str(payload.get("chat_id") or "").strip()
             if not chat_id:
                 raise RuntimeError("frame_video_chat_id_missing")
@@ -2061,23 +2131,32 @@ def run_frame_video_render(job: dict) -> None:
                 str(payload.get("caption") or ""),
                 filename="toan_aas_frame_video.mp4",
             )
-            if not receipt.get("sent") or not receipt.get("message_id"):
-                raise RuntimeError("frame_video_delivery_receipt_missing")
-            terminal = {
-                "delivery_message_id": str(receipt.get("message_id") or ""),
-                "delivery_file_id": str(receipt.get("file_id") or ""),
-                "output_size_bytes": int(os.path.getsize(output_path)),
-                "output_sha256": digest.hexdigest(),
-                "ffprobe": probe,
-                "charge_policy": "post_delivery",
-                "wallet_charge_amount_xu": 0,
-            }
+            receipt_blocker = frame_video_public_seam.frame_video_delivery_receipt_blocker(
+                receipt.get("message_id"),
+                receipt.get("file_id"),
+            )
+            if not receipt.get("sent") or receipt_blocker:
+                raise RuntimeError(
+                    receipt_blocker or "frame_video_delivery_receipt_missing"
+                )
+            terminal = frame_video_public_seam.build_frame_video_worker_terminal_receipt(
+                frame_job_id=payload.get("frame_job_id"),
+                local_worker_job_id=job_id,
+                delivery_message_id=receipt.get("message_id"),
+                delivery_file_id=receipt.get("file_id"),
+                output_size_bytes=os.path.getsize(output_path),
+                output_sha256=digest,
+                worker_id=LOCAL_WORKER_ID,
+                worker_sha=actual_worker_sha,
+                probe=probe,
+            )
         update_job(
             job_id,
             "succeeded",
             "frame video validated and sent",
             output_url=json.dumps(terminal, ensure_ascii=False, separators=(",", ":")),
             output_file_id=str(receipt.get("file_id") or ""),
+            output_limit=16 * 1024,
         )
     except subprocess.TimeoutExpired:
         update_job(job_id, "failed", "frame_video_render_timeout")

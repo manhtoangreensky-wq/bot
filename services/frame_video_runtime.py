@@ -76,15 +76,37 @@ def _clean_token(value: Any, fallback: str = "") -> str:
 def _safe_int(value: Any, fallback: int = 0) -> int:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return int(fallback)
 
 
 def _safe_float(value: Any, fallback: float = 0.0) -> float:
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
         return float(fallback)
+    return parsed if math.isfinite(parsed) else float(fallback)
+
+
+def _is_finite_number(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _valid_custom_dimension(value: Any) -> bool:
+    if not _is_finite_number(value):
+        return False
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if isinstance(value, float) and not value.is_integer():
+        return False
+    return 100 <= parsed <= 4096
 
 
 def _stable_image_id(item: dict[str, Any], ordinal: int, salt: str = "") -> str:
@@ -242,7 +264,7 @@ def _ratio_dimensions(
     try:
         width = max(100, min(4096, int(custom_width or 0)))
         height = max(100, min(4096, int(custom_height or 0)))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return RATIOS["9x16"]
     width -= width % 2
     height -= height % 2
@@ -262,10 +284,15 @@ def quality_payload(
         quality = "balanced"
     config = dict(QUALITY_PRESETS[quality])
     base_width, base_height = _ratio_dimensions(ratio, custom_width, custom_height)
-    long_edge = int(config["long_edge"])
-    scale = long_edge / max(base_width, base_height)
-    width = max(2, int(round(base_width * scale / 2.0) * 2))
-    height = max(2, int(round(base_height * scale / 2.0) * 2))
+    if _clean_token(ratio, "9x16") == "custom":
+        # A custom output is an explicit pixel contract; quality changes codec
+        # settings without silently resizing the requested canvas.
+        width, height = base_width, base_height
+    else:
+        long_edge = int(config["long_edge"])
+        scale = long_edge / max(base_width, base_height)
+        width = max(2, int(round(base_width * scale / 2.0) * 2))
+        height = max(2, int(round(base_height * scale / 2.0) * 2))
     config.update({"token": quality, "width": width, "height": height})
     return config
 
@@ -326,6 +353,31 @@ def validate_plan(
     manifest = canonical_image_manifest(state.get("photos") or [])
     config = canonical_config({**state, "photos": manifest})
     errors: list[str] = []
+    if state.get("seconds_per_image") not in (None, "") and not _is_finite_number(
+        state.get("seconds_per_image")
+    ):
+        errors.append("frame_duration_invalid")
+    raw_durations = state.get("image_durations")
+    if isinstance(raw_durations, dict) and any(
+        value not in (None, "") and not _is_finite_number(value)
+        for value in raw_durations.values()
+    ):
+        errors.append("frame_duration_invalid")
+    raw_transition = _clean_token(
+        state.get("transition") or state.get("effect"),
+        "fade",
+    )
+    if (
+        raw_transition not in {"none", "cut", "natural"}
+        and state.get("transition_seconds") not in (None, "")
+        and not _is_finite_number(state.get("transition_seconds"))
+    ):
+        errors.append("frame_transition_duration_invalid")
+    if _clean_token(state.get("ratio"), "9x16") == "custom" and not (
+        _valid_custom_dimension(state.get("custom_width"))
+        and _valid_custom_dimension(state.get("custom_height"))
+    ):
+        errors.append("frame_custom_dimensions_invalid")
     minimum_images = max(1, min(FRAME_VIDEO_MAX_IMAGES, _safe_int(min_images, FRAME_VIDEO_MIN_IMAGES)))
     expected_image_count = max(0, _safe_int(state.get("image_count"), 0))
     if len(manifest) < minimum_images:
