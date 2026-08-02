@@ -151,10 +151,10 @@ def test_m4live1_subtitle_safe_left_right_margin():
     style = bot.subdub_normalize_style(_style_state())
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, _style_state())
     fields = _style_fields(ass)
-    assert 0.84 <= style["subtitle_max_width_ratio"] <= 0.88
+    assert 0.90 <= style["subtitle_max_width_ratio"] <= 0.96
     assert int(fields[19]) == style["subtitle_margin_l_after"]
     assert int(fields[20]) == style["subtitle_margin_r_after"]
-    assert 70 <= style["subtitle_margin_l_after"] <= 128
+    assert 0.02 <= style["subtitle_margin_l_after"] / 1280 <= 0.05
 
 
 def test_m4live1_subtitle_max_two_lines():

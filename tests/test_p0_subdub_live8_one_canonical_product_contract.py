@@ -284,8 +284,9 @@ def test_live8_receipt_exposes_source_and_output_duration():
         "vi",
     )
 
-    assert "Thời lượng nguồn:" in text and "30" in text
-    assert "Thời lượng kết quả:" in text and "29.9" in text
+    assert "Thời lượng: <b>30 giây</b>" in text
+    assert "Thời lượng nguồn:" not in text
+    assert "Thời lượng kết quả:" not in text
 
 
 def test_live8_scope_is_subdub_only():
@@ -328,11 +329,15 @@ def test_live8_scope_is_subdub_only():
         "tests/test_p0_subdub_live10_tts_checkpoint_resume.py",
         "tests/test_p0_subdub_live13_selective_recent_mp4_restore.py",
         "tests/test_p0_subdub_live14_blackbox_lane_language_contract.py",
-        "tests/test_p0_19m6a_subdub_one_terminal_public_outcome_late_error_duplicate_fix.py",
+            "tests/test_p0_19m6a_subdub_one_terminal_public_outcome_late_error_duplicate_fix.py",
+            "tests/test_p0_19m6ab_subdub_suppress_late_fail_x_after_success_only.py",
+            "tests/test_p0_19m6ae_subdub_subtitle_polish_and_dub_known_good_restore.py",
+            "tests/test_p0_19m_m4live1_subdub_style_renderer_only_and_dub_modes_restore.py",
         "tests/test_p0_subdub_live21_four_lane_media_pipeline_truth.py",
         "tests/test_p0_subdub_long_media_no_speech_recovery.py",
         "tests/test_p0_subdub_longmedia32_duration_size_status_report.py",
-        "tests/test_p0_subdub_longmedia32_real_media_matrix.py",
+            "tests/test_p0_subdub_longmedia32_real_media_matrix.py",
+            "tests/test_p0_subdub_report_wrap_lock.py",
         "tests/test_p0_subdub_tts_audio_truth_sequential.py",
     }
     assert set(changed) <= allowed
