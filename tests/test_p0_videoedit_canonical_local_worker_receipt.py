@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import local_worker
-from services import video_editengine1
+from services import video_editengine1, video_local_editing
 
 
 def _run_job(
@@ -20,6 +20,10 @@ def _run_job(
     manual_plan: dict | None = None,
     payload_patch: dict | None = None,
     observed_plans: list[dict] | None = None,
+    downloaded_probe: dict | None = None,
+    observed_worker_steps: list[str] | None = None,
+    source_validation_calls: list[dict] | None = None,
+    job_user_id: str = "701",
 ) -> tuple[dict, list[str]]:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -37,14 +41,55 @@ def _run_job(
         "cleanup_job_workspace",
         lambda _workspace: {"ok": True, "removed": True},
     )
-    monkeypatch.setattr(
-        local_worker,
-        "_local1_download_asset",
-        lambda *_args, **_kwargs: str(source),
-    )
+    def fake_download(*_args, **_kwargs) -> str:
+        if observed_worker_steps is not None:
+            observed_worker_steps.append("download")
+        return str(source)
+
+    monkeypatch.setattr(local_worker, "_local1_download_asset", fake_download)
     monkeypatch.setattr(local_worker, "delivery_file_allowed", lambda *_args, **_kwargs: True)
+    probe = downloaded_probe or {
+        "ok": True,
+        "reason": "",
+        "duration": 2.0,
+        "duration_ms": 2_000,
+        "width": 640,
+        "height": 360,
+        "fps": 25.0,
+        "has_video": True,
+        "has_audio": True,
+        "audio_stream_count": 1,
+        "format_name": "mp4",
+        "bytes": source.stat().st_size,
+    }
+    def fake_probe(*_args, **_kwargs) -> dict:
+        if observed_worker_steps is not None:
+            observed_worker_steps.append("probe")
+        return deepcopy(probe)
+
+    original_validate_source_metadata = (
+        local_worker.video_local_validation.validate_source_metadata
+    )
+
+    def observe_source_validation(metadata: dict, *, file_size: int = 0) -> dict:
+        if observed_worker_steps is not None:
+            observed_worker_steps.append("validate")
+        if source_validation_calls is not None:
+            source_validation_calls.append(
+                {"metadata": deepcopy(metadata), "file_size": file_size}
+            )
+        return original_validate_source_metadata(metadata, file_size=file_size)
+
+    monkeypatch.setattr(local_worker.video_local_validation, "probe_video_file", fake_probe)
+    monkeypatch.setattr(
+        local_worker.video_local_validation,
+        "validate_source_metadata",
+        observe_source_validation,
+    )
 
     def fake_manual_edit(_plan: dict, *, output_path: str, **_kwargs) -> dict:
+        if observed_worker_steps is not None:
+            observed_worker_steps.append("execute")
         if observed_plans is not None:
             observed_plans.append(deepcopy(_plan))
         Path(output_path).write_bytes(b"rendered-video")
@@ -118,6 +163,15 @@ def _run_job(
         "worker_capability": video_editengine1.WORKER_CAPABILITY,
         "source_file_id": "source-file",
         "source_file_name": "source.mp4",
+        "source_metadata": {
+            "ok": True,
+            "duration": 2.0,
+            "duration_ms": 2_000,
+            "width": 640,
+            "height": 360,
+            "has_audio": True,
+        },
+        "user_id": "701",
         "chat_id": "88",
         "local1_mode": mode,
         "price_xu": price_xu,
@@ -126,16 +180,37 @@ def _run_job(
         "charge_policy": "free_local_tool" if price_xu == 0 else "after_valid_mp4_delivery",
         "provider_call": False,
         "plan_schema_version": "video-edit-plan-v1",
+        "state_revision": 3,
         "manual_edit_plan": (
-            {"trim": {"start_ms": 0, "end_ms": 2_000}, "brightness_percent": 110}
-            if manual_plan is None
-            else manual_plan
+            video_local_editing.neutral_split_manual_plan()
+            if mode == "split" and manual_plan is None
+            else {
+                "trim": {"start_ms": 0, "end_ms": 2_000},
+                "brightness_percent": 110,
+            }
+            if manual_plan is None else manual_plan
         ),
         "split_ranges": [{"index": 1, "start_ms": 0, "end_ms": 1_000}],
+        "rights_confirmation": {
+            "confirmed": True,
+            "policy": "video_edit_rights_v1",
+            "user_id": "701",
+            "review_revision": 3,
+            "confirmed_at_unix": 1_750_000_000,
+        },
     }
-    payload.update(dict(payload_patch or {}))
+    patch = dict(payload_patch or {})
+    drop_rights = bool(patch.pop("_drop_rights_confirmation", False))
+    payload.update(patch)
+    if drop_rights:
+        payload.pop("rights_confirmation", None)
     local_worker.run_video_local_edit(
-        {"id": 2701, "job_type": video_editengine1.WORKER_JOB_TYPE, "input_file_id": json.dumps(payload)}
+        {
+            "id": 2701,
+            "job_type": video_editengine1.WORKER_JOB_TYPE,
+            "user_id": job_user_id,
+            "input_file_id": json.dumps(payload),
+        }
     )
     return updates[-1], captions
 
@@ -313,6 +388,358 @@ def test_canonical_manual_job_rejects_an_empty_plan_instead_of_delivering_a_noop
     assert terminal["status"] == "failed"
     assert detail["stage"] == "failed_no_charge"
     assert detail["reason"] == "video_local_edit_plan_missing"
+    assert captions == []
+
+
+@pytest.mark.parametrize(
+    "rights",
+    [
+        None,
+        {},
+        {
+            "confirmed": False,
+            "policy": "video_edit_rights_v1",
+            "user_id": "701",
+            "review_revision": 3,
+            "confirmed_at_unix": 1_750_000_000,
+        },
+        {
+            "confirmed": True,
+            "policy": "wrong_policy",
+            "user_id": "701",
+            "review_revision": 3,
+            "confirmed_at_unix": 1_750_000_000,
+        },
+        {
+            "confirmed": True,
+            "policy": "video_edit_rights_v1",
+            "user_id": "999",
+            "review_revision": 3,
+            "confirmed_at_unix": 1_750_000_000,
+        },
+        {
+            "confirmed": True,
+            "policy": "video_edit_rights_v1",
+            "user_id": "701",
+            "review_revision": 0,
+            "confirmed_at_unix": 1_750_000_000,
+        },
+        {
+            "confirmed": True,
+            "policy": "video_edit_rights_v1",
+            "user_id": "701",
+            "review_revision": 3,
+            "confirmed_at_unix": 0,
+        },
+    ],
+)
+def test_local_free_worker_requires_valid_durable_rights_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    rights: dict | None,
+) -> None:
+    payload_patch = (
+        {"rights_confirmation": rights}
+        if rights is not None
+        else {"_drop_rights_confirmation": True}
+    )
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch=payload_patch,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == "video_local_edit_rights_confirmation_invalid"
+    assert captions == []
+
+
+def test_worker_binds_rights_confirmation_to_the_claimed_job_owner(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        job_user_id="701",
+        payload_patch={
+            "user_id": "999",
+            "rights_confirmation": {
+                "confirmed": True,
+                "policy": "video_edit_rights_v1",
+                "user_id": "999",
+                "review_revision": 3,
+                "confirmed_at_unix": 1_750_000_000,
+            },
+        },
+    )
+
+    assert terminal["status"] == "failed"
+    assert "video_local_edit_rights_confirmation_invalid" in terminal["detail"]
+    assert captions == []
+
+
+def test_worker_binds_rights_confirmation_to_the_claimed_review_revision(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch={"state_revision": 4},
+    )
+
+    assert terminal["status"] == "failed"
+    assert "video_local_edit_rights_confirmation_invalid" in terminal["detail"]
+    assert captions == []
+
+
+@pytest.mark.parametrize(
+    ("manual_plan", "asset_patch"),
+    [
+        (
+            {"trim": {"start_ms": 0, "end_ms": 2_000}, "brightness_percent": 120},
+            {},
+        ),
+        (
+            {"trim": {"start_ms": 0, "end_ms": 2_000}, "brightness_percent": 100},
+            {"concat_sources": [{"file_id": "concat-only", "file_name": "concat.mp4"}]},
+        ),
+        (
+            {"trim": {"start_ms": 0, "end_ms": 2_000}, "brightness_percent": 100},
+            {"logo_source": {"file_id": "logo-only", "file_name": "logo.png"}},
+        ),
+        (
+            {"trim": {"start_ms": 0, "end_ms": 2_000}, "brightness_percent": 100},
+            {"subtitle_source": {"file_id": "subtitle-only", "file_name": "subtitle.srt"}},
+        ),
+    ],
+)
+def test_split_worker_rejects_each_manual_operation_or_asset_independently(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manual_plan: dict,
+    asset_patch: dict,
+) -> None:
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="split",
+        manual_plan=manual_plan,
+        payload_patch=asset_patch,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == "video_local_edit_split_manual_conflict"
+    assert captions == []
+
+
+def test_split_worker_rejects_unknown_manual_plan_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    manual_plan = video_local_editing.neutral_split_manual_plan()
+    manual_plan["unknown_split_operation"] = True
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="split",
+        manual_plan=manual_plan,
+    )
+
+    assert terminal["status"] == "failed"
+    assert "video_local_edit_split_manual_conflict" in terminal["detail"]
+    assert captions == []
+
+
+@pytest.mark.parametrize(
+    ("plan_patch", "asset_patch"),
+    [
+        ({"concat_inputs": ["concat_1.mp4"]}, {}),
+        (
+            {"concat_inputs": ["concat_1.mp4", "concat_2.mp4"]},
+            {"concat_sources": [{"file_id": "concat-only", "file_name": "concat.mp4"}]},
+        ),
+        ({"logo_overlay": {"position": "top_right", "opacity": 1.0}}, {}),
+        ({"subtitle_file": "subtitle.srt"}, {}),
+        (
+            {},
+            {"concat_sources": [{"file_id": "concat-only", "file_name": "concat.mp4"}]},
+        ),
+        ({}, {"logo_source": {"file_id": "logo-only", "file_name": "logo.png"}}),
+        (
+            {},
+            {"subtitle_source": {"file_id": "subtitle-only", "file_name": "subtitle.srt"}},
+        ),
+    ],
+)
+def test_manual_worker_rejects_unbound_plan_assets(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    plan_patch: dict,
+    asset_patch: dict,
+) -> None:
+    manual_plan = {
+        "trim": {"start_ms": 0, "end_ms": 2_000},
+        "brightness_percent": 110,
+        **plan_patch,
+    }
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        manual_plan=manual_plan,
+        payload_patch={
+            "concat_sources": [],
+            "logo_source": {},
+            "subtitle_source": {},
+            **asset_patch,
+        },
+    )
+
+    assert terminal["status"] == "failed"
+    assert "video_local_edit_asset_contract_invalid" in terminal["detail"]
+    assert captions == []
+
+
+@pytest.mark.parametrize("malformed_plan", ["not-a-plan", ["trim"]])
+def test_split_worker_rejects_non_mapping_manual_plan_before_download(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    malformed_plan,
+) -> None:
+    observed_steps: list[str] = []
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="split",
+        payload_patch={"manual_edit_plan": malformed_plan},
+        observed_worker_steps=observed_steps,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == "video_local_edit_split_plan_invalid"
+    assert observed_steps == []
+    assert captions == []
+
+
+def test_split_worker_accepts_duration_independent_neutral_manual_plan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    downloaded_probe = {
+        "ok": True,
+        "reason": "",
+        "duration": 2.1,
+        "duration_ms": 2_100,
+        "width": 640,
+        "height": 360,
+        "fps": 25.0,
+        "has_video": True,
+        "has_audio": True,
+        "audio_stream_count": 1,
+        "format_name": "mp4",
+        "bytes": 12,
+    }
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="split",
+        manual_plan={},
+        downloaded_probe=downloaded_probe,
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert len(captions) == 2
+
+
+def test_worker_rechecks_downloaded_source_duration_before_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    over_limit = local_worker.video_local_validation.MAX_DURATION_SECONDS + 1
+    observed_steps: list[str] = []
+    validation_calls: list[dict] = []
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        downloaded_probe={
+            "ok": True,
+            "reason": "",
+            "duration": float(over_limit),
+            "duration_ms": over_limit * 1_000,
+            "width": 640,
+            "height": 360,
+            "fps": 25.0,
+            "has_video": True,
+            "has_audio": True,
+            "audio_stream_count": 1,
+            "format_name": "mp4",
+            "bytes": 12,
+        },
+        observed_worker_steps=observed_steps,
+        source_validation_calls=validation_calls,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == "duration_too_long"
+    assert captions == []
+    assert observed_steps == ["download", "probe", "validate"]
+    assert len(validation_calls) == 1
+    assert validation_calls[0]["file_size"] == len(b"source-video")
+    assert validation_calls[0]["metadata"]["duration_ms"] == over_limit * 1_000
+
+
+def test_worker_uses_downloaded_duration_for_the_final_noop_guard(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    observed_steps: list[str] = []
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        manual_plan={"trim": {"start_ms": 0, "end_ms": 2_000}},
+        payload_patch={
+            "source_metadata": {
+                "ok": True,
+                "duration": 4.0,
+                "duration_ms": 4_000,
+                "width": 640,
+                "height": 360,
+                "has_audio": True,
+            }
+        },
+        downloaded_probe={
+            "ok": True,
+            "reason": "",
+            "duration": 2.0,
+            "duration_ms": 2_000,
+            "width": 640,
+            "height": 360,
+            "fps": 25.0,
+            "has_video": True,
+            "has_audio": True,
+            "audio_stream_count": 1,
+            "format_name": "mp4",
+            "bytes": 12,
+        },
+        observed_worker_steps=observed_steps,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == "video_local_edit_plan_missing"
+    assert observed_steps == ["download", "probe", "validate"]
     assert captions == []
 
 

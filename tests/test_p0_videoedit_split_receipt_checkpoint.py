@@ -90,6 +90,14 @@ def _create_job(conn: sqlite3.Connection) -> int:
             "charge_policy": "free_local_tool",
             "price_xu": 0,
             "quoted_price_xu": 0,
+            "state_revision": 3,
+            "rights_confirmation": {
+                "confirmed": True,
+                "policy": "video_edit_rights_v1",
+                "user_id": "9101",
+                "review_revision": 3,
+                "confirmed_at_unix": 1_750_000_000,
+            },
         },
     )
     conn.commit()
@@ -112,6 +120,33 @@ def _artifact(index: int) -> dict:
             "height": 360,
             "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
         },
+    }
+
+
+def _valid_source_probe() -> dict:
+    return {
+        "ok": True,
+        "reason": "",
+        "duration": 2.0,
+        "duration_ms": 2_000,
+        "width": 640,
+        "height": 360,
+        "fps": 25.0,
+        "has_video": True,
+        "has_audio": True,
+        "audio_stream_count": 1,
+        "format_name": "mp4",
+        "bytes": 6,
+    }
+
+
+def _rights_confirmation() -> dict:
+    return {
+        "confirmed": True,
+        "policy": "video_edit_rights_v1",
+        "user_id": "9101",
+        "review_revision": 3,
+        "confirmed_at_unix": 1_750_000_000,
     }
 
 
@@ -221,6 +256,11 @@ def test_split_worker_marks_partial_delivery_unknown_with_artifact_manifest(
     monkeypatch.setattr(local_worker, "_local1_download_asset", lambda *_args, **_kwargs: str(source))
     monkeypatch.setattr(local_worker, "delivery_file_allowed", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(local_worker.video_ai_edit_validation, "sha256_file", lambda path: "a" * 64)
+    monkeypatch.setattr(
+        local_worker.video_local_validation,
+        "probe_video_file",
+        lambda *_args, **_kwargs: _valid_source_probe(),
+    )
 
     outputs = []
     for index in range(1, 3):
@@ -272,6 +312,8 @@ def test_split_worker_marks_partial_delivery_unknown_with_artifact_manifest(
         "worker_capability": video_editengine1.WORKER_CAPABILITY,
         "source_file_id": "source-file",
         "source_file_name": "source.mp4",
+        "source_metadata": _valid_source_probe(),
+        "user_id": "9101",
         "chat_id": "9101",
         "local1_mode": "split",
         "price_xu": 0,
@@ -279,13 +321,21 @@ def test_split_worker_marks_partial_delivery_unknown_with_artifact_manifest(
         "quality_tier_id": "local-free",
         "charge_policy": "free_local_tool",
         "provider_call": False,
+        "state_revision": 3,
+        "manual_edit_plan": {},
+        "rights_confirmation": _rights_confirmation(),
         "split_ranges": [
             {"index": 1, "start_ms": 0, "end_ms": 1_000},
             {"index": 2, "start_ms": 1_000, "end_ms": 2_000},
         ],
     }
     local_worker.run_video_local_edit(
-        {"id": 9201, "job_type": video_editengine1.WORKER_JOB_TYPE, "input_file_id": json.dumps(payload)}
+        {
+            "id": 9201,
+            "user_id": 9101,
+            "job_type": video_editengine1.WORKER_JOB_TYPE,
+            "input_file_id": json.dumps(payload),
+        }
     )
 
     terminal = updates[-1]
@@ -324,6 +374,11 @@ def test_manual_delivery_receipt_survives_workspace_cleanup_failure(
     monkeypatch.setattr(local_worker, "_local1_download_asset", lambda *_args, **_kwargs: str(source))
     monkeypatch.setattr(local_worker, "delivery_file_allowed", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(local_worker.video_ai_edit_validation, "sha256_file", lambda _path: "a" * 64)
+    monkeypatch.setattr(
+        local_worker.video_local_validation,
+        "probe_video_file",
+        lambda *_args, **_kwargs: _valid_source_probe(),
+    )
 
     def execute(_plan: dict, *, output_path: str, **_kwargs) -> dict:
         target = Path(output_path)
@@ -371,6 +426,8 @@ def test_manual_delivery_receipt_survives_workspace_cleanup_failure(
         "plan_schema_version": "video-edit-plan-v1",
         "source_file_id": "source-file",
         "source_file_name": "source.mp4",
+        "source_metadata": _valid_source_probe(),
+        "user_id": "9101",
         "chat_id": "9101",
         "local1_mode": "manual",
         "price_xu": 0,
@@ -378,10 +435,17 @@ def test_manual_delivery_receipt_survives_workspace_cleanup_failure(
         "quality_tier_id": "local-free",
         "charge_policy": "free_local_tool",
         "provider_call": False,
+        "state_revision": 3,
+        "rights_confirmation": _rights_confirmation(),
         "manual_edit_plan": {"trim": {"start_ms": 0, "end_ms": 2_000}, "brightness_percent": 110},
     }
     local_worker.run_video_local_edit(
-        {"id": 9301, "job_type": video_editengine1.WORKER_JOB_TYPE, "input_file_id": json.dumps(payload)}
+        {
+            "id": 9301,
+            "user_id": 9101,
+            "job_type": video_editengine1.WORKER_JOB_TYPE,
+            "input_file_id": json.dumps(payload),
+        }
     )
 
     terminal = updates[-1]
@@ -427,6 +491,11 @@ def _run_manual_delivery_case(
         local_worker.video_ai_edit_validation,
         "sha256_file",
         lambda _path: "a" * 64,
+    )
+    monkeypatch.setattr(
+        local_worker.video_local_validation,
+        "probe_video_file",
+        lambda *_args, **_kwargs: _valid_source_probe(),
     )
 
     def execute(_plan: dict, *, output_path: str, **_kwargs) -> dict:
@@ -475,6 +544,8 @@ def _run_manual_delivery_case(
         "plan_schema_version": "video-edit-plan-v1",
         "source_file_id": "source-file",
         "source_file_name": "source.mp4",
+        "source_metadata": _valid_source_probe(),
+        "user_id": "9101",
         "chat_id": "9101",
         "local1_mode": "manual",
         "price_xu": 0,
@@ -482,6 +553,8 @@ def _run_manual_delivery_case(
         "quality_tier_id": "local-free",
         "charge_policy": "free_local_tool",
         "provider_call": False,
+        "state_revision": 3,
+        "rights_confirmation": _rights_confirmation(),
         "manual_edit_plan": {
             "trim": {"start_ms": 0, "end_ms": 2_000},
             "brightness_percent": 110,
@@ -490,6 +563,7 @@ def _run_manual_delivery_case(
     local_worker.run_video_local_edit(
         {
             "id": 9401,
+            "user_id": 9101,
             "job_type": video_editengine1.WORKER_JOB_TYPE,
             "input_file_id": json.dumps(payload),
         }

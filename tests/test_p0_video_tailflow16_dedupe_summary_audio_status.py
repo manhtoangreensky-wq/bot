@@ -527,7 +527,8 @@ def test_submit_source_has_no_silent_job_branch_and_marks_status_render() -> Non
     confirm = handler[handler.index('if section == "confirm":') :]
     status_sender = _function_source("video_b14_send_or_edit_status_panel")
 
-    assert "video_tail9.mark_submitted" in confirm
+    assert "video_tail9.recover_submission" in confirm
+    assert "video_tail9.mark_submitted" not in confirm
     assert "video_tail9_render_confirmed_status" in confirm
     assert "video_tail9_prepare_submit_status" in confirm
     assert 'if response is None or bridge_preflight_blocked:' in confirm

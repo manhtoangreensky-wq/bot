@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,6 +15,9 @@ _TARGET_FUNCTIONS = (
     "video_b14_send_or_edit_status_panel",
     "video_b14_queue_status_keyboard",
     "video_b14_queue_status_text",
+    "video_edit_legacy_tail_compatibility",
+    "video_editor_state_snapshot",
+    "video_edit_review_return_action",
     "video_tail9_callback_guard",
     "video_tail9_prepare_submit_status",
     "video_tail9_render_confirmed_status",
@@ -457,6 +461,20 @@ def _submit_handler_namespace(
         "save_video_session": lambda _uid, current: current,
         "submit_local_video_editor_job": local_submit,
         "get_video_editor_pending": lambda _uid: {},
+        "compare_and_set_video_editor_pending": (
+            lambda _uid, _expected, step, **fields: (
+                True,
+                {"step": step, **fields},
+            )
+        ),
+        "rerender_video_editor_after_stale_commit": (
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("fresh Video Edit legacy callback must win its CAS")
+            )
+        ),
+        "get_user_language": lambda _uid: "vi",
+        "get_local_worker_job": lambda _job_id: None,
+        "video_edit_lane_upload_keyboard": lambda *_args, **_kwargs: "upload-keyboard",
         "video_tail9_render_confirmed_status": render_status,
         "video_tail9_prepare_submit_status": prepare_status,
         "safe_edit_or_send": blocker,
@@ -465,9 +483,23 @@ def _submit_handler_namespace(
         "video_tail9_submit_blocker_keyboard": lambda: "redundant-keyboard",
         "now_text_safe": lambda: "2026-07-27T16:00:00+07:00",
         "VIDEO_TAIL9_STATE_KEY": "video_tail9",
-        "logger": SimpleNamespace(warning=lambda *_args, **_kwargs: None),
+        "logger": SimpleNamespace(
+            warning=lambda *_args, **_kwargs: None,
+            exception=lambda *_args, **_kwargs: None,
+        ),
         "_status_calls": status_calls,
     }
+    namespace["video_editor_state_snapshot"] = _load_function(
+        "video_editor_state_snapshot",
+        {"json": json},
+    )
+    namespace["video_edit_review_return_action"] = _load_function(
+        "video_edit_review_return_action",
+    )
+    namespace["video_edit_legacy_tail_compatibility"] = _load_function(
+        "video_edit_legacy_tail_compatibility",
+        namespace,
+    )
     return namespace, rendered, blocker_calls, bridge_calls
 
 
@@ -539,11 +571,15 @@ def test_video_edit_without_persisted_job_opens_its_status_recovery_panel() -> N
         handler(SimpleNamespace(callback_query=_Query()), SimpleNamespace())
     )
 
-    assert result == "status-panel"
+    assert result == "redundant-board"
     assert rendered == []
-    assert blocker_calls == []
+    assert len(blocker_calls) == 1
+    public_copy = blocker_calls[0].lower()
+    assert "gửi video nguồn" in public_copy
+    assert "chưa tạo tác vụ" in public_copy
+    assert "chưa trừ xu" in public_copy
     assert bridge_calls == []
-    assert len(namespace["_status_calls"]) == 1
+    assert namespace["_status_calls"] == []
 
 
 def test_status_handoff_covers_shared_products_and_embedded_idea_source() -> None:

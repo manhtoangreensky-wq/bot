@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import hashlib
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -120,10 +121,42 @@ def _run_canonical_upload(
         persisted.update(state)
         return dict(persisted)
 
+    def snapshot(state: dict | None) -> dict:
+        return deepcopy(dict(state or {}))
+
+    def compare_and_set(_uid: int, expected: dict, step: str = "", **fields):
+        current = snapshot(persisted)
+        if current != snapshot(expected):
+            return False, current
+        committed = {**current, **deepcopy(fields)}
+        committed["step"] = step or str(current.get("step") or "await_edit_video")
+        save(_uid, committed)
+        return True, snapshot(persisted)
+
+    def compare_and_replace(
+        _uid: int,
+        expected: dict,
+        replacement: dict,
+        *,
+        replacement_exists: bool = True,
+    ):
+        current = snapshot(persisted)
+        if current != snapshot(expected):
+            return False, current
+        save(_uid, replacement if replacement_exists else {})
+        return True, snapshot(persisted)
+
+    async def rerender_stale(_message, winner: dict, _lang: str) -> None:
+        replies.append({"text": "stale", "winner": snapshot(winner)})
+
     handler = _compile_function(
         "handle_video_editor_pending_upload",
         {
             "get_video_editor_pending": lambda _uid: dict(persisted),
+            "video_editor_state_snapshot": snapshot,
+            "compare_and_set_video_editor_pending": compare_and_set,
+            "compare_and_replace_video_editor_pending": compare_and_replace,
+            "rerender_video_editor_after_stale_commit": rerender_stale,
             "get_video_session": lambda _uid: {"product_id": active_product},
             "video_edit_state_machine": video_edit_state_machine,
             "safe_int": lambda value, default=0: int(value or default),

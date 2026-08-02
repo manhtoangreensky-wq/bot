@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import html
 import json
 import logging
@@ -8,6 +9,8 @@ import re
 import sqlite3
 import time
 from copy import deepcopy
+from contextvars import ContextVar
+from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,30 +30,85 @@ ROOT = Path(__file__).resolve().parents[1]
 BOT_SOURCE = (ROOT / "bot.py").read_text(encoding="utf-8")
 
 
+@lru_cache(maxsize=1)
+def _top_level_function_sources() -> dict[str, str]:
+    tree = ast.parse(BOT_SOURCE)
+    lines = BOT_SOURCE.splitlines(keepends=True)
+    return {
+        node.name: "".join(lines[node.lineno - 1 : node.end_lineno]).rstrip() + "\n"
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.end_lineno is not None
+    }
+
+
 def _function_source(name: str) -> str:
-    markers = (f"async def {name}(", f"def {name}(")
-    starts = [BOT_SOURCE.find(marker) for marker in markers]
-    starts = [position for position in starts if position >= 0]
-    if not starts:
+    function_source = _top_level_function_sources().get(name)
+    if function_source is None:
         raise AssertionError(f"missing function: {name}")
-    start = min(starts)
-    next_defs = [
-        position
-        for position in (
-            BOT_SOURCE.find("\ndef ", start + 1),
-            BOT_SOURCE.find("\nasync def ", start + 1),
-            BOT_SOURCE.find("\n@", start + 1),
-        )
-        if position >= 0
-    ]
-    end = min(next_defs) if next_defs else len(BOT_SOURCE)
-    return BOT_SOURCE[start:end].rstrip() + "\n"
+    return function_source
 
 
 def _compile_function(name: str, namespace: dict):
     source = "from __future__ import annotations\n\n" + _function_source(name)
     exec(compile(source, filename="bot.py", mode="exec"), namespace)
     return namespace[name]
+
+
+def _isolated_guard_dependencies(pending: dict) -> tuple[ContextVar, dict]:
+    tracker = ContextVar("test_video_editor_state_write", default=None)
+
+    def snapshot(value) -> dict:
+        return deepcopy(dict(value or {}))
+
+    def rollback(user_id, write_record, original, *, snapshot_exists: bool):
+        record = dict(write_record or {})
+        key = f"video_editor:{user_id}"
+        current_exists = key in pending
+        current = snapshot(pending.get(key) or {})
+        if (
+            str(record.get("user_id") or "") != str(user_id)
+            or current_exists != bool(record.get("exists"))
+            or current != snapshot(record.get("state") or {})
+        ):
+            return False, current
+        if snapshot_exists:
+            pending[key] = snapshot(original)
+            return True, snapshot(original)
+        pending.pop(key, None)
+        return True, {}
+
+    async def rerender(*_args, **_kwargs):
+        return None
+
+    class ApplicationHandlerStop(Exception):
+        pass
+
+    return tracker, {
+        "ApplicationHandlerStop": ApplicationHandlerStop,
+        "safe_int": lambda value, default=0: int(value or default),
+        "video_editor_pending_key": lambda user_id: f"video_editor:{user_id}",
+        "video_editor_state_snapshot": snapshot,
+        "rollback_video_editor_guard_state": rollback,
+        "rerender_video_editor_after_stale_commit": rerender,
+        "get_user_language": lambda _uid: "vi",
+        "_VIDEO_EDITOR_STATE_WRITE": tracker,
+        "USER_PENDING": pending,
+    }
+
+
+VIDEO_EDITOR_SPLIT_CALLBACK_ALLOWED = _compile_function(
+    "video_editor_split_callback_allowed",
+    {},
+)
+VIDEO_EDITOR_STATE_SNAPSHOT = _compile_function(
+    "video_editor_state_snapshot",
+    {"json": json},
+)
+VIDEO_EDIT_REVIEW_RETURN_ACTION = _compile_function(
+    "video_edit_review_return_action",
+    {},
+)
 
 
 class _Message:
@@ -523,6 +581,7 @@ def test_videoedit_goal_assistant_and_public_alerts_are_vietnamese_first() -> No
     )
     for public_leak in (
         "Worker chưa xác nhận",
+        "chưa được worker xác nhận",
         "thao tác local",
         "Preset màu",
         "bộ lọc local",
@@ -638,6 +697,7 @@ def test_waiting_lane_reentry_rerenders_the_same_upload_screen() -> None:
             "get_video_editor_pending": lambda _uid: deepcopy(current_state),
             "video_edit_state_machine": video_edit_state_machine,
             "video_editor_normalize_action": lambda value: value,
+            "video_editor_split_callback_allowed": VIDEO_EDITOR_SPLIT_CALLBACK_ALLOWED,
             "safe_edit_or_send": render,
             "video_edit_lane_upload_text": lambda mode, _lang: f"upload:{mode}",
             "video_edit_lane_upload_keyboard": lambda mode, _lang: f"keyboard:{mode}",
@@ -679,6 +739,10 @@ def test_hub_entry_does_not_clear_any_video_state_before_telegram_render_succeed
         "handle_video_editor_callback",
         {
             "get_user_language": lambda _uid: "vi",
+            "get_video_editor_pending": lambda _uid: {},
+            "video_edit_state_machine": video_edit_state_machine,
+            "video_editor_normalize_action": lambda value: value,
+            "video_editor_split_callback_allowed": VIDEO_EDITOR_SPLIT_CALLBACK_ALLOWED,
             "clear_video_editor_competing_video_states": lambda *_args: events.append("clear-competing"),
             "clear_video_session": lambda *_args: events.append("clear-session"),
             "clear_video_editor_pending": lambda *_args: events.append("clear-pending"),
@@ -720,6 +784,7 @@ def test_lane_entry_commits_state_only_after_telegram_render(callback: str, edit
             "get_video_editor_pending": lambda _uid: {},
             "video_edit_state_machine": video_edit_state_machine,
             "video_editor_normalize_action": lambda value: value,
+            "video_editor_split_callback_allowed": VIDEO_EDITOR_SPLIT_CALLBACK_ALLOWED,
             "clear_video_editor_competing_video_states": lambda *_args: events.append("clear-competing"),
             "clear_video_session": lambda *_args: events.append("clear-session"),
             "clear_video_editor_pending": lambda *_args: events.append("clear-pending"),
@@ -1097,7 +1162,7 @@ def test_latest_and_legacy_status_actions_are_stateless_read_only_owned_refreshe
     assert "get_latest_video_editor_job(uid)" in latest_block
     assert "video_editor_job_status_text(job, lang)" in latest_block
     assert "video_editor_status_keyboard(job_id, lang)" in latest_block
-    assert '"videoedit|hub"' in latest_block
+    assert "video_editor_latest_status_fallback_keyboard(lang)" in latest_block
     assert "set_video_editor_pending" not in latest_block
     assert "update_video_editor_pending" not in latest_block
     assert "submit_video_edit" not in latest_block
@@ -1105,6 +1170,9 @@ def test_latest_and_legacy_status_actions_are_stateless_read_only_owned_refreshe
     status_start = callback.index('if action == "status":')
     status_end = callback.index('if action == "quick":', status_start)
     status_block = callback[status_start:status_end]
+    assert "get_local_worker_job_readonly(job_id)" in status_block
+    assert "except sqlite3.Error" in status_block
+    assert "video_editor_latest_status_unavailable_text(lang)" in status_block
     assert "str(job.get(\"user_id\") or \"\") != str(uid) and not is_admin_user(uid)" in status_block
     assert "set_video_editor_pending" not in status_block
     assert "submit_video_edit" not in status_block
@@ -1112,7 +1180,9 @@ def test_latest_and_legacy_status_actions_are_stateless_read_only_owned_refreshe
     start = callback.index('if action == "ai_status":')
     end = callback.index('if action.startswith("ai_"):', start)
     ai_status_block = callback[start:end]
-    assert "get_local_worker_job(job_id)" in ai_status_block
+    assert "get_local_worker_job_readonly(job_id)" in ai_status_block
+    assert "except sqlite3.Error" in ai_status_block
+    assert "video_editor_latest_status_unavailable_text(lang)" in ai_status_block
     assert "video_editengine1.WORKER_JOB_TYPE" in ai_status_block
     assert "video_editor_job_status_text(job, lang)" in ai_status_block
     assert "video_editor_status_keyboard(job_id, lang)" in ai_status_block
@@ -1120,6 +1190,13 @@ def test_latest_and_legacy_status_actions_are_stateless_read_only_owned_refreshe
     assert "create_job(" not in ai_status_block
     assert "set_video_editor_pending" not in ai_status_block
     assert "submit_video_edit" not in ai_status_block
+
+    readonly_lookup = _function_source("get_local_worker_job_readonly")
+    assert "db_connect_readonly()" in readonly_lookup
+    assert "SELECT id,user_id,command,job_type,status" in readonly_lookup
+    assert "INSERT" not in readonly_lookup
+    assert "UPDATE" not in readonly_lookup
+    assert "DELETE" not in readonly_lookup
 
 
 def test_every_workspace_rerender_preserves_the_exact_entry_lane_state() -> None:
@@ -1385,6 +1462,8 @@ def test_legacy_shared_tail_commits_review_state_only_after_telegram_render() ->
             "video_editor_pending_key": lambda uid: f"video_editor:{uid}",
             "USER_PENDING": pending,
             "json": json,
+            "video_editor_state_snapshot": VIDEO_EDITOR_STATE_SNAPSHOT,
+            "video_edit_review_return_action": VIDEO_EDIT_REVIEW_RETURN_ACTION,
             "set_video_editor_pending": commit_review,
             "safe_edit_or_send": failed_render,
             "video_local_confirmation_text": lambda *_args, **_kwargs: "review",
@@ -1472,6 +1551,7 @@ def test_free_delivered_status_never_claims_a_pending_fee() -> None:
     assert "miễn phí 0 Xu" in status
     free_branch = status[status.index("confirmed_price_xu <= 0"):status.index('elif charge_state == "charged"')]
     assert "đang được ghi nhận" not in free_branch
+    assert "local" not in free_branch.lower()
 
 
 def test_split_confirmation_truthfully_promises_multiple_validated_mp4_parts() -> None:
@@ -1614,7 +1694,9 @@ def test_invalid_logo_srt_and_concat_inputs_keep_their_exact_parent() -> None:
     upload = _function_source("handle_video_editor_pending_upload")
     legacy = upload[upload.index('step = str(state.get("step") or "")'):]
     metadata_failure_start = legacy.index('if not metadata.get("ok"):')
-    metadata_failure_end = legacy.index("cache_recent_media_state", metadata_failure_start)
+    metadata_failure_end = legacy.index(
+        'source["source_file_size"]', metadata_failure_start
+    )
     metadata_failure = legacy[metadata_failure_start:metadata_failure_end]
     assert "back_callback=back_callback" in metadata_failure
 
@@ -1774,7 +1856,9 @@ def test_stale_state_and_videoedit_only_failure_guard_restore_contract_is_presen
     ]
     assert "snapshot" in guard
     assert "had_state" in guard
-    assert "USER_PENDING[state_key]" in guard
+    assert "_VIDEO_EDITOR_STATE_WRITE" in guard
+    assert "rollback_video_editor_guard_state" in guard
+    assert "USER_PENDING[state_key]" not in guard
     assert "video_editor_pending_key" in guard
     assert "video_editor_pending_key" not in shared_guard
     assert "_video_edit_render_failed" not in shared_guard
@@ -1782,23 +1866,17 @@ def test_stale_state_and_videoedit_only_failure_guard_restore_contract_is_presen
 
 def test_videoedit_failure_guard_restores_a_hard_render_failure() -> None:
     pending = {"video_editor:904": {"step": "workspace", "manual_edit_plan": {"speed": 1.0}}}
-
-    class ApplicationHandlerStop(Exception):
-        pass
+    tracker, dependencies = _isolated_guard_dependencies(pending)
 
     guard = _compile_function(
         "video_editor_callback_state_guard",
-        {
-            "ApplicationHandlerStop": ApplicationHandlerStop,
-            "safe_int": lambda value, default=0: int(value or default),
-            "video_editor_pending_key": lambda user_id: f"video_editor:{user_id}",
-            "USER_PENDING": pending,
-            "json": json,
-        },
+        dependencies,
     )
 
     async def hard_handler(update, _context):
-        pending["video_editor:904"] = {"step": "mutated"}
+        mutated = {"step": "mutated"}
+        pending["video_editor:904"] = mutated
+        tracker.set({"user_id": "904", "exists": True, "state": mutated})
         raise RuntimeError("render failed")
 
     query = _Query(904, "videoedit|set|speed|2")
@@ -1813,24 +1891,18 @@ def test_videoedit_failure_guard_restores_a_hard_render_failure() -> None:
 
 def test_message_state_guard_commits_success_and_rolls_back_failed_reply() -> None:
     pending = {"video_editor:907": {"step": "await_brightness", "manual_edit_plan": {"speed": 1.0}}}
-
-    class ApplicationHandlerStop(Exception):
-        pass
+    tracker, dependencies = _isolated_guard_dependencies(pending)
 
     guard = _compile_function(
         "video_editor_message_state_guard",
-        {
-            "ApplicationHandlerStop": ApplicationHandlerStop,
-            "safe_int": lambda value, default=0: int(value or default),
-            "video_editor_pending_key": lambda user_id: f"video_editor:{user_id}",
-            "USER_PENDING": pending,
-            "json": json,
-        },
+        dependencies,
     )
     update = SimpleNamespace(effective_user=SimpleNamespace(id=907))
 
     async def failed_reply(_update, _context):
-        pending["video_editor:907"] = {"step": "review", "manual_edit_plan": {"speed": 2.0}}
+        mutated = {"step": "review", "manual_edit_plan": {"speed": 2.0}}
+        pending["video_editor:907"] = mutated
+        tracker.set({"user_id": "907", "exists": True, "state": mutated})
         raise RuntimeError("telegram reply failed")
 
     with pytest.raises(RuntimeError, match="telegram reply failed"):
@@ -1841,7 +1913,9 @@ def test_message_state_guard_commits_success_and_rolls_back_failed_reply() -> No
     }
 
     async def successful_reply(_update, _context):
-        pending["video_editor:907"] = {"step": "review", "manual_edit_plan": {"speed": 2.0}}
+        committed = {"step": "review", "manual_edit_plan": {"speed": 2.0}}
+        pending["video_editor:907"] = committed
+        tracker.set({"user_id": "907", "exists": True, "state": committed})
         return True
 
     assert asyncio.run(guard(successful_reply)(update, SimpleNamespace())) is True
@@ -2042,6 +2116,7 @@ def test_confirmation_retry_after_ui_failure_reuses_full_split_identity(tmp_path
         state_revision=3,
         selected_tool="split",
         split_mode="custom",
+        manual_edit_plan=video_local_editing.neutral_split_manual_plan(),
         split_ranges=[
             {"index": 1, "start_ms": 0, "end_ms": 5_000},
             {"index": 2, "start_ms": 5_000, "end_ms": 10_000},
@@ -2184,7 +2259,7 @@ def test_videoedit_summary_copy_is_vietnamese_without_changing_other_products() 
         ]
         assert "Tổng hợp chỉnh sửa video" in text
         assert "chọn gói" not in text.lower()
-        assert "Sửa logo và watermark" in labels
+        assert any("Sửa logo và watermark" in label for label in labels)
 
     product_tail = {
         "video_product_type": "product_video",
@@ -2201,5 +2276,5 @@ def test_videoedit_summary_copy_is_vietnamese_without_changing_other_products() 
     assert "Âm thanh/Add-on" in product_text
     assert "Logo/Watermark" in product_text
     assert "owner product_video" in product_text
-    assert "Tiếp tục chọn gói" in product_labels
+    assert any("Tiếp tục chọn gói" in label for label in product_labels)
     assert "🖼️ Sửa Logo/Watermark" in product_labels

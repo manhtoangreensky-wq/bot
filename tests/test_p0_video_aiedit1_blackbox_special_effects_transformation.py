@@ -128,7 +128,7 @@ class JsonResponse:
 
 def test_aiedit1_menu_entry_present():
     assert '"videoedit|ai"' in BOT_SOURCE
-    assert "Chỉnh sửa & nâng cấp bằng AI" in BOT_SOURCE
+    assert "Chỉnh sửa theo mục tiêu" in BOT_SOURCE
 
 
 def test_aiedit1_upload_flow():

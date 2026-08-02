@@ -50,7 +50,7 @@ def test_edit2_manual_menu_exposes_only_truthful_operations() -> None:
         "Âm thanh",
         "Ánh sáng & màu",
         "Chữ, logo & phụ đề",
-        "Hiệu ứng local",
+        "Hiệu ứng cục bộ",
         "Cắt đầu/cuối",
         "Bỏ đoạn giữa",
         "Chia thành nhiều đoạn",
@@ -129,7 +129,7 @@ def test_edit2_smart_aspect_does_not_claim_unwired_ai_features() -> None:
     assert "aspect_basic_crop" in block
     assert "aspect_keep_frame" in block
     assert "ai_set_aspect_method|aspect_subject_tracking" not in block
-    assert "chưa có runtime được kiểm chứng" in block
+    assert "chưa có bộ xử lý được kiểm chứng" in block
     assert "không có nút thực thi" in block
 
 
