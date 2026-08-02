@@ -2,6 +2,7 @@ import asyncio
 import importlib
 import inspect
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -266,7 +267,7 @@ def test_longmedia32_legacy_part_planner_has_no_implicit_hour_or_part_cap(monkey
     assert "0 parts" not in duration_only
 
 
-def test_longmedia32_fractional_duration_boundaries_honor_configured_cap(monkeypatch):
+def test_longmedia32_fractional_duration_boundaries_never_create_product_cap(monkeypatch):
     monkeypatch.setattr(bot, "SUBDUB_DIRECT_ASR_MAX_SECONDS", 60, raising=False)
     monkeypatch.setattr(bot, "SUBDUB_MAX_DURATION_SECONDS", 7200)
 
@@ -275,7 +276,7 @@ def test_longmedia32_fractional_duration_boundaries_honor_configured_cap(monkeyp
         {},
         ffprobe_duration=60.001,
     )
-    over_configured_cap = bot.subdub_duration_gate_payload(
+    beyond_legacy_setting = bot.subdub_duration_gate_payload(
         {"ffprobe_duration": 7200.001},
         {},
         ffprobe_duration=7200.001,
@@ -284,9 +285,10 @@ def test_longmedia32_fractional_duration_boundaries_honor_configured_cap(monkeyp
     assert over_direct["input_duration_seconds"] == 61
     assert over_direct["is_long_media"] is True
     assert over_direct["chunking_enabled"] is True
-    assert over_configured_cap["input_duration_seconds"] == 7201
-    assert over_configured_cap["duration_gate_result"] == "fail_over_limit"
-    assert bot.subtitle_plus_dub_exceeds_limits({"video_duration": 7201}) is True
+    assert beyond_legacy_setting["input_duration_seconds"] == 7201
+    assert beyond_legacy_setting["duration_gate_result"] == "pass_long"
+    assert beyond_legacy_setting["duration_limit_seconds"] == 0
+    assert bot.subtitle_plus_dub_exceeds_limits({"video_duration": 7201}) is False
 
 
 def test_longmedia32_saved_input_gate_keeps_fractional_ffprobe_duration(monkeypatch):
@@ -333,6 +335,7 @@ def test_longmedia32_saved_input_gate_keeps_fractional_ffprobe_duration(monkeypa
         bot = FakeBot()
 
     monkeypatch.setattr(bot, "telegram_local_api_enabled", lambda: False)
+    monkeypatch.setattr(bot, "SUBDUB_MAX_DURATION_SECONDS", 180)
     downloaded, content_type = asyncio.run(
         bot.video_dubbing_download_source(
             FakeContext(),
@@ -351,6 +354,60 @@ def test_longmedia32_saved_input_gate_keeps_fractional_ffprobe_duration(monkeypa
     assert beyond_hour["duration_gate_result"] == "pass_long"
     assert downloaded == b"fixture-video"
     assert content_type == "video/mp4"
+
+
+def test_longmedia32_public_core_advances_beyond_five_before_slow_preflight(
+    tmp_path,
+    monkeypatch,
+):
+    source_path = tmp_path / "source-181s.mp4"
+    source_path.write_bytes(b"fixture-video")
+    progress_stages = []
+    stages_seen_before_preflight = []
+
+    async def save_input(_context, _state, _workspace):
+        return {
+            "ok": True,
+            "source_bytes": b"fixture-video",
+            "content_type": "video/mp4",
+            "path": str(source_path),
+            "exists": True,
+            "file_saved": True,
+            "size": len(b"fixture-video"),
+            "duration": 181,
+        }
+
+    async def progress(_query, _job_key, _job_id, stage, _lang):
+        progress_stages.append(stage)
+
+    async def slow_preflight(_source, *, content_type):
+        assert content_type == "video/mp4"
+        stages_seen_before_preflight.extend(progress_stages)
+        raise RuntimeError("stop_after_progress_probe")
+
+    monkeypatch.setattr(bot, "video_dubbing_save_input_for_pipeline", save_input)
+    monkeypatch.setattr(bot, "subdub_send_progress_update", progress)
+    monkeypatch.setattr(bot, "subdub_normalize_video_bytes_if_needed", slow_preflight)
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
+
+    query = SimpleNamespace(
+        from_user=SimpleNamespace(id=32181),
+        message=SimpleNamespace(chat_id=32181),
+    )
+    state = {
+        "mode": bot.VIDEO_SUBTITLE_MODE_CREATE,
+        "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_CREATE,
+        "video_duration": 181,
+        "_pipeline_workspace": str(tmp_path),
+        "_pipeline_job_key": "longmedia32-progress-181",
+        "_pipeline_job_id": "LONGMEDIA32-181",
+    }
+
+    with pytest.raises(RuntimeError, match="stop_after_progress_probe"):
+        asyncio.run(bot._execute_video_dubbing_pipeline_core(query, SimpleNamespace(), state))
+
+    assert stages_seen_before_preflight == ["received_video", "saved_input"]
+    assert bot.subdub_progress_percent_for_lifecycle(stages_seen_before_preflight[0]) > 5
 
 
 def test_longmedia32_public_core_never_delivers_split_video_parts():
@@ -1186,7 +1243,9 @@ def test_longmedia32_four_lanes_share_one_canonical_final_report(mode):
         "tts_mixed_segments": 4 if mode in {bot.VIDEO_SUBTITLE_MODE_DUB, bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} else 0,
         "tts_dropped_segments": 0,
         "audio_active_duration": 8.5 if mode in {bot.VIDEO_SUBTITLE_MODE_DUB, bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} else 0.0,
-        "charged": 0,
+        "final_price_xu": 12,
+        "charged_xu": 10,
+        "account_balance_xu": 990,
         "public_job_id": "LONGMEDIA32",
     }
 
@@ -1195,19 +1254,25 @@ def test_longmedia32_four_lanes_share_one_canonical_final_report(mode):
     for label in (
         "Mã xử lý:",
         "Kết quả:",
-        "Loại:",
+        "Ngôn ngữ dịch:",
+        "Loại dịch vụ:",
+        "Thời lượng:",
+        "Giá:",
+        "Đã trừ:",
+        "Tài khoản còn:",
+        "Trạng thái:",
+    ):
+        assert label in text
+    for removed_label in (
         "Ngôn ngữ nguồn:",
-        "Ngôn ngữ đích:",
         "Thời lượng nguồn:",
         "Thời lượng kết quả:",
         "Số câu phụ đề:",
         "TTS dự kiến/tạo/ghép/bỏ:",
         "Âm thanh hoạt động:",
         "Kiểm tra file:",
-        "Đã trừ:",
-        "Trạng thái:",
     ):
-        assert label in text
+        assert removed_label not in text
     assert "Kết quả đã gửi phía trên" not in text
     assert text.count("Mã xử lý:") == 1
     if mode == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
@@ -1225,8 +1290,8 @@ def test_longmedia32_four_lanes_share_one_canonical_final_report(mode):
             },
             "vi",
         )
-        assert "Loại: <b>Phụ đề + lồng tiếng</b>" in staged_combo
-        assert "Loại: <b>Dịch phụ đề</b>" not in staged_combo
+        assert "Loại dịch vụ: <b>Combo phụ đề - lồng tiếng</b>" in staged_combo
+        assert "Loại dịch vụ: <b>Phụ đề dịch</b>" not in staged_combo
 
 
 def test_longmedia32_international_report_uses_same_canonical_fields():
@@ -1254,6 +1319,9 @@ def test_longmedia32_international_report_uses_same_canonical_fields():
             "tts_mixed_segments": 3,
             "tts_dropped_segments": 0,
             "audio_active_duration": 7.0,
+            "final_price_xu": 40,
+            "charged_xu": 36,
+            "account_balance_xu": 964,
             "public_job_id": "LONGMEDIA32-EN",
         },
         "en",
@@ -1262,23 +1330,19 @@ def test_longmedia32_international_report_uses_same_canonical_fields():
     for label in (
         "Support code:",
         "Result:",
-        "Type:",
-        "Source language:",
-        "Target language:",
-        "Input duration:",
-        "Output duration:",
-        "Subtitle cues:",
-        "TTS expected/generated/mixed/dropped:",
-        "Active audio:",
-        "File validation:",
+        "Translation language:",
+        "Service type:",
+        "Duration:",
+        "Price:",
         "Charged:",
+        "Account balance:",
         "Status:",
     ):
         assert label in text
     assert "The result was sent above" not in text
 
 
-def test_longmedia32_delivery_without_validation_evidence_never_claims_pass():
+def test_longmedia32_delivery_report_does_not_expose_internal_validation_detail():
     text = bot.video_dubbing_receipt_text(
         {
             "mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
@@ -1297,5 +1361,5 @@ def test_longmedia32_delivery_without_validation_evidence_never_claims_pass():
         "en",
     )
 
-    assert "File validation: <b>PASS</b>" not in text
-    assert "File validation: <b>UNKNOWN</b>" in text
+    assert "File validation:" not in text
+    assert "Kiểm tra file:" not in text

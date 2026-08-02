@@ -204162,13 +204162,9 @@ def subtitle_plus_dub_exceeds_limits(state: dict | None = None, *, admin: bool =
         intake_method=intake_method,
         local_api=telegram_local_api_enabled(),
     ) * 1024 * 1024
-    max_duration = subdub_full_duration_limit_seconds(admin)
     file_size = _safe_int(state.get("video_file_size") or state.get("source_file_size"), 0)
-    duration = _safe_int(state.get("video_duration") or state.get("source_duration"), 0)
-    return bool(
-        (file_size and file_size > max_bytes)
-        or (max_duration > 0 and duration and duration > max_duration)
-    )
+    # Duration is a routing input for chunking, never a public product gate.
+    return bool(file_size and file_size > max_bytes)
 
 def subtitle_plus_dub_segment_count(state: dict | None = None, *, translated: bool = False) -> int:
     state = dict(state or {})
@@ -207010,6 +207006,38 @@ def subdub_receipt_voice_label(state: dict | None = None, result: dict | None = 
         return ""
     return label[:80]
 
+
+def subdub_receipt_financial_snapshot(
+    user_id,
+    *,
+    price_xu: int = 0,
+    charged_xu: int = 0,
+) -> dict:
+    """Read the post-charge balance without performing another wallet mutation."""
+    balance_xu = 0
+    try:
+        balance_xu, _total_spent, _is_vip = get_user(user_id)
+    except Exception as exc:
+        logger.warning(
+            "subdub receipt balance read failed | error=%s",
+            type(exc).__name__,
+        )
+    return {
+        "final_price_xu": max(0, _safe_int(price_xu, 0)),
+        "charged_xu": max(0, _safe_int(charged_xu, 0)),
+        "account_balance_xu": max(0, _safe_int(balance_xu, 0)),
+    }
+
+
+def subdub_receipt_duration_label(duration_seconds, lang: str = "vi") -> str:
+    duration = max(0, _safe_int(duration_seconds, 0))
+    if not duration:
+        return "Đang cập nhật" if normalize_user_language(lang) == "vi" else "Updating"
+    minutes, seconds = divmod(duration, 60)
+    if normalize_user_language(lang) != "vi":
+        return f"{minutes} min {seconds} sec" if minutes else f"{seconds} sec"
+    return f"{minutes} phút {seconds} giây" if minutes else f"{seconds} giây"
+
 def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
     result = result or {}
@@ -207039,7 +207067,6 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
     )):
         return subdub_mode_fail_text(mode, lang)
     charged_xu = int(result.get("charged") or result.get("charged_xu") or state.get("charged_xu") or 0)
-    cost_line = subdub_success_cost_line(charged_xu, lang)
     if delivered_video or terminal_delivered:
         actual_duration = float(
             receipt_context.get("canonical_final_artifact_duration")
@@ -207048,20 +207075,26 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
             or (receipt_context.get("output_validation") or {}).get("duration")
             or 0.0
         )
-        duration = video_translate_duration_text(actual_duration) if actual_duration > 0 else subtitle_plus_dub_duration_label(receipt_context)
-        if "chưa" in duration.lower():
-            duration = "Đang cập nhật" if normalize_user_language(lang) == "vi" else "Updating"
+        if actual_duration <= 0:
+            actual_duration = float(
+                receipt_context.get("source_duration")
+                or receipt_context.get("input_duration_seconds")
+                or receipt_context.get("input_duration")
+                or receipt_context.get("video_duration")
+                or 0.0
+            )
+        duration = subdub_receipt_duration_label(actual_duration, lang)
         product_labels = {
             VIDEO_SUBTITLE_MODE_CREATE: "Video phụ đề",
-            VIDEO_SUBTITLE_MODE_TRANSLATE: "Đã tạo video phụ đề dịch",
+            VIDEO_SUBTITLE_MODE_TRANSLATE: "Video phụ đề dịch",
             VIDEO_SUBTITLE_MODE_DUB: "Video lồng tiếng",
-            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "Video phụ đề + lồng tiếng",
+            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "Video combo phụ đề - lồng tiếng",
         }
         type_labels = {
-            VIDEO_SUBTITLE_MODE_CREATE: "Tạo phụ đề",
-            VIDEO_SUBTITLE_MODE_TRANSLATE: "Dịch phụ đề",
+            VIDEO_SUBTITLE_MODE_CREATE: "Phụ đề",
+            VIDEO_SUBTITLE_MODE_TRANSLATE: "Phụ đề dịch",
             VIDEO_SUBTITLE_MODE_DUB: "Lồng tiếng",
-            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "Phụ đề + lồng tiếng",
+            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "Combo phụ đề - lồng tiếng",
         }
         product_label = product_labels.get(mode, "Video đã xử lý")
         type_label = type_labels.get(mode, product_label)
@@ -207077,103 +207110,42 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
             or ""
         )
         support_code = subdub_public_job_code(str(job_code)) if job_code else "-"
-        source_language = str(receipt_context.get("source_language") or receipt_context.get("detected_language") or "-").strip() or "-"
-        target_language = str(receipt_context.get("target_language") or "-").strip() or "-"
-        source_duration = float(
-            receipt_context.get("source_duration")
-            or receipt_context.get("input_duration_seconds")
-            or receipt_context.get("input_duration")
-            or receipt_context.get("video_duration")
-            or 0.0
+        is_vi = normalize_user_language(lang) == "vi"
+        target_language = str(receipt_context.get("target_language") or "").strip()
+        if not target_language:
+            target_language = "Không dịch" if is_vi else "Not translated"
+        final_price_xu = max(
+            0,
+            _safe_int(
+                receipt_context.get("final_price_xu"),
+                charged_xu,
+            ),
         )
-        original_cues = int(receipt_context.get("original_cue_count") or receipt_context.get("source_segment_count") or 0)
-        translated_cues = int(receipt_context.get("translated_cue_count") or receipt_context.get("translated_segment_count") or 0)
-        tts_expected = int(receipt_context.get("tts_expected_segments") or 0)
-        tts_generated = int(receipt_context.get("tts_generated_segments") or 0)
-        tts_mixed = int(receipt_context.get("tts_mixed_segments") or 0)
-        tts_dropped = int(receipt_context.get("tts_dropped_segments") or 0)
-        audio_active_duration = float(
-            receipt_context.get("audio_active_duration")
-            or (receipt_context.get("tts_audio_qc") or {}).get("active_duration")
-            or 0.0
-        )
-        output_validation = receipt_context.get("output_validation")
-        if not isinstance(output_validation, dict):
-            output_validation = {}
-        validation_detail = str(receipt_context.get("artifact_validation_result") or "").strip().lower()
-        validation_pass_details = {
-            "ok",
-            "validated",
-            "basic_mp4_ok",
-            "ffprobe_unavailable_basic_mp4_ok",
-        }
-        duration_validation_present = "duration_coverage_ok" in receipt_context
-        final_validation_present = "final_mp4_validated" in receipt_context
-        output_validation_present = "ok" in output_validation
-        detail_validation_present = bool(validation_detail)
-        validation_failed = bool(
-            (duration_validation_present and not receipt_context.get("duration_coverage_ok"))
-            or (final_validation_present and not receipt_context.get("final_mp4_validated"))
-            or (output_validation_present and not output_validation.get("ok"))
-            or (detail_validation_present and validation_detail not in validation_pass_details)
-        )
-        validation_ok = bool(
-            not validation_failed
-            and (
-                receipt_context.get("duration_coverage_ok")
-                or receipt_context.get("final_mp4_validated")
-                or output_validation.get("ok")
-                or validation_detail in validation_pass_details
-            )
-        )
-        validation_label = "FAILED" if validation_failed else "PASS" if validation_ok else "UNKNOWN"
-        source_duration_label = f"{source_duration:.3f} s" if source_duration > 0 else "-"
-        output_duration_label = f"{actual_duration:.3f} s" if actual_duration > 0 else "-"
-        voice_label = subdub_receipt_voice_label(state, result, lang) if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} else ""
-        voice_line = f"• Voice: <b>{html.escape(voice_label)}</b>\n" if voice_label and normalize_user_language(lang) != "vi" else (f"• Giọng: <b>{html.escape(voice_label)}</b>\n" if voice_label else "")
+        balance_present = "account_balance_xu" in receipt_context
+        account_balance_xu = max(0, _safe_int(receipt_context.get("account_balance_xu"), 0))
         if normalize_user_language(lang) != "vi":
             return (
                 "✅ <b>Completed</b>\n\n"
                 f"• Support code: <code>{html.escape(support_code)}</code>\n"
                 f"• Result: <b>{html.escape(product_label)}</b>\n"
-                f"• Type: <b>{html.escape(type_label)}</b>\n"
-                f"• Source language: <b>{html.escape(source_language)}</b>\n"
-                f"• Target language: <b>{html.escape(target_language)}</b>\n"
-                f"• Input duration: <b>{source_duration_label}</b>\n"
-                f"• Output duration: <b>{output_duration_label}</b>\n"
+                f"• Translation language: <b>{html.escape(target_language)}</b>\n"
+                f"• Service type: <b>{html.escape(type_label)}</b>\n"
                 f"• Duration: <b>{html.escape(duration)}</b>\n"
-                f"• Subtitle cues: <b>{original_cues}/{translated_cues}</b>\n"
-                f"• TTS expected/generated/mixed/dropped: <b>{tts_expected}/{tts_generated}/{tts_mixed}/{tts_dropped}</b>\n"
-                f"• Active audio: <b>{audio_active_duration:.3f} s</b>\n"
-                f"• File validation: <b>{validation_label}</b>\n"
-                f"• Plan/price: {cost_line}\n"
+                f"• Price: <b>{final_price_xu} Xu</b>\n"
                 f"• Charged: <b>{int(charged_xu or 0)} Xu</b>\n"
-                f"{voice_line}"
+                f"• Account balance: <b>{account_balance_xu} Xu</b>\n"
                 "• Status: <b>Video sent</b>"
             )
-        success_titles = {
-            VIDEO_SUBTITLE_MODE_CREATE: "✅ <b>Đã tạo video phụ đề thành công.</b>",
-            VIDEO_SUBTITLE_MODE_TRANSLATE: "✅ <b>Đã tạo video phụ đề thành công.</b>",
-            VIDEO_SUBTITLE_MODE_DUB: "✅ <b>Đã tạo video lồng tiếng thành công.</b>",
-            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "✅ <b>Đã tạo video phụ đề + lồng tiếng thành công.</b>",
-        }
         return (
-            f"{success_titles.get(mode, '✅ <b>Đã hoàn tất.</b>')}\n\n"
+            "✅ <b>Đã hoàn tất</b>\n\n"
             f"• Mã xử lý: <code>{html.escape(support_code)}</code>\n"
             f"• Kết quả: <b>{html.escape(product_label)}</b>\n"
-            f"• Loại: <b>{html.escape(type_label)}</b>\n"
-            f"• Ngôn ngữ nguồn: <b>{html.escape(source_language)}</b>\n"
-            f"• Ngôn ngữ đích: <b>{html.escape(target_language)}</b>\n"
-            f"• Thời lượng nguồn: <b>{source_duration_label}</b>\n"
-            f"• Thời lượng kết quả: <b>{output_duration_label}</b>\n"
+            f"• Ngôn ngữ dịch: <b>{html.escape(target_language)}</b>\n"
+            f"• Loại dịch vụ: <b>{html.escape(type_label)}</b>\n"
             f"• Thời lượng: <b>{html.escape(duration)}</b>\n"
-            f"• Số câu phụ đề: <b>{original_cues}/{translated_cues}</b>\n"
-            f"• TTS dự kiến/tạo/ghép/bỏ: <b>{tts_expected}/{tts_generated}/{tts_mixed}/{tts_dropped}</b>\n"
-            f"• Âm thanh hoạt động: <b>{audio_active_duration:.3f} s</b>\n"
-            f"• Kiểm tra file: <b>{validation_label}</b>\n"
-            f"• Gói/Giá: {cost_line}\n"
+            f"• Giá: <b>{final_price_xu} Xu</b>\n"
             f"• Đã trừ: <b>{int(charged_xu or 0)} Xu</b>\n"
-            f"{voice_line}"
+            f"• Tài khoản còn: <b>{account_balance_xu if balance_present else 0} Xu</b>\n"
             "• Trạng thái: <b>Đã gửi video</b>"
         )
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
@@ -208185,7 +208157,7 @@ SUBDUB_TERMINAL_STATES = {"delivered", "failed_no_charge", "failed_refunded", "n
 
 SUBDUB_LIFECYCLE_STAGE_MAP = {
     "received": "received_file",
-    "received_video": "received_file",
+    "received_video": "received_video",
     "saved_input": "saved_input",
     "input_save": "input_save_failed",
     "input_save_failed": "input_save_failed",
@@ -209859,8 +209831,13 @@ def pipeline_duration_limit_seconds(is_admin: bool = False) -> int:
     return PIPELINE_MAX_DURATION_SECONDS_ADMIN if is_admin else PIPELINE_MAX_DURATION_SECONDS_PUBLIC
 
 def subdub_full_duration_limit_seconds(is_admin: bool = False) -> int:
+    """Return zero: public media duration is unbounded by application policy.
+
+    Telegram transport and measured resource timeouts remain independent
+    capability concerns; this helper must never reject a video by seconds.
+    """
     del is_admin
-    return max(0, int(SUBDUB_MAX_DURATION_SECONDS))
+    return 0
 
 def subdub_preview_duration_seconds() -> int:
     return int(SUBDUB_PREVIEW_DURATION_SECONDS)
@@ -210068,6 +210045,7 @@ def subdub_lifecycle_debug_fields(stage: str = "", terminal_state: str = "") -> 
     canonical = subdub_canonical_lifecycle_state(stage or terminal or "received_file")
     order = [
         "received_file",
+        "received_video",
         "extracting_audio",
         "transcribing",
         "translating",
@@ -211583,7 +211561,7 @@ def subtitle_dub_debug_job_payload(
         "ffprobe_duration": int(state.get("ffprobe_duration") or input_save.get("ffprobe_duration") or 0),
         "duration_limit": int(state.get("duration_limit") or subdub_full_duration_limit_seconds(bool(is_admin_user(user_id)))),
         "duration_limit_seconds": int(state.get("duration_limit_seconds") or state.get("duration_limit") or subdub_full_duration_limit_seconds(bool(is_admin_user(user_id)))),
-        "duration_limit_source": str(state.get("duration_limit_source") or "SUBDUB_MAX_DURATION_SECONDS"),
+        "duration_limit_source": str(state.get("duration_limit_source") or "capability_config_unbounded"),
         "duration_gate_result": str(state.get("duration_gate_result") or "unknown"),
         "duration_guard_stage": str(state.get("duration_guard_stage") or stage or ""),
         "is_long_media": bool(state.get("is_long_media")),
@@ -212513,9 +212491,15 @@ def subdub_responsive_subtitle_size(style: dict, state: dict | None = None, *, e
 
 def subdub_render_subtitle_size(style: dict, state: dict | None = None) -> int:
     style_state = dict(state or {})
+    style_mode = (
+        style_state.get("mode")
+        or style_state.get("video_processing_mode")
+        or style_state.get("process_type")
+    )
     m4live1_style_active = bool(
         style_state.get("m4live1_style_renderer_only")
         or str(style_state.get("output_type") or "").strip().lower() in {"burn", "both", "video_subtitle"}
+        or (style_mode and subdub_has_subtitle_video_output(style_state, style_mode))
     )
     if not m4live1_style_active:
         base = subdub_clamp_int((style or {}).get("size"), 52, 34, 72)
@@ -212553,9 +212537,15 @@ def subdub_render_subtitle_size(style: dict, state: dict | None = None) -> int:
 
 def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     state = dict(style_or_state or {})
+    style_mode = (
+        state.get("mode")
+        or state.get("video_processing_mode")
+        or state.get("process_type")
+    )
     m4live1_style_active = bool(
         state.get("m4live1_style_renderer_only")
         or str(state.get("output_type") or "").strip().lower() in {"burn", "both", "video_subtitle"}
+        or (style_mode and subdub_has_subtitle_video_output(state, style_mode))
     )
     cover_default_enabled = subdub_should_enable_hardsub_cover(
         state,
@@ -212691,8 +212681,8 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     width, height = subdub_style_video_size(state)
     if not width or not height:
         width, height = (720, 1280) if bool(style.get("cover_original")) else (1280, 720)
-    style["play_res_x"] = max(480, min(3840, int(width or 1280)))
-    style["play_res_y"] = max(480, min(3840, int(height or 720)))
+    style["play_res_x"] = max(1, min(3840, int(width or 1280)))
+    style["play_res_y"] = max(1, min(3840, int(height or 720)))
     style["subtitle_position_slot_explicit"] = bool(position_slot_explicit)
     if position_slot_explicit:
         style["subtitle_position_slot"] = subdub_subtitle_position_slot({**state, **custom, **style})
@@ -212700,7 +212690,7 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         style["align"] = "center"
     if m4live1_style_active:
         style["subtitle_alignment"] = "bottom_center"
-        style["subtitle_max_width_ratio"] = max(0.84, min(0.88, subdub_float_value(style.get("max_width_ratio"), 0.86)))
+        style["subtitle_max_width_ratio"] = max(0.90, min(0.96, subdub_float_value(style.get("max_width_ratio"), 0.92)))
         style["subtitle_max_lines"] = 2
         style["subtitle_pipeline_untouched"] = True
         style["m4live2_subtitle_bottom_lock"] = True
@@ -212708,8 +212698,8 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         style["m4live1_style_renderer_only"] = True
         style["subtitle_margin_v_before"] = int(max(48, int(style["play_res_y"] * 0.05)))
         style["subtitle_margin_v_after"] = max(6, min(14, int(round(style["play_res_y"] * 0.008))))
-        side_margin = int(round(style["play_res_x"] * ((1.0 - float(style["subtitle_max_width_ratio"])) / 2.0)))
-        side_margin = max(24, min(int(style["play_res_x"] * 0.10), side_margin))
+        side_margin = int(round(style["play_res_x"] * 0.04))
+        side_margin = max(2, min(max(2, int(style["play_res_x"] * 0.05)), side_margin))
         style["subtitle_margin_l_after"] = side_margin
         style["subtitle_margin_r_after"] = side_margin
     return style
@@ -212763,8 +212753,8 @@ def subdub_subtitle_edge_margin_px(play_res_y: int | float = 720) -> int:
 
 def subdub_subtitle_position_point(style_or_state: dict | None = None) -> tuple[int, int]:
     style = dict(style_or_state or {})
-    play_res_x = max(480, int(style.get("play_res_x") or style.get("video_width") or 1280))
-    play_res_y = max(480, int(style.get("play_res_y") or style.get("video_height") or 720))
+    play_res_x = max(1, int(style.get("play_res_x") or style.get("video_width") or 1280))
+    play_res_y = max(1, int(style.get("play_res_y") or style.get("video_height") or 720))
     slot = subdub_subtitle_position_slot(style)
     edge_margin = subdub_subtitle_edge_margin_px(play_res_y)
     bottom_y = play_res_y - edge_margin
@@ -212820,48 +212810,150 @@ def subdub_ass_escape(text: str, max_lines: int = 2) -> str:
         return ""
     return r"\N".join(lines[:max(1, int(max_lines or 2))])
 
-def subdub_ass_wrap_text(text: str, style: dict, max_lines: int = 2) -> str:
+
+def subdub_ass_fit_text_layout(text: str, style: dict, max_lines: int = 2) -> dict:
     normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
     normalized = re.sub(r"[{}]", "", normalized)
-    play_res_x = max(480, int(style.get("play_res_x") or 1280))
-    font_size = max(24, int(style.get("render_size") or style.get("size") or 48))
-    max_width_ratio = max(0.84, min(0.88, subdub_float_value(style.get("subtitle_max_width_ratio"), 0.86)))
-    available_width = play_res_x * max_width_ratio if style.get("m4live1_style_renderer_only") else play_res_x * 0.76
-    max_chars = max(16, min(48, int(available_width / (font_size * 0.62))))
-    words = re.sub(r"\s+", " ", normalized).strip().split(" ")
-    limit = max(1, int(max_lines or 2))
-    lines: list[str] = []
-    current = ""
-    for word in (item for item in words if item):
-        candidate = f"{current} {word}".strip()
-        if current and len(candidate) > max_chars:
-            lines.append(current)
-            current = word
-        else:
-            current = candidate
-    if current:
-        lines.append(current)
-    if len(lines) > limit:
-        if limit == 2:
-            all_words = [word for word in words if word]
-            midpoint = max(1, len(all_words) // 2)
-            best_split = midpoint
-            best_score = 10**9
-            for split_at in range(1, len(all_words)):
-                first = " ".join(all_words[:split_at])
-                second = " ".join(all_words[split_at:])
-                overflow = max(0, len(first) - max_chars) + max(0, len(second) - max_chars)
-                balance = abs(len(first) - len(second))
-                score = overflow * 10 + balance
-                if score < best_score:
-                    best_score = score
-                    best_split = split_at
-            lines = [" ".join(all_words[:best_split]), " ".join(all_words[best_split:])]
-        else:
-            consumed = sum(len(line.split()) for line in lines[:limit - 1])
-            lines = lines[:limit]
-            lines[-1] = " ".join(words[consumed:])
-    return r"\N".join(line.replace("\\", r"\\") for line in lines if line)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    play_res_x = max(1, int((style or {}).get("play_res_x") or 1280))
+    margin_l = max(0, int((style or {}).get("subtitle_margin_l_after") or round(play_res_x * 0.04)))
+    margin_r = max(0, int((style or {}).get("subtitle_margin_r_after") or round(play_res_x * 0.04)))
+    requested_size = max(6, int((style or {}).get("render_size") or (style or {}).get("size") or 48))
+    line_limit = max(1, min(2, int(max_lines or 2)))
+    if not normalized:
+        return {
+            "text": "",
+            "font_size": requested_size,
+            "line_count": 0,
+            "max_line_width_px": 0,
+            "available_width_px": max(1, play_res_x - margin_l - margin_r),
+            "fits_width": True,
+        }
+
+    font_cache = {}
+    measurement_cache = {}
+    measurement_draw = (
+        ImageDraw.Draw(Image.new("L", (1, 1), 0))
+        if Image is not None and ImageDraw is not None
+        else None
+    )
+
+    def _font(size: int):
+        if size in font_cache:
+            return font_cache[size]
+        if ImageFont is None:
+            return None
+        path = str((style or {}).get("subtitle_font_path") or "").strip()
+        try:
+            if path and os.path.isfile(path):
+                font_cache[size] = ImageFont.truetype(path, size)
+            else:
+                font_cache[size] = load_operator_font(size, bold=True)
+        except Exception:
+            font_cache[size] = None
+        return font_cache[size]
+
+    def _measure(value: str, size: int, font) -> float:
+        cache_key = (size, value)
+        if cache_key in measurement_cache:
+            return measurement_cache[cache_key]
+        if measurement_draw is not None and font is not None:
+            try:
+                box = measurement_draw.textbbox((0, 0), value, font=font)
+                measurement_cache[cache_key] = float(max(0, box[2] - box[0]))
+                return measurement_cache[cache_key]
+            except Exception:
+                pass
+        units = 0.0
+        for char in value:
+            if char.isspace():
+                units += 0.34
+            elif unicodedata.east_asian_width(char) in {"W", "F"}:
+                units += 1.0
+            elif char.isupper():
+                units += 0.68
+            elif char.isalnum():
+                units += 0.56
+            else:
+                units += 0.42
+        measurement_cache[cache_key] = units * float(size)
+        return measurement_cache[cache_key]
+
+    last_layout = None
+    for font_size in range(requested_size, 5, -1):
+        font = _font(font_size)
+        outline = max(0, int((style or {}).get("outline") or 0))
+        shadow = max(0, int((style or {}).get("shadow") or 0))
+        box_padding = int(round(font_size * 0.10)) if (style or {}).get("boxed_background") else 0
+        available = max(1, play_res_x - margin_l - margin_r - (2 * (outline + shadow + box_padding)))
+        single_width = _measure(normalized, font_size, font)
+        if single_width <= available:
+            return {
+                "text": normalized,
+                "font_size": font_size,
+                "line_count": 1,
+                "max_line_width_px": single_width,
+                "available_width_px": available,
+                "fits_width": True,
+            }
+        if line_limit < 2:
+            last_layout = (normalized, font_size, single_width, available)
+            continue
+
+        whitespace_splits = [index for index, char in enumerate(normalized) if char == " "]
+        split_points = whitespace_splits or list(range(1, len(normalized)))
+        best = None
+        for split_at in split_points:
+            if whitespace_splits:
+                first = normalized[:split_at].rstrip()
+                second = normalized[split_at + 1 :].lstrip()
+            else:
+                first = normalized[:split_at]
+                second = normalized[split_at:]
+            if not first or not second:
+                continue
+            first_width = _measure(first, font_size, font)
+            second_width = _measure(second, font_size, font)
+            score = (max(first_width, second_width), abs(first_width - second_width))
+            if best is None or score < best[0]:
+                best = (score, first, second, first_width, second_width)
+        if best is None:
+            last_layout = (normalized, font_size, single_width, available)
+            continue
+        max_width = max(best[3], best[4])
+        layout_text = best[1] + r"\N" + best[2]
+        last_layout = (layout_text, font_size, max_width, available)
+        if max_width <= available:
+            return {
+                "text": layout_text,
+                "font_size": font_size,
+                "line_count": 2,
+                "max_line_width_px": max_width,
+                "available_width_px": available,
+                "fits_width": True,
+            }
+
+    layout_text, font_size, max_width, available = last_layout or (normalized, 6, 0.0, play_res_x)
+    return {
+        "text": layout_text,
+        "font_size": font_size,
+        "line_count": 1 + int(r"\N" in layout_text),
+        "max_line_width_px": max_width,
+        "available_width_px": available,
+        "fits_width": bool(max_width <= available),
+    }
+
+
+def subdub_ass_wrap_text(text: str, style: dict, max_lines: int = 2) -> str:
+    layout = subdub_ass_fit_text_layout(text, style, max_lines)
+    fitted = str(layout.get("text") or "")
+    if not fitted:
+        return ""
+    escaped = r"\N".join(
+        line.replace("\\", r"\\")
+        for line in fitted.split(r"\N")
+    )
+    return rf"{{\fs{int(layout.get('font_size') or style.get('render_size') or 48)}}}" + escaped
 
 def subdub_ass_text_chunks(text: str, style: dict, max_lines: int = 2) -> list[str]:
     normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
@@ -214019,11 +214111,7 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
         intake_method="bot_api_direct",
         local_api=local_api,
     ) * 1024 * 1024
-    max_duration = subdub_full_duration_limit_seconds(bool(state.get("_pipeline_is_admin")))
     file_size = _safe_int(state.get("video_file_size") or state.get("source_file_size"), 0)
-    duration = _safe_int(state.get("video_duration") or state.get("source_duration"), 0)
-    if max_duration > 0 and duration > max_duration:
-        raise RuntimeError("video_too_large")
     if file_size > max_bytes:
         raise RuntimeError("telegram_download_failed:file is too big")
     def _classify_download_error(exc: Exception) -> str:
@@ -216900,6 +216988,10 @@ async def _execute_video_dubbing_pipeline_core(
             await subdub_send_progress_update(query, job_key, job_id, stage, lang)
 
     input_save = await video_dubbing_save_input_for_pipeline(context, state, workspace)
+    if input_save.get("ok") and input_save.get("source_bytes"):
+        # The download is complete. Persist this before potentially long
+        # probe/normalization work so long media never appears stuck at 5%.
+        await _progress("received_video")
     await _progress("saved_input")
     if (
         input_save.get("ok")
@@ -217896,6 +217988,12 @@ async def _execute_video_dubbing_pipeline_core(
         if not charge.get("ok"):
             return {"ok": False, "insufficient": True, "text": "⚠️ Số dư đã thay đổi. TOAN AAS chưa gửi output và chưa trừ Xu."}
         charged = int(charge.get("final_cost") or 0)
+    financial_snapshot = subdub_receipt_financial_snapshot(
+        uid,
+        price_xu=final_price_xu,
+        charged_xu=charged,
+    )
+    state = {**state, **financial_snapshot}
     product_context = normalize_product_context(state.get("product_context") or (PRODUCT_CONTEXT_VIDEO_ADDON if str(state.get("origin") or "") == "video_addon" else PRODUCT_CONTEXT_SHOWROOM))
     source_ref = str(state.get("source_file_id") or state.get("video_file_id") or state.get("source_ref") or "")[:600]
     linked_session_id = media_asset_video_session_id(uid, product_context, state)
@@ -218208,6 +218306,8 @@ async def _execute_video_dubbing_pipeline_core(
             "tts_segments": len(tts_chunks),
             "mux_status": mux_state,
             "charged_xu": charged,
+            "final_price_xu": int(financial_snapshot.get("final_price_xu") or 0),
+            "account_balance_xu": int(financial_snapshot.get("account_balance_xu") or 0),
             **input_save_fields,
             "input_file_path": source_path,
             "input_file_exists": bool(source_path and os.path.exists(source_path)),
@@ -218219,7 +218319,7 @@ async def _execute_video_dubbing_pipeline_core(
             "telegram_duration": int(state.get("telegram_duration") or 0),
             "ffprobe_duration": int(state.get("ffprobe_duration") or 0),
             "duration_limit": int(state.get("duration_limit") or subdub_full_duration_limit_seconds(bool(is_admin_user(uid)))),
-            "duration_limit_source": str(state.get("duration_limit_source") or "SUBDUB_MAX_DURATION_SECONDS"),
+            "duration_limit_source": str(state.get("duration_limit_source") or "capability_config_unbounded"),
             "duration_gate_result": str(state.get("duration_gate_result") or ""),
             "duration_guard_stage": str(state.get("duration_guard_stage") or ""),
             "is_long_media": bool(state.get("is_long_media")),
@@ -218393,6 +218493,7 @@ async def _execute_video_dubbing_pipeline_core(
         "ok": True,
         "mode": mode,
         "charged": charged,
+        **financial_snapshot,
         "asr_provider": asr_provider,
         "tts_provider": tts_provider,
         "has_subtitle": bool(srt_bytes),
@@ -218442,7 +218543,7 @@ async def _execute_video_dubbing_pipeline_core(
         "concat_required": bool(state.get("concat_required")),
         "global_timing_preserved": bool(state.get("global_timing_preserved")),
         "input_duration_seconds": int(state.get("input_duration_seconds") or state.get("input_duration") or duration_seconds or 0),
-        "duration_limit_source": str(state.get("duration_limit_source") or "SUBDUB_MAX_DURATION_SECONDS"),
+        "duration_limit_source": str(state.get("duration_limit_source") or "capability_config_unbounded"),
         "source_duration": source_duration_seconds,
         "expected_duration": source_duration_seconds,
         "final_mp4_duration": float(final_output_validation.get("actual_duration") or final_output_validation.get("duration") or 0.0),
@@ -218714,6 +218815,8 @@ async def execute_video_dubbing_pipeline(
             "audio_fallback_suppressed": bool(result.get("audio_fallback_suppressed") or debug_job.get("audio_fallback_suppressed")),
             "audio_artifact_internal_only": bool(result.get("audio_artifact_internal_only") or debug_job.get("audio_artifact_internal_only")),
             "charged_xu": int(result.get("charged") or debug_job.get("charged_xu") or 0),
+            "final_price_xu": int(result.get("final_price_xu") or result_state.get("final_price_xu") or debug_job.get("final_price_xu") or 0),
+            "account_balance_xu": int(result.get("account_balance_xu") or result_state.get("account_balance_xu") or debug_job.get("account_balance_xu") or 0),
         }
         update_fields.update(subdub_lifecycle_debug_fields(
             update_fields.get("progress_stage") or debug_job.get("progress_stage") or ("delivered" if result.get("ok") else "failed_no_charge"),
@@ -222562,7 +222665,7 @@ async def handle_video_dubbing_callback(
             update_subtitle_dub_pipeline_job(
                 pipeline_job_key,
                 success_cost_line=subdub_success_cost_line(result.get("charged") or 0, lang),
-                cost_line_rendered="Chi phí:" in receipt_text or "Cost:" in receipt_text,
+                cost_line_rendered="Giá:" in receipt_text or "Price:" in receipt_text,
                 cost_line_reason="after_delivery",
             )
             return sent_receipt

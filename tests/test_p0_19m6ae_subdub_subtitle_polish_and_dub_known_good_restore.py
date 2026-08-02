@@ -123,7 +123,8 @@ def test_no_partial_copy_when_subtitle_video_delivered():
         "vi",
     )
 
-    assert "Đã tạo video phụ đề thành công" in text
+    assert "• Kết quả: <b>Video phụ đề dịch</b>" in text
+    assert "• Trạng thái: <b>Đã gửi video</b>" in text
     assert "chưa tạo được video hoàn chỉnh" not in text
     assert "chưa dịch được phụ đề" not in text
 
@@ -192,8 +193,12 @@ def test_subtitle_bottom_center_closer_to_bottom_and_no_giant_bar():
         "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
     })
 
-    assert ",2,70,70,58," in ass
-    assert "subtitle_margin_v_after" not in style
+    style_fields = next(
+        line for line in ass.splitlines() if line.startswith("Style: Default,")
+    ).split(",")
+    assert 0.02 <= int(style_fields[19]) / 1280 <= 0.05
+    assert 0.02 <= int(style_fields[20]) / 1280 <= 0.05
+    assert 0.006 <= style["subtitle_margin_v_after"] / 720 <= 0.011
     assert style["cover_height_ratio"] <= 0.06
     assert style["cover_y_ratio"] >= 0.90
 
@@ -217,14 +222,16 @@ def test_subtitle_wraps_without_losing_text():
 def test_subtitle_only_31_60_90s_allowed_full_mode():
     for seconds in (31, 60, 90):
         payload = bot.subdub_duration_gate_payload({"ok": True, "duration": seconds}, {}, is_admin=False)
-        assert payload["duration_limit_seconds"] >= 300
-        assert payload["duration_gate_result"] == "pass_long"
-        assert payload["long_media_allowed"] is True
+        assert payload["duration_limit_seconds"] == 0
+        assert payload["duration_gate_result"] in {"pass", "pass_long"}
+        assert payload["long_media_allowed"] is (
+            seconds > bot.SUBDUB_DIRECT_ASR_MAX_SECONDS
+        )
 
 
 def test_preview_mode_30s_limit_remains_preview_only():
     assert bot.subdub_preview_duration_seconds() == 30
-    assert bot.subdub_full_duration_limit_seconds(False) > bot.subdub_preview_duration_seconds()
+    assert bot.subdub_full_duration_limit_seconds(False) == 0
     source = inspect.getsource(bot.video_dubbing_prepare_subtitles)
     assert "SUBDUB_PREVIEW_DURATION_SECONDS" not in source
 

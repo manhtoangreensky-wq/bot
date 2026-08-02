@@ -52,10 +52,13 @@ def test_subtitle_size_is_moderate_bottom_center_and_wraps():
     size_source = function_source("subdub_render_subtitle_size")
     ass_source = function_source("subdub_generate_ass_from_srt")
     wrap_source = function_source("subdub_ass_wrap_text")
+    fit_source = function_source("subdub_ass_fit_text_layout")
     assert "current_effective - 2" in size_source
     assert "subdub_ass_alignment" in ass_source
     assert "subdub_ass_wrap_text" in ass_source
-    assert "play_res_x * 0.76" in wrap_source
+    assert "subdub_ass_fit_text_layout" in wrap_source
+    assert "available_width_px" in fit_source
+    assert "fits_width" in fit_source
 
 
 def test_audio_controls_are_split_and_accept_numeric_input():
@@ -80,4 +83,6 @@ def test_final_receipt_has_product_duration_and_cost():
     source = function_source("video_dubbing_receipt_text")
     assert "• Kết quả:" in source
     assert "• Thời lượng:" in source
-    assert "subdub_success_cost_line" in source
+    assert "• Giá:" in source
+    assert "• Đã trừ:" in source
+    assert "• Tài khoản còn:" in source
