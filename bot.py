@@ -111820,6 +111820,9 @@ async def handle_aichat_callback(update: Update, context: ContextTypes.DEFAULT_T
 async def handle_aichat_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:
         return False
+    chat_type = str(getattr(getattr(update, "effective_chat", None), "type", "") or "").lower()
+    if chat_type and chat_type != "private":
+        return False
     text = update.message.text.strip()
     if not text or text.startswith("/"):
         return False

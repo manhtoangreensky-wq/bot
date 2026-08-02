@@ -1269,6 +1269,7 @@ def test_integration_runtime_handlers_use_shared_context_without_legacy_or_paid_
     assert "cskh_shared_context" in aichat_handler
     assert "cskh_live_pricing_snapshot" in aichat_handler
     assert "cskh_finalize_delivered_reply" in aichat_handler
+    assert 'chat_type != "private"' in aichat_handler
     assert "runtime_facts=cskh_live_pricing_snapshot()" in business_wrapper
     assert "shared_context_fn=" in business_wrapper
     assert "record_customer_turn_fn=" in business_wrapper
