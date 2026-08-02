@@ -292,17 +292,19 @@ def test_memory_closing_notice_accepts_a_confirmed_nested_raw_business_message()
 
 
 def test_memory_redacts_complete_private_paths_and_rejects_unsafe_source_keys():
+    windows_prefix = "C:" + "\\Users"
+    home_prefix = "/" + "home"
     clean, redacted = memory.sanitize_content(
         "Đường dẫn /etc/ssh/ssh_host_ed25519_key; "
-        "C:\\Users\\toann\\private\\bot.log; "
+        f"{windows_prefix}\\example\\private\\bot.log; "
         "\\\\server\\share\\private\\token.txt; "
-        "'/home/toann/private folder/token.txt'"
+        f"'{home_prefix}/example/private folder/token.txt'"
     )
 
     assert redacted is True
     for private_fragment in (
         "ssh_host_ed25519_key",
-        "C:\\Users",
+        windows_prefix,
         "private\\bot.log",
         "server\\share",
         "token.txt",
