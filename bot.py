@@ -66768,6 +66768,8 @@ def video_editor_callback_state_guard(callback_handler):
             USER_PENDING.get(state_key) if had_state else {}
         )
         write_token = _VIDEO_EDITOR_STATE_WRITE.set(None)
+        answered_token = _VIDEO_EDIT_CALLBACK_ANSWERED.set(False)
+        transactional_token = _VIDEO_EDIT_CALLBACK_TRANSACTIONAL.set(False)
         try:
             return await callback_handler(update, context)
         except ApplicationHandlerStop:
@@ -66792,6 +66794,8 @@ def video_editor_callback_state_guard(callback_handler):
                         pass
             raise
         finally:
+            _VIDEO_EDIT_CALLBACK_TRANSACTIONAL.reset(transactional_token)
+            _VIDEO_EDIT_CALLBACK_ANSWERED.reset(answered_token)
             _VIDEO_EDITOR_STATE_WRITE.reset(write_token)
 
     guarded.__name__ = getattr(callback_handler, "__name__", "video_editor_callback")
@@ -68648,6 +68652,14 @@ VIDEO_EDITOR_NUMBER_FIELDS = {
 _VIDEO_EDITOR_STATE_WRITE = ContextVar(
     "video_editor_state_write",
     default=None,
+)
+_VIDEO_EDIT_CALLBACK_ANSWERED = ContextVar(
+    "video_edit_callback_answered",
+    default=False,
+)
+_VIDEO_EDIT_CALLBACK_TRANSACTIONAL = ContextVar(
+    "video_edit_callback_transactional",
+    default=False,
 )
 
 
@@ -90822,25 +90834,30 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 get_user_language(uid) or "vi",
             )
             return True
-        setattr(query, "_video_edit_transactional", True)
+        transactional_token = _VIDEO_EDIT_CALLBACK_TRANSACTIONAL.set(True)
+        answered_token = _VIDEO_EDIT_CALLBACK_ANSWERED.set(False)
         try:
-            return await video_edit_legacy_tail_compatibility(
-                query, uid, tail, claimed_host
-            )
-        except Exception:
-            logger.exception("video_edit_legacy_tail_compatibility_failed uid=%s", uid)
-            # The old shared callback is owned by Video Edit.  Never let its
-            # recovery failure continue into the commercial Product Video tail.
-            if not getattr(query, "_video_edit_callback_answered", False):
-                try:
-                    await query.answer(
-                        "Không thể cập nhật màn chỉnh sửa lúc này. Kế hoạch cũ vẫn được giữ.",
-                        show_alert=True,
-                    )
-                    setattr(query, "_video_edit_callback_answered", True)
-                except Exception:
-                    pass
-            return True
+            try:
+                return await video_edit_legacy_tail_compatibility(
+                    query, uid, tail, claimed_host
+                )
+            except Exception:
+                logger.exception("video_edit_legacy_tail_compatibility_failed uid=%s", uid)
+                # The old shared callback is owned by Video Edit.  Never let its
+                # recovery failure continue into the commercial Product Video tail.
+                if not _VIDEO_EDIT_CALLBACK_ANSWERED.get():
+                    try:
+                        await query.answer(
+                            "Không thể cập nhật màn chỉnh sửa lúc này. Kế hoạch cũ vẫn được giữ.",
+                            show_alert=True,
+                        )
+                        _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                    except Exception:
+                        pass
+                return True
+        finally:
+            _VIDEO_EDIT_CALLBACK_ANSWERED.reset(answered_token)
+            _VIDEO_EDIT_CALLBACK_TRANSACTIONAL.reset(transactional_token)
     save_video_tail9_state(uid, context, tail, owner, host)
     if section != "confirm":
         await query.answer()
@@ -110514,7 +110531,7 @@ async def safe_edit_or_send(
         return None
     is_video_edit = bool(
         str(getattr(query, "data", "") or "").startswith("videoedit|")
-        or getattr(query, "_video_edit_transactional", False)
+        or _VIDEO_EDIT_CALLBACK_TRANSACTIONAL.get()
     )
 
     async def finalize(result):
@@ -110522,8 +110539,8 @@ async def safe_edit_or_send(
             committed = post_render()
             if inspect.isawaitable(committed):
                 await committed
-        if is_video_edit and not getattr(query, "_video_edit_callback_answered", False):
-            setattr(query, "_video_edit_callback_answered", True)
+        if is_video_edit and not _VIDEO_EDIT_CALLBACK_ANSWERED.get():
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
             try:
                 await query.answer()
             except Exception as answer_error:
@@ -228558,7 +228575,7 @@ async def rerender_video_editor_after_stale_commit(query, state: dict, lang: str
     except Exception:
         pass
     if callback_answered:
-        setattr(query, "_video_edit_callback_answered", True)
+        _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
     text, reply_markup, parse_mode = video_editor_current_render_model(state, lang)
     try:
         await safe_edit_or_send(
