@@ -96,7 +96,7 @@ from video_product_system import (
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subdub_long_media, subdub_media_preflight, subdub_provider_contract, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
-from services import ai_chatbot_copilot, telegram_business_support, telegram_transport
+from services import ai_chatbot_copilot, cskh_session_memory, telegram_business_support, telegram_transport
 from services import ffmpeg_text
 from services import voice_clone_pipeline
 from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_maintenance as storage_maintenance_service, storage_migration, video_final_output, video_provider_catalog, video_provider_router, worker_auth
@@ -5620,6 +5620,7 @@ def init_db():
     )
     video_profile_catalog.seed_catalog(conn)
     ensure_broadcast_lite_schema(conn)
+    cskh_session_memory.ensure_schema(conn)
     conn.commit()
     conn.close()
 
@@ -6083,6 +6084,482 @@ def set_system_setting(key, value, note="", updated_by=""):
         if conn:
             conn.close()
 
+
+CSKH_SESSION_WINDOW_SETTING = "cskh_session_window_hours"
+CSKH_TURN_RETENTION_SETTING = "cskh_turn_retention_days"
+CSKH_RECENT_TURN_LIMIT_SETTING = "cskh_recent_turn_limit"
+CSKH_CONTEXT_CHARACTER_BUDGET_SETTING = "cskh_context_character_budget"
+CSKH_CLOSING_NOTICE_DELAY_SECONDS = 5 * 60
+CSKH_TURN_PURGE_INTERVAL_SECONDS = 60 * 60
+CSKH_CLOSING_NOTICE_TASKS: dict[str, asyncio.Task] = {}
+CSKH_LAST_SESSION_PURGE_AT = 0.0
+CSKH_ALLOWED_CONTEXT_EVENTS = {
+    "product_video": "Khách đang xem dịch vụ tạo video",
+    "image_ai": "Khách đang xem dịch vụ tạo ảnh",
+    "subdub": "Khách đang xem phụ đề và lồng tiếng",
+    "voice": "Khách đang xem dịch vụ giọng đọc",
+    "music": "Khách đang xem dịch vụ nhạc",
+}
+CSKH_ALLOWED_CONTEXT_EVENT_TEXTS = frozenset(CSKH_ALLOWED_CONTEXT_EVENTS.values())
+
+
+def cskh_runtime_setting_int(key, default, *, minimum=1, maximum=100_000):
+    """Read a bounded CSKH runtime setting without writing configuration."""
+    raw = get_system_setting(str(key), "")
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        value = int(default)
+    return max(int(minimum), min(int(maximum), value))
+
+
+def cskh_session_settings() -> dict:
+    return {
+        "session_window_hours": cskh_runtime_setting_int(
+            CSKH_SESSION_WINDOW_SETTING,
+            cskh_session_memory.DEFAULT_SESSION_WINDOW_HOURS,
+            minimum=1,
+            maximum=24 * 31,
+        ),
+        "retention_days": cskh_runtime_setting_int(
+            CSKH_TURN_RETENTION_SETTING,
+            cskh_session_memory.DEFAULT_RETENTION_DAYS,
+            minimum=1,
+            maximum=3650,
+        ),
+        "recent_turn_limit": cskh_runtime_setting_int(
+            CSKH_RECENT_TURN_LIMIT_SETTING,
+            cskh_session_memory.DEFAULT_RECENT_TURN_LIMIT,
+            minimum=1,
+            maximum=100,
+        ),
+        "character_budget": cskh_runtime_setting_int(
+            CSKH_CONTEXT_CHARACTER_BUDGET_SETTING,
+            cskh_session_memory.DEFAULT_CHARACTER_BUDGET,
+            minimum=200,
+            maximum=40_000,
+        ),
+    }
+
+
+def cskh_closing_notice_text(window_hours: int | None = None) -> str:
+    hours = int(window_hours or cskh_session_settings()["session_window_hours"])
+    return cskh_session_memory.closing_notice_text(hours)
+
+
+def cskh_shared_context(owner_id, chat_id, *, now=None, conn=None) -> dict:
+    """Read the active sanitized context, degrading safely on storage failure."""
+    owned_conn = conn is None
+    connection = conn
+    try:
+        connection = connection or db_connect()
+        settings = cskh_session_settings()
+        return cskh_session_memory.load_recent_session(
+            connection,
+            owner_id=str(owner_id or ""),
+            chat_id=str(chat_id or ""),
+            now=time.time() if now is None else now,
+            session_window_hours=settings["session_window_hours"],
+            recent_turn_limit=settings["recent_turn_limit"],
+            character_budget=settings["character_budget"],
+        )
+    except Exception as exc:
+        logger.warning("cskh shared context unavailable | error=%s", type(exc).__name__)
+        return {"session_id": "", "turns": [], "history_text": "", "truncated": False, "active": False}
+    finally:
+        if owned_conn and connection:
+            connection.close()
+
+
+def cskh_maybe_purge_session_turns(*, now=None, conn=None) -> int:
+    """Run the indexed retention purge at most once per process-hour."""
+    global CSKH_LAST_SESSION_PURGE_AT
+    timestamp = float(time.time() if now is None else now)
+    if timestamp - CSKH_LAST_SESSION_PURGE_AT < CSKH_TURN_PURGE_INTERVAL_SECONDS:
+        return 0
+    owned_conn = conn is None
+    connection = conn
+    try:
+        connection = connection or db_connect()
+        count = cskh_session_memory.purge_expired_turns(
+            connection,
+            now=timestamp,
+            retention_days=cskh_session_settings()["retention_days"],
+        )
+        connection.commit()
+        CSKH_LAST_SESSION_PURGE_AT = timestamp
+        return count
+    except Exception as exc:
+        logger.warning("cskh session purge skipped | error=%s", type(exc).__name__)
+        return 0
+    finally:
+        if owned_conn and connection:
+            connection.close()
+
+
+def cskh_safe_customer_context_text(value) -> str:
+    """Reject machine-only callback, route, and debug payloads from CSKH history."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*(?:\|[A-Za-z0-9_:-]+){1,5}", raw):
+        return ""
+    machine_field = r"(?:callback_data|callback|route|provider|task_id|job_id|traceback|debug|raw_payload)"
+    if re.search(rf"[\"']?{machine_field}[\"']?\s*[:=]", raw, flags=re.IGNORECASE):
+        return ""
+    return raw
+
+
+def cskh_allowed_context_event(value) -> str:
+    text = str(value or "").strip()
+    return text if text in CSKH_ALLOWED_CONTEXT_EVENT_TEXTS else ""
+
+
+def cskh_record_exchange(
+    *,
+    owner_id,
+    chat_id,
+    surface,
+    user_content="",
+    assistant_content="",
+    assistant_delivery_confirmed=False,
+    source_message_id="",
+    context_event="",
+    now=None,
+    conn=None,
+) -> dict:
+    """Persist customer input and only an assistant reply confirmed as delivered.
+
+    Callers record the customer message before classification.  They must call
+    again with ``assistant_delivery_confirmed=True`` only after Telegram has
+    acknowledged the actual reply; this helper never treats draft copy as a
+    sent response.
+    """
+    timestamp = float(time.time() if now is None else now)
+    source = str(source_message_id or "").strip()
+    if not source:
+        return {"session_id": "", "user_inserted": False, "assistant_inserted": False}
+    owned_conn = conn is None
+    connection = conn
+    try:
+        connection = connection or db_connect()
+        settings = cskh_session_settings()
+        user_turn = None
+        assistant_turn = None
+        safe_user_content = cskh_safe_customer_context_text(user_content)
+        if safe_user_content:
+            user_turn = cskh_session_memory.record_turn(
+                connection,
+                owner_id=owner_id,
+                chat_id=chat_id,
+                surface=surface,
+                role="user",
+                content=safe_user_content,
+                source_message_id=source,
+                now=timestamp,
+                session_window_hours=settings["session_window_hours"],
+            )
+        session_id = str(user_turn.session_id if user_turn else cskh_shared_context(owner_id, chat_id, now=timestamp, conn=connection).get("session_id") or "")
+        if str(assistant_content or "").strip() and assistant_delivery_confirmed is True and session_id:
+            assistant_turn = cskh_session_memory.record_turn(
+                connection,
+                owner_id=owner_id,
+                chat_id=chat_id,
+                surface=surface,
+                role="assistant",
+                content=assistant_content,
+                source_message_id=f"reply:{source}",
+                now=timestamp,
+                session_window_hours=settings["session_window_hours"],
+                session_id=session_id,
+            )
+        safe_context_event = cskh_allowed_context_event(context_event)
+        if safe_context_event and session_id:
+            cskh_session_memory.record_turn(
+                connection,
+                owner_id=owner_id,
+                chat_id=chat_id,
+                surface=surface,
+                role="context_event",
+                content=safe_context_event,
+                source_message_id=f"context:{source}",
+                now=timestamp,
+                session_window_hours=settings["session_window_hours"],
+                session_id=session_id,
+            )
+        connection.commit()
+        cskh_maybe_purge_session_turns(now=timestamp, conn=connection)
+        return {
+            "session_id": session_id,
+            "user_inserted": bool(user_turn and user_turn.inserted),
+            "assistant_inserted": bool(assistant_turn and assistant_turn.inserted),
+        }
+    except Exception as exc:
+        logger.warning("cskh exchange persistence skipped | error=%s", type(exc).__name__)
+        return {"session_id": "", "user_inserted": False, "assistant_inserted": False}
+    finally:
+        if owned_conn and connection:
+            connection.close()
+
+
+def cskh_record_customer_turn(
+    *,
+    owner_id,
+    chat_id,
+    surface,
+    user_content,
+    source_message_id,
+    context_event="",
+    now=None,
+    conn=None,
+) -> dict:
+    """Persist only the inbound customer turn before any reply is attempted."""
+    return cskh_record_exchange(
+        owner_id=owner_id,
+        chat_id=chat_id,
+        surface=surface,
+        user_content=user_content,
+        source_message_id=source_message_id,
+        context_event=context_event,
+        now=now,
+        conn=conn,
+    )
+
+
+def cskh_record_delivered_assistant_turn(
+    *,
+    owner_id,
+    chat_id,
+    surface,
+    assistant_content,
+    source_message_id,
+    context_event="",
+    now=None,
+    conn=None,
+) -> dict:
+    """Persist an assistant turn only after its Telegram send has succeeded."""
+    return cskh_record_exchange(
+        owner_id=owner_id,
+        chat_id=chat_id,
+        surface=surface,
+        assistant_content=assistant_content,
+        assistant_delivery_confirmed=True,
+        source_message_id=source_message_id,
+        context_event=context_event,
+        now=now,
+        conn=conn,
+    )
+
+
+async def cskh_deliver_closing_notice_if_current(
+    *,
+    owner_id,
+    chat_id,
+    session_id,
+    source_message_id,
+    surface,
+    send_notice,
+    opt_out=False,
+    conn=None,
+    now=None,
+) -> bool:
+    """Send one closing note only after a durable cross-surface claim.
+
+    The claim is committed before transport.  Known transport failures release
+    it; once a transport is explicitly confirmed, a completion failure retains
+    the claim rather than risking a duplicate customer-visible message.
+    """
+    timestamp = float(time.time() if now is None else now)
+    owned_conn = conn is None
+    connection = conn
+    claimed = False
+    delivery_confirmed = False
+    try:
+        connection = connection or db_connect()
+        context = cskh_shared_context(owner_id, chat_id, now=timestamp, conn=connection)
+        if str(context.get("session_id") or "") != str(session_id or ""):
+            return False
+        if not cskh_session_memory.closing_notice_needed(
+            connection,
+            owner_id=owner_id,
+            chat_id=chat_id,
+            session_id=session_id,
+            source_message_id=source_message_id,
+            now=timestamp,
+            opt_out=opt_out,
+        ):
+            return False
+        claimed = cskh_session_memory.claim_closing_notice(
+            connection,
+            owner_id=owner_id,
+            chat_id=chat_id,
+            session_id=session_id,
+            source_message_id=source_message_id,
+            surface=surface,
+            now=timestamp,
+            opt_out=opt_out,
+        )
+        if not claimed:
+            return False
+        connection.commit()
+        notice = cskh_closing_notice_text(cskh_session_settings()["session_window_hours"])
+        sent = send_notice(notice)
+        if inspect.isawaitable(sent):
+            sent = await sent
+        delivery_confirmed = cskh_session_memory.notice_delivery_confirmed(sent)
+        if not delivery_confirmed:
+            cskh_session_memory.release_closing_notice_claim(
+                connection,
+                owner_id=owner_id,
+                chat_id=chat_id,
+                session_id=session_id,
+            )
+            connection.commit()
+            return False
+        completed = cskh_session_memory.complete_closing_notice_claim(
+            connection,
+            owner_id=owner_id,
+            chat_id=chat_id,
+            surface=surface,
+            content=notice,
+            confirmed_success=True,
+            now=timestamp,
+            session_id=session_id,
+        )
+        connection.commit()
+        return bool(completed)
+    except asyncio.CancelledError:
+        if claimed and not delivery_confirmed and connection:
+            cskh_session_memory.release_closing_notice_claim(
+                connection,
+                owner_id=owner_id,
+                chat_id=chat_id,
+                session_id=session_id,
+            )
+            connection.commit()
+        raise
+    except Exception as exc:
+        if claimed and not delivery_confirmed and connection:
+            try:
+                cskh_session_memory.release_closing_notice_claim(
+                    connection,
+                    owner_id=owner_id,
+                    chat_id=chat_id,
+                    session_id=session_id,
+                )
+                connection.commit()
+            except Exception:
+                pass
+        logger.warning("cskh closing notice skipped | error=%s", type(exc).__name__)
+        return False
+    finally:
+        if owned_conn and connection:
+            connection.close()
+
+
+def cskh_schedule_closing_notice(
+    *,
+    owner_id,
+    chat_id,
+    session_id,
+    source_message_id,
+    surface,
+    send_notice,
+    opt_out=False,
+    delay_seconds=CSKH_CLOSING_NOTICE_DELAY_SECONDS,
+) -> None:
+    """Replace an older idle timer for the same customer/chat with the latest one."""
+    owner = str(owner_id or "").strip()
+    chat = str(chat_id or "").strip()
+    if not owner or not chat or not str(session_id or "").strip() or not str(source_message_id or "").strip():
+        return
+    key = f"{owner}:{chat}"
+    previous = CSKH_CLOSING_NOTICE_TASKS.pop(key, None)
+    if previous and not previous.done():
+        previous.cancel()
+
+    async def runner():
+        try:
+            await asyncio.sleep(max(0, float(delay_seconds)))
+            await cskh_deliver_closing_notice_if_current(
+                owner_id=owner,
+                chat_id=chat,
+                session_id=session_id,
+                source_message_id=source_message_id,
+                surface=surface,
+                send_notice=send_notice,
+                opt_out=opt_out,
+            )
+        except asyncio.CancelledError:
+            raise
+        finally:
+            current = CSKH_CLOSING_NOTICE_TASKS.get(key)
+            if current is asyncio.current_task():
+                CSKH_CLOSING_NOTICE_TASKS.pop(key, None)
+
+    try:
+        CSKH_CLOSING_NOTICE_TASKS[key] = asyncio.create_task(runner())
+    except RuntimeError:
+        logger.warning("cskh closing notice schedule skipped: no running loop")
+
+
+def cskh_safe_telegram_id(value, *, allow_negative=False) -> str:
+    raw = str(value or "").strip()
+    pattern = r"-?[1-9]\d{0,19}" if allow_negative else r"[1-9]\d{0,19}"
+    return raw if re.fullmatch(pattern, raw) else ""
+
+
+def cskh_safe_message_reference(value) -> str:
+    return cskh_safe_telegram_id(value)
+
+
+def cskh_transport_delivery_confirmed(value) -> bool:
+    """Use the same strict acknowledgement rule for replies and idle notes."""
+    return cskh_session_memory.notice_delivery_confirmed(value)
+
+
+def cskh_context_event_for_classification(classification: dict | None) -> str:
+    payload = classification or {}
+    product = str(payload.get("primary_product") or payload.get("product") or "").strip()
+    return CSKH_ALLOWED_CONTEXT_EVENTS.get(product, "")
+
+
+def cskh_finalize_delivered_reply(
+    *,
+    owner_id,
+    chat_id,
+    surface,
+    source_message_id,
+    assistant_content,
+    inbound_turn=None,
+    classification=None,
+    send_notice=None,
+) -> dict:
+    """Persist a real reply and arm the five-minute note only after delivery."""
+    source = cskh_safe_message_reference(source_message_id)
+    if not source:
+        return {"session_id": "", "assistant_inserted": False}
+    delivered = cskh_record_delivered_assistant_turn(
+        owner_id=owner_id,
+        chat_id=chat_id,
+        surface=surface,
+        assistant_content=assistant_content,
+        source_message_id=source,
+        context_event=cskh_context_event_for_classification(classification),
+    )
+    session_id = str((delivered or {}).get("session_id") or (inbound_turn or {}).get("session_id") or "")
+    if session_id and callable(send_notice):
+        cskh_schedule_closing_notice(
+            owner_id=owner_id,
+            chat_id=chat_id,
+            session_id=session_id,
+            source_message_id=source,
+            surface=surface,
+            send_notice=send_notice,
+        )
+    return delivered
+
+
 CANONICAL_PRICE_SETTING_PREFIX = "canonical_price_xu:"
 CANONICAL_PRICE_KEYS = (
     "voice_tts_basic",
@@ -6224,6 +6701,66 @@ def canonical_price_xu(key: str = ""):
     if str(raw or "").strip():
         return canonical_price_number(raw, defaults.get(normalized, 0))
     return defaults.get(normalized, 0)
+
+
+def cskh_live_pricing_snapshot() -> dict:
+    """Read the current customer-facing prices without changing any product state.
+
+    The CSKH layer receives a concrete runtime snapshot only.  It never falls
+    back to the static CSKH documents, so a missing canonical dependency is an
+    honest unavailable snapshot rather than a stale price claim.
+    """
+    try:
+        image_payload = image_tier_pricing_payload()
+        video_payload = video_tier_pricing_payload()
+        image_tiers = [
+            (
+                str((image_payload.get(tier) or {}).get("label") or tier),
+                int((image_payload.get(tier) or {}).get("cost") or 0),
+            )
+            for tier in IMAGE_TIER_ORDER
+            if tier in image_payload
+        ]
+        video_tiers = [
+            (
+                str((video_payload.get(tier) or {}).get("label") or tier),
+                int((video_payload.get(tier) or {}).get("cost") or 0),
+            )
+            for tier in VIDEO_TIER_ORDER
+            if tier in video_payload
+        ]
+        music_background_tiers = [
+            (music_product_tier_label(tier, "vi"), int(music_product_tier_price_xu(tier, "background") or 0))
+            for tier in MUSIC_PRODUCT_TIER_ORDER
+        ]
+        music_song_tiers = [
+            (music_product_tier_label(tier, "vi"), int(music_product_tier_price_xu(tier, "song") or 0))
+            for tier in MUSIC_PRODUCT_TIER_ORDER
+        ]
+        scene_seconds = int((product_video_r9_scene_pricing(1) or {}).get("scene_seconds") or 0)
+        if not image_tiers or not video_tiers or not music_background_tiers or not music_song_tiers or scene_seconds <= 0:
+            raise ValueError("canonical_cskh_price_snapshot_incomplete")
+        return {
+            "available": True,
+            "source": "runtime_canonical",
+            "xu_to_vnd": int(XU_TO_VND or 0),
+            "image_tiers": image_tiers,
+            "video_tiers": video_tiers,
+            "music_background_tiers": music_background_tiers,
+            "music_song_tiers": music_song_tiers,
+            "voice_private_first_xu": 0 if VOICE_PROFILE_FIRST_FREE else int(VOICE_PROFILE_PRICE_XU or 0),
+            "voice_private_repeat_xu": int(VOICE_PROFILE_PRICE_XU or 0),
+            "voice_tts_rate": canonical_price_xu("voice_tts_basic"),
+            "voice_tts_min_xu": int(VOICE_TTS_PRODUCT_MIN_CHARGE_XU or 0),
+            "subtitle_rate": canonical_price_xu("subtitle_translate_video"),
+            "dub_rate": canonical_price_xu("dub_video"),
+            "private_dub_rate": canonical_price_xu("voice_clone_custom"),
+            "scene_seconds": scene_seconds,
+        }
+    except Exception as exc:
+        logger.warning("cskh runtime pricing snapshot unavailable | error=%s", type(exc).__name__)
+        return {"available": False, "source": "runtime_unavailable"}
+
 
 def canonical_price_table() -> dict:
     table = {}
@@ -110679,6 +111216,8 @@ async def notify_admin_new_support_ticket(
 async def handle_support_persona_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not SUPPORT_PERSONA_AUTO_REPLY_ENABLED or not update.effective_user or not update.message or not update.message.text:
         return False
+    if ai_chatbot_copilot.is_enabled(aichat_state(), update.effective_user.id):
+        return False
     text = update.message.text.strip()
     classification = await classify_support_message(text, update.effective_user.id)
     if not classification.get("matched"):
@@ -110714,6 +111253,100 @@ async def handle_support_persona_message(update: Update, context: ContextTypes.D
             support_reply_for_classification(classification),
             is_new=is_new,
             customer_message=text,
+        )
+    return True
+
+
+CSKH_CONTINUITY_SAFE_INTENTS = {
+    "ask_capabilities",
+    "continuity_charged_no_file_reference",
+    "continuity_cosmetics_pricing_clarifier",
+    "continuity_video_package_step",
+    "file_without_instruction",
+    "guide_video_three_steps",
+    "guide_how_to",
+    "image_ai_pricing",
+    "image_create_request",
+    "music_pricing",
+    "payment_bonus_question",
+    "product_video_consulting",
+    "product_video_pricing",
+    "prompt_create_request",
+    "subdub_pricing",
+    "subtitle_pricing",
+    "dub_pricing",
+    "video_create_request",
+    "voice_pricing",
+}
+
+
+def cskh_continuity_reply_allowed(classification: dict | None) -> bool:
+    result = classification or {}
+    return bool(
+        result.get("public_safe")
+        and str(result.get("confidence") or "") == "high"
+        and str(result.get("intent_id") or "") in CSKH_CONTINUITY_SAFE_INTENTS
+        and not result.get("ticket")
+        and not result.get("handoff")
+        and not result.get("would_queue_learning")
+        and not result.get("learning_queue")
+    )
+
+
+async def handle_cskh_continuity_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Answer only a bounded, high-confidence CSKH continuation in private chat."""
+    if not update.effective_user or not update.message or not update.message.text:
+        return False
+    chat_type = str(getattr(getattr(update, "effective_chat", None), "type", "") or "").lower()
+    if chat_type and chat_type != "private":
+        return False
+    text = update.message.text.strip()
+    if not text or text.startswith("/"):
+        return False
+    user_id = update.effective_user.id
+    if ai_chatbot_copilot.is_enabled(aichat_state(), user_id):
+        return False
+    owner_id = cskh_safe_telegram_id(user_id)
+    chat_id = cskh_safe_telegram_id(
+        getattr(getattr(update, "effective_chat", None), "id", None) or getattr(update.message, "chat_id", None),
+        allow_negative=True,
+    )
+    source_message_id = cskh_safe_message_reference(getattr(update.message, "message_id", None))
+    if not owner_id or not chat_id or not source_message_id:
+        return False
+    inbound_turn = cskh_record_customer_turn(
+        owner_id=owner_id,
+        chat_id=chat_id,
+        surface="bot_menu",
+        user_content=text,
+        source_message_id=source_message_id,
+    )
+    classification = telegram_business_support.classify_cskh_message(
+        text,
+        conversation_memory=cskh_shared_context(owner_id, chat_id),
+        runtime_facts=cskh_live_pricing_snapshot(),
+    )
+    if not cskh_continuity_reply_allowed(classification):
+        return False
+    delivered_text = str(classification.get("reply") or "").strip()
+    if not delivered_text:
+        return False
+
+    async def send_closing_notice(notice):
+        return await update.message.reply_text(notice, disable_web_page_preview=True)
+
+    sent = await update.message.reply_text(delivered_text, disable_web_page_preview=True)
+    confirmed = cskh_transport_delivery_confirmed(sent)
+    if confirmed:
+        cskh_finalize_delivered_reply(
+            owner_id=owner_id,
+            chat_id=chat_id,
+            surface="bot_menu",
+            source_message_id=source_message_id,
+            assistant_content=delivered_text,
+            inbound_turn=inbound_turn,
+            classification=classification,
+            send_notice=send_closing_notice,
         )
     return True
 
@@ -111187,23 +111820,61 @@ async def handle_aichat_callback(update: Update, context: ContextTypes.DEFAULT_T
 async def handle_aichat_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:
         return False
+    chat_type = str(getattr(getattr(update, "effective_chat", None), "type", "") or "").lower()
+    if chat_type and chat_type != "private":
+        return False
     text = update.message.text.strip()
     if not text or text.startswith("/"):
         return False
     state = aichat_state()
-    lang = get_user_language(update.effective_user.id) or "vi"
-    state, result = ai_chatbot_copilot.process_message(state, update.effective_user.id, text)
+    user_id = update.effective_user.id
+    lang = get_user_language(user_id) or "vi"
+    owner_id = cskh_safe_telegram_id(user_id)
+    chat_id = cskh_safe_telegram_id(
+        getattr(getattr(update, "effective_chat", None), "id", None) or getattr(update.message, "chat_id", None),
+        allow_negative=True,
+    )
+    source_message_id = cskh_safe_message_reference(getattr(update.message, "message_id", None))
+    inbound_turn = {"session_id": ""}
+    shared_context = None
+    runtime_facts = None
+    if ai_chatbot_copilot.is_enabled(state, user_id):
+        runtime_facts = cskh_live_pricing_snapshot()
+        if owner_id and chat_id:
+            if source_message_id:
+                inbound_turn = cskh_record_customer_turn(
+                    owner_id=owner_id,
+                    chat_id=chat_id,
+                    surface="aichat",
+                    user_content=text,
+                    source_message_id=source_message_id,
+                )
+            shared_context = cskh_shared_context(owner_id, chat_id)
+    state, result = ai_chatbot_copilot.process_message(
+        state,
+        user_id,
+        text,
+        conversation_memory=shared_context,
+        runtime_facts=runtime_facts,
+    )
     save_aichat_state(state)
     if result.get("action_guard") == "disabled_no_reply":
-        return ai_chatbot_copilot.was_explicitly_disabled(state, update.effective_user.id)
+        return ai_chatbot_copilot.was_explicitly_disabled(state, user_id)
     if not result.get("replied"):
         return False
+
+    async def send_closing_notice(notice):
+        return await update.message.reply_text(
+            notice,
+            disable_web_page_preview=True,
+        )
+
     if result.get("action_should_execute") and result.get("selected_action") == "open_image_ai_flow_with_prefill":
-        payload = ai_chatbot_copilot.status_payload(state, update.effective_user.id)
-        flow_state = aichat_prepare_image_prefill_flow(update.effective_user.id, result=result, payload=payload, lang=lang)
+        payload = ai_chatbot_copilot.status_payload(state, user_id)
+        flow_state = aichat_prepare_image_prefill_flow(user_id, result=result, payload=payload, lang=lang)
         state = ai_chatbot_copilot.mark_action_execution(
             state,
-            update.effective_user.id,
+            user_id,
             selected_action="open_image_ai_flow_with_prefill",
             executed=True,
             router_called=True,
@@ -111217,19 +111888,45 @@ async def handle_aichat_message(update: Update, context: ContextTypes.DEFAULT_TY
             prefill_saved=True,
         )
         save_aichat_state(state)
-        await update.message.reply_text(
-            f"{result.get('reply') or ''}\n\n{quick_image_prepared_prompt_text(flow_state, lang)}",
+        delivered_text = f"{result.get('reply') or ''}\n\n{quick_image_prepared_prompt_text(flow_state, lang)}"
+        sent = await update.message.reply_text(
+            delivered_text,
             parse_mode="HTML",
             reply_markup=aichat_image_flow_keyboard(lang),
             disable_web_page_preview=True,
         )
+        confirmed = cskh_transport_delivery_confirmed(sent)
+        if confirmed and owner_id and chat_id:
+            cskh_finalize_delivered_reply(
+                owner_id=owner_id,
+                chat_id=chat_id,
+                surface="aichat",
+                source_message_id=source_message_id,
+                assistant_content=delivered_text,
+                inbound_turn=inbound_turn,
+                classification=result,
+                send_notice=send_closing_notice,
+            )
         return True
-    await update.message.reply_text(
-        str(result.get("reply") or ""),
+    delivered_text = str(result.get("reply") or "")
+    sent = await update.message.reply_text(
+        delivered_text,
         parse_mode="HTML",
-        reply_markup=aichat_result_keyboard(result, ai_chatbot_copilot.status_payload(state, update.effective_user.id)),
+        reply_markup=aichat_result_keyboard(result, ai_chatbot_copilot.status_payload(state, user_id)),
         disable_web_page_preview=True,
     )
+    confirmed = cskh_transport_delivery_confirmed(sent)
+    if confirmed and owner_id and chat_id:
+        cskh_finalize_delivered_reply(
+            owner_id=owner_id,
+            chat_id=chat_id,
+            surface="aichat",
+            source_message_id=source_message_id,
+            assistant_content=delivered_text,
+            inbound_turn=inbound_turn,
+            classification=result,
+            send_notice=send_closing_notice,
+        )
     return True
 
 async def cmd_cskh_business_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -111497,7 +112194,45 @@ async def process_cskh_business_event(
     allow_debounce: bool = True,
     state: dict | None = None,
 ):
-    await telegram_business_support.process_business_event_runtime(
+    def shared_context_fn(*, owner_id, chat_id, **_kwargs):
+        return cskh_shared_context(owner_id, chat_id)
+
+    def context_event_fn(*, classification, **_kwargs):
+        return cskh_context_event_for_classification(classification)
+
+    async def send_closing_notice(notice):
+        outcome = await telegram_business_support.send_business_message(
+            context.bot,
+            event.business_connection_id,
+            event.chat_id,
+            notice,
+            reply_to_message_id=event.message_id,
+        )
+        if isinstance(outcome, dict) and outcome.get("ok") is True:
+            return outcome.get("message") or True
+        return False
+
+    def schedule_closing_notice_fn(
+        *,
+        owner_id,
+        chat_id,
+        session_id,
+        source_message_id,
+        surface,
+        delay_seconds=CSKH_CLOSING_NOTICE_DELAY_SECONDS,
+        **_kwargs,
+    ):
+        cskh_schedule_closing_notice(
+            owner_id=owner_id,
+            chat_id=chat_id,
+            session_id=session_id,
+            source_message_id=source_message_id,
+            surface=surface,
+            send_notice=send_closing_notice,
+            delay_seconds=delay_seconds,
+        )
+
+    return await telegram_business_support.process_business_event_runtime(
         event,
         context,
         state=state or cskh_business_state(),
@@ -111507,6 +112242,12 @@ async def process_cskh_business_event(
         allow_debounce=allow_debounce,
         schedule_buffer_fn=cskh_schedule_buffer_flush,
         notify_admin_fn=notify_cskh_business_admin,
+        runtime_facts=cskh_live_pricing_snapshot(),
+        shared_context_fn=shared_context_fn,
+        record_customer_turn_fn=cskh_record_customer_turn,
+        record_delivered_assistant_turn_fn=cskh_record_delivered_assistant_turn,
+        schedule_closing_notice_fn=schedule_closing_notice_fn,
+        context_event_fn=context_event_fn,
     )
 
 def support_admin_search_payload(search: str) -> tuple[str, InlineKeyboardMarkup]:
@@ -231307,6 +232048,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_support_pending_input(update, context):
+        return
+
+    if await handle_cskh_continuity_message(update, context):
         return
 
     if await handle_support_persona_message(update, context):

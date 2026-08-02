@@ -130,9 +130,12 @@ def test_cskh6_scope_guard_cskh_only_no_locked_runtime_touched():
     changed = without_aiedit1_scope(_changed_files())
     allowed = {
         "bot.py",
+        "docs/superpowers/plans/2026-08-02-p0-cskh-continuity.md",
+        "docs/superpowers/specs/2026-08-02-p0-cskh-continuity-design.md",
         "knowledge/toan_aas_cskh_aichat_context.md",
         "services/aas_shared_knowledge.py",
         "services/ai_chatbot_copilot.py",
+        "services/cskh_session_memory.py",
         "services/telegram_business_support.py",
         "config/cskh_playbook.json",
         "config/cskh_training_data.json",
@@ -149,10 +152,12 @@ def test_cskh6_scope_guard_cskh_only_no_locked_runtime_touched():
         "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
         "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",
         "tests/test_p0_cskh3_conversation_brain_natural_replies.py",
+        "tests/test_p0_cskh4_aas_product_knowledge_pricing_mixed_intents.py",
         "tests/test_p0_cskh5b_live_business_followup_pricing_runtime.py",
         "tests/test_p0_cskh5c_business_self_echo_duplicate_guard.py",
         "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
         "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
+        "tests/test_p0_cskh_continuity_unified.py",
     }
     forbidden_fragments = (
         "music",

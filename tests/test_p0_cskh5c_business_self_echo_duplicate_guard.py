@@ -209,6 +209,36 @@ def test_cskh5c_same_real_message_replies_once_with_idempotency_key():
     assert len(bot.sent_messages) == 1
 
 
+def test_cskh5c_continuity_callbacks_skip_legacy_non_numeric_test_identifiers(monkeypatch):
+    state = _enabled_state()
+    observed = []
+    event = _event("giá video", message_id=1, chat_id="chat-1", from_user_id="user-1")
+    event.message_id = "m1"
+
+    async def delivered(*_args, **_kwargs):
+        return {"ok": True, "message": SimpleNamespace(message_id=9001), "payload": {}}
+
+    monkeypatch.setattr(cskh, "send_business_message", delivered)
+
+    result = _run(
+        cskh.process_business_event_runtime(
+            event,
+            SimpleNamespace(bot=FakeBot()),
+            state=state,
+            save_state_fn=_save_into(state),
+            bot_user_id="999",
+            allow_debounce=False,
+            shared_context_fn=lambda **kwargs: observed.append(("context", kwargs)),
+            record_customer_turn_fn=lambda **kwargs: observed.append(("customer", kwargs)),
+            record_delivered_assistant_turn_fn=lambda **kwargs: observed.append(("assistant", kwargs)),
+            schedule_closing_notice_fn=lambda **kwargs: observed.append(("schedule", kwargs)),
+        )
+    )
+
+    assert result["sent"] is True
+    assert observed == []
+
+
 def test_cskh5c_customer_reply_to_bot_with_text_is_allowed_but_quote_only_echo_is_ignored():
     state = _enabled_state()
     bot = FakeBot()
@@ -293,9 +323,12 @@ def test_cskh5c_trace_keeps_last_ten_ignored_events_with_direction_and_reason():
 def test_cskh5c_scope_guard_only_touches_cskh_runtime_bot_trace_and_tests():
     allowed = {
         "bot.py",
+        "docs/superpowers/plans/2026-08-02-p0-cskh-continuity.md",
+        "docs/superpowers/specs/2026-08-02-p0-cskh-continuity-design.md",
         "knowledge/toan_aas_cskh_aichat_context.md",
         "services/aas_shared_knowledge.py",
         "services/ai_chatbot_copilot.py",
+        "services/cskh_session_memory.py",
         "services/telegram_business_support.py",
         "tests/test_p0_aichat1_copilot_consent.py",
         "tests/test_p0_aichat1b_free_tools_menu_cleanup.py",
@@ -309,10 +342,12 @@ def test_cskh5c_scope_guard_only_touches_cskh_runtime_bot_trace_and_tests():
         "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
         "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",
         "tests/test_p0_cskh3_conversation_brain_natural_replies.py",
+        "tests/test_p0_cskh4_aas_product_knowledge_pricing_mixed_intents.py",
         "tests/test_p0_cskh5b_live_business_followup_pricing_runtime.py",
         "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
         "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
         "tests/test_p0_cskh5c_business_self_echo_duplicate_guard.py",
+        "tests/test_p0_cskh_continuity_unified.py",
     }
 
     assert without_aiedit1_scope(_changed_files()).issubset(allowed)

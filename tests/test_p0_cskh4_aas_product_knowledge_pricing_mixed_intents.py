@@ -368,13 +368,19 @@ def test_cskh4_no_voice_runtime_changes():
 
 def test_cskh4_no_payos_pricing_db_destructive_changes():
     allowed = {
+        "docs/superpowers/plans/2026-08-02-p0-cskh-continuity.md",
+        "docs/superpowers/specs/2026-08-02-p0-cskh-continuity-design.md",
         CSKH4_TEST,
         "services/aas_shared_knowledge.py",
         "services/ai_chatbot_copilot.py",
+        "services/cskh_session_memory.py",
         "services/telegram_business_support.py",
         "tests/test_p0_aichat2_natural_context_pricing.py",
         "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
         "tests/test_p0_cskh5b_live_business_followup_pricing_runtime.py",
+        "tests/test_p0_cskh5c_business_self_echo_duplicate_guard.py",
+        "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
+        "tests/test_p0_cskh_continuity_unified.py",
     }
     changed_files = without_aiedit1_scope(_changed_files())
     changed = " ".join(path for path in changed_files if path not in allowed).lower()

@@ -56,7 +56,7 @@ COMPLAINT_REPLY = (
     "em kiểm tra trạng thái và phần Xu cho mình ngay nha."
 )
 CHARGED_NO_RESULT_REPLY = (
-    "Dạ nếu hệ thống đã trừ Xu nhưng không có kết quả hợp lệ, bên em sẽ kiểm tra và xử lý theo chính sách hoàn/no-charge. "
+    "Dạ em xin lỗi anh/chị vì đã gặp tình huống này ạ. Bên em cần đối soát mã xử lý, thời gian và kết quả thực tế trước khi kết luận hướng xử lý phần Xu. "
     "Anh/chị gửi giúp em mã xử lý để em kiểm tra chính xác ạ."
 )
 LAST_REPLY_TEMPLATE = "Anh/chị gửi thêm giúp em [thông tin cần thiết], em sẽ hỗ trợ tiếp cho mình nha."
@@ -185,6 +185,83 @@ def format_vnd(value: float | int) -> str:
 
 def _list_prices(values: list[int]) -> str:
     return " / ".join(str(item) for item in values) + " Xu"
+
+
+def _runtime_snapshot(runtime_facts: dict | None) -> tuple[bool, dict[str, Any] | None]:
+    """Return an explicit, canonical read-only snapshot or an unavailable marker.
+
+    The static constants in this module only exist for legacy compatibility.
+    Supplying ``runtime_facts`` opts a caller into current-runtime-only answers:
+    an incomplete snapshot must never fall back to document values.
+    """
+    if runtime_facts is None:
+        return False, None
+    if not isinstance(runtime_facts, dict):
+        return True, None
+    if runtime_facts.get("available") is not True:
+        return True, None
+    if str(runtime_facts.get("source") or "") != "runtime_canonical":
+        return True, None
+    return True, runtime_facts
+
+
+def _runtime_number(facts: dict[str, Any] | None, key: str, *, minimum: float = 0.0) -> float | None:
+    if not facts:
+        return None
+    value = facts.get(key)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number >= minimum else None
+
+
+def _runtime_tiers(facts: dict[str, Any] | None, key: str) -> list[tuple[str, int]] | None:
+    if not facts:
+        return None
+    values = facts.get(key)
+    if isinstance(values, dict):
+        values = list(values.items())
+    if not isinstance(values, (list, tuple)) or not values:
+        return None
+    tiers: list[tuple[str, int]] = []
+    for value in values:
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            return None
+        name = str(value[0] or "").strip()
+        try:
+            price = int(round(float(value[1])))
+        except (TypeError, ValueError):
+            return None
+        if not name or price < 0:
+            return None
+        tiers.append((name, price))
+    return tiers or None
+
+
+def _runtime_price_source(runtime_facts: dict | None, *required: str) -> str:
+    explicit, facts = _runtime_snapshot(runtime_facts)
+    if not explicit:
+        return "pricing_doc"
+    if not facts:
+        return "runtime_unavailable"
+    for key in required:
+        if key.endswith("_tiers"):
+            if _runtime_tiers(facts, key) is None:
+                return "runtime_unavailable"
+        elif _runtime_number(facts, key, minimum=1 if key in {"xu_to_vnd", "scene_seconds"} else 0) is None:
+            return "runtime_unavailable"
+    return "runtime_canonical"
+
+
+def _runtime_unknown_or_legacy(runtime_facts: dict | None, *required: str) -> tuple[bool, dict[str, Any] | None]:
+    """Return ``(use_safe_unknown, facts)`` for a pricing reply."""
+    explicit, facts = _runtime_snapshot(runtime_facts)
+    if not explicit:
+        return False, None
+    if _runtime_price_source(runtime_facts, *required) != "runtime_canonical":
+        return True, None
+    return False, facts
 
 
 def _extract_first_int(text: str) -> int:
@@ -369,6 +446,64 @@ def _is_angry_customer(folded: str) -> bool:
     return any(term in folded for term in ("lua dao", "boc phot", "lam an chan", "bot gi ky", "app lua", "mat tien oan"))
 
 
+def _is_capabilities_question(folded: str) -> bool:
+    return any(
+        term in folded
+        for term in (
+            "ban co the biet gi",
+            "ban biet gi",
+            "co the biet gi",
+            "biet duoc gi",
+            "bot nay lam duoc gi",
+            "ben em co gi",
+            "toan aas lam gi",
+            "bot lam gi",
+        )
+    )
+
+
+def _is_bonus_policy_question(folded: str) -> bool:
+    bonus = any(term in folded for term in ("bonus", "tang xu", "khuyen mai", "uu dai"))
+    payment = any(term in folded for term in ("momo", "nap", "chuyen khoan", "thanh toan", "xu"))
+    already_paid_or_missing = any(
+        term in folded
+        for term in ("da nap", "nap roi", "roi nhung", "da chuyen", "da thanh toan", "khong nhan bonus", "bonus chua vao")
+    )
+    return bonus and payment and not already_paid_or_missing
+
+
+def _is_manager_request(folded: str) -> bool:
+    return any(
+        term in folded
+        for term in ("gap quan ly", "gap admin", "goi admin", "noi chuyen voi quan ly", "muon gap quan ly")
+    )
+
+
+def _is_wrong_voice_issue(folded: str) -> bool:
+    voice = any(term in folded for term in ("giong", "voice", "audio", "bai hat", "nhac"))
+    wrong = any(
+        term in folded
+        for term in (
+            "giong nu ma ra nam",
+            "giong nam ma ra nu",
+            "giong nu ma ra khac",
+            "chon giong nu ma ra nam",
+            "chon giong nam ma ra nu",
+            "sai giong",
+            "giong ra khac",
+        )
+    )
+    return voice and wrong
+
+
+def _is_subdub_pricing_with_length(folded: str) -> bool:
+    return (
+        "phu de" in folded
+        and any(term in folded for term in ("long tieng", "dub", "voice over"))
+        and bool(re.search(r"\b\d{1,7}\s*(?:ky tu|kytu|chu)\b", folded))
+    )
+
+
 def _is_file_capability_question(folded: str) -> bool:
     return any(term in folded for term in ("gui clip nay", "gui file nay", "clip nay lam gi", "file nay lam gi", "anh nay lam gi", "video nay lam gi"))
 
@@ -441,6 +576,19 @@ def _clean_subject(subject: str) -> str:
     return clean[:120]
 
 
+def _safe_draft_subject(subject: str) -> str:
+    """Keep customer-facing drafts from reflecting credentials or internal text."""
+    clean = _clean_subject(subject)
+    folded = fold(clean)
+    internal_markers = (
+        "provider", "api", "debug", "traceback", "stack", "token", "secret",
+        "endpoint", "webhook", "worker", "database", "private", "duong dan",
+    )
+    if not clean or any(marker in folded for marker in internal_markers) or "/" in clean or "\\" in clean:
+        return "sản phẩm"
+    return clean
+
+
 def _extract_image_subject(raw: str) -> str:
     patterns = (
         r"(?:bức\s+ảnh|ảnh|hình)\s+(?:về|ve|cho|của|cua)?\s*(.+)$",
@@ -510,7 +658,7 @@ def _is_image_create_request(raw: str, folded: str, memory: dict | None) -> bool
 
 
 def image_prompt_for_subject(topic: str) -> str:
-    clean = str(topic or "").strip() or "sản phẩm"
+    clean = _safe_draft_subject(topic)
     if "lexus" in fold(clean):
         return (
             "Ảnh quảng cáo xe Lexus màu đen chạy trên đường phố ban đêm, ánh đèn phản chiếu trên thân xe, "
@@ -573,7 +721,7 @@ def image_action_complaint_reply(memory: dict | None = None) -> str:
 
 
 def video_create_reply(raw: str, folded: str) -> str:
-    subject = _extract_video_subject(raw, folded) or "sản phẩm"
+    subject = _safe_draft_subject(_extract_video_subject(raw, folded))
     return (
         f"Dạ làm video {subject} được ạ. Em có thể giúp anh/chị chuẩn bị kịch bản/prompt video trước, rồi hướng vào luồng Tạo video trong bot. "
         "Khi tạo video thật, hệ thống sẽ hiện hóa đơn trước; anh/chị xác nhận rồi mới xử lý. "
@@ -582,14 +730,52 @@ def video_create_reply(raw: str, folded: str) -> str:
 
 
 def prompt_create_reply(raw: str, folded: str) -> str:
+    if "caption" in folded or "hashtag" in folded:
+        return caption_create_reply(raw)
+    if "kich ban" in folded or "script" in folded:
+        return script_create_reply(raw)
     if "video" in folded:
         return prompt_video_reply(raw)
-    subject = _extract_prompt_subject(raw) or _extract_image_subject(raw) or "sản phẩm"
+    subject = _safe_draft_subject(_extract_prompt_subject(raw) or _extract_image_subject(raw))
     return (
         "Dạ được ạ. Đây là prompt miễn phí cho ảnh để mình dùng làm nháp:\n\n"
         f"<code>Ảnh quảng cáo {subject}, chủ thể nổi bật, ánh sáng studio mềm, bố cục sạch, phong cách thương mại cao cấp, "
         "màu sắc hài hòa, chi tiết sắc nét, tỉ lệ 9:16, không chữ rối, không phóng đại công dụng.</code>\n\n"
         "Nếu muốn tạo ảnh thật trong bot, mình vào Tạo ảnh, xem gói và xác nhận hóa đơn trước khi xử lý ạ."
+    )
+
+
+def _content_draft_subject(raw: str) -> str:
+    text = str(raw or "")
+    patterns = (
+        r"(?:caption|hashtag|kịch bản|kich ban|script)(?:\s+video)?\s+(?:cho|về|ve)?\s*(.+)$",
+        r"(?:viết|viet|tạo|tao)\s+(?:cho\s+tôi\s+)?(?:caption|hashtag|kịch bản|kich ban|script)(?:\s+video)?\s+(?:cho|về|ve)?\s*(.+)$",
+    )
+    for pattern in patterns:
+        subject = _clean_subject(_subject_from_match(text, pattern))
+        if subject:
+            return _safe_draft_subject(subject)
+    return "sản phẩm"
+
+
+def caption_create_reply(raw: str) -> str:
+    subject = _content_draft_subject(raw)
+    return (
+        "Dạ được ạ. Đây là caption dùng ngay cho anh/chị:\n\n"
+        f"<code>{subject} — chọn một điều nhỏ nhưng phù hợp để chăm sóc mình mỗi ngày. "
+        "Thiết kế gọn gàng, cảm giác dễ dùng và phù hợp nhịp sống bận rộn. "
+        "Nhắn em để xem thông tin chi tiết nhé.</code>\n\n"
+        "#toanaas #sanpham #goiycontent"
+    )
+
+
+def script_create_reply(raw: str) -> str:
+    subject = _content_draft_subject(raw)
+    return (
+        "Dạ được ạ. Đây là kịch bản ngắn để anh/chị dùng ngay:\n\n"
+        f"<code>Cảnh 1 (0–3s): Cận cảnh {subject}, mở bằng vấn đề khách thường gặp.\n"
+        "Cảnh 2 (3–8s): Cho thấy cách dùng hoặc điểm nổi bật một cách tự nhiên.\n"
+        "Cảnh 3 (8–12s): Chốt lợi ích chính và CTA: Nhắn để xem thông tin chi tiết.</code>"
     )
 
 
@@ -670,7 +856,31 @@ def _base_result(
     }
 
 
-def pricing_table_reply() -> str:
+def pricing_table_reply(*, runtime_facts: dict | None = None) -> str:
+    unknown, facts = _runtime_unknown_or_legacy(
+        runtime_facts,
+        "xu_to_vnd",
+        "image_tiers",
+        "video_tiers",
+        "subtitle_rate",
+        "dub_rate",
+    )
+    if unknown:
+        return PRICE_UNKNOWN_SAFE_REPLY
+    if facts:
+        image_tiers = _runtime_tiers(facts, "image_tiers") or []
+        video_tiers = _runtime_tiers(facts, "video_tiers") or []
+        xu_to_vnd = int(_runtime_number(facts, "xu_to_vnd", minimum=1) or 0)
+        subtitle_rate = _runtime_number(facts, "subtitle_rate") or 0
+        dub_rate = _runtime_number(facts, "dub_rate") or 0
+        return (
+            "Dạ bảng giá hiện tại theo hệ thống đây ạ:\n"
+            f"• Quy đổi: 1 Xu = {_format_int(xu_to_vnd)}đ.\n"
+            f"• Ảnh AI: {'; '.join(f'{name} {format_xu(price)}' for name, price in image_tiers)}.\n"
+            f"• Video AI: {'; '.join(f'{name} {format_xu(price)}' for name, price in video_tiers)}.\n"
+            f"• SubDub: dịch phụ đề {subtitle_rate:g} Xu/ký tự; lồng tiếng mặc định {dub_rate:g} Xu/ký tự.\n"
+            "Hóa đơn luôn hiện trước khi anh/chị xác nhận."
+        )
     return (
         "Dạ bảng giá chính của TOAN AAS đây ạ:\n"
         "• Quy đổi: 1 Xu = 100đ.\n"
@@ -684,7 +894,16 @@ def pricing_table_reply() -> str:
     )
 
 
-def image_pricing_reply() -> str:
+def image_pricing_reply(*, runtime_facts: dict | None = None) -> str:
+    unknown, facts = _runtime_unknown_or_legacy(runtime_facts, "image_tiers")
+    if unknown:
+        return PRICE_UNKNOWN_SAFE_REPLY
+    if facts:
+        tiers = _runtime_tiers(facts, "image_tiers") or []
+        return (
+            f"Dạ tạo/chỉnh ảnh AI hiện có các mức: {'; '.join(f'{name} {format_xu(price)}' for name, price in tiers)}. "
+            "Bot sẽ hiện hóa đơn trước khi xử lý, chưa xác nhận thì chưa trừ Xu."
+        )
     tiers = "; ".join(f"{name} {price} Xu" for name, price in IMAGE_TIERS)
     return (
         f"Dạ tạo/chỉnh ảnh AI đang theo các mức: {tiers}. "
@@ -693,7 +912,19 @@ def image_pricing_reply() -> str:
     )
 
 
-def video_pricing_reply() -> str:
+def video_pricing_reply(*, runtime_facts: dict | None = None) -> str:
+    unknown, facts = _runtime_unknown_or_legacy(runtime_facts, "video_tiers", "scene_seconds")
+    if unknown:
+        return PRICE_UNKNOWN_SAFE_REPLY
+    if facts:
+        tiers = _runtime_tiers(facts, "video_tiers") or []
+        scene_seconds = _runtime_number(facts, "scene_seconds", minimum=1) or 0
+        scene_count = max(1, int(math.ceil(30 / scene_seconds)))
+        return (
+            f"Dạ video AI hiện có các gói: {'; '.join(f'{name} {format_xu(price)}' for name, price in tiers)}. "
+            f"Product Video hiện tính 1 cảnh = {scene_seconds:g}s; video khoảng 30s thường cần {scene_count} cảnh. "
+            "Bot sẽ dừng ở màn hóa đơn để anh/chị tự xác nhận."
+        )
     tiers = "; ".join(f"{name} {price} Xu" for name, price in VIDEO_TIERS)
     return (
         f"Dạ video AI có các gói: {tiers}. "
@@ -704,14 +935,43 @@ def video_pricing_reply() -> str:
     )
 
 
-def voice_pricing_reply() -> str:
+def voice_pricing_reply(*, runtime_facts: dict | None = None) -> str:
+    unknown, facts = _runtime_unknown_or_legacy(
+        runtime_facts,
+        "voice_private_first_xu",
+        "voice_private_repeat_xu",
+        "voice_tts_rate",
+        "voice_tts_min_xu",
+    )
+    if unknown:
+        return PRICE_UNKNOWN_SAFE_REPLY
+    if facts:
+        first = _runtime_number(facts, "voice_private_first_xu") or 0
+        repeat = _runtime_number(facts, "voice_private_repeat_xu") or 0
+        rate = _runtime_number(facts, "voice_tts_rate") or 0
+        minimum = _runtime_number(facts, "voice_tts_min_xu") or 0
+        return (
+            f"Dạ voice riêng lần đầu tạo thành công là {format_xu(first)}; từ lần 2 là {format_xu(repeat)}. "
+            f"Tạo audio từ voice là {rate:g} Xu/từ, tối thiểu {format_xu(minimum)}."
+        )
     return (
         "Dạ voice/TTS tính như sau: voice riêng đầu tiên miễn phí; từ voice riêng thứ 2 là 50 Xu nếu tạo thành công. "
         "Tạo audio từ voice là 0.10 Xu/từ, tối thiểu 1 Xu. Ví dụ 100 từ = 10 Xu, theo hướng dẫn hiện tại có giảm số lượng 10% còn 9 Xu."
     )
 
 
-def music_pricing_reply() -> str:
+def music_pricing_reply(*, runtime_facts: dict | None = None) -> str:
+    unknown, facts = _runtime_unknown_or_legacy(runtime_facts, "music_background_tiers", "music_song_tiers")
+    if unknown:
+        return PRICE_UNKNOWN_SAFE_REPLY
+    if facts:
+        background = _runtime_tiers(facts, "music_background_tiers") or []
+        songs = _runtime_tiers(facts, "music_song_tiers") or []
+        return (
+            f"Dạ nhạc nền AI hiện có: {'; '.join(f'{name} {format_xu(price)}' for name, price in background)}. "
+            f"Bài hát có lời hiện có: {'; '.join(f'{name} {format_xu(price)}' for name, price in songs)}. "
+            "Bot chỉ xử lý sau khi anh/chị xem hóa đơn và xác nhận."
+        )
     return (
         f"Dạ nhạc nền AI có 3 mức {_list_prices(MUSIC_BACKGROUND_TIERS)}. "
         f"Bài hát có lời có 3 mức {_list_prices(MUSIC_SONG_TIERS)}. "
@@ -719,7 +979,30 @@ def music_pricing_reply() -> str:
     )
 
 
-def subdub_pricing_reply(chars: int = 0, *, private_voice: bool = False) -> str:
+def subdub_pricing_reply(chars: int = 0, *, private_voice: bool = False, runtime_facts: dict | None = None) -> str:
+    required = ["subtitle_rate", "dub_rate"]
+    if private_voice:
+        required.append("private_dub_rate")
+    unknown, facts = _runtime_unknown_or_legacy(runtime_facts, *required)
+    if unknown:
+        return PRICE_UNKNOWN_SAFE_REPLY
+    if facts:
+        subtitle_rate = _runtime_number(facts, "subtitle_rate") or 0
+        dub_rate = _runtime_number(facts, "private_dub_rate" if private_voice else "dub_rate") or 0
+        safe_chars = max(0, int(chars or 0))
+        if safe_chars:
+            subtitle = int(math.ceil(safe_chars * subtitle_rate))
+            dub = int(math.ceil(safe_chars * dub_rate))
+            return (
+                f"Dạ với {_format_int(safe_chars)} ký tự, dịch phụ đề là {format_xu(subtitle)}, "
+                f"lồng tiếng {'voice riêng' if private_voice else 'giọng mặc định'} là {format_xu(dub)}, tổng {format_xu(subtitle + dub)}. "
+                "Bot vẫn hiện hóa đơn trước khi anh/chị xác nhận."
+            )
+        return (
+            f"Dạ SubDub hiện tính: dịch phụ đề {subtitle_rate:g} Xu/ký tự; "
+            f"lồng tiếng {'voice riêng' if private_voice else 'giọng mặc định'} {dub_rate:g} Xu/ký tự. "
+            "Anh/chị gửi số ký tự hoặc file để hệ thống báo hóa đơn chính xác ạ."
+        )
     if chars > 0:
         calc = calculate_subdub(chars, private_voice=private_voice)
         voice_label = "voice riêng" if private_voice else "giọng mặc định"
@@ -736,9 +1019,13 @@ def subdub_pricing_reply(chars: int = 0, *, private_voice: bool = False) -> str:
     )
 
 
-def topup_reply(vnd: int, *, include_examples: bool = False) -> str:
-    xu = vnd_to_xu(vnd)
-    base = f"Dạ {format_vnd(vnd)} = {format_xu(xu)} vì 1 Xu = 100đ."
+def topup_reply(vnd: int, *, include_examples: bool = False, runtime_facts: dict | None = None) -> str:
+    unknown, facts = _runtime_unknown_or_legacy(runtime_facts, "xu_to_vnd")
+    if unknown:
+        return PRICE_UNKNOWN_SAFE_REPLY
+    xu_to_vnd = int(_runtime_number(facts, "xu_to_vnd", minimum=1) or XU_TO_VND)
+    xu = max(0, int(vnd // xu_to_vnd))
+    base = f"Dạ {format_vnd(vnd)} = {format_xu(xu)} vì 1 Xu = {_format_int(xu_to_vnd)}đ."
     if include_examples:
         base += (
             f" Với {format_xu(xu)}, mình có thể test nhiều gói ảnh, làm video gói 200-600 Xu, "
@@ -769,6 +1056,14 @@ def angry_customer_reply() -> str:
     return COMPLAINT_REPLY
 
 
+def capabilities_reply() -> str:
+    return (
+        "Dạ TOAN AAS hỗ trợ tạo video/ảnh AI, phụ đề-dịch-lồng tiếng, voice/audio, nhạc AI, "
+        "prompt/caption/ý tưởng content và một số công cụ tài liệu. Bot luôn hiện hóa đơn trước khi xử lý. "
+        "Anh/chị muốn bắt đầu với video, ảnh hay phụ đề/lồng tiếng trước ạ?"
+    )
+
+
 def media_capability_reply() -> str:
     return (
         "Dạ clip/file này mình có thể dùng để tạo phụ đề, dịch phụ đề, lồng tiếng, lấy tư liệu dựng video, "
@@ -797,7 +1092,7 @@ def prompt_video_reply(text: str) -> str:
         topic = match.group(1).strip()
     elif "nuoc hoa" in folded:
         topic = "nước hoa nam"
-    topic = topic or "sản phẩm"
+    topic = _safe_draft_subject(topic)
     return (
         "Dạ đây là prompt video dùng miễn phí:\n\n"
         f"<code>Video quảng cáo ngắn cho {topic}, phong cách cao cấp và tự nhiên. "
@@ -822,7 +1117,13 @@ def guide_how_to_reply(product: str) -> str:
     )
 
 
-def classify_shared_answer(text: str, *, conversation_memory: dict | None = None, media_type: str = "") -> dict:
+def classify_shared_answer(
+    text: str,
+    *,
+    conversation_memory: dict | None = None,
+    media_type: str = "",
+    runtime_facts: dict | None = None,
+) -> dict:
     raw = str(text or "").strip()
     folded = fold(raw)
     media = fold(media_type)
@@ -870,6 +1171,77 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             sources=["context_file"],
             confidence="high",
             context_section="human_last_reply_policy",
+        )
+
+    if _is_capabilities_question(folded):
+        return _base_result(
+            "ask_capabilities",
+            capabilities_reply(),
+            sources=["guide_doc", "cskh_knowledge"],
+            confidence="high",
+            pricing_source="guide_doc",
+            context_section="usage_guides",
+        )
+
+    if _is_bonus_policy_question(folded):
+        return _base_result(
+            "payment_bonus_question",
+            (
+                "Dạ phần ưu đãi nạp Xu cần theo cấu hình đang hiển thị trong bot ạ. "
+                "Nếu màn nạp không ghi bonus thì em không tự hứa thêm Xu ngoài hệ thống. "
+                "Anh/chị chụp màn hình mục nạp đang thấy, em kiểm tra giúp mình nha."
+            ),
+            sources=["context_file", "cskh_knowledge"],
+            confidence="high",
+            product="payment_xu",
+            pricing_source="config",
+            context_section="payment_policy",
+        )
+
+    if _is_manager_request(folded):
+        return _base_result(
+            "admin_handoff",
+            (
+                "Dạ em ghi nhận anh/chị muốn gặp quản lý ạ. Em sẽ chuyển admin xem lại đúng trường hợp của mình; "
+                "anh/chị gửi giúp mã xử lý hoặc bill liên quan để admin đối soát nhanh hơn nha."
+            ),
+            sources=["context_file", "playbook"],
+            confidence="high",
+            handoff=True,
+            ticket=True,
+            context_section="scenario_dialogues",
+        )
+
+    if _is_wrong_voice_issue(folded):
+        is_music = any(term in folded for term in ("nhac", "bai hat", "mp3"))
+        intent_id = "music_wrong_voice_or_duplicate_file" if is_music else "voice_tts_error"
+        product = "music" if is_music else "voice"
+        return _base_result(
+            intent_id,
+            (
+                "Dạ em xin lỗi vì giọng đầu ra chưa đúng lựa chọn của anh/chị ạ. "
+                "Anh/chị gửi giúp mã xử lý và tên giọng đã chọn, nếu có file kết quả thì gửi kèm để em chuyển kiểm tra đúng ca nha."
+            ),
+            sources=["context_file", "playbook"],
+            confidence="high",
+            product=product,
+            handoff=True,
+            ticket=True,
+            context_section="scenario_dialogues",
+        )
+
+    if _is_subdub_pricing_with_length(folded):
+        chars = _extract_first_int(raw)
+        private_voice = any(term in folded for term in ("voice rieng", "giong rieng"))
+        required = ["subtitle_rate", "private_dub_rate" if private_voice else "dub_rate"]
+        return _base_result(
+            "subdub_pricing",
+            subdub_pricing_reply(chars, private_voice=private_voice, runtime_facts=runtime_facts),
+            sources=doc_sources,
+            confidence="high",
+            product="subdub",
+            pricing_source=_runtime_price_source(runtime_facts, *required),
+            context_section="pricing_facts",
         )
 
     if _is_meaningless_message(raw, folded):
@@ -922,11 +1294,7 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
     if any(term in folded for term in ("bot nay lam duoc gi", "ben em co gi", "toan aas lam gi", "bot lam gi")):
         return _base_result(
             "ask_capabilities",
-            (
-                "Dạ TOAN AAS hỗ trợ tạo video/ảnh AI, phụ đề-dịch-lồng tiếng, voice/audio, nhạc AI, "
-                "prompt/caption/ý tưởng content và một số công cụ tài liệu. Bot luôn hiện hóa đơn trước khi xử lý. "
-                "Anh/chị muốn bắt đầu với video, ảnh hay phụ đề/lồng tiếng trước ạ?"
-            ),
+            capabilities_reply(),
             sources=["guide_doc", "cskh_knowledge"],
             confidence="high",
             pricing_source="guide_doc",
@@ -995,22 +1363,24 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
         include_examples = any(term in folded for term in ("duoc gi", "lam duoc gi", "xai duoc gi", "dung duoc gi"))
         return _base_result(
             "pricing_topup",
-            topup_reply(amount, include_examples=include_examples),
+            topup_reply(amount, include_examples=include_examples, runtime_facts=runtime_facts),
             sources=doc_sources,
             product="payment_xu",
-            pricing_source="pricing_doc",
-            price_text=f"1 Xu = 100đ; {format_vnd(amount)} = {format_xu(vnd_to_xu(amount))}",
+            pricing_source=_runtime_price_source(runtime_facts, "xu_to_vnd"),
+            price_text="" if runtime_facts is not None else f"1 Xu = 100đ; {format_vnd(amount)} = {format_xu(vnd_to_xu(amount))}",
             context_section="pricing_facts",
         )
 
     if not product_pricing_context and any(term in folded for term in ("nap xu", "nap tien", "quy doi xu", "gia xu", "xu gia", "1 xu", "xu bang")):
         return _base_result(
             "pricing_topup",
-            "Dạ quy đổi hiện tại là 1 Xu = 100đ. Mình nạp mệnh giá nào thì lấy số tiền chia 100 ra số Xu, ví dụ 100.000đ = 1.000 Xu. Vào /naptien hoặc mục Nạp Xu / Bảng giá để chọn mệnh giá; bot sẽ hiện hướng thanh toán trước.",
+            topup_reply(100_000, runtime_facts=runtime_facts)
+            if runtime_facts is not None
+            else "Dạ quy đổi hiện tại là 1 Xu = 100đ. Mình nạp mệnh giá nào thì lấy số tiền chia 100 ra số Xu, ví dụ 100.000đ = 1.000 Xu. Vào /naptien hoặc mục Nạp Xu / Bảng giá để chọn mệnh giá; bot sẽ hiện hướng thanh toán trước.",
             sources=doc_sources,
             product="payment_xu",
-            pricing_source="pricing_doc",
-            price_text="1 Xu = 100đ",
+            pricing_source=_runtime_price_source(runtime_facts, "xu_to_vnd"),
+            price_text="" if runtime_facts is not None else "1 Xu = 100đ",
             context_section="pricing_facts",
         )
 
@@ -1112,22 +1482,22 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
         if topic == "image":
             return _base_result(
                 "image_ai_pricing",
-                image_pricing_reply(),
+                image_pricing_reply(runtime_facts=runtime_facts),
                 sources=doc_sources,
                 product="image_ai",
-                pricing_source="pricing_doc",
-                price_text=_list_prices([price for _name, price in IMAGE_TIERS]),
+                pricing_source=_runtime_price_source(runtime_facts, "image_tiers"),
+                price_text="" if runtime_facts is not None else _list_prices([price for _name, price in IMAGE_TIERS]),
                 context_section="pricing_facts",
                 topic="image",
             )
         if topic == "video":
             return _base_result(
                 "product_video_pricing",
-                video_pricing_reply(),
+                video_pricing_reply(runtime_facts=runtime_facts),
                 sources=doc_sources,
                 product="product_video",
-                pricing_source="pricing_doc",
-                price_text=_list_prices([price for _name, price in VIDEO_TIERS]),
+                pricing_source=_runtime_price_source(runtime_facts, "video_tiers", "scene_seconds"),
+                price_text="" if runtime_facts is not None else _list_prices([price for _name, price in VIDEO_TIERS]),
                 context_section="pricing_facts",
                 topic="video",
             )
@@ -1189,71 +1559,71 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
     if "bang gia" in folded and "video" in folded:
         return _base_result(
             "product_video_pricing",
-            video_pricing_reply(),
+            video_pricing_reply(runtime_facts=runtime_facts),
             sources=doc_sources,
             product="product_video",
-            pricing_source="pricing_doc",
-            price_text=_list_prices([price for _name, price in VIDEO_TIERS]),
+            pricing_source=_runtime_price_source(runtime_facts, "video_tiers", "scene_seconds"),
+            price_text="" if runtime_facts is not None else _list_prices([price for _name, price in VIDEO_TIERS]),
             context_section="pricing_facts",
         )
     if "bang gia" in folded or folded in {"gia", "bao gia", "gia tong"}:
         return _base_result(
             "pricing_table_general",
-            pricing_table_reply(),
+            pricing_table_reply(runtime_facts=runtime_facts),
             sources=doc_sources,
-            pricing_source="pricing_doc",
-            price_text="1 Xu = 100đ; full pricing table",
+            pricing_source=_runtime_price_source(runtime_facts, "xu_to_vnd", "image_tiers", "video_tiers", "subtitle_rate", "dub_rate"),
+            price_text="" if runtime_facts is not None else "1 Xu = 100đ; full pricing table",
             context_section="pricing_facts",
         )
     if has_price and any(term in folded for term in ("anh", "hinh", "tao anh", "chinh anh", "logo", "avatar")) and "video" not in folded:
         return _base_result(
             "image_ai_pricing",
-            image_pricing_reply(),
+            image_pricing_reply(runtime_facts=runtime_facts),
             sources=doc_sources,
             product="image_ai",
-            pricing_source="pricing_doc",
-            price_text=_list_prices([price for _name, price in IMAGE_TIERS]),
+            pricing_source=_runtime_price_source(runtime_facts, "image_tiers"),
+            price_text="" if runtime_facts is not None else _list_prices([price for _name, price in IMAGE_TIERS]),
             context_section="pricing_facts",
         )
     if has_price and "video" in folded:
         return _base_result(
             "product_video_pricing",
-            video_pricing_reply(),
+            video_pricing_reply(runtime_facts=runtime_facts),
             sources=doc_sources,
             product="product_video",
-            pricing_source="pricing_doc",
-            price_text=_list_prices([price for _name, price in VIDEO_TIERS]),
+            pricing_source=_runtime_price_source(runtime_facts, "video_tiers", "scene_seconds"),
+            price_text="" if runtime_facts is not None else _list_prices([price for _name, price in VIDEO_TIERS]),
             context_section="pricing_facts",
         )
     if has_price and any(term in folded for term in ("phu de", "subtitle", "sub", "long tieng", "dub", "voice over")):
         private_voice = any(term in folded for term in ("voice rieng", "giong rieng"))
         return _base_result(
             "subdub_pricing" if ("phu de" in folded and ("long tieng" in folded or "dub" in folded)) else ("dub_pricing" if ("long tieng" in folded or "dub" in folded) else "subtitle_pricing"),
-            subdub_pricing_reply(chars, private_voice=private_voice),
+            subdub_pricing_reply(chars, private_voice=private_voice, runtime_facts=runtime_facts),
             sources=doc_sources,
             product="subdub",
-            pricing_source="pricing_doc",
-            price_text="subtitle free; translation 0.1 Xu/char; default dub 0.10 Xu/char; custom voice 0.20 Xu/char",
+            pricing_source=_runtime_price_source(runtime_facts, "subtitle_rate", "private_dub_rate" if private_voice else "dub_rate"),
+            price_text="" if runtime_facts is not None else "subtitle free; translation 0.1 Xu/char; default dub 0.10 Xu/char; custom voice 0.20 Xu/char",
             context_section="pricing_facts",
         )
     if has_price and any(term in folded for term in ("voice", "tts", "giong doc", "doc text")):
         return _base_result(
             "voice_pricing",
-            voice_pricing_reply(),
+            voice_pricing_reply(runtime_facts=runtime_facts),
             sources=doc_sources,
             product="voice",
-            pricing_source="pricing_doc",
-            price_text="custom voice first free, second 50 Xu; TTS 0.10 Xu/word min 1 Xu",
+            pricing_source=_runtime_price_source(runtime_facts, "voice_private_first_xu", "voice_private_repeat_xu", "voice_tts_rate", "voice_tts_min_xu"),
+            price_text="" if runtime_facts is not None else "custom voice first free, second 50 Xu; TTS 0.10 Xu/word min 1 Xu",
             context_section="pricing_facts",
         )
     if has_price and any(term in folded for term in ("nhac", "music", "bai hat", "sfx")):
         return _base_result(
             "music_pricing",
-            music_pricing_reply(),
+            music_pricing_reply(runtime_facts=runtime_facts),
             sources=doc_sources,
             product="music",
-            pricing_source="pricing_doc",
-            price_text="background 100/150/200 Xu; song 200/250/300 Xu",
+            pricing_source=_runtime_price_source(runtime_facts, "music_background_tiers", "music_song_tiers"),
+            price_text="" if runtime_facts is not None else "background 100/150/200 Xu; song 200/250/300 Xu",
             context_section="pricing_facts",
         )
     if any(term in folded for term in ("huong dan", "cach dung", "su dung sao", "lam sao dung")):

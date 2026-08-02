@@ -225,6 +225,10 @@ def conversation_memory(state: dict, user_id: str | int) -> dict:
     return memory
 
 
+def _stored_conversation_memory(state: dict, user_id: str | int) -> dict:
+    return conversation_memory(state, user_id)
+
+
 def update_conversation_memory(state: dict, user_id: str | int, text: str, result: dict, *, now: float | None = None) -> dict:
     clean = normalize_state(state)
     uid = str(user_id)
@@ -391,8 +395,10 @@ def _sources_for_classification(classification: dict, *, fallback: bool = False,
         sources.append("pricing")
     elif pricing_source == "guide_doc":
         sources.append("guide_doc")
-    elif pricing_source == "config" or classification.get("price_text") or "pricing" in intent_id:
+    elif pricing_source in {"config", "runtime", "runtime_canonical"} or classification.get("price_text") or "pricing" in intent_id:
         sources.append("pricing")
+        if pricing_source == "runtime_canonical":
+            sources.append("runtime_canonical")
     if fallback:
         sources.append("fallback")
     if learning:
@@ -437,21 +443,42 @@ def _queue_learning(text: str, classification: dict, reply: str, user_id: str | 
     return candidate
 
 
-def classify_message(text: str, *, user_id: str | int = "", conversation_memory: dict | None = None) -> dict:
+def classify_message(
+    text: str,
+    *,
+    user_id: str | int = "",
+    conversation_memory: dict | None = None,
+    runtime_facts: dict | None = None,
+) -> dict:
     clean_text = _safe_text(text, 2000)
     classification = cskh.classify_cskh_message(
         clean_text,
         variation_seed=f"aichat:{user_id}:{_hash_text(clean_text)}",
         conversation_memory=conversation_memory,
+        runtime_facts=runtime_facts,
     )
     classification["entry"] = "aichat"
     return classification
 
 
-def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bool = True, entry_source: str = "live_chat") -> dict:
+def build_reply(
+    state: dict,
+    user_id: str | int,
+    text: str,
+    *,
+    queue_unknown: bool = True,
+    entry_source: str = "live_chat",
+    conversation_memory: dict | None = None,
+    runtime_facts: dict | None = None,
+) -> dict:
     clean_text = _safe_text(text, 2000)
-    memory = conversation_memory(state, user_id)
-    classification = classify_message(clean_text, user_id=user_id, conversation_memory=memory)
+    memory = dict(conversation_memory) if isinstance(conversation_memory, dict) else _stored_conversation_memory(state, user_id)
+    classification = classify_message(
+        clean_text,
+        user_id=user_id,
+        conversation_memory=memory,
+        runtime_facts=runtime_facts,
+    )
     intent_id = str(classification.get("intent_id") or "out_of_scope")
     assist_actions = action_permission_enabled(state, user_id)
     fallback = intent_id in {"out_of_scope", "vague_or_unclear"} or str(classification.get("confidence") or "") == "low"
@@ -542,6 +569,7 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
         "classification": classification,
         "confidence": str(classification.get("confidence") or ""),
         "primary_product": str(classification.get("primary_product") or classification.get("product") or ""),
+        "pricing_source": str(classification.get("pricing_source") or "unknown"),
         "reply": reply,
         "source": sources,
         "permission": permission,
@@ -566,6 +594,9 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
         "reply_template": str(classification.get("reply_template_id") or ""),
         "learning_candidate_id": learning_candidate.get("id") or "",
         "learning_queue": bool(learning_candidate),
+        "would_queue_learning": bool(classification.get("would_queue_learning")),
+        "ticket": bool(classification.get("ticket") or classification.get("ticket_required")),
+        "handoff": bool(classification.get("handoff") or classification.get("handoff_required")),
         "context_file_path": str(classification.get("context_file_path") or ""),
         "context_file_version": str(classification.get("context_file_version") or ""),
         "context_file_used": bool(classification.get("context_file_used")),
@@ -593,7 +624,16 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
     }
 
 
-def process_message(state: dict, user_id: str | int, text: str, *, queue_unknown: bool = True, entry_source: str = "live_chat") -> tuple[dict, dict]:
+def process_message(
+    state: dict,
+    user_id: str | int,
+    text: str,
+    *,
+    queue_unknown: bool = True,
+    entry_source: str = "live_chat",
+    conversation_memory: dict | None = None,
+    runtime_facts: dict | None = None,
+) -> tuple[dict, dict]:
     clean = normalize_state(state)
     uid = str(user_id)
     if not is_enabled(clean, uid):
@@ -609,7 +649,15 @@ def process_message(state: dict, user_id: str | int, text: str, *, queue_unknown
         if was_explicitly_disabled(clean, uid):
             clean = record_trace(clean, uid, text=text, result=result, replied=False)
         return clean, result
-    result = build_reply(clean, uid, text, queue_unknown=queue_unknown, entry_source=entry_source)
+    result = build_reply(
+        clean,
+        uid,
+        text,
+        queue_unknown=queue_unknown,
+        entry_source=entry_source,
+        conversation_memory=conversation_memory,
+        runtime_facts=runtime_facts,
+    )
     result["replied"] = True
     clean = update_conversation_memory(clean, uid, text, result)
     clean = record_trace(clean, uid, text=text, result=result, replied=True, entry_source=entry_source)
@@ -640,6 +688,7 @@ def record_trace(state: dict, user_id: str | int, *, text: str, result: dict, re
         "resolver_version": str(result.get("resolver_version") or RESOLVER_VERSION),
         "context_source": str(result.get("context_source") or entry_source or "live_chat"),
         "confidence": str(result.get("confidence") or (result.get("classification") or {}).get("confidence") or ""),
+        "pricing_source": str(result.get("pricing_source") or (result.get("classification") or {}).get("pricing_source") or "unknown"),
         "context_file_version": str(result.get("context_file_version") or (result.get("classification") or {}).get("context_file_version") or ""),
         "context_file_used": bool(result.get("context_file_used") or (result.get("classification") or {}).get("context_file_used")),
         "context_version": str(result.get("context_version") or (result.get("classification") or {}).get("context_version") or ""),
