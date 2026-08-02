@@ -1211,11 +1211,16 @@ def test_integration_business_runtime_records_after_customer_eligibility_and_suc
     assert recorded[3][1]["delay_seconds"] == 5 * 60
 
 
-def test_integration_business_runtime_never_records_assistant_or_schedule_when_transport_is_unconfirmed(monkeypatch):
+def test_integration_business_runtime_never_records_assistant_or_schedule_when_raw_transport_lacks_valid_message_id(monkeypatch):
     recorded = []
 
     async def unconfirmed_send(*_args, **_kwargs):
-        return {"ok": False, "message": None, "payload": {}}
+        return {
+            "ok": True,
+            "method": "raw",
+            "message": {"ok": True, "result": {}},
+            "payload": {},
+        }
 
     monkeypatch.setattr(cskh, "send_business_message", unconfirmed_send)
     result = asyncio.run(
@@ -1235,7 +1240,32 @@ def test_integration_business_runtime_never_records_assistant_or_schedule_when_t
     )
 
     assert result["sent"] is False
+    assert result["guard"]["block_reason_detail"] == "unconfirmed_transport"
     assert [name for name, _payload in recorded] == ["customer"]
+
+
+def test_business_transport_confirmation_requires_concrete_message_id_for_each_transport():
+    assert cskh._business_transport_delivery_confirmed(
+        {
+            "ok": True,
+            "method": "raw",
+            "message": {"ok": True, "result": {"message_id": 903}},
+        }
+    )
+    assert cskh._business_transport_delivery_confirmed(
+        {
+            "ok": True,
+            "method": "ptb",
+            "message": SimpleNamespace(message_id=904),
+        }
+    )
+    assert not cskh._business_transport_delivery_confirmed(
+        {
+            "ok": True,
+            "method": "raw",
+            "message": {"ok": True, "result": {"message_id": True}},
+        }
+    )
 
 
 def test_integration_business_runtime_does_not_persist_a_suppressed_customer_event():

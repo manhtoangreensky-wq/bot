@@ -3001,12 +3001,22 @@ async def _invoke_continuity_callback(callback: Any, **kwargs):
 
 
 def _business_transport_delivery_confirmed(send_result: Any) -> bool:
-    """Accept only an explicit successful Telegram send acknowledgement."""
-    if send_result is True:
-        return True
-    if isinstance(send_result, dict):
-        return send_result.get("ok") is True
-    return isinstance(getattr(send_result, "message_id", None), int) and getattr(send_result, "message_id", 0) > 0
+    """Require a concrete Telegram message ID before persisting delivery."""
+    if not isinstance(send_result, dict) or send_result.get("ok") is not True:
+        return False
+    message = send_result.get("message")
+    if isinstance(message, dict):
+        raw_result = message.get("result")
+        raw_message_id = raw_result.get("message_id") if isinstance(raw_result, dict) else None
+        return (
+            message.get("ok") is True
+            and type(raw_message_id) is int
+            and raw_message_id > 0
+        )
+    if str(send_result.get("method") or "").strip().lower() == "raw":
+        return False
+    message_id = getattr(message, "message_id", None)
+    return type(message_id) is int and message_id > 0
 
 
 async def process_business_event_runtime(
