@@ -306,9 +306,41 @@ def validate_srt_file(path: str | os.PathLike[str], *, workspace: str | os.PathL
         text = target.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeError):
         return {"ok": False, "reason": "subtitle_read_failed"}
-    if not _SRT_TIME.search(text) or not re.search(r"(?m)^\s*\d+\s*$", text):
+    timing_lines = _SRT_TIME.findall(text)
+    if not timing_lines or not re.search(r"(?m)^\s*\d+\s*$", text):
         return {"ok": False, "reason": "subtitle_format_invalid"}
-    return {"ok": True, "reason": "", "cue_count": len(_SRT_TIME.findall(text))}
+
+    def timestamp_ms(value: str) -> int:
+        hours, minutes, seconds_and_ms = value.strip().split(":", 2)
+        seconds, milliseconds = seconds_and_ms.split(",", 1)
+        minute_value = int(minutes)
+        second_value = int(seconds)
+        if minute_value >= 60 or second_value >= 60:
+            raise ValueError("subtitle_timestamp_invalid")
+        return (
+            int(hours) * 3_600_000
+            + minute_value * 60_000
+            + second_value * 1_000
+            + int(milliseconds)
+        )
+
+    cue_windows: list[dict[str, int]] = []
+    try:
+        for timing in timing_lines:
+            start_text, end_text = re.split(r"\s+-->\s+", timing.strip(), maxsplit=1)
+            start_ms = timestamp_ms(start_text)
+            end_ms = timestamp_ms(end_text)
+            if end_ms <= start_ms:
+                return {"ok": False, "reason": "subtitle_timing_invalid"}
+            cue_windows.append({"start_ms": start_ms, "end_ms": end_ms})
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "subtitle_timing_invalid"}
+    return {
+        "ok": True,
+        "reason": "",
+        "cue_count": len(cue_windows),
+        "cue_windows": cue_windows,
+    }
 
 
 def delivery_file_allowed(path: str | os.PathLike[str], *, workspace: str | os.PathLike[str]) -> bool:

@@ -45,7 +45,9 @@ from services.video_local_editing import (
     default_manual_edit_plan,
     execute_manual_edit,
     execute_split_plan,
+    manual_plan_assets_match,
     plan_has_effective_operation,
+    split_plan_has_manual_conflict,
 )
 from services.video_local_validation import (
     MAX_UPLOAD_BYTES,
@@ -807,6 +809,8 @@ def run_video_local_edit(job: dict) -> None:
             raise LocalVideoEditError("video_local_edit_mode_invalid")
         mode = requested_mode
         submitted_manual_plan = payload.get("manual_edit_plan")
+        if mode == "split" and not isinstance(submitted_manual_plan, dict):
+            raise LocalVideoEditError("video_local_edit_split_plan_invalid")
         if requested_mode == "manual" and (
             not isinstance(submitted_manual_plan, dict) or not submitted_manual_plan
         ):
@@ -832,7 +836,44 @@ def run_video_local_edit(job: dict) -> None:
             charge_status = "pending_post_delivery"
             charge_policy = "after_valid_mp4_delivery"
         charged_xu = 0
+        job_user_id = str(job.get("user_id") or "").strip()
+        payload_user_id = str(payload.get("user_id") or "").strip()
+        if free_edit and (
+            not job_user_id
+            or payload_user_id != job_user_id
+            or not video_editengine1.valid_local_free_rights_confirmation(
+                payload.get("rights_confirmation"),
+                user_id=job_user_id,
+                expected_review_revision=payload.get("state_revision"),
+            )
+        ):
+            raise LocalVideoEditError(
+                "video_local_edit_rights_confirmation_invalid"
+            )
+        if mode == "split":
+            source_metadata = dict(payload.get("source_metadata") or {})
+            try:
+                duration_hint = int(
+                    source_metadata.get("duration_ms")
+                    or round(float(source_metadata.get("duration") or 0) * 1000)
+                )
+            except (TypeError, ValueError, OverflowError):
+                duration_hint = 0
+            if split_plan_has_manual_conflict(
+                submitted_manual_plan,
+                source_duration_ms=duration_hint,
+                concat_sources=payload.get("concat_sources") or [],
+                logo_source=payload.get("logo_source") or {},
+                subtitle_source=payload.get("subtitle_source") or {},
+            ):
+                raise LocalVideoEditError(
+                    "video_local_edit_split_manual_conflict"
+                )
         if mode == "manual":
+            if free_edit and "source" in submitted_manual_plan:
+                raise LocalVideoEditError(
+                    "video_local_edit_legacy_plan_invalid"
+                )
             source_metadata = dict(payload.get("source_metadata") or {})
             try:
                 duration_hint = int(
@@ -854,6 +895,13 @@ def run_video_local_edit(job: dict) -> None:
                 or not isinstance(preflight_subtitle_source, dict)
                 or (preflight_logo_source and not str(preflight_logo_source.get("file_id") or "").strip())
                 or (preflight_subtitle_source and not str(preflight_subtitle_source.get("file_id") or "").strip())
+            ):
+                raise LocalVideoEditError("video_local_edit_asset_contract_invalid")
+            if free_edit and not manual_plan_assets_match(
+                submitted_manual_plan,
+                concat_sources=preflight_concat_sources,
+                logo_source=preflight_logo_source,
+                subtitle_source=preflight_subtitle_source,
             ):
                 raise LocalVideoEditError("video_local_edit_asset_contract_invalid")
             asset_operation = bool(
@@ -885,6 +933,28 @@ def run_video_local_edit(job: dict) -> None:
             ALLOWED_SOURCE_EXTENSIONS,
             "source",
         )
+        downloaded_probe = video_local_validation.probe_video_file(
+            source_path,
+            ffprobe_path=ffprobe,
+        )
+        downloaded_validation = video_local_validation.validate_source_metadata(
+            downloaded_probe,
+            file_size=os.path.getsize(source_path),
+        )
+        if not downloaded_validation.get("ok"):
+            raise LocalVideoEditError(
+                str(downloaded_validation.get("reason") or "invalid_video")
+            )
+        if mode == "split" and split_plan_has_manual_conflict(
+            submitted_manual_plan,
+            source_duration_ms=int(downloaded_validation.get("duration_ms") or 0),
+            concat_sources=payload.get("concat_sources") or [],
+            logo_source=payload.get("logo_source") or {},
+            subtitle_source=payload.get("subtitle_source") or {},
+        ):
+            raise LocalVideoEditError(
+                "video_local_edit_split_manual_conflict"
+            )
         source_sha256 = video_ai_edit_validation.sha256_file(source_path)
         source_video_path = os.path.basename(source_path)
         timeout = min(LOCAL_WORKER_MAX_JOB_SECONDS, max(30, int(payload.get("max_render_seconds") or 600)))
@@ -1019,16 +1089,7 @@ def run_video_local_edit(job: dict) -> None:
                     raise LocalVideoEditError("video_local_edit_plan_missing")
             plan = raw_plan or _legacy_local1_plan(payload, source_path)
             plan["input_video"] = source_path
-            source_metadata = dict(payload.get("source_metadata") or {})
-            try:
-                duration_hint = int(
-                    source_metadata.get("duration_ms")
-                    or round(float(source_metadata.get("duration") or 0) * 1000)
-                    or payload.get("source_duration_ms")
-                    or 0
-                )
-            except (TypeError, ValueError, OverflowError):
-                duration_hint = 0
+            duration_hint = int(downloaded_validation.get("duration_ms") or 0)
             if (
                 requested_mode == "manual"
                 and not raw_plan.get("source")

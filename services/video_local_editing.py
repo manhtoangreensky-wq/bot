@@ -47,8 +47,8 @@ COLOR_PRESETS = {
     "keep": "",
     "bright_clear": "eq=brightness=0.025:contrast=1.06:saturation=1.06,unsharp=5:5:0.45:5:5:0.0",
     "light_cinematic": "eq=brightness=-0.01:contrast=1.12:saturation=0.93:gamma=0.98",
-    "warm": "colorbalance=rs=0.06:gs=0.015:bs=-0.04",
-    "cool": "colorbalance=rs=-0.04:gs=0.01:bs=0.06",
+    "warm": "colorbalance=rs=0.06:gs=0.015:bs=-0.04:rm=0.06:gm=0.015:bm=-0.04:rh=0.06:gh=0.015:bh=-0.04",
+    "cool": "colorbalance=rs=-0.04:gs=0.01:bs=0.06:rm=-0.04:gm=0.01:bm=0.06:rh=-0.04:gh=0.01:bh=0.06",
     "high_contrast": "eq=contrast=1.25:saturation=1.05",
     "black_white": "hue=s=0,eq=contrast=1.08",
     "soft_clean": "hqdn3d=1.0:1.0:3.0:3.0,eq=brightness=0.01:contrast=1.03:saturation=0.98,unsharp=5:5:0.18:5:5:0.0",
@@ -136,7 +136,7 @@ def _number(value: Any, default: float = 0.0) -> float:
 def _integer(value: Any, default: int = 0) -> int:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return int(default)
 
 
@@ -242,6 +242,132 @@ def default_manual_edit_plan(input_video: str = "") -> dict[str, Any]:
     }
 
 
+def neutral_split_manual_plan() -> dict[str, Any]:
+    """Return the one duration-independent manual-plan identity for Split."""
+
+    return default_manual_edit_plan("")
+
+
+def _is_neutral_plan_subset(value: Any, neutral: Any) -> bool:
+    """Accept sparse JSON representations only when every value is neutral."""
+
+    if isinstance(neutral, dict):
+        if not isinstance(value, dict) or not set(value).issubset(neutral):
+            return False
+        return all(
+            _is_neutral_plan_subset(item, neutral[key])
+            for key, item in value.items()
+        )
+    if isinstance(neutral, list):
+        return isinstance(value, list) and value == neutral
+    if isinstance(neutral, bool):
+        return isinstance(value, bool) and value is neutral
+    if isinstance(neutral, (int, float)) and isinstance(value, bool):
+        return False
+    return value == neutral
+
+
+_MANUAL_PLAN_NESTED_FIELDS: dict[str, frozenset[str]] = {
+    "trim": frozenset({"start_ms", "end_ms"}),
+    "crop_or_fit": frozenset({"aspect_ratio", "mode"}),
+    "quality_filters": frozenset(QUALITY_FILTER_KEYS),
+    "local_effects": frozenset(LOCAL_EFFECT_KEYS),
+    "remove_middle": frozenset({"start_ms", "end_ms"}),
+    "text_overlay": frozenset(
+        {"content", "position", "start_ms", "end_ms", "font_size", "outline", "font_path"}
+    ),
+    "logo_overlay": frozenset({"path", "position", "scale", "opacity"}),
+}
+
+
+def _manual_plan_has_unknown_nested_fields(plan: dict[str, Any]) -> bool:
+    """Fail closed when a destructive transition sees an unknown nested field."""
+
+    for field, allowed in _MANUAL_PLAN_NESTED_FIELDS.items():
+        value = plan.get(field)
+        if value in (None, {}):
+            continue
+        if not isinstance(value, dict) or set(value) - set(allowed):
+            return True
+    return False
+
+
+def _collection_has_any_item(value: Any) -> bool:
+    """Treat every supplied item, including ``None``, as an occupied asset slot."""
+
+    if value is None:
+        return False
+    if isinstance(value, (str, bytes, bytearray, dict)):
+        return bool(value)
+    try:
+        return bool(tuple(value))
+    except TypeError:
+        return bool(value)
+
+
+def manual_plan_requires_split_reset(
+    plan: dict[str, Any] | None,
+    *,
+    source_duration_ms: int = 0,
+    concat_sources: Iterable[Any] | None = None,
+    logo_source: Any = None,
+    subtitle_source: Any = None,
+) -> bool:
+    """Return whether entering Split would discard real manual work."""
+
+    if not isinstance(plan, dict):
+        return True
+    if set(plan) - set(default_manual_edit_plan()):
+        return True
+    if _manual_plan_has_unknown_nested_fields(plan):
+        return True
+    has_concat = _collection_has_any_item(concat_sources)
+    return bool(
+        plan_has_effective_operation(
+            plan,
+            source_duration_ms=max(0, int(source_duration_ms or 0)),
+        )
+        or has_concat
+        or bool(logo_source)
+        or bool(subtitle_source)
+    )
+
+
+def manual_plan_assets_match(
+    plan: dict[str, Any] | None,
+    *,
+    concat_sources: Any,
+    logo_source: Any,
+    subtitle_source: Any,
+) -> bool:
+    """Bind every manual asset operation to exactly one Telegram asset record."""
+
+    if not isinstance(plan, dict) or not isinstance(concat_sources, list):
+        return False
+    if not isinstance(logo_source, dict) or not isinstance(subtitle_source, dict):
+        return False
+    concat_inputs = plan.get("concat_inputs") or []
+    if not isinstance(concat_inputs, list):
+        return False
+    if any(not isinstance(item, str) or not item.strip() for item in concat_inputs):
+        return False
+    if len(concat_inputs) != len(concat_sources):
+        return False
+    logo_plan = plan.get("logo_overlay") or {}
+    if not isinstance(logo_plan, dict):
+        return False
+    if bool(logo_plan) != bool(str(logo_source.get("file_id") or "").strip()):
+        return False
+    subtitle_plan = plan.get("subtitle_file") or ""
+    if not isinstance(subtitle_plan, str):
+        return False
+    if bool(subtitle_plan.strip()) != bool(
+        str(subtitle_source.get("file_id") or "").strip()
+    ):
+        return False
+    return True
+
+
 def plan_has_effective_operation(
     plan: dict[str, Any] | None,
     *,
@@ -323,6 +449,32 @@ def manual_plan_has_effect(
         plan,
         source_duration_ms=source_duration_ms,
         split_ranges=split_ranges,
+    )
+
+
+def split_plan_has_manual_conflict(
+    plan: dict[str, Any] | None,
+    *,
+    source_duration_ms: int = 0,
+    concat_sources: Iterable[Any] | None = None,
+    logo_source: Any = None,
+    subtitle_source: Any = None,
+) -> bool:
+    """Reject a Split payload that also carries an independent manual edit.
+
+    Split is a separate execution plan: it keeps source audio and only emits
+    the selected ranges.  Manual operations/assets must be explicitly reset
+    before entering that plan so neither the bot nor a forged worker payload
+    can silently combine two different products.
+    """
+
+    del source_duration_ms  # Split neutrality must never depend on probe rounding.
+    has_concat = _collection_has_any_item(concat_sources)
+    return bool(
+        not _is_neutral_plan_subset(plan, neutral_split_manual_plan())
+        or has_concat
+        or bool(logo_source)
+        or bool(subtitle_source)
     )
 
 
@@ -448,10 +600,11 @@ def normalize_manual_edit_plan(
     selected_after_removal_ms = end_ms - start_ms
     if remove_middle:
         selected_after_removal_ms -= int(remove_middle["end_ms"]) - int(remove_middle["start_ms"])
-    if (
-        fade_in_ms >= selected_after_removal_ms
-        or fade_out_ms >= selected_after_removal_ms
-        or fade_in_ms + fade_out_ms > selected_after_removal_ms
+    post_speed_duration_ms = max(1, int(round(selected_after_removal_ms / speed)))
+    if not concat_inputs and (
+        fade_in_ms >= post_speed_duration_ms
+        or fade_out_ms >= post_speed_duration_ms
+        or fade_in_ms + fade_out_ms > post_speed_duration_ms
     ):
         raise LocalVideoEditError("local_effect_duration_invalid")
     effects = {
@@ -498,6 +651,10 @@ def normalize_manual_edit_plan(
             "outline": outline,
             "font_path": str(text.get("font_path") or "").strip(),
         }
+        if not concat_inputs and not (
+            max(0, start) < min(post_speed_duration_ms, end)
+        ):
+            raise LocalVideoEditError("text_overlay_outside_output")
     logo = dict(raw.get("logo_overlay") or {})
     if logo:
         logo_path = str(logo.get("path") or "").strip()
@@ -523,6 +680,13 @@ def normalize_manual_edit_plan(
         validation = validate_srt_file(subtitle_file, workspace=workspace)
         if not validation.get("ok"):
             raise LocalVideoEditError(str(validation.get("reason") or "subtitle_invalid"))
+        if not concat_inputs and not any(
+            max(0, int(cue.get("start_ms") or 0))
+            < min(post_speed_duration_ms, int(cue.get("end_ms") or 0))
+            for cue in list(validation.get("cue_windows") or [])
+            if isinstance(cue, dict)
+        ):
+            raise LocalVideoEditError("subtitle_outside_output")
     if str(raw.get("output_format") or "mp4").lower() != "mp4":
         raise LocalVideoEditError("output_format_invalid")
     return {
@@ -548,14 +712,92 @@ def normalize_manual_edit_plan(
     }
 
 
-def expected_manual_duration_ms(plan: dict[str, Any]) -> int:
-    trim = dict(plan.get("trim") or {})
-    selected = max(0, int(trim.get("end_ms") or 0) - int(trim.get("start_ms") or 0))
-    remove_middle = dict(plan.get("remove_middle") or {})
+def expected_final_timeline_duration_ms(
+    plan: dict[str, Any] | None,
+    *,
+    concat_sources: Iterable[Any] | None = None,
+    source_duration_ms: int = 0,
+) -> int:
+    """Return the final post-trim/remove/concat/speed timeline duration.
+
+    Telegram stores appended clips as metadata records while the worker later
+    replaces them with bounded local paths.  Keeping this duration calculation
+    in one pure helper makes the intake UI and the FFmpeg contract agree before
+    any job is written.
+    """
+
+    current = dict(plan or {})
+    trim = current.get("trim") if isinstance(current.get("trim"), dict) else {}
+    start_ms = max(0, _integer(trim.get("start_ms"), 0))
+    end_ms = _integer(trim.get("end_ms"), 0)
+    if end_ms <= 0:
+        end_ms = max(start_ms, _integer(source_duration_ms, 0))
+    selected_ms = max(0, end_ms - start_ms)
+
+    remove_middle = (
+        current.get("remove_middle")
+        if isinstance(current.get("remove_middle"), dict)
+        else {}
+    )
     if remove_middle:
-        selected -= max(0, int(remove_middle.get("end_ms") or 0) - int(remove_middle.get("start_ms") or 0))
-    speed = max(0.01, float(plan.get("speed") or 1.0))
-    return int(round(selected / speed))
+        remove_start_ms = _integer(remove_middle.get("start_ms"), 0)
+        remove_end_ms = _integer(remove_middle.get("end_ms"), 0)
+        overlap_ms = max(
+            0,
+            min(end_ms, remove_end_ms) - max(start_ms, remove_start_ms),
+        )
+        selected_ms = max(0, selected_ms - overlap_ms)
+
+    appended_ms = 0
+    try:
+        items = list(concat_sources or [])
+    except TypeError:
+        items = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        metadata = (
+            item.get("metadata")
+            if isinstance(item.get("metadata"), dict)
+            else item.get("source_metadata")
+            if isinstance(item.get("source_metadata"), dict)
+            else {}
+        )
+        duration_ms = _integer(
+            metadata.get("duration_ms") or item.get("duration_ms"),
+            0,
+        )
+        if duration_ms <= 0:
+            duration_seconds = _number(
+                metadata.get("duration") or item.get("duration"),
+                0.0,
+            )
+            if not math.isfinite(duration_seconds) or duration_seconds <= 0:
+                duration_seconds = 0.0
+            duration_ms = int(
+                round(duration_seconds * 1000)
+            )
+        appended_ms += max(0, duration_ms)
+
+    speed = _number(current.get("speed"), 1.0)
+    if not math.isfinite(speed) or speed <= 0:
+        speed = 1.0
+    return max(0, int(round((selected_ms + appended_ms) / speed)))
+
+
+def expected_manual_duration_ms(
+    plan: dict[str, Any],
+    *,
+    concat_sources: Iterable[dict[str, Any]] | None = None,
+    source_duration_ms: int = 0,
+) -> int:
+    """Compatibility name for the authoritative final manual timeline."""
+
+    return expected_final_timeline_duration_ms(
+        plan,
+        concat_sources=concat_sources,
+        source_duration_ms=source_duration_ms,
+    )
 
 
 def required_optional_filters(
@@ -683,6 +925,7 @@ def validate_manual_edit_plan_contract(
     source_width: int = 0,
     source_height: int = 0,
     logo_source_present: bool = False,
+    concat_sources_present: bool = False,
 ) -> dict[str, Any]:
     """Validate plan shape before a Telegram job is written.
 
@@ -707,6 +950,11 @@ def validate_manual_edit_plan_contract(
         candidate["input_video"] = str(candidate.get("source") or "")
         candidate.pop("source", None)
     candidate["input_video"] = str(candidate.get("input_video") or "source.mp4")
+    if concat_sources_present and not candidate.get("concat_inputs"):
+        # Telegram admission stores appended media as file-id records.  One
+        # path-shaped placeholder preserves the pending-concat timeline rule;
+        # the worker replaces it with its bounded downloaded paths.
+        candidate["concat_inputs"] = ["concat-source.mp4"]
     # The worker downloads and validates the SRT inside its bounded workspace.
     # Do not require that worker-local path to exist during admission.
     subtitle_requested = bool(candidate.get("subtitle_file"))
@@ -945,13 +1193,14 @@ def build_manual_ffmpeg_command(
         filters.extend(["hflip", "vflip"])
     elif rotation == 270:
         filters.append("transpose=2")
+    output_width, output_height = (
+        (height, width) if rotation in {90, 270} else (width, height)
+    )
     if plan.get("flip") == "horizontal":
         filters.append("hflip")
     elif plan.get("flip") == "vertical":
         filters.append("vflip")
     speed = float(plan.get("speed") or 1.0)
-    if speed != 1.0:
-        filters.append(f"setpts=PTS/{speed:g}")
     expected_output_seconds = selected_seconds / max(0.01, speed)
     color = COLOR_PRESETS.get(str(plan.get("color_preset") or "keep"), "")
     if color:
@@ -961,7 +1210,7 @@ def build_manual_ffmpeg_command(
         filters.append(f"eq=brightness={(brightness_percent - 100) / 200:.3f}")
     quality = dict(plan.get("quality_filters") or {})
     if quality.get("denoise"):
-        filters.append("hqdn3d=1.5:1.5:6:6")
+        filters.append("hqdn3d=6:4:8:6")
     if quality.get("sharpen"):
         filters.append("unsharp=5:5:0.8:5:5:0.0")
     effects = dict(plan.get("local_effects") or {})
@@ -970,8 +1219,13 @@ def build_manual_ffmpeg_command(
         filters.append(
             "zoompan=z='min(max(zoom,pzoom)+0.0005,1.08)':"
             "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-            f"d=1:s={width}x{height}:fps={fps:g}"
+            f"d=1:s={output_width}x{output_height}:fps={fps:g}"
         )
+    # ``zoompan`` regenerates frame timestamps.  Apply the requested speed
+    # afterwards so slow zoom cannot silently cancel or distort the timeline.
+    # Timed filters (fade, text and subtitles) must remain after this stage.
+    if speed != 1.0:
+        filters.append(f"setpts=PTS/{speed:g}")
     if effects.get("vignette"):
         filters.append("vignette=PI/5")
     fade_in_seconds = int(effects.get("fade_in_ms") or 0) / 1000
@@ -995,7 +1249,7 @@ def build_manual_ffmpeg_command(
     filters.append("format=yuv420p")
     base_filter = ",".join(item for item in filters if item)
     if logo:
-        logo_frame_width = height if rotation in {90, 270} else width
+        logo_frame_width = output_width
         logo_width = max(
             2,
             int(round(logo_frame_width * float(logo.get("scale") or 0.12))) // 2 * 2,
@@ -1401,15 +1655,30 @@ def execute_manual_edit(
         normalized["remove_middle"] = {}
     concat_sources = [normalized["input_video"], *normalized.get("concat_inputs", [])]
     if len(concat_sources) > 1:
-        source, source_probe = _normalize_concat_inputs(
-            concat_sources,
-            workspace=workspace_path,
-            ffmpeg_path=ffmpeg,
-            ffprobe_path=probe_bin,
-            timeout=timeout,
-        )
-        normalized["input_video"] = source
-        normalized["trim"] = {"start_ms": 0, "end_ms": int(source_probe.get("duration_ms") or 0)}
+        try:
+            source, source_probe = _normalize_concat_inputs(
+                concat_sources,
+                workspace=workspace_path,
+                ffmpeg_path=ffmpeg,
+                ffprobe_path=probe_bin,
+                timeout=timeout,
+            )
+            normalized["input_video"] = source
+            normalized["concat_inputs"] = []
+            normalized["trim"] = {
+                "start_ms": 0,
+                "end_ms": int(source_probe.get("duration_ms") or 0),
+            }
+            normalized = normalize_manual_edit_plan(
+                normalized,
+                source_duration_ms=int(source_probe.get("duration_ms") or 0),
+                workspace=workspace_path,
+            )
+        except Exception:
+            if prepared_primary is not None and prepared_primary.exists():
+                prepared_primary.unlink()
+                prepared_primary = None
+            raise
     if progress:
         progress({"stage": "processing_video", "processed": 0, "total": 1})
     try:
@@ -1572,14 +1841,39 @@ def public_plan_summary(
         lines.append("Lật ngang" if plan["flip"] == "horizontal" else "Lật dọc")
     if float(plan.get("speed") or 1.0) != 1.0:
         lines.append(f"Tốc độ {float(plan['speed']):g}x")
-    if float(plan.get("volume") or 1.0) != 1.0:
-        lines.append("Tắt tiếng" if float(plan.get("volume") or 0) == 0 else f"Âm lượng {float(plan['volume']) * 100:g}%")
+    volume_value = plan.get("volume")
+    volume = 1.0 if volume_value is None else float(volume_value)
+    if volume != 1.0:
+        lines.append("Tắt tiếng" if volume == 0 else f"Âm lượng {volume * 100:g}%")
     if int(plan.get("brightness_percent") or 100) != 100:
         lines.append(f"Độ sáng {int(plan['brightness_percent'])}%")
     if plan.get("text_overlay"):
         lines.append("Chèn chữ")
     if plan.get("logo_overlay"):
-        lines.append("Chèn logo")
+        logo = dict(plan.get("logo_overlay") or {})
+        position_labels = {
+            "top_left": "Trên trái",
+            "top_center": "Trên giữa",
+            "top_right": "Trên phải",
+            "center_left": "Giữa trái",
+            "center": "Chính giữa",
+            "center_right": "Giữa phải",
+            "bottom_left": "Dưới trái",
+            "bottom_center": "Dưới giữa",
+            "bottom_right": "Dưới phải",
+        }
+        position = position_labels.get(
+            str(logo.get("position") or "top_right"),
+            "Trên phải",
+        )
+        try:
+            opacity = float(logo.get("opacity", 1.0))
+        except (TypeError, ValueError, OverflowError):
+            opacity = 1.0
+        if not math.isfinite(opacity):
+            opacity = 1.0
+        opacity_percent = int(round(max(0.0, min(1.0, opacity)) * 100))
+        lines.append(f"Logo / watermark · {position} · {opacity_percent}%")
     if plan.get("subtitle_file"):
         lines.append("Chèn phụ đề SRT")
     if str(plan.get("color_preset") or "keep") != "keep":
@@ -1591,7 +1885,7 @@ def public_plan_summary(
             "high_contrast": "Tương phản cao",
             "black_white": "Đen trắng",
         }
-        lines.append("Màu: " + color_labels.get(str(plan.get("color_preset")), "Cấu hình màu local"))
+        lines.append("Màu: " + color_labels.get(str(plan.get("color_preset")), "Cấu hình màu cục bộ"))
     if plan.get("remove_middle"):
         lines.append("Bỏ đoạn giữa và nối lại thành một MP4")
     quality = dict(plan.get("quality_filters") or {})

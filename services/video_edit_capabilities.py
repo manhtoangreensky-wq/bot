@@ -605,7 +605,7 @@ def compile_local_intent(
     )
     if not normalized:
         base["manual_edit_plan"] = deepcopy(existing_plan)
-        base["message_vi"] = "Hãy mô tả thao tác local như làm sáng, làm rõ, giảm nhiễu hoặc video dọc TikTok; chưa tạo tác vụ và chưa trừ Xu."
+        base["message_vi"] = "Hãy mô tả thao tác cục bộ như làm sáng, làm rõ, giảm nhiễu hoặc video dọc TikTok; chưa tạo tác vụ và chưa trừ Xu."
         return base
 
     unsupported = [term for term in _UNSUPPORTED_INTENT_TERMS if term in normalized]
@@ -614,9 +614,9 @@ def compile_local_intent(
         base["reason"] = "local_capability_unavailable"
         base["manual_edit_plan"] = deepcopy(existing_plan)
         base["message_vi"] = (
-            "Yêu cầu này cần năng lực chưa có trong bộ chỉnh sửa local ("
+            "Yêu cầu này cần năng lực chưa có trong bộ chỉnh sửa cục bộ ("
             + ", ".join(unsupported)
-            + "). Chưa tạo tác vụ, chưa gọi provider và chưa trừ Xu. "
+            + "). Chưa tạo tác vụ, chưa gọi dịch vụ bên ngoài và chưa trừ Xu. "
             "Bạn có thể chọn làm sáng, làm rõ, giảm nhiễu, cân bằng âm lượng hoặc cắt khung 9:16."
         )
         return base
@@ -630,7 +630,7 @@ def compile_local_intent(
         base["reason"] = "no_local_capability_match"
         base["manual_edit_plan"] = deepcopy(existing_plan)
         base["message_vi"] = (
-            "Chưa nhận ra thao tác local từ yêu cầu này. Hãy thử làm sáng, làm rõ, giảm nhiễu, "
+            "Chưa nhận ra thao tác cục bộ từ yêu cầu này. Hãy thử làm sáng, làm rõ, giảm nhiễu, "
             "cân bằng âm lượng hoặc video dọc TikTok; chưa tạo tác vụ và chưa trừ Xu."
         )
         return base
@@ -658,7 +658,7 @@ def compile_local_intent(
             # the result directly to the canonical editor state.
             "manual_edit_plan": deepcopy(compiled),
             "message_vi": (
-                "Đã lập kế hoạch chỉnh sửa local: "
+                "Đã lập kế hoạch chỉnh sửa cục bộ: "
                 + ", ".join(str(capability(key).get("public_name") or key) for key in selected)
                 + ". 0 Xu; chưa tạo tác vụ cho tới khi bạn xem lại và xác nhận."
             ),
@@ -741,7 +741,7 @@ def local_upgrade_suggestions(metadata: dict[str, Any] | None) -> list[dict[str,
         suggestions.append(
             {
                 "feature_key": "enhance_frame_interpolation",
-                "reason": f"FPS nguồn là {fps:.2f}; có thể cân nhắc làm mượt khi runtime hỗ trợ.",
+                "reason": f"Tốc độ khung hình nguồn là {fps:.2f}; có thể cân nhắc làm mượt khi hệ thống hỗ trợ.",
                 "risk": "Hiện chưa mở vì nội suy có thể tạo bóng ma ở chuyển động nhanh.",
                 "selected": False,
                 "cost_xu": 0,
@@ -753,7 +753,7 @@ def local_upgrade_suggestions(metadata: dict[str, Any] | None) -> list[dict[str,
             suggestions.append(
                 {
                     "feature_key": "enhance_denoise",
-                    "reason": f"Bitrate ước tính từ file là {estimated_mbps:.2f} Mbps; nên kiểm tra nén vỡ trước khi nâng cấp.",
+                    "reason": f"Tốc độ dữ liệu ước tính từ tệp là {estimated_mbps:.2f} Mbps; nên kiểm tra nén vỡ trước khi nâng cấp.",
                     "risk": "Chỉ là dấu hiệu từ dung lượng/thời lượng, không khẳng định video có nhiễu.",
                     "selected": False,
                     "cost_xu": 0,
