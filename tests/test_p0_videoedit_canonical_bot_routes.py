@@ -821,7 +821,9 @@ def test_lane_entry_commits_state_only_after_telegram_render(callback: str, edit
 
 def test_videoedit_callback_answers_exactly_at_the_final_route_not_before_validation() -> None:
     callback = _function_source("handle_video_editor_callback")
-    action_parse = callback.index("parts = str(query.data or \"\").split")
+    action_parse = callback.index(
+        "parts = str(callback_data_override or query.data or \"\").split"
+    )
     assert "await query.answer()" not in callback[:action_parse]
 
     safe_render = _function_source("safe_edit_or_send")
