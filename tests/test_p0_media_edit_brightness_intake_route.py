@@ -151,7 +151,11 @@ def test_video_brightness_is_visible_and_reaches_ffmpeg() -> None:
 
 def test_video_edit_callback_answer_failure_cannot_surface_generic_x() -> None:
     callback = _function_source("handle_video_editor_callback")
-    prologue = callback[: callback.index('    parts = str(query.data or "").split')]
+    prologue = callback[
+        : callback.index(
+            '    parts = str(callback_data_override or query.data or "").split'
+        )
+    ]
     assert "await query.answer()" not in prologue
     safe_render = _function_source("safe_edit_or_send")
     assert "await query.answer()" in safe_render

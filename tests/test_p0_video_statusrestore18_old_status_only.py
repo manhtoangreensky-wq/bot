@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -483,6 +484,14 @@ def _submit_handler_namespace(
         "video_tail9_submit_blocker_keyboard": lambda: "redundant-keyboard",
         "now_text_safe": lambda: "2026-07-27T16:00:00+07:00",
         "VIDEO_TAIL9_STATE_KEY": "video_tail9",
+        "_VIDEO_EDIT_CALLBACK_TRANSACTIONAL": ContextVar(
+            "statusrestore18_video_edit_callback_transactional",
+            default=False,
+        ),
+        "_VIDEO_EDIT_CALLBACK_ANSWERED": ContextVar(
+            "statusrestore18_video_edit_callback_answered",
+            default=False,
+        ),
         "logger": SimpleNamespace(
             warning=lambda *_args, **_kwargs: None,
             exception=lambda *_args, **_kwargs: None,

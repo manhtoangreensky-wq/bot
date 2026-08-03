@@ -67263,9 +67263,9 @@ def video_public_callback_failure_guard(callback_handler):
     prevents an exception from escaping into the global generic-X error handler.
     """
 
-    async def guarded(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def guarded(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         try:
-            return await callback_handler(update, context)
+            return await callback_handler(update, context, *args, **kwargs)
         except ApplicationHandlerStop:
             raise
         except Exception:
@@ -67299,7 +67299,7 @@ def video_public_callback_failure_guard(callback_handler):
 def video_editor_callback_state_guard(callback_handler):
     """Rollback only this callback's exact write when Telegram rendering fails."""
 
-    async def guarded(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def guarded(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         query = getattr(update, "callback_query", None)
         user_id = safe_int(getattr(getattr(query, "from_user", None), "id", 0), 0)
         state_key = video_editor_pending_key(user_id) if user_id else ""
@@ -67309,9 +67309,12 @@ def video_editor_callback_state_guard(callback_handler):
         )
         write_token = _VIDEO_EDITOR_STATE_WRITE.set(None)
         answered_token = _VIDEO_EDIT_CALLBACK_ANSWERED.set(False)
-        transactional_token = _VIDEO_EDIT_CALLBACK_TRANSACTIONAL.set(False)
+        callback_data_override = str(kwargs.get("callback_data_override") or "")
+        transactional_token = _VIDEO_EDIT_CALLBACK_TRANSACTIONAL.set(
+            callback_data_override.startswith("videoedit|")
+        )
         try:
-            return await callback_handler(update, context)
+            return await callback_handler(update, context, *args, **kwargs)
         except ApplicationHandlerStop:
             raise
         except Exception:
@@ -91356,27 +91359,27 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
     if not claimed:
         return
     if owner == "video_edit":
-        expected_host = video_editor_state_snapshot(host)
-        claimed_fields = dict(expected_host)
-        claimed_step = str(claimed_fields.pop("step", "") or "review")
-        claimed_fields.pop("created_at_ts", None)
-        claimed_fields[VIDEO_TAIL9_STATE_KEY] = tail
-        committed, claimed_host = compare_and_set_video_editor_pending(
-            uid,
-            expected_host,
-            claimed_step,
-            **claimed_fields,
-        )
-        if not committed:
-            await rerender_video_editor_after_stale_commit(
-                query,
-                claimed_host,
-                get_user_language(uid) or "vi",
-            )
-            return True
         transactional_token = _VIDEO_EDIT_CALLBACK_TRANSACTIONAL.set(True)
         answered_token = _VIDEO_EDIT_CALLBACK_ANSWERED.set(False)
         try:
+            expected_host = video_editor_state_snapshot(host)
+            claimed_fields = dict(expected_host)
+            claimed_step = str(claimed_fields.pop("step", "") or "review")
+            claimed_fields.pop("created_at_ts", None)
+            claimed_fields[VIDEO_TAIL9_STATE_KEY] = tail
+            committed, claimed_host = compare_and_set_video_editor_pending(
+                uid,
+                expected_host,
+                claimed_step,
+                **claimed_fields,
+            )
+            if not committed:
+                await rerender_video_editor_after_stale_commit(
+                    query,
+                    claimed_host,
+                    get_user_language(uid) or "vi",
+                )
+                return True
             try:
                 return await video_edit_legacy_tail_compatibility(
                     query, uid, tail, claimed_host
@@ -92902,6 +92905,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             await query.answer()
             return await safe_edit_or_send(query, VIDEO_PRODUCT_REGISTRY[product_id]["public_guard_message"])
         prefix, legacy_action = route.split("|", 1)
+        if prefix == "videoedit":
+            return await handle_video_editor_callback(
+                update,
+                context,
+                callback_data_override=route,
+            )
         query.data = route
         if prefix == "menu":
             await query.answer()
@@ -92913,8 +92922,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             return await handle_self_scene_ai_callback(update, context)
         if prefix == "videoref":
             return await handle_video_reference_callback(update, context)
-        if prefix == "videoedit":
-            return await handle_video_editor_callback(update, context)
     if action == "idea_library":
         requested_product = str(value or product_id).strip()
         if requested_product != product_id or requested_product not in VIDEO_IDEA_PRODUCT_LANE_PRODUCTS:
@@ -229337,11 +229344,16 @@ async def rerender_video_editor_after_stale_commit(query, state: dict, lang: str
 
 @video_public_callback_failure_guard
 @video_editor_callback_state_guard
-async def handle_video_editor_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_video_editor_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    callback_data_override: str = "",
+):
     query = update.callback_query
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
-    parts = str(query.data or "").split("|")
+    parts = str(callback_data_override or query.data or "").split("|")
     raw_action = parts[1] if len(parts) > 1 else "menu"
     if raw_action == "hub":
         def commit_hub_entry():
