@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import local_worker
 import pytest
 from services import frame_video_public_seam as seam
+from services import product_progress_status as progress
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +63,110 @@ def _write_png(path: Path, rgb: tuple[int, int, int]) -> None:
 
 def test_29o_frame_public_seam_module_exists() -> None:
     assert importlib.util.find_spec("services.frame_video_public_seam") is not None
+
+
+def _delivered_frame_progress_job() -> dict:
+    return {
+        "job_id": "fv17857497320001",
+        "status": "completed",
+        "progress_percent": 100,
+        "image_count": 8,
+        "output_size_bytes": 1_303_632,
+        "output_sha256": "a" * 64,
+        "delivery_status": "sent",
+        "delivery_message_id": "29001",
+        "delivery_file_id": "frame-file-id-must-not-leak",
+        "receipt_recorded": 1,
+        "charge_state": "charged",
+        "charge_amount_planned_xu": 0,
+        "wallet_charge_amount_xu": 0,
+        "delivered_at": "2026-08-03 09:35:58",
+        "ffprobe": {
+            "ok": True,
+            "full_decode": True,
+            "duration_seconds": 40.52,
+            "size_bytes": 1_303_632,
+            "video_stream_count": 1,
+            "audio_stream_count": 0,
+            "video_codec": "h264",
+            "width": 1080,
+            "height": 1920,
+            "artifact_sha256": "a" * 64,
+        },
+    }
+
+
+def test_29o_delivered_worker_receipt_renders_full_green_terminal() -> None:
+    state = progress.product_progress_stage_from_job(
+        "frame_video",
+        _delivered_frame_progress_job(),
+    )
+
+    assert state["terminal_state"] == "delivered"
+    assert state["current_stage"] == "delivered"
+    assert state["percent"] == 100
+
+
+def test_29o_delivered_frame_panel_has_safe_complete_receipt() -> None:
+    renderer = getattr(progress, "frame_video_terminal_receipt_summary", None)
+    assert callable(renderer)
+
+    text = renderer(
+        _delivered_frame_progress_job(),
+        lang="vi",
+        account_balance_xu=9_876,
+    )
+    assert "🧾 <b>Chi tiết kết quả</b>" in text
+    assert "8 ảnh" in text
+    assert "41 giây" in text
+    assert "1080 × 1920" in text
+    assert "1.2 MB" in text
+    assert "MP4 · H.264" in text
+    assert "9.876 Xu" in text
+    assert "Đã gửi video" in text
+    assert "frame-file-id-must-not-leak" not in text
+    assert "worker" not in text.lower()
+    status_source = _function_source(
+        REPO_ROOT / "bot.py",
+        "product_progress_status_from_job_text",
+    )
+    assert "frame_video_terminal_receipt_summary" in status_source
+
+
+def test_29o_terminal_receipt_balance_lookup_is_read_only() -> None:
+    status_source = _function_source(
+        REPO_ROOT / "bot.py",
+        "product_progress_status_from_job_text",
+    )
+
+    assert "db_connect_readonly()" in status_source
+    assert "get_user(" not in status_source
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("receipt_recorded", 0),
+        ("delivery_file_id", ""),
+        ("charge_state", "charge_pending"),
+        ("output_size_bytes", 1_303_633),
+        ("output_sha256", "b" * 64),
+        ("ffprobe.full_decode", False),
+    ),
+)
+def test_29o_frame_terminal_panel_fails_closed_without_complete_receipt(
+    field: str,
+    value: object,
+) -> None:
+    job = _delivered_frame_progress_job()
+    if field.startswith("ffprobe."):
+        job["ffprobe"][field.split(".", 1)[1]] = value
+    else:
+        job[field] = value
+
+    state = progress.product_progress_stage_from_job("frame_video", job)
+    assert state["terminal_state"] != "delivered"
+    assert progress.frame_video_terminal_receipt_summary(job) == ""
 
 
 def test_29o_public_seam_is_default_off_and_final_only() -> None:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import math
 import re
 import time
 from datetime import datetime
@@ -510,6 +511,14 @@ def _positive_int(job: dict[str, Any], *keys: str) -> int:
     return 0
 
 
+def _positive_float(value: Any) -> float:
+    try:
+        parsed = float(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    return parsed if math.isfinite(parsed) and parsed > 0 else 0.0
+
+
 def _music_raw_audio_url_present(job: dict[str, Any]) -> bool:
     if _first_text(
         job,
@@ -941,12 +950,117 @@ def job_has_final_artifact(job: dict[str, Any] | None = None) -> bool:
     return False
 
 
+def frame_video_terminal_receipt_evidence(
+    job: dict[str, Any] | None = None,
+) -> bool:
+    """Recognize only the fully attested durable Frame delivery shape."""
+
+    current = dict(job or {})
+    probe = current.get("ffprobe")
+    if not isinstance(probe, dict):
+        return False
+    status = str(current.get("status") or "").strip().lower()
+    delivery_status = str(current.get("delivery_status") or "").strip().lower()
+    charge_state = str(current.get("charge_state") or "").strip().lower()
+    output_size = _positive_int(current, "output_size_bytes")
+    probe_size = _positive_int(probe, "size_bytes")
+    output_sha = str(current.get("output_sha256") or "").strip().lower()
+    probe_sha = str(probe.get("artifact_sha256") or "").strip().lower()
+    return bool(
+        status in {"completed", "complete", "success", "succeeded", "delivered"}
+        and delivery_status == "sent"
+        and charge_state == "charged"
+        and _as_bool(current.get("receipt_recorded"))
+        and _first_text(current, "delivery_message_id")
+        and _first_text(current, "delivery_file_id")
+        and _first_text(current, "delivered_at")
+        and output_size > 0
+        and probe_size == output_size
+        and _as_bool(probe.get("ok"))
+        and _as_bool(probe.get("full_decode"))
+        and _positive_int(probe, "video_stream_count") > 0
+        and _positive_int(probe, "width") > 0
+        and _positive_int(probe, "height") > 0
+        and _positive_float(probe.get("duration_seconds")) > 0
+        and bool(re.fullmatch(r"[0-9a-f]{64}", output_sha))
+        and output_sha == probe_sha
+    )
+
+
 def _video_human_elapsed(seconds: Any) -> str:
     total = max(0, _as_int(seconds, 0))
     minutes, secs = divmod(total, 60)
     if minutes:
         return f"{minutes} phút {secs:02d} giây"
     return f"{secs} giây"
+
+
+def frame_video_terminal_receipt_summary(
+    job: dict[str, Any] | None = None,
+    *,
+    lang: str = "vi",
+    account_balance_xu: int | None = None,
+) -> str:
+    """Render a public, path-free receipt from the validated Frame artifact."""
+
+    current = dict(job or {})
+    if not frame_video_terminal_receipt_evidence(current):
+        return ""
+    probe = dict(current.get("ffprobe") or {})
+    image_count = max(0, _as_int(current.get("image_count"), 0))
+    if not image_count:
+        manifest = current.get("image_manifest")
+        image_count = len(manifest) if isinstance(manifest, list) else 0
+    duration = max(1, int(round(_positive_float(probe.get("duration_seconds")))))
+    width = _positive_int(probe, "width")
+    height = _positive_int(probe, "height")
+    size_mb = _positive_int(current, "output_size_bytes") / (1024 * 1024)
+    codec = str(probe.get("video_codec") or "").strip().lower()
+    codec_label = {
+        "h264": "H.264",
+        "hevc": "H.265 / HEVC",
+        "h265": "H.265 / HEVC",
+        "vp9": "VP9",
+        "av1": "AV1",
+    }.get(codec, codec.upper() or "Video")
+    planned_xu = max(0, _as_int(current.get("charge_amount_planned_xu"), 0))
+    charged_xu = max(0, _as_int(current.get("charged_xu"), 0))
+
+    def _xu(value: int) -> str:
+        return f"{max(0, int(value or 0)):,}".replace(",", ".")
+
+    if str(lang or "vi").strip().lower() != "vi":
+        lines = [
+            "🧾 <b>Result details</b>",
+            "• Product: <b>Image slideshow video</b>",
+            f"• Images: <b>{image_count}</b>",
+            f"• Duration: <b>{duration} seconds</b>",
+            f"• Resolution: <b>{width} × {height}</b>",
+            f"• File size: <b>{size_mb:.1f} MB</b>",
+            f"• Format: <b>MP4 · {html.escape(codec_label)}</b>",
+            f"• Price: <b>{_xu(planned_xu)} Xu</b>",
+            f"• Charged: <b>{_xu(charged_xu)} Xu</b>",
+        ]
+        if account_balance_xu is not None:
+            lines.append(f"• Account balance: <b>{_xu(account_balance_xu)} Xu</b>")
+        lines.append("• Status: <b>Video delivered</b>")
+        return "\n".join(lines)
+
+    lines = [
+        "🧾 <b>Chi tiết kết quả</b>",
+        "• Sản phẩm: <b>Video ghép từ ảnh</b>",
+        f"• Số ảnh: <b>{image_count} ảnh</b>",
+        f"• Thời lượng: <b>{_video_human_elapsed(duration)}</b>",
+        f"• Độ phân giải: <b>{width} × {height}</b>",
+        f"• Dung lượng: <b>{size_mb:.1f} MB</b>",
+        f"• Định dạng: <b>MP4 · {html.escape(codec_label)}</b>",
+        f"• Giá: <b>{_xu(planned_xu)} Xu</b>",
+        f"• Đã trừ: <b>{_xu(charged_xu)} Xu</b>",
+    ]
+    if account_balance_xu is not None:
+        lines.append(f"• Tài khoản còn: <b>{_xu(account_balance_xu)} Xu</b>")
+    lines.append("• Trạng thái: <b>Đã gửi video</b>")
+    return "\n".join(lines)
 
 
 def _video_epoch_from_value(value: Any) -> float:
@@ -1400,6 +1514,9 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
         or job.get("final_mp4_delivered")
         or job.get("delivery_succeeded")
     )
+    if canonical == "frame_video" and frame_video_terminal_receipt_evidence(job):
+        has_final_artifact = True
+        has_delivery = True
     music_artifact_waiting = bool(
         canonical in {"music_bg", "music_song"}
         and not bool(job.get("terminal_after_wait_exhausted"))

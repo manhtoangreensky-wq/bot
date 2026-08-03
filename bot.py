@@ -8632,7 +8632,7 @@ def product_progress_status_from_job_text(product_type: str = "", job: dict | No
         )
         return music_progress_missing_job_status_text(str(public_id or job_id or ""), lang)
     state = product_progress_state_from_job(product_type, current)
-    return product_progress_status_text(
+    text = product_progress_status_text(
         state.get("product_type") or product_type,
         str(public_id or ""),
         str(state.get("current_stage") or ""),
@@ -8642,6 +8642,38 @@ def product_progress_status_from_job_text(product_type: str = "", job: dict | No
         completed_steps=state.get("completed_steps"),
         status_override=str(state.get("status_text") or ""),
     )
+    if (
+        product_progress_status.normalize_product_type(product_type) == "frame_video"
+        and product_progress_status.frame_video_terminal_receipt_evidence(current)
+    ):
+        account_balance_xu = None
+        balance_conn = None
+        receipt_user_id = str(current.get("user_id") or "").strip()
+        try:
+            if receipt_user_id:
+                balance_conn = db_connect_readonly()
+                balance_row = balance_conn.execute(
+                    "SELECT credits FROM users WHERE user_id=? LIMIT 1",
+                    (receipt_user_id,),
+                ).fetchone()
+                if balance_row:
+                    account_balance_xu = int(balance_row[0] or 0)
+        except (OSError, TypeError, ValueError, sqlite3.Error):
+            account_balance_xu = None
+        finally:
+            if balance_conn is not None:
+                balance_conn.close()
+        receipt = product_progress_status.frame_video_terminal_receipt_summary(
+            {
+                **current,
+                "charged_xu": int(current.get("wallet_charge_amount_xu") or 0),
+            },
+            lang=lang,
+            account_balance_xu=account_balance_xu,
+        )
+        if receipt:
+            text = f"{text}\n\n{receipt}"
+    return text
 
 
 def progress_auto_refresh_key(product_type: str = "", job_id: str = "") -> str:
@@ -150584,6 +150616,13 @@ def frame_video_job_status_text(job: dict) -> str:
         elif worker_status == "queued" or status in {"queued", "waiting_worker"}:
             status = "waiting_worker"
             progress_percent = max(progress_percent, 10)
+    if status in {"completed", "succeeded", "success"}:
+        current = {**job, "status": status, "progress_percent": progress_percent}
+        return product_progress_status_from_job_text(
+            "frame_video",
+            current,
+            str(job.get("job_id") or ""),
+        )
     stage = {
         "received_assets": "received_images",
         "planning": "preparing_layout",
