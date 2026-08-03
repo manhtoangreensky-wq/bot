@@ -64,7 +64,10 @@ from services.video_local_validation import (
     ALLOWED_SUBTITLE_EXTENSIONS,
 )
 from services.video_smart_splitter import SplitRange
-from services import frame_video_commercial, frame_video_runtime, video_ai_edit_provider, video_ai_edit_status, video_ai_edit_validation, video_editengine1, video_local_validation
+from services import frame_video_commercial, frame_video_public_seam, frame_video_runtime, video_ai_edit_provider, video_ai_edit_status, video_ai_edit_validation, video_editengine1, video_local_validation
+
+
+_TELEGRAM_DEFAULT_URLOPEN = urllib.request.urlopen
 from services import product_video_public_seam
 
 
@@ -100,6 +103,34 @@ def env_int(name: str, default: int) -> int:
         return int(str(os.environ.get(name, str(default)) or str(default)).strip())
     except Exception:
         return int(default)
+
+
+def telegram_api_root(environ=None) -> str:
+    return frame_video_public_seam.frame_video_telegram_api_root(environ)
+
+
+def telegram_api_method_url(method: str, *, token: str = "", environ=None) -> str:
+    return frame_video_public_seam.frame_video_telegram_api_method_url(
+        method,
+        token=token or TELEGRAM_BOT_TOKEN,
+        environ=environ,
+    )
+
+
+def telegram_api_proxy_headers(environ=None) -> dict[str, str]:
+    return frame_video_public_seam.frame_video_telegram_api_proxy_headers(environ)
+
+
+def telegram_file_download_url(file_path: str, *, token: str = "", environ=None) -> str:
+    return frame_video_public_seam.frame_video_telegram_file_download_url(
+        file_path,
+        token=token or TELEGRAM_BOT_TOKEN,
+        environ=environ,
+    )
+
+
+def frame_video_telegram_input_limit_bytes(environ=None) -> int:
+    return frame_video_public_seam.frame_video_telegram_input_limit_bytes(environ)
 
 
 def normalize_base_url(value: str) -> str:
@@ -186,6 +217,8 @@ def local_worker_heartbeat_payload(*, last_error: str = "", queue_depth: int = 0
     return {
         "heartbeat_contract_version": 1,
         "worker_id": LOCAL_WORKER_ID,
+        "worker_sha": local_worker_runtime_sha(),
+        "frame_video_engine_flags": frame_video_public_seam.frame_video_worker_flag_snapshot(os.environ),
         "worker_owner": VIDEO_EDIT_WORKER_OWNER,
         "engine_route": VIDEO_EDIT_ENGINE_ROUTE,
         # This worker executes both canonical local-edit and frame-video jobs.
@@ -327,6 +360,33 @@ def local_ffmpeg_path() -> str:
     return shutil.which("ffmpeg") or LOCAL_FFMPEG_PATH
 
 
+def local_worker_runtime_sha() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=SCRIPT_DIR,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        value = str(result.stdout or "").strip()
+        if result.returncode == 0 and value:
+            return value
+    except Exception:
+        pass
+    for name in (
+        "FRAME_VIDEO_WORKER_SHA",
+        "RAILWAY_GIT_COMMIT_SHA",
+        "GIT_COMMIT_SHA",
+        "SOURCE_VERSION",
+    ):
+        value = str(os.environ.get(name) or "").strip()
+        if value:
+            return value
+    return "local"
+
+
 def run_ffmpeg_health(job: dict) -> None:
     job_id = job.get("id")
     if not LOCAL_FFMPEG_PATH:
@@ -358,36 +418,103 @@ def run_ffmpeg_health(job: dict) -> None:
         update_job(job_id, "failed", line or f"ffmpeg returned code {result.returncode}")
 
 
+def telegram_open_no_redirect(request, timeout):
+    injected_urlopen = urllib.request.urlopen
+    default_urlopen = globals().get("_TELEGRAM_DEFAULT_URLOPEN")
+    if default_urlopen is not None and injected_urlopen is not default_urlopen:
+        return injected_urlopen(request, timeout=timeout)
+
+    class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    opener = urllib.request.build_opener(NoRedirectHandler())
+    return opener.open(request, timeout=timeout)
+
+
 def telegram_json(method: str, payload: dict | None = None, timeout: int = 30) -> dict:
     if not TELEGRAM_BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN missing")
     data = None
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        **telegram_api_proxy_headers(),
+    }
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{method}", data=data, headers=headers, method="POST")
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        body = response.read().decode("utf-8", errors="replace")
-        return json.loads(body or "{}")
+    request = urllib.request.Request(
+        telegram_api_method_url(method),
+        data=data,
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with telegram_open_no_redirect(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"telegram_api_http_{int(exc.code or 0)}") from None
+    except (TimeoutError, socket.timeout, urllib.error.URLError, OSError):
+        raise RuntimeError("telegram_api_network") from None
+    try:
+        parsed = json.loads(body or "{}")
+    except (TypeError, ValueError):
+        raise RuntimeError("telegram_api_invalid_json") from None
+    if not isinstance(parsed, dict):
+        raise RuntimeError("telegram_api_invalid_json") from None
+    return parsed
 
 
-def telegram_download_file(file_id: str, destination: str, max_bytes: int = 20 * 1024 * 1024) -> None:
+def telegram_download_file(
+    file_id: str,
+    destination: str,
+    max_bytes: int = 20 * 1024 * 1024,
+) -> None:
     data = telegram_json("getFile", {"file_id": file_id}, timeout=30)
-    file_path = ((data.get("result") or {}).get("file_path") or "").strip()
-    if not data.get("ok") or not file_path:
+    result = data.get("result") if isinstance(data, dict) else {}
+    result = result if isinstance(result, dict) else {}
+    file_path = str(result.get("file_path") or "").strip()
+    if not isinstance(data, dict) or data.get("ok") is not True or not file_path:
         raise RuntimeError("telegram_get_file_failed")
-    url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
+    try:
+        url = telegram_file_download_url(file_path)
+    except ValueError as exc:
+        raise RuntimeError("telegram_file_path_invalid") from exc
+    limit = max(1, int(max_bytes or frame_video_telegram_input_limit_bytes()))
     downloaded = 0
-    with urllib.request.urlopen(url, timeout=60) as response, open(destination, "wb") as handle:
-        while True:
-            chunk = response.read(1024 * 256)
-            if not chunk:
-                break
-            downloaded += len(chunk)
-            if downloaded > max_bytes:
-                raise RuntimeError("telegram_file_too_large")
-            handle.write(chunk)
+    request = urllib.request.Request(url, headers=telegram_api_proxy_headers())
+    timeout = max(60, min(7200, env_int("FRAME_VIDEO_TELEGRAM_DOWNLOAD_TIMEOUT_SECONDS", 1800)))
+
+    def remove_partial() -> None:
+        try:
+            if os.path.exists(destination):
+                os.remove(destination)
+        except OSError:
+            pass
+
+    try:
+        with telegram_open_no_redirect(request, timeout=timeout) as response, open(destination, "wb") as handle:
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                downloaded += len(chunk)
+                if downloaded > limit:
+                    raise RuntimeError("telegram_file_too_large")
+                handle.write(chunk)
+    except RuntimeError:
+        remove_partial()
+        raise
+    except urllib.error.HTTPError as exc:
+        remove_partial()
+        raise RuntimeError(f"telegram_download_http_{int(exc.code or 0)}") from None
+    except (TimeoutError, socket.timeout, urllib.error.URLError):
+        remove_partial()
+        raise RuntimeError("telegram_download_network") from None
+    except OSError:
+        remove_partial()
+        raise RuntimeError("telegram_download_io") from None
     if downloaded <= 0:
+        remove_partial()
         raise RuntimeError("telegram_download_empty")
 
 
@@ -477,11 +604,17 @@ def telegram_send_video_receipt(
     caption: str = "",
     reply_markup: dict | None = None,
     filename: str = "",
+    max_bytes: int = 0,
+    prefer_document: bool = False,
 ) -> dict:
     if not TELEGRAM_BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN missing")
-    with open(video_path, "rb") as handle:
-        video_bytes = handle.read()
+    if not os.path.isfile(video_path) or os.path.getsize(video_path) <= 0:
+        raise RuntimeError("telegram_delivery_file_missing")
+    video_size = os.path.getsize(video_path)
+    output_limit = max(0, int(max_bytes or 0))
+    if output_limit and video_size > output_limit:
+        raise RuntimeError("telegram_delivery_resource_limit")
     safe_filename = safe_display_filename(filename or os.path.basename(video_path), "toan_aas_video.mp4")
     if not safe_filename.lower().endswith(".mp4"):
         safe_filename = "toan_aas_video.mp4"
@@ -491,39 +624,73 @@ def telegram_send_video_receipt(
         fields = {"chat_id": str(chat_id or ""), "caption": str(caption or "")[:1000]}
         if reply_markup:
             fields["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
-        body = bytearray()
+        prefix = bytearray()
         for key, value in fields.items():
-            body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n".encode("utf-8"))
-        body.extend(
+            prefix.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n".encode("utf-8"))
+        prefix.extend(
             f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
             f"filename=\"{safe_filename}\"\r\nContent-Type: video/mp4\r\n\r\n".encode("utf-8")
         )
-        body.extend(video_bytes)
-        body.extend(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+        suffix = f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+        def multipart_body_chunks():
+            yield bytes(prefix)
+            with open(video_path, "rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    yield chunk
+            yield suffix
+
+        content_length = len(prefix) + video_size + len(suffix)
+        headers = {
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Content-Length": str(content_length),
+            **telegram_api_proxy_headers(),
+        }
         request = urllib.request.Request(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{method}",
-            data=bytes(body),
-            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            telegram_api_method_url(method),
+            data=multipart_body_chunks(),
+            headers=headers,
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=120) as response:
-            data = json.loads(response.read().decode("utf-8", errors="replace") or "{}")
+        timeout = max(
+            120,
+            min(
+                7200,
+                env_int("FRAME_VIDEO_TELEGRAM_DELIVERY_TIMEOUT_SECONDS", 1800),
+            ),
+        )
+        try:
+            with telegram_open_no_redirect(request, timeout=timeout) as response:
+                body = response.read()
+            data = json.loads(body.decode("utf-8", errors="replace") or "{}")
+        except urllib.error.HTTPError:
+            raise
+        except (TimeoutError, socket.timeout, urllib.error.URLError, OSError, TypeError, ValueError):
+            raise RuntimeError("telegram_delivery_outcome_uncertain") from None
+        if not isinstance(data, dict):
+            raise RuntimeError("telegram_delivery_outcome_uncertain") from None
         if not data.get("ok"):
-            raise RuntimeError(f"telegram_{method.lower()}_failed")
+            raise RuntimeError("telegram_delivery_rejected") from None
         result = data.get("result") or {}
-        media = result.get(file_field) or {}
+        media = result.get(file_field) or {} if isinstance(result, dict) else {}
+        message_id = str(result.get("message_id") or "") if isinstance(result, dict) else ""
+        file_id = str(media.get("file_id") or "") if isinstance(media, dict) else ""
+        if not message_id.isdigit() or int(message_id) <= 0 or not file_id:
+            raise RuntimeError("telegram_delivery_outcome_uncertain") from None
         return {
             "sent": True,
-            "file_id": str(media.get("file_id") or ""),
-            "message_id": str(result.get("message_id") or ""),
+            "file_id": file_id,
+            "message_id": message_id,
             "delivery_method": method,
         }
 
+    initial_method = "sendDocument" if prefer_document else "sendVideo"
+    initial_field = "document" if prefer_document else "video"
     try:
-        return send("sendVideo", "video")
+        return send(initial_method, initial_field)
     except urllib.error.HTTPError as exc:
         status = int(getattr(exc, "code", 0) or 0)
-        if status in {400, 413, 422}:
+        if not prefer_document and status in {400, 413, 422}:
             # Telegram rejected the video representation before accepting it.
             # A document fallback is therefore deterministic and non-duplicating.
             try:
@@ -531,19 +698,19 @@ def telegram_send_video_receipt(
             except urllib.error.HTTPError as fallback_exc:
                 fallback_status = int(getattr(fallback_exc, "code", 0) or 0)
                 if 400 <= fallback_status < 500:
-                    raise RuntimeError("telegram_delivery_rejected") from fallback_exc
-                raise RuntimeError("telegram_delivery_outcome_uncertain") from fallback_exc
-            except (TimeoutError, socket.timeout, urllib.error.URLError) as fallback_exc:
-                raise RuntimeError("telegram_delivery_outcome_uncertain") from fallback_exc
+                    raise RuntimeError("telegram_delivery_rejected") from None
+                raise RuntimeError("telegram_delivery_outcome_uncertain") from None
+            except (TimeoutError, socket.timeout, urllib.error.URLError, OSError):
+                raise RuntimeError("telegram_delivery_outcome_uncertain") from None
         if 400 <= status < 500:
-            raise RuntimeError("telegram_delivery_rejected") from exc
+            raise RuntimeError("telegram_delivery_rejected") from None
         # A server-side failure can occur after Telegram accepted the upload.
         # Never issue a second send while delivery truth is uncertain.
-        raise RuntimeError("telegram_delivery_outcome_uncertain") from exc
-    except (TimeoutError, socket.timeout, urllib.error.URLError) as exc:
+        raise RuntimeError("telegram_delivery_outcome_uncertain") from None
+    except (TimeoutError, socket.timeout, urllib.error.URLError, OSError):
         # Telegram may have accepted the upload before the connection timed out.
         # Do not issue a second send when delivery truth is uncertain.
-        raise RuntimeError("telegram_delivery_outcome_uncertain") from exc
+        raise RuntimeError("telegram_delivery_outcome_uncertain") from None
 
 
 def telegram_send_video(
@@ -1962,6 +2129,14 @@ def run_frame_video_render(job: dict) -> None:
     job_id = job.get("id")
     try:
         payload = json.loads(str(job.get("input_file_id") or "") or "{}")
+        public_seam_job = frame_video_public_seam.frame_video_public_seam_applies_to_worker_job(
+            payload
+        )
+        minimum_images = (
+            frame_video_public_seam.frame_video_public_minimum_images()
+            if public_seam_job
+            else frame_video_runtime.FRAME_VIDEO_MIN_IMAGES
+        )
         if payload.get("frame_video_contract") is not None:
             contract = {
                 "version": int(payload.get("frame_video_contract") or 0) == 1,
@@ -1975,7 +2150,7 @@ def run_frame_video_render(job: dict) -> None:
                 update_job(job_id, "failed", f"frame_video_contract_{failed_contract}")
                 return
         photos = list(payload.get("photos") or [])
-        if len(photos) < frame_video_runtime.FRAME_VIDEO_MIN_IMAGES:
+        if len(photos) < minimum_images:
             update_job(job_id, "failed", "not_enough_images")
             return
         state = dict(payload.get("state") or {})
@@ -1983,7 +2158,7 @@ def run_frame_video_render(job: dict) -> None:
         framevideo3 = str(state.get("commercial_flow_version") or "") == "framevideo3"
         if (
             framevideo3
-            and expected_image_count >= frame_video_runtime.FRAME_VIDEO_MIN_IMAGES
+            and expected_image_count >= minimum_images
             and not payload.get("paid_preview")
             and len(photos) != expected_image_count
         ):
@@ -1991,12 +2166,39 @@ def run_frame_video_render(job: dict) -> None:
             return
         with tempfile.TemporaryDirectory() as tmpdir:
             image_paths = []
+            frame_input_limit = frame_video_telegram_input_limit_bytes()
+            processing_input_limit = (
+                frame_video_public_seam.frame_video_processing_input_limit_bytes()
+            )
+            downloaded_input_bytes = 0
+
+            def download_frame_asset(file_id: str, path: str) -> None:
+                nonlocal downloaded_input_bytes
+                remaining_bytes = processing_input_limit - downloaded_input_bytes
+                if remaining_bytes <= 0:
+                    raise RuntimeError("frame_video_processing_capacity_exceeded")
+                asset_limit = min(frame_input_limit, remaining_bytes)
+                try:
+                    telegram_download_file(file_id, path, max_bytes=asset_limit)
+                except RuntimeError as exc:
+                    if (
+                        str(exc) == "telegram_file_too_large"
+                        and asset_limit < frame_input_limit
+                    ):
+                        raise RuntimeError(
+                            "frame_video_processing_capacity_exceeded"
+                        ) from None
+                    raise
+                downloaded_input_bytes += os.path.getsize(path)
+                if downloaded_input_bytes > processing_input_limit:
+                    raise RuntimeError("frame_video_processing_capacity_exceeded")
+
             for idx, item in enumerate(photos, start=1):
                 file_id = str((item or {}).get("file_id") or "")
                 if not file_id:
                     continue
                 path = os.path.join(tmpdir, f"frame_input_{idx}.jpg")
-                telegram_download_file(file_id, path)
+                download_frame_asset(file_id, path)
                 image_paths.append(path)
             state["photos"] = photos
             logo_path = ""
@@ -2011,7 +2213,7 @@ def run_frame_video_render(job: dict) -> None:
                 if not file_id:
                     continue
                 path = os.path.join(tmpdir, filename)
-                telegram_download_file(file_id, path)
+                download_frame_asset(file_id, path)
                 if key == "logo_file_id":
                     logo_path = path
                 elif key == "music_file_id":
@@ -2020,64 +2222,155 @@ def run_frame_video_render(job: dict) -> None:
                     voice_path = path
             if (
                 framevideo3
-                and expected_image_count >= frame_video_runtime.FRAME_VIDEO_MIN_IMAGES
+                and expected_image_count >= minimum_images
                 and not payload.get("paid_preview")
                 and len(image_paths) != expected_image_count
             ):
                 update_job(job_id, "failed", "image_count_mismatch_downloaded")
                 return
             output_path = os.path.join(tmpdir, "toan_aas_frame_video.mp4")
-            render = frame_video_runtime.build_ffmpeg_command(
-                image_paths,
-                output_path,
-                state,
-                ffmpeg_path=local_ffmpeg_path(),
-                music_path=music_path,
-                voice_path=voice_path,
-                logo_path=logo_path,
-            )
-            completed = subprocess.run(
-                render.command,
-                capture_output=True,
-                text=True,
-                timeout=min(LOCAL_WORKER_MAX_JOB_SECONDS, int(payload.get("max_render_seconds") or 180)),
-                check=False,
-            )
-            if completed.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
-                raise RuntimeError(first_line(completed.stderr or completed.stdout) or "frame_video_ffmpeg_failed")
-            probe = frame_video_runtime.probe_mp4(output_path, render.expected_duration, render.expects_audio)
-            if not probe.get("ok"):
-                raise RuntimeError(f"frame_video_validate:{probe.get('reason')}")
-            digest = hashlib.sha256()
-            with open(output_path, "rb") as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
+            actual_worker_sha = local_worker_runtime_sha()
+            public_result = None
+            if public_seam_job:
+                frame_job_id = str(payload.get("frame_job_id") or "").strip()
+                if not frame_job_id or not str(job_id or "").isdigit() or int(job_id) <= 0:
+                    raise RuntimeError("frame_video_job_identity_missing")
+                runtime_sha = str(
+                    payload.get("frame_video_runtime_sha")
+                    or payload.get("frame_video_expected_worker_sha")
+                    or "local"
+                ).strip()
+                expected_worker_sha = str(
+                    payload.get("frame_video_expected_worker_sha") or runtime_sha
+                ).strip()
+                worker_timeout_ceiling = max(
+                    180,
+                    env_int("FRAME_VIDEO_STAGE_TIMEOUT_MAX_SECONDS", 7200),
+                )
+                requested_timeout_ceiling = max(
+                    180,
+                    int(payload.get("max_render_seconds") or worker_timeout_ceiling),
+                )
+                stage_timeout = frame_video_public_seam.frame_video_stage_timeout_seconds(
+                    frame_video_runtime.expected_duration_seconds(state),
+                    input_bytes=downloaded_input_bytes,
+                    large_media=(
+                        str(payload.get("media_lane") or "") == "large_media"
+                    ),
+                    ceiling_seconds=min(
+                        worker_timeout_ceiling,
+                        requested_timeout_ceiling,
+                    ),
+                )
+                public_result = frame_video_public_seam.render_frame_video_public(
+                    state=state,
+                    image_paths=image_paths,
+                    output_path=output_path,
+                    user_id=int(payload.get("user_id") or 0),
+                    confirmation_id=str(payload.get("frame_job_id") or job_id),
+                    language=str(payload.get("language") or "vi"),
+                    runtime_sha=runtime_sha,
+                    expected_worker_sha=expected_worker_sha,
+                    worker_sha=actual_worker_sha,
+                    worker_instance_id=LOCAL_WORKER_INSTANCE_ID,
+                    ffmpeg_path=local_ffmpeg_path(),
+                    ffprobe_path=find_ffprobe(ffmpeg_path=local_ffmpeg_path()),
+                    music_path=music_path,
+                    voice_path=voice_path,
+                    logo_path=logo_path,
+                    timeout_seconds=stage_timeout,
+                    environ=os.environ,
+                )
+                if not public_result.get("enabled"):
+                    raise RuntimeError("frame_video_public_seam_disabled")
+                if not public_result.get("ok"):
+                    raise RuntimeError(str(public_result.get("blocker") or "frame_video_public_seam_failed"))
+                probe = dict(public_result.get("probe") or {})
+                digest = str(public_result.get("output_sha256") or "")
+            else:
+                render = frame_video_runtime.build_ffmpeg_command(
+                    image_paths,
+                    output_path,
+                    state,
+                    ffmpeg_path=local_ffmpeg_path(),
+                    music_path=music_path,
+                    voice_path=voice_path,
+                    logo_path=logo_path,
+                )
+                completed = subprocess.run(
+                    render.command,
+                    capture_output=True,
+                    text=True,
+                    timeout=min(LOCAL_WORKER_MAX_JOB_SECONDS, int(payload.get("max_render_seconds") or 180)),
+                    check=False,
+                )
+                if completed.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+                    raise RuntimeError(first_line(completed.stderr or completed.stdout) or "frame_video_ffmpeg_failed")
+                probe = frame_video_runtime.probe_mp4(output_path, render.expected_duration, render.expects_audio)
+                if not probe.get("ok"):
+                    raise RuntimeError(f"frame_video_validate:{probe.get('reason')}")
+                digest_obj = hashlib.sha256()
+                with open(output_path, "rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        digest_obj.update(chunk)
+                digest = digest_obj.hexdigest()
             chat_id = str(payload.get("chat_id") or "").strip()
             if not chat_id:
                 raise RuntimeError("frame_video_chat_id_missing")
-            receipt = telegram_send_video_receipt(
-                chat_id,
-                output_path,
-                str(payload.get("caption") or ""),
-                filename="toan_aas_frame_video.mp4",
+            delivery_method = frame_video_public_seam.frame_video_telegram_delivery_method(
+                os.path.getsize(output_path)
             )
-            if not receipt.get("sent") or not receipt.get("message_id"):
-                raise RuntimeError("frame_video_delivery_receipt_missing")
-            terminal = {
-                "delivery_message_id": str(receipt.get("message_id") or ""),
-                "delivery_file_id": str(receipt.get("file_id") or ""),
-                "output_size_bytes": int(os.path.getsize(output_path)),
-                "output_sha256": digest.hexdigest(),
-                "ffprobe": probe,
-                "charge_policy": "post_delivery",
-                "wallet_charge_amount_xu": 0,
-            }
+            try:
+                receipt = telegram_send_video_receipt(
+                    chat_id,
+                    output_path,
+                    str(payload.get("caption") or ""),
+                    filename="toan_aas_frame_video.mp4",
+                    max_bytes=frame_video_public_seam.frame_video_telegram_output_limit_bytes(),
+                    prefer_document=delivery_method == "document",
+                )
+                if not isinstance(receipt, dict):
+                    raise RuntimeError("frame_video_delivery_receipt_missing")
+                receipt_blocker = frame_video_public_seam.frame_video_delivery_receipt_blocker(
+                    receipt.get("message_id"),
+                    receipt.get("file_id"),
+                )
+                if receipt.get("sent") is not True or receipt_blocker:
+                    raise RuntimeError("frame_video_delivery_receipt_missing")
+            except Exception as exc:
+                if frame_video_public_seam.frame_video_delivery_outcome_uncertain(exc):
+                    update_job(
+                        job_id,
+                        "failed",
+                        json.dumps(
+                            {
+                                "stage": "delivery_unknown",
+                                "reason": "telegram_delivery_outcome_uncertain",
+                                "charge": 0,
+                            },
+                            separators=(",", ":"),
+                        ),
+                    )
+                    return
+                raise
+            terminal = frame_video_public_seam.build_frame_video_worker_terminal_receipt(
+                frame_job_id=payload.get("frame_job_id"),
+                local_worker_job_id=job_id,
+                delivery_message_id=receipt.get("message_id"),
+                delivery_file_id=receipt.get("file_id"),
+                output_size_bytes=os.path.getsize(output_path),
+                output_sha256=digest,
+                worker_id=LOCAL_WORKER_ID,
+                worker_sha=actual_worker_sha,
+                probe=probe,
+            )
         update_job(
             job_id,
             "succeeded",
             "frame video validated and sent",
             output_url=json.dumps(terminal, ensure_ascii=False, separators=(",", ":")),
             output_file_id=str(receipt.get("file_id") or ""),
+            output_limit=16 * 1024,
         )
     except subprocess.TimeoutExpired:
         update_job(job_id, "failed", "frame_video_render_timeout")

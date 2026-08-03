@@ -255,9 +255,10 @@ def preflight(
     worker_connected: bool,
     output_writable: bool,
     package_available: bool,
+    min_images: int = frame_video_runtime.FRAME_VIDEO_MIN_IMAGES,
 ) -> dict[str, Any]:
     clean = deepcopy(state or {})
-    plan = frame_video_runtime.validate_plan(clean)
+    plan = frame_video_runtime.validate_plan(clean, min_images=min_images)
     direct_ready = bool(str(ffmpeg_path or "").strip() and str(ffprobe_path or "").strip())
     worker_ready = bool(worker_connected)
     blockers: list[str] = []
