@@ -827,14 +827,19 @@ def _fail_record(
     )
 
 
-def _full_decode(path: str, ffmpeg_path: str) -> dict[str, Any]:
+def _full_decode(
+    path: str,
+    ffmpeg_path: str,
+    *,
+    timeout_seconds: int = 120,
+) -> dict[str, Any]:
     command = [ffmpeg_path, "-v", "error", "-i", path, "-f", "null", "-"]
     try:
         completed = subprocess.run(
             command,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=max(30, int(timeout_seconds or 120)),
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -867,6 +872,7 @@ def execute_frame_video_local(
     output_path: str | Path | None = None,
     ffmpeg_path: str = "",
     ffprobe_path: str = "",
+    timeout_seconds: int = 180,
     public_request: bool = False,
 ) -> dict[str, Any]:
     dispatched = dispatch_frame_video(
@@ -1051,6 +1057,7 @@ def execute_frame_video_local(
             voice_path=selected_audio.get("voice", ""),
             logo_path=selected_logo,
             min_images=1,
+            continuous_still_motion=True,
         )
     except ValueError as exc:
         return _fail_record(ledger, record, _clean(exc) or "frame_plan_invalid")
@@ -1058,12 +1065,13 @@ def execute_frame_video_local(
     record["command"] = list(command.command)
     ledger.render_count += 1
     ledger.compose_count += 1
+    stage_timeout = max(30, int(timeout_seconds or 180))
     try:
         completed = subprocess.run(
             command.command,
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=stage_timeout,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -1093,7 +1101,11 @@ def execute_frame_video_local(
             record,
             _clean(probe.get("reason") or "frame_artifact_invalid"),
         )
-    decode = _full_decode(str(selected_output_path), ffmpeg)
+    decode = _full_decode(
+        str(selected_output_path),
+        ffmpeg,
+        timeout_seconds=stage_timeout,
+    )
     if not decode.get("ok"):
         record["validation"] = {**probe, "ok": False, "full_decode": False}
         return _fail_record(

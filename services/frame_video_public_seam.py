@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
-import os
 import hashlib
 import hmac
 import json
 import math
+import os
 import re
 import shutil
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import quote, urlsplit
 
-from services import frame_video_engine, frame_video_runtime, video_engine_contract
+from services import (
+    frame_video_engine,
+    frame_video_runtime,
+    telegram_transport,
+    video_engine_contract,
+)
 
 
 FRAME_VIDEO_PUBLIC_SEAM_FLAG = "FRAME_VIDEO_DURABLE_PUBLIC_SEAM_ENABLED"
@@ -23,6 +29,12 @@ FRAME_VIDEO_WORKER_FLAG_KEYS = (
     "FRAME_VIDEO_AUTO_RETRY",
     "FRAME_VIDEO_AUTO_FALLBACK",
 )
+FRAME_VIDEO_TELEGRAM_CLOUD_API_ROOT = "https://api.telegram.org"
+FRAME_VIDEO_TELEGRAM_CLOUD_INPUT_LIMIT_MB = 20
+FRAME_VIDEO_TELEGRAM_CLOUD_OUTPUT_LIMIT_MB = 49
+FRAME_VIDEO_TELEGRAM_LOCAL_LIMIT_MAX_MB = 2000
+FRAME_VIDEO_SHORT_MEDIA_MAX_BYTES = 20 * 1024 * 1024
+FRAME_VIDEO_SHORT_MEDIA_MAX_SECONDS = 60.0
 
 
 def _clean(value: Any) -> str:
@@ -69,6 +81,279 @@ def _positive_float(value: Any) -> float:
     except (TypeError, ValueError, OverflowError):
         return 0.0
     return parsed if math.isfinite(parsed) and parsed > 0 else 0.0
+
+
+def frame_video_stage_timeout_seconds(
+    expected_duration_seconds: Any,
+    *,
+    input_bytes: Any = 0,
+    large_media: bool = False,
+    ceiling_seconds: Any = 7200,
+) -> int:
+    """Scale a bounded stage timeout from measured duration and input size."""
+
+    ceiling = _positive_int(ceiling_seconds) or 7200
+    ceiling = min(7200, max(180, ceiling))
+    duration = _positive_float(expected_duration_seconds)
+    size_mib = _positive_int(input_bytes) / float(1024 * 1024)
+    duration_estimate = duration * 4.0 + 120.0 if duration else 180.0
+    size_estimate = size_mib * 3.0 + 120.0 if size_mib else 180.0
+    estimated = math.ceil(max(duration_estimate, size_estimate))
+    if large_media:
+        estimated = max(1800, estimated)
+    return min(ceiling, max(180, estimated))
+
+
+def frame_video_telegram_api_root(
+    environ: Mapping[str, Any] | None = None,
+) -> str:
+    source = os.environ if environ is None else environ
+    configured = _clean(source.get("TELEGRAM_API_BASE_URL"))
+    return (
+        telegram_transport.normalize_api_root(configured)
+        if configured
+        else FRAME_VIDEO_TELEGRAM_CLOUD_API_ROOT
+    )
+
+
+def _frame_video_telegram_local_api_enabled(
+    environ: Mapping[str, Any] | None = None,
+) -> bool:
+    return frame_video_telegram_api_root(environ) != FRAME_VIDEO_TELEGRAM_CLOUD_API_ROOT
+
+
+def frame_video_telegram_api_proxy_headers(
+    environ: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    source = os.environ if environ is None else environ
+    if not _frame_video_telegram_local_api_enabled(source):
+        return {}
+    raw_secret = str(source.get("TELEGRAM_API_PROXY_SECRET") or "")
+    if "\r" in raw_secret or "\n" in raw_secret:
+        raise ValueError("telegram_proxy_secret_invalid")
+    secret = _clean(raw_secret)
+    if not secret:
+        hostname = _clean(urlsplit(frame_video_telegram_api_root(source)).hostname).lower()
+        if hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("telegram_proxy_secret_missing")
+        return {}
+    header = _clean(source.get("TELEGRAM_API_PROXY_SECRET_HEADER")) or (
+        "X-Toanaas-Proxy-Secret"
+    )
+    if not re.fullmatch(r"[A-Za-z0-9-]{1,80}", header):
+        raise ValueError("telegram_proxy_header_invalid")
+    return {header: secret}
+
+
+def _frame_video_telegram_token(value: Any) -> str:
+    token = _clean(value)
+    if not re.fullmatch(r"[A-Za-z0-9:_-]{1,256}", token):
+        raise ValueError("telegram_token_invalid")
+    return token
+
+
+def frame_video_telegram_api_method_url(
+    method: Any,
+    *,
+    token: Any,
+    environ: Mapping[str, Any] | None = None,
+) -> str:
+    method_name = _clean(method)
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", method_name):
+        raise ValueError("telegram_method_invalid")
+    url = (
+        f"{frame_video_telegram_api_root(environ)}/"
+        f"bot{_frame_video_telegram_token(token)}/{method_name}"
+    )
+    return telegram_transport.validate_api_url(url)
+
+
+def frame_video_telegram_file_download_url(
+    file_path: Any,
+    *,
+    token: Any,
+    environ: Mapping[str, Any] | None = None,
+) -> str:
+    source = os.environ if environ is None else environ
+    raw = _clean(file_path)
+    if not raw:
+        raise ValueError("telegram_file_path_missing")
+    root = frame_video_telegram_api_root(source)
+    if _frame_video_telegram_local_api_enabled(source):
+        file_root = (
+            _clean(source.get("TELEGRAM_LOCAL_API_FILE_ROOT"))
+            or "/var/lib/telegram-bot-api"
+        ).rstrip("/")
+        current_token = _frame_video_telegram_token(token)
+        required_prefix = f"{file_root}/{current_token}/"
+        if "\\" in raw or not raw.startswith(required_prefix):
+            raise ValueError("telegram_file_path_invalid")
+        relative = raw[len(file_root) :].lstrip("/")
+        if not relative or ".." in relative.split("/"):
+            raise ValueError("telegram_file_path_invalid")
+        media_path = "/" + (
+            _clean(source.get("TELEGRAM_LOCAL_API_MEDIA_PATH")) or "localfile"
+        ).strip("/")
+        url = f"{root}{media_path}/{quote(relative, safe='/@._:-')}"
+        return telegram_transport.validate_api_url(url)
+    relative = raw.lstrip("/")
+    if not relative or ".." in relative.split("/"):
+        raise ValueError("telegram_file_path_invalid")
+    url = (
+        f"{root}/file/bot{_frame_video_telegram_token(token)}/"
+        f"{quote(relative, safe='/@._:-')}"
+    )
+    return telegram_transport.validate_api_url(url)
+
+
+def _frame_video_telegram_limit_bytes(
+    environ: Mapping[str, Any] | None,
+    *,
+    name: str,
+    cloud_mb: int,
+    local_default_mb: int,
+) -> int:
+    source = os.environ if environ is None else environ
+    if not _frame_video_telegram_local_api_enabled(source):
+        return int(cloud_mb) * 1024 * 1024
+    configured = _positive_int(source.get(name)) or int(local_default_mb)
+    return min(FRAME_VIDEO_TELEGRAM_LOCAL_LIMIT_MAX_MB, configured) * 1024 * 1024
+
+
+def frame_video_telegram_input_limit_bytes(
+    environ: Mapping[str, Any] | None = None,
+) -> int:
+    return _frame_video_telegram_limit_bytes(
+        environ,
+        name="FRAME_VIDEO_TELEGRAM_MAX_INPUT_MB",
+        cloud_mb=FRAME_VIDEO_TELEGRAM_CLOUD_INPUT_LIMIT_MB,
+        local_default_mb=500,
+    )
+
+
+def frame_video_telegram_output_limit_bytes(
+    environ: Mapping[str, Any] | None = None,
+) -> int:
+    return _frame_video_telegram_limit_bytes(
+        environ,
+        name="FRAME_VIDEO_TELEGRAM_MAX_OUTPUT_MB",
+        cloud_mb=FRAME_VIDEO_TELEGRAM_CLOUD_OUTPUT_LIMIT_MB,
+        local_default_mb=500,
+    )
+
+
+def frame_video_processing_input_limit_bytes(
+    environ: Mapping[str, Any] | None = None,
+) -> int:
+    source = os.environ if environ is None else environ
+    configured = _positive_int(
+        source.get("FRAME_VIDEO_PROCESSING_MAX_INPUT_MB", 1000)
+    )
+    return max(1, configured) * 1024 * 1024
+
+
+def frame_video_media_lane(
+    state: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    payload = dict(state or {})
+    photos = [dict(item or {}) for item in list(payload.get("photos") or [])]
+    declared_sizes = [_positive_int(item.get("file_size")) for item in photos]
+    optional_sizes: list[int] = []
+    optional_unknown = False
+    for prefix in ("logo", "music", "voice"):
+        if not _clean(payload.get(f"{prefix}_file_id")):
+            continue
+        size = _positive_int(payload.get(f"{prefix}_file_size"))
+        optional_sizes.append(size)
+        optional_unknown = optional_unknown or size <= 0
+    size_known = bool(photos) and all(value > 0 for value in declared_sizes)
+    size_known = size_known and not optional_unknown
+    total_bytes = sum(declared_sizes) + sum(optional_sizes)
+    duration_seconds = _positive_float(
+        frame_video_runtime.expected_duration_seconds(payload)
+    )
+    duration_known = duration_seconds > 0
+    short = bool(
+        size_known
+        and duration_known
+        and total_bytes <= FRAME_VIDEO_SHORT_MEDIA_MAX_BYTES
+        and duration_seconds <= FRAME_VIDEO_SHORT_MEDIA_MAX_SECONDS
+    )
+    if not size_known or not duration_known:
+        reason = "metadata_unknown"
+    elif total_bytes > FRAME_VIDEO_SHORT_MEDIA_MAX_BYTES:
+        reason = "declared_size_over_short_threshold"
+    elif duration_seconds > FRAME_VIDEO_SHORT_MEDIA_MAX_SECONDS:
+        reason = "duration_over_short_threshold"
+    else:
+        reason = "within_short_thresholds"
+    return {
+        "lane": "short_media" if short else "large_media",
+        "reason": reason,
+        "size_known": size_known,
+        "duration_known": duration_known,
+        "declared_input_bytes": total_bytes,
+        "duration_seconds": duration_seconds,
+    }
+
+
+def frame_video_input_capacity_blocker(
+    paths: list[str] | tuple[str, ...],
+    environ: Mapping[str, Any] | None = None,
+) -> str:
+    limit = frame_video_processing_input_limit_bytes(environ)
+    total = 0
+    for raw_path in paths:
+        candidate = Path(_clean(raw_path)).expanduser()
+        if not candidate.is_file():
+            continue
+        total += max(0, int(candidate.stat().st_size))
+        if total > limit:
+            return "frame_video_processing_capacity_exceeded"
+    return ""
+
+
+def frame_video_telegram_delivery_method(output_bytes: Any) -> str:
+    return (
+        "document"
+        if _positive_int(output_bytes) > FRAME_VIDEO_SHORT_MEDIA_MAX_BYTES
+        else "video"
+    )
+
+
+def frame_video_delivery_outcome_uncertain(error: BaseException) -> bool:
+    reason = _clean(error).lower()
+    error_types = {
+        item.__name__.lower()
+        for item in type(error).__mro__
+    }
+    if reason in {
+        "telegram_delivery_outcome_uncertain",
+        "telegram_delivery_receipt_missing",
+        "frame_video_delivery_receipt_missing",
+    }:
+        return True
+    if reason == "telegram_delivery_rejected":
+        return False
+    return bool(
+        isinstance(error, (TimeoutError, OSError))
+        or any(
+            marker in error_type
+            for error_type in error_types
+            for marker in ("timeout", "timedout", "network", "connection")
+        )
+        or any(
+            marker in reason
+            for marker in (
+                "timed out",
+                "timeout",
+                "connection reset",
+                "connection aborted",
+                "network error",
+                "response stream reset",
+            )
+        )
+    )
 
 
 def frame_video_delivery_receipt_blocker(
@@ -186,7 +471,7 @@ def frame_video_worker_transition_blocker(
         return "frame_worker_transition_invalid"
     admitted_worker = _sanitize_worker_id(job.get("worker_id"))
     reported_worker = _sanitize_worker_id(reported_worker_id)
-    if requested in {"running", "succeeded"} and (
+    if requested in {"running", "succeeded", "failed"} and (
         not admitted_worker or not reported_worker
     ):
         return "frame_worker_identity_missing"
@@ -399,6 +684,12 @@ def frame_video_public_seam_enabled(
     return _flag(source.get(FRAME_VIDEO_PUBLIC_SEAM_FLAG, False))
 
 
+def frame_video_public_minimum_images() -> int:
+    """The durable engine supports one-frame motion and multi-frame composition."""
+
+    return 1
+
+
 def frame_video_public_seam_blocker(
     environ: Mapping[str, Any] | None = None,
 ) -> str:
@@ -488,7 +779,10 @@ def build_frame_video_public_plan(
     logo_path: str = "",
 ) -> frame_video_engine.FrameVideoPlan:
     clean_state = dict(state or {})
-    validation = frame_video_runtime.validate_plan(clean_state)
+    validation = frame_video_runtime.validate_plan(
+        clean_state,
+        min_images=frame_video_public_minimum_images(),
+    )
     manifest = list(validation.get("manifest") or [])
     if not validation.get("ok"):
         raise ValueError(str((validation.get("errors") or ["frame_plan_invalid"])[0]))
@@ -581,6 +875,25 @@ def render_frame_video_public(
             "provider_calls": 0,
             "wallet_mutations": 0,
         }
+    capacity_blocker = frame_video_input_capacity_blocker(
+        tuple(image_paths)
+        + tuple(
+            str(kwargs.get(name) or "")
+            for name in ("music_path", "voice_path", "logo_path")
+        ),
+        environ,
+    )
+    if capacity_blocker:
+        return {
+            "enabled": True,
+            "legacy_passthrough": False,
+            "ok": False,
+            "blocker": capacity_blocker,
+            "reason": capacity_blocker,
+            "engine_jobs": 0,
+            "provider_calls": 0,
+            "wallet_mutations": 0,
+        }
     try:
         plan = build_frame_video_public_plan(
             state,
@@ -646,6 +959,25 @@ def render_frame_video_public(
     music_path = _clean(kwargs.get("music_path"))
     voice_path = _clean(kwargs.get("voice_path"))
     logo_path = _clean(kwargs.get("logo_path"))
+    source = os.environ if environ is None else environ
+    timeout_ceiling = (
+        _positive_int(kwargs.get("timeout_seconds"))
+        or _positive_int(source.get("FRAME_VIDEO_STAGE_TIMEOUT_MAX_SECONDS"))
+        or _positive_int(source.get("FRAME_VIDEO_MAX_RENDER_SECONDS"))
+        or 7200
+    )
+    actual_input_bytes = sum(
+        max(0, int(Path(path).stat().st_size))
+        for path in tuple(image_paths) + (music_path, voice_path, logo_path)
+        if path and Path(path).is_file()
+    )
+    media_lane = frame_video_media_lane(state)
+    stage_timeout = frame_video_stage_timeout_seconds(
+        plan.expected_duration_seconds,
+        input_bytes=actual_input_bytes,
+        large_media=str(media_lane.get("lane") or "") == "large_media",
+        ceiling_seconds=timeout_ceiling,
+    )
     execution = frame_video_engine.execute_frame_video_local(
         request,
         plan=plan,
@@ -662,6 +994,7 @@ def render_frame_video_public(
         ffprobe_path=_clean(
             kwargs.get("ffprobe_path") or shutil.which("ffprobe") or "ffprobe"
         ),
+        timeout_seconds=stage_timeout,
         environ=environ,
         public_request=True,
     )

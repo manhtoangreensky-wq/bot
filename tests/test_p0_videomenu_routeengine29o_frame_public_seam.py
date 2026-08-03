@@ -1245,6 +1245,12 @@ def _compile_29o_runtime_guard(*, execution_owner: str, admission) -> object:
         "ffprobe_path": "ffprobe" if execution_owner == "local_ffmpeg" else "",
     }
     seam_proxy = SimpleNamespace(
+        frame_video_public_seam_enabled=lambda: True,
+        frame_video_public_minimum_images=lambda: 1,
+        frame_video_media_lane=lambda _state: {
+            "lane": "short_media",
+            "reason": "within_short_thresholds",
+        },
         frame_video_public_seam_blocker=lambda: "",
         frame_video_worker_queue_admission=admission,
     )
@@ -1260,10 +1266,11 @@ def _compile_29o_runtime_guard(*, execution_owner: str, admission) -> object:
             "is_admin_user": lambda _user_id: False,
             "frame_video_runtime": SimpleNamespace(
                 FRAME_VIDEO_MIN_IMAGES=2,
-                validate_plan=lambda _state: {"ok": True},
+                validate_plan=lambda _state, **_kwargs: {"ok": True},
             ),
             "FRAME_VIDEO_MAX_IMAGES": 20,
             "FRAME_VIDEO_MAX_INPUT_MB": 50,
+            "FRAME_VIDEO_PROCESSING_MAX_INPUT_MB": 1000,
             "FRAME_VIDEO_MAX_OUTPUT_SECONDS": 160,
             "FRAME_VIDEO_MAX_CONCURRENT_JOBS": 1,
             "_safe_int": lambda value, default=0: int(value or default),
