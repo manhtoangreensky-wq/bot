@@ -378,6 +378,49 @@ def _is_plain_regular_file(result: os.stat_result) -> bool:
     return stat.S_ISREG(result.st_mode) and not _is_reparse_point(result)
 
 
+def _is_private_owned_directory(
+    result: os.stat_result,
+    *,
+    platform_name: str | None = None,
+    effective_uid: int | None = None,
+) -> bool:
+    """Return whether a destination parent is private to its POSIX owner.
+
+    POSIX publication is name based even when both names are anchored to a
+    retained directory descriptor.  A directory writable by another UID can
+    therefore swap the partial name between verification and ``renameat``.
+    Requiring an owner-only parent closes that boundary and prevents other
+    principals from reading user media through the workspace.  Cooperating
+    processes running as the same UID remain inside the worker's trust domain.
+    Windows relies on the retained no-delete-share directory/file handles.
+    """
+
+    if not _is_plain_directory(result):
+        return False
+    platform = os.name if platform_name is None else platform_name
+    if platform != "posix":
+        return True
+    uid = os.getuid() if effective_uid is None else effective_uid
+    return (
+        result.st_uid == uid
+        and not stat.S_IMODE(result.st_mode) & (stat.S_IRWXG | stat.S_IRWXO)
+    )
+
+
+def _destination_parent_allowed(
+    result: os.stat_result,
+    *,
+    require_private_parent: bool,
+) -> bool:
+    if not _is_plain_directory(result):
+        return False
+    if os.name != "posix":
+        return True
+    if result.st_uid != os.getuid():
+        return False
+    return not require_private_parent or _is_private_owned_directory(result)
+
+
 class _DestinationGuard:
     """Keep destination operations bound to one validated parent directory.
 
@@ -387,7 +430,13 @@ class _DestinationGuard:
     back to an unanchored path-only publish operation.
     """
 
-    def __init__(self, destination: str | os.PathLike[str]) -> None:
+    def __init__(
+        self,
+        destination: str | os.PathLike[str],
+        *,
+        partial_name: str | None = None,
+        require_private_parent: bool = False,
+    ) -> None:
         self.directory_fd: int | None = None
         self.windows_parent_handle: int | None = None
         self.windows_parent_identity: tuple[int, int] | None = None
@@ -395,11 +444,26 @@ class _DestinationGuard:
         self.windows_partial_identity: tuple[int, int] | None = None
         self.partial_identity: tuple[int, int] | None = None
         try:
+            if type(require_private_parent) is not bool:
+                raise OSError
+            self.require_private_parent = require_private_parent
             raw_path = os.fspath(destination)
             self.final_path = Path(os.path.abspath(raw_path))
             self.parent = self.final_path.parent
             self.final_name = self.final_path.name
-            self.partial_name = self.final_name + ".partial"
+            if partial_name is None:
+                self.partial_name = self.final_name + ".partial"
+            elif (
+                not isinstance(partial_name, str)
+                or not partial_name
+                or partial_name in {".", "..", self.final_name}
+                or "/" in partial_name
+                or "\\" in partial_name
+                or os.path.basename(partial_name) != partial_name
+            ):
+                raise OSError
+            else:
+                self.partial_name = partial_name
             self.partial_path = self.parent / self.partial_name
             if not self.final_name:
                 raise OSError
@@ -409,7 +473,10 @@ class _DestinationGuard:
             if os.path.normcase(parent_realpath) != os.path.normcase(parent_abspath):
                 raise OSError
             parent_result = os.lstat(self.parent)
-            if not _is_plain_directory(parent_result):
+            if not _destination_parent_allowed(
+                parent_result,
+                require_private_parent=self.require_private_parent,
+            ):
                 raise OSError
             self.parent_identity = _file_identity(parent_result)
             self.parent_realpath = parent_realpath
@@ -422,9 +489,11 @@ class _DestinationGuard:
                 self.directory_fd = os.open(str(self.parent), flags)
                 opened_parent = os.fstat(self.directory_fd)
                 if (
-                    not _is_plain_directory(opened_parent)
+                    not _destination_parent_allowed(
+                        opened_parent,
+                        require_private_parent=self.require_private_parent,
+                    )
                     or _file_identity(opened_parent) != self.parent_identity
-                    or opened_parent.st_uid != os.getuid()
                 ):
                     raise OSError
             elif os.name == "nt":
@@ -481,7 +550,10 @@ class _DestinationGuard:
         try:
             path_result = os.lstat(self.parent)
             if (
-                not _is_plain_directory(path_result)
+                not _destination_parent_allowed(
+                    path_result,
+                    require_private_parent=self.require_private_parent,
+                )
                 or _file_identity(path_result) != self.parent_identity
                 or os.path.normcase(os.path.realpath(self.parent))
                 != os.path.normcase(self.parent_realpath)
@@ -490,9 +562,11 @@ class _DestinationGuard:
             if self.directory_fd is not None:
                 opened_parent = os.fstat(self.directory_fd)
                 if (
-                    not _is_plain_directory(opened_parent)
+                    not _destination_parent_allowed(
+                        opened_parent,
+                        require_private_parent=self.require_private_parent,
+                    )
                     or _file_identity(opened_parent) != self.parent_identity
-                    or opened_parent.st_uid != os.getuid()
                 ):
                     raise OSError
             elif os.name == "nt":
@@ -646,9 +720,11 @@ class _DestinationGuard:
             if self.directory_fd is not None:
                 opened_parent = os.fstat(self.directory_fd)
                 if (
-                    not _is_plain_directory(opened_parent)
+                    not _destination_parent_allowed(
+                        opened_parent,
+                        require_private_parent=self.require_private_parent,
+                    )
                     or _file_identity(opened_parent) != self.parent_identity
-                    or opened_parent.st_uid != os.getuid()
                 ):
                     return
                 try:
@@ -842,6 +918,7 @@ def download_file_to_path(
     deadline_monotonic: float | None = None,
     workspace_reserve_bytes: int = 0,
     hard_max_bytes: int | None = None,
+    require_private_parent: bool = False,
     disk_usage: Callable[[str | os.PathLike[str]], Any] = shutil.disk_usage,
     free_bytes: Callable[[str | os.PathLike[str]], int] | None = None,
     monotonic: Callable[[], float] = time.monotonic,
@@ -871,6 +948,8 @@ def download_file_to_path(
         raise MediaTransferError("invalid_size_limit")
     if isinstance(workspace_reserve_bytes, bool) or not isinstance(workspace_reserve_bytes, int) or workspace_reserve_bytes < 0:
         raise MediaTransferError("invalid_disk_reserve")
+    if type(require_private_parent) is not bool:
+        raise MediaTransferError("invalid_destination_policy")
     if (
         isinstance(max_attempts, bool)
         or not isinstance(max_attempts, int)
@@ -893,7 +972,10 @@ def download_file_to_path(
         raise MediaTransferError("invalid_transport")
     if free_bytes is not None and not callable(free_bytes):
         raise MediaTransferError("invalid_disk_guard")
-    destination_guard = _DestinationGuard(destination)
+    destination_guard = _DestinationGuard(
+        destination,
+        require_private_parent=require_private_parent,
+    )
     try:
         for attempt in range(attempts):
             created_partial = False

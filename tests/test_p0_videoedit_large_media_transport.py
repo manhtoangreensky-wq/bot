@@ -4,6 +4,7 @@ import importlib
 import hashlib
 import os
 import re
+import stat
 
 import pytest
 
@@ -15,6 +16,14 @@ TOKEN = "123:token"
 LOCAL_ROOT = "https://tg.toanaas.vn"
 LOCAL_FILE_ROOT = "/var/lib/telegram-bot-api"
 LOCAL_MEDIA_PATH = "/localfile"
+OTHER_PRINCIPAL_PERMISSION_BITS = (
+    stat.S_IRGRP,
+    stat.S_IWGRP,
+    stat.S_IXGRP,
+    stat.S_IROTH,
+    stat.S_IWOTH,
+    stat.S_IXOTH,
+)
 
 
 def _media_transport():
@@ -767,6 +776,99 @@ def test_download_never_takes_over_a_preexisting_partial(tmp_path) -> None:
     assert not target.exists()
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX destination permission contract")
+@pytest.mark.parametrize("unsafe_permission_bit", OTHER_PRINCIPAL_PERMISSION_BITS)
+def test_download_rejects_destination_parent_access_by_other_principals(
+    tmp_path, unsafe_permission_bit
+) -> None:
+    media_transport = _media_transport()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(mode=0o700)
+    target = workspace / "clip.mp4"
+    target.write_bytes(b"old-final")
+    original_mode = stat.S_IMODE(workspace.stat().st_mode)
+    workspace.chmod(0o700 | unsafe_permission_bit)
+    stream = _BoundedStream([b"new-final"])
+
+    try:
+        with pytest.raises(media_transport.MediaTransferError) as error:
+            media_transport.download_file_to_path(
+                config=_local_config(),
+                file_id="file-id",
+                destination=target,
+                get_file_json=_get_file(
+                    path="/var/lib/telegram-bot-api/123:token/videos/file.mp4",
+                    size=9,
+                ),
+                stream_bytes=stream,
+                max_attempts=1,
+                require_private_parent=True,
+            )
+    finally:
+        workspace.chmod(original_mode)
+
+    assert error.value.reason == "invalid_destination"
+    assert target.read_bytes() == b"old-final"
+    assert stream.requested == []
+    assert not target.with_name("clip.mp4.partial").exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX opt-in permission contract")
+def test_destination_parent_privacy_policy_is_explicitly_opt_in(tmp_path) -> None:
+    media_transport = _media_transport()
+    workspace = tmp_path / "shared-workspace"
+    workspace.mkdir(mode=0o700)
+    target = workspace / "clip.mp4"
+    original_mode = stat.S_IMODE(workspace.stat().st_mode)
+    workspace.chmod(original_mode | stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP)
+    try:
+        compatible = media_transport._DestinationGuard(
+            target,
+            require_private_parent=False,
+        )
+        compatible.close()
+        with pytest.raises(media_transport.MediaTransferError):
+            media_transport._DestinationGuard(
+                target,
+                require_private_parent=True,
+            )
+    finally:
+        workspace.chmod(original_mode)
+
+
+@pytest.mark.parametrize(
+    "unsafe_permission_bit",
+    OTHER_PRINCIPAL_PERMISSION_BITS,
+)
+def test_destination_parent_policy_rejects_posix_access_by_other_principals(
+    unsafe_permission_bit,
+) -> None:
+    media_transport = _media_transport()
+    unsafe_result = type(
+        "UnsafeDirectoryResult",
+        (),
+        {
+            "st_mode": stat.S_IFDIR | 0o700 | unsafe_permission_bit,
+            "st_uid": 1000,
+        },
+    )()
+    safe_result = type(
+        "SafeDirectoryResult",
+        (),
+        {"st_mode": stat.S_IFDIR | 0o700, "st_uid": 1000},
+    )()
+    assert media_transport._is_private_owned_directory(
+        unsafe_result,
+        platform_name="posix",
+        effective_uid=1000,
+    ) is False
+    assert media_transport._is_private_owned_directory(
+        safe_result,
+        platform_name="posix",
+        effective_uid=1000,
+    ) is True
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Windows holds an undeletable parent lease")
 def test_download_parent_swap_fails_closed_and_preserves_both_final_files(
     tmp_path, monkeypatch
@@ -777,6 +879,9 @@ def test_download_parent_swap_fails_closed_and_preserves_both_final_files(
     attacker = tmp_path / "attacker-workspace"
     workspace.mkdir()
     attacker.mkdir()
+    if os.name == "posix":
+        workspace.chmod(0o700)
+        attacker.chmod(0o700)
     target = workspace / "clip.mp4"
     target.write_bytes(b"original")
     (attacker / "clip.mp4").write_bytes(b"attacker")
