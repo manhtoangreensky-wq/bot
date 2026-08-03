@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import hashlib
 import os
+import re
 
 import pytest
 
@@ -1099,3 +1100,658 @@ def test_download_never_retries_nontransient_failures(tmp_path, failure) -> None
 
     assert len(attempts) == 1
     assert delays == []
+
+
+def _sparse_mp4(path, size: int):
+    with path.open("wb") as handle:
+        handle.write(b"\x00\x00\x00\x18ftypmp42")
+        handle.seek(max(12, int(size)) - 1)
+        handle.write(b"\x00")
+    return path
+
+
+def _accepted_receipt(method_name: str, *, message_id=77):
+    field = "video" if method_name == "sendVideo" else "document"
+    return {
+        "ok": True,
+        "result": {
+            "message_id": message_id,
+            field: {"file_id": f"{field}-file-id"},
+        },
+    }
+
+
+def _consume_request(calls, response=None):
+    def request(**kwargs):
+        chunks = list(kwargs["body"])
+        calls.append({**kwargs, "chunks": chunks, "body_bytes": sum(map(len, chunks))})
+        if callable(response):
+            return response(kwargs)
+        return response if response is not None else _accepted_receipt(kwargs["method_name"])
+
+    return request
+
+
+def _request_boundary(call) -> str:
+    content_type = call["headers"]["Content-Type"]
+    prefix = "multipart/form-data; boundary="
+    assert content_type.startswith(prefix)
+    boundary = content_type[len(prefix) :]
+    assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{31,69}", boundary)
+    return boundary
+
+
+def _multipart_part_headers(body: bytes, boundary: str) -> list[bytes]:
+    delimiter = f"--{boundary}".encode("ascii")
+    parts = body.split(delimiter)[1:-1]
+    return [part.split(b"\r\n\r\n", 1)[0] for part in parts]
+
+
+def test_delivery_streams_exact_multipart_for_advertised_boundary_and_receipts_hash(
+    tmp_path,
+) -> None:
+    media_transport = _media_transport()
+    artifact = tmp_path / "clip.mp4"
+    artifact.write_bytes(b"mp4-payload")
+    calls = []
+    candidate = "ToanAasBoundaryExactBody000000000000000000000001"
+
+    receipt = media_transport.send_artifact_from_path(
+        config=_local_config(),
+        chat_id="-100123",
+        artifact=artifact,
+        caption="render done",
+        request=_consume_request(calls),
+        _boundary_factory=lambda: candidate,
+    )
+
+    assert len(calls) == 1
+    call = calls[0]
+    boundary = _request_boundary(call)
+    assert boundary == candidate
+    expected = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
+        "-100123\r\n"
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="caption"\r\n\r\n'
+        "render done\r\n"
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="video"; filename="clip.mp4"\r\n'
+        "Content-Type: video/mp4\r\n\r\n"
+    ).encode() + b"mp4-payload" + f"\r\n--{boundary}--\r\n".encode()
+    assert b"".join(call["chunks"]) == expected
+    assert call["content_length"] == len(expected) == call["body_bytes"]
+    assert call["method_name"] == "sendVideo"
+    assert call["url"].endswith(f"/bot{TOKEN}/sendVideo")
+    assert call["follow_redirects"] is False
+    assert call["headers"] == {
+        "X-Toanaas-Proxy-Secret": "test-secret",
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+        "Content-Length": str(len(expected)),
+    }
+    assert receipt == media_transport.DeliveryReceipt(
+        message_id="77",
+        file_id="video-file-id",
+        delivery_method="sendVideo",
+        bytes_sent=len(b"mp4-payload"),
+        sha256=hashlib.sha256(b"mp4-payload").hexdigest(),
+    )
+
+
+def test_delivery_regenerates_boundary_when_split_chunk_collision_could_inject_chat_id(
+    tmp_path,
+) -> None:
+    media_transport = _media_transport()
+    collision = "ToanAasBoundaryCollision00000000000000000000001"
+    safe = "ToanAasBoundaryRegenerated000000000000000000001"
+    delimiter = f"\r\n--{collision}\r\n".encode("ascii")
+    split_at = media_transport.STREAM_CHUNK_BYTES - len(delimiter) // 2
+    injected = (
+        b'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
+        b"attacker-chat\r\n"
+    )
+    artifact = tmp_path / "collision.mp4"
+    artifact.write_bytes(b"x" * split_at + delimiter + injected + b"video-tail")
+    candidates = iter((collision, safe))
+    calls = []
+
+    media_transport.send_artifact_from_path(
+        config=_local_config(),
+        chat_id="owner-chat",
+        artifact=artifact,
+        request=_consume_request(calls),
+        preview_threshold_bytes=artifact.stat().st_size,
+        _boundary_factory=lambda: next(candidates),
+    )
+
+    assert len(calls) == 1
+    call = calls[0]
+    boundary = _request_boundary(call)
+    body = b"".join(call["chunks"])
+    assert boundary == safe
+    assert call["content_length"] == len(body)
+    assert collision.encode("ascii") in body
+    headers = _multipart_part_headers(body, boundary)
+    assert sum(b'name="chat_id"' in header for header in headers) == 1
+
+
+def test_delivery_collision_scan_uses_only_bounded_reads(tmp_path, monkeypatch) -> None:
+    media_transport = _media_transport()
+    artifact = _sparse_mp4(tmp_path / "scan.mp4", 2 * MIB + 17)
+    candidate = "ToanAasBoundaryBoundedScan000000000000000000001"
+    real_open = open
+    read_sizes = []
+
+    class TrackedFile:
+        def __init__(self, raw):
+            self.raw = raw
+
+        def read(self, size):
+            read_sizes.append(size)
+            return self.raw.read(size)
+
+        def __getattr__(self, name):
+            return getattr(self.raw, name)
+
+    def tracked_open(path, *args, **kwargs):
+        raw = real_open(path, *args, **kwargs)
+        return TrackedFile(raw) if os.path.abspath(path) == os.path.abspath(artifact) else raw
+
+    monkeypatch.setattr(media_transport, "open", tracked_open, raising=False)
+
+    media_transport.send_artifact_from_path(
+        config=_local_config(),
+        chat_id="7",
+        artifact=artifact,
+        request=_consume_request([]),
+        preview_threshold_bytes=artifact.stat().st_size,
+        _boundary_factory=lambda: candidate,
+    )
+
+    assert len(read_sizes) >= 10  # full scan plus full multipart iteration
+    assert all(0 < size <= media_transport.STREAM_CHUNK_BYTES for size in read_sizes)
+
+
+def test_delivery_selects_document_for_sparse_large_artifact_with_bounded_reads(
+    tmp_path, monkeypatch
+) -> None:
+    media_transport = _media_transport()
+    artifact = _sparse_mp4(tmp_path / "large.mp4", 21 * MIB)
+    real_open = open
+    read_sizes = []
+
+    class TrackedFile:
+        def __init__(self, raw):
+            self.raw = raw
+
+        def read(self, size):
+            read_sizes.append(size)
+            return self.raw.read(size)
+
+        def __getattr__(self, name):
+            return getattr(self.raw, name)
+
+    def tracked_open(path, *args, **kwargs):
+        raw = real_open(path, *args, **kwargs)
+        return TrackedFile(raw) if os.path.abspath(path) == os.path.abspath(artifact) else raw
+
+    monkeypatch.setattr(media_transport, "open", tracked_open, raising=False)
+    calls = []
+
+    def request(**kwargs):
+        total = 0
+        maximum = 0
+        for chunk in kwargs["body"]:
+            total += len(chunk)
+            maximum = max(maximum, len(chunk))
+        calls.append(
+            {
+                "method_name": kwargs["method_name"],
+                "body_bytes": total,
+                "maximum_chunk": maximum,
+                "content_length": kwargs["content_length"],
+            }
+        )
+        return _accepted_receipt(kwargs["method_name"])
+
+    receipt = media_transport.send_artifact_from_path(
+        config=_local_config(),
+        chat_id=123,
+        artifact=artifact,
+        request=request,
+    )
+
+    assert [call["method_name"] for call in calls] == ["sendDocument"]
+    assert receipt.delivery_method == "sendDocument"
+    assert receipt.bytes_sent == 21 * MIB
+    assert read_sizes
+    assert all(0 < size <= 512 * 1024 for size in read_sizes)
+    assert calls[0]["maximum_chunk"] <= 512 * 1024
+    assert calls[0]["body_bytes"] == calls[0]["content_length"]
+
+
+def test_delivery_selects_document_for_non_video_before_body_iteration(tmp_path) -> None:
+    media_transport = _media_transport()
+    artifact = tmp_path / "result.zip"
+    artifact.write_bytes(b"archive")
+    observed = []
+
+    def request(**kwargs):
+        observed.append((kwargs["method_name"], kwargs["body"].bytes_sent))
+        list(kwargs["body"])
+        return _accepted_receipt(kwargs["method_name"])
+
+    receipt = media_transport.send_artifact_from_path(
+        config=_local_config(), chat_id="7", artifact=artifact, request=request
+    )
+
+    assert observed == [("sendDocument", 0)]
+    assert receipt.delivery_method == "sendDocument"
+
+
+def test_delivery_falls_back_once_only_for_explicit_preacceptance_video_rejection(
+    tmp_path,
+) -> None:
+    media_transport = _media_transport()
+    artifact = tmp_path / "fallback.mp4"
+    artifact.write_bytes(b"video")
+    methods = []
+    bodies = []
+    boundaries = []
+    candidates = iter(
+        (
+            "ToanAasBoundaryFallbackVideo0000000000000000001",
+            "ToanAasBoundaryFallbackDocument00000000000000001",
+        )
+    )
+
+    def request(**kwargs):
+        methods.append(kwargs["method_name"])
+        bodies.append(kwargs["body"])
+        boundaries.append(_request_boundary(kwargs))
+        list(kwargs["body"])
+        if kwargs["method_name"] == "sendVideo":
+            return {
+                "ok": False,
+                "error_code": 400,
+                "description": "Bad Request: VIDEO_CONTENT_TYPE_INVALID",
+            }
+        return _accepted_receipt("sendDocument", message_id=88)
+
+    receipt = media_transport.send_artifact_from_path(
+        config=_local_config(),
+        chat_id="7",
+        artifact=artifact,
+        request=request,
+        _boundary_factory=lambda: next(candidates),
+    )
+
+    assert methods == ["sendVideo", "sendDocument"]
+    assert len(set(boundaries)) == 2
+    assert bodies[0] is not bodies[1]
+    assert all(body.closed for body in bodies)
+    assert receipt.message_id == "88"
+    assert receipt.delivery_method == "sendDocument"
+    assert receipt.file_id == "document-file-id"
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    (
+        "too-short",
+        "Toan Aas Boundary With Spaces 000000000000000000000",
+        "ToanAasBoundary\r\nInjected00000000000000000000000",
+        b"ToanAasBoundaryBytes00000000000000000000000001",
+        None,
+    ),
+)
+def test_delivery_invalid_boundary_factory_fails_before_request(
+    tmp_path, candidate
+) -> None:
+    media_transport = _media_transport()
+    artifact = tmp_path / "valid.mp4"
+    artifact.write_bytes(b"video")
+    calls = []
+
+    with pytest.raises(media_transport.MediaTransferError) as error:
+        media_transport.send_artifact_from_path(
+            config=_local_config(),
+            chat_id="7",
+            artifact=artifact,
+            request=lambda **kwargs: calls.append(kwargs),
+            _boundary_factory=lambda: candidate,
+        )
+
+    assert error.value.reason == "invalid_boundary"
+    assert calls == []
+
+
+def test_delivery_repeated_boundary_collision_exhaustion_fails_before_request(
+    tmp_path,
+) -> None:
+    media_transport = _media_transport()
+    collision = "ToanAasBoundaryAlwaysCollides00000000000000000001"
+    artifact = tmp_path / "collides.mp4"
+    artifact.write_bytes(b"prefix" + collision.encode("ascii") + b"suffix")
+    calls = []
+    factory_calls = []
+
+    with pytest.raises(media_transport.MediaTransferError) as error:
+        media_transport.send_artifact_from_path(
+            config=_local_config(),
+            chat_id="7",
+            artifact=artifact,
+            request=lambda **kwargs: calls.append(kwargs),
+            _boundary_factory=lambda: factory_calls.append(1) or collision,
+        )
+
+    assert error.value.reason == "invalid_boundary"
+    assert len(factory_calls) == media_transport.DELIVERY_BOUNDARY_ATTEMPTS
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "failure",
+    (
+        "timeout",
+        "connection",
+        "generic",
+        "server",
+        "server_with_client_json",
+        "redirect",
+        "malformed",
+        "list",
+        "incomplete_message",
+        "incomplete_media",
+        "wrong_media",
+        "request_timeout",
+        "too_early",
+        "unlisted_client_error",
+        "mismatched_status_code",
+        "rate_limit",
+        "conflict",
+    ),
+)
+def test_delivery_ambiguous_outcomes_are_unknown_and_never_resent(
+    tmp_path, failure
+) -> None:
+    media_transport = _media_transport()
+    artifact = tmp_path / "ambiguous.mp4"
+    artifact.write_bytes(b"video")
+    methods = []
+
+    def request(**kwargs):
+        methods.append(kwargs["method_name"])
+        if failure == "timeout":
+            raise TimeoutError("token=123:secret https://unsafe.example")
+        if failure == "connection":
+            raise ConnectionError("X-Toanaas-Proxy-Secret: private")
+        if failure == "generic":
+            raise RuntimeError("raw infrastructure failure")
+        list(kwargs["body"])
+        outcomes = {
+            "server": {"ok": False, "error_code": 503, "description": "secret"},
+            "server_with_client_json": {
+                "status_code": 503,
+                "ok": False,
+                "error_code": 400,
+                "description": "Bad Request: VIDEO_CONTENT_TYPE_INVALID",
+            },
+            "redirect": {"status_code": 302, "location": "https://unsafe.example"},
+            "malformed": "not-json",
+            "list": [True],
+            "incomplete_message": {"ok": True, "result": {"video": {"file_id": "v"}}},
+            "incomplete_media": {"ok": True, "result": {"message_id": 1, "video": {}}},
+            "wrong_media": {
+                "ok": True,
+                "result": {"message_id": 1, "document": {"file_id": "d"}},
+            },
+            "request_timeout": {
+                "ok": False,
+                "error_code": 408,
+                "description": "Request Timeout",
+            },
+            "too_early": {
+                "ok": False,
+                "error_code": 425,
+                "description": "Too Early",
+            },
+            "unlisted_client_error": {
+                "ok": False,
+                "error_code": 418,
+                "description": "I'm a teapot",
+            },
+            "mismatched_status_code": {
+                "ok": False,
+                "error_code": 400,
+                "status_code": 418,
+                "description": "Bad Request",
+            },
+            "rate_limit": {"ok": False, "error_code": 429, "description": "retry"},
+            "conflict": {"ok": False, "error_code": 409, "description": "conflict"},
+        }
+        return outcomes[failure]
+
+    with pytest.raises(media_transport.MediaTransferError) as error:
+        media_transport.send_artifact_from_path(
+            config=_local_config(token="123:secret", proxy_secret="private"),
+            chat_id="7",
+            artifact=artifact,
+            request=request,
+        )
+
+    assert error.value.reason == "delivery_unknown"
+    assert str(error.value) == "media transfer failed: delivery_unknown"
+    assert methods == ["sendVideo"]
+
+
+@pytest.mark.parametrize("message_id", (0, -1, True, "77", "arbitrary", 7.0, None))
+def test_delivery_success_with_malformed_message_id_is_unknown_and_never_resent(
+    tmp_path, message_id
+) -> None:
+    media_transport = _media_transport()
+    artifact = tmp_path / "malformed-message-id.mp4"
+    artifact.write_bytes(b"video")
+    methods = []
+
+    def request(**kwargs):
+        methods.append(kwargs["method_name"])
+        list(kwargs["body"])
+        return _accepted_receipt("sendVideo", message_id=message_id)
+
+    with pytest.raises(media_transport.MediaTransferError) as error:
+        media_transport.send_artifact_from_path(
+            config=_local_config(), chat_id="7", artifact=artifact, request=request
+        )
+
+    assert error.value.reason == "delivery_unknown"
+    assert methods == ["sendVideo"]
+
+
+def test_delivery_deterministic_rejection_without_fallback_is_rejected(tmp_path) -> None:
+    media_transport = _media_transport()
+    artifact = tmp_path / "rejected.mp4"
+    artifact.write_bytes(b"video")
+    methods = []
+
+    def request(**kwargs):
+        methods.append(kwargs["method_name"])
+        list(kwargs["body"])
+        return {"ok": False, "error_code": 403, "description": "Forbidden"}
+
+    with pytest.raises(media_transport.MediaTransferError) as error:
+        media_transport.send_artifact_from_path(
+            config=_local_config(), chat_id="7", artifact=artifact, request=request
+        )
+
+    assert error.value.reason == "delivery_rejected"
+    assert methods == ["sendVideo"]
+
+
+@pytest.mark.parametrize(
+    ("chat_id", "caption"),
+    (
+        ("7\r\nX-Evil: yes", "ok"),
+        ("", "ok"),
+        (True, "ok"),
+        ("7", "caption\r\n--boundary"),
+        ("7", "x" * 1025),
+    ),
+)
+def test_delivery_rejects_chat_and_caption_injection_before_request(
+    tmp_path, chat_id, caption
+) -> None:
+    media_transport = _media_transport()
+    artifact = tmp_path / "valid.mp4"
+    artifact.write_bytes(b"video")
+    calls = []
+
+    with pytest.raises(media_transport.MediaTransferError) as error:
+        media_transport.send_artifact_from_path(
+            config=_local_config(),
+            chat_id=chat_id,
+            artifact=artifact,
+            caption=caption,
+            request=lambda **kwargs: calls.append(kwargs),
+        )
+
+    assert error.value.reason in {"invalid_chat_id", "invalid_caption"}
+    assert calls == []
+
+
+def test_delivery_rejects_invalid_artifacts_and_symlink_parent_before_request(
+    tmp_path,
+) -> None:
+    media_transport = _media_transport()
+    calls = []
+    missing = tmp_path / "missing.mp4"
+
+    for artifact in (missing, tmp_path):
+        with pytest.raises(media_transport.MediaTransferError) as error:
+            media_transport.send_artifact_from_path(
+                config=_local_config(),
+                chat_id="7",
+                artifact=artifact,
+                request=lambda **kwargs: calls.append(kwargs),
+            )
+        assert error.value.reason == "invalid_artifact"
+
+    real_parent = tmp_path / "real"
+    real_parent.mkdir()
+    (real_parent / "clip.mp4").write_bytes(b"video")
+    linked_parent = tmp_path / "linked"
+    try:
+        linked_parent.symlink_to(real_parent, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+    with pytest.raises(media_transport.MediaTransferError) as error:
+        media_transport.send_artifact_from_path(
+            config=_local_config(),
+            chat_id="7",
+            artifact=linked_parent / "clip.mp4",
+            request=lambda **kwargs: calls.append(kwargs),
+        )
+    assert error.value.reason == "invalid_artifact"
+    assert calls == []
+
+
+def test_delivery_detects_midstream_size_mutation_and_closes_body_once(
+    tmp_path, monkeypatch
+) -> None:
+    media_transport = _media_transport()
+    artifact = _sparse_mp4(tmp_path / "mutated.mp4", MIB)
+    real_open = open
+    close_calls = []
+    bodies = []
+
+    class TrackedFile:
+        def __init__(self, raw):
+            self.raw = raw
+
+        def read(self, size):
+            return self.raw.read(size)
+
+        def close(self):
+            close_calls.append(1)
+            return self.raw.close()
+
+        def __getattr__(self, name):
+            return getattr(self.raw, name)
+
+    def tracked_open(path, *args, **kwargs):
+        raw = real_open(path, *args, **kwargs)
+        return TrackedFile(raw) if os.path.abspath(path) == os.path.abspath(artifact) else raw
+
+    monkeypatch.setattr(media_transport, "open", tracked_open, raising=False)
+
+    def request(**kwargs):
+        body = kwargs["body"]
+        bodies.append(body)
+        chunks = iter(body)
+        next(chunks)  # fixed multipart header
+        next(chunks)  # first bounded artifact chunk
+        with real_open(artifact, "r+b") as handle:
+            handle.truncate(16)
+        next(chunks)
+
+    with pytest.raises(media_transport.MediaTransferError) as error:
+        media_transport.send_artifact_from_path(
+            config=_local_config(), chat_id="7", artifact=artifact, request=request
+        )
+
+    assert error.value.reason == "delivery_unknown"
+    assert len(bodies) == 1 and bodies[0].closed is True
+    assert close_calls == [1, 1]  # collision scan and multipart body
+
+
+@pytest.mark.parametrize("outcome", ("success", "failure"))
+def test_delivery_closes_body_exactly_once_on_terminal_outcome(
+    tmp_path, monkeypatch, outcome
+) -> None:
+    media_transport = _media_transport()
+    artifact = tmp_path / f"close-{outcome}.mp4"
+    artifact.write_bytes(b"video")
+    real_open = open
+    close_calls = []
+    bodies = []
+
+    class TrackedFile:
+        def __init__(self, raw):
+            self.raw = raw
+
+        def read(self, size):
+            return self.raw.read(size)
+
+        def close(self):
+            close_calls.append(1)
+            return self.raw.close()
+
+        def __getattr__(self, name):
+            return getattr(self.raw, name)
+
+    def tracked_open(path, *args, **kwargs):
+        raw = real_open(path, *args, **kwargs)
+        return TrackedFile(raw) if os.path.abspath(path) == os.path.abspath(artifact) else raw
+
+    monkeypatch.setattr(media_transport, "open", tracked_open, raising=False)
+
+    def request(**kwargs):
+        bodies.append(kwargs["body"])
+        list(kwargs["body"])
+        if outcome == "failure":
+            raise ConnectionError("secret failure")
+        return _accepted_receipt(kwargs["method_name"])
+
+    if outcome == "success":
+        media_transport.send_artifact_from_path(
+            config=_local_config(), chat_id="7", artifact=artifact, request=request
+        )
+    else:
+        with pytest.raises(media_transport.MediaTransferError):
+            media_transport.send_artifact_from_path(
+                config=_local_config(), chat_id="7", artifact=artifact, request=request
+            )
+
+    assert len(bodies) == 1 and bodies[0].closed is True
+    assert close_calls == [1, 1]  # collision scan and multipart body

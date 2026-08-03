@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import stat
 import time
@@ -25,7 +26,9 @@ from services import telegram_transport
 SHORT_MEDIA_MAX_SECONDS = 60.0
 SHORT_MEDIA_MAX_BYTES = 20 * 1024 * 1024
 STREAM_CHUNK_BYTES = 512 * 1024
+DELIVERY_BOUNDARY_ATTEMPTS = 4
 _HEADER_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+_DELIVERY_BOUNDARY_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{31,69}$")
 
 
 def _effective_origin(url: str) -> tuple[str, str, int]:
@@ -121,6 +124,17 @@ class DownloadReceipt:
         """Compatibility alias that makes actual-versus-declared evidence explicit."""
 
         return self.bytes_written
+
+
+@dataclass(frozen=True)
+class DeliveryReceipt:
+    """Immutable evidence from one accepted Telegram artifact delivery."""
+
+    message_id: str
+    file_id: str
+    delivery_method: str
+    bytes_sent: int
+    sha256: str
 
 
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
@@ -1027,3 +1041,455 @@ def download_file_to_path(
         raise MediaTransferError("stream_failed")
     finally:
         destination_guard.close()
+
+
+def _stat_fingerprint(result: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        int(result.st_dev),
+        int(result.st_ino),
+        int(result.st_size),
+        int(result.st_mtime_ns),
+        int(result.st_ctime_ns),
+    )
+
+
+class _ArtifactSnapshot:
+    """Bind one delivery to a plain file and its captured plain parent."""
+
+    def __init__(self, artifact: str | os.PathLike[str]) -> None:
+        try:
+            raw_path = os.fspath(artifact)
+            self.path = Path(os.path.abspath(raw_path))
+            self.parent = self.path.parent
+            self.filename = self.path.name
+            if (
+                not self.filename
+                or len(self.filename.encode("utf-8")) > 255
+                or any(ord(char) < 32 or ord(char) == 127 for char in self.filename)
+                or any(char in self.filename for char in ('"', "\\"))
+            ):
+                raise OSError
+            parent_abspath = os.path.abspath(self.parent)
+            self.parent_realpath = os.path.realpath(self.parent)
+            if os.path.normcase(self.parent_realpath) != os.path.normcase(
+                parent_abspath
+            ):
+                raise OSError
+            parent_result = os.lstat(self.parent)
+            if not _is_plain_directory(parent_result):
+                raise OSError
+            self.parent_identity = _file_identity(parent_result)
+            file_result = os.lstat(self.path)
+            if not _is_plain_regular_file(file_result) or file_result.st_size < 1:
+                raise OSError
+            self.file_fingerprint = _stat_fingerprint(file_result)
+            self.size = int(file_result.st_size)
+            self.verify()
+        except (OSError, TypeError, ValueError, UnicodeError):
+            raise MediaTransferError("invalid_artifact") from None
+
+    def verify(self, opened: object | None = None) -> None:
+        try:
+            parent_result = os.lstat(self.parent)
+            if (
+                not _is_plain_directory(parent_result)
+                or _file_identity(parent_result) != self.parent_identity
+                or os.path.normcase(os.path.realpath(self.parent))
+                != os.path.normcase(self.parent_realpath)
+            ):
+                raise OSError
+            path_result = os.lstat(self.path)
+            if (
+                not _is_plain_regular_file(path_result)
+                or _stat_fingerprint(path_result) != self.file_fingerprint
+            ):
+                raise OSError
+            if opened is not None:
+                fileno = getattr(opened, "fileno", None)
+                if not callable(fileno):
+                    raise OSError
+                opened_result = os.fstat(fileno())
+                if (
+                    not _is_plain_regular_file(opened_result)
+                    or _stat_fingerprint(opened_result) != self.file_fingerprint
+                ):
+                    raise OSError
+        except (OSError, TypeError, ValueError):
+            raise MediaTransferError("invalid_artifact") from None
+
+
+class _MultipartArtifactBody:
+    """Single-use multipart iterable with bounded artifact reads."""
+
+    def __init__(
+        self,
+        *,
+        snapshot: _ArtifactSnapshot,
+        header: bytes,
+        footer: bytes,
+    ) -> None:
+        snapshot.verify()
+        self._snapshot = snapshot
+        self._header = header
+        self._footer = footer
+        self._file: object | None = None
+        self._started = False
+        self.closed = False
+        self.complete = False
+        self.bytes_sent = 0
+        self._digest = hashlib.sha256()
+
+    @property
+    def sha256(self) -> str:
+        return self._digest.hexdigest()
+
+    def __iter__(self) -> Iterable[bytes]:
+        if self._started or self.closed:
+            raise MediaTransferError("invalid_artifact")
+        self._started = True
+        return self._iterate()
+
+    def _iterate(self) -> Iterable[bytes]:
+        try:
+            self._snapshot.verify()
+            self._file = open(self._snapshot.path, "rb", buffering=0)
+            self._snapshot.verify(self._file)
+            yield self._header
+            while True:
+                self._snapshot.verify(self._file)
+                chunk = self._file.read(STREAM_CHUNK_BYTES)
+                self._snapshot.verify(self._file)
+                if not isinstance(chunk, bytes) or len(chunk) > STREAM_CHUNK_BYTES:
+                    raise MediaTransferError("invalid_artifact")
+                if not chunk:
+                    break
+                next_size = self.bytes_sent + len(chunk)
+                if next_size > self._snapshot.size:
+                    raise MediaTransferError("invalid_artifact")
+                self._digest.update(chunk)
+                self.bytes_sent = next_size
+                yield chunk
+            if self.bytes_sent != self._snapshot.size:
+                raise MediaTransferError("invalid_artifact")
+            self.complete = True
+            yield self._footer
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        opened = self._file
+        self._file = None
+        if opened is not None:
+            close = getattr(opened, "close", None)
+            if callable(close):
+                close()
+
+
+def _multipart_text(value: object, *, reason: str, maximum: int) -> str:
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise MediaTransferError(reason)
+    text = str(value)
+    if (
+        not text
+        or len(text) > maximum
+        or text != text.strip()
+        or any(ord(char) < 32 or ord(char) == 127 for char in text)
+    ):
+        raise MediaTransferError(reason)
+    return text
+
+
+def _delivery_header(
+    *,
+    boundary: str,
+    method_name: str,
+    chat_id: str,
+    caption: str,
+    snapshot: _ArtifactSnapshot,
+) -> bytes:
+    media_field = "video" if method_name == "sendVideo" else "document"
+    content_type = (
+        "video/mp4" if snapshot.path.suffix.lower() == ".mp4" else "application/octet-stream"
+    )
+    parts = [
+        f"--{boundary}\r\n",
+        'Content-Disposition: form-data; name="chat_id"\r\n\r\n',
+        f"{chat_id}\r\n",
+    ]
+    if caption:
+        parts.extend(
+            (
+                f"--{boundary}\r\n",
+                'Content-Disposition: form-data; name="caption"\r\n\r\n',
+                f"{caption}\r\n",
+            )
+        )
+    parts.extend(
+        (
+            f"--{boundary}\r\n",
+            f'Content-Disposition: form-data; name="{media_field}"; filename="{snapshot.filename}"\r\n',
+            f"Content-Type: {content_type}\r\n\r\n",
+        )
+    )
+    return "".join(parts).encode("utf-8")
+
+
+def _default_delivery_boundary() -> str:
+    return f"ToanAasBoundary{secrets.token_hex(24)}"
+
+
+def _artifact_contains_boundary(
+    *,
+    snapshot: _ArtifactSnapshot,
+    boundary: str,
+) -> bool:
+    needle = boundary.encode("ascii")
+    overlap = b""
+    opened: object | None = None
+    try:
+        snapshot.verify()
+        opened = open(snapshot.path, "rb", buffering=0)
+        snapshot.verify(opened)
+        while True:
+            snapshot.verify(opened)
+            chunk = opened.read(STREAM_CHUNK_BYTES)
+            snapshot.verify(opened)
+            if not isinstance(chunk, bytes) or len(chunk) > STREAM_CHUNK_BYTES:
+                raise MediaTransferError("invalid_artifact")
+            if not chunk:
+                snapshot.verify(opened)
+                snapshot.verify()
+                return False
+            window = overlap + chunk
+            if needle in window:
+                snapshot.verify(opened)
+                snapshot.verify()
+                return True
+            overlap = window[-(len(needle) - 1) :]
+    except MediaTransferError:
+        raise
+    except Exception:
+        raise MediaTransferError("invalid_artifact") from None
+    finally:
+        if opened is not None:
+            try:
+                opened.close()
+            except Exception:
+                pass
+
+
+def _select_delivery_boundary(
+    *,
+    snapshot: _ArtifactSnapshot,
+    boundary_factory: Callable[[], object],
+    used_boundaries: set[str],
+) -> str:
+    for _attempt in range(DELIVERY_BOUNDARY_ATTEMPTS):
+        try:
+            boundary = boundary_factory()
+        except Exception:
+            raise MediaTransferError("invalid_boundary") from None
+        if not isinstance(boundary, str) or not _DELIVERY_BOUNDARY_TOKEN.fullmatch(
+            boundary
+        ):
+            raise MediaTransferError("invalid_boundary")
+        if boundary in used_boundaries:
+            continue
+        if _artifact_contains_boundary(snapshot=snapshot, boundary=boundary):
+            continue
+        return boundary
+    raise MediaTransferError("invalid_boundary")
+
+
+def _parse_delivery_receipt(
+    payload: object,
+    *,
+    method_name: str,
+    body: _MultipartArtifactBody,
+) -> DeliveryReceipt:
+    if not isinstance(payload, Mapping) or payload.get("ok") is not True:
+        raise MediaTransferError("delivery_unknown")
+    result = payload.get("result")
+    if not isinstance(result, Mapping):
+        raise MediaTransferError("delivery_unknown")
+    message_id = result.get("message_id")
+    if isinstance(message_id, bool) or not isinstance(message_id, int) or message_id <= 0:
+        raise MediaTransferError("delivery_unknown")
+    media_field = "video" if method_name == "sendVideo" else "document"
+    media = result.get(media_field)
+    if not isinstance(media, Mapping):
+        raise MediaTransferError("delivery_unknown")
+    file_id = media.get("file_id")
+    if (
+        not isinstance(file_id, str)
+        or not file_id.strip()
+        or any(ord(char) < 32 or ord(char) == 127 for char in file_id)
+    ):
+        raise MediaTransferError("delivery_unknown")
+    if not body.complete or body.bytes_sent < 1:
+        raise MediaTransferError("delivery_unknown")
+    return DeliveryReceipt(
+        message_id=str(message_id).strip(),
+        file_id=file_id,
+        delivery_method=method_name,
+        bytes_sent=body.bytes_sent,
+        sha256=body.sha256,
+    )
+
+
+_PREACCEPTANCE_REJECTION_STATUS_CODES = frozenset(
+    (400, 401, 403, 404, 405, 411, 413, 414, 415, 422)
+)
+
+
+def _deterministic_rejection(payload: object) -> bool:
+    if not isinstance(payload, Mapping) or payload.get("ok") is not False:
+        return False
+    error_code = payload.get("error_code")
+    status_code = payload.get("status_code") if "status_code" in payload else error_code
+    description = payload.get("description")
+    return (
+        isinstance(error_code, int)
+        and not isinstance(error_code, bool)
+        and isinstance(status_code, int)
+        and not isinstance(status_code, bool)
+        and error_code in _PREACCEPTANCE_REJECTION_STATUS_CODES
+        and status_code == error_code
+        and error_code not in (409, 429)
+        and isinstance(description, str)
+        and bool(description.strip())
+    )
+
+
+def _eligible_video_fallback(payload: object) -> bool:
+    return bool(
+        isinstance(payload, Mapping)
+        and payload.get("ok") is False
+        and payload.get("error_code") == 400
+        and payload.get("description")
+        == "Bad Request: VIDEO_CONTENT_TYPE_INVALID"
+    )
+
+
+def send_artifact_from_path(
+    *,
+    config: TelegramMediaConfig,
+    chat_id: str | int,
+    artifact: str | os.PathLike[str],
+    request: Callable[..., object],
+    caption: str = "",
+    preview_threshold_bytes: int = SHORT_MEDIA_MAX_BYTES,
+    _boundary_factory: Callable[[], object] | None = None,
+) -> DeliveryReceipt:
+    """Deliver one artifact with bounded multipart streaming and no blind retry."""
+
+    if not isinstance(config, TelegramMediaConfig):
+        raise MediaTransferError("invalid_config")
+    if not callable(request):
+        raise MediaTransferError("invalid_transport")
+    if _boundary_factory is not None and not callable(_boundary_factory):
+        raise MediaTransferError("invalid_boundary")
+    boundary_factory = _boundary_factory or _default_delivery_boundary
+    if (
+        isinstance(preview_threshold_bytes, bool)
+        or not isinstance(preview_threshold_bytes, int)
+        or preview_threshold_bytes < 1
+    ):
+        raise MediaTransferError("invalid_preview_threshold")
+    normalized_chat_id = _multipart_text(
+        chat_id, reason="invalid_chat_id", maximum=128
+    )
+    if not isinstance(caption, str):
+        raise MediaTransferError("invalid_caption")
+    if caption:
+        normalized_caption = _multipart_text(
+            caption, reason="invalid_caption", maximum=1024
+        )
+    else:
+        normalized_caption = ""
+    snapshot = _ArtifactSnapshot(artifact)
+
+    first_method = (
+        "sendVideo"
+        if snapshot.path.suffix.lower() == ".mp4"
+        and snapshot.size <= preview_threshold_bytes
+        else "sendDocument"
+    )
+    methods = (
+        ("sendVideo", "sendDocument")
+        if first_method == "sendVideo"
+        else ("sendDocument",)
+    )
+    used_boundaries: set[str] = set()
+
+    for attempt, method_name in enumerate(methods):
+        snapshot.verify()
+        boundary = _select_delivery_boundary(
+            snapshot=snapshot,
+            boundary_factory=boundary_factory,
+            used_boundaries=used_boundaries,
+        )
+        used_boundaries.add(boundary)
+        method_url = telegram_transport.bot_method_url(
+            api_root=config.api_root,
+            token=config.token,
+            method=method_name,
+        )
+        header = _delivery_header(
+            boundary=boundary,
+            method_name=method_name,
+            chat_id=normalized_chat_id,
+            caption=normalized_caption,
+            snapshot=snapshot,
+        )
+        footer = f"\r\n--{boundary}--\r\n".encode("ascii")
+        content_length = len(header) + snapshot.size + len(footer)
+        body = _MultipartArtifactBody(
+            snapshot=snapshot,
+            header=header,
+            footer=footer,
+        )
+        headers = config.request_headers(request_url=method_url)
+        headers.update(
+            {
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Content-Length": str(content_length),
+            }
+        )
+        try:
+            try:
+                payload = request(
+                    method_name=method_name,
+                    url=method_url,
+                    headers=headers,
+                    content_length=content_length,
+                    body=body,
+                    follow_redirects=False,
+                )
+            except Exception:
+                raise MediaTransferError("delivery_unknown") from None
+            if payload is not None and isinstance(payload, Mapping) and payload.get("ok") is True:
+                return _parse_delivery_receipt(
+                    payload,
+                    method_name=method_name,
+                    body=body,
+                )
+            if _deterministic_rejection(payload):
+                if (
+                    attempt == 0
+                    and method_name == "sendVideo"
+                    and _eligible_video_fallback(payload)
+                ):
+                    continue
+                raise MediaTransferError("delivery_rejected")
+            raise MediaTransferError("delivery_unknown")
+        finally:
+            try:
+                body.close()
+            except Exception:
+                pass
+
+    raise MediaTransferError("delivery_rejected")
