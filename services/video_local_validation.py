@@ -235,13 +235,19 @@ def probe_video_file(path: str | os.PathLike[str], *, ffprobe_path: str = "", ti
     }
 
 
-def validate_source_metadata(metadata: dict[str, Any], *, file_size: int = 0) -> dict[str, Any]:
+def validate_source_metadata(
+    metadata: dict[str, Any],
+    *,
+    file_size: int = 0,
+    maximum_bytes: int = MAX_UPLOAD_BYTES,
+    maximum_duration_seconds: int = MAX_DURATION_SECONDS,
+) -> dict[str, Any]:
     data = dict(metadata or {})
     size = int(file_size or data.get("bytes") or 0)
     duration = float(data.get("duration") or 0)
-    if size > MAX_UPLOAD_BYTES:
+    if int(maximum_bytes or 0) > 0 and size > int(maximum_bytes):
         return {**data, "ok": False, "reason": "video_too_large"}
-    if duration > MAX_DURATION_SECONDS:
+    if int(maximum_duration_seconds or 0) > 0 and duration > int(maximum_duration_seconds):
         return {**data, "ok": False, "reason": "duration_too_long"}
     if not data.get("ok"):
         return {**data, "ok": False, "reason": str(data.get("reason") or "invalid_video")}
