@@ -579,6 +579,135 @@ def test_workspace_admission_returns_truthful_structured_evidence() -> None:
     assert accepted.accepted is True and accepted.reason == "accepted"
 
 
+def test_workspace_admission_accepts_fully_materialized_inputs_at_remaining_boundary() -> None:
+    source_bytes = 50_000_000
+    asset_bytes = [5_000_000]
+    estimate = long_media.estimate_workspace(
+        operation="overlay",
+        source_bytes=source_bytes,
+        asset_bytes=asset_bytes,
+        output_count=1,
+        reserve_bytes=10_000_000,
+    )
+    materialized_input_bytes = source_bytes + sum(asset_bytes)
+    remaining_required_bytes = estimate.required_bytes - materialized_input_bytes
+
+    decision = long_media.admit_workspace(
+        operation="overlay",
+        source_bytes=source_bytes,
+        asset_bytes=asset_bytes,
+        output_count=1,
+        reserve_bytes=10_000_000,
+        free_bytes=remaining_required_bytes,
+        materialized_input_bytes=materialized_input_bytes,
+    )
+
+    assert remaining_required_bytes == (
+        estimate.scratch_bytes + estimate.output_bytes + estimate.reserve_bytes
+    )
+    assert decision.accepted is True
+    assert decision.reason == "accepted"
+    assert decision.evidence["required_bytes"] == estimate.required_bytes
+    assert decision.evidence["materialized_input_bytes"] == materialized_input_bytes
+    assert decision.evidence["remaining_required_bytes"] == remaining_required_bytes
+
+
+def test_workspace_admission_rejects_one_byte_below_fully_materialized_boundary() -> None:
+    source_bytes = 50_000_000
+    asset_bytes = [5_000_000]
+    estimate = long_media.estimate_workspace(
+        operation="overlay",
+        source_bytes=source_bytes,
+        asset_bytes=asset_bytes,
+        output_count=1,
+        reserve_bytes=10_000_000,
+    )
+    materialized_input_bytes = source_bytes + sum(asset_bytes)
+    remaining_required_bytes = estimate.required_bytes - materialized_input_bytes
+
+    decision = long_media.admit_workspace(
+        operation="overlay",
+        source_bytes=source_bytes,
+        asset_bytes=asset_bytes,
+        output_count=1,
+        reserve_bytes=10_000_000,
+        free_bytes=remaining_required_bytes - 1,
+        materialized_input_bytes=materialized_input_bytes,
+    )
+
+    assert decision.accepted is False
+    assert decision.reason == "insufficient_workspace"
+    assert decision.evidence["remaining_required_bytes"] == remaining_required_bytes
+
+
+def test_workspace_admission_counts_only_unmaterialized_input_bytes() -> None:
+    source_bytes = 80_000_000
+    asset_bytes = [20_000_000]
+    materialized_input_bytes = 35_000_000
+    estimate = long_media.estimate_workspace(
+        operation="concat",
+        source_bytes=source_bytes,
+        asset_bytes=asset_bytes,
+        output_count=1,
+        reserve_bytes=5_000_000,
+    )
+    remaining_required_bytes = estimate.required_bytes - materialized_input_bytes
+
+    decision = long_media.admit_workspace(
+        operation="concat",
+        source_bytes=source_bytes,
+        asset_bytes=asset_bytes,
+        output_count=1,
+        reserve_bytes=5_000_000,
+        free_bytes=remaining_required_bytes,
+        materialized_input_bytes=materialized_input_bytes,
+    )
+
+    assert decision.accepted is True
+    assert decision.evidence["required_bytes"] == estimate.required_bytes
+    assert decision.evidence["materialized_input_bytes"] == materialized_input_bytes
+    assert decision.evidence["remaining_required_bytes"] == remaining_required_bytes
+
+
+@pytest.mark.parametrize("bad", [121, -1, True])
+def test_workspace_admission_rejects_invalid_materialized_input_bytes(bad) -> None:
+    decision = long_media.admit_workspace(
+        operation="manual",
+        source_bytes=100,
+        asset_bytes=[20],
+        output_count=1,
+        reserve_bytes=0,
+        free_bytes=10_000,
+        materialized_input_bytes=bad,
+    )
+
+    assert decision.accepted is False
+    assert decision.reason == "invalid_input"
+
+
+def test_workspace_admission_defaults_materialized_input_to_zero() -> None:
+    estimate = long_media.estimate_workspace(
+        operation="manual",
+        source_bytes=100,
+        asset_bytes=[20],
+        output_count=1,
+        reserve_bytes=0,
+    )
+
+    decision = long_media.admit_workspace(
+        operation="manual",
+        source_bytes=100,
+        asset_bytes=[20],
+        output_count=1,
+        reserve_bytes=0,
+        free_bytes=estimate.required_bytes,
+    )
+
+    assert decision.accepted is True
+    assert decision.evidence["materialized_input_bytes"] == 0
+    assert decision.evidence["remaining_required_bytes"] == estimate.required_bytes
+
+
 def test_workspace_internal_emergency_cap_is_optional_and_not_a_public_limit() -> None:
     common = dict(
         operation="manual",

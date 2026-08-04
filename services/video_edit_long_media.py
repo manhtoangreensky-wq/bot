@@ -650,6 +650,7 @@ def admit_workspace(
     asset_bytes: Iterable[int | None] | int | None = (),
     output_count: int | None = 1,
     free_bytes: int | None,
+    materialized_input_bytes: int = 0,
     reserve_bytes: int = DEFAULT_WORKSPACE_RESERVE_BYTES,
     emergency_cap_bytes: int = 0,
 ) -> AdmissionDecision:
@@ -674,9 +675,16 @@ def admit_workspace(
             reserve_bytes=reserve_bytes,
         )
         free_value = _nonnegative_integer(free_bytes, "free_bytes")
+        materialized_value = _nonnegative_integer(
+            materialized_input_bytes, "materialized_input_bytes"
+        )
         cap_value = _nonnegative_integer(emergency_cap_bytes, "emergency_cap_bytes")
     except (TypeError, ValueError, OverflowError):
         return AdmissionDecision(False, "invalid_input", {"size_known": True})
+    declared_total = estimate.source_bytes + estimate.asset_bytes
+    if materialized_value > declared_total:
+        return AdmissionDecision(False, "invalid_input", {"size_known": True})
+    remaining_required_bytes = estimate.required_bytes - materialized_value
     evidence = {
         "operation": estimate.operation,
         "source_bytes": estimate.source_bytes,
@@ -685,13 +693,14 @@ def admit_workspace(
         "estimated_bytes": estimate.estimated_bytes,
         "reserve_bytes": estimate.reserve_bytes,
         "required_bytes": estimate.required_bytes,
+        "materialized_input_bytes": materialized_value,
+        "remaining_required_bytes": remaining_required_bytes,
         "free_bytes": free_value,
         "emergency_cap_enabled": bool(cap_value),
     }
-    declared_total = estimate.source_bytes + estimate.asset_bytes
     if cap_value and declared_total > cap_value:
         return AdmissionDecision(False, "internal_emergency_cap", evidence)
-    if free_value < estimate.required_bytes:
+    if free_value < remaining_required_bytes:
         return AdmissionDecision(False, "insufficient_workspace", evidence)
     return AdmissionDecision(True, "accepted", evidence)
 
