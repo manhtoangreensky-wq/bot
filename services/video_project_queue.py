@@ -54,6 +54,8 @@ PRODUCT_VIDEO_ADMISSION_TTL_SECONDS_DEFAULT = 60
 PRODUCT_VIDEO_FINAL_ADMISSION_CONTEXT_VERSION = "product_video_final_admission_v1"
 PRODUCT_VIDEO_PROBATION_ADMISSION_MODE = "public_confirmed_probation"
 PRODUCT_VIDEO_PROBATION_FAILURE_COOLDOWN_SECONDS_DEFAULT = 1800
+PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_MAX_ATTEMPTS = 3
+PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_COOLDOWN_SECONDS = 60
 PRODUCT_VIDEO_RECONCILIATION_SOURCES = frozenset(
     {
         "watchdog_scheduler",
@@ -6143,6 +6145,8 @@ def product_video_existing_task_recovery_state(
     project: dict | None = None,
     result: dict | None = None,
     outbox: dict | None = None,
+    *,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     """Decide whether a failed job may resume by polling already-created tasks only."""
     job = dict(job or {})
@@ -6217,6 +6221,28 @@ def product_video_existing_task_recovery_state(
         and mapped == required
     )
     already_recovered = bool(result.get("recovery_existing_tasks_only"))
+    recovery_count = max(
+        _as_int(result.get("existing_task_recovery_count"), 0),
+        1 if already_recovered else 0,
+    )
+    recovery_max_attempts = PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_MAX_ATTEMPTS
+    recovery_attempts_remaining = max(0, recovery_max_attempts - recovery_count)
+    recovery_attempts_exhausted = recovery_count >= recovery_max_attempts
+    recovered_at_epoch = _parse_time_epoch(
+        result.get("existing_task_recovery_recovered_at")
+    )
+    current_dt = now or datetime.now()
+    current_epoch = current_dt.timestamp()
+    retry_after_epoch = (
+        recovered_at_epoch + PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_COOLDOWN_SECONDS
+        if recovered_at_epoch > 0
+        else 0.0
+    )
+    recovery_cooldown_active = bool(
+        already_recovered
+        and retry_after_epoch > 0
+        and current_epoch < retry_after_epoch
+    )
     recoverable = bool(
         job_status == "failed"
         and product_video
@@ -6228,12 +6254,11 @@ def product_video_existing_task_recovery_state(
         and mapping_verified
         and not charge_recorded
         and not delivered
-        and not already_recovered
+        and not recovery_attempts_exhausted
+        and not recovery_cooldown_active
     )
     if recoverable:
         blocker = ""
-    elif already_recovered:
-        blocker = "existing_task_recovery_already_used"
     elif job_status != "failed":
         blocker = "job_not_failed"
     elif not product_video:
@@ -6254,6 +6279,10 @@ def product_video_existing_task_recovery_state(
         blocker = "wallet_charge_already_recorded"
     elif delivered:
         blocker = "video_already_delivered"
+    elif recovery_attempts_exhausted:
+        blocker = "existing_task_recovery_attempts_exhausted"
+    elif recovery_cooldown_active:
+        blocker = "existing_task_recovery_cooldown_active"
     else:
         blocker = "existing_task_recovery_not_eligible"
     return {
@@ -6261,6 +6290,13 @@ def product_video_existing_task_recovery_state(
         "existing_task_recovery_recoverable": recoverable,
         "existing_task_recovery_block_reason": blocker,
         "existing_task_recovery_already_used": already_recovered,
+        "existing_task_recovery_count": recovery_count,
+        "existing_task_recovery_max_attempts": recovery_max_attempts,
+        "existing_task_recovery_attempts_remaining": recovery_attempts_remaining,
+        "existing_task_recovery_attempts_exhausted": recovery_attempts_exhausted,
+        "existing_task_recovery_cooldown_seconds": PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_COOLDOWN_SECONDS,
+        "existing_task_recovery_cooldown_active": recovery_cooldown_active,
+        "existing_task_recovery_retry_after": _format_epoch(retry_after_epoch),
         "existing_task_recovery_job_status": job_status,
         "existing_task_recovery_project_status": project_status,
         "existing_task_recovery_outbox_status": outbox_status,
@@ -6288,6 +6324,8 @@ def recover_product_video_existing_tasks(
 ) -> dict[str, Any]:
     """CAS-requeue a failed Product Video job for read-only polling of its old tasks."""
     ensure_video_project_queue_schema(conn)
+    recovery_moment = now or datetime.now()
+
     def snapshot() -> tuple[dict, dict, dict, dict, dict]:
         current_job = get_video_render_job(conn, int(job_id))
         current_project = (
@@ -6311,6 +6349,7 @@ def recover_product_video_existing_tasks(
             current_project,
             current_result,
             current_outbox,
+            now=recovery_moment,
         )
         return (
             current_job,
@@ -6331,7 +6370,7 @@ def recover_product_video_existing_tasks(
             conn.rollback()
             return {**state, "existing_task_recovery_recovered": False}
 
-        current = now_text(now)
+        current = now_text(recovery_moment)
         invoice = _json_loads(str(project.get("invoice_json") or ""), {})
         if not isinstance(invoice, dict):
             invoice = {}
@@ -6352,6 +6391,10 @@ def recover_product_video_existing_tasks(
             or result.get("provider_submit_source")
             or "public_user_final_confirm"
         ).strip()
+        prior_recovery_count = max(
+            _as_int(result.get("existing_task_recovery_count"), 0),
+            1 if result.get("recovery_existing_tasks_only") else 0,
+        )
         result.update(
             {
                 "status": "queued",
@@ -6364,11 +6407,15 @@ def recover_product_video_existing_tasks(
                 "recovery_existing_tasks_only": True,
                 "existing_task_recovery_recovered": True,
                 "existing_task_recovery_recovered_at": current,
-                "existing_task_recovery_count": _as_int(
-                    result.get("existing_task_recovery_count"),
-                    0,
-                )
-                + 1,
+                "existing_task_recovery_count": prior_recovery_count + 1,
+                "existing_task_recovery_max_attempts": PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_MAX_ATTEMPTS,
+                "existing_task_recovery_cooldown_seconds": PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_COOLDOWN_SECONDS,
+                "existing_task_recovery_retry_after": now_text(
+                    recovery_moment
+                    + timedelta(
+                        seconds=PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_COOLDOWN_SECONDS
+                    )
+                ),
                 "existing_task_recovery_outbox_status": str(
                     outbox.get("dispatch_status") or ""
                 ),
