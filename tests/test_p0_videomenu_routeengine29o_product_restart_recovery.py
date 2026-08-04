@@ -4,6 +4,7 @@ import asyncio
 import json
 import sqlite3
 import threading
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -507,6 +508,153 @@ def test_existing_task_recovery_requeues_job_without_reopening_dispatch_or_charg
     conn.close()
 
 
+def test_existing_task_recovery_retries_poll_only_after_transient_worker_failure(
+    tmp_path: Path,
+):
+    conn, job_id, project_id = _seed_existing_task_recovery_job(
+        tmp_path / "routeengine29o-repeat-recovery.db"
+    )
+    first_recovery_at = datetime(2026, 8, 4, 12, 0, 0)
+
+    first = queue.recover_product_video_existing_tasks(
+        conn,
+        job_id=job_id,
+        now=first_recovery_at,
+    )
+    assert first["existing_task_recovery_recovered"] is True
+    claimed = remote_worker_api._claim_video_render_candidate(
+        conn,
+        worker_id="routeengine29o-stale-worker",
+        product_video_only=True,
+        public_enabled=True,
+    )
+    assert int(claimed["id"]) == job_id
+
+    failed = remote_worker_api.fail_remote_worker_job(
+        conn,
+        worker_id="routeengine29o-stale-worker",
+        job_id=job_id,
+        safe_error="RuntimeError:real_video_renderer_unavailable",
+        retryable=False,
+        diagnostics={
+            "recovery_existing_tasks_only": True,
+            "worker_git_sha": "stale-worker-sha",
+            "worker_code_matches_runtime": False,
+            "provider_submit_allowed": False,
+            "automatic_retry_allowed": False,
+            "automatic_resubmit_allowed": False,
+            "automatic_fallback_allowed": False,
+            "no_charge": True,
+            "charged_xu": 0,
+        },
+    )
+    assert failed["status"] == "failed"
+
+    during_cooldown = queue.recover_product_video_existing_tasks(
+        conn,
+        job_id=job_id,
+        now=first_recovery_at + timedelta(seconds=30),
+    )
+    assert during_cooldown["existing_task_recovery_recovered"] is False
+    assert (
+        during_cooldown["existing_task_recovery_block_reason"]
+        == "existing_task_recovery_cooldown_active"
+    )
+
+    second = queue.recover_product_video_existing_tasks(
+        conn,
+        job_id=job_id,
+        now=first_recovery_at + timedelta(seconds=61),
+    )
+    assert second["existing_task_recovery_recovered"] is True
+    stored_job = queue.get_video_render_job(conn, job_id)
+    stored_project = queue.get_video_project(conn, project_id)
+    stored_outbox = queue.get_product_video_dispatch_outbox(conn, job_id=job_id)
+    stored_result = json.loads(stored_job["result_json"])
+
+    assert stored_job["status"] == "queued"
+    assert stored_project["status"] == "queued_for_worker"
+    assert stored_outbox["dispatch_status"] == "acknowledged"
+    assert stored_result["existing_task_recovery_count"] == 2
+    assert stored_result["recovery_existing_tasks_only"] is True
+    assert stored_result["provider_submit_allowed"] is False
+    assert stored_result["automatic_retry_allowed"] is False
+    assert stored_result["automatic_resubmit_allowed"] is False
+    assert stored_result["automatic_fallback_allowed"] is False
+    assert stored_result["no_charge"] is True
+    assert stored_result["charged_xu"] == 0
+
+    second_claim = remote_worker_api._claim_video_render_candidate(
+        conn,
+        worker_id="routeengine29o-current-worker",
+        product_video_only=True,
+        public_enabled=True,
+    )
+    assert int(second_claim["id"]) == job_id
+    assert int(second_claim["attempts"]) > int(second_claim["max_attempts"])
+    second_claim_result = json.loads(second_claim["result_json"])
+    assert second_claim_result["recovery_existing_tasks_only"] is True
+    assert second_claim_result["provider_submit_allowed"] is False
+    assert second_claim_result["automatic_resubmit_allowed"] is False
+    assert second_claim_result["automatic_fallback_allowed"] is False
+    assert second_claim_result["charged_xu"] == 0
+    conn.close()
+
+
+def test_existing_task_recovery_retry_is_bounded_and_cancellation_still_wins(
+    tmp_path: Path,
+):
+    conn, job_id, project_id = _seed_existing_task_recovery_job(
+        tmp_path / "routeengine29o-bounded-recovery.db"
+    )
+    started_at = datetime(2026, 8, 4, 12, 0, 0)
+
+    for attempt in range(1, 4):
+        recovered = queue.recover_product_video_existing_tasks(
+            conn,
+            job_id=job_id,
+            now=started_at + timedelta(minutes=attempt * 2),
+        )
+        assert recovered["existing_task_recovery_recovered"] is True
+        stored_job = queue.get_video_render_job(conn, job_id)
+        stored_result = json.loads(stored_job["result_json"])
+        assert stored_result["existing_task_recovery_count"] == attempt
+        conn.execute(
+            "UPDATE video_jobs SET status='failed',locked_by='',locked_at=NULL WHERE id=?",
+            (job_id,),
+        )
+        conn.execute(
+            "UPDATE video_projects SET status='failed' WHERE project_id=?",
+            (project_id,),
+        )
+        conn.commit()
+
+    exhausted = queue.recover_product_video_existing_tasks(
+        conn,
+        job_id=job_id,
+        now=started_at + timedelta(minutes=8),
+    )
+    assert exhausted["existing_task_recovery_recovered"] is False
+    assert (
+        exhausted["existing_task_recovery_block_reason"]
+        == "existing_task_recovery_attempts_exhausted"
+    )
+
+    conn.execute(
+        "UPDATE video_dispatch_outbox SET dispatch_status='cancelled' WHERE job_id=?",
+        (job_id,),
+    )
+    conn.commit()
+    cancelled = queue.recover_product_video_existing_tasks(
+        conn,
+        job_id=job_id,
+        now=started_at + timedelta(minutes=10),
+    )
+    assert cancelled["existing_task_recovery_recovered"] is False
+    assert cancelled["existing_task_recovery_block_reason"] == "dispatch_outbox_cancelled"
+    conn.close()
+
+
 def test_completion_preserves_recovery_no_charge_contract_when_worker_result_omits_it(
     monkeypatch,
     tmp_path,
@@ -880,9 +1028,9 @@ def test_recovery_cas_preserves_cancellation_that_wins_after_preflight(
     original_state = queue.product_video_existing_task_recovery_state
     state_calls = 0
 
-    def racing_state(job, project, result, outbox):
+    def racing_state(job, project, result, outbox, **kwargs):
         nonlocal state_calls
-        state = original_state(job, project, result, outbox)
+        state = original_state(job, project, result, outbox, **kwargs)
         state_calls += 1
         if state_calls == 1:
             racer = sqlite3.connect(db_path)
