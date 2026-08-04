@@ -235606,6 +235606,75 @@ async def internal_worker_job_update(request: Request):
     previous_job_type = str((previous_job or {}).get("job_type") or "")
     is_video_edit = previous_job_type == video_editengine1.WORKER_JOB_TYPE
     is_frame_video = previous_job_type == "frame_video_render"
+    if is_video_edit:
+        payload_worker_id = str(payload.get("worker_id") or "")
+        header_worker_id = str(request.headers.get("x-worker-id") or "")
+        if payload_worker_id and header_worker_id and payload_worker_id != header_worker_id:
+            raise HTTPException(status_code=409, detail="video_edit_worker_identity_conflict")
+        reported_owner = payload_worker_id or header_worker_id
+        admitted_owner = str((previous_job or {}).get("worker_id") or "")
+        if not reported_owner or not admitted_owner or reported_owner != admitted_owner:
+            raise HTTPException(status_code=409, detail="video_edit_worker_owner_mismatch")
+        worker_id = reported_owner
+
+        current_error_short = str(payload.get("error_short") or "")
+        try:
+            video_edit_detail = json.loads(current_error_short or "{}")
+        except (TypeError, ValueError):
+            video_edit_detail = {}
+        if not isinstance(video_edit_detail, dict):
+            video_edit_detail = {}
+        requested_stage = payload.get("stage") if "stage" in payload else video_edit_detail.get("stage")
+        requested_stage = str(requested_stage or "")
+        allowed_video_edit_stages = {
+            "inspecting_input",
+            "preparing_plan",
+            "processing_video",
+            "validating_output",
+            "delivering",
+            "delivered",
+            "failed_no_charge",
+            "delivery_unknown",
+        }
+        if len(requested_stage) > 64 or requested_stage not in allowed_video_edit_stages:
+            raise HTTPException(status_code=400, detail="video_edit_stage_invalid")
+        video_edit_detail["stage"] = requested_stage
+        merged_error_short = json.dumps(
+            video_edit_detail,
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        if len(merged_error_short.encode("utf-8")) > video_edit_payload_limit:
+            raise HTTPException(status_code=400, detail="video_edit_detail_too_large")
+        payload["error_short"] = merged_error_short
+
+        default_lease_seconds = max(
+            30,
+            min(3600, safe_int(LOCAL_WORKER_MAX_JOB_SECONDS, 600)),
+        )
+        try:
+            lease_seconds = safe_int(payload.get("lease_seconds"), default_lease_seconds)
+        except (TypeError, ValueError):
+            lease_seconds = default_lease_seconds
+        lease_seconds = max(30, min(3600, lease_seconds))
+        lease_now = now_text()
+        lease_expires_at = (
+            datetime.strptime(lease_now, "%Y-%m-%d %H:%M:%S")
+            + timedelta(seconds=lease_seconds)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        conn = db_connect()
+        try:
+            if not video_editengine1.renew_worker_lease(
+                conn,
+                worker_job_id=job_id,
+                lease_owner=reported_owner,
+                now=lease_now,
+                lease_expires_at=lease_expires_at,
+            ):
+                raise HTTPException(status_code=409, detail="video_edit_worker_lease_conflict")
+            conn.commit()
+        finally:
+            conn.close()
     if is_frame_video and status == "succeeded":
         try:
             frame_payload = json.loads(str((previous_job or {}).get("input_file_id") or "") or "{}")

@@ -187,6 +187,231 @@ def _rewrite_as_historic_v2(
     return token
 
 
+def test_video_edit_outbox_lease_rejects_live_competitor_and_terminal_update() -> None:
+    conn = _conn()
+    created = _create(conn)
+    worker_job_id = created["local_worker_job_id"]
+    acquired_at = "2030-01-02 03:04:05"
+    first_expiry = "2030-01-02 03:09:05"
+
+    assert conn.execute(
+        "SELECT status,lease_owner,lease_expires_at FROM video_edit_outbox "
+        "WHERE local_worker_job_id=?",
+        (worker_job_id,),
+    ).fetchone() == ("pending", "", "")
+    assert video_editengine1.renew_worker_lease(
+        conn,
+        worker_job_id=worker_job_id,
+        lease_owner="worker-a",
+        now=acquired_at,
+        lease_expires_at=first_expiry,
+    ) is True
+    assert conn.execute(
+        "SELECT lease_owner,lease_expires_at FROM video_edit_outbox WHERE local_worker_job_id=?",
+        (worker_job_id,),
+    ).fetchone() == ("worker-a", first_expiry)
+
+    assert video_editengine1.renew_worker_lease(
+        conn,
+        worker_job_id=worker_job_id,
+        lease_owner="worker-b",
+        now="2030-01-02 03:05:00",
+        lease_expires_at="2030-01-02 03:10:00",
+    ) is False
+    assert conn.execute(
+        "SELECT lease_owner,lease_expires_at FROM video_edit_outbox WHERE local_worker_job_id=?",
+        (worker_job_id,),
+    ).fetchone() == ("worker-a", first_expiry)
+
+    conn.execute(
+        "UPDATE video_edit_outbox SET status='running' WHERE local_worker_job_id=?",
+        (worker_job_id,),
+    )
+    renewed_expiry = "2030-01-02 03:12:00"
+    assert video_editengine1.renew_worker_lease(
+        conn,
+        worker_job_id=worker_job_id,
+        lease_owner="worker-a",
+        now="2030-01-02 03:06:00",
+        lease_expires_at=renewed_expiry,
+    ) is True
+    assert conn.execute(
+        "SELECT lease_owner,lease_expires_at FROM video_edit_outbox WHERE local_worker_job_id=?",
+        (worker_job_id,),
+    ).fetchone() == ("worker-a", renewed_expiry)
+
+    replacement_expiry = "2030-01-02 03:20:00"
+    assert video_editengine1.renew_worker_lease(
+        conn,
+        worker_job_id=worker_job_id,
+        lease_owner="worker-b",
+        now="2030-01-02 03:12:01",
+        lease_expires_at=replacement_expiry,
+    ) is True
+    assert conn.execute(
+        "SELECT lease_owner,lease_expires_at FROM video_edit_outbox WHERE local_worker_job_id=?",
+        (worker_job_id,),
+    ).fetchone() == ("worker-b", replacement_expiry)
+
+    conn.execute(
+        "UPDATE video_edit_jobs SET status='delivered' WHERE id=?",
+        (created["edit_job_id"],),
+    )
+    assert video_editengine1.renew_worker_lease(
+        conn,
+        worker_job_id=worker_job_id,
+        lease_owner="worker-b",
+        now="2030-01-02 03:13:00",
+        lease_expires_at="2030-01-02 03:25:00",
+    ) is False
+    assert conn.execute(
+        "SELECT lease_owner,lease_expires_at FROM video_edit_outbox WHERE local_worker_job_id=?",
+        (worker_job_id,),
+    ).fetchone() == ("worker-b", replacement_expiry)
+
+    conn.execute(
+        "UPDATE video_edit_jobs SET status='queued' WHERE id=?",
+        (created["edit_job_id"],),
+    )
+    for terminal_status in ("terminal_failed", "terminal_delivery_unknown"):
+        conn.execute(
+            "UPDATE video_edit_outbox SET status=? WHERE local_worker_job_id=?",
+            (terminal_status, worker_job_id),
+        )
+        assert video_editengine1.renew_worker_lease(
+            conn,
+            worker_job_id=worker_job_id,
+            lease_owner="worker-b",
+            now="2030-01-02 03:13:00",
+            lease_expires_at="2030-01-02 03:25:00",
+        ) is False
+        assert conn.execute(
+            "SELECT status,lease_owner,lease_expires_at FROM video_edit_outbox "
+            "WHERE local_worker_job_id=?",
+            (worker_job_id,),
+        ).fetchone() == (terminal_status, "worker-b", replacement_expiry)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"worker_job_id": 0, "lease_owner": "worker-a", "lease_expires_at": "2030-01-02 03:09:05"},
+        {"worker_job_id": 1, "lease_owner": "", "lease_expires_at": "2030-01-02 03:09:05"},
+        {"worker_job_id": 1, "lease_owner": "worker-a", "lease_expires_at": ""},
+        {"worker_job_id": 1, "lease_owner": "worker-a", "lease_expires_at": "not-a-timestamp"},
+    ],
+)
+def test_video_edit_outbox_lease_rejects_invalid_inputs_without_mutating_row(kwargs: dict) -> None:
+    conn = _conn()
+    created = _create(conn)
+    kwargs["worker_job_id"] = (
+        created["local_worker_job_id"] if kwargs["worker_job_id"] == 1 else kwargs["worker_job_id"]
+    )
+
+    assert video_editengine1.renew_worker_lease(
+        conn,
+        now="2030-01-02 03:04:05",
+        **kwargs,
+    ) is False
+    assert conn.execute(
+        "SELECT lease_owner,lease_expires_at FROM video_edit_outbox WHERE local_worker_job_id=?",
+        (created["local_worker_job_id"],),
+    ).fetchone() == ("", "")
+
+
+def test_video_edit_stage_update_is_bounded_monotonic_and_terminal_fenced() -> None:
+    conn = _conn()
+    created = _create(conn)
+    worker_job_id = created["local_worker_job_id"]
+    edit_job_id = created["edit_job_id"]
+    stages = (
+        ("inspecting_input", 25),
+        ("preparing_plan", 35),
+        ("processing_video", 55),
+        ("validating_output", 80),
+        ("delivering", 90),
+    )
+
+    observed_progress = []
+    for stage, expected_progress in stages:
+        video_editengine1.record_worker_update(
+            conn,
+            worker_job_id=worker_job_id,
+            worker_status="running",
+            detail={"stage": stage},
+            receipt={},
+        )
+        persisted = conn.execute(
+            "SELECT status,progress_percent FROM video_edit_jobs WHERE id=?",
+            (edit_job_id,),
+        ).fetchone()
+        assert persisted == ("rendering", expected_progress)
+        observed_progress.append(persisted[1])
+    assert observed_progress == sorted(observed_progress)
+
+    # A replay or an arbitrary stage name must not roll the durable progress back.
+    for rejected_stage in ("preparing_plan", "unbounded_worker_stage"):
+        video_editengine1.record_worker_update(
+            conn,
+            worker_job_id=worker_job_id,
+            worker_status="running",
+            detail={"stage": rejected_stage},
+            receipt={},
+        )
+        assert conn.execute(
+            "SELECT status,progress_percent FROM video_edit_jobs WHERE id=?",
+            (edit_job_id,),
+        ).fetchone() == ("rendering", 90)
+
+    video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"stage": "delivering", "validation": "passed"},
+        receipt=_receipt(),
+    )
+    assert conn.execute(
+        "SELECT status,progress_percent FROM video_edit_jobs WHERE id=?",
+        (edit_job_id,),
+    ).fetchone() == ("delivered", 100)
+
+
+@pytest.mark.parametrize("terminal_status", sorted(video_editengine1.TERMINAL_JOB_STATES))
+def test_video_edit_terminal_stages_fence_running_updates(terminal_status: str) -> None:
+    conn = _conn()
+    created = _create(conn)
+    worker_job_id = created["local_worker_job_id"]
+    edit_job_id = created["edit_job_id"]
+    initial_progress = 73
+    initial_outbox_status = f"terminal_{terminal_status}"
+    conn.execute(
+        "UPDATE video_edit_jobs SET status=?,progress_percent=? WHERE id=?",
+        (terminal_status, initial_progress, edit_job_id),
+    )
+    conn.execute(
+        "UPDATE video_edit_outbox SET status=? WHERE local_worker_job_id=?",
+        (initial_outbox_status, worker_job_id),
+    )
+    conn.commit()
+
+    video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="running",
+        detail={"stage": "processing_video"},
+        receipt={},
+    )
+
+    assert conn.execute(
+        "SELECT status,progress_percent FROM video_edit_jobs WHERE id=?",
+        (edit_job_id,),
+    ).fetchone() == (terminal_status, initial_progress)
+    assert conn.execute(
+        "SELECT status FROM video_edit_outbox WHERE local_worker_job_id=?",
+        (worker_job_id,),
+    ).fetchone() == (initial_outbox_status,)
+
+
 def test_job_identity_changes_for_every_supplied_source_asset_and_plan_schema() -> None:
     conn = _conn()
     base = _job_input()

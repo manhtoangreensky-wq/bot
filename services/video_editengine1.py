@@ -1381,6 +1381,71 @@ def get_job_by_worker_id(conn, worker_job_id: Any) -> dict[str, Any]:
     return get_job_by_worker_id_readonly(conn, worker_job_id)
 
 
+def renew_worker_lease(
+    conn,
+    *,
+    worker_job_id: Any,
+    lease_owner: Any,
+    now: Any,
+    lease_expires_at: Any,
+) -> bool:
+    """Atomically acquire or renew one eligible local-worker lease."""
+
+    try:
+        job_id = _strict_nonnegative_int(worker_job_id, reason="worker_job_id_invalid")
+    except ValueError:
+        return False
+    if job_id <= 0:
+        return False
+    if (
+        not isinstance(lease_owner, str)
+        or lease_owner != lease_owner.strip()
+        or not lease_owner
+        or len(lease_owner) > 120
+        or any(ord(char) < 33 or ord(char) > 126 for char in lease_owner)
+    ):
+        return False
+
+    def canonical_timestamp(value: Any) -> str:
+        if isinstance(value, datetime):
+            if value.tzinfo is not None or value.microsecond:
+                return ""
+            return value.strftime("%Y-%m-%d %H:%M:%S")
+        if not isinstance(value, str) or value != value.strip():
+            return ""
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError):
+            return ""
+        return value if parsed.strftime("%Y-%m-%d %H:%M:%S") == value else ""
+
+    current = canonical_timestamp(now)
+    expires = canonical_timestamp(lease_expires_at)
+    if not current or not expires or expires <= current:
+        return False
+    cursor = conn.execute(
+        """UPDATE video_edit_outbox AS o
+           SET lease_owner=?,lease_expires_at=?,updated_at=?
+           WHERE o.local_worker_job_id=?
+             AND o.status IN ('pending','running')
+             AND EXISTS (
+                 SELECT 1 FROM video_edit_jobs AS j
+                  WHERE j.id=o.edit_job_id
+                    AND j.local_worker_job_id=o.local_worker_job_id
+                    AND j.local_worker_job_id=?
+                    AND j.status IN ('queued','rendering')
+             )
+             AND (
+                 COALESCE(o.lease_owner,'')=''
+                 OR o.lease_owner=?
+                 OR COALESCE(o.lease_expires_at,'')=''
+                 OR o.lease_expires_at<=?
+             )""",
+        (lease_owner, expires, current, job_id, job_id, lease_owner, current),
+    )
+    return int(cursor.rowcount or 0) == 1
+
+
 def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail: dict, receipt: dict) -> dict[str, Any]:
     ensure_schema(conn)
     if not conn.in_transaction:
@@ -1426,7 +1491,9 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
     artifact_cursor = len(incoming_artifacts or current_artifacts)
     if status == "running":
         stage = str(detail.get("stage") or "rendering")
-        progress = {"inspecting_input": 25, "preparing_plan": 35, "processing_video": 55, "validating_output": 80, "delivering": 90}.get(stage, 40)
+        current_progress = int(current.get("progress_percent") or 0)
+        stage_progress = {"inspecting_input": 25, "preparing_plan": 35, "processing_video": 55, "validating_output": 80, "delivering": 90}.get(stage)
+        progress = max(current_progress, stage_progress) if stage_progress is not None else current_progress
         cursor = conn.execute(
             """UPDATE video_edit_jobs SET status='rendering',progress_percent=?,
                artifact_receipts_json=?,delivery_cursor=?,

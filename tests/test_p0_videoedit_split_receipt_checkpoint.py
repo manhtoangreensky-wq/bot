@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import ast
+import asyncio
 import json
 import sqlite3
+from datetime import datetime, timedelta
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -12,6 +16,111 @@ from services import video_editengine1
 
 ROOT = Path(__file__).resolve().parents[1]
 BOT_SOURCE = (ROOT / "bot.py").read_text(encoding="utf-8")
+
+
+class _EndpointHTTPException(Exception):
+    def __init__(self, *, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+class _EndpointRequest:
+    def __init__(self, headers: dict[str, str]) -> None:
+        self.headers = headers
+
+
+MUTATION_EVENT_PREFIX = "mutation:"
+
+
+class _EndpointConnection:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+        self.commit_calls = 0
+        self.close_calls = 0
+
+    def commit(self) -> None:
+        self.commit_calls += 1
+        self._events.append("db_commit")
+
+    def close(self) -> None:
+        self.close_calls += 1
+        self._events.append("db_close")
+
+
+def _mutation_events(events: list[str]) -> list[str]:
+    return [event for event in events if event.startswith(MUTATION_EVENT_PREFIX)]
+
+
+def _compiled_video_edit_job_update_endpoint(
+    *,
+    payload: dict,
+    previous_job: dict,
+    lease_renewed: bool,
+) -> tuple[object, list[str], list[dict], _EndpointConnection, list[tuple[tuple, dict]]]:
+    """Compile the endpoint alone so its mutation fence stays executable in isolation."""
+
+    source_tree = ast.parse(BOT_SOURCE)
+    endpoint = next(
+        node
+        for node in source_tree.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "internal_worker_job_update"
+    )
+    endpoint.decorator_list = []
+    events: list[str] = []
+    updates: list[dict] = []
+    renew_calls: list[tuple[tuple, dict]] = []
+    connection = _EndpointConnection(events)
+
+    async def read_json_body(_request):
+        events.append("read_json")
+        return dict(payload)
+
+    def update_local_worker_job(job_id, **kwargs):
+        events.append(f"{MUTATION_EVENT_PREFIX}update_local_worker_job")
+        updated = {"id": job_id, **kwargs}
+        updates.append(updated)
+        return updated
+
+    def downstream(name: str):
+        return lambda *_args, **_kwargs: events.append(f"{MUTATION_EVENT_PREFIX}{name}")
+
+    def renew_worker_lease(*args, **kwargs):
+        events.append("renew_worker_lease")
+        renew_calls.append((args, kwargs))
+        return lease_renewed
+
+    namespace = {
+        "Request": object,
+        "HTTPException": _EndpointHTTPException,
+        "json": json,
+        "verify_local_worker_access": lambda _request: events.append("token_auth"),
+        "read_json_body": read_json_body,
+        "get_local_worker_job": lambda _job_id: dict(previous_job),
+        "update_local_worker_job": update_local_worker_job,
+        "handle_frame_video_worker_job_update": downstream("frame_handler"),
+        "handle_paid_video_preview_worker_job_update": downstream("paid_preview_handler"),
+        "handle_video_ai_edit_worker_job_update": downstream("ai_edit_handler"),
+        "handle_video_local_edit_worker_job_update": downstream("video_edit_handler"),
+        "handle_social_link_import_worker_job_update": downstream("social_import_handler"),
+        "video_editengine1": SimpleNamespace(
+            WORKER_JOB_TYPE="video_local_edit",
+            renew_worker_lease=renew_worker_lease,
+        ),
+        "db_connect": lambda: (events.append("db_connect") or connection),
+        "now_text": lambda: "2030-01-02 03:04:05",
+        "datetime": datetime,
+        "timedelta": timedelta,
+        "safe_int": lambda value, default=0: int(value or default),
+        "LOCAL_WORKER_MAX_JOB_SECONDS": 600,
+    }
+    compiled = compile(
+        ast.fix_missing_locations(ast.Module(body=[endpoint], type_ignores=[])),
+        str(ROOT / "bot.py"),
+        "exec",
+    )
+    exec(compiled, namespace)
+    return namespace["internal_worker_job_update"], events, updates, connection, renew_calls
 
 
 def test_cleanup_failure_preserves_delivery_unknown_receipt_state() -> None:
@@ -662,3 +771,195 @@ def test_bot_endpoint_and_storage_preserve_the_full_video_edit_receipt() -> None
     endpoint = BOT_SOURCE[endpoint_start:endpoint_end]
     assert "video_edit_payload_limit = 128 * 1024" in endpoint
     assert "if is_video_edit else 4000" in endpoint
+
+
+def test_video_edit_job_update_returns_409_before_local_state_mutation_for_stale_owner() -> None:
+    endpoint, events, updates, connection, renew_calls = _compiled_video_edit_job_update_endpoint(
+        payload={"id": 77, "status": "running", "worker_id": "worker-b"},
+        previous_job={
+            "id": 77,
+            "job_type": video_editengine1.WORKER_JOB_TYPE,
+            "worker_id": "worker-a",
+        },
+        lease_renewed=False,
+    )
+
+    with pytest.raises(_EndpointHTTPException) as failure:
+        asyncio.run(endpoint(_EndpointRequest({"x-worker-id": "worker-b"})))
+
+    assert failure.value.status_code == 409
+    assert updates == []
+    assert renew_calls == []
+    assert _mutation_events(events) == []
+    assert connection.commit_calls == 0
+    assert connection.close_calls == 0
+
+
+def test_video_edit_job_update_binds_reporter_to_claimed_worker_before_mutation() -> None:
+    previous_job = {
+        "id": 78,
+        "job_type": video_editengine1.WORKER_JOB_TYPE,
+        "worker_id": "worker-a",
+    }
+    endpoint, rejected_events, rejected_updates, rejected_connection, rejected_renew_calls = _compiled_video_edit_job_update_endpoint(
+        payload={"id": 78, "status": "running", "worker_id": "worker-b"},
+        previous_job=previous_job,
+        lease_renewed=True,
+    )
+
+    # Shared-token authentication cannot make payload.worker_id authoritative.
+    with pytest.raises(_EndpointHTTPException) as failure:
+        asyncio.run(endpoint(_EndpointRequest({"x-worker-id": "worker-a"})))
+    assert failure.value.status_code == 409
+    assert "token_auth" in rejected_events
+    assert rejected_updates == []
+    assert rejected_renew_calls == []
+    assert _mutation_events(rejected_events) == []
+    assert rejected_connection.commit_calls == 0
+    assert rejected_connection.close_calls == 0
+
+    endpoint, accepted_events, accepted_updates, accepted_connection, accepted_renew_calls = _compiled_video_edit_job_update_endpoint(
+        payload={
+            "id": 78,
+            "status": "running",
+            "worker_id": "worker-a",
+            "stage": "processing_video",
+        },
+        previous_job=previous_job,
+        lease_renewed=True,
+    )
+    response = asyncio.run(endpoint(_EndpointRequest({"x-worker-id": "worker-a"})))
+
+    assert response["ok"] is True
+    assert len(accepted_updates) == 1
+    assert accepted_updates[0]["worker_id"] == "worker-a"
+    assert len(accepted_renew_calls) == 1
+    assert accepted_events.index("renew_worker_lease") < accepted_events.index(
+        f"{MUTATION_EVENT_PREFIX}update_local_worker_job"
+    )
+    assert accepted_connection.commit_calls == 1
+    assert accepted_connection.close_calls == 1
+
+
+def test_video_edit_job_update_rejects_exact_owner_when_lease_renewal_fails_before_mutation() -> None:
+    endpoint, events, updates, connection, renew_calls = _compiled_video_edit_job_update_endpoint(
+        payload={
+            "id": 79,
+            "status": "running",
+            "worker_id": "worker-a",
+            "stage": "processing_video",
+        },
+        previous_job={
+            "id": 79,
+            "job_type": video_editengine1.WORKER_JOB_TYPE,
+            "worker_id": "worker-a",
+        },
+        lease_renewed=False,
+    )
+
+    with pytest.raises(_EndpointHTTPException) as failure:
+        asyncio.run(endpoint(_EndpointRequest({"x-worker-id": "worker-a"})))
+
+    assert failure.value.status_code == 409
+    assert len(renew_calls) == 1
+    assert _mutation_events(events) == []
+    assert connection.commit_calls == 0
+    assert connection.close_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("requested_lease_seconds", "expected_lease_seconds"),
+    [(1, 30), (99_999, 3_600)],
+)
+def test_video_edit_endpoint_scopes_bounded_lease_and_stage_to_video_edit(
+    requested_lease_seconds: int,
+    expected_lease_seconds: int,
+) -> None:
+    endpoint, events, updates, connection, renew_calls = _compiled_video_edit_job_update_endpoint(
+        payload={
+            "id": 80,
+            "status": "running",
+            "worker_id": "worker-a",
+            "lease_seconds": requested_lease_seconds,
+            "stage": "processing_video",
+        },
+        previous_job={
+            "id": 80,
+            "job_type": video_editengine1.WORKER_JOB_TYPE,
+            "worker_id": "worker-a",
+        },
+        lease_renewed=True,
+    )
+
+    response = asyncio.run(endpoint(_EndpointRequest({"x-worker-id": "worker-a"})))
+
+    assert response["ok"] is True
+    assert len(renew_calls) == 1
+    renew_args, renew_kwargs = renew_calls[0]
+    assert renew_args == (connection,)
+    assert renew_kwargs["worker_job_id"] == 80
+    assert renew_kwargs["lease_owner"] == "worker-a"
+    lease_start = datetime.strptime(renew_kwargs["now"], "%Y-%m-%d %H:%M:%S")
+    lease_end = datetime.strptime(renew_kwargs["lease_expires_at"], "%Y-%m-%d %H:%M:%S")
+    assert int((lease_end - lease_start).total_seconds()) == expected_lease_seconds
+    assert json.loads(updates[0]["error_short"])["stage"] == "processing_video"
+    assert events.index("renew_worker_lease") < events.index(
+        f"{MUTATION_EVENT_PREFIX}update_local_worker_job"
+    )
+    assert connection.commit_calls == 1
+    assert connection.close_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("worker_status", "terminal_stage"),
+    [("succeeded", "delivered"), ("failed", "failed_no_charge")],
+)
+def test_video_edit_endpoint_accepts_truthful_terminal_worker_stages(
+    worker_status: str,
+    terminal_stage: str,
+) -> None:
+    endpoint, _events, updates, connection, renew_calls = (
+        _compiled_video_edit_job_update_endpoint(
+            payload={
+                "id": 82,
+                "status": worker_status,
+                "worker_id": "worker-a",
+                "stage": terminal_stage,
+            },
+            previous_job={
+                "id": 82,
+                "job_type": video_editengine1.WORKER_JOB_TYPE,
+                "worker_id": "worker-a",
+            },
+            lease_renewed=True,
+        )
+    )
+
+    response = asyncio.run(endpoint(_EndpointRequest({"x-worker-id": "worker-a"})))
+
+    assert response["ok"] is True
+    assert len(renew_calls) == 1
+    assert json.loads(updates[0]["error_short"])["stage"] == terminal_stage
+    assert connection.commit_calls == 1
+    assert connection.close_calls == 1
+
+
+def test_non_video_job_update_never_renews_or_receives_video_edit_stage_handling() -> None:
+    endpoint, events, updates, _connection, renew_calls = _compiled_video_edit_job_update_endpoint(
+        payload={
+            "id": 81,
+            "status": "running",
+            "worker_id": "worker-a",
+            "lease_seconds": 99_999,
+            "stage": "processing_video",
+        },
+        previous_job={"id": 81, "job_type": "other_local_job", "worker_id": "worker-a"},
+        lease_renewed=True,
+    )
+
+    response = asyncio.run(endpoint(_EndpointRequest({"x-worker-id": "worker-a"})))
+
+    assert response["ok"] is True
+    assert renew_calls == []
+    assert "renew_worker_lease" not in events
+    assert updates[0]["error_short"] == ""
