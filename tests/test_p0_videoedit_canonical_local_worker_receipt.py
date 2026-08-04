@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+import time
 import urllib.error
 from copy import deepcopy
 from pathlib import Path
@@ -30,6 +32,10 @@ def _run_job(
     source_validation_calls: list[dict] | None = None,
     job_user_id: str = "701",
     transport_evidence: dict | None = None,
+    liveness_evidence: list[str] | None = None,
+    liveness_factory_calls: list[tuple[object, object, object]] | None = None,
+    liveness_health_failure_at: int | None = None,
+    liveness_failure_on_stop: bool = False,
 ) -> tuple[dict, list[str]]:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -37,6 +43,13 @@ def _run_job(
     source.write_bytes(b"source-video")
     updates: list[dict] = []
     captions: list[str] = []
+
+    def record_observed_event(event: str) -> None:
+        for evidence in (observed_worker_steps, liveness_evidence):
+            if evidence is not None and evidence is not observed_worker_steps:
+                evidence.append(event)
+        if observed_worker_steps is not None:
+            observed_worker_steps.append(event)
 
     monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "123:test-token")
     monkeypatch.setenv("TELEGRAM_API_BASE_URL", "https://api.telegram.org")
@@ -60,6 +73,56 @@ def _run_job(
         "cleanup_job_workspace",
         lambda _workspace: {"ok": True, "removed": True},
     )
+    if liveness_evidence is not None or liveness_health_failure_at is not None:
+        health_check_count = 0
+
+        class FakeVideoEditJobLiveness:
+            def __init__(self) -> None:
+                self._stopped = False
+
+            def start(self) -> None:
+                liveness_evidence.append("start")
+
+            def update_stage(self, stage: str) -> None:
+                liveness_evidence.append(f"stage:{stage}")
+
+            def assert_healthy(self) -> None:
+                nonlocal health_check_count
+                health_check_count += 1
+                if liveness_evidence is not None:
+                    liveness_evidence.append("assert_healthy")
+                if health_check_count == liveness_health_failure_at:
+                    raise local_worker.LocalVideoEditError(
+                        "video_local_edit_worker_lease_lost"
+                    )
+                if liveness_failure_on_stop and self._stopped:
+                    raise local_worker.LocalVideoEditError(
+                        "video_local_edit_worker_lease_lost"
+                    )
+
+            def stop(self) -> None:
+                if self._stopped:
+                    return
+                self._stopped = True
+                liveness_evidence.append("stop")
+
+        def fake_video_edit_job_liveness(
+            job_id: object,
+            lease_seconds: object,
+            interval_seconds: object,
+        ) -> FakeVideoEditJobLiveness:
+            if liveness_factory_calls is not None:
+                liveness_factory_calls.append(
+                    (job_id, lease_seconds, interval_seconds)
+                )
+            return FakeVideoEditJobLiveness()
+
+        monkeypatch.setattr(
+            local_worker,
+            "video_edit_job_liveness",
+            fake_video_edit_job_liveness,
+            raising=False,
+        )
     def fake_download(*_args, **_kwargs) -> str:
         if observed_worker_steps is not None:
             observed_worker_steps.append("download")
@@ -206,6 +269,7 @@ def _run_job(
             **_kwargs,
         ):
             del request
+            record_observed_event("delivery")
             artifact_path = Path(artifact)
             artifact_size = artifact_path.stat().st_size
             delivery_method = (
@@ -367,6 +431,7 @@ def _run_job(
         }
 
     def fake_split_plan(*_args, **_kwargs) -> dict:
+        record_observed_event("execute")
         outputs = []
         for index in range(1, 3):
             output = workspace / f"part-{index}.mp4"
@@ -406,6 +471,7 @@ def _run_job(
         **_kwargs,
     ) -> video_edit_media_transport.DeliveryReceipt:
         del config, chat_id, request
+        record_observed_event("delivery")
         captions.append(str(caption or ""))
         index = len(captions)
         artifact_path = Path(artifact)
@@ -424,10 +490,35 @@ def _run_job(
             fake_media_delivery,
         )
         monkeypatch.setattr(local_worker, "telegram_send_video_receipt", fake_delivery)
-    monkeypatch.setattr(
-        local_worker,
-        "update_job",
-        lambda job_id, status, error_short="", output_url="", output_file_id="", **_kwargs: updates.append(
+    def fake_update_job(
+        job_id,
+        status,
+        error_short="",
+        output_url="",
+        output_file_id="",
+        **_kwargs,
+    ) -> None:
+        def has_percent_field(value: object) -> bool:
+            if isinstance(value, dict):
+                return any(
+                    "percent" in str(key).lower() or has_percent_field(item)
+                    for key, item in value.items()
+                )
+            if isinstance(value, (list, tuple)):
+                return any(has_percent_field(item) for item in value)
+            return False
+
+        if has_percent_field(_kwargs):
+            record_observed_event("percent_keyword")
+        try:
+            error_detail = json.loads(error_short)
+        except (TypeError, json.JSONDecodeError):
+            error_detail = None
+        if has_percent_field(error_detail):
+            record_observed_event("percent_error_short")
+        if liveness_evidence is not None and status != "running":
+            liveness_evidence.append("terminal_update")
+        updates.append(
             {
                 "job_id": job_id,
                 "status": status,
@@ -435,8 +526,9 @@ def _run_job(
                 "output_url": output_url,
                 "output_file_id": output_file_id,
             }
-        ),
-    )
+        )
+
+    monkeypatch.setattr(local_worker, "update_job", fake_update_job)
 
     payload = {
         "local1_contract": 1,
@@ -496,6 +588,464 @@ def _run_job(
         }
     )
     return updates[-1], captions
+
+
+def test_update_job_forwards_liveness_stage_and_lease_only_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str, dict, int, float | None]] = []
+
+    def fake_http_json(
+        method: str,
+        path: str,
+        payload: dict,
+        timeout: int,
+        *,
+        total_deadline_seconds: float | None = None,
+    ) -> dict:
+        calls.append((method, path, payload, timeout, total_deadline_seconds))
+        return {"ok": True}
+
+    monkeypatch.setattr(local_worker, "http_json", fake_http_json)
+
+    local_worker.update_job(
+        2701,
+        "running",
+        "{}",
+        stage="processing_video",
+        lease_seconds=900,
+    )
+    local_worker.update_job(2701, "running", "{}")
+    local_worker.update_job(
+        2702,
+        "succeeded",
+        "legacy-detail",
+        "legacy-output-url",
+        "legacy-file-id",
+    )
+    local_worker.update_job(2703, "running", "{}", stage="delivering")
+    local_worker.update_job(2704, "running", "{}", lease_seconds=600)
+
+    assert calls[0] == (
+        "POST",
+        "/internal/worker/job_update",
+        {
+            "job_id": 2701,
+            "status": "running",
+            "worker_id": local_worker.LOCAL_WORKER_ID,
+            "error_short": "{}",
+            "output_url": "",
+            "output_file_id": "",
+            "stage": "processing_video",
+            "lease_seconds": 900,
+        },
+        20,
+        local_worker.VIDEO_EDIT_LIVENESS_UPDATE_TIMEOUT_SECONDS,
+    )
+    assert calls[1] == (
+        "POST",
+        "/internal/worker/job_update",
+        {
+            "job_id": 2701,
+            "status": "running",
+            "worker_id": local_worker.LOCAL_WORKER_ID,
+            "error_short": "{}",
+            "output_url": "",
+            "output_file_id": "",
+        },
+        20,
+        None,
+    )
+    assert calls[2] == (
+        "POST",
+        "/internal/worker/job_update",
+        {
+            "job_id": 2702,
+            "status": "succeeded",
+            "worker_id": local_worker.LOCAL_WORKER_ID,
+            "error_short": "legacy-detail",
+            "output_url": "legacy-output-url",
+            "output_file_id": "legacy-file-id",
+        },
+        20,
+        None,
+    )
+    assert calls[3] == (
+        "POST",
+        "/internal/worker/job_update",
+        {
+            "job_id": 2703,
+            "status": "running",
+            "worker_id": local_worker.LOCAL_WORKER_ID,
+            "error_short": "{}",
+            "output_url": "",
+            "output_file_id": "",
+            "stage": "delivering",
+        },
+        20,
+        local_worker.VIDEO_EDIT_LIVENESS_UPDATE_TIMEOUT_SECONDS,
+    )
+    assert calls[4] == (
+        "POST",
+        "/internal/worker/job_update",
+        {
+            "job_id": 2704,
+            "status": "running",
+            "worker_id": local_worker.LOCAL_WORKER_ID,
+            "error_short": "{}",
+            "output_url": "",
+            "output_file_id": "",
+            "lease_seconds": 600,
+        },
+        20,
+        local_worker.VIDEO_EDIT_LIVENESS_UPDATE_TIMEOUT_SECONDS,
+    )
+
+
+def test_http_json_total_deadline_closes_stalled_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    total_deadline_seconds = 0.05
+    response_events: list[str] = []
+
+    class FakeResponse:
+        def __init__(self) -> None:
+            self.closed = False
+            self.closed_event = threading.Event()
+
+        def __enter__(self):
+            response_events.append("enter")
+            return self
+
+        def __exit__(self, *_args) -> None:
+            response_events.append("exit")
+
+        def close(self) -> None:
+            self.closed = True
+            response_events.append("close")
+            self.closed_event.set()
+
+        def read(self, size: int | None = None) -> bytes:
+            if size is None or size <= 0 or size > 512 * 1024 + 1:
+                pytest.fail("response reads must use the bounded JSON body limit")
+            response_events.append("read")
+            # One second is only a safety escape hatch for a broken cancellation
+            # path; the real deadline must close the response much sooner.
+            if not self.closed_event.wait(timeout=1):
+                pytest.fail("the total deadline did not close the stalled response")
+            raise OSError("response closed by total deadline")
+
+    response = FakeResponse()
+
+    def fake_urlopen(_request, timeout=0) -> FakeResponse:
+        assert 0 < timeout <= total_deadline_seconds
+        return response
+
+    monkeypatch.setattr(local_worker.urllib.request, "urlopen", fake_urlopen)
+
+    started_at = time.monotonic()
+    with pytest.raises(TimeoutError):
+        local_worker.http_json(
+            "GET",
+            "/internal/worker/stalled",
+            timeout=20,
+            total_deadline_seconds=total_deadline_seconds,
+        )
+    elapsed = time.monotonic() - started_at
+
+    assert response.closed is True
+    assert elapsed < 0.5
+    assert [event for event in response_events if event != "close"] == [
+        "enter",
+        "read",
+        "exit",
+    ]
+    assert response_events.index("read") < response_events.index("close")
+    assert response_events.index("close") < response_events.index("exit")
+
+
+def test_video_edit_worker_liveness_tracks_real_stages_without_percent_events(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    evidence: list[str] = []
+    liveness_factory_calls: list[tuple[object, object, object]] = []
+
+    terminal, _captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        observed_worker_steps=evidence,
+        liveness_evidence=evidence,
+        liveness_factory_calls=liveness_factory_calls,
+    )
+
+    assert terminal["status"] == "succeeded"
+    expected_lease = max(30, min(3600, int(local_worker.LOCAL_WORKER_MAX_JOB_SECONDS)))
+    expected_interval = min(30, max(5, expected_lease // 3))
+    assert liveness_factory_calls == [(2701, expected_lease, expected_interval)]
+    assert evidence == [
+        "start",
+        "stage:inspecting_input",
+        "assert_healthy",
+        "download",
+        "assert_healthy",
+        "probe",
+        "validate",
+        "stage:processing_video",
+        "assert_healthy",
+        "execute",
+        "assert_healthy",
+        "stage:delivering",
+        "assert_healthy",
+        "delivery",
+        "assert_healthy",
+        "stop",
+        "assert_healthy",
+        "terminal_update",
+    ]
+    assert evidence.count("assert_healthy") == 7
+    assert evidence.count("terminal_update") == 1
+    assert not any("percent" in event for event in evidence)
+
+
+def test_video_edit_liveness_failure_stops_before_one_terminal_and_fences_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    evidence: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        observed_worker_steps=evidence,
+        liveness_evidence=evidence,
+        liveness_health_failure_at=5,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["stage"] == "failed_no_charge"
+    assert detail["charged_xu"] == 0
+    assert detail["reason"] == "video_local_edit_worker_lease_lost"
+    assert captions == []
+    assert "delivery" not in evidence
+    assert evidence == [
+        "start",
+        "stage:inspecting_input",
+        "assert_healthy",
+        "download",
+        "assert_healthy",
+        "probe",
+        "validate",
+        "stage:processing_video",
+        "assert_healthy",
+        "execute",
+        "assert_healthy",
+        "stage:delivering",
+        "assert_healthy",
+        "stop",
+        "terminal_update",
+    ]
+    assert evidence.count("terminal_update") == 1
+
+
+def test_video_edit_liveness_loss_after_manual_delivery_preserves_receipt_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    evidence: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        observed_worker_steps=evidence,
+        liveness_evidence=evidence,
+        liveness_health_failure_at=6,
+    )
+
+    detail = json.loads(terminal["detail"])
+    receipt = json.loads(terminal["output_url"])
+    assert terminal["status"] == "failed"
+    assert detail["stage"] == "delivery_unknown"
+    assert detail["delivered"] == 1
+    assert detail["charge"] == 0
+    assert terminal["output_file_id"] == "file-1"
+    assert receipt["delivery_message_id"] == "1001"
+    assert receipt["delivery_file_id"] == "file-1"
+    assert [item["file_id"] for item in receipt["artifacts"]] == ["file-1"]
+    assert len(captions) == 1
+    assert evidence == [
+        "start",
+        "stage:inspecting_input",
+        "assert_healthy",
+        "download",
+        "assert_healthy",
+        "probe",
+        "validate",
+        "stage:processing_video",
+        "assert_healthy",
+        "execute",
+        "assert_healthy",
+        "stage:delivering",
+        "assert_healthy",
+        "delivery",
+        "assert_healthy",
+        "stop",
+        "terminal_update",
+    ]
+    assert evidence.count("terminal_update") == 1
+
+
+def test_video_edit_liveness_loss_during_shutdown_preserves_receipt_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    evidence: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        observed_worker_steps=evidence,
+        liveness_evidence=evidence,
+        liveness_failure_on_stop=True,
+    )
+
+    detail = json.loads(terminal["detail"])
+    receipt = json.loads(terminal["output_url"])
+    assert terminal["status"] == "failed"
+    assert detail["stage"] == "delivery_unknown"
+    assert detail["reason"] == "video_local_edit_worker_lease_lost"
+    assert detail["delivered"] == 1
+    assert detail["charge"] == 0
+    assert terminal["output_file_id"] == "file-1"
+    assert receipt["delivery_message_id"] == "1001"
+    assert receipt["delivery_file_id"] == "file-1"
+    assert [
+        (item["message_id"], item["file_id"])
+        for item in receipt["artifacts"]
+    ] == [("1001", "file-1")]
+    assert len(captions) == 1
+    assert evidence == [
+        "start",
+        "stage:inspecting_input",
+        "assert_healthy",
+        "download",
+        "assert_healthy",
+        "probe",
+        "validate",
+        "stage:processing_video",
+        "assert_healthy",
+        "execute",
+        "assert_healthy",
+        "stage:delivering",
+        "assert_healthy",
+        "delivery",
+        "assert_healthy",
+        "stop",
+        "assert_healthy",
+        "terminal_update",
+    ]
+    assert evidence.count("delivery") == 1
+    assert evidence.count("stop") == 1
+    assert evidence.count("terminal_update") == 1
+
+
+def test_split_delivery_fences_each_artifact_before_and_after_send(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    evidence: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="split",
+        observed_worker_steps=evidence,
+        liveness_evidence=evidence,
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert len(captions) == 2
+    assert evidence == [
+        "start",
+        "stage:inspecting_input",
+        "assert_healthy",
+        "download",
+        "assert_healthy",
+        "probe",
+        "validate",
+        "stage:processing_video",
+        "assert_healthy",
+        "execute",
+        "assert_healthy",
+        "stage:delivering",
+        "assert_healthy",
+        "delivery",
+        "assert_healthy",
+        "assert_healthy",
+        "delivery",
+        "assert_healthy",
+        "stop",
+        "assert_healthy",
+        "terminal_update",
+    ]
+    assert evidence.count("stage:delivering") == 1
+    assert evidence.count("assert_healthy") == 9
+    assert evidence.count("delivery") == 2
+    assert evidence.count("terminal_update") == 1
+
+
+def test_split_receipt_size_and_hash_are_computed_before_each_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    evidence: list[str] = []
+    original_getsize = local_worker.os.path.getsize
+    original_sha256_file = local_worker.video_ai_edit_validation.sha256_file
+
+    def observed_getsize(path) -> int:
+        artifact = Path(path)
+        if artifact.name in {"part-1.mp4", "part-2.mp4"}:
+            evidence.append(f"size:{artifact.stem}")
+        return original_getsize(path)
+
+    def observed_sha256_file(path) -> str:
+        artifact = Path(path)
+        if artifact.name in {"part-1.mp4", "part-2.mp4"}:
+            evidence.append(f"sha256:{artifact.stem}")
+        return original_sha256_file(path)
+
+    monkeypatch.setattr(local_worker.os.path, "getsize", observed_getsize)
+    monkeypatch.setattr(
+        local_worker.video_ai_edit_validation,
+        "sha256_file",
+        observed_sha256_file,
+    )
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="split",
+        observed_worker_steps=evidence,
+    )
+
+    receipt_order = [
+        event
+        for event in evidence
+        if event == "delivery"
+        or event.startswith(("size:part-", "sha256:part-"))
+    ]
+    assert terminal["status"] == "succeeded"
+    assert len(captions) == 2
+    assert len(receipt_order) == 6
+    for index, part in enumerate(("part-1", "part-2")):
+        receipt_group = receipt_order[index * 3 : (index + 1) * 3]
+        assert receipt_group[-1] == "delivery"
+        assert set(receipt_group[:2]) == {f"size:{part}", f"sha256:{part}"}
 
 
 def test_video_edit_worker_large_media_uses_local_transport_and_document_delivery(
@@ -1199,7 +1749,7 @@ def test_worker_rechecks_downloaded_source_duration_without_public_rejection(
     assert terminal["status"] == "succeeded"
     assert detail["media_lane"] == "large_media"
     assert captions
-    assert observed_steps == ["download", "probe", "validate", "execute"]
+    assert observed_steps == ["download", "probe", "validate", "execute", "delivery"]
     assert len(validation_calls) == 1
     assert validation_calls[0]["file_size"] == len(b"source-video")
     assert validation_calls[0]["metadata"]["duration_ms"] == over_limit * 1_000

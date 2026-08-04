@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import math
 import os
 import socket
 import shutil
@@ -198,14 +199,101 @@ def auth_headers() -> dict[str, str]:
     }
 
 
-def http_json(method: str, path: str, payload: dict | None = None, timeout: int = 20) -> dict:
+def http_json(
+    method: str,
+    path: str,
+    payload: dict | None = None,
+    timeout: int = 20,
+    *,
+    total_deadline_seconds: float | None = None,
+) -> dict:
     data = None
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(endpoint(path), data=data, headers=auth_headers(), method=method.upper())
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        body = response.read().decode("utf-8", errors="replace")
-        return json.loads(body or "{}")
+
+    if total_deadline_seconds is None:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            return json.loads(body or "{}")
+
+    if isinstance(total_deadline_seconds, bool) or not isinstance(total_deadline_seconds, (int, float)):
+        raise ValueError("http_json_total_deadline_invalid")
+    try:
+        deadline_seconds = float(total_deadline_seconds)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("http_json_total_deadline_invalid") from None
+    if not math.isfinite(deadline_seconds) or deadline_seconds <= 0:
+        raise ValueError("http_json_total_deadline_invalid")
+    absolute_deadline = time.monotonic() + deadline_seconds
+    deadline_event = threading.Event()
+    watchdog: threading.Timer | None = None
+
+    try:
+        remaining = absolute_deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("http_json_total_deadline")
+        effective_timeout = min(float(timeout), remaining)
+        if effective_timeout <= 0:
+            raise TimeoutError("http_json_total_deadline")
+        with urllib.request.urlopen(request, timeout=effective_timeout) as response:
+            def expire_response() -> None:
+                deadline_event.set()
+                try:
+                    response_socket = response.fp.raw._sock
+                except Exception:
+                    response_socket = None
+                if response_socket is not None:
+                    try:
+                        response_socket.shutdown(socket.SHUT_RDWR)
+                    except Exception:
+                        pass
+                try:
+                    response.close()
+                except Exception:
+                    pass
+
+            remaining = absolute_deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("http_json_total_deadline")
+            watchdog = threading.Timer(remaining, expire_response)
+            watchdog.daemon = True
+            watchdog.start()
+            body_parts: list[bytes] = []
+            body_size = 0
+            body_limit = 512 * 1024
+            try:
+                while True:
+                    if deadline_event.is_set() or time.monotonic() >= absolute_deadline:
+                        raise TimeoutError("http_json_total_deadline")
+                    chunk = response.read(min(64 * 1024, body_limit - body_size + 1))
+                    if deadline_event.is_set() or time.monotonic() >= absolute_deadline:
+                        raise TimeoutError("http_json_total_deadline")
+                    if not chunk:
+                        break
+                    body_size += len(chunk)
+                    if body_size > body_limit:
+                        raise ValueError("http_json_response_too_large")
+                    body_parts.append(bytes(chunk))
+            except Exception:
+                if deadline_event.is_set() or time.monotonic() >= absolute_deadline:
+                    raise TimeoutError("http_json_total_deadline") from None
+                raise
+            finally:
+                watchdog.cancel()
+                watchdog.join()
+    except Exception:
+        if deadline_event.is_set() or time.monotonic() >= absolute_deadline:
+            raise TimeoutError("http_json_total_deadline") from None
+        raise
+
+    if deadline_event.is_set() or time.monotonic() >= absolute_deadline:
+        raise TimeoutError("http_json_total_deadline")
+    body = b"".join(body_parts).decode("utf-8", errors="replace")
+    result = json.loads(body or "{}")
+    if time.monotonic() >= absolute_deadline:
+        raise TimeoutError("http_json_total_deadline")
+    return result
 
 
 def local_worker_heartbeat_payload(*, last_error: str = "", queue_depth: int = 0) -> dict:
@@ -297,6 +385,9 @@ def update_job(
     output_file_id: str = "",
     detail_limit: int = 500,
     output_limit: int = 4000,
+    *,
+    stage: str | None = None,
+    lease_seconds: int | None = None,
 ) -> None:
     safe_detail_limit = max(
         500,
@@ -314,7 +405,147 @@ def update_job(
         "output_url": str(output_url or "")[:safe_output_limit],
         "output_file_id": str(output_file_id or "")[:500],
     }
-    http_json("POST", "/internal/worker/job_update", payload, timeout=20)
+    if stage is not None:
+        if not isinstance(stage, str) or stage not in VIDEO_EDIT_WORKER_STAGES:
+            raise LocalVideoEditError("video_local_edit_stage_invalid")
+        payload["stage"] = stage
+    if lease_seconds is not None:
+        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int):
+            raise LocalVideoEditError("video_local_edit_lease_invalid")
+        payload["lease_seconds"] = max(30, min(3600, lease_seconds))
+    if stage is not None or lease_seconds is not None:
+        http_json(
+            "POST",
+            "/internal/worker/job_update",
+            payload,
+            timeout=20,
+            total_deadline_seconds=VIDEO_EDIT_LIVENESS_UPDATE_TIMEOUT_SECONDS,
+        )
+    else:
+        http_json("POST", "/internal/worker/job_update", payload, timeout=20)
+
+
+VIDEO_EDIT_WORKER_STAGES = frozenset({
+    "inspecting_input",
+    "preparing_plan",
+    "processing_video",
+    "validating_output",
+    "delivering",
+    "delivered",
+    "failed_no_charge",
+    "delivery_unknown",
+})
+
+# Liveness updates opt into an absolute HTTP deadline so stop can join any
+# in-flight renewal to completion before cleanup and terminal persistence.
+VIDEO_EDIT_LIVENESS_UPDATE_TIMEOUT_SECONDS = 20
+
+
+class _VideoEditJobLiveness:
+    def __init__(self, job_id: int | str, lease_seconds: int, interval_seconds: int) -> None:
+        job_id_valid = (
+            isinstance(job_id, int)
+            and not isinstance(job_id, bool)
+            and job_id > 0
+        ) or (
+            isinstance(job_id, str)
+            and job_id.strip().isdigit()
+            and int(job_id.strip()) > 0
+        )
+        if not job_id_valid:
+            raise LocalVideoEditError("video_local_edit_worker_lease_lost")
+        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int):
+            raise LocalVideoEditError("video_local_edit_worker_lease_lost")
+        if isinstance(interval_seconds, bool) or not isinstance(interval_seconds, int):
+            raise LocalVideoEditError("video_local_edit_worker_lease_lost")
+        if not 30 <= lease_seconds <= 3600 or not 1 <= interval_seconds <= 60:
+            raise LocalVideoEditError("video_local_edit_worker_lease_lost")
+        self._job_id = job_id
+        self._lease_seconds = lease_seconds
+        self._interval_seconds = interval_seconds
+        self._stage = "inspecting_input"
+        self._stop_event = threading.Event()
+        self._lock = threading.RLock()
+        self._failure: LocalVideoEditError | None = None
+        self._thread: threading.Thread | None = None
+        self._closed = False
+        self._started = False
+
+    def _capture_failure(self) -> LocalVideoEditError:
+        with self._lock:
+            if self._failure is None:
+                self._failure = LocalVideoEditError("video_local_edit_worker_lease_lost")
+            return self._failure
+
+    def _renew(self) -> bool:
+        with self._lock:
+            if self._closed:
+                return False
+            stage = self._stage
+        try:
+            update_job(
+                self._job_id,
+                "running",
+                stage=stage,
+                lease_seconds=self._lease_seconds,
+            )
+        except Exception:
+            self._capture_failure()
+            return False
+        return True
+
+    def _run(self) -> None:
+        while not self._stop_event.wait(self._interval_seconds):
+            if not self._renew():
+                return
+
+    def start(self) -> None:
+        with self._lock:
+            if self._closed:
+                raise self._failure or LocalVideoEditError("video_local_edit_worker_lease_lost")
+            if self._started:
+                return
+            if not self._renew():
+                self._closed = True
+                self._stop_event.set()
+                raise self._capture_failure()
+            try:
+                candidate = threading.Thread(target=self._run, daemon=True)
+                candidate.start()
+            except Exception:
+                self._closed = True
+                self._stop_event.set()
+                raise self._capture_failure() from None
+            self._thread = candidate
+            self._started = True
+
+    def update_stage(self, stage: str) -> None:
+        if not isinstance(stage, str) or stage not in VIDEO_EDIT_WORKER_STAGES:
+            raise LocalVideoEditError("video_local_edit_worker_lease_lost")
+        with self._lock:
+            self._stage = stage
+
+    def assert_healthy(self) -> None:
+        with self._lock:
+            failure = self._failure
+        if failure is not None:
+            raise failure
+
+    def stop(self) -> None:
+        with self._lock:
+            self._closed = True
+            self._stop_event.set()
+            thread = self._thread if self._started else None
+        if thread is not None and thread is not threading.current_thread():
+            thread.join()
+
+
+def video_edit_job_liveness(
+    job_id: int | str,
+    lease_seconds: int,
+    interval_seconds: int,
+) -> _VideoEditJobLiveness:
+    return _VideoEditJobLiveness(job_id, lease_seconds, interval_seconds)
 
 
 def update_video_render_job(
@@ -1150,6 +1381,7 @@ def finalize_video_local_cleanup_state(
         "stage": "failed_no_charge",
         "reason": reason,
         "charge": 0,
+        "charged_xu": 0,
         "cleanup": "failed",
     }
 
@@ -1187,6 +1419,7 @@ def _strict_video_edit_price(value) -> int:
 def run_video_local_edit(job: dict) -> None:
     job_id = job.get("id")
     workspace: Path | None = None
+    liveness: _VideoEditJobLiveness | None = None
     terminal_status = "failed"
     terminal_detail = "failed_no_charge"
     output_file_ids: list[str] = []
@@ -1355,6 +1588,12 @@ def run_video_local_edit(job: dict) -> None:
             media_config = _video_edit_telegram_media_config()
         except (TypeError, ValueError):
             raise LocalVideoEditError("invalid_media_transport_config") from None
+        lease_seconds = max(30, min(3600, int(LOCAL_WORKER_MAX_JOB_SECONDS)))
+        interval_seconds = min(30, max(5, lease_seconds // 3))
+        liveness = video_edit_job_liveness(job_id, lease_seconds, interval_seconds)
+        liveness.start()
+        liveness.update_stage("inspecting_input")
+        liveness.assert_healthy()
 
         def send_video_edit_artifact(
             artifact_path: str | Path,
@@ -1400,6 +1639,7 @@ def run_video_local_edit(job: dict) -> None:
             "source",
             media_config=media_config,
         )
+        liveness.assert_healthy()
         downloaded_probe = video_local_validation.probe_video_file(
             source_path,
             ffprobe_path=ffprobe,
@@ -1480,6 +1720,8 @@ def run_video_local_edit(job: dict) -> None:
                     delivered=0,
                 )
 
+            liveness.update_stage("processing_video")
+            liveness.assert_healthy()
             result = execute_split_plan(
                 source_path,
                 ranges,
@@ -1490,15 +1732,19 @@ def run_video_local_edit(job: dict) -> None:
                 timeout=timeout,
                 progress=on_split_progress,
             )
+            liveness.assert_healthy()
             outputs = list(result.get("outputs") or [])
             total = len(outputs)
             expected_output_total = total
+            liveness.update_stage("delivering")
             for index, item in enumerate(outputs, start=1):
                 output_path = str(item.get("path") or "")
                 if not video_editengine1.valid_mp4_delivery_probe(item.get("validation")):
                     raise LocalVideoEditError("output_validation_failed")
                 if not delivery_file_allowed(output_path, workspace=workspace):
                     raise LocalVideoEditError("forbidden_delivery_artifact")
+                artifact_size = int(os.path.getsize(output_path))
+                artifact_sha256 = video_ai_edit_validation.sha256_file(output_path)
                 _local1_progress(job_id, "delivering", processed=total, total=total, delivered=index - 1)
                 duration_seconds = max(0.0, float(item.get("duration_ms") or 0) / 1000)
                 delivery_caption = (
@@ -1506,6 +1752,7 @@ def run_video_local_edit(job: dict) -> None:
                     if free_edit
                     else f"✅ Phần {index}/{total} · {duration_seconds:.1f} giây · chỉ ghi phí sau khi giao đủ kết quả"
                 )
+                liveness.assert_healthy()
                 delivery = send_video_edit_artifact(
                     output_path,
                     delivery_caption,
@@ -1520,8 +1767,8 @@ def run_video_local_edit(job: dict) -> None:
                     "index": index,
                     "message_id": message_id,
                     "file_id": file_id,
-                    "size": int(os.path.getsize(output_path)),
-                    "sha256": video_ai_edit_validation.sha256_file(output_path),
+                    "size": artifact_size,
+                    "sha256": artifact_sha256,
                     "ffprobe": dict(item.get("validation") or {}),
                 })
                 _local1_progress(
@@ -1532,6 +1779,7 @@ def run_video_local_edit(job: dict) -> None:
                     delivered=index,
                     artifact_receipts=delivery_receipts,
                 )
+                liveness.assert_healthy()
             joined_hashes = "|".join(item["sha256"] for item in delivery_receipts)
             terminal_receipt = {
                 "delivery_message_id": str(delivery_receipts[0]["message_id"] if delivery_receipts else ""),
@@ -1642,6 +1890,8 @@ def run_video_local_edit(job: dict) -> None:
                     total=int(status.get("total") or 1),
                 )
 
+            liveness.update_stage("processing_video")
+            liveness.assert_healthy()
             result = execute_manual_edit(
                 plan,
                 output_path=str(output_path),
@@ -1651,6 +1901,7 @@ def run_video_local_edit(job: dict) -> None:
                 timeout=timeout,
                 progress=on_manual_progress,
             )
+            liveness.assert_healthy()
             if not result.get("ok") or not delivery_file_allowed(output_path, workspace=workspace):
                 raise LocalVideoEditError("output_validation_failed")
             validation = dict(result.get("validation") or {})
@@ -1660,11 +1911,13 @@ def run_video_local_edit(job: dict) -> None:
             output_sha256 = video_ai_edit_validation.sha256_file(output_path)
             expected_output_total = 1
             _local1_progress(job_id, "delivering", processed=1, total=1)
+            liveness.update_stage("delivering")
             delivery_caption = (
                 "✅ Video đã chỉnh sửa xong · Miễn phí · 0 Xu."
                 if free_edit
                 else "✅ Video đã chỉnh sửa xong. Hệ thống chỉ ghi phí sau khi giao file MP4 hợp lệ."
             )
+            liveness.assert_healthy()
             delivery = send_video_edit_artifact(
                 output_path,
                 delivery_caption,
@@ -1683,6 +1936,7 @@ def run_video_local_edit(job: dict) -> None:
                 "ffprobe": validation,
             })
             output_file_ids.append(file_id)
+            liveness.assert_healthy()
             terminal_receipt = {
                 "delivery_message_id": message_id,
                 "delivery_file_id": file_id,
@@ -1710,6 +1964,8 @@ def run_video_local_edit(job: dict) -> None:
                 "charged_xu": charged_xu,
                 "cleanup": "done",
             }, ensure_ascii=False, separators=(",", ":"))
+        liveness.stop()
+        liveness.assert_healthy()
         terminal_status = "succeeded"
     except (LocalVideoEditError, LocalVideoValidationError) as exc:
         failure_reason = str(getattr(exc, "reason", str(exc)))[:160]
@@ -1751,6 +2007,7 @@ def run_video_local_edit(job: dict) -> None:
                 "stage": "failed_no_charge",
                 "reason": failure_reason,
                 "charge": 0,
+                "charged_xu": 0,
                 "cleanup": "done",
             }, ensure_ascii=False, separators=(",", ":"))
     except Exception as exc:
@@ -1798,14 +2055,22 @@ def run_video_local_edit(job: dict) -> None:
                 "stage": "failed_no_charge",
                 "reason": failure_reason,
                 "charge": 0,
+                "charged_xu": 0,
                 "cleanup": "done",
             }, ensure_ascii=False, separators=(",", ":"))
     finally:
+        if liveness is not None:
+            liveness.stop()
         cleanup = cleanup_job_workspace(workspace) if workspace else {"ok": True, "removed": False}
         try:
             detail_payload = json.loads(terminal_detail or "{}")
         except (TypeError, ValueError, json.JSONDecodeError):
-            detail_payload = {"local1": 1, "stage": "failed_no_charge", "charge": 0}
+            detail_payload = {
+                "local1": 1,
+                "stage": "failed_no_charge",
+                "charge": 0,
+                "charged_xu": 0,
+            }
         terminal_status, detail_payload = finalize_video_local_cleanup_state(
             terminal_status=terminal_status,
             terminal_detail=detail_payload,
