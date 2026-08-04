@@ -887,23 +887,60 @@ def is_remote_worker_product_video_job(job: dict | None = None, project: dict | 
     if is_remote_worker_admin_video_job(job, project) or _is_admin_fake_video_job(project):
         return False
     flags = _product_video_safety_flags(project)
+    persisted_result = _json_loads(job.get("result_json"), {})
+    if not isinstance(persisted_result, dict):
+        persisted_result = {}
+    existing_task_recovery = bool(
+        persisted_result.get("recovery_existing_tasks_only")
+        and (
+            persisted_result.get("product_video")
+            or str(persisted_result.get("source") or "").strip()
+            == REMOTE_WORKER_PRODUCT_VIDEO_SOURCE
+        )
+    )
     return bool(
         flags["source"] == REMOTE_WORKER_PRODUCT_VIDEO_SOURCE
         and flags["render_mode"] == RENDER_MODE_REAL
         and not flags["test_pattern"]
         and not flags["admin_video_delivery"]
         and not flags["fake_renderer_allowed"]
-        and (flags["provider_call"] or flags["claim_only_diagnostic"])
+        and (
+            flags["provider_call"]
+            or flags["claim_only_diagnostic"]
+            or existing_task_recovery
+        )
     )
 
 
-def _product_video_is_claimable(project: dict, *, owner_only: bool = False, public_enabled: bool = False) -> bool:
-    if not is_remote_worker_product_video_job({"job_type": video_project_queue.VIDEO_RENDER_JOB_TYPE}, project):
+def _product_video_is_claimable(
+    project: dict,
+    result: dict | None = None,
+    *,
+    owner_only: bool = False,
+    public_enabled: bool = False,
+) -> bool:
+    result = dict(result or {})
+    if not is_remote_worker_product_video_job(
+        {
+            "job_type": video_project_queue.VIDEO_RENDER_JOB_TYPE,
+            "result_json": video_project_queue._json_dumps(result),
+        },
+        project,
+    ):
         return False
     flags = _product_video_safety_flags(project)
     owner_product = bool(flags["admin_only"] and flags["no_charge"] and not flags["public_user"])
+    existing_task_recovery = bool(
+        result.get("recovery_existing_tasks_only")
+        and result.get("public_user_confirmed")
+        and result.get("invoice_confirmed")
+    )
     if owner_only:
-        return bool(owner_product or _product_video_public_confirmed_for_owner_worker(project))
+        return bool(
+            owner_product
+            or _product_video_public_confirmed_for_owner_worker(project)
+            or existing_task_recovery
+        )
     return bool(flags["public_user"] and public_enabled)
 
 
@@ -1287,6 +1324,9 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         product_video_orchestration_mode = _product_video_explicit_orchestration_mode()
         product_video_per_scene_orchestration = product_video_orchestration_mode == "per_scene_8s"
         product_video_render_pipeline_mode = "historical_multi_clip_concat" if product_video_per_scene_orchestration else "single_task_legacy"
+        existing_task_recovery = bool(
+            persisted_result.get("recovery_existing_tasks_only")
+        )
         route_contract = video_provider_router.product_video_route_contract(
             product_type,
             engine_adapter,
@@ -1303,7 +1343,11 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "admin_video_delivery": False,
                 "admin_only": bool(safety["admin_only"]),
                 "no_charge": bool(safety["no_charge"]),
-                "provider_call": bool(safety["provider_call"]) and not claim_only,
+                "provider_call": bool(
+                    (safety["provider_call"] or existing_task_recovery)
+                    and not claim_only
+                ),
+                "provider_poll_existing_task": existing_task_recovery,
                 "public_user": bool(safety["public_user"]),
                 "source": REMOTE_WORKER_PRODUCT_VIDEO_SOURCE,
                 "public_product_type": str(engine_contract.get("public_product_type") or product_type),
@@ -1432,6 +1476,23 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "probation_lock_owned_by_other_job": _safe_bool(
                     persisted_result.get("probation_lock_owned_by_other_job")
                 ),
+                "recovery_existing_tasks_only": _safe_bool(
+                    persisted_result.get("recovery_existing_tasks_only")
+                ),
+                "provider_submit_allowed": (
+                    False
+                    if persisted_result.get("recovery_existing_tasks_only")
+                    else persisted_result.get("provider_submit_allowed")
+                ),
+                "automatic_retry_allowed": persisted_result.get(
+                    "automatic_retry_allowed"
+                ),
+                "automatic_resubmit_allowed": persisted_result.get(
+                    "automatic_resubmit_allowed"
+                ),
+                "automatic_fallback_allowed": persisted_result.get(
+                    "automatic_fallback_allowed"
+                ),
                 "scene_dispatch_lease_by_index": dict(
                     persisted_result.get("scene_dispatch_lease_by_index") or {}
                 ),
@@ -1517,6 +1578,31 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
             pending_video_ids = [str(item.get("video_id") or "").strip() for item in provider_events if str(item.get("video_id") or "").strip()]
         first_seen = _parse_queue_time(hydrated_job.get("started_at") or hydrated_job.get("updated_at") or hydrated_job.get("created_at"))
         first_seen_epoch = int(first_seen.timestamp()) if first_seen else 0
+        durable_ownership = video_project_queue.product_video_durable_task_scene_owners(
+            persisted_result
+        )
+        durable_tasks_by_scene: dict[int, list[str]] = {}
+        for task_id, raw_scene_index in (
+            durable_ownership.get("task_to_scene_index") or {}
+        ).items():
+            mapped_scene_index = _safe_int(raw_scene_index, 0)
+            task_key = str(task_id or "").strip()
+            if mapped_scene_index > 0 and task_key:
+                durable_tasks_by_scene.setdefault(mapped_scene_index, []).append(task_key)
+        active_task_by_scene = {
+            _safe_int(key, 0): str(value or "").strip()
+            for key, value in (
+                persisted_result.get("scene_active_task_by_index") or {}
+            ).items()
+            if _safe_int(key, 0) > 0 and str(value or "").strip()
+        }
+        winner_task_by_scene = {
+            _safe_int(key, 0): str(value or "").strip()
+            for key, value in (
+                persisted_result.get("scene_winner_task_by_index") or {}
+            ).items()
+            if _safe_int(key, 0) > 0 and str(value or "").strip()
+        }
 
         def _full_scene_tasks(existing_items: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
             by_scene: dict[int, dict[str, Any]] = {}
@@ -1573,6 +1659,35 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                     merged.setdefault("provider_started_at_epoch", first_seen_epoch)
                     merged.setdefault("provider_wait_started_epoch", first_seen_epoch)
                 by_scene[idx] = merged
+            if payload.get("recovery_existing_tasks_only"):
+                for idx in range(1, safe_scene_count + 1):
+                    row = by_scene[idx]
+                    existing_task_id = str(
+                        row.get("provider_task_id")
+                        or row.get("task_id")
+                        or row.get("active_task_id")
+                        or row.get("winning_task_id")
+                        or ""
+                    ).strip()
+                    if existing_task_id:
+                        continue
+                    mapped_candidates = durable_tasks_by_scene.get(idx) or []
+                    selected_task_id = str(
+                        winner_task_by_scene.get(idx)
+                        or active_task_by_scene.get(idx)
+                        or (mapped_candidates[0] if mapped_candidates else "")
+                    ).strip()
+                    if not selected_task_id:
+                        continue
+                    row["provider_task_id"] = selected_task_id
+                    row["active_task_id"] = selected_task_id
+                    row["task_scene_mapping_verified"] = True
+                    row["task_scene_mapping_source"] = "durable_task_scene_map"
+                    row["provider"] = str(
+                        row.get("provider")
+                        or persisted_result.get("provider_pending_provider")
+                        or "shopaikey_video"
+                    )
             return [by_scene[idx] for idx in sorted(by_scene)]
 
         configured_chain = []
@@ -2623,6 +2738,8 @@ def _claim_video_render_candidate(
                     continue
                 elif dispatch_outbox.get("dispatch_status") in {"pending", "retry_wait", "leased"}:
                     continue
+                elif dispatch_outbox.get("dispatch_status") in {"cancelled", "canceled"}:
+                    continue
                 result_payload = video_project_queue._json_loads(job.get("result_json"), {})
                 if not isinstance(result_payload, dict):
                     result_payload = {}
@@ -2633,6 +2750,7 @@ def _claim_video_render_candidate(
                 )
                 if _product_video_is_claimable(
                     project,
+                    result_payload,
                     owner_only=bool(owner_product_video_only),
                     public_enabled=bool(public_enabled),
                 ) or public_confirmed_dispatch_recovery:
@@ -2648,9 +2766,16 @@ def _claim_video_render_candidate(
                         for item in (result_payload.get("scene_tasks") or result_payload.get("provider_scene_tasks") or [])
                         if isinstance(item, dict)
                     ]
+                    durable_ownership = video_project_queue.product_video_durable_task_scene_owners(
+                        result_payload
+                    )
                     has_existing_provider_task = bool(
                         str(result_payload.get("provider_task_id") or result_payload.get("provider_video_id") or "").strip()
                         or any(video_project_queue._product_video_scene_task_identity(item) for item in scene_task_rows)
+                        or (
+                            durable_ownership.get("task_scene_mapping_verified")
+                            and durable_ownership.get("scene_task_coverage_complete")
+                        )
                     )
                     has_existing_scene_clip = any(
                         bool(item.get("winning_task_id") or item.get("clip_valid") or item.get("result_url"))
@@ -2713,11 +2838,25 @@ def _claim_video_render_candidate(
                                 "candidate_after_worker_revalidation": list(
                                     runtime_eligibility.get("candidate_after_worker_revalidation") or runtime_candidates
                                 ),
-                                "provider_submit_allowed": bool(runtime_eligibility.get("provider_submit_allowed")),
+                                "provider_submit_allowed": (
+                                    False
+                                    if result_payload.get("recovery_existing_tasks_only")
+                                    else bool(runtime_eligibility.get("provider_submit_allowed"))
+                                ),
                                 "provider_submit_block_reason": str(runtime_eligibility.get("provider_submit_block_reason") or ""),
                                 "router_skip_reason": str(runtime_eligibility.get("router_skip_reason") or ""),
                             }
                         )
+                        if result_payload.get("recovery_existing_tasks_only"):
+                            result_payload.update(
+                                {
+                                    "automatic_retry_allowed": False,
+                                    "automatic_resubmit_allowed": False,
+                                    "automatic_fallback_allowed": False,
+                                    "provider_submit_allowed": False,
+                                    "provider_submit_block_reason": "existing_task_recovery_read_only",
+                                }
+                            )
                         if not runtime_candidates and not has_existing_provider_task and not has_existing_scene_clip:
                             blocker = str(
                                 runtime_eligibility.get("provider_submit_block_reason")
@@ -3804,6 +3943,24 @@ def complete_remote_worker_job(
     if not worker_owns_job(job, worker):
         return {"ok": False, "reason": "job_not_owned_by_worker", "job": job}
     payload = dict(result or {})
+    persisted_payload = _json_loads(job.get("result_json"), {})
+    if not isinstance(persisted_payload, dict):
+        persisted_payload = {}
+    if persisted_payload.get("recovery_existing_tasks_only"):
+        payload.update(
+            {
+                "recovery_existing_tasks_only": True,
+                "provider_submit_allowed": False,
+                "provider_submit_block_reason": "existing_task_recovery_read_only",
+                "automatic_retry_allowed": False,
+                "automatic_resubmit_allowed": False,
+                "automatic_fallback_allowed": False,
+                "no_charge": True,
+                "charge": 0,
+                "charged_xu": 0,
+                "wallet_charge_recorded": False,
+            }
+        )
     project_render_mode = RENDER_MODE_ADMIN_TEST_PATTERN if _is_admin_fake_video_job(project) else (_admin_video_safety_flags(project)["render_mode"] if is_admin_video else RENDER_MODE_REAL)
     render_mode = _normalize_render_mode(payload.get("render_mode"), project_render_mode)
     renderer = str(payload.get("renderer") or "").strip().lower()
