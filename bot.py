@@ -106,7 +106,7 @@ from services import video_postprocess_pipeline as video_postprocess
 from services import video_product_profiles as video_profiles
 from services import video_project_queue
 from services import knowledge_vault, knowledge_vault_sync, vault_importer
-from services import profile_router, video_edit_capabilities, video_edit_state_machine, video_editengine1, video_local_editing, video_local_validation, video_smart_splitter
+from services import profile_router, video_edit_capabilities, video_edit_state_machine, video_editengine1, video_edit_media_transport, video_edit_long_media, video_local_editing, video_local_validation, video_smart_splitter
 from services import architecture_profile_router, architecture_profile_status
 from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit_router, video_ai_edit_status, video_ai_edit_validation
 from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
@@ -69492,7 +69492,7 @@ VIDEO_EDITOR_STRUCTURED_FIELDS = {
     "pricing_snapshot",
 }
 VIDEO_EDITOR_TEXT_FIELDS = {
-    "source_file_id", "source_file_unique_id", "source_file_name", "source_mime_type", "requested_action",
+    "source_file_id", "source_file_unique_id", "source_file_name", "source_mime_type", "media_lane", "requested_action",
     "preset", "ratio", "method", "overlay_text", "selected_tool", "split_mode",
     "pending_field", "operation", "last_error", "source_display_name",
     "user_intent", "selected_ai_profile", "execution_lane", "intensity",
@@ -97286,7 +97286,7 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             if message_id and safe_int(draft.get("selfshot2_last_media_message_id"), 0) == message_id:
                 return True
             try:
-                local_probe = await inspect_video_editor_source(
+                local_probe = await inspect_bounded_telegram_video_source(
                     context,
                     {
                         "source_file_id": file_id,
@@ -97404,7 +97404,7 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             if message_id and safe_int(draft.get("selfshot3_last_media_message_id"), 0) == message_id:
                 return True
             try:
-                local_probe = await inspect_video_editor_source(
+                local_probe = await inspect_bounded_telegram_video_source(
                     context,
                     {
                         "source_file_id": file_id,
@@ -100656,7 +100656,7 @@ async def handle_video_reference_pending_upload(update: Update, context: Context
     inspection = {}
     if detailed and _safe_int(info.get("file_size"), 0) <= video_local_validation.MAX_UPLOAD_BYTES:
         try:
-            inspection = await inspect_video_editor_source(
+            inspection = await inspect_bounded_telegram_video_source(
                 context,
                 {
                     "source_file_id": info.get("file_id"),
@@ -225230,11 +225230,11 @@ def video_editor_aux_source_from_update(update: Update, kind: str) -> dict:
     }
 
 
-def video_local_public_error(reason: str) -> str:
+def video_local_public_error(reason: str, lang: str = "vi") -> str:
     reason = str(reason or "")
     if reason.startswith("ffprobe_exec_failed:"):
         reason = "ffprobe_exec_failed"
-    mapping = {
+    mapping_vi = {
         "video_too_large": "Video vượt giới hạn 50 MB. Anh/chị vui lòng gửi file nhỏ hơn.",
         "duration_too_long": "Video dài hơn giới hạn xử lý 30 phút.",
         "unsupported_file_type": "Định dạng chưa hỗ trợ. Vui lòng dùng MP4, MOV, MKV hoặc WebM.",
@@ -225260,8 +225260,40 @@ def video_local_public_error(reason: str) -> str:
         "worker_unavailable": "Hệ thống xử lý video đang bận hoặc chưa sẵn sàng. Chưa tạo tác vụ và chưa trừ Xu.",
         "active_job_exists": "Anh/chị đang có một video được xử lý. Vui lòng chờ kết quả trước khi tạo tác vụ mới.",
         "workspace_limit_exceeded": "Dung lượng tạm không đủ để xử lý video này.",
+        "insufficient_disk": "Dung lượng tạm hiện không đủ để kiểm tra video này. Chưa tạo tác vụ và chưa trừ Xu.",
+        "stream_failed": "Hệ thống chưa tải xong video để kiểm tra. Anh/chị vui lòng gửi lại file; chưa tạo tác vụ và chưa trừ Xu.",
+        "transfer_failed": "Hệ thống chưa tải xong video để kiểm tra. Anh/chị vui lòng gửi lại file; chưa tạo tác vụ và chưa trừ Xu.",
+        "inspection_failed": "Hệ thống chưa thể kiểm tra video này. Anh/chị vui lòng thử lại; chưa tạo tác vụ và chưa trừ Xu.",
     }
-    return "⚠️ " + mapping.get(reason, "Yêu cầu chưa hợp lệ. Hệ thống chưa xử lý và chưa trừ Xu.")
+    mapping_en = {
+        "insufficient_disk": "There is not enough temporary storage to inspect this video. No task was created and no credits were charged.",
+        "stream_failed": "The video download or transfer could not be completed. Please resend the file; no task was created and no credits were charged.",
+        "transfer_failed": "The video download or transfer could not be completed. Please resend the file; no task was created and no credits were charged.",
+        "inspection_failed": "The system could not inspect this video. Please try again; no task was created and no credits were charged.",
+    }
+    transport_reasons = {
+        "cancelled",
+        "deadline_exceeded",
+        "disk_check_failed",
+        "empty_file",
+        "get_file_invalid",
+        "invalid_config",
+        "invalid_destination",
+        "invalid_destination_policy",
+        "invalid_file_id",
+        "invalid_size_limit",
+        "invalid_transport",
+        "publish_failed",
+        "size_limit_exceeded",
+        "size_mismatch",
+        "stream_chunk_invalid",
+    }
+    if reason in transport_reasons:
+        reason = "transfer_failed"
+    if str(lang or "vi").lower().startswith("en"):
+        message = mapping_en.get(reason) or mapping_vi.get(reason)
+        return "⚠️ " + (message or "The request could not be validated. Nothing was processed and no credits were charged.")
+    return "⚠️ " + mapping_vi.get(reason, "Yêu cầu chưa hợp lệ. Hệ thống chưa xử lý và chưa trừ Xu.")
 
 
 def video_editor_telegram_probe_fallback(source: dict, reason: str) -> dict:
@@ -225303,10 +225335,140 @@ def video_editor_telegram_probe_fallback(source: dict, reason: str) -> dict:
         "probe_fallback": "telegram_video_metadata",
         "probe_warning": reason,
     }
-    return video_local_validation.validate_source_metadata(metadata, file_size=size)
+    return video_local_validation.validate_source_metadata(
+        metadata,
+        file_size=size,
+        maximum_bytes=0,
+        maximum_duration_seconds=0,
+    )
 
 
 async def inspect_video_editor_source(context: ContextTypes.DEFAULT_TYPE, source: dict) -> dict:
+    file_name = video_local_validation.validate_extension(
+        str(source.get("source_file_name") or "video.mp4"),
+        video_local_validation.ALLOWED_SOURCE_EXTENSIONS,
+    )
+    declared_bytes = safe_int(source.get("source_file_size"), 0)
+    declared_duration_seconds = safe_int(source.get("source_duration"), 0)
+    declared_lane = video_edit_media_transport.select_media_lane(
+        duration_seconds=declared_duration_seconds,
+        size_bytes=declared_bytes,
+    )
+    config = video_edit_media_transport.TelegramMediaConfig(
+        token=TELEGRAM_TOKEN,
+        api_root=TELEGRAM_API_ROOT or TELEGRAM_CLOUD_API_ROOT,
+        proxy_secret_header=TELEGRAM_API_PROXY_SECRET_HEADER,
+        proxy_secret=TELEGRAM_API_PROXY_SECRET,
+        local_file_root=TELEGRAM_LOCAL_API_FILE_ROOT,
+        local_media_path=TELEGRAM_LOCAL_API_MEDIA_PATH,
+    )
+
+    def get_file_json(*, url, headers, follow_redirects, json):
+        with httpx.Client(follow_redirects=False) as client:
+            response = client.post(
+                url,
+                headers=headers,
+                follow_redirects=False,
+                json=json,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    def stream_bytes(*, url, headers, follow_redirects, chunk_size):
+        requested_chunk_size = max(
+            1,
+            min(safe_int(chunk_size, 512 * 1024), 512 * 1024),
+        )
+        with httpx.Client(follow_redirects=False) as client:
+            with client.stream(
+                "GET",
+                url,
+                headers=headers,
+                follow_redirects=False,
+            ) as response:
+                response.raise_for_status()
+                for chunk in response.iter_bytes(chunk_size=512 * 1024):
+                    for offset in range(0, len(chunk), requested_chunk_size):
+                        yield chunk[offset:offset + requested_chunk_size]
+
+    with tempfile.TemporaryDirectory(prefix="toanaas_video_local_inspect_") as tmpdir:
+        path = os.path.join(tmpdir, file_name)
+        if (
+            declared_bytes > 0
+            and shutil.disk_usage(tmpdir).free
+            < video_edit_long_media.DEFAULT_WORKSPACE_RESERVE_BYTES + declared_bytes
+        ):
+            return {
+                "ok": False,
+                "reason": "insufficient_disk",
+                "declared_bytes": declared_bytes,
+                "declared_duration_seconds": declared_duration_seconds,
+                "media_lane": declared_lane,
+            }
+        receipt = await asyncio.to_thread(
+            video_edit_media_transport.download_file_to_path,
+            config=config,
+            file_id=str(source.get("source_file_id") or ""),
+            destination=path,
+            get_file_json=get_file_json,
+            stream_bytes=stream_bytes,
+            expected_bytes=None,
+            hard_max_bytes=(
+                None
+                if config.is_local
+                else video_edit_media_transport.SHORT_MEDIA_MAX_BYTES
+            ),
+            workspace_reserve_bytes=video_edit_long_media.DEFAULT_WORKSPACE_RESERVE_BYTES,
+            require_private_parent=True,
+        )
+        evidence = {
+            "declared_bytes": declared_bytes,
+            "declared_duration_seconds": declared_duration_seconds,
+            "actual_bytes": receipt.bytes_written,
+            "bytes": receipt.bytes_written,
+            "source_sha256": receipt.sha256,
+            "transport": receipt.transport,
+            "transport_lane": receipt.lane,
+        }
+        try:
+            probe = await asyncio.to_thread(
+                video_local_validation.probe_video_file,
+                receipt.path,
+            )
+        except video_local_validation.LocalVideoValidationError as exc:
+            streamed_lane = video_edit_media_transport.select_media_lane(
+                duration_seconds=declared_duration_seconds,
+                size_bytes=receipt.bytes_written,
+            )
+            return {
+                "ok": False,
+                "reason": str(exc.reason or "ffprobe_failed"),
+                **evidence,
+                "media_lane": (
+                    "short_media"
+                    if declared_lane == "short_media" and streamed_lane == "short_media"
+                    else "large_media"
+                ),
+            }
+        inspected_lane = video_edit_media_transport.select_media_lane(
+            duration_seconds=float(probe.get("duration") or 0),
+            size_bytes=receipt.bytes_written,
+        )
+        media_lane = (
+            "short_media"
+            if declared_lane == "short_media" and inspected_lane == "short_media"
+            else "large_media"
+        )
+        metadata = video_local_validation.validate_source_metadata(
+            probe,
+            file_size=receipt.bytes_written,
+            maximum_bytes=0,
+            maximum_duration_seconds=0,
+        )
+        return {**metadata, **evidence, "media_lane": media_lane}
+
+
+async def inspect_bounded_telegram_video_source(context: ContextTypes.DEFAULT_TYPE, source: dict) -> dict:
     file_name = video_local_validation.validate_extension(
         str(source.get("source_file_name") or "video.mp4"),
         video_local_validation.ALLOWED_SOURCE_EXTENSIONS,
@@ -226236,6 +226398,84 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
     uid = update.effective_user.id
     state = dict(get_video_editor_pending(uid) or {})
     lang = get_user_language(uid) or "vi"
+
+    def ffprobe_fallback_allowed(reason: str) -> bool:
+        candidate = str(reason or "")
+        return candidate in {
+            "ffprobe_missing",
+            "ffprobe_failed",
+            "ffprobe_invalid_json",
+            "invalid_video_metadata",
+        } or candidate.startswith("ffprobe_exec_failed:")
+
+    def merge_telegram_probe_evidence(inspected: dict, fallback: dict) -> dict:
+        merged = dict(fallback or {})
+        for key in (
+            "actual_bytes",
+            "declared_bytes",
+            "declared_duration_seconds",
+            "source_sha256",
+            "transport",
+            "transport_lane",
+            "media_lane",
+        ):
+            if key in inspected:
+                merged[key] = inspected[key]
+        if "actual_bytes" in inspected:
+            merged["bytes"] = safe_int(inspected.get("actual_bytes"), 0)
+        elif "bytes" in inspected:
+            merged["bytes"] = safe_int(inspected.get("bytes"), 0)
+        return merged
+
+    def retain_video_editor_inspection_truth(source: dict, metadata: dict) -> dict:
+        truth = dict(metadata or {})
+        declared_bytes = safe_int(
+            truth.get("declared_bytes")
+            if "declared_bytes" in truth
+            else source.get("source_file_size"),
+            0,
+        )
+        declared_duration_seconds = safe_int(
+            truth.get("declared_duration_seconds")
+            if "declared_duration_seconds" in truth
+            else source.get("source_duration"),
+            0,
+        )
+        actual_bytes = safe_int(
+            truth.get("actual_bytes")
+            if "actual_bytes" in truth
+            else truth.get("bytes", source.get("source_file_size")),
+            0,
+        )
+        actual_duration_seconds = float(truth.get("duration") or 0.0)
+        declared_lane = video_edit_media_transport.select_media_lane(
+            duration_seconds=declared_duration_seconds,
+            size_bytes=declared_bytes,
+        )
+        inspected_lane = video_edit_media_transport.select_media_lane(
+            duration_seconds=actual_duration_seconds,
+            size_bytes=actual_bytes,
+        )
+        reported_lane = str(truth.get("media_lane") or "")
+        media_lane = (
+            "large_media"
+            if "large_media" in {declared_lane, inspected_lane, reported_lane}
+            else "short_media"
+        )
+        truth.update({
+            "bytes": actual_bytes,
+            "actual_bytes": actual_bytes,
+            "declared_bytes": declared_bytes,
+            "declared_duration_seconds": declared_duration_seconds,
+            "media_lane": media_lane,
+        })
+        source["source_file_size"] = actual_bytes
+        source["source_duration"] = int(round(actual_duration_seconds))
+        source["source_duration_ms"] = safe_int(truth.get("duration_ms"), 0)
+        source["source_video_hash"] = str(truth.get("source_sha256") or "")
+        source["media_lane"] = media_lane
+        return truth
+
     edit_mode = video_edit_state_machine.normalize_edit_mode(state.get("edit_mode"))
     owner_mode = edit_mode or video_edit_recovery_mode(state)
     if owner_mode:
@@ -226378,24 +226618,25 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
                 return True
             await reply_after_intake_commit(
                 current,
-                video_local_public_error("unsupported_file_type"),
+                video_local_public_error("unsupported_file_type", lang),
                 reply_markup=video_edit_lane_upload_keyboard(edit_mode, lang),
             )
             return True
         try:
             metadata = await inspect_video_editor_source(context, source)
+        except video_edit_media_transport.MediaTransferError as exc:
+            metadata = {"ok": False, "reason": str(exc.reason or "transfer_failed")}
         except video_local_validation.LocalVideoValidationError as exc:
             metadata = {"ok": False, "reason": exc.reason}
         except Exception as exc:
             logger.warning("canonical video edit inspection failed | %s", sanitize_log_text(str(exc))[:180])
-            metadata = {"ok": False, "reason": "ffprobe_failed"}
+            metadata = {"ok": False, "reason": "inspection_failed"}
         if not metadata.get("ok"):
-            fallback = video_editor_telegram_probe_fallback(source, str(metadata.get("reason") or ""))
-            if fallback.get("ok"):
-                metadata = {
-                    **fallback,
-                    "source_sha256": str(metadata.get("source_sha256") or ""),
-                }
+            failure_reason = str(metadata.get("reason") or "")
+            if ffprobe_fallback_allowed(failure_reason):
+                fallback = video_editor_telegram_probe_fallback(source, failure_reason)
+                if fallback.get("ok"):
+                    metadata = merge_telegram_probe_evidence(metadata, fallback)
         if not metadata.get("ok"):
             reason = str(metadata.get("reason") or "invalid_video")
             waiting = video_edit_state_machine.keep_waiting_after_invalid(state, reason)
@@ -226404,14 +226645,11 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
                 return True
             await reply_after_intake_commit(
                 current,
-                video_local_public_error(reason),
+                video_local_public_error(reason, lang),
                 reply_markup=video_edit_lane_upload_keyboard(edit_mode, lang),
             )
             return True
-        source["source_file_size"] = int(metadata.get("bytes") or source.get("source_file_size") or 0)
-        source["source_duration"] = int(round(float(metadata.get("duration") or 0)))
-        source["source_duration_ms"] = int(metadata.get("duration_ms") or 0)
-        source["source_video_hash"] = str(metadata.get("source_sha256") or "")
+        metadata = retain_video_editor_inspection_truth(source, metadata)
         source["source_display_name"] = video_local_validation.safe_display_filename(
             str(source.get("source_file_name") or "video.mp4")
         )
@@ -226610,7 +226848,7 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
     source = video_editor_source_from_update(update)
     if not source.get("source_file_id"):
         await update.message.reply_text(
-            video_local_public_error("unsupported_file_type"),
+            video_local_public_error("unsupported_file_type", lang),
             reply_markup=video_local_input_keyboard(
                 str(state.get("selected_tool") or "manual"),
                 lang,
@@ -226620,14 +226858,25 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
         return True
     try:
         metadata = await inspect_video_editor_source(context, source)
+    except video_edit_media_transport.MediaTransferError as exc:
+        metadata = {"ok": False, "reason": str(exc.reason or "transfer_failed")}
     except video_local_validation.LocalVideoValidationError as exc:
         metadata = {"ok": False, "reason": exc.reason}
     except Exception as exc:
         logger.warning("video local inspection failed | %s", sanitize_log_text(str(exc))[:180])
-        metadata = {"ok": False, "reason": "ffprobe_failed"}
+        metadata = {"ok": False, "reason": "inspection_failed"}
+    if not metadata.get("ok"):
+        failure_reason = str(metadata.get("reason") or "")
+        if ffprobe_fallback_allowed(failure_reason):
+            fallback = video_editor_telegram_probe_fallback(source, failure_reason)
+            if fallback.get("ok"):
+                metadata = merge_telegram_probe_evidence(metadata, fallback)
     if not metadata.get("ok"):
         await update.message.reply_text(
-            video_local_public_error(str(metadata.get("reason") or "invalid_video")),
+            video_local_public_error(
+                str(metadata.get("reason") or "invalid_video"),
+                lang,
+            ),
             reply_markup=video_local_input_keyboard(
                 str(state.get("selected_tool") or "manual"),
                 lang,
@@ -226635,10 +226884,7 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
             ),
         )
         return True
-    source["source_file_size"] = int(metadata.get("bytes") or source.get("source_file_size") or 0)
-    source["source_duration"] = int(round(float(metadata.get("duration") or 0)))
-    source["source_duration_ms"] = int(metadata.get("duration_ms") or 0)
-    source["source_video_hash"] = str(metadata.get("source_sha256") or "")
+    metadata = retain_video_editor_inspection_truth(source, metadata)
     source["source_display_name"] = video_local_validation.safe_display_filename(str(source.get("source_file_name") or "video.mp4"))
     if step == "await_ai_video":
         metadata = dict(metadata)
