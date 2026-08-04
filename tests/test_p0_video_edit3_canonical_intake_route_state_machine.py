@@ -32,6 +32,10 @@ BOT_MODULE = ast.parse(BOT_SOURCE)
 MIB = 1024 * 1024
 
 
+def _is_whole_response_content_access(node: ast.AST) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr == "content"
+
+
 def _function_source(name: str) -> str:
     async_marker = f"async def {name}("
     sync_marker = f"def {name}("
@@ -1440,6 +1444,27 @@ def test_edit3_single_registered_video_media_gateway_and_read_only_legacy_callba
     assert "clear_video_editor_pending" not in compatibility
 
 
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    (
+        ("response.content", True),
+        ("reply.content", True),
+        ("client.get(...).content", True),
+        ("receipt.content_type", False),
+        ("chunk", False),
+    ),
+)
+def test_edit3_whole_response_content_guard_is_receiver_independent(
+    expression: str,
+    expected: bool,
+) -> None:
+    expression_module = ast.parse(expression)
+    assert any(
+        _is_whole_response_content_access(node)
+        for node in ast.walk(expression_module)
+    ) is expected
+
+
 def test_edit3_probe_contract_exposes_required_local_metadata_without_side_effects() -> None:
     probe = _function_source("inspect_video_editor_source")
     intake = _function_source("handle_video_editor_pending_upload")
@@ -1468,18 +1493,10 @@ def test_edit3_probe_contract_exposes_required_local_metadata_without_side_effec
         "write_bytes",
     }
 
-    def is_response_content(node: ast.expr) -> bool:
-        return (
-            isinstance(node, ast.Attribute)
-            and node.attr == "content"
-            and isinstance(node.value, ast.Name)
-            and node.value.id == "response"
-        )
-
     def is_whole_body_expression(node: ast.expr) -> bool:
         """Recognize expressions that materialize a streamed response body."""
 
-        if is_response_content(node):
+        if _is_whole_response_content_access(node):
             return True
         if isinstance(node, ast.Call):
             if called_name(node) == "iter_bytes":
@@ -1573,7 +1590,9 @@ def test_edit3_probe_contract_exposes_required_local_metadata_without_side_effec
     assert "telegram_local_media_fetch" not in probe
     assert "context.bot.get_file" not in probe
     assert all(called_name(call) not in forbidden_whole_file_calls for call in calls)
-    assert not any(is_response_content(node) for node in ast.walk(probe_module))
+    assert not any(
+        _is_whole_response_content_access(node) for node in ast.walk(probe_module)
+    )
     assert not any(is_bytes_join_of_iter_bytes(call) for call in calls)
     assert not any(is_wrapper_of_whole_body(call) for call in calls)
     assert not any(is_unbounded_read(call) for call in calls)
