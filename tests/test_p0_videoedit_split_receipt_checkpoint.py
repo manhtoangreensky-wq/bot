@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 import local_worker
-from services import video_editengine1
+from services import video_edit_media_transport, video_editengine1
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -362,7 +362,8 @@ def test_split_worker_marks_partial_delivery_unknown_with_artifact_manifest(
     monkeypatch.setattr(local_worker.shutil, "which", lambda _binary: "ffmpeg")
     monkeypatch.setattr(local_worker, "create_job_workspace", lambda _job_id: workspace)
     monkeypatch.setattr(local_worker, "cleanup_job_workspace", lambda _workspace: {"ok": True, "removed": True})
-    monkeypatch.setattr(local_worker, "_local1_download_asset", lambda *_args, **_kwargs: str(source))
+    monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "123:test-token")
+    monkeypatch.setattr(local_worker, "_video_edit_download_asset", lambda *_args, **_kwargs: str(source))
     monkeypatch.setattr(local_worker, "delivery_file_allowed", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(local_worker.video_ai_edit_validation, "sha256_file", lambda path: "a" * 64)
     monkeypatch.setattr(
@@ -392,13 +393,24 @@ def test_split_worker_marks_partial_delivery_unknown_with_artifact_manifest(
         )
     monkeypatch.setattr(local_worker, "execute_split_plan", lambda *_args, **_kwargs: {"ok": True, "outputs": outputs})
 
-    def deliver(_chat_id: str, path: str, *_args, **_kwargs) -> dict:
+    def deliver(*, artifact, **_kwargs):
+        path = str(artifact)
         delivery_calls.append(path)
         if len(delivery_calls) == 1:
-            return {"sent": True, "message_id": "1001", "file_id": "file-1"}
-        return {"sent": False, "message_id": "", "file_id": ""}
+            return video_edit_media_transport.DeliveryReceipt(
+                message_id="1001",
+                file_id="file-1",
+                delivery_method="sendVideo",
+                bytes_sent=Path(path).stat().st_size,
+                sha256="a" * 64,
+            )
+        raise video_edit_media_transport.MediaTransferError("delivery_unknown")
 
-    monkeypatch.setattr(local_worker, "telegram_send_video_receipt", deliver)
+    monkeypatch.setattr(
+        video_edit_media_transport,
+        "send_artifact_from_path",
+        deliver,
+    )
     monkeypatch.setattr(
         local_worker,
         "update_job",
@@ -480,7 +492,8 @@ def test_manual_delivery_receipt_survives_workspace_cleanup_failure(
         "cleanup_job_workspace",
         lambda _workspace: {"ok": False, "removed": False, "reason": "cleanup_locked"},
     )
-    monkeypatch.setattr(local_worker, "_local1_download_asset", lambda *_args, **_kwargs: str(source))
+    monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "123:test-token")
+    monkeypatch.setattr(local_worker, "_video_edit_download_asset", lambda *_args, **_kwargs: str(source))
     monkeypatch.setattr(local_worker, "delivery_file_allowed", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(local_worker.video_ai_edit_validation, "sha256_file", lambda _path: "a" * 64)
     monkeypatch.setattr(
@@ -508,9 +521,15 @@ def test_manual_delivery_receipt_survives_workspace_cleanup_failure(
 
     monkeypatch.setattr(local_worker, "execute_manual_edit", execute)
     monkeypatch.setattr(
-        local_worker,
-        "telegram_send_video_receipt",
-        lambda *_args, **_kwargs: {"sent": True, "message_id": "1001", "file_id": "manual-file"},
+        video_edit_media_transport,
+        "send_artifact_from_path",
+        lambda *, artifact, **_kwargs: video_edit_media_transport.DeliveryReceipt(
+            message_id="1001",
+            file_id="manual-file",
+            delivery_method="sendVideo",
+            bytes_sent=Path(artifact).stat().st_size,
+            sha256="a" * 64,
+        ),
     )
     monkeypatch.setattr(
         local_worker,
@@ -592,9 +611,10 @@ def _run_manual_delivery_case(
     )
     monkeypatch.setattr(
         local_worker,
-        "_local1_download_asset",
+        "_video_edit_download_asset",
         lambda *_args, **_kwargs: str(source),
     )
+    monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "123:test-token")
     monkeypatch.setattr(local_worker, "delivery_file_allowed", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         local_worker.video_ai_edit_validation,
@@ -629,7 +649,11 @@ def _run_manual_delivery_case(
         return dict(delivery_result)
 
     monkeypatch.setattr(local_worker, "execute_manual_edit", execute)
-    monkeypatch.setattr(local_worker, "telegram_send_video_receipt", deliver)
+    monkeypatch.setattr(
+        video_edit_media_transport,
+        "send_artifact_from_path",
+        deliver,
+    )
     monkeypatch.setattr(
         local_worker,
         "update_job",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import urllib.error
 from copy import deepcopy
@@ -8,7 +9,11 @@ from pathlib import Path
 import pytest
 
 import local_worker
-from services import video_editengine1, video_local_editing
+from services import (
+    video_edit_media_transport,
+    video_editengine1,
+    video_local_editing,
+)
 
 
 def _run_job(
@@ -24,6 +29,7 @@ def _run_job(
     observed_worker_steps: list[str] | None = None,
     source_validation_calls: list[dict] | None = None,
     job_user_id: str = "701",
+    transport_evidence: dict | None = None,
 ) -> tuple[dict, list[str]]:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -31,6 +37,19 @@ def _run_job(
     source.write_bytes(b"source-video")
     updates: list[dict] = []
     captions: list[str] = []
+
+    monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "123:test-token")
+    monkeypatch.setenv("TELEGRAM_API_BASE_URL", "https://api.telegram.org")
+    monkeypatch.setenv("TELEGRAM_API_PROXY_SECRET", "")
+    monkeypatch.setenv(
+        "TELEGRAM_API_PROXY_SECRET_HEADER",
+        "X-Toanaas-Proxy-Secret",
+    )
+    monkeypatch.setenv(
+        "TELEGRAM_LOCAL_API_FILE_ROOT",
+        "/var/lib/telegram-bot-api",
+    )
+    monkeypatch.setenv("TELEGRAM_LOCAL_API_MEDIA_PATH", "/localfile")
 
     monkeypatch.setattr(local_worker, "local_ffmpeg_path", lambda: "ffmpeg")
     monkeypatch.setattr(local_worker, "find_ffprobe", lambda ffmpeg_path="": "ffprobe")
@@ -46,7 +65,223 @@ def _run_job(
             observed_worker_steps.append("download")
         return str(source)
 
-    monkeypatch.setattr(local_worker, "_local1_download_asset", fake_download)
+    def materialize_bounded_fixture(
+        destination: str | Path,
+        *,
+        logical_size: int,
+        marker: str,
+    ) -> str:
+        target = Path(destination)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        seed = (str(marker or "fixture").encode("utf-8") + b"\0")
+        block_size = 64 * 1024
+        block = (seed * ((block_size // len(seed)) + 1))[:block_size]
+        remaining = max(1, int(logical_size or 0))
+        digest = hashlib.sha256()
+        with target.open("wb") as handle:
+            while remaining:
+                chunk = block[: min(remaining, block_size)]
+                handle.write(chunk)
+                digest.update(chunk)
+                remaining -= len(chunk)
+        return digest.hexdigest()
+
+    def bounded_file_sha256(path: str | Path) -> str:
+        digest = hashlib.sha256()
+        with Path(path).open("rb") as handle:
+            while True:
+                chunk = handle.read(64 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    if transport_evidence is None:
+        monkeypatch.setattr(local_worker, "_local1_download_asset", fake_download)
+        monkeypatch.setattr(
+            local_worker,
+            "_video_edit_download_asset",
+            fake_download,
+            raising=False,
+        )
+    else:
+        transport_evidence.setdefault("downloads", [])
+        transport_evidence.setdefault("download_calls", [])
+        transport_evidence.setdefault("deliveries", [])
+        transport_evidence.setdefault("delivery_calls", [])
+        transport_evidence["full_file_reads"] = int(
+            transport_evidence.get("full_file_reads") or 0
+        )
+        original_path_read_bytes = Path.read_bytes
+
+        def observe_full_file_read(path: Path) -> bytes:
+            transport_evidence["full_file_reads"] += 1
+            return original_path_read_bytes(path)
+
+        monkeypatch.setattr(Path, "read_bytes", observe_full_file_read)
+        monkeypatch.setenv("TELEGRAM_API_BASE_URL", "https://tg.toanaas.vn")
+        monkeypatch.setenv("TELEGRAM_API_PROXY_SECRET", "test-proxy-secret")
+        monkeypatch.setenv(
+            "TELEGRAM_API_PROXY_SECRET_HEADER",
+            "X-Toanaas-Proxy-Secret",
+        )
+        monkeypatch.setenv(
+            "TELEGRAM_LOCAL_API_FILE_ROOT",
+            "/var/lib/telegram-bot-api",
+        )
+        monkeypatch.setenv("TELEGRAM_LOCAL_API_MEDIA_PATH", "/localfile")
+        monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "123:test-token")
+
+        def fixture_size_for(file_id: str, expected_bytes: int | None) -> int:
+            if file_id == "source-file":
+                actual_probe_bytes = int(
+                    dict(downloaded_probe or {}).get("bytes") or 0
+                )
+                if actual_probe_bytes > 0:
+                    return actual_probe_bytes
+                declared_source_bytes = int(
+                    dict(payload_patch or {}).get("source_file_size") or 0
+                )
+                if declared_source_bytes > 0:
+                    return declared_source_bytes
+            if expected_bytes is not None and int(expected_bytes) > 0:
+                return int(expected_bytes)
+            return 1024
+
+        def fake_transport_download(
+            *,
+            config,
+            file_id,
+            destination,
+            expected_bytes=None,
+            expected_size=None,
+            hard_max_bytes=None,
+            workspace_reserve_bytes=0,
+            require_private_parent=False,
+            **_kwargs,
+        ):
+            expected = expected_bytes if expected_bytes is not None else expected_size
+            logical_size = fixture_size_for(str(file_id or ""), expected)
+            sha256 = materialize_bounded_fixture(
+                destination,
+                logical_size=logical_size,
+                marker=str(file_id or "asset"),
+            )
+            transport = (
+                "local_bot_api"
+                if bool(getattr(config, "is_local", False))
+                else "cloud_bot_api"
+            )
+            transport_evidence["downloads"].append(transport)
+            transport_evidence["download_calls"].append(
+                {
+                    "file_id": str(file_id or ""),
+                    "destination": str(destination),
+                    "expected_bytes": expected,
+                    "hard_max_bytes": hard_max_bytes,
+                    "workspace_reserve_bytes": workspace_reserve_bytes,
+                    "require_private_parent": require_private_parent,
+                    "transport": transport,
+                    "bytes_written": logical_size,
+                    "config": config,
+                }
+            )
+            return video_edit_media_transport.DownloadReceipt(
+                path=str(destination),
+                bytes_written=logical_size,
+                sha256=sha256,
+                lane="large_media",
+                transport="localfile" if transport == "local_bot_api" else "file",
+                declared_bytes=(int(expected) if expected is not None else logical_size),
+            )
+
+        def fake_transport_delivery(
+            *,
+            config,
+            chat_id,
+            artifact,
+            request,
+            caption="",
+            preview_threshold_bytes=video_edit_media_transport.SHORT_MEDIA_MAX_BYTES,
+            **_kwargs,
+        ):
+            del request
+            artifact_path = Path(artifact)
+            artifact_size = artifact_path.stat().st_size
+            delivery_method = (
+                "sendVideo"
+                if artifact_path.suffix.lower() == ".mp4"
+                and artifact_size <= int(preview_threshold_bytes)
+                else "sendDocument"
+            )
+            captions.append(str(caption or ""))
+            delivery_index = len(captions)
+            transport_evidence["deliveries"].append(delivery_method)
+            transport_evidence["delivery_calls"].append(
+                {
+                    "chat_id": str(chat_id),
+                    "artifact": str(artifact),
+                    "delivery_method": delivery_method,
+                    "bytes_sent": artifact_size,
+                    "config": config,
+                }
+            )
+            return video_edit_media_transport.DeliveryReceipt(
+                message_id=str(4_000 + delivery_index),
+                file_id=f"transport-file-{delivery_index}",
+                delivery_method=delivery_method,
+                bytes_sent=artifact_size,
+                sha256=bounded_file_sha256(artifact_path),
+            )
+
+        def legacy_download_must_not_run(*_args, **_kwargs) -> None:
+            pytest.fail(
+                "Video Edit transport evidence must not call telegram_download_file"
+            )
+
+        def legacy_delivery_must_not_run(*_args, **_kwargs) -> None:
+            pytest.fail(
+                "Video Edit transport evidence must not call telegram_send_video_receipt"
+            )
+
+        monkeypatch.setattr(
+            video_edit_media_transport,
+            "download_file_to_path",
+            fake_transport_download,
+        )
+        monkeypatch.setattr(
+            video_edit_media_transport,
+            "send_artifact_from_path",
+            fake_transport_delivery,
+        )
+        monkeypatch.setattr(
+            local_worker,
+            "video_edit_media_transport",
+            video_edit_media_transport,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            local_worker,
+            "download_file_to_path",
+            fake_transport_download,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            local_worker,
+            "send_artifact_from_path",
+            fake_transport_delivery,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            local_worker,
+            "telegram_download_file",
+            legacy_download_must_not_run,
+        )
+        monkeypatch.setattr(
+            local_worker,
+            "telegram_send_video_receipt",
+            legacy_delivery_must_not_run,
+        )
     monkeypatch.setattr(local_worker, "delivery_file_allowed", lambda *_args, **_kwargs: True)
     probe = downloaded_probe or {
         "ok": True,
@@ -71,14 +306,27 @@ def _run_job(
         local_worker.video_local_validation.validate_source_metadata
     )
 
-    def observe_source_validation(metadata: dict, *, file_size: int = 0) -> dict:
+    def observe_source_validation(
+        metadata: dict,
+        *,
+        file_size: int = 0,
+        **limits,
+    ) -> dict:
         if observed_worker_steps is not None:
             observed_worker_steps.append("validate")
         if source_validation_calls is not None:
             source_validation_calls.append(
-                {"metadata": deepcopy(metadata), "file_size": file_size}
+                {
+                    "metadata": deepcopy(metadata),
+                    "file_size": file_size,
+                    **deepcopy(limits),
+                }
             )
-        return original_validate_source_metadata(metadata, file_size=file_size)
+        return original_validate_source_metadata(
+            metadata,
+            file_size=file_size,
+            **limits,
+        )
 
     monkeypatch.setattr(local_worker.video_local_validation, "probe_video_file", fake_probe)
     monkeypatch.setattr(
@@ -92,7 +340,19 @@ def _run_job(
             observed_worker_steps.append("execute")
         if observed_plans is not None:
             observed_plans.append(deepcopy(_plan))
-        Path(output_path).write_bytes(b"rendered-video")
+        if transport_evidence is None:
+            Path(output_path).write_bytes(b"rendered-video")
+        else:
+            output_size = int(
+                transport_evidence.get("output_size_bytes")
+                or dict(probe or {}).get("bytes")
+                or len(b"rendered-video")
+            )
+            materialize_bounded_fixture(
+                output_path,
+                logical_size=output_size,
+                marker="rendered-video",
+            )
         return {
             "ok": True,
             "validation": {
@@ -131,16 +391,39 @@ def _run_job(
     monkeypatch.setattr(local_worker, "execute_manual_edit", fake_manual_edit)
     monkeypatch.setattr(local_worker, "execute_split_plan", fake_split_plan)
 
-    def fake_delivery(_chat_id: str, _path: str, caption: str = "", **_kwargs) -> dict:
-        captions.append(caption)
-        index = len(captions)
-        return {
-            "sent": True,
-            "message_id": str(1_000 + index),
-            "file_id": f"file-{index}",
-        }
+    def fake_delivery(*_args, **_kwargs) -> dict:
+        pytest.fail(
+            "Video Edit worker tests must not call telegram_send_video_receipt"
+        )
 
-    monkeypatch.setattr(local_worker, "telegram_send_video_receipt", fake_delivery)
+    def fake_media_delivery(
+        *,
+        config,
+        chat_id,
+        artifact,
+        request,
+        caption="",
+        **_kwargs,
+    ) -> video_edit_media_transport.DeliveryReceipt:
+        del config, chat_id, request
+        captions.append(str(caption or ""))
+        index = len(captions)
+        artifact_path = Path(artifact)
+        return video_edit_media_transport.DeliveryReceipt(
+            message_id=str(1_000 + index),
+            file_id=f"file-{index}",
+            delivery_method="sendVideo",
+            bytes_sent=artifact_path.stat().st_size,
+            sha256=bounded_file_sha256(artifact_path),
+        )
+
+    if transport_evidence is None:
+        monkeypatch.setattr(
+            video_edit_media_transport,
+            "send_artifact_from_path",
+            fake_media_delivery,
+        )
+        monkeypatch.setattr(local_worker, "telegram_send_video_receipt", fake_delivery)
     monkeypatch.setattr(
         local_worker,
         "update_job",
@@ -213,6 +496,229 @@ def _run_job(
         }
     )
     return updates[-1], captions
+
+
+def test_video_edit_worker_large_media_uses_local_transport_and_document_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    large_bytes = 21 * 1024 * 1024
+    evidence: dict = {
+        "downloads": [],
+        "deliveries": [],
+        "full_file_reads": 0,
+    }
+
+    terminal, _captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch={
+            "media_lane": "large_media",
+            "source_file_size": large_bytes,
+        },
+        downloaded_probe={
+            "ok": True,
+            "reason": "",
+            "duration": 90.0,
+            "duration_ms": 90_000,
+            "width": 1280,
+            "height": 720,
+            "fps": 25.0,
+            "has_video": True,
+            "has_audio": True,
+            "audio_stream_count": 1,
+            "format_name": "mp4",
+            "bytes": large_bytes,
+        },
+        transport_evidence=evidence,
+    )
+
+    receipt = json.loads(terminal["output_url"])
+    assert terminal["status"] == "succeeded"
+    assert evidence["downloads"] == ["local_bot_api"]
+    assert evidence["download_calls"][0]["config"].api_root == (
+        "https://tg.toanaas.vn"
+    )
+    assert evidence["download_calls"][0]["hard_max_bytes"] is None
+    assert evidence["download_calls"][0]["require_private_parent"] is True
+    assert evidence["deliveries"] == ["sendDocument"]
+    assert receipt["delivery_message_id"] == "4001"
+    assert receipt["delivery_file_id"] == "transport-file-1"
+    assert terminal["output_file_id"] == "transport-file-1"
+    assert evidence["full_file_reads"] == 0
+
+
+def test_video_edit_worker_streams_source_concat_logo_and_subtitle_with_asset_policies(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source_bytes = 2 * 1024 * 1024
+    evidence: dict = {
+        "downloads": [],
+        "deliveries": [],
+        "full_file_reads": 0,
+    }
+    observed_plans: list[dict] = []
+    validation_calls: list[dict] = []
+
+    terminal, _captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        manual_plan={
+            "trim": {"start_ms": 0, "end_ms": 2_000},
+            "concat_inputs": ["telegram-concat-placeholder.mp4"],
+            "logo_overlay": {
+                "position": "top_right",
+                "scale": 0.12,
+                "opacity": 0.75,
+            },
+            "subtitle_file": "telegram-subtitle-placeholder.srt",
+            "audio_normalization": "loudnorm",
+        },
+        payload_patch={
+            "media_lane": "large_media",
+            "source_file_size": source_bytes,
+            "concat_sources": [
+                {
+                    "file_id": "concat-file",
+                    "file_name": "concat.mp4",
+                    "file_size": 3 * 1024 * 1024,
+                }
+            ],
+            "logo_source": {
+                "file_id": "logo-file",
+                "file_name": "logo.png",
+                "file_size": 256 * 1024,
+            },
+            "subtitle_source": {
+                "file_id": "subtitle-file",
+                "file_name": "subtitle.srt",
+                "file_size": 32 * 1024,
+            },
+        },
+        downloaded_probe={
+            "ok": True,
+            "reason": "",
+            "duration": 2.0,
+            "duration_ms": 2_000,
+            "width": 640,
+            "height": 360,
+            "fps": 25.0,
+            "has_video": True,
+            "has_audio": True,
+            "audio_stream_count": 1,
+            "format_name": "mp4",
+            "bytes": source_bytes,
+        },
+        observed_plans=observed_plans,
+        source_validation_calls=validation_calls,
+        transport_evidence=evidence,
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert evidence["downloads"] == ["local_bot_api"] * 4
+    assert [
+        (call["file_id"], call["hard_max_bytes"])
+        for call in evidence["download_calls"]
+    ] == [
+        ("source-file", None),
+        ("concat-file", None),
+        ("logo-file", 10 * 1024 * 1024),
+        ("subtitle-file", 5 * 1024 * 1024),
+    ]
+    assert validation_calls
+    assert validation_calls[0]["file_size"] == source_bytes
+    assert validation_calls[0]["maximum_bytes"] == 0
+    assert validation_calls[0]["maximum_duration_seconds"] == 0
+    assert len(observed_plans) == 1
+    executed_plan = observed_plans[0]
+    assert Path(executed_plan["input_video"]).name == "source.mp4"
+    assert [Path(path).name for path in executed_plan["concat_inputs"]] == [
+        "concat_001.mp4"
+    ]
+    assert executed_plan["audio_normalization"] == "loudnorm"
+    assert Path(executed_plan["logo_overlay"]["path"]).name == "logo.png"
+    assert Path(executed_plan["subtitle_file"]).name == "subtitle.srt"
+    assert evidence["full_file_reads"] == 0
+
+
+@pytest.mark.parametrize(
+    ("persisted_lane", "actual_duration_seconds", "actual_bytes"),
+    [
+        pytest.param("short_media", 61.0, 1 * 1024 * 1024, id="duration-promotion"),
+        pytest.param(
+            "short_media",
+            30.0,
+            20 * 1024 * 1024 + 1,
+            id="size-promotion",
+        ),
+        pytest.param(
+            "large_media",
+            30.0,
+            1 * 1024 * 1024,
+            id="persisted-large-no-demotion",
+        ),
+    ],
+)
+def test_video_edit_worker_promotes_actual_probe_to_large_lane_and_disables_public_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    persisted_lane: str,
+    actual_duration_seconds: float,
+    actual_bytes: int,
+) -> None:
+    evidence: dict = {
+        "downloads": [],
+        "deliveries": [],
+        "full_file_reads": 0,
+    }
+    validation_calls: list[dict] = []
+
+    terminal, _captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch={
+            "media_lane": persisted_lane,
+            "source_file_size": 1 * 1024 * 1024,
+            "source_metadata": {
+                "ok": True,
+                "duration": 30.0,
+                "duration_ms": 30_000,
+                "width": 640,
+                "height": 360,
+                "has_audio": True,
+            },
+        },
+        downloaded_probe={
+            "ok": True,
+            "reason": "",
+            "duration": actual_duration_seconds,
+            "duration_ms": int(actual_duration_seconds * 1_000),
+            "width": 640,
+            "height": 360,
+            "fps": 25.0,
+            "has_video": True,
+            "has_audio": True,
+            "audio_stream_count": 1,
+            "format_name": "mp4",
+            "bytes": actual_bytes,
+        },
+        source_validation_calls=validation_calls,
+        transport_evidence=evidence,
+    )
+
+    assert terminal["status"] == "succeeded"
+    detail = json.loads(terminal["detail"])
+    assert detail["media_lane"] == "large_media"
+    assert len(validation_calls) == 1
+    assert validation_calls[0]["file_size"] == actual_bytes
+    assert validation_calls[0]["maximum_bytes"] == 0
+    assert validation_calls[0]["maximum_duration_seconds"] == 0
+    assert evidence["download_calls"][0]["hard_max_bytes"] is None
+    assert evidence["full_file_reads"] == 0
 
 
 @pytest.mark.parametrize("mode", ["manual", "split"])
@@ -660,7 +1166,7 @@ def test_split_worker_accepts_duration_independent_neutral_manual_plan(
     assert len(captions) == 2
 
 
-def test_worker_rechecks_downloaded_source_duration_before_execution(
+def test_worker_rechecks_downloaded_source_duration_without_public_rejection(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -690,13 +1196,15 @@ def test_worker_rechecks_downloaded_source_duration_before_execution(
     )
 
     detail = json.loads(terminal["detail"])
-    assert terminal["status"] == "failed"
-    assert detail["reason"] == "duration_too_long"
-    assert captions == []
-    assert observed_steps == ["download", "probe", "validate"]
+    assert terminal["status"] == "succeeded"
+    assert detail["media_lane"] == "large_media"
+    assert captions
+    assert observed_steps == ["download", "probe", "validate", "execute"]
     assert len(validation_calls) == 1
     assert validation_calls[0]["file_size"] == len(b"source-video")
     assert validation_calls[0]["metadata"]["duration_ms"] == over_limit * 1_000
+    assert validation_calls[0]["maximum_bytes"] == 0
+    assert validation_calls[0]["maximum_duration_seconds"] == 0
 
 
 def test_worker_uses_downloaded_duration_for_the_final_noop_guard(

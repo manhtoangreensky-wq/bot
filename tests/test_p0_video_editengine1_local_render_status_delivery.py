@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -11,7 +12,7 @@ from pathlib import Path
 import pytest
 
 import local_worker
-from services import video_editengine1
+from services import video_edit_media_transport, video_editengine1
 from services import video_local_editing as editing
 from services import video_local_validation as validation
 from services import video_tail9
@@ -500,12 +501,28 @@ def test_editengine1_worker_renders_and_delivers_one_real_mp4(tmp_path: Path, mo
     updates: list[dict] = []
     deliveries: list[dict] = []
 
-    def fake_download(_file_id: str, destination: str, max_bytes: int = 0) -> None:
-        Path(destination).write_bytes(source.read_bytes())
+    def fake_download(
+        _file_id,
+        _file_name,
+        workspace,
+        _allowed,
+        stem,
+        **_kwargs,
+    ) -> str:
+        target = Path(workspace) / f"{stem}{source.suffix}"
+        shutil.copyfile(source, target)
+        return str(target)
 
-    def fake_delivery(chat_id: str, output_path: str, caption: str = "", **_kwargs) -> dict:
-        deliveries.append({"chat_id": chat_id, "output_path": output_path, "caption": caption})
-        return {"sent": True, "message_id": "901", "file_id": "telegram-output-901"}
+    def fake_delivery(*, chat_id, artifact, caption="", **_kwargs):
+        output_path = Path(artifact)
+        deliveries.append({"chat_id": chat_id, "output_path": str(output_path), "caption": caption})
+        return video_edit_media_transport.DeliveryReceipt(
+            message_id="901",
+            file_id="telegram-output-901",
+            delivery_method="sendVideo",
+            bytes_sent=output_path.stat().st_size,
+            sha256="b" * 64,
+        )
 
     def capture_update(job_id, status: str, error_short: str = "", output_url: str = "", output_file_id: str = "", **_kwargs) -> None:
         updates.append({
@@ -528,8 +545,13 @@ def test_editengine1_worker_renders_and_delivers_one_real_mp4(tmp_path: Path, mo
         "cleanup_job_workspace",
         lambda workspace: validation.cleanup_job_workspace(workspace, root=workspaces),
     )
-    monkeypatch.setattr(local_worker, "telegram_download_file", fake_download)
-    monkeypatch.setattr(local_worker, "telegram_send_video_receipt", fake_delivery)
+    monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "123:test-token")
+    monkeypatch.setattr(local_worker, "_video_edit_download_asset", fake_download)
+    monkeypatch.setattr(
+        video_edit_media_transport,
+        "send_artifact_from_path",
+        fake_delivery,
+    )
     monkeypatch.setattr(local_worker, "update_job", capture_update)
 
     plan = editing.default_manual_edit_plan("")
@@ -576,10 +598,10 @@ def test_editengine1_worker_rejects_wrong_contract_before_download(monkeypatch: 
     deliveries: list[dict] = []
     updates: list[dict] = []
 
-    monkeypatch.setattr(local_worker, "telegram_download_file", lambda file_id, *_args, **_kwargs: downloads.append(file_id))
+    monkeypatch.setattr(local_worker, "_video_edit_download_asset", lambda file_id, *_args, **_kwargs: downloads.append(file_id))
     monkeypatch.setattr(
-        local_worker,
-        "telegram_send_video_receipt",
+        video_edit_media_transport,
+        "send_artifact_from_path",
         lambda *args, **kwargs: deliveries.append({"args": args, "kwargs": kwargs}),
     )
     monkeypatch.setattr(
@@ -706,7 +728,7 @@ def test_editengine1_worker_receipt_contains_real_delivery_and_validation_truth(
     end = WORKER_SOURCE.index("def _aiedit_progress", start)
     source = WORKER_SOURCE[start:end]
     for required in (
-        "telegram_send_video_receipt(",
+        "send_video_edit_artifact(",
         "telegram_delivery_identity(delivery)",
         '"message_id": message_id',
         '"file_id": file_id',
@@ -716,7 +738,7 @@ def test_editengine1_worker_receipt_contains_real_delivery_and_validation_truth(
         'terminal_status = "succeeded"',
     ):
         assert required in source
-    assert source.index("telegram_send_video_receipt(") < source.index('terminal_status = "succeeded"')
+    assert source.rindex("send_video_edit_artifact(") < source.index('terminal_status = "succeeded"')
 
 
 def test_editengine1_scope_has_no_real_provider_calls_or_early_charge() -> None:

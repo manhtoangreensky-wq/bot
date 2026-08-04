@@ -64,7 +64,18 @@ from services.video_local_validation import (
     ALLOWED_SUBTITLE_EXTENSIONS,
 )
 from services.video_smart_splitter import SplitRange
-from services import frame_video_commercial, frame_video_public_seam, frame_video_runtime, video_ai_edit_provider, video_ai_edit_status, video_ai_edit_validation, video_editengine1, video_local_validation
+from services import (
+    frame_video_commercial,
+    frame_video_public_seam,
+    frame_video_runtime,
+    video_ai_edit_provider,
+    video_ai_edit_status,
+    video_ai_edit_validation,
+    video_edit_long_media,
+    video_edit_media_transport,
+    video_editengine1,
+    video_local_validation,
+)
 
 
 _TELEGRAM_DEFAULT_URLOPEN = urllib.request.urlopen
@@ -430,6 +441,209 @@ def telegram_open_no_redirect(request, timeout):
 
     opener = urllib.request.build_opener(NoRedirectHandler())
     return opener.open(request, timeout=timeout)
+
+
+_VIDEO_EDIT_TELEGRAM_JSON_MAX_BYTES = 256 * 1024
+
+
+def _video_edit_telegram_media_config() -> video_edit_media_transport.TelegramMediaConfig:
+    raw_media_path = str(
+        os.environ.get("TELEGRAM_LOCAL_API_MEDIA_PATH") or "localfile"
+    )
+    local_media_path = (
+        raw_media_path if raw_media_path.startswith("/") else f"/{raw_media_path}"
+    )
+    return video_edit_media_transport.TelegramMediaConfig(
+        token=str(TELEGRAM_BOT_TOKEN or ""),
+        api_root=str(
+            os.environ.get("TELEGRAM_API_BASE_URL")
+            or "https://api.telegram.org"
+        ),
+        proxy_secret_header=str(
+            os.environ.get("TELEGRAM_API_PROXY_SECRET_HEADER")
+            or "X-Toanaas-Proxy-Secret"
+        ),
+        proxy_secret=str(os.environ.get("TELEGRAM_API_PROXY_SECRET") or ""),
+        local_file_root=str(
+            os.environ.get("TELEGRAM_LOCAL_API_FILE_ROOT")
+            or "/var/lib/telegram-bot-api"
+        ).rstrip("/"),
+        local_media_path=local_media_path,
+    )
+
+
+def _video_edit_bounded_json_response(response, *, reason: str) -> dict:
+    try:
+        body = response.read(_VIDEO_EDIT_TELEGRAM_JSON_MAX_BYTES + 1)
+    except (TimeoutError, socket.timeout, urllib.error.URLError, OSError):
+        raise RuntimeError(reason) from None
+    if (
+        not isinstance(body, bytes)
+        or not body
+        or len(body) > _VIDEO_EDIT_TELEGRAM_JSON_MAX_BYTES
+    ):
+        raise RuntimeError(reason)
+    headers = getattr(response, "headers", None)
+    declared_length = headers.get("Content-Length") if headers is not None else None
+    if declared_length not in {None, ""}:
+        try:
+            if int(declared_length) != len(body):
+                raise ValueError
+        except (TypeError, ValueError, OverflowError):
+            raise RuntimeError(reason) from None
+    try:
+        payload = json.loads(body.decode("utf-8", errors="strict"))
+    except (UnicodeError, TypeError, ValueError):
+        raise RuntimeError(reason) from None
+    if not isinstance(payload, dict):
+        raise RuntimeError(reason)
+    return payload
+
+
+def _video_edit_get_file_json(
+    *,
+    url: str,
+    headers: dict,
+    follow_redirects: bool,
+    **request_fields,
+) -> dict:
+    if follow_redirects is not False or set(request_fields) != {"json"}:
+        raise RuntimeError("telegram_get_file_request_invalid")
+    try:
+        body = json.dumps(
+            request_fields["json"],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            str(url or ""),
+            data=body,
+            headers={"Content-Type": "application/json", **dict(headers or {})},
+            method="POST",
+        )
+        with telegram_open_no_redirect(request, timeout=30) as response:
+            return _video_edit_bounded_json_response(
+                response,
+                reason="telegram_get_file_response_invalid",
+            )
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"telegram_get_file_http_{int(exc.code or 0)}") from None
+    except RuntimeError:
+        raise
+    except (TimeoutError, socket.timeout, urllib.error.URLError, OSError, TypeError, ValueError):
+        raise RuntimeError("telegram_get_file_network") from None
+
+
+def _video_edit_stream_bytes(
+    *,
+    url: str,
+    headers: dict,
+    follow_redirects: bool,
+    chunk_size: int,
+):
+    if (
+        follow_redirects is not False
+        or isinstance(chunk_size, bool)
+        or not isinstance(chunk_size, int)
+        or chunk_size < 1
+    ):
+        raise RuntimeError("telegram_download_request_invalid")
+    bounded_chunk_size = min(
+        chunk_size,
+        video_edit_media_transport.STREAM_CHUNK_BYTES,
+    )
+    timeout = max(
+        60,
+        min(
+            7200,
+            env_int(
+                "VIDEO_EDIT_TELEGRAM_DOWNLOAD_TIMEOUT_SECONDS",
+                max(60, LOCAL_WORKER_MAX_JOB_SECONDS),
+            ),
+        ),
+    )
+    try:
+        request = urllib.request.Request(
+            str(url or ""),
+            headers=dict(headers or {}),
+            method="GET",
+        )
+        with telegram_open_no_redirect(request, timeout=timeout) as response:
+            while True:
+                chunk = response.read(bounded_chunk_size)
+                if not chunk:
+                    break
+                if not isinstance(chunk, bytes) or len(chunk) > bounded_chunk_size:
+                    raise RuntimeError("telegram_download_chunk_invalid")
+                yield chunk
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"telegram_download_http_{int(exc.code or 0)}") from None
+    except RuntimeError:
+        raise
+    except (TimeoutError, socket.timeout, urllib.error.URLError, OSError, TypeError, ValueError):
+        raise RuntimeError("telegram_download_network") from None
+
+
+def _video_edit_multipart_request(
+    *,
+    method_name: str,
+    url: str,
+    headers: dict,
+    content_length: int,
+    body,
+    follow_redirects: bool,
+) -> dict:
+    if (
+        follow_redirects is not False
+        or method_name not in {"sendVideo", "sendDocument"}
+        or isinstance(content_length, bool)
+        or not isinstance(content_length, int)
+        or content_length < 1
+    ):
+        raise RuntimeError("telegram_delivery_request_invalid")
+    request_headers = dict(headers or {})
+    if str(request_headers.get("Content-Length") or "") != str(content_length):
+        raise RuntimeError("telegram_delivery_request_invalid")
+    timeout = max(
+        120,
+        min(
+            7200,
+            env_int("VIDEO_EDIT_TELEGRAM_DELIVERY_TIMEOUT_SECONDS", 1800),
+        ),
+    )
+    try:
+        request = urllib.request.Request(
+            str(url or ""),
+            data=body,
+            headers=request_headers,
+            method="POST",
+        )
+        with telegram_open_no_redirect(request, timeout=timeout) as response:
+            payload = _video_edit_bounded_json_response(
+                response,
+                reason="telegram_delivery_response_invalid",
+            )
+        payload["status_code"] = 200
+        return payload
+    except urllib.error.HTTPError as exc:
+        try:
+            payload = _video_edit_bounded_json_response(
+                exc,
+                reason="telegram_delivery_response_invalid",
+            )
+        finally:
+            try:
+                exc.close()
+            except OSError:
+                pass
+        payload["status_code"] = int(exc.code or 0)
+        if payload.get("ok") is not False:
+            raise RuntimeError("telegram_delivery_outcome_uncertain")
+        return payload
+    except RuntimeError:
+        raise
+    except (TimeoutError, socket.timeout, urllib.error.URLError, OSError, TypeError, ValueError):
+        raise RuntimeError("telegram_delivery_outcome_uncertain") from None
 
 
 def telegram_json(method: str, payload: dict | None = None, timeout: int = 30) -> dict:
@@ -833,12 +1047,53 @@ def _local1_download_asset(
     *,
     max_bytes: int = MAX_UPLOAD_BYTES,
 ) -> str:
+    """Preserve the bounded legacy helper used by non-Video-Edit routes."""
+
     safe_name = validate_extension(file_name, allowed)
     suffix = Path(safe_name).suffix.lower()
     target = workspace / f"{stem}{suffix}"
-    telegram_download_file(str(file_id or ""), str(target), max_bytes=max(1, int(max_bytes)))
+    telegram_download_file(
+        str(file_id or ""),
+        str(target),
+        max_bytes=max(1, int(max_bytes)),
+    )
     enforce_workspace_limit(workspace)
     return str(target)
+
+
+def _video_edit_download_asset(
+    file_id: str,
+    file_name: str,
+    workspace: Path,
+    allowed: set[str],
+    stem: str,
+    *,
+    max_bytes: int | None = None,
+    media_config: video_edit_media_transport.TelegramMediaConfig,
+) -> str:
+    safe_name = validate_extension(file_name, allowed)
+    suffix = Path(safe_name).suffix.lower()
+    target = workspace / f"{stem}{suffix}"
+    config = media_config
+    hard_max_bytes = max_bytes
+    if hard_max_bytes is None and not config.is_local:
+        hard_max_bytes = video_edit_media_transport.SHORT_MEDIA_MAX_BYTES
+    try:
+        receipt = video_edit_media_transport.download_file_to_path(
+            config=config,
+            file_id=str(file_id or ""),
+            destination=target,
+            get_file_json=_video_edit_get_file_json,
+            stream_bytes=_video_edit_stream_bytes,
+            hard_max_bytes=hard_max_bytes,
+            workspace_reserve_bytes=(
+                video_edit_long_media.DEFAULT_WORKSPACE_RESERVE_BYTES
+            ),
+            require_private_parent=True,
+        )
+    except video_edit_media_transport.MediaTransferError as exc:
+        raise LocalVideoEditError(str(exc.reason or "stream_failed")) from exc
+    return str(receipt.path)
 
 
 def _legacy_local1_plan(payload: dict, source_path: str) -> dict:
@@ -940,6 +1195,7 @@ def run_video_local_edit(job: dict) -> None:
     expected_output_total = 0
     source_video_path = ""
     source_sha256 = ""
+    media_lane = ""
     try:
         payload = json.loads(str(job.get("input_file_id") or "") or "{}")
         if not isinstance(payload, dict):
@@ -962,6 +1218,9 @@ def run_video_local_edit(job: dict) -> None:
         chat_id = str(payload.get("chat_id") or "")
         if not source_file_id or not chat_id:
             raise LocalVideoEditError("video_local_edit_missing_input")
+        persisted_media_lane = str(payload.get("media_lane") or "").strip()
+        if persisted_media_lane in {"short_media", "large_media"}:
+            media_lane = persisted_media_lane
         price_xu = _strict_video_edit_price(payload.get("price_xu", 0))
         quoted_price_xu = _strict_video_edit_price(
             payload.get("quoted_price_xu", 0)
@@ -1092,21 +1351,81 @@ def run_video_local_edit(job: dict) -> None:
         if not ffprobe:
             raise LocalVideoEditError("ffprobe_missing")
         workspace = create_job_workspace(f"job_{job_id}")
+        try:
+            media_config = _video_edit_telegram_media_config()
+        except (TypeError, ValueError):
+            raise LocalVideoEditError("invalid_media_transport_config") from None
+
+        def send_video_edit_artifact(
+            artifact_path: str | Path,
+            caption: str,
+        ) -> dict:
+            try:
+                receipt = video_edit_media_transport.send_artifact_from_path(
+                    config=media_config,
+                    chat_id=chat_id,
+                    artifact=artifact_path,
+                    request=_video_edit_multipart_request,
+                    caption=caption,
+                )
+            except video_edit_media_transport.MediaTransferError as exc:
+                reason = str(exc.reason or "delivery_unknown")
+                if reason == "delivery_unknown":
+                    reason = "telegram_delivery_outcome_uncertain"
+                elif reason == "delivery_rejected":
+                    reason = "telegram_delivery_rejected"
+                else:
+                    reason = f"telegram_{reason}"
+                raise LocalVideoEditError(reason) from exc
+            if not isinstance(
+                receipt,
+                video_edit_media_transport.DeliveryReceipt,
+            ):
+                raise LocalVideoEditError("telegram_delivery_receipt_invalid")
+            return {
+                "sent": True,
+                "message_id": receipt.message_id,
+                "file_id": receipt.file_id,
+                "delivery_method": receipt.delivery_method,
+                "bytes_sent": receipt.bytes_sent,
+                "sha256": receipt.sha256,
+            }
+
         _local1_progress(job_id, "inspecting_input")
-        source_path = _local1_download_asset(
+        source_path = _video_edit_download_asset(
             source_file_id,
             str(payload.get("source_file_name") or "video.mp4"),
             workspace,
             ALLOWED_SOURCE_EXTENSIONS,
             "source",
+            media_config=media_config,
         )
         downloaded_probe = video_local_validation.probe_video_file(
             source_path,
             ffprobe_path=ffprobe,
         )
+        actual_source_size = os.path.getsize(source_path)
+        try:
+            actual_duration_seconds = float(
+                downloaded_probe.get("duration") or 0.0
+            )
+        except (TypeError, ValueError, OverflowError):
+            actual_duration_seconds = 0.0
+        actual_media_lane = video_edit_media_transport.select_media_lane(
+            duration_seconds=actual_duration_seconds,
+            size_bytes=actual_source_size,
+        )
+        media_lane = (
+            "large_media"
+            if persisted_media_lane == "large_media"
+            or actual_media_lane == "large_media"
+            else "short_media"
+        )
         downloaded_validation = video_local_validation.validate_source_metadata(
             downloaded_probe,
-            file_size=os.path.getsize(source_path),
+            file_size=actual_source_size,
+            maximum_bytes=0,
+            maximum_duration_seconds=0,
         )
         if not downloaded_validation.get("ok"):
             raise LocalVideoEditError(
@@ -1187,11 +1506,9 @@ def run_video_local_edit(job: dict) -> None:
                     if free_edit
                     else f"✅ Phần {index}/{total} · {duration_seconds:.1f} giây · chỉ ghi phí sau khi giao đủ kết quả"
                 )
-                delivery = telegram_send_video_receipt(
-                    chat_id,
+                delivery = send_video_edit_artifact(
                     output_path,
                     delivery_caption,
-                    filename=os.path.basename(output_path),
                 )
                 message_id, file_id = video_editengine1.telegram_delivery_identity(delivery)
                 if delivery.get("sent") is True and (not message_id or not file_id):
@@ -1273,12 +1590,13 @@ def run_video_local_edit(job: dict) -> None:
             for index, source in enumerate(submitted_concat_sources, start=1):
                 if not isinstance(source, dict) or not source.get("file_id"):
                     raise LocalVideoEditError("video_local_edit_asset_contract_invalid")
-                concat_paths.append(_local1_download_asset(
+                concat_paths.append(_video_edit_download_asset(
                     str(source.get("file_id") or ""),
                     str(source.get("file_name") or f"concat_{index}.mp4"),
                     workspace,
                     ALLOWED_SOURCE_EXTENSIONS,
                     f"concat_{index:03d}",
+                    media_config=media_config,
                 ))
             plan["concat_inputs"] = concat_paths
             if payload.get("logo_source") is not None and not isinstance(payload.get("logo_source"), dict):
@@ -1287,13 +1605,14 @@ def run_video_local_edit(job: dict) -> None:
             if logo_source and not logo_source.get("file_id"):
                 raise LocalVideoEditError("video_local_edit_asset_contract_invalid")
             if logo_source.get("file_id"):
-                logo_path = _local1_download_asset(
+                logo_path = _video_edit_download_asset(
                     str(logo_source.get("file_id") or ""),
                     str(logo_source.get("file_name") or "logo.png"),
                     workspace,
                     ALLOWED_LOGO_EXTENSIONS,
                     "logo",
                     max_bytes=10 * 1024 * 1024,
+                    media_config=media_config,
                 )
                 logo_config = dict(plan.get("logo_overlay") or {})
                 logo_config["path"] = logo_path
@@ -1304,13 +1623,14 @@ def run_video_local_edit(job: dict) -> None:
             if subtitle_source and not subtitle_source.get("file_id"):
                 raise LocalVideoEditError("video_local_edit_asset_contract_invalid")
             if subtitle_source.get("file_id"):
-                plan["subtitle_file"] = _local1_download_asset(
+                plan["subtitle_file"] = _video_edit_download_asset(
                     str(subtitle_source.get("file_id") or ""),
                     str(subtitle_source.get("file_name") or "subtitle.srt"),
                     workspace,
                     ALLOWED_SUBTITLE_EXTENSIONS,
                     "subtitle",
                     max_bytes=5 * 1024 * 1024,
+                    media_config=media_config,
                 )
             output_path = workspace / f"toan_aas_video_edit_{job_id}.mp4"
 
@@ -1338,17 +1658,16 @@ def run_video_local_edit(job: dict) -> None:
                 raise LocalVideoEditError("output_validation_failed")
             output_size_bytes = int(os.path.getsize(output_path))
             output_sha256 = video_ai_edit_validation.sha256_file(output_path)
+            expected_output_total = 1
             _local1_progress(job_id, "delivering", processed=1, total=1)
             delivery_caption = (
                 "✅ Video đã chỉnh sửa xong · Miễn phí · 0 Xu."
                 if free_edit
                 else "✅ Video đã chỉnh sửa xong. Hệ thống chỉ ghi phí sau khi giao file MP4 hợp lệ."
             )
-            delivery = telegram_send_video_receipt(
-                chat_id,
-                str(output_path),
+            delivery = send_video_edit_artifact(
+                output_path,
                 delivery_caption,
-                filename=output_path.name,
             )
             message_id, file_id = video_editengine1.telegram_delivery_identity(delivery)
             if delivery.get("sent") is True and (not message_id or not file_id):
@@ -1493,6 +1812,10 @@ def run_video_local_edit(job: dict) -> None:
             delivery_receipts=delivery_receipts,
             cleanup=cleanup,
         )
+        if media_lane in {"short_media", "large_media"}:
+            detail_payload["media_lane"] = media_lane
+            if terminal_receipt:
+                terminal_receipt["media_lane"] = media_lane
         terminal_detail = json.dumps(detail_payload, ensure_ascii=False, separators=(",", ":"))
         update_job(
             job_id,
