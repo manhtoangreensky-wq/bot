@@ -51957,6 +51957,9 @@ def _video_provider_normalize_name(value: str) -> str:
 
 def _video_provider_task_candidates(result: dict, project: dict | None = None) -> list[dict]:
     payload = dict(result or {})
+    durable_ownership = video_project_queue.product_video_durable_task_scene_owners(payload)
+    durable_scene_by_task = dict(durable_ownership.get("task_to_scene_index") or {})
+    conflicting_task_ids = set((durable_ownership.get("task_scene_mapping_conflicts") or {}).keys())
     candidates: list[dict] = []
     order = 0
 
@@ -51984,6 +51987,27 @@ def _video_provider_task_candidates(result: dict, project: dict | None = None) -
         ).strip()
         if not task_id or task_id == "-":
             return
+        explicit_scene_index = safe_int(
+            mapping.get("scene_index")
+            or mapping.get("scene_id")
+            or mapping.get("clip_index"),
+            0,
+        )
+        durable_scene_index = safe_int(durable_scene_by_task.get(task_id), 0)
+        canonical_scene_index = safe_int(payload.get("canonical_scene_index"), 0)
+        ownership_conflict = task_id in conflicting_task_ids
+        if ownership_conflict:
+            scene_index = 0
+            scene_index_source = "durable_task_scene_conflict"
+        elif explicit_scene_index:
+            scene_index = explicit_scene_index
+            scene_index_source = "candidate"
+        elif durable_scene_index:
+            scene_index = durable_scene_index
+            scene_index_source = "durable_task_scene_map"
+        else:
+            scene_index = canonical_scene_index
+            scene_index_source = "canonical_scene_fallback" if canonical_scene_index else "missing"
         order += 1
         mapping_direct_task_id = str(
             mapping.get("provider_task_id")
@@ -52019,8 +52043,12 @@ def _video_provider_task_candidates(result: dict, project: dict | None = None) -
             {
                 "provider": provider or "shopaikey_video",
                 "task_id": task_id,
-                "scene_index": safe_int(mapping.get("scene_index") or mapping.get("scene_id") or mapping.get("clip_index") or payload.get("canonical_scene_index"), 0),
-                "scene_index_explicit": bool(mapping.get("scene_index") or mapping.get("scene_id") or mapping.get("clip_index")),
+                "scene_index": scene_index,
+                "scene_index_explicit": bool(
+                    not ownership_conflict
+                    and (explicit_scene_index or durable_scene_index)
+                ),
+                "scene_index_source": scene_index_source,
                 "source": source,
                 "status": status,
                 "result_url": result_url,
@@ -52662,19 +52690,36 @@ def _video_provider_recover_debug_from_poll(poll_result) -> dict:
 
 
 def _video_provider_update_job_result(conn, job_id: int, updates: dict) -> dict:
-    job = video_project_queue.get_video_render_job(conn, int(job_id))
-    if not job:
-        return {}
-    current = _video_debug_json((job or {}).get("result_json"), {})
-    if not isinstance(current, dict):
-        current = {}
-    current.update(updates)
-    conn.execute(
-        "UPDATE video_jobs SET result_json=?, updated_at=? WHERE id=?",
-        (json.dumps(current, ensure_ascii=False), now_text_safe(), int(job_id)),
-    )
-    conn.commit()
-    return current
+    for attempt in range(3):
+        job = video_project_queue.get_video_render_job(conn, int(job_id))
+        if not job:
+            return {}
+        original_result_json = str((job or {}).get("result_json") or "")
+        current = _video_debug_json(original_result_json, {})
+        if not isinstance(current, dict):
+            current = {}
+        current.update(updates)
+        cursor = conn.execute(
+            """UPDATE video_jobs
+                  SET result_json=?, updated_at=?
+                WHERE id=? AND COALESCE(result_json,'')=?""",
+            (
+                json.dumps(current, ensure_ascii=False),
+                now_text_safe(),
+                int(job_id),
+                original_result_json,
+            ),
+        )
+        if cursor.rowcount == 1:
+            conn.commit()
+            current["metadata_cas_retries"] = attempt
+            current["metadata_cas_conflict"] = bool(attempt)
+            return current
+        conn.rollback()
+    return {
+        "metadata_cas_conflict": True,
+        "metadata_cas_exhausted": True,
+    }
 
 
 def video_b14_persist_auto_refresh_metadata(job_id: int | str, updates: dict | None = None, conn=None) -> dict:
@@ -52697,15 +52742,23 @@ def video_b14_persist_auto_refresh_metadata(job_id: int | str, updates: dict | N
             or payload.get("progress_percent"),
             0,
         )
-        current_progress = safe_int((job or {}).get("progress_percent"), 0)
         merged = _video_provider_update_job_result(conn, jid, payload)
+        latest_job = video_project_queue.get_video_render_job(conn, jid)
+        current_progress = safe_int((latest_job or {}).get("progress_percent"), 0)
         if progress > current_progress:
-            conn.execute(
-                "UPDATE video_jobs SET progress_percent=?, updated_at=? WHERE id=?",
-                (min(100, max(0, progress)), now_text_safe(), jid),
+            cursor = conn.execute(
+                """UPDATE video_jobs
+                      SET progress_percent=?, updated_at=?
+                    WHERE id=? AND COALESCE(progress_percent,0)<?""",
+                (
+                    min(100, max(0, progress)),
+                    now_text_safe(),
+                    jid,
+                    min(100, max(0, progress)),
+                ),
             )
             conn.commit()
-            merged["persisted_progress_updated"] = True
+            merged["persisted_progress_updated"] = cursor.rowcount == 1
         else:
             merged["persisted_progress_updated"] = False
         return merged
@@ -52846,6 +52899,51 @@ def video_b14_autonomous_db_poll_metadata(
     return metadata
 
 
+def video_b14_recovery_cancellation_state(
+    job_id: int | str,
+    *,
+    conn=None,
+    job: dict | None = None,
+    project: dict | None = None,
+) -> dict:
+    jid = safe_int(job_id, 0)
+    if jid <= 0:
+        return {"cancelled": False, "blocker": "job_id_required"}
+    owns_conn = conn is None
+    if conn is None:
+        conn = db_connect()
+    try:
+        job = dict(job or video_project_queue.get_video_render_job(conn, jid) or {})
+        if not job:
+            return {"cancelled": False, "blocker": "job_not_found"}
+        project = dict(
+            project
+            or video_project_queue.get_video_project(
+                conn,
+                safe_int(job.get("project_id"), 0),
+            )
+            or {}
+        )
+        outbox = (
+            video_project_queue.get_product_video_dispatch_outbox(
+                conn,
+                job_id=jid,
+            )
+            if callable(getattr(conn, "execute", None))
+            else {}
+        )
+        return {
+            **video_project_queue.product_video_recovery_cancellation_state(
+                project,
+                outbox,
+            ),
+            "job_id": jid,
+        }
+    finally:
+        if owns_conn:
+            conn.close()
+
+
 async def video_b14_autonomous_materialize_and_deliver(
     context,
     chat_id,
@@ -52858,6 +52956,16 @@ async def video_b14_autonomous_materialize_and_deliver(
     jid = safe_int(job_id, 0)
     if jid <= 0:
         return {"ok": False, "sent": False, "reason": "job_id_required", "no_new_paid_submit": True, "charge": 0}
+    cancellation = video_b14_recovery_cancellation_state(jid)
+    if cancellation.get("cancelled"):
+        return {
+            "ok": False,
+            "sent": False,
+            "reason": str(cancellation.get("blocker") or "product_video_cancelled"),
+            "terminal": True,
+            "no_new_paid_submit": True,
+            "charge": 0,
+        }
     watchdog = run_product_video_bot_side_zero_task_watchdog(
         jid,
         reconciliation_source="worker_claim_recovery",
@@ -53073,6 +53181,22 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
             return {"ok": False, "blocker": "job_not_found", "job_id": jid, "charge": 0}
         result = _video_debug_json((job or {}).get("result_json"), {})
         project = video_project_queue.get_video_project(conn, safe_int((job or {}).get("project_id"), 0))
+        cancellation = video_b14_recovery_cancellation_state(
+            jid,
+            conn=conn,
+            job=job,
+            project=project,
+        )
+        if cancellation.get("cancelled"):
+            blocker = str(cancellation.get("blocker") or "product_video_cancelled")
+            return {
+                "ok": False,
+                "blocker": blocker,
+                "reason": blocker,
+                "job_id": jid,
+                "no_new_paid_submit": True,
+                "charge": 0,
+            }
         canonical = resolve_canonical_video_provider_task(
             jid,
             conn=conn,
@@ -83933,6 +84057,16 @@ def video_b14_auto_refresh_status_bundle(job_id: int | str = "", *, user_id=0, j
 def video_b14_auto_refresh_terminal_state(job: dict | None = None, project: dict | None = None) -> str:
     job = dict(job or {})
     project = dict(project or {})
+    job_status = str(job.get("status") or "").strip().lower()
+    project_status = str(project.get("status") or "").strip().lower()
+    status = job_status or project_status
+    terminal = str(project.get("video_terminal_state") or "").strip().lower()
+    if (
+        terminal in {"cancelled", "canceled"}
+        or job_status in {"cancelled", "canceled"}
+        or project_status in {"cancelled", "canceled"}
+    ):
+        return "cancelled"
     payload = video_b14_job_result_payload(job)
     try:
         telemetry = video_b14_reconciled_provider_debug(job, project, payload, refresh_source="auto_refresh_terminal")
@@ -83946,8 +84080,6 @@ def video_b14_auto_refresh_terminal_state(job: dict | None = None, project: dict
         or telemetry.get("dispatchable_scene_indexes")
     ):
         return ""
-    status = str(job.get("status") or project.get("status") or "").strip().lower()
-    terminal = str(project.get("video_terminal_state") or "").strip().lower()
     delivery_done = bool(
         project.get("video_delivered_at")
         or project.get("video_delivery_message_id")
@@ -84000,6 +84132,10 @@ def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: 
     current_session = dict(session or bundle.get("session") or {})
     jid = safe_int(current_job.get("id") or job_id or ((current_session.get("draft") or {}).get("b14_queue_job_id")), 0)
     registry_present = bool(VIDEO_STATUS_AUTO_REFRESH_JOBS.get(video_b14_auto_refresh_key(jid))) if jid else False
+    terminal_before_poll = video_b14_auto_refresh_terminal_state(
+        current_job,
+        current_project,
+    )
     autonomous = video_b14_autonomous_db_poll_metadata(
         jid,
         job=current_job,
@@ -84008,7 +84144,7 @@ def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: 
         registry_present=registry_present,
         refresh_source="auto_refresh_snapshot",
         persist=bool(jid),
-    ) if jid else {}
+    ) if jid and terminal_before_poll != "cancelled" else {}
     text = video_b14_queue_status_text(current_session, {"job": current_job, "project": current_project}, user_id, lang)
     percent_match = re.search(r"Tiến độ:\s*<b>(\d+)%</b>", text)
     percent = safe_int(percent_match.group(1) if percent_match else current_job.get("progress_percent"), 0)
@@ -84025,8 +84161,8 @@ def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: 
     )
     blocked_reason = video_b14_product_result_block_reason(current_job, current_project)
     visual_classification = video_b14_result_visual_classification(current_job)
-    terminal = video_b14_auto_refresh_terminal_state(current_job, current_project)
-    if autonomous.get("provider_task_alive"):
+    terminal = terminal_before_poll
+    if autonomous.get("provider_task_alive") and terminal != "cancelled":
         terminal = ""
     stage = video_b14_auto_refresh_stage_from_snapshot(
         status,
@@ -84131,6 +84267,282 @@ def video_b14_auto_refresh_start_task(context, key: str) -> bool:
         })
         VIDEO_STATUS_AUTO_REFRESH_JOBS[str(key or "")] = record
         return False
+
+
+def video_b14_auto_refresh_recovery_target(
+    job: dict | None = None,
+    project: dict | None = None,
+    result: dict | None = None,
+    outbox: dict | None = None,
+) -> dict:
+    """Build a fail-closed same-message refresh target from persisted Product Video state."""
+    job = dict(job or {})
+    project = dict(project or {})
+    payload = dict(result or video_b14_job_result_payload(job) or {})
+    outbox_supplied = outbox is not None
+    outbox = dict(outbox or {})
+    ownership = video_project_queue.product_video_durable_task_scene_owners(payload)
+    job_id = safe_int(job.get("id") or job.get("job_id") or payload.get("job_id"), 0)
+    job_owner_id = safe_int(job.get("user_id"), 0)
+    project_owner_id = safe_int(project.get("user_id"), 0)
+    payload_owner_id = safe_int(payload.get("user_id"), 0)
+    authoritative_user_id = job_owner_id or project_owner_id
+    owner_values = [
+        value
+        for value in (job_owner_id, project_owner_id, payload_owner_id)
+        if value
+    ]
+    owner_consistent = bool(
+        authoritative_user_id
+        and all(value == authoritative_user_id for value in owner_values)
+    )
+    persisted_chat_id = safe_int(
+        payload.get("chat_id")
+        or payload.get("status_panel_chat_id")
+        or payload.get("progress_chat_id"),
+        0,
+    )
+    private_chat_owner_consistent = bool(
+        persisted_chat_id <= 0
+        or (
+            authoritative_user_id > 0
+            and persisted_chat_id == authoritative_user_id
+        )
+    )
+    chat_id = (
+        persisted_chat_id or authoritative_user_id
+        if owner_consistent and private_chat_owner_consistent
+        else 0
+    )
+    message_id = safe_int(
+        payload.get("status_panel_message_id")
+        or payload.get("latest_status_message_id")
+        or payload.get("progress_message_id"),
+        0,
+    )
+    user_id = authoritative_user_id
+    product_video = bool(
+        payload.get("product_video")
+        or str(payload.get("source") or "").strip().lower() == "product_video"
+    )
+    delivered = bool(
+        project.get("video_delivered_at")
+        or project.get("video_delivery_message_id")
+        or project.get("final_video_file_id")
+        or payload.get("delivery_done")
+        or payload.get("final_delivered")
+    )
+    project_status = str(project.get("status") or "").strip().lower()
+    outbox_status = str(
+        outbox.get("dispatch_status")
+        or (payload.get("dispatch_outbox_status") if not outbox_supplied else "")
+        or ""
+    ).strip().lower()
+    project_cancelled = project_status in {"cancelled", "canceled"}
+    outbox_cancelled = outbox_status in {"cancelled", "canceled"}
+    outbox_present = safe_int(outbox.get("outbox_id"), 0) > 0
+    task_coverage = bool(
+        ownership.get("task_scene_mapping_verified")
+        and ownership.get("scene_task_coverage_complete")
+    )
+    eligible = bool(
+        VIDEO_STATUS_AUTO_REFRESH_ENABLED
+        and job_id > 0
+        and owner_consistent
+        and private_chat_owner_consistent
+        and chat_id
+        and message_id
+        and product_video
+        and task_coverage
+        and not project_cancelled
+        and not outbox_cancelled
+        and (not outbox_supplied or outbox_present)
+        and not delivered
+    )
+    if eligible:
+        blocker = ""
+    elif not VIDEO_STATUS_AUTO_REFRESH_ENABLED:
+        blocker = "auto_refresh_disabled"
+    elif job_id <= 0:
+        blocker = "job_id_missing"
+    elif not owner_consistent:
+        blocker = "status_owner_mismatch" if owner_values else "status_owner_missing"
+    elif not private_chat_owner_consistent:
+        blocker = "status_owner_mismatch"
+    elif not chat_id:
+        blocker = "status_chat_id_missing"
+    elif not message_id:
+        blocker = "status_panel_message_id_missing"
+    elif not product_video:
+        blocker = "not_product_video"
+    elif project_cancelled:
+        blocker = "project_cancelled"
+    elif outbox_cancelled:
+        blocker = "dispatch_outbox_cancelled"
+    elif outbox_supplied and not outbox_present:
+        blocker = "dispatch_outbox_missing"
+    elif not task_coverage:
+        blocker = "existing_task_scene_coverage_incomplete"
+    elif delivered:
+        blocker = "video_already_delivered"
+    else:
+        blocker = "auto_refresh_recovery_not_eligible"
+    return {
+        **ownership,
+        "eligible": eligible,
+        "blocker": blocker,
+        "job_id": job_id,
+        "project_id": safe_int(project.get("project_id") or job.get("project_id"), 0),
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "user_id": user_id,
+        "job_owner_id": job_owner_id,
+        "project_owner_id": project_owner_id,
+        "payload_owner_id": payload_owner_id,
+        "owner_consistent": owner_consistent,
+        "private_chat_owner_consistent": private_chat_owner_consistent,
+        "lang": normalize_user_language(str(payload.get("lang") or "vi")) or "vi",
+        "auto_refresh_recovered_from_db": True,
+        "status_panel_message_id_source": "result_json",
+        "elapsed_live_tick_enabled": bool(task_coverage),
+        "project_status": project_status,
+        "dispatch_outbox_status": outbox_status,
+        "dispatch_outbox_present": outbox_present,
+    }
+
+
+async def video_b14_rehydrate_auto_refresh_registry(context, *, limit: int = 100) -> dict:
+    """Restore Product Video refresh loops and read-only existing-task recovery after restart."""
+    targets: list[dict] = []
+    scanned = 0
+    recovered_jobs = 0
+    try:
+        conn = db_connect()
+        try:
+            rows = conn.execute(
+                """SELECT id FROM video_jobs
+                     WHERE job_type=? AND status IN ('queued','processing','failed')
+                     ORDER BY id DESC LIMIT ?""",
+                (video_project_queue.VIDEO_RENDER_JOB_TYPE, max(1, min(500, int(limit or 100)))),
+            ).fetchall()
+            for row in rows:
+                job_id = safe_int(row[0] if not isinstance(row, sqlite3.Row) else row["id"], 0)
+                if not job_id:
+                    continue
+                scanned += 1
+                job = video_project_queue.get_video_render_job(conn, job_id)
+                project = video_project_queue.get_video_project(
+                    conn,
+                    safe_int(job.get("project_id"), 0),
+                )
+                payload = video_b14_job_result_payload(job)
+                outbox = video_project_queue.get_product_video_dispatch_outbox(
+                    conn,
+                    job_id=job_id,
+                )
+                if str(job.get("status") or "").strip().lower() == "failed":
+                    recovery_state = video_project_queue.product_video_existing_task_recovery_state(
+                        job,
+                        project,
+                        payload,
+                        outbox,
+                    )
+                    if recovery_state.get("existing_task_recovery_recoverable"):
+                        recovery = video_project_queue.recover_product_video_existing_tasks(
+                            conn,
+                            job_id=job_id,
+                        )
+                        if recovery.get("existing_task_recovery_recovered"):
+                            recovered_jobs += 1
+                            job = video_project_queue.get_video_render_job(conn, job_id)
+                            project = video_project_queue.get_video_project(
+                                conn,
+                                safe_int(job.get("project_id"), 0),
+                            )
+                            payload = video_b14_job_result_payload(job)
+                target = video_b14_auto_refresh_recovery_target(
+                    job,
+                    project,
+                    payload,
+                    outbox,
+                )
+                if target.get("eligible"):
+                    targets.append(
+                        {
+                            **target,
+                            "job": job,
+                            "project": project,
+                            "result": payload,
+                        }
+                    )
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.warning(
+            "product video auto refresh rehydrate scan failed | %s",
+            sanitize_log_text(type(exc).__name__),
+        )
+        return {
+            "ok": False,
+            "scanned": scanned,
+            "registered": 0,
+            "recovered_jobs": recovered_jobs,
+            "error": type(exc).__name__,
+        }
+
+    registered = 0
+    for target in targets:
+        session = video_b14_auto_refresh_session_from_status(
+            target.get("job"),
+            target.get("project"),
+            user_id=target.get("user_id"),
+        )
+        record = video_b14_auto_refresh_register(
+            job_id=target.get("job_id"),
+            chat_id=target.get("chat_id"),
+            message_id=target.get("message_id"),
+            user_id=target.get("user_id"),
+            lang=target.get("lang") or "vi",
+            context=context,
+            session=session,
+            result={
+                "job": target.get("job"),
+                "project": target.get("project"),
+            },
+            start_task=True,
+        )
+        if not record:
+            continue
+        key = str(record.get("key") or video_b14_auto_refresh_key(target.get("job_id")))
+        record.update(
+            {
+                "auto_refresh_recovered_from_db": True,
+                "status_panel_message_id_source": "result_json",
+                "elapsed_live_tick_enabled": True,
+                "stopped": False,
+                "stopped_reason": "",
+            }
+        )
+        VIDEO_STATUS_AUTO_REFRESH_JOBS[key] = record
+        video_b14_persist_auto_refresh_metadata(
+            target.get("job_id"),
+            {
+                "auto_refresh_recovered_from_db": True,
+                "status_panel_message_id_source": "result_json",
+                "status_panel_message_id": target.get("message_id"),
+                "latest_status_message_id": target.get("message_id"),
+                "chat_id": target.get("chat_id"),
+                "elapsed_live_tick_enabled": True,
+            },
+        )
+        registered += 1
+    return {
+        "ok": True,
+        "scanned": scanned,
+        "eligible": len(targets),
+        "registered": registered,
+        "recovered_jobs": recovered_jobs,
+    }
 
 
 def video_b14_auto_refresh_register(
@@ -84289,6 +84701,26 @@ async def video_b14_auto_refresh_tick(context, key: str) -> dict:
         return {"status": "missing"}
     if record.get("stopped"):
         return {"status": "stopped", "reason": record.get("stopped_reason") or ""}
+    preflight = video_b14_auto_refresh_status_bundle(
+        record.get("job_id") or "",
+        user_id=record.get("user_id") or 0,
+    )
+    preflight_terminal = video_b14_auto_refresh_terminal_state(
+        preflight.get("job"),
+        preflight.get("project"),
+    )
+    if preflight_terminal == "cancelled":
+        record.update(
+            {
+                "stopped": True,
+                "task_alive": False,
+                "stopped_reason": "cancelled",
+                "terminal_state": "cancelled",
+                "auto_refresh_skip_reason": "cancelled_before_poll",
+            }
+        )
+        VIDEO_STATUS_AUTO_REFRESH_JOBS[str(key or "")] = record
+        return {"status": "stopped", "reason": "cancelled", "record": dict(record)}
     lease_until = float(record.get("auto_refresh_lease_until_epoch") or 0)
     current_epoch = time.time()
     if lease_until > current_epoch:
@@ -234037,6 +234469,20 @@ async def lifespan(app: FastAPI):
         await tg_app.initialize()
         await tg_app.start()
         telegram_started = True
+        try:
+            rehydrate_report = await video_b14_rehydrate_auto_refresh_registry(tg_app)
+            logger.info(
+                "product video auto refresh rehydrated | scanned=%s eligible=%s registered=%s recovered=%s",
+                rehydrate_report.get("scanned", 0),
+                rehydrate_report.get("eligible", 0),
+                rehydrate_report.get("registered", 0),
+                rehydrate_report.get("recovered_jobs", 0),
+            )
+        except Exception as exc:
+            logger.warning(
+                "product video auto refresh rehydrate skipped | %s",
+                sanitize_log_text(type(exc).__name__),
+            )
         try:
             me = await tg_app.bot.get_me()
             ACTIVE_TELEGRAM_BOT_ID = str(getattr(me, "id", "") or "")

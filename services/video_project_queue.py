@@ -1454,6 +1454,7 @@ def _add_column_if_missing(conn: sqlite3.Connection, table_name: str, column_nam
 
 def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
     """Create/adapt queue tables without dropping or deleting existing data."""
+    caller_transaction_active = bool(conn.in_transaction)
     conn.execute(
         """CREATE TABLE IF NOT EXISTS video_projects (
             project_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1642,7 +1643,8 @@ def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
              AND job_type='video_render'
              AND status IN ('queued','processing')"""
     )
-    conn.commit()
+    if not caller_transaction_active:
+        conn.commit()
 
 
 def _project_from_row(row: sqlite3.Row | tuple | None) -> dict[str, Any]:
@@ -5980,6 +5982,462 @@ def _product_video_scene_task_is_valid_clip(item: dict[str, Any]) -> bool:
     )
 
 
+def product_video_durable_task_scene_owners(result: dict | None = None) -> dict[str, Any]:
+    """Resolve persisted provider-task ownership without guessing from a canonical scene."""
+    payload = dict(result or {})
+    scene_count = max(
+        1,
+        min(
+            20,
+            _as_int(
+                payload.get("scene_count")
+                or payload.get("scenes_total")
+                or payload.get("scene_tasks_total"),
+                1,
+            ),
+        ),
+    )
+    required = list(range(1, scene_count + 1))
+    allowed = set(required)
+    task_to_scene_index: dict[str, int] = {}
+    conflicts: dict[str, list[int]] = {}
+    sources_by_task: dict[str, list[str]] = {}
+
+    def register(task_id: Any, scene_index: Any, source: str) -> None:
+        task_key = str(task_id or "").strip()
+        index = _as_int(scene_index, 0)
+        if not task_key or task_key == "-" or index not in allowed:
+            return
+        source_list = sources_by_task.setdefault(task_key, [])
+        if source not in source_list:
+            source_list.append(source)
+        existing = task_to_scene_index.get(task_key)
+        if existing is None and task_key not in conflicts:
+            task_to_scene_index[task_key] = index
+            return
+        if existing == index:
+            return
+        indexes = set(conflicts.get(task_key) or [])
+        if existing:
+            indexes.add(existing)
+        indexes.add(index)
+        conflicts[task_key] = sorted(indexes)
+        task_to_scene_index.pop(task_key, None)
+
+    for field_name in ("task_scene_index_map", "task_to_scene_index"):
+        mapping = _product_video_index_map(payload.get(field_name))
+        for task_id, scene_index in mapping.items():
+            register(task_id, scene_index, field_name)
+
+    for field_name in (
+        "scene_task_map",
+        "scene_active_task_by_index",
+        "scene_winner_task_by_index",
+    ):
+        mapping = _product_video_index_map(payload.get(field_name))
+        for scene_index, raw in mapping.items():
+            values: list[Any]
+            if isinstance(raw, dict):
+                values = [
+                    raw.get(key)
+                    for key in (
+                        "provider_task_id",
+                        "task_id",
+                        "active_task_id",
+                        "winning_task_id",
+                        "scene_winner_task",
+                        "canonical_task_selected",
+                    )
+                ]
+            elif isinstance(raw, (list, tuple, set)):
+                values = list(raw)
+            else:
+                values = [raw]
+            for task_id in values:
+                register(task_id, scene_index, field_name)
+
+    for field_name in (
+        "scene_ledger",
+        "scene_tasks",
+        "provider_scene_tasks",
+        "product_video_scene_tasks",
+    ):
+        raw_rows = payload.get(field_name) or []
+        if isinstance(raw_rows, str):
+            raw_rows = _json_loads(raw_rows, [])
+        if isinstance(raw_rows, dict):
+            rows = []
+            for scene_index, raw in raw_rows.items():
+                item = dict(raw or {}) if isinstance(raw, dict) else {}
+                item.setdefault("scene_index", scene_index)
+                rows.append(item)
+        elif isinstance(raw_rows, (list, tuple)):
+            rows = [dict(item or {}) for item in raw_rows if isinstance(item, dict)]
+        else:
+            rows = []
+        for row in rows:
+            scene_index = _product_video_scene_task_index(row)
+            task_ids = [
+                row.get(key)
+                for key in (
+                    "provider_task_id",
+                    "task_id",
+                    "provider_video_id",
+                    "video_id",
+                    "active_task_id",
+                    "winning_task_id",
+                    "scene_winner_task",
+                    "canonical_task_selected",
+                )
+            ]
+            for key in ("fallback_task_ids", "provider_task_ids", "provider_video_ids"):
+                values = row.get(key)
+                if isinstance(values, (list, tuple, set)):
+                    task_ids.extend(values)
+            for task_id in task_ids:
+                register(task_id, scene_index, field_name)
+
+    mapped_scene_indexes = sorted(set(task_to_scene_index.values()))
+    coverage_complete = mapped_scene_indexes == required
+    return {
+        "task_to_scene_index": dict(task_to_scene_index),
+        "task_scene_index_map": dict(task_to_scene_index),
+        "task_scene_mapping_conflicts": dict(conflicts),
+        "task_scene_mapping_sources": dict(sources_by_task),
+        "task_scene_mapping_verified": bool(task_to_scene_index and not conflicts),
+        "required_scene_indexes": required,
+        "mapped_scene_indexes": mapped_scene_indexes,
+        "scene_task_coverage_complete": coverage_complete,
+    }
+
+
+def product_video_recovery_cancellation_state(
+    project: dict | None = None,
+    outbox: dict | None = None,
+) -> dict[str, Any]:
+    project = dict(project or {})
+    outbox = dict(outbox or {})
+    project_status = str(project.get("status") or "").strip().lower()
+    outbox_status = str(outbox.get("dispatch_status") or "").strip().lower()
+    project_cancelled = project_status in {"cancelled", "canceled"}
+    outbox_cancelled = outbox_status in {"cancelled", "canceled"}
+    blocker = (
+        "project_cancelled"
+        if project_cancelled
+        else "dispatch_outbox_cancelled"
+        if outbox_cancelled
+        else ""
+    )
+    return {
+        "cancelled": bool(blocker),
+        "blocker": blocker,
+        "project_status": project_status,
+        "outbox_status": outbox_status,
+        "project_cancelled": project_cancelled,
+        "outbox_cancelled": outbox_cancelled,
+    }
+
+
+def product_video_existing_task_recovery_state(
+    job: dict | None = None,
+    project: dict | None = None,
+    result: dict | None = None,
+    outbox: dict | None = None,
+) -> dict[str, Any]:
+    """Decide whether a failed job may resume by polling already-created tasks only."""
+    job = dict(job or {})
+    project = dict(project or {})
+    result = dict(result or {})
+    outbox = dict(outbox or {})
+    invoice = _json_loads(project.get("invoice_json"), {})
+    if not isinstance(invoice, dict):
+        invoice = {}
+    durable_scene_count = _as_int(
+        project.get("scene_count")
+        or invoice.get("scene_count")
+        or result.get("scene_count")
+        or result.get("scenes_total")
+        or result.get("scene_tasks_total"),
+        0,
+    )
+    ownership_payload = dict(result)
+    if durable_scene_count > 0:
+        ownership_payload["scene_count"] = durable_scene_count
+    ownership = product_video_durable_task_scene_owners(ownership_payload)
+    required = list(ownership.get("required_scene_indexes") or [])
+    mapped = list(ownership.get("mapped_scene_indexes") or [])
+    outbox_present = _as_int(outbox.get("outbox_id"), 0) > 0
+    cancellation = product_video_recovery_cancellation_state(project, outbox)
+    outbox_status = str(cancellation.get("outbox_status") or "")
+    job_status = str(job.get("status") or "").strip().lower()
+    project_status = str(cancellation.get("project_status") or "")
+    project_cancelled = bool(cancellation.get("project_cancelled"))
+    outbox_cancelled = bool(cancellation.get("outbox_cancelled"))
+    product_video = bool(
+        result.get("product_video")
+        or str(result.get("source") or "").strip().lower() == "product_video"
+    )
+    confirmed = bool(
+        _as_int(project.get("is_confirmed"), 0) == 1
+        and result.get("public_user_confirmed")
+        and result.get("invoice_confirmed")
+    )
+    charged_xu = max(
+        0,
+        _as_int(
+            result.get("charged_xu")
+            or result.get("charge")
+            or result.get("wallet_charge")
+            or result.get("charged_amount_xu"),
+            0,
+        ),
+    )
+    charge_recorded = bool(
+        charged_xu > 0
+        or result.get("wallet_charge_recorded")
+        or result.get("charge_committed")
+    )
+    delivered = bool(
+        project.get("video_delivered_at")
+        or project.get("video_delivery_message_id")
+        or project.get("final_video_file_id")
+        or result.get("video_delivered_at")
+        or result.get("delivery_done")
+        or result.get("final_delivered")
+    )
+    terminal_outbox = outbox_status in {
+        "acknowledged",
+        "completed",
+        "terminal_failed",
+    }
+    mapping_verified = bool(
+        ownership.get("task_scene_mapping_verified")
+        and ownership.get("scene_task_coverage_complete")
+        and required
+        and mapped == required
+    )
+    already_recovered = bool(result.get("recovery_existing_tasks_only"))
+    recoverable = bool(
+        job_status == "failed"
+        and product_video
+        and confirmed
+        and not project_cancelled
+        and not outbox_cancelled
+        and outbox_present
+        and terminal_outbox
+        and mapping_verified
+        and not charge_recorded
+        and not delivered
+        and not already_recovered
+    )
+    if recoverable:
+        blocker = ""
+    elif already_recovered:
+        blocker = "existing_task_recovery_already_used"
+    elif job_status != "failed":
+        blocker = "job_not_failed"
+    elif not product_video:
+        blocker = "not_product_video"
+    elif not confirmed:
+        blocker = "public_confirmation_missing"
+    elif project_cancelled:
+        blocker = "project_cancelled"
+    elif outbox_cancelled:
+        blocker = "dispatch_outbox_cancelled"
+    elif not outbox_present:
+        blocker = "dispatch_outbox_missing"
+    elif not terminal_outbox:
+        blocker = "dispatch_outbox_not_terminal"
+    elif not mapping_verified:
+        blocker = "existing_task_scene_coverage_incomplete"
+    elif charge_recorded:
+        blocker = "wallet_charge_already_recorded"
+    elif delivered:
+        blocker = "video_already_delivered"
+    else:
+        blocker = "existing_task_recovery_not_eligible"
+    return {
+        **ownership,
+        "existing_task_recovery_recoverable": recoverable,
+        "existing_task_recovery_block_reason": blocker,
+        "existing_task_recovery_already_used": already_recovered,
+        "existing_task_recovery_job_status": job_status,
+        "existing_task_recovery_project_status": project_status,
+        "existing_task_recovery_outbox_status": outbox_status,
+        "existing_task_recovery_outbox_present": outbox_present,
+        "existing_task_recovery_product_video": product_video,
+        "existing_task_recovery_public_confirmed": confirmed,
+        "existing_task_recovery_outbox_terminal": terminal_outbox,
+        "existing_task_recovery_project_cancelled": project_cancelled,
+        "existing_task_recovery_outbox_cancelled": outbox_cancelled,
+        "existing_task_recovery_delivered": delivered,
+        "provider_submit_allowed": False,
+        "automatic_retry_allowed": False,
+        "automatic_resubmit_allowed": False,
+        "automatic_fallback_allowed": False,
+        "charged_xu": charged_xu,
+        "wallet_charge_recorded": charge_recorded,
+    }
+
+
+def recover_product_video_existing_tasks(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """CAS-requeue a failed Product Video job for read-only polling of its old tasks."""
+    ensure_video_project_queue_schema(conn)
+    def snapshot() -> tuple[dict, dict, dict, dict, dict]:
+        current_job = get_video_render_job(conn, int(job_id))
+        current_project = (
+            get_video_project(conn, _as_int(current_job.get("project_id"), 0))
+            if current_job
+            else {}
+        )
+        current_result = (
+            _json_loads(str(current_job.get("result_json") or ""), {})
+            if current_job
+            else {}
+        )
+        if not isinstance(current_result, dict):
+            current_result = {}
+        current_outbox = get_product_video_dispatch_outbox(
+            conn,
+            job_id=int(job_id),
+        )
+        current_state = product_video_existing_task_recovery_state(
+            current_job,
+            current_project,
+            current_result,
+            current_outbox,
+        )
+        return (
+            current_job,
+            current_project,
+            current_result,
+            current_outbox,
+            current_state,
+        )
+
+    job, project, result, outbox, state = snapshot()
+    if not state.get("existing_task_recovery_recoverable"):
+        return {**state, "existing_task_recovery_recovered": False}
+
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        job, project, result, outbox, state = snapshot()
+        if not state.get("existing_task_recovery_recoverable"):
+            conn.rollback()
+            return {**state, "existing_task_recovery_recovered": False}
+
+        current = now_text(now)
+        invoice = _json_loads(str(project.get("invoice_json") or ""), {})
+        if not isinstance(invoice, dict):
+            invoice = {}
+        durable_scene_count = max(
+            [
+                _as_int(project.get("scene_count"), 0),
+                _as_int(invoice.get("scene_count"), 0),
+                _as_int(result.get("scene_count"), 0),
+                *[
+                    _as_int(index, 0)
+                    for index in (state.get("required_scene_indexes") or [])
+                ],
+            ]
+        )
+        original_submit_source = str(
+            result.get("original_submit_source")
+            or result.get("submit_source")
+            or result.get("provider_submit_source")
+            or "public_user_final_confirm"
+        ).strip()
+        result.update(
+            {
+                "status": "queued",
+                "canonical_status": "queued_existing_task_recovery",
+                "terminal": False,
+                "terminal_state": "",
+                "final_decision": "continue_polling",
+                "continue_polling": True,
+                "scene_count": durable_scene_count,
+                "recovery_existing_tasks_only": True,
+                "existing_task_recovery_recovered": True,
+                "existing_task_recovery_recovered_at": current,
+                "existing_task_recovery_count": _as_int(
+                    result.get("existing_task_recovery_count"),
+                    0,
+                )
+                + 1,
+                "existing_task_recovery_outbox_status": str(
+                    outbox.get("dispatch_status") or ""
+                ),
+                "submit_source": "worker_poll_existing_task",
+                "provider_submit_source": "worker_poll_existing_task",
+                "original_submit_source": original_submit_source,
+                "provider_submit_allowed": False,
+                "provider_submit_block_reason": "existing_task_recovery_read_only",
+                "automatic_retry_allowed": False,
+                "automatic_resubmit_allowed": False,
+                "automatic_fallback_allowed": False,
+                "no_charge": True,
+                "charge": 0,
+                "charged_xu": 0,
+                "wallet_charge_recorded": False,
+            }
+        )
+        progress = max(20, min(60, _as_int(job.get("progress_percent"), 20)))
+        cursor = conn.execute(
+            """UPDATE video_jobs
+                  SET status='queued',result_json=?,last_error='',progress_percent=?,
+                      progress_message='queued_existing_task_recovery',locked_by='',locked_at=NULL,
+                      lease_expires_at=NULL,completed_at=NULL,updated_at=?
+                WHERE id=? AND status='failed'""",
+            (_json_dumps(result), progress, current, int(job_id)),
+        )
+        if cursor.rowcount != 1:
+            conn.rollback()
+            return {
+                **state,
+                "existing_task_recovery_recovered": False,
+                "existing_task_recovery_block_reason": "recovery_claim_lost",
+            }
+        project_cursor = conn.execute(
+            """UPDATE video_projects
+                  SET status='queued_for_worker',scene_count=?,video_terminal_state='',
+                      video_terminal_locked_at=NULL,error_log='',completed_at=NULL,updated_at=?
+                WHERE project_id=? AND status=?
+                  AND LOWER(status) NOT IN ('cancelled','canceled')""",
+            (
+                durable_scene_count,
+                current,
+                _as_int(project.get("project_id"), 0),
+                str(project.get("status") or ""),
+            ),
+        )
+        if project_cursor.rowcount != 1:
+            conn.rollback()
+            return {
+                **state,
+                "existing_task_recovery_recovered": False,
+                "existing_task_recovery_block_reason": "recovery_project_cas_lost",
+            }
+        conn.commit()
+        return {
+            **state,
+            "existing_task_recovery_recovered": True,
+            "job_status_after_recovery": "queued",
+            "project_status_after_recovery": "queued_for_worker",
+            "outbox_status_after_recovery": str(outbox.get("dispatch_status") or ""),
+        }
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+
+
 def product_video_scene_ledger_state(
     project: dict | None = None,
     job: dict | None = None,
@@ -6519,6 +6977,37 @@ def product_video_scene_ledger_state(
         next_poll_at = _text_value(merged, "next_scene_poll_at", "next_poll_scheduled_at", "next_poll_at")
         if next_poll_at:
             record["next_poll_at"] = next_poll_at
+
+    durable_ownership = product_video_durable_task_scene_owners(result)
+    durable_status_by_index = _product_video_index_map(
+        result.get("scene_status_by_index") or result.get("scene_status_by_scene")
+    )
+    durable_winner_by_index = _product_video_index_map(
+        result.get("scene_winner_task_by_index")
+    )
+    for task_id, scene_index in (
+        durable_ownership.get("task_to_scene_index") or {}
+    ).items():
+        index = _as_int(scene_index, 0)
+        task_key = str(task_id or "").strip()
+        if not task_key or index not in records:
+            continue
+        winner_task_id = str(durable_winner_by_index.get(str(index)) or "").strip()
+        _merge_item(
+            {
+                "scene_index": index,
+                "provider_task_id": task_key,
+                "winning_task_id": task_key if winner_task_id == task_key else "",
+                "provider": result.get("provider_pending_provider")
+                or result.get("selected_provider"),
+                "status": durable_status_by_index.get(str(index)) or "pending",
+                "submitted_at": result.get("provider_started_at")
+                or result.get("provider_wait_started_at"),
+                "submitted_at_epoch": result.get("provider_started_at_epoch")
+                or result.get("provider_wait_started_epoch"),
+            },
+            "result.durable_task_scene_ownership",
+        )
 
     for container_name, container in (("project", project), ("job", job), ("result", result)):
         for key in ("scene_ledger", "scene_tasks", "provider_scene_tasks", "product_video_scene_tasks"):
@@ -7194,6 +7683,25 @@ def product_video_delivery_charge_decision(
     invoice = _json_loads(project.get("invoice_json") or result.get("invoice_json") or result.get("invoice"), {})
     merged = {**project, **job, **invoice, **result}
     job_id = _as_int(job.get("id") or job.get("job_id") or result.get("job_id"), 0)
+    recovery_existing_tasks_only = bool(
+        result.get("recovery_existing_tasks_only")
+        or job.get("recovery_existing_tasks_only")
+        or project.get("recovery_existing_tasks_only")
+    )
+    no_charge_contract = bool(recovery_existing_tasks_only or merged.get("no_charge"))
+    if no_charge_contract:
+        return {
+            "ok": False,
+            "already_charged": False,
+            "amount_xu": 0,
+            "wallet_charge_amount_xu": 0,
+            "recovery_existing_tasks_only": recovery_existing_tasks_only,
+            "charge_skip_reason": (
+                "existing_task_recovery_no_charge"
+                if recovery_existing_tasks_only
+                else "no_charge_contract"
+            ),
+        }
     delivered = bool(
         project.get("video_delivered_at")
         or project.get("video_delivery_message_id")
@@ -7311,6 +7819,53 @@ def complete_video_job(
     if not job:
         return {"ok": False, "reason": "job_not_found"}
     current = now_text()
+
+    def begin_completion_mutation() -> tuple[dict | None, dict, dict]:
+        """Lock and recheck cancellation immediately before a terminal mutation."""
+        conn.execute("BEGIN IMMEDIATE")
+        locked_job = get_video_render_job(conn, int(job_id))
+        if not locked_job:
+            conn.rollback()
+            return {"ok": False, "reason": "job_not_found"}, {}, {}
+        locked_project = get_video_project(
+            conn,
+            _as_int(locked_job.get("project_id"), 0),
+        )
+        if not locked_project:
+            conn.rollback()
+            return {
+                "ok": False,
+                "reason": "project_not_found",
+                "job": locked_job,
+            }, {}, {}
+        locked_outbox = get_product_video_dispatch_outbox(
+            conn,
+            job_id=int(job_id),
+        )
+        cancellation = product_video_recovery_cancellation_state(
+            locked_project,
+            locked_outbox,
+        )
+        locked_job_status = str(locked_job.get("status") or "").strip().lower()
+        if locked_job_status in {"cancelled", "canceled"} or cancellation.get("cancelled"):
+            blocker = (
+                "job_cancelled"
+                if locked_job_status in {"cancelled", "canceled"}
+                else str(cancellation.get("blocker") or "product_video_cancelled")
+            )
+            conn.rollback()
+            return {
+                "ok": False,
+                "reason": blocker,
+                "cancelled": True,
+                "job": get_video_render_job(conn, int(job_id)),
+                "project": get_video_project(
+                    conn,
+                    _as_int(locked_job.get("project_id"), 0),
+                ),
+            }, {}, {}
+        return None, locked_job, locked_project
+
     persisted_payload = _json_loads(str(job.get("result_json") or ""), {})
     if not isinstance(persisted_payload, dict):
         persisted_payload = {}
@@ -7338,7 +7893,28 @@ def complete_video_job(
             ),
             "job": job,
         }
-    payload = dict(result or {})
+    incoming_payload = dict(result or {})
+    payload = {**persisted_payload, **incoming_payload}
+    recovery_existing_tasks_only = bool(
+        persisted_payload.get("recovery_existing_tasks_only")
+        or incoming_payload.get("recovery_existing_tasks_only")
+    )
+    if recovery_existing_tasks_only:
+        payload.update(
+            {
+                "recovery_existing_tasks_only": True,
+                "provider_submit_allowed": False,
+                "provider_submit_block_reason": "existing_task_recovery_read_only",
+                "automatic_retry_allowed": False,
+                "automatic_resubmit_allowed": False,
+                "automatic_fallback_allowed": False,
+                "no_charge": True,
+                "charge": 0,
+                "charged_xu": 0,
+                "wallet_charge_recorded": False,
+                "final_delivery_charge_allowed": False,
+            }
+        )
     route_decision = route_validation.get("decision")
     if isinstance(route_decision, dict):
         payload.update(
@@ -7401,8 +7977,10 @@ def complete_video_job(
                         "no_charge": True,
                     }
                 )
+                blocked, _locked_job, _locked_project = begin_completion_mutation()
+                if blocked is not None:
+                    return blocked
                 conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(payload), int(job_id)))
-                conn.commit()
                 return fail_video_job(conn, job_id=int(job_id), error="missing_scene_coverage_timeout", retry=False)
             payload.update(
                 {
@@ -7415,6 +7993,9 @@ def complete_video_job(
                 }
             )
             current = now_text()
+            blocked, locked_job, _locked_project = begin_completion_mutation()
+            if blocked is not None:
+                return blocked
             conn.execute(
                 """UPDATE video_jobs
                    SET status='processing', result_json=?, progress_percent=?,
@@ -7432,10 +8013,10 @@ def complete_video_job(
                    SET status='processing', video_terminal_state='final_rendering',
                        error_log='missing_scene_coverage_waiting', updated_at=?
                    WHERE project_id=?""",
-                (current, int(job["project_id"])),
+                (current, int(locked_job["project_id"])),
             )
             conn.commit()
-            return {"ok": False, "reason": "missing_scene_coverage_waiting", "job": get_video_render_job(conn, int(job_id)), "project": get_video_project(conn, int(job["project_id"]))}
+            return {"ok": False, "reason": "missing_scene_coverage_waiting", "job": get_video_render_job(conn, int(job_id)), "project": get_video_project(conn, int(locked_job["project_id"]))}
         validation = video_final_output.validate_final_video_output(
             path=str(final_video_path or payload.get("final_video_path") or ""),
             result=payload,
@@ -7445,8 +8026,10 @@ def complete_video_job(
         payload["final_output_validation"] = validation
         if not validation.get("ok"):
             payload["terminal_state"] = "failed_no_charge"
+            blocked, _locked_job, _locked_project = begin_completion_mutation()
+            if blocked is not None:
+                return blocked
             conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(payload), int(job_id)))
-            conn.commit()
             return fail_video_job(conn, job_id=int(job_id), error=str(validation.get("reason") or "final_output_invalid"), retry=False)
         duration_contract = product_video_duration_contract(project, payload, validation)
         payload["final_duration_contract"] = duration_contract
@@ -7455,8 +8038,10 @@ def complete_video_job(
         if not duration_contract.get("ok"):
             payload["terminal_state"] = "failed_no_charge"
             payload["finalizer_error"] = duration_contract["reason"]
+            blocked, _locked_job, _locked_project = begin_completion_mutation()
+            if blocked is not None:
+                return blocked
             conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(payload), int(job_id)))
-            conn.commit()
             return fail_video_job(conn, job_id=int(job_id), error=str(duration_contract.get("reason") or "final_duration_invalid"), retry=False)
         payload.update(
             {
@@ -7464,46 +8049,110 @@ def complete_video_job(
                 "output_duration": float(validation.get("duration") or 0),
                 "has_video": bool(validation.get("has_video")),
                 "has_audio": bool(validation.get("has_audio")),
+                "status": "completed",
+                "canonical_status": "completed",
+                "terminal": True,
                 "terminal_state": "final_delivered",
+                "final_decision": "final_delivered",
+                "continue_polling": False,
+                "blocker": "",
+                "provider_error": "",
                 "visual_classification": payload.get("visual_classification") or "final_ai_video",
                 "final_classification": payload.get("final_classification") or "final_ai_video",
             }
         )
     elif safe_claim_only_diagnostic:
         payload["terminal_state"] = terminal_state
-    conn.execute(
-        """UPDATE video_jobs
-           SET status='completed', result_json=?, progress_percent=?,
-               progress_message=?, completed_at=?, updated_at=?, lease_expires_at=NULL
-           WHERE id=?""",
-        (
-            _json_dumps(payload),
-            95 if product_job and not safe_claim_only_diagnostic else 100,
-            "final_mp4_ready_waiting_delivery" if product_job and not safe_claim_only_diagnostic else "completed",
-            current,
-            current,
-            int(job_id),
-        ),
-    )
-    conn.execute(
-        """UPDATE video_projects
-           SET status='completed', final_video_path=?, final_video_file_id=?,
-               video_terminal_state=?, video_terminal_locked_at=?,
-               video_artifact_hash=?, completed_at=?, updated_at=?
-           WHERE project_id=?""",
-        (
-            str(final_video_path or ""),
-            str(final_video_file_id or ""),
-            terminal_state,
-            current,
-            str(payload.get("video_artifact_hash") or payload.get("artifact_hash") or ""),
-            current,
-            current,
-            int(job["project_id"]),
-        ),
-    )
-    conn.commit()
-    return {"ok": True, "job": get_video_render_job(conn, int(job_id)), "project": get_video_project(conn, int(job["project_id"]))}
+    try:
+        blocked, locked_job, locked_project = begin_completion_mutation()
+        if blocked is not None:
+            return blocked
+        job_cursor = conn.execute(
+            """UPDATE video_jobs
+               SET status='completed', result_json=?, progress_percent=?,
+                   progress_message=?, completed_at=?, updated_at=?, lease_expires_at=NULL
+               WHERE id=?
+                 AND LOWER(COALESCE(status,'')) NOT IN ('cancelled','canceled')
+                 AND NOT EXISTS (
+                     SELECT 1 FROM video_projects p
+                      WHERE p.project_id=video_jobs.project_id
+                        AND LOWER(COALESCE(p.status,'')) IN ('cancelled','canceled')
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1 FROM video_dispatch_outbox o
+                      WHERE o.job_id=video_jobs.id
+                        AND LOWER(COALESCE(o.dispatch_status,'')) IN ('cancelled','canceled')
+                 )""",
+            (
+                _json_dumps(payload),
+                95 if product_job and not safe_claim_only_diagnostic else 100,
+                "final_mp4_ready_waiting_delivery" if product_job and not safe_claim_only_diagnostic else "completed",
+                current,
+                current,
+                int(job_id),
+            ),
+        )
+        project_cursor = conn.execute(
+            """UPDATE video_projects
+               SET status='completed', final_video_path=?, final_video_file_id=?,
+                   video_terminal_state=?, video_terminal_locked_at=?,
+                   video_artifact_hash=?, completed_at=?, updated_at=?
+               WHERE project_id=?
+                 AND LOWER(COALESCE(status,'')) NOT IN ('cancelled','canceled')
+                 AND NOT EXISTS (
+                     SELECT 1 FROM video_dispatch_outbox o
+                      WHERE o.job_id=?
+                        AND LOWER(COALESCE(o.dispatch_status,'')) IN ('cancelled','canceled')
+                 )""",
+            (
+                str(final_video_path or ""),
+                str(final_video_file_id or ""),
+                terminal_state,
+                current,
+                str(payload.get("video_artifact_hash") or payload.get("artifact_hash") or ""),
+                current,
+                current,
+                int(locked_job["project_id"]),
+                int(job_id),
+            ),
+        )
+        if job_cursor.rowcount != 1 or project_cursor.rowcount != 1:
+            conn.rollback()
+            fresh_job = get_video_render_job(conn, int(job_id))
+            fresh_project = get_video_project(
+                conn,
+                _as_int((fresh_job or {}).get("project_id"), 0),
+            )
+            fresh_outbox = get_product_video_dispatch_outbox(
+                conn,
+                job_id=int(job_id),
+            )
+            fresh_cancellation = product_video_recovery_cancellation_state(
+                fresh_project,
+                fresh_outbox,
+            )
+            return {
+                "ok": False,
+                "reason": str(
+                    fresh_cancellation.get("blocker")
+                    or "completion_state_cas_lost"
+                ),
+                "cancelled": bool(fresh_cancellation.get("cancelled")),
+                "job": fresh_job,
+                "project": fresh_project,
+            }
+        conn.commit()
+        return {
+            "ok": True,
+            "job": get_video_render_job(conn, int(job_id)),
+            "project": get_video_project(conn, int(locked_job["project_id"])),
+        }
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
 
 
 def note_video_delivery_result(

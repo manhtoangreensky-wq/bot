@@ -3810,6 +3810,68 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     pending_matches_request = bool(
         pending_task_id or pending_video_id
     ) and (not pending_request_job_id or pending_request_job_id == request_job_id)
+    recovery_existing_tasks_only = bool(
+        (job or {}).get("recovery_existing_tasks_only")
+    )
+    provider_aliases = {
+        "shopai": "shopaikey_video",
+        "shopaikey": "shopaikey_video",
+        "k4u": "key4u_video",
+        "key4u": "key4u_video",
+        "toanaas": "toanaas_video",
+        "generic": "generic_http",
+    }
+    pending_provider_key = provider_aliases.get(
+        str(
+            pending_scene_task.get("provider")
+            or pending_scene_task.get("provider_name")
+            or pending_scene_task.get("provider_key")
+            or ""
+        ).strip().lower(),
+        str(
+            pending_scene_task.get("provider")
+            or pending_scene_task.get("provider_name")
+            or pending_scene_task.get("provider_key")
+            or ""
+        ).strip().lower(),
+    )
+    recovery_provider_order = {
+        provider_aliases.get(str(item or "").strip().lower(), str(item or "").strip().lower())
+        for item in provider_order
+        if str(item or "").strip()
+    }
+    recovery_provider_mismatch = bool(
+        recovery_existing_tasks_only
+        and pending_matches_request
+        and (
+            not pending_provider_key
+            or (
+                recovery_provider_order
+                and pending_provider_key not in recovery_provider_order
+            )
+        )
+    )
+    if recovery_provider_mismatch:
+        raise RealVideoRenderError(
+            "scene_provider_mismatch",
+            diagnostics={
+                "ok": False,
+                "scene_index": scene_index,
+                "scene_id": scene_index,
+                "request_job_id": request_job_id,
+                "provider_error": "scene_provider_mismatch",
+                "blocker": "scene_provider_mismatch",
+                "provider_binding_present": bool(pending_provider_key),
+                "provider_order_match": False,
+                "provider_submit_called": False,
+                "provider_submit_allowed": False,
+                "automatic_retry_allowed": False,
+                "automatic_resubmit_allowed": False,
+                "automatic_fallback_allowed": False,
+                "recovery_existing_tasks_only": True,
+                "no_charge": True,
+            },
+        )
     pending_policy = product_video_scene_stall_policy(job, pending_scene_task, scene_index) if pending_matches_request else {}
     scene_fallback_order = list(pending_policy.get("fallback_provider_order") or [])
     scene_fallback_allowed = bool(pending_policy.get("fallback_allowed"))
@@ -3818,6 +3880,10 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         "automatic_fallback_allowed",
     )
     if automatic_fallback_forbidden:
+        scene_fallback_order = []
+        scene_fallback_allowed = False
+    if recovery_existing_tasks_only:
+        automatic_fallback_forbidden = True
         scene_fallback_order = []
         scene_fallback_allowed = False
     scene_stalled_not_start = bool(pending_policy.get("provider_stalled_not_start"))
@@ -3979,7 +4045,31 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             requires_concat=orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
         )
         model_context.update(model_metadata_from_resolution(model_resolution))
-    if pending_matches_request and scene_provider_stalled and not scene_fallback_allowed:
+    if recovery_existing_tasks_only and not pending_matches_request:
+        raise RealVideoRenderError(
+            "scene_provider_task_id_missing",
+            diagnostics={
+                "ok": False,
+                "scene_index": scene_index,
+                "scene_id": scene_index,
+                "request_job_id": request_job_id,
+                "provider_error": "scene_provider_task_id_missing",
+                "blocker": "scene_provider_task_id_missing",
+                "provider_submit_called": False,
+                "provider_submit_allowed": False,
+                "automatic_retry_allowed": False,
+                "automatic_resubmit_allowed": False,
+                "automatic_fallback_allowed": False,
+                "recovery_existing_tasks_only": True,
+                "no_charge": True,
+            },
+        )
+    if (
+        pending_matches_request
+        and scene_provider_stalled
+        and not scene_fallback_allowed
+        and not recovery_existing_tasks_only
+    ):
         raise RealVideoRenderError(
             PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START,
             diagnostics={
@@ -4117,6 +4207,10 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "automatic_fallback_allowed": (job or {}).get(
                 "automatic_fallback_allowed"
             ),
+            "recovery_existing_tasks_only": recovery_existing_tasks_only,
+            "provider_submit_allowed": False
+            if recovery_existing_tasks_only
+            else (job or {}).get("provider_submit_allowed"),
             "paid_fallback_confirmed": bool(scene_fallback_allowed or invoice_confirmed),
             "fallback_count": 1 if scene_fallback_allowed else _safe_int(pending_scene_task.get("fallback_count"), 0),
             "provider_fallback_count": 1 if scene_fallback_allowed else _safe_int(pending_scene_task.get("provider_fallback_count") or pending_scene_task.get("fallback_count"), 0),
@@ -4176,7 +4270,13 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         provider_env["SHOPAIKEY_VIDEO_MODEL"] = str(provider_model_map.get("shopaikey_video") or "")
     if provider_model_map.get("key4u_video"):
         provider_env["KEY4U_VIDEO_MODEL"] = str(provider_model_map.get("key4u_video") or "")
-    if product_type == "self_shot_scene_change":
+    if recovery_existing_tasks_only:
+        result = run_provider_generation(
+            request,
+            output_dir=output_dir,
+            environ=provider_env,
+        )
+    elif product_type == "self_shot_scene_change":
         result = _render_selfshot2_video_to_video(
             job=dict(job or {}),
             asset_pack=dict(asset_pack or {}),
