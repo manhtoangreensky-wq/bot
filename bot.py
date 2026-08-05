@@ -225872,6 +225872,88 @@ async def submit_video_ai_edit_job(update: Update, context: ContextTypes.DEFAULT
     return True
 
 
+def video_edit_submit_inspection_evidence(state: dict) -> dict:
+    """Return the inspected source evidence required before a local submit."""
+    invalid = {
+        "ok": False,
+        "reason": "video_edit_inspection_evidence_invalid",
+    }
+    try:
+        if type(state) is not dict or state.get("inspection_complete") is not True:
+            return invalid
+        metadata = state.get("source_metadata")
+        if type(metadata) is not dict or metadata.get("ok") is not True:
+            return invalid
+
+        actual_bytes = metadata.get("actual_bytes")
+        duration_ms = metadata.get("duration_ms")
+        source_sha256 = metadata.get("source_sha256")
+        source_file_size = state.get("source_file_size")
+        if (
+            isinstance(actual_bytes, bool)
+            or not isinstance(actual_bytes, int)
+            or actual_bytes <= 0
+            or isinstance(duration_ms, bool)
+            or not isinstance(duration_ms, int)
+            or duration_ms <= 0
+            or not isinstance(source_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", source_sha256) is None
+            or state.get("source_video_hash") != source_sha256
+            or isinstance(source_file_size, bool)
+            or not isinstance(source_file_size, int)
+            or source_file_size <= 0
+            or source_file_size != actual_bytes
+        ):
+            return invalid
+
+        declared_bytes = metadata.get("declared_bytes")
+        declared_duration_seconds = metadata.get("declared_duration_seconds")
+        if (
+            isinstance(declared_bytes, bool)
+            or not isinstance(declared_bytes, int)
+            or declared_bytes < 0
+            or isinstance(declared_duration_seconds, bool)
+            or not isinstance(declared_duration_seconds, (int, float))
+            or not 0 <= declared_duration_seconds < float("inf")
+        ):
+            return invalid
+
+        stored_lane = state.get("media_lane")
+        metadata_lane = metadata.get("media_lane")
+        if (
+            stored_lane not in {"short_media", "large_media"}
+            or metadata_lane not in {"short_media", "large_media"}
+            or stored_lane != metadata_lane
+        ):
+            return invalid
+
+        declared_lane = video_edit_media_transport.select_media_lane(
+            duration_seconds=declared_duration_seconds,
+            size_bytes=declared_bytes,
+        )
+        actual_lane = video_edit_media_transport.select_media_lane(
+            duration_seconds=duration_ms / 1000,
+            size_bytes=actual_bytes,
+        )
+        expected_lane = (
+            "large_media"
+            if "large_media" in {declared_lane, actual_lane}
+            else "short_media"
+        )
+        if stored_lane != expected_lane or metadata_lane != expected_lane:
+            return invalid
+        return {
+            "ok": True,
+            "media_lane": expected_lane,
+            "source_metadata": deepcopy(metadata),
+            "actual_bytes": actual_bytes,
+            "duration_ms": duration_ms,
+            "source_sha256": source_sha256,
+        }
+    except Exception:
+        return invalid
+
+
 async def submit_video_edit_local_free_job(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,

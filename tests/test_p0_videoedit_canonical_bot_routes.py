@@ -18,6 +18,7 @@ import pytest
 
 from services import (
     video_edit_capabilities,
+    video_edit_media_transport,
     video_edit_state_machine,
     video_editengine1,
     video_local_editing,
@@ -2048,6 +2049,160 @@ def _submit_namespace(db_path: Path, saved: dict) -> dict:
         "video_local_public_error": lambda reason: reason,
         "update_video_editor_pending": lambda _uid, step, **fields: saved.update({"step": step, **fields}) or deepcopy(saved),
     }
+
+
+def _video_edit_submit_evidence_state(
+    *,
+    actual_bytes: int = 1_024,
+    duration_ms: int = 10_000,
+    declared_bytes: int = 1_024,
+    declared_duration_seconds: int = 10,
+    media_lane: str = "short_media",
+    metadata_lane: str | None = None,
+) -> dict:
+    source_sha256 = "a" * 64
+    return {
+        "inspection_complete": True,
+        "source_video_hash": source_sha256,
+        "source_file_size": actual_bytes,
+        "media_lane": media_lane,
+        "private_source_path": "C:/private/input.mp4",
+        "provider_token": "must-not-leave-the-helper",
+        "source_metadata": {
+            "ok": True,
+            "actual_bytes": actual_bytes,
+            "duration_ms": duration_ms,
+            "source_sha256": source_sha256,
+            "declared_bytes": declared_bytes,
+            "declared_duration_seconds": declared_duration_seconds,
+            "media_lane": metadata_lane or media_lane,
+            "nested": {"preserved": True},
+        },
+    }
+
+
+def _compile_video_edit_submit_evidence_helper():
+    marker = "\ndef video_edit_submit_inspection_evidence("
+    start = BOT_SOURCE.find(marker)
+    if start < 0:
+        raise AssertionError("missing function: video_edit_submit_inspection_evidence")
+    end = BOT_SOURCE.find("\n\nasync def submit_video_edit_local_free_job(", start)
+    if end < 0:
+        raise AssertionError("submit function no longer bounds inspection evidence helper")
+    namespace = {
+        "deepcopy": deepcopy,
+        "re": re,
+        "video_edit_media_transport": __import__(
+            "services.video_edit_media_transport",
+            fromlist=["video_edit_media_transport"],
+        ),
+    }
+    source = "from __future__ import annotations\n\n" + BOT_SOURCE[start + 1 : end]
+    exec(compile(source, filename="bot.py", mode="exec"), namespace)
+    return namespace["video_edit_submit_inspection_evidence"]
+
+
+def test_video_edit_submit_inspection_evidence_accepts_exact_short_evidence() -> None:
+    helper = _compile_video_edit_submit_evidence_helper()
+    state = _video_edit_submit_evidence_state()
+    original = deepcopy(state)
+
+    evidence = helper(state)
+
+    assert state == original
+    assert evidence == {
+        "ok": True,
+        "media_lane": "short_media",
+        "source_metadata": original["source_metadata"],
+        "actual_bytes": 1_024,
+        "duration_ms": 10_000,
+        "source_sha256": "a" * 64,
+    }
+    assert "private_source_path" not in evidence
+    assert "provider_token" not in evidence
+    assert "C:/private" not in json.dumps(evidence, sort_keys=True)
+    state["source_metadata"]["nested"]["preserved"] = False
+    assert evidence["source_metadata"]["nested"]["preserved"] is True
+
+
+def test_video_edit_submit_inspection_evidence_accepts_large_actual_or_declared_media() -> None:
+    helper = _compile_video_edit_submit_evidence_helper()
+    state = _video_edit_submit_evidence_state(
+        actual_bytes=51 * 1024 * 1024,
+        duration_ms=60_000,
+        declared_bytes=51 * 1024 * 1024,
+        declared_duration_seconds=60,
+        media_lane="large_media",
+    )
+    original = deepcopy(state)
+
+    evidence = helper(state)
+
+    assert state == original
+    assert evidence["ok"] is True
+    assert evidence["media_lane"] == "large_media"
+    assert evidence["actual_bytes"] == 51 * 1024 * 1024
+    assert evidence["duration_ms"] == 60_000
+
+
+def test_video_edit_submit_inspection_evidence_unknown_declaration_requires_large_lane() -> None:
+    helper = _compile_video_edit_submit_evidence_helper()
+    state = _video_edit_submit_evidence_state(
+        declared_bytes=0,
+        declared_duration_seconds=0,
+        media_lane="large_media",
+    )
+    original = deepcopy(state)
+
+    evidence = helper(state)
+
+    assert state == original
+    assert evidence["ok"] is True
+    assert evidence["media_lane"] == "large_media"
+
+
+@pytest.mark.parametrize(
+    "case,state",
+    [
+        ("inspection_false", {**_video_edit_submit_evidence_state(), "inspection_complete": False}),
+        ("inspection_integer", {**_video_edit_submit_evidence_state(), "inspection_complete": 1}),
+        ("metadata_not_ok", {**_video_edit_submit_evidence_state(), "source_metadata": {**_video_edit_submit_evidence_state()["source_metadata"], "ok": False}}),
+        ("actual_bytes_bool", {**_video_edit_submit_evidence_state(), "source_metadata": {**_video_edit_submit_evidence_state()["source_metadata"], "actual_bytes": True}}),
+        ("actual_bytes_zero", {**_video_edit_submit_evidence_state(), "source_metadata": {**_video_edit_submit_evidence_state()["source_metadata"], "actual_bytes": 0}}),
+        ("actual_bytes_negative", {**_video_edit_submit_evidence_state(), "source_metadata": {**_video_edit_submit_evidence_state()["source_metadata"], "actual_bytes": -1}}),
+        ("duration_bool", {**_video_edit_submit_evidence_state(), "source_metadata": {**_video_edit_submit_evidence_state()["source_metadata"], "duration_ms": True}}),
+        ("duration_zero", {**_video_edit_submit_evidence_state(), "source_metadata": {**_video_edit_submit_evidence_state()["source_metadata"], "duration_ms": 0}}),
+        ("duration_negative", {**_video_edit_submit_evidence_state(), "source_metadata": {**_video_edit_submit_evidence_state()["source_metadata"], "duration_ms": -1}}),
+        ("hash_malformed", {**_video_edit_submit_evidence_state(), "source_metadata": {**_video_edit_submit_evidence_state()["source_metadata"], "source_sha256": "not-a-sha256"}}),
+        ("hash_uppercase", {**_video_edit_submit_evidence_state(), "source_metadata": {**_video_edit_submit_evidence_state()["source_metadata"], "source_sha256": "A" * 64}}),
+        ("hash_mismatch", {**_video_edit_submit_evidence_state(), "source_video_hash": "b" * 64}),
+        ("top_level_size_mismatch", {**_video_edit_submit_evidence_state(), "source_file_size": 1_025}),
+        ("top_level_lane_invalid", {**_video_edit_submit_evidence_state(), "media_lane": "unknown"}),
+        ("metadata_lane_invalid", {**_video_edit_submit_evidence_state(), "source_metadata": {**_video_edit_submit_evidence_state()["source_metadata"], "media_lane": "unknown"}}),
+        ("stored_lanes_differ", {**_video_edit_submit_evidence_state(), "source_metadata": {**_video_edit_submit_evidence_state()["source_metadata"], "media_lane": "large_media"}}),
+        ("actual_promotes_large", {**_video_edit_submit_evidence_state(), "source_metadata": {**_video_edit_submit_evidence_state()["source_metadata"], "duration_ms": (int(video_edit_media_transport.SHORT_MEDIA_MAX_SECONDS) + 1) * 1_000}}),
+        ("declared_promotes_large", {**_video_edit_submit_evidence_state(), "source_metadata": {**_video_edit_submit_evidence_state()["source_metadata"], "declared_bytes": 51 * 1024 * 1024}}),
+        ("state_not_dict", ["not-a-state"]),
+        ("metadata_not_dict", {**_video_edit_submit_evidence_state(), "source_metadata": ["not-metadata"]}),
+    ],
+)
+def test_video_edit_submit_inspection_evidence_fails_closed_for_invalid_evidence(
+    case: str,
+    state,
+) -> None:
+    helper = _compile_video_edit_submit_evidence_helper()
+    original = deepcopy(state)
+
+    evidence = helper(state)
+
+    assert state == original, case
+    assert evidence == {
+        "ok": False,
+        "reason": "video_edit_inspection_evidence_invalid",
+    }, case
+    assert "private" not in json.dumps(evidence, sort_keys=True), case
+    assert "token" not in json.dumps(evidence, sort_keys=True), case
+    assert "source_sha256" not in evidence, case
 
 
 def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_path: Path) -> None:
