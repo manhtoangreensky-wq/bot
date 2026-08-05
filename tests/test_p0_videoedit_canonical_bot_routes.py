@@ -176,10 +176,16 @@ def _default_state(user_id: int, **overrides) -> dict:
         "source_duration_ms": 10_000,
         "source_video_id": "telegram-source",
         "source_video_hash": "a" * 64,
+        "media_lane": "short_media",
         "source_metadata": {
             "ok": True,
+            "actual_bytes": 4096,
+            "declared_bytes": 4096,
             "duration": 10.0,
             "duration_ms": 10_000,
+            "declared_duration_seconds": 10,
+            "source_sha256": "a" * 64,
+            "media_lane": "short_media",
             "width": 1280,
             "height": 720,
             "fps": 30.0,
@@ -2020,7 +2026,7 @@ def _submit_namespace(db_path: Path, saved: dict) -> dict:
             post_render()
         return result
 
-    return {
+    namespace = {
         "get_user_language": lambda _uid: "vi",
         "safe_int": lambda value, default=0: int(value or default),
         "video_local_validation": video_local_validation,
@@ -2046,9 +2052,11 @@ def _submit_namespace(db_path: Path, saved: dict) -> dict:
         "video_local_manual_options_keyboard": lambda *_args, **_kwargs: "workspace-keyboard",
         "video_edit_lane_upload_keyboard": lambda *_args: "upload-keyboard",
         "video_editor_upload_required_text": lambda _lang: "Cần video nguồn",
-        "video_local_public_error": lambda reason: reason,
+        "video_local_public_error": lambda reason, _lang="vi": reason,
         "update_video_editor_pending": lambda _uid, step, **fields: saved.update({"step": step, **fields}) or deepcopy(saved),
     }
+    namespace["video_edit_submit_inspection_evidence"] = _compile_video_edit_submit_evidence_helper()
+    return namespace
 
 
 def _video_edit_submit_evidence_state(
@@ -2209,13 +2217,50 @@ def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_
     db_path = tmp_path / "videoedit.sqlite3"
     _init_job_db(db_path)
     saved: dict = {}
-    submit = _compile_function("submit_video_edit_local_free_job", _submit_namespace(db_path, saved))
+    namespace = _submit_namespace(db_path, saved)
+    create_calls = 0
+
+    class _EngineSpy:
+        def __getattr__(self, name):
+            return getattr(video_editengine1, name)
+
+        @staticmethod
+        def create_job(*args, **kwargs):
+            nonlocal create_calls
+            create_calls += 1
+            return video_editengine1.create_job(*args, **kwargs)
+
+    namespace["video_editengine1"] = _EngineSpy()
+    submit = _compile_function("submit_video_edit_local_free_job", namespace)
+    large_bytes = 51 * 1024 * 1024
+    large_duration_ms = 61_000
     state = _default_state(
         905,
         step="confirmation",
         current_screen="confirmation",
         status="confirmation_ready",
         review_revision=3,
+        source_file_size=large_bytes,
+        source_duration=61,
+        source_duration_ms=large_duration_ms,
+        source_video_hash="b" * 64,
+        media_lane="large_media",
+        source_metadata={
+            "ok": True,
+            "actual_bytes": large_bytes,
+            "declared_bytes": large_bytes,
+            "duration": 61.0,
+            "duration_ms": large_duration_ms,
+            "declared_duration_seconds": 61,
+            "source_sha256": "b" * 64,
+            "media_lane": "large_media",
+            "width": 1280,
+            "height": 720,
+            "fps": 30.0,
+            "has_audio": True,
+            "audio_stream_count": 1,
+            "format_name": "mp4",
+        },
     )
     state["manual_edit_plan"]["brightness_percent"] = 120
     query = _Query(905, "videoedit|confirm_local")
@@ -2247,6 +2292,12 @@ def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_
     assert payload["price_xu"] == 0
     assert payload["quoted_price_xu"] == 0
     assert payload["provider_call"] is False
+    assert payload["media_lane"] == "large_media"
+    assert payload["source_file_size"] == large_bytes
+    assert payload["source_video_hash"] == "b" * 64
+    assert payload["source_metadata"] == state["source_metadata"]
+    assert payload["source_manifest"] == state["source_metadata"]
+    assert "max_render_seconds" not in payload
     assert payload["charge_policy"] == "free_local_tool"
     assert payload["rights_confirmation"]["confirmed"] is True
     assert payload["rights_confirmation"]["policy"] == "video_edit_rights_v1"
@@ -2255,6 +2306,7 @@ def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_
     assert payload["rights_confirmation"]["confirmed_at_unix"] > 0
     assert canonical == ("local-free", 0, "{}")
     assert saved["step"] == "job_status"
+    assert create_calls == 1
     assert query.edits and all("0 Xu" in text for text, _kwargs in query.edits)
     assert second_query.edits and "0 Xu" in second_query.edits[-1][0]
     assert "trạng thái tác vụ" in second_query.edits[-1][0].lower()
@@ -2264,6 +2316,58 @@ def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_
     assert asyncio.run(submit(update, SimpleNamespace(), duplicate_state)) is True
     assert query.edits
     assert "Trạng thái tác vụ" in query.edits[-1][0]
+
+
+def test_confirm_local_invalid_inspection_evidence_creates_no_job_or_preflight(tmp_path: Path) -> None:
+    db_path = tmp_path / "videoedit-invalid-evidence.sqlite3"
+    _init_job_db(db_path)
+    saved: dict = {}
+    namespace = _submit_namespace(db_path, saved)
+
+    class _EngineSpy:
+        def __getattr__(self, name):
+            return getattr(video_editengine1, name)
+
+        @staticmethod
+        def preflight(*_args, **_kwargs):
+            raise AssertionError("preflight must not run for invalid evidence")
+
+        @staticmethod
+        def create_job(*_args, **_kwargs):
+            raise AssertionError("create_job must not run for invalid evidence")
+
+    namespace["video_editengine1"] = _EngineSpy()
+    submit = _compile_function("submit_video_edit_local_free_job", namespace)
+    state = _default_state(
+        906,
+        step="confirmation",
+        current_screen="confirmation",
+        status="confirmation_ready",
+        review_revision=3,
+    )
+    state["source_metadata"]["ok"] = False
+    query = _Query(906, "videoedit|confirm_local")
+    update = SimpleNamespace(callback_query=query, message=None, effective_user=query.from_user)
+
+    assert asyncio.run(submit(update, SimpleNamespace(), state)) is True
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='video_edit_jobs'"
+        ).fetchone()[0] == 0
+    finally:
+        conn.close()
+    assert query.edits == [("invalid_video", {"reply_markup": "upload-keyboard"})]
+    assert saved == {}
+
+
+def test_free_submit_source_does_not_use_legacy_size_or_render_limits() -> None:
+    submit = _function_source("submit_video_edit_local_free_job")
+
+    assert "MAX_UPLOAD_BYTES" not in submit
+    assert "max_render_seconds" not in submit
 
 
 def test_confirmation_retry_after_ui_failure_reuses_full_split_identity(tmp_path: Path) -> None:

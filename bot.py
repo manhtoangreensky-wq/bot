@@ -226009,12 +226009,13 @@ async def submit_video_edit_local_free_job(
         elif message:
             await message.reply_text(text, reply_markup=video_local_upload_keyboard("manual", lang))
         return True
-    if safe_int(state.get("source_file_size"), 0) > video_local_validation.MAX_UPLOAD_BYTES:
-        text = video_local_public_error("video_too_large")
+    evidence = video_edit_submit_inspection_evidence(state)
+    if not evidence.get("ok"):
+        text = video_local_public_error("invalid_video", lang)
         if query:
-            await safe_edit_or_send(query, text, reply_markup=video_local_source_summary_keyboard("manual", lang, state))
+            await safe_edit_or_send(query, text, reply_markup=video_edit_lane_upload_keyboard("manual_edit", lang))
         elif message:
-            await message.reply_text(text, reply_markup=video_local_source_summary_keyboard("manual", lang, state))
+            await message.reply_text(text, reply_markup=video_edit_lane_upload_keyboard("manual_edit", lang))
         return True
     rights_confirmation = {
         "confirmed": True,
@@ -226061,11 +226062,12 @@ async def submit_video_edit_local_free_job(
         "chat_id": str(message.chat_id if message else uid),
         "source_file_id": source_file_id,
         "source_video_id": str(state.get("source_video_id") or source_file_id),
-        "source_video_hash": str(state.get("source_video_hash") or ""),
+        "source_video_hash": str(evidence.get("source_sha256") or ""),
         "source_file_name": str(state.get("source_file_name") or "video.mp4")[:180],
-        "source_file_size": safe_int(state.get("source_file_size"), 0),
-        "source_metadata": dict(state.get("source_metadata") or {}),
-        "source_manifest": dict(state.get("source_manifest") or state.get("source_metadata") or {}),
+        "source_file_size": safe_int(evidence.get("actual_bytes"), 0),
+        "source_metadata": dict(evidence.get("source_metadata") or {}),
+        "source_manifest": dict(evidence.get("source_metadata") or {}),
+        "media_lane": str(evidence.get("media_lane") or ""),
         "plan_schema_version": "video-edit-plan-v1",
         "state_revision": max(1, safe_int(state.get("state_revision"), 1)),
         "manual_edit_plan": plan,
@@ -226075,7 +226077,6 @@ async def submit_video_edit_local_free_job(
         "split_mode": str(state.get("split_mode") or "")[:30],
         "split_ranges": split_ranges,
         "coverage_required": bool(state.get("coverage_required", True)),
-        "max_render_seconds": min(video_local_validation.FFMPEG_TIMEOUT_SECONDS, LOCAL_WORKER_MAX_JOB_SECONDS),
         "charge_policy": "free_local_tool",
         "price_xu": 0,
         "quoted_price_xu": 0,
