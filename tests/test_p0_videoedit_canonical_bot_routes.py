@@ -24,6 +24,7 @@ from services import (
     video_local_editing,
     video_local_validation,
     video_smart_splitter,
+    video_tail9,
 )
 
 
@@ -106,6 +107,7 @@ def _isolated_guard_dependencies(pending: dict) -> tuple[ContextVar, dict]:
         "rollback_video_editor_guard_state": rollback,
         "rerender_video_editor_after_stale_commit": rerender,
         "get_user_language": lambda _uid: "vi",
+        "html": html,
         "_VIDEO_EDITOR_STATE_WRITE": tracker,
         "USER_PENDING": pending,
         **_isolated_callback_flags(),
@@ -2028,8 +2030,10 @@ def _submit_namespace(db_path: Path, saved: dict) -> dict:
 
     namespace = {
         "get_user_language": lambda _uid: "vi",
+        "html": html,
         "safe_int": lambda value, default=0: int(value or default),
         "video_local_validation": video_local_validation,
+        "video_tail9": video_tail9,
         "video_edit_worker_status_payload": _ready_worker,
         "video_editengine1": video_editengine1,
         "VIDEO_TAIL9_STATE_KEY": "video_tail9",
@@ -2041,6 +2045,7 @@ def _submit_namespace(db_path: Path, saved: dict) -> dict:
         "time": time,
         "safe_edit_or_send": render,
         "video_editor_status_keyboard": lambda job_id, _lang: f"status:{job_id}",
+        "video_tail9_quality_keyboard": lambda *_args, **_kwargs: "quality-keyboard",
         "get_local_worker_job": lambda job_id: {
             "id": int(job_id),
             "user_id": "905",
@@ -2365,6 +2370,457 @@ def test_confirm_local_invalid_inspection_evidence_creates_no_job_or_preflight(t
 
 def test_free_submit_source_does_not_use_legacy_size_or_render_limits() -> None:
     submit = _function_source("submit_video_edit_local_free_job")
+
+    assert "MAX_UPLOAD_BYTES" not in submit
+    assert "max_render_seconds" not in submit
+
+
+def _paid_video_edit_tail(*, price_xu: int = 300) -> dict:
+    return {
+        "video_product_type": "video_local_edit",
+        "video_session_id": "paid-video-edit-session",
+        "plan_revision": 3,
+        "plan_approved": True,
+        "package_id": "video-local-standard",
+        "quality_tier_id": "300",
+        "capability_snapshot": {"ok": True, "reason": "ok"},
+        "pricing_snapshot": {"total_xu": price_xu},
+    }
+
+
+def test_paid_submit_queues_large_canonical_evidence_without_charge(tmp_path: Path) -> None:
+    db_path = tmp_path / "videoedit-paid.sqlite3"
+    _init_job_db(db_path)
+    saved: dict = {}
+    namespace = _submit_namespace(db_path, saved)
+    calls = {"create": 0, "claim": 0, "charge": 0}
+
+    class _EngineSpy:
+        def __getattr__(self, name):
+            return getattr(video_editengine1, name)
+
+        @staticmethod
+        def preflight(*_args, **_kwargs):
+            return {"ok": True, "reason": "ok"}
+
+        @staticmethod
+        def create_job(*args, **kwargs):
+            calls["create"] += 1
+            return video_editengine1.create_job(*args, **kwargs)
+
+        @staticmethod
+        def claim_charge(*_args, **_kwargs):
+            calls["claim"] += 1
+            raise AssertionError("submit must not claim a charge")
+
+        @staticmethod
+        def charge(*_args, **_kwargs):
+            calls["charge"] += 1
+            raise AssertionError("submit must not charge")
+
+    namespace["video_editengine1"] = _EngineSpy()
+    submit = _compile_function("submit_local_video_editor_job", namespace)
+    large_bytes = 51 * 1024 * 1024
+    large_duration_ms = 61_000
+    evidence_state = _video_edit_submit_evidence_state(
+        actual_bytes=large_bytes,
+        duration_ms=large_duration_ms,
+        declared_bytes=large_bytes,
+        declared_duration_seconds=61,
+        media_lane="large_media",
+    )
+    state = _default_state(
+        908,
+        source_file_size=large_bytes,
+        source_duration=61,
+        source_duration_ms=large_duration_ms,
+        source_video_hash="a" * 64,
+        media_lane="large_media",
+        source_metadata=evidence_state["source_metadata"],
+    )
+    query = _Query(908, "videoedit|confirm_paid")
+    update = SimpleNamespace(callback_query=query, message=None, effective_user=query.from_user)
+
+    assert asyncio.run(submit(update, SimpleNamespace(), state, tail=_paid_video_edit_tail())) is True
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 1
+        payload = json.loads(conn.execute("SELECT input_file_id FROM local_worker_jobs").fetchone()[0])
+        charge = conn.execute(
+            "SELECT charge_state,charged_xu FROM video_edit_jobs"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert payload["media_lane"] == "large_media"
+    assert payload["source_file_size"] == large_bytes
+    assert payload["source_video_hash"] == "a" * 64
+    assert payload["source_metadata"] == evidence_state["source_metadata"]
+    assert "max_render_seconds" not in payload
+    assert payload["price_xu"] == 300
+    assert payload["quoted_price_xu"] == 300
+    assert payload["provider_call"] is False
+    assert payload["charge_policy"] == "after_valid_mp4_delivery"
+    assert charge == ("not_charged", 0)
+    assert calls == {"create": 1, "claim": 0, "charge": 0}
+
+
+def test_paid_confirmation_retry_reuses_canonical_identity_without_charge(tmp_path: Path) -> None:
+    db_path = tmp_path / "videoedit-paid-retry.sqlite3"
+    _init_job_db(db_path)
+    saved: dict = {}
+    namespace = _submit_namespace(db_path, saved)
+    calls = {"create": 0, "claim": 0, "charge": 0}
+
+    class _EngineSpy:
+        def __getattr__(self, name):
+            return getattr(video_editengine1, name)
+
+        @staticmethod
+        def preflight(*_args, **_kwargs):
+            return {"ok": True, "reason": "ok"}
+
+        @staticmethod
+        def create_job(*args, **kwargs):
+            calls["create"] += 1
+            return video_editengine1.create_job(*args, **kwargs)
+
+        @staticmethod
+        def claim_charge(*_args, **_kwargs):
+            calls["claim"] += 1
+            raise AssertionError("submit must not claim a charge")
+
+        @staticmethod
+        def charge(*_args, **_kwargs):
+            calls["charge"] += 1
+            raise AssertionError("submit must not charge")
+
+    namespace["video_editengine1"] = _EngineSpy()
+    namespace["video_edit_submit_inspection_evidence"] = lambda _state: {
+        "ok": True,
+        "media_lane": "large_media",
+        "source_metadata": {},
+        "actual_bytes": 51 * 1024 * 1024,
+        "duration_ms": 61_000,
+        "source_sha256": "a" * 64,
+    }
+    submit = _compile_function("submit_local_video_editor_job", namespace)
+    evidence_state = _video_edit_submit_evidence_state(
+        actual_bytes=51 * 1024 * 1024,
+        duration_ms=61_000,
+        declared_bytes=51 * 1024 * 1024,
+        declared_duration_seconds=61,
+        media_lane="large_media",
+    )
+    state = _default_state(
+        910,
+        selected_tool="manual",
+        source_file_size=51 * 1024 * 1024,
+        source_duration=61,
+        source_duration_ms=61_000,
+        source_video_hash="a" * 64,
+        media_lane="large_media",
+        source_metadata=evidence_state["source_metadata"],
+        concat_sources=[{"file_id": "concat-paid-1", "mime_type": "video/mp4"}],
+        logo_source={"file_id": "logo-paid-1", "mime_type": "image/png"},
+        subtitle_source={"file_id": "subtitle-paid-1", "mime_type": "text/srt"},
+        split_mode="custom",
+        split_ranges=[
+            {"index": 1, "start_ms": 0, "end_ms": 30_000},
+            {"index": 2, "start_ms": 30_000, "end_ms": 61_000},
+        ],
+        coverage_required=False,
+    )
+    first_query = _Query(910, "videoedit|confirm_paid")
+    second_query = _Query(910, "videoedit|confirm_paid")
+    first_update = SimpleNamespace(
+        callback_query=first_query,
+        message=None,
+        effective_user=first_query.from_user,
+    )
+    second_update = SimpleNamespace(
+        callback_query=second_query,
+        message=None,
+        effective_user=second_query.from_user,
+    )
+
+    assert asyncio.run(submit(first_update, SimpleNamespace(), state, tail=_paid_video_edit_tail())) is True
+    assert asyncio.run(submit(second_update, SimpleNamespace(), state, tail=_paid_video_edit_tail())) is True
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM video_edit_outbox").fetchone()[0] == 1
+        assert conn.execute("SELECT charge_state,charged_xu FROM video_edit_jobs").fetchone() == (
+            "not_charged",
+            0,
+        )
+        payload = json.loads(conn.execute("SELECT input_file_id FROM local_worker_jobs").fetchone()[0])
+    finally:
+        conn.close()
+    assert "source_manifest" not in payload
+    assert "plan_schema_version" not in payload
+    assert payload["local1_mode"] == "manual"
+    assert payload["split_mode"] == "custom"
+    assert payload["split_ranges"] == state["split_ranges"]
+    assert payload["coverage_required"] is False
+    assert payload["concat_sources"] == state["concat_sources"]
+    assert payload["logo_source"] == state["logo_source"]
+    assert payload["subtitle_source"] == state["subtitle_source"]
+    assert calls == {"create": 2, "claim": 0, "charge": 0}
+    assert second_query.edits and "Đã nhận yêu cầu xử lý video" in second_query.edits[-1][0]
+
+
+def test_paid_retry_reuses_pre_feature_worker_identity_without_charge(tmp_path: Path) -> None:
+    db_path = tmp_path / "videoedit-paid-pre-feature-retry.sqlite3"
+    _init_job_db(db_path)
+    nested_manifest = {
+        "asset_id": "historic-paid-source",
+        "transport": {"storage_key": "video-edit/historic-paid-source.mp4"},
+    }
+    evidence_state = _video_edit_submit_evidence_state(
+        actual_bytes=4_096,
+        declared_bytes=4_096,
+    )
+    source_metadata = {
+        **evidence_state["source_metadata"],
+        "source_manifest": nested_manifest,
+    }
+    state = _default_state(912, source_metadata=source_metadata)
+    tail = _paid_video_edit_tail()
+    normalized_tail = video_tail9.normalize_state(tail)
+    plan = deepcopy(state["manual_edit_plan"])
+    plan["resolution"] = "720p"
+    pre_feature_payload = {
+        "local1_contract": 1,
+        "local1_mode": "manual",
+        "product_type": video_editengine1.PRODUCT_TYPE,
+        "flow_owner": "video_edit",
+        "engine_route": video_editengine1.ENGINE_ROUTE,
+        "worker_owner": video_editengine1.OUTBOX_OWNER,
+        "worker_capability": video_editengine1.WORKER_CAPABILITY,
+        "user_id": "912",
+        "chat_id": str(_Message.chat_id),
+        "source_file_id": state["source_file_id"],
+        "source_video_id": state["source_video_id"],
+        "source_video_hash": state["source_video_hash"],
+        "source_file_name": state["source_file_name"],
+        "source_file_size": state["source_file_size"],
+        "source_metadata": source_metadata,
+        "media_lane": state["media_lane"],
+        "state_revision": state["state_revision"],
+        "ratio": "keep",
+        "audio_policy": "preserve_if_present",
+        "manual_edit_plan": plan,
+        "concat_sources": [],
+        "logo_source": {},
+        "subtitle_source": {},
+        "split_mode": "",
+        "split_ranges": [],
+        "coverage_required": True,
+        "charge_policy": "after_valid_mp4_delivery",
+        "price_xu": 300,
+        "quoted_price_xu": 300,
+        "quality_tier_id": "300",
+        "provider_call": False,
+    }
+    assert "plan_schema_version" not in pre_feature_payload
+    assert "source_manifest" not in pre_feature_payload
+
+    conn = sqlite3.connect(db_path)
+    try:
+        seeded = video_editengine1.create_job(
+            conn,
+            user_id=912,
+            chat_id=str(_Message.chat_id),
+            edit_session_id=state["edit_session_id"],
+            source_file_id=state["source_file_id"],
+            source_metadata=source_metadata,
+            plan=plan,
+            tail=normalized_tail,
+            quality_tier_id="300",
+            price_xu=300,
+            worker_payload=pre_feature_payload,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    assert seeded["created"] is True
+
+    saved: dict = {}
+    namespace = _submit_namespace(db_path, saved)
+    calls = {"create": 0, "claim": 0, "charge": 0}
+    lookup_keys: list[tuple[str, str]] = []
+
+    class _EngineSpy:
+        def __getattr__(self, name):
+            return getattr(video_editengine1, name)
+
+        @staticmethod
+        def preflight(*_args, **_kwargs):
+            return {"ok": True, "reason": "ok"}
+
+        @staticmethod
+        def stable_idempotency_key(**kwargs):
+            key = video_editengine1.stable_idempotency_key(**kwargs)
+            lookup_keys.append(("v3", key))
+            return key
+
+        @staticmethod
+        def _historic_v2_idempotency_key(**kwargs):
+            key = video_editengine1._historic_v2_idempotency_key(**kwargs)
+            lookup_keys.append(("v2", key))
+            return key
+
+        @staticmethod
+        def create_job(*args, **kwargs):
+            calls["create"] += 1
+            return video_editengine1.create_job(*args, **kwargs)
+
+        @staticmethod
+        def claim_charge(*_args, **_kwargs):
+            calls["claim"] += 1
+            raise AssertionError("submit must not claim a charge")
+
+        @staticmethod
+        def charge(*_args, **_kwargs):
+            calls["charge"] += 1
+            raise AssertionError("submit must not charge")
+
+    namespace["video_editengine1"] = _EngineSpy()
+    submit = _compile_function("submit_local_video_editor_job", namespace)
+    query = _Query(912, "videoedit|confirm_paid")
+    update = SimpleNamespace(callback_query=query, message=None, effective_user=query.from_user)
+
+    assert asyncio.run(submit(update, SimpleNamespace(), state, tail=tail)) is True
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM video_edit_outbox").fetchone()[0] == 1
+        assert conn.execute("SELECT charge_state,charged_xu FROM video_edit_jobs").fetchone() == (
+            "not_charged",
+            0,
+        )
+        queued_payload = json.loads(
+            conn.execute("SELECT input_file_id FROM local_worker_jobs").fetchone()[0]
+        )
+    finally:
+        conn.close()
+
+    assert queued_payload["source_metadata"] == source_metadata
+    assert queued_payload["source_video_hash"] == state["source_video_hash"]
+    assert queued_payload["source_file_size"] == state["source_file_size"]
+    assert queued_payload["media_lane"] == state["media_lane"]
+    assert "source_manifest" not in queued_payload
+    assert "plan_schema_version" not in queued_payload
+    assert lookup_keys[0] == ("v3", seeded["idempotency_key"])
+    assert [version for version, _key in lookup_keys] == ["v3", "v2"]
+    assert calls == {"create": 1, "claim": 0, "charge": 0}
+    assert query.edits and "Đã nhận yêu cầu xử lý video" in query.edits[-1][0]
+
+
+def test_paid_submit_value_error_fails_closed_without_job_or_charge(tmp_path: Path) -> None:
+    db_path = tmp_path / "videoedit-paid-value-error.sqlite3"
+    _init_job_db(db_path)
+    saved: dict = {}
+    namespace = _submit_namespace(db_path, saved)
+    calls = {"create": 0, "claim": 0, "charge": 0}
+
+    class _EngineSpy:
+        def __getattr__(self, name):
+            return getattr(video_editengine1, name)
+
+        @staticmethod
+        def preflight(*_args, **_kwargs):
+            return {"ok": True, "reason": "ok"}
+
+        @staticmethod
+        def create_job(*_args, **_kwargs):
+            calls["create"] += 1
+            raise ValueError("idempotency_identity_mismatch:tail")
+
+        @staticmethod
+        def claim_charge(*_args, **_kwargs):
+            calls["claim"] += 1
+            raise AssertionError("submit must not claim a charge")
+
+        @staticmethod
+        def charge(*_args, **_kwargs):
+            calls["charge"] += 1
+            raise AssertionError("submit must not charge")
+
+    namespace["video_editengine1"] = _EngineSpy()
+    submit = _compile_function("submit_local_video_editor_job", namespace)
+    query = _Query(911, "videoedit|confirm_paid")
+    update = SimpleNamespace(callback_query=query, message=None, effective_user=query.from_user)
+
+    assert asyncio.run(
+        submit(update, SimpleNamespace(), _default_state(911), tail=_paid_video_edit_tail())
+    ) is True
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM video_edit_outbox").fetchone()[0] == 0
+    finally:
+        conn.close()
+    assert calls == {"create": 1, "claim": 0, "charge": 0}
+    assert query.edits == [
+        (
+            "⚠️ Chưa thể lưu tác vụ chỉnh sửa. TOAN AAS chưa trừ Xu.",
+            {"reply_markup": "quality-keyboard"},
+        )
+    ]
+    assert saved == {}
+
+
+def test_paid_submit_invalid_evidence_stops_before_preflight_or_job(tmp_path: Path) -> None:
+    db_path = tmp_path / "videoedit-paid-invalid.sqlite3"
+    _init_job_db(db_path)
+    saved: dict = {}
+    namespace = _submit_namespace(db_path, saved)
+
+    class _EngineSpy:
+        def __getattr__(self, name):
+            return getattr(video_editengine1, name)
+
+        @staticmethod
+        def preflight(*_args, **_kwargs):
+            raise AssertionError("preflight must not run for invalid evidence")
+
+        @staticmethod
+        def create_job(*_args, **_kwargs):
+            raise AssertionError("create_job must not run for invalid evidence")
+
+    namespace["video_editengine1"] = _EngineSpy()
+    submit = _compile_function("submit_local_video_editor_job", namespace)
+    state = _default_state(909)
+    state["source_metadata"]["ok"] = False
+    query = _Query(909, "videoedit|confirm_paid")
+    update = SimpleNamespace(callback_query=query, message=None, effective_user=query.from_user)
+
+    assert asyncio.run(submit(update, SimpleNamespace(), state, tail=_paid_video_edit_tail())) is True
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='video_edit_jobs'"
+        ).fetchone()[0] == 0
+    finally:
+        conn.close()
+    assert query.edits == [("invalid_video", {"parse_mode": None, "reply_markup": "upload-keyboard"})]
+    assert saved == {}
+
+
+def test_paid_submit_source_does_not_use_legacy_size_or_render_limits() -> None:
+    submit = _function_source("submit_local_video_editor_job")
 
     assert "MAX_UPLOAD_BYTES" not in submit
     assert "max_render_seconds" not in submit

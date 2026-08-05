@@ -226218,12 +226218,13 @@ async def submit_local_video_editor_job(
         else:
             await message.reply_text(text, reply_markup=video_local_upload_keyboard(tool, lang))
         return True
-    if safe_int(state.get("source_file_size"), 0) > video_local_validation.MAX_UPLOAD_BYTES:
-        text = video_local_public_error("video_too_large")
+    evidence = video_edit_submit_inspection_evidence(state)
+    if not evidence.get("ok"):
+        text = video_local_public_error("invalid_video", lang)
         if query:
-            await safe_edit_or_send(query, text, parse_mode=None, reply_markup=video_local_source_summary_keyboard(tool, lang, state))
+            await safe_edit_or_send(query, text, parse_mode=None, reply_markup=video_edit_lane_upload_keyboard("manual_edit", lang))
         else:
-            await message.reply_text(text, reply_markup=video_local_source_summary_keyboard(tool, lang, state))
+            await message.reply_text(text, reply_markup=video_edit_lane_upload_keyboard("manual_edit", lang))
         return True
     allowed, invoice_reason = video_tail9.invoice_allowed(tail)
     if not allowed:
@@ -226304,10 +226305,11 @@ async def submit_local_video_editor_job(
         "chat_id": str(message.chat_id),
         "source_file_id": source_file_id,
         "source_video_id": str(state.get("source_video_id") or source_file_id),
-        "source_video_hash": str(state.get("source_video_hash") or ""),
+        "source_video_hash": str(evidence["source_sha256"]),
         "source_file_name": str(state.get("source_file_name") or "video.mp4")[:180],
-        "source_file_size": safe_int(state.get("source_file_size"), 0),
-        "source_metadata": dict(state.get("source_metadata") or {}),
+        "source_file_size": int(evidence["actual_bytes"]),
+        "source_metadata": dict(evidence["source_metadata"]),
+        "media_lane": str(evidence["media_lane"]),
         "state_revision": max(1, safe_int(state.get("state_revision"), 1)),
         "ratio": "keep",
         "audio_policy": str(state.get("audio_policy") or "preserve_if_present"),
@@ -226318,7 +226320,6 @@ async def submit_local_video_editor_job(
         "split_mode": str(state.get("split_mode") or "")[:30],
         "split_ranges": list(state.get("split_ranges") or []),
         "coverage_required": bool(state.get("coverage_required", True)),
-        "max_render_seconds": min(video_local_validation.FFMPEG_TIMEOUT_SECONDS, LOCAL_WORKER_MAX_JOB_SECONDS),
         "charge_policy": "after_valid_mp4_delivery",
         "price_xu": price_xu,
         "quoted_price_xu": price_xu,
@@ -226334,15 +226335,70 @@ async def submit_local_video_editor_job(
     conn = db_connect()
     try:
         video_editengine1.ensure_schema(conn)
-        token = video_editengine1.stable_idempotency_key(
+        source_metadata = dict(state.get("source_metadata") or {})
+        source_manifest = payload.get("source_manifest")
+        if source_manifest is None:
+            source_manifest = source_metadata.get("source_manifest") or source_metadata
+        source_video_hash = (
+            payload.get("source_video_hash")
+            or payload.get("source_sha256")
+            or source_metadata.get("source_video_hash")
+            or source_metadata.get("source_sha256")
+            or source_metadata.get("sha256")
+            or ""
+        )
+        plan_schema_version = (
+            payload.get("plan_schema_version")
+            or payload.get("schema_version")
+            or plan.get("schema_version")
+            or plan.get("plan_version")
+            or (
+                f"local1-contract-{payload.get('local1_contract')}"
+                if payload.get("local1_contract") is not None
+                else video_editengine1.PLAN_SCHEMA_VERSION
+            )
+        )
+        concat_sources = list(payload.get("concat_sources") or [])
+        identity_logo_source = dict(payload.get("logo_source") or {})
+        subtitle_source = dict(payload.get("subtitle_source") or {})
+        local1_mode = str(payload.get("local1_mode") or "manual").strip().lower()
+        split_mode = str(payload.get("split_mode") or plan.get("split_mode") or "")
+        split_ranges = list(payload.get("split_ranges") or plan.get("split_ranges") or [])
+        coverage_required = payload.get("coverage_required", True)
+        idempotency_key = video_editengine1.stable_idempotency_key(
             user_id=uid,
             edit_session_id=edit_session_id,
             plan=plan,
             quality_tier_id=quality_tier_id,
+            plan_schema_version=plan_schema_version,
+            source_file_id=source_file_id,
+            source_video_hash=source_video_hash,
+            source_manifest=source_manifest,
+            concat_sources=concat_sources,
+            logo_source=identity_logo_source,
+            subtitle_source=subtitle_source,
+            local1_mode=local1_mode,
+            split_mode=split_mode,
+            split_ranges=split_ranges,
+            coverage_required=coverage_required,
+        )
+        historic_v2_key = video_editengine1._historic_v2_idempotency_key(
+            user_id=uid,
+            edit_session_id=edit_session_id,
+            plan=plan,
+            quality_tier_id=quality_tier_id,
+            plan_schema_version=plan_schema_version,
+            source_file_id=source_file_id,
+            source_video_hash=source_video_hash,
+            source_manifest=source_manifest,
+            concat_sources=concat_sources,
+            logo_source=identity_logo_source,
+            subtitle_source=subtitle_source,
         )
         existing = conn.execute(
-            "SELECT local_worker_job_id FROM video_edit_jobs WHERE idempotency_key=?",
-            (token,),
+            """SELECT id FROM video_edit_jobs
+               WHERE idempotency_key IN (?,?) LIMIT 1""",
+            (idempotency_key, historic_v2_key),
         ).fetchone()
         if not existing:
             active = conn.execute(
@@ -226362,7 +226418,7 @@ async def submit_local_video_editor_job(
             chat_id=str(message.chat_id),
             edit_session_id=edit_session_id,
             source_file_id=source_file_id,
-            source_metadata=dict(state.get("source_metadata") or {}),
+            source_metadata=source_metadata,
             plan=plan,
             tail=tail,
             quality_tier_id=quality_tier_id,
@@ -226370,7 +226426,7 @@ async def submit_local_video_editor_job(
             worker_payload=payload,
         )
         conn.commit()
-    except sqlite3.Error:
+    except (sqlite3.Error, ValueError):
         conn.rollback()
         logger.exception("video editengine1 job creation failed")
         text = "⚠️ Chưa thể lưu tác vụ chỉnh sửa. TOAN AAS chưa trừ Xu."
