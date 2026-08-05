@@ -774,3 +774,256 @@ def test_videoedit_callback_choices_return_bounded_typed_values() -> None:
     assert editing.normalize_callback_plan_choice("rotation", "90") == ("rotation", 90)
     assert editing.normalize_callback_plan_choice("speed", "1.25") == ("speed", 1.25)
     assert editing.normalize_callback_plan_choice("logo_opacity", "0.75") == ("logo_opacity", 0.75)
+
+
+def test_videoedit_run_uses_exact_remaining_deadline_without_rounding_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, float] = {}
+
+    monkeypatch.setattr(editing.time, "monotonic", lambda: 100.75)
+
+    def fake_run(command, **kwargs):
+        observed["timeout"] = kwargs["timeout"]
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(editing.subprocess, "run", fake_run)
+
+    editing._run(["ffmpeg", "-version"], timeout=20, deadline_monotonic=101.0)
+
+    assert observed["timeout"] == pytest.approx(0.25)
+
+
+def test_videoedit_run_rejects_an_expired_deadline_before_spawning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(editing.time, "monotonic", lambda: 50.0)
+
+    def unexpected_run(*args, **kwargs):
+        raise AssertionError("expired work must not spawn FFmpeg")
+
+    monkeypatch.setattr(editing.subprocess, "run", unexpected_run)
+
+    with pytest.raises(editing.LocalVideoEditError) as exc_info:
+        editing._run(["ffmpeg", "-version"], timeout=20, deadline_monotonic=50.0)
+
+    assert exc_info.value.reason == "ffmpeg_timeout"
+
+
+def test_videoedit_filter_discovery_honors_deadline_and_cache_key_stays_bounded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ffmpeg = tmp_path / "ffmpeg.exe"
+    ffmpeg.write_bytes(b"fake")
+    observed: list[float] = []
+    editing._FFMPEG_FILTER_CACHE.clear()
+    monkeypatch.setattr(editing.time, "monotonic", lambda: 10.6)
+
+    def fake_run(command, **kwargs):
+        observed.append(kwargs["timeout"])
+        return subprocess.CompletedProcess(command, 0, " .. scale V->V Scale\n", "")
+
+    monkeypatch.setattr(editing.subprocess, "run", fake_run)
+    first = editing.available_ffmpeg_filters(
+        str(ffmpeg),
+        deadline_monotonic=11.0,
+    )
+
+    def unexpected_run(*args, **kwargs):
+        raise AssertionError("a deadline must not create a distinct cache entry")
+
+    monkeypatch.setattr(editing.subprocess, "run", unexpected_run)
+    second = editing.available_ffmpeg_filters(
+        str(ffmpeg),
+        deadline_monotonic=-1.0,
+    )
+
+    assert first == second == frozenset({"scale"})
+    assert observed == [pytest.approx(0.4)]
+    assert len(editing._FFMPEG_FILTER_CACHE) == 1
+
+
+def test_videoedit_filter_discovery_deadline_timeout_has_canonical_reason(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ffmpeg = tmp_path / "ffmpeg-timeout.exe"
+    ffmpeg.write_bytes(b"fake")
+    editing._FFMPEG_FILTER_CACHE.clear()
+    monkeypatch.setattr(editing.time, "monotonic", lambda: 20.0)
+
+    def fake_run(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(editing.subprocess, "run", fake_run)
+
+    with pytest.raises(editing.LocalVideoEditError) as exc_info:
+        editing.available_ffmpeg_filters(
+            str(ffmpeg),
+            refresh=True,
+            deadline_monotonic=21.0,
+        )
+
+    assert exc_info.value.reason == "ffmpeg_timeout"
+
+
+def test_videoedit_concat_intermediates_share_deadline_and_admitted_workspace_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deadlines: list[float | None] = []
+    budgets: list[int] = []
+    monkeypatch.setattr(editing, "probe_video_file", lambda *args, **kwargs: _probe())
+    monkeypatch.setattr(
+        editing,
+        "_run_checked",
+        lambda command, *, timeout, deadline_monotonic=None: deadlines.append(deadline_monotonic),
+    )
+    monkeypatch.setattr(
+        editing,
+        "enforce_workspace_limit",
+        lambda workspace, *, maximum_bytes: budgets.append(maximum_bytes),
+    )
+
+    editing._normalize_concat_inputs(
+        ["one.mp4", "two.mp4"],
+        workspace=tmp_path,
+        ffmpeg_path="ffmpeg",
+        ffprobe_path="ffprobe",
+        timeout=20,
+        deadline_monotonic=123.5,
+        workspace_budget_bytes=777,
+    )
+
+    assert deadlines == [123.5, 123.5, 123.5]
+    assert budgets == [777, 777, 777]
+
+
+def test_videoedit_primary_intermediate_shares_deadline_and_workspace_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    plan = _source_plan(tmp_path)
+    plan["trim"] = {"start_ms": 500, "end_ms": 3_500}
+    observed: dict[str, float | int | None] = {}
+
+    def fake_run(command, *, timeout, deadline_monotonic=None):
+        observed["deadline"] = deadline_monotonic
+        Path(command[-1]).write_bytes(b"prepared")
+
+    monkeypatch.setattr(editing, "_run_checked", fake_run)
+    monkeypatch.setattr(editing, "validate_mp4_output", lambda *args, **kwargs: _probe(duration_ms=3_000))
+    monkeypatch.setattr(editing, "probe_video_file", lambda *args, **kwargs: _probe(duration_ms=3_000))
+    monkeypatch.setattr(
+        editing,
+        "enforce_workspace_limit",
+        lambda workspace, *, maximum_bytes: observed.update(budget=maximum_bytes),
+    )
+
+    editing._prepare_primary_timeline(
+        plan,
+        source_probe=_probe(),
+        workspace=tmp_path,
+        ffmpeg_path="ffmpeg",
+        ffprobe_path="ffprobe",
+        timeout=20,
+        deadline_monotonic=123.5,
+        workspace_budget_bytes=888,
+    )
+
+    assert observed == {"deadline": 123.5, "budget": 888}
+
+
+def test_videoedit_manual_executor_propagates_deadline_and_custom_workspace_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = _source_plan(tmp_path)
+    observed: dict[str, float | int | None] = {}
+    monkeypatch.setattr(editing, "find_ffmpeg", lambda value="": "ffmpeg")
+    monkeypatch.setattr(editing, "find_ffprobe", lambda value="", **kwargs: "ffprobe")
+    monkeypatch.setattr(editing, "probe_video_file", lambda *args, **kwargs: _probe())
+    monkeypatch.setattr(editing, "validate_mp4_output", lambda *args, **kwargs: _probe())
+    monkeypatch.setattr(
+        editing,
+        "available_ffmpeg_filters",
+        lambda ffmpeg, *, refresh=False, deadline_monotonic=None: (
+            observed.update(filter_deadline=deadline_monotonic)
+            or frozenset({"format", "scale", "setsar"})
+        ),
+    )
+
+    def fake_run(command, *, timeout, deadline_monotonic=None):
+        observed["deadline"] = deadline_monotonic
+        Path(command[-1]).write_bytes(b"output")
+
+    monkeypatch.setattr(editing, "_run_checked", fake_run)
+    monkeypatch.setattr(
+        editing,
+        "enforce_workspace_limit",
+        lambda workspace, *, maximum_bytes: observed.update(budget=maximum_bytes),
+    )
+
+    result = editing.execute_manual_edit(
+        plan,
+        output_path=str(tmp_path / "output.mp4"),
+        workspace=tmp_path,
+        deadline_monotonic=200.0,
+        workspace_budget_bytes=999,
+    )
+
+    assert result["ok"] is True
+    assert observed == {
+        "filter_deadline": 200.0,
+        "deadline": 200.0,
+        "budget": 999,
+    }
+
+
+def test_videoedit_split_executor_propagates_deadline_and_preserves_legacy_workspace_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    observed: dict[str, list] = {"filter_deadlines": [], "run_deadlines": [], "budgets": []}
+    monkeypatch.setattr(editing, "find_ffmpeg", lambda value="": "ffmpeg")
+    monkeypatch.setattr(editing, "find_ffprobe", lambda value="", **kwargs: "ffprobe")
+    monkeypatch.setattr(editing, "probe_video_file", lambda *args, **kwargs: _probe())
+    monkeypatch.setattr(editing, "validate_mp4_output", lambda *args, **kwargs: _probe(duration_ms=2_000))
+    monkeypatch.setattr(
+        editing,
+        "available_ffmpeg_filters",
+        lambda ffmpeg, *, refresh=False, deadline_monotonic=None: (
+            observed["filter_deadlines"].append(deadline_monotonic)
+            or frozenset({"format", "scale", "setsar"})
+        ),
+    )
+    monkeypatch.setattr(
+        editing,
+        "_run_checked",
+        lambda command, *, timeout, deadline_monotonic=None: observed["run_deadlines"].append(deadline_monotonic),
+    )
+    monkeypatch.setattr(
+        editing,
+        "enforce_workspace_limit",
+        lambda workspace, **kwargs: observed["budgets"].append(kwargs),
+    )
+
+    result = editing.execute_split_plan(
+        str(source),
+        [editing.SplitRange(index=1, start_ms=0, end_ms=2_000)],
+        workspace=tmp_path,
+        coverage_required=False,
+        deadline_monotonic=300.0,
+    )
+
+    assert result["ok"] is True
+    assert observed == {
+        "filter_deadlines": [300.0],
+        "run_deadlines": [300.0],
+        "budgets": [{}],
+    }

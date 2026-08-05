@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import math
+import time
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -1023,6 +1024,7 @@ def available_ffmpeg_filters(
     ffmpeg_path: str,
     *,
     refresh: bool = False,
+    deadline_monotonic: float | None = None,
 ) -> frozenset[str]:
     """Discover filters from the exact FFmpeg binary used by the worker."""
     cache_key = str(Path(str(ffmpeg_path or "")).resolve(strict=False)).lower()
@@ -1031,14 +1033,17 @@ def available_ffmpeg_filters(
     if not refresh and cached and cached[0] == fingerprint:
         return cached[1]
     try:
+        subprocess_timeout = _remaining_ffmpeg_timeout(20, deadline_monotonic)
         result = subprocess.run(
             [str(ffmpeg_path), "-hide_banner", "-filters"],
             capture_output=True,
             text=True,
-            timeout=20,
+            timeout=subprocess_timeout,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
+        raise LocalVideoEditError("ffmpeg_timeout") from exc
+    except OSError as exc:
         raise LocalVideoEditError("ffmpeg_filter_discovery_failed") from exc
     if result.returncode != 0:
         raise LocalVideoEditError("ffmpeg_filter_discovery_failed")
@@ -1382,19 +1387,52 @@ def validate_split_ranges(
     return items
 
 
-def _run(command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+def _remaining_ffmpeg_timeout(timeout: int, deadline_monotonic: float | None) -> float:
+    per_call_timeout = float(max(1, int(timeout)))
+    if deadline_monotonic is None:
+        return per_call_timeout
+    remaining = float(deadline_monotonic) - time.monotonic()
+    if remaining <= 0:
+        raise LocalVideoEditError("ffmpeg_timeout")
+    return min(per_call_timeout, remaining)
+
+
+def _enforce_workspace_budget(
+    workspace: str | os.PathLike[str],
+    workspace_budget_bytes: int | None,
+) -> int:
+    if workspace_budget_bytes is None:
+        return enforce_workspace_limit(workspace)
+    return enforce_workspace_limit(
+        workspace,
+        maximum_bytes=int(workspace_budget_bytes),
+    )
+
+
+def _run(
+    command: list[str],
+    *,
+    timeout: int,
+    deadline_monotonic: float | None = None,
+) -> subprocess.CompletedProcess[str]:
     if not command or "ffmpeg" not in Path(str(command[0])).name.lower():
         raise LocalVideoEditError("ffmpeg_command_required")
     try:
-        return subprocess.run(command, capture_output=True, text=True, timeout=max(1, int(timeout)), check=False)
+        subprocess_timeout = _remaining_ffmpeg_timeout(timeout, deadline_monotonic)
+        return subprocess.run(command, capture_output=True, text=True, timeout=subprocess_timeout, check=False)
     except subprocess.TimeoutExpired as exc:
         raise LocalVideoEditError("ffmpeg_timeout") from exc
     except OSError as exc:
         raise LocalVideoEditError(f"ffmpeg_exec_failed:{type(exc).__name__}") from exc
 
 
-def _run_checked(command: list[str], *, timeout: int) -> None:
-    result = _run(command, timeout=timeout)
+def _run_checked(
+    command: list[str],
+    *,
+    timeout: int,
+    deadline_monotonic: float | None = None,
+) -> None:
+    result = _run(command, timeout=timeout, deadline_monotonic=deadline_monotonic)
     if result.returncode != 0:
         lines = [line.strip() for line in str(result.stderr or result.stdout or "").splitlines() if line.strip()]
         diagnostics = [
@@ -1419,6 +1457,8 @@ def _normalize_concat_inputs(
     ffmpeg_path: str,
     ffprobe_path: str,
     timeout: int,
+    deadline_monotonic: float | None = None,
+    workspace_budget_bytes: int | None = None,
 ) -> tuple[str, dict[str, Any]]:
     normalized: list[Path] = []
     target_width = 0
@@ -1453,7 +1493,8 @@ def _normalize_concat_inputs(
             "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
             "-t", f"{duration:.3f}", "-movflags", "+faststart", str(target),
         ])
-        _run_checked(command, timeout=timeout)
+        _run_checked(command, timeout=timeout, deadline_monotonic=deadline_monotonic)
+        _enforce_workspace_budget(workspace, workspace_budget_bytes)
         normalized.append(target)
     manifest = workspace / "concat_inputs.txt"
     manifest.write_text(
@@ -1464,7 +1505,9 @@ def _normalize_concat_inputs(
     _run_checked(
         [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", str(manifest), "-c", "copy", "-movflags", "+faststart", str(concat_output)],
         timeout=timeout,
+        deadline_monotonic=deadline_monotonic,
     )
+    _enforce_workspace_budget(workspace, workspace_budget_bytes)
     probe = probe_video_file(concat_output, ffprobe_path=ffprobe_path)
     if not probe.get("ok"):
         raise LocalVideoEditError(str(probe.get("reason") or "concat_output_invalid"))
@@ -1479,6 +1522,8 @@ def _prepare_primary_timeline(
     ffmpeg_path: str,
     ffprobe_path: str,
     timeout: int,
+    deadline_monotonic: float | None = None,
+    workspace_budget_bytes: int | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Apply primary trim/remove-middle before any append operation."""
     source = str(plan.get("input_video") or "")
@@ -1566,7 +1611,8 @@ def _prepare_primary_timeline(
     try:
         if target.exists():
             target.unlink()
-        _run_checked(command, timeout=timeout)
+        _run_checked(command, timeout=timeout, deadline_monotonic=deadline_monotonic)
+        _enforce_workspace_budget(workspace, workspace_budget_bytes)
         expected_duration_ms = end_ms - start_ms
         if remove_middle:
             expected_duration_ms -= int(remove_middle["end_ms"]) - int(remove_middle["start_ms"])
@@ -1597,8 +1643,13 @@ def execute_manual_edit(
     ffprobe_path: str = "",
     timeout: int = FFMPEG_TIMEOUT_SECONDS,
     progress: Callable[[dict[str, Any]], None] | None = None,
+    deadline_monotonic: float | None = None,
+    workspace_budget_bytes: int | None = None,
 ) -> dict[str, Any]:
     workspace_path = Path(workspace).resolve(strict=False)
+    admitted_workspace_budget = (
+        None if workspace_budget_bytes is None else int(workspace_budget_bytes)
+    )
     output = require_path_within(output_path, workspace_path)
     staging = output.with_name(f".{output.stem}.{os.getpid()}.partial{output.suffix}")
     staging = require_path_within(staging, workspace_path)
@@ -1619,9 +1670,12 @@ def execute_manual_edit(
         source_height=int(source_probe.get("height") or 0),
     )
     if required_filters:
+        filter_discovery_kwargs: dict[str, Any] = {"refresh": True}
+        if deadline_monotonic is not None:
+            filter_discovery_kwargs["deadline_monotonic"] = deadline_monotonic
         validate_required_optional_filters(
             normalized,
-            available_filters=set(available_ffmpeg_filters(ffmpeg, refresh=True)),
+            available_filters=set(available_ffmpeg_filters(ffmpeg, **filter_discovery_kwargs)),
             has_audio=bool(source_probe.get("has_audio")),
             source_width=int(source_probe.get("width") or 0),
             source_height=int(source_probe.get("height") or 0),
@@ -1648,6 +1702,8 @@ def execute_manual_edit(
             ffmpeg_path=ffmpeg,
             ffprobe_path=probe_bin,
             timeout=timeout,
+            deadline_monotonic=deadline_monotonic,
+            workspace_budget_bytes=admitted_workspace_budget,
         )
         prepared_primary = Path(source)
         normalized["input_video"] = source
@@ -1662,6 +1718,8 @@ def execute_manual_edit(
                 ffmpeg_path=ffmpeg,
                 ffprobe_path=probe_bin,
                 timeout=timeout,
+                deadline_monotonic=deadline_monotonic,
+                workspace_budget_bytes=admitted_workspace_budget,
             )
             normalized["input_video"] = source
             normalized["concat_inputs"] = []
@@ -1690,8 +1748,8 @@ def execute_manual_edit(
             source_probe=source_probe,
             ffmpeg_path=ffmpeg,
         )
-        _run_checked(command, timeout=timeout)
-        enforce_workspace_limit(workspace_path)
+        _run_checked(command, timeout=timeout, deadline_monotonic=deadline_monotonic)
+        _enforce_workspace_budget(workspace_path, admitted_workspace_budget)
         if progress:
             progress({"stage": "validating_output", "processed": 1, "total": 1})
         expected = expected_manual_duration_ms(normalized)
@@ -1740,8 +1798,13 @@ def execute_split_plan(
     ffprobe_path: str = "",
     timeout: int = FFMPEG_TIMEOUT_SECONDS,
     progress: Callable[[dict[str, Any]], None] | None = None,
+    deadline_monotonic: float | None = None,
+    workspace_budget_bytes: int | None = None,
 ) -> dict[str, Any]:
     workspace_path = Path(workspace).resolve(strict=False)
+    admitted_workspace_budget = (
+        None if workspace_budget_bytes is None else int(workspace_budget_bytes)
+    )
     source = require_path_within(source_path, workspace_path)
     items = list(ranges or [])
     if not items:
@@ -1752,7 +1815,10 @@ def execute_split_plan(
         raise LocalVideoEditError("ffmpeg_missing")
     if not probe_bin:
         raise LocalVideoEditError("ffprobe_missing")
-    available_filters = set(available_ffmpeg_filters(ffmpeg, refresh=True))
+    filter_discovery_kwargs: dict[str, Any] = {"refresh": True}
+    if deadline_monotonic is not None:
+        filter_discovery_kwargs["deadline_monotonic"] = deadline_monotonic
+    available_filters = set(available_ffmpeg_filters(ffmpeg, **filter_discovery_kwargs))
     for required_filter in ("format", "scale", "setsar"):
         if required_filter not in available_filters:
             raise LocalVideoEditError(
@@ -1777,7 +1843,7 @@ def execute_split_plan(
         command = build_split_ffmpeg_command(
             str(source), item, str(target), ffmpeg_path=ffmpeg, has_audio=bool(source_probe.get("has_audio"))
         )
-        _run_checked(command, timeout=timeout)
+        _run_checked(command, timeout=timeout, deadline_monotonic=deadline_monotonic)
         validation = validate_mp4_output(
             target,
             expected_duration_ms=item.duration_ms,
@@ -1787,7 +1853,7 @@ def execute_split_plan(
         if not validation.get("ok"):
             raise LocalVideoEditError(f"split_part_invalid:{item.index}:{validation.get('reason')}")
         outputs.append({"index": item.index, "path": str(target), "duration_ms": item.duration_ms, "validation": validation})
-        enforce_workspace_limit(workspace_path)
+        _enforce_workspace_budget(workspace_path, admitted_workspace_budget)
         if progress:
             progress({"stage": "validating_output", "processed": item.index, "total": total, "current_part": item.index})
     actual_total = sum(int(item["validation"].get("duration_ms") or 0) for item in outputs)
