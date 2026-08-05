@@ -1304,6 +1304,210 @@ def test_delivery_streams_exact_multipart_for_advertised_boundary_and_receipts_h
     )
 
 
+def test_delivery_without_deadline_preserves_legacy_request_signature(tmp_path) -> None:
+    media_transport = _media_transport()
+    artifact = tmp_path / "legacy.mp4"
+    artifact.write_bytes(b"legacy-request")
+    calls = []
+
+    def legacy_request(
+        *,
+        method_name,
+        url,
+        headers,
+        content_length,
+        body,
+        follow_redirects,
+    ):
+        chunks = list(body)
+        calls.append((method_name, url, headers, content_length, follow_redirects))
+        assert sum(map(len, chunks)) == content_length
+        return _accepted_receipt(method_name)
+
+    receipt = media_transport.send_artifact_from_path(
+        config=_local_config(),
+        chat_id="7",
+        artifact=artifact,
+        request=legacy_request,
+    )
+
+    assert receipt.delivery_method == "sendVideo"
+    assert len(calls) == 1
+
+
+def test_delivery_expired_before_boundary_scan_never_sends(tmp_path) -> None:
+    media_transport = _media_transport()
+    artifact = tmp_path / "expired.mp4"
+    artifact.write_bytes(b"expired")
+    boundary_calls = []
+    request_calls = []
+
+    with pytest.raises(media_transport.MediaTransferError) as exc_info:
+        media_transport.send_artifact_from_path(
+            config=_local_config(),
+            chat_id="7",
+            artifact=artifact,
+            request=lambda **kwargs: request_calls.append(kwargs),
+            deadline_monotonic=5.0,
+            monotonic=lambda: 5.0,
+            _boundary_factory=lambda: boundary_calls.append(1),
+        )
+
+    assert exc_info.value.reason == "deadline_exceeded"
+    assert boundary_calls == []
+    assert request_calls == []
+
+
+def test_delivery_expiry_after_boundary_scan_never_starts_request(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    media_transport = _media_transport()
+    artifact = tmp_path / "scan-expiry.mp4"
+    artifact.write_bytes(b"scan-expiry")
+    clock = {"now": 0.0}
+    request_calls = []
+    original_scan = media_transport._artifact_contains_boundary
+
+    def expiring_scan(**kwargs):
+        result = original_scan(**kwargs)
+        clock["now"] = 10.0
+        return result
+
+    monkeypatch.setattr(media_transport, "_artifact_contains_boundary", expiring_scan)
+
+    with pytest.raises(media_transport.MediaTransferError) as exc_info:
+        media_transport.send_artifact_from_path(
+            config=_local_config(),
+            chat_id="7",
+            artifact=artifact,
+            request=lambda **kwargs: request_calls.append(kwargs),
+            deadline_monotonic=10.0,
+            monotonic=lambda: clock["now"],
+        )
+
+    assert exc_info.value.reason == "deadline_exceeded"
+    assert request_calls == []
+
+
+def test_delivery_midstream_deadline_is_unknown_and_never_retried(tmp_path) -> None:
+    media_transport = _media_transport()
+    artifact = _sparse_mp4(tmp_path / "midstream.mp4", MIB + 17)
+    clock = {"now": 0.0}
+    calls = []
+    bodies = []
+
+    def request(**kwargs):
+        calls.append(kwargs["method_name"])
+        assert kwargs["deadline_monotonic"] == 10.0
+        bodies.append(kwargs["body"])
+        chunks = iter(kwargs["body"])
+        assert next(chunks)
+        clock["now"] = 10.0
+        next(chunks)
+        pytest.fail("deadline must stop multipart iteration")
+
+    with pytest.raises(media_transport.MediaTransferError) as exc_info:
+        media_transport.send_artifact_from_path(
+            config=_local_config(),
+            chat_id="7",
+            artifact=artifact,
+            request=request,
+            deadline_monotonic=10.0,
+            monotonic=lambda: clock["now"],
+            preview_threshold_bytes=artifact.stat().st_size,
+        )
+
+    assert exc_info.value.reason == "delivery_unknown"
+    assert calls == ["sendVideo"]
+    assert len(bodies) == 1
+    assert bodies[0].closed is True
+    assert bodies[0].complete is False
+
+
+def test_delivery_expiry_after_started_rejection_is_unknown_without_fallback(
+    tmp_path,
+) -> None:
+    media_transport = _media_transport()
+    artifact = tmp_path / "rejected-at-deadline.mp4"
+    artifact.write_bytes(b"rejected-at-deadline")
+    clock = {"now": 0.0}
+    calls = []
+
+    def request(**kwargs):
+        calls.append(kwargs["method_name"])
+        list(kwargs["body"])
+        clock["now"] = 10.0
+        return {
+            "ok": False,
+            "error_code": 400,
+            "status_code": 400,
+            "description": "Bad Request: VIDEO_CONTENT_TYPE_INVALID",
+        }
+
+    with pytest.raises(media_transport.MediaTransferError) as exc_info:
+        media_transport.send_artifact_from_path(
+            config=_local_config(),
+            chat_id="7",
+            artifact=artifact,
+            request=request,
+            deadline_monotonic=10.0,
+            monotonic=lambda: clock["now"],
+        )
+
+    assert exc_info.value.reason == "delivery_unknown"
+    assert calls == ["sendVideo"]
+
+
+def test_delivery_boundary_scan_rechecks_deadline_between_bounded_reads(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    media_transport = _media_transport()
+    artifact = _sparse_mp4(tmp_path / "scan-deadline.mp4", 2 * MIB + 17)
+    clock = {"now": 0.0}
+    real_open = open
+    read_count = 0
+    request_calls = []
+
+    class ExpiringFile:
+        def __init__(self, raw):
+            self.raw = raw
+
+        def read(self, size):
+            nonlocal read_count
+            read_count += 1
+            chunk = self.raw.read(size)
+            if read_count == 1:
+                clock["now"] = 4.0
+            return chunk
+
+        def __getattr__(self, name):
+            return getattr(self.raw, name)
+
+    def tracked_open(path, *args, **kwargs):
+        raw = real_open(path, *args, **kwargs)
+        if os.path.abspath(path) == os.path.abspath(artifact):
+            return ExpiringFile(raw)
+        return raw
+
+    monkeypatch.setattr(media_transport, "open", tracked_open, raising=False)
+
+    with pytest.raises(media_transport.MediaTransferError) as exc_info:
+        media_transport.send_artifact_from_path(
+            config=_local_config(),
+            chat_id="7",
+            artifact=artifact,
+            request=lambda **kwargs: request_calls.append(kwargs),
+            deadline_monotonic=4.0,
+            monotonic=lambda: clock["now"],
+        )
+
+    assert exc_info.value.reason == "deadline_exceeded"
+    assert read_count == 1
+    assert request_calls == []
+
+
 def test_delivery_regenerates_boundary_when_split_chunk_collision_could_inject_chat_id(
     tmp_path,
 ) -> None:

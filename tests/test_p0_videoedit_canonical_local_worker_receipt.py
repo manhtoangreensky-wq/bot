@@ -36,6 +36,15 @@ def _run_job(
     liveness_factory_calls: list[tuple[object, object, object]] | None = None,
     liveness_health_failure_at: int | None = None,
     liveness_failure_on_stop: bool = False,
+    worker_policy_evidence: dict | None = None,
+    delivery_receipts_override: list[
+        video_edit_media_transport.DeliveryReceipt
+    ]
+    | None = None,
+    source_download_receipt_override: video_edit_media_transport.DownloadReceipt
+    | None = None,
+    update_evidence: list[dict] | None = None,
+    checkpoint_order_evidence: list[str] | None = None,
 ) -> tuple[dict, list[str]]:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -91,6 +100,8 @@ def _run_job(
                 health_check_count += 1
                 if liveness_evidence is not None:
                     liveness_evidence.append("assert_healthy")
+                if checkpoint_order_evidence is not None:
+                    checkpoint_order_evidence.append("assert_healthy")
                 if health_check_count == liveness_health_failure_at:
                     raise local_worker.LocalVideoEditError(
                         "video_local_edit_worker_lease_lost"
@@ -123,9 +134,16 @@ def _run_job(
             fake_video_edit_job_liveness,
             raising=False,
         )
-    def fake_download(*_args, **_kwargs) -> str:
+    def fake_download(*_args, **_kwargs) -> str | video_edit_media_transport.DownloadReceipt:
         if observed_worker_steps is not None:
             observed_worker_steps.append("download")
+        if worker_policy_evidence is not None:
+            worker_policy_evidence.setdefault("events", []).append("download")
+            worker_policy_evidence.setdefault("download_deadlines", []).append(
+                _kwargs.get("deadline_monotonic")
+            )
+        if source_download_receipt_override is not None:
+            return source_download_receipt_override
         return str(source)
 
     def materialize_bounded_fixture(
@@ -247,8 +265,11 @@ def _run_job(
                     "transport": transport,
                     "bytes_written": logical_size,
                     "config": config,
+                    "deadline_monotonic": _kwargs.get("deadline_monotonic"),
                 }
             )
+            if worker_policy_evidence is not None:
+                worker_policy_evidence.setdefault("events", []).append("download")
             return video_edit_media_transport.DownloadReceipt(
                 path=str(destination),
                 bytes_written=logical_size,
@@ -288,6 +309,7 @@ def _run_job(
                     "delivery_method": delivery_method,
                     "bytes_sent": artifact_size,
                     "config": config,
+                    "deadline_monotonic": _kwargs.get("deadline_monotonic"),
                 }
             )
             return video_edit_media_transport.DeliveryReceipt(
@@ -364,6 +386,8 @@ def _run_job(
     def fake_probe(*_args, **_kwargs) -> dict:
         if observed_worker_steps is not None:
             observed_worker_steps.append("probe")
+        if worker_policy_evidence is not None:
+            worker_policy_evidence.setdefault("events", []).append("probe")
         return deepcopy(probe)
 
     original_validate_source_metadata = (
@@ -404,6 +428,15 @@ def _run_job(
             observed_worker_steps.append("execute")
         if observed_plans is not None:
             observed_plans.append(deepcopy(_plan))
+        if worker_policy_evidence is not None:
+            worker_policy_evidence.setdefault("events", []).append("execute")
+            worker_policy_evidence.setdefault("executor_calls", []).append(
+                {
+                    "mode": "manual",
+                    "deadline_monotonic": _kwargs.get("deadline_monotonic"),
+                    "workspace_budget_bytes": _kwargs.get("workspace_budget_bytes"),
+                }
+            )
         if transport_evidence is None:
             Path(output_path).write_bytes(b"rendered-video")
         else:
@@ -432,6 +465,15 @@ def _run_job(
 
     def fake_split_plan(*_args, **_kwargs) -> dict:
         record_observed_event("execute")
+        if worker_policy_evidence is not None:
+            worker_policy_evidence.setdefault("events", []).append("execute")
+            worker_policy_evidence.setdefault("executor_calls", []).append(
+                {
+                    "mode": "split",
+                    "deadline_monotonic": _kwargs.get("deadline_monotonic"),
+                    "workspace_budget_bytes": _kwargs.get("workspace_budget_bytes"),
+                }
+            )
         outputs = []
         for index in range(1, 3):
             output = workspace / f"part-{index}.mp4"
@@ -475,13 +517,22 @@ def _run_job(
         captions.append(str(caption or ""))
         index = len(captions)
         artifact_path = Path(artifact)
-        return video_edit_media_transport.DeliveryReceipt(
+        if checkpoint_order_evidence is not None:
+            checkpoint_order_evidence.append("delivery_accepted")
+        if worker_policy_evidence is not None:
+            worker_policy_evidence.setdefault("delivery_deadlines", []).append(
+                _kwargs.get("deadline_monotonic")
+            )
+        default_receipt = video_edit_media_transport.DeliveryReceipt(
             message_id=str(1_000 + index),
             file_id=f"file-{index}",
             delivery_method="sendVideo",
             bytes_sent=artifact_path.stat().st_size,
             sha256=bounded_file_sha256(artifact_path),
         )
+        if delivery_receipts_override is not None:
+            return delivery_receipts_override[index - 1]
+        return default_receipt
 
     if transport_evidence is None:
         monkeypatch.setattr(
@@ -516,19 +567,131 @@ def _run_job(
             error_detail = None
         if has_percent_field(error_detail):
             record_observed_event("percent_error_short")
+        if (
+            isinstance(error_detail, dict)
+            and isinstance(error_detail.get("artifact_receipts"), list)
+        ):
+            if checkpoint_order_evidence is not None:
+                checkpoint_order_evidence.append("receipt_checkpoint")
         if liveness_evidence is not None and status != "running":
             liveness_evidence.append("terminal_update")
-        updates.append(
-            {
-                "job_id": job_id,
-                "status": status,
-                "detail": error_short,
-                "output_url": output_url,
-                "output_file_id": output_file_id,
-            }
-        )
+        update = {
+            "job_id": job_id,
+            "status": status,
+            "detail": error_short,
+            "output_url": output_url,
+            "output_file_id": output_file_id,
+        }
+        updates.append(update)
+        if update_evidence is not None:
+            update_evidence.append(deepcopy(update))
 
     monkeypatch.setattr(local_worker, "update_job", fake_update_job)
+
+    if worker_policy_evidence is not None:
+        worker_policy_evidence.setdefault("events", [])
+        worker_policy_evidence.setdefault("classification_calls", [])
+        worker_policy_evidence.setdefault("adaptive_deadline_calls", [])
+        worker_policy_evidence.setdefault("admission_calls", [])
+        worker_policy_evidence.setdefault("executor_calls", [])
+        worker_policy_evidence.setdefault("delivery_deadlines", [])
+        worker_policy_evidence.setdefault("monotonic_calls", 0)
+        started_at = float(worker_policy_evidence.get("started_at", 10.0))
+
+        def fake_monotonic() -> float:
+            worker_policy_evidence["monotonic_calls"] += 1
+            return started_at
+
+        original_classify_plan_execution = (
+            local_worker.video_edit_long_media.classify_plan_execution
+        )
+        original_adaptive_deadline_seconds = (
+            local_worker.video_edit_long_media.adaptive_deadline_seconds
+        )
+        original_admit_workspace = local_worker.video_edit_long_media.admit_workspace
+
+        def observe_classification(plan: dict) -> str:
+            worker_policy_evidence["events"].append("classify")
+            result = original_classify_plan_execution(plan)
+            worker_policy_evidence["classification_calls"].append(
+                {"plan": deepcopy(plan), "result": result}
+            )
+            return result
+
+        def observe_adaptive_deadline(**kwargs) -> int:
+            call_index = len(worker_policy_evidence["adaptive_deadline_calls"])
+            scripted_results = worker_policy_evidence.get("adaptive_results")
+            result = (
+                int(scripted_results[call_index])
+                if isinstance(scripted_results, list)
+                and call_index < len(scripted_results)
+                else original_adaptive_deadline_seconds(**kwargs)
+            )
+            worker_policy_evidence["events"].append(
+                f"adaptive:{call_index + 1}"
+            )
+            worker_policy_evidence["adaptive_deadline_calls"].append(
+                {**deepcopy(kwargs), "result": result}
+            )
+            return result
+
+        def observe_admission(**kwargs):
+            worker_policy_evidence["events"].append("admit")
+            worker_policy_evidence["admission_calls"].append(deepcopy(kwargs))
+            configured = dict(
+                worker_policy_evidence.get("admission_by_operation") or {}
+            ).get(str(kwargs.get("operation") or ""))
+            rejected_reason = str(
+                worker_policy_evidence.get("reject_admission_reason") or ""
+            )
+            if isinstance(configured, dict):
+                decision = local_worker.video_edit_long_media.AdmissionDecision(
+                    bool(configured.get("accepted")),
+                    str(configured.get("reason") or "accepted"),
+                    {
+                        "estimated_bytes": int(
+                            configured.get("estimated_bytes") or 0
+                        )
+                    },
+                )
+            elif rejected_reason:
+                decision = local_worker.video_edit_long_media.AdmissionDecision(
+                    False,
+                    rejected_reason,
+                    {"estimated_bytes": 777},
+                )
+            else:
+                decision = original_admit_workspace(**kwargs)
+            worker_policy_evidence.setdefault("admission_decisions", []).append(
+                decision
+            )
+            return decision
+
+        monkeypatch.setattr(local_worker.time, "monotonic", fake_monotonic)
+        monkeypatch.setattr(
+            local_worker.video_edit_long_media,
+            "classify_plan_execution",
+            observe_classification,
+        )
+        monkeypatch.setattr(
+            local_worker.video_edit_long_media,
+            "adaptive_deadline_seconds",
+            observe_adaptive_deadline,
+        )
+        monkeypatch.setattr(
+            local_worker.video_edit_long_media,
+            "admit_workspace",
+            observe_admission,
+        )
+        monkeypatch.setattr(
+            local_worker.shutil,
+            "disk_usage",
+            lambda _path: type(
+                "DiskUsage",
+                (),
+                {"total": 2 * 10**12, "used": 10**12, "free": 10**12},
+            )(),
+        )
 
     payload = {
         "local1_contract": 1,
@@ -588,6 +751,863 @@ def _run_job(
         }
     )
     return updates[-1], captions
+
+
+def test_video_edit_download_asset_returns_the_transport_receipt_and_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    payload = b"streamed-video-evidence"
+    expected_sha256 = hashlib.sha256(payload).hexdigest()
+    captured: list[dict] = []
+    config = video_edit_media_transport.TelegramMediaConfig(
+        token="123:test-token",
+        api_root="https://api.telegram.org",
+        proxy_secret_header="X-Toanaas-Proxy-Secret",
+        proxy_secret="",
+        local_file_root="/var/lib/telegram-bot-api",
+        local_media_path="/localfile",
+    )
+
+    def fake_download_file_to_path(**kwargs):
+        captured.append(dict(kwargs))
+        destination = Path(kwargs["destination"])
+        destination.write_bytes(payload)
+        return video_edit_media_transport.DownloadReceipt(
+            path=str(destination),
+            bytes_written=len(payload),
+            sha256=expected_sha256,
+            lane="large_media",
+            transport="file",
+            declared_bytes=len(payload),
+        )
+
+    monkeypatch.setattr(
+        video_edit_media_transport,
+        "download_file_to_path",
+        fake_download_file_to_path,
+    )
+
+    receipt = local_worker._video_edit_download_asset(
+        "source-file",
+        "source.mp4",
+        tmp_path,
+        local_worker.ALLOWED_SOURCE_EXTENSIONS,
+        "source",
+        media_config=config,
+        deadline_monotonic=321.25,
+    )
+
+    assert isinstance(receipt, video_edit_media_transport.DownloadReceipt)
+    assert Path(receipt.path).read_bytes() == payload
+    assert receipt.bytes_written == len(payload)
+    assert receipt.sha256 == expected_sha256
+    assert captured[0]["deadline_monotonic"] == 321.25
+
+
+def test_video_edit_multipart_request_caps_socket_timeout_by_remaining_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response_payload = b'{"ok":false,"error_code":400,"description":"rejected"}'
+    observed_timeouts: list[float] = []
+
+    class Response:
+        headers = {"Content-Length": str(len(response_payload))}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _maximum: int) -> bytes:
+            return response_payload
+
+    def fake_open(_request, *, timeout):
+        observed_timeouts.append(timeout)
+        return Response()
+
+    monkeypatch.setattr(local_worker, "telegram_open_no_redirect", fake_open)
+
+    payload = local_worker._video_edit_multipart_request(
+        method_name="sendVideo",
+        url="https://api.telegram.org/bot123:test-token/sendVideo",
+        headers={"Content-Length": "3"},
+        content_length=3,
+        body=iter((b"abc",)),
+        follow_redirects=False,
+        deadline_monotonic=105.25,
+        monotonic=lambda: 100.0,
+    )
+
+    assert payload["status_code"] == 200
+    assert observed_timeouts == [5.25]
+
+
+@pytest.mark.parametrize("hash_field", ["source_video_hash", "source_sha256"])
+@pytest.mark.parametrize(
+    ("queued_hash", "expected_reason"),
+    [
+        pytest.param("f" * 63, "video_local_edit_source_hash_invalid", id="short"),
+        pytest.param("g" * 64, "video_local_edit_source_hash_invalid", id="non-hex"),
+        pytest.param("f" * 64, "video_local_edit_source_hash_mismatch", id="mismatch"),
+    ],
+)
+def test_worker_rejects_invalid_or_mismatched_queued_source_hash_before_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    hash_field: str,
+    queued_hash: str,
+    expected_reason: str,
+) -> None:
+    observed_steps: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch={hash_field: queued_hash},
+        observed_worker_steps=observed_steps,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == expected_reason
+    assert observed_steps == ["download"]
+    assert captions == []
+
+
+@pytest.mark.parametrize("hash_field", ["source_video_hash", "source_sha256"])
+def test_worker_accepts_matching_uppercase_queued_source_hash(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    hash_field: str,
+) -> None:
+    source_hash = hashlib.sha256(b"source-video").hexdigest().upper()
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch={hash_field: source_hash},
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert len(captions) == 1
+    assert json.loads(terminal["output_url"])["source_sha256"] == source_hash.lower()
+
+
+def test_worker_rejects_same_size_download_receipt_hash_mismatch_before_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    observed_steps: list[str] = []
+    source = tmp_path / "workspace" / "source.mp4"
+    receipt = video_edit_media_transport.DownloadReceipt(
+        path=str(source),
+        bytes_written=len(b"source-video"),
+        sha256="f" * 64,
+        lane="large_media",
+        transport="fixture",
+        declared_bytes=len(b"source-video"),
+    )
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        source_download_receipt_override=receipt,
+        observed_worker_steps=observed_steps,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == "download_receipt_invalid"
+    assert observed_steps == ["download"]
+    assert captions == []
+
+
+def _source_evidence_patch(location: str, value: object) -> dict:
+    if location.startswith("metadata_manifest."):
+        return {
+            "source_metadata": {
+                "source_manifest": {location.split(".", 1)[1]: value}
+            }
+        }
+    if location.startswith("metadata."):
+        return {"source_metadata": {location.split(".", 1)[1]: value}}
+    if location.startswith("manifest."):
+        return {"source_manifest": {location.split(".", 1)[1]: value}}
+    return {location: value}
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "metadata.source_video_hash",
+        "metadata.source_sha256",
+        "metadata.sha256",
+        "manifest.source_video_hash",
+        "manifest.source_sha256",
+        "manifest.sha256",
+        "metadata_manifest.source_video_hash",
+        "metadata_manifest.source_sha256",
+        "metadata_manifest.sha256",
+    ],
+)
+def test_worker_rejects_each_malformed_nested_source_hash_before_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    location: str,
+) -> None:
+    observed_steps: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch=_source_evidence_patch(location, "not-a-sha256"),
+        observed_worker_steps=observed_steps,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == "video_local_edit_source_hash_invalid"
+    assert observed_steps == ["download"]
+    assert captions == []
+
+
+def test_worker_rejects_conflicting_source_hash_evidence_before_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    observed_steps: list[str] = []
+    actual_sha256 = hashlib.sha256(b"source-video").hexdigest()
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch={
+            "source_video_hash": actual_sha256,
+            "source_metadata": {
+                "source_sha256": "f" * 64,
+                "source_manifest": {"sha256": actual_sha256},
+            },
+        },
+        observed_worker_steps=observed_steps,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == "video_local_edit_source_hash_mismatch"
+    assert observed_steps == ["download"]
+    assert captions == []
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "source_file_size",
+        "metadata.bytes",
+        "metadata.actual_bytes",
+        "metadata.file_size",
+        "manifest.source_file_size",
+        "manifest.bytes",
+        "manifest.actual_bytes",
+        "manifest.file_size",
+        "metadata_manifest.source_file_size",
+        "metadata_manifest.bytes",
+        "metadata_manifest.actual_bytes",
+        "metadata_manifest.file_size",
+    ],
+)
+def test_worker_rejects_each_mismatched_source_size_before_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    location: str,
+) -> None:
+    observed_steps: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch=_source_evidence_patch(location, len(b"source-video") + 1),
+        observed_worker_steps=observed_steps,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == "video_local_edit_source_size_mismatch"
+    assert observed_steps == ["download"]
+    assert captions == []
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "manifest.source_file_size",
+        "manifest.bytes",
+        "manifest.actual_bytes",
+        "manifest.file_size",
+        "metadata_manifest.source_file_size",
+        "metadata_manifest.bytes",
+        "metadata_manifest.actual_bytes",
+        "metadata_manifest.file_size",
+    ],
+)
+def test_worker_rejects_each_malformed_manifest_source_size_before_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    location: str,
+) -> None:
+    observed_steps: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch=_source_evidence_patch(location, True),
+        observed_worker_steps=observed_steps,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == "video_local_edit_source_size_invalid"
+    assert observed_steps == ["download"]
+    assert captions == []
+
+
+def test_worker_accepts_reconciled_source_hash_and_size_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    actual_sha256 = hashlib.sha256(b"source-video").hexdigest()
+    actual_bytes = len(b"source-video")
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch={
+            "source_video_hash": actual_sha256,
+            "source_sha256": actual_sha256.upper(),
+            "source_file_size": actual_bytes,
+            "source_manifest": {
+                "source_video_hash": actual_sha256,
+                "source_sha256": actual_sha256.upper(),
+                "sha256": actual_sha256,
+                "source_file_size": actual_bytes,
+                "bytes": actual_bytes,
+                "actual_bytes": actual_bytes,
+                "file_size": actual_bytes,
+            },
+            "source_metadata": {
+                "source_video_hash": actual_sha256.upper(),
+                "source_sha256": actual_sha256,
+                "sha256": actual_sha256.upper(),
+                "bytes": actual_bytes,
+                "actual_bytes": actual_bytes,
+                "file_size": actual_bytes,
+                "source_manifest": {
+                    "sha256": actual_sha256,
+                    "source_file_size": actual_bytes,
+                    "bytes": actual_bytes,
+                    "actual_bytes": actual_bytes,
+                    "file_size": actual_bytes,
+                },
+            },
+        },
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert len(captions) == 1
+
+
+def test_worker_accepts_missing_manifest_source_size_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch={
+            "source_manifest": {},
+            "source_metadata": {"source_manifest": {}},
+        },
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert len(captions) == 1
+
+
+def test_worker_accepts_zero_manifest_source_size_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    zero_sizes = {
+        "source_file_size": 0,
+        "bytes": "0",
+        "actual_bytes": 0,
+        "file_size": "0",
+    }
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch={
+            "source_manifest": dict(zero_sizes),
+            "source_metadata": {"source_manifest": dict(zero_sizes)},
+        },
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert len(captions) == 1
+
+
+def test_worker_promotes_actual_source_deadline_before_assets_and_never_shortens(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    transport_evidence: dict = {"downloads": [], "deliveries": []}
+    policy_evidence: dict = {
+        "started_at": 10.0,
+        "adaptive_results": [100, 500, 300],
+    }
+    source_bytes = 2_048
+    manual_plan = {
+        "trim": {"start_ms": 0, "end_ms": 2_000},
+        "concat_inputs": ["queued-concat.mp4"],
+        "logo_overlay": {"position": "top_right", "path": "queued-logo.png"},
+        "subtitle_file": "queued-subtitle.srt",
+        "brightness_percent": 110,
+    }
+
+    terminal, _captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        manual_plan=manual_plan,
+        payload_patch={
+            "source_file_size": source_bytes,
+            "concat_sources": [
+                {"file_id": "concat-file", "file_name": "concat.mp4"}
+            ],
+            "logo_source": {"file_id": "logo-file", "file_name": "logo.png"},
+            "subtitle_source": {
+                "file_id": "subtitle-file",
+                "file_name": "subtitle.srt",
+            },
+        },
+        downloaded_probe={
+            "ok": True,
+            "reason": "",
+            "duration": 1_000.0,
+            "duration_ms": 1_000_000,
+            "width": 1280,
+            "height": 720,
+            "fps": 25.0,
+            "has_video": True,
+            "has_audio": True,
+            "audio_stream_count": 1,
+            "format_name": "mp4",
+            "bytes": source_bytes,
+        },
+        transport_evidence=transport_evidence,
+        worker_policy_evidence=policy_evidence,
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert len(policy_evidence["adaptive_deadline_calls"]) == 3
+    events = policy_evidence["events"]
+    download_indexes = [
+        index for index, event in enumerate(events) if event == "download"
+    ]
+    assert events.index("probe") < events.index("adaptive:2") < download_indexes[1]
+    download_deadlines = [
+        call["deadline_monotonic"]
+        for call in transport_evidence["download_calls"]
+    ]
+    assert download_deadlines == [110.0, 510.0, 510.0, 510.0]
+    final_promotion = policy_evidence["adaptive_deadline_calls"][2]
+    assert final_promotion["source_bytes"] == sum(
+        call["bytes_written"] for call in transport_evidence["download_calls"]
+    )
+    assert policy_evidence["executor_calls"][0]["deadline_monotonic"] == 510.0
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_operation"),
+    [("manual", "manual"), ("split", "split")],
+)
+def test_worker_uses_one_adaptive_absolute_deadline_and_admission_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mode: str,
+    expected_operation: str,
+) -> None:
+    evidence: dict = {"started_at": 41.5}
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode=mode,
+        downloaded_probe={
+            "ok": True,
+            "reason": "",
+            "duration": 1_000.0,
+            "duration_ms": 1_000_000,
+            "width": 1280,
+            "height": 720,
+            "fps": 25.0,
+            "has_video": True,
+            "has_audio": True,
+            "audio_stream_count": 1,
+            "format_name": "mp4",
+            "bytes": len(b"source-video"),
+        },
+        worker_policy_evidence=evidence,
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert len(captions) == (2 if mode == "split" else 1)
+    assert evidence["monotonic_calls"] == 1
+    assert evidence["events"].index("classify") < evidence["events"].index(
+        "download"
+    )
+    assert evidence["events"].index("admit") < evidence["events"].index(
+        "execute"
+    )
+    assert len(evidence["adaptive_deadline_calls"]) == (
+        3 if mode == "manual" else 2
+    )
+    provisional = evidence["adaptive_deadline_calls"][0]
+    promoted = evidence["adaptive_deadline_calls"][-1]
+    assert promoted["duration_seconds"] == 1_000.0
+    assert promoted["result"] > provisional["result"]
+    expected_deadline = evidence["started_at"] + promoted["result"]
+    execution = evidence["executor_calls"][0]
+    admission = evidence["admission_calls"][0]
+    decision = evidence["admission_decisions"][0]
+    assert admission["operation"] == expected_operation
+    assert admission["source_bytes"] == len(b"source-video")
+    assert admission["materialized_input_bytes"] == len(b"source-video")
+    assert admission["output_count"] == (1 if mode == "manual" else 1)
+    assert execution["mode"] == mode
+    assert execution["deadline_monotonic"] == expected_deadline
+    assert execution["workspace_budget_bytes"] == decision.evidence[
+        "estimated_bytes"
+    ]
+    assert evidence["delivery_deadlines"] == [expected_deadline] * len(captions)
+
+
+def test_worker_admits_all_actual_asset_receipts_before_executor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    transport_evidence: dict = {"downloads": [], "deliveries": []}
+    policy_evidence: dict = {"started_at": 75.0}
+    observed_plans: list[dict] = []
+    manual_plan = {
+        "trim": {"start_ms": 0, "end_ms": 2_000},
+        "concat_inputs": ["queued-concat.mp4"],
+        "logo_overlay": {"position": "top_right", "path": "queued-logo.png"},
+        "subtitle_file": "queued-subtitle.srt",
+        "brightness_percent": 110,
+    }
+
+    terminal, _captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        manual_plan=manual_plan,
+        payload_patch={
+            "source_file_size": 2_048,
+            "concat_sources": [
+                {"file_id": "concat-file", "file_name": "concat.mp4"}
+            ],
+            "logo_source": {"file_id": "logo-file", "file_name": "logo.png"},
+            "subtitle_source": {
+                "file_id": "subtitle-file",
+                "file_name": "subtitle.srt",
+            },
+        },
+        observed_plans=observed_plans,
+        transport_evidence=transport_evidence,
+        worker_policy_evidence=policy_evidence,
+    )
+
+    assert terminal["status"] == "succeeded"
+    calls = transport_evidence["download_calls"]
+    assert [call["file_id"] for call in calls] == [
+        "source-file",
+        "concat-file",
+        "logo-file",
+        "subtitle-file",
+    ]
+    admission = policy_evidence["admission_calls"][0]
+    actual_sizes = [call["bytes_written"] for call in calls]
+    assert admission["operation"] == "concat"
+    assert admission["source_bytes"] == actual_sizes[0]
+    assert admission["asset_bytes"] == actual_sizes[1:]
+    assert admission["materialized_input_bytes"] == sum(actual_sizes)
+    assert policy_evidence["events"].count("download") == 4
+    assert policy_evidence["events"].index("admit") > max(
+        index
+        for index, event in enumerate(policy_evidence["events"])
+        if event == "download"
+    )
+    classified = policy_evidence["classification_calls"][0]["plan"]
+    assert classified.get("input_video", "") == ""
+    assert classified["concat_inputs"] == [True]
+    assert classified["subtitle_file"] is True
+    assert "path" not in classified["logo_overlay"]
+    executed = observed_plans[0]
+    assert Path(executed["input_video"]).name == "source.mp4"
+    assert [Path(path).name for path in executed["concat_inputs"]] == [
+        "concat_001.mp4"
+    ]
+    assert Path(executed["logo_overlay"]["path"]).name == "logo.png"
+    assert Path(executed["subtitle_file"]).name == "subtitle.srt"
+
+
+def test_worker_uses_maximum_of_all_compound_workspace_profiles(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    transport_evidence: dict = {"downloads": [], "deliveries": []}
+    policy_evidence: dict = {
+        "admission_by_operation": {
+            "concat": {
+                "accepted": True,
+                "reason": "accepted",
+                "estimated_bytes": 11_000,
+            },
+            "overlay": {
+                "accepted": True,
+                "reason": "accepted",
+                "estimated_bytes": 33_000,
+            },
+            "transcode": {
+                "accepted": True,
+                "reason": "accepted",
+                "estimated_bytes": 22_000,
+            },
+        }
+    }
+    manual_plan = {
+        "concat_inputs": ["queued-concat.mp4"],
+        "logo_overlay": {"position": "top_right", "path": "queued-logo.png"},
+        "brightness_percent": 110,
+    }
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        manual_plan=manual_plan,
+        payload_patch={
+            "concat_sources": [
+                {"file_id": "concat-file", "file_name": "concat.mp4"}
+            ],
+            "logo_source": {"file_id": "logo-file", "file_name": "logo.png"},
+        },
+        transport_evidence=transport_evidence,
+        worker_policy_evidence=policy_evidence,
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert len(captions) == 1
+    assert policy_evidence["classification_calls"][0]["result"] == (
+        local_worker.video_edit_long_media.WHOLE_TIMELINE_REQUIRED
+    )
+    assert [
+        call["operation"] for call in policy_evidence["admission_calls"]
+    ] == ["concat", "overlay", "transcode"]
+    assert policy_evidence["executor_calls"][0]["workspace_budget_bytes"] == 33_000
+
+
+def test_worker_rejects_when_any_compound_workspace_profile_rejects(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    transport_evidence: dict = {"downloads": [], "deliveries": []}
+    policy_evidence: dict = {
+        "admission_by_operation": {
+            "concat": {
+                "accepted": True,
+                "reason": "accepted",
+                "estimated_bytes": 11_000,
+            },
+            "overlay": {
+                "accepted": False,
+                "reason": "insufficient_overlay_workspace",
+                "estimated_bytes": 33_000,
+            },
+            "transcode": {
+                "accepted": True,
+                "reason": "accepted",
+                "estimated_bytes": 22_000,
+            },
+        }
+    }
+    manual_plan = {
+        "concat_inputs": ["queued-concat.mp4"],
+        "logo_overlay": {"position": "top_right", "path": "queued-logo.png"},
+        "brightness_percent": 110,
+    }
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        manual_plan=manual_plan,
+        payload_patch={
+            "concat_sources": [
+                {"file_id": "concat-file", "file_name": "concat.mp4"}
+            ],
+            "logo_source": {"file_id": "logo-file", "file_name": "logo.png"},
+        },
+        transport_evidence=transport_evidence,
+        worker_policy_evidence=policy_evidence,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == "insufficient_overlay_workspace"
+    assert [
+        call["operation"] for call in policy_evidence["admission_calls"]
+    ] == ["concat", "overlay", "transcode"]
+    assert policy_evidence["executor_calls"] == []
+    assert captions == []
+
+
+def test_worker_workspace_rejection_fails_closed_before_executor_and_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    evidence: dict = {"reject_admission_reason": "insufficient_workspace"}
+    observed_steps: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        observed_worker_steps=observed_steps,
+        worker_policy_evidence=evidence,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == "insufficient_workspace"
+    assert evidence["executor_calls"] == []
+    assert "execute" not in observed_steps
+    assert captions == []
+
+
+@pytest.mark.parametrize(
+    ("delivery_method", "bytes_sent", "sha256"),
+    [
+        pytest.param(
+            "sendPhoto",
+            len(b"part-1"),
+            hashlib.sha256(b"part-1").hexdigest(),
+            id="method",
+        ),
+        pytest.param(
+            "sendVideo",
+            len(b"part-1") + 1,
+            hashlib.sha256(b"part-1").hexdigest(),
+            id="bytes",
+        ),
+        pytest.param(
+            "sendVideo",
+            len(b"part-1"),
+            "f" * 64,
+            id="sha256",
+        ),
+    ],
+)
+def test_worker_rejects_mismatched_delivery_evidence_without_next_send(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    delivery_method: str,
+    bytes_sent: int,
+    sha256: str,
+) -> None:
+    mismatched = video_edit_media_transport.DeliveryReceipt(
+        message_id="1001",
+        file_id="file-1",
+        delivery_method=delivery_method,
+        bytes_sent=bytes_sent,
+        sha256=sha256,
+    )
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="split",
+        delivery_receipts_override=[mismatched],
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["stage"] == "delivery_unknown"
+    assert detail["reason"] == "telegram_delivery_receipt_invalid"
+    assert detail["delivered"] == 0
+    assert detail["charge"] == 0
+    assert terminal["output_file_id"] == ""
+    assert captions == ["✅ Phần 1/2 · 1.0 giây · Miễn phí · 0 Xu"]
+
+
+def test_manual_acceptance_is_checkpointed_before_liveness_with_split_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    updates: list[dict] = []
+    order: list[str] = []
+    liveness: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        liveness_evidence=liveness,
+        update_evidence=updates,
+        checkpoint_order_evidence=order,
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert len(captions) == 1
+    checkpoints = []
+    for update in updates:
+        if update["status"] != "running":
+            continue
+        detail = json.loads(update["detail"])
+        if "artifact_receipts" in detail:
+            checkpoints.append(detail)
+    assert len(checkpoints) == 1
+    artifacts = checkpoints[0]["artifact_receipts"]
+    assert len(artifacts) == 1
+    artifact = artifacts[0]
+    assert artifact["index"] == 1
+    assert artifact["message_id"] == "1001"
+    assert artifact["file_id"] == "file-1"
+    assert artifact["delivery_method"] == "sendVideo"
+    assert artifact["bytes_sent"] == artifact["size"] == len(b"rendered-video")
+    assert artifact["sha256"] == hashlib.sha256(b"rendered-video").hexdigest()
+    assert video_editengine1.valid_mp4_delivery_probe(artifact["ffprobe"])
+    accepted_index = order.index("delivery_accepted")
+    checkpoint_index = order.index("receipt_checkpoint")
+    next_health_index = order.index("assert_healthy", accepted_index + 1)
+    assert accepted_index < checkpoint_index < next_health_index
+    receipt = json.loads(terminal["output_url"])
+    assert receipt["artifacts"] == artifacts
+    assert receipt["delivery_message_id"] == artifact["message_id"]
+    assert receipt["delivery_file_id"] == artifact["file_id"]
 
 
 def test_update_job_forwards_liveness_stage_and_lease_only_when_requested(
@@ -1232,7 +2252,7 @@ def test_video_edit_worker_promotes_actual_probe_to_large_lane_and_disables_publ
         mode="manual",
         payload_patch={
             "media_lane": persisted_lane,
-            "source_file_size": 1 * 1024 * 1024,
+            "source_file_size": actual_bytes,
             "source_metadata": {
                 "ok": True,
                 "duration": 30.0,

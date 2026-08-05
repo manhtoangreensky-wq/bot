@@ -438,6 +438,22 @@ def _artifact_receipts(value: Any) -> list[dict[str, Any]]:
             else _telegram_file_id(raw_legacy_file_id)
         )
         sha256 = item.get("sha256", item.get("output_sha256", ""))
+        raw_delivery_method = item.get("delivery_method", _MISSING)
+        delivery_method = (
+            "" if raw_delivery_method is _MISSING else raw_delivery_method
+        )
+        raw_bytes_sent = item.get("bytes_sent", _MISSING)
+        try:
+            bytes_sent = (
+                0
+                if raw_bytes_sent is _MISSING
+                else _strict_nonnegative_int(
+                    raw_bytes_sent,
+                    reason="artifact_bytes_sent_invalid",
+                )
+            )
+        except ValueError:
+            return []
         raw_ffprobe = item.get("ffprobe")
         if not isinstance(raw_ffprobe, dict):
             return []
@@ -461,20 +477,31 @@ def _artifact_receipts(value: Any) -> list[dict[str, Any]]:
             or size <= 0
             or not _is_sha256(sha256)
             or not _valid_ffprobe_receipt(ffprobe)
+            or (
+                raw_delivery_method is not _MISSING
+                and delivery_method not in {"sendVideo", "sendDocument"}
+            )
+            or (
+                raw_bytes_sent is not _MISSING
+                and bytes_sent != size
+            )
         ):
             return []
         message_ids.add(message_id)
         file_ids.add(file_id)
-        normalized.append(
-            {
-                "index": index,
-                "message_id": message_id,
-                "file_id": file_id,
-                "size": size,
-                "sha256": sha256,
-                "ffprobe": ffprobe,
-            }
-        )
+        receipt = {
+            "index": index,
+            "message_id": message_id,
+            "file_id": file_id,
+            "size": size,
+            "sha256": sha256,
+            "ffprobe": ffprobe,
+        }
+        if raw_delivery_method is not _MISSING:
+            receipt["delivery_method"] = delivery_method
+        if raw_bytes_sent is not _MISSING:
+            receipt["bytes_sent"] = bytes_sent
+        normalized.append(receipt)
     return normalized
 
 

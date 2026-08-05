@@ -1209,6 +1209,8 @@ class _MultipartArtifactBody:
         snapshot: _ArtifactSnapshot,
         header: bytes,
         footer: bytes,
+        deadline_monotonic: float | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         snapshot.verify()
         self._snapshot = snapshot
@@ -1220,6 +1222,14 @@ class _MultipartArtifactBody:
         self.complete = False
         self.bytes_sent = 0
         self._digest = hashlib.sha256()
+        self._deadline_monotonic = deadline_monotonic
+        self._monotonic = monotonic
+
+    def _check_deadline(self) -> None:
+        _delivery_deadline_remaining(
+            self._deadline_monotonic,
+            monotonic=self._monotonic,
+        )
 
     @property
     def sha256(self) -> str:
@@ -1233,14 +1243,18 @@ class _MultipartArtifactBody:
 
     def _iterate(self) -> Iterable[bytes]:
         try:
+            self._check_deadline()
             self._snapshot.verify()
             self._file = open(self._snapshot.path, "rb", buffering=0)
             self._snapshot.verify(self._file)
+            self._check_deadline()
             yield self._header
             while True:
+                self._check_deadline()
                 self._snapshot.verify(self._file)
                 chunk = self._file.read(STREAM_CHUNK_BYTES)
                 self._snapshot.verify(self._file)
+                self._check_deadline()
                 if not isinstance(chunk, bytes) or len(chunk) > STREAM_CHUNK_BYTES:
                     raise MediaTransferError("invalid_artifact")
                 if not chunk:
@@ -1253,6 +1267,7 @@ class _MultipartArtifactBody:
                 yield chunk
             if self.bytes_sent != self._snapshot.size:
                 raise MediaTransferError("invalid_artifact")
+            self._check_deadline()
             self.complete = True
             yield self._footer
         finally:
@@ -1323,10 +1338,42 @@ def _default_delivery_boundary() -> str:
     return f"ToanAasBoundary{secrets.token_hex(24)}"
 
 
+def _delivery_deadline_remaining(
+    deadline_monotonic: float | None,
+    *,
+    monotonic: Callable[[], float],
+) -> float | None:
+    if deadline_monotonic is None:
+        return None
+    if (
+        isinstance(deadline_monotonic, bool)
+        or not isinstance(deadline_monotonic, (int, float))
+        or not math.isfinite(float(deadline_monotonic))
+        or not callable(monotonic)
+    ):
+        raise MediaTransferError("invalid_deadline")
+    try:
+        now = monotonic()
+    except Exception:
+        raise MediaTransferError("invalid_deadline") from None
+    if (
+        isinstance(now, bool)
+        or not isinstance(now, (int, float))
+        or not math.isfinite(float(now))
+    ):
+        raise MediaTransferError("invalid_deadline")
+    remaining = float(deadline_monotonic) - float(now)
+    if remaining <= 0:
+        raise MediaTransferError("deadline_exceeded")
+    return remaining
+
+
 def _artifact_contains_boundary(
     *,
     snapshot: _ArtifactSnapshot,
     boundary: str,
+    deadline_monotonic: float | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> bool:
     needle = boundary.encode("ascii")
     overlap = b""
@@ -1336,6 +1383,10 @@ def _artifact_contains_boundary(
         opened = open(snapshot.path, "rb", buffering=0)
         snapshot.verify(opened)
         while True:
+            _delivery_deadline_remaining(
+                deadline_monotonic,
+                monotonic=monotonic,
+            )
             snapshot.verify(opened)
             chunk = opened.read(STREAM_CHUNK_BYTES)
             snapshot.verify(opened)
@@ -1368,8 +1419,14 @@ def _select_delivery_boundary(
     snapshot: _ArtifactSnapshot,
     boundary_factory: Callable[[], object],
     used_boundaries: set[str],
+    deadline_monotonic: float | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> str:
     for _attempt in range(DELIVERY_BOUNDARY_ATTEMPTS):
+        _delivery_deadline_remaining(
+            deadline_monotonic,
+            monotonic=monotonic,
+        )
         try:
             boundary = boundary_factory()
         except Exception:
@@ -1380,7 +1437,12 @@ def _select_delivery_boundary(
             raise MediaTransferError("invalid_boundary")
         if boundary in used_boundaries:
             continue
-        if _artifact_contains_boundary(snapshot=snapshot, boundary=boundary):
+        if _artifact_contains_boundary(
+            snapshot=snapshot,
+            boundary=boundary,
+            deadline_monotonic=deadline_monotonic,
+            monotonic=monotonic,
+        ):
             continue
         return boundary
     raise MediaTransferError("invalid_boundary")
@@ -1464,6 +1526,8 @@ def send_artifact_from_path(
     request: Callable[..., object],
     caption: str = "",
     preview_threshold_bytes: int = SHORT_MEDIA_MAX_BYTES,
+    deadline_monotonic: float | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
     _boundary_factory: Callable[[], object] | None = None,
 ) -> DeliveryReceipt:
     """Deliver one artifact with bounded multipart streaming and no blind retry."""
@@ -1474,6 +1538,11 @@ def send_artifact_from_path(
         raise MediaTransferError("invalid_transport")
     if _boundary_factory is not None and not callable(_boundary_factory):
         raise MediaTransferError("invalid_boundary")
+    if deadline_monotonic is not None:
+        _delivery_deadline_remaining(
+            deadline_monotonic,
+            monotonic=monotonic,
+        )
     boundary_factory = _boundary_factory or _default_delivery_boundary
     if (
         isinstance(preview_threshold_bytes, bool)
@@ -1509,10 +1578,16 @@ def send_artifact_from_path(
 
     for attempt, method_name in enumerate(methods):
         snapshot.verify()
+        _delivery_deadline_remaining(
+            deadline_monotonic,
+            monotonic=monotonic,
+        )
         boundary = _select_delivery_boundary(
             snapshot=snapshot,
             boundary_factory=boundary_factory,
             used_boundaries=used_boundaries,
+            deadline_monotonic=deadline_monotonic,
+            monotonic=monotonic,
         )
         used_boundaries.add(boundary)
         method_url = telegram_transport.bot_method_url(
@@ -1533,6 +1608,8 @@ def send_artifact_from_path(
             snapshot=snapshot,
             header=header,
             footer=footer,
+            deadline_monotonic=deadline_monotonic,
+            monotonic=monotonic,
         )
         headers = config.request_headers(request_url=method_url)
         headers.update(
@@ -1541,16 +1618,23 @@ def send_artifact_from_path(
                 "Content-Length": str(content_length),
             }
         )
+        _delivery_deadline_remaining(
+            deadline_monotonic,
+            monotonic=monotonic,
+        )
+        request_kwargs = {
+            "method_name": method_name,
+            "url": method_url,
+            "headers": headers,
+            "content_length": content_length,
+            "body": body,
+            "follow_redirects": False,
+        }
+        if deadline_monotonic is not None:
+            request_kwargs["deadline_monotonic"] = float(deadline_monotonic)
         try:
             try:
-                payload = request(
-                    method_name=method_name,
-                    url=method_url,
-                    headers=headers,
-                    content_length=content_length,
-                    body=body,
-                    follow_redirects=False,
-                )
+                payload = request(**request_kwargs)
             except Exception:
                 raise MediaTransferError("delivery_unknown") from None
             if payload is not None and isinstance(payload, Mapping) and payload.get("ok") is True:
@@ -1565,6 +1649,15 @@ def send_artifact_from_path(
                     and method_name == "sendVideo"
                     and _eligible_video_fallback(payload)
                 ):
+                    try:
+                        _delivery_deadline_remaining(
+                            deadline_monotonic,
+                            monotonic=monotonic,
+                        )
+                    except MediaTransferError as exc:
+                        if exc.reason == "deadline_exceeded":
+                            raise MediaTransferError("delivery_unknown") from None
+                        raise
                     continue
                 raise MediaTransferError("delivery_rejected")
             raise MediaTransferError("delivery_unknown")

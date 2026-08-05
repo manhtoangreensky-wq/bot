@@ -232,6 +232,39 @@ def _artifact(index: int) -> dict:
     }
 
 
+@pytest.mark.parametrize(
+    "optional_evidence",
+    [
+        {"delivery_method": "sendVideo"},
+        {"bytes_sent": 2_049},
+        {"delivery_method": "sendDocument", "bytes_sent": 2_049},
+    ],
+)
+def test_engine_retains_valid_optional_artifact_transport_evidence(
+    optional_evidence: dict,
+) -> None:
+    artifact = {**_artifact(1), **optional_evidence}
+
+    assert video_editengine1._artifact_receipts([artifact]) == [artifact]
+
+
+@pytest.mark.parametrize(
+    "optional_evidence",
+    [
+        {"delivery_method": "sendPhoto"},
+        {"delivery_method": True},
+        {"bytes_sent": True},
+        {"bytes_sent": 2_050},
+    ],
+)
+def test_engine_rejects_invalid_optional_artifact_transport_evidence(
+    optional_evidence: dict,
+) -> None:
+    artifact = {**_artifact(1), **optional_evidence}
+
+    assert video_editengine1._artifact_receipts([artifact]) == []
+
+
 def _valid_source_probe() -> dict:
     return {
         "ok": True,
@@ -468,6 +501,8 @@ def test_split_worker_marks_partial_delivery_unknown_with_artifact_manifest(
     assert detail["total"] == 2
     expected_artifact = _artifact(1)
     expected_artifact["sha256"] = "a" * 64
+    expected_artifact["delivery_method"] = "sendVideo"
+    expected_artifact["bytes_sent"] = expected_artifact["size"]
     assert receipt["artifacts"] == [expected_artifact]
     assert terminal["output_file_id"] == "file-1"
     assert len(delivery_calls) == 2

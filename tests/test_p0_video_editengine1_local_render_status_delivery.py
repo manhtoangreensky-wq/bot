@@ -724,21 +724,32 @@ def test_editengine1_bot_charges_only_after_persisted_delivery_truth() -> None:
 
 
 def test_editengine1_worker_receipt_contains_real_delivery_and_validation_truth() -> None:
+    receipt_start = WORKER_SOURCE.index("def _video_edit_artifact_receipt")
+    receipt_end = WORKER_SOURCE.index("def _legacy_local1_plan", receipt_start)
+    receipt_source = WORKER_SOURCE[receipt_start:receipt_end]
     start = WORKER_SOURCE.index("def run_video_local_edit")
     end = WORKER_SOURCE.index("def _aiedit_progress", start)
     source = WORKER_SOURCE[start:end]
     for required in (
         "send_video_edit_artifact(",
-        "telegram_delivery_identity(delivery)",
-        '"message_id": message_id',
-        '"file_id": file_id',
+        "_video_edit_artifact_receipt(",
         '"output_sha256"',
         '"output_size_bytes"',
         '"ffprobe"',
         'terminal_status = "succeeded"',
     ):
         assert required in source
-    assert source.rindex("send_video_edit_artifact(") < source.index('terminal_status = "succeeded"')
+    for required in (
+        "telegram_delivery_identity(delivery)",
+        '"message_id": message_id',
+        '"file_id": file_id',
+        '"delivery_method": delivery_method',
+        '"bytes_sent": bytes_sent',
+    ):
+        assert required in receipt_source
+    assert source.rindex("_video_edit_artifact_receipt(") < source.index(
+        'terminal_status = "succeeded"'
+    )
 
 
 def test_editengine1_scope_has_no_real_provider_calls_or_early_charge() -> None:
