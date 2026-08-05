@@ -73,7 +73,7 @@ Group=toanaas
 WorkingDirectory=$APP_DIR
 Environment=TOANAAS_STORAGE_BACKEND=vps
 Environment=STORAGE_VPS_ROOT=/opt/toanaas-storage
-ExecStart=$PYTHON_BIN -m services.storage_maintenance weekly --backend vps --keep-backups 5 --execute
+ExecStart=$PYTHON_BIN -m services.storage_maintenance weekly --backend vps --keep-backups 3 --execute
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true

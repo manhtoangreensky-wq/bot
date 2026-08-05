@@ -1222,7 +1222,7 @@ STORAGE_WEEKLY_MAINTENANCE_DAY = _env("STORAGE_WEEKLY_MAINTENANCE_DAY", "sunday"
 STORAGE_WEEKLY_MAINTENANCE_HOUR = max(0, min(23, env_int("STORAGE_WEEKLY_MAINTENANCE_HOUR", 3)))
 STORAGE_WEEKLY_MAINTENANCE_MINUTE = max(0, min(59, env_int("STORAGE_WEEKLY_MAINTENANCE_MINUTE", 30)))
 STORAGE_WEEKLY_TIMEZONE = _env("STORAGE_WEEKLY_TIMEZONE", "Asia/Ho_Chi_Minh").strip() or "Asia/Ho_Chi_Minh"
-STORAGE_RAILWAY_BACKUP_KEEP = max(1, env_int("STORAGE_RAILWAY_BACKUP_KEEP", 5))
+STORAGE_RAILWAY_BACKUP_KEEP = max(1, env_int("STORAGE_RAILWAY_BACKUP_KEEP", 3))
 STORAGE_VPS_WEEKLY_BACKUP_KEEP_WEEKS = max(1, env_int("STORAGE_VPS_WEEKLY_BACKUP_KEEP_WEEKS", 12))
 
 def expected_telegram_webhook_url() -> str:
@@ -1552,8 +1552,9 @@ DB_STARTUP_BACKUP_ENABLED = env_flag("DB_STARTUP_BACKUP_ENABLED", "true")
 DB_MIGRATION_DRY_RUN = env_flag("DB_MIGRATION_DRY_RUN", "false")
 DB_ALLOW_DESTRUCTIVE_MIGRATION = env_flag("DB_ALLOW_DESTRUCTIVE_MIGRATION", "false")
 DB_BACKUP_DIR = _env("DB_BACKUP_DIR", "/data/backups" if str(DB_FILE).replace("\\", "/").startswith("/data/") else "backups")
-DB_STARTUP_BACKUP_RETENTION = max(1, env_int("DB_STARTUP_BACKUP_RETENTION", 20))
-DB_BACKUP_KEEP_LAST = max(1, env_int("DB_BACKUP_KEEP_LAST", 10))
+DB_STARTUP_BACKUP_RETENTION = max(1, env_int("DB_STARTUP_BACKUP_RETENTION", STORAGE_RAILWAY_BACKUP_KEEP))
+DB_BACKUP_KEEP_LAST = max(1, env_int("DB_BACKUP_KEEP_LAST", STORAGE_RAILWAY_BACKUP_KEEP))
+AUTO_BACKUP_INTERVAL_HOURS = max(1, env_int("AUTO_BACKUP_INTERVAL_HOURS", 12))
 BACKUP_MAX_BYTES  = 45 * 1024 * 1024
 DATA_PERSISTENCE_WARNINGS: list[dict] = []
 DB_STARTUP_BACKUP_RESULT: dict = {"status": "not_run", "path": "", "created_at": "", "reason": ""}
@@ -107161,7 +107162,12 @@ async def storage_weekly_maintenance_loop():
                 weekly_config = await asyncio.to_thread(storage_maintenance_config)
                 weekly_status = await asyncio.to_thread(storage_maintenance_service.maintenance_status, weekly_config)
                 if weekly_status.get("weekly_due") and weekly_status.get("last_weekly_run", {}).get("key") != weekly_status.get("weekly_current_key"):
-                    report = await asyncio.to_thread(storage_maintenance_service.run_weekly, weekly_config, keep_backups=5, execute=True)
+                    report = await asyncio.to_thread(
+                        storage_maintenance_service.run_weekly,
+                        weekly_config,
+                        keep_backups=STORAGE_RAILWAY_BACKUP_KEEP,
+                        execute=True,
+                    )
                     logger.info(
                         "storage_weekly_maintenance | status=%s deleted=%s bytes=%s protected=%s",
                         report.status,
@@ -107264,7 +107270,12 @@ async def cmd_storage_weekly_cleanup_preview(update: Update, context: ContextTyp
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     config = await asyncio.to_thread(storage_maintenance_config)
-    report = await asyncio.to_thread(storage_maintenance_service.run_weekly, config, keep_backups=5, execute=False)
+    report = await asyncio.to_thread(
+        storage_maintenance_service.run_weekly,
+        config,
+        keep_backups=STORAGE_RAILWAY_BACKUP_KEEP,
+        execute=False,
+    )
     await reply_html_lines(update, storage_maintenance_report_lines(report), limit=3900)
 
 
@@ -107272,13 +107283,13 @@ async def cmd_storage_weekly_cleanup_run(update: Update, context: ContextTypes.D
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     args = [str(item).strip().lower() for item in (getattr(context, "args", []) or [])]
-    keep = 5
+    keep = STORAGE_RAILWAY_BACKUP_KEEP
     for item in args:
         if item.startswith("keep="):
             try:
                 keep = max(1, min(50, int(item.split("=", 1)[1])))
             except ValueError:
-                keep = 5
+                keep = STORAGE_RAILWAY_BACKUP_KEEP
     config = await asyncio.to_thread(storage_maintenance_config)
     if "confirm" not in args:
         report = await asyncio.to_thread(storage_maintenance_service.run_weekly, config, keep_backups=keep, execute=False)
@@ -225665,10 +225676,10 @@ async def lifespan(app: FastAPI):
                     raise
                 except Exception as e:
                     logger.warning(f"Auto backup error: {e}")
-                await asyncio.sleep(6 * 3600)
+                await asyncio.sleep(AUTO_BACKUP_INTERVAL_HOURS * 3600)
 
         tg_auto_backup_task = asyncio.create_task(auto_backup_loop())
-        if STORAGE_WEEKLY_MAINTENANCE_ENABLED:
+        if STORAGE_DAILY_MAINTENANCE_ENABLED or STORAGE_WEEKLY_MAINTENANCE_ENABLED:
             storage_weekly_task = asyncio.create_task(storage_weekly_maintenance_loop())
         tg_memory_reminder_task = asyncio.create_task(memory_reminder_loop(tg_app.bot))
         if tg_product_video_watchdog_task is None or tg_product_video_watchdog_task.done():

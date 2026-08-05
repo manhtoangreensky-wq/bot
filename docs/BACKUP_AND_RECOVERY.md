@@ -17,6 +17,9 @@ Không mất user, xu, đơn PayOS, `credit_events`, bill thủ công, affiliate
 - Trước khi deploy lớn, chạy `/backup_db`.
 - Trước migration, chạy `/backup_db`.
 - Sau khi tạo Railway Volume, chạy backup trước và sau khi đổi `DB_FILE`.
+- Runtime tự giữ tối đa 3 bản backup hợp lệ gần nhất trong `/data/backups`; file đang được DB/job tham chiếu hoặc backup lỗi không bị xóa.
+- Vòng maintenance kiểm tra mỗi 5 phút, dọn temp/partial theo TTL và chạy sweep daily lúc 12:00 Asia/Ho_Chi_Minh; backup retention chạy Sunday 03:30.
+- Auto backup health/checkpoint notification chạy mỗi 12 giờ; đây không thay thế backup thủ công trước migration/deploy.
 
 ## Backup trung hạn
 

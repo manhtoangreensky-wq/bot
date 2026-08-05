@@ -30,7 +30,7 @@ DEFAULT_TEMP_TTL_SECONDS = 12 * 3600
 DEFAULT_CACHE_TTL_SECONDS = 24 * 3600
 DEFAULT_PARTIAL_TTL_SECONDS = 2 * 3600
 DEFAULT_FAILED_JOB_GRACE_SECONDS = 2 * 3600
-DEFAULT_KEEP_BACKUPS = 5
+DEFAULT_KEEP_BACKUPS = 3
 BACKUP_NAME_RE = re.compile(
     r"^(?P<lineage>toan(?:aas|daas)_system)_(?P<stamp>\d{8}_\d{6})"
     r"(?:_(?P<label>[A-Za-z0-9-]+))?\.(?P<extension>db|sqlite|sqlite3)$",

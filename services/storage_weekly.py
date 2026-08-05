@@ -54,7 +54,7 @@ class WeeklyStorageConfig:
     hour: int = 3
     minute: int = 30
     timezone_name: str = "Asia/Ho_Chi_Minh"
-    railway_backup_keep: int = 5
+    railway_backup_keep: int = 3
     vps_backup_keep_weeks: int = 12
     tmp_ttl_seconds: int = 6 * 3600
     generated_ttl_seconds: int = 24 * 3600
@@ -400,7 +400,7 @@ def archive_old_backups_to_vps(
 ) -> BackupArchiveReport:
     base = _resolve(base_dir)
     backup_dir = _resolve((base / storage_migration.BACKUP_DIR_NAME) if base else "")
-    report = BackupArchiveReport(str(backup_dir or ""), max(1, int(keep or 5)), dry_run=not confirm)
+    report = BackupArchiveReport(str(backup_dir or ""), max(1, int(keep or 3)), dry_run=not confirm)
     if not backup_dir or not backup_dir.is_dir():
         report.errors.append("backup_dir_missing")
         return report
