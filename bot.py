@@ -2644,6 +2644,9 @@ def create_db_backup_now(actor_id="", note: str = "") -> dict:
             source.execute("PRAGMA wal_checkpoint(FULL)")
             source.backup(dest)
             dest.commit()
+            quick_check = dest.execute("PRAGMA quick_check").fetchone()
+            if not quick_check or str(quick_check[0]).lower() != "ok":
+                raise sqlite3.DatabaseError("backup_quick_check_failed")
         finally:
             dest.close()
             source.close()
@@ -224241,6 +224244,7 @@ tg_broadcast_lite_worker_task: asyncio.Task | None = None
 tg_product_video_watchdog_task: asyncio.Task | None = None
 tg_frame_video_watchdog_task: asyncio.Task | None = None
 tg_video_trend_catalog_task: asyncio.Task | None = None
+TELEGRAM_APP_READY = False
 PRODUCT_VIDEO_WATCHDOG_GENERATION_ID = f"watchdog-{uuid.uuid4().hex}"
 
 async def shopaikey_usage_monitor_loop(bot_client):
@@ -224298,13 +224302,84 @@ async def run_polling_guarded():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, tg_memory_reminder_task, tg_shopaikey_usage_task, tg_payos_expiry_task, tg_broadcast_lite_worker_task, tg_product_video_watchdog_task, tg_frame_video_watchdog_task, tg_video_trend_catalog_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, TELEGRAM_HANDLERS_REGISTERED, PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS
+    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, tg_memory_reminder_task, tg_shopaikey_usage_task, tg_payos_expiry_task, tg_broadcast_lite_worker_task, tg_product_video_watchdog_task, tg_frame_video_watchdog_task, tg_video_trend_catalog_task, TELEGRAM_APP_READY, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, TELEGRAM_HANDLERS_REGISTERED, PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS
     init_db()
     try:
         run_storage_cleanup_auto_once()
     except Exception as exc:
         logger.warning("storage cleanup auto skipped: %s", type(exc).__name__)
+    TELEGRAM_APP_READY = False
     storage_weekly_task: asyncio.Task | None = None
+
+    async def auto_backup_loop():
+        """Create verified SQLite backups independently of Telegram startup."""
+        await asyncio.sleep(60)
+        while True:
+            try:
+                if os.path.exists(DB_FILE):
+                    result = await asyncio.to_thread(create_db_backup_now, "", "auto")
+                    if not result.get("ok"):
+                        logger.warning(
+                            "Auto backup failed | reason=%s | error=%s",
+                            result.get("reason") or "unknown",
+                            result.get("error") or "-",
+                        )
+                    else:
+                        size = int(result.get("size_bytes") or 0)
+                        backup_name = str(result.get("filename") or "-")
+                        logger.info(
+                            "Auto backup created | filename=%s size_bytes=%s retained=%s",
+                            backup_name,
+                            size,
+                            result.get("retention_keep_last") or DB_BACKUP_KEEP_LAST,
+                        )
+                        if not TELEGRAM_APP_READY or not tg_app:
+                            logger.warning(
+                                "Auto backup notification deferred | reason=telegram_not_ready | filename=%s",
+                                backup_name,
+                            )
+                        elif ADMIN_ID:
+                            if size <= BACKUP_MAX_BYTES:
+                                logger.info(
+                                    "Auto backup Telegram document suppressed | filename=%s size_kb=%s",
+                                    backup_name,
+                                    size // 1024,
+                                )
+                                text = (
+                                    f"🗄️ Auto backup {now_text()} đã tạo thành công và giữ nội bộ.\n"
+                                    f"File: {backup_name}\n"
+                                    f"Size: {size // 1024}KB\n"
+                                    "Không gửi file DB qua Telegram."
+                                )
+                            else:
+                                text = (
+                                    f"🗄️ Auto backup {now_text()} đã tạo thành công và giữ nội bộ.\n"
+                                    f"Size: {size // 1024 // 1024}MB\n"
+                                    "File lớn nên không gửi qua Telegram."
+                                )
+                            try:
+                                await tg_app.bot.send_message(chat_id=ADMIN_ID, text=text)
+                            except Exception as exc:
+                                logger.warning("Auto backup notification failed: %s", type(exc).__name__)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Auto backup loop skipped: %s", type(exc).__name__)
+            await asyncio.sleep(AUTO_BACKUP_INTERVAL_HOURS * 3600)
+
+    async def stop_storage_tasks():
+        for task in (tg_auto_backup_task, storage_weekly_task):
+            if not task:
+                continue
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    tg_auto_backup_task = asyncio.create_task(auto_backup_loop())
+    if STORAGE_DAILY_MAINTENANCE_ENABLED or STORAGE_WEEKLY_MAINTENANCE_ENABLED:
+        storage_weekly_task = asyncio.create_task(storage_weekly_maintenance_loop())
     token_summary = telegram_token_runtime_summary()
     db_summary = runtime_db_status()
     data_summary = data_persistence_status_payload(include_counts=False)
@@ -224340,6 +224415,7 @@ async def lifespan(app: FastAPI):
         TELEGRAM_STARTUP_ERROR = "TELEGRAM_TOKEN chưa được set"
         logger.error("TELEGRAM_TOKEN: missing")
         yield
+        await stop_storage_tasks()
         return
     TELEGRAM_STARTUP_ERROR = ""
 
@@ -224351,6 +224427,7 @@ async def lifespan(app: FastAPI):
         ACTIVE_TELEGRAM_WEBHOOK_URL = ""
         logger.exception(f"Telegram builder lỗi nhưng FastAPI vẫn chạy để /runtime chẩn đoán: {e}")
         yield
+        await stop_storage_tasks()
         return
 
     tg_app.add_handler(MessageHandler(filters.ALL, safe_mode_message_guard), group=-10)
@@ -225538,6 +225615,7 @@ async def lifespan(app: FastAPI):
     try:
         await tg_app.initialize()
         await tg_app.start()
+        TELEGRAM_APP_READY = True
         telegram_started = True
         try:
             me = await tg_app.bot.get_me()
@@ -225637,50 +225715,6 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Startup alert error: {e}")
 
-        async def auto_backup_loop():
-            await asyncio.sleep(60)
-            while True:
-                try:
-                    if os.path.exists(DB_FILE):
-                        try:
-                            conn = db_connect()
-                            try:
-                                conn.execute("PRAGMA wal_checkpoint(FULL)")
-                                conn.commit()
-                            finally:
-                                conn.close()
-                        except Exception as e:
-                            logger.warning(f"Auto backup checkpoint error: {e}")
-                        size = os.path.getsize(DB_FILE)
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-                        backup_name = f"toan_aas_backup_{timestamp}.db"
-                        if size <= BACKUP_MAX_BYTES:
-                            logger.info("Auto backup Telegram document suppressed | filename=%s size_kb=%s", backup_name, size // 1024)
-                            await tg_app.bot.send_message(
-                                chat_id=ADMIN_ID,
-                                text=(
-                                    f"🗄️ Auto backup {now_text()} đã được giữ nội bộ.\n"
-                                    f"File DB không được gửi qua Telegram.\n"
-                                    f"Size: {size // 1024}KB"
-                                ),
-                            )
-                        else:
-                            await tg_app.bot.send_message(
-                                chat_id=ADMIN_ID,
-                                text=(
-                                    f"⚠️ DB quá lớn để backup qua Telegram ({size // 1024 // 1024}MB). "
-                                    "Backup thủ công bằng /backup_db."
-                                ),
-                            )
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    logger.warning(f"Auto backup error: {e}")
-                await asyncio.sleep(AUTO_BACKUP_INTERVAL_HOURS * 3600)
-
-        tg_auto_backup_task = asyncio.create_task(auto_backup_loop())
-        if STORAGE_DAILY_MAINTENANCE_ENABLED or STORAGE_WEEKLY_MAINTENANCE_ENABLED:
-            storage_weekly_task = asyncio.create_task(storage_weekly_maintenance_loop())
         tg_memory_reminder_task = asyncio.create_task(memory_reminder_loop(tg_app.bot))
         if tg_product_video_watchdog_task is None or tg_product_video_watchdog_task.done():
             tg_product_video_watchdog_task = asyncio.create_task(product_video_watchdog_scheduler_loop())
@@ -225693,6 +225727,7 @@ async def lifespan(app: FastAPI):
         if PAYOS_EXPIRY_ALERT_ENABLED and PAYOS_REGISTRATION_EXPIRES_AT:
             tg_payos_expiry_task = asyncio.create_task(payos_expiry_monitor_loop(tg_app.bot))
     except Exception as e:
+        TELEGRAM_APP_READY = False
         TELEGRAM_STARTUP_ERROR = str(e)
         ACTIVE_TELEGRAM_UPDATE_MODE = "telegram_startup_error"
         ACTIVE_TELEGRAM_WEBHOOK_URL = ""
@@ -225706,18 +225741,7 @@ async def lifespan(app: FastAPI):
         tg_polling_task.cancel()
     if tg_webhook_watchdog_task:
         tg_webhook_watchdog_task.cancel()
-    if tg_auto_backup_task:
-        tg_auto_backup_task.cancel()
-        try:
-            await tg_auto_backup_task
-        except asyncio.CancelledError:
-            pass
-    if storage_weekly_task:
-        storage_weekly_task.cancel()
-        try:
-            await storage_weekly_task
-        except asyncio.CancelledError:
-            pass
+    await stop_storage_tasks()
     if tg_memory_reminder_task:
         tg_memory_reminder_task.cancel()
         try:
@@ -225760,6 +225784,7 @@ async def lifespan(app: FastAPI):
             await tg_video_trend_catalog_task
         except asyncio.CancelledError:
             pass
+    TELEGRAM_APP_READY = False
     if tg_app and telegram_started:
         await tg_app.stop()
         await tg_app.shutdown()
@@ -227181,6 +227206,7 @@ async def runtime_health(request: Request):
             "token_masked": token_summary["masked"] or "",
             "bot_id": ACTIVE_TELEGRAM_BOT_ID or "",
             "bot_username": ACTIVE_TELEGRAM_BOT_USERNAME or "",
+            "app_ready": bool(TELEGRAM_APP_READY),
             "handlers_registered": TELEGRAM_HANDLERS_REGISTERED,
             "update_mode": TELEGRAM_UPDATE_MODE,
             "active_mode": ACTIVE_TELEGRAM_UPDATE_MODE or "",
@@ -227207,6 +227233,7 @@ async def runtime_health(request: Request):
         "telegram_webhook_url_active": ACTIVE_TELEGRAM_WEBHOOK_URL or "",
         "telegram_webhook_watchdog": ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG or "",
         "telegram_startup_error": TELEGRAM_STARTUP_ERROR or "",
+        "telegram_app_ready": bool(TELEGRAM_APP_READY),
         "telegram_bot_id": ACTIVE_TELEGRAM_BOT_ID or "",
         "telegram_bot_username": ACTIVE_TELEGRAM_BOT_USERNAME or "",
         "telegram_handlers_registered": TELEGRAM_HANDLERS_REGISTERED,
@@ -227220,7 +227247,7 @@ async def runtime_health(request: Request):
 @fastapi_app.post("/api/telegram/takeover")
 async def api_telegram_takeover(request: Request, drop_pending_updates: bool = True):
     verify_operator_api_token(request)
-    if not tg_app:
+    if not tg_app or not TELEGRAM_APP_READY:
         raise HTTPException(status_code=503, detail="Telegram app is not ready")
     try:
         result = await set_telegram_webhook_takeover(tg_app.bot, drop_pending_updates=drop_pending_updates)
@@ -227270,7 +227297,7 @@ async def telegram_webhook(request: Request):
                 action="telegram_webhook",
             )
             raise HTTPException(status_code=401, detail="Invalid request")
-    if not tg_app:
+    if not tg_app or not TELEGRAM_APP_READY:
         raise HTTPException(status_code=503, detail="Telegram app is not ready")
     payload = await request.json()
     update = Update.de_json(payload, tg_app.bot)
