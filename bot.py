@@ -2566,7 +2566,10 @@ def db_backup_file_candidates() -> list[tuple[float, str]]:
         if not os.path.isdir(backup_dir):
             return []
         for name in os.listdir(backup_dir):
-            if name.startswith("toandaas_system_") and (
+            # Startup backups historically used ``toandaas`` while the live
+            # auto-backup path uses the canonical ``toanaas`` spelling.
+            # Retention must see both generations as one global pool.
+            if name.startswith(("toanaas_system_", "toandaas_system_")) and (
                 name.endswith(".sqlite3") or name.endswith("_startup.db")
             ):
                 path = os.path.join(backup_dir, name)

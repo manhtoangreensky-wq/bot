@@ -75,3 +75,25 @@ def test_backup_retention_keeps_three_total_startup_and_auto_files(tmp_path, mon
     remaining = sorted(path.name for path in backup_dir.iterdir())
     assert len(remaining) == 3
     assert removed == [names[0]]
+
+
+def test_backup_retention_recognizes_auto_backup_prefix(tmp_path, monkeypatch):
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    names = (
+        "toandaas_system_20260801_000000_startup.db",
+        "toanaas_system_20260802_000000.sqlite3",
+        "toandaas_system_20260803_000000_startup.db",
+        "toanaas_system_20260804_000000.sqlite3",
+    )
+    for index, name in enumerate(names):
+        path = backup_dir / name
+        path.write_bytes(b"backup")
+        os.utime(path, (index, index))
+    monkeypatch.setattr(bot, "DB_BACKUP_DIR", str(backup_dir))
+
+    removed = bot.cleanup_old_db_backups(3)
+
+    remaining = sorted(path.name for path in backup_dir.iterdir())
+    assert len(remaining) == 3
+    assert removed == [names[0]]
