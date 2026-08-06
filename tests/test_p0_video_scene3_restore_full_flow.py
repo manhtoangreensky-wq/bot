@@ -8,7 +8,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from services import video_flow6, video_flow7, video_profile_catalog, video_scene3_flow, video_uifreeze1
+from services import (
+    video_edit_state_machine,
+    video_flow6,
+    video_flow7,
+    video_profile_catalog,
+    video_scene3_flow,
+    video_uifreeze1,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,9 +55,11 @@ def _keyboard_namespace(*names: str) -> dict:
         "InlineKeyboardButton": _Button,
         "InlineKeyboardMarkup": _Markup,
         "video_flow7": video_flow7,
+        "video_edit_state_machine": video_edit_state_machine,
         "video_scene3_flow": video_scene3_flow,
         "video_uifreeze1": video_uifreeze1,
         "video_ai_edit_entry_back": lambda *_args, **_kwargs: "videoedit|ai",
+        "local_video_studio_public_enabled": lambda: False,
         "ui_text": lambda _lang, key: "⬅️ Quay lại" if key == "common.back" else "🏠 Menu chính",
         "VIDEO_B14_2_QUALITY_OPTIONS": (200, 300, 400, 500, 600, 800, 1000, 1200, 1500),
         "VIDEO_SCENE3_CANONICAL_PUBLIC_PRODUCTS": frozenset({
@@ -400,6 +409,37 @@ def test_adaptive_keyboard_contract_allows_one_to_five_and_rejects_invalid_rows(
             [("Một", "scene3|same"), ("Hai", "scene3|two")],
             [("Ba", "scene3|same"), ("Bốn", "scene3|four")],
         ])
+
+
+@pytest.mark.parametrize(
+    ("suggestion_count", "requires_source_info_fallback"),
+    [(0, True), (1, False), (2, True), (3, False), (4, True), (5, False)],
+)
+def test_video_ai_edit_suggestions_keyboard_pairs_every_row_with_odd_count_fallback(
+    suggestion_count: int,
+    requires_source_info_fallback: bool,
+) -> None:
+    namespace = _keyboard_namespace(
+        "video_scene3_keyboard",
+        "video_ai_edit_suggestions_keyboard",
+    )
+    markup = namespace["video_ai_edit_suggestions_keyboard"]({
+        "ai_suggestions": [
+            {"title": f"Gợi ý {index + 1}"}
+            for index in range(suggestion_count)
+        ],
+    })
+    callbacks = [
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+    ]
+
+    assert all(len(row) == 2 for row in markup.inline_keyboard)
+    assert len(callbacks) == len(set(callbacks))
+    assert callbacks.count("videoedit|source_info") == int(
+        requires_source_info_fallback
+    )
 
 
 def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_buttons():

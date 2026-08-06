@@ -480,7 +480,12 @@ def new_state(
         ),
         "audio_status": "not_configured",
         "addon_config": {"automatic_text": [], "postprocessing": {}},
-        "logo_config": {"enabled": False, "asset_file_id": "", "position": ""},
+        "logo_config": {
+            "enabled": False,
+            "asset_file_id": "",
+            "file_size": 0,
+            "position": "",
+        },
         "logo_status": "not_configured",
         "watermark_config": {"enabled": False, "text": "", "position": "", "opacity_percent": 45},
         "watermark_status": "not_configured",
@@ -565,14 +570,26 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     logo = {
         "enabled": False,
         "asset_file_id": "",
+        "file_size": 0,
         "position": "",
         **dict(current.get("logo_config") or {}),
     }
     logo["enabled"] = bool(logo.get("enabled"))
     logo["asset_file_id"] = str(logo.get("asset_file_id") or "").strip()
+    raw_logo_file_size = logo.get("file_size")
+    try:
+        logo_file_size = (
+            0
+            if isinstance(raw_logo_file_size, bool)
+            else int(raw_logo_file_size or 0)
+        )
+    except (TypeError, ValueError, OverflowError):
+        logo_file_size = 0
+    logo["file_size"] = max(0, min(logo_file_size, (1 << 63) - 1))
     logo["position"] = str(logo.get("position") or "").strip()
     if not logo["asset_file_id"]:
         logo["enabled"] = False
+        logo["file_size"] = 0
         logo["position"] = ""
     watermark = {
         "enabled": False,
@@ -803,7 +820,12 @@ def mark_review_complete(state: dict[str, Any]) -> dict[str, Any]:
 
 def mark_branding_skipped(state: dict[str, Any]) -> dict[str, Any]:
     current = normalize_state(state)
-    current["logo_config"] = {"enabled": False, "asset_file_id": "", "position": ""}
+    current["logo_config"] = {
+        "enabled": False,
+        "asset_file_id": "",
+        "file_size": 0,
+        "position": "",
+    }
     current["watermark_config"] = {"enabled": False, "text": "", "position": "", "opacity_percent": 45}
     current["logo_status"] = "skipped"
     current["watermark_status"] = "skipped"

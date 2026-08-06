@@ -36,12 +36,19 @@ def _state() -> dict:
         "engine_route": "local_worker_ffmpeg",
         "worker_owner": "local_video_edit",
         "source_file_id": "telegram-source",
+        "source_file_size": 10_000_000,
+        "media_lane": "short_media",
         "inspection_complete": True,
         "source_metadata": {
             "ok": True,
+            "bytes": 10_000_000,
+            "actual_bytes": 10_000_000,
             "duration": 4.0,
             "duration_ms": 4_000,
+            "width": 1280,
+            "height": 720,
             "has_audio": True,
+            "media_lane": "short_media",
         },
         "selected_tool": "manual",
         "manual_edit_plan": plan,
@@ -69,6 +76,11 @@ def _runtime(**overrides) -> dict:
         "video_edit_filter_worker_id": "video-edit-worker",
         "ffmpeg_path": "C:/ffmpeg/bin/ffmpeg.exe",
         "video_edit_filter_ffmpeg_path": "C:/ffmpeg/bin/ffmpeg.exe",
+        "workspace_ready": True,
+        "workspace_free_bytes": 10**12,
+        "video_edit_max_deadline_seconds": 6 * 60 * 60,
+        "worker_token_ready": True,
+        "local_bot_api_ready": True,
     }
     runtime.update(overrides)
     return runtime
@@ -329,6 +341,165 @@ def test_worker_heartbeat_payload_registers_exact_adapter_contract() -> None:
     assert payload["queue_depth"] == 2
 
 
+def test_worker_capacity_heartbeat_reports_current_sanitized_truth_without_secrets(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    disk_targets = []
+
+    def disk_usage(target):
+        disk_targets.append(Path(target))
+        return SimpleNamespace(free=987_654_321)
+
+    monkeypatch.setattr(
+        local_worker.video_local_validation,
+        "VIDEO_LOCAL_WORKSPACE_ROOT",
+        tmp_path,
+    )
+    monkeypatch.setattr(local_worker.shutil, "disk_usage", disk_usage)
+    monkeypatch.setattr(local_worker, "LOCAL_WORKER_TOKEN", "worker-secret-value")
+    monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "12345:telegram-secret-value")
+    monkeypatch.setattr(local_worker, "VIDEO_EDIT_MAX_DEADLINE_SECONDS", 3_600)
+    monkeypatch.setattr(
+        local_worker,
+        "_video_edit_telegram_media_config",
+        lambda: SimpleNamespace(is_local=True),
+    )
+    monkeypatch.setattr(local_worker, "local_ffmpeg_path", lambda: "")
+    monkeypatch.setattr(local_worker, "find_ffprobe", lambda **_kwargs: "")
+    monkeypatch.setattr(local_worker, "available_ffmpeg_filters", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(local_worker, "local_worker_runtime_sha", lambda: "")
+
+    payload = local_worker.local_worker_heartbeat_payload()
+
+    assert disk_targets == [tmp_path]
+    assert payload["workspace_ready"] is True
+    assert type(payload["workspace_free_bytes"]) is int
+    assert payload["workspace_free_bytes"] == 987_654_321
+    assert payload["video_edit_max_deadline_seconds"] == 3_600
+    assert payload["worker_token_ready"] is True
+    assert payload["local_bot_api_ready"] is True
+    public_payload = json.dumps(payload, ensure_ascii=True)
+    assert "worker-secret-value" not in public_payload
+    assert "telegram-secret-value" not in public_payload
+    assert str(tmp_path) not in public_payload
+
+
+def test_worker_capacity_heartbeat_fails_closed_on_invalid_config_and_disk_error(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(
+        local_worker.video_local_validation,
+        "VIDEO_LOCAL_WORKSPACE_ROOT",
+        tmp_path,
+    )
+    monkeypatch.setattr(
+        local_worker.shutil,
+        "disk_usage",
+        lambda _target: (_ for _ in ()).throw(OSError("disk unavailable")),
+    )
+    monkeypatch.setattr(local_worker, "LOCAL_WORKER_TOKEN", "bad\ntoken")
+    monkeypatch.setattr(local_worker, "VIDEO_EDIT_MAX_DEADLINE_SECONDS", True)
+    monkeypatch.setattr(
+        local_worker,
+        "_video_edit_telegram_media_config",
+        lambda: (_ for _ in ()).throw(ValueError("invalid local config")),
+    )
+    monkeypatch.setattr(local_worker, "local_ffmpeg_path", lambda: "")
+    monkeypatch.setattr(local_worker, "find_ffprobe", lambda **_kwargs: "")
+    monkeypatch.setattr(local_worker, "available_ffmpeg_filters", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(local_worker, "local_worker_runtime_sha", lambda: "")
+
+    payload = local_worker.local_worker_heartbeat_payload()
+
+    assert payload["workspace_ready"] is False
+    assert payload["workspace_free_bytes"] == 0
+    assert payload["video_edit_max_deadline_seconds"] == 0
+    assert payload["worker_token_ready"] is False
+    assert payload["local_bot_api_ready"] is False
+
+
+def test_worker_capacity_heartbeat_prepares_configured_workspace_before_ready(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "fresh" / "video_local"
+    disk_targets = []
+
+    def disk_usage(target):
+        disk_targets.append(Path(target))
+        return SimpleNamespace(free=123_456_789)
+
+    monkeypatch.setattr(
+        local_worker.video_local_validation,
+        "VIDEO_LOCAL_WORKSPACE_ROOT",
+        workspace,
+    )
+    monkeypatch.setattr(local_worker.shutil, "disk_usage", disk_usage)
+    monkeypatch.setattr(local_worker, "LOCAL_WORKER_TOKEN", "worker-token")
+    monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "12345:bot-token")
+    monkeypatch.setattr(local_worker, "VIDEO_EDIT_MAX_DEADLINE_SECONDS", 3_600)
+    monkeypatch.setattr(
+        local_worker,
+        "_video_edit_telegram_media_config",
+        lambda: SimpleNamespace(is_local=True),
+    )
+    monkeypatch.setattr(local_worker, "local_ffmpeg_path", lambda: "")
+    monkeypatch.setattr(local_worker, "find_ffprobe", lambda **_kwargs: "")
+    monkeypatch.setattr(local_worker, "available_ffmpeg_filters", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(local_worker, "local_worker_runtime_sha", lambda: "")
+
+    payload = local_worker.local_worker_heartbeat_payload()
+
+    assert workspace.is_dir()
+    assert disk_targets == [workspace]
+    assert payload["workspace_ready"] is True
+    assert payload["workspace_free_bytes"] == 123_456_789
+
+
+@pytest.mark.parametrize(
+    "unsafe_root",
+    [
+        local_worker.video_local_validation.REPO_ROOT,
+        Path(local_worker.video_local_validation.REPO_ROOT.anchor),
+    ],
+)
+def test_worker_capacity_heartbeat_rejects_the_same_unsafe_roots_as_jobs(
+    monkeypatch,
+    unsafe_root: Path,
+) -> None:
+    disk_targets = []
+    monkeypatch.setattr(
+        local_worker.video_local_validation,
+        "VIDEO_LOCAL_WORKSPACE_ROOT",
+        unsafe_root,
+    )
+    monkeypatch.setattr(
+        local_worker.shutil,
+        "disk_usage",
+        lambda target: disk_targets.append(Path(target)) or SimpleNamespace(free=10**12),
+    )
+    monkeypatch.setattr(local_worker, "LOCAL_WORKER_TOKEN", "worker-token")
+    monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "12345:bot-token")
+    monkeypatch.setattr(local_worker, "VIDEO_EDIT_MAX_DEADLINE_SECONDS", 3_600)
+    monkeypatch.setattr(
+        local_worker,
+        "_video_edit_telegram_media_config",
+        lambda: SimpleNamespace(is_local=True),
+    )
+    monkeypatch.setattr(local_worker, "local_ffmpeg_path", lambda: "")
+    monkeypatch.setattr(local_worker, "find_ffprobe", lambda **_kwargs: "")
+    monkeypatch.setattr(local_worker, "available_ffmpeg_filters", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(local_worker, "local_worker_runtime_sha", lambda: "")
+
+    payload = local_worker.local_worker_heartbeat_payload()
+
+    assert disk_targets == []
+    assert payload["workspace_ready"] is False
+    assert payload["workspace_free_bytes"] == 0
+
+
 def test_frame_video_requires_the_worker_render_capability() -> None:
     section = _section(
         BOT_SOURCE,
@@ -513,3 +684,83 @@ def test_worker_status_debug_contract_is_persisted_and_exposed() -> None:
         "worker_instance_id",
     ):
         assert key in status
+
+
+def test_contract_heartbeat_overwrites_stale_capacity_and_ffmpeg_truth(
+    monkeypatch,
+) -> None:
+    settings = {
+        "local_worker:ffmpeg_path_seen": "C:/stale/ffmpeg.exe",
+        "local_worker:workspace_ready": "1",
+        "local_worker:workspace_free_bytes": "999999999",
+        "local_worker:video_edit_max_deadline_seconds": "21600",
+        "local_worker:worker_token_ready": "1",
+        "local_worker:local_bot_api_ready": "1",
+    }
+    payload = {
+        "heartbeat_contract_version": 1,
+        "worker_id": "capacity-worker",
+        "ffmpeg_path": "",
+        "workspace_ready": False,
+        "workspace_free_bytes": 0,
+        "video_edit_max_deadline_seconds": 0,
+        "worker_token_ready": False,
+        "local_bot_api_ready": False,
+    }
+
+    async def read_body(_request):
+        return payload
+
+    def save_setting(key, value, *_args, **_kwargs):
+        settings[str(key)] = str(value)
+
+    monkeypatch.setattr(bot, "verify_local_worker_access", lambda _request: None)
+    monkeypatch.setattr(bot, "read_json_body", read_body)
+    monkeypatch.setattr(bot, "set_system_setting", save_setting)
+
+    result = asyncio.run(
+        bot.internal_worker_heartbeat(SimpleNamespace(headers={}))
+    )
+
+    assert result["ok"] is True
+    assert settings["local_worker:ffmpeg_path_seen"] == ""
+    assert settings["local_worker:workspace_ready"] == "0"
+    assert settings["local_worker:workspace_free_bytes"] == "0"
+    assert settings["local_worker:video_edit_max_deadline_seconds"] == "0"
+    assert settings["local_worker:worker_token_ready"] == "0"
+    assert settings["local_worker:local_bot_api_ready"] == "0"
+
+
+def test_worker_status_projects_capacity_settings_as_strict_sanitized_types(
+    monkeypatch,
+) -> None:
+    settings = {
+        "local_worker:video_edit_received_at_utc": "fresh",
+        "local_worker:heartbeat_contract_version": "1",
+        "local_worker:workspace_ready": "1",
+        "local_worker:workspace_free_bytes": "987654321",
+        "local_worker:video_edit_max_deadline_seconds": "3600",
+        "local_worker:worker_token_ready": "1",
+        "local_worker:local_bot_api_ready": "0",
+    }
+    monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {})
+    monkeypatch.setattr(
+        bot,
+        "get_system_setting",
+        lambda key, default="": settings.get(key, default),
+    )
+    monkeypatch.setattr(
+        bot,
+        "parse_utc_text",
+        lambda _value: bot.datetime.now(bot.timezone.utc),
+    )
+
+    status = bot.video_edit_worker_status_payload()
+
+    assert status["workspace_ready"] is True
+    assert type(status["workspace_free_bytes"]) is int
+    assert status["workspace_free_bytes"] == 987_654_321
+    assert type(status["video_edit_max_deadline_seconds"]) is int
+    assert status["video_edit_max_deadline_seconds"] == 3_600
+    assert status["worker_token_ready"] is True
+    assert status["local_bot_api_ready"] is False

@@ -143,10 +143,176 @@ def test_videoedit_workspace_exposes_every_real_local_group() -> None:
         "videoedit|overlay",
         "videoedit|effects",
         "videoedit|source_info",
+        "videoedit|logo_entry",
         "videoedit|review",
+        "videoedit|upload|manual",
         "videoedit|manual",
         "menu|main",
     ]
+
+
+def test_videoedit_workspace_replaces_the_old_review_slot_with_logo_and_uses_forward_finish_copy() -> None:
+    pairs = _pairs(bot.video_local_manual_options_keyboard("vi"))
+
+    assert ("🖼 Logo & watermark", "videoedit|logo_entry") in pairs
+    assert ("✅ Hoàn tất & tiếp tục", "videoedit|review") in pairs
+    assert ("📎 Gửi video khác", "videoedit|upload|manual") in pairs
+    assert ("📋 Xem lại", "videoedit|review") not in pairs
+    assert pairs.index(("🖼 Logo & watermark", "videoedit|logo_entry")) < pairs.index(
+        ("✅ Hoàn tất & tiếp tục", "videoedit|review")
+    )
+
+
+def test_videoedit_workspace_logo_entry_opens_upload_or_existing_options_without_wrong_review_loop() -> None:
+    new_user = 88410
+    existing_user = 88411
+    _ready_state(new_user)
+    _ready_state(existing_user)
+    bot.update_video_editor_screen(
+        existing_user,
+        "workspace",
+        parent_callback="videoedit|manual",
+        logo_source={
+            "file_id": "existing-logo",
+            "file_name": "logo.png",
+            "mime_type": "image/png",
+            "file_size": 4096,
+        },
+        manual_edit_plan={
+            "trim": {"start_ms": 0, "end_ms": 5_000},
+            "logo_overlay": {
+                "position": "top_right",
+                "scale": 0.12,
+                "opacity": 1.0,
+            },
+        },
+    )
+    try:
+        upload = _press(new_user, "videoedit|logo_entry")
+        upload_state = dict(bot.get_video_editor_pending(new_user) or {})
+        assert upload_state["current_screen"] == "logo_input"
+        assert upload_state["parent_callback"] == "videoedit|workspace"
+        assert "Gửi logo" in upload.edits[-1][0]
+        assert ("⬅️ Quay lại", "videoedit|workspace") in _pairs(
+            _last_markup(upload)
+        )
+
+        options = _press(existing_user, "videoedit|logo_entry")
+        option_state = dict(bot.get_video_editor_pending(existing_user) or {})
+        option_pairs = _pairs(_last_markup(options))
+        assert option_state["current_screen"] == "logo_options"
+        assert option_state["parent_callback"] == "videoedit|workspace"
+        assert ("📎 Đổi ảnh", "videoedit|logo") in option_pairs
+        assert ("🗑 Xóa logo", "videoedit|logo_remove") in option_pairs
+        assert ("✅ Hoàn tất & tiếp tục", "videoedit|review") in option_pairs
+        assert ("⬅️ Quay lại", "videoedit|workspace") in option_pairs
+
+        removed = _press(existing_user, "videoedit|logo_remove")
+        removed_state = dict(bot.get_video_editor_pending(existing_user) or {})
+        assert removed_state["current_screen"] == "workspace"
+        assert removed_state.get("logo_source") == {}
+        assert removed_state["manual_edit_plan"].get("logo_overlay") == {}
+        assert ("🖼 Logo & watermark", "videoedit|logo_entry") in _pairs(
+            _last_markup(removed)
+        )
+    finally:
+        bot.clear_video_editor_pending(new_user)
+        bot.clear_video_editor_pending(existing_user)
+
+
+def test_videoedit_workspace_logo_upload_keeps_workspace_parent_through_option_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = 88412
+    _ready_state(user_id)
+    monkeypatch.setattr(
+        bot,
+        "video_editor_aux_source_from_update",
+        lambda _update, _kind: {
+            "file_id": "workspace-logo",
+            "file_name": "brand.webp",
+            "mime_type": "image/webp",
+            "file_size": 8_192,
+        },
+    )
+    try:
+        _press(user_id, "videoedit|logo_entry")
+        upload_message = _Message()
+        upload_message.message_id = 7_401
+        upload = SimpleNamespace(
+            effective_user=SimpleNamespace(id=user_id),
+            message=upload_message,
+            callback_query=None,
+        )
+
+        assert asyncio.run(
+            bot.handle_video_editor_pending_upload(upload, SimpleNamespace())
+        ) is True
+        uploaded = dict(bot.get_video_editor_pending(user_id) or {})
+        assert uploaded["current_screen"] == "logo_options"
+        assert uploaded["parent_callback"] == "videoedit|workspace"
+        assert uploaded["return_to"] == "logo_options"
+        assert ("⬅️ Quay lại", "videoedit|workspace") in _pairs(
+            upload_message.replies[-1][1]["reply_markup"]
+        )
+
+        changed = _press(user_id, "videoedit|set|logo_position|bottom_right")
+        changed_state = dict(bot.get_video_editor_pending(user_id) or {})
+        assert changed_state["current_screen"] == "logo_options"
+        assert changed_state["parent_callback"] == "videoedit|workspace"
+        assert changed_state["return_to"] == "logo_options"
+        assert changed_state["manual_edit_plan"]["logo_overlay"]["position"] == "bottom_right"
+        assert ("⬅️ Quay lại", "videoedit|workspace") in _pairs(
+            _last_markup(changed)
+        )
+
+        _text, resumed_markup, _parse_mode = bot.video_editor_current_render_model(
+            changed_state,
+            "vi",
+        )
+        assert ("⬅️ Quay lại", "videoedit|workspace") in _pairs(resumed_markup)
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_logo_options_review_back_returns_to_logo_without_losing_asset() -> None:
+    user_id = 88413
+    _ready_state(user_id)
+    bot.update_video_editor_screen(
+        user_id,
+        "workspace",
+        parent_callback="videoedit|manual",
+        logo_source={
+            "file_id": "review-logo",
+            "file_name": "review-logo.png",
+            "mime_type": "image/png",
+            "file_size": 4_096,
+        },
+        manual_edit_plan={
+            "logo_overlay": {
+                "position": "top_left",
+                "scale": 0.12,
+                "opacity": 0.75,
+            },
+        },
+    )
+    try:
+        _press(user_id, "videoedit|logo_entry")
+        review = _press(user_id, "videoedit|review")
+        assert ("⬅️ Quay lại", "videoedit|logo_options") in _pairs(
+            _last_markup(review)
+        )
+
+        returned = _press(user_id, "videoedit|logo_options")
+        returned_state = dict(bot.get_video_editor_pending(user_id) or {})
+        assert returned_state["current_screen"] == "logo_options"
+        assert returned_state["logo_source"]["file_id"] == "review-logo"
+        assert returned_state["manual_edit_plan"]["logo_overlay"]["opacity"] == 0.75
+        assert ("⬅️ Quay lại", "videoedit|workspace") in _pairs(
+            _last_markup(returned)
+        )
+    finally:
+        bot.clear_video_editor_pending(user_id)
 
 
 @pytest.mark.parametrize(
@@ -1320,5 +1486,224 @@ def test_videoedit_mute_clears_loudnorm_and_loudnorm_is_blocked_while_muted(
         assert blocked.answers[-1][1].get("show_alert") is True
         assert "tắt tiếng" in str(blocked.answers[-1][0][0]).lower()
         assert after["manual_edit_plan"]["audio_normalization"] == "off"
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize(
+    ("state", "expected_upload_callback"),
+    [
+        ({}, "videoedit|upload|manual"),
+        ({"edit_mode": "manual_edit"}, "videoedit|upload|manual"),
+        ({"edit_mode": "ai_edit"}, "videoedit|ai_upload"),
+        ({"edit_mode": "quality_enhance"}, "videoedit|quality_upload"),
+    ],
+)
+def test_videoedit_send_another_preserves_manual_ai_quality_lane(
+    state: dict,
+    expected_upload_callback: str,
+) -> None:
+    pairs = _pairs(bot.video_local_manual_options_keyboard("vi", state))
+
+    assert ("📎 Gửi video khác", expected_upload_callback) in pairs
+
+
+@pytest.mark.parametrize(
+    ("logo_parent", "expected_back"),
+    [
+        ("videoedit|workspace", "videoedit|workspace"),
+        ("videoedit|overlay", "videoedit|overlay"),
+    ],
+)
+def test_videoedit_direct_and_nested_logo_failure_keep_exact_parent(
+    logo_parent: str,
+    expected_back: str,
+) -> None:
+    user_id = 88_500 + len(logo_parent)
+    plan = video_local_editing.default_manual_edit_plan("")
+    plan["brightness_percent"] = 125
+    message = _Message()
+    message.message_id = 8_500
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=user_id),
+        message=message,
+    )
+    bot.clear_video_editor_pending(user_id)
+    try:
+        before = bot.set_video_editor_pending(
+            user_id,
+            "await_logo",
+            current_screen="logo_input",
+            parent_callback=logo_parent,
+            logo_parent_callback=logo_parent,
+            pending_field="logo",
+            source_file_id="video-source",
+            manual_edit_plan=plan,
+            edit_session_id="logo-recovery-session",
+        )
+
+        assert asyncio.run(
+            bot.recover_product_video_media_failure(
+                update,
+                SimpleNamespace(),
+                handler_name="handle_video_editor_pending_upload",
+            )
+        ) is True
+        recovered = dict(bot.get_video_editor_pending(user_id) or {})
+        assert recovered["parent_callback"] == logo_parent
+        assert recovered["logo_parent_callback"] == logo_parent
+        assert recovered["manual_edit_plan"] == before["manual_edit_plan"]
+        assert expected_back in _callbacks(message.replies[-1][1]["reply_markup"])
+
+        assert asyncio.run(
+            bot.recover_product_video_media_failure(
+                update,
+                SimpleNamespace(),
+                handler_name="handle_video_editor_pending_upload",
+            )
+        ) is True
+        assert len(message.replies) == 1
+        assert dict(bot.get_video_editor_pending(user_id) or {}) == recovered
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize(
+    ("logo_parent", "expected_screen"),
+    [
+        ("videoedit|workspace", "workspace"),
+        ("videoedit|overlay", "overlay"),
+    ],
+)
+def test_videoedit_logo_remove_is_screen_owned_and_preserves_non_logo_plan(
+    logo_parent: str,
+    expected_screen: str,
+) -> None:
+    user_id = 88_600 + len(logo_parent)
+    plan = video_local_editing.default_manual_edit_plan("")
+    plan.update(
+        {
+            "brightness_percent": 125,
+            "text_overlay": {"content": "keep this"},
+            "logo_overlay": {"position": "bottom_left", "opacity": 0.75},
+        }
+    )
+    bot.clear_video_editor_pending(user_id)
+    try:
+        before = bot.set_video_editor_pending(
+            user_id,
+            "logo_options",
+            current_screen="logo_options",
+            parent_callback=logo_parent,
+            logo_parent_callback=logo_parent,
+            return_to="logo_options",
+            source_file_id="video-source",
+            source_file_name="source.mp4",
+            inspection_complete=True,
+            source_duration_ms=10_000,
+            source_metadata={"duration_ms": 10_000},
+            edit_session_id="keep-session",
+            session_id="keep-session",
+            logo_source={"file_id": "logo-source", "file_name": "logo.png"},
+            manual_edit_plan=plan,
+        )
+
+        removed = _press(user_id, "videoedit|logo_remove")
+        after = dict(bot.get_video_editor_pending(user_id) or {})
+        assert after["current_screen"] == expected_screen
+        assert after["logo_source"] == {}
+        assert after["manual_edit_plan"]["logo_overlay"] == {}
+        assert after["manual_edit_plan"]["brightness_percent"] == 125
+        assert after["manual_edit_plan"]["text_overlay"] == {"content": "keep this"}
+        assert after["source_file_id"] == before["source_file_id"]
+        assert after["source_file_name"] == before["source_file_name"]
+        assert after["edit_session_id"] == before["edit_session_id"]
+        assert not removed.answers or not removed.answers[-1][1].get("show_alert")
+
+        stale_before = dict(after)
+        stale = _press(user_id, "videoedit|logo_remove")
+        assert dict(bot.get_video_editor_pending(user_id) or {}) == stale_before
+        assert stale.answers[-1][1].get("show_alert") is True
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_logo_remove_resets_review_return_target() -> None:
+    user_id = 88_700
+    plan = video_local_editing.default_manual_edit_plan("")
+    plan.update(
+        {
+            "brightness_percent": 125,
+            "logo_overlay": {"position": "top_right", "opacity": 1.0},
+        }
+    )
+    bot.clear_video_editor_pending(user_id)
+    try:
+        bot.set_video_editor_pending(
+            user_id,
+            "logo_options",
+            current_screen="logo_options",
+            parent_callback="videoedit|workspace",
+            logo_parent_callback="videoedit|workspace",
+            return_to="logo_options",
+            source_file_id="video-source",
+            inspection_complete=True,
+            source_duration_ms=10_000,
+            source_metadata={"duration_ms": 10_000},
+            logo_source={"file_id": "logo-source"},
+            manual_edit_plan=plan,
+        )
+
+        _press(user_id, "videoedit|logo_remove")
+        removed = dict(bot.get_video_editor_pending(user_id) or {})
+        assert removed["return_to"] == "workspace"
+        review = _press(user_id, "videoedit|review")
+        reviewed = dict(bot.get_video_editor_pending(user_id) or {})
+        assert reviewed["return_to"] == "workspace"
+        assert "videoedit|workspace" in _callbacks(_last_markup(review))
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_logo_parent_marker_survives_state_serialization() -> None:
+    user_id = 88_800
+    bot.clear_video_editor_pending(user_id)
+    try:
+        saved = bot.set_video_editor_pending(
+            user_id,
+            "await_logo",
+            logo_parent_callback="videoedit|workspace",
+        )
+        updated = bot.update_video_editor_pending(
+            user_id,
+            logo_parent_callback="videoedit|overlay",
+        )
+
+        assert saved["logo_parent_callback"] == "videoedit|workspace"
+        assert updated["logo_parent_callback"] == "videoedit|overlay"
+        assert bot.get_video_editor_pending(user_id)["logo_parent_callback"] == "videoedit|overlay"
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_overlay_logo_entry_ignores_a_stale_workspace_logo_marker() -> None:
+    user_id = 88_801
+    _ready_state(user_id)
+    try:
+        _press(user_id, "videoedit|logo_entry")
+        direct = dict(bot.get_video_editor_pending(user_id) or {})
+        assert direct["logo_parent_callback"] == "videoedit|workspace"
+
+        _press(user_id, "videoedit|workspace")
+        _press(user_id, "videoedit|overlay")
+        nested = _press(user_id, "videoedit|logo")
+        nested_state = dict(bot.get_video_editor_pending(user_id) or {})
+
+        assert nested_state["current_screen"] == "logo_input"
+        assert nested_state["parent_callback"] == "videoedit|overlay"
+        assert nested_state["logo_parent_callback"] == "videoedit|overlay"
+        assert ("⬅️ Quay lại", "videoedit|overlay") in _pairs(
+            _last_markup(nested)
+        )
     finally:
         bot.clear_video_editor_pending(user_id)

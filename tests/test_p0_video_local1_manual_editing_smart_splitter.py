@@ -692,7 +692,7 @@ def test_local1_split_progress_part_count() -> None:
 
 def test_local1_no_success_before_delivery() -> None:
     worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
-    assert worker.index("telegram_send_video_receipt(") < worker.index('terminal_status = "succeeded"')
+    assert worker.rindex("send_video_edit_artifact(") < worker.index('terminal_status = "succeeded"')
     assert worker.index("telegram_delivery_identity(delivery)") < worker.index('terminal_status = "succeeded"')
     assert worker.index('if delivery.get("sent") is True') < worker.index('terminal_status = "succeeded"')
 

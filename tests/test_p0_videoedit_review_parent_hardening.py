@@ -209,6 +209,28 @@ def test_videoedit_ai_review_returns_to_the_prompt_that_opened_it() -> None:
     assert bot.video_edit_review_return_action(state) == "ai_prompt"
 
 
+def test_videoedit_ai_status_help_survives_cleared_pending_state() -> None:
+    user_id = 88_108
+    callbacks = _callbacks(bot.video_ai_edit_status_keyboard(7_701, "vi"))
+
+    assert "videoedit|ai_invoice" not in callbacks
+    assert "videoedit|guide|ai" in callbacks
+
+    bot.clear_video_editor_pending(user_id)
+    try:
+        guide = _press_videoedit(user_id, "videoedit|guide|ai")
+
+        assert guide.edits or guide.message.replies
+        assert not any(
+            kwargs.get("show_alert") is True
+            for _args, kwargs in guide.answers
+        )
+        payload = guide.edits[-1][1] if guide.edits else guide.message.replies[-1][1]
+        assert "videoedit|ai" in _callbacks(payload["reply_markup"])
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
 def test_videoedit_complete_local_ai_lane_keeps_every_back_edge_and_creates_no_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

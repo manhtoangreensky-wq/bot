@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import math
 import os
 import socket
 import shutil
@@ -21,6 +22,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -54,6 +56,7 @@ from services.video_local_validation import (
     LocalVideoValidationError,
     cleanup_job_workspace,
     create_job_workspace,
+    create_video_edit_claim_workspace,
     delivery_file_allowed,
     enforce_workspace_limit,
     find_ffprobe,
@@ -63,8 +66,20 @@ from services.video_local_validation import (
     ALLOWED_SOURCE_EXTENSIONS,
     ALLOWED_SUBTITLE_EXTENSIONS,
 )
-from services.video_smart_splitter import SplitRange
-from services import frame_video_commercial, frame_video_public_seam, frame_video_runtime, video_ai_edit_provider, video_ai_edit_status, video_ai_edit_validation, video_editengine1, video_local_validation
+from services.video_smart_splitter import SplitRange, split_output_name
+from services import (
+    frame_video_commercial,
+    frame_video_public_seam,
+    frame_video_runtime,
+    video_ai_edit_provider,
+    video_ai_edit_status,
+    video_ai_edit_validation,
+    video_edit_cleanup_audit,
+    video_edit_long_media,
+    video_edit_media_transport,
+    video_editengine1,
+    video_local_validation,
+)
 
 
 _TELEGRAM_DEFAULT_URLOPEN = urllib.request.urlopen
@@ -103,6 +118,16 @@ def env_int(name: str, default: int) -> int:
         return int(str(os.environ.get(name, str(default)) or str(default)).strip())
     except Exception:
         return int(default)
+
+
+def resolve_telegram_bot_token(environ=None) -> str:
+    source = os.environ if environ is None else environ
+    return str(
+        source.get("TELEGRAM_BOT_TOKEN")
+        or source.get("TELEGRAM_TOKEN")
+        or source.get("BOT_TOKEN")
+        or ""
+    ).strip()
 
 
 def telegram_api_root(environ=None) -> str:
@@ -150,9 +175,13 @@ BOT_BASE_URL = normalize_base_url(
     or "http://127.0.0.1:8000"
 )
 LOCAL_WORKER_TOKEN = str(os.environ.get("LOCAL_WORKER_TOKEN", "")).strip()
-TELEGRAM_BOT_TOKEN = str(os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN") or "").strip()
+TELEGRAM_BOT_TOKEN = resolve_telegram_bot_token()
 LOCAL_WORKER_ID = str(os.environ.get("LOCAL_WORKER_ID", "toan-aas-local-windows")).strip()
 LOCAL_WORKER_MAX_JOB_SECONDS = max(30, env_int("LOCAL_WORKER_MAX_JOB_SECONDS", 600))
+VIDEO_EDIT_MAX_DEADLINE_SECONDS = max(
+    120,
+    min(6 * 60 * 60, env_int("VIDEO_EDIT_MAX_DEADLINE_SECONDS", 6 * 60 * 60)),
+)
 LOCAL_FFMPEG_PATH = str(
     os.environ.get("LOCAL_FFMPEG_PATH", r"D:\TOANAAS\ffmpeg-8.1.1\bin\ffmpeg.exe")
 ).strip()
@@ -172,6 +201,7 @@ LOCAL_WORKER_STARTED_AT_UTC = datetime.now(timezone.utc).isoformat().replace("+0
 LOCAL_WORKER_INSTANCE_ID = f"{LOCAL_WORKER_ID}:{socket.gethostname()}:{os.getpid()}"
 LOCAL_WORKER_LAST_ERROR = ""
 VIDEO_EDIT_RECEIPT_PAYLOAD_LIMIT = 128 * 1024
+WORKER_JSON_RESPONSE_MAX_BYTES = 512 * 1024
 
 
 def endpoint(path: str) -> str:
@@ -187,14 +217,179 @@ def auth_headers() -> dict[str, str]:
     }
 
 
-def http_json(method: str, path: str, payload: dict | None = None, timeout: int = 20) -> dict:
+def _bounded_worker_json_response(response) -> dict:
+    body = response.read(WORKER_JSON_RESPONSE_MAX_BYTES + 1)
+    if not isinstance(body, bytes) or len(body) > WORKER_JSON_RESPONSE_MAX_BYTES:
+        raise ValueError("http_json_response_too_large")
+    headers = getattr(response, "headers", None)
+    declared_length = headers.get("Content-Length") if headers is not None else None
+    if declared_length not in {None, ""}:
+        try:
+            if int(declared_length) != len(body):
+                raise ValueError
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("http_json_response_invalid") from None
+    try:
+        result = json.loads(body.decode("utf-8", errors="strict") or "{}")
+    except (UnicodeError, TypeError, ValueError):
+        raise ValueError("http_json_response_invalid") from None
+    if not isinstance(result, dict):
+        raise ValueError("http_json_response_invalid")
+    return result
+
+
+def http_json(
+    method: str,
+    path: str,
+    payload: dict | None = None,
+    timeout: int = 20,
+    *,
+    total_deadline_seconds: float | None = None,
+) -> dict:
     data = None
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(endpoint(path), data=data, headers=auth_headers(), method=method.upper())
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        body = response.read().decode("utf-8", errors="replace")
-        return json.loads(body or "{}")
+
+    if total_deadline_seconds is None:
+        with telegram_open_no_redirect(request, timeout=timeout) as response:
+            return _bounded_worker_json_response(response)
+
+    if isinstance(total_deadline_seconds, bool) or not isinstance(total_deadline_seconds, (int, float)):
+        raise ValueError("http_json_total_deadline_invalid")
+    try:
+        deadline_seconds = float(total_deadline_seconds)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("http_json_total_deadline_invalid") from None
+    if not math.isfinite(deadline_seconds) or deadline_seconds <= 0:
+        raise ValueError("http_json_total_deadline_invalid")
+    absolute_deadline = time.monotonic() + deadline_seconds
+    deadline_event = threading.Event()
+    watchdog: threading.Timer | None = None
+
+    try:
+        remaining = absolute_deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("http_json_total_deadline")
+        effective_timeout = min(float(timeout), deadline_seconds, remaining)
+        if effective_timeout <= 0:
+            raise TimeoutError("http_json_total_deadline")
+        with telegram_open_no_redirect(request, timeout=effective_timeout) as response:
+            def expire_response() -> None:
+                deadline_event.set()
+                try:
+                    response_socket = response.fp.raw._sock
+                except Exception:
+                    response_socket = None
+                if response_socket is not None:
+                    try:
+                        response_socket.shutdown(socket.SHUT_RDWR)
+                    except Exception:
+                        pass
+                try:
+                    response.close()
+                except Exception:
+                    pass
+
+            remaining = absolute_deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("http_json_total_deadline")
+            watchdog = threading.Timer(remaining, expire_response)
+            watchdog.daemon = True
+            watchdog.start()
+            body_parts: list[bytes] = []
+            body_size = 0
+            body_limit = WORKER_JSON_RESPONSE_MAX_BYTES
+            try:
+                while True:
+                    if deadline_event.is_set() or time.monotonic() >= absolute_deadline:
+                        raise TimeoutError("http_json_total_deadline")
+                    chunk = response.read(min(64 * 1024, body_limit - body_size + 1))
+                    if deadline_event.is_set() or time.monotonic() >= absolute_deadline:
+                        raise TimeoutError("http_json_total_deadline")
+                    if not chunk:
+                        break
+                    body_size += len(chunk)
+                    if body_size > body_limit:
+                        raise ValueError("http_json_response_too_large")
+                    body_parts.append(bytes(chunk))
+            except Exception:
+                if deadline_event.is_set() or time.monotonic() >= absolute_deadline:
+                    raise TimeoutError("http_json_total_deadline") from None
+                raise
+            finally:
+                watchdog.cancel()
+                watchdog.join()
+    except Exception:
+        if deadline_event.is_set() or time.monotonic() >= absolute_deadline:
+            raise TimeoutError("http_json_total_deadline") from None
+        raise
+
+    if deadline_event.is_set() or time.monotonic() >= absolute_deadline:
+        raise TimeoutError("http_json_total_deadline")
+    body = b"".join(body_parts).decode("utf-8", errors="replace")
+    result = json.loads(body or "{}")
+    if time.monotonic() >= absolute_deadline:
+        raise TimeoutError("http_json_total_deadline")
+    return result
+
+
+def _heartbeat_secret_ready(value: object) -> bool:
+    if not isinstance(value, str) or not value or value != value.strip():
+        return False
+    return not any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+def _video_edit_capacity_heartbeat() -> dict[str, int | bool]:
+    workspace_ready = False
+    workspace_free_bytes = 0
+    try:
+        workspace = video_local_validation.validate_workspace_root()
+        workspace.mkdir(parents=True, exist_ok=True)
+        if not workspace.is_dir():
+            raise OSError("video edit workspace unavailable")
+        free_bytes = shutil.disk_usage(workspace).free
+        if isinstance(free_bytes, bool):
+            raise ValueError("invalid workspace capacity")
+        workspace_free_bytes = int(free_bytes)
+        if workspace_free_bytes <= 0:
+            raise ValueError("invalid workspace capacity")
+        workspace_ready = True
+    except (
+        LocalVideoValidationError,
+        OSError,
+        TypeError,
+        ValueError,
+        OverflowError,
+    ):
+        workspace_ready = False
+        workspace_free_bytes = 0
+
+    raw_deadline = VIDEO_EDIT_MAX_DEADLINE_SECONDS
+    deadline_seconds = (
+        int(raw_deadline)
+        if isinstance(raw_deadline, int)
+        and not isinstance(raw_deadline, bool)
+        and 120 <= raw_deadline <= 6 * 60 * 60
+        else 0
+    )
+    worker_token_ready = _heartbeat_secret_ready(LOCAL_WORKER_TOKEN)
+    local_bot_api_ready = False
+    try:
+        media_config = _video_edit_telegram_media_config()
+        local_bot_api_ready = bool(
+            media_config.is_local
+            and _heartbeat_secret_ready(TELEGRAM_BOT_TOKEN)
+        )
+    except (AttributeError, TypeError, ValueError):
+        local_bot_api_ready = False
+    return {
+        "workspace_ready": workspace_ready,
+        "workspace_free_bytes": workspace_free_bytes,
+        "video_edit_max_deadline_seconds": deadline_seconds,
+        "worker_token_ready": worker_token_ready,
+        "local_bot_api_ready": local_bot_api_ready,
+    }
 
 
 def local_worker_heartbeat_payload(*, last_error: str = "", queue_depth: int = 0) -> dict:
@@ -236,6 +431,7 @@ def local_worker_heartbeat_payload(*, last_error: str = "", queue_depth: int = 0
         "video_edit_filters": video_edit_filters,
         "video_edit_filter_worker_id": LOCAL_WORKER_ID,
         "video_edit_filter_ffmpeg_path": ffmpeg_path,
+        **_video_edit_capacity_heartbeat(),
         "comfy_enabled": LOCAL_COMFY_ENABLED,
     }
 
@@ -267,9 +463,15 @@ def run_heartbeat_loop(stop_event: threading.Event, interval_seconds: int = 30) 
 
 
 def poll_job() -> dict | None:
-    query = urllib.parse.urlencode({"worker_id": LOCAL_WORKER_ID})
+    lease_seconds = max(30, min(3600, int(LOCAL_WORKER_MAX_JOB_SECONDS or 600)))
+    query = urllib.parse.urlencode({
+        "worker_id": LOCAL_WORKER_ID,
+        "worker_instance_id": LOCAL_WORKER_INSTANCE_ID,
+        "lease_seconds": lease_seconds,
+        "video_edit_resume_version": video_editengine1.VIDEO_LOCAL_EDIT_RESUME_VERSION,
+    })
     data = http_json("GET", f"/internal/worker/poll?{query}", timeout=25)
-    return data.get("job") if data.get("ok") else None
+    return data.get("job") if isinstance(data, dict) and data.get("ok") is True else None
 
 
 def poll_video_render_job() -> dict | None:
@@ -286,7 +488,11 @@ def update_job(
     output_file_id: str = "",
     detail_limit: int = 500,
     output_limit: int = 4000,
-) -> None:
+    *,
+    stage: str | None = None,
+    lease_seconds: int | None = None,
+    claim_attempt: int | None = None,
+) -> dict:
     safe_detail_limit = max(
         500,
         min(VIDEO_EDIT_RECEIPT_PAYLOAD_LIMIT, int(detail_limit or 500)),
@@ -303,7 +509,358 @@ def update_job(
         "output_url": str(output_url or "")[:safe_output_limit],
         "output_file_id": str(output_file_id or "")[:500],
     }
-    http_json("POST", "/internal/worker/job_update", payload, timeout=20)
+    video_edit_update = claim_attempt is not None
+    if video_edit_update:
+        if (
+            isinstance(claim_attempt, bool)
+            or not isinstance(claim_attempt, int)
+            or claim_attempt <= 0
+        ):
+            raise LocalVideoEditError("video_local_edit_claim_attempt_invalid")
+        payload["worker_instance_id"] = LOCAL_WORKER_INSTANCE_ID
+        payload["claim_attempt"] = claim_attempt
+    if stage is not None:
+        if not isinstance(stage, str) or stage not in VIDEO_EDIT_WORKER_STAGES:
+            raise LocalVideoEditError("video_local_edit_stage_invalid")
+        payload["stage"] = stage
+    if lease_seconds is not None:
+        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int):
+            raise LocalVideoEditError("video_local_edit_lease_invalid")
+        payload["lease_seconds"] = max(30, min(3600, lease_seconds))
+    if stage is not None or lease_seconds is not None:
+        response = http_json(
+            "POST",
+            "/internal/worker/job_update",
+            payload,
+            timeout=20,
+            total_deadline_seconds=VIDEO_EDIT_LIVENESS_UPDATE_TIMEOUT_SECONDS,
+        )
+    else:
+        response = http_json("POST", "/internal/worker/job_update", payload, timeout=20)
+    if video_edit_update and (
+        not isinstance(response, dict) or response.get("ok") is not True
+    ):
+        raise LocalVideoEditError("video_local_edit_worker_update_rejected")
+    return response
+
+
+VIDEO_EDIT_WORKER_STAGES = frozenset({
+    "inspecting_input",
+    "preparing_plan",
+    "processing_video",
+    "validating_output",
+    "delivering",
+    "delivered",
+    "failed_no_charge",
+    "delivery_unknown",
+})
+
+VIDEO_EDIT_CLEANUP_REPLAY_LIMIT = 4
+
+
+def prepare_video_edit_cleanup_intent(
+    *,
+    job_id: int,
+    claim_attempt: int,
+    workspace: Path | None,
+    terminal_stage: str,
+    project_workspace: bool = False,
+) -> tuple[dict | None, dict]:
+    """Persist path-free cleanup intent before terminal delivery truth."""
+
+    workspace_present = workspace is not None
+    evidence: dict = {
+        "persisted": False,
+        "workspace_present": workspace_present,
+    }
+    try:
+        intent = video_edit_cleanup_audit.build_cleanup_intent(
+            job_id=job_id,
+            delivery_claim_attempt=claim_attempt,
+            delivery_owner=LOCAL_WORKER_INSTANCE_ID,
+            workspace_present=workspace_present,
+            project_workspace=project_workspace,
+        )
+    except ValueError:
+        evidence["reason"] = "cleanup_intent_invalid"
+        return None, evidence
+    if not workspace_present or terminal_stage == "delivery_unknown":
+        return intent, evidence
+    expected_workspace_key = str(
+        intent.get("target_workspace_key") or intent["workspace_key"]
+    )
+    if Path(workspace).name != expected_workspace_key:
+        evidence["reason"] = "cleanup_workspace_binding_mismatch"
+        return intent, evidence
+    written = video_edit_cleanup_audit.write_cleanup_intent(
+        video_local_validation.VIDEO_LOCAL_WORKSPACE_ROOT,
+        intent,
+    )
+    evidence.update(written)
+    evidence["workspace_present"] = True
+    if written.get("persisted") is not True:
+        return None, evidence
+    return intent, evidence
+
+
+def reconcile_video_edit_cleanup_intent(intent: dict) -> dict:
+    """Reconcile one intent through server authority before any deletion."""
+
+    try:
+        normalized = video_edit_cleanup_audit.normalize_cleanup_intent(intent)
+    except ValueError:
+        return {"ok": False, "reason": "cleanup_intent_invalid"}
+    root = video_local_validation.VIDEO_LOCAL_WORKSPACE_ROOT
+    claim_payload = {
+        "job_id": normalized["job_id"],
+        "delivery_owner": normalized["delivery_owner"],
+        "delivery_claim_attempt": normalized["delivery_claim_attempt"],
+        "audit_owner": LOCAL_WORKER_INSTANCE_ID,
+        "lease_seconds": 60,
+    }
+    try:
+        authority = http_json(
+            "POST",
+            "/internal/worker/video_edit_cleanup/claim",
+            claim_payload,
+            timeout=10,
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": f"cleanup_claim_failed:{type(exc).__name__}"[:120],
+        }
+    if not isinstance(authority, dict):
+        return {"ok": False, "reason": "cleanup_claim_invalid"}
+    action = str(authority.get("action") or "")
+    if action == "orphan_retained":
+        retained = video_edit_cleanup_audit.retain_orphan_intent(
+            root,
+            normalized,
+        )
+        return {**authority, "local_reconciliation": retained}
+    if action == "remove_intent":
+        removed = video_edit_cleanup_audit.remove_active_intent(
+            root,
+            normalized,
+        )
+        return {**authority, "local_reconciliation": removed}
+    if action != "cleanup" or authority.get("ok") is not True:
+        return authority
+    audit_owner = str(authority.get("audit_owner") or "")
+    audit_attempt = authority.get("audit_attempt")
+    if (
+        audit_owner != LOCAL_WORKER_INSTANCE_ID
+        or isinstance(audit_attempt, bool)
+        or not isinstance(audit_attempt, int)
+        or audit_attempt <= 0
+    ):
+        return {"ok": False, "reason": "cleanup_authority_invalid"}
+    cleanup = video_edit_cleanup_audit.secure_cleanup_workspace(
+        root,
+        normalized,
+    )
+    cleanup_ok = cleanup.get("ok") is True
+    result_payload = {
+        "job_id": normalized["job_id"],
+        "delivery_owner": normalized["delivery_owner"],
+        "delivery_claim_attempt": normalized["delivery_claim_attempt"],
+        "audit_owner": audit_owner,
+        "audit_attempt": audit_attempt,
+        "outcome": "succeeded" if cleanup_ok else "failed_retryable",
+        "reason": "" if cleanup_ok else str(
+            cleanup.get("reason") or "cleanup_failed"
+        )[:120],
+    }
+    try:
+        acknowledged = http_json(
+            "POST",
+            "/internal/worker/video_edit_cleanup/result",
+            result_payload,
+            timeout=10,
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": f"cleanup_result_failed:{type(exc).__name__}"[:120],
+        }
+    if not isinstance(acknowledged, dict) or acknowledged.get("ok") is not True:
+        return (
+            acknowledged
+            if isinstance(acknowledged, dict)
+            else {"ok": False, "reason": "cleanup_result_invalid"}
+        )
+    audit = acknowledged.get("cleanup_audit")
+    audit_state = str(audit.get("state") or "") if isinstance(audit, dict) else ""
+    if audit_state in {"succeeded", "failed_exhausted"}:
+        removed = video_edit_cleanup_audit.remove_active_intent(
+            root,
+            normalized,
+        )
+        return {**acknowledged, "local_reconciliation": removed}
+    return acknowledged
+
+
+def replay_video_edit_cleanup_intents(*, limit: int = VIDEO_EDIT_CLEANUP_REPLAY_LIMIT) -> int:
+    """Replay a bounded set of durable intents; malformed files stay retained."""
+
+    try:
+        intents = video_edit_cleanup_audit.list_active_cleanup_intents(
+            video_local_validation.VIDEO_LOCAL_WORKSPACE_ROOT,
+            limit=limit,
+        )
+    except (OSError, ValueError):
+        return 0
+    for intent in intents:
+        reconcile_video_edit_cleanup_intent(intent)
+    return len(intents)
+
+
+def run_video_edit_cleanup_replay_loop(
+    stop_event: threading.Event,
+    interval_seconds: int = 30,
+) -> None:
+    interval = max(5, int(interval_seconds or 30))
+    while not stop_event.is_set():
+        try:
+            replay_video_edit_cleanup_intents()
+        except Exception as exc:
+            print(
+                "[local_worker] video edit cleanup replay error: "
+                f"{type(exc).__name__}"
+            )
+        stop_event.wait(interval)
+
+# Liveness updates opt into an absolute HTTP deadline so stop can join any
+# in-flight renewal to completion before cleanup and terminal persistence.
+VIDEO_EDIT_LIVENESS_UPDATE_TIMEOUT_SECONDS = 20
+
+
+class _VideoEditJobLiveness:
+    def __init__(
+        self,
+        job_id: int | str,
+        lease_seconds: int,
+        interval_seconds: int,
+        claim_attempt: int | None = None,
+    ) -> None:
+        job_id_valid = (
+            isinstance(job_id, int)
+            and not isinstance(job_id, bool)
+            and job_id > 0
+        ) or (
+            isinstance(job_id, str)
+            and job_id.strip().isdigit()
+            and int(job_id.strip()) > 0
+        )
+        if not job_id_valid:
+            raise LocalVideoEditError("video_local_edit_worker_lease_lost")
+        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int):
+            raise LocalVideoEditError("video_local_edit_worker_lease_lost")
+        if isinstance(interval_seconds, bool) or not isinstance(interval_seconds, int):
+            raise LocalVideoEditError("video_local_edit_worker_lease_lost")
+        if not 30 <= lease_seconds <= 3600 or not 1 <= interval_seconds <= 60:
+            raise LocalVideoEditError("video_local_edit_worker_lease_lost")
+        if claim_attempt is not None and (
+            isinstance(claim_attempt, bool)
+            or not isinstance(claim_attempt, int)
+            or claim_attempt <= 0
+        ):
+            raise LocalVideoEditError("video_local_edit_worker_lease_lost")
+        self._job_id = job_id
+        self._lease_seconds = lease_seconds
+        self._interval_seconds = interval_seconds
+        self._claim_attempt = claim_attempt
+        self._stage = "inspecting_input"
+        self._stop_event = threading.Event()
+        self._lock = threading.RLock()
+        self._failure: LocalVideoEditError | None = None
+        self._thread: threading.Thread | None = None
+        self._closed = False
+        self._started = False
+
+    def _capture_failure(self) -> LocalVideoEditError:
+        with self._lock:
+            if self._failure is None:
+                self._failure = LocalVideoEditError("video_local_edit_worker_lease_lost")
+            return self._failure
+
+    def _renew(self) -> bool:
+        with self._lock:
+            if self._closed:
+                return False
+            stage = self._stage
+        try:
+            update_kwargs = {
+                "stage": stage,
+                "lease_seconds": self._lease_seconds,
+            }
+            if self._claim_attempt is not None:
+                update_kwargs["claim_attempt"] = self._claim_attempt
+            update_job(self._job_id, "running", **update_kwargs)
+        except Exception:
+            self._capture_failure()
+            return False
+        return True
+
+    def _run(self) -> None:
+        while not self._stop_event.wait(self._interval_seconds):
+            if not self._renew():
+                return
+
+    def start(self) -> None:
+        with self._lock:
+            if self._closed:
+                raise self._failure or LocalVideoEditError("video_local_edit_worker_lease_lost")
+            if self._started:
+                return
+            if not self._renew():
+                self._closed = True
+                self._stop_event.set()
+                raise self._capture_failure()
+            try:
+                candidate = threading.Thread(target=self._run, daemon=True)
+                candidate.start()
+            except Exception:
+                self._closed = True
+                self._stop_event.set()
+                raise self._capture_failure() from None
+            self._thread = candidate
+            self._started = True
+
+    def update_stage(self, stage: str) -> None:
+        if not isinstance(stage, str) or stage not in VIDEO_EDIT_WORKER_STAGES:
+            raise LocalVideoEditError("video_local_edit_worker_lease_lost")
+        with self._lock:
+            self._stage = stage
+
+    def assert_healthy(self) -> None:
+        with self._lock:
+            failure = self._failure
+        if failure is not None:
+            raise failure
+
+    def stop(self) -> None:
+        with self._lock:
+            self._closed = True
+            self._stop_event.set()
+            thread = self._thread if self._started else None
+        if thread is not None and thread is not threading.current_thread():
+            thread.join()
+
+
+def video_edit_job_liveness(
+    job_id: int | str,
+    lease_seconds: int,
+    interval_seconds: int,
+    claim_attempt: int | None = None,
+) -> _VideoEditJobLiveness:
+    return _VideoEditJobLiveness(
+        job_id,
+        lease_seconds,
+        interval_seconds,
+        claim_attempt=claim_attempt,
+    )
 
 
 def update_video_render_job(
@@ -432,6 +989,234 @@ def telegram_open_no_redirect(request, timeout):
     return opener.open(request, timeout=timeout)
 
 
+_VIDEO_EDIT_TELEGRAM_JSON_MAX_BYTES = 256 * 1024
+
+
+def _video_edit_telegram_media_config() -> video_edit_media_transport.TelegramMediaConfig:
+    raw_media_path = str(
+        os.environ.get("TELEGRAM_LOCAL_API_MEDIA_PATH") or "localfile"
+    )
+    local_media_path = (
+        raw_media_path if raw_media_path.startswith("/") else f"/{raw_media_path}"
+    )
+    return video_edit_media_transport.TelegramMediaConfig(
+        token=str(TELEGRAM_BOT_TOKEN or ""),
+        api_root=str(
+            os.environ.get("TELEGRAM_API_BASE_URL")
+            or "https://api.telegram.org"
+        ),
+        proxy_secret_header=str(
+            os.environ.get("TELEGRAM_API_PROXY_SECRET_HEADER")
+            or "X-Toanaas-Proxy-Secret"
+        ),
+        proxy_secret=str(os.environ.get("TELEGRAM_API_PROXY_SECRET") or ""),
+        local_file_root=str(
+            os.environ.get("TELEGRAM_LOCAL_API_FILE_ROOT")
+            or "/var/lib/telegram-bot-api"
+        ).rstrip("/"),
+        local_media_path=local_media_path,
+    )
+
+
+def _video_edit_bounded_json_response(response, *, reason: str) -> dict:
+    try:
+        body = response.read(_VIDEO_EDIT_TELEGRAM_JSON_MAX_BYTES + 1)
+    except (TimeoutError, socket.timeout, urllib.error.URLError, OSError):
+        raise RuntimeError(reason) from None
+    if (
+        not isinstance(body, bytes)
+        or not body
+        or len(body) > _VIDEO_EDIT_TELEGRAM_JSON_MAX_BYTES
+    ):
+        raise RuntimeError(reason)
+    headers = getattr(response, "headers", None)
+    declared_length = headers.get("Content-Length") if headers is not None else None
+    if declared_length not in {None, ""}:
+        try:
+            if int(declared_length) != len(body):
+                raise ValueError
+        except (TypeError, ValueError, OverflowError):
+            raise RuntimeError(reason) from None
+    try:
+        payload = json.loads(body.decode("utf-8", errors="strict"))
+    except (UnicodeError, TypeError, ValueError):
+        raise RuntimeError(reason) from None
+    if not isinstance(payload, dict):
+        raise RuntimeError(reason)
+    return payload
+
+
+def _video_edit_get_file_json(
+    *,
+    url: str,
+    headers: dict,
+    follow_redirects: bool,
+    **request_fields,
+) -> dict:
+    if follow_redirects is not False or set(request_fields) != {"json"}:
+        raise RuntimeError("telegram_get_file_request_invalid")
+    try:
+        body = json.dumps(
+            request_fields["json"],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            str(url or ""),
+            data=body,
+            headers={"Content-Type": "application/json", **dict(headers or {})},
+            method="POST",
+        )
+        with telegram_open_no_redirect(request, timeout=30) as response:
+            return _video_edit_bounded_json_response(
+                response,
+                reason="telegram_get_file_response_invalid",
+            )
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"telegram_get_file_http_{int(exc.code or 0)}") from None
+    except RuntimeError:
+        raise
+    except (TimeoutError, socket.timeout, urllib.error.URLError, OSError, TypeError, ValueError):
+        raise RuntimeError("telegram_get_file_network") from None
+
+
+def _video_edit_stream_bytes(
+    *,
+    url: str,
+    headers: dict,
+    follow_redirects: bool,
+    chunk_size: int,
+):
+    if (
+        follow_redirects is not False
+        or isinstance(chunk_size, bool)
+        or not isinstance(chunk_size, int)
+        or chunk_size < 1
+    ):
+        raise RuntimeError("telegram_download_request_invalid")
+    bounded_chunk_size = min(
+        chunk_size,
+        video_edit_media_transport.STREAM_CHUNK_BYTES,
+    )
+    timeout = max(
+        60,
+        min(
+            7200,
+            env_int(
+                "VIDEO_EDIT_TELEGRAM_DOWNLOAD_TIMEOUT_SECONDS",
+                max(60, LOCAL_WORKER_MAX_JOB_SECONDS),
+            ),
+        ),
+    )
+    try:
+        request = urllib.request.Request(
+            str(url or ""),
+            headers=dict(headers or {}),
+            method="GET",
+        )
+        with telegram_open_no_redirect(request, timeout=timeout) as response:
+            while True:
+                chunk = response.read(bounded_chunk_size)
+                if not chunk:
+                    break
+                if not isinstance(chunk, bytes) or len(chunk) > bounded_chunk_size:
+                    raise RuntimeError("telegram_download_chunk_invalid")
+                yield chunk
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"telegram_download_http_{int(exc.code or 0)}") from None
+    except RuntimeError:
+        raise
+    except (TimeoutError, socket.timeout, urllib.error.URLError, OSError, TypeError, ValueError):
+        raise RuntimeError("telegram_download_network") from None
+
+
+def _video_edit_multipart_request(
+    *,
+    method_name: str,
+    url: str,
+    headers: dict,
+    content_length: int,
+    body,
+    follow_redirects: bool,
+    deadline_monotonic: float | None = None,
+    monotonic=time.monotonic,
+) -> dict:
+    if (
+        follow_redirects is not False
+        or method_name not in {"sendVideo", "sendDocument"}
+        or isinstance(content_length, bool)
+        or not isinstance(content_length, int)
+        or content_length < 1
+    ):
+        raise RuntimeError("telegram_delivery_request_invalid")
+    request_headers = dict(headers or {})
+    if str(request_headers.get("Content-Length") or "") != str(content_length):
+        raise RuntimeError("telegram_delivery_request_invalid")
+    configured_timeout = max(
+        120,
+        min(
+            7200,
+            env_int("VIDEO_EDIT_TELEGRAM_DELIVERY_TIMEOUT_SECONDS", 1800),
+        ),
+    )
+    timeout: float = float(configured_timeout)
+    if deadline_monotonic is not None:
+        try:
+            if (
+                isinstance(deadline_monotonic, bool)
+                or not isinstance(deadline_monotonic, (int, float))
+                or not math.isfinite(float(deadline_monotonic))
+                or not callable(monotonic)
+            ):
+                raise ValueError
+            now = monotonic()
+            if (
+                isinstance(now, bool)
+                or not isinstance(now, (int, float))
+                or not math.isfinite(float(now))
+            ):
+                raise ValueError
+            remaining = float(deadline_monotonic) - float(now)
+        except (TypeError, ValueError, OverflowError):
+            raise RuntimeError("telegram_delivery_request_invalid") from None
+        if remaining <= 0:
+            raise RuntimeError("telegram_delivery_deadline_exceeded")
+        timeout = min(timeout, remaining)
+    try:
+        request = urllib.request.Request(
+            str(url or ""),
+            data=body,
+            headers=request_headers,
+            method="POST",
+        )
+        with telegram_open_no_redirect(request, timeout=timeout) as response:
+            payload = _video_edit_bounded_json_response(
+                response,
+                reason="telegram_delivery_response_invalid",
+            )
+        payload["status_code"] = 200
+        return payload
+    except urllib.error.HTTPError as exc:
+        try:
+            payload = _video_edit_bounded_json_response(
+                exc,
+                reason="telegram_delivery_response_invalid",
+            )
+        finally:
+            try:
+                exc.close()
+            except OSError:
+                pass
+        payload["status_code"] = int(exc.code or 0)
+        if payload.get("ok") is not False:
+            raise RuntimeError("telegram_delivery_outcome_uncertain")
+        return payload
+    except RuntimeError:
+        raise
+    except (TimeoutError, socket.timeout, urllib.error.URLError, OSError, TypeError, ValueError):
+        raise RuntimeError("telegram_delivery_outcome_uncertain") from None
+
+
 def telegram_json(method: str, payload: dict | None = None, timeout: int = 30) -> dict:
     if not TELEGRAM_BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN missing")
@@ -450,18 +1235,16 @@ def telegram_json(method: str, payload: dict | None = None, timeout: int = 30) -
     )
     try:
         with telegram_open_no_redirect(request, timeout=timeout) as response:
-            body = response.read().decode("utf-8", errors="replace")
+            return _video_edit_bounded_json_response(
+                response,
+                reason="telegram_api_invalid_json",
+            )
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"telegram_api_http_{int(exc.code or 0)}") from None
+    except RuntimeError:
+        raise
     except (TimeoutError, socket.timeout, urllib.error.URLError, OSError):
         raise RuntimeError("telegram_api_network") from None
-    try:
-        parsed = json.loads(body or "{}")
-    except (TypeError, ValueError):
-        raise RuntimeError("telegram_api_invalid_json") from None
-    if not isinstance(parsed, dict):
-        raise RuntimeError("telegram_api_invalid_json") from None
-    return parsed
 
 
 def telegram_download_file(
@@ -804,7 +1587,9 @@ def _local1_progress(
     delivered: int = 0,
     detail: str = "",
     artifact_receipts: list[dict] | None = None,
-) -> None:
+    delivery_cursor: dict | None = None,
+    claim_attempt: int | None = None,
+) -> dict:
     payload = {
         "local1": 1,
         "stage": str(stage or "processing_video")[:40],
@@ -816,11 +1601,16 @@ def _local1_progress(
     }
     if artifact_receipts is not None:
         payload["artifact_receipts"] = list(artifact_receipts)
-    update_job(
+    if delivery_cursor is not None:
+        payload["delivery_cursor"] = dict(delivery_cursor)
+    update_kwargs = {"detail_limit": VIDEO_EDIT_RECEIPT_PAYLOAD_LIMIT}
+    if claim_attempt is not None:
+        update_kwargs["claim_attempt"] = claim_attempt
+    return update_job(
         job_id,
         "running",
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-        detail_limit=VIDEO_EDIT_RECEIPT_PAYLOAD_LIMIT,
+        **update_kwargs,
     )
 
 
@@ -833,12 +1623,456 @@ def _local1_download_asset(
     *,
     max_bytes: int = MAX_UPLOAD_BYTES,
 ) -> str:
+    """Preserve the bounded legacy helper used by non-Video-Edit routes."""
+
     safe_name = validate_extension(file_name, allowed)
     suffix = Path(safe_name).suffix.lower()
     target = workspace / f"{stem}{suffix}"
-    telegram_download_file(str(file_id or ""), str(target), max_bytes=max(1, int(max_bytes)))
+    telegram_download_file(
+        str(file_id or ""),
+        str(target),
+        max_bytes=max(1, int(max_bytes)),
+    )
     enforce_workspace_limit(workspace)
     return str(target)
+
+
+def _video_edit_download_asset(
+    file_id: str,
+    file_name: str,
+    workspace: Path,
+    allowed: set[str],
+    stem: str,
+    *,
+    max_bytes: int | None = None,
+    media_config: video_edit_media_transport.TelegramMediaConfig,
+    deadline_monotonic: float | None = None,
+) -> video_edit_media_transport.DownloadReceipt:
+    safe_name = validate_extension(file_name, allowed)
+    suffix = Path(safe_name).suffix.lower()
+    target = workspace / f"{stem}{suffix}"
+    config = media_config
+    hard_max_bytes = max_bytes
+    if hard_max_bytes is None and not config.is_local:
+        hard_max_bytes = video_edit_media_transport.SHORT_MEDIA_MAX_BYTES
+    try:
+        receipt = video_edit_media_transport.download_file_to_path(
+            config=config,
+            file_id=str(file_id or ""),
+            destination=target,
+            get_file_json=_video_edit_get_file_json,
+            stream_bytes=_video_edit_stream_bytes,
+            hard_max_bytes=hard_max_bytes,
+            workspace_reserve_bytes=(
+                video_edit_long_media.DEFAULT_WORKSPACE_RESERVE_BYTES
+            ),
+            require_private_parent=True,
+            deadline_monotonic=deadline_monotonic,
+        )
+    except video_edit_media_transport.MediaTransferError as exc:
+        raise LocalVideoEditError(str(exc.reason or "stream_failed")) from exc
+    if not isinstance(receipt, video_edit_media_transport.DownloadReceipt):
+        raise LocalVideoEditError("download_receipt_invalid")
+    return receipt
+
+
+def _video_edit_normalize_download_receipt(
+    value,
+) -> video_edit_media_transport.DownloadReceipt:
+    """Normalize legacy path-shaped download hooks with bounded file hashing."""
+
+    if isinstance(value, video_edit_media_transport.DownloadReceipt):
+        path = str(value.path or "")
+        try:
+            actual_bytes = int(os.path.getsize(path))
+        except (OSError, TypeError, ValueError, OverflowError):
+            raise LocalVideoEditError("download_receipt_invalid") from None
+        digest = str(value.sha256 or "").lower()
+        if (
+            not path
+            or isinstance(value.bytes_written, bool)
+            or int(value.bytes_written) != actual_bytes
+            or actual_bytes < 1
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise LocalVideoEditError("download_receipt_invalid")
+        try:
+            actual_digest = hashlib.sha256()
+            remaining = actual_bytes
+            with Path(path).open("rb") as handle:
+                while remaining:
+                    chunk = handle.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        raise LocalVideoEditError("download_receipt_invalid")
+                    actual_digest.update(chunk)
+                    remaining -= len(chunk)
+                if handle.read(1):
+                    raise LocalVideoEditError("download_receipt_invalid")
+        except OSError:
+            raise LocalVideoEditError("download_receipt_invalid") from None
+        if actual_digest.hexdigest() != digest:
+            raise LocalVideoEditError("download_receipt_invalid")
+        return video_edit_media_transport.DownloadReceipt(
+            path=path,
+            bytes_written=actual_bytes,
+            sha256=digest,
+            lane=str(value.lane or "large_media"),
+            transport=str(value.transport or "unknown"),
+            declared_bytes=value.declared_bytes,
+        )
+    try:
+        path = os.fspath(value)
+    except TypeError:
+        raise LocalVideoEditError("download_receipt_invalid") from None
+    if isinstance(path, bytes):
+        raise LocalVideoEditError("download_receipt_invalid")
+    try:
+        actual_bytes = int(os.path.getsize(path))
+        digest = video_ai_edit_validation.sha256_file(path).lower()
+    except (OSError, TypeError, ValueError, OverflowError):
+        raise LocalVideoEditError("download_receipt_invalid") from None
+    if (
+        actual_bytes < 1
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise LocalVideoEditError("download_receipt_invalid")
+    return video_edit_media_transport.DownloadReceipt(
+        path=str(path),
+        bytes_written=actual_bytes,
+        sha256=digest,
+        lane="large_media",
+        transport="legacy_path",
+        declared_bytes=None,
+    )
+
+
+def _video_edit_queued_source_hashes(payload: dict) -> tuple[str, ...]:
+    hashes: list[str] = []
+    source_metadata = payload.get("source_metadata")
+    if not isinstance(source_metadata, dict):
+        source_metadata = {}
+    source_manifest = payload.get("source_manifest")
+    if source_manifest in (None, ""):
+        source_manifest = {}
+    if not isinstance(source_manifest, dict):
+        raise LocalVideoEditError("video_local_edit_source_hash_invalid")
+    nested_manifest = source_metadata.get("source_manifest")
+    if nested_manifest in (None, ""):
+        nested_manifest = {}
+    if not isinstance(nested_manifest, dict):
+        raise LocalVideoEditError("video_local_edit_source_hash_invalid")
+    sources = (
+        (payload, ("source_video_hash", "source_sha256")),
+        (
+            source_metadata,
+            ("source_video_hash", "source_sha256", "sha256"),
+        ),
+        (
+            source_manifest,
+            ("source_video_hash", "source_sha256", "sha256"),
+        ),
+        (
+            nested_manifest,
+            ("source_video_hash", "source_sha256", "sha256"),
+        ),
+    )
+    for evidence, fields in sources:
+        for field in fields:
+            value = evidence.get(field)
+            if value is None or value == "":
+                continue
+            if not isinstance(value, str) or value != value.strip():
+                raise LocalVideoEditError("video_local_edit_source_hash_invalid")
+            normalized = value.lower()
+            if (
+                len(normalized) != 64
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in normalized
+                )
+            ):
+                raise LocalVideoEditError("video_local_edit_source_hash_invalid")
+            hashes.append(normalized)
+    return tuple(hashes)
+
+
+def _video_edit_queued_source_sizes(payload: dict) -> tuple[int, ...]:
+    source_metadata = payload.get("source_metadata")
+    if not isinstance(source_metadata, dict):
+        source_metadata = {}
+    source_manifest = payload.get("source_manifest")
+    if source_manifest in (None, ""):
+        source_manifest = {}
+    if not isinstance(source_manifest, dict):
+        raise LocalVideoEditError("video_local_edit_source_size_invalid")
+    nested_manifest = source_metadata.get("source_manifest")
+    if nested_manifest in (None, ""):
+        nested_manifest = {}
+    if not isinstance(nested_manifest, dict):
+        raise LocalVideoEditError("video_local_edit_source_size_invalid")
+    sizes: list[int] = []
+    for evidence, fields in (
+        (payload, ("source_file_size",)),
+        (source_metadata, ("bytes", "actual_bytes", "file_size")),
+        (
+            source_manifest,
+            ("source_file_size", "bytes", "actual_bytes", "file_size"),
+        ),
+        (
+            nested_manifest,
+            ("source_file_size", "bytes", "actual_bytes", "file_size"),
+        ),
+    ):
+        for field in fields:
+            value = evidence.get(field)
+            if value in (None, "", 0, "0") and not isinstance(value, bool):
+                continue
+            if isinstance(value, bool):
+                raise LocalVideoEditError("video_local_edit_source_size_invalid")
+            if isinstance(value, int):
+                parsed = value
+            elif (
+                isinstance(value, str)
+                and value == value.strip()
+                and value.isdigit()
+            ):
+                try:
+                    parsed = int(value)
+                except (TypeError, ValueError, OverflowError):
+                    raise LocalVideoEditError(
+                        "video_local_edit_source_size_invalid"
+                    ) from None
+            else:
+                raise LocalVideoEditError("video_local_edit_source_size_invalid")
+            if parsed <= 0:
+                raise LocalVideoEditError("video_local_edit_source_size_invalid")
+            sizes.append(parsed)
+    return tuple(sizes)
+
+
+def _video_edit_positive_number(value, *, integer: bool = False):
+    try:
+        if isinstance(value, bool) or value is None:
+            raise ValueError
+        parsed = int(value) if integer else float(value)
+        if parsed <= 0 or not math.isfinite(float(parsed)):
+            raise ValueError
+        return parsed
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _video_edit_declared_total_bytes(payload: dict, source_metadata: dict) -> int | None:
+    source_bytes = next(
+        (
+            parsed
+            for parsed in (
+                _video_edit_positive_number(payload.get("source_file_size"), integer=True),
+                _video_edit_positive_number(source_metadata.get("bytes"), integer=True),
+                _video_edit_positive_number(source_metadata.get("actual_bytes"), integer=True),
+                _video_edit_positive_number(source_metadata.get("file_size"), integer=True),
+            )
+            if parsed is not None
+        ),
+        None,
+    )
+    if source_bytes is None:
+        return None
+    total = int(source_bytes)
+    assets = list(payload.get("concat_sources") or [])
+    assets.extend(
+        item
+        for item in (payload.get("logo_source"), payload.get("subtitle_source"))
+        if isinstance(item, dict) and item
+    )
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        size = next(
+            (
+                parsed
+                for parsed in (
+                    _video_edit_positive_number(asset.get("file_size"), integer=True),
+                    _video_edit_positive_number(asset.get("bytes"), integer=True),
+                )
+                if parsed is not None
+            ),
+            None,
+        )
+        if size is not None:
+            total += int(size)
+    return total
+
+
+def _video_edit_logical_plan(
+    plan: dict,
+    *,
+    mode: str,
+    concat_sources: list,
+    logo_source: dict,
+    subtitle_source: dict,
+) -> dict:
+    logical = deepcopy(plan)
+    logical.pop("source", None)
+    logical["input_video"] = ""
+    logical["concat_inputs"] = [True] * len(concat_sources)
+    logo = logical.get("logo_overlay")
+    if isinstance(logo, dict):
+        logo = deepcopy(logo)
+        logo.pop("path", None)
+        logical["logo_overlay"] = logo
+    elif logo_source:
+        logical["logo_overlay"] = {"position": "top_right"}
+    if subtitle_source:
+        logical["subtitle_file"] = True
+    elif "subtitle_file" in logical:
+        logical["subtitle_file"] = ""
+    if mode == "split":
+        logical["split"] = True
+    return logical
+
+
+def _video_edit_workspace_operations(
+    *,
+    mode: str,
+    logical_plan: dict,
+    execution_class: str,
+    concat_sources: list,
+    logo_source: dict,
+    subtitle_source: dict,
+) -> tuple[str, ...]:
+    if mode == "split":
+        return ("split",)
+    operations: list[str] = []
+    if concat_sources:
+        operations.append("concat")
+    if (
+        logo_source
+        or subtitle_source
+        or bool(logical_plan.get("text_overlay"))
+        or bool(logical_plan.get("logo_overlay"))
+        or bool(logical_plan.get("subtitle_file"))
+    ):
+        operations.append("overlay")
+    if execution_class == video_edit_long_media.WHOLE_TIMELINE_REQUIRED:
+        operations.append("transcode")
+    return tuple(operations or ("manual",))
+
+
+def _video_edit_promote_deadline(
+    *,
+    job_started_monotonic: float,
+    current_deadline_monotonic: float,
+    source_probe: dict,
+    total_input_bytes: int,
+    output_count: int,
+    execution_class: str,
+) -> float:
+    duration_seconds = _video_edit_positive_number(source_probe.get("duration"))
+    if duration_seconds is None:
+        duration_ms = _video_edit_positive_number(
+            source_probe.get("duration_ms"),
+            integer=True,
+        )
+        duration_seconds = (
+            float(duration_ms) / 1000.0 if duration_ms is not None else None
+        )
+    seconds = video_edit_long_media.adaptive_deadline_seconds(
+        source_bytes=total_input_bytes,
+        duration_seconds=duration_seconds,
+        width=_video_edit_positive_number(source_probe.get("width"), integer=True),
+        height=_video_edit_positive_number(source_probe.get("height"), integer=True),
+        output_count=output_count,
+        operation_class=execution_class,
+        maximum_seconds=VIDEO_EDIT_MAX_DEADLINE_SECONDS,
+    )
+    return max(
+        float(current_deadline_monotonic),
+        float(job_started_monotonic) + float(seconds),
+    )
+
+
+def _video_edit_admit_materialized_workspace(
+    *,
+    workspace: Path,
+    operations: tuple[str, ...],
+    source_receipt: video_edit_media_transport.DownloadReceipt,
+    asset_receipts: list[video_edit_media_transport.DownloadReceipt],
+    output_count: int,
+) -> int:
+    materialized_input_bytes = source_receipt.bytes_written + sum(
+        receipt.bytes_written for receipt in asset_receipts
+    )
+    try:
+        free_bytes = int(shutil.disk_usage(workspace).free)
+    except (OSError, TypeError, ValueError, OverflowError):
+        raise LocalVideoEditError("workspace_disk_check_failed") from None
+    if not operations:
+        raise LocalVideoEditError("workspace_admission_invalid")
+    decisions = [
+        video_edit_long_media.admit_workspace(
+            operation=operation,
+            source_bytes=source_receipt.bytes_written,
+            asset_bytes=[receipt.bytes_written for receipt in asset_receipts],
+            output_count=output_count,
+            free_bytes=free_bytes,
+            materialized_input_bytes=materialized_input_bytes,
+        )
+        for operation in operations
+    ]
+    rejected = next((decision for decision in decisions if not decision.accepted), None)
+    if rejected is not None:
+        raise LocalVideoEditError(
+            str(rejected.reason or "workspace_admission_failed")
+        )
+    budgets: list[int] = []
+    for decision in decisions:
+        try:
+            budget = int(decision.evidence["estimated_bytes"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            raise LocalVideoEditError("workspace_admission_invalid") from None
+        if budget < materialized_input_bytes:
+            raise LocalVideoEditError("workspace_admission_invalid")
+        budgets.append(budget)
+    return max(budgets)
+
+
+def _video_edit_artifact_receipt(
+    delivery: dict,
+    *,
+    index: int,
+    artifact_size: int,
+    artifact_sha256: str,
+    ffprobe: dict,
+) -> dict:
+    message_id, file_id = video_editengine1.telegram_delivery_identity(delivery)
+    delivery_method = delivery.get("delivery_method")
+    bytes_sent = delivery.get("bytes_sent")
+    delivered_sha256 = delivery.get("sha256")
+    if (
+        delivery.get("sent") is not True
+        or not message_id
+        or not file_id
+        or delivery_method not in {"sendVideo", "sendDocument"}
+        or isinstance(bytes_sent, bool)
+        or not isinstance(bytes_sent, int)
+        or bytes_sent != artifact_size
+        or not isinstance(delivered_sha256, str)
+        or delivered_sha256 != artifact_sha256
+    ):
+        raise LocalVideoEditError("telegram_delivery_receipt_invalid")
+    return {
+        "index": index,
+        "message_id": message_id,
+        "file_id": file_id,
+        "delivery_method": delivery_method,
+        "bytes_sent": bytes_sent,
+        "size": artifact_size,
+        "sha256": artifact_sha256,
+        "ffprobe": dict(ffprobe or {}),
+    }
 
 
 def _legacy_local1_plan(payload: dict, source_path: str) -> dict:
@@ -895,6 +2129,7 @@ def finalize_video_local_cleanup_state(
         "stage": "failed_no_charge",
         "reason": reason,
         "charge": 0,
+        "charged_xu": 0,
         "cleanup": "failed",
     }
 
@@ -905,6 +2140,7 @@ def _video_local_delivery_is_uncertain(reason: str, receipts: list[dict]) -> boo
         receipts
         or "telegram_delivery_outcome_uncertain" in token
         or "telegram_delivery_receipt_invalid" in token
+        or "telegram_delivery_rejected_checkpoint_uncertain" in token
     )
 
 
@@ -929,17 +2165,169 @@ def _strict_video_edit_price(value) -> int:
     return parsed
 
 
+def _video_edit_resume_expected_output_count(payload: dict, mode: str) -> int:
+    if mode == "manual":
+        return 1
+    ranges = payload.get("split_ranges")
+    if not isinstance(ranges, list) or not ranges:
+        raise LocalVideoEditError("video_local_edit_resume_contract_invalid")
+    previous_end = 0
+    for position, item in enumerate(ranges, start=1):
+        if not isinstance(item, dict):
+            raise LocalVideoEditError("video_local_edit_resume_contract_invalid")
+        values = (item.get("index"), item.get("start_ms"), item.get("end_ms"))
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
+            raise LocalVideoEditError("video_local_edit_resume_contract_invalid")
+        index, start_ms, end_ms = values
+        if index != position or start_ms < previous_end or end_ms <= start_ms:
+            raise LocalVideoEditError("video_local_edit_resume_contract_invalid")
+        previous_end = end_ms
+    return len(ranges)
+
+
+def _video_edit_normalize_resume_contract(
+    job: dict,
+    payload: dict,
+    *,
+    mode: str,
+) -> dict | None:
+    if "resume_contract" not in job:
+        expected = _video_edit_resume_expected_output_count(payload, mode)
+        if "artifact_receipt_prefix" in job:
+            try:
+                uncontracted_prefix = (
+                    video_editengine1.normalize_artifact_receipt_prefix(
+                        job.get("artifact_receipt_prefix"),
+                        expected_output_count=expected,
+                    )
+                )
+            except ValueError:
+                raise LocalVideoEditError(
+                    "video_local_edit_resume_contract_invalid"
+                ) from None
+            if uncontracted_prefix:
+                raise LocalVideoEditError(
+                    "video_local_edit_resume_contract_invalid"
+                )
+        if "delivery_cursor" in job and (
+            isinstance(job.get("delivery_cursor"), bool)
+            or not isinstance(job.get("delivery_cursor"), int)
+            or job.get("delivery_cursor") != 0
+        ):
+            raise LocalVideoEditError(
+                "video_local_edit_resume_contract_invalid"
+            )
+        return None
+    try:
+        contract = video_editengine1.normalize_video_local_edit_resume_contract(
+            job.get("resume_contract")
+        )
+    except ValueError:
+        raise LocalVideoEditError("video_local_edit_resume_contract_invalid") from None
+    expected = _video_edit_resume_expected_output_count(payload, mode)
+    if contract["expected_output_count"] != expected:
+        raise LocalVideoEditError("video_local_edit_resume_contract_invalid")
+    if "artifact_receipt_prefix" in job:
+        try:
+            top_level_prefix = video_editengine1.normalize_artifact_receipt_prefix(
+                job.get("artifact_receipt_prefix"),
+                expected_output_count=expected,
+            )
+        except ValueError:
+            raise LocalVideoEditError("video_local_edit_resume_contract_invalid") from None
+        if top_level_prefix != contract["artifact_receipt_prefix"]:
+            raise LocalVideoEditError("video_local_edit_resume_contract_invalid")
+    if "delivery_cursor" in job and (
+        isinstance(job.get("delivery_cursor"), bool)
+        or not isinstance(job.get("delivery_cursor"), int)
+        or job.get("delivery_cursor") != contract["prefix_count"]
+    ):
+        raise LocalVideoEditError("video_local_edit_resume_contract_invalid")
+    source_sha256 = str(job.get("source_sha256") or "").strip().lower()
+    if contract["prefix_count"] and (
+        len(source_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in source_sha256)
+    ):
+        raise LocalVideoEditError("video_local_edit_resume_source_invalid")
+    return contract
+
+
+def _video_edit_receipt_identity(
+    receipts: list[dict],
+    *,
+    compatibility: str,
+) -> dict:
+    if not receipts:
+        return {}
+    return receipts[0] if compatibility == "legacy_receipt_only" else receipts[-1]
+
+
+def _video_edit_terminal_receipt_from_durable_receipts(
+    *,
+    receipts: list[dict],
+    compatibility: str,
+    source_video_path: str,
+    source_sha256: str,
+    output_names: list[str],
+    charge_policy: str,
+    charge_status: str,
+    charged_xu: int,
+) -> dict:
+    identity = _video_edit_receipt_identity(
+        receipts,
+        compatibility=compatibility,
+    )
+    joined_hashes = "|".join(str(item["sha256"]) for item in receipts)
+    return {
+        "delivery_message_id": str(identity.get("message_id") or ""),
+        "delivery_file_id": str(identity.get("file_id") or ""),
+        "source_video_path": source_video_path,
+        "source_sha256": source_sha256,
+        "output_path": ",".join(output_names),
+        "output_size_bytes": sum(int(item["size"]) for item in receipts),
+        "output_sha256": hashlib.sha256(joined_hashes.encode("utf-8")).hexdigest(),
+        "ffprobe": dict(receipts[0].get("ffprobe") or {}) if receipts else {},
+        "output_count": len(receipts),
+        "artifacts": receipts,
+        "charge_policy": charge_policy,
+        "charge_status": charge_status,
+        "charged_xu": charged_xu,
+    }
+
+
 def run_video_local_edit(job: dict) -> None:
+    job_started_monotonic = time.monotonic()
     job_id = job.get("id")
+    if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
+        raise LocalVideoEditError("video_local_edit_job_id_invalid")
+    raw_claim_attempt = job.get("claim_attempt")
+    if (
+        isinstance(raw_claim_attempt, bool)
+        or not isinstance(raw_claim_attempt, int)
+        or raw_claim_attempt <= 0
+    ):
+        raise LocalVideoEditError("video_local_edit_claim_attempt_invalid")
+    claim_attempt = raw_claim_attempt
+    project_workspace: Path | None = None
     workspace: Path | None = None
+    liveness: _VideoEditJobLiveness | None = None
     terminal_status = "failed"
     terminal_detail = "failed_no_charge"
     output_file_ids: list[str] = []
     terminal_receipt: dict = {}
     delivery_receipts: list[dict] = []
+    resume_prefix_count = 0
     expected_output_total = 0
     source_video_path = ""
     source_sha256 = ""
+    media_lane = ""
+    active_delivery_cursor: video_edit_long_media.DeliveryCursor | None = None
+    receipt_identity_compatibility = "strict"
+    cleanup_intent: dict | None = None
+    cleanup_intent_evidence: dict = {
+        "persisted": False,
+        "workspace_present": False,
+    }
     try:
         payload = json.loads(str(job.get("input_file_id") or "") or "{}")
         if not isinstance(payload, dict):
@@ -962,6 +2350,9 @@ def run_video_local_edit(job: dict) -> None:
         chat_id = str(payload.get("chat_id") or "")
         if not source_file_id or not chat_id:
             raise LocalVideoEditError("video_local_edit_missing_input")
+        persisted_media_lane = str(payload.get("media_lane") or "").strip()
+        if persisted_media_lane in {"short_media", "large_media"}:
+            media_lane = persisted_media_lane
         price_xu = _strict_video_edit_price(payload.get("price_xu", 0))
         quoted_price_xu = _strict_video_edit_price(
             payload.get("quoted_price_xu", 0)
@@ -1085,28 +2476,458 @@ def run_video_local_edit(job: dict) -> None:
                 )
             ):
                 raise LocalVideoEditError("video_local_edit_plan_missing")
+        if mode == "manual":
+            raw_plan = dict(submitted_manual_plan or {})
+            if free_edit and "source" in raw_plan:
+                raise LocalVideoEditError("video_local_edit_legacy_plan_invalid")
+            if "source" in raw_plan:
+                # Historic paid payloads carried a path-shaped alias that must
+                # never override the freshly downloaded Telegram input.
+                raw_plan.pop("source", None)
+                if not raw_plan:
+                    raise LocalVideoEditError("video_local_edit_plan_missing")
+            logical_concat_sources = list(preflight_concat_sources)
+            logical_logo_source = dict(preflight_logo_source)
+            logical_subtitle_source = dict(preflight_subtitle_source)
+        else:
+            raw_plan = dict(submitted_manual_plan or {})
+            logical_concat_sources = []
+            logical_logo_source = {}
+            logical_subtitle_source = {}
+        resume_contract = _video_edit_normalize_resume_contract(
+            job,
+            payload,
+            mode=mode,
+        )
+        if resume_contract is not None:
+            delivery_receipts.extend(resume_contract["artifact_receipt_prefix"])
+            resume_prefix_count = resume_contract["prefix_count"]
+            output_file_ids.extend(
+                str(item["file_id"]) for item in delivery_receipts
+            )
+            expected_output_total = resume_contract["expected_output_count"]
+            if resume_prefix_count:
+                receipt_identity_compatibility = resume_contract["compatibility"]
+            source_sha256 = str(job.get("source_sha256") or "").strip().lower()
+            raw_resume_cursor = resume_contract.get("delivery_cursor")
+            if raw_resume_cursor is not None:
+                active_delivery_cursor = (
+                    video_edit_long_media.DeliveryCursor.from_mapping(
+                        raw_resume_cursor
+                    )
+                )
+            source_video_path = os.path.basename(
+                str(payload.get("source_file_name") or "video.mp4")
+            )
+
+            if (
+                active_delivery_cursor is not None
+                and active_delivery_cursor.state in {"sending", "unknown"}
+            ):
+                terminal_detail = json.dumps(
+                    {
+                        "local1": 1,
+                        "stage": "delivery_unknown",
+                        "reason": "durable_delivery_cursor_ambiguous",
+                        "delivered": len(delivery_receipts),
+                        "total": expected_output_total,
+                        "charge": 0,
+                        "cleanup": "done",
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                terminal_status = "failed"
+                return
+
+            if (
+                active_delivery_cursor is not None
+                and active_delivery_cursor.state == "accepted"
+            ):
+                delivered_cursor = video_edit_long_media.DeliveryCursor(
+                    state="delivered",
+                    output_index=active_delivery_cursor.output_index,
+                    attempt_id=active_delivery_cursor.attempt_id,
+                    message_id=active_delivery_cursor.message_id,
+                    file_id=active_delivery_cursor.file_id,
+                )
+                delivered_ack = _local1_progress(
+                    job_id,
+                    "delivering",
+                    processed=len(delivery_receipts),
+                    total=expected_output_total,
+                    delivered=len(delivery_receipts),
+                    artifact_receipts=delivery_receipts,
+                    delivery_cursor=delivered_cursor.to_mapping(),
+                    claim_attempt=claim_attempt,
+                )
+                if (
+                    not isinstance(delivered_ack, dict)
+                    or delivered_ack.get("ok") is not True
+                ):
+                    raise LocalVideoEditError(
+                        "video_local_edit_delivery_cursor_rejected"
+                    )
+                active_delivery_cursor = delivered_cursor
+
+            if len(delivery_receipts) == expected_output_total:
+                try:
+                    project_workspace = (
+                        video_edit_cleanup_audit.discover_project_workspace(
+                            video_local_validation.VIDEO_LOCAL_WORKSPACE_ROOT,
+                            job_id,
+                        )
+                    )
+                except ValueError as exc:
+                    raise LocalVideoEditError(
+                        str(exc) or "cleanup_project_workspace_invalid"
+                    ) from None
+                output_names = (
+                    [f"toan_aas_video_edit_{job_id}.mp4"]
+                    if mode == "manual"
+                    else [
+                        split_output_name(index, expected_output_total)
+                        for index in range(1, expected_output_total + 1)
+                    ]
+                )
+                terminal_receipt = (
+                    _video_edit_terminal_receipt_from_durable_receipts(
+                        receipts=delivery_receipts,
+                        compatibility=receipt_identity_compatibility,
+                        source_video_path=source_video_path,
+                        source_sha256=source_sha256,
+                        output_names=output_names,
+                        charge_policy=charge_policy,
+                        charge_status=charge_status,
+                        charged_xu=charged_xu,
+                    )
+                )
+                terminal_detail = json.dumps(
+                    {
+                        "local1": 1,
+                        "stage": "delivered",
+                        "operation": mode,
+                        "processed": expected_output_total,
+                        "total": expected_output_total,
+                        "delivered": expected_output_total,
+                        "validation": "passed",
+                        "price_xu": price_xu,
+                        "charge_status": charge_status,
+                        "charged_xu": charged_xu,
+                        "cleanup": "done",
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                terminal_status = "succeeded"
+                return
+        logical_plan = _video_edit_logical_plan(
+            raw_plan,
+            mode=mode,
+            concat_sources=logical_concat_sources,
+            logo_source=logical_logo_source,
+            subtitle_source=logical_subtitle_source,
+        )
+        execution_class = video_edit_long_media.classify_plan_execution(
+            logical_plan
+        )
+        workspace_operations = _video_edit_workspace_operations(
+            mode=mode,
+            logical_plan=logical_plan,
+            execution_class=execution_class,
+            concat_sources=logical_concat_sources,
+            logo_source=logical_logo_source,
+            subtitle_source=logical_subtitle_source,
+        )
+        split_ranges_hint = payload.get("split_ranges")
+        output_count_hint = (
+            len(split_ranges_hint)
+            if mode == "split"
+            and isinstance(split_ranges_hint, list)
+            and split_ranges_hint
+            else 1 if mode == "manual" else None
+        )
+        declared_duration_seconds = _video_edit_positive_number(
+            source_metadata.get("duration")
+        )
+        if declared_duration_seconds is None:
+            duration_ms = _video_edit_positive_number(
+                source_metadata.get("duration_ms"),
+                integer=True,
+            )
+            declared_duration_seconds = (
+                float(duration_ms) / 1000.0 if duration_ms is not None else None
+            )
+        provisional_deadline_seconds = (
+            video_edit_long_media.adaptive_deadline_seconds(
+                source_bytes=_video_edit_declared_total_bytes(
+                    payload,
+                    source_metadata,
+                ),
+                duration_seconds=declared_duration_seconds,
+                width=_video_edit_positive_number(
+                    source_metadata.get("width"),
+                    integer=True,
+                ),
+                height=_video_edit_positive_number(
+                    source_metadata.get("height"),
+                    integer=True,
+                ),
+                output_count=output_count_hint,
+                operation_class=execution_class,
+                maximum_seconds=VIDEO_EDIT_MAX_DEADLINE_SECONDS,
+            )
+        )
+        deadline_monotonic = (
+            job_started_monotonic + provisional_deadline_seconds
+        )
         ffmpeg = local_ffmpeg_path()
         ffprobe = find_ffprobe(ffmpeg_path=ffmpeg)
         if not ffmpeg or not (os.path.exists(ffmpeg) or shutil.which(ffmpeg)):
             raise LocalVideoEditError("ffmpeg_missing")
         if not ffprobe:
             raise LocalVideoEditError("ffprobe_missing")
-        workspace = create_job_workspace(f"job_{job_id}")
-        _local1_progress(job_id, "inspecting_input")
-        source_path = _local1_download_asset(
-            source_file_id,
-            str(payload.get("source_file_name") or "video.mp4"),
-            workspace,
-            ALLOWED_SOURCE_EXTENSIONS,
-            "source",
+        project_workspace, workspace = create_video_edit_claim_workspace(
+            job_id,
+            claim_attempt,
         )
+        cleanup_intent, cleanup_intent_evidence = (
+            prepare_video_edit_cleanup_intent(
+                job_id=job_id,
+                claim_attempt=claim_attempt,
+                workspace=project_workspace,
+                terminal_stage="running",
+                project_workspace=True,
+            )
+        )
+        if (
+            cleanup_intent is None
+            or cleanup_intent_evidence.get("persisted") is not True
+        ):
+            raise LocalVideoEditError(
+                "video_local_edit_cleanup_intent_persistence_failed"
+            )
+        try:
+            media_config = _video_edit_telegram_media_config()
+        except (TypeError, ValueError):
+            raise LocalVideoEditError("invalid_media_transport_config") from None
+        if media_lane == "large_media" and not media_config.is_local:
+            raise LocalVideoEditError(
+                "video_local_edit_large_media_transport_unavailable"
+            )
+        lease_seconds = max(30, min(3600, int(LOCAL_WORKER_MAX_JOB_SECONDS)))
+        interval_seconds = min(30, max(5, lease_seconds // 3))
+        if claim_attempt is None:
+            liveness = video_edit_job_liveness(job_id, lease_seconds, interval_seconds)
+        else:
+            liveness = video_edit_job_liveness(
+                job_id,
+                lease_seconds,
+                interval_seconds,
+                claim_attempt=claim_attempt,
+            )
+        liveness.start()
+        liveness.update_stage("inspecting_input")
+        liveness.assert_healthy()
+
+        def send_video_edit_artifact(
+            artifact_path: str | Path,
+            caption: str,
+            *,
+            output_index: int,
+        ) -> dict:
+            nonlocal active_delivery_cursor, receipt_identity_compatibility
+            sending_cursor = video_edit_long_media.DeliveryCursor(
+                state="sending",
+                output_index=output_index,
+                attempt_id=(
+                    f"delivery-job-{str(job_id).strip()}-claim-{claim_attempt}"
+                    f"-output-{output_index}"
+                ),
+            )
+            sending_ack = _local1_progress(
+                job_id,
+                "delivering",
+                processed=max(1, expected_output_total),
+                total=max(1, expected_output_total),
+                delivered=len(delivery_receipts),
+                artifact_receipts=delivery_receipts,
+                delivery_cursor=sending_cursor.to_mapping(),
+                claim_attempt=claim_attempt,
+            )
+            if not isinstance(sending_ack, dict) or sending_ack.get("ok") is not True:
+                raise LocalVideoEditError(
+                    "video_local_edit_sending_cursor_rejected"
+                )
+            active_delivery_cursor = sending_cursor
+            receipt_identity_compatibility = "strict"
+            try:
+                receipt = video_edit_media_transport.send_artifact_from_path(
+                    config=media_config,
+                    chat_id=chat_id,
+                    artifact=artifact_path,
+                    request=_video_edit_multipart_request,
+                    caption=caption,
+                    deadline_monotonic=deadline_monotonic,
+                )
+            except video_edit_media_transport.MediaTransferError as exc:
+                reason = str(exc.reason or "delivery_unknown")
+                if reason == "delivery_unknown":
+                    reason = "telegram_delivery_outcome_uncertain"
+                elif reason == "delivery_rejected":
+                    rejected_cursor = video_edit_long_media.DeliveryCursor(
+                        state="rejected",
+                        output_index=output_index,
+                        attempt_id=sending_cursor.attempt_id,
+                        deterministic=True,
+                        rejection_code="delivery_rejected",
+                    )
+                    try:
+                        rejected_ack = _local1_progress(
+                            job_id,
+                            "delivering",
+                            processed=max(1, expected_output_total),
+                            total=max(1, expected_output_total),
+                            delivered=len(delivery_receipts),
+                            artifact_receipts=delivery_receipts,
+                            delivery_cursor=rejected_cursor.to_mapping(),
+                            claim_attempt=claim_attempt,
+                        )
+                    except Exception as checkpoint_exc:
+                        raise LocalVideoEditError(
+                            "telegram_delivery_rejected_checkpoint_uncertain"
+                        ) from checkpoint_exc
+                    if (
+                        not isinstance(rejected_ack, dict)
+                        or rejected_ack.get("ok") is not True
+                    ):
+                        raise LocalVideoEditError(
+                            "telegram_delivery_rejected_checkpoint_uncertain"
+                        ) from exc
+                    active_delivery_cursor = rejected_cursor
+                    reason = "telegram_delivery_rejected"
+                else:
+                    reason = f"telegram_{reason}"
+                raise LocalVideoEditError(reason) from exc
+            if not isinstance(
+                receipt,
+                video_edit_media_transport.DeliveryReceipt,
+            ):
+                raise LocalVideoEditError("telegram_delivery_receipt_invalid")
+            return {
+                "sent": True,
+                "message_id": receipt.message_id,
+                "file_id": receipt.file_id,
+                "delivery_method": receipt.delivery_method,
+                "bytes_sent": receipt.bytes_sent,
+                "sha256": receipt.sha256,
+            }
+
+        def persist_delivered_cursor(
+            artifact_receipt: dict,
+            *,
+            output_index: int,
+            total: int,
+        ) -> None:
+            nonlocal active_delivery_cursor
+            if active_delivery_cursor is None:
+                raise LocalVideoEditError("video_local_edit_delivery_cursor_missing")
+            for state in ("accepted", "delivered"):
+                proposed = video_edit_long_media.DeliveryCursor(
+                    state=state,
+                    output_index=output_index,
+                    attempt_id=active_delivery_cursor.attempt_id,
+                    message_id=str(artifact_receipt.get("message_id") or ""),
+                    file_id=str(artifact_receipt.get("file_id") or ""),
+                )
+                checkpoint_ack = _local1_progress(
+                    job_id,
+                    "delivering",
+                    processed=total,
+                    total=total,
+                    delivered=output_index,
+                    artifact_receipts=delivery_receipts,
+                    delivery_cursor=proposed.to_mapping(),
+                    claim_attempt=claim_attempt,
+                )
+                if (
+                    not isinstance(checkpoint_ack, dict)
+                    or checkpoint_ack.get("ok") is not True
+                ):
+                    raise LocalVideoEditError(
+                        "video_local_edit_delivery_cursor_rejected"
+                    )
+                active_delivery_cursor = proposed
+
+        _local1_progress(
+            job_id,
+            "inspecting_input",
+            claim_attempt=claim_attempt,
+        )
+        source_receipt = _video_edit_normalize_download_receipt(
+            _video_edit_download_asset(
+                source_file_id,
+                str(payload.get("source_file_name") or "video.mp4"),
+                workspace,
+                ALLOWED_SOURCE_EXTENSIONS,
+                "source",
+                media_config=media_config,
+                deadline_monotonic=deadline_monotonic,
+            )
+        )
+        source_path = source_receipt.path
+        downloaded_source_sha256 = source_receipt.sha256
+        if (
+            resume_prefix_count
+            and source_sha256 != downloaded_source_sha256
+        ):
+            raise LocalVideoEditError("video_local_edit_source_hash_mismatch")
+        source_sha256 = downloaded_source_sha256
+        expected_source_hashes = _video_edit_queued_source_hashes(payload)
+        if any(value != source_sha256 for value in expected_source_hashes):
+            raise LocalVideoEditError("video_local_edit_source_hash_mismatch")
+        expected_source_sizes = _video_edit_queued_source_sizes(payload)
+        if any(
+            value != source_receipt.bytes_written
+            for value in expected_source_sizes
+        ):
+            raise LocalVideoEditError("video_local_edit_source_size_mismatch")
+        liveness.assert_healthy()
         downloaded_probe = video_local_validation.probe_video_file(
             source_path,
             ffprobe_path=ffprobe,
         )
+        actual_source_size = source_receipt.bytes_written
+        if mode == "manual":
+            deadline_monotonic = _video_edit_promote_deadline(
+                job_started_monotonic=job_started_monotonic,
+                current_deadline_monotonic=deadline_monotonic,
+                source_probe=downloaded_probe,
+                total_input_bytes=source_receipt.bytes_written,
+                output_count=1,
+                execution_class=execution_class,
+            )
+        try:
+            actual_duration_seconds = float(
+                downloaded_probe.get("duration") or 0.0
+            )
+        except (TypeError, ValueError, OverflowError):
+            actual_duration_seconds = 0.0
+        actual_media_lane = video_edit_media_transport.select_media_lane(
+            duration_seconds=actual_duration_seconds,
+            size_bytes=actual_source_size,
+        )
+        media_lane = (
+            "large_media"
+            if persisted_media_lane == "large_media"
+            or actual_media_lane == "large_media"
+            else "short_media"
+        )
         downloaded_validation = video_local_validation.validate_source_metadata(
             downloaded_probe,
-            file_size=os.path.getsize(source_path),
+            file_size=actual_source_size,
+            maximum_bytes=0,
+            maximum_duration_seconds=0,
         )
         if not downloaded_validation.get("ok"):
             raise LocalVideoEditError(
@@ -1122,9 +2943,8 @@ def run_video_local_edit(job: dict) -> None:
             raise LocalVideoEditError(
                 "video_local_edit_split_manual_conflict"
             )
-        source_sha256 = video_ai_edit_validation.sha256_file(source_path)
         source_video_path = os.path.basename(source_path)
-        timeout = min(LOCAL_WORKER_MAX_JOB_SECONDS, max(30, int(payload.get("max_render_seconds") or 600)))
+        timeout = VIDEO_EDIT_MAX_DEADLINE_SECONDS
         if mode == "split":
             submitted_ranges = payload.get("split_ranges")
             if not isinstance(submitted_ranges, list) or not submitted_ranges:
@@ -1152,73 +2972,421 @@ def run_video_local_edit(job: dict) -> None:
             except (TypeError, ValueError, OverflowError) as exc:
                 raise LocalVideoEditError("split_range_invalid") from exc
 
+            deadline_monotonic = _video_edit_promote_deadline(
+                job_started_monotonic=job_started_monotonic,
+                current_deadline_monotonic=deadline_monotonic,
+                source_probe=downloaded_probe,
+                total_input_bytes=source_receipt.bytes_written,
+                output_count=len(ranges),
+                execution_class=execution_class,
+            )
+            workspace_budget_bytes = _video_edit_admit_materialized_workspace(
+                workspace=workspace,
+                operations=workspace_operations,
+                source_receipt=source_receipt,
+                asset_receipts=[],
+                output_count=len(ranges),
+            )
+
+            raw_revision = payload.get("state_revision")
+            if (
+                isinstance(raw_revision, bool)
+                or not isinstance(raw_revision, int)
+                or raw_revision <= 0
+            ):
+                raise LocalVideoEditError("video_local_edit_revision_invalid")
+            split_checkpoint_plan = {
+                "mode": "split",
+                "edit_plan": logical_plan,
+                "source": {
+                    "sha256": source_receipt.sha256,
+                    "byte_count": source_receipt.bytes_written,
+                },
+                "coverage_required": coverage_required,
+                "ranges": [
+                    {
+                        "index": item.index,
+                        "start_ms": item.start_ms,
+                        "end_ms": item.end_ms,
+                    }
+                    for item in ranges
+                ],
+                "assets": [],
+            }
+            split_plan_hash = video_edit_long_media.canonical_plan_hash(
+                split_checkpoint_plan
+            )
+            total = len(ranges)
+            if resume_contract is not None:
+                if total != expected_output_total:
+                    raise LocalVideoEditError(
+                        "video_local_edit_resume_output_count_mismatch"
+                    )
+            else:
+                expected_output_total = total
+
+            def split_checkpoint_identity(index: int) -> tuple[str, Path]:
+                return (
+                    video_edit_long_media.project_key(
+                        user_id=payload_user_id,
+                        source_sha256=source_sha256,
+                        plan=split_checkpoint_plan,
+                        revision=raw_revision,
+                        output_index=index,
+                    ),
+                    project_workspace
+                    / f"output_{index:06d}.checkpoint.json",
+                )
+
+            def persist_split_checkpoint(
+                *,
+                planned_range: SplitRange,
+                output_path: Path,
+                validation: dict,
+            ) -> dict:
+                index = planned_range.index
+                artifact_size = int(os.path.getsize(output_path))
+                artifact_sha256 = video_ai_edit_validation.sha256_file(
+                    output_path
+                )
+                raw_checkpoint_container = str(
+                    validation.get("format_name") or "mp4"
+                ).strip().lower()
+                checkpoint_containers = {
+                    token.strip()
+                    for token in raw_checkpoint_container.split(",")
+                    if token.strip()
+                }
+                checkpoint_container = (
+                    "mp4"
+                    if "mp4" in checkpoint_containers
+                    else raw_checkpoint_container
+                )
+                artifact_evidence = video_edit_long_media.ArtifactEvidence(
+                    relative_path=output_path.relative_to(
+                        project_workspace
+                    ).as_posix(),
+                    sha256=artifact_sha256,
+                    byte_count=artifact_size,
+                    duration_ms=int(validation.get("duration_ms") or 0),
+                    width=int(validation.get("width") or 0),
+                    height=int(validation.get("height") or 0),
+                    container=checkpoint_container,
+                )
+                part = video_edit_long_media.PartCheckpoint(
+                    part_id=video_edit_long_media.stable_part_id(
+                        index=index,
+                        start_ms=planned_range.start_ms,
+                        end_ms=planned_range.end_ms,
+                    ),
+                    index=index,
+                    start_ms=planned_range.start_ms,
+                    end_ms=planned_range.end_ms,
+                    artifact=artifact_evidence,
+                )
+                project_identity, checkpoint_path = (
+                    split_checkpoint_identity(index)
+                )
+                checkpoint = video_edit_long_media.LongMediaCheckpoint(
+                    project_key=project_identity,
+                    source_sha256=source_sha256,
+                    plan_hash=split_plan_hash,
+                    revision=raw_revision,
+                    output_index=index,
+                    execution_class=execution_class,
+                    stage="delivery_ready",
+                    progress=video_edit_long_media.ProgressState(
+                        stage="delivery_ready",
+                        completed_units=1,
+                        total_units=1,
+                        unit="outputs",
+                        detail="split",
+                    ),
+                    parts=(part,),
+                    canonical=artifact_evidence,
+                    delivery=video_edit_long_media.DeliveryCursor(
+                        output_index=index,
+                    ),
+                    liveness_epoch_ms=max(0, int(time.time() * 1000)),
+                )
+                video_edit_long_media.write_checkpoint_atomic(
+                    checkpoint_path,
+                    checkpoint,
+                )
+                return {
+                    "index": index,
+                    "path": str(output_path),
+                    "duration_ms": planned_range.duration_ms,
+                    "validation": validation,
+                    "artifact_size": artifact_size,
+                    "artifact_sha256": artifact_sha256,
+                }
+
+            prepared_by_index: dict[int, dict] = {}
+            missing_ranges: list[SplitRange] = []
+            for planned_range in ranges:
+                index = planned_range.index
+                project_identity, checkpoint_path = split_checkpoint_identity(
+                    index
+                )
+                checkpoint = video_edit_long_media.try_load_checkpoint(
+                    checkpoint_path,
+                    project_key=project_identity,
+                    source_sha256=source_sha256,
+                    plan_hash=split_plan_hash,
+                    revision=raw_revision,
+                    output_index=index,
+                )
+                if checkpoint is None or checkpoint.canonical is None:
+                    missing_ranges.append(planned_range)
+                    continue
+                recovered_path = (
+                    project_workspace / checkpoint.canonical.relative_path
+                )
+                try:
+                    recovered_probe = video_local_validation.probe_video_file(
+                        recovered_path,
+                        ffprobe_path=ffprobe,
+                    )
+                    checkpoint_probe = {
+                        "duration_ms": int(
+                            recovered_probe.get("duration_ms") or 0
+                        ),
+                        "width": int(recovered_probe.get("width") or 0),
+                        "height": int(recovered_probe.get("height") or 0),
+                        "container": str(
+                            recovered_probe.get("format_name") or ""
+                        )
+                        .strip()
+                        .lower(),
+                    }
+                    recovery = video_edit_long_media.recover_canonical_output(
+                        checkpoint,
+                        workspace=project_workspace,
+                        ffprobe_evidence=checkpoint_probe,
+                        project_key=project_identity,
+                        source_sha256=source_sha256,
+                        plan_hash=split_plan_hash,
+                        revision=raw_revision,
+                        output_index=index,
+                    )
+                    reusable_part = video_edit_long_media.validate_reusable_part(
+                        checkpoint,
+                        part_id=video_edit_long_media.stable_part_id(
+                            index=index,
+                            start_ms=planned_range.start_ms,
+                            end_ms=planned_range.end_ms,
+                        ),
+                        workspace=project_workspace,
+                        ffprobe_evidence=checkpoint_probe,
+                        project_key=project_identity,
+                        source_sha256=source_sha256,
+                        plan_hash=split_plan_hash,
+                        revision=raw_revision,
+                        output_index=index,
+                        expected_start_ms=planned_range.start_ms,
+                        expected_end_ms=planned_range.end_ms,
+                    )
+                except (OSError, TypeError, ValueError, OverflowError):
+                    recovery = video_edit_long_media.RecoveryDecision(
+                        False,
+                        "canonical_invalid",
+                    )
+                    reusable_part = None
+                if recovery.reason == "delivery_fenced":
+                    raise LocalVideoEditError(
+                        "telegram_delivery_outcome_uncertain"
+                    )
+                if (
+                    recovery.allowed
+                    and recovery.artifact is not None
+                    and reusable_part is not None
+                    and video_editengine1.valid_mp4_delivery_probe(
+                        recovered_probe
+                    )
+                    and delivery_file_allowed(
+                        recovered_path,
+                        workspace=project_workspace,
+                    )
+                ):
+                    prepared_by_index[index] = {
+                        "index": index,
+                        "path": str(recovered_path),
+                        "duration_ms": planned_range.duration_ms,
+                        "validation": dict(recovered_probe),
+                        "artifact_size": recovery.artifact.byte_count,
+                        "artifact_sha256": recovery.artifact.sha256,
+                    }
+                else:
+                    missing_ranges.append(planned_range)
+
+            reused_output_count = len(prepared_by_index)
+
             def on_split_progress(status: dict) -> None:
                 _local1_progress(
                     job_id,
                     str(status.get("stage") or "processing_video"),
-                    processed=int(status.get("processed") or 0),
-                    total=int(status.get("total") or len(ranges) or 1),
-                    delivered=0,
+                    processed=min(
+                        total,
+                        reused_output_count
+                        + int(status.get("processed") or 0),
+                    ),
+                    total=total,
+                    delivered=resume_prefix_count,
+                    claim_attempt=claim_attempt,
                 )
 
-            result = execute_split_plan(
-                source_path,
-                ranges,
-                workspace=workspace,
-                coverage_required=coverage_required,
-                ffmpeg_path=ffmpeg,
-                ffprobe_path=ffprobe,
-                timeout=timeout,
-                progress=on_split_progress,
-            )
-            outputs = list(result.get("outputs") or [])
-            total = len(outputs)
-            expected_output_total = total
+            if missing_ranges:
+                liveness.update_stage("processing_video")
+                liveness.assert_healthy()
+                render_ranges = (
+                    missing_ranges
+                    if len(missing_ranges) == total
+                    else [
+                        SplitRange(
+                            index=position,
+                            start_ms=item.start_ms,
+                            end_ms=item.end_ms,
+                        )
+                        for position, item in enumerate(
+                            missing_ranges,
+                            start=1,
+                        )
+                    ]
+                )
+                result = execute_split_plan(
+                    source_path,
+                    render_ranges,
+                    workspace=workspace,
+                    coverage_required=(
+                        coverage_required
+                        if len(missing_ranges) == total
+                        else False
+                    ),
+                    ffmpeg_path=ffmpeg,
+                    ffprobe_path=ffprobe,
+                    timeout=timeout,
+                    progress=on_split_progress,
+                    deadline_monotonic=deadline_monotonic,
+                    workspace_budget_bytes=workspace_budget_bytes,
+                )
+                liveness.assert_healthy()
+                rendered_outputs = list(result.get("outputs") or [])
+                if len(rendered_outputs) != len(missing_ranges):
+                    raise LocalVideoEditError(
+                        "video_local_edit_split_output_count_mismatch"
+                    )
+                try:
+                    for rendered_position, (item, planned_range) in enumerate(
+                        zip(rendered_outputs, missing_ranges),
+                        start=1,
+                    ):
+                        if not isinstance(item, dict):
+                            raise ValueError("split output invalid")
+                        declared_index = item.get(
+                            "index",
+                            rendered_position,
+                        )
+                        if (
+                            isinstance(declared_index, bool)
+                            or not isinstance(declared_index, int)
+                            or declared_index != rendered_position
+                        ):
+                            raise ValueError("split output index invalid")
+                        output_path = Path(str(item.get("path") or ""))
+                        validation = dict(item.get("validation") or {})
+                        if (
+                            not video_editengine1.valid_mp4_delivery_probe(
+                                validation
+                            )
+                            or not delivery_file_allowed(
+                                output_path,
+                                workspace=workspace,
+                            )
+                        ):
+                            raise ValueError("split output validation invalid")
+                        if len(missing_ranges) != total:
+                            canonical_output = (
+                                workspace
+                                / split_output_name(
+                                    planned_range.index,
+                                    total,
+                                )
+                            )
+                            if output_path != canonical_output:
+                                os.replace(output_path, canonical_output)
+                                output_path = canonical_output
+                        prepared_by_index[planned_range.index] = (
+                            persist_split_checkpoint(
+                                planned_range=planned_range,
+                                output_path=output_path,
+                                validation=validation,
+                            )
+                        )
+                except (
+                    OSError,
+                    TypeError,
+                    ValueError,
+                    video_edit_long_media.CheckpointError,
+                ) as exc:
+                    raise LocalVideoEditError(
+                        "video_local_edit_checkpoint_persistence_failed"
+                    ) from exc
+
+            if set(prepared_by_index) != set(range(1, total + 1)):
+                raise LocalVideoEditError(
+                    "video_local_edit_split_output_index_mismatch"
+                )
+            outputs = [
+                prepared_by_index[index]
+                for index in range(1, total + 1)
+            ]
+            liveness.update_stage("delivering")
             for index, item in enumerate(outputs, start=1):
                 output_path = str(item.get("path") or "")
-                if not video_editengine1.valid_mp4_delivery_probe(item.get("validation")):
-                    raise LocalVideoEditError("output_validation_failed")
-                if not delivery_file_allowed(output_path, workspace=workspace):
-                    raise LocalVideoEditError("forbidden_delivery_artifact")
-                _local1_progress(job_id, "delivering", processed=total, total=total, delivered=index - 1)
+                if index <= resume_prefix_count:
+                    continue
+                artifact_size = int(item["artifact_size"])
+                artifact_sha256 = str(item["artifact_sha256"])
+                _local1_progress(
+                    job_id,
+                    "delivering",
+                    processed=total,
+                    total=total,
+                    delivered=index - 1,
+                    claim_attempt=claim_attempt,
+                )
                 duration_seconds = max(0.0, float(item.get("duration_ms") or 0) / 1000)
                 delivery_caption = (
                     f"✅ Phần {index}/{total} · {duration_seconds:.1f} giây · Miễn phí · 0 Xu"
                     if free_edit
                     else f"✅ Phần {index}/{total} · {duration_seconds:.1f} giây · chỉ ghi phí sau khi giao đủ kết quả"
                 )
-                delivery = telegram_send_video_receipt(
-                    chat_id,
+                liveness.assert_healthy()
+                delivery = send_video_edit_artifact(
                     output_path,
                     delivery_caption,
-                    filename=os.path.basename(output_path),
+                    output_index=index,
                 )
-                message_id, file_id = video_editengine1.telegram_delivery_identity(delivery)
-                if delivery.get("sent") is True and (not message_id or not file_id):
-                    raise LocalVideoEditError("telegram_delivery_receipt_invalid")
-                if not message_id or not file_id:
-                    raise LocalVideoEditError("delivery_receipt_missing")
-                output_file_ids.append(file_id)
-                delivery_receipts.append({
-                    "index": index,
-                    "message_id": message_id,
-                    "file_id": file_id,
-                    "size": int(os.path.getsize(output_path)),
-                    "sha256": video_ai_edit_validation.sha256_file(output_path),
-                    "ffprobe": dict(item.get("validation") or {}),
-                })
-                _local1_progress(
-                    job_id,
-                    "delivering",
-                    processed=total,
+                artifact_receipt = _video_edit_artifact_receipt(
+                    delivery,
+                    index=index,
+                    artifact_size=artifact_size,
+                    artifact_sha256=artifact_sha256,
+                    ffprobe=dict(item.get("validation") or {}),
+                )
+                delivery_receipts.append(artifact_receipt)
+                output_file_ids.append(artifact_receipt["file_id"])
+                persist_delivered_cursor(
+                    artifact_receipt,
+                    output_index=index,
                     total=total,
-                    delivered=index,
-                    artifact_receipts=delivery_receipts,
                 )
+                liveness.assert_healthy()
             joined_hashes = "|".join(item["sha256"] for item in delivery_receipts)
             terminal_receipt = {
-                "delivery_message_id": str(delivery_receipts[0]["message_id"] if delivery_receipts else ""),
-                "delivery_file_id": str(delivery_receipts[0]["file_id"] if delivery_receipts else ""),
+                "delivery_message_id": str(delivery_receipts[-1]["message_id"] if delivery_receipts else ""),
+                "delivery_file_id": str(delivery_receipts[-1]["file_id"] if delivery_receipts else ""),
                 "source_video_path": source_video_path,
                 "source_sha256": source_sha256,
                 "output_path": ",".join(os.path.basename(str(item.get("path") or "")) for item in outputs),
@@ -1245,16 +3413,7 @@ def run_video_local_edit(job: dict) -> None:
                 "cleanup": "done",
             }, ensure_ascii=False, separators=(",", ":"))
         else:
-            raw_plan = dict(payload.get("manual_edit_plan") or {})
-            if free_edit and "source" in raw_plan:
-                raise LocalVideoEditError("video_local_edit_legacy_plan_invalid")
-            if "source" in raw_plan:
-                # Historic paid payloads carried a path-shaped alias that must
-                # never override the freshly downloaded Telegram input.
-                raw_plan.pop("source", None)
-                if not raw_plan:
-                    raise LocalVideoEditError("video_local_edit_plan_missing")
-            plan = raw_plan or _legacy_local1_plan(payload, source_path)
+            plan = deepcopy(raw_plan) or _legacy_local1_plan(payload, source_path)
             plan["input_video"] = source_path
             duration_hint = int(downloaded_validation.get("duration_ms") or 0)
             if (
@@ -1270,16 +3429,34 @@ def run_video_local_edit(job: dict) -> None:
             if not isinstance(submitted_concat_sources, list):
                 raise LocalVideoEditError("video_local_edit_asset_contract_invalid")
             concat_paths: list[str] = []
+            asset_receipts: list[
+                video_edit_media_transport.DownloadReceipt
+            ] = []
+            checkpoint_asset_evidence: list[dict] = []
             for index, source in enumerate(submitted_concat_sources, start=1):
                 if not isinstance(source, dict) or not source.get("file_id"):
                     raise LocalVideoEditError("video_local_edit_asset_contract_invalid")
-                concat_paths.append(_local1_download_asset(
-                    str(source.get("file_id") or ""),
-                    str(source.get("file_name") or f"concat_{index}.mp4"),
-                    workspace,
-                    ALLOWED_SOURCE_EXTENSIONS,
-                    f"concat_{index:03d}",
-                ))
+                concat_receipt = _video_edit_normalize_download_receipt(
+                    _video_edit_download_asset(
+                        str(source.get("file_id") or ""),
+                        str(source.get("file_name") or f"concat_{index}.mp4"),
+                        workspace,
+                        ALLOWED_SOURCE_EXTENSIONS,
+                        f"concat_{index:03d}",
+                        media_config=media_config,
+                        deadline_monotonic=deadline_monotonic,
+                    )
+                )
+                asset_receipts.append(concat_receipt)
+                checkpoint_asset_evidence.append(
+                    {
+                        "role": "concat",
+                        "index": index,
+                        "sha256": concat_receipt.sha256,
+                        "byte_count": concat_receipt.bytes_written,
+                    }
+                )
+                concat_paths.append(concat_receipt.path)
             plan["concat_inputs"] = concat_paths
             if payload.get("logo_source") is not None and not isinstance(payload.get("logo_source"), dict):
                 raise LocalVideoEditError("video_local_edit_asset_contract_invalid")
@@ -1287,16 +3464,29 @@ def run_video_local_edit(job: dict) -> None:
             if logo_source and not logo_source.get("file_id"):
                 raise LocalVideoEditError("video_local_edit_asset_contract_invalid")
             if logo_source.get("file_id"):
-                logo_path = _local1_download_asset(
-                    str(logo_source.get("file_id") or ""),
-                    str(logo_source.get("file_name") or "logo.png"),
-                    workspace,
-                    ALLOWED_LOGO_EXTENSIONS,
-                    "logo",
-                    max_bytes=10 * 1024 * 1024,
+                logo_receipt = _video_edit_normalize_download_receipt(
+                    _video_edit_download_asset(
+                        str(logo_source.get("file_id") or ""),
+                        str(logo_source.get("file_name") or "logo.png"),
+                        workspace,
+                        ALLOWED_LOGO_EXTENSIONS,
+                        "logo",
+                        max_bytes=10 * 1024 * 1024,
+                        media_config=media_config,
+                        deadline_monotonic=deadline_monotonic,
+                    )
+                )
+                asset_receipts.append(logo_receipt)
+                checkpoint_asset_evidence.append(
+                    {
+                        "role": "logo",
+                        "index": 1,
+                        "sha256": logo_receipt.sha256,
+                        "byte_count": logo_receipt.bytes_written,
+                    }
                 )
                 logo_config = dict(plan.get("logo_overlay") or {})
-                logo_config["path"] = logo_path
+                logo_config["path"] = logo_receipt.path
                 plan["logo_overlay"] = logo_config
             if payload.get("subtitle_source") is not None and not isinstance(payload.get("subtitle_source"), dict):
                 raise LocalVideoEditError("video_local_edit_asset_contract_invalid")
@@ -1304,15 +3494,148 @@ def run_video_local_edit(job: dict) -> None:
             if subtitle_source and not subtitle_source.get("file_id"):
                 raise LocalVideoEditError("video_local_edit_asset_contract_invalid")
             if subtitle_source.get("file_id"):
-                plan["subtitle_file"] = _local1_download_asset(
-                    str(subtitle_source.get("file_id") or ""),
-                    str(subtitle_source.get("file_name") or "subtitle.srt"),
-                    workspace,
-                    ALLOWED_SUBTITLE_EXTENSIONS,
-                    "subtitle",
-                    max_bytes=5 * 1024 * 1024,
+                subtitle_receipt = _video_edit_normalize_download_receipt(
+                    _video_edit_download_asset(
+                        str(subtitle_source.get("file_id") or ""),
+                        str(subtitle_source.get("file_name") or "subtitle.srt"),
+                        workspace,
+                        ALLOWED_SUBTITLE_EXTENSIONS,
+                        "subtitle",
+                        max_bytes=5 * 1024 * 1024,
+                        media_config=media_config,
+                        deadline_monotonic=deadline_monotonic,
+                    )
                 )
+                asset_receipts.append(subtitle_receipt)
+                checkpoint_asset_evidence.append(
+                    {
+                        "role": "subtitle",
+                        "index": 1,
+                        "sha256": subtitle_receipt.sha256,
+                        "byte_count": subtitle_receipt.bytes_written,
+                    }
+                )
+                plan["subtitle_file"] = subtitle_receipt.path
+            total_input_bytes = source_receipt.bytes_written + sum(
+                receipt.bytes_written for receipt in asset_receipts
+            )
+            deadline_monotonic = _video_edit_promote_deadline(
+                job_started_monotonic=job_started_monotonic,
+                current_deadline_monotonic=deadline_monotonic,
+                source_probe=downloaded_probe,
+                total_input_bytes=total_input_bytes,
+                output_count=1,
+                execution_class=execution_class,
+            )
+            workspace_budget_bytes = _video_edit_admit_materialized_workspace(
+                workspace=workspace,
+                operations=workspace_operations,
+                source_receipt=source_receipt,
+                asset_receipts=asset_receipts,
+                output_count=1,
+            )
+            raw_revision = payload.get("state_revision")
+            if (
+                isinstance(raw_revision, bool)
+                or not isinstance(raw_revision, int)
+                or raw_revision <= 0
+            ):
+                raise LocalVideoEditError("video_local_edit_revision_invalid")
+            checkpoint_plan = {
+                "mode": "manual",
+                "edit_plan": logical_plan,
+                "source": {
+                    "sha256": source_receipt.sha256,
+                    "byte_count": source_receipt.bytes_written,
+                },
+                "assets": checkpoint_asset_evidence,
+            }
+            checkpoint_plan_hash = video_edit_long_media.canonical_plan_hash(
+                checkpoint_plan
+            )
+            checkpoint_project_key = video_edit_long_media.project_key(
+                user_id=payload_user_id,
+                source_sha256=source_sha256,
+                plan=checkpoint_plan,
+                revision=raw_revision,
+                output_index=1,
+            )
+            checkpoint_path = (
+                project_workspace / "output_000001.checkpoint.json"
+            )
             output_path = workspace / f"toan_aas_video_edit_{job_id}.mp4"
+            validation: dict = {}
+            output_size_bytes = 0
+            output_sha256 = ""
+            recovered_canonical = False
+
+            existing_checkpoint = video_edit_long_media.try_load_checkpoint(
+                checkpoint_path,
+                project_key=checkpoint_project_key,
+                source_sha256=source_sha256,
+                plan_hash=checkpoint_plan_hash,
+                revision=raw_revision,
+                output_index=1,
+            )
+            if (
+                existing_checkpoint is not None
+                and existing_checkpoint.canonical is not None
+            ):
+                recovered_path = (
+                    project_workspace
+                    / existing_checkpoint.canonical.relative_path
+                )
+                try:
+                    recovered_probe = video_local_validation.probe_video_file(
+                        recovered_path,
+                        ffprobe_path=ffprobe,
+                    )
+                    recovery = video_edit_long_media.recover_canonical_output(
+                        existing_checkpoint,
+                        workspace=project_workspace,
+                        ffprobe_evidence={
+                            "duration_ms": int(
+                                recovered_probe.get("duration_ms") or 0
+                            ),
+                            "width": int(recovered_probe.get("width") or 0),
+                            "height": int(recovered_probe.get("height") or 0),
+                            "container": str(
+                                recovered_probe.get("format_name") or ""
+                            )
+                            .strip()
+                            .lower(),
+                        },
+                        project_key=checkpoint_project_key,
+                        source_sha256=source_sha256,
+                        plan_hash=checkpoint_plan_hash,
+                        revision=raw_revision,
+                        output_index=1,
+                    )
+                except (OSError, TypeError, ValueError, OverflowError):
+                    recovery = video_edit_long_media.RecoveryDecision(
+                        False,
+                        "canonical_invalid",
+                    )
+                if recovery.reason == "delivery_fenced":
+                    raise LocalVideoEditError(
+                        "telegram_delivery_outcome_uncertain"
+                    )
+                if (
+                    recovery.allowed
+                    and recovery.artifact is not None
+                    and video_editengine1.valid_mp4_delivery_probe(
+                        recovered_probe
+                    )
+                    and delivery_file_allowed(
+                        recovered_path,
+                        workspace=project_workspace,
+                    )
+                ):
+                    output_path = recovered_path
+                    validation = dict(recovered_probe)
+                    output_size_bytes = recovery.artifact.byte_count
+                    output_sha256 = recovery.artifact.sha256
+                    recovered_canonical = True
 
             def on_manual_progress(status: dict) -> None:
                 _local1_progress(
@@ -1320,53 +3643,146 @@ def run_video_local_edit(job: dict) -> None:
                     str(status.get("stage") or "processing_video"),
                     processed=int(status.get("processed") or 0),
                     total=int(status.get("total") or 1),
+                    claim_attempt=claim_attempt,
                 )
 
-            result = execute_manual_edit(
-                plan,
-                output_path=str(output_path),
-                workspace=workspace,
-                ffmpeg_path=ffmpeg,
-                ffprobe_path=ffprobe,
-                timeout=timeout,
-                progress=on_manual_progress,
+            if not recovered_canonical:
+                liveness.update_stage("processing_video")
+                liveness.assert_healthy()
+                result = execute_manual_edit(
+                    plan,
+                    output_path=str(output_path),
+                    workspace=workspace,
+                    ffmpeg_path=ffmpeg,
+                    ffprobe_path=ffprobe,
+                    timeout=timeout,
+                    progress=on_manual_progress,
+                    deadline_monotonic=deadline_monotonic,
+                    workspace_budget_bytes=workspace_budget_bytes,
+                )
+                liveness.assert_healthy()
+                if not result.get("ok") or not delivery_file_allowed(
+                    output_path,
+                    workspace=workspace,
+                ):
+                    raise LocalVideoEditError("output_validation_failed")
+                validation = dict(result.get("validation") or {})
+                if not video_editengine1.valid_mp4_delivery_probe(validation):
+                    raise LocalVideoEditError("output_validation_failed")
+                output_size_bytes = int(os.path.getsize(output_path))
+                output_sha256 = video_ai_edit_validation.sha256_file(
+                    output_path
+                )
+                try:
+                    raw_checkpoint_container = str(
+                        validation.get("format_name") or "mp4"
+                    ).strip().lower()
+                    checkpoint_containers = {
+                        item.strip()
+                        for item in raw_checkpoint_container.split(",")
+                        if item.strip()
+                    }
+                    checkpoint_container = (
+                        "mp4"
+                        if "mp4" in checkpoint_containers
+                        else raw_checkpoint_container
+                    )
+                    relative_output_path = output_path.relative_to(
+                        project_workspace
+                    ).as_posix()
+                    artifact_evidence = video_edit_long_media.ArtifactEvidence(
+                        relative_path=relative_output_path,
+                        sha256=output_sha256,
+                        byte_count=output_size_bytes,
+                        duration_ms=int(validation.get("duration_ms") or 0),
+                        width=int(validation.get("width") or 0),
+                        height=int(validation.get("height") or 0),
+                        container=checkpoint_container,
+                    )
+                    part = video_edit_long_media.PartCheckpoint(
+                        part_id=video_edit_long_media.stable_part_id(
+                            index=0,
+                            start_ms=0,
+                            end_ms=artifact_evidence.duration_ms,
+                        ),
+                        index=0,
+                        start_ms=0,
+                        end_ms=artifact_evidence.duration_ms,
+                        artifact=artifact_evidence,
+                    )
+                    checkpoint = video_edit_long_media.LongMediaCheckpoint(
+                        project_key=checkpoint_project_key,
+                        source_sha256=source_sha256,
+                        plan_hash=checkpoint_plan_hash,
+                        revision=raw_revision,
+                        output_index=1,
+                        execution_class=execution_class,
+                        stage="delivery_ready",
+                        progress=video_edit_long_media.ProgressState(
+                            stage="delivery_ready",
+                            completed_units=1,
+                            total_units=1,
+                            unit="outputs",
+                            detail="manual",
+                        ),
+                        parts=(part,),
+                        canonical=artifact_evidence,
+                        delivery=video_edit_long_media.DeliveryCursor(
+                            output_index=1,
+                        ),
+                        liveness_epoch_ms=max(0, int(time.time() * 1000)),
+                    )
+                    video_edit_long_media.write_checkpoint_atomic(
+                        checkpoint_path,
+                        checkpoint,
+                    )
+                except (
+                    OSError,
+                    TypeError,
+                    ValueError,
+                    video_edit_long_media.CheckpointError,
+                ) as exc:
+                    raise LocalVideoEditError(
+                        "video_local_edit_checkpoint_persistence_failed"
+                    ) from exc
+            expected_output_total = 1
+            _local1_progress(
+                job_id,
+                "delivering",
+                processed=1,
+                total=1,
+                claim_attempt=claim_attempt,
             )
-            if not result.get("ok") or not delivery_file_allowed(output_path, workspace=workspace):
-                raise LocalVideoEditError("output_validation_failed")
-            validation = dict(result.get("validation") or {})
-            if not video_editengine1.valid_mp4_delivery_probe(validation):
-                raise LocalVideoEditError("output_validation_failed")
-            output_size_bytes = int(os.path.getsize(output_path))
-            output_sha256 = video_ai_edit_validation.sha256_file(output_path)
-            _local1_progress(job_id, "delivering", processed=1, total=1)
+            liveness.update_stage("delivering")
             delivery_caption = (
                 "✅ Video đã chỉnh sửa xong · Miễn phí · 0 Xu."
                 if free_edit
                 else "✅ Video đã chỉnh sửa xong. Hệ thống chỉ ghi phí sau khi giao file MP4 hợp lệ."
             )
-            delivery = telegram_send_video_receipt(
-                chat_id,
-                str(output_path),
+            liveness.assert_healthy()
+            delivery = send_video_edit_artifact(
+                output_path,
                 delivery_caption,
-                filename=output_path.name,
+                output_index=1,
             )
-            message_id, file_id = video_editengine1.telegram_delivery_identity(delivery)
-            if delivery.get("sent") is True and (not message_id or not file_id):
-                raise LocalVideoEditError("telegram_delivery_receipt_invalid")
-            if not message_id or not file_id:
-                raise LocalVideoEditError("delivery_receipt_missing")
-            delivery_receipts.append({
-                "index": 1,
-                "message_id": message_id,
-                "file_id": file_id,
-                "size": output_size_bytes,
-                "sha256": output_sha256,
-                "ffprobe": validation,
-            })
-            output_file_ids.append(file_id)
+            artifact_receipt = _video_edit_artifact_receipt(
+                delivery,
+                index=1,
+                artifact_size=output_size_bytes,
+                artifact_sha256=output_sha256,
+                ffprobe=validation,
+            )
+            delivery_receipts.append(artifact_receipt)
+            output_file_ids.append(artifact_receipt["file_id"])
+            persist_delivered_cursor(
+                artifact_receipt,
+                output_index=1,
+                total=1,
+            )
+            liveness.assert_healthy()
             terminal_receipt = {
-                "delivery_message_id": message_id,
-                "delivery_file_id": file_id,
+                "delivery_message_id": artifact_receipt["message_id"],
+                "delivery_file_id": artifact_receipt["file_id"],
                 "source_video_path": source_video_path,
                 "source_sha256": source_sha256,
                 "output_path": output_path.name,
@@ -1374,6 +3790,7 @@ def run_video_local_edit(job: dict) -> None:
                 "output_sha256": output_sha256,
                 "ffprobe": validation,
                 "output_count": 1,
+                "artifacts": delivery_receipts,
                 "charge_policy": charge_policy,
                 "charge_status": charge_status,
                 "charged_xu": charged_xu,
@@ -1391,14 +3808,20 @@ def run_video_local_edit(job: dict) -> None:
                 "charged_xu": charged_xu,
                 "cleanup": "done",
             }, ensure_ascii=False, separators=(",", ":"))
+        liveness.stop()
+        liveness.assert_healthy()
         terminal_status = "succeeded"
     except (LocalVideoEditError, LocalVideoValidationError) as exc:
         failure_reason = str(getattr(exc, "reason", str(exc)))[:160]
         if delivery_receipts:
+            failure_identity = _video_edit_receipt_identity(
+                delivery_receipts,
+                compatibility=receipt_identity_compatibility,
+            )
             joined_hashes = "|".join(item["sha256"] for item in delivery_receipts)
             terminal_receipt = {
-                "delivery_message_id": str(delivery_receipts[0]["message_id"]),
-                "delivery_file_id": str(delivery_receipts[0]["file_id"]),
+                "delivery_message_id": str(failure_identity["message_id"]),
+                "delivery_file_id": str(failure_identity["file_id"]),
                 "source_video_path": source_video_path,
                 "source_sha256": source_sha256,
                 "output_size_bytes": sum(int(item["size"]) for item in delivery_receipts),
@@ -1432,6 +3855,7 @@ def run_video_local_edit(job: dict) -> None:
                 "stage": "failed_no_charge",
                 "reason": failure_reason,
                 "charge": 0,
+                "charged_xu": 0,
                 "cleanup": "done",
             }, ensure_ascii=False, separators=(",", ":"))
     except Exception as exc:
@@ -1442,10 +3866,14 @@ def run_video_local_edit(job: dict) -> None:
             else f"{type(exc).__name__}:{raw_failure_reason}"
         )[:160]
         if delivery_receipts:
+            failure_identity = _video_edit_receipt_identity(
+                delivery_receipts,
+                compatibility=receipt_identity_compatibility,
+            )
             joined_hashes = "|".join(item["sha256"] for item in delivery_receipts)
             terminal_receipt = {
-                "delivery_message_id": str(delivery_receipts[0]["message_id"]),
-                "delivery_file_id": str(delivery_receipts[0]["file_id"]),
+                "delivery_message_id": str(failure_identity["message_id"]),
+                "delivery_file_id": str(failure_identity["file_id"]),
                 "source_video_path": source_video_path,
                 "source_sha256": source_sha256,
                 "output_size_bytes": sum(int(item["size"]) for item in delivery_receipts),
@@ -1479,30 +3907,89 @@ def run_video_local_edit(job: dict) -> None:
                 "stage": "failed_no_charge",
                 "reason": failure_reason,
                 "charge": 0,
+                "charged_xu": 0,
                 "cleanup": "done",
             }, ensure_ascii=False, separators=(",", ":"))
     finally:
-        cleanup = cleanup_job_workspace(workspace) if workspace else {"ok": True, "removed": False}
+        if liveness is not None:
+            liveness.stop()
         try:
             detail_payload = json.loads(terminal_detail or "{}")
         except (TypeError, ValueError, json.JSONDecodeError):
-            detail_payload = {"local1": 1, "stage": "failed_no_charge", "charge": 0}
-        terminal_status, detail_payload = finalize_video_local_cleanup_state(
-            terminal_status=terminal_status,
-            terminal_detail=detail_payload,
-            delivery_receipts=delivery_receipts,
-            cleanup=cleanup,
-        )
+            detail_payload = {
+                "local1": 1,
+                "stage": "failed_no_charge",
+                "charge": 0,
+                "charged_xu": 0,
+            }
+        terminal_stage = str(detail_payload.get("stage") or "").lower()
+        if (
+            active_delivery_cursor is not None
+            and terminal_stage == "failed_no_charge"
+            and active_delivery_cursor.state != "rejected"
+        ):
+            terminal_stage = "delivery_unknown"
+            detail_payload["stage"] = terminal_stage
+        if active_delivery_cursor is not None and (
+            terminal_stage in {"delivered", "delivery_unknown"}
+            or (
+                terminal_stage == "failed_no_charge"
+                and active_delivery_cursor.state == "rejected"
+            )
+        ):
+            terminal_cursor = active_delivery_cursor
+            if (
+                terminal_stage == "delivery_unknown"
+                and active_delivery_cursor.state == "sending"
+            ):
+                terminal_cursor = video_edit_long_media.DeliveryCursor(
+                    state="unknown",
+                    output_index=active_delivery_cursor.output_index,
+                    attempt_id=active_delivery_cursor.attempt_id,
+                )
+            detail_payload["delivery_cursor"] = terminal_cursor.to_mapping()
+        if cleanup_intent is None:
+            cleanup_intent, cleanup_intent_evidence = (
+                prepare_video_edit_cleanup_intent(
+                    job_id=job_id,
+                    claim_attempt=claim_attempt,
+                    workspace=project_workspace,
+                    terminal_stage=terminal_stage,
+                    project_workspace=True,
+                )
+            )
+        detail_payload["cleanup"] = "pending"
+        detail_payload["cleanup_intent"] = cleanup_intent_evidence
+        if media_lane in {"short_media", "large_media"}:
+            detail_payload["media_lane"] = media_lane
+            if terminal_receipt:
+                terminal_receipt["media_lane"] = media_lane
         terminal_detail = json.dumps(detail_payload, ensure_ascii=False, separators=(",", ":"))
-        update_job(
+        terminal_output_identity = _video_edit_receipt_identity(
+            delivery_receipts,
+            compatibility=receipt_identity_compatibility,
+        )
+        terminal_ack = update_job(
             job_id,
             terminal_status,
             terminal_detail,
-            output_file_id=next((item for item in output_file_ids if item), "")[:500],
+            output_file_id=str(
+                terminal_output_identity.get("file_id")
+                or next((item for item in reversed(output_file_ids) if item), "")
+            )[:500],
             output_url=json.dumps(terminal_receipt, ensure_ascii=False, separators=(",", ":")) if terminal_receipt else "",
             detail_limit=4000,
             output_limit=VIDEO_EDIT_RECEIPT_PAYLOAD_LIMIT,
+            claim_attempt=claim_attempt,
         )
+        if not isinstance(terminal_ack, dict) or terminal_ack.get("ok") is not True:
+            raise LocalVideoEditError("video_local_edit_terminal_update_rejected")
+        if (
+            cleanup_intent is not None
+            and cleanup_intent_evidence.get("workspace_present") is True
+            and terminal_stage != "delivery_unknown"
+        ):
+            reconcile_video_edit_cleanup_intent(cleanup_intent)
 
 
 def _aiedit_progress(job_id, stage: str, **fields) -> None:
@@ -2524,7 +5011,15 @@ def main() -> None:
         name="toan-aas-local-worker-heartbeat",
         daemon=True,
     )
+    cleanup_replay_stop = threading.Event()
+    cleanup_replay_thread = threading.Thread(
+        target=run_video_edit_cleanup_replay_loop,
+        args=(cleanup_replay_stop,),
+        name="toan-aas-video-edit-cleanup-replay",
+        daemon=True,
+    )
     heartbeat_thread.start()
+    cleanup_replay_thread.start()
     try:
         while True:
             try:
@@ -2558,7 +5053,9 @@ def main() -> None:
                 time.sleep(10)
     finally:
         heartbeat_stop.set()
+        cleanup_replay_stop.set()
         heartbeat_thread.join(timeout=2)
+        cleanup_replay_thread.join(timeout=2)
 
 
 if __name__ == "__main__":

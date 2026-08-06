@@ -10,6 +10,9 @@ import os
 import re
 import subprocess
 import math
+import threading
+import time
+from collections import deque
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -769,7 +772,10 @@ def expected_final_timeline_duration_ms(
         )
         if duration_ms <= 0:
             duration_seconds = _number(
-                metadata.get("duration") or item.get("duration"),
+                metadata.get("duration_seconds")
+                or metadata.get("duration")
+                or item.get("duration_seconds")
+                or item.get("duration"),
                 0.0,
             )
             if not math.isfinite(duration_seconds) or duration_seconds <= 0:
@@ -1003,6 +1009,13 @@ def validate_manual_edit_plan_contract(
 
 
 _FFMPEG_FILTER_CACHE: dict[str, tuple[tuple[Any, ...], frozenset[str]]] = {}
+_FFMPEG_DIAGNOSTIC_TAIL_BYTES = 256 * 1024
+# `ffmpeg -filters` is normally a small textual listing.  This leaves generous
+# headroom for supported builds while refusing a hostile or unexpectedly noisy
+# binary before its output can consume unbounded memory.
+_FFMPEG_FILTER_OUTPUT_BYTES = 4 * 1024 * 1024
+_FFMPEG_PIPE_READ_BYTES = 64 * 1024
+_FFMPEG_PIPE_JOIN_SECONDS = 1.0
 
 
 def _ffmpeg_binary_fingerprint(ffmpeg_path: str) -> tuple[Any, ...]:
@@ -1023,6 +1036,7 @@ def available_ffmpeg_filters(
     ffmpeg_path: str,
     *,
     refresh: bool = False,
+    deadline_monotonic: float | None = None,
 ) -> frozenset[str]:
     """Discover filters from the exact FFmpeg binary used by the worker."""
     cache_key = str(Path(str(ffmpeg_path or "")).resolve(strict=False)).lower()
@@ -1031,16 +1045,19 @@ def available_ffmpeg_filters(
     if not refresh and cached and cached[0] == fingerprint:
         return cached[1]
     try:
-        result = subprocess.run(
+        subprocess_timeout = _remaining_ffmpeg_timeout(20, deadline_monotonic)
+        result, stdout_overflow, _stderr_overflow = _capture_bounded_subprocess(
             [str(ffmpeg_path), "-hide_banner", "-filters"],
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
+            timeout=subprocess_timeout,
+            deadline_monotonic=deadline_monotonic,
+            stdout_limit=_FFMPEG_FILTER_OUTPUT_BYTES,
+            stderr_limit=_FFMPEG_DIAGNOSTIC_TAIL_BYTES,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
+        raise LocalVideoEditError("ffmpeg_timeout") from exc
+    except OSError as exc:
         raise LocalVideoEditError("ffmpeg_filter_discovery_failed") from exc
-    if result.returncode != 0:
+    if stdout_overflow or result.returncode != 0:
         raise LocalVideoEditError("ffmpeg_filter_discovery_failed")
     discovered: set[str] = set()
     for line in str(result.stdout or "").splitlines():
@@ -1382,19 +1399,297 @@ def validate_split_ranges(
     return items
 
 
-def _run(command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+def _remaining_ffmpeg_timeout(timeout: int, deadline_monotonic: float | None) -> float:
+    per_call_timeout = float(max(1, int(timeout)))
+    if deadline_monotonic is None:
+        return per_call_timeout
+    remaining = float(deadline_monotonic) - time.monotonic()
+    if remaining <= 0:
+        raise LocalVideoEditError("ffmpeg_timeout")
+    return min(per_call_timeout, remaining)
+
+
+def _enforce_workspace_budget(
+    workspace: str | os.PathLike[str],
+    workspace_budget_bytes: int | None,
+) -> int:
+    if workspace_budget_bytes is None:
+        return enforce_workspace_limit(workspace)
+    return enforce_workspace_limit(
+        workspace,
+        maximum_bytes=int(workspace_budget_bytes),
+    )
+
+
+class _BoundedByteTail:
+    """Retain only the final ``limit`` bytes while a pipe is drained."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = int(limit)
+        self._chunks: deque[bytes] = deque()
+        self._size = 0
+        self.overflowed = False
+
+    def append(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        chunk = bytes(chunk)
+        if len(chunk) >= self.limit:
+            self.overflowed = (
+                self.overflowed
+                or len(chunk) > self.limit
+                or self._size > 0
+            )
+            self._chunks.clear()
+            retained = chunk[-self.limit :]
+            self._chunks.append(retained)
+            self._size = len(retained)
+            return
+        self._chunks.append(chunk)
+        self._size += len(chunk)
+        if self._size > self.limit:
+            self.overflowed = True
+        while self._size > self.limit and self._chunks:
+            overflow = self._size - self.limit
+            oldest = self._chunks[0]
+            if len(oldest) <= overflow:
+                self._chunks.popleft()
+                self._size -= len(oldest)
+                continue
+            self._chunks[0] = oldest[overflow:]
+            self._size -= overflow
+
+    def text(self) -> str:
+        return b"".join(self._chunks).decode("utf-8", errors="replace")
+
+
+def _reap_bounded_process(
+    process: Any,
+    *,
+    deadline_monotonic: float | None = None,
+) -> None:
+    """Stop and reap an unsuccessful capture without an unbounded wait."""
+
+    def cleanup_timeout() -> float:
+        if deadline_monotonic is None:
+            return 0.5
+        return max(
+            0.0,
+            min(0.5, float(deadline_monotonic) - time.monotonic()),
+        )
+
+    try:
+        running = process.poll() is None
+    except OSError:
+        running = True
+    if running:
+        terminate_failed = False
+        try:
+            process.terminate()
+        except OSError:
+            terminate_failed = True
+        if not terminate_failed:
+            try:
+                process.wait(timeout=cleanup_timeout())
+                running = False
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+        if running:
+            try:
+                process.kill()
+            except OSError:
+                pass
+            try:
+                process.wait(timeout=cleanup_timeout())
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+
+
+def _cancel_windows_reader_io(reader: threading.Thread) -> bool:
+    """Cancel a synchronous Windows pipe read owned by ``reader``."""
+    if os.name != "nt" or not reader.is_alive():
+        return False
+    native_id = getattr(reader, "native_id", None)
+    if not isinstance(native_id, int) or native_id <= 0:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenThread.argtypes = (
+            wintypes.DWORD,
+            wintypes.BOOL,
+            wintypes.DWORD,
+        )
+        kernel32.OpenThread.restype = wintypes.HANDLE
+        kernel32.CancelSynchronousIo.argtypes = (wintypes.HANDLE,)
+        kernel32.CancelSynchronousIo.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenThread(0x0001, False, native_id)
+        if not handle:
+            return False
+        try:
+            return bool(kernel32.CancelSynchronousIo(handle))
+        finally:
+            kernel32.CloseHandle(handle)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+
+
+def _capture_bounded_subprocess(
+    command: list[str],
+    *,
+    timeout: float,
+    deadline_monotonic: float | None = None,
+    stdout_limit: int,
+    stderr_limit: int,
+) -> tuple[subprocess.CompletedProcess[str], bool, bool]:
+    """Run a process with concurrently drained, fixed-size diagnostic tails."""
+    timeout_value = float(timeout)
+    started_monotonic = time.monotonic()
+    capture_deadline = started_monotonic + timeout_value
+    if deadline_monotonic is not None:
+        capture_deadline = min(capture_deadline, float(deadline_monotonic))
+
+    def remaining_capture_timeout() -> float:
+        remaining = capture_deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(command, timeout_value)
+        return remaining
+
+    remaining_capture_timeout()
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout_tail = _BoundedByteTail(stdout_limit)
+    stderr_tail = _BoundedByteTail(stderr_limit)
+    reader_errors: list[BaseException] = []
+
+    def drain(pipe: Any, tail: _BoundedByteTail) -> None:
+        try:
+            while True:
+                chunk = pipe.read(_FFMPEG_PIPE_READ_BYTES)
+                if not chunk:
+                    return
+                tail.append(chunk)
+        except BaseException as exc:  # Pipe reads can surface platform-specific I/O errors.
+            reader_errors.append(exc)
+            # A failed reader can otherwise leave a chatty child blocked on
+            # its other pipe.  End it promptly; the owner reaps it below.
+            try:
+                if process.poll() is None:
+                    process.terminate()
+            except OSError:
+                pass
+        finally:
+            try:
+                pipe.close()
+            except OSError:
+                pass
+
+    readers: list[threading.Thread] = []
+    started_readers: list[threading.Thread] = []
+
+    def join_readers() -> bool:
+        if not started_readers:
+            return True
+        remaining = max(0.0, capture_deadline - time.monotonic())
+        join_budget = min(float(_FFMPEG_PIPE_JOIN_SECONDS), remaining)
+        per_reader_timeout = max(
+            0.0,
+            join_budget / len(started_readers),
+        )
+        for reader in started_readers:
+            reader.join(timeout=per_reader_timeout)
+        return not any(reader.is_alive() for reader in started_readers)
+
+    try:
+        readers.extend(
+            (
+                threading.Thread(
+                    target=drain,
+                    args=(process.stdout, stdout_tail),
+                    daemon=True,
+                ),
+                threading.Thread(
+                    target=drain,
+                    args=(process.stderr, stderr_tail),
+                    daemon=True,
+                ),
+            )
+        )
+        for reader in readers:
+            reader.start()
+            started_readers.append(reader)
+        returncode = process.wait(timeout=remaining_capture_timeout())
+        if not join_readers():
+            alive_readers = [
+                reader for reader in started_readers if reader.is_alive()
+            ]
+            for reader in alive_readers:
+                _cancel_windows_reader_io(reader)
+            join_readers()
+            raise OSError("ffmpeg_pipe_read_timeout")
+        if reader_errors:
+            raise OSError("ffmpeg_pipe_read_failed") from reader_errors[0]
+        return (
+            subprocess.CompletedProcess(process.args, returncode, stdout_tail.text(), stderr_tail.text()),
+            stdout_tail.overflowed,
+            stderr_tail.overflowed,
+        )
+    except BaseException:
+        _reap_bounded_process(
+            process,
+            deadline_monotonic=capture_deadline,
+        )
+        alive_readers = [
+            reader for reader in started_readers if reader.is_alive()
+        ]
+        for reader in alive_readers:
+            _cancel_windows_reader_io(reader)
+        join_readers()
+        raise
+    finally:
+        for reader, pipe in zip(readers, (process.stdout, process.stderr)):
+            if reader not in started_readers or not reader.is_alive():
+                if pipe is not None:
+                    try:
+                        pipe.close()
+                    except OSError:
+                        pass
+
+
+def _run(
+    command: list[str],
+    *,
+    timeout: int,
+    deadline_monotonic: float | None = None,
+) -> subprocess.CompletedProcess[str]:
     if not command or "ffmpeg" not in Path(str(command[0])).name.lower():
         raise LocalVideoEditError("ffmpeg_command_required")
     try:
-        return subprocess.run(command, capture_output=True, text=True, timeout=max(1, int(timeout)), check=False)
+        subprocess_timeout = _remaining_ffmpeg_timeout(timeout, deadline_monotonic)
+        result, _stdout_overflow, _stderr_overflow = _capture_bounded_subprocess(
+            command,
+            timeout=subprocess_timeout,
+            deadline_monotonic=deadline_monotonic,
+            stdout_limit=_FFMPEG_DIAGNOSTIC_TAIL_BYTES,
+            stderr_limit=_FFMPEG_DIAGNOSTIC_TAIL_BYTES,
+        )
+        return result
     except subprocess.TimeoutExpired as exc:
         raise LocalVideoEditError("ffmpeg_timeout") from exc
     except OSError as exc:
         raise LocalVideoEditError(f"ffmpeg_exec_failed:{type(exc).__name__}") from exc
 
 
-def _run_checked(command: list[str], *, timeout: int) -> None:
-    result = _run(command, timeout=timeout)
+def _run_checked(
+    command: list[str],
+    *,
+    timeout: int,
+    deadline_monotonic: float | None = None,
+) -> None:
+    result = _run(command, timeout=timeout, deadline_monotonic=deadline_monotonic)
     if result.returncode != 0:
         lines = [line.strip() for line in str(result.stderr or result.stdout or "").splitlines() if line.strip()]
         diagnostics = [
@@ -1419,6 +1714,8 @@ def _normalize_concat_inputs(
     ffmpeg_path: str,
     ffprobe_path: str,
     timeout: int,
+    deadline_monotonic: float | None = None,
+    workspace_budget_bytes: int | None = None,
 ) -> tuple[str, dict[str, Any]]:
     normalized: list[Path] = []
     target_width = 0
@@ -1453,7 +1750,8 @@ def _normalize_concat_inputs(
             "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
             "-t", f"{duration:.3f}", "-movflags", "+faststart", str(target),
         ])
-        _run_checked(command, timeout=timeout)
+        _run_checked(command, timeout=timeout, deadline_monotonic=deadline_monotonic)
+        _enforce_workspace_budget(workspace, workspace_budget_bytes)
         normalized.append(target)
     manifest = workspace / "concat_inputs.txt"
     manifest.write_text(
@@ -1464,7 +1762,9 @@ def _normalize_concat_inputs(
     _run_checked(
         [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", str(manifest), "-c", "copy", "-movflags", "+faststart", str(concat_output)],
         timeout=timeout,
+        deadline_monotonic=deadline_monotonic,
     )
+    _enforce_workspace_budget(workspace, workspace_budget_bytes)
     probe = probe_video_file(concat_output, ffprobe_path=ffprobe_path)
     if not probe.get("ok"):
         raise LocalVideoEditError(str(probe.get("reason") or "concat_output_invalid"))
@@ -1479,6 +1779,8 @@ def _prepare_primary_timeline(
     ffmpeg_path: str,
     ffprobe_path: str,
     timeout: int,
+    deadline_monotonic: float | None = None,
+    workspace_budget_bytes: int | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Apply primary trim/remove-middle before any append operation."""
     source = str(plan.get("input_video") or "")
@@ -1566,7 +1868,8 @@ def _prepare_primary_timeline(
     try:
         if target.exists():
             target.unlink()
-        _run_checked(command, timeout=timeout)
+        _run_checked(command, timeout=timeout, deadline_monotonic=deadline_monotonic)
+        _enforce_workspace_budget(workspace, workspace_budget_bytes)
         expected_duration_ms = end_ms - start_ms
         if remove_middle:
             expected_duration_ms -= int(remove_middle["end_ms"]) - int(remove_middle["start_ms"])
@@ -1597,8 +1900,13 @@ def execute_manual_edit(
     ffprobe_path: str = "",
     timeout: int = FFMPEG_TIMEOUT_SECONDS,
     progress: Callable[[dict[str, Any]], None] | None = None,
+    deadline_monotonic: float | None = None,
+    workspace_budget_bytes: int | None = None,
 ) -> dict[str, Any]:
     workspace_path = Path(workspace).resolve(strict=False)
+    admitted_workspace_budget = (
+        None if workspace_budget_bytes is None else int(workspace_budget_bytes)
+    )
     output = require_path_within(output_path, workspace_path)
     staging = output.with_name(f".{output.stem}.{os.getpid()}.partial{output.suffix}")
     staging = require_path_within(staging, workspace_path)
@@ -1619,9 +1927,12 @@ def execute_manual_edit(
         source_height=int(source_probe.get("height") or 0),
     )
     if required_filters:
+        filter_discovery_kwargs: dict[str, Any] = {"refresh": True}
+        if deadline_monotonic is not None:
+            filter_discovery_kwargs["deadline_monotonic"] = deadline_monotonic
         validate_required_optional_filters(
             normalized,
-            available_filters=set(available_ffmpeg_filters(ffmpeg, refresh=True)),
+            available_filters=set(available_ffmpeg_filters(ffmpeg, **filter_discovery_kwargs)),
             has_audio=bool(source_probe.get("has_audio")),
             source_width=int(source_probe.get("width") or 0),
             source_height=int(source_probe.get("height") or 0),
@@ -1648,6 +1959,8 @@ def execute_manual_edit(
             ffmpeg_path=ffmpeg,
             ffprobe_path=probe_bin,
             timeout=timeout,
+            deadline_monotonic=deadline_monotonic,
+            workspace_budget_bytes=admitted_workspace_budget,
         )
         prepared_primary = Path(source)
         normalized["input_video"] = source
@@ -1662,6 +1975,8 @@ def execute_manual_edit(
                 ffmpeg_path=ffmpeg,
                 ffprobe_path=probe_bin,
                 timeout=timeout,
+                deadline_monotonic=deadline_monotonic,
+                workspace_budget_bytes=admitted_workspace_budget,
             )
             normalized["input_video"] = source
             normalized["concat_inputs"] = []
@@ -1690,8 +2005,8 @@ def execute_manual_edit(
             source_probe=source_probe,
             ffmpeg_path=ffmpeg,
         )
-        _run_checked(command, timeout=timeout)
-        enforce_workspace_limit(workspace_path)
+        _run_checked(command, timeout=timeout, deadline_monotonic=deadline_monotonic)
+        _enforce_workspace_budget(workspace_path, admitted_workspace_budget)
         if progress:
             progress({"stage": "validating_output", "processed": 1, "total": 1})
         expected = expected_manual_duration_ms(normalized)
@@ -1740,8 +2055,13 @@ def execute_split_plan(
     ffprobe_path: str = "",
     timeout: int = FFMPEG_TIMEOUT_SECONDS,
     progress: Callable[[dict[str, Any]], None] | None = None,
+    deadline_monotonic: float | None = None,
+    workspace_budget_bytes: int | None = None,
 ) -> dict[str, Any]:
     workspace_path = Path(workspace).resolve(strict=False)
+    admitted_workspace_budget = (
+        None if workspace_budget_bytes is None else int(workspace_budget_bytes)
+    )
     source = require_path_within(source_path, workspace_path)
     items = list(ranges or [])
     if not items:
@@ -1752,7 +2072,10 @@ def execute_split_plan(
         raise LocalVideoEditError("ffmpeg_missing")
     if not probe_bin:
         raise LocalVideoEditError("ffprobe_missing")
-    available_filters = set(available_ffmpeg_filters(ffmpeg, refresh=True))
+    filter_discovery_kwargs: dict[str, Any] = {"refresh": True}
+    if deadline_monotonic is not None:
+        filter_discovery_kwargs["deadline_monotonic"] = deadline_monotonic
+    available_filters = set(available_ffmpeg_filters(ffmpeg, **filter_discovery_kwargs))
     for required_filter in ("format", "scale", "setsar"):
         if required_filter not in available_filters:
             raise LocalVideoEditError(
@@ -1777,7 +2100,7 @@ def execute_split_plan(
         command = build_split_ffmpeg_command(
             str(source), item, str(target), ffmpeg_path=ffmpeg, has_audio=bool(source_probe.get("has_audio"))
         )
-        _run_checked(command, timeout=timeout)
+        _run_checked(command, timeout=timeout, deadline_monotonic=deadline_monotonic)
         validation = validate_mp4_output(
             target,
             expected_duration_ms=item.duration_ms,
@@ -1787,7 +2110,7 @@ def execute_split_plan(
         if not validation.get("ok"):
             raise LocalVideoEditError(f"split_part_invalid:{item.index}:{validation.get('reason')}")
         outputs.append({"index": item.index, "path": str(target), "duration_ms": item.duration_ms, "validation": validation})
-        enforce_workspace_limit(workspace_path)
+        _enforce_workspace_budget(workspace_path, admitted_workspace_budget)
         if progress:
             progress({"stage": "validating_output", "processed": item.index, "total": total, "current_part": item.index})
     actual_total = sum(int(item["validation"].get("duration_ms") or 0) for item in outputs)

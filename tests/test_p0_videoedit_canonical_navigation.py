@@ -94,6 +94,7 @@ def test_videoedit_review_back_uses_the_saved_exact_parent() -> None:
         "cut": "videoedit|cut",
         "join": "videoedit|join",
         "audio": "videoedit|audio",
+        "logo_options": "videoedit|logo_options",
         "effects": "videoedit|effects",
         "split": "videoedit|split",
         "options": "videoedit|workspace",
