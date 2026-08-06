@@ -33,7 +33,7 @@ def _run_job(
     job_user_id: str = "701",
     transport_evidence: dict | None = None,
     liveness_evidence: list[str] | None = None,
-    liveness_factory_calls: list[tuple[object, object, object]] | None = None,
+    liveness_factory_calls: list[tuple[object, object, object, object]] | None = None,
     liveness_health_failure_at: int | None = None,
     liveness_failure_on_stop: bool = False,
     worker_policy_evidence: dict | None = None,
@@ -45,11 +45,24 @@ def _run_job(
     | None = None,
     update_evidence: list[dict] | None = None,
     checkpoint_order_evidence: list[str] | None = None,
+    job_patch: dict | None = None,
+    setup_evidence: list[str] | None = None,
+    cleanup_intent_persisted: bool = True,
+    use_real_cleanup: bool = False,
+    resume_project_present: bool = True,
+    cleanup_order_evidence: list[str] | None = None,
+    cleanup_intent_evidence: list[dict] | None = None,
 ) -> tuple[dict, list[str]]:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    project_workspace = tmp_path / "job_2701"
+    workspace = project_workspace / "claim_1"
+    workspace.mkdir(parents=True)
     source = workspace / "source.mp4"
     source.write_bytes(b"source-video")
+    monkeypatch.setattr(
+        local_worker.video_local_validation,
+        "VIDEO_LOCAL_WORKSPACE_ROOT",
+        tmp_path,
+    )
     updates: list[dict] = []
     captions: list[str] = []
 
@@ -73,15 +86,122 @@ def _run_job(
     )
     monkeypatch.setenv("TELEGRAM_LOCAL_API_MEDIA_PATH", "/localfile")
 
-    monkeypatch.setattr(local_worker, "local_ffmpeg_path", lambda: "ffmpeg")
+    def fake_local_ffmpeg_path() -> str:
+        if setup_evidence is not None:
+            setup_evidence.append("ffmpeg_lookup")
+        return "ffmpeg"
+
+    def fake_create_job_workspace(_job_id: object) -> Path:
+        assert str(_job_id) in {workspace.name, "job_2701_claim_1"}
+        if setup_evidence is not None:
+            setup_evidence.append("workspace")
+        return workspace
+
+    def fake_create_video_edit_claim_workspace(
+        job_id: object,
+        claim_attempt: object,
+    ) -> tuple[Path, Path]:
+        assert job_id == 2701
+        assert claim_attempt == 1
+        if setup_evidence is not None:
+            setup_evidence.append("workspace")
+        return project_workspace, workspace
+
+    monkeypatch.setattr(local_worker, "local_ffmpeg_path", fake_local_ffmpeg_path)
     monkeypatch.setattr(local_worker, "find_ffprobe", lambda ffmpeg_path="": "ffprobe")
     monkeypatch.setattr(local_worker.shutil, "which", lambda _binary: "ffmpeg")
-    monkeypatch.setattr(local_worker, "create_job_workspace", lambda _job_id: workspace)
+    monkeypatch.setattr(local_worker, "create_job_workspace", fake_create_job_workspace)
     monkeypatch.setattr(
         local_worker,
-        "cleanup_job_workspace",
-        lambda _workspace: {"ok": True, "removed": True},
+        "create_video_edit_claim_workspace",
+        fake_create_video_edit_claim_workspace,
     )
+    def prepare_cleanup_intent(**kwargs) -> tuple[dict, dict]:
+        key = f"job_{kwargs['job_id']}_claim_{kwargs['claim_attempt']}"
+        workspace_present = kwargs["workspace"] is not None
+        if workspace_present:
+            assert kwargs["workspace"] == project_workspace
+            assert kwargs.get("project_workspace") is True
+            if setup_evidence is not None:
+                setup_evidence.append("cleanup_intent")
+        if workspace_present and not cleanup_intent_persisted:
+            return (
+                None,
+                {
+                    "persisted": False,
+                    "workspace_present": True,
+                    "reason": "cleanup_intent_persist_failed:OSError",
+                },
+            )
+        return (
+            {"job_id": kwargs["job_id"], "workspace_key": key},
+            (
+                {
+                    "persisted": True,
+                    "workspace_present": True,
+                    "intent_key": f"{key}.json",
+                    "workspace_key": key,
+                    "tombstone_key": key,
+                }
+                if workspace_present
+                else {"persisted": False, "workspace_present": False}
+            ),
+        )
+
+    if use_real_cleanup:
+        original_reconcile_cleanup = local_worker.reconcile_video_edit_cleanup_intent
+
+        def observe_reconcile_cleanup(intent: dict) -> dict:
+            if cleanup_intent_evidence is not None:
+                cleanup_intent_evidence.append(deepcopy(intent))
+            if cleanup_order_evidence is not None:
+                cleanup_order_evidence.append("cleanup_reconcile")
+            return original_reconcile_cleanup(intent)
+
+        def cleanup_http_json(
+            method: str,
+            path: str,
+            payload: dict,
+            timeout: int,
+            **_kwargs,
+        ) -> dict:
+            assert method == "POST"
+            assert timeout == 10
+            if path == "/internal/worker/video_edit_cleanup/claim":
+                if cleanup_order_evidence is not None:
+                    cleanup_order_evidence.append("cleanup_claim")
+                return {
+                    "ok": True,
+                    "action": "cleanup",
+                    "audit_owner": local_worker.LOCAL_WORKER_INSTANCE_ID,
+                    "audit_attempt": 1,
+                }
+            if path == "/internal/worker/video_edit_cleanup/result":
+                if cleanup_order_evidence is not None:
+                    cleanup_order_evidence.append("cleanup_result")
+                return {
+                    "ok": True,
+                    "cleanup_audit": {"state": "succeeded"},
+                }
+            pytest.fail(f"unexpected cleanup endpoint: {path}")
+
+        monkeypatch.setattr(
+            local_worker,
+            "reconcile_video_edit_cleanup_intent",
+            observe_reconcile_cleanup,
+        )
+        monkeypatch.setattr(local_worker, "http_json", cleanup_http_json)
+    else:
+        monkeypatch.setattr(
+            local_worker,
+            "prepare_video_edit_cleanup_intent",
+            prepare_cleanup_intent,
+        )
+        monkeypatch.setattr(
+            local_worker,
+            "reconcile_video_edit_cleanup_intent",
+            lambda _intent: {"ok": True},
+        )
     if liveness_evidence is not None or liveness_health_failure_at is not None:
         health_check_count = 0
 
@@ -121,10 +241,12 @@ def _run_job(
             job_id: object,
             lease_seconds: object,
             interval_seconds: object,
+            *,
+            claim_attempt: object = None,
         ) -> FakeVideoEditJobLiveness:
             if liveness_factory_calls is not None:
                 liveness_factory_calls.append(
-                    (job_id, lease_seconds, interval_seconds)
+                    (job_id, lease_seconds, interval_seconds, claim_attempt)
                 )
             return FakeVideoEditJobLiveness()
 
@@ -135,6 +257,8 @@ def _run_job(
             raising=False,
         )
     def fake_download(*_args, **_kwargs) -> str | video_edit_media_transport.DownloadReceipt:
+        if setup_evidence is not None:
+            setup_evidence.append("download")
         if observed_worker_steps is not None:
             observed_worker_steps.append("download")
         if worker_policy_evidence is not None:
@@ -433,6 +557,7 @@ def _run_job(
             worker_policy_evidence.setdefault("executor_calls", []).append(
                 {
                     "mode": "manual",
+                    "timeout": _kwargs.get("timeout"),
                     "deadline_monotonic": _kwargs.get("deadline_monotonic"),
                     "workspace_budget_bytes": _kwargs.get("workspace_budget_bytes"),
                 }
@@ -470,6 +595,7 @@ def _run_job(
             worker_policy_evidence.setdefault("executor_calls", []).append(
                 {
                     "mode": "split",
+                    "timeout": _kwargs.get("timeout"),
                     "deadline_monotonic": _kwargs.get("deadline_monotonic"),
                     "workspace_budget_bytes": _kwargs.get("workspace_budget_bytes"),
                 }
@@ -548,7 +674,7 @@ def _run_job(
         output_url="",
         output_file_id="",
         **_kwargs,
-    ) -> None:
+    ) -> dict:
         def has_percent_field(value: object) -> bool:
             if isinstance(value, dict):
                 return any(
@@ -575,6 +701,8 @@ def _run_job(
                 checkpoint_order_evidence.append("receipt_checkpoint")
         if liveness_evidence is not None and status != "running":
             liveness_evidence.append("terminal_update")
+        if cleanup_order_evidence is not None and status != "running":
+            cleanup_order_evidence.append("terminal_ack")
         update = {
             "job_id": job_id,
             "status": status,
@@ -585,6 +713,7 @@ def _run_job(
         updates.append(update)
         if update_evidence is not None:
             update_evidence.append(deepcopy(update))
+        return {"ok": True, "job": {"id": job_id}}
 
     monkeypatch.setattr(local_worker, "update_job", fake_update_job)
 
@@ -728,7 +857,10 @@ def _run_job(
             }
             if manual_plan is None else manual_plan
         ),
-        "split_ranges": [{"index": 1, "start_ms": 0, "end_ms": 1_000}],
+        "split_ranges": [
+            {"index": 1, "start_ms": 0, "end_ms": 1_000},
+            {"index": 2, "start_ms": 1_000, "end_ms": 2_000},
+        ],
         "rights_confirmation": {
             "confirmed": True,
             "policy": "video_edit_rights_v1",
@@ -742,14 +874,17 @@ def _run_job(
     payload.update(patch)
     if drop_rights:
         payload.pop("rights_confirmation", None)
-    local_worker.run_video_local_edit(
-        {
-            "id": 2701,
-            "job_type": video_editengine1.WORKER_JOB_TYPE,
-            "user_id": job_user_id,
-            "input_file_id": json.dumps(payload),
-        }
-    )
+    job = {
+        "id": 2701,
+        "claim_attempt": 1,
+        "job_type": video_editengine1.WORKER_JOB_TYPE,
+        "user_id": job_user_id,
+        "input_file_id": json.dumps(payload),
+    }
+    job.update(dict(job_patch or {}))
+    if not resume_project_present:
+        local_worker.shutil.rmtree(project_workspace)
+    local_worker.run_video_local_edit(job)
     return updates[-1], captions
 
 
@@ -803,6 +938,92 @@ def test_video_edit_download_asset_returns_the_transport_receipt_and_deadline(
     assert receipt.bytes_written == len(payload)
     assert receipt.sha256 == expected_sha256
     assert captured[0]["deadline_monotonic"] == 321.25
+
+
+def test_worker_media_config_accepts_canonical_telegram_token_alias() -> None:
+    environ = {
+        "TELEGRAM_TOKEN": "canonical-token",
+        "BOT_TOKEN": "legacy-token",
+    }
+
+    assert local_worker.resolve_telegram_bot_token(environ) == "canonical-token"
+    assert local_worker.resolve_telegram_bot_token(
+        {**environ, "TELEGRAM_BOT_TOKEN": "worker-token"}
+    ) == "worker-token"
+
+
+def test_large_media_worker_rejects_cloud_transport_before_download_or_executor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    evidence: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch={
+            "media_lane": "large_media",
+            "source_file_size": 21 * 1024 * 1024,
+        },
+        observed_worker_steps=evidence,
+    )
+
+    assert terminal["status"] == "failed"
+    assert "video_local_edit_large_media_transport_unavailable" in terminal["detail"]
+    assert "download" not in evidence
+    assert "execute" not in evidence
+    assert "delivery" not in evidence
+    assert captions == []
+
+
+def test_cleanup_intent_is_durable_before_first_workspace_download(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    setup: list[str] = []
+
+    terminal, _captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        setup_evidence=setup,
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert setup[:4] == [
+        "ffmpeg_lookup",
+        "workspace",
+        "cleanup_intent",
+        "download",
+    ]
+    assert setup.count("cleanup_intent") == 1
+
+
+def test_cleanup_intent_persistence_failure_stops_before_download_and_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    setup: list[str] = []
+    runtime: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        setup_evidence=setup,
+        observed_worker_steps=runtime,
+        cleanup_intent_persisted=False,
+    )
+
+    assert terminal["status"] == "failed"
+    assert "video_local_edit_cleanup_intent_persistence_failed" in terminal[
+        "detail"
+    ]
+    assert "download" not in setup
+    assert "execute" not in runtime
+    assert "delivery" not in runtime
+    assert captions == []
 
 
 def test_video_edit_multipart_request_caps_socket_timeout_by_remaining_deadline(
@@ -1295,13 +1516,53 @@ def test_worker_uses_one_adaptive_absolute_deadline_and_admission_budget(
     assert admission["operation"] == expected_operation
     assert admission["source_bytes"] == len(b"source-video")
     assert admission["materialized_input_bytes"] == len(b"source-video")
-    assert admission["output_count"] == (1 if mode == "manual" else 1)
+    assert admission["output_count"] == (1 if mode == "manual" else 2)
     assert execution["mode"] == mode
     assert execution["deadline_monotonic"] == expected_deadline
     assert execution["workspace_budget_bytes"] == decision.evidence[
         "estimated_bytes"
     ]
     assert evidence["delivery_deadlines"] == [expected_deadline] * len(captions)
+
+
+def test_video_edit_render_timeout_uses_dedicated_ceiling_not_generic_600_cap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    evidence: dict = {
+        "started_at": 10.0,
+        "adaptive_results": [120, 1_800, 1_800],
+    }
+    monkeypatch.setattr(local_worker, "LOCAL_WORKER_MAX_JOB_SECONDS", 600)
+    monkeypatch.setattr(local_worker, "VIDEO_EDIT_MAX_DEADLINE_SECONDS", 3_600)
+
+    terminal, _captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        payload_patch={"max_render_seconds": 30},
+        downloaded_probe={
+            "ok": True,
+            "reason": "",
+            "duration": 2_400.0,
+            "duration_ms": 2_400_000,
+            "width": 1920,
+            "height": 1080,
+            "fps": 25.0,
+            "has_video": True,
+            "has_audio": True,
+            "audio_stream_count": 1,
+            "format_name": "mp4",
+            "bytes": len(b"source-video"),
+        },
+        worker_policy_evidence=evidence,
+    )
+
+    assert terminal["status"] == "succeeded"
+    executor = evidence["executor_calls"][0]
+    assert executor["timeout"] == 3_600
+    assert executor["timeout"] != local_worker.LOCAL_WORKER_MAX_JOB_SECONDS
+    assert executor["deadline_monotonic"] == 1_810.0
 
 
 def test_worker_admits_all_actual_asset_receipts_before_executor(
@@ -1508,6 +1769,470 @@ def test_worker_workspace_rejection_fails_closed_before_executor_and_delivery(
     assert captions == []
 
 
+def _durable_resume_artifact(index: int) -> dict:
+    return {
+        "index": index,
+        "message_id": str(9_000 + index),
+        "file_id": f"durable-file-{index}",
+        "size": 4_096,
+        "sha256": f"{index:x}" * 64,
+        "ffprobe": {
+            "ok": True,
+            "has_video": True,
+            "video_codec": "h264",
+            "duration_ms": 1_000,
+            "width": 640,
+            "height": 360,
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        },
+        "delivery_method": "sendVideo",
+        "bytes_sent": 4_096,
+    }
+
+
+def _durable_resume_contract(
+    receipts: list[dict],
+    *,
+    expected_output_count: int,
+    cursor: dict | None,
+    compatibility: str,
+) -> dict:
+    digest = hashlib.sha256(
+        json.dumps(
+            receipts,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "schema": "video-local-edit-receipt-prefix-resume",
+        "version": 1,
+        "expected_output_count": expected_output_count,
+        "artifact_receipt_prefix": receipts,
+        "prefix_count": len(receipts),
+        "prefix_digest": digest,
+        "compatibility": compatibility,
+        "delivery_cursor": cursor,
+    }
+
+
+@pytest.mark.parametrize(
+    "cursor_state",
+    ["sending", "unknown", "accepted", "delivered"],
+)
+def test_durable_delivery_cursor_fences_render_and_transport_before_setup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    cursor_state: str,
+) -> None:
+    receipt = _durable_resume_artifact(1)
+    receipts = [receipt] if cursor_state in {"accepted", "delivered"} else []
+    cursor_kwargs = {
+        "state": cursor_state,
+        "output_index": 1,
+        "attempt_id": "resume-manual-attempt-1",
+    }
+    if receipts:
+        cursor_kwargs.update(
+            message_id=receipt["message_id"],
+            file_id=receipt["file_id"],
+        )
+    cursor = local_worker.video_edit_long_media.DeliveryCursor(
+        **cursor_kwargs
+    )
+    setup: list[str] = []
+    steps: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        observed_worker_steps=steps,
+        setup_evidence=setup,
+        job_patch={
+            "source_sha256": "a" * 64,
+            "resume_contract": _durable_resume_contract(
+                receipts,
+                expected_output_count=1,
+                cursor=cursor.to_mapping(),
+                compatibility="strict",
+            ),
+        },
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert "ffmpeg_lookup" not in setup
+    assert "workspace" not in setup
+    assert "download" not in setup
+    assert "download" not in steps
+    assert "delivery" not in steps
+    assert captions == []
+    if cursor_state in {"sending", "unknown"}:
+        assert terminal["status"] == "failed"
+        assert detail["stage"] == "delivery_unknown"
+        assert detail["delivery_cursor"]["state"] == "unknown"
+        assert terminal["output_file_id"] == ""
+    else:
+        assert terminal["status"] == "succeeded"
+        assert detail["stage"] == "delivered"
+        assert detail["delivery_cursor"]["state"] == "delivered"
+        assert terminal["output_file_id"] == receipt["file_id"]
+
+
+@pytest.mark.parametrize("compatibility", ["strict", "legacy_receipt_only"])
+def test_durable_resume_manual_full_prefix_finalizes_without_setup_or_resend(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    compatibility: str,
+) -> None:
+    receipt = _durable_resume_artifact(1)
+    cursor = (
+        local_worker.video_edit_long_media.DeliveryCursor(
+            state="accepted",
+            output_index=1,
+            attempt_id="resume-manual-accepted-1",
+            message_id=receipt["message_id"],
+            file_id=receipt["file_id"],
+        ).to_mapping()
+        if compatibility == "strict"
+        else None
+    )
+    setup: list[str] = []
+    steps: list[str] = []
+    updates: list[dict] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        observed_worker_steps=steps,
+        setup_evidence=setup,
+        update_evidence=updates,
+        job_patch={
+            "source_sha256": "a" * 64,
+            "resume_contract": _durable_resume_contract(
+                [receipt],
+                expected_output_count=1,
+                cursor=cursor,
+                compatibility=compatibility,
+            ),
+        },
+    )
+
+    terminal_receipt = json.loads(terminal["output_url"])
+    assert terminal["status"] == "succeeded"
+    assert setup == ["cleanup_intent"]
+    assert steps == []
+    assert captions == []
+    assert terminal_receipt["source_video_path"] == "source.mp4"
+    assert terminal_receipt["source_sha256"] == "a" * 64
+    assert terminal_receipt["output_path"] == "toan_aas_video_edit_2701.mp4"
+    assert terminal_receipt["artifacts"] == [receipt]
+    assert terminal_receipt["delivery_message_id"] == receipt["message_id"]
+    assert terminal_receipt["delivery_file_id"] == receipt["file_id"]
+    if compatibility == "strict":
+        delivered_updates = [
+            json.loads(update["detail"])
+            for update in updates
+            if update["status"] == "running"
+            and json.loads(update["detail"]).get("delivery_cursor", {}).get("state") == "delivered"
+        ]
+        assert len(delivered_updates) == 1
+        assert delivered_updates[0]["delivery_cursor"]["message_id"] == receipt["message_id"]
+        assert delivered_updates[0]["delivery_cursor"]["file_id"] == receipt["file_id"]
+
+
+def test_durable_resume_full_prefix_cleans_existing_project_only_after_terminal_ack(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    receipt = _durable_resume_artifact(1)
+    delivered = local_worker.video_edit_long_media.DeliveryCursor(
+        state="delivered",
+        output_index=1,
+        attempt_id="resume-manual-delivered-cleanup",
+        message_id=receipt["message_id"],
+        file_id=receipt["file_id"],
+    )
+    setup: list[str] = []
+    cleanup_order: list[str] = []
+    cleanup_intents: list[dict] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        setup_evidence=setup,
+        use_real_cleanup=True,
+        cleanup_order_evidence=cleanup_order,
+        cleanup_intent_evidence=cleanup_intents,
+        job_patch={
+            "source_sha256": "a" * 64,
+            "resume_contract": _durable_resume_contract(
+                [receipt],
+                expected_output_count=1,
+                cursor=delivered.to_mapping(),
+                compatibility="strict",
+            ),
+        },
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert captions == []
+    assert setup == []
+    assert cleanup_intents == [
+        {
+            "schema": local_worker.video_edit_cleanup_audit.PROJECT_CLEANUP_AUDIT_SCHEMA,
+            "version": local_worker.video_edit_cleanup_audit.PROJECT_CLEANUP_AUDIT_VERSION,
+            "job_id": 2701,
+            "delivery_claim_attempt": 1,
+            "delivery_owner": local_worker.LOCAL_WORKER_INSTANCE_ID,
+            "workspace_key": "job_2701_claim_1",
+            "tombstone_key": "job_2701_claim_1",
+            "workspace_present": True,
+            "target_workspace_key": "job_2701",
+        }
+    ]
+    assert cleanup_order.index("terminal_ack") < cleanup_order.index(
+        "cleanup_reconcile"
+    )
+    assert not (tmp_path / "job_2701").exists()
+
+
+def test_durable_resume_full_prefix_without_project_is_path_free_and_harmless(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    receipt = _durable_resume_artifact(1)
+    cleanup_order: list[str] = []
+    cleanup_intents: list[dict] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        use_real_cleanup=True,
+        resume_project_present=False,
+        cleanup_order_evidence=cleanup_order,
+        cleanup_intent_evidence=cleanup_intents,
+        job_patch={
+            "source_sha256": "a" * 64,
+            "resume_contract": _durable_resume_contract(
+                [receipt],
+                expected_output_count=1,
+                cursor=None,
+                compatibility="legacy_receipt_only",
+            ),
+        },
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "succeeded"
+    assert captions == []
+    assert detail["cleanup_intent"] == {
+        "persisted": False,
+        "workspace_present": False,
+    }
+    assert cleanup_intents == []
+    assert cleanup_order == ["terminal_ack"]
+    assert not (tmp_path / "job_2701").exists()
+
+
+def test_durable_resume_split_partial_prefix_sends_only_suffix_and_advances_accepted_first(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    prefix_receipt = _durable_resume_artifact(1)
+    accepted = local_worker.video_edit_long_media.DeliveryCursor(
+        state="accepted",
+        output_index=1,
+        attempt_id="resume-split-accepted-1",
+        message_id=prefix_receipt["message_id"],
+        file_id=prefix_receipt["file_id"],
+    )
+    updates: list[dict] = []
+    order: list[str] = []
+    steps: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="split",
+        payload_patch={
+            "split_ranges": [
+                {"index": 1, "start_ms": 0, "end_ms": 1_000},
+                {"index": 2, "start_ms": 1_000, "end_ms": 2_000},
+            ],
+        },
+        observed_worker_steps=steps,
+        update_evidence=updates,
+        checkpoint_order_evidence=order,
+        job_patch={
+            "source_sha256": hashlib.sha256(b"source-video").hexdigest(),
+            "resume_contract": _durable_resume_contract(
+                [prefix_receipt],
+                expected_output_count=2,
+                cursor=accepted.to_mapping(),
+                compatibility="strict",
+            ),
+        },
+    )
+
+    terminal_receipt = json.loads(terminal["output_url"])
+    assert terminal["status"] == "succeeded"
+    assert captions == ["✅ Phần 2/2 · 1.0 giây · Miễn phí · 0 Xu"]
+    assert steps == ["download", "probe", "validate", "execute", "delivery"]
+    assert terminal_receipt["artifacts"][0] == prefix_receipt
+    assert [item["index"] for item in terminal_receipt["artifacts"]] == [1, 2]
+    assert terminal_receipt["delivery_message_id"] == terminal_receipt["artifacts"][-1]["message_id"]
+    assert terminal_receipt["delivery_file_id"] == terminal_receipt["artifacts"][-1]["file_id"]
+    def parsed_detail(update: dict) -> dict:
+        try:
+            value = json.loads(update["detail"])
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    delivered_updates = [
+        parsed_detail(update)
+        for update in updates
+        if update["status"] == "running"
+        and parsed_detail(update).get("delivery_cursor", {}).get("state") == "delivered"
+    ]
+    assert delivered_updates[0]["delivery_cursor"] == {
+        **accepted.to_mapping(),
+        "state": "delivered",
+    }
+    assert order.index("receipt_checkpoint") < order.index("delivery_accepted")
+
+
+def test_durable_resume_split_legacy_partial_prefix_becomes_strict_only_for_suffix(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    prefix_receipt = _durable_resume_artifact(1)
+    updates: list[dict] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="split",
+        payload_patch={
+            "split_ranges": [
+                {"index": 1, "start_ms": 0, "end_ms": 1_000},
+                {"index": 2, "start_ms": 1_000, "end_ms": 2_000},
+            ],
+        },
+        update_evidence=updates,
+        job_patch={
+            "source_sha256": hashlib.sha256(b"source-video").hexdigest(),
+            "resume_contract": _durable_resume_contract(
+                [prefix_receipt],
+                expected_output_count=2,
+                cursor=None,
+                compatibility="legacy_receipt_only",
+            ),
+        },
+    )
+
+    terminal_receipt = json.loads(terminal["output_url"])
+    cursor_states = []
+    for update in updates:
+        try:
+            detail = json.loads(update["detail"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        cursor = detail.get("delivery_cursor") if isinstance(detail, dict) else None
+        if isinstance(cursor, dict):
+            cursor_states.append((cursor["state"], cursor["output_index"]))
+    assert terminal["status"] == "succeeded"
+    assert captions == ["✅ Phần 2/2 · 1.0 giây · Miễn phí · 0 Xu"]
+    assert cursor_states[:3] == [("sending", 2), ("accepted", 2), ("delivered", 2)]
+    assert terminal["output_file_id"] == terminal_receipt["artifacts"][-1]["file_id"]
+    assert terminal_receipt["delivery_file_id"] == terminal_receipt["artifacts"][-1]["file_id"]
+
+
+def test_durable_resume_split_full_prefix_finalizes_with_deterministic_names_without_setup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    receipts = [_durable_resume_artifact(1), _durable_resume_artifact(2)]
+    last = receipts[-1]
+    delivered = local_worker.video_edit_long_media.DeliveryCursor(
+        state="delivered",
+        output_index=2,
+        attempt_id="resume-split-delivered-2",
+        message_id=last["message_id"],
+        file_id=last["file_id"],
+    )
+    setup: list[str] = []
+    steps: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="split",
+        payload_patch={
+            "split_ranges": [
+                {"index": 1, "start_ms": 0, "end_ms": 1_000},
+                {"index": 2, "start_ms": 1_000, "end_ms": 2_000},
+            ],
+        },
+        observed_worker_steps=steps,
+        setup_evidence=setup,
+        job_patch={
+            "source_sha256": "b" * 64,
+            "resume_contract": _durable_resume_contract(
+                receipts,
+                expected_output_count=2,
+                cursor=delivered.to_mapping(),
+                compatibility="strict",
+            ),
+        },
+    )
+
+    terminal_receipt = json.loads(terminal["output_url"])
+    assert terminal["status"] == "succeeded"
+    assert setup == ["cleanup_intent"]
+    assert steps == []
+    assert captions == []
+    assert terminal_receipt["output_path"] == (
+        "toan_aas_part_001_of_002.mp4,toan_aas_part_002_of_002.mp4"
+    )
+    assert terminal_receipt["artifacts"] == receipts
+    assert terminal_receipt["delivery_file_id"] == last["file_id"]
+
+
+def test_durable_resume_rejects_uncontracted_nonempty_prefix_before_setup_or_resend(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    setup: list[str] = []
+    steps: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        observed_worker_steps=steps,
+        setup_evidence=setup,
+        job_patch={
+            "artifact_receipt_prefix": [_durable_resume_artifact(1)],
+            "delivery_cursor": 1,
+            "source_sha256": "c" * 64,
+        },
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["stage"] == "failed_no_charge"
+    assert detail["reason"] == "video_local_edit_resume_contract_invalid"
+    assert setup == []
+    assert steps == []
+    assert captions == []
+
+
 @pytest.mark.parametrize(
     ("delivery_method", "bytes_sent", "sha256"),
     [
@@ -1589,8 +2314,11 @@ def test_manual_acceptance_is_checkpointed_before_liveness_with_split_shape(
         detail = json.loads(update["detail"])
         if "artifact_receipts" in detail:
             checkpoints.append(detail)
-    assert len(checkpoints) == 1
-    artifacts = checkpoints[0]["artifact_receipts"]
+    assert [
+        checkpoint["delivery_cursor"]["state"] for checkpoint in checkpoints
+    ] == ["sending", "accepted", "delivered"]
+    accepted_checkpoint = checkpoints[1]
+    artifacts = accepted_checkpoint["artifact_receipts"]
     assert len(artifacts) == 1
     artifact = artifacts[0]
     assert artifact["index"] == 1
@@ -1601,7 +2329,7 @@ def test_manual_acceptance_is_checkpointed_before_liveness_with_split_shape(
     assert artifact["sha256"] == hashlib.sha256(b"rendered-video").hexdigest()
     assert video_editengine1.valid_mp4_delivery_probe(artifact["ffprobe"])
     accepted_index = order.index("delivery_accepted")
-    checkpoint_index = order.index("receipt_checkpoint")
+    checkpoint_index = order.index("receipt_checkpoint", accepted_index)
     next_health_index = order.index("assert_healthy", accepted_index + 1)
     assert accepted_index < checkpoint_index < next_health_index
     receipt = json.loads(terminal["output_url"])
@@ -1784,12 +2512,113 @@ def test_http_json_total_deadline_closes_stalled_response(
     assert response_events.index("close") < response_events.index("exit")
 
 
+def test_http_json_worker_credentials_use_no_redirect_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened: list[tuple[str, float]] = []
+
+    class Response:
+        headers: dict[str, str] = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def read(self, size: int = -1) -> bytes:
+            assert 0 < size <= 512 * 1024 + 1
+            return b'{"ok":true}'
+
+    def open_no_redirect(request, timeout):
+        opened.append((str(request.full_url), float(timeout)))
+        assert request.get_header("Authorization") == (
+            "Bearer " + local_worker.LOCAL_WORKER_TOKEN
+        )
+        assert request.get_header("X-local-worker-token") == (
+            local_worker.LOCAL_WORKER_TOKEN
+        )
+        return Response()
+
+    monkeypatch.setattr(local_worker, "telegram_open_no_redirect", open_no_redirect)
+    monkeypatch.setattr(
+        local_worker.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("worker credentials bypassed no-redirect transport")
+        ),
+    )
+
+    assert local_worker.http_json("GET", "/internal/worker/poll", timeout=9) == {
+        "ok": True
+    }
+    assert opened == [(local_worker.endpoint("/internal/worker/poll"), 9.0)]
+
+
+def test_http_json_without_total_deadline_rejects_oversized_json_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class OversizedResponse:
+        headers: dict[str, str] = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def read(self, size: int = -1) -> bytes:
+            assert size == 512 * 1024 + 1
+            return b"x" * size
+
+    monkeypatch.setattr(
+        local_worker,
+        "telegram_open_no_redirect",
+        lambda _request, timeout: OversizedResponse(),
+    )
+    monkeypatch.setattr(
+        local_worker.urllib.request,
+        "urlopen",
+        lambda _request, timeout: OversizedResponse(),
+    )
+
+    with pytest.raises(ValueError, match="http_json_response_too_large"):
+        local_worker.http_json("GET", "/internal/worker/poll", timeout=9)
+
+
+def test_telegram_json_rejects_oversized_response_before_json_decode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class OversizedResponse:
+        headers: dict[str, str] = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def read(self, size: int = -1) -> bytes:
+            assert size == local_worker._VIDEO_EDIT_TELEGRAM_JSON_MAX_BYTES + 1
+            return b"x" * size
+
+    monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr(
+        local_worker,
+        "telegram_open_no_redirect",
+        lambda _request, timeout: OversizedResponse(),
+    )
+
+    with pytest.raises(RuntimeError, match="telegram_api_invalid_json"):
+        local_worker.telegram_json("getFile", {"file_id": "file-1"})
+
+
 def test_video_edit_worker_liveness_tracks_real_stages_without_percent_events(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     evidence: list[str] = []
-    liveness_factory_calls: list[tuple[object, object, object]] = []
+    liveness_factory_calls: list[tuple[object, object, object, object]] = []
 
     terminal, _captions = _run_job(
         monkeypatch,
@@ -1803,7 +2632,9 @@ def test_video_edit_worker_liveness_tracks_real_stages_without_percent_events(
     assert terminal["status"] == "succeeded"
     expected_lease = max(30, min(3600, int(local_worker.LOCAL_WORKER_MAX_JOB_SECONDS)))
     expected_interval = min(30, max(5, expected_lease // 3))
-    assert liveness_factory_calls == [(2701, expected_lease, expected_interval)]
+    assert liveness_factory_calls == [
+        (2701, expected_lease, expected_interval, 1)
+    ]
     assert evidence == [
         "start",
         "stage:inspecting_input",
@@ -2061,11 +2892,14 @@ def test_split_receipt_size_and_hash_are_computed_before_each_delivery(
     ]
     assert terminal["status"] == "succeeded"
     assert len(captions) == 2
-    assert len(receipt_order) == 6
-    for index, part in enumerate(("part-1", "part-2")):
-        receipt_group = receipt_order[index * 3 : (index + 1) * 3]
-        assert receipt_group[-1] == "delivery"
-        assert set(receipt_group[:2]) == {f"size:{part}", f"sha256:{part}"}
+    assert receipt_order == [
+        "size:part-1",
+        "sha256:part-1",
+        "size:part-2",
+        "sha256:part-2",
+        "delivery",
+        "delivery",
+    ]
 
 
 def test_video_edit_worker_large_media_uses_local_transport_and_document_delivery(
@@ -2316,7 +3150,7 @@ def test_canonical_local_free_worker_receipt_never_requests_charge(
         assert "trừ xu" not in lowered
 
 
-def test_split_worker_uses_first_artifact_as_top_level_telegram_identity(
+def test_split_worker_uses_terminal_artifact_as_top_level_telegram_identity(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -2324,9 +3158,9 @@ def test_split_worker_uses_first_artifact_as_top_level_telegram_identity(
     receipt = json.loads(terminal["output_url"])
 
     assert terminal["status"] == "succeeded"
-    assert receipt["delivery_message_id"] == "1001"
-    assert receipt["delivery_file_id"] == "file-1"
-    assert terminal["output_file_id"] == "file-1"
+    assert receipt["delivery_message_id"] == "1002"
+    assert receipt["delivery_file_id"] == "file-2"
+    assert terminal["output_file_id"] == "file-2"
     assert [item["message_id"] for item in receipt["artifacts"]] == ["1001", "1002"]
 
 

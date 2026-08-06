@@ -7,7 +7,7 @@ from copy import deepcopy
 
 import pytest
 
-from services import video_editengine1, video_local_editing
+from services import video_edit_long_media, video_editengine1, video_local_editing
 
 
 def _conn(path: str = ":memory:") -> sqlite3.Connection:
@@ -21,9 +21,15 @@ def _conn(path: str = ":memory:") -> sqlite3.Connection:
             status TEXT,
             provider TEXT,
             input_file_id TEXT,
+            output_file_id TEXT,
+            output_url TEXT,
+            error_short TEXT,
             created_at TEXT,
+            started_at TEXT,
+            finished_at TEXT,
             xu_cost INTEGER,
             admin_only INTEGER,
+            worker_id TEXT,
             updated_at TEXT
         )"""
     )
@@ -84,6 +90,25 @@ def _create(conn: sqlite3.Connection, payload: dict | None = None) -> dict:
     created = video_editengine1.create_job(conn, **(payload or _job_input()))
     conn.commit()
     return created
+
+
+def _claim(
+    conn: sqlite3.Connection,
+    *,
+    lease_owner: str = "worker-a",
+    now: str = "2030-01-02 03:04:05",
+    lease_seconds: int = 300,
+    blank_lease_grace_cutoff: str = "2030-01-02 02:54:05",
+    supports_receipt_prefix_resume: bool = False,
+) -> dict:
+    return video_editengine1.claim_next_video_local_edit(
+        conn,
+        lease_owner=lease_owner,
+        now=now,
+        lease_seconds=lease_seconds,
+        blank_lease_grace_cutoff=blank_lease_grace_cutoff,
+        supports_receipt_prefix_resume=supports_receipt_prefix_resume,
+    )
 
 
 def _receipt() -> dict:
@@ -187,123 +212,313 @@ def _rewrite_as_historic_v2(
     return token
 
 
-def test_video_edit_outbox_lease_rejects_live_competitor_and_terminal_update() -> None:
+def test_video_edit_claim_atomically_starts_all_three_rows_without_committing(tmp_path) -> None:
+    database = tmp_path / "atomic-claim.sqlite3"
+    conn = _conn(str(database))
+    created = _create(conn)
+
+    claimed = _claim(conn)
+
+    assert claimed["id"] == created["local_worker_job_id"]
+    assert claimed["status"] == "running"
+    assert claimed["claim_attempt"] == 1
+    assert claimed["lease_owner"] == "worker-a"
+    assert claimed["lease_expires_at"] == "2030-01-02 03:09:05"
+    assert claimed["artifact_receipt_prefix"] == []
+    assert claimed["delivery_cursor"] == 0
+    assert claimed["source_sha256"] == "a" * 64
+    assert claimed["receipt_state"] == "not_created"
+    assert conn.in_transaction is True
+    assert conn.execute(
+        "SELECT status,started_at,worker_id,updated_at FROM local_worker_jobs WHERE id=?",
+        (created["local_worker_job_id"],),
+    ).fetchone() == (
+        "running",
+        "2030-01-02 03:04:05",
+        "worker-a",
+        "2030-01-02 03:04:05",
+    )
+    assert conn.execute(
+        "SELECT status,started_at,updated_at FROM video_edit_jobs WHERE id=?",
+        (created["edit_job_id"],),
+    ).fetchone() == (
+        "rendering",
+        "2030-01-02 03:04:05",
+        "2030-01-02 03:04:05",
+    )
+    assert conn.execute(
+        "SELECT status,attempt_count,lease_owner,lease_expires_at,updated_at "
+        "FROM video_edit_outbox WHERE id=?",
+        (created["outbox_id"],),
+    ).fetchone() == (
+        "running",
+        1,
+        "worker-a",
+        "2030-01-02 03:09:05",
+        "2030-01-02 03:04:05",
+    )
+
+    observer = sqlite3.connect(str(database), timeout=0)
+    assert observer.execute(
+        "SELECT status FROM local_worker_jobs WHERE id=?",
+        (created["local_worker_job_id"],),
+    ).fetchone() == ("queued",)
+    observer.close()
+    conn.rollback()
+
+
+def test_expired_claim_rotates_lease_and_returns_canonical_receipt_prefix() -> None:
     conn = _conn()
     created = _create(conn)
     worker_job_id = created["local_worker_job_id"]
-    acquired_at = "2030-01-02 03:04:05"
-    first_expiry = "2030-01-02 03:09:05"
+    first = _claim(conn)
+    assert first["claim_attempt"] == 1
+    conn.commit()
+    receipt = _artifact(1)
+    conn.execute(
+        "UPDATE video_edit_jobs SET artifact_receipts_json=?,delivery_cursor=1 WHERE id=?",
+        (json.dumps([receipt]), created["edit_job_id"]),
+    )
+    conn.commit()
 
+    reclaimed = _claim(
+        conn,
+        lease_owner="worker-b",
+        now="2030-01-02 03:09:06",
+        blank_lease_grace_cutoff="2030-01-02 02:59:06",
+        supports_receipt_prefix_resume=True,
+    )
+
+    expected_prefix = video_editengine1.normalize_artifact_receipt_prefix(
+        [receipt], expected_output_count=1
+    )
+    expected_digest = hashlib.sha256(
+        json.dumps(
+            expected_prefix,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert reclaimed["claim_attempt"] == 2
+    assert reclaimed["lease_owner"] == "worker-b"
+    assert reclaimed["started_at"] == "2030-01-02 03:04:05"
+    assert reclaimed["artifact_receipt_prefix"] == expected_prefix
+    assert reclaimed["delivery_cursor"] == 1
+    assert reclaimed["resume_contract"] == {
+        "schema": "video-local-edit-receipt-prefix-resume",
+        "version": 1,
+        "expected_output_count": 1,
+        "artifact_receipt_prefix": expected_prefix,
+        "prefix_count": 1,
+        "prefix_digest": expected_digest,
+        "compatibility": "legacy_receipt_only",
+        "delivery_cursor": None,
+    }
     assert conn.execute(
-        "SELECT status,lease_owner,lease_expires_at FROM video_edit_outbox "
+        "SELECT attempt_count,lease_owner,lease_expires_at FROM video_edit_outbox "
         "WHERE local_worker_job_id=?",
         (worker_job_id,),
-    ).fetchone() == ("pending", "", "")
-    assert video_editengine1.renew_worker_lease(
+    ).fetchone() == (2, "worker-b", "2030-01-02 03:14:06")
+
+
+def test_running_claim_rejects_malformed_persisted_lease_timestamp() -> None:
+    conn = _conn()
+    created = _create(conn)
+    first = _claim(conn)
+    assert first
+    conn.execute(
+        "UPDATE video_edit_outbox SET lease_expires_at='0000' WHERE id=?",
+        (created["outbox_id"],),
+    )
+    conn.commit()
+
+    assert _claim(
         conn,
-        worker_job_id=worker_job_id,
-        lease_owner="worker-a",
-        now=acquired_at,
-        lease_expires_at=first_expiry,
-    ) is True
+        lease_owner="worker-b",
+        now="2030-01-02 03:09:06",
+        blank_lease_grace_cutoff="2030-01-02 02:59:06",
+    ) == {}
     assert conn.execute(
-        "SELECT lease_owner,lease_expires_at FROM video_edit_outbox WHERE local_worker_job_id=?",
-        (worker_job_id,),
-    ).fetchone() == ("worker-a", first_expiry)
+        "SELECT attempt_count,lease_owner,lease_expires_at FROM video_edit_outbox WHERE id=?",
+        (created["outbox_id"],),
+    ).fetchone() == (1, "worker-a", "0000")
+
+
+def test_blank_lease_running_row_requires_explicit_elapsed_grace() -> None:
+    conn = _conn()
+    created = _create(conn)
+    conn.execute(
+        "UPDATE local_worker_jobs SET status='running',started_at='2030-01-02 02:58:00',"
+        "worker_id='legacy-worker' WHERE id=?",
+        (created["local_worker_job_id"],),
+    )
+    conn.execute(
+        "UPDATE video_edit_jobs SET status='rendering',started_at='2030-01-02 02:58:00' WHERE id=?",
+        (created["edit_job_id"],),
+    )
+    conn.execute(
+        "UPDATE video_edit_outbox SET status='running',lease_owner='',lease_expires_at='',"
+        "updated_at='2030-01-02 03:03:00' WHERE id=?",
+        (created["outbox_id"],),
+    )
+    conn.commit()
+
+    assert _claim(conn, blank_lease_grace_cutoff="2030-01-02 03:00:00") == {}
+    conn.execute(
+        "UPDATE video_edit_outbox SET updated_at='2030-01-02 02:59:59' WHERE id=?",
+        (created["outbox_id"],),
+    )
+    claimed = _claim(conn, blank_lease_grace_cutoff="2030-01-02 03:00:00")
+    assert claimed["claim_attempt"] == 1
+    assert claimed["lease_owner"] == "worker-a"
+
+
+@pytest.mark.parametrize(
+    ("table_name", "column_name", "blocked_value"),
+    [
+        ("local_worker_jobs", "status", "failed"),
+        ("local_worker_jobs", "job_type", "image_generation"),
+        ("video_edit_jobs", "status", "delivery_unknown"),
+        ("video_edit_jobs", "worker_job_type", "video_ai_edit"),
+        ("video_edit_outbox", "status", "terminal_delivery_unknown"),
+        ("video_edit_outbox", "owner", "other_owner"),
+    ],
+)
+def test_claim_excludes_terminal_and_nonvideo_rows(
+    table_name: str, column_name: str, blocked_value: str
+) -> None:
+    conn = _conn()
+    created = _create(conn)
+    conn.execute(
+        f"UPDATE {table_name} SET {column_name}=? WHERE "
+        + (
+            "id=?"
+            if table_name != "video_edit_outbox"
+            else "local_worker_job_id=?"
+        ),
+        (
+            blocked_value,
+            created[
+                "local_worker_job_id"
+                if table_name != "video_edit_jobs"
+                else "edit_job_id"
+            ],
+        ),
+    )
+    conn.commit()
+
+    assert _claim(conn) == {}
+
+
+def test_two_connections_cannot_both_claim_the_same_video_edit(tmp_path) -> None:
+    database = tmp_path / "claim-race.sqlite3"
+    first_conn = _conn(str(database))
+    created = _create(first_conn)
+    second_conn = sqlite3.connect(str(database))
+
+    first = _claim(first_conn, lease_owner="worker-a")
+    first_conn.commit()
+    second = _claim(second_conn, lease_owner="worker-b")
+
+    assert first["id"] == created["local_worker_job_id"]
+    assert second == {}
+    assert second_conn.execute(
+        "SELECT attempt_count,lease_owner FROM video_edit_outbox WHERE id=?",
+        (created["outbox_id"],),
+    ).fetchone() == (1, "worker-a")
+
+
+def test_renewal_requires_live_exact_owner_and_claim_attempt_even_after_same_id_reclaim() -> None:
+    conn = _conn()
+    created = _create(conn)
+    first = _claim(conn, lease_owner="stable-worker")
+    conn.commit()
 
     assert video_editengine1.renew_worker_lease(
         conn,
-        worker_job_id=worker_job_id,
-        lease_owner="worker-b",
+        worker_job_id=created["local_worker_job_id"],
+        lease_owner="competitor",
+        claim_attempt=first["claim_attempt"],
+        now="2030-01-02 03:05:00",
+        lease_expires_at="2030-01-02 03:10:00",
+    ) is False
+    assert video_editengine1.renew_worker_lease(
+        conn,
+        worker_job_id=created["local_worker_job_id"],
+        lease_owner="stable-worker",
+        claim_attempt=first["claim_attempt"],
+        now="2030-01-02 03:09:06",
+        lease_expires_at="2030-01-02 03:14:06",
+    ) is False
+
+    reclaimed = _claim(
+        conn,
+        lease_owner="stable-worker",
+        now="2030-01-02 03:09:06",
+        blank_lease_grace_cutoff="2030-01-02 02:59:06",
+    )
+    assert reclaimed["claim_attempt"] == first["claim_attempt"] + 1
+    assert video_editengine1.renew_worker_lease(
+        conn,
+        worker_job_id=created["local_worker_job_id"],
+        lease_owner="stable-worker",
+        claim_attempt=first["claim_attempt"],
+        now="2030-01-02 03:10:00",
+        lease_expires_at="2030-01-02 03:15:00",
+    ) is False
+    assert video_editengine1.renew_worker_lease(
+        conn,
+        worker_job_id=created["local_worker_job_id"],
+        lease_owner="stable-worker",
+        claim_attempt=reclaimed["claim_attempt"],
+        now="2030-01-02 03:10:00",
+        lease_expires_at="2030-01-02 03:15:00",
+    ) is True
+    assert conn.execute(
+        "SELECT attempt_count,lease_owner,lease_expires_at FROM video_edit_outbox WHERE id=?",
+        (created["outbox_id"],),
+    ).fetchone() == (2, "stable-worker", "2030-01-02 03:15:00")
+
+
+def test_renewal_without_claim_attempt_is_rejected_without_mutation() -> None:
+    conn = _conn()
+    created = _create(conn)
+    claimed = _claim(conn)
+    conn.commit()
+
+    assert video_editengine1.renew_worker_lease(
+        conn,
+        worker_job_id=created["local_worker_job_id"],
+        lease_owner="worker-a",
         now="2030-01-02 03:05:00",
         lease_expires_at="2030-01-02 03:10:00",
     ) is False
     assert conn.execute(
-        "SELECT lease_owner,lease_expires_at FROM video_edit_outbox WHERE local_worker_job_id=?",
-        (worker_job_id,),
-    ).fetchone() == ("worker-a", first_expiry)
-
-    conn.execute(
-        "UPDATE video_edit_outbox SET status='running' WHERE local_worker_job_id=?",
-        (worker_job_id,),
+        "SELECT attempt_count,lease_owner,lease_expires_at FROM video_edit_outbox WHERE id=?",
+        (created["outbox_id"],),
+    ).fetchone() == (
+        claimed["claim_attempt"],
+        "worker-a",
+        "2030-01-02 03:09:05",
     )
-    renewed_expiry = "2030-01-02 03:12:00"
-    assert video_editengine1.renew_worker_lease(
-        conn,
-        worker_job_id=worker_job_id,
-        lease_owner="worker-a",
-        now="2030-01-02 03:06:00",
-        lease_expires_at=renewed_expiry,
-    ) is True
-    assert conn.execute(
-        "SELECT lease_owner,lease_expires_at FROM video_edit_outbox WHERE local_worker_job_id=?",
-        (worker_job_id,),
-    ).fetchone() == ("worker-a", renewed_expiry)
-
-    replacement_expiry = "2030-01-02 03:20:00"
-    assert video_editengine1.renew_worker_lease(
-        conn,
-        worker_job_id=worker_job_id,
-        lease_owner="worker-b",
-        now="2030-01-02 03:12:01",
-        lease_expires_at=replacement_expiry,
-    ) is True
-    assert conn.execute(
-        "SELECT lease_owner,lease_expires_at FROM video_edit_outbox WHERE local_worker_job_id=?",
-        (worker_job_id,),
-    ).fetchone() == ("worker-b", replacement_expiry)
-
-    conn.execute(
-        "UPDATE video_edit_jobs SET status='delivered' WHERE id=?",
-        (created["edit_job_id"],),
-    )
-    assert video_editengine1.renew_worker_lease(
-        conn,
-        worker_job_id=worker_job_id,
-        lease_owner="worker-b",
-        now="2030-01-02 03:13:00",
-        lease_expires_at="2030-01-02 03:25:00",
-    ) is False
-    assert conn.execute(
-        "SELECT lease_owner,lease_expires_at FROM video_edit_outbox WHERE local_worker_job_id=?",
-        (worker_job_id,),
-    ).fetchone() == ("worker-b", replacement_expiry)
-
-    conn.execute(
-        "UPDATE video_edit_jobs SET status='queued' WHERE id=?",
-        (created["edit_job_id"],),
-    )
-    for terminal_status in ("terminal_failed", "terminal_delivery_unknown"):
-        conn.execute(
-            "UPDATE video_edit_outbox SET status=? WHERE local_worker_job_id=?",
-            (terminal_status, worker_job_id),
-        )
-        assert video_editengine1.renew_worker_lease(
-            conn,
-            worker_job_id=worker_job_id,
-            lease_owner="worker-b",
-            now="2030-01-02 03:13:00",
-            lease_expires_at="2030-01-02 03:25:00",
-        ) is False
-        assert conn.execute(
-            "SELECT status,lease_owner,lease_expires_at FROM video_edit_outbox "
-            "WHERE local_worker_job_id=?",
-            (worker_job_id,),
-        ).fetchone() == (terminal_status, "worker-b", replacement_expiry)
 
 
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"worker_job_id": 0, "lease_owner": "worker-a", "lease_expires_at": "2030-01-02 03:09:05"},
-        {"worker_job_id": 1, "lease_owner": "", "lease_expires_at": "2030-01-02 03:09:05"},
-        {"worker_job_id": 1, "lease_owner": "worker-a", "lease_expires_at": ""},
-        {"worker_job_id": 1, "lease_owner": "worker-a", "lease_expires_at": "not-a-timestamp"},
+        {"worker_job_id": 0, "lease_owner": "worker-a", "claim_attempt": 1, "lease_expires_at": "2030-01-02 03:09:05"},
+        {"worker_job_id": 1, "lease_owner": "", "claim_attempt": 1, "lease_expires_at": "2030-01-02 03:09:05"},
+        {"worker_job_id": 1, "lease_owner": "worker-a", "claim_attempt": 0, "lease_expires_at": "2030-01-02 03:09:05"},
+        {"worker_job_id": 1, "lease_owner": "worker-a", "claim_attempt": 1, "lease_expires_at": ""},
+        {"worker_job_id": 1, "lease_owner": "worker-a", "claim_attempt": 1, "lease_expires_at": "not-a-timestamp"},
     ],
 )
 def test_video_edit_outbox_lease_rejects_invalid_inputs_without_mutating_row(kwargs: dict) -> None:
     conn = _conn()
     created = _create(conn)
+    claimed = _claim(conn)
+    conn.commit()
     kwargs["worker_job_id"] = (
         created["local_worker_job_id"] if kwargs["worker_job_id"] == 1 else kwargs["worker_job_id"]
     )
@@ -314,9 +529,9 @@ def test_video_edit_outbox_lease_rejects_invalid_inputs_without_mutating_row(kwa
         **kwargs,
     ) is False
     assert conn.execute(
-        "SELECT lease_owner,lease_expires_at FROM video_edit_outbox WHERE local_worker_job_id=?",
+        "SELECT attempt_count,lease_owner,lease_expires_at FROM video_edit_outbox WHERE local_worker_job_id=?",
         (created["local_worker_job_id"],),
-    ).fetchone() == ("", "")
+    ).fetchone() == (claimed["claim_attempt"], "worker-a", "2030-01-02 03:09:05")
 
 
 def test_video_edit_stage_update_is_bounded_monotonic_and_terminal_fenced() -> None:
@@ -1404,3 +1619,392 @@ def test_claim_charge_rejects_corrupt_persisted_artifact_json() -> None:
         conn,
         worker_job_id=created["local_worker_job_id"],
     ) is False
+
+
+def test_queued_video_edit_with_empty_source_sha256_claims_without_reuse_material() -> None:
+    conn = _conn()
+    created = _create(conn)
+    conn.execute(
+        "UPDATE video_edit_jobs SET source_sha256='' WHERE id=?",
+        (created["edit_job_id"],),
+    )
+    conn.commit()
+
+    claimed = _claim(conn)
+
+    assert claimed["id"] == created["local_worker_job_id"]
+    assert claimed["source_sha256"] == ""
+    assert claimed["artifact_receipt_prefix"] == []
+    assert claimed["delivery_cursor"] == 0
+
+
+def test_corrupt_first_eligible_candidate_does_not_starve_next_valid_video_edit_claim() -> None:
+    for corruption in ("artifact_receipts", "lease"):
+        conn = _conn()
+        first = _create(conn)
+        second_payload = deepcopy(_job_input())
+        second_payload["edit_session_id"] = f"edit-safety-session-{corruption}-second"
+        second = _create(conn, second_payload)
+
+        if corruption == "artifact_receipts":
+            conn.execute(
+                "UPDATE video_edit_jobs SET artifact_receipts_json='not-json' WHERE id=?",
+                (first["edit_job_id"],),
+            )
+            expected_first = ("queued", "pending", "not-json")
+        else:
+            assert _claim(conn, lease_owner="corrupt-worker")["id"] == first["local_worker_job_id"]
+            conn.commit()
+            conn.execute(
+                "UPDATE video_edit_outbox SET lease_expires_at='0000' WHERE id=?",
+                (first["outbox_id"],),
+            )
+            expected_first = ("running", "running", "[]")
+        conn.commit()
+
+        claimed = _claim(conn, lease_owner=f"worker-{corruption}")
+
+        assert claimed["id"] == second["local_worker_job_id"]
+        assert conn.execute(
+            "SELECT l.status,o.status,j.artifact_receipts_json "
+            "FROM local_worker_jobs AS l "
+            "JOIN video_edit_jobs AS j ON j.local_worker_job_id=l.id "
+            "JOIN video_edit_outbox AS o ON o.local_worker_job_id=l.id "
+            "WHERE l.id=?",
+            (first["local_worker_job_id"],),
+        ).fetchone() == expected_first
+
+
+def test_partial_delivery_cursor_candidate_is_not_claimed_or_truncated_before_later_valid_claim() -> None:
+    conn = _conn()
+    first = _create(conn)
+    second_payload = deepcopy(_job_input())
+    second_payload["edit_session_id"] = "edit-safety-session-partial-second"
+    second = _create(conn, second_payload)
+    receipts = [_artifact(1), _artifact(2)]
+    persisted_receipts = json.dumps(receipts, ensure_ascii=False, separators=(",", ":"))
+    conn.execute(
+        "UPDATE video_edit_jobs SET artifact_receipts_json=?,delivery_cursor=1 WHERE id=?",
+        (persisted_receipts, first["edit_job_id"]),
+    )
+    conn.commit()
+
+    claimed = _claim(conn)
+
+    assert claimed["id"] == second["local_worker_job_id"]
+    assert conn.execute(
+        "SELECT artifact_receipts_json,delivery_cursor,status FROM video_edit_jobs WHERE id=?",
+        (first["edit_job_id"],),
+    ).fetchone() == (persisted_receipts, 1, "queued")
+
+
+@pytest.mark.parametrize("ambiguous_state", ["sending", "unknown"])
+def test_expired_ambiguous_delivery_cursor_is_terminalized_without_reclaim(
+    ambiguous_state: str,
+) -> None:
+    conn = _conn()
+    created = _create(conn)
+    first_claim = _claim(conn, lease_owner="worker-first")
+    conn.commit()
+    receipt_prefix = [_artifact(1)]
+    attempt_id = f"delivery-claim-{first_claim['claim_attempt']}-output-2"
+    sending = video_edit_long_media.advance_delivery_cursor(
+        video_edit_long_media.DeliveryCursor(output_index=2),
+        video_edit_long_media.DeliveryCursor(
+            state="sending",
+            output_index=2,
+            attempt_id=attempt_id,
+        ),
+    )
+    video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=created["local_worker_job_id"],
+        worker_status="running",
+        detail={
+            "stage": "delivering",
+            "artifact_receipts": receipt_prefix,
+        },
+        receipt={},
+    )
+    cursor = sending
+    durable_detail = {
+        "stage": "delivering",
+        "artifact_receipts": receipt_prefix,
+        "delivery_cursor": cursor.to_mapping(),
+    }
+    video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=created["local_worker_job_id"],
+        worker_status="running",
+        detail=durable_detail,
+        receipt={},
+    )
+    if ambiguous_state == "unknown":
+        cursor = video_edit_long_media.advance_delivery_cursor(
+            sending,
+            video_edit_long_media.DeliveryCursor(
+                state="unknown",
+                output_index=2,
+                attempt_id=attempt_id,
+            ),
+        )
+        durable_detail = {
+            "stage": "delivering",
+            "artifact_receipts": receipt_prefix,
+            "delivery_cursor": cursor.to_mapping(),
+        }
+        video_editengine1.record_worker_update(
+            conn,
+            worker_job_id=created["local_worker_job_id"],
+            worker_status="running",
+            detail=durable_detail,
+            receipt={},
+        )
+    persisted_prefix = json.dumps(receipt_prefix, ensure_ascii=False, separators=(",", ":"))
+    conn.execute(
+        "UPDATE local_worker_jobs SET error_short=? WHERE id=?",
+        (json.dumps(durable_detail, ensure_ascii=False, separators=(",", ":")), created["local_worker_job_id"]),
+    )
+    conn.execute(
+        "UPDATE video_edit_outbox SET lease_expires_at='2030-01-02 03:04:05' WHERE id=?",
+        (created["outbox_id"],),
+    )
+    conn.commit()
+
+    assert _claim(
+        conn,
+        lease_owner="worker-reclaimer",
+        now="2030-01-02 03:09:06",
+        blank_lease_grace_cutoff="2030-01-02 02:59:06",
+    ) == {}
+    assert conn.execute(
+        "SELECT l.status,j.status,o.status,j.artifact_receipts_json,j.delivery_cursor,j.charged_xu "
+        "FROM local_worker_jobs AS l "
+        "JOIN video_edit_jobs AS j ON j.local_worker_job_id=l.id "
+        "JOIN video_edit_outbox AS o ON o.local_worker_job_id=l.id "
+        "WHERE l.id=?",
+        (created["local_worker_job_id"],),
+    ).fetchone() == (
+        "failed",
+        "delivery_unknown",
+        "terminal_delivery_unknown",
+        persisted_prefix,
+        1,
+        0,
+    )
+
+
+def _persist_durable_resume_cursor(
+    conn: sqlite3.Connection,
+    created: dict,
+    *,
+    state: str,
+    receipts: list[dict],
+) -> video_edit_long_media.DeliveryCursor:
+    tail = json.loads(
+        conn.execute(
+            "SELECT tail_json FROM video_edit_jobs WHERE id=?",
+            (created["edit_job_id"],),
+        ).fetchone()[0]
+    )
+    last = receipts[-1] if receipts else {}
+    cursor = video_edit_long_media.DeliveryCursor(
+        state=state,
+        output_index=len(receipts) if state in {"accepted", "delivered"} else len(receipts) + 1,
+        attempt_id="durable-resume-attempt-1",
+        deterministic=state == "rejected",
+        rejection_code="telegram_delivery_rejected" if state == "rejected" else "",
+        message_id=str(last.get("message_id") or ""),
+        file_id=str(last.get("file_id") or ""),
+    )
+    tail["delivery_cursor"] = cursor.to_mapping()
+    conn.execute(
+        "UPDATE video_edit_jobs SET artifact_receipts_json=?,delivery_cursor=?,tail_json=? WHERE id=?",
+        (
+            json.dumps(receipts, ensure_ascii=False, separators=(",", ":")),
+            len(receipts),
+            json.dumps(tail, ensure_ascii=False, separators=(",", ":")),
+            created["edit_job_id"],
+        ),
+    )
+    conn.execute(
+        "UPDATE video_edit_outbox SET lease_expires_at='2030-01-02 03:04:05' WHERE id=?",
+        (created["outbox_id"],),
+    )
+    conn.commit()
+    return cursor
+
+
+def test_durable_resume_claim_requires_capability_and_returns_exact_server_contract() -> None:
+    conn = _conn()
+    payload = _job_input()
+    payload["worker_payload"]["expected_output_count"] = 999
+    created = _create(conn, payload)
+    assert _claim(conn, lease_owner="worker-first")
+    conn.commit()
+    receipt = _artifact(1)
+    cursor = _persist_durable_resume_cursor(
+        conn,
+        created,
+        state="delivered",
+        receipts=[receipt],
+    )
+
+    assert _claim(
+        conn,
+        lease_owner="legacy-worker",
+        now="2030-01-02 03:09:06",
+        blank_lease_grace_cutoff="2030-01-02 02:59:06",
+    ) == {}
+    assert conn.execute(
+        "SELECT attempt_count,lease_owner FROM video_edit_outbox WHERE id=?",
+        (created["outbox_id"],),
+    ).fetchone() == (1, "worker-first")
+
+    reclaimed = _claim(
+        conn,
+        lease_owner="resume-worker",
+        now="2030-01-02 03:09:06",
+        blank_lease_grace_cutoff="2030-01-02 02:59:06",
+        supports_receipt_prefix_resume=True,
+    )
+
+    expected_prefix = video_editengine1.normalize_artifact_receipt_prefix(
+        [receipt], expected_output_count=1
+    )
+    expected_digest = hashlib.sha256(
+        json.dumps(
+            expected_prefix,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert reclaimed["claim_attempt"] == 2
+    assert reclaimed["artifact_receipt_prefix"] == expected_prefix
+    assert reclaimed["resume_contract"] == {
+        "schema": "video-local-edit-receipt-prefix-resume",
+        "version": 1,
+        "expected_output_count": 1,
+        "artifact_receipt_prefix": expected_prefix,
+        "prefix_count": 1,
+        "prefix_digest": expected_digest,
+        "compatibility": "strict",
+        "delivery_cursor": cursor.to_mapping(),
+    }
+
+
+@pytest.mark.parametrize("cursor_state", ["accepted", "delivered"])
+def test_durable_resume_reclaims_expired_strict_prefix_states(cursor_state: str) -> None:
+    conn = _conn()
+    created = _create(conn)
+    assert _claim(conn, lease_owner="worker-first")
+    conn.commit()
+    cursor = _persist_durable_resume_cursor(
+        conn,
+        created,
+        state=cursor_state,
+        receipts=[_artifact(1)],
+    )
+
+    reclaimed = _claim(
+        conn,
+        lease_owner="resume-worker",
+        now="2030-01-02 03:09:06",
+        blank_lease_grace_cutoff="2030-01-02 02:59:06",
+        supports_receipt_prefix_resume=True,
+    )
+
+    assert reclaimed["claim_attempt"] == 2
+    assert reclaimed["resume_contract"]["delivery_cursor"] == cursor.to_mapping()
+
+
+def test_durable_resume_does_not_reclaim_expired_deterministic_rejection() -> None:
+    conn = _conn()
+    created = _create(conn)
+    assert _claim(conn, lease_owner="worker-first")
+    conn.commit()
+    _persist_durable_resume_cursor(
+        conn,
+        created,
+        state="rejected",
+        receipts=[],
+    )
+
+    assert _claim(
+        conn,
+        lease_owner="resume-worker",
+        now="2030-01-02 03:09:06",
+        blank_lease_grace_cutoff="2030-01-02 02:59:06",
+        supports_receipt_prefix_resume=True,
+    ) == {}
+    assert conn.execute(
+        "SELECT l.status,j.status,o.status FROM local_worker_jobs AS l "
+        "JOIN video_edit_jobs AS j ON j.local_worker_job_id=l.id "
+        "JOIN video_edit_outbox AS o ON o.local_worker_job_id=l.id WHERE l.id=?",
+        (created["local_worker_job_id"],),
+    ).fetchone() == ("failed", "failed_no_charge", "terminal_failed")
+
+
+def test_durable_resume_paid_strict_multi_output_charge_uses_last_bound_identity() -> None:
+    conn = _conn()
+    strict_created = _create(conn, _paid_payload())
+    strict_receipt = _split_receipt()
+    strict_receipt.update(
+        charge_policy="after_valid_mp4_delivery",
+        charge_status="pending_post_delivery",
+    )
+    strict_delivered = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=strict_created["local_worker_job_id"],
+        worker_status="succeeded",
+        detail={"validation": "passed"},
+        receipt=strict_receipt,
+    )
+    assert strict_delivered["status"] == "delivered"
+    last = strict_receipt["artifacts"][-1]
+    strict_cursor = video_edit_long_media.DeliveryCursor(
+        state="delivered",
+        output_index=2,
+        attempt_id="paid-strict-tail-2",
+        message_id=last["message_id"],
+        file_id=last["file_id"],
+    )
+    strict_tail = dict(strict_delivered["tail"])
+    strict_tail["delivery_cursor"] = strict_cursor.to_mapping()
+    conn.execute(
+        "UPDATE video_edit_jobs SET delivery_message_id=?,delivery_file_id=?,output_file_id=?,tail_json=? "
+        "WHERE local_worker_job_id=?",
+        (
+            last["message_id"],
+            last["file_id"],
+            last["file_id"],
+            json.dumps(strict_tail, ensure_ascii=False, separators=(",", ":")),
+            strict_created["local_worker_job_id"],
+        ),
+    )
+
+    assert video_editengine1.claim_charge(
+        conn,
+        worker_job_id=strict_created["local_worker_job_id"],
+    ) is True
+
+    legacy_payload = _paid_payload()
+    legacy_payload["edit_session_id"] = "legacy-paid-first-receipt"
+    legacy_created = _create(conn, legacy_payload)
+    legacy_receipt = _split_receipt()
+    legacy_receipt.update(
+        charge_policy="after_valid_mp4_delivery",
+        charge_status="pending_post_delivery",
+    )
+    assert video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=legacy_created["local_worker_job_id"],
+        worker_status="succeeded",
+        detail={"validation": "passed"},
+        receipt=legacy_receipt,
+    )["status"] == "delivered"
+    assert video_editengine1.claim_charge(
+        conn,
+        worker_job_id=legacy_created["local_worker_job_id"],
+    ) is True

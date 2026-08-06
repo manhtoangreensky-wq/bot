@@ -209,6 +209,7 @@ _REVIEW_BACK_CALLBACKS = {
     "join": "videoedit|join",
     "audio": "videoedit|audio",
     "overlay": "videoedit|overlay",
+    "logo_options": "videoedit|logo_options",
     "effects": "videoedit|effects",
     "split": "videoedit|split",
     "ai_prompt": "videoedit|ai_prompt",

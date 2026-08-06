@@ -1862,6 +1862,77 @@ def test_delivery_cursor_mapping_requires_exact_boolean_determinism(deterministi
         long_media.DeliveryCursor.from_mapping(value)
 
 
+def test_delivery_cursor_advances_only_through_exact_delivery_edges() -> None:
+    not_started = long_media.DeliveryCursor(output_index=2)
+    sending = long_media.DeliveryCursor(
+        state="sending", output_index=2, attempt_id="attempt-2"
+    )
+    accepted = long_media.DeliveryCursor(
+        state="accepted",
+        output_index=2,
+        attempt_id="attempt-2",
+        message_id="102",
+        file_id="file-2",
+    )
+    delivered = long_media.DeliveryCursor(
+        state="delivered",
+        output_index=2,
+        attempt_id="attempt-2",
+        message_id="102",
+        file_id="file-2",
+    )
+
+    assert long_media.advance_delivery_cursor(not_started, sending) is sending
+    assert long_media.advance_delivery_cursor(sending, accepted) is accepted
+    assert long_media.advance_delivery_cursor(accepted, delivered) is delivered
+    assert long_media.advance_delivery_cursor(delivered, delivered) is delivered
+
+
+@pytest.mark.parametrize(
+    ("current", "proposed"),
+    [
+        (
+            long_media.DeliveryCursor(state="sending", attempt_id="attempt-1"),
+            long_media.DeliveryCursor(),
+        ),
+        (
+            long_media.DeliveryCursor(state="sending", attempt_id="attempt-1"),
+            long_media.DeliveryCursor(
+                state="accepted",
+                attempt_id="attempt-2",
+                message_id="101",
+                file_id="file-1",
+            ),
+        ),
+        (
+            long_media.DeliveryCursor(state="sending", output_index=1, attempt_id="attempt-1"),
+            long_media.DeliveryCursor(
+                state="unknown", output_index=2, attempt_id="attempt-1"
+            ),
+        ),
+        (
+            long_media.DeliveryCursor(
+                state="rejected",
+                attempt_id="attempt-1",
+                deterministic=True,
+                rejection_code="unsupported",
+            ),
+            long_media.DeliveryCursor(state="sending", attempt_id="attempt-1"),
+        ),
+        (
+            long_media.DeliveryCursor(state="unknown", attempt_id="attempt-1"),
+            long_media.DeliveryCursor(state="unknown", attempt_id="attempt-2"),
+        ),
+    ],
+)
+def test_delivery_cursor_rejects_regression_identity_drift_and_terminal_mutation(
+    current: long_media.DeliveryCursor,
+    proposed: long_media.DeliveryCursor,
+) -> None:
+    with pytest.raises(ValueError, match="delivery cursor transition rejected"):
+        long_media.advance_delivery_cursor(current, proposed)
+
+
 @pytest.mark.parametrize(
     ("delivery", "allowed"),
     [

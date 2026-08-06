@@ -1010,6 +1010,35 @@ class DeliveryCursor:
         return cls(**dict(value))
 
 
+def advance_delivery_cursor(
+    current: DeliveryCursor,
+    proposed: DeliveryCursor,
+) -> DeliveryCursor:
+    """Return one exact monotonic delivery transition or reject it."""
+
+    if not isinstance(current, DeliveryCursor) or not isinstance(proposed, DeliveryCursor):
+        raise ValueError("delivery cursor transition rejected")
+    if current == proposed:
+        return proposed
+    if current.output_index != proposed.output_index:
+        raise ValueError("delivery cursor transition rejected")
+    if current.state != "not_started" and current.attempt_id != proposed.attempt_id:
+        raise ValueError("delivery cursor transition rejected")
+
+    allowed = {
+        "not_started": frozenset({"sending"}),
+        "sending": frozenset({"accepted", "rejected", "unknown"}),
+        "accepted": frozenset({"delivered"}),
+    }
+    if proposed.state not in allowed.get(current.state, frozenset()):
+        raise ValueError("delivery cursor transition rejected")
+    if current.state == "accepted" and (
+        current.message_id != proposed.message_id or current.file_id != proposed.file_id
+    ):
+        raise ValueError("delivery cursor transition rejected")
+    return proposed
+
+
 def _require_exact_keys(value: Mapping[str, Any], expected: set[str]) -> None:
     if not isinstance(value, Mapping) or set(value) != expected:
         raise ValueError("invalid checkpoint schema")

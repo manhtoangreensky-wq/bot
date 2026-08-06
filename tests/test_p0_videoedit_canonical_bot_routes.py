@@ -5,6 +5,7 @@ import ast
 import html
 import json
 import logging
+import os
 import re
 import sqlite3
 import time
@@ -270,6 +271,47 @@ def _run_pending_text(state: dict, text: str) -> _Message:
     return message
 
 
+@pytest.mark.parametrize(
+    ("name", "value", "reason"),
+    (
+        (
+            "TELEGRAM_API_PROXY_SECRET",
+            "secret\r\nX-Injected: yes",
+            "telegram_proxy_secret_invalid",
+        ),
+        (
+            "TELEGRAM_API_PROXY_SECRET_HEADER",
+            "X-Good\nX-Injected",
+            "telegram_proxy_secret_header_invalid",
+        ),
+    ),
+)
+def test_videoedit_bot_rejects_raw_proxy_header_injection_before_normalization(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    value: str,
+    reason: str,
+) -> None:
+    read_proxy_env = _compile_function(
+        "_telegram_proxy_env",
+        {"os": os},
+    )
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValueError, match=reason):
+        read_proxy_env(name, reason=reason)
+
+    infrastructure = BOT_SOURCE[
+        BOT_SOURCE.index("# ─── INFRA.LOCALBOTAPI") :
+        BOT_SOURCE.index("def normalize_telegram_api_root")
+    ]
+    assert re.search(
+        rf'_telegram_proxy_env\(\s*"{re.escape(name)}"',
+        infrastructure,
+    )
+    assert f'_first_env_line(_env("{name}"))' not in infrastructure
+
+
 def test_vietnamese_assistant_compiles_local_and_generative_intent_fails_closed() -> None:
     local_state = _default_state(901, step="await_ai_intent", edit_mode="ai_edit", entry_context="ai")
     local_message = _run_pending_text(local_state, "làm sáng, rõ và âm lượng đều")
@@ -447,7 +489,8 @@ def test_local_ui_copy_and_remove_middle_entry_are_truthful() -> None:
 
     assert "Hiệu ứng cục bộ" in effects
     assert "0 Xu" in effects
-    assert "50 MB" in guide
+    assert "20 MiB" in guide
+    assert "60 giây" in guide
     assert "0 Xu" in guide
     assert "đúng số phần MP4 đã chọn" in guide
     for english_fragment in ("fade", "vignette", "slow zoom", "giới hạn audio"):
@@ -473,6 +516,40 @@ def test_public_assistant_copy_advertises_only_executable_local_goals() -> None:
     assert "walkthrough căn phòng thành nội thất điện ảnh" not in combined
     assert "dịch vụ bên ngoài" in combined
     assert "0 xu" in combined
+
+
+def test_videoedit_lane_copy_uses_routing_thresholds_not_public_hard_limits() -> None:
+    guide = _compile_function(
+        "video_edit_guide_text",
+        {"normalize_user_language": lambda _lang: "vi"},
+    )("vi")
+    assistant_upload = _compile_function("video_ai_edit_upload_text", {})("vi")
+    quality_upload = _compile_function(
+        "video_edit_lane_upload_text",
+        {
+            "video_edit_state_machine": video_edit_state_machine,
+            "video_local_upload_text": lambda _mode, _lang: "manual",
+            "video_ai_edit_upload_text": lambda _lang: assistant_upload,
+        },
+    )("quality_enhance", "vi")
+    public_error = _compile_function("video_local_public_error", {})
+    public_lane_notice = "\n".join(
+        (
+            public_error("video_too_large", "vi"),
+            public_error("duration_too_long", "vi"),
+        )
+    )
+
+    for copy in (guide, quality_upload, assistant_upload, public_lane_notice):
+        assert "20 MiB" in copy
+        assert "60 giây" in copy
+        assert "Telegram" in copy
+        assert "VPS/server" in copy
+        assert "tự động" in copy
+        assert "dung lượng tạm" in copy
+        assert "50 MB" not in copy
+        assert "30 phút" not in copy
+        assert "không giới hạn" not in copy.lower()
 
 
 def test_videoedit_vietnamese_surfaces_translate_pipeline_terms_for_users() -> None:
@@ -1738,7 +1815,8 @@ def test_invalid_logo_srt_and_concat_inputs_keep_their_exact_parent() -> None:
     source_start = legacy.index("source = video_editor_source_from_update", srt_start)
     logo_block = legacy[logo_start:srt_start]
     srt_block = legacy[srt_start:source_start]
-    assert 'back_callback="videoedit|overlay"' in logo_block
+    assert "logo_parent = video_local_logo_parent_callback(state)" in logo_block
+    assert "back_callback=logo_parent" in logo_block
     assert 'back_callback="videoedit|overlay"' in srt_block
 
     pending_text = _function_source("handle_video_editor_pending_text")
@@ -1759,7 +1837,8 @@ def test_logo_upload_commits_the_canonical_logo_options_screen() -> None:
     block = upload[start:end]
     assert "update_video_editor_screen(" in block
     assert '"logo_options"' in block
-    assert 'parent_callback="videoedit|overlay"' in block
+    assert "parent_callback=logo_parent" in block
+    assert "logo_parent_callback=logo_parent" in block
     assert 'update_video_editor_pending(uid, "logo_options"' not in block
 
 
@@ -2017,6 +2096,11 @@ def _ready_worker() -> dict:
         "video_edit_filter_worker_id": "video-edit-test-worker",
         "ffmpeg_path": "C:/ffmpeg/bin/ffmpeg.exe",
         "video_edit_filter_ffmpeg_path": "C:/ffmpeg/bin/ffmpeg.exe",
+        "workspace_ready": True,
+        "workspace_free_bytes": 10 * 1024 * 1024 * 1024,
+        "video_edit_max_deadline_seconds": 1800,
+        "worker_token_ready": True,
+        "local_bot_api_ready": True,
     }
 
 
@@ -2032,8 +2116,12 @@ def _submit_namespace(db_path: Path, saved: dict) -> dict:
         "get_user_language": lambda _uid: "vi",
         "html": html,
         "safe_int": lambda value, default=0: int(value or default),
+        "video_local_editing": video_local_editing,
         "video_local_validation": video_local_validation,
         "video_tail9": video_tail9,
+        "logo_watermark_normalize_position": lambda value, default="bottom_right": (
+            video_local_editing._canonical_overlay_position(value, default)
+        ),
         "video_edit_worker_status_payload": _ready_worker,
         "video_editengine1": video_editengine1,
         "VIDEO_TAIL9_STATE_KEY": "video_tail9",
@@ -2465,6 +2553,149 @@ def test_paid_submit_queues_large_canonical_evidence_without_charge(tmp_path: Pa
     assert payload["charge_policy"] == "after_valid_mp4_delivery"
     assert charge == ("not_charged", 0)
     assert calls == {"create": 1, "claim": 0, "charge": 0}
+
+
+@pytest.mark.parametrize(
+    "concat_duration_fields",
+    [
+        pytest.param({"duration_seconds": 2}, id="top-level-duration-seconds"),
+        pytest.param(
+            {"metadata": {"duration_seconds": 2}},
+            id="nested-duration-seconds",
+        ),
+    ],
+)
+def test_paid_submit_preflights_exact_final_plan_and_assets_before_side_effects(
+    tmp_path: Path,
+    concat_duration_fields: dict,
+) -> None:
+    db_path = tmp_path / "videoedit-paid-final-preflight.sqlite3"
+    _init_job_db(db_path)
+    saved: dict = {}
+    namespace = _submit_namespace(db_path, saved)
+    captured: dict = {}
+    calls = {"preflight": 0, "db": 0, "create": 0, "claim": 0, "charge": 0}
+
+    class _EngineSpy:
+        def __getattr__(self, name):
+            return getattr(video_editengine1, name)
+
+        @staticmethod
+        def preflight(current, runtime):
+            calls["preflight"] += 1
+            captured["state"] = deepcopy(current)
+            captured["runtime"] = deepcopy(runtime)
+            captured["capacity"] = video_editengine1._preflight_capacity_evidence(
+                current,
+                dict(current.get("source_metadata") or {}),
+                dict(current.get("manual_edit_plan") or {}),
+            )
+            return {"ok": False, "reason": "local_worker_workspace_insufficient"}
+
+        @staticmethod
+        def create_job(*_args, **_kwargs):
+            calls["create"] += 1
+            raise AssertionError("blocked preflight must not create a job")
+
+        @staticmethod
+        def claim_charge(*_args, **_kwargs):
+            calls["claim"] += 1
+            raise AssertionError("submit must not claim a charge")
+
+        @staticmethod
+        def charge(*_args, **_kwargs):
+            calls["charge"] += 1
+            raise AssertionError("submit must not charge")
+
+    def blocked_db_connect():
+        calls["db"] += 1
+        raise AssertionError("blocked preflight must stop before opening the job database")
+
+    namespace["video_editengine1"] = _EngineSpy()
+    namespace["db_connect"] = blocked_db_connect
+    submit = _compile_function("submit_local_video_editor_job", namespace)
+    state = _default_state(
+        913,
+        source_duration_ms=5_000,
+        concat_sources=[{
+            "file_id": "concat-final",
+            "file_size": 2_000,
+            "mime_type": "video/mp4",
+            **concat_duration_fields,
+        }],
+        subtitle_source={
+            "file_id": "subtitle-final",
+            "file_size": 1_000,
+            "mime_type": "text/srt",
+        },
+    )
+    state["manual_edit_plan"]["trim"] = {"start_ms": 0, "end_ms": 0}
+    state["manual_edit_plan"]["speed"] = 0.5
+    tail = _paid_video_edit_tail(price_xu=500)
+    tail.update({
+        "quality_tier_id": "500",
+        "audio_config": {
+            "source_audio_available": True,
+            "source_audio": True,
+            "dubbing": False,
+            "music": False,
+            "sfx": False,
+            "subtitles": False,
+            "volumes": {"source_audio": 65},
+        },
+        "logo_config": {
+            "enabled": True,
+            "asset_file_id": "tail-logo-final",
+            "file_size": 4_000,
+            "mime_type": "image/webp",
+            "position": "center_right",
+        },
+        "watermark_config": {
+            "enabled": True,
+            "text": "TOAN AAS",
+            "position": "bottom_center",
+            "opacity_percent": 45,
+        },
+    })
+    query = _Query(913, "videoedit|confirm_paid")
+    update = SimpleNamespace(
+        callback_query=query,
+        message=None,
+        effective_user=query.from_user,
+    )
+
+    assert asyncio.run(submit(update, SimpleNamespace(), state, tail=tail)) is True
+
+    preflight_state = captured["state"]
+    final_plan = preflight_state["manual_edit_plan"]
+    assert final_plan["resolution"] == "1080p"
+    assert final_plan["volume"] == 0.65
+    assert final_plan["logo_overlay"] == {
+        "position": "center_right",
+        "scale": 0.12,
+        "opacity": 1.0,
+    }
+    assert final_plan["text_overlay"]["content"] == "TOAN AAS"
+    assert final_plan["text_overlay"]["position"] == "bottom_center"
+    assert final_plan["text_overlay"]["end_ms"] == 24_000
+    assert preflight_state["logo_source"] == {
+        "file_id": "tail-logo-final",
+        "file_name": "logo.png",
+        "mime_type": "image/webp",
+        "file_size": 4_000,
+    }
+    assert captured["capacity"]["declared_input_bytes"] == 4_096 + 2_000 + 1_000 + 4_000
+    assert calls == {"preflight": 1, "db": 0, "create": 0, "claim": 0, "charge": 0}
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('video_edit_jobs','video_edit_outbox')"
+        ).fetchone()[0] == 0
+    finally:
+        conn.close()
+    assert saved == {}
 
 
 def test_paid_confirmation_retry_reuses_canonical_identity_without_charge(tmp_path: Path) -> None:

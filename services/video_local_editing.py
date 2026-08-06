@@ -10,7 +10,9 @@ import os
 import re
 import subprocess
 import math
+import threading
 import time
+from collections import deque
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -770,7 +772,10 @@ def expected_final_timeline_duration_ms(
         )
         if duration_ms <= 0:
             duration_seconds = _number(
-                metadata.get("duration") or item.get("duration"),
+                metadata.get("duration_seconds")
+                or metadata.get("duration")
+                or item.get("duration_seconds")
+                or item.get("duration"),
                 0.0,
             )
             if not math.isfinite(duration_seconds) or duration_seconds <= 0:
@@ -1004,6 +1009,13 @@ def validate_manual_edit_plan_contract(
 
 
 _FFMPEG_FILTER_CACHE: dict[str, tuple[tuple[Any, ...], frozenset[str]]] = {}
+_FFMPEG_DIAGNOSTIC_TAIL_BYTES = 256 * 1024
+# `ffmpeg -filters` is normally a small textual listing.  This leaves generous
+# headroom for supported builds while refusing a hostile or unexpectedly noisy
+# binary before its output can consume unbounded memory.
+_FFMPEG_FILTER_OUTPUT_BYTES = 4 * 1024 * 1024
+_FFMPEG_PIPE_READ_BYTES = 64 * 1024
+_FFMPEG_PIPE_JOIN_SECONDS = 1.0
 
 
 def _ffmpeg_binary_fingerprint(ffmpeg_path: str) -> tuple[Any, ...]:
@@ -1034,18 +1046,18 @@ def available_ffmpeg_filters(
         return cached[1]
     try:
         subprocess_timeout = _remaining_ffmpeg_timeout(20, deadline_monotonic)
-        result = subprocess.run(
+        result, stdout_overflow, _stderr_overflow = _capture_bounded_subprocess(
             [str(ffmpeg_path), "-hide_banner", "-filters"],
-            capture_output=True,
-            text=True,
             timeout=subprocess_timeout,
-            check=False,
+            deadline_monotonic=deadline_monotonic,
+            stdout_limit=_FFMPEG_FILTER_OUTPUT_BYTES,
+            stderr_limit=_FFMPEG_DIAGNOSTIC_TAIL_BYTES,
         )
     except subprocess.TimeoutExpired as exc:
         raise LocalVideoEditError("ffmpeg_timeout") from exc
     except OSError as exc:
         raise LocalVideoEditError("ffmpeg_filter_discovery_failed") from exc
-    if result.returncode != 0:
+    if stdout_overflow or result.returncode != 0:
         raise LocalVideoEditError("ffmpeg_filter_discovery_failed")
     discovered: set[str] = set()
     for line in str(result.stdout or "").splitlines():
@@ -1409,6 +1421,244 @@ def _enforce_workspace_budget(
     )
 
 
+class _BoundedByteTail:
+    """Retain only the final ``limit`` bytes while a pipe is drained."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = int(limit)
+        self._chunks: deque[bytes] = deque()
+        self._size = 0
+        self.overflowed = False
+
+    def append(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        chunk = bytes(chunk)
+        if len(chunk) >= self.limit:
+            self.overflowed = (
+                self.overflowed
+                or len(chunk) > self.limit
+                or self._size > 0
+            )
+            self._chunks.clear()
+            retained = chunk[-self.limit :]
+            self._chunks.append(retained)
+            self._size = len(retained)
+            return
+        self._chunks.append(chunk)
+        self._size += len(chunk)
+        if self._size > self.limit:
+            self.overflowed = True
+        while self._size > self.limit and self._chunks:
+            overflow = self._size - self.limit
+            oldest = self._chunks[0]
+            if len(oldest) <= overflow:
+                self._chunks.popleft()
+                self._size -= len(oldest)
+                continue
+            self._chunks[0] = oldest[overflow:]
+            self._size -= overflow
+
+    def text(self) -> str:
+        return b"".join(self._chunks).decode("utf-8", errors="replace")
+
+
+def _reap_bounded_process(
+    process: Any,
+    *,
+    deadline_monotonic: float | None = None,
+) -> None:
+    """Stop and reap an unsuccessful capture without an unbounded wait."""
+
+    def cleanup_timeout() -> float:
+        if deadline_monotonic is None:
+            return 0.5
+        return max(
+            0.0,
+            min(0.5, float(deadline_monotonic) - time.monotonic()),
+        )
+
+    try:
+        running = process.poll() is None
+    except OSError:
+        running = True
+    if running:
+        terminate_failed = False
+        try:
+            process.terminate()
+        except OSError:
+            terminate_failed = True
+        if not terminate_failed:
+            try:
+                process.wait(timeout=cleanup_timeout())
+                running = False
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+        if running:
+            try:
+                process.kill()
+            except OSError:
+                pass
+            try:
+                process.wait(timeout=cleanup_timeout())
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+
+
+def _cancel_windows_reader_io(reader: threading.Thread) -> bool:
+    """Cancel a synchronous Windows pipe read owned by ``reader``."""
+    if os.name != "nt" or not reader.is_alive():
+        return False
+    native_id = getattr(reader, "native_id", None)
+    if not isinstance(native_id, int) or native_id <= 0:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenThread.argtypes = (
+            wintypes.DWORD,
+            wintypes.BOOL,
+            wintypes.DWORD,
+        )
+        kernel32.OpenThread.restype = wintypes.HANDLE
+        kernel32.CancelSynchronousIo.argtypes = (wintypes.HANDLE,)
+        kernel32.CancelSynchronousIo.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenThread(0x0001, False, native_id)
+        if not handle:
+            return False
+        try:
+            return bool(kernel32.CancelSynchronousIo(handle))
+        finally:
+            kernel32.CloseHandle(handle)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+
+
+def _capture_bounded_subprocess(
+    command: list[str],
+    *,
+    timeout: float,
+    deadline_monotonic: float | None = None,
+    stdout_limit: int,
+    stderr_limit: int,
+) -> tuple[subprocess.CompletedProcess[str], bool, bool]:
+    """Run a process with concurrently drained, fixed-size diagnostic tails."""
+    timeout_value = float(timeout)
+    started_monotonic = time.monotonic()
+    capture_deadline = started_monotonic + timeout_value
+    if deadline_monotonic is not None:
+        capture_deadline = min(capture_deadline, float(deadline_monotonic))
+
+    def remaining_capture_timeout() -> float:
+        remaining = capture_deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(command, timeout_value)
+        return remaining
+
+    remaining_capture_timeout()
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout_tail = _BoundedByteTail(stdout_limit)
+    stderr_tail = _BoundedByteTail(stderr_limit)
+    reader_errors: list[BaseException] = []
+
+    def drain(pipe: Any, tail: _BoundedByteTail) -> None:
+        try:
+            while True:
+                chunk = pipe.read(_FFMPEG_PIPE_READ_BYTES)
+                if not chunk:
+                    return
+                tail.append(chunk)
+        except BaseException as exc:  # Pipe reads can surface platform-specific I/O errors.
+            reader_errors.append(exc)
+            # A failed reader can otherwise leave a chatty child blocked on
+            # its other pipe.  End it promptly; the owner reaps it below.
+            try:
+                if process.poll() is None:
+                    process.terminate()
+            except OSError:
+                pass
+        finally:
+            try:
+                pipe.close()
+            except OSError:
+                pass
+
+    readers: list[threading.Thread] = []
+    started_readers: list[threading.Thread] = []
+
+    def join_readers() -> bool:
+        if not started_readers:
+            return True
+        remaining = max(0.0, capture_deadline - time.monotonic())
+        join_budget = min(float(_FFMPEG_PIPE_JOIN_SECONDS), remaining)
+        per_reader_timeout = max(
+            0.0,
+            join_budget / len(started_readers),
+        )
+        for reader in started_readers:
+            reader.join(timeout=per_reader_timeout)
+        return not any(reader.is_alive() for reader in started_readers)
+
+    try:
+        readers.extend(
+            (
+                threading.Thread(
+                    target=drain,
+                    args=(process.stdout, stdout_tail),
+                    daemon=True,
+                ),
+                threading.Thread(
+                    target=drain,
+                    args=(process.stderr, stderr_tail),
+                    daemon=True,
+                ),
+            )
+        )
+        for reader in readers:
+            reader.start()
+            started_readers.append(reader)
+        returncode = process.wait(timeout=remaining_capture_timeout())
+        if not join_readers():
+            alive_readers = [
+                reader for reader in started_readers if reader.is_alive()
+            ]
+            for reader in alive_readers:
+                _cancel_windows_reader_io(reader)
+            join_readers()
+            raise OSError("ffmpeg_pipe_read_timeout")
+        if reader_errors:
+            raise OSError("ffmpeg_pipe_read_failed") from reader_errors[0]
+        return (
+            subprocess.CompletedProcess(process.args, returncode, stdout_tail.text(), stderr_tail.text()),
+            stdout_tail.overflowed,
+            stderr_tail.overflowed,
+        )
+    except BaseException:
+        _reap_bounded_process(
+            process,
+            deadline_monotonic=capture_deadline,
+        )
+        alive_readers = [
+            reader for reader in started_readers if reader.is_alive()
+        ]
+        for reader in alive_readers:
+            _cancel_windows_reader_io(reader)
+        join_readers()
+        raise
+    finally:
+        for reader, pipe in zip(readers, (process.stdout, process.stderr)):
+            if reader not in started_readers or not reader.is_alive():
+                if pipe is not None:
+                    try:
+                        pipe.close()
+                    except OSError:
+                        pass
+
+
 def _run(
     command: list[str],
     *,
@@ -1419,7 +1669,14 @@ def _run(
         raise LocalVideoEditError("ffmpeg_command_required")
     try:
         subprocess_timeout = _remaining_ffmpeg_timeout(timeout, deadline_monotonic)
-        return subprocess.run(command, capture_output=True, text=True, timeout=subprocess_timeout, check=False)
+        result, _stdout_overflow, _stderr_overflow = _capture_bounded_subprocess(
+            command,
+            timeout=subprocess_timeout,
+            deadline_monotonic=deadline_monotonic,
+            stdout_limit=_FFMPEG_DIAGNOSTIC_TAIL_BYTES,
+            stderr_limit=_FFMPEG_DIAGNOSTIC_TAIL_BYTES,
+        )
+        return result
     except subprocess.TimeoutExpired as exc:
         raise LocalVideoEditError("ffmpeg_timeout") from exc
     except OSError as exc:

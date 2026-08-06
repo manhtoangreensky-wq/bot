@@ -521,10 +521,10 @@ def test_editengine1_worker_renders_and_delivers_one_real_mp4(tmp_path: Path, mo
             file_id="telegram-output-901",
             delivery_method="sendVideo",
             bytes_sent=output_path.stat().st_size,
-            sha256="b" * 64,
+            sha256=local_worker.video_ai_edit_validation.sha256_file(output_path),
         )
 
-    def capture_update(job_id, status: str, error_short: str = "", output_url: str = "", output_file_id: str = "", **_kwargs) -> None:
+    def capture_update(job_id, status: str, error_short: str = "", output_url: str = "", output_file_id: str = "", **_kwargs) -> dict:
         updates.append({
             "job_id": job_id,
             "status": status,
@@ -532,18 +532,23 @@ def test_editengine1_worker_renders_and_delivers_one_real_mp4(tmp_path: Path, mo
             "output_url": output_url,
             "output_file_id": output_file_id,
         })
+        return {"ok": True}
 
     monkeypatch.setattr(local_worker, "local_ffmpeg_path", lambda: ffmpeg)
     monkeypatch.setattr(local_worker, "find_ffprobe", lambda ffmpeg_path="": ffprobe)
     monkeypatch.setattr(
         local_worker,
-        "create_job_workspace",
-        lambda job_id: validation.create_job_workspace(job_id, root=workspaces),
+        "create_video_edit_claim_workspace",
+        lambda job_id, claim_attempt: validation.create_video_edit_claim_workspace(
+            job_id,
+            claim_attempt,
+            root=workspaces,
+        ),
     )
     monkeypatch.setattr(
-        local_worker,
-        "cleanup_job_workspace",
-        lambda workspace: validation.cleanup_job_workspace(workspace, root=workspaces),
+        local_worker.video_local_validation,
+        "VIDEO_LOCAL_WORKSPACE_ROOT",
+        workspaces,
     )
     monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "123:test-token")
     monkeypatch.setattr(local_worker, "_video_edit_download_asset", fake_download)
@@ -553,13 +558,20 @@ def test_editengine1_worker_renders_and_delivers_one_real_mp4(tmp_path: Path, mo
         fake_delivery,
     )
     monkeypatch.setattr(local_worker, "update_job", capture_update)
+    monkeypatch.setattr(
+        local_worker,
+        "reconcile_video_edit_cleanup_intent",
+        lambda _intent: {"ok": True},
+    )
 
     plan = editing.default_manual_edit_plan("")
     plan["trim"] = {"start_ms": 0, "end_ms": 2_000}
     plan["brightness_percent"] = 120
     local_worker.run_video_local_edit({
         "id": 901,
+        "claim_attempt": 1,
         "job_type": video_editengine1.WORKER_JOB_TYPE,
+        "user_id": "901",
         "input_file_id": json.dumps({
             "local1_contract": 1,
             "product_type": video_editengine1.PRODUCT_TYPE,
@@ -569,6 +581,7 @@ def test_editengine1_worker_renders_and_delivers_one_real_mp4(tmp_path: Path, mo
             "local1_mode": "manual",
             "source_file_id": "source-telegram-file",
             "source_file_name": "source.mp4",
+            "user_id": "901",
             "chat_id": "88",
             "manual_edit_plan": plan,
             "price_xu": 300,
@@ -577,10 +590,11 @@ def test_editengine1_worker_renders_and_delivers_one_real_mp4(tmp_path: Path, mo
             "charge_policy": "after_valid_mp4_delivery",
             "provider_call": False,
             "max_render_seconds": 45,
+            "state_revision": 1,
         }),
     })
 
-    assert len(deliveries) == 1
+    assert len(deliveries) == 1, updates[-1]["detail"]
     terminal = updates[-1]
     assert terminal["status"] == "succeeded"
     assert terminal["output_file_id"] == "telegram-output-901"
@@ -607,13 +621,22 @@ def test_editengine1_worker_rejects_wrong_contract_before_download(monkeypatch: 
     monkeypatch.setattr(
         local_worker,
         "update_job",
-        lambda job_id, status, error_short="", **_kwargs: updates.append(
-            {"job_id": job_id, "status": status, "detail": error_short}
+        lambda job_id, status, error_short="", **_kwargs: (
+            updates.append(
+                {"job_id": job_id, "status": status, "detail": error_short}
+            )
+            or {"ok": True}
         ),
+    )
+    monkeypatch.setattr(
+        local_worker,
+        "reconcile_video_edit_cleanup_intent",
+        lambda _intent: {"ok": True},
     )
 
     local_worker.run_video_local_edit({
         "id": 902,
+        "claim_attempt": 1,
         "job_type": video_editengine1.WORKER_JOB_TYPE,
         "input_file_id": json.dumps({
             "local1_contract": 1,
@@ -747,7 +770,7 @@ def test_editengine1_worker_receipt_contains_real_delivery_and_validation_truth(
         '"bytes_sent": bytes_sent',
     ):
         assert required in receipt_source
-    assert source.rindex("_video_edit_artifact_receipt(") < source.index(
+    assert source.rindex("_video_edit_artifact_receipt(") < source.rindex(
         'terminal_status = "succeeded"'
     )
 

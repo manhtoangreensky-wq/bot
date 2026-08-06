@@ -69,18 +69,52 @@ def require_path_within(path: str | os.PathLike[str], root: str | os.PathLike[st
     return target
 
 
+def validate_workspace_root(
+    root: str | os.PathLike[str] | None = None,
+) -> Path:
+    base = _resolve(root or VIDEO_LOCAL_WORKSPACE_ROOT)
+    if base == Path(base.anchor) or base == REPO_ROOT.resolve(strict=False):
+        raise LocalVideoValidationError("unsafe_workspace_root")
+    return base
+
+
 def create_job_workspace(job_id: str | int, *, root: str | os.PathLike[str] | None = None) -> Path:
     clean_id = str(job_id or "").strip()
     if not _SAFE_JOB_ID.fullmatch(clean_id):
         raise LocalVideoValidationError("unsafe_job_id")
-    base = _resolve(root or VIDEO_LOCAL_WORKSPACE_ROOT)
-    if base == Path(base.anchor) or base == REPO_ROOT.resolve(strict=False):
-        raise LocalVideoValidationError("unsafe_workspace_root")
+    base = validate_workspace_root(root)
     base.mkdir(parents=True, exist_ok=True)
     workspace = base / clean_id
     require_path_within(workspace, base)
     workspace.mkdir(parents=True, exist_ok=True)
     return workspace
+
+
+def create_video_edit_claim_workspace(
+    job_id: int,
+    claim_attempt: int,
+    *,
+    root: str | os.PathLike[str] | None = None,
+) -> tuple[Path, Path]:
+    """Create one stable server-derived project root and isolated claim child."""
+
+    if (
+        isinstance(job_id, bool)
+        or not isinstance(job_id, int)
+        or job_id <= 0
+        or isinstance(claim_attempt, bool)
+        or not isinstance(claim_attempt, int)
+        or claim_attempt <= 0
+    ):
+        raise LocalVideoValidationError("unsafe_job_id")
+    base = validate_workspace_root(root)
+    project = create_job_workspace(f"job_{job_id}", root=base)
+    claim = project / f"claim_{claim_attempt}"
+    require_path_within(claim, project)
+    if claim.exists() and (claim.is_symlink() or not claim.is_dir()):
+        raise LocalVideoValidationError("unsafe_job_id")
+    claim.mkdir(parents=False, exist_ok=True)
+    return project, require_path_within(claim, project)
 
 
 def cleanup_job_workspace(

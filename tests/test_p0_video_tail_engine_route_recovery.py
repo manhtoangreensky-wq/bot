@@ -143,7 +143,7 @@ def test_logo_and_watermark_need_a_nine_position_confirmation_before_enable() ->
     assert 'config["enabled"] = True' in logo
 
 
-def test_tail_logo_and_watermark_intakes_wait_for_position_confirmation() -> None:
+def test_tail_logo_and_watermark_intakes_keep_their_canonical_owner() -> None:
     watermark_input = _async_function_source("handle_video_tail9_pending_text")
     assert 'watermark.update({"enabled": False, "text": text[:120], "position": ""})' in watermark_input
     assert 'tail["brand_pending_target"] = "watermark"' in watermark_input
@@ -155,8 +155,72 @@ def test_tail_logo_and_watermark_intakes_wait_for_position_confirmation() -> Non
     assert 'video_tail9_position_keyboard("logo")' in public_media
 
     edit_media = _async_function_source("handle_video_editor_pending_upload")
-    assert 'tail["brand_pending_target"] = "logo"' in edit_media
-    assert 'video_tail9_position_keyboard("logo")' in edit_media
+    edit_logo = edit_media[
+        edit_media.index(
+            'if edit_mode and str(state.get("step") or "") == "awaiting_video_tail9_logo":'
+        ) : edit_media.index(
+            "if edit_mode and video_edit_state_machine.is_duplicate_message"
+        )
+    ]
+    assert "video_tail|" not in edit_logo
+    assert '"logo_options"' in edit_logo
+    assert "logo_source=source" in edit_logo
+    assert "video_local_logo_keyboard" in edit_logo
+
+
+def test_tail_logo_photo_upload_persists_exact_file_size() -> None:
+    saved: dict = {}
+    session = {
+        "current_step": "awaiting_video_tail9_logo",
+        "product_id": "video_local_edit",
+        "draft": {},
+    }
+    tail = video_tail9.new_state(
+        product_type="video_local_edit",
+        session_id="video-edit-logo-upload",
+    )
+
+    async def render(*_args, **_kwargs):
+        return True
+
+    def save_tail(_uid, _context, value, _owner, _host):
+        saved["tail"] = video_tail9.normalize_state(value)
+        return saved["tail"]
+
+    namespace = {
+        "VIDEO_MICROFLOW_MEDIA_INPUT_STEPS": {"awaiting_video_tail9_logo"},
+        "get_video_session": lambda _uid: dict(session),
+        "get_user_language": lambda _uid: "vi",
+        "safe_int": lambda value, default=0: int(value or default),
+        "video_microflow_missing_input_text": lambda _lang: "missing",
+        "video_microflow_keyboard": lambda *_args: "microflow-keyboard",
+        "video_tail9_context": lambda _uid, _context: (dict(tail), "video_edit", {}),
+        "save_video_tail9_state": save_tail,
+        "save_video_session": lambda _uid, value: saved.setdefault("session", dict(value)),
+        "safe_edit_or_send": render,
+        "video_tail9_position_text": lambda _target: "position",
+        "video_tail9_position_keyboard": lambda _target: "position-keyboard",
+    }
+    exec(
+        "from __future__ import annotations\n\n"
+        + _async_function_source("handle_video_product_pending_media"),
+        namespace,
+    )
+    media = SimpleNamespace(
+        file_id="tail-logo-file",
+        file_unique_id="tail-logo-unique",
+        file_size=4_321,
+    )
+    message = SimpleNamespace(photo=[media], document=None, video=None, message_id=88)
+    update = SimpleNamespace(
+        message=message,
+        effective_user=SimpleNamespace(id=77),
+    )
+
+    assert asyncio.run(
+        namespace["handle_video_product_pending_media"](update, SimpleNamespace())
+    ) is True
+    assert saved["tail"]["logo_config"]["file_size"] == 4_321
 
 
 def test_tail_summary_is_a_valid_canonical_stage() -> None:
@@ -396,8 +460,9 @@ def test_recovery_keeps_logo_intake_and_never_routes_media_to_another_product() 
     recovery_end = BOT_SOURCE.index("def product_video_media_failure_guard", recovery_start)
     recovery = BOT_SOURCE[recovery_start:recovery_end]
     assert 'step == "awaiting_video_tail9_logo"' in recovery
-    assert "video_tail|logo|open" in recovery
-    assert "menu|main" in recovery
+    assert "videoedit|overlay" in recovery
+    assert "video_tail|" not in recovery
+    assert "video_local_input_keyboard" in recovery
     assert "video_tail9_render" not in recovery
     assert "framevideo|" not in recovery.split('handler_name == "handle_video_editor_pending_upload"', 1)[1].split('handler_name == "handle_frame_video_pending_media"', 1)[0]
 

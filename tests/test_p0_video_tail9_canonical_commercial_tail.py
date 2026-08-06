@@ -104,6 +104,27 @@ def test_new_tail_state_keeps_optional_branding_unconfigured() -> None:
     assert state["watermark_config"]["position"] == ""
 
 
+def test_tail_logo_file_size_is_a_canonical_nonnegative_integer() -> None:
+    state = video_tail9.new_state(
+        product_type="video_local_edit",
+        session_id="logo-size-contract",
+    )
+    assert state["logo_config"]["file_size"] == 0
+
+    state["logo_config"].update({
+        "enabled": True,
+        "asset_file_id": "telegram-logo",
+        "position": "top_right",
+        "file_size": "4096",
+    })
+    normalized = video_tail9.normalize_state(state)
+    assert normalized["logo_config"]["file_size"] == 4096
+
+    normalized["logo_config"]["asset_file_id"] = ""
+    cleared = video_tail9.normalize_state(normalized)
+    assert cleared["logo_config"]["file_size"] == 0
+
+
 def test_summary_requires_an_explicit_optional_tail_decision() -> None:
     state = video_tail9.new_state(
         product_type="video_trend",

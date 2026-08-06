@@ -10,12 +10,20 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
+
+from services import (
+    video_edit_cleanup_audit,
+    video_edit_long_media,
+    video_edit_media_transport,
+)
 
 
 PRODUCT_TYPE = "video_edit"
 WORKER_JOB_TYPE = "video_local_edit"
+VIDEO_LOCAL_EDIT_RESUME_SCHEMA = "video-local-edit-receipt-prefix-resume"
+VIDEO_LOCAL_EDIT_RESUME_VERSION = 1
 ENGINE_ROUTE = "local_worker_ffmpeg"
 OUTBOX_OWNER = "local_video_edit"
 WORKER_CAPABILITY = "video_edit"
@@ -509,6 +517,305 @@ def _artifact_receipts_valid(value: Any) -> bool:
     return isinstance(value, list) and (not value or bool(_artifact_receipts(value)))
 
 
+def normalize_artifact_receipt_prefix(
+    value: Any,
+    *,
+    expected_output_count: Any,
+) -> list[dict[str, Any]]:
+    """Return one complete, ordered, bounded durable Telegram receipt prefix."""
+
+    try:
+        expected = _strict_nonnegative_int(
+            expected_output_count,
+            reason="expected_output_count_invalid",
+        )
+    except ValueError:
+        raise ValueError("artifact_receipt_prefix_invalid") from None
+    normalized = _artifact_receipts(value)
+    if (
+        expected <= 0
+        or not _artifact_receipts_valid(value)
+        or len(normalized) > expected
+    ):
+        raise ValueError("artifact_receipt_prefix_invalid")
+    return normalized
+
+
+def _validate_delivery_cursor_receipt_prefix(
+    cursor: video_edit_long_media.DeliveryCursor,
+    receipts: list[dict[str, Any]],
+) -> video_edit_long_media.DeliveryCursor:
+    """Bind one active strict cursor to an already-normalized receipt prefix."""
+
+    if not isinstance(cursor, video_edit_long_media.DeliveryCursor):
+        raise ValueError("delivery_cursor_invalid")
+    if not isinstance(receipts, list) or any(
+        not isinstance(receipt, dict) for receipt in receipts
+    ):
+        raise ValueError("delivery_cursor_invalid")
+    receipt_count = len(receipts)
+    if cursor.state == "not_started":
+        raise ValueError("delivery_cursor_invalid")
+    if cursor.state in {"sending", "unknown", "rejected"}:
+        if cursor.output_index != receipt_count + 1:
+            raise ValueError("delivery_cursor_invalid")
+        return cursor
+    if cursor.state in {"accepted", "delivered"}:
+        if receipt_count <= 0 or cursor.output_index != receipt_count:
+            raise ValueError("delivery_cursor_invalid")
+        last_receipt = receipts[-1]
+        if (
+            cursor.message_id != last_receipt.get("message_id")
+            or cursor.file_id != last_receipt.get("file_id")
+        ):
+            raise ValueError("delivery_cursor_invalid")
+        return cursor
+    raise ValueError("delivery_cursor_invalid")
+
+
+def normalize_video_local_edit_resume_contract(value: Any) -> dict[str, Any]:
+    """Validate and normalize the complete worker-facing receipt-prefix contract."""
+
+    if not isinstance(value, dict) or set(value) != {
+        "schema",
+        "version",
+        "expected_output_count",
+        "artifact_receipt_prefix",
+        "prefix_count",
+        "prefix_digest",
+        "compatibility",
+        "delivery_cursor",
+    }:
+        raise ValueError("video_local_edit_resume_contract_invalid")
+    if (
+        value.get("schema") != VIDEO_LOCAL_EDIT_RESUME_SCHEMA
+        or type(value.get("version")) is not int
+        or value.get("version") != VIDEO_LOCAL_EDIT_RESUME_VERSION
+    ):
+        raise ValueError("video_local_edit_resume_contract_invalid")
+    try:
+        expected = _strict_nonnegative_int(
+            value.get("expected_output_count"),
+            reason="expected_output_count_invalid",
+        )
+        prefix_count = _strict_nonnegative_int(
+            value.get("prefix_count"),
+            reason="prefix_count_invalid",
+        )
+        receipts = normalize_artifact_receipt_prefix(
+            value.get("artifact_receipt_prefix"),
+            expected_output_count=expected,
+        )
+    except ValueError:
+        raise ValueError("video_local_edit_resume_contract_invalid") from None
+    digest = hashlib.sha256(
+        json.dumps(
+            receipts,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    if (
+        prefix_count != len(receipts)
+        or value.get("prefix_digest") != digest
+        or value.get("compatibility") not in {"strict", "legacy_receipt_only"}
+    ):
+        raise ValueError("video_local_edit_resume_contract_invalid")
+    raw_cursor = value.get("delivery_cursor")
+    normalized_cursor = None
+    if value["compatibility"] == "strict":
+        try:
+            cursor = video_edit_long_media.DeliveryCursor.from_mapping(raw_cursor)
+            _validate_delivery_cursor_receipt_prefix(cursor, receipts)
+        except (TypeError, ValueError):
+            raise ValueError("video_local_edit_resume_contract_invalid") from None
+        if cursor.state not in {
+            "sending",
+            "unknown",
+            "accepted",
+            "delivered",
+        }:
+            raise ValueError("video_local_edit_resume_contract_invalid")
+        normalized_cursor = cursor.to_mapping()
+    elif raw_cursor is not None:
+        raise ValueError("video_local_edit_resume_contract_invalid")
+    return {
+        "schema": VIDEO_LOCAL_EDIT_RESUME_SCHEMA,
+        "version": VIDEO_LOCAL_EDIT_RESUME_VERSION,
+        "expected_output_count": expected,
+        "artifact_receipt_prefix": receipts,
+        "prefix_count": len(receipts),
+        "prefix_digest": digest,
+        "compatibility": value["compatibility"],
+        "delivery_cursor": normalized_cursor,
+    }
+
+
+def _positive_capacity_int(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def _preflight_capacity_evidence(
+    current: dict[str, Any],
+    metadata: dict[str, Any],
+    plan: dict[str, Any],
+) -> dict[str, Any]:
+    source_sizes = [
+        _positive_capacity_int(current.get("source_file_size")),
+        _positive_capacity_int(metadata.get("actual_bytes")),
+        _positive_capacity_int(metadata.get("bytes")),
+    ]
+    known_source_sizes = [value for value in source_sizes if value is not None]
+    if not known_source_sizes:
+        return {"ok": False, "reason": "local_worker_source_size_missing"}
+    source_bytes = max(known_source_sizes)
+
+    asset_sizes: list[int] = []
+    concat_sources = current.get("concat_sources") or []
+    if not isinstance(concat_sources, list):
+        return {"ok": False, "reason": "local_worker_asset_size_missing"}
+    asset_records: list[Any] = list(concat_sources)
+    for key in ("logo_source", "subtitle_source"):
+        record = current.get(key)
+        if record:
+            asset_records.append(record)
+    for record in asset_records:
+        if not isinstance(record, dict):
+            return {"ok": False, "reason": "local_worker_asset_size_missing"}
+        size = _positive_capacity_int(
+            record.get("file_size")
+            if record.get("file_size") is not None
+            else record.get("bytes")
+        )
+        if size is None:
+            return {"ok": False, "reason": "local_worker_asset_size_missing"}
+        asset_sizes.append(size)
+
+    split_ranges = current.get("split_ranges") or []
+    split_selected = bool(
+        str(current.get("selected_tool") or "").strip().lower() == "split"
+        and isinstance(split_ranges, list)
+        and split_ranges
+    )
+    output_count = len(split_ranges) if split_selected else 1
+    execution_class = video_edit_long_media.classify_plan_execution(plan)
+    if split_selected:
+        operations = ["split"]
+    else:
+        operations: list[str] = []
+        if concat_sources:
+            operations.append("concat")
+        if (
+            current.get("logo_source")
+            or current.get("subtitle_source")
+            or plan.get("text_overlay")
+            or plan.get("logo_overlay")
+            or plan.get("subtitle_file")
+        ):
+            operations.append("overlay")
+        if execution_class == video_edit_long_media.WHOLE_TIMELINE_REQUIRED:
+            operations.append("transcode")
+        if not operations:
+            operations.append("manual")
+
+    estimates = [
+        video_edit_long_media.estimate_workspace(
+            operation=operation,
+            source_bytes=source_bytes,
+            asset_bytes=asset_sizes,
+            output_count=output_count,
+        )
+        for operation in operations
+    ]
+    required_bytes = max(estimate.required_bytes for estimate in estimates)
+    declared_input_bytes = source_bytes + sum(asset_sizes)
+    duration_seconds = metadata.get("duration")
+    if duration_seconds is None or duration_seconds == "":
+        duration_ms = metadata.get("duration_ms")
+        duration_seconds = (
+            float(duration_ms) / 1000.0
+            if isinstance(duration_ms, int)
+            and not isinstance(duration_ms, bool)
+            and duration_ms > 0
+            else None
+        )
+    adaptive_deadline = video_edit_long_media.adaptive_deadline_seconds(
+        source_bytes=declared_input_bytes,
+        duration_seconds=duration_seconds,
+        width=metadata.get("width"),
+        height=metadata.get("height"),
+        output_count=output_count,
+        operation_class=execution_class,
+    )
+    persisted_lane = str(
+        current.get("media_lane")
+        or metadata.get("media_lane")
+        or "large_media"
+    ).strip()
+    evidence_lane = video_edit_media_transport.select_media_lane(
+        duration_seconds=duration_seconds,
+        size_bytes=source_bytes,
+    )
+    concat_requires_large = False
+    for record, size in zip(concat_sources, asset_sizes[: len(concat_sources)]):
+        nested_metadata = (
+            record.get("metadata")
+            if isinstance(record.get("metadata"), dict)
+            else {}
+        )
+        concat_duration = record.get(
+            "duration_seconds",
+            record.get(
+                "duration",
+                nested_metadata.get("duration_seconds", nested_metadata.get("duration")),
+            ),
+        )
+        if concat_duration is None or concat_duration == "":
+            duration_ms = record.get(
+                "duration_ms",
+                nested_metadata.get("duration_ms"),
+            )
+            concat_duration = (
+                float(duration_ms) / 1000.0
+                if isinstance(duration_ms, int)
+                and not isinstance(duration_ms, bool)
+                and duration_ms > 0
+                else 0
+            )
+        if (
+            video_edit_media_transport.select_media_lane(
+                duration_seconds=concat_duration,
+                size_bytes=size,
+            )
+            == "large_media"
+        ):
+            concat_requires_large = True
+            break
+    oversized_asset = any(
+        size > video_edit_media_transport.SHORT_MEDIA_MAX_BYTES
+        for size in asset_sizes
+    )
+    lane = (
+        "short_media"
+        if persisted_lane == "short_media"
+        and evidence_lane == "short_media"
+        and not concat_requires_large
+        and not oversized_asset
+        else "large_media"
+    )
+    return {
+        "ok": True,
+        "reason": "ok",
+        "declared_input_bytes": declared_input_bytes,
+        "workspace_required_bytes": required_bytes,
+        "adaptive_deadline_seconds": adaptive_deadline,
+        "media_lane": lane,
+    }
+
+
 def preflight(state: dict, runtime: dict) -> dict[str, Any]:
     """Return exact admission truth; this function has no side effects."""
     current = dict(state or {})
@@ -665,6 +972,58 @@ def preflight(state: dict, runtime: dict) -> dict[str, Any]:
         )
         if not contract.get("ok") and not plan_error:
             plan_error = str(contract.get("reason") or "edit_plan_invalid")
+    capacity_evidence: dict[str, Any] = {
+        "ok": not canonical_contract_required,
+        "reason": "ok" if not canonical_contract_required else "local_worker_capacity_contract_invalid",
+    }
+    if canonical_contract_required and not plan_error:
+        try:
+            capacity_evidence = _preflight_capacity_evidence(
+                current,
+                metadata,
+                plan,
+            )
+        except (TypeError, ValueError, OverflowError):
+            capacity_evidence = {
+                "ok": False,
+                "reason": "local_worker_capacity_contract_invalid",
+            }
+    workspace_free_bytes = _positive_capacity_int(
+        worker.get("workspace_free_bytes")
+    )
+    deadline_ceiling = _positive_capacity_int(
+        worker.get("video_edit_max_deadline_seconds")
+    )
+    required_workspace = _positive_capacity_int(
+        capacity_evidence.get("workspace_required_bytes")
+    )
+    adaptive_deadline = _positive_capacity_int(
+        capacity_evidence.get("adaptive_deadline_seconds")
+    )
+    if canonical_contract_required:
+        checks.update(
+            {
+                "capacity_evidence": capacity_evidence.get("ok") is True,
+                "worker_token_ready": worker.get("worker_token_ready") is True,
+                "workspace_ready": worker.get("workspace_ready") is True,
+                "workspace_capacity_present": workspace_free_bytes is not None,
+                "workspace_capacity": bool(
+                    workspace_free_bytes is not None
+                    and required_workspace is not None
+                    and workspace_free_bytes >= required_workspace
+                ),
+                "deadline_capacity_present": deadline_ceiling is not None,
+                "deadline_capacity": bool(
+                    deadline_ceiling is not None
+                    and adaptive_deadline is not None
+                    and deadline_ceiling >= adaptive_deadline
+                ),
+                "local_bot_api": bool(
+                    capacity_evidence.get("media_lane") == "short_media"
+                    or worker.get("local_bot_api_ready") is True
+                ),
+            }
+        )
     filter_snapshot_known = bool(worker.get("video_edit_filters_known"))
     available_filters = {
         str(item).strip()
@@ -749,6 +1108,14 @@ def preflight(state: dict, runtime: dict) -> dict[str, Any]:
             ("engine_route", "local_worker_route_mismatch"),
             ("capability", "local_worker_capability_missing"),
             ("heartbeat_ttl", "local_worker_heartbeat_stale"),
+            ("capacity_evidence", str(capacity_evidence.get("reason") or "local_worker_capacity_contract_invalid")),
+            ("worker_token_ready", "local_worker_token_not_ready"),
+            ("workspace_ready", "local_worker_workspace_not_ready"),
+            ("workspace_capacity_present", "local_worker_workspace_capacity_missing"),
+            ("workspace_capacity", "local_worker_workspace_insufficient"),
+            ("deadline_capacity_present", "local_worker_deadline_capacity_missing"),
+            ("deadline_capacity", "local_worker_deadline_ceiling_insufficient"),
+            ("local_bot_api", "local_worker_local_bot_api_not_ready"),
         ]
     reason = next((code for key, code in reason_order if not checks[key]), "ok")
     if reason == "local_worker_filter_snapshot_missing":
@@ -782,6 +1149,17 @@ def preflight(state: dict, runtime: dict) -> dict[str, Any]:
             result["filter_snapshot_reason"] = "local_worker_filter_snapshot_owner_mismatch"
         elif snapshot_path_mismatch:
             result["filter_snapshot_reason"] = "local_worker_filter_snapshot_path_mismatch"
+    if canonical_contract_required and capacity_evidence.get("ok") is True:
+        result.update(
+            {
+                "declared_input_bytes": int(capacity_evidence["declared_input_bytes"]),
+                "workspace_required_bytes": int(capacity_evidence["workspace_required_bytes"]),
+                "workspace_free_bytes": int(workspace_free_bytes or 0),
+                "adaptive_deadline_seconds": int(capacity_evidence["adaptive_deadline_seconds"]),
+                "video_edit_max_deadline_seconds": int(deadline_ceiling or 0),
+                "media_lane": str(capacity_evidence["media_lane"]),
+            }
+        )
     return result
 
 
@@ -1408,6 +1786,1173 @@ def get_job_by_worker_id(conn, worker_job_id: Any) -> dict[str, Any]:
     return get_job_by_worker_id_readonly(conn, worker_job_id)
 
 
+def _canonical_timestamp(value: Any) -> str:
+    if isinstance(value, datetime):
+        if value.tzinfo is not None or value.microsecond:
+            return ""
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    if not isinstance(value, str) or value != value.strip():
+        return ""
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return ""
+    return value if parsed.strftime("%Y-%m-%d %H:%M:%S") == value else ""
+
+
+def _valid_lease_owner(value: Any) -> str:
+    if (
+        not isinstance(value, str)
+        or value != value.strip()
+        or not value
+        or len(value) > 120
+        or any(ord(char) < 33 or ord(char) > 126 for char in value)
+    ):
+        return ""
+    return value
+
+
+def _cleanup_delivery_binding(conn, worker_job_id: Any) -> tuple[str, int]:
+    try:
+        job_id = _strict_nonnegative_int(
+            worker_job_id,
+            reason="worker_job_id_invalid",
+        )
+    except ValueError:
+        return "", 0
+    row = conn.execute(
+        """SELECT COALESCE(lease_owner,''),attempt_count
+             FROM video_edit_outbox
+            WHERE local_worker_job_id=? AND owner=? AND status='running'""",
+        (job_id, OUTBOX_OWNER),
+    ).fetchone()
+    if not row:
+        return "", 0
+    owner = _valid_lease_owner(row[0])
+    try:
+        attempt = _strict_nonnegative_int(
+            row[1],
+            reason="claim_attempt_invalid",
+        )
+    except ValueError:
+        attempt = 0
+    return owner, attempt if attempt > 0 else 0
+
+
+def _seed_cleanup_audit(
+    canonical_tail: dict[str, Any],
+    *,
+    worker_job_id: Any,
+    terminal_status: str,
+    delivery_owner: str,
+    delivery_claim_attempt: int,
+    cleanup_intent: Any,
+    now: str,
+) -> dict[str, Any]:
+    """Derive canonical cleanup state without trusting worker path material."""
+
+    tail = dict(canonical_tail)
+    try:
+        job_id = _strict_nonnegative_int(
+            worker_job_id,
+            reason="worker_job_id_invalid",
+        )
+    except ValueError:
+        job_id = 0
+    binding_valid = bool(
+        job_id > 0
+        and _valid_lease_owner(delivery_owner)
+        and isinstance(delivery_claim_attempt, int)
+        and not isinstance(delivery_claim_attempt, bool)
+        and delivery_claim_attempt > 0
+    )
+    key = (
+        video_edit_cleanup_audit.workspace_key(
+            job_id,
+            delivery_claim_attempt,
+        )
+        if binding_valid
+        else ""
+    )
+    evidence = cleanup_intent if isinstance(cleanup_intent, dict) else {}
+    workspace_present = evidence.get("workspace_present")
+    workspace_presence_valid = isinstance(workspace_present, bool)
+    persisted_valid = bool(
+        binding_valid
+        and workspace_present is True
+        and evidence.get("persisted") is True
+        and evidence.get("intent_key") == f"{key}.json"
+        and evidence.get("workspace_key") == key
+        and evidence.get("tombstone_key") == key
+    )
+    terminal = str(terminal_status or "").strip().lower()
+    if terminal == "delivery_unknown":
+        state = "retained_delivery_unknown"
+        reason = "delivery_outcome_uncertain"
+    elif workspace_presence_valid and workspace_present is False:
+        state = "succeeded"
+        reason = "workspace_not_created"
+    elif persisted_valid and terminal in {"delivered", "failed_no_charge"}:
+        state = "pending"
+        reason = ""
+    else:
+        state = "failed_exhausted"
+        reason = "cleanup_intent_not_persisted"
+    tail["cleanup_audit"] = {
+        "schema": video_edit_cleanup_audit.CLEANUP_AUDIT_SCHEMA,
+        "version": video_edit_cleanup_audit.CLEANUP_AUDIT_VERSION,
+        "state": state,
+        "job_id": job_id,
+        "delivery_owner": delivery_owner if binding_valid else "",
+        "delivery_claim_attempt": (
+            delivery_claim_attempt if binding_valid else 0
+        ),
+        "workspace_present": bool(workspace_present)
+        if workspace_presence_valid
+        else True,
+        "workspace_key": key,
+        "tombstone_key": key,
+        "intent_key": f"{key}.json" if key else "",
+        "audit_owner": "",
+        "audit_attempt": 0,
+        "lease_expires_at": "",
+        "reason": reason,
+        "updated_at": now,
+    }
+    return tail
+
+
+def _cleanup_positive_int(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return 0
+    return value
+
+
+def _cleanup_nonnegative_int(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return -1
+    return value
+
+
+def _cleanup_audit_record(
+    value: Any,
+    *,
+    worker_job_id: int,
+) -> dict[str, Any] | None:
+    """Validate canonical cleanup authority without accepting path material."""
+
+    expected_fields = {
+        "schema",
+        "version",
+        "state",
+        "job_id",
+        "delivery_owner",
+        "delivery_claim_attempt",
+        "workspace_present",
+        "workspace_key",
+        "tombstone_key",
+        "intent_key",
+        "audit_owner",
+        "audit_attempt",
+        "lease_expires_at",
+        "reason",
+        "updated_at",
+    }
+    if not isinstance(value, dict) or set(value) != expected_fields:
+        return None
+    job_id = _cleanup_positive_int(value.get("job_id"))
+    delivery_claim_attempt = _cleanup_positive_int(
+        value.get("delivery_claim_attempt")
+    )
+    delivery_owner = _valid_lease_owner(value.get("delivery_owner"))
+    audit_attempt = _cleanup_nonnegative_int(value.get("audit_attempt"))
+    audit_owner_value = value.get("audit_owner")
+    audit_owner = (
+        "" if audit_owner_value == "" else _valid_lease_owner(audit_owner_value)
+    )
+    lease_value = value.get("lease_expires_at")
+    lease_expires_at = (
+        "" if lease_value == "" else _canonical_timestamp(lease_value)
+    )
+    updated_at = _canonical_timestamp(value.get("updated_at"))
+    if (
+        value.get("schema")
+        != video_edit_cleanup_audit.CLEANUP_AUDIT_SCHEMA
+        or value.get("version")
+        != video_edit_cleanup_audit.CLEANUP_AUDIT_VERSION
+        or job_id != worker_job_id
+        or not delivery_owner
+        or delivery_claim_attempt <= 0
+        or audit_attempt < 0
+        or audit_attempt > video_edit_cleanup_audit.MAX_CLEANUP_ATTEMPTS
+        or not isinstance(value.get("workspace_present"), bool)
+        or not updated_at
+    ):
+        return None
+    try:
+        key = video_edit_cleanup_audit.workspace_key(
+            job_id,
+            delivery_claim_attempt,
+        )
+    except ValueError:
+        return None
+    if (
+        value.get("workspace_key") != key
+        or value.get("tombstone_key") != key
+        or value.get("intent_key") != f"{key}.json"
+        or value.get("state")
+        not in {
+            "pending",
+            "failed_retryable",
+            "succeeded",
+            "failed_exhausted",
+            "retained_delivery_unknown",
+        }
+        or (audit_owner_value != "" and not audit_owner)
+        or (lease_value != "" and not lease_expires_at)
+        or bool(audit_owner) != bool(lease_expires_at)
+        or (audit_owner and audit_attempt <= 0)
+    ):
+        return None
+    state = str(value["state"])
+    reason_value = value.get("reason")
+    reason = reason_value if isinstance(reason_value, str) else ""
+    reason_valid = bool(
+        isinstance(reason_value, str)
+        and len(reason) <= 120
+        and (
+            not reason
+            or (
+                _cleanup_result_reason(reason) == reason
+                and all(33 <= ord(char) <= 126 for char in reason)
+            )
+        )
+    )
+    workspace_present = bool(value["workspace_present"])
+    leased = bool(audit_owner)
+    if not reason_valid:
+        return None
+    if state == "pending" and not (
+        workspace_present
+        and reason == ""
+        and (
+            (audit_attempt == 0 and not leased)
+            or (1 <= audit_attempt <= video_edit_cleanup_audit.MAX_CLEANUP_ATTEMPTS and leased)
+        )
+    ):
+        return None
+    if state == "failed_retryable" and not (
+        workspace_present
+        and bool(reason)
+        and 1 <= audit_attempt <= video_edit_cleanup_audit.MAX_CLEANUP_ATTEMPTS
+        and (
+            audit_attempt < video_edit_cleanup_audit.MAX_CLEANUP_ATTEMPTS
+            or leased
+        )
+    ):
+        return None
+    if state == "succeeded" and not (
+        not workspace_present
+        and not leased
+        and (
+            (audit_attempt == 0 and reason == "workspace_not_created")
+            or (audit_attempt > 0 and reason == "")
+        )
+    ):
+        return None
+    if state == "failed_exhausted" and not (
+        workspace_present
+        and bool(reason)
+        and not leased
+        and audit_attempt in {0, video_edit_cleanup_audit.MAX_CLEANUP_ATTEMPTS}
+    ):
+        return None
+    if state == "retained_delivery_unknown" and not (
+        reason == "delivery_outcome_uncertain"
+        and audit_attempt == 0
+        and not leased
+    ):
+        return None
+    return dict(value)
+
+
+def _cleanup_result_reason(value: Any) -> str:
+    """Keep only bounded diagnostic tokens, never paths or control data."""
+
+    if not isinstance(value, str):
+        return "cleanup_failed"
+    token = value.strip()
+    if (
+        not token
+        or any(ord(char) < 33 or ord(char) > 126 for char in token)
+        or "/" in token
+        or "\\" in token
+    ):
+        return "cleanup_failed"
+    return token[:120]
+
+
+def claim_cleanup_audit(
+    conn,
+    *,
+    worker_job_id: Any,
+    delivery_owner: Any,
+    delivery_claim_attempt: Any,
+    audit_owner: Any,
+    now: Any,
+    lease_seconds: Any,
+) -> dict[str, Any]:
+    """Atomically lease one terminal job's audit-only workspace cleanup."""
+
+    job_id = _cleanup_positive_int(worker_job_id)
+    bound_delivery_owner = _valid_lease_owner(delivery_owner)
+    bound_delivery_attempt = _cleanup_positive_int(delivery_claim_attempt)
+    claimant = _valid_lease_owner(audit_owner)
+    current = _canonical_timestamp(now)
+    duration = _cleanup_positive_int(lease_seconds)
+    if (
+        job_id <= 0
+        or not bound_delivery_owner
+        or bound_delivery_attempt <= 0
+        or not claimant
+        or not current
+        or duration <= 0
+        or duration > 86_400
+    ):
+        return {
+            "ok": False,
+            "action": "defer",
+            "reason": "cleanup_audit_claim_invalid",
+        }
+    expires_at = (
+        datetime.strptime(current, "%Y-%m-%d %H:%M:%S")
+        + timedelta(seconds=duration)
+    ).strftime("%Y-%m-%d %H:%M:%S")
+
+    ensure_schema(conn)
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    row = conn.execute(
+        """SELECT id,status,price_xu,charge_state,tail_json
+             FROM video_edit_jobs
+            WHERE local_worker_job_id=? AND product_type=?
+              AND worker_job_type=? AND engine_route=? AND worker_owner=?""",
+        (
+            job_id,
+            PRODUCT_TYPE,
+            WORKER_JOB_TYPE,
+            ENGINE_ROUTE,
+            OUTBOX_OWNER,
+        ),
+    ).fetchone()
+    if not row:
+        return {
+            "ok": False,
+            "action": "orphan_retained",
+            "reason": "cleanup_job_missing",
+        }
+    status = str(row[1] or "")
+    if status not in TERMINAL_JOB_STATES:
+        return {
+            "ok": False,
+            "action": "retain_nonterminal",
+            "reason": "cleanup_job_nonterminal",
+        }
+    try:
+        canonical_tail = json.loads(str(row[4]))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        canonical_tail = None
+    if not isinstance(canonical_tail, dict):
+        canonical_tail = None
+    audit = _cleanup_audit_record(
+        canonical_tail.get("cleanup_audit") if canonical_tail is not None else None,
+        worker_job_id=job_id,
+    )
+    if (
+        audit is None
+        or audit.get("delivery_owner") != bound_delivery_owner
+        or audit.get("delivery_claim_attempt") != bound_delivery_attempt
+    ):
+        return {
+            "ok": False,
+            "action": "orphan_retained",
+            "reason": "cleanup_delivery_binding_mismatch",
+        }
+
+    state = str(audit.get("state") or "")
+    if status == "delivery_unknown":
+        if state != "retained_delivery_unknown":
+            return {
+                "ok": False,
+                "action": "orphan_retained",
+                "reason": "cleanup_terminal_state_invalid",
+            }
+        return {
+            "ok": True,
+            "action": "remove_intent",
+            "state": state,
+        }
+    try:
+        price_xu = _strict_nonnegative_int(
+            row[2], reason="canonical_price_invalid"
+        )
+    except ValueError:
+        return {
+            "ok": False,
+            "action": "defer",
+            "reason": "cleanup_charge_not_terminal",
+        }
+    charge_state = str(row[3] or "")
+    if status in {"delivered", "charged"} and (
+        (price_xu > 0 and charge_state not in {"charged", "charge_failed"})
+        or (status == "charged" and charge_state != "charged")
+    ):
+        return {
+            "ok": False,
+            "action": "defer",
+            "reason": "cleanup_charge_not_terminal",
+        }
+    if state in {"succeeded", "failed_exhausted"}:
+        return {
+            "ok": True,
+            "action": "remove_intent",
+            "state": state,
+        }
+    if state not in {"pending", "failed_retryable"}:
+        return {
+            "ok": False,
+            "action": "orphan_retained",
+            "reason": "cleanup_terminal_state_invalid",
+        }
+
+    prior_attempt = _cleanup_nonnegative_int(audit.get("audit_attempt"))
+    prior_owner = str(audit.get("audit_owner") or "")
+    prior_expiry = str(audit.get("lease_expires_at") or "")
+    if prior_owner and prior_expiry > current:
+        return {
+            "ok": False,
+            "action": "defer",
+            "reason": "cleanup_audit_lease_active",
+        }
+    if prior_attempt == video_edit_cleanup_audit.MAX_CLEANUP_ATTEMPTS:
+        exhausted_audit = dict(audit)
+        exhausted_audit.update(
+            {
+                "state": "failed_exhausted",
+                "audit_owner": "",
+                "lease_expires_at": "",
+                "reason": "cleanup_audit_attempts_exhausted",
+                "updated_at": current,
+            }
+        )
+        exhausted_tail = dict(canonical_tail)
+        exhausted_tail["cleanup_audit"] = exhausted_audit
+        cursor = conn.execute(
+            """UPDATE video_edit_jobs SET tail_json=?
+                WHERE id=? AND local_worker_job_id=? AND status=?
+                  AND price_xu=? AND charge_state=? AND tail_json=?""",
+            (
+                _json(exhausted_tail),
+                int(row[0]),
+                job_id,
+                status,
+                row[2],
+                row[3],
+                str(row[4]),
+            ),
+        )
+        if int(cursor.rowcount or 0) != 1:
+            return {
+                "ok": False,
+                "action": "defer",
+                "reason": "cleanup_audit_claim_conflict",
+            }
+        return {
+            "ok": True,
+            "action": "remove_intent",
+            "state": "failed_exhausted",
+        }
+    if prior_attempt < 0 or prior_attempt > video_edit_cleanup_audit.MAX_CLEANUP_ATTEMPTS:
+        return {
+            "ok": False,
+            "action": "orphan_retained",
+            "reason": "cleanup_audit_attempt_invalid",
+        }
+
+    claimed_audit = dict(audit)
+    claimed_audit.update(
+        {
+            "audit_owner": claimant,
+            "audit_attempt": prior_attempt + 1,
+            "lease_expires_at": expires_at,
+            "updated_at": current,
+        }
+    )
+    claimed_tail = dict(canonical_tail)
+    claimed_tail["cleanup_audit"] = claimed_audit
+    prior_tail_json = str(row[4])
+    cursor = conn.execute(
+        """UPDATE video_edit_jobs SET tail_json=?
+            WHERE id=? AND local_worker_job_id=? AND status=?
+              AND price_xu=? AND charge_state=? AND tail_json=?""",
+        (
+            _json(claimed_tail),
+            int(row[0]),
+            job_id,
+            status,
+            row[2],
+            row[3],
+            prior_tail_json,
+        ),
+    )
+    if int(cursor.rowcount or 0) != 1:
+        return {
+            "ok": False,
+            "action": "defer",
+            "reason": "cleanup_audit_claim_conflict",
+        }
+    return {
+        "ok": True,
+        "action": "cleanup",
+        "job_id": job_id,
+        "delivery_owner": bound_delivery_owner,
+        "delivery_claim_attempt": bound_delivery_attempt,
+        "workspace_key": claimed_audit["workspace_key"],
+        "tombstone_key": claimed_audit["tombstone_key"],
+        "intent_key": claimed_audit["intent_key"],
+        "audit_owner": claimant,
+        "audit_attempt": claimed_audit["audit_attempt"],
+        "lease_expires_at": expires_at,
+        "cleanup_audit": claimed_audit,
+    }
+
+
+def record_cleanup_audit_result(
+    conn,
+    *,
+    worker_job_id: Any,
+    delivery_owner: Any,
+    delivery_claim_attempt: Any,
+    audit_owner: Any,
+    audit_attempt: Any,
+    now: Any,
+    outcome: Any,
+    reason: Any,
+) -> dict[str, Any]:
+    """CAS one leased cleanup result without changing delivery or billing truth."""
+
+    job_id = _cleanup_positive_int(worker_job_id)
+    bound_delivery_owner = _valid_lease_owner(delivery_owner)
+    bound_delivery_attempt = _cleanup_positive_int(delivery_claim_attempt)
+    claimant = _valid_lease_owner(audit_owner)
+    claimed_attempt = _cleanup_positive_int(audit_attempt)
+    current = _canonical_timestamp(now)
+    result_outcome = outcome if isinstance(outcome, str) else ""
+    if (
+        job_id <= 0
+        or not bound_delivery_owner
+        or bound_delivery_attempt <= 0
+        or not claimant
+        or claimed_attempt <= 0
+        or not current
+        or result_outcome not in {"succeeded", "failed_retryable"}
+    ):
+        return {"ok": False, "reason": "cleanup_audit_result_invalid"}
+
+    ensure_schema(conn)
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    row = conn.execute(
+        """SELECT id,status,price_xu,charge_state,tail_json
+             FROM video_edit_jobs
+            WHERE local_worker_job_id=? AND product_type=?
+              AND worker_job_type=? AND engine_route=? AND worker_owner=?""",
+        (
+            job_id,
+            PRODUCT_TYPE,
+            WORKER_JOB_TYPE,
+            ENGINE_ROUTE,
+            OUTBOX_OWNER,
+        ),
+    ).fetchone()
+    if not row or str(row[1] or "") not in TERMINAL_JOB_STATES:
+        return {"ok": False, "reason": "cleanup_audit_lease_conflict"}
+    try:
+        canonical_tail = json.loads(str(row[4]))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        canonical_tail = None
+    if not isinstance(canonical_tail, dict):
+        canonical_tail = None
+    audit = _cleanup_audit_record(
+        canonical_tail.get("cleanup_audit") if canonical_tail is not None else None,
+        worker_job_id=job_id,
+    )
+    lease_expires_at = (
+        str(audit.get("lease_expires_at") or "") if audit is not None else ""
+    )
+    if (
+        audit is None
+        or audit.get("delivery_owner") != bound_delivery_owner
+        or audit.get("delivery_claim_attempt") != bound_delivery_attempt
+        or audit.get("audit_owner") != claimant
+        or audit.get("audit_attempt") != claimed_attempt
+        or audit.get("state") not in {"pending", "failed_retryable"}
+        or not lease_expires_at
+        or lease_expires_at <= current
+    ):
+        return {"ok": False, "reason": "cleanup_audit_lease_conflict"}
+
+    status = str(row[1] or "")
+    try:
+        price_xu = _strict_nonnegative_int(
+            row[2], reason="canonical_price_invalid"
+        )
+    except ValueError:
+        return {"ok": False, "reason": "cleanup_audit_lease_conflict"}
+    charge_state = str(row[3] or "")
+    if (
+        status == "delivery_unknown"
+        or (
+            status in {"delivered", "charged"}
+            and (
+                (price_xu > 0 and charge_state not in {"charged", "charge_failed"})
+                or (status == "charged" and charge_state != "charged")
+            )
+        )
+    ):
+        return {"ok": False, "reason": "cleanup_audit_lease_conflict"}
+
+    completed_audit = dict(audit)
+    if result_outcome == "succeeded":
+        completed_audit.update(
+            {
+                "state": "succeeded",
+                "workspace_present": False,
+                "audit_owner": "",
+                "lease_expires_at": "",
+                "reason": "",
+                "updated_at": current,
+            }
+        )
+    else:
+        exhausted = (
+            claimed_attempt
+            >= video_edit_cleanup_audit.MAX_CLEANUP_ATTEMPTS
+        )
+        completed_audit.update(
+            {
+                "state": "failed_exhausted" if exhausted else "failed_retryable",
+                "audit_owner": "",
+                "lease_expires_at": "",
+                "reason": _cleanup_result_reason(reason),
+                "updated_at": current,
+            }
+        )
+    completed_tail = dict(canonical_tail)
+    completed_tail["cleanup_audit"] = completed_audit
+    prior_tail_json = str(row[4])
+    cursor = conn.execute(
+        """UPDATE video_edit_jobs SET tail_json=?
+            WHERE id=? AND local_worker_job_id=? AND status=?
+              AND price_xu=? AND charge_state=? AND tail_json=?""",
+        (
+            _json(completed_tail),
+            int(row[0]),
+            job_id,
+            status,
+            row[2],
+            row[3],
+            prior_tail_json,
+        ),
+    )
+    if int(cursor.rowcount or 0) != 1:
+        return {"ok": False, "reason": "cleanup_audit_lease_conflict"}
+    return {"ok": True, "cleanup_audit": completed_audit}
+
+
+def _persisted_video_edit_expected_output_count(value: Any) -> int:
+    if not isinstance(value, dict):
+        raise ValueError("video_local_edit_worker_payload_invalid")
+    mode = value.get("local1_mode")
+    if not isinstance(mode, str) or mode != mode.strip().lower():
+        raise ValueError("video_local_edit_worker_payload_invalid")
+    if mode == "manual":
+        return 1
+    if mode != "split":
+        raise ValueError("video_local_edit_worker_payload_invalid")
+    ranges = value.get("split_ranges")
+    if not isinstance(ranges, list) or not ranges:
+        raise ValueError("video_local_edit_worker_payload_invalid")
+    previous_end = 0
+    for position, item in enumerate(ranges, start=1):
+        if not isinstance(item, dict):
+            raise ValueError("video_local_edit_worker_payload_invalid")
+        try:
+            index = _strict_nonnegative_int(
+                item.get("index"), reason="split_index_invalid"
+            )
+            start_ms = _strict_nonnegative_int(
+                item.get("start_ms"), reason="split_range_invalid"
+            )
+            end_ms = _strict_nonnegative_int(
+                item.get("end_ms"), reason="split_range_invalid"
+            )
+        except ValueError:
+            raise ValueError("video_local_edit_worker_payload_invalid") from None
+        if index != position or end_ms <= start_ms or start_ms < previous_end:
+            raise ValueError("video_local_edit_worker_payload_invalid")
+        previous_end = end_ms
+    return len(ranges)
+
+
+def _video_local_edit_resume_contract(
+    *,
+    receipts: list[dict[str, Any]],
+    expected_output_count: int,
+    strict_cursor: video_edit_long_media.DeliveryCursor | None,
+) -> dict[str, Any]:
+    normalized = normalize_artifact_receipt_prefix(
+        receipts,
+        expected_output_count=expected_output_count,
+    )
+    digest = hashlib.sha256(
+        json.dumps(
+            normalized,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    contract = {
+        "schema": VIDEO_LOCAL_EDIT_RESUME_SCHEMA,
+        "version": VIDEO_LOCAL_EDIT_RESUME_VERSION,
+        "expected_output_count": expected_output_count,
+        "artifact_receipt_prefix": normalized,
+        "prefix_count": len(normalized),
+        "prefix_digest": digest,
+        "compatibility": "strict" if strict_cursor is not None else "legacy_receipt_only",
+        "delivery_cursor": strict_cursor.to_mapping() if strict_cursor is not None else None,
+    }
+    return normalize_video_local_edit_resume_contract(contract)
+
+
+def claim_next_video_local_edit(
+    conn,
+    *,
+    lease_owner: Any,
+    now: Any,
+    lease_seconds: Any,
+    blank_lease_grace_cutoff: Any = None,
+    supports_receipt_prefix_resume: bool = False,
+) -> dict[str, Any]:
+    """Atomically claim queued or safely recoverable local Video Edit work."""
+
+    owner = _valid_lease_owner(lease_owner)
+    resume_capable = supports_receipt_prefix_resume is True
+    current = _canonical_timestamp(now)
+    grace_cutoff = (
+        "" if blank_lease_grace_cutoff is None else _canonical_timestamp(blank_lease_grace_cutoff)
+    )
+    try:
+        lease_duration = _strict_nonnegative_int(
+            lease_seconds, reason="lease_seconds_invalid"
+        )
+    except ValueError:
+        return {}
+    if (
+        not owner
+        or not current
+        or lease_duration <= 0
+        or lease_duration > 86_400
+        or (blank_lease_grace_cutoff is not None and not grace_cutoff)
+        or (grace_cutoff and grace_cutoff > current)
+    ):
+        return {}
+    expires = (
+        datetime.strptime(current, "%Y-%m-%d %H:%M:%S")
+        + timedelta(seconds=lease_duration)
+    ).strftime("%Y-%m-%d %H:%M:%S")
+
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    conn.execute("SAVEPOINT video_edit_claim")
+    try:
+        candidates = conn.execute(
+            """SELECT l.id,l.user_id,l.command,l.job_type,l.provider,l.input_file_id,
+                      l.output_file_id,l.output_url,l.error_short,l.created_at,l.finished_at,
+                      l.xu_cost,l.admin_only,
+                      j.id,j.source_sha256,j.artifact_receipts_json,j.delivery_cursor,
+                      j.receipt_state,j.tail_json,o.id,o.attempt_count,l.status,j.status,o.status,
+                      COALESCE(o.lease_owner,''),COALESCE(o.lease_expires_at,''),o.updated_at,
+                      l.started_at
+                 FROM local_worker_jobs AS l
+                 JOIN video_edit_jobs AS j ON j.local_worker_job_id=l.id
+                 JOIN video_edit_outbox AS o
+                   ON o.local_worker_job_id=l.id AND o.edit_job_id=j.id
+                WHERE l.command='video_editengine1'
+                  AND l.job_type=? AND l.provider=?
+                  AND j.product_type=? AND j.worker_job_type=?
+                  AND j.engine_route=? AND j.worker_owner=?
+                  AND o.owner=? AND o.attempt_count>=0
+                  AND (
+                    (l.status='queued' AND j.status='queued' AND o.status='pending'
+                     AND o.available_at<=?
+                     AND COALESCE(o.lease_owner,'')=''
+                     AND COALESCE(o.lease_expires_at,'')='')
+                    OR
+                    (l.status='running' AND j.status='rendering' AND o.status='running'
+                     AND (
+                       (COALESCE(o.lease_owner,'')<>''
+                        AND COALESCE(o.lease_expires_at,'')<>''
+                        AND o.lease_expires_at<=?)
+                       OR
+                       (COALESCE(o.lease_owner,'')=''
+                        AND COALESCE(o.lease_expires_at,'')=''
+                        AND ?<>'' AND o.updated_at<=?)
+                     ))
+                  )
+                ORDER BY o.available_at ASC,o.id ASC""",
+            (
+                WORKER_JOB_TYPE,
+                ENGINE_ROUTE,
+                PRODUCT_TYPE,
+                WORKER_JOB_TYPE,
+                ENGINE_ROUTE,
+                OUTBOX_OWNER,
+                OUTBOX_OWNER,
+                current,
+                current,
+                grace_cutoff,
+                grace_cutoff,
+            ),
+        ).fetchall()
+        for row in candidates:
+            try:
+                persisted_worker_payload = json.loads(str(row[5] or ""))
+                expected_output_count = _persisted_video_edit_expected_output_count(
+                    persisted_worker_payload
+                )
+                persisted_receipts = json.loads(str(row[15] or ""))
+                delivery_cursor = _strict_nonnegative_int(
+                    row[16], reason="delivery_cursor_invalid"
+                )
+                persisted_tail = json.loads(str(row[18] or ""))
+                if not isinstance(persisted_tail, dict):
+                    continue
+                strict_cursor = None
+                if "delivery_cursor" in persisted_tail:
+                    strict_cursor = video_edit_long_media.DeliveryCursor.from_mapping(
+                        persisted_tail["delivery_cursor"]
+                    )
+                attempt_count = _strict_nonnegative_int(
+                    row[20], reason="claim_attempt_invalid"
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            receipts = _artifact_receipts(persisted_receipts)
+            source_sha256 = row[14]
+            receipt_state = str(row[17] or "")
+            empty_source_without_reuse = bool(
+                source_sha256 == "" and delivery_cursor == 0 and receipts == []
+            )
+            if (
+                not _artifact_receipts_valid(persisted_receipts)
+                or delivery_cursor != len(receipts)
+                or len(receipts) > expected_output_count
+                or not (_is_sha256(source_sha256) or empty_source_without_reuse)
+                or receipt_state != "not_created"
+            ):
+                continue
+            if strict_cursor is not None:
+                try:
+                    _validate_delivery_cursor_receipt_prefix(
+                        strict_cursor,
+                        receipts,
+                    )
+                except ValueError:
+                    continue
+
+            worker_job_id = int(row[0])
+            edit_job_id = int(row[13])
+            outbox_id = int(row[19])
+            local_status = str(row[21] or "")
+            edit_status = str(row[22] or "")
+            outbox_status = str(row[23] or "")
+            old_lease_owner = str(row[24] or "")
+            old_lease_expires = str(row[25] or "")
+            old_outbox_updated = str(row[26] or "")
+            persisted_started_at = str(row[27] or "")
+            if local_status == "running":
+                if old_lease_owner:
+                    canonical_old_expiry = _canonical_timestamp(old_lease_expires)
+                    if not canonical_old_expiry or canonical_old_expiry > current:
+                        continue
+                else:
+                    canonical_old_updated = _canonical_timestamp(old_outbox_updated)
+                    if (
+                        not grace_cutoff
+                        or not canonical_old_updated
+                        or canonical_old_updated > grace_cutoff
+                    ):
+                        continue
+            if (
+                local_status == "running"
+                and strict_cursor is not None
+                and strict_cursor.state == "rejected"
+            ):
+                reason = str(
+                    strict_cursor.rejection_code or "delivery_rejected"
+                )[:180]
+                terminal_detail = _json(
+                    {
+                        "stage": "failed_no_charge",
+                        "reason": reason,
+                        "artifact_receipts": receipts,
+                        "delivery_cursor": strict_cursor.to_mapping(),
+                        "charge": 0,
+                        "charged_xu": 0,
+                    }
+                )
+                conn.execute("SAVEPOINT video_edit_rejected_terminal")
+                outbox_terminal = conn.execute(
+                    """UPDATE video_edit_outbox
+                          SET status='terminal_failed',terminal_reason=?,updated_at=?
+                        WHERE id=? AND local_worker_job_id=? AND edit_job_id=? AND owner=?
+                          AND status='running' AND attempt_count=?
+                          AND COALESCE(lease_owner,'')=?
+                          AND COALESCE(lease_expires_at,'')=? AND updated_at=?""",
+                    (
+                        reason,
+                        current,
+                        outbox_id,
+                        worker_job_id,
+                        edit_job_id,
+                        OUTBOX_OWNER,
+                        attempt_count,
+                        old_lease_owner,
+                        old_lease_expires,
+                        old_outbox_updated,
+                    ),
+                )
+                local_terminal = conn.execute(
+                    """UPDATE local_worker_jobs
+                          SET status='failed',error_short=?,finished_at=?,updated_at=?
+                        WHERE id=? AND command='video_editengine1' AND job_type=?
+                          AND provider=? AND status='running'""",
+                    (
+                        terminal_detail,
+                        current,
+                        current,
+                        worker_job_id,
+                        WORKER_JOB_TYPE,
+                        ENGINE_ROUTE,
+                    ),
+                )
+                edit_terminal = conn.execute(
+                    """UPDATE video_edit_jobs
+                          SET status='failed_no_charge',progress_percent=0,blocker=?,
+                              charge_state='not_charged',charged_xu=0,
+                              finished_at=?,updated_at=?
+                        WHERE id=? AND local_worker_job_id=? AND product_type=?
+                          AND worker_job_type=? AND engine_route=? AND worker_owner=?
+                          AND status='rendering'""",
+                    (
+                        reason,
+                        current,
+                        current,
+                        edit_job_id,
+                        worker_job_id,
+                        PRODUCT_TYPE,
+                        WORKER_JOB_TYPE,
+                        ENGINE_ROUTE,
+                        OUTBOX_OWNER,
+                    ),
+                )
+                if any(
+                    int(cursor.rowcount or 0) != 1
+                    for cursor in (outbox_terminal, local_terminal, edit_terminal)
+                ):
+                    conn.execute("ROLLBACK TO SAVEPOINT video_edit_rejected_terminal")
+                conn.execute("RELEASE SAVEPOINT video_edit_rejected_terminal")
+                continue
+            if (
+                local_status == "running"
+                and strict_cursor is not None
+                and strict_cursor.state in {"sending", "unknown"}
+            ):
+                reason = "delivery_cursor_expired_ambiguous"
+                terminal_detail = _json(
+                    {
+                        "stage": "delivery_unknown",
+                        "reason": reason,
+                        "artifact_receipts": receipts,
+                        "delivery_cursor": strict_cursor.to_mapping(),
+                    }
+                )
+                conn.execute("SAVEPOINT video_edit_ambiguous_terminal")
+                outbox_terminal = conn.execute(
+                    """UPDATE video_edit_outbox
+                          SET status='terminal_delivery_unknown',terminal_reason=?,updated_at=?
+                        WHERE id=? AND local_worker_job_id=? AND edit_job_id=? AND owner=?
+                          AND status='running' AND attempt_count=?
+                          AND COALESCE(lease_owner,'')=?
+                          AND COALESCE(lease_expires_at,'')=? AND updated_at=?""",
+                    (
+                        reason,
+                        current,
+                        outbox_id,
+                        worker_job_id,
+                        edit_job_id,
+                        OUTBOX_OWNER,
+                        attempt_count,
+                        old_lease_owner,
+                        old_lease_expires,
+                        old_outbox_updated,
+                    ),
+                )
+                local_terminal = conn.execute(
+                    """UPDATE local_worker_jobs
+                          SET status='failed',error_short=?,finished_at=?,updated_at=?
+                        WHERE id=? AND command='video_editengine1' AND job_type=?
+                          AND provider=? AND status='running'""",
+                    (
+                        terminal_detail,
+                        current,
+                        current,
+                        worker_job_id,
+                        WORKER_JOB_TYPE,
+                        ENGINE_ROUTE,
+                    ),
+                )
+                edit_terminal = conn.execute(
+                    """UPDATE video_edit_jobs
+                          SET status='delivery_unknown',blocker=?,receipt_state='delivery_unknown',
+                              charge_state='not_charged',charged_xu=0,finished_at=?,updated_at=?
+                        WHERE id=? AND local_worker_job_id=? AND product_type=?
+                          AND worker_job_type=? AND engine_route=? AND worker_owner=?
+                          AND status='rendering'""",
+                    (
+                        reason,
+                        current,
+                        current,
+                        edit_job_id,
+                        worker_job_id,
+                        PRODUCT_TYPE,
+                        WORKER_JOB_TYPE,
+                        ENGINE_ROUTE,
+                        OUTBOX_OWNER,
+                    ),
+                )
+                if any(
+                    int(cursor.rowcount or 0) != 1
+                    for cursor in (outbox_terminal, local_terminal, edit_terminal)
+                ):
+                    conn.execute("ROLLBACK TO SAVEPOINT video_edit_ambiguous_terminal")
+                conn.execute("RELEASE SAVEPOINT video_edit_ambiguous_terminal")
+                continue
+            if receipts and not resume_capable:
+                continue
+            break
+        else:
+            conn.execute("RELEASE SAVEPOINT video_edit_claim")
+            return {}
+        next_attempt = attempt_count + 1
+
+        outbox_update = conn.execute(
+            """UPDATE video_edit_outbox
+                  SET status='running',attempt_count=?,lease_owner=?,lease_expires_at=?,updated_at=?
+                WHERE id=? AND local_worker_job_id=? AND edit_job_id=? AND owner=?
+                  AND status=? AND attempt_count=?
+                  AND COALESCE(lease_owner,'')=?
+                  AND COALESCE(lease_expires_at,'')=? AND updated_at=?""",
+            (
+                next_attempt,
+                owner,
+                expires,
+                current,
+                outbox_id,
+                worker_job_id,
+                edit_job_id,
+                OUTBOX_OWNER,
+                outbox_status,
+                attempt_count,
+                old_lease_owner,
+                old_lease_expires,
+                old_outbox_updated,
+            ),
+        )
+        local_update = conn.execute(
+            """UPDATE local_worker_jobs
+                  SET status='running',started_at=CASE WHEN COALESCE(started_at,'')=''
+                       THEN ? ELSE started_at END,worker_id=?,updated_at=?
+                WHERE id=? AND command='video_editengine1' AND job_type=?
+                  AND provider=? AND status=?""",
+            (current, owner, current, worker_job_id, WORKER_JOB_TYPE, ENGINE_ROUTE, local_status),
+        )
+        edit_update = conn.execute(
+            """UPDATE video_edit_jobs
+                  SET status='rendering',started_at=CASE WHEN started_at=''
+                       THEN ? ELSE started_at END,updated_at=?
+                WHERE id=? AND local_worker_job_id=? AND product_type=?
+                  AND worker_job_type=? AND engine_route=? AND worker_owner=? AND status=?""",
+            (
+                current,
+                current,
+                edit_job_id,
+                worker_job_id,
+                PRODUCT_TYPE,
+                WORKER_JOB_TYPE,
+                ENGINE_ROUTE,
+                OUTBOX_OWNER,
+                edit_status,
+            ),
+        )
+        if any(int(cursor.rowcount or 0) != 1 for cursor in (outbox_update, local_update, edit_update)):
+            conn.execute("ROLLBACK TO SAVEPOINT video_edit_claim")
+            conn.execute("RELEASE SAVEPOINT video_edit_claim")
+            return {}
+        conn.execute("RELEASE SAVEPOINT video_edit_claim")
+        claimed_job = {
+            "id": worker_job_id,
+            "user_id": str(row[1] or ""),
+            "command": str(row[2] or ""),
+            "job_type": str(row[3] or ""),
+            "status": "running",
+            "provider": str(row[4] or ""),
+            "input_file_id": str(row[5] or ""),
+            "output_file_id": str(row[6] or ""),
+            "output_url": str(row[7] or ""),
+            "error_short": str(row[8] or ""),
+            "created_at": str(row[9] or ""),
+            "started_at": persisted_started_at or current,
+            "finished_at": str(row[10] or ""),
+            "xu_cost": int(row[11] or 0),
+            "admin_only": int(row[12] or 0),
+            "worker_id": owner,
+            "updated_at": current,
+            "edit_job_id": edit_job_id,
+            "outbox_id": outbox_id,
+            "artifact_receipt_prefix": receipts[:delivery_cursor],
+            "delivery_cursor": delivery_cursor,
+            "source_sha256": source_sha256.lower(),
+            "receipt_state": receipt_state,
+            "claim_attempt": next_attempt,
+            "lease_owner": owner,
+            "lease_expires_at": expires,
+        }
+        if resume_capable:
+            claimed_job["resume_contract"] = _video_local_edit_resume_contract(
+                receipts=receipts,
+                expected_output_count=expected_output_count,
+                strict_cursor=strict_cursor,
+            )
+        return claimed_job
+    except Exception:
+        conn.execute("ROLLBACK TO SAVEPOINT video_edit_claim")
+        conn.execute("RELEASE SAVEPOINT video_edit_claim")
+        raise
+
+
 def renew_worker_lease(
     conn,
     *,
@@ -1415,8 +2960,9 @@ def renew_worker_lease(
     lease_owner: Any,
     now: Any,
     lease_expires_at: Any,
+    claim_attempt: Any = None,
 ) -> bool:
-    """Atomically acquire or renew one eligible local-worker lease."""
+    """Strictly renew one live lease owned by the exact claim attempt."""
 
     try:
         job_id = _strict_nonnegative_int(worker_job_id, reason="worker_job_id_invalid")
@@ -1424,51 +2970,50 @@ def renew_worker_lease(
         return False
     if job_id <= 0:
         return False
-    if (
-        not isinstance(lease_owner, str)
-        or lease_owner != lease_owner.strip()
-        or not lease_owner
-        or len(lease_owner) > 120
-        or any(ord(char) < 33 or ord(char) > 126 for char in lease_owner)
-    ):
+    owner = _valid_lease_owner(lease_owner)
+    try:
+        attempt = _strict_nonnegative_int(claim_attempt, reason="claim_attempt_invalid")
+    except ValueError:
         return False
-
-    def canonical_timestamp(value: Any) -> str:
-        if isinstance(value, datetime):
-            if value.tzinfo is not None or value.microsecond:
-                return ""
-            return value.strftime("%Y-%m-%d %H:%M:%S")
-        if not isinstance(value, str) or value != value.strip():
-            return ""
-        try:
-            parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
-        except (TypeError, ValueError):
-            return ""
-        return value if parsed.strftime("%Y-%m-%d %H:%M:%S") == value else ""
-
-    current = canonical_timestamp(now)
-    expires = canonical_timestamp(lease_expires_at)
-    if not current or not expires or expires <= current:
+    current = _canonical_timestamp(now)
+    expires = _canonical_timestamp(lease_expires_at)
+    if not owner or attempt <= 0 or not current or not expires or expires <= current:
+        return False
+    active = conn.execute(
+        """SELECT o.lease_expires_at
+             FROM video_edit_outbox AS o
+             JOIN video_edit_jobs AS j
+               ON j.id=o.edit_job_id AND j.local_worker_job_id=o.local_worker_job_id
+             JOIN local_worker_jobs AS l ON l.id=o.local_worker_job_id
+            WHERE o.local_worker_job_id=? AND o.owner=? AND o.status='running'
+              AND o.lease_owner=? AND o.attempt_count=?
+              AND j.product_type=? AND j.worker_job_type=? AND j.engine_route=?
+              AND j.worker_owner=? AND j.status='rendering'
+              AND l.command='video_editengine1' AND l.job_type=? AND l.provider=?
+              AND l.status='running' AND l.worker_id=?""",
+        (
+            job_id,
+            OUTBOX_OWNER,
+            owner,
+            attempt,
+            PRODUCT_TYPE,
+            WORKER_JOB_TYPE,
+            ENGINE_ROUTE,
+            OUTBOX_OWNER,
+            WORKER_JOB_TYPE,
+            ENGINE_ROUTE,
+            owner,
+        ),
+    ).fetchone()
+    active_expiry = _canonical_timestamp(active[0]) if active else ""
+    if not active_expiry or active_expiry <= current:
         return False
     cursor = conn.execute(
-        """UPDATE video_edit_outbox AS o
-           SET lease_owner=?,lease_expires_at=?,updated_at=?
-           WHERE o.local_worker_job_id=?
-             AND o.status IN ('pending','running')
-             AND EXISTS (
-                 SELECT 1 FROM video_edit_jobs AS j
-                  WHERE j.id=o.edit_job_id
-                    AND j.local_worker_job_id=o.local_worker_job_id
-                    AND j.local_worker_job_id=?
-                    AND j.status IN ('queued','rendering')
-             )
-             AND (
-                 COALESCE(o.lease_owner,'')=''
-                 OR o.lease_owner=?
-                 OR COALESCE(o.lease_expires_at,'')=''
-                 OR o.lease_expires_at<=?
-             )""",
-        (lease_owner, expires, current, job_id, job_id, lease_owner, current),
+        """UPDATE video_edit_outbox
+              SET lease_expires_at=?,updated_at=?
+            WHERE local_worker_job_id=? AND owner=? AND status='running'
+              AND lease_owner=? AND attempt_count=? AND lease_expires_at=?""",
+        (expires, current, job_id, OUTBOX_OWNER, owner, attempt, active_expiry),
     )
     return int(cursor.rowcount or 0) == 1
 
@@ -1482,6 +3027,10 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
         return {}
     if str(current.get("status") or "") in TERMINAL_JOB_STATES:
         return current
+    delivery_owner, delivery_claim_attempt = _cleanup_delivery_binding(
+        conn,
+        worker_job_id,
+    )
     now = _now()
     status = str(worker_status or "").lower()
     detail = dict(detail or {})
@@ -1492,6 +3041,22 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
     receipt_artifacts = _artifact_receipts(receipt.get("artifacts"))
     incoming_artifacts = receipt_artifacts or detail_artifacts
     current_artifacts = _artifact_receipts(current.get("artifact_receipts"))
+    current_tail = current.get("tail")
+    if not isinstance(current_tail, dict):
+        raise ValueError("delivery_cursor_invalid")
+    canonical_tail = dict(current_tail)
+    current_strict_cursor = None
+    if "delivery_cursor" in canonical_tail:
+        try:
+            current_strict_cursor = video_edit_long_media.DeliveryCursor.from_mapping(
+                canonical_tail["delivery_cursor"]
+            )
+            _validate_delivery_cursor_receipt_prefix(
+                current_strict_cursor,
+                current_artifacts,
+            )
+        except (TypeError, ValueError):
+            raise ValueError("delivery_cursor_invalid") from None
     malformed_checkpoint = bool(
         status in {"running", "delivery_unknown"}
         and (
@@ -1511,11 +3076,65 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
         incoming_artifacts = current_artifacts
     if incoming_artifacts and current_artifacts:
         if incoming_artifacts[: len(current_artifacts)] != current_artifacts:
+            if current_strict_cursor is not None or "delivery_cursor" in detail:
+                raise ValueError("delivery_cursor_invalid")
             status = "delivery_unknown"
             detail = {**detail, "reason": "artifact_receipt_history_mismatch"}
             incoming_artifacts = current_artifacts
-    artifact_json = _json(incoming_artifacts or current_artifacts)
-    artifact_cursor = len(incoming_artifacts or current_artifacts)
+    effective_artifacts = incoming_artifacts or current_artifacts
+    canonical_strict_cursor = current_strict_cursor
+    if "delivery_cursor" in detail:
+        try:
+            incoming_strict_cursor = video_edit_long_media.DeliveryCursor.from_mapping(
+                detail["delivery_cursor"]
+            )
+            transition_start = current_strict_cursor
+            if transition_start is None:
+                next_output_index = len(current_artifacts) + 1
+                if (
+                    incoming_strict_cursor.state != "sending"
+                    or incoming_strict_cursor.output_index != next_output_index
+                ):
+                    raise ValueError("delivery cursor transition rejected")
+                transition_start = video_edit_long_media.DeliveryCursor(
+                    output_index=next_output_index
+                )
+            elif transition_start.output_index != incoming_strict_cursor.output_index:
+                completed_previous_output = bool(
+                    transition_start.state == "delivered"
+                    and incoming_strict_cursor.state == "sending"
+                    and incoming_strict_cursor.output_index
+                    == transition_start.output_index + 1
+                    and len(current_artifacts) >= transition_start.output_index
+                )
+                if not completed_previous_output:
+                    raise ValueError("delivery cursor transition rejected")
+                transition_start = video_edit_long_media.DeliveryCursor(
+                    output_index=incoming_strict_cursor.output_index
+                )
+            canonical_strict_cursor = video_edit_long_media.advance_delivery_cursor(
+                transition_start,
+                incoming_strict_cursor,
+            )
+            _validate_delivery_cursor_receipt_prefix(
+                canonical_strict_cursor,
+                effective_artifacts,
+            )
+            canonical_tail["delivery_cursor"] = canonical_strict_cursor.to_mapping()
+        except (TypeError, ValueError):
+            raise ValueError("delivery_cursor_invalid") from None
+    elif canonical_strict_cursor is not None:
+        _validate_delivery_cursor_receipt_prefix(
+            canonical_strict_cursor,
+            effective_artifacts,
+        )
+    tail_json = _json(canonical_tail)
+    artifact_json = json.dumps(
+        effective_artifacts,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    artifact_cursor = len(effective_artifacts)
     if status == "running":
         stage = str(detail.get("stage") or "rendering")
         current_progress = int(current.get("progress_percent") or 0)
@@ -1523,10 +3142,10 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
         progress = max(current_progress, stage_progress) if stage_progress is not None else current_progress
         cursor = conn.execute(
             """UPDATE video_edit_jobs SET status='rendering',progress_percent=?,
-               artifact_receipts_json=?,delivery_cursor=?,
+               artifact_receipts_json=?,delivery_cursor=?,tail_json=?,
                started_at=CASE WHEN started_at='' THEN ? ELSE started_at END,updated_at=?
                WHERE id=? AND status NOT IN ('delivered','charged','failed_no_charge','delivery_unknown')""",
-            (progress, artifact_json, artifact_cursor, now, now, int(current["id"])),
+            (progress, artifact_json, artifact_cursor, tail_json, now, now, int(current["id"])),
         )
         if cursor.rowcount != 1:
             return get_job_by_worker_id(conn, worker_job_id)
@@ -1536,13 +3155,23 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
         )
     elif status == "delivery_unknown":
         reason = str(detail.get("reason") or "telegram_delivery_receipt_commit_uncertain")[:180]
+        canonical_tail = _seed_cleanup_audit(
+            canonical_tail,
+            worker_job_id=worker_job_id,
+            terminal_status="delivery_unknown",
+            delivery_owner=delivery_owner,
+            delivery_claim_attempt=delivery_claim_attempt,
+            cleanup_intent=detail.get("cleanup_intent"),
+            now=now,
+        )
+        tail_json = _json(canonical_tail)
         cursor = conn.execute(
             """UPDATE video_edit_jobs SET status='delivery_unknown',blocker=?,
-               artifact_receipts_json=?,delivery_cursor=?,
+               artifact_receipts_json=?,delivery_cursor=?,tail_json=?,
                receipt_state='delivery_unknown',charge_state='not_charged',charged_xu=0,
                finished_at=?,updated_at=?
                WHERE id=? AND status NOT IN ('delivered','charged','failed_no_charge','delivery_unknown')""",
-            (reason, artifact_json, artifact_cursor, now, now, int(current["id"])),
+            (reason, artifact_json, artifact_cursor, tail_json, now, now, int(current["id"])),
         )
         if cursor.rowcount != 1:
             return get_job_by_worker_id(conn, worker_job_id)
@@ -1594,12 +3223,35 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
             output_count == 1
             and ((not artifacts_declared) or len(receipt_artifacts) == 1)
         ) or (output_count > 1 and len(receipt_artifacts) == output_count)
+        if canonical_strict_cursor is not None:
+            strict_terminal_valid = bool(
+                canonical_strict_cursor.state == "delivered"
+                and canonical_strict_cursor.output_index == output_count
+                and artifacts_declared
+                and len(receipt_artifacts) == output_count
+                and receipt_artifacts == effective_artifacts
+                and receipt_artifacts
+                and delivery_message_id == receipt_artifacts[-1]["message_id"]
+                and delivery_file_id == receipt_artifacts[-1]["file_id"]
+                and canonical_strict_cursor.message_id
+                == receipt_artifacts[-1]["message_id"]
+                and canonical_strict_cursor.file_id
+                == receipt_artifacts[-1]["file_id"]
+            )
+            if not strict_terminal_valid:
+                raise ValueError("delivery_cursor_invalid")
         artifact_identity_valid = bool(
             not artifacts_declared
             or (
                 receipt_artifacts
-                and delivery_message_id == receipt_artifacts[0]["message_id"]
-                and delivery_file_id == receipt_artifacts[0]["file_id"]
+                and delivery_message_id
+                == receipt_artifacts[-1 if canonical_strict_cursor is not None else 0][
+                    "message_id"
+                ]
+                and delivery_file_id
+                == receipt_artifacts[-1 if canonical_strict_cursor is not None else 0][
+                    "file_id"
+                ]
                 and output_size_bytes
                 == sum(int(item["size"]) for item in receipt_artifacts)
             )
@@ -1628,10 +3280,20 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
             and charge_receipt_valid
         )
         if valid:
+            canonical_tail = _seed_cleanup_audit(
+                canonical_tail,
+                worker_job_id=worker_job_id,
+                terminal_status="delivered",
+                delivery_owner=delivery_owner,
+                delivery_claim_attempt=delivery_claim_attempt,
+                cleanup_intent=detail.get("cleanup_intent"),
+                now=now,
+            )
+            tail_json = _json(canonical_tail)
             cursor = conn.execute(
                 """UPDATE video_edit_jobs SET status='delivered',progress_percent=100,blocker='',
                    source_video_path=?,source_sha256=?,output_file_id=?,output_path=?,output_sha256=?,output_size_bytes=?,ffprobe_json=?,
-                   delivery_message_id=?,delivery_file_id=?,artifact_receipts_json=?,delivery_cursor=?,receipt_state='created',
+                   delivery_message_id=?,delivery_file_id=?,artifact_receipts_json=?,delivery_cursor=?,tail_json=?,receipt_state='created',
                    delivered_at=?,finished_at=?,updated_at=?
                    WHERE id=? AND status NOT IN ('delivered','charged','failed_no_charge','delivery_unknown')""",
                 (
@@ -1646,6 +3308,7 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
                     delivery_file_id,
                     artifact_json,
                     artifact_cursor,
+                    tail_json,
                     now, now, now, int(current["id"]),
                 ),
             )
@@ -1659,12 +3322,27 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
             status = "failed"
             detail = {**detail, "reason": "delivery_receipt_invalid"}
     if status in {"failed", "cancelled"}:
+        if (
+            canonical_strict_cursor is not None
+            and canonical_strict_cursor.state != "rejected"
+        ):
+            raise ValueError("delivery_cursor_invalid")
         reason = str(detail.get("reason") or "local_edit_failed_no_charge")[:180]
+        canonical_tail = _seed_cleanup_audit(
+            canonical_tail,
+            worker_job_id=worker_job_id,
+            terminal_status="failed_no_charge",
+            delivery_owner=delivery_owner,
+            delivery_claim_attempt=delivery_claim_attempt,
+            cleanup_intent=detail.get("cleanup_intent"),
+            now=now,
+        )
+        tail_json = _json(canonical_tail)
         cursor = conn.execute(
             """UPDATE video_edit_jobs SET status='failed_no_charge',progress_percent=0,blocker=?,
-               charge_state='not_charged',charged_xu=0,finished_at=?,updated_at=?
+               tail_json=?,charge_state='not_charged',charged_xu=0,finished_at=?,updated_at=?
                WHERE id=? AND status NOT IN ('delivered','charged','failed_no_charge','delivery_unknown')""",
-            (reason, now, now, int(current["id"])),
+            (reason, tail_json, now, now, int(current["id"])),
         )
         if cursor.rowcount != 1:
             return get_job_by_worker_id(conn, worker_job_id)
@@ -1722,7 +3400,7 @@ def claim_charge(conn, *, worker_job_id: Any) -> bool:
         """SELECT status,receipt_state,charge_state,price_xu,source_sha256,
                   output_file_id,output_path,output_sha256,output_size_bytes,
                   ffprobe_json,delivery_message_id,delivery_file_id,
-                  artifact_receipts_json,delivery_cursor
+                  artifact_receipts_json,delivery_cursor,tail_json
            FROM video_edit_jobs WHERE local_worker_job_id=?""",
         (int(worker_job_id or 0),),
     ).fetchone()
@@ -1738,7 +3416,10 @@ def claim_charge(conn, *, worker_job_id: Any) -> bool:
         )
         ffprobe = json.loads(str(row[9]))
         artifact_value = json.loads(str(row[12]))
+        canonical_tail = json.loads(str(row[14]))
     except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(canonical_tail, dict):
         return False
     artifacts = _artifact_receipts(artifact_value)
     if not _artifact_receipts_valid(artifact_value):
@@ -1747,6 +3428,22 @@ def claim_charge(conn, *, worker_job_id: Any) -> bool:
     delivery_file_id = _telegram_file_id(row[11])
     output_file_id = _telegram_file_id(row[5])
     output_count = len(artifacts) if artifacts else 1
+    strict_cursor = None
+    if "delivery_cursor" in canonical_tail:
+        try:
+            strict_cursor = video_edit_long_media.DeliveryCursor.from_mapping(
+                canonical_tail["delivery_cursor"]
+            )
+            _validate_delivery_cursor_receipt_prefix(strict_cursor, artifacts)
+        except (TypeError, ValueError):
+            return False
+        if strict_cursor.state != "delivered":
+            return False
+    bound_artifact = (
+        artifacts[-1]
+        if artifacts and strict_cursor is not None
+        else artifacts[0] if artifacts else None
+    )
     evidence_valid = bool(
         str(row[0] or "") == "delivered"
         and str(row[1] or "") == "created"
@@ -1763,11 +3460,18 @@ def claim_charge(conn, *, worker_job_id: Any) -> bool:
         and _valid_mp4_path_list(row[6], output_count=output_count)
         and delivery_cursor == len(artifacts)
         and (
-            not artifacts
+            bound_artifact is None
             or (
-                delivery_message_id == artifacts[0]["message_id"]
-                and delivery_file_id == artifacts[0]["file_id"]
+                delivery_message_id == bound_artifact["message_id"]
+                and delivery_file_id == bound_artifact["file_id"]
                 and output_size_bytes == sum(int(item["size"]) for item in artifacts)
+                and (
+                    strict_cursor is None
+                    or (
+                        strict_cursor.message_id == bound_artifact["message_id"]
+                        and strict_cursor.file_id == bound_artifact["file_id"]
+                    )
+                )
             )
         )
     )
@@ -1790,12 +3494,13 @@ def claim_charge(conn, *, worker_job_id: Any) -> bool:
               AND delivery_message_id=?
               AND delivery_file_id=?
               AND artifact_receipts_json=?
-              AND delivery_cursor=?""",
+              AND delivery_cursor=?
+              AND tail_json=?""",
         (
             _now(),
             int(worker_job_id or 0),
             row[3], row[4], row[5], row[6], row[7], row[8], row[9],
-            row[10], row[11], row[12], row[13],
+            row[10], row[11], row[12], row[13], row[14],
         ),
     )
     return int(cursor.rowcount or 0) == 1
