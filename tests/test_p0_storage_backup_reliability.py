@@ -1,5 +1,6 @@
 import inspect
 import asyncio
+import os
 import sqlite3
 from types import SimpleNamespace
 
@@ -52,3 +53,25 @@ def test_create_db_backup_now_creates_verified_sqlite_file(tmp_path, monkeypatch
     with sqlite3.connect(backup_path) as conn:
         assert conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
         assert conn.execute("SELECT value FROM events").fetchone() == ("ok",)
+
+
+def test_backup_retention_keeps_three_total_startup_and_auto_files(tmp_path, monkeypatch):
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    names = (
+        "toandaas_system_20260801_000000_startup.db",
+        "toandaas_system_20260802_000000.sqlite3",
+        "toandaas_system_20260803_000000_startup.db",
+        "toandaas_system_20260804_000000.sqlite3",
+    )
+    for index, name in enumerate(names):
+        path = backup_dir / name
+        path.write_bytes(b"backup")
+        os.utime(path, (index, index))
+    monkeypatch.setattr(bot, "DB_BACKUP_DIR", str(backup_dir))
+
+    removed = bot.cleanup_old_db_backups(3)
+
+    remaining = sorted(path.name for path in backup_dir.iterdir())
+    assert len(remaining) == 3
+    assert removed == [names[0]]

@@ -2543,24 +2543,9 @@ def latest_startup_backup_info() -> dict:
     except Exception as e:
         return {"status": "error", "path": "", "created_at": "", "reason": str(e)[:160]}
 
-def cleanup_old_startup_backups():
-    backup_dir = str(DB_BACKUP_DIR or "backups")
-    try:
-        if not os.path.isdir(backup_dir):
-            return
-        files = []
-        for name in os.listdir(backup_dir):
-            if name.startswith("toandaas_system_") and name.endswith("_startup.db"):
-                path = os.path.join(backup_dir, name)
-                files.append((os.path.getmtime(path), path))
-        files = sorted(files, reverse=True)
-        for _mtime, path in files[DB_STARTUP_BACKUP_RETENTION:]:
-            try:
-                os.remove(path)
-            except Exception as e:
-                logger.warning(f"Startup DB backup cleanup skipped {masked_db_path(path)}: {type(e).__name__}")
-    except Exception as e:
-        logger.warning(f"Startup DB backup cleanup failed: {type(e).__name__}")
+def cleanup_old_startup_backups() -> list[str]:
+    """Apply one global retention budget across startup and automatic backups."""
+    return cleanup_old_db_backups(DB_STARTUP_BACKUP_RETENTION)
 
 def db_backup_dir_is_public(path: str = "") -> bool:
     value = str(path or DB_BACKUP_DIR or "").strip()
@@ -2581,7 +2566,9 @@ def db_backup_file_candidates() -> list[tuple[float, str]]:
         if not os.path.isdir(backup_dir):
             return []
         for name in os.listdir(backup_dir):
-            if name.startswith("toanaas_system_") and name.endswith(".sqlite3"):
+            if name.startswith("toandaas_system_") and (
+                name.endswith(".sqlite3") or name.endswith("_startup.db")
+            ):
                 path = os.path.join(backup_dir, name)
                 if os.path.isfile(path):
                     files.append((os.path.getmtime(path), path))
