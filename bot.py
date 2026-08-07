@@ -233957,9 +233957,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if SUPPORT_PERSONA_NORMAL_CHAT_ENABLED and await handle_support_persona_message(update, context):
         return
 
-    if SUPPORT_PERSONA_NORMAL_CHAT_ENABLED and await handle_support_persona_message(update, context):
-        return
-
     if AICHAT_INLINE_ENABLED and await handle_aichat_message(update, context):
         return
 
