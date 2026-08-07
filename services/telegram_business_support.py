@@ -30,7 +30,9 @@ BUSINESS_UPDATE_TYPES = (
 DEFAULT_MODE = "rules_only"
 VALID_MODES = {"off", "rules_only", "rules_plus_ai_draft"}
 DEFAULT_COOLDOWN_SECONDS = 60
-DEFAULT_CONVERSATION_TTL_SECONDS = 24 * 60 * 60
+# CSKH Business keeps a private working context for 48 hours. This value is
+# runtime-only and is never included in normal bot chat/public copy.
+DEFAULT_CONVERSATION_TTL_SECONDS = 48 * 60 * 60
 DEFAULT_MESSAGE_DEBOUNCE_SECONDS = 3
 STATE_VERSION = 1
 TRAINING_DATA_VERSION_FALLBACK = "0"
@@ -497,7 +499,7 @@ def _next_step_hint(intent: dict) -> str:
 
 def conversation_ttl_seconds() -> int:
     try:
-        return max(60, int(os.getenv("CSKH_CONVERSATION_TTL_SECONDS") or DEFAULT_CONVERSATION_TTL_SECONDS))
+        return max(60, min(48 * 60 * 60, int(os.getenv("CSKH_CONVERSATION_TTL_SECONDS") or DEFAULT_CONVERSATION_TTL_SECONDS)))
     except Exception:
         return DEFAULT_CONVERSATION_TTL_SECONDS
 

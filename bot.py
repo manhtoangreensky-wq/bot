@@ -37,6 +37,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 import uuid
 from decimal import Decimal, InvalidOperation
+from functools import wraps
 from urllib.parse import parse_qsl, quote, urlencode, urlparse
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -1282,6 +1283,10 @@ BOT_USERNAME        = _env("BOT_USERNAME", "toanaasbot")
 OFFICIAL_TELEGRAM_URL = _env("OFFICIAL_TELEGRAM_URL", "https://t.me/toanaasbot")
 SUPPORT_TELEGRAM_URL  = _env("SUPPORT_TELEGRAM_URL", "https://t.me/toanaas")
 SUPPORT_PERSONA_AUTO_REPLY_ENABLED = env_flag("SUPPORT_PERSONA_AUTO_REPLY_ENABLED", "true")
+# Keep normal bot chat on the explicit AI/provider route. CSKH persona and the
+# consent-based copilot remain available through their own commands/buttons.
+SUPPORT_PERSONA_NORMAL_CHAT_ENABLED = env_flag("SUPPORT_PERSONA_NORMAL_CHAT_ENABLED", "false")
+AICHAT_INLINE_ENABLED = env_flag("AICHAT_INLINE_ENABLED", "false")
 SUPPORT_PERSONA_TICKET_DEDUPE_MINUTES = max(1, env_int("SUPPORT_PERSONA_TICKET_DEDUPE_MINUTES", 30))
 SUPPORT_AI_CLASSIFIER_ENABLED = env_flag("SUPPORT_AI_CLASSIFIER_ENABLED", "false")
 TOAN_AAS_COMMUNITY_URL = _env("TOAN_AAS_COMMUNITY_URL", "https://t.me/+RLAA18Uqtv05NWQ1")
@@ -1519,6 +1524,11 @@ async def telegram_webhook_watchdog():
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 user_memory: dict = {}
+
+
+def ai_memory_key(user_id, scope: str = "normal_chat") -> str:
+    safe_scope = re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(scope or "normal_chat"))[:48] or "normal_chat"
+    return f"{safe_scope}:{str(user_id)}"
 
 # ─── DANH SÁCH MỆNH GIÁ NẠP ───────────────────────────────────────────────────
 PAYMENT_PACKAGES = {
@@ -39090,12 +39100,13 @@ class AgentGemini:
         if not gemini_client and not openai_client:
             return "❌ Chưa cấu hình AI Provider."
 
+        memory_key = ai_memory_key(uid, "agent_tool")
+        existing_memory = list(user_memory.get(memory_key) or [])
+        gemini_contents = text
+        if not is_json:
+            gemini_contents = (existing_memory + [types.Content(role="user", parts=[types.Part(text=text)])])[-10:]
+
         if gemini_client:
-            if uid not in user_memory:
-                user_memory[uid] = []
-            user_memory[uid].append(types.Content(role="user", parts=[types.Part(text=text)]))
-            if len(user_memory[uid]) > 10:
-                user_memory[uid] = user_memory[uid][-10:]
             cfg = {
                 "system_instruction": prompt,
                 "response_mime_type": "application/json" if is_json else "text/plain"
@@ -39106,12 +39117,10 @@ class AgentGemini:
                 res = gemini_client.models.generate_content(
                     model="gemini-2.0-flash",
                     config=types.GenerateContentConfig(**cfg),
-                    contents=user_memory[uid] if not is_json else text
+                    contents=gemini_contents,
                 )
                 if not is_json:
-                    user_memory[uid].append(
-                        types.Content(role="model", parts=[types.Part(text=res.text)])
-                    )
+                    user_memory[memory_key] = (list(gemini_contents) + [types.Content(role="model", parts=[types.Part(text=res.text)])])[-10:]
                 return res.text
             except Exception as e:
                 logger.error(f"Gemini error: {e} — Thử fallback OpenAI...")
@@ -39119,10 +39128,14 @@ class AgentGemini:
         if openai_client:
             try:
                 messages = [{"role": "system", "content": prompt}]
-                if uid in user_memory:
-                    for m in user_memory[uid][-6:]:
+                for m in existing_memory[-6:]:
+                    try:
                         role = "user" if m.role == "user" else "assistant"
-                        messages.append({"role": role, "content": m.parts[0].text})
+                        content = m.parts[0].text
+                    except Exception:
+                        continue
+                    if content:
+                        messages.append({"role": role, "content": content})
                 messages.append({"role": "user", "content": text})
 
                 res = openai_client.chat.completions.create(
@@ -39131,7 +39144,13 @@ class AgentGemini:
                     response_format={"type": "json_object"} if is_json else {"type": "text"},
                     max_tokens=1000
                 )
-                return res.choices[0].message.content
+                output = res.choices[0].message.content
+                if not is_json:
+                    user_memory[memory_key] = (existing_memory + [
+                        types.Content(role="user", parts=[types.Part(text=text)]),
+                        types.Content(role="model", parts=[types.Part(text=output)]),
+                    ])[-10:]
+                return output
             except Exception as e:
                 logger.error(f"OpenAI error: {e}")
                 return "❌ AI đang tạm hết quota hoặc quá tải.\nBot chưa trừ Xu. Vui lòng thử lại sau."
@@ -61747,17 +61766,43 @@ def shopaikey_chat_model_status_summary() -> str:
         parts.append(f"{model} {str(status).upper()}")
     return "; ".join(parts)
 
-async def shopaikey_chat_completion_single_model(system_prompt: str, user_text: str, model: str, max_tokens: int = 1200) -> dict:
+SHOPAIKEY_CHAT_MEMORY: dict[str, list[dict[str, str]]] = {}
+SHOPAIKEY_CHAT_MEMORY_LIMIT = 6
+
+
+def shopaikey_chat_memory_key(system_prompt: str, user_id) -> str:
+    prompt_hash = hashlib.sha256(str(system_prompt or "").encode("utf-8")).hexdigest()[:16]
+    return f"{str(user_id)}:{prompt_hash}"
+
+
+def _safe_shopaikey_chat_history(history) -> list[dict[str, str]]:
+    clean: list[dict[str, str]] = []
+    for item in list(history or [])[-SHOPAIKEY_CHAT_MEMORY_LIMIT:]:
+        role = str((item or {}).get("role") or "")
+        content = str((item or {}).get("content") or "").strip()
+        if role not in {"user", "assistant"} or not content:
+            continue
+        clean.append({"role": role, "content": content[:1400]})
+    return clean
+
+
+async def shopaikey_chat_completion_single_model(
+    system_prompt: str,
+    user_text: str,
+    model: str,
+    max_tokens: int = 1200,
+    history: list[dict[str, str]] | None = None,
+) -> dict:
     if not shopaikey_public_chat_fallback_enabled():
         return {"status": "MISSING", "provider": "shopaikey", "model": model, "text": "", "http_status": 0, "latency_ms": 0, "error_class": "missing_or_disabled"}
     endpoint = join_shopaikey_url(SHOPAIKEY_BASE_URL, "/chat/completions")
     started = time.perf_counter()
+    messages = [{"role": "system", "content": str(system_prompt or "")[:3000]}]
+    messages.extend(_safe_shopaikey_chat_history(history))
+    messages.append({"role": "user", "content": str(user_text or "")[:6000]})
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": str(system_prompt or "")[:3000]},
-            {"role": "user", "content": str(user_text or "")[:6000]},
-        ],
+        "messages": messages,
         "max_tokens": min(max(1, int(max_tokens or 1200)), 4096),
         "temperature": 0.3,
     }
@@ -61833,10 +61878,32 @@ async def shopaikey_chat_completion_single_model(system_prompt: str, user_text: 
 
 async def shopaikey_chat_completion(system_prompt: str, user_text: str, user_id, max_tokens: int = 1200, model_override: str = "") -> dict:
     attempts = []
+    memory_key = shopaikey_chat_memory_key(system_prompt, user_id)
+    history = list(SHOPAIKEY_CHAT_MEMORY.get(memory_key) or [])
     for model in shopaikey_chat_model_sequence(model_override):
-        result = await shopaikey_chat_completion_single_model(system_prompt, user_text, model, max_tokens=max_tokens)
+        if history:
+            result = await shopaikey_chat_completion_single_model(
+                system_prompt,
+                user_text,
+                model,
+                max_tokens=max_tokens,
+                history=history,
+            )
+        else:
+            # Preserve the legacy first-turn call shape for translation and tests.
+            result = await shopaikey_chat_completion_single_model(
+                system_prompt,
+                user_text,
+                model,
+                max_tokens=max_tokens,
+            )
         attempts.append({"model": model, "status": result.get("status"), "http_status": result.get("http_status"), "error_class": result.get("error_class"), "latency_ms": result.get("latency_ms")})
         if result.get("status") == "PASS" and str(result.get("text") or "").strip():
+            history.extend([
+                {"role": "user", "content": str(user_text or "")[:1400]},
+                {"role": "assistant", "content": str(result.get("text") or "")[:1400]},
+            ])
+            SHOPAIKEY_CHAT_MEMORY[memory_key] = _safe_shopaikey_chat_history(history)
             detail = f"model={model}; http={result.get('http_status') or 0}; latency_ms={result.get('latency_ms') or 0}; attempts=" + ",".join(f"{a['model']}={a['status']}" for a in attempts)
             save_tool_test_result("shopaikey_chat", "PASS", detail, user_id)
             save_shopaikey_chat_snapshot({"status": "PASS", "model": model, "http_status": result.get("http_status"), "latency_ms": result.get("latency_ms")}, detail, user_id)
@@ -111921,7 +111988,13 @@ async def classify_support_message(user_message: str, user_id=None) -> dict:
         "admin_escalation, out_of_scope, closing. Không trả lời nội dung khách."
     )
     try:
-        result = await call_ai_chat_with_fallback(instruction, str(user_message or "")[:1200], user_id, max_tokens=180)
+        result = await call_ai_chat_with_fallback(
+            instruction,
+            str(user_message or "")[:1200],
+            user_id,
+            max_tokens=180,
+            memory_scope="cskh_classifier",
+        )
         if not result.get("ok"):
             return rule_result
         parsed = _parse_support_ai_classification(result.get("text") or "")
@@ -184779,17 +184852,20 @@ def chat_mode_cost(mode: str) -> int:
 
 def chat_mode_instruction(mode: str) -> str:
     mode_norm = normalize_chat_tier(mode or CHAT_TIER_NORMAL)
+    language_rule = " Luôn trả lời cùng ngôn ngữ với tin nhắn mới nhất của người dùng, nối tiếp đúng ngữ cảnh và không tự chuyển sang tác vụ khác."
     if mode_norm == CHAT_TIER_PRO:
         return (
             "Bạn là Trợ Lý Ảo TOAN AAS ở Chat Pro. "
             "Trả lời chi tiết hơn, có phân tích, checklist thực tế và bước hành động rõ ràng."
+            + language_rule
         )
     if mode_norm == CHAT_TIER_DEEP:
         return (
             "Bạn là Trợ Lý Ảo TOAN AAS ở Chat Deep. "
             "Phân tích sâu, có cấu trúc, chỉ ra rủi ro, giả định, kế hoạch triển khai và hành động ưu tiên."
+            + language_rule
         )
-    return "Bạn là Trợ Lý Ảo TOAN AAS. Trả lời ngắn gọn, thực dụng, thân thiện."
+    return "Bạn là Trợ Lý Ảo TOAN AAS. Trả lời ngắn gọn, thực dụng, thân thiện." + language_rule
 
 def ai_failure_user_text(statuses: dict, errors: dict) -> str:
     return (
@@ -184820,32 +184896,35 @@ def is_ai_failure_text(value: str) -> bool:
         "ai chat đang bận",
     ))
 
-async def call_ai_chat_with_fallback(system_prompt: str, user_text: str, user_id, max_tokens: int = 1200) -> dict:
+async def call_ai_chat_with_fallback(
+    system_prompt: str,
+    user_text: str,
+    user_id,
+    max_tokens: int = 1200,
+    memory_scope: str = "normal_chat",
+) -> dict:
     statuses = {"gemini": "MISSING", "openai": "MISSING", "shopaikey": "MISSING"}
     errors = {}
-    uid_key = user_id
+    uid_key = ai_memory_key(user_id, memory_scope)
+    existing_memory = list(user_memory.get(uid_key) or [])
 
     if gemini_client:
         statuses["gemini"] = "TRYING"
         try:
-            if uid_key not in user_memory:
-                user_memory[uid_key] = []
-            user_memory[uid_key].append(types.Content(role="user", parts=[types.Part(text=user_text)]))
-            if len(user_memory[uid_key]) > 10:
-                user_memory[uid_key] = user_memory[uid_key][-10:]
+            gemini_contents = (existing_memory + [types.Content(role="user", parts=[types.Part(text=user_text)])])[-10:]
 
             def run_gemini():
                 return gemini_client.models.generate_content(
                     model="gemini-2.0-flash",
                     config=types.GenerateContentConfig(system_instruction=system_prompt),
-                    contents=user_memory[uid_key],
+                    contents=gemini_contents,
                 )
 
             res = await asyncio.to_thread(run_gemini)
             output = (getattr(res, "text", "") or "").strip()
             if is_ai_failure_text(output):
                 raise RuntimeError(output or "Gemini empty_response")
-            user_memory[uid_key].append(types.Content(role="model", parts=[types.Part(text=output)]))
+            user_memory[uid_key] = (gemini_contents + [types.Content(role="model", parts=[types.Part(text=output)])])[-10:]
             statuses["gemini"] = "PASS"
             record_api_debug("gemini", "ai_chat", "PASS", 0, f"mode_chat_success chars={len(output)}")
             return {"ok": True, "provider": "gemini", "text": output, "statuses": statuses, "errors": errors}
@@ -184859,15 +184938,14 @@ async def call_ai_chat_with_fallback(system_prompt: str, user_text: str, user_id
         statuses["openai"] = "TRYING"
         try:
             messages = [{"role": "system", "content": system_prompt}]
-            if uid_key in user_memory:
-                for item in user_memory[uid_key][-6:]:
-                    try:
-                        role = "user" if getattr(item, "role", "") == "user" else "assistant"
-                        content = item.parts[0].text
-                    except Exception:
-                        continue
-                    if content:
-                        messages.append({"role": role, "content": content})
+            for item in existing_memory[-6:]:
+                try:
+                    role = "user" if getattr(item, "role", "") == "user" else "assistant"
+                    content = item.parts[0].text
+                except Exception:
+                    continue
+                if content:
+                    messages.append({"role": role, "content": content})
             messages.append({"role": "user", "content": user_text})
 
             def run_openai():
@@ -184881,6 +184959,10 @@ async def call_ai_chat_with_fallback(system_prompt: str, user_text: str, user_id
             output = ((res.choices[0].message.content if res and res.choices else "") or "").strip()
             if is_ai_failure_text(output):
                 raise RuntimeError(output or "OpenAI empty_response")
+            user_memory[uid_key] = (existing_memory + [
+                types.Content(role="user", parts=[types.Part(text=user_text)]),
+                types.Content(role="model", parts=[types.Part(text=output)]),
+            ])[-10:]
             statuses["openai"] = "PASS"
             record_api_debug("openai", "ai_chat", "PASS", 0, f"mode_chat_success chars={len(output)}")
             return {"ok": True, "provider": "openai", "text": output, "statuses": statuses, "errors": errors}
@@ -233615,6 +233697,125 @@ async def handle_state_reset_slash_command(update: Update, context: ContextTypes
         await cmd_runtime(update, context)
     return True
 
+
+TELEGRAM_MESSAGE_DEDUPE_TTL_SECONDS = max(60, env_int("TELEGRAM_MESSAGE_DEDUPE_TTL_SECONDS", 600))
+TELEGRAM_MESSAGE_DEDUPE_MAX = max(500, env_int("TELEGRAM_MESSAGE_DEDUPE_MAX", 5000))
+TELEGRAM_MESSAGE_DEDUPE_DONE: dict[str, float] = {}
+TELEGRAM_MESSAGE_DEDUPE_LOCKS: dict[str, asyncio.Lock] = {}
+TELEGRAM_UPDATE_DEDUPE_DONE: dict[str, float] = {}
+TELEGRAM_UPDATE_DEDUPE_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def telegram_message_dedupe_key(update: Update) -> str:
+    message = getattr(update, "message", None)
+    message_id = safe_int(getattr(message, "message_id", 0), 0) if message else 0
+    if not message_id:
+        return ""
+    chat = getattr(message, "chat", None) if message else None
+    chat_id = getattr(chat, "id", None) or getattr(getattr(update, "effective_chat", None), "id", None) or ""
+    return f"{chat_id}:{message_id}"
+
+
+def _prune_telegram_message_dedupe(now: float) -> None:
+    stale_before = now - TELEGRAM_MESSAGE_DEDUPE_TTL_SECONDS
+    stale = [key for key, at in TELEGRAM_MESSAGE_DEDUPE_DONE.items() if at < stale_before]
+    for key in stale:
+        TELEGRAM_MESSAGE_DEDUPE_DONE.pop(key, None)
+        lock = TELEGRAM_MESSAGE_DEDUPE_LOCKS.get(key)
+        if lock and not lock.locked():
+            TELEGRAM_MESSAGE_DEDUPE_LOCKS.pop(key, None)
+    if len(TELEGRAM_MESSAGE_DEDUPE_DONE) > TELEGRAM_MESSAGE_DEDUPE_MAX:
+        for key, _at in sorted(TELEGRAM_MESSAGE_DEDUPE_DONE.items(), key=lambda item: item[1])[: len(TELEGRAM_MESSAGE_DEDUPE_DONE) - TELEGRAM_MESSAGE_DEDUPE_MAX]:
+            TELEGRAM_MESSAGE_DEDUPE_DONE.pop(key, None)
+            lock = TELEGRAM_MESSAGE_DEDUPE_LOCKS.get(key)
+            if lock and not lock.locked():
+                TELEGRAM_MESSAGE_DEDUPE_LOCKS.pop(key, None)
+
+
+def telegram_message_idempotent(handler):
+    """Serialize and suppress duplicate deliveries of one Telegram message."""
+    @wraps(handler)
+    async def guarded(update, context):
+        key = telegram_message_dedupe_key(update)
+        if not key:
+            return await handler(update, context)
+        lock = TELEGRAM_MESSAGE_DEDUPE_LOCKS.setdefault(key, asyncio.Lock())
+        async with lock:
+            now = time.time()
+            _prune_telegram_message_dedupe(now)
+            if key in TELEGRAM_MESSAGE_DEDUPE_DONE:
+                logger.info("telegram message duplicate suppressed | key=%s", key)
+                return True
+            result = await handler(update, context)
+            TELEGRAM_MESSAGE_DEDUPE_DONE[key] = time.time()
+            return result
+    return guarded
+
+
+async def process_telegram_update_once(update, payload: dict | None = None):
+    """Process one Telegram update id once, including commands and callbacks."""
+    update_id = safe_int((payload or {}).get("update_id"), 0)
+    if not update_id:
+        return await tg_app.process_update(update)
+    key = str(update_id)
+    lock = TELEGRAM_UPDATE_DEDUPE_LOCKS.setdefault(key, asyncio.Lock())
+    async with lock:
+        now = time.time()
+        stale_before = now - TELEGRAM_MESSAGE_DEDUPE_TTL_SECONDS
+        for stale_key, at in list(TELEGRAM_UPDATE_DEDUPE_DONE.items()):
+            if at < stale_before:
+                TELEGRAM_UPDATE_DEDUPE_DONE.pop(stale_key, None)
+                stale_lock = TELEGRAM_UPDATE_DEDUPE_LOCKS.get(stale_key)
+                if stale_lock and not stale_lock.locked():
+                    TELEGRAM_UPDATE_DEDUPE_LOCKS.pop(stale_key, None)
+        if len(TELEGRAM_UPDATE_DEDUPE_DONE) > TELEGRAM_MESSAGE_DEDUPE_MAX:
+            for stale_key, _at in sorted(TELEGRAM_UPDATE_DEDUPE_DONE.items(), key=lambda item: item[1])[: len(TELEGRAM_UPDATE_DEDUPE_DONE) - TELEGRAM_MESSAGE_DEDUPE_MAX]:
+                TELEGRAM_UPDATE_DEDUPE_DONE.pop(stale_key, None)
+                stale_lock = TELEGRAM_UPDATE_DEDUPE_LOCKS.get(stale_key)
+                if stale_lock and not stale_lock.locked():
+                    TELEGRAM_UPDATE_DEDUPE_LOCKS.pop(stale_key, None)
+        if key in TELEGRAM_UPDATE_DEDUPE_DONE:
+            logger.info("telegram update duplicate suppressed | update_id=%s", key)
+            return {"ok": True, "duplicate": True}
+        result = await tg_app.process_update(update)
+        TELEGRAM_UPDATE_DEDUPE_DONE[key] = time.time()
+        return result
+
+
+def pending_text_owner_active(user_id) -> bool:
+    """Keep an unfinished product input from falling into generic chat."""
+    uid = user_id
+    if subdub_text_input_owns_message(uid):
+        return True
+    video_state = dict(get_video_editor_pending(uid) or {})
+    if str(video_state.get("step") or "") in {
+        "await_ai_intent",
+        "await_ai_duration",
+        "await_audio_volume",
+        "await_brightness",
+        "await_concat_order",
+        "await_trim_edges",
+        "await_trim_range",
+        "await_text_overlay",
+        "await_split_fixed",
+        "await_split_count",
+        "await_split_custom",
+    }:
+        return True
+    finalization_state = dict(get_video_finalization_state(uid) or {})
+    if str(finalization_state.get("step") or "") in {
+        "scene_count_custom",
+        "await_video_voice_speed",
+        "await_video_music_speed",
+    }:
+        return True
+    support_state = dict(get_support_ticket_pending(uid) or {})
+    if str(support_state.get("step") or ""):
+        return True
+    return False
+
+
+@telegram_message_idempotent
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -233744,13 +233945,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_support_pending_input(update, context):
         return
 
-    if await handle_cskh_continuity_message(update, context):
+    if SUPPORT_PERSONA_NORMAL_CHAT_ENABLED and await handle_cskh_continuity_message(update, context):
         return
 
-    if await handle_support_persona_message(update, context):
+    # A pending product input is exclusive. If its specialized handler has
+    # already emitted a validation response, never let generic AI chat answer
+    # the same text as an unrelated question.
+    if pending_text_owner_active(uid):
         return
 
-    if await handle_aichat_message(update, context):
+    if SUPPORT_PERSONA_NORMAL_CHAT_ENABLED and await handle_support_persona_message(update, context):
+        return
+
+    if SUPPORT_PERSONA_NORMAL_CHAT_ENABLED and await handle_support_persona_message(update, context):
+        return
+
+    if AICHAT_INLINE_ENABLED and await handle_aichat_message(update, context):
         return
 
     normalized_music_command = normalize_music_inline_command_text(text)
@@ -237711,7 +237921,7 @@ async def telegram_webhook(request: Request):
         raise HTTPException(status_code=503, detail="Telegram app is not ready")
     payload = await request.json()
     update = Update.de_json(payload, tg_app.bot)
-    await tg_app.process_update(update)
+    await process_telegram_update_once(update, payload)
     return {"ok": True}
 
 @fastapi_app.get("/landing")
