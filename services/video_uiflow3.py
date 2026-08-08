@@ -25,6 +25,13 @@ NEED_VALUES = frozenset({"REQUIRED", "AUTO", "OPTIONAL", "SKIP", "UNSUPPORTED"})
 GENDERS = frozenset({"male", "female", "unspecified"})
 MUSIC_SCOPES = frozenset({"none", "whole_video", "per_scene"})
 MUSIC_SCENE_POLICIES = frozenset({"inherit", "track", "off"})
+ID_COUNTER_PREFIXES = ("source", "asset", "char", "loc", "prod", "prop", "rel", "scene", "dlg")
+DEFAULT_CONTINUITY = {
+    "identity": True,
+    "wardrobe": True,
+    "product": True,
+    "location": True,
+}
 
 
 ENTRY_ADAPTERS: dict[str, dict[str, Any]] = {
@@ -103,6 +110,7 @@ ENTRY_ADAPTERS: dict[str, dict[str, Any]] = {
 
 CANONICAL_VISIBLE_STEPS = (
     "entry",
+    "series_goal",
     "source",
     "format",
     "content_hub",
@@ -110,6 +118,7 @@ CANONICAL_VISIBLE_STEPS = (
     "production_bible",
     "references",
     "continuity",
+    "episode",
     "scene_count",
     "scene_plan",
     "scene_assignment",
@@ -147,6 +156,16 @@ CONTENT_DIRTY_DEPENDENCIES = (
     "prompts",
     "summary",
 )
+SUMMARY_EDIT_STEPS = frozenset({
+    "format",
+    "content_lock",
+    "production_bible",
+    "scene_count",
+    "scene_plan",
+    "scene_assignment",
+    "prompts",
+    "branding",
+})
 
 
 def _text(value: Any, limit: int = 4000) -> str:
@@ -178,6 +197,35 @@ def _stable_id(prefix: str, ordinal: int) -> str:
     return f"{prefix}_{max(1, int(ordinal)):02d}"
 
 
+def _next_ordinal(prefix: str, values: Iterable[Any]) -> int:
+    """Return the next numeric ordinal without assuming the current list order."""
+
+    marker = f"{_text(prefix, 40)}_"
+    highest = 0
+    for value in values:
+        token = _text(value, 120)
+        if not token.startswith(marker):
+            continue
+        try:
+            highest = max(highest, int(token[len(marker):]))
+        except (TypeError, ValueError):
+            continue
+    return highest + 1
+
+
+def _allocate_id(state: dict[str, Any], prefix: str, values: Iterable[Any]) -> str:
+    """Allocate a draft-scoped ID without resurrecting a removed entity."""
+
+    counters = dict(state.get("id_counters") or {})
+    ordinal = max(
+        _integer(counters.get(prefix), 0),
+        _next_ordinal(prefix, values) - 1,
+    ) + 1
+    counters[prefix] = ordinal
+    state["id_counters"] = counters
+    return _stable_id(prefix, ordinal)
+
+
 def _dedupe(values: Iterable[Any]) -> list[str]:
     return list(dict.fromkeys(_text(value, 120) for value in values if _text(value, 120)))
 
@@ -205,6 +253,8 @@ def _character(ordinal: int) -> dict[str, Any]:
             "gender": "unspecified",
             "distinct_from": [],
         },
+        "suggestion_source": "",
+        "suggestion_confidence": 0.0,
         "locked_by_user": False,
     }
 
@@ -220,6 +270,8 @@ def _location(ordinal: int) -> dict[str, Any]:
         "lighting": "",
         "mood": "",
         "reference_asset_ids": [],
+        "suggestion_source": "",
+        "suggestion_confidence": 0.0,
         "locked_by_user": False,
     }
 
@@ -258,7 +310,11 @@ def _scene(ordinal: int, *, seconds: int, ratio: str) -> dict[str, Any]:
         "continuity_to_scene_id": "",
         "original_scene_intent": "",
         "compiled_prompt_status": "not_compiled",
+        "planning_source": "",
+        "planning_confidence": 0.0,
+        "locked_by_user": False,
         "assignment_source": "unassigned",
+        "assignment_confidence": 0.0,
     }
 
 
@@ -305,15 +361,35 @@ def new_state(
             "revision": 0,
             "locked": False,
         },
+        "series": {
+            "series_id": "",
+            "goal": "",
+            "revision": 0,
+        },
+        "episode": {
+            "episode_id": "episode_01",
+            "number": 1,
+            "title": "",
+            "content": {
+                "original_intent": "",
+                "candidate_ready": False,
+                "locked": False,
+                "revision": 0,
+            },
+            "entity_overrides": {},
+            "continuity_overrides": {},
+        },
         "needs": {},
         "bible": {
             "characters": [],
+            "character_count_confirmed": False,
             "narrator": None,
             "products": [],
             "locations": [],
+            "location_count_confirmed": False,
             "props": [],
             "relationships": [],
-            "continuity": {},
+            "continuity": deepcopy(DEFAULT_CONTINUITY),
         },
         "references": [],
         "scenes": [],
@@ -335,6 +411,8 @@ def new_state(
             "dirty_sections": [],
         },
         "legacy_compat": {},
+        "id_counters": {prefix: 0 for prefix in ID_COUNTER_PREFIXES},
+        "ui_revision": 0,
         "handled_callback_ids": [],
         "side_effects": {
             "provider_calls": 0,
@@ -350,7 +428,7 @@ def normalize_state(value: Mapping[str, Any] | None) -> dict[str, Any]:
     raw = deepcopy(dict(value or {}))
     product = _text(raw.get("parent_product"), 80)
     if product not in ENTRY_ADAPTERS:
-        product = "video_ai_real"
+        raise ValueError("unsupported_video_uiflow3_product")
     adapter = _adapter(product)
     base = new_state(product, draft_id=_text(raw.get("draft_id"), 120) or uuid4().hex) if not raw.get("flow_schema_version") else {}
     if base:
@@ -411,6 +489,63 @@ def normalize_state(value: Mapping[str, Any] | None) -> dict[str, Any]:
     content["locked"] = bool(content.get("locked"))
     raw["content"] = content
 
+    series = {
+        "series_id": "",
+        "goal": "",
+        "revision": 0,
+        **dict(raw.get("series") or {}),
+    }
+    series["series_id"] = (
+        _text(series.get("series_id"), 120)
+        or f"series_{sha256(raw['draft_id'].encode('utf-8')).hexdigest()[:12]}"
+    )
+    series["goal"] = _text(series.get("goal"), 4000)
+    series["revision"] = max(0, _integer(series.get("revision"), 0))
+    raw["series"] = series
+
+    episode = {
+        "episode_id": "episode_01",
+        "number": 1,
+        "title": "",
+        "content": {},
+        "entity_overrides": {},
+        "continuity_overrides": {},
+        **dict(raw.get("episode") or {}),
+    }
+    episode["episode_id"] = _text(episode.get("episode_id"), 120) or "episode_01"
+    episode["number"] = max(1, min(9999, _integer(episode.get("number"), 1)))
+    episode["title"] = _text(episode.get("title"), 500)
+    episode_content = {
+        "original_intent": "",
+        "candidate_ready": False,
+        "locked": False,
+        "revision": 0,
+        **dict(episode.get("content") or {}),
+    }
+    episode_content["original_intent"] = _text(episode_content.get("original_intent"), 12000)
+    episode_content["candidate_ready"] = bool(
+        episode_content.get("candidate_ready")
+        and episode_content["original_intent"]
+    )
+    episode_content["locked"] = bool(
+        episode_content.get("locked")
+        and episode_content["candidate_ready"]
+    )
+    episode_content["revision"] = max(0, _integer(episode_content.get("revision"), 0))
+    episode["content"] = episode_content
+    raw_overrides = dict(episode.get("entity_overrides") or {})
+    episode["entity_overrides"] = {
+        key: _dedupe(raw_overrides[key] or [])
+        for key in ("characters", "locations", "products", "props")
+        if key in raw_overrides and raw_overrides[key] is not None
+    }
+    episode["continuity_overrides"] = {
+        key: bool(value)
+        for key, value in dict(episode.get("continuity_overrides") or {}).items()
+        if key in DEFAULT_CONTINUITY
+    }
+    raw["episode"] = episode
+
     raw["needs"] = {
         _text(key, 80): str(value).upper()
         for key, value in dict(raw.get("needs") or {}).items()
@@ -418,15 +553,18 @@ def normalize_state(value: Mapping[str, Any] | None) -> dict[str, Any]:
     }
     bible = {
         "characters": [],
+        "character_count_confirmed": False,
         "narrator": None,
         "products": [],
         "locations": [],
+        "location_count_confirmed": False,
         "props": [],
         "relationships": [],
-        "continuity": {},
+        "continuity": deepcopy(DEFAULT_CONTINUITY),
         **dict(raw.get("bible") or {}),
     }
     bible["characters"] = [dict(item) for item in bible.get("characters") or [] if isinstance(item, Mapping)][:MAX_CHARACTERS]
+    bible["character_count_confirmed"] = bool(bible.get("character_count_confirmed"))
     character_ids = [str(item.get("character_id") or "") for item in bible["characters"] if str(item.get("character_id") or "")]
     for item in bible["characters"]:
         character_id = str(item.get("character_id") or "")
@@ -437,14 +575,49 @@ def normalize_state(value: Mapping[str, Any] | None) -> dict[str, Any]:
             "distinct_from": [other for other in character_ids if other != character_id],
         }
     bible["locations"] = [dict(item) for item in bible.get("locations") or [] if isinstance(item, Mapping)][:MAX_LOCATIONS]
+    bible["location_count_confirmed"] = bool(bible.get("location_count_confirmed"))
     bible["products"] = [dict(item) for item in bible.get("products") or [] if isinstance(item, Mapping)][:20]
     bible["props"] = [dict(item) for item in bible.get("props") or [] if isinstance(item, Mapping)][:40]
     bible["relationships"] = [dict(item) for item in bible.get("relationships") or [] if isinstance(item, Mapping)][:80]
     bible["narrator"] = dict(bible["narrator"]) if isinstance(bible.get("narrator"), Mapping) else None
-    bible["continuity"] = dict(bible.get("continuity") or {})
+    bible["continuity"] = {
+        **DEFAULT_CONTINUITY,
+        **dict(bible.get("continuity") or {}),
+    }
     raw["bible"] = bible
     raw["references"] = [dict(item) for item in raw.get("references") or [] if isinstance(item, Mapping)][:200]
-    raw["scenes"] = [dict(item) for item in raw.get("scenes") or [] if isinstance(item, Mapping)][: int(adapter["maximum_scene_count"])]
+    raw_scenes = [dict(item) for item in raw.get("scenes") or [] if isinstance(item, Mapping)]
+    scene_rows: list[dict[str, Any]] = []
+    used_scene_ids: set[str] = set()
+    default_seconds = int(adapter["seconds_per_scene"])
+    default_ratio = str(format_state.get("ratio") or "9:16")
+    for index, item in enumerate(raw_scenes[: int(adapter["maximum_scene_count"])], 1):
+        ordinal = max(1, _integer(item.get("scene_index"), index))
+        scene = _scene(ordinal, seconds=default_seconds, ratio=default_ratio)
+        scene.update(item)
+        scene_id = _text(scene.get("scene_id"), 80)
+        if not scene_id or scene_id in used_scene_ids:
+            scene_id = _stable_id("scene", _next_ordinal("scene", used_scene_ids))
+        used_scene_ids.add(scene_id)
+        scene["scene_id"] = scene_id
+        scene["scene_index"] = index
+        scene["duration_target"] = max(1, _integer(scene.get("duration_target"), default_seconds))
+        scene["ratio"] = str(scene.get("ratio") or default_ratio)
+        scene["character_ids"] = _dedupe(scene.get("character_ids") or [])
+        scene["product_ids"] = _dedupe(scene.get("product_ids") or [])
+        scene["prop_ids"] = _dedupe(scene.get("prop_ids") or [])
+        scene["reference_asset_ids"] = _dedupe(scene.get("reference_asset_ids") or [])
+        scene["dialogue_segment_ids"] = _dedupe(scene.get("dialogue_segment_ids") or [])
+        scene["sfx_ids"] = _dedupe(scene.get("sfx_ids") or [])
+        scene["narrator_enabled"] = bool(scene.get("narrator_enabled"))
+        scene["ambient_id"] = _text(scene.get("ambient_id"), 160)
+        scene["planning_source"] = _text(scene.get("planning_source"), 80)
+        scene["planning_confidence"] = max(0.0, min(1.0, _number(scene.get("planning_confidence"), 0.0)))
+        scene["locked_by_user"] = bool(scene.get("locked_by_user"))
+        scene["assignment_source"] = _text(scene.get("assignment_source"), 40) or "unassigned"
+        scene["assignment_confidence"] = max(0.0, min(1.0, _number(scene.get("assignment_confidence"), 0.0)))
+        scene_rows.append(scene)
+    raw["scenes"] = scene_rows
 
     audio = {
         "dialogue_segments": [],
@@ -478,12 +651,53 @@ def normalize_state(value: Mapping[str, Any] | None) -> dict[str, Any]:
     }
     current_step = _text(navigation.get("current_step"), 80)
     navigation["current_step"] = current_step if current_step in CANONICAL_VISIBLE_STEPS else str(adapter["initial_step"])
-    navigation["visible_step_stack"] = [item for item in _dedupe(navigation.get("visible_step_stack") or []) if item in CANONICAL_VISIBLE_STEPS][-40:]
+    navigation["visible_step_stack"] = [
+        str(item) for item in navigation.get("visible_step_stack") or []
+        if str(item) in CANONICAL_VISIBLE_STEPS
+    ][-40:]
     navigation["completed_steps"] = [item for item in _dedupe(navigation.get("completed_steps") or []) if item in CANONICAL_VISIBLE_STEPS]
     navigation["return_to"] = _text(navigation.get("return_to"), 80) or None
     navigation["dirty_sections"] = _dedupe(navigation.get("dirty_sections") or [])
+    if product != "multi_scene_film":
+        navigation["visible_step_stack"] = [
+            item for item in navigation["visible_step_stack"] if item != "episode"
+        ]
+        navigation["completed_steps"] = [
+            item for item in navigation["completed_steps"] if item != "episode"
+        ]
+        if navigation["return_to"] == "episode":
+            navigation["return_to"] = None
+        if navigation["current_step"] == "episode":
+            if content.get("locked"):
+                navigation["current_step"] = "production_bible"
+            elif content.get("candidate_ready"):
+                navigation["current_step"] = "content_lock"
+            elif format_state.get("ratio") and format_state.get("target_duration_seconds"):
+                navigation["current_step"] = "content_hub"
+            else:
+                navigation["current_step"] = str(adapter["initial_step"])
     raw["navigation"] = navigation
     raw["legacy_compat"] = dict(raw.get("legacy_compat") or {})
+    counter_sources = {
+        "source": [item.get("asset_id") for item in source["assets"]],
+        "asset": [item.get("asset_id") for item in raw["references"]],
+        "char": [item.get("character_id") for item in bible["characters"]],
+        "loc": [item.get("location_id") for item in bible["locations"]],
+        "prod": [item.get("product_id") for item in bible["products"]],
+        "prop": [item.get("prop_id") for item in bible["props"]],
+        "rel": [item.get("relationship_id") for item in bible["relationships"]],
+        "scene": [item.get("scene_id") for item in raw["scenes"]],
+        "dlg": [item.get("dialogue_id") for item in audio["dialogue_segments"]],
+    }
+    stored_counters = dict(raw.get("id_counters") or {})
+    raw["id_counters"] = {
+        prefix: max(
+            _integer(stored_counters.get(prefix), 0),
+            _next_ordinal(prefix, counter_sources[prefix]) - 1,
+        )
+        for prefix in ID_COUNTER_PREFIXES
+    }
+    raw["ui_revision"] = max(0, _integer(raw.get("ui_revision"), 0))
     raw["handled_callback_ids"] = _dedupe(raw.get("handled_callback_ids") or [])[-100:]
     raw["side_effects"] = {
         "provider_calls": 0,
@@ -516,12 +730,42 @@ def set_entry_mode(state: Mapping[str, Any], mode: str) -> dict[str, Any]:
         current["source"]["kind"] = "storyboard_panels" if selected == "storyboard_upload" else "generated_storyboard"
     current["source"]["complete"] = bool(current["source"].get("assets")) if current["source"]["required"] else True
     current["entry_mode"] = selected
-    current["navigation"]["current_step"] = "source" if current["source"]["required"] else "format"
+    if product == "multi_scene_film":
+        current["navigation"]["current_step"] = "series_goal"
+    else:
+        current["navigation"]["current_step"] = "source" if current["source"]["required"] else "format"
+    return normalize_state(current)
+
+
+def _require_series_state(state: Mapping[str, Any]) -> dict[str, Any]:
+    current = normalize_state(state)
+    if current["parent_product"] != "multi_scene_film":
+        raise ValueError("series_step_not_supported")
+    return current
+
+
+def set_series_goal(state: Mapping[str, Any], goal: str) -> dict[str, Any]:
+    current = _require_series_state(state)
+    value = _text(goal, 4000)
+    if not value:
+        raise ValueError("series_goal_required")
+    if value != str(current["series"].get("goal") or ""):
+        current["series"]["revision"] = max(1, _integer(current["series"].get("revision"), 0) + 1)
+        current["navigation"]["dirty_sections"] = _dedupe(
+            list(current["navigation"].get("dirty_sections") or [])
+            + ["scene_plan", "prompts", "summary"]
+        )
+    current["series"]["goal"] = value
+    current["navigation"]["current_step"] = "series_goal"
     return normalize_state(current)
 
 
 def set_source_metadata(state: Mapping[str, Any], **metadata: Any) -> dict[str, Any]:
     current = normalize_state(state)
+    if current["parent_product"] == "storyboard_prompt" and "detected_panel_count" in metadata:
+        panel_count = _integer(metadata.get("detected_panel_count"), 0)
+        if panel_count > int(_adapter(current["parent_product"])["maximum_scene_count"]):
+            raise ValueError("source_scene_limit_exceeded")
     current["source"]["metadata"].update(deepcopy(metadata))
     if any(value not in (None, "", [], {}) for value in metadata.values()):
         current["source"]["complete"] = True
@@ -545,7 +789,12 @@ def add_source_asset(
     assets = list(current["source"]["assets"])
     if any(str(item.get("fingerprint") or "") == identity for item in assets):
         return current
-    asset_id = _stable_id("source", len(assets) + 1)
+    if (
+        current["parent_product"] == "frame_video_local"
+        and len(assets) >= int(_adapter(current["parent_product"])["maximum_scene_count"])
+    ):
+        raise ValueError("source_scene_limit_exceeded")
+    asset_id = _allocate_id(current, "source", [item.get("asset_id") for item in assets])
     assets.append({
         "asset_id": asset_id,
         "asset_type": _text(asset_type, 80),
@@ -570,6 +819,9 @@ def set_format(
     target_duration_seconds: int | None = None,
 ) -> dict[str, Any]:
     current = normalize_state(state)
+    previous_ratio = str(current["format"].get("ratio") or "")
+    previous_duration = _integer(current["format"].get("target_duration_seconds"), 0)
+    content_locked = bool(current["content"].get("locked"))
     if ratio is not None:
         aspect = _text(ratio, 20)
         if aspect not in SUPPORTED_RATIOS:
@@ -580,7 +832,20 @@ def set_format(
         if duration <= 0:
             raise ValueError("target_duration_invalid")
         current["format"]["target_duration_seconds"] = duration
-    if current["format"]["ratio"] and current["format"]["target_duration_seconds"]:
+
+    ratio_changed = str(current["format"].get("ratio") or "") != previous_ratio
+    duration_changed = _integer(current["format"].get("target_duration_seconds"), 0) != previous_duration
+    if content_locked:
+        dirty = list(current["navigation"].get("dirty_sections") or [])
+        if ratio_changed:
+            for scene in current["scenes"]:
+                scene["ratio"] = current["format"]["ratio"]
+            dirty.extend(["prompts", "summary"])
+        if duration_changed:
+            current["format"]["scene_count_confirmed"] = False
+            dirty.extend(["scene_plan", "dialogue", "prompts", "summary"])
+        current["navigation"]["dirty_sections"] = _dedupe(dirty)
+    elif current["format"]["ratio"] and current["format"]["target_duration_seconds"]:
         current["navigation"]["current_step"] = "content_hub"
     return normalize_state(current)
 
@@ -694,6 +959,164 @@ def _require_content_lock(state: Mapping[str, Any]) -> dict[str, Any]:
     return current
 
 
+def set_episode_identity(
+    state: Mapping[str, Any],
+    *,
+    number: int,
+    title: str,
+) -> dict[str, Any]:
+    current = _require_content_lock(_require_series_state(state))
+    episode_number = _integer(number, 0)
+    episode_title = _text(title, 500)
+    if episode_number <= 0 or episode_number > 9999 or not episode_title:
+        raise ValueError("episode_identity_required")
+    current["episode"]["number"] = episode_number
+    current["episode"]["title"] = episode_title
+    current["navigation"]["current_step"] = "episode"
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or [])
+        + ["scene_plan", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def set_episode_content(state: Mapping[str, Any], original_intent: str) -> dict[str, Any]:
+    current = _require_content_lock(_require_series_state(state))
+    value = _text(original_intent, 12000)
+    if not value:
+        raise ValueError("episode_content_required")
+    content = current["episode"]["content"]
+    content["original_intent"] = value
+    content["candidate_ready"] = True
+    content["locked"] = False
+    current["navigation"]["current_step"] = "episode"
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or [])
+        + ["scene_plan", "dialogue", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def lock_episode_content(state: Mapping[str, Any]) -> dict[str, Any]:
+    current = _require_content_lock(_require_series_state(state))
+    content = current["episode"]["content"]
+    if not content.get("candidate_ready") or not _text(content.get("original_intent"), 12000):
+        raise ValueError("episode_content_required")
+    content["locked"] = True
+    content["revision"] = max(1, _integer(content.get("revision"), 0) + 1)
+    current["navigation"]["current_step"] = "episode"
+    return normalize_state(current)
+
+
+def set_episode_entity_override(
+    state: Mapping[str, Any],
+    entity_type: str,
+    entity_ids: Iterable[str],
+) -> dict[str, Any]:
+    current = _require_content_lock(_require_series_state(state))
+    kind = _text(entity_type, 40)
+    fields = {
+        "characters": ("characters", "character_id"),
+        "locations": ("locations", "location_id"),
+        "products": ("products", "product_id"),
+        "props": ("props", "prop_id"),
+    }
+    if kind not in fields:
+        raise ValueError("episode_entity_type_invalid")
+    field, id_field = fields[kind]
+    valid_ids = {
+        str(item.get(id_field) or "")
+        for item in current["bible"].get(field) or []
+        if str(item.get(id_field) or "")
+    }
+    selected = _dedupe(entity_ids)
+    if any(item not in valid_ids for item in selected):
+        raise ValueError("episode_entity_invalid")
+    current["episode"]["entity_overrides"][kind] = selected
+    current["navigation"]["current_step"] = "episode"
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or [])
+        + ["scene_assignment", "dialogue", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def set_episode_continuity_override(
+    state: Mapping[str, Any],
+    key: str,
+    enabled: bool,
+) -> dict[str, Any]:
+    current = _require_content_lock(_require_series_state(state))
+    token = _text(key, 40)
+    if token not in DEFAULT_CONTINUITY:
+        raise ValueError("continuity_key_invalid")
+    current["episode"]["continuity_overrides"][token] = bool(enabled)
+    current["navigation"]["current_step"] = "episode"
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or [])
+        + ["continuity", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def reset_episode_overrides(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Restore all Episode-level choices to the current Series defaults."""
+
+    current = _require_content_lock(_require_series_state(state))
+    current["episode"]["entity_overrides"] = {}
+    current["episode"]["continuity_overrides"] = {}
+    current["navigation"]["current_step"] = "episode"
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or [])
+        + ["scene_assignment", "dialogue", "continuity", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def effective_episode_contract(state: Mapping[str, Any]) -> dict[str, Any]:
+    current = _require_series_state(state)
+    bible = current["bible"]
+    overrides = dict(current["episode"].get("entity_overrides") or {})
+    fields = {
+        "characters": ("characters", "character_id", "character_ids"),
+        "locations": ("locations", "location_id", "location_ids"),
+        "products": ("products", "product_id", "product_ids"),
+        "props": ("props", "prop_id", "prop_ids"),
+    }
+    result: dict[str, Any] = {
+        "series_id": str(current["series"].get("series_id") or ""),
+        "series_goal": str(current["series"].get("goal") or ""),
+        "episode_id": str(current["episode"].get("episode_id") or "episode_01"),
+        "episode_number": _integer(current["episode"].get("number"), 1),
+        "episode_title": str(current["episode"].get("title") or ""),
+        "episode_content": deepcopy(current["episode"].get("content") or {}),
+        "continuity": {
+            **dict(bible.get("continuity") or {}),
+            **dict(current["episode"].get("continuity_overrides") or {}),
+        },
+        "music_scope": str(current["audio"].get("music_scope") or "none"),
+        "music_plan": deepcopy(current["audio"].get("music_plan") or {}),
+        "branding": deepcopy(current.get("branding") or {}),
+    }
+    for kind, (field, id_field, output_field) in fields.items():
+        inherited = [
+            str(item.get(id_field) or "")
+            for item in bible.get(field) or []
+            if str(item.get(id_field) or "")
+        ]
+        result[output_field] = list(overrides[kind]) if kind in overrides else inherited
+    voice_owners = set(result["character_ids"])
+    narrator_id = str((bible.get("narrator") or {}).get("narrator_id") or "")
+    if narrator_id:
+        voice_owners.add(narrator_id)
+    result["voice_cast"] = {
+        owner_id: deepcopy(voice)
+        for owner_id, voice in current["audio"].get("voice_cast", {}).items()
+        if owner_id in voice_owners
+    }
+    return result
+
+
 def set_character_count(state: Mapping[str, Any], count: int) -> dict[str, Any]:
     current = _require_content_lock(state)
     target = _integer(count, -1)
@@ -702,16 +1125,30 @@ def set_character_count(state: Mapping[str, Any], count: int) -> dict[str, Any]:
     existing = list(current["bible"]["characters"])
     if target < len(existing):
         removed = {str(item.get("character_id") or "") for item in existing[target:]}
+        episode_overrides = (
+            set((current.get("episode") or {}).get("entity_overrides", {}).get("characters") or [])
+            if current["parent_product"] == "multi_scene_film"
+            else set()
+        )
         referenced = any(str(item.get("owner_type") or "") == "character" and str(item.get("owner_id") or "") in removed for item in current["references"])
         assigned = any(removed.intersection(scene.get("character_ids") or []) for scene in current["scenes"])
         dialogue = any(str(item.get("speaker_id") or "") in removed for item in current["audio"]["dialogue_segments"])
         voices = any(character_id in current["audio"]["voice_cast"] for character_id in removed)
-        if referenced or assigned or dialogue or voices:
+        relationships = any(
+            removed.intersection(item.get("character_ids") or [])
+            for item in current["bible"].get("relationships") or []
+        )
+        if removed.intersection(episode_overrides) or referenced or assigned or dialogue or voices or relationships:
             raise ValueError("character_reassignment_required")
     roster = [deepcopy(item) for item in existing[:target]]
-    for ordinal in range(len(roster) + 1, target + 1):
+    for _ in range(len(roster), target):
+        ordinal_id = _allocate_id(current, "char", [item.get("character_id") for item in roster])
+        ordinal = _integer(ordinal_id.rsplit("_", 1)[-1], len(roster) + 1)
         roster.append(_character(ordinal))
+        roster[-1]["character_id"] = ordinal_id
+        roster[-1]["display_name"] = f"Nhan vat {len(roster)}"
     current["bible"]["characters"] = roster
+    current["bible"]["character_count_confirmed"] = True
     current["navigation"]["dirty_sections"] = _dedupe(
         list(current["navigation"].get("dirty_sections") or [])
         + ["scene_assignment", "voice_cast", "continuity", "prompts", "summary"]
@@ -770,14 +1207,26 @@ def set_location_count(state: Mapping[str, Any], count: int) -> dict[str, Any]:
     existing = list(current["bible"]["locations"])
     if target < len(existing):
         removed = {str(item.get("location_id") or "") for item in existing[target:]}
+        episode_overrides = (
+            set((current.get("episode") or {}).get("entity_overrides", {}).get("locations") or [])
+            if current["parent_product"] == "multi_scene_film"
+            else set()
+        )
+        if removed.intersection(episode_overrides):
+            raise ValueError("location_reassignment_required")
         if any(str(scene.get("location_id") or "") in removed for scene in current["scenes"]):
             raise ValueError("location_reassignment_required")
         if any(str(item.get("owner_type") or "") == "location" and str(item.get("owner_id") or "") in removed for item in current["references"]):
             raise ValueError("location_reassignment_required")
     locations = [deepcopy(item) for item in existing[:target]]
-    for ordinal in range(len(locations) + 1, target + 1):
+    for _ in range(len(locations), target):
+        ordinal_id = _allocate_id(current, "loc", [item.get("location_id") for item in locations])
+        ordinal = _integer(ordinal_id.rsplit("_", 1)[-1], len(locations) + 1)
         locations.append(_location(ordinal))
+        locations[-1]["location_id"] = ordinal_id
+        locations[-1]["name"] = f"Boi canh {len(locations)}"
     current["bible"]["locations"] = locations
+    current["bible"]["location_count_confirmed"] = True
     current["navigation"]["dirty_sections"] = _dedupe(
         list(current["navigation"].get("dirty_sections") or []) + ["scene_assignment", "continuity", "prompts", "summary"]
     )
@@ -800,6 +1249,200 @@ def update_location(state: Mapping[str, Any], location_id: str, **changes: Any) 
     current["bible"]["locations"] = locations
     current["navigation"]["dirty_sections"] = _dedupe(
         list(current["navigation"].get("dirty_sections") or []) + ["scene_assignment", "continuity", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def set_narrator(
+    state: Mapping[str, Any],
+    *,
+    display_name: str,
+    style: str = "",
+    voice_id: str = "",
+    gender: str = "unspecified",
+    narrator_id: str = "",
+) -> dict[str, Any]:
+    current = _require_content_lock(state)
+    name = _text(display_name, 240)
+    if not name:
+        raise ValueError("narrator_name_required")
+    selected_gender = _text(gender, 40) or "unspecified"
+    if selected_gender not in GENDERS:
+        raise ValueError("narrator_gender_invalid")
+    existing = dict(current["bible"].get("narrator") or {})
+    previous_id = _text(existing.get("narrator_id"), 32)
+    target_id = _text(narrator_id, 32) or _text(existing.get("narrator_id"), 32) or "narrator_01"
+    if "|" in target_id:
+        raise ValueError("narrator_id_invalid")
+    narrator = {
+        **existing,
+        "narrator_id": target_id,
+        "display_name": name,
+        "style": _text(style, 240),
+        "gender": selected_gender,
+        "voice_id": _text(voice_id, 240),
+    }
+    current["bible"]["narrator"] = narrator
+    if previous_id and previous_id != target_id:
+        current["audio"]["voice_cast"].pop(previous_id, None)
+    if narrator["voice_id"]:
+        current["audio"]["voice_cast"][target_id] = {
+            "voice_id": narrator["voice_id"],
+            "gender": selected_gender,
+            "server_renderable": False,
+            "source": "user_selection_unverified",
+        }
+    else:
+        current["audio"]["voice_cast"].pop(target_id, None)
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or []) + ["production_bible", "scene_assignment", "voice_cast", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def clear_narrator(state: Mapping[str, Any]) -> dict[str, Any]:
+    current = _require_content_lock(state)
+    narrator_id = str((current["bible"].get("narrator") or {}).get("narrator_id") or "")
+    if narrator_id and (
+        any(bool(scene.get("narrator_enabled")) for scene in current["scenes"])
+        or any(str(item.get("speaker_id") or "") == narrator_id for item in current["audio"]["dialogue_segments"])
+    ):
+        raise ValueError("narrator_reassignment_required")
+    current["bible"]["narrator"] = None
+    if narrator_id:
+        current["audio"]["voice_cast"].pop(narrator_id, None)
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or []) + ["production_bible", "scene_assignment", "voice_cast", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def add_product(
+    state: Mapping[str, Any],
+    *,
+    name: str,
+    category: str = "",
+    description: str = "",
+    product_id: str = "",
+) -> dict[str, Any]:
+    current = _require_content_lock(state)
+    label = _text(name, 240)
+    if not label:
+        raise ValueError("product_name_required")
+    products = list(current["bible"].get("products") or [])
+    if len(products) >= 20:
+        raise ValueError("product_limit_reached")
+    target_id = _text(product_id, 32) or _allocate_id(
+        current, "prod", [item.get("product_id") for item in products]
+    )
+    if "|" in target_id:
+        raise ValueError("product_id_invalid")
+    if any(str(item.get("product_id") or "") == target_id for item in products):
+        raise ValueError("product_id_exists")
+    products.append({
+        "product_id": target_id,
+        "name": label,
+        "category": _text(category, 160),
+        "type": _text(category, 160),
+        "description": _text(description, 1600),
+        "geometry_shape_constraints": "",
+        "colors": [],
+        "logo_text_constraints": "",
+        "must_preserve": [_text(description, 1600)] if _text(description, 1600) else [],
+        "reference_asset_ids": [],
+        "locked_by_user": True,
+    })
+    current["bible"]["products"] = products[:20]
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or []) + ["production_bible", "scene_assignment", "continuity", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def add_prop(
+    state: Mapping[str, Any],
+    *,
+    name: str,
+    description: str = "",
+    prop_id: str = "",
+) -> dict[str, Any]:
+    current = _require_content_lock(state)
+    label = _text(name, 240)
+    if not label:
+        raise ValueError("prop_name_required")
+    props = list(current["bible"].get("props") or [])
+    if len(props) >= 40:
+        raise ValueError("prop_limit_reached")
+    target_id = _text(prop_id, 32) or _allocate_id(
+        current, "prop", [item.get("prop_id") for item in props]
+    )
+    if "|" in target_id:
+        raise ValueError("prop_id_invalid")
+    if any(str(item.get("prop_id") or "") == target_id for item in props):
+        raise ValueError("prop_id_exists")
+    props.append({
+        "prop_id": target_id,
+        "name": label,
+        "description": _text(description, 1600),
+        "owner_hints": [],
+        "scene_hints": [],
+        "reference_asset_ids": [],
+        "locked_by_user": True,
+    })
+    current["bible"]["props"] = props[:40]
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or []) + ["production_bible", "scene_assignment", "continuity", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def add_relationship(
+    state: Mapping[str, Any],
+    *,
+    character_ids: Iterable[str] | str,
+    relation: str = "",
+    relationship_type: str = "",
+    description: str = "",
+    relationship_id: str = "",
+) -> dict[str, Any]:
+    current = _require_content_lock(state)
+    if isinstance(character_ids, str):
+        raw_ids = [item.strip() for item in character_ids.replace(",", "|").split("|")]
+    else:
+        raw_ids = list(character_ids or [])
+    selected_ids = _dedupe(raw_ids)
+    valid_ids = {str(item.get("character_id") or "") for item in current["bible"].get("characters") or []}
+    if len(selected_ids) < 2 or any(item not in valid_ids for item in selected_ids):
+        raise ValueError("relationship_characters_invalid")
+    label = _text(relation or relationship_type, 160)
+    if not label:
+        raise ValueError("relationship_type_required")
+    relationships = list(current["bible"].get("relationships") or [])
+    if len(relationships) >= 80:
+        raise ValueError("relationship_limit_reached")
+    target_id = _text(relationship_id, 32) or _allocate_id(
+        current, "rel", [item.get("relationship_id") for item in relationships]
+    )
+    if "|" in target_id:
+        raise ValueError("relationship_id_invalid")
+    if any(str(item.get("relationship_id") or "") == target_id for item in relationships):
+        raise ValueError("relationship_id_exists")
+    relationships.append({
+        "relationship_id": target_id,
+        "character_ids": selected_ids,
+        "relation": label,
+        "description": _text(description, 1000),
+    })
+    current["bible"]["relationships"] = relationships[:80]
+    for character in current["bible"].get("characters") or []:
+        character_id = str(character.get("character_id") or "")
+        if character_id in selected_ids:
+            hints = list(character.get("relationship_hints") or [])
+            if target_id not in hints:
+                hints.append(target_id)
+            character["relationship_hints"] = hints[:40]
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or []) + ["production_bible", "continuity", "prompts", "summary"]
     )
     return normalize_state(current)
 
@@ -833,28 +1476,44 @@ def add_reference(
     current = _require_content_lock(state)
     owner_kind = _text(owner_type, 80)
     owner = _text(owner_id, 120)
+    reference_role = _text(role, 80)
     identity = _text(fingerprint, 256)
     file_id = _text(telegram_file_id, 512)
     if not identity or not file_id:
         raise ValueError("reference_asset_identity_required")
     if not _owner_exists(current, owner_kind, owner):
         raise ValueError("reference_owner_invalid")
-    existing = next((item for item in current["references"] if str(item.get("fingerprint") or "") == identity), None)
+    scene_scope = _dedupe(allowed_scene_ids or [])
+    valid_scene_ids = {str(item.get("scene_id") or "") for item in current["scenes"]}
+    if any(scene_id not in valid_scene_ids for scene_id in scene_scope):
+        raise ValueError("reference_scene_invalid")
+    existing = next(
+        (
+            item for item in current["references"]
+            if str(item.get("fingerprint") or "") == identity
+            and str(item.get("owner_type") or "") == owner_kind
+            and str(item.get("owner_id") or "") == owner
+            and str(item.get("role") or "") == reference_role
+        ),
+        None,
+    )
     if existing:
         return current
-    asset_id = _stable_id("asset", len(current["references"]) + 1)
+    asset_id = _allocate_id(
+        current, "asset", [item.get("asset_id") for item in current["references"]]
+    )
     record = {
         "asset_id": asset_id,
         "asset_type": _text(asset_type, 80),
         "owner_type": owner_kind,
         "owner_id": owner,
-        "role": _text(role, 80),
+        "role": reference_role,
         "angle": _text(metadata.pop("angle", ""), 80),
         "priority": max(0, _integer(metadata.pop("priority", 0), 0)),
         "fingerprint": identity,
         "source": "telegram",
         "telegram_file_id": file_id,
-        "allowed_scene_ids": _dedupe(allowed_scene_ids or []),
+        "allowed_scene_ids": scene_scope,
         "metadata": deepcopy(metadata),
     }
     current["references"].append(record)
@@ -894,23 +1553,219 @@ def suggest_scene_count(state: Mapping[str, Any]) -> dict[str, Any]:
     return {"count": count, "seconds_per_scene": int(adapter["seconds_per_scene"]), "source": source}
 
 
+def _link_scene_states(scenes: list[dict[str, Any]]) -> None:
+    for index, scene in enumerate(scenes):
+        scene["continuity_from_scene_id"] = scenes[index - 1]["scene_id"] if index > 0 else ""
+        scene["continuity_to_scene_id"] = scenes[index + 1]["scene_id"] if index + 1 < len(scenes) else ""
+        if index > 0:
+            scene["start_state"] = _text(scenes[index - 1].get("completion_state"), 800)
+
+
+def scene_plan_complete(state: Mapping[str, Any]) -> bool:
+    current = normalize_state(state)
+    scenes = list(current.get("scenes") or [])
+    return bool(
+        current["format"].get("scene_count_confirmed")
+        and scenes
+        and all(
+            all(_text(scene.get(field), 800) for field in ("semantic_beat", "main_action", "completion_state"))
+            for scene in scenes
+        )
+    )
+
+
+def suggest_scene_plan(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Fill only missing scene semantics with a provider-free content outline."""
+
+    current = _require_content_lock(state)
+    scenes = list(current.get("scenes") or [])
+    if not scenes:
+        raise ValueError("scene_plan_missing")
+    brief = dict(current["content"].get("approved_brief") or {})
+    episode_intent = ""
+    if current["parent_product"] == "multi_scene_film":
+        episode_content = dict(current["episode"].get("content") or {})
+        if episode_content.get("locked"):
+            episode_intent = _text(episode_content.get("original_intent"), 12000)
+    topic = _text(
+        episode_intent
+        or brief.get("title")
+        or current["content"].get("original_intent")
+        or "noi dung da khoa",
+        240,
+    )
+    total = len(scenes)
+    for index, scene in enumerate(scenes, 1):
+        if total == 1:
+            role = "complete"
+            defaults = {
+                "semantic_beat": f"Trinh bay tron ven: {topic}",
+                "main_action": "Thuc hien mot hanh dong day du theo noi dung da khoa.",
+                "completion_state": "Thong diep chinh da duoc truyen dat tron ven.",
+            }
+        elif index == 1:
+            role = "hook"
+            defaults = {
+                "semantic_beat": f"Mo dau thu hut cho: {topic}",
+                "main_action": "Gioi thieu boi canh va dat van de chinh.",
+                "completion_state": "Nguoi xem da hieu boi canh va muon theo doi tiep.",
+            }
+        elif index == total:
+            role = "resolution"
+            defaults = {
+                "semantic_beat": f"Ket lai thong diep cua: {topic}",
+                "main_action": "Hoan tat hanh dong chinh va tong ket noi dung.",
+                "completion_state": "Thong diep cuoi cung va trang thai ket thuc da ro rang.",
+            }
+        else:
+            role = "development"
+            defaults = {
+                "semantic_beat": f"Phat trien y {index - 1} cua: {topic}",
+                "main_action": "Tiep noi ket qua canh truoc va phat trien mot y chinh.",
+                "completion_state": f"Y phat trien {index - 1} da hoan tat de chuyen sang canh tiep.",
+            }
+        filled = False
+        if not _text(scene.get("scene_role"), 80):
+            scene["scene_role"] = role
+        for field, value in defaults.items():
+            if not _text(scene.get(field), 800):
+                scene[field] = value
+                filled = True
+        if filled and str(scene.get("planning_source") or "") != "user":
+            scene["planning_source"] = "rule_content_outline"
+            scene["planning_confidence"] = 0.55
+    _link_scene_states(scenes)
+    current["scenes"] = scenes
+    current["navigation"]["current_step"] = "scene_plan"
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or [])
+        + ["scene_plan", "scene_assignment", "dialogue", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def map_source_asset_to_reference(
+    state: Mapping[str, Any],
+    *,
+    source_asset_id: str,
+    owner_type: str,
+    owner_id: str,
+    role: str,
+    allowed_scene_ids: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """Map an intake asset by identity while preserving the original source row."""
+
+    current = _require_content_lock(state)
+    source_id = _text(source_asset_id, 120)
+    source_asset = next(
+        (
+            item for item in current["source"].get("assets") or []
+            if str(item.get("asset_id") or "") == source_id
+        ),
+        None,
+    )
+    if not source_asset:
+        raise ValueError("source_asset_not_found")
+    mapped = add_reference(
+        current,
+        asset_type=str(source_asset.get("asset_type") or "image"),
+        owner_type=owner_type,
+        owner_id=owner_id,
+        role=role,
+        telegram_file_id=str(source_asset.get("telegram_file_id") or ""),
+        fingerprint=str(source_asset.get("fingerprint") or ""),
+        allowed_scene_ids=allowed_scene_ids,
+        source_asset_id=source_id,
+    )
+    for reference in mapped["references"]:
+        if (
+            str(reference.get("fingerprint") or "") == str(source_asset.get("fingerprint") or "")
+            and str(reference.get("owner_type") or "") == _text(owner_type, 80)
+            and str(reference.get("owner_id") or "") == _text(owner_id, 120)
+            and str(reference.get("role") or "") == _text(role, 80)
+        ):
+            reference["source"] = "source_intake"
+            reference["metadata"] = {
+                **dict(reference.get("metadata") or {}),
+                "source_asset_id": source_id,
+            }
+            break
+    return normalize_state(mapped)
+
+
+def update_scene_plan(
+    state: Mapping[str, Any],
+    scene_id: str,
+    *,
+    semantic_beat: str,
+    main_action: str,
+    completion_state: str,
+    original_scene_intent: str = "",
+) -> dict[str, Any]:
+    current = _require_content_lock(state)
+    scene = next(
+        (item for item in current["scenes"] if str(item.get("scene_id") or "") == _text(scene_id, 80)),
+        None,
+    )
+    if scene is None:
+        raise ValueError("scene_not_found")
+    values = {
+        "semantic_beat": _text(semantic_beat, 800),
+        "main_action": _text(main_action, 800),
+        "completion_state": _text(completion_state, 800),
+    }
+    if not all(values.values()):
+        raise ValueError("scene_plan_format_invalid")
+    scene.update(values)
+    scene["original_scene_intent"] = _text(original_scene_intent, 1600)
+    scene["planning_source"] = "user"
+    scene["planning_confidence"] = 1.0
+    scene["locked_by_user"] = True
+    _link_scene_states(current["scenes"])
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or [])
+        + ["scene_plan", "scene_assignment", "dialogue", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def scene_count_floor(state: Mapping[str, Any]) -> int:
+    current = _require_content_lock(state)
+    adapter = _adapter(current["parent_product"])
+    floor = int(adapter["minimum_scene_count"])
+    metadata = dict(current["source"].get("metadata") or {})
+    if current["parent_product"] == "storyboard_prompt":
+        floor = max(floor, _integer(metadata.get("detected_panel_count"), 0))
+    elif current["parent_product"] == "frame_video_local":
+        floor = max(floor, len(current["source"].get("assets") or []))
+    if floor > int(adapter["maximum_scene_count"]):
+        raise ValueError("source_scene_limit_exceeded")
+    return floor
+
+
 def confirm_scene_count(state: Mapping[str, Any], count: int) -> dict[str, Any]:
     current = _require_content_lock(state)
     adapter = _adapter(current["parent_product"])
     target = _integer(count, 0)
     if not int(adapter["minimum_scene_count"]) <= target <= int(adapter["maximum_scene_count"]):
         raise ValueError("scene_count_out_of_range")
-    existing = {str(item.get("scene_id") or ""): dict(item) for item in current["scenes"]}
-    if target < len(existing):
-        removed_scenes = [dict(item) for item in current["scenes"][target:]]
+    if target < scene_count_floor(current):
+        raise ValueError("scene_content_reconcile_required")
+    existing_scenes = [deepcopy(item) for item in current["scenes"]]
+    if target < len(existing_scenes):
+        # Reduction is positional in the user's current order, never ordinal by ID.
+        removed_scenes = existing_scenes[target:]
         removed_ids = {str(item.get("scene_id") or "") for item in removed_scenes}
         protected_scene_fields = (
-            "semantic_beat", "main_action", "completion_state", "original_scene_intent",
-            "reference_asset_ids", "product_ids", "prop_ids", "dialogue_segment_ids",
+            "scene_role", "goal", "semantic_beat", "start_state", "main_action",
+            "completion_state", "original_scene_intent", "reference_asset_ids",
+            "product_ids", "prop_ids", "dialogue_segment_ids", "narrator_enabled",
+            "wardrobe_overrides", "camera", "framing", "movement", "lighting",
+            "mood", "transition_in", "transition_out", "sfx_ids", "ambient_id",
         )
         has_user_scene_content = any(
             str(scene.get("assignment_source") or "") == "user"
-            or any(scene.get(field) not in (None, "", [], {}) for field in protected_scene_fields)
+            or any(bool(scene.get(field)) for field in protected_scene_fields)
             for scene in removed_scenes
         )
         has_dialogue = any(str(item.get("scene_id") or "") in removed_ids for item in current["audio"]["dialogue_segments"])
@@ -927,19 +1782,41 @@ def confirm_scene_count(state: Mapping[str, Any], count: int) -> dict[str, Any]:
             raise ValueError("scene_content_reconcile_required")
     seconds = int(adapter["seconds_per_scene"])
     ratio = str(current["format"].get("ratio") or "9:16")
-    scenes = []
-    for ordinal in range(1, target + 1):
-        scene_id = _stable_id("scene", ordinal)
+    scenes = [deepcopy(item) for item in existing_scenes[:target]]
+    while len(scenes) < target:
+        scene_id = _allocate_id(current, "scene", [item.get("scene_id") for item in scenes])
+        ordinal = _integer(scene_id.rsplit("_", 1)[-1], len(scenes) + 1)
         scene = _scene(ordinal, seconds=seconds, ratio=ratio)
-        scene.update(existing.get(scene_id) or {})
         scene["scene_id"] = scene_id
-        scene["scene_index"] = ordinal
+        scenes.append(scene)
+    for index, scene in enumerate(scenes, 1):
+        scene["scene_index"] = index
         scene["duration_target"] = max(1, _integer(scene.get("duration_target"), seconds))
         scene["ratio"] = ratio
-        scenes.append(scene)
-    for index, scene in enumerate(scenes):
-        scene["continuity_from_scene_id"] = scenes[index - 1]["scene_id"] if index > 0 else ""
-        scene["continuity_to_scene_id"] = scenes[index + 1]["scene_id"] if index + 1 < len(scenes) else ""
+    _link_scene_states(scenes)
+    removed_ids = {str(item.get("scene_id") or "") for item in existing_scenes[target:]}
+    if removed_ids:
+        current["audio"]["dialogue_segments"] = [
+            item for item in current["audio"]["dialogue_segments"]
+            if str(item.get("scene_id") or "") not in removed_ids
+        ]
+        current["audio"]["music_plan"] = {
+            key: value for key, value in current["audio"]["music_plan"].items()
+            if key not in removed_ids
+        }
+        current["audio"]["sfx_plan"] = [
+            item for item in current["audio"]["sfx_plan"]
+            if str(item.get("scene_id") or "") not in removed_ids
+        ]
+        current["audio"]["ambient_plan"] = [
+            item for item in current["audio"]["ambient_plan"]
+            if str(item.get("scene_id") or "") not in removed_ids
+        ]
+        for reference in current["references"]:
+            reference["allowed_scene_ids"] = [
+                scene_id for scene_id in reference.get("allowed_scene_ids") or []
+                if str(scene_id) not in removed_ids
+            ]
     current["format"].update({"scene_count": target, "scene_count_confirmed": True})
     current["scenes"] = scenes
     current["navigation"]["current_step"] = "scene_plan"
@@ -959,8 +1836,7 @@ def reorder_scenes(state: Mapping[str, Any], ordered_scene_ids: Iterable[str]) -
     scenes = [by_id[scene_id] for scene_id in requested]
     for index, scene in enumerate(scenes):
         scene["scene_index"] = index + 1
-        scene["continuity_from_scene_id"] = scenes[index - 1]["scene_id"] if index > 0 else ""
-        scene["continuity_to_scene_id"] = scenes[index + 1]["scene_id"] if index + 1 < len(scenes) else ""
+    _link_scene_states(scenes)
     current["scenes"] = scenes
     current["navigation"]["dirty_sections"] = _dedupe(
         list(current["navigation"].get("dirty_sections") or []) + ["scene_plan", "scene_assignment", "dialogue", "prompts", "summary"]
@@ -970,14 +1846,20 @@ def reorder_scenes(state: Mapping[str, Any], ordered_scene_ids: Iterable[str]) -
 
 def auto_assign_scenes(state: Mapping[str, Any]) -> dict[str, Any]:
     current = normalize_state(state)
-    characters = [str(item.get("character_id") or "") for item in current["bible"]["characters"] if item.get("character_id")]
-    locations = [str(item.get("location_id") or "") for item in current["bible"]["locations"] if item.get("location_id")]
+    if current["parent_product"] == "multi_scene_film":
+        episode = effective_episode_contract(current)
+        characters = list(episode["character_ids"])
+        locations = list(episode["location_ids"])
+    else:
+        characters = [str(item.get("character_id") or "") for item in current["bible"]["characters"] if item.get("character_id")]
+        locations = [str(item.get("location_id") or "") for item in current["bible"]["locations"] if item.get("location_id")]
     for index, scene in enumerate(current["scenes"]):
         if str(scene.get("assignment_source") or "") == "user":
             continue
         scene["character_ids"] = [characters[index % len(characters)]] if characters else []
         scene["location_id"] = locations[index % len(locations)] if locations else ""
         scene["assignment_source"] = "auto_round_robin"
+        scene["assignment_confidence"] = 1.0
     current["navigation"]["current_step"] = "scene_assignment"
     return normalize_state(current)
 
@@ -988,6 +1870,11 @@ def assign_scene(
     *,
     character_ids: Iterable[str] | None = None,
     location_id: str | None = None,
+    product_ids: Iterable[str] | None = None,
+    prop_ids: Iterable[str] | None = None,
+    narrator_enabled: bool | None = None,
+    sfx_ids: Iterable[str] | None = None,
+    ambient_id: str | None = None,
 ) -> dict[str, Any]:
     current = normalize_state(state)
     target = _text(scene_id, 80)
@@ -995,16 +1882,35 @@ def assign_scene(
     if not scene:
         raise ValueError("scene_not_found")
     valid_characters = {str(item.get("character_id") or "") for item in current["bible"]["characters"]}
-    selected = _dedupe(character_ids or scene.get("character_ids") or [])
+    selected = _dedupe(scene.get("character_ids") or [] if character_ids is None else character_ids)
     if any(item not in valid_characters for item in selected):
         raise ValueError("scene_character_invalid")
     valid_locations = {str(item.get("location_id") or "") for item in current["bible"]["locations"]}
     selected_location = str(scene.get("location_id") or "") if location_id is None else _text(location_id, 80)
     if selected_location and selected_location not in valid_locations:
         raise ValueError("scene_location_invalid")
+    valid_products = {str(item.get("product_id") or "") for item in current["bible"].get("products") or []}
+    selected_products = _dedupe(scene.get("product_ids") or [] if product_ids is None else product_ids)
+    if any(item not in valid_products for item in selected_products):
+        raise ValueError("scene_product_invalid")
+    valid_props = {str(item.get("prop_id") or "") for item in current["bible"].get("props") or []}
+    selected_props = _dedupe(scene.get("prop_ids") or [] if prop_ids is None else prop_ids)
+    if any(item not in valid_props for item in selected_props):
+        raise ValueError("scene_prop_invalid")
+    selected_narrator = bool(scene.get("narrator_enabled")) if narrator_enabled is None else bool(narrator_enabled)
+    if selected_narrator and not str((current["bible"].get("narrator") or {}).get("narrator_id") or ""):
+        raise ValueError("scene_narrator_invalid")
+    selected_sfx = _dedupe(scene.get("sfx_ids") or [] if sfx_ids is None else sfx_ids)
+    selected_ambient = _text(scene.get("ambient_id"), 160) if ambient_id is None else _text(ambient_id, 160)
     scene["character_ids"] = selected
     scene["location_id"] = selected_location
+    scene["product_ids"] = selected_products
+    scene["prop_ids"] = selected_props
+    scene["narrator_enabled"] = selected_narrator
+    scene["sfx_ids"] = selected_sfx
+    scene["ambient_id"] = selected_ambient
     scene["assignment_source"] = "user"
+    scene["assignment_confidence"] = 1.0
     current["navigation"]["dirty_sections"] = _dedupe(
         list(current["navigation"].get("dirty_sections") or []) + ["scene_assignment", "dialogue", "prompts", "summary"]
     )
@@ -1034,7 +1940,11 @@ def set_dialogue(
     dialogue_text = _text(text, 4000)
     if not dialogue_text:
         raise ValueError("dialogue_text_required")
-    dialogue_id = _stable_id("dlg", len(current["audio"]["dialogue_segments"]) + 1)
+    dialogue_id = _allocate_id(
+        current,
+        "dlg",
+        [item.get("dialogue_id") for item in current["audio"]["dialogue_segments"]],
+    )
     estimated_seconds = max(1, ceil(len(dialogue_text) / 14))
     scene_budget_seconds = max(1, _integer(target_scene.get("duration_target"), 1))
     record = {
@@ -1054,6 +1964,79 @@ def set_dialogue(
     target_scene["dialogue_segment_ids"] = _dedupe(list(target_scene.get("dialogue_segment_ids") or []) + [dialogue_id])
     current["navigation"]["dirty_sections"] = _dedupe(
         list(current["navigation"].get("dirty_sections") or []) + ["dialogue", "voice_cast", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def remove_dialogue(
+    state: Mapping[str, Any],
+    dialogue_id: str,
+    *,
+    scene_id: str,
+) -> dict[str, Any]:
+    current = normalize_state(state)
+    target_id = _text(dialogue_id, 80)
+    target_scene_id = _text(scene_id, 80)
+    record = next(
+        (
+            item for item in current["audio"]["dialogue_segments"]
+            if str(item.get("dialogue_id") or "") == target_id
+        ),
+        None,
+    )
+    if record is None:
+        raise ValueError("dialogue_not_found")
+    if str(record.get("scene_id") or "") != target_scene_id:
+        raise ValueError("dialogue_scene_mismatch")
+    scene = next(
+        (item for item in current["scenes"] if str(item.get("scene_id") or "") == target_scene_id),
+        None,
+    )
+    if scene is None:
+        raise ValueError("scene_not_found")
+    current["audio"]["dialogue_segments"] = [
+        item for item in current["audio"]["dialogue_segments"]
+        if str(item.get("dialogue_id") or "") != target_id
+    ]
+    scene["dialogue_segment_ids"] = [
+        item for item in scene.get("dialogue_segment_ids") or []
+        if str(item) != target_id
+    ]
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or [])
+        + ["dialogue", "voice_cast", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def update_scene_direction(
+    state: Mapping[str, Any],
+    scene_id: str,
+    *,
+    framing: str = "",
+    movement: str = "",
+    lighting: str = "",
+    mood: str = "",
+    camera: str = "",
+) -> dict[str, Any]:
+    """Persist the compact scene-direction editor without compiling a prompt."""
+
+    current = normalize_state(state)
+    target = _text(scene_id, 80)
+    scene = next((item for item in current["scenes"] if str(item.get("scene_id") or "") == target), None)
+    if not scene:
+        raise ValueError("scene_not_found")
+    for field, value in {
+        "camera": camera,
+        "framing": framing,
+        "movement": movement,
+        "lighting": lighting,
+        "mood": mood,
+    }.items():
+        if value is not None:
+            scene[field] = _text(value, 800 if field == "camera" else 240)
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or []) + ["prompts", "summary"]
     )
     return normalize_state(current)
 
@@ -1085,6 +2068,41 @@ def auto_assign_voices(state: Mapping[str, Any], inventory: Iterable[Mapping[str
             "server_renderable": True,
             "source": _text(selected.get("source") or "verified_inventory", 80),
         }
+    narrator = dict(current["bible"].get("narrator") or {})
+    narrator_id = str(narrator.get("narrator_id") or "")
+    if narrator_id:
+        narrator_gender = str(narrator.get("gender") or "unspecified")
+        preferred_voice_id = str(narrator.get("voice_id") or "")
+        selected = next(
+            (
+                item for item in voices
+                if str(item.get("voice_id") or "") == preferred_voice_id
+                and preferred_voice_id not in used
+            ),
+            None,
+        ) or next(
+            (
+                item for item in voices
+                if str(item.get("voice_id") or "") not in used
+                and (
+                    narrator_gender == "unspecified"
+                    or str(item.get("gender") or "unspecified") == narrator_gender
+                )
+            ),
+            None,
+        )
+        if not selected:
+            raise ValueError("distinct_server_voice_required")
+        voice_id = str(selected["voice_id"])
+        used.add(voice_id)
+        narrator["voice_id"] = voice_id
+        current["bible"]["narrator"] = narrator
+        voice_cast[narrator_id] = {
+            "voice_id": voice_id,
+            "gender": str(selected.get("gender") or narrator_gender),
+            "server_renderable": True,
+            "source": _text(selected.get("source") or "verified_inventory", 80),
+        }
     current["audio"]["voice_cast"] = voice_cast
     current["navigation"]["dirty_sections"] = _dedupe(
         list(current["navigation"].get("dirty_sections") or []) + ["voice_cast", "audio", "summary"]
@@ -1099,8 +2117,10 @@ def set_music_scope(state: Mapping[str, Any], scope: str) -> dict[str, Any]:
         raise ValueError("music_scope_invalid")
     current["audio"]["music_scope"] = value
     current["audio"]["music_plan"] = {}
+    for scene in current["scenes"]:
+        scene["music_policy"] = "off" if value == "none" else "inherit"
     current["navigation"]["dirty_sections"] = _dedupe(
-        list(current["navigation"].get("dirty_sections") or []) + ["audio", "summary"]
+        list(current["navigation"].get("dirty_sections") or []) + ["audio", "prompts", "summary"]
     )
     return normalize_state(current)
 
@@ -1129,6 +2149,9 @@ def set_whole_video_music(
         "fade_out": max(0.0, _number(fade_out, 0.25)),
         "ducking": bool(ducking),
     }
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or []) + ["audio", "prompts", "summary"]
+    )
     return normalize_state(current)
 
 
@@ -1159,6 +2182,25 @@ def set_scene_music(
         "ducking": True,
         "fade": True,
     }
+    for scene in current["scenes"]:
+        if str(scene.get("scene_id") or "") == target:
+            scene["music_policy"] = mode
+            break
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or []) + ["audio", "prompts", "summary"]
+    )
+    return normalize_state(current)
+
+
+def set_continuity(state: Mapping[str, Any], key: str, enabled: bool) -> dict[str, Any]:
+    current = _require_content_lock(state)
+    target = _text(key, 40)
+    if target not in DEFAULT_CONTINUITY:
+        raise ValueError("continuity_key_invalid")
+    current["bible"]["continuity"][target] = bool(enabled)
+    current["navigation"]["dirty_sections"] = _dedupe(
+        list(current["navigation"].get("dirty_sections") or []) + ["continuity", "prompts", "summary"]
+    )
     return normalize_state(current)
 
 
@@ -1176,6 +2218,17 @@ def scene_assignment_model(state: Mapping[str, Any], scene_id: str) -> dict[str,
         row = deepcopy(item)
         row["voice"] = deepcopy(current["audio"]["voice_cast"].get(character_id) or {})
         characters.append(row)
+    product_ids = set(target.get("product_ids") or [])
+    products = [
+        deepcopy(item) for item in current["bible"].get("products") or []
+        if str(item.get("product_id") or "") in product_ids
+    ]
+    prop_ids = set(target.get("prop_ids") or [])
+    props = [
+        deepcopy(item) for item in current["bible"].get("props") or []
+        if str(item.get("prop_id") or "") in prop_ids
+    ]
+    narrator_id = str((current["bible"].get("narrator") or {}).get("narrator_id") or "")
     dialogue_ids = set(target.get("dialogue_segment_ids") or [])
     dialogue = [deepcopy(item) for item in current["audio"]["dialogue_segments"] if str(item.get("dialogue_id") or "") in dialogue_ids]
     if current["audio"]["music_scope"] == "per_scene":
@@ -1189,9 +2242,14 @@ def scene_assignment_model(state: Mapping[str, Any], scene_id: str) -> dict[str,
         "scene_id": str(target["scene_id"]),
         "scene_index": int(target.get("scene_index") or 0),
         "characters": characters,
+        "narrator": {"enabled": bool(target.get("narrator_enabled")), "narrator_id": narrator_id},
+        "products": products,
+        "props": props,
         "location_id": str(target.get("location_id") or ""),
         "dialogue": dialogue,
         "music": music,
+        "sfx_ids": _dedupe(target.get("sfx_ids") or []),
+        "ambient_id": _text(target.get("ambient_id"), 160),
         "advanced_collapsed": True,
     }
 
@@ -1208,6 +2266,8 @@ def public_controls(state: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     }
     planned_multi_voice = len(planned_voice_owners) > 1
     planned_per_scene = current["audio"]["music_scope"] == "per_scene"
+    planned_sfx = bool(current["audio"]["sfx_plan"]) or any(scene.get("sfx_ids") for scene in current["scenes"])
+    planned_ambient = bool(current["audio"]["ambient_plan"]) or any(scene.get("ambient_id") for scene in current["scenes"])
 
     def control(key: str, planned: bool) -> dict[str, Any]:
         supported = bool(current["capabilities"].get(key))
@@ -1221,37 +2281,124 @@ def public_controls(state: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         "multi_voice_render": control("multi_voice_render", planned_multi_voice),
         "whole_video_music": control("whole_video_music", current["audio"]["music_scope"] == "whole_video"),
         "per_scene_music": control("per_scene_music", planned_per_scene),
-        "scene_sfx": control("scene_sfx", bool(current["audio"]["sfx_plan"])),
-        "scene_ambient": control("scene_ambient", bool(current["audio"]["ambient_plan"])),
+        "scene_sfx": control("scene_sfx", planned_sfx),
+        "scene_ambient": control("scene_ambient", planned_ambient),
     }
 
 
 def readiness_errors(state: Mapping[str, Any]) -> list[str]:
     current = normalize_state(state)
     errors: list[str] = []
+    needs = current["needs"]
+    if current["parent_product"] == "multi_scene_film":
+        if not _text(current["series"].get("goal"), 4000):
+            errors.append("series_goal_required")
+        if (
+            _integer(current["episode"].get("number"), 0) <= 0
+            or not _text(current["episode"].get("title"), 500)
+        ):
+            errors.append("episode_identity_required")
+        if not bool((current["episode"].get("content") or {}).get("locked")):
+            errors.append("episode_content_not_locked")
     if not current["content"].get("locked"):
         errors.append("content_not_locked")
-    if current["needs"].get("characters") == "REQUIRED" and not current["bible"]["characters"]:
+    if needs.get("characters") not in {"SKIP", "UNSUPPORTED"} and not current["bible"].get("character_count_confirmed"):
+        errors.append("character_count_unconfirmed")
+    if needs.get("locations") not in {"SKIP", "UNSUPPORTED"} and not current["bible"].get("location_count_confirmed"):
+        errors.append("location_count_unconfirmed")
+    if needs.get("characters") == "REQUIRED" and not current["bible"]["characters"]:
         errors.append("characters_required")
+    if needs.get("locations") == "REQUIRED" and not current["bible"]["locations"]:
+        errors.append("locations_required")
+    narrator = dict(current["bible"].get("narrator") or {})
+    narrator_id = str(narrator.get("narrator_id") or "")
+    if needs.get("narrator") == "REQUIRED" and not narrator_id:
+        errors.append("narrator_required")
+    products = list(current["bible"].get("products") or [])
+    product_ids_available = {str(item.get("product_id") or "") for item in products}
+    if needs.get("product") == "REQUIRED" and not products:
+        errors.append("products_required")
+    prop_ids_available = {str(item.get("prop_id") or "") for item in current["bible"].get("props") or []}
     if not current["format"].get("scene_count_confirmed") or not current["scenes"]:
         errors.append("scene_plan_missing")
-    character_ids = {str(item.get("character_id") or "") for item in current["bible"]["characters"]}
+    character_id_order = [str(item.get("character_id") or "") for item in current["bible"]["characters"]]
+    character_ids = set(character_id_order)
     location_ids = {str(item.get("location_id") or "") for item in current["bible"]["locations"]}
+    reference_ids = {str(item.get("asset_id") or "") for item in current["references"]}
+    references_required = needs.get("reference_assets") == "REQUIRED"
+    if references_required and not reference_ids:
+        errors.append("reference_assets_required")
+    for character in current["bible"]["characters"]:
+        character_id = str(character.get("character_id") or "")
+        if str(character.get("gender") or "unspecified") == "unspecified":
+            errors.append(f"{character_id}_gender_missing")
+        if not str(character.get("description") or "").strip():
+            errors.append(f"{character_id}_description_missing")
+        if references_required and not reference_ids.intersection(character.get("reference_asset_ids") or []):
+            errors.append(f"{character_id}_reference_missing")
+    for location in current["bible"]["locations"]:
+        location_id = str(location.get("location_id") or "")
+        if not str(location.get("description") or "").strip():
+            errors.append(f"{location_id}_description_missing")
+        if references_required and not reference_ids.intersection(location.get("reference_asset_ids") or []):
+            errors.append(f"{location_id}_reference_missing")
+    for product in products:
+        product_id = str(product.get("product_id") or "")
+        if references_required and not reference_ids.intersection(product.get("reference_asset_ids") or []):
+            errors.append(f"{product_id}_reference_missing")
+    for prop in current["bible"].get("props") or []:
+        prop_id = str(prop.get("prop_id") or "")
+        if references_required and not reference_ids.intersection(prop.get("reference_asset_ids") or []):
+            errors.append(f"{prop_id}_reference_missing")
     for scene in current["scenes"]:
+        scene_id = str(scene.get("scene_id") or "")
+        for field in ("semantic_beat", "main_action", "completion_state"):
+            if needs.get("scene_planning") not in {"SKIP", "UNSUPPORTED"} and not str(scene.get(field) or "").strip():
+                errors.append(f"{scene_id}_{field}_missing")
         if any(item not in character_ids for item in scene.get("character_ids") or []):
             errors.append(f"{scene.get('scene_id')}_character_invalid")
         if scene.get("location_id") and str(scene.get("location_id")) not in location_ids:
             errors.append(f"{scene.get('scene_id')}_location_invalid")
-    for item in current["audio"]["dialogue_segments"]:
-        if str(item.get("speaker_id") or "") not in character_ids and str(item.get("speaker_id") or "") != str((current["bible"].get("narrator") or {}).get("narrator_id") or ""):
+        if any(item not in product_ids_available for item in scene.get("product_ids") or []):
+            errors.append(f"{scene_id}_product_invalid")
+        if any(item not in prop_ids_available for item in scene.get("prop_ids") or []):
+            errors.append(f"{scene_id}_prop_invalid")
+        if scene.get("narrator_enabled") and not narrator_id:
+            errors.append(f"{scene_id}_narrator_invalid")
+        if needs.get("locations") == "REQUIRED" and not str(scene.get("location_id") or ""):
+            errors.append(f"{scene.get('scene_id')}_location_missing")
+    dialogue_segments = current["audio"]["dialogue_segments"]
+    if needs.get("product") == "REQUIRED" and current["scenes"] and not any(
+        scene.get("product_ids") for scene in current["scenes"]
+    ):
+        errors.append("product_scene_assignment_required")
+    narrator_used = any(scene.get("narrator_enabled") for scene in current["scenes"]) or any(
+        str(item.get("speaker_id") or "") == narrator_id for item in dialogue_segments
+    )
+    if needs.get("narrator") == "REQUIRED" and narrator_id and not narrator_used:
+        errors.append("narrator_scene_assignment_required")
+    if needs.get("dialogue") == "REQUIRED" and not dialogue_segments:
+        errors.append("dialogue_required")
+    scene_cast = {
+        str(scene.get("scene_id") or ""): set(scene.get("character_ids") or [])
+        for scene in current["scenes"]
+    }
+    for item in dialogue_segments:
+        speaker_id = str(item.get("speaker_id") or "")
+        if speaker_id not in character_ids and speaker_id != narrator_id:
             errors.append(f"{item.get('dialogue_id')}_speaker_invalid")
+        elif speaker_id != narrator_id and speaker_id not in scene_cast.get(str(item.get("scene_id") or ""), set()):
+            errors.append(f"{item.get('dialogue_id')}_speaker_not_in_scene")
     dialogue_speakers = list(dict.fromkeys(
         str(item.get("speaker_id") or "")
-        for item in current["audio"]["dialogue_segments"]
+        for item in dialogue_segments
         if str(item.get("speaker_id") or "")
     ))
+    voice_owners = list(dialogue_speakers)
+    if needs.get("voice") == "REQUIRED":
+        voice_owners = _dedupe([*character_id_order, narrator_id, *voice_owners])
     selected_voice_ids: list[str] = []
-    for speaker_id in dialogue_speakers:
+    for speaker_id in voice_owners:
         voice = dict(current["audio"]["voice_cast"].get(speaker_id) or {})
         voice_id = str(voice.get("voice_id") or "")
         if not voice_id:
@@ -1269,6 +2416,30 @@ def readiness_errors(state: Mapping[str, Any]) -> list[str]:
         errors.append("whole_video_music_renderer_missing")
     if controls["per_scene_music"]["planned"] and not controls["per_scene_music"]["supported"]:
         errors.append("per_scene_music_renderer_missing")
+    if controls["scene_sfx"]["planned"] and not controls["scene_sfx"]["supported"]:
+        errors.append("scene_sfx_renderer_missing")
+    if controls["scene_ambient"]["planned"] and not controls["scene_ambient"]["supported"]:
+        errors.append("scene_ambient_renderer_missing")
+    if needs.get("music") == "REQUIRED":
+        music_scope = str(current["audio"].get("music_scope") or "none")
+        music_plan = dict(current["audio"].get("music_plan") or {})
+        has_music = bool(music_plan.get("track_id")) if music_scope == "whole_video" else any(
+            str(dict(item).get("track_id") or "")
+            for item in music_plan.values()
+            if isinstance(item, Mapping)
+        ) if music_scope == "per_scene" else False
+        if not has_music:
+            errors.append("music_required")
+    if needs.get("sfx") == "REQUIRED" and not (
+        current["audio"].get("sfx_plan") or any(scene.get("sfx_ids") for scene in current["scenes"])
+    ):
+        errors.append("sfx_required")
+    if needs.get("ambient") == "REQUIRED" and not (
+        current["audio"].get("ambient_plan") or any(scene.get("ambient_id") for scene in current["scenes"])
+    ):
+        errors.append("ambient_required")
+    if needs.get("continuity") == "REQUIRED" and "continuity" not in set(current["navigation"].get("completed_steps") or []):
+        errors.append("continuity_required")
     if not bool(_adapter(current["parent_product"])["public_submit_enabled"]):
         errors.append("public_submit_locked")
     dirty = set(current["navigation"].get("dirty_sections") or [])
@@ -1278,11 +2449,36 @@ def readiness_errors(state: Mapping[str, Any]) -> list[str]:
     return list(dict.fromkeys(errors))
 
 
+def _is_render_readiness_error(error: str) -> bool:
+    value = str(error or "")
+    return (
+        value == "public_submit_locked"
+        or value.endswith("_renderer_missing")
+        or value.endswith("_voice_not_server_renderable")
+    )
+
+
+def planning_readiness_errors(state: Mapping[str, Any]) -> list[str]:
+    return [
+        error for error in readiness_errors(state)
+        if not _is_render_readiness_error(error)
+    ]
+
+
+def render_readiness_errors(state: Mapping[str, Any]) -> list[str]:
+    return [
+        error for error in readiness_errors(state)
+        if _is_render_readiness_error(error)
+    ]
+
+
 def next_required_step(state: Mapping[str, Any]) -> str:
     current = normalize_state(state)
     source = current["source"]
     if source.get("required") and not source.get("complete"):
         return "source"
+    if current["parent_product"] == "multi_scene_film" and not _text(current["series"].get("goal"), 4000):
+        return "series_goal"
     if not current["format"].get("ratio") or not current["format"].get("target_duration_seconds"):
         return "format"
     if not current["content"].get("candidate_ready"):
@@ -1294,6 +2490,7 @@ def next_required_step(state: Mapping[str, Any]) -> str:
         "production_bible",
         "references",
         "continuity",
+        "episode",
         "scene_count",
         "scene_plan",
         "scene_assignment",
@@ -1304,6 +2501,13 @@ def next_required_step(state: Mapping[str, Any]) -> str:
         if step == "scene_count" and current["format"].get("scene_count_confirmed"):
             continue
         if step == "scene_plan" and current["scenes"]:
+            continue
+        if step == "episode" and current["parent_product"] != "multi_scene_film":
+            continue
+        if step == "episode" and (
+            _text(current["episode"].get("title"), 500)
+            and bool((current["episode"].get("content") or {}).get("locked"))
+        ):
             continue
         if step not in completed:
             return step
@@ -1347,8 +2551,11 @@ def begin_summary_edit(state: Mapping[str, Any], step: str) -> dict[str, Any]:
     current = normalize_state(state)
     if str(current["navigation"].get("current_step") or "") != "summary":
         raise ValueError("summary_edit_requires_summary")
+    target = _text(step, 80)
+    if target not in SUMMARY_EDIT_STEPS:
+        raise ValueError("summary_edit_target_invalid")
     current["navigation"]["return_to"] = "summary"
-    return navigate(current, step)
+    return navigate(current, target)
 
 
 def finish_editor(state: Mapping[str, Any]) -> dict[str, Any]:
@@ -1356,6 +2563,11 @@ def finish_editor(state: Mapping[str, Any]) -> dict[str, Any]:
     target = str(current["navigation"].get("return_to") or "")
     if not target:
         return current
+    stack = list(current["navigation"].get("visible_step_stack") or [])
+    if target in stack:
+        last_target = len(stack) - 1 - stack[::-1].index(target)
+        stack = stack[:last_target]
+    current["navigation"]["visible_step_stack"] = stack
     current["navigation"]["current_step"] = target
     current["navigation"]["return_to"] = None
     return normalize_state(current)
@@ -1397,7 +2609,7 @@ def from_legacy_state(
     source = deepcopy(dict(legacy or {}))
     product = _text(source.get("source_product_id") or source.get("product_type"), 80)
     if product not in ENTRY_ADAPTERS:
-        product = "video_ai_real"
+        raise ValueError("unsupported_video_uiflow3_product")
     current = new_state(product, draft_id=draft_id)
     current["source"]["complete"] = True
     ratio = _text(source.get("aspect_ratio") or source.get("ratio"), 20)
@@ -1413,6 +2625,7 @@ def from_legacy_state(
             "gender": str(character.get("gender") or character.get("mode") or "unspecified") if str(character.get("gender") or character.get("mode") or "") in GENDERS else "unspecified",
         })
         current["bible"]["characters"] = [item]
+        current["bible"]["character_count_confirmed"] = True
     post = dict(source.get("postproduction_addons") or {})
     dubbing = dict(post.get("dubbing") or {})
     dubbing_value = dict(dubbing.get("value") or {}) if isinstance(dubbing.get("value"), Mapping) else {}
@@ -1441,7 +2654,11 @@ def from_legacy_state(
         if not file_id:
             continue
         current["references"].append({
-            "asset_id": _stable_id("asset", len(current["references"]) + 1),
+            "asset_id": _allocate_id(
+                current,
+                "asset",
+                [item.get("asset_id") for item in current["references"]],
+            ),
             "asset_type": _text(raw_asset.get("type") or "image", 80),
             "owner_type": "legacy_unassigned",
             "owner_id": "",
@@ -1465,10 +2682,8 @@ def from_legacy_state(
 def approved_snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
     current = normalize_state(state)
     errors = readiness_errors(current)
-    blocking = [
-        item for item in errors
-        if item not in {"multi_voice_renderer_missing"}
-    ]
+    blocking = [item for item in errors if not _is_render_readiness_error(item)]
+    render_blockers = [item for item in errors if _is_render_readiness_error(item)]
     if blocking:
         raise ValueError("approved_snapshot_not_ready:" + ",".join(blocking))
     payload = {
@@ -1480,6 +2695,13 @@ def approved_snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
         "source": deepcopy(current["source"]),
         "format": deepcopy(current["format"]),
         "content": deepcopy(current["content"]),
+        "series": deepcopy(current["series"]),
+        "episode": deepcopy(current["episode"]),
+        "effective_episode": (
+            effective_episode_contract(current)
+            if current["parent_product"] == "multi_scene_film"
+            else None
+        ),
         "production_bible": deepcopy(current["bible"]),
         "references": deepcopy(current["references"]),
         "scenes": deepcopy(current["scenes"]),
@@ -1488,6 +2710,7 @@ def approved_snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
         "capability_requirements": [
             key for key, item in public_controls(current).items() if item["planned"]
         ],
+        "render_blockers": render_blockers,
         "side_effects": deepcopy(current["side_effects"]),
     }
     encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -1503,3 +2726,25 @@ def callback(action: str, *parts: Any) -> str:
     if len(value.encode("utf-8")) > 64:
         raise ValueError("video_uiflow3_callback_too_long")
     return value
+
+
+def draft_token(state: Mapping[str, Any]) -> str:
+    current = normalize_state(state)
+    if not _text(current.get("draft_id"), 120):
+        raise ValueError("video_uiflow3_draft_id_required")
+    # Bind callbacks to the visible draft snapshot, not only its lifetime.
+    # This makes an old same-draft screen harmless after navigation or edits.
+    current.pop("handled_callback_ids", None)
+    encoded = json.dumps(current, ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=str)
+    return sha256(encoded.encode("utf-8")).hexdigest()[:8]
+
+
+def scope_callback(state: Mapping[str, Any], value: str) -> str:
+    raw = str(value or "")
+    parts = raw.split("|")
+    if len(parts) < 2 or parts[0] != "vid3" or parts[1] in {"entry", "resume", "d"}:
+        return raw
+    scoped = "|".join(("vid3", "d", draft_token(state), *parts[1:]))
+    if len(scoped.encode("utf-8")) > 64:
+        raise ValueError("video_uiflow3_callback_too_long")
+    return scoped

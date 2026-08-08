@@ -17,7 +17,7 @@ are outside this task.
 | Video tu quay | `vproduct|ss2/ss3` | Source video/segment | Local analysis -> subject -> content | Reuse source analysis, then canonical Content Lock/Bible |
 | Storyboard | `vstory` | Generate/upload mode | Count/panels -> ratio -> content | Preserve raw panels; move semantic scene approval after Content Lock/Bible |
 | Video dai tap | `longvideo` | Internal series input | Separate long planning flow | Planning only; preserve public execution lock |
-| Y tuong video | `videoidea` | Idea catalog | Existing read-only catalog/handoff | Keep `videoidea|start` and every catalog owner unchanged; V3 never edits catalog internals |
+| Y tuong video | `videoidea` | Idea catalog | Existing read-only catalog/handoff | Keep standalone `videoidea|start` and every catalog owner unchanged; V3 uses a parent-bound launcher/return and never edits catalog internals |
 
 ## Existing Good Components To Reuse
 
