@@ -55,7 +55,9 @@ def _press(user_id: int, callback: str):
     query = FakeQuery(user_id, callback)
     update = SimpleNamespace(callback_query=query)
     context = SimpleNamespace(user_data={})
-    if callback.startswith("vproduct|"):
+    if callback.startswith("vid3|"):
+        asyncio.run(bot.handle_video_uiflow3_callback(update, context))
+    elif callback.startswith("vproduct|"):
         asyncio.run(bot.handle_video_product_callback(update, context))
     elif callback.startswith("videoidea|"):
         asyncio.run(bot.handle_video_idea_callback(update, context))
