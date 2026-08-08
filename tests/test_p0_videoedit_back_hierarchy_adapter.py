@@ -142,8 +142,10 @@ def test_videoedit_workspace_exposes_every_real_local_group() -> None:
         "videoedit|color",
         "videoedit|overlay",
         "videoedit|effects",
-        "videoedit|source_info",
         "videoedit|logo_entry",
+        "videoedit|watermark_entry",
+        "videoedit|source_info",
+        "videoedit|latest_status",
         "videoedit|review",
         "videoedit|upload|manual",
         "videoedit|manual",
@@ -151,14 +153,20 @@ def test_videoedit_workspace_exposes_every_real_local_group() -> None:
     ]
 
 
-def test_videoedit_workspace_replaces_the_old_review_slot_with_logo_and_uses_forward_finish_copy() -> None:
+def test_videoedit_workspace_separates_logo_watermark_and_uses_forward_finish_copy() -> None:
     pairs = _pairs(bot.video_local_manual_options_keyboard("vi"))
 
-    assert ("🖼 Logo & watermark", "videoedit|logo_entry") in pairs
+    assert ("🖼 Logo ảnh", "videoedit|logo_entry") in pairs
+    assert ("🏷️ Watermark chữ", "videoedit|watermark_entry") in pairs
+    assert ("🎞 Thông tin video", "videoedit|source_info") in pairs
+    assert ("📊 Trạng thái chỉnh sửa", "videoedit|latest_status") in pairs
     assert ("✅ Hoàn tất & tiếp tục", "videoedit|review") in pairs
     assert ("📎 Gửi video khác", "videoedit|upload|manual") in pairs
     assert ("📋 Xem lại", "videoedit|review") not in pairs
-    assert pairs.index(("🖼 Logo & watermark", "videoedit|logo_entry")) < pairs.index(
+    assert pairs.index(("🖼 Logo ảnh", "videoedit|logo_entry")) < pairs.index(
+        ("✅ Hoàn tất & tiếp tục", "videoedit|review")
+    )
+    assert pairs.index(("🏷️ Watermark chữ", "videoedit|watermark_entry")) < pairs.index(
         ("✅ Hoàn tất & tiếp tục", "videoedit|review")
     )
 
@@ -192,7 +200,7 @@ def test_videoedit_workspace_logo_entry_opens_upload_or_existing_options_without
         upload_state = dict(bot.get_video_editor_pending(new_user) or {})
         assert upload_state["current_screen"] == "logo_input"
         assert upload_state["parent_callback"] == "videoedit|workspace"
-        assert "Gửi logo" in upload.edits[-1][0]
+        assert "Logo ảnh" in upload.edits[-1][0]
         assert ("⬅️ Quay lại", "videoedit|workspace") in _pairs(
             _last_markup(upload)
         )
@@ -204,7 +212,7 @@ def test_videoedit_workspace_logo_entry_opens_upload_or_existing_options_without
         assert option_state["parent_callback"] == "videoedit|workspace"
         assert ("📎 Đổi ảnh", "videoedit|logo") in option_pairs
         assert ("🗑 Xóa logo", "videoedit|logo_remove") in option_pairs
-        assert ("✅ Hoàn tất & tiếp tục", "videoedit|review") in option_pairs
+        assert ("✅ Xem lại", "videoedit|review") in option_pairs
         assert ("⬅️ Quay lại", "videoedit|workspace") in option_pairs
 
         removed = _press(existing_user, "videoedit|logo_remove")
@@ -212,12 +220,95 @@ def test_videoedit_workspace_logo_entry_opens_upload_or_existing_options_without
         assert removed_state["current_screen"] == "workspace"
         assert removed_state.get("logo_source") == {}
         assert removed_state["manual_edit_plan"].get("logo_overlay") == {}
-        assert ("🖼 Logo & watermark", "videoedit|logo_entry") in _pairs(
+        assert ("🖼 Logo ảnh", "videoedit|logo_entry") in _pairs(
             _last_markup(removed)
         )
     finally:
         bot.clear_video_editor_pending(new_user)
         bot.clear_video_editor_pending(existing_user)
+
+
+@pytest.mark.parametrize("product", ["logo", "watermark"])
+@pytest.mark.parametrize(
+    ("visible_parent", "expected_screen"),
+    [
+        ("videoedit|workspace", "workspace"),
+        ("videoedit|overlay", "overlay"),
+        ("videoedit|branding", "branding"),
+        ("videoedit|review", "review"),
+    ],
+)
+def test_videoedit_branding_options_and_remove_preserve_the_actual_parent(
+    product: str,
+    visible_parent: str,
+    expected_screen: str,
+) -> None:
+    user_id = 88_450 + (0 if product == "logo" else 10) + len(visible_parent)
+    _ready_state(user_id)
+    state = dict(bot.get_video_editor_pending(user_id) or {})
+    plan = dict(state.get("manual_edit_plan") or {})
+    plan["logo_overlay"] = {
+        "position": "top_right",
+        "scale": 0.12,
+        "opacity": 0.75,
+    }
+    plan["watermark_overlay"] = {
+        "content": "TOAN AAS",
+        "position": "bottom_right",
+        "start_ms": 0,
+        "end_ms": 10_000,
+        "font_size": 32,
+        "outline": 2,
+        "opacity": 0.45,
+    }
+    bot.update_video_editor_pending(
+        user_id,
+        "review" if expected_screen == "review" else "options",
+        current_screen=expected_screen,
+        screen_id=expected_screen,
+        parent_callback="videoedit|workspace",
+        return_to="workspace",
+        status="review_ready" if expected_screen == "review" else "source_ready",
+        review_revision=2 if expected_screen == "review" else 0,
+        state_revision=2 if expected_screen == "review" else 1,
+        logo_source={"file_id": "logo-source", "file_name": "logo.png"},
+        watermark_config={
+            "enabled": True,
+            "text": "TOAN AAS",
+            "position": "bottom_right",
+            "opacity": 0.45,
+        },
+        manual_edit_plan=plan,
+    )
+    try:
+        opened = _press(user_id, f"videoedit|{product}_entry")
+        opened_state = dict(bot.get_video_editor_pending(user_id) or {})
+        assert opened_state["parent_callback"] == visible_parent
+        assert ("⬅️ Quay lại", visible_parent) in _pairs(_last_markup(opened))
+
+        removed = _press(user_id, f"videoedit|{product}_remove")
+        after = dict(bot.get_video_editor_pending(user_id) or {})
+        assert after["current_screen"] == expected_screen
+        assert f"videoedit|{product}_options" not in _callbacks(_last_markup(removed))
+        if product == "logo":
+            assert after["logo_source"] == {}
+            assert after["manual_edit_plan"].get("logo_overlay") == {}
+            assert after["watermark_config"]["enabled"] is True
+        else:
+            assert after["watermark_config"] == {}
+            assert "watermark_overlay" not in after["manual_edit_plan"]
+            assert after["logo_source"]["file_id"] == "logo-source"
+        if expected_screen == "review":
+            assert "Xem lại kế hoạch" in removed.edits[-1][0]
+            assert after["step"] == "review"
+            assert after["status"] == "review_ready"
+            assert after["review_revision"] == after["state_revision"]
+            assert after["state_revision"] > 2
+            removed_pairs = _pairs(_last_markup(removed))
+            assert ("➡️ Tiếp tục xác nhận", "videoedit|confirmation") in removed_pairs
+            assert ("⬅️ Quay lại", "videoedit|workspace") in removed_pairs
+    finally:
+        bot.clear_video_editor_pending(user_id)
 
 
 def test_videoedit_workspace_logo_upload_keeps_workspace_parent_through_option_changes(
@@ -308,7 +399,7 @@ def test_videoedit_logo_options_review_back_returns_to_logo_without_losing_asset
         assert returned_state["current_screen"] == "logo_options"
         assert returned_state["logo_source"]["file_id"] == "review-logo"
         assert returned_state["manual_edit_plan"]["logo_overlay"]["opacity"] == 0.75
-        assert ("⬅️ Quay lại", "videoedit|workspace") in _pairs(
+        assert ("⬅️ Quay lại", "videoedit|review") in _pairs(
             _last_markup(returned)
         )
     finally:
@@ -631,13 +722,16 @@ def test_videoedit_public_vietnamese_labels_pair_with_their_exact_callbacks() ->
             "vi",
         )
     )
-    assert ("ℹ️ Giọng nói / đối thoại", "videoedit|audio_component|audio_dialogue") in audio
-    assert ("ℹ️ Nhạc nền", "videoedit|audio_component|audio_music") in audio
-    assert ("ℹ️ Âm thanh môi trường", "videoedit|audio_component|audio_ambience") in audio
-    assert ("ℹ️ Hiệu ứng âm thanh", "videoedit|audio_component|audio_sfx") in audio
+    assert ("ℹ️ Kiểm tra âm thanh", "videoedit|audio_component|audio_dialogue") in audio
+    assert all(
+        callback.startswith("videoedit|audio_component|")
+        for label, callback in audio
+        if label.startswith("ℹ️")
+    )
 
     overlay = _pairs(bot.video_local_overlay_keyboard("vi"))
-    assert ("🖼 Logo / watermark ảnh", "videoedit|logo") in overlay
+    assert ("🖼 Logo ảnh", "videoedit|logo_entry") in overlay
+    assert ("🏷️ Watermark chữ", "videoedit|watermark_entry") in overlay
 
 
 def test_videoedit_audio_component_copy_never_claims_an_unavailable_stem_control() -> None:
@@ -971,12 +1065,36 @@ def test_videoedit_manual_to_split_requires_an_explicit_destructive_reset() -> N
         state = dict(bot.get_video_editor_pending(user_id) or {})
         plan = dict(state.get("manual_edit_plan") or {})
         plan["brightness_percent"] = 130
+        plan["audio_tracks"] = [
+            {
+                "path": "",
+                "kind": "music",
+                "volume": 0.35,
+                "start_ms": 0,
+                "end_ms": 0,
+            }
+        ]
         bot.update_video_editor_pending(
             user_id,
             manual_edit_plan=plan,
             concat_sources=[{"file_id": "concat"}],
             logo_source={"file_id": "logo"},
             subtitle_source={"file_id": "srt"},
+            audio_sources=[
+                {
+                    "file_id": "music",
+                    "kind": "music",
+                    "volume": 0.35,
+                    "start_ms": 0,
+                    "end_ms": 0,
+                }
+            ],
+            watermark_config={
+                "enabled": True,
+                "text": "TOAN AAS",
+                "position": "bottom_right",
+                "opacity": 0.45,
+            },
         )
         before_warning = dict(bot.get_video_editor_pending(user_id) or {})
 
@@ -996,6 +1114,7 @@ def test_videoedit_manual_to_split_requires_an_explicit_destructive_reset() -> N
             "concat_sources",
             "logo_source",
             "subtitle_source",
+            "audio_sources",
             "source_file_id",
             "source_metadata",
             "edit_session_id",
@@ -1023,6 +1142,11 @@ def test_videoedit_manual_to_split_requires_an_explicit_destructive_reset() -> N
         assert reset_state["concat_sources"] == []
         assert reset_state["logo_source"] == {}
         assert reset_state["subtitle_source"] == {}
+        assert reset_state["audio_sources"] == []
+        assert reset_state["watermark_config"] == {}
+        assert "watermark_overlay" not in bot.video_editor_plan_with_watermark(
+            reset_state
+        )
         assert reset_state["split_ranges"] == []
         assert not reset_state.get("pending_field")
         reset_snapshot = dict(reset_state)
@@ -1085,6 +1209,50 @@ def test_videoedit_split_reset_never_resurrects_or_overwrites_changed_state(
                 "manual_edit", "vi"
             )
         assert query.answers[-1][1].get("show_alert") is True
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize(
+    "callback",
+    [
+        "videoedit|hub",
+        "videoedit|quality_upload",
+        "videoedit|ai_upload",
+        "videoedit|upload|manual",
+        "videoedit|audio_reupload",
+    ],
+)
+def test_videoedit_post_render_lane_transition_preserves_concurrent_winner(
+    callback: str,
+) -> None:
+    user_id = 88_910 + len(callback)
+    _ready_state(user_id)
+    if callback.endswith("audio_reupload"):
+        bot.update_video_editor_screen(
+            user_id,
+            "audio",
+            parent_callback="videoedit|workspace",
+            state_step="audio",
+        )
+
+    def install_winner() -> None:
+        bot.start_video_edit_lane_state(
+            user_id,
+            "manual_edit",
+            edit_session_id=f"winner-{user_id}",
+        )
+
+    query = _StateChangingQuery(user_id, callback, install_winner)
+    try:
+        asyncio.run(
+            bot.handle_video_editor_callback(
+                SimpleNamespace(callback_query=query),
+                SimpleNamespace(user_data={}),
+            )
+        )
+        current = dict(bot.get_video_editor_pending(user_id) or {})
+        assert current["edit_session_id"] == f"winner-{user_id}"
     finally:
         bot.clear_video_editor_pending(user_id)
 
@@ -1289,9 +1457,11 @@ def test_videoedit_public_review_copy_is_fully_vietnamese_and_callbacks_stay_sta
         "owner",
     ):
         assert forbidden not in public_copy
-    assert ("🖼️ Logo và watermark", "videoedit|overlay") in review_pairs
+    assert ("🖼 Logo ảnh", "videoedit|logo_entry") in review_pairs
+    assert ("🏷️ Watermark chữ", "videoedit|watermark_entry") in review_pairs
     assert ("➡️ Âm thanh và bổ sung", "videoedit|audio") in review_pairs
-    assert ("🖼️ Sửa logo và watermark", "videoedit|overlay") in summary_pairs
+    assert ("🖼 Logo ảnh", "videoedit|logo_entry") in summary_pairs
+    assert ("🏷️ Watermark chữ", "videoedit|watermark_entry") in summary_pairs
     assert ("⬅️ Quay lại", "video_tail|review|open") in recovery_pairs
 
 
@@ -1347,7 +1517,8 @@ def test_videoedit_logo_upload_and_source_info_return_to_existing_logo_options(
 
         review = _press(user_id, "videoedit|review")
         review_text = review.edits[-1][0]
-        assert "Logo / watermark" in review_text
+        assert "Logo ảnh" in review_text
+        assert "Logo / watermark" not in review_text
         assert "Dưới trái" in review_text
         assert "75%" in review_text
         _press(user_id, "videoedit|overlay")

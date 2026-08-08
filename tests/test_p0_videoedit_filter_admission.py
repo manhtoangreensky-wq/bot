@@ -468,6 +468,7 @@ def test_preflight_rejects_unknown_manual_plan_fields_before_job_creation() -> N
         ({"speed": 0.5}, {"format", "setpts", "atempo"}),
         ({"color_preset": "bright_clear"}, {"format", "eq", "unsharp"}),
         ({"text_overlay": {"content": "Chào", "start_ms": 0, "end_ms": 1_000}}, {"format", "drawtext"}),
+        ({"watermark_overlay": {"content": "© TOAN AAS", "start_ms": 0, "end_ms": 10_000, "opacity": 0.45}}, {"format", "drawtext"}),
         ({"subtitle_file": "subtitle.srt"}, {"format", "subtitles"}),
         ({"logo_overlay": {"path": "logo.png", "position": "top_right", "scale": 0.12, "opacity": 1.0}}, {"format", "colorchannelmixer", "scale", "overlay"}),
         ({"volume": 0.5}, {"format", "volume"}),

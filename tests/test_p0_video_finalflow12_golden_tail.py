@@ -88,7 +88,8 @@ def test_unified_summary_is_the_only_final_check_before_quality() -> None:
     assert "video_tail|quality|open" not in edit_review
     assert "return video_tail9_summary_keyboard(tail)" in tail_review
     assert "video_tail|review|logo" in scene_review
-    assert "videoedit|overlay" in edit_review
+    assert "videoedit|logo_entry" in edit_review
+    assert "videoedit|watermark_entry" in edit_review
     assert "video_tail|review|summary" in scene_review
     assert "videoedit|review" in edit_review
     assert "video_tail|" not in edit_review

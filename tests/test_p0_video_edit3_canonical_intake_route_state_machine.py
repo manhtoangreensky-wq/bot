@@ -583,7 +583,10 @@ def _run_canonical_upload(
             "video_editor_telegram_probe_fallback": telegram_probe_fallback,
             "video_edit_media_transport": video_edit_media_transport,
             "video_local_validation": video_local_validation,
-            "logger": SimpleNamespace(warning=lambda *_args, **_kwargs: None),
+            "logger": SimpleNamespace(
+                info=lambda *_args, **_kwargs: None,
+                warning=lambda *_args, **_kwargs: None,
+            ),
             "sanitize_log_text": str,
             "video_local_public_error": lambda reason, message_lang="vi": f"{message_lang}:{reason}",
             "video_edit_lane_upload_keyboard": lane_upload_keyboard,
@@ -633,27 +636,26 @@ def test_edit3_opaque_telegram_identity_is_retained_as_separate_audit_field() ->
 
 
 def test_edit3_media_lane_survives_real_video_editor_persistence_allow_list() -> None:
-    pending: dict[str, dict] = {}
-    setter = _compile_function(
-        "set_video_editor_pending",
-        {
-            "VIDEO_EDITOR_TEXT_FIELDS": _literal_assignment("VIDEO_EDITOR_TEXT_FIELDS"),
-            "VIDEO_EDITOR_NUMBER_FIELDS": _literal_assignment("VIDEO_EDITOR_NUMBER_FIELDS"),
-            "VIDEO_EDITOR_STRUCTURED_FIELDS": _literal_assignment("VIDEO_EDITOR_STRUCTURED_FIELDS"),
-            "USER_PENDING": pending,
-            "video_editor_pending_key": lambda user_id: f"video_editor:{user_id}",
-            "record_video_editor_state_write": lambda *_args, **_kwargs: None,
-            "safe_int": lambda value, default=0: int(value or default),
-            "json": json,
-            "re": re,
-            "time": time,
-        },
+    namespace = {
+        "VIDEO_EDITOR_TEXT_FIELDS": _literal_assignment("VIDEO_EDITOR_TEXT_FIELDS"),
+        "VIDEO_EDITOR_NUMBER_FIELDS": _literal_assignment("VIDEO_EDITOR_NUMBER_FIELDS"),
+        "VIDEO_EDITOR_STRUCTURED_FIELDS": _literal_assignment("VIDEO_EDITOR_STRUCTURED_FIELDS"),
+        "safe_int": lambda value, default=0: int(value or default),
+        "json": json,
+        "re": re,
+        "time": time,
+    }
+    builder = _compile_function(
+        "build_video_editor_pending_state",
+        namespace,
     )
 
-    state = setter(78, "manual_edit", media_lane="large_media")
+    state = builder("manual_edit", media_lane="large_media")
 
     assert state["media_lane"] == "large_media"
-    assert pending["video_editor:78"]["media_lane"] == "large_media"
+    assert "build_video_editor_pending_state(" in _function_source(
+        "set_video_editor_pending"
+    )
 
 
 def test_edit3_local_inspection_is_file_backed_unbounded_and_uses_local_origin(
@@ -1766,16 +1768,18 @@ def test_edit3_real_inspector_retains_stream_evidence_when_ffprobe_is_unavailabl
     assert result["media_lane"] == "short_media"
 
 
-def test_edit3_stale_state_cannot_consume_another_video_product_upload() -> None:
+def test_edit3_active_editor_wins_over_stale_other_product_session() -> None:
     first, second, state, replies, probes = _run_canonical_upload(
         "manual_edit",
         active_product="product_video",
     )
 
-    assert first is False and second is False
-    assert probes == []
-    assert replies == []
-    assert state == video_edit_state_machine.start_lane("manual_edit")
+    assert first is True and second is True
+    assert probes == ["video-file-901"]
+    assert len(replies) == 1
+    assert state["edit_mode"] == "manual_edit"
+    assert state["source_file_id"] == "video-file-901"
+    assert state["inspection_complete"] is True
 
 
 @pytest.mark.parametrize(
@@ -2081,7 +2085,7 @@ def test_edit3_failed_inspection_cannot_overwrite_a_concurrent_state_winner(
 
 
 @pytest.mark.parametrize("legacy_step", ["await_concat", "await_logo", "await_srt"])
-def test_edit3_legacy_stale_state_cannot_consume_another_product_upload(
+def test_edit3_legacy_editor_state_fences_upload_from_another_product(
     legacy_step: str,
 ) -> None:
     state = {
@@ -2113,13 +2117,15 @@ def test_edit3_legacy_stale_state_cannot_consume_another_product_upload(
             "get_video_session": lambda _uid: {"product_id": "product_video"},
             "video_edit_recovery_mode": recovery_mode,
             "video_edit_state_machine": video_edit_state_machine,
+            "logger": SimpleNamespace(info=lambda *_args, **_kwargs: None),
             "safe_int": lambda value, default=0: int(value or default),
             "clear_video_editor_competing_video_states": lambda uid, _context: clear_calls.append(uid),
             "get_user_language": lambda _uid: "vi",
             "video_editor_aux_source_from_update": lambda _update, _kind: {},
             "video_editor_source_from_update": lambda _update: {},
+            "video_local_logo_parent_callback": lambda _state: "videoedit|branding",
             "video_local_input_keyboard": lambda *_args, **_kwargs: "input-keyboard",
-            "video_local_public_error": lambda reason: reason,
+            "video_local_public_error": lambda reason, *_args: reason,
         },
     )
     update = SimpleNamespace(
@@ -2127,9 +2133,9 @@ def test_edit3_legacy_stale_state_cannot_consume_another_product_upload(
         message=Message(),
     )
 
-    assert asyncio.run(handler(update, SimpleNamespace(user_data={}))) is False
-    assert clear_calls == []
-    assert replies == []
+    assert asyncio.run(handler(update, SimpleNamespace(user_data={}))) is True
+    assert clear_calls == [78]
+    assert len(replies) == 1
 
 
 def test_edit3_invalid_upload_replies_once_and_keeps_active_lane() -> None:

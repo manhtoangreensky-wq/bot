@@ -222,6 +222,7 @@ def _handler(
     dependencies = {
         "get_user_language": lambda _uid: lang,
         "get_video_editor_pending": lambda _uid: deepcopy(state),
+        "video_editor_state_snapshot": lambda value: deepcopy(dict(value or {})),
         "video_edit_state_machine": SimpleNamespace(
             requested_group=lambda _action: "",
             canonical_compatibility_action=lambda action: action,

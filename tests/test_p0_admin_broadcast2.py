@@ -637,7 +637,7 @@ def test_scope_and_menu_routing_static_gates():
     assert source.index("if await handle_broadcast_lite_pending_text(update, context):") < source.index("if await handle_support_pending_input(update, context):")
     assert source.index("if await handle_broadcast_lite_pending_text(update, context):") < source.index("if await handle_manual_topup_pending_text(update, context):")
     assert source.index("if await handle_broadcast_lite_pending_photo(update, context):") < source.index("if await handle_image_menu_pending_photo(update, context):")
-    assert source.index("if await handle_broadcast_lite_pending_photo(update, context):") < source.index("if await handle_video_editor_pending_upload(update, context):")
+    assert source.index("if await handle_video_editor_pending_upload(update, context):") < source.index("if await handle_broadcast_lite_pending_photo(update, context):")
     assert "asyncio.create_task(enqueue_broadcast_first_start_safe(uid))" in source
     paid = source.split("def process_payos_paid_order", 1)[1].split("# ─── ADMIN ALERT", 1)[0]
     assert paid.index("conn.commit()") < paid.index("enqueue_broadcast_after_first_topup_safe(target_id)") < paid.index('return True, "success", info')

@@ -6,6 +6,7 @@ import hashlib
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -158,6 +159,8 @@ def preprocess_source_video(
     preserve_audio: bool,
     env: dict[str, str] | os._Environ[str] | None = None,
     timeout: int = 600,
+    deadline_monotonic: float | None = None,
+    monotonic: Callable[[], float] | None = None,
     runner: Callable[..., Any] = subprocess.run,
 ) -> dict[str, Any]:
     base = Path(workspace).resolve(strict=False)
@@ -185,8 +188,15 @@ def preprocess_source_video(
         max_width=int(limits["max_width"]), max_height=int(limits["max_height"]),
         target_fps=int(limits["target_fps"]),
     )
+    process_timeout = float(max(30, int(timeout)))
+    if deadline_monotonic is not None:
+        clock = monotonic or time.monotonic
+        remaining = float(deadline_monotonic) - float(clock())
+        if remaining <= 0:
+            raise AiEditValidationError("preprocess_timeout")
+        process_timeout = min(process_timeout, remaining)
     try:
-        result = runner(command, capture_output=True, text=True, timeout=max(30, int(timeout)), check=False)
+        result = runner(command, capture_output=True, text=True, timeout=process_timeout, check=False)
     except subprocess.TimeoutExpired as exc:
         raise AiEditValidationError("preprocess_timeout") from exc
     except (OSError, ValueError) as exc:
@@ -200,6 +210,10 @@ def preprocess_source_video(
         tolerance_ms=max(1500, int(expected_ms * 0.15)) if expected_ms else None,
         require_audio=bool(preserve_audio and probe.get("has_audio")),
         ffprobe_path=ffprobe_path,
+        require_full_decode=True,
+        ffmpeg_path=ffmpeg_path,
+        decode_timeout=timeout,
+        deadline_monotonic=deadline_monotonic,
     )
     if not output_validation.get("ok"):
         raise AiEditValidationError(str(output_validation.get("reason") or "preprocessed_input_invalid"))
@@ -219,8 +233,10 @@ def validate_final_edited_mp4(
     *,
     source_path: str | os.PathLike[str],
     workspace: str | os.PathLike[str],
+    ffmpeg_path: str,
     requested_duration_seconds: int = 0,
     ffprobe_path: str = "",
+    deadline_monotonic: float | None = None,
 ) -> dict[str, Any]:
     if not artifact_delivery_allowed(output_path, workspace=workspace):
         return {"ok": False, "reason": "forbidden_delivery_artifact"}
@@ -230,6 +246,9 @@ def validate_final_edited_mp4(
         expected_duration_ms=expected_ms,
         tolerance_ms=max(2000, int(expected_ms * 0.25)) if expected_ms else None,
         ffprobe_path=ffprobe_path,
+        require_full_decode=True,
+        ffmpeg_path=ffmpeg_path,
+        deadline_monotonic=deadline_monotonic,
     )
     if not validation.get("ok"):
         return validation

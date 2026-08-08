@@ -28,7 +28,7 @@ ENGINE_ROUTE = "local_worker_ffmpeg"
 OUTBOX_OWNER = "local_video_edit"
 WORKER_CAPABILITY = "video_edit"
 HEARTBEAT_TTL_SECONDS = 90
-IDEMPOTENCY_SCHEMA_VERSION = "video-edit-job-identity-v3"
+IDEMPOTENCY_SCHEMA_VERSION = "video-edit-job-identity-v4"
 PLAN_SCHEMA_VERSION = "video-edit-plan-v1"
 TERMINAL_JOB_STATES = frozenset({"delivered", "charged", "failed_no_charge", "delivery_unknown"})
 
@@ -98,7 +98,7 @@ def _valid_ffprobe_receipt(value: Any) -> bool:
 def valid_mp4_delivery_probe(value: Any) -> bool:
     """Public worker/server boundary check for one rendered MP4 probe."""
 
-    return _valid_ffprobe_receipt(value)
+    return _valid_ffprobe_receipt(value) and dict(value or {}).get("full_decode") is True
 
 
 def _path_identity(value: Any) -> str:
@@ -308,6 +308,7 @@ def stable_idempotency_key(
     concat_sources: Any = _MISSING,
     logo_source: Any = _MISSING,
     subtitle_source: Any = _MISSING,
+    audio_sources: Any = _MISSING,
     local1_mode: Any = _MISSING,
     split_mode: Any = _MISSING,
     split_ranges: Any = _MISSING,
@@ -327,6 +328,7 @@ def stable_idempotency_key(
         concat_sources,
         logo_source,
         subtitle_source,
+        audio_sources,
         local1_mode,
         split_mode,
         split_ranges,
@@ -347,6 +349,7 @@ def stable_idempotency_key(
             "concat_sources": [] if concat_sources is _MISSING else concat_sources or [],
             "logo_source": {} if logo_source is _MISSING else logo_source or {},
             "subtitle_source": {} if subtitle_source is _MISSING else subtitle_source or {},
+            "audio_sources": [] if audio_sources is _MISSING else audio_sources or [],
             "local1_mode": str("" if local1_mode is _MISSING else local1_mode or ""),
             "split_mode": str("" if split_mode is _MISSING else split_mode or ""),
             "split_ranges": [] if split_ranges is _MISSING else split_ranges or [],
@@ -355,6 +358,15 @@ def stable_idempotency_key(
             ),
         })
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _historic_pre_audio_plan(plan: dict) -> dict[str, Any]:
+    """Treat only the new empty audio container as absent in old identities."""
+
+    historic_plan = dict(plan or {})
+    if isinstance(historic_plan.get("audio_tracks"), list) and not historic_plan["audio_tracks"]:
+        historic_plan.pop("audio_tracks", None)
+    return historic_plan
 
 
 def _historic_v2_idempotency_key(
@@ -370,13 +382,14 @@ def _historic_v2_idempotency_key(
     concat_sources: Any,
     logo_source: Any,
     subtitle_source: Any,
+    audio_sources: Any = _MISSING,
 ) -> str:
     """Reproduce the immutable identity written by the historic v2 lane."""
 
     material = _json({
         "user_id": str(user_id or ""),
         "edit_session_id": str(edit_session_id or ""),
-        "plan": dict(plan or {}),
+        "plan": _historic_pre_audio_plan(plan),
         "quality_tier_id": str(quality_tier_id or ""),
         "idempotency_schema_version": "video-edit-job-identity-v2",
         "plan_schema_version": str(plan_schema_version or PLAN_SCHEMA_VERSION),
@@ -386,6 +399,47 @@ def _historic_v2_idempotency_key(
         "concat_sources": concat_sources or [],
         "logo_source": logo_source or {},
         "subtitle_source": subtitle_source or {},
+    })
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _historic_v3_idempotency_key(
+    *,
+    user_id: Any,
+    edit_session_id: Any,
+    plan: dict,
+    quality_tier_id: Any,
+    plan_schema_version: Any,
+    source_file_id: Any,
+    source_video_hash: Any,
+    source_manifest: Any,
+    concat_sources: Any,
+    logo_source: Any,
+    subtitle_source: Any,
+    local1_mode: Any,
+    split_mode: Any,
+    split_ranges: Any,
+    coverage_required: Any,
+) -> str:
+    """Reproduce deployed v3 identity material before audio assets were bound."""
+
+    material = _json({
+        "user_id": str(user_id or ""),
+        "edit_session_id": str(edit_session_id or ""),
+        "plan": _historic_pre_audio_plan(plan),
+        "quality_tier_id": str(quality_tier_id or ""),
+        "idempotency_schema_version": "video-edit-job-identity-v3",
+        "plan_schema_version": str(plan_schema_version or PLAN_SCHEMA_VERSION),
+        "source_file_id": str(source_file_id or ""),
+        "source_video_hash": str(source_video_hash or ""),
+        "source_manifest": source_manifest or {},
+        "concat_sources": concat_sources or [],
+        "logo_source": logo_source or {},
+        "subtitle_source": subtitle_source or {},
+        "local1_mode": str(local1_mode or ""),
+        "split_mode": str(split_mode or ""),
+        "split_ranges": split_ranges or [],
+        "coverage_required": bool(coverage_required),
     })
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
@@ -678,9 +732,15 @@ def _preflight_capacity_evidence(
     if not isinstance(concat_sources, list):
         return {"ok": False, "reason": "local_worker_asset_size_missing"}
     asset_records: list[Any] = list(concat_sources)
-    for key in ("logo_source", "subtitle_source"):
+    for key in ("logo_source", "subtitle_source", "audio_sources"):
         record = current.get(key)
-        if record:
+        if key == "audio_sources":
+            if record is None:
+                record = []
+            if not isinstance(record, list):
+                return {"ok": False, "reason": "local_worker_asset_size_missing"}
+            asset_records.extend(record)
+        elif record:
             asset_records.append(record)
     for record in asset_records:
         if not isinstance(record, dict):
@@ -712,6 +772,7 @@ def _preflight_capacity_evidence(
             current.get("logo_source")
             or current.get("subtitle_source")
             or plan.get("text_overlay")
+            or plan.get("watermark_overlay")
             or plan.get("logo_overlay")
             or plan.get("subtitle_file")
         ):
@@ -907,6 +968,7 @@ def preflight(state: dict, runtime: dict) -> dict[str, Any]:
             source_height=source_height,
             logo_source_present=bool(current.get("logo_source")),
             concat_sources_present=bool(current.get("concat_sources")),
+            audio_sources=current.get("audio_sources") or [],
         )
         required_filters = set(contract.get("required_filters") or [])
         split_selected = bool(
@@ -1322,6 +1384,7 @@ def create_job(
             raw_concat_sources = worker_payload.get("concat_sources") or []
             raw_logo_source = worker_payload.get("logo_source") or {}
             raw_subtitle_source = worker_payload.get("subtitle_source") or {}
+            raw_audio_sources = worker_payload.get("audio_sources") or []
             if (
                 not isinstance(raw_concat_sources, list)
                 or any(
@@ -1330,8 +1393,16 @@ def create_job(
                 )
                 or not isinstance(raw_logo_source, dict)
                 or not isinstance(raw_subtitle_source, dict)
+                or not isinstance(raw_audio_sources, list)
+                or len(raw_audio_sources) > 4
                 or (raw_logo_source and not str(raw_logo_source.get("file_id") or "").strip())
                 or (raw_subtitle_source and not str(raw_subtitle_source.get("file_id") or "").strip())
+                or any(
+                    not isinstance(item, dict)
+                    or not str(item.get("file_id") or "").strip()
+                    or str(item.get("kind") or "music").strip().lower() not in {"music", "voice", "sfx"}
+                    for item in raw_audio_sources
+                )
             ):
                 raise ValueError("local_free_asset_contract_invalid")
             if not video_local_editing.manual_plan_assets_match(
@@ -1339,12 +1410,14 @@ def create_job(
                 concat_sources=raw_concat_sources,
                 logo_source=raw_logo_source,
                 subtitle_source=raw_subtitle_source,
+                audio_sources=raw_audio_sources,
             ):
                 raise ValueError("local_free_asset_contract_invalid")
             asset_operation = bool(
                 raw_concat_sources
                 or raw_logo_source.get("file_id")
                 or raw_subtitle_source.get("file_id")
+                or raw_audio_sources
             )
             contract = video_local_editing.validate_manual_edit_plan_contract(
                 plan,
@@ -1355,6 +1428,7 @@ def create_job(
                 source_height=int(dict(source_metadata or {}).get("height") or 0),
                 logo_source_present=bool(raw_logo_source.get("file_id")),
                 concat_sources_present=bool(raw_concat_sources),
+                audio_sources=raw_audio_sources,
             )
             if not contract.get("ok"):
                 contract_reason = str(contract.get("reason") or "edit_plan_invalid")
@@ -1438,6 +1512,7 @@ def create_job(
     concat_sources = list(worker_payload.get("concat_sources") or [])
     logo_source = dict(worker_payload.get("logo_source") or {})
     subtitle_source = dict(worker_payload.get("subtitle_source") or {})
+    audio_sources = list(worker_payload.get("audio_sources") or [])
     local1_mode = str(worker_payload.get("local1_mode") or "manual")
     split_mode = str(
         worker_payload.get("split_mode") or dict(plan or {}).get("split_mode") or ""
@@ -1459,6 +1534,7 @@ def create_job(
         concat_sources=concat_sources,
         logo_source=logo_source,
         subtitle_source=subtitle_source,
+        audio_sources=audio_sources,
         local1_mode=local1_mode,
         split_mode=split_mode,
         split_ranges=split_ranges,
@@ -1499,27 +1575,62 @@ def create_job(
             "status": str(existing[2] or "queued"),
             "idempotency_key": token,
         }
-    legacy_token = _historic_v2_idempotency_key(
-        user_id=user_id,
-        edit_session_id=edit_session_id,
-        plan=plan,
-        quality_tier_id=quality_tier_id,
-        plan_schema_version=plan_schema_version,
-        source_file_id=source_file_id,
-        source_video_hash=source_video_hash,
-        source_manifest=source_manifest,
-        concat_sources=concat_sources,
-        logo_source=logo_source,
-        subtitle_source=subtitle_source,
+    historic_candidates = (
+        (
+            "v3",
+            _historic_v3_idempotency_key(
+                user_id=user_id,
+                edit_session_id=edit_session_id,
+                plan=plan,
+                quality_tier_id=quality_tier_id,
+                plan_schema_version=plan_schema_version,
+                source_file_id=source_file_id,
+                source_video_hash=source_video_hash,
+                source_manifest=source_manifest,
+                concat_sources=concat_sources,
+                logo_source=logo_source,
+                subtitle_source=subtitle_source,
+                local1_mode=local1_mode,
+                split_mode=split_mode,
+                split_ranges=split_ranges,
+                coverage_required=coverage_required,
+            ),
+        ),
+        (
+            "v2",
+            _historic_v2_idempotency_key(
+                user_id=user_id,
+                edit_session_id=edit_session_id,
+                plan=plan,
+                quality_tier_id=quality_tier_id,
+                plan_schema_version=plan_schema_version,
+                source_file_id=source_file_id,
+                source_video_hash=source_video_hash,
+                source_manifest=source_manifest,
+                concat_sources=concat_sources,
+                logo_source=logo_source,
+                subtitle_source=subtitle_source,
+                audio_sources=audio_sources,
+            ),
+        ),
     )
-    legacy = conn.execute(
-        """SELECT id,idempotency_key,local_worker_job_id,status,user_id,chat_id,
-                  edit_session_id,source_file_id,source_metadata_json,plan_json,
-                  tail_json,quality_tier_id,price_xu,product_type,worker_job_type,
-                  engine_route,worker_owner
-           FROM video_edit_jobs WHERE idempotency_key=?""",
-        (legacy_token,),
-    ).fetchone()
+    legacy_version = ""
+    legacy_token = ""
+    legacy = None
+    for candidate_version, candidate_token in historic_candidates:
+        candidate = conn.execute(
+            """SELECT id,idempotency_key,local_worker_job_id,status,user_id,chat_id,
+                      edit_session_id,source_file_id,source_metadata_json,plan_json,
+                      tail_json,quality_tier_id,price_xu,product_type,worker_job_type,
+                      engine_route,worker_owner
+               FROM video_edit_jobs WHERE idempotency_key=?""",
+            (candidate_token,),
+        ).fetchone()
+        if candidate:
+            legacy_version = candidate_version
+            legacy_token = candidate_token
+            legacy = candidate
+            break
     if legacy:
         legacy_metadata = _strict_identity_dict(
             legacy[8], field="source_metadata_json"
@@ -1536,6 +1647,8 @@ def create_job(
             raise ValueError(
                 "legacy_idempotency_identity_unverifiable:canonical_row"
             ) from exc
+        historic_requested_plan = _historic_pre_audio_plan(plan)
+        historic_legacy_plan = _historic_pre_audio_plan(legacy_plan)
         canonical_expected = {
             "idempotency_key": legacy_token,
             "user_id": str(user_id or ""),
@@ -1543,7 +1656,7 @@ def create_job(
             "edit_session_id": str(edit_session_id or ""),
             "source_file_id": str(source_file_id or ""),
             "source_metadata": dict(source_metadata or {}),
-            "plan": dict(plan or {}),
+            "plan": historic_requested_plan,
             "tail": dict(tail or {}),
             "quality_tier_id": str(quality_tier_id or ""),
             "price_xu": normalized_price,
@@ -1559,7 +1672,7 @@ def create_job(
             "edit_session_id": str(legacy[6] or ""),
             "source_file_id": str(legacy[7] or ""),
             "source_metadata": legacy_metadata,
-            "plan": legacy_plan,
+            "plan": historic_legacy_plan,
             "tail": legacy_tail,
             "quality_tier_id": str(legacy[11] or ""),
             "price_xu": legacy_price,
@@ -1619,7 +1732,7 @@ def create_job(
             "edit_session_id": str(edit_session_id or ""),
             "source_file_id": str(source_file_id or ""),
             "quality_tier_id": str(quality_tier_id or ""),
-            "manual_edit_plan": dict(plan or {}),
+            "manual_edit_plan": historic_requested_plan,
             "local1_contract": 1,
             "price_xu": normalized_price,
             "quoted_price_xu": normalized_price,
@@ -1629,7 +1742,14 @@ def create_job(
             ),
         }
         for field, expected_value in queued_contract.items():
-            if queued.get(field, _MISSING) != expected_value:
+            actual_value = queued.get(field, _MISSING)
+            if field == "manual_edit_plan":
+                if not isinstance(actual_value, dict):
+                    raise ValueError(
+                        "legacy_idempotency_identity_unverifiable:manual_edit_plan"
+                    )
+                actual_value = _historic_pre_audio_plan(actual_value)
+            if actual_value != expected_value:
                 raise ValueError(f"legacy_idempotency_identity_mismatch:{field}")
         queued_coverage = queued.get("coverage_required", True)
         if not isinstance(queued_coverage, bool):
@@ -1654,6 +1774,23 @@ def create_job(
             or legacy_plan.get("plan_version")
             or f"local1-contract-{queued.get('local1_contract')}"
         )
+        queued_audio_sources = queued.get("audio_sources", [])
+        if not isinstance(queued_audio_sources, list) or any(
+            not isinstance(item, dict) for item in queued_audio_sources
+        ):
+            raise ValueError(
+                "legacy_idempotency_identity_unverifiable:audio_sources"
+            )
+        queued_concat_sources = list(queued.get("concat_sources") or [])
+        queued_logo_source = dict(queued.get("logo_source") or {})
+        queued_subtitle_source = dict(queued.get("subtitle_source") or {})
+        queued_local1_mode = str(queued.get("local1_mode") or "manual")
+        queued_split_mode = str(
+            queued.get("split_mode") or legacy_plan.get("split_mode") or ""
+        )
+        queued_split_ranges = list(
+            queued.get("split_ranges") or legacy_plan.get("split_ranges") or []
+        )
         recomputed_v2 = _historic_v2_idempotency_key(
             user_id=legacy[4],
             edit_session_id=legacy[6],
@@ -1663,11 +1800,11 @@ def create_job(
             source_file_id=legacy[7],
             source_video_hash=queued_hash,
             source_manifest=queued_manifest,
-            concat_sources=list(queued.get("concat_sources") or []),
-            logo_source=dict(queued.get("logo_source") or {}),
-            subtitle_source=dict(queued.get("subtitle_source") or {}),
+            concat_sources=queued_concat_sources,
+            logo_source=queued_logo_source,
+            subtitle_source=queued_subtitle_source,
         )
-        recomputed_v3 = stable_idempotency_key(
+        recomputed_v3 = _historic_v3_idempotency_key(
             user_id=legacy[4],
             edit_session_id=legacy[6],
             plan=legacy_plan,
@@ -1676,18 +1813,39 @@ def create_job(
             source_file_id=legacy[7],
             source_video_hash=queued_hash,
             source_manifest=queued_manifest,
-            concat_sources=list(queued.get("concat_sources") or []),
-            logo_source=dict(queued.get("logo_source") or {}),
-            subtitle_source=dict(queued.get("subtitle_source") or {}),
-            local1_mode=str(queued.get("local1_mode") or "manual"),
-            split_mode=str(queued.get("split_mode") or legacy_plan.get("split_mode") or ""),
-            split_ranges=list(queued.get("split_ranges") or legacy_plan.get("split_ranges") or []),
+            concat_sources=queued_concat_sources,
+            logo_source=queued_logo_source,
+            subtitle_source=queued_subtitle_source,
+            local1_mode=queued_local1_mode,
+            split_mode=queued_split_mode,
+            split_ranges=queued_split_ranges,
             coverage_required=queued_coverage,
         )
-        if recomputed_v2 != legacy_token:
-            raise ValueError("legacy_idempotency_identity_mismatch:v2_key")
-        if recomputed_v3 != token:
-            raise ValueError("legacy_idempotency_identity_mismatch:v3_key")
+        recomputed_current = stable_idempotency_key(
+            user_id=legacy[4],
+            edit_session_id=legacy[6],
+            plan=plan,
+            quality_tier_id=legacy[11],
+            plan_schema_version=queued_schema,
+            source_file_id=legacy[7],
+            source_video_hash=queued_hash,
+            source_manifest=queued_manifest,
+            concat_sources=queued_concat_sources,
+            logo_source=queued_logo_source,
+            subtitle_source=queued_subtitle_source,
+            audio_sources=queued_audio_sources,
+            local1_mode=queued_local1_mode,
+            split_mode=queued_split_mode,
+            split_ranges=queued_split_ranges,
+            coverage_required=queued_coverage,
+        )
+        expected_historic = recomputed_v3 if legacy_version == "v3" else recomputed_v2
+        if expected_historic != legacy_token:
+            raise ValueError(
+                f"legacy_idempotency_identity_mismatch:{legacy_version}_key"
+            )
+        if recomputed_current != token:
+            raise ValueError("legacy_idempotency_identity_mismatch:v4_key")
         outbox = conn.execute(
             """SELECT id FROM video_edit_outbox
                WHERE edit_job_id=? AND local_worker_job_id=?""",

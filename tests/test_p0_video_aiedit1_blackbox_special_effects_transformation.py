@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+import local_worker
+
 from aiedit1_scope_guard import aiedit1_scope_files
 
 from services import (
@@ -17,6 +19,29 @@ from services import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _is_local_test_scratch(path: str) -> bool:
+    """Ignore root-level basetemp/fixture directories created by local gates."""
+
+    normalized = path.replace("\\", "/")
+    first = normalized.split("/", 1)[0]
+    return (
+        normalized.startswith(("data/tmp/", "video_editor_sessions/"))
+        or first.startswith(
+            (
+                ".cleanup_",
+                ".postmatrix_",
+                ".postrebase_",
+                ".recovery_",
+                ".task",
+                ".videoedit_",
+                ".videoedit-",
+            )
+        )
+    )
+
+
 BOT_SOURCE = (ROOT / "bot.py").read_text(encoding="utf-8")
 WORKER_SOURCE = (ROOT / "local_worker.py").read_text(encoding="utf-8")
 SERVICE_SOURCES = "\n".join(
@@ -46,6 +71,7 @@ def test_aiedit1_changed_files_stay_in_exact_scope():
             line.strip().replace("\\", "/")
             for line in result.stdout.splitlines()
             if line.strip()
+            and not _is_local_test_scratch(line.strip())
             and not line.strip().replace("\\", "/").startswith((".pytest_tmp/", "pytest-baseline-r1/"))
         )
     assert changed <= aiedit1_scope_files(changed)
@@ -380,6 +406,88 @@ def test_aiedit1_poll_interval_respected():
     assert sleeps == [5, 5]
 
 
+def test_aiedit1_provider_network_calls_use_the_shared_remaining_deadline(
+    tmp_path,
+):
+    source = tmp_path / "source.mp4"
+    output = tmp_path / "output.mp4"
+    source.write_bytes(b"video")
+    observed_timeouts = []
+
+    provider.submit_video_edit(
+        valid_config(),
+        source_video_path=str(source),
+        prompt="edit",
+        negative_prompt="",
+        aspect_ratio="9:16",
+        duration_seconds=8,
+        job_id="deadline-job",
+        submit_source=provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+        public_user_confirmed=True,
+        deadline_monotonic=105.0,
+        monotonic=lambda: 100.0,
+        opener=lambda _request, timeout=0: (
+            observed_timeouts.append(float(timeout))
+            or JsonResponse({"data": {"task_id": "task-1", "status": "PENDING"}})
+        ),
+    )
+    provider.poll_video_edit(
+        valid_config(),
+        "task-1",
+        deadline_monotonic=104.0,
+        monotonic=lambda: 100.0,
+        opener=lambda _request, timeout=0: (
+            observed_timeouts.append(float(timeout))
+            or JsonResponse({"data": {"task_id": "task-1", "status": "RUNNING"}})
+        ),
+    )
+
+    class BinaryResponse:
+        status = 200
+
+        def __init__(self):
+            self._chunks = iter((b"edited-video", b""))
+
+        def read(self, _size):
+            return next(self._chunks)
+
+    provider.download_result(
+        "https://result.test/output.mp4",
+        str(output),
+        deadline_monotonic=103.0,
+        monotonic=lambda: 100.0,
+        opener=lambda _request, timeout=0: (
+            observed_timeouts.append(float(timeout)) or BinaryResponse()
+        ),
+    )
+
+    assert observed_timeouts == [5.0, 4.0, 3.0]
+    assert output.read_bytes() == b"edited-video"
+
+
+def test_aiedit1_provider_wait_never_outlives_the_shared_deadline():
+    clock = [100.0]
+    sleeps = []
+    polls = []
+
+    def sleeper(seconds):
+        sleeps.append(float(seconds))
+        clock[0] += float(seconds)
+
+    with pytest.raises(provider.AiEditProviderError, match="provider_deadline_exceeded"):
+        provider.wait_for_result(
+            valid_config(),
+            "task-1",
+            deadline_monotonic=104.0,
+            poller=lambda *_args, **_kwargs: polls.append(True) or {"status": "running"},
+            sleeper=sleeper,
+            now=lambda: clock[0],
+        )
+
+    assert sleeps == [4.0]
+    assert polls == []
+
+
 def test_aiedit1_no_fallback_while_primary_alive():
     decision = provider.controlled_fallback_decision(public_confirm_provenance=True, primary_status="running", primary_task_alive=True, fallback_count=0, candidate=valid_config())
     assert decision["allowed"] is False
@@ -431,10 +539,338 @@ def test_aiedit1_preprocessed_input_validated(monkeypatch, tmp_path):
     assert result["ok"] is True and output.exists()
 
 
+def test_aiedit1_preprocess_and_full_decode_share_one_remaining_deadline(
+    monkeypatch,
+    tmp_path,
+):
+    source, output = tmp_path / "source.mov", tmp_path / "output.mp4"
+    source.write_bytes(b"source")
+    observed = {"runner_timeouts": [], "validation": []}
+    monkeypatch.setattr(
+        validation.video_local_validation,
+        "probe_video_file",
+        lambda *_a, **_k: metadata(),
+    )
+
+    def validate_output(*_args, **kwargs):
+        observed["validation"].append(dict(kwargs))
+        return {"ok": True, "duration_ms": 8_000, "full_decode": True}
+
+    monkeypatch.setattr(
+        validation.video_local_validation,
+        "validate_mp4_output",
+        validate_output,
+    )
+    monkeypatch.setattr(
+        validation.video_local_validation,
+        "enforce_workspace_limit",
+        lambda *_a, **_k: None,
+    )
+
+    def runner(command, **kwargs):
+        observed["runner_timeouts"].append(float(kwargs["timeout"]))
+        Path(command[-1]).write_bytes(b"normalized")
+        return SimpleNamespace(returncode=0)
+
+    result = validation.preprocess_source_video(
+        str(source),
+        str(output),
+        workspace=tmp_path,
+        ffmpeg_path="ffmpeg",
+        ffprobe_path="ffprobe",
+        target_duration_seconds=8,
+        preserve_audio=True,
+        timeout=600,
+        deadline_monotonic=105.0,
+        monotonic=lambda: 100.0,
+        runner=runner,
+    )
+
+    assert result["ok"] is True
+    assert observed["runner_timeouts"] == [5.0]
+    assert observed["validation"][0]["deadline_monotonic"] == 105.0
+
+
+def test_aiedit1_final_validation_forwards_the_shared_deadline(
+    monkeypatch,
+    tmp_path,
+):
+    source, output = tmp_path / "source.mp4", tmp_path / "output.mp4"
+    source.write_bytes(b"source")
+    output.write_bytes(b"different")
+    observed = {}
+
+    def validate_output(*_args, **kwargs):
+        observed.update(kwargs)
+        return {"ok": True, "full_decode": True}
+
+    monkeypatch.setattr(
+        validation.video_local_validation,
+        "validate_mp4_output",
+        validate_output,
+    )
+
+    result = validation.validate_final_edited_mp4(
+        output,
+        source_path=source,
+        workspace=tmp_path,
+        ffmpeg_path="ffmpeg",
+        ffprobe_path="ffprobe",
+        deadline_monotonic=205.0,
+    )
+
+    assert result["ok"] is True
+    assert observed["deadline_monotonic"] == 205.0
+
+
+def test_aiedit1_final_validation_uses_the_worker_resolved_ffmpeg_path(
+    monkeypatch,
+    tmp_path,
+):
+    source, output = tmp_path / "source.mp4", tmp_path / "output.mp4"
+    source.write_bytes(b"source")
+    output.write_bytes(b"different")
+    observed = {}
+
+    def validate_output(*_args, **kwargs):
+        observed.update(kwargs)
+        return {"ok": True, "full_decode": True}
+
+    monkeypatch.setattr(
+        validation.video_local_validation,
+        "validate_mp4_output",
+        validate_output,
+    )
+    monkeypatch.setattr(
+        validation.video_local_validation,
+        "find_ffmpeg",
+        lambda *_args, **_kwargs: pytest.fail(
+            "final validation must not rediscover a different FFmpeg binary"
+        ),
+    )
+
+    result = validation.validate_final_edited_mp4(
+        output,
+        source_path=source,
+        workspace=tmp_path,
+        ffprobe_path="worker-resolved-ffprobe",
+        ffmpeg_path="worker-resolved-ffmpeg",
+    )
+
+    assert result["ok"] is True
+    assert observed["ffprobe_path"] == "worker-resolved-ffprobe"
+    assert observed["ffmpeg_path"] == "worker-resolved-ffmpeg"
+
+
 def test_aiedit1_workspace_cleanup():
     run = source_between(WORKER_SOURCE, "def run_video_ai_edit", "def run_social_link_import")
     assert "cleanup_job_workspace(workspace)" in run
     assert "finally:" in run
+
+
+def test_aiedit1_worker_shares_one_deadline_with_render_and_full_decode():
+    run = source_between(WORKER_SOURCE, "def run_video_ai_edit", "def run_social_link_import")
+    deadline = run.index("deadline_monotonic =")
+    local_render = run.index("execute_manual_edit(")
+    preprocess = run.index("preprocess_source_video(")
+    final_validation = run.index("validate_final_edited_mp4(")
+
+    assert deadline < local_render < preprocess < final_validation
+    assert "time.monotonic() + render_timeout" in run
+    assert run.count("deadline_monotonic=deadline_monotonic") >= 3
+
+
+def test_aiedit1_worker_forwards_the_resolved_ffmpeg_to_final_validation():
+    run = source_between(WORKER_SOURCE, "def run_video_ai_edit", "def run_social_link_import")
+    validation_call = run[
+        run.index("validation = video_ai_edit_validation.validate_final_edited_mp4(") :
+    ]
+    validation_call = validation_call[: validation_call.index("\n        )")]
+
+    assert "ffmpeg_path=ffmpeg" in validation_call
+
+
+def test_aiedit1_worker_forwards_one_deadline_to_provider_download_and_delivery():
+    submit_wait = source_between(
+        WORKER_SOURCE,
+        "def _aiedit_submit_and_wait",
+        "def run_video_ai_edit",
+    )
+    run = source_between(WORKER_SOURCE, "def run_video_ai_edit", "def run_social_link_import")
+
+    assert "deadline_monotonic" in submit_wait.split(") -> dict:", 1)[0]
+    assert "deadline_monotonic=deadline_monotonic" in submit_wait
+    assert run.count("deadline_monotonic=deadline_monotonic") >= 7
+    assert "download_result(\n                result_url,\n                str(output_path),\n                deadline_monotonic=deadline_monotonic," in run
+    delivery = run[run.index("receipt = telegram_send_video_receipt(") :]
+    delivery_call = delivery[: delivery.index("\n        )")]
+    assert "deadline_monotonic=deadline_monotonic" in delivery_call
+
+
+def _ai_worker_job(**payload_overrides):
+    payload = {
+        "aiedit1_contract": 1,
+        "execution_lane": "local",
+        "public_user_confirmed": True,
+        "source_file_id": "telegram-ai-source",
+        "source_file_name": "source.mp4",
+        "chat_id": "702",
+        "max_render_seconds": 5,
+        "target_duration_seconds": 4,
+        "preserve_source_audio": True,
+        "price_xu": 0,
+    }
+    payload.update(payload_overrides)
+    return {
+        "id": 703,
+        "input_file_id": json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+    }
+
+
+def _patch_ai_worker_foundation(monkeypatch, tmp_path, updates):
+    ffmpeg = tmp_path / "ffmpeg.exe"
+    ffprobe = tmp_path / "ffprobe.exe"
+    ffmpeg.write_bytes(b"ffmpeg")
+    ffprobe.write_bytes(b"ffprobe")
+    monkeypatch.setattr(local_worker.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(
+        local_worker.video_ai_edit_provider,
+        "submit_source_policy",
+        lambda *_args, **_kwargs: {"allowed": True},
+    )
+    monkeypatch.setattr(local_worker, "local_ffmpeg_path", lambda: str(ffmpeg))
+    monkeypatch.setattr(
+        local_worker,
+        "find_ffprobe",
+        lambda *_args, **_kwargs: str(ffprobe),
+    )
+    monkeypatch.setattr(local_worker, "create_job_workspace", lambda *_args: tmp_path)
+    monkeypatch.setattr(local_worker, "cleanup_job_workspace", lambda *_args: {"ok": True})
+    monkeypatch.setattr(local_worker, "_aiedit_progress", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        local_worker,
+        "_video_edit_telegram_media_config",
+        lambda: SimpleNamespace(is_local=True),
+    )
+
+    def capture_update(job_id, status_value, detail, **kwargs):
+        updates.append(
+            {
+                "job_id": job_id,
+                "status": status_value,
+                "detail": json.loads(detail),
+                "kwargs": kwargs,
+            }
+        )
+        return {"ok": True}
+
+    monkeypatch.setattr(local_worker, "update_job", capture_update)
+
+
+def test_aiedit1_absolute_deadline_covers_source_download_and_probe(
+    monkeypatch,
+    tmp_path,
+):
+    updates = []
+    observed = {"legacy_download": False}
+    _patch_ai_worker_foundation(monkeypatch, tmp_path, updates)
+    source = tmp_path / "source.mp4"
+
+    def legacy_download(*_args, **_kwargs):
+        observed["legacy_download"] = True
+        source.write_bytes(b"source")
+        return str(source)
+
+    def deadline_download(*_args, **kwargs):
+        observed["download_deadline"] = kwargs.get("deadline_monotonic")
+        source.write_bytes(b"source")
+        return SimpleNamespace(path=str(source))
+
+    def stop_after_probe(*_args, **kwargs):
+        observed["probe_deadline"] = kwargs.get("deadline_monotonic")
+        raise validation.AiEditValidationError("stop_after_probe")
+
+    monkeypatch.setattr(local_worker, "_local1_download_asset", legacy_download)
+    monkeypatch.setattr(local_worker, "_video_edit_download_asset", deadline_download)
+    monkeypatch.setattr(
+        local_worker.video_local_validation,
+        "probe_video_file",
+        stop_after_probe,
+    )
+
+    local_worker.run_video_ai_edit(_ai_worker_job())
+
+    assert observed["legacy_download"] is False
+    assert observed["download_deadline"] == 105.0
+    assert observed["probe_deadline"] == 105.0
+    assert updates[-1]["detail"]["reason"] == "stop_after_probe"
+
+
+def test_aiedit1_ambiguous_delivery_is_persisted_as_delivery_unknown(
+    monkeypatch,
+    tmp_path,
+):
+    updates = []
+    _patch_ai_worker_foundation(monkeypatch, tmp_path, updates)
+    source = tmp_path / "source.mp4"
+
+    def materialize_source(*_args, **_kwargs):
+        source.write_bytes(b"source")
+        return SimpleNamespace(path=str(source))
+
+    def materialize_legacy_source(*_args, **_kwargs):
+        source.write_bytes(b"source")
+        return str(source)
+
+    def render_local(_plan, *, output_path, **_kwargs):
+        Path(output_path).write_bytes(b"edited-video")
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        local_worker,
+        "_video_edit_download_asset",
+        materialize_source,
+    )
+    monkeypatch.setattr(
+        local_worker,
+        "_local1_download_asset",
+        materialize_legacy_source,
+    )
+    monkeypatch.setattr(
+        local_worker.video_local_validation,
+        "probe_video_file",
+        lambda *_args, **_kwargs: metadata(),
+    )
+    monkeypatch.setattr(
+        local_worker.video_ai_edit_validation,
+        "validate_input_metadata",
+        lambda *_args, **_kwargs: {"ok": True},
+    )
+    monkeypatch.setattr(local_worker, "_aiedit_local_plan", lambda *_args: {})
+    monkeypatch.setattr(local_worker, "execute_manual_edit", render_local)
+    monkeypatch.setattr(
+        local_worker.video_ai_edit_validation,
+        "validate_final_edited_mp4",
+        lambda *_args, **_kwargs: {"ok": True, "artifact_size": 12},
+    )
+    monkeypatch.setattr(
+        local_worker,
+        "telegram_send_video_receipt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("telegram_delivery_outcome_uncertain")
+        ),
+    )
+
+    local_worker.run_video_ai_edit(_ai_worker_job())
+
+    assert updates[-1]["status"] == "failed"
+    assert updates[-1]["detail"]["stage"] == "delivery_unknown"
+    assert updates[-1]["detail"]["reason"] == "telegram_delivery_outcome_uncertain"
+    assert updates[-1]["detail"]["charge"] == 0
 
 
 def test_aiedit1_http_200_without_result_not_success():
@@ -452,7 +888,12 @@ def test_aiedit1_zero_byte_mp4_not_success(monkeypatch, tmp_path):
     source.write_bytes(b"source")
     output.write_bytes(b"")
     monkeypatch.setattr(validation.video_local_validation, "validate_mp4_output", lambda *_a, **_k: {"ok": False, "reason": "zero_bytes"})
-    assert validation.validate_final_edited_mp4(output, source_path=source, workspace=tmp_path)["ok"] is False
+    assert validation.validate_final_edited_mp4(
+        output,
+        source_path=source,
+        workspace=tmp_path,
+        ffmpeg_path="ffmpeg",
+    )["ok"] is False
 
 
 def test_aiedit1_original_input_not_accepted_as_edited_output(monkeypatch, tmp_path):
@@ -460,7 +901,12 @@ def test_aiedit1_original_input_not_accepted_as_edited_output(monkeypatch, tmp_p
     source.write_bytes(b"same")
     output.write_bytes(b"same")
     monkeypatch.setattr(validation.video_local_validation, "validate_mp4_output", lambda *_a, **_k: {"ok": True})
-    result = validation.validate_final_edited_mp4(output, source_path=source, workspace=tmp_path)
+    result = validation.validate_final_edited_mp4(
+        output,
+        source_path=source,
+        workspace=tmp_path,
+        ffmpeg_path="ffmpeg",
+    )
     assert result["reason"] == "original_input_returned_as_edit"
 
 
@@ -473,7 +919,13 @@ def test_aiedit1_duration_validation(monkeypatch, tmp_path):
         seen.update(kwargs)
         return {"ok": True}
     monkeypatch.setattr(validation.video_local_validation, "validate_mp4_output", validator)
-    assert validation.validate_final_edited_mp4(output, source_path=source, workspace=tmp_path, requested_duration_seconds=8)["ok"] is True
+    assert validation.validate_final_edited_mp4(
+        output,
+        source_path=source,
+        workspace=tmp_path,
+        ffmpeg_path="ffmpeg",
+        requested_duration_seconds=8,
+    )["ok"] is True
     assert seen["expected_duration_ms"] == 8000
 
 

@@ -7,9 +7,10 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import zipfile
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 
 def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -38,6 +39,7 @@ MAX_OUTPUT_HEIGHT = 1920
 ALLOWED_SOURCE_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
 ALLOWED_LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 ALLOWED_SUBTITLE_EXTENSIONS = {".srt"}
+ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac", ".opus"}
 ALLOWED_OUTPUT_EXTENSIONS = {".mp4"}
 FORBIDDEN_DELIVERY_EXTENSIONS = {".db", ".sqlite", ".sqlite3", ".env", ".log", ".bak"}
 _SAFE_JOB_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
@@ -211,7 +213,14 @@ def _fps(value: str) -> float:
         return 0.0
 
 
-def probe_video_file(path: str | os.PathLike[str], *, ffprobe_path: str = "", timeout: int = 45) -> dict[str, Any]:
+def probe_video_file(
+    path: str | os.PathLike[str],
+    *,
+    ffprobe_path: str = "",
+    timeout: int = 45,
+    deadline_monotonic: float | None = None,
+    monotonic: Callable[[], float] | None = None,
+) -> dict[str, Any]:
     target = _resolve(path)
     if not target.is_file():
         return {"ok": False, "reason": "input_missing"}
@@ -228,8 +237,24 @@ def probe_video_file(path: str | os.PathLike[str], *, ffprobe_path: str = "", ti
         "-of", "json",
         str(target),
     ]
+    probe_timeout = float(max(1, int(timeout)))
+    if deadline_monotonic is not None:
+        clock = monotonic or time.monotonic
+        try:
+            remaining = float(deadline_monotonic) - float(clock())
+        except (TypeError, ValueError, OverflowError):
+            return {"ok": False, "reason": "ffprobe_timeout", "bytes": size}
+        if remaining <= 0:
+            return {"ok": False, "reason": "ffprobe_timeout", "bytes": size}
+        probe_timeout = min(probe_timeout, remaining)
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=max(1, int(timeout)), check=False)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=probe_timeout,
+            check=False,
+        )
     except subprocess.TimeoutExpired:
         return {"ok": False, "reason": "ffprobe_timeout", "bytes": size}
     except (OSError, ValueError) as exc:
@@ -269,6 +294,64 @@ def probe_video_file(path: str | os.PathLike[str], *, ffprobe_path: str = "", ti
     }
 
 
+def full_decode_video_file(
+    path: str | os.PathLike[str],
+    *,
+    ffmpeg_path: str = "",
+    timeout: int = 45,
+    deadline_monotonic: float | None = None,
+    monotonic: Callable[[], float] | None = None,
+) -> dict[str, Any]:
+    """Decode every video/audio packet before an artifact becomes terminal."""
+
+    target = _resolve(path)
+    if not target.is_file() or target.stat().st_size <= 0:
+        return {"ok": False, "full_decode": False, "reason": "output_missing"}
+    ffmpeg = find_ffmpeg(ffmpeg_path)
+    if not ffmpeg:
+        return {"ok": False, "full_decode": False, "reason": "ffmpeg_missing"}
+    command = [
+        ffmpeg,
+        "-v", "error",
+        "-xerror",
+        "-i", str(target),
+        "-map", "0:v:0",
+        "-map", "0:a:0?",
+        "-f", "null",
+        "-",
+    ]
+    decode_timeout = float(max(1, int(timeout or 1)))
+    if deadline_monotonic is not None:
+        clock = monotonic or time.monotonic
+        remaining = float(deadline_monotonic) - float(clock())
+        if remaining <= 0:
+            return {
+                "ok": False,
+                "full_decode": False,
+                "reason": "output_full_decode_timeout",
+            }
+        decode_timeout = min(decode_timeout, remaining)
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=decode_timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "full_decode": False, "reason": "output_full_decode_timeout"}
+    except (OSError, ValueError) as exc:
+        return {
+            "ok": False,
+            "full_decode": False,
+            "reason": f"output_full_decode_exec_failed:{type(exc).__name__}",
+        }
+    if int(getattr(result, "returncode", 1)) != 0:
+        return {"ok": False, "full_decode": False, "reason": "output_full_decode_failed"}
+    return {"ok": True, "full_decode": True, "reason": ""}
+
+
 def validate_source_metadata(
     metadata: dict[str, Any],
     *,
@@ -295,6 +378,10 @@ def validate_mp4_output(
     tolerance_ms: int | None = None,
     require_audio: bool = False,
     ffprobe_path: str = "",
+    require_full_decode: bool = False,
+    ffmpeg_path: str = "",
+    decode_timeout: int = 45,
+    deadline_monotonic: float | None = None,
 ) -> dict[str, Any]:
     target = _resolve(path)
     if target.suffix.lower() != ".mp4":
@@ -328,7 +415,23 @@ def validate_mp4_output(
                 "duration_delta_ms": actual - expected,
                 "tolerance_ms": tolerance,
             }
-    return {**probe, "ok": True, "reason": "", "expected_duration_ms": expected}
+    result = {**probe, "ok": True, "reason": "", "expected_duration_ms": expected}
+    if require_full_decode:
+        decoded = full_decode_video_file(
+            target,
+            ffmpeg_path=ffmpeg_path,
+            timeout=decode_timeout,
+            deadline_monotonic=deadline_monotonic,
+        )
+        if not decoded.get("ok"):
+            return {
+                **result,
+                "ok": False,
+                "full_decode": False,
+                "reason": str(decoded.get("reason") or "output_full_decode_failed"),
+            }
+        result["full_decode"] = True
+    return result
 
 
 def validate_srt_file(path: str | os.PathLike[str], *, workspace: str | os.PathLike[str] | None = None) -> dict[str, Any]:
@@ -346,8 +449,23 @@ def validate_srt_file(path: str | os.PathLike[str], *, workspace: str | os.PathL
         text = target.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeError):
         return {"ok": False, "reason": "subtitle_read_failed"}
-    timing_lines = _SRT_TIME.findall(text)
-    if not timing_lines or not re.search(r"(?m)^\s*\d+\s*$", text):
+    blocks = [
+        block
+        for block in re.split(r"\r?\n\s*\r?\n", text.strip())
+        if block.strip()
+    ]
+    timing_lines: list[str] = []
+    for block in blocks:
+        lines = block.splitlines()
+        if (
+            len(lines) < 3
+            or not lines[0].strip().isdigit()
+            or _SRT_TIME.fullmatch(lines[1].strip()) is None
+            or not "\n".join(lines[2:]).strip()
+        ):
+            return {"ok": False, "reason": "subtitle_format_invalid"}
+        timing_lines.append(lines[1].strip())
+    if not timing_lines:
         return {"ok": False, "reason": "subtitle_format_invalid"}
 
     def timestamp_ms(value: str) -> int:

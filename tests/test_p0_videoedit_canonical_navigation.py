@@ -72,7 +72,10 @@ def test_videoedit_parent_matrix_is_exact() -> None:
     assert machine.parent_callback("color") == "videoedit|workspace"
     assert machine.parent_callback("overlay") == "videoedit|workspace"
     assert machine.parent_callback("text_input") == "videoedit|overlay"
-    assert machine.parent_callback("logo_input") == "videoedit|overlay"
+    assert machine.parent_callback("branding") == "videoedit|workspace"
+    assert machine.parent_callback("logo_input") == "videoedit|branding"
+    assert machine.parent_callback("watermark_input") == "videoedit|branding"
+    assert machine.parent_callback("watermark_options") == "videoedit|branding"
     assert machine.parent_callback("srt_input") == "videoedit|overlay"
     assert machine.parent_callback("effects") == "videoedit|workspace"
     assert machine.parent_callback("effect_detail") == "videoedit|effects"
@@ -94,7 +97,10 @@ def test_videoedit_review_back_uses_the_saved_exact_parent() -> None:
         "cut": "videoedit|cut",
         "join": "videoedit|join",
         "audio": "videoedit|audio",
+        "overlay": "videoedit|overlay",
+        "branding": "videoedit|branding",
         "logo_options": "videoedit|logo_options",
+        "watermark_options": "videoedit|watermark_options",
         "effects": "videoedit|effects",
         "split": "videoedit|split",
         "options": "videoedit|workspace",
@@ -109,9 +115,12 @@ def test_videoedit_review_back_uses_the_saved_exact_parent() -> None:
 
 
 def test_videoedit_logo_options_is_a_canonical_resumable_screen() -> None:
-    assert machine.parent_callback("logo_options") == "videoedit|overlay"
+    assert machine.parent_callback("logo_options") == "videoedit|branding"
     assert machine.screen_callback("logo_options") == "videoedit|logo_options"
     assert machine.resume_callback("logo_options", "") == "videoedit|logo_options"
+    assert machine.screen_callback("branding") == "videoedit|branding"
+    assert machine.screen_callback("watermark_options") == "videoedit|watermark_options"
+    assert machine.resume_callback("watermark_options", "") == "videoedit|watermark_options"
 
 
 def test_videoedit_audio_upload_starts_a_fresh_audio_intake() -> None:
@@ -185,7 +194,13 @@ def test_videoedit_live_actions_are_not_rewritten_as_legacy_redirects() -> None:
         "volume",
         "color_preset",
         "text_overlay",
+        "branding",
+        "logo_entry",
         "logo",
+        "watermark_entry",
+        "watermark_text",
+        "watermark_options",
+        "watermark_remove",
         "srt",
         "review",
     ):
@@ -200,6 +215,7 @@ def test_videoedit_source_info_resumes_the_exact_input_screen() -> None:
     assert machine.resume_callback("reorder_input", "concat_order") == "videoedit|reorder"
     assert machine.resume_callback("text_input", "text_overlay") == "videoedit|text_overlay"
     assert machine.resume_callback("logo_input", "logo") == "videoedit|logo"
+    assert machine.resume_callback("watermark_input", "watermark_text") == "videoedit|watermark_text"
     assert machine.resume_callback("srt_input", "srt") == "videoedit|srt"
     assert machine.resume_callback("choose_aspect") == "videoedit|aspect"
     assert machine.resume_callback("choose_resolution") == "videoedit|resolution"
@@ -215,6 +231,7 @@ def test_videoedit_requested_group_resumes_exact_screen_after_upload() -> None:
         "audio": "audio",
         "effects": "effects",
         "overlay": "overlay",
+        "branding": "branding",
         "color": "color",
         "review": "review",
     }

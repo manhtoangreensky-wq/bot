@@ -186,6 +186,41 @@ def _historic_v2_token(payload: dict) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _historic_v3_token(payload: dict) -> str:
+    """Reproduce the deployed v3 identity before audio_sources was added."""
+
+    worker = payload["worker_payload"]
+    material = {
+        "user_id": str(payload["user_id"]),
+        "edit_session_id": str(payload["edit_session_id"]),
+        "plan": payload["plan"],
+        "quality_tier_id": str(payload["quality_tier_id"]),
+        "idempotency_schema_version": "video-edit-job-identity-v3",
+        "plan_schema_version": worker["plan_schema_version"],
+        "source_file_id": payload["source_file_id"],
+        "source_video_hash": worker["source_video_hash"],
+        "source_manifest": worker["source_manifest"],
+        "concat_sources": worker["concat_sources"],
+        "logo_source": worker["logo_source"],
+        "subtitle_source": worker["subtitle_source"],
+        "local1_mode": str(worker.get("local1_mode") or "manual"),
+        "split_mode": str(
+            worker.get("split_mode") or payload["plan"].get("split_mode") or ""
+        ),
+        "split_ranges": list(
+            worker.get("split_ranges") or payload["plan"].get("split_ranges") or []
+        ),
+        "coverage_required": worker.get("coverage_required", True),
+    }
+    encoded = json.dumps(
+        material,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _rewrite_as_historic_v2(
     conn: sqlite3.Connection,
     created: dict,
@@ -203,6 +238,41 @@ def _rewrite_as_historic_v2(
     conn.execute(
         "UPDATE local_worker_jobs SET input_file_id=? WHERE id=?",
         (json.dumps(queued, ensure_ascii=False, separators=(",", ":"), sort_keys=True), worker_job_id),
+    )
+    conn.execute(
+        "UPDATE video_edit_jobs SET idempotency_key=? WHERE id=?",
+        (token, created["edit_job_id"]),
+    )
+    conn.commit()
+    return token
+
+
+def _rewrite_as_historic_v3(
+    conn: sqlite3.Connection,
+    created: dict,
+    payload: dict,
+) -> str:
+    token = _historic_v3_token(payload)
+    worker_job_id = created["local_worker_job_id"]
+    queued = json.loads(
+        conn.execute(
+            "SELECT input_file_id FROM local_worker_jobs WHERE id=?",
+            (worker_job_id,),
+        ).fetchone()[0]
+    )
+    queued.pop("audio_sources", None)
+    queued["edit_idempotency_key"] = token
+    conn.execute(
+        "UPDATE local_worker_jobs SET input_file_id=? WHERE id=?",
+        (
+            json.dumps(
+                queued,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            worker_job_id,
+        ),
     )
     conn.execute(
         "UPDATE video_edit_jobs SET idempotency_key=? WHERE id=?",
@@ -691,6 +761,96 @@ def test_exact_historic_v2_retry_reuses_the_original_job_without_rewriting() -> 
         "SELECT idempotency_key FROM video_edit_jobs WHERE id=?",
         (created["edit_job_id"],),
     ).fetchone()[0] == historic_token
+
+
+def test_exact_historic_v3_retry_reuses_original_job_worker_and_outbox() -> None:
+    conn = _conn()
+    payload = _job_input()
+    created = _create(conn, payload)
+    historic_token = _rewrite_as_historic_v3(conn, created, payload)
+
+    retried = video_editengine1.create_job(conn, **deepcopy(payload))
+
+    assert retried["created"] is False
+    assert retried["edit_job_id"] == created["edit_job_id"]
+    assert retried["local_worker_job_id"] == created["local_worker_job_id"]
+    assert retried["idempotency_key"] == historic_token
+    assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM video_edit_outbox").fetchone()[0] == 1
+    assert conn.execute(
+        "SELECT charge_state,charged_xu FROM video_edit_jobs WHERE id=?",
+        (created["edit_job_id"],),
+    ).fetchone() == ("not_charged", 0)
+    assert video_editengine1.IDEMPOTENCY_SCHEMA_VERSION == "video-edit-job-identity-v4"
+
+
+@pytest.mark.parametrize(
+    ("historic_version", "token_builder"),
+    [
+        ("v2", _historic_v2_token),
+        ("v3", _historic_v3_token),
+    ],
+)
+def test_pre_audio_historic_retry_ignores_only_the_new_empty_audio_track_container(
+    historic_version,
+    token_builder,
+) -> None:
+    conn = _conn()
+    payload = _job_input()
+    payload["plan"]["audio_tracks"] = []
+    payload["worker_payload"]["audio_sources"] = []
+    created = _create(conn, payload)
+
+    historic_payload = deepcopy(payload)
+    historic_payload["plan"].pop("audio_tracks", None)
+    historic_token = token_builder(historic_payload)
+    worker_job_id = created["local_worker_job_id"]
+    queued = json.loads(
+        conn.execute(
+            "SELECT input_file_id FROM local_worker_jobs WHERE id=?",
+            (worker_job_id,),
+        ).fetchone()[0]
+    )
+    queued["manual_edit_plan"] = deepcopy(historic_payload["plan"])
+    queued.pop("audio_sources", None)
+    queued["edit_idempotency_key"] = historic_token
+    conn.execute(
+        "UPDATE local_worker_jobs SET input_file_id=? WHERE id=?",
+        (
+            json.dumps(
+                queued,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            worker_job_id,
+        ),
+    )
+    conn.execute(
+        "UPDATE video_edit_jobs SET idempotency_key=?,plan_json=? WHERE id=?",
+        (
+            historic_token,
+            json.dumps(
+                historic_payload["plan"],
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            created["edit_job_id"],
+        ),
+    )
+    conn.commit()
+
+    retried = video_editengine1.create_job(conn, **deepcopy(payload))
+
+    assert retried["created"] is False, historic_version
+    assert retried["edit_job_id"] == created["edit_job_id"]
+    assert retried["local_worker_job_id"] == worker_job_id
+    assert retried["idempotency_key"] == historic_token
+    assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM video_edit_outbox").fetchone()[0] == 1
 
 
 def test_historic_v2_candidate_with_changed_v3_identity_fails_closed() -> None:
