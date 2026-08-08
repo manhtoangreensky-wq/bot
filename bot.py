@@ -114,7 +114,7 @@ from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit
 from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
 from services import video_profile_context_engine
 from services import frame_video_commercial, frame_video_flow, frame_video_public_seam, frame_video_runtime
-from services import video_addon_planner, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_selfshot_local_analysis, video_selfshotflow4, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uifreeze1
+from services import video_addon_planner, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_selfshot_local_analysis, video_selfshotflow4, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uiflow3, video_uifreeze1
 from services import ui_navigation
 from services import local_video_studio_preview
 from services import local_video_studio_public
@@ -67660,7 +67660,7 @@ async def safe_mode_callback_guard(update: Update, context: ContextTypes.DEFAULT
 
 VIDEO_PUBLIC_CALLBACK_DEDUPE_TTL_SECONDS = 10 * 60
 VIDEO_PUBLIC_CALLBACK_PREFIXES = (
-    "vproduct|", "vprofile|", "framevideo|", "vpromptlib|", "videoidea|",
+    "vid3|", "vproduct|", "vprofile|", "framevideo|", "vpromptlib|", "videoidea|",
     "longvideo|", "vdownload|", "videoedit|", "trendg|", "tvflow|",
     "motion|", "adconcept|", "promptvideo|", "imagevideo|", "videoref|",
     "videodub|", "marketing|", "selfscene|", "storypack|", "videa|",
@@ -70687,6 +70687,1532 @@ VIDEO_SCENE2_LEGACY_PLANNING_CALLBACKS = frozenset({
     "b14_scene_count",
     "b14_scene_custom",
 })
+
+
+VIDEO_UIFLOW3_STATE_KEY = "video_uiflow3"
+VIDEO_UIFLOW3_PRODUCT_LABELS = {
+    "video_trend": "Video theo trend",
+    "video_ai_real": "Video AI chan that",
+    "script_image_video": "Kich ban -> Video",
+    "frame_video_local": "Ghep anh thanh video",
+    "self_shot_scene_change": "Video tu quay",
+    "storyboard_prompt": "Storyboard",
+    "multi_scene_film": "Video dai tap",
+}
+VIDEO_UIFLOW3_VOICE_ALIASES = {
+    "auto": "",
+    "vf1": "vi-VN-HoaiMyNeural",
+    "vm1": "vi-VN-NamMinhNeural",
+}
+VIDEO_UIFLOW3_STEP_ACTIONS = {
+    "entry": {"mode"},
+    "source": {"source_text", "source_media", "source_status", "source_done"},
+    "format": {"ratio", "duration", "duration_custom", "format_done"},
+    "content_hub": {"content", "profiles", "profile"},
+    "content_lock": {"content_lock", "content_edit", "content_change"},
+    "production_bible": {
+        "chars", "chars_custom", "character", "char_gender", "char_desc",
+        "char_image", "char_voice", "voice", "voice_custom", "char_scenes",
+        "locs", "locs_custom", "location", "loc_desc", "loc_image",
+        "loc_scenes", "refs", "continuity", "bible_auto", "bible_done",
+        "entity_scene",
+    },
+    "scene_count": {"scene_count", "scene_custom"},
+    "scene_plan": {"scene_plan_edit", "plan_scene", "plan_edit", "plan_move", "scene_plan_done"},
+    "scene_assignment": {
+        "scene", "scene_auto", "scene_cast", "cast_toggle", "cast_clear",
+        "scene_loc", "scene_loc_set", "scene_loc_clear", "scene_dialogue",
+        "dialogue_speaker", "scene_voice", "scene_voice_char", "voice",
+        "voice_custom", "music_scope", "music_set", "scene_music",
+        "scene_music_set", "scene_music_custom", "scene_advanced",
+        "entity_scene", "assignment_done",
+    },
+    "prompts": {"prompt_scenes", "prompt_advanced", "prompts_done"},
+    "branding": {"brand", "branding_done"},
+    "summary": {"edit", "summary_done"},
+}
+VIDEO_UIFLOW3_VIEW_OWNERS = {
+    "profiles": "content_hub",
+    "character_count": "production_bible",
+    "character_list": "production_bible",
+    "location_count": "production_bible",
+    "location_list": "production_bible",
+    "references": "production_bible",
+    "continuity": "production_bible",
+    "scene_plan_list": "scene_plan",
+    "prompt_scenes": "prompts",
+    "prompt_advanced": "prompts",
+}
+
+
+def video_uiflow3_state(context) -> dict:
+    user_data = getattr(context, "user_data", None)
+    if not isinstance(user_data, dict):
+        return {}
+    raw = user_data.get(VIDEO_UIFLOW3_STATE_KEY)
+    if not isinstance(raw, dict) or not raw:
+        return {}
+    return video_uiflow3.normalize_state(raw)
+
+
+def save_video_uiflow3_state(context, state: dict) -> dict:
+    clean = video_uiflow3.normalize_state(state)
+    if isinstance(getattr(context, "user_data", None), dict):
+        context.user_data[VIDEO_UIFLOW3_STATE_KEY] = clean
+    return clean
+
+
+def start_video_uiflow3_state(context, product_id: str) -> dict:
+    product = str(product_id or "").strip()
+    if product not in video_uiflow3.ENTRY_ADAPTERS:
+        raise ValueError("unsupported_video_uiflow3_product")
+    state = video_uiflow3.new_state(product, draft_id=uuid.uuid4().hex)
+    state["legacy_compat"] = {
+        "migrated": False,
+        "legacy_entry_callback": str(
+            (VIDEO_PUBLIC_ROUTE_MATRIX.get(product) or {}).get("legacy_entry_callback")
+            or (VIDEO_PUBLIC_ROUTE_MATRIX.get(product) or {}).get("entry_callback")
+            or ""
+        ),
+    }
+    return save_video_uiflow3_state(context, state)
+
+
+def video_uiflow3_keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(label, callback_data=callback) for label, callback in row]
+        for row in rows
+    ])
+
+
+def video_uiflow3_nav_rows(*, back: str = "vid3|back") -> list[list[tuple[str, str]]]:
+    if str(back or "") == "menu|main_video":
+        return [[("Quay lai Menu Video", "menu|main_video")]]
+    return [[("Quay lai", back), ("Menu Video", "menu|main_video")]]
+
+
+def video_uiflow3_progress_text(state: dict) -> str:
+    current = str((state.get("navigation") or {}).get("current_step") or "entry")
+    public_steps = [
+        "source", "format", "content_hub", "content_lock", "production_bible",
+        "scene_count", "scene_plan", "scene_assignment", "prompts", "branding", "summary",
+    ]
+    if current not in public_steps:
+        return ""
+    return f"Buoc {public_steps.index(current) + 1}/{len(public_steps)}"
+
+
+def video_uiflow3_product_label(state: dict) -> str:
+    return VIDEO_UIFLOW3_PRODUCT_LABELS.get(str(state.get("parent_product") or ""), "Video")
+
+
+def video_uiflow3_readiness_labels(errors: list[str]) -> list[str]:
+    exact = {
+        "content_not_locked": "Noi dung chua duoc xac nhan",
+        "characters_required": "Chua co nhan vat bat buoc",
+        "scene_plan_missing": "Chua co ke hoach canh",
+        "multi_voice_renderer_missing": "Chua ho tro ket xuat nhieu giong",
+        "whole_video_music_renderer_missing": "Chua ho tro ghep nhac toan video tu ke hoach V3",
+        "per_scene_music_renderer_missing": "Chua ho tro nhac rieng tung canh",
+        "voice_cast_not_distinct": "Cac nhan vat dang dung trung giong",
+        "public_submit_locked": "Loai video nay moi cho phep lap ke hoach",
+        "production_bible_reconcile_required": "Rà soát lại Production Bible",
+        "scene_plan_reconcile_required": "Rà soát lại kế hoạch cảnh",
+        "dialogue_reconcile_required": "Rà soát lại phân vai và lời thoại",
+        "prompts_reconcile_required": "Rà soát lại hợp đồng prompt",
+    }
+    labels = []
+    for error in errors:
+        value = str(error or "")
+        if value in exact:
+            labels.append(exact[value])
+        elif value.endswith("_voice_missing"):
+            labels.append("Nhan vat co loi thoai chua co giong")
+        elif value.endswith("_voice_not_server_renderable"):
+            labels.append("Giong da chon chua duoc chung minh co the ket xuat tren may chu")
+        elif value.endswith("_character_invalid"):
+            labels.append("Mot canh dang tham chieu nhan vat khong con ton tai")
+        elif value.endswith("_location_invalid"):
+            labels.append("Mot canh dang tham chieu boi canh khong con ton tai")
+        elif value.endswith("_speaker_invalid"):
+            labels.append("Mot cau thoai chua gan dung nguoi noi")
+        else:
+            labels.append("Ke hoach con mot muc chua hop le")
+    return list(dict.fromkeys(labels))
+
+
+def video_uiflow3_guide_text(lang: str = "vi") -> str:
+    language = normalize_user_language(lang) or "vi"
+    if language != "vi":
+        return (
+            "🎬 <b>VIDEO CREATION GUIDE</b>\n\n"
+            "1. Choose the video product and provide its required source.\n"
+            "2. Set target ratio and duration.\n"
+            "3. Choose content from 32 Profiles, the read-only Idea catalog, your source, or manual text.\n"
+            "4. Lock content before defining people or scenes.\n"
+            "5. Enter the total character count, then set each character's gender, description, reference image and voice.\n"
+            "6. Add locations and references, then confirm scene count.\n"
+            "7. Assign cast, location, dialogue and available audio per scene. Unassigned scenes use stable round-robin order.\n"
+            "8. Add optional logo/watermark and review the single Summary.\n\n"
+            "Video Ideas is a catalog only; it does not own rendering or checkout. Unsupported renderer controls remain unavailable."
+        )
+    return (
+        "🎬 <b>HƯỚNG DẪN TẠO VIDEO</b>\n\n"
+        "1. Chọn đúng loại video và gửi nguồn bắt buộc của loại đó.\n"
+        "2. Chọn tỉ lệ và tổng thời lượng mục tiêu.\n"
+        "3. Chọn nội dung từ 32 Nội dung, Kho Ý tưởng, nội dung nguồn hoặc tự nhập.\n"
+        "4. Xác nhận Nội dung trước khi khai báo nhân vật và cảnh.\n"
+        "5. Nhập tổng số nhân vật; sau đó chỉnh từng NV: Nam/Nữ, mô tả, ảnh tham chiếu và giọng.\n"
+        "6. Khai báo bối cảnh/ảnh, rồi xác nhận số cảnh được đề xuất.\n"
+        "7. Trong từng cảnh, gán nhân vật, bối cảnh, người nói và âm thanh đang được hỗ trợ. Cảnh chưa gán dùng thứ tự NV1, NV2 rồi lặp lại.\n"
+        "8. Logo/watermark có thể bỏ qua; kiểm tra và sửa tại một màn Tóm tắt duy nhất.\n\n"
+        "💡 <b>Ý tưởng video chỉ là kho tham khảo.</b> Kho không dựng video, không sở hữu RouteEngine và không có thanh toán riêng. Control chưa được renderer chứng minh sẽ không được bật."
+    )
+
+
+def video_uiflow3_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    language = normalize_user_language(lang) or "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎬 Mo Menu Video" if language == "vi" else "🎬 Open Video menu", callback_data="menu|main_video")],
+        [InlineKeyboardButton(ui_text(language, "common.back"), callback_data="menu|main_guide"), InlineKeyboardButton(ui_text(language, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def video_uiflow3_profile_rows(state: dict) -> list[dict]:
+    page = max(1, min(4, safe_int(state.get("profile_page"), 1)))
+    profiles = [dict(item) for item in video_profile_catalog.PROFILE_SEEDS if bool(item.get("is_active", 1))]
+    start = (page - 1) * 8
+    return profiles[start:start + 8]
+
+
+def video_uiflow3_character_label(item: dict, index: int) -> str:
+    name = str(item.get("display_name") or f"Nhan vat {index}")
+    gender = {"male": "Nam", "female": "Nu"}.get(str(item.get("gender") or ""), "")
+    return f"NV{index} - {name}" + (f" ({gender})" if gender else "")
+
+
+def video_uiflow3_scene_label(state: dict, scene: dict) -> str:
+    characters = {
+        str(item.get("character_id") or ""): str(item.get("display_name") or "")
+        for item in (state.get("bible") or {}).get("characters") or []
+    }
+    names = [characters.get(str(item), str(item)) for item in scene.get("character_ids") or []]
+    suffix = ", ".join(item for item in names if item) or "Tu dong"
+    return f"Canh {int(scene.get('scene_index') or 0)} - {suffix}"
+
+
+def video_uiflow3_screen_payload(raw_state: dict) -> tuple[str, InlineKeyboardMarkup]:
+    state = video_uiflow3.normalize_state(raw_state)
+    step = str((state.get("navigation") or {}).get("current_step") or "entry")
+    view = str(state.get("ui_view") or "")
+    product = str(state.get("parent_product") or "")
+    product_label = video_uiflow3_product_label(state)
+    progress = video_uiflow3_progress_text(state)
+    prefix = f"{progress}\n\n" if progress else ""
+
+    if view == "input_prompt":
+        pending = dict(state.get("pending_input") or {})
+        kind = str(pending.get("kind") or "")
+        prompts = {
+            "source_text": "Gui noi dung nguon trong mot tin nhan. Bot se giu nguyen van de lap Content Lock.",
+            "source_media": "Gui anh, video hoac tep nguon dung cho san pham nay.",
+            "manual_content": "Nhap chu de, muc tieu va thong diep chinh trong mot tin nhan.",
+            "content_edit": "Nhap lai noi dung mong muon. Ban cu chi duoc thay sau khi tin nhan moi hop le.",
+            "character_count": "Nhap tong so nhan vat tu 0 den 20.",
+            "character_description": "Nhap theo mau: Ten nhan vat | Mo ta ngoai hinh, trang phuc, vai tro.",
+            "character_image": "Gui mot anh tham chieu cho dung nhan vat dang chon.",
+            "character_voice": "Nhap ma giong da co. De trong khong duoc; co the quay lai va chon Tu dong.",
+            "location_count": "Nhap tong so boi canh tu 0 den 20.",
+            "location_description": "Nhap theo mau: Ten boi canh | Mo ta anh sang, thoi gian, khong khi.",
+            "location_image": "Gui mot anh tham chieu cho dung boi canh dang chon.",
+            "duration": "Nhap tong thoi luong muc tieu tinh bang giay.",
+            "scene_count": "Nhap tong so canh hop le cho loai video nay.",
+            "scene_plan": "Nhap: Y chinh | Hanh dong chinh | Ket qua cuoi canh.",
+            "dialogue": "Nhap loi thoai cho nhan vat da chon trong canh nay.",
+            "whole_music": "Nhap ma bai nhac hoac mo ta nhac dung cho toan video.",
+            "scene_music": "Nhap ma bai nhac hoac mo ta nhac rieng cho canh nay.",
+            "brand_logo": "Gui anh logo. Tep chi duoc luu vao ban ke hoach, chua render.",
+            "watermark": "Nhap noi dung watermark muon hien tren video.",
+        }
+        back_callback = str(pending.get("back_callback") or "vid3|back")
+        input_rows: list[list[tuple[str, str]]] = []
+        if kind == "source_media" and bool((state.get("source") or {}).get("complete")):
+            input_rows.append([("Xong nguon", "vid3|source_done")])
+        input_rows.extend(video_uiflow3_nav_rows(back=back_callback))
+        return (
+            "NHAP THONG TIN\n\n" + prompts.get(kind, "Gui thong tin cho buoc dang mo."),
+            video_uiflow3_keyboard(input_rows),
+        )
+
+    if view == "voice_select":
+        character_id = str(state.get("active_character_id") or "")
+        characters = list((state.get("bible") or {}).get("characters") or [])
+        item = next((row for row in characters if str(row.get("character_id") or "") == character_id), {})
+        current_voice = str(item.get("voice_id") or "")
+        back_callback = str(state.get("ui_return_callback") or f"vid3|character|{character_id}")
+        rows = [
+            [(("[x] " if not current_voice else "") + "Tu dong theo gioi tinh", f"vid3|voice|{character_id}|auto")],
+            [(("[x] " if current_voice == VIDEO_UIFLOW3_VOICE_ALIASES["vf1"] else "") + "Nu mien phi 1", f"vid3|voice|{character_id}|vf1"),
+             (("[x] " if current_voice == VIDEO_UIFLOW3_VOICE_ALIASES["vm1"] else "") + "Nam mien phi 1", f"vid3|voice|{character_id}|vm1")],
+            [("Nhap giong khac", f"vid3|voice_custom|{character_id}")],
+            *video_uiflow3_nav_rows(back=back_callback),
+        ]
+        return (
+            "GIONG NHAN VAT\n\nChon giong cho dung NV. Neu co nhieu NV cung gioi tinh, che do Tu dong se yeu cau cac giong khac nhau tu inventory that; khong am tham dung chung mot giong.",
+            video_uiflow3_keyboard(rows),
+        )
+
+    if view == "scene_cast":
+        scene_id = str(state.get("active_scene_id") or "")
+        scene = next((item for item in state.get("scenes") or [] if str(item.get("scene_id") or "") == scene_id), {})
+        selected_ids = set(scene.get("character_ids") or [])
+        rows = [[
+            (("[x] " if str(item.get("character_id") or "") in selected_ids else "[ ] ") + video_uiflow3_character_label(item, index),
+             f"vid3|cast_toggle|{scene_id}|{item.get('character_id')}")
+        ] for index, item in enumerate((state.get("bible") or {}).get("characters") or [], 1)]
+        rows.append([("Khong co nhan vat", f"vid3|cast_clear|{scene_id}")])
+        rows.extend(video_uiflow3_nav_rows(back=f"vid3|scene|{scene_id}"))
+        return "NHAN VAT TRONG CANH\n\nChon mot hoac nhieu NV xuat hien. Bo trong neu canh chi co san pham/phong canh.", video_uiflow3_keyboard(rows)
+
+    if view == "scene_location":
+        scene_id = str(state.get("active_scene_id") or "")
+        scene = next((item for item in state.get("scenes") or [] if str(item.get("scene_id") or "") == scene_id), {})
+        selected_id = str(scene.get("location_id") or "")
+        rows = [[
+            (("[x] " if str(item.get("location_id") or "") == selected_id else "") + f"BC{index} - {item.get('name') or f'Boi canh {index}'}",
+             f"vid3|scene_loc_set|{scene_id}|{item.get('location_id')}")
+        ] for index, item in enumerate((state.get("bible") or {}).get("locations") or [], 1)]
+        rows.append([("Tu dong / khong gan", f"vid3|scene_loc_clear|{scene_id}")])
+        rows.extend(video_uiflow3_nav_rows(back=f"vid3|scene|{scene_id}"))
+        return "BOI CANH CUA CANH\n\nChon mot boi canh da khai bao cho canh nay.", video_uiflow3_keyboard(rows)
+
+    if view == "dialogue_speaker":
+        scene_id = str(state.get("active_scene_id") or "")
+        scene = next((item for item in state.get("scenes") or [] if str(item.get("scene_id") or "") == scene_id), {})
+        cast = set(scene.get("character_ids") or [])
+        rows = [[
+            (video_uiflow3_character_label(item, index), f"vid3|dialogue_speaker|{scene_id}|{item.get('character_id')}")
+        ] for index, item in enumerate((state.get("bible") or {}).get("characters") or [], 1) if str(item.get("character_id") or "") in cast]
+        rows.extend(video_uiflow3_nav_rows(back=f"vid3|scene|{scene_id}"))
+        return "LOI THOAI THEO NHAN VAT\n\nChon nguoi noi, sau do nhap mot cau. Moi cau luon gan voi dung NV va dung canh.", video_uiflow3_keyboard(rows)
+
+    if view == "scene_voice":
+        scene_id = str(state.get("active_scene_id") or "")
+        scene = next((item for item in state.get("scenes") or [] if str(item.get("scene_id") or "") == scene_id), {})
+        cast = set(scene.get("character_ids") or [])
+        rows = [[
+            (video_uiflow3_character_label(item, index), f"vid3|scene_voice_char|{scene_id}|{item.get('character_id')}")
+        ] for index, item in enumerate((state.get("bible") or {}).get("characters") or [], 1) if str(item.get("character_id") or "") in cast]
+        rows.extend(video_uiflow3_nav_rows(back=f"vid3|scene|{scene_id}"))
+        return "GIONG TRONG CANH\n\nGiong thuoc ve nhan vat, khong thuoc rieng tung canh. Chon NV de sua mot lan va ap dung nhat quan.", video_uiflow3_keyboard(rows)
+
+    if view == "music_scope":
+        scope = str((state.get("audio") or {}).get("music_scope") or "none")
+        mark = lambda value: "[x] " if scope == value else ""
+        controls = video_uiflow3.public_controls(state)
+        rows = [[(mark("none") + "Khong nhac", "vid3|music_set|none")]]
+        if controls["whole_video_music"]["supported"]:
+            rows.append([(mark("whole_video") + "Mot ban toan video", "vid3|music_set|whole_video")])
+        if controls["per_scene_music"]["supported"]:
+            rows.append([(mark("per_scene") + "Nhac theo tung canh", "vid3|music_set|per_scene")])
+        rows.extend(video_uiflow3_nav_rows(back="vid3|view|scene_assignment"))
+        unavailable = []
+        if not controls["whole_video_music"]["supported"]:
+            unavailable.append("nhac toan video")
+        if not controls["per_scene_music"]["supported"]:
+            unavailable.append("nhac theo canh")
+        note = "" if not unavailable else "\n\nChua bat control final: " + ", ".join(unavailable) + ". Ke hoach state van duoc giu cho RouteEngine noi sau."
+        return (
+            "NHAC VIDEO\n\nChon pham vi nhac da duoc runtime chung minh. Khong co control gia." + note,
+            video_uiflow3_keyboard(rows),
+        )
+
+    if view == "scene_music":
+        scene_id = str(state.get("active_scene_id") or "")
+        model = video_uiflow3.scene_assignment_model(state, scene_id)
+        policy = str((model.get("music") or {}).get("policy") or "off")
+        return (
+            f"NHAC CANH {model.get('scene_index') or '?'}\n\nHien tai: {policy}. Chon ke thua, tat rieng canh, hoac nhap mot ban nhac rieng.",
+            video_uiflow3_keyboard([
+                [("Ke thua", f"vid3|scene_music_set|{scene_id}|inherit"), ("Tat canh nay", f"vid3|scene_music_set|{scene_id}|off")],
+                [("Nhap nhac rieng", f"vid3|scene_music_custom|{scene_id}")],
+                *video_uiflow3_nav_rows(back=f"vid3|scene|{scene_id}"),
+            ]),
+        )
+
+    if view == "entity_scene_assign":
+        owner_type = str(state.get("assignment_owner_type") or "")
+        owner_id = str(state.get("assignment_owner_id") or "")
+        rows = []
+        for scene in state.get("scenes") or []:
+            scene_id = str(scene.get("scene_id") or "")
+            selected = owner_id in (scene.get("character_ids") or []) if owner_type == "character" else str(scene.get("location_id") or "") == owner_id
+            rows.append([(("[x] " if selected else "[ ] ") + f"Canh {scene.get('scene_index')}", f"vid3|entity_scene|{owner_type}|{owner_id}|{scene_id}")])
+        back_callback = f"vid3|character|{owner_id}" if owner_type == "character" else f"vid3|location|{owner_id}"
+        rows.extend(video_uiflow3_nav_rows(back=back_callback))
+        return "GAN THEO CANH\n\nBat/tat cac canh co tac nhan nay. Khong chon thi che do Tu dong theo thu tu se xu ly.", video_uiflow3_keyboard(rows)
+
+    if view == "scene_plan_list":
+        rows = [[(f"Canh {scene.get('scene_index')}", f"vid3|plan_scene|{scene.get('scene_id')}")] for scene in state.get("scenes") or []]
+        rows.extend(video_uiflow3_nav_rows(back="vid3|view|scene_plan"))
+        return "SUA KE HOACH CANH\n\nMoi canh chi nen co mot y chinh va mot hanh dong hoan tat.", video_uiflow3_keyboard(rows)
+
+    if view == "scene_plan_detail":
+        scene_id = str(state.get("active_scene_id") or "")
+        scene = next((item for item in state.get("scenes") or [] if str(item.get("scene_id") or "") == scene_id), {})
+        return (
+            f"KE HOACH CANH {scene.get('scene_index') or '?'}\n\nY chinh: {scene.get('semantic_beat') or 'Chua co'}\nHanh dong: {scene.get('main_action') or 'Chua co'}\nKet qua: {scene.get('completion_state') or 'Chua co'}",
+            video_uiflow3_keyboard([
+                [("Sua canh", f"vid3|plan_edit|{scene_id}")],
+                [("Dua len", f"vid3|plan_move|{scene_id}|up"), ("Dua xuong", f"vid3|plan_move|{scene_id}|down")],
+                *video_uiflow3_nav_rows(back="vid3|view|scene_plan_list"),
+            ]),
+        )
+
+    if view == "prompt_scenes":
+        lines = ["PROMPT THEO CANH", ""] + [
+            f"Canh {scene.get('scene_index')}: {scene.get('compiled_prompt_status') or 'not_compiled'}"
+            for scene in state.get("scenes") or []
+        ]
+        return "\n".join(lines), video_uiflow3_keyboard(video_uiflow3_nav_rows(back="vid3|view|prompts"))
+
+    if view == "prompt_advanced":
+        return (
+            "TUY CHINH NANG CAO\n\nPhan nay chi luu rang buoc camera/chuyen dong. Khong hien prompt provider va khong goi engine trong task UI.",
+            video_uiflow3_keyboard(video_uiflow3_nav_rows(back="vid3|view|prompts")),
+        )
+
+    if view == "profiles":
+        page = max(1, min(4, safe_int(state.get("profile_page"), 1)))
+        rows: list[list[tuple[str, str]]] = []
+        profiles = video_uiflow3_profile_rows(state)
+        for offset in range(0, len(profiles), 2):
+            rows.append([
+                (
+                    f"{item.get('icon') or ''} {str(item.get('short_name') or item.get('public_name') or item.get('profile_key') or '')[:24]}".strip(),
+                    video_uiflow3.callback("profile", str(item.get("profile_key") or "")),
+                )
+                for item in profiles[offset:offset + 2]
+            ])
+        rows.append([
+            ("Nhom truoc", video_uiflow3.callback("profiles", str(4 if page == 1 else page - 1))),
+            ("Nhom sau", video_uiflow3.callback("profiles", str(1 if page == 4 else page + 1))),
+        ])
+        rows.extend(video_uiflow3_nav_rows(back=video_uiflow3.callback("view", "content_hub")))
+        return (
+            f"32 NOI DUNG\n\nTrang {page}/4. Chon mot loai noi dung; he thong chi dung catalog hien co va se cho xem lai Content Lock truoc khi tiep tuc.",
+            video_uiflow3_keyboard(rows),
+        )
+
+    if view == "character_count":
+        count = len((state.get("bible") or {}).get("characters") or [])
+        rows = [
+            [("0", "vid3|chars|0"), ("1", "vid3|chars|1"), ("2", "vid3|chars|2")],
+            [("3", "vid3|chars|3"), ("4", "vid3|chars|4"), ("Nhap so khac", "vid3|chars_custom")],
+            *video_uiflow3_nav_rows(back="vid3|view|production_bible"),
+        ]
+        return (
+            f"SO NHAN VAT\n\nHien tai: {count}. Nhap dung tong so nguoi xuat hien; sau do chinh Nam/Nu, mo ta, anh va giong cho tung NV.",
+            video_uiflow3_keyboard(rows),
+        )
+
+    if view == "character_list":
+        characters = list((state.get("bible") or {}).get("characters") or [])
+        rows = [
+            [(video_uiflow3_character_label(item, index), video_uiflow3.callback("character", str(item.get("character_id") or "")))]
+            for index, item in enumerate(characters, 1)
+        ]
+        if not rows:
+            rows.append([("Chon so nhan vat", "vid3|view|character_count")])
+        rows.extend(video_uiflow3_nav_rows(back="vid3|view|production_bible"))
+        return (
+            "DAN NHAN VAT\n\nMoi nhan vat co mot ID on dinh. Doi ten hoac sap xep khong lam mat anh, giong hay canh da gan.",
+            video_uiflow3_keyboard(rows),
+        )
+
+    if view == "character_detail":
+        character_id = str(state.get("active_character_id") or "")
+        characters = list((state.get("bible") or {}).get("characters") or [])
+        item = next((row for row in characters if str(row.get("character_id") or "") == character_id), {})
+        index = next((idx for idx, row in enumerate(characters, 1) if str(row.get("character_id") or "") == character_id), 1)
+        voice = str(item.get("voice_id") or "Tu dong theo gioi tinh")
+        references = len(item.get("reference_asset_ids") or [])
+        rows = [
+            [("Nam", f"vid3|char_gender|{character_id}|male"), ("Nu", f"vid3|char_gender|{character_id}|female")],
+            [("Sua ten/mo ta", f"vid3|char_desc|{character_id}"), ("Gui anh NV", f"vid3|char_image|{character_id}")],
+            [("Chon giong", f"vid3|char_voice|{character_id}")],
+        ]
+        if state.get("scenes"):
+            rows[-1].append(("Canh xuat hien", f"vid3|char_scenes|{character_id}"))
+        rows.extend(video_uiflow3_nav_rows(back="vid3|view|character_list"))
+        return (
+            f"NHAN VAT {index}\n\nTen: {item.get('display_name') or f'Nhan vat {index}'}\nGioi tinh: {item.get('gender') or 'Chua chon'}\nMo ta: {item.get('description') or 'Chua co'}\nAnh: {references}\nGiong: {voice}\n\nCac tuy chon cua NV duoc gom tai day de khong tao wizard dai.",
+            video_uiflow3_keyboard(rows),
+        )
+
+    if view == "location_count":
+        count = len((state.get("bible") or {}).get("locations") or [])
+        return (
+            f"SO BOI CANH\n\nHien tai: {count}. Moi boi canh co mo ta, anh va danh sach canh su dung rieng.",
+            video_uiflow3_keyboard([
+                [("0", "vid3|locs|0"), ("1", "vid3|locs|1"), ("2", "vid3|locs|2")],
+                [("3", "vid3|locs|3"), ("4", "vid3|locs|4"), ("Nhap so khac", "vid3|locs_custom")],
+                *video_uiflow3_nav_rows(back="vid3|view|production_bible"),
+            ]),
+        )
+
+    if view == "location_list":
+        locations = list((state.get("bible") or {}).get("locations") or [])
+        rows = [[(f"BC{index} - {item.get('name') or f'Boi canh {index}'}", f"vid3|location|{item.get('location_id')}")]
+                for index, item in enumerate(locations, 1)]
+        if not rows:
+            rows.append([("Chon so boi canh", "vid3|view|location_count")])
+        rows.extend(video_uiflow3_nav_rows(back="vid3|view|production_bible"))
+        return "BOI CANH\n\nChon mot boi canh de sua mo ta hoac gui anh.", video_uiflow3_keyboard(rows)
+
+    if view == "location_detail":
+        location_id = str(state.get("active_location_id") or "")
+        locations = list((state.get("bible") or {}).get("locations") or [])
+        item = next((row for row in locations if str(row.get("location_id") or "") == location_id), {})
+        index = next((idx for idx, row in enumerate(locations, 1) if str(row.get("location_id") or "") == location_id), 1)
+        location_rows = [
+            [("Sua ten/mo ta", f"vid3|loc_desc|{location_id}"), ("Gui anh boi canh", f"vid3|loc_image|{location_id}")],
+            [("Xem anh", f"vid3|refs|location|{location_id}")],
+        ]
+        if state.get("scenes"):
+            location_rows[-1].insert(0, ("Canh su dung", f"vid3|loc_scenes|{location_id}"))
+        location_rows.extend(video_uiflow3_nav_rows(back="vid3|view|location_list"))
+        return (
+            f"BOI CANH {index}\n\nTen: {item.get('name') or f'Boi canh {index}'}\nMo ta: {item.get('description') or 'Chua co'}\nAnh: {len(item.get('reference_asset_ids') or [])}",
+            video_uiflow3_keyboard(location_rows),
+        )
+
+    if view == "references":
+        references = list(state.get("references") or [])
+        lines = ["ANH THAM CHIEU", ""]
+        if references:
+            for item in references[:20]:
+                lines.append(f"- {item.get('asset_id')}: {item.get('owner_type')} / {item.get('owner_id') or 'chua gan'} / {item.get('role')}")
+        else:
+            lines.append("Chua co anh. Gui anh tu dung NV hoac Boi canh de anh co owner ro rang.")
+        return "\n".join(lines), video_uiflow3_keyboard(video_uiflow3_nav_rows(back="vid3|view|production_bible"))
+
+    if view == "continuity":
+        continuity = dict((state.get("bible") or {}).get("continuity") or {})
+        def selected(key: str) -> str:
+            return "[x]" if continuity.get(key, True) else "[ ]"
+        return (
+            "NHAT QUAN\n\nBat nhung thu phai giu xuyen canh. Mac dinh an toan duoc chon san.",
+            video_uiflow3_keyboard([
+                [(f"{selected('identity')} Khuon mat", "vid3|continuity|identity"), (f"{selected('wardrobe')} Trang phuc", "vid3|continuity|wardrobe")],
+                [(f"{selected('product')} San pham", "vid3|continuity|product"), (f"{selected('location')} Boi canh", "vid3|continuity|location")],
+                *video_uiflow3_nav_rows(back="vid3|view|production_bible"),
+            ]),
+        )
+
+    if view == "scene_detail":
+        scene_id = str(state.get("active_scene_id") or "")
+        scene = next((item for item in state.get("scenes") or [] if str(item.get("scene_id") or "") == scene_id), {})
+        model = video_uiflow3.scene_assignment_model(state, scene_id) if scene else {
+            "characters": [], "dialogue": [], "music": {"policy": "off", "track_id": ""}, "location_id": "",
+        }
+        names = ", ".join(str(item.get("display_name") or item.get("character_id") or "") for item in model["characters"]) or "Chua gan"
+        detail_rows = [
+            [("Nhan vat trong canh", f"vid3|scene_cast|{scene_id}"), ("Boi canh", f"vid3|scene_loc|{scene_id}")],
+            [("Loi thoai", f"vid3|scene_dialogue|{scene_id}"), ("Giong nhan vat", f"vid3|scene_voice|{scene_id}")],
+        ]
+        if bool((state.get("capabilities") or {}).get("per_scene_music")):
+            detail_rows.append([("Nhac canh", f"vid3|scene_music|{scene_id}"), ("Nang cao", f"vid3|scene_advanced|{scene_id}")])
+        else:
+            detail_rows.append([("Nang cao", f"vid3|scene_advanced|{scene_id}")])
+        detail_rows.extend(video_uiflow3_nav_rows(back="vid3|view|scene_assignment"))
+        return (
+            f"CANH {scene.get('scene_index') or '?'} - PHAN VAI & AM THANH\n\nNhan vat: {names}\nBoi canh: {model.get('location_id') or 'Tu dong'}\nLoi thoai: {len(model.get('dialogue') or [])}\nNhac: {model.get('music', {}).get('policy') or 'off'}\n\nPhan Nang cao duoc thu gon; chi mo khi can.",
+            video_uiflow3_keyboard(detail_rows),
+        )
+
+    if step == "entry":
+        if product == "video_ai_real":
+            rows = [
+                [("Prompt -> Video", "vid3|mode|prompt_video"), ("Anh -> Video", "vid3|mode|image_video")],
+            ]
+            if bool((state.get("capabilities") or {}).get("video_to_video")):
+                rows.append([("Video -> Video", "vid3|mode|video_video")])
+            rows.extend(video_uiflow3_nav_rows(back="menu|main_video"))
+            copy = "Chon dung loai dau vao. Moi nhanh van di qua Content Lock truoc Nhan vat va Canh."
+        elif product == "storyboard_prompt":
+            rows = [
+                [("Tao Storyboard tu noi dung", "vid3|mode|storyboard_generate"), ("Gui Storyboard co san", "vid3|mode|storyboard_upload")],
+                *video_uiflow3_nav_rows(back="menu|main_video"),
+            ]
+            copy = "Anh/panel co the gui som, nhung chi duoc gan y nghia sau Content Lock."
+        elif product == "multi_scene_film":
+            rows = [[("Lap ke hoach series", "vid3|mode|series_plan")], *video_uiflow3_nav_rows(back="menu|main_video")]
+            copy = "Chi lap ke hoach. Cong khai van khoa submit Video dai tap."
+        else:
+            rows = [[("Bat dau", "vid3|mode|default")], *video_uiflow3_nav_rows(back="menu|main_video")]
+            copy = "Bat dau dung quy trinh Content-first."
+        return f"{product_label}\n\n{copy}", video_uiflow3_keyboard(rows)
+
+    if step == "source":
+        assets = list((state.get("source") or {}).get("assets") or [])
+        source_kind = str((state.get("source") or {}).get("kind") or "")
+        source_copy = {
+            "video_trend": "Nhap trend/link/chu de trend truoc khi chon noi dung moi.",
+            "script_image_video": "Dan hoac gui nguyen van kich ban. Bot khong rut gon am tham.",
+            "frame_video_local": "Gui lan luot anh nguon. Vai tro NV/Boi canh se gan sau Content Lock.",
+            "self_shot_scene_change": "Gui video tu quay de luu source va phan tich o flow hien co sau nay.",
+            "storyboard_prompt": "Gui anh hoac file Storyboard theo dung thu tu.",
+        }.get(product, "Gui noi dung nguon cua video.")
+        media_source_kinds = {"raw_images", "source_video", "storyboard_panels"}
+        rows = []
+        if source_kind in media_source_kinds:
+            rows.append([("Gui tep/anh", "vid3|source_media"), (f"Da nhan {len(assets)}", "vid3|source_status")])
+        else:
+            rows.append([("Nhap noi dung nguon", "vid3|source_text")])
+        if (state.get("source") or {}).get("complete"):
+            rows.append([("Xong nguon", "vid3|source_done")])
+        source_back = "vid3|back" if (state.get("navigation") or {}).get("visible_step_stack") else "menu|main_video"
+        rows.extend(video_uiflow3_nav_rows(back=source_back))
+        return f"{prefix}NGUON VIDEO\n\n{source_copy}", video_uiflow3_keyboard(rows)
+
+    if step == "format":
+        fmt = dict(state.get("format") or {})
+        selected_ratio = str(fmt.get("ratio") or "")
+        selected_duration = safe_int(fmt.get("target_duration_seconds"), 0)
+        durations = (600, 1800, 3600) if product == "multi_scene_film" else (8, 16, 24, 40)
+        duration_rows = []
+        for offset in range(0, len(durations), 2):
+            duration_rows.append([
+                (("[x] " if selected_duration == value else "") + (f"{value // 60} phut" if value >= 60 else f"{value} giay"), f"vid3|duration|{value}")
+                for value in durations[offset:offset + 2]
+            ])
+        rows = [
+            [(f"{'[x] ' if selected_ratio == '9:16' else ''}9:16", "vid3|ratio|9x16"), (f"{'[x] ' if selected_ratio == '16:9' else ''}16:9", "vid3|ratio|16x9")],
+            [(f"{'[x] ' if selected_ratio == '1:1' else ''}1:1", "vid3|ratio|1x1"), (f"{'[x] ' if selected_ratio == '4:5' else ''}4:5", "vid3|ratio|4x5")],
+            *duration_rows,
+            [("Nhap thoi luong khac", "vid3|duration_custom"), ("Tiep tuc", "vid3|format_done")],
+            *video_uiflow3_nav_rows(),
+        ]
+        return (
+            f"{prefix}DINH DANG MUC TIEU\n\nTi le: {selected_ratio or 'Chua chon'}\nThoi luong: {selected_duration or 'Chua chon'} giay\n\nDay la muc tieu de lap ke hoach; so canh se duoc de xuat sau khi khoa noi dung.",
+            video_uiflow3_keyboard(rows),
+        )
+
+    if step == "content_hub":
+        rows = [
+            [("32 Noi dung", "vid3|content|profiles"), ("Kho Y tuong video", "videoidea|start")],
+            [("Tu nhap noi dung", "vid3|content|manual")],
+        ]
+        if (state.get("source") or {}).get("complete"):
+            rows.append([("Dung noi dung nguon", "vid3|content|source")])
+        rows.extend(video_uiflow3_nav_rows())
+        return f"{prefix}NOI DUNG VIDEO\n\nChon mot nguon. Kho Y tuong giu nguyen va chi handoff ket qua ve day.", video_uiflow3_keyboard(rows)
+
+    if step == "content_lock":
+        content = dict(state.get("content") or {})
+        brief = dict(content.get("approved_brief") or {})
+        return (
+            f"{prefix}NOI DUNG DA CHON\n\nChu de: {brief.get('title') or content.get('original_intent') or 'Chua co'}\nMuc tieu: {brief.get('goal') or 'Tu noi dung'}\nDoi tuong: {brief.get('audience') or 'Chua chon'}\nProfile: {content.get('profile_id') or 'Tu nhap'}\n\nChi sau khi bam Tiep tuc, bot moi hoi Nhan vat/Boi canh/Canh.",
+            video_uiflow3_keyboard([
+                [("Tiep tuc", "vid3|content_lock"), ("Sua noi dung", "vid3|content_edit")],
+                [("Chon nguon khac", "vid3|content_change")],
+                *video_uiflow3_nav_rows(),
+            ]),
+        )
+
+    if step == "production_bible":
+        bible = dict(state.get("bible") or {})
+        characters = list(bible.get("characters") or [])
+        locations = list(bible.get("locations") or [])
+        return (
+            f"{prefix}PRODUCTION BIBLE\n\nNhan vat: {len(characters)}\nBoi canh: {len(locations)}\nAnh tham chieu: {len(state.get('references') or [])}\n\nMac dinh dung Tu dong. Chi mo tung muc neu muon sua chi tiet.",
+            video_uiflow3_keyboard([
+                [("So nhan vat", "vid3|view|character_count"), ("Sua tung nhan vat", "vid3|view|character_list")],
+                [("Boi canh", "vid3|view|location_count"), ("Sua tung boi canh", "vid3|view|location_list")],
+                [("Anh tham chieu", "vid3|view|references"), ("Nhat quan", "vid3|view|continuity")],
+                [("Tu dong goi y", "vid3|bible_auto"), ("Tiep tuc", "vid3|bible_done")],
+                *video_uiflow3_nav_rows(),
+            ]),
+        )
+
+    if step == "scene_count":
+        suggestion = video_uiflow3.suggest_scene_count(state)
+        count = int(suggestion["count"])
+        return (
+            f"{prefix}SO CANH DE XUAT\n\nDe xuat: {count} canh, moi canh khoang {suggestion['seconds_per_scene']} giay. De xuat dua tren noi dung + thoi luong, khong chon mu truoc noi dung.",
+            video_uiflow3_keyboard([
+                [(f"Dung {count} canh", f"vid3|scene_count|{count}"), ("Them 1 canh", f"vid3|scene_count|{min(20, count + 1)}")],
+                [("Bot 1 canh", f"vid3|scene_count|{max(1, count - 1)}"), ("Tu nhap", "vid3|scene_custom")],
+                *video_uiflow3_nav_rows(),
+            ]),
+        )
+
+    if step == "scene_plan":
+        scenes = list(state.get("scenes") or [])
+        lines = [f"{prefix}KE HOACH CANH", ""]
+        for scene in scenes:
+            lines.append(f"Canh {scene.get('scene_index')}: {scene.get('semantic_beat') or scene.get('main_action') or 'Mot y chinh tron ven'}")
+        rows = [[("Xem/sua tung canh", "vid3|scene_plan_edit"), ("Duyet ke hoach", "vid3|scene_plan_done")], *video_uiflow3_nav_rows()]
+        return "\n".join(lines), video_uiflow3_keyboard(rows)
+
+    if step == "scene_assignment":
+        scenes = list(state.get("scenes") or [])
+        characters = list((state.get("bible") or {}).get("characters") or [])
+        lines = [f"{prefix}PHAN VAI & AM THANH THEO CANH", "", "Tu dong theo thu tu: canh 1 -> NV1, canh 2 -> NV2, roi lap lai. Co the sua tung canh.", ""]
+        for scene in scenes:
+            lines.append(video_uiflow3_scene_label(state, scene))
+        rows = []
+        scene_buttons = [(f"Canh {scene.get('scene_index')}", f"vid3|scene|{scene.get('scene_id')}") for scene in scenes]
+        for offset in range(0, len(scene_buttons), 3):
+            rows.append(scene_buttons[offset:offset + 3])
+        rows.extend([
+            [("Tu dong theo thu tu", "vid3|scene_auto"), ("Nhac video/canh", "vid3|music_scope")],
+            [("Tiep tuc", "vid3|assignment_done")],
+            *video_uiflow3_nav_rows(),
+        ])
+        if characters:
+            lines.append("\n" + " / ".join(f"NV{index}: {item.get('display_name') or ''}" for index, item in enumerate(characters, 1)))
+        return "\n".join(lines), video_uiflow3_keyboard(rows)
+
+    if step == "prompts":
+        return (
+            f"{prefix}HOP DONG PROMPT\n\nPrompt se duoc bien dich tu Content Lock + Production Bible + Scene Plan. Nguoi dung khong phai viet lai toan bo prompt ky thuat.",
+            video_uiflow3_keyboard([
+                [("Xem tung canh", "vid3|prompt_scenes"), ("Tuy chinh nang cao", "vid3|prompt_advanced")],
+                [("Tiep tuc", "vid3|prompts_done")],
+                *video_uiflow3_nav_rows(),
+            ]),
+        )
+
+    if step == "branding":
+        branding = dict(state.get("branding") or {})
+        return (
+            f"{prefix}LOGO / WATERMARK\n\nLogo: {'Co' if branding.get('logo') else 'Khong'}\nWatermark: {'Co' if branding.get('watermark') else 'Khong'}",
+            video_uiflow3_keyboard([
+                [("Gui Logo", "vid3|brand|logo"), ("Nhap Watermark", "vid3|brand|watermark")],
+                [("Khong dung", "vid3|brand|none"), ("Tiep tuc", "vid3|branding_done")],
+                *video_uiflow3_nav_rows(),
+            ]),
+        )
+
+    if step == "summary":
+        content = dict(state.get("content") or {})
+        bible = dict(state.get("bible") or {})
+        fmt = dict(state.get("format") or {})
+        errors = video_uiflow3.readiness_errors(state)
+        lines = [
+            "TOM TAT VIDEO",
+            "",
+            f"Noi dung: {content.get('original_intent') or (content.get('approved_brief') or {}).get('title') or 'Chua co'}",
+            f"Dinh dang: {fmt.get('ratio') or '-'} / {fmt.get('target_duration_seconds') or 0} giay",
+            f"Nhan vat: {len(bible.get('characters') or [])}",
+            f"Boi canh: {len(bible.get('locations') or [])}",
+            f"Anh tham chieu: {len(state.get('references') or [])}",
+            f"Canh: {len(state.get('scenes') or [])}",
+            f"Loi thoai: {len((state.get('audio') or {}).get('dialogue_segments') or [])}",
+            f"Giong da gan: {len((state.get('audio') or {}).get('voice_cast') or {})}",
+            f"Nhac: {(state.get('audio') or {}).get('music_scope') or 'none'}",
+            f"Khoa nhat quan: {sum(1 for value in bible.get('continuity', {}).values() if value)}",
+            f"Logo/Watermark: {'Da chon' if state.get('branding') else 'Khong'}",
+        ]
+        if errors:
+            lines.extend(["", "Con thieu:"] + [f"- {item}" for item in video_uiflow3_readiness_labels(errors)])
+        return "\n".join(lines), video_uiflow3_keyboard([
+            [("Sua noi dung", "vid3|edit|content_lock"), ("Sua nhan vat/boi canh", "vid3|edit|production_bible")],
+            [("Sua ke hoach canh", "vid3|edit|scene_plan"), ("Sua phan vai/am thanh", "vid3|edit|scene_assignment")],
+            [("Sua Logo", "vid3|edit|branding")],
+            [("Tiep tuc chon goi", "vid3|summary_done")],
+            *video_uiflow3_nav_rows(),
+        ])
+
+    state["navigation"]["current_step"] = video_uiflow3.next_required_step(state)
+    return video_uiflow3_screen_payload(state)
+
+
+async def video_uiflow3_render(query, context, state: dict | None = None):
+    current = save_video_uiflow3_state(context, state or video_uiflow3_state(context))
+    text, keyboard = video_uiflow3_screen_payload(current)
+    return await safe_edit_or_send(query, text, parse_mode=None, reply_markup=keyboard)
+
+
+def video_uiflow3_clear_transient(state: dict, *, keep_return: bool = True) -> dict:
+    current = video_uiflow3.normalize_state(state)
+    for key in (
+        "ui_view", "active_character_id", "active_location_id", "active_scene_id",
+        "assignment_owner_type", "assignment_owner_id", "ui_return_callback",
+        "reference_filter_type", "reference_filter_id",
+    ):
+        current.pop(key, None)
+    current.pop("pending_input", None)
+    if not keep_return:
+        current["navigation"]["return_to"] = None
+    return video_uiflow3.normalize_state(current)
+
+
+def video_uiflow3_go(state: dict, step: str) -> dict:
+    current = video_uiflow3_clear_transient(state)
+    return video_uiflow3.navigate(current, step)
+
+
+def video_uiflow3_after_service_update(before: dict, updated: dict) -> dict:
+    previous_step = str((before.get("navigation") or {}).get("current_step") or "entry")
+    target_step = str((updated.get("navigation") or {}).get("current_step") or previous_step)
+    current = video_uiflow3_clear_transient(updated)
+    current["navigation"]["current_step"] = previous_step
+    return video_uiflow3.navigate(current, target_step)
+
+
+def video_uiflow3_open_view(state: dict, view: str, **fields) -> dict:
+    current = video_uiflow3.normalize_state(state)
+    current.pop("pending_input", None)
+    current["ui_view"] = str(view or "")
+    current.update(fields)
+    return video_uiflow3.normalize_state(current)
+
+
+def video_uiflow3_await_input(state: dict, kind: str, *, back_callback: str, **fields) -> dict:
+    current = video_uiflow3_open_view(state, "input_prompt")
+    current["pending_input"] = {
+        "kind": str(kind or ""),
+        "back_callback": str(back_callback or "vid3|back"),
+        **fields,
+    }
+    return video_uiflow3.normalize_state(current)
+
+
+def video_uiflow3_finish_section(state: dict, section: str, next_step: str) -> dict:
+    current = video_uiflow3.mark_sections_complete(state, section)
+    if str((current.get("navigation") or {}).get("return_to") or "") == "summary":
+        return video_uiflow3_clear_transient(video_uiflow3.finish_editor(current), keep_return=False)
+    return video_uiflow3_go(current, next_step)
+
+
+def video_uiflow3_find_character(state: dict, character_id: str) -> dict:
+    return next(
+        (dict(item) for item in (state.get("bible") or {}).get("characters") or [] if str(item.get("character_id") or "") == str(character_id or "")),
+        {},
+    )
+
+
+def video_uiflow3_find_location(state: dict, location_id: str) -> dict:
+    return next(
+        (dict(item) for item in (state.get("bible") or {}).get("locations") or [] if str(item.get("location_id") or "") == str(location_id or "")),
+        {},
+    )
+
+
+def video_uiflow3_find_scene(state: dict, scene_id: str) -> dict:
+    return next(
+        (dict(item) for item in state.get("scenes") or [] if str(item.get("scene_id") or "") == str(scene_id or "")),
+        {},
+    )
+
+
+def video_uiflow3_profile_candidate(profile_key: str) -> dict:
+    key = str(profile_key or "")
+    profile = dict(video_profile_catalog.PROFILE_BY_KEY.get(key) or {})
+    if not profile or not bool(profile.get("is_active", 1)):
+        raise ValueError("video_profile_not_found")
+    return {
+        "profile": profile,
+        "intent": str(profile.get("description") or profile.get("public_name") or key),
+        "brief": {
+            "title": str(profile.get("public_name") or profile.get("short_name") or key),
+            "goal": ", ".join(str(item) for item in profile.get("goal_tags") or []),
+            "story_formula": list(profile.get("default_scene_pattern") or []),
+            "visual_intent": list(profile.get("visual_tags") or []),
+            "platform": list(profile.get("platform_tags") or []),
+        },
+    }
+
+
+def video_uiflow3_source_content(state: dict) -> str:
+    source = dict(state.get("source") or {})
+    metadata = dict(source.get("metadata") or {})
+    value = str(metadata.get("text") or metadata.get("source_text") or "").strip()
+    if value:
+        return value
+    assets = list(source.get("assets") or [])
+    if assets:
+        return f"Noi dung tu {len(assets)} tep nguon da gui."
+    return ""
+
+
+def video_uiflow3_media_candidate(message) -> tuple[object | None, str, str, str]:
+    if not message:
+        return None, "", "", ""
+    if getattr(message, "photo", None):
+        return message.photo[-1], "image", "image/jpeg", "telegram_photo.jpg"
+    for attr, kind in (("video", "video"), ("animation", "video"), ("audio", "audio"), ("voice", "audio")):
+        media = getattr(message, attr, None)
+        if media:
+            return (
+                media,
+                kind,
+                str(getattr(media, "mime_type", "") or ("video/mp4" if kind == "video" else "audio/ogg")),
+                str(getattr(media, "file_name", "") or ""),
+            )
+    document = getattr(message, "document", None)
+    if document:
+        mime_type = str(getattr(document, "mime_type", "") or "application/octet-stream").lower()
+        file_name = str(getattr(document, "file_name", "") or "")
+        guessed = mimetypes.guess_type(file_name)[0] or ""
+        effective_mime = mime_type if mime_type != "application/octet-stream" else guessed
+        kind = "image" if effective_mime.startswith("image/") else "video" if effective_mime.startswith("video/") else "audio" if effective_mime.startswith("audio/") else "document"
+        return document, kind, effective_mime or mime_type, file_name
+    return None, "", "", ""
+
+
+def video_uiflow3_expected_source_media_kinds(state: dict) -> set[str]:
+    source_kind = str((state.get("source") or {}).get("kind") or "")
+    if source_kind in {"raw_images", "storyboard_panels"}:
+        return {"image"}
+    if source_kind == "source_video":
+        return {"video"}
+    return set()
+
+
+async def video_uiflow3_reply(message, context, state: dict):
+    current = save_video_uiflow3_state(context, state)
+    text, keyboard = video_uiflow3_screen_payload(current)
+    return await message.reply_text(text, reply_markup=keyboard)
+
+
+def video_uiflow3_compact_pair(value: str) -> tuple[str, str]:
+    parts = [item.strip() for item in str(value or "").split("|", 1)]
+    return (parts[0], parts[1]) if len(parts) == 2 else ("", parts[0])
+
+
+def video_uiflow3_action_allowed(state: dict, action: str) -> bool:
+    if action in {"back", "resume", "view"}:
+        return True
+    current_step = str((state.get("navigation") or {}).get("current_step") or "")
+    return str(action or "") in VIDEO_UIFLOW3_STEP_ACTIONS.get(current_step, set())
+
+
+@video_public_callback_failure_guard
+async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = getattr(update, "callback_query", None)
+    if not query:
+        return False
+    data = str(getattr(query, "data", "") or "")
+    parts = data.split("|")
+    if len(parts) < 2 or parts[0] != "vid3":
+        return False
+    action = parts[1]
+    values = parts[2:]
+    user_id = safe_int(getattr(getattr(query, "from_user", None), "id", 0), 0)
+
+    if action == "entry":
+        product = str(values[0] if values else "")
+        if product not in video_uiflow3.ENTRY_ADAPTERS or product == "video_idea":
+            await query.answer("Kho Y tuong dung flow rieng va khong bi thay doi.", show_alert=True)
+            return True
+        state = start_video_uiflow3_state(context, product)
+        state["owner_user_id"] = user_id
+    else:
+        state = video_uiflow3_state(context)
+        if not state:
+            await query.answer("Phien lap ke hoach da het. Hay mo lai dung menu Video.", show_alert=True)
+            return True
+        owner_user_id = safe_int(state.get("owner_user_id"), user_id)
+        if owner_user_id and user_id and owner_user_id != user_id:
+            await query.answer("Phien nay khong thuoc tai khoan hien tai.", show_alert=True)
+            return True
+
+    state, claimed = video_uiflow3.claim_callback(state, str(getattr(query, "id", "") or ""))
+    if not claimed:
+        await query.answer("Da nhan lua chon nay.")
+        return await video_uiflow3_render(query, context, state)
+    save_video_uiflow3_state(context, state)
+
+    try:
+        if action != "entry" and not video_uiflow3_action_allowed(state, action):
+            raise ValueError("video_uiflow3_action_not_relevant")
+        if action == "entry":
+            pass
+        elif action == "resume":
+            state = video_uiflow3.normalize_state(state)
+        elif action == "back":
+            state = video_uiflow3_clear_transient(state)
+            state = video_uiflow3.back(state)
+            if str((state.get("navigation") or {}).get("current_step") or "") == "summary":
+                state["navigation"]["return_to"] = None
+        elif action == "mode" and values:
+            updated = video_uiflow3.set_entry_mode(state, values[0])
+            state = video_uiflow3_after_service_update(state, updated)
+        elif action == "view" and values:
+            target = str(values[0])
+            if target in video_uiflow3.CANONICAL_VISIBLE_STEPS:
+                if target != str((state.get("navigation") or {}).get("current_step") or ""):
+                    raise ValueError("video_uiflow3_view_not_relevant")
+                state = video_uiflow3_go(state, target)
+            elif target in {
+                "character_count", "character_list", "location_count", "location_list",
+                "references", "continuity", "scene_plan_list", "prompt_scenes",
+                "prompt_advanced", "prompts",
+            }:
+                if VIDEO_UIFLOW3_VIEW_OWNERS.get(target) != str((state.get("navigation") or {}).get("current_step") or ""):
+                    raise ValueError("video_uiflow3_view_not_relevant")
+                state = video_uiflow3_open_view(state, target)
+            else:
+                raise ValueError("video_uiflow3_view_invalid")
+        elif action == "profiles" and values:
+            page = max(1, min(4, safe_int(values[0], 1)))
+            state = video_uiflow3_open_view(state, "profiles", profile_page=page)
+        elif action == "profile" and values:
+            candidate = video_uiflow3_profile_candidate(values[0])
+            updated = video_uiflow3.set_content_candidate(
+                state,
+                source="content_catalog",
+                profile_id=str(candidate["profile"].get("profile_key") or ""),
+                original_intent=candidate["intent"],
+                approved_brief=candidate["brief"],
+            )
+            state = video_uiflow3_after_service_update(state, updated)
+        elif action == "source_text":
+            state = video_uiflow3_await_input(state, "source_text", back_callback="vid3|view|source")
+        elif action == "source_media":
+            state = video_uiflow3_await_input(state, "source_media", back_callback="vid3|view|source")
+        elif action == "source_status":
+            await query.answer(f"Da nhan {len((state.get('source') or {}).get('assets') or [])} tep nguon.", show_alert=True)
+        elif action == "source_done":
+            if not bool((state.get("source") or {}).get("complete")):
+                raise ValueError("video_source_required")
+            state = video_uiflow3_go(state, "format")
+        elif action == "ratio" and values:
+            ratio = {"9x16": "9:16", "16x9": "16:9", "1x1": "1:1", "4x5": "4:5"}.get(values[0], "")
+            if not ratio:
+                raise ValueError("aspect_ratio_unsupported")
+            state = video_uiflow3.set_format(state, ratio=ratio)
+            state["navigation"]["current_step"] = "format"
+        elif action == "duration" and values:
+            state = video_uiflow3.set_format(state, target_duration_seconds=safe_int(values[0], 0))
+            state["navigation"]["current_step"] = "format"
+        elif action == "duration_custom":
+            state = video_uiflow3_await_input(state, "duration", back_callback="vid3|view|format")
+        elif action == "format_done":
+            fmt = dict(state.get("format") or {})
+            if not fmt.get("ratio") or safe_int(fmt.get("target_duration_seconds"), 0) <= 0:
+                raise ValueError("video_format_incomplete")
+            state = video_uiflow3_go(state, "content_hub")
+        elif action == "content" and values:
+            source_kind = values[0]
+            if source_kind == "profiles":
+                state = video_uiflow3_open_view(state, "profiles", profile_page=1)
+            elif source_kind == "manual":
+                state = video_uiflow3_await_input(state, "manual_content", back_callback="vid3|view|content_hub")
+            elif source_kind == "source":
+                source_text = video_uiflow3_source_content(state)
+                if not source_text:
+                    raise ValueError("video_source_content_missing")
+                updated = video_uiflow3.set_content_candidate(
+                    state,
+                    source="source",
+                    original_intent=source_text,
+                    approved_brief={"title": source_text[:240]},
+                )
+                state = video_uiflow3_after_service_update(state, updated)
+            else:
+                raise ValueError("video_content_source_invalid")
+        elif action == "content_lock":
+            state = video_uiflow3.lock_content(state) if not bool((state.get("content") or {}).get("locked")) else state
+            state = video_uiflow3_go(state, "production_bible")
+        elif action == "content_edit":
+            state = video_uiflow3_await_input(state, "content_edit", back_callback="vid3|view|content_lock")
+        elif action == "content_change":
+            state = video_uiflow3_go(state, "content_hub")
+        elif action == "chars" and values:
+            state = video_uiflow3.set_character_count(state, safe_int(values[0], -1))
+            state = video_uiflow3_open_view(state, "character_list")
+        elif action == "chars_custom":
+            state = video_uiflow3_await_input(state, "character_count", back_callback="vid3|view|character_count")
+        elif action == "character" and values:
+            character_id = values[0]
+            if not video_uiflow3_find_character(state, character_id):
+                raise ValueError("character_not_found")
+            state = video_uiflow3_open_view(state, "character_detail", active_character_id=character_id)
+        elif action == "char_gender" and len(values) >= 2:
+            character_id, gender = values[:2]
+            state = video_uiflow3.update_character(state, character_id, gender=gender)
+            state = video_uiflow3_open_view(state, "character_detail", active_character_id=character_id)
+        elif action == "char_desc" and values:
+            character_id = values[0]
+            if not video_uiflow3_find_character(state, character_id):
+                raise ValueError("character_not_found")
+            state = video_uiflow3_await_input(state, "character_description", back_callback=f"vid3|character|{character_id}", character_id=character_id)
+        elif action == "char_image" and values:
+            character_id = values[0]
+            if not video_uiflow3_find_character(state, character_id):
+                raise ValueError("character_not_found")
+            state = video_uiflow3_await_input(state, "character_image", back_callback=f"vid3|character|{character_id}", character_id=character_id)
+        elif action == "char_voice" and values:
+            character_id = values[0]
+            if not video_uiflow3_find_character(state, character_id):
+                raise ValueError("character_not_found")
+            state = video_uiflow3_open_view(state, "voice_select", active_character_id=character_id, ui_return_callback=f"vid3|character|{character_id}")
+        elif action == "voice" and len(values) >= 2:
+            character_id, alias = values[:2]
+            if alias not in VIDEO_UIFLOW3_VOICE_ALIASES:
+                raise ValueError("voice_alias_invalid")
+            state = video_uiflow3.update_character(state, character_id, voice_id=VIDEO_UIFLOW3_VOICE_ALIASES[alias])
+            back_callback = str(state.get("ui_return_callback") or f"vid3|character|{character_id}")
+            state = video_uiflow3_open_view(state, "voice_select", active_character_id=character_id, ui_return_callback=back_callback)
+        elif action == "voice_custom" and values:
+            character_id = values[0]
+            state = video_uiflow3_await_input(state, "character_voice", back_callback=f"vid3|char_voice|{character_id}", character_id=character_id)
+        elif action == "char_scenes" and values:
+            character_id = values[0]
+            if not video_uiflow3_find_character(state, character_id):
+                raise ValueError("character_not_found")
+            state = video_uiflow3_open_view(state, "entity_scene_assign", assignment_owner_type="character", assignment_owner_id=character_id)
+        elif action == "locs" and values:
+            state = video_uiflow3.set_location_count(state, safe_int(values[0], -1))
+            state = video_uiflow3_open_view(state, "location_list")
+        elif action == "locs_custom":
+            state = video_uiflow3_await_input(state, "location_count", back_callback="vid3|view|location_count")
+        elif action == "location" and values:
+            location_id = values[0]
+            if not video_uiflow3_find_location(state, location_id):
+                raise ValueError("location_not_found")
+            state = video_uiflow3_open_view(state, "location_detail", active_location_id=location_id)
+        elif action == "loc_desc" and values:
+            location_id = values[0]
+            if not video_uiflow3_find_location(state, location_id):
+                raise ValueError("location_not_found")
+            state = video_uiflow3_await_input(state, "location_description", back_callback=f"vid3|location|{location_id}", location_id=location_id)
+        elif action == "loc_image" and values:
+            location_id = values[0]
+            if not video_uiflow3_find_location(state, location_id):
+                raise ValueError("location_not_found")
+            state = video_uiflow3_await_input(state, "location_image", back_callback=f"vid3|location|{location_id}", location_id=location_id)
+        elif action == "loc_scenes" and values:
+            location_id = values[0]
+            if not video_uiflow3_find_location(state, location_id):
+                raise ValueError("location_not_found")
+            state = video_uiflow3_open_view(state, "entity_scene_assign", assignment_owner_type="location", assignment_owner_id=location_id)
+        elif action == "refs" and len(values) >= 2:
+            state = video_uiflow3_open_view(state, "references", reference_filter_type=values[0], reference_filter_id=values[1])
+        elif action == "continuity" and values:
+            key = values[0]
+            if key not in {"identity", "wardrobe", "product", "location"}:
+                raise ValueError("continuity_key_invalid")
+            state["bible"]["continuity"][key] = not bool(state["bible"]["continuity"].get(key, True))
+            state = video_uiflow3_open_view(state, "continuity")
+        elif action == "bible_auto":
+            needs = dict(state.get("needs") or {})
+            if needs.get("characters") in {"REQUIRED", "AUTO"} and not (state.get("bible") or {}).get("characters"):
+                state = video_uiflow3.set_character_count(state, 1)
+            if needs.get("locations") in {"REQUIRED", "AUTO"} and not (state.get("bible") or {}).get("locations"):
+                state = video_uiflow3.set_location_count(state, 1)
+            state = video_uiflow3_clear_transient(state)
+            state["navigation"]["current_step"] = "production_bible"
+        elif action == "bible_done":
+            state = video_uiflow3.mark_sections_complete(state, "production_bible", "references", "continuity")
+            state = video_uiflow3_finish_section(state, "production_bible", "scene_count")
+        elif action == "scene_count" and values:
+            updated = video_uiflow3.confirm_scene_count(state, safe_int(values[0], 0))
+            state = video_uiflow3_after_service_update(state, updated)
+        elif action == "scene_custom":
+            state = video_uiflow3_await_input(state, "scene_count", back_callback="vid3|view|scene_count")
+        elif action == "scene_plan_edit":
+            state = video_uiflow3_open_view(state, "scene_plan_list")
+        elif action == "plan_scene" and values:
+            scene_id = values[0]
+            if not video_uiflow3_find_scene(state, scene_id):
+                raise ValueError("scene_not_found")
+            state = video_uiflow3_open_view(state, "scene_plan_detail", active_scene_id=scene_id)
+        elif action == "plan_edit" and values:
+            scene_id = values[0]
+            state = video_uiflow3_await_input(state, "scene_plan", back_callback=f"vid3|plan_scene|{scene_id}", scene_id=scene_id)
+        elif action == "plan_move" and len(values) >= 2:
+            scene_id, direction = values[:2]
+            order = [str(item.get("scene_id") or "") for item in state.get("scenes") or []]
+            if scene_id not in order or direction not in {"up", "down"}:
+                raise ValueError("scene_order_invalid")
+            index = order.index(scene_id)
+            target = index - 1 if direction == "up" else index + 1
+            if 0 <= target < len(order):
+                order[index], order[target] = order[target], order[index]
+                state = video_uiflow3.reorder_scenes(state, order)
+            state = video_uiflow3_open_view(state, "scene_plan_detail", active_scene_id=scene_id)
+        elif action == "scene_plan_done":
+            state = video_uiflow3.mark_sections_complete(state, "scene_plan")
+            if str((state.get("navigation") or {}).get("return_to") or "") == "summary":
+                state = video_uiflow3_clear_transient(video_uiflow3.finish_editor(state), keep_return=False)
+            else:
+                updated = video_uiflow3.auto_assign_scenes(state)
+                state = video_uiflow3_after_service_update(state, updated)
+        elif action == "scene" and values:
+            scene_id = values[0]
+            if not video_uiflow3_find_scene(state, scene_id):
+                raise ValueError("scene_not_found")
+            state = video_uiflow3_open_view(state, "scene_detail", active_scene_id=scene_id)
+        elif action == "scene_auto":
+            state = video_uiflow3.auto_assign_scenes(state)
+            state = video_uiflow3_clear_transient(state)
+            state["navigation"]["current_step"] = "scene_assignment"
+        elif action == "scene_cast" and values:
+            scene_id = values[0]
+            if not video_uiflow3_find_scene(state, scene_id):
+                raise ValueError("scene_not_found")
+            state = video_uiflow3_open_view(state, "scene_cast", active_scene_id=scene_id)
+        elif action == "cast_toggle" and len(values) >= 2:
+            scene_id, character_id = values[:2]
+            scene = video_uiflow3_find_scene(state, scene_id)
+            if not scene or not video_uiflow3_find_character(state, character_id):
+                raise ValueError("scene_character_invalid")
+            selected = list(scene.get("character_ids") or [])
+            selected = [item for item in selected if item != character_id] if character_id in selected else selected + [character_id]
+            state = video_uiflow3.assign_scene(state, scene_id, character_ids=selected)
+            state = video_uiflow3_open_view(state, "scene_cast", active_scene_id=scene_id)
+        elif action == "cast_clear" and values:
+            scene_id = values[0]
+            state = video_uiflow3.assign_scene(state, scene_id, character_ids=[])
+            state = video_uiflow3_open_view(state, "scene_cast", active_scene_id=scene_id)
+        elif action == "scene_loc" and values:
+            scene_id = values[0]
+            if not video_uiflow3_find_scene(state, scene_id):
+                raise ValueError("scene_not_found")
+            state = video_uiflow3_open_view(state, "scene_location", active_scene_id=scene_id)
+        elif action == "scene_loc_set" and len(values) >= 2:
+            scene_id, location_id = values[:2]
+            state = video_uiflow3.assign_scene(state, scene_id, location_id=location_id)
+            state = video_uiflow3_open_view(state, "scene_location", active_scene_id=scene_id)
+        elif action == "scene_loc_clear" and values:
+            scene_id = values[0]
+            state = video_uiflow3.assign_scene(state, scene_id, location_id="")
+            state = video_uiflow3_open_view(state, "scene_location", active_scene_id=scene_id)
+        elif action == "scene_dialogue" and values:
+            scene_id = values[0]
+            state = video_uiflow3_open_view(state, "dialogue_speaker", active_scene_id=scene_id)
+        elif action == "dialogue_speaker" and len(values) >= 2:
+            scene_id, speaker_id = values[:2]
+            state = video_uiflow3_await_input(state, "dialogue", back_callback=f"vid3|scene_dialogue|{scene_id}", scene_id=scene_id, speaker_id=speaker_id)
+        elif action == "scene_voice" and values:
+            scene_id = values[0]
+            state = video_uiflow3_open_view(state, "scene_voice", active_scene_id=scene_id)
+        elif action == "scene_voice_char" and len(values) >= 2:
+            scene_id, character_id = values[:2]
+            state = video_uiflow3_open_view(state, "voice_select", active_scene_id=scene_id, active_character_id=character_id, ui_return_callback=f"vid3|scene_voice|{scene_id}")
+        elif action == "music_scope":
+            state = video_uiflow3_open_view(state, "music_scope")
+        elif action == "music_set" and values:
+            scope = values[0]
+            controls = video_uiflow3.public_controls(state)
+            if scope == "whole_video" and not controls["whole_video_music"]["supported"]:
+                raise ValueError("whole_video_music_renderer_missing")
+            if scope == "per_scene" and not controls["per_scene_music"]["supported"]:
+                raise ValueError("per_scene_music_renderer_missing")
+            state = video_uiflow3.set_music_scope(state, scope)
+            if scope == "whole_video":
+                state = video_uiflow3_await_input(state, "whole_music", back_callback="vid3|music_scope")
+            else:
+                state = video_uiflow3_open_view(state, "music_scope")
+        elif action == "scene_music" and values:
+            scene_id = values[0]
+            if not bool((state.get("capabilities") or {}).get("per_scene_music")):
+                raise ValueError("per_scene_music_renderer_missing")
+            if str((state.get("audio") or {}).get("music_scope") or "none") != "per_scene":
+                state = video_uiflow3.set_music_scope(state, "per_scene")
+            state = video_uiflow3_open_view(state, "scene_music", active_scene_id=scene_id)
+        elif action == "scene_music_set" and len(values) >= 2:
+            scene_id, policy = values[:2]
+            if not bool((state.get("capabilities") or {}).get("per_scene_music")):
+                raise ValueError("per_scene_music_renderer_missing")
+            if str((state.get("audio") or {}).get("music_scope") or "") != "per_scene":
+                state = video_uiflow3.set_music_scope(state, "per_scene")
+            state = video_uiflow3.set_scene_music(state, scene_id, policy=policy)
+            state = video_uiflow3_open_view(state, "scene_music", active_scene_id=scene_id)
+        elif action == "scene_music_custom" and values:
+            scene_id = values[0]
+            if not bool((state.get("capabilities") or {}).get("per_scene_music")):
+                raise ValueError("per_scene_music_renderer_missing")
+            if str((state.get("audio") or {}).get("music_scope") or "") != "per_scene":
+                state = video_uiflow3.set_music_scope(state, "per_scene")
+            state = video_uiflow3_await_input(state, "scene_music", back_callback=f"vid3|scene_music|{scene_id}", scene_id=scene_id)
+        elif action == "scene_advanced" and values:
+            state = video_uiflow3_open_view(state, "prompt_advanced", active_scene_id=values[0])
+        elif action == "entity_scene" and len(values) >= 3:
+            owner_type, owner_id, scene_id = values[:3]
+            scene = video_uiflow3_find_scene(state, scene_id)
+            if not scene:
+                raise ValueError("scene_not_found")
+            if owner_type == "character":
+                selected = list(scene.get("character_ids") or [])
+                selected = [item for item in selected if item != owner_id] if owner_id in selected else selected + [owner_id]
+                state = video_uiflow3.assign_scene(state, scene_id, character_ids=selected)
+            elif owner_type == "location":
+                state = video_uiflow3.assign_scene(state, scene_id, location_id="" if str(scene.get("location_id") or "") == owner_id else owner_id)
+            else:
+                raise ValueError("scene_owner_invalid")
+            state = video_uiflow3_open_view(state, "entity_scene_assign", assignment_owner_type=owner_type, assignment_owner_id=owner_id)
+        elif action == "assignment_done":
+            state = video_uiflow3_finish_section(state, "scene_assignment", "prompts")
+        elif action == "prompt_scenes":
+            state = video_uiflow3_open_view(state, "prompt_scenes")
+        elif action == "prompt_advanced":
+            state = video_uiflow3_open_view(state, "prompt_advanced")
+        elif action == "prompts_done":
+            state = video_uiflow3_finish_section(state, "prompts", "branding")
+        elif action == "brand" and values:
+            value = values[0]
+            if value == "logo":
+                state = video_uiflow3_await_input(state, "brand_logo", back_callback="vid3|view|branding")
+            elif value == "watermark":
+                state = video_uiflow3_await_input(state, "watermark", back_callback="vid3|view|branding")
+            elif value == "none":
+                state["branding"] = {}
+                state = video_uiflow3_go(state, "branding")
+            else:
+                raise ValueError("branding_action_invalid")
+        elif action == "branding_done":
+            state = video_uiflow3_finish_section(state, "branding", "summary")
+        elif action == "edit" and values:
+            target = values[0]
+            state = video_uiflow3.begin_summary_edit(state, target)
+            state = video_uiflow3_clear_transient(state)
+        elif action == "summary_done":
+            errors = video_uiflow3.readiness_errors(state)
+            if errors:
+                await query.answer("; ".join(video_uiflow3_readiness_labels(errors)[:3]), show_alert=True)
+            else:
+                state["legacy_compat"]["approved_snapshot"] = video_uiflow3.approved_snapshot(state)
+                state["legacy_compat"]["commercial_tail_ready"] = True
+                await query.answer("Da luu ke hoach UI. Route/Engine dang tam dung va chua duoc goi.", show_alert=True)
+        else:
+            raise ValueError("video_uiflow3_stale_action")
+    except ValueError:
+        await query.answer("Lua chon cu hoac khong hop le. Man hien tai van duoc giu nguyen.", show_alert=True)
+        return await video_uiflow3_render(query, context, state)
+
+    await query.answer()
+    return await video_uiflow3_render(query, context, state)
+
+
+async def handle_video_uiflow3_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    state = video_uiflow3_state(context)
+    pending = dict(state.get("pending_input") or {}) if state else {}
+    kind = str(pending.get("kind") or "")
+    if kind not in {
+        "source_text", "manual_content", "content_edit", "character_count",
+        "character_description", "character_voice", "location_count",
+        "location_description", "duration", "scene_count", "scene_plan",
+        "dialogue", "whole_music", "scene_music", "watermark",
+    }:
+        return False
+    text = str(update.message.text or "").strip()
+    if not text or text.startswith("/"):
+        return False
+    message_id = safe_int(getattr(update.message, "message_id", 0), 0)
+    handled = [safe_int(item, 0) for item in state.get("handled_text_message_ids") or [] if safe_int(item, 0) > 0][-80:]
+    if message_id and message_id in handled:
+        return True
+
+    try:
+        if kind == "source_text":
+            state = video_uiflow3.set_source_metadata(state, text=text[:12000])
+            state = video_uiflow3_go(state, "format")
+        elif kind == "manual_content":
+            updated = video_uiflow3.set_content_candidate(
+                state,
+                source="manual",
+                original_intent=text[:12000],
+                approved_brief={"title": text[:240]},
+            )
+            state = video_uiflow3_after_service_update(state, updated)
+        elif kind == "content_edit":
+            state = video_uiflow3.revise_content(state, original_intent=text[:12000])
+            state = video_uiflow3_go(state, "content_lock")
+        elif kind == "character_count":
+            state = video_uiflow3.set_character_count(state, safe_int(text, -1))
+            state = video_uiflow3_open_view(state, "character_list")
+        elif kind == "character_description":
+            character_id = str(pending.get("character_id") or "")
+            name, description = video_uiflow3_compact_pair(text)
+            changes = {"description": description[:1600]}
+            if name:
+                changes["display_name"] = name[:240]
+            state = video_uiflow3.update_character(state, character_id, **changes)
+            state = video_uiflow3_open_view(state, "character_detail", active_character_id=character_id)
+        elif kind == "character_voice":
+            character_id = str(pending.get("character_id") or "")
+            state = video_uiflow3.update_character(state, character_id, voice_id=text[:240])
+            state = video_uiflow3_open_view(state, "voice_select", active_character_id=character_id, ui_return_callback=f"vid3|character|{character_id}")
+        elif kind == "location_count":
+            state = video_uiflow3.set_location_count(state, safe_int(text, -1))
+            state = video_uiflow3_open_view(state, "location_list")
+        elif kind == "location_description":
+            location_id = str(pending.get("location_id") or "")
+            name, description = video_uiflow3_compact_pair(text)
+            changes = {"description": description[:1600]}
+            if name:
+                changes["name"] = name[:240]
+            state = video_uiflow3.update_location(state, location_id, **changes)
+            state = video_uiflow3_open_view(state, "location_detail", active_location_id=location_id)
+        elif kind == "duration":
+            state = video_uiflow3.set_format(state, target_duration_seconds=safe_int(text, 0))
+            state = video_uiflow3_go(state, "format")
+        elif kind == "scene_count":
+            before = state
+            updated = video_uiflow3.confirm_scene_count(state, safe_int(text, 0))
+            state = video_uiflow3_after_service_update(before, updated)
+        elif kind == "scene_plan":
+            scene_id = str(pending.get("scene_id") or "")
+            scene = next((item for item in state.get("scenes") or [] if str(item.get("scene_id") or "") == scene_id), None)
+            if scene is None:
+                raise ValueError("scene_not_found")
+            fields = [item.strip() for item in text.split("|", 2)]
+            scene["semantic_beat"] = fields[0][:800]
+            scene["main_action"] = (fields[1] if len(fields) > 1 else fields[0])[:800]
+            scene["completion_state"] = (fields[2] if len(fields) > 2 else "")[:800]
+            scene["original_scene_intent"] = text[:1600]
+            state = video_uiflow3_open_view(state, "scene_plan_detail", active_scene_id=scene_id)
+        elif kind == "dialogue":
+            scene_id = str(pending.get("scene_id") or "")
+            speaker_id = str(pending.get("speaker_id") or "")
+            state = video_uiflow3.set_dialogue(state, scene_id, speaker_id=speaker_id, text=text[:4000])
+            state = video_uiflow3_open_view(state, "scene_detail", active_scene_id=scene_id)
+        elif kind == "whole_music":
+            if str((state.get("audio") or {}).get("music_scope") or "") != "whole_video":
+                state = video_uiflow3.set_music_scope(state, "whole_video")
+            state = video_uiflow3.set_whole_video_music(state, track_id=text[:240])
+            state = video_uiflow3_open_view(state, "music_scope")
+        elif kind == "scene_music":
+            scene_id = str(pending.get("scene_id") or "")
+            if str((state.get("audio") or {}).get("music_scope") or "") != "per_scene":
+                state = video_uiflow3.set_music_scope(state, "per_scene")
+            state = video_uiflow3.set_scene_music(state, scene_id, policy="track", track_id=text[:240])
+            state = video_uiflow3_open_view(state, "scene_music", active_scene_id=scene_id)
+        elif kind == "watermark":
+            state["branding"]["watermark"] = {"text": text[:500], "source": "user"}
+            state = video_uiflow3_go(state, "branding")
+        else:
+            return False
+    except ValueError as exc:
+        await update.message.reply_text(
+            "Thong tin chua hop le: " + str(exc) + ". Vui long nhap lai; du lieu cu van duoc giu.",
+            reply_markup=video_uiflow3_screen_payload(state)[1],
+        )
+        return True
+
+    if message_id:
+        state["handled_text_message_ids"] = (handled + [message_id])[-80:]
+    state.pop("pending_input", None)
+    if str(state.get("ui_view") or "") == "input_prompt":
+        state.pop("ui_view", None)
+    await video_uiflow3_reply(update.message, context, state)
+    return True
+
+
+async def handle_video_uiflow3_pending_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.effective_user:
+        return False
+    state = video_uiflow3_state(context)
+    pending = dict(state.get("pending_input") or {}) if state else {}
+    kind = str(pending.get("kind") or "")
+    if kind not in {"source_media", "character_image", "location_image", "brand_logo"}:
+        return False
+    media, media_kind, mime_type, file_name = video_uiflow3_media_candidate(update.message)
+    if not media:
+        return False
+    if kind == "source_media":
+        expected_kinds = video_uiflow3_expected_source_media_kinds(state)
+        if not expected_kinds or media_kind not in expected_kinds:
+            expected_label = "anh" if expected_kinds == {"image"} else "video" if expected_kinds == {"video"} else "tep dung loai"
+            await update.message.reply_text(f"Buoc nay chi nhan {expected_label}. Tep chua duoc luu; hay gui lai dung loai.")
+            return True
+    if kind in {"character_image", "location_image", "brand_logo"} and media_kind != "image":
+        await update.message.reply_text("Buoc nay chi nhan anh. Tep chua duoc luu; hay gui lai dung anh.")
+        return True
+    file_id = str(getattr(media, "file_id", "") or "")
+    unique_id = str(getattr(media, "file_unique_id", "") or "")
+    if not file_id:
+        await update.message.reply_text("Khong doc duoc ma tep Telegram. Vui long gui lai.")
+        return True
+    message_id = safe_int(getattr(update.message, "message_id", 0), 0)
+    handled = [safe_int(item, 0) for item in state.get("handled_media_message_ids") or [] if safe_int(item, 0) > 0][-80:]
+    if message_id and message_id in handled:
+        return True
+    fingerprint = "telegram:" + (unique_id or file_id)
+    metadata = {
+        "file_unique_id": unique_id,
+        "file_size": safe_int(getattr(media, "file_size", 0), 0),
+        "mime_type": mime_type,
+        "file_name": file_name,
+        "source_message_id": message_id,
+        "owner_user_id": safe_int(getattr(update.effective_user, "id", 0), 0),
+    }
+    keep_collecting = False
+    try:
+        if kind == "source_media":
+            asset_type = "frame" if state.get("parent_product") == "frame_video_local" and media_kind == "image" else "source_video" if media_kind == "video" else media_kind
+            state = video_uiflow3.add_source_asset(
+                state,
+                asset_type=asset_type,
+                telegram_file_id=file_id,
+                fingerprint=fingerprint,
+                **metadata,
+            )
+            if state.get("parent_product") == "storyboard_prompt" and media_kind == "image":
+                state = video_uiflow3.set_source_metadata(
+                    state,
+                    detected_panel_count=len((state.get("source") or {}).get("assets") or []),
+                )
+            keep_collecting = bool(
+                media_kind == "image"
+                and state.get("parent_product") in {"frame_video_local", "storyboard_prompt"}
+            )
+            if keep_collecting:
+                state["navigation"]["current_step"] = "source"
+                state["ui_view"] = "input_prompt"
+                state["pending_input"] = pending
+            else:
+                state = video_uiflow3_go(state, "format")
+        elif kind == "character_image":
+            character_id = str(pending.get("character_id") or "")
+            state = video_uiflow3.add_reference(
+                state,
+                asset_type="image",
+                owner_type="character",
+                owner_id=character_id,
+                role="primary_identity",
+                telegram_file_id=file_id,
+                fingerprint=fingerprint,
+                **metadata,
+            )
+            state = video_uiflow3_open_view(state, "character_detail", active_character_id=character_id)
+        elif kind == "location_image":
+            location_id = str(pending.get("location_id") or "")
+            state = video_uiflow3.add_reference(
+                state,
+                asset_type="image",
+                owner_type="location",
+                owner_id=location_id,
+                role="primary_location",
+                telegram_file_id=file_id,
+                fingerprint=fingerprint,
+                **metadata,
+            )
+            state = video_uiflow3_open_view(state, "location_detail", active_location_id=location_id)
+        elif kind == "brand_logo":
+            state["branding"]["logo"] = {"telegram_file_id": file_id, "fingerprint": fingerprint, **metadata}
+            state = video_uiflow3_go(state, "branding")
+    except ValueError as exc:
+        await update.message.reply_text("Tep chua hop le: " + str(exc) + ". Du lieu cu van duoc giu.")
+        return True
+
+    if message_id:
+        state["handled_media_message_ids"] = (handled + [message_id])[-80:]
+    if not keep_collecting:
+        state.pop("pending_input", None)
+        if str(state.get("ui_view") or "") == "input_prompt":
+            state.pop("ui_view", None)
+    await video_uiflow3_reply(update.message, context, state)
+    return True
 
 
 def video_profile_studio_state(context) -> dict:
@@ -77129,8 +78655,9 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_vi": "🔥 Video theo trend",
         "label_en": "🔥 Trend video",
         "label_zh": "🔥 Trend 视频",
-        "entry_callback": "vproduct|open|video_trend",
-        "handler": "handle_video_product_callback",
+        "entry_callback": "vid3|entry|video_trend",
+        "legacy_entry_callback": "vproduct|open|video_trend",
+        "handler": "handle_video_uiflow3_callback",
         "expected_children": (
             "vproduct|scene3_start|video_trend",
             "vproduct|idea_library|video_trend",
@@ -77153,8 +78680,9 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_vi": "🎬 Video AI chân thật",
         "label_en": "🎬 Real AI Video",
         "label_zh": "🎬 真实 AI 视频",
-        "entry_callback": "vproduct|open|video_ai_real",
-        "handler": "handle_video_product_callback",
+        "entry_callback": "vid3|entry|video_ai_real",
+        "legacy_entry_callback": "vproduct|open|video_ai_real",
+        "handler": "handle_video_uiflow3_callback",
         "expected_children": ("vproduct|scene3_start|video_ai_real", "vproduct|idea_library|video_ai_real"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
@@ -77170,8 +78698,9 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_vi": "🧩 Kịch bản → Video",
         "label_en": "🧩 Script → Video",
         "label_zh": "🧩 脚本 → 视频",
-        "entry_callback": "vproduct|open|script_image_video",
-        "handler": "handle_video_product_callback",
+        "entry_callback": "vid3|entry|script_image_video",
+        "legacy_entry_callback": "vproduct|open|script_image_video",
+        "handler": "handle_video_uiflow3_callback",
         "expected_children": ("vproduct|scene3_start|script_image_video", "vproduct|idea_library|script_image_video"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
@@ -77221,8 +78750,9 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_vi": "🎞 Ghép ảnh thành video",
         "label_en": "🎞 Image slideshow video",
         "label_zh": "🎞 图片合成视频",
-        "entry_callback": "vproduct|open|frame_video_local",
-        "handler": "handle_video_product_callback",
+        "entry_callback": "vid3|entry|frame_video_local",
+        "legacy_entry_callback": "vproduct|open|frame_video_local",
+        "handler": "handle_video_uiflow3_callback",
         "expected_children": ("framevideo|start", "framevideo|ai_first"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
@@ -77237,8 +78767,9 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_vi": "🎥 Video tự quay",
         "label_en": "🎥 Self-shot video",
         "label_zh": "🎥 自拍视频",
-        "entry_callback": "vproduct|open|self_shot_scene_change",
-        "handler": "handle_video_product_callback",
+        "entry_callback": "vid3|entry|self_shot_scene_change",
+        "legacy_entry_callback": "vproduct|open|self_shot_scene_change",
+        "handler": "handle_video_uiflow3_callback",
         "expected_children": (
             "vproduct|selfshot_product|scene_change",
             "vproduct|selfshot_product|cinematic",
@@ -77277,8 +78808,9 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_vi": "🎬 Video dài tập",
         "label_en": "🎬 Long-form episodic video",
         "label_zh": "🎬 多场景 AI 影片",
-        "entry_callback": "longvideo|public_guard",
-        "handler": "handle_long_video_callback",
+        "entry_callback": "vid3|entry|multi_scene_film",
+        "legacy_entry_callback": "longvideo|public_guard",
+        "handler": "handle_video_uiflow3_callback",
         "expected_children": (
             "vproduct|scene3_start|multi_scene_film",
             "vproduct|idea_library|multi_scene_film",
@@ -77314,8 +78846,9 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_vi": "🎞 Storyboard",
         "label_en": "🎞 Storyboard",
         "label_zh": "🎬 分镜 + Prompt",
-        "entry_callback": "vproduct|open|storyboard_prompt",
-        "handler": "handle_video_product_callback",
+        "entry_callback": "vid3|entry|storyboard_prompt",
+        "legacy_entry_callback": "vproduct|open|storyboard_prompt",
+        "handler": "handle_video_uiflow3_callback",
         "expected_children": (
             "vstory|ai",
             "vstory|upload",
@@ -77852,6 +79385,7 @@ def video_public_menu_label(tool_id: str, lang: str = "vi") -> str:
 
 VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES = (
     ("vproduct|b14_confirm", "handle_product_video_public_confirm_callback"),
+    ("vid3|", "handle_video_uiflow3_callback"),
     ("lvs27b|", "handle_local_video_studio_public_callback"),
     ("video_tail|", "handle_video_tail_callback"),
     ("vtrend|", "handle_video_trend2_callback"),
@@ -109829,6 +111363,8 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
         return menu_text_main_guide_i18n(lang), main_guide_keyboard(lang)
     if action == "guide":
         return guide_index_text_i18n(lang), guide_keyboard("", lang)
+    if action == "guide_video_ai":
+        return video_uiflow3_guide_text(lang), video_uiflow3_guide_keyboard(lang)
     if action.startswith("guide_"):
         section = action.replace("guide_", "", 1)
         return guide_section_text_i18n(section, lang), guide_keyboard(section, lang)
@@ -109941,6 +111477,8 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
         return legal_menu_text(), legal_menu_keyboard()
     if action == "guide":
         return guide_index_text(), guide_keyboard()
+    if action == "guide_video_ai":
+        return video_uiflow3_guide_text("vi"), video_uiflow3_guide_keyboard("vi")
     if action.startswith("guide_"):
         section = action.replace("guide_", "", 1)
         return guide_section_text(section), guide_keyboard(section)
@@ -205692,6 +207230,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_storyboard2_pending_media(update, context):
         return
 
+    if await handle_video_uiflow3_pending_media(update, context):
+        return
+
     if await handle_video_scene3_pending_media(update, context):
         return
 
@@ -205781,6 +207322,8 @@ async def handle_translation_media_pending_upload(update: Update, context: Conte
 
 async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_video_editor_pending_upload(update, context):
+        return
+    if await handle_video_uiflow3_pending_media(update, context):
         return
     if await handle_storyboard2_pending_media(update, context):
         return
@@ -205927,6 +207470,10 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_caption_admin_tool_test_media(update, context):
         return
     if await handle_pending_admin_tool_test_media(update, context):
+        return
+    if await handle_video_editor_pending_upload(update, context):
+        return
+    if await handle_video_uiflow3_pending_media(update, context):
         return
     if await handle_storyboard2_pending_media(update, context):
         return
@@ -234655,6 +236202,10 @@ async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_
         return
     if await handle_pending_admin_tool_test_media(update, context):
         return
+    if await handle_video_editor_pending_upload(update, context):
+        return
+    if await handle_video_uiflow3_pending_media(update, context):
+        return
     if await handle_storyboard2_pending_media(update, context):
         return
     if await handle_frame_video_pending_media(update, context):
@@ -235354,6 +236905,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_storyboard2_pending_text(update, context):
+        return
+
+    if await handle_video_editor_invalid_intake_text(update, context):
+        return
+
+    if await handle_video_editor_pending_text(update, context):
+        return
+
+    if await handle_video_uiflow3_pending_text(update, context):
         return
 
     if await handle_frame_video_pending_text(update, context):
@@ -236881,6 +238441,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_local_video_studio_public_callback, pattern=r"^lvs27b\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_product_video_public_confirm_callback, pattern=r"^vproduct\|b14_confirm$"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_tail_callback, pattern=r"^video_tail\|", block=True))
+    tg_app.add_handler(CallbackQueryHandler(handle_video_uiflow3_callback, pattern=r"^vid3\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_trend2_callback, pattern=r"^vtrend\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_storyboard2_callback, pattern=r"^vstory\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_product_callback, pattern=r"^vproduct\|(?!b14_confirm(?:\||$))"))
