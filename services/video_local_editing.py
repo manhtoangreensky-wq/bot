@@ -105,7 +105,7 @@ def normalize_callback_plan_choice(kind: Any, value: Any) -> tuple[str, Any]:
             if token not in FLIP_MODES:
                 raise ValueError
             return key, token
-        if key in {"speed", "volume", "logo_opacity"}:
+        if key in {"speed", "volume", "logo_opacity", "watermark_opacity"}:
             number = float(token)
             if not math.isfinite(number):
                 raise ValueError
@@ -113,14 +113,14 @@ def normalize_callback_plan_choice(kind: Any, value: Any) -> tuple[str, Any]:
                 raise ValueError
             if key == "volume" and number not in VOLUME_PRESETS:
                 raise ValueError
-            if key == "logo_opacity" and not 0.1 <= number <= 1.0:
+            if key in {"logo_opacity", "watermark_opacity"} and not 0.1 <= number <= 1.0:
                 raise ValueError
             return key, number
         if key == "color_preset":
             if token not in COLOR_PRESETS:
                 raise ValueError
             return key, token
-        if key == "logo_position":
+        if key in {"logo_position", "watermark_position"}:
             if token not in LOGO_POSITIONS:
                 raise ValueError
             return key, token
@@ -227,6 +227,7 @@ def default_manual_edit_plan(input_video: str = "") -> dict[str, Any]:
         "flip": "none",
         "speed": 1.0,
         "volume": 1.0,
+        "audio_tracks": [],
         "brightness_percent": 100,
         "text_overlay": {},
         "logo_overlay": {},
@@ -279,7 +280,11 @@ _MANUAL_PLAN_NESTED_FIELDS: dict[str, frozenset[str]] = {
     "text_overlay": frozenset(
         {"content", "position", "start_ms", "end_ms", "font_size", "outline", "font_path"}
     ),
+    "watermark_overlay": frozenset(
+        {"content", "position", "start_ms", "end_ms", "font_size", "outline", "font_path", "opacity"}
+    ),
     "logo_overlay": frozenset({"path", "position", "scale", "opacity"}),
+    "audio_tracks": frozenset({"path", "kind", "volume", "start_ms", "end_ms"}),
 }
 
 
@@ -288,6 +293,17 @@ def _manual_plan_has_unknown_nested_fields(plan: dict[str, Any]) -> bool:
 
     for field, allowed in _MANUAL_PLAN_NESTED_FIELDS.items():
         value = plan.get(field)
+        if field == "audio_tracks":
+            if value is None:
+                continue
+            if not isinstance(value, list):
+                return True
+            if any(
+                not isinstance(item, dict) or set(item) - set(allowed)
+                for item in value
+            ):
+                return True
+            continue
         if value in (None, {}):
             continue
         if not isinstance(value, dict) or set(value) - set(allowed):
@@ -342,12 +358,17 @@ def manual_plan_assets_match(
     concat_sources: Any,
     logo_source: Any,
     subtitle_source: Any,
+    audio_sources: Any = None,
 ) -> bool:
     """Bind every manual asset operation to exactly one Telegram asset record."""
 
     if not isinstance(plan, dict) or not isinstance(concat_sources, list):
         return False
     if not isinstance(logo_source, dict) or not isinstance(subtitle_source, dict):
+        return False
+    if audio_sources is None:
+        audio_sources = []
+    if not isinstance(audio_sources, list):
         return False
     concat_inputs = plan.get("concat_inputs") or []
     if not isinstance(concat_inputs, list):
@@ -368,6 +389,39 @@ def manual_plan_assets_match(
         str(subtitle_source.get("file_id") or "").strip()
     ):
         return False
+    audio_plan = plan.get("audio_tracks") or []
+    if not isinstance(audio_plan, list) or len(audio_plan) != len(audio_sources):
+        return False
+    for planned, source in zip(audio_plan, audio_sources):
+        if not isinstance(planned, dict) or not isinstance(source, dict):
+            return False
+        if not str(source.get("file_id") or "").strip():
+            return False
+        if str(planned.get("kind") or "music").strip().lower() != str(source.get("kind") or "music").strip().lower():
+            return False
+        planned_volume = planned.get("volume", 1.0)
+        source_volume = source.get("volume", 1.0)
+        if (
+            isinstance(planned_volume, bool)
+            or isinstance(source_volume, bool)
+            or not isinstance(planned_volume, (int, float))
+            or not isinstance(source_volume, (int, float))
+            or not math.isfinite(float(planned_volume))
+            or not math.isfinite(float(source_volume))
+            or float(planned_volume) != float(source_volume)
+        ):
+            return False
+        for field in ("start_ms", "end_ms"):
+            planned_value = planned.get(field, 0)
+            source_value = source.get(field, 0)
+            if (
+                isinstance(planned_value, bool)
+                or isinstance(source_value, bool)
+                or not isinstance(planned_value, int)
+                or not isinstance(source_value, int)
+                or planned_value != source_value
+            ):
+                return False
     return True
 
 
@@ -435,7 +489,13 @@ def plan_has_effective_operation(
     effects = current.get("local_effects") if isinstance(current.get("local_effects"), dict) else {}
     if any(bool(effects.get(key)) or _integer(effects.get(key), 0) > 0 for key in LOCAL_EFFECT_KEYS):
         return True
-    if current.get("text_overlay") or current.get("logo_overlay") or current.get("subtitle_file"):
+    if (
+        current.get("text_overlay")
+        or current.get("watermark_overlay")
+        or current.get("logo_overlay")
+        or current.get("subtitle_file")
+        or current.get("audio_tracks")
+    ):
         return True
     return False
 
@@ -453,6 +513,20 @@ def manual_plan_has_effect(
         source_duration_ms=source_duration_ms,
         split_ranges=split_ranges,
     )
+
+
+def manual_output_requires_audio(
+    plan: dict[str, Any] | None,
+    *,
+    source_has_audio: bool,
+) -> bool:
+    """Require an audio stream when an audible source or add-on was requested."""
+
+    current = dict(plan or {})
+    if _number(current.get("volume"), 1.0) <= 0:
+        return False
+    audio_tracks = current.get("audio_tracks") or []
+    return bool(source_has_audio or audio_tracks)
 
 
 def split_plan_has_manual_conflict(
@@ -494,7 +568,7 @@ def normalize_manual_edit_plan(
         requested = dict(plan or {})
     except (TypeError, ValueError) as exc:
         raise LocalVideoEditError("edit_plan_invalid") from exc
-    allowed_fields = set(default_manual_edit_plan())
+    allowed_fields = {*default_manual_edit_plan(), "watermark_overlay"}
     unknown_fields = sorted(set(requested) - allowed_fields)
     if unknown_fields:
         raise LocalVideoEditError(f"unknown_edit_plan_field:{unknown_fields[0]}")
@@ -658,6 +732,99 @@ def normalize_manual_edit_plan(
             max(0, start) < min(post_speed_duration_ms, end)
         ):
             raise LocalVideoEditError("text_overlay_outside_output")
+    try:
+        watermark = dict(raw.get("watermark_overlay") or {})
+    except (TypeError, ValueError) as exc:
+        raise LocalVideoEditError("watermark_overlay_invalid") from exc
+    if watermark:
+        content = _safe_text(watermark.get("content"), 120)
+        requested_position = str(
+            watermark.get("position") or "bottom_right"
+        ).strip().lower()
+        position = _canonical_overlay_position(
+            requested_position,
+            "bottom_right",
+        )
+        watermark_start = _strict_integer(
+            watermark.get("start_ms", 0),
+            reason="watermark_overlay_invalid",
+        )
+        requested_watermark_end = _strict_integer(
+            watermark.get("end_ms", 0),
+            reason="watermark_overlay_invalid",
+        )
+        defer_watermark_end = requested_watermark_end == 0 and bool(concat_inputs)
+        watermark_end = (
+            0
+            if defer_watermark_end
+            else requested_watermark_end or post_speed_duration_ms
+        )
+        watermark_font_size = _strict_integer(
+            watermark.get("font_size", 32),
+            reason="watermark_overlay_invalid",
+        )
+        watermark_outline = _strict_integer(
+            watermark.get("outline", 2),
+            reason="watermark_overlay_invalid",
+        )
+        watermark_opacity = _strict_number(
+            watermark.get("opacity", 0.45),
+            reason="watermark_overlay_invalid",
+        )
+        if (
+            not content
+            or requested_position not in LOGO_POSITIONS
+            or watermark_start < 0
+            or requested_watermark_end < 0
+            or (not defer_watermark_end and watermark_start >= watermark_end)
+            or not 16 <= watermark_font_size <= 120
+            or not 1 <= watermark_outline <= 6
+            or not 0.1 <= watermark_opacity <= 1.0
+        ):
+            raise LocalVideoEditError("watermark_overlay_invalid")
+        watermark = {
+            "content": content,
+            "position": position,
+            "start_ms": watermark_start,
+            "end_ms": watermark_end,
+            "font_size": watermark_font_size,
+            "outline": watermark_outline,
+            "font_path": str(watermark.get("font_path") or "").strip(),
+            "opacity": watermark_opacity,
+        }
+        if not concat_inputs and not (
+            max(0, watermark_start)
+            < min(post_speed_duration_ms, watermark_end)
+        ):
+            raise LocalVideoEditError("watermark_overlay_outside_output")
+    raw_audio_tracks = raw.get("audio_tracks") or []
+    if not isinstance(raw_audio_tracks, list) or len(raw_audio_tracks) > 4:
+        raise LocalVideoEditError("audio_tracks_invalid")
+    audio_tracks: list[dict[str, Any]] = []
+    for item in raw_audio_tracks:
+        if not isinstance(item, dict):
+            raise LocalVideoEditError("audio_tracks_invalid")
+        path = str(item.get("path") or "").strip()
+        kind = str(item.get("kind") or "music").strip().lower()
+        if kind not in {"music", "voice", "sfx"} or not path:
+            raise LocalVideoEditError("audio_tracks_invalid")
+        volume_track = _strict_number(item.get("volume", 1.0), reason="audio_tracks_invalid")
+        start_track = _strict_integer(item.get("start_ms", 0), reason="audio_tracks_invalid")
+        end_track = _strict_integer(item.get("end_ms", 0), reason="audio_tracks_invalid")
+        if not 0.0 <= volume_track <= 2.0 or start_track < 0 or end_track < 0 or (end_track and start_track >= end_track):
+            raise LocalVideoEditError("audio_tracks_invalid")
+        if workspace is not None:
+            try:
+                require_path_within(path, workspace)
+            except LocalVideoValidationError as exc:
+                raise LocalVideoEditError(exc.reason) from exc
+        audio_tracks.append({
+            "path": path,
+            "kind": kind,
+            "volume": volume_track,
+            "start_ms": start_track,
+            "end_ms": end_track,
+        })
     logo = dict(raw.get("logo_overlay") or {})
     if logo:
         logo_path = str(logo.get("path") or "").strip()
@@ -683,16 +850,32 @@ def normalize_manual_edit_plan(
         validation = validate_srt_file(subtitle_file, workspace=workspace)
         if not validation.get("ok"):
             raise LocalVideoEditError(str(validation.get("reason") or "subtitle_invalid"))
-        if not concat_inputs and not any(
-            max(0, int(cue.get("start_ms") or 0))
-            < min(post_speed_duration_ms, int(cue.get("end_ms") or 0))
-            for cue in list(validation.get("cue_windows") or [])
-            if isinstance(cue, dict)
-        ):
-            raise LocalVideoEditError("subtitle_outside_output")
+        # At admission, appended-media durations are not authoritative yet,
+        # so defer the complete check to the worker's final retime pass.  For
+        # the primary source we can still reject a subtitle file whose cues do
+        # not intersect any retained source span; otherwise it would queue a
+        # job guaranteed to produce no subtitle artifact.  Speed is applied
+        # after this source-window check by _retime_srt_for_manual_timeline.
+        if not concat_inputs:
+            retained_spans = [(start_ms, end_ms)]
+            if remove_middle:
+                retained_spans = [
+                    (start_ms, int(remove_middle["start_ms"])),
+                    (int(remove_middle["end_ms"]), end_ms),
+                ]
+            has_retained_cue = any(
+                max(int(cue.get("start_ms") or 0), span_start)
+                < min(int(cue.get("end_ms") or 0), span_end)
+                for cue in (validation.get("cue_windows") or [])
+                if isinstance(cue, dict)
+                for span_start, span_end in retained_spans
+                if span_end > span_start
+            )
+            if not has_retained_cue:
+                raise LocalVideoEditError("subtitle_outside_output")
     if str(raw.get("output_format") or "mp4").lower() != "mp4":
         raise LocalVideoEditError("output_format_invalid")
-    return {
+    normalized = {
         "input_video": source,
         "concat_inputs": concat_inputs,
         "trim": {"start_ms": start_ms, "end_ms": end_ms},
@@ -702,6 +885,7 @@ def normalize_manual_edit_plan(
         "flip": flip,
         "speed": speed,
         "volume": volume,
+        "audio_tracks": audio_tracks,
         "brightness_percent": brightness_percent,
         "text_overlay": text,
         "logo_overlay": logo,
@@ -713,6 +897,9 @@ def normalize_manual_edit_plan(
         "remove_middle": remove_middle,
         "output_format": "mp4",
     }
+    if watermark:
+        normalized["watermark_overlay"] = watermark
+    return normalized
 
 
 def expected_final_timeline_duration_ms(
@@ -876,7 +1063,8 @@ def required_optional_filters(
     if effects.get("slow_zoom"):
         required.add("zoompan")
     text = dict(plan.get("text_overlay") or {})
-    if text:
+    watermark = dict(plan.get("watermark_overlay") or {})
+    if text or watermark:
         required.add("drawtext")
     if str(plan.get("subtitle_file") or ""):
         required.add("subtitles")
@@ -885,6 +1073,18 @@ def required_optional_filters(
         required.update({"colorchannelmixer", "scale", "overlay"})
     if audible and float(plan.get("volume") or 0.0) != 1.0:
         required.add("volume")
+    audio_tracks = plan.get("audio_tracks") or []
+    if audio_tracks:
+        # Added tracks are resampled, time-windowed, delayed and mixed into
+        # one final bus.  Admission must require the same filter surface the
+        # command builder emits, including the post-mix limiter.
+        required.update({"aresample", "amix", "alimiter", "adelay", "atrim", "asetpts"})
+        if any(
+            _number(track.get("volume"), 1.0) != 1.0
+            for track in audio_tracks
+            if isinstance(track, dict)
+        ):
+            required.add("volume")
     if plan.get("concat_inputs"):
         # Each concat input is normalized to the primary stream contract.
         # The primary clip can require a trim before append, and any appended
@@ -932,6 +1132,7 @@ def validate_manual_edit_plan_contract(
     source_height: int = 0,
     logo_source_present: bool = False,
     concat_sources_present: bool = False,
+    audio_sources: Any = None,
 ) -> dict[str, Any]:
     """Validate plan shape before a Telegram job is written.
 
@@ -961,6 +1162,46 @@ def validate_manual_edit_plan_contract(
         # path-shaped placeholder preserves the pending-concat timeline rule;
         # the worker replaces it with its bounded downloaded paths.
         candidate["concat_inputs"] = ["concat-source.mp4"]
+    # Telegram intake carries a file_id while the worker owns the eventual
+    # local path.  Preserve the audio operation during admission with a
+    # workspace-neutral placeholder; local_worker replaces it after download.
+    if audio_sources is not None:
+        if not isinstance(audio_sources, list):
+            return {
+                "ok": False,
+                "reason": "audio_tracks_invalid",
+                "required_filters": [],
+                "plan": {},
+            }
+        raw_tracks = candidate.get("audio_tracks") or []
+        if not isinstance(raw_tracks, list) or len(raw_tracks) != len(audio_sources):
+            return {
+                "ok": False,
+                "reason": "audio_tracks_invalid",
+                "required_filters": [],
+                "plan": {},
+            }
+        tracks_with_placeholders: list[dict[str, Any]] = []
+        for index, (track, source_record) in enumerate(zip(raw_tracks, audio_sources), start=1):
+            if not isinstance(track, dict) or not isinstance(source_record, dict):
+                return {
+                    "ok": False,
+                    "reason": "audio_tracks_invalid",
+                    "required_filters": [],
+                    "plan": {},
+                }
+            normalized_track = dict(track)
+            if not str(normalized_track.get("path") or "").strip():
+                if not str(source_record.get("file_id") or "").strip():
+                    return {
+                        "ok": False,
+                        "reason": "audio_tracks_invalid",
+                        "required_filters": [],
+                        "plan": {},
+                    }
+                normalized_track["path"] = f"audio-track-{index}.audio"
+            tracks_with_placeholders.append(normalized_track)
+        candidate["audio_tracks"] = tracks_with_placeholders
     # The worker downloads and validates the SRT inside its bounded workspace.
     # Do not require that worker-local path to exist during admission.
     subtitle_requested = bool(candidate.get("subtitle_file"))
@@ -1117,6 +1358,130 @@ def _escape_filter_path(path: str) -> str:
     return ffmpeg_text.escape_filter_path(path)
 
 
+def _srt_timestamp_ms(value: str) -> int:
+    hours, minutes, seconds_ms = str(value or "").strip().split(":", 2)
+    seconds, milliseconds = seconds_ms.split(",", 1)
+    return (
+        int(hours) * 3_600_000
+        + int(minutes) * 60_000
+        + int(seconds) * 1_000
+        + int(milliseconds)
+    )
+
+
+def _format_srt_timestamp(value_ms: int) -> str:
+    value = max(0, int(value_ms or 0))
+    hours, remainder = divmod(value, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds, milliseconds = divmod(remainder, 1_000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+
+
+def _read_srt_cues(path: str | os.PathLike[str]) -> list[tuple[int, int, str]]:
+    try:
+        text = Path(path).read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeError) as exc:
+        raise LocalVideoEditError("subtitle_read_failed") from exc
+    cues: list[tuple[int, int, str]] = []
+    for raw_block in re.split(r"\r?\n\s*\r?\n", text.strip()):
+        lines = raw_block.splitlines()
+        if (
+            len(lines) < 3
+            or not lines[0].strip().isdigit()
+            or "-->" not in lines[1]
+        ):
+            raise LocalVideoEditError("subtitle_format_invalid")
+        timing_index = 1
+        try:
+            start_text, end_text = re.split(
+                r"\s+-->\s+",
+                lines[timing_index].strip(),
+                maxsplit=1,
+            )
+            start_ms = _srt_timestamp_ms(start_text)
+            end_ms = _srt_timestamp_ms(end_text.split()[0])
+        except (TypeError, ValueError):
+            raise LocalVideoEditError("subtitle_timing_invalid")
+        content = "\n".join(lines[timing_index + 1 :]).strip()
+        if end_ms <= start_ms:
+            raise LocalVideoEditError("subtitle_timing_invalid")
+        if not content:
+            raise LocalVideoEditError("subtitle_format_invalid")
+        cues.append((start_ms, end_ms, content))
+    if not cues:
+        raise LocalVideoEditError("subtitle_format_invalid")
+    return cues
+
+
+def _retime_srt_for_manual_timeline(
+    subtitle_path: str | os.PathLike[str],
+    *,
+    plan: dict[str, Any],
+    source_duration_ms: int,
+    workspace: str | os.PathLike[str],
+    concat_durations_ms: Iterable[int] | None = None,
+) -> str:
+    """Intersect source cues with retained spans and map them to final PTS."""
+
+    workspace_path = Path(workspace).resolve(strict=False)
+    source = require_path_within(subtitle_path, workspace_path)
+    trim = dict(plan.get("trim") or {})
+    trim_start = max(0, int(trim.get("start_ms") or 0))
+    trim_end = int(trim.get("end_ms") or source_duration_ms)
+    trim_end = min(max(trim_start + 1, trim_end), int(source_duration_ms or trim_end))
+    remove = dict(plan.get("remove_middle") or {})
+    retained: list[tuple[int, int, int]] = []
+    output_offset = 0
+    if remove:
+        remove_start = max(trim_start, int(remove.get("start_ms") or trim_start))
+        remove_end = min(trim_end, int(remove.get("end_ms") or trim_end))
+        raw_spans = ((trim_start, remove_start), (remove_end, trim_end))
+    else:
+        raw_spans = ((trim_start, trim_end),)
+    for span_start, span_end in raw_spans:
+        if span_end <= span_start:
+            continue
+        retained.append((span_start, span_end, output_offset))
+        output_offset += span_end - span_start
+    source_offset = max(0, int(source_duration_ms or 0))
+    for raw_duration in concat_durations_ms or ():
+        duration_ms = max(0, int(raw_duration or 0))
+        if duration_ms <= 0:
+            continue
+        retained.append(
+            (source_offset, source_offset + duration_ms, output_offset)
+        )
+        source_offset += duration_ms
+        output_offset += duration_ms
+    speed = float(plan.get("speed") or 1.0)
+    mapped: list[tuple[int, int, str]] = []
+    for cue_start, cue_end, content in _read_srt_cues(source):
+        for span_start, span_end, span_offset in retained:
+            overlap_start = max(cue_start, span_start)
+            overlap_end = min(cue_end, span_end)
+            if overlap_end <= overlap_start:
+                continue
+            mapped_start = int(round((span_offset + overlap_start - span_start) / speed))
+            mapped_end = int(round((span_offset + overlap_end - span_start) / speed))
+            if mapped_end > mapped_start:
+                mapped.append((mapped_start, mapped_end, content))
+    if not mapped:
+        raise LocalVideoEditError("subtitle_outside_output")
+    target = require_path_within(
+        workspace_path / f"retimed_subtitle_{os.getpid()}_{time.time_ns()}.srt",
+        workspace_path,
+    )
+    blocks = [
+        f"{index}\n{_format_srt_timestamp(start_ms)} --> {_format_srt_timestamp(end_ms)}\n{content}"
+        for index, (start_ms, end_ms, content) in enumerate(mapped, start=1)
+    ]
+    try:
+        target.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise LocalVideoEditError("subtitle_write_failed") from exc
+    return str(target)
+
+
 def resolve_vietnamese_font_path(explicit: str = "") -> str:
     candidates = (
         explicit,
@@ -1151,10 +1516,25 @@ def _text_filter(config: dict[str, Any]) -> str:
     font = f"fontfile='{_escape_filter_path(font_path)}':" if font_path else ""
     start = int(config.get("start_ms") or 0) / 1000
     end = int(config.get("end_ms") or 0) / 1000
+    try:
+        opacity = float(config.get("opacity", 1.0))
+    except (TypeError, ValueError, OverflowError):
+        opacity = 1.0
+    opacity = max(0.1, min(1.0, opacity))
+    font_color = (
+        f"white@{opacity:.3f}"
+        if "opacity" in config
+        else "white"
+    )
+    border_color = (
+        f"black@{(0.9 * opacity):.3f}"
+        if "opacity" in config
+        else "black@0.9"
+    )
     return (
         f"drawtext={font}text='{_escape_filter_text(str(config.get('content') or ''))}':{ffmpeg_text.DRAWTEXT_NO_EXPANSION}:"
-        f"fontcolor=white:fontsize={int(config.get('font_size') or 42)}:"
-        f"borderw={int(config.get('outline') or 2)}:bordercolor=black@0.9:"
+        f"fontcolor={font_color}:fontsize={int(config.get('font_size') or 42)}:"
+        f"borderw={int(config.get('outline') or 2)}:bordercolor={border_color}:"
         f"x={x}:y={y}:enable='between(t,{start:.3f},{end:.3f})'"
     )
 
@@ -1176,6 +1556,12 @@ def build_manual_ffmpeg_command(
     logo = dict(plan.get("logo_overlay") or {})
     if logo:
         command.extend(["-i", str(logo.get("path") or "")])
+    audio_tracks = list(plan.get("audio_tracks") or [])
+    for track in audio_tracks:
+        track_path = str(track.get("path") or "")
+        if str(track.get("kind") or "music") == "music":
+            command.extend(["-stream_loop", "-1"])
+        command.extend(["-i", track_path])
     filters: list[str] = []
     aspect = str((plan.get("crop_or_fit") or {}).get("aspect_ratio") or "keep")
     mode = str((plan.get("crop_or_fit") or {}).get("mode") or "fit")
@@ -1255,6 +1641,9 @@ def build_manual_ffmpeg_command(
     text = _text_filter(dict(plan.get("text_overlay") or {}))
     if text:
         filters.append(text)
+    watermark = _text_filter(dict(plan.get("watermark_overlay") or {}))
+    if watermark:
+        filters.append(watermark)
     subtitle = str(plan.get("subtitle_file") or "")
     if subtitle:
         subtitle_font = resolve_vietnamese_font_path()
@@ -1265,6 +1654,45 @@ def build_manual_ffmpeg_command(
         )
     filters.append("format=yuv420p")
     base_filter = ",".join(item for item in filters if item)
+    has_audio = bool(source_probe.get("has_audio"))
+    volume = float(plan.get("volume", 1.0) or 0.0)
+    audio_labels: list[str] = []
+    source_audio_filters = ["aresample=48000"]
+    if speed != 1.0:
+        source_audio_filters.append(f"atempo={speed:g}")
+    audio_tracks_present = bool(audio_tracks)
+    if has_audio and (audio_tracks_present or volume > 0):
+        # When add-ons are present, source volume/normalization/fades are
+        # applied on the final bus below so mute and master controls cover
+        # every mixed stream.  A source-only edit keeps the same filters here.
+        if not audio_tracks_present:
+            if volume != 1.0:
+                source_audio_filters.append(f"volume={volume:g}")
+            if str(plan.get("audio_normalization") or "off") == "loudnorm":
+                source_audio_filters.append("loudnorm=I=-16:LRA=11:TP=-1.5")
+            if fade_in_seconds > 0:
+                source_audio_filters.append(f"afade=t=in:st=0:d={fade_in_seconds:.3f}")
+            if fade_out_seconds > 0:
+                source_audio_filters.append(f"afade=t=out:st={fade_out_start:.3f}:d={fade_out_seconds:.3f}")
+        filters.append("[0:a:0]" + ",".join(source_audio_filters) + "[a_source]")
+        audio_labels.append("[a_source]")
+    for track_index, track in enumerate(audio_tracks):
+        input_index = 1 + (1 if logo else 0) + track_index
+        track_filters = ["aresample=48000", "asetpts=PTS-STARTPTS"]
+        track_volume = float(track.get("volume", 1.0))
+        if track_volume != 1.0:
+            track_filters.append(f"volume={track_volume:g}")
+        start_track_ms = int(track.get("start_ms") or 0)
+        end_track_ms = int(track.get("end_ms") or 0)
+        if end_track_ms > start_track_ms:
+            track_filters.append(f"atrim=duration={(end_track_ms - start_track_ms) / 1000:.3f}")
+        if start_track_ms:
+            track_filters.append(f"adelay={start_track_ms}|{start_track_ms}")
+        label = f"[a_track_{track_index}]"
+        filters.append(f"[{input_index}:a:0]" + ",".join(track_filters) + label)
+        audio_labels.append(label)
+    base_filter = ",".join(item for item in filters if item and not item.startswith("["))
+    audio_filter_lines = list(item for item in filters if item.startswith("["))
     if logo:
         logo_frame_width = output_width
         logo_width = max(
@@ -1281,36 +1709,47 @@ def build_manual_ffmpeg_command(
             margin_y="main_h*0.035",
             default="top_right",
         )
-        complex_filter = (
-            f"[0:v]{base_filter}[base];"
-            f"[1:v]format=rgba,colorchannelmixer=aa={float(logo.get('opacity') or 1.0):.3f}[logo0];"
-            f"[logo0]scale=w={logo_width}:h=-2[logo];"
-            f"[base][logo]overlay={x}:{y}[v]"
-        )
+        video_filter_lines = [
+            f"[0:v]{base_filter}[base]",
+            f"[1:v]format=rgba,colorchannelmixer=aa={float(logo.get('opacity') or 1.0):.3f}[logo0]",
+            f"[logo0]scale=w={logo_width}:h=-2[logo]",
+            f"[base][logo]overlay={x}:{y}[v]",
+        ]
+    else:
+        video_filter_lines = [f"[0:v]{base_filter}[v]"] if audio_tracks else []
+    if audio_tracks:
+        if not audio_labels:
+            raise LocalVideoEditError("audio_tracks_without_audio")
+        mix_filters = [
+            f"amix=inputs={len(audio_labels)}:duration=longest:dropout_transition=2",
+            f"atrim=0:{expected_output_seconds:.3f}",
+            "asetpts=N/SR/TB",
+        ]
+        if volume != 1.0:
+            mix_filters.append(f"volume={volume:g}")
+        if str(plan.get("audio_normalization") or "off") == "loudnorm":
+            mix_filters.append("loudnorm=I=-16:LRA=11:TP=-1.5")
+        if fade_in_seconds > 0:
+            mix_filters.append(f"afade=t=in:st=0:d={fade_in_seconds:.3f}")
+        if fade_out_seconds > 0:
+            mix_filters.append(f"afade=t=out:st={fade_out_start:.3f}:d={fade_out_seconds:.3f}")
+        mix_filters.append("alimiter=limit=0.95")
+        audio_filter_lines.append("".join(audio_labels) + ",".join(mix_filters) + "[aout]")
+    if logo or audio_tracks:
+        complex_filter = ";".join(video_filter_lines + audio_filter_lines)
         command.extend(["-filter_complex", complex_filter, "-map", "[v]"])
+        if audio_labels:
+            command.extend(["-map", "[aout]" if audio_tracks else audio_labels[0]])
+        else:
+            command.append("-an")
     else:
         command.extend(["-vf", base_filter, "-map", "0:v:0"])
-    has_audio = bool(source_probe.get("has_audio"))
-    volume = float(plan.get("volume") or 0.0)
-    if has_audio and volume > 0:
-        command.extend(["-map", "0:a:0?"])
-        audio_filters = []
-        if speed != 1.0:
-            audio_filters.append(f"atempo={speed:g}")
-        if volume != 1.0:
-            audio_filters.append(f"volume={volume:g}")
-        if str(plan.get("audio_normalization") or "off") == "loudnorm":
-            audio_filters.append("loudnorm=I=-16:LRA=11:TP=-1.5")
-        if fade_in_seconds > 0:
-            audio_filters.append(f"afade=t=in:st=0:d={fade_in_seconds:.3f}")
-        if fade_out_seconds > 0:
-            fade_out_start = max(0.0, expected_output_seconds - fade_out_seconds)
-            audio_filters.append(f"afade=t=out:st={fade_out_start:.3f}:d={fade_out_seconds:.3f}")
-        if audio_filters:
-            command.extend(["-af", ",".join(audio_filters)])
+        if audio_labels:
+            command.extend(["-map", "0:a:0?", "-af", ",".join(source_audio_filters), "-c:a", "aac", "-b:a", "160k", "-ar", "48000"])
+        else:
+            command.append("-an")
+    if audio_labels and (logo or audio_tracks):
         command.extend(["-c:a", "aac", "-b:a", "160k", "-ar", "48000"])
-    else:
-        command.append("-an")
     command.extend([
         "-t", f"{expected_output_seconds:.3f}",
         "-c:v", "libx264",
@@ -1878,6 +2317,10 @@ def _prepare_primary_timeline(
             expected_duration_ms=expected_duration_ms,
             require_audio=has_audio,
             ffprobe_path=ffprobe_path,
+            require_full_decode=True,
+            ffmpeg_path=ffmpeg_path,
+            decode_timeout=timeout,
+            deadline_monotonic=deadline_monotonic,
         )
         if not validation.get("ok"):
             raise LocalVideoEditError(str(validation.get("reason") or "primary_timeline_invalid"))
@@ -1920,6 +2363,22 @@ def execute_manual_edit(
     if not source_probe.get("ok"):
         raise LocalVideoEditError(str(source_probe.get("reason") or "input_probe_failed"))
     normalized = normalize_manual_edit_plan(plan, source_duration_ms=int(source_probe.get("duration_ms") or 0), workspace=workspace_path)
+    concat_durations_ms: list[int] = []
+    for concat_source in normalized.get("concat_inputs") or []:
+        concat_probe = probe_video_file(concat_source, ffprobe_path=probe_bin)
+        if not concat_probe.get("ok"):
+            raise LocalVideoEditError(
+                str(concat_probe.get("reason") or "concat_probe_failed")
+            )
+        concat_durations_ms.append(int(concat_probe.get("duration_ms") or 0))
+    if normalized.get("subtitle_file"):
+        normalized["subtitle_file"] = _retime_srt_for_manual_timeline(
+            str(normalized.get("subtitle_file") or ""),
+            plan=normalized,
+            source_duration_ms=int(source_probe.get("duration_ms") or 0),
+            workspace=workspace_path,
+            concat_durations_ms=concat_durations_ms,
+        )
     required_filters = required_optional_filters(
         normalized,
         has_audio=bool(source_probe.get("has_audio")),
@@ -1996,6 +2455,10 @@ def execute_manual_edit(
             raise
     if progress:
         progress({"stage": "processing_video", "processed": 0, "total": 1})
+    require_output_audio = manual_output_requires_audio(
+        normalized,
+        source_has_audio=bool(source_probe.get("has_audio")),
+    )
     try:
         if staging.exists():
             staging.unlink()
@@ -2013,8 +2476,12 @@ def execute_manual_edit(
         validation = validate_mp4_output(
             staging,
             expected_duration_ms=expected,
-            require_audio=bool(source_probe.get("has_audio") and float(normalized.get("volume") or 0) > 0),
+            require_audio=require_output_audio,
             ffprobe_path=probe_bin,
+            require_full_decode=False,
+            ffmpeg_path=ffmpeg,
+            decode_timeout=timeout,
+            deadline_monotonic=deadline_monotonic,
         )
         if not validation.get("ok"):
             raise LocalVideoEditError(str(validation.get("reason") or "output_validation_failed"))
@@ -2022,8 +2489,12 @@ def execute_manual_edit(
         validation = validate_mp4_output(
             output,
             expected_duration_ms=expected,
-            require_audio=bool(source_probe.get("has_audio") and float(normalized.get("volume") or 0) > 0),
+            require_audio=require_output_audio,
             ffprobe_path=probe_bin,
+            require_full_decode=True,
+            ffmpeg_path=ffmpeg,
+            decode_timeout=timeout,
+            deadline_monotonic=deadline_monotonic,
         )
         if not validation.get("ok"):
             if output.exists():
@@ -2106,6 +2577,10 @@ def execute_split_plan(
             expected_duration_ms=item.duration_ms,
             require_audio=bool(source_probe.get("has_audio")),
             ffprobe_path=probe_bin,
+            require_full_decode=True,
+            ffmpeg_path=ffmpeg_path,
+            decode_timeout=timeout,
+            deadline_monotonic=deadline_monotonic,
         )
         if not validation.get("ok"):
             raise LocalVideoEditError(f"split_part_invalid:{item.index}:{validation.get('reason')}")
@@ -2172,19 +2647,33 @@ def public_plan_summary(
         lines.append(f"Độ sáng {int(plan['brightness_percent'])}%")
     if plan.get("text_overlay"):
         lines.append("Chèn chữ")
+    position_labels = {
+        "top_left": "Trên trái",
+        "top_center": "Trên giữa",
+        "top_right": "Trên phải",
+        "center_left": "Giữa trái",
+        "center": "Chính giữa",
+        "center_right": "Giữa phải",
+        "bottom_left": "Dưới trái",
+        "bottom_center": "Dưới giữa",
+        "bottom_right": "Dưới phải",
+    }
+    if plan.get("watermark_overlay"):
+        watermark = dict(plan.get("watermark_overlay") or {})
+        position = position_labels.get(
+            str(watermark.get("position") or "bottom_right"),
+            "Dưới phải",
+        )
+        try:
+            opacity = float(watermark.get("opacity", 0.45))
+        except (TypeError, ValueError, OverflowError):
+            opacity = 0.45
+        if not math.isfinite(opacity):
+            opacity = 0.45
+        opacity_percent = int(round(max(0.1, min(1.0, opacity)) * 100))
+        lines.append(f"Watermark chữ · {position} · {opacity_percent}%")
     if plan.get("logo_overlay"):
         logo = dict(plan.get("logo_overlay") or {})
-        position_labels = {
-            "top_left": "Trên trái",
-            "top_center": "Trên giữa",
-            "top_right": "Trên phải",
-            "center_left": "Giữa trái",
-            "center": "Chính giữa",
-            "center_right": "Giữa phải",
-            "bottom_left": "Dưới trái",
-            "bottom_center": "Dưới giữa",
-            "bottom_right": "Dưới phải",
-        }
         position = position_labels.get(
             str(logo.get("position") or "top_right"),
             "Trên phải",
@@ -2196,7 +2685,7 @@ def public_plan_summary(
         if not math.isfinite(opacity):
             opacity = 1.0
         opacity_percent = int(round(max(0.0, min(1.0, opacity)) * 100))
-        lines.append(f"Logo / watermark · {position} · {opacity_percent}%")
+        lines.append(f"Logo ảnh · {position} · {opacity_percent}%")
     if plan.get("subtitle_file"):
         lines.append("Chèn phụ đề SRT")
     if str(plan.get("color_preset") or "keep") != "keep":

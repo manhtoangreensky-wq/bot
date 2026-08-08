@@ -94,9 +94,11 @@ def test_edit3_manual_submenus_are_complete_and_back_one_screen() -> None:
 def test_edit3_entry_clears_stale_product_video_session() -> None:
     handler = _between("async def handle_video_editor_callback", "async def handle_video_upload_callback")
     hub = handler[handler.index('if raw_action == "hub":'):handler.index('if raw_action == "menu":')]
-    assert hub.index("clear_video_session(uid)") < hub.index("clear_video_editor_pending(uid)")
+    assert hub.index("compare_and_replace_video_editor_pending(") < hub.index("clear_video_session(uid)")
+    assert "clear_video_editor_pending(uid)" not in hub
     manual = handler[handler.index('if action == "manual"'):handler.index("state = dict(get_video_editor_pending(uid) or {})", handler.index('if action == "manual"'))]
-    assert manual.index("clear_video_session(uid)") < manual.index("clear_video_editor_pending(uid)")
+    assert manual.index("replace_video_edit_lane_state(") < manual.index("clear_video_session(uid)")
+    assert "clear_video_editor_pending(uid)" not in manual
     pending = _between("async def handle_video_editor_pending_text", "async def handle_video_editor_callback")
     assert all(step in pending for step in (
         '"await_split_fixed"',

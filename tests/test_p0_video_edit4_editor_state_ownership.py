@@ -40,8 +40,12 @@ def _compile_function(name: str, namespace: dict):
 
 def test_edit4_active_editor_owns_text_and_media_before_creation_flows() -> None:
     message_handler = _async_function_source("handle_message")
+    editor_invalid = message_handler.index("handle_video_editor_invalid_intake_text")
     editor_text = message_handler.index("handle_video_editor_pending_text")
+    editor_fence = message_handler.index("handle_video_editor_owned_text_fallback")
+    assert editor_invalid < editor_text < editor_fence
     for competing_handler in (
+        "handle_storyboard2_pending_text",
         "handle_frame_video_pending_text",
         "handle_architecture_profile_pending_text",
         "handle_video_profile_studio_pending_text",
@@ -50,8 +54,9 @@ def test_edit4_active_editor_owns_text_and_media_before_creation_flows() -> None
         "handle_trend_video_flow_pending_text",
         "handle_public_video_prompt_pending_text",
         "handle_developing_video_pending_text",
+        "handle_aichat_message",
     ):
-        assert editor_text < message_handler.index(competing_handler)
+        assert editor_fence < message_handler.index(competing_handler)
 
     media_handler = _async_function_source("handle_media_cache_only")
     editor_media = media_handler.index("handle_video_editor_pending_upload")

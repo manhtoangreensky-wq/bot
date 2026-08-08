@@ -25,6 +25,7 @@ def _run_job(
     mode: str,
     price_xu: int = 0,
     manual_plan: dict | None = None,
+    manual_result_patch: dict | None = None,
     payload_patch: dict | None = None,
     observed_plans: list[dict] | None = None,
     downloaded_probe: dict | None = None,
@@ -575,17 +576,23 @@ def _run_job(
                 logical_size=output_size,
                 marker="rendered-video",
             )
+        validation = {
+            "ok": True,
+            "has_video": True,
+            "video_codec": "h264",
+            "duration_ms": 2_000,
+            "width": 640,
+            "height": 360,
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            # A real executor must report successful full decode before the
+            # worker can checkpoint or deliver an MP4.  Existing fixtures are
+            # successful artifacts unless a test overrides this field.
+            "full_decode": True,
+        }
+        validation.update(dict(manual_result_patch or {}))
         return {
             "ok": True,
-            "validation": {
-                "ok": True,
-                "has_video": True,
-                "video_codec": "h264",
-                "duration_ms": 2_000,
-                "width": 640,
-                "height": 360,
-                "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
-            },
+            "validation": validation,
         }
 
     def fake_split_plan(*_args, **_kwargs) -> dict:
@@ -616,6 +623,7 @@ def _run_job(
                         "width": 640,
                         "height": 360,
                         "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+                        "full_decode": True,
                     },
                 }
             )
@@ -1023,6 +1031,46 @@ def test_cleanup_intent_persistence_failure_stops_before_download_and_delivery(
     assert "download" not in setup
     assert "execute" not in runtime
     assert "delivery" not in runtime
+    assert captions == []
+
+
+def test_video_edit_delivery_probe_rejects_metadata_valid_full_decode_failure() -> None:
+    metadata_valid_but_decode_failed = {
+        "ok": True,
+        "has_video": True,
+        "video_codec": "h264",
+        "duration_ms": 2_000,
+        "width": 640,
+        "height": 360,
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "full_decode": False,
+    }
+
+    assert video_editengine1.valid_mp4_delivery_probe(
+        metadata_valid_but_decode_failed
+    ) is False
+
+
+def test_video_edit_worker_fences_metadata_valid_full_decode_failed_mp4_before_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    observed_steps: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        manual_result_patch={"full_decode": False},
+        observed_worker_steps=observed_steps,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["stage"] == "failed_no_charge"
+    assert detail["reason"] == "output_validation_failed"
+    assert "delivery" not in observed_steps
+    assert terminal["output_file_id"] == ""
     assert captions == []
 
 
@@ -1784,6 +1832,7 @@ def _durable_resume_artifact(index: int) -> dict:
             "width": 640,
             "height": 360,
             "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "full_decode": True,
         },
         "delivery_method": "sendVideo",
         "bytes_sent": 4_096,
@@ -3515,6 +3564,100 @@ def test_manual_worker_rejects_unbound_plan_assets(
     assert terminal["status"] == "failed"
     assert "video_local_edit_asset_contract_invalid" in terminal["detail"]
     assert captions == []
+
+
+def test_paid_worker_never_silently_drops_unbound_legacy_audio_tracks(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        price_xu=125,
+        manual_plan={
+            "trim": {"start_ms": 0, "end_ms": 2_000},
+            "audio_tracks": [
+                {
+                    "path": "legacy-worker-audio.mp3",
+                    "kind": "voice",
+                    "volume": 1.0,
+                    "start_ms": 0,
+                    "end_ms": 1_000,
+                }
+            ],
+        },
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == "video_local_edit_asset_contract_invalid"
+    assert captions == []
+
+
+@pytest.mark.parametrize("track_volume", [0.0, 0.35])
+def test_worker_materializes_audio_only_telegram_asset_into_executed_plan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    track_volume: float,
+) -> None:
+    observed_plans: list[dict] = []
+    transport_evidence: dict = {}
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        manual_plan={
+            "trim": {"start_ms": 0, "end_ms": 2_000},
+            "audio_tracks": [
+                {
+                    "path": "",
+                    "kind": "music",
+                    "volume": track_volume,
+                    "start_ms": 0,
+                    "end_ms": 0,
+                }
+            ],
+        },
+        payload_patch={
+            "audio_sources": [
+                {
+                    "file_id": "telegram-music-only",
+                    "file_name": "music.m4a",
+                    "file_size": 1_024,
+                    "kind": "music",
+                    "volume": track_volume,
+                    "start_ms": 0,
+                    "end_ms": 0,
+                }
+            ],
+        },
+        observed_plans=observed_plans,
+        transport_evidence=transport_evidence,
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert captions
+    audio_downloads = [
+        call
+        for call in transport_evidence["download_calls"]
+        if call["file_id"] == "telegram-music-only"
+    ]
+    assert len(audio_downloads) == 1
+    materialized_audio = Path(audio_downloads[0]["destination"])
+    assert materialized_audio.is_file()
+    assert materialized_audio.stat().st_size > 0
+    assert len(observed_plans) == 1
+    executed_tracks = observed_plans[0]["audio_tracks"]
+    assert executed_tracks == [
+        {
+            "path": str(materialized_audio),
+            "kind": "music",
+            "volume": track_volume,
+            "start_ms": 0,
+            "end_ms": 0,
+        }
+    ]
 
 
 @pytest.mark.parametrize("malformed_plan", ["not-a-plan", ["trim"]])
