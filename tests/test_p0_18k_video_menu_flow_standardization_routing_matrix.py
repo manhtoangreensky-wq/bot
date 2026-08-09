@@ -69,6 +69,8 @@ def _press(user_id: int, callback: str):
         asyncio.run(bot.handle_video_profile_studio_callback(update, context))
     elif callback.startswith("videoedit|"):
         asyncio.run(bot.handle_video_editor_callback(update, context))
+    elif callback.startswith("lvs27b|"):
+        asyncio.run(bot.handle_local_video_studio_public_callback(update, context))
     elif callback.startswith("longvideo|"):
         asyncio.run(bot.handle_long_video_callback(update, context))
     elif callback.startswith("menu|"):
@@ -79,24 +81,34 @@ def _press(user_id: int, callback: str):
     return query.edits[-1]["text"], query.edits[-1].get("reply_markup"), bot.get_video_session(user_id)
 
 
-def test_video_menu_layout_groups_primary_products_above_helpers():
+def test_video_menu_layout_places_planning_beside_guide_when_enabled(monkeypatch):
+    monkeypatch.setattr(bot, "local_video_studio_public_enabled", lambda: True)
     assert _rows(bot.main_video_keyboard("vi")) == [
         ["🔥 Video theo trend", "🎬 Video AI chân thật"],
         ["🧩 Kịch bản → Video", "🎞 Ghép ảnh thành video"],
-        ["🎥 Tự quay & đổi cảnh AI", "🎬 Video dài tập"],
-        ["🎞 Storyboard", "💡 Ý tưởng video"],
+        ["🎥 Video tự quay", "🎞 Storyboard"],
+        ["🎬 Video dài tập", "💡 Ý tưởng video"],
         ["🛠️ Chỉnh sửa / Nâng cấp video", "📥 Tải video từ liên kết"],
-        ["🏠 Menu chính", "📖 Hướng dẫn video"],
+        ["🧭 Lập kế hoạch dựng video", "📖 Hướng dẫn video"],
+        ["🏠 Menu chính"],
     ]
 
 
-def test_video_route_matrix_matches_public_menu_buttons():
+def test_video_menu_hides_planning_when_disabled(monkeypatch):
+    monkeypatch.setattr(bot, "local_video_studio_public_enabled", lambda: False)
+    callbacks = _callbacks(bot.main_video_keyboard("vi"))
+    assert "lvs27b|open" not in callbacks
+    assert "menu|guide_video_ai" in callbacks
+
+
+def test_video_route_matrix_matches_public_menu_buttons(monkeypatch):
+    monkeypatch.setattr(bot, "local_video_studio_public_enabled", lambda: True)
     payload = bot.video_route_audit_payload()
     assert payload["ok"] is True
     matrix_callbacks = [row["entry_callback"] for row in payload["rows"]]
     menu_callbacks = [callback for callback in _callbacks(bot.main_video_keyboard("vi")) if callback != "menu|main"]
     assert matrix_callbacks == menu_callbacks
-    assert len(matrix_callbacks) == 11
+    assert len(matrix_callbacks) == 12
     assert len(set(matrix_callbacks)) == len(matrix_callbacks)
 
 
@@ -121,6 +133,11 @@ def test_video_route_entry_context_is_saved_per_button():
         if route["video_tool"] == "video_guide":
             assert "video" in text.lower()
             assert "menu|main_video" in callbacks
+            continue
+        if route["video_tool"] == "video_edit_planning":
+            assert "lập kế hoạch" in text.lower()
+            assert not session
+            assert any(callback.startswith("lvs27b|") for callback in callbacks)
             continue
         assert route["label"].split(" ", 1)[-1].split("→", 1)[0].strip()[:8] in text
         assert session.get("product_area") == "video"

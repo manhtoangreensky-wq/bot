@@ -2489,10 +2489,11 @@ def test_music_controls_are_capability_gated_but_contract_remains_available() ->
     assert "vid3|music_set|per_scene" in callbacks
 
 
-def test_video_guide_teaches_content_first_and_keeps_ideas_catalog_only() -> None:
+def test_video_guide_teaches_content_first_and_returns_to_video_menu() -> None:
     text, markup = bot.localized_menu_content("guide_video_ai", False, "vi", user_id=970035)
     assert "Nội dung trước" in text or "Xác nhận Nội dung" in text
     assert "tổng số nhân vật" in text
     assert "Ý tưởng video chỉ là kho" in text
     assert "không sở hữu RouteEngine" in text
-    assert _callbacks(markup) == ["menu|main_video", "menu|main_guide", "menu|main"]
+    assert _callbacks(markup) == ["menu|main_video", "menu|main"]
+    assert "menu|main_guide" not in _callbacks(markup)

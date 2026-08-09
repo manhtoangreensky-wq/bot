@@ -23,8 +23,6 @@ PREFIX = 'lvs27b'
 STATE_KEY = 'local_video_studio27b_public'
 ENTRY_LABEL = '🧭 Lập kế hoạch dựng video'
 ENTRY_CALLBACK = 'lvs27b|open'
-STATUS_LABEL = '📊 Trạng thái chỉnh sửa'
-STATUS_CALLBACK = 'videoedit|latest_status'
 PUBLIC_READINESS = {'CONTRACT_ONLY', 'LOCAL_PLANNING_READY', 'REQUIRES_RUNTIME', 'REQUIRES_PLANNED_SHOOT', 'NOT_SUPPORTED'}
 GOAL_IDS = {'cut_pacing', 'reframe', 'transition_motion', 'sound_post'}
 
@@ -81,6 +79,8 @@ def compile_public_adapter(svc, enabled):
         'ContextTypes': SimpleNamespace(DEFAULT_TYPE=object),
         'local_video_studio_public': svc,
         'local_video_studio_public_enabled': lambda: enabled['value'],
+        'menu_text_main_video_i18n': lambda _lang: 'MAIN VIDEO',
+        'main_video_keyboard': lambda _lang: FakeMarkup([]),
         'video_edit_hub_text': lambda _lang: 'VIDEO EDIT HUB',
         'video_edit_hub_keyboard': lambda _lang: FakeMarkup([]),
         'get_user_language': lambda _user_id: 'vi',
@@ -132,11 +132,11 @@ def test_flag_off_row_is_empty_and_flag_on_adds_exactly_one_secondary_action():
     assert 'LOCAL_VIDEO_STUDIO_PUBLIC_ENABLED' in source
     assert ENTRY_LABEL in source
     assert ENTRY_CALLBACK in source
-    assert source.count(ENTRY_CALLBACK) == 1
+    assert source.count(ENTRY_CALLBACK) >= 1
     assert 'videoedit|ai' in source and 'videoedit|manual' in source
 
 
-def test_video_edit_hub_runtime_shape_keeps_status_between_primary_actions_and_optional_planning():
+def test_video_edit_hub_runtime_shape_excludes_detached_status_and_planning():
     source = BOT_PATH.read_text(encoding='utf-8')
     start = source.index('def video_edit_hub_keyboard(')
     end = source.index('\ndef video_edit_info_text(', start)
@@ -166,18 +166,18 @@ def test_video_edit_hub_runtime_shape_keeps_status_between_primary_actions_and_o
     assert [[button.callback_data for button in row] for row in off_rows] == [
         ['videoedit|ai', 'videoedit|manual'],
         ['videoedit|restore', 'videoedit|guide'],
-        [STATUS_CALLBACK],
         ['menu|main_video', 'menu|main'],
     ]
     enabled['value'] = True
     on_rows = keyboard('vi').inline_keyboard
-    assert [[button.callback_data for button in row] for row in on_rows[:2]] == [
+    assert [[button.callback_data for button in row] for row in on_rows] == [
         ['videoedit|ai', 'videoedit|manual'],
         ['videoedit|restore', 'videoedit|guide'],
+        ['menu|main_video', 'menu|main'],
     ]
-    assert [(button.text, button.callback_data) for button in on_rows[2]] == [(STATUS_LABEL, STATUS_CALLBACK)]
-    assert [(button.text, button.callback_data) for button in on_rows[3]] == [(ENTRY_LABEL, ENTRY_CALLBACK)]
-    assert [button.callback_data for button in on_rows[4]] == ['menu|main_video', 'menu|main']
+    callbacks = [button.callback_data for row in on_rows for button in row]
+    assert 'videoedit|latest_status' not in callbacks
+    assert ENTRY_CALLBACK not in callbacks
 
 def test_canonical_index_is_reused_without_public_capability_data_copy():
     svc = service()
@@ -996,6 +996,8 @@ def test_fake_public_adapter_transactions_sessions_duplicate_and_root_back(monke
         'ContextTypes': SimpleNamespace(DEFAULT_TYPE=object),
         'local_video_studio_public': svc,
         'local_video_studio_public_enabled': lambda: True,
+        'menu_text_main_video_i18n': lambda _lang: 'MAIN VIDEO',
+        'main_video_keyboard': lambda _lang: FakeMarkup([]),
         'video_edit_hub_text': lambda _lang: 'VIDEO EDIT HUB',
         'video_edit_hub_keyboard': lambda _lang: FakeMarkup([]),
         'get_user_language': lambda _user_id: 'vi',
@@ -1257,10 +1259,10 @@ def test_flag_off_mid_session_allows_back_and_close_but_denies_forward(monkeypat
     events.clear()
     back = FakeQuery('q-back-off', svc.callback_data(opened['session_id'], 'back'))
     assert asyncio.run(handler(update_for(back), context)) is True
-    assert events[0][0:2] == ('edit', 'VIDEO EDIT HUB')
+    assert events[0][0:2] == ('edit', 'MAIN VIDEO')
     assert events[1:] == [
         'delete',
-        ('answer', 'Đã quay lại Chỉnh sửa video.', {}),
+        ('answer', 'Đã quay lại Menu Video.', {}),
     ]
     assert STATE_KEY not in context.user_data
 

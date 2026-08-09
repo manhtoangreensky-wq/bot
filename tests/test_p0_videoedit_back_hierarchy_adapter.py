@@ -131,7 +131,7 @@ def _press(user_id: int, callback: str) -> _Query:
     return query
 
 
-def test_videoedit_workspace_exposes_every_real_local_group() -> None:
+def test_videoedit_workspace_exposes_every_real_local_group_without_detached_status() -> None:
     callbacks = _callbacks(bot.video_local_manual_options_keyboard("vi"))
     assert callbacks == [
         "videoedit|cut",
@@ -145,7 +145,6 @@ def test_videoedit_workspace_exposes_every_real_local_group() -> None:
         "videoedit|logo_entry",
         "videoedit|watermark_entry",
         "videoedit|source_info",
-        "videoedit|latest_status",
         "videoedit|review",
         "videoedit|upload|manual",
         "videoedit|manual",
@@ -159,7 +158,7 @@ def test_videoedit_workspace_separates_logo_watermark_and_uses_forward_finish_co
     assert ("🖼 Logo ảnh", "videoedit|logo_entry") in pairs
     assert ("🏷️ Watermark chữ", "videoedit|watermark_entry") in pairs
     assert ("🎞 Thông tin video", "videoedit|source_info") in pairs
-    assert ("📊 Trạng thái chỉnh sửa", "videoedit|latest_status") in pairs
+    assert ("📊 Trạng thái chỉnh sửa", "videoedit|latest_status") not in pairs
     assert ("✅ Hoàn tất & tiếp tục", "videoedit|review") in pairs
     assert ("📎 Gửi video khác", "videoedit|upload|manual") in pairs
     assert ("📋 Xem lại", "videoedit|review") not in pairs
