@@ -371,17 +371,19 @@ def test_videoedit_active_state_has_a_hard_text_ownership_fence() -> None:
 
 
 @pytest.mark.parametrize(
-    ("step", "screen", "pending_field", "text"),
+    ("step", "screen", "pending_field", "text", "chat_id", "message_id"),
     (
-        ("await_logo", "logo_input", "logo", "TOAN AAS"),
+        ("await_logo", "logo_input", "logo", "TOAN AAS", 91_030, 91_301),
         (
             "await_watermark_text",
             "watermark_input",
             "watermark_text",
             "© TOAN AAS",
+            91_031,
+            91_302,
         ),
-        ("await_brightness", "brightness_input", "brightness", "200"),
-        ("await_trim_edges", "trim_input", "trim_edges", "00:10-00:40"),
+        ("await_brightness", "brightness_input", "brightness", "200", 91_032, 91_303),
+        ("await_trim_edges", "trim_input", "trim_edges", "00:10-00:40", 91_033, 91_304),
     ),
 )
 def test_actual_handle_message_keeps_videoedit_text_out_of_chat_and_admin_tools(
@@ -390,6 +392,8 @@ def test_actual_handle_message_keeps_videoedit_text_out_of_chat_and_admin_tools(
     screen: str,
     pending_field: str,
     text: str,
+    chat_id: int,
+    message_id: int,
 ) -> None:
     user_id = 91_030
     bot.clear_video_editor_pending(user_id)
@@ -431,7 +435,8 @@ def test_actual_handle_message_keeps_videoedit_text_out_of_chat_and_admin_tools(
             }
         )
         _store_state(user_id, state)
-        message = _Message(text)
+        message = _Message(text, message_id=message_id)
+        message.chat = SimpleNamespace(id=chat_id)
 
         asyncio.run(
             bot.handle_message(
@@ -439,6 +444,7 @@ def test_actual_handle_message_keeps_videoedit_text_out_of_chat_and_admin_tools(
                     callback_query=None,
                     message=message,
                     effective_user=SimpleNamespace(id=user_id),
+                    effective_chat=SimpleNamespace(id=chat_id),
                 ),
                 SimpleNamespace(user_data={}),
             )
@@ -449,6 +455,9 @@ def test_actual_handle_message_keeps_videoedit_text_out_of_chat_and_admin_tools(
         assert bot.get_video_editor_pending(user_id)
     finally:
         bot.clear_video_editor_pending(user_id)
+        dedupe_key = f"{chat_id}:{message_id}"
+        bot.TELEGRAM_MESSAGE_DEDUPE_DONE.pop(dedupe_key, None)
+        bot.TELEGRAM_MESSAGE_DEDUPE_LOCKS.pop(dedupe_key, None)
 
 
 @pytest.mark.parametrize(
@@ -1050,15 +1059,24 @@ def test_videoedit_restart_read_failure_keeps_text_and_media_owned(
     with pytest.raises(bot.VideoEditorStateUnavailableError):
         bot.get_video_editor_pending(user_id)
 
-    message = _Message("200")
+    chat_id = 91_019
+    message_id = 91_190
+    message = _Message("200", message_id=message_id)
+    message.chat = SimpleNamespace(id=chat_id)
     update = SimpleNamespace(
         effective_user=SimpleNamespace(id=user_id),
+        effective_chat=SimpleNamespace(id=chat_id),
         message=message,
         callback_query=None,
     )
-    asyncio.run(bot.handle_message(update, SimpleNamespace(user_data={})))
-    assert len(message.replies) == 1
-    assert "không chuyển sang Chatbot" in message.replies[0][0]
+    try:
+        asyncio.run(bot.handle_message(update, SimpleNamespace(user_data={})))
+        assert len(message.replies) == 1
+        assert "không chuyển sang Chatbot" in message.replies[0][0]
+    finally:
+        dedupe_key = f"{chat_id}:{message_id}"
+        bot.TELEGRAM_MESSAGE_DEDUPE_DONE.pop(dedupe_key, None)
+        bot.TELEGRAM_MESSAGE_DEDUPE_LOCKS.pop(dedupe_key, None)
 
 
 def test_videoedit_state_store_propagates_file_read_errors(
