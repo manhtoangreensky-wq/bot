@@ -1927,12 +1927,12 @@ FRAME_VIDEO_DURATION_SLOW_EXTRA_XU = env_int("FRAME_VIDEO_DURATION_SLOW_EXTRA_XU
 FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU = env_int("FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU", 20)
 FRAME_VIDEO_RANDOM_EFFECT_EXTRA_XU = env_int("FRAME_VIDEO_RANDOM_EFFECT_EXTRA_XU", 30)
 FRAME_VIDEO_ENABLED = env_flag("FRAME_VIDEO_ENABLED", "true")
-LOCAL_VIDEO_STUDIO_PUBLIC_ENABLED = env_flag("LOCAL_VIDEO_STUDIO_PUBLIC_ENABLED", "0")
+LOCAL_VIDEO_STUDIO_PUBLIC_ENABLED = env_flag("LOCAL_VIDEO_STUDIO_PUBLIC_ENABLED", "true")
 
 def local_video_studio_public_enabled() -> bool:
-    # Read at call time so an invalid/missing ENV remains fail-closed and local
-    # preview tests can toggle the gate without changing the existing menu.
-    return env_flag("LOCAL_VIDEO_STUDIO_PUBLIC_ENABLED", "0")
+    # Read at call time so an explicit operator kill switch still hides the
+    # planning-only entry without changing the canonical Video menu layout.
+    return env_flag("LOCAL_VIDEO_STUDIO_PUBLIC_ENABLED", "true")
 FRAME_VIDEO_DIRECT_RENDER_ENABLED = env_flag("FRAME_VIDEO_DIRECT_RENDER_ENABLED", "true")
 FRAME_VIDEO_REQUIRE_LOCAL_WORKER = env_flag("FRAME_VIDEO_REQUIRE_LOCAL_WORKER", "false")
 FRAME_VIDEO_MAX_IMAGES = max(2, min(100, env_int("FRAME_VIDEO_MAX_IMAGES", 20)))

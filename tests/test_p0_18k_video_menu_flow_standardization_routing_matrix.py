@@ -98,6 +98,16 @@ def test_video_menu_layout_places_planning_beside_guide_when_enabled(monkeypatch
     ]
 
 
+def test_video_menu_places_planning_beside_guide_by_default(monkeypatch):
+    monkeypatch.delenv("LOCAL_VIDEO_STUDIO_PUBLIC_ENABLED", raising=False)
+
+    assert bot.local_video_studio_public_enabled() is True
+    assert _rows(bot.main_video_keyboard("vi"))[-2:] == [
+        ["🧭 Lập kế hoạch dựng video", "📖 Hướng dẫn video"],
+        ["🏠 Menu chính"],
+    ]
+
+
 def test_video_menu_hides_planning_when_disabled(monkeypatch):
     monkeypatch.setattr(bot, "local_video_studio_public_enabled", lambda: False)
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
