@@ -70968,14 +70968,19 @@ def video_uiflow3_progress_text(state: dict) -> str:
         "source", "format", "content_hub", "content_lock", "production_bible",
         "scene_count", "scene_plan", "scene_assignment", "prompts", "branding", "summary",
     ]
-    if (
-        str(state.get("parent_product") or "") == "video_ai_real"
-        and str(state.get("entry_mode") or "") == "prompt_video"
-    ):
-        public_steps = [
-            "scene_count", "format", "content_hub", "content_lock", "production_bible",
-            "scene_plan", "scene_assignment", "prompts", "branding", "summary",
-        ]
+    if str(state.get("parent_product") or "") == "video_ai_real":
+        entry_mode = str(state.get("entry_mode") or "")
+        if entry_mode == "prompt_video":
+            public_steps = [
+                "scene_count", "format", "content_hub", "content_lock", "production_bible",
+                "scene_plan", "scene_assignment", "prompts", "branding", "summary",
+            ]
+        elif entry_mode == "image_video":
+            public_steps = [
+                "scene_count", "format", "source", "content_hub", "content_lock",
+                "production_bible", "scene_plan", "scene_assignment", "prompts",
+                "branding", "summary",
+            ]
     elif str(state.get("parent_product") or "") == "multi_scene_film":
         public_steps = [
             "series_goal", "format", "content_hub", "content_lock", "production_bible",
@@ -72333,7 +72338,11 @@ def video_ai_real_pilot_screen_payload(
 ) -> tuple[str, InlineKeyboardMarkup] | None:
     if str(state.get("parent_product") or "") != "video_ai_real":
         return None
-    if step != "entry" and str(state.get("entry_mode") or "") != "prompt_video":
+    entry_mode = str(state.get("entry_mode") or "")
+    image_product_first_step = entry_mode == "image_video" and step in {
+        "scene_count", "format", "source",
+    }
+    if step != "entry" and entry_mode != "prompt_video" and not image_product_first_step:
         return None
     progress_prefix = str(prefix or "").replace("Buoc ", "Bước ")
 
@@ -72360,7 +72369,7 @@ def video_ai_real_pilot_screen_payload(
         ])
         return (
             "🎬 Video AI chân thật\n\n"
-            "Chọn cách bắt đầu phù hợp. Với Prompt → Video, bot sẽ đi từ nội dung đến nhân vật, bối cảnh và kế hoạch cảnh.\n\n"
+            "Chọn sản phẩm trước để bot mở đúng quy trình. Sau đó bot hỏi số cảnh và khung hình trước khi nhận nội dung hoặc ảnh nguồn.\n\n"
             "Kho ý tưởng chỉ để tham khảo và không bị chỉnh sửa trong flow này.\n\n"
             "Mọi lựa chọn hiện tại chỉ lập kế hoạch; chưa tạo tác vụ và chưa trừ Xu.",
             video_uiflow3_keyboard(rows),
@@ -72567,6 +72576,7 @@ def video_ai_real_pilot_screen_payload(
 
     if step == "scene_count" and not view:
         if not bool((state.get("content") or {}).get("locked")):
+            product_label = "Ảnh → Video" if entry_mode == "image_video" else "Prompt → Video"
             selected_count = safe_int((state.get("format") or {}).get("scene_count"), 0)
             rows = [
                 [
@@ -72586,7 +72596,7 @@ def video_ai_real_pilot_screen_payload(
             ]
             return (
                 f"{progress_prefix}🎬 Chọn số cảnh\n\n"
-                "Sản phẩm: Prompt → Video\n\n"
+                f"Sản phẩm: {product_label}\n\n"
                 "Mỗi cảnh là một ý hoặc hành động trọn vẹn. Sau bước này, bạn chọn tỉ lệ và độ dài 6 hoặc 8 giây/cảnh; "
                 "bot sẽ tự tính tổng thời lượng. Cảnh thật chỉ được lập sau khi nội dung đã xác nhận.",
                 video_uiflow3_keyboard(rows),
@@ -72768,6 +72778,7 @@ def video_ai_real_pilot_screen_payload(
 
     if step == "format" and not view:
         fmt = dict(state.get("format") or {})
+        product_label = "Ảnh → Video" if entry_mode == "image_video" else "Prompt → Video"
         ratio = str(fmt.get("ratio") or "")
         total_seconds = safe_int(fmt.get("target_duration_seconds"), 0)
         seconds_per_scene = safe_int(fmt.get("seconds_per_scene"), 8)
@@ -72807,7 +72818,7 @@ def video_ai_real_pilot_screen_payload(
         )
         return (
             f"{progress_prefix}📐 Khung hình & thời lượng\n\n"
-            f"Sản phẩm: Prompt → Video · {scene_count or 'Chưa chọn'} cảnh\n"
+            f"Sản phẩm: {product_label} · {scene_count or 'Chưa chọn'} cảnh\n"
             f"Khung đã chọn: {ratio_label}\n"
             f"Tổng thời lượng mục tiêu: {total_seconds or 'Chưa chọn'} giây\n"
             f"Độ dài mỗi cảnh: {seconds_per_scene} giây\n\n"
@@ -74572,7 +74583,10 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         elif action == "source_done":
             if not bool((state.get("source") or {}).get("complete")):
                 raise ValueError("video_source_required")
-            state = video_uiflow3_go(state, "format")
+            state = video_uiflow3_go(
+                state,
+                "content_hub" if video_uiflow3.image_source_follows_format(state) else "format",
+            )
         elif action == "ratio" and values:
             ratio = {"9x16": "9:16", "16x9": "16:9", "1x1": "1:1", "4x5": "4:5"}.get(values[0], "")
             if not ratio:
@@ -74586,7 +74600,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             scene_duration = safe_int(values[0], 0)
             if (
                 str(state.get("parent_product") or "") != "video_ai_real"
-                or str(state.get("entry_mode") or "") != "prompt_video"
+                or str(state.get("entry_mode") or "") not in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
                 or scene_duration not in {6, 8}
             ):
                 raise ValueError("scene_duration_invalid")
@@ -74606,7 +74620,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 or safe_int(fmt.get("target_duration_seconds"), 0) <= 0
                 or (
                     str(state.get("parent_product") or "") == "video_ai_real"
-                    and str(state.get("entry_mode") or "") == "prompt_video"
+                    and str(state.get("entry_mode") or "") in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
                     and safe_int(fmt.get("scene_count"), 0) <= 0
                 )
             ):
@@ -74614,7 +74628,12 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             if str((state.get("navigation") or {}).get("return_to") or "") == "summary":
                 state = video_uiflow3_clear_transient(video_uiflow3.finish_editor(state), keep_return=False)
             else:
-                state = video_uiflow3_go(state, "content_hub")
+                needs_image_source = (
+                    video_uiflow3.image_source_follows_format(state)
+                    and bool((state.get("source") or {}).get("required"))
+                    and not bool((state.get("source") or {}).get("complete"))
+                )
+                state = video_uiflow3_go(state, "source" if needs_image_source else "content_hub")
         elif action == "content" and values:
             source_kind = values[0]
             if source_kind == "profiles":
@@ -74942,7 +74961,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 state = video_uiflow3_clear_transient(video_uiflow3.finish_editor(state), keep_return=False)
             elif (
                 str(state.get("parent_product") or "") == "video_ai_real"
-                and str(state.get("entry_mode") or "") == "prompt_video"
+                and str(state.get("entry_mode") or "") in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
                 and not bool((state.get("format") or {}).get("scene_count_confirmed"))
                 and safe_int((state.get("format") or {}).get("scene_count"), 0) > 0
             ):
@@ -75001,7 +75020,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         elif action == "scene_count" and values:
             if (
                 str(state.get("parent_product") or "") == "video_ai_real"
-                and str(state.get("entry_mode") or "") == "prompt_video"
+                and str(state.get("entry_mode") or "") in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
                 and not bool((state.get("content") or {}).get("locked"))
             ):
                 updated = video_uiflow3.set_scene_count_preference(state, safe_int(values[0], 0))
@@ -75524,7 +75543,7 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
             before = state
             if (
                 str(state.get("parent_product") or "") == "video_ai_real"
-                and str(state.get("entry_mode") or "") == "prompt_video"
+                and str(state.get("entry_mode") or "") in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
                 and not bool((state.get("content") or {}).get("locked"))
             ):
                 updated = video_uiflow3.set_scene_count_preference(state, safe_int(text, 0))
@@ -75674,7 +75693,10 @@ async def handle_video_uiflow3_pending_media(update: Update, context: ContextTyp
                 )
             keep_collecting = bool(
                 media_kind == "image"
-                and state.get("parent_product") in {"frame_video_local", "storyboard_prompt"}
+                and (
+                    state.get("parent_product") in {"frame_video_local", "storyboard_prompt"}
+                    or video_uiflow3.image_source_follows_format(state)
+                )
             )
             if keep_collecting:
                 state["navigation"]["current_step"] = "source"

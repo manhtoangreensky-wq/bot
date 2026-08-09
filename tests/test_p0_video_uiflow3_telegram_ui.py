@@ -2344,7 +2344,7 @@ def test_entry_mode_requires_real_source_and_keeps_video_to_video_out_of_public_
     image_mode = video_uiflow3.set_entry_mode(state, "image_video")
     assert image_mode["source"]["required"] is True
     assert image_mode["source"]["kind"] == "raw_images"
-    assert image_mode["navigation"]["current_step"] == "source"
+    assert image_mode["navigation"]["current_step"] == "scene_count"
 
     capable = video_uiflow3.new_state(
         "video_ai_real",
@@ -2371,6 +2371,10 @@ def test_each_source_branch_accepts_only_its_advertised_media_kind() -> None:
     image_context = SimpleNamespace(user_data={})
     _click(image_context, user_id, "vid3|entry|video_ai_real", "kind-01")
     _click(image_context, user_id, "vid3|mode|image_video", "kind-02")
+    _click(image_context, user_id, "vid3|scene_count|1", "kind-02a")
+    _click(image_context, user_id, "vid3|ratio|9x16", "kind-02b")
+    _click(image_context, user_id, "vid3|duration_scene|8", "kind-02c")
+    _click(image_context, user_id, "vid3|format_done", "kind-02d")
     _text, markup = bot.video_uiflow3_screen_payload(bot.video_uiflow3_state(image_context))
     assert "vid3|source_media" in _callbacks(markup)
     assert "vid3|source_text" not in _callbacks(markup)
@@ -2390,6 +2394,46 @@ def test_each_source_branch_accepts_only_its_advertised_media_kind() -> None:
     _click(frame_context, user_id, "vid3|source_media", "kind-07")
     _send_video(frame_context, user_id, "wrong-frame-video", "wrong-frame-video-u", 403)
     assert bot.video_uiflow3_state(frame_context)["source"]["assets"] == []
+
+
+def test_image_product_collects_multiple_source_photos_before_content() -> None:
+    user_id = 970079
+    context = SimpleNamespace(user_data={})
+    _click(context, user_id, "vid3|entry|video_ai_real", "image-batch-01")
+    _click(context, user_id, "vid3|mode|image_video", "image-batch-02")
+    _click(context, user_id, "vid3|scene_count|2", "image-batch-03")
+    _click(context, user_id, "vid3|ratio|9x16", "image-batch-04")
+    _click(context, user_id, "vid3|duration_scene|8", "image-batch-05")
+    _click(context, user_id, "vid3|format_done", "image-batch-06")
+    _click(context, user_id, "vid3|source_media", "image-batch-07")
+
+    _send_photo(context, user_id, "image-source-1", "image-source-u1", 404)
+    first = bot.video_uiflow3_state(context)
+    assert first["navigation"]["current_step"] == "source"
+    assert (first.get("pending_input") or {}).get("kind") == "source_media"
+
+    _send_photo(context, user_id, "image-source-2", "image-source-u2", 405)
+    second = bot.video_uiflow3_state(context)
+    assert [item["telegram_file_id"] for item in second["source"]["assets"]] == [
+        "image-source-1",
+        "image-source-2",
+    ]
+    assert second["navigation"]["current_step"] == "source"
+
+    _input_text, input_markup = bot.video_uiflow3_screen_payload(second)
+    assert "vid3|view|source" in _callbacks(input_markup)
+    _click(context, user_id, "vid3|view|source", "image-batch-08")
+    source = bot.video_uiflow3_state(context)
+    assert source["navigation"]["current_step"] == "source"
+    assert not source.get("pending_input")
+    _source_text, source_markup = bot.video_uiflow3_screen_payload(source)
+    assert "vid3|source_done" in _callbacks(source_markup)
+
+    _click(context, user_id, "vid3|source_done", "image-batch-09")
+    final = bot.video_uiflow3_state(context)
+    assert final["navigation"]["current_step"] == "content_hub"
+    assert final["format"]["ratio"] == "9:16"
+    assert final["format"]["target_duration_seconds"] == 16
 
 
 def test_compact_public_flow_persists_character_voice_dialogue_and_returns_summary() -> None:

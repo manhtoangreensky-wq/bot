@@ -314,7 +314,7 @@ def test_video_ai_real_pilot_entry_restores_clear_source_choices_and_readonly_id
     assert "vid3|idea_catalog" in callbacks
 
 
-def test_video_ai_real_pilot_stays_inside_prompt_to_video_mode():
+def test_video_ai_real_product_first_format_applies_to_prompt_and_image_only():
     prompt_state = video_uiflow3.new_state("video_ai_real", draft_id="pilot-scope-prompt")
     prompt_state = video_uiflow3.set_entry_mode(prompt_state, "prompt_video")
     prompt_state = video_uiflow3.set_format(
@@ -330,23 +330,24 @@ def test_video_ai_real_pilot_stays_inside_prompt_to_video_mode():
 
     image_state = video_uiflow3.new_state("video_ai_real", draft_id="pilot-scope-image")
     image_state = video_uiflow3.set_entry_mode(image_state, "image_video")
+    image_state = video_uiflow3.set_scene_count_preference(image_state, 2)
     image_state = video_uiflow3.set_format(
         image_state,
         ratio="9:16",
-        target_duration_seconds=16,
+        target_duration_seconds=12,
+        seconds_per_scene=6,
     )
     image_state["navigation"]["current_step"] = "format"
 
     image_text, _image_markup = bot.video_uiflow3_screen_payload(image_state)
-    assert "DINH DANG MUC TIEU" in image_text
-    assert "Khung hình & thời lượng" not in image_text
-
-    with pytest.raises(ValueError, match="scene_duration_invalid"):
-        video_uiflow3.set_format(image_state, seconds_per_scene=6)
-
-    image_state["format"]["seconds_per_scene"] = 6
+    assert "Khung hình & thời lượng" in image_text
+    assert "Sản phẩm: Ảnh → Video · 2 cảnh" in image_text
     normalized_image_state = video_uiflow3.normalize_state(image_state)
-    assert normalized_image_state["format"]["seconds_per_scene"] == 8
+    assert normalized_image_state["format"]["seconds_per_scene"] == 6
+
+    other_product = video_uiflow3.new_state("script_image_video", draft_id="pilot-scope-other")
+    with pytest.raises(ValueError, match="scene_duration_invalid"):
+        video_uiflow3.set_format(other_product, seconds_per_scene=6)
 
 
 def test_prompt_product_selection_precedes_scene_count_then_ratio():
@@ -383,6 +384,126 @@ def test_prompt_product_selection_precedes_scene_count_then_ratio():
     assert content_state["navigation"]["current_step"] == "content_hub"
     assert content_state["format"]["ratio"] == "9:16"
     assert content_state["format"]["target_duration_seconds"] == 12
+
+
+def test_image_product_selection_precedes_scene_count_ratio_then_source_with_exact_back():
+    user_id = 981013
+    context = SimpleNamespace(user_data={})
+    entry = video_uiflow3.new_state("video_ai_real", draft_id="pilot-image-product-first")
+    _save_owned(context, entry, user_id)
+
+    _click_visible(context, user_id, "vid3|mode|image_video", "pilot-image-product-first-1")
+    choosing_scenes = bot.video_uiflow3_state(context)
+    assert choosing_scenes["entry_mode"] == "image_video"
+    assert choosing_scenes["source"]["kind"] == "raw_images"
+    assert choosing_scenes["navigation"]["current_step"] == "scene_count"
+    scene_text, _scene_markup = bot.video_uiflow3_screen_payload(choosing_scenes)
+    assert "Sản phẩm: Ảnh → Video" in scene_text
+
+    _click_visible(context, user_id, "vid3|scene_count|2", "pilot-image-product-first-2")
+    choosing_format = bot.video_uiflow3_state(context)
+    assert choosing_format["navigation"]["current_step"] == "format"
+    assert choosing_format["format"]["scene_count"] == 2
+    assert choosing_format["scenes"] == []
+    format_text, format_markup = bot.video_uiflow3_screen_payload(choosing_format)
+    assert "Sản phẩm: Ảnh → Video · 2 cảnh" in format_text
+    assert {"Dọc 9:16", "6 giây/cảnh", "8 giây/cảnh"}.issubset(
+        set(_plain_labels(format_markup))
+    )
+
+    _click_visible(context, user_id, "vid3|ratio|9x16", "pilot-image-product-first-3")
+    _click_visible(context, user_id, "vid3|duration_scene|8", "pilot-image-product-first-4")
+    _click_visible(context, user_id, "vid3|format_done", "pilot-image-product-first-5")
+    source_state = bot.video_uiflow3_state(context)
+    assert source_state["navigation"]["current_step"] == "source"
+    assert source_state["format"]["ratio"] == "9:16"
+    assert source_state["format"]["target_duration_seconds"] == 16
+    source_text, _source_markup = bot.video_uiflow3_screen_payload(source_state)
+    assert "Ảnh tham chiếu đầu vào" in source_text
+
+    _click_visible(context, user_id, "vid3|back", "pilot-image-product-first-6")
+    assert bot.video_uiflow3_state(context)["navigation"]["current_step"] == "format"
+    _click_visible(context, user_id, "vid3|back", "pilot-image-product-first-7")
+    assert bot.video_uiflow3_state(context)["navigation"]["current_step"] == "scene_count"
+    _click_visible(context, user_id, "vid3|back", "pilot-image-product-first-8")
+    assert bot.video_uiflow3_state(context)["navigation"]["current_step"] == "entry"
+
+
+def test_image_product_collects_sources_after_format_and_done_advances_to_content():
+    user_id = 981014
+    context = SimpleNamespace(user_data={})
+    state = video_uiflow3.new_state("video_ai_real", draft_id="pilot-image-source-after-format")
+    state = video_uiflow3.set_entry_mode(state, "image_video")
+    state = video_uiflow3.set_scene_count_preference(state, 2)
+    state = video_uiflow3.set_format(
+        state,
+        ratio="9:16",
+        target_duration_seconds=16,
+        seconds_per_scene=8,
+    )
+    state = video_uiflow3.navigate(state, "source")
+    state = video_uiflow3.add_source_asset(
+        state,
+        asset_type="image",
+        telegram_file_id="image-source-file-1",
+        fingerprint="image-source-fingerprint-1",
+    )
+
+    assert state["navigation"]["current_step"] == "source"
+    _save_owned(context, state, user_id)
+    _click_visible(context, user_id, "vid3|source_done", "pilot-image-source-after-format-1")
+    content_state = bot.video_uiflow3_state(context)
+    assert content_state["navigation"]["current_step"] == "content_hub"
+    assert content_state["entry_mode"] == "image_video"
+    assert content_state["format"]["scene_count"] == 2
+    assert content_state["format"]["ratio"] == "9:16"
+
+
+def test_image_product_materializes_preselected_scenes_only_after_bible_done():
+    user_id = 981015
+    context = SimpleNamespace(user_data={})
+    state = video_uiflow3.new_state("video_ai_real", draft_id="pilot-image-deferred-scenes")
+    state = video_uiflow3.set_entry_mode(state, "image_video")
+    state = video_uiflow3.set_scene_count_preference(state, 2)
+    state = video_uiflow3.set_format(
+        state,
+        ratio="9:16",
+        target_duration_seconds=16,
+        seconds_per_scene=8,
+    )
+    state = video_uiflow3.add_source_asset(
+        state,
+        asset_type="image",
+        telegram_file_id="image-deferred-source",
+        fingerprint="image-deferred-fingerprint",
+    )
+    state = video_uiflow3.set_content_candidate(
+        state,
+        source="manual",
+        original_intent="Hai cảnh chuyển động nối tiếp từ một ảnh tham chiếu.",
+        approved_brief={
+            "title": "Hai cảnh từ ảnh",
+            "needs_characters": False,
+            "needs_locations": False,
+            "needs_dialogue": False,
+            "needs_voice": False,
+            "needs_music": False,
+        },
+    )
+    state = video_uiflow3.lock_content(state)
+    state = video_uiflow3.set_character_count(state, 0)
+    state = video_uiflow3.set_location_count(state, 0)
+    state["navigation"]["current_step"] = "production_bible"
+    _save_owned(context, state, user_id)
+
+    assert bot.video_uiflow3_state(context)["scenes"] == []
+    _click_visible(context, user_id, "vid3|bible_done", "pilot-image-deferred-scenes-1")
+
+    planned = bot.video_uiflow3_state(context)
+    assert planned["navigation"]["current_step"] == "scene_plan"
+    assert planned["format"]["scene_count_confirmed"] is True
+    assert [scene["duration_target"] for scene in planned["scenes"]] == [8, 8]
+    assert [scene["ratio"] for scene in planned["scenes"]] == ["9:16", "9:16"]
 
 
 def test_prompt_preselected_scene_count_materializes_only_after_bible_done():
@@ -632,21 +753,25 @@ def test_video_ai_real_pilot_restores_old_visual_language_without_technical_mark
     assert all("[x]" not in label and "[ ]" not in label for label in labels)
 
 
-def test_video_ai_real_non_prompt_source_stays_legacy_while_prompt_input_is_polished():
+def test_video_ai_real_image_source_and_prompt_input_use_the_polished_pilot_shell():
     state = video_uiflow3.new_state(
         "video_ai_real",
         draft_id="pilot-source",
         capabilities={"video_to_video": True},
     )
-    state = bot.video_uiflow3_after_service_update(
+    state = video_uiflow3.set_entry_mode(state, "image_video")
+    state = video_uiflow3.set_scene_count_preference(state, 1)
+    state = video_uiflow3.set_format(
         state,
-        video_uiflow3.set_entry_mode(state, "image_video"),
+        ratio="9:16",
+        target_duration_seconds=8,
+        seconds_per_scene=8,
     )
+    state = video_uiflow3.navigate(state, "source")
 
     source_text, source_markup = bot.video_uiflow3_screen_payload(state)
-    assert "NGUON VIDEO" in source_text
-    assert "Ảnh tham chiếu đầu vào" not in source_text
-    assert {"Gui tep/anh", "Da nhan 0"}.issubset(set(_plain_labels(source_markup)))
+    assert "Ảnh tham chiếu đầu vào" in source_text
+    assert {"Gửi ảnh", "Đã nhận 0 ảnh"}.issubset(set(_plain_labels(source_markup)))
     assert "vid3|back" in _callbacks(source_markup)
 
     prompt_state = video_uiflow3.new_state("video_ai_real", draft_id="pilot-manual-input")
