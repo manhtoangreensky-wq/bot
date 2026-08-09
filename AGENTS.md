@@ -74,3 +74,23 @@ Every task must go through:
 6. Do not render or auto-publish without an explicit approval gate.
 
 Do not start the next task without approval.
+
+## Owner-Governed Codex for TOAN AAS
+
+Before doing engineering work in this repository:
+
+- Apply `owner-governed-codex`.
+- Read project-specific approved knowledge only when relevant.
+- One task / one branch / one PR unless Owner specifies otherwise.
+- merged != deployed != LIVE.
+- No provider calls in regression tests.
+- No fake success.
+- No wallet mutation unless explicitly authorized.
+- PayOS/wallet, DB schema, provider ENV and unrelated modules are protected.
+- Video Edit is protected from Video creation tasks unless explicitly authorized.
+- SubDub and Music/Suno are protected unless task explicitly owns them.
+- Record BASE SHA, HEAD SHA, files changed and test evidence.
+- New failures introduced must equal 0 unless Owner explicitly accepts otherwise.
+- No deploy without Owner approval.
+
+Do not hardcode current SHAs or time-sensitive provider status in this file. Do not copy long memory into `AGENTS.md`.
