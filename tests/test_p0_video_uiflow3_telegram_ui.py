@@ -344,7 +344,7 @@ def test_selected_idea_returns_to_same_v3_draft_content_lock() -> None:
         "wallet_mutations": 0,
         "xu_charged": 0,
     }
-    assert query.edits and "NOI DUNG DA CHON" in query.edits[-1]["text"]
+    assert query.edits and "✅ Nội dung đã chọn" in query.edits[-1]["text"]
 
 
 def test_long_video_summary_saves_planning_snapshot_without_unlocking_submit() -> None:
@@ -548,7 +548,12 @@ def test_supported_video_summary_keeps_existing_save_contract() -> None:
 def test_public_route_metadata_matches_actual_uiflow3_entry_screens() -> None:
     expected_children = {
         "video_trend": ("vid3|source_text",),
-        "video_ai_real": ("vid3|mode|prompt_video", "vid3|mode|image_video"),
+        "video_ai_real": (
+            "vid3|mode|prompt_video",
+            "vid3|mode|image_video",
+            "vid3|idea_catalog",
+            "menu|guide_video_ai",
+        ),
         "script_image_video": ("vid3|source_text",),
         "frame_video_local": ("vid3|source_media", "vid3|source_status"),
         "self_shot_scene_change": ("vid3|source_media", "vid3|source_status"),
@@ -631,9 +636,15 @@ def test_each_creation_entry_opens_only_its_owned_first_screen_and_exact_menu_ba
         assert state["parent_product"] == product
         assert bot.VIDEO_UIFLOW3_PRODUCT_LABELS[product] in text or state["navigation"]["current_step"] == "source"
         assert callbacks.count("menu|main_video") == 1
+        allowed_direct_callbacks = {
+            callback
+            for callback in bot.VIDEO_PUBLIC_ROUTE_MATRIX[product]["expected_children"]
+            if not callback.startswith("vid3|")
+        }
         assert all(
             callback == "menu|main_video"
             or callback.startswith("vid3|d|")
+            or callback in allowed_direct_callbacks
             for callback in wire_callbacks
         )
         assert not any(
@@ -664,9 +675,9 @@ def test_format_and_content_hub_are_compact_with_unique_callbacks_and_exact_back
     text, markup = bot.video_uiflow3_screen_payload(state)
     labels = [label for row in _rows(markup) for label, _callback in row]
     assert "9:16" in " ".join(labels)
-    assert "8 giay" in " ".join(labels)
-    assert "Tiep tuc" in " ".join(labels)
-    assert _rows(markup)[-1] == [("Quay lai", "vid3|back"), ("Menu Video", "menu|main_video")]
+    assert "8 giây/cảnh" in " ".join(labels)
+    assert "Tiếp tục" in " ".join(labels)
+    assert _rows(markup)[-1] == [("⬅️ Quay lại", "vid3|back"), ("🎬 Menu Video", "menu|main_video")]
     callbacks = _callbacks(markup)
     assert len(callbacks) == len(set(callbacks))
     assert all(len(callback.encode("utf-8")) <= 64 for callback in callbacks)
@@ -676,8 +687,8 @@ def test_format_and_content_hub_are_compact_with_unique_callbacks_and_exact_back
     text, markup = bot.video_uiflow3_screen_payload(state)
     labels = [label for row in _rows(markup) for label, _callback in row]
     assert any("32" in label for label in labels)
-    assert any("Y tuong" in label for label in labels)
-    assert any("Tu nhap" in label for label in labels)
+    assert any("Kho ý tưởng" in label for label in labels)
+    assert any("Tự mô tả" in label for label in labels)
     assert "vid3|idea_catalog" in _callbacks(markup)
     assert "videoidea|start" not in _callbacks(markup)
     assert "vid3|content|ideas" not in _callbacks(markup)
@@ -706,10 +717,11 @@ def test_32_content_public_route_locks_profile_before_any_character_or_scene() -
     context = SimpleNamespace(user_data={})
     _click(context, user_id, "vid3|entry|video_ai_real", "profile-route-01")
     _click(context, user_id, "vid3|mode|prompt_video", "profile-route-02")
-    _click(context, user_id, "vid3|ratio|9x16", "profile-route-03")
-    _click(context, user_id, "vid3|duration|8", "profile-route-04")
-    _click(context, user_id, "vid3|format_done", "profile-route-05")
-    _click(context, user_id, "vid3|content|profiles", "profile-route-06")
+    _click(context, user_id, "vid3|scene_count|1", "profile-route-03")
+    _click(context, user_id, "vid3|ratio|9x16", "profile-route-04")
+    _click(context, user_id, "vid3|duration_scene|8", "profile-route-05")
+    _click(context, user_id, "vid3|format_done", "profile-route-06")
+    _click(context, user_id, "vid3|content|profiles", "profile-route-07")
 
     choosing = bot.video_uiflow3_state(context)
     assert choosing["navigation"]["current_step"] == "content_hub"
@@ -719,7 +731,7 @@ def test_32_content_public_route_locks_profile_before_any_character_or_scene() -
     assert profile_callbacks
 
     selected_profile_id = profile_callbacks[0].split("|", 2)[-1]
-    _click(context, user_id, profile_callbacks[0], "profile-route-07")
+    _click(context, user_id, profile_callbacks[0], "profile-route-08")
 
     candidate = bot.video_uiflow3_state(context)
     assert candidate["content"]["source"] == "content_catalog"
@@ -730,7 +742,7 @@ def test_32_content_public_route_locks_profile_before_any_character_or_scene() -
     assert candidate["bible"]["characters"] == []
     assert candidate["scenes"] == []
 
-    _click(context, user_id, "vid3|content_lock", "profile-route-08")
+    _click(context, user_id, "vid3|content_lock", "profile-route-09")
     locked = bot.video_uiflow3_state(context)
     assert locked["content"]["locked"] is True
     assert locked["navigation"]["current_step"] == "production_bible"
@@ -775,18 +787,18 @@ def test_production_bible_groups_character_count_details_images_voice_and_locati
     text, markup = bot.video_uiflow3_screen_payload(state)
     labels = [label for row in _rows(markup) for label, _callback in row]
     combined = " ".join(labels)
-    assert "So nhan vat" in combined
-    assert "Sua tung nhan vat" in combined
-    assert "Boi canh" in combined
-    assert "Anh tham chieu" in combined
-    assert "Nhat quan" in combined
+    assert "Số nhân vật" in combined
+    assert "Danh sách nhân vật" in combined
+    assert "Số bối cảnh" in combined
+    assert "Ảnh tham chiếu" in combined
+    assert "Giữ nhất quán" in combined
 
     state = video_uiflow3.set_character_count(state, 2)
     state["ui_view"] = "character_list"
     _text, markup = bot.video_uiflow3_screen_payload(state)
     assert [label for row in _rows(markup) for label, _callback in row][:2] == [
-        "NV1 - Nhan vat 1",
-        "NV2 - Nhan vat 2",
+        "👤 Nhân vật 1",
+        "👤 Nhân vật 2",
     ]
 
 
@@ -796,7 +808,7 @@ def test_production_bible_keeps_optional_actors_in_one_compact_editor() -> None:
 
     text, markup = bot.video_uiflow3_screen_payload(state)
 
-    assert "Tac nhan nang cao" in text
+    assert "Tùy chỉnh chi tiết" in text
     assert "vid3|view|bible_extras" in _callbacks(markup)
 
 
@@ -892,9 +904,10 @@ def test_bible_done_persists_the_continuity_defaults_shown_as_selected() -> None
     bot.save_video_uiflow3_state(context, state)
 
     _text, markup = bot.video_uiflow3_screen_payload(state)
+    selected_labels = [label for row in _rows(markup) for label, _callback in row]
     assert all(
-        any(label == f"[x] {expected}" for row in _rows(markup) for label, _callback in row)
-        for expected in ("Khuon mat", "Trang phuc", "San pham", "Boi canh")
+        any(label.startswith("✅") and expected in label for label in selected_labels)
+        for expected in ("Khuôn mặt", "Trang phục", "Sản phẩm", "Bối cảnh")
     )
 
     _click(context, user_id, "vid3|view|production_bible", "continuity-defaults-01")
@@ -973,12 +986,14 @@ def test_relationship_input_uses_visible_nv_numbers_but_persists_stable_ids() ->
     bot.save_video_uiflow3_state(context, state)
 
     text, _markup = bot.video_uiflow3_screen_payload(state)
-    assert "NV1=" in text and "NV2=" in text
+    assert "Nhân vật 1 (chưa đặt tên)" in text
+    assert "Nhân vật 2 (chưa đặt tên)" in text
     assert "char_01=" not in text and "char_03=" not in text
+    assert "Nhan vat" not in text
 
     _click(context, user_id, "vid3|relationship_add", "relationship-01")
     prompt_text, _markup = bot.video_uiflow3_screen_payload(bot.video_uiflow3_state(context))
-    assert "NV1 | NV2" in prompt_text
+    assert "Nhân vật 1 | Nhân vật 2" in prompt_text
     assert "char_01 | char_02" not in prompt_text
     _send_text(context, user_id, "NV1 | NV2 | dong nghiep", 410)
 
@@ -1015,32 +1030,30 @@ def test_scene_assignment_screen_combines_cast_dialogue_voice_and_music_with_aut
     state = video_uiflow3.auto_assign_scenes(state)
     state["navigation"]["current_step"] = "scene_assignment"
     text, markup = bot.video_uiflow3_screen_payload(state)
-    assert "Tu dong theo thu tu" in text
-    assert "NV1" in text and "NV2" in text
+    assert "gán nhân vật theo thứ tự" in text
+    assert "Nhân vật 1" in text and "Nhân vật 2" in text
     labels = [label for row in _rows(markup) for label, _callback in row]
-    assert "Canh 1" in labels
-    assert "Canh 2" in labels
-    assert "Canh 3" in labels
-    assert not any("Nhac" in label for label in labels)
+    assert all(any(f"Cảnh {index}" in label for label in labels) for index in (1, 2, 3))
+    assert not any("Nhạc" in label for label in labels)
 
     state["capabilities"].update({"whole_video_music": True, "per_scene_music": True})
     _text, markup = bot.video_uiflow3_screen_payload(state)
     labels = [label for row in _rows(markup) for label, _callback in row]
-    assert any("Nhac" in label for label in labels)
+    assert any("Nhạc" in label for label in labels)
     state["capabilities"].update({"whole_video_music": False, "per_scene_music": False})
 
     state["ui_view"] = "scene_detail"
     state["active_scene_id"] = "scene_01"
     text, markup = bot.video_uiflow3_screen_payload(state)
     labels = [label for row in _rows(markup) for label, _callback in row]
-    assert any("Nhan vat" in label for label in labels)
-    assert any("Loi thoai" in label for label in labels)
-    assert any("Giong" in label for label in labels)
-    assert not any("Nhac canh" in label for label in labels)
+    assert any("Nhân vật" in label for label in labels)
+    assert any("Lời thoại" in label for label in labels)
+    assert any("Giọng" in label for label in labels)
+    assert not any("Nhạc cảnh" in label for label in labels)
 
     state["capabilities"]["per_scene_music"] = True
     _text, markup = bot.video_uiflow3_screen_payload(state)
-    assert any("Nhac canh" in label for row in _rows(markup) for label, _callback in row)
+    assert any("Nhạc cảnh" in label for row in _rows(markup) for label, _callback in row)
 
 
 def test_scene_detail_hides_empty_actor_and_audio_submenus_until_they_have_content() -> None:
@@ -1080,9 +1093,9 @@ def test_voice_picker_offers_distinct_planning_slots_for_same_gender_cast() -> N
     assert "vid3|voice|char_01|vf2" in callbacks
     assert "vid3|voice|char_01|vm1" not in callbacks
     assert "vid3|voice|char_01|vm2" not in callbacks
-    assert "Nu 1 (ke hoach)" in labels
-    assert "Nu 2 (ke hoach)" in labels
-    assert "dau ra cuoi" in text
+    assert "👩 Giọng nữ 1 (kế hoạch)" in labels
+    assert "👩 Giọng nữ 2 (kế hoạch)" in labels
+    assert "giọng đầu ra" in text
 
 
 def test_voice_picker_hides_slots_used_by_another_character_and_rejects_forged_reuse() -> None:
@@ -1272,7 +1285,7 @@ def test_summary_has_one_hub_and_each_editor_returns_to_summary() -> None:
     state = _locked_state()
     state["navigation"]["current_step"] = "summary"
     text, markup = bot.video_uiflow3_screen_payload(state)
-    assert "TOM TAT VIDEO" in text
+    assert "Tóm tắt Video AI chân thật" in text
     callbacks = _callbacks(markup)
     assert "vid3|edit|content_lock" in callbacks
     assert "vid3|edit|production_bible" in callbacks
@@ -1280,8 +1293,8 @@ def test_summary_has_one_hub_and_each_editor_returns_to_summary() -> None:
     assert "vid3|edit|scene_assignment" in callbacks
     assert "vid3|edit|branding" in callbacks
     labels = [label for row in _rows(markup) for label, _callback in row]
-    assert "Lưu kế hoạch" in labels
-    assert "Tiếp tục chọn gói" not in labels
+    assert any("Lưu kế hoạch" in label for label in labels)
+    assert not any("Tiếp tục chọn gói" in label for label in labels)
     assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["video_ai_real"]["legacy_entry_callback"] not in callbacks
 
     editor = video_uiflow3.begin_summary_edit(state, "production_bible")
@@ -1566,7 +1579,7 @@ def test_summary_translates_dirty_dependency_codes_into_actionable_copy() -> Non
     state = video_uiflow3.lock_content(state)
     state["navigation"]["current_step"] = "summary"
     text, _markup = bot.video_uiflow3_screen_payload(state)
-    assert "Rà soát lại Production Bible" in text
+    assert "Rà soát lại Nhân vật & bối cảnh" in text
     assert "Rà soát lại kế hoạch cảnh" in text
     assert "_reconcile_required" not in text
 
@@ -1631,7 +1644,7 @@ def test_summary_caps_long_content_and_readiness_details_below_telegram_limit() 
     text, _markup = bot.video_uiflow3_screen_payload(state)
 
     assert len(text) < 4096
-    assert "muc can hoan tat khac" in text
+    assert "mục khác cần hoàn tất" in text
 
 
 def test_scene_plan_summary_editor_saves_directly_back_to_summary() -> None:
@@ -1667,7 +1680,7 @@ def test_scene_plan_requires_real_content_and_offers_non_destructive_rule_draft(
     callbacks = _callbacks(markup)
     assert "vid3|scene_plan_auto" in callbacks
     assert "vid3|scene_plan_done" not in callbacks
-    assert "Chua du y chinh" in text
+    assert "Chưa đủ ý chính" in text
 
     _click(context, user_id, "vid3|scene_plan_auto", "scene-plan-auto-01")
     drafted = bot.video_uiflow3_state(context)
@@ -1688,7 +1701,7 @@ def test_real_callback_back_resume_and_stale_action_never_cross_product() -> Non
 
     _click(context, user_id, "vid3|mode|prompt_video", "mode")
     state = bot.video_uiflow3_state(context)
-    assert state["navigation"]["current_step"] == "format"
+    assert state["navigation"]["current_step"] == "scene_count"
 
     before = bot.video_uiflow3_state(context)
     _click(context, user_id, "vid3|character|char_99", "stale")
@@ -1726,7 +1739,7 @@ def test_video_menu_exposes_resume_only_for_a_valid_draft_and_restores_its_exact
     assert resumed["parent_product"] == "video_ai_real"
     assert resumed["navigation"]["current_step"] == "production_bible"
     assert resume_query.edits
-    assert "PRODUCTION BIBLE" in resume_query.edits[-1]["text"]
+    assert "Nhân vật & bối cảnh" in resume_query.edits[-1]["text"]
 
     empty_context = SimpleNamespace(user_data={})
     empty_menu_query = FakeQuery(user_id, "menu|main_video", "menu-resume-03")
@@ -1868,10 +1881,11 @@ def test_foreign_callback_deactivates_pending_input_but_preserves_resume_step(mo
     user_id = 970039
     _click(context, user_id, "vid3|entry|video_ai_real", "leave-01")
     _click(context, user_id, "vid3|mode|prompt_video", "leave-02")
-    _click(context, user_id, "vid3|ratio|9x16", "leave-03")
-    _click(context, user_id, "vid3|duration|16", "leave-04")
-    _click(context, user_id, "vid3|format_done", "leave-05")
-    _click(context, user_id, "vid3|content|manual", "leave-06")
+    _click(context, user_id, "vid3|scene_count|2", "leave-03")
+    _click(context, user_id, "vid3|ratio|9x16", "leave-04")
+    _click(context, user_id, "vid3|duration_scene|8", "leave-05")
+    _click(context, user_id, "vid3|format_done", "leave-06")
+    _click(context, user_id, "vid3|content|manual", "leave-07")
     before = bot.video_uiflow3_state(context)
     assert before["pending_input"]["kind"] == "manual_content"
 
@@ -1899,26 +1913,26 @@ def test_leaving_uiflow3_invalidates_every_old_screen_button_until_resume(monkey
     _click(context, user_id, "vid3|mode|prompt_video", "leave-token-02")
     state = bot.video_uiflow3_state(context)
     _text, markup = bot.video_uiflow3_screen_payload(state)
-    old_duration = next(
+    old_scene_count = next(
         callback for callback in _wire_callbacks(markup)
-        if callback.endswith("|duration|24")
+        if callback.endswith("|scene_count|2")
     )
 
     monkeypatch.setattr(bot, "current_system_mode", lambda: {})
     foreign = FakeQuery(user_id, "menu|main_video", "leave-token-menu")
     asyncio.run(bot.safe_mode_callback_guard(SimpleNamespace(callback_query=foreign), context))
     suspended = bot.video_uiflow3_state(context)
-    assert suspended["navigation"]["current_step"] == "format"
+    assert suspended["navigation"]["current_step"] == "scene_count"
     assert suspended["ui_revision"] == state["ui_revision"] + 1
 
-    stale = FakeQuery(user_id, old_duration, "leave-token-03")
+    stale = FakeQuery(user_id, old_scene_count, "leave-token-03")
     asyncio.run(bot.handle_video_uiflow3_callback(SimpleNamespace(callback_query=stale), context))
     after_stale = bot.video_uiflow3_state(context)
-    assert after_stale["format"]["target_duration_seconds"] == 0
+    assert after_stale["format"]["scene_count"] == 0
     assert stale.answers
 
     _click(context, user_id, "vid3|resume", "leave-token-04")
-    assert bot.video_uiflow3_state(context)["navigation"]["current_step"] == "format"
+    assert bot.video_uiflow3_state(context)["navigation"]["current_step"] == "scene_count"
 
 
 def test_pending_input_requires_matching_draft_and_owner() -> None:
@@ -2059,18 +2073,19 @@ def test_stale_step_callback_cannot_skip_prerequisites_or_rewind_an_active_flow(
     _click(context, user_id, "vid3|entry|video_ai_real", "guard-01")
     _click(context, user_id, "vid3|mode|prompt_video", "guard-02")
     before = bot.video_uiflow3_state(context)
-    _click(context, user_id, "vid3|view|scene_count", "guard-03")
+    _click(context, user_id, "vid3|view|scene_plan", "guard-03")
     after = bot.video_uiflow3_state(context)
-    assert after["navigation"]["current_step"] == before["navigation"]["current_step"] == "format"
+    assert after["navigation"]["current_step"] == before["navigation"]["current_step"] == "scene_count"
 
-    _click(context, user_id, "vid3|ratio|9x16", "guard-04")
-    _click(context, user_id, "vid3|duration|16", "guard-05")
-    _click(context, user_id, "vid3|format_done", "guard-06")
-    _click(context, user_id, "vid3|content|manual", "guard-07")
+    _click(context, user_id, "vid3|scene_count|2", "guard-04")
+    _click(context, user_id, "vid3|ratio|9x16", "guard-05")
+    _click(context, user_id, "vid3|duration_scene|8", "guard-06")
+    _click(context, user_id, "vid3|format_done", "guard-07")
+    _click(context, user_id, "vid3|content|manual", "guard-08")
     _send_text(context, user_id, "Noi dung da khoa de kiem tra callback cu.", 301)
-    _click(context, user_id, "vid3|content_lock", "guard-08")
+    _click(context, user_id, "vid3|content_lock", "guard-09")
     before = bot.video_uiflow3_state(context)
-    _click(context, user_id, "vid3|ratio|16x9", "guard-09")
+    _click(context, user_id, "vid3|ratio|16x9", "guard-10")
     after = bot.video_uiflow3_state(context)
     assert after["navigation"]["current_step"] == before["navigation"]["current_step"] == "production_bible"
     assert after["format"]["ratio"] == before["format"]["ratio"] == "9:16"
@@ -2124,17 +2139,18 @@ def test_same_draft_old_screen_callback_cannot_mutate_the_new_visible_state() ->
 
     state = bot.video_uiflow3_state(context)
     _text, old_markup = bot.video_uiflow3_screen_payload(state)
-    old_duration = next(
+    old_scene_count = next(
         callback for callback in _wire_callbacks(old_markup)
-        if callback.endswith("|duration|24")
+        if callback.endswith("|scene_count|2")
     )
 
-    _click(context, user_id, "vid3|ratio|9x16", "same-draft-03")
-    stale = FakeQuery(user_id, old_duration, "same-draft-04")
+    _click(context, user_id, "vid3|scene_count|1", "same-draft-03")
+    stale = FakeQuery(user_id, old_scene_count, "same-draft-04")
     asyncio.run(bot.handle_video_uiflow3_callback(SimpleNamespace(callback_query=stale), context))
 
     current = bot.video_uiflow3_state(context)
-    assert current["format"]["target_duration_seconds"] == 0
+    assert current["format"]["scene_count"] == 1
+    assert current["format"]["target_duration_seconds"] == 8
     assert stale.answers
 
 
@@ -2173,8 +2189,8 @@ def test_reference_gallery_is_owner_filtered_and_back_returns_to_owner_editor() 
 
     rendered = bot.video_uiflow3_state(context)
     text, markup = bot.video_uiflow3_screen_payload(rendered)
-    assert "Anh nhan vat" in text
-    assert "Anh boi canh" not in text
+    assert "Ảnh tham chiếu · Nhân vật 1" in text
+    assert "Bối cảnh" not in text
     assert "char_01" not in text
     assert "asset_01" not in text
     assert "char-file" not in text
@@ -2198,7 +2214,7 @@ def test_scene_detail_uses_visible_location_label_instead_of_internal_id() -> No
 
     text, _markup = bot.video_uiflow3_screen_payload(state)
 
-    assert "BC1 - Quan ca phe" in text
+    assert "Bối cảnh: Quan ca phe" in text
     assert "loc_01" not in text
 
 
@@ -2216,7 +2232,7 @@ def test_prompt_advanced_has_a_real_scene_editor_and_exact_parent_back() -> None
     text, markup = bot.video_uiflow3_screen_payload(bot.video_uiflow3_state(context))
     assert "vid3|scene_advanced|scene_01" in _callbacks(markup)
     assert "vid3|view|prompts" in _callbacks(markup)
-    assert "NANG CAO" in text
+    assert "Tùy chỉnh nâng cao theo cảnh" in text
 
     _click(context, user_id, "vid3|scene_advanced|scene_01", "advanced-02")
     _text, markup = bot.video_uiflow3_screen_payload(bot.video_uiflow3_state(context))
@@ -2260,7 +2276,7 @@ def test_resume_preserves_child_editor_and_initial_source_back_is_not_a_loop() -
     assert "vid3|back" not in callbacks
 
 
-def test_source_text_and_custom_duration_back_follow_visible_history_not_service_side_effects() -> None:
+def test_source_text_and_custom_scene_count_back_follow_visible_history_not_service_side_effects() -> None:
     trend_context = SimpleNamespace(user_data={})
     trend_user = 970041
     _click(trend_context, trend_user, "vid3|entry|video_trend", "history-source-01")
@@ -2276,14 +2292,14 @@ def test_source_text_and_custom_duration_back_follow_visible_history_not_service
     duration_user = 970042
     _click(duration_context, duration_user, "vid3|entry|video_ai_real", "history-duration-01")
     _click(duration_context, duration_user, "vid3|mode|prompt_video", "history-duration-02")
-    _click(duration_context, duration_user, "vid3|ratio|9x16", "history-duration-03")
-    _click(duration_context, duration_user, "vid3|duration_custom", "history-duration-04")
-    _send_text(duration_context, duration_user, "24", 394)
+    _click(duration_context, duration_user, "vid3|scene_custom", "history-duration-03")
+    _send_text(duration_context, duration_user, "4", 394)
     duration_state = bot.video_uiflow3_state(duration_context)
     assert duration_state["navigation"]["current_step"] == "format"
+    assert duration_state["format"]["scene_count"] == 4
     assert "content_hub" not in duration_state["navigation"]["visible_step_stack"]
-    _click(duration_context, duration_user, "vid3|back", "history-duration-05")
-    assert bot.video_uiflow3_state(duration_context)["navigation"]["current_step"] == "entry"
+    _click(duration_context, duration_user, "vid3|back", "history-duration-04")
+    assert bot.video_uiflow3_state(duration_context)["navigation"]["current_step"] == "scene_count"
 
     media_context = SimpleNamespace(user_data={})
     media_user = 970043
@@ -2320,7 +2336,7 @@ def test_uiflow3_handlers_are_planning_only_and_media_dispatch_precedes_legacy_s
     assert text.index("handle_video_uiflow3_pending_text") < text.index("handle_video_profile_studio_pending_text")
 
 
-def test_entry_mode_requires_real_source_and_hides_unproved_video_to_video() -> None:
+def test_entry_mode_requires_real_source_and_keeps_video_to_video_out_of_public_ui() -> None:
     state = video_uiflow3.new_state("video_ai_real", draft_id="mode-source")
     _text, markup = bot.video_uiflow3_screen_payload(state)
     assert "vid3|mode|video_video" not in _callbacks(markup)
@@ -2336,7 +2352,7 @@ def test_entry_mode_requires_real_source_and_hides_unproved_video_to_video() -> 
         capabilities={"video_to_video": True},
     )
     _text, markup = bot.video_uiflow3_screen_payload(capable)
-    assert "vid3|mode|video_video" in _callbacks(markup)
+    assert "vid3|mode|video_video" not in _callbacks(markup)
 
 
 def test_each_source_branch_accepts_only_its_advertised_media_kind() -> None:
@@ -2370,8 +2386,9 @@ def test_compact_public_flow_persists_character_voice_dialogue_and_returns_summa
     user_id = 970032
     _click(context, user_id, "vid3|entry|video_ai_real", "q01")
     _click(context, user_id, "vid3|mode|prompt_video", "q02")
+    _click(context, user_id, "vid3|scene_count|2", "q02a")
     _click(context, user_id, "vid3|ratio|9x16", "q03")
-    _click(context, user_id, "vid3|duration|16", "q04")
+    _click(context, user_id, "vid3|duration_scene|8", "q04")
     _click(context, user_id, "vid3|format_done", "q05")
     _click(context, user_id, "vid3|content|manual", "q06")
     _send_text(context, user_id, "Lan va Minh gioi thieu san pham.", 101)
@@ -2399,7 +2416,6 @@ def test_compact_public_flow_persists_character_voice_dialogue_and_returns_summa
     _send_text(context, user_id, "Studio | Anh sang mem, nen sach.", 104)
     _click(context, user_id, "vid3|view|production_bible", "q23")
     _click(context, user_id, "vid3|bible_done", "q24")
-    _click(context, user_id, "vid3|scene_count|2", "q25")
     _click(context, user_id, "vid3|scene_plan_auto", "q25b")
     _click(context, user_id, "vid3|scene_plan_done", "q26")
 
