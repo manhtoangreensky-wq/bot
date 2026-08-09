@@ -187114,6 +187114,7 @@ async def _handle_create_media_callback_impl(
     if action == "trend":
         return await trend_guided_start_from_query(query, uid, lang)
     if action == "quick_image":
+        clear_video_editor_pending(uid)
         clear_trend_video_flow_pending(uid)
         clear_quick_media_pending(uid)
         clear_quick_image_flow(uid)
@@ -187780,6 +187781,7 @@ async def _handle_create_media_callback_impl(
         record_shopaikey_billing_event(uid, 0, "video_prompt_received", 0, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}; aspect={aspect}")
         return await start_video_addon_step(query, uid, pending_payload, tier, lang, source="ai")
     if action.startswith("image_tier_"):
+        clear_video_editor_pending(uid)
         clear_trend_video_flow_pending(uid)
         clear_quick_media_pending(uid)
         clear_public_video_prompt_pending(uid)

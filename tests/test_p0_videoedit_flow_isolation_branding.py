@@ -451,6 +451,90 @@ def test_actual_handle_message_keeps_videoedit_text_out_of_chat_and_admin_tools(
         bot.clear_video_editor_pending(user_id)
 
 
+@pytest.mark.parametrize(
+    ("user_id", "chat_id", "message_id", "entry_callbacks", "expected_owner"),
+    (
+        (
+            91_040,
+            -100_091_040,
+            91_040,
+            ("create_media|quick_image", "create_media|qi_custom"),
+            "quick_image",
+        ),
+        (
+            91_041,
+            -100_091_041,
+            91_041,
+            ("create_media|image_tier_low",),
+            "public_image",
+        ),
+    ),
+)
+def test_public_image_entry_releases_a_stale_videoedit_text_owner(
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+    entry_callbacks: tuple[str, ...],
+    expected_owner: str,
+) -> None:
+    bot.clear_video_editor_pending(user_id)
+    bot.clear_quick_image_flow(user_id)
+    bot.clear_public_image_prompt_pending(user_id)
+    bot.clear_media_aspect_pending(user_id)
+    try:
+        stale = _ready_state(user_id, step="await_brightness")
+        stale.update(
+            {
+                "current_screen": "brightness_input",
+                "screen_id": "brightness_input",
+                "pending_field": "brightness",
+                "parent_callback": "videoedit|color",
+            }
+        )
+        _store_state(user_id, stale)
+        context = SimpleNamespace(user_data={})
+
+        for callback in entry_callbacks:
+            query = _Query(user_id, callback)
+            asyncio.run(
+                bot.handle_create_media_callback(
+                    SimpleNamespace(callback_query=query),
+                    context,
+                )
+            )
+
+        message = _Message("© TOAN AAS", message_id=message_id)
+        message.chat = SimpleNamespace(id=chat_id)
+        asyncio.run(
+            bot.handle_message(
+                SimpleNamespace(
+                    callback_query=None,
+                    message=message,
+                    effective_message=message,
+                    effective_user=SimpleNamespace(id=user_id),
+                    effective_chat=SimpleNamespace(id=chat_id),
+                ),
+                context,
+            )
+        )
+
+        assert bot.get_video_editor_pending(user_id) == {}
+        assert len(message.replies) == 1
+        assert "Vui lòng nhập một số từ 20 đến 200" not in message.replies[0][0]
+        if expected_owner == "quick_image":
+            assert (bot.get_quick_image_flow(user_id) or {}).get("step") == "prepared_prompt"
+        else:
+            pending = bot.get_media_aspect_pending(user_id, "image") or {}
+            assert pending.get("prompt") == "© TOAN AAS"
+    finally:
+        bot.clear_video_editor_pending(user_id)
+        bot.clear_quick_image_flow(user_id)
+        bot.clear_public_image_prompt_pending(user_id)
+        bot.clear_media_aspect_pending(user_id)
+        bot.TELEGRAM_MESSAGE_DEDUPE_DONE.pop(f"{chat_id}:{message_id}", None)
+        bot.TELEGRAM_MESSAGE_DEDUPE_LOCKS.pop(f"{chat_id}:{message_id}", None)
+
+
 def test_videoedit_state_restores_after_process_memory_loss(
     monkeypatch,
     tmp_path: Path,
