@@ -4199,6 +4199,12 @@ def _split_product_video_provider_chain(value: Any) -> list[str]:
     return result
 
 
+def normalize_product_video_provider_chain(value: Any) -> list[str]:
+    """Normalize a configured provider chain for service-layer callers."""
+
+    return _split_product_video_provider_chain(value)
+
+
 def resolve_product_video_provider_chain(environ: dict[str, str] | None = None) -> list[str]:
     env = os.environ if environ is None else environ
     raw = env.get("VIDEO_PROVIDER_CHAIN") if hasattr(env, "get") else None
@@ -4583,6 +4589,24 @@ def build_product_video_confirm_kickoff_payload(
         or invoice.get("multi_scene_health_gate")
         or {}
     )
+    # Keep the immutable UIFLOW3 handoff identity at the worker payload
+    # boundary as well as inside the durable project asset pack.  Recovery,
+    # worker admission, and artifact validation must be able to verify the
+    # exact approved plan without reconstructing it from UI state.
+    uiflow3_identity = {
+        key: asset_pack.get(key) or invoice.get(key)
+        for key in (
+            "uiflow3_bridge_version",
+            "uiflow3_draft_id",
+            "uiflow3_owner_user_id",
+            "uiflow3_owner_chat_id",
+            "uiflow3_snapshot_config_hash",
+            "uiflow3_handoff_sha256",
+            "uiflow3_quote_sha256",
+            "uiflow3_route_selection_sha256",
+        )
+        if asset_pack.get(key) not in (None, "") or invoice.get(key) not in (None, "")
+    }
     return {
         "source": "product_video",
         "product_video": True,
@@ -4689,6 +4713,7 @@ def build_product_video_confirm_kickoff_payload(
         "provider_attempted": False,
         "provider_task_id_saved": False,
         "no_new_paid_submit": True,
+        **uiflow3_identity,
     }
 
 

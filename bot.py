@@ -116,7 +116,7 @@ from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit
 from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
 from services import video_profile_context_engine
 from services import frame_video_commercial, frame_video_flow, frame_video_public_seam, frame_video_runtime
-from services import video_addon_planner, video_ai_real_pricing, video_ai_real_prompt_compiler, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_selfshot_local_analysis, video_selfshotflow4, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uiflow3, video_uifreeze1
+from services import video_addon_planner, video_ai_real_pricing, video_ai_real_prompt_compiler, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_selfshot_local_analysis, video_selfshotflow4, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uiflow3, video_uiflow3_routeengine, video_uifreeze1
 from services import ui_navigation
 from services import local_video_studio_preview
 from services import local_video_studio_public
@@ -71757,6 +71757,124 @@ def save_video_uiflow3_state(context, state: dict) -> dict:
     return clean
 
 
+def video_uiflow3_handoff_from_session(session: dict | None = None) -> dict:
+    draft = dict((session or {}).get("draft") or {})
+    handoff = draft.get("uiflow3_routeengine_handoff")
+    return dict(handoff) if isinstance(handoff, dict) and handoff.get("handoff_sha256") else {}
+
+
+def video_uiflow3_bind_routeengine_session(
+    user_id: int,
+    state: dict,
+    handoff: dict,
+) -> dict:
+    """Expose the approved V3 snapshot to the existing commercial tail.
+
+    This only prepares an in-memory session. It never creates a project/job,
+    calls a provider, or mutates wallet state; the package and final-confirm
+    handlers remain the only durable side-effect edges.
+    """
+
+    current = video_uiflow3.normalize_state(state)
+    content = dict(handoff.get("content") or {})
+    public_product = str(handoff.get("parent_product") or "video_ai_real")
+    profile_id = str(
+        content.get("profile_id")
+        or handoff.get("public_product_type")
+        or "video_ai_prompt"
+    )[:160]
+    topic = str(
+        content.get("original_intent")
+        or (content.get("approved_brief") or {}).get("title")
+        or ""
+    ).strip()[:8000]
+    draft = {
+        "product_id": public_product,
+        "topic": topic,
+        "b14_profile_id": profile_id,
+        "b14_scene_count": max(1, safe_int(handoff.get("scene_count"), 1)),
+        "b14_scene_count_selected": True,
+        "b14_aspect_ratio": str(handoff.get("aspect_ratio") or "9:16"),
+        "b14_addon_plan": deepcopy(dict(handoff.get("addon_plan") or {})),
+        "b14_storyboard_plan": {
+            "scene_count": max(1, safe_int(handoff.get("scene_count"), 1)),
+            "scene_cards": deepcopy(list(handoff.get("scene_cards") or [])),
+            "preview_text": topic,
+        },
+        "uiflow3_routeengine_handoff": deepcopy(handoff),
+        "uiflow3_handoff_sha256": str(handoff.get("handoff_sha256") or ""),
+        "uiflow3_snapshot_config_hash": str(handoff.get("snapshot_config_hash") or ""),
+        "uiflow3_summary_token": video_uiflow3.draft_token(current),
+        "provider_called": False,
+        "job_created": False,
+        "outbox_created": False,
+        "xu_charged": 0,
+        "public_user_confirmed": False,
+        "charge_policy": "after_valid_mp4_delivery",
+    }
+    session = default_video_session(user_id)
+    session.update(
+        {
+            "product_id": public_product,
+            "topic": topic,
+            "aspect_ratio": str(handoff.get("aspect_ratio") or "9:16"),
+            "entry_flow": "uiflow3_content_first",
+            "current_flow": "product_video",
+            "current_step": "b14_quality",
+            "return_to": "vid3|resume",
+            "draft": draft,
+        }
+    )
+    return save_video_session(user_id, session)
+
+
+def video_uiflow3_compile_routeengine_handoff(
+    state: dict,
+    *,
+    owner_user_id: int,
+    owner_chat_id: int,
+) -> dict:
+    snapshot = video_uiflow3.approved_snapshot(state)
+    return video_uiflow3_routeengine.compile_routeengine_handoff(
+        snapshot,
+        owner_user_id=int(owner_user_id),
+        owner_chat_id=int(owner_chat_id),
+    )
+
+
+def video_uiflow3_commercial_tail_guard(
+    context,
+    user_id: int,
+    chat_id: int,
+    session: dict | None = None,
+) -> dict:
+    handoff = video_uiflow3_handoff_from_session(session)
+    if not handoff:
+        return {"ok": True, "uiflow3": False, "reason": ""}
+    state = video_uiflow3_state(context)
+    draft = dict((session or {}).get("draft") or {})
+    if not state:
+        return {"ok": False, "uiflow3": True, "reason": "uiflow3_state_missing"}
+    if safe_int(state.get("owner_user_id"), 0) != int(user_id):
+        return {"ok": False, "uiflow3": True, "reason": "uiflow3_owner_mismatch"}
+    if safe_int(state.get("owner_chat_id"), 0) != int(chat_id):
+        return {"ok": False, "uiflow3": True, "reason": "uiflow3_chat_mismatch"}
+    if str(state.get("draft_id") or "") != str(handoff.get("draft_id") or ""):
+        return {"ok": False, "uiflow3": True, "reason": "uiflow3_draft_mismatch"}
+    if not hmac.compare_digest(
+        str(draft.get("uiflow3_summary_token") or ""),
+        video_uiflow3.draft_token(state),
+    ):
+        return {"ok": False, "uiflow3": True, "reason": "uiflow3_summary_changed"}
+    state_handoff = dict((state.get("legacy_compat") or {}).get("routeengine_handoff") or {})
+    if not hmac.compare_digest(
+        str(state_handoff.get("handoff_sha256") or ""),
+        str(handoff.get("handoff_sha256") or ""),
+    ):
+        return {"ok": False, "uiflow3": True, "reason": "uiflow3_handoff_changed"}
+    return {"ok": True, "uiflow3": True, "reason": ""}
+
+
 def deactivate_video_uiflow3_pending_input(context) -> bool:
     user_data = getattr(context, "user_data", None)
     if not isinstance(user_data, dict):
@@ -93645,7 +93763,11 @@ def video_b14_quality_text(lang: str = "vi") -> str:
     return "\n".join(lines)
 
 
-def video_b14_quality_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def video_b14_quality_keyboard(
+    lang: str = "vi",
+    *,
+    back_callback: str = "vproduct|b14_aspect_screen",
+) -> InlineKeyboardMarkup:
     values = list(VIDEO_AI_REAL_QUALITY_MODEL_KEYS)
     buttons = [
         InlineKeyboardButton(
@@ -93656,7 +93778,7 @@ def video_b14_quality_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ]
     rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     rows.append([
-        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_aspect_screen"),
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back_callback),
         InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
     ])
     return InlineKeyboardMarkup(rows)
@@ -94099,11 +94221,29 @@ def video_b14_invoice_text(session: dict, user_id=0, lang: str = "vi") -> str:
     return video_b14_with_admin_label("\n".join(lines), user_id, lang)
 
 
-def video_b14_invoice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def video_b14_invoice_keyboard(
+    lang: str = "vi",
+    *,
+    review_callback: str = "vproduct|b14_storyboard_screen",
+    back_callback: str = "vproduct|b14_scene_count_screen",
+) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Xác nhận tạo video", callback_data="vproduct|b14_confirm"), InlineKeyboardButton("📋 Xem lại kế hoạch", callback_data="vproduct|b14_storyboard_screen")],
-        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+        [InlineKeyboardButton("✅ Xác nhận tạo video", callback_data="vproduct|b14_confirm"), InlineKeyboardButton("📋 Xem lại kế hoạch", callback_data=review_callback)],
+        [InlineKeyboardButton(video_ui_back_label(lang), callback_data=back_callback), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
     ])
+
+
+def video_b14_invoice_keyboard_for_session(
+    session: dict | None = None,
+    lang: str = "vi",
+) -> InlineKeyboardMarkup:
+    if video_uiflow3_handoff_from_session(session):
+        return video_b14_invoice_keyboard(
+            lang,
+            review_callback="vid3|resume",
+            back_callback="vid3|resume",
+        )
+    return video_b14_invoice_keyboard(lang)
 
 
 def video_b14_eta_seconds(scene_count: int) -> int:
@@ -97611,7 +97751,84 @@ def video_engine_product_type_for_session(session: dict | None = None) -> str:
     return video_final_output.normalize_video_product_type(product_id or "video_ai_prompt")
 
 
+def video_uiflow3_commercial_quote(session: dict, user_id: int) -> dict:
+    invoice = video_b14_invoice_for_session(session, user_id)
+    quality = safe_int(invoice.get("quality_xu"), 0)
+    scene_count = max(1, safe_int(invoice.get("scene_count"), 1))
+    if quality <= 0:
+        return {}
+    tier = {
+        200: "low",
+        300: "basic",
+        400: "common",
+        500: "standard",
+        600: "advanced",
+        800: "premium",
+        1000: "pro",
+        1200: "studio",
+        1500: "max",
+    }.get(quality, "basic")
+    total = max(1, safe_int(invoice.get("total_xu"), quality * scene_count))
+    return {
+        "tier": tier,
+        "package_xu": total,
+        "quality_tier": quality,
+        "scene_count": scene_count,
+        "total_xu": total,
+        "user_visible_price_xu": total,
+        "persisted_quoted_price_xu": total,
+        "customer_charge_planned_xu": total,
+        "wallet_charge_amount_xu": total,
+        "list_price_xu": max(total, safe_int(invoice.get("subtotal_xu"), total)),
+        "provider_budget_xu": total,
+        "addons_disabled_by_package": bool(invoice.get("addons_disabled_by_package")),
+        "provider_chain": video_project_queue.resolve_product_video_provider_chain(),
+    }
+
+
+def video_uiflow3_prepare_project_for_invoice(user_id: int, session: dict) -> dict:
+    """Persist the V3 draft through RouteEngine after package selection."""
+
+    handoff = video_uiflow3_handoff_from_session(session)
+    if not handoff:
+        return {}
+    quote = video_uiflow3_commercial_quote(session, int(user_id))
+    if not quote:
+        return {}
+    db = db_connect()
+    try:
+        prepared = video_uiflow3_routeengine.prepare_commercial_project(
+            db,
+            handoff,
+            quote=quote,
+        )
+    finally:
+        db.close()
+    if not prepared.get("ok"):
+        current = get_video_session(user_id)
+        draft = dict(current.get("draft") or {})
+        draft["uiflow3_prepare_error"] = dict(prepared)
+        current["draft"] = draft
+        save_video_session(user_id, current)
+        return {}
+    project = dict(prepared.get("project") or {})
+    current = get_video_session(user_id)
+    draft = dict(current.get("draft") or {})
+    draft.update(
+        {
+            "b14_project_id": safe_int(project.get("project_id"), 0),
+            "b14_invoice": video_b14_invoice_for_session(current, user_id),
+            "uiflow3_prepare_error": {},
+        }
+    )
+    current["draft"] = draft
+    save_video_session(user_id, current)
+    return project
+
+
 def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
+    if video_uiflow3_handoff_from_session(session):
+        return video_uiflow3_prepare_project_for_invoice(user_id, session)
     draft = dict((session or {}).get("draft") or {})
     plan = dict(draft.get("b14_storyboard_plan") or {})
     if not plan:
@@ -105186,6 +105403,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if (
         product_id in VIDEO_SCENE2_PUBLIC_PRODUCTS
         and action in VIDEO_SCENE2_LEGACY_PLANNING_CALLBACKS
+        and not video_uiflow3_handoff_from_session(session)
         and not bool((session.get("draft") or {}).get("scene1_planning_handoff"))
     ):
         state = video_scene2_recover_legacy_state(context, uid, product_id, session)
@@ -106766,9 +106984,13 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action in {"b14_addon_done", "b14_aspect_screen"}:
+        if video_uiflow3_handoff_from_session(session):
+            return await video_uiflow3_render(query, context)
         session = task3d_session_step(uid, "b14_aspect", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, "📐 <b>Chọn tỉ lệ video</b>", parse_mode="HTML", reply_markup=video_b14_aspect_ratio_keyboard(lang))
     if action == "b14_aspect":
+        if video_uiflow3_handoff_from_session(session):
+            return await video_uiflow3_render(query, context)
         aspect = value if value in {"9:16", "16:9", "1:1", "4:5"} else "9:16"
         session = task3d_session_step(uid, "b14_quality", aspect_ratio=aspect, b14_aspect_ratio=aspect, provider_called=False, xu_charged=0)
         session = video_b14_clear_runtime_selection_for_package(session)
@@ -106779,9 +107001,31 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_or_send(query, video_b14_quality_text(lang), parse_mode="HTML", reply_markup=video_b14_quality_keyboard(lang))
     if action == "b14_quality_screen":
         session = task3d_session_step(uid, "b14_quality", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, video_b14_quality_text(lang), parse_mode="HTML", reply_markup=video_b14_quality_keyboard(lang))
+        return await safe_edit_or_send(
+            query,
+            video_b14_quality_text(lang),
+            parse_mode="HTML",
+            reply_markup=video_b14_quality_keyboard(
+                lang,
+                back_callback=(
+                    "vid3|resume"
+                    if video_uiflow3_handoff_from_session(session)
+                    else "vproduct|b14_aspect_screen"
+                ),
+            ),
+        )
     if action == "b14_quality":
         quality = min(VIDEO_B14_2_QUALITY_OPTIONS, key=lambda item: abs(item - safe_int(value, 200)))
+        uiflow3_handoff = video_uiflow3_handoff_from_session(session)
+        if uiflow3_handoff:
+            tail_guard = video_uiflow3_commercial_tail_guard(
+                context,
+                uid,
+                safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0),
+                session,
+            )
+            if not tail_guard.get("ok"):
+                return await video_uiflow3_render(query, context)
         quality_product = video_public_quality_product(quality)
         model = dict(quality_product.get("internal_model") or {})
         provider_costs = [
@@ -106821,11 +107065,35 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             "provider_model_metadata": deepcopy(model),
             "asset_pack": asset_pack,
         })
+        if uiflow3_handoff:
+            draft["b14_scene_count"] = max(1, safe_int(uiflow3_handoff.get("scene_count"), 1))
+            draft["b14_scene_count_selected"] = True
         session["draft"] = draft
         session = save_video_session(uid, session)
+        if uiflow3_handoff:
+            project = video_b14_prepare_project_for_invoice(uid, session)
+            if not safe_int(project.get("project_id"), 0):
+                return await safe_edit_or_send(
+                    query,
+                    "Hệ thống đang bảo trì/nâng cấp. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau.",
+                    reply_markup=video_b14_quality_keyboard(
+                        lang,
+                        back_callback="vid3|resume",
+                    ),
+                )
+            session = get_video_session(uid)
+            session = task3d_session_step(uid, "b14_invoice", provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(
+                query,
+                video_b14_invoice_text(session, uid, lang),
+                parse_mode="HTML",
+                reply_markup=video_b14_invoice_keyboard_for_session(session, lang),
+            )
         session = task3d_session_step(uid, "b14_scene_count", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_scene_count_text(session, lang), parse_mode="HTML", reply_markup=video_b14_scene_count_keyboard(uid, lang))
     if action == "b14_scene_count_screen":
+        if video_uiflow3_handoff_from_session(session):
+            return await video_uiflow3_render(query, context)
         draft = dict(session.get("draft") or {})
         if str(session.get("current_step") or "") == "b14_invoice" and str(draft.get("b14_invoice_return_step") or "") == "b14_queue_status":
             session = task3d_session_step(uid, "b14_queue_status", b14_invoice_return_step="", provider_called=False, xu_charged=0)
@@ -106833,6 +107101,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "b14_scene_count", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_scene_count_text(session, lang), parse_mode="HTML", reply_markup=video_b14_scene_count_keyboard(uid, lang))
     if action == "b14_scene_custom":
+        if video_uiflow3_handoff_from_session(session):
+            return await video_uiflow3_render(query, context)
         if video_b14_is_trial_quality(video_b14_quality_for_session(session)):
             return await safe_edit_or_send(
                 query,
@@ -106876,6 +107146,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         count = max(1, safe_int(context_data.get("selected_scene_count"), 1))
         return await product_video_show_public_preflight_panel(query, uid, session, lang, count)
     if action == "b14_scene_count":
+        if video_uiflow3_handoff_from_session(session):
+            return await video_uiflow3_render(query, context)
         count = max(1, min(20, safe_int(value, 3)))
         scene_policy = video_b14_trial_scene_policy(video_b14_quality_for_session(session), count)
         count = safe_int(scene_policy.get("scene_count"), count)
@@ -106938,6 +107210,24 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 current["selfshot3_preflight"] = selfshot3_report
                 save_video_selfshot3_draft(uid, current, step="selfshot3:finish")
                 return await video_selfshot3_render(query, uid, "finish", draft=current)
+        tail_guard = video_uiflow3_commercial_tail_guard(
+            context,
+            uid,
+            safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0),
+            session,
+        )
+        if not tail_guard.get("ok"):
+            return await video_uiflow3_render(query, context)
+        if tail_guard.get("uiflow3") and safe_int(draft.get("b14_quality_xu"), 0) <= 0:
+            return await safe_edit_or_send(
+                query,
+                video_b14_quality_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_b14_quality_keyboard(
+                    lang,
+                    back_callback="vid3|resume",
+                ),
+            )
         if not draft.get("b14_scene_count_selected"):
             if is_uiflow3_confirmation:
                 blocked_session = video_uiflow3_prepare_no_job_status(
@@ -106955,6 +107245,20 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             session = task3d_session_step(uid, "b14_scene_count", provider_called=False, xu_charged=0)
             return await safe_edit_or_send(query, video_b14_scene_count_text(session, lang), parse_mode="HTML", reply_markup=video_b14_scene_count_keyboard(uid, lang))
         project_id = safe_int(draft.get("b14_project_id"), 0)
+        if tail_guard.get("uiflow3") and project_id <= 0:
+            project = video_b14_prepare_project_for_invoice(uid, session)
+            project_id = safe_int(project.get("project_id"), 0)
+            if project_id <= 0:
+                return await safe_edit_or_send(
+                    query,
+                    "Hệ thống đang bảo trì/nâng cấp. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau.",
+                    reply_markup=video_b14_quality_keyboard(
+                        lang,
+                        back_callback="vid3|resume",
+                    ),
+                )
+            session = get_video_session(uid)
+            draft = dict(session.get("draft") or {})
         confirm_scene_count = max(1, safe_int(draft.get("b14_scene_count"), 1))
         if video_b14_is_trial_quality((draft.get("b14_invoice") or {}).get("quality_xu") or draft.get("b14_quality_xu")) and not video_b14_is_admin_or_owner(uid):
             trial_usage = video_b14_trial_usage_allowed(uid)
@@ -107032,6 +107336,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         try:
             project = video_b14_prepare_project_for_invoice(uid, session)
             project_id = safe_int(project.get("project_id"), project_id)
+            if project_id <= 0:
+                raise ValueError("project_not_created")
             final_admission = build_product_video_public_final_admission(
                 project,
                 int(uid),
@@ -107253,7 +107559,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             provider_called=False,
             xu_charged=0,
         )
-        return await safe_edit_or_send(query, video_b14_invoice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
+        return await safe_edit_or_send(
+            query,
+            video_b14_invoice_text(session, uid, lang),
+            parse_mode="HTML",
+            reply_markup=video_b14_invoice_keyboard_for_session(session, lang),
+        )
     if action == "restyle":
         session = task3d_session_step(uid, "b14_creative_controls", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_creative_controls_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_creative_controls_keyboard(lang))
