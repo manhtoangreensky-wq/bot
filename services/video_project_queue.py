@@ -20,7 +20,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from services import product_video_public_seam, video_final_output
+from services import (
+    product_video_public_seam,
+    video_final_output,
+    video_uiflow3_execution_contract,
+)
 from services.video_provider_catalog import (
     model_metadata_from_resolution,
     resolve_product_video_model,
@@ -8115,6 +8119,46 @@ def complete_video_job(
                 return blocked
             conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(payload), int(job_id)))
             return fail_video_job(conn, job_id=int(job_id), error=str(validation.get("reason") or "final_output_invalid"), retry=False)
+        uiflow3_contract = video_uiflow3_execution_contract.validate_execution_contract(
+            project,
+            payload,
+            artifact_validation=validation,
+            require_payload_identity=True,
+            require_artifact=True,
+        )
+        if uiflow3_contract.get("applies"):
+            payload["uiflow3_execution_contract"] = uiflow3_contract
+        if not uiflow3_contract.get("ok"):
+            blocker = str(
+                uiflow3_contract.get("blocker")
+                or "uiflow3_execution_contract_invalid"
+            )
+            payload.update(
+                {
+                    "terminal_state": "failed_no_charge",
+                    "final_decision": "failed_no_charge",
+                    "blocker": blocker,
+                    "provider_error": blocker,
+                    "continue_polling": False,
+                    "no_charge": True,
+                    "charge": 0,
+                    "charged_xu": 0,
+                }
+            )
+            blocked, _locked_job, _locked_project = begin_completion_mutation()
+            if blocked is not None:
+                return blocked
+            conn.execute(
+                "UPDATE video_jobs SET result_json=? WHERE id=?",
+                (_json_dumps(payload), int(job_id)),
+            )
+            failed = fail_video_job(
+                conn,
+                job_id=int(job_id),
+                error=blocker,
+                retry=False,
+            )
+            return {**failed, "ok": False, "reason": blocker}
         duration_contract = product_video_duration_contract(project, payload, validation)
         payload["final_duration_contract"] = duration_contract
         payload["expected_duration_seconds"] = duration_contract["expected_duration_seconds"]
@@ -8277,6 +8321,28 @@ def note_video_delivery_result(
             "reason": str(
                 route_validation.get("blocker")
                 or "product_video_route_decision_invalid"
+            ),
+            "job": job,
+            "project": project,
+        }
+    uiflow3_contract = video_uiflow3_execution_contract.validate_execution_contract(
+        project,
+        payload,
+        artifact_validation=(
+            payload.get("final_output_validation")
+            if isinstance(payload.get("final_output_validation"), dict)
+            else None
+        ),
+        require_payload_identity=True,
+        require_artifact=True,
+    )
+    if not uiflow3_contract.get("ok"):
+        return {
+            "ok": False,
+            "sent": False,
+            "reason": str(
+                uiflow3_contract.get("blocker")
+                or "uiflow3_execution_contract_invalid"
             ),
             "job": job,
             "project": project,

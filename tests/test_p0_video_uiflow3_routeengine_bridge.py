@@ -11,8 +11,11 @@ from pathlib import Path
 import pytest
 
 from services import video_engine_contract
+from services import product_video_public_seam
+from services import remote_worker_api
 from services import video_project_queue as queue
 from services import video_provider_router
+from services import video_real_render_connector
 from services import video_uiflow3
 
 
@@ -293,6 +296,72 @@ def _enabled_seam(monkeypatch: pytest.MonkeyPatch) -> None:
     }
     for key, value in values.items():
         monkeypatch.setenv(key, value)
+
+
+def _confirmed_uiflow3_job(
+    conn: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[dict, dict, dict, dict]:
+    bridge = _bridge()
+    _enabled_seam(monkeypatch)
+    snapshot = video_uiflow3.approved_snapshot(_ready_state())
+    handoff = bridge.compile_routeengine_handoff(
+        snapshot,
+        owner_user_id=USER_ID,
+        owner_chat_id=USER_ID,
+    )
+    prepared = bridge.prepare_commercial_project(conn, handoff, quote=_quote(1))
+    confirmed = queue.confirm_public_product_video_invoice(
+        conn,
+        project_id=int(prepared["project"]["project_id"]),
+        user_id=USER_ID,
+        balance_xu=300,
+        provider_admission=_admission(prepared["project"]),
+    )
+    assert confirmed["ok"] is True
+    return snapshot, handoff, prepared, confirmed
+
+
+def _stub_completion_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    width: int,
+    height: int,
+) -> None:
+    monkeypatch.setattr(
+        queue,
+        "product_video_scene_coverage_state",
+        lambda *_args, **_kwargs: {
+            "delivery_blocked_by_scene_coverage": False,
+            "scene_clip_coverage_complete": True,
+            "scene_coverage_expected": 1,
+            "scene_coverage_count": 1,
+        },
+    )
+    monkeypatch.setattr(
+        queue.video_final_output,
+        "validate_final_video_output",
+        lambda **_kwargs: {
+            "ok": True,
+            "bytes": 2048,
+            "duration": 8.0,
+            "has_video": True,
+            "has_audio": False,
+            "width": width,
+            "height": height,
+            "sample_aspect_ratio": "1:1",
+        },
+    )
+    monkeypatch.setattr(
+        queue,
+        "product_video_duration_contract",
+        lambda *_args, **_kwargs: {
+            "ok": True,
+            "reason": "",
+            "expected_duration_seconds": 8.0,
+            "actual_duration_seconds": 8.0,
+        },
+    )
 
 
 def test_uiflow3_bridge_preserves_exact_snapshot_fields_and_structured_ratio() -> None:
@@ -589,3 +658,173 @@ def test_uiflow3_bridge_never_prepares_render_blocked_plan(tmp_path: Path) -> No
     assert result["ok"] is False
     assert result["blocker"] == "uiflow3_render_blockers_present"
     assert _counts(conn) == (0, 0, 0, 0)
+
+
+def test_uiflow3_worker_payload_carries_immutable_identity_to_render_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn = sqlite3.connect(tmp_path / "uiflow3-worker-identity.db")
+    conn.row_factory = sqlite3.Row
+    _snapshot, _handoff, _prepared, confirmed = _confirmed_uiflow3_job(
+        conn,
+        monkeypatch,
+    )
+
+    hydrated = queue.hydrate_video_job_payload(conn, confirmed["job"])
+    worker_payload = remote_worker_api.build_worker_job_payload(hydrated)
+    persisted = json.loads(confirmed["job"]["result_json"])
+
+    for key in (
+        "uiflow3_bridge_version",
+        "uiflow3_draft_id",
+        "uiflow3_owner_user_id",
+        "uiflow3_owner_chat_id",
+        "uiflow3_snapshot_config_hash",
+        "uiflow3_handoff_sha256",
+        "uiflow3_quote_sha256",
+        "uiflow3_route_selection_sha256",
+    ):
+        assert worker_payload[key] == persisted[key]
+
+
+def test_uiflow3_worker_boundary_rejects_tampered_snapshot_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn = sqlite3.connect(tmp_path / "uiflow3-worker-tamper.db")
+    conn.row_factory = sqlite3.Row
+    _snapshot, _handoff, _prepared, confirmed = _confirmed_uiflow3_job(
+        conn,
+        monkeypatch,
+    )
+    hydrated = queue.hydrate_video_job_payload(conn, confirmed["job"])
+    worker_payload = remote_worker_api.build_worker_job_payload(hydrated)
+    persisted = json.loads(confirmed["job"]["result_json"])
+    for key in (
+        "uiflow3_bridge_version",
+        "uiflow3_draft_id",
+        "uiflow3_owner_user_id",
+        "uiflow3_owner_chat_id",
+        "uiflow3_snapshot_config_hash",
+        "uiflow3_handoff_sha256",
+        "uiflow3_quote_sha256",
+        "uiflow3_route_selection_sha256",
+    ):
+        worker_payload[key] = persisted[key]
+    worker_payload["uiflow3_snapshot_config_hash"] = "0" * 64
+
+    with pytest.raises(RuntimeError, match="uiflow3_snapshot_config_hash_mismatch"):
+        product_video_public_seam.prepare_product_video_worker_job(worker_payload)
+
+
+def test_uiflow3_completion_rejects_landscape_mp4_for_portrait_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn = sqlite3.connect(tmp_path / "uiflow3-wrong-ratio.db")
+    conn.row_factory = sqlite3.Row
+    _snapshot, _handoff, prepared, confirmed = _confirmed_uiflow3_job(
+        conn,
+        monkeypatch,
+    )
+    _stub_completion_validation(monkeypatch, width=1920, height=1080)
+
+    completed = queue.complete_video_job(
+        conn,
+        job_id=int(confirmed["job"]["id"]),
+        final_video_path=str(tmp_path / "landscape.mp4"),
+        result={"ok": True, "visual_classification": "final_ai_video"},
+    )
+
+    assert completed["ok"] is False
+    assert completed["reason"] == "uiflow3_output_aspect_ratio_mismatch"
+    project = queue.get_video_project(conn, int(prepared["project"]["project_id"]))
+    assert project["video_terminal_state"] == "failed_no_charge"
+    assert not project.get("video_delivered_at")
+
+
+def test_uiflow3_delivery_rejects_identity_changed_after_valid_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn = sqlite3.connect(tmp_path / "uiflow3-delivery-tamper.db")
+    conn.row_factory = sqlite3.Row
+    _snapshot, _handoff, prepared, confirmed = _confirmed_uiflow3_job(
+        conn,
+        monkeypatch,
+    )
+    _stub_completion_validation(monkeypatch, width=540, height=960)
+    completed = queue.complete_video_job(
+        conn,
+        job_id=int(confirmed["job"]["id"]),
+        final_video_path=str(tmp_path / "portrait.mp4"),
+        result={"ok": True, "visual_classification": "final_ai_video"},
+    )
+    assert completed["ok"] is True
+    payload = json.loads(completed["job"]["result_json"])
+    payload["uiflow3_handoff_sha256"] = "0" * 64
+    conn.execute(
+        "UPDATE video_jobs SET result_json=? WHERE id=?",
+        (json.dumps(payload), int(confirmed["job"]["id"])),
+    )
+    conn.commit()
+
+    delivered = queue.note_video_delivery_result(
+        conn,
+        job_id=int(confirmed["job"]["id"]),
+        sent=True,
+        delivery_message_id="must-not-be-recorded",
+    )
+
+    assert delivered["ok"] is False
+    assert delivered["reason"] == "uiflow3_handoff_sha256_mismatch"
+    project = queue.get_video_project(conn, int(prepared["project"]["project_id"]))
+    assert not project.get("video_delivered_at")
+    assert not project.get("video_delivery_message_id")
+
+
+@pytest.mark.parametrize(
+    ("ratio", "expected_width", "expected_height"),
+    (
+        ("9:16", 540, 960),
+        ("16:9", 960, 540),
+        ("1:1", 720, 720),
+        ("4:5", 720, 900),
+    ),
+)
+def test_uiflow3_runtime_normalizes_scene_clips_to_selected_ratio(
+    monkeypatch: pytest.MonkeyPatch,
+    ratio: str,
+    expected_width: int,
+    expected_height: int,
+) -> None:
+    captured: dict = {}
+
+    def fake_pipeline(**kwargs):
+        captured.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        video_real_render_connector,
+        "process_multiscene_video_pipeline",
+        fake_pipeline,
+    )
+    video_real_render_connector._run_multiscene_render(
+        {
+            "job_id": "uiflow3-ratio-normalization",
+            "user_id": USER_ID,
+            "source": "product_video",
+            "product_video": True,
+            "scene_count": 1,
+            "aspect_ratio": ratio,
+            "expected_duration_seconds": 8,
+            "project": {"addon_plan_json": "{}"},
+        },
+        ".",
+        render_video_func=lambda *_args, **_kwargs: {},
+    )
+
+    assert captured["aspect_ratio"] == ratio
+    assert captured["output_width"] == expected_width
+    assert captured["output_height"] == expected_height

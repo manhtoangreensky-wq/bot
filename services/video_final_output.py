@@ -393,6 +393,8 @@ def _canvas_size(aspect_ratio: str = "9:16") -> tuple[int, int]:
         return 960, 540
     if value == "1:1":
         return 720, 720
+    if value == "4:5":
+        return 720, 900
     return 540, 960
 
 
@@ -565,7 +567,7 @@ def probe_video(path: str, *, ffprobe: str = "") -> dict[str, Any]:
         "-v",
         "error",
         "-show_entries",
-        "format=duration:stream=codec_type",
+        "format=duration:stream=codec_type,width,height,sample_aspect_ratio,display_aspect_ratio",
         "-of",
         "json",
         clean,
@@ -577,15 +579,40 @@ def probe_video(path: str, *, ffprobe: str = "") -> dict[str, Any]:
     streams = list(payload.get("streams") or []) if isinstance(payload, dict) else []
     has_video = any(str(item.get("codec_type") or "") == "video" for item in streams if isinstance(item, dict))
     has_audio = any(str(item.get("codec_type") or "") == "audio" for item in streams if isinstance(item, dict))
+    video_stream = next(
+        (
+            item
+            for item in streams
+            if isinstance(item, dict)
+            and str(item.get("codec_type") or "") == "video"
+        ),
+        {},
+    )
+    try:
+        width = int(video_stream.get("width") or 0)
+        height = int(video_stream.get("height") or 0)
+    except (TypeError, ValueError):
+        width = 0
+        height = 0
+    geometry = {
+        "width": width,
+        "height": height,
+        "sample_aspect_ratio": str(
+            video_stream.get("sample_aspect_ratio") or "1:1"
+        ),
+        "display_aspect_ratio": str(
+            video_stream.get("display_aspect_ratio") or ""
+        ),
+    }
     try:
         duration = float(((payload.get("format") or {}) if isinstance(payload, dict) else {}).get("duration") or 0)
     except Exception:
         duration = 0.0
     if duration <= 0:
-        return {"ok": False, "reason": "output_zero_duration", "path": clean, "bytes": int(size), "duration": duration, "has_video": has_video, "has_audio": has_audio}
+        return {"ok": False, "reason": "output_zero_duration", "path": clean, "bytes": int(size), "duration": duration, "has_video": has_video, "has_audio": has_audio, **geometry}
     if not has_video:
         return {"ok": False, "reason": "output_no_video_stream", "path": clean, "bytes": int(size), "duration": duration, "has_audio": has_audio}
-    return {"ok": True, "path": clean, "bytes": int(size), "duration": duration, "has_video": True, "has_audio": has_audio}
+    return {"ok": True, "path": clean, "bytes": int(size), "duration": duration, "has_video": True, "has_audio": has_audio, **geometry}
 
 
 def is_placeholder_or_draft(result: dict | None = None) -> bool:

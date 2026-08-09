@@ -17,9 +17,9 @@ import uuid
 
 from services import video_engine_contract
 from services import video_project_queue
+from services.video_uiflow3_execution_contract import BRIDGE_VERSION, RATIO_GEOMETRY
 
 
-BRIDGE_VERSION = "video_uiflow3_routeengine_v1"
 SUPPORTED_FLOW_SCHEMA_VERSION = 3
 ZERO_SIDE_EFFECTS = {
     "provider_calls": 0,
@@ -27,12 +27,6 @@ ZERO_SIDE_EFFECTS = {
     "outbox": 0,
     "wallet_mutations": 0,
     "charges": 0,
-}
-RATIO_GEOMETRY = {
-    "9:16": {"width": 1080, "height": 1920},
-    "16:9": {"width": 1920, "height": 1080},
-    "1:1": {"width": 1080, "height": 1080},
-    "4:5": {"width": 1080, "height": 1350},
 }
 BRAND_POSITIONS = frozenset(
     {

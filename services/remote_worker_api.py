@@ -15,7 +15,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from services import video_engine_contract, video_project_queue, video_provider_router
+from services import (
+    video_engine_contract,
+    video_project_queue,
+    video_provider_router,
+    video_uiflow3_execution_contract,
+)
 from services.video_provider_catalog import (
     model_interface_contract,
     model_metadata_from_resolution,
@@ -1185,6 +1190,22 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
             "final_video_bytes_gt_zero": True,
         },
     }
+    if (
+        asset_pack.get("uiflow3_bridge_version")
+        or persisted_result.get("uiflow3_bridge_version")
+    ):
+        payload.update(
+            {
+                key: (
+                    persisted_result[key]
+                    if persisted_result.get(key) not in (None, "")
+                    else asset_pack.get(key)
+                )
+                for key in video_uiflow3_execution_contract.UIFLOW3_IDENTITY_KEYS
+                if persisted_result.get(key) not in (None, "")
+                or asset_pack.get(key) not in (None, "")
+            }
+        )
     durable_selection = video_engine_contract.durable_video_product_route_selection(
         project
     )

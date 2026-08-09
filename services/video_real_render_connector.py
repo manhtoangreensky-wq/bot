@@ -5047,6 +5047,8 @@ def _run_per_scene_provider_orchestrator(
         enable_logo=_logo_enabled(addon),
         logo_text=str(addon.get("logo_text") or ""),
         logo_position=str(addon.get("logo_position") or "bottom_right"),
+        output_width=_canvas_size(_aspect_ratio(job))[0],
+        output_height=_canvas_size(_aspect_ratio(job))[1],
     )
     final_result.update(base)
     final_result["finalizer_invoked"] = True
@@ -5233,6 +5235,8 @@ def _canvas_size(aspect_ratio: str) -> tuple[int, int]:
         return 960, 540
     if value == "1:1":
         return 720, 720
+    if value == "4:5":
+        return 720, 900
     return 540, 960
 
 
@@ -5480,6 +5484,7 @@ def _run_multiscene_render(job: dict, workspace: str, *, render_video_func, bgm_
         per_scene_duration = float(product_video_scene_duration_seconds(job))
     else:
         per_scene_duration = max(1.0, min(8.0, product_video_expected_duration_seconds(job) / max(1, _scene_count(job))))
+    output_width, output_height = _canvas_size(_aspect_ratio(job))
     return process_multiscene_video_pipeline(
         user_id=str(job.get("user_id") or ""),
         job_id=str(job.get("job_id") or job.get("id") or int(time.time())),
@@ -5496,6 +5501,8 @@ def _run_multiscene_render(job: dict, workspace: str, *, render_video_func, bgm_
         enable_logo=_logo_enabled(addon),
         logo_text=str(addon.get("logo_text") or ""),
         logo_position=str(addon.get("logo_position") or "bottom_right"),
+        output_width=output_width,
+        output_height=output_height,
     )
 
 
