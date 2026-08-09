@@ -32,6 +32,7 @@ DEFAULT_CONTINUITY = {
     "product": True,
     "location": True,
 }
+VIDEO_AI_REAL_PRODUCT_FIRST_MODES = frozenset({"prompt_video", "image_video"})
 
 
 ENTRY_ADAPTERS: dict[str, dict[str, Any]] = {
@@ -347,6 +348,7 @@ def new_state(
         "format": {
             "ratio": "",
             "target_duration_seconds": 0,
+            "seconds_per_scene": int(adapter["seconds_per_scene"]),
             "scene_count_policy": "auto",
             "scene_count": 0,
             "scene_count_confirmed": False,
@@ -458,6 +460,7 @@ def normalize_state(value: Mapping[str, Any] | None) -> dict[str, Any]:
     format_state = {
         "ratio": "",
         "target_duration_seconds": 0,
+        "seconds_per_scene": int(adapter["seconds_per_scene"]),
         "scene_count_policy": "auto",
         "scene_count": 0,
         "scene_count_confirmed": False,
@@ -466,6 +469,13 @@ def normalize_state(value: Mapping[str, Any] | None) -> dict[str, Any]:
     if str(format_state.get("ratio") or "") not in SUPPORTED_RATIOS:
         format_state["ratio"] = ""
     format_state["target_duration_seconds"] = max(0, _integer(format_state.get("target_duration_seconds"), 0))
+    if product == "video_ai_real" and raw["entry_mode"] in VIDEO_AI_REAL_PRODUCT_FIRST_MODES:
+        format_state["seconds_per_scene"] = max(
+            1,
+            min(60, _integer(format_state.get("seconds_per_scene"), int(adapter["seconds_per_scene"]))),
+        )
+    else:
+        format_state["seconds_per_scene"] = int(adapter["seconds_per_scene"])
     format_state["scene_count"] = max(0, min(int(adapter["maximum_scene_count"]), _integer(format_state.get("scene_count"), 0)))
     format_state["scene_count_confirmed"] = bool(format_state.get("scene_count_confirmed"))
     raw["format"] = format_state
@@ -732,9 +742,22 @@ def set_entry_mode(state: Mapping[str, Any], mode: str) -> dict[str, Any]:
     current["entry_mode"] = selected
     if product == "multi_scene_film":
         current["navigation"]["current_step"] = "series_goal"
+    elif product == "video_ai_real" and selected in VIDEO_AI_REAL_PRODUCT_FIRST_MODES:
+        current["navigation"]["current_step"] = "scene_count"
     else:
         current["navigation"]["current_step"] = "source" if current["source"]["required"] else "format"
     return normalize_state(current)
+
+
+def image_source_follows_format(state: Mapping[str, Any]) -> bool:
+    current = normalize_state(state)
+    return bool(
+        current["parent_product"] == "video_ai_real"
+        and current["entry_mode"] == "image_video"
+        and current["format"].get("ratio")
+        and _integer(current["format"].get("target_duration_seconds"), 0) > 0
+        and _integer(current["format"].get("scene_count"), 0) > 0
+    )
 
 
 def _require_series_state(state: Mapping[str, Any]) -> dict[str, Any]:
@@ -808,7 +831,7 @@ def add_source_asset(
     current["source"]["assets"] = assets
     current["source"]["asset_ids"] = [item["asset_id"] for item in assets]
     current["source"]["complete"] = True
-    current["navigation"]["current_step"] = "format"
+    current["navigation"]["current_step"] = "source" if image_source_follows_format(current) else "format"
     return normalize_state(current)
 
 
@@ -817,10 +840,12 @@ def set_format(
     *,
     ratio: str | None = None,
     target_duration_seconds: int | None = None,
+    seconds_per_scene: int | None = None,
 ) -> dict[str, Any]:
     current = normalize_state(state)
     previous_ratio = str(current["format"].get("ratio") or "")
     previous_duration = _integer(current["format"].get("target_duration_seconds"), 0)
+    previous_scene_duration = _integer(current["format"].get("seconds_per_scene"), 0)
     content_locked = bool(current["content"].get("locked"))
     if ratio is not None:
         aspect = _text(ratio, 20)
@@ -832,16 +857,27 @@ def set_format(
         if duration <= 0:
             raise ValueError("target_duration_invalid")
         current["format"]["target_duration_seconds"] = duration
+    if seconds_per_scene is not None:
+        if (
+            current["parent_product"] != "video_ai_real"
+            or current["entry_mode"] not in VIDEO_AI_REAL_PRODUCT_FIRST_MODES
+        ):
+            raise ValueError("scene_duration_invalid")
+        scene_duration = _integer(seconds_per_scene, 0)
+        if scene_duration < 1 or scene_duration > 60:
+            raise ValueError("scene_duration_invalid")
+        current["format"]["seconds_per_scene"] = scene_duration
 
     ratio_changed = str(current["format"].get("ratio") or "") != previous_ratio
     duration_changed = _integer(current["format"].get("target_duration_seconds"), 0) != previous_duration
+    scene_duration_changed = _integer(current["format"].get("seconds_per_scene"), 0) != previous_scene_duration
     if content_locked:
         dirty = list(current["navigation"].get("dirty_sections") or [])
         if ratio_changed:
             for scene in current["scenes"]:
                 scene["ratio"] = current["format"]["ratio"]
             dirty.extend(["prompts", "summary"])
-        if duration_changed:
+        if duration_changed or scene_duration_changed:
             current["format"]["scene_count_confirmed"] = False
             dirty.extend(["scene_plan", "dialogue", "prompts", "summary"])
         current["navigation"]["dirty_sections"] = _dedupe(dirty)
@@ -1546,11 +1582,46 @@ def suggest_scene_count(state: Mapping[str, Any]) -> dict[str, Any]:
         count = len(current["source"]["assets"])
         source = "frame_asset_count"
     else:
-        duration = max(1, _integer(current["format"].get("target_duration_seconds"), int(adapter["seconds_per_scene"])))
-        count = ceil(duration / int(adapter["seconds_per_scene"]))
+        seconds_per_scene = max(
+            1,
+            _integer(current["format"].get("seconds_per_scene"), int(adapter["seconds_per_scene"])),
+        )
+        duration = max(1, _integer(current["format"].get("target_duration_seconds"), seconds_per_scene))
+        count = ceil(duration / seconds_per_scene)
         source = "duration_and_content"
     count = max(int(adapter["minimum_scene_count"]), min(int(adapter["maximum_scene_count"]), count))
-    return {"count": count, "seconds_per_scene": int(adapter["seconds_per_scene"]), "source": source}
+    return {
+        "count": count,
+        "seconds_per_scene": max(
+            1,
+            _integer(current["format"].get("seconds_per_scene"), int(adapter["seconds_per_scene"])),
+        ),
+        "source": source,
+    }
+
+
+def set_scene_count_preference(state: Mapping[str, Any], count: int) -> dict[str, Any]:
+    current = normalize_state(state)
+    if (
+        current["parent_product"] != "video_ai_real"
+        or current["entry_mode"] not in VIDEO_AI_REAL_PRODUCT_FIRST_MODES
+    ):
+        raise ValueError("scene_count_out_of_range")
+    if current["content"].get("locked") or current["scenes"]:
+        raise ValueError("scene_content_reconcile_required")
+    adapter = _adapter(current["parent_product"])
+    target = _integer(count, 0)
+    if target < int(adapter["minimum_scene_count"]) or target > int(adapter["maximum_scene_count"]):
+        raise ValueError("scene_count_out_of_range")
+    seconds = max(1, _integer(current["format"].get("seconds_per_scene"), int(adapter["seconds_per_scene"])))
+    current["format"].update({
+        "scene_count_policy": "user",
+        "scene_count": target,
+        "scene_count_confirmed": False,
+        "target_duration_seconds": target * seconds,
+    })
+    current["navigation"]["current_step"] = "format"
+    return normalize_state(current)
 
 
 def _link_scene_states(scenes: list[dict[str, Any]]) -> None:
@@ -1780,7 +1851,10 @@ def confirm_scene_count(state: Mapping[str, Any], count: int) -> dict[str, Any]:
         )
         if has_user_scene_content or has_dialogue or has_music or has_effects or has_reference_scope:
             raise ValueError("scene_content_reconcile_required")
-    seconds = int(adapter["seconds_per_scene"])
+    seconds = max(
+        1,
+        _integer(current["format"].get("seconds_per_scene"), int(adapter["seconds_per_scene"])),
+    )
     ratio = str(current["format"].get("ratio") or "9:16")
     scenes = [deepcopy(item) for item in existing_scenes[:target]]
     while len(scenes) < target:
@@ -1789,9 +1863,17 @@ def confirm_scene_count(state: Mapping[str, Any], count: int) -> dict[str, Any]:
         scene = _scene(ordinal, seconds=seconds, ratio=ratio)
         scene["scene_id"] = scene_id
         scenes.append(scene)
+    product_first_uniform_duration = (
+        current["parent_product"] == "video_ai_real"
+        and current["entry_mode"] in VIDEO_AI_REAL_PRODUCT_FIRST_MODES
+    )
     for index, scene in enumerate(scenes, 1):
         scene["scene_index"] = index
-        scene["duration_target"] = max(1, _integer(scene.get("duration_target"), seconds))
+        scene["duration_target"] = (
+            seconds
+            if product_first_uniform_duration
+            else max(1, _integer(scene.get("duration_target"), seconds))
+        )
         scene["ratio"] = ratio
     _link_scene_states(scenes)
     removed_ids = {str(item.get("scene_id") or "") for item in existing_scenes[target:]}
