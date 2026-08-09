@@ -2354,6 +2354,17 @@ def test_entry_mode_requires_real_source_and_keeps_video_to_video_out_of_public_
     _text, markup = bot.video_uiflow3_screen_payload(capable)
     assert "vid3|mode|video_video" not in _callbacks(markup)
 
+    user_id = 970076
+    context = SimpleNamespace(user_data={})
+    capable["owner_user_id"] = user_id
+    capable["owner_chat_id"] = user_id
+    bot.save_video_uiflow3_state(context, capable)
+    rejected = _click(context, user_id, "vid3|mode|video_video", "mode-video-hidden-01")
+    rejected_state = bot.video_uiflow3_state(context)
+    assert rejected_state["entry_mode"] == ""
+    assert rejected_state["navigation"]["current_step"] == "entry"
+    assert rejected.answers
+
 
 def test_each_source_branch_accepts_only_its_advertised_media_kind() -> None:
     user_id = 970037

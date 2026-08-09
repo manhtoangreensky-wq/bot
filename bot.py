@@ -74522,6 +74522,11 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             if str((state.get("navigation") or {}).get("current_step") or "") == "summary":
                 state["navigation"]["return_to"] = None
         elif action == "mode" and values:
+            if (
+                str(state.get("parent_product") or "") == "video_ai_real"
+                and str(values[0] or "") == "video_video"
+            ):
+                raise ValueError("entry_mode_unsupported")
             updated = video_uiflow3.set_entry_mode(state, values[0])
             state = video_uiflow3_after_service_update(state, updated)
         elif action == "series_goal_edit":
