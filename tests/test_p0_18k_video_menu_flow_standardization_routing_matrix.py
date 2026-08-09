@@ -53,7 +53,11 @@ def _rows(markup):
 
 def _press(user_id: int, callback: str):
     query = FakeQuery(user_id, callback)
-    update = SimpleNamespace(callback_query=query)
+    update = SimpleNamespace(
+        callback_query=query,
+        effective_user=query.from_user,
+        effective_chat=SimpleNamespace(id=query.message.chat_id),
+    )
     context = SimpleNamespace(user_data={})
     if callback.startswith("vid3|"):
         asyncio.run(bot.handle_video_uiflow3_callback(update, context))
@@ -99,6 +103,21 @@ def test_video_menu_hides_planning_when_disabled(monkeypatch):
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
     assert "lvs27b|open" not in callbacks
     assert "menu|guide_video_ai" in callbacks
+
+
+def test_video_planning_entry_uses_its_registered_public_handler(monkeypatch):
+    monkeypatch.setattr(bot, "local_video_studio_public_enabled", lambda: True)
+    user_id = 180099
+    bot.clear_video_session(user_id)
+    try:
+        text, markup, session = _press(user_id, "lvs27b|open")
+        callbacks = _callbacks(markup)
+        assert "lập kế hoạch" in text.lower()
+        assert any(callback.startswith("lvs27b|") for callback in callbacks)
+        assert not session.get("job_created")
+        assert not session.get("provider_called")
+    finally:
+        bot.clear_video_session(user_id)
 
 
 def test_video_route_matrix_matches_public_menu_buttons(monkeypatch):

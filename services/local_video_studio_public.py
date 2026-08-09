@@ -628,7 +628,7 @@ def apply_callback(
         if not history:
             if state["screen"] == "goal":
                 result["exit_parent"] = True
-                result["feedback"] = "Đã quay lại Chỉnh sửa video."
+                result["feedback"] = "Đã quay lại Menu Video."
                 return result
             raise PreviewActionError("back_history_empty")
         target = history.pop()

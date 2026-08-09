@@ -8,6 +8,7 @@ Ship one UI/UX-only change before any Video Edit engine work. The public Telegra
 
 - Keep the four Video Edit hub actions: goal-based edit, manual edit, quality enhancement, and editor-specific guide.
 - Remove the standalone `videoedit|latest_status` button from both the idle Video Edit hub and the active manual workspace.
+- In the two-column manual workspace, replace that detached status slot with an editor guide whose Back target is the exact workspace.
 - Keep the old `latest_status` handler read-only for callbacks already present in old Telegram messages; do not expose it in new menus.
 - When Local Video Studio planning is enabled, show `🧭 Lập kế hoạch dựng video` beside `📖 Hướng dẫn video` in the main Video menu. Keep it hidden when the feature flag is off.
 - Render the main-menu button on its own row when Planning is visible.
@@ -65,4 +66,3 @@ Forbidden in this phase:
 3. Run focused GREEN tests plus affected menu, route-audit, editor navigation, and planning tests.
 4. Run `python -m py_compile bot.py`, `git diff --check`, and inspect the changed-file scope.
 5. After an approved deploy/runtime is available, perform Telegram QA on the real public callbacks. Do not label unit results as live results.
-

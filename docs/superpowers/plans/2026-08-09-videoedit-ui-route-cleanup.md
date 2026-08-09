@@ -47,7 +47,7 @@ Run the exact changed nodes with a fresh `--basetemp`. Expected: behavioral asse
 
 - [ ] **Step 1: Remove detached status buttons**
 
-Delete `videoedit|latest_status` only from `video_edit_hub_keyboard()` and `video_local_manual_options_keyboard()`. Do not delete its callback handler or per-job `status`/`ai_status` refresh callbacks.
+Delete `videoedit|latest_status` only from `video_edit_hub_keyboard()` and `video_local_manual_options_keyboard()`. Replace its two-column workspace slot with `videoedit|guide|workspace`, whose Back edge returns to the same workspace. Do not delete the compatibility callback handler or per-job `status`/`ai_status` refresh callbacks.
 
 - [ ] **Step 2: Make the general Video guide parent-exact**
 
@@ -123,4 +123,3 @@ Route the public flow through the existing `video_local_edit` job, `services/vid
 - [ ] **Step 4: Prove artifacts and live behavior**
 
 Require validated MP4 bytes/container/duration/dimensions and Telegram delivery evidence. A queued job, metadata object, or unit-only pass is not completion.
-
