@@ -266,7 +266,7 @@ def test_public_menu_routes_seven_creation_products_to_vid3_and_keeps_idea_as_ca
     assert 'CallbackQueryHandler(handle_video_uiflow3_callback, pattern=r"^vid3\\|")' in BOT_SOURCE
 
 
-def test_content_hub_opens_idea_catalog_through_parent_aware_v3_action() -> None:
+def test_content_hub_keeps_idea_catalog_in_its_external_video_menu() -> None:
     state = video_uiflow3.new_state("video_ai_real", draft_id="idea-parent-screen")
     state = video_uiflow3.set_entry_mode(state, "prompt_video")
     state = video_uiflow3.set_format(state, ratio="9:16", target_duration_seconds=16)
@@ -275,11 +275,13 @@ def test_content_hub_opens_idea_catalog_through_parent_aware_v3_action() -> None
     _text, markup = bot.video_uiflow3_screen_payload(state)
     callbacks = _callbacks(markup)
 
-    assert "vid3|idea_catalog" in callbacks
+    assert "vid3|idea_catalog" not in callbacks
+    assert "vid3|content|profiles" in callbacks
+    assert "vid3|content|manual" in callbacks
     assert "videoidea|start" not in callbacks
 
 
-def test_parent_aware_idea_action_opens_catalog_without_losing_v3_draft() -> None:
+def test_hidden_legacy_idea_action_opens_catalog_without_losing_v3_draft() -> None:
     user_id = 970084
     context = SimpleNamespace(user_data={})
     state = video_uiflow3.new_state("video_ai_real", draft_id="idea-parent-open")
@@ -290,7 +292,9 @@ def test_parent_aware_idea_action_opens_catalog_without_losing_v3_draft() -> Non
     state["navigation"]["current_step"] = "content_hub"
     bot.save_video_uiflow3_state(context, state)
 
-    query = _click_visible(context, user_id, "vid3|idea_catalog", "idea-parent-open-01")
+    _text, markup = bot.video_uiflow3_screen_payload(state)
+    assert "vid3|idea_catalog" not in _callbacks(markup)
+    query = _click(context, user_id, "vid3|idea_catalog", "idea-parent-open-01")
 
     handoff = dict(context.user_data.get("video_idea_parent_handoff") or {})
     assert handoff["uiflow3_draft_id"] == "idea-parent-open"
@@ -526,7 +530,7 @@ def test_source_scene_limit_error_is_actionable_for_media_intake() -> None:
     assert "tep da nhan van duoc giu" in message.lower()
 
 
-def test_supported_video_summary_keeps_existing_save_contract() -> None:
+def test_video_ai_real_summary_requires_quality_before_quote() -> None:
     user_id = 970072
     context = SimpleNamespace(user_data={})
     state = _ready_supported_video_planning_state()
@@ -539,10 +543,9 @@ def test_supported_video_summary_keeps_existing_save_contract() -> None:
     query = _click(context, user_id, "vid3|summary_done", "supported-plan-save-01")
     current = bot.video_uiflow3_state(context)
 
-    assert current["legacy_compat"]["approved_snapshot"]["parent_product"] == "video_ai_real"
-    assert current["legacy_compat"]["commercial_tail_ready"] is True
     assert current["navigation"]["current_step"] == "summary"
-    assert query.answers[-1].get("text") == "Da luu ke hoach. Chua bat dau tao video va chua tinh phi."
+    assert "approved_snapshot" not in current["legacy_compat"]
+    assert query.answers[-1].get("text") == "Hãy chọn model & chất lượng trước khi xác nhận báo giá."
 
 
 def test_public_route_metadata_matches_actual_uiflow3_entry_screens() -> None:
@@ -551,7 +554,6 @@ def test_public_route_metadata_matches_actual_uiflow3_entry_screens() -> None:
         "video_ai_real": (
             "vid3|mode|prompt_video",
             "vid3|mode|image_video",
-            "vid3|idea_catalog",
             "menu|guide_video_ai",
         ),
         "script_image_video": ("vid3|source_text",),
@@ -675,8 +677,8 @@ def test_format_and_content_hub_are_compact_with_unique_callbacks_and_exact_back
     text, markup = bot.video_uiflow3_screen_payload(state)
     labels = [label for row in _rows(markup) for label, _callback in row]
     assert "9:16" in " ".join(labels)
-    assert "8 giây/cảnh" in " ".join(labels)
-    assert "Tiếp tục" in " ".join(labels)
+    assert "giây/cảnh" not in " ".join(labels)
+    assert "Thời lượng nằm ở bước Chất lượng" in text
     assert _rows(markup)[-1] == [("⬅️ Quay lại", "vid3|back"), ("🎬 Menu Video", "menu|main_video")]
     callbacks = _callbacks(markup)
     assert len(callbacks) == len(set(callbacks))
@@ -687,9 +689,9 @@ def test_format_and_content_hub_are_compact_with_unique_callbacks_and_exact_back
     text, markup = bot.video_uiflow3_screen_payload(state)
     labels = [label for row in _rows(markup) for label, _callback in row]
     assert any("32" in label for label in labels)
-    assert any("Kho ý tưởng" in label for label in labels)
+    assert not any("ý tưởng" in label.lower() for label in labels)
     assert any("Tự mô tả" in label for label in labels)
-    assert "vid3|idea_catalog" in _callbacks(markup)
+    assert "vid3|idea_catalog" not in _callbacks(markup)
     assert "videoidea|start" not in _callbacks(markup)
     assert "vid3|content|ideas" not in _callbacks(markup)
 
@@ -703,7 +705,7 @@ def test_content_hub_offers_source_only_when_source_content_really_exists() -> N
 
     _text, markup = bot.video_uiflow3_screen_payload(state)
     assert "vid3|content|source" not in _callbacks(markup)
-    assert "vid3|idea_catalog" in _callbacks(markup)
+    assert "vid3|idea_catalog" not in _callbacks(markup)
     assert "videoidea|start" not in _callbacks(markup)
 
     with_source = video_uiflow3.set_source_metadata(state, text="Noi dung nguon co that")
@@ -1039,7 +1041,8 @@ def test_scene_assignment_screen_combines_cast_dialogue_voice_and_music_with_aut
     state["capabilities"].update({"whole_video_music": True, "per_scene_music": True})
     _text, markup = bot.video_uiflow3_screen_payload(state)
     labels = [label for row in _rows(markup) for label, _callback in row]
-    assert any("Nhạc" in label for label in labels)
+    assert any("Âm thanh & phụ đề" in label for label in labels)
+    assert "vid3|view|audio_options" in _callbacks(markup)
     state["capabilities"].update({"whole_video_music": False, "per_scene_music": False})
 
     state["ui_view"] = "scene_detail"
@@ -1293,7 +1296,7 @@ def test_summary_has_one_hub_and_each_editor_returns_to_summary() -> None:
     assert "vid3|edit|scene_assignment" in callbacks
     assert "vid3|edit|branding" in callbacks
     labels = [label for row in _rows(markup) for label, _callback in row]
-    assert any("Lưu kế hoạch" in label for label in labels)
+    assert any("Xác nhận chất lượng" in label for label in labels)
     assert not any("Tiếp tục chọn gói" in label for label in labels)
     assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["video_ai_real"]["legacy_entry_callback"] not in callbacks
 
@@ -1399,6 +1402,7 @@ def test_summary_saves_planning_voice_without_claiming_render_readiness() -> Non
     state["owner_user_id"] = user_id
     state["owner_chat_id"] = user_id
     state["navigation"]["current_step"] = "summary"
+    state = bot.video_ai_real_apply_prompt_model(state, "veo31_fast_8")
     bot.save_video_uiflow3_state(context, state)
 
     assert "char_01_voice_not_server_renderable" in video_uiflow3.readiness_errors(state)
@@ -1407,6 +1411,7 @@ def test_summary_saves_planning_voice_without_claiming_render_readiness() -> Non
     current = bot.video_uiflow3_state(context)
     assert current["legacy_compat"]["approved_snapshot"]["parent_product"] == "video_ai_real"
     assert current["legacy_compat"]["commercial_tail_ready"] is False
+    assert current["navigation"]["current_step"] == "invoice"
     assert current["side_effects"] == {
         "provider_calls": 0,
         "jobs": 0,
@@ -1414,7 +1419,7 @@ def test_summary_saves_planning_voice_without_claiming_render_readiness() -> Non
         "wallet_mutations": 0,
         "xu_charged": 0,
     }
-    assert "Da luu ke hoach" in str(query.answers[-1].get("text") or "")
+    assert query.answers[-1].get("text") is None
 
 
 def test_existing_source_asset_is_reusable_from_reference_editor() -> None:
@@ -1484,6 +1489,44 @@ def test_summary_rejects_forged_editor_target_without_leaving_summary() -> None:
     assert preserved["navigation"]["current_step"] == "summary"
     assert preserved["navigation"]["return_to"] is None
     assert query.answers[-1]["show_alert"] is True
+
+
+def test_source_reference_product_mapping_keeps_non_pilot_flow_on_references() -> None:
+    user_id = 970078
+    context = SimpleNamespace(user_data={})
+    state = video_uiflow3.new_state("script_image_video", draft_id="protected-source-product")
+    state = video_uiflow3.set_format(state, ratio="9:16", target_duration_seconds=8)
+    state = video_uiflow3.set_content_candidate(
+        state,
+        source="manual",
+        original_intent="Video sản phẩm thuộc flow được bảo vệ.",
+        approved_brief={"title": "Sản phẩm được bảo vệ"},
+    )
+    state = video_uiflow3.lock_content(state)
+    state = video_uiflow3.add_product(state, name="Sản phẩm A")
+    state = video_uiflow3.add_source_asset(
+        state,
+        asset_type="image",
+        telegram_file_id="protected-product-source",
+        fingerprint="telegram:protected-product-source",
+    )
+    state["owner_user_id"] = user_id
+    state["owner_chat_id"] = user_id
+    state["navigation"]["current_step"] = "production_bible"
+    state = bot.video_uiflow3_open_view(state, "references")
+    bot.save_video_uiflow3_state(context, state)
+
+    _click_visible(context, user_id, "vid3|source_ref|source_01", "protected-source-product-1")
+    _click_visible(
+        context,
+        user_id,
+        "vid3|source_ref_set|source_01|product|prod_01",
+        "protected-source-product-2",
+    )
+
+    mapped = bot.video_uiflow3_state(context)
+    assert mapped["ui_view"] == "references"
+    assert mapped["references"][0]["owner_id"] == "prod_01"
 
 
 def test_summary_exposes_prompt_reconciliation_and_returns_without_a_dead_end() -> None:
@@ -2433,7 +2476,8 @@ def test_image_product_collects_multiple_source_photos_before_content() -> None:
     final = bot.video_uiflow3_state(context)
     assert final["navigation"]["current_step"] == "content_hub"
     assert final["format"]["ratio"] == "9:16"
-    assert final["format"]["target_duration_seconds"] == 16
+    assert final["format"]["target_duration_seconds"] == 0
+    assert final["format"]["scene_count"] == 2
 
 
 def test_compact_public_flow_persists_character_voice_dialogue_and_returns_summary() -> None:
@@ -2550,7 +2594,8 @@ def test_music_controls_are_capability_gated_but_contract_remains_available() ->
     state.pop("ui_view", None)
     state["navigation"]["current_step"] = "scene_assignment"
     _text, markup = bot.video_uiflow3_screen_payload(state)
-    assert "vid3|music_scope" in _callbacks(markup)
+    assert "vid3|music_scope" not in _callbacks(markup)
+    assert "vid3|view|audio_options" in _callbacks(markup)
 
     state["capabilities"].update({"whole_video_music": True, "per_scene_music": True})
     state["ui_view"] = "music_scope"

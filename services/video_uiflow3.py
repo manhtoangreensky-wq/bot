@@ -755,7 +755,6 @@ def image_source_follows_format(state: Mapping[str, Any]) -> bool:
         current["parent_product"] == "video_ai_real"
         and current["entry_mode"] == "image_video"
         and current["format"].get("ratio")
-        and _integer(current["format"].get("target_duration_seconds"), 0) > 0
         and _integer(current["format"].get("scene_count"), 0) > 0
     )
 

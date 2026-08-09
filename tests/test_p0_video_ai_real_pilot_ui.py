@@ -76,6 +76,17 @@ class _PilotQuery:
         self.edits.append({"text": text, **kwargs})
 
 
+class _PilotMessage:
+    def __init__(self, user_id: int, text: str, message_id: int) -> None:
+        self.chat_id = user_id
+        self.text = text
+        self.message_id = message_id
+        self.replies: list[dict] = []
+
+    async def reply_text(self, text: str, **kwargs) -> None:
+        self.replies.append({"text": text, **kwargs})
+
+
 def _save_owned(context, state: dict, user_id: int) -> dict:
     state = video_uiflow3.normalize_state(state)
     state["owner_user_id"] = user_id
@@ -149,7 +160,7 @@ def _assigned_state() -> dict:
     return video_uiflow3.normalize_state(state)
 
 
-def test_video_ai_real_pilot_format_screen_uses_accented_portrait_copy_and_scene_duration_choices():
+def test_video_ai_real_pilot_ratio_screen_keeps_duration_out_of_the_early_step():
     state = video_uiflow3.new_state("video_ai_real", draft_id="pilot-format")
     state = video_uiflow3.set_entry_mode(state, "prompt_video")
     state = video_uiflow3.set_format(state, ratio="9:16", target_duration_seconds=8)
@@ -158,13 +169,11 @@ def test_video_ai_real_pilot_format_screen_uses_accented_portrait_copy_and_scene
     text, markup = bot.video_uiflow3_screen_payload(state)
     callbacks = _callbacks(markup)
 
-    assert "Khung hình & thời lượng" in text
+    assert "Tỷ lệ khung hình" in text
     assert "Dọc 9:16" in text
-    assert "6 giây/cảnh" in text
-    assert "8 giây/cảnh" in text
-    assert "DINH DANG MUC TIEU" not in text
-    assert "vid3|duration_scene|6" in callbacks
-    assert "vid3|duration_scene|8" in callbacks
+    assert "giây/cảnh" not in text
+    assert "vid3|duration_scene|6" not in callbacks
+    assert "vid3|duration_scene|8" not in callbacks
 
 
 def test_video_ai_real_pilot_character_detail_uses_gender_label_and_per_character_image():
@@ -269,7 +278,7 @@ def test_video_ai_real_pilot_scene_assignment_explains_continuity_and_music_scop
     assert "Nhân vật 1" in text
     assert "Nhạc toàn video" in text
     assert "Nhạc theo từng cảnh" in text
-    assert "vid3|music_scope" in callbacks
+    assert "vid3|view|audio_options" in callbacks
 
 
 def test_video_ai_real_pilot_location_back_callback_is_the_immediate_parent():
@@ -282,14 +291,14 @@ def test_video_ai_real_pilot_location_back_callback_is_the_immediate_parent():
     )
 
     _text, markup = bot.video_uiflow3_screen_payload(state)
-    back_buttons = [
+    finish_buttons = [
         _logical_callback(str(button.callback_data or ""))
         for row in markup.inline_keyboard
         for button in row
-        if _plain_label(button.text) == "Quay lại"
+        if _plain_label(button.text) == "Hoàn thành bối cảnh"
     ]
 
-    assert back_buttons == ["vid3|view|location_list"]
+    assert finish_buttons == ["vid3|view|location_list"]
 
 
 def test_video_ai_real_pilot_entry_restores_clear_source_choices_and_readonly_idea_catalog():
@@ -307,11 +316,11 @@ def test_video_ai_real_pilot_entry_restores_clear_source_choices_and_readonly_id
     assert "Prompt → Video" in labels
     assert "Ảnh → Video" in labels
     assert "Video mẫu → Video" not in labels
-    assert "Kho ý tưởng (chỉ xem)" in labels
+    assert "Kho ý tưởng (chỉ xem)" not in labels
     assert "vid3|mode|prompt_video" in callbacks
     assert "vid3|mode|image_video" in callbacks
     assert "vid3|mode|video_video" not in callbacks
-    assert "vid3|idea_catalog" in callbacks
+    assert "vid3|idea_catalog" not in callbacks
 
 
 def test_video_ai_real_product_first_format_applies_to_prompt_and_image_only():
@@ -326,7 +335,8 @@ def test_video_ai_real_product_first_format_applies_to_prompt_and_image_only():
     prompt_state["navigation"]["current_step"] = "format"
 
     prompt_text, _prompt_markup = bot.video_uiflow3_screen_payload(prompt_state)
-    assert "Khung hình & thời lượng" in prompt_text
+    assert "Tỷ lệ khung hình" in prompt_text
+    assert "giây/cảnh" not in prompt_text
 
     image_state = video_uiflow3.new_state("video_ai_real", draft_id="pilot-scope-image")
     image_state = video_uiflow3.set_entry_mode(image_state, "image_video")
@@ -340,7 +350,7 @@ def test_video_ai_real_product_first_format_applies_to_prompt_and_image_only():
     image_state["navigation"]["current_step"] = "format"
 
     image_text, _image_markup = bot.video_uiflow3_screen_payload(image_state)
-    assert "Khung hình & thời lượng" in image_text
+    assert "Tỷ lệ khung hình" in image_text
     assert "Sản phẩm: Ảnh → Video · 2 cảnh" in image_text
     normalized_image_state = video_uiflow3.normalize_state(image_state)
     assert normalized_image_state["format"]["seconds_per_scene"] == 6
@@ -374,16 +384,12 @@ def test_prompt_product_selection_precedes_scene_count_then_ratio():
     format_text, format_markup = bot.video_uiflow3_screen_payload(choosing_ratio)
     assert "2 cảnh" in format_text
     assert "Dọc 9:16" in _plain_labels(format_markup)
-    assert "6 giây/cảnh" in _plain_labels(format_markup)
-    assert "8 giây/cảnh" in _plain_labels(format_markup)
+    assert not any("giây/cảnh" in label for label in _plain_labels(format_markup))
 
     _click_visible(context, user_id, "vid3|ratio|9x16", "pilot-product-first-3")
-    _click_visible(context, user_id, "vid3|duration_scene|6", "pilot-product-first-4")
-    _click_visible(context, user_id, "vid3|format_done", "pilot-product-first-5")
     content_state = bot.video_uiflow3_state(context)
     assert content_state["navigation"]["current_step"] == "content_hub"
     assert content_state["format"]["ratio"] == "9:16"
-    assert content_state["format"]["target_duration_seconds"] == 12
 
 
 def test_image_product_selection_precedes_scene_count_ratio_then_source_with_exact_back():
@@ -407,25 +413,22 @@ def test_image_product_selection_precedes_scene_count_ratio_then_source_with_exa
     assert choosing_format["scenes"] == []
     format_text, format_markup = bot.video_uiflow3_screen_payload(choosing_format)
     assert "Sản phẩm: Ảnh → Video · 2 cảnh" in format_text
-    assert {"Dọc 9:16", "6 giây/cảnh", "8 giây/cảnh"}.issubset(
-        set(_plain_labels(format_markup))
-    )
+    assert "Dọc 9:16" in _plain_labels(format_markup)
+    assert not any("giây/cảnh" in label for label in _plain_labels(format_markup))
 
     _click_visible(context, user_id, "vid3|ratio|9x16", "pilot-image-product-first-3")
-    _click_visible(context, user_id, "vid3|duration_scene|8", "pilot-image-product-first-4")
-    _click_visible(context, user_id, "vid3|format_done", "pilot-image-product-first-5")
     source_state = bot.video_uiflow3_state(context)
     assert source_state["navigation"]["current_step"] == "source"
     assert source_state["format"]["ratio"] == "9:16"
-    assert source_state["format"]["target_duration_seconds"] == 16
+    assert source_state["format"]["target_duration_seconds"] == 0
     source_text, _source_markup = bot.video_uiflow3_screen_payload(source_state)
     assert "Ảnh tham chiếu đầu vào" in source_text
 
-    _click_visible(context, user_id, "vid3|back", "pilot-image-product-first-6")
+    _click_visible(context, user_id, "vid3|back", "pilot-image-product-first-4")
     assert bot.video_uiflow3_state(context)["navigation"]["current_step"] == "format"
-    _click_visible(context, user_id, "vid3|back", "pilot-image-product-first-7")
+    _click_visible(context, user_id, "vid3|back", "pilot-image-product-first-5")
     assert bot.video_uiflow3_state(context)["navigation"]["current_step"] == "scene_count"
-    _click_visible(context, user_id, "vid3|back", "pilot-image-product-first-8")
+    _click_visible(context, user_id, "vid3|back", "pilot-image-product-first-6")
     assert bot.video_uiflow3_state(context)["navigation"]["current_step"] == "entry"
 
 
@@ -558,7 +561,8 @@ def test_video_ai_real_pilot_content_hub_and_content_lock_are_clear_and_accented
 
     assert "Chọn nội dung video" in hub_text
     assert "32 loại nội dung" in hub_labels
-    assert "Kho ý tưởng (chỉ xem)" in hub_labels
+    assert "72 ý tưởng video" not in hub_labels
+    assert "vid3|idea_catalog" not in _callbacks(hub_markup)
     assert "Tự mô tả nội dung" in hub_labels
 
     state = video_uiflow3.set_content_candidate(
@@ -571,7 +575,7 @@ def test_video_ai_real_pilot_content_hub_and_content_lock_are_clear_and_accented
 
     assert "Nội dung đã chọn" in lock_text
     assert "Chủ đề: Giới thiệu sản phẩm" in lock_text
-    assert "Tiếp tục đến nhân vật & bối cảnh" in _plain_labels(lock_markup)
+    assert "Khóa nội dung" in _plain_labels(lock_markup)
     assert "Chọn nội dung khác" in _plain_labels(lock_markup)
 
 
@@ -656,7 +660,7 @@ def test_video_ai_real_pilot_scene_count_plan_branding_and_summary_have_one_clea
 
     count_text, count_markup = bot.video_uiflow3_screen_payload(state)
     assert "Số cảnh được đề xuất" in count_text
-    assert "mỗi cảnh 8 giây" in count_text
+    assert "thời lượng sẽ chọn ở bước Chất lượng" in count_text
     assert "Dùng đề xuất" in _plain_labels(count_markup)
 
     state = video_uiflow3.confirm_scene_count(state, 2)
@@ -746,7 +750,7 @@ def test_video_ai_real_pilot_restores_old_visual_language_without_technical_mark
     assert "📝 Prompt → Video" in labels
     assert "🖼 Ảnh → Video" in labels
     assert "🎞 Video mẫu → Video" not in labels
-    assert "🗂 Kho ý tưởng (chỉ xem)" in labels
+    assert "🗂 Kho ý tưởng (chỉ xem)" not in labels
     assert "⬅️ Quay lại Menu Video" in labels
     assert "flow cũ" not in text.lower()
     assert _callbacks(markup).count("menu|main_video") == 1
@@ -891,32 +895,20 @@ def test_video_ai_real_pilot_scene_plan_and_prompt_children_never_fall_back_to_a
     assert "vid3|view|prompts" in _callbacks(advanced_markup)
 
 
-def test_video_ai_real_pilot_duration_and_location_callbacks_persist_only_inside_pilot():
+def test_video_ai_real_pilot_model_and_location_callbacks_persist_only_inside_pilot():
     user_id = 981001
     context = SimpleNamespace(user_data={})
-    state = video_uiflow3.new_state("video_ai_real", draft_id="pilot-callback-duration")
-    state = video_uiflow3.set_entry_mode(state, "prompt_video")
-    state = video_uiflow3.set_format(state, ratio="9:16", target_duration_seconds=16)
-    state["navigation"]["current_step"] = "format"
+    state = _assigned_state()
+    state["navigation"]["current_step"] = "summary"
     _save_owned(context, state, user_id)
 
-    _click_visible(context, user_id, "vid3|duration_scene|6", "pilot-duration-1")
+    _click_visible(context, user_id, "vid3|model|grok3_5", "pilot-model-1")
     saved = bot.video_uiflow3_state(context)
     assert saved["parent_product"] == "video_ai_real"
     assert saved["format"]["ratio"] == "9:16"
-    assert saved["format"]["seconds_per_scene"] == 6
-    planned = video_uiflow3.set_content_candidate(
-        saved,
-        source="manual",
-        original_intent="Một video sản phẩm có ba hành động ngắn.",
-        approved_brief={"title": "Ba hành động ngắn"},
-    )
-    planned = video_uiflow3.lock_content(planned)
-    assert video_uiflow3.suggest_scene_count(planned) == {
-        "count": 3,
-        "seconds_per_scene": 6,
-        "source": "duration_and_content",
-    }
+    assert saved["format"]["seconds_per_scene"] == 5
+    assert saved["format"]["target_duration_seconds"] == 10
+    assert [scene["duration_target"] for scene in saved["scenes"]] == [5, 5]
 
     location_state = video_uiflow3.set_location_count(_locked_state(), 1)
     location_state["navigation"]["current_step"] = "production_bible"
@@ -989,8 +981,11 @@ def test_video_ai_real_pilot_snapshot_keeps_real_portrait_ratio_and_scene_math()
     assert [scene["ratio"] for scene in snapshot["scenes"]] == ["9:16", "9:16"]
     assert [scene["duration_target"] for scene in snapshot["scenes"]] == [6, 6]
 
-    summary_text, _summary_markup = bot.video_uiflow3_screen_payload(state)
-    assert "2 cảnh × 6 giây = 12 giây" in summary_text
+    summary_text, summary_markup = bot.video_uiflow3_screen_payload(state)
+    assert "Chọn model & chất lượng" in summary_text
+    assert "Chưa chọn model" in summary_text
+    assert "2 cảnh × 6 giây = 12 giây" not in summary_text
+    assert "Grok 3 · 5 giây · 190 Xu/cảnh" in _plain_labels(summary_markup)
 
 
 def test_prompt_scene_duration_change_updates_already_materialized_scenes_on_reconfirm():
@@ -1035,3 +1030,879 @@ def test_video_ai_real_pilot_copy_does_not_change_other_products():
 
     assert "DINH DANG MUC TIEU" in text
     assert "Khung hình & thời lượng" not in text
+
+
+def _ready_prompt_summary_state() -> dict:
+    state = video_uiflow3.new_state("video_ai_real", draft_id="pilot-commercial-ready")
+    state = video_uiflow3.set_entry_mode(state, "prompt_video")
+    state = video_uiflow3.set_scene_count_preference(state, 2)
+    state = video_uiflow3.set_format(
+        state,
+        ratio="9:16",
+        target_duration_seconds=16,
+        seconds_per_scene=8,
+    )
+    state = video_uiflow3.set_content_candidate(
+        state,
+        source="manual",
+        original_intent="Hai cảnh giới thiệu một sản phẩm theo phong cách chân thật.",
+        approved_brief={
+            "title": "Giới thiệu sản phẩm chân thật",
+            "needs_characters": False,
+            "needs_locations": False,
+            "needs_dialogue": False,
+            "needs_voice": False,
+            "needs_music": False,
+        },
+    )
+    state = video_uiflow3.lock_content(state)
+    state = video_uiflow3.set_character_count(state, 0)
+    state = video_uiflow3.set_location_count(state, 0)
+    state = video_uiflow3.confirm_scene_count(state, 2)
+    state = video_uiflow3.suggest_scene_plan(state)
+    state = video_uiflow3.auto_assign_scenes(state)
+    state = video_uiflow3.mark_sections_complete(
+        state,
+        "production_bible",
+        "references",
+        "continuity",
+        "scene_plan",
+        "scene_assignment",
+        "dialogue",
+        "prompts",
+        "branding",
+    )
+    state["navigation"]["dirty_sections"] = []
+    state["navigation"]["current_step"] = "summary"
+    return video_uiflow3.normalize_state(state)
+
+
+def test_video_ai_real_prompt_model_catalog_uses_verified_seconds_and_triple_fallback_cost():
+    catalog = bot.video_ai_real_prompt_model_catalog()
+    by_key = {item["key"]: item for item in catalog}
+
+    assert list(by_key) == [
+        "grok3_5",
+        "grok3_10",
+        "veo31_fast_8",
+        "veo31_pro_8",
+    ]
+    assert (by_key["grok3_5"]["seconds"], by_key["grok3_5"]["unit_xu"]) == (5, 190)
+    assert (by_key["grok3_10"]["seconds"], by_key["grok3_10"]["unit_xu"]) == (10, 380)
+    assert (by_key["veo31_fast_8"]["seconds"], by_key["veo31_fast_8"]["unit_xu"]) == (8, 70)
+    assert (by_key["veo31_pro_8"]["seconds"], by_key["veo31_pro_8"]["unit_xu"]) == (8, 340)
+    grok_10_shop = next(
+        item
+        for item in by_key["grok3_10"]["provider_costs"]
+        if item["provider"] == "shopaikey"
+    )
+    assert grok_10_shop["catalog_model"] == "grok-video-3-10s"
+    assert grok_10_shop["model"] == "grok-video-3"
+    assert grok_10_shop["request_metadata"] == {
+        "duration": 10,
+        "resolution": "720P",
+    }
+    assert all(item["description"] and item["quality"] for item in catalog)
+    assert all(item["price_multiplier"] == 3 for item in catalog)
+    assert {
+        key: item["provider_priority"]
+        for key, item in by_key.items()
+    } == {
+        "grok3_5": ["shopaikey", "key4u"],
+        "grok3_10": ["shopaikey", "key4u"],
+        "veo31_fast_8": ["key4u", "shopaikey"],
+        "veo31_pro_8": ["key4u", "shopaikey"],
+    }
+    assert {
+        key: item["pricing_provider"]
+        for key, item in by_key.items()
+    } == {
+        "grok3_5": "key4u",
+        "grok3_10": "key4u",
+        "veo31_fast_8": "shopaikey",
+        "veo31_pro_8": "shopaikey",
+    }
+    for item in catalog:
+        cost_by_provider = {
+            cost["provider"]: cost["cost_vnd"]
+            for cost in item["provider_costs"]
+        }
+        priority_costs = [
+            cost_by_provider[provider]
+            for provider in item["provider_priority"]
+        ]
+        assert priority_costs == sorted(priority_costs)
+        assert item["pricing_cost_vnd"] == max(cost_by_provider.values())
+    assert all(item["unit_xu"] % 10 == 0 for item in catalog)
+    assert all("trial" not in item["key"] for item in catalog)
+
+    assert bot.video_ai_real_round_sale_xu(81) == 80
+    assert bot.video_ai_real_round_sale_xu(82) == 80
+    assert bot.video_ai_real_round_sale_xu(83) == 90
+    assert bot.video_ai_real_round_sale_xu(84) == 90
+
+
+def test_video_ai_real_image_model_catalog_uses_verified_triple_fallback_cost():
+    catalog = bot.video_ai_real_pricing.image_model_catalog()
+    by_key = {item["key"]: item for item in catalog}
+
+    assert list(by_key) == ["grok_image", "grok_image_pro"]
+    assert by_key["grok_image"]["unit_xu"] == 20
+    assert by_key["grok_image_pro"]["unit_xu"] == 70
+    assert by_key["grok_image"]["pricing_provider"] == "shopaikey"
+    assert by_key["grok_image"]["provider_costs"] == [
+        {
+            "provider": "shopaikey",
+            "model": "grok-imagine-image",
+            "usd_per_image": 0.208,
+            "usd_to_vnd": 3250,
+            "cost_vnd": 676,
+            "pricing_basis": "mỗi ảnh",
+            "source_url": "https://shopaikey.com/models",
+            "checked_on": "2026-08-09",
+        },
+        {
+            "provider": "key4u",
+            "model": "grok-imagine-image",
+            "usd_per_image": 0.208,
+            "usd_to_vnd": 3000,
+            "cost_vnd": 624,
+            "pricing_basis": "mỗi ảnh",
+            "source_url": "https://key4u.vn/models",
+            "checked_on": "2026-08-09",
+        },
+    ]
+    assert all(item["provider_priority"] == ["key4u", "shopaikey"] for item in catalog)
+    for item in catalog:
+        cost_by_provider = {
+            cost["provider"]: cost["cost_vnd"]
+            for cost in item["provider_costs"]
+        }
+        assert item["pricing_cost_vnd"] == max(cost_by_provider.values())
+    assert all(item["unit_xu"] % 10 == 0 for item in catalog)
+
+
+def test_video_ai_real_music_catalog_uses_verified_triple_fallback_cost():
+    catalog = bot.video_ai_real_pricing.music_model_catalog()
+
+    assert len(catalog) == 1
+    music = catalog[0]
+    assert music["key"] == "suno_music"
+    assert music["unit"] == "track"
+    assert music["unit_xu"] == 80
+    assert music["pricing_provider"] == "shopaikey"
+    assert music["provider_priority"] == ["key4u", "shopaikey"]
+    assert music["provider_costs"] == [
+        {
+            "provider": "shopaikey",
+            "model": "suno_music",
+            "usd_per_track": 0.8,
+            "usd_to_vnd": 3250,
+            "cost_vnd": 2600,
+            "pricing_basis": "mỗi lần tạo track",
+            "source_url": "https://shopaikey.com/models",
+            "checked_on": "2026-08-09",
+        },
+        {
+            "provider": "key4u",
+            "model": "suno_music_open",
+            "usd_per_track": 0.24,
+            "usd_to_vnd": 3000,
+            "cost_vnd": 720,
+            "pricing_basis": "mỗi lần tạo track",
+            "source_url": "https://key4u.vn/models",
+            "checked_on": "2026-08-09",
+        },
+    ]
+
+
+def test_video_ai_real_content_lock_offers_context_prompt_suggestions_before_bible():
+    user_id = 981021
+    context = SimpleNamespace(user_data={})
+    state = video_uiflow3.new_state("video_ai_real", draft_id="pilot-context-prompt")
+    state = video_uiflow3.set_entry_mode(state, "prompt_video")
+    state = video_uiflow3.set_scene_count_preference(state, 1)
+    state = video_uiflow3.set_format(state, ratio="9:16", target_duration_seconds=8)
+    state = video_uiflow3.set_content_candidate(
+        state,
+        source="content_catalog",
+        original_intent="Giới thiệu sản phẩm.",
+        approved_brief={"title": "Giới thiệu sản phẩm"},
+    )
+    _save_owned(context, state, user_id)
+
+    text, markup = bot.video_uiflow3_screen_payload(state)
+    assert "Gợi ý prompt theo ngữ cảnh" in text
+    assert {"Bán hàng tự nhiên", "Kể chuyện", "Ngắn gọn mạng xã hội"}.issubset(
+        set(_plain_labels(markup))
+    )
+
+    _click_visible(context, user_id, "vid3|context|story", "pilot-context-prompt-1")
+    selected = bot.video_uiflow3_state(context)
+    assert selected["navigation"]["current_step"] == "content_lock"
+    assert "mở đầu" in selected["content"]["original_intent"].lower()
+    _click_visible(context, user_id, "vid3|content_lock", "pilot-context-prompt-2")
+    assert bot.video_uiflow3_state(context)["navigation"]["current_step"] == "production_bible"
+
+
+def test_video_ai_real_audio_addons_are_compact_finishable_and_return_to_assignment():
+    state = _ready_prompt_summary_state()
+    state["navigation"]["current_step"] = "scene_assignment"
+    state["capabilities"].update({
+        "whole_video_music": True,
+        "per_scene_music": True,
+        "scene_sfx": True,
+    })
+    state = bot.video_uiflow3_open_view(state, "audio_options")
+
+    text, markup = bot.video_uiflow3_screen_payload(state)
+    labels = _plain_labels(markup)
+    assert "Âm thanh & phụ đề" in text
+    assert {"Nhạc", "Phụ đề", "Lồng tiếng", "SFX", "Hoàn thành âm thanh"}.issubset(set(labels))
+    assert all(len(row) <= 2 for row in markup.inline_keyboard)
+    assert "vid3|view|scene_assignment" in _callbacks(markup)
+
+
+def test_video_ai_real_character_location_voice_and_audio_finish_buttons_return_to_exact_parent():
+    state = _assigned_state()
+    state["navigation"]["current_step"] = "production_bible"
+
+    character_list = bot.video_uiflow3_open_view(state, "character_list")
+    _text, character_markup = bot.video_uiflow3_screen_payload(character_list)
+    assert "Hoàn thành chọn nhân vật" in _plain_labels(character_markup)
+    assert "vid3|view|production_bible" in _callbacks(character_markup)
+
+    location_list = bot.video_uiflow3_open_view(state, "location_list")
+    _text, location_markup = bot.video_uiflow3_screen_payload(location_list)
+    assert "Hoàn thành chọn bối cảnh" in _plain_labels(location_markup)
+    assert "vid3|view|production_bible" in _callbacks(location_markup)
+
+    voice = bot.video_uiflow3_open_view(
+        state,
+        "voice_select",
+        active_character_id="char_01",
+        ui_return_callback="vid3|character|char_01",
+    )
+    _text, voice_markup = bot.video_uiflow3_screen_payload(voice)
+    assert "Hoàn thành chọn giọng" in _plain_labels(voice_markup)
+    assert "vid3|character|char_01" in _callbacks(voice_markup)
+
+    state["navigation"]["current_step"] = "scene_assignment"
+    audio = bot.video_uiflow3_open_view(state, "audio_options")
+    _text, audio_markup = bot.video_uiflow3_screen_payload(audio)
+    assert "Hoàn thành âm thanh" in _plain_labels(audio_markup)
+    assert "vid3|view|scene_assignment" in _callbacks(audio_markup)
+
+
+def test_video_ai_real_prompt_review_shows_detailed_scene_prompt_and_exact_parent_back():
+    state = _ready_prompt_summary_state()
+    state["navigation"]["current_step"] = "prompts"
+    state = bot.video_uiflow3_open_view(state, "prompt_scenes")
+
+    text, markup = bot.video_uiflow3_screen_payload(state)
+    assert "Prompt từng cảnh" in text
+    assert {"Cảnh 1", "Cảnh 2", "Hoàn thành rà soát prompt"}.issubset(
+        set(_plain_labels(markup))
+    )
+    assert "vid3|prompt_scene|scene_01" in _callbacks(markup)
+    assert "vid3|view|prompts" in _callbacks(markup)
+
+    detail = bot.video_uiflow3_open_view(
+        state,
+        "prompt_scene_detail",
+        active_scene_id="scene_01",
+    )
+    detail_text, detail_markup = bot.video_uiflow3_screen_payload(detail)
+    assert "Prompt chi tiết · Cảnh 1" in detail_text
+    assert "Chủ thể" in detail_text
+    assert "Hành động" in detail_text
+    assert "Bối cảnh" in detail_text
+    assert "Sửa prompt cảnh" in _plain_labels(detail_markup)
+    assert "vid3|view|prompt_scenes" in _callbacks(detail_markup)
+
+
+def test_video_ai_real_quote_includes_each_paid_addon_once_and_exact_total():
+    state = _ready_prompt_summary_state()
+    state = bot.video_ai_real_apply_prompt_model(state, "grok3_10")
+    state["audio"].update({
+        "music_scope": "per_scene",
+        "music_source": "ai",
+        "subtitle_mode": "auto",
+        "dubbing_mode": "default_ai",
+        "sfx_mode": "ai",
+    })
+
+    quote = bot.video_ai_real_prompt_quote(state)
+    assert quote["scene_count"] == 2
+    assert quote["total_duration_seconds"] == 20
+    assert quote["base_xu"] == 760
+    assert quote["addons_xu"] == 610
+    assert quote["total_xu"] == 1370
+    assert quote["estimated_vnd"] == 137000
+    assert [(item["key"], item["price_xu"]) for item in quote["addons"]] == [
+        ("music_ai", 160),
+        ("subtitle_auto", 120),
+        ("dubbing_default", 250),
+        ("sfx_ai", 80),
+    ]
+
+
+def test_video_ai_real_quote_confirmation_reaches_truthful_status_with_exact_back_stack():
+    user_id = 981022
+    context = SimpleNamespace(user_data={})
+    _save_owned(context, _ready_prompt_summary_state(), user_id)
+
+    _click_visible(context, user_id, "vid3|model|veo31_fast_8", "pilot-commercial-1")
+    selected = bot.video_uiflow3_state(context)
+    assert selected["format"]["seconds_per_scene"] == 8
+    assert selected["format"]["target_duration_seconds"] == 16
+
+    _click_visible(context, user_id, "vid3|summary_done", "pilot-commercial-2")
+    invoice = bot.video_uiflow3_state(context)
+    assert invoice["navigation"]["current_step"] == "invoice"
+    invoice_text, invoice_markup = bot.video_uiflow3_screen_payload(invoice)
+    assert "Báo giá xác nhận" in invoice_text
+    assert "2 cảnh × 70 Xu = 140 Xu" in invoice_text
+    assert "Tổng thanh toán dự kiến: 140 Xu" in invoice_text
+    assert "Xác nhận báo giá" in _plain_labels(invoice_markup)
+
+    _click_visible(context, user_id, "vid3|invoice_confirm", "pilot-commercial-3")
+    confirmation = bot.video_uiflow3_state(context)
+    assert confirmation["navigation"]["current_step"] == "confirmation"
+    _click_visible(context, user_id, "vid3|confirmation_submit", "pilot-commercial-4")
+    status = bot.video_uiflow3_state(context)
+    assert status["navigation"]["current_step"] == "status"
+    assert status["side_effects"] == {
+        "provider_calls": 0,
+        "jobs": 0,
+        "outbox": 0,
+        "wallet_mutations": 0,
+        "xu_charged": 0,
+    }
+    status_text, _status_markup = bot.video_uiflow3_screen_payload(status)
+    assert "Chưa gửi sang RouteEngine" in status_text
+    assert "chưa trừ Xu" in status_text
+
+    _click_visible(context, user_id, "vid3|back", "pilot-commercial-5")
+    assert bot.video_uiflow3_state(context)["navigation"]["current_step"] == "confirmation"
+    _click_visible(context, user_id, "vid3|back", "pilot-commercial-6")
+    assert bot.video_uiflow3_state(context)["navigation"]["current_step"] == "invoice"
+
+
+def test_video_ai_real_quality_screen_keeps_provider_details_internal():
+    state = bot.video_ai_real_apply_prompt_model(
+        _ready_prompt_summary_state(),
+        "veo31_fast_8",
+    )
+
+    text, _markup = bot.video_uiflow3_screen_payload(state)
+
+    assert "ShopAIKey" not in text
+    assert "Key4U" not in text
+    assert "provider" not in text.lower()
+
+
+def test_video_ai_real_source_image_shortcuts_render_and_return_to_exact_entity():
+    user_id = 981023
+    context = SimpleNamespace(user_data={})
+    state = video_uiflow3.set_character_count(_locked_state(), 1)
+    state = video_uiflow3.set_location_count(state, 1)
+    state = video_uiflow3.add_source_asset(
+        state,
+        asset_type="image",
+        telegram_file_id="source-image-file",
+        fingerprint="telegram:source-image-unique",
+    )
+    state["navigation"]["current_step"] = "production_bible"
+    state = bot.video_uiflow3_open_view(
+        state,
+        "character_detail",
+        active_character_id="char_01",
+    )
+    _save_owned(context, state, user_id)
+
+    _text, character_markup = bot.video_uiflow3_screen_payload(state)
+    assert "vid3|source_ref_set|source_01|character|char_01" in _callbacks(character_markup)
+    _click_visible(
+        context,
+        user_id,
+        "vid3|source_ref_set|source_01|character|char_01",
+        "pilot-source-character-1",
+    )
+    character_state = bot.video_uiflow3_state(context)
+    assert character_state.get("ui_view") == "character_detail"
+    assert character_state.get("active_character_id") == "char_01"
+
+    location_state = bot.video_uiflow3_open_view(
+        character_state,
+        "location_detail",
+        active_location_id="loc_01",
+    )
+    _save_owned(context, location_state, user_id)
+    _text, location_markup = bot.video_uiflow3_screen_payload(location_state)
+    assert "vid3|source_ref_set|source_01|location|loc_01" in _callbacks(location_markup)
+    _click_visible(
+        context,
+        user_id,
+        "vid3|source_ref_set|source_01|location|loc_01",
+        "pilot-source-location-1",
+    )
+    saved_location = bot.video_uiflow3_state(context)
+    assert saved_location.get("ui_view") == "location_detail"
+    assert saved_location.get("active_location_id") == "loc_01"
+
+
+def test_video_ai_real_prompt_scene_edit_accepts_text_and_returns_to_same_scene():
+    user_id = 981024
+    context = SimpleNamespace(user_data={})
+    state = _ready_prompt_summary_state()
+    state["navigation"]["current_step"] = "prompts"
+    state = bot.video_uiflow3_open_view(state, "prompt_scenes")
+    _save_owned(context, state, user_id)
+
+    _click_visible(context, user_id, "vid3|prompt_scene|scene_01", "pilot-prompt-edit-1")
+    _click_visible(context, user_id, "vid3|prompt_edit|scene_01", "pilot-prompt-edit-2")
+    pending = bot.video_uiflow3_state(context)
+    assert pending["pending_input"]["kind"] == "scene_prompt"
+
+    message = _PilotMessage(user_id, "Lan giới thiệu sản phẩm trong ánh sáng cửa sổ tự nhiên.", 88101)
+    handled = asyncio.run(
+        bot.handle_video_uiflow3_pending_text(
+            SimpleNamespace(message=message, effective_user=SimpleNamespace(id=user_id)),
+            context,
+        )
+    )
+
+    assert handled is True
+    saved = bot.video_uiflow3_state(context)
+    assert saved.get("ui_view") == "prompt_scene_detail"
+    assert saved.get("active_scene_id") == "scene_01"
+    assert saved["scenes"][0]["prompt_override"].startswith("Lan giới thiệu")
+
+
+def test_video_ai_real_character_can_use_a_content_based_default_description():
+    user_id = 981025
+    context = SimpleNamespace(user_data={})
+    state = video_uiflow3.set_character_count(_locked_state(), 1)
+    state = video_uiflow3.update_character(state, "char_01", gender="female")
+    state["navigation"]["current_step"] = "production_bible"
+    state = bot.video_uiflow3_open_view(
+        state,
+        "character_detail",
+        active_character_id="char_01",
+    )
+    _save_owned(context, state, user_id)
+
+    _text, markup = bot.video_uiflow3_screen_payload(state)
+    assert "Dùng mô tả theo nội dung" in _plain_labels(markup)
+    _click_visible(context, user_id, "vid3|char_suggest|char_01", "pilot-character-suggest-1")
+
+    saved = bot.video_uiflow3_state(context)
+    character = saved["bible"]["characters"][0]
+    assert saved.get("ui_view") == "character_detail"
+    assert character["description"]
+    assert "Giới thiệu sản phẩm" in character["description"]
+
+
+def test_video_ai_real_per_scene_music_has_a_finishable_scene_picker():
+    user_id = 981026
+    context = SimpleNamespace(user_data={})
+    state = _ready_prompt_summary_state()
+    state["navigation"]["current_step"] = "scene_assignment"
+    state = bot.video_uiflow3_open_view(state, "audio_options")
+    _save_owned(context, state, user_id)
+
+    _click_visible(context, user_id, "vid3|view|audio_music", "pilot-music-scenes-1")
+    _click_visible(context, user_id, "vid3|audio_set|music|library_scene", "pilot-music-scenes-2")
+
+    saved = bot.video_uiflow3_state(context)
+    assert saved.get("ui_view") == "audio_music_scenes"
+    text, markup = bot.video_uiflow3_screen_payload(saved)
+    assert "Nhạc theo từng cảnh" in text
+    assert {"Cảnh 1", "Cảnh 2", "Hoàn thành nhạc theo cảnh"}.issubset(set(_plain_labels(markup)))
+    assert "vid3|view|audio_options" in _callbacks(markup)
+
+    _click_visible(context, user_id, "vid3|scene_music|scene_01", "pilot-music-scenes-3")
+    scene_music = bot.video_uiflow3_state(context)
+    assert scene_music.get("ui_view") == "scene_music"
+    assert scene_music.get("active_scene_id") == "scene_01"
+    _scene_text, scene_music_markup = bot.video_uiflow3_screen_payload(scene_music)
+    assert "vid3|view|audio_music_scenes" in _callbacks(scene_music_markup)
+    _click_visible(context, user_id, "vid3|view|audio_music_scenes", "pilot-music-scenes-back-1")
+    assert bot.video_uiflow3_state(context).get("ui_view") == "audio_music_scenes"
+    _click_visible(context, user_id, "vid3|scene_music|scene_01", "pilot-music-scenes-3b")
+
+    _click_visible(context, user_id, "vid3|scene_music_set|scene_01|off", "pilot-music-scenes-set-1")
+    scene_music_after_set = bot.video_uiflow3_state(context)
+    _set_text, set_markup = bot.video_uiflow3_screen_payload(scene_music_after_set)
+    assert "vid3|view|audio_music_scenes" in _callbacks(set_markup)
+
+    _click_visible(context, user_id, "vid3|scene_music_custom|scene_01", "pilot-music-scenes-4")
+    pending = bot.video_uiflow3_state(context)
+    assert pending["pending_input"]["kind"] == "scene_music"
+    _pending_text, pending_markup = bot.video_uiflow3_screen_payload(pending)
+    assert "vid3|scene_music|scene_01" in _callbacks(pending_markup)
+    _click_visible(context, user_id, "vid3|scene_music|scene_01", "pilot-music-scenes-input-back-1")
+    returned_scene_music = bot.video_uiflow3_state(context)
+    _returned_text, returned_markup = bot.video_uiflow3_screen_payload(returned_scene_music)
+    assert "vid3|view|audio_music_scenes" in _callbacks(returned_markup)
+    _click_visible(context, user_id, "vid3|scene_music_custom|scene_01", "pilot-music-scenes-4b")
+
+    message = _PilotMessage(user_id, "Nhạc thư viện tươi sáng cho cảnh mở đầu", 88102)
+    handled = asyncio.run(
+        bot.handle_video_uiflow3_pending_text(
+            SimpleNamespace(message=message, effective_user=SimpleNamespace(id=user_id)),
+            context,
+        )
+    )
+    assert handled is True
+    selected = bot.video_uiflow3_state(context)
+    assert selected.get("ui_view") == "scene_music"
+    assert selected["audio"]["music_plan"]["scene_01"]["track_id"].startswith("Nhạc thư viện")
+    _selected_text, selected_markup = bot.video_uiflow3_screen_payload(selected)
+    assert "vid3|view|audio_music_scenes" in _callbacks(selected_markup)
+    _click_visible(context, user_id, "vid3|view|audio_music_scenes", "pilot-music-scenes-back-2")
+    assert bot.video_uiflow3_state(context).get("ui_view") == "audio_music_scenes"
+
+
+def test_video_ai_real_entry_route_metadata_matches_the_visible_product_screen():
+    state = video_uiflow3.new_state("video_ai_real", draft_id="pilot-entry-route-contract")
+    _text, markup = bot.video_uiflow3_screen_payload(state)
+    visible = tuple(_callbacks(markup))
+    expected = tuple(bot.VIDEO_PUBLIC_ROUTE_MATRIX["video_ai_real"]["expected_children"])
+
+    assert "vid3|idea_catalog" not in expected
+    assert expected == tuple(callback for callback in visible if callback != "menu|main_video")
+
+
+def _detailed_visual_state() -> dict:
+    state = _assigned_state()
+    state = video_uiflow3.update_character(
+        state,
+        "char_01",
+        description="Lan mặc áo xanh, biểu cảm tự tin và thao tác sản phẩm tự nhiên.",
+    )
+    state = video_uiflow3.update_character(
+        state,
+        "char_02",
+        description="Minh mặc áo trắng, phản ứng chân thật và giữ nhận diện ổn định.",
+    )
+    state = video_uiflow3.update_location(
+        state,
+        "loc_01",
+        description="Quán cà phê sáng, bàn gỗ cạnh cửa sổ và hậu cảnh gọn.",
+        lighting="Ánh sáng cửa sổ mềm",
+        mood="Ấm áp, đáng tin",
+    )
+    state = video_uiflow3.add_product(
+        state,
+        name="Serum A",
+        category="Mỹ phẩm",
+        description="Chai thủy tinh xanh, nhãn và hình dáng phải giữ nguyên.",
+    )
+    state = video_uiflow3.add_prop(
+        state,
+        name="Gương tròn",
+        description="Gương nhỏ đặt bên phải sản phẩm.",
+    )
+    state = video_uiflow3.add_reference(
+        state,
+        asset_type="image",
+        owner_type="character",
+        owner_id="char_01",
+        role="primary_identity",
+        telegram_file_id="character-reference-file",
+        fingerprint="character-reference-fingerprint",
+    )
+    state = video_uiflow3.add_reference(
+        state,
+        asset_type="image",
+        owner_type="location",
+        owner_id="loc_01",
+        role="primary_location",
+        telegram_file_id="location-reference-file",
+        fingerprint="location-reference-fingerprint",
+    )
+    state = video_uiflow3.assign_scene(
+        state,
+        "scene_01",
+        character_ids=["char_01", "char_02"],
+        location_id="loc_01",
+        product_ids=["prod_01"],
+        prop_ids=["prop_01"],
+    )
+    state = video_uiflow3.update_scene_plan(
+        state,
+        "scene_01",
+        semantic_beat="Lan khám phá vấn đề da khô rồi giới thiệu giải pháp.",
+        main_action="Lan mở nắp, nhỏ serum lên tay và Minh quan sát kết cấu.",
+        completion_state="Hai nhân vật nhìn thấy kết cấu thấm đều trên da.",
+    )
+    state = video_uiflow3.update_scene_direction(
+        state,
+        "scene_01",
+        framing="Trung cảnh chuyển sang cận sản phẩm",
+        movement="Dolly-in chậm theo bàn tay Lan",
+        lighting="Ánh sáng cửa sổ mềm, da và thủy tinh trung thực",
+        mood="Tò mò rồi tin tưởng",
+    )
+    state["audio"].update({
+        "dialogue_segments": [{
+            "dialogue_id": "dlg_01",
+            "scene_id": "scene_01",
+            "speaker_id": "char_01",
+            "text": "POST_ONLY_DIALOGUE",
+        }],
+        "voice_cast": {
+            "char_01": {"voice_id": "POST_ONLY_VOICE", "gender": "female"},
+        },
+        "music_scope": "whole_video",
+        "music_source": "library",
+        "music_plan": {"track_id": "POST_ONLY_MUSIC"},
+        "subtitle_mode": "auto",
+        "dubbing_mode": "browser",
+        "sfx_mode": "library",
+        "sfx_plan": [{"scene_id": "scene_01", "cue": "POST_ONLY_SFX"}],
+    })
+    state["branding"] = {
+        "logo_file_id": "POST_ONLY_LOGO",
+        "watermark_text": "POST_ONLY_WATERMARK",
+    }
+    return video_uiflow3.normalize_state(state)
+
+
+def test_video_ai_real_compiler_materializes_visual_choices_and_separates_postproduction():
+    compiled = bot.video_ai_real_compile_state(_detailed_visual_state())
+    contract = compiled["render_contract"]
+    first = contract["visual"]["scenes"][0]
+    prompt = first["visual_prompt"]
+
+    for selected_visual in (
+        "Lan",
+        "Minh",
+        "áo xanh",
+        "Quán cà phê",
+        "Serum A",
+        "Gương tròn",
+        "nhỏ serum lên tay",
+        "Dolly-in chậm",
+        "Ánh sáng cửa sổ mềm",
+        "Tò mò rồi tin tưởng",
+        "9:16",
+    ):
+        assert selected_visual in prompt
+    assert first["reference_asset_ids"] == ["asset_01", "asset_02"]
+    assert first["duration_seconds"] == 8
+    assert first["visual_prompt_hash"]
+
+    for post_only in (
+        "POST_ONLY_DIALOGUE",
+        "POST_ONLY_VOICE",
+        "POST_ONLY_MUSIC",
+        "POST_ONLY_SFX",
+        "POST_ONLY_LOGO",
+        "POST_ONLY_WATERMARK",
+    ):
+        assert post_only not in prompt
+
+    post = contract["post_production"]
+    assert post["dialogue"][0]["text"] == "POST_ONLY_DIALOGUE"
+    assert post["voice_cast"]["char_01"]["voice_id"] == "POST_ONLY_VOICE"
+    assert post["music"]["plan"]["track_id"] == "POST_ONLY_MUSIC"
+    assert post["sfx"]["plan"][0]["cue"] == "POST_ONLY_SFX"
+    assert post["branding"]["logo_file_id"] == "POST_ONLY_LOGO"
+    assert post["branding"]["watermark_text"] == "POST_ONLY_WATERMARK"
+    assert contract["provider_called"] is False
+    assert contract["job_created"] is False
+    assert contract["wallet_mutations"] == 0
+
+
+def test_video_ai_real_compiler_materializes_per_scene_music_assignments():
+    state = _detailed_visual_state()
+    state["audio"].update({
+        "music_scope": "per_scene",
+        "music_source": "library",
+        "music_plan": {
+            "scene_01": {
+                "policy": "track",
+                "track_id": "SCENE_ONE_MUSIC",
+                "volume": 20,
+            },
+        },
+    })
+    compiled = bot.video_ai_real_compile_state(state)["render_contract"]
+
+    assert compiled["post_production"]["music"]["scope"] == "per_scene"
+    assert compiled["post_production"]["music"]["scene_assignments"] == {
+        "scene_01": {
+            "policy": "track",
+            "track_id": "SCENE_ONE_MUSIC",
+            "volume": 20,
+        },
+    }
+
+
+def test_video_ai_real_postproduction_changes_do_not_dirty_or_rewrite_visual_prompts():
+    compiled = bot.video_ai_real_compile_state(_detailed_visual_state())
+    visual_hash = compiled["render_contract"]["visual"]["visual_hash"]
+
+    changed = bot.video_ai_real_apply_audio_option(compiled, "music", "ai_scene")
+    assert "prompts" not in set(changed["navigation"]["dirty_sections"])
+
+    recompiled = bot.video_ai_real_compile_state(changed)
+    assert recompiled["render_contract"]["visual"]["visual_hash"] == visual_hash
+    assert recompiled["render_contract"]["post_production"]["music"] == {
+        "scope": "per_scene",
+        "source": "ai",
+        "plan": {},
+        "scene_assignments": {},
+    }
+
+
+def test_video_ai_real_quick_build_is_deterministic_and_reaches_quality_without_side_effects():
+    user_id = 981027
+    context = SimpleNamespace(user_data={})
+    state = video_uiflow3.new_state("video_ai_real", draft_id="pilot-quick-build")
+    state = video_uiflow3.set_entry_mode(state, "prompt_video")
+    state = video_uiflow3.set_scene_count_preference(state, 2)
+    state = video_uiflow3.set_format(state, ratio="9:16", target_duration_seconds=16)
+    state = video_uiflow3.set_content_candidate(
+        state,
+        source="content_catalog",
+        profile_id="product_demo",
+        original_intent="Giới thiệu serum cho người mới chăm sóc da.",
+        approved_brief={
+            "title": "Serum cho người mới",
+            "needs_characters": True,
+            "needs_locations": True,
+            "needs_dialogue": False,
+            "needs_voice": False,
+            "needs_music": False,
+        },
+    )
+    state = video_uiflow3.lock_content(state)
+    state["navigation"]["current_step"] = "production_bible"
+    _save_owned(context, state, user_id)
+
+    text, markup = bot.video_uiflow3_screen_payload(state)
+    assert "Nhân vật & bối cảnh" in text
+    assert {"Tạo nhanh", "Tùy chỉnh chi tiết"}.issubset(set(_plain_labels(markup)))
+
+    _click_visible(context, user_id, "vid3|quick_build", "pilot-quick-build-1")
+    quick = bot.video_uiflow3_state(context)
+    assert quick["navigation"]["current_step"] == "summary"
+    assert quick["render_contract"]["visual"]["scene_count"] == 2
+    assert quick["legacy_compat"]["pilot_quick_build"]["seed"]
+    assert quick["legacy_compat"]["pilot_quick_build"]["version"] == "quick-v1"
+    assert quick["side_effects"] == {
+        "provider_calls": 0,
+        "jobs": 0,
+        "outbox": 0,
+        "wallet_mutations": 0,
+        "xu_charged": 0,
+    }
+
+    second = bot.video_ai_real_build_quick_plan(state)
+    assert second["render_contract"]["visual"]["visual_hash"] == quick["render_contract"]["visual"]["visual_hash"]
+    summary_text, summary_markup = bot.video_uiflow3_screen_payload(quick)
+    assert "Chọn model & chất lượng" in summary_text
+    assert {"Logo & watermark", "Xác nhận chất lượng"}.issubset(set(_plain_labels(summary_markup)))
+
+
+def test_video_ai_real_compile_hook_is_a_noop_for_other_products():
+    state = video_uiflow3.new_state("script_image_video", draft_id="protected-other-product")
+    before = video_uiflow3.normalize_state(state)
+
+    after = bot.video_ai_real_maybe_compile_state(state)
+
+    assert after == before
+    assert "render_contract" not in after
+
+
+def test_video_ai_real_voice_change_is_post_only_and_keeps_visual_hash():
+    user_id = 981028
+    context = SimpleNamespace(user_data={})
+    state = bot.video_ai_real_compile_state(_detailed_visual_state())
+    visual_hash = state["render_contract"]["visual"]["visual_hash"]
+    state["navigation"]["current_step"] = "production_bible"
+    state = bot.video_uiflow3_open_view(
+        state,
+        "character_detail",
+        active_character_id="char_01",
+    )
+    _save_owned(context, state, user_id)
+
+    _click_visible(context, user_id, "vid3|char_voice|char_01", "pilot-post-voice-1")
+    _click_visible(context, user_id, "vid3|voice|char_01|vf1", "pilot-post-voice-2")
+
+    changed = bot.video_uiflow3_state(context)
+    assert "prompts" not in set(changed["navigation"]["dirty_sections"])
+    assert "audio" in set(changed["navigation"]["dirty_sections"])
+    recompiled = bot.video_ai_real_compile_state(changed)
+    assert recompiled["render_contract"]["visual"]["visual_hash"] == visual_hash
+    assert recompiled["bible"]["characters"][0]["voice_id"] == "vi-VN-HoaiMyNeural"
+
+
+def test_video_ai_real_context_suggestion_rebases_after_content_changes():
+    state = _locked_state()
+    original_revision = state["content"]["revision"]
+    state = bot.video_ai_real_apply_context_prompt(state, "story")
+    assert state["content"]["revision"] == original_revision + 1
+    assert state["content"]["locked"] is False
+    assert "prompts" in state["navigation"]["dirty_sections"]
+
+    state = video_uiflow3.set_content_candidate(
+        state,
+        source="manual",
+        original_intent="Nội dung mới về chăm sóc da.",
+        approved_brief={"title": "Chăm sóc da mới"},
+    )
+    changed = bot.video_ai_real_apply_context_prompt(state, "sales")
+
+    assert changed["content"]["original_intent"].startswith("Nội dung mới về chăm sóc da.")
+    assert "Nội dung ban đầu về cà phê" not in changed["content"]["original_intent"]
+    commercial = changed["legacy_compat"]["pilot_commercial"]
+    assert commercial["context_base_intent"] == "Nội dung mới về chăm sóc da."
+
+
+def test_video_ai_real_post_only_change_preserves_existing_visual_dirtiness():
+    state = bot.video_ai_real_compile_state(_detailed_visual_state())
+    state["scenes"][0]["main_action"] = "Lan đổi hành động hình ảnh sau lần biên dịch trước."
+    state["navigation"]["dirty_sections"] = ["prompts"]
+
+    changed = bot.video_ai_real_apply_audio_option(state, "music", "none")
+
+    assert {"prompts", "audio", "summary"}.issubset(
+        set(changed["navigation"]["dirty_sections"])
+    )
+
+
+def test_video_ai_real_model_change_refreshes_existing_visual_contract():
+    state = bot.video_ai_real_compile_state(_ready_prompt_summary_state())
+    old_hash = state["render_contract"]["visual"]["visual_hash"]
+
+    changed = bot.video_ai_real_apply_prompt_model(state, "grok3_5")
+
+    assert [scene["duration_target"] for scene in changed["scenes"]] == [5, 5]
+    contract = changed["render_contract"]["visual"]
+    assert [scene["duration_seconds"] for scene in contract["scenes"]] == [5, 5]
+    assert contract["visual_hash"] != old_hash
+
+
+def test_video_ai_real_quote_excludes_per_scene_ai_music_explicitly_turned_off():
+    state = bot.video_ai_real_apply_prompt_model(
+        _ready_prompt_summary_state(),
+        "veo31_fast_8",
+    )
+    state = bot.video_ai_real_apply_audio_option(state, "music", "ai_scene")
+    state = video_uiflow3.set_scene_music(state, "scene_01", policy="off")
+    state = bot.video_ai_real_mark_post_only_change(state)
+
+    quote = bot.video_ai_real_prompt_quote(state)
+
+    music = next(item for item in quote["addons"] if item["key"] == "music_ai")
+    assert music == {
+        "key": "music_ai",
+        "label": "Nhạc AI theo từng cảnh",
+        "price_xu": 80,
+    }
