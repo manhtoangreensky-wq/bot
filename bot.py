@@ -68243,7 +68243,7 @@ async def handle_local_video_studio_public_callback(
             "exit_parent": True,
             "duplicate": False,
             "saved_text": "",
-            "feedback": "Đã quay lại Chỉnh sửa video.",
+            "feedback": "Đã quay lại Menu Video.",
         }
     else:
         try:
@@ -68287,8 +68287,8 @@ async def handle_local_video_studio_public_callback(
 
     if result.get("exit_parent"):
         parent_lang = normalize_user_language(get_user_language(user_id) or "vi")
-        text = video_edit_hub_text(parent_lang)
-        markup = video_edit_hub_keyboard(parent_lang)
+        text = menu_text_main_video_i18n(parent_lang)
+        markup = main_video_keyboard(parent_lang)
 
         def commit_parent():
             local_video_studio_public.delete_session(store, user_id, chat_id, session_id)
@@ -71153,8 +71153,10 @@ def video_uiflow3_guide_text(lang: str = "vi") -> str:
 def video_uiflow3_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     language = normalize_user_language(lang) or "vi"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎬 Mo Menu Video" if language == "vi" else "🎬 Open Video menu", callback_data="menu|main_video")],
-        [InlineKeyboardButton(ui_text(language, "common.back"), callback_data="menu|main_guide"), InlineKeyboardButton(ui_text(language, "common.main_menu"), callback_data="menu|main")],
+        [
+            InlineKeyboardButton(ui_text(language, "common.back"), callback_data="menu|main_video"),
+            InlineKeyboardButton(ui_text(language, "common.main_menu"), callback_data="menu|main"),
+        ],
     ])
 
 
@@ -78472,12 +78474,6 @@ def video_edit_hub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("❓ Hướng dẫn công cụ này" if is_vi else "❓ Tool guide", "videoedit|guide"),
         ],
     ]
-    rows.append([(
-        "📊 Trạng thái chỉnh sửa" if is_vi else "📊 Edit status",
-        "videoedit|latest_status",
-    )])
-    if local_video_studio_public_enabled():
-        rows.append([("🧭 Lập kế hoạch dựng video", "lvs27b|open")])
     rows.append([
         (ui_text(lang, "common.back"), "menu|main_video"),
         (ui_text(lang, "common.main_menu"), "menu|main"),
@@ -79505,7 +79501,7 @@ def video_local_manual_options_keyboard(lang: str = "vi", state: dict | None = N
         [("🔊 Âm thanh", "videoedit|audio"), ("🎨 Ánh sáng & màu", "videoedit|color")],
         [("🔠 Chữ & phụ đề", "videoedit|overlay"), ("✨ Hiệu ứng cục bộ", "videoedit|effects")],
         [("🖼 Logo ảnh", "videoedit|logo_entry"), ("🏷️ Watermark chữ", "videoedit|watermark_entry")],
-        [("🎞 Thông tin video", "videoedit|source_info"), ("📊 Trạng thái chỉnh sửa", "videoedit|latest_status")],
+        [("🎞 Thông tin video", "videoedit|source_info"), ("❓ Hướng dẫn chỉnh sửa", "videoedit|guide|workspace")],
         [("✅ Hoàn tất & tiếp tục", "videoedit|review"), ("📎 Gửi video khác", upload_callback)],
         [(ui_text(lang, "common.back"), back_target), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
@@ -80478,6 +80474,19 @@ VIDEO_IDEA_PRODUCT_LANE_PRODUCTS = frozenset({
 VIDEO_PUBLIC_MENU_ROWS = video_uifreeze1.PUBLIC_MENU_ROWS
 
 
+def video_public_visible_menu_rows() -> tuple[tuple[str, ...], ...]:
+    rows: list[tuple[str, ...]] = []
+    planning_enabled = local_video_studio_public_enabled()
+    for row in VIDEO_PUBLIC_MENU_ROWS:
+        normalized = tuple(str(tool_id or "") for tool_id in row)
+        if planning_enabled and normalized == ("main_menu", "video_guide"):
+            rows.append(("video_edit_planning", "video_guide"))
+            rows.append(("main_menu",))
+            continue
+        rows.append(normalized)
+    return tuple(rows)
+
+
 VIDEO_PUBLIC_ROUTE_MATRIX = {
     "video_trend": {
         "label_vi": "🔥 Video theo trend",
@@ -80735,7 +80744,7 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🛠️ 编辑 / 增强视频",
         "entry_callback": "videoedit|hub",
         "handler": "handle_video_editor_callback",
-        "expected_children": ("videoedit|ai", "videoedit|manual", "videoedit|restore", "videoedit|guide", "videoedit|latest_status"),
+        "expected_children": ("videoedit|ai", "videoedit|manual", "videoedit|restore", "videoedit|guide"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "helper",
@@ -80744,6 +80753,23 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "invoice_reachable": False,
         "job_reachable": True,
         "product_id": "video_local_edit",
+    },
+    "video_edit_planning": {
+        "label_vi": "🧭 Lập kế hoạch dựng video",
+        "label_en": "🧭 Video editing planner",
+        "label_zh": "🧭 视频剪辑规划",
+        "entry_callback": "lvs27b|open",
+        "handler": "handle_local_video_studio_public_callback",
+        "expected_children": (),
+        "parent_menu": "menu|main_video",
+        "back_target": "menu|main_video",
+        "category": "planning",
+        "flow_type": "local_planning",
+        "canonical": True,
+        "first_step": "goal",
+        "invoice_reachable": False,
+        "job_reachable": False,
+        "product_id": "",
     },
     "video_guide": {
         "label_vi": "📖 Hướng dẫn video",
@@ -81807,7 +81833,7 @@ def video_post_profile_step(product_id: str, session: dict | None = None) -> str
 
 def video_route_matrix_rows() -> list[dict]:
     rows = []
-    for row_index, row in enumerate(VIDEO_PUBLIC_MENU_ROWS, start=1):
+    for row_index, row in enumerate(video_public_visible_menu_rows(), start=1):
         for column_index, tool_id in enumerate(row, start=1):
             if tool_id == "main_menu":
                 continue
@@ -81863,7 +81889,7 @@ def video_route_audit_payload() -> dict:
         "rows": rows,
         "forbidden_public_words": forbidden,
         "missing_labels": missing_labels,
-        "menu_rows": [list(row) for row in VIDEO_PUBLIC_MENU_ROWS],
+        "menu_rows": [list(row) for row in video_public_visible_menu_rows()],
     }
 
 
@@ -82667,7 +82693,7 @@ def main_video_keyboard(lang: str = "vi", *, resume_uiflow3: bool = False) -> In
             "zh": "↩️ 继续当前视频计划",
         }.get(lang, "↩️ Resume current video plan")
         rows.append([InlineKeyboardButton(resume_label, callback_data="vid3|resume")])
-    for product_ids in VIDEO_PUBLIC_MENU_ROWS:
+    for product_ids in video_public_visible_menu_rows():
         row = []
         for tool_id in product_ids:
             if tool_id == "main_menu":
@@ -235731,6 +235757,7 @@ async def handle_video_editor_callback(
             "quality": "videoedit|restore",
             "audio": "videoedit|audio",
             "effects": "videoedit|effects",
+            "workspace": "videoedit|workspace",
             "hub": "videoedit|hub",
         }.get(caller, "videoedit|hub")
         return await safe_edit_or_send(

@@ -874,7 +874,7 @@ def test_local1_services_do_not_call_real_providers() -> None:
 
 def test_local1_route_matrix_is_canonical() -> None:
     route = _between(BOT_SOURCE, '"video_local_edit": {', "def video_public_route_for_tool")
-    assert '"expected_children": ("videoedit|ai", "videoedit|manual", "videoedit|restore", "videoedit|guide", "videoedit|latest_status")' in route
+    assert '"expected_children": ("videoedit|ai", "videoedit|manual", "videoedit|restore", "videoedit|guide")' in route
     assert '"back_target": "menu|main_video"' in route
     assert '"job_reachable": True' in route
 

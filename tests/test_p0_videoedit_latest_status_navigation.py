@@ -264,7 +264,7 @@ def _handler(
     return handler, rendered, state, _Query(user_id, "videoedit|latest_status")
 
 
-def test_hub_has_one_status_row_after_four_primary_actions_and_no_legacy_video_menu_status() -> None:
+def test_hub_keeps_four_primary_actions_without_detached_status_or_planning() -> None:
     hub = _function_source("video_edit_hub_keyboard")
     expected_primary = (
         '"videoedit|ai"',
@@ -276,10 +276,9 @@ def test_hub_has_one_status_row_after_four_primary_actions_and_no_legacy_video_m
     assert [hub.index(callback) for callback in expected_primary] == sorted(
         hub.index(callback) for callback in expected_primary
     )
-    assert hub.count('"videoedit|latest_status"') == 1
-    assert hub.index('"videoedit|guide"') < hub.index('"videoedit|latest_status"')
-    assert hub.index('"videoedit|latest_status"') < hub.index('"lvs27b|open"')
-    assert '"📊 Trạng thái chỉnh sửa"' in hub
+    assert '"videoedit|latest_status"' not in hub
+    assert '"lvs27b|open"' not in hub
+    assert '"📊 Trạng thái chỉnh sửa"' not in hub
     assert "videoedit|history" not in hub
     assert "videoedit|history" not in _function_source("handle_video_editor_callback")
     assert "latest_status" not in _function_source("video_editor_menu_keyboard")

@@ -31,7 +31,9 @@ def test_public_video_menu_order_is_frozen_without_callback_changes() -> None:
     )
     assert "VIDEO_PUBLIC_MENU_ROWS = video_uifreeze1.PUBLIC_MENU_ROWS" in BOT_SOURCE
     menu_builder = _function_source("main_video_keyboard")
-    assert "VIDEO_PUBLIC_MENU_ROWS" in menu_builder
+    visible_rows = _function_source("video_public_visible_menu_rows")
+    assert "video_public_visible_menu_rows" in menu_builder
+    assert "VIDEO_PUBLIC_MENU_ROWS" in visible_rows
     assert "entry_callback" in menu_builder
     assert "callback_data=str(route.get(\"entry_callback\")" in menu_builder
 
