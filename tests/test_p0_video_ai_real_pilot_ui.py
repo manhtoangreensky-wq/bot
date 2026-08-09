@@ -868,6 +868,39 @@ def test_video_ai_real_pilot_snapshot_keeps_real_portrait_ratio_and_scene_math()
     assert "2 cảnh × 6 giây = 12 giây" in summary_text
 
 
+def test_prompt_scene_duration_change_updates_already_materialized_scenes_on_reconfirm():
+    state = video_uiflow3.new_state("video_ai_real", draft_id="pilot-duration-reconfirm")
+    state = video_uiflow3.set_entry_mode(state, "prompt_video")
+    state = video_uiflow3.set_scene_count_preference(state, 2)
+    state = video_uiflow3.set_format(
+        state,
+        ratio="9:16",
+        target_duration_seconds=16,
+        seconds_per_scene=8,
+    )
+    state = video_uiflow3.set_content_candidate(
+        state,
+        source="manual",
+        original_intent="Hai cảnh chuyển động nối tiếp nhau.",
+        approved_brief={"title": "Hai cảnh nối tiếp"},
+    )
+    state = video_uiflow3.lock_content(state)
+    state = video_uiflow3.confirm_scene_count(state, 2)
+    assert [scene["duration_target"] for scene in state["scenes"]] == [8, 8]
+
+    state = video_uiflow3.set_format(
+        state,
+        target_duration_seconds=12,
+        seconds_per_scene=6,
+    )
+    assert state["format"]["scene_count_confirmed"] is False
+
+    state = video_uiflow3.confirm_scene_count(state, 2)
+    assert state["format"]["target_duration_seconds"] == 12
+    assert [scene["duration_target"] for scene in state["scenes"]] == [6, 6]
+    assert sum(scene["duration_target"] for scene in state["scenes"]) == 12
+
+
 def test_video_ai_real_pilot_copy_does_not_change_other_products():
     state = video_uiflow3.new_state("script_image_video", draft_id="not-pilot")
     state = video_uiflow3.set_format(state, ratio="9:16", target_duration_seconds=16)

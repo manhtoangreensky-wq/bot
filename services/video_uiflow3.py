@@ -1845,9 +1845,17 @@ def confirm_scene_count(state: Mapping[str, Any], count: int) -> dict[str, Any]:
         scene = _scene(ordinal, seconds=seconds, ratio=ratio)
         scene["scene_id"] = scene_id
         scenes.append(scene)
+    prompt_video_uniform_duration = (
+        current["parent_product"] == "video_ai_real"
+        and current["entry_mode"] == "prompt_video"
+    )
     for index, scene in enumerate(scenes, 1):
         scene["scene_index"] = index
-        scene["duration_target"] = max(1, _integer(scene.get("duration_target"), seconds))
+        scene["duration_target"] = (
+            seconds
+            if prompt_video_uniform_duration
+            else max(1, _integer(scene.get("duration_target"), seconds))
+        )
         scene["ratio"] = ratio
     _link_scene_states(scenes)
     removed_ids = {str(item.get("scene_id") or "") for item in existing_scenes[target:]}
