@@ -147,6 +147,10 @@ def test_videoedit_logo_image_and_text_watermark_are_distinct_products() -> None
 
     assert ("🖼 Logo ảnh", "videoedit|logo_entry") in visible
     assert ("🏷️ Watermark chữ", "videoedit|watermark_entry") in visible
+    assert not any(
+        "Trạng thái chỉnh sửa" in label or callback == "videoedit|latest_status"
+        for label, callback in visible
+    )
     assert not any("Logo & watermark" in label or "Logo / watermark" in label for label, _ in visible)
 
     assert video_edit_state_machine.parent_callback("logo_input") == "videoedit|branding"
@@ -1674,6 +1678,55 @@ def test_brightness_and_trim_keep_the_inspected_source_evidence() -> None:
             assert "Bạn muốn mình giúp gì" not in message.replies[0][0]
         finally:
             bot.clear_video_editor_pending(user_id)
+
+
+def test_public_cut_route_collects_trim_and_reaches_review_with_exact_parents() -> None:
+    user_id = 91_006
+    bot.clear_video_editor_pending(user_id)
+    try:
+        _store_state(user_id, _ready_state(user_id))
+
+        cut_query = _press_callback(user_id, "videoedit|cut")
+        assert cut_query.edits
+        cut_buttons = _button_pairs(cut_query.edits[-1][1]["reply_markup"])
+        assert ("✂️ Cắt đầu/cuối", "videoedit|trim_edges") in cut_buttons
+        assert ("⬅️ Quay lại", "videoedit|workspace") in cut_buttons
+        cut_state = bot.get_video_editor_pending(user_id)
+        assert cut_state["current_screen"] == "cut"
+        assert cut_state["parent_callback"] == "videoedit|workspace"
+
+        trim_query = _press_callback(user_id, "videoedit|trim_edges")
+        assert trim_query.edits
+        trim_buttons = _button_pairs(trim_query.edits[-1][1]["reply_markup"])
+        assert ("⬅️ Quay lại", "videoedit|cut") in trim_buttons
+        trim_state = bot.get_video_editor_pending(user_id)
+        assert trim_state["step"] == "await_trim_edges"
+        assert trim_state["current_screen"] == "trim_input"
+        assert trim_state["parent_callback"] == "videoedit|cut"
+
+        handled, message = _run_pending_text(user_id, "00:10-00:40")
+        assert handled is True
+        assert len(message.replies) == 1
+        planned = bot.get_video_editor_pending(user_id)
+        assert planned["manual_edit_plan"]["trim"] == {
+            "start_ms": 10_000,
+            "end_ms": 40_000,
+        }
+        assert planned["current_screen"] == "workspace"
+        assert ("✅ Hoàn tất & tiếp tục", "videoedit|review") in _button_pairs(
+            message.replies[-1][1]["reply_markup"]
+        )
+
+        review_query = _press_callback(user_id, "videoedit|review")
+        assert review_query.edits
+        review_buttons = _button_pairs(review_query.edits[-1][1]["reply_markup"])
+        assert ("➡️ Tiếp tục xác nhận", "videoedit|confirmation") in review_buttons
+        assert ("⬅️ Quay lại", "videoedit|cut") in review_buttons
+        review_state = bot.get_video_editor_pending(user_id)
+        assert review_state["current_screen"] == "review"
+        assert review_state["return_to"] == "cut"
+    finally:
+        bot.clear_video_editor_pending(user_id)
 
 
 def test_watermark_has_an_independent_render_plan_and_alpha_drawtext() -> None:
