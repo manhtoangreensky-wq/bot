@@ -191,6 +191,44 @@ def test_all_scope_worker_never_claims_a_video_edit_only_job(
     assert claim_calls == [f"vps-{VIDEO_EDIT_ONLY}:1"]
 
 
+def test_startup_creates_video_edit_schema_before_first_dedicated_poll(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "fresh-video-edit-worker.sqlite3"
+    monkeypatch.setattr(bot, "DB_FILE", str(database))
+    monkeypatch.setattr(bot, "DB_MIGRATION_DRY_RUN", False)
+    monkeypatch.setattr(bot, "evaluate_data_persistence_startup_state", lambda: None)
+    monkeypatch.setattr(bot, "ensure_startup_sqlite_backup_once", lambda: None)
+    monkeypatch.setattr(bot, "LOCAL_WORKER_TOKEN", "legacy-token")
+    monkeypatch.setattr(bot, "VIDEO_EDIT_WORKER_TOKEN", "dedicated-token", raising=False)
+    monkeypatch.setattr(bot, "LOCAL_WORKER_ENABLED", True)
+    monkeypatch.setattr(bot, "LOCAL_WORKER_POLL_ENABLED", True)
+    monkeypatch.setattr(bot, "set_system_setting", lambda *_args, **_kwargs: None)
+
+    bot.init_db()
+
+    response = asyncio.run(
+        bot.internal_worker_poll(
+            _worker_request(VIDEO_EDIT_ONLY, "dedicated-token")
+        )
+    )
+    assert response["ok"] is True
+    assert response["job"] is None
+
+    conn = bot.db_connect()
+    try:
+        tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+    assert {"video_edit_jobs", "video_edit_outbox"} <= tables
+
+
 @pytest.mark.parametrize(
     ("scope", "cleanup_started"),
     [("all", False), (VIDEO_EDIT_ONLY, True)],
