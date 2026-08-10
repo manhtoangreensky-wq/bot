@@ -736,7 +736,7 @@ def set_entry_mode(state: Mapping[str, Any], mode: str) -> dict[str, Any]:
         current["source"]["required"] = selected in {"image_video", "video_video"}
         current["source"]["kind"] = "raw_images" if selected == "image_video" else "source_video" if selected == "video_video" else "prompt"
     elif product == "storyboard_prompt":
-        current["source"]["required"] = selected == "storyboard_upload"
+        current["source"]["required"] = True
         current["source"]["kind"] = "storyboard_panels" if selected == "storyboard_upload" else "generated_storyboard"
     current["source"]["complete"] = bool(current["source"].get("assets")) if current["source"]["required"] else True
     current["entry_mode"] = selected
