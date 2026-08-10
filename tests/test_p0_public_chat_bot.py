@@ -100,7 +100,9 @@ def test_public_chat_menu_puts_free_first_and_pro_next_to_account():
     assert '[InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main")]' in BOT_SOURCE
     assert 'InlineKeyboardButton(f"💎 Chat Pro • {public_chat_runtime.CHAT_PRO_RATE_LABEL}", callback_data="menu|chat_pro")' in BOT_SOURCE
     assert 'InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")' in BOT_SOURCE
-    assert 'if action == "chat_pro_toggle":' in BOT_SOURCE
+    assert 'toggle_action = "menu|chat_pro_off" if pro else "menu|chat_pro_on"' in BOT_SOURCE
+    assert 'if action in {"chat_pro_on", "chat_pro_off", "chat_pro_toggle"}:' in BOT_SOURCE
+    assert "resolve_public_chat_mode_action(action, current)" in BOT_SOURCE
     assert 'if action == "chat_free":' in BOT_SOURCE
 
 
@@ -126,13 +128,13 @@ def test_public_chat_runtime_copy_has_one_price_authority_and_no_legacy_fixed_pr
     assert "Owner/Admin" in combined
 
 
-def test_legacy_deep_alias_is_pro_and_one_shot_uses_public_runtime():
-    deep_on = _function_source("async def cmd_chat_deep_on", "async def cmd_chat_deep_off")
-    deep = _function_source("async def cmd_chat_deep(", "async def run_one_shot_chat_command")
-    pro = _function_source("async def cmd_chat_pro(", "async def cmd_chat_deep(")
-    assert 'set_chat_mode_command(update, "pro", "/chat_deep_on"' in deep_on
-    assert "return await cmd_chat_pro(update, context)" in deep
+def test_public_chat_exposes_only_free_and_pro_modes():
+    pro = _function_source("async def cmd_chat_pro(", "async def run_one_shot_chat_command")
     assert "handle_public_chat_text" in pro
+    assert "Chat Deep" not in BOT_SOURCE
+    assert "/chat_deep" not in BOT_SOURCE
+    assert 'CommandHandler("chat_deep' not in BOT_SOURCE
+    assert 'mode = "pro" if raw_mode in {"pro", "deep"} else "normal"' in BOT_SOURCE
 
 
 def test_ordinary_text_public_chat_is_last_resort_after_protected_owners():

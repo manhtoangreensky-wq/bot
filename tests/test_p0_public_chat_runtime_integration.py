@@ -9,7 +9,11 @@ from types import SimpleNamespace
 import pytest
 
 from services.chat_pro_pricing import calculate_opus_charge_xu
-from services.public_chat_runtime import _usage_from_result, run_public_chat_request
+from services.public_chat_runtime import (
+    _usage_from_result,
+    resolve_public_chat_mode_action,
+    run_public_chat_request,
+)
 from services.public_chat_store import ensure_schema
 
 
@@ -97,6 +101,13 @@ class _SensitiveOpus(_Opus):
 def _run(conn, **kwargs):
     record_credit_event = kwargs.pop("record_credit_event", _record)
     return asyncio.run(run_public_chat_request(conn=conn, owner_id=kwargs.pop("owner_id", "u1"), chat_id="chat", source_message_id=kwargs.pop("source_message_id", "m1"), text=kwargs.pop("text", "hello"), record_credit_event=record_credit_event, **kwargs))
+
+
+def test_explicit_pro_mode_actions_are_idempotent_for_duplicate_callbacks():
+    assert resolve_public_chat_mode_action("chat_pro_on", "normal") == "pro"
+    assert resolve_public_chat_mode_action("chat_pro_on", "pro") == "pro"
+    assert resolve_public_chat_mode_action("chat_pro_off", "pro") == "normal"
+    assert resolve_public_chat_mode_action("chat_pro_off", "normal") == "normal"
 
 
 def test_usage_parser_defaults_cache_only_when_cache_field_is_absent():
