@@ -1718,9 +1718,14 @@ def test_delivery_unknown_status_is_terminal_and_never_claims_waiting_or_retry()
 
 def test_free_delivered_status_never_claims_a_pending_fee() -> None:
     status = _function_source("video_editor_job_status_text")
-    assert "confirmed_price_xu <= 0" in status
-    assert "miễn phí 0 Xu" in status
-    free_branch = status[status.index("confirmed_price_xu <= 0"):status.index('elif charge_state == "charged"')]
+    free_condition = 'confirmed_price_xu == 0 and charge_state == "not_charged"'
+    assert free_condition in status
+    assert "• Đã trừ: <b>0 Xu</b>" in status
+    free_branch = status[
+        status.index(free_condition) : status.index(
+            "elif (\n            confirmed_price_xu is not None"
+        )
+    ]
     assert "đang được ghi nhận" not in free_branch
     assert "local" not in free_branch.lower()
 

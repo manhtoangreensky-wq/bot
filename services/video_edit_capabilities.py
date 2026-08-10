@@ -535,6 +535,32 @@ def _fold_vietnamese(value: Any) -> str:
     return re.sub(r"[^a-z0-9:]+", " ", text).strip()
 
 
+def _explicit_percent_for_context(
+    user_intent: str,
+    contexts: tuple[str, ...],
+    *,
+    excluded_contexts: tuple[str, ...] = (),
+) -> int | None:
+    """Return a percentage only from the same local subject clause."""
+    text = unicodedata.normalize("NFKD", str(user_intent or "")).lower()
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    text = text.replace("đ", "d")
+    text = re.sub(r"-(?!\d)", " ", text)
+    text = re.sub(r"[^a-z0-9%\-]+", " ", text).strip()
+    context = "|".join(re.escape(item) for item in contexts)
+    pattern = (
+        rf"\b(?:{context})\b"
+        rf"(?:\s+(?!-?\d+\s*%)[a-z0-9]+){{0,5}}"
+        rf"\s+(?P<percent>-?\d+)\s*%"
+    )
+    excluded = "|".join(re.escape(item) for item in excluded_contexts)
+    for match in re.finditer(pattern, text):
+        if excluded and re.search(rf"\b(?:{excluded})\b", match.group(0)):
+            continue
+        return int(match.group("percent"))
+    return None
+
+
 # Ordered by the canonical plan output, not by the order in which keywords
 # happen to occur in a user's sentence.  This makes equivalent Vietnamese
 # requests compile to byte-for-byte equivalent JSON-like dictionaries.
@@ -608,6 +634,37 @@ def compile_local_intent(
         base["message_vi"] = "Hãy mô tả thao tác cục bộ như làm sáng, làm rõ, giảm nhiễu hoặc video dọc TikTok; chưa tạo tác vụ và chưa trừ Xu."
         return base
 
+    brightness_percent = _explicit_percent_for_context(
+        user_intent,
+        ("do sang", "lam sang", "can sang", "anh sang", "brightness", "bright"),
+        excluded_contexts=("am luong", "volume"),
+    )
+    master_volume_percent = _explicit_percent_for_context(
+        user_intent,
+        ("am luong", "volume"),
+        excluded_contexts=(
+            "do sang",
+            "lam sang",
+            "can sang",
+            "anh sang",
+            "brightness",
+            "bright",
+        ),
+    )
+    for percent, reason, allowed_range in (
+        (brightness_percent, "brightness_percent_out_of_range", "20% đến 200%"),
+        (master_volume_percent, "master_volume_percent_out_of_range", "0% đến 200%"),
+    ):
+        lower_bound = 20 if reason == "brightness_percent_out_of_range" else 0
+        if percent is not None and not lower_bound <= percent <= 200:
+            base["reason"] = reason
+            base["manual_edit_plan"] = deepcopy(existing_plan)
+            base["message_vi"] = (
+                f"Phần trăm được yêu cầu phải trong khoảng {allowed_range}; "
+                "chưa tạo tác vụ và chưa trừ Xu."
+            )
+            return base
+
     unsupported = [term for term in _UNSUPPORTED_INTENT_TERMS if term in normalized]
     if unsupported:
         base["unsupported"] = True
@@ -626,6 +683,10 @@ def compile_local_intent(
     for key, terms in _LOCAL_INTENT_RULES:
         if any(term in searchable for term in terms) and plan_patch(key):
             selected.append(key)
+    if brightness_percent is not None and "enhance_light_color" not in selected:
+        selected.append("enhance_light_color")
+    if master_volume_percent is not None:
+        selected.append("audio_master_volume")
     if not selected:
         base["reason"] = "no_local_capability_match"
         base["manual_edit_plan"] = deepcopy(existing_plan)
@@ -637,7 +698,12 @@ def compile_local_intent(
 
     compiled: dict[str, Any] = existing_plan
     for key in selected:
-        patch = plan_patch(key)
+        if key == "enhance_light_color" and brightness_percent is not None:
+            patch = {"brightness_percent": brightness_percent}
+        elif key == "audio_master_volume" and master_volume_percent is not None:
+            patch = {"volume": master_volume_percent / 100}
+        else:
+            patch = plan_patch(key)
         # The public phrase "video dọc TikTok" carries an explicit ratio;
         # retain the generic capability patch for other callers but compile
         # this intent to the concrete local crop requested by the user.

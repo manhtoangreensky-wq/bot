@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from services import video_edit_capabilities as capabilities
 from services import video_local_editing as editing
 from services import video_local_validation as validation
 from services import video_smart_splitter as splitter
@@ -394,6 +395,46 @@ def source_clip(tmp_path: Path) -> Path:
     source = tmp_path / "source-red.mp4"
     _make_clip(source, color="red", frequency=440)
     return source
+
+
+def test_videoedit_numeric_goal_executes_observable_brightness_and_volume(
+    source_clip: Path,
+    tmp_path: Path,
+) -> None:
+    compiled = capabilities.compile_local_intent(
+        "Làm sáng video lên 120% và tăng âm lượng lên 110%"
+    )
+    assert compiled["ok"] is True
+    assert compiled["manual_edit_plan"] == {
+        "brightness_percent": 120,
+        "volume": 1.1,
+    }
+
+    baseline = tmp_path / "numeric-goal-baseline.mp4"
+    output = tmp_path / "numeric-goal-output.mp4"
+    _run_edit(
+        source_clip,
+        baseline,
+        tmp_path,
+        trim={"start_ms": 0, "end_ms": 1_500},
+    )
+    result = _run_edit(
+        source_clip,
+        output,
+        tmp_path,
+        trim={"start_ms": 0, "end_ms": 1_500},
+        **compiled["manual_edit_plan"],
+    )
+
+    assert result["validation"]["full_decode"] is True
+    baseline_light = sum(_frame_mean_rgb(baseline, at_seconds=0.7))
+    edited_light = sum(_frame_mean_rgb(output, at_seconds=0.7))
+    assert edited_light > baseline_light * 1.10
+    volume_ratio = _audio_rms(output, at_seconds=0.7) / _audio_rms(
+        baseline,
+        at_seconds=0.7,
+    )
+    assert 1.04 <= volume_ratio <= 1.16
 
 
 def test_videoedit_trim_preserves_audio_with_local_fade_effect(source_clip: Path, tmp_path: Path) -> None:

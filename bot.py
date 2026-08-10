@@ -86449,11 +86449,24 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
     is_vi = normalize_user_language(lang) == "vi"
     status = str((job or {}).get("status") or "unknown").lower()
     progress = video_local_job_progress_payload(job)
+
+    def strict_nonnegative_integer(value) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value >= 0 else None
+        if isinstance(value, str):
+            token = value.strip()
+            if token and token.isdigit():
+                return int(token)
+        return None
+
     canonical = dict((job or {}).get("_video_edit_canonical") or {})
     if not canonical:
         canonical = video_editengine1_job_for_worker((job or {}).get("id"))
     canonical_status = str(canonical.get("status") or "").lower()
     stage = str(progress.get("stage") or ("received" if status == "queued" else ""))
+    failed_stage = str(progress.get("failed_stage") or "").strip().lower()
     processed = max(0, safe_int(progress.get("processed"), 0))
     total = max(1, safe_int(progress.get("total"), 1))
     delivered = max(0, safe_int(progress.get("delivered"), 0))
@@ -86517,29 +86530,44 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
             stage,
             "Đang chờ xử lý" if is_vi else "Waiting to process",
         )
-    confirmed_price_xu = safe_int(canonical.get("price_xu") or (job or {}).get("xu_cost"), 0)
+    confirmed_price_xu = strict_nonnegative_integer(canonical.get("price_xu"))
+    if delivered_truth:
+        heading = "✅ <b>Đã hoàn tất</b>" if is_vi else "✅ <b>Completed</b>"
+    elif not delivery_uncertain and (
+        canonical_status == "failed_no_charge"
+        or status in {"failed", "cancelled"}
+        or stage == "failed_no_charge"
+    ):
+        heading = "❌ <b>Chưa xử lý được</b>" if is_vi else "❌ <b>Could not process</b>"
+    else:
+        heading = "🎞 <b>Trạng thái chỉnh sửa video</b>" if is_vi else "🎞 <b>Video Edit status</b>"
     if is_vi:
         lines = [
-            "🎞 <b>Trạng thái chỉnh sửa video</b>",
+            heading,
             "",
             f"• Mã xử lý: <code>#{html.escape(str((job or {}).get('id') or '-'))}</code>",
-            f"• Trạng thái: <b>{html.escape(public_status)}</b>",
-            f"• Giá đã xác nhận: <b>{confirmed_price_xu} Xu</b>",
         ]
+        if not delivered_truth:
+            lines.append(f"• Trạng thái: <b>{html.escape(public_status)}</b>")
+        if confirmed_price_xu is not None:
+            lines.append(f"• Giá: <b>{confirmed_price_xu} Xu</b>")
     else:
         lines = [
-            "🎞 <b>Video Edit status</b>",
+            heading,
             "",
             f"• Task ID: <code>#{html.escape(str((job or {}).get('id') or '-'))}</code>",
-            f"• Status: <b>{html.escape(public_status)}</b>",
-            f"• Confirmed price: <b>{confirmed_price_xu} Xu</b>",
         ]
+        if not delivered_truth:
+            lines.append(f"• Status: <b>{html.escape(public_status)}</b>")
+        if confirmed_price_xu is not None:
+            lines.append(f"• Price: <b>{confirmed_price_xu} Xu</b>")
     failed = bool(
         canonical_status == "failed_no_charge"
         or delivery_uncertain
         or status in {"failed", "cancelled"}
         or stage == "failed_no_charge"
     )
+    board_stage = failed_stage if failed and failed_stage else stage
     completed_count = {
         "received": 1,
         "inspecting_input": 1,
@@ -86548,7 +86576,7 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
         "validating_output": 4,
         "delivering": 5,
         "delivered": 6,
-    }.get(stage, 1 if status in {"queued", "running"} else 0)
+    }.get(board_stage, 1 if status in {"queued", "running"} else 0)
     if delivered_truth:
         completed_count = 6
     elif delivery_uncertain:
@@ -86583,6 +86611,33 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
         else:
             icon = "⬜"
         lines.append(f"{icon} {label}")
+    if delivered_truth:
+        lines.append(
+            "• Kết quả: <b>Hoàn tất</b>"
+            if is_vi
+            else "• Result: <b>Completed</b>"
+        )
+    raw_operation_summary = progress.get("operation_summary")
+    if delivered_truth and isinstance(raw_operation_summary, list):
+        operation_summary = [
+            item.strip()
+            for item in raw_operation_summary
+            if isinstance(item, str) and item.strip()
+        ]
+        if operation_summary and len(operation_summary) == len(raw_operation_summary):
+            lines.append(
+                "• Thao tác: <b>" + html.escape("; ".join(operation_summary)) + "</b>"
+                if is_vi
+                else "• Operations: <b>" + html.escape("; ".join(operation_summary)) + "</b>"
+            )
+    failure_stage_labels = {
+        "received": canonical_stages[0],
+        "inspecting_input": canonical_stages[1],
+        "preparing_plan": canonical_stages[2],
+        "processing_video": canonical_stages[3],
+        "validating_output": canonical_stages[4],
+        "delivering": canonical_stages[5],
+    }
     if total > 1 and stage in {"processing_video", "validating_output", "delivering", "delivered", "delivery_unknown"}:
         if stage == "delivering":
             lines.append(
@@ -86618,36 +86673,155 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
             part_label = "phần" if is_vi else "parts"
             lines.append(f"• {action}: <b>{min(processed, total)}/{total}</b> {part_label}")
     if delivered_truth:
-        lines.append(
-            "• Kết quả: hệ thống đã gửi file MP4 hợp lệ vào cuộc trò chuyện."
-            if is_vi
-            else "• Result: a validated MP4 file was delivered to this chat."
+        canonical_probe = dict(canonical.get("ffprobe") or {})
+        if artifact_receipts:
+            artifact_durations = [
+                strict_nonnegative_integer(
+                    dict(item.get("ffprobe") or {}).get("duration_ms")
+                )
+                for item in artifact_receipts
+            ]
+            duration_ms = (
+                sum(artifact_durations)
+                if all(value is not None and value > 0 for value in artifact_durations)
+                else 0
+            )
+        else:
+            duration_ms = strict_nonnegative_integer(
+                canonical_probe.get("duration_ms")
+            ) or 0
+        if duration_ms > 0:
+            duration_seconds = duration_ms / 1000.0
+            duration_text = (
+                str(int(duration_seconds))
+                if duration_seconds.is_integer()
+                else f"{duration_seconds:.1f}".rstrip("0").rstrip(".")
+            )
+            lines.append(
+                f"• Thời lượng video: <b>{duration_text} giây</b>"
+                if is_vi
+                else f"• Video duration: <b>{duration_text} seconds</b>"
+            )
+        output_count = len(artifact_receipts) if artifact_receipts else 1
+        output_size_bytes = strict_nonnegative_integer(
+            canonical.get("output_size_bytes")
         )
-        charge_state = str(canonical.get("charge_state") or "not_charged")
-        if confirmed_price_xu <= 0:
+        common_resolution: tuple[int, int] | None = None
+        if artifact_receipts:
+            resolutions: list[tuple[int, int]] = []
+            for item in artifact_receipts:
+                probe = dict(item.get("ffprobe") or {})
+                width = strict_nonnegative_integer(probe.get("width"))
+                height = strict_nonnegative_integer(probe.get("height"))
+                if width is None or height is None or width <= 0 or height <= 0:
+                    resolutions = []
+                    break
+                resolutions.append((width, height))
+            if resolutions and len(set(resolutions)) == 1:
+                common_resolution = resolutions[0]
+        else:
+            output_width = strict_nonnegative_integer(canonical_probe.get("width"))
+            output_height = strict_nonnegative_integer(canonical_probe.get("height"))
+            if (
+                output_width is not None
+                and output_width > 0
+                and output_height is not None
+                and output_height > 0
+            ):
+                common_resolution = (output_width, output_height)
+        if output_size_bytes is not None and output_size_bytes > 0:
+            output_size_mb = output_size_bytes / (1024 * 1024)
+            output_size_text = f"{output_size_mb:.1f} MB"
+            output_parts = [f"{output_count} MP4" if output_count > 1 else "MP4"]
+            if common_resolution is not None:
+                output_parts.append(f"{common_resolution[0]}×{common_resolution[1]}")
+            output_parts.append(output_size_text)
+            output_summary = " · ".join(output_parts)
             lines.append(
-                "• Tác vụ cục bộ miễn phí 0 Xu; hệ thống không ghi phí và không chạm ví."
+                f"• Đầu ra: <b>{output_summary}</b>"
                 if is_vi
-                else "• This on-device task costs 0 Xu; no fee was recorded and the wallet was not touched."
+                else f"• Output: <b>{output_summary}</b>"
             )
-        elif charge_state == "charged":
-            charged_xu = safe_int(canonical.get("charged_xu"), 0)
+        raw_started_at = str((job or {}).get("started_at") or "")
+        raw_finished_at = str((job or {}).get("finished_at") or "")
+        if raw_started_at and raw_finished_at:
+            try:
+                started_at = parse_datetime_text(raw_started_at)
+                finished_at = parse_datetime_text(raw_finished_at)
+            except (TypeError, ValueError, OverflowError):
+                started_at = None
+                finished_at = None
+            if (
+                started_at is not None
+                and finished_at is not None
+                and finished_at >= started_at
+            ):
+                elapsed_seconds = int(
+                    round((finished_at - started_at).total_seconds())
+                )
+                lines.append(
+                    f"• Thời gian xử lý: <b>{elapsed_seconds} giây</b>"
+                    if is_vi
+                    else f"• Processing time: <b>{elapsed_seconds} seconds</b>"
+                )
+        if (
+            str(canonical.get("engine_route") or "") == video_editengine1.ENGINE_ROUTE
+            and str(canonical.get("worker_owner") or "") == video_editengine1.OUTBOX_OWNER
+        ):
+            engine_label = html.escape(
+                f"{video_editengine1.ENGINE_ROUTE} · {video_editengine1.OUTBOX_OWNER}"
+            )
             lines.append(
-                f"• Đã trừ: <b>{charged_xu} Xu</b> sau khi giao file."
+                f"• Engine: <b>{engine_label}</b>"
                 if is_vi
-                else f"• Charged: <b>{charged_xu} Xu</b> after delivery."
+                else f"• Engine: <b>{engine_label}</b>"
             )
-        elif charge_state == "charge_failed":
+        charge_state = str(canonical.get("charge_state") or "")
+        charged_xu = strict_nonnegative_integer(canonical.get("charged_xu"))
+        if confirmed_price_xu == 0 and charge_state == "not_charged":
+            lines.append(
+                "• Đã trừ: <b>0 Xu</b>"
+                if is_vi
+                else "• Charged: <b>0 Xu</b>"
+            )
+        elif (
+            confirmed_price_xu is not None
+            and charge_state == "charged"
+            and charged_xu == confirmed_price_xu
+        ):
+            lines.append(
+                f"• Đã trừ: <b>{charged_xu} Xu</b>"
+                if is_vi
+                else f"• Charged: <b>{charged_xu} Xu</b>"
+            )
+        elif confirmed_price_xu is not None and charge_state == "charge_failed":
             lines.append(
                 "• Giao file thành công; hệ thống chưa ghi được phí và không tự trừ lặp lại."
                 if is_vi
                 else "• Delivery succeeded; the fee was not recorded and will not be charged repeatedly."
             )
-        else:
+        elif confirmed_price_xu is not None and charge_state in {
+            "not_charged",
+            "charging",
+        }:
             lines.append(
                 "• Phí đang được ghi nhận sau biên nhận giao file; không cần bấm lại."
                 if is_vi
                 else "• The fee is being recorded from the delivery receipt; do not tap again."
+            )
+        lines.append(
+            "• Trạng thái: <b>Đã gửi video</b>"
+            if is_vi
+            else "• Delivery status: <b>Video delivered</b>"
+        )
+        authoritative_balance = strict_nonnegative_integer(
+            canonical.get("account_balance_xu")
+        )
+        if authoritative_balance is not None:
+            lines.append(
+                f"• Tài khoản còn: <b>{authoritative_balance} Xu</b>"
+                if is_vi
+                else f"• Account balance: <b>{authoritative_balance} Xu</b>"
             )
     elif delivery_uncertain:
         lines.append(
@@ -86662,8 +86836,8 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
             )
         )
         charge_state = str(canonical.get("charge_state") or "not_charged")
-        charged_xu = safe_int(canonical.get("charged_xu"), 0)
-        if charge_state == "charged" and charged_xu > 0:
+        charged_xu = strict_nonnegative_integer(canonical.get("charged_xu"))
+        if charge_state == "charged" and charged_xu is not None and charged_xu > 0:
             lines.append(
                 f"• Đã ghi nhận trừ: <b>{charged_xu} Xu</b>. Không bấm lại; hệ thống đang đối soát biên nhận giao file."
                 if is_vi
@@ -86675,7 +86849,7 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
                 if is_vi
                 else "• The fee is marked as recorded, but its Xu amount needs reconciliation. Do not tap again."
             )
-        elif confirmed_price_xu <= 0:
+        elif confirmed_price_xu == 0:
             lines.append(
                 "• Tác vụ cục bộ miễn phí 0 Xu; hệ thống không ghi phí và không chạm ví."
                 if is_vi
@@ -86694,10 +86868,27 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
                 else "• The panel has not recorded a new Xu charge. Do not tap again during reconciliation."
             )
     elif failed:
+        failed_stage_label = failure_stage_labels.get(failed_stage)
+        if failed_stage_label:
+            lines.append(
+                f"• Bước lỗi: <b>{html.escape(failed_stage_label)}</b>"
+                if is_vi
+                else f"• Failed step: <b>{html.escape(failed_stage_label)}</b>"
+            )
+        public_reason = (
+            "Hệ thống chưa tạo được file MP4 hợp lệ."
+            if str(progress.get("reason") or "").endswith("output_validation_failed")
+            else "Hệ thống chưa thể hoàn tất xử lý video."
+        )
         lines.append(
-            "• Kết quả: xử lý chưa thành công. Hệ thống không trừ Xu."
+            f"• Lý do: <b>{public_reason}</b>"
             if is_vi
-            else "• Result: processing did not complete. No Xu was charged."
+            else "• Reason: <b>The system could not complete video processing.</b>"
+        )
+        lines.append(
+            "• Đã trừ: <b>0 Xu</b>"
+            if is_vi
+            else "• Charged: <b>0 Xu</b>"
         )
     else:
         lines.append(

@@ -49,6 +49,7 @@ from services.video_local_editing import (
     execute_split_plan,
     manual_plan_assets_match,
     plan_has_effective_operation,
+    public_plan_summary,
     split_plan_has_manual_conflict,
 )
 from services.video_local_validation import (
@@ -863,6 +864,10 @@ class _VideoEditJobLiveness:
             raise LocalVideoEditError("video_local_edit_worker_lease_lost")
         with self._lock:
             self._stage = stage
+
+    def current_stage(self) -> str:
+        with self._lock:
+            return self._stage
 
     def assert_healthy(self) -> None:
         with self._lock:
@@ -2724,6 +2729,14 @@ def run_video_local_edit(job: dict) -> None:
                         "local1": 1,
                         "stage": "delivered",
                         "operation": mode,
+                        "operation_summary": (
+                            public_plan_summary(
+                                raw_plan,
+                                source_duration_ms=duration_hint,
+                            )
+                            if mode == "manual"
+                            else ["Tách video"]
+                        ),
                         "processed": expected_output_total,
                         "total": expected_output_total,
                         "delivered": expected_output_total,
@@ -3050,6 +3063,12 @@ def run_video_local_edit(job: dict) -> None:
             raise LocalVideoEditError(
                 str(downloaded_validation.get("reason") or "invalid_video")
             )
+        liveness.update_stage("preparing_plan")
+        _local1_progress(
+            job_id,
+            "preparing_plan",
+            claim_attempt=claim_attempt,
+        )
         if mode == "split" and split_plan_has_manual_conflict(
             submitted_manual_plan,
             source_duration_ms=int(downloaded_validation.get("duration_ms") or 0),
@@ -3348,9 +3367,13 @@ def run_video_local_edit(job: dict) -> None:
             reused_output_count = len(prepared_by_index)
 
             def on_split_progress(status: dict) -> None:
+                callback_stage = str(
+                    status.get("stage") or "processing_video"
+                )
+                liveness.update_stage(callback_stage)
                 _local1_progress(
                     job_id,
-                    str(status.get("stage") or "processing_video"),
+                    callback_stage,
                     processed=min(
                         total,
                         reused_output_count
@@ -3528,6 +3551,7 @@ def run_video_local_edit(job: dict) -> None:
                 "local1": 1,
                 "stage": "delivered",
                 "operation": "split",
+                "operation_summary": ["Tách video"],
                 "processed": total,
                 "total": total,
                 "delivered": total,
@@ -3825,9 +3849,13 @@ def run_video_local_edit(job: dict) -> None:
                     recovered_canonical = True
 
             def on_manual_progress(status: dict) -> None:
+                callback_stage = str(
+                    status.get("stage") or "processing_video"
+                )
+                liveness.update_stage(callback_stage)
                 _local1_progress(
                     job_id,
-                    str(status.get("stage") or "processing_video"),
+                    callback_stage,
                     processed=int(status.get("processed") or 0),
                     total=int(status.get("total") or 1),
                     claim_attempt=claim_attempt,
@@ -3986,6 +4014,12 @@ def run_video_local_edit(job: dict) -> None:
                 "local1": 1,
                 "stage": "delivered",
                 "operation": "manual",
+                "operation_summary": public_plan_summary(
+                    logical_plan,
+                    source_duration_ms=int(
+                        downloaded_validation.get("duration_ms") or 0
+                    ),
+                ),
                 "processed": 1,
                 "total": 1,
                 "delivered": 1,
@@ -4000,6 +4034,11 @@ def run_video_local_edit(job: dict) -> None:
         terminal_status = "succeeded"
     except (LocalVideoEditError, LocalVideoValidationError) as exc:
         failure_reason = str(getattr(exc, "reason", str(exc)))[:160]
+        failed_stage = (
+            liveness.current_stage()
+            if liveness is not None
+            else "received"
+        )
         if delivery_receipts:
             failure_identity = _video_edit_receipt_identity(
                 delivery_receipts,
@@ -4020,6 +4059,7 @@ def run_video_local_edit(job: dict) -> None:
             terminal_detail = json.dumps({
                 "local1": 1,
                 "stage": "delivery_unknown",
+                "failed_stage": failed_stage,
                 "reason": failure_reason,
                 "delivered": len(delivery_receipts),
                 "total": expected_output_total,
@@ -4030,6 +4070,7 @@ def run_video_local_edit(job: dict) -> None:
             terminal_detail = json.dumps({
                 "local1": 1,
                 "stage": "delivery_unknown",
+                "failed_stage": failed_stage,
                 "reason": failure_reason,
                 "delivered": len(delivery_receipts),
                 "total": expected_output_total,
@@ -4040,6 +4081,7 @@ def run_video_local_edit(job: dict) -> None:
             terminal_detail = json.dumps({
                 "local1": 1,
                 "stage": "failed_no_charge",
+                "failed_stage": failed_stage,
                 "reason": failure_reason,
                 "charge": 0,
                 "charged_xu": 0,
@@ -4052,6 +4094,11 @@ def run_video_local_edit(job: dict) -> None:
             if raw_failure_reason.startswith("telegram_delivery_")
             else f"{type(exc).__name__}:{raw_failure_reason}"
         )[:160]
+        failed_stage = (
+            liveness.current_stage()
+            if liveness is not None
+            else "received"
+        )
         if delivery_receipts:
             failure_identity = _video_edit_receipt_identity(
                 delivery_receipts,
@@ -4072,6 +4119,7 @@ def run_video_local_edit(job: dict) -> None:
             terminal_detail = json.dumps({
                 "local1": 1,
                 "stage": "delivery_unknown",
+                "failed_stage": failed_stage,
                 "reason": failure_reason,
                 "delivered": len(delivery_receipts),
                 "total": expected_output_total,
@@ -4082,6 +4130,7 @@ def run_video_local_edit(job: dict) -> None:
             terminal_detail = json.dumps({
                 "local1": 1,
                 "stage": "delivery_unknown",
+                "failed_stage": failed_stage,
                 "reason": failure_reason,
                 "delivered": len(delivery_receipts),
                 "total": expected_output_total,
@@ -4092,6 +4141,7 @@ def run_video_local_edit(job: dict) -> None:
             terminal_detail = json.dumps({
                 "local1": 1,
                 "stage": "failed_no_charge",
+                "failed_stage": failed_stage,
                 "reason": failure_reason,
                 "charge": 0,
                 "charged_xu": 0,

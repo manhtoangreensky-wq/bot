@@ -214,12 +214,17 @@ def _run_job(
         class FakeVideoEditJobLiveness:
             def __init__(self) -> None:
                 self._stopped = False
+                self._stage = ""
 
             def start(self) -> None:
                 liveness_evidence.append("start")
 
             def update_stage(self, stage: str) -> None:
+                self._stage = stage
                 liveness_evidence.append(f"stage:{stage}")
+
+            def current_stage(self) -> str:
+                return self._stage
 
             def assert_healthy(self) -> None:
                 nonlocal health_check_count
@@ -1025,6 +1030,7 @@ def test_cleanup_intent_is_durable_before_first_workspace_download(
     )
 
     assert terminal["status"] == "succeeded"
+    assert json.loads(terminal["detail"])["operation_summary"] == ["Độ sáng 110%"]
     assert setup[:4] == [
         "ffmpeg_lookup",
         "workspace",
@@ -2718,6 +2724,7 @@ def test_video_edit_worker_liveness_tracks_real_stages_without_percent_events(
         "assert_healthy",
         "probe",
         "validate",
+        "stage:preparing_plan",
         "stage:processing_video",
         "assert_healthy",
         "execute",
@@ -2753,6 +2760,7 @@ def test_video_edit_liveness_failure_stops_before_one_terminal_and_fences_delive
     detail = json.loads(terminal["detail"])
     assert terminal["status"] == "failed"
     assert detail["stage"] == "failed_no_charge"
+    assert detail["failed_stage"] == "delivering"
     assert detail["charged_xu"] == 0
     assert detail["reason"] == "video_local_edit_worker_lease_lost"
     assert captions == []
@@ -2765,6 +2773,7 @@ def test_video_edit_liveness_failure_stops_before_one_terminal_and_fences_delive
         "assert_healthy",
         "probe",
         "validate",
+        "stage:preparing_plan",
         "stage:processing_video",
         "assert_healthy",
         "execute",
@@ -2796,6 +2805,7 @@ def test_video_edit_liveness_loss_after_manual_delivery_preserves_receipt_withou
     receipt = json.loads(terminal["output_url"])
     assert terminal["status"] == "failed"
     assert detail["stage"] == "delivery_unknown"
+    assert detail["failed_stage"] == "delivering"
     assert detail["delivered"] == 1
     assert detail["charge"] == 0
     assert terminal["output_file_id"] == "file-1"
@@ -2811,6 +2821,7 @@ def test_video_edit_liveness_loss_after_manual_delivery_preserves_receipt_withou
         "assert_healthy",
         "probe",
         "validate",
+        "stage:preparing_plan",
         "stage:processing_video",
         "assert_healthy",
         "execute",
@@ -2844,6 +2855,7 @@ def test_video_edit_liveness_loss_during_shutdown_preserves_receipt_without_retr
     receipt = json.loads(terminal["output_url"])
     assert terminal["status"] == "failed"
     assert detail["stage"] == "delivery_unknown"
+    assert detail["failed_stage"] == "delivering"
     assert detail["reason"] == "video_local_edit_worker_lease_lost"
     assert detail["delivered"] == 1
     assert detail["charge"] == 0
@@ -2863,6 +2875,7 @@ def test_video_edit_liveness_loss_during_shutdown_preserves_receipt_without_retr
         "assert_healthy",
         "probe",
         "validate",
+        "stage:preparing_plan",
         "stage:processing_video",
         "assert_healthy",
         "execute",
@@ -2904,6 +2917,7 @@ def test_split_delivery_fences_each_artifact_before_and_after_send(
         "assert_healthy",
         "probe",
         "validate",
+        "stage:preparing_plan",
         "stage:processing_video",
         "assert_healthy",
         "execute",

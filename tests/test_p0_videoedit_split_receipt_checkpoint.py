@@ -2283,6 +2283,7 @@ def test_deterministic_transport_rejection_persists_rejected_before_terminal_ack
     assert checkpoint_states == ["sending", "rejected"]
     assert result["terminal"]["status"] == "failed"
     assert terminal_detail["stage"] == "failed_no_charge"
+    assert terminal_detail["failed_stage"] == "delivering"
     assert terminal_cursor.state == "rejected"
     assert terminal_cursor.output_index == 1
     assert terminal_cursor.deterministic is True
