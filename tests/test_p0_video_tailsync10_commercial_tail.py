@@ -183,9 +183,8 @@ def test_long_public_entry_and_final_confirm_have_exact_separate_owners() -> Non
     handler = _between("async def handle_long_video_callback", "async def handle_storyboard_pack_callback")
     confirm = _between("async def handle_video_tail_callback", "async def handle_video_tail9_pending_text")
     long_route = route[route.index('"multi_scene_film"'):route.index('"video_idea"')]
-    assert '"entry_callback": "vid3|entry|multi_scene_film"' in long_route
-    assert '"legacy_entry_callback": "longvideo|public_guard"' in long_route
-    assert '"handler": "handle_video_uiflow3_callback"' in long_route
+    assert '"entry_callback": "longvideo|public_guard"' in long_route
+    assert '"handler": "handle_long_video_callback"' in long_route
     assert '"invoice_reachable": True' in long_route
     assert '"job_reachable": False' in long_route
     assert "start_public_video_scene2_step" in handler

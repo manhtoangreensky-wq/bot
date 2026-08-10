@@ -272,13 +272,24 @@ def _ready_supported_video_planning_state() -> dict:
     return video_uiflow3.normalize_state(state)
 
 
-def test_public_menu_routes_seven_creation_products_to_vid3_and_keeps_idea_as_catalog() -> None:
-    for product in CREATION_PRODUCTS:
+def test_public_menu_keeps_each_proven_product_owner_and_idea_as_catalog() -> None:
+    expected_routes = {
+        "video_trend": ("vproduct|open|video_trend", "handle_video_product_callback", "trend_first"),
+        "video_ai_real": ("vid3|entry|video_ai_real", "handle_video_uiflow3_callback", "content_first_canonical"),
+        "script_image_video": ("vproduct|open|script_image_video", "handle_video_product_callback", "intro_then_profile"),
+        "frame_video_local": ("vproduct|open|frame_video_local", "handle_video_product_callback", "local_frame_video"),
+        "self_shot_scene_change": ("vproduct|open|self_shot_scene_change", "handle_video_product_callback", "self_shot_product_hub"),
+        "storyboard_prompt": ("vproduct|open|storyboard_prompt", "handle_video_product_callback", "storyboard2_canonical"),
+        "multi_scene_film": ("longvideo|public_guard", "handle_long_video_callback", "canonical_long_preview"),
+    }
+    assert set(expected_routes) == set(CREATION_PRODUCTS)
+    menu_callbacks = _callbacks(bot.main_video_keyboard("vi"))
+    for product, expected in expected_routes.items():
         route = bot.VIDEO_PUBLIC_ROUTE_MATRIX[product]
-        assert route["entry_callback"] == f"vid3|entry|{product}"
-        assert route["handler"] == "handle_video_uiflow3_callback"
+        assert (route["entry_callback"], route["handler"], route["flow_type"]) == expected
         assert route["parent_menu"] == "menu|main_video"
         assert route["back_target"] == "menu|main_video"
+        assert menu_callbacks.count(route["entry_callback"]) == 1
     idea_route = bot.VIDEO_PUBLIC_ROUTE_MATRIX["video_idea"]
     assert idea_route["entry_callback"] == "videoidea|start"
     assert idea_route["handler"] == "handle_video_idea_callback"
@@ -576,33 +587,72 @@ def test_video_ai_real_summary_requires_quality_before_quote() -> None:
 
 def test_public_route_metadata_matches_actual_uiflow3_entry_screens() -> None:
     expected_children = {
-        "video_trend": ("vid3|source_text",),
+        "video_trend": (
+            "vtrend|catalog|latest",
+            "vtrend|manual_trend",
+        ),
         "video_ai_real": (
             "vid3|mode|prompt_video",
             "vid3|mode|image_video",
             "menu|guide_video_ai",
         ),
-        "script_image_video": ("vid3|source_text",),
-        "frame_video_local": ("vid3|source_media", "vid3|image_ai|source", "vid3|source_status"),
-        "self_shot_scene_change": ("vid3|source_media", "vid3|source_status"),
-        "storyboard_prompt": ("vid3|mode|storyboard_generate", "vid3|mode|storyboard_upload"),
-        "multi_scene_film": ("vid3|mode|series_plan",),
+        "script_image_video": (
+            "vproduct|script_existing|script_image_video",
+            "vproduct|script_ideas|script_image_video",
+            "vproduct|idea_library|script_image_video",
+            "menu|guide_video_ai",
+        ),
+        "frame_video_local": (
+            "framevideo|source|uploaded",
+            "framevideo|source|ai",
+            "framevideo|source|saved",
+            "framevideo|how",
+        ),
+        "self_shot_scene_change": (
+            "vproduct|selfshot_product|scene_change",
+            "vproduct|selfshot_product|cinematic",
+        ),
+        "storyboard_prompt": ("vstory|ai", "vstory|upload"),
+        "multi_scene_film": (
+            "vproduct|scene3_start|multi_scene_film",
+            "vproduct|idea_library|multi_scene_film",
+        ),
     }
     assert set(expected_children) == set(CREATION_PRODUCTS)
 
+    rendered_entry_markups = {
+        "video_trend": bot.video_trend2_entry_keyboard(),
+        "script_image_video": bot.task3d_product_intro_keyboard(
+            "script_image_video",
+            "vi",
+        ),
+        "frame_video_local": bot.ivf.frame_video_unified_menu_keyboard("vi"),
+        "self_shot_scene_change": bot.video_selfshot_product_hub_keyboard(),
+        "storyboard_prompt": bot.storyboard2_entry_keyboard(),
+        "video_idea": bot.video_idea_menu_keyboard("vi"),
+    }
+
     for product, children in expected_children.items():
         route = bot.VIDEO_PUBLIC_ROUTE_MATRIX[product]
-        adapter = video_uiflow3.ENTRY_ADAPTERS[product]
-        state = video_uiflow3.new_state(product, draft_id=f"route-{product}")
-        _text, markup = bot.video_uiflow3_screen_payload(state)
-        callbacks = _callbacks(markup)
-
-        assert route["first_step"] == adapter["initial_step"]
-        assert route["flow_type"] == "content_first_canonical"
-        assert route["canonical"] is True
         assert tuple(route["expected_children"]) == children
-        assert set(children).issubset(callbacks)
-        assert callbacks.count("menu|main_video") == 1
+        assert bot.video_route_expected_handler(route["entry_callback"]) == route["handler"]
+        assert all(bot.video_route_expected_handler(callback) for callback in children)
+        if product == "video_ai_real":
+            adapter = video_uiflow3.ENTRY_ADAPTERS[product]
+            state = video_uiflow3.new_state(product, draft_id=f"route-{product}")
+            _text, markup = bot.video_uiflow3_screen_payload(state)
+            callbacks = _callbacks(markup)
+            assert route["first_step"] == adapter["initial_step"]
+            assert set(children).issubset(callbacks)
+            assert callbacks.count("menu|main_video") == 1
+        elif product != "multi_scene_film":
+            visible_children = tuple(
+                callback
+                for callback in _callbacks(rendered_entry_markups[product])
+                if callback not in {"menu|main_video", "menu|main", "framevideo|main"}
+            )
+            assert visible_children == children
+            assert route["entry_callback"] not in visible_children
 
 
 def test_uiflow3_admin_audits_use_the_canonical_graph_not_legacy_steps() -> None:
@@ -626,12 +676,12 @@ def test_uiflow3_admin_audits_use_the_canonical_graph_not_legacy_steps() -> None
         for row in bot.video_back_audit_rows_detailed()
         if row["video_tool"] in CREATION_PRODUCTS
     ]
-    assert len(rows) == len(CREATION_PRODUCTS)
+    assert {row["video_tool"] for row in rows} == set(CREATION_PRODUCTS)
     for row in rows:
-        assert row["step"] == video_uiflow3.ENTRY_ADAPTERS[row["video_tool"]]["initial_step"]
-        assert row["expected"] == "menu|main_video"
-        assert row["actual"] == "menu|main_video"
+        assert row["expected"] == row["actual"]
         assert row["ok"] is True
+    ai_row = next(row for row in rows if row["video_tool"] == "video_ai_real")
+    assert ai_row["step"] == video_uiflow3.ENTRY_ADAPTERS["video_ai_real"]["initial_step"]
 
 
 def test_full_video_back_audit_has_no_false_failure_after_uiflow3_migration() -> None:

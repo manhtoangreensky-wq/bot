@@ -1,4 +1,4 @@
-"""Deterministic render contract for the Video AI Real prompt pilot.
+"""Deterministic render contract for Video AI Real prompt/image products.
 
 Creative selections are compiled into visual prompts. Dialogue, voices, music,
 captions, sound effects and branding remain in a separate post-production plan.
@@ -76,6 +76,43 @@ def _scene_reference_ids(
     ])
 
 
+def _global_scene_references(
+    state: Mapping[str, Any],
+    scene: Mapping[str, Any],
+) -> dict[str, list[str]]:
+    scene_id = _text(scene.get("scene_id"))
+    scene_index = max(1, int(scene.get("scene_index") or 1))
+    by_role = {
+        "visual_style_reference": [],
+        "storyboard_frames": [],
+    }
+    unscoped_storyboard: list[str] = []
+    for item in state.get("references") or []:
+        if not isinstance(item, Mapping):
+            continue
+        role = _text(item.get("role"))
+        if role not in by_role:
+            continue
+        allowed_scene_ids = {
+            _text(value) for value in item.get("allowed_scene_ids") or []
+        }
+        if allowed_scene_ids and scene_id not in allowed_scene_ids:
+            continue
+        asset_id = _text(item.get("asset_id"))
+        if not asset_id:
+            continue
+        if role == "storyboard_frames" and not allowed_scene_ids:
+            unscoped_storyboard.append(asset_id)
+        else:
+            by_role[role].append(asset_id)
+    if unscoped_storyboard:
+        storyboard_index = min(scene_index - 1, len(unscoped_storyboard) - 1)
+        by_role["storyboard_frames"].append(
+            unscoped_storyboard[storyboard_index]
+        )
+    return {role: _unique(asset_ids) for role, asset_ids in by_role.items()}
+
+
 def _visual_scene(
     state: Mapping[str, Any],
     scene: Mapping[str, Any],
@@ -114,6 +151,21 @@ def _visual_scene(
         products=products,
         props=props,
     )
+    global_references = _global_scene_references(state, scene)
+    references = _unique([
+        *references,
+        *global_references["visual_style_reference"],
+        *global_references["storyboard_frames"],
+    ])
+    if _text(state.get("entry_mode")) == "image_video":
+        references = _unique([
+            *references,
+            *(
+                item.get("asset_id")
+                for item in dict(state.get("source") or {}).get("assets") or []
+                if isinstance(item, Mapping)
+            ),
+        ])
 
     scene_index = max(1, int(scene.get("scene_index") or 1))
     duration = max(1, int(scene.get("duration_target") or fmt.get("seconds_per_scene") or 8))
@@ -124,7 +176,14 @@ def _visual_scene(
         scene.get("main_action") or scene.get("semantic_beat"),
         "Thực hiện trọn một hành động phù hợp nội dung",
     )
-    override = _text(scene.get("prompt_override"))
+    raw_override = scene.get("prompt_override")
+    override = str(raw_override) if raw_override is not None else ""
+    override_present = bool(override.strip())
+    raw_negative_override = scene.get("negative_prompt_override")
+    negative_override = (
+        str(raw_negative_override) if raw_negative_override is not None else ""
+    )
+    negative_override_present = bool(negative_override.strip())
     visual_direction = _unique([
         scene.get("framing") or scene.get("camera") or "Khung hình chân thật, chủ thể rõ",
         scene.get("movement") or "Chuyển động có chủ đích và kết thúc trọn vẹn",
@@ -164,17 +223,28 @@ def _visual_scene(
         )
     if references:
         prompt_parts.append("Dùng đúng các ảnh tham chiếu đã gắn cho nhận diện và bối cảnh; không tự thay thế chủ thể")
-    if override:
-        prompt_parts.append(f"Chỉ dẫn bổ sung của người dùng: {override}")
+    if global_references["visual_style_reference"]:
+        prompt_parts.append(
+            "Dùng ảnh phong cách làm chuẩn cho bảng màu, ánh sáng, chất liệu và ngôn ngữ hình ảnh; "
+            "không sao chép nhầm nhân vật hoặc sản phẩm từ ảnh phong cách"
+        )
+    if global_references["storyboard_frames"]:
+        prompt_parts.append(
+            "Dùng ảnh Storyboard làm chuẩn cho bố cục, vị trí chủ thể và diễn tiến hành động của cảnh"
+        )
     prompt_parts.extend([
         "Một cảnh chỉ có một nhịp nội dung chính; hoàn tất hành động và chuyển động camera trước khi cắt",
         "Không chèn lời thoại, giọng đọc, phụ đề, nhạc, hiệu ứng âm thanh, logo hoặc watermark trong lần dựng hình",
     ])
-    visual_prompt = " | ".join(item for item in prompt_parts if item)
-    negative_prompt = (
+    generated_visual_prompt = " | ".join(item for item in prompt_parts if item)
+    generated_negative_prompt = (
         "sai nhận diện, đổi khuôn mặt, đổi trang phục ngoài chỉ dẫn, đổi hình dáng hoặc nhãn sản phẩm, "
         "biến dạng tay, thừa ngón, vật thể nhân đôi, chữ ngẫu nhiên, logo giả, watermark giả, "
         "chuyển động giật, hành động dang dở, cắt giữa chuyển động camera"
+    )
+    visual_prompt = override if override_present else generated_visual_prompt
+    negative_prompt = (
+        negative_override if negative_override_present else generated_negative_prompt
     )
     scene_payload = {
         "scene_id": _text(scene.get("scene_id"), f"scene_{scene_index:02d}"),
@@ -186,7 +256,8 @@ def _visual_scene(
         "reference_asset_ids": references,
         "transition_in": _text(scene.get("transition_in")),
         "transition_out": _text(scene.get("transition_out")),
-        "user_override_applied": bool(override),
+        "user_override_applied": override_present,
+        "negative_override_applied": negative_override_present,
     }
     scene_payload["visual_prompt_hash"] = _hash_payload(scene_payload)
     return scene_payload
@@ -243,7 +314,7 @@ def build_post_production_manifest(state: Mapping[str, Any]) -> dict[str, Any]:
 def compile_render_contract(state: Mapping[str, Any]) -> dict[str, Any]:
     if _text(state.get("parent_product")) != "video_ai_real":
         raise ValueError("video_ai_real_prompt_contract_required")
-    if _text(state.get("entry_mode")) != "prompt_video":
+    if _text(state.get("entry_mode")) not in {"prompt_video", "image_video"}:
         raise ValueError("video_ai_real_prompt_contract_required")
     scenes = [dict(item) for item in state.get("scenes") or [] if isinstance(item, Mapping)]
     if not scenes:
@@ -269,6 +340,7 @@ def compile_render_contract(state: Mapping[str, Any]) -> dict[str, Any]:
     content = dict(state.get("content") or {})
     visual = {
         "schema_version": VISUAL_VERSION,
+        "entry_mode": _text(state.get("entry_mode")),
         "profile_id": _text(content.get("profile_id"), "general"),
         "content_revision": max(0, int(content.get("revision") or 0)),
         "aspect_ratio": _text(fmt.get("ratio"), "9:16"),
