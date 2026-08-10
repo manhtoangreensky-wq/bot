@@ -4452,7 +4452,6 @@ def build_product_video_confirm_kickoff_payload(
 ) -> dict[str, Any]:
     current_dt = now or datetime.now()
     scene_count = _product_video_scene_count(project)
-    scene_duration = PRODUCT_VIDEO_SCENE_SECONDS
     invoice = _json_loads(str(project.get("invoice_json") or ""), {})
     if not isinstance(invoice, dict):
         invoice = {}
@@ -4460,6 +4459,19 @@ def build_product_video_confirm_kickoff_payload(
     asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
     if not isinstance(asset_pack, dict):
         asset_pack = {}
+    scene_duration = max(
+        1,
+        min(
+            PRODUCT_VIDEO_SCENE_SECONDS,
+            _as_int(
+                invoice.get("scene_duration_seconds")
+                or invoice.get("scene_seconds")
+                or asset_pack.get("scene_duration_seconds")
+                or asset_pack.get("scene_seconds"),
+                PRODUCT_VIDEO_SCENE_SECONDS,
+            ),
+        ),
+    )
     requested_product_type = _product_video_requested_product_type(project, asset_pack, invoice)
     engine_contract = product_video_engine_contract(requested_product_type)
     execution_product_type = str(engine_contract.get("product_type") or requested_product_type)

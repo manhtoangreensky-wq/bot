@@ -66,6 +66,12 @@ VISUAL_SOURCE_LOCAL_IMAGE_SEQUENCE = video_final_output.VISUAL_SOURCE_LOCAL_IMAG
 VISUAL_SOURCE_LOCAL_SCENE_CARD = video_final_output.VISUAL_SOURCE_LOCAL_SCENE_CARD
 LOCAL_IMAGE_SEQUENCE_PRODUCT_TYPES = {"image_to_video", "storyboard_prompt", "script_to_video"}
 LOCAL_SCENE_CARD_PRODUCT_TYPES = {"script_to_video", "storyboard_prompt", "multi_scene_film"}
+PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES = {
+    "storyboard_prompt",
+    "storyboard_to_video",
+    "video_ai_image",
+    "image_to_video",
+}
 PROVIDER_BRIDGE_RENDERER = "video_provider_bridge"
 PRODUCT_VIDEO_SCENE_SECONDS = 8
 PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S = "per_scene_8s"
@@ -2748,6 +2754,13 @@ def storyboard_scene_image_paths(job: dict | None = None, scene_index: int = 1) 
     return []
 
 
+def product_video_scene_image_paths(job: dict | None = None, scene_index: int = 1) -> list[str]:
+    product_type = _product_type(job)
+    if product_type in PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES:
+        return storyboard_scene_image_paths(job, scene_index)
+    return _local_image_sequence_paths(job)
+
+
 def _local_image_sequence_allowed(job: dict | None = None, paths: list[str] | None = None) -> bool:
     if not paths:
         return False
@@ -4149,14 +4162,10 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
                 for fallback_index, card in enumerate(_scene_cards(job), start=1)
                 if max(1, _safe_int(card.get("scene_index") or card.get("scene_id"), fallback_index)) == scene_index
             ]
-            if product_type == "storyboard_prompt"
+            if product_type in PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES
             else _scene_cards(job)
         ),
-        image_paths=(
-            storyboard_scene_image_paths(job, scene_index)
-            if product_type == "storyboard_prompt"
-            else _local_image_sequence_paths(job)
-        ),
+        image_paths=product_video_scene_image_paths(job, scene_index),
         source_video_path=str((job or {}).get("source_video_path") or ""),
         ratio=aspect_ratio,
         duration_seconds=float(scene_duration_seconds if orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S else (getattr(scene, "target_duration_sec", 6.0) or 6.0)),

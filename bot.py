@@ -68070,7 +68070,16 @@ async def safe_mode_callback_guard(update: Update, context: ContextTypes.DEFAULT
         isinstance(quick_image_state, dict)
         and str(quick_image_state.get("source_flow") or "") == "video_uiflow3"
     )
-    if not callback_data.startswith("vid3|") and not preserve_uiflow3_handoff:
+    preserve_uiflow3_tail = bool(
+        callback_data.startswith(("video_tail|", "vt9|"))
+        and isinstance(getattr(context, "user_data", None), dict)
+        and isinstance(context.user_data.get(VIDEO_UIFLOW3_ACTIVE_TAIL_KEY), dict)
+    )
+    if (
+        not callback_data.startswith("vid3|")
+        and not preserve_uiflow3_handoff
+        and not preserve_uiflow3_tail
+    ):
         deactivate_video_uiflow3_pending_input(context)
     state = current_system_mode()
     if not any([state.get("emergency_lock"), state.get("payment_freeze"), state.get("tool_freeze"), state.get("provider_freeze"), state.get("maintenance_mode")]):
@@ -71535,6 +71544,7 @@ VIDEO_SCENE2_LEGACY_PLANNING_CALLBACKS = frozenset({
 
 
 VIDEO_UIFLOW3_STATE_KEY = "video_uiflow3"
+VIDEO_UIFLOW3_ACTIVE_TAIL_KEY = "video_uiflow3_active_tail"
 VIDEO_UIFLOW3_PRODUCT_LABELS = {
     "video_trend": "Video theo trend",
     "video_ai_real": "Video AI chân thật",
@@ -71599,7 +71609,7 @@ VIDEO_UIFLOW3_STEP_ACTIONS = {
     "branding": {"brand", "branding_done"},
     "summary": {"edit", "model", "summary_done"},
     "package": {"quality", "quality_done", "model"},
-    "invoice": {"invoice_confirm"},
+    "invoice": {"invoice_back", "invoice_confirm"},
     "confirmation": {"confirmation_submit"},
     "status": set(),
 }
@@ -71686,7 +71696,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
             "scene_plan_auto", "scene_plan_done", "scene_auto", "music_scope",
             "assignment_done", "prompt_scenes", "prompt_advanced", "prompts_done",
             "branding_done", "summary_done", "quality_done",
-            "invoice_confirm", "confirmation_submit",
+            "invoice_back", "invoice_confirm", "confirmation_submit",
         )
     },
     **{
@@ -71782,6 +71792,7 @@ def deactivate_video_uiflow3_pending_input(context) -> bool:
     user_data = getattr(context, "user_data", None)
     if not isinstance(user_data, dict):
         return False
+    user_data.pop(VIDEO_UIFLOW3_ACTIVE_TAIL_KEY, None)
     raw = user_data.get(VIDEO_UIFLOW3_STATE_KEY)
     if not isinstance(raw, dict) or not raw:
         return False
@@ -71804,6 +71815,8 @@ def start_video_uiflow3_state(context, product_id: str) -> dict:
     product = str(product_id or "").strip()
     if product not in video_uiflow3.ENTRY_ADAPTERS:
         raise ValueError("unsupported_video_uiflow3_product")
+    if isinstance(getattr(context, "user_data", None), dict):
+        context.user_data.pop(VIDEO_UIFLOW3_ACTIVE_TAIL_KEY, None)
     state = video_uiflow3.new_state(product, draft_id=uuid.uuid4().hex)
     state["legacy_compat"] = {
         "migrated": False,
@@ -71825,39 +71838,14 @@ def video_uiflow3_keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardM
 
 def video_uiflow3_nav_rows(*, back: str = "vid3|back") -> list[list[tuple[str, str]]]:
     if str(back or "") == "menu|main_video":
-        return [[("Quay lai Menu Video", "menu|main_video")]]
-    return [[("Quay lai", back), ("Menu Video", "menu|main_video")]]
+        return [[("⬅️ Quay lại Menu Video", "menu|main_video")]]
+    return [[("⬅️ Quay lại", back), ("🎬 Menu Video", "menu|main_video")]]
 
 
 def video_uiflow3_progress_text(state: dict) -> str:
-    current = str((state.get("navigation") or {}).get("current_step") or "entry")
-    public_steps = [
-        "source", "format", "content_hub", "content_lock", "production_bible",
-        "scene_count", "scene_plan", "scene_assignment", "prompts", "branding", "summary",
-    ]
-    if str(state.get("parent_product") or "") == "video_ai_real":
-        entry_mode = str(state.get("entry_mode") or "")
-        if entry_mode == "prompt_video":
-            public_steps = [
-                "scene_count", "format", "content_hub", "content_lock", "production_bible",
-                "scene_plan", "scene_assignment", "prompts", "branding", "summary",
-                "package", "invoice", "confirmation", "status",
-            ]
-        elif entry_mode == "image_video":
-            public_steps = [
-                "scene_count", "format", "source", "content_hub", "content_lock",
-                "production_bible", "scene_plan", "scene_assignment", "prompts",
-                "branding", "summary",
-            ]
-    elif str(state.get("parent_product") or "") == "multi_scene_film":
-        public_steps = [
-            "series_goal", "format", "content_hub", "content_lock", "production_bible",
-            "episode", "scene_count", "scene_plan", "scene_assignment", "prompts",
-            "branding", "summary",
-        ]
-    if current not in public_steps:
-        return ""
-    return f"Buoc {public_steps.index(current) + 1}/{len(public_steps)}"
+    # The original Video flow used descriptive screens instead of a long
+    # numbered wizard. Keep navigation in state, but do not expose step counts.
+    return ""
 
 
 def video_uiflow3_product_label(state: dict) -> str:
@@ -71866,13 +71854,18 @@ def video_uiflow3_product_label(state: dict) -> str:
 
 def video_uiflow3_readiness_labels(errors: list[str]) -> list[str]:
     exact = {
-        "series_goal_required": "Chưa có mục tiêu chung của series",
+        "source_content_required": "Chưa có nội dung nguồn bắt buộc",
+        "source_required": "Chưa có tư liệu nguồn bắt buộc",
+        "frame_images_required": "Cần ít nhất 2 ảnh để ghép video",
+        "storyboard_images_required": "Cần ít nhất 2 ảnh storyboard hoặc ảnh được tạo mới",
+        "source_video_required": "Chưa có video nguồn bắt buộc",
+        "series_goal_required": "Chưa có mục tiêu chung của loạt video",
         "episode_identity_required": "Chưa có số và tên tập",
         "episode_content_not_locked": "Nội dung tập chưa được xác nhận",
-        "content_not_locked": "Noi dung chua duoc xac nhan",
+        "content_not_locked": "Nội dung chưa được xác nhận",
         "character_count_unconfirmed": "Chưa xác nhận tổng số nhân vật",
         "location_count_unconfirmed": "Chưa xác nhận tổng số bối cảnh",
-        "characters_required": "Chua co nhan vat bat buoc",
+        "characters_required": "Chưa có nhân vật bắt buộc",
         "locations_required": "Chưa có bối cảnh bắt buộc",
         "narrator_required": "Chưa có người dẫn chuyện bắt buộc",
         "products_required": "Chưa có sản phẩm bắt buộc",
@@ -71884,18 +71877,18 @@ def video_uiflow3_readiness_labels(errors: list[str]) -> list[str]:
         "sfx_required": "Chưa chọn hiệu ứng âm thanh bắt buộc",
         "ambient_required": "Chưa chọn âm thanh môi trường bắt buộc",
         "continuity_required": "Chưa xác nhận quy tắc nhất quán",
-        "scene_plan_missing": "Chua co ke hoach canh",
-        "multi_voice_renderer_missing": "Chua ho tro ket xuat nhieu giong",
-        "whole_video_music_renderer_missing": "Chua ho tro ghep nhac toan video tu ke hoach V3",
-        "per_scene_music_renderer_missing": "Chua ho tro nhac rieng tung canh",
-        "scene_sfx_renderer_missing": "Chưa hỗ trợ kết xuất hiệu ứng âm thanh theo cảnh",
-        "scene_ambient_renderer_missing": "Chưa hỗ trợ kết xuất âm thanh môi trường theo cảnh",
-        "voice_cast_not_distinct": "Cac nhan vat dang dung trung giong",
-        "public_submit_locked": "Loai video nay moi cho phep lap ke hoach",
-        "production_bible_reconcile_required": "Rà soát lại Production Bible",
+        "scene_plan_missing": "Chưa có kế hoạch cảnh",
+        "multi_voice_renderer_missing": "Chưa hỗ trợ tạo video với nhiều giọng",
+        "whole_video_music_renderer_missing": "Chưa hỗ trợ ghép nhạc toàn video từ kế hoạch",
+        "per_scene_music_renderer_missing": "Chưa hỗ trợ nhạc riêng từng cảnh",
+        "scene_sfx_renderer_missing": "Chưa hỗ trợ tạo hiệu ứng âm thanh theo cảnh",
+        "scene_ambient_renderer_missing": "Chưa hỗ trợ tạo âm thanh môi trường theo cảnh",
+        "voice_cast_not_distinct": "Các nhân vật đang dùng trùng giọng",
+        "public_submit_locked": "Loại video này hiện mới cho phép lập kế hoạch",
+        "production_bible_reconcile_required": "Rà soát lại nhân vật và bối cảnh",
         "scene_plan_reconcile_required": "Rà soát lại kế hoạch cảnh",
         "dialogue_reconcile_required": "Rà soát lại phân vai và lời thoại",
-        "prompts_reconcile_required": "Rà soát lại hợp đồng prompt",
+        "prompts_reconcile_required": "Rà soát lại câu lệnh từng cảnh",
     }
     labels = []
     for error in errors:
@@ -71925,15 +71918,15 @@ def video_uiflow3_readiness_labels(errors: list[str]) -> list[str]:
         elif value.startswith("scene_") and value.endswith("_completion_state_missing"):
             labels.append("Cảnh chưa có kết quả cuối")
         elif value.endswith("_voice_not_server_renderable"):
-            labels.append("Giong da chon chua duoc chung minh co the ket xuat tren may chu")
+            labels.append("Giọng đã chọn chưa sẵn sàng để sử dụng")
         elif value.endswith("_character_invalid"):
-            labels.append("Mot canh dang tham chieu nhan vat khong con ton tai")
+            labels.append("Một cảnh đang tham chiếu nhân vật không còn tồn tại")
         elif value.endswith("_location_invalid"):
-            labels.append("Mot canh dang tham chieu boi canh khong con ton tai")
+            labels.append("Một cảnh đang tham chiếu bối cảnh không còn tồn tại")
         elif value.endswith("_location_missing"):
             labels.append("Cảnh còn thiếu bối cảnh")
         elif value.endswith("_speaker_invalid"):
-            labels.append("Mot cau thoai chua gan dung nguoi noi")
+            labels.append("Một câu thoại chưa gán đúng người nói")
         elif value.endswith("_speaker_not_in_scene"):
             labels.append("Người nói chưa được gán vào cảnh")
         elif value.endswith("_product_invalid"):
@@ -71943,7 +71936,7 @@ def video_uiflow3_readiness_labels(errors: list[str]) -> list[str]:
         elif value.endswith("_narrator_invalid"):
             labels.append("Cảnh đang bật lời dẫn nhưng chưa có người dẫn chuyện")
         else:
-            labels.append("Ke hoach con mot muc chua hop le")
+            labels.append("Kế hoạch còn một mục chưa hợp lệ")
     return list(dict.fromkeys(labels))
 
 
@@ -71957,13 +71950,13 @@ def video_uiflow3_input_error(exc: Exception, *, media: bool = False) -> str:
         "location_count_out_of_range": "Tổng số bối cảnh phải từ 0 đến 20.",
         "location_reassignment_required": "Hãy gỡ bối cảnh này khỏi các cảnh và ảnh trước khi giảm tổng số.",
         "content_intent_required": "Nội dung không được để trống.",
-        "series_goal_required": "Hãy nhập mục tiêu chung của series trước khi chọn định dạng.",
+        "series_goal_required": "Hãy nhập mục tiêu chung của loạt video trước khi chọn định dạng.",
         "episode_identity_required": "Hãy nhập theo mẫu: số tập | tên tập.",
         "episode_content_required": "Nội dung tập không được để trống.",
-        "episode_entity_invalid": "Tác nhân này không còn thuộc Series Bible.",
+        "episode_entity_invalid": "Tác nhân này không còn thuộc thiết lập chung của loạt video.",
         "source_scene_limit_exceeded": (
-            "Da dat gioi han so tep/canh cua loai video nay. "
-            "Tep da nhan van duoc giu; hay bot nguon hoac tao ban ke hoach khac."
+            "Đã đạt giới hạn số tệp hoặc số cảnh của loại video này. "
+            "Tệp đã nhận vẫn được giữ; hãy bớt nguồn hoặc tạo bản kế hoạch khác."
         ),
         "target_duration_invalid": "Thời lượng phải là số giây lớn hơn 0.",
         "scene_count_out_of_range": "Số cảnh chưa phù hợp với loại video này.",
@@ -71979,7 +71972,7 @@ def video_uiflow3_input_error(exc: Exception, *, media: bool = False) -> str:
         "relationship_characters_invalid": "Hai số NV trong quan hệ phải tồn tại và khác nhau.",
         "relationship_type_required": "Hãy nhập loại quan hệ.",
         "reference_owner_invalid": "Ảnh không còn thuộc đối tượng đang mở. Hãy quay lại chọn đúng đối tượng.",
-        "source_asset_not_found": "Ảnh/tep nguồn không còn trong bản nháp. Hãy mở lại mục Nguồn.",
+        "source_asset_not_found": "Ảnh hoặc tệp nguồn không còn trong bản nháp. Hãy mở lại mục Nguồn.",
         "reference_asset_identity_required": "Không đọc được định danh ảnh. Hãy gửi lại ảnh.",
         "dialogue_speaker_invalid": "Người nói không còn thuộc kế hoạch cảnh này.",
         "dialogue_speaker_not_in_scene": "Người nói chưa được gán vào cảnh này.",
@@ -72024,11 +72017,12 @@ def video_uiflow3_guide_text(lang: str = "vi") -> str:
         "2. Chọn tỉ lệ và tổng thời lượng mục tiêu.\n"
         "3. Chọn nội dung từ 32 Nội dung, Kho Ý tưởng, nội dung nguồn hoặc tự nhập.\n"
         "4. Xác nhận Nội dung trước khi khai báo nhân vật và cảnh.\n"
-        "5. Nhập tổng số nhân vật; sau đó chỉnh từng NV: Nam/Nữ, mô tả, ảnh tham chiếu và giọng.\n"
-        "6. Khai báo bối cảnh/ảnh và tác nhân tùy chọn (người dẫn, sản phẩm, đạo cụ, quan hệ), rồi xác nhận số cảnh được đề xuất.\n"
-        "7. Trong từng cảnh, gán nhân vật, bối cảnh, tác nhân, người nói và âm thanh hệ thống đang hỗ trợ. Cảnh chưa gán dùng thứ tự NV1, NV2 rồi lặp lại.\n"
-        "8. Logo/watermark có thể bỏ qua; kiểm tra và sửa tại một màn Tóm tắt duy nhất.\n\n"
-        "💡 <b>Ý tưởng video chỉ là kho tham khảo.</b> Kho không dựng video, không sở hữu RouteEngine và không có thanh toán riêng. Tính năng chưa được hệ thống hỗ trợ thật sẽ không được bật."
+        "5. Nhập tổng số nhân vật; sau đó chỉnh từng nhân vật: nam hoặc nữ, mô tả, ảnh tham chiếu và giọng.\n"
+        "6. Khai báo bối cảnh, ảnh và tác nhân tùy chọn như người dẫn, sản phẩm, đạo cụ hoặc quan hệ; sau đó xác nhận số cảnh được đề xuất.\n"
+        "7. Trong từng cảnh, gán nhân vật, bối cảnh, tác nhân, người nói và âm thanh đang được hỗ trợ. Cảnh chưa gán dùng lần lượt Nhân vật 1, Nhân vật 2 rồi lặp lại.\n"
+        "8. Logo và watermark có thể bỏ qua; kiểm tra và sửa tại một màn Tóm tắt duy nhất.\n\n"
+        "💡 <b>Ý tưởng video chỉ là kho tham khảo.</b> Kho không tạo video và không sửa nội dung gốc trong kho. "
+        "Khi chọn một ý tưởng, bot đưa một bản sao về đúng bản kế hoạch đang mở để tiếp tục."
     )
 
 
@@ -72050,9 +72044,9 @@ def video_uiflow3_profile_rows(state: dict) -> list[dict]:
 
 
 def video_uiflow3_character_label(item: dict, index: int) -> str:
-    name = str(item.get("display_name") or f"Nhan vat {index}")
-    gender = {"male": "Nam", "female": "Nu"}.get(str(item.get("gender") or ""), "")
-    return f"NV{index} - {name}" + (f" ({gender})" if gender else "")
+    name = str(item.get("display_name") or f"Nhân vật {index}")
+    gender = {"male": "Nam", "female": "Nữ"}.get(str(item.get("gender") or ""), "")
+    return f"Nhân vật {index} - {name}" + (f" ({gender})" if gender else "")
 
 
 def video_uiflow3_scene_label(state: dict, scene: dict) -> str:
@@ -72061,8 +72055,8 @@ def video_uiflow3_scene_label(state: dict, scene: dict) -> str:
         for item in (state.get("bible") or {}).get("characters") or []
     }
     names = [characters.get(str(item), str(item)) for item in scene.get("character_ids") or []]
-    suffix = ", ".join(item for item in names if item) or "Tu dong"
-    return f"Canh {int(scene.get('scene_index') or 0)} - {suffix}"
+    suffix = ", ".join(item for item in names if item) or "Tự động"
+    return f"Cảnh {int(scene.get('scene_index') or 0)} - {suffix}"
 
 
 def video_uiflow3_canonical_screen_state(raw_state: dict) -> dict:
@@ -72212,32 +72206,32 @@ def video_uiflow3_canonical_screen_state(raw_state: dict) -> dict:
 def video_uiflow3_entity_label(state: dict, owner_type: str, owner_id: str) -> str:
     bible = dict(state.get("bible") or {})
     config = {
-        "character": ("characters", "character_id", "display_name", "NV"),
-        "location": ("locations", "location_id", "name", "BC"),
-        "product": ("products", "product_id", "name", "SP"),
-        "prop": ("props", "prop_id", "name", "DC"),
+        "character": ("characters", "character_id", "display_name", "Nhân vật"),
+        "location": ("locations", "location_id", "name", "Bối cảnh"),
+        "product": ("products", "product_id", "name", "Sản phẩm"),
+        "prop": ("props", "prop_id", "name", "Đạo cụ"),
     }.get(str(owner_type or ""))
     if not config:
-        return "Nguon video"
+        return "Nguồn video"
     field, id_field, name_field, prefix = config
     rows = list(bible.get(field) or [])
     for index, item in enumerate(rows, 1):
         if str(item.get(id_field) or "") == str(owner_id or ""):
-            name = str(item.get(name_field) or f"{prefix}{index}")
-            return f"{prefix}{index} - {name}"
-    return "Doi tuong khong con ton tai"
+            name = str(item.get(name_field) or f"{prefix} {index}")
+            return f"{prefix} {index} - {name}"
+    return "Đối tượng không còn tồn tại"
 
 
 def video_uiflow3_reference_role_label(role: str) -> str:
     return {
-        "primary_identity": "Anh nhan vat",
-        "front_face": "Anh chinh dien",
-        "side_face": "Anh nghieng",
-        "full_body": "Anh toan than",
-        "primary_location": "Anh boi canh",
-        "primary_product": "Anh san pham",
-        "primary_prop": "Anh dao cu",
-    }.get(str(role or ""), "Anh tham chieu")
+        "primary_identity": "Ảnh nhân vật",
+        "front_face": "Ảnh chính diện",
+        "side_face": "Ảnh góc nghiêng",
+        "full_body": "Ảnh toàn thân",
+        "primary_location": "Ảnh bối cảnh",
+        "primary_product": "Ảnh sản phẩm",
+        "primary_prop": "Ảnh đạo cụ",
+    }.get(str(role or ""), "Ảnh tham chiếu")
 
 
 VIDEO_AI_REAL_PILOT_LOCATION_PRESETS = {
@@ -72476,9 +72470,10 @@ def _video_ai_real_pilot_state(raw_state: dict) -> dict:
     state = video_uiflow3.normalize_state(raw_state)
     if (
         str(state.get("parent_product") or "") != "video_ai_real"
-        or str(state.get("entry_mode") or "") != "prompt_video"
+        or str(state.get("entry_mode") or "")
+        not in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
     ):
-        raise ValueError("video_ai_real_prompt_pilot_required")
+        raise ValueError("video_ai_real_creation_flow_required")
     return state
 
 
@@ -72696,6 +72691,870 @@ def video_ai_real_prompt_quote(raw_state: dict) -> dict:
         "pricing_provider": str(model.get("pricing_provider") or ""),
         "quote_only": True,
     }
+
+
+def video_ai_real_is_creation_flow(raw_state: dict) -> bool:
+    return bool(
+        str((raw_state or {}).get("parent_product") or "") == "video_ai_real"
+        and str((raw_state or {}).get("entry_mode") or "")
+        in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
+    )
+
+
+VIDEO_UIFLOW3_SHARED_TAIL_PRODUCTS = frozenset({
+    "video_trend",
+    "script_image_video",
+    "storyboard_prompt",
+})
+
+
+def video_uiflow3_execution_adapter(raw_state: dict) -> dict:
+    """Resolve one UIFLOW3 product to its real, product-specific executor."""
+
+    state = video_uiflow3.normalize_state(raw_state)
+    product = str(state.get("parent_product") or "")
+    commercial = video_tail9.commercial_contract(product)
+    kind = {
+        "video_ai_real": "b14_invoice",
+        "frame_video_local": "frame_video",
+        "self_shot_scene_change": "selfshot2",
+        "multi_scene_film": "planning_only",
+    }.get(product, "product_tail" if product in VIDEO_UIFLOW3_SHARED_TAIL_PRODUCTS else "planning_only")
+    if not bool(commercial.get("execution_enabled", True)):
+        kind = "planning_only"
+    return {
+        "kind": kind,
+        "product_type": product,
+        "engine_route": str(commercial.get("engine_route") or ""),
+        "executor_product_type": str(commercial.get("executor_product_type") or product),
+        "required_capability": str(commercial.get("required_capability") or ""),
+        "input_type": str(commercial.get("input_type") or ""),
+        "worker_owner": str(commercial.get("worker_owner") or ""),
+        "execution_enabled": bool(commercial.get("execution_enabled", True)),
+        "execution_blocker": str(commercial.get("execution_blocker") or ""),
+    }
+
+
+def video_uiflow3_snapshot_revision(snapshot: dict) -> int:
+    token = str((snapshot or {}).get("config_hash") or "")[:12]
+    try:
+        return max(1, int(token, 16))
+    except (TypeError, ValueError):
+        return 1
+
+
+def video_uiflow3_snapshot_assets(snapshot: dict) -> list[dict]:
+    seen: set[str] = set()
+    rows: list[dict] = []
+    for raw in [
+        *list(((snapshot or {}).get("source") or {}).get("assets") or []),
+        *list((snapshot or {}).get("references") or []),
+    ]:
+        item = dict(raw or {})
+        file_id = str(item.get("telegram_file_id") or item.get("file_id") or "").strip()
+        if not file_id or file_id in seen:
+            continue
+        seen.add(file_id)
+        metadata = dict(item.get("metadata") or {})
+        rows.append({
+            **metadata,
+            **item,
+            "file_id": file_id,
+            "file_unique_id": str(item.get("file_unique_id") or metadata.get("file_unique_id") or ""),
+            "file_size": safe_int(item.get("file_size") or metadata.get("file_size"), 0),
+            "mime_type": str(item.get("mime_type") or metadata.get("mime_type") or ""),
+        })
+    return rows
+
+
+def claim_video_uiflow3_tail_owner(context, raw_state: dict) -> dict:
+    state = video_uiflow3.normalize_state(raw_state)
+    claim = {
+        "owner": "uiflow3",
+        "draft_id": str(state.get("draft_id") or ""),
+        "product_type": str(state.get("parent_product") or ""),
+    }
+    if isinstance(getattr(context, "user_data", None), dict):
+        context.user_data[VIDEO_UIFLOW3_ACTIVE_TAIL_KEY] = claim
+    return claim
+
+
+def video_uiflow3_build_tail_state(raw_state: dict) -> dict:
+    state = video_uiflow3.normalize_state(raw_state)
+    route = video_uiflow3_execution_adapter(state)
+    if route["kind"] != "product_tail":
+        raise ValueError("video_uiflow3_shared_tail_not_supported")
+    snapshot = video_uiflow3.approved_snapshot(state)
+    scenes = [dict(item or {}) for item in snapshot.get("scenes") or []]
+    content = dict(snapshot.get("content") or {})
+    fmt = dict(snapshot.get("format") or {})
+    assets = video_uiflow3_snapshot_assets(snapshot)
+    scene_seconds = max(1, safe_int(fmt.get("seconds_per_scene"), 8))
+    duration = sum(
+        max(1, safe_int(item.get("duration_target"), scene_seconds))
+        for item in scenes
+    ) or scene_seconds
+    revision = video_uiflow3_snapshot_revision(snapshot)
+    existing = dict(state.get(VIDEO_TAIL9_STATE_KEY) or {})
+    if video_tail9.scope_matches(
+        existing,
+        product_type=route["product_type"],
+        session_id=str(snapshot.get("draft_id") or ""),
+        plan_revision=revision,
+    ):
+        tail = video_tail9.normalize_state(existing)
+    else:
+        tail = video_tail9.new_state(
+            product_type=route["product_type"],
+            session_id=str(snapshot.get("draft_id") or ""),
+            plan_revision=revision,
+            scene_count=max(1, len(scenes)),
+            ratio=str(fmt.get("ratio") or "9:16"),
+            estimated_duration=duration,
+            source_asset_ids=[str(item.get("file_id") or "") for item in assets],
+            return_to="vid3|resume",
+        )
+    tail["video_flow_owner"] = "uiflow3"
+    tail["return_to"] = "vid3|resume"
+    scene_contract = []
+    fallback_prompt = str(content.get("original_intent") or "").strip()
+    for item in scenes:
+        scene = dict(item)
+        scene["provider_prompt"] = str(
+            scene.get("provider_prompt")
+            or scene.get("prompt_override")
+            or scene.get("visual_prompt")
+            or scene.get("semantic_beat")
+            or scene.get("main_action")
+            or fallback_prompt
+        ).strip()
+        scene_contract.append(scene)
+    tail = video_tail9.apply_content_contract(tail, {
+        "content_source": str(content.get("source") or "manual"),
+        "canonical_content_mode": str(state.get("entry_mode") or (snapshot.get("source") or {}).get("kind") or ""),
+        "selected_prompt": fallback_prompt,
+        "scene_drafts": scene_contract,
+        "content_revision": safe_int(content.get("revision"), 1),
+        "plan_revision": revision,
+        "plan_status": "approved",
+        "plan_approved": True,
+    })
+    audio_source = dict(snapshot.get("audio") or {})
+    audio = dict(tail.get("audio_config") or {})
+    audio.update({
+        "source_audio": False,
+        "dubbing": str(audio_source.get("dubbing_mode") or "none") != "none",
+        "music": str(audio_source.get("music_scope") or "none") != "none",
+        "sfx": str(audio_source.get("sfx_mode") or "none") != "none",
+        "subtitles": str(audio_source.get("subtitle_mode") or "none") != "none",
+    })
+    tail["audio_config"] = audio
+    tail["audio_status"] = "configured" if any(
+        bool(audio.get(key)) for key in ("dubbing", "music", "sfx", "subtitles")
+    ) else "skipped"
+    branding = dict(snapshot.get("branding") or {})
+    logo = dict(branding.get("logo") or {})
+    watermark = dict(branding.get("watermark") or {})
+    logo_file_id = str(logo.get("telegram_file_id") or logo.get("file_id") or "")
+    watermark_text = str(watermark.get("text") or "").strip()
+    tail["logo_config"] = {
+        "enabled": bool(logo_file_id),
+        "asset_file_id": logo_file_id,
+        "file_size": safe_int(logo.get("file_size"), 0),
+        "position": str(logo.get("position") or "top_right") if logo_file_id else "",
+    }
+    tail["watermark_config"] = {
+        "enabled": bool(watermark_text),
+        "text": watermark_text,
+        "position": str(watermark.get("position") or "bottom_right") if watermark_text else "",
+        "opacity_percent": max(0, min(100, safe_int(watermark.get("opacity_percent"), 45))),
+    }
+    tail["logo_status"] = "configured" if logo_file_id else "skipped"
+    tail["watermark_status"] = "configured" if watermark_text else "skipped"
+    return video_tail9.prepare_summary(tail)
+
+
+def video_uiflow3_build_frame_state(raw_state: dict) -> dict:
+    state = video_uiflow3.normalize_state(raw_state)
+    if video_uiflow3_execution_adapter(state)["kind"] != "frame_video":
+        raise ValueError("video_uiflow3_frame_handoff_not_supported")
+    snapshot = video_uiflow3.approved_snapshot(state)
+    source_rows = [
+        item for item in video_uiflow3_snapshot_assets(snapshot)
+        if str(item.get("asset_type") or "").lower() in {"frame", "image", "photo"}
+        or str(item.get("mime_type") or "").lower().startswith("image/")
+    ]
+    if len(source_rows) < frame_video_runtime.FRAME_VIDEO_MIN_IMAGES:
+        raise ValueError("frame_video_minimum_images_required")
+    fmt = dict(snapshot.get("format") or {})
+    branding = dict(snapshot.get("branding") or {})
+    logo = dict(branding.get("logo") or {})
+    watermark = dict(branding.get("watermark") or {})
+    frame = frame_video3_new_state("uploaded")
+    frame.update({
+        "step": "quality",
+        "photos": source_rows[:frame_video_runtime.FRAME_VIDEO_MAX_IMAGES],
+        "image_count": min(len(source_rows), frame_video_runtime.FRAME_VIDEO_MAX_IMAGES),
+        "ratio": str(fmt.get("ratio") or "9:16").replace(":", "x"),
+        "seconds_per_image": float(max(1, safe_int(fmt.get("seconds_per_scene"), 3))),
+        "duration_confirmed": True,
+        "logo_enabled": bool(logo.get("telegram_file_id") or logo.get("file_id")),
+        "logo_file_id": str(logo.get("telegram_file_id") or logo.get("file_id") or ""),
+        "logo_position": str(logo.get("position") or "top_right"),
+        "watermark_enabled": bool(str(watermark.get("text") or "").strip()),
+        "watermark_text": str(watermark.get("text") or "").strip(),
+        "watermark_position": str(watermark.get("position") or "bottom_right"),
+        "uiflow3_draft_id": str(snapshot.get("draft_id") or ""),
+        "uiflow3_config_hash": str(snapshot.get("config_hash") or ""),
+        "uiflow3_return_to": "vid3|resume",
+        "uiflow3_approved_snapshot": snapshot,
+    })
+    return normalize_frame_video_state(frame)
+
+
+def video_uiflow3_build_selfshot2_handoff(raw_state: dict) -> dict:
+    state = video_uiflow3.normalize_state(raw_state)
+    if video_uiflow3_execution_adapter(state)["kind"] != "selfshot2":
+        raise ValueError("video_uiflow3_selfshot_handoff_not_supported")
+    snapshot = video_uiflow3.approved_snapshot(state)
+    source_rows = [
+        item for item in video_uiflow3_snapshot_assets(snapshot)
+        if str(item.get("asset_type") or "").lower() in {"source_video", "video"}
+        or str(item.get("mime_type") or "").lower().startswith("video/")
+    ]
+    source = dict(source_rows[-1] if source_rows else {})
+    metadata = dict(source.get("metadata") or {})
+    source_video = {
+        **metadata,
+        **source,
+        "file_id": str(source.get("file_id") or source.get("telegram_file_id") or ""),
+        "file_unique_id": str(source.get("file_unique_id") or metadata.get("file_unique_id") or ""),
+        "duration_seconds": float(source.get("duration_seconds") or metadata.get("duration_seconds") or 0),
+        "width": safe_int(source.get("width") or metadata.get("width"), 0),
+        "height": safe_int(source.get("height") or metadata.get("height"), 0),
+    }
+    analysis = video_selfshot2.analyze_source(source_video)
+    gate = video_selfshot2.source_gate(source_video, analysis)
+    if not gate.get("ok"):
+        return {"ok": False, "blocker": str(gate.get("blocker") or "source_video_probe_missing"), "draft": {}}
+    content = dict(snapshot.get("content") or {})
+    branding = dict(snapshot.get("branding") or {})
+    logo = dict(branding.get("logo") or {})
+    watermark = dict(branding.get("watermark") or {})
+    draft = video_selfshot2.initial_draft()
+    draft.update({
+        "session_id": str(snapshot.get("draft_id") or ""),
+        "revision": video_uiflow3_snapshot_revision(snapshot),
+        "source_video": source_video,
+        "source_analysis": analysis,
+        "scene_count": max(1, len(snapshot.get("scenes") or [])),
+        "aspect_ratio": str((snapshot.get("format") or {}).get("ratio") or analysis.get("aspect_ratio") or "9:16"),
+        "content_source": str(content.get("source") or "manual"),
+        "selected_content": {
+            **dict(content.get("approved_brief") or {}),
+            "summary": str(content.get("original_intent") or ""),
+        },
+        "scene_plan": [dict(item or {}) for item in snapshot.get("scenes") or []],
+        "uiflow3_draft_id": str(snapshot.get("draft_id") or ""),
+        "uiflow3_config_hash": str(snapshot.get("config_hash") or ""),
+        "uiflow3_return_to": "vid3|resume",
+        "uiflow3_approved_snapshot": snapshot,
+    })
+    draft["visual_addons"] = {
+        "logo": {
+            "enabled": bool(logo.get("telegram_file_id") or logo.get("file_id")),
+            "file_id": str(logo.get("telegram_file_id") or logo.get("file_id") or ""),
+            "file_unique_id": str(logo.get("file_unique_id") or ""),
+            "position": str(logo.get("position") or "top_right"),
+        },
+        "watermark": {
+            "enabled": bool(str(watermark.get("text") or "").strip()),
+            "text": str(watermark.get("text") or "").strip(),
+            "position": str(watermark.get("position") or "bottom_right"),
+        },
+    }
+    return {"ok": True, "blocker": "", "draft": draft}
+
+
+def video_uiflow3_b14_storyboard_payload(raw_state: dict) -> dict:
+    """Translate the approved UI plan into the existing real Product Video seam."""
+
+    state = video_uiflow3.normalize_state(raw_state)
+    snapshot = video_uiflow3.approved_snapshot(state)
+    content = dict(snapshot.get("content") or {})
+    brief = dict(content.get("approved_brief") or {})
+    bible = dict(snapshot.get("production_bible") or {})
+    audio = dict(snapshot.get("audio") or {})
+    fmt = dict(snapshot.get("format") or {})
+    product_route = video_uiflow3_execution_adapter(state)
+    profile_key = str(content.get("profile_id") or "")
+    profile_id = video_profile_scene1_b14_profile_id(profile_key)
+    profile = video_profiles.get_video_profile(profile_id)
+    characters = {
+        str(item.get("character_id") or ""): str(item.get("display_name") or "")
+        for item in bible.get("characters") or []
+    }
+    locations = {
+        str(item.get("location_id") or ""): dict(item)
+        for item in bible.get("locations") or []
+    }
+    dialogue_by_scene: dict[str, list[str]] = {}
+    for item in audio.get("dialogue_segments") or []:
+        scene_id = str(item.get("scene_id") or "")
+        speaker = characters.get(str(item.get("speaker_id") or ""), "")
+        text = str(item.get("text") or "").strip()
+        if scene_id and text:
+            dialogue_by_scene.setdefault(scene_id, []).append(
+                f"{speaker}: {text}" if speaker else text
+            )
+
+    asset_items: list[dict] = []
+    seen_file_ids: set[str] = set()
+    for raw in [
+        *list(snapshot.get("references") or []),
+        *list((snapshot.get("source") or {}).get("assets") or []),
+    ]:
+        item = dict(raw or {})
+        file_id = str(item.get("telegram_file_id") or item.get("file_id") or "").strip()
+        if not file_id or file_id in seen_file_ids:
+            continue
+        seen_file_ids.add(file_id)
+        asset_items.append({
+            "asset_id": str(item.get("asset_id") or f"asset_{len(asset_items) + 1:02d}"),
+            "file_id": file_id,
+            "file_unique_id": str(item.get("file_unique_id") or ""),
+            "type": str(item.get("asset_type") or "image"),
+            "owner_type": str(item.get("owner_type") or "source"),
+            "owner_id": str(item.get("owner_id") or ""),
+            "role": str(item.get("role") or "reference"),
+            "fingerprint": str(item.get("fingerprint") or f"telegram:{file_id}"),
+            "allowed_scene_ids": [str(value) for value in item.get("allowed_scene_ids") or []],
+        })
+    ordered_source_assets = [
+        item for item in asset_items
+        if str(item.get("owner_type") or "") in {"raw_source", "source"}
+        and not list(item.get("allowed_scene_ids") or [])
+    ]
+
+    cards = []
+    scenes = list(snapshot.get("scenes") or [])
+    for fallback_index, raw_scene in enumerate(scenes, 1):
+        scene = dict(raw_scene or {})
+        scene_id = str(scene.get("scene_id") or f"scene_{fallback_index:02d}")
+        scene_index = max(1, safe_int(scene.get("scene_index"), fallback_index))
+        character_ids = [str(value) for value in scene.get("character_ids") or []]
+        location_id = str(scene.get("location_id") or "")
+        location = locations.get(location_id, {})
+        scene_assets = []
+        ordered_source = (
+            ordered_source_assets[min(fallback_index - 1, len(ordered_source_assets) - 1)]
+            if ordered_source_assets
+            else {}
+        )
+        for item in asset_items:
+            allowed = set(item.get("allowed_scene_ids") or [])
+            owner_type = str(item.get("owner_type") or "")
+            owner_id = str(item.get("owner_id") or "")
+            if allowed:
+                applies = scene_id in allowed
+            elif owner_type == "character":
+                applies = bool(owner_id and owner_id in character_ids)
+            elif owner_type == "location":
+                applies = bool(owner_id and owner_id == location_id)
+            elif owner_type == "product":
+                applies = bool(owner_id and owner_id in set(scene.get("product_ids") or []))
+            elif owner_type == "prop":
+                applies = bool(owner_id and owner_id in set(scene.get("prop_ids") or []))
+            elif owner_type in {"raw_source", "source"}:
+                applies = bool(
+                    ordered_source
+                    and str(item.get("file_id") or "")
+                    == str(ordered_source.get("file_id") or "")
+                )
+            else:
+                applies = owner_type == "source_video"
+            if applies:
+                scene_assets.append(dict(item))
+        start_asset = dict(next(
+            (
+                item for item in scene_assets
+                if str(item.get("owner_type") or "") in {"raw_source", "source", "source_video"}
+            ),
+            scene_assets[0] if scene_assets else {},
+        ))
+        subject_names = [characters.get(value, "") for value in character_ids]
+        subject = ", ".join(value for value in subject_names if value)
+        visual_goal = str(
+            scene.get("semantic_beat")
+            or scene.get("goal")
+            or brief.get("main_message")
+            or content.get("original_intent")
+            or ""
+        ).strip()
+        action = str(scene.get("main_action") or visual_goal).strip()
+        provider_prompt = str(
+            scene.get("prompt_override")
+            or scene.get("visual_prompt")
+            or f"{visual_goal}. {action}"
+        ).strip()
+        narration = "\n".join(dialogue_by_scene.get(scene_id) or [])
+        cards.append({
+            "scene_index": scene_index,
+            "role": str(scene.get("scene_role") or "scene"),
+            "duration_seconds": float(
+                scene.get("duration_target")
+                or fmt.get("seconds_per_scene")
+                or 8
+            ),
+            "narration_line": narration,
+            "subtitle_line": narration,
+            "visual_goal": visual_goal,
+            "subject_action": action,
+            "camera_motion": str(scene.get("movement") or scene.get("camera") or ""),
+            "composition": str(scene.get("framing") or scene.get("camera") or ""),
+            "background": str(location.get("description") or location.get("name") or ""),
+            "reference_asset_ids": [str(item.get("file_id") or "") for item in scene_assets],
+            "scene_assets": scene_assets,
+            "start_image_file_id": str(start_asset.get("file_id") or ""),
+            "end_image_file_id": "",
+            "input_mode": "image_to_video" if scene_assets else "text_to_video",
+            "transition_from_previous": str(scene.get("transition_in") or ""),
+            "transition_to_next": str(scene.get("transition_out") or ""),
+            "music_cue": str(scene.get("music_policy") or ""),
+            "exact_subject": subject or str(brief.get("title") or ""),
+            "exact_product_or_object": ", ".join(str(value) for value in scene.get("product_ids") or []),
+            "exact_location": str(location.get("name") or location.get("description") or ""),
+            "camera_angle": str(scene.get("camera") or scene.get("framing") or ""),
+            "lighting": str(scene.get("lighting") or location.get("lighting") or ""),
+            "entry_state": str(scene.get("start_state") or ""),
+            "exit_state": str(scene.get("completion_state") or ""),
+            "continuity_lock": "; ".join(
+                key for key, value in dict(bible.get("continuity") or {}).items() if value
+            ),
+            "provider_prompt": provider_prompt,
+            "negative_prompt": str(scene.get("negative_prompt") or ""),
+        })
+
+    title = str(brief.get("title") or content.get("original_intent") or "TOAN AAS Video")
+    required_capability = str(product_route.get("required_capability") or "text_to_video")
+    if str(state.get("entry_mode") or "") == "image_video":
+        required_capability = "image_to_video"
+    continuity = dict(bible.get("continuity") or {})
+    return {
+        "profile": profile.to_public_dict(),
+        "story_bible": {
+            "profile_id": profile_id,
+            "title": title,
+            "core_message": str(brief.get("main_message") or content.get("original_intent") or title),
+            "main_subject": title,
+            "visual_style": str(brief.get("visual_intent") or brief.get("tone") or ""),
+            "color_palette": str(brief.get("palette") or ""),
+            "brand_tone": str(brief.get("tone") or ""),
+            "creative_controls": {},
+            "negative_prompt": "",
+        },
+        "scene_cards": cards,
+        "asset_pack": {"items": asset_items, "planning_notes": []},
+        "preview_text": "Kế hoạch video theo cảnh đã được duyệt",
+        "prompt_context": {
+            "profile_id": profile_id,
+            "job_type": str(product_route.get("executor_product_type") or "video_ai_prompt"),
+            "execution_owner": "owner_product_video",
+            "required_capability": required_capability,
+            "public_product_type": str(product_route.get("product_type") or ""),
+            "engine_route": str(product_route.get("engine_route") or ""),
+            "selected_voice_music_subtitle_cues": deepcopy(audio),
+        },
+        "continuity_ledger": continuity,
+        "uiflow3_approved_snapshot": snapshot,
+        "provider_called": False,
+        "xu_charged": 0,
+    }
+
+
+def video_uiflow3_b14_execution_blockers(raw_state: dict) -> list[str]:
+    state = video_uiflow3.normalize_state(raw_state)
+    blockers = list(video_uiflow3.render_readiness_errors(state))
+    audio = dict(state.get("audio") or {})
+    dialogue_rows = [
+        dict(item) for item in audio.get("dialogue_segments") or []
+        if isinstance(item, dict) and str(item.get("text") or "").strip()
+    ]
+    speakers = list(dict.fromkeys(
+        str(item.get("speaker_id") or "")
+        for item in dialogue_rows
+        if str(item.get("speaker_id") or "")
+    ))
+    dubbing_mode = str(audio.get("dubbing_mode") or "none")
+    if dialogue_rows and dubbing_mode == "browser":
+        blockers.append("browser_voice_not_server_renderable")
+    if dialogue_rows and dubbing_mode == "default_ai" and len(speakers) > 1:
+        blockers.append("multi_voice_renderer_missing")
+    return list(dict.fromkeys(str(item or "") for item in blockers if str(item or "")))
+
+
+def video_uiflow3_new_invoice_attestation(
+    state: dict,
+    *,
+    user_id: int,
+    chat_id: int = 0,
+    message_id: int = 0,
+) -> dict:
+    snapshot = video_uiflow3.approved_snapshot(state)
+    return {
+        "token": uuid.uuid4().hex[:12],
+        "draft_id": str(snapshot.get("draft_id") or ""),
+        "config_hash": str(snapshot.get("config_hash") or ""),
+        "owner_user_id": int(user_id or 0),
+        "owner_chat_id": int(chat_id or user_id or 0),
+        "message_id": int(message_id or 0),
+        "product_id": "video_ai_real",
+    }
+
+
+def video_uiflow3_validate_invoice_confirmation(
+    session: dict,
+    *,
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+    token: str,
+) -> dict:
+    draft = dict((session or {}).get("draft") or {})
+    if not draft.get("uiflow3_invoice_attestation_required"):
+        return {"ok": True, "reason": ""}
+    if str((session or {}).get("current_step") or "") != "b14_invoice":
+        return {"ok": False, "reason": "invoice_step_changed"}
+    if str((session or {}).get("product_id") or "") != "video_ai_real":
+        return {"ok": False, "reason": "invoice_product_mismatch"}
+    attestation = dict(draft.get("uiflow3_invoice_attestation") or {})
+    if not attestation:
+        return {"ok": False, "reason": "invoice_attestation_missing"}
+    if (
+        safe_int(attestation.get("owner_user_id"), 0) != int(user_id or 0)
+        or safe_int(attestation.get("owner_chat_id"), 0) != int(chat_id or 0)
+    ):
+        return {"ok": False, "reason": "invoice_owner_mismatch"}
+    expected_token = str(attestation.get("token") or "")
+    expected_message_id = safe_int(attestation.get("message_id"), 0)
+    if (
+        not expected_token
+        or not hmac.compare_digest(expected_token, str(token or ""))
+        or expected_message_id <= 0
+        or expected_message_id != int(message_id or 0)
+    ):
+        return {"ok": False, "reason": "invoice_attestation_mismatch"}
+    snapshot = dict(draft.get("uiflow3_approved_snapshot") or {})
+    if (
+        str(snapshot.get("draft_id") or "") != str(attestation.get("draft_id") or "")
+        or str(snapshot.get("config_hash") or "") != str(attestation.get("config_hash") or "")
+    ):
+        return {"ok": False, "reason": "invoice_snapshot_replaced"}
+    return {"ok": True, "reason": ""}
+
+
+def video_uiflow3_update_invoice_message_id(user_id: int, session: dict, message_id: int) -> dict:
+    rendered_message_id = safe_int(message_id, 0)
+    if rendered_message_id <= 0:
+        return session
+    expected = dict(((session or {}).get("draft") or {}).get("uiflow3_invoice_attestation") or {})
+    current = get_video_session(user_id)
+    draft = dict(current.get("draft") or {})
+    attestation = dict(draft.get("uiflow3_invoice_attestation") or {})
+    if (
+        str(current.get("current_step") or "") != "b14_invoice"
+        or not expected.get("token")
+        or not hmac.compare_digest(
+            str(expected.get("token") or ""),
+            str(attestation.get("token") or ""),
+        )
+    ):
+        return current
+    attestation["message_id"] = rendered_message_id
+    draft["uiflow3_invoice_attestation"] = attestation
+    current["draft"] = draft
+    return save_video_session(user_id, current)
+
+
+def video_uiflow3_prepare_b14_session(
+    user_id: int,
+    raw_state: dict,
+    *,
+    owner_chat_id: int = 0,
+    invoice_message_id: int = 0,
+    tail_state: dict | None = None,
+    require_attestation: bool = True,
+) -> tuple[dict, dict]:
+    """Persist a real B14 invoice handoff without submitting or charging yet."""
+
+    state = video_ai_real_maybe_compile_state(raw_state)
+    approved_snapshot = video_uiflow3.approved_snapshot(state)
+    existing_session = get_video_session(user_id)
+    existing_draft = dict(existing_session.get("draft") or {})
+    existing_snapshot = dict(existing_draft.get("uiflow3_approved_snapshot") or {})
+    same_durable_scope = bool(
+        str(existing_session.get("product_id") or existing_draft.get("product_id") or "")
+        == str(state.get("parent_product") or "")
+        and str(existing_snapshot.get("draft_id") or "")
+        == str(approved_snapshot.get("draft_id") or "")
+        and str(existing_snapshot.get("config_hash") or "")
+        == str(approved_snapshot.get("config_hash") or "")
+    )
+    durable_submit_fields = {
+        key: deepcopy(existing_draft[key])
+        for key in (
+            "b14_project_id",
+            "b14_queue_job_id",
+            "b14_queue_job",
+            "b14_duplicate_prevented",
+            "b14_submit_attempted",
+            "b14_submit_preflight_snapshot",
+            "submitted_at",
+            "video_tail_submit_session_id",
+            "video_tail_submit_product_type",
+            "video_tail_submit_owner",
+            "video_tail_submit_user_id",
+        )
+        if same_durable_scope and key in existing_draft
+    }
+    blockers = video_uiflow3_b14_execution_blockers(state)
+    if blockers:
+        raise ValueError("video_uiflow3_render_capability_unavailable:" + ",".join(blockers))
+    storyboard = video_uiflow3_b14_storyboard_payload(state)
+    content = dict(state.get("content") or {})
+    brief = dict(content.get("approved_brief") or {})
+    fmt = dict(state.get("format") or {})
+    audio = dict(state.get("audio") or {})
+    branding = dict(state.get("branding") or {})
+    commercial = dict((state.get("legacy_compat") or {}).get("pilot_commercial") or {})
+    tail = video_tail9.normalize_state(tail_state) if tail_state else {}
+    if tail:
+        selected_quality = safe_int(tail.get("quality_tier_id"), 0)
+        quality = {
+            "tier_id": selected_quality,
+            "seconds": safe_int(fmt.get("seconds_per_scene"), TASK3D_SCENE_SECONDS),
+            "unit_xu": selected_quality,
+        }
+        model = dict(tail.get("capability_snapshot") or {})
+    else:
+        quality = dict(commercial.get("quality") or {})
+        model = dict(commercial.get("model") or {})
+    if not quality or not safe_int(quality.get("tier_id"), 0) or (not model and not tail):
+        raise ValueError("video_ai_real_model_required")
+    scene_count = max(1, len(state.get("scenes") or []), safe_int(fmt.get("scene_count"), 0))
+    profile_id = str((storyboard.get("profile") or {}).get("profile_id") or "storytelling")
+    addon_plan = video_b14_default_addon_plan(profile_id)
+    dialogue_rows = [
+        dict(item) for item in audio.get("dialogue_segments") or []
+        if isinstance(item, dict) and str(item.get("text") or "").strip()
+    ]
+    dialogues = [str(item.get("text") or "").strip() for item in dialogue_rows]
+    dialogue_speakers = list(dict.fromkeys(
+        str(item.get("speaker_id") or "")
+        for item in dialogue_rows
+        if str(item.get("speaker_id") or "")
+    ))
+    gender_by_speaker = {
+        str(item.get("character_id") or ""): str(item.get("gender") or "unspecified")
+        for item in (state.get("bible") or {}).get("characters") or []
+    }
+    narrator = dict((state.get("bible") or {}).get("narrator") or {})
+    if narrator.get("narrator_id"):
+        gender_by_speaker[str(narrator.get("narrator_id"))] = str(narrator.get("gender") or "unspecified")
+    dubbing_mode = str(audio.get("dubbing_mode") or "none")
+    dialogue_gender = gender_by_speaker.get(dialogue_speakers[0], "unspecified") if len(dialogue_speakers) == 1 else "unspecified"
+    default_voice_source = "default_female" if dialogue_gender == "female" else "default_male"
+    music_scope = str(audio.get("music_scope") or "none")
+    music_source = str(audio.get("music_source") or "none")
+    logo = dict(branding.get("logo") or {})
+    watermark = dict(branding.get("watermark") or {})
+    logo_file_id = str(logo.get("telegram_file_id") or logo.get("file_id") or "")
+    watermark_text = str(watermark.get("text") or "")
+    logo_material = (
+        product_video_logo_material_config(
+            logo_file_id=logo_file_id,
+            logo_position=str(logo.get("position") or "top_right"),
+            logo_enabled=True,
+        )
+        if logo_file_id
+        else {}
+    )
+    asset_pack = deepcopy(storyboard.get("asset_pack") or {})
+    if logo_material:
+        asset_pack["logo_material"] = deepcopy(logo_material)
+    addon_plan.update({
+        "voice_enabled": dubbing_mode == "default_ai" and bool(dialogues),
+        "voice_source": default_voice_source if dubbing_mode == "default_ai" and dialogues else "none",
+        "voice_provider_voice_id": default_tts_voice_id(dialogue_gender) if dubbing_mode == "default_ai" and dialogues else "",
+        "voice_label": ("Nữ mặc định" if dialogue_gender == "female" else "Nam mặc định") if dubbing_mode == "default_ai" and dialogues else "",
+        "dub_enabled": dubbing_mode == "default_ai" and bool(dialogues),
+        "dub_source": "same_as_voice" if dubbing_mode == "default_ai" and dialogues else "none",
+        "music_enabled": music_scope != "none" and music_source in {"library", "ai"},
+        "music_source": "default" if music_scope != "none" else "none",
+        "subtitle_enabled": str(audio.get("subtitle_mode") or "none") != "none",
+        "subtitle_source": "from_narration" if str(audio.get("subtitle_mode") or "none") != "none" else "none",
+        "sfx_enabled": str(audio.get("sfx_mode") or "none") != "none",
+        "logo_enabled": bool(logo_file_id or watermark_text),
+        "logo_source": "text" if watermark_text else "none",
+        "logo_text": watermark_text,
+        "logo_file_id": logo_file_id,
+        "narration_text": "\n".join(dialogues),
+        "music_note": f"{music_source}:{music_scope}" if music_scope != "none" else "",
+    })
+    source_refs = [
+        str(item.get("file_id") or "")
+        for item in (storyboard.get("asset_pack") or {}).get("items") or []
+        if str(item.get("file_id") or "")
+    ]
+    product_id = str(state.get("parent_product") or "video_ai_real")
+    product_route = video_uiflow3_execution_adapter(state)
+    topic = str(
+        brief.get("title")
+        or content.get("original_intent")
+        or VIDEO_UIFLOW3_PRODUCT_LABELS.get(product_id)
+        or "Video"
+    )
+    scene_seconds = max(1, safe_int(fmt.get("seconds_per_scene") or quality.get("seconds") or model.get("seconds"), TASK3D_SCENE_SECONDS))
+    if scene_seconds > TASK3D_SCENE_SECONDS:
+        raise ValueError("video_uiflow3_scene_duration_not_supported")
+    attestation = (
+        video_uiflow3_new_invoice_attestation(
+            state,
+            user_id=user_id,
+            chat_id=owner_chat_id or safe_int(state.get("owner_chat_id"), 0),
+            message_id=invoice_message_id,
+        )
+        if require_attestation
+        else {}
+    )
+    session = default_video_session(user_id)
+    session.update({
+        "product_id": product_id,
+        "current_step": "b14_invoice",
+        "topic": topic,
+        "original_user_prompt": str(content.get("original_intent") or topic),
+        "aspect_ratio": str(fmt.get("ratio") or "9:16"),
+        "entry_flow": "video_uiflow3",
+        "current_flow": "product_video",
+    })
+    session["draft"] = {
+        "topic": topic,
+        "product_id": product_id,
+        "content_mode": str(content.get("source") or "manual"),
+        "content_source": str(content.get("source") or "manual"),
+        "content_choice": deepcopy(brief),
+        "selected_suggestion": deepcopy(brief),
+        "selected_prompt": str(content.get("original_intent") or topic),
+        "selected_prompt_text": str(content.get("original_intent") or topic),
+        "b14_profile_id": profile_id,
+        "b14_scene_count": scene_count,
+        "b14_scene_count_selected": True,
+        "b14_scene_seconds": scene_seconds,
+        "b14_quality_xu": safe_int(quality.get("tier_id"), 0),
+        "b14_aspect_ratio": str(fmt.get("ratio") or "9:16"),
+        "b14_addon_plan": addon_plan,
+        "b14_storyboard_plan": storyboard,
+        "prompt_bundle": video_b14_prompt_bundle_from_plan_payload(storyboard),
+        "asset_pack": asset_pack,
+        "provider_model_metadata": model,
+        "video_tail_engine_route": str(product_route.get("engine_route") or ""),
+        "video_tail_executor_product_type": str(product_route.get("executor_product_type") or ""),
+        "video_tail_required_capability": str(product_route.get("required_capability") or ""),
+        "video_tail_worker_owner": str(product_route.get("worker_owner") or ""),
+        "entry_choice": "ai_image_menu" if str(state.get("entry_mode") or "") == "image_video" else "prompt_video",
+        "input_origin_step": "awaiting_source_image" if str(state.get("entry_mode") or "") == "image_video" else "prompt_video",
+        "source_media_ref": source_refs[0] if source_refs else "",
+        "source_media_refs": source_refs,
+        "media_type": "image" if str(state.get("entry_mode") or "") == "image_video" else "text",
+        "uiflow3_approved_snapshot": approved_snapshot,
+        "uiflow3_invoice_attestation_required": bool(require_attestation),
+        "uiflow3_invoice_attestation": attestation,
+        "charge_policy": "after_valid_mp4_delivery",
+        "provider_called": False,
+        "job_created": False,
+        "outbox_created": False,
+        "xu_charged": 0,
+    }
+    session["draft"].update(durable_submit_fields)
+    if logo_material:
+        session["draft"]["product_video_logo_material"] = deepcopy(logo_material)
+    if tail:
+        session["draft"][VIDEO_TAIL9_STATE_KEY] = tail
+    saved = save_video_session(user_id, session)
+    commercial["b14_handoff_ready"] = True
+    commercial["b14_quality_xu"] = safe_int(quality.get("tier_id"), 0)
+    state["legacy_compat"]["pilot_commercial"] = commercial
+    state["navigation"]["current_step"] = "invoice"
+    return video_uiflow3.normalize_state(state), saved
+
+
+def video_uiflow3_real_invoice_keyboard(state: dict, session: dict) -> InlineKeyboardMarkup:
+    back_callback = video_uiflow3.scope_callback(state, "vid3|invoice_back")
+    attestation = dict(((session or {}).get("draft") or {}).get("uiflow3_invoice_attestation") or {})
+    token = str(attestation.get("token") or "")
+    confirm_callback = (
+        f"{video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK}|{token}"
+        if token
+        else video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK
+    )
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Xác nhận báo giá và tạo video", callback_data=confirm_callback),
+            InlineKeyboardButton("✏️ Sửa lựa chọn", callback_data=back_callback),
+        ],
+        [InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+    ])
+
+
+def video_uiflow3_matching_b14_session(user_id: int, raw_state: dict) -> dict:
+    state = video_uiflow3.normalize_state(raw_state)
+    session = get_video_session(user_id)
+    draft = dict(session.get("draft") or {})
+    snapshot = dict(draft.get("uiflow3_approved_snapshot") or {})
+    current_snapshot = video_uiflow3.approved_snapshot(state)
+    if (
+        str(session.get("product_id") or "") != "video_ai_real"
+        or str(snapshot.get("draft_id") or "") != str(state.get("draft_id") or "")
+        or str(snapshot.get("config_hash") or "") != str(current_snapshot.get("config_hash") or "")
+    ):
+        return {}
+    return session
+
+
+async def video_uiflow3_render_real_invoice(
+    query,
+    context,
+    user_id: int,
+    state: dict,
+    *,
+    reuse_saved: bool = False,
+):
+    if reuse_saved:
+        prepared = video_uiflow3.normalize_state(state)
+        session = video_uiflow3_matching_b14_session(user_id, prepared)
+        if str(session.get("current_step") or "") != "b14_invoice":
+            raise ValueError("video_uiflow3_saved_invoice_unavailable")
+    else:
+        prepared, session = video_uiflow3_prepare_b14_session(
+            user_id,
+            state,
+            owner_chat_id=safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0),
+            invoice_message_id=safe_int(getattr(getattr(query, "message", None), "message_id", 0), 0),
+        )
+    save_video_uiflow3_state(context, prepared)
+    rendered = await safe_edit_or_send(
+        query,
+        video_b14_invoice_text(session, user_id, get_user_language(user_id) or "vi"),
+        parse_mode="HTML",
+        reply_markup=video_uiflow3_real_invoice_keyboard(prepared, session),
+    )
+    rendered_message_id = safe_int(
+        getattr(rendered, "message_id", 0)
+        or getattr(getattr(query, "message", None), "message_id", 0),
+        0,
+    )
+    video_uiflow3_update_invoice_message_id(user_id, session, rendered_message_id)
+    return rendered
 
 
 def video_ai_real_is_prompt_pilot(raw_state: dict) -> bool:
@@ -73150,7 +74009,7 @@ def video_ai_real_pilot_scene_prompt_text(state: dict, scene: dict) -> str:
         f"Bối cảnh: {location_name}\n"
         f"Máy quay: {framing} · {movement}\n"
         f"Ánh sáng / cảm xúc: {lighting} · {mood}\n\n"
-        f"Prompt hoàn chỉnh:\n{compiled}"
+        f"Câu lệnh hoàn chỉnh:\n{compiled}"
     )
 
 
@@ -73223,7 +74082,7 @@ def video_ai_real_pilot_input_payload(
         ),
         "character_voice": (
             f"🎙 Giọng của Nhân vật {character_index}",
-            "Nhập mã giọng đã có hoặc quay lại chọn giọng gợi ý. Giọng chỉ được dùng cho đầu ra khi backend xác minh kết xuất được.",
+            "Nhập mã giọng đã có hoặc quay lại chọn giọng gợi ý. Giọng chỉ được dùng khi hệ thống xác minh sẵn sàng.",
         ),
         "location_count": (
             "🏞 Tổng số bối cảnh",
@@ -73278,8 +74137,8 @@ def video_ai_real_pilot_input_payload(
             "Nhập theo mẫu: Khuôn hình | chuyển động camera | ánh sáng | tâm trạng. Có thể bỏ trống phần không cần.",
         ),
         "scene_prompt": (
-            f"🧠 Prompt Cảnh {scene_index or '?'}",
-            "Nhập prompt hoàn chỉnh cho đúng cảnh này. Bot vẫn giữ nhân vật, bối cảnh, tỉ lệ và tính nối tiếp đã khóa; bản cũ chỉ đổi sau khi tin nhắn hợp lệ.",
+            f"🧠 Câu lệnh Cảnh {scene_index or '?'}",
+            "Nhập câu lệnh hoàn chỉnh cho đúng cảnh này. Bot vẫn giữ nhân vật, bối cảnh, tỉ lệ và tính nối tiếp đã xác nhận; bản cũ chỉ đổi sau khi tin nhắn hợp lệ.",
         ),
         "dialogue": (
             f"🗣 Lời thoại Cảnh {scene_index or '?'}",
@@ -73303,7 +74162,7 @@ def video_ai_real_pilot_input_payload(
         ),
         "brand_logo": (
             "🏷 Gửi logo",
-            "Gửi ảnh logo nền trong hoặc nền sạch. Tệp chỉ được lưu vào kế hoạch; chưa render ở bước này.",
+            "Gửi ảnh logo nền trong hoặc nền sạch. Tệp chỉ được lưu vào kế hoạch; chưa tạo video ở bước này.",
         ),
         "watermark": (
             "✍️ Nhập watermark",
@@ -73316,7 +74175,7 @@ def video_ai_real_pilot_input_payload(
     )
     rows: list[list[tuple[str, str]]] = []
     if kind == "source_media" and bool((state.get("source") or {}).get("complete")):
-        rows.append([("✅ Xong nguồn", "vid3|source_done")])
+        rows.append([("✅ Hoàn tất chọn nguồn đầu vào", "vid3|source_done")])
     rows.extend(video_ai_real_pilot_nav_rows(back=back_callback))
     return f"{title}\n\n{guidance}", video_uiflow3_keyboard(rows)
 
@@ -73409,7 +74268,7 @@ def video_ai_real_pilot_bible_view_payload(
         if not rows:
             rows.append([("👥 Chọn số nhân vật", "vid3|view|character_count")])
         rows.append([
-            ("✅ Hoàn thành chọn nhân vật", "vid3|view|production_bible"),
+            ("✅ Hoàn tất khai báo nhân vật", "vid3|view|production_bible"),
             ("🎬 Menu Video", "menu|main_video"),
         ])
         return (
@@ -73428,7 +74287,7 @@ def video_ai_real_pilot_bible_view_payload(
         if not rows:
             rows.append([("🏞 Chọn số bối cảnh", "vid3|view|location_count")])
         rows.append([
-            ("✅ Hoàn thành chọn bối cảnh", "vid3|view|production_bible"),
+            ("✅ Hoàn tất khai báo bối cảnh", "vid3|view|production_bible"),
             ("🎬 Menu Video", "menu|main_video"),
         ])
         return (
@@ -73467,7 +74326,7 @@ def video_ai_real_pilot_bible_view_payload(
         rows = [owner_buttons[offset:offset + 2] for offset in range(0, len(owner_buttons), 2)]
         rows.extend(video_ai_real_pilot_nav_rows(back="vid3|view|references"))
         guidance = (
-            "Chọn đúng chủ sở hữu. Ảnh nguồn vẫn được giữ nguyên; thao tác này chỉ gán vai trò tham chiếu sau Content Lock."
+            "Chọn đúng chủ sở hữu. Ảnh nguồn vẫn được giữ nguyên; thao tác này chỉ gán vai trò sau khi nội dung được xác nhận."
             if owner_buttons
             else "Chưa có nhân vật, bối cảnh, sản phẩm hoặc đạo cụ để gán ảnh này."
         )
@@ -73546,7 +74405,7 @@ def video_ai_real_pilot_bible_view_payload(
                 (video_ai_real_pilot_selected("📦 Sản phẩm", bool(continuity.get("product", True))), "vid3|continuity|product"),
                 (video_ai_real_pilot_selected("🏞 Bối cảnh", bool(continuity.get("location", True))), "vid3|continuity|location"),
             ],
-            *video_ai_real_pilot_nav_rows(back="vid3|view|production_bible"),
+            [("✅ Hoàn tất chọn yếu tố nhất quán", "vid3|view|production_bible"), ("🎬 Menu Video", "menu|main_video")],
         ]
         return (
             "🔒 Giữ nhất quán\n\n"
@@ -73574,7 +74433,7 @@ def video_ai_real_pilot_bible_view_payload(
             if owner_type == "character"
             else f"vid3|location|{owner_id}"
         )
-        rows.extend(video_ai_real_pilot_nav_rows(back=back_callback))
+        rows.append([("✅ Hoàn tất chọn cảnh áp dụng", back_callback), ("🎬 Menu Video", "menu|main_video")])
         return (
             f"🎬 Gán theo cảnh · {video_ai_real_pilot_entity_label(state, owner_type, owner_id)}\n\n"
             "Bật các cảnh sử dụng mục này. Nếu không chọn, bot tự gán nhân vật theo thứ tự hoặc tự chọn bối cảnh theo nội dung.",
@@ -73637,7 +74496,7 @@ def video_ai_real_pilot_scene_view_payload(
             f"vid3|cast_toggle|{scene_id}|{item.get('character_id')}",
         )] for index, item in enumerate(characters, 1)]
         rows.append([("🚫 Không có nhân vật", f"vid3|cast_clear|{scene_id}")])
-        rows.extend(video_ai_real_pilot_nav_rows(back=f"vid3|scene|{scene_id}"))
+        rows.append([("✅ Hoàn tất chọn nhân vật cho cảnh", f"vid3|scene|{scene_id}"), ("🎬 Menu Video", "menu|main_video")])
         return (
             f"👥 Nhân vật trong Cảnh {scene_index or '?'}\n\n"
             "Chọn một hoặc nhiều nhân vật xuất hiện. Nếu bỏ trống, cảnh có thể chỉ gồm sản phẩm hoặc phong cảnh.",
@@ -73752,10 +74611,10 @@ def video_ai_real_pilot_scene_view_payload(
             f"vid3|scene_sfx_set|{scene_id}|{key}",
         )] for key, label in presets]
         rows.append([("✍️ Nhập hiệu ứng khác", f"vid3|scene_sfx_custom|{scene_id}"), ("🗑 Xóa hết", f"vid3|scene_sfx_clear|{scene_id}")])
-        rows.extend(video_ai_real_pilot_nav_rows(back=f"vid3|scene_entities|{scene_id}"))
+        rows.append([("✅ Hoàn tất chọn hiệu ứng âm thanh", f"vid3|scene_entities|{scene_id}"), ("🎬 Menu Video", "menu|main_video")])
         return (
             f"🔊 Hiệu ứng âm thanh Cảnh {scene_index or '?'}\n\n"
-            "Có thể chọn nhiều hiệu ứng. Mục này chỉ xuất hiện khi renderer khai báo hỗ trợ âm thanh theo cảnh.",
+            "Có thể chọn nhiều hiệu ứng. Mục này chỉ xuất hiện khi hệ thống hỗ trợ âm thanh theo cảnh.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -73777,7 +74636,7 @@ def video_ai_real_pilot_scene_view_payload(
         rows.extend(video_ai_real_pilot_nav_rows(back=f"vid3|scene_entities|{scene_id}"))
         return (
             f"🌆 Âm thanh môi trường Cảnh {scene_index or '?'}\n\n"
-            "Chọn một không gian âm thanh. Đây là ambient nền, không phải nhạc hoặc hiệu ứng hành động.",
+            "Chọn một không gian âm thanh. Đây là âm thanh nền của bối cảnh, không phải nhạc hoặc hiệu ứng hành động.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -73846,7 +74705,7 @@ def video_ai_real_pilot_scene_view_payload(
         optional: list[tuple[str, str]] = []
         capabilities = dict(state.get("capabilities") or {})
         if bible.get("narrator") or bible.get("products") or bible.get("props") or capabilities.get("scene_sfx") or capabilities.get("scene_ambient"):
-            optional.append(("🧩 Tác nhân & âm thanh", f"vid3|scene_entities|{scene_id}"))
+            optional.append(("🧩 Tác nhân và âm thanh", f"vid3|scene_entities|{scene_id}"))
         if bool(capabilities.get("per_scene_music")):
             optional.append(("🎵 Nhạc cảnh", f"vid3|scene_music|{scene_id}"))
         if optional:
@@ -73859,14 +74718,14 @@ def video_ai_real_pilot_scene_view_payload(
             "override": "Nhạc riêng",
         }.get(str((model.get("music") or {}).get("policy") or "off"), "Theo kế hoạch")
         return (
-            f"🎬 Cảnh {scene_index or '?'} · Phân vai & âm thanh\n\n"
+            f"🎬 Cảnh {scene_index or '?'} · Phân vai và âm thanh\n\n"
             f"Nhân vật: {names}\n"
             f"Bối cảnh: {location_name}\n"
             f"Sản phẩm / đạo cụ: {len(model.get('products') or [])} / {len(model.get('props') or [])}\n"
             f"Người dẫn: {'Bật' if (model.get('narrator') or {}).get('enabled') else 'Tắt'}\n"
             f"Lời thoại: {len(model.get('dialogue') or [])} câu\n"
             f"Nhạc: {music_policy}\n\n"
-            "Mặc định chỉ hiện các mục cần dùng; phần kỹ thuật nằm trong Nâng cao.",
+            "Mặc định chỉ hiện các mục cần dùng; tùy chỉnh chuyên sâu nằm trong mục Nâng cao.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -73897,11 +74756,11 @@ def video_ai_real_pilot_scene_view_payload(
             rows.append(audio_row)
         rows.extend(video_ai_real_pilot_nav_rows(back=f"vid3|scene|{scene_id}"))
         return (
-            f"🧩 Tác nhân & âm thanh Cảnh {scene_index or '?'}\n\n"
+            f"🧩 Tác nhân và âm thanh Cảnh {scene_index or '?'}\n\n"
             f"Sản phẩm: {len(scene.get('product_ids') or [])}/{len(products)} · "
             f"Đạo cụ: {len(scene.get('prop_ids') or [])}/{len(props)}\n"
             f"Người dẫn: {'Đã bật' if scene.get('narrator_enabled') and narrator else 'Tắt'}\n\n"
-            "Không chọn thì giữ cấu hình tự động của cảnh; Production Bible gốc không bị thay đổi.",
+            "Không chọn thì giữ cấu hình tự động của cảnh; thiết lập nhân vật và bối cảnh gốc không bị thay đổi.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -73920,7 +74779,8 @@ def video_ai_real_pilot_scene_view_payload(
             )])
         clear_action = "scene_product_clear" if is_product else "scene_prop_clear"
         rows.append([("🚫 Không gán", f"vid3|{clear_action}|{scene_id}")])
-        rows.extend(video_ai_real_pilot_nav_rows(back=f"vid3|scene_entities|{scene_id}"))
+        finish_label = "✅ Hoàn tất chọn sản phẩm cho cảnh" if is_product else "✅ Hoàn tất chọn đạo cụ cho cảnh"
+        rows.append([(finish_label, f"vid3|scene_entities|{scene_id}"), ("🎬 Menu Video", "menu|main_video")])
         title = "📦 Sản phẩm của cảnh" if is_product else "🧩 Đạo cụ của cảnh"
         return (
             f"{title}\n\nChọn một hoặc nhiều mục; chạm lại để bật hoặc tắt.",
@@ -73938,13 +74798,13 @@ def video_ai_real_pilot_prompt_view_payload(
     scenes = list(state.get("scenes") or [])
 
     if view == "prompt_scenes":
-        lines = ["🧠 Prompt từng cảnh", ""]
+        lines = ["🧠 Câu lệnh từng cảnh", ""]
         for scene in scenes:
             status = "Đã tùy chỉnh" if str(scene.get("prompt_override") or "").strip() else "Sẵn sàng rà soát"
             lines.append(f"• Cảnh {scene.get('scene_index')}: {status}")
         lines.extend([
             "",
-            "Prompt được tạo từ nội dung, nhân vật, bối cảnh, continuity và hành động đã duyệt; bạn không phải viết lại từ đầu.",
+            "Câu lệnh được tạo từ nội dung, nhân vật, bối cảnh, tính nhất quán và hành động đã duyệt; bạn không phải viết lại từ đầu.",
         ])
         scene_buttons = [
             (f"🎬 Cảnh {scene.get('scene_index')}", f"vid3|prompt_scene|{scene.get('scene_id')}")
@@ -73952,7 +74812,7 @@ def video_ai_real_pilot_prompt_view_payload(
         ]
         rows = [scene_buttons[offset:offset + 2] for offset in range(0, len(scene_buttons), 2)]
         rows.append([
-            ("✅ Hoàn thành rà soát prompt", "vid3|view|prompts"),
+            ("✅ Hoàn tất rà soát câu lệnh từng cảnh", "vid3|view|prompts"),
             ("🎬 Menu Video", "menu|main_video"),
         ])
         return (
@@ -73966,12 +74826,12 @@ def video_ai_real_pilot_prompt_view_payload(
         if not scene:
             raise ValueError("scene_not_found")
         return (
-            f"🧠 Prompt chi tiết · Cảnh {scene.get('scene_index') or '?'}\n\n"
+            f"🧠 Câu lệnh chi tiết · Cảnh {scene.get('scene_index') or '?'}\n\n"
             f"{video_ai_real_pilot_scene_prompt_text(state, scene)}\n\n"
-            "Đây là bản kế hoạch prompt; chưa gửi provider và chưa trừ Xu.",
+            "Đây là bản kế hoạch câu lệnh; chưa bắt đầu tạo video và chưa trừ Xu.",
             video_uiflow3_keyboard([
-                [("✏️ Sửa prompt cảnh", f"vid3|prompt_edit|{scene_id}")],
-                [("✅ Hoàn thành cảnh", "vid3|view|prompt_scenes"), ("🎬 Menu Video", "menu|main_video")],
+                [("✏️ Sửa câu lệnh của cảnh", f"vid3|prompt_edit|{scene_id}")],
+                [("✅ Hoàn tất rà soát câu lệnh của cảnh", "vid3|view|prompt_scenes"), ("🎬 Menu Video", "menu|main_video")],
             ]),
         )
 
@@ -73984,7 +74844,7 @@ def video_ai_real_pilot_prompt_view_payload(
             rows.extend(video_ai_real_pilot_nav_rows(back="vid3|view|prompts"))
             return (
                 "🎥 Tùy chỉnh nâng cao theo cảnh\n\n"
-                "Chỉ mở khi cần sửa khuôn hình, camera, chuyển động hoặc ánh sáng. Các mục này không thay thế nội dung cảnh.",
+                "Chỉ mở khi cần sửa khuôn hình, máy quay, chuyển động hoặc ánh sáng. Các mục này không thay thế nội dung cảnh.",
                 video_uiflow3_keyboard(rows),
             )
         scene = video_uiflow3_find_scene(state, scene_id)
@@ -73998,7 +74858,7 @@ def video_ai_real_pilot_prompt_view_payload(
         )
         back_callback = str(state.get("ui_return_callback") or default_back)
         rows = [
-            [("✏️ Sửa camera & chuyển động", f"vid3|scene_direction|{scene_id}")],
+            [("✏️ Sửa máy quay và chuyển động", f"vid3|scene_direction|{scene_id}")],
             *video_ai_real_pilot_nav_rows(back=back_callback),
         ]
         return (
@@ -74090,7 +74950,7 @@ def video_ai_real_pilot_screen_payload(
                 (count_label, "vid3|source_status"),
             ])
         if bool(source.get("complete")):
-            rows.append([("✅ Xong nguồn", "vid3|source_done")])
+            rows.append([("✅ Hoàn tất chọn nguồn đầu vào", "vid3|source_done")])
         source_back = "vid3|back" if (state.get("navigation") or {}).get("visible_step_stack") else "menu|main_video"
         rows.extend(video_ai_real_pilot_nav_rows(back=source_back))
         return (
@@ -74100,11 +74960,13 @@ def video_ai_real_pilot_screen_payload(
 
     if step == "content_hub" and not view:
         rows = [
-            [("📚 32 loại nội dung", "vid3|content|profiles"), ("✍️ Tự mô tả nội dung", "vid3|content|manual")],
-            [("📖 Hướng dẫn", "menu|guide_video_ai")],
+            [("📚 32 loại nội dung", "vid3|content|profiles"), ("💡 Ý tưởng video", "vid3|idea_catalog")],
         ]
+        content_row = [("✍️ Tự mô tả nội dung", "vid3|content|manual")]
         if video_uiflow3_source_content(state):
-            rows.append([("📄 Dùng nội dung nguồn", "vid3|content|source")])
+            content_row.append(("📄 Dùng nội dung nguồn", "vid3|content|source"))
+        rows.append(content_row)
+        rows.append([("📖 Hướng dẫn", "menu|guide_video_ai")])
         rows.extend(video_ai_real_pilot_nav_rows(back="vid3|back"))
         return (
             f"{progress_prefix}📝 Chọn nội dung video\n\n"
@@ -74136,7 +74998,7 @@ def video_ai_real_pilot_screen_payload(
                 suggestion_buttons[offset:offset + 2]
                 for offset in range(0, len(suggestion_buttons), 2)
             ],
-            [("✅ Khóa nội dung", "vid3|content_lock"), ("✏️ Sửa nội dung", "vid3|content_edit")],
+            [("✅ Hoàn tất xác nhận nội dung", "vid3|content_lock"), ("✏️ Sửa nội dung", "vid3|content_edit")],
             [("🔄 Chọn nội dung khác", "vid3|content_change")],
             *video_ai_real_pilot_nav_rows(back="vid3|back"),
         ]
@@ -74150,7 +75012,7 @@ def video_ai_real_pilot_screen_payload(
             f"Gợi ý theo loại nội dung: {profile_name}\n"
             f"Khung nội dung: {pattern}\n"
             f"Đang dùng: {commercial.get('context_label') or 'Giữ nguyên nội dung đã chọn'}\n\n"
-            "Sau khi khóa, bot mới mở Nhân vật & bối cảnh; nội dung gốc vẫn được giữ để bạn rà soát lại.",
+            "Sau khi xác nhận, bot mới mở Nhân vật và bối cảnh; nội dung gốc vẫn được giữ để bạn rà soát lại.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -74161,7 +75023,7 @@ def video_ai_real_pilot_screen_payload(
         products = list(bible.get("products") or [])
         props = list(bible.get("props") or [])
         return (
-            f"{progress_prefix}👥 Nhân vật & bối cảnh\n\n"
+            f"{progress_prefix}👥 Nhân vật và bối cảnh\n\n"
             f"Nhân vật: {len(characters)} · Bối cảnh: {len(locations)}\n"
             f"Ảnh tham chiếu đã gán: {len(state.get('references') or [])}\n\n"
             f"Tùy chỉnh chi tiết: {len(products)} sản phẩm · {len(props)} đạo cụ · "
@@ -74172,7 +75034,7 @@ def video_ai_real_pilot_screen_payload(
                 [("🏞 Số bối cảnh", "vid3|view|location_count"), ("🗺 Danh sách bối cảnh", "vid3|view|location_list")],
                 [("🖼 Ảnh tham chiếu", "vid3|view|references"), ("🔒 Giữ nhất quán", "vid3|view|continuity")],
                 [("⚡ Tạo nhanh", "vid3|quick_build"), ("🛠 Tùy chỉnh chi tiết", "vid3|view|bible_extras")],
-                [("✨ Tự động gợi ý", "vid3|bible_auto"), ("➡️ Tiếp tục", "vid3|bible_done")],
+                [("✨ Tự động gợi ý", "vid3|bible_auto"), ("✅ Hoàn tất thiết lập nhân vật và bối cảnh", "vid3|bible_done")],
                 *video_ai_real_pilot_nav_rows(back="vid3|back"),
             ]),
         )
@@ -74220,9 +75082,9 @@ def video_ai_real_pilot_screen_payload(
         else:
             aliases = ("vf1", "vf2") if gender == "female" else ("vm1", "vm2")
             labels = (
-                ("Giọng nữ 1 (kế hoạch)", "Giọng nữ 2 (kế hoạch)")
+                ("Giọng nữ 1", "Giọng nữ 2")
                 if gender == "female"
-                else ("Giọng nam 1 (kế hoạch)", "Giọng nam 2 (kế hoạch)")
+                else ("Giọng nam 1", "Giọng nam 2")
             )
             category = "Giọng nữ" if gender == "female" else "Giọng nam"
             used_by_others = {
@@ -74251,12 +75113,9 @@ def video_ai_real_pilot_screen_payload(
             rows.append([("✍️ Nhập giọng khác", f"vid3|voice_custom|{character_id}")])
             guidance = (
                 "Mỗi nhân vật giữ một giọng xuyên các cảnh; các nhân vật cùng giới không âm thầm dùng chung giọng. "
-                "Giọng kế hoạch chỉ trở thành giọng đầu ra khi backend xác minh kết xuất được."
+                "Giọng đã chọn chỉ được dùng cho video khi hệ thống xác minh sẵn sàng."
             )
-        rows.append([
-            ("✅ Hoàn thành chọn giọng", back_callback),
-            ("🎬 Menu Video", "menu|main_video"),
-        ])
+        rows.extend(video_ai_real_pilot_nav_rows(back=back_callback))
         return (
             f"🎙 Giọng của Nhân vật {index}\n\nNhóm giọng: {category}\n{guidance}",
             video_uiflow3_keyboard(rows),
@@ -74304,22 +75163,22 @@ def video_ai_real_pilot_screen_payload(
             (str(audio.get("music_scope") or "none"), str(audio.get("music_source") or "none")),
             "Theo kế hoạch",
         )
-        subtitle_label = {"none": "Bỏ qua", "script": "Theo script", "auto": "Tự động"}.get(
+        subtitle_label = {"none": "Bỏ qua", "script": "Theo kịch bản", "auto": "Tự động"}.get(
             str(audio.get("subtitle_mode") or "none"), "Bỏ qua"
         )
         dubbing_label = {"none": "Bỏ qua", "browser": "Giọng miễn phí theo nhân vật", "default_ai": "Giọng AI"}.get(
             str(audio.get("dubbing_mode") or "none"), "Bỏ qua"
         )
-        sfx_label = {"none": "Bỏ qua", "library": "Kho hiệu ứng", "ai": "SFX AI"}.get(
+        sfx_label = {"none": "Bỏ qua", "library": "Kho hiệu ứng", "ai": "Hiệu ứng âm thanh AI"}.get(
             str(audio.get("sfx_mode") or "none"), "Bỏ qua"
         )
         rows = [
             [("🎵 Nhạc", "vid3|view|audio_music"), ("💬 Phụ đề", "vid3|view|audio_subtitle")],
-            [("🎙 Lồng tiếng", "vid3|view|audio_dubbing"), ("🔊 SFX", "vid3|view|audio_sfx")],
-            [("✅ Hoàn thành âm thanh", "vid3|view|scene_assignment"), ("🎬 Menu Video", "menu|main_video")],
+            [("🎙 Lồng tiếng", "vid3|view|audio_dubbing"), ("🔊 Hiệu ứng âm thanh", "vid3|view|audio_sfx")],
+            [("✅ Hoàn tất thiết lập âm thanh và phụ đề", "vid3|view|scene_assignment"), ("🎬 Menu Video", "menu|main_video")],
         ]
         return (
-            "🎧 Âm thanh & phụ đề\n\n"
+            "🎧 Âm thanh và phụ đề\n\n"
             f"Nhạc: {music_label}\n"
             f"Phụ đề: {subtitle_label}\n"
             f"Lồng tiếng: {dubbing_label}\n"
@@ -74345,11 +75204,11 @@ def video_ai_real_pilot_screen_payload(
                 (video_ai_real_pilot_selected("✨ Nhạc AI · toàn video", current == "ai_whole"), "vid3|audio_set|music|ai_whole"),
                 (video_ai_real_pilot_selected("✨ Nhạc AI · theo cảnh", current == "ai_scene"), "vid3|audio_set|music|ai_scene"),
             ],
-            [("✅ Hoàn thành chọn nhạc", "vid3|view|audio_options"), ("🎬 Menu Video", "menu|main_video")],
+            [("⬅️ Âm thanh và phụ đề", "vid3|view|audio_options"), ("🎬 Menu Video", "menu|main_video")],
         ]
         return (
             "🎵 Nhạc cho video\n\n"
-            "Kho nhạc có sẵn không tính thêm Xu. Nhạc AI được tính theo số track: một track toàn video hoặc một track cho mỗi cảnh.",
+            "Kho nhạc có sẵn không tính thêm Xu. Nhạc AI được tính theo số bản nhạc: một bản cho toàn video hoặc một bản cho mỗi cảnh.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -74360,13 +75219,13 @@ def video_ai_real_pilot_screen_payload(
         ]
         rows = [scene_buttons[offset:offset + 2] for offset in range(0, len(scene_buttons), 2)]
         rows.append([
-            ("✅ Hoàn thành nhạc theo cảnh", "vid3|view|audio_options"),
+            ("✅ Hoàn tất chọn nhạc theo từng cảnh", "vid3|view|audio_options"),
             ("🎬 Menu Video", "menu|main_video"),
         ])
         return (
             "🎼 Nhạc theo từng cảnh\n\n"
             "Chọn từng cảnh để đặt track riêng hoặc để tự động theo tình tiết. Xong cảnh nào quay lại đây; "
-            "bấm Hoàn thành để trở về Âm thanh & phụ đề.",
+            "bấm Hoàn tất chọn nhạc theo từng cảnh để trở về Âm thanh và phụ đề.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -74375,13 +75234,13 @@ def video_ai_real_pilot_screen_payload(
         rows = [
             [
                 (video_ai_real_pilot_selected("🚫 Bỏ qua", current == "none"), "vid3|audio_set|subtitle|none"),
-                (video_ai_real_pilot_selected("📝 Theo script · 0 Xu", current == "script"), "vid3|audio_set|subtitle|script"),
+                (video_ai_real_pilot_selected("📝 Theo kịch bản · 0 Xu", current == "script"), "vid3|audio_set|subtitle|script"),
             ],
             [(video_ai_real_pilot_selected("✨ Tạo tự động", current == "auto"), "vid3|audio_set|subtitle|auto")],
-            [("✅ Hoàn thành phụ đề", "vid3|view|audio_options"), ("🎬 Menu Video", "menu|main_video")],
+            [("⬅️ Âm thanh và phụ đề", "vid3|view|audio_options"), ("🎬 Menu Video", "menu|main_video")],
         ]
         return (
-            "💬 Phụ đề\n\nPhụ đề theo script không tính thêm Xu; phụ đề tự động được cộng một lần theo tổng thời lượng video.",
+            "💬 Phụ đề\n\nPhụ đề theo kịch bản không tính thêm Xu; phụ đề tự động được cộng một lần theo tổng thời lượng video.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -74391,7 +75250,7 @@ def video_ai_real_pilot_screen_payload(
             [(video_ai_real_pilot_selected("🚫 Bỏ qua", current == "none"), "vid3|audio_set|dubbing|none")],
             [(video_ai_real_pilot_selected("🌐 Giọng miễn phí theo nhân vật", current == "browser"), "vid3|audio_set|dubbing|browser")],
             [(video_ai_real_pilot_selected("✨ Giọng AI mặc định", current == "default_ai"), "vid3|audio_set|dubbing|default_ai")],
-            [("✅ Hoàn thành lồng tiếng", "vid3|view|audio_options"), ("🎬 Menu Video", "menu|main_video")],
+            [("⬅️ Âm thanh và phụ đề", "vid3|view|audio_options"), ("🎬 Menu Video", "menu|main_video")],
         ]
         return (
             "🎙 Lồng tiếng theo nhân vật\n\n"
@@ -74407,11 +75266,11 @@ def video_ai_real_pilot_screen_payload(
                 (video_ai_real_pilot_selected("🚫 Bỏ qua", current == "none"), "vid3|audio_set|sfx|none"),
                 (video_ai_real_pilot_selected("📚 Kho hiệu ứng · 0 Xu", current == "library"), "vid3|audio_set|sfx|library"),
             ],
-            [(video_ai_real_pilot_selected("✨ SFX AI", current == "ai"), "vid3|audio_set|sfx|ai")],
-            [("✅ Hoàn thành hiệu ứng", "vid3|view|audio_options"), ("🎬 Menu Video", "menu|main_video")],
+            [(video_ai_real_pilot_selected("✨ Hiệu ứng âm thanh AI", current == "ai"), "vid3|audio_set|sfx|ai")],
+            [("⬅️ Âm thanh và phụ đề", "vid3|view|audio_options"), ("🎬 Menu Video", "menu|main_video")],
         ]
         return (
-            "🔊 Hiệu ứng âm thanh\n\nKho hiệu ứng có sẵn không tính thêm Xu; SFX AI được cộng một lần cho video.",
+            "🔊 Hiệu ứng âm thanh\n\nKho hiệu ứng có sẵn không tính thêm Xu; hiệu ứng âm thanh AI được cộng một lần cho video.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -74438,7 +75297,7 @@ def video_ai_real_pilot_screen_payload(
             return (
                 f"{progress_prefix}🎬 Chọn số cảnh\n\n"
                 f"Sản phẩm: {product_label}\n\n"
-                "Mỗi cảnh là một ý hoặc hành động trọn vẹn. Thời lượng mỗi cảnh được xác định sau ở bước Chất lượng theo đúng model; "
+                "Mỗi cảnh là một ý hoặc hành động trọn vẹn. Thời lượng mỗi cảnh được xác định sau ở bước Chất lượng theo đúng gói đã chọn; "
                 "cảnh thật chỉ được lập sau khi nội dung đã xác nhận.",
                 video_uiflow3_keyboard(rows),
             )
@@ -74478,25 +75337,25 @@ def video_ai_real_pilot_screen_payload(
     if step == "branding" and not view:
         branding = dict(state.get("branding") or {})
         return (
-            f"{progress_prefix}🏷 Logo & watermark\n\n"
+            f"{progress_prefix}🏷 Logo và watermark\n\n"
             f"Logo: {'Đã chọn' if branding.get('logo') else 'Chưa chọn'}\n"
             f"Watermark: {'Đã chọn' if branding.get('watermark') else 'Chưa chọn'}\n\n"
             "Đây là lớp tùy chọn; bỏ qua thì video vẫn giữ nguyên nội dung và bố cục.",
             video_uiflow3_keyboard([
                 [("🖼 Gửi logo", "vid3|brand|logo"), ("✍️ Nhập watermark", "vid3|brand|watermark")],
-                [("⏭ Bỏ qua", "vid3|brand|none"), ("➡️ Tiếp tục", "vid3|branding_done")],
+                [("⏭ Bỏ qua", "vid3|brand|none"), ("✅ Hoàn tất chọn logo và watermark", "vid3|branding_done")],
                 *video_ai_real_pilot_nav_rows(back="vid3|back"),
             ]),
         )
 
     if step == "prompts" and not view:
         return (
-            f"{progress_prefix}🧠 Rà soát prompt\n\n"
-            "Bot tạo prompt từ nội dung đã khóa, nhân vật, bối cảnh, ảnh, continuity và kế hoạch cảnh. "
-            "Người mới có thể tiếp tục ngay; chỉ mở Tùy chỉnh nâng cao khi cần sửa camera hoặc ánh sáng.",
+            f"{progress_prefix}🧠 Rà soát câu lệnh\n\n"
+            "Bot tạo câu lệnh từ nội dung đã xác nhận, nhân vật, bối cảnh, ảnh, tính nhất quán và kế hoạch cảnh. "
+            "Người mới có thể tiếp tục ngay; chỉ mở Tùy chỉnh nâng cao khi cần sửa máy quay hoặc ánh sáng.",
             video_uiflow3_keyboard([
-                [("📝 Prompt từng cảnh", "vid3|prompt_scenes"), ("🎥 Tùy chỉnh nâng cao", "vid3|prompt_advanced")],
-                [("➡️ Tiếp tục", "vid3|prompts_done")],
+                [("📝 Câu lệnh từng cảnh", "vid3|prompt_scenes"), ("🎥 Tùy chỉnh nâng cao", "vid3|prompt_advanced")],
+                [("✅ Hoàn tất rà soát câu lệnh", "vid3|prompts_done")],
                 *video_ai_real_pilot_nav_rows(back="vid3|back"),
             ]),
         )
@@ -74544,15 +75403,15 @@ def video_ai_real_pilot_screen_payload(
                 "Noi dung chua duoc xac nhan": "Nội dung chưa được xác nhận",
                 "Chua co nhan vat bat buoc": "Chưa có nhân vật bắt buộc",
                 "Chua co ke hoach canh": "Chưa có kế hoạch cảnh",
-                "Chua ho tro ket xuat nhieu giong": "Chưa hỗ trợ kết xuất nhiều giọng",
+                "Chua ho tro ket xuat nhieu giong": "Chưa hỗ trợ tạo video với nhiều giọng",
                 "Chua ho tro ghep nhac toan video tu ke hoach V3": "Chưa hỗ trợ ghép nhạc toàn video từ kế hoạch",
                 "Chua ho tro nhac rieng tung canh": "Chưa hỗ trợ nhạc riêng từng cảnh",
                 "Cac nhan vat dang dung trung giong": "Các nhân vật đang dùng trùng giọng",
                 "Loai video nay moi cho phep lap ke hoach": "Loại video này mới cho phép lập kế hoạch",
-                "Rà soát lại Production Bible": "Rà soát lại Nhân vật & bối cảnh",
-                "Rà soát lại phân vai và lời thoại": "Rà soát lại Phân vai & âm thanh",
-                "Rà soát lại hợp đồng prompt": "Rà soát lại Prompt từng cảnh",
-                "Giong da chon chua duoc chung minh co the ket xuat tren may chu": "Giọng đã chọn chưa được xác minh có thể kết xuất",
+                "Rà soát lại Production Bible": "Rà soát lại nhân vật và bối cảnh",
+                "Rà soát lại phân vai và lời thoại": "Rà soát lại phân vai và âm thanh",
+                "Rà soát lại hợp đồng prompt": "Rà soát lại câu lệnh từng cảnh",
+                "Giong da chon chua duoc chung minh co the ket xuat tren may chu": "Giọng đã chọn chưa sẵn sàng để sử dụng",
                 "Ke hoach con mot muc chua hop le": "Kế hoạch còn một mục chưa hợp lệ",
             }
             reconcile_errors = [
@@ -74571,15 +75430,15 @@ def video_ai_real_pilot_screen_payload(
             remaining_error_count = max(0, len(errors) - len(visible_error_labels))
             if remaining_error_count:
                 lines.append(f"• Và {remaining_error_count} mục khác cần hoàn tất")
-        assignment_row = [("🎙 Phân vai & âm thanh", "vid3|edit|scene_assignment")]
+        assignment_row = [("🎙 Phân vai và âm thanh", "vid3|edit|scene_assignment")]
         if not bool(fmt.get("scene_count_confirmed")):
             assignment_row.append(("🎬 Số cảnh", "vid3|edit|scene_count"))
         rows = [
             [("📐 Sửa khung hình", "vid3|edit|format"), ("📝 Sửa nội dung", "vid3|edit|content_lock")],
-            [("👥 Nhân vật & bối cảnh", "vid3|edit|production_bible"), ("🎬 Kế hoạch cảnh", "vid3|edit|scene_plan")],
+            [("👥 Nhân vật và bối cảnh", "vid3|edit|production_bible"), ("🎬 Kế hoạch cảnh", "vid3|edit|scene_plan")],
             assignment_row,
-            [("🧠 Rà soát prompt", "vid3|edit|prompts"), ("🏷 Logo & watermark", "vid3|edit|branding")],
-            [("✅ Hoàn thành rà soát", "vid3|summary_done")],
+            [("🧠 Rà soát câu lệnh", "vid3|edit|prompts"), ("🏷 Logo và watermark", "vid3|edit|branding")],
+            [("✅ Hoàn tất rà soát và chọn chất lượng", "vid3|summary_done")],
             *video_ai_real_pilot_nav_rows(back="vid3|back"),
         ]
         return "\n".join(lines), video_uiflow3_keyboard(rows)
@@ -74593,7 +75452,7 @@ def video_ai_real_pilot_screen_payload(
             f"{progress_prefix}⭐ Chọn chất lượng",
             "",
             "Mỗi gói ghi rõ thời lượng một cảnh và giá một cảnh. "
-            "Tổng giá được tính ở màn Báo giá sau khi bạn hoàn thành lựa chọn.",
+            "Chọn một gói để mở ngay báo giá đầy đủ trước khi xác nhận tạo video.",
         ]
         if selected_quality:
             lines.extend([
@@ -74605,7 +75464,7 @@ def video_ai_real_pilot_screen_payload(
         buttons = [
             (
                 video_ai_real_pilot_selected(
-                    f"{item['icon']} {item['name']} · {item['seconds']}s · {item['unit_xu']} Xu",
+                    f"{item['icon']} {item['name']} · {item['seconds']} giây · {item['unit_xu']} Xu",
                     selected_tier_id == item["tier_id"],
                 ),
                 f"vid3|quality|{item['tier_id']}",
@@ -74613,10 +75472,7 @@ def video_ai_real_pilot_screen_payload(
             for item in products
         ]
         rows = [buttons[offset:offset + 2] for offset in range(0, len(buttons), 2)]
-        rows.extend([
-            [("✅ Hoàn thành chất lượng", "vid3|quality_done")],
-            *video_ai_real_pilot_nav_rows(back="vid3|back"),
-        ])
+        rows.extend(video_ai_real_pilot_nav_rows(back="vid3|back"))
         return "\n".join(lines), video_uiflow3_keyboard(rows)
 
     if step == "invoice" and not view:
@@ -74624,7 +75480,7 @@ def video_ai_real_pilot_screen_payload(
             quote = video_ai_real_prompt_quote(state)
         except ValueError:
             return (
-                "🧾 Báo giá xác nhận\n\nChưa đủ model hoặc số cảnh để lập báo giá.",
+                "🧾 Báo giá xác nhận\n\nChưa đủ thông tin chất lượng hoặc số cảnh để lập báo giá.",
                 video_uiflow3_keyboard(video_ai_real_pilot_nav_rows(back="vid3|back")),
             )
         quality = dict(quote.get("quality") or {})
@@ -74642,13 +75498,13 @@ def video_ai_real_pilot_screen_payload(
             f"Video: {quote['scene_count']} cảnh × {quote['unit_xu']} Xu = {quote['base_xu']} Xu",
         ]
         if quote.get("addons"):
-            lines.extend(["", "Add-on:"])
+            lines.extend(["", "Phần bổ sung:"])
             lines.extend([
                 f"• {item.get('label')}: {item.get('price_xu')} Xu"
                 for item in quote["addons"]
             ])
         else:
-            lines.extend(["", "Add-on: 0 Xu"])
+            lines.extend(["", "Phần bổ sung: 0 Xu"])
         lines.extend([
             "",
             f"Tổng thanh toán dự kiến: {quote['total_xu']} Xu",
@@ -74657,36 +75513,9 @@ def video_ai_real_pilot_screen_payload(
             "Đây là báo giá xác nhận; chưa tạo tác vụ và chưa trừ Xu.",
         ])
         return "\n".join(lines), video_uiflow3_keyboard([
-            [("✅ Xác nhận báo giá", "vid3|invoice_confirm")],
+            [("✅ Xác nhận báo giá và tạo video", "vid3|invoice_confirm")],
             *video_ai_real_pilot_nav_rows(back="vid3|back"),
         ])
-
-    if step == "confirmation" and not view:
-        quote = video_ai_real_prompt_quote(state)
-        quality = dict(quote.get("quality") or {})
-        return (
-            f"{progress_prefix}✅ Xác nhận cuối\n\n"
-            f"{quality.get('name') or 'Chất lượng đã chọn'} · "
-            f"{quote['scene_count']} cảnh · {quote['total_duration_seconds']} giây\n"
-            f"Tổng dự kiến: {quote['total_xu']} Xu\n\n"
-            "Bước này chỉ lưu lựa chọn cuối để bạn kiểm tra. Chưa bắt đầu tạo video và chưa trừ Xu.",
-            video_uiflow3_keyboard([
-                [("➡️ Xem trạng thái", "vid3|confirmation_submit")],
-                *video_ai_real_pilot_nav_rows(back="vid3|back"),
-            ]),
-        )
-
-    if step == "status" and not view:
-        quote = video_ai_real_prompt_quote(state)
-        return (
-            f"{progress_prefix}📊 Trạng thái Video AI chân thật\n\n"
-            "Trạng thái: Đã lưu lựa chọn\n"
-            "Tiến độ: Chưa bắt đầu tạo video\n"
-            "Thanh toán: chưa trừ Xu\n\n"
-            f"Báo giá đã lưu: {quote['total_xu']} Xu · {quote['scene_count']} cảnh · {quote['total_duration_seconds']} giây.\n"
-            "Khi bắt đầu xử lý, màn này sẽ hiển thị tiến độ và kết quả thực tế.",
-            video_uiflow3_keyboard(video_ai_real_pilot_nav_rows(back="vid3|back")),
-        )
 
     if view == "input_prompt":
         pending = dict(state.get("pending_input") or {})
@@ -74740,7 +75569,7 @@ def video_ai_real_pilot_screen_payload(
             f"Sản phẩm: {product_label} · {scene_count or 'Chưa chọn'} cảnh\n"
             f"Khung đã chọn: {ratio_label}\n\n"
             "Dọc 9:16 phù hợp TikTok/Reels/Shorts; ngang 16:9 phù hợp YouTube và màn hình; "
-            "vuông 1:1 hoặc dọc 4:5 phù hợp bài đăng. Thời lượng nằm ở bước Chất lượng vì phụ thuộc model.",
+            "vuông 1:1 hoặc dọc 4:5 phù hợp bài đăng. Thời lượng nằm ở bước Chất lượng vì phụ thuộc gói đã chọn.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -74765,7 +75594,7 @@ def video_ai_real_pilot_screen_payload(
                 (video_ai_real_pilot_selected("👩 Nữ", str(item.get("gender") or "") == "female"), f"vid3|char_gender|{character_id}|female"),
             ],
             [(video_ai_real_pilot_selected("➖ Không chỉ định", str(item.get("gender") or "unspecified") == "unspecified"), f"vid3|char_gender|{character_id}|unspecified")],
-            [("✏️ Sửa tên & mô tả", f"vid3|char_desc|{character_id}"), ("🎙 Chọn giọng", f"vid3|char_voice|{character_id}")],
+            [("✏️ Sửa tên và mô tả", f"vid3|char_desc|{character_id}"), ("🎙 Chọn giọng", f"vid3|char_voice|{character_id}")],
             [(f"🖼 Gửi ảnh Nhân vật {index}", f"vid3|char_image|{character_id}"), ("✨ Tạo ảnh AI", f"vid3|image_ai|character|{character_id}")],
             [("🗂 Xem ảnh", f"vid3|refs|character|{character_id}")],
         ]
@@ -74784,7 +75613,7 @@ def video_ai_real_pilot_screen_payload(
         if state.get("scenes"):
             rows.append([(f"🎬 Nhân vật {index} xuất hiện ở cảnh nào", f"vid3|char_scenes|{character_id}")])
         rows.append([
-            ("✅ Hoàn thành nhân vật", "vid3|view|character_list"),
+            ("✅ Hoàn tất khai báo nhân vật này", "vid3|view|character_list"),
             ("🎬 Menu Video", "menu|main_video"),
         ])
         return (
@@ -74849,7 +75678,7 @@ def video_ai_real_pilot_screen_payload(
         if state.get("scenes"):
             rows.append([("🎬 Cảnh sử dụng", f"vid3|loc_scenes|{location_id}")])
         rows.append([
-            ("✅ Hoàn thành bối cảnh", "vid3|view|location_list"),
+            ("✅ Hoàn tất khai báo bối cảnh này", "vid3|view|location_list"),
             ("🎬 Menu Video", "menu|main_video"),
         ])
         source_guidance = (
@@ -74870,7 +75699,7 @@ def video_ai_real_pilot_screen_payload(
         scenes = list(state.get("scenes") or [])
         characters = list((state.get("bible") or {}).get("characters") or [])
         lines = [
-            f"{progress_prefix}🎭 Phân vai & âm thanh theo cảnh",
+            f"{progress_prefix}🎭 Phân vai và âm thanh theo cảnh",
             "",
             "Không chọn thì hệ thống gán nhân vật theo thứ tự và giữ cùng một nhân vật/giọng xuyên các cảnh đã gán.",
             "Nhạc toàn video, Nhạc theo từng cảnh hoặc Bỏ qua đều được chọn tại mục âm nhạc.",
@@ -74898,11 +75727,11 @@ def video_ai_real_pilot_screen_payload(
             rows.append(scene_buttons[offset:offset + 2])
         assignment_controls = [
             ("✨ Tự động theo thứ tự", "vid3|scene_auto"),
-            ("🎧 Âm thanh & phụ đề", "vid3|view|audio_options"),
+            ("🎧 Âm thanh và phụ đề", "vid3|view|audio_options"),
         ]
         rows.extend([
             assignment_controls,
-            [("✅ Hoàn thành phân vai", "vid3|assignment_done")],
+            [("✅ Hoàn tất phân vai và âm thanh", "vid3|assignment_done")],
             *video_ai_real_pilot_nav_rows(back="vid3|back"),
         ])
         return "\n".join(lines), video_uiflow3_keyboard(rows)
@@ -74932,45 +75761,45 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         pending = dict(state.get("pending_input") or {})
         kind = str(pending.get("kind") or "")
         prompts = {
-            "series_goal": "Nhap muc tieu chung cua series trong mot tin nhan.",
-            "source_text": "Gui noi dung nguon trong mot tin nhan. Bot se giu nguyen van de lap Content Lock.",
-            "source_media": "Gui anh, video hoac tep nguon dung cho san pham nay.",
-            "manual_content": "Nhap chu de, muc tieu va thong diep chinh trong mot tin nhan.",
-            "content_edit": "Nhap lai noi dung mong muon. Ban cu chi duoc thay sau khi tin nhan moi hop le.",
-            "character_count": "Nhap tong so nhan vat tu 0 den 20.",
-            "character_description": "Nhap theo mau: Ten nhan vat | Mo ta ngoai hinh, trang phuc, vai tro.",
-            "character_image": "Gui mot anh tham chieu cho dung nhan vat dang chon.",
-            "character_voice": "Nhap ma giong da co. De trong khong duoc; co the quay lai va chon Tu dong.",
-            "location_count": "Nhap tong so boi canh tu 0 den 20.",
-            "location_description": "Nhap theo mau: Ten boi canh | Mo ta anh sang, thoi gian, khong khi.",
-            "location_image": "Gui mot anh tham chieu cho dung boi canh dang chon.",
-            "narrator": "Nhap theo mau: Ten nguoi dan | Phong cach | Ma giong (co the de trong).",
-            "product": "Nhap theo mau: Ten san pham | Nhom | Mo ta, yeu cau giu dung hinh dang.",
-            "prop": "Nhap theo mau: Ten dao cu | Mo ta cach xuat hien trong canh.",
-            "relationship": "Nhap theo mau: NV1 | NV2 | Quan he giua hai nhan vat. Co the dung ten neu ten khong trung nhau.",
-            "episode_identity": "Nhap theo mau: So tap | Ten tap. Vi du: 2 | Tap bat dau.",
-            "episode_content": "Nhap noi dung rieng cua tap dang lap. Noi dung nay se duoc khoa truoc khi chia canh.",
-            "product_image": "Gui mot anh tham chieu cho dung san pham dang chon.",
-            "prop_image": "Gui mot anh tham chieu cho dung dao cu dang chon.",
-            "duration": "Nhap tong thoi luong muc tieu tinh bang giay.",
-            "scene_count": "Nhap tong so canh hop le cho loai video nay.",
-            "scene_plan": "Nhap: Y chinh | Hanh dong chinh | Ket qua cuoi canh.",
-            "scene_direction": "Nhap: Khuon hinh | Chuyen dong | Anh sang | Tam trang. Co the bo trong phan khong can.",
-            "dialogue": "Nhap loi thoai cho nhan vat da chon trong canh nay.",
-            "whole_music": "Nhap ma bai nhac hoac mo ta nhac dung cho toan video.",
-            "scene_music": "Nhap ma bai nhac hoac mo ta nhac rieng cho canh nay.",
-            "scene_sfx_custom": "Nhap cac ma hieu ung, ngan cach bang dau phay.",
-            "scene_ambient_custom": "Nhap ma am thanh moi truong cho canh nay.",
-            "brand_logo": "Gui anh logo. Tep chi duoc luu vao ban ke hoach, chua render.",
-            "watermark": "Nhap noi dung watermark muon hien tren video.",
+            "series_goal": "Nhập mục tiêu chung của loạt video trong một tin nhắn.",
+            "source_text": "Gửi nội dung nguồn trong một tin nhắn; bot giữ nguyên văn để lập kế hoạch.",
+            "source_media": "Gửi ảnh, video hoặc tệp nguồn dùng cho sản phẩm này.",
+            "manual_content": "Nhập chủ đề, mục tiêu và thông điệp chính trong một tin nhắn.",
+            "content_edit": "Nhập lại nội dung mong muốn; bản cũ chỉ được thay khi tin nhắn mới hợp lệ.",
+            "character_count": "Nhập tổng số nhân vật từ 0 đến 20.",
+            "character_description": "Nhập theo mẫu: Tên nhân vật | ngoại hình | trang phục | vai trò.",
+            "character_image": "Gửi một ảnh tham chiếu cho đúng nhân vật đang chọn.",
+            "character_voice": "Nhập mã giọng đã có; hoặc quay lại để chọn tự động.",
+            "location_count": "Nhập tổng số bối cảnh từ 0 đến 20.",
+            "location_description": "Nhập theo mẫu: Tên bối cảnh | ánh sáng | thời gian | không khí.",
+            "location_image": "Gửi một ảnh tham chiếu cho đúng bối cảnh đang chọn.",
+            "narrator": "Nhập theo mẫu: Tên người dẫn | phong cách | mã giọng (có thể để trống).",
+            "product": "Nhập theo mẫu: Tên sản phẩm | nhóm | mô tả và yêu cầu giữ đúng hình dáng.",
+            "prop": "Nhập theo mẫu: Tên đạo cụ | mô tả cách xuất hiện trong cảnh.",
+            "relationship": "Nhập theo mẫu: Nhân vật 1 | Nhân vật 2 | quan hệ giữa hai nhân vật.",
+            "episode_identity": "Nhập theo mẫu: Số tập | Tên tập. Ví dụ: 2 | Tập bắt đầu.",
+            "episode_content": "Nhập nội dung riêng của tập đang lập; nội dung này được xác nhận trước khi chia cảnh.",
+            "product_image": "Gửi một ảnh tham chiếu cho đúng sản phẩm đang chọn.",
+            "prop_image": "Gửi một ảnh tham chiếu cho đúng đạo cụ đang chọn.",
+            "duration": "Nhập tổng thời lượng mục tiêu tính bằng giây.",
+            "scene_count": "Nhập tổng số cảnh phù hợp với loại video này.",
+            "scene_plan": "Nhập: Ý chính | Hành động chính | Kết quả cuối cảnh.",
+            "scene_direction": "Nhập: Khung hình | Chuyển động | Ánh sáng | Tâm trạng.",
+            "dialogue": "Nhập lời thoại cho nhân vật đã chọn trong cảnh này.",
+            "whole_music": "Nhập mã bài nhạc hoặc mô tả nhạc dùng cho toàn video.",
+            "scene_music": "Nhập mã bài nhạc hoặc mô tả nhạc riêng cho cảnh này.",
+            "scene_sfx_custom": "Nhập các hiệu ứng, ngăn cách bằng dấu phẩy.",
+            "scene_ambient_custom": "Nhập âm thanh môi trường cho cảnh này.",
+            "brand_logo": "Gửi ảnh logo; tệp chỉ được lưu vào kế hoạch ở bước này.",
+            "watermark": "Nhập nội dung watermark muốn hiển thị trên video.",
         }
         back_callback = str(pending.get("back_callback") or "vid3|back")
         input_rows: list[list[tuple[str, str]]] = []
         if kind == "source_media" and bool((state.get("source") or {}).get("complete")):
-            input_rows.append([("Xong nguon", "vid3|source_done")])
+            input_rows.append([("✅ Hoàn tất chọn nguồn đầu vào", "vid3|source_done")])
         input_rows.extend(video_uiflow3_nav_rows(back=back_callback))
         return (
-            "NHAP THONG TIN\n\n" + prompts.get(kind, "Gui thong tin cho buoc dang mo."),
+            "✍️ NHẬP THÔNG TIN\n\n" + prompts.get(kind, "Gửi thông tin cho mục đang mở."),
             video_uiflow3_keyboard(input_rows),
         )
 
@@ -74981,39 +75810,39 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         products = list(bible.get("products") or [])
         props = list(bible.get("props") or [])
         relationships = list(bible.get("relationships") or [])
-        narrator_row: list[tuple[str, str]] = [("Sua nguoi dan", "vid3|narrator_edit")]
+        narrator_row: list[tuple[str, str]] = [("✏️ Sửa người dẫn", "vid3|narrator_edit")]
         if narrator:
-            narrator_row.append(("Xoa nguoi dan", "vid3|narrator_clear"))
+            narrator_row.append(("🗑 Xóa người dẫn", "vid3|narrator_clear"))
         rows: list[list[tuple[str, str]]] = [
             narrator_row,
-            [("Them san pham", "vid3|product_add"), ("Them dao cu", "vid3|prop_add")],
+            [("➕ Thêm sản phẩm", "vid3|product_add"), ("➕ Thêm đạo cụ", "vid3|prop_add")],
         ]
         if len(characters) >= 2:
-            rows.append([("Them quan he NV", "vid3|relationship_add")])
+            rows.append([("➕ Thêm quan hệ nhân vật", "vid3|relationship_add")])
         for product_item in products[:8]:
             product_id = str(product_item.get("product_id") or "")
             rows.append([
                 (f"Gửi ảnh SP: {str(product_item.get('name') or product_id)[:16]}", f"vid3|product_image|{product_id}"),
-                ("Tạo ảnh AI", f"vid3|image_ai|product|{product_id}"),
+                ("✨ Tạo ảnh AI", f"vid3|image_ai|product|{product_id}"),
             ])
         for prop_item in props[:8]:
             prop_id = str(prop_item.get("prop_id") or "")
             rows.append([
                 (f"Gửi ảnh ĐC: {str(prop_item.get('name') or prop_id)[:16]}", f"vid3|prop_image|{prop_id}"),
-                ("Tạo ảnh AI", f"vid3|image_ai|prop|{prop_id}"),
+                ("✨ Tạo ảnh AI", f"vid3|image_ai|prop|{prop_id}"),
             ])
-        rows.extend(video_uiflow3_nav_rows(back="vid3|view|production_bible"))
-        narrator_text = narrator.get("display_name") or "Chua co"
+        rows.append([("✅ Hoàn tất tùy chỉnh chi tiết", "vid3|view|production_bible"), ("🎬 Menu Video", "menu|main_video")])
+        narrator_text = narrator.get("display_name") or "Chưa có"
         character_legend = ", ".join(
-            f"NV{index}={item.get('display_name') or f'Nhan vat {index}'}"
+            f"Nhân vật {index} = {item.get('display_name') or f'Nhân vật {index}'}"
             for index, item in enumerate(characters, 1)
-        ) or "Chua co"
+        ) or "Chưa có"
         return (
-            "TAC NHAN NANG CAO\n\n"
-            f"Nguoi dan: {narrator_text}\n"
-            f"San pham: {len(products)} | Dao cu: {len(props)} | Quan he: {len(relationships)}\n"
-            f"Danh sach nhan vat: {character_legend}\n"
-            "Day la editor tuy chon. Neu bo qua, scene se dung cast/boi canh da gan hoac tu dong theo thu tu.",
+            "🛠 TÙY CHỈNH CHI TIẾT\n\n"
+            f"Người dẫn: {narrator_text}\n"
+            f"Sản phẩm: {len(products)} | Đạo cụ: {len(props)} | Quan hệ: {len(relationships)}\n"
+            f"Danh sách nhân vật: {character_legend}\n"
+            "Đây là phần tùy chọn. Nếu bỏ qua, cảnh dùng nhân vật, bối cảnh đã gán hoặc tự động theo thứ tự.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -75036,7 +75865,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         for kind, id_key, label_prefix, name_key in entity_groups:
             buttons = [
                 (
-                    ("[x] " if str(item.get(id_key) or "") in selected_by_kind[kind] else "[ ] ")
+                    ("✅ " if str(item.get(id_key) or "") in selected_by_kind[kind] else "▫️ ")
                     + f"{label_prefix}{index} {str(item.get(name_key) or item.get(id_key) or '')[:18]}",
                     f"vid3|episode_entity|{kind}|{item.get(id_key)}",
                 )
@@ -75046,27 +75875,27 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                 rows.append(buttons[offset:offset + 2])
 
         continuity_labels = {
-            "identity": "Nhan dien",
-            "wardrobe": "Trang phuc",
-            "product": "San pham",
-            "location": "Boi canh",
+            "identity": "Nhận diện",
+            "wardrobe": "Trang phục",
+            "product": "Sản phẩm",
+            "location": "Bối cảnh",
         }
         continuity_buttons = [
             (
-                ("[x] " if bool(effective.get("continuity", {}).get(key, True)) else "[ ] ") + label,
+                ("✅ " if bool(effective.get("continuity", {}).get(key, True)) else "▫️ ") + label,
                 f"vid3|episode_continuity|{key}",
             )
             for key, label in continuity_labels.items()
         ]
         for offset in range(0, len(continuity_buttons), 2):
             rows.append(continuity_buttons[offset:offset + 2])
-        rows.append([("Ke thua lai mac dinh Series", "vid3|episode_inherit")])
-        rows.extend(video_uiflow3_nav_rows(back="vid3|view|episode"))
+        rows.append([("↩️ Dùng lại thiết lập chung của loạt video", "vid3|episode_inherit")])
+        rows.append([("✅ Hoàn tất thiết lập riêng của tập", "vid3|view|episode"), ("🎬 Menu Video", "menu|main_video")])
         return (
-            "TAC NHAN RIENG CUA TAP\n\n"
-            "Mac dinh tap ke thua toan bo Series Bible. Cham de bat/tat NV, boi canh, "
-            "san pham, dao cu va quy tac continuity chi trong tap nay. "
-            "Bo trong mot nhom nghia la tap khong dung nhom do; stable ID va giong goc khong doi.",
+            "👥 NHÂN VẬT VÀ BỐI CẢNH RIÊNG CỦA TẬP\n\n"
+            "Mặc định tập kế thừa toàn bộ thiết lập chung của loạt video. Chạm để bật hoặc tắt nhân vật, bối cảnh, "
+            "sản phẩm, đạo cụ và quy tắc nhất quán chỉ trong tập này. "
+            "Bỏ trống một nhóm nghĩa là tập không dùng nhóm đó; định danh và giọng gốc không đổi.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -75080,14 +75909,14 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         rows: list[list[tuple[str, str]]] = []
         if gender == "unspecified":
             rows.append([
-                ("Nhan vat Nam", f"vid3|voice_gender|{character_id}|male"),
-                ("Nhan vat Nu", f"vid3|voice_gender|{character_id}|female"),
+                ("👨 Nhân vật nam", f"vid3|voice_gender|{character_id}|male"),
+                ("👩 Nhân vật nữ", f"vid3|voice_gender|{character_id}|female"),
             ])
-            guidance = "Chon Nam/Nu mot lan de bot chi hien dung nhom giong cho nhan vat nay."
+            guidance = "Chọn giới tính để bot chỉ hiển thị đúng nhóm giọng cho nhân vật này."
         else:
-            rows.append([(("[x] " if not current_voice else "") + "Tu dong theo gioi tinh", f"vid3|voice|{character_id}|auto")])
+            rows.append([(("✅ " if not current_voice else "") + "Tự động theo giới tính", f"vid3|voice|{character_id}|auto")])
             aliases = ("vf1", "vf2") if gender == "female" else ("vm1", "vm2")
-            labels = ("Nu 1 (ke hoach)", "Nu 2 (ke hoach)") if gender == "female" else ("Nam 1 (ke hoach)", "Nam 2 (ke hoach)")
+            labels = ("Giọng nữ 1", "Giọng nữ 2") if gender == "female" else ("Giọng nam 1", "Giọng nam 2")
             used_by_others = {
                 str(other.get("voice_id") or "")
                 for other in characters
@@ -75097,17 +75926,17 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             if narrator_voice:
                 used_by_others.add(narrator_voice)
             available_voice_row = [
-                (("[x] " if current_voice == VIDEO_UIFLOW3_VOICE_ALIASES[alias] else "") + label, f"vid3|voice|{character_id}|{alias}")
+                (("✅ " if current_voice == VIDEO_UIFLOW3_VOICE_ALIASES[alias] else "") + label, f"vid3|voice|{character_id}|{alias}")
                 for alias, label in zip(aliases, labels)
                 if VIDEO_UIFLOW3_VOICE_ALIASES[alias] not in used_by_others or current_voice == VIDEO_UIFLOW3_VOICE_ALIASES[alias]
             ]
             if available_voice_row:
                 rows.append(available_voice_row)
-            rows.append([("Nhap giong khac", f"vid3|voice_custom|{character_id}")])
-            guidance = "Neu co nhieu NV cung gioi tinh, che do Tu dong se yeu cau cac giong khac nhau; khong am tham dung chung."
+            rows.append([("✍️ Nhập giọng khác", f"vid3|voice_custom|{character_id}")])
+            guidance = "Nếu có nhiều nhân vật cùng giới tính, chế độ tự động dùng các giọng khác nhau; không âm thầm dùng chung."
         rows.extend(video_uiflow3_nav_rows(back=back_callback))
         return (
-            "GIONG NHAN VAT\n\n" + guidance + " Giong chi tro thanh dau ra cuoi khi he thong da xac minh co the ket xuat.",
+            "🎙 GIỌNG NHÂN VẬT\n\n" + guidance + " Giọng chỉ được dùng cho video khi hệ thống xác minh sẵn sàng.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -75116,24 +75945,24 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         scene = next((item for item in state.get("scenes") or [] if str(item.get("scene_id") or "") == scene_id), {})
         selected_ids = set(scene.get("character_ids") or [])
         rows = [[
-            (("[x] " if str(item.get("character_id") or "") in selected_ids else "[ ] ") + video_uiflow3_character_label(item, index),
+            (("✅ " if str(item.get("character_id") or "") in selected_ids else "▫️ ") + video_uiflow3_character_label(item, index),
              f"vid3|cast_toggle|{scene_id}|{item.get('character_id')}")
         ] for index, item in enumerate((state.get("bible") or {}).get("characters") or [], 1)]
-        rows.append([("Khong co nhan vat", f"vid3|cast_clear|{scene_id}")])
-        rows.extend(video_uiflow3_nav_rows(back=f"vid3|scene|{scene_id}"))
-        return "NHAN VAT TRONG CANH\n\nChon mot hoac nhieu NV xuat hien. Bo trong neu canh chi co san pham/phong canh.", video_uiflow3_keyboard(rows)
+        rows.append([("🚫 Không có nhân vật", f"vid3|cast_clear|{scene_id}")])
+        rows.append([("✅ Hoàn tất chọn nhân vật cho cảnh", f"vid3|scene|{scene_id}"), ("🎬 Menu Video", "menu|main_video")])
+        return "👥 NHÂN VẬT TRONG CẢNH\n\nChọn một hoặc nhiều nhân vật xuất hiện; bỏ trống nếu cảnh chỉ có sản phẩm hoặc phong cảnh.", video_uiflow3_keyboard(rows)
 
     if view == "scene_location":
         scene_id = str(state.get("active_scene_id") or "")
         scene = next((item for item in state.get("scenes") or [] if str(item.get("scene_id") or "") == scene_id), {})
         selected_id = str(scene.get("location_id") or "")
         rows = [[
-            (("[x] " if str(item.get("location_id") or "") == selected_id else "") + f"BC{index} - {item.get('name') or f'Boi canh {index}'}",
+            (("✅ " if str(item.get("location_id") or "") == selected_id else "") + f"Bối cảnh {index} · {item.get('name') or f'Bối cảnh {index}'}",
              f"vid3|scene_loc_set|{scene_id}|{item.get('location_id')}")
         ] for index, item in enumerate((state.get("bible") or {}).get("locations") or [], 1)]
-        rows.append([("Tu dong / khong gan", f"vid3|scene_loc_clear|{scene_id}")])
+        rows.append([("✨ Tự động theo nội dung", f"vid3|scene_loc_clear|{scene_id}")])
         rows.extend(video_uiflow3_nav_rows(back=f"vid3|scene|{scene_id}"))
-        return "BOI CANH CUA CANH\n\nChon mot boi canh da khai bao cho canh nay.", video_uiflow3_keyboard(rows)
+        return "🏞 BỐI CẢNH CỦA CẢNH\n\nChọn một bối cảnh đã khai báo cho cảnh này.", video_uiflow3_keyboard(rows)
 
     if view == "dialogue_speaker":
         scene_id = str(state.get("active_scene_id") or "")
@@ -75146,29 +75975,29 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         narrator = dict((state.get("bible") or {}).get("narrator") or {})
         if scene.get("narrator_enabled") and narrator.get("narrator_id"):
             rows.append([(
-                f"Nguoi dan - {str(narrator.get('display_name') or 'Nguoi dan')[:24]}",
+                f"Người dẫn · {str(narrator.get('display_name') or 'Người dẫn')[:24]}",
                 f"vid3|dialogue_speaker|{scene_id}|{narrator.get('narrator_id')}",
             )])
         speaker_names = {
-            str(item.get("character_id") or ""): str(item.get("display_name") or "Nhan vat")
+            str(item.get("character_id") or ""): str(item.get("display_name") or "Nhân vật")
             for item in characters
         }
         if narrator.get("narrator_id"):
-            speaker_names[str(narrator["narrator_id"])] = str(narrator.get("display_name") or "Nguoi dan")
+            speaker_names[str(narrator["narrator_id"])] = str(narrator.get("display_name") or "Người dẫn")
         dialogue = [
             item for item in (state.get("audio") or {}).get("dialogue_segments") or []
             if str(item.get("scene_id") or "") == scene_id
         ]
-        lines = ["LOI THOAI THEO NHAN VAT", "", "Chon nguoi noi de them mot cau moi."]
+        lines = ["🗣 LỜI THOẠI THEO NHÂN VẬT", "", "Chọn người nói để thêm một câu mới."]
         if dialogue:
-            lines.extend(["", "Cac cau da co:"])
+            lines.extend(["", "Các câu đã có:"])
             for index, item in enumerate(dialogue[:12], 1):
-                speaker = speaker_names.get(str(item.get("speaker_id") or ""), "Nguoi noi")
+                speaker = speaker_names.get(str(item.get("speaker_id") or ""), "Người nói")
                 lines.append(f"{index}. {speaker}: {str(item.get('text') or '')[:120]}")
-                rows.append([("Xoa cau " + str(index), f"vid3|dialogue_remove|{scene_id}|{item.get('dialogue_id')}")])
+                rows.append([("🗑 Xóa câu " + str(index), f"vid3|dialogue_remove|{scene_id}|{item.get('dialogue_id')}")])
             if len(dialogue) > 12:
-                lines.append(f"... con {len(dialogue) - 12} cau; xoa bot de xem tiep.")
-        rows.extend(video_uiflow3_nav_rows(back=f"vid3|scene|{scene_id}"))
+                lines.append(f"Còn {len(dialogue) - 12} câu; xóa bớt để xem tiếp.")
+        rows.append([("✅ Hoàn tất thêm lời thoại cho cảnh", f"vid3|scene|{scene_id}"), ("🎬 Menu Video", "menu|main_video")])
         return "\n".join(lines), video_uiflow3_keyboard(rows)
 
     if view == "scene_voice":
@@ -75178,27 +76007,27 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         rows = [[
             (video_uiflow3_character_label(item, index), f"vid3|scene_voice_char|{scene_id}|{item.get('character_id')}")
         ] for index, item in enumerate((state.get("bible") or {}).get("characters") or [], 1) if str(item.get("character_id") or "") in cast]
-        rows.extend(video_uiflow3_nav_rows(back=f"vid3|scene|{scene_id}"))
-        return "GIONG TRONG CANH\n\nGiong thuoc ve nhan vat, khong thuoc rieng tung canh. Chon NV de sua mot lan va ap dung nhat quan.", video_uiflow3_keyboard(rows)
+        rows.append([("✅ Hoàn tất chọn giọng cho cảnh", f"vid3|scene|{scene_id}"), ("🎬 Menu Video", "menu|main_video")])
+        return "🎙 GIỌNG TRONG CẢNH\n\nGiọng thuộc về nhân vật, không thuộc riêng từng cảnh. Chọn nhân vật để sửa một lần và áp dụng nhất quán.", video_uiflow3_keyboard(rows)
 
     if view == "music_scope":
         scope = str((state.get("audio") or {}).get("music_scope") or "none")
-        mark = lambda value: "[x] " if scope == value else ""
+        mark = lambda value: "✅ " if scope == value else ""
         controls = video_uiflow3.public_controls(state)
-        rows = [[(mark("none") + "Khong nhac", "vid3|music_set|none")]]
+        rows = [[(mark("none") + "Không dùng nhạc", "vid3|music_set|none")]]
         if controls["whole_video_music"]["supported"]:
-            rows.append([(mark("whole_video") + "Mot ban toan video", "vid3|music_set|whole_video")])
+            rows.append([(mark("whole_video") + "Một bài cho toàn video", "vid3|music_set|whole_video")])
         if controls["per_scene_music"]["supported"]:
-            rows.append([(mark("per_scene") + "Nhac theo tung canh", "vid3|music_set|per_scene")])
+            rows.append([(mark("per_scene") + "Nhạc theo từng cảnh", "vid3|music_set|per_scene")])
         rows.extend(video_uiflow3_nav_rows(back="vid3|view|scene_assignment"))
         unavailable = []
         if not controls["whole_video_music"]["supported"]:
-            unavailable.append("nhac toan video")
+            unavailable.append("nhạc toàn video")
         if not controls["per_scene_music"]["supported"]:
-            unavailable.append("nhac theo canh")
-        note = "" if not unavailable else "\n\nChua the ket xuat: " + ", ".join(unavailable) + ". Lua chon hien tai van duoc giu trong ban ke hoach."
+            unavailable.append("nhạc theo cảnh")
+        note = "" if not unavailable else "\n\nChưa thể tạo: " + ", ".join(unavailable) + ". Lựa chọn hiện tại vẫn được giữ trong kế hoạch."
         return (
-            "NHAC VIDEO\n\nChon pham vi nhac ma he thong dang ho tro that. Khong co lua chon gia." + note,
+            "🎵 NHẠC VIDEO\n\nChọn phạm vi nhạc mà hệ thống đang hỗ trợ. Không hiển thị lựa chọn chưa dùng được." + note,
             video_uiflow3_keyboard(rows),
         )
 
@@ -75207,10 +76036,10 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         model = video_uiflow3.scene_assignment_model(state, scene_id)
         policy = str((model.get("music") or {}).get("policy") or "off")
         return (
-            f"NHAC CANH {model.get('scene_index') or '?'}\n\nHien tai: {policy}. Chon ke thua, tat rieng canh, hoac nhap mot ban nhac rieng.",
+            f"🎵 NHẠC CẢNH {model.get('scene_index') or '?'}\n\nHiện tại: {policy}. Chọn dùng nhạc chung, tắt riêng cảnh hoặc nhập một bài nhạc riêng.",
             video_uiflow3_keyboard([
-                [("Ke thua", f"vid3|scene_music_set|{scene_id}|inherit"), ("Tat canh nay", f"vid3|scene_music_set|{scene_id}|off")],
-                [("Nhap nhac rieng", f"vid3|scene_music_custom|{scene_id}")],
+                [("🎵 Dùng nhạc chung", f"vid3|scene_music_set|{scene_id}|inherit"), ("🔇 Tắt nhạc cảnh này", f"vid3|scene_music_set|{scene_id}|off")],
+                [("✍️ Nhập nhạc riêng", f"vid3|scene_music_custom|{scene_id}")],
                 *video_uiflow3_nav_rows(back=f"vid3|scene|{scene_id}"),
             ]),
         )
@@ -75220,20 +76049,20 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         scene = video_uiflow3_find_scene(state, scene_id)
         selected = set(scene.get("sfx_ids") or [])
         presets = [
-            ("footstep", "Buoc chan"),
-            ("door", "Cua"),
-            ("impact", "Va cham"),
-            ("swoosh", "Chuyen canh"),
-            ("click", "Click"),
-            ("vehicle", "Xe co"),
+            ("footstep", "👣 Bước chân"),
+            ("door", "🚪 Mở cửa"),
+            ("impact", "💥 Va chạm"),
+            ("swoosh", "💨 Chuyển cảnh"),
+            ("click", "🖱 Tiếng click"),
+            ("vehicle", "🚗 Xe cộ"),
         ]
-        rows = [[(("[x] " if key in selected else "[ ] ") + label, f"vid3|scene_sfx_set|{scene_id}|{key}")]
+        rows = [[(("✅ " if key in selected else "▫️ ") + label, f"vid3|scene_sfx_set|{scene_id}|{key}")]
                  for key, label in presets]
-        rows.append([("Nhap ma khac", f"vid3|scene_sfx_custom|{scene_id}"), ("Xoa het", f"vid3|scene_sfx_clear|{scene_id}")])
-        rows.extend(video_uiflow3_nav_rows(back=f"vid3|scene_entities|{scene_id}"))
+        rows.append([("✍️ Nhập hiệu ứng khác", f"vid3|scene_sfx_custom|{scene_id}"), ("🗑 Xóa hết", f"vid3|scene_sfx_clear|{scene_id}")])
+        rows.append([("✅ Hoàn tất chọn hiệu ứng âm thanh", f"vid3|scene_entities|{scene_id}"), ("🎬 Menu Video", "menu|main_video")])
         return (
-            f"HIEU UNG AM THANH CANH {scene.get('scene_index') or '?'}\n\n"
-            "Co the chon nhieu hieu ung; muc nay chi hien khi he thong da ho tro ket xuat theo canh.",
+            f"🔊 HIỆU ỨNG ÂM THANH CẢNH {scene.get('scene_index') or '?'}\n\n"
+            "Có thể chọn nhiều hiệu ứng; mục này chỉ hiện khi hệ thống hỗ trợ tạo âm thanh theo cảnh.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -75242,20 +76071,20 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         scene = video_uiflow3_find_scene(state, scene_id)
         current_ambient = str(scene.get("ambient_id") or "")
         presets = [
-            ("", "Tat ambient"),
-            ("cafe", "Quan ca phe"),
-            ("street", "Duong pho"),
-            ("rain", "Mua"),
-            ("sea", "Bien"),
-            ("office", "Van phong"),
+            ("", "🔇 Không dùng"),
+            ("cafe", "☕ Quán cà phê"),
+            ("street", "🌆 Đường phố"),
+            ("rain", "🌧 Mưa"),
+            ("sea", "🌊 Biển"),
+            ("office", "🏢 Văn phòng"),
         ]
-        rows = [[(("[x] " if key == current_ambient else "[ ] ") + label, f"vid3|scene_ambient_set|{scene_id}|{key or 'none'}")]
+        rows = [[(("✅ " if key == current_ambient else "") + label, f"vid3|scene_ambient_set|{scene_id}|{key or 'none'}")]
                  for key, label in presets]
-        rows.append([("Nhap ma khac", f"vid3|scene_ambient_custom|{scene_id}")])
+        rows.append([("✍️ Nhập môi trường khác", f"vid3|scene_ambient_custom|{scene_id}")])
         rows.extend(video_uiflow3_nav_rows(back=f"vid3|scene_entities|{scene_id}"))
         return (
-            f"AM THANH MOI TRUONG CANH {scene.get('scene_index') or '?'}\n\n"
-            "Chon mot ambient; khong chon thi canh khong co am thanh moi truong.",
+            f"🌆 ÂM THANH MÔI TRƯỜNG CẢNH {scene.get('scene_index') or '?'}\n\n"
+            "Chọn một không gian âm thanh; không chọn thì cảnh không có âm thanh môi trường.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -75266,45 +76095,47 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         for scene in state.get("scenes") or []:
             scene_id = str(scene.get("scene_id") or "")
             selected = owner_id in (scene.get("character_ids") or []) if owner_type == "character" else str(scene.get("location_id") or "") == owner_id
-            rows.append([(("[x] " if selected else "[ ] ") + f"Canh {scene.get('scene_index')}", f"vid3|entity_scene|{owner_type}|{owner_id}|{scene_id}")])
+            rows.append([(("✅ " if selected else "") + f"Cảnh {scene.get('scene_index')}", f"vid3|entity_scene|{owner_type}|{owner_id}|{scene_id}")])
         back_callback = f"vid3|character|{owner_id}" if owner_type == "character" else f"vid3|location|{owner_id}"
-        rows.extend(video_uiflow3_nav_rows(back=back_callback))
-        return "GAN THEO CANH\n\nBat/tat cac canh co tac nhan nay. Khong chon thi che do Tu dong theo thu tu se xu ly.", video_uiflow3_keyboard(rows)
+        rows.append([("✅ Hoàn tất chọn cảnh áp dụng", back_callback), ("🎬 Menu Video", "menu|main_video")])
+        return "🎬 GÁN THEO CẢNH\n\nBật hoặc tắt các cảnh có đối tượng này. Không chọn thì chế độ tự động theo thứ tự sẽ xử lý.", video_uiflow3_keyboard(rows)
 
     if view == "scene_plan_list":
-        rows = [[(f"Canh {scene.get('scene_index')}", f"vid3|plan_scene|{scene.get('scene_id')}")] for scene in state.get("scenes") or []]
+        rows = [[(f"🎬 Cảnh {scene.get('scene_index')}", f"vid3|plan_scene|{scene.get('scene_id')}")] for scene in state.get("scenes") or []]
         rows.extend(video_uiflow3_nav_rows(back="vid3|view|scene_plan"))
-        return "SUA KE HOACH CANH\n\nMoi canh chi nen co mot y chinh va mot hanh dong hoan tat.", video_uiflow3_keyboard(rows)
+        return "🎬 SỬA KẾ HOẠCH CẢNH\n\nMỗi cảnh chỉ nên có một ý chính và một hành động hoàn chỉnh.", video_uiflow3_keyboard(rows)
 
     if view == "scene_plan_detail":
         scene_id = str(state.get("active_scene_id") or "")
         scene = next((item for item in state.get("scenes") or [] if str(item.get("scene_id") or "") == scene_id), {})
         return (
-            f"KE HOACH CANH {scene.get('scene_index') or '?'}\n\nY chinh: {scene.get('semantic_beat') or 'Chua co'}\nHanh dong: {scene.get('main_action') or 'Chua co'}\nKet qua: {scene.get('completion_state') or 'Chua co'}",
+            f"🎬 KẾ HOẠCH CẢNH {scene.get('scene_index') or '?'}\n\nÝ chính: {scene.get('semantic_beat') or 'Chưa có'}\nHành động: {scene.get('main_action') or 'Chưa có'}\nKết quả: {scene.get('completion_state') or 'Chưa có'}",
             video_uiflow3_keyboard([
-                [("Sua canh", f"vid3|plan_edit|{scene_id}")],
-                [("Dua len", f"vid3|plan_move|{scene_id}|up"), ("Dua xuong", f"vid3|plan_move|{scene_id}|down")],
+                [("✏️ Sửa cảnh", f"vid3|plan_edit|{scene_id}")],
+                [("⬆️ Đưa lên", f"vid3|plan_move|{scene_id}|up"), ("⬇️ Đưa xuống", f"vid3|plan_move|{scene_id}|down")],
                 *video_uiflow3_nav_rows(back="vid3|view|scene_plan_list"),
             ]),
         )
 
     if view == "prompt_scenes":
-        lines = ["PROMPT THEO CANH", ""] + [
-            f"Canh {scene.get('scene_index')}: {scene.get('compiled_prompt_status') or 'not_compiled'}"
+        lines = ["📝 CÂU LỆNH THEO CẢNH", ""] + [
+            f"Cảnh {scene.get('scene_index')}: {scene.get('compiled_prompt_status') or 'chưa hoàn tất'}"
             for scene in state.get("scenes") or []
         ]
-        return "\n".join(lines), video_uiflow3_keyboard(video_uiflow3_nav_rows(back="vid3|view|prompts"))
+        return "\n".join(lines), video_uiflow3_keyboard([
+            [("✅ Hoàn tất rà soát câu lệnh từng cảnh", "vid3|view|prompts"), ("🎬 Menu Video", "menu|main_video")],
+        ])
 
     if view == "prompt_advanced":
         scene_id = str(state.get("active_scene_id") or "")
         if not scene_id:
             rows = [
-                [(f"Canh {scene.get('scene_index')}", f"vid3|scene_advanced|{scene.get('scene_id')}")]
+                [(f"🎬 Cảnh {scene.get('scene_index')}", f"vid3|scene_advanced|{scene.get('scene_id')}")]
                 for scene in state.get("scenes") or []
             ]
             rows.extend(video_uiflow3_nav_rows(back="vid3|view|prompts"))
             return (
-                "TUY CHINH NANG CAO\n\nChon canh de sua khuon hinh, camera, chuyen dong va anh sang.",
+                "🎥 TÙY CHỈNH NÂNG CAO\n\nChọn cảnh để sửa khung hình, camera, chuyển động và ánh sáng.",
                 video_uiflow3_keyboard(rows),
             )
         scene = video_uiflow3_find_scene(state, scene_id)
@@ -75318,14 +76149,14 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         )
         back_callback = str(state.get("ui_return_callback") or default_return_callback)
         return (
-            f"TUY CHINH NANG CAO - CANH {scene.get('scene_index') or '?'}\n\n"
-            f"Khuon hinh: {scene.get('framing') or 'Tu dong'}\n"
-            f"Chuyen dong: {scene.get('movement') or 'Tu dong'}\n"
-            f"Anh sang: {scene.get('lighting') or 'Tu dong'}\n"
-            f"Tam trang: {scene.get('mood') or 'Tu dong'}\n\n"
-            "Chi luu rang buoc ke hoach; chua bat dau tao video.",
+            f"🎥 TÙY CHỈNH NÂNG CAO · CẢNH {scene.get('scene_index') or '?'}\n\n"
+            f"Khung hình: {scene.get('framing') or 'Tự động'}\n"
+            f"Chuyển động: {scene.get('movement') or 'Tự động'}\n"
+            f"Ánh sáng: {scene.get('lighting') or 'Tự động'}\n"
+            f"Tâm trạng: {scene.get('mood') or 'Tự động'}\n\n"
+            "Chỉ lưu ràng buộc kế hoạch; chưa bắt đầu tạo video.",
             video_uiflow3_keyboard([
-                [("Sua camera/chuyen dong", f"vid3|scene_direction|{scene_id}")],
+                [("✏️ Sửa máy quay và chuyển động", f"vid3|scene_direction|{scene_id}")],
                 *video_uiflow3_nav_rows(back=back_callback),
             ]),
         )
@@ -75343,24 +76174,25 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                 for item in profiles[offset:offset + 2]
             ])
         rows.append([
-            ("Nhom truoc", video_uiflow3.callback("profiles", str(4 if page == 1 else page - 1))),
-            ("Nhom sau", video_uiflow3.callback("profiles", str(1 if page == 4 else page + 1))),
+            ("⬅️ Nhóm trước", video_uiflow3.callback("profiles", str(4 if page == 1 else page - 1))),
+            ("Nhóm sau ➡️", video_uiflow3.callback("profiles", str(1 if page == 4 else page + 1))),
         ])
         rows.extend(video_uiflow3_nav_rows(back=video_uiflow3.callback("view", "content_hub")))
         return (
-            f"32 NOI DUNG\n\nTrang {page}/4. Chon mot loai noi dung; he thong chi dung catalog hien co va se cho xem lai Content Lock truoc khi tiep tuc.",
+            f"📚 32 LOẠI NỘI DUNG\n\nTrang {page}/4. Chọn một loại nội dung; bot hiển thị gợi ý riêng của loại đó và cho rà soát trước khi tiếp tục.",
             video_uiflow3_keyboard(rows),
         )
 
     if view == "character_count":
         count = len((state.get("bible") or {}).get("characters") or [])
         rows = [
-            [("0", "vid3|chars|0"), ("1", "vid3|chars|1"), ("2", "vid3|chars|2")],
-            [("3", "vid3|chars|3"), ("4", "vid3|chars|4"), ("Nhap so khac", "vid3|chars_custom")],
+            [("🚫 0 nhân vật", "vid3|chars|0"), ("👤 1 nhân vật", "vid3|chars|1")],
+            [("👥 2 nhân vật", "vid3|chars|2"), ("👥 3 nhân vật", "vid3|chars|3")],
+            [("👥 4 nhân vật", "vid3|chars|4"), ("✍️ Nhập số khác", "vid3|chars_custom")],
             *video_uiflow3_nav_rows(back="vid3|view|production_bible"),
         ]
         return (
-            f"SO NHAN VAT\n\nHien tai: {count}. Nhap dung tong so nguoi xuat hien; sau do chinh Nam/Nu, mo ta, anh va giong cho tung NV.",
+            f"👥 SỐ NHÂN VẬT\n\nHiện tại: {count}. Chọn đúng tổng số người xuất hiện; sau đó khai báo giới tính, mô tả, ảnh và giọng cho từng nhân vật.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -75371,10 +76203,10 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             for index, item in enumerate(characters, 1)
         ]
         if not rows:
-            rows.append([("Chon so nhan vat", "vid3|view|character_count")])
-        rows.extend(video_uiflow3_nav_rows(back="vid3|view|production_bible"))
+            rows.append([("👥 Chọn số nhân vật", "vid3|view|character_count")])
+        rows.append([("✅ Hoàn tất khai báo nhân vật", "vid3|view|production_bible"), ("🎬 Menu Video", "menu|main_video")])
         return (
-            "DAN NHAN VAT\n\nMoi nhan vat co mot ID on dinh. Doi ten hoac sap xep khong lam mat anh, giong hay canh da gan.",
+            "👤 DANH SÁCH NHÂN VẬT\n\nMỗi nhân vật có định danh ổn định; đổi tên không làm mất ảnh, giọng hoặc cảnh đã gán.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -75383,41 +76215,42 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         characters = list((state.get("bible") or {}).get("characters") or [])
         item = next((row for row in characters if str(row.get("character_id") or "") == character_id), {})
         index = next((idx for idx, row in enumerate(characters, 1) if str(row.get("character_id") or "") == character_id), 1)
-        voice = str(item.get("voice_id") or "Tu dong theo gioi tinh")
+        voice = str(item.get("voice_id") or "Tự động theo giới tính")
         references = len(item.get("reference_asset_ids") or [])
         rows = [
-            [("Nam", f"vid3|char_gender|{character_id}|male"), ("Nu", f"vid3|char_gender|{character_id}|female")],
-            [("Sua ten/mo ta", f"vid3|char_desc|{character_id}"), ("Chon giong", f"vid3|char_voice|{character_id}")],
-            [("Gui anh NV", f"vid3|char_image|{character_id}"), ("Tao anh AI", f"vid3|image_ai|character|{character_id}")],
-            [("Xem anh", f"vid3|refs|character|{character_id}")],
+            [("👨 Nam", f"vid3|char_gender|{character_id}|male"), ("👩 Nữ", f"vid3|char_gender|{character_id}|female")],
+            [("✏️ Sửa tên và mô tả", f"vid3|char_desc|{character_id}"), ("🎙 Chọn giọng", f"vid3|char_voice|{character_id}")],
+            [("🖼 Gửi ảnh nhân vật", f"vid3|char_image|{character_id}"), ("✨ Tạo ảnh AI", f"vid3|image_ai|character|{character_id}")],
+            [("🗂 Xem ảnh", f"vid3|refs|character|{character_id}")],
         ]
         if state.get("scenes"):
-            rows[-1].append(("Canh xuat hien", f"vid3|char_scenes|{character_id}"))
-        rows.extend(video_uiflow3_nav_rows(back="vid3|view|character_list"))
+            rows.append([("🎬 Chọn cảnh xuất hiện", f"vid3|char_scenes|{character_id}")])
+        rows.append([("✅ Hoàn tất khai báo nhân vật này", "vid3|view|character_list"), ("🎬 Menu Video", "menu|main_video")])
         return (
-            f"NHAN VAT {index}\n\nTen: {item.get('display_name') or f'Nhan vat {index}'}\nGioi tinh: {item.get('gender') or 'Chua chon'}\nMo ta: {item.get('description') or 'Chua co'}\nAnh: {references}\nGiong: {voice}\n\nCac tuy chon cua NV duoc gom tai day de khong tao wizard dai.",
+            f"👤 NHÂN VẬT {index}\n\nTên: {item.get('display_name') or f'Nhân vật {index}'}\nGiới tính: {item.get('gender') or 'Chưa chọn'}\nMô tả: {item.get('description') or 'Chưa có'}\nẢnh: {references}\nGiọng: {voice}\n\nCác tùy chọn của nhân vật được gom tại đây để dễ rà soát.",
             video_uiflow3_keyboard(rows),
         )
 
     if view == "location_count":
         count = len((state.get("bible") or {}).get("locations") or [])
         return (
-            f"SO BOI CANH\n\nHien tai: {count}. Moi boi canh co mo ta, anh va danh sach canh su dung rieng.",
+            f"🏞 SỐ BỐI CẢNH\n\nHiện tại: {count}. Mỗi bối cảnh có mô tả, ảnh và danh sách cảnh sử dụng riêng.",
             video_uiflow3_keyboard([
-                [("0", "vid3|locs|0"), ("1", "vid3|locs|1"), ("2", "vid3|locs|2")],
-                [("3", "vid3|locs|3"), ("4", "vid3|locs|4"), ("Nhap so khac", "vid3|locs_custom")],
+                [("✨ 0 bối cảnh", "vid3|locs|0"), ("🏞 1 bối cảnh", "vid3|locs|1")],
+                [("🗺 2 bối cảnh", "vid3|locs|2"), ("🗺 3 bối cảnh", "vid3|locs|3")],
+                [("🗺 4 bối cảnh", "vid3|locs|4"), ("✍️ Nhập số khác", "vid3|locs_custom")],
                 *video_uiflow3_nav_rows(back="vid3|view|production_bible"),
             ]),
         )
 
     if view == "location_list":
         locations = list((state.get("bible") or {}).get("locations") or [])
-        rows = [[(f"BC{index} - {item.get('name') or f'Boi canh {index}'}", f"vid3|location|{item.get('location_id')}")]
+        rows = [[(f"🏞 Bối cảnh {index} · {item.get('name') or f'Bối cảnh {index}'}", f"vid3|location|{item.get('location_id')}")]
                 for index, item in enumerate(locations, 1)]
         if not rows:
-            rows.append([("Chon so boi canh", "vid3|view|location_count")])
-        rows.extend(video_uiflow3_nav_rows(back="vid3|view|production_bible"))
-        return "BOI CANH\n\nChon mot boi canh de sua mo ta hoac gui anh.", video_uiflow3_keyboard(rows)
+            rows.append([("🏞 Chọn số bối cảnh", "vid3|view|location_count")])
+        rows.append([("✅ Hoàn tất khai báo bối cảnh", "vid3|view|production_bible"), ("🎬 Menu Video", "menu|main_video")])
+        return "🏞 DANH SÁCH BỐI CẢNH\n\nChọn một bối cảnh để sửa mô tả hoặc gửi ảnh.", video_uiflow3_keyboard(rows)
 
     if view == "location_detail":
         location_id = str(state.get("active_location_id") or "")
@@ -75425,14 +76258,14 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         item = next((row for row in locations if str(row.get("location_id") or "") == location_id), {})
         index = next((idx for idx, row in enumerate(locations, 1) if str(row.get("location_id") or "") == location_id), 1)
         location_rows = [
-            [("Sua ten/mo ta", f"vid3|loc_desc|{location_id}"), ("Xem anh", f"vid3|refs|location|{location_id}")],
-            [("Gui anh boi canh", f"vid3|loc_image|{location_id}"), ("Tao anh AI", f"vid3|image_ai|location|{location_id}")],
+            [("✏️ Sửa tên và mô tả", f"vid3|loc_desc|{location_id}"), ("🗂 Xem ảnh", f"vid3|refs|location|{location_id}")],
+            [("🖼 Gửi ảnh bối cảnh", f"vid3|loc_image|{location_id}"), ("✨ Tạo ảnh AI", f"vid3|image_ai|location|{location_id}")],
         ]
         if state.get("scenes"):
-            location_rows.append([("Canh su dung", f"vid3|loc_scenes|{location_id}")])
-        location_rows.extend(video_uiflow3_nav_rows(back="vid3|view|location_list"))
+            location_rows.append([("🎬 Chọn cảnh sử dụng", f"vid3|loc_scenes|{location_id}")])
+        location_rows.append([("✅ Hoàn tất khai báo bối cảnh này", "vid3|view|location_list"), ("🎬 Menu Video", "menu|main_video")])
         return (
-            f"BOI CANH {index}\n\nTen: {item.get('name') or f'Boi canh {index}'}\nMo ta: {item.get('description') or 'Chua co'}\nAnh: {len(item.get('reference_asset_ids') or [])}",
+            f"🏞 BỐI CẢNH {index}\n\nTên: {item.get('name') or f'Bối cảnh {index}'}\nMô tả: {item.get('description') or 'Chưa có'}\nẢnh: {len(item.get('reference_asset_ids') or [])}",
             video_uiflow3_keyboard(location_rows),
         )
 
@@ -75467,13 +76300,13 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         rows = [owner_buttons[offset:offset + 2] for offset in range(0, len(owner_buttons), 2)]
         rows.extend(video_uiflow3_nav_rows(back="vid3|view|references"))
         note = (
-            "Chon dung NV/boi canh/san pham/dao cu. Anh nguon goc van duoc giu, "
-            "chi them vai tro tham chieu sau Content Lock."
+            "Chọn đúng nhân vật, bối cảnh, sản phẩm hoặc đạo cụ. Ảnh nguồn gốc vẫn được giữ; "
+            "mục này chỉ gán thêm vai trò tham chiếu."
             if owner_buttons
-            else "Chua co doi tuong de gan. Hay khai bao NV, boi canh hoac tac nhan truoc."
+            else "Chưa có đối tượng để gán. Hãy khai báo nhân vật, bối cảnh hoặc tác nhân trước."
         )
         return (
-            f"GAN ANH NGUON {source_asset.get('asset_id') or source_asset_id}\n\n{note}",
+            f"🖼 GÁN ẢNH NGUỒN {source_asset.get('asset_id') or source_asset_id}\n\n{note}",
             video_uiflow3_keyboard(rows),
         )
 
@@ -75489,12 +76322,12 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                 and str(item.get("owner_id") or "") == reference_filter_id
             )
         ]
-        owner_labels = {"character": "NHAN VAT", "location": "BOI CANH", "product": "SAN PHAM", "prop": "DAO CU"}
+        owner_labels = {"character": "NHÂN VẬT", "location": "BỐI CẢNH", "product": "SẢN PHẨM", "prop": "ĐẠO CỤ"}
         filtered_owner_label = video_uiflow3_entity_label(state, reference_filter_type, reference_filter_id)
         title = (
-            f"ANH {owner_labels.get(reference_filter_type, 'THAM CHIEU')} - {filtered_owner_label}"
+            f"ẢNH {owner_labels.get(reference_filter_type, 'THAM CHIẾU')} · {filtered_owner_label}"
             if reference_filter_type and reference_filter_id
-            else "ANH THAM CHIEU"
+            else "ẢNH THAM CHIẾU"
         )
         lines = [title, ""]
         if references:
@@ -75505,17 +76338,17 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                     str(item.get("owner_id") or ""),
                 )
                 role_label = video_uiflow3_reference_role_label(str(item.get("role") or ""))
-                lines.append(f"- Anh {index}: {owner_label} / {role_label} / tep da nhan")
+                lines.append(f"• Ảnh {index}: {owner_label} / {role_label} / tệp đã nhận")
         else:
-            lines.append("Chua co anh cho doi tuong nay. Hay quay lai va gui anh tai dung muc.")
+            lines.append("Chưa có ảnh cho đối tượng này. Hãy quay lại và gửi ảnh tại đúng mục.")
         rows: list[list[tuple[str, str]]] = []
         if not reference_filter_type:
             source_assets = list((state.get("source") or {}).get("assets") or [])
             if source_assets:
-                lines.extend(["", "Anh/tep nguon co the dung lai, khong can gui lai:"])
+                lines.extend(["", "Ảnh hoặc tệp nguồn có thể dùng lại, không cần gửi lại:"])
                 source_buttons = [
                     (
-                        f"Gan nguon {index}",
+                        f"🧭 Gán nguồn {index}",
                         f"vid3|source_ref|{item.get('asset_id')}",
                     )
                     for index, item in enumerate(source_assets, 1)
@@ -75533,19 +76366,19 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             back_callback = "vid3|view|bible_extras"
         else:
             back_callback = "vid3|view|production_bible"
-        rows.extend(video_uiflow3_nav_rows(back=back_callback))
+        rows.append([("✅ Hoàn tất rà soát ảnh tham chiếu", back_callback), ("🎬 Menu Video", "menu|main_video")])
         return "\n".join(lines), video_uiflow3_keyboard(rows)
 
     if view == "continuity":
         continuity = dict((state.get("bible") or {}).get("continuity") or {})
         def selected(key: str) -> str:
-            return "[x]" if continuity.get(key, True) else "[ ]"
+            return "✅" if continuity.get(key, True) else "▫️"
         return (
-            "NHAT QUAN\n\nBat nhung thu phai giu xuyen canh. Mac dinh an toan duoc chon san.",
+            "🔒 GIỮ NHẤT QUÁN\n\nBật những yếu tố phải giữ xuyên các cảnh. Các lựa chọn an toàn được bật sẵn.",
             video_uiflow3_keyboard([
-                [(f"{selected('identity')} Khuon mat", "vid3|continuity|identity"), (f"{selected('wardrobe')} Trang phuc", "vid3|continuity|wardrobe")],
-                [(f"{selected('product')} San pham", "vid3|continuity|product"), (f"{selected('location')} Boi canh", "vid3|continuity|location")],
-                *video_uiflow3_nav_rows(back="vid3|view|production_bible"),
+                [(f"{selected('identity')} Khuôn mặt", "vid3|continuity|identity"), (f"{selected('wardrobe')} Trang phục", "vid3|continuity|wardrobe")],
+                [(f"{selected('product')} Sản phẩm", "vid3|continuity|product"), (f"{selected('location')} Bối cảnh", "vid3|continuity|location")],
+                [("✅ Hoàn tất chọn yếu tố nhất quán", "vid3|view|production_bible"), ("🎬 Menu Video", "menu|main_video")],
             ]),
         )
 
@@ -75555,21 +76388,21 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         model = video_uiflow3.scene_assignment_model(state, scene_id) if scene else {
             "characters": [], "dialogue": [], "music": {"policy": "off", "track_id": ""}, "location_id": "",
         }
-        names = ", ".join(str(item.get("display_name") or item.get("character_id") or "") for item in model["characters"]) or "Chua gan"
+        names = ", ".join(str(item.get("display_name") or item.get("character_id") or "") for item in model["characters"]) or "Chưa gán"
         location_id = str(model.get("location_id") or "")
-        location_label = video_uiflow3_entity_label(state, "location", location_id) if location_id else "Tu dong"
+        location_label = video_uiflow3_entity_label(state, "location", location_id) if location_id else "Tự động"
         bible = dict(state.get("bible") or {})
         primary_row: list[tuple[str, str]] = []
         if bible.get("characters"):
-            primary_row.append(("Nhan vat trong canh", f"vid3|scene_cast|{scene_id}"))
+            primary_row.append(("👥 Nhân vật trong cảnh", f"vid3|scene_cast|{scene_id}"))
         if bible.get("locations"):
-            primary_row.append(("Boi canh", f"vid3|scene_loc|{scene_id}"))
+            primary_row.append(("🏞 Bối cảnh", f"vid3|scene_loc|{scene_id}"))
         detail_rows: list[list[tuple[str, str]]] = [primary_row] if primary_row else []
         dialogue_row: list[tuple[str, str]] = []
         if model["characters"] or (model.get("narrator") or {}).get("enabled"):
-            dialogue_row.append(("Loi thoai", f"vid3|scene_dialogue|{scene_id}"))
+            dialogue_row.append(("🗣 Lời thoại", f"vid3|scene_dialogue|{scene_id}"))
         if model["characters"]:
-            dialogue_row.append(("Giong nhan vat", f"vid3|scene_voice|{scene_id}"))
+            dialogue_row.append(("🎙 Giọng nhân vật", f"vid3|scene_voice|{scene_id}"))
         if dialogue_row:
             detail_rows.append(dialogue_row)
         capabilities = dict(state.get("capabilities") or {})
@@ -75582,15 +76415,15 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         )
         optional_row: list[tuple[str, str]] = []
         if has_scene_entities:
-            optional_row.append(("Tac nhan", f"vid3|scene_entities|{scene_id}"))
+            optional_row.append(("🧩 Tác nhân", f"vid3|scene_entities|{scene_id}"))
         if bool(capabilities.get("per_scene_music")):
-            optional_row.append(("Nhac canh", f"vid3|scene_music|{scene_id}"))
+            optional_row.append(("🎵 Nhạc cảnh", f"vid3|scene_music|{scene_id}"))
         if optional_row:
             detail_rows.append(optional_row)
-        detail_rows.append([("Nang cao", f"vid3|scene_advanced|{scene_id}")])
+        detail_rows.append([("🎥 Tùy chỉnh nâng cao", f"vid3|scene_advanced|{scene_id}")])
         detail_rows.extend(video_uiflow3_nav_rows(back="vid3|view|scene_assignment"))
         return (
-            f"CANH {scene.get('scene_index') or '?'} - PHAN VAI & AM THANH\n\nNhan vat: {names}\nBoi canh: {location_label}\nSan pham/dao cu: {len(model.get('products') or [])}/{len(model.get('props') or [])}\nNguoi dan: {'Bat' if (model.get('narrator') or {}).get('enabled') else 'Tat'}\nLoi thoai: {len(model.get('dialogue') or [])}\nNhac: {model.get('music', {}).get('policy') or 'off'}\n\nPhan Nang cao duoc thu gon; chi mo khi can.",
+            f"🎬 CẢNH {scene.get('scene_index') or '?'} · PHÂN VAI VÀ ÂM THANH\n\nNhân vật: {names}\nBối cảnh: {location_label}\nSản phẩm / đạo cụ: {len(model.get('products') or [])}/{len(model.get('props') or [])}\nNgười dẫn: {'Bật' if (model.get('narrator') or {}).get('enabled') else 'Tắt'}\nLời thoại: {len(model.get('dialogue') or [])}\nNhạc: {model.get('music', {}).get('policy') or 'không dùng'}\n\nTùy chỉnh nâng cao được thu gọn; chỉ mở khi cần.",
             video_uiflow3_keyboard(detail_rows),
         )
 
@@ -75602,29 +76435,29 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         narrator = dict((state.get("bible") or {}).get("narrator") or {})
         actor_row: list[tuple[str, str]] = []
         if products:
-            actor_row.append(("San pham trong canh", f"vid3|scene_product|{scene_id}"))
+            actor_row.append(("📦 Sản phẩm trong cảnh", f"vid3|scene_product|{scene_id}"))
         if props:
-            actor_row.append(("Dao cu trong canh", f"vid3|scene_prop|{scene_id}"))
+            actor_row.append(("🧩 Đạo cụ trong cảnh", f"vid3|scene_prop|{scene_id}"))
         rows: list[list[tuple[str, str]]] = [actor_row] if actor_row else []
         if narrator:
             rows.append([
-                (("[x] " if bool(scene.get("narrator_enabled")) else "[ ] ") + "Nguoi dan trong canh",
+                (("✅ " if bool(scene.get("narrator_enabled")) else "▫️ ") + "Người dẫn trong cảnh",
                  f"vid3|scene_narrator|{scene_id}"),
             ])
         audio_row: list[tuple[str, str]] = []
         if bool((state.get("capabilities") or {}).get("scene_sfx")):
-            audio_row.append(("SFX", f"vid3|scene_sfx|{scene_id}"))
+            audio_row.append(("🔊 Hiệu ứng âm thanh", f"vid3|scene_sfx|{scene_id}"))
         if bool((state.get("capabilities") or {}).get("scene_ambient")):
-            audio_row.append(("Ambient", f"vid3|scene_ambient|{scene_id}"))
+            audio_row.append(("🌆 Âm thanh môi trường", f"vid3|scene_ambient|{scene_id}"))
         if audio_row:
             rows.append(audio_row)
         rows.extend(video_uiflow3_nav_rows(back=f"vid3|scene|{scene_id}"))
         return (
-            f"TAC NHAN CANH {scene.get('scene_index') or '?'}\n\n"
-            f"San pham: {len(scene.get('product_ids') or [])}/{len(products)}\n"
-            f"Dao cu: {len(scene.get('prop_ids') or [])}/{len(props)}\n"
-            f"Nguoi dan: {'Da bat' if scene.get('narrator_enabled') and narrator else 'Tat'}\n\n"
-            "Khong chon thi giu mac dinh/tu dong cua canh; khong lam thay doi Bible goc.",
+            f"🧩 TÁC NHÂN CẢNH {scene.get('scene_index') or '?'}\n\n"
+            f"Sản phẩm: {len(scene.get('product_ids') or [])}/{len(products)}\n"
+            f"Đạo cụ: {len(scene.get('prop_ids') or [])}/{len(props)}\n"
+            f"Người dẫn: {'Đã bật' if scene.get('narrator_enabled') and narrator else 'Tắt'}\n\n"
+            "Không chọn thì giữ cấu hình tự động của cảnh; không làm thay đổi thiết lập gốc.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -75639,47 +76472,48 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             item_id = str(item.get("product_id" if is_product else "prop_id") or "")
             label = str(item.get("name") or item_id)[:28]
             action = "scene_product" if is_product else "scene_prop"
-            rows.append([("[x] " + label if item_id in selected else "[ ] " + label, f"vid3|{action}|{scene_id}|{item_id}")])
+            rows.append([(("✅ " if item_id in selected else "▫️ ") + label, f"vid3|{action}|{scene_id}|{item_id}")])
         clear_action = "scene_product_clear" if is_product else "scene_prop_clear"
-        rows.append([("Khong gan", f"vid3|{clear_action}|{scene_id}")])
-        rows.extend(video_uiflow3_nav_rows(back=f"vid3|scene_entities|{scene_id}"))
-        title = "SAN PHAM CUA CANH" if is_product else "DAO CU CUA CANH"
+        rows.append([("🚫 Không gán", f"vid3|{clear_action}|{scene_id}")])
+        finish_label = "✅ Hoàn tất chọn sản phẩm cho cảnh" if is_product else "✅ Hoàn tất chọn đạo cụ cho cảnh"
+        rows.append([(finish_label, f"vid3|scene_entities|{scene_id}"), ("🎬 Menu Video", "menu|main_video")])
+        title = "📦 SẢN PHẨM CỦA CẢNH" if is_product else "🧩 ĐẠO CỤ CỦA CẢNH"
         return (
-            f"{title}\n\nChon mot hoac nhieu muc. Nhan lai de bat/tat; Khong gan de xoa toan bo.",
+            f"{title}\n\nChọn một hoặc nhiều mục; chạm lại để bật hoặc tắt. Chọn Không gán để xóa toàn bộ.",
             video_uiflow3_keyboard(rows),
         )
 
     if step == "entry":
         if product == "video_ai_real":
             rows = [
-                [("Prompt -> Video", "vid3|mode|prompt_video"), ("Anh -> Video", "vid3|mode|image_video")],
+                [("📝 Prompt → Video", "vid3|mode|prompt_video"), ("🖼 Ảnh → Video", "vid3|mode|image_video")],
             ]
             if bool((state.get("capabilities") or {}).get("video_to_video")):
-                rows.append([("Video -> Video", "vid3|mode|video_video")])
+                rows.append([("🎞 Video → Video", "vid3|mode|video_video")])
             rows.extend(video_uiflow3_nav_rows(back="menu|main_video"))
-            copy = "Chon dung loai dau vao. Moi nhanh van di qua Content Lock truoc Nhan vat va Canh."
+            copy = "Chọn đúng loại đầu vào. Mỗi nhánh đều xác nhận nội dung trước khi khai báo nhân vật, bối cảnh và cảnh."
         elif product == "storyboard_prompt":
             rows = [
-                [("Tao Storyboard tu noi dung", "vid3|mode|storyboard_generate"), ("Gui Storyboard co san", "vid3|mode|storyboard_upload")],
+                [("✨ Tạo Storyboard từ nội dung", "vid3|mode|storyboard_generate"), ("🖼 Gửi Storyboard có sẵn", "vid3|mode|storyboard_upload")],
                 *video_uiflow3_nav_rows(back="menu|main_video"),
             ]
-            copy = "Anh/panel co the gui som, nhung chi duoc gan y nghia sau Content Lock."
+            copy = "Ảnh hoặc panel được nhận trước, sau đó mới gán đúng nội dung và thứ tự cảnh."
         elif product == "multi_scene_film":
-            rows = [[("Lap ke hoach series", "vid3|mode|series_plan")], *video_uiflow3_nav_rows(back="menu|main_video")]
-            copy = "Chi lap ke hoach. Cong khai van khoa submit Video dai tap."
+            rows = [[("📚 Lập kế hoạch loạt video", "vid3|mode|series_plan")], *video_uiflow3_nav_rows(back="menu|main_video")]
+            copy = "Lập kế hoạch chung và nội dung từng tập; bước tạo video dài tập chỉ mở khi hệ thống đủ điều kiện."
         else:
-            rows = [[("Bat dau", "vid3|mode|default")], *video_uiflow3_nav_rows(back="menu|main_video")]
-            copy = "Bat dau dung quy trinh Content-first."
+            rows = [[("✅ Bắt đầu", "vid3|mode|default")], *video_uiflow3_nav_rows(back="menu|main_video")]
+            copy = "Bắt đầu đúng quy trình riêng của sản phẩm này."
         return f"{product_label}\n\n{copy}", video_uiflow3_keyboard(rows)
 
     if step == "series_goal":
         goal = str((state.get("series") or {}).get("goal") or "")
         return (
-            f"{prefix}MUC TIEU SERIES\n\n"
-            f"Muc tieu chung: {goal or 'Chua nhap'}\n\n"
-            "Muc tieu nay la mac dinh cho cac tap; noi dung rieng tung tap duoc nhap sau Series Bible.",
+            f"{prefix}🎯 MỤC TIÊU LOẠT VIDEO\n\n"
+            f"Mục tiêu chung: {goal or 'Chưa nhập'}\n\n"
+            "Mục tiêu này là nền chung cho các tập; nội dung riêng của từng tập được nhập sau khi hoàn tất thiết lập chung của loạt video.",
             video_uiflow3_keyboard([
-                [("Nhap/sua muc tieu", "vid3|series_goal_edit"), ("Tiep tuc", "vid3|series_goal_done")],
+                [("✏️ Nhập hoặc sửa mục tiêu", "vid3|series_goal_edit"), ("✅ Hoàn tất mục tiêu của loạt video", "vid3|series_goal_done")],
                 *video_uiflow3_nav_rows(),
             ]),
         )
@@ -75688,12 +76522,12 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         assets = list((state.get("source") or {}).get("assets") or [])
         source_kind = str((state.get("source") or {}).get("kind") or "")
         source_copy = {
-            "video_trend": "Nhap trend/link/chu de trend truoc khi chon noi dung moi.",
-            "script_image_video": "Dan hoac gui nguyen van kich ban. Bot khong rut gon am tham.",
-            "frame_video_local": "Gui lan luot anh nguon. Vai tro NV/Boi canh se gan sau Content Lock.",
-            "self_shot_scene_change": "Gui video tu quay de luu source va phan tich o flow hien co sau nay.",
+            "video_trend": "Nhập trend, liên kết hoặc chủ đề trend trước khi chọn hướng nội dung.",
+            "script_image_video": "Dán hoặc gửi nguyên văn kịch bản; bot không tự ý rút gọn.",
+            "frame_video_local": "Gửi lần lượt ảnh nguồn; vai trò nhân vật và bối cảnh được gán ở bước sau.",
+            "self_shot_scene_change": "Gửi video tự quay để giữ làm nguồn cho đúng quy trình sản phẩm.",
             "storyboard_prompt": "Gửi ảnh Storyboard theo đúng thứ tự, hoặc chọn Tạo ảnh AI.",
-        }.get(product, "Gui noi dung nguon cua video.")
+        }.get(product, "Gửi nội dung nguồn của video.")
         media_source_kinds = {"raw_images", "source_video", "storyboard_panels", "generated_storyboard"}
         image_source_kinds = {"raw_images", "storyboard_panels", "generated_storyboard"}
         rows = []
@@ -75704,12 +76538,12 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             else:
                 rows.append([("Gửi tệp/video", "vid3|source_media"), (f"Đã nhận {len(assets)}", "vid3|source_status")])
         else:
-            rows.append([("Nhap noi dung nguon", "vid3|source_text")])
+            rows.append([("✍️ Nhập nội dung nguồn", "vid3|source_text")])
         if (state.get("source") or {}).get("complete"):
-            rows.append([("Hoàn thành nguồn", "vid3|source_done")])
+            rows.append([("✅ Hoàn tất chọn nguồn đầu vào", "vid3|source_done")])
         source_back = "vid3|back" if (state.get("navigation") or {}).get("visible_step_stack") else "menu|main_video"
         rows.extend(video_uiflow3_nav_rows(back=source_back))
-        return f"{prefix}NGUỒN VIDEO\n\n{source_copy}", video_uiflow3_keyboard(rows)
+        return f"{prefix}📥 NGUỒN VIDEO\n\n{source_copy}", video_uiflow3_keyboard(rows)
 
     if step == "format":
         fmt = dict(state.get("format") or {})
@@ -75719,39 +76553,39 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         duration_rows = []
         for offset in range(0, len(durations), 2):
             duration_rows.append([
-                (("[x] " if selected_duration == value else "") + (f"{value // 60} phut" if value >= 60 else f"{value} giay"), f"vid3|duration|{value}")
+                (("✅ " if selected_duration == value else "") + (f"{value // 60} phút" if value >= 60 else f"{value} giây"), f"vid3|duration|{value}")
                 for value in durations[offset:offset + 2]
             ])
         rows = [
-            [(f"{'[x] ' if selected_ratio == '9:16' else ''}9:16", "vid3|ratio|9x16"), (f"{'[x] ' if selected_ratio == '16:9' else ''}16:9", "vid3|ratio|16x9")],
-            [(f"{'[x] ' if selected_ratio == '1:1' else ''}1:1", "vid3|ratio|1x1"), (f"{'[x] ' if selected_ratio == '4:5' else ''}4:5", "vid3|ratio|4x5")],
+            [(f"{'✅ ' if selected_ratio == '9:16' else ''}9:16", "vid3|ratio|9x16"), (f"{'✅ ' if selected_ratio == '16:9' else ''}16:9", "vid3|ratio|16x9")],
+            [(f"{'✅ ' if selected_ratio == '1:1' else ''}1:1", "vid3|ratio|1x1"), (f"{'✅ ' if selected_ratio == '4:5' else ''}4:5", "vid3|ratio|4x5")],
             *duration_rows,
-            [("Nhap thoi luong khac", "vid3|duration_custom"), ("Tiep tuc", "vid3|format_done")],
+            [("✍️ Nhập thời lượng khác", "vid3|duration_custom"), ("✅ Hoàn tất chọn định dạng video", "vid3|format_done")],
             *video_uiflow3_nav_rows(),
         ]
         return (
-            f"{prefix}DINH DANG MUC TIEU\n\nTi le: {selected_ratio or 'Chua chon'}\nThoi luong: {selected_duration or 'Chua chon'} giay\n\nDay la muc tieu de lap ke hoach; so canh se duoc de xuat sau khi khoa noi dung.",
+            f"{prefix}📐 ĐỊNH DẠNG MỤC TIÊU\n\nTỷ lệ: {selected_ratio or 'Chưa chọn'}\nThời lượng: {selected_duration or 'Chưa chọn'} giây\n\nĐây là mục tiêu để lập kế hoạch; số cảnh được đề xuất sau khi nội dung được xác nhận.",
             video_uiflow3_keyboard(rows),
         )
 
     if step == "content_hub":
         rows = [
-            [("32 Noi dung", "vid3|content|profiles"), ("Kho Y tuong video", "vid3|idea_catalog")],
-            [("Tu nhap noi dung", "vid3|content|manual")],
+            [("📚 32 loại nội dung", "vid3|content|profiles"), ("💡 Ý tưởng video", "vid3|idea_catalog")],
+            [("✍️ Tự mô tả nội dung", "vid3|content|manual")],
         ]
         if video_uiflow3_source_content(state):
-            rows.append([("Dung noi dung nguon", "vid3|content|source")])
+            rows.append([("📄 Dùng nội dung nguồn", "vid3|content|source")])
         rows.extend(video_uiflow3_nav_rows())
-        return f"{prefix}NOI DUNG VIDEO\n\nChon mot nguon. Kho Y tuong la kho doc lap de tham khao; flow V3 khong sua kho.", video_uiflow3_keyboard(rows)
+        return f"{prefix}📝 NỘI DUNG VIDEO\n\nChọn một nguồn. Ý tưởng video là kho riêng; quy trình hiện tại chỉ nhận ý tưởng đã chọn và không sửa nội dung trong kho.", video_uiflow3_keyboard(rows)
 
     if step == "content_lock":
         content = dict(state.get("content") or {})
         brief = dict(content.get("approved_brief") or {})
         return (
-            f"{prefix}NOI DUNG DA CHON\n\nChu de: {brief.get('title') or content.get('original_intent') or 'Chua co'}\nMuc tieu: {brief.get('goal') or 'Tu noi dung'}\nDoi tuong: {brief.get('audience') or 'Chua chon'}\nProfile: {content.get('profile_id') or 'Tu nhap'}\n\nChi sau khi bam Tiep tuc, bot moi hoi Nhan vat/Boi canh/Canh.",
+            f"{prefix}✅ NỘI DUNG ĐÃ CHỌN\n\nChủ đề: {brief.get('title') or content.get('original_intent') or 'Chưa có'}\nMục tiêu: {brief.get('goal') or 'Theo nội dung'}\nĐối tượng: {brief.get('audience') or 'Chưa chọn'}\nLoại nội dung: {content.get('profile_id') or 'Tự nhập'}\n\nHoàn tất xác nhận nội dung để chuyển sang nhân vật, bối cảnh và kế hoạch cảnh.",
             video_uiflow3_keyboard([
-                [("Tiep tuc", "vid3|content_lock"), ("Sua noi dung", "vid3|content_edit")],
-                [("Chon nguon khac", "vid3|content_change")],
+                [("✅ Hoàn tất xác nhận nội dung", "vid3|content_lock"), ("✏️ Sửa nội dung", "vid3|content_edit")],
+                [("🔄 Chọn nguồn nội dung khác", "vid3|content_change")],
                 *video_uiflow3_nav_rows(),
             ]),
         )
@@ -75761,13 +76595,13 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         characters = list(bible.get("characters") or [])
         locations = list(bible.get("locations") or [])
         return (
-            f"{prefix}PRODUCTION BIBLE\n\nNhan vat: {len(characters)}\nBoi canh: {len(locations)}\nAnh tham chieu: {len(state.get('references') or [])}\nTac nhan nang cao: {len(bible.get('products') or [])} san pham, {len(bible.get('props') or [])} dao cu\n\nMac dinh dung Tu dong. Chi mo tung muc neu muon sua chi tiet.",
+            f"{prefix}👥 NHÂN VẬT VÀ BỐI CẢNH\n\nNhân vật: {len(characters)}\nBối cảnh: {len(locations)}\nẢnh tham chiếu: {len(state.get('references') or [])}\nTùy chỉnh thêm: {len(bible.get('products') or [])} sản phẩm, {len(bible.get('props') or [])} đạo cụ\n\nMặc định dùng tự động; chỉ mở từng mục khi cần sửa chi tiết.",
             video_uiflow3_keyboard([
-                [("So nhan vat", "vid3|view|character_count"), ("Sua tung nhan vat", "vid3|view|character_list")],
-                [("Boi canh", "vid3|view|location_count"), ("Sua tung boi canh", "vid3|view|location_list")],
-                [("Anh tham chieu", "vid3|view|references"), ("Nhat quan", "vid3|view|continuity")],
-                [("Tac nhan nang cao", "vid3|view|bible_extras")],
-                [("Tu dong goi y", "vid3|bible_auto"), ("Tiep tuc", "vid3|bible_done")],
+                [("👥 Số nhân vật", "vid3|view|character_count"), ("👤 Danh sách nhân vật", "vid3|view|character_list")],
+                [("🏞 Số bối cảnh", "vid3|view|location_count"), ("🗺 Danh sách bối cảnh", "vid3|view|location_list")],
+                [("🖼 Ảnh tham chiếu", "vid3|view|references"), ("🔒 Giữ nhất quán", "vid3|view|continuity")],
+                [("🛠 Tùy chỉnh chi tiết", "vid3|view|bible_extras")],
+                [("✨ Tự động gợi ý", "vid3|bible_auto"), ("✅ Hoàn tất thiết lập nhân vật và bối cảnh", "vid3|bible_done")],
                 *video_uiflow3_nav_rows(),
             ]),
         )
@@ -75776,22 +76610,22 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         episode = dict(state.get("episode") or {})
         episode_content = dict(episode.get("content") or {})
         effective = video_uiflow3.effective_episode_contract(state)
-        content_preview = str(episode_content.get("original_intent") or "Chua nhap")
+        content_preview = str(episode_content.get("original_intent") or "Chưa nhập")
         if len(content_preview) > 300:
             content_preview = content_preview[:297].rstrip() + "..."
         return (
-            f"{prefix}TAP DANG LAP\n\n"
-            f"Tap {episode.get('number') or 1}: {episode.get('title') or 'Chua dat ten'}\n"
-            f"Noi dung tap: {content_preview}\n"
-            f"Ke thua: {len(effective.get('character_ids') or [])} NV / "
-            f"{len(effective.get('location_ids') or [])} boi canh / "
-            f"{len(effective.get('product_ids') or [])} san pham / "
-            f"{len(effective.get('prop_ids') or [])} dao cu\n\n"
-            "Thu tu ke thua: Series mac dinh -> Tap ghi de -> Canh ghi de.",
+            f"{prefix}🎞 TẬP ĐANG LẬP\n\n"
+            f"Tập {episode.get('number') or 1}: {episode.get('title') or 'Chưa đặt tên'}\n"
+            f"Nội dung tập: {content_preview}\n"
+            f"Kế thừa: {len(effective.get('character_ids') or [])} nhân vật / "
+            f"{len(effective.get('location_ids') or [])} bối cảnh / "
+            f"{len(effective.get('product_ids') or [])} sản phẩm / "
+            f"{len(effective.get('prop_ids') or [])} đạo cụ\n\n"
+            "Thứ tự kế thừa: thiết lập chung của loạt video → thiết lập riêng của tập → thiết lập riêng của cảnh.",
             video_uiflow3_keyboard([
-                [("So & ten tap", "vid3|episode_identity"), ("Noi dung tap", "vid3|episode_content")],
-                [("NV/boi canh cua tap", "vid3|episode_entities")],
-                [("Tiep tuc", "vid3|episode_done")],
+                [("🔢 Số và tên tập", "vid3|episode_identity"), ("📝 Nội dung tập", "vid3|episode_content")],
+                [("👥 Nhân vật và bối cảnh của tập", "vid3|episode_entities")],
+                [("✅ Hoàn tất thiết lập nội dung tập", "vid3|episode_done")],
                 *video_uiflow3_nav_rows(),
             ]),
         )
@@ -75805,16 +76639,16 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             video_uiflow3.scene_count_floor(state),
         )
         maximum = safe_int(adapter.get("maximum_scene_count"), video_uiflow3.MAX_SCENES)
-        count_rows: list[list[tuple[str, str]]] = [[(f"Dung {count} canh", f"vid3|scene_count|{count}")]]
+        count_rows: list[list[tuple[str, str]]] = [[(f"✅ Dùng {count} cảnh", f"vid3|scene_count|{count}")]]
         if count < maximum:
-            count_rows[0].append(("Them 1 canh", f"vid3|scene_count|{count + 1}"))
+            count_rows[0].append(("➕ Thêm 1 cảnh", f"vid3|scene_count|{count + 1}"))
         adjust_row: list[tuple[str, str]] = []
         if count > minimum:
-            adjust_row.append(("Bot 1 canh", f"vid3|scene_count|{count - 1}"))
-        adjust_row.append(("Tu nhap", "vid3|scene_custom"))
+            adjust_row.append(("➖ Bớt 1 cảnh", f"vid3|scene_count|{count - 1}"))
+        adjust_row.append(("✍️ Tự nhập", "vid3|scene_custom"))
         count_rows.append(adjust_row)
         return (
-            f"{prefix}SO CANH DE XUAT\n\nDe xuat: {count} canh, moi canh khoang {suggestion['seconds_per_scene']} giay. De xuat dua tren noi dung + thoi luong, khong chon mu truoc noi dung.",
+            f"{prefix}🎬 SỐ CẢNH ĐỀ XUẤT\n\nĐề xuất: {count} cảnh, mỗi cảnh khoảng {suggestion['seconds_per_scene']} giây. Số cảnh dựa trên nội dung và thời lượng, không chọn trước nội dung.",
             video_uiflow3_keyboard([
                 *count_rows,
                 *video_uiflow3_nav_rows(),
@@ -75823,36 +76657,36 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
 
     if step == "scene_plan":
         scenes = list(state.get("scenes") or [])
-        lines = [f"{prefix}KE HOACH CANH", ""]
+        lines = [f"{prefix}🎬 KẾ HOẠCH CẢNH", ""]
         for scene in scenes:
-            lines.append(f"Canh {scene.get('scene_index')}: {scene.get('semantic_beat') or scene.get('main_action') or 'Mot y chinh tron ven'}")
+            lines.append(f"Cảnh {scene.get('scene_index')}: {scene.get('semantic_beat') or scene.get('main_action') or 'Một ý chính trọn vẹn'}")
         complete = video_uiflow3.scene_plan_complete(state)
         if not complete:
-            lines.extend(["", "Chua du y chinh, hanh dong va ket qua cho tat ca canh."])
-        rows = [[("Xem/sua tung canh", "vid3|scene_plan_edit"), ("Tu dong phac thao", "vid3|scene_plan_auto")]]
+            lines.extend(["", "Chưa đủ ý chính, hành động và kết quả cho tất cả cảnh."])
+        rows = [[("✏️ Xem hoặc sửa từng cảnh", "vid3|scene_plan_edit"), ("✨ Tự động phác thảo", "vid3|scene_plan_auto")]]
         if complete:
-            rows.append([("Duyet ke hoach", "vid3|scene_plan_done")])
+            rows.append([("✅ Hoàn tất duyệt kế hoạch cảnh", "vid3|scene_plan_done")])
         rows.extend(video_uiflow3_nav_rows())
         return "\n".join(lines), video_uiflow3_keyboard(rows)
 
     if step == "scene_assignment":
         scenes = list(state.get("scenes") or [])
         characters = list((state.get("bible") or {}).get("characters") or [])
-        lines = [f"{prefix}PHAN VAI & AM THANH THEO CANH", "", "Tu dong theo thu tu: canh 1 -> NV1, canh 2 -> NV2, roi lap lai. Co the sua tung canh.", ""]
+        lines = [f"{prefix}🎭 PHÂN VAI VÀ ÂM THANH THEO CẢNH", "", "Tự động theo thứ tự: Cảnh 1 → Nhân vật 1, Cảnh 2 → Nhân vật 2 rồi lặp lại. Có thể sửa từng cảnh.", ""]
         for scene in scenes:
             lines.append(video_uiflow3_scene_label(state, scene))
         rows = []
-        scene_buttons = [(f"Canh {scene.get('scene_index')}", f"vid3|scene|{scene.get('scene_id')}") for scene in scenes]
-        for offset in range(0, len(scene_buttons), 3):
-            rows.append(scene_buttons[offset:offset + 3])
-        assignment_row: list[tuple[str, str]] = [("Tu dong theo thu tu", "vid3|scene_auto")]
+        scene_buttons = [(f"🎬 Cảnh {scene.get('scene_index')}", f"vid3|scene|{scene.get('scene_id')}") for scene in scenes]
+        for offset in range(0, len(scene_buttons), 2):
+            rows.append(scene_buttons[offset:offset + 2])
+        assignment_row: list[tuple[str, str]] = [("✨ Tự động theo thứ tự", "vid3|scene_auto")]
         capabilities = dict(state.get("capabilities") or {})
         music_scope = str((state.get("audio") or {}).get("music_scope") or "none")
         if capabilities.get("whole_video_music") or capabilities.get("per_scene_music") or music_scope != "none":
-            assignment_row.append(("Nhac video/canh", "vid3|music_scope"))
+            assignment_row.append(("🎵 Nhạc video hoặc từng cảnh", "vid3|music_scope"))
         rows.extend([
             assignment_row,
-            [("Tiep tuc", "vid3|assignment_done")],
+            [("✅ Hoàn tất phân vai và âm thanh", "vid3|assignment_done")],
             *video_uiflow3_nav_rows(),
         ])
         if characters:
@@ -75861,10 +76695,10 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
 
     if step == "prompts":
         return (
-            f"{prefix}HOP DONG PROMPT\n\nPrompt se duoc bien dich tu Content Lock + Production Bible + Scene Plan. Nguoi dung khong phai viet lai toan bo prompt ky thuat.",
+            f"{prefix}🧠 RÀ SOÁT CÂU LỆNH\n\nCâu lệnh được tạo từ nội dung đã xác nhận, nhân vật, bối cảnh và kế hoạch cảnh; người dùng không phải viết lại từ đầu.",
             video_uiflow3_keyboard([
-                [("Xem tung canh", "vid3|prompt_scenes"), ("Tuy chinh nang cao", "vid3|prompt_advanced")],
-                [("Tiep tuc", "vid3|prompts_done")],
+                [("📝 Xem câu lệnh từng cảnh", "vid3|prompt_scenes"), ("🎥 Tùy chỉnh nâng cao", "vid3|prompt_advanced")],
+                [("✅ Hoàn tất rà soát câu lệnh", "vid3|prompts_done")],
                 *video_uiflow3_nav_rows(),
             ]),
         )
@@ -75872,10 +76706,10 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
     if step == "branding":
         branding = dict(state.get("branding") or {})
         return (
-            f"{prefix}LOGO / WATERMARK\n\nLogo: {'Co' if branding.get('logo') else 'Khong'}\nWatermark: {'Co' if branding.get('watermark') else 'Khong'}",
+            f"{prefix}🏷 LOGO VÀ WATERMARK\n\nLogo: {'Đã chọn' if branding.get('logo') else 'Chưa chọn'}\nWatermark: {'Đã chọn' if branding.get('watermark') else 'Chưa chọn'}",
             video_uiflow3_keyboard([
-                [("Gui Logo", "vid3|brand|logo"), ("Nhap Watermark", "vid3|brand|watermark")],
-                [("Khong dung", "vid3|brand|none"), ("Tiep tuc", "vid3|branding_done")],
+                [("🖼 Gửi logo", "vid3|brand|logo"), ("✍️ Nhập watermark", "vid3|brand|watermark")],
+                [("⏭ Bỏ qua", "vid3|brand|none"), ("✅ Hoàn tất chọn logo và watermark", "vid3|branding_done")],
                 *video_uiflow3_nav_rows(),
             ]),
         )
@@ -75886,44 +76720,50 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         fmt = dict(state.get("format") or {})
         errors = video_uiflow3.readiness_errors(state)
         content_preview = str(
-            content.get("original_intent") or (content.get("approved_brief") or {}).get("title") or "Chua co"
+            content.get("original_intent") or (content.get("approved_brief") or {}).get("title") or "Chưa có"
         ).strip()
         if len(content_preview) > 320:
             content_preview = content_preview[:317].rstrip() + "..."
         lines = [
-            "TOM TAT VIDEO",
+            "✅ RÀ SOÁT KẾ HOẠCH VIDEO",
             "",
-            f"Noi dung: {content_preview}",
-            f"Dinh dang: {fmt.get('ratio') or '-'} / {fmt.get('target_duration_seconds') or 0} giay",
-            f"Nhan vat: {len(bible.get('characters') or [])}",
-            f"Boi canh: {len(bible.get('locations') or [])}",
-            f"Nguoi dan: {'Co' if bible.get('narrator') else 'Khong'}",
-            f"San pham/Dao cu: {len(bible.get('products') or [])}/{len(bible.get('props') or [])}",
-            f"Anh tham chieu: {len(state.get('references') or [])}",
-            f"Canh: {len(state.get('scenes') or [])}",
-            f"Loi thoai: {len((state.get('audio') or {}).get('dialogue_segments') or [])}",
-            f"Giong da gan: {len((state.get('audio') or {}).get('voice_cast') or {})}",
-            f"Nhac: {(state.get('audio') or {}).get('music_scope') or 'none'}",
-            f"Khoa nhat quan: {sum(1 for value in bible.get('continuity', {}).values() if value)}",
-            f"Logo/Watermark: {'Da chon' if state.get('branding') else 'Khong'}",
+            f"Nội dung: {content_preview}",
+            f"Định dạng: {fmt.get('ratio') or '-'} / {fmt.get('target_duration_seconds') or 0} giây",
+            f"Nhân vật: {len(bible.get('characters') or [])}",
+            f"Bối cảnh: {len(bible.get('locations') or [])}",
+            f"Người dẫn: {'Có' if bible.get('narrator') else 'Không'}",
+            f"Sản phẩm / đạo cụ: {len(bible.get('products') or [])}/{len(bible.get('props') or [])}",
+            f"Ảnh tham chiếu: {len(state.get('references') or [])}",
+            f"Cảnh: {len(state.get('scenes') or [])}",
+            f"Lời thoại: {len((state.get('audio') or {}).get('dialogue_segments') or [])}",
+            f"Giọng đã gán: {len((state.get('audio') or {}).get('voice_cast') or {})}",
+            f"Nhạc: {(state.get('audio') or {}).get('music_scope') or 'không dùng'}",
+            f"Yếu tố nhất quán: {sum(1 for value in bible.get('continuity', {}).values() if value)}",
+            f"Logo / watermark: {'Đã chọn' if state.get('branding') else 'Không dùng'}",
         ]
         if errors:
             readiness_labels = video_uiflow3_readiness_labels(errors)
             visible_labels = readiness_labels[:12]
-            lines.extend(["", "Con thieu:"] + [f"- {item}" for item in visible_labels])
+            lines.extend(["", "Còn thiếu:"] + [f"• {item}" for item in visible_labels])
             remaining = len(errors) - len(visible_labels)
             if remaining > 0:
-                lines.append(f"- Va {remaining} muc can hoan tat khac")
-        summary_actions = [("Lưu kế hoạch", "vid3|summary_done")]
-        scene_plan_action = ("Sua ke hoach canh", "vid3|edit|scene_plan")
+                lines.append(f"• Và {remaining} mục khác cần hoàn tất")
+        route_kind = str(video_uiflow3_execution_adapter(state).get("kind") or "planning_only")
+        summary_label = {
+            "product_tail": "✅ Hoàn tất rà soát và chọn chất lượng",
+            "frame_video": "✅ Hoàn tất rà soát và chọn chất lượng",
+            "selfshot2": "✅ Hoàn tất rà soát và kiểm tra video nguồn",
+        }.get(route_kind, "✅ Hoàn tất và lưu kế hoạch")
+        summary_actions = [(summary_label, "vid3|summary_done")]
+        scene_plan_action = ("🎬 Sửa kế hoạch cảnh", "vid3|edit|scene_plan")
         summary_rows = [
-            [("Sua dinh dang", "vid3|edit|format"), ("Sua noi dung", "vid3|edit|content_lock")],
-            [("Sua nhan vat/boi canh", "vid3|edit|production_bible"), scene_plan_action],
-            [("Sua phan vai/am thanh", "vid3|edit|scene_assignment")],
-            [("Ra soat Prompt", "vid3|edit|prompts"), ("Sua Logo", "vid3|edit|branding")],
+            [("📐 Sửa định dạng", "vid3|edit|format"), ("📝 Sửa nội dung", "vid3|edit|content_lock")],
+            [("👥 Sửa nhân vật và bối cảnh", "vid3|edit|production_bible"), scene_plan_action],
+            [("🎭 Sửa phân vai và âm thanh", "vid3|edit|scene_assignment")],
+            [("🧠 Rà soát câu lệnh", "vid3|edit|prompts"), ("🏷 Sửa logo và watermark", "vid3|edit|branding")],
         ]
         if not bool(fmt.get("scene_count_confirmed")):
-            summary_rows.append([("Ra soat so canh", "vid3|edit|scene_count")])
+            summary_rows.append([("🎬 Rà soát số cảnh", "vid3|edit|scene_count")])
         summary_rows.extend([summary_actions, *video_uiflow3_nav_rows()])
         return "\n".join(lines), video_uiflow3_keyboard(summary_rows)
 
@@ -76093,7 +76933,7 @@ def video_uiflow3_source_content(state: dict) -> str:
         return value
     assets = list(source.get("assets") or [])
     if assets:
-        return f"Noi dung tu {len(assets)} tep nguon da gui."
+        return f"Nội dung từ {len(assets)} tệp nguồn đã gửi."
     return ""
 
 
@@ -76335,7 +77175,7 @@ async def video_uiflow3_open_idea_catalog(query, context, user_id: int, state: d
         user_id=user_id,
         chat_id=_video_uiflow3_query_chat_id(query),
     ):
-        await query.answer("Khong the mo kho y tuong cho ban nhap nay.", show_alert=True)
+        await query.answer("Không thể mở kho ý tưởng cho bản kế hoạch này.", show_alert=True)
         return await video_uiflow3_render(query, context, video_uiflow3_state(context))
     lang = get_user_language(user_id) or "vi"
     await query.answer()
@@ -76365,7 +77205,7 @@ async def video_uiflow3_accept_idea_candidate(
         user_id=user_id,
         chat_id=_video_uiflow3_query_chat_id(query),
     ):
-        await query.answer("Phien kho y tuong khong con thuoc ban nhap hien tai.", show_alert=True)
+        await query.answer("Phiên kho ý tưởng không còn thuộc bản kế hoạch hiện tại.", show_alert=True)
         return await video_uiflow3_render(query, context, state) if state else False
     try:
         fields = _video_uiflow3_catalog_candidate(dict(candidate or {}))
@@ -76418,7 +77258,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
     if action == "entry":
         product = str(values[0] if values else "")
         if product not in video_uiflow3.ENTRY_ADAPTERS or product == "video_idea":
-            await query.answer("Kho Y tuong dung flow rieng va khong bi thay doi.", show_alert=True)
+            await query.answer("Kho Ý tưởng dùng quy trình riêng và không sửa nội dung gốc trong kho.", show_alert=True)
             return True
         state = start_video_uiflow3_state(context, product)
         state["owner_user_id"] = user_id
@@ -76426,27 +77266,27 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
     else:
         state = video_uiflow3_state(context)
         if not state:
-            await query.answer("Phien lap ke hoach da het. Hay mo lai dung menu Video.", show_alert=True)
+            await query.answer("Phiên lập kế hoạch đã hết hạn. Hãy mở lại đúng mục trong Menu Video.", show_alert=True)
             return True
         owner_user_id = safe_int(state.get("owner_user_id"), user_id)
         if owner_user_id and owner_user_id != user_id:
-            await query.answer("Phien nay khong thuoc tai khoan hien tai.", show_alert=True)
+            await query.answer("Phiên này không thuộc tài khoản hiện tại.", show_alert=True)
             return True
         owner_chat_id = safe_int(state.get("owner_chat_id"), 0)
         callback_chat_id = safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0)
         if owner_chat_id and callback_chat_id != owner_chat_id:
-            await query.answer("Nut nay khong thuoc cuoc tro chuyen dang so huu ban ke hoach.", show_alert=True)
+            await query.answer("Nút này không thuộc cuộc trò chuyện đang sở hữu bản kế hoạch.", show_alert=True)
             return True
         if action != "resume" and (
             not callback_token
             or not hmac.compare_digest(callback_token, video_uiflow3.draft_token(state))
         ):
-            await query.answer("Nut nay thuoc ban ke hoach cu. Ban hien tai duoc giu nguyen.", show_alert=True)
+            await query.answer("Nút này thuộc bản kế hoạch cũ. Bản hiện tại vẫn được giữ nguyên.", show_alert=True)
             return await video_uiflow3_render(query, context, state)
 
     state, claimed = video_uiflow3.claim_callback(state, str(getattr(query, "id", "") or ""))
     if not claimed:
-        await query.answer("Da nhan lua chon nay.")
+        await query.answer("Đã nhận lựa chọn này.")
         return await video_uiflow3_render(query, context, state)
     save_video_uiflow3_state(context, state)
 
@@ -76457,6 +77297,64 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             pass
         elif action == "resume":
             state = video_uiflow3.normalize_state(state)
+            shared_tail = dict(state.get(VIDEO_TAIL9_STATE_KEY) or {})
+            if (
+                str(state.get("parent_product") or "") in VIDEO_UIFLOW3_SHARED_TAIL_PRODUCTS
+                and shared_tail
+            ):
+                claim_video_uiflow3_tail_owner(context, state)
+                tail, owner, host = video_tail9_context(user_id, context)
+                await query.answer()
+                if tail.get("final_confirmed") or str(tail.get("job_id") or "").strip():
+                    return await video_tail9_render_confirmed_status(
+                        query,
+                        context,
+                        user_id,
+                        tail,
+                        owner,
+                        host,
+                    )
+                screen = {
+                    "invoice": "invoice",
+                    "quality": "quality",
+                    "confirmed": "invoice",
+                    "rendering": "invoice",
+                    "validating": "invoice",
+                    "delivering": "invoice",
+                    "failed": "invoice",
+                }.get(str(tail.get("status_stage") or ""), "quality")
+                return await video_tail9_render(query, user_id, context, screen)
+            if (
+                video_ai_real_is_creation_flow(state)
+                and str((state.get("navigation") or {}).get("current_step") or "") == "invoice"
+            ):
+                session = video_uiflow3_matching_b14_session(user_id, state)
+                if not session:
+                    state = video_uiflow3_clear_transient(state)
+                    state["navigation"]["current_step"] = "package"
+                    await query.answer(
+                        "Hóa đơn cũ không còn khớp bản kế hoạch. Hãy chọn lại chất lượng để lập hóa đơn hiện tại.",
+                        show_alert=True,
+                    )
+                    return await video_uiflow3_render(query, context, state)
+                if str(session.get("current_step") or "") != "b14_invoice":
+                    await query.answer()
+                    return await safe_edit_or_send(
+                        query,
+                        "📊 Tác vụ đã rời bước báo giá. Mở trạng thái thật để xem tiến độ và kết quả hiện tại.",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("📊 Xem trạng thái video", callback_data="vproduct|b14_job_status")],
+                            [InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+                        ]),
+                    )
+                await query.answer()
+                return await video_uiflow3_render_real_invoice(
+                    query,
+                    context,
+                    user_id,
+                    state,
+                    reuse_saved=True,
+                )
         elif action == "back":
             state = video_uiflow3_clear_transient(state)
             state = video_uiflow3.back(state)
@@ -76508,7 +77406,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         elif action == "source_media":
             state = video_uiflow3_await_input(state, "source_media", back_callback="vid3|view|source")
         elif action == "source_status":
-            await query.answer(f"Da nhan {len((state.get('source') or {}).get('assets') or [])} tep nguon.", show_alert=True)
+            await query.answer(f"Đã nhận {len((state.get('source') or {}).get('assets') or [])} tệp nguồn.", show_alert=True)
             return await video_uiflow3_render(query, context, state)
         elif action == "image_ai" and values:
             quick_state = video_uiflow3_prepare_quick_image_handoff(
@@ -76633,7 +77531,14 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 state = video_uiflow3_go(state, "production_bible")
         elif action == "context" and values:
             state = video_ai_real_apply_context_prompt(state, values[0])
-            state["navigation"]["current_step"] = "content_lock"
+            state = video_uiflow3.lock_content(state)
+            if str((state.get("navigation") or {}).get("return_to") or "") == "summary":
+                state = video_uiflow3_clear_transient(
+                    video_uiflow3.finish_editor(state),
+                    keep_return=False,
+                )
+            else:
+                state = video_uiflow3_go(state, "production_bible")
         elif action == "content_edit":
             state = video_uiflow3_await_input(state, "content_edit", back_callback="vid3|view|content_lock")
         elif action == "content_change":
@@ -76725,13 +77630,18 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state = video_uiflow3.update_character(state, character_id, voice_id=selected_voice_id)
             state = video_ai_real_mark_post_only_change(state)
             back_callback = str(state.get("ui_return_callback") or f"vid3|character|{character_id}")
-            state = video_uiflow3_open_view(
-                state,
-                "voice_select",
-                active_character_id=character_id,
-                active_scene_id=scene_id,
-                ui_return_callback=back_callback,
-            )
+            if scene_id and back_callback == f"vid3|scene_voice|{scene_id}":
+                state = video_uiflow3_open_view(
+                    state,
+                    "scene_voice",
+                    active_scene_id=scene_id,
+                )
+            else:
+                state = video_uiflow3_open_view(
+                    state,
+                    "character_detail",
+                    active_character_id=character_id,
+                )
         elif action == "voice_custom" and values:
             character_id = values[0]
             character = video_uiflow3_find_character(state, character_id)
@@ -77100,11 +78010,11 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         elif action == "scene_loc_set" and len(values) >= 2:
             scene_id, location_id = values[:2]
             state = video_uiflow3.assign_scene(state, scene_id, location_id=location_id)
-            state = video_uiflow3_open_view(state, "scene_location", active_scene_id=scene_id)
+            state = video_uiflow3_open_view(state, "scene_detail", active_scene_id=scene_id)
         elif action == "scene_loc_clear" and values:
             scene_id = values[0]
             state = video_uiflow3.assign_scene(state, scene_id, location_id="")
-            state = video_uiflow3_open_view(state, "scene_location", active_scene_id=scene_id)
+            state = video_uiflow3_open_view(state, "scene_detail", active_scene_id=scene_id)
         elif action == "scene_dialogue" and values:
             scene_id = values[0]
             if not video_uiflow3_find_scene(state, scene_id):
@@ -77244,14 +78154,14 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 ambient_id="" if ambient_id == "none" else ambient_id,
             )
             state = video_ai_real_mark_post_only_change(state)
-            state = video_uiflow3_open_view(state, "scene_ambient", active_scene_id=scene_id)
+            state = video_uiflow3_open_view(state, "scene_entities", active_scene_id=scene_id)
         elif action == "scene_ambient_clear" and values:
             scene_id = values[0]
             if not bool((state.get("capabilities") or {}).get("scene_ambient")):
                 raise ValueError("scene_ambient_renderer_missing")
             state = video_uiflow3.assign_scene(state, scene_id, ambient_id="")
             state = video_ai_real_mark_post_only_change(state)
-            state = video_uiflow3_open_view(state, "scene_ambient", active_scene_id=scene_id)
+            state = video_uiflow3_open_view(state, "scene_entities", active_scene_id=scene_id)
         elif action == "scene_ambient_custom" and values:
             scene_id = values[0]
             if not bool((state.get("capabilities") or {}).get("scene_ambient")):
@@ -77267,7 +78177,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             target_view = (
                 "audio_music_scenes"
                 if values[0] == "music" and values[1].endswith("_scene")
-                else f"audio_{values[0]}"
+                else "audio_options"
             )
             state = video_uiflow3_open_view(state, target_view)
         elif action == "music_scope":
@@ -77308,12 +78218,10 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 state = video_uiflow3.set_music_scope(state, "per_scene")
             state = video_uiflow3.set_scene_music(state, scene_id, policy=policy)
             state = video_ai_real_mark_post_only_change(state)
-            state = video_uiflow3_open_view(
-                state,
-                "scene_music",
-                active_scene_id=scene_id,
-                ui_return_callback=return_callback,
-            )
+            if return_callback == "vid3|view|audio_music_scenes":
+                state = video_uiflow3_open_view(state, "audio_music_scenes")
+            else:
+                state = video_uiflow3_open_view(state, "scene_detail", active_scene_id=scene_id)
         elif action == "scene_music_custom" and values:
             scene_id = values[0]
             return_callback = video_ai_real_scene_music_return_callback(state, scene_id)
@@ -77408,7 +78316,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 state = video_uiflow3_await_input(state, "watermark", back_callback="vid3|view|branding")
             elif value == "none":
                 state["branding"] = {}
-                state = video_uiflow3_go(state, "branding")
+                state = video_uiflow3_finish_section(state, "branding", "summary")
             else:
                 raise ValueError("branding_action_invalid")
         elif action == "branding_done":
@@ -77421,7 +78329,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state = video_ai_real_apply_prompt_model(state, values[0])
             state["navigation"]["current_step"] = "package"
         elif action == "summary_done":
-            prompt_pilot = video_ai_real_is_prompt_pilot(state)
+            creation_flow = video_ai_real_is_creation_flow(state)
             state = video_ai_real_maybe_compile_state(state)
             planning_errors = video_uiflow3.planning_readiness_errors(state)
             if planning_errors:
@@ -77430,23 +78338,105 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             else:
                 snapshot = video_uiflow3.approved_snapshot(state)
                 state["legacy_compat"]["approved_snapshot"] = snapshot
-                render_blockers = list(snapshot.get("render_blockers") or [])
+                route = video_uiflow3_execution_adapter(state)
+                render_blockers = video_uiflow3_b14_execution_blockers(state)
                 state["legacy_compat"]["commercial_tail_ready"] = not render_blockers
-                if prompt_pilot:
+                if route["kind"] != "planning_only" and render_blockers:
+                    state["navigation"]["current_step"] = "summary"
+                    await query.answer(
+                        "Chưa thể chọn chất lượng: "
+                        + "; ".join(video_uiflow3_readiness_labels(render_blockers)[:3])
+                        + ". Hãy sửa lựa chọn âm thanh hoặc giọng rồi hoàn tất lại.",
+                        show_alert=True,
+                    )
+                    return await video_uiflow3_render(query, context, state)
+                if creation_flow:
                     state = video_uiflow3.mark_sections_complete(state, "summary")
                     state = video_uiflow3_go(state, "package")
+                elif route["kind"] == "product_tail":
+                    state = video_uiflow3.mark_sections_complete(state, "summary")
+                    tail = video_uiflow3_build_tail_state(state)
+                    state[VIDEO_TAIL9_STATE_KEY] = tail
+                    state = save_video_uiflow3_state(context, state)
+                    claim_video_uiflow3_tail_owner(context, state)
+                    await query.answer()
+                    return await video_tail9_render(
+                        query,
+                        user_id,
+                        context,
+                        "quality",
+                    )
+                elif route["kind"] == "frame_video":
+                    state = video_uiflow3.mark_sections_complete(state, "summary")
+                    state = save_video_uiflow3_state(context, state)
+                    frame_state = video_uiflow3_build_frame_state(state)
+                    set_frame_video_state(user_id, frame_state)
+                    await query.answer()
+                    return await safe_edit_or_send(
+                        query,
+                        frame_video_quality_text(frame_state),
+                        parse_mode="HTML",
+                        reply_markup=frame_video_quality_keyboard(frame_state),
+                    )
+                elif route["kind"] == "selfshot2":
+                    handoff = video_uiflow3_build_selfshot2_handoff(state)
+                    if not handoff.get("ok"):
+                        state = video_uiflow3_go(state, "source")
+                        save_video_uiflow3_state(context, state)
+                        await query.answer(
+                            "Video nguồn chưa đủ thông tin thời lượng hoặc khung hình. "
+                            "Hãy gửi lại video nguồn để tiếp tục; hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+                            show_alert=True,
+                        )
+                        return await video_uiflow3_render(query, context, state)
+                    state = video_uiflow3.mark_sections_complete(state, "summary")
+                    save_video_uiflow3_state(context, state)
+                    saved_selfshot = save_video_selfshot2_draft(
+                        user_id,
+                        dict(handoff.get("draft") or {}),
+                        step="selfshot2:analysis",
+                    )
+                    await query.answer()
+                    return await video_selfshot2_render(
+                        query,
+                        user_id,
+                        "analysis",
+                        draft=saved_selfshot.get("draft"),
+                    )
                 else:
                     message = (
-                        "Da luu ke hoach. Loai video nay hien chi cho phep lap ke hoach; "
-                        "chua tao video va chua tinh phi."
+                        "Đã lưu kế hoạch. Loại video này hiện chỉ cho phép lập kế hoạch; "
+                        "chưa tạo video và chưa tính phí."
                         if render_blockers
-                        else "Da luu ke hoach. Chua bat dau tao video va chua tinh phi."
+                        else "Đã lưu kế hoạch. Chưa bắt đầu tạo video và chưa tính phí."
                     )
                     await query.answer(message, show_alert=True)
                     return await video_uiflow3_render(query, context, state)
         elif action == "quality" and values:
             state = video_ai_real_apply_quality_product(state, safe_int(values[0], 0))
-            state["navigation"]["current_step"] = "package"
+            state = video_ai_real_maybe_compile_state(state)
+            planning_errors = video_uiflow3.planning_readiness_errors(state)
+            if planning_errors:
+                await query.answer(
+                    "; ".join(video_uiflow3_readiness_labels(planning_errors)[:3]),
+                    show_alert=True,
+                )
+                return await video_uiflow3_render(query, context, state)
+            render_blockers = video_uiflow3_b14_execution_blockers(state)
+            if render_blockers:
+                state["navigation"]["current_step"] = "summary"
+                await query.answer(
+                    "; ".join(video_uiflow3_readiness_labels(render_blockers)[:3]),
+                    show_alert=True,
+                )
+                return await video_uiflow3_render(query, context, state)
+            await query.answer()
+            return await video_uiflow3_render_real_invoice(
+                query,
+                context,
+                user_id,
+                state,
+            )
         elif action == "quality_done":
             commercial = dict(
                 (state.get("legacy_compat") or {}).get("pilot_commercial") or {}
@@ -77465,25 +78455,34 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                     show_alert=True,
                 )
                 return await video_uiflow3_render(query, context, state)
-            quote = video_ai_real_prompt_quote(state)
-            commercial = dict(state["legacy_compat"].get("pilot_commercial") or {})
-            commercial["quote"] = deepcopy(quote)
-            state["legacy_compat"]["pilot_commercial"] = commercial
-            state = video_uiflow3.mark_sections_complete(state, "package")
-            state = video_uiflow3_go(state, "invoice")
-        elif action == "invoice_confirm":
-            quote = video_ai_real_prompt_quote(state)
-            commercial = dict(state["legacy_compat"].get("pilot_commercial") or {})
-            commercial["quote"] = deepcopy(quote)
-            commercial["invoice_confirmed"] = True
-            state["legacy_compat"]["pilot_commercial"] = commercial
-            state = video_uiflow3_go(state, "confirmation")
-        elif action == "confirmation_submit":
-            commercial = dict(state["legacy_compat"].get("pilot_commercial") or {})
-            commercial["ui_confirmed"] = True
-            commercial["execution_started"] = False
-            state["legacy_compat"]["pilot_commercial"] = commercial
-            state = video_uiflow3_go(state, "status")
+            render_blockers = video_uiflow3_b14_execution_blockers(state)
+            if render_blockers:
+                state["navigation"]["current_step"] = "summary"
+                await query.answer(
+                    "; ".join(video_uiflow3_readiness_labels(render_blockers)[:3]),
+                    show_alert=True,
+                )
+                return await video_uiflow3_render(query, context, state)
+            await query.answer()
+            return await video_uiflow3_render_real_invoice(
+                query,
+                context,
+                user_id,
+                state,
+            )
+        elif action == "invoice_back":
+            state = video_uiflow3_clear_transient(state)
+            state["navigation"]["current_step"] = "package"
+        elif action in {"invoice_confirm", "confirmation_submit"}:
+            # Old simplified-flow callbacks are kept only as a safe bridge to
+            # the real invoice. They never manufacture a status screen.
+            await query.answer()
+            return await video_uiflow3_render_real_invoice(
+                query,
+                context,
+                user_id,
+                state,
+            )
         else:
             raise ValueError("video_uiflow3_stale_action")
     except ValueError as exc:
@@ -77553,6 +78552,10 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
             state = video_uiflow3_open_view(state, "character_detail", active_character_id=character_id)
         elif kind == "character_voice":
             character_id = str(pending.get("character_id") or "")
+            scene_id = str(pending.get("active_scene_id") or "")
+            return_callback = str(
+                pending.get("ui_return_callback") or f"vid3|character|{character_id}"
+            )
             selected_voice_id = text[:240]
             other_voice_ids = {
                 str(item.get("voice_id") or "")
@@ -77566,13 +78569,14 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
                 raise ValueError("voice_already_used")
             state = video_uiflow3.update_character(state, character_id, voice_id=selected_voice_id)
             state = video_ai_real_mark_post_only_change(state)
-            state = video_uiflow3_open_view(
-                state,
-                "voice_select",
-                active_character_id=character_id,
-                active_scene_id=str(pending.get("active_scene_id") or ""),
-                ui_return_callback=str(pending.get("ui_return_callback") or f"vid3|character|{character_id}"),
-            )
+            if scene_id and return_callback == f"vid3|scene_voice|{scene_id}":
+                state = video_uiflow3_open_view(state, "scene_voice", active_scene_id=scene_id)
+            else:
+                state = video_uiflow3_open_view(
+                    state,
+                    "character_detail",
+                    active_character_id=character_id,
+                )
         elif kind == "location_count":
             state = video_uiflow3.set_location_count(state, safe_int(text, -1))
             state = video_uiflow3_open_view(state, "location_list")
@@ -77716,14 +78720,11 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
                 state = video_uiflow3.set_music_scope(state, "per_scene")
             state = video_uiflow3.set_scene_music(state, scene_id, policy="track", track_id=text[:240])
             state = video_ai_real_mark_post_only_change(state)
-            state = video_uiflow3_open_view(
-                state,
-                "scene_music",
-                active_scene_id=scene_id,
-                ui_return_callback=str(
-                    pending.get("ui_return_callback") or f"vid3|scene|{scene_id}"
-                ),
-            )
+            return_callback = str(pending.get("ui_return_callback") or f"vid3|scene|{scene_id}")
+            if return_callback == "vid3|view|audio_music_scenes":
+                state = video_uiflow3_open_view(state, "audio_music_scenes")
+            else:
+                state = video_uiflow3_open_view(state, "scene_detail", active_scene_id=scene_id)
         elif kind == "scene_sfx_custom":
             scene_id = str(pending.get("scene_id") or "")
             if not bool((state.get("capabilities") or {}).get("scene_sfx")):
@@ -77740,7 +78741,7 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
                 raise ValueError("scene_ambient_renderer_missing")
             state = video_uiflow3.assign_scene(state, scene_id, ambient_id=text[:160])
             state = video_ai_real_mark_post_only_change(state)
-            state = video_uiflow3_open_view(state, "scene_ambient", active_scene_id=scene_id)
+            state = video_uiflow3_open_view(state, "scene_entities", active_scene_id=scene_id)
         elif kind == "watermark":
             state["branding"]["watermark"] = {"text": text[:500], "source": "user"}
             state = video_uiflow3_go(state, "branding")
@@ -77748,7 +78749,7 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
             return False
     except ValueError as exc:
         await update.message.reply_text(
-            video_uiflow3_input_error(exc) + " Du lieu cu van duoc giu; ban co the nhap lai.",
+            video_uiflow3_input_error(exc) + " Dữ liệu cũ vẫn được giữ; bạn có thể nhập lại.",
             reply_markup=video_uiflow3_screen_payload(state)[1],
         )
         return True
@@ -77780,16 +78781,16 @@ async def handle_video_uiflow3_pending_media(update: Update, context: ContextTyp
     if kind == "source_media":
         expected_kinds = video_uiflow3_expected_source_media_kinds(state)
         if not expected_kinds or media_kind not in expected_kinds:
-            expected_label = "anh" if expected_kinds == {"image"} else "video" if expected_kinds == {"video"} else "tep dung loai"
-            await update.message.reply_text(f"Buoc nay chi nhan {expected_label}. Tep chua duoc luu; hay gui lai dung loai.")
+            expected_label = "ảnh" if expected_kinds == {"image"} else "video" if expected_kinds == {"video"} else "tệp đúng loại"
+            await update.message.reply_text(f"Bước này chỉ nhận {expected_label}. Tệp chưa được lưu; hãy gửi lại đúng loại.")
             return True
     if kind in {"character_image", "location_image", "product_image", "prop_image", "brand_logo"} and media_kind != "image":
-        await update.message.reply_text("Buoc nay chi nhan anh. Tep chua duoc luu; hay gui lai dung anh.")
+        await update.message.reply_text("Bước này chỉ nhận ảnh. Tệp chưa được lưu; hãy gửi lại đúng ảnh.")
         return True
     file_id = str(getattr(media, "file_id", "") or "")
     unique_id = str(getattr(media, "file_unique_id", "") or "")
     if not file_id:
-        await update.message.reply_text("Khong doc duoc ma tep Telegram. Vui long gui lai.")
+        await update.message.reply_text("Không đọc được mã tệp Telegram. Vui lòng gửi lại.")
         return True
     message_id = safe_int(getattr(update.message, "message_id", 0), 0)
     handled = [safe_int(item, 0) for item in state.get("handled_media_message_ids") or [] if safe_int(item, 0) > 0][-80:]
@@ -77801,6 +78802,9 @@ async def handle_video_uiflow3_pending_media(update: Update, context: ContextTyp
         "file_size": safe_int(getattr(media, "file_size", 0), 0),
         "mime_type": mime_type,
         "file_name": file_name,
+        "duration_seconds": max(0, safe_int(getattr(media, "duration", 0), 0)),
+        "width": max(0, safe_int(getattr(media, "width", 0), 0)),
+        "height": max(0, safe_int(getattr(media, "height", 0), 0)),
         "source_message_id": message_id,
         "owner_user_id": safe_int(getattr(update.effective_user, "id", 0), 0),
     }
@@ -77890,7 +78894,7 @@ async def handle_video_uiflow3_pending_media(update: Update, context: ContextTyp
             state["branding"]["logo"] = {"telegram_file_id": file_id, "fingerprint": fingerprint, **metadata}
             state = video_uiflow3_go(state, "branding")
     except ValueError as exc:
-        await update.message.reply_text(video_uiflow3_input_error(exc, media=True) + " Du lieu cu van duoc giu.")
+        await update.message.reply_text(video_uiflow3_input_error(exc, media=True) + " Dữ liệu cũ vẫn được giữ.")
         return True
 
     if message_id:
@@ -85591,6 +86595,8 @@ def video_route_expected_handler(callback: str) -> str:
     callback_value = str(callback or "")
     if callback_value == "vproduct|b14_confirm":
         return "handle_product_video_public_confirm_callback"
+    if re.fullmatch(r"vproduct\|b14_confirm\|[a-f0-9]{12}", callback_value):
+        return "handle_product_video_public_confirm_callback"
     if callback_value.startswith("vproduct|b14_confirm"):
         return ""
     for prefix, owner in VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES[1:]:
@@ -91205,6 +92211,7 @@ def video_b14_invoice_for_session(session: dict, user_id=0) -> dict:
     quality = max(200, safe_int(draft.get("b14_quality_xu"), 200))
     scene_policy = video_b14_trial_scene_policy(quality, video_b14_scene_count_for_session(session, 1))
     scenes = safe_int(scene_policy.get("scene_count"), 1)
+    scene_seconds = max(1, safe_int(draft.get("b14_scene_seconds"), TASK3D_SCENE_SECONDS))
     addon_plan = dict(draft.get("b14_addon_plan") or video_b14_addon_plan_from_session(session))
     trial_addon_policy = video_b14_trial_addon_policy(addon_plan, quality_xu=quality)
     addons_disabled = bool(trial_addon_policy.get("paid_blocked"))
@@ -91214,8 +92221,9 @@ def video_b14_invoice_for_session(session: dict, user_id=0) -> dict:
         "package_name": video_b14_package_tier(quality)[1],
         "package_label": video_b14_package_full_label(quality),
         "scene_count": scenes,
-        "scene_seconds": TASK3D_SCENE_SECONDS,
-        "duration_seconds": scenes * TASK3D_SCENE_SECONDS,
+        "scene_seconds": scene_seconds,
+        "scene_duration_seconds": scene_seconds,
+        "duration_seconds": scenes * scene_seconds,
         "subtotal_xu": pricing["subtotal_xu"],
         "discount_percent": pricing["discount_percent"],
         "discount_xu": pricing["discount_xu"],
@@ -96423,7 +97431,10 @@ async def handle_product_video_public_confirm_callback(update: Update, context: 
         or getattr(query, "data", "")
         or ""
     )
-    if not query or callback_data != video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK:
+    if not query or not re.fullmatch(
+        rf"{re.escape(video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK)}(?:\|[a-f0-9]{{12}})?",
+        callback_data,
+    ):
         return
     diagnostics = dict(PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS or {})
     if (
@@ -97849,11 +98860,23 @@ async def video_selfshot2_render(target, user_id: int, screen: str, *, draft: di
         model = video_selfshotflow4.screen_model("ss2", screen, session.get("draft"))
         parent = video_selfshotflow4.screen_parent("ss2", screen, session.get("draft"))
         expected_back = video_selfshotflow4.back_callback("ss2", screen, session.get("draft"))
+        if current.get("uiflow3_draft_id") and screen == "analysis":
+            model["rows"][-1] = [
+                ("⬅️ Quay lại rà soát kế hoạch", "vid3|resume"),
+                ("🎬 Menu Video", "menu|main_video"),
+            ]
+            expected_back = "vid3|resume"
         validation = video_selfshotflow4.validate_rows(model["rows"], back_callback=expected_back)
     else:
         model = video_selfshot2.screen_model(screen, session.get("draft"))
         parent = video_selfshot2.screen_parent(screen, session.get("draft"))
         expected_back = "vproduct|selfshot_hub" if parent == "hub" else f"vproduct|ss2|show|{parent}"
+        if current.get("uiflow3_draft_id") and screen == "analysis":
+            model["rows"][-1] = [
+                ("⬅️ Quay lại rà soát kế hoạch", "vid3|resume"),
+                ("🎬 Menu Video", "menu|main_video"),
+            ]
+            expected_back = "vid3|resume"
         validation = video_selfshot2.validate_rows(model["rows"], back_callback=expected_back)
     if not validation.get("ok"):
         logger.error("selfshot2_keyboard_invalid | screen=%s errors=%s", screen, validation.get("errors"))
@@ -98836,6 +99859,25 @@ def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
     draft = dict(session.get("draft") or {})
     session_product = str(session.get("product_id") or draft.get("product_id") or "").strip()
     persisted_tail = dict(draft.get(VIDEO_TAIL9_STATE_KEY) or {})
+    uiflow3_host = video_uiflow3_state(context)
+    uiflow3_product = str(uiflow3_host.get("parent_product") or "")
+    uiflow3_snapshot = dict(
+        (uiflow3_host.get("legacy_compat") or {}).get("approved_snapshot") or {}
+    )
+    user_data = getattr(context, "user_data", None)
+    uiflow3_tail_claim = dict(
+        user_data.get(VIDEO_UIFLOW3_ACTIVE_TAIL_KEY) or {}
+    ) if isinstance(user_data, dict) else {}
+    uiflow3_tail_ready = bool(
+        str(uiflow3_tail_claim.get("owner") or "") == "uiflow3"
+        and str(uiflow3_tail_claim.get("draft_id") or "")
+        == str(uiflow3_host.get("draft_id") or "")
+        and str(uiflow3_tail_claim.get("product_type") or "") == uiflow3_product
+        and uiflow3_product in VIDEO_UIFLOW3_SHARED_TAIL_PRODUCTS
+        and str(uiflow3_snapshot.get("draft_id") or "")
+        == str(uiflow3_host.get("draft_id") or "")
+        and str(uiflow3_snapshot.get("parent_product") or "") == uiflow3_product
+    )
     edit_route_marker = bool(
         session_product in {
             "video_edit", "video_ai_edit", "video_local_edit",
@@ -98849,7 +99891,25 @@ def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
     )
     selfshot_products = {video_selfshot2.PRODUCT_ID, video_selfshot3.PRODUCT_ID}
     source_audio_available = None
-    if edit_ready or edit_route_marker:
+    if uiflow3_tail_ready:
+        owner = "uiflow3"
+        host = uiflow3_host
+        product_type = uiflow3_product
+        session_id = str(uiflow3_snapshot.get("draft_id") or host.get("draft_id") or f"{uid}:{product_type}")
+        revision = video_uiflow3_snapshot_revision(uiflow3_snapshot)
+        scene_count = max(1, len(uiflow3_snapshot.get("scenes") or []))
+        ratio = str((uiflow3_snapshot.get("format") or {}).get("ratio") or "9:16")
+        estimated_duration = sum(
+            max(1, safe_int(item.get("duration_target"), 8))
+            for item in uiflow3_snapshot.get("scenes") or []
+            if isinstance(item, dict)
+        ) or scene_count * 8
+        source_asset_ids = [
+            str(item.get("file_id") or "")
+            for item in video_uiflow3_snapshot_assets(uiflow3_snapshot)
+            if str(item.get("file_id") or "")
+        ]
+    elif edit_ready or edit_route_marker:
         owner = "video_edit"
         host = edit_host
         product_type = video_editengine1.PRODUCT_TYPE
@@ -98925,7 +99985,11 @@ def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
             if str(item.get("file_id") or "").strip()
         ]
 
-    existing = dict(host.get(VIDEO_TAIL9_STATE_KEY) or draft.get(VIDEO_TAIL9_STATE_KEY) or {})
+    existing = (
+        video_uiflow3_build_tail_state(host)
+        if owner == "uiflow3"
+        else dict(host.get(VIDEO_TAIL9_STATE_KEY) or draft.get(VIDEO_TAIL9_STATE_KEY) or {})
+    )
     if video_tail9.scope_matches(
         existing,
         product_type=product_type,
@@ -99122,6 +100186,8 @@ def save_video_tail9_state(user_id: int, context, tail: dict, owner: str, host: 
             "pricing_snapshot": dict(clean.get("pricing_snapshot") or {}),
         })
         save_video_edit_canonical_state(uid, current)
+    elif owner == "uiflow3":
+        save_video_uiflow3_state(context, current)
     elif owner == "scene3":
         save_video_profile_studio_state(context, current)
     elif clean.get("video_product_type") == video_selfshot2.PRODUCT_ID:
@@ -99204,7 +100270,15 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
             "aspect_ratio": "keep",
             "scene_count": 1,
         }
-    if owner == "scene3":
+    if owner == "uiflow3":
+        _prepared, session = video_uiflow3_prepare_b14_session(
+            uid,
+            host,
+            owner_chat_id=safe_int(host.get("owner_chat_id"), 0),
+            tail_state=clean,
+            require_attestation=False,
+        )
+    elif owner == "scene3":
         session = video_profile_scene1_handoff(uid, host)
     else:
         session = get_video_session(uid)
@@ -100124,6 +101198,12 @@ async def video_tail9_open_planning_audio(query, context, uid: int, tail: dict, 
     """Open the product's existing audio owner without creating a tail duplicate."""
 
     lang = get_user_language(uid) or "vi"
+    if owner == "uiflow3":
+        current = video_uiflow3.normalize_state(host)
+        current = video_uiflow3_go(current, "scene_assignment")
+        current = video_uiflow3_open_view(current, "audio_options")
+        save_video_uiflow3_state(context, current)
+        return await video_uiflow3_render(query, context, current)
     if owner == "scene3":
         state = video_profile_studio_step(
             context,
@@ -100497,6 +101577,36 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         await query.answer()
     if tail.get("final_confirmed") and section != "confirm":
         return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
+    if owner == "uiflow3":
+        target_step = ""
+        target_view = ""
+        if section == "quality" and action == "back":
+            target_step = "summary"
+        elif section == "review":
+            target_step = {
+                "open": "summary",
+                "summary": "summary",
+                "review": "summary",
+                "scenes": "scene_plan",
+                "edit": "content_lock",
+                "redo": "content_lock",
+                "prompts": "prompts",
+            }.get(action, "")
+        elif section == "summary" and action in {"open", "review", "back"}:
+            target_step = "summary"
+        elif section == "summary" and action == "logo":
+            target_step = "branding"
+        elif section == "summary" and action == "audio":
+            target_step = "scene_assignment"
+            target_view = "audio_options"
+        if target_step:
+            current = video_uiflow3_go(host, target_step)
+            if target_view:
+                current = video_uiflow3_open_view(current, target_view)
+            if isinstance(getattr(context, "user_data", None), dict):
+                context.user_data.pop(VIDEO_UIFLOW3_ACTIVE_TAIL_KEY, None)
+            save_video_uiflow3_state(context, current)
+            return await video_uiflow3_render(query, context, current)
     if section == "review":
         if action in {"open", "summary", "review"}:
             target_screen = "summary" if action == "summary" else "review"
@@ -103661,6 +104771,28 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_or_send(query, prefix + video_b14_invoice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
     if action == "b14_confirm":
         draft = dict(session.get("draft") or {})
+        confirmation_guard = video_uiflow3_validate_invoice_confirmation(
+            session,
+            user_id=uid,
+            chat_id=safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0),
+            message_id=safe_int(getattr(getattr(query, "message", None), "message_id", 0), 0),
+            token=value,
+        )
+        if not confirmation_guard.get("ok"):
+            logger.info(
+                "video_uiflow3_invoice_confirmation_rejected | user_id=%s | reason=%s",
+                uid,
+                str(confirmation_guard.get("reason") or "invoice_invalid"),
+            )
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Báo giá này không còn hiệu lực cho bản kế hoạch hiện tại. "
+                "TOAN AAS chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📋 Mở lại báo giá hiện tại", callback_data="vid3|resume")],
+                    [InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+                ]),
+            )
         if product_id == video_selfshot2.PRODUCT_ID:
             selfshot2_report = video_selfshot2_preflight(video_selfshot2_draft(session))
             if not selfshot2_report.get("ok"):
@@ -160483,17 +161615,51 @@ def frame_video_position_keyboard(kind: str, back: str = "framevideo|addons") ->
 def frame_video_quality_keyboard(state: dict | None = None) -> InlineKeyboardMarkup:
     is_framevideo3 = is_frame_video3_state(state)
     done_callback = "framevideo|continue" if is_framevideo3 else "framevideo|panel"
-    done_label = "✅ Bước tiếp theo" if is_framevideo3 else "✅ Hoàn thiện video"
+    done_label = "✅ Hoàn tất chọn chất lượng" if is_framevideo3 else "✅ Hoàn thiện video"
+    back_callback = (
+        "vid3|resume"
+        if str((state or {}).get("uiflow3_return_to") or "") == "vid3|resume"
+        else "framevideo|review" if is_framevideo3 else "framevideo|panel"
+    )
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⚡ Nhanh · 50 Xu", callback_data="framevideo|quality_set|fast"), InlineKeyboardButton("⭐ Cân bằng · 100 Xu", callback_data="framevideo|quality_set|balanced")],
         [InlineKeyboardButton("💎 Đẹp · 200 Xu", callback_data="framevideo|quality_set|beautiful"), InlineKeyboardButton(done_label, callback_data=done_callback)],
-        [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|review" if is_framevideo3 else "framevideo|panel"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+        [InlineKeyboardButton("⬅️ Quay lại rà soát kế hoạch", callback_data=back_callback), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
     ])
 
 
 def frame_video_quality_text(state: dict) -> str:
     clean = normalize_frame_video_state(state)
     current = str(clean.get("quality") or "balanced")
+    if clean.get("uiflow3_draft_id"):
+        lines = [
+            "⭐ <b>Chọn chất lượng video</b>",
+            "",
+            f"Đang chọn: <b>{html.escape(FRAME_VIDEO_QUALITY_LABELS.get(current, current))}</b>",
+            "",
+            "Chọn mức phù hợp với tốc độ, độ nét và kích thước video mong muốn:",
+        ]
+        for token in ("fast", "balanced", "beautiful"):
+            detail = frame_video_commercial.QUALITY_DETAILS[token]
+            preset = frame_video_runtime.quality_payload(
+                token,
+                str(clean.get("ratio") or "9x16"),
+                clean.get("custom_width"),
+                clean.get("custom_height"),
+            )
+            price = frame_video_price_breakdown({**clean, "quality": token})
+            marker = "✅" if token == current else "•"
+            lines.append(
+                f"{marker} <b>{html.escape(str(detail['label']))}</b> · "
+                f"{int(preset['width'])}×{int(preset['height'])} · "
+                f"{xu_number(int(price.get('total') or 0))} Xu"
+            )
+            lines.append(f"  {html.escape(str(detail['strength']))}. {html.escape(str(detail['limit']))}.")
+        lines.extend([
+            "",
+            "Giá đầy đủ sẽ được hiển thị ở bước báo giá trước khi xác nhận dựng video.",
+        ])
+        return "\n".join(lines)
     preflight = frame_video_commercial_preflight(clean)
     route = str(preflight.get("execution_owner") or "")
     route_label = {
@@ -245468,6 +246634,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_local_video_studio_preview_callback, pattern=r"^lvs27a\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_local_video_studio_public_callback, pattern=r"^lvs27b\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_product_video_public_confirm_callback, pattern=r"^vproduct\|b14_confirm$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_product_video_public_confirm_callback, pattern=r"^vproduct\|b14_confirm\|[a-f0-9]{12}$"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_tail_callback, pattern=r"^video_tail\|", block=True))
     tg_app.add_handler(CallbackQueryHandler(handle_video_uiflow3_callback, pattern=r"^vid3\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_trend2_callback, pattern=r"^vtrend\|"))
@@ -247488,6 +248655,14 @@ async def api_worker_asset_download(asset_id: str, request: Request):
     return FileResponse(candidate, filename=os.path.basename(candidate))
 
 
+PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES = frozenset({
+    "storyboard_prompt",
+    "storyboard_to_video",
+    "video_ai_image",
+    "image_to_video",
+})
+
+
 @fastapi_app.get("/api/v1/worker/jobs/{job_id}/storyboard-image/{scene_index}/{slot}")
 async def api_worker_storyboard_scene_image(job_id: int, scene_index: int, slot: str, request: Request):
     """Transfer one confirmed storyboard image to its authenticated worker."""
@@ -247522,7 +248697,7 @@ async def api_worker_storyboard_scene_image(job_id: int, scene_index: int, slot:
         or project.get("profile_id")
         or ""
     ).strip()
-    if product_type != "storyboard_prompt":
+    if product_type not in PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES:
         raise HTTPException(status_code=404, detail="storyboard_image_not_found")
     try:
         scene_cards = json.loads(str(project.get("scene_cards_json") or "[]"))
@@ -247584,6 +248759,63 @@ async def api_worker_storyboard_scene_image(job_id: int, scene_index: int, slot:
         content=content,
         media_type="image/png",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@fastapi_app.get("/api/v1/worker/jobs/{job_id}/logo-material")
+async def api_worker_product_video_logo_material(job_id: int, request: Request):
+    """Transfer one confirmed logo image to its authenticated product worker."""
+
+    verify_remote_worker_api_access(request)
+    conn = db_connect()
+    try:
+        job = video_project_queue.get_video_render_job(conn, safe_int(job_id, 0))
+        hydrated = video_project_queue.hydrate_video_job_payload(conn, job)
+    finally:
+        conn.close()
+    if not hydrated:
+        raise HTTPException(status_code=404, detail="job_not_found")
+    if str(hydrated.get("status") or "").strip().lower() not in {
+        "queued", "processing", "in_progress", "running", "claimed",
+    }:
+        raise HTTPException(status_code=409, detail="logo_transfer_requires_active_job")
+    project = dict(hydrated.get("project") or {})
+    try:
+        asset_pack = json.loads(str(project.get("asset_pack_json") or "{}"))
+    except Exception:
+        asset_pack = {}
+    if not isinstance(asset_pack, dict) or str(asset_pack.get("source") or "") != "product_video":
+        raise HTTPException(status_code=404, detail="product_video_logo_not_found")
+    material = dict(asset_pack.get("logo_material") or {})
+    file_id = str(material.get("logo_file_id") or "").strip()
+    if not material.get("logo_enabled") or not file_id:
+        raise HTTPException(status_code=404, detail="product_video_logo_file_id_missing")
+    if tg_app is None or getattr(tg_app, "bot", None) is None:
+        raise HTTPException(status_code=503, detail="telegram_logo_transfer_unavailable")
+    max_bytes = max(1, safe_int(os.getenv("PRODUCT_VIDEO_LOGO_MAX_BYTES"), 10 * 1024 * 1024))
+    try:
+        telegram_file = await tg_app.bot.get_file(file_id)
+        declared_size = safe_int(getattr(telegram_file, "file_size", 0), 0)
+        if declared_size and declared_size > max_bytes:
+            raise HTTPException(status_code=413, detail="product_video_logo_too_large")
+        content = bytes(await telegram_file.download_as_bytearray())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "product_video_logo_transfer_failed | job_id=%s | error=%s",
+            job_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=502, detail="product_video_logo_download_failed") from exc
+    if not content:
+        raise HTTPException(status_code=502, detail="product_video_logo_empty")
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail="product_video_logo_too_large")
+    return Response(
+        content=content,
+        media_type="image/png",
+        headers={"Content-Disposition": 'attachment; filename="product-video-logo.png"'},
     )
 
 

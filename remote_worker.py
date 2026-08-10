@@ -852,8 +852,16 @@ def _selfshot2_job(job: dict | None) -> bool:
     return _selfshot_job_type(job) == "self_shot_scene_change"
 
 
+PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES = frozenset({
+    "storyboard_prompt",
+    "storyboard_to_video",
+    "video_ai_image",
+    "image_to_video",
+})
+
+
 def _storyboard_job(job: dict | None) -> bool:
-    return _selfshot_job_type(job) in {"storyboard_prompt", "storyboard_to_video"}
+    return _selfshot_job_type(job) in PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES
 
 
 def download_storyboard_scene_images(job: dict, work_dir: str) -> list[str]:
@@ -935,6 +943,65 @@ def download_storyboard_scene_images(job: dict, work_dir: str) -> list[str]:
     job["image_paths"] = list(image_paths)
     job["storyboard_assets_materialized"] = True
     return image_paths
+
+
+def download_product_video_logo(job: dict, work_dir: str) -> str:
+    """Materialize one confirmed Telegram logo inside the disposable workspace."""
+
+    raw_pack = job.get("asset_pack") or job.get("asset_pack_json") or {}
+    if isinstance(raw_pack, str):
+        try:
+            raw_pack = json.loads(raw_pack)
+        except Exception:
+            raw_pack = {}
+    asset_pack = dict(raw_pack) if isinstance(raw_pack, dict) else {}
+    material = dict(asset_pack.get("logo_material") or {})
+    if not material.get("logo_enabled"):
+        return ""
+    job_id = str(job.get("job_id") or job.get("id") or "").strip()
+    file_id = str(material.get("logo_file_id") or "").strip()
+    if not job_id:
+        raise RuntimeError("product_video_logo_job_id_missing")
+    if not file_id:
+        raise RuntimeError("product_video_logo_file_id_missing")
+    root = Path(work_dir).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    target = (root / "product-video-logo.png").resolve()
+    if root not in target.parents:
+        raise RuntimeError("product_video_logo_path_unsafe")
+    max_bytes = max(1, int(os.getenv("PRODUCT_VIDEO_LOGO_MAX_BYTES", str(10 * 1024 * 1024))))
+    request = urllib.request.Request(
+        endpoint(f"/api/v1/worker/jobs/{job_id}/logo-material"),
+        headers=auth_headers(""),
+        method="GET",
+    )
+    partial = target.with_suffix(target.suffix + ".partial")
+    received = 0
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            with partial.open("wb") as handle:
+                while True:
+                    chunk = response.read(min(1024 * 1024, max_bytes - received + 1))
+                    if not chunk:
+                        break
+                    received += len(chunk)
+                    if received > max_bytes:
+                        raise RuntimeError("product_video_logo_too_large")
+                    handle.write(chunk)
+        if received <= 0:
+            raise RuntimeError("product_video_logo_empty")
+        partial.replace(target)
+    except Exception:
+        try:
+            partial.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+    material["logo_path"] = str(target)
+    asset_pack["logo_material"] = material
+    job["asset_pack"] = asset_pack
+    job["product_video_logo_materialized"] = True
+    return str(target)
 
 
 def download_selfshot3_source_video(job: dict, work_dir: str) -> str:
@@ -1094,6 +1161,8 @@ def process_claimed_job(job: dict) -> dict:
         elif _storyboard_job(job):
             send_heartbeat(job_id, 12, "downloading storyboard scene images")
             download_storyboard_scene_images(job, work_dir)
+        if download_product_video_logo(job, work_dir):
+            send_heartbeat(job_id, 16, "downloading product video logo")
         send_heartbeat(job_id, 20, "preparing product video")
         print(
             "[remote_worker] provider submit start "

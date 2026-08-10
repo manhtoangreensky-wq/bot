@@ -2371,6 +2371,19 @@ def readiness_errors(state: Mapping[str, Any]) -> list[str]:
     current = normalize_state(state)
     errors: list[str] = []
     needs = current["needs"]
+    product = current["parent_product"]
+    source = current["source"]
+    source_assets = list(source.get("assets") or [])
+    if product in {"video_trend", "script_image_video"} and not source.get("complete"):
+        errors.append("source_content_required")
+    elif product == "frame_video_local" and len(source_assets) < 2:
+        errors.append("frame_images_required")
+    elif product == "storyboard_prompt" and source.get("required") and len(source_assets) < 2:
+        errors.append("storyboard_images_required")
+    elif product == "self_shot_scene_change" and not source_assets:
+        errors.append("source_video_required")
+    elif source.get("required") and not source.get("complete"):
+        errors.append("source_required")
     if current["parent_product"] == "multi_scene_film":
         if not _text(current["series"].get("goal"), 4000):
             errors.append("series_goal_required")
