@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import time
 import zipfile
+import zlib
 from pathlib import Path
 from typing import Any, Callable, Iterable
+
+from PIL import Image, UnidentifiedImageError
 
 
 def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -38,6 +44,9 @@ MAX_OUTPUT_HEIGHT = 1920
 
 ALLOWED_SOURCE_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
 ALLOWED_LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+MAX_LOGO_BYTES = 10 * 1024 * 1024
+MAX_LOGO_DIMENSION = 8_192
+MAX_LOGO_PIXELS = 40_000_000
 ALLOWED_SUBTITLE_EXTENSIONS = {".srt"}
 ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac", ".opus"}
 ALLOWED_OUTPUT_EXTENSIONS = {".mp4"}
@@ -171,6 +180,241 @@ def safe_display_filename(filename: str, fallback: str = "video.mp4") -> str:
     name = Path(str(filename or "").replace("\\", "/")).name
     name = re.sub(r"[^A-Za-z0-9._ -]+", "_", name).strip(" ._")[:120]
     return name or fallback
+
+
+def _png_dimensions(payload: bytes) -> tuple[int, int] | None:
+    if not payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        return None
+    offset = 8
+    dimensions: tuple[int, int] | None = None
+    saw_idat = False
+    saw_iend = False
+    while offset + 12 <= len(payload):
+        length = struct.unpack(">I", payload[offset : offset + 4])[0]
+        chunk_type = payload[offset + 4 : offset + 8]
+        data_start = offset + 8
+        data_end = data_start + length
+        crc_end = data_end + 4
+        if data_end < data_start or crc_end > len(payload):
+            return None
+        expected_crc = struct.unpack(">I", payload[data_end:crc_end])[0]
+        if zlib.crc32(chunk_type + payload[data_start:data_end]) & 0xFFFFFFFF != expected_crc:
+            return None
+        if dimensions is None:
+            if chunk_type != b"IHDR" or length != 13:
+                return None
+            width, height = struct.unpack(">II", payload[data_start : data_start + 8])
+            bit_depth = payload[data_start + 8]
+            color_type = payload[data_start + 9]
+            if (
+                width <= 0
+                or height <= 0
+                or bit_depth not in {1, 2, 4, 8, 16}
+                or color_type not in {0, 2, 3, 4, 6}
+                or payload[data_start + 10] != 0
+                or payload[data_start + 11] != 0
+                or payload[data_start + 12] not in {0, 1}
+            ):
+                return None
+            dimensions = (width, height)
+        elif chunk_type == b"IDAT":
+            saw_idat = True
+        elif chunk_type == b"IEND":
+            if length != 0:
+                return None
+            saw_iend = True
+            offset = crc_end
+            break
+        offset = crc_end
+    if not dimensions or not saw_idat or not saw_iend or offset != len(payload):
+        return None
+    return dimensions
+
+
+def _jpeg_dimensions(payload: bytes) -> tuple[int, int] | None:
+    if len(payload) < 12 or not payload.startswith(b"\xff\xd8") or not payload.endswith(b"\xff\xd9"):
+        return None
+    offset = 2
+    dimensions: tuple[int, int] | None = None
+    saw_scan = False
+    sof_markers = {
+        0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+        0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+    }
+    standalone = {0x01, *range(0xD0, 0xD8)}
+    while offset < len(payload) - 2:
+        if payload[offset] != 0xFF:
+            return None
+        while offset < len(payload) and payload[offset] == 0xFF:
+            offset += 1
+        if offset >= len(payload):
+            return None
+        marker = payload[offset]
+        offset += 1
+        if marker == 0xDA:
+            saw_scan = True
+            break
+        if marker == 0xD9:
+            break
+        if marker in standalone:
+            continue
+        if offset + 2 > len(payload):
+            return None
+        segment_length = struct.unpack(">H", payload[offset : offset + 2])[0]
+        if segment_length < 2 or offset + segment_length > len(payload):
+            return None
+        if marker in sof_markers:
+            if segment_length < 8:
+                return None
+            height = struct.unpack(">H", payload[offset + 3 : offset + 5])[0]
+            width = struct.unpack(">H", payload[offset + 5 : offset + 7])[0]
+            if width <= 0 or height <= 0:
+                return None
+            dimensions = (width, height)
+        offset += segment_length
+    return dimensions if dimensions and saw_scan else None
+
+
+def _webp_dimensions(payload: bytes) -> tuple[int, int] | None:
+    if (
+        len(payload) < 30
+        or payload[:4] != b"RIFF"
+        or payload[8:12] != b"WEBP"
+        or struct.unpack("<I", payload[4:8])[0] + 8 != len(payload)
+    ):
+        return None
+    offset = 12
+    dimensions: tuple[int, int] | None = None
+    while offset + 8 <= len(payload):
+        chunk_type = payload[offset : offset + 4]
+        chunk_size = struct.unpack("<I", payload[offset + 4 : offset + 8])[0]
+        data_start = offset + 8
+        data_end = data_start + chunk_size
+        padded_end = data_end + (chunk_size & 1)
+        if data_end < data_start or padded_end > len(payload):
+            return None
+        chunk = payload[data_start:data_end]
+        if chunk_type == b"VP8X" and len(chunk) >= 10:
+            width = 1 + int.from_bytes(chunk[4:7], "little")
+            height = 1 + int.from_bytes(chunk[7:10], "little")
+            dimensions = (width, height)
+        elif chunk_type == b"VP8L" and len(chunk) >= 5 and chunk[0] == 0x2F:
+            packed = int.from_bytes(chunk[1:5], "little")
+            dimensions = ((packed & 0x3FFF) + 1, ((packed >> 14) & 0x3FFF) + 1)
+        elif (
+            chunk_type == b"VP8 "
+            and len(chunk) >= 10
+            and chunk[3:6] == b"\x9d\x01\x2a"
+        ):
+            dimensions = (
+                int.from_bytes(chunk[6:8], "little") & 0x3FFF,
+                int.from_bytes(chunk[8:10], "little") & 0x3FFF,
+            )
+        offset = padded_end
+    return dimensions if dimensions and offset == len(payload) else None
+
+
+def validate_static_image_file(
+    path: str | os.PathLike[str],
+    *,
+    expected_filename: str = "",
+    maximum_bytes: int = MAX_LOGO_BYTES,
+) -> dict[str, Any]:
+    """Validate one static logo from its bytes, not Telegram metadata."""
+
+    target = _resolve(path)
+    if not target.is_file() or target.is_symlink():
+        return {"ok": False, "reason": "logo_file_missing"}
+    try:
+        size = int(target.stat().st_size)
+    except OSError:
+        return {"ok": False, "reason": "logo_read_failed"}
+    if size <= 0 or size > max(1, min(int(maximum_bytes), MAX_LOGO_BYTES)):
+        return {"ok": False, "reason": "logo_size_invalid"}
+    try:
+        chunks: list[bytes] = []
+        remaining = size
+        with target.open("rb") as handle:
+            while remaining:
+                chunk = handle.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    return {"ok": False, "reason": "logo_read_failed"}
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            if handle.read(1):
+                return {"ok": False, "reason": "logo_size_invalid"}
+        payload = b"".join(chunks)
+    except OSError:
+        return {"ok": False, "reason": "logo_read_failed"}
+    if len(payload) != size:
+        return {"ok": False, "reason": "logo_read_failed"}
+
+    detected = ""
+    dimensions: tuple[int, int] | None = None
+    if payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        detected = "png"
+        dimensions = _png_dimensions(payload)
+    elif payload.startswith(b"\xff\xd8"):
+        detected = "jpeg"
+        dimensions = _jpeg_dimensions(payload)
+    elif payload.startswith(b"RIFF") and payload[8:12] == b"WEBP":
+        detected = "webp"
+        dimensions = _webp_dimensions(payload)
+    if not detected or dimensions is None:
+        return {"ok": False, "reason": "logo_format_invalid"}
+
+    filename = safe_display_filename(expected_filename or target.name, target.name)
+    suffix = Path(filename).suffix.lower()
+    expected_formats = {
+        ".png": {"png"},
+        ".jpg": {"jpeg"},
+        ".jpeg": {"jpeg"},
+        ".webp": {"webp"},
+    }
+    if detected not in expected_formats.get(suffix, set()):
+        return {"ok": False, "reason": "logo_extension_content_mismatch"}
+    width, height = dimensions
+    if (
+        width <= 0
+        or height <= 0
+        or width > MAX_LOGO_DIMENSION
+        or height > MAX_LOGO_DIMENSION
+        or width * height > MAX_LOGO_PIXELS
+    ):
+        return {"ok": False, "reason": "logo_dimensions_invalid"}
+    try:
+        with Image.open(io.BytesIO(payload)) as image:
+            decoded_format = {
+                "PNG": "png",
+                "JPEG": "jpeg",
+                "WEBP": "webp",
+            }.get(str(image.format or "").upper(), "")
+            decoded_dimensions = tuple(int(value) for value in image.size)
+            animated = bool(getattr(image, "is_animated", False)) or int(
+                getattr(image, "n_frames", 1) or 1
+            ) != 1
+            image.load()
+    except (
+        Image.DecompressionBombError,
+        OSError,
+        SyntaxError,
+        UnidentifiedImageError,
+        ValueError,
+    ):
+        return {"ok": False, "reason": "logo_decode_invalid"}
+    if animated:
+        return {"ok": False, "reason": "logo_animation_invalid"}
+    if decoded_format != detected or decoded_dimensions != dimensions:
+        return {"ok": False, "reason": "logo_decode_invalid"}
+    return {
+        "ok": True,
+        "reason": "",
+        "format": detected,
+        "width": width,
+        "height": height,
+        "bytes": size,
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
 
 
 def find_ffmpeg(explicit: str = "") -> str:

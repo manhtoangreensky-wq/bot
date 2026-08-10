@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
 import threading
 import time
@@ -11,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
 import bot
 import local_worker
@@ -272,6 +274,12 @@ def _run_job(
             )
         if source_download_receipt_override is not None:
             return source_download_receipt_override
+        role = str(_args[4] if len(_args) > 4 else "")
+        if role == "logo":
+            suffix = Path(str(_args[1] if len(_args) > 1 else "logo.png")).suffix.lower()
+            logo_path = tmp_path / f"logo{suffix if suffix in {'.png', '.jpg', '.jpeg', '.webp'} else '.png'}"
+            materialize_image_fixture(logo_path)
+            return str(logo_path)
         return str(source)
 
     def materialize_bounded_fixture(
@@ -294,6 +302,17 @@ def _run_job(
                 digest.update(chunk)
                 remaining -= len(chunk)
         return digest.hexdigest()
+
+    def materialize_image_fixture(destination: str | Path) -> str:
+        target = Path(destination)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        suffix = target.suffix.lower()
+        image_format = "JPEG" if suffix in {".jpg", ".jpeg"} else "WEBP" if suffix == ".webp" else "PNG"
+        buffer = io.BytesIO()
+        Image.new("RGB", (3, 2), (220, 40, 90)).save(buffer, format=image_format)
+        payload = buffer.getvalue()
+        target.write_bytes(payload)
+        return hashlib.sha256(payload).hexdigest()
 
     def bounded_file_sha256(path: str | Path) -> str:
         digest = hashlib.sha256()
@@ -370,12 +389,16 @@ def _run_job(
             **_kwargs,
         ):
             expected = expected_bytes if expected_bytes is not None else expected_size
-            logical_size = fixture_size_for(str(file_id or ""), expected)
-            sha256 = materialize_bounded_fixture(
-                destination,
-                logical_size=logical_size,
-                marker=str(file_id or "asset"),
-            )
+            if Path(destination).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+                sha256 = materialize_image_fixture(destination)
+                logical_size = Path(destination).stat().st_size
+            else:
+                logical_size = fixture_size_for(str(file_id or ""), expected)
+                sha256 = materialize_bounded_fixture(
+                    destination,
+                    logical_size=logical_size,
+                    marker=str(file_id or "asset"),
+                )
             transport = (
                 "local_bot_api"
                 if bool(getattr(config, "is_local", False))

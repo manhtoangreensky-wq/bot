@@ -1,0 +1,17 @@
+[Unit]
+Description=TOAN AAS Video Edit-only Local Worker
+After=network.target
+
+[Service]
+User=toanaas
+Group=toanaas
+UMask=0077
+WorkingDirectory=/opt/toanaas/bot
+EnvironmentFile=/etc/toanaas-video-edit-worker.env
+ExecStart=/opt/toanaas/bot/.venv/bin/python /opt/toanaas/bot/local_worker.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

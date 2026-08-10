@@ -1119,6 +1119,7 @@ def test_submitters_reuse_job_bound_status_panel_helper() -> None:
 def test_job_bound_panel_renders_all_six_stages_immediately_after_submit() -> None:
     rendered: list[dict] = []
     registered: list[dict] = []
+    started: list[str] = []
     reads: list[tuple[int, int]] = []
     snapshots: list[dict] = []
 
@@ -1201,6 +1202,7 @@ def test_job_bound_panel_renders_all_six_stages_immediately_after_submit() -> No
             "video_editor_status_keyboard": lambda job_id, _lang: f"videoedit|status|{job_id}",
             "safe_edit_or_send": lambda query, text, **kwargs: query.edit_message_text(text, **kwargs),
             "progress_auto_refresh_register_message": register,
+            "progress_auto_refresh_start_task": lambda _context, key: started.append(key) or True,
         },
     )
 
@@ -1214,8 +1216,9 @@ def test_job_bound_panel_renders_all_six_stages_immediately_after_submit() -> No
 
     assert reads == [(71, 9)]
     assert len(snapshots) == 1
-    assert len(rendered) == 1
-    panel = rendered[0]
+    assert len(rendered) == 2
+    assert "reply_markup" not in rendered[0]
+    panel = rendered[1]
     assert panel["reply_markup"] == "videoedit|status|71"
     for label in (
         "Nhận video",
@@ -1235,8 +1238,10 @@ def test_job_bound_panel_renders_all_six_stages_immediately_after_submit() -> No
             "user_id": 9,
             "lang": "vi",
             "initial_snapshot": snapshots[0],
+            "start_task": False,
         }
     ]
+    assert started == ["video_edit:71"]
 
 
 @pytest.mark.parametrize(
@@ -1256,6 +1261,8 @@ def test_job_bound_panel_renders_all_six_stages_immediately_after_submit() -> No
 def test_job_bound_panel_rejects_missing_or_mismatched_exact_registration(
     registration: dict,
 ) -> None:
+    rendered: list[dict] = []
+
     class Message:
         chat_id = 99001
         message_id = 7002
@@ -1263,7 +1270,12 @@ def test_job_bound_panel_rejects_missing_or_mismatched_exact_registration(
     class Query:
         message = Message()
 
+        async def edit_message_text(self, _text, **kwargs):
+            rendered.append(dict(kwargs))
+            return self.message
+
     async def render(_query, _text, **_kwargs):
+        rendered.append(dict(_kwargs))
         return Message()
 
     ns = _compile_functions(
@@ -1284,6 +1296,9 @@ def test_job_bound_panel_rejects_missing_or_mismatched_exact_registration(
             "progress_auto_refresh_register_message": lambda *_args, **_kwargs: dict(
                 registration
             ),
+            "progress_auto_refresh_start_task": lambda *_args: (_ for _ in ()).throw(
+                AssertionError("scheduler must not start before exact registration")
+            ),
         },
     )
     update = SimpleNamespace(
@@ -1302,6 +1317,497 @@ def test_job_bound_panel_rejects_missing_or_mismatched_exact_registration(
                 user_id=9,
             )
         )
+    assert len(rendered) == 1
+    assert "reply_markup" not in rendered[0]
+
+
+def test_job_bound_panel_reserves_one_binding_before_the_first_telegram_await() -> None:
+    registry: dict[str, dict] = {}
+    preliminary_started = asyncio.Event()
+    release_preliminary = asyncio.Event()
+    full_panels: list[int] = []
+
+    class Message:
+        chat_id = 99001
+
+        def __init__(self, message_id: int) -> None:
+            self.message_id = message_id
+
+    class Query:
+        def __init__(self, message_id: int) -> None:
+            self.message = Message(message_id)
+            self.answers: list[tuple[tuple, dict]] = []
+
+        async def answer(self, *args, **kwargs):
+            self.answers.append((args, kwargs))
+
+        async def edit_message_text(self, _text, **kwargs):
+            if "reply_markup" not in kwargs:
+                preliminary_started.set()
+                await release_preliminary.wait()
+            else:
+                full_panels.append(self.message.message_id)
+            return self.message
+
+    def register(message, _context, **kwargs):
+        key = f"video_edit:{kwargs['job_id']}"
+        record = {
+            **dict(registry.get(key) or {}),
+            "key": key,
+            "product_type": kwargs["product_type"],
+            "job_id": kwargs["job_id"],
+            "user_id": kwargs["user_id"],
+            "chat_id": message.chat_id,
+            "message_id": message.message_id,
+        }
+        registry[key] = record
+        return record
+
+    ns = _compile_functions(
+        ["show_video_editor_job_status_panel"],
+        {
+            "PROGRESS_AUTO_REFRESH_JOBS": registry,
+            "PROGRESS_AUTO_REFRESH_TASKS": {},
+            "safe_int": lambda value, default=0: int(value or default),
+            "video_edit_progress_read_status": lambda *_args, **_kwargs: {
+                "id": 71,
+                "job_type": video_editengine1.WORKER_JOB_TYPE,
+                "user_id": "9",
+            },
+            "video_edit_progress_snapshot": lambda *_args, **_kwargs: {
+                "text": "six exact stages",
+            },
+            "video_editor_job_status_text": lambda *_args: "six exact stages",
+            "video_editor_status_keyboard": lambda *_args: "keyboard",
+            "progress_auto_refresh_register_message": register,
+            "progress_auto_refresh_start_task": lambda *_args: True,
+            "video_edit_panel_not_modified": lambda _error: False,
+            "uuid": __import__("uuid"),
+        },
+    )
+    first_query = Query(7001)
+    second_query = Query(7002)
+
+    async def scenario():
+        first = asyncio.create_task(
+            ns["show_video_editor_job_status_panel"](
+                SimpleNamespace(
+                    callback_query=first_query,
+                    message=None,
+                    effective_user=SimpleNamespace(id=9),
+                ),
+                SimpleNamespace(),
+                71,
+                "vi",
+                user_id=9,
+            )
+        )
+        await preliminary_started.wait()
+        second = asyncio.create_task(
+            ns["show_video_editor_job_status_panel"](
+                SimpleNamespace(
+                    callback_query=second_query,
+                    message=None,
+                    effective_user=SimpleNamespace(id=9),
+                ),
+                SimpleNamespace(),
+                71,
+                "vi",
+                user_id=9,
+            )
+        )
+        await asyncio.sleep(0)
+        release_preliminary.set()
+        return await asyncio.gather(first, second)
+
+    results = asyncio.run(scenario())
+    assert sum(result is not None for result in results) == 1
+    assert full_panels == [7001]
+    assert second_query.answers[-1][1].get("show_alert") is True
+    assert registry["video_edit:71"]["message_id"] == 7001
+
+
+@pytest.mark.parametrize("failure", ["registration", "final_render", "scheduler"])
+def test_job_bound_panel_rolls_back_only_its_binding_on_partial_failure(
+    failure: str,
+) -> None:
+    registry: dict[str, dict] = {}
+    tasks: dict[str, object] = {}
+
+    class Message:
+        chat_id = 99001
+        message_id = 7002
+
+    class Query:
+        message = Message()
+
+        def __init__(self) -> None:
+            self.edit_count = 0
+
+        async def edit_message_text(self, _text, **kwargs):
+            self.edit_count += 1
+            if failure == "final_render" and "reply_markup" in kwargs:
+                raise RuntimeError("telegram final render failed")
+            return self.message
+
+    def register(message, _context, **kwargs):
+        key = f"video_edit:{kwargs['job_id']}"
+        record = {
+            **dict(registry.get(key) or {}),
+            "key": key,
+            "product_type": kwargs["product_type"],
+            "job_id": kwargs["job_id"],
+            "user_id": kwargs["user_id"],
+            "chat_id": message.chat_id,
+            "message_id": 7999 if failure == "registration" else message.message_id,
+        }
+        registry[key] = record
+        return record
+
+    ns = _compile_functions(
+        ["show_video_editor_job_status_panel"],
+        {
+            "PROGRESS_AUTO_REFRESH_JOBS": registry,
+            "PROGRESS_AUTO_REFRESH_TASKS": tasks,
+            "safe_int": lambda value, default=0: int(value or default),
+            "video_edit_progress_read_status": lambda *_args, **_kwargs: {
+                "id": 71,
+                "job_type": video_editengine1.WORKER_JOB_TYPE,
+                "user_id": "9",
+            },
+            "video_edit_progress_snapshot": lambda *_args, **_kwargs: {
+                "text": "exact job status",
+            },
+            "video_editor_job_status_text": lambda *_args: "exact job status",
+            "video_editor_status_keyboard": lambda *_args: "keyboard",
+            "progress_auto_refresh_register_message": register,
+            "progress_auto_refresh_start_task": lambda *_args: failure != "scheduler",
+            "video_edit_panel_not_modified": lambda error: "message is not modified" in str(error).lower(),
+            "uuid": __import__("uuid"),
+        },
+    )
+    update = SimpleNamespace(
+        callback_query=Query(),
+        message=None,
+        effective_user=SimpleNamespace(id=9),
+    )
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(
+            ns["show_video_editor_job_status_panel"](
+                update,
+                SimpleNamespace(),
+                71,
+                "vi",
+                user_id=9,
+            )
+        )
+    assert registry == {}
+
+
+def test_job_bound_panel_recovers_from_exact_message_not_modified() -> None:
+    registry: dict[str, dict] = {}
+
+    class Message:
+        chat_id = 99001
+        message_id = 7002
+
+    class Query:
+        message = Message()
+
+        async def edit_message_text(self, *_args, **_kwargs):
+            raise RuntimeError("BadRequest: message is not modified")
+
+    def register(message, _context, **kwargs):
+        key = f"video_edit:{kwargs['job_id']}"
+        record = {
+            **dict(registry.get(key) or {}),
+            "key": key,
+            "product_type": kwargs["product_type"],
+            "job_id": kwargs["job_id"],
+            "user_id": kwargs["user_id"],
+            "chat_id": message.chat_id,
+            "message_id": message.message_id,
+        }
+        registry[key] = record
+        return record
+
+    ns = _compile_functions(
+        ["show_video_editor_job_status_panel"],
+        {
+            "PROGRESS_AUTO_REFRESH_JOBS": registry,
+            "PROGRESS_AUTO_REFRESH_TASKS": {},
+            "safe_int": lambda value, default=0: int(value or default),
+            "video_edit_progress_read_status": lambda *_args, **_kwargs: {
+                "id": 71,
+                "job_type": video_editengine1.WORKER_JOB_TYPE,
+                "user_id": "9",
+            },
+            "video_edit_progress_snapshot": lambda *_args, **_kwargs: {
+                "text": "exact job status",
+            },
+            "video_editor_job_status_text": lambda *_args: "exact job status",
+            "video_editor_status_keyboard": lambda *_args: "keyboard",
+            "progress_auto_refresh_register_message": register,
+            "progress_auto_refresh_start_task": lambda *_args: True,
+            "video_edit_panel_not_modified": lambda error: "message is not modified" in str(error).lower(),
+            "uuid": __import__("uuid"),
+        },
+    )
+
+    result = asyncio.run(
+        ns["show_video_editor_job_status_panel"](
+            SimpleNamespace(
+                callback_query=Query(),
+                message=None,
+                effective_user=SimpleNamespace(id=9),
+            ),
+            SimpleNamespace(),
+            71,
+            "vi",
+            user_id=9,
+        )
+    )
+    assert result is not None
+    assert registry["video_edit:71"]["message_id"] == 7002
+
+
+def test_job_bound_panel_renders_terminal_snapshot_without_starting_scheduler() -> None:
+    registry: dict[str, dict] = {}
+    rendered: list[dict] = []
+
+    class Message:
+        chat_id = 99001
+        message_id = 7002
+
+    class Query:
+        message = Message()
+
+        async def edit_message_text(self, _text, **kwargs):
+            rendered.append(dict(kwargs))
+            return self.message
+
+    def register(message, _context, **kwargs):
+        key = f"video_edit:{kwargs['job_id']}"
+        record = {
+            **dict(registry.get(key) or {}),
+            "key": key,
+            "product_type": kwargs["product_type"],
+            "job_id": kwargs["job_id"],
+            "user_id": kwargs["user_id"],
+            "chat_id": message.chat_id,
+            "message_id": message.message_id,
+            "stopped": True,
+            "terminal_state": "delivered",
+        }
+        registry[key] = record
+        return record
+
+    ns = _compile_functions(
+        ["show_video_editor_job_status_panel"],
+        {
+            "PROGRESS_AUTO_REFRESH_JOBS": registry,
+            "PROGRESS_AUTO_REFRESH_TASKS": {},
+            "safe_int": lambda value, default=0: int(value or default),
+            "video_edit_progress_read_status": lambda *_args, **_kwargs: {
+                "id": 71,
+                "job_type": video_editengine1.WORKER_JOB_TYPE,
+                "user_id": "9",
+            },
+            "video_edit_progress_snapshot": lambda *_args, **_kwargs: {
+                "text": "delivered status",
+                "terminal_state": "delivered",
+            },
+            "video_editor_job_status_text": lambda *_args: "delivered status",
+            "video_editor_status_keyboard": lambda *_args: "terminal-keyboard",
+            "progress_auto_refresh_register_message": register,
+            "progress_auto_refresh_start_task": lambda *_args: (_ for _ in ()).throw(
+                AssertionError("terminal panel must not start scheduler")
+            ),
+            "video_edit_panel_not_modified": lambda _error: False,
+        },
+    )
+    result = asyncio.run(
+        ns["show_video_editor_job_status_panel"](
+            SimpleNamespace(
+                callback_query=Query(),
+                message=None,
+                effective_user=SimpleNamespace(id=9),
+            ),
+            SimpleNamespace(),
+            71,
+            "vi",
+            user_id=9,
+        )
+    )
+    assert result is not None
+    assert rendered[-1]["reply_markup"] == "terminal-keyboard"
+    assert registry["video_edit:71"]["binding_state"] == "active"
+    assert registry["video_edit:71"]["stopped"] is True
+
+
+def test_job_bound_panel_never_cancels_an_orphan_task_it_did_not_start() -> None:
+    registry: dict[str, dict] = {}
+
+    class ExistingTask:
+        cancelled = False
+
+        def done(self):
+            return False
+
+        def cancel(self):
+            self.cancelled = True
+
+    orphan = ExistingTask()
+    tasks = {"video_edit:71": orphan}
+
+    class Message:
+        chat_id = 99001
+        message_id = 7002
+
+    class Query:
+        message = Message()
+
+        def __init__(self) -> None:
+            self.answers: list[tuple[tuple, dict]] = []
+            self.edits: list[dict] = []
+
+        async def answer(self, *args, **kwargs):
+            self.answers.append((args, kwargs))
+
+        async def edit_message_text(self, _text, **kwargs):
+            self.edits.append(dict(kwargs))
+            return self.message
+
+    query = Query()
+    ns = _compile_functions(
+        ["show_video_editor_job_status_panel"],
+        {
+            "PROGRESS_AUTO_REFRESH_JOBS": registry,
+            "PROGRESS_AUTO_REFRESH_TASKS": tasks,
+            "safe_int": lambda value, default=0: int(value or default),
+            "video_edit_progress_read_status": lambda *_args, **_kwargs: {
+                "id": 71,
+                "job_type": video_editengine1.WORKER_JOB_TYPE,
+                "user_id": "9",
+            },
+            "video_edit_progress_snapshot": lambda *_args, **_kwargs: {
+                "text": "status",
+            },
+            "video_editor_job_status_text": lambda *_args: "status",
+            "video_editor_status_keyboard": lambda *_args: "keyboard",
+            "progress_auto_refresh_register_message": lambda *_args, **_kwargs: {},
+            "progress_auto_refresh_start_task": lambda *_args: True,
+            "video_edit_panel_not_modified": lambda _error: False,
+        },
+    )
+    result = asyncio.run(
+        ns["show_video_editor_job_status_panel"](
+            SimpleNamespace(
+                callback_query=query,
+                message=None,
+                effective_user=SimpleNamespace(id=9),
+            ),
+            SimpleNamespace(),
+            71,
+            "vi",
+            user_id=9,
+        )
+    )
+    assert result is None
+    assert query.edits == []
+    assert query.answers[-1][1].get("show_alert") is True
+    assert tasks["video_edit:71"] is orphan
+    assert orphan.cancelled is False
+
+
+def test_job_bound_panel_falls_back_to_a_new_exact_message_when_source_cannot_edit() -> None:
+    registry: dict[str, dict] = {}
+    final_renders: list[dict] = []
+
+    class FallbackMessage:
+        chat_id = 99001
+        message_id = 7003
+
+        async def edit_text(self, _text, **kwargs):
+            final_renders.append(dict(kwargs))
+            return self
+
+    fallback = FallbackMessage()
+
+    class SourceMessage:
+        chat_id = 99001
+        message_id = 7002
+
+        async def reply_text(self, _text, **_kwargs):
+            return fallback
+
+    class Query:
+        message = SourceMessage()
+
+        async def edit_message_text(self, *_args, **_kwargs):
+            raise RuntimeError("BadRequest: message can't be edited")
+
+    async def safe_render(query, text, **kwargs):
+        try:
+            return await query.edit_message_text(text, **kwargs)
+        except RuntimeError:
+            return await query.message.reply_text(text, **kwargs)
+
+    def register(message, _context, **kwargs):
+        key = f"video_edit:{kwargs['job_id']}"
+        record = {
+            "key": key,
+            "product_type": kwargs["product_type"],
+            "job_id": kwargs["job_id"],
+            "user_id": kwargs["user_id"],
+            "chat_id": message.chat_id,
+            "message_id": message.message_id,
+        }
+        registry[key] = record
+        return record
+
+    ns = _compile_functions(
+        ["show_video_editor_job_status_panel"],
+        {
+            "PROGRESS_AUTO_REFRESH_JOBS": registry,
+            "PROGRESS_AUTO_REFRESH_TASKS": {},
+            "safe_int": lambda value, default=0: int(value or default),
+            "video_edit_progress_read_status": lambda *_args, **_kwargs: {
+                "id": 71,
+                "job_type": video_editengine1.WORKER_JOB_TYPE,
+                "user_id": "9",
+            },
+            "video_edit_progress_snapshot": lambda *_args, **_kwargs: {
+                "text": "exact job status",
+            },
+            "video_editor_job_status_text": lambda *_args: "exact job status",
+            "video_editor_status_keyboard": lambda *_args: "keyboard",
+            "safe_edit_or_send": safe_render,
+            "progress_auto_refresh_register_message": register,
+            "progress_auto_refresh_start_task": lambda *_args: True,
+            "video_edit_panel_not_modified": lambda _error: False,
+            "uuid": __import__("uuid"),
+        },
+    )
+    result = asyncio.run(
+        ns["show_video_editor_job_status_panel"](
+            SimpleNamespace(
+                callback_query=Query(),
+                message=None,
+                effective_user=SimpleNamespace(id=9),
+            ),
+            SimpleNamespace(),
+            71,
+            "vi",
+            user_id=9,
+        )
+    )
+
+    assert result is fallback
+    assert registry["video_edit:71"]["message_id"] == 7003
+    assert registry["video_edit:71"]["binding_state"] == "active"
+    assert final_renders[-1]["reply_markup"] == "keyboard"
 
 
 def test_video_edit_is_not_added_to_generic_product_progress_specs() -> None:

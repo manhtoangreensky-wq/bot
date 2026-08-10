@@ -131,6 +131,59 @@ def _press(user_id: int, callback: str) -> _Query:
     return query
 
 
+def test_videoedit_legacy_cut_requires_owned_state_but_current_workspace_still_works(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = 88_101
+    competing_state_clears: list[int] = []
+    monkeypatch.setattr(
+        bot,
+        "clear_video_editor_competing_video_states",
+        lambda uid, _context: competing_state_clears.append(uid),
+    )
+    bot.clear_video_editor_pending(user_id)
+    try:
+        missing = _press(user_id, "videoedit|cut")
+
+        assert bot.get_video_editor_pending(user_id) == {}
+        assert competing_state_clears == []
+        assert missing.answers[-1][1].get("show_alert") is True
+
+        _ready_state(user_id)
+        current = _press(user_id, "videoedit|cut")
+        state = dict(bot.get_video_editor_pending(user_id) or {})
+
+        assert state["current_screen"] == "cut"
+        assert "videoedit|trim_edges" in _callbacks(_last_markup(current))
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize("callback", ["videoedit|cut", "videoedit|review", "videoedit|logo"])
+def test_videoedit_job_status_rejects_stale_editor_callbacks_without_state_overwrite(
+    callback: str,
+) -> None:
+    user_id = 88_102
+    bot.clear_video_editor_pending(user_id)
+    try:
+        before = bot.set_video_editor_pending(
+            user_id,
+            "job_status",
+            current_screen="job_status",
+            job_id=71,
+            source_file_id="committed-source",
+            inspection_complete=True,
+            edit_session_id="committed-job-session",
+        )
+
+        stale = _press(user_id, callback)
+
+        assert dict(bot.get_video_editor_pending(user_id) or {}) == before
+        assert stale.answers[-1][1].get("show_alert") is True
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
 def test_videoedit_workspace_exposes_every_real_local_group_without_detached_status() -> None:
     callbacks = _callbacks(bot.video_local_manual_options_keyboard("vi"))
     assert callbacks == [
@@ -377,6 +430,169 @@ def test_videoedit_workspace_logo_upload_keeps_workspace_parent_through_option_c
             "vi",
         )
         assert ("⬅️ Quay lại", "videoedit|workspace") in _pairs(resumed_markup)
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+def test_videoedit_branding_replacements_return_to_options_and_preserve_tuning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = 88_413
+    _ready_state(user_id)
+    state = dict(bot.get_video_editor_pending(user_id) or {})
+    plan = dict(state.get("manual_edit_plan") or {})
+    plan["logo_overlay"] = {
+        "position": "bottom_left",
+        "scale": 0.18,
+        "opacity": 0.5,
+    }
+    watermark = {
+        "enabled": True,
+        "text": "OLD",
+        "position": "top_left",
+        "opacity": 0.75,
+    }
+    plan = bot.video_editor_plan_with_watermark(
+        {**state, "manual_edit_plan": plan},
+        watermark,
+    )
+    bot.update_video_editor_screen(
+        user_id,
+        "branding",
+        parent_callback="videoedit|workspace",
+        logo_source={"file_id": "old-logo", "file_name": "old.png"},
+        watermark_config=watermark,
+        manual_edit_plan=plan,
+    )
+    monkeypatch.setattr(
+        bot,
+        "video_editor_aux_source_from_update",
+        lambda _update, _kind: {
+            "file_id": "new-logo",
+            "file_name": "new.png",
+            "mime_type": "image/png",
+            "file_size": 4_096,
+        },
+    )
+    try:
+        _press(user_id, "videoedit|logo_entry")
+        logo_input = _press(user_id, "videoedit|logo")
+        assert ("⬅️ Quay lại", "videoedit|logo_options") in _pairs(
+            _last_markup(logo_input)
+        )
+
+        wrong_logo_message = _Message()
+        wrong_logo_message.text = "not an image"
+        wrong_logo_message.message_id = 7_412
+        assert asyncio.run(
+            bot.handle_video_editor_pending_text(
+                SimpleNamespace(
+                    effective_user=SimpleNamespace(id=user_id),
+                    message=wrong_logo_message,
+                    callback_query=None,
+                ),
+                SimpleNamespace(),
+            )
+        ) is True
+        assert ("⬅️ Quay lại", "videoedit|logo_options") in _pairs(
+            wrong_logo_message.replies[-1][1]["reply_markup"]
+        )
+
+        logo_message = _Message()
+        logo_message.message_id = 7_413
+        assert asyncio.run(
+            bot.handle_video_editor_pending_upload(
+                SimpleNamespace(
+                    effective_user=SimpleNamespace(id=user_id),
+                    message=logo_message,
+                    callback_query=None,
+                ),
+                SimpleNamespace(),
+            )
+        ) is True
+        after_logo = dict(bot.get_video_editor_pending(user_id) or {})
+        assert after_logo["logo_source"]["file_id"] == "new-logo"
+        assert after_logo["manual_edit_plan"]["logo_overlay"] == {
+            "position": "bottom_left",
+            "scale": 0.18,
+            "opacity": 0.5,
+        }
+
+        _press(user_id, "videoedit|watermark_entry")
+        watermark_input = _press(user_id, "videoedit|watermark_text")
+        assert ("⬅️ Quay lại", "videoedit|watermark_options") in _pairs(
+            _last_markup(watermark_input)
+        )
+
+        watermark_message = _Message()
+        watermark_message.text = "NEW"
+        watermark_message.message_id = 7_414
+        assert asyncio.run(
+            bot.handle_video_editor_pending_text(
+                SimpleNamespace(
+                    effective_user=SimpleNamespace(id=user_id),
+                    message=watermark_message,
+                    callback_query=None,
+                ),
+                SimpleNamespace(),
+            )
+        ) is True
+        after_watermark = dict(bot.get_video_editor_pending(user_id) or {})
+        assert after_watermark["watermark_config"] == {
+            "enabled": True,
+            "text": "NEW",
+            "position": "top_left",
+            "opacity": 0.75,
+        }
+        assert after_watermark["manual_edit_plan"]["watermark_overlay"][
+            "position"
+        ] == "top_left"
+        assert after_watermark["manual_edit_plan"]["watermark_overlay"][
+            "opacity"
+        ] == 0.75
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize(
+    "callback",
+    ["videoedit|logo", "videoedit|watermark_text"],
+)
+def test_videoedit_branding_replace_buttons_fail_closed_outside_owned_options(
+    callback: str,
+) -> None:
+    user_id = 88_414
+    _ready_state(user_id)
+    state = dict(bot.get_video_editor_pending(user_id) or {})
+    plan = dict(state.get("manual_edit_plan") or {})
+    plan["logo_overlay"] = {
+        "position": "top_right",
+        "scale": 0.12,
+        "opacity": 1.0,
+    }
+    watermark = {
+        "enabled": True,
+        "text": "LOCKED",
+        "position": "bottom_right",
+        "opacity": 0.45,
+    }
+    plan = bot.video_editor_plan_with_watermark(
+        {**state, "manual_edit_plan": plan},
+        watermark,
+    )
+    before = bot.update_video_editor_screen(
+        user_id,
+        "branding",
+        parent_callback="videoedit|workspace",
+        logo_source={"file_id": "locked-logo", "file_name": "logo.png"},
+        watermark_config=watermark,
+        manual_edit_plan=plan,
+    )
+    try:
+        stale = _press(user_id, callback)
+        assert dict(bot.get_video_editor_pending(user_id) or {}) == before
+        assert stale.answers[-1][1].get("show_alert") is True
+        assert stale.edits == []
     finally:
         bot.clear_video_editor_pending(user_id)
 

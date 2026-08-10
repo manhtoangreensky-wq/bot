@@ -1340,6 +1340,8 @@ TOAN_AAS_VAULT_MAX_FILES_PER_BATCH = max(1, env_int("TOAN_AAS_VAULT_MAX_FILES_PE
 TOAN_AAS_VAULT_MAX_FILE_SIZE_MB = max(1, env_int("TOAN_AAS_VAULT_MAX_FILE_SIZE_MB", 500))
 LOCAL_WORKER_ENABLED = env_flag("LOCAL_WORKER_ENABLED", "false")
 LOCAL_WORKER_TOKEN = _env("LOCAL_WORKER_TOKEN")
+VIDEO_EDIT_WORKER_TOKEN = _env("VIDEO_EDIT_WORKER_TOKEN")
+LOCAL_WORKER_JOB_SCOPES = frozenset({"all", "video_edit_only"})
 LOCAL_WORKER_POLL_ENABLED = env_flag("LOCAL_WORKER_POLL_ENABLED", "true")
 LOCAL_WORKER_MAX_JOB_SECONDS = max(30, env_int("LOCAL_WORKER_MAX_JOB_SECONDS", 600))
 WORKER_RESULT_UPLOAD_DIR = _env("WORKER_RESULT_UPLOAD_DIR", os.path.join("files", "worker_results"))
@@ -45873,7 +45875,6 @@ def local_worker_status_payload() -> dict:
 def video_edit_worker_status_payload() -> dict:
     """Return only the fresh heartbeat owned by the local Video Edit adapter."""
 
-    generic = dict(local_worker_status_payload())
     received_at = get_system_setting("local_worker:video_edit_received_at_utc", "")
     received_dt = parse_utc_text(received_at)
     age_seconds = None
@@ -45882,7 +45883,10 @@ def video_edit_worker_status_payload() -> dict:
             0,
             int((datetime.now(timezone.utc) - received_dt).total_seconds()),
         )
-    capabilities_raw = get_system_setting("local_worker:capabilities_json", "[]")
+    capabilities_raw = get_system_setting(
+        "local_worker:video_edit_capabilities_json",
+        "[]",
+    )
     try:
         capabilities = json.loads(capabilities_raw or "[]")
     except (TypeError, ValueError, json.JSONDecodeError):
@@ -45902,21 +45906,32 @@ def video_edit_worker_status_payload() -> dict:
         if re.fullmatch(r"[a-z0-9_]{1,64}", str(item))
     ][:256]
     contract_version = safe_int(
-        get_system_setting("local_worker:heartbeat_contract_version", "0"),
+        get_system_setting(
+            "local_worker:video_edit_heartbeat_contract_version",
+            "0",
+        ),
         0,
     )
+    job_scope = get_system_setting("local_worker:video_edit_job_scope", "")
     fresh = bool(
         contract_version >= 1
+        and job_scope == "video_edit_only"
         and age_seconds is not None
         and age_seconds <= video_editengine1.HEARTBEAT_TTL_SECONDS
     )
     worker_status = "healthy" if fresh else "stale"
-    reported_ffmpeg_path = get_system_setting("local_worker:ffmpeg_path_seen", "")
+    reported_ffmpeg_path = get_system_setting(
+        "local_worker:video_edit_ffmpeg_path_seen",
+        "",
+    )
     workspace_free_bytes = max(
         0,
         min(
             safe_int(
-                get_system_setting("local_worker:workspace_free_bytes", "0"),
+                get_system_setting(
+                    "local_worker:video_edit_workspace_free_bytes",
+                    "0",
+                ),
                 0,
             ),
             (1 << 63) - 1,
@@ -45936,37 +45951,71 @@ def video_edit_worker_status_payload() -> dict:
         ),
     )
     return {
-        **generic,
+        "enabled": LOCAL_WORKER_ENABLED,
+        "poll_enabled": LOCAL_WORKER_POLL_ENABLED,
+        "delivery_configured": bool(TELEGRAM_TOKEN),
+        "worker_sha": get_system_setting(
+            "local_worker:video_edit_worker_sha",
+            "",
+        ),
+        "last_heartbeat": received_at,
         "ffmpeg_path": reported_ffmpeg_path,
         "ffmpeg_path_configured": bool(reported_ffmpeg_path),
         "ffmpeg_seen": bool(reported_ffmpeg_path),
+        "ffprobe_path_configured": get_system_setting(
+            "local_worker:video_edit_ffprobe_configured",
+            "0",
+        ) == "1",
+        "token_configured": bool(VIDEO_EDIT_WORKER_TOKEN),
         "connected": fresh,
         "heartbeat_contract_version": contract_version,
-        "worker_id": get_system_setting("local_worker:worker_id", ""),
-        "worker_owner": get_system_setting("local_worker:worker_owner", ""),
-        "engine_route": get_system_setting("local_worker:engine_route", ""),
+        "job_scope": job_scope,
+        "worker_id": get_system_setting("local_worker:video_edit_worker_id", ""),
+        "worker_owner": get_system_setting(
+            "local_worker:video_edit_worker_owner",
+            "",
+        ),
+        "engine_route": get_system_setting(
+            "local_worker:video_edit_engine_route",
+            "",
+        ),
         "capabilities": [str(item) for item in capabilities if str(item).strip()],
         "video_edit_filters": video_edit_filters,
         "video_edit_filters_known": get_system_setting("local_worker:video_edit_filters_known", "0") == "1",
         "video_edit_filter_worker_id": get_system_setting("local_worker:video_edit_filter_worker_id", ""),
         "video_edit_filter_ffmpeg_path": get_system_setting("local_worker:video_edit_filter_ffmpeg_path", ""),
-        "instance_id": get_system_setting("local_worker:instance_id", ""),
-        "worker_instance_id": get_system_setting("local_worker:instance_id", ""),
-        "process_id": safe_int(get_system_setting("local_worker:process_id", "0"), 0),
-        "started_at_utc": get_system_setting("local_worker:started_at_utc", ""),
+        "instance_id": get_system_setting("local_worker:video_edit_instance_id", ""),
+        "worker_instance_id": get_system_setting("local_worker:video_edit_instance_id", ""),
+        "process_id": safe_int(
+            get_system_setting("local_worker:video_edit_process_id", "0"),
+            0,
+        ),
+        "started_at_utc": get_system_setting("local_worker:video_edit_started_at_utc", ""),
         "timestamp_utc": get_system_setting("local_worker:video_edit_timestamp_utc", ""),
         "heartbeat_timestamp": get_system_setting("local_worker:video_edit_timestamp_utc", ""),
         "received_at_utc": received_at,
         "heartbeat_age_seconds": age_seconds,
         "heartbeat_ttl_seconds": video_editengine1.HEARTBEAT_TTL_SECONDS,
         "worker_status": worker_status,
-        "queue_depth": safe_int(get_system_setting("local_worker:queue_depth", "0"), 0),
-        "last_error": get_system_setting("local_worker:last_error", ""),
-        "workspace_ready": get_system_setting("local_worker:workspace_ready", "0") == "1",
+        "queue_depth": safe_int(
+            get_system_setting("local_worker:video_edit_queue_depth", "0"),
+            0,
+        ),
+        "last_error": get_system_setting("local_worker:video_edit_last_error", ""),
+        "workspace_ready": get_system_setting(
+            "local_worker:video_edit_workspace_ready",
+            "0",
+        ) == "1",
         "workspace_free_bytes": workspace_free_bytes,
         "video_edit_max_deadline_seconds": max_deadline_seconds,
-        "worker_token_ready": get_system_setting("local_worker:worker_token_ready", "0") == "1",
-        "local_bot_api_ready": get_system_setting("local_worker:local_bot_api_ready", "0") == "1",
+        "worker_token_ready": get_system_setting(
+            "local_worker:video_edit_worker_token_ready",
+            "0",
+        ) == "1",
+        "local_bot_api_ready": get_system_setting(
+            "local_worker:video_edit_local_bot_api_ready",
+            "0",
+        ) == "1",
     }
 
 
@@ -45993,6 +46042,8 @@ def video_edit_runtime_capability_admission(
         return blocked("local_worker_poll_disabled")
     if not worker.get("token_configured"):
         return blocked("local_worker_token_missing")
+    if str(worker.get("job_scope") or "") != "video_edit_only":
+        return blocked("local_worker_job_scope_mismatch")
     if not worker.get("connected"):
         return blocked("local_worker_heartbeat_stale")
     try:
@@ -83593,6 +83644,17 @@ def video_local_logo_parent_callback(state: dict | None = None) -> str:
     return "videoedit|branding"
 
 
+def video_local_logo_input_back_callback(state: dict | None = None) -> str:
+    current = dict(state or {})
+    if (
+        str(current.get("current_screen") or "") == "logo_input"
+        and str(current.get("parent_callback") or "") == "videoedit|logo_options"
+        and dict(current.get("logo_source") or {}).get("file_id")
+    ):
+        return "videoedit|logo_options"
+    return video_local_logo_parent_callback(current)
+
+
 def video_local_logo_keyboard(lang: str = "vi", *, back_callback: str = "videoedit|overlay") -> InlineKeyboardMarkup:
     state_machine = globals().get("video_edit_state_machine")
     safe_parent = getattr(state_machine, "safe_parent_callback", lambda _value: "videoedit|hub")
@@ -83653,6 +83715,18 @@ def video_local_watermark_parent_callback(state: dict | None = None) -> str:
     if parent in {"videoedit|workspace", "videoedit|overlay", "videoedit|branding", "videoedit|review"}:
         return parent
     return "videoedit|branding"
+
+
+def video_local_watermark_input_back_callback(state: dict | None = None) -> str:
+    current = dict(state or {})
+    if (
+        str(current.get("current_screen") or "") == "watermark_input"
+        and str(current.get("parent_callback") or "")
+        == "videoedit|watermark_options"
+        and dict(current.get("watermark_config") or {}).get("enabled")
+    ):
+        return "videoedit|watermark_options"
+    return video_local_watermark_parent_callback(current)
 
 
 def video_local_watermark_text(state: dict | None = None, lang: str = "vi") -> str:
@@ -84433,7 +84507,7 @@ async def show_video_editor_job_status_panel(
             )
         return None
 
-    registry = globals().get("PROGRESS_AUTO_REFRESH_JOBS")
+    registry = globals().setdefault("PROGRESS_AUTO_REFRESH_JOBS", {})
     key = f"video_edit:{normalized_job_id}"
     existing = dict(registry.get(key) or {}) if isinstance(registry, dict) else {}
     if existing:
@@ -84443,6 +84517,18 @@ async def show_video_editor_job_status_panel(
                 show_alert=True,
             )
         return None
+    tasks = globals().setdefault("PROGRESS_AUTO_REFRESH_TASKS", {})
+    orphan_task = tasks.get(key) if isinstance(tasks, dict) else None
+    if orphan_task is not None:
+        task_done = getattr(orphan_task, "done", None)
+        if not callable(task_done) or not task_done():
+            if query:
+                await query.answer(
+                    "Bảng tiến độ của tác vụ này đang được khôi phục. Hãy thử lại sau.",
+                    show_alert=True,
+                )
+            return None
+        tasks.pop(key, None)
 
     snapshot = video_edit_progress_snapshot(
         str(normalized_job_id),
@@ -84459,34 +84545,98 @@ async def show_video_editor_job_status_panel(
         return None
 
     text = str(snapshot.get("text") or video_editor_job_status_text(current, lang))
+    if not isinstance(registry, dict):
+        raise RuntimeError("videoedit_progress_registry_unavailable")
+    binding_attempt = object()
+    binding_task = None
+    registry[key] = {
+        "key": key,
+        "product_type": "video_edit",
+        "job_id": str(normalized_job_id),
+        "user_id": normalized_user_id,
+        "binding_attempt": binding_attempt,
+        "binding_state": "reserved",
+        "task_started": False,
+        "task_alive": False,
+    }
+
+    def rollback_binding() -> None:
+        owned = dict(registry.get(key) or {})
+        if owned.get("binding_attempt") is not binding_attempt:
+            return
+        if isinstance(tasks, dict) and binding_task is not None:
+            task = tasks.get(key)
+            if task is binding_task:
+                tasks.pop(key, None)
+                task_done = getattr(task, "done", None)
+                task_cancel = getattr(task, "cancel", None)
+                if callable(task_cancel) and (
+                    not callable(task_done) or not task_done()
+                ):
+                    task_cancel()
+        registry.pop(key, None)
+
     if query:
-        rendered = await safe_edit_or_send(
-            query,
-            text,
-            parse_mode="HTML",
-            reply_markup=video_editor_status_keyboard(normalized_job_id, lang),
-        )
+        if source_message is None:
+            rollback_binding()
+            return None
+        try:
+            rendered = await query.edit_message_text(text, parse_mode="HTML")
+        except Exception as exc:
+            if video_edit_panel_not_modified(exc):
+                rendered = None
+            elif any(
+                fragment in str(exc or "").lower()
+                for fragment in (
+                    "there is no text in the message to edit",
+                    "query is too old",
+                    "message to edit not found",
+                    "message can't be edited",
+                    "message is not editable",
+                )
+            ):
+                try:
+                    rendered = await source_message.reply_text(
+                        text,
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    rollback_binding()
+                    raise
+            else:
+                rollback_binding()
+                raise
         panel_message = rendered or source_message
     elif source_message:
-        panel_message = await source_message.reply_text(
-            text,
-            parse_mode="HTML",
-            reply_markup=video_editor_status_keyboard(normalized_job_id, lang),
-        )
+        try:
+            panel_message = await source_message.reply_text(
+                text,
+                parse_mode="HTML",
+            )
+        except Exception:
+            rollback_binding()
+            raise
     else:
+        rollback_binding()
         return None
 
     if panel_message is None:
+        rollback_binding()
         return None
-    registration = dict(progress_auto_refresh_register_message(
-        panel_message,
-        context,
-        product_type="video_edit",
-        job_id=str(normalized_job_id),
-        user_id=normalized_user_id,
-        lang=lang,
-        initial_snapshot=snapshot,
-    ) or {})
+    try:
+        registration = dict(progress_auto_refresh_register_message(
+            panel_message,
+            context,
+            product_type="video_edit",
+            job_id=str(normalized_job_id),
+            user_id=normalized_user_id,
+            lang=lang,
+            initial_snapshot=snapshot,
+            start_task=False,
+        ) or {})
+    except Exception:
+        rollback_binding()
+        raise
     panel_chat_id = safe_int(
         getattr(panel_message, "chat_id", 0)
         or getattr(getattr(panel_message, "chat", None), "id", 0),
@@ -84503,7 +84653,48 @@ async def show_video_editor_job_status_panel(
         and panel_chat_id != 0
         and panel_message_id > 0
     ):
+        rollback_binding()
         raise RuntimeError("videoedit_progress_panel_registration_failed")
+    registry[key] = {
+        **dict(registry.get(key) or {}),
+        **registration,
+        "binding_attempt": binding_attempt,
+        "binding_state": "registered",
+    }
+    terminal_snapshot = bool(str(snapshot.get("terminal_state") or "").strip())
+    if not terminal_snapshot:
+        try:
+            scheduler_started = bool(progress_auto_refresh_start_task(context, key))
+        except Exception:
+            rollback_binding()
+            raise
+        if not scheduler_started:
+            rollback_binding()
+            raise RuntimeError("videoedit_progress_panel_scheduler_start_failed")
+        binding_task = tasks.get(key) if isinstance(tasks, dict) else None
+    try:
+        if query and panel_message is source_message:
+            await query.edit_message_text(
+                text,
+                parse_mode="HTML",
+                reply_markup=video_editor_status_keyboard(normalized_job_id, lang),
+            )
+        else:
+            await panel_message.edit_text(
+                text,
+                parse_mode="HTML",
+                reply_markup=video_editor_status_keyboard(normalized_job_id, lang),
+            )
+    except Exception as exc:
+        if not video_edit_panel_not_modified(exc):
+            rollback_binding()
+            raise
+    active = dict(registry.get(key) or {})
+    if active.get("binding_attempt") is not binding_attempt:
+        rollback_binding()
+        raise RuntimeError("videoedit_progress_panel_binding_lost")
+    active["binding_state"] = "active"
+    registry[key] = active
     return panel_message
 
 
@@ -234595,6 +234786,49 @@ async def inspect_video_editor_srt(context: ContextTypes.DEFAULT_TYPE, source: d
         return video_local_validation.validate_srt_file(path, workspace=tmpdir)
 
 
+async def inspect_video_editor_logo(
+    context: ContextTypes.DEFAULT_TYPE,
+    source: dict,
+) -> dict:
+    """Validate actual static-image bytes when Telegram transport is available."""
+
+    current = dict(source or {})
+    try:
+        file_name = video_local_validation.validate_extension(
+            str(current.get("file_name") or "logo.png"),
+            video_local_validation.ALLOWED_LOGO_EXTENSIONS,
+        )
+    except video_local_validation.LocalVideoValidationError as exc:
+        return {"ok": False, "reason": exc.reason}
+    if safe_int(current.get("file_size"), 0) > video_local_validation.MAX_LOGO_BYTES:
+        return {"ok": False, "reason": "logo_size_invalid"}
+    telegram_bot = getattr(context, "bot", None)
+    if telegram_bot is None:
+        # Some internal/legacy seams do not expose Telegram transport. The worker
+        # remains authoritative and always validates bytes before FFmpeg.
+        return {"ok": True, "reason": "", "deferred_to_worker": True}
+    with tempfile.TemporaryDirectory(prefix="toanaas_video_local_logo_") as tmpdir:
+        path = os.path.join(tmpdir, file_name)
+        try:
+            telegram_file = await telegram_bot.get_file(str(current.get("file_id") or ""))
+            download_to_drive = getattr(telegram_file, "download_to_drive", None)
+            if callable(download_to_drive):
+                await download_to_drive(custom_path=path)
+            else:
+                data = bytes(await telegram_file.download_as_bytearray())
+                if len(data) > video_local_validation.MAX_LOGO_BYTES:
+                    return {"ok": False, "reason": "logo_size_invalid"}
+                with open(path, "wb") as handle:
+                    handle.write(data)
+        except Exception:
+            return {"ok": False, "reason": "logo_download_failed"}
+        return await asyncio.to_thread(
+            video_local_validation.validate_static_image_file,
+            path,
+            expected_filename=file_name,
+        )
+
+
 def count_active_video_local_jobs(user_id) -> int:
     conn = db_connect()
     try:
@@ -236214,12 +236448,13 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
         return True
     if step == "await_logo":
         logo_parent = video_local_logo_parent_callback(state)
+        logo_input_back = video_local_logo_input_back_callback(state)
         source = video_editor_aux_source_from_update(update, "logo")
         if not source.get("file_id"):
             await update.message.reply_text(
                 "⚠️ Vui lòng gửi logo PNG, JPG, JPEG hoặc WebP.",
                 reply_markup=video_local_input_keyboard(
-                    "manual", lang, back_callback=logo_parent
+                    "manual", lang, back_callback=logo_input_back
                 ),
             )
             return True
@@ -236227,12 +236462,34 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
             await update.message.reply_text(
                 "⚠️ Logo vượt 10 MB. Vui lòng gửi ảnh nhỏ hơn.",
                 reply_markup=video_local_input_keyboard(
-                    "manual", lang, back_callback=logo_parent
+                    "manual", lang, back_callback=logo_input_back
                 ),
             )
             return True
+        logo_validation = await inspect_video_editor_logo(context, source)
+        if not logo_validation.get("ok"):
+            await update.message.reply_text(
+                "⚠️ File Logo chưa phải ảnh PNG, JPG, JPEG hoặc WebP hợp lệ. "
+                "Hãy gửi lại đúng file ảnh; kế hoạch hiện tại vẫn được giữ.",
+                reply_markup=video_local_input_keyboard(
+                    "manual", lang, back_callback=logo_input_back
+                ),
+            )
+            return True
+        if not logo_validation.get("deferred_to_worker"):
+            source.update({
+                "detected_format": str(logo_validation.get("format") or ""),
+                "width": safe_int(logo_validation.get("width"), 0),
+                "height": safe_int(logo_validation.get("height"), 0),
+                "content_sha256": str(logo_validation.get("sha256") or ""),
+                "validated_bytes": safe_int(logo_validation.get("bytes"), 0),
+            })
         plan = dict(state.get("manual_edit_plan") or {})
-        plan["logo_overlay"] = {"position": "top_right", "scale": 0.12, "opacity": 1.0}
+        logo_overlay = dict(plan.get("logo_overlay") or {})
+        logo_overlay.setdefault("position", "top_right")
+        logo_overlay.setdefault("scale", 0.12)
+        logo_overlay.setdefault("opacity", 1.0)
+        plan["logo_overlay"] = logo_overlay
         update_video_editor_screen(
             uid,
             "logo_options",
@@ -236679,7 +236936,7 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
             parse_mode="HTML",
             reply_markup=video_scene3_keyboard([
                 [("📎 Tiếp tục gửi Logo ảnh", "videoedit|logo"), ("🏷️ Mở Watermark chữ", "videoedit|watermark_entry")],
-                [(ui_text(lang, "common.back"), video_local_logo_parent_callback(state)), (ui_text(lang, "common.main_menu"), "menu|main")],
+                [(ui_text(lang, "common.back"), video_local_logo_input_back_callback(state)), (ui_text(lang, "common.main_menu"), "menu|main")],
             ]),
         )
         return True
@@ -236697,7 +236954,7 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
                 reply_markup=video_local_input_keyboard(
                     "manual",
                     lang,
-                    back_callback=video_local_watermark_parent_callback(state),
+                    back_callback=video_local_watermark_input_back_callback(state),
                 ),
             )
             return True
@@ -236719,11 +236976,12 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
             )
             return True
         watermark_config = {
+            **dict(state.get("watermark_config") or {}),
             "enabled": True,
             "text": content,
-            "position": "bottom_right",
-            "opacity": 0.45,
         }
+        watermark_config.setdefault("position", "bottom_right")
+        watermark_config.setdefault("opacity", 0.45)
         plan = video_editor_plan_with_watermark(state, watermark_config)
         watermark_parent = video_local_watermark_parent_callback(state)
         current = update_video_editor_screen(
@@ -240165,6 +240423,23 @@ async def handle_video_editor_callback(
     callback_entry_state = video_editor_state_snapshot(
         get_video_editor_pending(uid)
     )
+    if (
+        str(callback_entry_state.get("current_screen") or callback_entry_state.get("step") or "")
+        == "job_status"
+    ):
+        callback_job_id = safe_int(parts[2] if len(parts) > 2 else 0, 0)
+        owned_job_id = safe_int(callback_entry_state.get("job_id"), 0)
+        if (
+            raw_action not in {"status", "ai_status", "status_hub", "status_menu"}
+            or callback_job_id <= 0
+            or callback_job_id != owned_job_id
+        ):
+            await query.answer(
+                "Nút này thuộc màn chỉnh sửa cũ. Job hiện tại và bảng tiến độ được giữ nguyên.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
     if raw_action in {"status_hub", "status_menu"}:
         job_id = safe_int(parts[2] if len(parts) > 2 else 0, 0)
         binding = video_edit_progress_callback_binding(job_id, uid, query)
@@ -240361,10 +240636,13 @@ async def handle_video_editor_callback(
         "subtitle", "srt", "preset", "text", "sharpen", "color", "brightness", "logo",
         "resolution", "volume",
     }
+    owned_compat_upload_action = bool(callback_entry_state) and (
+        legacy_raw_action in VIDEO_EDIT_COMPAT_UPLOAD_ACTIONS
+    )
     if (
         not get_video_editor_pending(uid)
         and action not in VIDEO_EDIT_STATELESS_ACTIONS
-        and legacy_raw_action not in VIDEO_EDIT_COMPAT_UPLOAD_ACTIONS
+        and not owned_compat_upload_action
     ):
         return await query.answer(
             "Phiên chỉnh sửa đã hết hạn. Hãy mở lại Chỉnh sửa video và gửi video nguồn.",
@@ -242410,11 +242688,33 @@ async def handle_video_editor_callback(
             ),
         )
     if action == "watermark_text":
+        watermark_replace_owned = bool(
+            str(state.get("current_screen") or "") == "watermark_options"
+            and dict(state.get("watermark_config") or {}).get("enabled")
+        )
+        watermark_retry_owned = bool(
+            str(state.get("current_screen") or "") == "watermark_input"
+            and str(state.get("step") or "") == "await_watermark_text"
+            and str(state.get("pending_field") or "") == "watermark_text"
+        )
+        if not (watermark_replace_owned or watermark_retry_owned):
+            await query.answer(
+                "Nút sửa Watermark chữ đã cũ. Hãy mở lại Watermark chữ.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
         watermark_parent = video_local_watermark_parent_callback(state)
+        watermark_input_back = (
+            "videoedit|watermark_options"
+            if str(state.get("current_screen") or "") == "watermark_options"
+            and dict(state.get("watermark_config") or {}).get("enabled")
+            else watermark_parent
+        )
         update_video_editor_screen(
             uid,
             "watermark_input",
-            parent_callback=watermark_parent,
+            parent_callback=watermark_input_back,
             watermark_parent_callback=watermark_parent,
             state_step="await_watermark_text",
             pending_field="watermark_text",
@@ -242427,7 +242727,7 @@ async def handle_video_editor_callback(
             reply_markup=video_local_input_keyboard(
                 "manual",
                 lang,
-                back_callback=watermark_parent,
+                back_callback=watermark_input_back,
             ),
         )
     if action == "watermark_remove":
@@ -242532,11 +242832,33 @@ async def handle_video_editor_callback(
             ),
         )
     if action == "logo":
+        logo_replace_owned = bool(
+            str(state.get("current_screen") or "") == "logo_options"
+            and dict(state.get("logo_source") or {}).get("file_id")
+        )
+        logo_retry_owned = bool(
+            str(state.get("current_screen") or "") == "logo_input"
+            and str(state.get("step") or "") == "await_logo"
+            and str(state.get("pending_field") or "") == "logo"
+        )
+        if not (logo_replace_owned or logo_retry_owned):
+            await query.answer(
+                "Nút đổi Logo ảnh đã cũ. Hãy mở lại Logo ảnh.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
         logo_parent = video_local_logo_parent_callback(state)
+        logo_input_back = (
+            "videoedit|logo_options"
+            if str(state.get("current_screen") or "") == "logo_options"
+            and dict(state.get("logo_source") or {}).get("file_id")
+            else logo_parent
+        )
         update_video_editor_screen(
             uid,
             "logo_input",
-            parent_callback=logo_parent,
+            parent_callback=logo_input_back,
             logo_parent_callback=logo_parent,
             state_step="await_logo",
             pending_field="logo",
@@ -242549,7 +242871,7 @@ async def handle_video_editor_callback(
             reply_markup=video_local_input_keyboard(
                 "manual",
                 lang,
-                back_callback=logo_parent,
+                back_callback=logo_input_back,
             ),
         )
     if action == "logo_remove":
@@ -245499,10 +245821,23 @@ def verify_local_worker_access(request: Request):
     auth = request.headers.get("authorization", "")
     bearer = auth.replace("Bearer ", "", 1).strip() if auth.lower().startswith("bearer ") else ""
     token = token or bearer
-    if not LOCAL_WORKER_TOKEN:
-        raise HTTPException(status_code=503, detail="LOCAL_WORKER_TOKEN is not configured")
-    if not token or not hmac.compare_digest(str(token), LOCAL_WORKER_TOKEN):
+    header_scope = str(request.headers.get("x-local-worker-job-scope") or "").strip().lower()
+    query_scope = str(request.query_params.get("job_scope") or "").strip().lower()
+    if header_scope and query_scope and header_scope != query_scope:
+        raise HTTPException(status_code=403, detail="worker job scope mismatch")
+    worker_scope = header_scope or query_scope or "all"
+    if worker_scope not in LOCAL_WORKER_JOB_SCOPES:
+        raise HTTPException(status_code=403, detail="worker job scope forbidden")
+    expected_token = (
+        VIDEO_EDIT_WORKER_TOKEN
+        if worker_scope == "video_edit_only"
+        else LOCAL_WORKER_TOKEN
+    )
+    if not expected_token:
+        raise HTTPException(status_code=503, detail="worker token is not configured")
+    if not token or not hmac.compare_digest(str(token), expected_token):
         raise HTTPException(status_code=401, detail="invalid worker token")
+    return worker_scope
 
 def verify_remote_worker_api_access(request: Request):
     result = worker_auth.verify_worker_bearer_token(
@@ -245951,43 +246286,48 @@ def remote_worker_status_snapshot() -> dict:
 
 @fastapi_app.post("/internal/worker/heartbeat")
 async def internal_worker_heartbeat(request: Request):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
     payload = await read_json_body(request)
+    payload_scope = str(payload.get("job_scope") or worker_scope).strip().lower()
+    if payload_scope != worker_scope or payload_scope not in LOCAL_WORKER_JOB_SCOPES:
+        raise HTTPException(status_code=403, detail="worker job scope mismatch")
     worker_id = str(payload.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
-    set_system_setting("local_worker:last_heartbeat", now_text(), "last local worker heartbeat", worker_id)
-    set_system_setting("local_worker:worker_id", worker_id, "last local worker id", worker_id)
     worker_sha = frame_video_public_seam.sanitize_frame_video_worker_sha(payload.get("worker_sha"))
-    set_system_setting(
-        "local_worker:worker_sha",
-        worker_sha,
-        "last local worker revision",
-        worker_id,
-    )
     worker_flags = frame_video_public_seam.normalize_frame_video_worker_flags(
         payload.get("frame_video_engine_flags")
     )
-    set_system_setting(
-        "local_worker:frame_video_engine_flags_json",
-        json.dumps(worker_flags, ensure_ascii=True, separators=(",", ":")),
-        "last local Frame engine flag snapshot",
-        worker_id,
-    )
     ffmpeg_path = str(payload.get("ffmpeg_path") or "")
-    set_system_setting(
-        "local_worker:ffmpeg_path_seen",
-        ffmpeg_path[:500],
-        "worker reported ffmpeg path",
-        worker_id,
-    )
     ffprobe_path = str(payload.get("ffprobe_path") or "")
-    set_system_setting(
-        "local_worker:ffprobe_configured",
-        "1" if ffprobe_path else "0",
-        "worker reported ffprobe availability",
-        worker_id,
-    )
+    if worker_scope == "all":
+        set_system_setting("local_worker:last_heartbeat", now_text(), "last local worker heartbeat", worker_id)
+        set_system_setting("local_worker:worker_id", worker_id, "last local worker id", worker_id)
+        set_system_setting("local_worker:job_scope", worker_scope, "last local worker job scope", worker_id)
+        set_system_setting(
+            "local_worker:worker_sha",
+            worker_sha,
+            "last local worker revision",
+            worker_id,
+        )
+        set_system_setting(
+            "local_worker:frame_video_engine_flags_json",
+            json.dumps(worker_flags, ensure_ascii=True, separators=(",", ":")),
+            "last local Frame engine flag snapshot",
+            worker_id,
+        )
+        set_system_setting(
+            "local_worker:ffmpeg_path_seen",
+            ffmpeg_path[:500],
+            "worker reported ffmpeg path",
+            worker_id,
+        )
+        set_system_setting(
+            "local_worker:ffprobe_configured",
+            "1" if ffprobe_path else "0",
+            "worker reported ffprobe availability",
+            worker_id,
+        )
     contract_version = max(0, safe_int(payload.get("heartbeat_contract_version"), 0))
-    if contract_version >= 1:
+    if contract_version >= 1 and worker_scope == "video_edit_only":
         received_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         capabilities = payload.get("capabilities") or []
         if not isinstance(capabilities, list):
@@ -246014,24 +246354,29 @@ async def internal_worker_heartbeat(request: Request):
         adapter_settings = {
             "local_worker:video_edit_received_at_utc": received_at_utc,
             "local_worker:video_edit_timestamp_utc": str(payload.get("timestamp_utc") or "")[:80],
-            "local_worker:worker_owner": str(payload.get("worker_owner") or "")[:120],
-            "local_worker:engine_route": str(payload.get("engine_route") or "")[:120],
-            "local_worker:capabilities_json": json.dumps(
+            "local_worker:video_edit_job_scope": worker_scope,
+            "local_worker:video_edit_worker_id": worker_id,
+            "local_worker:video_edit_worker_sha": worker_sha,
+            "local_worker:video_edit_ffmpeg_path_seen": ffmpeg_path[:500],
+            "local_worker:video_edit_ffprobe_configured": "1" if ffprobe_path else "0",
+            "local_worker:video_edit_worker_owner": str(payload.get("worker_owner") or "")[:120],
+            "local_worker:video_edit_engine_route": str(payload.get("engine_route") or "")[:120],
+            "local_worker:video_edit_capabilities_json": json.dumps(
                 [str(item)[:120] for item in capabilities if str(item).strip()],
                 ensure_ascii=False,
             ),
-            "local_worker:instance_id": str(payload.get("instance_id") or "")[:180],
-            "local_worker:process_id": str(max(0, safe_int(payload.get("process_id"), 0))),
-            "local_worker:queue_depth": str(max(0, safe_int(payload.get("queue_depth"), 0))),
-            "local_worker:last_error": str(payload.get("last_error") or "")[:500],
-            "local_worker:heartbeat_contract_version": str(contract_version),
-            "local_worker:started_at_utc": str(payload.get("started_at_utc") or "")[:80],
+            "local_worker:video_edit_instance_id": str(payload.get("instance_id") or "")[:180],
+            "local_worker:video_edit_process_id": str(max(0, safe_int(payload.get("process_id"), 0))),
+            "local_worker:video_edit_queue_depth": str(max(0, safe_int(payload.get("queue_depth"), 0))),
+            "local_worker:video_edit_last_error": str(payload.get("last_error") or "")[:500],
+            "local_worker:video_edit_heartbeat_contract_version": str(contract_version),
+            "local_worker:video_edit_started_at_utc": str(payload.get("started_at_utc") or "")[:80],
             "local_worker:video_edit_filters_json": json.dumps(safe_filters, ensure_ascii=True, separators=(",", ":")),
             "local_worker:video_edit_filters_known": "1" if bool(payload.get("video_edit_filters_known")) else "0",
             "local_worker:video_edit_filter_worker_id": str(payload.get("video_edit_filter_worker_id") or "")[:120],
             "local_worker:video_edit_filter_ffmpeg_path": str(payload.get("video_edit_filter_ffmpeg_path") or "")[:500],
-            "local_worker:workspace_ready": "1" if payload.get("workspace_ready") is True else "0",
-            "local_worker:workspace_free_bytes": str(
+            "local_worker:video_edit_workspace_ready": "1" if payload.get("workspace_ready") is True else "0",
+            "local_worker:video_edit_workspace_free_bytes": str(
                 heartbeat_nonnegative_int("workspace_free_bytes", (1 << 63) - 1)
             ),
             "local_worker:video_edit_max_deadline_seconds": str(
@@ -246040,8 +246385,8 @@ async def internal_worker_heartbeat(request: Request):
                     6 * 60 * 60,
                 )
             ),
-            "local_worker:worker_token_ready": "1" if payload.get("worker_token_ready") is True else "0",
-            "local_worker:local_bot_api_ready": "1" if payload.get("local_bot_api_ready") is True else "0",
+            "local_worker:video_edit_worker_token_ready": "1" if payload.get("worker_token_ready") is True else "0",
+            "local_worker:video_edit_local_bot_api_ready": "1" if payload.get("local_bot_api_ready") is True else "0",
         }
         for key, value in adapter_settings.items():
             set_system_setting(key, value, "video edit worker heartbeat contract", worker_id)
@@ -246054,7 +246399,7 @@ async def internal_worker_heartbeat(request: Request):
 
 @fastapi_app.get("/internal/worker/poll")
 async def internal_worker_poll(request: Request):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
     worker_id = str(request.query_params.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
     worker_instance_id = str(request.query_params.get("worker_instance_id") or "")[:120]
     video_edit_resume_version = str(
@@ -246074,20 +246419,31 @@ async def internal_worker_poll(request: Request):
             ),
         ),
     )
-    set_system_setting("local_worker:last_heartbeat", now_text(), "poll heartbeat", worker_id)
-    set_system_setting("local_worker:worker_id", worker_id, "last local worker id", worker_id)
+    if worker_scope == "all":
+        set_system_setting("local_worker:last_heartbeat", now_text(), "poll heartbeat", worker_id)
+        set_system_setting("local_worker:worker_id", worker_id, "last local worker id", worker_id)
+        set_system_setting("local_worker:job_scope", worker_scope, "poll worker job scope", worker_id)
+    else:
+        set_system_setting(
+            "local_worker:video_edit_poll_job_scope",
+            worker_scope,
+            "video edit poll worker job scope",
+            worker_id,
+        )
     if not LOCAL_WORKER_ENABLED or not LOCAL_WORKER_POLL_ENABLED:
         return {"ok": True, "enabled": LOCAL_WORKER_ENABLED, "poll_enabled": LOCAL_WORKER_POLL_ENABLED, "job": None}
     conn = db_connect()
     try:
         claim_now = now_text()
-        canonical_job = video_editengine1.claim_next_video_local_edit(
-            conn,
-            lease_owner=worker_instance_id,
-            now=claim_now,
-            lease_seconds=lease_seconds,
-            supports_receipt_prefix_resume=supports_video_edit_receipt_prefix_resume,
-        )
+        canonical_job = {}
+        if worker_scope == "video_edit_only":
+            canonical_job = video_editengine1.claim_next_video_local_edit(
+                conn,
+                lease_owner=worker_instance_id,
+                now=claim_now,
+                lease_seconds=lease_seconds,
+                supports_receipt_prefix_resume=supports_video_edit_receipt_prefix_resume,
+            )
         if canonical_job:
             conn.commit()
             return {
@@ -246097,6 +246453,9 @@ async def internal_worker_poll(request: Request):
                 "max_job_seconds": LOCAL_WORKER_MAX_JOB_SECONDS,
                 "job": canonical_job,
             }
+        if worker_scope == "video_edit_only":
+            conn.commit()
+            return {"ok": True, "enabled": True, "poll_enabled": True, "job": None}
         c = conn.cursor()
         c.execute(
             """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
@@ -246156,7 +246515,9 @@ async def internal_worker_poll(request: Request):
 
 @fastapi_app.post("/internal/worker/video_edit_cleanup/claim")
 async def internal_worker_video_edit_cleanup_claim(request: Request):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
+    if worker_scope != "video_edit_only":
+        raise HTTPException(status_code=403, detail="worker job scope forbidden")
     payload = await read_json_body(request)
     job_id = payload.get("job_id")
     delivery_owner = payload.get("delivery_owner")
@@ -246218,7 +246579,9 @@ async def internal_worker_video_edit_cleanup_claim(request: Request):
 
 @fastapi_app.post("/internal/worker/video_edit_cleanup/result")
 async def internal_worker_video_edit_cleanup_result(request: Request):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
+    if worker_scope != "video_edit_only":
+        raise HTTPException(status_code=403, detail="worker job scope forbidden")
     payload = await read_json_body(request)
     job_id = payload.get("job_id")
     delivery_owner = payload.get("delivery_owner")
@@ -246285,7 +246648,9 @@ async def internal_worker_video_edit_cleanup_result(request: Request):
 
 @fastapi_app.get("/internal/video_worker/poll")
 async def internal_video_worker_poll(request: Request):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
+    if worker_scope != "all":
+        raise HTTPException(status_code=403, detail="worker job scope forbidden")
     worker_id = str(request.query_params.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
     lease_seconds = max(30, min(3600, int(request.query_params.get("lease_seconds") or LOCAL_WORKER_MAX_JOB_SECONDS or 600)))
     set_system_setting("local_worker:last_heartbeat", now_text(), "video project poll heartbeat", worker_id)
@@ -246308,7 +246673,7 @@ async def internal_video_worker_poll(request: Request):
 
 @fastapi_app.post("/internal/worker/job_update")
 async def internal_worker_job_update(request: Request):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
     payload = await read_json_body(request)
     job_id = payload.get("id") or payload.get("job_id")
     if not job_id:
@@ -246319,6 +246684,12 @@ async def internal_worker_job_update(request: Request):
     video_edit_payload_limit = 128 * 1024
     previous_job_type = str((previous_job or {}).get("job_type") or "")
     is_video_edit = previous_job_type == video_editengine1.WORKER_JOB_TYPE
+    if (
+        worker_scope == "video_edit_only" and not is_video_edit
+    ) or (
+        worker_scope == "all" and is_video_edit
+    ):
+        raise HTTPException(status_code=403, detail="worker job scope forbidden")
     is_frame_video = previous_job_type == "frame_video_render"
     job = None
     if is_video_edit:
@@ -246670,7 +247041,9 @@ async def internal_worker_job_update(request: Request):
 
 @fastapi_app.post("/internal/video_worker/job_update")
 async def internal_video_worker_job_update(request: Request):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
+    if worker_scope != "all":
+        raise HTTPException(status_code=403, detail="worker job scope forbidden")
     payload = await read_json_body(request)
     job_id = payload.get("id") or payload.get("job_id")
     if not job_id:
@@ -246722,7 +247095,9 @@ async def internal_video_worker_job_update(request: Request):
 
 @fastapi_app.post("/internal/worker/upload_result")
 async def internal_worker_upload_result(request: Request, job_id: str = Form(default=""), file: UploadFile | None = File(default=None)):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
+    if worker_scope != "all":
+        raise HTTPException(status_code=403, detail="worker job scope forbidden")
     if not job_id:
         raise HTTPException(status_code=400, detail="job_id required")
     if not file:

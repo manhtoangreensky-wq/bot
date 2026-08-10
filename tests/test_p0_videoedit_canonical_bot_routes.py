@@ -17,6 +17,8 @@ from types import SimpleNamespace
 
 import pytest
 
+import local_worker
+
 from services import (
     video_edit_capabilities,
     video_edit_media_transport,
@@ -1124,12 +1126,15 @@ def test_runtime_capability_ui_requires_fresh_matching_worker_snapshot() -> None
     admission = _function_source("video_edit_runtime_capability_admission")
     status = _function_source("video_edit_worker_status_payload")
     assert 'worker.get("connected")' in admission
+    assert 'worker.get("job_scope")' in admission
     assert 'worker.get("worker_owner")' in admission
     assert 'worker.get("engine_route")' in admission
     assert 'worker.get("worker_id")' in admission
     assert 'worker.get("video_edit_filter_worker_id")' in admission
     assert "local_worker_filter_snapshot_owner_mismatch" in admission
-    assert 'get_system_setting("local_worker:ffmpeg_path_seen"' in status
+    assert '"local_worker:video_edit_ffmpeg_path_seen"' in status
+    assert '"local_worker:video_edit_job_scope"' in status
+    assert '"local_worker:video_edit_worker_id"' in status
     assert '"ffmpeg_path": reported_ffmpeg_path' in status
 
     heartbeat = _function_source("internal_worker_heartbeat")
@@ -1149,6 +1154,7 @@ def test_runtime_capability_ui_fails_closed_on_worker_identity_or_heartbeat() ->
         "ffprobe_path_configured": True,
         "heartbeat_contract_version": 1,
         "heartbeat_age_seconds": 1,
+        "job_scope": "video_edit_only",
         "worker_id": "video-edit-worker-1",
         "worker_owner": video_editengine1.OUTBOX_OWNER,
         "engine_route": video_editengine1.ENGINE_ROUTE,
@@ -1174,6 +1180,7 @@ def test_runtime_capability_ui_fails_closed_on_worker_identity_or_heartbeat() ->
     blockers = (
         ({"connected": False}, "local_worker_heartbeat_stale"),
         ({"heartbeat_contract_version": 0}, "local_worker_contract_missing"),
+        ({"job_scope": "all"}, "local_worker_job_scope_mismatch"),
         ({"heartbeat_age_seconds": video_editengine1.HEARTBEAT_TTL_SECONDS + 1}, "local_worker_heartbeat_stale"),
         ({"worker_owner": "another-product"}, "local_worker_owner_mismatch"),
         ({"engine_route": "provider-route"}, "local_worker_route_mismatch"),
@@ -2229,9 +2236,15 @@ def _init_job_db(path: Path) -> None:
                 status TEXT,
                 provider TEXT,
                 input_file_id TEXT,
+                output_file_id TEXT,
+                output_url TEXT,
+                error_short TEXT,
                 created_at TEXT,
+                started_at TEXT,
+                finished_at TEXT,
                 xu_cost INTEGER,
                 admin_only INTEGER,
+                worker_id TEXT,
                 updated_at TEXT
             )"""
         )
@@ -2575,7 +2588,10 @@ def test_video_edit_submit_inspection_evidence_fails_closed_for_invalid_evidence
     assert "source_sha256" not in evidence, case
 
 
-def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_path: Path) -> None:
+def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     db_path = tmp_path / "videoedit.sqlite3"
     _init_job_db(db_path)
     saved: dict = {}
@@ -2645,8 +2661,16 @@ def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_
     try:
         assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM video_edit_outbox").fetchone()[0] == 1
         payload = json.loads(conn.execute("SELECT input_file_id FROM local_worker_jobs").fetchone()[0])
         canonical = conn.execute("SELECT quality_tier_id,price_xu,tail_json FROM video_edit_jobs").fetchone()
+        claimed = video_editengine1.claim_next_video_local_edit(
+            conn,
+            lease_owner="video-edit-worker:test:1",
+            now="2030-01-02 03:04:05",
+            lease_seconds=300,
+        )
+        conn.commit()
     finally:
         conn.close()
 
@@ -2654,6 +2678,8 @@ def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_
     assert payload["price_xu"] == 0
     assert payload["quoted_price_xu"] == 0
     assert payload["provider_call"] is False
+    assert payload["engine_route"] == video_editengine1.ENGINE_ROUTE
+    assert payload["worker_owner"] == video_editengine1.OUTBOX_OWNER
     assert payload["media_lane"] == "large_media"
     assert payload["source_file_size"] == large_bytes
     assert payload["source_video_hash"] == "b" * 64
@@ -2667,6 +2693,17 @@ def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_
     assert payload["rights_confirmation"]["review_revision"] == 3
     assert payload["rights_confirmation"]["confirmed_at_unix"] > 0
     assert canonical == ("local-free", 0, "{}")
+    assert claimed["job_type"] == video_editengine1.WORKER_JOB_TYPE
+    assert json.loads(claimed["input_file_id"]) == payload
+    dispatched: list[dict] = []
+    monkeypatch.setattr(local_worker, "LOCAL_WORKER_JOB_SCOPE", "video_edit_only")
+    monkeypatch.setattr(
+        local_worker,
+        "run_video_local_edit",
+        lambda job: dispatched.append(dict(job)),
+    )
+    local_worker.process_job(claimed)
+    assert [job["id"] for job in dispatched] == [claimed["id"]]
     assert saved["step"] == "job_status"
     assert create_calls == 1
     assert query.edits and all("0 Xu" in text for text, _kwargs in query.edits)

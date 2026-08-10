@@ -176,6 +176,8 @@ BOT_BASE_URL = normalize_base_url(
     or "http://127.0.0.1:8000"
 )
 LOCAL_WORKER_TOKEN = str(os.environ.get("LOCAL_WORKER_TOKEN", "")).strip()
+VIDEO_EDIT_WORKER_TOKEN = str(os.environ.get("VIDEO_EDIT_WORKER_TOKEN", "")).strip()
+LOCAL_WORKER_JOB_SCOPE = str(os.environ.get("LOCAL_WORKER_JOB_SCOPE", "all")).strip().lower() or "all"
 TELEGRAM_BOT_TOKEN = resolve_telegram_bot_token()
 LOCAL_WORKER_ID = str(os.environ.get("LOCAL_WORKER_ID", "toan-aas-local-windows")).strip()
 LOCAL_WORKER_MAX_JOB_SECONDS = max(30, env_int("LOCAL_WORKER_MAX_JOB_SECONDS", 600))
@@ -197,7 +199,8 @@ VIDEO_EDIT_WORKER_OWNER = "local_video_edit"
 VIDEO_EDIT_ENGINE_ROUTE = "local_worker_ffmpeg"
 VIDEO_EDIT_CAPABILITIES = ("video_edit",)
 FRAME_VIDEO_WORKER_CAPABILITY = "frame_video_render"
-LOCAL_WORKER_CAPABILITIES = VIDEO_EDIT_CAPABILITIES + (FRAME_VIDEO_WORKER_CAPABILITY,)
+LOCAL_WORKER_CAPABILITIES = (FRAME_VIDEO_WORKER_CAPABILITY,)
+LOCAL_WORKER_JOB_SCOPES = frozenset({"all", "video_edit_only"})
 LOCAL_WORKER_STARTED_AT_UTC = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 LOCAL_WORKER_INSTANCE_ID = f"{LOCAL_WORKER_ID}:{socket.gethostname()}:{os.getpid()}"
 LOCAL_WORKER_LAST_ERROR = ""
@@ -209,12 +212,36 @@ def endpoint(path: str) -> str:
     return BOT_BASE_URL.rstrip("/") + "/" + path.lstrip("/")
 
 
+def local_worker_job_scope() -> str:
+    scope = str(LOCAL_WORKER_JOB_SCOPE or "").strip().lower()
+    if scope not in LOCAL_WORKER_JOB_SCOPES:
+        raise LocalVideoEditError("worker_scope_invalid")
+    return scope
+
+
+def local_worker_auth_token() -> str:
+    if local_worker_job_scope() == "video_edit_only":
+        if not VIDEO_EDIT_WORKER_TOKEN:
+            raise LocalVideoEditError("video_edit_worker_token_missing")
+        return VIDEO_EDIT_WORKER_TOKEN
+    return LOCAL_WORKER_TOKEN
+
+
+def local_worker_capabilities() -> tuple[str, ...]:
+    if local_worker_job_scope() == "video_edit_only":
+        return VIDEO_EDIT_CAPABILITIES
+    return LOCAL_WORKER_CAPABILITIES
+
+
 def auth_headers() -> dict[str, str]:
+    scope = local_worker_job_scope()
+    token = local_worker_auth_token()
     return {
         "Content-Type": "application/json",
-        "Authorization": "Bearer " + LOCAL_WORKER_TOKEN,
-        "x-local-worker-token": LOCAL_WORKER_TOKEN,
+        "Authorization": "Bearer " + token,
+        "x-local-worker-token": token,
         "x-worker-id": LOCAL_WORKER_ID,
+        "x-local-worker-job-scope": scope,
     }
 
 
@@ -374,7 +401,7 @@ def _video_edit_capacity_heartbeat() -> dict[str, int | bool]:
         and 120 <= raw_deadline <= 6 * 60 * 60
         else 0
     )
-    worker_token_ready = _heartbeat_secret_ready(LOCAL_WORKER_TOKEN)
+    worker_token_ready = _heartbeat_secret_ready(local_worker_auth_token())
     local_bot_api_ready = False
     try:
         media_config = _video_edit_telegram_media_config()
@@ -394,6 +421,7 @@ def _video_edit_capacity_heartbeat() -> dict[str, int | bool]:
 
 
 def local_worker_heartbeat_payload(*, last_error: str = "", queue_depth: int = 0) -> dict:
+    scope = local_worker_job_scope()
     ffmpeg_path = local_ffmpeg_path()
     try:
         discovered_filters = available_ffmpeg_filters(ffmpeg_path, refresh=True)
@@ -417,9 +445,8 @@ def local_worker_heartbeat_payload(*, last_error: str = "", queue_depth: int = 0
         "frame_video_engine_flags": frame_video_public_seam.frame_video_worker_flag_snapshot(os.environ),
         "worker_owner": VIDEO_EDIT_WORKER_OWNER,
         "engine_route": VIDEO_EDIT_ENGINE_ROUTE,
-        # This worker executes both canonical local-edit and frame-video jobs.
-        # Advertising both avoids admitting a queued job to a worker that cannot own it.
-        "capabilities": list(LOCAL_WORKER_CAPABILITIES),
+        "job_scope": scope,
+        "capabilities": list(local_worker_capabilities()),
         "instance_id": LOCAL_WORKER_INSTANCE_ID,
         "process_id": int(os.getpid()),
         "started_at_utc": LOCAL_WORKER_STARTED_AT_UTC,
@@ -464,11 +491,13 @@ def run_heartbeat_loop(stop_event: threading.Event, interval_seconds: int = 30) 
 
 
 def poll_job() -> dict | None:
+    scope = local_worker_job_scope()
     lease_seconds = max(30, min(3600, int(LOCAL_WORKER_MAX_JOB_SECONDS or 600)))
     query = urllib.parse.urlencode({
         "worker_id": LOCAL_WORKER_ID,
         "worker_instance_id": LOCAL_WORKER_INSTANCE_ID,
         "lease_seconds": lease_seconds,
+        "job_scope": scope,
         "video_edit_resume_version": video_editengine1.VIDEO_LOCAL_EDIT_RESUME_VERSION,
     })
     data = http_json("GET", f"/internal/worker/poll?{query}", timeout=25)
@@ -1771,6 +1800,52 @@ def _video_edit_normalize_download_receipt(
         transport="legacy_path",
         declared_bytes=None,
     )
+
+
+def _video_edit_validate_logo_receipt(
+    source: dict,
+    receipt: video_edit_media_transport.DownloadReceipt,
+) -> dict:
+    """Revalidate a downloaded static logo before it can enter an FFmpeg plan."""
+
+    current = dict(source or {})
+    validation = video_local_validation.validate_static_image_file(
+        receipt.path,
+        expected_filename=str(current.get("file_name") or "logo.png"),
+        maximum_bytes=video_local_validation.MAX_LOGO_BYTES,
+    )
+    if not validation.get("ok"):
+        raise LocalVideoEditError(
+            str(validation.get("reason") or "logo_format_invalid")
+        )
+    expected_sha = str(
+        current.get("content_sha256") or current.get("sha256") or ""
+    ).strip().lower()
+    if expected_sha and (
+        expected_sha != str(receipt.sha256 or "").strip().lower()
+        or expected_sha != str(validation.get("sha256") or "").strip().lower()
+    ):
+        raise LocalVideoEditError("logo_content_hash_mismatch")
+    expected_bytes = current.get("validated_bytes")
+    if expected_bytes not in {None, ""}:
+        if (
+            isinstance(expected_bytes, bool)
+            or not isinstance(expected_bytes, int)
+            or expected_bytes != int(receipt.bytes_written)
+        ):
+            raise LocalVideoEditError("logo_content_size_mismatch")
+    expected_format = str(current.get("detected_format") or "").strip().lower()
+    if expected_format and expected_format != str(validation.get("format") or ""):
+        raise LocalVideoEditError("logo_content_format_mismatch")
+    for key in ("width", "height"):
+        expected_dimension = current.get(key)
+        if expected_dimension not in {None, "", 0} and (
+            isinstance(expected_dimension, bool)
+            or not isinstance(expected_dimension, int)
+            or expected_dimension != int(validation.get(key) or 0)
+        ):
+            raise LocalVideoEditError("logo_content_dimensions_mismatch")
+    return validation
 
 
 def _video_edit_queued_source_hashes(payload: dict) -> tuple[str, ...]:
@@ -3526,6 +3601,7 @@ def run_video_local_edit(job: dict) -> None:
                         deadline_monotonic=deadline_monotonic,
                     )
                 )
+                _video_edit_validate_logo_receipt(logo_source, logo_receipt)
                 asset_receipts.append(logo_receipt)
                 checkpoint_asset_evidence.append(
                     {
@@ -5135,6 +5211,13 @@ def run_paid_video_preview(job: dict) -> None:
 def process_job(job: dict) -> None:
     job_id = job.get("id")
     job_type = str(job.get("job_type") or "").strip()
+    worker_scope = local_worker_job_scope()
+    if (
+        worker_scope == "video_edit_only" and job_type != "video_local_edit"
+    ) or (
+        worker_scope == "all" and job_type == "video_local_edit"
+    ):
+        raise LocalVideoEditError("worker_scope_job_type_forbidden")
     if not job_id:
         return
     if job_type == "worker_ping":
@@ -5169,10 +5252,11 @@ def process_job(job: dict) -> None:
 
 def main() -> None:
     global LOCAL_WORKER_LAST_ERROR
+    worker_scope = local_worker_job_scope()
     print("[local_worker] TOAN AAS Local Worker Phase 1 starting")
     print(f"[local_worker] base_url={BOT_BASE_URL}")
     print(f"[local_worker] worker_id={LOCAL_WORKER_ID}")
-    print(f"[local_worker] token_configured={'yes' if bool(LOCAL_WORKER_TOKEN) else 'no'}")
+    print(f"[local_worker] token_configured={'yes' if bool(local_worker_auth_token()) else 'no'}")
     print(f"[local_worker] telegram_token_configured={'yes' if bool(TELEGRAM_BOT_TOKEN) else 'no'}")
     print(f"[local_worker] ffmpeg_path={LOCAL_FFMPEG_PATH}")
     print("[local_worker] ComfyUI render is planned/not_ready in Phase 1")
@@ -5183,15 +5267,19 @@ def main() -> None:
         name="toan-aas-local-worker-heartbeat",
         daemon=True,
     )
-    cleanup_replay_stop = threading.Event()
-    cleanup_replay_thread = threading.Thread(
-        target=run_video_edit_cleanup_replay_loop,
-        args=(cleanup_replay_stop,),
-        name="toan-aas-video-edit-cleanup-replay",
-        daemon=True,
-    )
+    cleanup_replay_stop = None
+    cleanup_replay_thread = None
+    if worker_scope == "video_edit_only":
+        cleanup_replay_stop = threading.Event()
+        cleanup_replay_thread = threading.Thread(
+            target=run_video_edit_cleanup_replay_loop,
+            args=(cleanup_replay_stop,),
+            name="toan-aas-video-edit-cleanup-replay",
+            daemon=True,
+        )
     heartbeat_thread.start()
-    cleanup_replay_thread.start()
+    if cleanup_replay_thread is not None:
+        cleanup_replay_thread.start()
     try:
         while True:
             try:
@@ -5199,7 +5287,7 @@ def main() -> None:
                 if job:
                     print(f"[local_worker] job #{job.get('id')} {job.get('job_type')}")
                     process_job(job)
-                elif VIDEO_PROJECT_QUEUE_ENABLED:
+                elif worker_scope == "all" and VIDEO_PROJECT_QUEUE_ENABLED:
                     video_job = poll_video_render_job()
                     if video_job:
                         print(f"[local_worker] video_job #{video_job.get('id')} {video_job.get('job_type')}")
@@ -5225,9 +5313,11 @@ def main() -> None:
                 time.sleep(10)
     finally:
         heartbeat_stop.set()
-        cleanup_replay_stop.set()
         heartbeat_thread.join(timeout=2)
-        cleanup_replay_thread.join(timeout=2)
+        if cleanup_replay_stop is not None:
+            cleanup_replay_stop.set()
+        if cleanup_replay_thread is not None:
+            cleanup_replay_thread.join(timeout=2)
 
 
 if __name__ == "__main__":
