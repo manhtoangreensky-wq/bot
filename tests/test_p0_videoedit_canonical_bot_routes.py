@@ -2729,6 +2729,52 @@ def test_confirm_local_invalid_inspection_evidence_creates_no_job_or_preflight(t
     assert saved == {}
 
 
+def test_local_free_submit_surfaces_preflight_reason_without_creating_job(tmp_path: Path) -> None:
+    db_path = tmp_path / "videoedit-preflight-reason.sqlite3"
+    _init_job_db(db_path)
+    saved: dict = {}
+    namespace = _submit_namespace(db_path, saved)
+
+    class _EngineSpy:
+        def __getattr__(self, name):
+            return getattr(video_editengine1, name)
+
+        @staticmethod
+        def preflight(*_args, **_kwargs):
+            return {"ok": False, "reason": "local_worker_heartbeat_stale"}
+
+        @staticmethod
+        def create_job(*_args, **_kwargs):
+            raise AssertionError("create_job must not run when preflight is blocked")
+
+    namespace["video_editengine1"] = _EngineSpy()
+    submit = _compile_function("submit_video_edit_local_free_job", namespace)
+    state = _default_state(
+        907,
+        step="confirmation",
+        current_screen="confirmation",
+        status="confirmation_ready",
+        review_revision=3,
+        state_revision=3,
+    )
+    query = _Query(907, "videoedit|confirm_local")
+    update = SimpleNamespace(callback_query=query, message=None, effective_user=query.from_user)
+
+    assert asyncio.run(submit(update, SimpleNamespace(), state)) is True
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 0
+    finally:
+        conn.close()
+    assert len(query.edits) == 1
+    blocker_text, blocker_kwargs = query.edits[0]
+    assert "local_worker_heartbeat_stale" in blocker_text
+    assert "chưa tạo tác vụ và chưa trừ Xu" in blocker_text
+    assert blocker_kwargs["parse_mode"] == "HTML"
+    assert saved == {}
+
+
 def test_free_submit_source_does_not_use_legacy_size_or_render_limits() -> None:
     submit = _function_source("submit_video_edit_local_free_job")
 

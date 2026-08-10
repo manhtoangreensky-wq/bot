@@ -8711,9 +8711,69 @@ def product_progress_status_from_job_text(product_type: str = "", job: dict | No
 
 
 def progress_auto_refresh_key(product_type: str = "", job_id: str = "") -> str:
-    canonical = product_progress_status.normalize_product_type(product_type)
+    canonical = (
+        "video_edit"
+        if str(product_type or "").strip().lower() == "video_edit"
+        else product_progress_status.normalize_product_type(product_type)
+    )
     safe_job = product_progress_status.product_progress_safe_callback_value(job_id, 40) or "latest"
     return f"{canonical}:{safe_job}"
+
+
+def video_edit_panel_not_modified(error) -> bool:
+    """Treat only Telegram's exact unchanged-message response as render success."""
+
+    tokens = (
+        str(error or "").strip().lower(),
+        str(getattr(error, "message", "") or "").strip().lower(),
+    )
+    return any(
+        "message is not modified" in token or "message_not_modified" in token
+        for token in tokens
+        if token
+    )
+
+
+def video_edit_progress_callback_binding(job_id, user_id, query) -> dict:
+    """Resolve one public refresh to its exact job/user/chat/message panel tuple."""
+
+    normalized_job_id = safe_int(job_id, 0)
+    normalized_user_id = safe_int(user_id, 0)
+    message = getattr(query, "message", None)
+    chat_id = safe_int(
+        getattr(message, "chat_id", 0)
+        or getattr(getattr(message, "chat", None), "id", 0),
+        0,
+    )
+    message_id = safe_int(getattr(message, "message_id", 0), 0)
+    if normalized_job_id <= 0 or normalized_user_id <= 0 or chat_id == 0 or message_id <= 0:
+        return {}
+    key = progress_auto_refresh_key("video_edit", str(normalized_job_id))
+    record = dict(PROGRESS_AUTO_REFRESH_JOBS.get(key) or {})
+    if record:
+        if not (
+            str(record.get("key") or "") == key
+            and str(record.get("product_type") or "").strip().lower() == "video_edit"
+            and safe_int(record.get("job_id"), 0) == normalized_job_id
+            and safe_int(record.get("user_id"), 0) == normalized_user_id
+            and safe_int(record.get("chat_id"), 0) == chat_id
+            and safe_int(record.get("message_id"), 0) == message_id
+        ):
+            return {}
+        restart_recovery = bool(record.get("stopped")) or record.get("task_alive") is False
+    else:
+        if chat_id != normalized_user_id:
+            return {}
+        restart_recovery = True
+    return {
+        "key": key,
+        "record": record,
+        "job_id": normalized_job_id,
+        "user_id": normalized_user_id,
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "restart_recovery": restart_recovery,
+    }
 
 
 def subdub_progress_job_for_user(job_id: str = "", user_id=0) -> dict:
@@ -8783,7 +8843,142 @@ def subdub_progress_job_for_user(job_id: str = "", user_id=0) -> dict:
     return max(candidates, key=_truth_priority)
 
 
+def video_edit_progress_read_status(job_id: str = "", user_id=0) -> dict:
+    """Read one exact, owner-bound Video Edit job from one DB snapshot."""
+
+    worker_job_id = safe_int(job_id, 0)
+    if worker_job_id <= 0:
+        return {}
+    conn = db_connect_readonly()
+    try:
+        conn.execute("BEGIN")
+        worker_job = dict(
+            get_local_worker_job_readonly(worker_job_id, conn=conn) or {}
+        )
+        if (
+            safe_int(worker_job.get("id"), 0) != worker_job_id
+            or str(worker_job.get("job_type") or "") != video_editengine1.WORKER_JOB_TYPE
+            or not str(worker_job.get("user_id") or "").strip()
+            or (user_id and str(worker_job.get("user_id") or "") != str(user_id))
+        ):
+            return {}
+        canonical = dict(
+            video_editengine1_job_for_worker(worker_job_id, conn=conn) or {}
+        )
+        if (
+            safe_int(canonical.get("local_worker_job_id"), 0) != worker_job_id
+            or str(canonical.get("product_type") or "") != video_editengine1.PRODUCT_TYPE
+            or str(canonical.get("worker_job_type") or "")
+            != video_editengine1.WORKER_JOB_TYPE
+            or str(canonical.get("engine_route") or "")
+            != video_editengine1.ENGINE_ROUTE
+            or str(canonical.get("worker_owner") or "")
+            != video_editengine1.OUTBOX_OWNER
+            or str(canonical.get("user_id") or "")
+            != str(worker_job.get("user_id") or "")
+        ):
+            return {}
+        worker_job["_video_edit_canonical"] = canonical
+        return worker_job
+    finally:
+        conn.close()
+
+
+def video_edit_progress_snapshot(
+    job_id: str = "",
+    user_id=0,
+    job: dict | None = None,
+    lang: str = "vi",
+) -> dict:
+    """Build the six-stage, artifact-gated snapshot for one Video Edit job."""
+
+    worker_job_id = safe_int(job_id, 0)
+    current = dict(
+        job
+        if job is not None
+        else video_edit_progress_read_status(str(worker_job_id), user_id=user_id)
+    )
+    if user_id and current and str(current.get("user_id") or "") != str(user_id):
+        current = {}
+    canonical = dict(current.get("_video_edit_canonical") or {})
+    worker_owner = str(current.get("user_id") or "").strip()
+    if (
+        worker_job_id <= 0
+        or not current
+        or safe_int(current.get("id"), 0) != worker_job_id
+        or str(current.get("job_type") or "") != video_editengine1.WORKER_JOB_TYPE
+        or not worker_owner
+        or (user_id and worker_owner != str(user_id))
+        or safe_int(canonical.get("local_worker_job_id"), 0) != worker_job_id
+        or str(canonical.get("product_type") or "") != video_editengine1.PRODUCT_TYPE
+        or str(canonical.get("worker_job_type") or "") != video_editengine1.WORKER_JOB_TYPE
+        or str(canonical.get("user_id") or "") != worker_owner
+    ):
+        return {}
+    progress = video_local_job_progress_payload(current)
+    worker_status = str(current.get("status") or "").strip().lower()
+    canonical_status = str(canonical.get("status") or "").strip().lower()
+    stage = str(progress.get("stage") or "").strip()
+    if not stage:
+        if worker_status == "queued":
+            stage = "received"
+        elif worker_status in {"running", "processing"}:
+            stage = "processing_video"
+    delivered_truth = video_edit_delivery_receipt_is_complete(
+        canonical,
+        {**progress, "worker_status": worker_status},
+    )
+    worker_terminal_success = worker_status in {"completed", "succeeded"}
+    delivery_uncertain = bool(
+        canonical_status == "delivery_unknown"
+        or stage == "delivery_unknown"
+        or (stage == "delivered" and not delivered_truth)
+        or (canonical_status in {"delivered", "charged"} and not delivered_truth)
+        or (worker_terminal_success and not delivered_truth)
+    )
+    failed = bool(
+        canonical_status == "failed_no_charge"
+        or worker_status in {"failed", "cancelled"}
+        or stage == "failed_no_charge"
+    )
+    if delivered_truth:
+        terminal_state = "delivered"
+        stage = "delivered"
+    elif delivery_uncertain:
+        terminal_state = "delivery_unknown"
+        stage = "delivery_unknown"
+    elif failed:
+        terminal_state = "failed_no_charge"
+        stage = "failed_no_charge"
+    else:
+        terminal_state = ""
+    percent = {
+        "received": 10,
+        "inspecting_input": 20,
+        "preparing_plan": 35,
+        "processing_video": 60,
+        "validating_output": 85,
+        "delivering": 95,
+        "delivery_unknown": 95,
+        "delivered": 100,
+    }.get(stage, 0)
+    text = video_editor_job_status_text(current, lang)
+    return {
+        "product_type": "video_edit",
+        "job_id": str(worker_job_id or current.get("id") or ""),
+        "stage": stage,
+        "percent": percent,
+        "terminal_state": terminal_state,
+        "completed_steps": [],
+        "text": text,
+        "render_hash": hashlib.sha256(str(text or "").encode("utf-8")).hexdigest(),
+    }
+
+
 def progress_auto_refresh_read_status(product_type: str = "", job_id: str = "", user_id=0) -> dict:
+    raw_product_type = str(product_type or "").strip().lower()
+    if raw_product_type == "video_edit":
+        return video_edit_progress_read_status(job_id, user_id)
     canonical = product_progress_status.normalize_product_type(product_type)
     if canonical == "frame_video":
         return frame_video_job_for_user(job_id, user_id) or dict(FRAME_VIDEO_JOBS.get(str(job_id or "")) or {})
@@ -8792,7 +8987,16 @@ def progress_auto_refresh_read_status(product_type: str = "", job_id: str = "", 
     return get_engine_async_job(job_id)
 
 
-def progress_auto_refresh_snapshot(product_type: str = "", job_id: str = "", job: dict | None = None, lang: str = "vi") -> dict:
+def progress_auto_refresh_snapshot(
+    product_type: str = "",
+    job_id: str = "",
+    job: dict | None = None,
+    lang: str = "vi",
+    user_id=0,
+) -> dict:
+    raw_product_type = str(product_type or "").strip().lower()
+    if raw_product_type == "video_edit":
+        return video_edit_progress_snapshot(job_id, user_id=user_id, job=job, lang=lang)
     canonical = product_progress_status.normalize_product_type(product_type)
     current = dict(job if job is not None else progress_auto_refresh_read_status(canonical, job_id))
     canonical = resolve_progress_product_type(job_id, canonical, current)
@@ -8840,13 +9044,50 @@ def progress_auto_refresh_register(
     initial_snapshot: dict | None = None,
     start_task: bool = True,
 ) -> dict:
-    canonical = product_progress_status.normalize_product_type(product_type)
-    if not PROGRESS_AUTO_REFRESH_ENABLED or not job_id or not chat_id or not message_id:
+    canonical = (
+        "video_edit"
+        if str(product_type or "").strip().lower() == "video_edit"
+        else product_progress_status.normalize_product_type(product_type)
+    )
+    if (
+        not job_id
+        or not chat_id
+        or not message_id
+        or (not PROGRESS_AUTO_REFRESH_ENABLED and canonical != "video_edit")
+    ):
         return {}
-    snapshot = dict(initial_snapshot or progress_auto_refresh_snapshot(canonical, job_id, lang=lang))
+    snapshot = dict(
+        initial_snapshot
+        or progress_auto_refresh_snapshot(
+            canonical,
+            job_id,
+            lang=lang,
+            user_id=user_id,
+        )
+    )
     key = progress_auto_refresh_key(canonical, job_id)
     current = dict(PROGRESS_AUTO_REFRESH_JOBS.get(key) or {})
-    is_music_progress = progress_product_type_is_music(canonical, job_id)
+    is_video_edit_progress = canonical == "video_edit"
+    is_music_progress = (
+        False
+        if is_video_edit_progress
+        else progress_product_type_is_music(canonical, job_id)
+    )
+    interval_seconds = int(
+        MUSIC_AUTO_DELIVERY_POLL_INTERVAL_SECONDS
+        if is_music_progress
+        else PROGRESS_AUTO_REFRESH_INTERVAL_SECONDS
+    )
+    configured_max_updates = int(
+        MUSIC_AUTO_DELIVERY_MAX_POLLS
+        if is_music_progress
+        else PROGRESS_AUTO_REFRESH_MAX_UPDATES
+    )
+    if is_video_edit_progress:
+        configured_max_updates = max(
+            configured_max_updates,
+            int(math.ceil(max(1, int(LOCAL_WORKER_MAX_JOB_SECONDS)) / interval_seconds)) + 1,
+        )
     record = {
         **current,
         "key": key,
@@ -8858,10 +9099,13 @@ def progress_auto_refresh_register(
         "lang": normalize_user_language(lang) or "vi",
         "enabled": bool(PROGRESS_AUTO_REFRESH_ENABLED),
         "interval_seconds": int(MUSIC_AUTO_DELIVERY_POLL_INTERVAL_SECONDS if is_music_progress else PROGRESS_AUTO_REFRESH_INTERVAL_SECONDS),
-        "max_updates": int(MUSIC_AUTO_DELIVERY_MAX_POLLS if is_music_progress else PROGRESS_AUTO_REFRESH_MAX_UPDATES),
+        "max_updates": max(
+            int(current.get("max_updates") or 0),
+            configured_max_updates,
+        ),
         "auto_delivery_enabled": bool(MUSIC_AUTO_DELIVERY_ENABLED and is_music_progress),
         "stop_on_terminal": bool(MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL if is_music_progress else PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL),
-        "edit_only": bool(PROGRESS_AUTO_REFRESH_EDIT_ONLY),
+        "edit_only": bool(PROGRESS_AUTO_REFRESH_EDIT_ONLY or canonical == "video_edit"),
         "min_delta_percent": int(PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT),
         "last_stage": str(snapshot.get("stage") or current.get("last_stage") or ""),
         "last_percent": int(snapshot.get("percent") or current.get("last_percent") or 0),
@@ -8875,7 +9119,11 @@ def progress_auto_refresh_register(
         "edit_fail_count": int(current.get("edit_fail_count") or 0),
         "registry_saved": True,
         "scheduler_mode": str(current.get("scheduler_mode") or ("music_auto_delivery" if is_music_progress else "auto_refresh")),
-        "scheduler_status": str(current.get("scheduler_status") or ("not_started" if start_task else "not_started")),
+        "scheduler_status": (
+            "disabled"
+            if not PROGRESS_AUTO_REFRESH_ENABLED
+            else str(current.get("scheduler_status") or "not_started")
+        ),
         "task_started": bool(current.get("task_started")),
         "task_alive": bool(current.get("task_alive")),
         "task_started_at": str(current.get("task_started_at") or ""),
@@ -8886,7 +9134,7 @@ def progress_auto_refresh_register(
         "stop_reason": "terminal" if snapshot.get("terminal_state") and (MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL if is_music_progress else PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL) else "",
     }
     PROGRESS_AUTO_REFRESH_JOBS[key] = record
-    if start_task:
+    if start_task and PROGRESS_AUTO_REFRESH_ENABLED:
         started = False
         try:
             started = progress_auto_refresh_start_task(context, key)
@@ -8906,10 +9154,27 @@ def progress_auto_refresh_register(
                 if job:
                     mark_music_confirm_submit_blocker(job, "scheduler_start_failed", record.get("scheduler_error") or "scheduler_start_failed", updated_by=user_id)
         PROGRESS_AUTO_REFRESH_JOBS[key] = record
+    elif start_task:
+        record.update({
+            "task_started": False,
+            "task_alive": False,
+            "scheduler_status": "disabled",
+        })
+        PROGRESS_AUTO_REFRESH_JOBS[key] = record
     return dict(record)
 
 
-def progress_auto_refresh_register_message(message, context, *, product_type: str, job_id: str, user_id=0, lang: str = "vi", start_task: bool = True) -> dict:
+def progress_auto_refresh_register_message(
+    message,
+    context,
+    *,
+    product_type: str,
+    job_id: str,
+    user_id=0,
+    lang: str = "vi",
+    initial_snapshot: dict | None = None,
+    start_task: bool = True,
+) -> dict:
     chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
     message_id = getattr(message, "message_id", None)
     return progress_auto_refresh_register(
@@ -8920,6 +9185,7 @@ def progress_auto_refresh_register_message(message, context, *, product_type: st
         user_id=user_id,
         lang=lang,
         context=context,
+        initial_snapshot=initial_snapshot,
         start_task=start_task,
     )
 
@@ -8989,7 +9255,10 @@ async def progress_auto_refresh_loop(context, key: str):
             PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
             product_type = str(record.get("product_type") or "")
             job_id = str(record.get("job_id") or "")
-            if progress_product_type_is_music(product_type, job_id):
+            if (
+                product_type.strip().lower() != "video_edit"
+                and progress_product_type_is_music(product_type, job_id)
+            ):
                 job = get_engine_async_job(job_id)
                 if job:
                     mark_music_confirm_submit_blocker(job, "auto_tick_exception", str(exc), updated_by=record.get("user_id") or "")
@@ -9999,6 +10268,12 @@ async def music_auto_deliver_from_progress_record(context, record: dict, job: di
 async def progress_auto_refresh_status_for_tick(context, record: dict) -> dict:
     product_type = str(record.get("product_type") or "")
     job_id = str(record.get("job_id") or "")
+    if product_type.strip().lower() == "video_edit":
+        return progress_auto_refresh_read_status(
+            product_type,
+            job_id,
+            record.get("user_id") or 0,
+        )
     if progress_product_type_is_music(product_type, job_id):
         refreshed = await music_progress_refresh_job_status(
             job_id,
@@ -10008,6 +10283,14 @@ async def progress_auto_refresh_status_for_tick(context, record: dict) -> dict:
         )
         return await music_auto_deliver_from_progress_record(context, record, refreshed)
     return progress_auto_refresh_read_status(product_type, job_id, record.get("user_id") or 0)
+
+
+def progress_auto_refresh_keyboard(product_type: str, job_id: str, lang: str = "vi"):
+    if str(product_type or "").strip().lower() == "video_edit":
+        normalized_job_id = safe_int(job_id, 0)
+        return video_editor_status_keyboard(normalized_job_id, lang) if normalized_job_id > 0 else None
+    canonical = product_progress_status.normalize_product_type(product_type)
+    return product_progress_status_keyboard(canonical, job_id, lang)
 
 
 async def progress_auto_refresh_tick(context, key: str) -> dict:
@@ -10022,15 +10305,69 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
         record["task_alive"] = False
         PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
         return {"status": "stopped", "reason": "max_updates"}
+    is_video_edit = str(record.get("product_type") or "").strip().lower() == "video_edit"
+    if is_video_edit:
+        expected_key = progress_auto_refresh_key("video_edit", str(record.get("job_id") or ""))
+        binding_valid = bool(
+            safe_int(record.get("job_id"), 0) > 0
+            and safe_int(record.get("user_id"), 0) > 0
+            and safe_int(record.get("chat_id"), 0) != 0
+            and safe_int(record.get("message_id"), 0) > 0
+            and str(key or "") == expected_key
+            and str(record.get("key") or expected_key) == expected_key
+        )
+        if not binding_valid:
+            record.update({
+                "stopped": True,
+                "task_alive": False,
+                "stop_reason": "job_missing_or_owner_mismatch",
+                "stopped_reason": "job_missing_or_owner_mismatch",
+            })
+            PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
+            return {
+                "status": "stopped",
+                "reason": "job_missing_or_owner_mismatch",
+                "record": dict(record),
+                "snapshot": {},
+            }
     record["last_tick_at"] = now_text()
     record["task_alive"] = True
     refreshed_job = await progress_auto_refresh_status_for_tick(context, record)
+    if is_video_edit and not refreshed_job:
+        record.update({
+            "stopped": True,
+            "task_alive": False,
+            "stop_reason": "job_missing_or_owner_mismatch",
+            "stopped_reason": "job_missing_or_owner_mismatch",
+        })
+        PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
+        return {
+            "status": "stopped",
+            "reason": "job_missing_or_owner_mismatch",
+            "record": dict(record),
+            "snapshot": {},
+        }
     snapshot = progress_auto_refresh_snapshot(
         record.get("product_type") or "",
         record.get("job_id") or "",
         job=refreshed_job,
         lang=record.get("lang") or "vi",
+        user_id=record.get("user_id") or 0,
     )
+    if is_video_edit and not snapshot:
+        record.update({
+            "stopped": True,
+            "task_alive": False,
+            "stop_reason": "job_missing_or_owner_mismatch",
+            "stopped_reason": "job_missing_or_owner_mismatch",
+        })
+        PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
+        return {
+            "status": "stopped",
+            "reason": "job_missing_or_owner_mismatch",
+            "record": dict(record),
+            "snapshot": {},
+        }
     last_percent = int(record.get("last_percent") or 0)
     if int(snapshot.get("percent") or 0) < last_percent and not snapshot.get("terminal_state"):
         snapshot["percent"] = last_percent
@@ -10039,6 +10376,18 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
     record["update_count"] = int(record.get("update_count") or 0) + 1
     terminal = str(snapshot.get("terminal_state") or "")
     should_edit = progress_auto_refresh_should_edit(record, snapshot)
+
+    def commit_panel_update() -> None:
+        record["edit_success_count"] = int(record.get("edit_success_count") or 0) + 1
+        record["last_update_at"] = now_text()
+        record["last_edit_at"] = record["last_update_at"]
+        record["last_stage"] = str(snapshot.get("stage") or "")
+        record["last_percent"] = int(snapshot.get("percent") or 0)
+        record["current_stage"] = str(snapshot.get("stage") or "")
+        record["percent"] = int(snapshot.get("percent") or 0)
+        record["terminal_state"] = terminal
+        record["last_render_hash"] = str(snapshot.get("render_hash") or "")
+
     if should_edit:
         try:
             await context.bot.edit_message_text(
@@ -10046,27 +10395,23 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
                 message_id=record.get("message_id"),
                 text=str(snapshot.get("text") or ""),
                 parse_mode="HTML",
-                reply_markup=product_progress_status_keyboard(record.get("product_type") or "", record.get("job_id") or "", record.get("lang") or "vi"),
+                reply_markup=progress_auto_refresh_keyboard(record.get("product_type") or "", record.get("job_id") or "", record.get("lang") or "vi"),
             )
-            record["edit_success_count"] = int(record.get("edit_success_count") or 0) + 1
-            record["last_update_at"] = now_text()
-            record["last_edit_at"] = record["last_update_at"]
-            record["last_stage"] = str(snapshot.get("stage") or "")
-            record["last_percent"] = int(snapshot.get("percent") or 0)
-            record["current_stage"] = str(snapshot.get("stage") or "")
-            record["percent"] = int(snapshot.get("percent") or 0)
-            record["terminal_state"] = terminal
-            record["last_render_hash"] = str(snapshot.get("render_hash") or "")
+            commit_panel_update()
         except Exception as exc:
-            record["edit_fail_count"] = int(record.get("edit_fail_count") or 0) + 1
-            record["last_error"] = sanitize_log_text(str(exc))[:180]
-            if not bool(record.get("edit_only")) and not record.get("fallback_used"):
+            not_modified = is_video_edit and video_edit_panel_not_modified(exc)
+            if not_modified:
+                commit_panel_update()
+            else:
+                record["edit_fail_count"] = int(record.get("edit_fail_count") or 0) + 1
+                record["last_error"] = sanitize_log_text(str(exc))[:180]
+            if not is_video_edit and not bool(record.get("edit_only")) and not record.get("fallback_used"):
                 try:
                     sent = await context.bot.send_message(
                         chat_id=record.get("chat_id"),
                         text=str(snapshot.get("text") or ""),
                         parse_mode="HTML",
-                        reply_markup=product_progress_status_keyboard(record.get("product_type") or "", record.get("job_id") or "", record.get("lang") or "vi"),
+                        reply_markup=progress_auto_refresh_keyboard(record.get("product_type") or "", record.get("job_id") or "", record.get("lang") or "vi"),
                     )
                     record["message_id"] = getattr(sent, "message_id", record.get("message_id"))
                     record["fallback_used"] = True
@@ -10080,6 +10425,14 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
                     record["last_render_hash"] = str(snapshot.get("render_hash") or "")
                 except Exception as send_exc:
                     record["last_error"] = sanitize_log_text(str(send_exc))[:180]
+            if is_video_edit and not not_modified:
+                record["task_alive"] = True
+                PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
+                return {
+                    "status": "retry_pending",
+                    "record": dict(record),
+                    "snapshot": snapshot,
+                }
     else:
         record["last_checked_at"] = now_text()
         record["current_stage"] = str(snapshot.get("stage") or record.get("current_stage") or "")
@@ -44979,10 +45332,11 @@ def get_local_worker_job(job_id, *, conn=None) -> dict:
             conn.close()
 
 
-def get_local_worker_job_readonly(job_id) -> dict:
+def get_local_worker_job_readonly(job_id, *, conn=None) -> dict:
     """Read one local-worker job without creating a database or schema."""
 
-    conn = db_connect_readonly()
+    owns_connection = conn is None
+    conn = conn or db_connect_readonly()
     try:
         c = conn.cursor()
         c.execute(
@@ -44993,7 +45347,8 @@ def get_local_worker_job_readonly(job_id) -> dict:
         )
         return local_worker_job_from_row(c.fetchone())
     finally:
-        conn.close()
+        if owns_connection:
+            conn.close()
 
 
 def get_latest_video_editor_job(user_id) -> dict:
@@ -70108,6 +70463,73 @@ def video_editor_normalize_action(action: str) -> str:
     return VIDEO_EDITOR_ACTION_ALIASES.get(action, action)
 
 
+_VIDEO_EDITOR_CALLBACK_NO_VALUE_ACTIONS = frozenset({
+    "admin", "ai", "ai_aspect", "ai_aspect_limits", "ai_aspect_method",
+    "ai_custom_duration", "ai_duration", "ai_effect_timing", "ai_info",
+    "ai_intensity", "ai_intent", "ai_invoice", "ai_motion", "ai_preserve",
+    "ai_prompt", "ai_remove_effect", "ai_review", "ai_settings", "ai_source",
+    "ai_suggestions", "ai_text", "ai_upload", "ai_use_local", "aspect",
+    "audio", "audio_clear", "audio_custom", "audio_loudnorm", "audio_master",
+    "audio_reupload", "audio_upload", "branding", "brightness",
+    "brightness_custom", "color", "color_preset", "compress", "concat",
+    "concat_done", "confirmation", "crop", "cut", "effect_timing", "effects",
+    "enhance", "flip", "frame", "hub", "ideas", "join", "latest_status",
+    "legacy_sharpen", "logo", "logo_entry", "logo_options", "logo_remove",
+    "manual", "manual_audio", "manual_cut", "manual_done", "manual_effects",
+    "manual_info", "manual_join", "manual_rotate_flip", "menu", "motion",
+    "music", "overlay", "plan", "quality_source", "quality_upload", "reference",
+    "remove_middle", "reorder", "reset_manual", "resize", "resolution",
+    "restore", "restore_limits", "review", "rotation", "save", "selfscene",
+    "sharpen", "source_info", "source_summary", "speed", "split", "split_count",
+    "split_custom", "split_fixed", "split_from_manual", "split_info", "srt",
+    "start", "subtitle", "text", "text_overlay", "timeline", "toggle_gaps",
+    "transform", "trim_edges", "trim_range", "vertical", "volume",
+    "watermark_entry", "watermark_options", "watermark_remove", "watermark_text",
+    "workspace",
+})
+_VIDEO_EDITOR_CALLBACK_ONE_VALUE_ACTIONS = frozenset({
+    "ai_pick", "ai_set_aspect", "ai_set_aspect_method", "ai_set_duration",
+    "ai_set_effect_timing", "ai_set_intensity", "ai_set_motion", "ai_set_text",
+    "ai_toggle", "audio_add", "audio_component", "audio_set", "brightness_set",
+    "effect_pick", "method", "options", "preset", "ratio", "restore_pick",
+    "split_reset_manual",
+})
+_VIDEO_EDITOR_CALLBACK_OPTIONAL_ONE_VALUE_ACTIONS = frozenset({
+    "confirm_local", "guide", "quick", "upload",
+})
+VIDEO_EDITOR_GUIDE_CALLERS = frozenset({
+    "hub", "manual", "ai", "ai_suggestions", "quality", "audio", "effects",
+    "workspace",
+})
+
+
+def video_editor_callback_arity_valid(parts: list[str] | tuple[str, ...]) -> bool:
+    """Reject malformed Video Edit callback shapes before state or UI work."""
+
+    values = list(parts or [])
+    if len(values) < 2 or str(values[0] or "").strip().lower() != "videoedit":
+        return False
+    action = str(values[1] or "").strip().lower()
+    parameters = [str(value or "").strip() for value in values[2:]]
+    if action in {"status", "ai_status", "status_hub", "status_menu"}:
+        return len(parameters) == 1 and bool(re.fullmatch(r"[1-9][0-9]*", parameters[0]))
+    if action == "guide":
+        return not parameters or (
+            len(parameters) == 1 and parameters[0] in VIDEO_EDITOR_GUIDE_CALLERS
+        )
+    if action in _VIDEO_EDITOR_CALLBACK_NO_VALUE_ACTIONS:
+        return not parameters
+    if action in _VIDEO_EDITOR_CALLBACK_ONE_VALUE_ACTIONS:
+        return len(parameters) == 1 and bool(parameters[0])
+    if action in _VIDEO_EDITOR_CALLBACK_OPTIONAL_ONE_VALUE_ACTIONS:
+        return len(parameters) <= 1 and (not parameters or bool(parameters[0]))
+    if action == "set":
+        return len(parameters) == 2 and all(parameters)
+    if action.startswith("ai_set_"):
+        return len(parameters) == 1 and bool(parameters[0])
+    return False
+
+
 def video_editor_pending_key(user_id) -> str:
     return f"video_editor:{user_id}"
 
@@ -83533,9 +83955,15 @@ def video_editor_status_keyboard(job_id: int, lang: str = "vi") -> InlineKeyboar
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("🔄 Cập nhật trạng thái" if is_vi else "🔄 Update status", callback_data=f"videoedit|status|{int(job_id)}"),
-        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ], [
-        InlineKeyboardButton("⬅️ Chỉnh sửa video" if is_vi else "⬅️ Video Edit", callback_data="videoedit|hub"),
+        InlineKeyboardButton(
+            "🛠 Mở Chỉnh sửa video" if is_vi else "🛠 Open Video Edit",
+            callback_data=f"videoedit|status_hub|{int(job_id)}",
+        ),
+        InlineKeyboardButton(
+            ui_text(lang, "common.main_menu"),
+            callback_data=f"videoedit|status_menu|{int(job_id)}",
+        ),
     ]])
 
 
@@ -83583,19 +84011,140 @@ def video_local_job_progress_payload(job: dict) -> dict:
     return parsed if isinstance(parsed, dict) and parsed.get("local1") else {}
 
 
-def video_editengine1_job_for_worker(worker_job_id) -> dict:
-    conn = db_connect_readonly()
+def video_editengine1_job_for_worker(worker_job_id, *, conn=None) -> dict:
+    owns_connection = conn is None
+    conn = conn or db_connect_readonly()
     try:
         return video_editengine1.get_job_by_worker_id_readonly(conn, worker_job_id)
     finally:
-        conn.close()
+        if owns_connection:
+            conn.close()
+
+
+def video_edit_delivery_receipt_is_complete(
+    canonical: dict | None,
+    progress: dict | None = None,
+) -> bool:
+    """Require one internally consistent, fully decoded Telegram receipt."""
+
+    current = dict(canonical or {})
+    worker_progress = dict(progress or {}) if isinstance(progress, dict) else {}
+
+    def _strict_nonnegative_integer(value) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value >= 0 else None
+        if isinstance(value, str):
+            token = value.strip()
+            if not token or not token.isdigit():
+                return None
+            parsed = int(token)
+            return parsed if parsed >= 0 else None
+        return None
+
+    output_sha256 = current.get("output_sha256")
+    output_size_bytes = _strict_nonnegative_integer(current.get("output_size_bytes"))
+    delivery_message_id, delivery_file_id = video_editengine1.telegram_delivery_identity({
+        "sent": True,
+        "message_id": current.get("delivery_message_id"),
+        "file_id": current.get("delivery_file_id"),
+    })
+    output_file_id = current.get("output_file_id")
+    if not (
+        str(current.get("status") or "").strip().lower() in {"delivered", "charged"}
+        and current.get("receipt_state") == "created"
+        and delivery_message_id
+        and delivery_file_id
+        and isinstance(output_file_id, str)
+        and output_file_id == output_file_id.strip() == delivery_file_id
+        and isinstance(output_sha256, str)
+        and output_sha256 == output_sha256.strip()
+        and re.fullmatch(r"[0-9A-Fa-f]{64}", output_sha256)
+        and output_size_bytes is not None
+        and output_size_bytes > 0
+        and video_editengine1.valid_mp4_delivery_probe(current.get("ffprobe"))
+    ):
+        return False
+
+    raw_artifacts = current.get("artifact_receipts", [])
+    if not isinstance(raw_artifacts, list) or not video_editengine1._artifact_receipts_valid(raw_artifacts):
+        return False
+    artifacts = video_editengine1._artifact_receipts(raw_artifacts)
+    scalar_cursor = _strict_nonnegative_integer(current.get("delivery_cursor", 0))
+    if scalar_cursor is None:
+        return False
+    tail = current.get("tail", {})
+    if not isinstance(tail, dict):
+        return False
+    has_strict_cursor = "delivery_cursor" in tail
+    strict_cursor = None
+    if has_strict_cursor:
+        try:
+            strict_cursor = video_editengine1.video_edit_long_media.DeliveryCursor.from_mapping(
+                tail.get("delivery_cursor")
+            )
+            video_editengine1._validate_delivery_cursor_receipt_prefix(
+                strict_cursor,
+                artifacts,
+            )
+        except (TypeError, ValueError):
+            return False
+
+    if artifacts:
+        if (
+            scalar_cursor != len(artifacts)
+            or output_size_bytes != sum(int(item.get("size") or 0) for item in artifacts)
+            or not video_editengine1._valid_mp4_path_list(
+                current.get("output_path"),
+                output_count=len(artifacts),
+            )
+            or any(
+                not video_editengine1.valid_mp4_delivery_probe(item.get("ffprobe"))
+                for item in artifacts
+            )
+            or (strict_cursor is not None and strict_cursor.state != "delivered")
+        ):
+            return False
+        bound_artifact = artifacts[-1] if strict_cursor is not None else artifacts[0]
+        if (
+            delivery_message_id != str(bound_artifact.get("message_id") or "")
+            or delivery_file_id != str(bound_artifact.get("file_id") or "")
+        ):
+            return False
+        expected_output_count = len(artifacts)
+    else:
+        if (
+            scalar_cursor != 0
+            or has_strict_cursor
+            or not video_editengine1._valid_mp4_path_list(
+                current.get("output_path"),
+                output_count=1,
+            )
+        ):
+            return False
+        expected_output_count = 1
+
+    worker_status = str(worker_progress.get("worker_status") or "").strip().lower()
+    worker_stage = str(worker_progress.get("stage") or "").strip().lower()
+    if worker_status not in {"completed", "succeeded"}:
+        return False
+    if worker_stage != "delivered":
+        return False
+    for field in ("processed", "total", "delivered"):
+        parsed = _strict_nonnegative_integer(worker_progress.get(field))
+        if parsed is None or parsed != expected_output_count:
+            return False
+    return True
 
 
 def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
     is_vi = normalize_user_language(lang) == "vi"
     status = str((job or {}).get("status") or "unknown").lower()
     progress = video_local_job_progress_payload(job)
-    canonical = video_editengine1_job_for_worker((job or {}).get("id"))
+    canonical = dict((job or {}).get("_video_edit_canonical") or {})
+    if not canonical:
+        canonical = video_editengine1_job_for_worker((job or {}).get("id"))
     canonical_status = str(canonical.get("status") or "").lower()
     stage = str(progress.get("stage") or ("received" if status == "queued" else ""))
     processed = max(0, safe_int(progress.get("processed"), 0))
@@ -83626,15 +84175,16 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
             "failed_no_charge": "Could not process",
         }
     )
-    delivered_truth = bool(
-        canonical_status in {"delivered", "charged"}
-        and canonical.get("receipt_state") == "created"
-        and str(canonical.get("delivery_message_id") or "").strip()
-        and str(canonical.get("delivery_file_id") or "").strip()
-        and str(canonical.get("output_sha256") or "").strip()
-        and safe_int(canonical.get("output_size_bytes"), 0) > 0
-        and bool((canonical.get("ffprobe") or {}).get("ok"))
+    receipt_progress = {**progress, "worker_status": status}
+    delivered_truth = video_edit_delivery_receipt_is_complete(
+        canonical,
+        receipt_progress,
     )
+    artifact_receipts = video_editengine1._artifact_receipts(
+        canonical.get("artifact_receipts") or []
+    )
+    receipt_count = len(artifact_receipts)
+    worker_terminal_success = status in {"completed", "succeeded"}
     delivery_uncertain = bool(
         canonical_status == "delivery_unknown"
         or stage == "delivery_unknown"
@@ -83643,6 +84193,7 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
             canonical_status in {"delivered", "charged"}
             and not delivered_truth
         )
+        or (worker_terminal_success and not delivered_truth)
     )
     if delivered_truth:
         public_status = "Hoàn tất" if is_vi else "Completed"
@@ -83741,15 +84292,15 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
                 )
             else:
                 lines.append(
-                    f"• Đã có biên nhận: <b>{min(delivered, total)}/{total}</b> phần"
+                    f"• Đã có biên nhận: <b>{min(receipt_count, total)}/{total}</b> phần"
                     if is_vi
-                    else f"• Receipts recorded: <b>{min(delivered, total)}/{total}</b> parts"
+                    else f"• Receipts recorded: <b>{min(receipt_count, total)}/{total}</b> parts"
                 )
         elif stage == "delivery_unknown":
             lines.append(
-                f"• Đã có biên nhận: <b>{min(delivered, total)}/{total}</b> phần"
+                f"• Đã có biên nhận: <b>{min(receipt_count, total)}/{total}</b> phần"
                 if is_vi
-                else f"• Receipts recorded: <b>{min(delivered, total)}/{total}</b> parts"
+                else f"• Receipts recorded: <b>{min(receipt_count, total)}/{total}</b> parts"
             )
         else:
             action = (
@@ -83795,14 +84346,46 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
         lines.append(
             (
                 "• Một phần hoặc toàn bộ file có thể đã tới Telegram nhưng biên nhận cuối chưa chắc chắn. "
-                "Hệ thống không tự gửi lại để tránh trùng file và không trừ Xu."
+                "Hệ thống không tự gửi lại để tránh trùng file."
             )
             if is_vi
             else (
                 "• Some or all files may have reached Telegram, but the final receipt is not verified. "
-                "The system will not resend automatically or charge Xu."
+                "The system will not resend automatically."
             )
         )
+        charge_state = str(canonical.get("charge_state") or "not_charged")
+        charged_xu = safe_int(canonical.get("charged_xu"), 0)
+        if charge_state == "charged" and charged_xu > 0:
+            lines.append(
+                f"• Đã ghi nhận trừ: <b>{charged_xu} Xu</b>. Không bấm lại; hệ thống đang đối soát biên nhận giao file."
+                if is_vi
+                else f"• Recorded charge: <b>{charged_xu} Xu</b>. Do not tap again while the delivery receipt is reconciled."
+            )
+        elif charge_state == "charged":
+            lines.append(
+                "• Phí đã được đánh dấu ghi nhận nhưng số Xu cần đối soát. Không bấm lại."
+                if is_vi
+                else "• The fee is marked as recorded, but its Xu amount needs reconciliation. Do not tap again."
+            )
+        elif confirmed_price_xu <= 0:
+            lines.append(
+                "• Tác vụ cục bộ miễn phí 0 Xu; hệ thống không ghi phí và không chạm ví."
+                if is_vi
+                else "• This local task costs 0 Xu; no fee was recorded and the wallet was not touched."
+            )
+        elif charge_state == "charge_failed":
+            lines.append(
+                "• Hệ thống chưa ghi được phí; không tự trừ lặp lại trong lúc đối soát."
+                if is_vi
+                else "• The fee was not recorded; it will not be charged repeatedly during reconciliation."
+            )
+        else:
+            lines.append(
+                "• Panel chưa ghi nhận khoản trừ Xu mới. Không bấm lại trong lúc hệ thống đối soát."
+                if is_vi
+                else "• The panel has not recorded a new Xu charge. Do not tap again during reconciliation."
+            )
     elif failed:
         lines.append(
             "• Kết quả: xử lý chưa thành công. Hệ thống không trừ Xu."
@@ -83816,6 +84399,112 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
             else "• The result will be delivered after validation. You do not need to tap again."
         )
     return "\n".join(lines)
+
+
+async def show_video_editor_job_status_panel(
+    update,
+    context,
+    job_id,
+    lang: str = "vi",
+    *,
+    user_id=0,
+):
+    """Render and register one exact owner-bound Video Edit progress panel."""
+
+    query = getattr(update, "callback_query", None)
+    source_message = getattr(update, "message", None) or getattr(query, "message", None)
+    normalized_job_id = safe_int(job_id, 0)
+    normalized_user_id = safe_int(
+        user_id or getattr(getattr(update, "effective_user", None), "id", 0),
+        0,
+    )
+    current = dict(
+        video_edit_progress_read_status(
+            normalized_job_id,
+            user_id=normalized_user_id,
+        )
+        or {}
+    )
+    if not current:
+        if query:
+            await query.answer(
+                "Không tìm thấy bảng tiến độ Video Edit thuộc tài khoản này.",
+                show_alert=True,
+            )
+        return None
+
+    registry = globals().get("PROGRESS_AUTO_REFRESH_JOBS")
+    key = f"video_edit:{normalized_job_id}"
+    existing = dict(registry.get(key) or {}) if isinstance(registry, dict) else {}
+    if existing:
+        if query:
+            await query.answer(
+                "Bảng tiến độ của tác vụ này đang hoạt động. Hãy dùng đúng bảng đã mở.",
+                show_alert=True,
+            )
+        return None
+
+    snapshot = video_edit_progress_snapshot(
+        str(normalized_job_id),
+        user_id=normalized_user_id,
+        job=current,
+        lang=lang,
+    )
+    if not snapshot:
+        if query:
+            await query.answer(
+                "Chưa đọc được tiến độ Video Edit an toàn.",
+                show_alert=True,
+            )
+        return None
+
+    text = str(snapshot.get("text") or video_editor_job_status_text(current, lang))
+    if query:
+        rendered = await safe_edit_or_send(
+            query,
+            text,
+            parse_mode="HTML",
+            reply_markup=video_editor_status_keyboard(normalized_job_id, lang),
+        )
+        panel_message = rendered or source_message
+    elif source_message:
+        panel_message = await source_message.reply_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=video_editor_status_keyboard(normalized_job_id, lang),
+        )
+    else:
+        return None
+
+    if panel_message is None:
+        return None
+    registration = dict(progress_auto_refresh_register_message(
+        panel_message,
+        context,
+        product_type="video_edit",
+        job_id=str(normalized_job_id),
+        user_id=normalized_user_id,
+        lang=lang,
+        initial_snapshot=snapshot,
+    ) or {})
+    panel_chat_id = safe_int(
+        getattr(panel_message, "chat_id", 0)
+        or getattr(getattr(panel_message, "chat", None), "id", 0),
+        0,
+    )
+    panel_message_id = safe_int(getattr(panel_message, "message_id", 0), 0)
+    if not (
+        str(registration.get("key") or "") == f"video_edit:{normalized_job_id}"
+        and str(registration.get("product_type") or "").strip().lower() == "video_edit"
+        and safe_int(registration.get("job_id"), 0) == normalized_job_id
+        and safe_int(registration.get("user_id"), 0) == normalized_user_id
+        and safe_int(registration.get("chat_id"), 0) == panel_chat_id
+        and safe_int(registration.get("message_id"), 0) == panel_message_id
+        and panel_chat_id != 0
+        and panel_message_id > 0
+    ):
+        raise RuntimeError("videoedit_progress_panel_registration_failed")
+    return panel_message
 
 
 VIDEO_PUBLIC_ROUTE_FORBIDDEN_WORDS = (
@@ -187080,11 +187769,16 @@ async def _handle_create_media_callback_impl(
     confirmation_context_fields: dict | None = None,
 ):
     query = update.callback_query
-    await query.answer()
     callback_parts = str(callback_data if callback_data is not None else (query.data or "")).split("|")
     action = callback_parts[1] if len(callback_parts) > 1 else ""
     value = callback_parts[2] if len(callback_parts) > 2 else ""
     uid = query.from_user.id if query.from_user else 0
+    video_editor_entry_state = {}
+    if uid and (action == "quick_image" or action.startswith("image_tier_")):
+        video_editor_entry_state = video_editor_state_snapshot(
+            get_video_editor_pending(uid)
+        )
+    await query.answer()
     lang = get_user_language(uid) or "vi"
     if action == "main":
         notice = clear_pending_start_notice(uid)
@@ -187114,23 +187808,39 @@ async def _handle_create_media_callback_impl(
     if action == "trend":
         return await trend_guided_start_from_query(query, uid, lang)
     if action == "quick_image":
-        clear_video_editor_pending(uid)
-        clear_trend_video_flow_pending(uid)
-        clear_quick_media_pending(uid)
-        clear_quick_image_flow(uid)
-        clear_public_image_prompt_pending(uid)
-        clear_public_video_prompt_pending(uid)
-        clear_media_aspect_pending(uid)
-        clear_public_video_package_context(uid)
-        clear_image_menu_pending(uid)
-        if isinstance(getattr(context, "user_data", None), dict):
-            context.user_data["video_scene3_image_handoff_active"] = False
-        set_quick_image_flow(uid, "entry", suggest_offset=0)
+        async def commit_quick_image_entry():
+            state_cleared, winner = compare_and_replace_video_editor_pending(
+                uid,
+                video_editor_entry_state,
+                {},
+                expected_exists=bool(video_editor_entry_state),
+                replacement_exists=False,
+            )
+            if not state_cleared:
+                await rerender_video_editor_after_stale_commit(
+                    query,
+                    winner,
+                    lang,
+                )
+                return
+            clear_trend_video_flow_pending(uid)
+            clear_quick_media_pending(uid)
+            clear_quick_image_flow(uid)
+            clear_public_image_prompt_pending(uid)
+            clear_public_video_prompt_pending(uid)
+            clear_media_aspect_pending(uid)
+            clear_public_video_package_context(uid)
+            clear_image_menu_pending(uid)
+            if isinstance(getattr(context, "user_data", None), dict):
+                context.user_data["video_scene3_image_handoff_active"] = False
+            set_quick_image_flow(uid, "entry", suggest_offset=0)
+
         return await safe_edit_or_send(
             query,
             quick_image_entry_text(lang),
             parse_mode="HTML",
             reply_markup=quick_image_entry_keyboard(lang),
+            post_render=commit_quick_image_entry,
         )
     if action == "qi_entry":
         state = get_quick_image_flow(uid) or {}
@@ -187781,19 +188491,40 @@ async def _handle_create_media_callback_impl(
         record_shopaikey_billing_event(uid, 0, "video_prompt_received", 0, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}; aspect={aspect}")
         return await start_video_addon_step(query, uid, pending_payload, tier, lang, source="ai")
     if action.startswith("image_tier_"):
-        clear_video_editor_pending(uid)
-        clear_trend_video_flow_pending(uid)
-        clear_quick_media_pending(uid)
-        clear_public_video_prompt_pending(uid)
-        clear_media_aspect_pending(uid)
-        clear_public_video_package_context(uid)
-        clear_image_menu_pending(uid)
         tier = normalize_image_tier(action.replace("image_tier_", "", 1))
         payload = image_tier_payload(tier)
         if not payload.get("enabled"):
             return await safe_edit_or_send(query, ui_text(lang, "image.tier_disabled_message"))
-        set_public_image_prompt_pending(uid, tier)
-        return await safe_edit_or_send(query, public_image_prompt_request_text(tier, lang), parse_mode="HTML")
+
+        async def commit_image_tier_entry():
+            state_cleared, winner = compare_and_replace_video_editor_pending(
+                uid,
+                video_editor_entry_state,
+                {},
+                expected_exists=bool(video_editor_entry_state),
+                replacement_exists=False,
+            )
+            if not state_cleared:
+                await rerender_video_editor_after_stale_commit(
+                    query,
+                    winner,
+                    lang,
+                )
+                return
+            clear_trend_video_flow_pending(uid)
+            clear_quick_media_pending(uid)
+            clear_public_video_prompt_pending(uid)
+            clear_media_aspect_pending(uid)
+            clear_public_video_package_context(uid)
+            clear_image_menu_pending(uid)
+            set_public_image_prompt_pending(uid, tier)
+
+        return await safe_edit_or_send(
+            query,
+            public_image_prompt_request_text(tier, lang),
+            parse_mode="HTML",
+            post_render=commit_image_tier_entry,
+        )
     if action == "quick_video":
         clear_trend_video_flow_pending(uid)
         clear_quick_media_pending(uid)
@@ -213247,8 +213978,6 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if await handle_pending_admin_tool_test_media(update, context):
         return
-    if await handle_video_editor_pending_upload(update, context):
-        return
     if await handle_video_uiflow3_pending_media(update, context):
         return
     if await handle_storyboard2_pending_media(update, context):
@@ -234291,20 +235020,13 @@ async def submit_video_edit_local_free_job(
             and str(existing_job.get("job_type") or "") == video_editengine1.WORKER_JOB_TYPE
             and str(existing_job.get("user_id") or "") == str(uid)
         ):
-            text = video_editor_job_status_text(existing_job, lang)
-            if query:
-                await safe_edit_or_send(
-                    query,
-                    text,
-                    parse_mode="HTML",
-                    reply_markup=video_editor_status_keyboard(existing_job_id, lang),
-                )
-            elif message:
-                await message.reply_text(
-                    text,
-                    parse_mode="HTML",
-                    reply_markup=video_editor_status_keyboard(existing_job_id, lang),
-                )
+            await show_video_editor_job_status_panel(
+                update,
+                context,
+                existing_job_id,
+                lang,
+                user_id=uid,
+            )
             return True
     review_revision = safe_int(state.get("review_revision"), 0)
     state_revision = safe_int(state.get("state_revision"), 0)
@@ -234357,7 +235079,8 @@ async def submit_video_edit_local_free_job(
     if not admission.get("ok"):
         text = (
             "⚠️ <b>Chưa thể bắt đầu chỉnh sửa video</b>\n\n"
-            "Bộ xử lý cục bộ chưa sẵn sàng. Hệ thống chưa tạo tác vụ và chưa trừ Xu."
+            f"• Lý do: <code>{html.escape(str(admission.get('reason') or 'local_edit_unavailable'))}</code>\n"
+            "TOAN AAS chưa tạo tác vụ và chưa trừ Xu."
         )
         if query:
             await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=video_local_manual_options_keyboard(lang, state))
@@ -234553,23 +235276,14 @@ async def submit_video_edit_local_free_job(
             )
         return True
     mark_video_editor_submission_committed()
-    text = (
-        "✅ <b>Đã nhận tác vụ chỉnh sửa cục bộ</b>\n\n"
-        "Hệ thống chỉ gửi MP4 sau khi bộ xử lý kiểm tra tệp hợp lệ.\n"
-        "Tác vụ này miễn phí: <b>0 Xu</b>. Không gọi dịch vụ bên ngoài và không trừ ví.\n\n"
-        f"• Mã xử lý: <code>#{job_id}</code>"
-    )
-
     try:
-        if query:
-            await safe_edit_or_send(
-                query,
-                text,
-                parse_mode="HTML",
-                reply_markup=video_editor_status_keyboard(job_id, lang),
-            )
-        elif message:
-            await message.reply_text(text, parse_mode="HTML", reply_markup=video_editor_status_keyboard(job_id, lang))
+        await show_video_editor_job_status_panel(
+            update,
+            context,
+            job_id,
+            lang,
+            user_id=uid,
+        )
     except Exception:
         logger.exception("video local-free confirmation UI failed")
         raise
@@ -234945,17 +235659,13 @@ async def submit_local_video_editor_job(
             )
         return True
     mark_video_editor_submission_committed()
-    text = (
-        "✅ <b>Đã nhận yêu cầu xử lý video</b>\n\n"
-        "Hệ thống đang chuẩn bị video và sẽ tự gửi kết quả MP4 sau khi kiểm tra hợp lệ. Chỉ sau khi Telegram nhận file và có biên nhận, hệ thống mới ghi phí.\n"
-        "Vui lòng không bấm lại nhiều lần.\n\n"
-        f"• Mã xử lý: <code>#{job_id}</code>\n"
-        f"• Giá đã xác nhận: <b>{price_xu} Xu</b>"
+    await show_video_editor_job_status_panel(
+        update,
+        context,
+        job_id,
+        lang,
+        user_id=uid,
     )
-    if query:
-        await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=video_editor_status_keyboard(job_id, lang))
-    else:
-        await message.reply_text(text, parse_mode="HTML", reply_markup=video_editor_status_keyboard(job_id, lang))
     return True
 
 
@@ -239444,10 +240154,116 @@ async def handle_video_editor_callback(
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     parts = str(callback_data_override or query.data or "").split("|")
+    if not video_editor_callback_arity_valid(parts):
+        await query.answer(
+            "Nút Chỉnh sửa video này không hợp lệ hoặc đã cũ. Phiên hiện tại được giữ nguyên.",
+            show_alert=True,
+        )
+        _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+        return True
     raw_action = parts[1] if len(parts) > 1 else "menu"
     callback_entry_state = video_editor_state_snapshot(
         get_video_editor_pending(uid)
     )
+    if raw_action in {"status_hub", "status_menu"}:
+        job_id = safe_int(parts[2] if len(parts) > 2 else 0, 0)
+        binding = video_edit_progress_callback_binding(job_id, uid, query)
+        if not binding:
+            await query.answer(
+                "Nút điều hướng này không thuộc bảng tiến độ hiện tại. Job đang chạy được giữ nguyên.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
+        if callback_entry_state and (
+            str(callback_entry_state.get("step") or "").strip().lower()
+            != "job_status"
+            or safe_int(callback_entry_state.get("job_id"), 0) != job_id
+        ):
+            await query.answer(
+                "Nút điều hướng này thuộc job cũ. Phiên chỉnh sửa hiện tại được giữ nguyên.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
+        try:
+            if not video_edit_progress_read_status(job_id, user_id=uid):
+                await query.answer(
+                    "Không tìm thấy job Chỉnh sửa video thuộc tài khoản này.",
+                    show_alert=True,
+                )
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
+        except sqlite3.Error as exc:
+            logger.warning(
+                "videoedit status navigation lookup failed | error_type=%s",
+                type(exc).__name__,
+            )
+            await query.answer(
+                "Chưa mở được màn mới. Bảng tiến độ và job hiện tại được giữ nguyên.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
+        state_cleared = False
+        if callback_entry_state:
+            state_cleared, _winner = compare_and_replace_video_editor_pending(
+                uid,
+                callback_entry_state,
+                {},
+                expected_exists=True,
+                replacement_exists=False,
+            )
+            if not state_cleared:
+                await query.answer(
+                    "Phiên chỉnh sửa đã thay đổi. Màn hiện tại được giữ nguyên.",
+                    show_alert=True,
+                )
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
+        try:
+            if raw_action == "status_hub":
+                await query.message.reply_text(
+                    video_edit_hub_text(lang),
+                    parse_mode="HTML",
+                    reply_markup=video_edit_hub_keyboard(lang),
+                )
+            else:
+                await query.message.reply_text(
+                    localized_start_menu_text(uid, lang),
+                    parse_mode="HTML",
+                    reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang),
+                )
+        except Exception as exc:
+            if state_cleared:
+                restored, winner = compare_and_replace_video_editor_pending(
+                    uid,
+                    {},
+                    callback_entry_state,
+                    expected_exists=False,
+                    replacement_exists=True,
+                )
+                if not restored and not winner:
+                    logger.warning("videoedit status navigation state rollback failed")
+            logger.warning(
+                "videoedit status navigation render failed | error_type=%s",
+                type(exc).__name__,
+            )
+            await query.answer(
+                "Chưa mở được màn mới. Bảng tiến độ và job hiện tại được giữ nguyên.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
+        _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+        try:
+            await query.answer()
+        except Exception as exc:
+            logger.warning(
+                "videoedit status navigation callback answer skipped | error_type=%s",
+                type(exc).__name__,
+            )
+        return True
     if raw_action == "hub":
         def commit_hub_entry():
             compare_and_replace_video_editor_pending(
@@ -239526,7 +240342,7 @@ async def handle_video_editor_callback(
             "effects": "videoedit|effects",
             "workspace": "videoedit|workspace",
             "hub": "videoedit|hub",
-        }.get(caller, "videoedit|hub")
+        }[caller]
         return await safe_edit_or_send(
             query,
             video_edit_guide_text(lang),
@@ -239561,38 +240377,12 @@ async def handle_video_editor_callback(
             show_alert=True,
         )
     if action == "latest_status":
-        try:
-            job = get_latest_video_editor_job(uid)
-            if (
-                not job
-                or str(job.get("user_id") or "") != str(uid)
-                or str(job.get("job_type") or "") != video_editengine1.WORKER_JOB_TYPE
-                or safe_int(job.get("id"), 0) <= 0
-            ):
-                return await safe_edit_or_send(
-                    query,
-                    video_editor_latest_status_empty_text(lang),
-                    parse_mode="HTML",
-                    reply_markup=video_editor_latest_status_fallback_keyboard(lang),
-                )
-            job_id = safe_int(job.get("id"), 0)
-            return await safe_edit_or_send(
-                query,
-                video_editor_job_status_text(job, lang),
-                parse_mode="HTML",
-                reply_markup=video_editor_status_keyboard(job_id, lang),
-            )
-        except sqlite3.Error as exc:
-            logger.warning(
-                "videoedit latest status lookup failed | error_type=%s",
-                type(exc).__name__,
-            )
-            return await safe_edit_or_send(
-                query,
-                video_editor_latest_status_unavailable_text(lang),
-                parse_mode="HTML",
-                reply_markup=video_editor_latest_status_fallback_keyboard(lang),
-            )
+        await query.answer(
+            "Nút Trạng thái chỉnh sửa chung đã được gỡ. Bảng tiến độ chỉ có trong từng job Chỉnh sửa video.",
+            show_alert=True,
+        )
+        _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+        return True
     if action == "audio_loudnorm":
         state = dict(get_video_editor_pending(uid) or {})
         current_plan = dict(state.get("manual_edit_plan") or {})
@@ -239966,40 +240756,109 @@ async def handle_video_editor_callback(
         )
     if action == "ai_status":
         job_id = safe_int(parts[2] if len(parts) > 2 else 0, 0)
+        binding = video_edit_progress_callback_binding(job_id, uid, query)
+        if not binding:
+            await query.answer(
+                "Nút cập nhật này không thuộc bảng tiến độ hiện tại.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
         try:
+            canonical_job = video_edit_progress_read_status(
+                job_id,
+                user_id=uid,
+            )
+            if canonical_job:
+                try:
+                    rendered = None
+                    try:
+                        rendered = await query.edit_message_text(
+                            video_editor_job_status_text(canonical_job, lang),
+                            parse_mode="HTML",
+                            reply_markup=video_editor_status_keyboard(job_id, lang),
+                        )
+                    except Exception as exc:
+                        if not video_edit_panel_not_modified(exc):
+                            raise
+                    if binding.get("restart_recovery"):
+                        snapshot = video_edit_progress_snapshot(
+                            str(job_id),
+                            user_id=uid,
+                            job=canonical_job,
+                            lang=lang,
+                        )
+                        if snapshot and not str(snapshot.get("terminal_state") or "").strip():
+                            progress_auto_refresh_register_message(
+                                query.message,
+                                context,
+                                product_type="video_edit",
+                                job_id=str(job_id),
+                                user_id=uid,
+                                lang=lang,
+                                initial_snapshot=snapshot,
+                            )
+                    await query.answer()
+                    _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                    return True
+                except Exception as exc:
+                    logger.warning(
+                        "videoedit exact ai status render failed | error_type=%s",
+                        type(exc).__name__,
+                    )
+                    await query.answer(
+                        "Chưa cập nhật được bảng hiện tại; hệ thống không tạo bảng mới.",
+                        show_alert=True,
+                    )
+                    _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                    return True
             job = get_local_worker_job_readonly(job_id)
             if (
                 not job
-                or (str(job.get("user_id") or "") != str(uid) and not is_admin_user(uid))
+                or str(job.get("user_id") or "") != str(uid)
             ):
-                return await query.answer("Không tìm thấy tác vụ chỉnh sửa video này.", show_alert=True)
+                await query.answer("Không tìm thấy tác vụ chỉnh sửa video này.", show_alert=True)
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
             job_type = str(job.get("job_type") or "")
-            if job_type == video_editengine1.WORKER_JOB_TYPE:
-                return await safe_edit_or_send(
-                    query,
-                    video_editor_job_status_text(job, lang),
-                    parse_mode="HTML",
-                    reply_markup=video_editor_status_keyboard(job_id, lang),
-                )
             if job_type != "video_ai_edit":
-                return await query.answer("Không tìm thấy tác vụ chỉnh sửa video này.", show_alert=True)
-            return await safe_edit_or_send(
-                query,
-                video_ai_edit_status.public_status_text(job, video_ai_edit_job_progress(job)),
-                parse_mode="HTML",
-                reply_markup=video_ai_edit_status_keyboard(job_id, lang),
-            )
+                await query.answer("Không tìm thấy tác vụ chỉnh sửa video này.", show_alert=True)
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
+            try:
+                await query.edit_message_text(
+                    video_ai_edit_status.public_status_text(
+                        job,
+                        video_ai_edit_job_progress(job),
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=video_ai_edit_status_keyboard(job_id, lang),
+                )
+                await query.answer()
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
+            except Exception as exc:
+                logger.warning(
+                    "videoedit legacy ai status render failed | error_type=%s",
+                    type(exc).__name__,
+                )
+                await query.answer(
+                    "Chưa cập nhật được bảng hiện tại; hệ thống không tạo bảng mới.",
+                    show_alert=True,
+                )
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
         except sqlite3.Error as exc:
             logger.warning(
                 "videoedit exact status refresh failed | error_type=%s",
                 type(exc).__name__,
             )
-            return await safe_edit_or_send(
-                query,
-                video_editor_latest_status_unavailable_text(lang),
-                parse_mode="HTML",
-                reply_markup=video_editor_latest_status_fallback_keyboard(lang),
+            await query.answer(
+                "Chưa đọc được trạng thái job này. Bảng tiến độ hiện tại được giữ nguyên.",
+                show_alert=True,
             )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
     VIDEO_EDIT_LEGACY_AI_CONTROL_ACTIONS = {
         "ai_settings", "ai_intensity", "ai_set_intensity", "ai_preserve", "ai_toggle",
         "ai_aspect", "ai_set_aspect", "ai_set_aspect_method", "ai_aspect_limits",
@@ -240371,31 +241230,73 @@ async def handle_video_editor_callback(
             )
     if action == "status":
         job_id = safe_int(parts[2] if len(parts) > 2 else 0, 0)
-        try:
-            job = get_local_worker_job_readonly(job_id)
-            if (
-                not job
-                or str(job.get("job_type") or "") != video_editengine1.WORKER_JOB_TYPE
-                or (str(job.get("user_id") or "") != str(uid) and not is_admin_user(uid))
-            ):
-                return await query.answer("Không tìm thấy job video này.", show_alert=True)
-            return await safe_edit_or_send(
-                query,
-                video_editor_job_status_text(job, lang),
-                parse_mode="HTML",
-                reply_markup=video_editor_status_keyboard(job_id, lang),
+        binding = video_edit_progress_callback_binding(job_id, uid, query)
+        if not binding:
+            await query.answer(
+                "Nút cập nhật này không thuộc bảng tiến độ hiện tại.",
+                show_alert=True,
             )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
+        try:
+            job = video_edit_progress_read_status(job_id, user_id=uid)
+            if not job:
+                await query.answer("Không tìm thấy job video này.", show_alert=True)
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
+            try:
+                rendered = None
+                try:
+                    rendered = await query.edit_message_text(
+                        video_editor_job_status_text(job, lang),
+                        parse_mode="HTML",
+                        reply_markup=video_editor_status_keyboard(job_id, lang),
+                    )
+                except Exception as exc:
+                    if not video_edit_panel_not_modified(exc):
+                        raise
+                if binding.get("restart_recovery"):
+                    snapshot = video_edit_progress_snapshot(
+                        str(job_id),
+                        user_id=uid,
+                        job=job,
+                        lang=lang,
+                    )
+                    if snapshot and not str(snapshot.get("terminal_state") or "").strip():
+                        progress_auto_refresh_register_message(
+                            query.message,
+                            context,
+                            product_type="video_edit",
+                            job_id=str(job_id),
+                            user_id=uid,
+                            lang=lang,
+                            initial_snapshot=snapshot,
+                        )
+                await query.answer()
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
+            except Exception as exc:
+                logger.warning(
+                    "videoedit exact status render failed | error_type=%s",
+                    type(exc).__name__,
+                )
+                await query.answer(
+                    "Chưa cập nhật được bảng hiện tại; hệ thống không tạo bảng mới.",
+                    show_alert=True,
+                )
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
         except sqlite3.Error as exc:
             logger.warning(
                 "videoedit exact status refresh failed | error_type=%s",
                 type(exc).__name__,
             )
-            return await safe_edit_or_send(
-                query,
-                video_editor_latest_status_unavailable_text(lang),
-                parse_mode="HTML",
-                reply_markup=video_editor_latest_status_fallback_keyboard(lang),
+            await query.answer(
+                "Chưa đọc được trạng thái job này. Bảng tiến độ hiện tại được giữ nguyên.",
+                show_alert=True,
             )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
     if action == "quick":
         requested_action = str(parts[2] if len(parts) > 2 else "")
         if requested_action not in {"concat", "aspect", "compress", "audio", "subtitle"}:
@@ -242022,8 +242923,6 @@ async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_
     if await handle_caption_admin_tool_test_media(update, context):
         return
     if await handle_pending_admin_tool_test_media(update, context):
-        return
-    if await handle_video_editor_pending_upload(update, context):
         return
     if await handle_video_uiflow3_pending_media(update, context):
         return

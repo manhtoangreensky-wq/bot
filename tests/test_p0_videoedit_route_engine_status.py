@@ -69,6 +69,8 @@ def _canonical_receipt(*, full_decode: bool, status: str = "delivered") -> dict:
         "user_id": "9",
         "product_type": video_editengine1.PRODUCT_TYPE,
         "worker_job_type": video_editengine1.WORKER_JOB_TYPE,
+        "engine_route": video_editengine1.ENGINE_ROUTE,
+        "worker_owner": video_editengine1.OUTBOX_OWNER,
         "status": status,
         "receipt_state": "created",
         "delivery_message_id": "501",
@@ -139,20 +141,35 @@ def _strict_receipt(
 
 
 def test_video_edit_adapter_reads_only_exact_owned_worker_job_and_receipt() -> None:
-    calls: list[tuple[str, object]] = []
+    calls: list[tuple[str, object, object]] = []
 
-    def get_local_worker_job_readonly(job_id):
-        calls.append(("worker", job_id))
+    class ReadSnapshot:
+        def __init__(self) -> None:
+            self.statements: list[str] = []
+            self.closed = False
+
+        def execute(self, statement: str):
+            self.statements.append(str(statement))
+            return self
+
+        def close(self) -> None:
+            self.closed = True
+
+    snapshot = ReadSnapshot()
+
+    def get_local_worker_job_readonly(job_id, *, conn=None):
+        calls.append(("worker", job_id, conn))
         return _worker_job(stage="processing_video")
 
-    def receipt_for_worker(job_id):
-        calls.append(("receipt", job_id))
+    def receipt_for_worker(job_id, *, conn=None):
+        calls.append(("receipt", job_id, conn))
         return _canonical_receipt(full_decode=True, status="rendering")
 
     ns = _compile_functions(
         ["video_edit_progress_read_status"],
         {
             "safe_int": lambda value, default=0: int(value or default),
+            "db_connect_readonly": lambda: snapshot,
             "get_local_worker_job_readonly": get_local_worker_job_readonly,
             "video_editengine1_job_for_worker": receipt_for_worker,
             "video_editengine1": video_editengine1,
@@ -162,8 +179,50 @@ def test_video_edit_adapter_reads_only_exact_owned_worker_job_and_receipt() -> N
     status = ns["video_edit_progress_read_status"]("71", user_id=9)
     assert status["id"] == 71
     assert status["_video_edit_canonical"]["local_worker_job_id"] == 71
-    assert calls == [("worker", 71), ("receipt", 71)]
+    assert snapshot.statements == ["BEGIN"]
+    assert snapshot.closed is True
+    assert calls == [
+        ("worker", 71, snapshot),
+        ("receipt", 71, snapshot),
+    ]
     assert ns["video_edit_progress_read_status"]("71", user_id=10) == {}
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("engine_route", "provider_video"),
+        ("worker_owner", "other_product"),
+    ],
+)
+def test_video_edit_status_adapter_requires_the_exact_engine_route_and_worker_owner(
+    field: str,
+    invalid_value: str,
+) -> None:
+    class ReadSnapshot:
+        def execute(self, _statement: str):
+            return self
+
+        def close(self) -> None:
+            return None
+
+    snapshot = ReadSnapshot()
+    receipt = _canonical_receipt(full_decode=True, status="rendering")
+    receipt[field] = invalid_value
+    ns = _compile_functions(
+        ["video_edit_progress_read_status"],
+        {
+            "safe_int": lambda value, default=0: int(value or default),
+            "db_connect_readonly": lambda: snapshot,
+            "get_local_worker_job_readonly": lambda _job_id, **_kwargs: _worker_job(
+                stage="processing_video"
+            ),
+            "video_editengine1_job_for_worker": lambda _job_id, **_kwargs: dict(receipt),
+            "video_editengine1": video_editengine1,
+        },
+    )
+
+    assert ns["video_edit_progress_read_status"]("71", user_id=9) == {}
 
 
 def test_video_edit_status_requires_full_decode_before_completion() -> None:
@@ -196,6 +255,55 @@ def test_video_edit_status_requires_full_decode_before_completion() -> None:
     assert snapshot["product_type"] == "video_edit"
     assert snapshot["terminal_state"] == "delivery_unknown"
     assert "Hoàn tất" not in snapshot["text"]
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    ["worker_status", "stage", "processed", "total", "delivered"],
+)
+def test_video_edit_status_requires_complete_worker_delivery_evidence(
+    missing_field: str,
+) -> None:
+    ns = _compile_functions(
+        [
+            "video_local_job_progress_payload",
+            "video_edit_delivery_receipt_is_complete",
+            "video_editor_job_status_text",
+            "video_edit_progress_snapshot",
+        ],
+        {
+            "json": json,
+            "html": html,
+            "hashlib": hashlib,
+            "re": __import__("re"),
+            "safe_int": lambda value, default=0: int(value or default),
+            "normalize_user_language": lambda value: value,
+            "video_editengine1": video_editengine1,
+            "video_editengine1_job_for_worker": lambda _job_id: {},
+        },
+    )
+    worker = _worker_job()
+    progress = json.loads(worker["error_short"])
+    if missing_field == "worker_status":
+        worker.pop("status")
+    else:
+        progress.pop(missing_field)
+        worker["error_short"] = json.dumps(progress)
+
+    snapshot = ns["video_edit_progress_snapshot"](
+        "71",
+        user_id=9,
+        job={
+            **worker,
+            "_video_edit_canonical": _canonical_receipt(full_decode=True),
+        },
+        lang="vi",
+    )
+
+    assert snapshot["terminal_state"] == "delivery_unknown"
+    assert snapshot["percent"] == 95
+    assert "Hoàn tất" not in snapshot["text"]
+    assert snapshot["text"].count("✅") == 5
 
 
 def test_video_edit_status_rejects_noncanonical_sha_probe_and_size_fields() -> None:
@@ -311,6 +419,59 @@ def test_video_edit_status_never_completes_when_worker_and_canonical_terminals_c
     assert snapshot["percent"] != 100
     assert "Hoàn tất" not in snapshot["text"]
     assert snapshot["text"].count("✅") < 6
+
+
+@pytest.mark.parametrize("canonical_status", ["rendering", "failed_no_charge"])
+def test_video_edit_terminal_worker_without_delivery_stage_is_uncertain(
+    canonical_status: str,
+) -> None:
+    ns = _compile_functions(
+        [
+            "video_local_job_progress_payload",
+            "video_edit_delivery_receipt_is_complete",
+            "video_editor_job_status_text",
+            "video_edit_progress_snapshot",
+        ],
+        {
+            "json": json,
+            "html": html,
+            "hashlib": hashlib,
+            "re": __import__("re"),
+            "safe_int": lambda value, default=0: int(value or default),
+            "normalize_user_language": lambda value: value,
+            "video_editengine1": video_editengine1,
+            "video_editengine1_job_for_worker": lambda _job_id: {},
+        },
+    )
+    worker = _worker_job()
+    progress = json.loads(worker["error_short"])
+    progress.pop("stage")
+    worker["error_short"] = json.dumps(progress)
+    canonical = _canonical_receipt(
+        full_decode=canonical_status != "failed_no_charge",
+        status=canonical_status,
+    )
+    if canonical_status == "failed_no_charge":
+        canonical.update(
+            {
+                "receipt_state": "",
+                "delivery_message_id": "",
+                "delivery_file_id": "",
+                "output_file_id": "",
+            }
+        )
+
+    snapshot = ns["video_edit_progress_snapshot"](
+        "71",
+        user_id=9,
+        job={**worker, "_video_edit_canonical": canonical},
+        lang="vi",
+    )
+
+    assert snapshot["terminal_state"] == "delivery_unknown"
+    assert snapshot["percent"] == 95
+    assert "Hoàn tất" not in snapshot["text"]
+    assert snapshot["text"].count("✅") == 5
 
 
 def test_video_edit_status_rejects_nonterminal_strict_delivery_cursor() -> None:
@@ -529,7 +690,7 @@ def test_delivery_uncertain_panel_preserves_an_already_recorded_charge() -> None
     assert "Hoàn tất" not in snapshot["text"]
 
 
-def test_video_edit_scheduler_tick_edits_original_and_never_sends_fallback_duplicate() -> None:
+def test_video_edit_scheduler_retries_the_same_terminal_panel_after_a_transient_edit_failure() -> None:
     registry = {
         "video_edit:71": {
             "key": "video_edit:71",
@@ -589,6 +750,7 @@ def test_video_edit_scheduler_tick_edits_original_and_never_sends_fallback_dupli
             "safe_int": lambda value, default=0: int(value or default),
             "now_text": lambda: "2026-08-09 10:00:00",
             "sanitize_log_text": str,
+            "video_edit_panel_not_modified": lambda _error: False,
             "re": __import__("re"),
             "hashlib": hashlib,
         },
@@ -597,9 +759,85 @@ def test_video_edit_scheduler_tick_edits_original_and_never_sends_fallback_dupli
     result = asyncio.run(
         ns["progress_auto_refresh_tick"](SimpleNamespace(bot=Bot()), "video_edit:71")
     )
-    assert result["record"]["stopped"] is True
-    assert result["record"]["stop_reason"] == "delivery_unknown"
+    assert result["status"] == "retry_pending"
+    assert result["record"].get("stopped") is not True
+    assert result["record"].get("stop_reason") in {None, ""}
+    assert result["record"]["task_alive"] is True
+    assert result["record"]["last_render_hash"] == "old"
+    assert result["record"]["last_percent"] == 50
     assert events == ["edit:99001:7001"]
+
+
+def test_video_edit_scheduler_treats_message_not_modified_as_terminal_panel_success() -> None:
+    key = "video_edit:71"
+    registry = {
+        key: {
+            "key": key,
+            "product_type": "video_edit",
+            "job_id": "71",
+            "chat_id": 99001,
+            "message_id": 7001,
+            "user_id": 9,
+            "lang": "vi",
+            "update_count": 0,
+            "max_updates": 10,
+            "last_percent": 50,
+            "last_render_hash": "old",
+            "stop_on_terminal": True,
+            "edit_only": True,
+        }
+    }
+    events: list[str] = []
+
+    class Bot:
+        async def edit_message_text(self, **_kwargs):
+            events.append("edit")
+            raise RuntimeError("BadRequest: message is not modified")
+
+        async def send_message(self, **_kwargs):
+            events.append("send")
+
+    async def status_for_tick(_context, _record):
+        return {
+            **_worker_job(stage="delivered"),
+            "_video_edit_canonical": _canonical_receipt(full_decode=True),
+        }
+
+    ns = _compile_functions(
+        ["progress_auto_refresh_tick"],
+        {
+            "PROGRESS_AUTO_REFRESH_JOBS": registry,
+            "PROGRESS_AUTO_REFRESH_MAX_UPDATES": 10,
+            "PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL": True,
+            "progress_auto_refresh_status_for_tick": status_for_tick,
+            "progress_auto_refresh_snapshot": lambda *_args, **_kwargs: {
+                "stage": "delivered",
+                "percent": 100,
+                "terminal_state": "delivered",
+                "text": "delivered",
+                "render_hash": "delivered-hash",
+            },
+            "progress_auto_refresh_should_edit": lambda *_args: True,
+            "progress_auto_refresh_keyboard": lambda *_args: "videoedit|status|71",
+            "progress_auto_refresh_key": lambda product_type, job_id: f"{product_type}:{job_id}",
+            "safe_int": lambda value, default=0: int(value or default),
+            "now_text": lambda: "2026-08-09 10:00:00",
+            "sanitize_log_text": str,
+            "video_edit_panel_not_modified": lambda error: "message is not modified" in str(error).lower(),
+            "re": __import__("re"),
+            "hashlib": hashlib,
+        },
+    )
+
+    result = asyncio.run(ns["progress_auto_refresh_tick"](SimpleNamespace(bot=Bot()), key))
+    assert result["status"] == "updated"
+    assert result["record"]["stopped"] is True
+    assert result["record"]["stop_reason"] == "delivered"
+    assert result["record"]["last_render_hash"] == "delivered-hash"
+    assert result["record"]["last_percent"] == 100
+    assert result["record"]["edit_success_count"] == 1
+    assert result["record"].get("edit_fail_count", 0) == 0
+    assert events == ["edit"]
 
 
 @pytest.mark.parametrize("case", ["job_missing", "registry_key_mismatch"])
@@ -737,6 +975,78 @@ def test_video_edit_panel_registration_preserves_owner_and_never_normalizes_to_p
     assert record["max_updates"] >= 121
 
 
+def test_video_edit_panel_keeps_exact_binding_when_auto_refresh_is_disabled() -> None:
+    registry: dict[str, dict] = {}
+    product_progress = SimpleNamespace(
+        normalize_product_type=lambda value: str(value),
+        product_progress_safe_callback_value=lambda value, _limit: str(value),
+    )
+    ns = _compile_functions(
+        ["progress_auto_refresh_key", "progress_auto_refresh_register"],
+        {
+            "product_progress_status": product_progress,
+            "PROGRESS_AUTO_REFRESH_ENABLED": False,
+            "PROGRESS_AUTO_REFRESH_JOBS": registry,
+            "PROGRESS_AUTO_REFRESH_EDIT_ONLY": False,
+            "PROGRESS_AUTO_REFRESH_INTERVAL_SECONDS": 5,
+            "PROGRESS_AUTO_REFRESH_MAX_UPDATES": 10,
+            "PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL": True,
+            "PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT": 5,
+            "MUSIC_AUTO_DELIVERY_POLL_INTERVAL_SECONDS": 5,
+            "MUSIC_AUTO_DELIVERY_MAX_POLLS": 10,
+            "MUSIC_AUTO_DELIVERY_ENABLED": False,
+            "MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL": True,
+            "LOCAL_WORKER_MAX_JOB_SECONDS": 600,
+            "math": __import__("math"),
+            "progress_auto_refresh_snapshot": lambda *_args, **_kwargs: {},
+            "progress_product_type_is_music": lambda *_args: False,
+            "normalize_user_language": lambda value: value,
+            "now_text": lambda: "2026-08-10 01:00:00",
+            "progress_auto_refresh_start_task": lambda *_args: (_ for _ in ()).throw(
+                AssertionError("disabled scheduler must not start")
+            ),
+        },
+    )
+
+    record = ns["progress_auto_refresh_register"](
+        product_type="video_edit",
+        job_id="71",
+        chat_id=99001,
+        message_id=7001,
+        user_id=9,
+        lang="vi",
+        initial_snapshot={
+            "stage": "received",
+            "percent": 10,
+            "terminal_state": "",
+            "render_hash": "received",
+        },
+        start_task=True,
+    )
+
+    assert record["key"] == "video_edit:71"
+    assert record["product_type"] == "video_edit"
+    assert record["job_id"] == "71"
+    assert record["user_id"] == 9
+    assert record["chat_id"] == 99001
+    assert record["message_id"] == 7001
+    assert record["enabled"] is False
+    assert record["scheduler_status"] == "disabled"
+    assert record["task_started"] is False
+    assert record["task_alive"] is False
+    assert registry["video_edit:71"] == record
+    assert ns["progress_auto_refresh_register"](
+        product_type="frame_video",
+        job_id="frame-71",
+        chat_id=99001,
+        message_id=7002,
+        user_id=9,
+        lang="vi",
+        initial_snapshot={"stage": "received", "percent": 5},
+        start_task=True,
+    ) == {}
+
+
 def test_video_edit_tick_and_loop_never_enter_generic_product_detection() -> None:
     reads: list[tuple[str, str, int]] = []
     registry = {
@@ -846,6 +1156,14 @@ def test_job_bound_panel_renders_all_six_stages_immediately_after_submit() -> No
 
     def register(message, context, **kwargs):
         registered.append({"message": message, "context": context, **kwargs})
+        return {
+            "key": f"video_edit:{kwargs['job_id']}",
+            "product_type": kwargs["product_type"],
+            "job_id": kwargs["job_id"],
+            "user_id": kwargs["user_id"],
+            "chat_id": message.chat_id,
+            "message_id": message.message_id,
+        }
 
     def snapshot(job_id, user_id=0, job=None, lang="vi"):
         assert int(job_id) == 71
@@ -919,6 +1237,71 @@ def test_job_bound_panel_renders_all_six_stages_immediately_after_submit() -> No
             "initial_snapshot": snapshots[0],
         }
     ]
+
+
+@pytest.mark.parametrize(
+    "registration",
+    [
+        {},
+        {
+            "key": "video_edit:71",
+            "product_type": "video_edit",
+            "job_id": "71",
+            "user_id": 9,
+            "chat_id": 99001,
+            "message_id": 7999,
+        },
+    ],
+)
+def test_job_bound_panel_rejects_missing_or_mismatched_exact_registration(
+    registration: dict,
+) -> None:
+    class Message:
+        chat_id = 99001
+        message_id = 7002
+
+    class Query:
+        message = Message()
+
+    async def render(_query, _text, **_kwargs):
+        return Message()
+
+    ns = _compile_functions(
+        ["show_video_editor_job_status_panel"],
+        {
+            "safe_int": lambda value, default=0: int(value or default),
+            "video_edit_progress_read_status": lambda *_args, **_kwargs: {
+                "id": 71,
+                "job_type": video_editengine1.WORKER_JOB_TYPE,
+                "user_id": "9",
+            },
+            "video_edit_progress_snapshot": lambda *_args, **_kwargs: {
+                "text": "exact job status",
+            },
+            "video_editor_job_status_text": lambda *_args: "exact job status",
+            "video_editor_status_keyboard": lambda *_args: "keyboard",
+            "safe_edit_or_send": render,
+            "progress_auto_refresh_register_message": lambda *_args, **_kwargs: dict(
+                registration
+            ),
+        },
+    )
+    update = SimpleNamespace(
+        callback_query=Query(),
+        message=None,
+        effective_user=SimpleNamespace(id=9),
+    )
+
+    with pytest.raises(RuntimeError, match="videoedit_progress_panel_registration_failed"):
+        asyncio.run(
+            ns["show_video_editor_job_status_panel"](
+                update,
+                SimpleNamespace(),
+                71,
+                "vi",
+                user_id=9,
+            )
+        )
 
 
 def test_video_edit_is_not_added_to_generic_product_progress_specs() -> None:
@@ -999,6 +1382,143 @@ def test_image_handoff_commits_only_after_telegram_render(
         assert bot_namespace.video_editor_state_snapshot(current) == bot_namespace.video_editor_state_snapshot(original)
         assert dict(bot_namespace.get_quick_image_flow(user_id) or {}) == {}
         assert dict(bot_namespace.get_public_image_prompt_pending(user_id) or {}) == {}
+    finally:
+        bot_namespace.clear_video_editor_pending(user_id)
+        bot_namespace.clear_quick_image_flow(user_id)
+        bot_namespace.clear_public_image_prompt_pending(user_id)
+
+
+@pytest.mark.parametrize(
+    "callback_data",
+    ["create_media|quick_image", "create_media|image_tier_low"],
+)
+def test_image_handoff_never_clears_a_newer_video_editor_draft(
+    monkeypatch: pytest.MonkeyPatch,
+    callback_data: str,
+) -> None:
+    user_id = 92_011 if callback_data.endswith("quick_image") else 92_012
+    bot_namespace = __import__("bot")
+    bot_namespace.clear_video_editor_pending(user_id)
+    bot_namespace.clear_quick_image_flow(user_id)
+    bot_namespace.clear_public_image_prompt_pending(user_id)
+    bot_namespace.set_video_editor_pending(
+        user_id,
+        "review",
+        edit_mode="manual_edit",
+        current_screen="review",
+        source_file_id="old-source",
+        inspection_complete=True,
+        edit_session_id="old-edit-session",
+        manual_edit_plan={"trim": {"start_ms": 0, "end_ms": 1_000}},
+    )
+    winner: dict[str, dict] = {}
+    renders: list[str] = []
+
+    async def render_then_publish_newer_draft(*_args, **kwargs):
+        if "post_render" not in kwargs:
+            renders.append("winner")
+            return SimpleNamespace(chat_id=user_id, message_id=9_102)
+        renders.append("handoff")
+        winner["state"] = bot_namespace.set_video_editor_pending(
+            user_id,
+            "review",
+            edit_mode="manual_edit",
+            current_screen="review",
+            source_file_id="newer-source",
+            inspection_complete=True,
+            edit_session_id="newer-edit-session",
+            manual_edit_plan={"trim": {"start_ms": 500, "end_ms": 1_500}},
+        )
+        committed = kwargs["post_render"]()
+        if asyncio.iscoroutine(committed):
+            await committed
+        return SimpleNamespace(chat_id=user_id, message_id=9_101)
+
+    monkeypatch.setattr(
+        bot_namespace,
+        "safe_edit_or_send",
+        render_then_publish_newer_draft,
+    )
+    query = _FailingMediaQuery(callback_data, user_id)
+    update = SimpleNamespace(
+        callback_query=query,
+        effective_user=SimpleNamespace(id=user_id),
+    )
+    try:
+        asyncio.run(
+            bot_namespace._handle_create_media_callback_impl(
+                update,
+                SimpleNamespace(user_data={}),
+            )
+        )
+        current = bot_namespace.get_video_editor_pending(user_id)
+        assert bot_namespace.video_editor_state_snapshot(
+            current
+        ) == bot_namespace.video_editor_state_snapshot(winner["state"])
+        assert renders == ["handoff", "winner"]
+    finally:
+        bot_namespace.clear_video_editor_pending(user_id)
+        bot_namespace.clear_quick_image_flow(user_id)
+        bot_namespace.clear_public_image_prompt_pending(user_id)
+
+
+@pytest.mark.parametrize(
+    "callback_data",
+    ["create_media|quick_image", "create_media|image_tier_low"],
+)
+def test_image_handoff_rerenders_the_hub_when_the_entry_draft_was_cleared(
+    monkeypatch: pytest.MonkeyPatch,
+    callback_data: str,
+) -> None:
+    user_id = 92_021 if callback_data.endswith("quick_image") else 92_022
+    bot_namespace = __import__("bot")
+    bot_namespace.clear_video_editor_pending(user_id)
+    bot_namespace.clear_quick_image_flow(user_id)
+    bot_namespace.clear_public_image_prompt_pending(user_id)
+    bot_namespace.set_video_editor_pending(
+        user_id,
+        "review",
+        edit_mode="manual_edit",
+        current_screen="review",
+        source_file_id="entry-source",
+        inspection_complete=True,
+        edit_session_id="entry-edit-session",
+        manual_edit_plan={"trim": {"start_ms": 0, "end_ms": 1_000}},
+    )
+    renders: list[str] = []
+
+    async def render_then_clear_entry_draft(*_args, **kwargs):
+        if "post_render" not in kwargs:
+            renders.append("winner")
+            return SimpleNamespace(chat_id=user_id, message_id=9_202)
+        renders.append("handoff")
+        bot_namespace.clear_video_editor_pending(user_id)
+        committed = kwargs["post_render"]()
+        if asyncio.iscoroutine(committed):
+            await committed
+        return SimpleNamespace(chat_id=user_id, message_id=9_201)
+
+    monkeypatch.setattr(
+        bot_namespace,
+        "safe_edit_or_send",
+        render_then_clear_entry_draft,
+    )
+    query = _FailingMediaQuery(callback_data, user_id)
+    update = SimpleNamespace(
+        callback_query=query,
+        effective_user=SimpleNamespace(id=user_id),
+    )
+    try:
+        asyncio.run(
+            bot_namespace._handle_create_media_callback_impl(
+                update,
+                SimpleNamespace(user_data={}),
+            )
+        )
+        assert bot_namespace.get_video_editor_pending(user_id) == {}
+        assert dict(bot_namespace.get_quick_image_flow(user_id) or {}) == {}
+        assert dict(bot_namespace.get_public_image_prompt_pending(user_id) or {}) == {}
+        assert renders == ["handoff", "winner"]
     finally:
         bot_namespace.clear_video_editor_pending(user_id)
         bot_namespace.clear_quick_image_flow(user_id)
@@ -1381,6 +1901,255 @@ def test_job_panel_navigation_clears_the_committed_editor_draft(
         bot_namespace.clear_video_editor_pending(user_id)
 
 
+@pytest.mark.parametrize("action", ["status_hub", "status_menu"])
+def test_old_job_panel_navigation_never_clears_a_newer_editor_draft(
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    bot_namespace = __import__("bot")
+    user_id = 92_421 + (1 if action == "status_menu" else 0)
+    old_job_id = 71
+    key = bot_namespace.progress_auto_refresh_key(
+        "video_edit",
+        str(old_job_id),
+    )
+    bot_namespace.PROGRESS_AUTO_REFRESH_JOBS[key] = {
+        "key": key,
+        "product_type": "video_edit",
+        "job_id": str(old_job_id),
+        "user_id": user_id,
+        "chat_id": user_id,
+        "message_id": 7_101,
+    }
+    newer = bot_namespace.set_video_editor_pending(
+        user_id,
+        "review",
+        current_screen="review",
+        source_file_id="newer-source",
+        inspection_complete=True,
+        edit_session_id="newer-edit-session",
+        job_id=72,
+        manual_edit_plan={"trim": {"start_ms": 500, "end_ms": 1_500}},
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "video_edit_progress_read_status",
+        lambda *_args, **_kwargs: {
+            "id": old_job_id,
+            "job_type": bot_namespace.video_editengine1.WORKER_JOB_TYPE,
+            "user_id": str(user_id),
+        },
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "localized_start_menu_text",
+        lambda *_args: "main menu",
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "localized_main_menu_keyboard",
+        lambda *_args: "main keyboard",
+    )
+    rendered: list[tuple[tuple, dict]] = []
+
+    class PanelMessage:
+        chat_id = user_id
+        message_id = 7_101
+
+        async def reply_text(self, *args, **kwargs):
+            rendered.append((args, kwargs))
+            return SimpleNamespace(chat_id=self.chat_id, message_id=8_101)
+
+    query = _CallbackProbe(
+        f"videoedit|{action}|{old_job_id}",
+        user_id,
+    )
+    query.message = PanelMessage()
+    try:
+        asyncio.run(
+            bot_namespace.handle_video_editor_callback(
+                SimpleNamespace(callback_query=query),
+                SimpleNamespace(user_data={}),
+            )
+        )
+        current = bot_namespace.get_video_editor_pending(user_id)
+        assert bot_namespace.video_editor_state_snapshot(
+            current
+        ) == bot_namespace.video_editor_state_snapshot(newer)
+        assert rendered == []
+        assert query.answers and query.answers[-1][1].get("show_alert") is True
+    finally:
+        bot_namespace.PROGRESS_AUTO_REFRESH_JOBS.pop(key, None)
+        bot_namespace.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize("action", ["status_hub", "status_menu"])
+def test_job_panel_navigation_rejects_a_state_winner_before_render(
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    bot_namespace = __import__("bot")
+    user_id = 92_431 + (1 if action == "status_menu" else 0)
+    old_job_id = 71
+    key = bot_namespace.progress_auto_refresh_key(
+        "video_edit",
+        str(old_job_id),
+    )
+    bot_namespace.PROGRESS_AUTO_REFRESH_JOBS[key] = {
+        "key": key,
+        "product_type": "video_edit",
+        "job_id": str(old_job_id),
+        "user_id": user_id,
+        "chat_id": user_id,
+        "message_id": 7_111,
+    }
+    bot_namespace.set_video_editor_pending(
+        user_id,
+        "job_status",
+        current_screen="job_status",
+        source_file_id="old-source",
+        inspection_complete=True,
+        job_id=old_job_id,
+    )
+    winner: dict[str, dict] = {}
+
+    def read_status_and_publish_winner(*_args, **_kwargs):
+        winner["state"] = bot_namespace.set_video_editor_pending(
+            user_id,
+            "review",
+            current_screen="review",
+            source_file_id="newer-source",
+            inspection_complete=True,
+            edit_session_id="newer-edit-session",
+            job_id=72,
+            manual_edit_plan={"trim": {"start_ms": 500, "end_ms": 1_500}},
+        )
+        return {
+            "id": old_job_id,
+            "job_type": bot_namespace.video_editengine1.WORKER_JOB_TYPE,
+            "user_id": str(user_id),
+        }
+
+    monkeypatch.setattr(
+        bot_namespace,
+        "video_edit_progress_read_status",
+        read_status_and_publish_winner,
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "localized_start_menu_text",
+        lambda *_args: "main menu",
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "localized_main_menu_keyboard",
+        lambda *_args: "main keyboard",
+    )
+    rendered: list[tuple[tuple, dict]] = []
+
+    class PanelMessage:
+        chat_id = user_id
+        message_id = 7_111
+
+        async def reply_text(self, *args, **kwargs):
+            rendered.append((args, kwargs))
+            return SimpleNamespace(chat_id=self.chat_id, message_id=8_111)
+
+    query = _CallbackProbe(
+        f"videoedit|{action}|{old_job_id}",
+        user_id,
+    )
+    query.message = PanelMessage()
+    try:
+        asyncio.run(
+            bot_namespace.handle_video_editor_callback(
+                SimpleNamespace(callback_query=query),
+                SimpleNamespace(user_data={}),
+            )
+        )
+        current = bot_namespace.get_video_editor_pending(user_id)
+        assert bot_namespace.video_editor_state_snapshot(
+            current
+        ) == bot_namespace.video_editor_state_snapshot(winner["state"])
+        assert rendered == []
+        assert query.edits == []
+        assert query.answers and query.answers[-1][1].get("show_alert") is True
+    finally:
+        bot_namespace.PROGRESS_AUTO_REFRESH_JOBS.pop(key, None)
+        bot_namespace.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize("action", ["status_hub", "status_menu"])
+def test_job_panel_navigation_restores_state_when_new_message_render_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    bot_namespace = __import__("bot")
+    user_id = 92_441 + (1 if action == "status_menu" else 0)
+    job_id = 71
+    key = bot_namespace.progress_auto_refresh_key("video_edit", str(job_id))
+    bot_namespace.PROGRESS_AUTO_REFRESH_JOBS[key] = {
+        "key": key,
+        "product_type": "video_edit",
+        "job_id": str(job_id),
+        "user_id": user_id,
+        "chat_id": user_id,
+        "message_id": 7_121,
+    }
+    original = bot_namespace.set_video_editor_pending(
+        user_id,
+        "job_status",
+        current_screen="job_status",
+        source_file_id="source-for-rollback",
+        inspection_complete=True,
+        job_id=job_id,
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "video_edit_progress_read_status",
+        lambda *_args, **_kwargs: {
+            "id": job_id,
+            "job_type": bot_namespace.video_editengine1.WORKER_JOB_TYPE,
+            "user_id": str(user_id),
+        },
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "localized_start_menu_text",
+        lambda *_args: "main menu",
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "localized_main_menu_keyboard",
+        lambda *_args: "main keyboard",
+    )
+
+    class PanelMessage:
+        chat_id = user_id
+        message_id = 7_121
+
+        async def reply_text(self, *_args, **_kwargs):
+            raise RuntimeError("telegram new-message render failed")
+
+    query = _CallbackProbe(f"videoedit|{action}|{job_id}", user_id)
+    query.message = PanelMessage()
+    try:
+        asyncio.run(
+            bot_namespace.handle_video_editor_callback(
+                SimpleNamespace(callback_query=query),
+                SimpleNamespace(user_data={}),
+            )
+        )
+        current = bot_namespace.get_video_editor_pending(user_id)
+        assert bot_namespace.video_editor_state_snapshot(
+            current
+        ) == bot_namespace.video_editor_state_snapshot(original)
+        assert query.answers and query.answers[-1][1].get("show_alert") is True
+    finally:
+        bot_namespace.PROGRESS_AUTO_REFRESH_JOBS.pop(key, None)
+        bot_namespace.clear_video_editor_pending(user_id)
+
+
 def test_video_editor_guide_rejects_an_unknown_caller_without_rendering(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1514,6 +2283,162 @@ def test_video_edit_exact_status_edit_failure_never_fallback_sends_a_second_pane
         bot_namespace.PROGRESS_AUTO_REFRESH_JOBS.pop(key, None)
 
 
+def test_video_edit_message_not_modified_refresh_restores_the_exact_scheduler_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bot_namespace = __import__("bot")
+    user_id = 92_271
+    key = bot_namespace.progress_auto_refresh_key("video_edit", "71")
+    bot_namespace.PROGRESS_AUTO_REFRESH_JOBS.pop(key, None)
+    job = {
+        "id": 71,
+        "job_type": bot_namespace.video_editengine1.WORKER_JOB_TYPE,
+        "user_id": str(user_id),
+    }
+    snapshot = {
+        "stage": "processing_video",
+        "percent": 60,
+        "terminal_state": "",
+        "text": "same status panel",
+        "render_hash": "same-status-hash",
+    }
+    registrations: list[tuple[object, object, dict]] = []
+
+    monkeypatch.setattr(
+        bot_namespace,
+        "video_edit_progress_read_status",
+        lambda *_args, **_kwargs: dict(job),
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "video_editor_job_status_text",
+        lambda *_args: "same status panel",
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "video_edit_progress_snapshot",
+        lambda *_args, **_kwargs: dict(snapshot),
+    )
+
+    def capture_registration(message, context, **kwargs):
+        registrations.append((message, context, kwargs))
+        return {"key": key, **kwargs}
+
+    monkeypatch.setattr(
+        bot_namespace,
+        "progress_auto_refresh_register_message",
+        capture_registration,
+    )
+    query = _CallbackProbe("videoedit|status|71", user_id)
+
+    async def unchanged_edit(*_args, **_kwargs):
+        raise RuntimeError("BadRequest: message is not modified")
+
+    query.edit_message_text = unchanged_edit
+    context = SimpleNamespace(user_data={})
+    try:
+        assert asyncio.run(
+            bot_namespace.handle_video_editor_callback(
+                SimpleNamespace(callback_query=query),
+                context,
+            )
+        ) is True
+        assert len(registrations) == 1
+        message, registered_context, kwargs = registrations[0]
+        assert message is query.message
+        assert registered_context is context
+        assert kwargs["product_type"] == "video_edit"
+        assert kwargs["job_id"] == "71"
+        assert kwargs["user_id"] == user_id
+        assert kwargs["initial_snapshot"] == snapshot
+        assert query.answers == [((), {})]
+    finally:
+        bot_namespace.PROGRESS_AUTO_REFRESH_JOBS.pop(key, None)
+
+
+@pytest.mark.parametrize(
+    ("terminal_state", "expected_registrations"),
+    [("", 1), ("delivered", 0)],
+)
+def test_video_edit_status_restart_recovery_only_rebinds_a_nonterminal_exact_job(
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_state: str,
+    expected_registrations: int,
+) -> None:
+    bot_namespace = __import__("bot")
+    user_id = 92_281 + (1 if terminal_state else 0)
+    key = bot_namespace.progress_auto_refresh_key("video_edit", "71")
+    bot_namespace.PROGRESS_AUTO_REFRESH_JOBS[key] = {
+        "key": key,
+        "product_type": "video_edit",
+        "job_id": "71",
+        "chat_id": user_id,
+        "message_id": 9002,
+        "user_id": user_id,
+        "lang": "vi",
+        "stopped": True,
+        "task_alive": False,
+        "stop_reason": "auto_tick_exception",
+    }
+    job = {
+        "id": 71,
+        "job_type": bot_namespace.video_editengine1.WORKER_JOB_TYPE,
+        "user_id": str(user_id),
+    }
+    snapshot = {
+        "stage": terminal_state or "processing_video",
+        "percent": 100 if terminal_state else 60,
+        "terminal_state": terminal_state,
+        "text": terminal_state or "processing",
+        "render_hash": terminal_state or "processing-hash",
+    }
+    registrations: list[tuple[object, object, dict]] = []
+    monkeypatch.setattr(
+        bot_namespace,
+        "video_edit_progress_read_status",
+        lambda *_args, **_kwargs: dict(job),
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "video_editor_job_status_text",
+        lambda *_args: str(snapshot["text"]),
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "video_edit_progress_snapshot",
+        lambda *_args, **_kwargs: dict(snapshot),
+    )
+
+    def capture_registration(message, context, **kwargs):
+        registrations.append((message, context, kwargs))
+        return {"key": key, **kwargs}
+
+    monkeypatch.setattr(
+        bot_namespace,
+        "progress_auto_refresh_register_message",
+        capture_registration,
+    )
+    query = _CallbackProbe("videoedit|status|71", user_id)
+    context = SimpleNamespace(user_data={})
+    try:
+        assert asyncio.run(
+            bot_namespace.handle_video_editor_callback(
+                SimpleNamespace(callback_query=query),
+                context,
+            )
+        ) is True
+        assert len(registrations) == expected_registrations
+        if registrations:
+            message, registered_context, kwargs = registrations[0]
+            assert message is query.message
+            assert registered_context is context
+            assert kwargs["job_id"] == "71"
+            assert kwargs["user_id"] == user_id
+            assert kwargs["initial_snapshot"] == snapshot
+    finally:
+        bot_namespace.PROGRESS_AUTO_REFRESH_JOBS.pop(key, None)
+
+
 @pytest.mark.parametrize("action", ["status", "ai_status"])
 def test_video_edit_public_status_never_grants_admin_cross_owner_bypass(
     monkeypatch: pytest.MonkeyPatch,
@@ -1623,3 +2548,85 @@ def test_video_edit_status_navigation_opens_new_message_and_preserves_live_panel
     assert "videoedit|status_menu|71" in callbacks
     assert "videoedit|hub" not in callbacks
     assert "menu|main" not in callbacks
+
+
+@pytest.mark.parametrize("action", ["status_hub", "status_menu"])
+def test_video_edit_status_navigation_ack_failure_never_rolls_back_a_rendered_destination(
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    bot_namespace = __import__("bot")
+    user_id = 92_411 + (1 if action == "status_menu" else 0)
+    job_id = 71
+    key = bot_namespace.progress_auto_refresh_key("video_edit", str(job_id))
+    original_record = {
+        "key": key,
+        "product_type": "video_edit",
+        "job_id": str(job_id),
+        "user_id": user_id,
+        "chat_id": user_id,
+        "message_id": 7_001,
+        "last_stage": "processing_video",
+        "last_percent": 60,
+        "last_render_hash": "known-good",
+    }
+    bot_namespace.PROGRESS_AUTO_REFRESH_JOBS[key] = dict(original_record)
+    bot_namespace.set_video_editor_pending(
+        user_id,
+        "job_status",
+        current_screen="job_status",
+        source_file_id="source-for-navigation",
+        inspection_complete=True,
+        job_id=job_id,
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "video_edit_progress_read_status",
+        lambda *_args, **_kwargs: {
+            "id": job_id,
+            "job_type": bot_namespace.video_editengine1.WORKER_JOB_TYPE,
+            "user_id": str(user_id),
+        },
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "localized_start_menu_text",
+        lambda *_args: "main menu",
+    )
+    monkeypatch.setattr(
+        bot_namespace,
+        "localized_main_menu_keyboard",
+        lambda *_args: "main keyboard",
+    )
+
+    class PanelMessage:
+        chat_id = user_id
+        message_id = 7_001
+
+        def __init__(self) -> None:
+            self.replies: list[tuple[str, dict]] = []
+
+        async def reply_text(self, text, **kwargs):
+            self.replies.append((str(text), kwargs))
+            return SimpleNamespace(chat_id=self.chat_id, message_id=8_001)
+
+    query = _CallbackProbe(f"videoedit|{action}|{job_id}", user_id)
+    query.message = PanelMessage()
+
+    async def fail_acknowledgement(*_args, **_kwargs):
+        raise RuntimeError("telegram callback acknowledgement failed")
+
+    query.answer = fail_acknowledgement
+    try:
+        assert asyncio.run(
+            bot_namespace.handle_video_editor_callback(
+                SimpleNamespace(callback_query=query),
+                SimpleNamespace(user_data={}),
+            )
+        ) is True
+        assert len(query.message.replies) == 1
+        assert bot_namespace.get_video_editor_pending(user_id) == {}
+        assert bot_namespace.PROGRESS_AUTO_REFRESH_JOBS[key] == original_record
+    finally:
+        bot_namespace.PROGRESS_AUTO_REFRESH_JOBS.pop(key, None)
+        bot_namespace.clear_video_editor_pending(user_id)
