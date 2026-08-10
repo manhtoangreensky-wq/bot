@@ -37936,7 +37936,9 @@ def calculate_chat_cost(size_or_length) -> int:
 
 def normalize_chat_tier(value: str) -> str:
     tier = str(value or CHAT_TIER_PRO).strip().lower()
-    return tier if tier in {CHAT_TIER_NORMAL, CHAT_TIER_PRO, CHAT_TIER_DEEP} else CHAT_TIER_PRO
+    if tier == CHAT_TIER_DEEP:
+        return CHAT_TIER_PRO
+    return tier if tier in {CHAT_TIER_NORMAL, CHAT_TIER_PRO} else CHAT_TIER_PRO
 
 def normalize_chat_model(value: str) -> str:
     model = str(value or "auto").strip().lower().replace("-", "_")
@@ -40653,10 +40655,20 @@ def ensure_user_modes(user_id) -> dict:
             )
             conn.commit()
             row = ("normal", "normal", "", "", "", now_text(), "default")
+        raw_chat_mode = str(row[0] or "normal").strip().lower()
+        raw_ai_level = str(row[1] or raw_chat_mode).strip().lower()
+        chat_mode = "pro" if raw_chat_mode in {"pro", "deep"} else "normal"
+        ai_level = "pro" if raw_ai_level in {"pro", "deep"} else "normal"
+        if str(row[0] or "normal").strip().lower() != chat_mode or str(row[1] or "normal").strip().lower() != ai_level:
+            conn.execute(
+                "UPDATE user_modes SET chat_mode=?,ai_level=?,updated_at=?,note=? WHERE user_id=?",
+                (chat_mode, ai_level, now_text(), "Migrated legacy Chat mode to Free/Pro", uid),
+            )
+            conn.commit()
         return {
             "user_id": uid,
-            "chat_mode": row[0] or "normal",
-            "ai_level": row[1] or "normal",
+            "chat_mode": chat_mode,
+            "ai_level": ai_level,
             "voice_mode": row[2] or "",
             "media_mode": row[3] or "",
             "translate_mode_target": row[4] or "",
@@ -40667,9 +40679,8 @@ def ensure_user_modes(user_id) -> dict:
         conn.close()
 
 def set_user_chat_mode(user_id, mode: str, username="", note="") -> tuple[bool, dict]:
-    mode = str(mode or "normal").lower().strip()
-    if mode not in {"normal", "pro", "deep"}:
-        mode = "normal"
+    raw_mode = str(mode or "normal").strip().lower()
+    mode = "pro" if raw_mode in {"pro", "deep"} else "normal"
     current = ensure_user_modes(user_id)
     changed = current.get("chat_mode") != mode or current.get("ai_level") != mode
     if not changed:
@@ -41329,12 +41340,10 @@ def set_user_translate_mode(user_id, target_lang: str, username="", note="") -> 
     return True, ensure_user_modes(user_id)
 
 def user_mode_label(modes: dict) -> str:
-    chat_mode = (modes or {}).get("chat_mode") or "normal"
-    if chat_mode == "deep":
-        return "Chat Deep"
+    chat_mode = normalize_chat_tier((modes or {}).get("chat_mode") or "normal")
     if chat_mode == "pro":
         return "Chat Pro"
-    return "Normal"
+    return "Chat miễn phí"
 
 def mode_start_notice(user_id) -> str:
     modes = ensure_user_modes(user_id)
@@ -67418,7 +67427,7 @@ TOOL_FREEZE_COMMANDS = {
     "video_upscale", "video_enhance", "image_enhance", "image_upscale",
     "media_factory", "video_factory_flow", "video_provider_status", "trend_source_status", "trend_source_refresh", "trend_source_add", "trend_source_list", "remove_bg",
     "source_help", "dubbing_help", "story_video_factory", "story_motion_prompt", "translate_text",
-    "chat_pro", "chat_deep", "chat_pro_on", "chat_deep_on", "growth_ai",
+    "chat_pro", "chat_pro_on", "growth_ai",
     "campaign_report", "produce", "pipeline", "tool_test_ai", "tool_test_translate",
     "tool_test_image", "tool_test_image_debug", "tool_test_ai_image",
     "tool_test_ai_image_edit", "tool_test_image_edit", "tool_test_gemini_image_edit",
@@ -69429,7 +69438,7 @@ async def maybe_send_free_hub_promo(target, user_id, lang: str, success_count: i
 def public_chat_menu_text(user_id, lang: str = "vi") -> str:
     lang = normalize_user_language(lang) or "vi"
     modes = ensure_user_modes(user_id)
-    mode = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") in {"pro", "deep"} else "free"
+    mode = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") == "pro" else "free"
     admin = is_admin_user(user_id)
     credits = int(get_user(user_id)[0] or 0)
     balance = "Vô hạn" if admin and lang == "vi" else ("Unlimited" if admin else f"{credits} Xu")
@@ -69465,7 +69474,7 @@ def public_chat_menu_text(user_id, lang: str = "vi") -> str:
 def public_chat_menu_keyboard(user_id, lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     current = ensure_user_modes(user_id).get("chat_mode") or "normal"
-    pro = normalize_chat_tier(current) in {"pro", "deep"}
+    pro = normalize_chat_tier(current) == "pro"
     if lang == "zh":
         toggle = "⏹ 关闭 Chat Pro" if pro else "💎 开启 Chat Pro"
         free = "🆓 免费聊天"
@@ -69481,8 +69490,9 @@ def public_chat_menu_keyboard(user_id, lang: str = "vi") -> InlineKeyboardMarkup
         free = "🆓 Chat miễn phí"
         account = "👤 Tài khoản"
         main = "🏠 Menu chính"
+    toggle_action = "menu|chat_pro_off" if pro else "menu|chat_pro_on"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(toggle, callback_data="menu|chat_pro_toggle")],
+        [InlineKeyboardButton(toggle, callback_data=toggle_action)],
         [InlineKeyboardButton(free, callback_data="menu|chat_free"), InlineKeyboardButton(account, callback_data="menu|main_profile")],
         [InlineKeyboardButton(main, callback_data="menu|main")],
     ])
@@ -69556,8 +69566,8 @@ async def handle_public_chat_text(
     modes = ensure_user_modes(uid)
     selected = str(mode_override or "").strip().lower()
     if not selected:
-        selected = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") in {"pro", "deep"} else "free"
-    selected = "pro" if selected in {"pro", "deep"} else "free"
+        selected = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") == "pro" else "free"
+    selected = "pro" if selected == "pro" else "free"
     lang = get_user_language(uid) or "vi"
     if not attachments_override:
         intent_text = raw_text if creation_intent_override is None else str(creation_intent_override)
@@ -69714,7 +69724,7 @@ async def handle_public_chat_attachment(update: Update, context: ContextTypes.DE
         await message.reply_text("⚠️ File vượt quá giới hạn dung lượng của Chat. Bot chưa tải file, chưa gọi AI và chưa trừ Xu.")
         return True
     modes = ensure_user_modes(user.id)
-    selected = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") in {"pro", "deep"} else "free"
+    selected = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") == "pro" else "free"
     if not is_text_file and public_chat_media.capability_decision(selected, [kind]).get("route") == "unsupported":
         await message.reply_text("⚠️ Chat Pro hiện nhận text, ảnh và PDF. Audio/video hãy dùng Chat miễn phí hoặc công cụ chuyên dụng; bot chưa trừ Xu.")
         return True
@@ -121211,9 +121221,9 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == "chat_free":
         set_user_chat_mode(query.from_user.id, "normal", username=query.from_user.username or query.from_user.first_name or "", note="Public Chat Free selected from menu")
         return await safe_edit_query_message(query, public_chat_free_text(lang), reply_markup=public_chat_menu_keyboard(query.from_user.id, lang))
-    if action == "chat_pro_toggle":
+    if action in {"chat_pro_on", "chat_pro_off", "chat_pro_toggle"}:
         current = ensure_user_modes(query.from_user.id).get("chat_mode") or "normal"
-        next_mode = "normal" if normalize_chat_tier(current) in {"pro", "deep"} else "pro"
+        next_mode = public_chat_runtime.resolve_public_chat_mode_action(action, current)
         set_user_chat_mode(query.from_user.id, next_mode, username=query.from_user.username or query.from_user.first_name or "", note="Public Chat Pro toggled from menu")
         return await safe_edit_query_message(query, public_chat_menu_text(query.from_user.id, lang), reply_markup=public_chat_menu_keyboard(query.from_user.id, lang))
 
@@ -129483,7 +129493,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Public chat fallback: <code>{'ON' if shopaikey_public_chat_fallback_enabled() else 'OFF'}</code>",
         "• Claude Sonnet/Opus: <code>planned/missing</code>",
         "• Grok cao cấp: <code>planned/missing</code>",
-        f"• Router normal/pro/deep: <code>{'configured' if (providers['ai']['ready'] or shopaikey_public_chat_fallback_enabled()) else 'missing'}</code>",
+        f"• Public Chat Free/Pro: <code>{'configured' if (providers['ai']['ready'] or shopaikey_public_chat_fallback_enabled()) else 'missing'}</code>",
         f"• AI tested: <code>{html.escape(preferred_tool_test_status_text('ai_chat', 'ai'))}</code>",
         "• AI quota guide: <code>Gemini/OpenAI quota/rate limit → fallback ShopAIKey; nếu tất cả fail thì không trừ Xu.</code>",
         "",
@@ -162020,7 +162030,6 @@ async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <code>/campaign_report</code>: <b>{CAMPAIGN_REPORT_COST} Xu</b>/lần",
         f"• Chat thường: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công",
         f"• <code>/chat_pro</code> Pro: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công",
-        f"• <code>/chat_deep</code> Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công",
         "• Chat AI lỗi/quota/công cụ quá tải: không trừ Xu",
         f"• Voice/TTS: từ <b>{VOICE_BASE_COST} Xu</b> + block {VOICE_BLOCK_CHARS} ký tự",
         f"• STT/audio: từ <b>{AUDIO_MIN_COST} Xu</b>, +{AUDIO_COST_PER_MB} Xu/MB",
@@ -163767,7 +163776,7 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Money</b>",
         f"• Packages: <b>{data['packages']}</b>",
         f"• Trial credits: <b>{data['trial_credits']}</b>",
-        f"• Chat pricing: <b>{CHAT_COST_NORMAL}/{CHAT_COST_PRO}/{CHAT_COST_DEEP_BASE} Xu</b> normal/pro/deep khi AI trả lời thành công",
+        f"• Public Chat: Free Gemini 0 Xu; Pro Opus 4.8 <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output",
         f"• Promo BETA50: <code>{'seeded' if promo.get('beta50_seeded') else promo.get('status', 'missing')}</code>"
         f" | <b>{html.escape(promo.get('label') or 'limited')}</b>"
         f" | used <b>{int(promo.get('used_count', 0) or 0)}/{int(promo.get('max_uses', 0) or 0)}</b>",
@@ -163785,7 +163794,7 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /report_today /report_week /report_month: <code>available</code>",
         "• /report_ai_today: <code>available if AI provider works</code>",
         "• /report_chart_week: <code>available/text fallback</code>",
-        "• /mode /chat_pro_on /chat_deep_on: <code>available</code>",
+        "• /mode /chat_pro_on /chat_pro_off: <code>available</code>",
         "",
         "<b>PayOS real test</b>",
         f"• Status: <code>{html.escape(payos_test.get('status') or 'NOT_TESTED')}</code>",
@@ -190378,7 +190387,6 @@ async def cmd_pricing_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• CAMPAIGN_REPORT_COST = <b>{CAMPAIGN_REPORT_COST}</b>",
         f"• CHAT_COST_NORMAL = <b>{CHAT_COST_NORMAL}</b>",
         f"• CHAT_COST_PRO = <b>{CHAT_COST_PRO}</b>",
-        f"• CHAT_COST_DEEP_BASE = <b>{CHAT_COST_DEEP_BASE}</b>",
         f"• CHAT_PRO_MB_UNIT_COST = <b>{CHAT_PRO_MB_UNIT_COST}</b>",
         f"• CHAT_PRO_MAX_COST = <b>{CHAT_PRO_MAX_COST}</b>",
         f"• AUDIO_BASE_COST = <b>{AUDIO_BASE_COST}</b>",
@@ -190496,7 +190504,6 @@ def pricing_audit_lines() -> list[str]:
         f"• Free/menu/guide/prompt planning | 0 Xu | pricing_free_lines | no provider/no charge",
         f"• Chat thường | {CHAT_COST_NORMAL} Xu | CHAT_COST_NORMAL | refund/no-charge on provider fail",
         f"• Chat Pro | {CHAT_COST_PRO} Xu | CHAT_COST_PRO | upfront charge/refund guard",
-        f"• Chat Deep | từ {CHAT_COST_DEEP_BASE} Xu | CHAT_COST_DEEP_BASE | dynamic by task length",
         f"• Image tiers | {', '.join(str((pricing['image_tiers'].get(t) or {}).get('cost')) for t in IMAGE_TIER_ORDER if t in pricing['image_tiers'])} Xu | IMAGE_*_COST_XU | confirm + refund",
         f"• Image prompt/edit planning | 0 Xu | image menu guard | no provider/no charge",
         f"• Video AI tiers | {', '.join(str((pricing['video_tiers'].get(t) or {}).get('cost')) for t in VIDEO_TIER_ORDER if t != 'premium' and t in pricing['video_tiers'])} Xu | VIDEO_*_COST_XU | confirm + freeze/refund",
@@ -191341,7 +191348,6 @@ def pricing_main_lines() -> list[str]:
         "<b>AI Chat</b>",
         f"• Chat thường: <b>{CHAT_COST_NORMAL} Xu</b> / lượt thành công.",
         f"• Chat Pro: <b>{CHAT_COST_PRO} Xu</b> / lượt thành công.",
-        f"• Chat Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>, tùy độ dài/tác vụ.",
         "",
         "<b>2. 🖼 Hình ảnh</b>",
         *image_items,
@@ -192701,12 +192707,11 @@ def chat_pro_usage_text() -> str:
         "• prompt cao cấp\n"
         "• tài liệu nhiều nội dung\n\n"
         "Cách dùng:\n"
-        "<code>/chat_pro phân tích kế hoạch bán hàng trong 7 ngày</code>\n"
-        "<code>/chat_deep lập kế hoạch ra mắt beta</code>\n\n"
+        "<code>/chat_pro phân tích kế hoạch bán hàng trong 7 ngày</code>\n\n"
         "Chính sách:\n"
         "• Free Gemini: <b>0 Xu</b>, 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt\n"
         f"• Chat Pro Opus 4.8: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; đơn giá đã gồm ×3 và tính theo usage thực tế\n"
-        "• Pro không giới hạn lượt/ngày khi đủ Xu; <code>/chat_deep</code> là alias của Pro\n"
+        "• Pro không giới hạn lượt/ngày khi đủ Xu\n"
         "• Owner/Admin: miễn phí và không giới hạn\n"
         "AI lỗi/quota/công cụ quá tải: không trừ Xu; bộ nhớ Public Chat giữ 48 giờ."
     )
@@ -192766,8 +192771,6 @@ def call_chat_pro_ai(user_prompt: str, provider_payload: dict, user_id=None) -> 
 
 def chat_mode_cost(mode: str) -> int:
     mode_norm = normalize_chat_tier(mode or CHAT_TIER_NORMAL)
-    if mode_norm == CHAT_TIER_DEEP:
-        return CHAT_COST_DEEP_BASE
     if mode_norm == CHAT_TIER_PRO:
         return CHAT_COST_PRO
     return CHAT_COST_NORMAL
@@ -192779,12 +192782,6 @@ def chat_mode_instruction(mode: str) -> str:
         return (
             "Bạn là Trợ Lý Ảo TOAN AAS ở Chat Pro. "
             "Trả lời chi tiết hơn, có phân tích, checklist thực tế và bước hành động rõ ràng."
-            + language_rule
-        )
-    if mode_norm == CHAT_TIER_DEEP:
-        return (
-            "Bạn là Trợ Lý Ảo TOAN AAS ở Chat Deep. "
-            "Phân tích sâu, có cấu trúc, chỉ ra rủi ro, giả định, kế hoạch triển khai và hành động ưu tiên."
             + language_rule
         )
     return "Bạn là Trợ Lý Ảo TOAN AAS. Trả lời ngắn gọn, thực dụng, thân thiện." + language_rule
@@ -192927,8 +192924,6 @@ def chat_charge_line(cost: int, mode: str, is_free: bool = False, reason: str = 
     if is_free:
         return f"(-0 Xu | {reason})" if reason else "(-0 Xu)"
     mode_norm = normalize_chat_tier(mode)
-    if mode_norm == CHAT_TIER_DEEP:
-        return f"(-{cost} Xu Chat Deep)"
     if mode_norm == CHAT_TIER_PRO:
         return f"(-{cost} Xu Chat Pro)"
     return f"(-{cost} Xu)"
@@ -192936,7 +192931,7 @@ def chat_charge_line(cost: int, mode: str, is_free: bool = False, reason: str = 
 def chat_insufficient_credits_text(mode: str, cost: int, credits: int) -> str:
     mode_norm = normalize_chat_tier(mode or CHAT_TIER_NORMAL)
     mode_label = user_mode_label({"chat_mode": mode_norm})
-    off_hint = "\n• Có thể gõ /chat_pro_off hoặc /chat_deep_off để về chat thường." if mode_norm != CHAT_TIER_NORMAL else ""
+    off_hint = "\n• Có thể gõ /chat_pro_off để về Chat miễn phí." if mode_norm != CHAT_TIER_NORMAL else ""
     return (
         "❌ Bạn không đủ Xu để chat.\n"
         f"• Chế độ hiện tại: {mode_label}\n"
@@ -192976,12 +192971,13 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profile = get_member_profile(uid)
     admin_badge = admin_display_badge(uid)
     badge = get_role_badge(uid)
+    public_mode = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") == "pro" else "free"
+    public_model = "Opus 4.8" if public_mode == "pro" else "Gemini 3.6 Flash"
     if admin_badge:
         member_note = (
             f"🛡 Đặc quyền {html.escape(admin_badge)}:\n"
-            "• Normal Chat: miễn phí nội bộ\n"
-            "• Chat Pro: miễn phí nội bộ\n"
-            "• Chat Deep: miễn phí nội bộ admin"
+            "• Chat miễn phí: miễn phí, không giới hạn\n"
+            "• Chat Pro: miễn phí, không giới hạn"
         )
     else:
         discount_rate = int(get_member_service_discount_rate(uid) or 0)
@@ -192993,8 +192989,7 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 <b>Chế độ AI hiện tại</b>",
         "",
         f"• 🪪 Thành viên: <b>{html.escape(badge)}</b>",
-        f"• Chat mode: <code>{html.escape(modes.get('chat_mode') or 'normal')}</code>",
-        f"• AI level: <code>{html.escape(modes.get('ai_level') or 'normal')}</code>",
+        f"• Chat mode: <code>{public_mode}</code> — <b>{public_model}</b>",
         f"• Voice mode: <code>{html.escape(modes.get('voice_mode') or '-')}</code>",
         f"• Media mode: <code>{html.escape(modes.get('media_mode') or '-')}</code>",
         f"• Translate mode: <code>{html.escape(modes.get('translate_mode_target') or 'off')}</code>",
@@ -193003,16 +192998,14 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Public Chat</b>",
         "• Free Gemini: <b>0 Xu</b>, 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt",
         f"• Pro Opus 4.8: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; đơn giá đã gồm ×3, tính usage thực tế, không giới hạn lượt/ngày khi đủ Xu",
-        "• Chat Deep là alias của Pro; Owner/Admin miễn phí và không giới hạn",
+        "• Owner/Admin miễn phí và không giới hạn ở cả hai chế độ",
         "• AI lỗi/quota/công cụ quá tải: không trừ Xu",
         "",
         member_note,
         "",
         "<b>Lệnh đổi chế độ</b>",
         "• <code>/chat_pro_on</code> — bật Chat Pro persistent",
-        "• <code>/chat_pro_off</code> — tắt Chat Pro về normal",
-        "• <code>/chat_deep_on</code> — alias bật Chat Pro persistent",
-        "• <code>/chat_deep_off</code> — alias tắt Chat Pro về Free",
+        "• <code>/chat_pro_off</code> — chuyển về Chat miễn phí",
         "• <code>/translate_mode en</code> — bật dịch tự động",
         "• <code>/translate_mode_off</code> — tắt dịch tự động",
         "",
@@ -193039,16 +193032,8 @@ async def set_chat_mode_command(update: Update, mode: str, command: str, note: s
             "• Nếu AI lỗi hoặc công cụ quá tải, không trừ Xu.\n\n"
             "Bot sẽ dùng Chat Pro cho đến khi bạn tắt bằng <code>/chat_pro_off</code>."
         )
-    elif mode == "deep":
-        text = (
-            "✅ <b>Đã bật Chat Pro qua alias Chat Deep.</b>\n\n"
-            f"• Giá: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; đơn giá đã gồm ×3 và tính theo usage thực tế.\n"
-            "• Không giới hạn lượt/ngày khi đủ Xu; Owner/Admin miễn phí và không giới hạn.\n"
-            "Nếu AI lỗi hoặc công cụ quá tải, không trừ Xu.\n\n"
-            "Gõ <code>/chat_deep_off</code> để tắt."
-        )
     else:
-        text = "✅ Đã đưa Chat mode về <b>normal</b>."
+        text = "✅ Đã chuyển về <b>Chat miễn phí — Gemini 3.6 Flash</b>."
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_chat_pro_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -193057,21 +193042,12 @@ async def cmd_chat_pro_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_chat_pro_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await set_chat_mode_command(update, "normal", "/chat_pro_off", "User disabled Chat Pro")
 
-async def cmd_chat_deep_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await set_chat_mode_command(update, "pro", "/chat_deep_on", "Legacy Chat Deep alias enabled Chat Pro")
-
-async def cmd_chat_deep_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await set_chat_mode_command(update, "normal", "/chat_deep_off", "Legacy Chat Deep alias disabled Chat Pro")
-
 async def cmd_chat_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = " ".join(context.args or []).strip()
     if not prompt:
         lang = get_user_language(update.effective_user.id) or "vi"
         return await update.message.reply_text(public_chat_menu_text(update.effective_user.id, lang), parse_mode="HTML", reply_markup=public_chat_menu_keyboard(update.effective_user.id, lang))
     return await handle_public_chat_text(update, context, text_override=prompt, mode_override="pro")
-
-async def cmd_chat_deep(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await cmd_chat_pro(update, context)
 
 async def run_one_shot_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str, command: str):
     uid = update.effective_user.id
@@ -193080,8 +193056,6 @@ async def run_one_shot_chat_command(update: Update, context: ContextTypes.DEFAUL
     parsed = parse_chat_pro_args(" ".join(context.args or []))
     prompt = parsed["prompt"]
     if not prompt:
-        if mode == CHAT_TIER_DEEP:
-            return await update.message.reply_text("Cú pháp: /chat_deep <nội dung>")
         return await update.message.reply_text(chat_pro_usage_text(), parse_mode="HTML")
 
     credits, _, is_vip = get_user(uid, update.effective_user.first_name)
@@ -193147,13 +193121,11 @@ async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Claude Opus 4.8 — tính usage thực tế, không giới hạn lượt/ngày khi đủ Xu.",
         f"• Giá: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; đơn giá đã gồm ×3.",
         "",
-        "<b>Chat Deep</b>: alias của Chat Pro, không có giá fixed riêng.",
         "• Owner/Admin miễn phí và không giới hạn.",
         "• AI lỗi/quota/công cụ quá tải: không trừ Xu.",
         "",
         "Kiểm tra giá: <code>/pricing</code>",
         "Dùng Chat Pro: <code>/chat_pro nội dung...</code>",
-        "Dùng Chat Deep: <code>/chat_deep nội dung...</code>",
     ]
     if admin:
         lines.insert(10, f"• OpenAI Pro style: <code>{provider_status_text(providers['ai']['openai'])}</code>")
@@ -206787,9 +206759,8 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Hạng khách hàng vẫn tính riêng theo tổng nạp nếu cần."
         )
         benefits = (
-            "• Free Normal Chat nội bộ\n"
-            "• Free Chat Pro nội bộ\n"
-            "• Free Chat Deep nội bộ admin\n"
+            "• Chat miễn phí: miễn phí, không giới hạn\n"
+            "• Chat Pro: miễn phí, không giới hạn\n"
             "• Quyền vận hành/admin tùy theo OWNER_IDS/ADMIN_IDS"
         )
     promos = get_member_personal_promos(uid, include_used=False)
@@ -206810,7 +206781,7 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Quà sinh nhật: <b>quà bí mật theo hạng thành viên</b>"
     )
     if admin_badge:
-        service_line = "• Free Normal Chat nội bộ\n• Free Chat Pro nội bộ\n• Free Chat Deep nội bộ admin"
+        service_line = "• Chat miễn phí: miễn phí, không giới hạn\n• Chat Pro: miễn phí, không giới hạn"
     else:
         service_line = (
             f"• Ưu đãi dịch vụ hiện tại: giảm <b>{int(get_member_service_discount_rate(uid) or 0)}%</b> khi tiêu Xu\n"
@@ -206961,7 +206932,7 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Không rút tiền, không chuyển nhượng, không quy đổi ngược thành tiền.",
         "• Referral chỉ thưởng sau khi người được mời nạp lần đầu thành công.",
         "• TOAN AAS có quyền từ chối thưởng nếu phát hiện spam/tài khoản ảo/gian lận.",
-        "• Chat Deep vẫn tính Xu để kiểm soát tác vụ sâu/API.",
+        "• Chat Pro tính theo usage thực tế; Owner/Admin miễn phí.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -243860,10 +243831,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("mode",        cmd_mode))
     tg_app.add_handler(CommandHandler("chat_pro_on", cmd_chat_pro_on))
     tg_app.add_handler(CommandHandler("chat_pro_off", cmd_chat_pro_off))
-    tg_app.add_handler(CommandHandler("chat_deep_on", cmd_chat_deep_on))
-    tg_app.add_handler(CommandHandler("chat_deep_off", cmd_chat_deep_off))
     tg_app.add_handler(CommandHandler("chat_pro",    cmd_chat_pro))
-    tg_app.add_handler(CommandHandler("chat_deep",   cmd_chat_deep))
     tg_app.add_handler(CommandHandler("models",      cmd_models))
     tg_app.add_handler(CommandHandler("ai_models",   cmd_models))
     tg_app.add_handler(CommandHandler("beta_offer",  cmd_beta_offer))

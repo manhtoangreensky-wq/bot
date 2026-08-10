@@ -271,6 +271,18 @@ def toggle_public_chat_mode(current: str) -> str:
     return "pro" if str(current or "free").lower() != "pro" else "free"
 
 
+def resolve_public_chat_mode_action(action: str, current: str) -> str:
+    """Resolve menu callbacks to a persistent mode; explicit actions are idempotent."""
+    selected = str(action or "").strip().lower()
+    if selected == "chat_pro_on":
+        return "pro"
+    if selected == "chat_pro_off":
+        return "normal"
+    if selected == "chat_pro_toggle":
+        return "normal" if str(current or "normal").strip().lower() in {"pro", "deep"} else "pro"
+    raise ValueError("unsupported public chat mode action")
+
+
 def public_chat_system_prompt(lang: str = "vi") -> str:
     language = "Vietnamese" if str(lang or "vi").lower() == "vi" else "the user's latest language"
     return f"You are TOAN AAS public chat. Return text only and reply in {language}. Never switch into another product flow."
@@ -517,4 +529,4 @@ async def run_public_chat_request(*, conn: sqlite3.Connection, owner_id: Any, ch
     }
 
 
-__all__ = ["CHAT_PRO_RATE_LABEL", "PUBLIC_CHAT_MAX_OUTPUT_TOKENS", "PublicChatRequest", "PublicChatRuntime", "public_chat_menu_rows", "public_chat_system_prompt", "run_public_chat_request", "split_public_chat_text", "toggle_public_chat_mode"]
+__all__ = ["CHAT_PRO_RATE_LABEL", "PUBLIC_CHAT_MAX_OUTPUT_TOKENS", "PublicChatRequest", "PublicChatRuntime", "public_chat_menu_rows", "public_chat_system_prompt", "resolve_public_chat_mode_action", "run_public_chat_request", "split_public_chat_text", "toggle_public_chat_mode"]

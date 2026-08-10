@@ -277,10 +277,11 @@ def test_bot_source_connects_public_chat_only_after_protected_handlers():
     assert media.index("handle_public_chat_attachment") > media.index("handle_music_guided_pending_media")
 
 
-def test_bot_source_maps_legacy_deep_alias_to_opus_pro_and_keeps_exact_menu_rows():
+def test_bot_source_exposes_only_free_and_pro_and_keeps_exact_menu_rows():
     source = (Path(__file__).parents[1] / "bot.py").read_text(encoding="utf-8")
 
-    assert 'set_chat_mode_command(update, "pro", "/chat_deep_on"' in source
-    assert "return await cmd_chat_pro(update, context)" in source
+    assert "Chat Deep" not in source
+    assert "/chat_deep" not in source
+    assert 'CommandHandler("chat_deep' not in source
     assert '[InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main")]' in source
     assert 'InlineKeyboardButton(f"💎 Chat Pro • {public_chat_runtime.CHAT_PRO_RATE_LABEL}", callback_data="menu|chat_pro")' in source
