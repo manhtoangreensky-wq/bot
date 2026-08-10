@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import io
 import json
 import threading
 import time
 import urllib.error
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
+import bot
 import local_worker
 from services import (
     video_edit_media_transport,
@@ -269,6 +274,12 @@ def _run_job(
             )
         if source_download_receipt_override is not None:
             return source_download_receipt_override
+        role = str(_args[4] if len(_args) > 4 else "")
+        if role == "logo":
+            suffix = Path(str(_args[1] if len(_args) > 1 else "logo.png")).suffix.lower()
+            logo_path = tmp_path / f"logo{suffix if suffix in {'.png', '.jpg', '.jpeg', '.webp'} else '.png'}"
+            materialize_image_fixture(logo_path)
+            return str(logo_path)
         return str(source)
 
     def materialize_bounded_fixture(
@@ -291,6 +302,17 @@ def _run_job(
                 digest.update(chunk)
                 remaining -= len(chunk)
         return digest.hexdigest()
+
+    def materialize_image_fixture(destination: str | Path) -> str:
+        target = Path(destination)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        suffix = target.suffix.lower()
+        image_format = "JPEG" if suffix in {".jpg", ".jpeg"} else "WEBP" if suffix == ".webp" else "PNG"
+        buffer = io.BytesIO()
+        Image.new("RGB", (3, 2), (220, 40, 90)).save(buffer, format=image_format)
+        payload = buffer.getvalue()
+        target.write_bytes(payload)
+        return hashlib.sha256(payload).hexdigest()
 
     def bounded_file_sha256(path: str | Path) -> str:
         digest = hashlib.sha256()
@@ -367,12 +389,16 @@ def _run_job(
             **_kwargs,
         ):
             expected = expected_bytes if expected_bytes is not None else expected_size
-            logical_size = fixture_size_for(str(file_id or ""), expected)
-            sha256 = materialize_bounded_fixture(
-                destination,
-                logical_size=logical_size,
-                marker=str(file_id or "asset"),
-            )
+            if Path(destination).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+                sha256 = materialize_image_fixture(destination)
+                logical_size = Path(destination).stat().st_size
+            else:
+                logical_size = fixture_size_for(str(file_id or ""), expected)
+                sha256 = materialize_bounded_fixture(
+                    destination,
+                    logical_size=logical_size,
+                    marker=str(file_id or "asset"),
+                )
             transport = (
                 "local_bot_api"
                 if bool(getattr(config, "is_local", False))
@@ -3095,6 +3121,204 @@ def test_video_edit_worker_streams_source_concat_logo_and_subtitle_with_asset_po
     assert Path(executed_plan["logo_overlay"]["path"]).name == "logo.png"
     assert Path(executed_plan["subtitle_file"]).name == "subtitle.srt"
     assert evidence["full_file_reads"] == 0
+
+
+def test_public_logo_and_watermark_state_reaches_the_local_worker_plan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    user_id = 91_041
+    bot.clear_video_editor_pending(user_id)
+
+    class Message:
+        def __init__(self, *, text: str = "", document=None, message_id: int) -> None:
+            self.text = text
+            self.document = document
+            self.photo = []
+            self.video = None
+            self.audio = None
+            self.voice = None
+            self.animation = None
+            self.message_id = message_id
+            self.chat_id = user_id
+            self.replies: list[tuple[str, dict]] = []
+
+        async def reply_text(self, text: str, **kwargs):
+            self.replies.append((text, kwargs))
+            return self
+
+    class Query:
+        def __init__(self, data: str) -> None:
+            self.id = f"public-worker-{data}"
+            self.data = data
+            self.from_user = SimpleNamespace(id=user_id, first_name="Video Edit")
+            self.message = Message(message_id=7_002)
+            self.answers: list[tuple[tuple, dict]] = []
+            self.edits: list[tuple[str, dict]] = []
+
+        async def answer(self, *args, **kwargs):
+            self.answers.append((args, kwargs))
+
+        async def edit_message_text(self, text: str, **kwargs):
+            self.edits.append((text, kwargs))
+            return self.message
+
+    try:
+        manual_plan = video_local_editing.default_manual_edit_plan("")
+        manual_plan["trim"] = {"start_ms": 0, "end_ms": 2_000}
+        bot.set_video_editor_pending(
+            user_id,
+            "await_logo",
+            edit_mode="manual_edit",
+            current_screen="logo_input",
+            screen_id="logo_input",
+            parent_callback="videoedit|branding",
+            entry_parent_callback="videoedit|manual",
+            logo_parent_callback="videoedit|branding",
+            selected_tool="manual",
+            entry_context="manual",
+            last_section="manual",
+            source_file_id="source-file",
+            source_file_name="source.mp4",
+            source_file_size=2 * 1024 * 1024,
+            source_duration=2,
+            source_duration_ms=2_000,
+            source_video_hash="a" * 64,
+            media_lane="short_media",
+            source_metadata={
+                "ok": True,
+                "duration": 2.0,
+                "duration_ms": 2_000,
+                "width": 640,
+                "height": 360,
+                "has_audio": True,
+            },
+            inspection_complete=True,
+            manual_edit_plan=manual_plan,
+            concat_sources=[],
+            logo_source={},
+            watermark_config={},
+            subtitle_source={},
+            edit_session_id=f"edit-{user_id}",
+            session_id=f"edit-{user_id}",
+            state_revision=3,
+            revision=3,
+            status="source_ready",
+            pending_field="logo",
+        )
+
+        logo_message = Message(
+            document=SimpleNamespace(
+                file_id="public-logo-file",
+                file_name="logo.png",
+                mime_type="image/png",
+                file_size=256 * 1024,
+            ),
+            message_id=7_003,
+        )
+        assert asyncio.run(
+            bot.handle_video_editor_pending_upload(
+                SimpleNamespace(
+                    callback_query=None,
+                    message=logo_message,
+                    effective_user=SimpleNamespace(id=user_id),
+                ),
+                SimpleNamespace(user_data={}),
+            )
+        ) is True
+
+        watermark_query = Query("videoedit|watermark_entry")
+        assert asyncio.run(
+            bot.handle_video_editor_callback(
+                SimpleNamespace(callback_query=watermark_query),
+                SimpleNamespace(user_data={}),
+            )
+        ) is not False
+        watermark_message = Message(text="© TOAN AAS", message_id=7_004)
+        assert asyncio.run(
+            bot.handle_video_editor_pending_text(
+                SimpleNamespace(
+                    callback_query=None,
+                    message=watermark_message,
+                    effective_user=SimpleNamespace(id=user_id),
+                ),
+                SimpleNamespace(user_data={}),
+            )
+        ) is True
+
+        public_state = deepcopy(bot.get_video_editor_pending(user_id) or {})
+        assert public_state["logo_source"]["file_id"] == "public-logo-file"
+        assert public_state["manual_edit_plan"]["logo_overlay"] == {
+            "position": "top_right",
+            "scale": 0.12,
+            "opacity": 1.0,
+        }
+        assert public_state["manual_edit_plan"]["watermark_overlay"]["content"] == "© TOAN AAS"
+        assert public_state["manual_edit_plan"]["watermark_overlay"]["opacity"] == 0.45
+
+        observed_plans: list[dict] = []
+        transport_evidence: dict = {
+            "downloads": [],
+            "deliveries": [],
+            "full_file_reads": 0,
+        }
+        terminal, captions = _run_job(
+            monkeypatch,
+            tmp_path,
+            mode="manual",
+            manual_plan=deepcopy(public_state["manual_edit_plan"]),
+            payload_patch={
+                "user_id": str(user_id),
+                "chat_id": str(user_id),
+                "media_lane": "short_media",
+                "source_file_size": 2 * 1024 * 1024,
+                "logo_source": deepcopy(public_state["logo_source"]),
+                "rights_confirmation": {
+                    "confirmed": True,
+                    "policy": "video_edit_rights_v1",
+                    "user_id": str(user_id),
+                    "review_revision": 3,
+                    "confirmed_at_unix": 1_750_000_000,
+                },
+            },
+            observed_plans=observed_plans,
+            downloaded_probe={
+                "ok": True,
+                "reason": "",
+                "duration": 2.0,
+                "duration_ms": 2_000,
+                "width": 640,
+                "height": 360,
+                "fps": 25.0,
+                "has_video": True,
+                "has_audio": True,
+                "audio_stream_count": 1,
+                "format_name": "mp4",
+                "bytes": 2 * 1024 * 1024,
+            },
+            transport_evidence=transport_evidence,
+            job_user_id=str(user_id),
+        )
+
+        assert terminal["status"] == "succeeded"
+        assert len(observed_plans) == 1
+        worker_plan = observed_plans[0]
+        assert Path(worker_plan["logo_overlay"]["path"]).name == "logo.png"
+        assert worker_plan["logo_overlay"]["position"] == "top_right"
+        assert worker_plan["watermark_overlay"]["content"] == "© TOAN AAS"
+        assert worker_plan["watermark_overlay"]["opacity"] == 0.45
+        assert transport_evidence["downloads"] == ["local_bot_api", "local_bot_api"]
+        assert transport_evidence["full_file_reads"] == 0
+        detail = json.loads(terminal["detail"])
+        receipt = json.loads(terminal["output_url"])
+        assert detail["price_xu"] == 0
+        assert detail["charged_xu"] == 0
+        assert receipt["charge_policy"] == "free_local_tool"
+        assert receipt["charge_status"] == "not_required_free"
+        assert receipt["charged_xu"] == 0
+        assert captions and all("0 Xu" in caption for caption in captions)
+    finally:
+        bot.clear_video_editor_pending(user_id)
 
 
 @pytest.mark.parametrize(

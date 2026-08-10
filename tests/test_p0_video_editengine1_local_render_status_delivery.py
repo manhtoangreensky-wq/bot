@@ -119,11 +119,44 @@ def _receipt() -> dict:
             "width": 640,
             "height": 360,
             "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "full_decode": True,
         },
         "output_count": 1,
         "charge_policy": "after_valid_mp4_delivery",
         "charge_status": "pending_post_delivery",
         "charged_xu": 0,
+    }
+
+
+def _multi_receipt(*, second_full_decode: bool) -> dict:
+    first_probe = dict(_receipt()["ffprobe"])
+    second_probe = {**first_probe, "full_decode": second_full_decode}
+    artifacts = [
+        {
+            "index": 1,
+            "message_id": "9101",
+            "file_id": "telegram-part-1",
+            "size": 2048,
+            "sha256": "d" * 64,
+            "ffprobe": first_probe,
+        },
+        {
+            "index": 2,
+            "message_id": "9102",
+            "file_id": "telegram-part-2",
+            "size": 2048,
+            "sha256": "e" * 64,
+            "ffprobe": second_probe,
+        },
+    ]
+    return {
+        **_receipt(),
+        "delivery_message_id": artifacts[0]["message_id"],
+        "delivery_file_id": artifacts[0]["file_id"],
+        "output_path": "part-1.mp4,part-2.mp4",
+        "output_size_bytes": 4096,
+        "output_count": 2,
+        "artifacts": artifacts,
     }
 
 
@@ -282,6 +315,101 @@ def test_editengine1_success_requires_valid_delivery_receipt() -> None:
     assert job["receipt_state"] == "not_created"
     assert job["charge_state"] == "not_charged"
     assert job["charged_xu"] == 0
+
+
+def test_editengine1_metadata_valid_decode_failed_receipt_never_becomes_delivered() -> None:
+    conn = _conn()
+    created = _create(conn)
+    receipt = _receipt()
+    receipt["ffprobe"] = {**receipt["ffprobe"], "full_decode": False}
+
+    job = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=created["local_worker_job_id"],
+        worker_status="succeeded",
+        detail={"validation": "passed"},
+        receipt=receipt,
+    )
+
+    assert job["status"] == "failed_no_charge"
+    assert job["blocker"] == "delivery_receipt_invalid"
+    assert job["receipt_state"] == "not_created"
+    assert job["charge_state"] == "not_charged"
+    assert job["charged_xu"] == 0
+
+
+def test_editengine1_charge_claim_rechecks_full_decode_evidence() -> None:
+    conn = _conn()
+    created = _create(conn)
+    worker_job_id = created["local_worker_job_id"]
+    delivered = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"validation": "passed"},
+        receipt=_receipt(),
+    )
+    assert delivered["status"] == "delivered"
+    decode_failed = {**delivered["ffprobe"], "full_decode": False}
+    conn.execute(
+        "UPDATE video_edit_jobs SET ffprobe_json=?,charge_state='not_charged' "
+        "WHERE local_worker_job_id=?",
+        (json.dumps(decode_failed, ensure_ascii=False), worker_job_id),
+    )
+
+    assert video_editengine1.claim_charge(conn, worker_job_id=worker_job_id) is False
+    assert conn.execute(
+        "SELECT charge_state FROM video_edit_jobs WHERE local_worker_job_id=?",
+        (worker_job_id,),
+    ).fetchone()[0] == "not_charged"
+
+
+def test_editengine1_multi_artifact_decode_failure_never_becomes_delivered() -> None:
+    conn = _conn()
+    created = _create(conn)
+
+    job = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=created["local_worker_job_id"],
+        worker_status="succeeded",
+        detail={"validation": "passed"},
+        receipt=_multi_receipt(second_full_decode=False),
+    )
+
+    assert job["status"] == "failed_no_charge"
+    assert job["blocker"] == "delivery_receipt_invalid"
+    assert job["receipt_state"] == "not_created"
+    assert job["charge_state"] == "not_charged"
+
+
+def test_editengine1_multi_artifact_charge_rechecks_every_full_decode() -> None:
+    conn = _conn()
+    created = _create(conn)
+    worker_job_id = created["local_worker_job_id"]
+    delivered = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"validation": "passed"},
+        receipt=_multi_receipt(second_full_decode=True),
+    )
+    assert delivered["status"] == "delivered"
+    artifacts = list(delivered["artifact_receipts"])
+    artifacts[1] = {
+        **artifacts[1],
+        "ffprobe": {**artifacts[1]["ffprobe"], "full_decode": False},
+    }
+    conn.execute(
+        "UPDATE video_edit_jobs SET artifact_receipts_json=?,charge_state='not_charged' "
+        "WHERE local_worker_job_id=?",
+        (json.dumps(artifacts, ensure_ascii=False), worker_job_id),
+    )
+
+    assert video_editengine1.claim_charge(conn, worker_job_id=worker_job_id) is False
+    assert conn.execute(
+        "SELECT charge_state FROM video_edit_jobs WHERE local_worker_job_id=?",
+        (worker_job_id,),
+    ).fetchone()[0] == "not_charged"
 
 
 def test_editengine1_delivery_receipt_and_charge_are_once_only() -> None:

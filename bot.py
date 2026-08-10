@@ -1340,6 +1340,8 @@ TOAN_AAS_VAULT_MAX_FILES_PER_BATCH = max(1, env_int("TOAN_AAS_VAULT_MAX_FILES_PE
 TOAN_AAS_VAULT_MAX_FILE_SIZE_MB = max(1, env_int("TOAN_AAS_VAULT_MAX_FILE_SIZE_MB", 500))
 LOCAL_WORKER_ENABLED = env_flag("LOCAL_WORKER_ENABLED", "false")
 LOCAL_WORKER_TOKEN = _env("LOCAL_WORKER_TOKEN")
+VIDEO_EDIT_WORKER_TOKEN = _env("VIDEO_EDIT_WORKER_TOKEN")
+LOCAL_WORKER_JOB_SCOPES = frozenset({"all", "video_edit_only"})
 LOCAL_WORKER_POLL_ENABLED = env_flag("LOCAL_WORKER_POLL_ENABLED", "true")
 LOCAL_WORKER_MAX_JOB_SECONDS = max(30, env_int("LOCAL_WORKER_MAX_JOB_SECONDS", 600))
 WORKER_RESULT_UPLOAD_DIR = _env("WORKER_RESULT_UPLOAD_DIR", os.path.join("files", "worker_results"))
@@ -8711,9 +8713,69 @@ def product_progress_status_from_job_text(product_type: str = "", job: dict | No
 
 
 def progress_auto_refresh_key(product_type: str = "", job_id: str = "") -> str:
-    canonical = product_progress_status.normalize_product_type(product_type)
+    canonical = (
+        "video_edit"
+        if str(product_type or "").strip().lower() == "video_edit"
+        else product_progress_status.normalize_product_type(product_type)
+    )
     safe_job = product_progress_status.product_progress_safe_callback_value(job_id, 40) or "latest"
     return f"{canonical}:{safe_job}"
+
+
+def video_edit_panel_not_modified(error) -> bool:
+    """Treat only Telegram's exact unchanged-message response as render success."""
+
+    tokens = (
+        str(error or "").strip().lower(),
+        str(getattr(error, "message", "") or "").strip().lower(),
+    )
+    return any(
+        "message is not modified" in token or "message_not_modified" in token
+        for token in tokens
+        if token
+    )
+
+
+def video_edit_progress_callback_binding(job_id, user_id, query) -> dict:
+    """Resolve one public refresh to its exact job/user/chat/message panel tuple."""
+
+    normalized_job_id = safe_int(job_id, 0)
+    normalized_user_id = safe_int(user_id, 0)
+    message = getattr(query, "message", None)
+    chat_id = safe_int(
+        getattr(message, "chat_id", 0)
+        or getattr(getattr(message, "chat", None), "id", 0),
+        0,
+    )
+    message_id = safe_int(getattr(message, "message_id", 0), 0)
+    if normalized_job_id <= 0 or normalized_user_id <= 0 or chat_id == 0 or message_id <= 0:
+        return {}
+    key = progress_auto_refresh_key("video_edit", str(normalized_job_id))
+    record = dict(PROGRESS_AUTO_REFRESH_JOBS.get(key) or {})
+    if record:
+        if not (
+            str(record.get("key") or "") == key
+            and str(record.get("product_type") or "").strip().lower() == "video_edit"
+            and safe_int(record.get("job_id"), 0) == normalized_job_id
+            and safe_int(record.get("user_id"), 0) == normalized_user_id
+            and safe_int(record.get("chat_id"), 0) == chat_id
+            and safe_int(record.get("message_id"), 0) == message_id
+        ):
+            return {}
+        restart_recovery = bool(record.get("stopped")) or record.get("task_alive") is False
+    else:
+        if chat_id != normalized_user_id:
+            return {}
+        restart_recovery = True
+    return {
+        "key": key,
+        "record": record,
+        "job_id": normalized_job_id,
+        "user_id": normalized_user_id,
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "restart_recovery": restart_recovery,
+    }
 
 
 def subdub_progress_job_for_user(job_id: str = "", user_id=0) -> dict:
@@ -8783,7 +8845,142 @@ def subdub_progress_job_for_user(job_id: str = "", user_id=0) -> dict:
     return max(candidates, key=_truth_priority)
 
 
+def video_edit_progress_read_status(job_id: str = "", user_id=0) -> dict:
+    """Read one exact, owner-bound Video Edit job from one DB snapshot."""
+
+    worker_job_id = safe_int(job_id, 0)
+    if worker_job_id <= 0:
+        return {}
+    conn = db_connect_readonly()
+    try:
+        conn.execute("BEGIN")
+        worker_job = dict(
+            get_local_worker_job_readonly(worker_job_id, conn=conn) or {}
+        )
+        if (
+            safe_int(worker_job.get("id"), 0) != worker_job_id
+            or str(worker_job.get("job_type") or "") != video_editengine1.WORKER_JOB_TYPE
+            or not str(worker_job.get("user_id") or "").strip()
+            or (user_id and str(worker_job.get("user_id") or "") != str(user_id))
+        ):
+            return {}
+        canonical = dict(
+            video_editengine1_job_for_worker(worker_job_id, conn=conn) or {}
+        )
+        if (
+            safe_int(canonical.get("local_worker_job_id"), 0) != worker_job_id
+            or str(canonical.get("product_type") or "") != video_editengine1.PRODUCT_TYPE
+            or str(canonical.get("worker_job_type") or "")
+            != video_editengine1.WORKER_JOB_TYPE
+            or str(canonical.get("engine_route") or "")
+            != video_editengine1.ENGINE_ROUTE
+            or str(canonical.get("worker_owner") or "")
+            != video_editengine1.OUTBOX_OWNER
+            or str(canonical.get("user_id") or "")
+            != str(worker_job.get("user_id") or "")
+        ):
+            return {}
+        worker_job["_video_edit_canonical"] = canonical
+        return worker_job
+    finally:
+        conn.close()
+
+
+def video_edit_progress_snapshot(
+    job_id: str = "",
+    user_id=0,
+    job: dict | None = None,
+    lang: str = "vi",
+) -> dict:
+    """Build the six-stage, artifact-gated snapshot for one Video Edit job."""
+
+    worker_job_id = safe_int(job_id, 0)
+    current = dict(
+        job
+        if job is not None
+        else video_edit_progress_read_status(str(worker_job_id), user_id=user_id)
+    )
+    if user_id and current and str(current.get("user_id") or "") != str(user_id):
+        current = {}
+    canonical = dict(current.get("_video_edit_canonical") or {})
+    worker_owner = str(current.get("user_id") or "").strip()
+    if (
+        worker_job_id <= 0
+        or not current
+        or safe_int(current.get("id"), 0) != worker_job_id
+        or str(current.get("job_type") or "") != video_editengine1.WORKER_JOB_TYPE
+        or not worker_owner
+        or (user_id and worker_owner != str(user_id))
+        or safe_int(canonical.get("local_worker_job_id"), 0) != worker_job_id
+        or str(canonical.get("product_type") or "") != video_editengine1.PRODUCT_TYPE
+        or str(canonical.get("worker_job_type") or "") != video_editengine1.WORKER_JOB_TYPE
+        or str(canonical.get("user_id") or "") != worker_owner
+    ):
+        return {}
+    progress = video_local_job_progress_payload(current)
+    worker_status = str(current.get("status") or "").strip().lower()
+    canonical_status = str(canonical.get("status") or "").strip().lower()
+    stage = str(progress.get("stage") or "").strip()
+    if not stage:
+        if worker_status == "queued":
+            stage = "received"
+        elif worker_status in {"running", "processing"}:
+            stage = "processing_video"
+    delivered_truth = video_edit_delivery_receipt_is_complete(
+        canonical,
+        {**progress, "worker_status": worker_status},
+    )
+    worker_terminal_success = worker_status in {"completed", "succeeded"}
+    delivery_uncertain = bool(
+        canonical_status == "delivery_unknown"
+        or stage == "delivery_unknown"
+        or (stage == "delivered" and not delivered_truth)
+        or (canonical_status in {"delivered", "charged"} and not delivered_truth)
+        or (worker_terminal_success and not delivered_truth)
+    )
+    failed = bool(
+        canonical_status == "failed_no_charge"
+        or worker_status in {"failed", "cancelled"}
+        or stage == "failed_no_charge"
+    )
+    if delivered_truth:
+        terminal_state = "delivered"
+        stage = "delivered"
+    elif delivery_uncertain:
+        terminal_state = "delivery_unknown"
+        stage = "delivery_unknown"
+    elif failed:
+        terminal_state = "failed_no_charge"
+        stage = "failed_no_charge"
+    else:
+        terminal_state = ""
+    percent = {
+        "received": 10,
+        "inspecting_input": 20,
+        "preparing_plan": 35,
+        "processing_video": 60,
+        "validating_output": 85,
+        "delivering": 95,
+        "delivery_unknown": 95,
+        "delivered": 100,
+    }.get(stage, 0)
+    text = video_editor_job_status_text(current, lang)
+    return {
+        "product_type": "video_edit",
+        "job_id": str(worker_job_id or current.get("id") or ""),
+        "stage": stage,
+        "percent": percent,
+        "terminal_state": terminal_state,
+        "completed_steps": [],
+        "text": text,
+        "render_hash": hashlib.sha256(str(text or "").encode("utf-8")).hexdigest(),
+    }
+
+
 def progress_auto_refresh_read_status(product_type: str = "", job_id: str = "", user_id=0) -> dict:
+    raw_product_type = str(product_type or "").strip().lower()
+    if raw_product_type == "video_edit":
+        return video_edit_progress_read_status(job_id, user_id)
     canonical = product_progress_status.normalize_product_type(product_type)
     if canonical == "frame_video":
         return frame_video_job_for_user(job_id, user_id) or dict(FRAME_VIDEO_JOBS.get(str(job_id or "")) or {})
@@ -8792,7 +8989,16 @@ def progress_auto_refresh_read_status(product_type: str = "", job_id: str = "", 
     return get_engine_async_job(job_id)
 
 
-def progress_auto_refresh_snapshot(product_type: str = "", job_id: str = "", job: dict | None = None, lang: str = "vi") -> dict:
+def progress_auto_refresh_snapshot(
+    product_type: str = "",
+    job_id: str = "",
+    job: dict | None = None,
+    lang: str = "vi",
+    user_id=0,
+) -> dict:
+    raw_product_type = str(product_type or "").strip().lower()
+    if raw_product_type == "video_edit":
+        return video_edit_progress_snapshot(job_id, user_id=user_id, job=job, lang=lang)
     canonical = product_progress_status.normalize_product_type(product_type)
     current = dict(job if job is not None else progress_auto_refresh_read_status(canonical, job_id))
     canonical = resolve_progress_product_type(job_id, canonical, current)
@@ -8840,13 +9046,50 @@ def progress_auto_refresh_register(
     initial_snapshot: dict | None = None,
     start_task: bool = True,
 ) -> dict:
-    canonical = product_progress_status.normalize_product_type(product_type)
-    if not PROGRESS_AUTO_REFRESH_ENABLED or not job_id or not chat_id or not message_id:
+    canonical = (
+        "video_edit"
+        if str(product_type or "").strip().lower() == "video_edit"
+        else product_progress_status.normalize_product_type(product_type)
+    )
+    if (
+        not job_id
+        or not chat_id
+        or not message_id
+        or (not PROGRESS_AUTO_REFRESH_ENABLED and canonical != "video_edit")
+    ):
         return {}
-    snapshot = dict(initial_snapshot or progress_auto_refresh_snapshot(canonical, job_id, lang=lang))
+    snapshot = dict(
+        initial_snapshot
+        or progress_auto_refresh_snapshot(
+            canonical,
+            job_id,
+            lang=lang,
+            user_id=user_id,
+        )
+    )
     key = progress_auto_refresh_key(canonical, job_id)
     current = dict(PROGRESS_AUTO_REFRESH_JOBS.get(key) or {})
-    is_music_progress = progress_product_type_is_music(canonical, job_id)
+    is_video_edit_progress = canonical == "video_edit"
+    is_music_progress = (
+        False
+        if is_video_edit_progress
+        else progress_product_type_is_music(canonical, job_id)
+    )
+    interval_seconds = int(
+        MUSIC_AUTO_DELIVERY_POLL_INTERVAL_SECONDS
+        if is_music_progress
+        else PROGRESS_AUTO_REFRESH_INTERVAL_SECONDS
+    )
+    configured_max_updates = int(
+        MUSIC_AUTO_DELIVERY_MAX_POLLS
+        if is_music_progress
+        else PROGRESS_AUTO_REFRESH_MAX_UPDATES
+    )
+    if is_video_edit_progress:
+        configured_max_updates = max(
+            configured_max_updates,
+            int(math.ceil(max(1, int(LOCAL_WORKER_MAX_JOB_SECONDS)) / interval_seconds)) + 1,
+        )
     record = {
         **current,
         "key": key,
@@ -8858,10 +9101,13 @@ def progress_auto_refresh_register(
         "lang": normalize_user_language(lang) or "vi",
         "enabled": bool(PROGRESS_AUTO_REFRESH_ENABLED),
         "interval_seconds": int(MUSIC_AUTO_DELIVERY_POLL_INTERVAL_SECONDS if is_music_progress else PROGRESS_AUTO_REFRESH_INTERVAL_SECONDS),
-        "max_updates": int(MUSIC_AUTO_DELIVERY_MAX_POLLS if is_music_progress else PROGRESS_AUTO_REFRESH_MAX_UPDATES),
+        "max_updates": max(
+            int(current.get("max_updates") or 0),
+            configured_max_updates,
+        ),
         "auto_delivery_enabled": bool(MUSIC_AUTO_DELIVERY_ENABLED and is_music_progress),
         "stop_on_terminal": bool(MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL if is_music_progress else PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL),
-        "edit_only": bool(PROGRESS_AUTO_REFRESH_EDIT_ONLY),
+        "edit_only": bool(PROGRESS_AUTO_REFRESH_EDIT_ONLY or canonical == "video_edit"),
         "min_delta_percent": int(PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT),
         "last_stage": str(snapshot.get("stage") or current.get("last_stage") or ""),
         "last_percent": int(snapshot.get("percent") or current.get("last_percent") or 0),
@@ -8875,7 +9121,11 @@ def progress_auto_refresh_register(
         "edit_fail_count": int(current.get("edit_fail_count") or 0),
         "registry_saved": True,
         "scheduler_mode": str(current.get("scheduler_mode") or ("music_auto_delivery" if is_music_progress else "auto_refresh")),
-        "scheduler_status": str(current.get("scheduler_status") or ("not_started" if start_task else "not_started")),
+        "scheduler_status": (
+            "disabled"
+            if not PROGRESS_AUTO_REFRESH_ENABLED
+            else str(current.get("scheduler_status") or "not_started")
+        ),
         "task_started": bool(current.get("task_started")),
         "task_alive": bool(current.get("task_alive")),
         "task_started_at": str(current.get("task_started_at") or ""),
@@ -8886,7 +9136,7 @@ def progress_auto_refresh_register(
         "stop_reason": "terminal" if snapshot.get("terminal_state") and (MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL if is_music_progress else PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL) else "",
     }
     PROGRESS_AUTO_REFRESH_JOBS[key] = record
-    if start_task:
+    if start_task and PROGRESS_AUTO_REFRESH_ENABLED:
         started = False
         try:
             started = progress_auto_refresh_start_task(context, key)
@@ -8906,10 +9156,27 @@ def progress_auto_refresh_register(
                 if job:
                     mark_music_confirm_submit_blocker(job, "scheduler_start_failed", record.get("scheduler_error") or "scheduler_start_failed", updated_by=user_id)
         PROGRESS_AUTO_REFRESH_JOBS[key] = record
+    elif start_task:
+        record.update({
+            "task_started": False,
+            "task_alive": False,
+            "scheduler_status": "disabled",
+        })
+        PROGRESS_AUTO_REFRESH_JOBS[key] = record
     return dict(record)
 
 
-def progress_auto_refresh_register_message(message, context, *, product_type: str, job_id: str, user_id=0, lang: str = "vi", start_task: bool = True) -> dict:
+def progress_auto_refresh_register_message(
+    message,
+    context,
+    *,
+    product_type: str,
+    job_id: str,
+    user_id=0,
+    lang: str = "vi",
+    initial_snapshot: dict | None = None,
+    start_task: bool = True,
+) -> dict:
     chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
     message_id = getattr(message, "message_id", None)
     return progress_auto_refresh_register(
@@ -8920,6 +9187,7 @@ def progress_auto_refresh_register_message(message, context, *, product_type: st
         user_id=user_id,
         lang=lang,
         context=context,
+        initial_snapshot=initial_snapshot,
         start_task=start_task,
     )
 
@@ -8989,7 +9257,10 @@ async def progress_auto_refresh_loop(context, key: str):
             PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
             product_type = str(record.get("product_type") or "")
             job_id = str(record.get("job_id") or "")
-            if progress_product_type_is_music(product_type, job_id):
+            if (
+                product_type.strip().lower() != "video_edit"
+                and progress_product_type_is_music(product_type, job_id)
+            ):
                 job = get_engine_async_job(job_id)
                 if job:
                     mark_music_confirm_submit_blocker(job, "auto_tick_exception", str(exc), updated_by=record.get("user_id") or "")
@@ -9999,6 +10270,12 @@ async def music_auto_deliver_from_progress_record(context, record: dict, job: di
 async def progress_auto_refresh_status_for_tick(context, record: dict) -> dict:
     product_type = str(record.get("product_type") or "")
     job_id = str(record.get("job_id") or "")
+    if product_type.strip().lower() == "video_edit":
+        return progress_auto_refresh_read_status(
+            product_type,
+            job_id,
+            record.get("user_id") or 0,
+        )
     if progress_product_type_is_music(product_type, job_id):
         refreshed = await music_progress_refresh_job_status(
             job_id,
@@ -10008,6 +10285,14 @@ async def progress_auto_refresh_status_for_tick(context, record: dict) -> dict:
         )
         return await music_auto_deliver_from_progress_record(context, record, refreshed)
     return progress_auto_refresh_read_status(product_type, job_id, record.get("user_id") or 0)
+
+
+def progress_auto_refresh_keyboard(product_type: str, job_id: str, lang: str = "vi"):
+    if str(product_type or "").strip().lower() == "video_edit":
+        normalized_job_id = safe_int(job_id, 0)
+        return video_editor_status_keyboard(normalized_job_id, lang) if normalized_job_id > 0 else None
+    canonical = product_progress_status.normalize_product_type(product_type)
+    return product_progress_status_keyboard(canonical, job_id, lang)
 
 
 async def progress_auto_refresh_tick(context, key: str) -> dict:
@@ -10022,15 +10307,69 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
         record["task_alive"] = False
         PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
         return {"status": "stopped", "reason": "max_updates"}
+    is_video_edit = str(record.get("product_type") or "").strip().lower() == "video_edit"
+    if is_video_edit:
+        expected_key = progress_auto_refresh_key("video_edit", str(record.get("job_id") or ""))
+        binding_valid = bool(
+            safe_int(record.get("job_id"), 0) > 0
+            and safe_int(record.get("user_id"), 0) > 0
+            and safe_int(record.get("chat_id"), 0) != 0
+            and safe_int(record.get("message_id"), 0) > 0
+            and str(key or "") == expected_key
+            and str(record.get("key") or expected_key) == expected_key
+        )
+        if not binding_valid:
+            record.update({
+                "stopped": True,
+                "task_alive": False,
+                "stop_reason": "job_missing_or_owner_mismatch",
+                "stopped_reason": "job_missing_or_owner_mismatch",
+            })
+            PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
+            return {
+                "status": "stopped",
+                "reason": "job_missing_or_owner_mismatch",
+                "record": dict(record),
+                "snapshot": {},
+            }
     record["last_tick_at"] = now_text()
     record["task_alive"] = True
     refreshed_job = await progress_auto_refresh_status_for_tick(context, record)
+    if is_video_edit and not refreshed_job:
+        record.update({
+            "stopped": True,
+            "task_alive": False,
+            "stop_reason": "job_missing_or_owner_mismatch",
+            "stopped_reason": "job_missing_or_owner_mismatch",
+        })
+        PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
+        return {
+            "status": "stopped",
+            "reason": "job_missing_or_owner_mismatch",
+            "record": dict(record),
+            "snapshot": {},
+        }
     snapshot = progress_auto_refresh_snapshot(
         record.get("product_type") or "",
         record.get("job_id") or "",
         job=refreshed_job,
         lang=record.get("lang") or "vi",
+        user_id=record.get("user_id") or 0,
     )
+    if is_video_edit and not snapshot:
+        record.update({
+            "stopped": True,
+            "task_alive": False,
+            "stop_reason": "job_missing_or_owner_mismatch",
+            "stopped_reason": "job_missing_or_owner_mismatch",
+        })
+        PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
+        return {
+            "status": "stopped",
+            "reason": "job_missing_or_owner_mismatch",
+            "record": dict(record),
+            "snapshot": {},
+        }
     last_percent = int(record.get("last_percent") or 0)
     if int(snapshot.get("percent") or 0) < last_percent and not snapshot.get("terminal_state"):
         snapshot["percent"] = last_percent
@@ -10039,6 +10378,18 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
     record["update_count"] = int(record.get("update_count") or 0) + 1
     terminal = str(snapshot.get("terminal_state") or "")
     should_edit = progress_auto_refresh_should_edit(record, snapshot)
+
+    def commit_panel_update() -> None:
+        record["edit_success_count"] = int(record.get("edit_success_count") or 0) + 1
+        record["last_update_at"] = now_text()
+        record["last_edit_at"] = record["last_update_at"]
+        record["last_stage"] = str(snapshot.get("stage") or "")
+        record["last_percent"] = int(snapshot.get("percent") or 0)
+        record["current_stage"] = str(snapshot.get("stage") or "")
+        record["percent"] = int(snapshot.get("percent") or 0)
+        record["terminal_state"] = terminal
+        record["last_render_hash"] = str(snapshot.get("render_hash") or "")
+
     if should_edit:
         try:
             await context.bot.edit_message_text(
@@ -10046,27 +10397,23 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
                 message_id=record.get("message_id"),
                 text=str(snapshot.get("text") or ""),
                 parse_mode="HTML",
-                reply_markup=product_progress_status_keyboard(record.get("product_type") or "", record.get("job_id") or "", record.get("lang") or "vi"),
+                reply_markup=progress_auto_refresh_keyboard(record.get("product_type") or "", record.get("job_id") or "", record.get("lang") or "vi"),
             )
-            record["edit_success_count"] = int(record.get("edit_success_count") or 0) + 1
-            record["last_update_at"] = now_text()
-            record["last_edit_at"] = record["last_update_at"]
-            record["last_stage"] = str(snapshot.get("stage") or "")
-            record["last_percent"] = int(snapshot.get("percent") or 0)
-            record["current_stage"] = str(snapshot.get("stage") or "")
-            record["percent"] = int(snapshot.get("percent") or 0)
-            record["terminal_state"] = terminal
-            record["last_render_hash"] = str(snapshot.get("render_hash") or "")
+            commit_panel_update()
         except Exception as exc:
-            record["edit_fail_count"] = int(record.get("edit_fail_count") or 0) + 1
-            record["last_error"] = sanitize_log_text(str(exc))[:180]
-            if not bool(record.get("edit_only")) and not record.get("fallback_used"):
+            not_modified = is_video_edit and video_edit_panel_not_modified(exc)
+            if not_modified:
+                commit_panel_update()
+            else:
+                record["edit_fail_count"] = int(record.get("edit_fail_count") or 0) + 1
+                record["last_error"] = sanitize_log_text(str(exc))[:180]
+            if not is_video_edit and not bool(record.get("edit_only")) and not record.get("fallback_used"):
                 try:
                     sent = await context.bot.send_message(
                         chat_id=record.get("chat_id"),
                         text=str(snapshot.get("text") or ""),
                         parse_mode="HTML",
-                        reply_markup=product_progress_status_keyboard(record.get("product_type") or "", record.get("job_id") or "", record.get("lang") or "vi"),
+                        reply_markup=progress_auto_refresh_keyboard(record.get("product_type") or "", record.get("job_id") or "", record.get("lang") or "vi"),
                     )
                     record["message_id"] = getattr(sent, "message_id", record.get("message_id"))
                     record["fallback_used"] = True
@@ -10080,6 +10427,14 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
                     record["last_render_hash"] = str(snapshot.get("render_hash") or "")
                 except Exception as send_exc:
                     record["last_error"] = sanitize_log_text(str(send_exc))[:180]
+            if is_video_edit and not not_modified:
+                record["task_alive"] = True
+                PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
+                return {
+                    "status": "retry_pending",
+                    "record": dict(record),
+                    "snapshot": snapshot,
+                }
     else:
         record["last_checked_at"] = now_text()
         record["current_stage"] = str(snapshot.get("stage") or record.get("current_stage") or "")
@@ -44979,10 +45334,11 @@ def get_local_worker_job(job_id, *, conn=None) -> dict:
             conn.close()
 
 
-def get_local_worker_job_readonly(job_id) -> dict:
+def get_local_worker_job_readonly(job_id, *, conn=None) -> dict:
     """Read one local-worker job without creating a database or schema."""
 
-    conn = db_connect_readonly()
+    owns_connection = conn is None
+    conn = conn or db_connect_readonly()
     try:
         c = conn.cursor()
         c.execute(
@@ -44993,7 +45349,8 @@ def get_local_worker_job_readonly(job_id) -> dict:
         )
         return local_worker_job_from_row(c.fetchone())
     finally:
-        conn.close()
+        if owns_connection:
+            conn.close()
 
 
 def get_latest_video_editor_job(user_id) -> dict:
@@ -45518,7 +45875,6 @@ def local_worker_status_payload() -> dict:
 def video_edit_worker_status_payload() -> dict:
     """Return only the fresh heartbeat owned by the local Video Edit adapter."""
 
-    generic = dict(local_worker_status_payload())
     received_at = get_system_setting("local_worker:video_edit_received_at_utc", "")
     received_dt = parse_utc_text(received_at)
     age_seconds = None
@@ -45527,7 +45883,10 @@ def video_edit_worker_status_payload() -> dict:
             0,
             int((datetime.now(timezone.utc) - received_dt).total_seconds()),
         )
-    capabilities_raw = get_system_setting("local_worker:capabilities_json", "[]")
+    capabilities_raw = get_system_setting(
+        "local_worker:video_edit_capabilities_json",
+        "[]",
+    )
     try:
         capabilities = json.loads(capabilities_raw or "[]")
     except (TypeError, ValueError, json.JSONDecodeError):
@@ -45547,21 +45906,32 @@ def video_edit_worker_status_payload() -> dict:
         if re.fullmatch(r"[a-z0-9_]{1,64}", str(item))
     ][:256]
     contract_version = safe_int(
-        get_system_setting("local_worker:heartbeat_contract_version", "0"),
+        get_system_setting(
+            "local_worker:video_edit_heartbeat_contract_version",
+            "0",
+        ),
         0,
     )
+    job_scope = get_system_setting("local_worker:video_edit_job_scope", "")
     fresh = bool(
         contract_version >= 1
+        and job_scope == "video_edit_only"
         and age_seconds is not None
         and age_seconds <= video_editengine1.HEARTBEAT_TTL_SECONDS
     )
     worker_status = "healthy" if fresh else "stale"
-    reported_ffmpeg_path = get_system_setting("local_worker:ffmpeg_path_seen", "")
+    reported_ffmpeg_path = get_system_setting(
+        "local_worker:video_edit_ffmpeg_path_seen",
+        "",
+    )
     workspace_free_bytes = max(
         0,
         min(
             safe_int(
-                get_system_setting("local_worker:workspace_free_bytes", "0"),
+                get_system_setting(
+                    "local_worker:video_edit_workspace_free_bytes",
+                    "0",
+                ),
                 0,
             ),
             (1 << 63) - 1,
@@ -45581,37 +45951,71 @@ def video_edit_worker_status_payload() -> dict:
         ),
     )
     return {
-        **generic,
+        "enabled": LOCAL_WORKER_ENABLED,
+        "poll_enabled": LOCAL_WORKER_POLL_ENABLED,
+        "delivery_configured": bool(TELEGRAM_TOKEN),
+        "worker_sha": get_system_setting(
+            "local_worker:video_edit_worker_sha",
+            "",
+        ),
+        "last_heartbeat": received_at,
         "ffmpeg_path": reported_ffmpeg_path,
         "ffmpeg_path_configured": bool(reported_ffmpeg_path),
         "ffmpeg_seen": bool(reported_ffmpeg_path),
+        "ffprobe_path_configured": get_system_setting(
+            "local_worker:video_edit_ffprobe_configured",
+            "0",
+        ) == "1",
+        "token_configured": bool(VIDEO_EDIT_WORKER_TOKEN),
         "connected": fresh,
         "heartbeat_contract_version": contract_version,
-        "worker_id": get_system_setting("local_worker:worker_id", ""),
-        "worker_owner": get_system_setting("local_worker:worker_owner", ""),
-        "engine_route": get_system_setting("local_worker:engine_route", ""),
+        "job_scope": job_scope,
+        "worker_id": get_system_setting("local_worker:video_edit_worker_id", ""),
+        "worker_owner": get_system_setting(
+            "local_worker:video_edit_worker_owner",
+            "",
+        ),
+        "engine_route": get_system_setting(
+            "local_worker:video_edit_engine_route",
+            "",
+        ),
         "capabilities": [str(item) for item in capabilities if str(item).strip()],
         "video_edit_filters": video_edit_filters,
         "video_edit_filters_known": get_system_setting("local_worker:video_edit_filters_known", "0") == "1",
         "video_edit_filter_worker_id": get_system_setting("local_worker:video_edit_filter_worker_id", ""),
         "video_edit_filter_ffmpeg_path": get_system_setting("local_worker:video_edit_filter_ffmpeg_path", ""),
-        "instance_id": get_system_setting("local_worker:instance_id", ""),
-        "worker_instance_id": get_system_setting("local_worker:instance_id", ""),
-        "process_id": safe_int(get_system_setting("local_worker:process_id", "0"), 0),
-        "started_at_utc": get_system_setting("local_worker:started_at_utc", ""),
+        "instance_id": get_system_setting("local_worker:video_edit_instance_id", ""),
+        "worker_instance_id": get_system_setting("local_worker:video_edit_instance_id", ""),
+        "process_id": safe_int(
+            get_system_setting("local_worker:video_edit_process_id", "0"),
+            0,
+        ),
+        "started_at_utc": get_system_setting("local_worker:video_edit_started_at_utc", ""),
         "timestamp_utc": get_system_setting("local_worker:video_edit_timestamp_utc", ""),
         "heartbeat_timestamp": get_system_setting("local_worker:video_edit_timestamp_utc", ""),
         "received_at_utc": received_at,
         "heartbeat_age_seconds": age_seconds,
         "heartbeat_ttl_seconds": video_editengine1.HEARTBEAT_TTL_SECONDS,
         "worker_status": worker_status,
-        "queue_depth": safe_int(get_system_setting("local_worker:queue_depth", "0"), 0),
-        "last_error": get_system_setting("local_worker:last_error", ""),
-        "workspace_ready": get_system_setting("local_worker:workspace_ready", "0") == "1",
+        "queue_depth": safe_int(
+            get_system_setting("local_worker:video_edit_queue_depth", "0"),
+            0,
+        ),
+        "last_error": get_system_setting("local_worker:video_edit_last_error", ""),
+        "workspace_ready": get_system_setting(
+            "local_worker:video_edit_workspace_ready",
+            "0",
+        ) == "1",
         "workspace_free_bytes": workspace_free_bytes,
         "video_edit_max_deadline_seconds": max_deadline_seconds,
-        "worker_token_ready": get_system_setting("local_worker:worker_token_ready", "0") == "1",
-        "local_bot_api_ready": get_system_setting("local_worker:local_bot_api_ready", "0") == "1",
+        "worker_token_ready": get_system_setting(
+            "local_worker:video_edit_worker_token_ready",
+            "0",
+        ) == "1",
+        "local_bot_api_ready": get_system_setting(
+            "local_worker:video_edit_local_bot_api_ready",
+            "0",
+        ) == "1",
     }
 
 
@@ -45638,6 +46042,8 @@ def video_edit_runtime_capability_admission(
         return blocked("local_worker_poll_disabled")
     if not worker.get("token_configured"):
         return blocked("local_worker_token_missing")
+    if str(worker.get("job_scope") or "") != "video_edit_only":
+        return blocked("local_worker_job_scope_mismatch")
     if not worker.get("connected"):
         return blocked("local_worker_heartbeat_stale")
     try:
@@ -70108,6 +70514,73 @@ def video_editor_normalize_action(action: str) -> str:
     return VIDEO_EDITOR_ACTION_ALIASES.get(action, action)
 
 
+_VIDEO_EDITOR_CALLBACK_NO_VALUE_ACTIONS = frozenset({
+    "admin", "ai", "ai_aspect", "ai_aspect_limits", "ai_aspect_method",
+    "ai_custom_duration", "ai_duration", "ai_effect_timing", "ai_info",
+    "ai_intensity", "ai_intent", "ai_invoice", "ai_motion", "ai_preserve",
+    "ai_prompt", "ai_remove_effect", "ai_review", "ai_settings", "ai_source",
+    "ai_suggestions", "ai_text", "ai_upload", "ai_use_local", "aspect",
+    "audio", "audio_clear", "audio_custom", "audio_loudnorm", "audio_master",
+    "audio_reupload", "audio_upload", "branding", "brightness",
+    "brightness_custom", "color", "color_preset", "compress", "concat",
+    "concat_done", "confirmation", "crop", "cut", "effect_timing", "effects",
+    "enhance", "flip", "frame", "hub", "ideas", "join", "latest_status",
+    "legacy_sharpen", "logo", "logo_entry", "logo_options", "logo_remove",
+    "manual", "manual_audio", "manual_cut", "manual_done", "manual_effects",
+    "manual_info", "manual_join", "manual_rotate_flip", "menu", "motion",
+    "music", "overlay", "plan", "quality_source", "quality_upload", "reference",
+    "remove_middle", "reorder", "reset_manual", "resize", "resolution",
+    "restore", "restore_limits", "review", "rotation", "save", "selfscene",
+    "sharpen", "source_info", "source_summary", "speed", "split", "split_count",
+    "split_custom", "split_fixed", "split_from_manual", "split_info", "srt",
+    "start", "subtitle", "text", "text_overlay", "timeline", "toggle_gaps",
+    "transform", "trim_edges", "trim_range", "vertical", "volume",
+    "watermark_entry", "watermark_options", "watermark_remove", "watermark_text",
+    "workspace",
+})
+_VIDEO_EDITOR_CALLBACK_ONE_VALUE_ACTIONS = frozenset({
+    "ai_pick", "ai_set_aspect", "ai_set_aspect_method", "ai_set_duration",
+    "ai_set_effect_timing", "ai_set_intensity", "ai_set_motion", "ai_set_text",
+    "ai_toggle", "audio_add", "audio_component", "audio_set", "brightness_set",
+    "effect_pick", "method", "options", "preset", "ratio", "restore_pick",
+    "split_reset_manual",
+})
+_VIDEO_EDITOR_CALLBACK_OPTIONAL_ONE_VALUE_ACTIONS = frozenset({
+    "confirm_local", "guide", "quick", "upload",
+})
+VIDEO_EDITOR_GUIDE_CALLERS = frozenset({
+    "hub", "manual", "ai", "ai_suggestions", "quality", "audio", "effects",
+    "workspace",
+})
+
+
+def video_editor_callback_arity_valid(parts: list[str] | tuple[str, ...]) -> bool:
+    """Reject malformed Video Edit callback shapes before state or UI work."""
+
+    values = list(parts or [])
+    if len(values) < 2 or str(values[0] or "").strip().lower() != "videoedit":
+        return False
+    action = str(values[1] or "").strip().lower()
+    parameters = [str(value or "").strip() for value in values[2:]]
+    if action in {"status", "ai_status", "status_hub", "status_menu"}:
+        return len(parameters) == 1 and bool(re.fullmatch(r"[1-9][0-9]*", parameters[0]))
+    if action == "guide":
+        return not parameters or (
+            len(parameters) == 1 and parameters[0] in VIDEO_EDITOR_GUIDE_CALLERS
+        )
+    if action in _VIDEO_EDITOR_CALLBACK_NO_VALUE_ACTIONS:
+        return not parameters
+    if action in _VIDEO_EDITOR_CALLBACK_ONE_VALUE_ACTIONS:
+        return len(parameters) == 1 and bool(parameters[0])
+    if action in _VIDEO_EDITOR_CALLBACK_OPTIONAL_ONE_VALUE_ACTIONS:
+        return len(parameters) <= 1 and (not parameters or bool(parameters[0]))
+    if action == "set":
+        return len(parameters) == 2 and all(parameters)
+    if action.startswith("ai_set_"):
+        return len(parameters) == 1 and bool(parameters[0])
+    return False
+
+
 def video_editor_pending_key(user_id) -> str:
     return f"video_editor:{user_id}"
 
@@ -83171,6 +83644,17 @@ def video_local_logo_parent_callback(state: dict | None = None) -> str:
     return "videoedit|branding"
 
 
+def video_local_logo_input_back_callback(state: dict | None = None) -> str:
+    current = dict(state or {})
+    if (
+        str(current.get("current_screen") or "") == "logo_input"
+        and str(current.get("parent_callback") or "") == "videoedit|logo_options"
+        and dict(current.get("logo_source") or {}).get("file_id")
+    ):
+        return "videoedit|logo_options"
+    return video_local_logo_parent_callback(current)
+
+
 def video_local_logo_keyboard(lang: str = "vi", *, back_callback: str = "videoedit|overlay") -> InlineKeyboardMarkup:
     state_machine = globals().get("video_edit_state_machine")
     safe_parent = getattr(state_machine, "safe_parent_callback", lambda _value: "videoedit|hub")
@@ -83231,6 +83715,18 @@ def video_local_watermark_parent_callback(state: dict | None = None) -> str:
     if parent in {"videoedit|workspace", "videoedit|overlay", "videoedit|branding", "videoedit|review"}:
         return parent
     return "videoedit|branding"
+
+
+def video_local_watermark_input_back_callback(state: dict | None = None) -> str:
+    current = dict(state or {})
+    if (
+        str(current.get("current_screen") or "") == "watermark_input"
+        and str(current.get("parent_callback") or "")
+        == "videoedit|watermark_options"
+        and dict(current.get("watermark_config") or {}).get("enabled")
+    ):
+        return "videoedit|watermark_options"
+    return video_local_watermark_parent_callback(current)
 
 
 def video_local_watermark_text(state: dict | None = None, lang: str = "vi") -> str:
@@ -83533,9 +84029,15 @@ def video_editor_status_keyboard(job_id: int, lang: str = "vi") -> InlineKeyboar
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("🔄 Cập nhật trạng thái" if is_vi else "🔄 Update status", callback_data=f"videoedit|status|{int(job_id)}"),
-        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ], [
-        InlineKeyboardButton("⬅️ Chỉnh sửa video" if is_vi else "⬅️ Video Edit", callback_data="videoedit|hub"),
+        InlineKeyboardButton(
+            "🛠 Mở Chỉnh sửa video" if is_vi else "🛠 Open Video Edit",
+            callback_data=f"videoedit|status_hub|{int(job_id)}",
+        ),
+        InlineKeyboardButton(
+            ui_text(lang, "common.main_menu"),
+            callback_data=f"videoedit|status_menu|{int(job_id)}",
+        ),
     ]])
 
 
@@ -83583,19 +84085,140 @@ def video_local_job_progress_payload(job: dict) -> dict:
     return parsed if isinstance(parsed, dict) and parsed.get("local1") else {}
 
 
-def video_editengine1_job_for_worker(worker_job_id) -> dict:
-    conn = db_connect_readonly()
+def video_editengine1_job_for_worker(worker_job_id, *, conn=None) -> dict:
+    owns_connection = conn is None
+    conn = conn or db_connect_readonly()
     try:
         return video_editengine1.get_job_by_worker_id_readonly(conn, worker_job_id)
     finally:
-        conn.close()
+        if owns_connection:
+            conn.close()
+
+
+def video_edit_delivery_receipt_is_complete(
+    canonical: dict | None,
+    progress: dict | None = None,
+) -> bool:
+    """Require one internally consistent, fully decoded Telegram receipt."""
+
+    current = dict(canonical or {})
+    worker_progress = dict(progress or {}) if isinstance(progress, dict) else {}
+
+    def _strict_nonnegative_integer(value) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value >= 0 else None
+        if isinstance(value, str):
+            token = value.strip()
+            if not token or not token.isdigit():
+                return None
+            parsed = int(token)
+            return parsed if parsed >= 0 else None
+        return None
+
+    output_sha256 = current.get("output_sha256")
+    output_size_bytes = _strict_nonnegative_integer(current.get("output_size_bytes"))
+    delivery_message_id, delivery_file_id = video_editengine1.telegram_delivery_identity({
+        "sent": True,
+        "message_id": current.get("delivery_message_id"),
+        "file_id": current.get("delivery_file_id"),
+    })
+    output_file_id = current.get("output_file_id")
+    if not (
+        str(current.get("status") or "").strip().lower() in {"delivered", "charged"}
+        and current.get("receipt_state") == "created"
+        and delivery_message_id
+        and delivery_file_id
+        and isinstance(output_file_id, str)
+        and output_file_id == output_file_id.strip() == delivery_file_id
+        and isinstance(output_sha256, str)
+        and output_sha256 == output_sha256.strip()
+        and re.fullmatch(r"[0-9A-Fa-f]{64}", output_sha256)
+        and output_size_bytes is not None
+        and output_size_bytes > 0
+        and video_editengine1.valid_mp4_delivery_probe(current.get("ffprobe"))
+    ):
+        return False
+
+    raw_artifacts = current.get("artifact_receipts", [])
+    if not isinstance(raw_artifacts, list) or not video_editengine1._artifact_receipts_valid(raw_artifacts):
+        return False
+    artifacts = video_editengine1._artifact_receipts(raw_artifacts)
+    scalar_cursor = _strict_nonnegative_integer(current.get("delivery_cursor", 0))
+    if scalar_cursor is None:
+        return False
+    tail = current.get("tail", {})
+    if not isinstance(tail, dict):
+        return False
+    has_strict_cursor = "delivery_cursor" in tail
+    strict_cursor = None
+    if has_strict_cursor:
+        try:
+            strict_cursor = video_editengine1.video_edit_long_media.DeliveryCursor.from_mapping(
+                tail.get("delivery_cursor")
+            )
+            video_editengine1._validate_delivery_cursor_receipt_prefix(
+                strict_cursor,
+                artifacts,
+            )
+        except (TypeError, ValueError):
+            return False
+
+    if artifacts:
+        if (
+            scalar_cursor != len(artifacts)
+            or output_size_bytes != sum(int(item.get("size") or 0) for item in artifacts)
+            or not video_editengine1._valid_mp4_path_list(
+                current.get("output_path"),
+                output_count=len(artifacts),
+            )
+            or any(
+                not video_editengine1.valid_mp4_delivery_probe(item.get("ffprobe"))
+                for item in artifacts
+            )
+            or (strict_cursor is not None and strict_cursor.state != "delivered")
+        ):
+            return False
+        bound_artifact = artifacts[-1] if strict_cursor is not None else artifacts[0]
+        if (
+            delivery_message_id != str(bound_artifact.get("message_id") or "")
+            or delivery_file_id != str(bound_artifact.get("file_id") or "")
+        ):
+            return False
+        expected_output_count = len(artifacts)
+    else:
+        if (
+            scalar_cursor != 0
+            or has_strict_cursor
+            or not video_editengine1._valid_mp4_path_list(
+                current.get("output_path"),
+                output_count=1,
+            )
+        ):
+            return False
+        expected_output_count = 1
+
+    worker_status = str(worker_progress.get("worker_status") or "").strip().lower()
+    worker_stage = str(worker_progress.get("stage") or "").strip().lower()
+    if worker_status not in {"completed", "succeeded"}:
+        return False
+    if worker_stage != "delivered":
+        return False
+    for field in ("processed", "total", "delivered"):
+        parsed = _strict_nonnegative_integer(worker_progress.get(field))
+        if parsed is None or parsed != expected_output_count:
+            return False
+    return True
 
 
 def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
     is_vi = normalize_user_language(lang) == "vi"
     status = str((job or {}).get("status") or "unknown").lower()
     progress = video_local_job_progress_payload(job)
-    canonical = video_editengine1_job_for_worker((job or {}).get("id"))
+    canonical = dict((job or {}).get("_video_edit_canonical") or {})
+    if not canonical:
+        canonical = video_editengine1_job_for_worker((job or {}).get("id"))
     canonical_status = str(canonical.get("status") or "").lower()
     stage = str(progress.get("stage") or ("received" if status == "queued" else ""))
     processed = max(0, safe_int(progress.get("processed"), 0))
@@ -83626,15 +84249,16 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
             "failed_no_charge": "Could not process",
         }
     )
-    delivered_truth = bool(
-        canonical_status in {"delivered", "charged"}
-        and canonical.get("receipt_state") == "created"
-        and str(canonical.get("delivery_message_id") or "").strip()
-        and str(canonical.get("delivery_file_id") or "").strip()
-        and str(canonical.get("output_sha256") or "").strip()
-        and safe_int(canonical.get("output_size_bytes"), 0) > 0
-        and bool((canonical.get("ffprobe") or {}).get("ok"))
+    receipt_progress = {**progress, "worker_status": status}
+    delivered_truth = video_edit_delivery_receipt_is_complete(
+        canonical,
+        receipt_progress,
     )
+    artifact_receipts = video_editengine1._artifact_receipts(
+        canonical.get("artifact_receipts") or []
+    )
+    receipt_count = len(artifact_receipts)
+    worker_terminal_success = status in {"completed", "succeeded"}
     delivery_uncertain = bool(
         canonical_status == "delivery_unknown"
         or stage == "delivery_unknown"
@@ -83643,6 +84267,7 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
             canonical_status in {"delivered", "charged"}
             and not delivered_truth
         )
+        or (worker_terminal_success and not delivered_truth)
     )
     if delivered_truth:
         public_status = "Hoàn tất" if is_vi else "Completed"
@@ -83741,15 +84366,15 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
                 )
             else:
                 lines.append(
-                    f"• Đã có biên nhận: <b>{min(delivered, total)}/{total}</b> phần"
+                    f"• Đã có biên nhận: <b>{min(receipt_count, total)}/{total}</b> phần"
                     if is_vi
-                    else f"• Receipts recorded: <b>{min(delivered, total)}/{total}</b> parts"
+                    else f"• Receipts recorded: <b>{min(receipt_count, total)}/{total}</b> parts"
                 )
         elif stage == "delivery_unknown":
             lines.append(
-                f"• Đã có biên nhận: <b>{min(delivered, total)}/{total}</b> phần"
+                f"• Đã có biên nhận: <b>{min(receipt_count, total)}/{total}</b> phần"
                 if is_vi
-                else f"• Receipts recorded: <b>{min(delivered, total)}/{total}</b> parts"
+                else f"• Receipts recorded: <b>{min(receipt_count, total)}/{total}</b> parts"
             )
         else:
             action = (
@@ -83795,14 +84420,46 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
         lines.append(
             (
                 "• Một phần hoặc toàn bộ file có thể đã tới Telegram nhưng biên nhận cuối chưa chắc chắn. "
-                "Hệ thống không tự gửi lại để tránh trùng file và không trừ Xu."
+                "Hệ thống không tự gửi lại để tránh trùng file."
             )
             if is_vi
             else (
                 "• Some or all files may have reached Telegram, but the final receipt is not verified. "
-                "The system will not resend automatically or charge Xu."
+                "The system will not resend automatically."
             )
         )
+        charge_state = str(canonical.get("charge_state") or "not_charged")
+        charged_xu = safe_int(canonical.get("charged_xu"), 0)
+        if charge_state == "charged" and charged_xu > 0:
+            lines.append(
+                f"• Đã ghi nhận trừ: <b>{charged_xu} Xu</b>. Không bấm lại; hệ thống đang đối soát biên nhận giao file."
+                if is_vi
+                else f"• Recorded charge: <b>{charged_xu} Xu</b>. Do not tap again while the delivery receipt is reconciled."
+            )
+        elif charge_state == "charged":
+            lines.append(
+                "• Phí đã được đánh dấu ghi nhận nhưng số Xu cần đối soát. Không bấm lại."
+                if is_vi
+                else "• The fee is marked as recorded, but its Xu amount needs reconciliation. Do not tap again."
+            )
+        elif confirmed_price_xu <= 0:
+            lines.append(
+                "• Tác vụ cục bộ miễn phí 0 Xu; hệ thống không ghi phí và không chạm ví."
+                if is_vi
+                else "• This local task costs 0 Xu; no fee was recorded and the wallet was not touched."
+            )
+        elif charge_state == "charge_failed":
+            lines.append(
+                "• Hệ thống chưa ghi được phí; không tự trừ lặp lại trong lúc đối soát."
+                if is_vi
+                else "• The fee was not recorded; it will not be charged repeatedly during reconciliation."
+            )
+        else:
+            lines.append(
+                "• Panel chưa ghi nhận khoản trừ Xu mới. Không bấm lại trong lúc hệ thống đối soát."
+                if is_vi
+                else "• The panel has not recorded a new Xu charge. Do not tap again during reconciliation."
+            )
     elif failed:
         lines.append(
             "• Kết quả: xử lý chưa thành công. Hệ thống không trừ Xu."
@@ -83816,6 +84473,229 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
             else "• The result will be delivered after validation. You do not need to tap again."
         )
     return "\n".join(lines)
+
+
+async def show_video_editor_job_status_panel(
+    update,
+    context,
+    job_id,
+    lang: str = "vi",
+    *,
+    user_id=0,
+):
+    """Render and register one exact owner-bound Video Edit progress panel."""
+
+    query = getattr(update, "callback_query", None)
+    source_message = getattr(update, "message", None) or getattr(query, "message", None)
+    normalized_job_id = safe_int(job_id, 0)
+    normalized_user_id = safe_int(
+        user_id or getattr(getattr(update, "effective_user", None), "id", 0),
+        0,
+    )
+    current = dict(
+        video_edit_progress_read_status(
+            normalized_job_id,
+            user_id=normalized_user_id,
+        )
+        or {}
+    )
+    if not current:
+        if query:
+            await query.answer(
+                "Không tìm thấy bảng tiến độ Video Edit thuộc tài khoản này.",
+                show_alert=True,
+            )
+        return None
+
+    registry = globals().setdefault("PROGRESS_AUTO_REFRESH_JOBS", {})
+    key = f"video_edit:{normalized_job_id}"
+    existing = dict(registry.get(key) or {}) if isinstance(registry, dict) else {}
+    if existing:
+        if query:
+            await query.answer(
+                "Bảng tiến độ của tác vụ này đang hoạt động. Hãy dùng đúng bảng đã mở.",
+                show_alert=True,
+            )
+        return None
+    tasks = globals().setdefault("PROGRESS_AUTO_REFRESH_TASKS", {})
+    orphan_task = tasks.get(key) if isinstance(tasks, dict) else None
+    if orphan_task is not None:
+        task_done = getattr(orphan_task, "done", None)
+        if not callable(task_done) or not task_done():
+            if query:
+                await query.answer(
+                    "Bảng tiến độ của tác vụ này đang được khôi phục. Hãy thử lại sau.",
+                    show_alert=True,
+                )
+            return None
+        tasks.pop(key, None)
+
+    snapshot = video_edit_progress_snapshot(
+        str(normalized_job_id),
+        user_id=normalized_user_id,
+        job=current,
+        lang=lang,
+    )
+    if not snapshot:
+        if query:
+            await query.answer(
+                "Chưa đọc được tiến độ Video Edit an toàn.",
+                show_alert=True,
+            )
+        return None
+
+    text = str(snapshot.get("text") or video_editor_job_status_text(current, lang))
+    if not isinstance(registry, dict):
+        raise RuntimeError("videoedit_progress_registry_unavailable")
+    binding_attempt = object()
+    binding_task = None
+    registry[key] = {
+        "key": key,
+        "product_type": "video_edit",
+        "job_id": str(normalized_job_id),
+        "user_id": normalized_user_id,
+        "binding_attempt": binding_attempt,
+        "binding_state": "reserved",
+        "task_started": False,
+        "task_alive": False,
+    }
+
+    def rollback_binding() -> None:
+        owned = dict(registry.get(key) or {})
+        if owned.get("binding_attempt") is not binding_attempt:
+            return
+        if isinstance(tasks, dict) and binding_task is not None:
+            task = tasks.get(key)
+            if task is binding_task:
+                tasks.pop(key, None)
+                task_done = getattr(task, "done", None)
+                task_cancel = getattr(task, "cancel", None)
+                if callable(task_cancel) and (
+                    not callable(task_done) or not task_done()
+                ):
+                    task_cancel()
+        registry.pop(key, None)
+
+    if query:
+        if source_message is None:
+            rollback_binding()
+            return None
+        try:
+            rendered = await query.edit_message_text(text, parse_mode="HTML")
+        except Exception as exc:
+            if video_edit_panel_not_modified(exc):
+                rendered = None
+            elif any(
+                fragment in str(exc or "").lower()
+                for fragment in (
+                    "there is no text in the message to edit",
+                    "query is too old",
+                    "message to edit not found",
+                    "message can't be edited",
+                    "message is not editable",
+                )
+            ):
+                try:
+                    rendered = await source_message.reply_text(
+                        text,
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    rollback_binding()
+                    raise
+            else:
+                rollback_binding()
+                raise
+        panel_message = rendered or source_message
+    elif source_message:
+        try:
+            panel_message = await source_message.reply_text(
+                text,
+                parse_mode="HTML",
+            )
+        except Exception:
+            rollback_binding()
+            raise
+    else:
+        rollback_binding()
+        return None
+
+    if panel_message is None:
+        rollback_binding()
+        return None
+    try:
+        registration = dict(progress_auto_refresh_register_message(
+            panel_message,
+            context,
+            product_type="video_edit",
+            job_id=str(normalized_job_id),
+            user_id=normalized_user_id,
+            lang=lang,
+            initial_snapshot=snapshot,
+            start_task=False,
+        ) or {})
+    except Exception:
+        rollback_binding()
+        raise
+    panel_chat_id = safe_int(
+        getattr(panel_message, "chat_id", 0)
+        or getattr(getattr(panel_message, "chat", None), "id", 0),
+        0,
+    )
+    panel_message_id = safe_int(getattr(panel_message, "message_id", 0), 0)
+    if not (
+        str(registration.get("key") or "") == f"video_edit:{normalized_job_id}"
+        and str(registration.get("product_type") or "").strip().lower() == "video_edit"
+        and safe_int(registration.get("job_id"), 0) == normalized_job_id
+        and safe_int(registration.get("user_id"), 0) == normalized_user_id
+        and safe_int(registration.get("chat_id"), 0) == panel_chat_id
+        and safe_int(registration.get("message_id"), 0) == panel_message_id
+        and panel_chat_id != 0
+        and panel_message_id > 0
+    ):
+        rollback_binding()
+        raise RuntimeError("videoedit_progress_panel_registration_failed")
+    registry[key] = {
+        **dict(registry.get(key) or {}),
+        **registration,
+        "binding_attempt": binding_attempt,
+        "binding_state": "registered",
+    }
+    terminal_snapshot = bool(str(snapshot.get("terminal_state") or "").strip())
+    if not terminal_snapshot:
+        try:
+            scheduler_started = bool(progress_auto_refresh_start_task(context, key))
+        except Exception:
+            rollback_binding()
+            raise
+        if not scheduler_started:
+            rollback_binding()
+            raise RuntimeError("videoedit_progress_panel_scheduler_start_failed")
+        binding_task = tasks.get(key) if isinstance(tasks, dict) else None
+    try:
+        if query and panel_message is source_message:
+            await query.edit_message_text(
+                text,
+                parse_mode="HTML",
+                reply_markup=video_editor_status_keyboard(normalized_job_id, lang),
+            )
+        else:
+            await panel_message.edit_text(
+                text,
+                parse_mode="HTML",
+                reply_markup=video_editor_status_keyboard(normalized_job_id, lang),
+            )
+    except Exception as exc:
+        if not video_edit_panel_not_modified(exc):
+            rollback_binding()
+            raise
+    active = dict(registry.get(key) or {})
+    if active.get("binding_attempt") is not binding_attempt:
+        rollback_binding()
+        raise RuntimeError("videoedit_progress_panel_binding_lost")
+    active["binding_state"] = "active"
+    registry[key] = active
+    return panel_message
 
 
 VIDEO_PUBLIC_ROUTE_FORBIDDEN_WORDS = (
@@ -187080,11 +187960,16 @@ async def _handle_create_media_callback_impl(
     confirmation_context_fields: dict | None = None,
 ):
     query = update.callback_query
-    await query.answer()
     callback_parts = str(callback_data if callback_data is not None else (query.data or "")).split("|")
     action = callback_parts[1] if len(callback_parts) > 1 else ""
     value = callback_parts[2] if len(callback_parts) > 2 else ""
     uid = query.from_user.id if query.from_user else 0
+    video_editor_entry_state = {}
+    if uid and (action == "quick_image" or action.startswith("image_tier_")):
+        video_editor_entry_state = video_editor_state_snapshot(
+            get_video_editor_pending(uid)
+        )
+    await query.answer()
     lang = get_user_language(uid) or "vi"
     if action == "main":
         notice = clear_pending_start_notice(uid)
@@ -187114,22 +187999,39 @@ async def _handle_create_media_callback_impl(
     if action == "trend":
         return await trend_guided_start_from_query(query, uid, lang)
     if action == "quick_image":
-        clear_trend_video_flow_pending(uid)
-        clear_quick_media_pending(uid)
-        clear_quick_image_flow(uid)
-        clear_public_image_prompt_pending(uid)
-        clear_public_video_prompt_pending(uid)
-        clear_media_aspect_pending(uid)
-        clear_public_video_package_context(uid)
-        clear_image_menu_pending(uid)
-        if isinstance(getattr(context, "user_data", None), dict):
-            context.user_data["video_scene3_image_handoff_active"] = False
-        set_quick_image_flow(uid, "entry", suggest_offset=0)
+        async def commit_quick_image_entry():
+            state_cleared, winner = compare_and_replace_video_editor_pending(
+                uid,
+                video_editor_entry_state,
+                {},
+                expected_exists=bool(video_editor_entry_state),
+                replacement_exists=False,
+            )
+            if not state_cleared:
+                await rerender_video_editor_after_stale_commit(
+                    query,
+                    winner,
+                    lang,
+                )
+                return
+            clear_trend_video_flow_pending(uid)
+            clear_quick_media_pending(uid)
+            clear_quick_image_flow(uid)
+            clear_public_image_prompt_pending(uid)
+            clear_public_video_prompt_pending(uid)
+            clear_media_aspect_pending(uid)
+            clear_public_video_package_context(uid)
+            clear_image_menu_pending(uid)
+            if isinstance(getattr(context, "user_data", None), dict):
+                context.user_data["video_scene3_image_handoff_active"] = False
+            set_quick_image_flow(uid, "entry", suggest_offset=0)
+
         return await safe_edit_or_send(
             query,
             quick_image_entry_text(lang),
             parse_mode="HTML",
             reply_markup=quick_image_entry_keyboard(lang),
+            post_render=commit_quick_image_entry,
         )
     if action == "qi_entry":
         state = get_quick_image_flow(uid) or {}
@@ -187780,18 +188682,40 @@ async def _handle_create_media_callback_impl(
         record_shopaikey_billing_event(uid, 0, "video_prompt_received", 0, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}; aspect={aspect}")
         return await start_video_addon_step(query, uid, pending_payload, tier, lang, source="ai")
     if action.startswith("image_tier_"):
-        clear_trend_video_flow_pending(uid)
-        clear_quick_media_pending(uid)
-        clear_public_video_prompt_pending(uid)
-        clear_media_aspect_pending(uid)
-        clear_public_video_package_context(uid)
-        clear_image_menu_pending(uid)
         tier = normalize_image_tier(action.replace("image_tier_", "", 1))
         payload = image_tier_payload(tier)
         if not payload.get("enabled"):
             return await safe_edit_or_send(query, ui_text(lang, "image.tier_disabled_message"))
-        set_public_image_prompt_pending(uid, tier)
-        return await safe_edit_or_send(query, public_image_prompt_request_text(tier, lang), parse_mode="HTML")
+
+        async def commit_image_tier_entry():
+            state_cleared, winner = compare_and_replace_video_editor_pending(
+                uid,
+                video_editor_entry_state,
+                {},
+                expected_exists=bool(video_editor_entry_state),
+                replacement_exists=False,
+            )
+            if not state_cleared:
+                await rerender_video_editor_after_stale_commit(
+                    query,
+                    winner,
+                    lang,
+                )
+                return
+            clear_trend_video_flow_pending(uid)
+            clear_quick_media_pending(uid)
+            clear_public_video_prompt_pending(uid)
+            clear_media_aspect_pending(uid)
+            clear_public_video_package_context(uid)
+            clear_image_menu_pending(uid)
+            set_public_image_prompt_pending(uid, tier)
+
+        return await safe_edit_or_send(
+            query,
+            public_image_prompt_request_text(tier, lang),
+            parse_mode="HTML",
+            post_render=commit_image_tier_entry,
+        )
     if action == "quick_video":
         clear_trend_video_flow_pending(uid)
         clear_quick_media_pending(uid)
@@ -213245,8 +214169,6 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if await handle_pending_admin_tool_test_media(update, context):
         return
-    if await handle_video_editor_pending_upload(update, context):
-        return
     if await handle_video_uiflow3_pending_media(update, context):
         return
     if await handle_storyboard2_pending_media(update, context):
@@ -233864,6 +234786,49 @@ async def inspect_video_editor_srt(context: ContextTypes.DEFAULT_TYPE, source: d
         return video_local_validation.validate_srt_file(path, workspace=tmpdir)
 
 
+async def inspect_video_editor_logo(
+    context: ContextTypes.DEFAULT_TYPE,
+    source: dict,
+) -> dict:
+    """Validate actual static-image bytes when Telegram transport is available."""
+
+    current = dict(source or {})
+    try:
+        file_name = video_local_validation.validate_extension(
+            str(current.get("file_name") or "logo.png"),
+            video_local_validation.ALLOWED_LOGO_EXTENSIONS,
+        )
+    except video_local_validation.LocalVideoValidationError as exc:
+        return {"ok": False, "reason": exc.reason}
+    if safe_int(current.get("file_size"), 0) > video_local_validation.MAX_LOGO_BYTES:
+        return {"ok": False, "reason": "logo_size_invalid"}
+    telegram_bot = getattr(context, "bot", None)
+    if telegram_bot is None:
+        # Some internal/legacy seams do not expose Telegram transport. The worker
+        # remains authoritative and always validates bytes before FFmpeg.
+        return {"ok": True, "reason": "", "deferred_to_worker": True}
+    with tempfile.TemporaryDirectory(prefix="toanaas_video_local_logo_") as tmpdir:
+        path = os.path.join(tmpdir, file_name)
+        try:
+            telegram_file = await telegram_bot.get_file(str(current.get("file_id") or ""))
+            download_to_drive = getattr(telegram_file, "download_to_drive", None)
+            if callable(download_to_drive):
+                await download_to_drive(custom_path=path)
+            else:
+                data = bytes(await telegram_file.download_as_bytearray())
+                if len(data) > video_local_validation.MAX_LOGO_BYTES:
+                    return {"ok": False, "reason": "logo_size_invalid"}
+                with open(path, "wb") as handle:
+                    handle.write(data)
+        except Exception:
+            return {"ok": False, "reason": "logo_download_failed"}
+        return await asyncio.to_thread(
+            video_local_validation.validate_static_image_file,
+            path,
+            expected_filename=file_name,
+        )
+
+
 def count_active_video_local_jobs(user_id) -> int:
     conn = db_connect()
     try:
@@ -234289,20 +235254,13 @@ async def submit_video_edit_local_free_job(
             and str(existing_job.get("job_type") or "") == video_editengine1.WORKER_JOB_TYPE
             and str(existing_job.get("user_id") or "") == str(uid)
         ):
-            text = video_editor_job_status_text(existing_job, lang)
-            if query:
-                await safe_edit_or_send(
-                    query,
-                    text,
-                    parse_mode="HTML",
-                    reply_markup=video_editor_status_keyboard(existing_job_id, lang),
-                )
-            elif message:
-                await message.reply_text(
-                    text,
-                    parse_mode="HTML",
-                    reply_markup=video_editor_status_keyboard(existing_job_id, lang),
-                )
+            await show_video_editor_job_status_panel(
+                update,
+                context,
+                existing_job_id,
+                lang,
+                user_id=uid,
+            )
             return True
     review_revision = safe_int(state.get("review_revision"), 0)
     state_revision = safe_int(state.get("state_revision"), 0)
@@ -234355,7 +235313,8 @@ async def submit_video_edit_local_free_job(
     if not admission.get("ok"):
         text = (
             "⚠️ <b>Chưa thể bắt đầu chỉnh sửa video</b>\n\n"
-            "Bộ xử lý cục bộ chưa sẵn sàng. Hệ thống chưa tạo tác vụ và chưa trừ Xu."
+            f"• Lý do: <code>{html.escape(str(admission.get('reason') or 'local_edit_unavailable'))}</code>\n"
+            "TOAN AAS chưa tạo tác vụ và chưa trừ Xu."
         )
         if query:
             await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=video_local_manual_options_keyboard(lang, state))
@@ -234551,23 +235510,14 @@ async def submit_video_edit_local_free_job(
             )
         return True
     mark_video_editor_submission_committed()
-    text = (
-        "✅ <b>Đã nhận tác vụ chỉnh sửa cục bộ</b>\n\n"
-        "Hệ thống chỉ gửi MP4 sau khi bộ xử lý kiểm tra tệp hợp lệ.\n"
-        "Tác vụ này miễn phí: <b>0 Xu</b>. Không gọi dịch vụ bên ngoài và không trừ ví.\n\n"
-        f"• Mã xử lý: <code>#{job_id}</code>"
-    )
-
     try:
-        if query:
-            await safe_edit_or_send(
-                query,
-                text,
-                parse_mode="HTML",
-                reply_markup=video_editor_status_keyboard(job_id, lang),
-            )
-        elif message:
-            await message.reply_text(text, parse_mode="HTML", reply_markup=video_editor_status_keyboard(job_id, lang))
+        await show_video_editor_job_status_panel(
+            update,
+            context,
+            job_id,
+            lang,
+            user_id=uid,
+        )
     except Exception:
         logger.exception("video local-free confirmation UI failed")
         raise
@@ -234943,17 +235893,13 @@ async def submit_local_video_editor_job(
             )
         return True
     mark_video_editor_submission_committed()
-    text = (
-        "✅ <b>Đã nhận yêu cầu xử lý video</b>\n\n"
-        "Hệ thống đang chuẩn bị video và sẽ tự gửi kết quả MP4 sau khi kiểm tra hợp lệ. Chỉ sau khi Telegram nhận file và có biên nhận, hệ thống mới ghi phí.\n"
-        "Vui lòng không bấm lại nhiều lần.\n\n"
-        f"• Mã xử lý: <code>#{job_id}</code>\n"
-        f"• Giá đã xác nhận: <b>{price_xu} Xu</b>"
+    await show_video_editor_job_status_panel(
+        update,
+        context,
+        job_id,
+        lang,
+        user_id=uid,
     )
-    if query:
-        await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=video_editor_status_keyboard(job_id, lang))
-    else:
-        await message.reply_text(text, parse_mode="HTML", reply_markup=video_editor_status_keyboard(job_id, lang))
     return True
 
 
@@ -235502,12 +236448,13 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
         return True
     if step == "await_logo":
         logo_parent = video_local_logo_parent_callback(state)
+        logo_input_back = video_local_logo_input_back_callback(state)
         source = video_editor_aux_source_from_update(update, "logo")
         if not source.get("file_id"):
             await update.message.reply_text(
                 "⚠️ Vui lòng gửi logo PNG, JPG, JPEG hoặc WebP.",
                 reply_markup=video_local_input_keyboard(
-                    "manual", lang, back_callback=logo_parent
+                    "manual", lang, back_callback=logo_input_back
                 ),
             )
             return True
@@ -235515,12 +236462,34 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
             await update.message.reply_text(
                 "⚠️ Logo vượt 10 MB. Vui lòng gửi ảnh nhỏ hơn.",
                 reply_markup=video_local_input_keyboard(
-                    "manual", lang, back_callback=logo_parent
+                    "manual", lang, back_callback=logo_input_back
                 ),
             )
             return True
+        logo_validation = await inspect_video_editor_logo(context, source)
+        if not logo_validation.get("ok"):
+            await update.message.reply_text(
+                "⚠️ File Logo chưa phải ảnh PNG, JPG, JPEG hoặc WebP hợp lệ. "
+                "Hãy gửi lại đúng file ảnh; kế hoạch hiện tại vẫn được giữ.",
+                reply_markup=video_local_input_keyboard(
+                    "manual", lang, back_callback=logo_input_back
+                ),
+            )
+            return True
+        if not logo_validation.get("deferred_to_worker"):
+            source.update({
+                "detected_format": str(logo_validation.get("format") or ""),
+                "width": safe_int(logo_validation.get("width"), 0),
+                "height": safe_int(logo_validation.get("height"), 0),
+                "content_sha256": str(logo_validation.get("sha256") or ""),
+                "validated_bytes": safe_int(logo_validation.get("bytes"), 0),
+            })
         plan = dict(state.get("manual_edit_plan") or {})
-        plan["logo_overlay"] = {"position": "top_right", "scale": 0.12, "opacity": 1.0}
+        logo_overlay = dict(plan.get("logo_overlay") or {})
+        logo_overlay.setdefault("position", "top_right")
+        logo_overlay.setdefault("scale", 0.12)
+        logo_overlay.setdefault("opacity", 1.0)
+        plan["logo_overlay"] = logo_overlay
         update_video_editor_screen(
             uid,
             "logo_options",
@@ -235967,7 +236936,7 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
             parse_mode="HTML",
             reply_markup=video_scene3_keyboard([
                 [("📎 Tiếp tục gửi Logo ảnh", "videoedit|logo"), ("🏷️ Mở Watermark chữ", "videoedit|watermark_entry")],
-                [(ui_text(lang, "common.back"), video_local_logo_parent_callback(state)), (ui_text(lang, "common.main_menu"), "menu|main")],
+                [(ui_text(lang, "common.back"), video_local_logo_input_back_callback(state)), (ui_text(lang, "common.main_menu"), "menu|main")],
             ]),
         )
         return True
@@ -235985,7 +236954,7 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
                 reply_markup=video_local_input_keyboard(
                     "manual",
                     lang,
-                    back_callback=video_local_watermark_parent_callback(state),
+                    back_callback=video_local_watermark_input_back_callback(state),
                 ),
             )
             return True
@@ -236007,11 +236976,12 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
             )
             return True
         watermark_config = {
+            **dict(state.get("watermark_config") or {}),
             "enabled": True,
             "text": content,
-            "position": "bottom_right",
-            "opacity": 0.45,
         }
+        watermark_config.setdefault("position", "bottom_right")
+        watermark_config.setdefault("opacity", 0.45)
         plan = video_editor_plan_with_watermark(state, watermark_config)
         watermark_parent = video_local_watermark_parent_callback(state)
         current = update_video_editor_screen(
@@ -239442,10 +240412,133 @@ async def handle_video_editor_callback(
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     parts = str(callback_data_override or query.data or "").split("|")
+    if not video_editor_callback_arity_valid(parts):
+        await query.answer(
+            "Nút Chỉnh sửa video này không hợp lệ hoặc đã cũ. Phiên hiện tại được giữ nguyên.",
+            show_alert=True,
+        )
+        _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+        return True
     raw_action = parts[1] if len(parts) > 1 else "menu"
     callback_entry_state = video_editor_state_snapshot(
         get_video_editor_pending(uid)
     )
+    if (
+        str(callback_entry_state.get("current_screen") or callback_entry_state.get("step") or "")
+        == "job_status"
+    ):
+        callback_job_id = safe_int(parts[2] if len(parts) > 2 else 0, 0)
+        owned_job_id = safe_int(callback_entry_state.get("job_id"), 0)
+        if (
+            raw_action not in {"status", "ai_status", "status_hub", "status_menu"}
+            or callback_job_id <= 0
+            or callback_job_id != owned_job_id
+        ):
+            await query.answer(
+                "Nút này thuộc màn chỉnh sửa cũ. Job hiện tại và bảng tiến độ được giữ nguyên.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
+    if raw_action in {"status_hub", "status_menu"}:
+        job_id = safe_int(parts[2] if len(parts) > 2 else 0, 0)
+        binding = video_edit_progress_callback_binding(job_id, uid, query)
+        if not binding:
+            await query.answer(
+                "Nút điều hướng này không thuộc bảng tiến độ hiện tại. Job đang chạy được giữ nguyên.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
+        if callback_entry_state and (
+            str(callback_entry_state.get("step") or "").strip().lower()
+            != "job_status"
+            or safe_int(callback_entry_state.get("job_id"), 0) != job_id
+        ):
+            await query.answer(
+                "Nút điều hướng này thuộc job cũ. Phiên chỉnh sửa hiện tại được giữ nguyên.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
+        try:
+            if not video_edit_progress_read_status(job_id, user_id=uid):
+                await query.answer(
+                    "Không tìm thấy job Chỉnh sửa video thuộc tài khoản này.",
+                    show_alert=True,
+                )
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
+        except sqlite3.Error as exc:
+            logger.warning(
+                "videoedit status navigation lookup failed | error_type=%s",
+                type(exc).__name__,
+            )
+            await query.answer(
+                "Chưa mở được màn mới. Bảng tiến độ và job hiện tại được giữ nguyên.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
+        state_cleared = False
+        if callback_entry_state:
+            state_cleared, _winner = compare_and_replace_video_editor_pending(
+                uid,
+                callback_entry_state,
+                {},
+                expected_exists=True,
+                replacement_exists=False,
+            )
+            if not state_cleared:
+                await query.answer(
+                    "Phiên chỉnh sửa đã thay đổi. Màn hiện tại được giữ nguyên.",
+                    show_alert=True,
+                )
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
+        try:
+            if raw_action == "status_hub":
+                await query.message.reply_text(
+                    video_edit_hub_text(lang),
+                    parse_mode="HTML",
+                    reply_markup=video_edit_hub_keyboard(lang),
+                )
+            else:
+                await query.message.reply_text(
+                    localized_start_menu_text(uid, lang),
+                    parse_mode="HTML",
+                    reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang),
+                )
+        except Exception as exc:
+            if state_cleared:
+                restored, winner = compare_and_replace_video_editor_pending(
+                    uid,
+                    {},
+                    callback_entry_state,
+                    expected_exists=False,
+                    replacement_exists=True,
+                )
+                if not restored and not winner:
+                    logger.warning("videoedit status navigation state rollback failed")
+            logger.warning(
+                "videoedit status navigation render failed | error_type=%s",
+                type(exc).__name__,
+            )
+            await query.answer(
+                "Chưa mở được màn mới. Bảng tiến độ và job hiện tại được giữ nguyên.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
+        _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+        try:
+            await query.answer()
+        except Exception as exc:
+            logger.warning(
+                "videoedit status navigation callback answer skipped | error_type=%s",
+                type(exc).__name__,
+            )
+        return True
     if raw_action == "hub":
         def commit_hub_entry():
             compare_and_replace_video_editor_pending(
@@ -239524,7 +240617,7 @@ async def handle_video_editor_callback(
             "effects": "videoedit|effects",
             "workspace": "videoedit|workspace",
             "hub": "videoedit|hub",
-        }.get(caller, "videoedit|hub")
+        }[caller]
         return await safe_edit_or_send(
             query,
             video_edit_guide_text(lang),
@@ -239543,10 +240636,13 @@ async def handle_video_editor_callback(
         "subtitle", "srt", "preset", "text", "sharpen", "color", "brightness", "logo",
         "resolution", "volume",
     }
+    owned_compat_upload_action = bool(callback_entry_state) and (
+        legacy_raw_action in VIDEO_EDIT_COMPAT_UPLOAD_ACTIONS
+    )
     if (
         not get_video_editor_pending(uid)
         and action not in VIDEO_EDIT_STATELESS_ACTIONS
-        and legacy_raw_action not in VIDEO_EDIT_COMPAT_UPLOAD_ACTIONS
+        and not owned_compat_upload_action
     ):
         return await query.answer(
             "Phiên chỉnh sửa đã hết hạn. Hãy mở lại Chỉnh sửa video và gửi video nguồn.",
@@ -239559,38 +240655,12 @@ async def handle_video_editor_callback(
             show_alert=True,
         )
     if action == "latest_status":
-        try:
-            job = get_latest_video_editor_job(uid)
-            if (
-                not job
-                or str(job.get("user_id") or "") != str(uid)
-                or str(job.get("job_type") or "") != video_editengine1.WORKER_JOB_TYPE
-                or safe_int(job.get("id"), 0) <= 0
-            ):
-                return await safe_edit_or_send(
-                    query,
-                    video_editor_latest_status_empty_text(lang),
-                    parse_mode="HTML",
-                    reply_markup=video_editor_latest_status_fallback_keyboard(lang),
-                )
-            job_id = safe_int(job.get("id"), 0)
-            return await safe_edit_or_send(
-                query,
-                video_editor_job_status_text(job, lang),
-                parse_mode="HTML",
-                reply_markup=video_editor_status_keyboard(job_id, lang),
-            )
-        except sqlite3.Error as exc:
-            logger.warning(
-                "videoedit latest status lookup failed | error_type=%s",
-                type(exc).__name__,
-            )
-            return await safe_edit_or_send(
-                query,
-                video_editor_latest_status_unavailable_text(lang),
-                parse_mode="HTML",
-                reply_markup=video_editor_latest_status_fallback_keyboard(lang),
-            )
+        await query.answer(
+            "Nút Trạng thái chỉnh sửa chung đã được gỡ. Bảng tiến độ chỉ có trong từng job Chỉnh sửa video.",
+            show_alert=True,
+        )
+        _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+        return True
     if action == "audio_loudnorm":
         state = dict(get_video_editor_pending(uid) or {})
         current_plan = dict(state.get("manual_edit_plan") or {})
@@ -239964,40 +241034,109 @@ async def handle_video_editor_callback(
         )
     if action == "ai_status":
         job_id = safe_int(parts[2] if len(parts) > 2 else 0, 0)
+        binding = video_edit_progress_callback_binding(job_id, uid, query)
+        if not binding:
+            await query.answer(
+                "Nút cập nhật này không thuộc bảng tiến độ hiện tại.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
         try:
+            canonical_job = video_edit_progress_read_status(
+                job_id,
+                user_id=uid,
+            )
+            if canonical_job:
+                try:
+                    rendered = None
+                    try:
+                        rendered = await query.edit_message_text(
+                            video_editor_job_status_text(canonical_job, lang),
+                            parse_mode="HTML",
+                            reply_markup=video_editor_status_keyboard(job_id, lang),
+                        )
+                    except Exception as exc:
+                        if not video_edit_panel_not_modified(exc):
+                            raise
+                    if binding.get("restart_recovery"):
+                        snapshot = video_edit_progress_snapshot(
+                            str(job_id),
+                            user_id=uid,
+                            job=canonical_job,
+                            lang=lang,
+                        )
+                        if snapshot and not str(snapshot.get("terminal_state") or "").strip():
+                            progress_auto_refresh_register_message(
+                                query.message,
+                                context,
+                                product_type="video_edit",
+                                job_id=str(job_id),
+                                user_id=uid,
+                                lang=lang,
+                                initial_snapshot=snapshot,
+                            )
+                    await query.answer()
+                    _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                    return True
+                except Exception as exc:
+                    logger.warning(
+                        "videoedit exact ai status render failed | error_type=%s",
+                        type(exc).__name__,
+                    )
+                    await query.answer(
+                        "Chưa cập nhật được bảng hiện tại; hệ thống không tạo bảng mới.",
+                        show_alert=True,
+                    )
+                    _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                    return True
             job = get_local_worker_job_readonly(job_id)
             if (
                 not job
-                or (str(job.get("user_id") or "") != str(uid) and not is_admin_user(uid))
+                or str(job.get("user_id") or "") != str(uid)
             ):
-                return await query.answer("Không tìm thấy tác vụ chỉnh sửa video này.", show_alert=True)
+                await query.answer("Không tìm thấy tác vụ chỉnh sửa video này.", show_alert=True)
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
             job_type = str(job.get("job_type") or "")
-            if job_type == video_editengine1.WORKER_JOB_TYPE:
-                return await safe_edit_or_send(
-                    query,
-                    video_editor_job_status_text(job, lang),
-                    parse_mode="HTML",
-                    reply_markup=video_editor_status_keyboard(job_id, lang),
-                )
             if job_type != "video_ai_edit":
-                return await query.answer("Không tìm thấy tác vụ chỉnh sửa video này.", show_alert=True)
-            return await safe_edit_or_send(
-                query,
-                video_ai_edit_status.public_status_text(job, video_ai_edit_job_progress(job)),
-                parse_mode="HTML",
-                reply_markup=video_ai_edit_status_keyboard(job_id, lang),
-            )
+                await query.answer("Không tìm thấy tác vụ chỉnh sửa video này.", show_alert=True)
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
+            try:
+                await query.edit_message_text(
+                    video_ai_edit_status.public_status_text(
+                        job,
+                        video_ai_edit_job_progress(job),
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=video_ai_edit_status_keyboard(job_id, lang),
+                )
+                await query.answer()
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
+            except Exception as exc:
+                logger.warning(
+                    "videoedit legacy ai status render failed | error_type=%s",
+                    type(exc).__name__,
+                )
+                await query.answer(
+                    "Chưa cập nhật được bảng hiện tại; hệ thống không tạo bảng mới.",
+                    show_alert=True,
+                )
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
         except sqlite3.Error as exc:
             logger.warning(
                 "videoedit exact status refresh failed | error_type=%s",
                 type(exc).__name__,
             )
-            return await safe_edit_or_send(
-                query,
-                video_editor_latest_status_unavailable_text(lang),
-                parse_mode="HTML",
-                reply_markup=video_editor_latest_status_fallback_keyboard(lang),
+            await query.answer(
+                "Chưa đọc được trạng thái job này. Bảng tiến độ hiện tại được giữ nguyên.",
+                show_alert=True,
             )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
     VIDEO_EDIT_LEGACY_AI_CONTROL_ACTIONS = {
         "ai_settings", "ai_intensity", "ai_set_intensity", "ai_preserve", "ai_toggle",
         "ai_aspect", "ai_set_aspect", "ai_set_aspect_method", "ai_aspect_limits",
@@ -240369,31 +241508,73 @@ async def handle_video_editor_callback(
             )
     if action == "status":
         job_id = safe_int(parts[2] if len(parts) > 2 else 0, 0)
-        try:
-            job = get_local_worker_job_readonly(job_id)
-            if (
-                not job
-                or str(job.get("job_type") or "") != video_editengine1.WORKER_JOB_TYPE
-                or (str(job.get("user_id") or "") != str(uid) and not is_admin_user(uid))
-            ):
-                return await query.answer("Không tìm thấy job video này.", show_alert=True)
-            return await safe_edit_or_send(
-                query,
-                video_editor_job_status_text(job, lang),
-                parse_mode="HTML",
-                reply_markup=video_editor_status_keyboard(job_id, lang),
+        binding = video_edit_progress_callback_binding(job_id, uid, query)
+        if not binding:
+            await query.answer(
+                "Nút cập nhật này không thuộc bảng tiến độ hiện tại.",
+                show_alert=True,
             )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
+        try:
+            job = video_edit_progress_read_status(job_id, user_id=uid)
+            if not job:
+                await query.answer("Không tìm thấy job video này.", show_alert=True)
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
+            try:
+                rendered = None
+                try:
+                    rendered = await query.edit_message_text(
+                        video_editor_job_status_text(job, lang),
+                        parse_mode="HTML",
+                        reply_markup=video_editor_status_keyboard(job_id, lang),
+                    )
+                except Exception as exc:
+                    if not video_edit_panel_not_modified(exc):
+                        raise
+                if binding.get("restart_recovery"):
+                    snapshot = video_edit_progress_snapshot(
+                        str(job_id),
+                        user_id=uid,
+                        job=job,
+                        lang=lang,
+                    )
+                    if snapshot and not str(snapshot.get("terminal_state") or "").strip():
+                        progress_auto_refresh_register_message(
+                            query.message,
+                            context,
+                            product_type="video_edit",
+                            job_id=str(job_id),
+                            user_id=uid,
+                            lang=lang,
+                            initial_snapshot=snapshot,
+                        )
+                await query.answer()
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
+            except Exception as exc:
+                logger.warning(
+                    "videoedit exact status render failed | error_type=%s",
+                    type(exc).__name__,
+                )
+                await query.answer(
+                    "Chưa cập nhật được bảng hiện tại; hệ thống không tạo bảng mới.",
+                    show_alert=True,
+                )
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                return True
         except sqlite3.Error as exc:
             logger.warning(
                 "videoedit exact status refresh failed | error_type=%s",
                 type(exc).__name__,
             )
-            return await safe_edit_or_send(
-                query,
-                video_editor_latest_status_unavailable_text(lang),
-                parse_mode="HTML",
-                reply_markup=video_editor_latest_status_fallback_keyboard(lang),
+            await query.answer(
+                "Chưa đọc được trạng thái job này. Bảng tiến độ hiện tại được giữ nguyên.",
+                show_alert=True,
             )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
     if action == "quick":
         requested_action = str(parts[2] if len(parts) > 2 else "")
         if requested_action not in {"concat", "aspect", "compress", "audio", "subtitle"}:
@@ -241507,11 +242688,33 @@ async def handle_video_editor_callback(
             ),
         )
     if action == "watermark_text":
+        watermark_replace_owned = bool(
+            str(state.get("current_screen") or "") == "watermark_options"
+            and dict(state.get("watermark_config") or {}).get("enabled")
+        )
+        watermark_retry_owned = bool(
+            str(state.get("current_screen") or "") == "watermark_input"
+            and str(state.get("step") or "") == "await_watermark_text"
+            and str(state.get("pending_field") or "") == "watermark_text"
+        )
+        if not (watermark_replace_owned or watermark_retry_owned):
+            await query.answer(
+                "Nút sửa Watermark chữ đã cũ. Hãy mở lại Watermark chữ.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
         watermark_parent = video_local_watermark_parent_callback(state)
+        watermark_input_back = (
+            "videoedit|watermark_options"
+            if str(state.get("current_screen") or "") == "watermark_options"
+            and dict(state.get("watermark_config") or {}).get("enabled")
+            else watermark_parent
+        )
         update_video_editor_screen(
             uid,
             "watermark_input",
-            parent_callback=watermark_parent,
+            parent_callback=watermark_input_back,
             watermark_parent_callback=watermark_parent,
             state_step="await_watermark_text",
             pending_field="watermark_text",
@@ -241524,7 +242727,7 @@ async def handle_video_editor_callback(
             reply_markup=video_local_input_keyboard(
                 "manual",
                 lang,
-                back_callback=watermark_parent,
+                back_callback=watermark_input_back,
             ),
         )
     if action == "watermark_remove":
@@ -241629,11 +242832,33 @@ async def handle_video_editor_callback(
             ),
         )
     if action == "logo":
+        logo_replace_owned = bool(
+            str(state.get("current_screen") or "") == "logo_options"
+            and dict(state.get("logo_source") or {}).get("file_id")
+        )
+        logo_retry_owned = bool(
+            str(state.get("current_screen") or "") == "logo_input"
+            and str(state.get("step") or "") == "await_logo"
+            and str(state.get("pending_field") or "") == "logo"
+        )
+        if not (logo_replace_owned or logo_retry_owned):
+            await query.answer(
+                "Nút đổi Logo ảnh đã cũ. Hãy mở lại Logo ảnh.",
+                show_alert=True,
+            )
+            _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+            return True
         logo_parent = video_local_logo_parent_callback(state)
+        logo_input_back = (
+            "videoedit|logo_options"
+            if str(state.get("current_screen") or "") == "logo_options"
+            and dict(state.get("logo_source") or {}).get("file_id")
+            else logo_parent
+        )
         update_video_editor_screen(
             uid,
             "logo_input",
-            parent_callback=logo_parent,
+            parent_callback=logo_input_back,
             logo_parent_callback=logo_parent,
             state_step="await_logo",
             pending_field="logo",
@@ -241646,7 +242871,7 @@ async def handle_video_editor_callback(
             reply_markup=video_local_input_keyboard(
                 "manual",
                 lang,
-                back_callback=logo_parent,
+                back_callback=logo_input_back,
             ),
         )
     if action == "logo_remove":
@@ -242020,8 +243245,6 @@ async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_
     if await handle_caption_admin_tool_test_media(update, context):
         return
     if await handle_pending_admin_tool_test_media(update, context):
-        return
-    if await handle_video_editor_pending_upload(update, context):
         return
     if await handle_video_uiflow3_pending_media(update, context):
         return
@@ -244598,10 +245821,23 @@ def verify_local_worker_access(request: Request):
     auth = request.headers.get("authorization", "")
     bearer = auth.replace("Bearer ", "", 1).strip() if auth.lower().startswith("bearer ") else ""
     token = token or bearer
-    if not LOCAL_WORKER_TOKEN:
-        raise HTTPException(status_code=503, detail="LOCAL_WORKER_TOKEN is not configured")
-    if not token or not hmac.compare_digest(str(token), LOCAL_WORKER_TOKEN):
+    header_scope = str(request.headers.get("x-local-worker-job-scope") or "").strip().lower()
+    query_scope = str(request.query_params.get("job_scope") or "").strip().lower()
+    if header_scope and query_scope and header_scope != query_scope:
+        raise HTTPException(status_code=403, detail="worker job scope mismatch")
+    worker_scope = header_scope or query_scope or "all"
+    if worker_scope not in LOCAL_WORKER_JOB_SCOPES:
+        raise HTTPException(status_code=403, detail="worker job scope forbidden")
+    expected_token = (
+        VIDEO_EDIT_WORKER_TOKEN
+        if worker_scope == "video_edit_only"
+        else LOCAL_WORKER_TOKEN
+    )
+    if not expected_token:
+        raise HTTPException(status_code=503, detail="worker token is not configured")
+    if not token or not hmac.compare_digest(str(token), expected_token):
         raise HTTPException(status_code=401, detail="invalid worker token")
+    return worker_scope
 
 def verify_remote_worker_api_access(request: Request):
     result = worker_auth.verify_worker_bearer_token(
@@ -245050,43 +246286,48 @@ def remote_worker_status_snapshot() -> dict:
 
 @fastapi_app.post("/internal/worker/heartbeat")
 async def internal_worker_heartbeat(request: Request):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
     payload = await read_json_body(request)
+    payload_scope = str(payload.get("job_scope") or worker_scope).strip().lower()
+    if payload_scope != worker_scope or payload_scope not in LOCAL_WORKER_JOB_SCOPES:
+        raise HTTPException(status_code=403, detail="worker job scope mismatch")
     worker_id = str(payload.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
-    set_system_setting("local_worker:last_heartbeat", now_text(), "last local worker heartbeat", worker_id)
-    set_system_setting("local_worker:worker_id", worker_id, "last local worker id", worker_id)
     worker_sha = frame_video_public_seam.sanitize_frame_video_worker_sha(payload.get("worker_sha"))
-    set_system_setting(
-        "local_worker:worker_sha",
-        worker_sha,
-        "last local worker revision",
-        worker_id,
-    )
     worker_flags = frame_video_public_seam.normalize_frame_video_worker_flags(
         payload.get("frame_video_engine_flags")
     )
-    set_system_setting(
-        "local_worker:frame_video_engine_flags_json",
-        json.dumps(worker_flags, ensure_ascii=True, separators=(",", ":")),
-        "last local Frame engine flag snapshot",
-        worker_id,
-    )
     ffmpeg_path = str(payload.get("ffmpeg_path") or "")
-    set_system_setting(
-        "local_worker:ffmpeg_path_seen",
-        ffmpeg_path[:500],
-        "worker reported ffmpeg path",
-        worker_id,
-    )
     ffprobe_path = str(payload.get("ffprobe_path") or "")
-    set_system_setting(
-        "local_worker:ffprobe_configured",
-        "1" if ffprobe_path else "0",
-        "worker reported ffprobe availability",
-        worker_id,
-    )
+    if worker_scope == "all":
+        set_system_setting("local_worker:last_heartbeat", now_text(), "last local worker heartbeat", worker_id)
+        set_system_setting("local_worker:worker_id", worker_id, "last local worker id", worker_id)
+        set_system_setting("local_worker:job_scope", worker_scope, "last local worker job scope", worker_id)
+        set_system_setting(
+            "local_worker:worker_sha",
+            worker_sha,
+            "last local worker revision",
+            worker_id,
+        )
+        set_system_setting(
+            "local_worker:frame_video_engine_flags_json",
+            json.dumps(worker_flags, ensure_ascii=True, separators=(",", ":")),
+            "last local Frame engine flag snapshot",
+            worker_id,
+        )
+        set_system_setting(
+            "local_worker:ffmpeg_path_seen",
+            ffmpeg_path[:500],
+            "worker reported ffmpeg path",
+            worker_id,
+        )
+        set_system_setting(
+            "local_worker:ffprobe_configured",
+            "1" if ffprobe_path else "0",
+            "worker reported ffprobe availability",
+            worker_id,
+        )
     contract_version = max(0, safe_int(payload.get("heartbeat_contract_version"), 0))
-    if contract_version >= 1:
+    if contract_version >= 1 and worker_scope == "video_edit_only":
         received_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         capabilities = payload.get("capabilities") or []
         if not isinstance(capabilities, list):
@@ -245113,24 +246354,29 @@ async def internal_worker_heartbeat(request: Request):
         adapter_settings = {
             "local_worker:video_edit_received_at_utc": received_at_utc,
             "local_worker:video_edit_timestamp_utc": str(payload.get("timestamp_utc") or "")[:80],
-            "local_worker:worker_owner": str(payload.get("worker_owner") or "")[:120],
-            "local_worker:engine_route": str(payload.get("engine_route") or "")[:120],
-            "local_worker:capabilities_json": json.dumps(
+            "local_worker:video_edit_job_scope": worker_scope,
+            "local_worker:video_edit_worker_id": worker_id,
+            "local_worker:video_edit_worker_sha": worker_sha,
+            "local_worker:video_edit_ffmpeg_path_seen": ffmpeg_path[:500],
+            "local_worker:video_edit_ffprobe_configured": "1" if ffprobe_path else "0",
+            "local_worker:video_edit_worker_owner": str(payload.get("worker_owner") or "")[:120],
+            "local_worker:video_edit_engine_route": str(payload.get("engine_route") or "")[:120],
+            "local_worker:video_edit_capabilities_json": json.dumps(
                 [str(item)[:120] for item in capabilities if str(item).strip()],
                 ensure_ascii=False,
             ),
-            "local_worker:instance_id": str(payload.get("instance_id") or "")[:180],
-            "local_worker:process_id": str(max(0, safe_int(payload.get("process_id"), 0))),
-            "local_worker:queue_depth": str(max(0, safe_int(payload.get("queue_depth"), 0))),
-            "local_worker:last_error": str(payload.get("last_error") or "")[:500],
-            "local_worker:heartbeat_contract_version": str(contract_version),
-            "local_worker:started_at_utc": str(payload.get("started_at_utc") or "")[:80],
+            "local_worker:video_edit_instance_id": str(payload.get("instance_id") or "")[:180],
+            "local_worker:video_edit_process_id": str(max(0, safe_int(payload.get("process_id"), 0))),
+            "local_worker:video_edit_queue_depth": str(max(0, safe_int(payload.get("queue_depth"), 0))),
+            "local_worker:video_edit_last_error": str(payload.get("last_error") or "")[:500],
+            "local_worker:video_edit_heartbeat_contract_version": str(contract_version),
+            "local_worker:video_edit_started_at_utc": str(payload.get("started_at_utc") or "")[:80],
             "local_worker:video_edit_filters_json": json.dumps(safe_filters, ensure_ascii=True, separators=(",", ":")),
             "local_worker:video_edit_filters_known": "1" if bool(payload.get("video_edit_filters_known")) else "0",
             "local_worker:video_edit_filter_worker_id": str(payload.get("video_edit_filter_worker_id") or "")[:120],
             "local_worker:video_edit_filter_ffmpeg_path": str(payload.get("video_edit_filter_ffmpeg_path") or "")[:500],
-            "local_worker:workspace_ready": "1" if payload.get("workspace_ready") is True else "0",
-            "local_worker:workspace_free_bytes": str(
+            "local_worker:video_edit_workspace_ready": "1" if payload.get("workspace_ready") is True else "0",
+            "local_worker:video_edit_workspace_free_bytes": str(
                 heartbeat_nonnegative_int("workspace_free_bytes", (1 << 63) - 1)
             ),
             "local_worker:video_edit_max_deadline_seconds": str(
@@ -245139,8 +246385,8 @@ async def internal_worker_heartbeat(request: Request):
                     6 * 60 * 60,
                 )
             ),
-            "local_worker:worker_token_ready": "1" if payload.get("worker_token_ready") is True else "0",
-            "local_worker:local_bot_api_ready": "1" if payload.get("local_bot_api_ready") is True else "0",
+            "local_worker:video_edit_worker_token_ready": "1" if payload.get("worker_token_ready") is True else "0",
+            "local_worker:video_edit_local_bot_api_ready": "1" if payload.get("local_bot_api_ready") is True else "0",
         }
         for key, value in adapter_settings.items():
             set_system_setting(key, value, "video edit worker heartbeat contract", worker_id)
@@ -245153,7 +246399,7 @@ async def internal_worker_heartbeat(request: Request):
 
 @fastapi_app.get("/internal/worker/poll")
 async def internal_worker_poll(request: Request):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
     worker_id = str(request.query_params.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
     worker_instance_id = str(request.query_params.get("worker_instance_id") or "")[:120]
     video_edit_resume_version = str(
@@ -245173,20 +246419,31 @@ async def internal_worker_poll(request: Request):
             ),
         ),
     )
-    set_system_setting("local_worker:last_heartbeat", now_text(), "poll heartbeat", worker_id)
-    set_system_setting("local_worker:worker_id", worker_id, "last local worker id", worker_id)
+    if worker_scope == "all":
+        set_system_setting("local_worker:last_heartbeat", now_text(), "poll heartbeat", worker_id)
+        set_system_setting("local_worker:worker_id", worker_id, "last local worker id", worker_id)
+        set_system_setting("local_worker:job_scope", worker_scope, "poll worker job scope", worker_id)
+    else:
+        set_system_setting(
+            "local_worker:video_edit_poll_job_scope",
+            worker_scope,
+            "video edit poll worker job scope",
+            worker_id,
+        )
     if not LOCAL_WORKER_ENABLED or not LOCAL_WORKER_POLL_ENABLED:
         return {"ok": True, "enabled": LOCAL_WORKER_ENABLED, "poll_enabled": LOCAL_WORKER_POLL_ENABLED, "job": None}
     conn = db_connect()
     try:
         claim_now = now_text()
-        canonical_job = video_editengine1.claim_next_video_local_edit(
-            conn,
-            lease_owner=worker_instance_id,
-            now=claim_now,
-            lease_seconds=lease_seconds,
-            supports_receipt_prefix_resume=supports_video_edit_receipt_prefix_resume,
-        )
+        canonical_job = {}
+        if worker_scope == "video_edit_only":
+            canonical_job = video_editengine1.claim_next_video_local_edit(
+                conn,
+                lease_owner=worker_instance_id,
+                now=claim_now,
+                lease_seconds=lease_seconds,
+                supports_receipt_prefix_resume=supports_video_edit_receipt_prefix_resume,
+            )
         if canonical_job:
             conn.commit()
             return {
@@ -245196,6 +246453,9 @@ async def internal_worker_poll(request: Request):
                 "max_job_seconds": LOCAL_WORKER_MAX_JOB_SECONDS,
                 "job": canonical_job,
             }
+        if worker_scope == "video_edit_only":
+            conn.commit()
+            return {"ok": True, "enabled": True, "poll_enabled": True, "job": None}
         c = conn.cursor()
         c.execute(
             """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
@@ -245255,7 +246515,9 @@ async def internal_worker_poll(request: Request):
 
 @fastapi_app.post("/internal/worker/video_edit_cleanup/claim")
 async def internal_worker_video_edit_cleanup_claim(request: Request):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
+    if worker_scope != "video_edit_only":
+        raise HTTPException(status_code=403, detail="worker job scope forbidden")
     payload = await read_json_body(request)
     job_id = payload.get("job_id")
     delivery_owner = payload.get("delivery_owner")
@@ -245317,7 +246579,9 @@ async def internal_worker_video_edit_cleanup_claim(request: Request):
 
 @fastapi_app.post("/internal/worker/video_edit_cleanup/result")
 async def internal_worker_video_edit_cleanup_result(request: Request):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
+    if worker_scope != "video_edit_only":
+        raise HTTPException(status_code=403, detail="worker job scope forbidden")
     payload = await read_json_body(request)
     job_id = payload.get("job_id")
     delivery_owner = payload.get("delivery_owner")
@@ -245384,7 +246648,9 @@ async def internal_worker_video_edit_cleanup_result(request: Request):
 
 @fastapi_app.get("/internal/video_worker/poll")
 async def internal_video_worker_poll(request: Request):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
+    if worker_scope != "all":
+        raise HTTPException(status_code=403, detail="worker job scope forbidden")
     worker_id = str(request.query_params.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
     lease_seconds = max(30, min(3600, int(request.query_params.get("lease_seconds") or LOCAL_WORKER_MAX_JOB_SECONDS or 600)))
     set_system_setting("local_worker:last_heartbeat", now_text(), "video project poll heartbeat", worker_id)
@@ -245407,7 +246673,7 @@ async def internal_video_worker_poll(request: Request):
 
 @fastapi_app.post("/internal/worker/job_update")
 async def internal_worker_job_update(request: Request):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
     payload = await read_json_body(request)
     job_id = payload.get("id") or payload.get("job_id")
     if not job_id:
@@ -245418,6 +246684,12 @@ async def internal_worker_job_update(request: Request):
     video_edit_payload_limit = 128 * 1024
     previous_job_type = str((previous_job or {}).get("job_type") or "")
     is_video_edit = previous_job_type == video_editengine1.WORKER_JOB_TYPE
+    if (
+        worker_scope == "video_edit_only" and not is_video_edit
+    ) or (
+        worker_scope == "all" and is_video_edit
+    ):
+        raise HTTPException(status_code=403, detail="worker job scope forbidden")
     is_frame_video = previous_job_type == "frame_video_render"
     job = None
     if is_video_edit:
@@ -245769,7 +247041,9 @@ async def internal_worker_job_update(request: Request):
 
 @fastapi_app.post("/internal/video_worker/job_update")
 async def internal_video_worker_job_update(request: Request):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
+    if worker_scope != "all":
+        raise HTTPException(status_code=403, detail="worker job scope forbidden")
     payload = await read_json_body(request)
     job_id = payload.get("id") or payload.get("job_id")
     if not job_id:
@@ -245821,7 +247095,9 @@ async def internal_video_worker_job_update(request: Request):
 
 @fastapi_app.post("/internal/worker/upload_result")
 async def internal_worker_upload_result(request: Request, job_id: str = Form(default=""), file: UploadFile | None = File(default=None)):
-    verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request)
+    if worker_scope != "all":
+        raise HTTPException(status_code=403, detail="worker job scope forbidden")
     if not job_id:
         raise HTTPException(status_code=400, detail="job_id required")
     if not file:

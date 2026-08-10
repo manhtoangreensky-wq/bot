@@ -329,12 +329,14 @@ def test_worker_contract_reports_exact_blocker(overrides: dict, reason: str) -> 
     assert result["reason"] == reason
 
 
-def test_worker_heartbeat_payload_registers_exact_adapter_contract() -> None:
+def test_worker_heartbeat_payload_registers_exact_adapter_contract(monkeypatch) -> None:
+    monkeypatch.setattr(local_worker, "LOCAL_WORKER_JOB_SCOPE", "all")
     payload = local_worker.local_worker_heartbeat_payload(last_error="", queue_depth=2)
     assert payload["heartbeat_contract_version"] == 1
     assert payload["worker_owner"] == "local_video_edit"
     assert payload["engine_route"] == "local_worker_ffmpeg"
-    assert payload["capabilities"] == ["video_edit", "frame_video_render"]
+    assert payload["job_scope"] == "all"
+    assert payload["capabilities"] == ["frame_video_render"]
     assert payload["instance_id"]
     assert payload["process_id"] > 0
     assert payload["timestamp_utc"].endswith("Z")
@@ -531,8 +533,15 @@ def test_worker_dispatch_supports_each_advertised_video_capability(monkeypatch) 
         lambda job: dispatched.append(("edit", str(job["id"]))),
     )
 
+    monkeypatch.setattr(local_worker, "LOCAL_WORKER_JOB_SCOPE", "all")
     local_worker.process_job({"id": "frame-1", "job_type": "frame_video_render"})
+    with pytest.raises(local_worker.LocalVideoEditError, match="worker_scope_job_type_forbidden"):
+        local_worker.process_job({"id": "edit-all", "job_type": "video_local_edit"})
+
+    monkeypatch.setattr(local_worker, "LOCAL_WORKER_JOB_SCOPE", "video_edit_only")
     local_worker.process_job({"id": "edit-1", "job_type": "video_local_edit"})
+    with pytest.raises(local_worker.LocalVideoEditError, match="worker_scope_job_type_forbidden"):
+        local_worker.process_job({"id": "frame-edit", "job_type": "frame_video_render"})
 
     assert dispatched == [("frame", "frame-1"), ("edit", "edit-1")]
 
@@ -690,15 +699,16 @@ def test_contract_heartbeat_overwrites_stale_capacity_and_ffmpeg_truth(
     monkeypatch,
 ) -> None:
     settings = {
-        "local_worker:ffmpeg_path_seen": "C:/stale/ffmpeg.exe",
-        "local_worker:workspace_ready": "1",
-        "local_worker:workspace_free_bytes": "999999999",
+        "local_worker:video_edit_ffmpeg_path_seen": "C:/stale/ffmpeg.exe",
+        "local_worker:video_edit_workspace_ready": "1",
+        "local_worker:video_edit_workspace_free_bytes": "999999999",
         "local_worker:video_edit_max_deadline_seconds": "21600",
-        "local_worker:worker_token_ready": "1",
-        "local_worker:local_bot_api_ready": "1",
+        "local_worker:video_edit_worker_token_ready": "1",
+        "local_worker:video_edit_local_bot_api_ready": "1",
     }
     payload = {
         "heartbeat_contract_version": 1,
+        "job_scope": "video_edit_only",
         "worker_id": "capacity-worker",
         "ffmpeg_path": "",
         "workspace_ready": False,
@@ -714,7 +724,11 @@ def test_contract_heartbeat_overwrites_stale_capacity_and_ffmpeg_truth(
     def save_setting(key, value, *_args, **_kwargs):
         settings[str(key)] = str(value)
 
-    monkeypatch.setattr(bot, "verify_local_worker_access", lambda _request: None)
+    monkeypatch.setattr(
+        bot,
+        "verify_local_worker_access",
+        lambda _request: "video_edit_only",
+    )
     monkeypatch.setattr(bot, "read_json_body", read_body)
     monkeypatch.setattr(bot, "set_system_setting", save_setting)
 
@@ -723,12 +737,12 @@ def test_contract_heartbeat_overwrites_stale_capacity_and_ffmpeg_truth(
     )
 
     assert result["ok"] is True
-    assert settings["local_worker:ffmpeg_path_seen"] == ""
-    assert settings["local_worker:workspace_ready"] == "0"
-    assert settings["local_worker:workspace_free_bytes"] == "0"
+    assert settings["local_worker:video_edit_ffmpeg_path_seen"] == ""
+    assert settings["local_worker:video_edit_workspace_ready"] == "0"
+    assert settings["local_worker:video_edit_workspace_free_bytes"] == "0"
     assert settings["local_worker:video_edit_max_deadline_seconds"] == "0"
-    assert settings["local_worker:worker_token_ready"] == "0"
-    assert settings["local_worker:local_bot_api_ready"] == "0"
+    assert settings["local_worker:video_edit_worker_token_ready"] == "0"
+    assert settings["local_worker:video_edit_local_bot_api_ready"] == "0"
 
 
 def test_worker_status_projects_capacity_settings_as_strict_sanitized_types(
@@ -736,14 +750,24 @@ def test_worker_status_projects_capacity_settings_as_strict_sanitized_types(
 ) -> None:
     settings = {
         "local_worker:video_edit_received_at_utc": "fresh",
-        "local_worker:heartbeat_contract_version": "1",
-        "local_worker:workspace_ready": "1",
-        "local_worker:workspace_free_bytes": "987654321",
+        "local_worker:video_edit_job_scope": "video_edit_only",
+        "local_worker:video_edit_worker_id": "capacity-worker",
+        "local_worker:video_edit_heartbeat_contract_version": "1",
+        "local_worker:video_edit_workspace_ready": "1",
+        "local_worker:video_edit_workspace_free_bytes": "987654321",
         "local_worker:video_edit_max_deadline_seconds": "3600",
-        "local_worker:worker_token_ready": "1",
-        "local_worker:local_bot_api_ready": "0",
+        "local_worker:video_edit_worker_token_ready": "1",
+        "local_worker:video_edit_local_bot_api_ready": "0",
     }
-    monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {})
+    monkeypatch.setattr(
+        bot,
+        "local_worker_status_payload",
+        lambda: {
+            "job_counts": {"generic": 9},
+            "frame_video_engine_flags": {"generic": True},
+            "ffmpeg_test_status": "GENERIC",
+        },
+    )
     monkeypatch.setattr(
         bot,
         "get_system_setting",
@@ -764,3 +788,6 @@ def test_worker_status_projects_capacity_settings_as_strict_sanitized_types(
     assert status["video_edit_max_deadline_seconds"] == 3_600
     assert status["worker_token_ready"] is True
     assert status["local_bot_api_ready"] is False
+    assert "job_counts" not in status
+    assert "frame_video_engine_flags" not in status
+    assert "ffmpeg_test_status" not in status

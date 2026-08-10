@@ -17,6 +17,8 @@ from types import SimpleNamespace
 
 import pytest
 
+import local_worker
+
 from services import (
     video_edit_capabilities,
     video_edit_media_transport,
@@ -822,6 +824,7 @@ def test_waiting_lane_reentry_rerenders_the_same_upload_screen() -> None:
             "get_video_editor_pending": lambda _uid: deepcopy(current_state),
             "video_edit_state_machine": video_edit_state_machine,
             "video_editor_normalize_action": lambda value: value,
+            "video_editor_callback_arity_valid": lambda _parts: True,
             "video_editor_split_callback_allowed": VIDEO_EDITOR_SPLIT_CALLBACK_ALLOWED,
             "video_editor_state_snapshot": lambda value: deepcopy(dict(value or {})),
             "safe_edit_or_send": render,
@@ -868,6 +871,7 @@ def test_hub_entry_does_not_clear_any_video_state_before_telegram_render_succeed
             "get_video_editor_pending": lambda _uid: {},
             "video_edit_state_machine": video_edit_state_machine,
             "video_editor_normalize_action": lambda value: value,
+            "video_editor_callback_arity_valid": lambda _parts: True,
             "video_editor_split_callback_allowed": VIDEO_EDITOR_SPLIT_CALLBACK_ALLOWED,
             "video_editor_state_snapshot": lambda value: deepcopy(dict(value or {})),
             "clear_video_editor_competing_video_states": lambda *_args: events.append("clear-competing"),
@@ -911,6 +915,7 @@ def test_lane_entry_commits_state_only_after_telegram_render(callback: str, edit
             "get_video_editor_pending": lambda _uid: {},
             "video_edit_state_machine": video_edit_state_machine,
             "video_editor_normalize_action": lambda value: value,
+            "video_editor_callback_arity_valid": lambda _parts: True,
             "video_editor_split_callback_allowed": VIDEO_EDITOR_SPLIT_CALLBACK_ALLOWED,
             "video_editor_state_snapshot": lambda value: deepcopy(dict(value or {})),
             "clear_video_editor_competing_video_states": lambda *_args: events.append("clear-competing"),
@@ -1121,12 +1126,15 @@ def test_runtime_capability_ui_requires_fresh_matching_worker_snapshot() -> None
     admission = _function_source("video_edit_runtime_capability_admission")
     status = _function_source("video_edit_worker_status_payload")
     assert 'worker.get("connected")' in admission
+    assert 'worker.get("job_scope")' in admission
     assert 'worker.get("worker_owner")' in admission
     assert 'worker.get("engine_route")' in admission
     assert 'worker.get("worker_id")' in admission
     assert 'worker.get("video_edit_filter_worker_id")' in admission
     assert "local_worker_filter_snapshot_owner_mismatch" in admission
-    assert 'get_system_setting("local_worker:ffmpeg_path_seen"' in status
+    assert '"local_worker:video_edit_ffmpeg_path_seen"' in status
+    assert '"local_worker:video_edit_job_scope"' in status
+    assert '"local_worker:video_edit_worker_id"' in status
     assert '"ffmpeg_path": reported_ffmpeg_path' in status
 
     heartbeat = _function_source("internal_worker_heartbeat")
@@ -1146,6 +1154,7 @@ def test_runtime_capability_ui_fails_closed_on_worker_identity_or_heartbeat() ->
         "ffprobe_path_configured": True,
         "heartbeat_contract_version": 1,
         "heartbeat_age_seconds": 1,
+        "job_scope": "video_edit_only",
         "worker_id": "video-edit-worker-1",
         "worker_owner": video_editengine1.OUTBOX_OWNER,
         "engine_route": video_editengine1.ENGINE_ROUTE,
@@ -1171,6 +1180,7 @@ def test_runtime_capability_ui_fails_closed_on_worker_identity_or_heartbeat() ->
     blockers = (
         ({"connected": False}, "local_worker_heartbeat_stale"),
         ({"heartbeat_contract_version": 0}, "local_worker_contract_missing"),
+        ({"job_scope": "all"}, "local_worker_job_scope_mismatch"),
         ({"heartbeat_age_seconds": video_editengine1.HEARTBEAT_TTL_SECONDS + 1}, "local_worker_heartbeat_stale"),
         ({"worker_owner": "another-product"}, "local_worker_owner_mismatch"),
         ({"engine_route": "provider-route"}, "local_worker_route_mismatch"),
@@ -1185,7 +1195,7 @@ def test_runtime_capability_ui_fails_closed_on_worker_identity_or_heartbeat() ->
         assert result["reason"] == reason
 
 
-def test_local_confirmation_and_status_back_targets_stay_in_videoedit_namespace() -> None:
+def test_local_confirmation_and_job_status_navigation_stay_in_videoedit_namespace() -> None:
     review = _function_source("video_local_review_keyboard")
     confirmation = _function_source("video_local_confirmation_keyboard")
     confirmation_text = _function_source("video_local_confirmation_text")
@@ -1197,7 +1207,10 @@ def test_local_confirmation_and_status_back_targets_stay_in_videoedit_namespace(
     assert "video_edit_state_machine.confirmation_token" in confirmation
     assert '"videoedit|review"' in confirmation
     assert "videoedit|options|" not in confirmation
-    assert 'callback_data="videoedit|hub"' in status
+    assert 'callback_data=f"videoedit|status_hub|{int(job_id)}"' in status
+    assert 'callback_data=f"videoedit|status_menu|{int(job_id)}"' in status
+    assert 'callback_data="videoedit|hub"' not in status
+    assert 'callback_data="menu|main"' not in status
     assert "quyền sử dụng" in confirmation_text.lower()
     assert "logo" in confirmation_text.lower()
     assert "âm thanh" in confirmation_text.lower()
@@ -1285,7 +1298,7 @@ def test_local_submit_requires_the_final_confirmation_screen() -> None:
     assert confirm_block.index("confirmation_token") < confirm_block.index("submit_video_edit_local_free_job")
 
 
-def test_latest_and_legacy_status_actions_are_stateless_read_only_owned_refreshes() -> None:
+def test_detached_and_job_bound_status_actions_are_stateless_owned_refreshes() -> None:
     callback = _function_source("handle_video_editor_callback")
     stateless_start = callback.index("VIDEO_EDIT_STATELESS_ACTIONS = {")
     stateless_end = callback.index("VIDEO_EDIT_COMPAT_UPLOAD_ACTIONS", stateless_start)
@@ -1296,10 +1309,11 @@ def test_latest_and_legacy_status_actions_are_stateless_read_only_owned_refreshe
     latest_start = callback.index('if action == "latest_status":')
     latest_end = callback.index("\n    if ", latest_start + 1)
     latest_block = callback[latest_start:latest_end]
-    assert "get_latest_video_editor_job(uid)" in latest_block
-    assert "video_editor_job_status_text(job, lang)" in latest_block
-    assert "video_editor_status_keyboard(job_id, lang)" in latest_block
-    assert "video_editor_latest_status_fallback_keyboard(lang)" in latest_block
+    assert "query.answer" in latest_block
+    assert "show_alert=True" in latest_block
+    assert "get_latest_video_editor_job" not in latest_block
+    assert "video_editor_job_status_text" not in latest_block
+    assert "safe_edit_or_send" not in latest_block
     assert "set_video_editor_pending" not in latest_block
     assert "update_video_editor_pending" not in latest_block
     assert "submit_video_edit" not in latest_block
@@ -1307,23 +1321,31 @@ def test_latest_and_legacy_status_actions_are_stateless_read_only_owned_refreshe
     status_start = callback.index('if action == "status":')
     status_end = callback.index('if action == "quick":', status_start)
     status_block = callback[status_start:status_end]
-    assert "get_local_worker_job_readonly(job_id)" in status_block
+    assert "video_edit_progress_callback_binding(job_id, uid, query)" in status_block
+    assert "video_edit_progress_read_status(job_id, user_id=uid)" in status_block
+    assert "owner_user_id = 0 if is_admin_user(uid) else uid" not in status_block
+    assert "get_local_worker_job_readonly(job_id)" not in status_block
     assert "except sqlite3.Error" in status_block
-    assert "video_editor_latest_status_unavailable_text(lang)" in status_block
-    assert "str(job.get(\"user_id\") or \"\") != str(uid) and not is_admin_user(uid)" in status_block
+    assert "query.edit_message_text" in status_block
+    assert "video_editor_latest_status_unavailable_text(lang)" not in status_block
     assert "set_video_editor_pending" not in status_block
     assert "submit_video_edit" not in status_block
 
     start = callback.index('if action == "ai_status":')
     end = callback.index('if action.startswith("ai_"):', start)
     ai_status_block = callback[start:end]
+    assert "video_edit_progress_callback_binding(job_id, uid, query)" in ai_status_block
+    assert "owner_user_id = 0 if is_admin_user(uid) else uid" not in ai_status_block
+    assert "video_edit_progress_read_status(" in ai_status_block
+    assert "user_id=uid" in ai_status_block
     assert "get_local_worker_job_readonly(job_id)" in ai_status_block
     assert "except sqlite3.Error" in ai_status_block
-    assert "video_editor_latest_status_unavailable_text(lang)" in ai_status_block
-    assert "video_editengine1.WORKER_JOB_TYPE" in ai_status_block
-    assert "video_editor_job_status_text(job, lang)" in ai_status_block
+    assert "video_editor_latest_status_unavailable_text(lang)" not in ai_status_block
+    assert 'job_type != "video_ai_edit"' in ai_status_block
+    assert "video_editor_job_status_text(canonical_job, lang)" in ai_status_block
     assert "video_editor_status_keyboard(job_id, lang)" in ai_status_block
-    assert "str(job.get(\"user_id\") or \"\") != str(uid) and not is_admin_user(uid)" in ai_status_block
+    assert "str(job.get(\"user_id\") or \"\") != str(uid)" in ai_status_block
+    assert "not is_admin_user(uid)" not in ai_status_block
     assert "create_job(" not in ai_status_block
     assert "set_video_editor_pending" not in ai_status_block
     assert "submit_video_edit" not in ai_status_block
@@ -1631,7 +1653,7 @@ def test_local_free_job_status_commits_before_callback_answer() -> None:
     submit = _function_source("submit_video_edit_local_free_job")
     commit_start = submit.rindex("committed, winner = finish_video_editor_submission(")
     marker_start = submit.index("mark_video_editor_submission_committed()", commit_start)
-    render_start = submit.index("await safe_edit_or_send(", marker_start)
+    render_start = submit.index("await show_video_editor_job_status_panel(", marker_start)
     commit_block = submit[commit_start:marker_start]
 
     assert "committed, winner = finish_video_editor_submission(" in commit_block
@@ -1956,7 +1978,11 @@ def test_local_status_rejects_non_video_edit_worker_jobs() -> None:
     status_start = callback.index('if action == "status":')
     status_end = callback.index('if action == "quick":', status_start)
     status_block = callback[status_start:status_end]
-    assert 'str(job.get("job_type") or "") != video_editengine1.WORKER_JOB_TYPE' in status_block
+    assert "video_edit_progress_callback_binding(job_id, uid, query)" in status_block
+    assert "video_edit_progress_read_status(job_id, user_id=uid)" in status_block
+    adapter = _function_source("video_edit_progress_read_status")
+    assert 'str(worker_job.get("job_type") or "") != video_editengine1.WORKER_JOB_TYPE' in adapter
+    assert 'str(canonical.get("product_type") or "") != video_editengine1.PRODUCT_TYPE' in adapter
 
 
 def test_source_info_back_resolves_quality_and_assistant_parents() -> None:
@@ -2119,7 +2145,7 @@ def test_videoedit_submit_paths_mark_irreversible_job_before_ui_render() -> None
 
     local_free = _function_source("submit_video_edit_local_free_job")
     commit = local_free.rindex("finish_video_editor_submission(")
-    render = local_free.index("await safe_edit_or_send(", commit)
+    render = local_free.index("await show_video_editor_job_status_panel(", commit)
     assert commit < render
     assert "post_render=commit_job_status" not in local_free
 
@@ -2210,9 +2236,15 @@ def _init_job_db(path: Path) -> None:
                 status TEXT,
                 provider TEXT,
                 input_file_id TEXT,
+                output_file_id TEXT,
+                output_url TEXT,
+                error_short TEXT,
                 created_at TEXT,
+                started_at TEXT,
+                finished_at TEXT,
                 xu_cost INTEGER,
                 admin_only INTEGER,
+                worker_id TEXT,
                 updated_at TEXT
             )"""
         )
@@ -2264,6 +2296,15 @@ def _submit_namespace(db_path: Path, saved: dict) -> dict:
         return deepcopy(dict(value or {}))
 
     last_submit_user_id = {"value": ""}
+
+    def worker_job(job_id):
+        return {
+            "id": int(job_id),
+            "user_id": last_submit_user_id["value"] or "905",
+            "job_type": video_editengine1.WORKER_JOB_TYPE,
+            "status": "queued",
+            "xu_cost": 0,
+        }
 
     class VideoEditorStateCommitError(RuntimeError):
         def __init__(self, reason: str, winner: dict | None = None) -> None:
@@ -2324,6 +2365,25 @@ def _submit_namespace(db_path: Path, saved: dict) -> dict:
             post_render()
         return result
 
+    async def show_status_panel(update, context, job_id, lang, *, user_id=0, job=None):
+        query = getattr(update, "callback_query", None)
+        message = getattr(update, "message", None) or getattr(query, "message", None)
+        panel_job = dict(job or worker_job(job_id) or {"id": int(job_id)})
+        text = namespace_status_text(panel_job, lang)
+        markup = f"status:{int(job_id)}"
+        if query:
+            await namespace["safe_edit_or_send"](
+                query,
+                text,
+                parse_mode="HTML",
+                reply_markup=markup,
+            )
+        elif message:
+            await message.reply_text(text, parse_mode="HTML", reply_markup=markup)
+        return True
+
+    namespace_status_text = lambda job, _lang: f"Trạng thái tác vụ #{job['id']} · 0 Xu"
+
     namespace = {
         "get_user_language": lambda _uid: "vi",
         "html": html,
@@ -2346,6 +2406,7 @@ def _submit_namespace(db_path: Path, saved: dict) -> dict:
         "time": time,
         "safe_edit_or_send": render,
         "video_editor_status_keyboard": lambda job_id, _lang: f"status:{job_id}",
+        "show_video_editor_job_status_panel": show_status_panel,
         "video_editor_state_snapshot": snapshot,
         "begin_video_editor_submission": begin_submission,
         "finish_video_editor_submission": finish_submission,
@@ -2353,13 +2414,7 @@ def _submit_namespace(db_path: Path, saved: dict) -> dict:
         "VideoEditorStateCommitError": VideoEditorStateCommitError,
         "rerender_video_editor_after_stale_commit": rerender_after_stale_commit,
         "video_tail9_quality_keyboard": lambda *_args, **_kwargs: "quality-keyboard",
-        "get_local_worker_job": lambda job_id: {
-            "id": int(job_id),
-            "user_id": last_submit_user_id["value"] or "905",
-            "job_type": video_editengine1.WORKER_JOB_TYPE,
-            "status": "queued",
-            "xu_cost": 0,
-        },
+        "get_local_worker_job": worker_job,
         "video_editor_job_status_text": lambda job, _lang: f"Trạng thái tác vụ #{job['id']} · 0 Xu",
         "video_local_manual_options_keyboard": lambda *_args, **_kwargs: "workspace-keyboard",
         "video_edit_lane_upload_keyboard": lambda *_args: "upload-keyboard",
@@ -2533,7 +2588,10 @@ def test_video_edit_submit_inspection_evidence_fails_closed_for_invalid_evidence
     assert "source_sha256" not in evidence, case
 
 
-def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_path: Path) -> None:
+def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     db_path = tmp_path / "videoedit.sqlite3"
     _init_job_db(db_path)
     saved: dict = {}
@@ -2603,8 +2661,16 @@ def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_
     try:
         assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM video_edit_outbox").fetchone()[0] == 1
         payload = json.loads(conn.execute("SELECT input_file_id FROM local_worker_jobs").fetchone()[0])
         canonical = conn.execute("SELECT quality_tier_id,price_xu,tail_json FROM video_edit_jobs").fetchone()
+        claimed = video_editengine1.claim_next_video_local_edit(
+            conn,
+            lease_owner="video-edit-worker:test:1",
+            now="2030-01-02 03:04:05",
+            lease_seconds=300,
+        )
+        conn.commit()
     finally:
         conn.close()
 
@@ -2612,6 +2678,8 @@ def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_
     assert payload["price_xu"] == 0
     assert payload["quoted_price_xu"] == 0
     assert payload["provider_call"] is False
+    assert payload["engine_route"] == video_editengine1.ENGINE_ROUTE
+    assert payload["worker_owner"] == video_editengine1.OUTBOX_OWNER
     assert payload["media_lane"] == "large_media"
     assert payload["source_file_size"] == large_bytes
     assert payload["source_video_hash"] == "b" * 64
@@ -2625,6 +2693,17 @@ def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_
     assert payload["rights_confirmation"]["review_revision"] == 3
     assert payload["rights_confirmation"]["confirmed_at_unix"] > 0
     assert canonical == ("local-free", 0, "{}")
+    assert claimed["job_type"] == video_editengine1.WORKER_JOB_TYPE
+    assert json.loads(claimed["input_file_id"]) == payload
+    dispatched: list[dict] = []
+    monkeypatch.setattr(local_worker, "LOCAL_WORKER_JOB_SCOPE", "video_edit_only")
+    monkeypatch.setattr(
+        local_worker,
+        "run_video_local_edit",
+        lambda job: dispatched.append(dict(job)),
+    )
+    local_worker.process_job(claimed)
+    assert [job["id"] for job in dispatched] == [claimed["id"]]
     assert saved["step"] == "job_status"
     assert create_calls == 1
     assert query.edits and all("0 Xu" in text for text, _kwargs in query.edits)
@@ -2684,6 +2763,52 @@ def test_confirm_local_invalid_inspection_evidence_creates_no_job_or_preflight(t
     assert "Kế hoạch chỉnh sửa vẫn được giữ" in recovery_text
     assert "chưa tạo tác vụ và chưa trừ Xu" in recovery_text
     assert recovery_kwargs == {"reply_markup": "upload-keyboard"}
+    assert saved == {}
+
+
+def test_local_free_submit_surfaces_preflight_reason_without_creating_job(tmp_path: Path) -> None:
+    db_path = tmp_path / "videoedit-preflight-reason.sqlite3"
+    _init_job_db(db_path)
+    saved: dict = {}
+    namespace = _submit_namespace(db_path, saved)
+
+    class _EngineSpy:
+        def __getattr__(self, name):
+            return getattr(video_editengine1, name)
+
+        @staticmethod
+        def preflight(*_args, **_kwargs):
+            return {"ok": False, "reason": "local_worker_heartbeat_stale"}
+
+        @staticmethod
+        def create_job(*_args, **_kwargs):
+            raise AssertionError("create_job must not run when preflight is blocked")
+
+    namespace["video_editengine1"] = _EngineSpy()
+    submit = _compile_function("submit_video_edit_local_free_job", namespace)
+    state = _default_state(
+        907,
+        step="confirmation",
+        current_screen="confirmation",
+        status="confirmation_ready",
+        review_revision=3,
+        state_revision=3,
+    )
+    query = _Query(907, "videoedit|confirm_local")
+    update = SimpleNamespace(callback_query=query, message=None, effective_user=query.from_user)
+
+    assert asyncio.run(submit(update, SimpleNamespace(), state)) is True
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 0
+    finally:
+        conn.close()
+    assert len(query.edits) == 1
+    blocker_text, blocker_kwargs = query.edits[0]
+    assert "local_worker_heartbeat_stale" in blocker_text
+    assert "chưa tạo tác vụ và chưa trừ Xu" in blocker_text
+    assert blocker_kwargs["parse_mode"] == "HTML"
     assert saved == {}
 
 
@@ -3195,7 +3320,7 @@ def test_paid_retry_reuses_pre_feature_worker_identity_without_charge(tmp_path: 
     assert lookup_keys[0] == ("v3", seeded["idempotency_key"])
     assert [version for version, _key in lookup_keys] == ["v3", "v2"]
     assert calls == {"create": 1, "claim": 0, "charge": 0}
-    assert query.edits and "Đã nhận yêu cầu xử lý video" in query.edits[-1][0]
+    assert query.edits and "Trạng thái tác vụ #1" in query.edits[-1][0]
 
 
 def test_paid_submit_value_error_fails_closed_without_job_or_charge(tmp_path: Path) -> None:

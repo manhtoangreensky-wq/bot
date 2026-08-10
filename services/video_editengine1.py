@@ -538,7 +538,7 @@ def _artifact_receipts(value: Any) -> list[dict[str, Any]]:
             or file_id in file_ids
             or size <= 0
             or not _is_sha256(sha256)
-            or not _valid_ffprobe_receipt(ffprobe)
+            or not valid_mp4_delivery_probe(ffprobe)
             or (
                 raw_delivery_method is not _MISSING
                 and delivery_method not in {"sendVideo", "sendDocument"}
@@ -3434,7 +3434,7 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
             and source_identity_valid
             and _valid_mp4_path_list(receipt.get("output_path"), output_count=output_count)
             and output_size_bytes > 0
-            and _valid_ffprobe_receipt(receipt.get("ffprobe"))
+            and valid_mp4_delivery_probe(receipt.get("ffprobe"))
             and charge_receipt_valid
         )
         if valid:
@@ -3611,7 +3611,7 @@ def claim_charge(conn, *, worker_job_id: Any) -> bool:
         and _is_sha256(row[7])
         and output_size_bytes > 0
         and isinstance(ffprobe, dict)
-        and _valid_ffprobe_receipt(ffprobe)
+        and valid_mp4_delivery_probe(ffprobe)
         and delivery_message_id
         and delivery_file_id
         and output_file_id == delivery_file_id

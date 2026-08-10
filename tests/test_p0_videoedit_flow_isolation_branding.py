@@ -147,6 +147,10 @@ def test_videoedit_logo_image_and_text_watermark_are_distinct_products() -> None
 
     assert ("🖼 Logo ảnh", "videoedit|logo_entry") in visible
     assert ("🏷️ Watermark chữ", "videoedit|watermark_entry") in visible
+    assert not any(
+        "Trạng thái chỉnh sửa" in label or callback == "videoedit|latest_status"
+        for label, callback in visible
+    )
     assert not any("Logo & watermark" in label or "Logo / watermark" in label for label, _ in visible)
 
     assert video_edit_state_machine.parent_callback("logo_input") == "videoedit|branding"
@@ -371,17 +375,19 @@ def test_videoedit_active_state_has_a_hard_text_ownership_fence() -> None:
 
 
 @pytest.mark.parametrize(
-    ("step", "screen", "pending_field", "text"),
+    ("step", "screen", "pending_field", "text", "chat_id", "message_id"),
     (
-        ("await_logo", "logo_input", "logo", "TOAN AAS"),
+        ("await_logo", "logo_input", "logo", "TOAN AAS", 91_030, 91_301),
         (
             "await_watermark_text",
             "watermark_input",
             "watermark_text",
             "© TOAN AAS",
+            91_031,
+            91_302,
         ),
-        ("await_brightness", "brightness_input", "brightness", "200"),
-        ("await_trim_edges", "trim_input", "trim_edges", "00:10-00:40"),
+        ("await_brightness", "brightness_input", "brightness", "200", 91_032, 91_303),
+        ("await_trim_edges", "trim_input", "trim_edges", "00:10-00:40", 91_033, 91_304),
     ),
 )
 def test_actual_handle_message_keeps_videoedit_text_out_of_chat_and_admin_tools(
@@ -390,6 +396,8 @@ def test_actual_handle_message_keeps_videoedit_text_out_of_chat_and_admin_tools(
     screen: str,
     pending_field: str,
     text: str,
+    chat_id: int,
+    message_id: int,
 ) -> None:
     user_id = 91_030
     bot.clear_video_editor_pending(user_id)
@@ -431,7 +439,8 @@ def test_actual_handle_message_keeps_videoedit_text_out_of_chat_and_admin_tools(
             }
         )
         _store_state(user_id, state)
-        message = _Message(text)
+        message = _Message(text, message_id=message_id)
+        message.chat = SimpleNamespace(id=chat_id)
 
         asyncio.run(
             bot.handle_message(
@@ -439,6 +448,7 @@ def test_actual_handle_message_keeps_videoedit_text_out_of_chat_and_admin_tools(
                     callback_query=None,
                     message=message,
                     effective_user=SimpleNamespace(id=user_id),
+                    effective_chat=SimpleNamespace(id=chat_id),
                 ),
                 SimpleNamespace(user_data={}),
             )
@@ -449,6 +459,93 @@ def test_actual_handle_message_keeps_videoedit_text_out_of_chat_and_admin_tools(
         assert bot.get_video_editor_pending(user_id)
     finally:
         bot.clear_video_editor_pending(user_id)
+        dedupe_key = f"{chat_id}:{message_id}"
+        bot.TELEGRAM_MESSAGE_DEDUPE_DONE.pop(dedupe_key, None)
+        bot.TELEGRAM_MESSAGE_DEDUPE_LOCKS.pop(dedupe_key, None)
+
+
+@pytest.mark.parametrize(
+    ("user_id", "chat_id", "message_id", "entry_callbacks", "expected_owner"),
+    (
+        (
+            91_040,
+            -100_091_040,
+            91_040,
+            ("create_media|quick_image", "create_media|qi_custom"),
+            "quick_image",
+        ),
+        (
+            91_041,
+            -100_091_041,
+            91_041,
+            ("create_media|image_tier_low",),
+            "public_image",
+        ),
+    ),
+)
+def test_public_image_entry_releases_a_stale_videoedit_text_owner(
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+    entry_callbacks: tuple[str, ...],
+    expected_owner: str,
+) -> None:
+    bot.clear_video_editor_pending(user_id)
+    bot.clear_quick_image_flow(user_id)
+    bot.clear_public_image_prompt_pending(user_id)
+    bot.clear_media_aspect_pending(user_id)
+    try:
+        stale = _ready_state(user_id, step="await_brightness")
+        stale.update(
+            {
+                "current_screen": "brightness_input",
+                "screen_id": "brightness_input",
+                "pending_field": "brightness",
+                "parent_callback": "videoedit|color",
+            }
+        )
+        _store_state(user_id, stale)
+        context = SimpleNamespace(user_data={})
+
+        for callback in entry_callbacks:
+            query = _Query(user_id, callback)
+            asyncio.run(
+                bot.handle_create_media_callback(
+                    SimpleNamespace(callback_query=query),
+                    context,
+                )
+            )
+
+        message = _Message("© TOAN AAS", message_id=message_id)
+        message.chat = SimpleNamespace(id=chat_id)
+        asyncio.run(
+            bot.handle_message(
+                SimpleNamespace(
+                    callback_query=None,
+                    message=message,
+                    effective_message=message,
+                    effective_user=SimpleNamespace(id=user_id),
+                    effective_chat=SimpleNamespace(id=chat_id),
+                ),
+                context,
+            )
+        )
+
+        assert bot.get_video_editor_pending(user_id) == {}
+        assert len(message.replies) == 1
+        assert "Vui lòng nhập một số từ 20 đến 200" not in message.replies[0][0]
+        if expected_owner == "quick_image":
+            assert (bot.get_quick_image_flow(user_id) or {}).get("step") == "prepared_prompt"
+        else:
+            pending = bot.get_media_aspect_pending(user_id, "image") or {}
+            assert pending.get("prompt") == "© TOAN AAS"
+    finally:
+        bot.clear_video_editor_pending(user_id)
+        bot.clear_quick_image_flow(user_id)
+        bot.clear_public_image_prompt_pending(user_id)
+        bot.clear_media_aspect_pending(user_id)
+        bot.TELEGRAM_MESSAGE_DEDUPE_DONE.pop(f"{chat_id}:{message_id}", None)
+        bot.TELEGRAM_MESSAGE_DEDUPE_LOCKS.pop(f"{chat_id}:{message_id}", None)
 
 
 def test_videoedit_state_restores_after_process_memory_loss(
@@ -966,15 +1063,24 @@ def test_videoedit_restart_read_failure_keeps_text_and_media_owned(
     with pytest.raises(bot.VideoEditorStateUnavailableError):
         bot.get_video_editor_pending(user_id)
 
-    message = _Message("200")
+    chat_id = 91_019
+    message_id = 91_190
+    message = _Message("200", message_id=message_id)
+    message.chat = SimpleNamespace(id=chat_id)
     update = SimpleNamespace(
         effective_user=SimpleNamespace(id=user_id),
+        effective_chat=SimpleNamespace(id=chat_id),
         message=message,
         callback_query=None,
     )
-    asyncio.run(bot.handle_message(update, SimpleNamespace(user_data={})))
-    assert len(message.replies) == 1
-    assert "không chuyển sang Chatbot" in message.replies[0][0]
+    try:
+        asyncio.run(bot.handle_message(update, SimpleNamespace(user_data={})))
+        assert len(message.replies) == 1
+        assert "không chuyển sang Chatbot" in message.replies[0][0]
+    finally:
+        dedupe_key = f"{chat_id}:{message_id}"
+        bot.TELEGRAM_MESSAGE_DEDUPE_DONE.pop(dedupe_key, None)
+        bot.TELEGRAM_MESSAGE_DEDUPE_LOCKS.pop(dedupe_key, None)
 
 
 def test_videoedit_state_store_propagates_file_read_errors(
@@ -1572,6 +1678,55 @@ def test_brightness_and_trim_keep_the_inspected_source_evidence() -> None:
             assert "Bạn muốn mình giúp gì" not in message.replies[0][0]
         finally:
             bot.clear_video_editor_pending(user_id)
+
+
+def test_public_cut_route_collects_trim_and_reaches_review_with_exact_parents() -> None:
+    user_id = 91_006
+    bot.clear_video_editor_pending(user_id)
+    try:
+        _store_state(user_id, _ready_state(user_id))
+
+        cut_query = _press_callback(user_id, "videoedit|cut")
+        assert cut_query.edits
+        cut_buttons = _button_pairs(cut_query.edits[-1][1]["reply_markup"])
+        assert ("✂️ Cắt đầu/cuối", "videoedit|trim_edges") in cut_buttons
+        assert ("⬅️ Quay lại", "videoedit|workspace") in cut_buttons
+        cut_state = bot.get_video_editor_pending(user_id)
+        assert cut_state["current_screen"] == "cut"
+        assert cut_state["parent_callback"] == "videoedit|workspace"
+
+        trim_query = _press_callback(user_id, "videoedit|trim_edges")
+        assert trim_query.edits
+        trim_buttons = _button_pairs(trim_query.edits[-1][1]["reply_markup"])
+        assert ("⬅️ Quay lại", "videoedit|cut") in trim_buttons
+        trim_state = bot.get_video_editor_pending(user_id)
+        assert trim_state["step"] == "await_trim_edges"
+        assert trim_state["current_screen"] == "trim_input"
+        assert trim_state["parent_callback"] == "videoedit|cut"
+
+        handled, message = _run_pending_text(user_id, "00:10-00:40")
+        assert handled is True
+        assert len(message.replies) == 1
+        planned = bot.get_video_editor_pending(user_id)
+        assert planned["manual_edit_plan"]["trim"] == {
+            "start_ms": 10_000,
+            "end_ms": 40_000,
+        }
+        assert planned["current_screen"] == "workspace"
+        assert ("✅ Hoàn tất & tiếp tục", "videoedit|review") in _button_pairs(
+            message.replies[-1][1]["reply_markup"]
+        )
+
+        review_query = _press_callback(user_id, "videoedit|review")
+        assert review_query.edits
+        review_buttons = _button_pairs(review_query.edits[-1][1]["reply_markup"])
+        assert ("➡️ Tiếp tục xác nhận", "videoedit|confirmation") in review_buttons
+        assert ("⬅️ Quay lại", "videoedit|cut") in review_buttons
+        review_state = bot.get_video_editor_pending(user_id)
+        assert review_state["current_screen"] == "review"
+        assert review_state["return_to"] == "cut"
+    finally:
+        bot.clear_video_editor_pending(user_id)
 
 
 def test_watermark_has_an_independent_render_plan_and_alpha_drawtext() -> None:
