@@ -67641,7 +67641,17 @@ async def safe_mode_callback_guard(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     if not query:
         return
-    if not str(getattr(query, "data", "") or "").startswith("vid3|"):
+    callback_data = str(getattr(query, "data", "") or "")
+    quick_image_state = (
+        get_quick_image_flow(getattr(getattr(query, "from_user", None), "id", 0))
+        if callback_data.startswith(("create_media|", "shopai|"))
+        else None
+    )
+    preserve_uiflow3_handoff = bool(
+        isinstance(quick_image_state, dict)
+        and str(quick_image_state.get("source_flow") or "") == "video_uiflow3"
+    )
+    if not callback_data.startswith("vid3|") and not preserve_uiflow3_handoff:
         deactivate_video_uiflow3_pending_input(context)
     state = current_system_mode()
     if not any([state.get("emergency_lock"), state.get("payment_freeze"), state.get("tool_freeze"), state.get("provider_freeze"), state.get("maintenance_mode")]):
@@ -70494,6 +70504,7 @@ VIDEO_SCENE2_ACTION_EXPECTED_STEPS = {
     "req_view": {"requirements"},
     "req_done": {"requirements"},
     "material": {"materials"},
+    "material_ai": {"materials"},
     "material_view": {"materials"},
     "material_manage_done": {"materials_manage"},
     "material_prev": {"materials_manage"},
@@ -70721,7 +70732,7 @@ VIDEO_UIFLOW3_VOICE_ALIAS_GENDERS = {
 VIDEO_UIFLOW3_STEP_ACTIONS = {
     "entry": {"mode", "idea_catalog"},
     "series_goal": {"series_goal_edit", "series_goal_done"},
-    "source": {"source_text", "source_media", "source_status", "source_done"},
+    "source": {"source_text", "source_media", "source_status", "source_done", "image_ai"},
     "format": {"ratio", "duration", "duration_scene", "duration_custom", "format_done"},
     "content_hub": {"content", "profiles", "profile", "idea_catalog"},
     "content_lock": {"content_lock", "content_edit", "content_change", "context"},
@@ -70732,7 +70743,7 @@ VIDEO_UIFLOW3_STEP_ACTIONS = {
         "loc_scenes", "refs", "continuity", "bible_auto", "bible_done",
         "entity_scene", "narrator_edit", "narrator_clear",
         "product_add", "product_image", "prop_add", "relationship_add",
-        "prop_image", "source_ref", "source_ref_set", "quick_build",
+        "prop_image", "source_ref", "source_ref_set", "image_ai", "quick_build",
     },
     "episode": {
         "episode_identity", "episode_content", "episode_entities",
@@ -70758,6 +70769,7 @@ VIDEO_UIFLOW3_STEP_ACTIONS = {
     },
     "branding": {"brand", "branding_done"},
     "summary": {"edit", "model", "summary_done"},
+    "package": {"quality", "quality_done", "model"},
     "invoice": {"invoice_confirm"},
     "confirmation": {"confirmation_submit"},
     "status": set(),
@@ -70789,7 +70801,7 @@ VIDEO_UIFLOW3_VIEW_OWNERS = {
 VIDEO_UIFLOW3_RENDERED_STEPS = frozenset({
     "entry", "series_goal", "source", "format", "content_hub", "content_lock",
     "production_bible", "episode", "scene_count", "scene_plan", "scene_assignment",
-    "prompts", "branding", "summary", "invoice", "confirmation", "status",
+    "prompts", "branding", "summary", "package", "invoice", "confirmation", "status",
 })
 VIDEO_UIFLOW3_CHILD_VIEW_STEPS = {
     "profiles": {"content_hub"},
@@ -70844,7 +70856,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
             "episode_entities", "episode_inherit", "episode_done", "idea_catalog", "scene_custom", "scene_plan_edit",
             "scene_plan_auto", "scene_plan_done", "scene_auto", "music_scope",
             "assignment_done", "prompt_scenes", "prompt_advanced", "prompts_done",
-            "branding_done", "summary_done",
+            "branding_done", "summary_done", "quality_done",
             "invoice_confirm", "confirmation_submit",
         )
     },
@@ -70863,7 +70875,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
             "scene_ambient_clear", "scene_ambient_custom", "music_set",
             "scene_music", "scene_music_custom", "scene_advanced",
             "scene_direction", "brand", "edit", "source_ref", "context",
-            "model", "prompt_scene", "prompt_edit",
+            "model", "quality", "prompt_scene", "prompt_edit",
             "episode_continuity",
         )
     },
@@ -70882,6 +70894,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
     "audio_set": frozenset({2}),
     "entity_scene": frozenset({3}),
     "source_ref_set": frozenset({3}),
+    "image_ai": frozenset({1, 2}),
 }
 VIDEO_UIFLOW3_SCENE_CHILD_VIEWS = frozenset({
     "scene_plan_detail", "scene_cast", "scene_location", "dialogue_speaker",
@@ -70999,7 +71012,7 @@ def video_uiflow3_progress_text(state: dict) -> str:
             public_steps = [
                 "scene_count", "format", "content_hub", "content_lock", "production_bible",
                 "scene_plan", "scene_assignment", "prompts", "branding", "summary",
-                "invoice", "confirmation", "status",
+                "package", "invoice", "confirmation", "status",
             ]
         elif entry_mode == "image_video":
             public_steps = [
@@ -71469,12 +71482,165 @@ VIDEO_AI_REAL_CONTEXT_PROMPTS = {
 }
 
 
+def video_ai_real_profile_context_prompts(raw_state: dict) -> list[dict]:
+    """Build public suggestions from the selected 32-content profile."""
+
+    state = _video_ai_real_pilot_state(raw_state)
+    profile_key = str((state.get("content") or {}).get("profile_id") or "").strip()
+    profile = dict(video_profile_catalog.PROFILE_BY_KEY.get(profile_key) or {})
+    pattern = [
+        str(item or "").strip()
+        for item in profile.get("default_scene_pattern") or []
+        if str(item or "").strip()
+    ]
+    if not pattern:
+        pattern = ["Nêu ý chính", "Phát triển một hành động", "Kết quả rõ ràng"]
+    opening = pattern[0]
+    development = pattern[len(pattern) // 2]
+    ending = pattern[-1]
+    profile_name = str(
+        profile.get("public_name")
+        or (state.get("content") or {}).get("approved_brief", {}).get("title")
+        or "Nội dung tự nhập"
+    ).strip()
+    description = str(profile.get("description") or "").strip()
+    sequence = " → ".join(pattern)
+    return [
+        {
+            "key": "opening",
+            "label": f"Mở: {opening}",
+            "guidance": (
+                f"Với loại {profile_name}, mở bằng phần '{opening}', rồi phát triển đúng mạch "
+                f"{sequence}. {description}"
+            ).strip(),
+            "profile_key": profile_key,
+            "profile_name": profile_name,
+            "pattern": sequence,
+        },
+        {
+            "key": "development",
+            "label": f"Phát triển: {development}",
+            "guidance": (
+                f"Với loại {profile_name}, đặt trọng tâm vào phần '{development}', mỗi cảnh giữ "
+                f"một ý và một hành động hoàn chỉnh trong mạch {sequence}. {description}"
+            ).strip(),
+            "profile_key": profile_key,
+            "profile_name": profile_name,
+            "pattern": sequence,
+        },
+        {
+            "key": "ending",
+            "label": f"Kết: {ending}",
+            "guidance": (
+                f"Với loại {profile_name}, dẫn toàn bộ nội dung tới phần kết '{ending}' và khép "
+                f"lại trọn vẹn theo mạch {sequence}. {description}"
+            ).strip(),
+            "profile_key": profile_key,
+            "profile_name": profile_name,
+            "pattern": sequence,
+        },
+    ]
+
+
 def video_ai_real_round_sale_xu(value) -> int:
     return video_ai_real_pricing.round_sale_xu(value)
 
 
 def video_ai_real_prompt_model_catalog() -> list[dict]:
     return video_ai_real_pricing.model_catalog()
+
+
+VIDEO_AI_REAL_QUALITY_MODEL_KEYS = {
+    200: "grok3_5",
+    300: "grok3_5",
+    400: "veo31_fast_8",
+    500: "veo31_fast_8",
+    600: "veo31_fast_8",
+    800: "veo31_pro_8",
+    1000: "veo31_pro_8",
+    1200: "veo31_pro_8",
+    1500: "veo31_pro_8",
+}
+
+
+def video_ai_real_quality_products(raw_state: dict) -> list[dict]:
+    """Return public quality packages without exposing internal routing."""
+
+    state = video_uiflow3.normalize_state(raw_state)
+    if str(state.get("parent_product") or "") != "video_ai_real":
+        raise ValueError("video_ai_real_quality_required")
+    scene_count = max(
+        1,
+        len(state.get("scenes") or []),
+        safe_int((state.get("format") or {}).get("scene_count"), 0),
+    )
+    required_capability = (
+        "image_to_video"
+        if str(state.get("entry_mode") or "") == "image_video"
+        else "text_to_video"
+    )
+    offers = video_uifreeze1.compatible_quality_tiers(
+        "video_ai_real",
+        scene_count=scene_count,
+        ratio=str((state.get("format") or {}).get("ratio") or "9:16"),
+        required_capability=required_capability,
+    )
+    products: list[dict] = []
+    for offer in offers:
+        tier_id = safe_int(offer.get("tier_id"), 0)
+        internal_model = video_ai_real_pricing.model_by_key(
+            VIDEO_AI_REAL_QUALITY_MODEL_KEYS[tier_id]
+        )
+        products.append({
+            "tier_id": tier_id,
+            "icon": str(offer.get("icon") or "🎬"),
+            "name": str(offer.get("name") or f"Gói {tier_id}"),
+            "public_level": str(offer.get("public_level") or "Chất lượng video"),
+            "public_detail": str(offer.get("public_detail") or ""),
+            "seconds": max(1, safe_int(internal_model.get("seconds"), 1)),
+            "unit_xu": tier_id,
+        })
+    return products
+
+
+def video_ai_real_apply_quality_product(raw_state: dict, tier_id: int) -> dict:
+    state = video_uiflow3.normalize_state(raw_state)
+    selected_id = safe_int(tier_id, 0)
+    quality = next(
+        (item for item in video_ai_real_quality_products(state) if item["tier_id"] == selected_id),
+        None,
+    )
+    if not quality:
+        raise ValueError("video_ai_real_quality_invalid")
+    model = video_ai_real_pricing.model_by_key(
+        VIDEO_AI_REAL_QUALITY_MODEL_KEYS[selected_id]
+    )
+    seconds = max(1, safe_int(quality.get("seconds"), 1))
+    scene_count = max(
+        1,
+        len(state.get("scenes") or []),
+        safe_int((state.get("format") or {}).get("scene_count"), 0),
+    )
+    state["format"]["seconds_per_scene"] = seconds
+    state["format"]["target_duration_seconds"] = scene_count * seconds
+    for scene in state.get("scenes") or []:
+        scene["duration_target"] = seconds
+    _legacy, commercial = _video_ai_real_commercial_state(state)
+    commercial["quality"] = deepcopy(quality)
+    commercial["model"] = {
+        **deepcopy(model),
+        "unit_xu": selected_id,
+        "seconds": seconds,
+    }
+    dirty = list((state.get("navigation") or {}).get("dirty_sections") or [])
+    state["navigation"]["dirty_sections"] = list(dict.fromkeys([
+        *dirty,
+        "prompts",
+        "summary",
+    ]))
+    if state.get("render_contract") and video_ai_real_is_prompt_pilot(state):
+        return video_ai_real_compile_state(state)
+    return video_uiflow3.normalize_state(state)
 
 
 def _video_ai_real_pilot_state(raw_state: dict) -> dict:
@@ -71528,7 +71694,21 @@ def video_ai_real_mark_post_only_change(raw_state: dict) -> dict:
 def video_ai_real_apply_context_prompt(raw_state: dict, context_key: str) -> dict:
     state = _video_ai_real_pilot_state(raw_state)
     key = str(context_key or "").strip()
-    label, guidance = VIDEO_AI_REAL_CONTEXT_PROMPTS.get(key, ("", ""))
+    profile_prompt = next(
+        (
+            item
+            for item in video_ai_real_profile_context_prompts(state)
+            if str(item.get("key") or "") == key
+        ),
+        {},
+    )
+    if profile_prompt:
+        label = str(profile_prompt.get("label") or "")
+        guidance = str(profile_prompt.get("guidance") or "")
+        context_profile_id = str(profile_prompt.get("profile_key") or "")
+    else:
+        label, guidance = VIDEO_AI_REAL_CONTEXT_PROMPTS.get(key, ("", ""))
+        context_profile_id = "legacy"
     if not guidance:
         raise ValueError("video_ai_real_context_invalid")
     _legacy, commercial = _video_ai_real_commercial_state(state)
@@ -71542,6 +71722,7 @@ def video_ai_real_apply_context_prompt(raw_state: dict, context_key: str) -> dic
     commercial.update({
         "context_key": key,
         "context_label": label,
+        "context_profile_id": context_profile_id,
         "context_base_intent": base_intent,
         "context_applied_intent": contextual_intent,
     })
@@ -71624,15 +71805,16 @@ def video_ai_real_prompt_quote(raw_state: dict) -> dict:
     state = _video_ai_real_pilot_state(raw_state)
     commercial = dict((state.get("legacy_compat") or {}).get("pilot_commercial") or {})
     model = dict(commercial.get("model") or {})
+    quality = dict(commercial.get("quality") or {})
     if not model:
         raise ValueError("video_ai_real_model_required")
     scenes = list(state.get("scenes") or [])
     scene_count = len(scenes) or safe_int((state.get("format") or {}).get("scene_count"), 0)
     if scene_count <= 0:
         raise ValueError("scene_count_out_of_range")
-    seconds = max(1, safe_int(model.get("seconds"), 1))
+    seconds = max(1, safe_int(quality.get("seconds") or model.get("seconds"), 1))
     total_duration = scene_count * seconds
-    unit_xu = max(0, safe_int(model.get("unit_xu"), 0))
+    unit_xu = max(0, safe_int(quality.get("unit_xu") or model.get("unit_xu"), 0))
     base_xu = scene_count * unit_xu
     audio = dict(state.get("audio") or {})
     addons: list[dict] = []
@@ -71671,6 +71853,7 @@ def video_ai_real_prompt_quote(raw_state: dict) -> dict:
     total_xu = base_xu + addons_xu
     return {
         "model": model,
+        "quality": quality,
         "scene_count": scene_count,
         "seconds_per_scene": seconds,
         "total_duration_seconds": total_duration,
@@ -72357,16 +72540,22 @@ def video_ai_real_pilot_bible_view_payload(
             rows.append([("🤝 Thêm quan hệ nhân vật", "vid3|relationship_add")])
         for item in products[:8]:
             product_id = str(item.get("product_id") or "")
-            rows.append([(
-                f"🖼 Ảnh sản phẩm · {str(item.get('name') or 'Chưa đặt tên')[:20]}",
-                f"vid3|product_image|{product_id}",
-            )])
+            rows.append([
+                (
+                    f"🖼 Gửi ảnh · {str(item.get('name') or 'Sản phẩm')[:18]}",
+                    f"vid3|product_image|{product_id}",
+                ),
+                ("✨ Tạo ảnh AI", f"vid3|image_ai|product|{product_id}"),
+            ])
         for item in props[:8]:
             prop_id = str(item.get("prop_id") or "")
-            rows.append([(
-                f"🖼 Ảnh đạo cụ · {str(item.get('name') or 'Chưa đặt tên')[:20]}",
-                f"vid3|prop_image|{prop_id}",
-            )])
+            rows.append([
+                (
+                    f"🖼 Gửi ảnh · {str(item.get('name') or 'Đạo cụ')[:18]}",
+                    f"vid3|prop_image|{prop_id}",
+                ),
+                ("✨ Tạo ảnh AI", f"vid3|image_ai|prop|{prop_id}"),
+            ])
         rows.extend(video_ai_real_pilot_nav_rows(back="vid3|view|production_bible"))
         character_legend = ", ".join(
             f"Nhân vật {index} ({video_ai_real_pilot_visible_entity_name(item.get('display_name'), entity='character', index=index) or 'chưa đặt tên'})"
@@ -73059,10 +73248,18 @@ def video_ai_real_pilot_screen_payload(
             )
             send_label = "🎞 Gửi video"
             count_label = f"📚 Đã nhận {len(assets)} video"
-        rows: list[list[tuple[str, str]]] = [[
-            (send_label, "vid3|source_media"),
-            (count_label, "vid3|source_status"),
-        ]]
+        rows: list[list[tuple[str, str]]] = []
+        if source_kind == "raw_images":
+            rows.append([
+                (send_label, "vid3|source_media"),
+                ("✨ Tạo ảnh AI", "vid3|image_ai|source"),
+            ])
+            rows.append([(count_label, "vid3|source_status")])
+        else:
+            rows.append([
+                (send_label, "vid3|source_media"),
+                (count_label, "vid3|source_status"),
+            ])
         if bool(source.get("complete")):
             rows.append([("✅ Xong nguồn", "vid3|source_done")])
         source_back = "vid3|back" if (state.get("navigation") or {}).get("visible_step_stack") else "menu|main_video"
@@ -73092,22 +73289,37 @@ def video_ai_real_pilot_screen_payload(
         brief = dict(content.get("approved_brief") or {})
         commercial = dict((state.get("legacy_compat") or {}).get("pilot_commercial") or {})
         context_key = str(commercial.get("context_key") or "")
+        context_profile_id = str(commercial.get("context_profile_id") or "")
+        suggestions = video_ai_real_profile_context_prompts(state)
+        suggestion_buttons = [
+            (
+                video_ai_real_pilot_selected(
+                    str(item.get("label") or "Gợi ý"),
+                    context_key == str(item.get("key") or "")
+                    and context_profile_id == str(item.get("profile_key") or ""),
+                ),
+                f"vid3|context|{item.get('key')}",
+            )
+            for item in suggestions
+        ]
         rows = [
-            [
-                (video_ai_real_pilot_selected("🛍 Bán hàng tự nhiên", context_key == "sales"), "vid3|context|sales"),
-                (video_ai_real_pilot_selected("📖 Kể chuyện", context_key == "story"), "vid3|context|story"),
+            *[
+                suggestion_buttons[offset:offset + 2]
+                for offset in range(0, len(suggestion_buttons), 2)
             ],
-            [(video_ai_real_pilot_selected("⚡ Ngắn gọn mạng xã hội", context_key == "social"), "vid3|context|social")],
             [("✅ Khóa nội dung", "vid3|content_lock"), ("✏️ Sửa nội dung", "vid3|content_edit")],
             [("🔄 Chọn nội dung khác", "vid3|content_change")],
             *video_ai_real_pilot_nav_rows(back="vid3|back"),
         ]
+        profile_name = str(suggestions[0].get("profile_name") or "Nội dung tự nhập")
+        pattern = str(suggestions[0].get("pattern") or "")
         return (
             f"{progress_prefix}✅ Nội dung đã chọn\n\n"
             f"Chủ đề: {brief.get('title') or content.get('original_intent') or 'Chưa có'}\n"
             f"Mục tiêu: {brief.get('goal') or 'Theo nội dung đã nhập'}\n"
             f"Đối tượng: {brief.get('audience') or 'Chưa chọn'}\n\n"
-            "Gợi ý prompt theo ngữ cảnh\n"
+            f"Gợi ý theo loại nội dung: {profile_name}\n"
+            f"Khung nội dung: {pattern}\n"
             f"Đang dùng: {commercial.get('context_label') or 'Giữ nguyên nội dung đã chọn'}\n\n"
             "Sau khi khóa, bot mới mở Nhân vật & bối cảnh; nội dung gốc vẫn được giữ để bạn rà soát lại.",
             video_uiflow3_keyboard(rows),
@@ -73466,9 +73678,6 @@ def video_ai_real_pilot_screen_payload(
         fmt = dict(state.get("format") or {})
         audio = dict(state.get("audio") or {})
         scenes = list(state.get("scenes") or [])
-        commercial = dict((state.get("legacy_compat") or {}).get("pilot_commercial") or {})
-        selected_model = dict(commercial.get("model") or {})
-        selected_model_key = str(selected_model.get("key") or "")
         errors = video_uiflow3.readiness_errors(state)
         content_preview = str(content.get("original_intent") or (content.get("approved_brief") or {}).get("title") or "Chưa có")[:320]
         ratio_label = {
@@ -73490,20 +73699,11 @@ def video_ai_real_pilot_screen_payload(
         )
         branding = dict(state.get("branding") or {})
         lines = [
-            "✨ Chọn model & chất lượng",
-            "",
-            "📋 Tóm tắt Video AI chân thật",
+            "✅ Rà soát cuối",
             "",
             f"Nội dung: {content_preview}",
             f"Khung hình: {ratio_label}",
-            (
-                f"Model: {selected_model.get('label')} · {selected_model.get('quality')}\n"
-                f"Thời lượng: {len(scenes)} cảnh × {selected_model.get('seconds')} giây = "
-                f"{len(scenes) * safe_int(selected_model.get('seconds'), 0)} giây\n"
-                f"Giá video: {selected_model.get('unit_xu')} Xu/cảnh"
-                if selected_model
-                else "Model: Chưa chọn model"
-            ),
+            f"Số cảnh: {len(scenes) or safe_int(fmt.get('scene_count'), 0)}",
             f"Nhân vật: {len(bible.get('characters') or [])} · Bối cảnh: {len(bible.get('locations') or [])}",
             f"Ảnh tham chiếu: {len(state.get('references') or [])}",
             f"Lời thoại: {len(audio.get('dialogue_segments') or [])} · Giọng đã gán: {voices_assigned}",
@@ -73545,29 +73745,48 @@ def video_ai_real_pilot_screen_payload(
         assignment_row = [("🎙 Phân vai & âm thanh", "vid3|edit|scene_assignment")]
         if not bool(fmt.get("scene_count_confirmed")):
             assignment_row.append(("🎬 Số cảnh", "vid3|edit|scene_count"))
-        catalog = video_ai_real_prompt_model_catalog()
-        model_buttons = [
-            (
-                video_ai_real_pilot_selected(
-                    f"{item['label']} · {item['seconds']} giây · {item['unit_xu']} Xu/cảnh",
-                    selected_model_key == str(item["key"]),
-                ),
-                f"vid3|model|{item['key']}",
-            )
-            for item in catalog
-        ]
-        rows = [model_buttons[offset:offset + 2] for offset in range(0, len(model_buttons), 2)]
-        rows.extend([
+        rows = [
             [("📐 Sửa khung hình", "vid3|edit|format"), ("📝 Sửa nội dung", "vid3|edit|content_lock")],
             [("👥 Nhân vật & bối cảnh", "vid3|edit|production_bible"), ("🎬 Kế hoạch cảnh", "vid3|edit|scene_plan")],
             assignment_row,
             [("🧠 Rà soát prompt", "vid3|edit|prompts"), ("🏷 Logo & watermark", "vid3|edit|branding")],
-            [("✅ Xác nhận chất lượng", "vid3|summary_done")],
+            [("✅ Hoàn thành rà soát", "vid3|summary_done")],
             *video_ai_real_pilot_nav_rows(back="vid3|back"),
-        ])
-        lines.extend([
+        ]
+        return "\n".join(lines), video_uiflow3_keyboard(rows)
+
+    if step == "package" and not view:
+        commercial = dict((state.get("legacy_compat") or {}).get("pilot_commercial") or {})
+        selected_quality = dict(commercial.get("quality") or {})
+        selected_tier_id = safe_int(selected_quality.get("tier_id"), 0)
+        products = video_ai_real_quality_products(state)
+        lines = [
+            f"{progress_prefix}⭐ Chọn chất lượng",
             "",
-            "Giá mỗi cảnh dùng chi phí dự phòng cao hơn, nhân 3 rồi làm tròn theo bảng giá chính thức.",
+            "Mỗi gói ghi rõ thời lượng một cảnh và giá một cảnh. "
+            "Tổng giá được tính ở màn Báo giá sau khi bạn hoàn thành lựa chọn.",
+        ]
+        if selected_quality:
+            lines.extend([
+                "",
+                f"Đang chọn: {selected_quality.get('name')} · "
+                f"{selected_quality.get('seconds')} giây/cảnh · "
+                f"{selected_quality.get('unit_xu')} Xu/cảnh",
+            ])
+        buttons = [
+            (
+                video_ai_real_pilot_selected(
+                    f"{item['icon']} {item['name']} · {item['seconds']}s · {item['unit_xu']} Xu",
+                    selected_tier_id == item["tier_id"],
+                ),
+                f"vid3|quality|{item['tier_id']}",
+            )
+            for item in products
+        ]
+        rows = [buttons[offset:offset + 2] for offset in range(0, len(buttons), 2)]
+        rows.extend([
+            [("✅ Hoàn thành chất lượng", "vid3|quality_done")],
+            *video_ai_real_pilot_nav_rows(back="vid3|back"),
         ])
         return "\n".join(lines), video_uiflow3_keyboard(rows)
 
@@ -73579,11 +73798,17 @@ def video_ai_real_pilot_screen_payload(
                 "🧾 Báo giá xác nhận\n\nChưa đủ model hoặc số cảnh để lập báo giá.",
                 video_uiflow3_keyboard(video_ai_real_pilot_nav_rows(back="vid3|back")),
             )
-        model = dict(quote.get("model") or {})
+        quality = dict(quote.get("quality") or {})
+        fallback_quality = dict(quote.get("model") or {})
+        quality_name = str(
+            quality.get("name")
+            or fallback_quality.get("quality")
+            or "Gói chất lượng đã chọn"
+        )
         lines = [
             f"{progress_prefix}🧾 Báo giá xác nhận",
             "",
-            f"Model: {model.get('label')} · {model.get('quality')}",
+            f"Chất lượng: {quality_name}",
             f"Thời lượng: {quote['scene_count']} cảnh × {quote['seconds_per_scene']} giây = {quote['total_duration_seconds']} giây",
             f"Video: {quote['scene_count']} cảnh × {quote['unit_xu']} Xu = {quote['base_xu']} Xu",
         ]
@@ -73609,12 +73834,13 @@ def video_ai_real_pilot_screen_payload(
 
     if step == "confirmation" and not view:
         quote = video_ai_real_prompt_quote(state)
-        model = dict(quote.get("model") or {})
+        quality = dict(quote.get("quality") or {})
         return (
             f"{progress_prefix}✅ Xác nhận cuối\n\n"
-            f"{model.get('label')} · {quote['scene_count']} cảnh · {quote['total_duration_seconds']} giây\n"
+            f"{quality.get('name') or 'Chất lượng đã chọn'} · "
+            f"{quote['scene_count']} cảnh · {quote['total_duration_seconds']} giây\n"
             f"Tổng dự kiến: {quote['total_xu']} Xu\n\n"
-            "Bước này chỉ khóa lựa chọn UI để bạn kiểm tra flow. Chưa gửi RouteEngine, chưa tạo job và chưa trừ Xu.",
+            "Bước này chỉ lưu lựa chọn cuối để bạn kiểm tra. Chưa bắt đầu tạo video và chưa trừ Xu.",
             video_uiflow3_keyboard([
                 [("➡️ Xem trạng thái", "vid3|confirmation_submit")],
                 *video_ai_real_pilot_nav_rows(back="vid3|back"),
@@ -73625,12 +73851,11 @@ def video_ai_real_pilot_screen_payload(
         quote = video_ai_real_prompt_quote(state)
         return (
             f"{progress_prefix}📊 Trạng thái Video AI chân thật\n\n"
-            "Trạng thái: Đã lưu cấu hình UI\n"
-            "RouteEngine: Chưa gửi sang RouteEngine\n"
-            "Tác vụ: Chưa tạo job\n"
+            "Trạng thái: Đã lưu lựa chọn\n"
+            "Tiến độ: Chưa bắt đầu tạo video\n"
             "Thanh toán: chưa trừ Xu\n\n"
             f"Báo giá đã lưu: {quote['total_xu']} Xu · {quote['scene_count']} cảnh · {quote['total_duration_seconds']} giây.\n"
-            "Khi RouteEngine được nối ở task riêng, trạng thái thật sẽ thay cho màn kiểm tra này.",
+            "Khi bắt đầu xử lý, màn này sẽ hiển thị tiến độ và kết quả thực tế.",
             video_uiflow3_keyboard(video_ai_real_pilot_nav_rows(back="vid3|back")),
         )
 
@@ -73711,8 +73936,9 @@ def video_ai_real_pilot_screen_payload(
                 (video_ai_real_pilot_selected("👩 Nữ", str(item.get("gender") or "") == "female"), f"vid3|char_gender|{character_id}|female"),
             ],
             [(video_ai_real_pilot_selected("➖ Không chỉ định", str(item.get("gender") or "unspecified") == "unspecified"), f"vid3|char_gender|{character_id}|unspecified")],
-            [("✏️ Sửa tên & mô tả", f"vid3|char_desc|{character_id}"), (f"🖼 Gửi ảnh Nhân vật {index}", f"vid3|char_image|{character_id}")],
-            [("🎙 Chọn giọng", f"vid3|char_voice|{character_id}"), ("🗂 Xem ảnh", f"vid3|refs|character|{character_id}")],
+            [("✏️ Sửa tên & mô tả", f"vid3|char_desc|{character_id}"), ("🎙 Chọn giọng", f"vid3|char_voice|{character_id}")],
+            [(f"🖼 Gửi ảnh Nhân vật {index}", f"vid3|char_image|{character_id}"), ("✨ Tạo ảnh AI", f"vid3|image_ai|character|{character_id}")],
+            [("🗂 Xem ảnh", f"vid3|refs|character|{character_id}")],
         ]
         if not str(item.get("description") or "").strip():
             rows.insert(2, [("✨ Dùng mô tả theo nội dung", f"vid3|char_suggest|{character_id}")])
@@ -73783,13 +74009,16 @@ def video_ai_real_pilot_screen_payload(
                 for offset in range(0, len(source_buttons), 2)
             ])
         rows.append([
-            ("✏️ Tự mô tả", f"vid3|loc_desc|{location_id}"),
             (f"🖼 {'Đổi / thêm ảnh' if reference_count else 'Gửi ảnh Bối cảnh ' + str(index)}", f"vid3|loc_image|{location_id}"),
+            ("✨ Tạo ảnh AI", f"vid3|image_ai|location|{location_id}"),
         ])
-        detail_row: list[tuple[str, str]] = [("🗂 Xem ảnh", f"vid3|refs|location|{location_id}")]
-        if state.get("scenes"):
-            detail_row.insert(0, ("🎬 Cảnh sử dụng", f"vid3|loc_scenes|{location_id}"))
+        detail_row: list[tuple[str, str]] = [
+            ("✏️ Tự mô tả", f"vid3|loc_desc|{location_id}"),
+            ("🗂 Xem ảnh", f"vid3|refs|location|{location_id}"),
+        ]
         rows.append(detail_row)
+        if state.get("scenes"):
+            rows.append([("🎬 Cảnh sử dụng", f"vid3|loc_scenes|{location_id}")])
         rows.append([
             ("✅ Hoàn thành bối cảnh", "vid3|view|location_list"),
             ("🎬 Menu Video", "menu|main_video"),
@@ -73935,12 +74164,14 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         for product_item in products[:8]:
             product_id = str(product_item.get("product_id") or "")
             rows.append([
-                (f"Anh SP: {str(product_item.get('name') or product_id)[:20]}", f"vid3|product_image|{product_id}"),
+                (f"Gửi ảnh SP: {str(product_item.get('name') or product_id)[:16]}", f"vid3|product_image|{product_id}"),
+                ("Tạo ảnh AI", f"vid3|image_ai|product|{product_id}"),
             ])
         for prop_item in props[:8]:
             prop_id = str(prop_item.get("prop_id") or "")
             rows.append([
-                (f"Anh DC: {str(prop_item.get('name') or prop_id)[:20]}", f"vid3|prop_image|{prop_id}"),
+                (f"Gửi ảnh ĐC: {str(prop_item.get('name') or prop_id)[:16]}", f"vid3|prop_image|{prop_id}"),
+                ("Tạo ảnh AI", f"vid3|image_ai|prop|{prop_id}"),
             ])
         rows.extend(video_uiflow3_nav_rows(back="vid3|view|production_bible"))
         narrator_text = narrator.get("display_name") or "Chua co"
@@ -74327,8 +74558,9 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         references = len(item.get("reference_asset_ids") or [])
         rows = [
             [("Nam", f"vid3|char_gender|{character_id}|male"), ("Nu", f"vid3|char_gender|{character_id}|female")],
-            [("Sua ten/mo ta", f"vid3|char_desc|{character_id}"), ("Gui anh NV", f"vid3|char_image|{character_id}")],
-            [("Chon giong", f"vid3|char_voice|{character_id}"), ("Xem anh", f"vid3|refs|character|{character_id}")],
+            [("Sua ten/mo ta", f"vid3|char_desc|{character_id}"), ("Chon giong", f"vid3|char_voice|{character_id}")],
+            [("Gui anh NV", f"vid3|char_image|{character_id}"), ("Tao anh AI", f"vid3|image_ai|character|{character_id}")],
+            [("Xem anh", f"vid3|refs|character|{character_id}")],
         ]
         if state.get("scenes"):
             rows[-1].append(("Canh xuat hien", f"vid3|char_scenes|{character_id}"))
@@ -74364,11 +74596,11 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         item = next((row for row in locations if str(row.get("location_id") or "") == location_id), {})
         index = next((idx for idx, row in enumerate(locations, 1) if str(row.get("location_id") or "") == location_id), 1)
         location_rows = [
-            [("Sua ten/mo ta", f"vid3|loc_desc|{location_id}"), ("Gui anh boi canh", f"vid3|loc_image|{location_id}")],
-            [("Xem anh", f"vid3|refs|location|{location_id}")],
+            [("Sua ten/mo ta", f"vid3|loc_desc|{location_id}"), ("Xem anh", f"vid3|refs|location|{location_id}")],
+            [("Gui anh boi canh", f"vid3|loc_image|{location_id}"), ("Tao anh AI", f"vid3|image_ai|location|{location_id}")],
         ]
         if state.get("scenes"):
-            location_rows[-1].insert(0, ("Canh su dung", f"vid3|loc_scenes|{location_id}"))
+            location_rows.append([("Canh su dung", f"vid3|loc_scenes|{location_id}")])
         location_rows.extend(video_uiflow3_nav_rows(back="vid3|view|location_list"))
         return (
             f"BOI CANH {index}\n\nTen: {item.get('name') or f'Boi canh {index}'}\nMo ta: {item.get('description') or 'Chua co'}\nAnh: {len(item.get('reference_asset_ids') or [])}",
@@ -74631,19 +74863,24 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             "script_image_video": "Dan hoac gui nguyen van kich ban. Bot khong rut gon am tham.",
             "frame_video_local": "Gui lan luot anh nguon. Vai tro NV/Boi canh se gan sau Content Lock.",
             "self_shot_scene_change": "Gui video tu quay de luu source va phan tich o flow hien co sau nay.",
-            "storyboard_prompt": "Gui anh hoac file Storyboard theo dung thu tu.",
+            "storyboard_prompt": "Gửi ảnh Storyboard theo đúng thứ tự, hoặc chọn Tạo ảnh AI.",
         }.get(product, "Gui noi dung nguon cua video.")
-        media_source_kinds = {"raw_images", "source_video", "storyboard_panels"}
+        media_source_kinds = {"raw_images", "source_video", "storyboard_panels", "generated_storyboard"}
+        image_source_kinds = {"raw_images", "storyboard_panels", "generated_storyboard"}
         rows = []
         if source_kind in media_source_kinds:
-            rows.append([("Gui tep/anh", "vid3|source_media"), (f"Da nhan {len(assets)}", "vid3|source_status")])
+            if source_kind in image_source_kinds:
+                rows.append([("Gửi ảnh", "vid3|source_media"), ("Tạo ảnh AI", "vid3|image_ai|source")])
+                rows.append([(f"Đã nhận {len(assets)} ảnh", "vid3|source_status")])
+            else:
+                rows.append([("Gửi tệp/video", "vid3|source_media"), (f"Đã nhận {len(assets)}", "vid3|source_status")])
         else:
             rows.append([("Nhap noi dung nguon", "vid3|source_text")])
         if (state.get("source") or {}).get("complete"):
-            rows.append([("Xong nguon", "vid3|source_done")])
+            rows.append([("Hoàn thành nguồn", "vid3|source_done")])
         source_back = "vid3|back" if (state.get("navigation") or {}).get("visible_step_stack") else "menu|main_video"
         rows.extend(video_uiflow3_nav_rows(back=source_back))
-        return f"{prefix}NGUON VIDEO\n\n{source_copy}", video_uiflow3_keyboard(rows)
+        return f"{prefix}NGUỒN VIDEO\n\n{source_copy}", video_uiflow3_keyboard(rows)
 
     if step == "format":
         fmt = dict(state.get("format") or {})
@@ -75058,7 +75295,7 @@ def video_uiflow3_media_candidate(message) -> tuple[object | None, str, str, str
 
 def video_uiflow3_expected_source_media_kinds(state: dict) -> set[str]:
     source_kind = str((state.get("source") or {}).get("kind") or "")
-    if source_kind in {"raw_images", "storyboard_panels"}:
+    if source_kind in {"raw_images", "storyboard_panels", "generated_storyboard"}:
         return {"image"}
     if source_kind == "source_video":
         return {"video"}
@@ -75444,6 +75681,29 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         elif action == "source_status":
             await query.answer(f"Da nhan {len((state.get('source') or {}).get('assets') or [])} tep nguon.", show_alert=True)
             return await video_uiflow3_render(query, context, state)
+        elif action == "image_ai" and values:
+            quick_state = video_uiflow3_prepare_quick_image_handoff(
+                context,
+                state,
+                user_id=user_id,
+                target_kind=values[0],
+                target_id=values[1] if len(values) > 1 else "",
+            )
+            lang = get_user_language(user_id) or "vi"
+            await query.answer()
+            return await safe_edit_or_send(
+                query,
+                quick_image_prepared_prompt_text(quick_state, lang),
+                parse_mode="HTML",
+                reply_markup=quick_image_prepared_prompt_keyboard(
+                    lang,
+                    state=quick_state,
+                    back_callback=quick_image_context_return_callback(quick_state),
+                    back_label=quick_image_context_return_label(quick_state, lang),
+                    context_return_callback=quick_image_context_return_callback(quick_state),
+                    context_return_label=quick_image_context_return_label(quick_state, lang),
+                ),
+            )
         elif action == "source_done":
             if not bool((state.get("source") or {}).get("complete")):
                 raise ValueError("video_source_required")
@@ -76330,18 +76590,10 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state = video_uiflow3_clear_transient(state)
         elif action == "model" and values:
             state = video_ai_real_apply_prompt_model(state, values[0])
-            state["navigation"]["current_step"] = "summary"
+            state["navigation"]["current_step"] = "package"
         elif action == "summary_done":
             prompt_pilot = video_ai_real_is_prompt_pilot(state)
             state = video_ai_real_maybe_compile_state(state)
-            if prompt_pilot and not dict(
-                (state.get("legacy_compat") or {}).get("pilot_commercial") or {}
-            ).get("model"):
-                await query.answer(
-                    "Hãy chọn model & chất lượng trước khi xác nhận báo giá.",
-                    show_alert=True,
-                )
-                return await video_uiflow3_render(query, context, state)
             planning_errors = video_uiflow3.planning_readiness_errors(state)
             if planning_errors:
                 await query.answer("; ".join(video_uiflow3_readiness_labels(planning_errors)[:3]), show_alert=True)
@@ -76352,11 +76604,8 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 render_blockers = list(snapshot.get("render_blockers") or [])
                 state["legacy_compat"]["commercial_tail_ready"] = not render_blockers
                 if prompt_pilot:
-                    quote = video_ai_real_prompt_quote(state)
-                    commercial = dict(state["legacy_compat"].get("pilot_commercial") or {})
-                    commercial["quote"] = deepcopy(quote)
-                    state["legacy_compat"]["pilot_commercial"] = commercial
-                    state = video_uiflow3_go(state, "invoice")
+                    state = video_uiflow3.mark_sections_complete(state, "summary")
+                    state = video_uiflow3_go(state, "package")
                 else:
                     message = (
                         "Da luu ke hoach. Loai video nay hien chi cho phep lap ke hoach; "
@@ -76366,6 +76615,33 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                     )
                     await query.answer(message, show_alert=True)
                     return await video_uiflow3_render(query, context, state)
+        elif action == "quality" and values:
+            state = video_ai_real_apply_quality_product(state, safe_int(values[0], 0))
+            state["navigation"]["current_step"] = "package"
+        elif action == "quality_done":
+            commercial = dict(
+                (state.get("legacy_compat") or {}).get("pilot_commercial") or {}
+            )
+            if not dict(commercial.get("quality") or {}):
+                await query.answer(
+                    "Hãy chọn một gói chất lượng trước khi xem báo giá.",
+                    show_alert=True,
+                )
+                return await video_uiflow3_render(query, context, state)
+            state = video_ai_real_maybe_compile_state(state)
+            planning_errors = video_uiflow3.planning_readiness_errors(state)
+            if planning_errors:
+                await query.answer(
+                    "; ".join(video_uiflow3_readiness_labels(planning_errors)[:3]),
+                    show_alert=True,
+                )
+                return await video_uiflow3_render(query, context, state)
+            quote = video_ai_real_prompt_quote(state)
+            commercial = dict(state["legacy_compat"].get("pilot_commercial") or {})
+            commercial["quote"] = deepcopy(quote)
+            state["legacy_compat"]["pilot_commercial"] = commercial
+            state = video_uiflow3.mark_sections_complete(state, "package")
+            state = video_uiflow3_go(state, "invoice")
         elif action == "invoice_confirm":
             quote = video_ai_real_prompt_quote(state)
             commercial = dict(state["legacy_compat"].get("pilot_commercial") or {})
@@ -78911,11 +79187,14 @@ def video_scene3_materials_text(state: dict) -> str:
 
 def video_scene3_materials_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("🧍 Gửi ảnh nhân vật/người", "vprofile|material|character_person"), ("📦 Gửi ảnh sản phẩm/đồ vật", "vprofile|material|product_object")],
-        [("🏞 Gửi ảnh bối cảnh", "vprofile|material|background"), ("🎨 Gửi ảnh phong cách", "vprofile|material|visual_style_reference")],
-        [("🖼 Gửi ảnh Storyboard", "vprofile|material|storyboard_frames"), ("👁 Quản lý ảnh đã gửi", "vprofile|material_view")],
-        [("✅ Xong phần ảnh", "vprofile|material_done"), ("⏭ Không dùng ảnh", "vprofile|material_skip")],
-        *video_scene3_nav_rows(),
+        [("🧍 Gửi ảnh nhân vật", "vprofile|material|character_person"), ("✨ Tạo ảnh AI", "vprofile|material_ai|character_person")],
+        [("📦 Gửi ảnh sản phẩm", "vprofile|material|product_object"), ("✨ Tạo ảnh AI", "vprofile|material_ai|product_object")],
+        [("🏞 Gửi ảnh bối cảnh", "vprofile|material|background"), ("✨ Tạo ảnh AI", "vprofile|material_ai|background")],
+        [("🎨 Gửi ảnh phong cách", "vprofile|material|visual_style_reference"), ("✨ Tạo ảnh AI", "vprofile|material_ai|visual_style_reference")],
+        [("🖼 Gửi ảnh Storyboard", "vprofile|material|storyboard_frames"), ("✨ Tạo ảnh AI", "vprofile|material_ai|storyboard_frames")],
+        [("👁 Quản lý ảnh đã gửi", "vprofile|material_view"), ("✅ Xong phần ảnh", "vprofile|material_done")],
+        [("⏭ Không dùng ảnh", "vprofile|material_skip"), ("⬅️ Quay lại", "vprofile|back")],
+        [("🎬 Menu Video", "menu|main_video"), ("🏠 Menu chính", "menu|main")],
     ])
 
 
@@ -83340,7 +83619,7 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "entry_callback": "vid3|entry|frame_video_local",
         "legacy_entry_callback": "vproduct|open|frame_video_local",
         "handler": "handle_video_uiflow3_callback",
-        "expected_children": ("vid3|source_media", "vid3|source_status"),
+        "expected_children": ("vid3|source_media", "vid3|image_ai|source", "vid3|source_status"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
@@ -135480,15 +135759,31 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
     package_item = {}
     package_use_result = {}
     scene3_handoff = str(pending.get("origin_flow") or "") == "video_scene3"
-    scene3_return_callback = str(pending.get("return_to") or "vprofile|image_ai_return") if scene3_handoff else ""
-    scene3_return_label = str(pending.get("return_label") or "⬅️ Nguồn hình ảnh") if scene3_handoff else ""
+    uiflow3_handoff = str(pending.get("origin_flow") or "") == "video_uiflow3"
+    image_handoff = scene3_handoff or uiflow3_handoff
+    scene3_return_callback = str(pending.get("return_to") or "vprofile|image_ai_return") if image_handoff else ""
+    scene3_return_label = str(pending.get("return_label") or "⬅️ Nguồn hình ảnh") if image_handoff else ""
     scene3_return_state = None
+    uiflow3_return_state = None
     if scene3_handoff and not storyboard_pending_image_owner_valid(context, pending):
         return await safe_edit_or_send(
             query,
             "⚠️ Phiên ảnh Storyboard này không còn thuộc bảng hiện tại. "
             "Bot chưa gọi nguồn tạo ảnh và chưa trừ Xu.",
         )
+    if uiflow3_handoff:
+        uiflow3_return_state = video_uiflow3_record_generated_image(
+            context,
+            uid,
+            pending,
+            delivered=False,
+        )
+        if not uiflow3_return_state:
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Phiên ảnh Video này không còn hợp lệ. "
+                "Bot chưa gọi nguồn tạo ảnh và chưa trừ Xu.",
+            )
     final_preview_cost = int(shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image") or base_cost)
     if package_used:
         package_item = active_package_item_for_user(uid, package_item_type)
@@ -135617,6 +135912,17 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
                 prompt=prompt,
                 delivered=True,
             )
+        if output_sent and uiflow3_handoff:
+            uiflow3_return_state = video_uiflow3_record_generated_image(
+                context,
+                uid,
+                pending,
+                job_id=job_id,
+                output_file_id=output_file_id,
+                image_url=image_url,
+                prompt=prompt,
+                delivered=True,
+            )
         if output_sent and image_url and (workflow_id or trend_output_id):
             update_trend_workflow_generated_image(
                 output_id=trend_output_id,
@@ -135696,6 +136002,27 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
                 parse_mode="HTML",
                 reply_markup=panel_keyboard,
             )
+        if uiflow3_handoff:
+            uiflow3_return_state = video_uiflow3_record_generated_image(
+                context,
+                uid,
+                pending,
+                job_id=job_id,
+                prompt=prompt,
+                delivered=False,
+            )
+            if uiflow3_return_state:
+                panel_text, panel_keyboard = video_uiflow3_screen_payload(
+                    uiflow3_return_state
+                )
+                return await safe_edit_or_send(
+                    query,
+                    public_image_provider_fail_message(0, False, lang)
+                    + "\n\n"
+                    + panel_text,
+                    parse_mode=None,
+                    reply_markup=panel_keyboard,
+                )
         return await context.bot.send_message(
             chat_id=query.message.chat_id,
             text=public_image_provider_fail_message(0, False, lang),
@@ -135776,6 +136103,18 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
                     parse_mode="HTML",
                     reply_markup=panel_keyboard,
                 )
+            if uiflow3_return_state:
+                panel_text, panel_keyboard = video_uiflow3_screen_payload(
+                    uiflow3_return_state
+                )
+                return await safe_edit_or_send(
+                    query,
+                    "✅ Ảnh đã gửi và được gắn đúng mục Video. "
+                    "Số dư vừa thay đổi nên TOAN AAS chưa trừ Xu.\n\n"
+                    + panel_text,
+                    parse_mode=None,
+                    reply_markup=panel_keyboard,
+                )
             return await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text="✅ Ảnh đã gửi thành công. Số dư vừa thay đổi nên TOAN AAS chưa trừ Xu; vui lòng kiểm tra số dư trước khi tạo tiếp.",
@@ -135843,6 +136182,18 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
                 + panel_text
             ),
             parse_mode="HTML",
+            reply_markup=panel_keyboard,
+        )
+    if uiflow3_return_state:
+        panel_text, panel_keyboard = video_uiflow3_screen_payload(
+            uiflow3_return_state
+        )
+        return await safe_edit_or_send(
+            query,
+            "✅ Ảnh hợp lệ đã được gửi và gắn đúng mục Video.\n"
+            f"• Số dư còn lại: {xu_number(int(credits_after or 0))} Xu\n\n"
+            + panel_text,
+            parse_mode=None,
             reply_markup=panel_keyboard,
         )
     return await context.bot.send_message(chat_id=query.message.chat_id, text=ui_text(lang, "account.balance_left", credits=int(credits_after or 0)))
@@ -171130,7 +171481,10 @@ def set_quick_image_flow(user_id, step: str = "entry", **fields) -> dict:
             "image_purpose", "purpose_label", "style", "suggested_ratio", "text_logo_caution",
             "logo_watermark_text", "ratio_back_target", "return_to", "return_label", "source_flow",
             "storyboard_scene_id", "storyboard_slot", "flow", "product", "owner", "session_id", "return_step",
-            "generation_state", "idea_id",
+            "generation_state", "idea_id", "material_type", "uiflow3_draft_id",
+            "uiflow3_parent_product", "uiflow3_target_kind", "uiflow3_target_id",
+            "uiflow3_return_step", "uiflow3_return_view", "uiflow3_active_character_id",
+            "uiflow3_active_location_id",
         }:
             limit = 300 if key == "logo_watermark_text" else 1400
             payload[key] = re.sub(r"\s+", " ", str(value or "").strip())[:limit]
@@ -171141,6 +171495,7 @@ def set_quick_image_flow(user_id, step: str = "entry", **fields) -> dict:
         elif key in {
             "suggest_offset", "prompt_variant", "storyboard_scene_index", "storyboard_prompt_version",
             "storyboard_target_index", "storyboard_target_count", "revision",
+            "uiflow3_owner_user_id", "uiflow3_owner_chat_id", "uiflow3_ui_revision",
         }:
             payload[key] = max(0, _safe_int(value, 0))
         elif key in {"logo_watermark_enabled", "logo_watermark_decided"}:
@@ -171163,14 +171518,14 @@ def get_quick_image_flow(user_id) -> dict | None:
 
 def quick_image_context_return_callback(state: dict | None = None) -> str:
     state = dict(state or {})
-    if str(state.get("source_flow") or "") == "video_scene3":
+    if str(state.get("source_flow") or "") in {"video_scene3", "video_uiflow3"}:
         return str(state.get("return_to") or "vprofile|image_ai_return")
     return "menu|main_image"
 
 
 def quick_image_context_return_label(state: dict | None = None, lang: str = "vi") -> str:
     state = dict(state or {})
-    if str(state.get("source_flow") or "") == "video_scene3":
+    if str(state.get("source_flow") or "") in {"video_scene3", "video_uiflow3"}:
         return str(state.get("return_label") or ("⬅️ Nguồn hình ảnh" if normalize_user_language(lang) == "vi" else "⬅️ Image source"))
     return "⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back"
 
@@ -171192,8 +171547,138 @@ def quick_image_callback(state: dict | None, action: str, value: str = "") -> st
     return f"{prefix}|{action}{suffix}"
 
 
+def _video_uiflow3_image_target(state: dict, target_kind: str, target_id: str) -> dict:
+    kind = str(target_kind or "").strip()
+    target = str(target_id or "").strip()
+    bible = dict(state.get("bible") or {})
+    specs = {
+        "character": ("characters", "character_id", "display_name", "description"),
+        "location": ("locations", "location_id", "name", "description"),
+        "product": ("products", "product_id", "name", "description"),
+        "prop": ("props", "prop_id", "name", "description"),
+    }
+    if kind == "source":
+        return {"kind": "source", "id": "", "name": "Ảnh nguồn", "description": ""}
+    if kind not in specs or not target:
+        raise ValueError("video_uiflow3_image_target_invalid")
+    field, id_field, name_field, description_field = specs[kind]
+    record = next(
+        (
+            dict(item)
+            for item in bible.get(field) or []
+            if str(item.get(id_field) or "") == target
+        ),
+        None,
+    )
+    if not record:
+        raise ValueError("video_uiflow3_image_target_invalid")
+    return {
+        "kind": kind,
+        "id": target,
+        "name": str(record.get(name_field) or target).strip(),
+        "description": str(record.get(description_field) or "").strip(),
+    }
+
+
+def video_uiflow3_prepare_quick_image_handoff(
+    context,
+    raw_state: dict,
+    *,
+    user_id: int,
+    target_kind: str,
+    target_id: str = "",
+) -> dict:
+    state = video_uiflow3_canonical_screen_state(raw_state)
+    saved = video_uiflow3_state(context)
+    owner_user_id = safe_int(state.get("owner_user_id"), 0)
+    owner_chat_id = safe_int(state.get("owner_chat_id"), 0)
+    if (
+        not saved
+        or str(saved.get("draft_id") or "") != str(state.get("draft_id") or "")
+        or (owner_user_id and owner_user_id != safe_int(user_id, 0))
+    ):
+        raise ValueError("video_uiflow3_image_owner_invalid")
+    target = _video_uiflow3_image_target(state, target_kind, target_id)
+    step = str((state.get("navigation") or {}).get("current_step") or "")
+    view = str(state.get("ui_view") or "")
+    expected_views = {
+        "source": ("source", ""),
+        "character": ("production_bible", "character_detail"),
+        "location": ("production_bible", "location_detail"),
+        "product": ("production_bible", "bible_extras"),
+        "prop": ("production_bible", "bible_extras"),
+    }
+    if (step, view) != expected_views[target["kind"]]:
+        raise ValueError("video_uiflow3_image_target_invalid")
+    if (
+        target["kind"] == "character"
+        and str(state.get("active_character_id") or "") != target["id"]
+    ) or (
+        target["kind"] == "location"
+        and str(state.get("active_location_id") or "") != target["id"]
+    ):
+        raise ValueError("video_uiflow3_image_target_invalid")
+
+    content = dict(state.get("content") or {})
+    topic = str(
+        content.get("original_intent")
+        or (content.get("approved_brief") or {}).get("title")
+        or video_uiflow3_product_label(state)
+    ).strip()
+    prompt = " ".join(
+        item for item in (
+            f"Tạo {target['name']} phù hợp video: {topic}.",
+            target.get("description") or "",
+            "Hình ảnh chân thật, chủ thể rõ, bố cục sạch và nhất quán với các cảnh tiếp theo.",
+        )
+        if item
+    )
+    clear_quick_image_flow(user_id)
+    return set_quick_image_flow(
+        user_id,
+        "prepared_prompt",
+        selected_topic=target["name"],
+        original_request=prompt,
+        prompt=prompt,
+        prompt_source="video_uiflow3",
+        source_flow="video_uiflow3",
+        return_to="vid3|resume",
+        return_label="⬅️ Quay lại đúng mục Video",
+        suggested_ratio=str((state.get("format") or {}).get("ratio") or "1:1"),
+        ratio_back_target="prepared_prompt",
+        uiflow3_draft_id=str(state.get("draft_id") or ""),
+        uiflow3_parent_product=str(state.get("parent_product") or ""),
+        uiflow3_owner_user_id=safe_int(user_id, 0),
+        uiflow3_owner_chat_id=owner_chat_id,
+        uiflow3_ui_revision=safe_int(state.get("ui_revision"), 0),
+        uiflow3_target_kind=target["kind"],
+        uiflow3_target_id=target["id"],
+        uiflow3_return_step=step,
+        uiflow3_return_view=view,
+        uiflow3_active_character_id=str(state.get("active_character_id") or ""),
+        uiflow3_active_location_id=str(state.get("active_location_id") or ""),
+    )
+
+
 def quick_image_video_scene3_confirmation_fields(state: dict | None = None) -> dict:
     state = dict(state or {})
+    if str(state.get("source_flow") or "") == "video_uiflow3":
+        return {
+            "origin_flow": "video_uiflow3",
+            "return_to": str(state.get("return_to") or "vid3|resume")[:120],
+            "return_label": str(state.get("return_label") or "⬅️ Quay lại Video")[:120],
+            "uiflow3_draft_id": str(state.get("uiflow3_draft_id") or "")[:120],
+            "uiflow3_parent_product": str(state.get("uiflow3_parent_product") or "")[:80],
+            "uiflow3_owner_user_id": safe_int(state.get("uiflow3_owner_user_id"), 0),
+            "uiflow3_owner_chat_id": safe_int(state.get("uiflow3_owner_chat_id"), 0),
+            "uiflow3_ui_revision": safe_int(state.get("uiflow3_ui_revision"), 0),
+            "uiflow3_target_kind": str(state.get("uiflow3_target_kind") or "")[:80],
+            "uiflow3_target_id": str(state.get("uiflow3_target_id") or "")[:120],
+            "uiflow3_return_step": str(state.get("uiflow3_return_step") or "")[:80],
+            "uiflow3_return_view": str(state.get("uiflow3_return_view") or "")[:80],
+            "uiflow3_active_character_id": str(state.get("uiflow3_active_character_id") or "")[:120],
+            "uiflow3_active_location_id": str(state.get("uiflow3_active_location_id") or "")[:120],
+        }
     if str(state.get("source_flow") or "") != "video_scene3":
         return {}
     fields = {
@@ -171201,6 +171686,8 @@ def quick_image_video_scene3_confirmation_fields(state: dict | None = None) -> d
         "return_to": str(state.get("return_to") or "vprofile|image_ai_return")[:120],
         "return_label": str(state.get("return_label") or "⬅️ Nguồn hình ảnh")[:120],
     }
+    if str(state.get("material_type") or ""):
+        fields["material_type"] = str(state.get("material_type") or "")[:80]
     if str(state.get("return_to") or "") == "vstory|image_return":
         fields.update({
             "storyboard_session_id": str(state.get("session_id") or "")[:80],
@@ -171231,6 +171718,8 @@ def storyboard_pending_image_owner_valid(context, pending: dict | None = None) -
 
 def video_scene3_image_handoff_target_step(pending: dict | None, state: dict | None = None) -> str:
     return_to = str((pending or {}).get("return_to") or "")
+    if str((pending or {}).get("material_type") or ""):
+        return "materials"
     if return_to == "vstory|image_return":
         return "storyboard2_assets"
     if return_to == "vprofile|asset_ai_return" or video_flow7_kind(state or {}) == "storyboard":
@@ -171247,7 +171736,122 @@ def video_scene3_image_handoff_panel(state: dict) -> tuple[str, InlineKeyboardMa
         return video_scene3_asset_gate_text(state), video_scene3_asset_gate_keyboard(state)
     if step == "image_source":
         return video_scene3_image_source_text(state), video_scene3_image_source_keyboard(state)
+    if step == "materials":
+        return video_scene3_materials_text(state), video_scene3_materials_keyboard()
     return video_scene3_image_assets_text(state), video_scene3_image_assets_keyboard(state)
+
+
+def video_uiflow3_record_generated_image(
+    context,
+    user_id,
+    pending: dict | None = None,
+    *,
+    job_id: int = 0,
+    output_file_id: str = "",
+    image_url: str = "",
+    prompt: str = "",
+    delivered: bool = False,
+) -> dict | None:
+    handoff = dict(pending or {})
+    if str(handoff.get("origin_flow") or handoff.get("source_flow") or "") != "video_uiflow3":
+        return None
+    state = video_uiflow3_state(context)
+    if not state:
+        return None
+    if (
+        str(handoff.get("uiflow3_draft_id") or "") != str(state.get("draft_id") or "")
+        or str(handoff.get("uiflow3_parent_product") or "") != str(state.get("parent_product") or "")
+        or safe_int(handoff.get("uiflow3_owner_user_id"), 0) != safe_int(user_id, 0)
+        or safe_int(state.get("owner_user_id"), 0) != safe_int(user_id, 0)
+        or safe_int(handoff.get("uiflow3_owner_chat_id"), 0) != safe_int(state.get("owner_chat_id"), 0)
+        or safe_int(handoff.get("uiflow3_ui_revision"), -1) != safe_int(state.get("ui_revision"), 0)
+    ):
+        return None
+    target_kind = str(handoff.get("uiflow3_target_kind") or "")
+    target_id = str(handoff.get("uiflow3_target_id") or "")
+    try:
+        _video_uiflow3_image_target(state, target_kind, target_id)
+    except ValueError:
+        return None
+    return_step = str(handoff.get("uiflow3_return_step") or "")
+    return_view = str(handoff.get("uiflow3_return_view") or "")
+    if (
+        return_step != str((state.get("navigation") or {}).get("current_step") or "")
+        or return_view != str(state.get("ui_view") or "")
+        or str(handoff.get("uiflow3_active_character_id") or "") != str(state.get("active_character_id") or "")
+        or str(handoff.get("uiflow3_active_location_id") or "") != str(state.get("active_location_id") or "")
+    ):
+        return None
+    if not delivered:
+        return state
+    artifact_id = str(output_file_id or image_url or "").strip()
+    if not artifact_id:
+        return None
+    fingerprint_seed = "|".join((str(job_id or 0), artifact_id, str(image_url or "")))
+    fingerprint = "quick_image:" + hashlib.sha256(
+        fingerprint_seed.encode("utf-8")
+    ).hexdigest()
+    metadata = {
+        "source": "quick_image_v6",
+        "source_job_id": safe_int(job_id, 0),
+        "result_url": str(image_url or "")[:1000],
+        "prompt": str(prompt or "")[:1000],
+        "delivered": True,
+    }
+    try:
+        if target_kind == "source":
+            updated = video_uiflow3.add_source_asset(
+                state,
+                asset_type="image",
+                telegram_file_id=artifact_id,
+                fingerprint=fingerprint,
+                **metadata,
+            )
+        else:
+            role = {
+                "character": "primary_identity",
+                "location": "primary_location",
+                "product": "primary_product",
+                "prop": "primary_prop",
+            }[target_kind]
+            updated = video_uiflow3.add_reference(
+                state,
+                asset_type="image",
+                owner_type=target_kind,
+                owner_id=target_id,
+                role=role,
+                telegram_file_id=artifact_id,
+                fingerprint=fingerprint,
+                **metadata,
+            )
+            for reference in updated.get("references") or []:
+                if (
+                    str(reference.get("fingerprint") or "") == fingerprint
+                    and str(reference.get("owner_type") or "") == target_kind
+                    and str(reference.get("owner_id") or "") == target_id
+                ):
+                    reference["source"] = "quick_image_v6"
+                    break
+    except (KeyError, ValueError):
+        return None
+
+    updated["navigation"]["current_step"] = return_step
+    updated = video_uiflow3_clear_transient(updated)
+    if return_view == "character_detail":
+        updated = video_uiflow3_open_view(
+            updated,
+            return_view,
+            active_character_id=target_id,
+        )
+    elif return_view == "location_detail":
+        updated = video_uiflow3_open_view(
+            updated,
+            return_view,
+            active_location_id=target_id,
+        )
+    elif return_view:
+        updated = video_uiflow3_open_view(updated, return_view)
+    return save_video_uiflow3_state(context, updated)
 
 
 def video_scene3_record_generated_image(
@@ -171265,7 +171869,13 @@ def video_scene3_record_generated_image(
     if str(pending.get("origin_flow") or "") != "video_scene3":
         return None
     state = video_profile_studio_state(context)
-    state = video_scene3_flow.set_image_source_mode(state, "create")
+    material_type = video_scene3_flow.normalize_material_type(
+        str(pending.get("material_type") or "")
+    )
+    if material_type not in {item[0] for item in video_scene3_flow.PUBLIC_MATERIAL_TYPES}:
+        material_type = ""
+    if not material_type:
+        state = video_scene3_flow.set_image_source_mode(state, "create")
     target_step = video_scene3_image_handoff_target_step(pending, state)
     if target_step == "storyboard2_assets":
         board = video_storyboard2.normalize_state(dict(state.get("storyboard2") or {}))
@@ -171309,7 +171919,7 @@ def video_scene3_record_generated_image(
         items = [dict(item) for item in assets.get("items") or [] if isinstance(item, dict)]
         storyboard_handoff = target_step == "asset_gate"
         asset_record = {
-            "type": "storyboard_frames" if storyboard_handoff else "visual_style_reference",
+            "type": material_type or ("storyboard_frames" if storyboard_handoff else "visual_style_reference"),
             "media_kind": "image",
             "file_id": str(output_file_id or "")[:240],
             "file_unique_id": "",
@@ -171373,7 +171983,7 @@ def video_scene3_record_generated_image(
             "active_material_index": len(assets["items"]),
             "image_generation_confirmed": True,
         })
-        if not storyboard_handoff:
+        if not storyboard_handoff and not material_type:
             target_step = "image_assets"
     state = video_flow6.sync_scene_state(state)
     state = video_profile_studio_step(context, state, target_step, push=False)
@@ -186898,6 +187508,23 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         uid = query.from_user.id if query.from_user else 0
         lang = get_user_language(uid) or "vi"
         quick_state = get_quick_image_flow(uid) or {}
+        if str(quick_state.get("source_flow") or "") == "video_uiflow3":
+            return_pending = {
+                **quick_state,
+                **quick_image_video_scene3_confirmation_fields(quick_state),
+            }
+            return_state = video_uiflow3_record_generated_image(
+                context,
+                uid,
+                return_pending,
+                delivered=False,
+            )
+            clear_quick_image_flow(uid)
+            if return_state:
+                return await video_uiflow3_render(query, context, return_state)
+            current = video_uiflow3_state(context)
+            if current:
+                return await video_uiflow3_render(query, context, current)
         if str(quick_state.get("source_flow") or "") == "video_scene3":
             return_pending = {**quick_state, "origin_flow": "video_scene3"}
             scene_state = video_scene3_record_generated_image(
@@ -236874,6 +237501,48 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         # Old callbacks for AI planning/logo/audio/music now return to the one
         # reference-image screen instead of reopening duplicate flows.
         return await video_profile_scene1_render(query, state, lang)
+    if action == "material_ai":
+        key = str(parts[2] if len(parts) > 2 else "")
+        material_labels = dict(video_scene3_flow.PUBLIC_MATERIAL_TYPES)
+        if key not in material_labels:
+            return await query.answer("Mục ảnh này không còn hợp lệ.", show_alert=True)
+        state = video_profile_studio_step(context, state, "materials", push=False)
+        subject = str(state.get("subject") or state.get("context") or "nội dung video").strip()
+        label = str(material_labels[key]).split("Gửi ảnh", 1)[-1].strip().lower()
+        prompt = (
+            f"Tạo ảnh {label} phù hợp với {subject}. "
+            "Chủ thể rõ, bố cục sạch, hình ảnh chân thật và nhất quán giữa các cảnh."
+        )
+        clear_quick_image_flow(uid)
+        quick_state = set_quick_image_flow(
+            uid,
+            "prepared_prompt",
+            selected_topic=str(material_labels[key]),
+            original_request=prompt,
+            prompt=prompt,
+            prompt_source="video_scene3_material",
+            source_flow="video_scene3",
+            material_type=key,
+            return_to="vprofile|image_ai_return",
+            return_label="⬅️ Ảnh tham chiếu",
+            suggested_ratio=str(state.get("aspect_ratio") or "1:1"),
+            ratio_back_target="prepared_prompt",
+        )
+        if isinstance(getattr(context, "user_data", None), dict):
+            context.user_data["video_scene3_image_handoff_active"] = True
+        return await safe_edit_or_send(
+            query,
+            quick_image_prepared_prompt_text(quick_state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_prepared_prompt_keyboard(
+                lang,
+                state=quick_state,
+                back_callback=quick_image_context_return_callback(quick_state),
+                back_label=quick_image_context_return_label(quick_state, lang),
+                context_return_callback=quick_image_context_return_callback(quick_state),
+                context_return_label=quick_image_context_return_label(quick_state, lang),
+            ),
+        )
     if action == "material_view":
         state = video_profile_studio_step(context, state, "materials_manage")
         return await video_profile_scene1_render(query, state, lang)

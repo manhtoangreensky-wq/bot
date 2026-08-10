@@ -543,9 +543,14 @@ def test_video_ai_real_summary_requires_quality_before_quote() -> None:
     query = _click(context, user_id, "vid3|summary_done", "supported-plan-save-01")
     current = bot.video_uiflow3_state(context)
 
-    assert current["navigation"]["current_step"] == "summary"
-    assert "approved_snapshot" not in current["legacy_compat"]
-    assert query.answers[-1].get("text") == "Hãy chọn model & chất lượng trước khi xác nhận báo giá."
+    assert current["navigation"]["current_step"] == "package"
+    assert current["legacy_compat"]["approved_snapshot"]["parent_product"] == "video_ai_real"
+    assert query.answers[-1].get("text") is None
+
+    query = _click(context, user_id, "vid3|quality_done", "supported-plan-save-02")
+    current = bot.video_uiflow3_state(context)
+    assert current["navigation"]["current_step"] == "package"
+    assert query.answers[-1].get("text") == "Hãy chọn một gói chất lượng trước khi xem báo giá."
 
 
 def test_public_route_metadata_matches_actual_uiflow3_entry_screens() -> None:
@@ -557,7 +562,7 @@ def test_public_route_metadata_matches_actual_uiflow3_entry_screens() -> None:
             "menu|guide_video_ai",
         ),
         "script_image_video": ("vid3|source_text",),
-        "frame_video_local": ("vid3|source_media", "vid3|source_status"),
+        "frame_video_local": ("vid3|source_media", "vid3|image_ai|source", "vid3|source_status"),
         "self_shot_scene_change": ("vid3|source_media", "vid3|source_status"),
         "storyboard_prompt": ("vid3|mode|storyboard_generate", "vid3|mode|storyboard_upload"),
         "multi_scene_film": ("vid3|mode|series_plan",),
@@ -1288,7 +1293,7 @@ def test_summary_has_one_hub_and_each_editor_returns_to_summary() -> None:
     state = _locked_state()
     state["navigation"]["current_step"] = "summary"
     text, markup = bot.video_uiflow3_screen_payload(state)
-    assert "Tóm tắt Video AI chân thật" in text
+    assert "Rà soát cuối" in text
     callbacks = _callbacks(markup)
     assert "vid3|edit|content_lock" in callbacks
     assert "vid3|edit|production_bible" in callbacks
@@ -1296,8 +1301,8 @@ def test_summary_has_one_hub_and_each_editor_returns_to_summary() -> None:
     assert "vid3|edit|scene_assignment" in callbacks
     assert "vid3|edit|branding" in callbacks
     labels = [label for row in _rows(markup) for label, _callback in row]
-    assert any("Xác nhận chất lượng" in label for label in labels)
-    assert not any("Tiếp tục chọn gói" in label for label in labels)
+    assert any("Hoàn thành rà soát" in label for label in labels)
+    assert not any("Xu/cảnh" in label for label in labels)
     assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["video_ai_real"]["legacy_entry_callback"] not in callbacks
 
     editor = video_uiflow3.begin_summary_edit(state, "production_bible")
@@ -1402,7 +1407,6 @@ def test_summary_saves_planning_voice_without_claiming_render_readiness() -> Non
     state["owner_user_id"] = user_id
     state["owner_chat_id"] = user_id
     state["navigation"]["current_step"] = "summary"
-    state = bot.video_ai_real_apply_prompt_model(state, "veo31_fast_8")
     bot.save_video_uiflow3_state(context, state)
 
     assert "char_01_voice_not_server_renderable" in video_uiflow3.readiness_errors(state)
@@ -1411,6 +1415,10 @@ def test_summary_saves_planning_voice_without_claiming_render_readiness() -> Non
     current = bot.video_uiflow3_state(context)
     assert current["legacy_compat"]["approved_snapshot"]["parent_product"] == "video_ai_real"
     assert current["legacy_compat"]["commercial_tail_ready"] is False
+    assert current["navigation"]["current_step"] == "package"
+    _click_visible(context, user_id, "vid3|quality|300", "planning-voice-quality-01")
+    _click_visible(context, user_id, "vid3|quality_done", "planning-voice-quality-02")
+    current = bot.video_uiflow3_state(context)
     assert current["navigation"]["current_step"] == "invoice"
     assert current["side_effects"] == {
         "provider_calls": 0,
@@ -1821,7 +1829,7 @@ def test_corrupt_or_catalog_parent_resume_fails_closed_without_cross_product_ren
     assert "Phien lap ke hoach da het" in str(query.answers[-1].get("text") or "")
 
 
-def test_resume_normalizes_an_unrendered_legacy_step_before_scoping_new_buttons() -> None:
+def test_resume_keeps_the_rendered_quality_step_and_scopes_new_buttons() -> None:
     user_id = 970066
     context = SimpleNamespace(user_data={})
     state = _locked_state()
@@ -1833,11 +1841,10 @@ def test_resume_normalizes_an_unrendered_legacy_step_before_scoping_new_buttons(
     _click(context, user_id, "vid3|resume", "resume-normalize-01")
 
     resumed = bot.video_uiflow3_state(context)
-    assert resumed["navigation"]["current_step"] == "production_bible"
-    _text, markup = bot.video_uiflow3_screen_payload(resumed)
-    assert "vid3|view|character_count" in _callbacks(markup)
-    _click(context, user_id, "vid3|view|character_count", "resume-normalize-02")
-    assert bot.video_uiflow3_state(context)["ui_view"] == "character_count"
+    assert resumed["navigation"]["current_step"] == "package"
+    text, markup = bot.video_uiflow3_screen_payload(resumed)
+    assert "Chọn chất lượng" in text
+    assert "vid3|quality|300" in _callbacks(markup)
 
 
 def test_resume_discards_a_child_view_owned_by_another_step_instead_of_rendering_dead_buttons() -> None:
