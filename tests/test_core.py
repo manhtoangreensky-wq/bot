@@ -344,7 +344,8 @@ def test_start_keyboard_callbacks_unchanged():
         for row in bot.localized_main_menu_keyboard(False, "vi").inline_keyboard
     ]
     assert rows == [
-        [("🆓 Công cụ miễn phí", "freehub|main", None), ("👤 Tài khoản", "menu|main_profile", None)],
+        [("🆓 Công cụ miễn phí", "freehub|main", None)],
+        [("💎 Chat Pro • 4.5/22.5 Xu/1K", "menu|chat_pro", None), ("👤 Tài khoản", "menu|main_profile", None)],
         [("🖼 Tạo ảnh AI", "menu|main_image", None), ("🎬 Tạo video AI", "menu|main_video", None)],
         [("🎧 Studio âm thanh", "music_quick|showroom|root", None), ("🌐 Dịch thuật", "menu|translate", None)],
         [("📝 Ghi chú / Tài liệu", "menu|main_memory", None), ("📚 Hướng dẫn", "menu|main_guide", None)],

@@ -100,6 +100,7 @@ import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subdub_long_media, subdub_media_preflight, subdub_provider_contract, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import ai_chatbot_copilot, cskh_session_memory, telegram_business_support, telegram_transport
+from services import public_chat_media, public_chat_runtime, public_chat_store
 from services import ffmpeg_text
 from services import voice_clone_pipeline
 from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_maintenance as storage_maintenance_service, storage_migration, video_final_output, video_provider_catalog, video_provider_router, worker_auth
@@ -5667,6 +5668,9 @@ def init_db():
     video_profile_catalog.seed_catalog(conn)
     ensure_broadcast_lite_schema(conn)
     cskh_session_memory.ensure_schema(conn)
+    # Public Chat owns only its isolated request/turn tables. Existing billing,
+    # PayOS, CSKH, SubDub, Music and Video tables are untouched.
+    public_chat_store.ensure_schema(conn)
     conn.commit()
     conn.close()
 
@@ -69421,9 +69425,348 @@ async def maybe_send_free_hub_promo(target, user_id, lang: str, success_count: i
     )
     await target.reply_text(text, reply_markup=free_hub_soft_promo_keyboard(lang))
 
+
+def public_chat_menu_text(user_id, lang: str = "vi") -> str:
+    lang = normalize_user_language(lang) or "vi"
+    modes = ensure_user_modes(user_id)
+    mode = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") in {"pro", "deep"} else "free"
+    admin = is_admin_user(user_id)
+    credits = int(get_user(user_id)[0] or 0)
+    balance = "Vô hạn" if admin and lang == "vi" else ("Unlimited" if admin else f"{credits} Xu")
+    if lang == "en":
+        return (
+            "💬 <b>Public Chat</b>\n\n"
+            f"Mode: <b>{'Chat Pro — Opus 4.8' if mode == 'pro' else 'Free Chat — Gemini'}</b>\n"
+            f"Balance: <b>{html.escape(balance)}</b>\n"
+            "Free: 20 successful replies per Vietnam day; failures do not consume quota.\n"
+            f"Pro: Claude Opus 4.8, {public_chat_runtime.CHAT_PRO_RATE_LABEL} input/output; price includes ×3, billed by actual usage, no daily cap while Xu is sufficient.\n"
+            "Memory: 48 hours for public chat only; text replies only. Owner/Admin: free and unlimited."
+        )
+    if lang == "zh":
+        return (
+            "💬 <b>公开聊天</b>\n\n"
+            f"当前模式: <b>{'Chat Pro — Opus 4.8' if mode == 'pro' else '免费 Gemini'}</b>\n"
+            f"余额: <b>{html.escape(balance)}</b>\n"
+            "免费聊天每天每个账号 20 次成功回复；失败不扣次数。\n"
+            f"Pro 使用 Claude Opus 4.8，{public_chat_runtime.CHAT_PRO_RATE_LABEL} input/output；单价已含 ×3，按实际 usage 计费，不设每日次数上限。\n"
+            "公开聊天记忆 48 小时，仅返回文字；Owner/Admin 免费无限。"
+        )
+    return (
+        "💬 <b>Chat công khai</b>\n\n"
+        f"• Chế độ hiện tại: <b>{'Chat Pro — Opus 4.8' if mode == 'pro' else 'Chat miễn phí — Gemini'}</b>\n"
+        f"• Số dư: <b>{html.escape(balance)}</b>\n"
+        "• Free: 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt\n"
+        f"• Pro: Claude Opus 4.8, {public_chat_runtime.CHAT_PRO_RATE_LABEL} input/output; đơn giá đã gồm ×3, tính usage thực tế, không giới hạn ngày khi đủ Xu\n"
+        "• Bộ nhớ nối tiếp 48 giờ, chỉ thuộc Chat công khai; chỉ trả text\n"
+        "• Owner/Admin: miễn phí và không giới hạn"
+    )
+
+
+def public_chat_menu_keyboard(user_id, lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = normalize_user_language(lang) or "vi"
+    current = ensure_user_modes(user_id).get("chat_mode") or "normal"
+    pro = normalize_chat_tier(current) in {"pro", "deep"}
+    if lang == "zh":
+        toggle = "⏹ 关闭 Chat Pro" if pro else "💎 开启 Chat Pro"
+        free = "🆓 免费聊天"
+        account = "👤 我的账户"
+        main = "🏠 主菜单"
+    elif lang == "en":
+        toggle = "⏹ Disable Chat Pro" if pro else "💎 Enable Chat Pro"
+        free = "🆓 Free Chat"
+        account = "👤 Account"
+        main = "🏠 Main menu"
+    else:
+        toggle = "⏹ Tắt Chat Pro" if pro else "💎 Bật Chat Pro"
+        free = "🆓 Chat miễn phí"
+        account = "👤 Tài khoản"
+        main = "🏠 Menu chính"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(toggle, callback_data="menu|chat_pro_toggle")],
+        [InlineKeyboardButton(free, callback_data="menu|chat_free"), InlineKeyboardButton(account, callback_data="menu|main_profile")],
+        [InlineKeyboardButton(main, callback_data="menu|main")],
+    ])
+
+
+def public_chat_free_text(lang: str = "vi") -> str:
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "en":
+        return "🆓 <b>Free Chat</b>\n\nGemini 3.6 Flash; 20 successful replies per Vietnam day/account. Failed replies do not consume a turn. Memory is isolated to 48 hours and output is text-only."
+    if lang == "zh":
+        return "🆓 <b>免费 Chat</b>\n\n使用 Gemini 3.6 Flash。每个账号每天（越南日期）最多 20 次成功回复；失败不扣次数。记忆仅保留 48 小时，回复只返回文字。"
+    return "🆓 <b>Chat miễn phí</b>\n\nDùng Gemini 3.6 Flash. Mỗi tài khoản tối đa 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt. Bộ nhớ chỉ 48 giờ và câu trả lời chỉ là text."
+
+
+def _public_chat_failure_text(status: str, mode: str, lang: str = "vi") -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"free_quota_exhausted", "quota_exhausted"}:
+        return "⚠️ Bạn đã dùng hết 20 lượt Chat miễn phí hôm nay. Ngày Việt Nam mới sẽ tự mở lại."
+    if normalized in {"insufficient_balance", "insufficient_xu"}:
+        return "❌ Không đủ Xu cho Chat Pro. Bot chưa gọi Opus và chưa trừ thêm Xu."
+    if normalized == "unsupported":
+        return "⚠️ Nội dung này chưa thuộc năng lực của chế độ Chat đang chọn. Bot chưa gọi AI và chưa trừ Xu."
+    if normalized == "duplicate":
+        return "ℹ️ Tin nhắn trùng đã được xử lý; bot không gửi lặp câu trả lời."
+    return "⚠️ AI đang bận hoặc không trả lời hợp lệ. Bot chưa trừ Xu/lượt; bạn thử lại sau."
+
+
+async def send_public_chat_text(
+    target,
+    text: str,
+    footer: str = "",
+    *,
+    conn=None,
+    request_id: str = "",
+    start_index: int = 0,
+) -> None:
+    chunks = public_chat_runtime.split_public_chat_text(text)
+    if footer and chunks:
+        chunks[-1] = f"{chunks[-1]}\n\n{footer}"
+    cursor = max(0, min(int(start_index or 0), len(chunks)))
+    for index, chunk in enumerate(chunks[cursor:], start=cursor):
+        await target.reply_text(chunk)
+        if conn is not None and request_id:
+            checkpoint = public_chat_store.advance_public_chat_delivery(
+                conn,
+                request_id,
+                next_cursor=index + 1,
+                total_chunks=len(chunks),
+            )
+            conn.commit()
+            if not checkpoint.get("updated"):
+                raise RuntimeError("public chat delivery checkpoint failed")
+
+
+async def handle_public_chat_text(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    text_override: str = "",
+    mode_override: str = "",
+    attachments_override=(),
+    creation_intent_override=None,
+) -> bool:
+    message = getattr(update, "message", None)
+    user = getattr(update, "effective_user", None)
+    chat = getattr(update, "effective_chat", None)
+    raw_text = str(text_override or getattr(message, "text", "") or "").strip()
+    if not message or not user or not raw_text:
+        return False
+    uid = user.id
+    modes = ensure_user_modes(uid)
+    selected = str(mode_override or "").strip().lower()
+    if not selected:
+        selected = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") in {"pro", "deep"} else "free"
+    selected = "pro" if selected in {"pro", "deep"} else "free"
+    lang = get_user_language(uid) or "vi"
+    if not attachments_override:
+        intent_text = raw_text if creation_intent_override is None else str(creation_intent_override)
+        creation = public_chat_media.detect_creation_intent(intent_text)
+        if creation in {"image", "video"}:
+            label = "🖼 Mở Tạo ảnh AI" if creation == "image" else "🎬 Mở Tạo video AI"
+            callback = "menu|main_image" if creation == "image" else "menu|main_video"
+            await message.reply_text("Tác vụ tạo media dùng dịch vụ riêng có màn xác nhận. Chat chỉ trả text; bot chưa gọi provider và chưa trừ Xu.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=callback)]]))
+            return True
+    conn = db_connect()
+    result: dict = {"ok": False, "status": "provider_failure", "mode": selected}
+    remaining = 0
+    try:
+        public_chat_store.ensure_schema(conn)
+        admin = is_admin_user(uid)
+        chat_id = chat.id if chat else uid
+        source_message_id = getattr(message, "message_id", "") or f"legacy-{time.time_ns()}"
+        pending = public_chat_store.load_pending_public_chat_delivery(
+            conn,
+            owner_id=uid,
+            chat_id=chat_id,
+        )
+        if pending is not None:
+            pending_mode = "pro" if str(pending.get("mode") or "").lower() == "pro" else "free"
+            pending_remaining = public_chat_store.free_quota_status(
+                conn, uid, is_admin=admin
+            ).get("remaining", 0)
+            if pending_mode == "pro":
+                pending_footer = (
+                    "💎 Chat Pro • Owner/Admin: miễn phí"
+                    if admin
+                    else f"💎 Chat Pro • -{int(pending.get('charged_xu') or 0)} Xu • usage thực tế"
+                )
+            else:
+                pending_footer = (
+                    "🆓 Chat miễn phí • Owner/Admin: miễn phí, không giới hạn"
+                    if admin
+                    else f"🆓 Chat miễn phí • còn {int(pending_remaining or 0)} lượt hôm nay"
+                )
+            try:
+                await send_public_chat_text(
+                    message,
+                    str(pending.get("text") or ""),
+                    pending_footer,
+                    conn=conn,
+                    request_id=str(pending.get("request_id") or ""),
+                    start_index=int(pending.get("delivery_cursor") or 0),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "public chat pending delivery failed | error=%s",
+                    type(exc).__name__,
+                )
+                return True
+            if str(pending.get("source_message_id") or "") == str(source_message_id):
+                return True
+        if context is not None and getattr(context, "bot", None):
+            try:
+                await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+            except Exception:
+                pass
+        result = await public_chat_runtime.run_public_chat_request(
+            conn=conn,
+            owner_id=uid,
+            chat_id=chat_id,
+            source_message_id=source_message_id,
+            text=raw_text,
+            mode=selected,
+            lang=lang,
+            gemini_client=gemini_client if GEMINI_ENABLED else None,
+            key4u_provider=key4u_provider_instance() if selected == "pro" else None,
+            is_admin=admin,
+            record_credit_event=record_credit_event,
+            attachments=tuple(attachments_override or ()),
+        )
+        remaining = public_chat_store.free_quota_status(conn, uid, is_admin=admin).get("remaining", 0)
+        if not result.get("ok"):
+            await message.reply_text(_public_chat_failure_text(str(result.get("status") or ""), selected, lang))
+            return True
+        if selected == "pro":
+            footer = "💎 Chat Pro • Owner/Admin: miễn phí" if admin else f"💎 Chat Pro • -{int(result.get('charged_xu') or result.get('cost_xu') or 0)} Xu • usage thực tế"
+        else:
+            footer = (
+                "🆓 Chat miễn phí • Owner/Admin: miễn phí, không giới hạn"
+                if admin
+                else f"🆓 Chat miễn phí • còn {int(remaining or 0)} lượt hôm nay"
+            )
+        try:
+            await send_public_chat_text(
+                message,
+                str(result.get("text") or ""),
+                footer,
+                conn=conn,
+                request_id=str(result.get("request_id") or ""),
+                start_index=int(result.get("delivery_cursor") or 0),
+            )
+        except Exception as exc:
+            logger.warning(
+                "public chat delivery deferred | error=%s",
+                type(exc).__name__,
+            )
+        return True
+    except Exception as exc:
+        logger.warning("public chat orchestration failed | error=%s", type(exc).__name__)
+    finally:
+        conn.close()
+    return True
+
+
+async def handle_public_chat_attachment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    message = getattr(update, "message", None)
+    user = getattr(update, "effective_user", None)
+    if not message or not user:
+        return False
+    media = None
+    mime_type = ""
+    file_name = ""
+    duration = 0.0
+    if getattr(message, "photo", None):
+        media = message.photo[-1]
+        mime_type, file_name = "image/jpeg", "photo.jpg"
+    elif getattr(message, "voice", None):
+        media = message.voice
+        mime_type, file_name = str(getattr(media, "mime_type", "") or "audio/ogg"), "voice.ogg"
+        duration = float(getattr(media, "duration", 0) or 0)
+    elif getattr(message, "audio", None):
+        media = message.audio
+        mime_type = str(getattr(media, "mime_type", "") or "audio/mpeg")
+        file_name = str(getattr(media, "file_name", "") or "audio.mp3")
+        duration = float(getattr(media, "duration", 0) or 0)
+    elif getattr(message, "video", None):
+        media = message.video
+        mime_type = str(getattr(media, "mime_type", "") or "video/mp4")
+        file_name = str(getattr(media, "file_name", "") or "video.mp4")
+        duration = float(getattr(media, "duration", 0) or 0)
+    elif getattr(message, "document", None):
+        media = message.document
+        mime_type = str(getattr(media, "mime_type", "") or "")
+        file_name = str(getattr(media, "file_name", "") or "document")
+    if media is None:
+        return False
+    mime_type = mime_type.lower().split(";", 1)[0]
+    declared = int(getattr(media, "file_size", 0) or 0)
+    is_text_file = mime_type == "text/plain" or Path(file_name).suffix.lower() == ".txt"
+    kind = public_chat_media.classify_attachment(mime_type, file_name)
+    if not is_text_file and kind is None:
+        await message.reply_text("⚠️ Chat không hỗ trợ loại file này. Bot chưa tải file, chưa gọi AI và chưa trừ Xu.")
+        return True
+    if declared <= 0:
+        await message.reply_text("⚠️ Không xác minh được dung lượng file. Bot chưa tải file, chưa gọi AI và chưa trừ Xu.")
+        return True
+    declared_limit = 1 * 1024 * 1024 if is_text_file else public_chat_media.PUBLIC_ATTACHMENT_LIMITS[kind]
+    if declared > declared_limit:
+        await message.reply_text("⚠️ File vượt quá giới hạn dung lượng của Chat. Bot chưa tải file, chưa gọi AI và chưa trừ Xu.")
+        return True
+    modes = ensure_user_modes(user.id)
+    selected = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") in {"pro", "deep"} else "free"
+    if not is_text_file and public_chat_media.capability_decision(selected, [kind]).get("route") == "unsupported":
+        await message.reply_text("⚠️ Chat Pro hiện nhận text, ảnh và PDF. Audio/video hãy dùng Chat miễn phí hoặc công cụ chuyên dụng; bot chưa trừ Xu.")
+        return True
+    caption = str(getattr(message, "caption", "") or "").strip()
+    creation = public_chat_media.detect_creation_intent(caption)
+    if creation in {"image", "video"}:
+        callback = "menu|main_image" if creation == "image" else "menu|main_video"
+        label = "🖼 Mở Tạo ảnh AI" if creation == "image" else "🎬 Mở Tạo video AI"
+        await message.reply_text("Tạo media dùng dịch vụ riêng có màn xác nhận. Bot chưa gọi provider và chưa trừ Xu.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=callback)]]))
+        return True
+    if not caption:
+        caption = {"image": "Hãy phân tích ảnh này và trả lời bằng text.", "audio": "Hãy nghe, tóm tắt audio này và trả lời bằng text.", "video": "Hãy xem, tóm tắt video này và trả lời bằng text.", "pdf": "Hãy đọc, tóm tắt tài liệu PDF này và trả lời bằng text.", "text": "Hãy đọc nội dung file text này và trả lời bằng text."}[kind or "text"]
+    temp_path = ""
+    try:
+        suffix = Path(file_name).suffix or {"image": ".jpg", "audio": ".ogg", "video": ".mp4", "pdf": ".pdf", "text": ".txt"}[kind or "text"]
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as stream:
+            temp_path = stream.name
+        telegram_file = await context.bot.get_file(media.file_id)
+        await telegram_file.download_to_drive(custom_path=temp_path)
+        if is_text_file:
+            text_path = Path(temp_path)
+            actual_bytes = text_path.stat().st_size
+            if actual_bytes < 1 or actual_bytes > declared_limit:
+                raise ValueError("text attachment size is outside the allowed range")
+            with text_path.open("r", encoding="utf-8", errors="replace") as stream:
+                content = stream.read(1_000_001)
+            if len(content) > 1_000_000:
+                raise ValueError("text attachment content exceeds the allowed range")
+            return await handle_public_chat_text(
+                update,
+                context,
+                text_override=f"{caption}\n\n{content}",
+                mode_override=selected,
+                creation_intent_override=caption,
+            )
+        attachment = public_chat_media.validate_attachment(temporary_path=Path(temp_path), mime_type=mime_type, file_name=file_name, declared_bytes=declared, duration_seconds=duration)
+        return await handle_public_chat_text(update, context, text_override=caption, mode_override=selected, attachments_override=(attachment,))
+    except Exception as exc:
+        logger.warning("public chat attachment rejected | error=%s", type(exc).__name__)
+        await message.reply_text("⚠️ Không đọc được file hợp lệ. Bot đã xóa file tạm, chưa gọi AI và chưa trừ Xu.")
+        return True
+    finally:
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
+        [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main")],
+        [InlineKeyboardButton(f"💎 Chat Pro • {public_chat_runtime.CHAT_PRO_RATE_LABEL}", callback_data="menu|chat_pro"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
         [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
         [InlineKeyboardButton("🎧 Studio âm thanh", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
         [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
@@ -69469,7 +69812,8 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
         rows = [
-            [InlineKeyboardButton("🆓 免费工具", callback_data="freehub|main"), InlineKeyboardButton("👤 我的账户", callback_data="menu|main_profile")],
+            [InlineKeyboardButton("🆓 免费工具", callback_data="freehub|main")],
+            [InlineKeyboardButton(f"💎 Chat Pro • {public_chat_runtime.CHAT_PRO_RATE_LABEL}", callback_data="menu|chat_pro"), InlineKeyboardButton("👤 我的账户", callback_data="menu|main_profile")],
             [InlineKeyboardButton("🖼 AI 图片", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI 视频", callback_data="menu|main_video")],
             [InlineKeyboardButton("🎧 音频 Studio", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 翻译/字幕/配音 Studio", callback_data="menu|translate")],
             [InlineKeyboardButton("📝 笔记 / 文件", callback_data="menu|main_memory"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
@@ -69481,7 +69825,8 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         return InlineKeyboardMarkup(rows)
     if lang == "vi":
         rows = [
-            [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
+            [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main")],
+            [InlineKeyboardButton(f"💎 Chat Pro • {public_chat_runtime.CHAT_PRO_RATE_LABEL}", callback_data="menu|chat_pro"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
             [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
             [InlineKeyboardButton("🎧 Studio âm thanh", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
             [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
@@ -69492,7 +69837,8 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
             rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
         return InlineKeyboardMarkup(rows)
     rows = [
-        [InlineKeyboardButton("🆓 Free tools", callback_data="freehub|main"), InlineKeyboardButton("👤 My Account", callback_data="menu|main_profile")],
+        [InlineKeyboardButton("🆓 Free tools", callback_data="freehub|main")],
+        [InlineKeyboardButton(f"💎 Chat Pro • {public_chat_runtime.CHAT_PRO_RATE_LABEL}", callback_data="menu|chat_pro"), InlineKeyboardButton("👤 My Account", callback_data="menu|main_profile")],
         [InlineKeyboardButton("🖼 AI Image", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI Video", callback_data="menu|main_video")],
         [InlineKeyboardButton("🎧 Audio Studio", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 Translation / Subtitle / Dubbing Studio", callback_data="menu|translate")],
         [InlineKeyboardButton("📝 Notes / Docs", callback_data="menu|main_memory"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
@@ -120860,6 +121206,17 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action not in {"hint_note", "hint_search_note"}:
         clear_memory_guided_pending(query.from_user.id)
     clear_music_guided_pending(query.from_user.id)
+    if action == "chat_pro":
+        return await safe_edit_query_message(query, public_chat_menu_text(query.from_user.id, lang), reply_markup=public_chat_menu_keyboard(query.from_user.id, lang))
+    if action == "chat_free":
+        set_user_chat_mode(query.from_user.id, "normal", username=query.from_user.username or query.from_user.first_name or "", note="Public Chat Free selected from menu")
+        return await safe_edit_query_message(query, public_chat_free_text(lang), reply_markup=public_chat_menu_keyboard(query.from_user.id, lang))
+    if action == "chat_pro_toggle":
+        current = ensure_user_modes(query.from_user.id).get("chat_mode") or "normal"
+        next_mode = "normal" if normalize_chat_tier(current) in {"pro", "deep"} else "pro"
+        set_user_chat_mode(query.from_user.id, next_mode, username=query.from_user.username or query.from_user.first_name or "", note="Public Chat Pro toggled from menu")
+        return await safe_edit_query_message(query, public_chat_menu_text(query.from_user.id, lang), reply_markup=public_chat_menu_keyboard(query.from_user.id, lang))
+
     admin_only = {"affiliate", "operator", "admin", "system", "finance", "billing", "admin_packages", "admin_provider", "internal_archive"}
     admin_only_prefixes = (
         "finance_",
@@ -192346,12 +192703,12 @@ def chat_pro_usage_text() -> str:
         "Cách dùng:\n"
         "<code>/chat_pro phân tích kế hoạch bán hàng trong 7 ngày</code>\n"
         "<code>/chat_deep lập kế hoạch ra mắt beta</code>\n\n"
-        "Giá:\n"
-        f"• Chat thường: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công\n"
-        f"• Chat Pro: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công\n"
-        f"• Chat Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công\n"
-        "• Hạng thành viên được giảm Xu khi dùng dịch vụ đủ điều kiện; xem /pricing\n"
-        "AI lỗi/quota/công cụ quá tải: không trừ Xu."
+        "Chính sách:\n"
+        "• Free Gemini: <b>0 Xu</b>, 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt\n"
+        f"• Chat Pro Opus 4.8: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; đơn giá đã gồm ×3 và tính theo usage thực tế\n"
+        "• Pro không giới hạn lượt/ngày khi đủ Xu; <code>/chat_deep</code> là alias của Pro\n"
+        "• Owner/Admin: miễn phí và không giới hạn\n"
+        "AI lỗi/quota/công cụ quá tải: không trừ Xu; bộ nhớ Public Chat giữ 48 giờ."
     )
 
 def build_chat_pro_prompt(user_prompt, tier=CHAT_TIER_PRO, model_level="standard"):
@@ -192643,10 +193000,10 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Translate mode: <code>{html.escape(modes.get('translate_mode_target') or 'off')}</code>",
         f"• Updated: <code>{html.escape(modes.get('updated_at') or '-')}</code>",
         "",
-        "<b>Chi phí chat</b>",
-        f"• Normal Chat: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công",
-        f"• Chat Pro: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công",
-        f"• Chat Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công",
+        "<b>Public Chat</b>",
+        "• Free Gemini: <b>0 Xu</b>, 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt",
+        f"• Pro Opus 4.8: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; đơn giá đã gồm ×3, tính usage thực tế, không giới hạn lượt/ngày khi đủ Xu",
+        "• Chat Deep là alias của Pro; Owner/Admin miễn phí và không giới hạn",
         "• AI lỗi/quota/công cụ quá tải: không trừ Xu",
         "",
         member_note,
@@ -192654,8 +193011,8 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Lệnh đổi chế độ</b>",
         "• <code>/chat_pro_on</code> — bật Chat Pro persistent",
         "• <code>/chat_pro_off</code> — tắt Chat Pro về normal",
-        "• <code>/chat_deep_on</code> — bật Chat Deep persistent",
-        "• <code>/chat_deep_off</code> — tắt Chat Deep về normal",
+        "• <code>/chat_deep_on</code> — alias bật Chat Pro persistent",
+        "• <code>/chat_deep_off</code> — alias tắt Chat Pro về Free",
         "• <code>/translate_mode en</code> — bật dịch tự động",
         "• <code>/translate_mode_off</code> — tắt dịch tự động",
         "",
@@ -192677,15 +193034,16 @@ async def set_chat_mode_command(update: Update, mode: str, command: str, note: s
     if mode == "pro":
         text = (
             "✅ <b>Đã bật Chat Pro.</b>\n\n"
-            f"• Chi phí: <b>{CHAT_COST_PRO} Xu</b> / lượt AI trả lời thành công.\n"
+            f"• Giá: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; đơn giá đã gồm ×3 và tính theo usage thực tế.\n"
+            "• Không giới hạn lượt/ngày khi đủ Xu; Owner/Admin miễn phí và không giới hạn.\n"
             "• Nếu AI lỗi hoặc công cụ quá tải, không trừ Xu.\n\n"
             "Bot sẽ dùng Chat Pro cho đến khi bạn tắt bằng <code>/chat_pro_off</code>."
         )
     elif mode == "deep":
         text = (
-            "✅ <b>Đã bật Chat Deep.</b>\n\n"
-            f"⚠️ Chi phí: từ <b>{CHAT_COST_DEEP_BASE} Xu</b> / lượt AI trả lời thành công.\n"
-            "Tác vụ dài/sâu có thể tốn nhiều Xu hơn khi hệ thống mở tính theo dữ liệu.\n"
+            "✅ <b>Đã bật Chat Pro qua alias Chat Deep.</b>\n\n"
+            f"• Giá: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; đơn giá đã gồm ×3 và tính theo usage thực tế.\n"
+            "• Không giới hạn lượt/ngày khi đủ Xu; Owner/Admin miễn phí và không giới hạn.\n"
             "Nếu AI lỗi hoặc công cụ quá tải, không trừ Xu.\n\n"
             "Gõ <code>/chat_deep_off</code> để tắt."
         )
@@ -192700,16 +193058,20 @@ async def cmd_chat_pro_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await set_chat_mode_command(update, "normal", "/chat_pro_off", "User disabled Chat Pro")
 
 async def cmd_chat_deep_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await set_chat_mode_command(update, "deep", "/chat_deep_on", "User enabled persistent Chat Deep")
+    await set_chat_mode_command(update, "pro", "/chat_deep_on", "Legacy Chat Deep alias enabled Chat Pro")
 
 async def cmd_chat_deep_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await set_chat_mode_command(update, "normal", "/chat_deep_off", "User disabled Chat Deep")
+    await set_chat_mode_command(update, "normal", "/chat_deep_off", "Legacy Chat Deep alias disabled Chat Pro")
 
 async def cmd_chat_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await run_one_shot_chat_command(update, context, CHAT_TIER_PRO, "/chat_pro")
+    prompt = " ".join(context.args or []).strip()
+    if not prompt:
+        lang = get_user_language(update.effective_user.id) or "vi"
+        return await update.message.reply_text(public_chat_menu_text(update.effective_user.id, lang), parse_mode="HTML", reply_markup=public_chat_menu_keyboard(update.effective_user.id, lang))
+    return await handle_public_chat_text(update, context, text_override=prompt, mode_override="pro")
 
 async def cmd_chat_deep(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await run_one_shot_chat_command(update, context, CHAT_TIER_DEEP, "/chat_deep")
+    return await cmd_chat_pro(update, context)
 
 async def run_one_shot_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str, command: str):
     uid = update.effective_user.id
@@ -192776,18 +193138,17 @@ async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
         "🤖 <b>AI Models trong TOAN AAS</b>",
         "",
-        "<b>Chat thường</b>",
-        "• Auto Fast AI — dùng model nhanh/tiết kiệm.",
-        "• Phù hợp hỏi đáp, caption, sửa nội dung, ý tưởng nhanh.",
-        f"• Giá: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công.",
+        "<b>Free Chat</b>",
+        "• Gemini 3.6 Flash — 0 Xu.",
+        "• 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt.",
+        "• Bộ nhớ Public Chat riêng 48 giờ.",
         "",
         "<b>Chat Pro</b>",
-        "• Chế độ trả lời nâng cao cho nội dung dài hơn, yêu cầu kỹ hơn.",
-        f"• Giá: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công.",
+        "• Claude Opus 4.8 — tính usage thực tế, không giới hạn lượt/ngày khi đủ Xu.",
+        f"• Giá: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; đơn giá đã gồm ×3.",
         "",
-        "<b>Chat Deep</b>",
-        "• Dùng cho chiến lược, hệ thống, code/debug, nội dung lớn.",
-        f"• Giá từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công.",
+        "<b>Chat Deep</b>: alias của Chat Pro, không có giá fixed riêng.",
+        "• Owner/Admin miễn phí và không giới hạn.",
         "• AI lỗi/quota/công cụ quá tải: không trừ Xu.",
         "",
         "Kiểm tra giá: <code>/pricing</code>",
@@ -212692,6 +213053,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_frame_video_photo(update, context):
         return
 
+    if await handle_public_chat_attachment(update, context):
+        return
+
     remember_last_user_file(update)
     cache_recent_media_state(update)
     await update.message.reply_text(
@@ -212795,6 +213159,8 @@ async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAU
         return
 
     if await handle_image_menu_pending_document(update, context):
+        return
+    if await handle_public_chat_attachment(update, context):
         return
     if update.effective_user and getattr(update.message, "document", None):
         document = update.message.document
@@ -212928,10 +213294,12 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if await handle_music_guided_pending_media(update, context):
         return
-    media_kind = cache_recent_media_state(update)
-    remember_last_media(update)
     if await handle_video_finalization_pending_media(update, context):
         return
+    if await handle_public_chat_attachment(update, context):
+        return
+    media_kind = cache_recent_media_state(update)
+    remember_last_media(update)
     if update.effective_user:
         save_translation_request(update.effective_user.id, "voice")
     if media_kind == "audio" and getattr(update.message, "audio", None):
@@ -241714,6 +242082,8 @@ async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_
         return
     if await handle_self_scene_pending_upload(update, context):
         return
+    if await handle_public_chat_attachment(update, context):
+        return
     media_kind = cache_recent_media_state(update)
     remember_last_media(update)
     if update.effective_user:
@@ -242514,22 +242884,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await handle_auto_translate_message(update, context, text, translate_target)
 
     detected_video_url = extract_supported_video_url(text)
-    if detected_video_url:
-        route = {"action": "download", "data": detected_video_url}
-    else:
-        if not gemini_client and not openai_client and not shopaikey_public_chat_fallback_enabled():
-            return await update.message.reply_text("⚠️ AI chat đang bận hoặc hết quota tạm thời.\nBot chưa trừ Xu. Vui lòng thử lại sau.")
-        if not gemini_client and not openai_client and shopaikey_public_chat_fallback_enabled():
-            route = {"action": "general", "data": text}
-        else:
-            try:
-                route_raw = AgentGemini.chat(
-                    "Phân loại: 'voice' (đọc văn bản), 'download' (URL video), 'general' (còn lại). Trả về JSON.",
-                    text, uid, is_json=True
-                )
-                route = json.loads(route_raw)
-            except Exception:
-                route = {"action": "general", "data": text}
+    if not detected_video_url:
+        return await handle_public_chat_text(update, context)
+    route = {"action": "download", "data": detected_video_url}
 
     act  = route.get("action", "general")
     data = route.get("data", text)

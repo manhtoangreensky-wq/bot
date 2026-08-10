@@ -84,9 +84,10 @@ def test_main_menu_layout_regular_user():
     markup = bot.localized_main_menu_keyboard(False, "vi")
     labels = _labels(markup)
 
-    assert labels[0] == ["🆓 Công cụ miễn phí", "👤 Tài khoản"]
-    assert labels[1] == ["🖼 Tạo ảnh AI", "🎬 Tạo video AI"]
-    assert all(len(row) == 2 for row in markup.inline_keyboard)
+    assert labels[0] == ["🆓 Công cụ miễn phí"]
+    assert labels[1] == ["💎 Chat Pro • 4.5/22.5 Xu/1K", "👤 Tài khoản"]
+    assert labels[2] == ["🖼 Tạo ảnh AI", "🎬 Tạo video AI"]
+    assert all(1 <= len(row) <= 2 for row in markup.inline_keyboard)
     assert labels[-1] == ["💬 Góp ý / Báo lỗi", "🌐 Trung tâm"]
     assert all("🔐 Admin" not in label for row in labels for label in row)
     assert "menu|main_video" in _callback_set(markup)
@@ -96,11 +97,12 @@ def test_main_menu_layout_admin():
     markup = bot.localized_main_menu_keyboard(True, "vi")
     labels = _labels(markup)
 
-    assert labels[0] == ["🆓 Công cụ miễn phí", "👤 Tài khoản"]
+    assert labels[0] == ["🆓 Công cụ miễn phí"]
+    assert labels[1] == ["💎 Chat Pro • 4.5/22.5 Xu/1K", "👤 Tài khoản"]
     assert labels[-1] == ["🔐 Admin"]
     assert len(markup.inline_keyboard[-1]) == 1
     assert labels[-2] == ["💬 Góp ý / Báo lỗi", "🌐 Trung tâm"]
-    assert all(len(row) == 2 for row in markup.inline_keyboard[:-1])
+    assert all(1 <= len(row) <= 2 for row in markup.inline_keyboard[:-1])
 
 
 def test_main_menu_callbacks_have_handlers():
@@ -110,6 +112,7 @@ def test_main_menu_callbacks_have_handlers():
 
     assert callbacks == {
         "freehub|main",
+        "menu|chat_pro",
         "menu|main_profile",
         "menu|main_image",
         "menu|main_video",
