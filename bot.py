@@ -45873,6 +45873,9 @@ def local_worker_status_payload() -> dict:
     }
 
 
+VIDEO_EDIT_FILTER_SNAPSHOT_MAX_ITEMS = 1024
+
+
 def video_edit_worker_status_payload() -> dict:
     """Return only the fresh heartbeat owned by the local Video Edit adapter."""
 
@@ -45905,7 +45908,7 @@ def video_edit_worker_status_payload() -> dict:
         str(item)
         for item in video_edit_filters
         if re.fullmatch(r"[a-z0-9_]{1,64}", str(item))
-    ][:256]
+    ][:VIDEO_EDIT_FILTER_SNAPSHOT_MAX_ITEMS]
     contract_version = safe_int(
         get_system_setting(
             "local_worker:video_edit_heartbeat_contract_version",
@@ -247592,7 +247595,7 @@ async def internal_worker_heartbeat(request: Request):
             str(item).strip()
             for item in reported_filters
             if re.fullmatch(r"[a-z0-9_]{1,64}", str(item).strip())
-        })[:256]
+        })[:VIDEO_EDIT_FILTER_SNAPSHOT_MAX_ITEMS]
 
         def heartbeat_nonnegative_int(name: str, maximum: int) -> int:
             raw = payload.get(name)

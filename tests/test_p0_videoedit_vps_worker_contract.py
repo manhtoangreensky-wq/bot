@@ -126,6 +126,60 @@ def test_all_scope_heartbeat_cannot_overwrite_dedicated_video_edit_readiness(
     assert all(key.startswith("local_worker:video_edit_") for key in settings)
 
 
+def test_dedicated_heartbeat_preserves_late_ffmpeg_filters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(bot, "LOCAL_WORKER_TOKEN", "legacy-token")
+    monkeypatch.setattr(bot, "VIDEO_EDIT_WORKER_TOKEN", "dedicated-token", raising=False)
+    monkeypatch.setattr(bot, "LOCAL_WORKER_ENABLED", True)
+    monkeypatch.setattr(bot, "LOCAL_WORKER_POLL_ENABLED", True)
+    settings: dict[str, str] = {}
+    monkeypatch.setattr(
+        bot,
+        "set_system_setting",
+        lambda key, value, *_args: settings.__setitem__(key, value),
+    )
+    required_filters = {"format", "overlay", "scale", "setpts", "trim"}
+
+    async def payload(_request):
+        return {
+            "heartbeat_contract_version": 1,
+            "worker_id": "vps-video-edit",
+            "worker_sha": "a" * 40,
+            "worker_owner": video_editengine1.OUTBOX_OWNER,
+            "engine_route": video_editengine1.ENGINE_ROUTE,
+            "job_scope": VIDEO_EDIT_ONLY,
+            "capabilities": [video_editengine1.WORKER_CAPABILITY],
+            "ffmpeg_path": "/usr/bin/ffmpeg",
+            "ffprobe_path": "/usr/bin/ffprobe",
+            "video_edit_filters_known": True,
+            "video_edit_filters": [
+                *(f"a_filter_{index:03d}" for index in range(300)),
+                *required_filters,
+            ],
+            "video_edit_filter_worker_id": "vps-video-edit",
+            "video_edit_filter_ffmpeg_path": "/usr/bin/ffmpeg",
+        }
+
+    monkeypatch.setattr(bot, "read_json_body", payload)
+    asyncio.run(
+        bot.internal_worker_heartbeat(
+            _worker_request(VIDEO_EDIT_ONLY, "dedicated-token")
+        )
+    )
+    monkeypatch.setattr(
+        bot,
+        "get_system_setting",
+        lambda key, default="": settings.get(key, default),
+    )
+
+    runtime = bot.video_edit_worker_status_payload()
+
+    assert runtime["video_edit_filters_known"] is True
+    assert required_filters <= set(runtime["video_edit_filters"])
+    assert len(runtime["video_edit_filters"]) == 305
+
+
 def test_all_scope_worker_never_claims_a_video_edit_only_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
