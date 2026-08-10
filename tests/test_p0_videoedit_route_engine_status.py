@@ -5,12 +5,13 @@ import ast
 import hashlib
 import html
 import json
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from services import video_edit_long_media, video_editengine1
+from services import video_edit_long_media, video_editengine1, video_local_editing
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -675,7 +676,7 @@ def test_delivery_uncertain_panel_preserves_an_already_recorded_charge() -> None
     snapshot = ns["video_edit_progress_snapshot"]("71", user_id=9, job=delivered, lang="vi")
     assert snapshot["terminal_state"] == "delivered"
     assert "Hoàn tất" in snapshot["text"]
-    assert snapshot["text"].count("✅") == 6
+    assert snapshot["text"].count("✅") == 7
 
     failed = {
         **_worker_job(stage="failed_no_charge"),
@@ -688,6 +689,257 @@ def test_delivery_uncertain_panel_preserves_an_already_recorded_charge() -> None
     assert snapshot["terminal_state"] == "failed_no_charge"
     assert "Chưa xử lý được" in snapshot["text"]
     assert "Hoàn tất" not in snapshot["text"]
+
+
+def test_video_edit_completed_status_is_receipt_backed_professional_report() -> None:
+    ns = _compile_functions(
+        [
+            "video_local_job_progress_payload",
+            "video_edit_delivery_receipt_is_complete",
+            "video_editor_job_status_text",
+            "video_edit_progress_snapshot",
+        ],
+        {
+            "json": json,
+            "html": html,
+            "hashlib": hashlib,
+            "re": __import__("re"),
+            "safe_int": lambda value, default=0: int(value or default),
+            "normalize_user_language": lambda value: value,
+            "video_editengine1": video_editengine1,
+            "video_local_editing": video_local_editing,
+            "parse_datetime_text": lambda value: datetime.strptime(
+                str(value or "")[:19], "%Y-%m-%d %H:%M:%S"
+            ),
+            "video_editengine1_job_for_worker": lambda _job_id: (_ for _ in ()).throw(
+                AssertionError("snapshot must use the already-read exact receipt")
+            ),
+        },
+    )
+    worker = _worker_job()
+    worker.update(
+        {
+            "error_short": json.dumps(
+                {
+                    "local1": 1,
+                    "stage": "delivered",
+                    "processed": 1,
+                    "total": 1,
+                    "delivered": 1,
+                    "operation": "manual",
+                    "operation_summary": ["Âm lượng 110%", "Độ sáng 120%"],
+                }
+            ),
+            "started_at": "2026-08-10 02:53:00",
+            "finished_at": "2026-08-10 02:53:07",
+        }
+    )
+    receipt = _canonical_receipt(full_decode=True)
+    receipt.update(
+        {
+            "ffprobe": {
+                **_valid_probe(full_decode=True),
+                "duration_ms": 3_000,
+                "width": 640,
+                "height": 360,
+            },
+            "output_size_bytes": 1_572_864,
+            "price_xu": 0,
+            "charge_state": "not_charged",
+            "charged_xu": 0,
+        }
+    )
+
+    snapshot = ns["video_edit_progress_snapshot"](
+        "71",
+        user_id=9,
+        job={**worker, "_video_edit_canonical": receipt},
+        lang="vi",
+    )
+    text = snapshot["text"]
+
+    assert snapshot["terminal_state"] == "delivered"
+    assert "✅ <b>Đã hoàn tất</b>" in text
+    assert "Âm lượng 110%; Độ sáng 120%" in text
+    assert "Thời lượng video: <b>3 giây</b>" in text
+    assert "Đầu ra: <b>MP4 · 640×360 · 1.5 MB</b>" in text
+    assert "Thời gian xử lý: <b>7 giây</b>" in text
+    assert "Engine: <b>local_worker_ffmpeg · local_video_edit</b>" in text
+    assert "Giá: <b>0 Xu</b>" in text
+    assert "Đã trừ: <b>0 Xu</b>" in text
+    assert "Trạng thái: <b>Đã gửi video</b>" in text
+    assert text.count("Trạng thái: <b>Đã gửi video</b>") == 1
+    assert "Trạng thái: <b>Hoàn tất</b>" not in text
+    assert "Tài khoản còn" not in text
+    for stage in (
+        "Nhận video",
+        "Kiểm tra cấu hình",
+        "Chuẩn bị file",
+        "Chỉnh sửa video",
+        "Kiểm tra MP4",
+        "Gửi kết quả",
+    ):
+        assert stage in text
+
+
+def test_video_edit_completed_status_omits_unverified_or_inconsistent_facts() -> None:
+    ns = _compile_functions(
+        [
+            "video_local_job_progress_payload",
+            "video_edit_delivery_receipt_is_complete",
+            "video_editor_job_status_text",
+            "video_edit_progress_snapshot",
+        ],
+        {
+            "json": json,
+            "html": html,
+            "hashlib": hashlib,
+            "re": __import__("re"),
+            "safe_int": lambda value, default=0: int(value or default),
+            "normalize_user_language": lambda value: value,
+            "video_editengine1": video_editengine1,
+            "video_local_editing": video_local_editing,
+            "parse_datetime_text": lambda value: datetime.strptime(
+                str(value or "")[:19], "%Y-%m-%d %H:%M:%S"
+            ),
+            "video_editengine1_job_for_worker": lambda _job_id: (_ for _ in ()).throw(
+                AssertionError("snapshot must use the already-read exact receipt")
+            ),
+        },
+    )
+    artifacts = [
+        _artifact_receipt(1, full_decode=True, size=1_048_576),
+        _artifact_receipt(2, full_decode=True, size=1_048_576),
+    ]
+    artifacts[0]["ffprobe"].update({"width": 640, "height": 360})
+    artifacts[1]["ffprobe"].update({"width": 1280, "height": 720})
+    receipt = _strict_receipt(artifacts)
+    receipt.pop("price_xu")
+    receipt.update({"charge_state": "charged", "charged_xu": True})
+    worker = _worker_job()
+    worker.update(
+        {
+            "error_short": json.dumps(
+                {
+                    "local1": 1,
+                    "stage": "delivered",
+                    "processed": 2,
+                    "total": 2,
+                    "delivered": 2,
+                    "operation": "split",
+                    "operation_summary": ["Tách video"],
+                }
+            ),
+            "started_at": "2026-08-10 02:53:07",
+            "finished_at": "2026-08-10 02:53:00",
+            "account_balance_xu": 999,
+        }
+    )
+
+    snapshot = ns["video_edit_progress_snapshot"](
+        "71", user_id=9, job={**worker, "_video_edit_canonical": receipt}, lang="vi"
+    )
+    text = snapshot["text"]
+
+    assert snapshot["terminal_state"] == "delivered"
+    assert "Thời lượng video: <b>2 giây</b>" in text
+    assert "Đầu ra: <b>2 MP4 · 2.0 MB</b>" in text
+    assert "Engine: <b>local_worker_ffmpeg · local_video_edit</b>" in text
+    for unverified in (
+        "Thời gian xử lý:",
+        "Giá:",
+        "Đã trừ:",
+        "Phí đang",
+        "Tài khoản còn",
+        "640×360",
+        "1280×720",
+    ):
+        assert unverified not in text
+
+
+def test_video_edit_failed_status_reports_stage_reason_without_delivery_or_charge() -> None:
+    ns = _compile_functions(
+        [
+            "video_local_job_progress_payload",
+            "video_edit_delivery_receipt_is_complete",
+            "video_editor_job_status_text",
+            "video_edit_progress_snapshot",
+        ],
+        {
+            "json": json,
+            "html": html,
+            "hashlib": hashlib,
+            "re": __import__("re"),
+            "safe_int": lambda value, default=0: int(value or default),
+            "normalize_user_language": lambda value: value,
+            "video_editengine1": video_editengine1,
+            "video_local_editing": video_local_editing,
+            "parse_datetime_text": lambda value: datetime.strptime(
+                str(value or "")[:19], "%Y-%m-%d %H:%M:%S"
+            ),
+            "video_editengine1_job_for_worker": lambda _job_id: {},
+        },
+    )
+    worker = _worker_job(stage="failed_no_charge")
+    worker.update(
+        {
+            "status": "failed",
+            "input_file_id": json.dumps(
+                {
+                    "local1_mode": "manual",
+                    "source_metadata": {"duration_ms": 6_000},
+                    "manual_edit_plan": {
+                        "brightness_percent": 120,
+                        "volume": 1.1,
+                    },
+                }
+            ),
+            "started_at": "2026-08-10 02:53:00",
+            "finished_at": "2026-08-10 02:53:07",
+            "error_short": json.dumps(
+                {
+                    "local1": 1,
+                    "stage": "failed_no_charge",
+                    "failed_stage": "processing_video",
+                    "reason": "output_validation_failed",
+                    "charge": 0,
+                    "charged_xu": 0,
+                }
+            ),
+        }
+    )
+    receipt = _canonical_receipt(full_decode=False, status="failed_no_charge")
+    receipt.update(
+        {
+            "receipt_state": "",
+            "delivery_message_id": "",
+            "delivery_file_id": "",
+            "output_file_id": "",
+            "output_path": "",
+            "price_xu": 0,
+            "charge_state": "not_charged",
+            "charged_xu": 0,
+        }
+    )
+
+    snapshot = ns["video_edit_progress_snapshot"](
+        "71",
+        user_id=9,
+        job={**worker, "_video_edit_canonical": receipt},
+        lang="vi",
+    )
+    text = snapshot["text"]
+
+    assert snapshot["terminal_state"] == "failed_no_charge"
+    assert "❌ <b>Chưa xử lý được</b>" in text
+    assert "Bước lỗi: <b>Chỉnh sửa video</b>" in text
+    assert "Lý do: <b>Hệ thống chưa tạo được file MP4 hợp lệ.</b>" in text
+    assert "Đã trừ: <b>0 Xu</b>" in text
+    assert "✅ <b>Đã hoàn tất</b>" not in text
+    assert "Đã gửi video" not in text
+    assert "Thời lượng video:" not in text
+    assert "Đầu ra:" not in text
+    assert "output_validation_failed" not in text
 
 
 def test_video_edit_scheduler_retries_the_same_terminal_panel_after_a_transient_edit_failure() -> None:
