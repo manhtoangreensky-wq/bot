@@ -369,9 +369,10 @@ def test_storyboard_entry_owner_and_confirm_audit_see_the_real_handler() -> None
         '    "storyboard_prompt": {',
         '    "prompt_library": {',
     )
-    assert '"entry_callback": "vid3|entry|storyboard_prompt"' in route_section
-    assert '"legacy_entry_callback": "vproduct|open|storyboard_prompt"' in route_section
-    assert '"handler": "handle_video_uiflow3_callback"' in route_section
+    assert '"entry_callback": "vproduct|open|storyboard_prompt"' in route_section
+    assert '"handler": "handle_video_product_callback"' in route_section
+    assert '"vstory|ai"' in route_section
+    assert '"vstory|upload"' in route_section
 
     guard_section = _source_section(
         BOT_SOURCE,
