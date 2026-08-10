@@ -277,7 +277,8 @@ def test_review_quality_and_invoice_are_separate_and_quality_hides_technical_det
 
     assert "Chọn chất lượng" in quality_text
     assert len(quality_callbacks) >= 8
-    assert "vid3|quality_done" in callbacks
+    assert "vid3|quality_done" not in callbacks
+    assert any(" giây ·" in label for label in _labels(quality_markup))
     for forbidden in ("model", "provider", "api", "shopaikey", "key4u", "payload", "worker"):
         assert forbidden not in quality_text.lower()
         assert all(forbidden not in label.lower() for label in _labels(quality_markup))

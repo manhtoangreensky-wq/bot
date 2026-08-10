@@ -182,15 +182,19 @@ def test_long_public_entry_and_final_confirm_have_exact_separate_owners() -> Non
     route = _between("VIDEO_PUBLIC_ROUTE_MATRIX = {", "\n\n\ndef video_public_route_for_tool")
     handler = _between("async def handle_long_video_callback", "async def handle_storyboard_pack_callback")
     confirm = _between("async def handle_video_tail_callback", "async def handle_video_tail9_pending_text")
-    assert '"entry_callback": "longvideo|public_guard"' in route
-    assert '"invoice_reachable": True' in route[route.index('"multi_scene_film"'):]
+    long_route = route[route.index('"multi_scene_film"'):route.index('"video_idea"')]
+    assert '"entry_callback": "vid3|entry|multi_scene_film"' in long_route
+    assert '"legacy_entry_callback": "longvideo|public_guard"' in long_route
+    assert '"handler": "handle_video_uiflow3_callback"' in long_route
+    assert '"invoice_reachable": True' in long_route
+    assert '"job_reachable": False' in long_route
     assert "start_public_video_scene2_step" in handler
     assert '"multi_scene_film"' in handler
     assert "handle_video_product_callback" not in handler
     assert "query.data =" not in handler
     assert "video_tail9_long_maintenance_text" in confirm
     maintenance_start = confirm.index('if not contract.get("execution_enabled")')
-    maintenance_end = confirm.index('if owner == "video_edit":', maintenance_start)
+    maintenance_end = confirm.index("is_internal = video_b14_is_admin_or_owner", maintenance_start)
     maintenance = confirm[maintenance_start:maintenance_end]
     assert "handle_product_video_public_confirm_callback" not in maintenance
 
