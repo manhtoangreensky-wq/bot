@@ -3346,6 +3346,7 @@ def init_db():
     conn = db_connect()
     conn.execute("PRAGMA journal_mode=WAL")
     video_trend_catalog.ensure_schema(conn)
+    video_editengine1.ensure_schema(conn)
     c = conn.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS users (
         user_id TEXT PRIMARY KEY,
