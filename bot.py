@@ -235934,6 +235934,46 @@ async def inspect_selfshot_source(
         return {"ok": True, "analysis": report, "metadata": metadata, "source_video_hash": content_hash}
 
 
+async def download_video_editor_asset_bytes(
+    context: ContextTypes.DEFAULT_TYPE,
+    source: dict,
+    maximum_bytes: int,
+    *,
+    read_timeout: float = 60.0,
+) -> bytes:
+    """Download one Telegram asset from cloud or the remote Local Bot API."""
+
+    limit = max(1, int(maximum_bytes))
+    telegram_file = await context.bot.get_file(str(source.get("file_id") or ""))
+    declared_size = safe_int(getattr(telegram_file, "file_size", 0), 0)
+    if declared_size > limit:
+        raise RuntimeError("telegram_asset_too_large")
+    local_media_url = telegram_local_media_url(
+        getattr(telegram_file, "file_path", "")
+    )
+    if local_media_url:
+        data = await telegram_local_media_fetch(
+            local_media_url,
+            limit,
+            float(read_timeout),
+        )
+    elif callable(getattr(telegram_file, "download_as_bytearray", None)):
+        data = bytes(await telegram_file.download_as_bytearray())
+    elif callable(getattr(telegram_file, "download_to_drive", None)):
+        with tempfile.TemporaryDirectory(prefix="toanaas_video_editor_asset_") as tmpdir:
+            path = os.path.join(tmpdir, "asset.bin")
+            await telegram_file.download_to_drive(custom_path=path)
+            with open(path, "rb") as handle:
+                data = handle.read(limit + 1)
+    else:
+        raise RuntimeError("telegram_asset_download_unavailable")
+    if not data:
+        raise RuntimeError("telegram_asset_empty")
+    if len(data) > limit:
+        raise RuntimeError("telegram_asset_too_large")
+    return data
+
+
 async def inspect_video_editor_srt(context: ContextTypes.DEFAULT_TYPE, source: dict) -> dict:
     file_name = video_local_validation.validate_extension(
         str(source.get("file_name") or "subtitle.srt"),
@@ -235976,16 +236016,13 @@ async def inspect_video_editor_logo(
     with tempfile.TemporaryDirectory(prefix="toanaas_video_local_logo_") as tmpdir:
         path = os.path.join(tmpdir, file_name)
         try:
-            telegram_file = await telegram_bot.get_file(str(current.get("file_id") or ""))
-            download_to_drive = getattr(telegram_file, "download_to_drive", None)
-            if callable(download_to_drive):
-                await download_to_drive(custom_path=path)
-            else:
-                data = bytes(await telegram_file.download_as_bytearray())
-                if len(data) > video_local_validation.MAX_LOGO_BYTES:
-                    return {"ok": False, "reason": "logo_size_invalid"}
-                with open(path, "wb") as handle:
-                    handle.write(data)
+            data = await download_video_editor_asset_bytes(
+                context,
+                current,
+                video_local_validation.MAX_LOGO_BYTES,
+            )
+            with open(path, "wb") as handle:
+                handle.write(data)
         except Exception:
             return {"ok": False, "reason": "logo_download_failed"}
         return await asyncio.to_thread(
@@ -244989,11 +245026,59 @@ def telegram_message_idempotent(handler):
 
 
 async def process_telegram_update_once(update, payload: dict | None = None):
-    """Process one Telegram update id once, including commands and callbacks."""
-    update_id = safe_int((payload or {}).get("update_id"), 0)
-    if not update_id:
+    """Process one Telegram event once even when two Bot API owners forward it."""
+    current_payload = payload if isinstance(payload, dict) else {}
+    callback = current_payload.get("callback_query")
+    if isinstance(callback, dict) and str(callback.get("id") or "").strip():
+        key = f"callback:{str(callback.get('id') or '').strip()[:240]}"
+    else:
+        key = ""
+        for event_name in (
+            "message",
+            "edited_message",
+            "channel_post",
+            "edited_channel_post",
+            "business_message",
+            "edited_business_message",
+        ):
+            event = current_payload.get(event_name)
+            if not isinstance(event, dict):
+                continue
+            chat = event.get("chat") if isinstance(event.get("chat"), dict) else {}
+            chat_id = str(chat.get("id") or "").strip()
+            message_id = safe_int(event.get("message_id"), 0)
+            if chat_id and message_id:
+                business_connection_id = str(
+                    event.get("business_connection_id") or ""
+                ).strip()
+                identity = [
+                    event_name,
+                    business_connection_id,
+                    chat_id,
+                    str(message_id),
+                ]
+                if event_name in {
+                    "edited_message",
+                    "edited_channel_post",
+                    "edited_business_message",
+                }:
+                    revision_payload = json.dumps(
+                        event,
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                    identity.append(
+                        hashlib.sha256(revision_payload.encode("utf-8")).hexdigest()[:24]
+                    )
+                key = ":".join(identity)
+                break
+    if not key:
+        update_id = safe_int(current_payload.get("update_id"), 0)
+        if update_id:
+            key = f"update:{update_id}"
+    if not key:
         return await tg_app.process_update(update)
-    key = str(update_id)
     lock = TELEGRAM_UPDATE_DEDUPE_LOCKS.setdefault(key, asyncio.Lock())
     async with lock:
         now = time.time()
@@ -245011,7 +245096,7 @@ async def process_telegram_update_once(update, payload: dict | None = None):
                 if stale_lock and not stale_lock.locked():
                     TELEGRAM_UPDATE_DEDUPE_LOCKS.pop(stale_key, None)
         if key in TELEGRAM_UPDATE_DEDUPE_DONE:
-            logger.info("telegram update duplicate suppressed | update_id=%s", key)
+            logger.info("telegram update duplicate suppressed | stable_event=true")
             return {"ok": True, "duplicate": True}
         result = await tg_app.process_update(update)
         TELEGRAM_UPDATE_DEDUPE_DONE[key] = time.time()
