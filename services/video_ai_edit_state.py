@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import secrets
 import threading
 from typing import Any
 
@@ -20,6 +21,8 @@ DEFAULT_QUALITY = "360p"
 MAX_SOURCE_BYTES = 50 * 1024 * 1024
 MAX_SOURCE_DURATION_SECONDS = 30.0
 MAX_SOURCE_DIMENSION = 1920
+PREUPLOAD_PHASE = "preupload"
+DRAFT_PHASE = "draft"
 _MEMORY: dict[int, dict[str, Any]] = {}
 _LOCK = threading.RLock()
 _ALLOWED_UPDATES = frozenset({
@@ -34,6 +37,12 @@ _ALLOWED_UPDATES = frozenset({
     "pending_input",
     "summary_return",
 })
+
+
+def _new_callback_token() -> str:
+    """Return a compact opaque token that fits Telegram callback limits."""
+
+    return secrets.token_hex(4)
 
 
 def _uid(value: Any) -> int:
@@ -147,6 +156,72 @@ def clear_draft(
     return video_edit_state_store.delete_state(uid, root=_state_root(root))
 
 
+def start_preupload(
+    *,
+    user_id: Any,
+    chat_id: Any,
+    draft_id: str,
+    root: str | os.PathLike[str] | None = None,
+) -> dict[str, Any]:
+    """Create the AI650-owned source-intake state without Video Edit pending."""
+
+    uid = _uid(user_id)
+    cid = _chat_id(chat_id)
+    clean_draft_id = str(draft_id or "").strip()
+    if not clean_draft_id:
+        raise ValueError("ai_edit_draft_invalid")
+    state = {
+        "product_id": PRODUCT_ID,
+        "user_id": str(uid),
+        "chat_id": str(cid),
+        "draft_id": clean_draft_id,
+        "callback_token": _new_callback_token(),
+        "revision": 1,
+        "phase": PREUPLOAD_PHASE,
+        "current_screen": "ai650_upload",
+        "source": {},
+        "source_metadata": {},
+        "ai_edit_selected": [],
+        "ai_edit_details": {},
+        "ai_edit_references": {},
+        "quality": DEFAULT_QUALITY,
+        "pending_input": {},
+        "summary_return": {},
+    }
+    return _save_draft(uid, state, root=root)
+
+
+def callback_identity_matches(
+    state: dict[str, Any] | None,
+    *,
+    user_id: Any,
+    chat_id: Any,
+    callback_token: Any,
+    revision: Any,
+    phases: tuple[str, ...] = (DRAFT_PHASE,),
+) -> bool:
+    """Validate one callback against the exact owned AI650 state generation."""
+
+    current = dict(state or {})
+    try:
+        uid = _uid(user_id)
+        cid = _chat_id(chat_id)
+        expected_revision = int(revision)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return bool(
+        str(current.get("product_id") or "") == PRODUCT_ID
+        and str(current.get("user_id") or "") == str(uid)
+        and str(current.get("chat_id") or "") == str(cid)
+        and str(current.get("phase") or "") in set(phases)
+        and secrets.compare_digest(
+            str(current.get("callback_token") or ""),
+            str(callback_token or ""),
+        )
+        and int(current.get("revision") or 0) == expected_revision
+    )
+
+
 def replace_source_draft(
     *,
     user_id: Any,
@@ -154,6 +229,8 @@ def replace_source_draft(
     draft_id: str,
     source: dict[str, Any],
     metadata: dict[str, Any],
+    expected_callback_token: str | None = None,
+    expected_revision: int | None = None,
     root: str | os.PathLike[str] | None = None,
 ) -> dict[str, Any]:
     uid = _uid(user_id)
@@ -167,13 +244,40 @@ def replace_source_draft(
     metadata_data = _clone(metadata)
     if not metadata_data.get("ok") or not metadata_data.get("has_video", True):
         raise ValueError("ai_edit_source_invalid")
+    current = load_draft(uid, root=root)
+    if expected_callback_token is not None or expected_revision is not None:
+        if not callback_identity_matches(
+            current,
+            user_id=uid,
+            chat_id=cid,
+            callback_token=expected_callback_token,
+            revision=expected_revision,
+            phases=(PREUPLOAD_PHASE,),
+        ):
+            raise ValueError("ai_edit_preupload_stale")
+    if current and str(current.get("product_id") or "") == PRODUCT_ID:
+        if str(current.get("user_id") or "") != str(uid) or str(current.get("chat_id") or "") != str(cid):
+            raise ValueError("ai_edit_owner_invalid")
+        resolved_draft_id = str(current.get("draft_id") or "").strip()
+        callback_token = str(current.get("callback_token") or "").strip()
+        revision = int(current.get("revision") or 0) + 1
+    else:
+        resolved_draft_id = str(draft_id or "").strip()
+        callback_token = _new_callback_token()
+        revision = 1
+    if not resolved_draft_id:
+        raise ValueError("ai_edit_draft_invalid")
+    if not callback_token:
+        callback_token = _new_callback_token()
     state = {
         "product_id": PRODUCT_ID,
         "user_id": str(uid),
         "chat_id": str(cid),
-        "draft_id": str(draft_id or "").strip(),
-        "revision": 1,
-        "current_screen": "ai_source_summary",
+        "draft_id": resolved_draft_id,
+        "callback_token": callback_token,
+        "revision": revision,
+        "phase": DRAFT_PHASE,
+        "current_screen": "ai650_source_summary",
         "source": source_data,
         "source_metadata": metadata_data,
         "ai_edit_selected": [],
