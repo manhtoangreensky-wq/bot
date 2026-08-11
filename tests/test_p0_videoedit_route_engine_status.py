@@ -764,7 +764,7 @@ def test_video_edit_completed_status_is_receipt_backed_professional_report() -> 
     assert "Thời lượng video: <b>3 giây</b>" in text
     assert "Đầu ra: <b>MP4 · 640×360 · 1.5 MB</b>" in text
     assert "Thời gian xử lý: <b>7 giây</b>" in text
-    assert "Engine: <b>local_worker_ffmpeg · local_video_edit</b>" in text
+    assert "Engine:" not in text
     assert "Giá: <b>0 Xu</b>" in text
     assert "Đã trừ: <b>0 Xu</b>" in text
     assert "Trạng thái: <b>Đã gửi video</b>" in text
@@ -844,7 +844,7 @@ def test_video_edit_completed_status_omits_unverified_or_inconsistent_facts() ->
     assert snapshot["terminal_state"] == "delivered"
     assert "Thời lượng video: <b>2 giây</b>" in text
     assert "Đầu ra: <b>2 MP4 · 2.0 MB</b>" in text
-    assert "Engine: <b>local_worker_ffmpeg · local_video_edit</b>" in text
+    assert "Engine:" not in text
     for unverified in (
         "Thời gian xử lý:",
         "Giá:",
