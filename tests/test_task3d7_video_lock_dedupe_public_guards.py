@@ -349,7 +349,7 @@ def test_video_flow_lock_snapshots_are_unchanged():
     assert "vdownload|start" in _callbacks(menu)
     assert _labels(bot.task3d_result_keyboard("storyboard_prompt", "vi")) == [
         ["🖼 Tạo prompt ảnh", "🎥 Tạo prompt video"],
-        ["📦 Xuất bộ prompt", "💾 Lưu Kho prompt"],
+        ["📦 Xuất bộ câu lệnh", "💾 Lưu Kho câu lệnh"],
         ["🔁 Đổi phong cách"],
         ["🎬 Dùng để tạo video"],
         ["⬅️ Quay lại", "🏠 Menu chính"],
