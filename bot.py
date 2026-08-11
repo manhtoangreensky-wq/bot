@@ -221295,12 +221295,311 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
     if mode == VIDEO_SUBTITLE_MODE_DUB and not result.get("has_video") and result.get("has_audio"):
         caption = subdub_audio_fallback_text(mode, lang) if SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED else subdub_final_video_failed_text(lang)
     return f"{caption}\n\n{cost_line}"
+
+
+SUBDUB_POSTDELIVERY_VIDEO_EDIT_CONTEXT = "subdub_postdelivery"
+
+
+def subdub_postdelivery_video_edit_artifact(
+    job: dict | None = None,
+    *,
+    user_id=0,
+    token: str = "",
+) -> dict:
+    """Resolve only one fully delivered MP4 that can seed canonical Video Edit."""
+
+    current = dict(job or {})
+    delivery = subdub_terminal_delivery_evidence(current)
+    owner_user_id = safe_int(current.get("user_id") or current.get("owner_user_id"), 0)
+    job_key = str(current.get("job_key") or "").strip()
+    message_id = str(delivery.get("message_id") or "").strip()
+    file_id = str(current.get("video_delivery_file_id") or "").strip()
+    size_bytes = safe_int(current.get("video_delivery_size_bytes"), 0)
+    sha256 = str(current.get("video_delivery_sha256") or "").strip().lower()
+    validation = dict(current.get("output_validation") or {})
+    try:
+        duration_seconds = float(
+            current.get("video_delivery_duration_seconds")
+            or current.get("final_mp4_duration")
+            or validation.get("actual_duration")
+            or validation.get("duration")
+            or 0.0
+        )
+    except (TypeError, ValueError, OverflowError):
+        duration_seconds = 0.0
+    terminal = str(current.get("terminal_state") or "").strip().lower()
+    status = str(current.get("status") or "").strip().lower()
+    if not (
+        delivery.get("is_video") is True
+        and owner_user_id > 0
+        and (not user_id or owner_user_id == safe_int(user_id, 0))
+        and job_key
+        and message_id
+        and file_id
+        and size_bytes > 0
+        and re.fullmatch(r"[0-9a-f]{64}", sha256)
+        and math.isfinite(duration_seconds)
+        and duration_seconds > 0
+        and terminal == "delivered"
+        and status in {"completed", "delivered"}
+        and current.get("final_mp4_delivered") is True
+        and current.get("final_mp4_validated") is True
+        and validation.get("ok") is True
+        and subdub_duration_validation_allows_success(current)
+    ):
+        return {}
+    identity = "\n".join((job_key, str(owner_user_id), message_id, file_id, sha256))
+    artifact_token = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+    if token and str(token).strip().lower() != artifact_token:
+        return {}
+    media_lane = video_edit_media_transport.select_media_lane(
+        duration_seconds=duration_seconds,
+        size_bytes=size_bytes,
+    )
+    metadata = {
+        **validation,
+        "ok": True,
+        "bytes": size_bytes,
+        "actual_bytes": size_bytes,
+        "declared_bytes": size_bytes,
+        "duration": duration_seconds,
+        "duration_ms": max(1, int(round(duration_seconds * 1000))),
+        "declared_duration_seconds": duration_seconds,
+        "source_sha256": sha256,
+        "media_lane": media_lane,
+        "has_video": True,
+        "has_audio": bool(validation.get("has_audio")),
+    }
+    filename = video_local_validation.safe_display_filename(
+        str(current.get("video_delivery_filename") or "video_subdub.mp4"),
+        "video_subdub.mp4",
+    )
+    return {
+        "token": artifact_token,
+        "job_key": job_key,
+        "user_id": owner_user_id,
+        "chat_id": safe_int(current.get("chat_id"), owner_user_id),
+        "message_id": message_id,
+        "file_id": file_id[:240],
+        "file_name": filename,
+        "mime_type": str(current.get("video_delivery_mime_type") or "video/mp4")[:120],
+        "size_bytes": size_bytes,
+        "sha256": sha256,
+        "duration_seconds": duration_seconds,
+        "duration_ms": metadata["duration_ms"],
+        "media_lane": media_lane,
+        "metadata": metadata,
+    }
+
+
+def subdub_resolve_postdelivery_video_edit_artifact(
+    token: str,
+    *,
+    user_id,
+) -> dict:
+    safe_token = str(token or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{16}", safe_token):
+        return {}
+    matches = []
+    for job in SUBTITLE_DUB_PIPELINE_JOBS.values():
+        artifact = subdub_postdelivery_video_edit_artifact(
+            job,
+            user_id=user_id,
+            token=safe_token,
+        )
+        if artifact:
+            matches.append(artifact)
+    return matches[0] if len(matches) == 1 else {}
+
+
+def subdub_postdelivery_video_edit_buttons(
+    state: dict | None = None,
+    *,
+    lang: str = "vi",
+) -> list[InlineKeyboardButton]:
+    artifact = subdub_postdelivery_video_edit_artifact(state)
+    if not artifact:
+        return []
+    is_vi = normalize_user_language(lang) == "vi"
+    token = artifact["token"]
+    return [
+        InlineKeyboardButton(
+            "🛠 Chỉnh sửa video" if is_vi else "🛠 Edit video",
+            callback_data=f"videodub|edit|{token}",
+        ),
+        InlineKeyboardButton(
+            "🏷 Logo / Watermark",
+            callback_data=f"videodub|branding|{token}",
+        ),
+    ]
+
+
+def subdub_postdelivery_video_edit_state(
+    artifact: dict | None,
+    *,
+    target: str,
+) -> dict:
+    current = dict(artifact or {})
+    target_screen = "branding" if str(target or "").strip().lower() == "branding" else "workspace"
+    if not current.get("file_id") or not current.get("token") or not current.get("metadata"):
+        return {}
+    session_id = f"subdub-delivery-{current['token']}"
+    seed = video_edit_state_machine.start_lane("manual_edit")
+    seed.update({
+        "edit_session_id": session_id,
+        "session_id": session_id,
+        "state_revision": 0,
+        "revision": 0,
+        "entry_context": SUBDUB_POSTDELIVERY_VIDEO_EDIT_CONTEXT,
+        "entry_parent_callback": "videoedit|hub",
+        "selected_tool": "manual",
+        "last_section": "manual",
+    })
+    metadata = dict(current.get("metadata") or {})
+    source = {
+        "source_file_id": str(current.get("file_id") or ""),
+        "source_video_id": str(current.get("file_id") or ""),
+        "source_file_name": str(current.get("file_name") or "video_subdub.mp4"),
+        "source_display_name": str(current.get("file_name") or "video_subdub.mp4"),
+        "source_mime_type": str(current.get("mime_type") or "video/mp4"),
+        "source_file_size": safe_int(current.get("size_bytes"), 0),
+        "source_duration": max(1, int(round(float(current.get("duration_seconds") or 0.0)))),
+        "source_duration_ms": safe_int(current.get("duration_ms"), 0),
+        "source_video_hash": str(current.get("sha256") or ""),
+        "source_origin": "subdub_delivery",
+        "source_width": safe_int(metadata.get("display_width") or metadata.get("width"), 0),
+        "source_height": safe_int(metadata.get("display_height") or metadata.get("height"), 0),
+        "media_lane": str(current.get("media_lane") or ""),
+    }
+    completed = video_edit_state_machine.complete_intake(seed, source, metadata)
+    completed.update({
+        "step": target_screen,
+        "screen_id": target_screen,
+        "current_screen": target_screen,
+        "parent_callback": "videoedit|workspace" if target_screen == "branding" else "videoedit|hub",
+        "entry_parent_callback": "videoedit|hub",
+        "entry_context": SUBDUB_POSTDELIVERY_VIDEO_EDIT_CONTEXT,
+        "requested_action": str(target or "edit"),
+        "return_to": target_screen,
+        "selected_tool": "manual",
+        "last_section": "manual",
+        "concat_sources": [],
+        "audio_sources": [],
+        "logo_source": {},
+        "watermark_config": {},
+        "subtitle_source": {},
+        "split_ranges": [],
+        "coverage_required": True,
+        "price_xu": 0,
+        "provider_call": False,
+    })
+    return completed
+
+
+async def open_subdub_postdelivery_video_edit(
+    query,
+    context,
+    *,
+    user_id,
+    token: str,
+    target: str,
+    lang: str = "vi",
+):
+    artifact = subdub_resolve_postdelivery_video_edit_artifact(
+        token,
+        user_id=user_id,
+    )
+    if not artifact:
+        await query.answer(
+            "Không còn mở được đúng video vừa hoàn tất. Video hiện tại không bị thay đổi.",
+            show_alert=True,
+        )
+        return True
+    try:
+        existing = video_editor_state_snapshot(get_video_editor_pending(user_id))
+    except VideoEditorStateUnavailableError:
+        await query.answer(
+            "Chưa mở được Chỉnh sửa video lúc này. Vui lòng thử lại sau.",
+            show_alert=True,
+        )
+        return True
+    if str(existing.get("step") or "") == "job_status" and safe_int(existing.get("job_id"), 0) > 0:
+        await query.answer(
+            "Một tác vụ Chỉnh sửa video đang được xử lý. Hãy dùng bảng trạng thái hiện có.",
+            show_alert=True,
+        )
+        return True
+    session_id = f"subdub-delivery-{artifact['token']}"
+    same_source = bool(
+        existing
+        and str(existing.get("edit_session_id") or existing.get("session_id") or "") == session_id
+        and str(existing.get("source_file_id") or "") == artifact["file_id"]
+        and str(existing.get("source_video_hash") or "") == artifact["sha256"]
+    )
+    if same_source:
+        candidate = dict(existing)
+        target_screen = "branding" if str(target or "").strip().lower() == "branding" else "workspace"
+        candidate.update({
+            "step": target_screen,
+            "screen_id": target_screen,
+            "current_screen": target_screen,
+            "parent_callback": "videoedit|workspace" if target_screen == "branding" else "videoedit|hub",
+            "entry_parent_callback": "videoedit|hub",
+            "pending_field": "",
+            "awaiting_media": False,
+            "intake_in_progress": False,
+            "return_to": target_screen,
+        })
+    else:
+        candidate = subdub_postdelivery_video_edit_state(artifact, target=target)
+    if not candidate:
+        await query.answer(
+            "Chưa mở được video vừa hoàn tất. Vui lòng thử lại sau.",
+            show_alert=True,
+        )
+        return True
+    fields = video_editor_state_snapshot(candidate)
+    step = str(fields.pop("step", "") or "workspace")
+    fields.pop("created_at_ts", None)
+    try:
+        stored = set_video_editor_pending(user_id, step, **fields)
+    except (VideoEditorStateCommitError, VideoEditorStateUnavailableError):
+        await query.answer(
+            "Phiên chỉnh sửa vừa thay đổi. Hãy bấm lại từ báo cáo hoàn tất.",
+            show_alert=True,
+        )
+        return True
+    clear_video_editor_competing_video_states(user_id, context)
+    clear_video_session(user_id)
+    set_video_route_session(
+        user_id,
+        "video_local_edit",
+        "tool_home",
+        product_id="video_local_edit",
+    )
+    await query.answer()
+    if str(stored.get("current_screen") or "") == "branding":
+        return await safe_edit_or_send(
+            query,
+            video_local_branding_text(stored, lang),
+            parse_mode="HTML",
+            reply_markup=video_local_branding_keyboard(lang),
+        )
+    return await safe_edit_or_send(
+        query,
+        video_local_manual_options_text(stored, lang),
+        parse_mode="HTML",
+        reply_markup=video_local_manual_options_keyboard(lang, stored),
+    )
+
+
 def video_dubbing_receipt_keyboard(lang: str = "vi", origin: str = "translation", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     state = dict(state or {})
     mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode"))
     active_flow = str(state.get("active_flow") or "")
     rows = []
+    postdelivery_buttons = subdub_postdelivery_video_edit_buttons(state, lang=lang)
     if str(origin or "").strip().lower() == "video_addon":
         rows.append([InlineKeyboardButton("⬅️ Quay lại tùy chọn video" if is_vi else "⬅️ Back to video options", callback_data="videodub|return_origin")])
     if active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT:
@@ -221309,15 +221608,15 @@ def video_dubbing_receipt_keyboard(lang: str = "vi", origin: str = "translation"
         rows.append([InlineKeyboardButton("📄 Tải phụ đề dịch" if is_vi else "📄 Download translated subtitle", callback_data="videodub|download_final_subtitle")])
     elif mode == VIDEO_SUBTITLE_MODE_CREATE:
         _filename, _caption, video_button = video_dubbing_final_video_label(mode, lang)
-        rows.extend([
-            [
-                InlineKeyboardButton(video_button, callback_data="videodub|download_final_video"),
-                InlineKeyboardButton("📄 Tải SRT" if is_vi else "📄 Download SRT", callback_data="videodub|download_final_subtitle"),
-            ],
-            [
-                InlineKeyboardButton("🔁 Tạo lại phụ đề" if is_vi else "🔁 Create subtitles again", callback_data="videodub|retry_media"),
-                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-            ],
+        rows.append([
+            InlineKeyboardButton(video_button, callback_data="videodub|download_final_video"),
+            InlineKeyboardButton("📄 Tải SRT" if is_vi else "📄 Download SRT", callback_data="videodub|download_final_subtitle"),
+        ])
+        if postdelivery_buttons:
+            rows.append(postdelivery_buttons)
+        rows.append([
+            InlineKeyboardButton("🔁 Tạo lại phụ đề" if is_vi else "🔁 Create subtitles again", callback_data="videodub|retry_media"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ])
         return InlineKeyboardMarkup(rows)
     elif mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
@@ -221329,6 +221628,8 @@ def video_dubbing_receipt_keyboard(lang: str = "vi", origin: str = "translation"
                 InlineKeyboardButton("📄 Tải SRT dịch" if is_vi else "📄 Download translated SRT", callback_data="videodub|download_final_subtitle"),
             ],
         ])
+        if postdelivery_buttons:
+            rows.append(postdelivery_buttons)
         if requested == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
             rows.append([
                 InlineKeyboardButton("🎙 Lồng tiếng bản dịch" if is_vi else "🎙 Dub translated subtitles", callback_data="videodub|result_translate_dub"),
@@ -221350,14 +221651,18 @@ def video_dubbing_receipt_keyboard(lang: str = "vi", origin: str = "translation"
             first_row.append(InlineKeyboardButton("🎧 Tải audio" if is_vi else "🎧 Download audio", callback_data="videodub|download_final_audio"))
         if first_row:
             rows.append(first_row)
+        if postdelivery_buttons:
+            rows.append(postdelivery_buttons)
         rows.append([
             InlineKeyboardButton("🔁 Lồng tiếng lại" if is_vi else "🔁 Dub again", callback_data="videodub|redub_voice"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ])
         return InlineKeyboardMarkup(rows)
-    rows.extend([
-        [InlineKeyboardButton("🔁 Làm video khác" if is_vi else "🔁 Another video", callback_data="videodub|back_type")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    if postdelivery_buttons:
+        rows.append(postdelivery_buttons)
+    rows.append([
+        InlineKeyboardButton("🔁 Làm video khác" if is_vi else "🔁 Another video", callback_data="videodub|back_type"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -227906,6 +228211,12 @@ async def send_public_subtitle_dub_final_outputs(
         "size_limit_used": 0.0,
         "telegram_message_id": "",
         "video_delivery_message_id": "",
+        "video_delivery_file_id": "",
+        "video_delivery_size_bytes": 0,
+        "video_delivery_sha256": "",
+        "video_delivery_filename": "",
+        "video_delivery_mime_type": "",
+        "video_delivery_duration_seconds": 0.0,
         "audio_delivery_message_id": "",
         "srt_delivery_message_id": "",
         "terminal_artifact_type": "",
@@ -227992,6 +228303,18 @@ async def send_public_subtitle_dub_final_outputs(
                     if result.get("delivery_reason"):
                         sent["delivery_reason"] = str(result.get("delivery_reason") or "")
                     return False
+                sent.update({
+                    "video_delivery_file_id": str(result.get("file_id") or ""),
+                    "video_delivery_size_bytes": len(payload),
+                    "video_delivery_sha256": hashlib.sha256(payload).hexdigest(),
+                    "video_delivery_filename": filename,
+                    "video_delivery_mime_type": "video/mp4",
+                    "video_delivery_duration_seconds": float(
+                        validation.get("actual_duration")
+                        or validation.get("duration")
+                        or 0.0
+                    ),
+                })
                 if result.get("delivery_method") == "video":
                     sent["video"] = 1
                     sent["terminal_artifact_type"] = "video"
@@ -228013,6 +228336,22 @@ async def send_public_subtitle_dub_final_outputs(
                     sent["srt_suppress_reason"] = "video_delivered"
                     sent["partial_copy_suppressed"] = True
                     sent["explicit_srt_download_available"] = bool(subtitle_items or str(srt_text or "").strip())
+                if sent.get("final_mp4_delivered") and job_key:
+                    update_subtitle_dub_pipeline_job(
+                        job_key,
+                        video_delivery_file_id=sent["video_delivery_file_id"],
+                        video_delivery_size_bytes=sent["video_delivery_size_bytes"],
+                        video_delivery_sha256=sent["video_delivery_sha256"],
+                        video_delivery_filename=sent["video_delivery_filename"],
+                        video_delivery_mime_type=sent["video_delivery_mime_type"],
+                        video_delivery_duration_seconds=sent["video_delivery_duration_seconds"],
+                        video_delivery_message_id=sent["video_delivery_message_id"],
+                        final_mp4_validated=bool(sent.get("final_mp4_validated")),
+                        final_mp4_delivered=True,
+                        duration_coverage_ok=bool(sent.get("duration_coverage_ok")),
+                        final_mp4_duration=float(sent.get("final_mp4_duration") or 0.0),
+                        output_validation=dict(sent.get("output_validation") or {}),
+                    )
                 return True
             except Exception as exc:
                 sent["delivery_reason"] = type(exc).__name__
@@ -234932,13 +235271,22 @@ async def handle_video_dubbing_callback(
     _subdub_background: bool = False,
 ):
     query = update.callback_query
-    if not _subdub_background:
-        await query.answer()
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
     value = parts[2] if len(parts) > 2 else ""
+    if action in {"edit", "branding"} and not _subdub_background:
+        return await open_subdub_postdelivery_video_edit(
+            query,
+            context,
+            user_id=uid,
+            token=value,
+            target=action,
+            lang=lang,
+        )
+    if not _subdub_background:
+        await query.answer()
     state = get_video_dubbing_pending(uid) or {}
     if action == "final" and not _subdub_background:
         task_key = subtitle_dub_pipeline_job_key(
@@ -236520,11 +236868,20 @@ async def handle_video_dubbing_callback(
                 )
             if result.get("already_delivered"):
                 set_video_dubbing_pending(uid, "completed", processing="0", terminal_state="delivered")
+                receipt_keyboard_state = {
+                    **state,
+                    **result,
+                    **dict(SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {}),
+                }
                 return await safe_edit_or_send(
                     query,
                     str(result.get("text") or "Kết quả đã gửi phía trên."),
                     parse_mode="HTML",
-                    reply_markup=video_dubbing_receipt_keyboard(lang, origin, state),
+                    reply_markup=video_dubbing_receipt_keyboard(
+                        lang,
+                        origin,
+                        receipt_keyboard_state,
+                    ),
                 )
             set_video_dubbing_pending(uid, "guarded", processing="0")
             result_blocker = str(
@@ -236781,13 +237138,22 @@ async def handle_video_dubbing_callback(
                 )
                 return None
             receipt_text = video_dubbing_receipt_text(completed_state, result, lang)
+            receipt_keyboard_state = {
+                **completed_state,
+                **result,
+                **dict(SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {}),
+            }
             # The helper persists subdub_success_message_id and
             # success_sent_count=max(1, ...) only after Telegram returns an ID.
             sent_receipt = await subdub_send_success_receipt_once(
                 query.message,
                 pipeline_job_key,
                 receipt_text,
-                reply_markup=video_dubbing_receipt_keyboard(lang, origin, completed_state),
+                reply_markup=video_dubbing_receipt_keyboard(
+                    lang,
+                    origin,
+                    receipt_keyboard_state,
+                ),
             )
             update_subtitle_dub_pipeline_job(
                 pipeline_job_key,
