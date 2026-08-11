@@ -940,7 +940,7 @@ def test_videoedit_confirmation_source_info_back_preserves_exact_confirmation() 
 
 def test_videoedit_public_vietnamese_labels_pair_with_their_exact_callbacks() -> None:
     hub = _pairs(bot.video_edit_hub_keyboard("vi"))
-    assert ("✨ Chỉnh sửa theo mục tiêu", "videoedit|ai") in hub
+    assert ("🤖 Chỉnh sửa video AI", "videoedit|ai") in hub
     assert ("✂️ Chỉnh sửa thủ công", "videoedit|manual") in hub
 
     audio = _pairs(
