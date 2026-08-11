@@ -93,7 +93,7 @@ def test_video_menu_layout_places_planning_beside_guide_when_enabled(monkeypatch
         ["🎥 Video tự quay", "🎞 Storyboard"],
         ["🎬 Video dài tập", "💡 Ý tưởng video"],
         ["🛠️ Chỉnh sửa / Nâng cấp video", "📥 Tải video từ liên kết"],
-        ["🧭 Lập kế hoạch dựng video", "📖 Hướng dẫn video"],
+        ["🧭 Lên kế hoạch chỉnh sửa", "📖 Hướng dẫn video"],
         ["🏠 Menu chính"],
     ]
 
@@ -103,7 +103,7 @@ def test_video_menu_places_planning_beside_guide_by_default(monkeypatch):
 
     assert bot.local_video_studio_public_enabled() is True
     assert _rows(bot.main_video_keyboard("vi"))[-2:] == [
-        ["🧭 Lập kế hoạch dựng video", "📖 Hướng dẫn video"],
+        ["🧭 Lên kế hoạch chỉnh sửa", "📖 Hướng dẫn video"],
         ["🏠 Menu chính"],
     ]
 
@@ -122,7 +122,7 @@ def test_video_planning_entry_uses_its_registered_public_handler(monkeypatch):
     try:
         text, markup, session = _press(user_id, "lvs27b|open")
         callbacks = _callbacks(markup)
-        assert "lập kế hoạch" in text.lower()
+        assert "lên kế hoạch" in text.lower()
         assert any(callback.startswith("lvs27b|") for callback in callbacks)
         assert not session.get("job_created")
         assert not session.get("provider_called")
@@ -164,7 +164,7 @@ def test_video_route_entry_context_is_saved_per_button():
             assert "menu|main_video" in callbacks
             continue
         if route["video_tool"] == "video_edit_planning":
-            assert "lập kế hoạch" in text.lower()
+            assert "lên kế hoạch" in text.lower()
             assert not session
             assert any(callback.startswith("lvs27b|") for callback in callbacks)
             continue
