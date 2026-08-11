@@ -42,12 +42,8 @@ BRAND_POSITIONS = frozenset(
     }
 )
 PRODUCT_TYPE_BY_PARENT = {
-    "video_trend": "video_trend",
     "script_image_video": "script_to_video",
-    "frame_video_local": "image_to_video",
     "self_shot_scene_change": "self_shot_scene_change",
-    "storyboard_prompt": "storyboard_prompt",
-    "multi_scene_film": "multi_scene_film",
 }
 ACTIVE_DRAFT_STATUSES = (
     "draft_planning",

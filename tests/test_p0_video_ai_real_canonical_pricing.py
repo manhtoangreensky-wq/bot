@@ -112,7 +112,6 @@ def test_video_package_registry_uses_tier_ids_with_canonical_price_and_duration(
         "video_ai_real",
         "image_to_video",
         "script_image_video",
-        "storyboard_prompt",
         "self_shot_scene_change",
         "self_shot_cinematic_transform",
     )
@@ -243,7 +242,6 @@ def test_fifteen_second_tier_stays_scoped_to_approved_uiflow3_products():
         "video_ai_prompt",
         "video_ai_image",
         "script_image_video",
-        "storyboard_prompt",
         "self_shot_scene_change",
         "self_shot_cinematic_transform",
     )

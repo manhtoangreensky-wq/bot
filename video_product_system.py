@@ -39,7 +39,7 @@ PRODUCT_FIELDS = (
     "admin_status_fields",
 )
 
-LEGACY_LOCKED_VIDEO_PACKAGES = (
+PUBLIC_VIDEO_PACKAGES = (
     "package_200",
     "package_300",
     "package_400",
@@ -50,7 +50,7 @@ LEGACY_LOCKED_VIDEO_PACKAGES = (
     "package_1200",
     "package_1500",
 )
-PUBLIC_VIDEO_PACKAGES = (
+UIFLOW3_EXTENDED_VIDEO_PACKAGES = (
     "package_200",
     "package_300",
     "package_400",
@@ -111,13 +111,13 @@ VIDEO_PRODUCT_REGISTRY: dict[str, dict[str, Any]] = {
     "video_trend": _product(
         "video_trend", "🔥 Video theo trend",
         "Tạo trend angle, hook, kịch bản, caption và storyboard prompt từ chủ đề.",
-        "topic|product|niche", "plan|script|prompt_pack", "free_planning", LEGACY_LOCKED_VIDEO_PACKAGES,
+        "topic|product|niche", "plan|script|prompt_pack", "free_planning", PUBLIC_VIDEO_PACKAGES,
         template="tiktok_hook", next_steps=("generate_plan", "export_prompt_pack", "render_video"),
     ),
     "video_idea": _product(
         "video_idea", "💡 Ý tưởng video",
         "Tạo 5–10 ý tưởng, hook và format theo chủ đề, sản phẩm và nền tảng.",
-        "topic|product|platform", "idea_pack", "free_planning", LEGACY_LOCKED_VIDEO_PACKAGES,
+        "topic|product|platform", "idea_pack", "free_planning", PUBLIC_VIDEO_PACKAGES,
         template="youtube_short_script", next_steps=("generate_ideas", "export_prompt_pack", "render_video"),
     ),
     "storyboard_prompt": _product(
@@ -131,21 +131,21 @@ VIDEO_PRODUCT_REGISTRY: dict[str, dict[str, Any]] = {
         "script_image_video", "🧩 Kịch bản → Ảnh → Video",
         "Tạo kịch bản, shot list, prompt ảnh rồi prompt chuyển động/video từng cảnh.",
         "topic|script|product", "script|shot_list|image_prompts|video_prompts", "free_planning_paid_render",
-        PUBLIC_VIDEO_PACKAGES, template="product_ad", max_duration=60,
+        UIFLOW3_EXTENDED_VIDEO_PACKAGES, template="product_ad", max_duration=60,
         next_steps=("export_prompt_pack", "create_scene_image", "render_scene", "assemble_multiscene"),
     ),
     "video_ai_real": _product(
         "video_ai_real", "🎬 Video AI chân thật",
         "Biến prompt hoặc ảnh tham chiếu thành một video AI ngắn, chân thật.",
         "text_prompt|optional_reference_image", "rendered_video", "paid_after_final_confirm",
-        PUBLIC_VIDEO_PACKAGES, provider=True, template="realistic_video", max_duration=12,
+        UIFLOW3_EXTENDED_VIDEO_PACKAGES, provider=True, template="realistic_video", max_duration=12,
         next_steps=("improve_prompt", "choose_package", "final_confirm", "provider_job"),
     ),
     "image_to_video": _product(
         "image_to_video", "🖼 Ảnh → Video",
         "Tạo motion prompt miễn phí hoặc render video từ 1–4 ảnh.",
         "1_to_4_images|scene_description", "motion_prompt|rendered_video", "free_prompt_paid_render",
-        PUBLIC_VIDEO_PACKAGES, provider=True, template="image_to_video_motion", max_duration=12,
+        UIFLOW3_EXTENDED_VIDEO_PACKAGES, provider=True, template="image_to_video_motion", max_duration=12,
         next_steps=("motion_prompt", "choose_package", "final_confirm", "provider_job"),
     ),
     "frame_video_local": _product(
@@ -158,28 +158,28 @@ VIDEO_PRODUCT_REGISTRY: dict[str, dict[str, Any]] = {
         "self_shot_scene_change", "🎥 Tự quay & đổi cảnh AI",
         "Giữ chủ thể/hướng chuyển động từ video hoặc ảnh nguồn rồi đổi bối cảnh, ánh sáng và phong cách.",
         "user_video|user_image", "video_to_video_plan|edited_video", "free_plan_paid_guarded_render",
-        PUBLIC_VIDEO_PACKAGES, provider=True, template="transformation_video", max_duration=12,
+        UIFLOW3_EXTENDED_VIDEO_PACKAGES, provider=True, template="transformation_video", max_duration=12,
         next_steps=("collect_source", "preserve_subject", "scene_plan", "choose_package"),
     ),
     "self_shot_cinematic_transform": _product(
         "self_shot_cinematic_transform", "🎥 Tự quay & biến đổi điện ảnh",
         "Giữ khuôn mặt, vóc dáng, chuyển động và tương tác nguồn trong một cú máy; biến đổi trang phục, thế giới và hiệu ứng theo từng giai đoạn.",
         "source_video", "cinematic_transform_plan|final_mp4", "free_plan_paid_guarded_render",
-        PUBLIC_VIDEO_PACKAGES, provider=True, template="one_take_cinematic_transform", max_duration=120,
+        UIFLOW3_EXTENDED_VIDEO_PACKAGES, provider=True, template="one_take_cinematic_transform", max_duration=120,
         next_steps=("collect_source", "analyze_source", "lock_subject", "build_timeline", "choose_package"),
     ),
     "multi_scene_film": _product(
         "multi_scene_film", "🎬 Video dài tập",
         "Lập kế hoạch phim/quảng cáo nhiều cảnh và render theo từng scene khi gói phù hợp.",
         "story|product|script", "scene_plan|prompt_pack|optional_scene_renders", "free_planning_paid_higher_tier_render",
-        LEGACY_LOCKED_VIDEO_PACKAGES, provider=True, template="cinematic_story", max_duration=120,
+        PUBLIC_VIDEO_PACKAGES, provider=True, template="cinematic_story", max_duration=120,
         next_steps=("scene_plan", "export_prompt_pack", "render_scene_batches"),
         guard="Gói 200 xuất một cảnh trải nghiệm từ kế hoạch; chọn gói cao hơn khi muốn xuất thêm cảnh.",
     ),
     "motion_prompt": _product(
         "motion_prompt", "🎥 Prompt / Chuyển động",
         "Tạo prompt camera, chuyển động chủ thể và chuyển cảnh chuyên nghiệp.",
-        "image|scene_description", "camera_motion_prompt", "free_planning", LEGACY_LOCKED_VIDEO_PACKAGES, template="image_to_video_motion",
+        "image|scene_description", "camera_motion_prompt", "free_planning", PUBLIC_VIDEO_PACKAGES, template="image_to_video_motion",
         next_steps=("generate_motion_prompt", "export_prompt_pack", "render_video"),
     ),
     "video_reference": _product(
@@ -262,7 +262,7 @@ VIDEO_PACKAGE_REGISTRY: dict[str, dict[str, Any]] = {
     "package_700": {
         "package_id": "package_700", **_canonical_video_package_fields(700),
         "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
-        "provider_quality": "long_audio", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "self_shot_scene_change", "self_shot_cinematic_transform"],
+        "provider_quality": "long_audio", "allowed_products": ["video_ai_real", "image_to_video", "script_image_video", "self_shot_scene_change", "self_shot_cinematic_transform"],
         "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"],
         "preview_policy": "optional", "public_enabled": True, "cost_gate": "open_business_package",
     },

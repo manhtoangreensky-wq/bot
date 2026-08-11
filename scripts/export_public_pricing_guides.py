@@ -18,14 +18,22 @@ from services.pricing_guide_content import (  # noqa: E402
     public_video_price_lines,
     video_multiscene_discount_lines,
 )
+from services import video_ai_real_pricing  # noqa: E402
 
 
 PUBLIC_DIR = ROOT / "docs" / "public"
 
 
+def _image_price_values() -> str:
+    values = sorted({int(entry["unit_xu"]) for entry in video_ai_real_pricing.public_image_quality_catalog()})
+    return " / ".join(str(value) for value in values)
+
+
 def guide_v2_markdown() -> str:
     video_prices = "".join(f"- {line.removeprefix('• ')}\n" for line in public_video_price_lines())
-    video_discounts = "".join(f"- {line.removeprefix('• ')}\n" for line in video_multiscene_discount_lines())
+    video_discounts = "".join(
+        f"- {line.removeprefix('• ')}\n" for line in video_multiscene_discount_lines()
+    )
     return (
         "# TOAN AAS - Hướng dẫn sử dụng cho khách hàng\n\n"
         "**Phiên bản:** V2\n\n"
@@ -36,13 +44,11 @@ def guide_v2_markdown() -> str:
         "**Định hướng:** Công cụ AI hỗ trợ sáng tạo nội dung và công việc hằng ngày\n\n"
         "TOAN AAS giúp anh/chị tạo ảnh, video, âm thanh, phụ đề, dịch, lồng tiếng, xử lý tài liệu và xem chi phí trước khi dùng.\n\n"
         "## Bảng giá nhanh\n\n"
-        "- Bảng giá tạo ảnh: 50, 150, 200, 300, 400, 500 và 600 Xu.\n"
+        f"- Bảng giá tạo ảnh: {_image_price_values()} Xu/ảnh.\n"
         "### Video AI theo cảnh\n\n"
         f"{video_prices}\n"
         "Khuyến mãi chỉ áp dụng cho đơn Video nhiều cảnh từ 2 cảnh; add-on tính riêng.\n\n"
         f"{video_discounts}\n"
-        "- Tiết kiệm: 50 Xu.\n"
-        "- Cao + bảo hành: 600 Xu.\n"
         "- Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam nếu chương trình đang mở.\n\n"
         "## Hướng dẫn chi tiết\n\n"
         f"{guide_markdown()}\n"

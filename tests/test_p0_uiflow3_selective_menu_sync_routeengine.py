@@ -13,9 +13,7 @@ from services import (
 SYNCED_PRODUCTS = (
     "video_ai_real",
     "script_image_video",
-    "frame_video_local",
     "self_shot_scene_change",
-    "storyboard_prompt",
 )
 
 
@@ -54,16 +52,7 @@ def test_approved_products_use_exact_uiflow3_entry_owner_and_menu_back() -> None
     expected_children = {
         "video_ai_real": ("vid3|mode|prompt_video", "vid3|mode|image_video"),
         "script_image_video": ("vid3|source_text",),
-        "frame_video_local": (
-            "vid3|source_media",
-            "vid3|image_ai|source",
-            "vid3|source_status",
-        ),
         "self_shot_scene_change": ("vid3|source_media", "vid3|source_status"),
-        "storyboard_prompt": (
-            "vid3|mode|storyboard_generate",
-            "vid3|mode|storyboard_upload",
-        ),
     }
     for product in SYNCED_PRODUCTS:
         route = bot.VIDEO_PUBLIC_ROUTE_MATRIX[product]
@@ -83,6 +72,8 @@ def test_locked_video_routes_remain_on_their_existing_owners() -> None:
     assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["video_idea"]["entry_callback"] == "videoidea|start"
     assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["multi_scene_film"]["entry_callback"] == "longvideo|public_guard"
     assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["video_local_edit"]["entry_callback"] == "videoedit|hub"
+    assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["frame_video_local"]["entry_callback"] == "vproduct|open|frame_video_local"
+    assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["storyboard_prompt"]["entry_callback"] == "vproduct|open|storyboard_prompt"
 
 
 def test_each_synced_non_pilot_product_has_five_ordered_specific_suggestions() -> None:
@@ -117,14 +108,7 @@ def test_each_synced_non_pilot_product_has_five_ordered_specific_suggestions() -
     assert len(set(prompts.values())) == len(prompts)
 
 
-def test_source_intake_is_product_specific_and_has_no_skip_before_media() -> None:
-    frame_text, frame_markup = bot.video_uiflow3_screen_payload(
-        video_uiflow3.new_state("frame_video_local", draft_id="frame-source")
-    )
-    assert "ít nhất 2 ảnh" in frame_text
-    assert "vid3|image_ai|source" in _callbacks(frame_markup)
-    assert "vid3|source_done" not in _callbacks(frame_markup)
-
+def test_selfshot_source_intake_is_product_specific_and_has_no_skip_before_media() -> None:
     selfshot_text, selfshot_markup = bot.video_uiflow3_screen_payload(
         video_uiflow3.new_state("self_shot_scene_change", draft_id="selfshot-source")
     )
@@ -164,8 +148,6 @@ def test_non_pilot_branding_shows_positions_and_returns_to_branding_parent() -> 
 def test_synced_products_keep_distinct_execution_adapters() -> None:
     expected = {
         "script_image_video": "product_tail",
-        "storyboard_prompt": "product_tail",
-        "frame_video_local": "frame_video",
         "self_shot_scene_change": "selfshot2",
     }
     for product, kind in expected.items():
@@ -179,7 +161,6 @@ def test_fifteen_second_quality_is_selective_and_does_not_unlock_protected_produ
         "video_ai_prompt",
         "video_ai_image",
         "script_image_video",
-        "storyboard_prompt",
         "self_shot_scene_change",
         "self_shot_cinematic_transform",
     )

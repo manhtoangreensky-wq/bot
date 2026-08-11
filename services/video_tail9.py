@@ -168,7 +168,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "worker_owner": "product_video",
         "minimum_scene_count": 2,
         "supports_single_scene": False,
-        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
+        "supported_quality_tiers": MULTI_SCENE_QUALITY_TIERS,
     },
     "video_trend": {
         "flow_owner": "trend",
