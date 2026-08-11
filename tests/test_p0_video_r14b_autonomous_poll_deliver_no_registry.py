@@ -65,7 +65,7 @@ def test_provider_running_never_surfaces_failed_no_charge_terminal_in_video_debu
     assert "provider_running_overrides_failed_no_charge" in BOT_SOURCE
 
 
-def test_auto_refresh_and_manual_status_poll_existing_task_then_materialize_delivery():
+def test_refresh_only_renders_persisted_state_while_worker_keeps_recovery_owner():
     materialize = _between(
         BOT_SOURCE,
         "async def video_b14_autonomous_materialize_and_deliver",
@@ -79,12 +79,20 @@ def test_auto_refresh_and_manual_status_poll_existing_task_then_materialize_deli
     assert "submit_video_job" not in materialize
 
     tick = _between(BOT_SOURCE, "async def video_b14_auto_refresh_tick", "async def video_b14_send_or_edit_status_panel")
-    assert "video_b14_autonomous_materialize_and_deliver" in tick
-    assert "source=\"auto_refresh_tick\"" in tick
+    assert "video_b14_autonomous_materialize_and_deliver" not in tick
+    assert "video_b14_auto_refresh_snapshot" in tick
+    assert "video_b14_persist_auto_refresh_metadata" not in tick
 
     callback = _between(BOT_SOURCE, 'if action == "b14_job_status":', 'if action == "b14_download_video":')
-    assert "video_b14_autonomous_materialize_and_deliver" in callback
-    assert "source=\"manual_status_refresh\"" in callback
+    assert "video_b14_autonomous_materialize_and_deliver" not in callback
+    assert "safe_edit_or_send" not in callback
+    assert "video_b14_edit_existing_status_message" in callback
+    assert "video_b14_auto_refresh_status_bundle" in callback
+    assert "register_auto_refresh=False" in callback
+    assert "edit_existing_only=True" in callback
+
+    worker_claim = _between(BOT_SOURCE, "async def api_worker_claim", "async def api_worker_heartbeat")
+    assert "video_b14_recover_existing_tasks_for_worker_claim" in worker_claim
 
 
 def test_autonomous_recovery_finalizes_provider_artifact_before_complete_and_delivery():

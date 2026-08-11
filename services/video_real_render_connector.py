@@ -74,6 +74,7 @@ PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES = {
 }
 PROVIDER_BRIDGE_RENDERER = "video_provider_bridge"
 PRODUCT_VIDEO_SCENE_SECONDS = 8
+PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS = 15
 PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S = "per_scene_8s"
 PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK = "single_task_legacy"
 PRODUCT_VIDEO_RENDER_PIPELINE_HISTORICAL_CONCAT = "historical_multi_clip_concat"
@@ -1185,6 +1186,7 @@ def product_video_orchestration_mode(job: dict | None = None) -> str:
 def product_video_scene_duration_seconds(job: dict | None = None) -> int:
     job = dict(job or {})
     invoice = _invoice_payload(job)
+    asset_pack = _asset_pack_payload(job)
     product_type = str(
         job.get("product_type")
         or job.get("job_type")
@@ -1193,7 +1195,6 @@ def product_video_scene_duration_seconds(job: dict | None = None) -> int:
         or ""
     ).strip()
     if product_type == "self_shot_cinematic_transform":
-        asset_pack = _asset_pack_payload(job)
         segment = dict(asset_pack.get("source_segment") or {})
         segment_seconds = _safe_int((segment.get("duration_ms") or 0) / 1000, 0)
         direct_seconds = _safe_int(
@@ -1211,7 +1212,17 @@ def product_video_scene_duration_seconds(job: dict | None = None) -> int:
         or invoice.get("scene_seconds"),
         PRODUCT_VIDEO_SCENE_SECONDS,
     )
-    return max(1, min(PRODUCT_VIDEO_SCENE_SECONDS, scene_seconds))
+    scene_duration_limit = (
+        PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
+        if str(
+            job.get("uiflow3_handoff_sha256")
+            or asset_pack.get("uiflow3_handoff_sha256")
+            or invoice.get("uiflow3_handoff_sha256")
+            or ""
+        ).strip()
+        else PRODUCT_VIDEO_SCENE_SECONDS
+    )
+    return max(1, min(scene_duration_limit, scene_seconds))
 
 
 def _existing_scene_tasks(job: dict | None = None) -> list[dict[str, Any]]:
@@ -4038,7 +4049,9 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "selected_capabilities",
             "selected_clip_seconds",
             "selected_payload_adapter",
+            "selected_request_defaults",
             "provider_model_map",
+            "provider_request_defaults",
             "provider_catalog_model_found",
             "supports_concat",
             "contract_validation_status",
@@ -5047,6 +5060,8 @@ def _run_per_scene_provider_orchestrator(
         enable_logo=_logo_enabled(addon),
         logo_text=str(addon.get("logo_text") or ""),
         logo_position=str(addon.get("logo_position") or "bottom_right"),
+        output_width=_canvas_size(_aspect_ratio(job))[0],
+        output_height=_canvas_size(_aspect_ratio(job))[1],
     )
     final_result.update(base)
     final_result["finalizer_invoked"] = True
@@ -5233,6 +5248,8 @@ def _canvas_size(aspect_ratio: str) -> tuple[int, int]:
         return 960, 540
     if value == "1:1":
         return 720, 720
+    if value == "4:5":
+        return 720, 900
     return 540, 960
 
 
@@ -5480,6 +5497,7 @@ def _run_multiscene_render(job: dict, workspace: str, *, render_video_func, bgm_
         per_scene_duration = float(product_video_scene_duration_seconds(job))
     else:
         per_scene_duration = max(1.0, min(8.0, product_video_expected_duration_seconds(job) / max(1, _scene_count(job))))
+    output_width, output_height = _canvas_size(_aspect_ratio(job))
     return process_multiscene_video_pipeline(
         user_id=str(job.get("user_id") or ""),
         job_id=str(job.get("job_id") or job.get("id") or int(time.time())),
@@ -5496,6 +5514,8 @@ def _run_multiscene_render(job: dict, workspace: str, *, render_video_func, bgm_
         enable_logo=_logo_enabled(addon),
         logo_text=str(addon.get("logo_text") or ""),
         logo_position=str(addon.get("logo_position") or "bottom_right"),
+        output_width=output_width,
+        output_height=output_height,
     )
 
 

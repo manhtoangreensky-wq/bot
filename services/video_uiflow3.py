@@ -1664,6 +1664,14 @@ def suggest_scene_plan(state: Mapping[str, Any]) -> dict[str, Any]:
         or "noi dung da khoa",
         240,
     )
+    selected_context = str(brief.get("prompt") or brief.get("visual_prompt") or "").strip()
+    context_blueprint = dict(brief.get("prompt_blueprint") or {})
+    context_sequence = [
+        _text(item, 240)
+        for item in str(context_blueprint.get("sequence") or "").split("→")
+        if _text(item, 240)
+    ]
+    context_focus = _text(context_blueprint.get("focus"), 800)
     total = len(scenes)
     for index, scene in enumerate(scenes, 1):
         if total == 1:
@@ -1694,6 +1702,13 @@ def suggest_scene_plan(state: Mapping[str, Any]) -> dict[str, Any]:
                 "main_action": "Tiep noi ket qua canh truoc va phat trien mot y chinh.",
                 "completion_state": f"Y phat trien {index - 1} da hoan tat de chuyen sang canh tiep.",
             }
+        if selected_context and str(brief.get("context_suggestion_key") or "").startswith("product_context_"):
+            beat = context_sequence[(index - 1) % len(context_sequence)] if context_sequence else topic
+            defaults.update({
+                "semantic_beat": f"{beat}: {topic}",
+                "main_action": f"{context_focus or 'Thực hiện đúng ý chính'} Tập trung vào {beat.lower()}.",
+                "completion_state": f"{beat} đã hoàn tất và sẵn sàng nối sang cảnh kế tiếp.",
+            })
         filled = False
         if not _text(scene.get("scene_role"), 80):
             scene["scene_role"] = role

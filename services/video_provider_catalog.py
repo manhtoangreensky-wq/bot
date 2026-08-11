@@ -39,8 +39,12 @@ _TIER_COST_ORDER = {
     "basic": 2,
     "common": 3,
     "standard": 4,
+    "long": 5,
     "advanced": 5,
     "high": 6,
+    "future_1000": 7,
+    "future_1200": 8,
+    "future_1500": 9,
 }
 _KEY4U_EXCLUSIVE_ENDPOINT_ENVS = {
     "kling": (
@@ -74,6 +78,14 @@ _KEY4U_EXCLUSIVE_POLL_ENVS = {
     "minimax_hailuo": ("KEY4U_HAILUO_VIDEO_POLL_URL", "KEY4U_MINIMAX_HAILUO_VIDEO_POLL_URL", "KEY4U_MINIMAX_VIDEO_POLL_URL"),
     "google_veo": ("KEY4U_VEO_VIDEO_POLL_URL", "KEY4U_GOOGLE_VEO_VIDEO_POLL_URL"),
 }
+_KEY4U_GENERIC_ENDPOINT_ENVS = (
+    "KEY4U_VIDEO_ENDPOINT",
+    "KEY4U_VIDEO_SUBMIT_URL",
+)
+_KEY4U_GENERIC_POLL_ENVS = (
+    "KEY4U_VIDEO_POLL_ENDPOINT",
+    "KEY4U_VIDEO_POLL_URL",
+)
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -266,6 +278,26 @@ def model_interface_contract(
                 }
             )
         return base
+    submit_url, submit_source = _first_endpoint(data, _KEY4U_GENERIC_ENDPOINT_ENVS)
+    poll_url, poll_source = _first_endpoint(data, _KEY4U_GENERIC_POLL_ENVS)
+    base.update(
+        {
+            "provider_interface": "key4u_catalog_generic",
+            "provider_endpoint_source": submit_source or "missing:key4u_catalog_generic",
+            "provider_submit_url_override": submit_url,
+            "provider_poll_url_override": poll_url,
+            "provider_poll_endpoint_source": poll_source,
+            "model_requires_exclusive_interface": False,
+        }
+    )
+    if not submit_url:
+        base.update(
+            {
+                "contract_validation_status": "blocked",
+                "contract_block_reason": KEY4U_MODEL_CONTRACT_MISSING,
+                "submit_skipped_due_to_contract": True,
+            }
+        )
     return base
 
 
@@ -334,6 +366,25 @@ def _candidate_from_entry(provider: str, model: str, source: str, catalog: dict[
     return {"provider": provider, "model": model, "source": source, "config": cfg}
 
 
+def _request_defaults(value: Any, fallback_duration: int = 0) -> dict[str, Any]:
+    """Normalize route-owned provider defaults without inventing payload fields."""
+
+    raw = dict(value) if isinstance(value, dict) else {}
+    result = {
+        str(key): item
+        for key, item in raw.items()
+        if str(key).strip() and item not in (None, "")
+    }
+    if result.get("duration") in (None, "") and int(fallback_duration or 0) > 0:
+        result["duration"] = int(fallback_duration)
+    if result.get("duration") not in (None, ""):
+        try:
+            result["duration"] = max(1, int(round(float(result["duration"]))))
+        except (TypeError, ValueError):
+            result.pop("duration", None)
+    return result
+
+
 def _routing_candidates(
     tier: str,
     provider_chain: list[str],
@@ -346,6 +397,8 @@ def _routing_candidates(
     env_override_detected = False
     tier_cfg = (routing.get("tiers") or {}).get(tier) if isinstance(routing.get("tiers"), dict) else {}
     preferred = [dict(item) for item in (tier_cfg or {}).get("preferred", []) if isinstance(item, dict)]
+    tier_duration = int((tier_cfg or {}).get("clip_seconds") or 0)
+    tier_defaults = _request_defaults((tier_cfg or {}).get("request_defaults"), tier_duration)
 
     for provider in provider_chain:
         for env_name in _provider_env_model_names(provider, tier):
@@ -354,7 +407,9 @@ def _routing_candidates(
                 continue
             env_override_detected = True
             if provider_model_config(provider, value, catalog):
-                candidates.append(_candidate_from_entry(provider, value, f"env:{env_name}", catalog))
+                candidate = _candidate_from_entry(provider, value, f"env:{env_name}", catalog)
+                candidate["request_defaults"] = dict(tier_defaults)
+                candidates.append(candidate)
                 break
             rejected.append({"provider": provider, "model": value, "reason": MODEL_UNKNOWN, "source": f"env:{env_name}"})
 
@@ -366,20 +421,25 @@ def _routing_candidates(
         candidate = _candidate_from_entry(provider, model, f"config:tier:{tier}", catalog)
         candidate["role"] = str(entry.get("role") or ("primary" if idx == 0 else "fallback"))
         candidate["cost_tier"] = str(entry.get("cost_tier") or tier)
+        entry_defaults = dict(tier_defaults)
+        entry_defaults.update(_request_defaults(entry.get("request_defaults"), tier_duration))
+        candidate["request_defaults"] = _request_defaults(entry_defaults, tier_duration)
         candidates.append(candidate)
 
-    # Add one catalog fallback per chained provider so Key4U is not treated as a
-    # one-model generic provider if tier config misses a provider.
-    providers = catalog.get("providers") if isinstance(catalog.get("providers"), dict) else {}
-    for provider in provider_chain:
-        provider_cfg = providers.get(provider) if isinstance(providers, dict) else {}
-        models = provider_cfg.get("models") if isinstance(provider_cfg, dict) else {}
-        for model in models.keys() if isinstance(models, dict) else []:
-            candidate = _candidate_from_entry(provider, str(model), "catalog:fallback", catalog)
-            candidate["role"] = "fallback"
-            candidate["cost_tier"] = str((candidate.get("config") or {}).get("cost_tier") or tier)
-            candidates.append(candidate)
-            break
+    # Canonical tiers own their exact fallback list. A generic catalog fallback
+    # is only allowed for legacy/custom routing that has no preferred entries.
+    if not preferred:
+        providers = catalog.get("providers") if isinstance(catalog.get("providers"), dict) else {}
+        for provider in provider_chain:
+            provider_cfg = providers.get(provider) if isinstance(providers, dict) else {}
+            models = provider_cfg.get("models") if isinstance(provider_cfg, dict) else {}
+            for model in models.keys() if isinstance(models, dict) else []:
+                candidate = _candidate_from_entry(provider, str(model), "catalog:fallback", catalog)
+                candidate["role"] = "fallback"
+                candidate["cost_tier"] = str((candidate.get("config") or {}).get("cost_tier") or tier)
+                candidate["request_defaults"] = _request_defaults({}, tier_duration)
+                candidates.append(candidate)
+                break
 
     deduped: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
@@ -423,6 +483,7 @@ def resolve_product_video_model(
                 "family": str(cfg.get("family") or ""),
                 "cost_tier": str(cfg.get("cost_tier") or candidate.get("cost_tier") or ""),
                 "role": str(candidate.get("role") or ""),
+                "request_defaults": _request_defaults(candidate.get("request_defaults")),
                 "required_capability": required_capability,
                 "supports_concat": bool(cfg.get("supports_concat")),
                 "contract_status": str(candidate_interface.get("contract_validation_status") or ""),
@@ -446,6 +507,24 @@ def resolve_product_video_model(
         if not _model_supports(cfg, required_capability, requires_concat=requires_concat):
             rejected.append({"provider": provider, "model": model, "reason": "model_capability_missing", "source": item.get("source")})
             continue
+        selected_defaults = _request_defaults(
+            item.get("request_defaults"),
+            int((route.get("tiers") or {}).get(tier_key, {}).get("clip_seconds") or cfg.get("clip_seconds") or 8),
+        )
+        selected_duration = int(selected_defaults.get("duration") or 0)
+        max_duration = int(cfg.get("max_single_task_seconds") or cfg.get("clip_seconds") or 0)
+        if selected_duration and max_duration and selected_duration > max_duration:
+            rejected.append(
+                {
+                    "provider": provider,
+                    "model": model,
+                    "reason": "model_duration_exceeds_capability",
+                    "requested_duration": selected_duration,
+                    "max_single_task_seconds": max_duration,
+                    "source": item.get("source"),
+                }
+            )
+            continue
         contract = payload_contract_for_model(provider, model, cat)
         if not contract or not contract.get("payload_adapter"):
             rejected.append({"provider": provider, "model": model, "reason": CONTRACT_MISSING, "source": item.get("source")})
@@ -462,11 +541,45 @@ def resolve_product_video_model(
             )
             continue
         provider_model_map = {provider: model}
+        provider_request_defaults = {provider: dict(selected_defaults)}
         for fallback in candidates:
             fallback_provider = str(fallback.get("provider") or "")
             fallback_model = str(fallback.get("model") or "")
-            if fallback_provider and fallback_provider not in provider_model_map and provider_model_config(fallback_provider, fallback_model, cat):
-                provider_model_map[fallback_provider] = fallback_model
+            if not fallback_provider or fallback_provider in provider_model_map:
+                continue
+            fallback_cfg = provider_model_config(fallback_provider, fallback_model, cat)
+            fallback_defaults = _request_defaults(
+                fallback.get("request_defaults"),
+                int((route.get("tiers") or {}).get(tier_key, {}).get("clip_seconds") or 8),
+            )
+            fallback_duration = int(fallback_defaults.get("duration") or 0)
+            fallback_max_duration = int(
+                fallback_cfg.get("max_single_task_seconds")
+                or fallback_cfg.get("clip_seconds")
+                or 0
+            )
+            fallback_interface = model_interface_contract(
+                fallback_provider,
+                fallback_model,
+                env=data,
+                catalog=cat,
+            )
+            if (
+                not fallback_cfg
+                or not _cost_tier_allowed(tier_key, fallback_cfg)
+                or (requires_concat and not fallback_cfg.get("supports_concat"))
+                or not _model_supports(
+                    fallback_cfg,
+                    required_capability,
+                    requires_concat=requires_concat,
+                )
+                or (fallback_duration and fallback_max_duration and fallback_duration > fallback_max_duration)
+                or fallback_interface.get("contract_validation_status") == "blocked"
+                or not payload_contract_for_model(fallback_provider, fallback_model, cat).get("payload_adapter")
+            ):
+                continue
+            provider_model_map[fallback_provider] = fallback_model
+            provider_request_defaults[fallback_provider] = fallback_defaults
         capabilities = normalize_capability_values(cfg.get("capabilities") or [])
         return {
             "ok": True,
@@ -479,7 +592,13 @@ def resolve_product_video_model(
             "selected_cost_tier": str(cfg.get("cost_tier") or item.get("cost_tier") or tier_key),
             "selected_role": str(item.get("role") or ("primary" if not rejected else "fallback")),
             "selected_capabilities": capabilities,
-            "selected_clip_seconds": int(cfg.get("clip_seconds") or (route.get("tiers") or {}).get(tier_key, {}).get("clip_seconds") or 8),
+            "selected_request_defaults": dict(selected_defaults),
+            "selected_clip_seconds": int(
+                selected_duration
+                or (route.get("tiers") or {}).get(tier_key, {}).get("clip_seconds")
+                or cfg.get("clip_seconds")
+                or 8
+            ),
             "selected_payload_adapter": str(cfg.get("payload_adapter") or ""),
             "payload_adapter": str(cfg.get("payload_adapter") or ""),
             "provider_catalog_model_found": True,
@@ -487,6 +606,7 @@ def resolve_product_video_model(
             "contract_validation_status": "ok",
             **candidate_interface,
             "provider_model_map": provider_model_map,
+            "provider_request_defaults": provider_request_defaults,
             "provider_chain": chain,
             "default_public_provider_chain": default_chain,
             "candidate_list_compact": candidate_list_compact,
@@ -509,6 +629,7 @@ def resolve_product_video_model(
         "selected_model_source": "",
         "selected_quality": "",
         "selected_capabilities": [],
+        "selected_request_defaults": {},
         "selected_clip_seconds": 0,
         "selected_payload_adapter": "",
         "payload_adapter": "",
@@ -518,6 +639,7 @@ def resolve_product_video_model(
         "contract_block_reason": rejected[-1].get("reason") if rejected else CONTRACT_MISSING,
         "candidate_list_compact": candidate_list_compact,
         "provider_model_map": {},
+        "provider_request_defaults": {},
         "provider_chain": chain,
         "default_public_provider_chain": default_chain,
         "rejected_models": rejected,
@@ -546,6 +668,7 @@ def model_metadata_from_resolution(resolution: dict[str, Any]) -> dict[str, Any]
         "selected_cost_tier": resolution.get("selected_cost_tier") or "",
         "selected_role": resolution.get("selected_role") or "",
         "selected_capabilities": list(resolution.get("selected_capabilities") or []),
+        "selected_request_defaults": dict(resolution.get("selected_request_defaults") or {}),
         "selected_clip_seconds": int(resolution.get("selected_clip_seconds") or 0),
         "selected_payload_adapter": resolution.get("selected_payload_adapter") or "",
         "provider_catalog_model_found": bool(resolution.get("provider_catalog_model_found")),
@@ -559,6 +682,11 @@ def model_metadata_from_resolution(resolution: dict[str, Any]) -> dict[str, Any]
         "model_requires_exclusive_interface": bool(resolution.get("model_requires_exclusive_interface")),
         "submit_skipped_due_to_contract": bool(resolution.get("submit_skipped_due_to_contract")),
         "provider_model_map": dict(resolution.get("provider_model_map") or {}),
+        "provider_request_defaults": {
+            str(key): dict(value)
+            for key, value in (resolution.get("provider_request_defaults") or {}).items()
+            if isinstance(value, dict)
+        },
         "candidate_list_compact": list(resolution.get("candidate_list_compact") or []),
         "default_public_provider_chain": list(resolution.get("default_public_provider_chain") or []),
         "rejected_models": list(resolution.get("rejected_models") or []),
@@ -607,7 +735,13 @@ def enrich_metadata_with_model_contract(
             "selected_quality": str(cfg.get("quality") or meta.get("selected_quality") or ""),
             "selected_cost_tier": str(cfg.get("cost_tier") or meta.get("selected_cost_tier") or ""),
             "selected_capabilities": normalize_capability_values(cfg.get("capabilities") or meta.get("selected_capabilities") or []),
-            "selected_clip_seconds": int(cfg.get("clip_seconds") or meta.get("selected_clip_seconds") or 0),
+            "selected_clip_seconds": int(meta.get("selected_clip_seconds") or cfg.get("clip_seconds") or 0),
+            "selected_request_defaults": dict(meta.get("selected_request_defaults") or {}),
+            "provider_request_defaults": {
+                str(key): dict(value)
+                for key, value in (meta.get("provider_request_defaults") or {}).items()
+                if isinstance(value, dict)
+            },
             "selected_payload_adapter": str(cfg.get("payload_adapter") or contract.get("payload_adapter") or meta.get("selected_payload_adapter") or ""),
             "provider_catalog_model_found": bool(cfg),
             "supports_concat": bool(cfg.get("supports_concat") or meta.get("supports_concat")),

@@ -1,5 +1,5 @@
 {
-  "version": "p0.video.r18d",
+  "version": "p0.video.r19",
   "default_provider_chain": ["shopaikey_video", "key4u_video", "toanaas_video", "veo", "kling", "generic_http"],
   "tier_aliases": {
     "200": "low",
@@ -10,73 +10,205 @@
     "400": "common",
     "good": "common",
     "common": "common",
-    "500": "standard",
-    "standard": "standard",
-    "600": "advanced",
+    "500": "advanced",
     "advanced": "advanced",
-    "800": "advanced",
-    "premium": "advanced",
-    "1000": "standard",
-    "pro": "standard",
-    "1200": "high",
-    "studio": "high",
-    "1500": "high",
-    "max": "high",
-    "high": "high"
+    "plus": "advanced",
+    "600": "standard",
+    "standard": "standard",
+    "business": "standard",
+    "700": "long",
+    "long": "long",
+    "800": "high",
+    "premium": "high",
+    "high": "high",
+    "1000": "future_1000",
+    "pro": "future_1000",
+    "professional": "future_1000",
+    "1200": "future_1200",
+    "studio": "future_1200",
+    "pro_plus": "future_1200",
+    "1500": "future_1500",
+    "max": "future_1500",
+    "premium_future": "future_1500"
   },
   "tiers": {
     "low": {
       "quality": "low",
-      "clip_seconds": 8,
+      "clip_seconds": 5,
       "preferred": [
-        {"provider": "shopaikey_video", "model": "grok-video-3", "cost_tier": "low", "role": "primary"},
-        {"provider": "shopaikey_video", "model": "veo3.1-fast", "cost_tier": "low", "role": "fallback"},
-        {"provider": "key4u_video", "model": "kling-3.0-turbo", "cost_tier": "low", "role": "fallback"}
+        {
+          "provider": "shopaikey_video",
+          "model": "grok-video-3",
+          "cost_tier": "low",
+          "role": "primary",
+          "request_defaults": {"duration": 5, "resolution": "720p"}
+        },
+        {
+          "provider": "key4u_video",
+          "model": "pixverse-video",
+          "cost_tier": "low",
+          "role": "fallback",
+          "request_defaults": {"duration": 5, "resolution": "720p"}
+        }
       ]
     },
     "basic": {
       "quality": "basic",
-      "clip_seconds": 8,
+      "clip_seconds": 5,
       "preferred": [
-        {"provider": "shopaikey_video", "model": "veo3.1-fast", "cost_tier": "basic", "role": "primary"},
-        {"provider": "shopaikey_video", "model": "veo3.1-fast-components", "cost_tier": "basic", "role": "fallback"},
-        {"provider": "key4u_video", "model": "kling-3.0-turbo", "cost_tier": "basic", "role": "fallback"}
+        {
+          "provider": "shopaikey_video",
+          "model": "grok-video-3",
+          "cost_tier": "low",
+          "role": "primary",
+          "request_defaults": {"duration": 5, "resolution": "720p", "sound": true}
+        },
+        {
+          "provider": "key4u_video",
+          "model": "grok-imagine-video",
+          "cost_tier": "basic",
+          "role": "fallback",
+          "request_defaults": {"duration": 5, "resolution": "720p", "sound": true}
+        }
       ]
     },
     "common": {
       "quality": "common",
       "clip_seconds": 8,
       "preferred": [
-        {"provider": "shopaikey_video", "model": "veo3.1-fast-components", "cost_tier": "common", "role": "primary"},
-        {"provider": "key4u_video", "model": "kling-video", "cost_tier": "common", "role": "fallback"},
-        {"provider": "shopaikey_video", "model": "veo3.1-fast", "cost_tier": "basic", "role": "fallback"}
+        {
+          "provider": "key4u_video",
+          "model": "veo_3_1-fast",
+          "cost_tier": "common",
+          "role": "primary",
+          "request_defaults": {"duration": 8, "resolution": "1080p"}
+        },
+        {
+          "provider": "shopaikey_video",
+          "model": "veo3.1-fast",
+          "cost_tier": "low",
+          "role": "fallback",
+          "request_defaults": {"duration": 8, "resolution": "720p"}
+        }
       ]
     },
     "advanced": {
       "quality": "advanced",
-      "clip_seconds": 8,
+      "clip_seconds": 5,
       "preferred": [
-        {"provider": "shopaikey_video", "model": "veo3.1-pro", "cost_tier": "advanced", "role": "primary"},
-        {"provider": "key4u_video", "model": "MiniMax-Hailuo-02", "cost_tier": "advanced", "role": "fallback"},
-        {"provider": "key4u_video", "model": "kling-video", "cost_tier": "common", "role": "fallback"}
+        {
+          "provider": "shopaikey_video",
+          "model": "veo3.1-fast",
+          "cost_tier": "low",
+          "role": "primary",
+          "request_defaults": {"duration": 5, "resolution": "720p", "sound": false}
+        },
+        {
+          "provider": "key4u_video",
+          "model": "kling-video",
+          "cost_tier": "common",
+          "role": "fallback",
+          "request_defaults": {"model_name": "kling-v3", "mode": "std", "duration": 5, "sound": false}
+        }
       ]
     },
     "standard": {
       "quality": "standard",
-      "clip_seconds": 8,
+      "clip_seconds": 5,
       "preferred": [
-        {"provider": "shopaikey_video", "model": "veo3.1-pro-components", "cost_tier": "standard", "role": "primary"},
-        {"provider": "key4u_video", "model": "MiniMax-Hailuo-2.3", "cost_tier": "standard", "role": "fallback"},
-        {"provider": "shopaikey_video", "model": "veo3.1-pro", "cost_tier": "advanced", "role": "fallback"}
+        {
+          "provider": "shopaikey_video",
+          "model": "veo3.1-fast",
+          "cost_tier": "low",
+          "role": "primary",
+          "request_defaults": {"duration": 5, "resolution": "720p", "sound": true}
+        },
+        {
+          "provider": "key4u_video",
+          "model": "kling-video",
+          "cost_tier": "common",
+          "role": "fallback",
+          "request_defaults": {"model_name": "kling-v3", "mode": "std", "duration": 5, "sound": true}
+        }
+      ]
+    },
+    "long": {
+      "quality": "long_scene_with_audio",
+      "clip_seconds": 15,
+      "preferred": [
+        {
+          "provider": "key4u_video",
+          "model": "kling-video",
+          "cost_tier": "common",
+          "role": "primary",
+          "request_defaults": {"model_name": "kling-v3", "mode": "pro", "duration": 15, "sound": true}
+        }
       ]
     },
     "high": {
       "quality": "high",
+      "clip_seconds": 10,
+      "preferred": [
+        {
+          "provider": "key4u_video",
+          "model": "kling-video",
+          "cost_tier": "common",
+          "role": "primary",
+          "request_defaults": {"model_name": "kling-v3", "mode": "pro", "duration": 10, "sound": true}
+        },
+        {
+          "provider": "shopaikey_video",
+          "model": "grok-video-3-10s",
+          "cost_tier": "high",
+          "role": "fallback",
+          "request_defaults": {"duration": 10, "resolution": "1080p", "sound": true}
+        }
+      ]
+    },
+    "future_1000": {
+      "quality": "professional",
+      "clip_seconds": 6,
+      "preferred": [
+        {
+          "provider": "key4u_video",
+          "model": "MiniMax-Hailuo-2.3",
+          "cost_tier": "high",
+          "role": "primary",
+          "request_defaults": {"duration": 6, "resolution": "768P"}
+        }
+      ]
+    },
+    "future_1200": {
+      "quality": "pro_plus",
       "clip_seconds": 8,
       "preferred": [
-        {"provider": "shopaikey_video", "model": "veo3.1-pro-4k", "cost_tier": "high", "role": "primary"},
-        {"provider": "shopaikey_video", "model": "veo3.1-pro-components", "cost_tier": "standard", "role": "fallback"},
-        {"provider": "key4u_video", "model": "MiniMax-Hailuo-2.3", "cost_tier": "high", "role": "fallback"}
+        {
+          "provider": "shopaikey_video",
+          "model": "veo3.1-pro-components",
+          "cost_tier": "standard",
+          "role": "primary",
+          "request_defaults": {"duration": 8, "resolution": "1080p"}
+        },
+        {
+          "provider": "key4u_video",
+          "model": "viduq3-mix",
+          "cost_tier": "high",
+          "role": "fallback",
+          "request_defaults": {"duration": 8, "resolution": "1080p"}
+        }
+      ]
+    },
+    "future_1500": {
+      "quality": "cinematic",
+      "clip_seconds": 10,
+      "preferred": [
+        {
+          "provider": "key4u_video",
+          "model": "doubao-seedance-1-0-pro-250528",
+          "cost_tier": "high",
+          "role": "primary",
+          "request_defaults": {"duration": 10, "resolution": "1080p"}
+        }
       ]
     }
   }

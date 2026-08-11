@@ -83,8 +83,21 @@ STATUS_STAGES = (
     "failed",
 )
 
-CANONICAL_QUALITY_TIERS = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
-MULTI_SCENE_QUALITY_TIERS = CANONICAL_QUALITY_TIERS
+CANONICAL_QUALITY_TIERS = (200, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500)
+LEGACY_LOCKED_QUALITY_TIERS = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
+MULTI_SCENE_QUALITY_TIERS = LEGACY_LOCKED_QUALITY_TIERS
+UIFLOW3_EXTENDED_QUALITY_TIERS = (
+    200,
+    300,
+    400,
+    500,
+    600,
+    700,
+    800,
+    1000,
+    1200,
+    1500,
+)
 
 
 PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
@@ -97,6 +110,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "required_capability": "text_to_video",
         "input_type": "text_prompt",
         "worker_owner": "product_video",
+        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
     "video_ai_prompt": {
         "flow_owner": "scene3",
@@ -107,6 +121,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "required_capability": "text_to_video",
         "input_type": "text_prompt",
         "worker_owner": "product_video",
+        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
     "video_ai_image": {
         "flow_owner": "scene3",
@@ -117,6 +132,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "required_capability": "image_to_video",
         "input_type": "scene_images",
         "worker_owner": "product_video",
+        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
     "video_ai_video_reference": {
         "flow_owner": "scene3",
@@ -139,7 +155,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "worker_owner": "product_video",
         "minimum_scene_count": 2,
         "supports_single_scene": False,
-        "supported_quality_tiers": MULTI_SCENE_QUALITY_TIERS,
+        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
     "storyboard_prompt": {
         "flow_owner": "storyboard",
@@ -184,6 +200,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "required_capability": "video_to_video",
         "input_type": "source_video",
         "worker_owner": "selfshot2",
+        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
     "self_shot_cinematic_transform": {
         "flow_owner": "selfshot3",
@@ -194,6 +211,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "required_capability": "video_to_video",
         "input_type": "source_video",
         "worker_owner": "selfshot3",
+        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
     "video_idea": {
         "flow_owner": "scene3",
@@ -300,7 +318,7 @@ def adapter_for(product_type: str) -> dict[str, Any]:
     result.setdefault("minimum_scene_count", 1)
     result.setdefault("maximum_scene_count", 20)
     result.setdefault("supports_single_scene", True)
-    result.setdefault("supported_quality_tiers", CANONICAL_QUALITY_TIERS)
+    result.setdefault("supported_quality_tiers", LEGACY_LOCKED_QUALITY_TIERS)
     result.setdefault("pricing_mode", "canonical")
     result.setdefault("required_capability", "text_to_video")
     result.setdefault("input_type", "text_prompt")

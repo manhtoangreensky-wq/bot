@@ -1492,6 +1492,8 @@ def process_multiscene_video_pipeline(
     enable_logo: bool = False,
     logo_text: str | None = None,
     logo_position: str = "bottom_right",
+    output_width: int | None = None,
+    output_height: int | None = None,
 ) -> dict[str, Any]:
     workspace = os.path.abspath(workspace_dir)
     os.makedirs(workspace, exist_ok=True)
@@ -1560,6 +1562,8 @@ def process_multiscene_video_pipeline(
             enable_logo=enable_logo,
             logo_text=logo_text,
             logo_position=logo_position,
+            output_width=output_width,
+            output_height=output_height,
         )
         created_files.extend(
             str(path)

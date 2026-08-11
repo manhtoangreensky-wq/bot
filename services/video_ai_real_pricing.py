@@ -16,16 +16,82 @@ XU_TO_VND = Decimal("100")
 SALE_MULTIPLIER = Decimal("3")
 PROVIDER_PRIORITY = ("shopaikey", "key4u")
 SOURCE_CHECKED_ON = "2026-08-11"
-CATALOG_VERSION = "2026-08-11.video.1"
+CATALOG_VERSION = "2026-08-11.video.5"
 IMAGE_CATALOG_VERSION = "2026-08-11.image.1"
-PROVIDER_USD_TO_VND = {
-    "shopaikey": Decimal("3250"),
-    "key4u": Decimal("3000"),
-}
+PROVIDER_EXCHANGE_RATE_CATALOG_VERSION = "2026-08-11.fx.1"
+DEFAULT_PROVIDER_USD_TO_VND = Decimal("3500")
 PROVIDER_SOURCE_URLS = {
     "shopaikey": "https://shopaikey.com/models",
     "key4u": "https://key4u.vn/models",
 }
+PROVIDER_EXCHANGE_RATE_ROWS: tuple[dict[str, Any], ...] = (
+    {
+        "provider_key": "shopaikey",
+        "currency": "USD",
+        "quote_currency": "VND",
+        "vnd_per_usd": 3250,
+        "source_reference": "ShopAIKey model catalog: 1 USD = 3,250 VND",
+        "source_url": "https://shopaikey.com/models",
+        "verified_at": SOURCE_CHECKED_ON,
+        "verified_by": "owner_governed_catalog_review",
+        "approval_status": "canonical_approved",
+        "is_default": False,
+        "catalog_version": PROVIDER_EXCHANGE_RATE_CATALOG_VERSION,
+    },
+    {
+        "provider_key": "key4u",
+        "currency": "USD",
+        "quote_currency": "VND",
+        "vnd_per_usd": 3500,
+        "source_reference": "Owner-verified live top-up checkout: 1 USD costs 3,500 VND",
+        "source_url": "https://key4u.vn/pricing",
+        "verified_at": SOURCE_CHECKED_ON,
+        "verified_by": "owner_live_topup_evidence",
+        "approval_status": "canonical_approved",
+        "is_default": True,
+        "catalog_version": PROVIDER_EXCHANGE_RATE_CATALOG_VERSION,
+    },
+    {
+        "provider_key": "default",
+        "currency": "USD",
+        "quote_currency": "VND",
+        "vnd_per_usd": 3500,
+        "source_reference": "Owner pricing policy: unknown providers use 3,500 VND per USD",
+        "source_url": "",
+        "verified_at": SOURCE_CHECKED_ON,
+        "verified_by": "owner_pricing_policy",
+        "approval_status": "canonical_approved",
+        "is_default": True,
+        "catalog_version": PROVIDER_EXCHANGE_RATE_CATALOG_VERSION,
+    },
+)
+VIDEO_PROVIDER_USD_TO_VND = {
+    row["provider_key"]: Decimal(str(row["vnd_per_usd"]))
+    for row in PROVIDER_EXCHANGE_RATE_ROWS
+    if row["provider_key"] != "default"
+}
+VIDEO_PROVIDER_ADAPTER_KEYS = {
+    "shopaikey": "shopaikey_video",
+    "key4u": "key4u_video",
+}
+
+# Image and Music have separate owners. Preserve their pre-existing conversion
+# inputs in this branch; their canonical task will replace them independently.
+PROVIDER_USD_TO_VND = {
+    "shopaikey": Decimal("3250"),
+    "key4u": Decimal("3000"),
+}
+
+
+def provider_exchange_rate_catalog() -> list[dict[str, Any]]:
+    return deepcopy(list(PROVIDER_EXCHANGE_RATE_ROWS))
+
+
+def provider_usd_to_vnd(provider: str = "") -> Decimal:
+    return VIDEO_PROVIDER_USD_TO_VND.get(
+        str(provider or "").strip().lower(),
+        DEFAULT_PROVIDER_USD_TO_VND,
+    )
 
 
 _MODEL_ROWS: tuple[dict[str, Any], ...] = (
@@ -51,9 +117,9 @@ _MODEL_ROWS: tuple[dict[str, Any], ...] = (
             "key4u": {
                 "model": "pixverse-video",
                 "request_metadata": {"duration": 5, "resolution": "720p"},
-                "usd_per_scene": "0.041",
-                "pricing_basis": "mỗi lần tạo",
-                "source_reference": "Key4U Model Hub: pixverse-video",
+                "usd_per_second": "0.369",
+                "pricing_basis": "0,369 USD mỗi giây; một cảnh 5 giây",
+                "source_reference": "Key4U Model Hub: PixVerse V6 720p không âm thanh",
             },
         },
     },
@@ -80,9 +146,9 @@ _MODEL_ROWS: tuple[dict[str, Any], ...] = (
             "key4u": {
                 "model": "grok-imagine-video",
                 "request_metadata": {"duration": 5, "resolution": "720p"},
-                "usd_per_scene": "0.060",
-                "pricing_basis": "mỗi lần tạo",
-                "source_reference": "Key4U Model Hub: grok-imagine-video",
+                "usd_per_second": "0.420",
+                "pricing_basis": "0,420 USD mỗi giây; một cảnh 5 giây",
+                "source_reference": "Key4U Model Hub: Grok Imagine Video 720p output",
             },
         },
     },
@@ -128,7 +194,7 @@ _MODEL_ROWS: tuple[dict[str, Any], ...] = (
         "providers": {
             "shopaikey": {
                 "model": "veo3.1-fast",
-                "request_metadata": {"duration": 5},
+                "request_metadata": {"duration": 5, "sound": False},
                 "usd_per_scene": "0.700",
                 "pricing_basis": "mỗi lần tạo",
                 "source_reference": "ShopAIKey model catalog: veo3.1-fast",
@@ -156,7 +222,7 @@ _MODEL_ROWS: tuple[dict[str, Any], ...] = (
         "providers": {
             "shopaikey": {
                 "model": "veo3.1-fast",
-                "request_metadata": {"duration": 5},
+                "request_metadata": {"duration": 5, "sound": True},
                 "usd_per_scene": "0.700",
                 "pricing_basis": "mỗi lần tạo",
                 "source_reference": "ShopAIKey model catalog: veo3.1-fast",
@@ -167,6 +233,32 @@ _MODEL_ROWS: tuple[dict[str, Any], ...] = (
                 "usd_per_scene": "1.530",
                 "pricing_basis": "mỗi lần tạo",
                 "source_reference": "Key4U kling-video detail: Kling-2, v3 std, audio",
+            },
+        },
+    },
+    {
+        "key": "kling_long_audio_15",
+        "label": "Cảnh dài có âm thanh",
+        "public_icon": "⏱️",
+        "public_level": "Nâng cao 15 giây",
+        "seconds": 15,
+        "quality": "Cảnh dài, chuyển động rõ và có âm thanh",
+        "resolution": "1080p theo chế độ",
+        "description": "Giữ một hành động dài hoặc lời thoại trọn vẹn trong một cảnh 15 giây.",
+        "use_case": "Quảng cáo một cảnh dài, trình diễn sản phẩm, hội thoại hoặc hành động cần thêm thời gian.",
+        "capability_key": "long_motion_video_with_audio",
+        "providers": {
+            "key4u": {
+                "model": "kling-video",
+                "request_metadata": {
+                    "model_name": "kling-v3",
+                    "mode": "pro",
+                    "duration": 15,
+                    "sound": True,
+                },
+                "usd_per_scene": "2.040",
+                "pricing_basis": "mỗi lần tạo 3 đến 15 giây",
+                "source_reference": "Key4U kling-video detail: Kling v3 pro có âm thanh",
             },
         },
     },
@@ -219,10 +311,10 @@ _MODEL_ROWS: tuple[dict[str, Any], ...] = (
             },
             "key4u": {
                 "model": "MiniMax-Hailuo-2.3",
-                "request_metadata": {"duration": 6, "resolution": "1080P"},
+                "request_metadata": {"duration": 6, "resolution": "768P"},
                 "usd_per_scene": "3.200",
                 "pricing_basis": "mỗi lần tạo",
-                "source_reference": "Key4U Model Hub: MiniMax-Hailuo-2.3; MiniMax official duration schema",
+                "source_reference": "Key4U Model Hub: MiniMax Hailuo 2.3, 768p/6 giây",
             },
         },
     },
@@ -248,9 +340,9 @@ _MODEL_ROWS: tuple[dict[str, Any], ...] = (
             "key4u": {
                 "model": "viduq3-mix",
                 "request_metadata": {"duration": 8, "resolution": "1080p"},
-                "usd_per_scene": "6.250",
-                "pricing_basis": "mỗi lần tạo",
-                "source_reference": "Key4U Model Hub: viduq3-mix; Vidu official 3-16s schema",
+                "usd_per_second": "1.500",
+                "pricing_basis": "1,500 USD mỗi giây; một cảnh 8 giây",
+                "source_reference": "Key4U Model Hub: Vidu Q3 Mix 1080p, hỗ trợ 1 đến 16 giây",
             },
         },
     },
@@ -291,11 +383,22 @@ QUALITY_TIER_MODEL_KEYS: dict[int, str] = {
     400: "veo31_fast_8",
     500: "motion_standard_5",
     600: "motion_audio_5",
+    700: "kling_long_audio_15",
     800: "motion_pro_audio_10",
     1000: "human_performance_6",
     1200: "multi_angle_reference_8",
     1500: "cinematic_multishot_10",
 }
+
+VIDEO_RUNTIME_FALLBACK_MODEL_KEYS = frozenset({
+    "social_fast_5",
+    "grok3_5",
+    "veo31_fast_8",
+    "motion_standard_5",
+    "motion_audio_5",
+    "motion_pro_audio_10",
+    "multi_angle_reference_8",
+})
 
 
 _IMAGE_MODEL_ROWS: tuple[dict[str, Any], ...] = (
@@ -523,6 +626,57 @@ def round_sale_xu(value: Any) -> int:
     return int(rounded)
 
 
+VIDEO_MULTISCENE_DISCOUNT_BANDS: tuple[tuple[int, int, int], ...] = (
+    (2, 5, 10),
+    (6, 10, 15),
+    (11, 20, 20),
+)
+
+
+def video_multiscene_discount_percent(scene_count: Any) -> int:
+    """Return the public discount for one multi-scene Video order."""
+
+    try:
+        count = int(scene_count or 1)
+    except (TypeError, ValueError):
+        count = 1
+    count = max(1, min(20, count))
+    return next(
+        (
+            discount
+            for minimum, maximum, discount in VIDEO_MULTISCENE_DISCOUNT_BANDS
+            if minimum <= count <= maximum
+        ),
+        0,
+    )
+
+
+def video_multiscene_price(unit_xu: Any, scene_count: Any) -> dict[str, int]:
+    """Calculate a whole-Xu Video subtotal and the owner-approved scene discount."""
+
+    try:
+        count = int(scene_count or 1)
+    except (TypeError, ValueError):
+        count = 1
+    count = max(1, min(20, count))
+    unit = max(0, int(_decimal(unit_xu).to_integral_value(rounding=ROUND_HALF_UP)))
+    subtotal = unit * count
+    discount_percent = video_multiscene_discount_percent(count)
+    discount_xu = int(
+        (Decimal(subtotal) * Decimal(discount_percent) / Decimal("100")).to_integral_value(
+            rounding=ROUND_HALF_UP
+        )
+    )
+    return {
+        "scene_count": count,
+        "unit_xu": unit,
+        "subtotal_xu": subtotal,
+        "discount_percent": discount_percent,
+        "discount_xu": discount_xu,
+        "total_xu": max(0, subtotal - discount_xu),
+    }
+
+
 def _provider_order(costs: list[dict[str, Any]]) -> list[str]:
     ordered = sorted(
         costs,
@@ -540,13 +694,23 @@ def _provider_cost(row: dict[str, Any], provider: str) -> dict[str, Any]:
     usd_per_scene = _decimal(raw.get("usd_per_scene"))
     if usd_per_scene <= 0:
         usd_per_scene = _decimal(raw.get("usd_per_second")) * Decimal(seconds)
-    exchange = PROVIDER_USD_TO_VND[provider]
+    exchange = provider_usd_to_vnd(provider)
     cost_vnd = usd_per_scene * exchange
+    fallback_eligible = str(row.get("key") or "") in VIDEO_RUNTIME_FALLBACK_MODEL_KEYS
     return {
+        "provider_key": provider,
         "provider": provider,
+        "adapter_key": VIDEO_PROVIDER_ADAPTER_KEYS[provider],
+        "capability_key": str(row.get("capability_key") or "text_to_video"),
+        "model_key": str(raw.get("model") or ""),
         "model": str(raw.get("model") or ""),
         "catalog_model": str(raw.get("catalog_model") or raw.get("model") or ""),
         "request_metadata": deepcopy(dict(raw.get("request_metadata") or {})),
+        "currency": "USD",
+        "billable_unit": "scene",
+        "cost_minor": int((usd_per_scene * Decimal("1000000")).to_integral_value(rounding=ROUND_HALF_UP)),
+        "cost_minor_scale": 1000000,
+        "exact_cost": str(usd_per_scene),
         "usd_per_scene": float(usd_per_scene),
         "usd_to_vnd": int(exchange),
         "cost_vnd": int(cost_vnd),
@@ -554,9 +718,10 @@ def _provider_cost(row: dict[str, Any], provider: str) -> dict[str, Any]:
         "source_reference": str(raw.get("source_reference") or ""),
         "source_url": PROVIDER_SOURCE_URLS[provider],
         "checked_on": SOURCE_CHECKED_ON,
+        "verified_at": SOURCE_CHECKED_ON,
         "verified_by": "owner_governed_catalog_review",
         "approval_status": "canonical_approved",
-        "fallback_eligible": True,
+        "fallback_eligible": fallback_eligible,
         "catalog_version": CATALOG_VERSION,
     }
 
@@ -572,21 +737,31 @@ def model_catalog() -> list[dict[str, Any]]:
         ]
         if not costs:
             raise ValueError("video_ai_real_provider_price_missing")
-        priced_by = max(costs, key=lambda item: (int(item["cost_vnd"]), -PROVIDER_PRIORITY.index(item["provider"])))
-        raw_sale_xu = Decimal(int(priced_by["cost_vnd"])) / XU_TO_VND * SALE_MULTIPLIER
+        priced_by = max(
+            costs,
+            key=lambda item: (
+                _decimal(item["exact_cost"]),
+                -PROVIDER_PRIORITY.index(item["provider"]),
+            ),
+        )
+        pricing_cost_vnd_decimal = _decimal(priced_by["exact_cost"]) * DEFAULT_PROVIDER_USD_TO_VND
+        pricing_cost_vnd = int(pricing_cost_vnd_decimal)
+        raw_sale_xu = pricing_cost_vnd_decimal / XU_TO_VND * SALE_MULTIPLIER
         row.update({
             "selectable": True,
             "provider_priority": _provider_order(costs),
             "provider_costs": costs,
             "pricing_provider": str(priced_by["provider"]),
-            "pricing_cost_vnd": int(priced_by["cost_vnd"]),
+            "pricing_cost_usd": str(priced_by["exact_cost"]),
+            "pricing_cost_vnd": pricing_cost_vnd,
+            "public_pricing_usd_to_vnd": int(DEFAULT_PROVIDER_USD_TO_VND),
             "price_multiplier": int(SALE_MULTIPLIER),
             "raw_sale_xu": float(raw_sale_xu),
             "unit_xu": round_sale_xu(raw_sale_xu),
             "source_checked_on": SOURCE_CHECKED_ON,
             "catalog_version": CATALOG_VERSION,
             "approval_status": "canonical_approved",
-            "fallback_eligible": len(costs) > 1,
+            "fallback_eligible": str(row.get("key") or "") in VIDEO_RUNTIME_FALLBACK_MODEL_KEYS,
         })
         result.append(row)
     return result

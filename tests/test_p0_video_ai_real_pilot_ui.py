@@ -155,6 +155,18 @@ def _click_visible(context, user_id: int, logical_callback: str, query_id: str) 
     return query
 
 
+def _click_wire(context, user_id: int, wire_callback: str, query_id: str) -> _PilotQuery:
+    assert wire_callback
+    query = _PilotQuery(user_id, wire_callback, query_id)
+    asyncio.run(
+        bot.handle_video_uiflow3_callback(
+            SimpleNamespace(callback_query=query),
+            context,
+        )
+    )
+    return query
+
+
 def _assigned_state() -> dict:
     state = _locked_state(
         capabilities={
@@ -1248,6 +1260,32 @@ def _ready_prompt_summary_state() -> dict:
     return video_uiflow3.normalize_state(state)
 
 
+def _bind_ready_routeengine_session(context, user_id: int) -> tuple[dict, dict]:
+    state = bot.video_ai_real_maybe_compile_state(_ready_prompt_summary_state())
+    state["owner_user_id"] = user_id
+    state["owner_chat_id"] = user_id
+    snapshot = video_uiflow3.approved_snapshot(state)
+    handoff = bot.video_uiflow3_compile_routeengine_handoff(
+        state,
+        owner_user_id=user_id,
+        owner_chat_id=user_id,
+    )
+    assert bot.video_uiflow3_routeengine_handoff_is_ready(handoff)
+    state["legacy_compat"]["approved_snapshot"] = snapshot
+    state["legacy_compat"]["routeengine_handoff"] = handoff
+    state["legacy_compat"]["commercial_tail_ready"] = True
+    _save_owned(context, state, user_id)
+    session = bot.video_uiflow3_bind_routeengine_session(user_id, state, handoff)
+    return bot.video_uiflow3_state(context), session
+
+
+def _confirm_bound_invoice(context, user_id: int, state: dict, query_id: str) -> _PilotQuery:
+    wire = video_uiflow3.scope_callback(state, "vid3|invoice_confirm")
+    query = _click_wire(context, user_id, wire, query_id)
+    assert query.edits and "Xác nhận cuối" in query.edits[-1]["text"]
+    return query
+
+
 def _ready_product_summary_state(
     product: str,
     *,
@@ -1710,15 +1748,16 @@ def test_video_ai_real_prompt_model_catalog_uses_verified_seconds_and_triple_fal
     by_key = {item["key"]: item for item in catalog}
 
     expected = {
-        "social_fast_5": (5, 40, ["key4u", "shopaikey"], "shopaikey"),
-        "grok3_5": (5, 40, ["key4u", "shopaikey"], "shopaikey"),
-        "veo31_fast_8": (8, 70, ["key4u", "shopaikey"], "shopaikey"),
-        "motion_standard_5": (5, 90, ["shopaikey", "key4u"], "key4u"),
-        "motion_audio_5": (5, 140, ["shopaikey", "key4u"], "key4u"),
-        "motion_pro_audio_10": (10, 340, ["key4u", "shopaikey"], "shopaikey"),
-        "human_performance_6": (6, 340, ["key4u", "shopaikey"], "shopaikey"),
-        "multi_angle_reference_8": (8, 560, ["shopaikey", "key4u"], "key4u"),
-        "cinematic_multishot_10": (10, 2030, ["shopaikey", "key4u"], "key4u"),
+        "social_fast_5": (5, 200, ["shopaikey", "key4u"], "key4u"),
+        "grok3_5": (5, 220, ["shopaikey", "key4u"], "key4u"),
+        "veo31_fast_8": (8, 80, ["key4u", "shopaikey"], "shopaikey"),
+        "motion_standard_5": (5, 110, ["shopaikey", "key4u"], "key4u"),
+        "motion_audio_5": (5, 160, ["shopaikey", "key4u"], "key4u"),
+        "kling_long_audio_15": (15, 220, ["key4u"], "key4u"),
+        "motion_pro_audio_10": (10, 370, ["key4u", "shopaikey"], "shopaikey"),
+        "human_performance_6": (6, 370, ["key4u", "shopaikey"], "shopaikey"),
+        "multi_angle_reference_8": (8, 1260, ["shopaikey", "key4u"], "key4u"),
+        "cinematic_multishot_10": (10, 2360, ["shopaikey", "key4u"], "key4u"),
     }
     assert list(by_key) == list(expected)
     for key, (seconds, unit_xu, priority, pricing_provider) in expected.items():
@@ -1737,7 +1776,19 @@ def test_video_ai_real_prompt_model_catalog_uses_verified_seconds_and_triple_fal
             for provider in item["provider_priority"]
         ]
         assert priority_costs == sorted(priority_costs)
-        assert item["pricing_cost_vnd"] == max(cost_by_provider.values())
+        assert item["pricing_cost_vnd"] == int(
+            max(Decimal(str(cost["usd_per_scene"])) for cost in item["provider_costs"])
+            * Decimal("3500")
+        )
+    provider_costs = {
+        item["key"]: {cost["provider"]: cost for cost in item["provider_costs"]}
+        for item in catalog
+    }
+    assert provider_costs["social_fast_5"]["key4u"]["usd_per_scene"] == 1.845
+    assert provider_costs["grok3_5"]["key4u"]["usd_per_scene"] == 2.1
+    assert provider_costs["human_performance_6"]["key4u"]["request_metadata"]["resolution"] == "768P"
+    assert provider_costs["multi_angle_reference_8"]["key4u"]["usd_per_scene"] == 12.0
+    assert by_key["kling_long_audio_15"]["fallback_eligible"] is False
     assert all(item["unit_xu"] % 10 == 0 for item in catalog)
     assert all("trial" not in item["key"] for item in catalog)
 
@@ -1821,6 +1872,27 @@ def test_video_ai_real_music_catalog_uses_verified_triple_fallback_cost():
             "checked_on": "2026-08-11",
         },
     ]
+
+
+def test_video_uiflow3_commercial_quote_routes_by_tier_id_not_public_price(monkeypatch):
+    monkeypatch.setattr(
+        bot,
+        "video_b14_invoice_for_session",
+        lambda *_args, **_kwargs: {
+            "quality_xu": 80,
+            "routing_quality_tier": 400,
+            "scene_count": 2,
+            "subtotal_xu": 160,
+            "total_xu": 160,
+            "addons_disabled_by_package": False,
+        },
+    )
+
+    quote = bot.video_uiflow3_commercial_quote({}, 981071)
+
+    assert quote["tier"] == "common"
+    assert quote["quality_tier"] == 400
+    assert quote["package_xu"] == 160
 
 
 def _profile_content_lock_state(profile_key: str) -> dict:
@@ -2196,10 +2268,12 @@ def test_video_ai_real_quote_includes_each_paid_addon_once_and_exact_total():
     quote = bot.video_ai_real_prompt_quote(state)
     assert quote["scene_count"] == 2
     assert quote["total_duration_seconds"] == 20
-    assert quote["base_xu"] == 680
+    assert quote["discount_percent"] == 10
+    assert quote["discount_xu"] == 74
+    assert quote["base_xu"] == 666
     assert quote["addons_xu"] == 610
-    assert quote["total_xu"] == 1290
-    assert quote["estimated_vnd"] == 129000
+    assert quote["total_xu"] == 1276
+    assert quote["estimated_vnd"] == 127600
     assert [(item["key"], item["price_xu"]) for item in quote["addons"]] == [
         ("music_ai", 160),
         ("subtitle_auto", 120),
@@ -2208,7 +2282,7 @@ def test_video_ai_real_quote_includes_each_paid_addon_once_and_exact_total():
     ]
 
 
-def test_video_ai_real_quote_confirmation_reaches_truthful_status_with_exact_back_stack(monkeypatch):
+def test_video_ai_real_quote_reaches_scoped_final_confirmation_with_exact_back_stack(monkeypatch):
     user_id = 981022
     context = SimpleNamespace(user_data={})
     monkeypatch.setattr(bot, "get_user", lambda _uid: (100, 0, False))
@@ -2257,17 +2331,12 @@ def test_video_ai_real_quote_confirmation_reaches_truthful_status_with_exact_bac
     confirmation_text = confirmation_query.edits[-1]["text"]
     confirmation_markup = confirmation_query.edits[-1]["reply_markup"]
     confirmation_callbacks = _callbacks(confirmation_markup)
-    assert "Xác nhận tạo video" in confirmation_text
-    assert "Tổng thanh toán" in confirmation_text
-    confirm_callback = next(
-        value for value in confirmation_callbacks
-        if value.startswith("vproduct|b14_confirm|")
-    )
-    assert re.fullmatch(r"vproduct\|b14_confirm\|[a-f0-9]{12}", confirm_callback)
+    assert "Xác nhận cuối" in confirmation_text
+    assert "Tổng dự kiến" in confirmation_text
+    assert "MP4" not in confirmation_text
+    assert "vid3|confirmation_submit" in confirmation_callbacks
     assert "vid3|confirmation_back" in confirmation_callbacks
-    assert bot.video_route_expected_handler(confirm_callback) == (
-        "handle_product_video_public_confirm_callback"
-    )
+    assert not any(value.startswith("vproduct|b14_confirm") for value in confirmation_callbacks)
 
     back_query = _click_visible(
         context,
@@ -3268,10 +3337,47 @@ def test_video_ai_real_quality_screen_uses_public_authority_metadata_and_totals(
     assert "5 giây/cảnh" in text
     assert "Hình ảnh ổn định, âm thanh đồng bộ" in text
     assert "720p" in text
-    assert "40 Xu/cảnh" in text
-    assert "80 Xu/2 cảnh" in text
+    assert "200 Xu/cảnh" in text
+    assert "400 Xu/2 cảnh" in text
     assert "ShopAIKey" not in text
     assert "Key4U" not in text
     assert "provider" not in text.lower()
     assert len(text) <= 4096
     assert all(len(row) <= 2 for row in markup.inline_keyboard)
+
+
+def test_video_ai_real_quality_screen_is_price_sorted_and_includes_real_15_second_option():
+    state = video_uiflow3.navigate(_ready_prompt_summary_state(), "package")
+
+    products = bot.video_ai_real_quality_products(state)
+    text, markup = bot.video_uiflow3_screen_payload(state)
+
+    assert [item["unit_xu"] for item in products] == sorted(
+        item["unit_xu"] for item in products
+    )
+    long_scene = next(item for item in products if item["tier_id"] == 700)
+    assert (long_scene["seconds"], long_scene["unit_xu"]) == (15, 220)
+    assert "15 giây/cảnh" in text
+    assert "vid3|quality|700" in _callbacks(markup)
+    assert all(len(row) <= 2 for row in markup.inline_keyboard)
+
+
+def test_video_ai_real_fifteen_second_choice_reaches_routeengine_without_duration_downgrade():
+    user_id = 981070
+    state = _ready_prompt_summary_state()
+    state["owner_user_id"] = user_id
+    state["owner_chat_id"] = user_id
+    state["format"]["seconds_per_scene"] = 15
+    state["format"]["target_duration_seconds"] = 15 * len(state["scenes"])
+    for scene in state["scenes"]:
+        scene["duration_target"] = 15
+
+    handoff = bot.video_uiflow3_compile_routeengine_handoff(
+        bot.video_ai_real_maybe_compile_state(state),
+        owner_user_id=user_id,
+        owner_chat_id=user_id,
+    )
+
+    assert bot.video_uiflow3_routeengine_handoff_is_ready(handoff)
+    assert handoff["scene_duration_seconds"] == [15] * len(state["scenes"])
+    assert handoff["target_duration_seconds"] == 15 * len(state["scenes"])

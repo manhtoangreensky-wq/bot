@@ -68,10 +68,10 @@ This is a draft knowledge file only. Runtime code must not import it until a sep
 
 ## Recommendation Rules
 
-- If user asks for a trial/test video, recommend `video.low` 200 Xu and explain daily/monthly limits.
-- If user wants to continue after trial, recommend 300 Xu.
-- If user wants sales/ads, recommend 400/500/600 depending on quality need.
-- If user wants premium cinematic quality, recommend 800 Xu if public gate passes; otherwise say premium provider is coming soon.
+- If user asks for a quick test, recommend Nhanh gọn (`tier_id=200`) at 200 Xu for each 5-second scene.
+- Recommend by public quality, duration and current sale price; never present tier IDs as Xu prices.
+- For multi-scene Video orders, state the canonical discount: 2–5 scenes 10%, 6–10 scenes 15%, 11–20 scenes 20%; one scene has no discount and add-ons are separate.
+- If user wants sales/ads or cinematic quality, recommend the closest ready public package by its current catalog description, never by the old numeric price ladder.
 - Always suggest voice/subtitle/music as optional add-ons after a paid video tier is chosen.
 - Do not claim provider readiness unless `/tool_public_status`, `/video_gate_status` or relevant smoke status says ready.
 

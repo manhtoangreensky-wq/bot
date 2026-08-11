@@ -20,9 +20,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from services import product_video_public_seam, video_final_output
+from services import (
+    product_video_public_seam,
+    video_final_output,
+    video_uiflow3_execution_contract,
+)
+from services.video_ai_real_pricing import public_quality_catalog
 from services.video_provider_catalog import (
     model_metadata_from_resolution,
+    normalize_tier,
     resolve_product_video_model,
 )
 
@@ -150,18 +156,8 @@ _PRODUCT_VIDEO_FINAL_ADMISSION_SIGNED_FIELDS = (
     "public_user_confirmed",
 )
 PRODUCT_VIDEO_TIER_PRICE_MAP = {
-    "low": 200,
-    "trial": 200,
-    "basic": 300,
-    "common": 400,
-    "good": 400,
-    "standard": 500,
-    "advanced": 600,
-    "premium": 800,
-    "pro": 1000,
-    "studio": 1200,
-    "high": 1200,
-    "max": 1500,
+    normalize_tier(row["tier_id"]): int(row["unit_xu"])
+    for row in public_quality_catalog()
 }
 
 
@@ -218,48 +214,44 @@ def _json_loads(value: str | None, fallback: Any = None) -> Any:
 
 
 def _product_video_selected_tier(value: Any) -> str:
-    raw = str(value or "").strip().lower()
-    if raw in {"200", "trial", "low"}:
-        return "low"
-    if raw in {"300", "basic"}:
-        return "basic"
-    if raw in {"400", "good", "common"}:
-        return "common"
-    if raw in {"500", "standard"}:
-        return "standard"
-    if raw in {"600", "advanced"}:
-        return "advanced"
-    if raw in {"800", "premium"}:
-        return "premium"
-    if raw in {"1000", "pro"}:
-        return "pro"
-    if raw in {"1200", "studio", "high"}:
-        return "studio"
-    if raw in {"1500", "max"}:
-        return "max"
-    return raw or "basic"
+    return normalize_tier(value)
+
+
+def _product_video_route_tier_value(invoice: dict[str, Any], project: dict[str, Any]) -> Any:
+    return (
+        invoice.get("tier")
+        or invoice.get("tier_key")
+        or invoice.get("routing_quality_tier")
+        or invoice.get("quality_tier")
+        or project.get("quality_tier")
+        or "basic"
+    )
 
 
 def _product_video_quote_consistency(invoice: dict[str, Any], project: dict[str, Any]) -> dict[str, Any]:
     invoice = dict(invoice or {})
     project = dict(project or {})
-    selected_tier = _product_video_selected_tier(
-        invoice.get("tier")
-        or invoice.get("tier_key")
-        or invoice.get("package_xu")
-        or invoice.get("quality_tier")
-        or project.get("quality_tier")
-        or project.get("total_xu_estimated")
-        or "basic"
+    selected_tier = _product_video_selected_tier(_product_video_route_tier_value(invoice, project))
+    scene_count = max(1, _as_int(invoice.get("scene_count") or project.get("scene_count"), 1))
+    unit_price = _as_int(
+        invoice.get("quality_xu")
+        or invoice.get("unit_xu")
+        or PRODUCT_VIDEO_TIER_PRICE_MAP.get(selected_tier),
+        PRODUCT_VIDEO_TIER_PRICE_MAP.get("basic", 220),
+    )
+    calculated_total = max(1, unit_price) * scene_count + max(
+        0,
+        _as_int(invoice.get("addons_xu") or invoice.get("addon_total_xu"), 0),
     )
     user_visible = _as_int(
         invoice.get("user_visible_price_xu")
         or invoice.get("package_xu")
         or invoice.get("package_price_xu")
-        or invoice.get("quality_tier")
-        or PRODUCT_VIDEO_TIER_PRICE_MAP.get(selected_tier)
-        or 300,
-        300,
+        or invoice.get("total_xu")
+        or invoice.get("total")
+        or project.get("total_xu_estimated")
+        or calculated_total,
+        calculated_total,
     )
     persisted = _as_int(
         invoice.get("persisted_quoted_price_xu")
@@ -4023,6 +4015,153 @@ def confirm_video_project_invoice(
     return {"ok": True, "project": project, "job": job, "duplicate_prevented": bool(job.get("duplicate_prevented"))}
 
 
+def _persisted_product_video_route_identity_matches(payload: dict[str, Any]) -> bool:
+    """Validate the frozen route without depending on current runtime flags."""
+
+    raw_decision = payload.get("product_video_route_decision")
+    if not payload.get("product_video_durable_public_seam") or not isinstance(raw_decision, dict):
+        return False
+    decision = dict(raw_decision)
+    persisted_hash = str(decision.pop("route_decision_sha256", "")).strip().lower()
+    if len(persisted_hash) != 64 or any(
+        character not in "0123456789abcdef" for character in persisted_hash
+    ):
+        return False
+    calculated_hash = hashlib.sha256(
+        json.dumps(
+            decision,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    if calculated_hash != persisted_hash or str(
+        payload.get("product_video_route_decision_sha256") or ""
+    ).strip().lower() != persisted_hash:
+        return False
+    frozen = {**decision, "route_decision_sha256": persisted_hash}
+    flattened = product_video_public_seam.product_video_route_decision_payload(frozen)
+    for key in (
+        "product_video_route_decision_version",
+        "product_video_route_selection_sha256",
+        "product_video_engine_mode",
+        "scene_count",
+        "route_id",
+        "product_video_engine_adapter",
+        "worker_job_type",
+        "worker_owner",
+        "required_worker_capability",
+        "automatic_retry_allowed",
+        "automatic_resubmit_allowed",
+        "automatic_fallback_allowed",
+    ):
+        if payload.get(key) != flattened.get(key):
+            return False
+    return bool(
+        decision.get("canonical_engine_entry") == PRODUCT_VIDEO_CANONICAL_ENGINE_ENTRY
+        and decision.get("automatic_retry_allowed") is False
+        and decision.get("automatic_resubmit_allowed") is False
+        and decision.get("automatic_fallback_allowed") is False
+    )
+
+
+def _confirmed_uiflow3_job_for_exact_admission_replay(
+    conn: sqlite3.Connection,
+    *,
+    project_id: int,
+    user_id: int,
+    admission: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Resolve an exact UIFLOW3 confirmation replay without creating work."""
+
+    project = get_video_project(conn, int(project_id))
+    if not project or _as_int(project.get("user_id"), 0) != int(user_id):
+        return {}
+    asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
+    invoice = _json_loads(str(project.get("invoice_json") or ""), {})
+    if not isinstance(asset_pack, dict) or not isinstance(invoice, dict):
+        return {}
+    if str(asset_pack.get("uiflow3_bridge_version") or "") != video_uiflow3_execution_contract.BRIDGE_VERSION:
+        return {}
+
+    admission = dict(admission or {})
+    snapshot_id = str(admission.get("admission_snapshot_id") or "").strip()
+    consumed_ids = {
+        str(asset_pack.get("admission_snapshot_consumed_id") or "").strip(),
+        str(invoice.get("admission_snapshot_consumed_id") or "").strip(),
+    }
+    consumed_job_ids = {
+        _as_int(asset_pack.get("admission_snapshot_consumed_job_id"), 0),
+        _as_int(invoice.get("admission_snapshot_consumed_job_id"), 0),
+    }
+    if not snapshot_id or consumed_ids != {snapshot_id} or len(consumed_job_ids) != 1:
+        return {}
+    consumed_job_id = next(iter(consumed_job_ids))
+    if consumed_job_id <= 0 or _as_int(project.get("job_id"), 0) != consumed_job_id:
+        return {}
+    if any(
+        (
+            _as_int(admission.get("admission_user_id"), 0) != int(user_id),
+            _as_int(admission.get("admission_project_id"), 0) != int(project_id),
+            str(admission.get("admission_quote_fingerprint") or "")
+            != product_video_admission_quote_fingerprint(project, int(user_id)),
+            str(admission.get("admission_callback_handler_id") or "")
+            != PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID,
+            str(admission.get("admission_callback_data") or "")
+            != PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK,
+        )
+    ):
+        return {}
+
+    job = get_video_render_job(conn, consumed_job_id)
+    if (
+        not job
+        or _as_int(job.get("project_id"), 0) != int(project_id)
+        or _as_int(job.get("user_id"), 0) != int(user_id)
+        or str(job.get("job_type") or "") != VIDEO_RENDER_JOB_TYPE
+    ):
+        return {}
+    payload = _json_loads(str(job.get("result_json") or ""), {})
+    if not isinstance(payload, dict):
+        return {}
+    if any(
+        (
+            str(payload.get("admission_snapshot_id") or "") != snapshot_id,
+            _as_int(payload.get("admission_user_id"), 0) != int(user_id),
+            _as_int(payload.get("admission_project_id"), 0) != int(project_id),
+            str(payload.get("admission_quote_fingerprint") or "")
+            != str(admission.get("admission_quote_fingerprint") or ""),
+        )
+    ):
+        return {}
+    execution = video_uiflow3_execution_contract.validate_execution_contract(
+        project,
+        payload,
+        require_payload_identity=True,
+    )
+    if not execution.get("applies") or not execution.get("ok"):
+        return {}
+    if not _persisted_product_video_route_identity_matches(payload):
+        return {}
+    if str(payload.get("product_video_route_selection_sha256") or "") != str(
+        payload.get("uiflow3_route_selection_sha256") or ""
+    ):
+        return {}
+    return {
+        "ok": True,
+        "project": project,
+        "job": job,
+        "outbox": get_product_video_dispatch_outbox(conn, job_id=consumed_job_id),
+        "duplicate_prevented": True,
+        "confirmation_replay_resolved": True,
+        "job_created": False,
+        "dispatch_outbox_created": False,
+        "scene_records_created": False,
+        "charge": 0,
+        "charged_xu": 0,
+    }
+
+
 def confirm_public_product_video_invoice(
     conn: sqlite3.Connection,
     *,
@@ -4043,6 +4182,14 @@ def confirm_public_product_video_invoice(
             "charge": 0,
             "charged_xu": 0,
         }
+    replay = _confirmed_uiflow3_job_for_exact_admission_replay(
+        conn,
+        project_id=int(project_id),
+        user_id=int(user_id),
+        admission=provider_admission,
+    )
+    if replay:
+        return replay
     return confirm_video_project_invoice(
         conn,
         project_id=int(project_id),
@@ -4162,6 +4309,7 @@ def heartbeat_video_job(
 
 
 PRODUCT_VIDEO_SCENE_SECONDS = 8
+PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS = 15
 PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS = 0.7
 PRODUCT_VIDEO_DEFAULT_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
 PRODUCT_VIDEO_ORCHESTRATION_MODE_RAW_DELIVERY = "single_task_legacy"
@@ -4197,6 +4345,12 @@ def _split_product_video_provider_chain(value: Any) -> list[str]:
         if token and token not in result:
             result.append(token)
     return result
+
+
+def normalize_product_video_provider_chain(value: Any) -> list[str]:
+    """Normalize a configured provider chain for service-layer callers."""
+
+    return _split_product_video_provider_chain(value)
 
 
 def resolve_product_video_provider_chain(environ: dict[str, str] | None = None) -> list[str]:
@@ -4360,7 +4514,13 @@ def product_video_initial_scene_tasks(
 ) -> list[dict[str, Any]]:
     safe_job_id = str(job_id or "").strip() or "job"
     safe_count = max(1, min(20, int(scene_count or 1)))
-    safe_duration = max(1, min(PRODUCT_VIDEO_SCENE_SECONDS, int(scene_duration_seconds or PRODUCT_VIDEO_SCENE_SECONDS)))
+    safe_duration = max(
+        1,
+        min(
+            PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS,
+            int(scene_duration_seconds or PRODUCT_VIDEO_SCENE_SECONDS),
+        ),
+    )
     cards_by_index: dict[int, dict[str, Any]] = {}
     for fallback_index, raw_card in enumerate(scene_cards or [], start=1):
         if not isinstance(raw_card, dict):
@@ -4459,10 +4619,15 @@ def build_product_video_confirm_kickoff_payload(
     asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
     if not isinstance(asset_pack, dict):
         asset_pack = {}
+    scene_duration_limit = (
+        PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
+        if str(asset_pack.get("uiflow3_handoff_sha256") or "").strip()
+        else PRODUCT_VIDEO_SCENE_SECONDS
+    )
     scene_duration = max(
         1,
         min(
-            PRODUCT_VIDEO_SCENE_SECONDS,
+            scene_duration_limit,
             _as_int(
                 invoice.get("scene_duration_seconds")
                 or invoice.get("scene_seconds")
@@ -4523,13 +4688,7 @@ def build_product_video_confirm_kickoff_payload(
         )
         chain = _split_product_video_provider_chain(source_chain) or resolve_product_video_provider_chain()
     model_resolution = resolve_product_video_model(
-        tier=invoice.get("tier")
-        or invoice.get("tier_key")
-        or invoice.get("package_xu")
-        or invoice.get("quality_tier")
-        or project.get("quality_tier")
-        or project.get("total_xu_estimated")
-        or "basic",
+        tier=_product_video_route_tier_value(invoice, project),
         provider_chain=chain,
         scene_count=scene_count,
         required_capability=required_capability,
@@ -4545,9 +4704,15 @@ def build_product_video_confirm_kickoff_payload(
                     "selected_family": model_metadata.get("selected_family") or "",
                     "selected_model_source": model_metadata.get("selected_model_source") or "",
                     "selected_payload_adapter": model_metadata.get("selected_payload_adapter") or "",
+                    "selected_request_defaults": dict(model_metadata.get("selected_request_defaults") or {}),
                     "model_used": model_metadata.get("selected_model") or "",
                     "model_used_in_payload": model_metadata.get("selected_model") or "",
                     "provider_model_map": dict(model_metadata.get("provider_model_map") or {}),
+                    "provider_request_defaults": {
+                        str(key): dict(value)
+                        for key, value in (model_metadata.get("provider_request_defaults") or {}).items()
+                        if isinstance(value, dict)
+                    },
                     "contract_validation_status": model_metadata.get("contract_validation_status") or "",
                     "supports_concat": bool(model_metadata.get("supports_concat")),
                 }
@@ -4583,6 +4748,24 @@ def build_product_video_confirm_kickoff_payload(
         or invoice.get("multi_scene_health_gate")
         or {}
     )
+    # Keep the immutable UIFLOW3 handoff identity at the worker payload
+    # boundary as well as inside the durable project asset pack.  Recovery,
+    # worker admission, and artifact validation must be able to verify the
+    # exact approved plan without reconstructing it from UI state.
+    uiflow3_identity = {
+        key: asset_pack.get(key) or invoice.get(key)
+        for key in (
+            "uiflow3_bridge_version",
+            "uiflow3_draft_id",
+            "uiflow3_owner_user_id",
+            "uiflow3_owner_chat_id",
+            "uiflow3_snapshot_config_hash",
+            "uiflow3_handoff_sha256",
+            "uiflow3_quote_sha256",
+            "uiflow3_route_selection_sha256",
+        )
+        if asset_pack.get(key) not in (None, "") or invoice.get(key) not in (None, "")
+    }
     return {
         "source": "product_video",
         "product_video": True,
@@ -4689,6 +4872,7 @@ def build_product_video_confirm_kickoff_payload(
         "provider_attempted": False,
         "provider_task_id_saved": False,
         "no_new_paid_submit": True,
+        **uiflow3_identity,
     }
 
 
@@ -5925,6 +6109,19 @@ def product_video_expected_duration_seconds(project: dict | None = None, payload
     invoice = _json_loads(str(project.get("invoice_json") or payload.get("invoice_json") or ""), {})
     if not isinstance(invoice, dict):
         invoice = {}
+    asset_pack = _json_loads(str(project.get("asset_pack_json") or payload.get("asset_pack_json") or ""), {})
+    if not isinstance(asset_pack, dict):
+        asset_pack = {}
+    scene_duration_limit = (
+        PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
+        if str(
+            payload.get("uiflow3_handoff_sha256")
+            or asset_pack.get("uiflow3_handoff_sha256")
+            or invoice.get("uiflow3_handoff_sha256")
+            or ""
+        ).strip()
+        else PRODUCT_VIDEO_SCENE_SECONDS
+    )
     scene_count = _as_int(project.get("scene_count") or payload.get("scene_count") or invoice.get("scene_count"), 1)
     orchestration_mode = str(
         payload.get("orchestration_mode")
@@ -5940,7 +6137,7 @@ def product_video_expected_duration_seconds(project: dict | None = None, payload
             or invoice.get("scene_seconds"),
             PRODUCT_VIDEO_SCENE_SECONDS,
         )
-        return max(1, min(20, scene_count)) * max(1, min(PRODUCT_VIDEO_SCENE_SECONDS, scene_seconds))
+        return max(1, min(20, scene_count)) * max(1, min(scene_duration_limit, scene_seconds))
     direct = _as_int(
         payload.get("expected_duration_seconds")
         or payload.get("duration_seconds")
@@ -8090,6 +8287,46 @@ def complete_video_job(
                 return blocked
             conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(payload), int(job_id)))
             return fail_video_job(conn, job_id=int(job_id), error=str(validation.get("reason") or "final_output_invalid"), retry=False)
+        uiflow3_contract = video_uiflow3_execution_contract.validate_execution_contract(
+            project,
+            payload,
+            artifact_validation=validation,
+            require_payload_identity=True,
+            require_artifact=True,
+        )
+        if uiflow3_contract.get("applies"):
+            payload["uiflow3_execution_contract"] = uiflow3_contract
+        if not uiflow3_contract.get("ok"):
+            blocker = str(
+                uiflow3_contract.get("blocker")
+                or "uiflow3_execution_contract_invalid"
+            )
+            payload.update(
+                {
+                    "terminal_state": "failed_no_charge",
+                    "final_decision": "failed_no_charge",
+                    "blocker": blocker,
+                    "provider_error": blocker,
+                    "continue_polling": False,
+                    "no_charge": True,
+                    "charge": 0,
+                    "charged_xu": 0,
+                }
+            )
+            blocked, _locked_job, _locked_project = begin_completion_mutation()
+            if blocked is not None:
+                return blocked
+            conn.execute(
+                "UPDATE video_jobs SET result_json=? WHERE id=?",
+                (_json_dumps(payload), int(job_id)),
+            )
+            failed = fail_video_job(
+                conn,
+                job_id=int(job_id),
+                error=blocker,
+                retry=False,
+            )
+            return {**failed, "ok": False, "reason": blocker}
         duration_contract = product_video_duration_contract(project, payload, validation)
         payload["final_duration_contract"] = duration_contract
         payload["expected_duration_seconds"] = duration_contract["expected_duration_seconds"]
@@ -8252,6 +8489,28 @@ def note_video_delivery_result(
             "reason": str(
                 route_validation.get("blocker")
                 or "product_video_route_decision_invalid"
+            ),
+            "job": job,
+            "project": project,
+        }
+    uiflow3_contract = video_uiflow3_execution_contract.validate_execution_contract(
+        project,
+        payload,
+        artifact_validation=(
+            payload.get("final_output_validation")
+            if isinstance(payload.get("final_output_validation"), dict)
+            else None
+        ),
+        require_payload_identity=True,
+        require_artifact=True,
+    )
+    if not uiflow3_contract.get("ok"):
+        return {
+            "ok": False,
+            "sent": False,
+            "reason": str(
+                uiflow3_contract.get("blocker")
+                or "uiflow3_execution_contract_invalid"
             ),
             "job": job,
             "project": project,
