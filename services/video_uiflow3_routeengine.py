@@ -60,6 +60,7 @@ ACTIVE_DRAFT_STATUSES = (
     "queued_for_worker",
     "processing",
 )
+PRODUCT_VIDEO_SCENE_DURATION_OPTIONS = frozenset({5, 6, 8, 10, 15})
 
 
 def _clean(value: Any, limit: int = 12000) -> str:
@@ -524,13 +525,16 @@ def compile_routeengine_handoff(
     bridge_blockers: list[str] = []
     if selection.get("engine_product") != video_engine_contract.VideoProduct.PRODUCT_VIDEO.value:
         bridge_blockers.append("uiflow3_engine_route_delegated")
+    target_duration = _positive_int(fmt.get("target_duration_seconds"))
     if selection.get("engine_product") == video_engine_contract.VideoProduct.PRODUCT_VIDEO.value:
-        expected_scene_seconds = int(video_project_queue.PRODUCT_VIDEO_SCENE_SECONDS)
+        expected_scene_seconds = _positive_int(fmt.get("seconds_per_scene"))
         scene_durations = [_positive_int(item.get("duration_seconds")) for item in cards]
         if (
-            target_duration := _positive_int(fmt.get("target_duration_seconds"))
-        ) != scene_count * expected_scene_seconds or any(
+            expected_scene_seconds not in PRODUCT_VIDEO_SCENE_DURATION_OPTIONS
+            or target_duration != scene_count * expected_scene_seconds
+            or any(
             item != expected_scene_seconds for item in scene_durations
+            )
         ):
             bridge_blockers.append("uiflow3_product_duration_contract_mismatch")
         if audio.get("voice_cast") or audio.get("dialogue_segments"):
@@ -545,7 +549,6 @@ def compile_routeengine_handoff(
             bridge_blockers.append("uiflow3_dual_branding_materialization_missing")
     bridge_blockers = list(dict.fromkeys(bridge_blockers))
     commercial_ready = not render_blockers and not bridge_blockers
-    target_duration = _positive_int(fmt.get("target_duration_seconds"))
     result = {
         "ok": True,
         "bridge_version": BRIDGE_VERSION,

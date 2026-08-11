@@ -1267,7 +1267,29 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         safety = _product_video_safety_flags(project)
         claim_only = bool(safety["claim_only_diagnostic"])
         safe_scene_count = max(1, min(20, safety["scene_count"] or scene_count))
-        safe_scene_duration = 8
+        uiflow3_handoff_sha256 = str(
+            persisted_result.get("uiflow3_handoff_sha256")
+            or asset_pack.get("uiflow3_handoff_sha256")
+            or invoice.get("uiflow3_handoff_sha256")
+            or ""
+        ).strip()
+        scene_duration_limit = (
+            video_project_queue.PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
+            if uiflow3_handoff_sha256
+            else video_project_queue.PRODUCT_VIDEO_SCENE_SECONDS
+        )
+        safe_scene_duration = max(
+            1,
+            min(
+                scene_duration_limit,
+                _safe_int(
+                    persisted_result.get("scene_duration_seconds")
+                    or asset_pack.get("scene_duration_seconds")
+                    or invoice.get("scene_duration_seconds"),
+                    video_project_queue.PRODUCT_VIDEO_SCENE_SECONDS,
+                ),
+            ),
+        )
         safe_expected_duration = safe_scene_count * safe_scene_duration
         engine_contract = video_project_queue.product_video_engine_contract(product_type)
         required_capability = str(
@@ -1747,7 +1769,9 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "selected_capabilities",
                 "selected_clip_seconds",
                 "selected_payload_adapter",
+                "selected_request_defaults",
                 "provider_model_map",
+                "provider_request_defaults",
                 "provider_catalog_model_found",
                 "supports_concat",
                 "contract_validation_status",
@@ -1800,9 +1824,15 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                     item.setdefault("selected_family", model_context.get("selected_family") or "")
                     item.setdefault("selected_model_source", model_context.get("selected_model_source") or "")
                     item.setdefault("selected_payload_adapter", model_context.get("selected_payload_adapter") or "")
+                    item.setdefault("selected_request_defaults", dict(model_context.get("selected_request_defaults") or {}))
                     item.setdefault("model_used", model_context.get("selected_model") or "")
                     item.setdefault("model_used_in_payload", model_context.get("selected_model") or "")
                     item.setdefault("provider_model_map", dict(model_context.get("provider_model_map") or {}))
+                    item.setdefault("provider_request_defaults", {
+                        str(key): dict(value)
+                        for key, value in (model_context.get("provider_request_defaults") or {}).items()
+                        if isinstance(value, dict)
+                    })
                     item.setdefault("contract_validation_status", model_context.get("contract_validation_status") or "")
             submitted_count = sum(
                 1
@@ -1919,9 +1949,15 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                     item.setdefault("selected_family", model_context.get("selected_family") or "")
                     item.setdefault("selected_model_source", model_context.get("selected_model_source") or "")
                     item.setdefault("selected_payload_adapter", model_context.get("selected_payload_adapter") or "")
+                    item.setdefault("selected_request_defaults", dict(model_context.get("selected_request_defaults") or {}))
                     item.setdefault("model_used", model_context.get("selected_model") or "")
                     item.setdefault("model_used_in_payload", model_context.get("selected_model") or "")
                     item.setdefault("provider_model_map", dict(model_context.get("provider_model_map") or {}))
+                    item.setdefault("provider_request_defaults", {
+                        str(key): dict(value)
+                        for key, value in (model_context.get("provider_request_defaults") or {}).items()
+                        if isinstance(value, dict)
+                    })
                     item.setdefault("contract_validation_status", model_context.get("contract_validation_status") or "")
             submitted_count = sum(
                 1

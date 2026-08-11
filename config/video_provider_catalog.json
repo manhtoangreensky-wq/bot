@@ -1,5 +1,5 @@
 {
-  "version": "p0.video.r18d",
+  "version": "p0.video.r19",
   "providers": {
     "shopaikey_video": {
       "display_name": "ShopAIKey Video",
@@ -81,6 +81,36 @@
       "display_name": "Key4U Video",
       "default_capabilities": ["text_to_video", "image_to_video", "video_to_video", "scene_video", "multi_scene_video"],
       "models": {
+        "pixverse-video": {
+          "family": "pixverse",
+          "quality": "fast",
+          "cost_tier": "low",
+          "capabilities": ["text_to_video", "image_to_video", "scene_video", "short_video"],
+          "clip_seconds": 5,
+          "max_single_task_seconds": 5,
+          "supports_concat": true,
+          "payload_adapter": "key4u_pixverse_small_clip"
+        },
+        "grok-imagine-video": {
+          "family": "xai_grok",
+          "quality": "audio",
+          "cost_tier": "basic",
+          "capabilities": ["text_to_video", "image_to_video", "scene_video", "short_video"],
+          "clip_seconds": 5,
+          "max_single_task_seconds": 5,
+          "supports_concat": true,
+          "payload_adapter": "key4u_grok_small_clip"
+        },
+        "veo_3_1-fast": {
+          "family": "google_veo",
+          "quality": "fast",
+          "cost_tier": "common",
+          "capabilities": ["text_to_video", "image_to_video", "scene_video", "short_video"],
+          "clip_seconds": 8,
+          "max_single_task_seconds": 8,
+          "supports_concat": true,
+          "payload_adapter": "key4u_veo_small_clip"
+        },
         "kling-3.0-turbo": {
           "family": "kling",
           "quality": "fast",
@@ -97,7 +127,7 @@
           "cost_tier": "common",
           "capabilities": ["text_to_video", "image_to_video", "video_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
-          "max_single_task_seconds": 8,
+          "max_single_task_seconds": 15,
           "supports_concat": true,
           "payload_adapter": "key4u_kling_small_clip"
         },
@@ -136,8 +166,8 @@
           "quality": "high",
           "cost_tier": "high",
           "capabilities": ["text_to_video", "image_to_video", "scene_video", "short_video"],
-          "clip_seconds": 8,
-          "max_single_task_seconds": 8,
+          "clip_seconds": 6,
+          "max_single_task_seconds": 6,
           "supports_concat": true,
           "payload_adapter": "key4u_hailuo_small_clip"
         },
@@ -160,6 +190,26 @@
           "max_single_task_seconds": 8,
           "supports_concat": true,
           "payload_adapter": "key4u_veo_small_clip"
+        },
+        "viduq3-mix": {
+          "family": "vidu",
+          "quality": "reference_mix",
+          "cost_tier": "high",
+          "capabilities": ["text_to_video", "image_to_video", "scene_video", "short_video"],
+          "clip_seconds": 8,
+          "max_single_task_seconds": 8,
+          "supports_concat": true,
+          "payload_adapter": "key4u_vidu_small_clip"
+        },
+        "doubao-seedance-1-0-pro-250528": {
+          "family": "doubao_seedance",
+          "quality": "cinematic_multishot",
+          "cost_tier": "high",
+          "capabilities": ["text_to_video", "image_to_video", "scene_video", "short_video"],
+          "clip_seconds": 10,
+          "max_single_task_seconds": 10,
+          "supports_concat": true,
+          "payload_adapter": "key4u_seedance_small_clip"
         }
       }
     }
@@ -168,7 +218,7 @@
     "shopaikey_veo_small_clip": {
       "family": "google_veo",
       "required_fields": ["model", "prompt", "duration", "ratio"],
-      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "metadata"],
+      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "sound", "resolution", "metadata"],
       "result_fields": ["data.status", "data.result_url", "data.id", "data.id_base", "status", "result_url"],
       "poll_status_fields": ["data.status", "status"],
       "duration_support": "short_clip",
@@ -177,7 +227,7 @@
     "key4u_kling_small_clip": {
       "family": "kling",
       "required_fields": ["model", "prompt", "duration", "ratio"],
-      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "metadata", "storyboard", "image_paths", "source_video_path"],
+      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "model_name", "mode", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "sound", "resolution", "metadata", "storyboard", "image_paths", "source_video_path"],
       "allowed_fields_by_capability": {
         "image_to_video": ["storyboard", "image_paths"],
         "first_last_frame_video": ["storyboard", "image_paths"],
@@ -191,7 +241,7 @@
     "key4u_hailuo_small_clip": {
       "family": "minimax_hailuo",
       "required_fields": ["model", "prompt", "duration", "ratio"],
-      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "metadata", "storyboard", "image_paths"],
+      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "sound", "resolution", "metadata", "storyboard", "image_paths"],
       "allowed_fields_by_capability": {
         "image_to_video": ["storyboard", "image_paths"],
         "first_last_frame_video": ["storyboard", "image_paths"]
@@ -204,7 +254,59 @@
     "key4u_veo_small_clip": {
       "family": "google_veo",
       "required_fields": ["model", "prompt", "duration", "ratio"],
-      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "metadata"],
+      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "sound", "resolution", "metadata"],
+      "result_fields": ["data.status", "data.result_url", "status", "result_url", "task_id"],
+      "poll_status_fields": ["data.status", "status"],
+      "duration_support": "short_clip",
+      "scene_fields_allowed": false
+    },
+    "key4u_pixverse_small_clip": {
+      "family": "pixverse",
+      "required_fields": ["model", "prompt", "duration", "ratio"],
+      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "sound", "resolution", "metadata", "storyboard", "image_paths"],
+      "allowed_fields_by_capability": {
+        "image_to_video": ["storyboard", "image_paths"],
+        "first_last_frame_video": ["storyboard", "image_paths"]
+      },
+      "result_fields": ["data.status", "data.result_url", "status", "result_url", "task_id"],
+      "poll_status_fields": ["data.status", "status"],
+      "duration_support": "short_clip",
+      "scene_fields_allowed": false
+    },
+    "key4u_grok_small_clip": {
+      "family": "xai_grok",
+      "required_fields": ["model", "prompt", "duration", "ratio"],
+      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "sound", "resolution", "metadata", "storyboard", "image_paths"],
+      "allowed_fields_by_capability": {
+        "image_to_video": ["storyboard", "image_paths"],
+        "first_last_frame_video": ["storyboard", "image_paths"]
+      },
+      "result_fields": ["data.status", "data.result_url", "status", "result_url", "task_id"],
+      "poll_status_fields": ["data.status", "status"],
+      "duration_support": "short_clip",
+      "scene_fields_allowed": false
+    },
+    "key4u_vidu_small_clip": {
+      "family": "vidu",
+      "required_fields": ["model", "prompt", "duration", "ratio"],
+      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "sound", "resolution", "metadata", "storyboard", "image_paths"],
+      "allowed_fields_by_capability": {
+        "image_to_video": ["storyboard", "image_paths"],
+        "first_last_frame_video": ["storyboard", "image_paths"]
+      },
+      "result_fields": ["data.status", "data.result_url", "status", "result_url", "task_id"],
+      "poll_status_fields": ["data.status", "status"],
+      "duration_support": "short_clip",
+      "scene_fields_allowed": false
+    },
+    "key4u_seedance_small_clip": {
+      "family": "doubao_seedance",
+      "required_fields": ["model", "prompt", "duration", "ratio"],
+      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "sound", "resolution", "metadata", "storyboard", "image_paths"],
+      "allowed_fields_by_capability": {
+        "image_to_video": ["storyboard", "image_paths"],
+        "first_last_frame_video": ["storyboard", "image_paths"]
+      },
       "result_fields": ["data.status", "data.result_url", "status", "result_url", "task_id"],
       "poll_status_fields": ["data.status", "status"],
       "duration_support": "short_clip",
@@ -213,7 +315,7 @@
     "generic_short_clip": {
       "family": "generic_http",
       "required_fields": ["model", "prompt", "duration", "ratio"],
-      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "metadata"],
+      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "sound", "resolution", "metadata"],
       "result_fields": ["data.status", "data.result_url", "status", "result_url"],
       "poll_status_fields": ["data.status", "status"],
       "duration_support": "short_clip",

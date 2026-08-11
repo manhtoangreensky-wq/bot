@@ -74,6 +74,7 @@ PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES = {
 }
 PROVIDER_BRIDGE_RENDERER = "video_provider_bridge"
 PRODUCT_VIDEO_SCENE_SECONDS = 8
+PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS = 15
 PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S = "per_scene_8s"
 PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK = "single_task_legacy"
 PRODUCT_VIDEO_RENDER_PIPELINE_HISTORICAL_CONCAT = "historical_multi_clip_concat"
@@ -1185,6 +1186,7 @@ def product_video_orchestration_mode(job: dict | None = None) -> str:
 def product_video_scene_duration_seconds(job: dict | None = None) -> int:
     job = dict(job or {})
     invoice = _invoice_payload(job)
+    asset_pack = _asset_pack_payload(job)
     product_type = str(
         job.get("product_type")
         or job.get("job_type")
@@ -1193,7 +1195,6 @@ def product_video_scene_duration_seconds(job: dict | None = None) -> int:
         or ""
     ).strip()
     if product_type == "self_shot_cinematic_transform":
-        asset_pack = _asset_pack_payload(job)
         segment = dict(asset_pack.get("source_segment") or {})
         segment_seconds = _safe_int((segment.get("duration_ms") or 0) / 1000, 0)
         direct_seconds = _safe_int(
@@ -1211,7 +1212,17 @@ def product_video_scene_duration_seconds(job: dict | None = None) -> int:
         or invoice.get("scene_seconds"),
         PRODUCT_VIDEO_SCENE_SECONDS,
     )
-    return max(1, min(PRODUCT_VIDEO_SCENE_SECONDS, scene_seconds))
+    scene_duration_limit = (
+        PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
+        if str(
+            job.get("uiflow3_handoff_sha256")
+            or asset_pack.get("uiflow3_handoff_sha256")
+            or invoice.get("uiflow3_handoff_sha256")
+            or ""
+        ).strip()
+        else PRODUCT_VIDEO_SCENE_SECONDS
+    )
+    return max(1, min(scene_duration_limit, scene_seconds))
 
 
 def _existing_scene_tasks(job: dict | None = None) -> list[dict[str, Any]]:
@@ -4038,7 +4049,9 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "selected_capabilities",
             "selected_clip_seconds",
             "selected_payload_adapter",
+            "selected_request_defaults",
             "provider_model_map",
+            "provider_request_defaults",
             "provider_catalog_model_found",
             "supports_concat",
             "contract_validation_status",

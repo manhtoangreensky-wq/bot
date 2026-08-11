@@ -25,8 +25,10 @@ from services import (
     video_final_output,
     video_uiflow3_execution_contract,
 )
+from services.video_ai_real_pricing import public_quality_catalog
 from services.video_provider_catalog import (
     model_metadata_from_resolution,
+    normalize_tier,
     resolve_product_video_model,
 )
 
@@ -154,18 +156,8 @@ _PRODUCT_VIDEO_FINAL_ADMISSION_SIGNED_FIELDS = (
     "public_user_confirmed",
 )
 PRODUCT_VIDEO_TIER_PRICE_MAP = {
-    "low": 200,
-    "trial": 200,
-    "basic": 300,
-    "common": 400,
-    "good": 400,
-    "standard": 500,
-    "advanced": 600,
-    "premium": 800,
-    "pro": 1000,
-    "studio": 1200,
-    "high": 1200,
-    "max": 1500,
+    normalize_tier(row["tier_id"]): int(row["unit_xu"])
+    for row in public_quality_catalog()
 }
 
 
@@ -222,48 +214,44 @@ def _json_loads(value: str | None, fallback: Any = None) -> Any:
 
 
 def _product_video_selected_tier(value: Any) -> str:
-    raw = str(value or "").strip().lower()
-    if raw in {"200", "trial", "low"}:
-        return "low"
-    if raw in {"300", "basic"}:
-        return "basic"
-    if raw in {"400", "good", "common"}:
-        return "common"
-    if raw in {"500", "standard"}:
-        return "standard"
-    if raw in {"600", "advanced"}:
-        return "advanced"
-    if raw in {"800", "premium"}:
-        return "premium"
-    if raw in {"1000", "pro"}:
-        return "pro"
-    if raw in {"1200", "studio", "high"}:
-        return "studio"
-    if raw in {"1500", "max"}:
-        return "max"
-    return raw or "basic"
+    return normalize_tier(value)
+
+
+def _product_video_route_tier_value(invoice: dict[str, Any], project: dict[str, Any]) -> Any:
+    return (
+        invoice.get("tier")
+        or invoice.get("tier_key")
+        or invoice.get("routing_quality_tier")
+        or invoice.get("quality_tier")
+        or project.get("quality_tier")
+        or "basic"
+    )
 
 
 def _product_video_quote_consistency(invoice: dict[str, Any], project: dict[str, Any]) -> dict[str, Any]:
     invoice = dict(invoice or {})
     project = dict(project or {})
-    selected_tier = _product_video_selected_tier(
-        invoice.get("tier")
-        or invoice.get("tier_key")
-        or invoice.get("package_xu")
-        or invoice.get("quality_tier")
-        or project.get("quality_tier")
-        or project.get("total_xu_estimated")
-        or "basic"
+    selected_tier = _product_video_selected_tier(_product_video_route_tier_value(invoice, project))
+    scene_count = max(1, _as_int(invoice.get("scene_count") or project.get("scene_count"), 1))
+    unit_price = _as_int(
+        invoice.get("quality_xu")
+        or invoice.get("unit_xu")
+        or PRODUCT_VIDEO_TIER_PRICE_MAP.get(selected_tier),
+        PRODUCT_VIDEO_TIER_PRICE_MAP.get("basic", 220),
+    )
+    calculated_total = max(1, unit_price) * scene_count + max(
+        0,
+        _as_int(invoice.get("addons_xu") or invoice.get("addon_total_xu"), 0),
     )
     user_visible = _as_int(
         invoice.get("user_visible_price_xu")
         or invoice.get("package_xu")
         or invoice.get("package_price_xu")
-        or invoice.get("quality_tier")
-        or PRODUCT_VIDEO_TIER_PRICE_MAP.get(selected_tier)
-        or 300,
-        300,
+        or invoice.get("total_xu")
+        or invoice.get("total")
+        or project.get("total_xu_estimated")
+        or calculated_total,
+        calculated_total,
     )
     persisted = _as_int(
         invoice.get("persisted_quoted_price_xu")
@@ -4166,6 +4154,7 @@ def heartbeat_video_job(
 
 
 PRODUCT_VIDEO_SCENE_SECONDS = 8
+PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS = 15
 PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS = 0.7
 PRODUCT_VIDEO_DEFAULT_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
 PRODUCT_VIDEO_ORCHESTRATION_MODE_RAW_DELIVERY = "single_task_legacy"
@@ -4370,7 +4359,13 @@ def product_video_initial_scene_tasks(
 ) -> list[dict[str, Any]]:
     safe_job_id = str(job_id or "").strip() or "job"
     safe_count = max(1, min(20, int(scene_count or 1)))
-    safe_duration = max(1, min(PRODUCT_VIDEO_SCENE_SECONDS, int(scene_duration_seconds or PRODUCT_VIDEO_SCENE_SECONDS)))
+    safe_duration = max(
+        1,
+        min(
+            PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS,
+            int(scene_duration_seconds or PRODUCT_VIDEO_SCENE_SECONDS),
+        ),
+    )
     cards_by_index: dict[int, dict[str, Any]] = {}
     for fallback_index, raw_card in enumerate(scene_cards or [], start=1):
         if not isinstance(raw_card, dict):
@@ -4469,10 +4464,15 @@ def build_product_video_confirm_kickoff_payload(
     asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
     if not isinstance(asset_pack, dict):
         asset_pack = {}
+    scene_duration_limit = (
+        PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
+        if str(asset_pack.get("uiflow3_handoff_sha256") or "").strip()
+        else PRODUCT_VIDEO_SCENE_SECONDS
+    )
     scene_duration = max(
         1,
         min(
-            PRODUCT_VIDEO_SCENE_SECONDS,
+            scene_duration_limit,
             _as_int(
                 invoice.get("scene_duration_seconds")
                 or invoice.get("scene_seconds")
@@ -4533,13 +4533,7 @@ def build_product_video_confirm_kickoff_payload(
         )
         chain = _split_product_video_provider_chain(source_chain) or resolve_product_video_provider_chain()
     model_resolution = resolve_product_video_model(
-        tier=invoice.get("tier")
-        or invoice.get("tier_key")
-        or invoice.get("package_xu")
-        or invoice.get("quality_tier")
-        or project.get("quality_tier")
-        or project.get("total_xu_estimated")
-        or "basic",
+        tier=_product_video_route_tier_value(invoice, project),
         provider_chain=chain,
         scene_count=scene_count,
         required_capability=required_capability,
@@ -4555,9 +4549,15 @@ def build_product_video_confirm_kickoff_payload(
                     "selected_family": model_metadata.get("selected_family") or "",
                     "selected_model_source": model_metadata.get("selected_model_source") or "",
                     "selected_payload_adapter": model_metadata.get("selected_payload_adapter") or "",
+                    "selected_request_defaults": dict(model_metadata.get("selected_request_defaults") or {}),
                     "model_used": model_metadata.get("selected_model") or "",
                     "model_used_in_payload": model_metadata.get("selected_model") or "",
                     "provider_model_map": dict(model_metadata.get("provider_model_map") or {}),
+                    "provider_request_defaults": {
+                        str(key): dict(value)
+                        for key, value in (model_metadata.get("provider_request_defaults") or {}).items()
+                        if isinstance(value, dict)
+                    },
                     "contract_validation_status": model_metadata.get("contract_validation_status") or "",
                     "supports_concat": bool(model_metadata.get("supports_concat")),
                 }
@@ -5954,6 +5954,19 @@ def product_video_expected_duration_seconds(project: dict | None = None, payload
     invoice = _json_loads(str(project.get("invoice_json") or payload.get("invoice_json") or ""), {})
     if not isinstance(invoice, dict):
         invoice = {}
+    asset_pack = _json_loads(str(project.get("asset_pack_json") or payload.get("asset_pack_json") or ""), {})
+    if not isinstance(asset_pack, dict):
+        asset_pack = {}
+    scene_duration_limit = (
+        PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
+        if str(
+            payload.get("uiflow3_handoff_sha256")
+            or asset_pack.get("uiflow3_handoff_sha256")
+            or invoice.get("uiflow3_handoff_sha256")
+            or ""
+        ).strip()
+        else PRODUCT_VIDEO_SCENE_SECONDS
+    )
     scene_count = _as_int(project.get("scene_count") or payload.get("scene_count") or invoice.get("scene_count"), 1)
     orchestration_mode = str(
         payload.get("orchestration_mode")
@@ -5969,7 +5982,7 @@ def product_video_expected_duration_seconds(project: dict | None = None, payload
             or invoice.get("scene_seconds"),
             PRODUCT_VIDEO_SCENE_SECONDS,
         )
-        return max(1, min(20, scene_count)) * max(1, min(PRODUCT_VIDEO_SCENE_SECONDS, scene_seconds))
+        return max(1, min(20, scene_count)) * max(1, min(scene_duration_limit, scene_seconds))
     direct = _as_int(
         payload.get("expected_duration_seconds")
         or payload.get("duration_seconds")
