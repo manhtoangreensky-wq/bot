@@ -37,7 +37,7 @@ Current public-facing price references found:
 
 | Family | Current ranges |
 | --- | --- |
-| Video | 200, 300, 400, 500, 600, 800, 1000, 1200, 1500 Xu |
+| Video | Bảng canonical hiện hành có 10 tier ID; giá bán và thời lượng lấy từ `services/video_ai_real_pricing.py`, tier ID không phải Xu. |
 | Image | 50, 150-200, 300-400, 500-600 Xu |
 | Music | separate product family; not changed |
 | SubDub | separate product family; not changed |
@@ -137,11 +137,11 @@ Result fields requiring exact verification:
 | Provider area | Endpoint | Candidate models | Cost confidence | Recommended use |
 | --- | --- | --- | --- | --- |
 | Unified video | `/v1/video/create` + `/v1/video/query` | `veo3.1-fast` from current repo default | Low | Fallback for normal video only after ShopAIKey is unavailable or unhealthy |
-| Kling text-to-video | `/kling/v1/videos/text2video` | `kling-v2-5-turbo`, `kling-v2-5-pro`, `kling-v2-1` if visible/available | Low | 1000+ Xu high-end tiers after exact API/cost verification |
+| Kling text-to-video | `/kling/v1/videos/text2video` | `kling-v2-5-turbo`, `kling-v2-5-pro`, `kling-v2-1` if visible/available | Low | High-quality route candidates after exact API/cost verification |
 | Kling image-to-video | `/kling/v1/videos/image2video` | same Kling family | Low | Premium image-to-video |
 | Kling video extension | `/kling/v1/videos/video-extend` | same Kling family | Low | Kéo dài video |
 | Kling effects | `/kling/v1/videos/effects` | same Kling family | Low | Video hiệu ứng |
-| Kling multi-image reference | `/kling/v1/videos/multi-image2video` | same Kling family | Low | 1500 Xu premium/reference-heavy tier |
+| Kling multi-image reference | `/kling/v1/videos/multi-image2video` | same Kling family | Low | Reference-heavy route candidate; public price comes from the canonical catalog |
 
 Key4U should not be used as the first provider while ShopAIKey is configured and has usable balance. Use Key4U as fallback only, and do not perform paid fallback without explicit confirmation.
 
@@ -187,4 +187,4 @@ Every new tier must have:
 
 ## Implementation Recommendation
 
-Do not change runtime pricing yet. Next implementation should first add an admin-only provider catalog smoke that reads configured provider metadata without submitting paid jobs, then add mocked tests for each model family.
+Runtime Video pricing is now owned by `services/video_ai_real_pricing.py`. Provider readiness still requires the existing guarded route checks; this audit must not override that source.

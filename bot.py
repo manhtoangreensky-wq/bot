@@ -1139,7 +1139,6 @@ VIDEO_HIGH_TIER_AUTO_FREEZE_ON_ERROR = env_flag("VIDEO_HIGH_TIER_AUTO_FREEZE_ON_
 VIDEO_PREMIUM_ADMIN_ONLY = env_flag("VIDEO_PREMIUM_ADMIN_ONLY", "true")
 SHOPAIKEY_VIDEO_DEFAULT_TIER = _env("SHOPAIKEY_VIDEO_DEFAULT_TIER", "low")
 SHOPAIKEY_IMAGE_COST_XU = env_int("SHOPAIKEY_IMAGE_COST_XU", 50)
-SHOPAIKEY_VIDEO_COST_XU = env_int("SHOPAIKEY_VIDEO_COST_XU", 200)
 SHOPAIKEY_TREND_COST_XU = env_int("SHOPAIKEY_TREND_COST_XU", 10)
 CREATIVE_MOTION_GUIDE_COST_XU = env_int("CREATIVE_MOTION_GUIDE_COST_XU", 0)
 FRAME_VIDEO_PUBLIC_ENABLED = env_flag("FRAME_VIDEO_PUBLIC_ENABLED", "true")
@@ -1881,22 +1880,12 @@ AI_IMAGE_EDIT_COST = 350
 IMAGE_EDIT_BASIC_XU = env_int("IMAGE_EDIT_BASIC_XU", 50)
 IMAGE_EDIT_STANDARD_XU = env_int("IMAGE_EDIT_STANDARD_XU", 200)
 IMAGE_UPSCALE_AI_XU = env_int("IMAGE_UPSCALE_AI_XU", 200)
-VIDEO_FROM_IMAGE_BASIC_COST = 300
-VIDEO_FROM_IMAGE_PRO_COST = 600
 IMAGE_BASE_COST_XU = env_int("IMAGE_BASE_COST_XU", 50)
-VIDEO_BASE_COST_XU = env_int("VIDEO_BASE_COST_XU", 300)
 MEDIA_PRICE_MULTIPLIER = env_int("MEDIA_PRICE_MULTIPLIER", 2)
 IMAGE_LOW_PROVIDER_COST_XU = env_int("IMAGE_LOW_PROVIDER_COST_XU", 25)
 IMAGE_STANDARD_PROVIDER_COST_XU = env_int("IMAGE_STANDARD_PROVIDER_COST_XU", 150)
 IMAGE_COMMON_PROVIDER_COST_XU = env_int("IMAGE_COMMON_PROVIDER_COST_XU", 200)
 IMAGE_HIGH_PROVIDER_COST_XU = env_int("IMAGE_HIGH_PROVIDER_COST_XU", 250)
-VIDEO_LOW_PROVIDER_COST_XU = env_int("VIDEO_LOW_PROVIDER_COST_XU", 150)
-VIDEO_BASIC_PROVIDER_COST_XU = env_int("VIDEO_BASIC_PROVIDER_COST_XU", 150)
-VIDEO_COMMON_PROVIDER_COST_XU = env_int("VIDEO_COMMON_PROVIDER_COST_XU", 200)
-VIDEO_ADVANCED_PROVIDER_COST_XU = env_int("VIDEO_ADVANCED_PROVIDER_COST_XU", 250)
-VIDEO_STANDARD_PROVIDER_COST_XU = env_int("VIDEO_STANDARD_PROVIDER_COST_XU", 300)
-VIDEO_HIGH_PROVIDER_COST_XU = env_int("VIDEO_HIGH_PROVIDER_COST_XU", 400)
-VIDEO_PREMIUM_PROVIDER_COST_XU = env_int("VIDEO_PREMIUM_PROVIDER_COST_XU", 1000)
 IMAGE_LOW_COST_XU = env_int("IMAGE_LOW_COST_XU", IMAGE_LOW_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
 IMAGE_STANDARD_COST_XU = env_int("IMAGE_STANDARD_COST_XU", 150)
 IMAGE_STANDARD_WARRANTY_COST_XU = env_int("IMAGE_STANDARD_WARRANTY_COST_XU", 200)
@@ -1904,16 +1893,23 @@ IMAGE_COMMON_COST_XU = env_int("IMAGE_COMMON_COST_XU", 300)
 IMAGE_COMMON_WARRANTY_COST_XU = env_int("IMAGE_COMMON_WARRANTY_COST_XU", 400)
 IMAGE_HIGH_COST_XU = env_int("IMAGE_HIGH_COST_XU", 500)
 IMAGE_HIGH_WARRANTY_COST_XU = env_int("IMAGE_HIGH_WARRANTY_COST_XU", 600)
-VIDEO_LOW_COST_XU = env_int("VIDEO_LOW_COST_XU", 200)
-VIDEO_BASIC_COST_XU = env_int("VIDEO_BASIC_COST_XU", 300)
-VIDEO_COMMON_COST_XU = env_int("VIDEO_COMMON_COST_XU", 400)
-VIDEO_ADVANCED_COST_XU = env_int("VIDEO_ADVANCED_COST_XU", 500)
-VIDEO_STANDARD_COST_XU = env_int("VIDEO_STANDARD_COST_XU", VIDEO_STANDARD_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
-VIDEO_HIGH_COST_XU = env_int("VIDEO_HIGH_COST_XU", 800)
-VIDEO_PREMIUM_COST_XU = env_int("VIDEO_PREMIUM_COST_XU", VIDEO_PREMIUM_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
-VIDEO_FUTURE_1000_COST_XU = env_int("VIDEO_FUTURE_1000_COST_XU", 1000)
-VIDEO_FUTURE_1200_COST_XU = env_int("VIDEO_FUTURE_1200_COST_XU", 1200)
-VIDEO_FUTURE_1500_COST_XU = env_int("VIDEO_FUTURE_1500_COST_XU", 1500)
+def canonical_video_unit_xu(tier_id: int) -> int:
+    return int(video_ai_real_pricing.public_quality_by_tier(tier_id)["unit_xu"])
+
+
+# Stable numeric tier IDs remain route identities. Public prices always come
+# from the reviewed Video catalog and cannot be overwritten by stale ENV data.
+VIDEO_LOW_COST_XU = canonical_video_unit_xu(200)
+VIDEO_BASIC_COST_XU = canonical_video_unit_xu(300)
+VIDEO_COMMON_COST_XU = canonical_video_unit_xu(400)
+VIDEO_ADVANCED_COST_XU = canonical_video_unit_xu(500)
+VIDEO_STANDARD_COST_XU = canonical_video_unit_xu(600)
+VIDEO_LONG_COST_XU = canonical_video_unit_xu(700)
+VIDEO_HIGH_COST_XU = canonical_video_unit_xu(800)
+VIDEO_FUTURE_1000_COST_XU = canonical_video_unit_xu(1000)
+VIDEO_FUTURE_1200_COST_XU = canonical_video_unit_xu(1200)
+VIDEO_FUTURE_1500_COST_XU = canonical_video_unit_xu(1500)
+VIDEO_PREMIUM_COST_XU = VIDEO_FUTURE_1500_COST_XU
 WORKFLOW_TREND_ANALYSIS_COST_XU = env_int("WORKFLOW_TREND_ANALYSIS_COST_XU", 20)
 WORKFLOW_SCRIPT_STORYBOARD_COST_XU = env_int("WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 30)
 WORKFLOW_PROMPT_PACK_COST_XU = env_int("WORKFLOW_PROMPT_PACK_COST_XU", 20)
@@ -6635,6 +6631,11 @@ CANONICAL_PRICE_KEYS = (
     "video_addon_logo",
 )
 CANONICAL_DERIVED_PRICE_KEYS = {"subtitle_dub_video", "auto_subtitle_then_dub"}
+CANONICAL_LOCKED_VIDEO_PRICE_KEYS = {
+    "video_beta_200",
+    "video_beta_300",
+    "video_beta_400",
+}
 CANONICAL_DERIVED_PRICE_FORMULAS = {
     "subtitle_dub_video": ("subtitle_translate_video", "dub_video"),
     "auto_subtitle_then_dub": ("auto_subtitle_video", "dub_video"),
@@ -6670,9 +6671,9 @@ CANONICAL_PRICE_LABELS = {
     "dub_video": "Lồng tiếng video",
     "subtitle_dub_video": "Phụ đề + lồng tiếng",
     "auto_subtitle_then_dub": "Tạo phụ đề rồi lồng tiếng",
-    "video_beta_200": "Video 200 Xu",
-    "video_beta_300": "Video 300 Xu",
-    "video_beta_400": "Video 400 Xu",
+    "video_beta_200": "Video Nhanh gọn 200 Xu/cảnh",
+    "video_beta_300": "Video Tiêu chuẩn có âm thanh 220 Xu/cảnh",
+    "video_beta_400": "Video Cân bằng rõ nét 80 Xu/cảnh",
     "video_addon_voice": "Video add-on voice",
     "video_addon_subtitle": "Video add-on phụ đề",
     "video_addon_dub": "Video add-on lồng tiếng",
@@ -6732,9 +6733,9 @@ def canonical_price_defaults() -> dict:
         "dub_video": dub_rate,
         "subtitle_dub_video": canonical_price_number(float(subtitle_rate) + float(dub_rate)),
         "auto_subtitle_then_dub": canonical_price_number(float(auto_subtitle) + float(dub_rate)),
-        "video_beta_200": canonical_price_number(globals().get("VIDEO_LOW_COST_XU", 200)),
-        "video_beta_300": canonical_price_number(globals().get("VIDEO_BASIC_COST_XU", 300)),
-        "video_beta_400": canonical_price_number(globals().get("VIDEO_COMMON_COST_XU", 400)),
+        "video_beta_200": canonical_price_number(VIDEO_LOW_COST_XU),
+        "video_beta_300": canonical_price_number(VIDEO_BASIC_COST_XU),
+        "video_beta_400": canonical_price_number(VIDEO_COMMON_COST_XU),
         "video_addon_voice": 0,
         "video_addon_subtitle": canonical_price_number(globals().get("VIDEO_SUBTITLE_AUTO_BASE_XU", 120)),
         "video_addon_dub": canonical_price_number(globals().get("VIDEO_DUB_DEFAULT_BASE_XU", 250)),
@@ -6747,6 +6748,8 @@ def canonical_price_xu(key: str = ""):
     defaults = canonical_price_defaults()
     if normalized not in CANONICAL_PRICE_KEYS:
         return 0
+    if normalized in CANONICAL_LOCKED_VIDEO_PRICE_KEYS:
+        return defaults.get(normalized, 0)
     if normalized in CANONICAL_DERIVED_PRICE_KEYS:
         if normalized == "subtitle_dub_video":
             return canonical_price_number(float(canonical_price_xu("subtitle_translate_video")) + float(canonical_price_xu("dub_video")))
@@ -6825,8 +6828,14 @@ def canonical_price_table() -> dict:
             "label": CANONICAL_PRICE_LABELS.get(key, key),
             "price_xu": canonical_price_xu(key),
             "unit": CANONICAL_PRICE_UNITS.get(key, "Xu"),
-            "source": "derived" if key in CANONICAL_DERIVED_PRICE_KEYS else "canonical_setting_or_default",
-            "editable": key not in CANONICAL_DERIVED_PRICE_KEYS,
+            "source": (
+                "video_model_catalog"
+                if key in CANONICAL_LOCKED_VIDEO_PRICE_KEYS
+                else "derived"
+                if key in CANONICAL_DERIVED_PRICE_KEYS
+                else "canonical_setting_or_default"
+            ),
+            "editable": key not in CANONICAL_DERIVED_PRICE_KEYS | CANONICAL_LOCKED_VIDEO_PRICE_KEYS,
         }
     return table
 
@@ -6881,6 +6890,8 @@ def set_canonical_price_value(key: str, value, updated_by="") -> dict:
         raise ValueError("unknown_price_key")
     if normalized in CANONICAL_DERIVED_PRICE_KEYS:
         raise ValueError("derived_price_key")
+    if normalized in CANONICAL_LOCKED_VIDEO_PRICE_KEYS:
+        raise ValueError("video_price_owned_by_model_catalog")
     price = canonical_price_number(value)
     set_system_setting(
         canonical_price_setting_key(normalized),
@@ -47719,14 +47730,10 @@ def video_order_voice_item(state: dict, order: dict) -> tuple[dict | None, dict 
     return None, None
 
 def video_scene_discount_percent(scene_count) -> int:
+    """Return the payable percentage kept for legacy invoice fields."""
+
     count = max(1, min(20, safe_int(scene_count, 1)))
-    if count == 1:
-        return 100
-    if count <= 9:
-        return 90
-    if count <= 19:
-        return 85
-    return 80
+    return 100 - video_ai_real_pricing.video_multiscene_discount_percent(count)
 
 def video_scene_discount_multiplier(scene_count) -> float:
     return video_scene_discount_percent(scene_count) / 100.0
@@ -47734,8 +47741,7 @@ def video_scene_discount_multiplier(scene_count) -> float:
 def calculate_scene_video_price(package_base_xu, scene_count) -> int:
     base = max(0, safe_int(package_base_xu, 0))
     count = max(1, min(20, safe_int(scene_count, 1)))
-    percent = video_scene_discount_percent(count)
-    return int(round(base * count * (percent / 100.0)))
+    return int(video_ai_real_pricing.video_multiscene_price(base, count)["total_xu"])
 
 def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
     order = dict(order or {})
@@ -47975,9 +47981,9 @@ def video_quote_selected_addon_keys(state: dict | None = None, order: dict | Non
 
 
 PRODUCT_VIDEO_R9_SCENE_MAX = 20
-PRODUCT_VIDEO_R9_LIST_PRICE_PER_SCENE_XU = 300
-PRODUCT_VIDEO_R9_PROMO_PRICE_PER_SCENE_XU = 200
-PRODUCT_VIDEO_R9_PROMO_UNTIL = "2026-12-31"
+PRODUCT_VIDEO_R9_LIST_PRICE_PER_SCENE_XU = VIDEO_LOW_COST_XU
+PRODUCT_VIDEO_R9_PROMO_PRICE_PER_SCENE_XU = VIDEO_LOW_COST_XU
+PRODUCT_VIDEO_R9_PROMO_UNTIL = ""
 
 
 def product_video_r9_scene_count(scene_count) -> int:
@@ -47992,6 +47998,7 @@ def product_video_r9_scene_pricing(scene_count, *, tier: str = "low", today=None
     unit_charge = max(1, safe_int(payload.get("cost"), 1))
     scene_seconds = max(1, safe_int(payload.get("seconds"), TASK3D_SCENE_SECONDS))
     duration = count * scene_seconds
+    discount = video_ai_real_pricing.video_multiscene_price(unit_charge, count)
     return {
         "tier": tier_name,
         "scene_count": count,
@@ -48000,11 +48007,14 @@ def product_video_r9_scene_pricing(scene_count, *, tier: str = "low", today=None
         "unit_list_xu": unit_charge,
         "unit_promo_xu": unit_charge,
         "unit_charge_xu": unit_charge,
-        "list_total_xu": unit_charge * count,
-        "promo_total_xu": unit_charge * count,
-        "charge_total_xu": unit_charge * count,
-        "promo_active": False,
+        "list_total_xu": int(discount["subtotal_xu"]),
+        "promo_total_xu": int(discount["total_xu"]),
+        "charge_total_xu": int(discount["total_xu"]),
+        "discount_percent": int(discount["discount_percent"]),
+        "discount_xu": int(discount["discount_xu"]),
+        "promo_active": bool(discount["discount_percent"]),
         "promo_until": "",
+        "promotion_scope": "video_multiscene" if discount["discount_percent"] else "",
     }
 
 
@@ -48263,8 +48273,10 @@ def calculate_video_quote(session: dict | None = None) -> dict:
     scene_pricing = product_video_r9_scene_pricing(scene_count, tier=tier)
     package_base_xu = int(scene_pricing["unit_charge_xu"])
     estimated_seconds = int(scene_pricing["estimated_seconds"])
-    scene_discount = 1.0
-    scene_discount_percent = 100
+    multiscene_discount_percent = int(scene_pricing["discount_percent"])
+    scene_discount_xu = int(scene_pricing["discount_xu"])
+    scene_discount_percent = 100 - multiscene_discount_percent
+    scene_discount = scene_discount_percent / 100.0
     scene_video_xu = int(scene_pricing["charge_total_xu"])
     paid_items = video_order_dedupe_items(order.get("paid_items") or [])
     addon_fee_xu = sum(max(0, safe_int(item.get("price_xu"), 0)) for item in paid_items)
@@ -48285,7 +48297,8 @@ def calculate_video_quote(session: dict | None = None) -> dict:
             "price_xu": scene_video_xu,
             "scene_count": scene_count,
             "package_base_xu": package_base_xu,
-            "discount_percent": scene_discount_percent,
+            "discount_percent": multiscene_discount_percent,
+            "discount_xu": scene_discount_xu,
         },
     ]
     selected_addons = [
@@ -48302,6 +48315,10 @@ def calculate_video_quote(session: dict | None = None) -> dict:
         "scene_duration_seconds": int(scene_pricing["scene_seconds"]),
         "requested_seconds": estimated_seconds,
         "base_price_xu": package_base_xu,
+        "scene_discount": scene_discount,
+        "scene_discount_percent": scene_discount_percent,
+        "multiscene_discount_percent": multiscene_discount_percent,
+        "scene_discount_xu": scene_discount_xu,
         "scene_video_xu": scene_video_xu,
         "addon_fee_xu": addon_fee_xu,
         "paid_items": paid_items,
@@ -48314,6 +48331,9 @@ def calculate_video_quote(session: dict | None = None) -> dict:
     pricing.update({
         "base_video_xu": scene_video_xu,
         "package_base_xu": package_base_xu,
+        "scene_list_total_xu": int(scene_pricing["list_total_xu"]),
+        "multiscene_discount_percent": multiscene_discount_percent,
+        "scene_discount_xu": scene_discount_xu,
         "scene_video_xu": scene_video_xu,
         "addon_xu": addon_fee_xu,
         "raw_total_xu": total_xu,
@@ -48338,6 +48358,8 @@ def calculate_video_quote(session: dict | None = None) -> dict:
         "promo_until": str(scene_pricing["promo_until"]),
         "scene_discount": scene_discount,
         "scene_discount_percent": scene_discount_percent,
+        "multiscene_discount_percent": multiscene_discount_percent,
+        "scene_discount_xu": scene_discount_xu,
         "scene_video_xu": scene_video_xu,
         "addon_fee_xu": addon_fee_xu,
         "total_xu": total_xu,
@@ -48742,19 +48764,19 @@ def video_experience_tier_lock_text(lang: str = "vi", reasons: list[str] | tuple
     }
     if normalize_user_language(lang) != "vi":
         if "extra_scene" in reasons:
-            return "The 200 Xu package supports 1 scene only. Please choose 1 scene or upgrade to the 300 Xu package or above."
+            return "This order currently supports 1 scene only. Please choose 1 scene or select another quality package."
         readable = [reason_labels_en.get(item, item.replace("_", " ")) for item in reasons]
         selected = f" Selected: {', '.join(readable)}." if readable else ""
-        return "The 200 Xu package supports one scene without paid add-ons. Remove paid add-ons or choose the 300 Xu package or above." + selected
+        return "This order currently supports one scene without paid add-ons. Remove paid add-ons or select another quality package." + selected
     if "extra_scene" in reasons:
-        return "Gói 200 Xu chỉ hỗ trợ 1 cảnh. Vui lòng chọn 1 cảnh hoặc nâng lên gói 300 Xu trở lên."
-    return "Gói 200 Xu chỉ hỗ trợ video 1 cảnh không add-on trả phí. Vui lòng bỏ add-on trả phí hoặc chọn gói 300 Xu trở lên."
+        return "Đơn hiện tại chỉ hỗ trợ 1 cảnh. Vui lòng chọn 1 cảnh hoặc chọn gói chất lượng khác."
+    return "Đơn hiện tại chỉ hỗ trợ 1 cảnh không add-on trả phí. Vui lòng bỏ add-on hoặc chọn gói chất lượng khác."
 
 def video_experience_tier_lock_keyboard(lang: str = "vi", upgrade_callback: str = "videoaddon|upgrade_300", back_callback: str = "videoaddon|export_back") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔷 Nâng lên 300 Xu" if is_vi else "🔷 Upgrade to 300 Xu", callback_data=upgrade_callback),
+            InlineKeyboardButton(video_tier_button_text("basic", lang), callback_data=upgrade_callback),
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=back_callback),
         ],
     ])
@@ -48776,7 +48798,7 @@ def video_package_200_lock_reasons(quote: dict | None = None) -> list[str]:
             reasons.append("paid_addon")
     if int(quote.get("addon_fee_xu") or 0) > 0 and not any(reason in reasons for reason in {"paid_addon", "paid_music", "paid_voice", "dubbing", "subtitle"}):
         reasons.append("paid_addon")
-    if int(quote.get("total_xu") or 0) != int(VIDEO_LOW_COST_XU or 200):
+    if int(quote.get("total_xu") or 0) != int(VIDEO_LOW_COST_XU):
         reasons.append("invoice_total_over_base")
     return list(dict.fromkeys(reasons or ["paid_addon"]))
 
@@ -55011,7 +55033,9 @@ def calculate_short_video_quote(
     selected_addons: list[str] | tuple[str, ...] | set[str] | None = None,
 ) -> dict:
     tier_norm = normalize_video_tier(tier)
-    duration = max(1, int(math.ceil(float(requested_duration_seconds or VIDEO_SHORT_BASE_SECONDS))))
+    tier_payload = video_tier_payload(tier_norm)
+    scene_seconds = max(1, safe_int(tier_payload.get("seconds"), VIDEO_SHORT_BASE_SECONDS))
+    duration = max(1, int(math.ceil(float(requested_duration_seconds or scene_seconds))))
     scenes = max(1, int(math.ceil(float(requested_scene_count or VIDEO_SHORT_BASE_SCENES))))
     if duration > int(VIDEO_SHORT_MAX_SECONDS or 60):
         return {
@@ -55024,43 +55048,14 @@ def calculate_short_video_quote(
             "total_xu": 0,
             "estimated_vnd": 0,
         }
-    base = int(video_tier_cost_xu(tier_norm) or 0)
-    extra_seconds = max(0, duration - int(VIDEO_SHORT_BASE_SECONDS or 8))
+    base = int(tier_payload.get("cost") or video_tier_cost_xu(tier_norm) or 0)
+    extra_seconds = max(0, duration - scene_seconds)
     extra_scenes = max(0, scenes - int(VIDEO_SHORT_BASE_SCENES or 1))
     addon_matrix = video_addon_pricing_matrix()
     selected_keys = [str(addon or "").strip().lower() for addon in (selected_addons or []) if str(addon or "").strip()]
-    paid_selected = [
-        key for key in selected_keys
-        if int((addon_matrix.get(key) or {}).get("price_xu") or 0) > 0
-    ]
-    if tier_norm == "low" and (extra_seconds > 0 or extra_scenes > 0 or paid_selected):
-        reasons = []
-        if extra_seconds > 0:
-            reasons.append("extra_duration")
-        if extra_scenes > 0:
-            reasons.append("extra_scene")
-        reasons.extend(paid_selected)
-        return {
-            "tier": tier_norm,
-            "label": video_tier_payload(tier_norm).get("label") or tier_norm,
-            "starter_tier_locked": True,
-            "reasons": reasons,
-            "base_price_xu": base,
-            "base_seconds": int(VIDEO_SHORT_BASE_SECONDS or 8),
-            "base_scenes": int(VIDEO_SHORT_BASE_SCENES or 1),
-            "requested_duration_seconds": duration,
-            "requested_scene_count": scenes,
-            "selected_addons": paid_selected,
-            "total_xu": base,
-            "estimated_vnd": base * int(XU_TO_VND or 100),
-            "route_to_long_video": False,
-            "upsell_to": "basic",
-            "upsell_to_xu": int(VIDEO_BASIC_COST_XU or 300),
-        }
     extra_second_rate = video_tier_extra_second_xu(tier_norm) if video_tier_allows_extra_duration(tier_norm) else 0
-    extra_scene_rate = video_tier_extra_scene_xu(tier_norm) if video_tier_allows_extra_scenes(tier_norm) else 0
     extra_seconds_xu = int(extra_seconds * extra_second_rate)
-    extra_scenes_xu = int(extra_scenes * extra_scene_rate)
+    scene_price = video_ai_real_pricing.video_multiscene_price(base, scenes)
     addon_items = []
     addon_total = 0
     for key in selected_keys:
@@ -55070,21 +55065,26 @@ def calculate_short_video_quote(
         amount = int(spec.get("price_xu") or 0)
         addon_total += amount
         addon_items.append({"key": key, "label": spec.get("label") or key, "price_xu": amount, "display": spec.get("display") or f"+{amount} Xu"})
-    total = int(base + extra_seconds_xu + extra_scenes_xu + addon_total)
+    scene_video_xu = int(scene_price["total_xu"])
+    total = int(scene_video_xu + extra_seconds_xu + addon_total)
     return {
         "tier": tier_norm,
-        "label": video_tier_payload(tier_norm).get("label") or tier_norm,
+        "label": tier_payload.get("label") or tier_norm,
         "base_price_xu": base,
-        "base_seconds": int(VIDEO_SHORT_BASE_SECONDS or 8),
+        "base_seconds": scene_seconds,
         "base_scenes": int(VIDEO_SHORT_BASE_SCENES or 1),
         "requested_duration_seconds": duration,
         "requested_scene_count": scenes,
+        "scene_subtotal_xu": int(scene_price["subtotal_xu"]),
+        "scene_discount_percent": int(scene_price["discount_percent"]),
+        "scene_discount_xu": int(scene_price["discount_xu"]),
+        "scene_video_xu": scene_video_xu,
         "extra_seconds": extra_seconds,
         "extra_second_rate_xu": int(extra_second_rate),
         "extra_seconds_xu": extra_seconds_xu,
         "extra_scenes": extra_scenes,
-        "extra_scene_rate_xu": int(extra_scene_rate),
-        "extra_scenes_xu": extra_scenes_xu,
+        "extra_scene_rate_xu": 0,
+        "extra_scenes_xu": 0,
         "selected_addons": addon_items,
         "selected_addons_xu": addon_total,
         "addon_fee_xu": addon_total,
@@ -55104,32 +55104,23 @@ def short_video_quote_lines(quote: dict, lang: str = "vi") -> list[str]:
             "Video trên 60 giây thuộc quy trình Video dài. TOAN AAS sẽ chuyển sang mục Video dài để tính giá và xử lý ổn định hơn.",
             "Bot chưa gọi provider và chưa trừ Xu.",
         ]
-    if quote.get("starter_tier_locked"):
-        reasons = ", ".join(str(item) for item in (quote.get("reasons") or [])) or "paid_addon"
-        return [
-            "🎬 <b>Báo giá Video AI</b>",
-            "",
-            f"Gói: <b>{html.escape(str(quote.get('label') or 'Video trải nghiệm'))}</b> — <b>{xu_number(quote.get('base_price_xu'))} Xu</b>",
-            f"Mặc định: <b>{int(quote.get('base_scenes') or 1)} cảnh / {int(quote.get('base_seconds') or 8)} giây</b>",
-            f"Thời lượng yêu cầu: <b>{int(quote.get('requested_duration_seconds') or 0)} giây</b>",
-            f"Số cảnh yêu cầu: <b>{int(quote.get('requested_scene_count') or 0)}</b>",
-            "",
-            "Gói 200 Xu là gói trải nghiệm nên không mở add-on trả phí hoặc tăng thời lượng/cảnh.",
-            f"Lý do cần nâng gói: <code>{html.escape(reasons)}</code>",
-            f"Đề xuất: chuyển sang <b>{xu_number(quote.get('upsell_to_xu') or 300)} Xu</b> trở lên.",
-            "",
-            "Bot chưa gọi provider và chưa trừ Xu.",
-        ]
     lines = [
         "🎬 <b>Báo giá Video AI</b>",
         "",
-        f"Gói: <b>{html.escape(str(quote.get('label') or quote.get('tier') or 'Video'))}</b> — <b>{xu_number(quote.get('base_price_xu'))} Xu</b>",
-        f"Mặc định: <b>{int(quote.get('base_scenes') or 1)} cảnh / {int(quote.get('base_seconds') or 8)} giây</b>",
+        f"Gói: <b>{html.escape(str(quote.get('label') or quote.get('tier') or 'Video'))}</b> — <b>{xu_number(quote.get('base_price_xu'))} Xu/cảnh</b>",
+        f"Mỗi cảnh theo gói: <b>{int(quote.get('base_seconds') or 1)} giây</b>",
         f"Thời lượng khách chọn: <b>{int(quote.get('requested_duration_seconds') or 0)} giây</b>",
         f"Thêm giây: <b>{int(quote.get('extra_seconds') or 0)} x {int(quote.get('extra_second_rate_xu') or 0)} Xu = {xu_number(quote.get('extra_seconds_xu'))} Xu</b>",
         f"Số cảnh khách chọn: <b>{int(quote.get('requested_scene_count') or 0)}</b>",
-        f"Thêm cảnh: <b>{int(quote.get('extra_scenes') or 0)} x {int(quote.get('extra_scene_rate_xu') or 0)} Xu = {xu_number(quote.get('extra_scenes_xu'))} Xu</b>",
+        f"Tiền video theo cảnh: <b>{xu_number(quote.get('base_price_xu'))} × {int(quote.get('requested_scene_count') or 1)} = {xu_number(quote.get('scene_subtotal_xu'))} Xu</b>",
     ]
+    if int(quote.get("scene_discount_percent") or 0) > 0:
+        lines.append(
+            f"Khuyến mãi Video nhiều cảnh: <b>-{int(quote.get('scene_discount_percent') or 0)}%</b> "
+            f"= <b>-{xu_number(quote.get('scene_discount_xu'))} Xu</b>; tiền video còn <b>{xu_number(quote.get('scene_video_xu'))} Xu</b>. Add-on tính riêng."
+        )
+    else:
+        lines.append("Khuyến mãi Video nhiều cảnh: <b>1 cảnh không giảm</b>; add-on tính riêng.")
     addons = list(quote.get("selected_addons") or [])
     if addons:
         lines.append("Tùy chọn cộng thêm:")
@@ -55540,7 +55531,7 @@ def media_workflow_pricing_payload() -> dict:
         "trend_workflow_content_only": bool(TREND_WORKFLOW_CONTENT_ONLY),
         "trend_workflow_billing_status": trend_workflow_billing_status_text(),
         "legacy_shopaikey_image_fallback": max(0, int(SHOPAIKEY_IMAGE_COST_XU or 0)),
-        "legacy_shopaikey_video_fallback": max(0, int(SHOPAIKEY_VIDEO_COST_XU or 0)),
+        "legacy_shopaikey_video_fallback": max(0, int(video_tier_cost_xu("low") or 0)),
     }
 
 PACKAGE_WALLET_ENABLED = True
@@ -56448,10 +56439,10 @@ def p0_21d_task_package_payload() -> dict:
     image_standard = package_catalog_image_cost_xu("standard", 150)
     image_standard_warranty = package_catalog_image_cost_xu("standard_warranty", 200)
     image_high = package_catalog_image_cost_xu("high", 500)
-    video_common = package_catalog_video_cost_xu("common", 400)
-    video_standard = package_catalog_video_cost_xu("standard", 600)
-    video_high = package_catalog_video_cost_xu("high", 800)
-    video_multiscene = max(video_high * 2, 1600)
+    video_common = package_catalog_video_cost_xu("common", video_tier_cost_xu("common"))
+    video_standard = package_catalog_video_cost_xu("standard", video_tier_cost_xu("standard"))
+    video_high = package_catalog_video_cost_xu("high", video_tier_cost_xu("high"))
+    video_multiscene = video_high * 2
     music_bg_basic = max(100, int(MUSIC_PRODUCT_BASIC_PRICE_XU or 100))
     music_bg_standard = 150
     music_bg_premium = max(200, int(MUSIC_PRODUCT_STANDARD_PRICE_XU or 200))
@@ -56806,8 +56797,8 @@ def p0_21d_task_package_payload() -> dict:
 def p0_21d_combo_catalog_payload(include_legacy: bool = True) -> dict:
     image_standard = package_catalog_image_cost_xu("standard", 150)
     image_high = package_catalog_image_cost_xu("high", 500)
-    video_standard = package_catalog_video_cost_xu("standard", 600)
-    video_high = package_catalog_video_cost_xu("high", 800)
+    video_standard = package_catalog_video_cost_xu("standard", video_tier_cost_xu("standard"))
+    video_high = package_catalog_video_cost_xu("high", video_tier_cost_xu("high"))
     workflow_unit = package_catalog_prompt_workflow_xu()
     music_bg = max(150, int(MUSIC_PRODUCT_STANDARD_PRICE_XU or 200))
     song = max(250, int(MUSIC_PRODUCT_PREMIUM_PRICE_XU or 300))
@@ -67711,7 +67702,7 @@ def guide_section_text_i18n(section_key_or_number: str, lang: str = "vi") -> str
             "🎬 <b>AI Video Guide</b>\n\n"
             "Choose the topic or source, select the scene count first, then choose the profile, review the per-scene plan and pick a quality package before final confirmation.\n\n"
             "The quality screen shows the current duration, quality description and Xu price for every package. "
-            "Product Video supports 1-20 planned scenes.\n\n"
+            "Product Video supports 1-20 planned scenes. Multi-scene discount: 1 scene has no discount; 2-5 scenes 10%; 6-10 scenes 15%; 11-20 scenes 20%; add-ons are priced separately.\n\n"
             "If video generation is unavailable, TOAN AAS does not process the paid step or wrongly charge Xu."
         ),
         "audio": (
@@ -67750,8 +67741,8 @@ def guide_section_text_i18n(section_key_or_number: str, lang: str = "vi") -> str
             ),
             "video_ai": (
                 "🎬 <b>AI 视频指南</b>\n\n"
-                "描述场景、镜头运动、风格、时长和画面比例，然后选择套餐并确认。\n\n"
-                "视频价格：200、300、400、500、600、800、1000、1200、1500 Xu。\n\n"
+                "描述场景、镜头运动、风格、时长和画面比例，然后在质量页面查看每个套餐的实际时长与 Xu 价格并确认。\n\n"
+                "多场景优惠：1 个场景不优惠；2–5 个场景 10%；6–10 个场景 15%；11–20 个场景 20%；附加项目另计。\n\n"
                 "系统不可用时不会开始处理，也不会扣除 Xu。"
             ),
             "audio": (
@@ -73371,7 +73362,8 @@ def video_ai_real_prompt_quote(raw_state: dict) -> dict:
     seconds = max(1, safe_int(quality.get("seconds") or model.get("seconds"), 1))
     total_duration = scene_count * seconds
     unit_xu = max(0, safe_int(quality.get("unit_xu") or model.get("unit_xu"), 0))
-    base_xu = scene_count * unit_xu
+    scene_price = video_ai_real_pricing.video_multiscene_price(unit_xu, scene_count)
+    base_xu = int(scene_price["total_xu"])
     audio = dict(state.get("audio") or {})
     addons: list[dict] = []
 
@@ -73414,6 +73406,9 @@ def video_ai_real_prompt_quote(raw_state: dict) -> dict:
         "seconds_per_scene": seconds,
         "total_duration_seconds": total_duration,
         "unit_xu": unit_xu,
+        "subtotal_xu": int(scene_price["subtotal_xu"]),
+        "discount_percent": int(scene_price["discount_percent"]),
+        "discount_xu": int(scene_price["discount_xu"]),
         "base_xu": base_xu,
         "addons": addons,
         "addons_xu": addons_xu,
@@ -76902,8 +76897,15 @@ def video_ai_real_pilot_screen_payload(
             "",
             "Mỗi gói ghi rõ thời lượng, cấp chất lượng, mục đích sử dụng và giá theo cảnh. "
             "Chọn một gói để mở báo giá đầy đủ.",
+            "Khuyến mãi Video nhiều cảnh: 1 cảnh không giảm; 2–5 cảnh giảm 10%; 6–10 cảnh giảm 15%; 11–20 cảnh giảm 20%; add-on tính riêng.",
         ]
         for item in products:
+            scene_price = video_ai_real_pricing.video_multiscene_price(item["unit_xu"], scene_count)
+            discount_note = (
+                f" · giảm {scene_price['discount_percent']}% (-{scene_price['discount_xu']} Xu)"
+                if scene_price["discount_percent"]
+                else ""
+            )
             quality_line = " · ".join(
                 part
                 for part in (
@@ -76918,7 +76920,8 @@ def video_ai_real_pilot_screen_payload(
                 f"• Cấp chất lượng: {item['public_level']}",
                 f"• Hình ảnh: {quality_line or 'Theo gói đã chọn'}",
                 f"• Phù hợp: {item['use_case']}",
-                f"• Giá: {item['unit_xu']} Xu/cảnh · {item['unit_xu'] * scene_count} Xu/{scene_count} cảnh",
+                f"• Giá: {item['unit_xu']} Xu/cảnh · tạm tính {scene_price['subtotal_xu']} Xu"
+                f"{discount_note} · còn {scene_price['total_xu']} Xu/{scene_count} cảnh",
             ])
         if selected_quality:
             lines.extend([
@@ -76961,8 +76964,15 @@ def video_ai_real_pilot_screen_payload(
             "",
             f"Chất lượng: {quality_name}",
             f"Thời lượng: {quote['scene_count']} cảnh × {quote['seconds_per_scene']} giây = {quote['total_duration_seconds']} giây",
-            f"Video: {quote['scene_count']} cảnh × {quote['unit_xu']} Xu = {quote['base_xu']} Xu",
+            f"Tạm tính Video: {quote['scene_count']} cảnh × {quote['unit_xu']} Xu = {quote['subtotal_xu']} Xu",
         ]
+        if quote.get("discount_percent"):
+            lines.append(
+                f"Khuyến mãi Video nhiều cảnh: giảm {quote['discount_percent']}% "
+                f"(-{quote['discount_xu']} Xu); tiền Video còn {quote['base_xu']} Xu. Add-on tính riêng."
+            )
+        else:
+            lines.append("Khuyến mãi Video nhiều cảnh: 1 cảnh không giảm; add-on tính riêng.")
         if quote.get("addons"):
             lines.extend(["", "Phần bổ sung:"])
             lines.extend([
@@ -82345,16 +82355,24 @@ def video_profile_scene1_quality_text(state: dict, lang: str = "vi") -> str:
     quality_rows = []
     for tier_id in VIDEO_AI_REAL_QUALITY_MODEL_KEYS:
         product = video_public_quality_product(tier_id)
+        scene_price = video_ai_real_pricing.video_multiscene_price(product["unit_xu"], scene_count)
+        discount_note = (
+            f" · giảm {scene_price['discount_percent']}% (-{scene_price['discount_xu']} Xu)"
+            if scene_price["discount_percent"]
+            else ""
+        )
         quality_rows.append(
             f"{product['icon']} <b>{html.escape(product['name'])}</b> · "
             f"<b>{product['seconds']} giây/cảnh</b> · <b>{product['unit_xu']} Xu/cảnh</b>\n"
             f"• {html.escape(product['public_level'])} · {html.escape(product['resolution'])}\n"
             f"• {html.escape(product['use_case'])}\n"
-            f"• Tổng {scene_count} cảnh: <b>{product['unit_xu'] * scene_count} Xu</b>"
+            f"• Tạm tính {scene_count} cảnh: <b>{scene_price['subtotal_xu']} Xu</b>"
+            f"{discount_note} · còn <b>{scene_price['total_xu']} Xu</b>"
         )
     return (
         "⭐ <b>Chọn chất lượng gần cuối</b>\n\n"
         f"Kế hoạch đã có <b>{scene_count} cảnh</b>. Thời lượng và giá được tính riêng theo gói đã chọn.\n\n"
+        "Khuyến mãi Video nhiều cảnh: 1 cảnh không giảm; 2–5 cảnh giảm 10%; 6–10 cảnh giảm 15%; 11–20 cảnh giảm 20%; add-on tính riêng.\n\n"
         + "\n\n".join(quality_rows)
         + "\n\n"
         "Hệ thống tự chọn đường dựng phù hợp theo năng lực của gói và phương án dự phòng; giá không đổi sau khi xác nhận. "
@@ -89960,9 +89978,14 @@ def video_ui_audit_payload() -> dict:
         "draft": {
             "b14_invoice": {
                 "scene_count": 3,
-                "duration_seconds": 18,
-                "quality_xu": 300,
-                "package_label": "⭐ 300 Xu — Cơ bản",
+                "duration_seconds": 15,
+                "routing_quality_tier": 300,
+                "quality_xu": 220,
+                "subtotal_xu": 660,
+                "discount_percent": 10,
+                "discount_xu": 66,
+                "total_xu": 594,
+                "package_label": "🌱 Tiêu chuẩn có âm thanh — 220 Xu/cảnh",
             },
             "b14_addon_plan": {
                 "subtitle_enabled": True,
@@ -94565,8 +94588,8 @@ def video_b14_extended_scene_guard(user_id=0, scene_count: int = 1) -> tuple[boo
 
 
 def video_b14_scene_discount_percent(scene_count: int) -> int:
-    _count = max(1, min(20, safe_int(scene_count, 1)))
-    return 0
+    count = max(1, min(20, safe_int(scene_count, 1)))
+    return video_ai_real_pricing.video_multiscene_discount_percent(count)
 
 
 def video_b14_invoice_breakdown(quality_xu: int, scene_count: int) -> dict:
@@ -94576,15 +94599,12 @@ def video_b14_invoice_breakdown(quality_xu: int, scene_count: int) -> dict:
     )
     unit_xu = video_public_quality_product(routing_tier)["unit_xu"]
     count = max(1, min(20, safe_int(scene_count, 1)))
-    subtotal = unit_xu * count
-    discount_percent = video_b14_scene_discount_percent(count)
-    discount_xu = int(round(subtotal * discount_percent / 100.0)) if discount_percent else 0
-    total = max(0, subtotal - discount_xu)
+    price = video_ai_real_pricing.video_multiscene_price(unit_xu, count)
     return {
-        "subtotal_xu": subtotal,
-        "discount_percent": discount_percent,
-        "discount_xu": discount_xu,
-        "total_xu": total,
+        "subtotal_xu": price["subtotal_xu"],
+        "discount_percent": price["discount_percent"],
+        "discount_xu": price["discount_xu"],
+        "total_xu": price["total_xu"],
         "unit_xu": unit_xu,
         "routing_quality_tier": routing_tier,
     }
@@ -94632,13 +94652,8 @@ def video_b14_invoice_for_session(session: dict, user_id=0) -> dict:
     ]
     addons_xu = max(0, safe_int(draft.get("b14_addon_quote_xu"), 0))
     if model_pricing:
-        subtotal_xu = billing_unit * scenes
-        pricing = {
-            "subtotal_xu": subtotal_xu,
-            "discount_percent": 0,
-            "discount_xu": 0,
-            "total_xu": subtotal_xu + addons_xu,
-        }
+        pricing = video_ai_real_pricing.video_multiscene_price(billing_unit, scenes)
+        pricing["total_xu"] = max(0, safe_int(pricing.get("total_xu"), 0) + addons_xu)
     else:
         pricing = video_b14_invoice_breakdown(routing_quality, scenes)
         pricing["total_xu"] = max(0, safe_int(pricing.get("total_xu"), 0) + addons_xu)
@@ -94749,7 +94764,9 @@ def video_b14_invoice_text(session: dict, user_id=0, lang: str = "vi") -> str:
         ])
         lines.append(f"• Tổng phần bổ sung: <b>{xu_number(invoice.get('addons_xu') or 0)} Xu</b>")
     if safe_int(invoice.get("discount_xu"), 0) > 0:
-        lines.append(f"• Giảm giá số cảnh: <b>-{safe_int(invoice.get('discount_percent'), 0)}%</b> = <b>-{xu_number(safe_int(invoice.get('discount_xu'), 0))} Xu</b>")
+        lines.append(f"• Khuyến mãi Video nhiều cảnh: <b>-{safe_int(invoice.get('discount_percent'), 0)}%</b> = <b>-{xu_number(safe_int(invoice.get('discount_xu'), 0))} Xu</b>; add-on tính riêng.")
+    else:
+        lines.append("• Khuyến mãi Video nhiều cảnh: <b>1 cảnh không giảm</b>; add-on tính riêng.")
     lines.extend(["", f"💰 <b>Tổng thanh toán dự kiến: {xu_number(invoice['total_xu'])} Xu</b>"])
     if balance_text:
         lines.append(balance_text)
@@ -103740,10 +103757,20 @@ def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None 
         f"• Số cảnh: <b>{scene_count}</b>",
         f"• Tỉ lệ: <b>{html.escape(str(tail.get('ratio') or '9:16'))}</b>",
     ]
-    lines.extend(["", "Mỗi gói dưới đây ghi rõ thời lượng, chất lượng, mục đích sử dụng và giá theo cảnh:"])
+    lines.extend([
+        "",
+        "Mỗi gói dưới đây ghi rõ thời lượng, chất lượng, mục đích sử dụng và giá theo cảnh:",
+        "Khuyến mãi Video nhiều cảnh: 1 cảnh không giảm; 2–5 cảnh giảm 10%; 6–10 cảnh giảm 15%; 11–20 cảnh giảm 20%; add-on tính riêng.",
+    ])
     for offer in catalog.get("offers") or []:
         tier_id = safe_int(offer.get("tier_id"), 0)
         product = video_public_quality_product(tier_id)
+        scene_price = video_ai_real_pricing.video_multiscene_price(product["unit_xu"], scene_count)
+        discount_note = (
+            f" · giảm {scene_price['discount_percent']}% (-{scene_price['discount_xu']} Xu)"
+            if scene_price["discount_percent"]
+            else ""
+        )
         lines.extend([
             "",
             f"{product['icon']} <b>{html.escape(product['name'])}</b> · "
@@ -103752,7 +103779,8 @@ def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None 
             f"• Đặc điểm: {html.escape(product['public_detail'])}",
             "• Đầu vào: Câu lệnh hoặc ảnh tham chiếu theo sản phẩm đã chọn",
             f"• Phù hợp: {html.escape(product['use_case'])}",
-            f"• Tổng {scene_count} cảnh: <b>{product['unit_xu'] * scene_count} Xu</b>",
+            f"• Tạm tính {scene_count} cảnh: <b>{scene_price['subtotal_xu']} Xu</b>"
+            f"{discount_note} · còn <b>{scene_price['total_xu']} Xu</b>",
         ])
     lines.extend(["", "Chọn một gói để mở hóa đơn đầy đủ trước khi xác nhận tạo video."])
     return "\n".join(lines)
@@ -128269,17 +128297,14 @@ def video_high_tier_limit_message(tier: str = "", lang: str = "vi") -> str:
 
 def video_beta_200_limit_message(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
-        return (
-            "The 200 Xu starter package has reached today's usage limit. "
-            "You can choose the 300 Xu or 400 Xu package to continue."
-        )
+        return "The Nhanh gọn package has reached today's controlled limit. Choose another quality package to continue."
     return "Gói Nhanh Gọn hiện chưa thể tiếp nhận yêu cầu mới. Anh/chị có thể chọn một gói Chất lượng khác để tiếp tục."
 
 def video_beta_200_limit_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("300 Xu", callback_data="vfinal|tier|basic"),
-            InlineKeyboardButton("400 Xu", callback_data="vfinal|tier|common"),
+            InlineKeyboardButton(video_tier_button_text("basic", lang), callback_data="vfinal|tier|basic"),
+            InlineKeyboardButton(video_tier_button_text("common", lang), callback_data="vfinal|tier|common"),
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|scene_count_screen"),
@@ -142086,8 +142111,8 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                         if get_video_finalization_state(uid)
                         else InlineKeyboardMarkup([
                             [
-                                InlineKeyboardButton("300 Xu", callback_data="create_media|video_tier_basic"),
-                                InlineKeyboardButton("400 Xu", callback_data="create_media|video_tier_common"),
+                                InlineKeyboardButton(video_tier_button_text("basic", lang), callback_data="create_media|video_tier_basic"),
+                                InlineKeyboardButton(video_tier_button_text("common", lang), callback_data="create_media|video_tier_common"),
                             ],
                             [
                                 InlineKeyboardButton("⬅️ Chọn gói", callback_data="create_media|quick_video"),
@@ -181225,38 +181250,40 @@ def video_scene_count_price_line(tier: str, scene_count, lang: str = "vi", html_
     price = product_video_r9_scene_pricing(count, tier=tier)
     seconds = int(price["estimated_seconds"])
     effective_each = int(price["unit_charge_xu"])
+    subtotal = int(price["list_total_xu"])
+    discount_percent = int(price["discount_percent"])
+    discount_xu = int(price["discount_xu"])
     total = int(price["charge_total_xu"])
     total_text = f"<b>{xu_number(total)} Xu</b>" if html_bold_total else f"{xu_number(total)} Xu"
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
-        return (
-            f"• {count} 个场景 ≈ {seconds} 秒 - "
-            f"{xu_number(effective_each)} Xu/场景；"
-            f"{xu_number(effective_each)} × {count} = {total_text}"
-        )
+        formula = f"{xu_number(effective_each)} × {count} = {xu_number(subtotal)} Xu"
+        if discount_percent:
+            formula += f"；优惠 {discount_percent}%（-{xu_number(discount_xu)} Xu）= {total_text}"
+        return f"• {count} 个场景 ≈ {seconds} 秒 - {formula}"
     if lang == "en":
-        return (
-            f"• {count} scene{'s' if count != 1 else ''} ≈ {seconds}s - "
-            f"{xu_number(effective_each)} Xu/scene; "
-            f"{xu_number(effective_each)} × {count} = {total_text}"
-        )
-    return (
-        f"• {count} cảnh ≈ {seconds} giây - "
-        f"{xu_number(effective_each)} Xu/cảnh; "
-        f"{xu_number(effective_each)} × {count} = {total_text}"
-    )
+        formula = f"{xu_number(effective_each)} × {count} = {xu_number(subtotal)} Xu"
+        if discount_percent:
+            formula += f"; {discount_percent}% off (-{xu_number(discount_xu)} Xu) = {total_text}"
+        return f"• {count} scene{'s' if count != 1 else ''} ≈ {seconds}s - {formula}"
+    formula = f"{xu_number(effective_each)} × {count} = {xu_number(subtotal)} Xu"
+    if discount_percent:
+        formula += f"; giảm {discount_percent}% (-{xu_number(discount_xu)} Xu) = {total_text}"
+    return f"• {count} cảnh ≈ {seconds} giây - {formula}"
 
 def video_scene_count_option_label(tier: str, scene_count, lang: str = "vi") -> str:
     count = product_video_r9_scene_count(scene_count)
     price = product_video_r9_scene_pricing(count, tier=tier)
     seconds = int(price["estimated_seconds"])
     total = int(price["charge_total_xu"])
+    discount = int(price["discount_percent"])
+    discount_note = f" · -{discount}%" if discount else ""
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
-        return f"{count} 个场景 ≈ {seconds} 秒 = {xu_number(total)} Xu"
+        return f"{count} 个场景 ≈ {seconds} 秒 = {xu_number(total)} Xu{discount_note}"
     if lang == "en":
-        return f"{count} scene{'s' if count != 1 else ''} ≈ {seconds}s = {xu_number(total)} Xu"
-    return f"{count} cảnh ≈ {seconds}s = {xu_number(total)} Xu"
+        return f"{count} scene{'s' if count != 1 else ''} ≈ {seconds}s = {xu_number(total)} Xu{discount_note}"
+    return f"{count} cảnh ≈ {seconds}s = {xu_number(total)} Xu{discount_note}"
 
 def video_finalization_scene_count_text(state: dict | None = None, lang: str = "vi") -> str:
     state = dict(state or {})
@@ -181274,6 +181301,7 @@ def video_finalization_scene_count_text(state: dict | None = None, lang: str = "
             f"所选套餐价格：<b>{xu_number(unit)} Xu/场景</b>。\n\n"
             "<b>按场景数量计价</b>\n"
             f"{price_lines}\n\n"
+            "优惠仅适用于同一多场景视频订单：1 个场景不优惠；2–5 个场景 10%；6–10 个场景 15%；11–20 个场景 20%。附加项目另计。\n\n"
             "请选择或自定义场景数量。下一步是最终账单。\n"
             "只有有效视频成功发送后才会扣除 Xu。"
         )
@@ -181285,6 +181313,7 @@ def video_finalization_scene_count_text(state: dict | None = None, lang: str = "
             f"Selected package: <b>{xu_number(unit)} Xu/scene</b>.\n\n"
             "<b>Price by scene count</b>\n"
             f"{price_lines}\n\n"
+            "Multi-scene Video discount: 1 scene has no discount; 2–5 scenes 10%; 6–10 scenes 15%; 11–20 scenes 20%. Add-ons are priced separately.\n\n"
             "Choose or enter the scene count you want. The next step is the final invoice.\n"
             "TOAN AAS charges only after a valid video is delivered."
         )
@@ -181295,6 +181324,7 @@ def video_finalization_scene_count_text(state: dict | None = None, lang: str = "
         f"Giá gói đã chọn: <b>{xu_number(unit)} Xu/cảnh</b>.\n\n"
         "<b>Bảng giá theo số cảnh</b>\n"
         f"{price_lines}\n\n"
+        "<b>Khuyến mãi Video nhiều cảnh:</b> 1 cảnh không giảm; 2–5 cảnh giảm 10%; 6–10 cảnh giảm 15%; 11–20 cảnh giảm 20%. Add-on tính riêng.\n\n"
         "Chọn nhanh hoặc tự nhập số cảnh ở bước này. Bước kế tiếp là hóa đơn cuối.\n"
         "TOAN AAS chỉ trừ Xu sau khi video hợp lệ đã được gửi thành công."
     )
@@ -181328,7 +181358,7 @@ def video_finalization_scene_count_custom_text(lang: str = "vi", state: dict | N
         return f"您想创建多少个场景？请输入 1 到 {PRODUCT_VIDEO_R9_SCENE_MAX}。所选套餐每个场景约 {scene_seconds} 秒；只有有效视频成功发送后才扣除 Xu。"
     if lang == "en":
         return f"How many scenes do you want to create? Enter a number from 1 to {PRODUCT_VIDEO_R9_SCENE_MAX}. The selected package is about {scene_seconds}s per scene; TOAN AAS charges only after a valid video is delivered."
-    return f"Bạn muốn tạo bao nhiêu cảnh? Nhập số từ 1 đến {PRODUCT_VIDEO_R9_SCENE_MAX}. Gói đã chọn dài khoảng {scene_seconds} giây/cảnh; TOAN AAS chỉ trừ Xu sau khi video hợp lệ đã được gửi."
+    return f"Bạn muốn tạo bao nhiêu cảnh? Nhập số từ 1 đến {PRODUCT_VIDEO_R9_SCENE_MAX}. Gói đã chọn dài khoảng {scene_seconds} giây/cảnh. Khuyến mãi: 1 cảnh không giảm; 2–5 cảnh giảm 10%; 6–10 cảnh giảm 15%; 11–20 cảnh giảm 20%; add-on tính riêng. TOAN AAS chỉ trừ Xu sau khi video hợp lệ đã được gửi."
 
 def video_finalization_scene_count_custom_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
@@ -182698,7 +182728,7 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
                         f"🛡 <b>Gói chưa phù hợp</b>\n\n{html.escape(str(guard))}\n\nTOAN AAS chưa xử lý và chưa trừ Xu.",
                         parse_mode="HTML",
                         reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("300 Xu", callback_data="vfinal|tier|basic"), InlineKeyboardButton("400 Xu", callback_data="vfinal|tier|common")],
+                            [InlineKeyboardButton(video_tier_button_text("basic", lang), callback_data="vfinal|tier|basic"), InlineKeyboardButton(video_tier_button_text("common", lang), callback_data="vfinal|tier|common")],
                             [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")],
                         ]),
                     )
@@ -183386,21 +183416,24 @@ def video_addon_menu_text(state: dict | None = None, lang: str = "vi") -> str:
     count = int(quote.get("scene_count") or 1)
     base = int(quote.get("package_base_xu") or video_tier_cost_xu(tier) or 0)
     total = int(quote.get("scene_video_xu") or calculate_scene_video_price(base, count))
-    percent = int(quote.get("scene_discount_percent") or video_scene_discount_percent(count))
-    effective_each = int(round(base * percent / 100.0))
+    subtotal = int(quote.get("scene_list_total_xu") or base * count)
+    discount_percent = int(quote.get("multiscene_discount_percent") or 0)
+    discount_xu = int(quote.get("scene_discount_xu") or max(0, subtotal - total))
+    discount_en = f"; {discount_percent}% off (-{xu_number(discount_xu)} Xu)" if discount_percent else ""
+    discount_vi = f"; giảm {discount_percent}% (-{xu_number(discount_xu)} Xu)" if discount_percent else ""
     if normalize_user_language(lang) != "vi":
         return (
             "🎛 <b>Video finishing tools</b>\n\n"
             f"Selected package: <b>{xu_number(base)} Xu/scene</b>\n"
             f"Scene count: <b>{count} scene{'s' if count != 1 else ''}</b> - about <b>{duration}s</b>\n"
-            f"Video subtotal: <b>{xu_number(base)} × {percent}% = {xu_number(effective_each)} Xu/scene; {xu_number(effective_each)} × {count} = {xu_number(total)} Xu</b>\n\n"
+            f"Video subtotal: <b>{xu_number(base)} × {count} = {xu_number(subtotal)} Xu{discount_en}; total {xu_number(total)} Xu</b>\n\n"
             "Choose a tool, or choose None to open the final invoice. No processing starts and no Xu is charged here."
         )
     return (
         "🎛 <b>Công cụ hoàn thiện video</b>\n\n"
         f"Gói đã chọn: <b>{xu_number(base)} Xu/cảnh</b>\n"
         f"Số cảnh: <b>{count} cảnh</b> - khoảng <b>{duration} giây</b>\n"
-        f"Tạm tính video: <b>{xu_number(base)} × {percent}% = {xu_number(effective_each)} Xu/cảnh; {xu_number(effective_each)} × {count} = {xu_number(total)} Xu</b>\n\n"
+        f"Tạm tính video: <b>{xu_number(base)} × {count} = {xu_number(subtotal)} Xu{discount_vi}; còn {xu_number(total)} Xu</b>\n\n"
         "Chọn công cụ cần thêm, hoặc chọn Không thêm để xem hóa đơn cuối. Màn này chưa xử lý video và chưa trừ Xu."
     )
 
@@ -183498,23 +183531,34 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
     )
     if quote.get("charge_policy") == "charge_after_valid_mp4" or quote.get("addons_public_locked"):
         unit = int(quote.get("scene_unit_price_xu") or base or PRODUCT_VIDEO_R9_PROMO_PRICE_PER_SCENE_XU)
-        list_unit = int(quote.get("scene_unit_list_xu") or PRODUCT_VIDEO_R9_LIST_PRICE_PER_SCENE_XU)
-        promo_until = str(quote.get("promo_until") or PRODUCT_VIDEO_R9_PROMO_UNTIL)
+        subtotal_xu = int(quote.get("scene_list_total_xu") or unit * count)
+        multiscene_discount = int(quote.get("multiscene_discount_percent") or discount)
+        multiscene_discount_xu = int(quote.get("scene_discount_xu") or max(0, subtotal_xu - scene_video_xu))
         promo_note_vi = (
-            f"Giá ưu đãi: <b>{xu_number(unit)} Xu/cảnh</b> (giá gốc {xu_number(list_unit)} Xu/cảnh, đến {html.escape(promo_until)})."
-            if quote.get("promo_active")
-            else f"Đơn giá: <b>{xu_number(unit)} Xu/cảnh</b>."
+            f"Khuyến mãi Video nhiều cảnh: <b>giảm {multiscene_discount}%</b> "
+            f"(-{xu_number(multiscene_discount_xu)} Xu). Add-on tính riêng."
+            if multiscene_discount
+            else "Khuyến mãi Video nhiều cảnh: <b>1 cảnh không giảm</b>. Add-on tính riêng."
         )
         promo_note_en = (
-            f"Promo price: <b>{xu_number(unit)} Xu/scene</b> (list {xu_number(list_unit)} Xu/scene, until {html.escape(promo_until)})."
-            if quote.get("promo_active")
-            else f"Unit price: <b>{xu_number(unit)} Xu/scene</b>."
+            f"Multi-scene Video discount: <b>{multiscene_discount}% off</b> "
+            f"(-{xu_number(multiscene_discount_xu)} Xu). Add-ons are priced separately."
+            if multiscene_discount
+            else "Multi-scene Video discount: <b>no discount for 1 scene</b>. Add-ons are priced separately."
         )
         promo_note_zh = (
-            f"优惠价：<b>{xu_number(unit)} Xu/场景</b>（原价 {xu_number(list_unit)} Xu/场景，至 {html.escape(promo_until)}）。"
-            if quote.get("promo_active")
-            else f"单价：<b>{xu_number(unit)} Xu/场景</b>。"
+            f"多场景视频优惠：<b>减 {multiscene_discount}%</b> "
+            f"（-{xu_number(multiscene_discount_xu)} Xu）。附加项目另计。"
+            if multiscene_discount
+            else "多场景视频优惠：<b>1 个场景不优惠</b>。附加项目另计。"
         )
+        video_cost_vi = f"{count} × {xu_number(unit)} = {xu_number(subtotal_xu)} Xu"
+        video_cost_en = video_cost_vi
+        video_cost_zh = video_cost_vi
+        if multiscene_discount:
+            video_cost_vi += f"; sau giảm còn {xu_number(scene_video_xu)} Xu"
+            video_cost_en += f"; after discount {xu_number(scene_video_xu)} Xu"
+            video_cost_zh += f"；优惠后 {xu_number(scene_video_xu)} Xu"
         lang = normalize_user_language(lang) or "vi"
         if lang == "zh":
             return (
@@ -183524,7 +183568,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
                 f"每个场景：<b>约 {scene_seconds} 秒</b>\n"
                 f"预计总时长：<b>约 {seconds} 秒</b>\n"
                 f"{promo_note_zh}\n"
-                f"视频费用：<b>{count} × {xu_number(unit)} = {xu_number(scene_video_xu)} Xu</b>\n"
+                f"视频费用：<b>{video_cost_zh}</b>\n"
                 f"{branding_line}"
                 f"附加工具：\n{addon_lines}\n"
                 f"附加工具合计：<b>{xu_number(addon_fee_xu)} Xu</b>\n\n"
@@ -183541,7 +183585,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
                 f"Each scene: <b>about {scene_seconds}s</b>\n"
                 f"Estimated total duration: <b>about {seconds}s</b>\n"
                 f"{promo_note_en}\n"
-                f"Video cost: <b>{count} × {xu_number(unit)} = {xu_number(scene_video_xu)} Xu</b>\n"
+                f"Video cost: <b>{video_cost_en}</b>\n"
                 f"{branding_line}"
                 f"Add-ons:\n{addon_lines}\n"
                 f"Add-ons subtotal: <b>{xu_number(addon_fee_xu)} Xu</b>\n\n"
@@ -183557,7 +183601,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
             f"Mỗi cảnh: <b>khoảng {scene_seconds} giây</b>\n"
             f"Tổng thời lượng dự kiến: <b>khoảng {seconds} giây</b>\n"
             f"{promo_note_vi}\n"
-            f"Tiền video: <b>{count} × {xu_number(unit)} = {xu_number(scene_video_xu)} Xu</b>\n"
+            f"Tiền video: <b>{video_cost_vi}</b>\n"
             f"{branding_line}"
             f"Phần bổ sung:\n{addon_lines}\n"
             f"Tổng phần bổ sung: <b>{xu_number(addon_fee_xu)} Xu</b>\n\n"
@@ -195865,6 +195909,7 @@ def pricing_premium_lines() -> list[str]:
 
 def pricing_audit_lines() -> list[str]:
     pricing = media_workflow_pricing_payload()
+    video_catalog = video_tier_pricing_payload()
     frame_status = frame_video_status_payload()
     canonical = canonical_price_table()
     subtitle_total_ok = float(canonical["subtitle_dub_video"]["price_xu"]) == float(canonical["subtitle_translate_video"]["price_xu"]) + float(canonical["dub_video"]["price_xu"])
@@ -195880,7 +195925,10 @@ def pricing_audit_lines() -> list[str]:
         f"• Dub default: <code>{canonical_price_display('dub_video')}</code>",
         f"• Subtitle + dub total: <code>{canonical_price_display('subtitle_dub_video')}</code> | sum_ok=<code>{'YES' if subtitle_total_ok else 'NO'}</code>",
         f"• Auto subtitle then dub: <code>{canonical_price_display('auto_subtitle_then_dub')}</code> | sum_ok=<code>{'YES' if auto_then_dub_ok else 'NO'}</code>",
-        f"• Video beta: <code>{canonical_price_display('video_beta_200')}</code> / <code>{canonical_price_display('video_beta_300')}</code> / <code>{canonical_price_display('video_beta_400')}</code>",
+        "• Video catalog: <code>" + " / ".join(
+            f"tier {tier_id}={int((video_catalog.get(tier) or {}).get('cost') or 0)} Xu"
+            for tier_id, tier in VIDEO_TIER_ID_TO_NAME.items()
+        ) + "</code>",
         f"• Discount cap: <code>{VOLUME_DISCOUNT_CAP_PERCENT}%</code>",
         f"• B2C VAT display: <code>{B2C_TAX_DISPLAY}</code> | CIT customer charge: <code>NO</code>",
         "",
@@ -195890,8 +195938,8 @@ def pricing_audit_lines() -> list[str]:
         f"• Chat Pro | {CHAT_COST_PRO} Xu | CHAT_COST_PRO | upfront charge/refund guard",
         f"• Image tiers | {', '.join(str((pricing['image_tiers'].get(t) or {}).get('cost')) for t in IMAGE_TIER_ORDER if t in pricing['image_tiers'])} Xu | IMAGE_*_COST_XU | confirm + refund",
         f"• Image prompt/edit planning | 0 Xu | image menu guard | no provider/no charge",
-        f"• Video AI tiers | {', '.join(str((pricing['video_tiers'].get(t) or {}).get('cost')) for t in VIDEO_TIER_ORDER if t != 'premium' and t in pricing['video_tiers'])} Xu | VIDEO_*_COST_XU | confirm + freeze/refund",
-        f"• Video premium | liên hệ admin | VIDEO_PREMIUM_COST_XU | admin-only/contact",
+        f"• Video AI tiers | {', '.join(str((video_catalog.get(t) or {}).get('cost')) for t in VIDEO_TIER_ORDER if t in video_catalog)} Xu/cảnh | video_ai_real_pricing | confirm + valid-output charge",
+        "• Video nhiều cảnh | 2–5: -10%; 6–10: -15%; 11–20: -20% | add-on tính riêng",
         f"• Frame video | base {frame_status.get('base_2_5_xu')}/{frame_status.get('base_6_10_xu')}/{frame_status.get('base_11_20_xu')} Xu | FRAME_VIDEO_* | require worker/OOM guard",
         f"• Workflow content-only | {pricing.get('workflow_content_total_cost')} Xu | WORKFLOW_* | plan only; image/video separate",
         f"• Motion guide | {int(CREATIVE_MOTION_GUIDE_COST_XU or 0)} Xu | CREATIVE_MOTION_GUIDE_COST_XU | no provider if text-only",
@@ -195942,9 +195990,13 @@ def product_price_audit_lines(scope: str = "all") -> list[str]:
         video_payload = video_tier_pricing_payload()
         lines.extend([
             "",
-            f"• Video 200 invoice/table match: <code>{'YES' if int((video_payload.get('low') or {}).get('cost') or 0) == int(canonical_price_xu('video_beta_200') or 0) else 'NO'}</code>",
-            f"• Video 300 invoice/table match: <code>{'YES' if int((video_payload.get('basic') or {}).get('cost') or 0) == int(canonical_price_xu('video_beta_300') or 0) else 'NO'}</code>",
-            f"• Video 400 invoice/table match: <code>{'YES' if int((video_payload.get('common') or {}).get('cost') or 0) == int(canonical_price_xu('video_beta_400') or 0) else 'NO'}</code>",
+            f"• Tier ID 200 catalog/key match: <code>{'YES' if int((video_payload.get('low') or {}).get('cost') or 0) == int(canonical_price_xu('video_beta_200') or 0) else 'NO'}</code>",
+            f"• Tier ID 300 catalog/key match: <code>{'YES' if int((video_payload.get('basic') or {}).get('cost') or 0) == int(canonical_price_xu('video_beta_300') or 0) else 'NO'}</code>",
+            f"• Tier ID 400 catalog/key match: <code>{'YES' if int((video_payload.get('common') or {}).get('cost') or 0) == int(canonical_price_xu('video_beta_400') or 0) else 'NO'}</code>",
+            "• Canonical tiers: <code>" + " / ".join(
+                f"{tier_id}:{int((video_payload.get(tier) or {}).get('cost') or 0)}"
+                for tier_id, tier in VIDEO_TIER_ID_TO_NAME.items()
+            ) + " Xu/cảnh</code>",
         ])
     return lines
 

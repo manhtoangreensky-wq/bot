@@ -10,6 +10,8 @@ import html
 import re
 from typing import Iterable
 
+from services import video_ai_real_pricing
+
 
 PRICING_DOWNLOAD_FILENAME = "bang-gia-toan-aas.md"
 GUIDE_DOWNLOAD_FILENAME = "huong-dan-su-dung-toan-aas.md"
@@ -114,6 +116,29 @@ def pricing_menu_labels() -> list[tuple[str, str]]:
     ]
 
 
+def _format_xu(value: int) -> str:
+    return f"{int(value):,}".replace(",", ".")
+
+
+def public_video_price_lines() -> list[str]:
+    return [
+        (
+            f"• {row['icon']} {row['name']} — {row['seconds']} giây/cảnh: "
+            f"{_format_xu(row['unit_xu'])} Xu/cảnh."
+        )
+        for row in video_ai_real_pricing.public_quality_catalog()
+    ]
+
+
+def video_multiscene_discount_lines() -> list[str]:
+    return [
+        "• 1 cảnh không giảm.",
+        "• 2–5 cảnh: giảm 10%.",
+        "• 6–10 cảnh: giảm 15%.",
+        "• 11–20 cảnh: giảm 20%.",
+    ]
+
+
 def default_context() -> dict:
     return {
         "image_price_lines": [
@@ -122,17 +147,7 @@ def default_context() -> dict:
             "• Ảnh 300-400 Xu: ảnh chất lượng cao, nhiều chi tiết hơn.",
             "• Ảnh 500-600 Xu: ảnh cao cấp, nhiều ảnh hoặc tác vụ nặng nếu hệ thống có.",
         ],
-        "video_price_lines": [
-            "• Video 200 Xu: gói trải nghiệm.",
-            "• Video 300 Xu: gói cơ bản.",
-            "• Video 400 Xu: gói phổ thông.",
-            "• Video 500 Xu: gói nâng cao.",
-            "• Video 600 Xu: gói bán hàng.",
-            "• Video 800 Xu: gói cao cấp.",
-            "• Video 1000 Xu: gói chuyên nghiệp.",
-            "• Video 1200 Xu: gói Pro Plus.",
-            "• Video 1500 Xu: gói Premium.",
-        ],
+        "video_price_lines": public_video_price_lines(),
         "document_price_lines": [
             "• Ảnh sang PDF: <b>0 Xu</b>.",
             "• PDF sang ảnh: <b>0 Xu</b>.",
@@ -258,10 +273,15 @@ def pricing_video_lines(context: dict | None = None) -> list[str]:
     return [
         "🎬 <b>Bảng giá Video</b>",
         "",
-        "Bảng này giữ nguyên các gói video hiện có trong hệ thống.",
+        "Giá dưới đây tính cho từng cảnh theo đúng gói chất lượng đã chọn.",
         CONFIRM_GATE_COPY,
         "",
         *_context_value(context, "video_price_lines"),
+        "",
+        "<b>Khuyến mãi Video nhiều cảnh</b>",
+        "Khuyến mãi chỉ áp dụng khi tạo từ 2 cảnh trong cùng một đơn Video nhiều cảnh.",
+        *video_multiscene_discount_lines(),
+        "• Phần giảm chỉ tính trên chi phí tạo video theo cảnh; add-on được cộng riêng theo lựa chọn.",
         "",
         "<b>Miễn phí trong video khi dùng tài nguyên có sẵn</b>",
         "• Watermark/logo chữ có sẵn nếu không tạo mới: miễn phí.",
@@ -272,7 +292,8 @@ def pricing_video_lines(context: dict | None = None) -> list[str]:
         "• Logo tự tạo bằng công cụ ảnh riêng: tính theo bảng giá Hình ảnh, không tính trong video nếu khách tự đưa tài nguyên.",
         "",
         "<b>Ví dụ</b>",
-        "• Anh/chị chọn gói video 300 Xu, bật voice mặc định và nhạc mặc định miễn phí theo gói. Tổng thanh toán vẫn là 300 Xu nếu không chọn thêm tác vụ tạo mới tính phí.",
+        "• Nhanh gọn 1 cảnh: 200 Xu; không áp dụng giảm giá nhiều cảnh.",
+        "• Nhanh gọn 3 cảnh: 200 × 3 = 600 Xu; giảm 10% là 60 Xu; tiền video còn 540 Xu.",
         "• Nếu anh/chị chọn tạo ảnh/logo AI riêng bên ngoài, phần ảnh sẽ tính theo bảng giá Hình ảnh.",
     ]
 
@@ -564,32 +585,14 @@ def customer_guide_sections() -> list[tuple[str, str, str]]:
                 "10. Add-on được thực hiện sau khi ghép; video hoàn chỉnh được kiểm tra và gửi về bot.",
                 "",
                 "Bảng giá video theo gói:",
-                "• Trải nghiệm — 200 Xu.",
-                "• Cơ bản — 300 Xu.",
-                "• Phổ thông — 400 Xu.",
-                "• Nâng cao — 500 Xu.",
-                "• Bán hàng — 600 Xu.",
-                "• Cao cấp — 800 Xu.",
-                "• Chuyên nghiệp — 1000 Xu.",
-                "• Pro Plus — 1200 Xu.",
-                "• Premium — 1500 Xu.",
+                *public_video_price_lines(),
                 "",
-                "Gói Trải nghiệm 200 Xu phù hợp để test ý tưởng nhanh, xem hướng chuyển động, kiểm tra concept hoặc tạo bản nháp ngắn trước khi dùng gói cao hơn.",
+                "Khuyến mãi Video nhiều cảnh:",
+                "Khuyến mãi chỉ áp dụng cho một đơn Video có từ 2 cảnh trở lên; 1 cảnh không giảm.",
+                *video_multiscene_discount_lines(),
+                "• Add-on được cộng riêng và không nằm trong phần giảm theo số cảnh.",
                 "",
-                "Cách tính theo cảnh:",
-                "• 1 cảnh khoảng 8 giây.",
-                "• 3 cảnh khoảng 24 giây.",
-                "• 5 cảnh khoảng 40 giây.",
-                "• 10 cảnh khoảng 80 giây.",
-                "• 20 cảnh khoảng 160 giây.",
-                "",
-                "Ưu đãi theo số cảnh:",
-                "• 1 cảnh: giá gốc.",
-                "• 2-9 cảnh: giảm 10%.",
-                "• 10-19 cảnh: giảm 15%.",
-                "• 20 cảnh: giảm 20%.",
-                "",
-                "Ví dụ: gói Cơ bản 300 Xu, làm 3 cảnh: 300 × 90% = 270 Xu/cảnh, tổng 270 × 3 = 810 Xu.",
+                "Ví dụ: Nhanh gọn 3 cảnh = 200 × 3 = 600 Xu; giảm 10% là 60 Xu; tiền video còn 540 Xu.",
             ]),
         ),
         (

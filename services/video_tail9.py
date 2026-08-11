@@ -83,8 +83,9 @@ STATUS_STAGES = (
     "failed",
 )
 
-CANONICAL_QUALITY_TIERS = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
-MULTI_SCENE_QUALITY_TIERS = CANONICAL_QUALITY_TIERS
+CANONICAL_QUALITY_TIERS = (200, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500)
+LEGACY_LOCKED_QUALITY_TIERS = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
+MULTI_SCENE_QUALITY_TIERS = LEGACY_LOCKED_QUALITY_TIERS
 UIFLOW3_EXTENDED_QUALITY_TIERS = (
     200,
     300,
@@ -317,7 +318,7 @@ def adapter_for(product_type: str) -> dict[str, Any]:
     result.setdefault("minimum_scene_count", 1)
     result.setdefault("maximum_scene_count", 20)
     result.setdefault("supports_single_scene", True)
-    result.setdefault("supported_quality_tiers", CANONICAL_QUALITY_TIERS)
+    result.setdefault("supported_quality_tiers", LEGACY_LOCKED_QUALITY_TIERS)
     result.setdefault("pricing_mode", "canonical")
     result.setdefault("required_capability", "text_to_video")
     result.setdefault("input_type", "text_prompt")

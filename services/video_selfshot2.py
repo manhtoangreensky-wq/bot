@@ -1275,16 +1275,24 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             "",
             status_text,
             f"Sản phẩm dùng video nguồn · <b>{scene_count} cảnh</b>.",
+            "Khuyến mãi Video nhiều cảnh: 1 cảnh không giảm; 2–5 cảnh giảm 10%; 6–10 cảnh giảm 15%; 11–20 cảnh giảm 20%; add-on tính riêng.",
         ]
         buttons: list[tuple[str, str]] = []
         for quality in quality_rows:
+            scene_price = video_ai_real_pricing.video_multiscene_price(quality["unit_xu"], scene_count)
+            discount_note = (
+                f" · giảm {scene_price['discount_percent']}% (-{scene_price['discount_xu']} Xu)"
+                if scene_price["discount_percent"]
+                else ""
+            )
             lines.extend([
                 "",
                 f"{quality['icon']} <b>{quality['name']}</b> · <b>{quality['seconds']} giây/cảnh</b> · <b>{quality['unit_xu']} Xu/cảnh</b>",
                 f"• Chất lượng: {quality['public_level']} · {quality['resolution']}",
                 f"• Đặc điểm: {quality['public_detail']}",
                 f"• Phù hợp: {quality['use_case']}",
-                f"• Tổng {scene_count} cảnh: <b>{quality['unit_xu'] * scene_count} Xu</b>",
+                f"• Tạm tính {scene_count} cảnh: <b>{scene_price['subtotal_xu']} Xu</b>"
+                f"{discount_note} · còn <b>{scene_price['total_xu']} Xu</b>",
             ])
             buttons.append((
                 f"{quality['icon']} {quality['name']} · {quality['unit_xu']} Xu",

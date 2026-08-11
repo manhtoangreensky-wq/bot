@@ -1,6 +1,6 @@
 # TOAN AAS Pricing Knowledge
 
-Last updated: 2026-06-20
+Last updated: 2026-08-11
 
 ## Runtime Rule
 
@@ -14,30 +14,34 @@ This document is knowledge/backlog. Runtime pricing remains in bot configuration
 
 ## Video Pricing Current Policy
 
-| Tier | Price | Role | Notes |
-| --- | ---: | --- | --- |
-| Video Trải Nghiệm | 200 Xu | marketing starter | Intentional low/mồi product; 3 uses/day per account; no paid add-ons. |
-| Video Cơ Bản | 300 Xu | starter paid tier | Same base quality line as 200; paid add-ons start here when provider gate passes. |
-| Video Phổ Thông | 400 Xu | normal public tier | Public beta when provider gate passes. |
-| Video Nâng Cao | 500 Xu | higher tier | Open only after smoke/cost gate. |
-| Video Bán Hàng | 600 Xu | main revenue tier | Open only after smoke/cost gate. |
-| Video Cao Cấp | 800 Xu | high tier | Open only after smoke/cost gate. |
-| Video Chuyên Nghiệp | 1000 Xu | professional tier | Public-controlled; provider/job gate still applies. |
-| Future premium | 1500 Xu | future provider tier | Keep OFF until cost verified. |
+| Tier ID | Gói công khai | Thời lượng | Giá bán |
+| ---: | --- | ---: | ---: |
+| 200 | Nhanh gọn | 5 giây/cảnh | 200 Xu/cảnh |
+| 300 | Tiêu chuẩn có âm thanh | 5 giây/cảnh | 220 Xu/cảnh |
+| 400 | Cân bằng rõ nét | 8 giây/cảnh | 80 Xu/cảnh |
+| 500 | Chuyển động ổn định | 5 giây/cảnh | 110 Xu/cảnh |
+| 600 | Chuyển động có âm thanh | 5 giây/cảnh | 160 Xu/cảnh |
+| 700 | Cảnh dài có âm thanh | 15 giây/cảnh | 220 Xu/cảnh |
+| 800 | Cao cấp linh hoạt | 10 giây/cảnh | 370 Xu/cảnh |
+| 1000 | Diễn xuất chân thật | 6 giây/cảnh | 370 Xu/cảnh |
+| 1200 | Đa góc máy | 8 giây/cảnh | 1.260 Xu/cảnh |
+| 1500 | Điện ảnh nhiều cảnh | 10 giây/cảnh | 2.360 Xu/cảnh |
+
+Tier ID là mã định tuyến ổn định, không phải giá bán.
 
 ## Video Add-on Policy
 
-- Base short-video package = 1 scene / 8 seconds.
-- Gói 200 Xu is locked to the default experience flow: no paid add-ons, no paid extra duration, no paid extra scenes, no paid subtitles/dubbing/AI music.
-- Paid add-ons start from 300 Xu and above.
+- Mỗi gói có thời lượng riêng như bảng trên.
+- Khuyến mãi chỉ áp dụng cho đơn Video nhiều cảnh: 1 cảnh không giảm; 2–5 cảnh giảm 10%; 6–10 cảnh giảm 15%; 11–20 cảnh giảm 20%.
+- Khuyến mãi chỉ giảm phần chi phí Video theo cảnh; add-on tính riêng.
 - Items marked with `+` in user-facing pricing are the only items that add Xu.
 - Built-in libraries, prompt/script templates and basic manual/local actions can remain free inside their technical limits.
 
 ## Provider Cost Rule
 
-- Do not open a public provider path without cost data or explicit marketing-loss policy.
-- Key4U costs are not finalized from code alone; use admin smoke + dashboard/usage before public routing.
-- WokuShop remains parked due higher cost.
+- Giá Video lấy chi phí cao nhất giữa provider đủ điều kiện, quy đổi mặc định 3.500 VND/USD, nhân 3 và làm tròn theo chính sách Xu.
+- ShopAIKey là tuyến ưu tiên khi đủ điều kiện; Key4U là tuyến dự phòng theo mapping của từng tier.
+- Không mở tuyến public khi model/adapter chưa có route readiness và bằng chứng chi phí tương ứng.
 
 ## Image Pricing Current Policy
 

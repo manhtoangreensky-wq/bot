@@ -169,32 +169,26 @@ Quy trình tạo video:
 10. Add-on được thực hiện sau khi ghép; video hoàn chỉnh được kiểm tra và gửi về bot.
 
 Bảng giá video theo gói:
-• Trải nghiệm — 200 Xu.
-• Cơ bản — 300 Xu.
-• Phổ thông — 400 Xu.
-• Nâng cao — 500 Xu.
-• Bán hàng — 600 Xu.
-• Cao cấp — 800 Xu.
-• Chuyên nghiệp — 1000 Xu.
-• Pro Plus — 1200 Xu.
-• Premium — 1500 Xu.
+• ⚡ Nhanh gọn — 5 giây/cảnh: 200 Xu/cảnh.
+• 🌱 Tiêu chuẩn có âm thanh — 5 giây/cảnh: 220 Xu/cảnh.
+• ✨ Cân bằng rõ nét — 8 giây/cảnh: 80 Xu/cảnh.
+• 🎥 Chuyển động ổn định — 5 giây/cảnh: 110 Xu/cảnh.
+• 🔊 Chuyển động có âm thanh — 5 giây/cảnh: 160 Xu/cảnh.
+• ⏱️ Cảnh dài có âm thanh — 15 giây/cảnh: 220 Xu/cảnh.
+• 🏆 Cao cấp linh hoạt — 10 giây/cảnh: 370 Xu/cảnh.
+• 🎭 Diễn xuất chân thật — 6 giây/cảnh: 370 Xu/cảnh.
+• 🎬 Đa góc máy — 8 giây/cảnh: 1.260 Xu/cảnh.
+• 👑 Điện ảnh nhiều cảnh — 10 giây/cảnh: 2.360 Xu/cảnh.
 
-Gói Trải nghiệm 200 Xu phù hợp để test ý tưởng nhanh, xem hướng chuyển động, kiểm tra concept hoặc tạo bản nháp ngắn trước khi dùng gói cao hơn.
+Khuyến mãi Video nhiều cảnh:
+Khuyến mãi chỉ áp dụng cho một đơn Video có từ 2 cảnh trở lên; 1 cảnh không giảm.
+• 1 cảnh không giảm.
+• 2–5 cảnh: giảm 10%.
+• 6–10 cảnh: giảm 15%.
+• 11–20 cảnh: giảm 20%.
+• Add-on được cộng riêng và không nằm trong phần giảm theo số cảnh.
 
-Cách tính theo cảnh:
-• 1 cảnh khoảng 8 giây.
-• 3 cảnh khoảng 24 giây.
-• 5 cảnh khoảng 40 giây.
-• 10 cảnh khoảng 80 giây.
-• 20 cảnh khoảng 160 giây.
-
-Ưu đãi theo số cảnh:
-• 1 cảnh: giá gốc.
-• 2-9 cảnh: giảm 10%.
-• 10-19 cảnh: giảm 15%.
-• 20 cảnh: giảm 20%.
-
-Ví dụ: gói Cơ bản 300 Xu, làm 3 cảnh: 300 × 90% = 270 Xu/cảnh, tổng 270 × 3 = 810 Xu.
+Ví dụ: Nhanh gọn 3 cảnh = 200 × 3 = 600 Xu; giảm 10% là 60 Xu; tiền video còn 540 Xu.
 
 Mục lục: /huongdan
 
@@ -219,7 +213,7 @@ Mục lục: /huongdan
 
 Dùng khi: anh/chị muốn chuyển phụ đề sang ngôn ngữ khác.
 Cách làm: gửi video/audio hoặc phụ đề, chọn ngôn ngữ đích, xem số ký tự tính phí, xem hóa đơn và xác nhận.
-Cách tính: 0.1 Xu / ký tự; trên 1.000 ký tự giảm 10%; trên 10.000 ký tự giảm 20%.
+Cách tính: 0.1 Xu / ký tự; từ 1.000 ký tự giảm 10%; từ 10.000 ký tự giảm 20%; tổng giảm volume cap 30%.
 Ví dụ: 2.000 ký tự = 200 Xu, giảm 10%, tổng còn 180 Xu.
 
 Mục lục: /huongdan
@@ -232,7 +226,7 @@ Mục lục: /huongdan
 
 Dùng khi: anh/chị muốn tạo bản giọng đọc mới cho nội dung.
 Cách làm: gửi nội dung hoặc video, chọn giọng mặc định hoặc voice riêng, xem hóa đơn và xác nhận.
-Cách tính: giọng mặc định 0.10 Xu / ký tự; voice riêng 0.20 Xu / ký tự. Trên 1.000 ký tự giảm 10%, trên 10.000 ký tự giảm 20%.
+Cách tính: giọng mặc định 0.10 Xu / ký tự; voice riêng 0.20 Xu / ký tự. Từ 1.000 ký tự giảm 10%, từ 10.000 ký tự giảm 20%, tổng giảm volume cap 30%.
 Ví dụ: lồng tiếng giọng mặc định 2.000 ký tự = 200 Xu, giảm 10%, tổng còn 180 Xu.
 
 Mục lục: /huongdan

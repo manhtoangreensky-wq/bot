@@ -16,7 +16,7 @@ XU_TO_VND = Decimal("100")
 SALE_MULTIPLIER = Decimal("3")
 PROVIDER_PRIORITY = ("shopaikey", "key4u")
 SOURCE_CHECKED_ON = "2026-08-11"
-CATALOG_VERSION = "2026-08-11.video.4"
+CATALOG_VERSION = "2026-08-11.video.5"
 IMAGE_CATALOG_VERSION = "2026-08-11.image.1"
 PROVIDER_EXCHANGE_RATE_CATALOG_VERSION = "2026-08-11.fx.1"
 DEFAULT_PROVIDER_USD_TO_VND = Decimal("3500")
@@ -617,6 +617,57 @@ def round_sale_xu(value: Any) -> int:
     lower_ten = (amount / Decimal("10")).to_integral_value(rounding=ROUND_FLOOR) * Decimal("10")
     rounded = lower_ten if amount - lower_ten < Decimal("3") else lower_ten + Decimal("10")
     return int(rounded)
+
+
+VIDEO_MULTISCENE_DISCOUNT_BANDS: tuple[tuple[int, int, int], ...] = (
+    (2, 5, 10),
+    (6, 10, 15),
+    (11, 20, 20),
+)
+
+
+def video_multiscene_discount_percent(scene_count: Any) -> int:
+    """Return the public discount for one multi-scene Video order."""
+
+    try:
+        count = int(scene_count or 1)
+    except (TypeError, ValueError):
+        count = 1
+    count = max(1, min(20, count))
+    return next(
+        (
+            discount
+            for minimum, maximum, discount in VIDEO_MULTISCENE_DISCOUNT_BANDS
+            if minimum <= count <= maximum
+        ),
+        0,
+    )
+
+
+def video_multiscene_price(unit_xu: Any, scene_count: Any) -> dict[str, int]:
+    """Calculate a whole-Xu Video subtotal and the owner-approved scene discount."""
+
+    try:
+        count = int(scene_count or 1)
+    except (TypeError, ValueError):
+        count = 1
+    count = max(1, min(20, count))
+    unit = max(0, int(_decimal(unit_xu).to_integral_value(rounding=ROUND_HALF_UP)))
+    subtotal = unit * count
+    discount_percent = video_multiscene_discount_percent(count)
+    discount_xu = int(
+        (Decimal(subtotal) * Decimal(discount_percent) / Decimal("100")).to_integral_value(
+            rounding=ROUND_HALF_UP
+        )
+    )
+    return {
+        "scene_count": count,
+        "unit_xu": unit,
+        "subtotal_xu": subtotal,
+        "discount_percent": discount_percent,
+        "discount_xu": discount_xu,
+        "total_xu": max(0, subtotal - discount_xu),
+    }
 
 
 def _provider_order(costs: list[dict[str, Any]]) -> list[str]:

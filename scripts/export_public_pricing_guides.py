@@ -15,6 +15,8 @@ from services.pricing_guide_content import (  # noqa: E402
     PRICING_DOWNLOAD_FILENAME,
     guide_markdown,
     pricing_markdown,
+    public_video_price_lines,
+    video_multiscene_discount_lines,
 )
 
 
@@ -22,23 +24,25 @@ PUBLIC_DIR = ROOT / "docs" / "public"
 
 
 def guide_v2_markdown() -> str:
+    video_prices = "".join(f"- {line.removeprefix('• ')}\n" for line in public_video_price_lines())
+    video_discounts = "".join(f"- {line.removeprefix('• ')}\n" for line in video_multiscene_discount_lines())
     return (
         "# TOAN AAS - Hướng dẫn sử dụng cho khách hàng\n\n"
         "**Phiên bản:** V2\n\n"
         "**Cập nhật nền:** 23/06/2026\n\n"
-        "**Cập nhật bảng giá/hướng dẫn:** 28/06/2026\n\n"
+        "**Cập nhật bảng giá/hướng dẫn:** 11/08/2026\n\n"
         "**Bot Telegram:** @toanaasbot\n\n"
         "**Website:** www.toanaas.vn\n\n"
         "**Định hướng:** Công cụ AI hỗ trợ sáng tạo nội dung và công việc hằng ngày\n\n"
         "TOAN AAS giúp anh/chị tạo ảnh, video, âm thanh, phụ đề, dịch, lồng tiếng, xử lý tài liệu và xem chi phí trước khi dùng.\n\n"
         "## Bảng giá nhanh\n\n"
         "- Bảng giá tạo ảnh: 50, 150, 200, 300, 400, 500 và 600 Xu.\n"
-        "- Bảng giá video: 200, 300, 400, 500, 600, 800, 1000, 1200 và 1500 Xu.\n"
+        "### Video AI theo cảnh\n\n"
+        f"{video_prices}\n"
+        "Khuyến mãi chỉ áp dụng cho đơn Video nhiều cảnh từ 2 cảnh; add-on tính riêng.\n\n"
+        f"{video_discounts}\n"
         "- Tiết kiệm: 50 Xu.\n"
         "- Cao + bảo hành: 600 Xu.\n"
-        "- Trải nghiệm: 200 Xu.\n"
-        "- Pro Plus: 1200 Xu.\n"
-        "- Premium: 1500 Xu.\n"
         "- Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam nếu chương trình đang mở.\n\n"
         "## Hướng dẫn chi tiết\n\n"
         f"{guide_markdown()}\n"

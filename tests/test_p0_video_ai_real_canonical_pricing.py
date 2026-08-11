@@ -2,13 +2,22 @@ from decimal import Decimal
 import json
 from pathlib import Path
 
+import video_product_system
 from providers.video_generic_http_provider import build_key4u_video_payload
 from services import video_ai_real_pricing as pricing
-from services import remote_worker_api, video_project_queue, video_provider_catalog, video_tail9
+from services import (
+    aas_shared_knowledge,
+    pricing_guide_content,
+    remote_worker_api,
+    video_project_queue,
+    video_provider_catalog,
+    video_tail9,
+)
 from services.video_provider_base import VideoGenerationRequest
 
 
-BOT_SOURCE = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
+ROOT = Path(__file__).resolve().parents[1]
+BOT_SOURCE = (ROOT / "bot.py").read_text(encoding="utf-8")
 
 
 def _source_between(start: str, end: str) -> str:
@@ -76,6 +85,42 @@ def test_video_catalog_has_ten_stable_tier_ids_in_owner_order():
         1200: "multi_angle_reference_8",
         1500: "cinematic_multishot_10",
     }
+
+
+def test_video_package_registry_uses_tier_ids_with_canonical_price_and_duration():
+    expected = {
+        200: (200, 5),
+        300: (220, 5),
+        400: (80, 8),
+        500: (110, 5),
+        600: (160, 5),
+        700: (220, 15),
+        800: (370, 10),
+        1000: (370, 6),
+        1200: (1260, 8),
+        1500: (2360, 10),
+    }
+
+    for tier_id, (price_xu, seconds) in expected.items():
+        package_id = f"package_{tier_id}"
+        package = video_product_system.VIDEO_PACKAGE_REGISTRY[package_id]
+        assert package["tier_id"] == tier_id
+        assert package["price_xu"] == price_xu
+        assert package["duration_seconds"] == seconds
+
+    extended = (
+        "video_ai_real",
+        "image_to_video",
+        "script_image_video",
+        "storyboard_prompt",
+        "self_shot_scene_change",
+        "self_shot_cinematic_transform",
+    )
+    protected = ("video_trend", "video_idea", "multi_scene_film")
+    for product in extended:
+        assert "package_700" in video_product_system.VIDEO_PRODUCT_REGISTRY[product]["allowed_packages"]
+    for product in protected:
+        assert "package_700" not in video_product_system.VIDEO_PRODUCT_REGISTRY[product]["allowed_packages"]
 
 
 def test_each_video_tier_resolves_to_its_exact_catalog_model_and_duration():
@@ -383,20 +428,137 @@ def test_project_queue_keeps_route_tier_separate_from_the_public_quote_total():
         "quality_xu": 80,
         "scene_count": 2,
         "subtotal_xu": 160,
-        "total_xu": 160,
+        "discount_percent": 10,
+        "discount_xu": 16,
+        "total_xu": 144,
     }
     project = {
         "quality_tier": 400,
-        "total_xu_estimated": 160,
+        "total_xu_estimated": 144,
     }
 
-    for current_invoice in (invoice, {**invoice, "package_xu": 160}):
+    for current_invoice in (invoice, {**invoice, "package_xu": 144}):
         quote = video_project_queue._product_video_quote_consistency(
             current_invoice,
             project,
         )
 
         assert quote["selected_tier"] == "common"
-        assert quote["user_visible_price_xu"] == 160
-        assert quote["persisted_quoted_price_xu"] == 160
-        assert quote["customer_charge_planned_xu"] == 160
+        assert quote["user_visible_price_xu"] == 144
+        assert quote["persisted_quoted_price_xu"] == 144
+        assert quote["customer_charge_planned_xu"] == 144
+
+
+def test_all_active_video_price_surfaces_reject_the_legacy_tier_as_price_table():
+    public_rows = pricing.public_quality_catalog()
+    expected_tiers = [
+        (row["name"], row["unit_xu"])
+        for row in public_rows
+    ]
+    expected_lines = [
+        f"• {row['icon']} {row['name']} — {row['seconds']} giây/cảnh: {row['unit_xu']:,} Xu/cảnh.".replace(",", ".")
+        for row in public_rows
+    ]
+
+    assert aas_shared_knowledge.VIDEO_TIERS == expected_tiers
+    assert pricing_guide_content.default_context()["video_price_lines"] == expected_lines
+
+    active_paths = (
+        ROOT / "bot.py",
+        ROOT / "video_product_system.py",
+        ROOT / "services" / "pricing_guide_content.py",
+        ROOT / "services" / "aas_shared_knowledge.py",
+        ROOT / "services" / "video_selfshot2.py",
+        ROOT / "services" / "video_selfshot3.py",
+        ROOT / "services" / "video_tail9.py",
+        ROOT / "knowledge" / "toan_aas_cskh_aichat_context.md",
+        ROOT / "scripts" / "export_public_pricing_guides.py",
+        ROOT / ".env.example",
+        ROOT / "docs" / "COMMAND_REGISTRY.md",
+        ROOT / "docs" / "provider_catalog_audit.md",
+        ROOT / "docs" / "knowledge" / "TOAN_AAS_BOT_APP_KNOWLEDGE.md",
+        ROOT / "docs" / "knowledge" / "TOAN_AAS_PRICING_KNOWLEDGE.md",
+        ROOT / "docs" / "knowledge" / "TOAN_AAS_PROMPT_VAULT_SCHEMA.md",
+        ROOT / "docs" / "public" / "bang-gia-toan-aas.md",
+        ROOT / "docs" / "public" / "huong-dan-su-dung-toan-aas.md",
+        ROOT / "docs" / "public" / "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V2.md",
+    )
+    active_text = "\n".join(path.read_text(encoding="utf-8") for path in active_paths)
+    forbidden = (
+        "Video 300 Xu: gói cơ bản",
+        "Cơ bản — 300 Xu",
+        "Phổ thông — 400 Xu",
+        "Nâng cao — 500 Xu",
+        "Bán hàng — 600 Xu",
+        "Cao cấp — 800 Xu",
+        "Chuyên nghiệp — 1000 Xu",
+        "Pro Plus — 1200 Xu",
+        "Premium — 1500 Xu",
+        "gói Cơ bản 300 Xu",
+        "300 × 90%",
+        "2-9 cảnh: giảm 10%",
+        "10-19 cảnh: giảm 15%",
+        "• 20 cảnh: giảm 20%.",
+        "Nâng lên 300 Xu",
+        'InlineKeyboardButton("300 Xu", callback_data="vfinal|tier|basic")',
+        'InlineKeyboardButton("400 Xu", callback_data="vfinal|tier|common")',
+        'InlineKeyboardButton("300 Xu", callback_data="create_media|video_tier_basic")',
+        'InlineKeyboardButton("400 Xu", callback_data="create_media|video_tier_common")',
+        "VIDEO_BASIC_COST_XU=300",
+        "VIDEO_COMMON_COST_XU=400",
+        "VIDEO_PREMIUM_COST_XU=2000",
+    )
+
+    assert not [marker for marker in forbidden if marker in active_text]
+    for line in expected_lines:
+        assert line in pricing_guide_content.guide_markdown()
+    assert video_tail9.CANONICAL_QUALITY_TIERS == tuple(
+        row["tier_id"] for row in public_rows
+    )
+
+
+def test_video_multiscene_discount_uses_the_owner_bands_only_from_two_scenes():
+    expected = {
+        1: 0,
+        2: 10,
+        5: 10,
+        6: 15,
+        10: 15,
+        11: 20,
+        20: 20,
+    }
+
+    assert {
+        scene_count: pricing.video_multiscene_discount_percent(scene_count)
+        for scene_count in expected
+    } == expected
+    assert pricing.video_multiscene_price(200, 1) == {
+        "scene_count": 1,
+        "unit_xu": 200,
+        "subtotal_xu": 200,
+        "discount_percent": 0,
+        "discount_xu": 0,
+        "total_xu": 200,
+    }
+    assert pricing.video_multiscene_price(200, 3) == {
+        "scene_count": 3,
+        "unit_xu": 200,
+        "subtotal_xu": 600,
+        "discount_percent": 10,
+        "discount_xu": 60,
+        "total_xu": 540,
+    }
+    assert pricing.video_multiscene_price(110, 7) == {
+        "scene_count": 7,
+        "unit_xu": 110,
+        "subtotal_xu": 770,
+        "discount_percent": 15,
+        "discount_xu": 116,
+        "total_xu": 654,
+    }
+
+    guide = pricing_guide_content.guide_markdown()
+    assert "2–5 cảnh: giảm 10%" in guide
+    assert "6–10 cảnh: giảm 15%" in guide
+    assert "11–20 cảnh: giảm 20%" in guide
+    assert "1 cảnh không giảm" in guide

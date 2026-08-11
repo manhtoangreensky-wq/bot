@@ -4,7 +4,7 @@
 
 **Cập nhật nền:** 23/06/2026
 
-**Cập nhật bảng giá/hướng dẫn:** 28/06/2026
+**Cập nhật bảng giá/hướng dẫn:** 11/08/2026
 
 **Bot Telegram:** @toanaasbot
 
@@ -17,12 +17,28 @@ TOAN AAS giúp anh/chị tạo ảnh, video, âm thanh, phụ đề, dịch, l�
 ## Bảng giá nhanh
 
 - Bảng giá tạo ảnh: 50, 150, 200, 300, 400, 500 và 600 Xu.
-- Bảng giá video: 200, 300, 400, 500, 600, 800, 1000, 1200 và 1500 Xu.
+### Video AI theo cảnh
+
+- ⚡ Nhanh gọn — 5 giây/cảnh: 200 Xu/cảnh.
+- 🌱 Tiêu chuẩn có âm thanh — 5 giây/cảnh: 220 Xu/cảnh.
+- ✨ Cân bằng rõ nét — 8 giây/cảnh: 80 Xu/cảnh.
+- 🎥 Chuyển động ổn định — 5 giây/cảnh: 110 Xu/cảnh.
+- 🔊 Chuyển động có âm thanh — 5 giây/cảnh: 160 Xu/cảnh.
+- ⏱️ Cảnh dài có âm thanh — 15 giây/cảnh: 220 Xu/cảnh.
+- 🏆 Cao cấp linh hoạt — 10 giây/cảnh: 370 Xu/cảnh.
+- 🎭 Diễn xuất chân thật — 6 giây/cảnh: 370 Xu/cảnh.
+- 🎬 Đa góc máy — 8 giây/cảnh: 1.260 Xu/cảnh.
+- 👑 Điện ảnh nhiều cảnh — 10 giây/cảnh: 2.360 Xu/cảnh.
+
+Khuyến mãi chỉ áp dụng cho đơn Video nhiều cảnh từ 2 cảnh; add-on tính riêng.
+
+- 1 cảnh không giảm.
+- 2–5 cảnh: giảm 10%.
+- 6–10 cảnh: giảm 15%.
+- 11–20 cảnh: giảm 20%.
+
 - Tiết kiệm: 50 Xu.
 - Cao + bảo hành: 600 Xu.
-- Trải nghiệm: 200 Xu.
-- Pro Plus: 1200 Xu.
-- Premium: 1500 Xu.
 - Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam nếu chương trình đang mở.
 
 ## Hướng dẫn chi tiết
@@ -198,32 +214,26 @@ Quy trình tạo video:
 10. Add-on được thực hiện sau khi ghép; video hoàn chỉnh được kiểm tra và gửi về bot.
 
 Bảng giá video theo gói:
-• Trải nghiệm — 200 Xu.
-• Cơ bản — 300 Xu.
-• Phổ thông — 400 Xu.
-• Nâng cao — 500 Xu.
-• Bán hàng — 600 Xu.
-• Cao cấp — 800 Xu.
-• Chuyên nghiệp — 1000 Xu.
-• Pro Plus — 1200 Xu.
-• Premium — 1500 Xu.
+• ⚡ Nhanh gọn — 5 giây/cảnh: 200 Xu/cảnh.
+• 🌱 Tiêu chuẩn có âm thanh — 5 giây/cảnh: 220 Xu/cảnh.
+• ✨ Cân bằng rõ nét — 8 giây/cảnh: 80 Xu/cảnh.
+• 🎥 Chuyển động ổn định — 5 giây/cảnh: 110 Xu/cảnh.
+• 🔊 Chuyển động có âm thanh — 5 giây/cảnh: 160 Xu/cảnh.
+• ⏱️ Cảnh dài có âm thanh — 15 giây/cảnh: 220 Xu/cảnh.
+• 🏆 Cao cấp linh hoạt — 10 giây/cảnh: 370 Xu/cảnh.
+• 🎭 Diễn xuất chân thật — 6 giây/cảnh: 370 Xu/cảnh.
+• 🎬 Đa góc máy — 8 giây/cảnh: 1.260 Xu/cảnh.
+• 👑 Điện ảnh nhiều cảnh — 10 giây/cảnh: 2.360 Xu/cảnh.
 
-Gói Trải nghiệm 200 Xu phù hợp để test ý tưởng nhanh, xem hướng chuyển động, kiểm tra concept hoặc tạo bản nháp ngắn trước khi dùng gói cao hơn.
+Khuyến mãi Video nhiều cảnh:
+Khuyến mãi chỉ áp dụng cho một đơn Video có từ 2 cảnh trở lên; 1 cảnh không giảm.
+• 1 cảnh không giảm.
+• 2–5 cảnh: giảm 10%.
+• 6–10 cảnh: giảm 15%.
+• 11–20 cảnh: giảm 20%.
+• Add-on được cộng riêng và không nằm trong phần giảm theo số cảnh.
 
-Cách tính theo cảnh:
-• 1 cảnh khoảng 8 giây.
-• 3 cảnh khoảng 24 giây.
-• 5 cảnh khoảng 40 giây.
-• 10 cảnh khoảng 80 giây.
-• 20 cảnh khoảng 160 giây.
-
-Ưu đãi theo số cảnh:
-• 1 cảnh: giá gốc.
-• 2-9 cảnh: giảm 10%.
-• 10-19 cảnh: giảm 15%.
-• 20 cảnh: giảm 20%.
-
-Ví dụ: gói Cơ bản 300 Xu, làm 3 cảnh: 300 × 90% = 270 Xu/cảnh, tổng 270 × 3 = 810 Xu.
+Ví dụ: Nhanh gọn 3 cảnh = 200 × 3 = 600 Xu; giảm 10% là 60 Xu; tiền video còn 540 Xu.
 
 Mục lục: /huongdan
 
@@ -248,7 +258,7 @@ Mục lục: /huongdan
 
 Dùng khi: anh/chị muốn chuyển phụ đề sang ngôn ngữ khác.
 Cách làm: gửi video/audio hoặc phụ đề, chọn ngôn ngữ đích, xem số ký tự tính phí, xem hóa đơn và xác nhận.
-Cách tính: 0.1 Xu / ký tự; trên 1.000 ký tự giảm 10%; trên 10.000 ký tự giảm 20%.
+Cách tính: 0.1 Xu / ký tự; từ 1.000 ký tự giảm 10%; từ 10.000 ký tự giảm 20%; tổng giảm volume cap 30%.
 Ví dụ: 2.000 ký tự = 200 Xu, giảm 10%, tổng còn 180 Xu.
 
 Mục lục: /huongdan
@@ -261,7 +271,7 @@ Mục lục: /huongdan
 
 Dùng khi: anh/chị muốn tạo bản giọng đọc mới cho nội dung.
 Cách làm: gửi nội dung hoặc video, chọn giọng mặc định hoặc voice riêng, xem hóa đơn và xác nhận.
-Cách tính: giọng mặc định 0.10 Xu / ký tự; voice riêng 0.20 Xu / ký tự. Trên 1.000 ký tự giảm 10%, trên 10.000 ký tự giảm 20%.
+Cách tính: giọng mặc định 0.10 Xu / ký tự; voice riêng 0.20 Xu / ký tự. Từ 1.000 ký tự giảm 10%, từ 10.000 ký tự giảm 20%, tổng giảm volume cap 30%.
 Ví dụ: lồng tiếng giọng mặc định 2.000 ký tự = 200 Xu, giảm 10%, tổng còn 180 Xu.
 
 Mục lục: /huongdan
@@ -383,14 +393,12 @@ Mục lục: /huongdan
 TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tác vụ tạo ra kết quả hợp lệ.
 
 • Giọng nói: từ 0.10 Xu / từ.
-• Tạo voice riêng: lần đầu miễn phí, từ lần 2: 50 Xu / voice thành công.
 • Nhạc nền AI: 100 / 150 / 200 Xu.
 • Bài hát có lời: 200 / 250 / 300 Xu.
 • Video AI: theo gói video đang chọn.
 • Tạo phụ đề tự động: miễn phí.
 • Dịch phụ đề: 0.1 Xu / ký tự.
 • Lồng tiếng giọng mặc định: 0.10 Xu / ký tự.
-• Lồng tiếng voice riêng: 0.20 Xu / ký tự.
 • Hình ảnh: 50 / 150 / 200 / 300 / 400 / 500 / 600 Xu.
 • Tài nguyên tự có của anh/chị: miễn phí nếu hệ thống không cần tạo mới.
 
@@ -415,12 +423,12 @@ TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ 
 A. Tạo voice riêng
 • Voice riêng đầu tiên tạo thành công: miễn phí.
 • Từ voice riêng thứ 2 trở đi: 50 Xu / voice tạo thành công.
+• Tạo audio từ voice: 0.10 Xu / từ.
 • Chỉ tính Xu khi tạo voice thành công.
 • Nếu mẫu lỗi, quá ngắn hoặc không tạo được voice hợp lệ: không trừ Xu.
 • Nếu tài khoản vận hành được miễn phí nội bộ, phần hiển thị cho khách vẫn giữ cùng cách báo giá.
 
 B. Tạo audio từ voice
-• 0.10 Xu / từ.
 • Nội dung tối thiểu: 20 từ.
 • Tối thiểu thanh toán: 1 Xu.
 • Không giới hạn từ nếu hệ thống cho phép.
@@ -469,18 +477,27 @@ Ví dụ
 
 🎬 Bảng giá Video
 
-Bảng này giữ nguyên các gói video hiện có trong hệ thống.
+Giá dưới đây tính cho từng cảnh theo đúng gói chất lượng đã chọn.
 TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tác vụ tạo ra kết quả hợp lệ.
 
-• Video 200 Xu: gói trải nghiệm.
-• Video 300 Xu: gói cơ bản.
-• Video 400 Xu: gói phổ thông.
-• Video 500 Xu: gói nâng cao.
-• Video 600 Xu: gói bán hàng.
-• Video 800 Xu: gói cao cấp.
-• Video 1000 Xu: gói chuyên nghiệp.
-• Video 1200 Xu: gói Pro Plus.
-• Video 1500 Xu: gói Premium.
+• ⚡ Nhanh gọn — 5 giây/cảnh: 200 Xu/cảnh.
+• 🌱 Tiêu chuẩn có âm thanh — 5 giây/cảnh: 220 Xu/cảnh.
+• ✨ Cân bằng rõ nét — 8 giây/cảnh: 80 Xu/cảnh.
+• 🎥 Chuyển động ổn định — 5 giây/cảnh: 110 Xu/cảnh.
+• 🔊 Chuyển động có âm thanh — 5 giây/cảnh: 160 Xu/cảnh.
+• ⏱️ Cảnh dài có âm thanh — 15 giây/cảnh: 220 Xu/cảnh.
+• 🏆 Cao cấp linh hoạt — 10 giây/cảnh: 370 Xu/cảnh.
+• 🎭 Diễn xuất chân thật — 6 giây/cảnh: 370 Xu/cảnh.
+• 🎬 Đa góc máy — 8 giây/cảnh: 1.260 Xu/cảnh.
+• 👑 Điện ảnh nhiều cảnh — 10 giây/cảnh: 2.360 Xu/cảnh.
+
+Khuyến mãi Video nhiều cảnh
+Khuyến mãi chỉ áp dụng khi tạo từ 2 cảnh trong cùng một đơn Video nhiều cảnh.
+• 1 cảnh không giảm.
+• 2–5 cảnh: giảm 10%.
+• 6–10 cảnh: giảm 15%.
+• 11–20 cảnh: giảm 20%.
+• Phần giảm chỉ tính trên chi phí tạo video theo cảnh; add-on được cộng riêng theo lựa chọn.
 
 Miễn phí trong video khi dùng tài nguyên có sẵn
 • Watermark/logo chữ có sẵn nếu không tạo mới: miễn phí.
@@ -491,7 +508,8 @@ Miễn phí trong video khi dùng tài nguyên có sẵn
 • Logo tự tạo bằng công cụ ảnh riêng: tính theo bảng giá Hình ảnh, không tính trong video nếu khách tự đưa tài nguyên.
 
 Ví dụ
-• Anh/chị chọn gói video 300 Xu, bật voice mặc định và nhạc mặc định miễn phí theo gói. Tổng thanh toán vẫn là 300 Xu nếu không chọn thêm tác vụ tạo mới tính phí.
+• Nhanh gọn 1 cảnh: 200 Xu; không áp dụng giảm giá nhiều cảnh.
+• Nhanh gọn 3 cảnh: 200 × 3 = 600 Xu; giảm 10% là 60 Xu; tiền video còn 540 Xu.
 • Nếu anh/chị chọn tạo ảnh/logo AI riêng bên ngoài, phần ảnh sẽ tính theo bảng giá Hình ảnh.
 
 -----
@@ -499,6 +517,7 @@ Ví dụ
 🌐 Bảng giá Phụ đề / Lồng tiếng
 
 TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tác vụ tạo ra kết quả hợp lệ.
+
 
 A. Tạo phụ đề tự động
 • Miễn phí.
@@ -517,18 +536,18 @@ C. Lồng tiếng giọng mặc định
 • Trên 10.000 ký tự: giảm 20%.
 
 D. Lồng tiếng voice riêng
-• 0.20 Xu / ký tự.
+• Theo bảng giá Giọng nói/Voice riêng ở bảng trung tâm.
 • Trên 1.000 ký tự: giảm 10%.
 • Trên 10.000 ký tự: giảm 20%.
 
 E. Phụ đề + Lồng tiếng
-Tổng = giá dịch phụ đề + giá lồng tiếng.
+Tổng = giá dịch phụ đề + giá lồng tiếng. Tạo phụ đề rồi lồng tiếng = giá phụ đề tự động + giá lồng tiếng.
 
 Ví dụ
 • Dịch phụ đề 2.000 ký tự: giá gốc 200 Xu, giảm 10%, tổng còn 180 Xu.
-• Lồng tiếng giọng mặc định 2.000 ký tự: giá gốc 100 Xu, giảm 10%, tổng còn 90 Xu.
-• Lồng tiếng voice riêng 2.000 ký tự: giá gốc 200 Xu, giảm 10%, tổng còn 180 Xu.
-• Phụ đề + lồng tiếng: 180 Xu + 90 Xu = 270 Xu.
+• Lồng tiếng giọng mặc định 2.000 ký tự: giá gốc 200 Xu, giảm 10%, tổng còn 180 Xu.
+• Lồng tiếng voice riêng 2.000 ký tự: giá gốc 400 Xu, giảm 10%, tổng còn 360 Xu.
+• Phụ đề + lồng tiếng: tổng luôn cộng từ hai dòng giá đang hiển thị ở bảng trung tâm.
 
 -----
 

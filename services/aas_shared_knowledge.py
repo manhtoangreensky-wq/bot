@@ -6,18 +6,10 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
+from services import video_ai_real_pricing
 
-VIDEO_TIERS = [
-    ("Trải nghiệm", 200),
-    ("Cơ bản", 300),
-    ("Phổ thông", 400),
-    ("Nâng cao", 500),
-    ("Bán hàng", 600),
-    ("Cao cấp", 800),
-    ("Chuyên nghiệp", 1000),
-    ("Pro Plus", 1200),
-    ("Premium", 1500),
-]
+VIDEO_PRICE_ROWS = tuple(video_ai_real_pricing.public_quality_catalog())
+VIDEO_TIERS = [(row["name"], row["unit_xu"]) for row in VIDEO_PRICE_ROWS]
 
 IMAGE_TIERS = [
     ("Tiết kiệm", 50),
@@ -185,6 +177,19 @@ def format_vnd(value: float | int) -> str:
 
 def _list_prices(values: list[int]) -> str:
     return " / ".join(str(item) for item in values) + " Xu"
+
+
+def _video_price_summary() -> str:
+    return "; ".join(
+        f"{row['name']} {row['seconds']} giây {format_xu(row['unit_xu'])}/cảnh"
+        for row in VIDEO_PRICE_ROWS
+    )
+
+
+VIDEO_MULTISCENE_DISCOUNT_COPY = (
+    "Khuyến mãi Video nhiều cảnh: 1 cảnh không giảm; 2–5 cảnh giảm 10%; "
+    "6–10 cảnh giảm 15%; 11–20 cảnh giảm 20%. Add-on tính riêng."
+)
 
 
 def _runtime_snapshot(runtime_facts: dict | None) -> tuple[bool, dict[str, Any] | None]:
@@ -877,7 +882,7 @@ def pricing_table_reply(*, runtime_facts: dict | None = None) -> str:
             "Dạ bảng giá hiện tại theo hệ thống đây ạ:\n"
             f"• Quy đổi: 1 Xu = {_format_int(xu_to_vnd)}đ.\n"
             f"• Ảnh AI: {'; '.join(f'{name} {format_xu(price)}' for name, price in image_tiers)}.\n"
-            f"• Video AI: {'; '.join(f'{name} {format_xu(price)}' for name, price in video_tiers)}.\n"
+            f"• Video AI: {_video_price_summary()}.\n"
             f"• SubDub: dịch phụ đề {subtitle_rate:g} Xu/ký tự; lồng tiếng mặc định {dub_rate:g} Xu/ký tự.\n"
             "Hóa đơn luôn hiện trước khi anh/chị xác nhận."
         )
@@ -885,7 +890,7 @@ def pricing_table_reply(*, runtime_facts: dict | None = None) -> str:
         "Dạ bảng giá chính của TOAN AAS đây ạ:\n"
         "• Quy đổi: 1 Xu = 100đ.\n"
         "• ảnh AI: 50 / 150 / 200 / 300 / 400 / 500 / 600 Xu.\n"
-        "• Video AI: 200 / 300 / 400 / 500 / 600 / 800 / 1000 / 1200 / 1500 Xu theo gói.\n"
+        f"• Video AI: {_video_price_summary()}.\n"
         "• Voice riêng: lần đầu miễn phí, từ voice thứ 2 là 50 Xu; audio từ voice 0.10 Xu/từ, tối thiểu 1 Xu.\n"
         "• Nhạc nền AI: 100 / 150 / 200 Xu; bài hát có lời: 200 / 250 / 300 Xu.\n"
         "• SubDub: phụ đề gốc tự động miễn phí; dịch phụ đề 0.1 Xu/ký tự; lồng tiếng mặc định 0.10 Xu/ký tự; voice riêng 0.20 Xu/ký tự.\n"
@@ -913,24 +918,19 @@ def image_pricing_reply(*, runtime_facts: dict | None = None) -> str:
 
 
 def video_pricing_reply(*, runtime_facts: dict | None = None) -> str:
-    unknown, facts = _runtime_unknown_or_legacy(runtime_facts, "video_tiers", "scene_seconds")
+    unknown, facts = _runtime_unknown_or_legacy(runtime_facts, "video_tiers")
     if unknown:
         return PRICE_UNKNOWN_SAFE_REPLY
     if facts:
-        tiers = _runtime_tiers(facts, "video_tiers") or []
-        scene_seconds = _runtime_number(facts, "scene_seconds", minimum=1) or 0
-        scene_count = max(1, int(math.ceil(30 / scene_seconds)))
         return (
-            f"Dạ video AI hiện có các gói: {'; '.join(f'{name} {format_xu(price)}' for name, price in tiers)}. "
-            f"Product Video hiện tính 1 cảnh = {scene_seconds:g}s; video khoảng 30s thường cần {scene_count} cảnh. "
+            f"Dạ video AI hiện có các gói: {_video_price_summary()}. "
+            f"{VIDEO_MULTISCENE_DISCOUNT_COPY} "
             "Bot sẽ dừng ở màn hóa đơn để anh/chị tự xác nhận."
         )
-    tiers = "; ".join(f"{name} {price} Xu" for name, price in VIDEO_TIERS)
     return (
-        f"Dạ video AI có các gói: {tiers}. "
-        "Product Video hiện tính 1 cảnh = 8s; video khoảng 30s thường cần 4 cảnh. "
-        "Nếu làm nhiều cảnh: 2-9 cảnh giảm 10%, 10-19 cảnh giảm 15%, 20 cảnh giảm 20% theo từng cảnh. "
-        "Ví dụ gói Cơ bản 300 Xu làm 4 cảnh: 300 × 90% × 4 = 1.080 Xu nếu đủ điều kiện giảm. "
+        f"Dạ video AI có các gói: {_video_price_summary()}. "
+        f"{VIDEO_MULTISCENE_DISCOUNT_COPY} "
+        "Ví dụ Nhanh gọn 3 cảnh: 200 × 3 = 600 Xu, giảm 10% còn 540 Xu tiền video. "
         "Bot sẽ dừng ở màn hóa đơn để mình tự xác nhận. Anh/chị muốn làm video về sản phẩm gì để em gợi ý gói phù hợp?"
     )
 
@@ -1028,7 +1028,7 @@ def topup_reply(vnd: int, *, include_examples: bool = False, runtime_facts: dict
     base = f"Dạ {format_vnd(vnd)} = {format_xu(xu)} vì 1 Xu = {_format_int(xu_to_vnd)}đ."
     if include_examples:
         base += (
-            f" Với {format_xu(xu)}, mình có thể test nhiều gói ảnh, làm video gói 200-600 Xu, "
+            f" Với {format_xu(xu)}, mình có thể tạo ảnh, chọn một trong các gói Video hiện hành, "
             "hoặc dùng cho SubDub/voice theo số ký tự/từ. Bot vẫn báo hóa đơn từng tác vụ trước khi trừ Xu."
         )
     return base
