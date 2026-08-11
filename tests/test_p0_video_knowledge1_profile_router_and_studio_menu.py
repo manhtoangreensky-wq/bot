@@ -228,7 +228,7 @@ def test_main_video_menu_hides_studio_but_preserves_internal_route_and_edit_hub(
 
 def test_edit_video_hub_restores_only_tools_with_real_existing_handlers() -> None:
     hub = _source_between("def video_edit_hub_keyboard", "def video_edit_info_text")
-    assert "✨ Chỉnh sửa theo mục tiêu" in hub
+    assert "🤖 Chỉnh sửa video AI" in hub
     assert "✂️ Chỉnh sửa thủ công" in hub
     assert "🧹 Nâng chất lượng video" in hub
     assert "❓ Hướng dẫn công cụ này" in hub
