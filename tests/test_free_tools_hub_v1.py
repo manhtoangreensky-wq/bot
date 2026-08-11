@@ -85,7 +85,7 @@ def test_main_menu_layout_regular_user():
     labels = _labels(markup)
 
     assert labels[0] == ["🆓 Công cụ miễn phí"]
-    assert labels[1] == ["💎 Chat Pro • 4.5/22.5 Xu/1K", "👤 Tài khoản"]
+    assert labels[1] == ["💎 Chat Pro • 5/25 Xu/1K", "👤 Tài khoản"]
     assert labels[2] == ["🖼 Tạo ảnh AI", "🎬 Tạo video AI"]
     assert all(1 <= len(row) <= 2 for row in markup.inline_keyboard)
     assert labels[-1] == ["💬 Góp ý / Báo lỗi", "🌐 Trung tâm"]
@@ -98,7 +98,7 @@ def test_main_menu_layout_admin():
     labels = _labels(markup)
 
     assert labels[0] == ["🆓 Công cụ miễn phí"]
-    assert labels[1] == ["💎 Chat Pro • 4.5/22.5 Xu/1K", "👤 Tài khoản"]
+    assert labels[1] == ["💎 Chat Pro • 5/25 Xu/1K", "👤 Tài khoản"]
     assert labels[-1] == ["🔐 Admin"]
     assert len(markup.inline_keyboard[-1]) == 1
     assert labels[-2] == ["💬 Góp ý / Báo lỗi", "🌐 Trung tâm"]

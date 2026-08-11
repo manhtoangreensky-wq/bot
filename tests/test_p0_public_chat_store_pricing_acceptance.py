@@ -127,16 +127,16 @@ def test_sanitize_redacts_urls_with_sensitive_query_keys(query_key: str) -> None
     assert redaction_applied is True
 
 
-def test_opus_sale_price_uses_key4u_rates_and_rounds_up() -> None:
+def test_opus_customer_price_uses_rounded_public_tariff_and_rounds_up() -> None:
     from services.chat_pro_pricing import calculate_opus_charge_xu
 
-    assert calculate_opus_charge_xu(500, 300) == 9
-    assert calculate_opus_charge_xu(1_000, 500) == 16
-    assert calculate_opus_charge_xu(2_000, 1_000) == 32
+    assert calculate_opus_charge_xu(500, 300) == 10
+    assert calculate_opus_charge_xu(1_000, 500) == 18
+    assert calculate_opus_charge_xu(2_000, 1_000) == 35
     assert calculate_opus_charge_xu(0, 0, 1_000) == 1
 
 
-def test_opus_display_rates_are_exact_and_request_rounding_happens_once() -> None:
+def test_opus_display_rates_use_rounded_public_tariff_and_request_rounding_happens_once() -> None:
     from decimal import Decimal
 
     from services.chat_pro_pricing import (
@@ -145,20 +145,22 @@ def test_opus_display_rates_are_exact_and_request_rounding_happens_once() -> Non
     )
 
     assert opus_price_per_thousand_xu() == {
-        "input": Decimal("4.5"),
-        "output": Decimal("22.5"),
+        "input": Decimal("5"),
+        "output": Decimal("25"),
         "cache_read": Decimal("0.45"),
     }
     assert opus_price_per_thousand_labels() == {
-        "input": "4.5",
-        "output": "22.5",
+        "input": "5",
+        "output": "25",
         "cache_read": "0.45",
     }
 
-    # 500 input + 500 output = 2.25 + 11.25 = 13.5 Xu, then ceil once.
-    from services.chat_pro_pricing import calculate_opus_charge_xu
+    # 500 input + 500 output = 2.5 + 12.5 = 15 Xu, then one request-level ceil.
+    from services.chat_pro_pricing import TokenUsage, calculate_actual_xu, calculate_opus_charge_xu
+    from services.public_chat_runtime import _default_pricing
 
-    assert calculate_opus_charge_xu(500, 500) == 14
+    assert calculate_opus_charge_xu(500, 500) == 15
+    assert calculate_actual_xu(TokenUsage(1_000, 1_000), _default_pricing()) == 30
 
 
 def test_opus_reservation_is_utf8_conservative_bounded_and_rate_reviewed() -> None:
@@ -182,7 +184,7 @@ def test_opus_reservation_is_utf8_conservative_bounded_and_rate_reviewed() -> No
     )
 
     assert vietnamese >= english > 0
-    assert english == 23
+    assert english == 26
     assert bounded == at_cap
     assert KEY4U_RATE_EFFECTIVE_DATE <= date(2026, 8, 9) <= KEY4U_RATE_REVIEW_BY
     assert pricing_rate_review_status(date(2026, 8, 9))["review_required"] is False
@@ -564,10 +566,10 @@ def test_pro_reservation_settlement_refund_and_retry_are_exactly_once() -> None:
         now=2_001,
     )
     assert settled["settled"] is True
-    assert settled["charged_xu"] == 16
-    assert settled["refunded_xu"] == 34
-    assert conn.execute("SELECT credits FROM users WHERE user_id='u1'").fetchone()[0] == 84
-    assert conn.execute("SELECT total_spent FROM users WHERE user_id='u1'").fetchone()[0] == 16
+    assert settled["charged_xu"] == 18
+    assert settled["refunded_xu"] == 32
+    assert conn.execute("SELECT credits FROM users WHERE user_id='u1'").fetchone()[0] == 82
+    assert conn.execute("SELECT total_spent FROM users WHERE user_id='u1'").fetchone()[0] == 18
     stored_provider_id = conn.execute(
         "SELECT provider_request_id FROM public_chat_requests WHERE request_id=?",
         (reserved["request_id"],),
@@ -583,8 +585,8 @@ def test_pro_reservation_settlement_refund_and_retry_are_exactly_once() -> None:
         now=2_002,
     )
     assert duplicate["duplicate"] is True
-    assert conn.execute("SELECT credits FROM users WHERE user_id='u1'").fetchone()[0] == 84
-    assert conn.execute("SELECT total_spent FROM users WHERE user_id='u1'").fetchone()[0] == 16
+    assert conn.execute("SELECT credits FROM users WHERE user_id='u1'").fetchone()[0] == 82
+    assert conn.execute("SELECT total_spent FROM users WHERE user_id='u1'").fetchone()[0] == 18
     assert conn.in_transaction is True
 
 
@@ -966,10 +968,10 @@ def test_pro_settlement_over_reserved_with_sufficient_balance_charges_actual_onc
         now=5_101,
     )
     assert settled["status"] == "settled"
-    assert settled["charged_xu"] == 16
+    assert settled["charged_xu"] == 18
     assert settled["uncollected_xu"] == 0
-    assert conn.execute("SELECT credits FROM users WHERE user_id='u1'").fetchone()[0] == 84
-    assert conn.execute("SELECT total_spent FROM users WHERE user_id='u1'").fetchone()[0] == 16
+    assert conn.execute("SELECT credits FROM users WHERE user_id='u1'").fetchone()[0] == 82
+    assert conn.execute("SELECT total_spent FROM users WHERE user_id='u1'").fetchone()[0] == 18
 
     duplicate = settle_pro_request(
         conn,
@@ -980,9 +982,9 @@ def test_pro_settlement_over_reserved_with_sufficient_balance_charges_actual_onc
         now=5_102,
     )
     assert duplicate["duplicate"] is True
-    assert duplicate["charged_xu"] == 16
-    assert conn.execute("SELECT credits FROM users WHERE user_id='u1'").fetchone()[0] == 84
-    assert conn.execute("SELECT total_spent FROM users WHERE user_id='u1'").fetchone()[0] == 16
+    assert duplicate["charged_xu"] == 18
+    assert conn.execute("SELECT credits FROM users WHERE user_id='u1'").fetchone()[0] == 82
+    assert conn.execute("SELECT total_spent FROM users WHERE user_id='u1'").fetchone()[0] == 18
 
 
 def test_pro_settlement_over_reserved_with_insufficient_balance_refunds_all_once() -> None:
@@ -1014,7 +1016,7 @@ def test_pro_settlement_over_reserved_with_insufficient_balance_refunds_all_once
     assert settled["status"] == "under_reserved_refunded"
     assert settled["charged_xu"] == 0
     assert settled["refunded_xu"] == 5
-    assert settled["uncollected_xu"] == 16
+    assert settled["uncollected_xu"] == 18
     assert settled["balance_xu"] == 10
     assert conn.execute("SELECT credits FROM users WHERE user_id='u1'").fetchone()[0] == 10
     assert conn.execute("SELECT total_spent FROM users WHERE user_id='u1'").fetchone()[0] == 0
@@ -1023,7 +1025,7 @@ def test_pro_settlement_over_reserved_with_insufficient_balance_refunds_all_once
         conn.execute(
             "SELECT status,settled_xu,refunded_xu,uncollected_xu,reason FROM public_chat_requests"
         ).fetchone()
-    ) == ("under_reserved_refunded", 0, 5, 16, "insufficient_balance_after_usage")
+    ) == ("under_reserved_refunded", 0, 5, 18, "insufficient_balance_after_usage")
 
     duplicate = settle_pro_request(
         conn,
@@ -1039,7 +1041,7 @@ def test_pro_settlement_over_reserved_with_insufficient_balance_refunds_all_once
     assert duplicate["status"] == "under_reserved_refunded"
     assert duplicate["charged_xu"] == 0
     assert duplicate["refunded_xu"] == 5
-    assert duplicate["uncollected_xu"] == 16
+    assert duplicate["uncollected_xu"] == 18
     assert tuple(conn.execute("SELECT credits,total_spent FROM users WHERE user_id='u1'").fetchone()) == (10, 0)
     assert conn.execute("SELECT COUNT(*) FROM public_chat_turns").fetchone()[0] == 0
 

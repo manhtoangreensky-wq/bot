@@ -22,6 +22,7 @@ from services.chat_pro_pricing import (
     TokenUsage,
     calculate_actual_xu,
     opus_price_per_thousand_labels,
+    public_chat_customer_pricing,
     reserve_xu,
 )
 from services.public_chat_media import (
@@ -56,8 +57,7 @@ CHAT_PRO_RATE_LABEL = f"{_LABELS['input']}/{_LABELS['output']} Xu/1K"
 
 
 def _default_pricing() -> ClaudeOpusPricing:
-    # 6/30 USD per million at 25,000 VND/USD and 100 VND/Xu, then 3x sale.
-    return ClaudeOpusPricing(input_xu_per_million=1500, output_xu_per_million=7500, cache_read_xu_per_million=150, multiplier=3)
+    return public_chat_customer_pricing()
 
 
 @dataclass(frozen=True)
