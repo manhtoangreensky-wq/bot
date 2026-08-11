@@ -2040,7 +2040,8 @@ VIDEO_VOICE_PRESET_TRANSFORM_XU = max(0, env_int("VIDEO_VOICE_PRESET_TRANSFORM_X
 VIDEO_VOICE_PREMIUM_PRESET_XU = max(0, env_int("VIDEO_VOICE_PREMIUM_PRESET_XU", 200))
 VIDEO_VOICE_CLONE_CREATE_XU = max(0, env_int("VIDEO_VOICE_CLONE_CREATE_XU", VOICE_PROFILE_PRICE_XU))
 VIDEO_VOICE_CLONE_REUSE_XU = max(0, env_int("VIDEO_VOICE_CLONE_REUSE_XU", 100))
-VIDEO_SUNO_MUSIC_XU = max(0, env_int("VIDEO_SUNO_MUSIC_XU", 300))
+VERIFIED_SUNO_MUSIC_XU = int(video_ai_real_pricing.music_model_catalog()[0]["unit_xu"])
+VIDEO_SUNO_MUSIC_XU = max(0, env_int("VIDEO_SUNO_MUSIC_XU", VERIFIED_SUNO_MUSIC_XU))
 VIDEO_SUNO_VARIATION_XU = max(0, env_int("VIDEO_SUNO_VARIATION_XU", 150))
 VIDEO_LYRICS_AI_XU = max(0, env_int("VIDEO_LYRICS_AI_XU", 80))
 VIDEO_MUSIC_CUT_LOOP_XU = max(0, env_int("VIDEO_MUSIC_CUT_LOOP_XU", 50))
@@ -6764,14 +6765,14 @@ def cskh_live_pricing_snapshot() -> dict:
     honest unavailable snapshot rather than a stale price claim.
     """
     try:
-        image_payload = image_tier_pricing_payload()
+        image_payload = canonical_image_tier_pricing_payload()
         video_payload = video_tier_pricing_payload()
         image_tiers = [
             (
                 str((image_payload.get(tier) or {}).get("label") or tier),
                 int((image_payload.get(tier) or {}).get("cost") or 0),
             )
-            for tier in IMAGE_TIER_ORDER
+            for tier in CANONICAL_IMAGE_TIER_ORDER
             if tier in image_payload
         ]
         video_tiers = [
@@ -13326,7 +13327,7 @@ UI_TEXT = {
         "account.ref_link_title": "🎁 <b>Link giới thiệu TOAN AAS của bạn:</b>",
         "account.ref_link_body": "Bạn có thể gửi link này cho bạn bè/khách hàng. Khi họ đăng ký hoặc nạp Xu hợp lệ, hệ thống sẽ ghi nhận theo chính sách giới thiệu hiện hành.\n\nGhi nhận giới thiệu trước, chính sách thưởng có thể cấu hình sau.",
         "pricing.xu": "💰 Bảng giá Xu",
-        "pricing.video_low": "Video Trải Nghiệm",
+        "pricing.video_low": "Video Nhanh Gọn",
         "pricing.plans": "📦 Gói tháng",
         "pricing.vip": "⭐ Dịch vụ VIP",
         "pricing.member": "🪪 Thành viên",
@@ -13382,7 +13383,7 @@ UI_TEXT = {
         "video.image_to_video": "🖼➡️🎞 Tạo video từ ảnh",
         "video.prompt_button": "✍️ Tạo prompt video",
         "video.hook_script": "📝 Viết hook/script/caption",
-        "video.tier.low": "Video Trải Nghiệm",
+        "video.tier.low": "Video Nhanh Gọn",
         "video.tier.basic": "Video Cơ Bản",
         "video.tier.common": "Video Phổ Thông",
         "video.tier.standard": "Video Tiêu Chuẩn",
@@ -13636,7 +13637,7 @@ UI_TEXT = {
         "video.image_to_video": "🖼➡️🎞 Image to video",
         "video.prompt_button": "✍️ Video prompt",
         "video.hook_script": "📝 Hook/script/caption",
-        "video.tier.low": "Experience video",
+        "video.tier.low": "Quick video",
         "video.tier.basic": "Basic video",
         "video.tier.common": "Regular video",
         "video.tier.standard": "Standard video",
@@ -13890,7 +13891,7 @@ UI_TEXT = {
         "video.image_to_video": "🖼➡️🎞 图片生成视频",
         "video.prompt_button": "✍️ 视频提示词",
         "video.hook_script": "📝 开场钩子/脚本/文案",
-        "video.tier.low": "体验视频",
+        "video.tier.low": "快速视频",
         "video.tier.basic": "基础视频",
         "video.tier.common": "常规视频",
         "video.tier.standard": "标准视频",
@@ -46519,6 +46520,7 @@ def media_tier_price(cost_xu: int, provider_cost_xu: int, fallback_xu: int = 0) 
     return max(0, int(fallback_xu or 0))
 
 IMAGE_TIER_ORDER = ("low", "standard", "standard_warranty", "common", "common_warranty", "high", "high_warranty")
+CANONICAL_IMAGE_TIER_ORDER = ("low", "standard", "standard_warranty", "common", "high", "common_warranty", "high_warranty")
 IMAGE_TIER_ICONS = {
     "low": "🟢",
     "standard": "🔵",
@@ -46630,7 +46632,95 @@ def image_tier_payload(tier: str = "") -> dict:
     payload["model"] = payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana"
     return payload
 
+
+def canonical_image_tier_pricing_payload() -> dict:
+    public_rows = {
+        str(row.get("tier_key") or ""): dict(row)
+        for row in video_ai_real_pricing.public_image_quality_catalog()
+    }
+    model_rows = {
+        str(row.get("key") or ""): dict(row)
+        for row in video_ai_real_pricing.image_model_catalog()
+    }
+    result: dict[str, dict] = {}
+    for tier_name in CANONICAL_IMAGE_TIER_ORDER:
+        public = dict(public_rows.get(tier_name) or {})
+        model_key = str(video_ai_real_pricing.IMAGE_TIER_MODEL_KEYS.get(tier_name) or "")
+        model = dict(model_rows.get(model_key) or {})
+        routes = [dict(item) for item in model.get("provider_costs") or [] if isinstance(item, dict)]
+        preferred_provider = str((model.get("provider_priority") or [""])[0] or "")
+        preferred_route = next(
+            (item for item in routes if str(item.get("provider_key") or item.get("provider") or "") == preferred_provider),
+            routes[0] if routes else {},
+        )
+        retry_count = max(0, safe_int(public.get("retry_warranty_count"), 0))
+        result[tier_name] = {
+            "label": str(public.get("name") or model.get("label") or "Chất lượng ảnh"),
+            "cost": max(1, safe_int(public.get("unit_xu"), 1)),
+            "provider_cost": max(0, safe_int(preferred_route.get("cost_vnd"), 0) // 100),
+            # Runtime routing is intentionally unchanged until the separate image-engine task.
+            "model": SHOPAIKEY_IMAGE_MODEL or SHOPAIKEY_IMAGE_MODEL_PRIMARY or "nano-banana",
+            "catalog_model_key": model_key,
+            "provider_routes": routes,
+            "provider_priority": list(model.get("provider_priority") or []),
+            "public_icon": str(public.get("icon") or model.get("public_icon") or "🖼"),
+            "public_level": str(public.get("public_level") or model.get("public_level") or ""),
+            "quality": str(public.get("quality_characteristic") or model.get("quality") or ""),
+            "resolution": str(public.get("resolution") or model.get("resolution") or ""),
+            "description": str(public.get("public_detail") or model.get("description") or ""),
+            "use_case": str(public.get("use_case") or model.get("use_case") or ""),
+            "note": (
+                "Kèm 1 lần tạo lại trong cùng yêu cầu."
+                if retry_count
+                else "Không kèm tạo lại miễn phí."
+            ),
+            "retry_warranty_count": retry_count,
+            "catalog_version": str(model.get("catalog_version") or ""),
+            "approval_status": str(model.get("approval_status") or ""),
+            "fallback_eligible": bool(model.get("fallback_eligible")),
+            "routing_ready": False,
+        }
+    return result
+
+
+def canonical_image_tier_payload(tier: str = "") -> dict:
+    tier_norm = normalize_image_tier(tier)
+    pricing = canonical_image_tier_pricing_payload()
+    payload = dict(pricing.get(tier_norm) or pricing["low"])
+    payload["tier"] = tier_norm
+    payload["enabled"] = bool(image_tier_enabled_map().get(tier_norm, False))
+    return payload
+
+
+def canonical_image_tier_cost_xu(tier: str = "") -> int:
+    return int(canonical_image_tier_payload(tier).get("cost") or 0)
+
+
+def canonical_image_tier_retry_warranty_count(tier: str = "") -> int:
+    return max(0, int(canonical_image_tier_payload(tier).get("retry_warranty_count") or 0))
+
+
+def canonical_image_tier_warranty_note(tier: str = "", lang: str = "vi") -> str:
+    has_warranty = canonical_image_tier_retry_warranty_count(tier) > 0
+    if normalize_user_language(lang) == "zh":
+        return "本套餐包含同一需求内 1 次重新生成。" if has_warranty else "本套餐不包含免费重新生成。"
+    if normalize_user_language(lang) != "vi":
+        return "This package includes 1 retry in the same request." if has_warranty else "This package does not include a free retry."
+    return "Gói này kèm 1 lần tạo lại trong cùng yêu cầu." if has_warranty else "Gói này không kèm tạo lại miễn phí."
+
+
+def canonical_image_tier_quality_note(tier: str = "", lang: str = "vi") -> str:
+    payload = canonical_image_tier_payload(tier)
+    if normalize_user_language(lang) != "vi":
+        return image_tier_quality_note(tier, lang)
+    detail = str(payload.get("description") or "").strip()
+    use_case = str(payload.get("use_case") or "").strip()
+    return " · ".join(item for item in (detail, use_case) if item)
+
+
 def localized_image_tier_label(tier: str = "", lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "vi":
+        return str(canonical_image_tier_payload(tier).get("label") or "Chất lượng ảnh")
     return ui_text(lang, f"image.tier.{normalize_image_tier(tier)}")
 
 def image_tier_cost_xu(tier: str = "") -> int:
@@ -46984,17 +47074,17 @@ def apply_logo_watermark_to_prompt(prompt: str, text: str = "", kind: str = "ima
 
 def image_tier_button_text(tier: str = "", lang: str = "vi", include_state: bool = True) -> str:
     tier_norm = normalize_image_tier(tier)
-    payload = image_tier_payload(tier_norm)
+    payload = canonical_image_tier_payload(tier_norm)
     state = ui_text(lang, "image.tier_disabled") if include_state and not payload.get("enabled") else ""
     if normalize_user_language(lang) == "vi":
         short_labels = {
-            "low": "Tiết kiệm",
-            "standard": "Chuẩn",
-            "standard_warranty": "Chuẩn + BH",
-            "common": "Phổ thông",
-            "common_warranty": "Phổ thông + BH",
-            "high": "Cao",
-            "high_warranty": "Cao + BH",
+            "low": "Nhanh gọn",
+            "standard": "Cân bằng",
+            "standard_warranty": "Cân bằng + BH",
+            "common": "Chi tiết",
+            "common_warranty": "Chi tiết + BH",
+            "high": "Cao cấp",
+            "high_warranty": "Cao cấp + BH",
         }
     else:
         short_labels = {
@@ -47012,96 +47102,54 @@ def image_tier_button_text(tier: str = "", lang: str = "vi", include_state: bool
 def image_tier_choice_rows(callback_builder, lang: str = "vi") -> list[list[InlineKeyboardButton]]:
     buttons = [
         InlineKeyboardButton(image_tier_button_text(tier, lang), callback_data=callback_builder(tier))
-        for tier in IMAGE_TIER_ORDER
+        for tier in CANONICAL_IMAGE_TIER_ORDER
     ]
     return [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
 
 VIDEO_TIER_ORDER = ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
 VIDEO_TIER_ICONS = {
-    "low": "🟢",
-    "basic": "🔷",
-    "common": "🔵",
-    "advanced": "🟣",
-    "standard": "🟠",
-    "high": "🔴",
-    "future_1000": "⭐",
-    "future_1200": "💎",
+    "low": "⚡",
+    "basic": "🌱",
+    "common": "✨",
+    "advanced": "🎥",
+    "standard": "🔊",
+    "high": "🏆",
+    "future_1000": "🎭",
+    "future_1200": "🎬",
     "future_1500": "👑",
 }
 
 def video_tier_pricing_payload() -> dict:
-    return {
-        "low": {
-            "label": "Video Trải Nghiệm",
-            "cost": int(canonical_price_xu("video_beta_200") or media_tier_price(VIDEO_LOW_COST_XU, VIDEO_LOW_PROVIDER_COST_XU, VIDEO_BASE_COST_XU)),
-            "provider_cost": int(VIDEO_LOW_PROVIDER_COST_XU or 0),
-            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
-            "note": "Gói mồi/test nhanh, không phải gói tốt nhất. Public vẫn phụ thuộc ENV.",
-        },
-        "basic": {
-            "label": "Video Cơ Bản",
-            "cost": int(canonical_price_xu("video_beta_300") or media_tier_price(VIDEO_BASIC_COST_XU, VIDEO_BASIC_PROVIDER_COST_XU, VIDEO_BASE_COST_XU)),
-            "provider_cost": int(VIDEO_BASIC_PROVIDER_COST_XU or 0),
-            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
-            "note": "Video ngắn cơ bản, phù hợp test sản phẩm/nội dung đơn giản.",
-        },
-        "common": {
-            "label": "Video Phổ Thông",
-            "cost": int(canonical_price_xu("video_beta_400") or media_tier_price(VIDEO_COMMON_COST_XU, VIDEO_COMMON_PROVIDER_COST_XU, VIDEO_BASE_COST_XU)),
-            "provider_cost": int(VIDEO_COMMON_PROVIDER_COST_XU or 0),
-            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
-            "note": "Gói phổ thông cho TikTok/Reels, cân bằng chi phí và chất lượng.",
-        },
-        "advanced": {
-            "label": "Video Nâng Cao",
-            "cost": media_tier_price(VIDEO_ADVANCED_COST_XU, VIDEO_ADVANCED_PROVIDER_COST_XU, 500),
-            "provider_cost": int(VIDEO_ADVANCED_PROVIDER_COST_XU or 0),
-            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
-            "note": "Tối ưu prompt, bố cục, ánh sáng, brand style và hướng chuyển động.",
-        },
-        "standard": {
-            "label": "Video Bán Hàng",
-            "cost": media_tier_price(VIDEO_STANDARD_COST_XU, VIDEO_STANDARD_PROVIDER_COST_XU, VIDEO_FROM_IMAGE_PRO_COST),
-            "provider_cost": int(VIDEO_STANDARD_PROVIDER_COST_XU or 0),
-            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
-            "note": "Tối ưu video quảng cáo/bán hàng, có góc chốt đơn, lợi ích sản phẩm và CTA.",
-        },
-        "high": {
-            "label": "Video Cao Cấp",
-            "cost": media_tier_price(VIDEO_HIGH_COST_XU, VIDEO_HIGH_PROVIDER_COST_XU, 800),
-            "provider_cost": int(VIDEO_HIGH_PROVIDER_COST_XU or 0),
-            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
-            "note": "Tối ưu cinematic/commercial look, ánh sáng cao cấp, camera motion và độ hoàn thiện.",
-        },
-        "future_1000": {
-            "label": "Video Chuyên Nghiệp",
-            "cost": int(VIDEO_FUTURE_1000_COST_XU or 1000),
-            "provider_cost": int(VIDEO_PREMIUM_PROVIDER_COST_XU or 0),
-            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
-            "note": "Gói public cao hơn để test/bán sản phẩm chất lượng hơn. Kling/Seedance vẫn là provider future riêng.",
-        },
-        "future_1200": {
-            "label": "Video Pro Plus",
-            "cost": int(VIDEO_FUTURE_1200_COST_XU or 1200),
-            "provider_cost": int(VIDEO_PREMIUM_PROVIDER_COST_XU or 0),
-            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
-            "note": "Gói public chất lượng cao hơn, vẫn xác nhận lần cuối trước khi xử lý và trừ Xu.",
-        },
-        "future_1500": {
-            "label": "Video Premium",
-            "cost": int(VIDEO_FUTURE_1500_COST_XU or 1500),
-            "provider_cost": int(VIDEO_PREMIUM_PROVIDER_COST_XU or 0),
-            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
-            "note": "Gói public cao nhất hiện tại. TOAN AAS luôn xác nhận lần cuối trước khi xử lý.",
-        },
-        "premium": {
-            "label": "Video premium/admin-only",
-            "cost": media_tier_price(VIDEO_PREMIUM_COST_XU, VIDEO_PREMIUM_PROVIDER_COST_XU, max(VIDEO_SERIES_COST, 2000)),
-            "provider_cost": int(VIDEO_PREMIUM_PROVIDER_COST_XU or 0),
-            "model": "premium/admin-only",
-            "note": "Compatibility alias. Public users should see configured public tiers; premium alias remains guarded.",
-        },
+    catalog = video_ai_real_pricing.model_catalog()
+    payload: dict[str, dict] = {}
+    for tier_name, model in zip(VIDEO_TIER_ORDER, catalog):
+        provider_costs = [
+            dict(item) for item in model.get("provider_costs") or [] if isinstance(item, dict)
+        ]
+        primary_provider = str((model.get("provider_priority") or [""])[0] or "")
+        primary_cost = next(
+            (item for item in provider_costs if str(item.get("provider") or "") == primary_provider),
+            provider_costs[0] if provider_costs else {},
+        )
+        payload[tier_name] = {
+            "label": str(model.get("label") or "Chất lượng video"),
+            "cost": max(1, safe_int(model.get("unit_xu"), 1)),
+            "provider_cost": max(0, safe_int(primary_cost.get("cost_vnd"), 0) // 100),
+            "model": str(primary_cost.get("model") or ""),
+            "seconds": max(1, safe_int(model.get("seconds"), 1)),
+            "resolution": str(model.get("resolution") or ""),
+            "public_level": str(model.get("public_level") or model.get("quality") or ""),
+            "note": str(model.get("use_case") or model.get("description") or ""),
+            "provider_priority": list(model.get("provider_priority") or []),
+            "provider_costs": provider_costs,
+            "catalog_version": str(model.get("catalog_version") or ""),
+        }
+    payload["premium"] = {
+        **dict(payload.get("future_1500") or {}),
+        "label": "Điện ảnh nhiều cảnh",
+        "compatibility_alias": True,
     }
+    return payload
 
 def video_tier_enabled_map() -> dict:
     return {
@@ -47168,17 +47216,10 @@ def video_tier_short_label(tier: str = "", lang: str = "vi") -> str:
     tier_norm = normalize_video_tier(tier)
     lang = normalize_user_language(lang) or "vi"
     if lang == "vi":
-        labels = {
-            "low": "Trải nghiệm",
-            "basic": "Cơ bản",
-            "common": "Phổ thông",
-            "advanced": "Nâng cao",
-            "standard": "Bán hàng",
-            "high": "Cao cấp",
-            "future_1000": "Chuyên nghiệp",
-            "future_1200": "Pro Plus",
-            "future_1500": "Premium",
-        }
+        return str(
+            (video_tier_pricing_payload().get(tier_norm) or {}).get("label")
+            or localized_video_tier_label(tier_norm, lang)
+        )
     else:
         labels = {
             "low": "Starter",
@@ -47208,9 +47249,19 @@ def video_tier_price_line(tier: str = "", lang: str = "vi") -> str:
         if lang == "vi"
         else localized_video_tier_label(tier_norm, lang)
     )
+    seconds = max(1, safe_int(payload.get("seconds"), 1))
+    if lang == "vi":
+        note = (
+            f"{seconds} giây/cảnh; {str(payload.get('public_level') or '')}. "
+            f"{str(payload.get('note') or '')}"
+        ).strip()
+        return (
+            f"• {VIDEO_TIER_ICONS.get(tier_norm, '🎬')} <b>{html.escape(str(label))}</b> — "
+            f"<b>{cost} Xu/cảnh</b>: {html.escape(note)}"
+        )
     if lang == "zh":
         notes = {
-            "low": "1 个场景，约 6 秒；体验套餐固定 200 Xu，不含附加工具",
+            "low": "每个场景按所选质量的时长和价格计算；下一步显示场景数与总 Xu",
             **{
                 key: "每个标准场景约 6 秒；下一步按场景数量显示折扣、公式和总 Xu"
                 for key in ("basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
@@ -47218,29 +47269,17 @@ def video_tier_price_line(tier: str = "", lang: str = "vi") -> str:
         }
     elif lang == "en":
         notes = {
-            "low": "1 scene, about 8 seconds; fixed 200 Xu starter package with no add-ons",
+            "low": "each scene uses the selected package duration and price; the next step shows scene count and total Xu",
             **{
-                key: "each standard scene is about 8 seconds; the next step shows scene discount, formula and total Xu"
+                key: f"{seconds} seconds per scene; {str(payload.get('public_level') or '')}. {str(payload.get('note') or '')}".strip()
                 for key in ("basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
             },
         }
-    elif lang == "zh":
-        labels = {
-            "low": "体验",
-            "basic": "基础",
-            "common": "标准",
-            "advanced": "进阶",
-            "standard": "商业",
-            "high": "高级",
-            "future_1000": "专业",
-            "future_1200": "Pro Plus",
-            "future_1500": "Premium",
-        }
     else:
         notes = {
-            "low": "1 cảnh, khoảng 8 giây; gói trải nghiệm cố định 200 Xu, không công cụ bổ sung",
+            "low": "mỗi cảnh dùng đúng thời lượng và giá của gói đã chọn; bước sau hiển thị số cảnh và tổng Xu",
             **{
-                key: "mỗi cảnh chuẩn khoảng 8 giây; bước sau hiển thị chiết khấu cảnh, công thức và tổng Xu"
+                key: f"{seconds} giây/cảnh; {str(payload.get('public_level') or '')}. {str(payload.get('note') or '')}".strip()
                 for key in ("basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
             },
         }
@@ -47248,9 +47287,11 @@ def video_tier_price_line(tier: str = "", lang: str = "vi") -> str:
 
 def video_tier_quality_description(tier: str = "", lang: str = "vi") -> str:
     tier_norm = normalize_video_tier(tier)
+    if normalize_user_language(lang) == "vi":
+        return str((video_tier_pricing_payload().get(tier_norm) or {}).get("note") or "")
     if normalize_user_language(lang) != "vi":
         descriptions = {
-            "low": "Starter short AI video for quick testing. Controlled by the 200 Xu starter limits.",
+            "low": "Quick short AI video for simple content and a clear primary action.",
             "basic": "Basic short AI video with a clear prompt and simple motion.",
             "common": "Balanced short AI video with stronger style, camera and motion guidance.",
             "advanced": "Optimized prompt, composition, lighting, brand style and motion direction.",
@@ -47259,18 +47300,6 @@ def video_tier_quality_description(tier: str = "", lang: str = "vi") -> str:
             "future_1000": "Professional public tier with stronger production guidance.",
             "future_1200": "Pro Plus public tier with higher quality controls.",
             "future_1500": "Premium public tier with the strongest current package.",
-        }
-    else:
-        descriptions = {
-            "low": "Video ngắn trải nghiệm để test nhanh. Gói 200 Xu vẫn theo giới hạn/ngày/tuần/tháng.",
-            "basic": "Video ngắn cơ bản, prompt rõ ý và chuyển động đơn giản.",
-            "common": "Video ngắn cân bằng hơn, có style, camera và motion rõ hơn.",
-            "advanced": "Tối ưu prompt, bố cục, ánh sáng, brand style và hướng chuyển động.",
-            "standard": "Tối ưu theo hướng quảng cáo/bán hàng: lợi ích sản phẩm, góc chốt đơn, CTA và bố cục rõ.",
-            "high": "Phong cách cao cấp: cinematic/commercial look, ánh sáng, camera motion và độ hoàn thiện tốt hơn.",
-            "future_1000": "Gói chuyên nghiệp public, tối ưu hướng sản xuất rõ hơn.",
-            "future_1200": "Gói Pro Plus public với kiểm soát chất lượng cao hơn.",
-            "future_1500": "Gói Premium public, gói cao nhất đang mở hiện tại.",
         }
     return descriptions.get(tier_norm) or str((video_tier_pricing_payload().get(tier_norm) or {}).get("note") or "")
 
@@ -47287,52 +47316,31 @@ VIDEO_SHORT_TIER_PRICING_NOTE_EN = (
 )
 
 def video_tier_extra_second_xu(tier: str = "") -> int:
-    tier_norm = normalize_video_tier(tier)
-    return {
-        "low": VIDEO_LOW_EXTRA_SECOND_XU,
-        "basic": VIDEO_BASIC_EXTRA_SECOND_XU,
-        "common": VIDEO_COMMON_EXTRA_SECOND_XU,
-        "advanced": VIDEO_ADVANCED_EXTRA_SECOND_XU,
-        "standard": VIDEO_STANDARD_EXTRA_SECOND_XU,
-        "high": VIDEO_HIGH_EXTRA_SECOND_XU,
-        "future_1000": VIDEO_FUTURE_1000_EXTRA_SECOND_XU,
-        "future_1200": VIDEO_FUTURE_1200_EXTRA_SECOND_XU,
-        "future_1500": VIDEO_FUTURE_1500_EXTRA_SECOND_XU,
-    }.get(tier_norm, 0)
+    _ = tier
+    return 0
 
 def video_tier_extra_scene_xu(tier: str = "") -> int:
-    tier_norm = normalize_video_tier(tier)
-    return {
-        "low": VIDEO_LOW_EXTRA_SCENE_XU,
-        "basic": VIDEO_BASIC_EXTRA_SCENE_XU,
-        "common": VIDEO_COMMON_EXTRA_SCENE_XU,
-        "advanced": VIDEO_ADVANCED_EXTRA_SCENE_XU,
-        "standard": VIDEO_STANDARD_EXTRA_SCENE_XU,
-        "high": VIDEO_HIGH_EXTRA_SCENE_XU,
-        "future_1000": VIDEO_FUTURE_1000_EXTRA_SCENE_XU,
-        "future_1200": VIDEO_FUTURE_1200_EXTRA_SCENE_XU,
-        "future_1500": VIDEO_FUTURE_1500_EXTRA_SCENE_XU,
-    }.get(tier_norm, 0)
+    return video_tier_cost_xu(tier)
 
 def video_tier_allows_extra_duration(tier: str = "") -> bool:
-    return normalize_video_tier(tier) not in {"low"} and video_tier_extra_second_xu(tier) > 0
+    _ = tier
+    return False
 
 def video_tier_allows_extra_scenes(tier: str = "") -> bool:
-    return normalize_video_tier(tier) not in {"low"} and video_tier_extra_scene_xu(tier) > 0
+    return video_tier_extra_scene_xu(tier) > 0
 
 def video_tier_allows_paid_addons(tier: str = "") -> bool:
-    tier_norm = normalize_video_tier(tier)
-    if tier_norm == "low":
-        return bool(VIDEO_200_ALLOW_PAID_ADDONS)
+    _ = tier
     return True
 
 def video_experience_tier_policy() -> dict:
-    paid_addons_allowed = video_tier_allows_paid_addons("low")
+    paid_addons_allowed = True
+    payload = video_tier_payload("low")
     return {
         "tier": "low",
-        "name": "Video trải nghiệm",
-        "role": "experience_trial",
-        "base_price_xu": int(canonical_price_xu("video_beta_200") or VIDEO_LOW_COST_XU or 200),
+        "name": str(payload.get("label") or "Nhanh gọn"),
+        "role": "paid_public",
+        "base_price_xu": int(payload.get("cost") or 0),
         "allow_paid_addons": paid_addons_allowed,
         "allow_free_assets": bool(VIDEO_FREE_ADDONS_ALL_TIERS),
         "allow_extra_duration": False,
@@ -47342,13 +47350,9 @@ def video_experience_tier_policy() -> dict:
         "allow_dubbing": paid_addons_allowed,
         "allow_subtitle_plus_dubbing": paid_addons_allowed,
         "allow_quality_upgrade": False,
-        "limits": {
-            "per_day": int(VIDEO_BETA_200_MAX_USER_DAY or 3),
-            "per_week": int(VIDEO_BETA_200_MAX_USER_WEEK or 10),
-            "per_month": int(VIDEO_BETA_200_MAX_USER_MONTH or 30),
-        },
+        "limits": {},
         "upsell_to": "basic",
-        "upsell_to_xu": int(canonical_price_xu("video_beta_300") or VIDEO_BASIC_COST_XU or 300),
+        "upsell_to_xu": int(video_tier_cost_xu("basic") or 0),
         "same_base_model_upsell": "basic",
     }
 
@@ -47394,14 +47398,14 @@ def video_addon_pricing_matrix() -> dict:
         "translate_dub_default": {"label": "Dịch + lồng tiếng giọng mặc định", "price_xu": translate_dub, "unit": "job<=60s", "display": f"+{translate_dub} Xu"},
         "voice_advanced": {"label": "Chọn giọng nâng cao", "price_xu": addon_voice, "unit": "job", "display": "Miễn phí" if addon_voice <= 0 else f"+{addon_voice} Xu"},
         "voice_transform": {"label": "Biến đổi giọng theo mẫu có sẵn", "price_xu": VIDEO_VOICE_PRESET_TRANSFORM_XU, "unit": "job", "display": f"+{VIDEO_VOICE_PRESET_TRANSFORM_XU} Xu"},
-        "voice_premium_preset": {"label": "Voice preset cao cấp", "price_xu": VIDEO_VOICE_PREMIUM_PRESET_XU, "unit": "job", "display": f"+{VIDEO_VOICE_PREMIUM_PRESET_XU} Xu"},
-        "voice_clone_create": {"label": "Upload mẫu giọng / clone voice", "price_xu": int(VOICE_PROFILE_PRICE_XU or 0), "unit": "profile", "display": f"Miễn phí lượt đầu / +{int(VOICE_PROFILE_PRICE_XU or 0)} Xu"},
-        "voice_clone_reuse": {"label": "Dùng lại voice clone đã tạo", "price_xu": VIDEO_VOICE_CLONE_REUSE_XU, "unit": "job", "display": f"+{VIDEO_VOICE_CLONE_REUSE_XU} Xu"},
+        "voice_premium_preset": {"label": "Mẫu giọng cao cấp", "price_xu": VIDEO_VOICE_PREMIUM_PRESET_XU, "unit": "job", "display": f"+{VIDEO_VOICE_PREMIUM_PRESET_XU} Xu"},
+        "voice_clone_create": {"label": "Tạo giọng riêng từ mẫu đã gửi", "price_xu": int(VOICE_PROFILE_PRICE_XU or 0), "unit": "profile", "display": f"Miễn phí lượt đầu / +{int(VOICE_PROFILE_PRICE_XU or 0)} Xu"},
+        "voice_clone_reuse": {"label": "Dùng lại giọng riêng đã tạo", "price_xu": VIDEO_VOICE_CLONE_REUSE_XU, "unit": "job", "display": f"+{VIDEO_VOICE_CLONE_REUSE_XU} Xu"},
         "suno_music": {"label": "Tạo nhạc AI", "price_xu": addon_music, "unit": "track", "display": f"+{addon_music} Xu/bài"},
         "suno_variation": {"label": "Tạo biến thể nhạc AI", "price_xu": VIDEO_SUNO_VARIATION_XU, "unit": "variation", "display": f"+{VIDEO_SUNO_VARIATION_XU} Xu/lần"},
         "lyrics_ai": {"label": "Viết lyrics bằng AI", "price_xu": VIDEO_LYRICS_AI_XU, "unit": "job", "display": f"+{VIDEO_LYRICS_AI_XU} Xu"},
         "music_cut_loop": {"label": "Cắt/loop nhạc khớp video", "price_xu": VIDEO_MUSIC_CUT_LOOP_XU, "unit": "job", "display": f"+{VIDEO_MUSIC_CUT_LOOP_XU} Xu"},
-        "sfx_ai": {"label": "Tạo sound effect AI", "price_xu": VIDEO_SFX_AI_XU, "unit": "job", "display": f"+{VIDEO_SFX_AI_XU} Xu"},
+        "sfx_ai": {"label": "Tạo hiệu ứng âm thanh bằng AI", "price_xu": VIDEO_SFX_AI_XU, "unit": "job", "display": f"+{VIDEO_SFX_AI_XU} Xu"},
         "save_to_media_vault": {"label": "Lưu vào kho media", "price_xu": 0, "unit": "storage", "display": "Miễn phí trong hạn mức"},
     }
 
@@ -47490,10 +47494,7 @@ def video_final_duration_model(payload: dict | None = None, state: dict | None =
     paid_preview_route_ready = video_paid_preview_worker_available()
     preview_locked_reason = ""
     preview_enabled = True
-    if tier_norm == "low":
-        preview_enabled = False
-        preview_locked_reason = "tier_200"
-    elif short_request or final_seconds <= 17 or scene_count < VIDEO_FINAL_DEFAULT_SCENES:
+    if short_request or final_seconds <= 17 or scene_count < VIDEO_FINAL_DEFAULT_SCENES:
         preview_enabled = False
         preview_locked_reason = "under_18s"
     elif not paid_preview_route_ready:
@@ -47632,7 +47633,7 @@ def video_order_music_item(state: dict, order: dict) -> tuple[dict | None, dict 
         item = matrix["stock_music_library"]
         return {"key": "stock_music_library", "label": item["label"], "price_xu": 0}, None
     if option in {"sfx", "stock_sfx", "sfx_library"}:
-        return {"key": "stock_sfx_library", "label": "SFX từ kho có sẵn", "price_xu": 0}, None
+        return {"key": "stock_sfx_library", "label": "Hiệu ứng âm thanh từ kho có sẵn", "price_xu": 0}, None
     if option in {"uploaded", "upload", "user_media", "media", "my_media"}:
         return {"key": "user_audio_media", "label": "Audio trong Media của tôi", "price_xu": 0}, None
     if option in {"ai", "ai_music", "music_ai", "suno"}:
@@ -47748,10 +47749,6 @@ def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
     ):
         dubbing = "none"
         order["addons"]["dub"] = None
-    if tier == "low":
-        subtitle = "none"
-        dubbing = "none"
-        translated = False
     if subtitle not in {"", "none"} and dubbing not in {"", "none"}:
         key = "subtitle_plus_dubbing"
         breakdown = subtitle_dub_price_breakdown(key, duration_seconds)
@@ -47780,10 +47777,6 @@ def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
             {"key": "prompt_script_templates", "label": "Prompt/kịch bản mẫu", "price_xu": 0},
             {"key": "save_to_media_vault", "label": "Lưu kế hoạch/kết quả trong hạn mức", "price_xu": 0},
         ])
-    if tier == "low":
-        paid_items = []
-        order["addons"].update({"voice": None, "subtitle": None, "dub": None, "subtitle_translate": None, "subtitle_plus_dub": None})
-
     scene_count = max(1, min(20, safe_int(
         order.get("scene_count")
         or state.get("selected_scene_count")
@@ -47956,42 +47949,27 @@ def product_video_r9_scene_count(scene_count) -> int:
     return max(1, min(PRODUCT_VIDEO_R9_SCENE_MAX, safe_int(scene_count, 1)))
 
 
-def product_video_r9_scene_pricing(scene_count, *, today=None) -> dict:
+def product_video_r9_scene_pricing(scene_count, *, tier: str = "low", today=None) -> dict:
     count = product_video_r9_scene_count(scene_count)
-    unit_list = PRODUCT_VIDEO_R9_LIST_PRICE_PER_SCENE_XU
-    unit_promo = PRODUCT_VIDEO_R9_PROMO_PRICE_PER_SCENE_XU
-    promo_until = PRODUCT_VIDEO_R9_PROMO_UNTIL
-    try:
-        from services.product_video_duration_decision import load_duration_decision, promo_active
-
-        cfg = load_duration_decision()
-        scene_cfg = dict((cfg.get("scene_pricing") or {}).get("scenes") or {})
-        first_scene = dict(scene_cfg.get("1") or {})
-        unit_list = safe_int(first_scene.get("list_price"), unit_list)
-        unit_promo = safe_int(first_scene.get("promo_price"), unit_promo)
-        promo_until = str((cfg.get("scene_pricing") or {}).get("promo_until") or promo_until)
-        promo_on = bool(promo_active(promo_until, today=today))
-    except Exception:
-        try:
-            from datetime import date as _date
-
-            promo_on = (_date.today() if today is None else today) <= _date.fromisoformat(promo_until)
-        except Exception:
-            promo_on = True
-    unit_charge = unit_promo if promo_on else unit_list
-    duration = count * TASK3D_SCENE_SECONDS
+    _ = today
+    tier_name = normalize_video_tier(tier)
+    payload = video_tier_pricing_payload().get(tier_name) or video_tier_pricing_payload()["low"]
+    unit_charge = max(1, safe_int(payload.get("cost"), 1))
+    scene_seconds = max(1, safe_int(payload.get("seconds"), TASK3D_SCENE_SECONDS))
+    duration = count * scene_seconds
     return {
+        "tier": tier_name,
         "scene_count": count,
-        "scene_seconds": TASK3D_SCENE_SECONDS,
+        "scene_seconds": scene_seconds,
         "estimated_seconds": duration,
-        "unit_list_xu": unit_list,
-        "unit_promo_xu": unit_promo,
+        "unit_list_xu": unit_charge,
+        "unit_promo_xu": unit_charge,
         "unit_charge_xu": unit_charge,
-        "list_total_xu": unit_list * count,
-        "promo_total_xu": unit_promo * count,
+        "list_total_xu": unit_charge * count,
+        "promo_total_xu": unit_charge * count,
         "charge_total_xu": unit_charge * count,
-        "promo_active": promo_on,
-        "promo_until": promo_until,
+        "promo_active": False,
+        "promo_until": "",
     }
 
 
@@ -48220,7 +48198,7 @@ def product_video_provider_pending_public_copy(lang: str = "vi") -> str:
 
 
 def calculate_video_quote(session: dict | None = None) -> dict:
-    state = product_video_r9_sanitized_addon_state(session or {})
+    state = dict(session or {})
     order = video_order_from_state(state, state.get("user_id") or state.get("owner_user_id"))
     scene_sources = (
         state,
@@ -48247,14 +48225,15 @@ def calculate_video_quote(session: dict | None = None) -> dict:
     order = dict(pricing.get("video_order") or order)
     tier = normalize_video_tier(order.get("tier") or state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier") or "low")
     scene_count = product_video_r9_scene_count(order.get("scene_count") or pricing.get("scene_count") or explicit_scene_count or 1)
-    scene_pricing = product_video_r9_scene_pricing(scene_count)
+    scene_pricing = product_video_r9_scene_pricing(scene_count, tier=tier)
     package_base_xu = int(scene_pricing["unit_charge_xu"])
     estimated_seconds = int(scene_pricing["estimated_seconds"])
     scene_discount = 1.0
     scene_discount_percent = 100
     scene_video_xu = int(scene_pricing["charge_total_xu"])
-    addon_fee_xu = 0
-    total_xu = scene_video_xu
+    paid_items = video_order_dedupe_items(order.get("paid_items") or [])
+    addon_fee_xu = sum(max(0, safe_int(item.get("price_xu"), 0)) for item in paid_items)
+    total_xu = scene_video_xu + addon_fee_xu
     package_id = {
         "low": "package_200",
         "basic": "package_300",
@@ -48266,9 +48245,14 @@ def calculate_video_quote(session: dict | None = None) -> dict:
         "future_1200": "package_1200",
         "future_1500": "package_1500",
     }.get(tier, f"package_{package_base_xu}")
-    package_label = "Video AI theo cảnh"
-    paid_items = []
-    free_items = [{"key": "product_video_core", "label": "Dựng video AI theo cảnh", "price_xu": 0}]
+    package_label = str(
+        (video_tier_pricing_payload().get(tier) or {}).get("label")
+        or video_tier_short_label(tier, "vi")
+    )
+    free_items = video_order_dedupe_items([
+        {"key": "product_video_core", "label": "Dựng video AI theo cảnh", "price_xu": 0},
+        *list(order.get("free_items") or []),
+    ])
     line_items = [
         {
             "key": "scene_video",
@@ -48279,22 +48263,38 @@ def calculate_video_quote(session: dict | None = None) -> dict:
             "discount_percent": scene_discount_percent,
         },
     ]
-    selected_addons = []
-    paid_addon_items = []
+    selected_addons = [
+        str(item.get("key") or "")
+        for item in paid_items
+        if str(item.get("key") or "")
+    ]
+    paid_addon_items = list(paid_items)
+    line_items.extend(paid_items)
     is_package_200_valid = True
     warnings = []
     order.update({
         "scene_count": scene_count,
-        "scene_duration_seconds": TASK3D_SCENE_SECONDS,
+        "scene_duration_seconds": int(scene_pricing["scene_seconds"]),
         "requested_seconds": estimated_seconds,
         "base_price_xu": package_base_xu,
         "scene_video_xu": scene_video_xu,
-        "addon_fee_xu": 0,
-        "paid_items": [],
+        "addon_fee_xu": addon_fee_xu,
+        "paid_items": paid_items,
         "free_items": free_items,
         "total_xu": total_xu,
+        "estimated_vnd": total_xu * int(XU_TO_VND or 100),
         "billing_policy": "charge_after_valid_mp4",
         "product_video_r9_scene_pricing": True,
+    })
+    pricing.update({
+        "base_video_xu": scene_video_xu,
+        "package_base_xu": package_base_xu,
+        "scene_video_xu": scene_video_xu,
+        "addon_xu": addon_fee_xu,
+        "raw_total_xu": total_xu,
+        "total_xu": total_xu,
+        "estimated_vnd": total_xu * int(XU_TO_VND or 100),
+        "video_order": order,
     })
     return {
         "package_id": package_id,
@@ -48303,7 +48303,7 @@ def calculate_video_quote(session: dict | None = None) -> dict:
         "tier": tier,
         "scene_count": scene_count,
         "estimated_seconds": estimated_seconds,
-        "scene_seconds": TASK3D_SCENE_SECONDS,
+        "scene_seconds": int(scene_pricing["scene_seconds"]),
         "scene_unit_list_xu": int(scene_pricing["unit_list_xu"]),
         "scene_unit_promo_xu": int(scene_pricing["unit_promo_xu"]),
         "scene_unit_price_xu": int(scene_pricing["unit_charge_xu"]),
@@ -48327,7 +48327,7 @@ def calculate_video_quote(session: dict | None = None) -> dict:
         "video_order": order,
         "pricing": pricing,
         "charge_policy": "charge_after_valid_mp4",
-        "addons_public_locked": True,
+        "addons_public_locked": False,
     }
 
 def video_order_screen_text(screen: str, state: dict | None = None, lang: str = "vi") -> str:
@@ -48339,13 +48339,13 @@ def video_order_screen_text(screen: str, state: dict | None = None, lang: str = 
             return (
                 "🎵 <b>Music / SFX</b>\n\n"
                 "Free options:\n• Use built-in music when available\n• Upload your own music\n• Save a mood/SFX direction\n\n"
-                f"Paid options for 300 Xu+ packages:\n• AI music: <b>+{VIDEO_SUNO_MUSIC_XU} Xu</b>\n• AI SFX: <b>+{VIDEO_SFX_AI_XU} Xu</b>\n\n"
+                f"Paid options:\n• AI music: <b>+{VIDEO_SUNO_MUSIC_XU} Xu</b>\n• AI SFX: <b>+{VIDEO_SFX_AI_XU} Xu</b>\n\n"
                 "The final invoice is shown before any processing or Xu charge."
             )
         return (
             "🎵 <b>Nhạc / SFX</b>\n\n"
             "Miễn phí:\n• Dùng kho nhạc có sẵn nếu đủ điều kiện\n• Upload file nhạc của bạn\n• Lưu hướng mood/SFX vào kế hoạch\n\n"
-            f"Cộng phí từ gói 300 Xu trở lên:\n• Tạo nhạc AI: <b>+{VIDEO_SUNO_MUSIC_XU} Xu</b>\n• Tạo SFX AI: <b>+{VIDEO_SFX_AI_XU} Xu</b>\n\n"
+            f"Tùy chọn có phí:\n• Tạo nhạc AI: <b>+{VIDEO_SUNO_MUSIC_XU} Xu</b>\n• Tạo SFX AI: <b>+{VIDEO_SFX_AI_XU} Xu</b>\n\n"
             "TOAN AAS sẽ hiện hóa đơn cuối trước khi xử lý và trừ Xu."
         )
     if screen == "voice":
@@ -48353,14 +48353,14 @@ def video_order_screen_text(screen: str, state: dict | None = None, lang: str = 
             return (
                 "🎙 <b>Voice / dubbing</b>\n\n"
                 "Free planning:\n• Save narration text\n• Upload a prepared voice file\n\n"
-                f"Paid options for 300 Xu+ packages:\n• Default AI dubbing: <b>+{VIDEO_DUB_DEFAULT_BASE_XU} Xu</b>\n"
+                f"Paid options:\n• Default AI dubbing: <b>+{VIDEO_DUB_DEFAULT_BASE_XU} Xu</b>\n"
                 f"• Advanced voice: <b>+{VIDEO_VOICE_ADVANCED_ADDON_XU} Xu</b>\n\n"
                 "The final invoice is shown before any processing or Xu charge."
             )
         return (
             "🎙 <b>Voice / lồng tiếng</b>\n\n"
             "Miễn phí ở bước kế hoạch:\n• Lưu nội dung đọc\n• Upload file voice đã có\n\n"
-            f"Cộng phí từ gói 300 Xu trở lên:\n• Lồng tiếng AI giọng mặc định: <b>+{VIDEO_DUB_DEFAULT_BASE_XU} Xu</b>\n"
+            f"Tùy chọn có phí:\n• Lồng tiếng AI giọng mặc định: <b>+{VIDEO_DUB_DEFAULT_BASE_XU} Xu</b>\n"
             f"• Chọn giọng nâng cao: <b>+{VIDEO_VOICE_ADVANCED_ADDON_XU} Xu</b>\n\n"
             "TOAN AAS sẽ hiện hóa đơn cuối trước khi xử lý và trừ Xu."
         )
@@ -48370,7 +48370,7 @@ def video_order_screen_text(screen: str, state: dict | None = None, lang: str = 
                 "🎙 <b>Subtitles & dubbing</b>\n\n"
                 f"Package: <b>{html.escape(str(order.get('tier_name')))}</b>\n"
                 "Free planning: save script/caption and use manual text when available.\n\n"
-                f"Paid options for 300 Xu+ packages:\n• Auto subtitles: <b>+{VIDEO_SUBTITLE_AUTO_BASE_XU} Xu</b>\n"
+                f"Paid options:\n• Auto subtitles: <b>+{VIDEO_SUBTITLE_AUTO_BASE_XU} Xu</b>\n"
                 f"• Translate subtitles: <b>+{VIDEO_SUBTITLE_TRANSLATE_BASE_XU} Xu</b>\n"
                 f"• Dubbing: <b>+{VIDEO_DUB_DEFAULT_BASE_XU} Xu</b>\n"
                 f"• Translate + dubbing: <b>+{VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU} Xu</b>\n\n"
@@ -48380,7 +48380,7 @@ def video_order_screen_text(screen: str, state: dict | None = None, lang: str = 
             "🎙 <b>Phụ đề & lồng tiếng</b>\n\n"
             f"Gói đang chọn: <b>{html.escape(str(order.get('tier_name')))}</b>\n"
             "Miễn phí ở bước kế hoạch: lưu script/caption và dùng nội dung thủ công khi có sẵn.\n\n"
-            f"Cộng phí từ gói 300 Xu trở lên:\n• Tạo phụ đề tự động: <b>+{VIDEO_SUBTITLE_AUTO_BASE_XU} Xu</b>\n"
+            f"Tùy chọn có phí:\n• Tạo phụ đề tự động: <b>+{VIDEO_SUBTITLE_AUTO_BASE_XU} Xu</b>\n"
             f"• Dịch phụ đề: <b>+{VIDEO_SUBTITLE_TRANSLATE_BASE_XU} Xu</b>\n"
             f"• Lồng tiếng: <b>+{VIDEO_DUB_DEFAULT_BASE_XU} Xu</b>\n"
             f"• Dịch + lồng tiếng: <b>+{VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU} Xu</b>\n\n"
@@ -48390,16 +48390,6 @@ def video_order_screen_text(screen: str, state: dict | None = None, lang: str = 
 
 def get_allowed_addons_for_tier(tier: str = "") -> list[str]:
     tier_norm = normalize_video_tier(tier)
-    if tier_norm == "low":
-        return [
-            "stock_music_library",
-            "stock_prompt_library",
-            "default_template",
-            "default_voice_library",
-            "local_basic_processing",
-            "manual_volume_basic",
-            "save_to_media_vault",
-        ]
     if not video_tier_allows_paid_addons(tier_norm):
         return []
     return sorted(video_addon_pricing_matrix().keys())
@@ -52081,21 +52071,6 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
             1,
         )
     )
-    pricing = product_video_r9_scene_pricing(scene_count)
-    tier_price_map = {
-        "low": 200,
-        "trial": 200,
-        "basic": 300,
-        "common": 400,
-        "good": 400,
-        "standard": 500,
-        "advanced": 600,
-        "premium": 800,
-        "pro": 1000,
-        "studio": 1200,
-        "high": 1200,
-        "max": 1500,
-    }
     selected_tier = str(
         _video_finance_first_value(
             merged,
@@ -52104,14 +52079,17 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         )
         or "basic"
     ).strip()
+    normalized_tier = normalize_video_tier(selected_tier)
+    pricing = product_video_r9_scene_pricing(scene_count, tier=normalized_tier)
+    default_unit_price = int(pricing["unit_charge_xu"])
     user_visible_raw = _video_finance_first_value(
         merged,
         ("user_visible_price_xu", "package_xu", "package_price_xu", "package_base_xu"),
         "",
     )
     if user_visible_raw in (None, ""):
-        user_visible_raw = tier_price_map.get(selected_tier.lower(), 300)
-    user_visible_price = safe_int(user_visible_raw, tier_price_map.get(selected_tier.lower(), 300))
+        user_visible_raw = default_unit_price
+    user_visible_price = safe_int(user_visible_raw, default_unit_price)
     persisted_quoted_price = safe_int(
         _video_finance_first_value(
             merged,
@@ -55247,7 +55225,7 @@ def video_tier_prompt_for_generation(prompt: str, tier: str = "", aspect_ratio: 
     )
 
 def image_base_cost_xu() -> int:
-    return int(image_tier_pricing_payload()["low"]["cost"])
+    return int(canonical_image_tier_pricing_payload()["low"]["cost"])
 
 def video_base_cost_xu() -> int:
     return int(video_tier_pricing_payload()["low"]["cost"])
@@ -55516,7 +55494,7 @@ def trend_workflow_billing_status_text() -> str:
 
 def media_workflow_pricing_payload() -> dict:
     trend_breakdown = trend_workflow_content_cost_breakdown()
-    image_tiers = image_tier_pricing_payload()
+    image_tiers = canonical_image_tier_pricing_payload()
     video_tiers = video_tier_pricing_payload()
     return {
         "billing_mode": "tiered_media_pricing",
@@ -55578,7 +55556,7 @@ PACKAGE_ITEM_LABELS = {
     "image_standard_warranty": "Ảnh tiêu chuẩn + bảo hành",
     "image_high": "Ảnh chất lượng cao",
     "image_high_warranty": "Ảnh chất lượng cao + bảo hành",
-    "video_experience": "Video Trải Nghiệm",
+    "video_experience": "Video Nhanh Gọn",
     "video_basic": "Video Cơ Bản",
     "video_common": "Video Phổ Thông",
     "video_standard": "Video Tiêu Chuẩn",
@@ -56415,7 +56393,7 @@ def package_catalog_entry_from_xu(
 
 def package_catalog_image_cost_xu(tier: str, fallback: int) -> int:
     try:
-        return max(1, int(image_tier_cost_xu(tier) or fallback))
+        return max(1, int(canonical_image_tier_cost_xu(tier) or fallback))
     except Exception:
         return max(1, int(fallback or 1))
 
@@ -67252,44 +67230,18 @@ CUSTOMER_GUIDE_SECTIONS = [
         "video_ai",
         "Tạo video",
         (
-            "🎬 <b>HƯỚNG DẪN TẠO VIDEO AI</b>\n\n"
-            "<b>Quy trình tạo video:</b>\n"
-            "1. Mở mục <b>Tạo video</b>.\n"
-            "2. Chọn chủ đề hoặc nguồn video và gửi ý tưởng chính.\n"
-            "3. Chọn số cảnh trước để hệ thống phân bổ đúng số ý; hỗ trợ 1-20 cảnh.\n"
-            "4. Chọn profile và ngữ cảnh phù hợp.\n"
-            "5. Bổ sung yêu cầu chi tiết và các add-on ảnh hưởng nội dung, bố cục hoặc lời thoại.\n"
-            "6. Kiểm tra kế hoạch và prompt riêng của từng cảnh.\n"
-            "7. Chọn gói chất lượng video.\n"
-            "8. Xem tổng chi phí, kiểm tra nội dung và xác nhận cuối.\n"
-            "9. Hệ thống tạo, kiểm tra từng cảnh rồi ghép video.\n"
-            "10. Add-on được thực hiện sau khi ghép; video hoàn chỉnh được kiểm tra và gửi về bot.\n\n"
-            "<b>Bảng giá video theo gói:</b>\n"
-            "• 🟢 Trải nghiệm — 200 Xu\n"
-            "• 🔷 Cơ bản — 300 Xu\n"
-            "• 🔵 Phổ thông — 400 Xu\n"
-            "• 🟣 Nâng cao — 500 Xu\n"
-            "• 🟠 Bán hàng — 600 Xu\n"
-            "• 🔴 Cao cấp — 800 Xu\n"
-            "• ⭐ Chuyên nghiệp — 1000 Xu\n"
-            "• 💎 Pro Plus — 1200 Xu\n"
-            "• 👑 Premium — 1500 Xu\n\n"
-            "<b>Gói 200 Xu dùng khi nào?</b>\n"
-            "Gói Trải nghiệm 200 Xu phù hợp để test ý tưởng nhanh, xem hướng chuyển động, kiểm tra concept hoặc tạo bản nháp ngắn trước khi dùng gói cao hơn.\n\n"
-            "<b>Cách tính theo cảnh:</b>\n"
-            "• 1 cảnh khoảng 8 giây\n"
-            "• 3 cảnh khoảng 24 giây\n"
-            "• 5 cảnh khoảng 40 giây\n"
-            "• 10 cảnh khoảng 80 giây\n"
-            "• 20 cảnh khoảng 160 giây\n\n"
-            "<b>Ưu đãi theo số cảnh:</b>\n"
-            "• 1 cảnh: giá gốc\n"
-            "• 2-9 cảnh: giảm 10%\n"
-            "• 10-19 cảnh: giảm 15%\n"
-            "• 20 cảnh: giảm 20%\n\n"
-            "<b>Ví dụ:</b> Gói Cơ bản 300 Xu, làm 3 cảnh: 300 × 90% = 270 Xu/cảnh, tổng 270 × 3 = 810 Xu.\n\n"
-            f"{PUBLIC_MAINTENANCE_COPY}"
-        ),
+             "🎬 <b>HƯỚNG DẪN TẠO VIDEO AI</b>\n\n"
+             "<b>Quy trình tạo video:</b>\n"
+             "1. Mở <b>Menu Video</b> và chọn đúng sản phẩm cần làm.\n"
+             "2. Chọn nguồn đầu vào; sản phẩm cần ảnh phải gửi ảnh hoặc tạo ảnh AI trước khi tiếp tục.\n"
+             "3. Chọn nội dung, số cảnh và tỉ lệ theo đúng màn đang hiển thị.\n"
+             "4. Hoàn thiện nhân vật, bối cảnh, hành động, máy quay, lời thoại và âm thanh khi sản phẩm yêu cầu.\n"
+             "5. Xem toàn bộ câu lệnh từng cảnh; có thể sửa trực tiếp trước khi hoàn tất.\n"
+             "6. Thêm logo ảnh hoặc watermark chữ và chọn đúng vị trí nếu cần.\n"
+             "7. Mở màn <b>Chất lượng</b> để xem thời lượng, đặc điểm, mục đích sử dụng và giá Xu hiện hành của từng gói.\n"
+             "8. Kiểm tra hóa đơn, xác nhận tạo video rồi theo dõi bảng trạng thái đến khi nhận video hoặc thông báo lỗi rõ ràng.\n\n"
+             "Giá và số giây thay đổi theo từng gói chất lượng, vì vậy thông tin trên màn Chất lượng và hóa đơn là thông tin áp dụng cho lần tạo hiện tại."
+         ),
     ),
     (
         "audio",
@@ -67350,9 +67302,8 @@ CUSTOMER_GUIDE_SECTIONS = [
             "• Phổ thông 300 Xu; Phổ thông + bảo hành 400 Xu\n"
             "• Cao 500 Xu; Cao + bảo hành 600 Xu\n\n"
             "<b>Bảng giá video:</b>\n"
-            "• Trải nghiệm 200 Xu; Cơ bản 300 Xu; Phổ thông 400 Xu\n"
-            "• Nâng cao 500 Xu; Bán hàng 600 Xu; Cao cấp 800 Xu\n"
-            "• Chuyên nghiệp 1000 Xu; Pro Plus 1200 Xu; Premium 1500 Xu\n\n"
+            "• Mỗi gói có số giây, chất lượng, mục đích sử dụng và giá Xu/cảnh riêng.\n"
+            "• Mở đúng sản phẩm video rồi chọn <b>Chất lượng</b> để xem giá hiện hành và tổng Xu chính xác.\n\n"
             "<b>Khuyến mãi nạp:</b>\n"
             "• Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam nếu chương trình đang mở.\n"
             "• Không áp dụng cho Zalo/MoMo hoặc kênh nạp quốc tế.\n"
@@ -71552,11 +71503,11 @@ VIDEO_UIFLOW3_ACTIVE_TAIL_KEY = "video_uiflow3_active_tail"
 VIDEO_UIFLOW3_PRODUCT_LABELS = {
     "video_trend": "Video theo trend",
     "video_ai_real": "Video AI chân thật",
-    "script_image_video": "Kich ban -> Video",
+    "script_image_video": "Kịch bản → Video",
     "frame_video_local": "Ghep anh thanh video",
-    "self_shot_scene_change": "Video tu quay",
+    "self_shot_scene_change": "Video tự quay",
     "storyboard_prompt": "Storyboard",
-    "multi_scene_film": "Video dai tap",
+    "multi_scene_film": "Video dài tập",
 }
 VIDEO_UIFLOW3_VOICE_ALIASES = {
     "auto": "",
@@ -71610,7 +71561,7 @@ VIDEO_UIFLOW3_STEP_ACTIONS = {
         "scene_direction", "audio_set",
     },
     "prompts": {
-        "prompt_scenes", "prompt_scene", "prompt_edit", "prompt_advanced",
+        "prompt_scenes", "prompt_page", "prompt_scene", "prompt_edit", "prompt_advanced",
         "prompt_negative_edit", "scene_advanced", "scene_direction", "prompts_done",
     },
     "branding": {
@@ -71731,7 +71682,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
             "scene_music", "scene_music_custom", "scene_advanced",
             "scene_direction", "brand", "brand_position_view", "brand_remove",
             "edit", "source_ref", "ref_add", "ref_manage", "ref_remove", "context",
-            "model", "quality", "prompt_scene", "prompt_edit", "prompt_negative_edit",
+            "model", "quality", "prompt_page", "prompt_scene", "prompt_edit", "prompt_negative_edit",
             "episode_continuity",
         )
     },
@@ -71848,12 +71799,17 @@ def start_video_uiflow3_state(context, product_id: str) -> dict:
 
 
 def video_uiflow3_keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
-    compact_rows = [
-        row[offset:offset + 2]
-        for row in rows
-        for offset in range(0, len(row), 2)
-        if row[offset:offset + 2]
-    ]
+    compact_rows: list[list[tuple[str, str]]] = []
+    for row in rows:
+        labels = [str(label or "").removeprefix("✅ ").strip() for label, _callback in row]
+        if labels == ["1", "2", "3", "4", "5"]:
+            compact_rows.append(row)
+            continue
+        compact_rows.extend(
+            row[offset:offset + 2]
+            for offset in range(0, len(row), 2)
+            if row[offset:offset + 2]
+        )
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(label, callback_data=callback) for label, callback in row]
         for row in compact_rows
@@ -72095,7 +72051,7 @@ def video_uiflow3_canonical_screen_state(raw_state: dict) -> dict:
         "ui_view", "active_character_id", "active_location_id", "active_scene_id",
         "assignment_owner_type", "assignment_owner_id", "ui_return_callback",
         "reference_filter_type", "reference_filter_id", "source_reference_asset_id",
-        "active_reference_index",
+        "active_reference_index", "prompt_page_index",
         "pending_input",
     )
     if step not in VIDEO_UIFLOW3_RENDERED_STEPS:
@@ -72678,19 +72634,21 @@ def video_ai_real_prompt_model_catalog() -> list[dict]:
     return video_ai_real_pricing.model_catalog()
 
 
-VIDEO_AI_REAL_QUALITY_MODEL_KEYS = {
-    300: "grok3_5",
-    400: "grok3_10",
-    600: "veo31_fast_8",
-    1000: "veo31_pro_8",
-}
+VIDEO_AI_REAL_QUALITY_MODEL_KEYS = dict(video_ai_real_pricing.QUALITY_TIER_MODEL_KEYS)
 
-VIDEO_AI_REAL_QUALITY_ICONS = {
-    "grok3_5": "⚡",
-    "grok3_10": "🎬",
-    "veo31_fast_8": "✨",
-    "veo31_pro_8": "🏆",
-}
+
+def video_public_quality_product(tier_id: int) -> dict:
+    selected_id = safe_int(tier_id, 0)
+    model_key = VIDEO_AI_REAL_QUALITY_MODEL_KEYS.get(selected_id)
+    if not model_key:
+        raise ValueError("video_quality_invalid")
+    internal_model = video_ai_real_pricing.model_by_key(model_key)
+    public_product = video_ai_real_pricing.public_quality_by_tier(selected_id)
+    return {
+        **public_product,
+        "model_key": model_key,
+        "internal_model": deepcopy(internal_model),
+    }
 
 
 def video_ai_real_quality_products(raw_state: dict) -> list[dict]:
@@ -72720,25 +72678,12 @@ def video_ai_real_quality_products(raw_state: dict) -> list[dict]:
         for item in compatible_offers
     }
     products: list[dict] = []
-    for tier_id, model_key in VIDEO_AI_REAL_QUALITY_MODEL_KEYS.items():
+    for tier_id in VIDEO_AI_REAL_QUALITY_MODEL_KEYS:
         if tier_id not in offers_by_tier:
             continue
-        internal_model = video_ai_real_pricing.model_by_key(model_key)
-        public_resolution = str(internal_model.get("resolution") or "")
-        public_resolution = public_resolution.replace(" theo provider", "").replace("/", " đến ")
-        products.append({
-            "model_key": model_key,
-            "tier_id": tier_id,
-            "icon": VIDEO_AI_REAL_QUALITY_ICONS.get(model_key, "🎬"),
-            "name": str(internal_model.get("label") or model_key),
-            "public_level": str(internal_model.get("quality") or "Chất lượng video"),
-            "public_detail": str(internal_model.get("description") or ""),
-            "quality_characteristic": str(internal_model.get("quality") or ""),
-            "resolution": public_resolution,
-            "use_case": str(internal_model.get("description") or "Video theo nội dung đã duyệt."),
-            "seconds": max(1, safe_int(internal_model.get("seconds"), 1)),
-            "unit_xu": max(1, safe_int(internal_model.get("unit_xu"), 1)),
-        })
+        product = video_public_quality_product(tier_id)
+        product.pop("internal_model", None)
+        products.append(product)
     return products
 
 
@@ -72887,6 +72832,29 @@ def video_ai_real_apply_context_prompt(raw_state: dict, context_key: str) -> dic
         state = video_uiflow3.revise_content(state, original_intent=contextual_intent)
     else:
         state["content"]["original_intent"] = contextual_intent
+    return video_uiflow3.normalize_state(state)
+
+
+def video_ai_real_confirm_preselected_scene_count(raw_state: dict) -> dict:
+    """Materialize the scene count selected at product intake without asking twice."""
+
+    state = video_uiflow3.normalize_state(raw_state)
+    if (
+        not video_ai_real_is_creation_flow(state)
+        or not bool((state.get("content") or {}).get("locked"))
+        or bool(state.get("scenes"))
+    ):
+        return state
+    scene_count = safe_int((state.get("format") or {}).get("scene_count"), 0)
+    if scene_count <= 0:
+        return state
+    previous_step = str((state.get("navigation") or {}).get("current_step") or "content_lock")
+    previous_stack = list((state.get("navigation") or {}).get("visible_step_stack") or [])
+    seconds = max(1, safe_int((state.get("format") or {}).get("seconds_per_scene"), 8))
+    state["format"]["target_duration_seconds"] = scene_count * seconds
+    state = video_uiflow3.confirm_scene_count(state, scene_count)
+    state["navigation"]["current_step"] = previous_step
+    state["navigation"]["visible_step_stack"] = previous_stack
     return video_uiflow3.normalize_state(state)
 
 
@@ -73095,6 +73063,110 @@ def video_ai_real_prompt_quote(raw_state: dict) -> dict:
     }
 
 
+def video_tail9_addon_quote(raw_tail: dict | None = None) -> dict:
+    """Price only the explicit post-production choices carried by Tail9."""
+
+    tail = video_tail9.normalize_state(dict(raw_tail or {}))
+    audio = dict(tail.get("audio_config") or {})
+    addon_config = dict(tail.get("addon_config") or {})
+    entries = {
+        str(key): dict(value)
+        for key, value in dict(addon_config.get("postprocessing") or {}).items()
+        if isinstance(value, dict)
+    }
+    duration = max(1, safe_int(tail.get("estimated_duration"), 8))
+    items: list[dict] = []
+
+    def value_for(key: str) -> dict:
+        entry = dict(entries.get(key) or {})
+        return dict(entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}
+
+    def selected(key: str) -> bool:
+        entry = dict(entries.get(key) or {})
+        return bool(entry.get("enabled", audio.get(key)))
+
+    def add_item(key: str, label: str, price_xu: int = 0) -> None:
+        if any(str(item.get("key") or "") == key for item in items):
+            return
+        items.append({
+            "key": key,
+            "label": label,
+            "price_xu": max(0, safe_int(price_xu, 0)),
+        })
+
+    if selected("source_audio"):
+        add_item("source_audio", "Giữ âm thanh gốc", 0)
+
+    if selected("dubbing"):
+        dubbing_price = calculate_named_addon_quote(
+            "dubbing_default", duration
+        ).get("total_xu") or 0
+        add_item("dubbing_default", "Lồng tiếng", dubbing_price)
+
+    if selected("subtitles"):
+        subtitle_value = value_for("subtitles")
+        translated = bool(
+            subtitle_value.get("translation")
+            or str(subtitle_value.get("source") or "").lower()
+            in {"translated", "auto_translate", "translation"}
+        )
+        quote_key = "subtitle_translate" if translated else "subtitle_auto"
+        subtitle_quote = calculate_named_addon_quote(quote_key, duration)
+        add_item(
+            quote_key,
+            "Dịch phụ đề" if translated else "Tạo phụ đề tự động",
+            subtitle_quote.get("total_xu") or 0,
+        )
+
+    if selected("music"):
+        music_value = value_for("music")
+        music_source = str(
+            music_value.get("source")
+            or music_value.get("music_source")
+            or music_value.get("music_source_choice")
+            or ""
+        ).strip().lower()
+        paid_music = bool(
+            music_value.get("paid_generation")
+            or music_source
+            in {"ai", "create_new", "planned_generation", "generated", "music_ai"}
+        )
+        if paid_music:
+            music_price = safe_int(
+                video_ai_real_pricing.music_model_catalog()[0].get("unit_xu"),
+                0,
+            )
+            add_item("music_ai", "Tạo nhạc bằng AI", music_price)
+        else:
+            add_item("music_existing", "Nhạc nền từ kho hoặc tệp đã gửi", 0)
+
+    if selected("sfx"):
+        sfx_value = value_for("sfx")
+        sfx_source = str(
+            sfx_value.get("source") or sfx_value.get("sfx_source") or ""
+        ).strip().lower()
+        paid_sfx = bool(
+            sfx_value.get("paid_generation")
+            or sfx_source in {"ai", "planned_generation", "generated", "sfx_ai"}
+        )
+        if paid_sfx:
+            sfx_quote = calculate_named_addon_quote("sfx_ai", duration)
+            add_item(
+                "sfx_ai",
+                "Tạo hiệu ứng âm thanh bằng AI",
+                sfx_quote.get("total_xu") or 0,
+            )
+        else:
+            add_item("sfx_library", "Hiệu ứng âm thanh từ kho", 0)
+
+    total_xu = sum(max(0, safe_int(item.get("price_xu"), 0)) for item in items)
+    return {
+        "items": items,
+        "total_xu": total_xu,
+        "duration_seconds": duration,
+    }
+
+
 def video_ai_real_is_creation_flow(raw_state: dict) -> bool:
     return bool(
         str((raw_state or {}).get("parent_product") or "") == "video_ai_real"
@@ -73251,6 +73323,43 @@ def video_uiflow3_build_tail_state(raw_state: dict) -> dict:
         "subtitles": str(audio_source.get("subtitle_mode") or "none") != "none",
     })
     tail["audio_config"] = audio
+    music_source = str(audio_source.get("music_source") or "none").strip().lower()
+    sfx_mode = str(audio_source.get("sfx_mode") or "none").strip().lower()
+    subtitle_mode = str(audio_source.get("subtitle_mode") or "none").strip().lower()
+    dubbing_mode = str(audio_source.get("dubbing_mode") or "none").strip().lower()
+    addon_config = dict(tail.get("addon_config") or {})
+    addon_config["postprocessing"] = {
+        "dubbing": {
+            "enabled": dubbing_mode != "none",
+            "value": {
+                "dubbing_mode": dubbing_mode,
+                "voice_source": dubbing_mode,
+            },
+        },
+        "subtitles": {
+            "enabled": subtitle_mode != "none",
+            "value": {
+                "source": subtitle_mode,
+                "translation": subtitle_mode in {"translated", "auto_translate"},
+            },
+        },
+        "music": {
+            "enabled": str(audio_source.get("music_scope") or "none") != "none",
+            "value": {
+                "source": "planned_generation" if music_source == "ai" else music_source,
+                "paid_generation": music_source == "ai",
+                "music_scope": str(audio_source.get("music_scope") or "none"),
+            },
+        },
+        "sfx": {
+            "enabled": sfx_mode != "none",
+            "value": {
+                "source": "ai" if sfx_mode == "ai" else "library_only",
+                "paid_generation": sfx_mode == "ai",
+            },
+        },
+    }
+    tail["addon_config"] = addon_config
     tail["audio_status"] = "configured" if any(
         bool(audio.get(key)) for key in ("dubbing", "music", "sfx", "subtitles")
     ) else "skipped"
@@ -73675,6 +73784,7 @@ def video_uiflow3_new_invoice_attestation(
     message_id: int = 0,
 ) -> dict:
     snapshot = video_uiflow3.approved_snapshot(state)
+    product_id = str(snapshot.get("parent_product") or state.get("parent_product") or "").strip()
     return {
         "token": uuid.uuid4().hex[:12],
         "draft_id": str(snapshot.get("draft_id") or ""),
@@ -73682,7 +73792,7 @@ def video_uiflow3_new_invoice_attestation(
         "owner_user_id": int(user_id or 0),
         "owner_chat_id": int(chat_id or user_id or 0),
         "message_id": int(message_id or 0),
-        "product_id": "video_ai_real",
+        "product_id": product_id,
     }
 
 
@@ -73699,11 +73809,12 @@ def video_uiflow3_validate_invoice_confirmation(
         return {"ok": True, "reason": ""}
     if str((session or {}).get("current_step") or "") != "b14_invoice":
         return {"ok": False, "reason": "invoice_step_changed"}
-    if str((session or {}).get("product_id") or "") != "video_ai_real":
-        return {"ok": False, "reason": "invoice_product_mismatch"}
     attestation = dict(draft.get("uiflow3_invoice_attestation") or {})
     if not attestation:
         return {"ok": False, "reason": "invoice_attestation_missing"}
+    attested_product = str(attestation.get("product_id") or "").strip()
+    if not attested_product or str((session or {}).get("product_id") or "") != attested_product:
+        return {"ok": False, "reason": "invoice_product_mismatch"}
     if (
         safe_int(attestation.get("owner_user_id"), 0) != int(user_id or 0)
         or safe_int(attestation.get("owner_chat_id"), 0) != int(chat_id or 0)
@@ -73806,6 +73917,10 @@ def video_uiflow3_prepare_b14_session(
     """Persist a real B14 invoice handoff without submitting or charging yet."""
 
     state = video_ai_real_maybe_compile_state(raw_state)
+    product_id = str(state.get("parent_product") or "").strip()
+    product_route = video_uiflow3_execution_adapter(state)
+    if not product_id or not str(product_route.get("product_type") or "").strip():
+        raise ValueError("video_uiflow3_product_owner_required")
     approved_snapshot = video_uiflow3.approved_snapshot(state)
     existing_session = get_video_session(user_id)
     existing_draft = dict(existing_session.get("draft") or {})
@@ -73953,8 +74068,6 @@ def video_uiflow3_prepare_b14_session(
         for item in (storyboard.get("asset_pack") or {}).get("items") or []
         if str(item.get("file_id") or "")
     ]
-    product_id = str(state.get("parent_product") or "video_ai_real")
-    product_route = video_uiflow3_execution_adapter(state)
     topic = str(
         brief.get("title")
         or content.get("original_intent")
@@ -74126,14 +74239,13 @@ async def video_uiflow3_render_real_invoice(
             invoice_message_id=safe_int(getattr(getattr(query, "message", None), "message_id", 0), 0),
         )
     save_video_uiflow3_state(context, prepared)
-    rendered = await safe_edit_or_send(
+    rendered = await safe_edit_or_send_long_html(
         query,
         video_uiflow3_real_invoice_text(
             session,
             user_id,
             get_user_language(user_id) or "vi",
         ),
-        parse_mode="HTML",
         reply_markup=video_uiflow3_real_invoice_keyboard(prepared, session),
     )
     rendered_message_id = safe_int(
@@ -74652,6 +74764,55 @@ def video_ai_real_prompt_review_pages(raw_state: dict) -> list[dict]:
                     "body": body,
                 })
     return pages
+
+
+def video_ai_real_prompt_page_payload(
+    raw_state: dict,
+    page_number: int = 1,
+) -> tuple[str, InlineKeyboardMarkup]:
+    """Render one complete prompt page without truncating the stored text."""
+
+    state = video_uiflow3.normalize_state(raw_state)
+    pages = video_ai_real_prompt_review_pages(state)
+    if not pages:
+        return (
+            "🧠 Rà soát câu lệnh\n\nChưa có câu lệnh để hiển thị.",
+            video_uiflow3_keyboard([
+                [("⬅️ Quay lại", "vid3|back"), ("🎬 Menu Video", "menu|main_video")],
+            ]),
+        )
+    page_index = max(1, min(len(pages), safe_int(page_number, 1)))
+    page = dict(pages[page_index - 1])
+    scene_id = str(page.get("scene_id") or "")
+    scene_index = safe_int(page.get("scene_index"), 1)
+    part_label = str(page.get("part_label") or "Câu lệnh")
+    lines = [
+        "🧠 Rà soát câu lệnh",
+        "Toàn bộ câu lệnh hiện tại",
+        f"CẢNH {scene_index} · {part_label} · Trang {page_index}/{len(pages)}",
+        "",
+        str(page.get("body") or ""),
+        "",
+        "Nội dung được hiển thị nguyên văn. Mở chi tiết cảnh để sửa trực tiếp; mọi ký tự đều được giữ nguyên.",
+    ]
+    rows: list[list[tuple[str, str]]] = []
+    page_navigation: list[tuple[str, str]] = []
+    if page_index > 1:
+        page_navigation.append(("⬅️ Trang trước", f"vid3|prompt_page|{page_index - 1}"))
+    if page_index < len(pages):
+        page_navigation.append(("Trang sau ➡️", f"vid3|prompt_page|{page_index + 1}"))
+    if page_navigation:
+        rows.append(page_navigation)
+    rows.append([
+        ("📝 Câu lệnh từng cảnh", "vid3|prompt_scenes"),
+        ("✏️ Mở chi tiết cảnh", f"vid3|prompt_scene|{scene_id}" if scene_id else "vid3|prompt_scenes"),
+    ])
+    rows.append([
+        ("🎥 Tùy chỉnh nâng cao", "vid3|prompt_advanced"),
+        ("✅ Hoàn tất rà soát câu lệnh", "vid3|prompts_done"),
+    ])
+    rows.extend(video_ai_real_pilot_nav_rows(back="vid3|back"))
+    return "\n".join(lines), video_uiflow3_keyboard(rows)
 
 
 def video_ai_real_pilot_scene_prompt_text(state: dict, scene: dict) -> str:
@@ -75772,30 +75933,24 @@ def video_ai_real_pilot_screen_payload(
         suggestion_buttons = [
             (
                 video_ai_real_pilot_selected(
-                    str(index),
+                    str(visible_index),
                     context_key == str(item.get("key") or "")
                     and context_profile_id == str(item.get("profile_key") or ""),
                 ),
                 f"vid3|context|{item.get('key')}",
             )
-            for index, item in enumerate(visible_suggestions, page_start + 1)
+            for visible_index, item in enumerate(visible_suggestions, 1)
         ]
-        rows = [
-            suggestion_buttons[offset:offset + 2]
-            for offset in range(0, len(suggestion_buttons), 2)
-        ]
-        if page_count > 1:
-            rows.append([("🔄 Đổi 5 gợi ý tiếp theo", "vid3|context_page")])
+        rows = [suggestion_buttons]
         rows.extend([
-            [("✅ Giữ nguyên nội dung đã chọn", "vid3|content_lock"), ("✏️ Sửa nội dung", "vid3|content_edit")],
-            [("🔄 Chọn nội dung khác", "vid3|content_change")],
+            [("🔄 Đổi 5 gợi ý", "vid3|context_page"), ("✍️ Tự nhập nội dung", "vid3|content_edit")],
             *video_ai_real_pilot_nav_rows(back="vid3|back"),
         ])
         profile_name = str(suggestions[0].get("profile_name") or "Nội dung tự nhập")
         pattern = str(suggestions[0].get("pattern") or "")
         suggestion_lines = [
             f"{index}. {item.get('label')}: {item.get('guidance')}"
-            for index, item in enumerate(visible_suggestions, page_start + 1)
+            for index, item in enumerate(visible_suggestions, 1)
         ]
         suggestion_copy = "\n\n".join(suggestion_lines)
         return (
@@ -75806,10 +75961,10 @@ def video_ai_real_pilot_screen_payload(
             f"{len(visible_suggestions)} gợi ý theo {profile_name}\n"
             f"Bộ gợi ý {context_page}/{page_count}\n"
             f"Khung nội dung: {pattern}\n"
-            f"Đang dùng: {commercial.get('context_label') or 'Giữ nguyên nội dung đã chọn'}\n\n"
+            f"Đang dùng: {commercial.get('context_label') or 'Chưa chọn gợi ý triển khai'}\n\n"
             f"{suggestion_copy}\n\n"
-            "Chọn một gợi ý để bot đưa toàn bộ chi tiết vào câu lệnh và chuyển thẳng sang Nhân vật/Bối cảnh. "
-            "Nếu nội dung gốc đã đủ, chọn Giữ nguyên nội dung đã chọn.",
+            "Chọn một số để bot đưa toàn bộ chi tiết vào câu lệnh và chuyển thẳng sang Nhân vật và bối cảnh. "
+            "Nếu muốn dùng nội dung riêng, chọn Tự nhập nội dung.",
             video_uiflow3_keyboard(rows),
         )
 
@@ -76180,7 +76335,7 @@ def video_ai_real_pilot_screen_payload(
             else "Chưa chọn"
         )
         watermark_line = (
-            f"Đã chọn\nNội dung: {watermark_text[:180]}\nVị trí: {watermark_position}"
+            f"Đã chọn\nNội dung: {watermark_text}\nVị trí: {watermark_position}"
             if watermark_text
             else "Chưa chọn"
         )
@@ -76215,24 +76370,11 @@ def video_ai_real_pilot_screen_payload(
         )
 
     if step == "prompts" and not view:
-        scenes = list(state.get("scenes") or [])
-        prompt_sections = []
-        for scene in scenes:
-            prompt_sections.append(
-                f"CẢNH {scene.get('scene_index') or '?'}\n"
-                f"{video_ai_real_pilot_scene_prompt_text(state, scene)}"
-            )
-        return (
-            f"{progress_prefix}🧠 Rà soát câu lệnh\n\n"
-            "Toàn bộ câu lệnh hiện tại\n\n"
-            + "\n\n".join(prompt_sections)
-            + "\n\nNội dung được hiển thị nguyên văn. Mở từng cảnh để sửa câu lệnh hình ảnh hoặc điều cần tránh; nếu đã đúng, hoàn tất để tiếp tục.",
-            video_uiflow3_keyboard([
-                [("📝 Câu lệnh từng cảnh", "vid3|prompt_scenes"), ("🎥 Tùy chỉnh nâng cao", "vid3|prompt_advanced")],
-                [("✅ Hoàn tất rà soát câu lệnh", "vid3|prompts_done")],
-                *video_ai_real_pilot_nav_rows(back="vid3|back"),
-            ]),
+        prompt_text, prompt_markup = video_ai_real_prompt_page_payload(
+            state,
+            safe_int(state.get("prompt_page_index"), 1),
         )
+        return f"{progress_prefix}{prompt_text}", prompt_markup
 
     if step == "summary" and not view:
         content = dict(state.get("content") or {})
@@ -76241,7 +76383,11 @@ def video_ai_real_pilot_screen_payload(
         audio = dict(state.get("audio") or {})
         scenes = list(state.get("scenes") or [])
         errors = video_uiflow3.readiness_errors(state)
-        content_preview = str(content.get("original_intent") or (content.get("approved_brief") or {}).get("title") or "Chưa có")[:320]
+        content_preview = str(
+            content.get("original_intent")
+            or (content.get("approved_brief") or {}).get("title")
+            or "Chưa có"
+        )
         ratio_label = {
             "9:16": "Dọc 9:16",
             "16:9": "Ngang 16:9",
@@ -76271,7 +76417,7 @@ def video_ai_real_pilot_screen_payload(
             else "Bỏ qua"
         )
         watermark_summary = (
-            f"{watermark_text[:120]} · "
+            f"{watermark_text} · "
             f"{video_scene3_flow.logo_position_label(str(watermark.get('position') or ''))}"
             if watermark_text
             else "Bỏ qua"
@@ -76289,6 +76435,20 @@ def video_ai_real_pilot_screen_payload(
             f"Logo: {logo_summary}",
             f"Watermark: {watermark_summary}",
         ]
+        prompt_sections = []
+        for fallback_index, scene in enumerate(scenes, 1):
+            scene_index = max(1, safe_int(scene.get("scene_index"), fallback_index))
+            prompt_sections.extend([
+                "",
+                f"Câu lệnh đầy đủ cảnh {scene_index}:",
+                video_ai_real_pilot_scene_prompt_text(state, scene),
+            ])
+        if prompt_sections:
+            lines.extend([
+                "",
+                "🧠 Toàn bộ câu lệnh video hiện tại (nguyên văn):",
+                *prompt_sections,
+            ])
         if errors:
             pilot_label_replacements = {
                 "Noi dung chua duoc xac nhan": "Nội dung chưa được xác nhận",
@@ -77756,7 +77916,7 @@ def video_uiflow3_clear_transient(state: dict, *, keep_return: bool = True) -> d
         "ui_view", "active_character_id", "active_location_id", "active_scene_id",
         "assignment_owner_type", "assignment_owner_id", "ui_return_callback",
         "reference_filter_type", "reference_filter_id", "source_reference_asset_id",
-        "active_reference_index",
+        "active_reference_index", "prompt_page_index",
     ):
         current.pop(key, None)
     current.pop("pending_input", None)
@@ -77785,7 +77945,7 @@ def video_uiflow3_open_view(state: dict, view: str, **fields) -> dict:
         "active_character_id", "active_location_id", "active_scene_id",
         "assignment_owner_type", "assignment_owner_id", "ui_return_callback",
         "reference_filter_type", "reference_filter_id", "source_reference_asset_id",
-        "active_reference_index",
+        "active_reference_index", "prompt_page_index",
     ):
         current.pop(key, None)
     current["ui_view"] = str(view or "")
@@ -78520,6 +78680,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 raise ValueError("video_content_source_invalid")
         elif action == "content_lock":
             state = video_uiflow3.lock_content(state) if not bool((state.get("content") or {}).get("locked")) else state
+            state = video_ai_real_confirm_preselected_scene_count(state)
             if str((state.get("navigation") or {}).get("return_to") or "") == "summary":
                 state = video_uiflow3_clear_transient(video_uiflow3.finish_editor(state), keep_return=False)
             else:
@@ -78527,6 +78688,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         elif action == "context" and values:
             state = video_ai_real_apply_context_prompt(state, values[0])
             state = video_uiflow3.lock_content(state)
+            state = video_ai_real_confirm_preselected_scene_count(state)
             if str((state.get("navigation") or {}).get("return_to") or "") == "summary":
                 state = video_uiflow3_clear_transient(
                     video_uiflow3.finish_editor(state),
@@ -79372,6 +79534,16 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         elif action == "prompt_scenes":
             state = video_ai_real_maybe_compile_state(state)
             state = video_uiflow3_open_view(state, "prompt_scenes")
+        elif action == "prompt_page" and values:
+            state = video_ai_real_maybe_compile_state(state)
+            pages = video_ai_real_prompt_review_pages(state)
+            if not pages:
+                raise ValueError("prompt_pages_missing")
+            state["prompt_page_index"] = max(
+                1,
+                min(len(pages), safe_int(values[0], 1)),
+            )
+            state["ui_view"] = ""
         elif action == "prompt_scene" and values:
             scene_id = values[0]
             if not video_uiflow3_find_scene(state, scene_id):
@@ -79995,7 +80167,7 @@ async def handle_video_uiflow3_pending_media(update: Update, context: ContextTyp
     file_id = str(getattr(media, "file_id", "") or "")
     unique_id = str(getattr(media, "file_unique_id", "") or "")
     if not file_id:
-        await update.message.reply_text("Không đọc được mã tệp Telegram. Vui lòng gửi lại.")
+        await update.message.reply_text("Không đọc được tệp vừa gửi. Vui lòng gửi lại.")
         return True
     message_id = safe_int(getattr(update.message, "message_id", 0), 0)
     handled = [safe_int(item, 0) for item in state.get("handled_media_message_ids") or [] if safe_int(item, 0) > 0][-80:]
@@ -80525,8 +80697,8 @@ def storyboard2_quality_text(state: dict, lang: str = "vi") -> str:
     ]
     if not packages:
         lines.extend([
-            "Hiện chưa có gói nào có hợp đồng kỹ thuật phù hợp với đúng chế độ ảnh đã chọn.",
-            "Hệ thống không hiển thị nút gói giả, chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu.",
+            "Hiện chưa có gói nào đáp ứng đúng chế độ ảnh đã chọn.",
+            "Hệ thống chưa tạo tác vụ, chưa xử lý video và chưa trừ Xu.",
         ])
         if capability == "first_last_frame_video":
             lines.append("Có thể chuyển về một ảnh đầu mỗi cảnh hoặc quay lại quản lý ảnh.")
@@ -80545,7 +80717,7 @@ def storyboard2_quality_text(state: dict, lang: str = "vi") -> str:
         )
     lines.extend([
         "",
-        "Chọn một gói để chạy preflight thật và mở hóa đơn. Màn này chưa tạo video và chưa trừ Xu.",
+        "Chọn một gói để kiểm tra điều kiện xử lý và mở hóa đơn. Màn này chưa tạo video và chưa trừ Xu.",
     ])
     return "\n".join(lines)
 
@@ -80578,7 +80750,7 @@ def storyboard2_entry_text() -> str:
     return (
         "🎞️ <b>Storyboard</b>\n\n"
         "Lập bảng phân cảnh có ảnh đầu bắt buộc và ảnh cuối tùy chọn cho từng cảnh. "
-        "Mỗi cảnh khoảng 8 giây, có câu lệnh chuyển động riêng rồi được ghép thành một MP4 cuối.\n\n"
+        "Mỗi cảnh có câu lệnh chuyển động riêng và được ghép thành một video hoàn chỉnh.\n\n"
         "Bước này chỉ mở kế hoạch. Hệ thống chưa tạo ảnh/video, chưa tạo tác vụ và chưa trừ Xu."
     )
 
@@ -80597,7 +80769,7 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
             "📎 <b>Gửi storyboard có sẵn</b>\n\n"
             "Gửi ảnh, tài liệu hoặc PDF storyboard. Có thể gửi nhiều ảnh liên tiếp; hệ thống giữ nguyên phiên và "
             "đếm panel đã nhận để anh/chị xác nhận trước khi chọn tỉ lệ.\n\n"
-            "Bước này chỉ lưu tham chiếu Telegram, chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu.",
+            "Bước này chỉ lưu tư liệu trong phiên, chưa tạo tác vụ, chưa xử lý video và chưa trừ Xu.",
             storyboard2_upload_wait_keyboard(),
         )
     if screen in {"upload_review", "await_upload_count"}:
@@ -80621,22 +80793,22 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
             f"• Tên: <b>{html.escape(str(item.get('file_name') or 'Ảnh storyboard'))}</b>\n"
             f"• Loại: <b>{html.escape(str(item.get('mime_type') or 'image'))}</b>\n"
             f"• Ghi chú: {html.escape(str(item.get('caption') or 'Không có'))}\n\n"
-            "Đây là bản xem mapping, chưa tạo file đầu ra và chưa trừ Xu.",
+            "Đây là bản xem thông tin, chưa tạo tệp đầu ra và chưa trừ Xu.",
             storyboard2_upload_panels_keyboard(),
         )
     if screen == "help":
         return (
             "ℹ️ <b>Storyboard hoạt động thế nào?</b>\n\n"
             "Chọn số cảnh và tỉ lệ → viết nội dung → chuẩn bị ảnh đầu/ảnh cuối theo cảnh → "
-            "duyệt câu lệnh chuyển động → chọn chuyển cảnh và add-on → chọn gói, xem hóa đơn rồi xác nhận.\n\n"
-            "Ảnh AI có hóa đơn và xác nhận riêng. Video chỉ trừ Xu sau khi MP4 hợp lệ đã được gửi thành công.",
+            "duyệt câu lệnh chuyển động → chọn chuyển cảnh và phần bổ sung → chọn gói, xem hóa đơn rồi xác nhận.\n\n"
+            "Ảnh AI có hóa đơn và xác nhận riêng. Video chỉ trừ Xu sau khi video hợp lệ đã được gửi thành công.",
             storyboard2_keyboard(storyboard2_nav("vstory|entry")),
         )
     if screen in {"count", "await_count"}:
         suffix = "\n\nHãy gửi một số từ 2 đến 20." if screen == "await_count" else ""
         return (
             "🔢 <b>Chọn số cảnh Storyboard</b>\n\n"
-            "Mỗi cảnh là một ý hoặc hành động trọn vẹn khoảng 8 giây. Số cảnh ảnh hưởng trực tiếp tới thời lượng và tổng giá video; "
+            "Mỗi cảnh là một ý hoặc hành động trọn vẹn. Thời lượng mỗi cảnh và tổng giá được tính theo gói Chất lượng ở bước cuối; "
             "hãy chọn vừa đủ nội dung, hệ thống không tự tăng số cảnh."
             + suffix,
             storyboard2_count_keyboard(),
@@ -80645,7 +80817,7 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
         return (
             "📐 <b>Chọn tỉ lệ Storyboard</b>\n\n"
             f"• Số cảnh: <b>{count}</b>\n"
-            "Tỉ lệ này được giữ cho prompt ảnh, ảnh tạo AI và clip của toàn bộ cảnh. Bước này chưa gọi dịch vụ.",
+            "Tỉ lệ này được giữ cho câu lệnh ảnh, ảnh tạo AI và video của toàn bộ cảnh. Bước này chưa xử lý dữ liệu.",
             storyboard2_ratio_keyboard(board),
         )
     if screen == "content_source":
@@ -80808,7 +80980,7 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
         if screen == "await_image_prompt":
             return (
                 f"✍️ <b>Nhập prompt {slot_label} · cảnh {index}/{count}</b>\n\n"
-                "Prompt phải giữ đúng nội dung cảnh, tỉ lệ, nhận diện và trạng thái đầu/cuối đã chọn.",
+                "Câu lệnh phải giữ đúng nội dung cảnh, tỉ lệ, nhận diện và trạng thái đầu/cuối đã chọn.",
                 storyboard2_keyboard(storyboard2_nav("vstory|image_prompt_screen")),
             )
         if screen == "await_image_negative":
@@ -80819,15 +80991,15 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
             )
         offset = int(board.get("image_prompt_offset") or 0)
         lines = [
-            f"✨ <b>Prompt {slot_label} · cảnh {index}/{count}</b>",
+            f"✨ <b>Câu lệnh {slot_label} · cảnh {index}/{count}</b>",
             "",
-            "Chọn một biến thể bố cục. Cả năm đều kế thừa đúng ý tưởng, nội dung cảnh, tỉ lệ và continuity.",
+            "Chọn một biến thể bố cục. Cả năm đều kế thừa đúng ý tưởng, nội dung cảnh, tỉ lệ, nhận diện và mạch cảnh.",
             "",
         ]
         for choice in range(1, 6):
             prompt = video_storyboard2.image_prompt(board, index, slot, offset + choice - 1)
             lines.append(f"{choice}. {html.escape(prompt['prompt'][:220])}…")
-        lines.extend(["", "Sau khi chọn, hệ thống mở gói ảnh và hóa đơn riêng; chưa gọi provider ở màn này."])
+        lines.extend(["", "Sau khi chọn, hệ thống mở gói ảnh và hóa đơn riêng; chưa tạo ảnh ở màn này."])
         return "\n".join(lines), storyboard2_image_prompt_keyboard()
     if screen in {"video_prompts", "await_video_prompt", "await_video_negative"}:
         if screen == "await_video_prompt":
@@ -80877,7 +81049,7 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
         capability = video_storyboard2.required_capability(board)
         addons = [key for key, enabled in dict(board.get("addons") or {}).items() if enabled]
         return (
-            "📋 <b>Review Storyboard</b>\n\n"
+            "📋 <b>Xem lại bảng phân cảnh</b>\n\n"
             f"• Nội dung: {html.escape(str(board.get('content') or ''))}\n"
             f"• Số cảnh: <b>{count}</b> · khoảng <b>{count * 8} giây</b>\n"
             f"• Tỉ lệ: <b>{html.escape(ratio)}</b>\n"
@@ -81168,7 +81340,7 @@ def video_profile_studio_menu_text(lang: str = "vi") -> str:
     return (
         "🧠 <b>Lập kế hoạch video theo cảnh</b>\n\n"
         "Bắt đầu bằng chủ đề video. Tiếp theo anh/chị chọn số cảnh trước, rồi hệ thống mới gợi ý mẫu chuyên ngành, ngữ cảnh và viết câu lệnh riêng cho từng cảnh.\n\n"
-        "Bộ lập kế hoạch hỗ trợ 1–20 cảnh, mục tiêu khoảng 8 giây/cảnh. Khả năng tạo thật sẽ được kiểm tra theo gói và trạng thái hệ thống trước xác nhận cuối.\n\n"
+        "Bộ lập kế hoạch hỗ trợ 1–20 cảnh. Thời lượng mỗi cảnh được xác định theo gói Chất lượng trước khi lập hóa đơn và xác nhận cuối.\n\n"
         "Màn này chỉ lập kế hoạch trong phiên, chưa tạo file và chưa trừ Xu."
     )
 
@@ -81255,7 +81427,7 @@ def video_profile_studio_preview_text(draft: dict, lang: str = "vi") -> str:
         duration_seconds = int(scene.get("duration_seconds") or 0)
         suffix = f" · {duration_seconds}s" if duration_seconds > 0 else ""
         scene_lines.append(
-            f"{scene_index}. <b>{html.escape(scene_title)}</b>{html.escape(suffix)}: {html.escape(scene_prompt[:260])}"
+            f"{scene_index}. <b>{html.escape(scene_title)}</b>{html.escape(suffix)}:\n{html.escape(scene_prompt)}"
         )
     if not scene_lines:
         scene_lines.append("1. <b>Cảnh mở đầu</b>: Giữ đúng chủ thể và yêu cầu anh/chị đã mô tả.")
@@ -81264,13 +81436,13 @@ def video_profile_studio_preview_text(draft: dict, lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             f"🧠 <b>Profile preview: {html.escape(title)}</b>\n\n"
-            f"<b>Prompt draft</b>\n{html.escape(prompt[:1400])}\n\n"
+            f"<b>Câu lệnh nháp</b>\n{html.escape(prompt)}\n\n"
             f"<b>Scene plan</b>\n" + "\n".join(scene_lines) + clarification_text +
             "\n\nThis draft is stored only in the current session. No file has been created and no Xu has been deducted."
         )
     return (
         f"🧠 <b>Bản xem trước: {html.escape(title)}</b>\n\n"
-        f"<b>Prompt đề xuất</b>\n{html.escape(prompt[:1400])}\n\n"
+        f"<b>Câu lệnh đề xuất</b>\n{html.escape(prompt)}\n\n"
         f"<b>Kế hoạch cảnh</b>\n" + "\n".join(scene_lines) + clarification_text +
         "\n\nBản nháp chỉ được lưu trong phiên hiện tại. Hệ thống chưa tạo file và chưa trừ Xu."
     )
@@ -81316,14 +81488,14 @@ def video_profile_scene1_count_text(state: dict, lang: str = "vi") -> str:
         "manual": "Tự nhập nội dung",
     }.get(content_mode, "Chưa chọn nguồn nội dung")
     range_line = (
-        "• Kịch bản dài dùng 5–20 cảnh, tương ứng khoảng 40–160 giây.\n"
+        "• Kịch bản dài dùng 5–20 cảnh; thời lượng mỗi cảnh và tổng thời lượng được tính theo gói Chất lượng.\n"
         if is_script
-        else "• Bộ lập kế hoạch hỗ trợ 1–20 cảnh, tối đa lý thuyết 160 giây.\n"
+        else "• Bộ lập kế hoạch hỗ trợ 1–20 cảnh; tổng thời lượng được tính theo gói Chất lượng.\n"
     )
     return (
         "🎞 <b>Chọn số cảnh</b>\n\n"
         f"• Cách bắt đầu: <b>{html.escape(mode)}</b>\n"
-        "• 1 cảnh = một nhịp nội dung hoàn chỉnh, mục tiêu khoảng 8 giây.\n"
+        "• 1 cảnh = một nhịp nội dung hoàn chỉnh; số giây của cảnh được chọn ở bước Chất lượng.\n"
         f"{range_line}"
         "• Nhiều cảnh hơn sẽ cần nhiều nội dung và chi phí dựng cao hơn. Chất lượng và giá chỉ được chọn gần cuối.\n\n"
         "Hãy chọn đúng số cảnh cần dùng. Hệ thống không tự tăng số cảnh, không cắt cụt ý cuối và chưa tạo tác vụ ở bước này."
@@ -81482,19 +81654,21 @@ def video_profile_scene1_post_keyboard(state: dict, lang: str = "vi") -> InlineK
 def video_profile_scene1_quality_text(state: dict, lang: str = "vi") -> str:
     scene_count = int(state.get("scene_count") or 1)
     quality_rows = []
-    for price in VIDEO_B14_2_QUALITY_OPTIONS:
-        icon, name, _descriptions = video_b14_package_tier(price)
-        level, detail = video_scene3_public_quality_spec(price, scene_count=scene_count)
+    for tier_id in VIDEO_AI_REAL_QUALITY_MODEL_KEYS:
+        product = video_public_quality_product(tier_id)
         quality_rows.append(
-            f"{icon} <b>{price} Xu — {html.escape(name)}</b>: "
-            f"{html.escape(level)} · {html.escape(detail)}"
+            f"{product['icon']} <b>{html.escape(product['name'])}</b> · "
+            f"<b>{product['seconds']} giây/cảnh</b> · <b>{product['unit_xu']} Xu/cảnh</b>\n"
+            f"• {html.escape(product['public_level'])} · {html.escape(product['resolution'])}\n"
+            f"• {html.escape(product['use_case'])}\n"
+            f"• Tổng {scene_count} cảnh: <b>{product['unit_xu'] * scene_count} Xu</b>"
         )
     return (
         "⭐ <b>Chọn chất lượng gần cuối</b>\n\n"
-        f"Kế hoạch đã có <b>{scene_count} cảnh</b> · khoảng <b>{scene_count * 8} giây</b>. Mỗi cảnh dùng một clip ngắn khoảng 8 giây rồi mới ghép thành video cuối.\n\n"
-        + "\n".join(quality_rows)
+        f"Kế hoạch đã có <b>{scene_count} cảnh</b>. Thời lượng và giá được tính riêng theo gói đã chọn.\n\n"
+        + "\n\n".join(quality_rows)
         + "\n\n"
-        "Hệ thống tự chọn công nghệ phù hợp theo gói và tình trạng sẵn sàng; không làm thay đổi giá sau khi xác nhận. "
+        "Hệ thống tự chọn đường dựng phù hợp theo năng lực của gói và phương án dự phòng; giá không đổi sau khi xác nhận. "
         "Màn này chưa tạo video và chưa trừ Xu."
     )
 
@@ -81529,30 +81703,29 @@ def video_scene3_keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMa
 
 
 def video_scene3_nav_rows() -> list[list[tuple[str, str]]]:
-    return [[("⬅️ Quay lại", "vprofile|back"), ("🏠 Menu chính", "menu|main")]]
+    return [[("⬅️ Quay lại", "vprofile|back"), ("🎬 Menu Video", "menu|main_video")]]
 
 
 def video_scene3_content_mode_text(state: dict) -> str:
-    product_id = str(state.get("source_product_id") or state.get("product_type") or "video_ai_real")
+    product_id = str(state.get("source_product_id") or state.get("product_type") or "")
     product = VIDEO_PRODUCT_REGISTRY.get(product_id) or {}
     return (
         f"{html.escape(str(product.get('public_label') or '🎬 Tạo video'))}\n\n"
         "Chọn cách chuẩn bị nội dung. Cả hai cách đều đi cùng một quy trình: chọn số cảnh, tỉ lệ, tài nguyên bắt buộc và một Video Profile trước khi viết từng cảnh.\n\n"
-        "Bước này chỉ lập kế hoạch, chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu."
+        "Bước này chỉ lập kế hoạch, chưa tạo tác vụ, chưa xử lý video và chưa trừ Xu."
     )
 
 
 def video_scene3_content_mode_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("✍️ Tự nhập nội dung", "vprofile|mode|manual"), ("💡 Gợi ý nội dung", "vprofile|mode|suggestions")],
-        [("⬅️ Quay lại", "vprofile|back"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", "vprofile|back"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
 VIDEO_SCENE3_AI_INPUT_LABELS = {
     "prompt_video": "✨ Prompt → Video",
     "image_video": "🖼 Ảnh → Video",
-    "video_video": "🎞 Video → Video",
 }
 
 
@@ -81563,7 +81736,7 @@ def video_scene3_ai_input_text(state: dict) -> str:
         f"• Đang chọn: <b>{html.escape(selected)}</b>\n"
         f"• Số cảnh: <b>{max(1, safe_int(state.get('scene_count'), 1))}</b>\n"
         f"• Tỉ lệ: <b>{html.escape(str(state.get('aspect_ratio') or 'Chưa chọn'))}</b>\n\n"
-        "Prompt dùng mô tả để dựng cảnh; Ảnh dùng ảnh tham chiếu; Video mẫu dùng video tham chiếu. "
+        "Câu lệnh dùng mô tả để dựng cảnh; Ảnh dùng ảnh tham chiếu. "
         "Tệp tham chiếu chỉ được hỏi ở đúng bước sau. Màn này chưa tạo tác vụ và chưa trừ Xu."
     )
 
@@ -81571,7 +81744,7 @@ def video_scene3_ai_input_text(state: dict) -> str:
 def video_scene3_ai_input_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("✨ Prompt → Video", "vprofile|ai_input|prompt_video"), ("🖼 Ảnh → Video", "vprofile|ai_input|image_video")],
-        [("🎞 Video → Video", "vprofile|ai_input|video_video"), ("🔄 Chọn lại tỉ lệ", "vprofile|ai_input|back")],
+        [("🔄 Chọn lại tỉ lệ", "vprofile|ai_input|back")],
         *video_scene3_nav_rows(),
     ])
 
@@ -82121,7 +82294,7 @@ def video_scene3_suggestion_keyboard(state: dict | None = None) -> InlineKeyboar
     return video_scene3_keyboard([
         number_buttons,
         [("🔄 Đổi 5 gợi ý", "vprofile|suggest_refresh"), ("✍️ Tự nhập nội dung", "vprofile|suggest_custom")],
-        [("⬅️ Quay lại", "vprofile|back"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", "vprofile|back"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
@@ -82500,7 +82673,7 @@ def video_scene3_content_position_text(state: dict) -> str:
     return (
         f"📍 <b>{html.escape(label)}</b>\n\n"
         f"• Vị trí đang chọn: <b>{html.escape(video_scene3_flow.logo_position_label(str(value.get('position') or '')))}</b>\n\n"
-        "Hệ thống sẽ chừa vùng này khi lập bố cục từng cảnh. Đây chưa phải logo hoặc dấu bản quyền đã gắn vào MP4."
+        "Hệ thống sẽ chừa vùng này khi lập bố cục từng cảnh. Đây chưa phải logo hoặc dấu bản quyền đã gắn vào video."
     )
 
 
@@ -82911,8 +83084,8 @@ def video_scene3_prompt_text(state: dict, kind: str) -> str:
         f"{'🖼' if kind == 'image' else '🎥'} <b>{title} · cảnh {index}/{safe_int(state.get('scene_count'), 1)}</b>\n\n"
         f"• Phiên bản: <b>{safe_int(entry.get('active_version'), 1)}</b>\n"
         f"• Đã duyệt: <b>{'Có' if entry.get('approved') else 'Chưa'}</b>{transition_line}{structure}\n\n"
-        f"<b>Nội dung</b>\n{html.escape(str(prompt.get('prompt') or '')[:1500])}\n\n"
-        f"<b>Yêu cầu loại trừ</b>\n{html.escape(str(prompt.get('negative_prompt') or '')[:600])}\n\n"
+        f"<b>Nội dung đầy đủ</b>\n{html.escape(str(prompt.get('prompt') or ''))}\n\n"
+        f"<b>Yêu cầu loại trừ đầy đủ</b>\n{html.escape(str(prompt.get('negative_prompt') or ''))}\n\n"
         f"{explanation} Chưa gọi dịch vụ tạo ảnh/video."
     )
 
@@ -82925,8 +83098,8 @@ def video_scene3_prompt_copy_text(state: dict, kind: str) -> str:
     title = "ảnh" if kind == "image" else "video"
     return (
         f"📋 <b>Bản sao câu lệnh {title} · cảnh {index}/{safe_int(state.get('scene_count'), 1)}</b>\n\n"
-        f"<pre>{html.escape(str(prompt.get('prompt') or '')[:2200])}</pre>\n\n"
-        f"<b>Yêu cầu loại trừ</b>\n<pre>{html.escape(str(prompt.get('negative_prompt') or '')[:700])}</pre>\n\n"
+        f"<pre>{html.escape(str(prompt.get('prompt') or ''))}</pre>\n\n"
+        f"<b>Yêu cầu loại trừ</b>\n<pre>{html.escape(str(prompt.get('negative_prompt') or ''))}</pre>\n\n"
         "Chạm giữ phần câu lệnh để sao chép. Đây chỉ là bản kế hoạch; hệ thống chưa gọi dịch vụ tạo ảnh/video."
     )
 
@@ -83012,7 +83185,7 @@ def video_scene3_full_review_text(state: dict) -> str:
 def video_scene3_full_review_keyboard(state: dict) -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("👁️ Xem từng cảnh", "video_tail|review|scenes"), ("✍️ Sửa nội dung", "video_tail|review|edit")],
-        [("🎬 Prompt video", "video_tail|review|prompts"), ("🖼️ Logo/Watermark", "video_tail|review|logo")],
+        [("🎬 Câu lệnh video", "video_tail|review|prompts"), ("🖼️ Logo/Watermark", "video_tail|review|logo")],
         [("📄 Xem tổng hợp", "video_tail|review|summary"), ("➡️ Âm thanh & Add-on", "video_tail|review|audio")],
         [("⬅️ Quay lại", "video_tail|review|back"), ("🏠 Menu chính", "menu|main")],
     ])
@@ -83281,17 +83454,13 @@ def video_scene3_aspect_keyboard() -> InlineKeyboardMarkup:
 
 
 def video_scene3_quality_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    values = list(VIDEO_B14_2_QUALITY_OPTIONS)
+    values = list(VIDEO_AI_REAL_QUALITY_MODEL_KEYS)
     rows = []
-    for index in range(0, 8, 2):
+    for index in range(0, len(values), 2):
         rows.append([
             (video_b14_package_button_label(value), f"vprofile|tier|{value}")
             for value in values[index:index + 2]
         ])
-    rows.append([
-        (video_b14_package_button_label(values[-1]), f"vprofile|tier|{values[-1]}"),
-        ("ℹ️ Điểm khác biệt", "vprofile|quality_info"),
-    ])
     rows.extend(video_scene3_nav_rows())
     return video_scene3_keyboard(rows)
 
@@ -83299,13 +83468,16 @@ def video_scene3_quality_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def video_scene3_quality_guide_text() -> str:
     lines = [
         "📊 <b>So sánh gói chất lượng</b>", "",
-        "Mỗi mức dưới đây áp dụng cho một cảnh khoảng 8 giây. Tên công nghệ xử lý được ẩn; hệ thống tự chọn đường phù hợp khi anh/chị xác nhận cuối.", "",
+        "Mỗi mức dưới đây ghi rõ thời lượng, chất lượng và giá cho một cảnh.", "",
     ]
-    for price in VIDEO_B14_2_QUALITY_OPTIONS:
-        icon, name, _descriptions = video_b14_package_tier(price)
-        level, detail = video_scene3_public_quality_spec(price)
-        lines.append(f"{icon} <b>{price} Xu — {html.escape(name)}</b> · {html.escape(level)}")
-        lines.append(f"↳ {html.escape(detail)}")
+    for tier_id in VIDEO_AI_REAL_QUALITY_MODEL_KEYS:
+        product = video_public_quality_product(tier_id)
+        lines.append(
+            f"{product['icon']} <b>{html.escape(product['name'])}</b> · "
+            f"{product['seconds']} giây · {product['unit_xu']} Xu/cảnh · "
+            f"{html.escape(product['public_level'])}"
+        )
+        lines.append(f"↳ {html.escape(product['use_case'])}")
     lines.extend(["", "Thông số là định hướng chọn gói, không phải lời hứa hoàn tất. Chỉ video cuối hợp lệ đã gửi mới được tính Xu."])
     return "\n".join(lines)[:3900]
 
@@ -83320,6 +83492,7 @@ def video_scene3_final_text(state: dict, user_id: int = 0) -> str:
     quality_xu = safe_int(state.get("quality_xu"), 200)
     count = max(1, safe_int(state.get("scene_count"), 1))
     quote = video_b14_invoice_breakdown(quality_xu, count)
+    quality_product = video_public_quality_product(quality_xu)
     balance = 0
     if user_id:
         try:
@@ -83351,12 +83524,12 @@ def video_scene3_final_text(state: dict, user_id: int = 0) -> str:
         "🧾 <b>Báo cáo tổng hợp trước xác nhận</b>\n\n"
         f"• Ý tưởng: {html.escape(str(state.get('subject') or '')[:260])}\n"
         f"• Số cảnh: <b>{count}</b>\n"
-        f"• Tổng thời lượng dự kiến: <b>{count * 8} giây</b>\n"
+        f"• Tổng thời lượng dự kiến: <b>{count * quality_product['seconds']} giây</b>\n"
         f"• Video Profile: {html.escape(video_profile_public_label(state))}\n"
         f"• Profile bổ sung: {html.escape(linked_line)}\n"
         f"• Tỉ lệ: <b>{html.escape(str(state.get('aspect_ratio') or '9:16'))}</b>\n"
         f"• Gói: <b>{html.escape(video_b14_package_full_label(quality_xu))}</b>\n"
-        f"• Giá mỗi cảnh theo gói: <b>{xu_number(quality_xu)} Xu</b>\n"
+        f"• Giá mỗi cảnh theo gói: <b>{xu_number(quality_product['unit_xu'])} Xu</b>\n"
         f"• Tạm tính: <b>{xu_number(safe_int(quote.get('subtotal_xu'), 0))} Xu</b>\n"
         f"• Giảm theo số cảnh: <b>{safe_int(quote.get('discount_percent'), 0)}%</b>\n"
         f"• Lời thoại và âm thanh: {html.escape(audio)}\n"
@@ -83365,7 +83538,7 @@ def video_scene3_final_text(state: dict, user_id: int = 0) -> str:
         f"• Tổng dự kiến: <b>{xu_number(safe_int(quote.get('total_xu'), 0))} Xu</b>\n"
         f"• Số dư hiện tại: <b>{xu_number(balance)} Xu</b>\n"
         f"• Thời gian dự kiến: khoảng <b>{max(3, count * 2)}–{max(6, count * 4)} phút</b> tùy tải hệ thống\n\n"
-        "Chỉ nút xác nhận cuối ở hóa đơn mới được phép tạo tác vụ. TOAN AAS chỉ trừ Xu sau khi MP4 hợp lệ đã được gửi thành công."
+        "Chỉ nút xác nhận cuối ở hóa đơn mới được phép tạo tác vụ. TOAN AAS chỉ trừ Xu sau khi video hợp lệ đã được gửi thành công."
     )
 
 
@@ -83549,7 +83722,7 @@ def video_profile_scene1_storyboard_payload(state: dict) -> dict:
 
 def video_flow6_product_id(state: dict | None = None) -> str:
     current = dict(state or {})
-    return str(current.get("source_product_id") or current.get("product_type") or "video_ai_real")
+    return str(current.get("source_product_id") or current.get("product_type") or "")
 
 
 def video_flow6_required_capability(flow_kind: str, state: dict | None = None) -> str:
@@ -83768,7 +83941,7 @@ def video_flow6_preflight_block_text(preflight: dict | None = None) -> str:
     return (
         "⚠️ Chưa thể mở hóa đơn vì "
         + labels.get(blocker, "đường dựng chưa sẵn sàng")
-        + ". Hệ thống chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu."
+        + ". Hệ thống chưa tạo tác vụ, chưa bắt đầu xử lý video và chưa trừ Xu."
     )
 
 
@@ -84036,7 +84209,7 @@ async def video_profile_scene1_render(query, state: dict, lang: str = "vi"):
     state = video_scene3_flow.normalize_state(state)
     step = str(state.get("step") or "content_mode")
     pending = {
-        "await_count_custom": "🔢 <b>Nhập số cảnh</b>\n\nGửi một số từ 1 đến 20. Mỗi cảnh khoảng 8 giây và phải là một ý hoặc hành động hoàn chỉnh.",
+        "await_count_custom": "🔢 <b>Nhập số cảnh</b>\n\nGửi một số từ 1 đến 20. Mỗi cảnh phải là một ý hoặc hành động hoàn chỉnh; thời lượng được xác định theo gói Chất lượng.",
         "await_ratio_custom": "📐 <b>Nhập tỉ lệ video</b>\n\nGửi một trong bốn tỉ lệ: <code>9:16</code>, <code>16:9</code>, <code>1:1</code> hoặc <code>4:5</code>.",
         "await_flow6_asset_upload": lambda: (
             "📎 <b>Gửi video tham chiếu</b>\n\nGửi đúng một video mẫu. Tệp chỉ được giữ trong phiên lập kế hoạch; chưa tạo tác vụ và chưa trừ Xu."
@@ -84051,7 +84224,7 @@ async def video_profile_scene1_render(query, state: dict, lang: str = "vi"):
         "await_character_description": "✍️ <b>Mô tả nhân vật</b>\n\nMô tả nhận diện, giới tính nếu có, trang phục và đặc điểm phải giữ nhất quán. Hệ thống không tự đoán giới tính khi mô tả chưa rõ.",
         "await_suggestion": (
             "✍️ <b>Nhập kịch bản dài</b>\n\n"
-            "Gửi kịch bản hoàn chỉnh cho 5–20 cảnh, tương ứng khoảng 40–160 giây. "
+            "Gửi kịch bản hoàn chỉnh cho 5–20 cảnh; thời lượng được tính theo gói Chất lượng. "
             "Hệ thống giữ đúng ý, chia thành các cảnh trọn vẹn và cho xem lại trước khi dựng."
             if video_flow7_kind(state) == "script_to_video"
             else "✍️ <b>Nhập hướng nội dung riêng</b>\n\nMô tả hook, mạch kể và kết quả mong muốn. Hệ thống sẽ phân bổ đúng số cảnh đã chọn."
@@ -88256,10 +88429,10 @@ def video_flow7_script_count_text(proposal: dict) -> str:
         "📄 <b>Xác nhận số cảnh từ kịch bản</b>\n\n"
         f"TOAN AAS đề xuất <b>{count} cảnh</b> từ đúng nội dung anh/chị đã gửi; chưa tự cắt bỏ câu nào.\n\n"
         f"{preview}\n\n"
-        "Kịch bản → Video dùng từ 5 đến 20 cảnh, tương ứng khoảng 40–160 giây. "
+        "Kịch bản → Video dùng từ 5 đến 20 cảnh; thời lượng được tính theo gói Chất lượng. "
         "Dùng số cảnh này hoặc nhập số khác trước khi chọn tỉ lệ. Bước này chưa tạo tác vụ, "
         "chưa gọi nguồn dựng và chưa trừ Xu."
-    )[:4050]
+    )
 
 
 def video_flow7_script_count_keyboard(count: int) -> InlineKeyboardMarkup:
@@ -90114,22 +90287,34 @@ def video_ui_back_label(lang: str = "vi") -> str:
     return "⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back"
 
 
-def video_microflow_nav_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def video_microflow_menu_button(product_id: str = "", lang: str = "vi") -> InlineKeyboardButton:
+    protected = str(product_id or "") in {
+        "frame_video_local",
+        "image_to_video",
+        "video_edit",
+        "video_local_edit",
+    }
+    if protected:
+        return InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")
+    return InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")
+
+
+def video_microflow_nav_keyboard(lang: str = "vi", product_id: str = "") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"),
-        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        video_microflow_menu_button(product_id, lang),
     ]])
 
 
-def video_microflow_media_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def video_microflow_media_keyboard(lang: str = "vi", product_id: str = "") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Tiếp tục" if is_vi else "✅ Continue", callback_data="vproduct|media_continue"), InlineKeyboardButton("🗑 Xóa ảnh/video cuối" if is_vi else "🗑 Remove last", callback_data="vproduct|media_delete_last")],
-        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), video_microflow_menu_button(product_id, lang)],
     ])
 
 
-def video_microflow_scene_count_keyboard(kind: str, lang: str = "vi") -> InlineKeyboardMarkup:
+def video_microflow_scene_count_keyboard(kind: str, lang: str = "vi", product_id: str = "") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     if str(kind or "") == "storyboard":
         unit = "khung hình/cảnh ảnh" if is_vi else "image frames"
@@ -90141,7 +90326,7 @@ def video_microflow_scene_count_keyboard(kind: str, lang: str = "vi") -> InlineK
         [InlineKeyboardButton(f"4 {unit}", callback_data=f"vproduct|{kind}_scene_count|4"), InlineKeyboardButton(f"6 {unit}", callback_data=f"vproduct|{kind}_scene_count|6")],
         [InlineKeyboardButton(f"8 {unit}", callback_data=f"vproduct|{kind}_scene_count|8"), InlineKeyboardButton(f"10 {unit}", callback_data=f"vproduct|{kind}_scene_count|10")],
         [InlineKeyboardButton("✍️ Nhập số khác" if is_vi else "✍️ Custom", callback_data=f"vproduct|{kind}_scene_count|custom"), InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")],
-        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), video_microflow_menu_button(product_id, lang)],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -90150,7 +90335,7 @@ def video_storyboard_duration_keyboard(lang: str = "vi") -> InlineKeyboardMarkup
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("3 giây/cảnh", callback_data="vproduct|storyboard_video_duration|3"), InlineKeyboardButton("5 giây/cảnh", callback_data="vproduct|storyboard_video_duration|5")],
         [InlineKeyboardButton("8 giây/cảnh", callback_data="vproduct|storyboard_video_duration|8"), InlineKeyboardButton("✍️ Tự nhập", callback_data="vproduct|storyboard_video_duration|custom")],
-        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
     ])
 
 
@@ -90160,8 +90345,8 @@ def video_microflow_text(step: str, product_id: str = "", session: dict | None =
     media_count = len(list(draft.get("source_media_refs") or []))
     texts = {
         "ai_prompt_menu": (
-            "✨ <b>Prompt AI → Video</b>\n\n"
-            "Anh/chị có thể gửi prompt có sẵn, xem gợi ý prompt hoặc chọn một ý tưởng đã được chuẩn bị trong Kho ý tưởng video.\n\n"
+            "✨ <b>Prompt → Video</b>\n\n"
+            "Anh/chị có thể gửi câu lệnh có sẵn, xem gợi ý câu lệnh hoặc chọn một ý tưởng đã được chuẩn bị trong Kho Ý tưởng video.\n\n"
             "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu."
         ),
         "ai_image_menu": (
@@ -90175,13 +90360,13 @@ def video_microflow_text(step: str, product_id: str = "", session: dict | None =
             "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu."
         ),
         "trend_manual_input": "✍️ Nhập trend, chủ đề hoặc ý tưởng muốn bám theo. TOAN AAS sẽ đưa anh/chị sang chọn loại video sau khi nhận nội dung.",
-        "awaiting_prompt_text": "✍️ Gửi prompt video có sẵn. TOAN AAS sẽ chuẩn hóa và đưa sang bước chọn loại video.",
+        "awaiting_prompt_text": "✍️ Gửi câu lệnh video có sẵn. TOAN AAS sẽ giữ nguyên nội dung và đưa sang bước chọn loại video.",
         "awaiting_source_image": "🖼 Gửi ảnh tham khảo cho video AI. TOAN AAS chỉ lưu ảnh trong phiên; chưa tạo file thật và chưa trừ Xu.",
         "awaiting_reference_video": "🎞 Gửi video mẫu/tham khảo. TOAN AAS chỉ lưu video trong phiên để lập kế hoạch; chưa tạo file thật và chưa trừ Xu.",
         "prompt_suggestion_topic": "💡 Nhập sản phẩm/chủ đề/mục tiêu video. TOAN AAS sẽ gợi ý câu lệnh video rõ chủ thể, bối cảnh, camera và chuyển động.",
-        "prompt_custom_topic": "✍️ Sửa nội dung prompt video. TOAN AAS sẽ tạo lại 3-5 prompt để anh/chị chọn.",
+        "prompt_custom_topic": "✍️ Sửa nội dung câu lệnh video. TOAN AAS sẽ tạo lại 3-5 câu lệnh để anh/chị chọn.",
         "image_suggestion_topic": "🎨 Nhập sản phẩm/nhân vật/bối cảnh muốn có. TOAN AAS sẽ gợi ý câu lệnh ảnh trước khi sang video.",
-        "image_custom_topic": "✍️ Sửa nội dung ảnh/prompt ảnh. TOAN AAS sẽ tạo lại 3-5 hướng ảnh để anh/chị chọn.",
+        "image_custom_topic": "✍️ Sửa nội dung ảnh/câu lệnh ảnh. TOAN AAS sẽ tạo lại 3-5 hướng ảnh để anh/chị chọn.",
         "video_reference_suggestion_topic": "💡 Nhập sản phẩm/chủ đề/video mẫu muốn tham khảo. TOAN AAS sẽ gợi ý cách làm video, nhịp cảnh và chuyển động.",
         "video_reference_custom_topic": "✍️ Sửa nội dung hướng video mẫu. TOAN AAS sẽ tạo lại 3-5 hướng video để anh/chị chọn.",
         "awaiting_existing_script": "📄 Gửi kịch bản có sẵn. TOAN AAS sẽ đọc phần chữ/câu chuyện/hành động/thoại trước khi chia cảnh.",
@@ -90208,14 +90393,14 @@ def video_microflow_text(step: str, product_id: str = "", session: dict | None =
         "selfshot_source_ready": (
             "✅ <b>Đã nhận video tự quay</b>\n\n"
             "TOAN AAS đã giữ video nguồn trong phiên. Anh/chị có thể tiếp tục lập kế hoạch quanh video này hoặc chọn một ý tưởng có sẵn để định hướng từng cảnh.\n\n"
-            "Chưa tạo job, chưa gọi nguồn dựng và chưa trừ Xu."
+            "Chưa tạo tác vụ, chưa bắt đầu xử lý video và chưa trừ Xu."
         ),
         "self_shot_direction_suggestion_topic": "💡 Mô tả mục tiêu đổi cảnh dựa trên video đã gửi. TOAN AAS sẽ gợi ý 3-5 hướng đổi cảnh.",
         "self_shot_custom_topic": "✍️ Nhập mô tả riêng cho video tự quay hoặc bối cảnh muốn đổi. TOAN AAS sẽ tạo lại 3-5 hướng để anh/chị chọn.",
         "film_manual_topic": "✍️ Nhập ý tưởng phim/video nhiều cảnh. TOAN AAS sẽ phát triển cốt truyện và dàn cảnh trước.",
         "film_story_suggestion_topic": "💡 Nhập thể loại/chủ đề. TOAN AAS sẽ gợi ý cốt truyện nhiều cảnh để anh/chị chọn.",
         "film_custom_topic": "✍️ Nhập chủ đề riêng cho phim nhiều cảnh. TOAN AAS sẽ tạo lại 3-5 cốt truyện để anh/chị chọn.",
-        "film_script_input": "📄 Gửi kịch bản phim có sẵn. TOAN AAS sẽ chia cảnh và tạo storyboard/prompt theo kịch bản.",
+        "film_script_input": "📄 Gửi kịch bản phim có sẵn. TOAN AAS sẽ chia cảnh và tạo bảng phân cảnh/câu lệnh theo kịch bản.",
         "video_idea_manual_topic": "✍️ Nhập chủ đề/sản phẩm/ngành. TOAN AAS sẽ gợi ý ý tưởng và hướng triển khai, chưa hiện gói và chưa trừ Xu.",
         "idea_custom_topic": "✍️ Sửa nội dung ý tưởng video. TOAN AAS sẽ tạo lại 5 ý tưởng để anh/chị chọn.",
     }
@@ -90226,47 +90411,51 @@ def video_microflow_keyboard(step: str, product_id: str = "", lang: str = "vi") 
     is_vi = normalize_user_language(lang) == "vi"
     if step == "awaiting_selfshot2_video":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="vproduct|ss2|show|intro"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="vproduct|ss2|show|intro"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
         ])
     if step == "awaiting_selfshot2_logo":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="vproduct|ss2|show|addons"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="vproduct|ss2|show|addons"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
         ])
     if step == "awaiting_video_tail9_logo":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="video_tail|logo|open"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="video_tail|logo|open"), video_microflow_menu_button(product_id, lang)],
         ])
     if step == "ai_prompt_menu":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("✍️ Gửi prompt có sẵn", callback_data="vproduct|input_text|video_ai_real"), InlineKeyboardButton("💡 Gợi ý prompt", callback_data="vproduct|suggest_prompt|video_ai_real")],
+            [InlineKeyboardButton("✍️ Gửi câu lệnh có sẵn", callback_data="vproduct|input_text|video_ai_real"), InlineKeyboardButton("💡 Gợi ý câu lệnh", callback_data="vproduct|suggest_prompt|video_ai_real")],
             [InlineKeyboardButton("🗂 Ý tưởng video có sẵn", callback_data="vproduct|idea_library|video_ai_real"), InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")],
-            [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
         ])
     if step == "ai_image_menu":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🖼 Gửi ảnh sẵn", callback_data="vproduct|input_media|video_ai_real"), InlineKeyboardButton("🎨 Gợi ý tạo ảnh trước", callback_data="vproduct|suggest_image|video_ai_real")],
             [InlineKeyboardButton("🖼 Dùng ảnh gần nhất", callback_data="vproduct|use_recent_image|video_ai_real"), InlineKeyboardButton("💡 Gợi ý câu lệnh ảnh", callback_data="vproduct|image_prompt_suggest|video_ai_real")],
             [InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")],
-            [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
         ])
     if step == "ai_video_menu":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🎞 Gửi video mẫu", callback_data="vproduct|entry_media|video_ai_real"), InlineKeyboardButton("💡 Gợi ý cách làm video", callback_data="vproduct|suggest_video|video_ai_real")],
             [InlineKeyboardButton("🎞 Dùng video gần nhất", callback_data="vproduct|use_recent_video|video_ai_real")],
             [InlineKeyboardButton("🔎 Phân tích cách dựng", callback_data="videoref|hub"), InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")],
-            [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
         ])
     if step == "selfshot_source_ready":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("➡️ Lập kế hoạch từ video", callback_data="vproduct|selfshot_continue|1"), InlineKeyboardButton("🗂 Ý tưởng video có sẵn", callback_data="vproduct|idea_library|self_shot_scene_change")],
             [InlineKeyboardButton("🎥 Gửi video khác", callback_data="vproduct|selfshot_source|upload"), InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")],
-            [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
         ])
     if step in {"storyboard_suggestion_scene_count", "image_to_video_image_suggestion_scene_count"}:
-        return video_microflow_scene_count_keyboard("storyboard" if step.startswith("storyboard") else "image_suggest", lang)
+        return video_microflow_scene_count_keyboard(
+            "storyboard" if step.startswith("storyboard") else "image_suggest",
+            lang,
+            product_id,
+        )
     if step in VIDEO_MICROFLOW_MEDIA_INPUT_STEPS:
-        return video_microflow_media_keyboard(lang)
-    return video_microflow_nav_keyboard(lang)
+        return video_microflow_media_keyboard(lang, product_id)
+    return video_microflow_nav_keyboard(lang, product_id)
 
 
 def video_microflow_normalize_topic(topic: str) -> str:
@@ -90640,7 +90829,7 @@ def video_microflow_options_keyboard(product_id: str, lang: str = "vi", options:
         rows.append([(edit_label, "vproduct|microflow_custom_topic"), ("📖 Xem hướng dẫn", "menu|guide_video_ai")])
     else:
         rows.append([(refresh_label, "vproduct|microflow_regenerate"), (edit_label, "vproduct|microflow_custom_topic")])
-    rows.append([(ui_text(lang, "common.back"), "vproduct|back"), (ui_text(lang, "common.main_menu"), "menu|main")])
+    rows.append([(ui_text(lang, "common.back"), "vproduct|back"), ("🎬 Menu Video", "menu|main_video")])
     return video_scene3_keyboard(rows)
 
 
@@ -90661,7 +90850,7 @@ def video_idea_development_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [("🧩 Kịch bản → Video", "vproduct|idea_develop|script_image_video"), ("🎞 Storyboard", "vproduct|idea_develop|storyboard_prompt")],
         [("🎬 Video AI chân thật", "vproduct|idea_develop|video_ai_real"), ("🔥 Video theo trend", "vproduct|idea_develop|video_trend")],
         [("🔎 Chọn ý tưởng khác", "videa|page|1"), ("📖 Xem hướng dẫn", "menu|guide_video_ai")],
-        [(ui_text(lang, "common.back"), "vproduct|back"), (ui_text(lang, "common.main_menu"), "menu|main")],
+        [(ui_text(lang, "common.back"), "vproduct|back"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
@@ -90691,7 +90880,7 @@ def video_storyboard_image_scenes_keyboard(lang: str = "vi") -> InlineKeyboardMa
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Dùng bảng phân cảnh này", callback_data="vproduct|storyboard_use"), InlineKeyboardButton("🖼 Tạo ảnh theo bảng", callback_data="vproduct|storyboard_create_images")],
         [InlineKeyboardButton("🔄 Gợi ý lại", callback_data="vproduct|microflow_regenerate"), InlineKeyboardButton("✍️ Sửa bảng phân cảnh", callback_data="vproduct|microflow_edit")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
     ])
 
 
@@ -90717,7 +90906,7 @@ def video_storyboard_final_video_scenes_text(session: dict | None = None, lang: 
 def video_storyboard_final_video_scenes_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("➡️ Tiếp tục chọn loại video", callback_data="vproduct|storyboard_continue_profile"), InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
     ])
 
 
@@ -90769,6 +90958,11 @@ def video_scene3_canonical_entry_keyboard(
     """Shared public entry for every canonical short-video product."""
 
     is_vi = normalize_user_language(lang) == "vi"
+    protected = str(product_id or "") in {
+        "frame_video_local", "image_to_video", "video_edit", "video_local_edit",
+    }
+    secondary_label = ui_text(lang, "common.main_menu") if protected else "🎬 Menu Video"
+    secondary_callback = "menu|main" if protected else "menu|main_video"
     return video_scene3_keyboard([
         [
             (
@@ -90782,7 +90976,7 @@ def video_scene3_canonical_entry_keyboard(
         ],
         [
             ("⬅️ Menu video" if is_vi else "⬅️ Video menu", parent_callback),
-            (ui_text(lang, "common.main_menu"), "menu|main"),
+            (secondary_label, secondary_callback),
         ],
     ])
 
@@ -90801,31 +90995,39 @@ def task3d_product_intro_keyboard(
     is_vi = normalize_user_language(lang) == "vi"
     parent_callback = str(parent_callback_override or product.get("parent_menu_callback") or "menu|main_video")
     menu_label = "⬅️ Menu video" if is_vi else "⬅️ Video menu"
+    protected = str(product_id or "") in {
+        "frame_video_local", "image_to_video", "video_edit", "video_local_edit",
+    }
+    secondary_menu = (
+        (ui_text(lang, "common.main_menu"), "menu|main")
+        if protected
+        else ("🎬 Menu Video", "menu|main_video")
+    )
     if (
         str(product_id or "") in video_flow7.ENTRY_ROWS
         and str(product_id or "") != "script_image_video"
     ):
         rows = video_flow7.entry_rows(str(product_id))
-        rows.append([(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")])
+        rows.append([(menu_label, parent_callback), secondary_menu])
         return video_scene3_keyboard(rows)
     rows_by_product = {
         "video_trend": [
             [("🔥 Gợi ý trend hot", "vproduct|trend_today"), ("🗂 Ý tưởng video có sẵn", "vproduct|idea_library|video_trend")],
             [("✍️ Tự nhập trend", "vproduct|trend_custom"), ("📖 Xem hướng dẫn", "menu|guide_video_ai")],
-            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
+            [(menu_label, parent_callback), secondary_menu],
         ],
         "video_idea": [
             [("🔎 Khám phá ý tưởng", "videa|page|1"), ("📖 Xem hướng dẫn video", "menu|guide_video_ai")],
-            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
+            [(menu_label, parent_callback), secondary_menu],
         ],
         "storyboard_prompt": [
             [("🖼 Gửi bảng phân cảnh sẵn", "vproduct|storyboard_upload|storyboard_prompt"), ("💡 Gợi ý bảng phân cảnh", "vproduct|storyboard_suggest|storyboard_prompt")],
             [("🗂 Ý tưởng video có sẵn", "vproduct|idea_library|storyboard_prompt"), ("📖 Xem hướng dẫn video", "menu|guide_video_ai")],
-            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
+            [(menu_label, parent_callback), secondary_menu],
         ],
         "motion_prompt": [
             [("✍️ Mô tả cảnh", "vproduct|input_text|motion_prompt"), ("📷 Gửi ảnh", "vproduct|input_media|motion_prompt")],
-            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
+            [(menu_label, parent_callback), secondary_menu],
         ],
         "image_to_video": [
             [("📷 Gửi ảnh", "vproduct|input_media|image_to_video"), ("✍️ Mô tả cảnh", "vproduct|input_text|image_to_video")],
@@ -90837,33 +91039,32 @@ def task3d_product_intro_keyboard(
             [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "video_ai_real": [
-            [("✨ Prompt AI → Video", "vproduct|ai_prompt_menu|video_ai_real"), ("🖼 Ảnh → Video AI", "vproduct|ai_image_menu|video_ai_real")],
-            [("🎞 Video mẫu → Video AI", "vproduct|ai_video_menu|video_ai_real"), ("📊 Phân tích video", "videoref|analyze")],
-            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
+            [("✨ Prompt → Video", "vproduct|ai_prompt_menu|video_ai_real"), ("🖼 Ảnh → Video", "vproduct|ai_image_menu|video_ai_real")],
+            [(menu_label, parent_callback), secondary_menu],
         ],
         "script_image_video": [
             [("📄 Gửi kịch bản có sẵn", "vproduct|script_existing|script_image_video"), ("💡 Gợi ý kịch bản", "vproduct|script_ideas|script_image_video")],
             [("🗂 Ý tưởng video có sẵn", "vproduct|idea_library|script_image_video"), ("📖 Xem hướng dẫn video", "menu|guide_video_ai")],
-            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
+            [(menu_label, parent_callback), secondary_menu],
         ],
         "self_shot_scene_change": [
             [("🎥 Gửi video tự quay", "vproduct|selfshot_source|upload"), ("📖 Xem hướng dẫn video", "menu|guide_video_ai")],
-            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
+            [(menu_label, parent_callback), secondary_menu],
         ],
         "multi_scene_film": [
             [("✍️ Nhập ý tưởng phim", "vproduct|film_manual|multi_scene_film"), ("💡 Gợi ý cốt truyện", "vproduct|film_story|multi_scene_film")],
             [("📄 Gửi kịch bản phim", "vproduct|film_script|multi_scene_film"), ("📖 Xem hướng dẫn video", "menu|guide_video_ai")],
-            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
+            [(menu_label, parent_callback), secondary_menu],
         ],
         "video_reference": [
             [("📎 Gửi video mẫu", "vproduct|legacy|video_reference"), ("🔗 Gửi link mẫu", "vproduct|input_text|video_reference")],
             [("✍️ Mô tả phong cách", "vproduct|input_detail|video_reference"), ("📖 Xem hướng dẫn video", "menu|guide_video_ai")],
-            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
+            [(menu_label, parent_callback), secondary_menu],
         ],
         "audio_addons": [
             [("🎵 Không thêm", "vproduct|addon_skip"), ("🎙 Chọn giọng đọc", "vfinal|voice")],
             [("📂 Chọn nhạc từ kho", "vfinal|music_library"), ("📖 Xem hướng dẫn video", "menu|guide_video_ai")],
-            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
+            [(menu_label, parent_callback), secondary_menu],
         ],
         "video_local_edit": [
             [("📎 Gửi video", "videoedit|upload"), ("✂️ Cắt video", "videoedit|cut")],
@@ -90873,7 +91074,7 @@ def task3d_product_intro_keyboard(
     }
     rows = rows_by_product.get(product_id, [
         [("✍️ Nhập nội dung", f"vproduct|input_text|{product_id}"), ("📖 Xem hướng dẫn video", "menu|guide_video_ai")],
-        [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
+        [(menu_label, parent_callback), secondary_menu],
     ])
     return video_scene3_keyboard(rows)
 
@@ -90889,7 +91090,7 @@ VIDEO_B14_2_ASSET_SKIP_WARNING_VI = (
 )
 VIDEO_B14_2_WORKER_NOT_READY_VI = "Hệ thống dựng video nền chưa sẵn sàng. TOAN AAS chưa xử lý và chưa trừ Xu."
 VIDEO_B14_2_PUBLIC_MULTISCENE_OFF_VI = "Video dài tập 1–2 giờ đang mở thử nghiệm nội bộ. TOAN AAS chưa xử lý và chưa trừ Xu."
-VIDEO_B14_2_PACKAGE_200_NOTE_VI = "Gói Trải nghiệm chỉ hỗ trợ 1 cảnh / 8 giây. Tư liệu miễn phí đã gửi như logo, ảnh, voice hoặc nhạc được giữ; add-on có phí không áp dụng."
+VIDEO_B14_2_PACKAGE_200_NOTE_VI = "Nhanh gọn là gói video bình thường, tính theo từng cảnh và vẫn dùng được các phần bổ sung đã chọn."
 VIDEO_B14_2_QUALITY_OPTIONS = video_uifreeze1.QUALITY_TIER_ORDER
 VIDEO_B14_2_SCENE_OPTIONS = (1, 3, 5, 10, 20)
 PRODUCT_VIDEO_TRIAL_QUALITY_XU = 200
@@ -90898,7 +91099,7 @@ PRODUCT_VIDEO_TRIAL_DURATION_SECONDS = 8
 PRODUCT_VIDEO_TRIAL_LIMIT_DAY = 1
 PRODUCT_VIDEO_TRIAL_LIMIT_WEEK = 3
 PRODUCT_VIDEO_TRIAL_LIMIT_MONTH = 10
-PRODUCT_VIDEO_TRIAL_LIMIT_COPY_VI = "Gói Trải nghiệm chỉ hỗ trợ 1 cảnh / 8 giây."
+PRODUCT_VIDEO_TRIAL_LIMIT_COPY_VI = "Gói Nhanh gọn tính theo từng cảnh như các gói video khác."
 PRODUCT_VIDEO_R9E_ADDONS_LOCKED = True
 PRODUCT_VIDEO_R9E_ADDONS_LOCK_COPY_VI = "Hậu kỳ đang khóa tạm thời cho Product Video. Hóa đơn này chỉ tính video chính."
 PRODUCT_VIDEO_R9E_PROVIDER_LOCK_COPY_VI = "Hệ thống dựng video đang tạm khóa để bảo vệ Xu. TOAN AAS chưa xử lý và chưa trừ Xu. Anh/chị vui lòng thử lại sau."
@@ -91184,7 +91385,7 @@ def video_b14_profile_selection_keyboard(lang: str = "vi") -> InlineKeyboardMark
     ])
     rows.append([
         InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"),
-        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -91214,7 +91415,7 @@ def video_b14_profile_next_keyboard(product_id: str = "", lang: str = "vi") -> I
         ],
         [
             InlineKeyboardButton("⬅️ Chọn lại loại video", callback_data="vproduct|b14_profiles"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
 
@@ -91303,16 +91504,17 @@ def video_b14_idea_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarku
         [
             InlineKeyboardButton("1", callback_data="vproduct|b14_idea_select|0"),
             InlineKeyboardButton("2", callback_data="vproduct|b14_idea_select|1"),
+            InlineKeyboardButton("3", callback_data="vproduct|b14_idea_select|2"),
+            InlineKeyboardButton("4", callback_data="vproduct|b14_idea_select|3"),
+            InlineKeyboardButton("5", callback_data="vproduct|b14_idea_select|4"),
         ],
-        [InlineKeyboardButton("3", callback_data="vproduct|b14_idea_select|2"), InlineKeyboardButton("4", callback_data="vproduct|b14_idea_select|3")],
-        [InlineKeyboardButton("5", callback_data="vproduct|b14_idea_select|4"), InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")],
         [
-            InlineKeyboardButton("✍️ Nhập ý tưởng riêng", callback_data="vproduct|input_text"),
-            InlineKeyboardButton("🔁 Gợi ý khác", callback_data="vproduct|ideas_refresh"),
+            InlineKeyboardButton("🔄 Đổi 5 gợi ý", callback_data="vproduct|ideas_refresh"),
+            InlineKeyboardButton("✍️ Tự nhập nội dung", callback_data="vproduct|input_text"),
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
 
@@ -91372,7 +91574,7 @@ def video_asset_intake_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("🏷 Gửi logo" if is_vi else "🏷 Logo", callback_data="vproduct|asset_wait|logo"),
-            InlineKeyboardButton("🎙 Gửi voice/audio" if is_vi else "🎙 Voice/audio", callback_data="vproduct|asset_wait|voice"),
+            InlineKeyboardButton("🎙 Gửi giọng / âm thanh" if is_vi else "🎙 Voice/audio", callback_data="vproduct|asset_wait|voice"),
         ],
         [
             InlineKeyboardButton("🎵 Gửi nhạc nền" if is_vi else "🎵 Music", callback_data="vproduct|asset_wait|music"),
@@ -91384,7 +91586,7 @@ def video_asset_intake_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_profile_back"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
 
@@ -91449,10 +91651,10 @@ def video_b14_storyboard_preview_text(plan) -> str:
     context = dict(getattr(plan, "prompt_context", {}) or {})
     ledger = dict(getattr(plan, "continuity_ledger", {}) or {})
     lines = [
-        "🧠 <b>Storyboard + prompt preview</b>",
+        "🧠 <b>Xem trước Storyboard và câu lệnh</b>",
         "<b>Bản kế hoạch video</b>",
         "",
-        "TOAN AAS đã chọn bộ ngữ cảnh prompt phù hợp và ghép ý tưởng, loại video, tư liệu thành một hướng dựng liền mạch:",
+        "TOAN AAS đã chọn ngữ cảnh phù hợp và ghép ý tưởng, loại video, tư liệu thành một hướng dựng liền mạch:",
         f"• Loại video: <b>{html.escape(str(plan.profile.menu_label))}</b>",
         f"• Ngữ cảnh sản phẩm / nhóm nội dung: <b>{html.escape(str(context.get('product_domain') or 'tổng quát'))}</b>",
         f"• Phong cách: {html.escape(str(context.get('selected_visual_style') or plan.story_bible.visual_style))}",
@@ -91465,8 +91667,8 @@ def video_b14_storyboard_preview_text(plan) -> str:
         f"• Nhân vật/sản phẩm chính: {html.escape(str(plan.story_bible.main_subject))}",
         f"• Bối cảnh: {html.escape(str(plan.story_bible.setting))}",
         f"• Số cảnh gợi ý: <b>{scene_count}</b>",
-        f"• Continuity arc / Mạch cảm xúc: {html.escape(str(ledger.get('emotional_arc') or 'liền mạch từ mở đầu tới kết'))}",
-        f"• Voice mặc định: {html.escape(str(plan.story_bible.voice_policy))}",
+        f"• Mạch cảm xúc: {html.escape(str(ledger.get('emotional_arc') or 'liền mạch từ mở đầu tới kết'))}",
+        f"• Giọng đọc mặc định: {html.escape(str(plan.story_bible.voice_policy))}",
         f"• Nhạc mặc định: {html.escape(str(plan.story_bible.music_policy))}",
         f"• Phụ đề mặc định: {html.escape(str(plan.story_bible.subtitle_policy))}",
         f"• Logo mặc định: {html.escape(str(plan.story_bible.logo_policy))}",
@@ -91479,7 +91681,7 @@ def video_b14_storyboard_preview_text(plan) -> str:
             f"   {html.escape(card.subject_action)}\n"
             f"   Góc quay: {html.escape(card.camera_motion)}"
         )
-    lines.extend(["", "Màn này chỉ là kế hoạch dạng text. Chưa tạo file thật, chưa trừ Xu."])
+    lines.extend(["", "Màn này chỉ là kế hoạch dạng văn bản. Chưa tạo tệp thật, chưa trừ Xu."])
     return "\n".join(lines)
 
 
@@ -91602,10 +91804,15 @@ def video_b14_prompt_text_from_session(session: dict, kind: str = "video") -> st
     plan = dict(draft.get("b14_storyboard_plan") or {})
     cards = list(plan.get("scene_cards") or [])
     if not cards:
-        return "⚠️ Bộ storyboard/prompt chưa sẵn sàng. TOAN AAS chưa xử lý video và chưa trừ Xu."
-    title = "🖼 <b>Prompt ảnh</b>" if kind == "image" else "🎥 <b>Prompt video</b>"
-    lines = [title, "", "Màn này chỉ xuất prompt dạng text. Không tạo file thật và không trừ Xu.", ""]
-    for index, card in enumerate(cards[:12], 1):
+        return "⚠️ Bộ câu lệnh chưa sẵn sàng. TOAN AAS chưa xử lý video và chưa trừ Xu."
+    title = "🖼 Câu lệnh tạo ảnh" if kind == "image" else "🎥 Câu lệnh tạo video"
+    lines = [
+        title,
+        "",
+        "Toàn bộ câu lệnh hiện tại được hiển thị nguyên văn bên dưới. Chưa tạo tệp và chưa trừ Xu.",
+        "",
+    ]
+    for index, card in enumerate(cards, 1):
         if kind == "image":
             prompt = (
                 f"{card.get('visual_goal') or ''}. "
@@ -91615,9 +91822,7 @@ def video_b14_prompt_text_from_session(session: dict, kind: str = "video") -> st
             )
         else:
             prompt = str(card.get("provider_prompt") or card.get("video_prompt") or card.get("visual_goal") or "")
-        lines.append(f"<b>Cảnh {index}</b>\n<code>{html.escape(prompt[:1800])}</code>")
-    if len(cards) > 12:
-        lines.append(f"\n… còn {len(cards) - 12} cảnh trong bộ prompt.")
+        lines.append(f"Cảnh {index}\n{prompt}")
     return "\n\n".join(lines)
 
 
@@ -91626,20 +91831,19 @@ def video_b14_prompt_video_text_from_session(session: dict, lang: str = "vi") ->
     plan = dict(draft.get("b14_storyboard_plan") or {})
     cards = list(plan.get("scene_cards") or [])
     if not cards:
-        return video_b14_missing_session_text(lang)
+        return "⚠️ Phiên tạo video bị thiếu dữ liệu. TOAN AAS chưa xử lý video và chưa trừ Xu."
     story_bible = dict(plan.get("story_bible") or {})
     context = dict(plan.get("prompt_context") or {})
     emotion = str(context.get("selected_emotional_tone") or story_bible.get("brand_tone") or "theo mạch câu chuyện")
     visual_style = str(context.get("selected_visual_style") or story_bible.get("visual_style") or "theo profile")
     negative = str(context.get("selected_negative_prompt") or story_bible.get("negative_prompt") or "không méo chữ/logo, không đổi nhân vật chính")
     lines = [
-        "🎥 <b>Prompt video</b>",
+        "🎥 Câu lệnh tạo video",
         "",
-        "Màn này chỉ hiển thị prompt dạng text. Chưa tạo file thật và chưa trừ Xu.",
+        "Toàn bộ câu lệnh hiện tại được hiển thị nguyên văn bên dưới. Chưa tạo tệp và chưa trừ Xu.",
         "",
     ]
-    preview_limit = 6
-    for index, card in enumerate(cards[:preview_limit], 1):
+    for index, card in enumerate(cards, 1):
         card = dict(card or {})
         camera = str(card.get("camera_motion") or card.get("camera_angle") or card.get("composition") or "camera mượt theo cảnh")
         subject = str(card.get("subject_action") or card.get("exact_subject") or card.get("visual_goal") or "chủ thể chính")
@@ -91648,22 +91852,18 @@ def video_b14_prompt_video_text_from_session(session: dict, lang: str = "vi") ->
         card_negative = str(card.get("negative_prompt") or negative)
         duration = safe_int(card.get("duration_seconds"), TASK3D_SCENE_SECONDS)
         prompt = str(card.get("provider_prompt") or card.get("video_prompt") or card.get("visual_goal") or "")
-        if len(prompt) > 220:
-            prompt = prompt[:217].rstrip() + "..."
         lines.extend([
-            f"<b>Cảnh {index}</b>",
-            f"• Camera/motion: {html.escape(camera[:220])}",
-            f"• Subject: {html.escape(subject[:260])}",
-            f"• Visual style: {html.escape(card_style[:220])}",
-            f"• Emotion: {html.escape(card_emotion[:180])}",
-            f"• Negative prompt: {html.escape(card_negative[:220])}",
-            f"• Duration estimate: <b>{duration}s</b>",
+            f"Cảnh {index}",
+            f"• Máy quay và chuyển động: {camera}",
+            f"• Chủ thể: {subject}",
+            f"• Phong cách hình ảnh: {card_style}",
+            f"• Cảm xúc: {card_emotion}",
+            f"• Điều cần tránh: {card_negative}",
+            f"• Thời lượng dự kiến: {duration} giây",
         ])
         if prompt:
-            lines.append(f"• Prompt: <code>{html.escape(prompt)}</code>")
+            lines.extend(["• Câu lệnh nguyên văn:", prompt])
         lines.append("")
-    if len(cards) > preview_limit:
-        lines.append(f"… còn {len(cards) - preview_limit} cảnh trong bộ prompt. Bấm Xuất bộ prompt để xem phần đầy đủ.")
     return "\n".join(lines).strip()
 
 
@@ -91671,7 +91871,7 @@ def video_b14_prompt_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📦 Xuất bộ prompt" if is_vi else "📦 Export prompt pack", callback_data="vproduct|b14_export_pack"),
+            InlineKeyboardButton("📦 Xuất bộ câu lệnh" if is_vi else "📦 Export prompt pack", callback_data="vproduct|b14_export_pack"),
             InlineKeyboardButton("🖼 Xem prompt ảnh" if is_vi else "🖼 Image prompts", callback_data="vproduct|b14_prompt_image_text"),
         ],
         [
@@ -91680,7 +91880,7 @@ def video_b14_prompt_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("⬅️ Quay lại storyboard" if is_vi else "⬅️ Back to storyboard", callback_data="vproduct|b14_storyboard_screen"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
 
@@ -91689,7 +91889,7 @@ def video_b14_prompt_pack_text_from_session(session: dict) -> str:
     draft = dict((session or {}).get("draft") or {})
     plan = dict(draft.get("b14_storyboard_plan") or {})
     if not plan:
-        return "⚠️ Prompt pack chưa sẵn sàng. TOAN AAS chưa xử lý video và chưa trừ Xu."
+        return "⚠️ Bộ câu lệnh chưa sẵn sàng. TOAN AAS chưa xử lý video và chưa trừ Xu."
     prompt_context = dict(plan.get("prompt_context") or {})
     for internal_key in ("provider_called", "xu_charged", "shared_blocks", "profile_pack", "reason_summary"):
         prompt_context.pop(internal_key, None)
@@ -91723,7 +91923,7 @@ def video_b14_prompt_pack_text_from_session(session: dict) -> str:
                 "bridge_to_next": item.get("bridge_to_next"),
                 "match_cut_hint": item.get("match_cut_hint"),
             }
-            for item in list(continuity.get("transition_plan") or [])[:12]
+            for item in list(continuity.get("transition_plan") or [])
             if isinstance(item, dict)
         ],
     }
@@ -91741,7 +91941,7 @@ def video_b14_prompt_pack_text_from_session(session: dict) -> str:
         "creative_controls": story_bible.get("creative_controls") or {},
     }
     scene_cards_public = []
-    for card in list(plan.get("scene_cards") or [])[:12]:
+    for card in list(plan.get("scene_cards") or []):
         scene_cards_public.append({
             "scene_index": card.get("scene_index"),
             "role": card.get("role"),
@@ -91753,7 +91953,7 @@ def video_b14_prompt_pack_text_from_session(session: dict) -> str:
             "exit_state": card.get("exit_state"),
             "transition_bridge": card.get("transition_to_next"),
             "match_cut_hint": card.get("match_cut_hint"),
-            "video_prompt": str(card.get("provider_prompt") or "")[:1200],
+            "video_prompt": str(card.get("provider_prompt") or ""),
         })
     payload = {
         "profile": (plan.get("profile") or {}).get("profile_id"),
@@ -91770,9 +91970,9 @@ def video_b14_prompt_pack_text_from_session(session: dict) -> str:
     }
     content = json.dumps(payload, ensure_ascii=False, indent=2)
     return (
-        "📦 <b>Xuất bộ prompt</b>\n\n"
-        "Bộ prompt dưới đây là kế hoạch dạng text, không phải file video thành phẩm và không trừ Xu.\n\n"
-        f"<code>{html.escape(content[:3500])}</code>"
+        "📦 Xuất bộ câu lệnh\n\n"
+        "Bộ câu lệnh dưới đây là kế hoạch dạng văn bản, không phải tệp video thành phẩm và không trừ Xu.\n\n"
+        f"{content}"
     )
 
 
@@ -91785,7 +91985,7 @@ def video_b14_storyboard_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("🎥 Xem prompt video" if is_vi else "🎥 Video prompts", callback_data="vproduct|b14_prompt_video_text"),
-            InlineKeyboardButton("📦 Xuất bộ prompt" if is_vi else "📦 Export prompt pack", callback_data="vproduct|b14_export_pack"),
+            InlineKeyboardButton("📦 Xuất bộ câu lệnh" if is_vi else "📦 Export prompt pack", callback_data="vproduct|b14_export_pack"),
         ],
         [
             InlineKeyboardButton("🎨 Đổi phong cách" if is_vi else "🎨 Change style", callback_data="vproduct|b14_creative_field|visual_style"),
@@ -91797,7 +91997,7 @@ def video_b14_storyboard_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_creative_screen"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
 
@@ -91819,10 +92019,9 @@ def video_b14_missing_session_keyboard(lang: str = "vi") -> InlineKeyboardMarkup
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✍️ Nhập lại ý tưởng" if is_vi else "✍️ Enter idea again", callback_data="vproduct|open|multi_scene_film"),
-            InlineKeyboardButton("🎬 Menu video" if is_vi else "🎬 Video menu", callback_data="menu|main_video"),
+            InlineKeyboardButton("🎬 Về Menu Video" if is_vi else "🎬 Video menu", callback_data="menu|main_video"),
+            InlineKeyboardButton("📖 Xem hướng dẫn" if is_vi else "📖 View guide", callback_data="menu|guide_video_ai"),
         ],
-        [InlineKeyboardButton("📖 Xem hướng dẫn video", callback_data="menu|guide_video_ai"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 
@@ -91844,7 +92043,7 @@ def video_b14_asset_skip_warning_keyboard(lang: str = "vi") -> InlineKeyboardMar
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|asset_intro"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
 
@@ -92001,7 +92200,7 @@ def video_b14_creative_controls_keyboard(lang: str = "vi") -> InlineKeyboardMark
             InlineKeyboardButton("✅ Xem storyboard/prompt", callback_data="vproduct|b14_creative_done"),
             InlineKeyboardButton("📸 Thêm tư liệu", callback_data="vproduct|asset_intro"),
         ],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
     ])
 
 
@@ -92020,7 +92219,7 @@ def video_b14_creative_choice_keyboard(field: str, lang: str = "vi") -> InlineKe
             InlineKeyboardButton("✅ Theo mẫu chuyên ngành", callback_data=f"vproduct|b14_creative_set|{field}|default"),
             InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai"),
         ])
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_creative_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_creative_screen"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -92139,7 +92338,7 @@ def product_video_duration_predictor(session: dict | None = None, user_id=0) -> 
     upgrade_hint = ""
     if trial:
         if recommended > 1 or requested_seconds > PRODUCT_VIDEO_TRIAL_DURATION_SECONDS:
-            upgrade_hint = "Gói Trải nghiệm chỉ làm 1 cảnh/8s. Prompt này phù hợp hơn với 2–3 cảnh nếu muốn đầy đủ."
+            upgrade_hint = "Nội dung này phù hợp hơn với 2–3 cảnh nếu muốn thể hiện đầy đủ."
         recommended = PRODUCT_VIDEO_TRIAL_FIXED_SCENE_COUNT
     breakdown = product_video_scene_breakdown(intent, recommended, prompt)
     pricing = video_b14_invoice_breakdown(quality, recommended)
@@ -92152,7 +92351,7 @@ def product_video_duration_predictor(session: dict | None = None, user_id=0) -> 
     if addon_plan.get("music_enabled") and str(addon_plan.get("music_source") or "").lower() in {"uploaded", "media", "user", "sent", "saved"}:
         add_on_impact.append("nhạc tự gửi/đã lưu không tính phí tạo mới")
     if trial_addons.get("paid_blocked"):
-        add_on_impact.append("add-on có phí bị tắt trong gói Trải nghiệm")
+        add_on_impact.append("một số phần bổ sung chưa được tính trong dự đoán")
     if not add_on_impact:
         add_on_impact.append("chưa có add-on tính vào dự đoán")
     confidence = "high" if prompt and (requested_seconds or intent != "unknown") else ("medium" if prompt else "low")
@@ -92426,30 +92625,30 @@ def video_b14_addon_label(kind: str, value: str) -> str:
             "none": "không dùng",
             "default_male": "nam mặc định",
             "default_female": "nữ mặc định",
-            "uploaded": "voice đã gửi",
-            "saved": "voice đã lưu",
-            "custom": "voice riêng",
+            "uploaded": "giọng đã gửi",
+            "saved": "giọng đã lưu",
+            "custom": "giọng riêng",
         },
         "music": {
             "none": "không dùng",
             "default": "nhạc mặc định theo loại video",
             "vault": "kho nhạc TOAN AAS",
-            "sfx_vault": "kho SFX TOAN AAS",
-            "media": "media của tôi",
+            "sfx_vault": "kho hiệu ứng TOAN AAS",
+            "media": "tư liệu của tôi",
             "uploaded": "nhạc đã gửi",
             "saved": "nhạc đã lưu",
         },
         "subtitle": {
             "none": "không dùng",
             "from_narration": "từ lời đọc",
-            "uploaded": "file đã gửi",
+            "uploaded": "tệp đã gửi",
             "translated": "phụ đề dịch",
         },
         "dub": {
             "none": "không dùng",
             "from_voice": "theo lời đọc",
             "translated": "theo bản dịch",
-            "same_as_voice": "theo voice đã chọn",
+            "same_as_voice": "theo giọng đã chọn",
         },
         "logo": {
             "none": "không dùng",
@@ -92504,7 +92703,7 @@ def video_b14_narration_source(session: dict | None = None) -> dict:
         "ok": False,
         "source": "missing",
         "text": "",
-        "public_message": "TOAN AAS cần lời đọc trước khi bật voice. Anh/chị bấm Sửa lời đọc rồi gửi kịch bản muốn đọc.",
+        "public_message": "TOAN AAS cần lời đọc trước khi bật giọng đọc. Anh/chị bấm Sửa lời đọc rồi gửi kịch bản muốn đọc.",
     }
 
 
@@ -92555,12 +92754,12 @@ def video_b14_uploaded_voice_profiles(user_id, limit: int = 5) -> list[dict]:
 def video_b14_voice_select_keyboard(user_id, lang: str = "vi") -> InlineKeyboardMarkup:
     buttons = []
     for profile in video_b14_saved_voice_profiles(user_id, 5):
-        label = minimax_voice_adapter.friendly_voice_name(profile, f"Voice #{profile.get('id') or ''}")[:32] or "Voice đã lưu"
+        label = minimax_voice_adapter.friendly_voice_name(profile, f"Giọng #{profile.get('id') or ''}")[:32] or "Giọng đã lưu"
         buttons.append(InlineKeyboardButton(f"📚 {label}", callback_data=f"vproduct|b14_voice_saved_pick|{int(profile.get('id') or 0)}"))
     rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     if rows and len(rows[-1]) == 1:
         rows[-1].append(InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai"))
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_voice"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_voice"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -92673,7 +92872,7 @@ def video_b14_subtitle_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
 
@@ -92695,7 +92894,7 @@ def video_b14_subtitle_language_keyboard(lang: str = "vi") -> InlineKeyboardMark
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_subtitle"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
 
@@ -92739,7 +92938,7 @@ def video_b14_dub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
 
@@ -92750,19 +92949,25 @@ def video_b14_voice_text(session: dict | None = None, user_id=0, lang: str = "vi
     narration_info = video_b14_narration_source(session)
     narration = str(narration_info.get("text") or "")
     preview = narration[:500] + ("..." if len(narration) > 500 else "")
+    narration_source = {
+        "manual": "anh/chị tự nhập",
+        "storyboard": "kịch bản từng cảnh",
+        "generated": "gợi ý theo nội dung",
+        "missing": "chưa có",
+    }.get(str(narration_info.get("source") or "missing"), "kịch bản hiện tại")
     lines = [
         "🎙 <b>Giọng đọc cho video</b>",
         "",
         f"• Đang chọn: <b>{html.escape(source)}</b>",
         f"• Âm lượng: <b>{safe_int(plan.get('voice_volume_percent'), 100)}%</b>",
         f"• Tốc độ đọc: <b>{safe_int(plan.get('voice_speed_percent'), 100)}%</b>",
-        f"• Nguồn lời đọc: <b>{html.escape(str(narration_info.get('source') or 'missing'))}</b>",
+        f"• Nguồn lời đọc: <b>{html.escape(narration_source)}</b>",
         "",
         "<b>Lời đọc dự kiến</b>",
         html.escape(preview or "Chưa có lời đọc. Anh/chị bấm Sửa lời đọc để nhập kịch bản."),
         "",
         "TOAN AAS sẽ dùng lời đọc theo kịch bản từng cảnh. Anh/chị có thể sửa lại lời đọc trước khi tạo video.",
-        "Bước này chỉ lưu lựa chọn voice vào kế hoạch video. Chưa tạo file thật, chưa trừ Xu.",
+        "Bước này chỉ lưu lựa chọn giọng vào kế hoạch video. Chưa tạo tệp thật, chưa trừ Xu.",
     ]
     return video_b14_with_admin_label("\n".join(lines), user_id, lang)
 
@@ -92770,15 +92975,15 @@ def video_b14_voice_text(session: dict | None = None, user_id=0, lang: str = "vi
 def video_b14_voice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🚫 Không voice", callback_data="vproduct|b14_voice_source|none"),
+            InlineKeyboardButton("🚫 Không giọng đọc", callback_data="vproduct|b14_voice_source|none"),
             InlineKeyboardButton("👩 Giọng nữ mặc định", callback_data="vproduct|b14_voice_source|default_female"),
         ],
         [
             InlineKeyboardButton("👨 Giọng nam mặc định", callback_data="vproduct|b14_voice_source|default_male"),
-            InlineKeyboardButton("🎧 Voice đã gửi", callback_data="vproduct|b14_voice_source|uploaded"),
+            InlineKeyboardButton("🎧 Giọng đã gửi", callback_data="vproduct|b14_voice_source|uploaded"),
         ],
         [
-            InlineKeyboardButton("📚 Voice đã lưu", callback_data="vproduct|b14_voice_source|saved"),
+            InlineKeyboardButton("📚 Giọng đã lưu", callback_data="vproduct|b14_voice_source|saved"),
             InlineKeyboardButton("✍️ Sửa lời đọc", callback_data="vproduct|b14_voice_edit"),
         ],
         [
@@ -92786,12 +92991,12 @@ def video_b14_voice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton("🎚 Âm lượng giọng", callback_data="vproduct|b14_voice_volume"),
         ],
         [
-            InlineKeyboardButton("✅ Xong voice", callback_data="vproduct|b14_voice_done"),
+            InlineKeyboardButton("✅ Hoàn tất giọng đọc", callback_data="vproduct|b14_voice_done"),
             InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai"),
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
 
@@ -92800,21 +93005,21 @@ def video_b14_voice_edit_text(lang: str = "vi") -> str:
     return (
         "✍️ <b>Sửa lời đọc video</b>\n\n"
         "Gửi lời đọc mới cho video.\n"
-        "TOAN AAS sẽ lưu lời đọc này vào kế hoạch, dùng cho voice và phụ đề sau khi anh/chị xác nhận tạo video.\n\n"
+        "TOAN AAS sẽ lưu lời đọc này vào kế hoạch, dùng cho giọng đọc và phụ đề sau khi anh/chị xác nhận tạo video.\n\n"
         "<b>Gợi ý</b>\n"
         "• Có thể viết theo từng cảnh.\n"
         "• Ví dụ:\n"
         "Cảnh 1: ...\n"
         "Cảnh 2: ...\n"
         "Cảnh 3: ...\n\n"
-        "Chưa xử lý voice và chưa trừ Xu ở bước này."
+        "Chưa tạo giọng đọc và chưa trừ Xu ở bước này."
     )
 
 
 def video_b14_voice_edit_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("⬅️ Quay lại Voice", callback_data="vproduct|b14_addon_voice"),
-        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        InlineKeyboardButton("⬅️ Quay lại Giọng đọc", callback_data="vproduct|b14_addon_voice"),
+        InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
     ]])
 
 
@@ -92827,7 +93032,7 @@ def video_b14_volume_input_text(kind: str, lang: str = "vi") -> str:
             "<b>Khuyến nghị</b>\n"
             "• 5–10: nhạc nền nhẹ\n"
             "• 15–25: rõ hơn\n"
-            "• Trên 30 dễ lấn voice\n\n"
+            "• Trên 30% dễ lấn giọng đọc\n\n"
             "Cho phép: <b>0–100%</b>. Chưa xử lý nhạc và chưa trừ Xu."
         )
     return (
@@ -92838,7 +93043,7 @@ def video_b14_volume_input_text(kind: str, lang: str = "vi") -> str:
         "• 80–90: nhẹ\n"
         "• 100: mặc định\n"
         "• 110–120: nổi bật hơn\n\n"
-        "Cho phép: <b>10–200%</b>. Chưa xử lý voice và chưa trừ Xu."
+        "Cho phép: <b>10–200%</b>. Chưa tạo giọng đọc và chưa trừ Xu."
     )
 
 
@@ -92846,7 +93051,7 @@ def video_b14_volume_input_keyboard(kind: str, lang: str = "vi") -> InlineKeyboa
     back = "vproduct|b14_addon_music" if kind == "music" else "vproduct|b14_addon_voice"
     return InlineKeyboardMarkup([[
         InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back),
-        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
     ]])
 
 
@@ -93080,7 +93285,7 @@ def video_b14_music_text(session: dict | None = None, user_id=0, lang: str = "vi
         "",
         f"• Nhạc nền: <b>{html.escape(source)}</b>",
         f"• Âm lượng nhạc: <b>{safe_int(plan.get('music_volume_percent'), 10)}%</b>",
-        f"• SFX: <b>{sfx}</b>",
+        f"• Hiệu ứng âm thanh: <b>{sfx}</b>",
         "",
         "Nhạc mặc định sẽ lấy theo loại video đã chọn; nếu anh/chị đã gửi nhạc riêng, TOAN AAS sẽ ưu tiên tư liệu đó. Chưa tạo file thật, chưa trừ Xu.",
     ]
@@ -93095,7 +93300,7 @@ def video_b14_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("📚 Kho nhạc", callback_data="vproduct|b14_music_source|vault"),
-            InlineKeyboardButton("💥 Kho SFX", callback_data="vproduct|b14_music_source|sfx_vault"),
+            InlineKeyboardButton("💥 Kho hiệu ứng", callback_data="vproduct|b14_music_source|sfx_vault"),
         ],
         [
             InlineKeyboardButton("📁 Media của tôi", callback_data="vproduct|b14_music_source|media"),
@@ -93107,7 +93312,7 @@ def video_b14_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
 
@@ -93220,35 +93425,29 @@ def product_video_logo_position_text(session: dict | None = None, lang: str = "v
     if normalize_user_language(lang) != "vi":
         return (
             "🏷 <b>Choose logo position</b>\n\n"
-            "Choose one of 6 positions. TOAN AAS only saves this as Product Video material; no video processing and no Xu charge yet."
+            "Choose one of 9 positions. TOAN AAS only saves this as Product Video material; no video processing and no Xu charge yet."
         )
     return (
         "🏷 <b>Chọn vị trí logo</b>\n\n"
-        "Chọn 1 trong 6 vị trí trên màn hình. Logo mặc định nhỏ, giữ đúng tỉ lệ ảnh gốc.\n\n"
+        "Chọn 1 trong 9 vị trí trên màn hình. Logo mặc định nhỏ, giữ đúng tỉ lệ ảnh gốc.\n\n"
         "Bước này chỉ lưu logo vào tư liệu Product Video, chưa xử lý video và chưa trừ Xu."
     )
 
 
 def product_video_logo_position_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("↖️ Trên trái", callback_data="vproduct|asset_logo_position|top_left"),
-            InlineKeyboardButton("⬆️ Trên giữa", callback_data="vproduct|asset_logo_position|top_center"),
-        ],
-        [
-            InlineKeyboardButton("↗️ Trên phải", callback_data="vproduct|asset_logo_position|top_right"),
-            InlineKeyboardButton("↙️ Dưới trái", callback_data="vproduct|asset_logo_position|bottom_left"),
-        ],
-        [
-            InlineKeyboardButton("⬇️ Dưới giữa", callback_data="vproduct|asset_logo_position|bottom_center"),
-            InlineKeyboardButton("↘️ Dưới phải", callback_data="vproduct|asset_logo_position|bottom_right"),
-        ],
-        [InlineKeyboardButton("🚫 Không dùng logo", callback_data="vproduct|asset_logo_none"), InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")],
+    buttons = [
+        InlineKeyboardButton(label, callback_data=f"vproduct|asset_logo_position|{position}")
+        for position, label in video_scene3_flow.LOGO_POSITIONS
+    ]
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+    rows.extend([
+        [InlineKeyboardButton("🚫 Không dùng logo", callback_data="vproduct|asset_logo_none")],
         [
             InlineKeyboardButton("⬅️ Quay lại", callback_data="vproduct|asset_intro"),
-            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
+    return InlineKeyboardMarkup(rows)
 
 
 def video_b14_logo_text(session: dict | None = None, lang: str = "vi") -> str:
@@ -93278,7 +93477,7 @@ def video_b14_logo_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("✍️ Nhập chữ logo/watermark", callback_data="vproduct|b14_logo_text_start"), InlineKeyboardButton("🧹 Xóa chữ logo/watermark", callback_data="vproduct|b14_logo_clear")],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
 
@@ -93298,29 +93497,21 @@ def video_b14_logo_position_text(session: dict | None = None, lang: str = "vi") 
     return (
         "🎯 <b>Chọn vị trí logo/watermark</b>\n\n"
         f"• Chữ: <b>{html.escape(text or 'chưa nhập')}</b>\n"
-        "Chọn 1 trong 6 vị trí trên màn hình. Bước này chỉ lưu vị trí, chưa xử lý video và chưa trừ Xu."
+        "Chọn 1 trong 9 vị trí trên màn hình. Bước này chỉ lưu vị trí, chưa xử lý video và chưa trừ Xu."
     )
 
 
 def video_b14_logo_position_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("↖️ Trái trên", callback_data="vproduct|b14_logo_position|top_left"),
-            InlineKeyboardButton("⬆️ Giữa trên", callback_data="vproduct|b14_logo_position|top_center"),
-        ],
-        [
-            InlineKeyboardButton("↗️ Phải trên", callback_data="vproduct|b14_logo_position|top_right"),
-            InlineKeyboardButton("↙️ Trái dưới", callback_data="vproduct|b14_logo_position|bottom_left"),
-        ],
-        [
-            InlineKeyboardButton("⬇️ Giữa dưới", callback_data="vproduct|b14_logo_position|bottom_center"),
-            InlineKeyboardButton("↘️ Phải dưới", callback_data="vproduct|b14_logo_position|bottom_right"),
-        ],
-        [
-            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_logo"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-        ],
+    buttons = [
+        InlineKeyboardButton(label, callback_data=f"vproduct|b14_logo_position|{position}")
+        for position, label in video_scene3_flow.LOGO_POSITIONS
+    ]
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+    rows.append([
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_logo"),
+        InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
     ])
+    return InlineKeyboardMarkup(rows)
 
 
 def video_b14_logo_confirm_text(session: dict | None = None, lang: str = "vi") -> str:
@@ -93331,7 +93522,7 @@ def video_b14_logo_confirm_text(session: dict | None = None, lang: str = "vi") -
         "✅ <b>Xác nhận logo/watermark chữ</b>\n\n"
         f"• Chữ: <b>{html.escape(text or 'chưa nhập')}</b>\n"
         f"• Vị trí: <b>{html.escape(position)}</b>\n\n"
-        "Bấm xác nhận để lưu vào kế hoạch video, sau đó TOAN AAS quay lại màn add-on để anh/chị chọn tiếp mục khác."
+        "Bấm xác nhận để lưu vào kế hoạch video, sau đó TOAN AAS quay lại màn phần bổ sung để anh/chị chọn tiếp mục khác."
     )
 
 
@@ -93340,7 +93531,7 @@ def video_b14_logo_confirm_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("✅ Xác nhận logo/watermark", callback_data="vproduct|b14_logo_confirm"), InlineKeyboardButton("🧹 Xóa logo/watermark", callback_data="vproduct|b14_logo_clear")],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_logo_position_screen"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
 
@@ -93358,11 +93549,11 @@ def video_b14_addon_text(session: dict | None = None, lang: str = "vi") -> str:
         logo_text_value = logo_watermark_clean_text(plan.get("logo_text") or "")
         logo_tail = f"{logo_tail} · {html.escape(logo_text_value or 'chưa nhập')} · {html.escape(video_b14_addon_label('logo', str(plan['logo_position'])))}"
     return "\n".join([
-        "🎙 <b>Voice / nhạc / phụ đề / logo</b>",
+        "🎙 <b>Giọng đọc / nhạc / phụ đề / logo</b>",
         "",
-        f"• Voice: <b>{yes if plan['voice_enabled'] else no}</b> · {html.escape(voice_label)} · tốc độ <b>{html.escape(video_audio_speed_display(video_audio_settings_from_state(plan)['video_voice_speed']))}x</b> · âm lượng <b>{video_audio_settings_from_state(plan)['video_voice_volume_percent']}%</b>",
+        f"• Giọng đọc: <b>{yes if plan['voice_enabled'] else no}</b> · {html.escape(voice_label)} · tốc độ <b>{html.escape(video_audio_speed_display(video_audio_settings_from_state(plan)['video_voice_speed']))}x</b> · âm lượng <b>{video_audio_settings_from_state(plan)['video_voice_volume_percent']}%</b>",
         f"• Nhạc: <b>{yes if plan['music_enabled'] else no}</b> · {html.escape(video_b14_addon_label('music', str(plan['music_source'])))} · tốc độ <b>{html.escape(video_audio_speed_display(video_audio_settings_from_state(plan)['video_music_speed']))}x</b> · âm lượng <b>{video_audio_settings_from_state(plan)['video_music_volume_percent']}%</b>",
-        f"• SFX: <b>{yes if plan['sfx_enabled'] else no}</b>",
+        f"• Hiệu ứng âm thanh: <b>{yes if plan['sfx_enabled'] else no}</b>",
         f"• Phụ đề: <b>{yes if plan['subtitle_enabled'] else no}</b> · {html.escape(video_b14_addon_label('subtitle', str(plan['subtitle_source'])))}{(' · ' + html.escape(subtitle_target)) if subtitle_target else ''}",
         f"• Lồng tiếng: <b>{yes if plan.get('dub_enabled') else no}</b>{(' · ' + html.escape(dub_target)) if dub_target else ''}",
         f"• Logo: <b>{yes if plan['logo_enabled'] else no}</b> · {logo_tail}",
@@ -93375,7 +93566,7 @@ def video_b14_addon_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🎙 Voice" if is_vi else "🎙 Voice", callback_data="vproduct|b14_addon_voice"),
+            InlineKeyboardButton("🎙 Giọng đọc" if is_vi else "🎙 Voice", callback_data="vproduct|b14_addon_voice"),
             InlineKeyboardButton("🎙 Âm lượng giọng" if is_vi else "🎙 Voice volume", callback_data="vproduct|b14_voice_volume"),
         ],
         [
@@ -93391,7 +93582,7 @@ def video_b14_addon_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton("💥 SFX" if is_vi else "💥 SFX", callback_data="vproduct|b14_addon_sfx"),
         ],
         [InlineKeyboardButton("✅ Xong tùy chọn hậu kỳ" if is_vi else "✅ Done", callback_data="vproduct|b14_addon_done"), InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_creative_done"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_creative_done"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
     ])
 
 
@@ -93404,7 +93595,7 @@ def video_b14_choice_keyboard(kind: str, choices: list[tuple[str, str]], lang: s
         ])
     if rows and len(rows[-1]) == 1:
         rows[-1].append(InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai"))
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -93412,7 +93603,7 @@ def video_b14_aspect_ratio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📱 9:16", callback_data="vproduct|b14_aspect|9:16"), InlineKeyboardButton("🖥 16:9", callback_data="vproduct|b14_aspect|16:9")],
         [InlineKeyboardButton("⬛ 1:1", callback_data="vproduct|b14_aspect|1:1"), InlineKeyboardButton("🖼 4:5", callback_data="vproduct|b14_aspect|4:5")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
     ])
 
 
@@ -93422,67 +93613,65 @@ def video_b14_package_tier(quality_xu: int) -> tuple[str, str, tuple[str, ...]]:
 
 
 def video_b14_package_button_label(quality_xu: int) -> str:
-    icon, name, _desc = video_b14_package_tier(quality_xu)
-    return f"{icon} {quality_xu} {name}"
+    product = video_public_quality_product(quality_xu)
+    return f"{product['icon']} {product['name']} · {product['unit_xu']} Xu"
 
 
 def video_b14_package_full_label(quality_xu: int) -> str:
-    icon, name, _desc = video_b14_package_tier(quality_xu)
-    return f"{icon} {quality_xu} Xu — {name}"
+    product = video_public_quality_product(quality_xu)
+    return (
+        f"{product['icon']} {product['name']} · "
+        f"{product['seconds']} giây/cảnh · {product['unit_xu']} Xu/cảnh"
+    )
 
 
 def video_b14_quality_text(lang: str = "vi") -> str:
     lines = [
         "🎬 <b>Chọn gói chất lượng video</b>",
         "",
-        "Chọn mức chất lượng cho mỗi cảnh. TOAN AAS sẽ tính tổng Xu sau khi anh/chị chọn số cảnh. "
-        "Gói càng cao thì hình ảnh, chuyển động và phần hoàn thiện cuối sẽ được ưu tiên tốt hơn.",
+        "Chọn mức phù hợp cho mỗi cảnh. Mỗi gói ghi rõ thời lượng, chất lượng hình ảnh, mục đích sử dụng và giá.",
         "",
     ]
-    for price in VIDEO_B14_2_QUALITY_OPTIONS:
-        icon, name, descriptions = video_b14_package_tier(price)
-        lines.append(f"{icon} <b>{price} Xu — {name}</b>")
-        for description in descriptions:
-            lines.append(f"• {description}")
+    for tier_id in VIDEO_AI_REAL_QUALITY_MODEL_KEYS:
+        product = video_public_quality_product(tier_id)
+        lines.extend([
+            f"{product['icon']} <b>{html.escape(product['name'])}</b> · "
+            f"<b>{product['seconds']} giây/cảnh</b> · <b>{product['unit_xu']} Xu/cảnh</b>",
+            f"• Chất lượng: {html.escape(product['public_level'])} · {html.escape(product['resolution'])}",
+            f"• Phù hợp: {html.escape(product['use_case'])}",
+            "",
+        ])
     lines.append("\nMàn này chỉ chọn gói. Chưa xử lý video và chưa trừ Xu.")
     return "\n".join(lines)
 
 
 def video_b14_quality_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    rows = [
-        [
-            InlineKeyboardButton(video_b14_package_button_label(200), callback_data="vproduct|b14_quality|200"),
-            InlineKeyboardButton(video_b14_package_button_label(300), callback_data="vproduct|b14_quality|300"),
-        ],
-        [
-            InlineKeyboardButton(video_b14_package_button_label(400), callback_data="vproduct|b14_quality|400"),
-            InlineKeyboardButton(video_b14_package_button_label(500), callback_data="vproduct|b14_quality|500"),
-        ],
-        [
-            InlineKeyboardButton(video_b14_package_button_label(600), callback_data="vproduct|b14_quality|600"),
-            InlineKeyboardButton(video_b14_package_button_label(800), callback_data="vproduct|b14_quality|800"),
-        ],
-        [
-            InlineKeyboardButton(video_b14_package_button_label(1000), callback_data="vproduct|b14_quality|1000"),
-            InlineKeyboardButton(video_b14_package_button_label(1200), callback_data="vproduct|b14_quality|1200"),
-        ],
-        [InlineKeyboardButton(video_b14_package_button_label(1500), callback_data="vproduct|b14_quality|1500"), InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")],
+    values = list(VIDEO_AI_REAL_QUALITY_MODEL_KEYS)
+    buttons = [
+        InlineKeyboardButton(
+            video_b14_package_button_label(tier_id),
+            callback_data=f"vproduct|b14_quality|{tier_id}",
+        )
+        for tier_id in values
     ]
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_aspect_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+    rows.append([
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_aspect_screen"),
+        InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 
 def video_b14_quality_selected_text(quality_xu: int, lang: str = "vi") -> str:
-    icon, name, descriptions = video_b14_package_tier(quality_xu)
+    product = video_public_quality_product(quality_xu)
     lines = [
-        f"{icon} <b>Đã chọn gói {name}</b>",
+        f"{product['icon']} <b>Đã chọn gói {html.escape(product['name'])}</b>",
         "",
-        f"• Giá mỗi cảnh: <b>{quality_xu} Xu</b>",
+        f"• Thời lượng mỗi cảnh: <b>{product['seconds']} giây</b>",
+        f"• Chất lượng: <b>{html.escape(product['public_level'])}</b>",
+        f"• Giá mỗi cảnh: <b>{product['unit_xu']} Xu</b>",
+        f"• Phù hợp: {html.escape(product['use_case'])}",
     ]
-    for description in descriptions:
-        lines.append(f"• {description}")
-    if int(quality_xu) == 200:
-        lines.extend(["", VIDEO_B14_2_PACKAGE_200_NOTE_VI])
     lines.extend(["", "Tiếp theo: chọn số cảnh để TOAN AAS tính tổng Xu. Chưa xử lý video và chưa trừ Xu."])
     return "\n".join(lines)
 
@@ -93492,7 +93681,8 @@ def video_b14_public_max_scene_count() -> int:
 
 
 def video_b14_is_trial_quality(quality_xu: int | str | None) -> bool:
-    return safe_int(quality_xu, 0) == PRODUCT_VIDEO_TRIAL_QUALITY_XU
+    _ = quality_xu
+    return False
 
 
 def video_b14_quality_for_session(session: dict | None = None) -> int:
@@ -93597,7 +93787,7 @@ def video_b14_trial_addon_policy(addon_plan: dict | None = None, *, quality_xu: 
         blocked.append("dịch phụ đề")
     copy = ""
     if blocked:
-        copy = "Gói Trải nghiệm chỉ dùng tư liệu miễn phí đã gửi. Add-on có phí sẽ được tắt khỏi hóa đơn này."
+        copy = "Một số phần bổ sung chưa đủ thông tin để đưa vào hóa đơn."
     return {"trial": True, "paid_blocked": bool(blocked), "blocked_addons": blocked, "public_copy": copy}
 
 
@@ -93630,19 +93820,24 @@ def video_b14_scene_count_keyboard(user_id=0, lang: str = "vi", session: dict | 
     rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     if rows and len(rows[-1]) == 1:
         rows[-1].append(InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai"))
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")])
     return InlineKeyboardMarkup(rows)
 
 
 def video_b14_scene_count_text(session: dict | None = None, lang: str = "vi") -> str:
     draft = dict((session or {}).get("draft") or {})
     quality = safe_int(draft.get("b14_quality_xu"), 0)
+    scene_seconds = (
+        video_public_quality_product(quality)["seconds"]
+        if quality in VIDEO_AI_REAL_QUALITY_MODEL_KEYS
+        else TASK3D_SCENE_SECONDS
+    )
     extra = ""
     if video_b14_is_trial_quality(quality):
         extra = f"\n• <b>{PRODUCT_VIDEO_TRIAL_LIMIT_COPY_VI}</b>\n"
     return (
         "🎞 <b>Chọn số cảnh</b>\n\n"
-        f"• Mỗi cảnh dự kiến: <b>{TASK3D_SCENE_SECONDS} giây</b>\n\n"
+        f"• Mỗi cảnh theo gói đã chọn: <b>{scene_seconds} giây</b>\n\n"
         f"{product_video_duration_predictor_text(session, lang=lang)}\n\n"
         f"{extra}"
         "Số cảnh được chọn trước để hệ thống lập nội dung vừa đủ từng cảnh. Gói chất lượng và hóa đơn nằm gần cuối. Chưa xử lý video và chưa trừ Xu."
@@ -93671,9 +93866,13 @@ def video_b14_scene_discount_percent(scene_count: int) -> int:
 
 
 def video_b14_invoice_breakdown(quality_xu: int, scene_count: int) -> dict:
-    quality = max(200, safe_int(quality_xu, 200))
+    routing_tier = min(
+        VIDEO_AI_REAL_QUALITY_MODEL_KEYS,
+        key=lambda item: abs(item - safe_int(quality_xu, 200)),
+    )
+    unit_xu = video_public_quality_product(routing_tier)["unit_xu"]
     count = max(1, min(20, safe_int(scene_count, 1)))
-    subtotal = quality * count
+    subtotal = unit_xu * count
     discount_percent = video_b14_scene_discount_percent(count)
     discount_xu = int(round(subtotal * discount_percent / 100.0)) if discount_percent else 0
     total = max(0, subtotal - discount_xu)
@@ -93682,6 +93881,8 @@ def video_b14_invoice_breakdown(quality_xu: int, scene_count: int) -> dict:
         "discount_percent": discount_percent,
         "discount_xu": discount_xu,
         "total_xu": total,
+        "unit_xu": unit_xu,
+        "routing_quality_tier": routing_tier,
     }
 
 
@@ -93691,12 +93892,15 @@ def video_b14_total_xu(quality_xu: int, scene_count: int) -> int:
 
 def video_b14_invoice_for_session(session: dict, user_id=0) -> dict:
     draft = dict((session or {}).get("draft") or {})
-    routing_quality = max(200, safe_int(draft.get("b14_quality_xu"), 200))
+    routing_quality = min(
+        VIDEO_AI_REAL_QUALITY_MODEL_KEYS,
+        key=lambda item: abs(item - safe_int(draft.get("b14_quality_xu"), 200)),
+    )
     model_pricing = str(draft.get("b14_pricing_mode") or "") == "video_ai_real_model"
     billing_unit = (
         max(1, safe_int(draft.get("b14_billing_unit_xu"), routing_quality))
         if model_pricing
-        else routing_quality
+        else video_public_quality_product(routing_quality)["unit_xu"]
     )
     scene_policy = (
         {
@@ -93717,16 +93921,12 @@ def video_b14_invoice_for_session(session: dict, user_id=0) -> dict:
     addon_plan = dict(draft.get("b14_addon_plan") or video_b14_addon_plan_from_session(session))
     trial_addon_policy = video_b14_trial_addon_policy(addon_plan, quality_xu=routing_quality)
     addons_disabled = bool(trial_addon_policy.get("paid_blocked"))
-    addon_items = (
-        [dict(item) for item in draft.get("b14_addon_quote_items") or [] if isinstance(item, dict)]
-        if model_pricing
-        else []
-    )
-    addons_xu = (
-        max(0, safe_int(draft.get("b14_addon_quote_xu"), 0))
-        if model_pricing
-        else 0
-    )
+    addon_items = [
+        dict(item)
+        for item in draft.get("b14_addon_quote_items") or []
+        if isinstance(item, dict)
+    ]
+    addons_xu = max(0, safe_int(draft.get("b14_addon_quote_xu"), 0))
     if model_pricing:
         subtotal_xu = billing_unit * scenes
         pricing = {
@@ -93737,6 +93937,7 @@ def video_b14_invoice_for_session(session: dict, user_id=0) -> dict:
         }
     else:
         pricing = video_b14_invoice_breakdown(routing_quality, scenes)
+        pricing["total_xu"] = max(0, safe_int(pricing.get("total_xu"), 0) + addons_xu)
     package_label = str(draft.get("b14_package_label_override") or "").strip()
     if not package_label:
         package_label = video_b14_package_full_label(routing_quality)
@@ -93764,6 +93965,50 @@ def video_b14_invoice_for_session(session: dict, user_id=0) -> dict:
     }
 
 
+def video_b14_invoice_prompt_lines(session: dict) -> list[str]:
+    """Return every current video prompt for the customer invoice, unchanged."""
+
+    draft = dict((session or {}).get("draft") or {})
+    bundle = dict(draft.get("prompt_bundle") or {})
+    prompts = list(bundle.get("video_prompts") or [])
+    if not prompts:
+        plan = dict(draft.get("b14_storyboard_plan") or {})
+        prompts = [
+            dict(card).get("provider_prompt")
+            or dict(card).get("video_prompt")
+            or dict(card).get("visual_goal")
+            or ""
+            for card in list(plan.get("scene_cards") or [])
+            if isinstance(card, dict)
+        ]
+    if not prompts:
+        return []
+
+    lines = [
+        "",
+        "<b>Toàn bộ câu lệnh video hiện tại</b>",
+        "Nội dung dưới đây được hiển thị nguyên văn để anh/chị kiểm tra lại trước khi xác nhận:",
+    ]
+    for index, raw_prompt in enumerate(prompts, 1):
+        if isinstance(raw_prompt, dict):
+            prompt = next(
+                (
+                    str(raw_prompt.get(key) or "")
+                    for key in ("prompt", "video_prompt", "provider_prompt", "text", "value")
+                    if str(raw_prompt.get(key) or "").strip()
+                ),
+                json.dumps(raw_prompt, ensure_ascii=False, sort_keys=True),
+            )
+        else:
+            prompt = str(raw_prompt or "")
+        lines.extend([
+            "",
+            f"<b>Cảnh {index}</b>",
+            html.escape(prompt, quote=False),
+        ])
+    return lines
+
+
 def video_b14_invoice_text(session: dict, user_id=0, lang: str = "vi") -> str:
     invoice = video_b14_invoice_for_session(session, user_id)
     draft = dict((session or {}).get("draft") or {})
@@ -93779,15 +94024,15 @@ def video_b14_invoice_text(session: dict, user_id=0, lang: str = "vi") -> str:
         "🧾 <b>Hóa đơn tạo video</b>",
         "",
         f"• Loại video: <b>{html.escape(video_b14_profile_button_label(str(draft.get('b14_profile_id') or video_b14_profile_id_for_session(session))))}</b>",
-        f"• Ý tưởng: {html.escape(idea[:180] or 'theo tư liệu đã gửi')}",
+        f"• Ý tưởng đầy đủ: {html.escape(idea or 'theo tư liệu đã gửi')}",
         f"• Tỉ lệ: <b>{html.escape(str(draft.get('b14_aspect_ratio') or '9:16'))}</b>",
         f"• Gói: <b>{html.escape(str(invoice['package_label']))}</b>",
         f"• Giá mỗi cảnh: <b>{invoice['quality_xu']} Xu</b>",
         f"• Số cảnh: <b>{invoice['scene_count']}</b> · khoảng <b>{invoice['duration_seconds']}s</b>",
         f"• Tạm tính: <b>{xu_number(invoice.get('subtotal_xu') or invoice['quality_xu'] * invoice['scene_count'])} Xu</b>",
         f"• Thời gian chờ dự kiến: <b>{video_b14_eta_text(eta)}</b>",
-        f"• Tổng: <b>{xu_number(invoice['total_xu'])} Xu</b>",
     ]
+    lines.extend(video_b14_invoice_prompt_lines(session))
     addon_items = [
         dict(item) for item in invoice.get("addon_items") or [] if isinstance(item, dict)
     ]
@@ -93801,6 +94046,7 @@ def video_b14_invoice_text(session: dict, user_id=0, lang: str = "vi") -> str:
         lines.append(f"• Tổng phần bổ sung: <b>{xu_number(invoice.get('addons_xu') or 0)} Xu</b>")
     if safe_int(invoice.get("discount_xu"), 0) > 0:
         lines.append(f"• Giảm giá số cảnh: <b>-{safe_int(invoice.get('discount_percent'), 0)}%</b> = <b>-{xu_number(safe_int(invoice.get('discount_xu'), 0))} Xu</b>")
+    lines.extend(["", f"💰 <b>Tổng thanh toán dự kiến: {xu_number(invoice['total_xu'])} Xu</b>"])
     if balance_text:
         lines.append(balance_text)
     prediction = product_video_duration_predictor(session, user_id)
@@ -93837,16 +94083,26 @@ def video_b14_invoice_text(session: dict, user_id=0, lang: str = "vi") -> str:
             f"• Phụ đề: {'bật' if addon_plan.get('subtitle_enabled') else 'tắt'} · {html.escape(subtitle_label)}",
             f"• Lồng tiếng: {'bật' if addon_plan.get('dub_enabled') else 'tắt'}{(' · ' + html.escape(dub_target)) if dub_target else ''}",
         ])
+        if addon_plan.get("logo_enabled"):
+            branding_text = logo_watermark_clean_text(addon_plan.get("logo_text") or "")
+            branding_position = product_video_logo_position_label(
+                str(addon_plan.get("logo_position") or "bottom_right"),
+                lang,
+            )
+            lines.append(
+                f"• Logo/Watermark chữ: <b>{html.escape(branding_text or 'đã bật')}</b> · "
+                f"vị trí <b>{html.escape(branding_position)}</b>"
+            )
         if logo_material_line:
             lines.append(f"• {html.escape(logo_material_line)}")
-    lines.extend(["", "Bấm xác nhận để đưa tác vụ vào hàng chờ xử lý nền. TOAN AAS chỉ trừ Xu khi MP4 hợp lệ đã được gửi thành công."])
+    lines.extend(["", "Bấm xác nhận để đưa tác vụ vào hàng chờ xử lý. TOAN AAS chỉ trừ Xu khi video hợp lệ đã được gửi thành công."])
     return video_b14_with_admin_label("\n".join(lines), user_id, lang)
 
 
 def video_b14_invoice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Xác nhận tạo video", callback_data="vproduct|b14_confirm"), InlineKeyboardButton("📋 Xem lại kế hoạch", callback_data="vproduct|b14_storyboard_screen")],
-        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
     ])
 
 
@@ -94372,7 +94628,7 @@ def video_b14_compact_postproduction_label(addon_plan: dict | None) -> str:
     addon_plan = dict(addon_plan or {})
     items: list[str] = []
     if addon_plan.get("voice_enabled"):
-        items.append("Voice")
+        items.append("Giọng đọc")
     if addon_plan.get("dub_enabled"):
         items.append("lồng tiếng")
     if addon_plan.get("music_enabled"):
@@ -94380,7 +94636,13 @@ def video_b14_compact_postproduction_label(addon_plan: dict | None) -> str:
     if addon_plan.get("subtitle_enabled"):
         items.append("phụ đề")
     if addon_plan.get("logo_enabled"):
-        items.append("logo")
+        position = product_video_logo_position_label(
+            str(addon_plan.get("logo_position") or "bottom_right"),
+            "vi",
+        )
+        text_value = logo_watermark_clean_text(addon_plan.get("logo_text") or "")
+        label = f"watermark chữ “{text_value}”" if text_value else "logo/watermark chữ"
+        items.append(f"{label} · {position}")
     return ", ".join(items) if items else "Không thêm"
 
 
@@ -94501,12 +94763,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     duration = safe_int(invoice.get("duration_seconds"), scene_count * TASK3D_SCENE_SECONDS)
     eta = video_b14_eta_seconds(scene_count)
     job_id = safe_int(job.get("id") or draft.get("b14_queue_job_id"), 0)
-    submit_blocked = bool(
-        submit_attempted
-        and job_id <= 0
-        and submit_preflight
-        and not submit_preflight.get("allowed")
-    )
+    submit_blocked = bool(submit_attempted and job_id <= 0)
     try:
         video_b14_fail_stale_product_job_for_status(job_id)
     except Exception:
@@ -94747,9 +95004,18 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     real_renderer_unavailable = "real_video_renderer_unavailable" in error_log
     if real_renderer_unavailable:
         render_mode = "unavailable"
-    package_label = str(invoice.get("package_label") or video_b14_package_full_label(safe_int(invoice.get("quality_xu"), 200)))
+    routing_quality = safe_int(
+        invoice.get("routing_quality_tier")
+        or draft.get("b14_quality_xu"),
+        200,
+    )
+    package_label = str(
+        invoice.get("package_label")
+        or video_b14_package_full_label(routing_quality)
+    )
     postproduction_label = video_b14_compact_postproduction_label(addon_plan)
     logo_material_line = product_video_logo_material_invoice_line(session, lang)
+    tail_branding_line = video_tail9_branding_public_summary(tail_state) if tail_state else ""
     scene_board_payload = {
         **job_result,
         **provider_telemetry,
@@ -94777,17 +95043,22 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     public_processing_code = str(
         draft.get("public_processing_code")
         or job_result.get("public_processing_code")
-        or (f"#{job_id or project_id}" if (job_id or project_id) else "-")
+        or (f"#{job_id or project_id}" if (job_id or project_id) else "Không có")
     )
     confirmation_line = (
-        "⚠️ <b>Đã nhận xác nhận, chưa thể bắt đầu tạo video</b>"
+        "❌ <b>FAIL · Chưa tạo được tác vụ video</b>"
         if submit_blocked
         else "✅ <b>Đã xác nhận tạo video</b>"
         if job_id
         else "ℹ️ <b>Video chưa xác nhận</b>"
     )
+    panel_title = (
+        "❌ <b>Trạng thái tạo video: FAIL</b>"
+        if submit_blocked
+        else "🎬 <b>Trạng thái tạo video</b>"
+    )
     lines = [
-        "🎬 <b>TOAN AAS đang xử lý video</b>",
+        panel_title,
         "",
         confirmation_line,
         "",
@@ -94801,7 +95072,9 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         f"• Thời lượng: <b>{duration}s</b>",
         f"• Hậu kỳ: <b>{html.escape(postproduction_label)}</b>",
     ]
-    if logo_material_line:
+    if tail_branding_line and tail_branding_line != "Không thêm":
+        lines.append(f"• Logo/Watermark: <b>{html.escape(tail_branding_line)}</b>")
+    elif logo_material_line:
         lines.append(f"• {html.escape(logo_material_line)}")
     if duplicate:
         lines.append("• Ghi chú: video này đã có trong danh sách chờ, TOAN AAS không tạo trùng lần nữa.")
@@ -98125,7 +98398,7 @@ def task3d_result_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardM
     is_vi = normalize_user_language(lang) == "vi"
     rows = [
         [InlineKeyboardButton("🖼 Tạo prompt ảnh" if is_vi else "🖼 Image prompts", callback_data="vproduct|prompt_image"), InlineKeyboardButton("🎥 Tạo prompt video" if is_vi else "🎥 Video prompts", callback_data="vproduct|prompt_video")],
-        [InlineKeyboardButton("📦 Xuất bộ prompt" if is_vi else "📦 Export prompts", callback_data="vproduct|export_menu"), InlineKeyboardButton("💾 Lưu Kho prompt" if is_vi else "💾 Save prompt vault", callback_data="vproduct|prompt_vault_save")],
+        [InlineKeyboardButton("📦 Xuất bộ câu lệnh" if is_vi else "📦 Export prompts", callback_data="vproduct|export_menu"), InlineKeyboardButton("💾 Lưu Kho câu lệnh" if is_vi else "💾 Save prompt vault", callback_data="vproduct|prompt_vault_save")],
     ]
     if VIDEO_PRODUCT_REGISTRY.get(product_id, {}).get("allowed_packages") or product_id in TASK3D_VIDEO_PROMPT_OUTPUT_PRODUCTS:
         rows.append([
@@ -98344,15 +98617,18 @@ def task3d_video_prompt_entries(session: dict, kind: str) -> list[str]:
     bundle = task3d_video_prompt_bundle(session)
     prompt_key = "image_prompts" if kind == "image" else "video_prompts"
     shot_key = "image_prompt" if kind == "image" else "video_prompt"
-    prompts = [str(item or "").strip() for item in (bundle.get(prompt_key) or []) if str(item or "").strip()]
+    prompts = [str(item or "") for item in (bundle.get(prompt_key) or []) if str(item or "").strip()]
     if not prompts:
         prompts = [
-            str(shot.get(shot_key) or "").strip()
+            str(shot.get(shot_key) or "")
             for shot in (bundle.get("shot_table") or [])
             if str(shot.get(shot_key) or "").strip()
         ]
     overrides = dict(((session or {}).get("draft") or {}).get(f"prompt_{kind}_overrides") or {})
-    return [str(overrides.get(str(index)) or prompt).strip() for index, prompt in enumerate(prompts, start=1)]
+    return [
+        str(overrides[str(index)]) if str(index) in overrides else prompt
+        for index, prompt in enumerate(prompts, start=1)
+    ]
 
 
 def task3d_video_prompt_selection(session: dict, kind: str) -> list[int]:
@@ -98407,23 +98683,44 @@ def task3d_prompt_image_scene_keyboard(session: dict, lang: str = "vi") -> Inlin
 
 def task3d_prompt_detail_text(session: dict, kind: str, copy_hint: bool = False) -> str:
     selected = task3d_video_prompt_selected_entries(session, kind)
-    noun = "Cảnh" if kind == "image" else "Shot"
+    noun = "Cảnh"
     icon = "🖼" if kind == "image" else "🎥"
     title_tail = str(selected[0][0]) if len(selected) == 1 else f"{len(selected)} {noun.lower()}"
     blocks = [f"{noun} {index}\n{prompt}" for index, prompt in selected]
-    prompt_text = "\n\n".join(blocks) or "Prompt chưa sẵn sàng."
-    hint = "\n\n📋 Prompt đang ở dạng dễ sao chép; bạn có thể nhấn giữ phần mã." if copy_hint else ""
+    prompt_text = "\n\n".join(blocks) or "Câu lệnh chưa sẵn sàng."
+    hint = "\n\n📋 Câu lệnh đang ở dạng văn bản nguyên vẹn để anh/chị xem và sao chép." if copy_hint else ""
     return (
-        f"{icon} <b>Prompt {'ảnh' if kind == 'image' else 'video'} — {html.escape(title_tail)}</b>\n\n"
-        f"<code>{html.escape(prompt_text[:3500])}</code>{hint}\n\n"
-        "Bạn muốn làm gì tiếp?"
+        f"{icon} Câu lệnh {'tạo ảnh' if kind == 'image' else 'tạo video'} — {title_tail}\n\n"
+        f"{prompt_text}{hint}\n\n"
+        "Anh/chị muốn làm gì tiếp?"
     )
+
+
+def task3d_prompt_exact_edit_text(session: dict, kind: str) -> str:
+    selected = task3d_video_prompt_selected_entries(session, kind)
+    if len(selected) != 1:
+        return "⚠️ Hãy chọn đúng một cảnh trước khi sửa câu lệnh."
+    index, prompt = selected[0]
+    return (
+        f"✍️ Sửa câu lệnh {'tạo ảnh' if kind == 'image' else 'tạo video'} — Cảnh {index}\n\n"
+        "Câu lệnh hiện tại:\n\n"
+        f"{prompt}\n\n"
+        "Gửi lại toàn bộ câu lệnh mới. Hệ thống sẽ lưu đúng nguyên văn nội dung anh/chị gửi."
+    )
+
+
+def task3d_prompt_exact_edit_keyboard(kind: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    detail_callback = "vproduct|prompt_image_detail" if kind == "image" else "vproduct|prompt_video_detail"
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Quay lại câu lệnh", callback_data=detail_callback),
+        InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
+    ]])
 
 
 def task3d_prompt_image_detail_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 Copy prompt", callback_data="vproduct|prompt_image_copy"), InlineKeyboardButton("🎨 Tạo ảnh từ prompt", callback_data="vproduct|prompt_image_packages")],
-        [InlineKeyboardButton("🔁 Viết sát ý hơn", callback_data="vproduct|prompt_image_rewrite"), InlineKeyboardButton("✍️ Sửa yêu cầu", callback_data="vproduct|prompt_image_edit")],
+        [InlineKeyboardButton("📋 Sao chép câu lệnh", callback_data="vproduct|prompt_image_copy"), InlineKeyboardButton("🎨 Tạo ảnh", callback_data="vproduct|prompt_image_packages")],
+        [InlineKeyboardButton("🔁 Viết sát ý hơn", callback_data="vproduct|prompt_image_rewrite"), InlineKeyboardButton("✍️ Sửa nguyên văn", callback_data="vproduct|prompt_image_edit")],
         [InlineKeyboardButton("⬅️ Chọn cảnh", callback_data="vproduct|prompt_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
@@ -98566,17 +98863,17 @@ def task3d_prompt_image_confirm_keyboard(token: str, session: dict, lang: str = 
 def task3d_prompt_video_selector_text(session: dict, lang: str = "vi") -> str:
     count = len(task3d_video_prompt_entries(session, "video"))
     return (
-        "🎥 <b>Tạo prompt video</b>\n\n"
-        f"TOAN AAS đã có prompt video cho <b>{count}</b> cảnh/shot.\n"
-        "Bạn muốn dùng cảnh nào?"
+        "🎥 <b>Câu lệnh tạo video</b>\n\n"
+        f"TOAN AAS đã có câu lệnh tạo video cho <b>{count}</b> cảnh.\n"
+        "Anh/chị muốn dùng cảnh nào?"
     )
 
 
 def task3d_prompt_video_selector_keyboard(session: dict, lang: str = "vi") -> InlineKeyboardMarkup:
     rows = task3d_prompt_number_rows(len(task3d_video_prompt_entries(session, "video")), "prompt_video_select", "Shot ")
     rows.append([
-        InlineKeyboardButton("📦 Tất cả shot", callback_data="vproduct|prompt_video_select|all"),
-        InlineKeyboardButton("🎞 Theo batch 2 cảnh", callback_data="vproduct|prompt_video_batches"),
+        InlineKeyboardButton("📦 Tất cả cảnh", callback_data="vproduct|prompt_video_select|all"),
+        InlineKeyboardButton("🎞 Theo nhóm 2 cảnh", callback_data="vproduct|prompt_video_batches"),
     ])
     rows.append([
         InlineKeyboardButton("⬅️ Bộ prompt", callback_data="vproduct|result"),
@@ -98595,15 +98892,15 @@ def task3d_prompt_video_batch_keyboard(session: dict, lang: str = "vi") -> Inlin
     rows.extend(buttons[index:index + 2] for index in range(0, len(buttons), 2))
     if rows and len(rows[-1]) == 1:
         rows[-1].append(InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai"))
-    rows.append([InlineKeyboardButton("⬅️ Chọn shot", callback_data="vproduct|prompt_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    rows.append([InlineKeyboardButton("⬅️ Chọn cảnh", callback_data="vproduct|prompt_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 
 def task3d_prompt_video_detail_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 Copy prompt", callback_data="vproduct|prompt_video_copy"), InlineKeyboardButton("🎬 Tạo video từ prompt", callback_data="vproduct|prompt_video_create")],
-        [InlineKeyboardButton("🔁 Viết sát ý hơn", callback_data="vproduct|prompt_video_rewrite"), InlineKeyboardButton("✍️ Sửa yêu cầu", callback_data="vproduct|prompt_video_edit")],
-        [InlineKeyboardButton("⬅️ Chọn shot", callback_data="vproduct|prompt_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton("📋 Sao chép câu lệnh", callback_data="vproduct|prompt_video_copy"), InlineKeyboardButton("🎬 Tạo video", callback_data="vproduct|prompt_video_create")],
+        [InlineKeyboardButton("🔁 Viết sát ý hơn", callback_data="vproduct|prompt_video_rewrite"), InlineKeyboardButton("✍️ Sửa nguyên văn", callback_data="vproduct|prompt_video_edit")],
+        [InlineKeyboardButton("⬅️ Chọn cảnh", callback_data="vproduct|prompt_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 
@@ -98652,7 +98949,7 @@ def task3d_prompt_export_done_keyboard(product_id: str, lang: str = "vi") -> Inl
     if VIDEO_PRODUCT_REGISTRY.get(product_id, {}).get("allowed_packages") or product_id in TASK3D_VIDEO_PROMPT_OUTPUT_PRODUCTS:
         rows.append([InlineKeyboardButton("🎬 Dùng để tạo video", callback_data="vproduct|render"), InlineKeyboardButton("⬅️ Bộ prompt", callback_data="vproduct|result")])
     else:
-        rows.append([InlineKeyboardButton("💾 Lưu Kho prompt", callback_data="vproduct|prompt_vault_save"), InlineKeyboardButton("⬅️ Bộ prompt", callback_data="vproduct|result")])
+        rows.append([InlineKeyboardButton("💾 Lưu Kho câu lệnh", callback_data="vproduct|prompt_vault_save"), InlineKeyboardButton("⬅️ Bộ câu lệnh", callback_data="vproduct|result")])
     rows.append([InlineKeyboardButton("⬅️ Menu video", callback_data="menu|main_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
@@ -99170,7 +99467,7 @@ def video_trend2_scene_count_text(state: dict) -> str:
     return (
         "🎞 <b>Chọn số cảnh</b>\n\n"
         f"• Trend: <b>{html.escape(str(trend.get('title') or 'Trend tự nhập'))}</b>\n"
-        "• Mỗi cảnh khoảng 8 giây và phải hoàn tất một ý hoặc hành động.\n"
+        "• Mỗi cảnh phải hoàn tất một ý hoặc hành động; thời lượng được xác định theo gói Chất lượng.\n"
         "• Nhiều cảnh hơn sẽ tăng thời lượng, chất lượng và chi phí; giá chỉ được chọn gần cuối.\n\n"
         "Hãy chọn đúng số cảnh cần dùng. Bước này chưa tạo tác vụ và chưa trừ Xu."
     )
@@ -99528,7 +99825,7 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
         save_video_trend2_state(context, state)
         return await safe_edit_or_send(
             query,
-            "✍️ <b>Nhập số cảnh</b>\n\nGửi một số từ 1 đến 20. Mỗi cảnh khoảng 8 giây.",
+            "✍️ <b>Nhập số cảnh</b>\n\nGửi một số từ 1 đến 20. Thời lượng mỗi cảnh được xác định theo gói Chất lượng.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([video_trend2_nav("vtrend|resume")]),
         )
@@ -99895,7 +100192,7 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
         return await storyboard2_render(query, context, persist(board))
     if action == "count_help":
         return await query.answer(
-            "Storyboard public cần 2–20 cảnh, mỗi cảnh khoảng 8 giây. Giá/gói được chọn gần cuối.",
+            "Storyboard cần 2–20 cảnh. Thời lượng và giá mỗi cảnh được chọn ở bước Chất lượng gần cuối.",
             show_alert=True,
         )
     if action == "count":
@@ -100431,6 +100728,18 @@ async def video_selfshot2_render(target, user_id: int, screen: str, *, draft: di
             "⚠️ Màn này chưa có tuyến nút hợp lệ. TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
             reply_markup=video_selfshot_product_hub_keyboard(),
         )
+    if screen == "prompts":
+        return await safe_edit_or_send_long_plain(
+            target,
+            model["text"],
+            reply_markup=video_scene3_keyboard(model["rows"]),
+        )
+    if screen == "finish":
+        return await safe_edit_or_send_long_plain(
+            target,
+            model["text"],
+            reply_markup=video_scene3_keyboard(model["rows"]),
+        )
     return await safe_edit_or_send(
         target,
         model["text"],
@@ -100442,14 +100751,14 @@ async def video_selfshot2_render(target, user_id: int, screen: str, *, draft: di
 def video_selfshot2_input_keyboard(back_screen: str) -> InlineKeyboardMarkup:
     target = str(back_screen or "intro").strip()
     return video_scene3_keyboard([
-        [("⬅️ Quay lại", f"vproduct|ss2|show|{target}"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", f"vproduct|ss2|show|{target}"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
 def video_selfshot2_invoice_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("✅ Xác nhận tạo video", "vproduct|b14_confirm"), ("📋 Xem lại kế hoạch", "vproduct|ss2|show|review")],
-        [("⬅️ Quay lại", "vproduct|ss2|finish"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", "vproduct|ss2|finish"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
@@ -100614,6 +100923,12 @@ async def video_selfshot3_render(target, user_id: int, screen: str, *, draft: di
             "⚠️ Màn này chưa có tuyến nút hợp lệ. TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
             reply_markup=video_selfshot_product_hub_keyboard(),
         )
+    if screen == "package":
+        return await safe_edit_or_send_long_html(
+            target,
+            model["text"],
+            reply_markup=video_scene3_keyboard(model["rows"]),
+        )
     return await safe_edit_or_send(
         target,
         model["text"],
@@ -100625,13 +100940,13 @@ async def video_selfshot3_render(target, user_id: int, screen: str, *, draft: di
 def video_selfshotflow4_input_keyboard(flow: str, back_screen: str) -> InlineKeyboardMarkup:
     target = str(back_screen or "segment").strip()
     return video_scene3_keyboard([
-        [("⬅️ Quay lại", f"vproduct|{flow}|c4show|{target}"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", f"vproduct|{flow}|c4show|{target}"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
 def video_selfshotflow4_source_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("⬅️ Quay lại", "vproduct|selfshot_hub"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", "vproduct|selfshot_hub"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
@@ -100844,7 +101159,11 @@ async def video_selfshotflow4_handle_pending_text(update: Update, context: Conte
     current = video_selfshotflow4_draft(flow, session)
     if not video_selfshotflow4.enabled(flow, current):
         return False
-    text = re.sub(r"\s+", " ", str(update.message.text or "").strip())[:5000]
+    text = (
+        str(update.message.text or "")
+        if pending == "prompt"
+        else re.sub(r"\s+", " ", str(update.message.text or "").strip())[:5000]
+    )
     try:
         result = video_selfshotflow4.apply_text(flow, current, pending, text)
     except (TypeError, ValueError):
@@ -100863,7 +101182,7 @@ async def video_selfshotflow4_handle_pending_text(update: Update, context: Conte
 def video_selfshot3_input_keyboard(back_screen: str) -> InlineKeyboardMarkup:
     target = str(back_screen or "intro").strip()
     return video_scene3_keyboard([
-        [("⬅️ Quay lại", f"vproduct|ss3|show|{target}"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", f"vproduct|ss3|show|{target}"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
@@ -100874,7 +101193,7 @@ def video_selfshot3_source_request_keyboard() -> InlineKeyboardMarkup:
 def video_selfshot3_invoice_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("✅ Xác nhận tạo video", "vproduct|b14_confirm"), ("📋 Xem lại kế hoạch", "vproduct|ss3|show|review")],
-        [("⬅️ Quay lại", "vproduct|ss3|finish"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", "vproduct|ss3|finish"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
@@ -101109,12 +101428,11 @@ def video_tail12_compile_content_contract(state: dict | None, *, product_type: s
         or current.get("product_type")
         or current.get("source_product_id")
         or flow_context.get("product_id")
-        or "video_ai_real"
+        or ""
     ).strip()
-    requested_product = str(
-        video_tail9.adapter_for(requested_product).get("adapter_key")
-        or requested_product
-    ).strip()
+    requested_product = str(video_tail9.adapter_for(requested_product).get("adapter_key") or "").strip()
+    if not requested_product:
+        return current
     source = str(
         current.get("content_source")
         or source_fields.get("content_source")
@@ -101513,8 +101831,12 @@ def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
         host = video_tail9_hydrate_scene3_host(host, session)
         restored_host = video_ai_realistic_restore_legacy_content_mode(host)
         host = save_video_profile_studio_state(context, restored_host)
-        requested = str(host.get("product_type") or host.get("source_product_id") or session_product or "video_ai_real")
-        product_type = str(video_tail9.adapter_for(requested).get("adapter_key") or "video_ai_real")
+        requested = str(host.get("product_type") or host.get("source_product_id") or session_product or "")
+        if not requested:
+            return {}, "missing", host
+        product_type = str(video_tail9.adapter_for(requested).get("adapter_key") or "")
+        if not product_type:
+            return {}, "missing", host
         compiled_host = video_tail12_compile_content_contract(host, product_type=product_type)
         if compiled_host != host:
             host = save_video_profile_studio_state(context, compiled_host)
@@ -101840,7 +102162,7 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
         "b14_quality_xu": safe_int(clean.get("quality_tier_id"), 0),
         "video_tail_engine_route": str(clean.get("engine_route") or ""),
         "video_tail_executor_product_type": str(
-            video_tail9.adapter_for(str(clean.get("video_product_type") or "video_ai_real")).get("executor_product_type") or ""
+            video_tail9.adapter_for(str(clean.get("video_product_type") or "")).get("executor_product_type") or ""
         ),
         "charge_policy": "after_valid_mp4_delivery",
         "provider_called": False,
@@ -101848,6 +102170,33 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
         "outbox_created": False,
         "xu_charged": 0,
     })
+    postprocessing = dict(
+        (clean.get("addon_config") or {}).get("postprocessing") or {}
+    )
+
+    def post_value(key: str) -> dict:
+        entry = dict(postprocessing.get(key) or {})
+        return dict(entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}
+
+    dubbing_value = post_value("dubbing")
+    music_value = post_value("music")
+    sfx_value = post_value("sfx")
+    subtitle_value = post_value("subtitles")
+    music_source_value = str(
+        music_value.get("source")
+        or music_value.get("music_source")
+        or music_value.get("music_source_choice")
+        or ""
+    ).strip().lower()
+    music_is_ai = bool(
+        music_value.get("paid_generation")
+        or music_source_value
+        in {"ai", "create_new", "planned_generation", "generated", "music_ai"}
+    )
+    sfx_source_value = str(
+        sfx_value.get("source") or sfx_value.get("sfx_source") or ""
+    ).strip().lower()
+    subtitle_source_value = str(subtitle_value.get("source") or "").strip().lower()
     addon_plan = video_b14_default_addon_plan(str(draft.get("b14_profile_id") or "storytelling"))
     addon_plan.update({
         "voice_enabled": False,
@@ -101856,24 +102205,53 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
         "source_audio_enabled": bool(audio.get("source_audio")),
         "source_audio_volume_percent": safe_int(volumes.get("source_audio"), 100),
         "dub_enabled": bool(audio.get("dubbing")),
-        "dub_source": "same_as_voice" if audio.get("dubbing") else "none",
+        "dub_source": str(
+            dubbing_value.get("voice_source")
+            or dubbing_value.get("dubbing_mode")
+            or ("same_as_voice" if audio.get("dubbing") else "none")
+        ),
         "dub_volume_percent": safe_int(volumes.get("dubbing"), 100),
         "music_enabled": bool(audio.get("music")),
-        "music_source": "default" if audio.get("music") else "none",
+        "music_source": (
+            "ai"
+            if audio.get("music") and music_is_ai
+            else "uploaded"
+            if audio.get("music") and music_source_value in {"user_asset", "uploaded", "media"}
+            else "default"
+            if audio.get("music")
+            else "none"
+        ),
         "music_volume_percent": safe_int(volumes.get("music"), 20),
         "sfx_enabled": bool(audio.get("sfx")),
+        "sfx_source": (
+            "ai"
+            if sfx_value.get("paid_generation") or sfx_source_value in {"ai", "planned_generation", "generated", "sfx_ai"}
+            else "library"
+        ),
         "sfx_volume_percent": safe_int(volumes.get("sfx"), 35),
         "environment_audio_volume_percent": safe_int(volumes.get("environment"), 100),
         "audio_ducking": bool(audio.get("ducking", True)),
         "audio_clipping_guard": True,
         "subtitle_enabled": bool(audio.get("subtitles")),
-        "subtitle_source": "from_narration" if audio.get("subtitles") else "none",
+        "subtitle_source": (
+            "translated"
+            if audio.get("subtitles") and (
+                subtitle_value.get("translation")
+                or subtitle_source_value in {"translated", "auto_translate", "translation"}
+            )
+            else "auto"
+            if audio.get("subtitles")
+            else "none"
+        ),
         "logo_enabled": bool(clean.get("watermark_config", {}).get("enabled")),
         "logo_source": "text" if clean.get("watermark_config", {}).get("enabled") else "none",
         "logo_text": str(clean.get("watermark_config", {}).get("text") or ""),
         "logo_position": str(clean.get("watermark_config", {}).get("position") or ""),
     })
     draft["b14_addon_plan"] = addon_plan
+    addon_quote = video_tail9_addon_quote(clean)
+    draft["b14_addon_quote_items"] = deepcopy(addon_quote.get("items") or [])
+    draft["b14_addon_quote_xu"] = safe_int(addon_quote.get("total_xu"), 0)
     logo = dict(clean.get("logo_config") or {})
     if logo.get("enabled") and logo.get("asset_file_id"):
         draft["product_video_logo_material"] = product_video_logo_material_config(
@@ -101884,7 +102262,9 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
     else:
         draft.pop("product_video_logo_material", None)
     session["draft"] = draft
-    session["product_id"] = str(clean.get("video_product_type") or session.get("product_id") or "video_ai_real")
+    clean_product = str(clean.get("video_product_type") or "").strip()
+    if clean_product:
+        session["product_id"] = clean_product
     session["aspect_ratio"] = str(clean.get("ratio") or "9:16")
     session["scene_count"] = int(clean.get("scene_count") or 1)
     save_video_session(uid, session)
@@ -101906,9 +102286,9 @@ def video_tail9_prepare_submit_status(
     preflight = dict(snapshot or {})
     preflight.setdefault("allowed", False)
     preflight.setdefault("blocker_code", "submit_not_started")
-    preflight["public_message"] = (
+    preflight.setdefault("public_message", (
         "TOAN AAS chưa thể bắt đầu tạo video lúc này. Anh/chị vui lòng kiểm tra lại sau."
-    )
+    ))
     clean.update(
         {
             "submit_attempted": True,
@@ -101994,7 +102374,7 @@ def video_tail9_commercial_preflight(
 
     runtime = video_tail9_preflight(user_id, context, tail, owner, host, quality)
     compatibility = video_tail9.package_compatibility(
-        str(tail.get("video_product_type") or "video_ai_real"),
+        str(tail.get("video_product_type") or ""),
         scene_count=safe_int(tail.get("scene_count"), 1),
         ratio=str(tail.get("ratio") or "9:16"),
         quality_tier_id=safe_int(quality, 0),
@@ -102045,6 +102425,26 @@ def video_tail9_review_keyboard(tail: dict | None = None) -> InlineKeyboardMarku
     return video_tail9_summary_keyboard(tail)
 
 
+def video_tail9_branding_public_summary(tail: dict | None = None) -> str:
+    current = dict(tail or {})
+    logo = dict(current.get("logo_config") or {})
+    watermark = dict(current.get("watermark_config") or {})
+    items: list[str] = []
+    if logo.get("enabled") and logo.get("asset_file_id"):
+        position = PRODUCT_VIDEO_LOGO_POSITION_LABELS_VI.get(
+            str(logo.get("position") or ""),
+            "Chưa chọn vị trí",
+        )
+        items.append(f"Logo ảnh · {position}")
+    if watermark.get("enabled") and watermark.get("text"):
+        position = PRODUCT_VIDEO_LOGO_POSITION_LABELS_VI.get(
+            str(watermark.get("position") or ""),
+            "Chưa chọn vị trí",
+        )
+        items.append(f"Watermark “{str(watermark.get('text') or '')}” · {position}")
+    return "; ".join(items) or "Không thêm"
+
+
 def video_tail9_summary_text(tail: dict) -> str:
     product_type = str(tail.get("video_product_type") or "")
     is_video_edit = product_type in {
@@ -102067,8 +102467,6 @@ def video_tail9_summary_text(tail: dict) -> str:
             "không có bước thanh toán và không gọi dịch vụ bên ngoài."
         )
     audio = dict(tail.get("audio_config") or {})
-    logo = dict(tail.get("logo_config") or {})
-    watermark = dict(tail.get("watermark_config") or {})
     source_labels = {
         "content_profiles": "Loại nội dung đã chọn",
         "idea_catalog": "Kho Ý tưởng video",
@@ -102080,19 +102478,15 @@ def video_tail9_summary_text(tail: dict) -> str:
         for key in ("source_audio", "dubbing", "music", "sfx", "subtitles")
         if audio.get(key)
     ]
-    brand_items = []
-    if logo.get("enabled") and logo.get("asset_file_id"):
-        brand_items.append("Logo")
-    if watermark.get("enabled") and watermark.get("text"):
-        brand_items.append("Watermark")
+    branding_summary = video_tail9_branding_public_summary(tail)
     audio_status = str(tail.get("audio_status") or "not_configured")
     audio_label = ", ".join(enabled_audio) or (
         "Không thêm" if audio_status in {"configured", "skipped"} else "Chưa cấu hình"
     )
     selected_prompt = str(tail.get("selected_prompt") or "").strip()
     prompt_line = (
-        f"• Prompt ý tưởng: <b>{html.escape(selected_prompt[:420])}</b>\n"
-        if str(tail.get("content_source") or "") == "idea_catalog" and selected_prompt
+        f"\n<b>Câu lệnh hiện tại đầy đủ</b>\n<code>{html.escape(selected_prompt)}</code>\n"
+        if selected_prompt
         else ""
     )
     source_assets = [str(item) for item in tail.get("source_asset_ids") or [] if str(item).strip()]
@@ -102117,11 +102511,11 @@ def video_tail9_summary_text(tail: dict) -> str:
         f"• Tỉ lệ: <b>{html.escape(str(tail.get('ratio') or '9:16'))}</b>\n"
         f"• Thời lượng: <b>{safe_int(tail.get('estimated_duration'), 8)} giây</b>\n"
         f"• Nội dung: <b>{'Đã sẵn sàng' if content_ready else 'Cần kiểm tra lại'}</b>\n"
-        f"• Prompt video: <b>{'Không áp dụng' if prompt_not_applicable else 'Đã sẵn sàng' if prompt_ready else 'Cần kiểm tra lại'}</b>\n"
+        f"• Câu lệnh video: <b>{'Không áp dụng' if prompt_not_applicable else 'Đã sẵn sàng' if prompt_ready else 'Cần kiểm tra lại'}</b>\n"
         f"{prompt_line}"
-        f"• Âm thanh/Add-on: <b>{html.escape(audio_label)}</b>\n"
-        f"• Logo/Watermark: <b>{html.escape(', '.join(brand_items) or 'Không thêm')}</b>\n\n"
-        f"• Tư liệu nguồn: <b>{len(source_assets)} tệp · owner {html.escape(str(tail.get('video_flow_owner') or '-'))}</b>\n"
+        f"• Âm thanh và hậu kỳ: <b>{html.escape(audio_label)}</b>\n"
+        f"• Logo/Watermark: <b>{html.escape(branding_summary)}</b>\n\n"
+        f"• Tư liệu nguồn: <b>{len(source_assets)} tệp</b>\n"
         f"{package_line}\n"
         "Kiểm tra lần cuối hoặc sửa đúng mục cần thiết trước khi chuyển sang chọn gói."
     )
@@ -102143,13 +102537,13 @@ def video_tail9_summary_keyboard(tail: dict | None = None) -> InlineKeyboardMark
     view_callback = "video_tail|review|operations" if is_video_edit else "video_tail|review|scenes"
     edit_label = "✍️ Sửa thao tác" if is_video_edit else "✍️ Sửa nội dung"
     edit_callback = "video_tail|review|edit_operation" if is_video_edit else "video_tail|review|edit"
-    prompt_label = "🎞 Thông tin video" if is_video_edit else "🎬 Xem/Sửa prompt"
+    prompt_label = "🎞 Thông tin video" if is_video_edit else "🎬 Xem/Sửa câu lệnh"
     prompt_callback = "video_tail|review|source" if is_video_edit else "video_tail|review|prompts"
     return video_scene3_keyboard([
         [(view_label, view_callback), (edit_label, edit_callback)],
         [(prompt_label, prompt_callback), ("🖼️ Sửa Logo/Watermark", "video_tail|summary|logo")],
         [("🎙️ Sửa lời thoại & âm thanh", "video_tail|summary|audio"), ("➡️ Tiếp tục chọn gói", "video_tail|summary|continue")],
-        [("⬅️ Quay lại", "video_tail|summary|back"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", "video_tail|summary|back"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
@@ -102163,7 +102557,7 @@ def video_tail9_public_blocker_text() -> str:
 def video_tail9_public_blocker_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("🔄 Kiểm tra lại", "video_tail|quality|open"), ("📄 Xem tổng hợp", "video_tail|summary|open")],
-        [("⬅️ Quay lại", "video_tail|quality|back"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", "video_tail|quality|back"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
@@ -102328,7 +102722,7 @@ def video_tail9_submit_blocker_text() -> str:
 def video_tail9_submit_blocker_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("🔄 Kiểm tra lại", "video_tail|confirm|submit"), ("⭐ Đổi gói", "video_tail|quality|change")],
-        [("⬅️ Quay lại hóa đơn", "video_tail|confirm|back"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại hóa đơn", "video_tail|confirm|back"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
@@ -102341,7 +102735,7 @@ def video_tail9_submit_preflight_keyboard(result: dict) -> InlineKeyboardMarkup:
     )
     return video_scene3_keyboard([
         first_row,
-        [("⬅️ Quay lại hóa đơn", "video_tail|confirm|back"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại hóa đơn", "video_tail|confirm|back"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
@@ -102367,17 +102761,23 @@ def video_tail9_logo_text(tail: dict) -> str:
 
 def video_tail9_logo_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
     current = dict(tail or {})
+    is_video_edit = str(current.get("video_product_type") or "") == video_editengine1.PRODUCT_TYPE
     if str(current.get("branding_back_to") or "prompt") == "summary":
         back_callback = "video_tail|summary|open"
-    elif str(current.get("video_product_type") or "") == video_editengine1.PRODUCT_TYPE:
+    elif is_video_edit:
         back_callback = "video_tail|review|edit_operation"
     else:
         back_callback = "video_tail|review|prompts"
+    menu_button = (
+        ("🏠 Menu chính", "menu|main")
+        if is_video_edit
+        else ("🎬 Menu Video", "menu|main_video")
+    )
     return video_scene3_keyboard([
         [("🖼️ Thêm logo", "video_tail|logo|upload"), ("✍️ Thêm watermark", "video_tail|logo|watermark")],
         [("🗑️ Xóa logo", "video_tail|logo|clear|logo"), ("🗑️ Xóa watermark", "video_tail|logo|clear|watermark")],
         [("✅ Xong bổ sung", "video_tail|logo|done"), ("⏭️ Bỏ qua", "video_tail|logo|skip")],
-        [("⬅️ Quay lại", back_callback), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", back_callback), menu_button],
     ])
 
 
@@ -102389,18 +102789,31 @@ def video_tail9_position_text(target: str) -> str:
     )
 
 
-def video_tail9_position_keyboard(target: str) -> InlineKeyboardMarkup:
+def video_tail9_position_keyboard(
+    target: str,
+    *,
+    columns: int = 2,
+    menu_callback: str = "menu|main_video",
+) -> InlineKeyboardMarkup:
     labels = (
         ("↖️ Trên trái", "top_left"), ("⬆️ Trên giữa", "top_center"), ("↗️ Trên phải", "top_right"),
         ("⬅️ Giữa trái", "center_left"), ("⏺ Chính giữa", "center"), ("➡️ Giữa phải", "center_right"),
         ("↙️ Dưới trái", "bottom_left"), ("⬇️ Dưới giữa", "bottom_center"), ("↘️ Dưới phải", "bottom_right"),
     )
+    width = 3 if safe_int(columns, 2) == 3 else 2
     rows = [
-        [(label, f"video_tail|logo|setpos|{target}|{position}") for label, position in labels[0:3]],
-        [(label, f"video_tail|logo|setpos|{target}|{position}") for label, position in labels[3:6]],
-        [(label, f"video_tail|logo|setpos|{target}|{position}") for label, position in labels[6:9]],
+        [
+            (label, f"video_tail|logo|setpos|{target}|{position}")
+            for label, position in labels[offset:offset + width]
+        ]
+        for offset in range(0, len(labels), width)
     ]
-    rows.append([("⬅️ Quay lại", "video_tail|logo|open"), ("🏠 Menu chính", "menu|main")])
+    menu_button = (
+        ("🏠 Menu chính", "menu|main")
+        if menu_callback == "menu|main"
+        else ("🎬 Menu Video", "menu|main_video")
+    )
+    rows.append([("⬅️ Quay lại", "video_tail|logo|open"), menu_button])
     return video_scene3_keyboard(rows)
 
 
@@ -102423,16 +102836,22 @@ def video_tail9_brand_confirm_text(tail: dict) -> str:
     )
 
 
-def video_tail9_brand_confirm_keyboard(target: str) -> InlineKeyboardMarkup:
+def video_tail9_brand_confirm_keyboard(target: str, tail: dict | None = None) -> InlineKeyboardMarkup:
     label = "logo" if target == "logo" else "watermark"
+    is_video_edit = str((tail or {}).get("video_product_type") or "") == video_editengine1.PRODUCT_TYPE
+    menu_button = (
+        ("🏠 Menu chính", "menu|main")
+        if is_video_edit
+        else ("🎬 Menu Video", "menu|main_video")
+    )
     return video_scene3_keyboard([
         [(f"✅ Lưu {label}", f"video_tail|logo|confirm|{target}"), ("↩️ Chọn lại vị trí", f"video_tail|logo|position|{target}")],
-        [("⬅️ Quay lại", "video_tail|logo|open"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", "video_tail|logo|open"), menu_button],
     ])
 
 
 def video_tail9_catalog_report(tail: dict, capability: dict | None = None) -> dict:
-    product = str(tail.get("video_product_type") or "video_ai_real")
+    product = str(tail.get("video_product_type") or "")
     if product in {video_editengine1.PRODUCT_TYPE, video_editengine1.WORKER_JOB_TYPE}:
         # The local editor renders a supplied video with FFmpeg; it is not a text-to-video package.
         required_capability = "video_to_video"
@@ -102451,20 +102870,29 @@ def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None 
     catalog = dict(catalog or video_tail9_catalog_report(tail, capability))
     if not capability.get("ok") or not catalog.get("ok"):
         return video_tail9_public_blocker_text()
+    scene_count = max(1, safe_int(tail.get("scene_count"), 1))
     lines = [
-        "⭐ <b>Hoàn thiện video</b>", "",
+        "⭐ <b>Chọn chất lượng video</b>", "",
         f"• Sản phẩm: <b>{html.escape(VIDEO_TAIL9_PRODUCT_LABELS.get(str(tail.get('video_product_type') or ''), str(tail.get('video_product_type') or 'Video AI')))}</b>",
-        f"• Số cảnh: <b>{safe_int(tail.get('scene_count'), 1)}</b>",
-        f"• Thời lượng dự kiến: <b>{safe_int(tail.get('estimated_duration'), 8)} giây</b>",
+        f"• Số cảnh: <b>{scene_count}</b>",
         f"• Tỉ lệ: <b>{html.escape(str(tail.get('ratio') or '9:16'))}</b>",
     ]
-    lines.extend(["", "Chọn gói phù hợp với độ chi tiết và độ ổn định mong muốn:"])
+    lines.extend(["", "Mỗi gói dưới đây ghi rõ thời lượng, chất lượng, mục đích sử dụng và giá theo cảnh:"])
     for offer in catalog.get("offers") or []:
-        price = safe_int(offer.get("tier_id"), 0)
-        level, detail = video_scene3_public_quality_spec(price, scene_count=safe_int(tail.get("scene_count"), 1))
-        lines.append(f"• <b>{price} Xu/cảnh</b> · {html.escape(level)}: {html.escape(detail)}")
-    lines.extend(["", "Giá cuối sẽ hiện đầy đủ trong hóa đơn trước khi xác nhận tạo video."])
-    return "\n".join(lines)[:4050]
+        tier_id = safe_int(offer.get("tier_id"), 0)
+        product = video_public_quality_product(tier_id)
+        lines.extend([
+            "",
+            f"{product['icon']} <b>{html.escape(product['name'])}</b> · "
+            f"<b>{product['seconds']} giây/cảnh</b> · <b>{product['unit_xu']} Xu/cảnh</b>",
+            f"• Chất lượng: {html.escape(product['public_level'])} · {html.escape(product['resolution'])}",
+            f"• Đặc điểm: {html.escape(product['public_detail'])}",
+            "• Đầu vào: Câu lệnh hoặc ảnh tham chiếu theo sản phẩm đã chọn",
+            f"• Phù hợp: {html.escape(product['use_case'])}",
+            f"• Tổng {scene_count} cảnh: <b>{product['unit_xu'] * scene_count} Xu</b>",
+        ])
+    lines.extend(["", "Chọn một gói để mở hóa đơn đầy đủ trước khi xác nhận tạo video."])
+    return "\n".join(lines)
 
 
 def video_tail9_quality_keyboard(
@@ -102486,7 +102914,7 @@ def video_tail9_quality_keyboard(
         rows.append(row)
     if not rows:
         return video_tail9_public_blocker_keyboard()
-    rows.append([("⬅️ Quay lại", "video_tail|quality|back"), ("🏠 Menu chính", "menu|main")])
+    rows.append([("⬅️ Quay lại", "video_tail|quality|back"), ("🎬 Menu Video", "menu|main_video")])
     return video_scene3_keyboard(rows)
 
 
@@ -102494,7 +102922,7 @@ def video_tail9_invoice_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("✅ Xác nhận tạo video", "video_tail|confirm|open"), ("⭐ Đổi gói", "video_tail|quality|change")],
         [("✍️ Sửa cấu hình", "video_tail|review|open"), ("📄 Xem tổng hợp", "video_tail|summary|open")],
-        [("⬅️ Quay lại", "video_tail|quality|open"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", "video_tail|quality|open"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
@@ -102507,11 +102935,28 @@ def video_tail9_invoice_text(tail: dict, session: dict, user_id: int, lang: str 
         for key in ("source_audio", "dubbing", "music", "sfx", "subtitles")
         if audio.get(key)
     ]
-    quality = safe_int(tail.get("quality_tier_id") or pricing.get("quality_xu"), 0)
-    package_label = str(pricing.get("package_label") or video_b14_package_full_label(quality))
+    routing_quality = safe_int(
+        tail.get("quality_tier_id")
+        or pricing.get("routing_quality_tier"),
+        200,
+    )
+    quality_product = video_public_quality_product(routing_quality)
+    unit_xu = max(
+        1,
+        safe_int(
+            pricing.get("quality_xu")
+            or pricing.get("unit_xu")
+            or quality_product.get("unit_xu"),
+            quality_product["unit_xu"],
+        ),
+    )
+    package_label = str(
+        pricing.get("package_label")
+        or video_b14_package_full_label(routing_quality)
+    )
     quoted_total = safe_int(pricing.get("total_xu") or pricing.get("price_xu"), 0)
     is_internal = video_b14_is_admin_or_owner(user_id)
-    total = 0 if is_internal else quoted_total
+    total = quoted_total
     balance_line = "• Tài khoản owner/admin: <b>Không trừ Xu</b>\n" if is_internal else ""
     if not is_internal:
         try:
@@ -102519,17 +102964,25 @@ def video_tail9_invoice_text(tail: dict, session: dict, user_id: int, lang: str 
             balance_line = f"• Số dư hiện tại: <b>{xu_number(int(credits or 0))} Xu</b>\n"
         except Exception:
             pass
-    logo = dict(tail.get("logo_config") or {})
-    watermark = dict(tail.get("watermark_config") or {})
-    branding = ", ".join(
-        label
-        for enabled, label in (
-            (logo.get("enabled"), "Logo"),
-            (watermark.get("enabled"), "Watermark"),
+    branding = video_tail9_branding_public_summary(tail)
+    product = str(tail.get("video_product_type") or "")
+    addon_items = [
+        dict(item)
+        for item in pricing.get("addon_items") or []
+        if isinstance(item, dict)
+    ]
+    addon_lines = ""
+    if addon_items:
+        addon_rows = "\n".join(
+            f"  ◦ {html.escape(str(item.get('label') or 'Phần bổ sung'))}: "
+            f"<b>{xu_number(safe_int(item.get('price_xu'), 0))} Xu</b>"
+            for item in addon_items
         )
-        if enabled
-    ) or "Không thêm"
-    product = str(tail.get("video_product_type") or "video_ai_real")
+        addon_lines = (
+            f"• Video chính: <b>{xu_number(safe_int(pricing.get('subtotal_xu'), 0))} Xu</b>\n"
+            f"• Phần bổ sung đã chọn:\n{addon_rows}\n"
+            f"• Tổng phần bổ sung: <b>{xu_number(safe_int(pricing.get('addons_xu'), 0))} Xu</b>\n"
+        )
     return (
         "🧾 <b>Hóa đơn tạo video</b>\n\n"
         f"• Mã hóa đơn: <code>{html.escape(str(tail.get('invoice_id') or 'chưa tạo'))}</code>\n"
@@ -102538,15 +102991,16 @@ def video_tail9_invoice_text(tail: dict, session: dict, user_id: int, lang: str 
         f"• Thời lượng: <b>{safe_int(tail.get('estimated_duration'), 8)} giây</b>\n"
         f"• Tỉ lệ: <b>{html.escape(str(tail.get('ratio') or '9:16'))}</b>\n"
         f"• Gói: <b>{html.escape(package_label)}</b>\n"
-        f"• Chất lượng: <b>{quality} Xu/cảnh</b>\n"
-        f"• Âm thanh/Add-on: <b>{html.escape(', '.join(enabled_audio) or 'Không thêm')}</b>\n"
+        f"• Giá mỗi cảnh: <b>{unit_xu} Xu</b>\n"
+        f"{addon_lines}"
+        f"• Âm thanh và hậu kỳ: <b>{html.escape(', '.join(enabled_audio) or 'Không thêm')}</b>\n"
         f"• Logo/Watermark: <b>{html.escape(branding)}</b>\n"
         f"• Tổng: <b>{xu_number(total)} Xu</b>\n"
         f"{balance_line}\n"
         "Bấm xác nhận để bắt đầu tạo video. Xu chỉ được trừ sau khi video hợp lệ đã được gửi thành công."
         if not delivery_message_id
         else "Video đã được giao thành công; hệ thống sẽ gửi biên nhận trước khi trừ Xu."
-    )[:4050]
+    )
 
 
 def video_tail9_confirm_text(tail: dict, user_id: int) -> str:
@@ -102554,7 +103008,7 @@ def video_tail9_confirm_text(tail: dict, user_id: int) -> str:
     quality = safe_int(tail.get("quality_tier_id") or pricing.get("quality_xu"), 0)
     quoted_total = safe_int(pricing.get("total_xu") or pricing.get("price_xu"), 0)
     is_internal = video_b14_is_admin_or_owner(user_id)
-    total = 0 if is_internal else quoted_total
+    total = quoted_total
     package_label = str(pricing.get("package_label") or video_b14_package_full_label(quality))
     balance_line = "• Tài khoản owner/admin: <b>Không trừ Xu</b>\n" if is_internal else ""
     if not is_internal:
@@ -102572,13 +103026,13 @@ def video_tail9_confirm_text(tail: dict, user_id: int) -> str:
         f"{balance_line}\n"
         "Kiểm tra lần cuối rồi bấm <b>Bắt đầu tạo video</b>. Nếu số dư chưa đủ, "
         "TOAN AAS sẽ giữ nguyên hóa đơn để anh/chị nạp thêm hoặc đổi gói."
-    )[:4050]
+    )
 
 
 def video_tail9_confirm_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("🚀 Bắt đầu tạo video", "video_tail|confirm|submit"), ("✍️ Sửa cấu hình", "video_tail|review|open")],
-        [("⬅️ Quay lại hóa đơn", "video_tail|confirm|back"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại hóa đơn", "video_tail|confirm|back"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
@@ -102610,16 +103064,16 @@ def video_tail9_uses_idea_catalog(tail: dict, host: dict) -> bool:
 def video_idea_prompt_owner_recovery_text(tail: dict) -> str:
     return (
         "💡 <b>Kho Ý tưởng video</b>\n\n"
-        "Prompt đã chọn vẫn được giữ nguyên trong kế hoạch video. Phiên danh sách 5 prompt trước "
+        "Câu lệnh đã chọn vẫn được giữ nguyên trong kế hoạch video. Phiên danh sách 5 câu lệnh trước "
         "không còn đủ dữ liệu để mở lại an toàn.\n\n"
-        "Anh/chị có thể quay về Review để tiếp tục, hoặc mở lại Kho Ý tưởng từ màn chọn nguồn nội dung "
+        "Anh/chị có thể quay về màn Xem lại để tiếp tục, hoặc mở lại Kho Ý tưởng từ màn chọn nguồn nội dung "
         "khi muốn chọn ý tưởng khác."
     )
 
 
 def video_idea_prompt_owner_recovery_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("⬅️ Quay lại Review", "video_tail|review|open"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại xem", "video_tail|review|open"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
@@ -102665,34 +103119,40 @@ def video_tail9_status_recovery_text(tail: dict) -> str:
         or (f"#{tail.get('job_id')}" if tail.get("job_id") else "-")
     )
     submit_preflight = dict(tail.get("submit_preflight_snapshot") or {})
-    submit_blocked = bool(
+    submit_failed = bool(
         tail.get("submit_attempted")
         and not str(tail.get("job_id") or "").strip()
-        and submit_preflight
-        and not submit_preflight.get("allowed")
     )
-    if submit_blocked:
+    if submit_failed:
+        detail = str(submit_preflight.get("public_message") or "").strip()
         return (
             "🎬 <b>Trạng thái tạo video</b>\n\n"
-            "⚠️ <b>Đã nhận xác nhận, chưa thể bắt đầu tạo video</b>\n\n"
+            "❌ <b>FAIL - Chưa tạo được tác vụ</b>\n\n"
             f"• Mã xử lý: <code>{html.escape(public_code)}</code>\n"
             f"• Mã hóa đơn: <code>{html.escape(str(tail.get('invoice_id') or '-'))}</code>\n"
             "• Tiến độ: <b>0%</b>\n"
-            "• Trạng thái: <b>Chưa thể bắt đầu tạo video</b>\n\n"
+            "• Trạng thái: <b>Đã dừng - chưa tạo video</b>\n\n"
+            f"{detail + chr(10) + chr(10) if detail else ''}"
             "Hóa đơn và toàn bộ cấu hình vẫn được giữ nguyên. Tài khoản chưa bị trừ Xu."
         )
     return (
-        "🎬 <b>TOAN AAS đang xử lý video</b>\n\n"
-        "✅ Hệ thống đã nhận xác nhận tạo video.\n"
+        "🎬 <b>Trạng thái tạo video</b>\n\n"
+        "ℹ️ <b>Chưa có tác vụ tạo video</b>\n"
         f"• Mã xử lý: <code>{html.escape(public_code)}</code>\n"
         f"• Mã hóa đơn: <code>{html.escape(str(tail.get('invoice_id') or '-'))}</code>\n"
-        "• Trạng thái: <b>Đang đồng bộ mã tác vụ</b>\n\n"
-        "Bấm kiểm tra lại để tải trạng thái mới nhất. Hóa đơn và cấu hình hiện tại được giữ nguyên."
+        "• Trạng thái: <b>Chưa bắt đầu</b>\n\n"
+        "Quay lại hóa đơn để xác nhận tạo video. Hệ thống chưa tạo tác vụ và chưa trừ Xu."
     )
 
 
 def video_tail9_status_recovery_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
     current = dict(tail or {})
+    is_video_edit = str(current.get("video_product_type") or "") == video_editengine1.PRODUCT_TYPE
+    menu_button = (
+        ("🏠 Menu chính", "menu|main")
+        if is_video_edit
+        else ("🎬 Menu Video", "menu|main_video")
+    )
     retry_callback = (
         "video_tail|confirm|submit"
         if current.get("submit_attempted") and not str(current.get("job_id") or "").strip()
@@ -102700,7 +103160,7 @@ def video_tail9_status_recovery_keyboard(tail: dict | None = None) -> InlineKeyb
     )
     return video_scene3_keyboard([
         [("🔄 Kiểm tra trạng thái", retry_callback), ("🎬 Gửi video khác", "menu|main_video")],
-        [("🧾 Xem lại hóa đơn", "video_tail|confirm|back"), ("🏠 Menu chính", "menu|main")],
+        [("🧾 Xem lại hóa đơn", "video_tail|confirm|back"), menu_button],
     ])
 
 
@@ -102789,6 +103249,14 @@ async def video_tail9_open_planning_audio(query, context, uid: int, tail: dict, 
 
 async def video_tail9_render(query, user_id: int, context, screen: str):
     tail, owner, host = video_tail9_context(user_id, context)
+    if owner == "missing" or not str(tail.get("video_product_type") or ""):
+        return await safe_edit_or_send(
+            query,
+            "⏰ Phiên video không còn đúng ngữ cảnh. Hãy mở lại đúng sản phẩm từ Menu Video; bot chưa tạo tác vụ và chưa trừ Xu.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
+            ]]),
+        )
     if screen == "review":
         if owner == "video_edit":
             tail["status_stage"] = "review"
@@ -102825,7 +103293,7 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
             query,
             video_tail9_brand_confirm_text(tail),
             parse_mode="HTML",
-            reply_markup=video_tail9_brand_confirm_keyboard(target),
+            reply_markup=video_tail9_brand_confirm_keyboard(target, tail),
         )
     if screen == "summary":
         required_screen = video_tail9.next_required_screen(tail)
@@ -102834,7 +103302,20 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
         tail = video_tail9.prepare_summary(tail)
         tail["status_stage"] = "summary"
         save_video_tail9_state(user_id, context, tail, owner, host)
-        return await safe_edit_or_send(query, video_tail9_summary_text(tail), parse_mode="HTML", reply_markup=video_tail9_summary_keyboard(tail))
+        summary_text = video_tail9_summary_text(tail)
+        summary_keyboard = video_tail9_summary_keyboard(tail)
+        if owner == "video_edit":
+            return await safe_edit_or_send(
+                query,
+                summary_text,
+                parse_mode="HTML",
+                reply_markup=summary_keyboard,
+            )
+        return await safe_edit_or_send_long_html(
+            query,
+            summary_text,
+            reply_markup=summary_keyboard,
+        )
     if screen == "quality":
         required_screen = video_tail9.next_required_screen(tail)
         if required_screen:
@@ -102855,19 +103336,35 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
                 parse_mode="HTML",
                 reply_markup=video_tail9_public_blocker_keyboard(),
             )
-        return await safe_edit_or_send(
+        quality_text = video_tail9_quality_text(tail, capability, catalog)
+        quality_keyboard = video_tail9_quality_keyboard(tail, catalog, selectable=selection_ready)
+        if owner == "video_edit":
+            return await safe_edit_or_send(
+                query,
+                quality_text,
+                parse_mode="HTML",
+                reply_markup=quality_keyboard,
+            )
+        return await safe_edit_or_send_long_html(
             query,
-            video_tail9_quality_text(tail, capability, catalog),
-            parse_mode="HTML",
-            reply_markup=video_tail9_quality_keyboard(tail, catalog, selectable=selection_ready),
+            quality_text,
+            reply_markup=quality_keyboard,
         )
     if screen == "invoice":
         session = video_tail9_apply_to_session(user_id, context, tail, owner, host)
-        return await safe_edit_or_send(
+        invoice_text = video_tail9_invoice_text(tail, session, user_id, get_user_language(user_id) or "vi")
+        invoice_keyboard = video_tail9_invoice_keyboard()
+        if owner == "video_edit":
+            return await safe_edit_or_send(
+                query,
+                invoice_text,
+                parse_mode="HTML",
+                reply_markup=invoice_keyboard,
+            )
+        return await safe_edit_or_send_long_html(
             query,
-            video_tail9_invoice_text(tail, session, user_id, get_user_language(user_id) or "vi"),
-            parse_mode="HTML",
-            reply_markup=video_tail9_invoice_keyboard(),
+            invoice_text,
+            reply_markup=invoice_keyboard,
         )
     if screen == "confirm":
         return await safe_edit_or_send(
@@ -103072,6 +103569,18 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
     argument = parts[3] if len(parts) > 3 else ""
     extra = parts[4] if len(parts) > 4 else ""
     tail, owner, host = video_tail9_context(uid, context)
+    if owner == "missing":
+        lang = get_user_language(uid) or "vi"
+        await query.answer(
+            "Phiên video cũ đã hết hạn. Vui lòng chọn lại sản phẩm.",
+            show_alert=True,
+        )
+        return await safe_edit_or_send(
+            query,
+            menu_text_main_video_i18n(lang),
+            parse_mode="HTML",
+            reply_markup=main_video_keyboard(lang),
+        )
     tail, claimed = video_tail9.claim_callback(tail, str(getattr(query, "id", "") or ""))
     if not claimed:
         return
@@ -103408,11 +103917,16 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 session["draft"] = draft
                 session.update({"current_step": "awaiting_video_tail9_logo", "awaiting_media": True})
                 save_video_session(uid, session)
+            menu_button = (
+                ("🏠 Menu chính", "menu|main")
+                if owner == "video_edit"
+                else ("🎬 Menu Video", "menu|main_video")
+            )
             return await safe_edit_or_send(
                 query,
-                "📎 <b>Gửi logo hình ảnh</b>\n\nGửi một ảnh PNG/JPG/WEBP. TOAN AAS chỉ lưu file_id vào kế hoạch; chưa tạo video và chưa trừ Xu.",
+                "📎 <b>Gửi logo hình ảnh</b>\n\nGửi một ảnh PNG/JPG/WEBP. TOAN AAS chỉ lưu ảnh vào kế hoạch; chưa tạo video và chưa trừ Xu.",
                 parse_mode="HTML",
-                reply_markup=video_scene3_keyboard([[("⬅️ Quay lại", "video_tail|logo|open"), ("🏠 Menu chính", "menu|main")]]),
+                reply_markup=video_scene3_keyboard([[("⬅️ Quay lại", "video_tail|logo|open"), menu_button]]),
             )
         if action == "watermark":
             if owner == "video_edit":
@@ -103428,11 +103942,16 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 session["draft"] = draft
                 session["current_step"] = "video_tail9_watermark_input"
                 save_video_session(uid, session)
+            menu_button = (
+                ("🏠 Menu chính", "menu|main")
+                if owner == "video_edit"
+                else ("🎬 Menu Video", "menu|main_video")
+            )
             return await safe_edit_or_send(
                 query,
                 "✍️ <b>Nhập watermark chữ</b>\n\nGửi nội dung ngắn tối đa 120 ký tự. Sau đó chọn vị trí hiển thị.",
                 parse_mode="HTML",
-                reply_markup=video_scene3_keyboard([[("⬅️ Quay lại", "video_tail|logo|open"), ("🏠 Menu chính", "menu|main")]]),
+                reply_markup=video_scene3_keyboard([[("⬅️ Quay lại", "video_tail|logo|open"), menu_button]]),
             )
         if action == "position":
             config = dict(tail.get("logo_config" if argument == "logo" else "watermark_config") or {})
@@ -103454,7 +103973,11 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 query,
                 video_tail9_position_text(argument),
                 parse_mode="HTML",
-                reply_markup=video_tail9_position_keyboard(argument),
+                reply_markup=video_tail9_position_keyboard(
+                    argument,
+                    columns=3 if owner == "video_edit" else 2,
+                    menu_callback="menu|main" if owner == "video_edit" else "menu|main_video",
+                ),
             )
         if action == "setpos":
             key = "logo_config" if argument == "logo" else "watermark_config"
@@ -103468,7 +103991,11 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     query,
                     video_tail9_position_text(argument),
                     parse_mode="HTML",
-                    reply_markup=video_tail9_position_keyboard(argument),
+                    reply_markup=video_tail9_position_keyboard(
+                        argument,
+                        columns=3 if owner == "video_edit" else 2,
+                        menu_callback="menu|main" if owner == "video_edit" else "menu|main_video",
+                    ),
                 )
             tail["brand_pending_target"] = argument
             tail["brand_pending_position"] = extra
@@ -103522,7 +104049,11 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     query,
                     video_tail9_position_text(pending_target),
                     parse_mode="HTML",
-                    reply_markup=video_tail9_position_keyboard(pending_target),
+                    reply_markup=video_tail9_position_keyboard(
+                        pending_target,
+                        columns=3 if owner == "video_edit" else 2,
+                        menu_callback="menu|main" if owner == "video_edit" else "menu|main_video",
+                    ),
                 )
             tail = video_tail9.mark_branding_complete(tail)
             save_video_tail9_state(uid, context, tail, owner, host)
@@ -103564,7 +104095,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 session = video_tail9_apply_to_session(uid, context, tail, owner, host)
                 pricing = video_b14_invoice_for_session(session, uid)
                 pricing.update({
-                    "product_type": str(tail.get("video_product_type") or "video_ai_real"),
+                    "product_type": str(tail.get("video_product_type") or ""),
                     "scene_count": safe_int(tail.get("scene_count"), 1),
                     "duration_seconds": safe_int(tail.get("estimated_duration"), 8),
                     "ratio": str(tail.get("ratio") or "9:16"),
@@ -103768,7 +104299,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         bridge_preflight_blocked = bool(
             confirmed_draft.get("b14_preflight_ui_context")
         )
-        if response is None or bridge_preflight_blocked:
+        if owner != "video_edit" or response is None or bridge_preflight_blocked:
             tail = video_tail9_prepare_submit_status(
                 uid,
                 context,
@@ -103851,7 +104382,11 @@ async def handle_video_tail9_pending_text(update: Update, context: ContextTypes.
         update.message,
         video_tail9_position_text("watermark"),
         parse_mode="HTML",
-        reply_markup=video_tail9_position_keyboard("watermark"),
+        reply_markup=video_tail9_position_keyboard(
+            "watermark",
+            columns=3 if owner == "video_edit" else 2,
+            menu_callback="menu|main" if owner == "video_edit" else "menu|main_video",
+        ),
     )
     return True
 
@@ -104171,7 +104706,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 return await safe_edit_or_send(
                     query,
                     "📎 <b>Gửi video nguồn</b>\n\nGửi đúng một video có người, vật hoặc sản phẩm cần giữ. "
-                    "TOAN AAS chỉ đọc metadata và phân tích cục bộ ở bước này; chưa gọi nguồn dựng, chưa tạo tác vụ và chưa trừ Xu.",
+                    "TOAN AAS chỉ đọc thông tin cần thiết và phân tích cục bộ ở bước này; chưa xử lý video, chưa tạo tác vụ và chưa trừ Xu.",
                     parse_mode="HTML",
                     reply_markup=video_selfshot_source_input_keyboard("ss2", current),
                 )
@@ -104197,8 +104732,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 save_video_session(uid, pending_session)
                 return await safe_edit_or_send(
                     query,
-                    "📎 <b>Gửi logo hình ảnh</b>\n\nGửi một ảnh logo. TOAN AAS chỉ lưu file_id và vị trí trong kế hoạch; "
-                    "chưa tạo file, chưa gọi provider và chưa trừ Xu.",
+                    "📎 <b>Gửi logo hình ảnh</b>\n\nGửi một ảnh logo. TOAN AAS chỉ lưu ảnh và vị trí trong kế hoạch; "
+                    "chưa tạo tệp, chưa xử lý video và chưa trừ Xu.",
                     parse_mode="HTML",
                     reply_markup=video_selfshot2_input_keyboard("addons"),
                 )
@@ -104222,14 +104757,23 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 save_video_session(uid, pending_session)
                 pending_copy = {
                     "subject": "✍️ <b>Mô tả chủ thể cần giữ</b>\n\nGhi rõ người, vật/sản phẩm và quan hệ cần giữ xuyên suốt.",
-                    "preserve": "✍️ <b>Yêu cầu cần giữ thêm</b>\n\nGhi một yêu cầu nhận diện hoặc quan hệ cụ thể, không nhập thông tin provider.",
+                    "preserve": "✍️ <b>Yêu cầu cần giữ thêm</b>\n\nGhi một yêu cầu nhận diện hoặc quan hệ cụ thể cần giữ xuyên suốt video.",
                     "scene_count": "🎬 <b>Nhập số cảnh</b>\n\nNhập một số từ 1 đến 20.",
                     "ratio": "📐 <b>Nhập tỉ lệ</b>\n\nNhập dạng rộng:cao, ví dụ 3:2. Màn này không có gợi ý tỉ lệ.",
                     "content": "✍️ <b>Nhập nội dung</b>\n\nMô tả câu chuyện mới quanh đúng người/vật và hành động trong video nguồn.",
-                    "prompt": "✍️ <b>Sửa prompt các cảnh</b>\n\nGửi yêu cầu chỉnh chung; hệ thống giữ nguyên khóa nhận diện và quan hệ.",
+                    "prompt": "✍️ <b>Sửa câu lệnh các cảnh</b>\n\nGửi yêu cầu chỉnh chung; hệ thống giữ nguyên nhận diện và quan hệ đã khóa.",
                     "volume": "🔊 <b>Nhập âm lượng</b>\n\nNhập số từ 0 đến 200 (%).",
                     "watermark": "✍️ <b>Nhập watermark chữ</b>\n\nNhập nội dung ngắn tối đa 120 ký tự; vị trí được chọn ở màn bổ sung.",
                 }
+                if pending == "prompt":
+                    prompt_index = safe_int(current.get("prompt_edit_index"), 0)
+                    prompts = list(current.get("video_prompts") or [])
+                    current_prompt = str((prompts[prompt_index - 1] or {}).get("prompt") or "") if 1 <= prompt_index <= len(prompts) else ""
+                    return await safe_edit_or_send_long_plain(
+                        query,
+                        f"✍️ Sửa nguyên văn câu lệnh cảnh {prompt_index}\n\nCâu lệnh hiện tại:\n\n{current_prompt}\n\nGửi lại toàn bộ câu lệnh mới. Hệ thống sẽ lưu đúng nguyên văn nội dung anh/chị gửi.",
+                        reply_markup=video_selfshot2_input_keyboard(back_screen),
+                    )
                 return await safe_edit_or_send(
                     query,
                     pending_copy[pending],
@@ -104239,7 +104783,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             if result.get("notice") == "scene_count_help":
                 return await safe_edit_or_send(
                     query,
-                    "ℹ️ <b>Lưu ý số cảnh</b>\n\nMỗi cảnh khoảng 8 giây và dùng một đoạn nguồn được ghi rõ. "
+                    "ℹ️ <b>Lưu ý số cảnh</b>\n\nMỗi cảnh dùng một đoạn nguồn được ghi rõ; thời lượng được xác định theo gói Chất lượng. "
                     "Chọn 1–20 cảnh; số cảnh nhiều hơn có thể tăng giá ở hóa đơn cuối.",
                     parse_mode="HTML",
                     reply_markup=video_selfshot2_input_keyboard("scene_count"),
@@ -104331,7 +104875,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 return await safe_edit_or_send(
                     query,
                     "📎 <b>Gửi video mộc</b>\n\nGửi một video có người, vật hoặc thú cưng cần giữ. "
-                    "TOAN AAS chỉ đọc thông tin cục bộ để lập kế hoạch; chưa gọi nguồn dựng và chưa trừ Xu.",
+                    "TOAN AAS chỉ đọc thông tin cục bộ để lập kế hoạch; chưa xử lý video và chưa trừ Xu.",
                     parse_mode="HTML",
                     reply_markup=video_selfshot_source_input_keyboard("ss3", current),
                 )
@@ -104578,11 +105122,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 current["prompt_bundle"] = video_selfshot3_compile_prompt(current)
                 save_video_selfshot3_draft(uid, current, step="selfshot3:review")
                 prompt_text = json.dumps(current["prompt_bundle"], ensure_ascii=False, indent=2)
-                return await safe_edit_or_send(
+                return await safe_edit_or_send_long_plain(
                     query,
-                    "📝 <b>Prompt biến đổi điện ảnh</b>\n\n<pre>" + html.escape(prompt_text[:12000]) + "</pre>\n\nChưa gọi nguồn dựng và chưa trừ Xu.",
-                    parse_mode="HTML",
-                    reply_markup=video_scene3_keyboard([[('⬅️ Quay lại', 'vproduct|ss3|show|review'), ('🏠 Menu chính', 'menu|main')]]),
+                    "📝 Câu lệnh biến đổi điện ảnh\n\n" + prompt_text + "\n\nChưa xử lý video và chưa trừ Xu.",
+                    reply_markup=video_scene3_keyboard([[('✍️ Sửa nội dung', 'vproduct|ss3|show|content'), ('⬅️ Quay lại', 'vproduct|ss3|show|review')], [('🎬 Menu Video', 'menu|main_video')]]),
                 )
             return await video_selfshot3_render(query, uid, "intro", draft=current)
         except (ValueError, KeyError, TypeError) as exc:
@@ -104750,7 +105293,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         )
         return await safe_edit_or_send(
             query,
-            "✍️ <b>Nhập số cảnh từ 5 đến 20</b>\n\nKịch bản → Video có thời lượng khoảng 40–160 giây. "
+            "✍️ <b>Nhập số cảnh từ 5 đến 20</b>\n\nKịch bản → Video có thời lượng theo gói Chất lượng đã chọn. "
             "Nội dung kịch bản gốc vẫn được giữ nguyên. Bước này chưa tạo tác vụ và chưa trừ Xu.",
             parse_mode="HTML",
             reply_markup=video_flow7_script_count_keyboard(
@@ -105177,7 +105720,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         draft = dict(session.get("draft") or {})
         image_scenes = list(draft.get("storyboard_image_scenes") or video_microflow_selected_option(session).get("image_scenes") or [])
         if not image_scenes:
-            return await safe_edit_or_send(query, video_microflow_missing_input_text(lang), reply_markup=video_microflow_nav_keyboard(lang))
+            return await safe_edit_or_send(query, video_microflow_missing_input_text(lang), reply_markup=video_microflow_nav_keyboard(lang, product_id))
         session = task3d_session_step(uid, "storyboard_final_video_duration", storyboard_image_scenes=image_scenes, storyboard_images_confirmed=True, provider_called=False, xu_charged=0)
         return await safe_edit_or_send(
             query,
@@ -105217,7 +105760,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         selected = dict(draft.get("selected_image_prompt_set") or video_microflow_selected_option(session))
         images = list(selected.get("images") or [])
         if not images:
-            return await safe_edit_or_send(query, video_microflow_missing_input_text(lang), reply_markup=video_microflow_nav_keyboard(lang))
+            return await safe_edit_or_send(query, video_microflow_missing_input_text(lang), reply_markup=video_microflow_nav_keyboard(lang, product_id))
         if product_id == "video_ai_real":
             session = task3d_session_step(
                 uid,
@@ -105525,10 +106068,9 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             video_b14_build_storyboard_for_session(uid, session)
             session = get_video_session(uid)
         session = task3d_session_step(uid, "asset_storyboard_prompt", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(
+        return await safe_edit_or_send_long_plain(
             query,
             video_b14_prompt_text_from_session(session, "image"),
-            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton("🖼 Tạo ảnh AI trước" if normalize_user_language(lang) == "vi" else "🖼 Create AI images first", callback_data="vproduct|asset_create_ai_image"),
@@ -105886,17 +106428,21 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if not (session.get("draft") or {}).get("b14_storyboard_plan"):
             video_b14_build_storyboard_for_session(uid, session)
             session = get_video_session(uid)
-        return await safe_edit_or_send(query, video_b14_prompt_text_from_session(session, "image"), parse_mode="HTML", reply_markup=video_b14_storyboard_keyboard(lang))
+        return await safe_edit_or_send_long_plain(query, video_b14_prompt_text_from_session(session, "image"), reply_markup=video_b14_storyboard_keyboard(lang))
     if action == "b14_prompt_video_text":
         if not (session.get("draft") or {}).get("b14_storyboard_plan"):
             video_b14_build_storyboard_for_session(uid, session)
             session = get_video_session(uid)
-        return await safe_edit_or_send(query, video_b14_prompt_video_text_from_session(session, lang), parse_mode="HTML", reply_markup=video_b14_prompt_video_keyboard(lang))
+        return await safe_edit_or_send_long_plain(query, video_b14_prompt_video_text_from_session(session, lang), reply_markup=video_b14_prompt_video_keyboard(lang))
     if action == "b14_export_pack":
         if not (session.get("draft") or {}).get("b14_storyboard_plan"):
             video_b14_build_storyboard_for_session(uid, session)
             session = get_video_session(uid)
-        return await safe_edit_or_send(query, video_b14_prompt_pack_text_from_session(session), parse_mode="HTML", reply_markup=video_b14_storyboard_keyboard(lang))
+        return await safe_edit_or_send_long_html(
+            query,
+            video_b14_prompt_pack_text_from_session(session),
+            reply_markup=video_b14_storyboard_keyboard(lang),
+        )
     if action == "storyboard_confirm":
         if not (session.get("draft") or {}).get("b14_storyboard_plan"):
             video_b14_build_storyboard_for_session(uid, session)
@@ -105924,7 +106470,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             session = task3d_session_step(uid, "b14_voice", provider_called=False, xu_charged=0)
             return await safe_edit_or_send(
                 query,
-                state.public_message or "🎙 Tạo voice riêng đang tạm khóa để kiểm soát chất lượng. Anh/chị có thể dùng giọng nam/nữ mặc định hoặc voice đã lưu.",
+                state.public_message or "🎙 Tạo giọng riêng đang tạm khóa để kiểm soát chất lượng. Anh/chị có thể dùng giọng nam, giọng nữ mặc định hoặc giọng đã lưu.",
                 reply_markup=video_b14_voice_keyboard(lang),
             )
         if source == "saved":
@@ -105932,14 +106478,14 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             if not profiles:
                 return await safe_edit_or_send(
                     query,
-                    "📚 Chưa có voice đã lưu nào sẵn sàng để dùng. Anh/chị chọn giọng mặc định hoặc tạo lại voice.",
+                    "📚 Chưa có giọng đã lưu nào sẵn sàng để dùng. Anh/chị chọn giọng mặc định hoặc tạo lại giọng riêng.",
                     parse_mode="HTML",
                     reply_markup=video_b14_voice_keyboard(lang),
                 )
             session = task3d_session_step(uid, "b14_voice_saved", provider_called=False, xu_charged=0)
             return await safe_edit_or_send(
                 query,
-                "📚 <b>Chọn voice đã lưu</b>\n\nTOAN AAS chỉ hiện các voice đã sẵn sàng để dùng cho video. Chưa tạo file thật và chưa trừ Xu.",
+                "📚 <b>Chọn giọng đã lưu</b>\n\nTOAN AAS chỉ hiện các giọng đã sẵn sàng để dùng cho video. Chưa tạo tệp thật và chưa trừ Xu.",
                 parse_mode="HTML",
                 reply_markup=video_b14_voice_select_keyboard(uid, lang),
             )
@@ -105958,7 +106504,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             if not result.get("ok"):
                 return await safe_edit_or_send(
                     query,
-                    result.get("public_message") or "TOAN AAS cần lời đọc trước khi bật voice.",
+                    result.get("public_message") or "TOAN AAS cần lời đọc trước khi bật giọng đọc.",
                     reply_markup=video_b14_voice_keyboard(lang),
                 )
         session = task3d_session_step(uid, "b14_voice", provider_called=False, xu_charged=0)
@@ -106028,7 +106574,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if source == "sfx_vault":
             fields["sfx_enabled"] = True
             fields["music_source"] = "vault"
-            fields["music_note"] = "TOAN AAS đã ghi nhận Kho SFX. SFX sẽ được xử lý sau xác nhận cuối nếu gói cho phép."
+            fields["music_note"] = "TOAN AAS đã ghi nhận kho hiệu ứng âm thanh. Hiệu ứng sẽ được xử lý sau xác nhận cuối nếu gói cho phép."
         elif source == "vault":
             fields["music_note"] = "TOAN AAS đã ghi nhận Kho nhạc. Nhạc nền sẽ được chọn theo loại video sau xác nhận cuối."
         elif source == "media":
@@ -106052,7 +106598,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "b14_music", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_music_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_music_keyboard(lang))
     if action == "b14_addon_sfx":
-        return await safe_edit_or_send(query, "💥 <b>SFX</b>", parse_mode="HTML", reply_markup=video_b14_choice_keyboard("b14_sfx_set", [("Không SFX", "none"), ("SFX mặc định", "default")], lang))
+        return await safe_edit_or_send(query, "💥 <b>Hiệu ứng âm thanh</b>", parse_mode="HTML", reply_markup=video_b14_choice_keyboard("b14_sfx_set", [("Không dùng", "none"), ("Hiệu ứng mặc định", "default")], lang))
     if action == "b14_sfx_set":
         session = video_b14_set_addon_plan(uid, session, sfx_enabled=(value == "default"))
         return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
@@ -106067,7 +106613,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if source == "from_narration" and not video_b14_narration_source(session).get("ok"):
             return await safe_edit_or_send(
                 query,
-                "TOAN AAS cần lời đọc/kịch bản trước khi tạo phụ đề theo lời đọc. Anh/chị vào Voice rồi bấm Sửa lời đọc.",
+                "TOAN AAS cần lời đọc hoặc kịch bản trước khi tạo phụ đề theo lời đọc. Anh/chị vào Giọng đọc rồi bấm Sửa lời đọc.",
                 reply_markup=video_b14_subtitle_keyboard(lang),
             )
         if source == "from_narration":
@@ -106153,7 +106699,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "b14_dub_custom", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(
             query,
-            "✍️ Nhập ngôn ngữ muốn lồng tiếng. TOAN AAS chỉ lưu kế hoạch, chưa gọi provider và chưa trừ Xu.",
+            "✍️ Nhập ngôn ngữ muốn lồng tiếng. TOAN AAS chỉ lưu kế hoạch, chưa xử lý video và chưa trừ Xu.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_dub"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
         )
     if action == "b14_dub_done":
@@ -106185,7 +106731,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "b14_logo_position", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_logo_position_text(session, lang), parse_mode="HTML", reply_markup=video_b14_logo_position_keyboard(lang))
     if action == "b14_logo_position":
-        position = value if value in {"top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"} else "bottom_right"
+        position = value if value in PRODUCT_VIDEO_LOGO_POSITIONS else "bottom_right"
         session = video_b14_set_addon_plan(
             uid,
             session,
@@ -106236,10 +106782,45 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_or_send(query, video_b14_quality_text(lang), parse_mode="HTML", reply_markup=video_b14_quality_keyboard(lang))
     if action == "b14_quality":
         quality = min(VIDEO_B14_2_QUALITY_OPTIONS, key=lambda item: abs(item - safe_int(value, 200)))
+        quality_product = video_public_quality_product(quality)
+        model = dict(quality_product.get("internal_model") or {})
+        provider_costs = [
+            dict(item) for item in model.get("provider_costs") or [] if isinstance(item, dict)
+        ]
+        runtime_provider_keys = {
+            "shopaikey": "shopaikey_video",
+            "key4u": "key4u_video",
+        }
+        provider_model_map = {
+            runtime_provider_keys.get(str(item.get("provider") or ""), str(item.get("provider") or "")): str(item.get("model") or "")
+            for item in provider_costs
+            if str(item.get("provider") or "") and str(item.get("model") or "")
+        }
+        provider_chain = [
+            runtime_provider_keys.get(str(item or ""), str(item or ""))
+            for item in model.get("provider_priority") or []
+            if str(item or "")
+        ]
         session = video_b14_clear_runtime_selection_for_package(session)
         draft = dict(session.get("draft") or {})
-        draft["b14_quality_xu"] = quality
-        draft["b14_scene_count_selected"] = False
+        asset_pack = dict(draft.get("asset_pack") or {})
+        asset_pack.update({
+            "provider_model_metadata": deepcopy(model),
+            "provider_model_map": provider_model_map,
+            "provider_chain": provider_chain,
+            "provider_order": ",".join(provider_chain),
+            "selected_clip_seconds": quality_product["seconds"],
+            "selected_quality": quality_product["public_level"],
+        })
+        draft.update({
+            "b14_quality_xu": quality,
+            "b14_billing_unit_xu": quality_product["unit_xu"],
+            "b14_scene_seconds": quality_product["seconds"],
+            "b14_package_label_override": video_b14_package_full_label(quality),
+            "b14_scene_count_selected": False,
+            "provider_model_metadata": deepcopy(model),
+            "asset_pack": asset_pack,
+        })
         session["draft"] = draft
         session = save_video_session(uid, session)
         session = task3d_session_step(uid, "b14_scene_count", provider_called=False, xu_charged=0)
@@ -106337,7 +106918,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             return await safe_edit_or_send(
                 query,
                 "⚠️ Báo giá này không còn hiệu lực cho bản kế hoạch hiện tại. "
-                "TOAN AAS chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu.",
+                "TOAN AAS chưa tạo tác vụ, chưa xử lý video và chưa trừ Xu.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("📋 Mở lại báo giá hiện tại", callback_data="vid3|resume")],
                     [InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
@@ -106393,7 +106974,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     )
                 return await safe_edit_or_send(
                     query,
-                    "⚠️ Gói Trải nghiệm đã đạt giới hạn dùng thử trong kỳ này. TOAN AAS chưa xử lý và chưa trừ Xu.",
+                    "⚠️ Gói đã chọn hiện chưa thể tiếp tục. TOAN AAS chưa xử lý và chưa trừ Xu.",
                     parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
                 )
@@ -106684,7 +107265,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             if str(session.get("topic") or (session.get("draft") or {}).get("topic") or "").strip():
                 video_b14_build_storyboard_for_session(uid, session)
                 session = get_video_session(uid)
-                return await safe_edit_or_send(query, video_b14_prompt_text_from_session(session, "image"), parse_mode="HTML", reply_markup=video_b14_storyboard_keyboard(lang))
+                return await safe_edit_or_send_long_plain(query, video_b14_prompt_text_from_session(session, "image"), reply_markup=video_b14_storyboard_keyboard(lang))
             return await safe_edit_or_send(query, "⚠️ Bộ prompt ảnh chưa sẵn sàng. Bot chưa trừ Xu.", reply_markup=task3d_result_parent_keyboard(lang))
         session = task3d_session_step(uid, "prompt_image_scene")
         return await safe_edit_or_send(query, task3d_prompt_image_scene_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_image_scene_keyboard(session, lang))
@@ -106699,18 +107280,35 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         else:
             selected = [max(1, min(len(prompts), safe_int(value, 1)))]
         session = task3d_session_step(uid, "prompt_image_detail", prompt_image_selection=selected)
-        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "image"), parse_mode="HTML", reply_markup=task3d_prompt_image_detail_keyboard(lang))
+        return await safe_edit_or_send_long_plain(query, task3d_prompt_detail_text(session, "image"), reply_markup=task3d_prompt_image_detail_keyboard(lang))
     if action == "prompt_image_detail":
         session = task3d_session_step(uid, "prompt_image_detail")
-        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "image"), parse_mode="HTML", reply_markup=task3d_prompt_image_detail_keyboard(lang))
+        return await safe_edit_or_send_long_plain(query, task3d_prompt_detail_text(session, "image"), reply_markup=task3d_prompt_image_detail_keyboard(lang))
     if action == "prompt_image_copy":
-        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "image", copy_hint=True), parse_mode="HTML", reply_markup=task3d_prompt_image_detail_keyboard(lang))
+        return await safe_edit_or_send_long_plain(query, task3d_prompt_detail_text(session, "image", copy_hint=True), reply_markup=task3d_prompt_image_detail_keyboard(lang))
     if action == "prompt_image_rewrite":
         session = task3d_session_step(uid, "prompt_image_detail", **task3d_rewrite_selected_prompts(session, "image"))
-        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "image"), parse_mode="HTML", reply_markup=task3d_prompt_image_detail_keyboard(lang))
+        return await safe_edit_or_send_long_plain(query, task3d_prompt_detail_text(session, "image"), reply_markup=task3d_prompt_image_detail_keyboard(lang))
     if action == "prompt_image_edit":
-        session = task3d_session_step(uid, "detail", prompt_edit_kind="image")
-        return await task3d_render_step(query, uid, session, lang)
+        selected = task3d_video_prompt_selected_entries(session, "image")
+        if len(selected) != 1:
+            session = task3d_session_step(uid, "prompt_image_scene")
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Hãy chọn đúng một cảnh để sửa nguyên văn câu lệnh tạo ảnh.",
+                reply_markup=task3d_prompt_image_scene_keyboard(session, lang),
+            )
+        session = task3d_session_step(
+            uid,
+            "prompt_exact_edit",
+            prompt_edit_kind="image",
+            prompt_edit_index=selected[0][0],
+        )
+        return await safe_edit_or_send_long_plain(
+            query,
+            task3d_prompt_exact_edit_text(session, "image"),
+            reply_markup=task3d_prompt_exact_edit_keyboard("image", lang),
+        )
     if action == "prompt_image_packages":
         session = task3d_session_step(uid, "prompt_image_logo_choice")
         return await safe_edit_or_send(query, task3d_prompt_image_logo_choice_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_image_logo_choice_keyboard(lang))
@@ -106775,7 +107373,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         token = ""
         if len(selected) == 1:
             provider_tier = str(package.get("provider_tier") or "low")
-            tier_payload = image_tier_payload(provider_tier)
+            tier_payload = canonical_image_tier_payload(provider_tier)
             prompt = selected[0][1]
             aspect = normalize_media_aspect_ratio(str(session.get("aspect_ratio") or "1:1"), "1:1", "image")
             draft = dict((session or {}).get("draft") or {})
@@ -106838,7 +107436,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             block_message = (
                 shopaikey_provider_submit_maintenance_message("image", lang, str(provider_submit_guard.get("message") or ""))
                 if block_reason == "image_explicit_maintenance"
-                else str(provider_submit_guard.get("message") or "TOAN AAS chưa gọi provider và chưa trừ Xu.")
+                else str(provider_submit_guard.get("message") or "TOAN AAS chưa tạo ảnh và chưa trừ Xu.")
             )
             return await safe_edit_or_send(
                 query,
@@ -106860,13 +107458,13 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             if str(session.get("topic") or (session.get("draft") or {}).get("topic") or "").strip():
                 video_b14_build_storyboard_for_session(uid, session)
                 session = get_video_session(uid)
-                return await safe_edit_or_send(query, video_b14_prompt_text_from_session(session, "video"), parse_mode="HTML", reply_markup=video_b14_storyboard_keyboard(lang))
+                return await safe_edit_or_send_long_plain(query, video_b14_prompt_text_from_session(session, "video"), reply_markup=video_b14_storyboard_keyboard(lang))
             return await safe_edit_or_send(query, "⚠️ Bộ prompt video chưa sẵn sàng. Bot chưa trừ Xu.", reply_markup=task3d_result_parent_keyboard(lang))
         session = task3d_session_step(uid, "prompt_video_shot")
         return await safe_edit_or_send(query, task3d_prompt_video_selector_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_video_selector_keyboard(session, lang))
     if action == "prompt_video_batches":
         session = task3d_session_step(uid, "prompt_video_batch")
-        return await safe_edit_or_send(query, "🎞 <b>Chọn batch 2 cảnh</b>\n\nMỗi batch ghép tối đa 2 prompt video liên tiếp. Bước này chưa gọi provider và chưa trừ Xu.", parse_mode="HTML", reply_markup=task3d_prompt_video_batch_keyboard(session, lang))
+        return await safe_edit_or_send(query, "🎞 <b>Chọn nhóm 2 cảnh</b>\n\nMỗi nhóm gồm tối đa 2 câu lệnh tạo video liên tiếp. Bước này chưa xử lý video và chưa trừ Xu.", parse_mode="HTML", reply_markup=task3d_prompt_video_batch_keyboard(session, lang))
     if action == "prompt_video_select":
         prompts = task3d_video_prompt_entries(session, "video")
         if not prompts:
@@ -106879,23 +107477,40 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         else:
             selected = [max(1, min(len(prompts), safe_int(value, 1)))]
         session = task3d_session_step(uid, "prompt_video_detail", prompt_video_selection=selected)
-        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "video"), parse_mode="HTML", reply_markup=task3d_prompt_video_detail_keyboard(lang))
+        return await safe_edit_or_send_long_plain(query, task3d_prompt_detail_text(session, "video"), reply_markup=task3d_prompt_video_detail_keyboard(lang))
     if action == "prompt_video_detail":
         session = task3d_session_step(uid, "prompt_video_detail")
-        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "video"), parse_mode="HTML", reply_markup=task3d_prompt_video_detail_keyboard(lang))
+        return await safe_edit_or_send_long_plain(query, task3d_prompt_detail_text(session, "video"), reply_markup=task3d_prompt_video_detail_keyboard(lang))
     if action == "prompt_video_copy":
-        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "video", copy_hint=True), parse_mode="HTML", reply_markup=task3d_prompt_video_detail_keyboard(lang))
+        return await safe_edit_or_send_long_plain(query, task3d_prompt_detail_text(session, "video", copy_hint=True), reply_markup=task3d_prompt_video_detail_keyboard(lang))
     if action == "prompt_video_rewrite":
         session = task3d_session_step(uid, "prompt_video_detail", **task3d_rewrite_selected_prompts(session, "video"))
-        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "video"), parse_mode="HTML", reply_markup=task3d_prompt_video_detail_keyboard(lang))
+        return await safe_edit_or_send_long_plain(query, task3d_prompt_detail_text(session, "video"), reply_markup=task3d_prompt_video_detail_keyboard(lang))
     if action == "prompt_video_edit":
-        session = task3d_session_step(uid, "detail", prompt_edit_kind="video")
-        return await task3d_render_step(query, uid, session, lang)
+        selected = task3d_video_prompt_selected_entries(session, "video")
+        if len(selected) != 1:
+            session = task3d_session_step(uid, "prompt_video_shot")
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Hãy chọn đúng một cảnh để sửa nguyên văn câu lệnh tạo video.",
+                reply_markup=task3d_prompt_video_selector_keyboard(session, lang),
+            )
+        session = task3d_session_step(
+            uid,
+            "prompt_exact_edit",
+            prompt_edit_kind="video",
+            prompt_edit_index=selected[0][0],
+        )
+        return await safe_edit_or_send_long_plain(
+            query,
+            task3d_prompt_exact_edit_text(session, "video"),
+            reply_markup=task3d_prompt_exact_edit_keyboard("video", lang),
+        )
     if action == "prompt_video_create":
         selected = task3d_video_prompt_selected_entries(session, "video")
         if not selected:
-            return await safe_edit_or_send(query, "⚠️ Hãy chọn lại shot cần tạo video. Bot chưa trừ Xu.", reply_markup=task3d_prompt_video_selector_keyboard(session, lang))
-        selected_prompt = "\n\n".join(f"Shot {index}: {prompt}" for index, prompt in selected)
+            return await safe_edit_or_send(query, "⚠️ Hãy chọn lại cảnh cần tạo video. Bot chưa trừ Xu.", reply_markup=task3d_prompt_video_selector_keyboard(session, lang))
+        selected_prompt = "\n\n".join(f"Cảnh {index}: {prompt}" for index, prompt in selected)
         session = task3d_session_step(
             uid,
             "storyboard_preview",
@@ -106903,7 +107518,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             scene_count_render_video_prompt=selected_prompt,
             scene_count_render_prompt_count=len(selected),
             scene_count_render_selected_shots=[index for index, _prompt in selected],
-            topic=selected_prompt[:1200],
+            topic=selected_prompt,
             provider_called=False,
             xu_charged=0,
         )
@@ -106913,8 +107528,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if not (session.get("draft") or {}).get("prompt_bundle") and str(session.get("topic") or (session.get("draft") or {}).get("topic") or "").strip():
             video_b14_build_storyboard_for_session(uid, session)
             session = get_video_session(uid)
-            return await safe_edit_or_send(query, video_b14_prompt_pack_text_from_session(session), parse_mode="HTML", reply_markup=video_b14_storyboard_keyboard(lang))
-        return await safe_edit_or_send(query, "📦 <b>Xuất prompt pack</b>\n\nChọn định dạng:", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
+            return await safe_edit_or_send_long_plain(
+                query,
+                video_b14_prompt_pack_text_from_session(session),
+                reply_markup=video_b14_storyboard_keyboard(lang),
+            )
+        return await safe_edit_or_send(query, "📦 <b>Xuất bộ câu lệnh</b>\n\nChọn định dạng:", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("JSON", callback_data="vproduct|export|json"), InlineKeyboardButton("Markdown", callback_data="vproduct|export|markdown")],
             [InlineKeyboardButton("TXT", callback_data="vproduct|export|txt"), InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")],
             [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|result"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
@@ -106922,7 +107541,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "export":
         bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
         if not bundle:
-            return await safe_edit_or_send(query, "⚠️ Prompt pack chưa sẵn sàng. Bot chưa trừ Xu.")
+            return await safe_edit_or_send(query, "⚠️ Bộ câu lệnh chưa sẵn sàng. Bot chưa trừ Xu.")
         if value == "json":
             content, suffix = json.dumps(bundle, ensure_ascii=False, indent=2), "json"
         elif value == "markdown":
@@ -106934,7 +107553,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         await context.bot.send_document(chat_id=query.message.chat_id, document=output, filename=output.name, caption="✅ Bộ prompt miễn phí. Bot chưa xử lý video AI và chưa trừ Xu.")
         return await safe_edit_or_send(
             query,
-            "✅ Bộ prompt đã được xuất miễn phí. TOAN AAS chưa gọi provider và chưa trừ Xu.",
+            "✅ Bộ câu lệnh đã được xuất miễn phí. TOAN AAS chưa xử lý video và chưa trừ Xu.",
             reply_markup=task3d_prompt_export_done_keyboard(product_id, lang),
         )
     if action == "render":
@@ -107071,7 +107690,11 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         step = str(session.get("current_step") or "")
         owned_steps = {value[0] for value in video_selfshot2.PENDING_INPUTS.values()}
         if step in owned_steps:
-            text = re.sub(r"\s+", " ", update.message.text.strip())[:5000]
+            text = (
+                str(update.message.text or "")
+                if step == "selfshot2_prompt_input"
+                else re.sub(r"\s+", " ", update.message.text.strip())[:5000]
+            )
             current = video_selfshot2_draft(session)
             try:
                 if step == "selfshot2_subject_input":
@@ -107123,13 +107746,16 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
                         current["content_return_screen"] = "content_source"
                     screen = "direction"
                 elif step == "selfshot2_prompt_input":
-                    if not text:
+                    if not text.strip():
                         raise ValueError("prompt_note_required")
                     prompts = list(current.get("video_prompts") or video_selfshot2_compile_prompts(current))
-                    for item in prompts:
-                        item["prompt"] = f"{str(item.get('prompt') or '').rstrip()} User correction: {text}"
-                        item["prompt_version"] = max(1, safe_int(item.get("prompt_version"), 1)) + 1
+                    prompt_index = safe_int(current.get("prompt_edit_index"), 0)
+                    if not 1 <= prompt_index <= len(prompts):
+                        raise ValueError("prompt_index_invalid")
+                    prompts[prompt_index - 1]["prompt"] = text
+                    prompts[prompt_index - 1]["prompt_version"] = max(1, safe_int(prompts[prompt_index - 1].get("prompt_version"), 1)) + 1
                     current["video_prompts"] = prompts
+                    current.pop("prompt_edit_index", None)
                     screen = "prompts"
                 elif step == "selfshot2_volume_input":
                     if not re.fullmatch(r"\d{1,3}", text):
@@ -107160,10 +107786,11 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
                         **dict(addons.get("watermark") or {}),
                         "enabled": True,
                         "text": watermark_text,
-                        "position": str((addons.get("watermark") or {}).get("position") or "bottom_right"),
+                        "position": "",
                     }
                     current["visual_addons"] = addons
-                    screen = "addons"
+                    current["selfshot2_addon_position_target"] = "watermark"
+                    screen = "addon_position"
                 else:
                     return False
             except (ValueError, TypeError):
@@ -107180,7 +107807,7 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
                     "selfshot2_scene_count_input": "⚠️ Số cảnh phải từ 1 đến 20.",
                     "selfshot2_ratio_input": "⚠️ Tỉ lệ phải có dạng rộng:cao, ví dụ 3:2.",
                     "selfshot2_content_input": "⚠️ Hãy nhập nội dung cần dựng quanh video nguồn.",
-                    "selfshot2_prompt_input": "⚠️ Hãy nhập yêu cầu chỉnh prompt.",
+                    "selfshot2_prompt_input": "⚠️ Hãy gửi toàn bộ câu lệnh mới cho đúng cảnh đã chọn.",
                     "selfshot2_volume_input": "⚠️ Âm lượng phải là số từ 0 đến 200.",
                     "selfshot2_watermark_input": "⚠️ Watermark phải có nội dung và không quá 120 ký tự.",
                 }
@@ -107509,6 +108136,34 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         await update.message.reply_text(prefix + video_b14_quality_text(lang), parse_mode="HTML", reply_markup=video_b14_quality_keyboard(lang))
         return True
     current_step = str(session.get("current_step") or "")
+    if current_step == "prompt_exact_edit":
+        lang = get_user_language(uid) or "vi"
+        draft = dict(session.get("draft") or {})
+        kind = str(draft.get("prompt_edit_kind") or "")
+        index = safe_int(draft.get("prompt_edit_index"), 0)
+        prompts = task3d_video_prompt_entries(session, kind) if kind in {"image", "video"} else []
+        exact_text = str(update.message.text or "")
+        if not exact_text.strip() or not (1 <= index <= len(prompts)):
+            await update.message.reply_text(
+                "⚠️ Câu lệnh chưa hợp lệ. Nội dung cũ vẫn được giữ nguyên.",
+                reply_markup=task3d_prompt_exact_edit_keyboard(kind if kind in {"image", "video"} else "video", lang),
+            )
+            return True
+        overrides = dict(draft.get(f"prompt_{kind}_overrides") or {})
+        overrides[str(index)] = exact_text
+        draft[f"prompt_{kind}_overrides"] = overrides
+        draft.pop("prompt_edit_kind", None)
+        draft.pop("prompt_edit_index", None)
+        session["draft"] = draft
+        session["previous_step"] = "prompt_exact_edit"
+        session["current_step"] = f"prompt_{kind}_detail"
+        session = save_video_session(uid, session)
+        await safe_reply_long_plain(
+            update.message,
+            "✅ Đã lưu nguyên văn câu lệnh mới.\n\n" + task3d_prompt_detail_text(session, kind),
+            reply_markup=(task3d_prompt_image_detail_keyboard(lang) if kind == "image" else task3d_prompt_video_detail_keyboard(lang)),
+        )
+        return True
     if current_step in VIDEO_MICROFLOW_TEXT_INPUT_STEPS:
         lang = get_user_language(uid) or "vi"
         text = re.sub(r"\s+", " ", update.message.text.strip())[:3500]
@@ -107887,7 +108542,7 @@ async def handle_storyboard2_pending_media(update: Update, context: ContextTypes
         file_id = str(getattr(upload_media, "file_id", "") or "")
         if not file_id:
             await update.message.reply_text(
-                "⚠️ Không đọc được mã tệp Telegram. Hãy gửi lại; Storyboard hiện tại vẫn được giữ và chưa trừ Xu.",
+                "⚠️ Không đọc được tệp vừa gửi. Hãy gửi lại; Storyboard hiện tại vẫn được giữ và chưa trừ Xu.",
                 reply_markup=storyboard2_keyboard(storyboard2_nav("vstory|upload_review" if board.get("uploaded_storyboard_files") else "vstory|entry")),
             )
             return True
@@ -107914,7 +108569,7 @@ async def handle_storyboard2_pending_media(update: Update, context: ContextTypes
         payload, keyboard = storyboard2_screen_payload(board)
         await update.message.reply_text(
             "✅ Đã nhận tệp Storyboard. Có thể gửi thêm ảnh/panel hoặc xác nhận số cảnh. "
-            "Chưa gọi provider và chưa trừ Xu.\n\n" + payload,
+            "Chưa xử lý Storyboard và chưa trừ Xu.\n\n" + payload,
             parse_mode="HTML",
             reply_markup=keyboard,
         )
@@ -107940,7 +108595,7 @@ async def handle_storyboard2_pending_media(update: Update, context: ContextTypes
     if not file_id:
         media_back_callback = "vstory|asset_view" if pending_image_action == "image_upload_replace" else "vstory|assets_screen"
         await update.message.reply_text(
-            "⚠️ Không đọc được mã ảnh Telegram. Vui lòng gửi lại; chưa tạo tác vụ và chưa trừ Xu.",
+            "⚠️ Không đọc được ảnh vừa gửi. Vui lòng gửi lại; chưa tạo tác vụ và chưa trừ Xu.",
             reply_markup=storyboard2_keyboard(storyboard2_nav(media_back_callback)),
         )
         return True
@@ -107996,7 +108651,7 @@ async def handle_storyboard2_pending_media(update: Update, context: ContextTypes
             else f"✅ Đã nhận {slot_label} cảnh {scene_index} và đủ toàn bộ ảnh Storyboard."
         )
     await update.message.reply_text(
-        f"{status_line} Chưa gọi provider và chưa trừ Xu.\n\n{payload}",
+        f"{status_line} Chưa xử lý ảnh và chưa trừ Xu.\n\n{payload}",
         parse_mode="HTML",
         reply_markup=keyboard,
     )
@@ -108097,7 +108752,7 @@ async def handle_video_scene3_pending_media(update: Update, context: ContextType
         file_id = str(getattr(media, "file_id", "") or "")
         if not file_id:
             await message.reply_text(
-                "⚠️ Không đọc được mã tệp Telegram. Vui lòng gửi lại; hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+                "⚠️ Không đọc được tệp vừa gửi. Vui lòng gửi lại; hệ thống chưa tạo tác vụ và chưa trừ Xu.",
                 reply_markup=video_scene3_keyboard(video_scene3_nav_rows()),
             )
             return True
@@ -108168,7 +108823,7 @@ async def handle_video_scene3_pending_media(update: Update, context: ContextType
     }
     expected_kind = "image" if wants_image else "audio"
     if not media or media_kind != expected_kind:
-        expected_copy = "ảnh hoặc file PNG/JPG/WEBP" if wants_image else "voice hoặc file âm thanh"
+        expected_copy = "ảnh PNG/JPG/WEBP" if wants_image else "tệp giọng đọc hoặc âm thanh"
         await message.reply_text(
             f"⚠️ Mục này cần {expected_copy}. Tệp chưa được lưu; hệ thống chưa gọi AI và chưa trừ Xu.",
             reply_markup=video_scene3_keyboard(video_scene3_nav_rows()),
@@ -108178,7 +108833,7 @@ async def handle_video_scene3_pending_media(update: Update, context: ContextType
     file_id = str(getattr(media, "file_id", "") or "")
     if not file_id:
         await message.reply_text(
-            "⚠️ Không đọc được mã tệp Telegram. Vui lòng gửi lại; hệ thống chưa gọi AI và chưa trừ Xu.",
+            "⚠️ Không đọc được tệp vừa gửi. Vui lòng gửi lại; hệ thống chưa xử lý và chưa trừ Xu.",
             reply_markup=video_scene3_keyboard(video_scene3_nav_rows()),
         )
         return True
@@ -108518,7 +109173,11 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 update.message,
                 "✅ <b>Đã nhận logo</b>\n\n" + video_tail9_position_text("logo"),
                 parse_mode="HTML",
-                reply_markup=video_tail9_position_keyboard("logo"),
+                reply_markup=video_tail9_position_keyboard(
+                    "logo",
+                    columns=3 if tail_owner == "video_edit" else 2,
+                    menu_callback="menu|main" if tail_owner == "video_edit" else "menu|main_video",
+                ),
             )
             return True
         if current_step == "awaiting_selfshot2_logo" and product_id == video_selfshot2.PRODUCT_ID:
@@ -108539,10 +109198,11 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "file_id": file_id,
                 "file_unique_id": str(getattr(media, "file_unique_id", "") or ""),
                 "mime_type": mime_type or "image/jpeg",
-                "position": str((addons.get("logo") or {}).get("position") or "top_right"),
+                "position": "",
             }
             current.update({
                 "visual_addons": addons,
+                "selfshot2_addon_position_target": "logo",
                 "awaiting_media": False,
                 "selfshot2_last_logo_message_id": message_id,
                 "provider_called": False,
@@ -108552,8 +109212,8 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "wallet_mutations": 0,
                 "xu_charged": 0,
             })
-            save_video_selfshot2_draft(uid, current, step="selfshot2:addons")
-            await video_selfshot2_render(update.message, uid, "addons", draft=current)
+            save_video_selfshot2_draft(uid, current, step="selfshot2:addon_position")
+            await video_selfshot2_render(update.message, uid, "addon_position", draft=current)
             return True
         if current_step == "awaiting_selfshot2_video" and product_id == video_selfshot2.PRODUCT_ID:
             if not video_selfshot_media_owner_valid(
@@ -108801,7 +109461,7 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 provider_called=False,
                 xu_charged=0,
             )
-            await update.message.reply_text(video_microflow_text(current_step, product_id, session, lang), parse_mode="HTML", reply_markup=video_microflow_media_keyboard(lang))
+            await update.message.reply_text(video_microflow_text(current_step, product_id, session, lang), parse_mode="HTML", reply_markup=video_microflow_media_keyboard(lang, product_id))
             return True
         if current_step == "awaiting_self_shot_video":
             source_asset = {
@@ -114058,7 +114718,7 @@ def video_idea_dynamic_scene_count_text(preset: dict) -> str:
     recommended = max(1, min(20, safe_int(preset.get("recommended_scene_count"), 3)))
     return (
         "🎬 <b>Chọn số cảnh trước</b>\n\n"
-        f"Mẫu này gợi ý <b>{recommended} cảnh</b>. Một cảnh khoảng 8 giây và phải hoàn tất một ý hoặc hành động. "
+        f"Mẫu này gợi ý <b>{recommended} cảnh</b>. Mỗi cảnh phải hoàn tất một ý hoặc hành động; thời lượng được xác định theo gói Chất lượng. "
         "TOAN AAS sẽ viết đúng số cảnh anh/chị chọn, không chia cơ học một đoạn dài.\n\n"
         "Hệ thống chưa bắt đầu tạo video và chưa trừ Xu."
     )
@@ -114418,7 +115078,7 @@ def video_idea_catalog_detail_text(state: dict | None = None, lang: str = "vi") 
         f"• Phong cách: {html.escape(str(idea.get('style') or ''))}\n\n"
         f"• Phù hợp: {html.escape(', '.join(str(item) for item in idea.get('platform_fit') or []))}\n"
         f"• Có thể thay đổi: {html.escape(', '.join(str(item) for item in idea.get('variation_axes') or []))}\n\n"
-        "Chọn số cảnh. Mỗi cảnh khoảng 8 giây và phải là một ý/hành động hoàn chỉnh; hệ thống không cắt cơ học một câu lệnh dài thành nhiều đoạn.\n\n"
+        "Chọn số cảnh. Mỗi cảnh phải là một ý/hành động hoàn chỉnh; thời lượng được xác định theo gói Chất lượng và hệ thống không cắt cơ học một câu lệnh dài thành nhiều đoạn.\n\n"
         "Chưa tạo video và chưa trừ Xu."
     )
 
@@ -117785,7 +118445,7 @@ async def video_idea_render_exact_parent(
         "flow_owner": str(
             handoff.get("idea_parent_flow_owner")
             or handoff.get("flow_owner")
-            or video_tail9.adapter_for(product_id or "video_ai_real").get("flow_owner")
+            or video_tail9.adapter_for(product_id).get("flow_owner")
             or "scene3"
         ),
         "parent_session_id": str(
@@ -118593,7 +119253,7 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
             restore_developing_video_pending(uid, "videoidea", state, "idea2_scene_count_custom")
             return await safe_edit_or_send(
                 query,
-                "✍️ <b>Nhập số cảnh từ 1 đến 20</b>\n\nMỗi cảnh khoảng 8 giây và phải trọn một ý/hành động.",
+                "✍️ <b>Nhập số cảnh từ 1 đến 20</b>\n\nMỗi cảnh phải trọn một ý/hành động; thời lượng được xác định theo gói Chất lượng.",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("⬅️ Chọn số cảnh", callback_data=f"videa|preset|{int(preset.get('id') or 0)}"),
@@ -120800,13 +121460,12 @@ def help_text_for_user(user_id) -> str:
         "<b>2. Ảnh AI</b>\n"
         "• Gửi mô tả ảnh: chủ thể, phong cách, nền, ánh sáng, tỉ lệ ảnh và chi tiết cần có.\n"
         "• Chọn gói ảnh rồi xem giá trước khi xác nhận.\n"
-        "• Bảng giá ảnh: Tiết kiệm 50 Xu, Chuẩn 150 Xu, Chuẩn + bảo hành 200 Xu, Phổ thông 300 Xu, Phổ thông + bảo hành 400 Xu, Cao 500 Xu, Cao + bảo hành 600 Xu.\n\n"
+        "• Bảng giá ảnh luôn hiển thị theo từng gói chất lượng, số lần tạo lại và giá Xu hiện hành ở màn Chất lượng/bảng giá.\n\n"
         "<b>3. Video AI</b>\n"
         "• Chọn tạo video từ mô tả hoặc từ ảnh đã có.\n"
         "• Gửi chủ đề, chọn số cảnh trước, chọn profile/ngữ cảnh, kiểm tra prompt từng cảnh rồi mới chọn gói và xác nhận.\n"
-        "• 1 cảnh khoảng 8 giây. 3 cảnh khoảng 24 giây, 5 cảnh khoảng 40 giây, 10 cảnh khoảng 80 giây, 20 cảnh khoảng 160 giây.\n"
-        "• Bảng giá video: Trải nghiệm 200 Xu, Cơ bản 300 Xu, Phổ thông 400 Xu, Nâng cao 500 Xu, Bán hàng 600 Xu, Cao cấp 800 Xu, Chuyên nghiệp 1000 Xu, Pro Plus 1200 Xu, Premium 1500 Xu.\n"
-        "• Ví dụ giảm theo cảnh: gói Cơ bản 300 Xu/cảnh, 3 cảnh được giảm 10% còn 270 Xu/cảnh, tổng 270 × 3 = 810 Xu.\n\n"
+        "• Mỗi cảnh là một ý hoặc hành động hoàn chỉnh; thời lượng và giá được ghi rõ theo từng gói Chất lượng trước khi xác nhận.\n"
+        "• Hóa đơn hiển thị giá mỗi cảnh, số cảnh, add-on, tổng Xu và trạng thái xử lý.\n\n"
         "<b>4. Âm thanh</b>\n"
         "• Tạo giọng đọc từ văn bản, bóc băng giọng nói thành chữ, chọn voice, tạo voice riêng, tạo nhạc nền hoặc bài hát ngắn.\n"
         "• Bản nghe thử là preview ngắn; bản đầy đủ chỉ xử lý sau bước xác nhận nếu có phí.\n\n"
@@ -123145,6 +123804,19 @@ async def safe_edit_or_send_long_plain(query, text: str, reply_markup=None):
                 parse_mode=None,
                 reply_markup=markup,
             )
+    return sent
+
+
+async def safe_reply_long_plain(message, text: str, reply_markup=None):
+    chunks = split_telegram_plain_text_exact(text)
+    sent = None
+    for index, chunk in enumerate(chunks):
+        sent = await safe_reply_text(
+            message,
+            chunk,
+            parse_mode=None,
+            reply_markup=reply_markup if index == len(chunks) - 1 else None,
+        )
     return sent
 
 
@@ -126632,7 +127304,7 @@ def video_beta_200_limit_message(lang: str = "vi") -> str:
             "The 200 Xu starter package has reached today's usage limit. "
             "You can choose the 300 Xu or 400 Xu package to continue."
         )
-    return "Gói trải nghiệm 200 Xu đã hết lượt sử dụng trong hôm nay. Bạn có thể chọn gói 300 Xu hoặc 400 Xu để tiếp tục."
+    return "Gói Nhanh Gọn hiện chưa thể tiếp nhận yêu cầu mới. Anh/chị có thể chọn một gói Chất lượng khác để tiếp tục."
 
 def video_beta_200_limit_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -127689,7 +128361,7 @@ def answer_toanaas_support_question(user_id, question: str) -> str:
     if not kb_text:
         kb_text = (
             "TOAN AAS là hệ thống bot/app tự động hóa AI cho chat, ảnh, video, dịch thuật, tài liệu, hỗ trợ và nạp Xu. "
-            "Video 200 là gói trải nghiệm có giới hạn; 300/400/500/600/800/1000 là nhóm video public hiện tại khi provider và billing safety sẵn sàng."
+            "Video AI có nhiều gói Chất lượng; thời lượng, đặc điểm và giá Xu được hiển thị ngay trước khi xác nhận."
         )
     system_prompt = (
         "Bạn là trợ lý CSKH TOAN AAS. Chỉ trả lời dựa trên knowledge base dưới đây. "
@@ -138273,7 +138945,7 @@ async def cmd_shopaikey_image_public(update: Update, context: ContextTypes.DEFAU
         return await update.message.reply_text("⚠️ Cú pháp: /shopaikey_image <mô tả ảnh>")
     credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Unknown")
     tier = normalize_image_tier(SHOPAIKEY_IMAGE_DEFAULT_TIER)
-    tier_payload = image_tier_payload(tier)
+    tier_payload = canonical_image_tier_payload(tier)
     base_cost = int(tier_payload.get("cost") or image_base_cost_xu())
     final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image")
     if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
@@ -138295,7 +138967,7 @@ async def cmd_shopaikey_image_public(update: Update, context: ContextTypes.DEFAU
     )
 
 async def start_public_image_prompt_from_tier_message(message, user_id, tier: str) -> None:
-    payload = image_tier_payload(tier)
+    payload = canonical_image_tier_payload(tier)
     lang = user_ui_lang(user_id)
     if not payload.get("enabled"):
         return await message.reply_text(ui_text(lang, "image.tier_disabled_message"))
@@ -138315,7 +138987,7 @@ async def handle_public_image_prompt_pending_text(update: Update, context: Conte
     clear_public_image_prompt_pending(uid)
     lang = get_user_language(uid) or "vi"
     tier = normalize_image_tier(pending.get("tier") or SHOPAIKEY_IMAGE_DEFAULT_TIER)
-    payload = image_tier_payload(tier)
+    payload = canonical_image_tier_payload(tier)
     if not payload.get("enabled"):
         await update.message.reply_text(ui_text(lang, "image.tier_disabled_message"))
         return True
@@ -138391,7 +139063,7 @@ def image_prompt_confirm_keyboard(
 async def show_image_prompt_confirmation(query, uid, tier: str, prompt: str, aspect_ratio: str, lang: str = "vi", source: str = "image_prompt_tool"):
     tier = normalize_image_tier(tier or SHOPAIKEY_IMAGE_DEFAULT_TIER)
     aspect = normalize_media_aspect_ratio(aspect_ratio, "1:1", "image")
-    payload = image_tier_payload(tier)
+    payload = canonical_image_tier_payload(tier)
     if not payload.get("enabled"):
         return await safe_edit_query_message(query, ui_text(lang, "image.tier_disabled_message"))
     credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Image prompt user")
@@ -163930,7 +164602,7 @@ def storyboard_ready_keyboard() -> InlineKeyboardMarkup:
     )
 
 def storyboard_image_safe_floor(tier: str = "") -> int:
-    payload = image_tier_payload(tier)
+    payload = canonical_image_tier_payload(tier)
     provider_cost = int(payload.get("provider_cost") or 0)
     base_cost = int(payload.get("cost") or 0)
     floor = provider_cost * media_price_multiplier() if provider_cost > 0 else 0
@@ -163948,14 +164620,14 @@ def storyboard_image_unit_cost(tier: str = "", scene_count: int = 1) -> int:
             return 35
         return 30
     if tier_norm == "standard":
-        base = image_tier_cost_xu("standard")
+        base = canonical_image_tier_cost_xu("standard")
         discount = 5 if count <= 5 else 10 if count <= 10 else 15 if count <= 20 else 20
         return max(storyboard_image_safe_floor("standard"), int(base or 0) - discount)
     if tier_norm == "high":
-        base = image_tier_cost_xu("high")
+        base = canonical_image_tier_cost_xu("high")
         discount = 10 if count <= 5 else 20 if count <= 10 else 30 if count <= 20 else 40
         return max(storyboard_image_safe_floor("high"), int(base or 0) - discount)
-    return image_tier_cost_xu(tier_norm)
+    return canonical_image_tier_cost_xu(tier_norm)
 
 def storyboard_image_price_info(tier: str = "", scene_count: int = 1) -> dict:
     tier_norm = normalize_image_tier(tier)
@@ -164007,9 +164679,9 @@ def storyboard_image_confirm_keyboard(tier: str = "") -> InlineKeyboardMarkup:
     tier_norm = normalize_image_tier(tier)
     rows = [[InlineKeyboardButton("✅ Tạo ảnh", callback_data="storyboard|confirm_images")]]
     if tier_norm == "standard":
-        rows.append([InlineKeyboardButton(f"🛡 Thêm bảo hành — {image_tier_cost_xu('standard_warranty')} Xu/ảnh", callback_data="storyboard|warranty")])
+        rows.append([InlineKeyboardButton(f"🛡 Thêm bảo hành — {canonical_image_tier_cost_xu('standard_warranty')} Xu/ảnh", callback_data="storyboard|warranty")])
     elif tier_norm == "high":
-        rows.append([InlineKeyboardButton(f"🛡 Thêm bảo hành — {image_tier_cost_xu('high_warranty')} Xu/ảnh", callback_data="storyboard|warranty")])
+        rows.append([InlineKeyboardButton(f"🛡 Thêm bảo hành — {canonical_image_tier_cost_xu('high_warranty')} Xu/ảnh", callback_data="storyboard|warranty")])
     rows.extend([
         [InlineKeyboardButton("✏️ Sửa prompt", callback_data="storyboard|edit_scene")],
         [InlineKeyboardButton("🖼 Tôi dùng ảnh có sẵn", callback_data="storyboard|images")],
@@ -173801,7 +174473,7 @@ def cinematic_ad_image_tier_keyboard(prompt_index: int = 1, lang: str = "vi") ->
     idx = max(1, min(5, int(prompt_index or 1)))
     rows = []
     for tier in ["low", "standard", "high"]:
-        payload = image_tier_payload(tier)
+        payload = canonical_image_tier_payload(tier)
         state = "" if payload.get("enabled") else ui_text(lang, "image.tier_disabled")
         rows.append([InlineKeyboardButton(
             f"{localized_image_tier_label(tier, lang)} — {int(payload.get('cost') or 0)} Xu{state}",
@@ -175256,7 +175928,7 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
         if action == "image_ai_tier":
             prompt_index = safe_int(value, 1)
             tier = normalize_image_tier(extra or SHOPAIKEY_IMAGE_DEFAULT_TIER)
-            payload = image_tier_payload(tier)
+            payload = canonical_image_tier_payload(tier)
             if not payload.get("enabled"):
                 return await safe_edit_query_message(query, ui_text(lang, "image.tier_disabled_message"))
             if not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
@@ -175415,7 +176087,7 @@ def public_image_pending_key(user_id) -> str:
     return f"public_image_prompt:{user_id}"
 
 def set_public_image_prompt_pending(user_id, tier: str) -> None:
-    tier_payload = image_tier_payload(tier)
+    tier_payload = canonical_image_tier_payload(tier)
     USER_PENDING[public_image_pending_key(user_id)] = {
         "pending_action": "public_image_prompt",
         "tier": tier_payload["tier"],
@@ -175577,8 +176249,33 @@ async def execute_image_warranty_retry(context: ContextTypes.DEFAULT_TYPE, chat_
     )
     return True
 
+def canonical_image_quality_catalog_lines(lang: str = "vi") -> list[str]:
+    if normalize_user_language(lang) != "vi":
+        return [ui_text(lang, "image.choose_tier.title")]
+    rows = ["🖼 <b>Chọn chất lượng ảnh</b>", ""]
+    for tier in CANONICAL_IMAGE_TIER_ORDER:
+        payload = canonical_image_tier_payload(tier)
+        if not payload.get("enabled"):
+            continue
+        icon = str(payload.get("public_icon") or IMAGE_TIER_ICONS.get(tier) or "🖼")
+        warranty = int(payload.get("retry_warranty_count") or 0)
+        rows.extend([
+            f"{icon} <b>{html.escape(str(payload.get('label') or 'Chất lượng ảnh'))} — {int(payload.get('cost') or 0)} Xu/ảnh</b>",
+            f"• Mức chất lượng: {html.escape(str(payload.get('public_level') or payload.get('quality') or 'Rõ nét'))}.",
+            f"• Phù hợp: {html.escape(str(payload.get('use_case') or payload.get('description') or 'Ảnh theo nội dung đã duyệt.'))}",
+            (
+                "• Bảo hành: kèm 1 lần tạo lại trong cùng yêu cầu."
+                if warranty
+                else "• Bảo hành: không kèm lần tạo lại miễn phí."
+            ),
+            "",
+        ])
+    rows.append("Xu chỉ được trừ sau khi bạn xem báo giá và xác nhận tạo ảnh.")
+    return rows
+
+
 def public_image_tier_selection_text(lang: str = "vi") -> str:
-    return ui_text(lang, "image.choose_tier.title")
+    return "\n".join(canonical_image_quality_catalog_lines(lang))
 
 QUICK_IMAGE_FLOW_TTL_SECONDS = 10 * 60
 QUICK_IMAGE_FLOW_STEPS = {
@@ -176515,19 +177212,18 @@ def quick_image_tier_text(state: dict | None = None, lang: str = "vi") -> str:
             "Choose a tier below. Warranty tiers include one retry for the same request; other tiers do not include a free retry. "
             "Xu is charged only after final confirmation."
         )
-    return (
-        "🖼 <b>Bạn muốn tạo ảnh chất lượng nào?</b>\n\n"
-        f"Prompt: <code>{html.escape(prompt)}</code>\n"
-        f"{logo_line_vi}"
-        f"Tỉ lệ: <b>{html.escape(media_aspect_ratio_label(aspect, 'image', lang))}</b>\n\n"
-        "Chọn tier ảnh bên dưới. Gói có BH kèm 1 lần tạo lại trong cùng yêu cầu; gói thường không kèm tạo lại miễn phí.\n"
-        "Xu chỉ được trừ sau bước xác nhận cuối."
-    )
+    context_lines = [
+        f"Câu lệnh: <code>{html.escape(prompt)}</code>",
+        logo_line_vi.rstrip(),
+        f"Tỉ lệ: <b>{html.escape(media_aspect_ratio_label(aspect, 'image', lang))}</b>",
+        "",
+    ]
+    return "\n".join(item for item in context_lines if item is not None) + "\n" + public_image_tier_selection_text(lang)
 
 def quick_image_tier_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     tier_buttons = [
         InlineKeyboardButton(image_tier_button_text(tier, lang), callback_data=quick_image_callback(state, f"qi_tier_{tier}"))
-        for tier in IMAGE_TIER_ORDER
+        for tier in CANONICAL_IMAGE_TIER_ORDER
     ]
     rows = [tier_buttons[index:index + 2] for index in range(0, len(tier_buttons), 2)]
     if len(rows[-1]) == 1:
@@ -176939,7 +177635,7 @@ def shopaikey_confirm_keyboard(job_type: str, token: str, tier: str, lang: str =
     return InlineKeyboardMarkup(rows)
 
 def public_image_confirm_text(tier: str, prompt: str, current_credits: int = 0, lang: str = "vi", aspect_ratio: str = "", logo_watermark_text: str = "", logo_watermark_position: str = "") -> str:
-    payload = image_tier_payload(tier)
+    payload = canonical_image_tier_payload(tier)
     cost = int(payload.get("cost") or 0)
     text = with_aspect_line(ui_text(
         lang,
@@ -176947,7 +177643,7 @@ def public_image_confirm_text(tier: str, prompt: str, current_credits: int = 0, 
         label=html.escape(localized_image_tier_label(tier, lang)),
         cost=cost,
         credits=int(current_credits or 0),
-        warranty_note=html.escape(image_tier_warranty_note(tier, lang)),
+        warranty_note=html.escape(canonical_image_tier_warranty_note(tier, lang)),
         prompt=html.escape(shopaikey_safe_prompt_preview(prompt)),
     ), aspect_ratio, lang, "image")
     logo = logo_watermark_clean_text(logo_watermark_text)
@@ -176956,7 +177652,7 @@ def public_image_confirm_text(tier: str, prompt: str, current_credits: int = 0, 
         line = f"• Logo / Watermark: <b>{html.escape(logo)}</b> ({html.escape(position)})"
         text = text.replace("• Prompt:", f"{line}\n• Prompt:", 1) if "• Prompt:" in text else f"{text}\n{line}"
     quality_label = "Quality control" if normalize_user_language(lang) != "vi" else "Kiểm soát chất lượng"
-    return f"{text}\n\n<b>{quality_label}:</b> {html.escape(image_tier_quality_note(tier, lang))}"
+    return f"{text}\n\n<b>{quality_label}:</b> {html.escape(canonical_image_tier_quality_note(tier, lang))}"
 
 def public_image_success_billing_note(deducted: int = 0, lang: str = "vi", admin_internal_free: bool = False) -> str:
     amount = int(deducted or 0)
@@ -177286,24 +177982,17 @@ def clear_public_video_prompt_pending(user_id) -> bool:
 def public_video_tier_selection_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) == "zh":
         return (
-            "🎬 <b>真实 AI 视频 Beta</b>\n\n"
-            "当前开放短视频 Beta 档位：200/300/400/500/600/800/1000/1200/1500 Xu。200 Xu 是体验档，按每日/每周/月度限制控制。\n"
-            "Premium 和长视频仍保持关闭。Bot 会先报价并等待确认。"
+            "🎬 <b>真实 AI 视频</b>\n\n"
+            "请选择适合内容的质量档位。每个档位都会显示时长、画面特点、用途和 Xu 价格，确认前会显示完整账单。"
         )
     if normalize_user_language(lang) != "vi":
         return (
-            "🎬 <b>Real AI Video Beta</b>\n\n"
-            "Public beta currently supports 200/300/400/500/600/800/1000/1200/1500 Xu short-video tiers. "
-            "200 Xu is a controlled starter tier with daily/weekly/monthly limits.\n"
-            "Premium and long render remain OFF. The bot will show the invoice and ask for confirmation first."
+            "🎬 <b>Real AI Video</b>\n\n"
+            "Choose a quality package for your content. Each package shows duration, visual characteristics, use case and Xu price before the full invoice and confirmation."
         )
     return (
-        "🎬 <b>Video AI chân thật Beta</b>\n\n"
-        "TOAN AAS đang mở thử nghiệm Video AI thật ở gói ngắn để kiểm soát chất lượng.\n\n"
-        "Gói public hiện có: <b>200 Xu</b>, <b>300 Xu</b>, <b>400 Xu</b>, <b>500 Xu</b>, <b>600 Xu</b>, <b>800 Xu</b>, <b>1000 Xu</b>, <b>1200 Xu</b> và <b>1500 Xu</b>.\n"
-        "Gói <b>200 Xu</b> là gói trải nghiệm, có giới hạn/ngày/tuần/tháng để kiểm soát chi phí.\n"
-        "Premium và video dài đang giữ OFF.\n\n"
-        "Bot sẽ báo giá và hỏi xác nhận trước khi xử lý."
+        "🎬 <b>Video AI chân thật</b>\n\n"
+        "Chọn gói Chất lượng phù hợp với nội dung. Mỗi gói ghi rõ thời lượng, đặc điểm hình ảnh, mục đích sử dụng và giá Xu; hóa đơn đầy đủ sẽ hiện trước khi xác nhận."
     )
 
 def public_video_off_options_text(lang: str = "vi") -> str:
@@ -179554,34 +180243,33 @@ def video_finalization_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 
 def video_scene_count_price_line(tier: str, scene_count, lang: str = "vi", html_bold_total: bool = True) -> str:
     count = product_video_r9_scene_count(scene_count)
-    price = product_video_r9_scene_pricing(count)
+    price = product_video_r9_scene_pricing(count, tier=tier)
     seconds = int(price["estimated_seconds"])
     effective_each = int(price["unit_charge_xu"])
     total = int(price["charge_total_xu"])
-    list_each = int(price["unit_list_xu"])
     total_text = f"<b>{xu_number(total)} Xu</b>" if html_bold_total else f"{xu_number(total)} Xu"
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
         return (
             f"• {count} 个场景 ≈ {seconds} 秒 - "
-            f"{xu_number(effective_each)} Xu/场景（原价 {xu_number(list_each)}）；"
+            f"{xu_number(effective_each)} Xu/场景；"
             f"{xu_number(effective_each)} × {count} = {total_text}"
         )
     if lang == "en":
         return (
             f"• {count} scene{'s' if count != 1 else ''} ≈ {seconds}s - "
-            f"{xu_number(effective_each)} Xu/scene (list {xu_number(list_each)}); "
+            f"{xu_number(effective_each)} Xu/scene; "
             f"{xu_number(effective_each)} × {count} = {total_text}"
         )
     return (
         f"• {count} cảnh ≈ {seconds} giây - "
-        f"{xu_number(effective_each)} Xu/cảnh (giá gốc {xu_number(list_each)}); "
+        f"{xu_number(effective_each)} Xu/cảnh; "
         f"{xu_number(effective_each)} × {count} = {total_text}"
     )
 
 def video_scene_count_option_label(tier: str, scene_count, lang: str = "vi") -> str:
     count = product_video_r9_scene_count(scene_count)
-    price = product_video_r9_scene_pricing(count)
+    price = product_video_r9_scene_pricing(count, tier=tier)
     seconds = int(price["estimated_seconds"])
     total = int(price["charge_total_xu"])
     lang = normalize_user_language(lang) or "vi"
@@ -179596,41 +180284,40 @@ def video_finalization_scene_count_text(state: dict | None = None, lang: str = "
     lang = normalize_user_language(lang) or "vi"
     tier = normalize_video_tier(state.get("selected_video_tier") or state.get("video_tier") or "low")
     price_lines = "\n".join(video_scene_count_price_line(tier, count, lang) for count in TASK3D_SCENE_COUNT_OPTIONS)
-    price = product_video_r9_scene_pricing(1)
+    price = product_video_r9_scene_pricing(1, tier=tier)
     unit = int(price["unit_charge_xu"])
-    list_unit = int(price["unit_list_xu"])
-    promo_until = str(price.get("promo_until") or PRODUCT_VIDEO_R9_PROMO_UNTIL)
+    scene_seconds = int(price["scene_seconds"])
     if lang == "zh":
         return (
             "🎞 <b>选择视频场景数量</b>\n\n"
             "Product Video 按场景销售。\n"
-            f"1 个场景约 {TASK3D_SCENE_SECONDS} 秒。\n"
-            f"当前优惠价：<b>{xu_number(unit)} Xu/场景</b>（原价 {xu_number(list_unit)} Xu，至 {html.escape(promo_until)}）。\n\n"
+            f"1 个场景约 {scene_seconds} 秒。\n"
+            f"所选套餐价格：<b>{xu_number(unit)} Xu/场景</b>。\n\n"
             "<b>按场景数量计价</b>\n"
             f"{price_lines}\n\n"
             "请选择或自定义场景数量。下一步是最终账单。\n"
-            "只有生成有效 MP4 后才会扣除 Xu。"
+            "只有有效视频成功发送后才会扣除 Xu。"
         )
     if lang == "en":
         return (
             "🎞 <b>Choose video scene count</b>\n\n"
             "Product Video is sold by scene.\n"
-            f"1 scene is about {TASK3D_SCENE_SECONDS} seconds.\n"
-            f"Current promo: <b>{xu_number(unit)} Xu/scene</b> (list {xu_number(list_unit)} Xu, until {html.escape(promo_until)}).\n\n"
+            f"1 scene is about {scene_seconds} seconds.\n"
+            f"Selected package: <b>{xu_number(unit)} Xu/scene</b>.\n\n"
             "<b>Price by scene count</b>\n"
             f"{price_lines}\n\n"
             "Choose or enter the scene count you want. The next step is the final invoice.\n"
-            "TOAN AAS charges only after a valid MP4 is ready."
+            "TOAN AAS charges only after a valid video is delivered."
         )
     return (
         "🎞 <b>Chọn số cảnh video</b>\n\n"
         "Product Video tính theo cảnh.\n"
-        f"1 cảnh khoảng <b>{TASK3D_SCENE_SECONDS} giây</b>.\n"
-        f"Giá hiện tại: <b>{xu_number(unit)} Xu/cảnh</b> (giá gốc {xu_number(list_unit)} Xu/cảnh, ưu đãi đến {html.escape(promo_until)}).\n\n"
+        f"1 cảnh theo gói đã chọn: <b>{scene_seconds} giây</b>.\n"
+        f"Giá gói đã chọn: <b>{xu_number(unit)} Xu/cảnh</b>.\n\n"
         "<b>Bảng giá theo số cảnh</b>\n"
         f"{price_lines}\n\n"
         "Chọn nhanh hoặc tự nhập số cảnh ở bước này. Bước kế tiếp là hóa đơn cuối.\n"
-        "TOAN AAS chỉ trừ Xu khi có MP4 hợp lệ."
+        "TOAN AAS chỉ trừ Xu sau khi video hợp lệ đã được gửi thành công."
     )
 
 def video_finalization_scene_count_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -179653,13 +180340,16 @@ def video_finalization_scene_count_keyboard(state: dict | None = None, lang: str
         ],
     ])
 
-def video_finalization_scene_count_custom_text(lang: str = "vi") -> str:
+def video_finalization_scene_count_custom_text(lang: str = "vi", state: dict | None = None) -> str:
     lang = normalize_user_language(lang) or "vi"
+    current = dict(state or {})
+    tier = normalize_video_tier(current.get("selected_video_tier") or current.get("video_tier") or "low")
+    scene_seconds = int(product_video_r9_scene_pricing(1, tier=tier)["scene_seconds"])
     if lang == "zh":
-        return f"您想创建多少个场景？请输入 1 到 {PRODUCT_VIDEO_R9_SCENE_MAX}。1 个场景约 {TASK3D_SCENE_SECONDS} 秒；只有有效 MP4 准备好后才扣除 Xu。"
+        return f"您想创建多少个场景？请输入 1 到 {PRODUCT_VIDEO_R9_SCENE_MAX}。所选套餐每个场景约 {scene_seconds} 秒；只有有效视频成功发送后才扣除 Xu。"
     if lang == "en":
-        return f"How many scenes do you want to create? Enter a number from 1 to {PRODUCT_VIDEO_R9_SCENE_MAX}. 1 scene is about {TASK3D_SCENE_SECONDS}s; TOAN AAS charges only after a valid MP4 is ready."
-    return f"Bạn muốn tạo bao nhiêu cảnh? Nhập số từ 1 đến {PRODUCT_VIDEO_R9_SCENE_MAX}. 1 cảnh khoảng {TASK3D_SCENE_SECONDS} giây; TOAN AAS chỉ trừ Xu khi có MP4 hợp lệ."
+        return f"How many scenes do you want to create? Enter a number from 1 to {PRODUCT_VIDEO_R9_SCENE_MAX}. The selected package is about {scene_seconds}s per scene; TOAN AAS charges only after a valid video is delivered."
+    return f"Bạn muốn tạo bao nhiêu cảnh? Nhập số từ 1 đến {PRODUCT_VIDEO_R9_SCENE_MAX}. Gói đã chọn dài khoảng {scene_seconds} giây/cảnh; TOAN AAS chỉ trừ Xu sau khi video hợp lệ đã được gửi."
 
 def video_finalization_scene_count_custom_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
@@ -179739,14 +180429,6 @@ async def video_finalization_continue_after_scene_count(query, user_id, state: d
             video_finalization_confirm_not_ready_text(current, lang),
             parse_mode="HTML",
             reply_markup=video_finalization_confirm_not_ready_keyboard(current, lang),
-        )
-    quote = calculate_video_quote(current)
-    if tier == "low" and not quote.get("is_package_200_valid"):
-        return await safe_edit_or_send(
-            query,
-            video_experience_tier_lock_text(lang, video_package_200_lock_reasons(quote)),
-            parse_mode=None,
-            reply_markup=video_experience_tier_lock_keyboard(lang, upgrade_callback="vfinal|upgrade_300", back_callback="vfinal|scene_count_screen"),
         )
     package = video_finalization_package_from_state(current)
     aspect = video_finalization_selected_aspect(current)
@@ -180692,10 +181374,9 @@ async def video_finalization_back_to_source(query, user_id, state: dict, lang: s
         if action == "prompt_video_detail":
             session["current_step"] = "prompt_video_detail"
             save_video_session(user_id, session)
-            return await safe_edit_or_send(
+            return await safe_edit_or_send_long_plain(
                 query,
                 task3d_prompt_detail_text(session, "video"),
-                parse_mode="HTML",
                 reply_markup=task3d_prompt_video_detail_keyboard(lang),
             )
     source = str((state or {}).get("source") or "").strip().lower()
@@ -180767,7 +181448,7 @@ async def render_video_finalization_stack_target(query, user_id, state: dict, ta
     if step == "scene_count":
         return True, await safe_edit_or_send(query, video_finalization_scene_count_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_scene_count_keyboard(state, lang))
     if step == "scene_count_custom":
-        return True, await safe_edit_or_send(query, video_finalization_scene_count_custom_text(lang), reply_markup=video_finalization_scene_count_custom_keyboard(lang))
+        return True, await safe_edit_or_send(query, video_finalization_scene_count_custom_text(lang, state), reply_markup=video_finalization_scene_count_custom_keyboard(lang))
     if step in {"confirm", "review", "saved"}:
         return True, await safe_edit_or_send(query, video_finalization_summary_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_summary_keyboard(state, lang))
     if step == "music":
@@ -181049,19 +181730,9 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             state["video_tier"] = tier
             state["selected_video_aspect_ratio"] = video_finalization_selected_aspect(state)
             state.pop("video_order", None)
-            if tier == "low":
-                state = video_finalization_apply_scene_count_fields(state, 1, uid)
             status = get_public_video_tier_ui_status(tier, is_admin_user(uid))
             if not status.get("enabled"):
                 return await safe_edit_or_send(query, video_finalization_tier_guard_text(tier, lang), parse_mode="HTML", reply_markup=video_finalization_tier_guard_keyboard(lang))
-            quote = calculate_video_quote(state)
-            if tier == "low" and not quote.get("is_package_200_valid"):
-                return await safe_edit_or_send(
-                    query,
-                    video_experience_tier_lock_text(lang, video_package_200_lock_reasons(quote)),
-                    parse_mode=None,
-                    reply_markup=video_experience_tier_lock_keyboard(lang, upgrade_callback="vfinal|upgrade_300", back_callback="vfinal|tier"),
-                )
             if not video_finalization_has_prompt(state):
                 return await safe_edit_or_send(query, video_finalization_confirm_not_ready_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_confirm_not_ready_keyboard(state, lang))
             state["step"] = "scene_count"
@@ -181086,25 +181757,20 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         set_video_finalization_state(uid, state)
         return await video_finalization_render_scene_count(query, uid, state, lang)
     if action == "scene_custom":
-        tier = normalize_video_tier(state.get("selected_video_tier") or state.get("video_tier") or "low")
-        if tier == "low":
-            return await video_finalization_render_scene_count(query, uid, state, lang)
         state["step"] = "scene_count_custom"
         set_video_finalization_state(uid, state)
         return await safe_edit_or_send(
             query,
-            video_finalization_scene_count_custom_text(lang),
+            video_finalization_scene_count_custom_text(lang, state),
             reply_markup=video_finalization_scene_count_custom_keyboard(lang),
         )
     if action == "scene_count":
         tier = normalize_video_tier(state.get("selected_video_tier") or state.get("video_tier") or "low")
         count = safe_int(value, 0)
-        if tier == "low":
-            count = 1
         if count < 1:
             return await safe_edit_or_send(
                 query,
-                video_finalization_scene_count_custom_text(lang),
+                video_finalization_scene_count_custom_text(lang, state),
                 reply_markup=video_finalization_scene_count_custom_keyboard(lang),
             )
         if count > 20:
@@ -181428,14 +182094,14 @@ async def handle_video_finalization_pending_text(update: Update, context: Contex
         raw_text = re.sub(r"\s+", " ", update.message.text.strip())[:80]
         if not re.fullmatch(r"\d+", raw_text or ""):
             await update.message.reply_text(
-                video_finalization_scene_count_custom_text(lang),
+                video_finalization_scene_count_custom_text(lang, state),
                 reply_markup=video_finalization_scene_count_custom_keyboard(lang),
             )
             return True
         count = safe_int(raw_text, 0)
         if count < 1:
             await update.message.reply_text(
-                video_finalization_scene_count_custom_text(lang),
+                video_finalization_scene_count_custom_text(lang, state),
                 reply_markup=video_finalization_scene_count_custom_keyboard(lang),
             )
             return True
@@ -181622,10 +182288,10 @@ async def handle_video_finalization_pending_media(update: Update, context: Conte
     file_id = str(getattr(media, "file_id", "") or "")
     if state.get("step") == "await_music_upload":
         update_video_finalization(uid, music_enabled=True, music_mode="uploaded", music_file_id=file_id)
-        note = "✅ Đã lưu file nhạc." if is_music_mux_ready() else "✅ Đã lưu file nhạc. Ghép nhạc đang chờ local worker; bot chưa xử lý video và chưa trừ Xu."
+        note = "✅ Đã lưu file nhạc." if is_music_mux_ready() else "✅ Đã lưu file nhạc. Phần ghép nhạc đang chờ hệ thống xử lý; bot chưa tạo video và chưa trừ Xu."
     else:
         update_video_finalization(uid, voice_enabled=True, voice_mode="uploaded", voice_file_id=file_id, dub_enabled=True)
-        note = "✅ Đã lưu file voice." if is_voice_mux_ready() else "✅ Đã lưu file voice. Ghép voice đang chờ local worker; bot chưa xử lý video và chưa trừ Xu."
+        note = "✅ Đã lưu file voice." if is_voice_mux_ready() else "✅ Đã lưu file voice. Phần ghép giọng đang chờ hệ thống xử lý; bot chưa tạo video và chưa trừ Xu."
     state = get_video_finalization_state(uid)
     state["step"] = "menu"
     state["return_to_invoice"] = False
@@ -181732,32 +182398,6 @@ def video_addon_menu_text(state: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
     tier_raw = state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier")
     tier = normalize_video_tier(tier_raw) if str(tier_raw or "").strip() else ""
-    if tier == "low" and str(state.get("source") or "") != "frame":
-        policy = video_experience_tier_policy()
-        if normalize_user_language(lang) != "vi":
-            return (
-                "🎬 <b>200 Xu starter video</b>\n\n"
-                "This package keeps the default creation flow simple so customers can see the result first.\n\n"
-                "Included:\n"
-                "• Short default AI video\n"
-                "• Built-in prompt/script templates\n"
-                "• Built-in/free assets when available\n\n"
-                "Not included: paid subtitles, dubbing, AI music, extra duration/scenes or quality upgrades.\n"
-                f"Limit: <b>{policy['limits']['per_day']}/day, {policy['limits']['per_week']}/week, {policy['limits']['per_month']}/month</b>.\n\n"
-                "Upgrade to 300 Xu or above to add paid options. This screen only saves choices; no processing or Xu charge starts here."
-            )
-        return (
-            "🎬 <b>Gói 200 Xu — Video trải nghiệm</b>\n\n"
-            "Gói này giữ quy trình mặc định đơn giản để khách thấy kết quả trước, sau đó có thể nâng lên 300 Xu trở lên.\n\n"
-            "Bao gồm:\n"
-            "• Video AI ngắn theo cấu hình mặc định\n"
-            "• Prompt/kịch bản mẫu miễn phí\n"
-            "• Tài nguyên/kho có sẵn nếu hệ thống hỗ trợ\n"
-            "• Không phát sinh add-on trả phí\n\n"
-            "Không bao gồm: tăng thời lượng, tạo nhạc AI mới, giọng đọc AI trả phí, phụ đề, dịch phụ đề, lồng tiếng, phụ đề và lồng tiếng hoặc nâng chất lượng/model.\n"
-            f"Giới hạn: <b>{policy['limits']['per_day']}/ngày, {policy['limits']['per_week']}/tuần, {policy['limits']['per_month']}/tháng</b>.\n\n"
-            "TOAN AAS chỉ lưu lựa chọn ở bước này, chưa xử lý video và chưa trừ Xu."
-        )
     quote = calculate_video_quote(state)
     duration = int(
         quote.get("estimated_seconds")
@@ -181787,21 +182427,6 @@ def video_addon_menu_text(state: dict | None = None, lang: str = "vi") -> str:
 
 def video_addon_menu_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
-    state = state or {}
-    tier_raw = state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier")
-    tier = normalize_video_tier(tier_raw) if str(tier_raw or "").strip() else ""
-    if tier == "low" and str(state.get("source") or "") != "frame":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Dùng gói trải nghiệm 200" if is_vi else "✅ Use 200 starter", callback_data="videoaddon|none")],
-            [
-                InlineKeyboardButton("⬆️ Nâng lên 300 Xu" if is_vi else "⬆️ Upgrade 300 Xu", callback_data="vfinal|tier|basic"),
-                InlineKeyboardButton("400/500/600/800" if is_vi else "400/500/600/800", callback_data="vfinal|tier"),
-            ],
-            [
-                InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|back"),
-                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main"),
-            ],
-        ])
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🎙 Giọng/lồng tiếng" if is_vi else "🎙 Voice/dubbing", callback_data="videoaddon|voice_menu"),
@@ -181868,6 +182493,30 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
     addon_fee_xu = int(quote.get("addon_fee_xu") or 0)
     total_xu = int(quote.get("total_xu") or 0)
     equivalent = int(quote.get("estimated_vnd") or total_xu * int(XU_TO_VND or 100))
+    scene_seconds = max(1, int(quote.get("scene_seconds") or max(1, seconds // max(1, count))))
+    package_label = str(quote.get("package_label") or video_tier_short_label(tier, "vi"))
+    quote_paid_items = video_order_dedupe_items(quote.get("paid_items") or [])
+    addon_lines = "\n".join(
+        f"• {html.escape(str(item.get('label') or 'Phần bổ sung'))}: <b>+{xu_number(item.get('price_xu'))} Xu</b>"
+        for item in quote_paid_items
+    ) or "• Không thêm: <b>0 Xu</b>"
+    finalization_for_invoice = video_finalization_defaults()
+    finalization_for_invoice.update(dict(state.get("video_finalization") or {}))
+    branding_text = logo_watermark_clean_text(
+        finalization_for_invoice.get("logo_watermark_text")
+        if finalization_for_invoice.get("logo_watermark_enabled")
+        else ""
+    )
+    branding_position = logo_watermark_position_label(
+        finalization_for_invoice.get("logo_watermark_position") or "",
+        lang,
+    )
+    branding_line = (
+        f"• Logo/Watermark: <b>{html.escape(branding_text)}</b> · "
+        f"{html.escape(branding_position)}\n"
+        if branding_text
+        else "• Logo/Watermark: <b>Không thêm</b>\n"
+    )
     if quote.get("charge_policy") == "charge_after_valid_mp4" or quote.get("addons_public_locked"):
         unit = int(quote.get("scene_unit_price_xu") or base or PRODUCT_VIDEO_R9_PROMO_PRICE_PER_SCENE_XU)
         list_unit = int(quote.get("scene_unit_list_xu") or PRODUCT_VIDEO_R9_LIST_PRICE_PER_SCENE_XU)
@@ -181891,46 +182540,52 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
         if lang == "zh":
             return (
                 "🎬 <b>最终视频账单 - 确认生成</b>\n\n"
-                "Product Video 按场景计价。\n"
+                f"套餐：<b>{html.escape(package_label)}</b>\n"
                 f"场景数量：<b>{count} 个</b>\n"
-                f"每个场景：<b>约 {TASK3D_SCENE_SECONDS} 秒</b>\n"
+                f"每个场景：<b>约 {scene_seconds} 秒</b>\n"
                 f"预计总时长：<b>约 {seconds} 秒</b>\n"
                 f"{promo_note_zh}\n"
                 f"视频费用：<b>{count} × {xu_number(unit)} = {xu_number(scene_video_xu)} Xu</b>\n"
-                "附加工具：<b>此版本不在 Product Video 账单中出售</b>\n\n"
+                f"{branding_line}"
+                f"附加工具：\n{addon_lines}\n"
+                f"附加工具合计：<b>{xu_number(addon_fee_xu)} Xu</b>\n\n"
                 f"总计：<b>{xu_number(total_xu)} Xu</b>\n"
                 f"折合：<b>{xu_number(equivalent)} VND</b>\n\n"
-                "如果 provider 仍在处理、没有 result URL、下载失败或 MP4 无效，TOAN AAS 不会扣 Xu。\n"
-                "只有在有效 MP4 准备好后才扣除 Xu。"
+                "如果视频未生成成功或最终文件无效，TOAN AAS 不会扣除 Xu。\n"
+                "只有在有效视频成功发送后才扣除 Xu。"
             )
         if lang == "en":
             return (
                 "🎬 <b>Final video invoice - Confirm creation</b>\n\n"
-                "Product Video is priced by scene.\n"
+                f"Package: <b>{html.escape(package_label)}</b>\n"
                 f"Scene count: <b>{count}</b>\n"
-                f"Each scene: <b>about {TASK3D_SCENE_SECONDS}s</b>\n"
+                f"Each scene: <b>about {scene_seconds}s</b>\n"
                 f"Estimated total duration: <b>about {seconds}s</b>\n"
                 f"{promo_note_en}\n"
                 f"Video cost: <b>{count} × {xu_number(unit)} = {xu_number(scene_video_xu)} Xu</b>\n"
-                "Add-ons: <b>not sold in this Product Video invoice yet</b>\n\n"
+                f"{branding_line}"
+                f"Add-ons:\n{addon_lines}\n"
+                f"Add-ons subtotal: <b>{xu_number(addon_fee_xu)} Xu</b>\n\n"
                 f"Total: <b>{xu_number(total_xu)} Xu</b>\n"
                 f"Equivalent: <b>{xu_number(equivalent)} VND</b>\n\n"
-                "If the provider is still processing, no result URL exists, download fails, or the MP4 is invalid, TOAN AAS does not charge Xu.\n"
-                "TOAN AAS charges only after a valid MP4 is ready."
+                "If video creation fails or the final file is invalid, TOAN AAS does not charge Xu.\n"
+                "TOAN AAS charges only after a valid video is delivered."
             )
         return (
             "🎬 <b>Hóa đơn xác nhận video - Xác nhận tạo</b>\n\n"
-            "Product Video tính theo cảnh.\n"
+            f"Gói: <b>{html.escape(package_label)}</b>\n"
             f"Số cảnh: <b>{count} cảnh</b>\n"
-            f"Mỗi cảnh: <b>khoảng {TASK3D_SCENE_SECONDS} giây</b>\n"
+            f"Mỗi cảnh: <b>khoảng {scene_seconds} giây</b>\n"
             f"Tổng thời lượng dự kiến: <b>khoảng {seconds} giây</b>\n"
             f"{promo_note_vi}\n"
             f"Tiền video: <b>{count} × {xu_number(unit)} = {xu_number(scene_video_xu)} Xu</b>\n"
-            "Add-on: <b>chưa bán trong hóa đơn Product Video phiên bản này</b>\n\n"
+            f"{branding_line}"
+            f"Phần bổ sung:\n{addon_lines}\n"
+            f"Tổng phần bổ sung: <b>{xu_number(addon_fee_xu)} Xu</b>\n\n"
             f"Tổng: <b>{xu_number(total_xu)} Xu</b>\n"
             f"Tương đương: <b>{xu_number(equivalent)}đ</b>\n\n"
-            "Nếu provider còn đang dựng, chưa có result URL, tải file lỗi hoặc MP4 không hợp lệ, TOAN AAS không trừ Xu.\n"
-            "TOAN AAS chỉ trừ Xu khi có MP4 hợp lệ."
+            "Nếu video không tạo thành công hoặc tệp cuối không hợp lệ, TOAN AAS không trừ Xu.\n"
+            "TOAN AAS chỉ trừ Xu sau khi video hợp lệ đã được gửi thành công."
         )
     aspect_display = video_finalization_aspect_display(state, lang)
     paid_items = video_order_dedupe_items(quote.get("paid_items") or [])
@@ -181966,24 +182621,6 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
 
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
-        if tier == "low":
-            warning = ""
-            if not quote.get("is_package_200_valid", True):
-                warning = "\n⚠️ 200 Xu 套餐仅适用于 1 个场景、无附加工具且总价固定为 200 Xu。\n"
-            return (
-                "🎬 <b>最终视频账单 - 确认导出视频</b>\n\n"
-                "套餐：<b>体验视频 200 Xu</b>\n"
-                f"画面比例：<b>{html.escape(str(aspect_display))}</b>\n"
-                f"{logo_line_zh}"
-                f"场景数量：<b>{count} 个</b>\n"
-                f"预计时长：<b>约 {seconds} 秒</b>\n"
-                "附加工具：<b>不支持</b>\n"
-                f"总计：<b>{xu_number(total_xu)} Xu</b>\n"
-                f"折合：<b>{xu_number(equivalent)} VND</b>\n"
-                f"{voice_note_zh}"
-                f"{warning}\n"
-                "只有在您点击最终确认“导出视频”后，TOAN AAS 才会开始处理并扣除 Xu。"
-            )
         return (
             "🎬 <b>最终视频账单 - 确认导出视频</b>\n\n"
             f"套餐：<b>{html.escape(video_tier_short_label(tier, 'zh'))} - 每个标准场景 {xu_number(base)} Xu</b>\n"
@@ -182007,25 +182644,6 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
             "只有在您点击最终确认“导出视频”后，TOAN AAS 才会开始处理并扣除 Xu。"
         )
     if lang == "en":
-        if tier == "low":
-            warning = ""
-            if not quote.get("is_package_200_valid", True):
-                warning = "\n⚠️ The 200 Xu package is only valid for 1 scene, no add-ons, total exactly 200 Xu.\n"
-            return (
-                "🎬 <b>Final video invoice - Confirm video export</b>\n\n"
-                f"Package: <b>Starter video 200 Xu</b>\n"
-                f"Aspect ratio: <b>{html.escape(str(aspect_display))}</b>\n"
-                f"{logo_line_en}"
-                f"Scene count: <b>{count} scene</b>\n"
-                f"Estimated duration: <b>about {seconds} seconds</b>\n"
-                "Add-on: <b>not supported</b>\n"
-                f"Total: <b>{xu_number(total_xu)} Xu</b>\n"
-                f"Equivalent: <b>{xu_number(equivalent)} VND</b>\n"
-                f"{voice_note_en}"
-                f"{(audio_invoice_block + chr(10)) if audio_invoice_block else ''}"
-                f"{warning}\n"
-                "TOAN AAS starts processing and charges Xu only after you press the final confirmation: Create video."
-            )
         return (
             "🎬 <b>Final video invoice - Confirm video export</b>\n\n"
             f"Package: <b>{html.escape(video_tier_short_label(tier, 'en'))} - {xu_number(base)} Xu/standard scene</b>\n"
@@ -182050,25 +182668,6 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
             "TOAN AAS starts processing and charges Xu only after you press the final confirmation: Create video."
         )
 
-    if tier == "low":
-        warning = ""
-        if not quote.get("is_package_200_valid", True):
-            warning = "\n⚠️ Gói 200 chỉ hợp lệ khi 1 cảnh, không add-on, tổng đúng 200 Xu.\n"
-        return (
-            "🎬 <b>Hóa đơn xác nhận video - Xác nhận xuất video</b>\n\n"
-            "Gói: <b>Video trải nghiệm 200 Xu</b>\n"
-            f"Tỉ lệ khung hình: <b>{html.escape(str(aspect_display))}</b>\n"
-            f"{logo_line_vi}"
-            f"Số cảnh: <b>{count} cảnh</b>\n"
-            f"Thời lượng ước tính: <b>khoảng {seconds} giây</b>\n"
-            "Công cụ bổ sung: <b>không hỗ trợ</b>\n"
-            f"Tổng: <b>{xu_number(total_xu)} Xu</b>\n"
-            f"Tương đương: <b>{xu_number(equivalent)}đ</b>\n"
-            f"{voice_note_vi}"
-            f"{(audio_invoice_block + chr(10)) if audio_invoice_block else ''}"
-            f"{warning}\n"
-            "TOAN AAS chỉ bắt đầu xử lý và trừ Xu sau khi bạn bấm xác nhận cuối: Xuất video."
-        )
     return (
         "🎬 <b>Hóa đơn xác nhận video - Xác nhận xuất video</b>\n\n"
         f"Gói: <b>Video {html.escape(video_tier_short_label(tier, 'vi'))} — {xu_number(base)} Xu/cảnh chuẩn</b>\n"
@@ -182141,8 +182740,6 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
     duration = int(order.get("requested_seconds") or pricing.get("duration_seconds") or VIDEO_ORDER_DEFAULT_BASE_SECONDS)
     raw_tier = str(order.get("tier") or state.get("video_tier") or "").strip()
     tier_norm = normalize_video_tier(raw_tier) if raw_tier in set(VIDEO_TIER_ORDER) else ""
-    policy = video_experience_tier_policy()
-
     def lines(items):
         return "\n".join(
             f"• {html.escape(str(item.get('label')))}: <b>{'+' if int(item.get('price_xu') or 0) > 0 else ''}{xu_number(item.get('price_xu'))} Xu</b>"
@@ -182189,11 +182786,6 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
     duration_line_vi = "\n".join(scene_invoice_lines_vi) if scene_invoice_lines_vi else f"Thời lượng: <b>{duration} giây</b>"
 
     if normalize_user_language(lang) != "vi":
-        starter_note = (
-            "\nPaid add-ons are locked for the 200 Xu starter package. Upgrade to 300 Xu or above for subtitles, dubbing, AI music or longer video.\n"
-            f"Limit: <b>{policy['limits']['per_day']}/day, {policy['limits']['per_week']}/week, {policy['limits']['per_month']}/month</b>\n"
-            if tier_norm == "low" else ""
-        )
         discount_block = f"\nDiscounts:\n{discount_lines}\n" if discount_lines else ""
         return (
             "🎬 <b>Confirm video export</b>\n\n"
@@ -182210,16 +182802,11 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
             f"Free items:\n{free_lines_en}\n\n"
             f"Paid add-ons:\n{paid_lines_en}\n"
             f"{discount_block}"
-            f"{starter_note}\n"
+            "\n"
             f"Total: <b>{xu_number(total_xu)} Xu</b>\n"
             f"Equivalent: <b>{xu_number(equivalent)} VND</b>\n\n"
             "Processing starts only after you press the final confirmation button."
         )
-    starter_note = (
-        "\nGói 200 Xu không mở add-on trả phí. Muốn dùng phụ đề, lồng tiếng, tạo nhạc AI hoặc tăng thời lượng thì nâng lên gói 300 Xu trở lên.\n"
-        f"Giới hạn: <b>{policy['limits']['per_day']}/ngày, {policy['limits']['per_week']}/tuần, {policy['limits']['per_month']}/tháng</b>\n"
-        if tier_norm == "low" else ""
-    )
     discount_block = f"\nƯu đãi hợp lệ:\n{discount_lines}\n" if discount_lines else ""
     return (
         "🎬 <b>Xác nhận xuất video</b>\n\n"
@@ -182236,22 +182823,15 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
         f"Mục miễn phí:\n{free_lines_vi}\n\n"
         f"Công cụ bổ sung có phí:\n{paid_lines_vi}\n"
         f"{discount_block}"
-        f"{starter_note}\n"
+        "\n"
         f"Tổng: <b>{xu_number(total_xu)} Xu</b>\n"
         f"Tương đương: <b>{xu_number(equivalent)}đ</b>\n\n"
         "TOAN AAS chỉ bắt đầu xử lý và trừ Xu sau khi bạn bấm xác nhận cuối."
     )
 
 def video_preview_locked_text(state: dict | None = None, lang: str = "vi") -> str:
-    state = dict(state or {})
-    pending = dict(state.get("pending_payload") or state)
-    tier = normalize_video_tier(state.get("video_tier") or pending.get("video_tier") or pending.get("selected_tier") or "")
     if normalize_user_language(lang) != "vi":
-        if tier == "low":
-            return "The 200 Xu starter package does not include a video preview. You can create the full video after reviewing the invoice."
         return "This package does not include a video preview. You can create the full video after reviewing the invoice."
-    if tier == "low":
-        return "Gói Trải nghiệm 200 Xu không có bản xem thử video. Bạn có thể xuất bản đầy đủ sau khi kiểm tra hóa đơn."
     return "Gói này không có bản xem thử video. Bạn có thể xuất bản đầy đủ sau khi kiểm tra hóa đơn."
 
 def video_addon_confirm_keyboard(token: str, tier: str, lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
@@ -182715,8 +183295,8 @@ def public_video_pending_payload_from_package(tier: str, package: dict, aspect_r
         "prompt": video_tier_prompt_for_generation(generation_prompt, tier_norm, aspect, flow),
         "original_prompt": raw_prompt,
         "base_cost": int(payload.get("cost") or 0),
-        "marketing_loss": bool(tier_norm == "low" and video_beta_200_marketing_loss_enabled_runtime()),
-        "marketing_loss_reason": "starter_product" if tier_norm == "low" and video_beta_200_marketing_loss_enabled_runtime() else "",
+        "marketing_loss": False,
+        "marketing_loss_reason": "",
         "cost_ratio": check_video_margin(tier_norm).get("cost_ratio"),
         "from_image": str((package or {}).get("source") or "") == "image_to_video",
         "source_job_id": str((package or {}).get("source_job_id") or "")[:80],
@@ -182733,7 +183313,7 @@ def public_video_pending_payload_from_package(tier: str, package: dict, aspect_r
         "direction_prompt": str((package or {}).get("direction_prompt") or (package or {}).get("selected_motion") or (package or {}).get("direction") or "")[:500],
         "video_tier": tier_norm,
         "task3d_package_id": {"low": "package_200", "basic": "package_300", "common": "package_400"}.get(tier_norm, ""),
-        "preview_required": False if tier_norm == "low" else bool((package or {}).get("preview_required", False)),
+        "preview_required": bool((package or {}).get("preview_required", False)),
         "tier_label": payload.get("label") or tier_norm,
         "model": payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
         "package_id": str((package or {}).get("package_id") or "")[:80],
@@ -182890,7 +183470,7 @@ async def start_video_addon_step(query, user_id, pending_payload: dict, tier: st
     })
     if pending_payload.get("video_finalization_confirmed"):
         tier_norm = normalize_video_tier(tier)
-        if source == "frame" or tier_norm == "low" or pending_payload.get("video_addon_ready_for_invoice"):
+        if source == "frame" or pending_payload.get("video_addon_ready_for_invoice"):
             return await finalize_video_addon_confirmation(query, user_id, state, lang)
         state = set_video_addon_screen(user_id, state, "video_addon_menu", push=False)
         return await safe_edit_or_send(
@@ -183015,22 +183595,6 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
         "video_price_preview": pricing,
         "video_order": order,
     })
-    if tier == "low" and video_beta_200_marketing_loss_enabled_runtime():
-        pending_payload.update({
-            "marketing_loss": True,
-            "marketing_loss_reason": "starter_product",
-            "cost_ratio": check_video_margin(tier).get("cost_ratio"),
-        })
-    if tier == "low" and pending_payload.get("marketing_loss"):
-        limit = check_video_beta_200_limit(user_id)
-        if not limit.get("ok"):
-            clear_video_addon_state(user_id)
-            return await safe_edit_or_send(
-                query,
-                video_beta_200_limit_message(lang),
-                parse_mode=None,
-                reply_markup=video_beta_200_limit_keyboard(lang),
-            )
     token = set_shopaikey_pending_confirmation(user_id, pending_payload)
     state["pending_confirm_token"] = token
     state["pending_payload"] = pending_payload
@@ -185066,8 +185630,8 @@ def trend_guided_selected_image_prompt_text(state: dict, index: int = 1, lang: s
 def trend_guided_selected_image_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     items = [("✅ Lưu prompt ảnh" if is_vi else "✅ Save image prompt", "trendg|image_prompt_save")]
-    for tier in IMAGE_TIER_ORDER:
-        payload = image_tier_payload(tier)
+    for tier in CANONICAL_IMAGE_TIER_ORDER:
+        payload = canonical_image_tier_payload(tier)
         if payload.get("enabled"):
             items.append((image_tier_button_text(tier, lang), f"trendg|image_ai_tier|{tier}"))
     items.extend([
@@ -186526,7 +187090,7 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
         return await safe_edit_or_send(query, prefix + trend_guided_selected_image_prompt_text(state, idx, lang), parse_mode="HTML", reply_markup=trend_guided_selected_image_prompt_keyboard(lang))
     if action == "image_ai_tier":
         tier = normalize_image_tier(value or SHOPAIKEY_IMAGE_DEFAULT_TIER)
-        payload = image_tier_payload(tier)
+        payload = canonical_image_tier_payload(tier)
         if not payload.get("enabled"):
             return await safe_edit_or_send(query, ui_text(lang, "image.tier_disabled_message"))
         idx = int(state.get("image_prompt_choice") or 1)
@@ -186734,7 +187298,7 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
             "trend_output_id": int(output.get("id") or 0),
             "source_prompt_type": "image_prompt",
             "image_tier": "low",
-            "retry_warranty_count": int(image_tier_payload("low").get("retry_warranty_count") or 0),
+            "retry_warranty_count": int(canonical_image_tier_payload("low").get("retry_warranty_count") or 0),
             "provider_submit_source": "public_user_final_confirm",
         })
         return await safe_edit_or_send(
@@ -191308,7 +191872,7 @@ async def _handle_create_media_callback_impl(
             state = set_quick_image_flow(uid, "entry", suggest_offset=0)
             return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang, state=state))
         tier = normalize_image_tier(action.replace("qi_tier_", "", 1))
-        payload = image_tier_payload(tier)
+        payload = canonical_image_tier_payload(tier)
         if not payload.get("enabled"):
             return await safe_edit_or_send(query, ui_text(lang, "image.tier_disabled_message"))
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Image user")
@@ -191502,7 +192066,7 @@ async def _handle_create_media_callback_impl(
         clear_media_aspect_pending(uid)
         tier = normalize_image_tier(pending_aspect.get("tier") or SHOPAIKEY_IMAGE_DEFAULT_TIER)
         prompt = str(pending_aspect.get("prompt") or "").strip()
-        payload = image_tier_payload(tier)
+        payload = canonical_image_tier_payload(tier)
         if not payload.get("enabled"):
             return await safe_edit_or_send(query, ui_text(lang, "image.tier_disabled_message"))
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Image user")
@@ -191600,7 +192164,7 @@ async def _handle_create_media_callback_impl(
         return await start_video_addon_step(query, uid, pending_payload, tier, lang, source="ai")
     if action.startswith("image_tier_"):
         tier = normalize_image_tier(action.replace("image_tier_", "", 1))
-        payload = image_tier_payload(tier)
+        payload = canonical_image_tier_payload(tier)
         if not payload.get("enabled"):
             return await safe_edit_or_send(query, ui_text(lang, "image.tier_disabled_message"))
 
@@ -194504,14 +195068,18 @@ async def cmd_price_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def public_pricing_context() -> dict:
     prices = canonical_price_table()
-    image_payload = image_tier_pricing_payload()
+    image_payload = canonical_image_tier_pricing_payload()
     image_lines = []
-    for tier in IMAGE_TIER_ORDER:
+    for tier in CANONICAL_IMAGE_TIER_ORDER:
         payload = image_payload.get(tier) or {}
         if not payload:
             continue
         warranty = int(payload.get("retry_warranty_count") or 0)
-        note = "có bảo hành tạo lại theo chính sách gói" if warranty > 0 else "phù hợp nhu cầu cơ bản hoặc tiêu chuẩn"
+        note = (
+            "có 1 lần tạo lại trong cùng yêu cầu"
+            if warranty > 0
+            else str(payload.get("use_case") or payload.get("description") or "không kèm tạo lại miễn phí")
+        )
         image_lines.append(
             f"• {html.escape(str(payload.get('label') or tier))}: <b>{int(payload.get('cost') or 0)} Xu</b> — {html.escape(note)}."
         )
@@ -194522,11 +195090,10 @@ def public_pricing_context() -> dict:
         if not payload:
             continue
         cost = int(payload.get("cost") or 0)
-        note = "1 cảnh / khoảng 8 giây; màn số cảnh sẽ hiển thị tổng Xu"
-        if tier == "low":
-            note = "gói trải nghiệm để test ý tưởng nhanh hoặc tạo bản nháp ngắn"
-        elif tier == "premium":
-            note = "gói cao cấp; chỉ dùng khi màn sản phẩm đang mở phù hợp"
+        seconds = max(1, int(payload.get("seconds") or 1))
+        public_level = str(payload.get("public_level") or "Chất lượng theo gói")
+        use_case = str(payload.get("note") or "Phù hợp nội dung đã chọn")
+        note = f"{seconds} giây/cảnh · {public_level} · {use_case}"
         video_lines.append(
             f"• {html.escape(str(payload.get('label') or tier))}: <b>{cost} Xu</b> — {html.escape(note)}."
         )
@@ -195236,64 +195803,9 @@ def pricing_main_lines() -> list[str]:
 
 def pricing_image_lines() -> list[str]:
     return public_pricing_lines("image", public_pricing_context())
-    pricing = image_tier_pricing_payload()
-    rows = [
-        "🖼 <b>GIÁ HÌNH ẢNH AI</b>",
-        "",
-        "Chọn tier ảnh trong flow tạo ảnh. Bot luôn hỏi xác nhận trước khi trừ Xu.",
-        "",
-    ]
-    for tier in IMAGE_TIER_ORDER:
-        payload = pricing.get(tier) or {}
-        warranty = int(payload.get("retry_warranty_count") or 0)
-        warranty_text = "Kèm 1 lần tạo lại trong cùng yêu cầu." if warranty > 0 else "Không kèm tạo lại miễn phí."
-        rows.append(f"• {payload.get('label') or tier}: <b>{int(payload.get('cost') or 0)} Xu</b> — {html.escape(warranty_text)}")
-    rows.extend([
-        "",
-        "Nếu xử lý thất bại: bot hoàn Xu nếu đã trừ theo chính sách hiện có.",
-    ])
-    return rows
 
 def pricing_video_lines() -> list[str]:
     return public_pricing_lines("video", public_pricing_context())
-    pricing = video_tier_pricing_payload()
-    rows = [
-        "🎬 <b>GIÁ VIDEO AI</b>",
-        "",
-        "Giá gói là giá cho <b>1 cảnh chuẩn, khoảng 8 giây</b>. Màn chọn số cảnh sẽ hiển thị công thức và tổng Xu.",
-        "Bot luôn hiển thị hóa đơn cuối cùng và hỏi xác nhận trước khi trừ Xu.",
-        "",
-    ]
-    for tier in VIDEO_TIER_ORDER:
-        payload = pricing.get(tier) or {}
-        if tier == "premium":
-            continue
-        else:
-            if tier == "low":
-                extra = "1 cảnh / khoảng 8 giây; tổng đúng 200 Xu; không công cụ bổ sung"
-            else:
-                extra = "giá mỗi cảnh chuẩn; chọn nhiều cảnh để xem chiết khấu và tổng Xu"
-            rows.append(f"• {payload.get('label') or tier}: <b>{int(payload.get('cost') or 0)} Xu</b> — {html.escape(extra)}")
-    rows.extend([
-        "",
-        "<b>Tùy chọn cộng thêm phổ biến</b>",
-        f"• Tạo phụ đề tự động từ video: <b>+{VIDEO_SUBTITLE_AUTO_BASE_XU} Xu</b>",
-        f"• Dịch phụ đề 1 ngôn ngữ: <b>+{VIDEO_SUBTITLE_TRANSLATE_BASE_XU} Xu</b>",
-        f"• Tạo phụ đề + dịch + burn: <b>+{VIDEO_SUBTITLE_TRANSLATE_BURN_BASE_XU} Xu</b>",
-        f"• Lồng tiếng giọng mặc định: <b>+{VIDEO_DUB_DEFAULT_BASE_XU} Xu</b>",
-        f"• Dịch + lồng tiếng: <b>+{VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU} Xu</b>",
-        f"• Tạo nhạc AI Suno: <b>+{VIDEO_SUNO_MUSIC_XU} Xu/bài</b>",
-        "",
-        "<b>Miễn phí trong giới hạn</b>",
-        "• Nhạc từ kho có sẵn, giữ âm thanh gốc, chỉnh âm lượng cơ bản.",
-        "• Prompt/kịch bản mẫu, hướng chuyển động/camera cơ bản và phụ đề từ kịch bản có sẵn khi không cần xử lý nâng cao.",
-        "",
-        html.escape(VIDEO_SHORT_TIER_PRICING_NOTE_VI),
-        "",
-        "Tỉ lệ hỗ trợ: 9:16, 16:9, 1:1, 4:5, 3:4.",
-        "Sau khi xác nhận, video được đưa vào hàng chờ và tự gửi kết quả khi hoàn tất.",
-    ])
-    return rows
 
 def pricing_combo_lines() -> list[str]:
     combos = public_video_combo_pricing_payload()
@@ -241156,12 +241668,24 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         )
     if action == "start":
         state = video_scene3_flow.default_state()
-        state.update({"step": "content_mode", "history": ["menu"]})
+        state.update({
+            "step": "content_mode",
+            "history": ["menu"],
+            "standalone_profile_studio": True,
+        })
         state = save_video_profile_studio_state(context, state)
         return await video_profile_scene1_render(query, state, lang)
+    source_product_id = video_flow6_product_id(state)
+    if not source_product_id and not bool(state.get("standalone_profile_studio")):
+        clear_video_session(uid)
+        return await safe_edit_or_send(
+            query,
+            menu_text_main_video_i18n(lang),
+            parse_mode="HTML",
+            reply_markup=main_video_keyboard(lang),
+        )
     if action == "back":
         step = str(state.get("step") or "menu")
-        source_product_id = str(state.get("source_product_id") or state.get("product_type") or "")
         if step == "scene_count" and bool(state.get("flow8_direct_entry")):
             clear_video_session(uid)
             return await safe_edit_or_send(
@@ -241737,7 +242261,7 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         state = video_profile_studio_step(context, state, "creative_controls")
         return await video_profile_scene1_render(query, state, lang)
     if action == "image_quote":
-        state = video_scene3_flow.prepare_image_generation_quote(state, image_tier_cost_xu("low"))
+        state = video_scene3_flow.prepare_image_generation_quote(state, canonical_image_tier_cost_xu("low"))
         state = video_profile_studio_step(context, state, "image_quote")
         return await video_profile_scene1_render(query, state, lang)
     if action == "image_quote_confirm":
@@ -243019,6 +243543,7 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         return await video_profile_scene1_render(query, state, lang)
     if action == "tier":
         quality = min(VIDEO_B14_2_QUALITY_OPTIONS, key=lambda item: abs(item - safe_int(parts[2] if len(parts) > 2 else 200, 200)))
+        quality_product = video_public_quality_product(quality)
         scene_policy = video_b14_trial_scene_policy(quality, int(state.get("scene_count") or 1))
         if scene_policy.get("clamped"):
             return await safe_edit_or_send(
@@ -243064,6 +243589,9 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             "final_report",
             quality_xu=quality,
             quality_tier=quality,
+            quality_unit_xu=quality_product["unit_xu"],
+            scene_seconds=quality_product["seconds"],
+            estimated_duration=safe_int(state.get("scene_count"), 1) * quality_product["seconds"],
             provider_model_selection=dict(route_selection),
             provider_model_metadata=dict(route_metadata),
             flow6_preflight=dict(preflight),
@@ -243077,9 +243605,11 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
                 "content_type": str(state.get("content_type") or ""),
                 "technical_profile": str(state.get("technical_profile") or ""),
                 "scene_count": safe_int(state.get("scene_count"), 1),
-                "duration_seconds": safe_int(state.get("scene_count"), 1) * video_scene3_flow.SCENE_SECONDS,
+                "duration_seconds": safe_int(state.get("scene_count"), 1) * quality_product["seconds"],
                 "aspect_ratio": str(state.get("aspect_ratio") or "9:16"),
                 "quality_tier": quality,
+                "quality_unit_xu": quality_product["unit_xu"],
+                "scene_seconds": quality_product["seconds"],
                 "estimate": dict(quote),
                 "postproduction_addons": dict(state.get("postproduction_addons") or {}),
                 "provider_model_metadata": dict(route_metadata),

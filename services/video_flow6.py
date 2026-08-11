@@ -11,7 +11,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from services import video_flow7
+from services import video_flow7, video_profile_catalog
 
 
 MIN_SCENES = 1
@@ -170,7 +170,8 @@ _CONTENT_PATTERNS = (
 
 
 def flow_kind_for_product(product_id: str) -> str:
-    return FLOW_KIND_BY_PRODUCT.get(str(product_id or "").strip(), "ai_real")
+    product = str(product_id or "").strip()
+    return FLOW_KIND_BY_PRODUCT.get(product, "ai_real" if product else "")
 
 
 def flow_spec(flow_kind: str) -> dict[str, Any]:
@@ -183,7 +184,7 @@ def effective_asset_requirement(value: dict[str, Any] | None) -> str:
         raw.get("product_id")
         or raw.get("source_product_id")
         or raw.get("product_type")
-        or "video_ai_real"
+        or ""
     )
     flow_kind = flow_kind_for_product(product_id)
     source_fields = dict(raw.get("source_fields") or {})
@@ -236,7 +237,7 @@ def new_context(
 
 def normalize_context(value: dict[str, Any] | None) -> dict[str, Any]:
     raw = dict(value or {})
-    product_id = str(raw.get("product_id") or raw.get("source_product_id") or raw.get("product_type") or "video_ai_real")
+    product_id = str(raw.get("product_id") or raw.get("source_product_id") or raw.get("product_type") or "")
     base = new_context(
         product_id=product_id,
         content_mode=str(raw.get("content_mode") or ""),
@@ -292,7 +293,7 @@ def context_from_scene_state(state: dict[str, Any] | None) -> dict[str, Any]:
     context = dict(source.get("video_flow_context") or {})
     source_fields = dict(source.get("source_fields") or context.get("source_fields") or {})
     context.update({
-        "product_id": str(source.get("source_product_id") or source.get("product_type") or context.get("product_id") or "video_ai_real"),
+        "product_id": str(source.get("source_product_id") or source.get("product_type") or context.get("product_id") or ""),
         "content_mode": str(source.get("content_mode") or context.get("content_mode") or ""),
         "scene_count": source.get("scene_count", context.get("scene_count", 0)),
         "aspect_ratio": str(source.get("aspect_ratio") or context.get("aspect_ratio") or ""),
@@ -558,7 +559,25 @@ def next_after_ratio(value: dict[str, Any] | None) -> str:
 
 def content_suggestion_catalog(value: dict[str, Any] | None, *, profile_label: str = "") -> list[dict[str, Any]]:
     context = normalize_context(value)
-    profile = str(profile_label or context.get("primary_profile_key") or "profile đã chọn")
+    profile_key = video_profile_catalog.canonical_profile_key(
+        context.get("primary_profile_key") or ""
+    )
+    profile_record = dict(video_profile_catalog.PROFILE_BY_KEY.get(profile_key) or {})
+    profile = str(
+        profile_label
+        or profile_record.get("public_name")
+        or context.get("primary_profile_key")
+        or "profile đã chọn"
+    )
+    profile_description = str(
+        profile_record.get("description")
+        or f"Triển khai đúng đặc trưng của {profile}"
+    )
+    scene_pattern = [
+        str(item) for item in profile_record.get("default_scene_pattern") or [] if str(item)
+    ] or ["Mở đầu", "Diễn biến", "Điểm nhấn", "Kết luận"]
+    goal_tags = [str(item).replace("_", " ") for item in profile_record.get("goal_tags") or [] if str(item)]
+    visual_tags = [str(item).replace("_", " ") for item in profile_record.get("visual_tags") or [] if str(item)]
     count = max(1, int(context.get("scene_count") or 1))
     ratio = str(context.get("aspect_ratio") or "9:16")
     flow_kind = str(context.get("flow_kind") or "ai_real")
@@ -567,21 +586,31 @@ def content_suggestion_catalog(value: dict[str, Any] | None, *, profile_label: s
     character_note = str(character.get("description") or character.get("mode") or "chủ thể phù hợp nội dung")
     rows = []
     for index, (hook, structure) in enumerate(_CONTENT_PATTERNS, 1):
+        offset = (index - 1) % len(scene_pattern)
+        ordered_pattern = scene_pattern[offset:] + scene_pattern[:offset]
+        pattern_text = " → ".join(ordered_pattern)
+        profile_hook = ordered_pattern[0]
         suggestion_id = f"{context['primary_profile_key'] or 'profile'}:{index:02d}"
         rows.append({
             "id": suggestion_id,
             "index": index,
-            "title": hook,
-            "hook": f"{hook}, bám đúng {profile}.",
+            "title": f"{profile_hook}: {hook}",
+            "hook": f"{hook}, mở bằng {profile_hook.lower()} và bám đúng {profile}.",
             "concept": (
+                f"{profile_description} Mạch riêng: {pattern_text}. "
                 f"Dùng {count} cảnh, tỉ lệ {ratio}, loại {flow_kind}; {structure}. "
                 f"Giữ {character_note} nhất quán."
             ),
             "flow": (
-                f"Phân bổ đúng {count} ý/cảnh trọn vẹn; trạng thái cuối cảnh trước nối tự nhiên sang cảnh sau. "
+                f"Phân bổ {pattern_text} vào đúng {count} cảnh trọn vẹn; trạng thái cuối cảnh trước nối tự nhiên sang cảnh sau. "
                 f"Tài nguyên hiện có {asset_status['received']}/{asset_status['required']}."
             ),
-            "reason": f"Khớp profile {profile}, số cảnh {count} và tỉ lệ {ratio}.",
+            "reason": (
+                f"Khớp {profile}, số cảnh {count}, tỉ lệ {ratio}"
+                + (f", mục tiêu {', '.join(goal_tags[:2])}" if goal_tags else "")
+                + (f" và hình ảnh {', '.join(visual_tags[:2])}" if visual_tags else "")
+                + "."
+            ),
         })
     return rows
 

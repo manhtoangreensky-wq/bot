@@ -9,7 +9,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from services import video_tail9
+from services import video_ai_real_pricing, video_tail9
 
 
 PUBLIC_MENU_ROWS = (
@@ -41,86 +41,17 @@ CANONICAL_PRICING_PRODUCTS = frozenset({
 FRAMEVIDEO_PRICING_PRODUCTS = frozenset({"frame_video_local", "image_to_video"})
 PUBLIC_EXECUTION_LOCKED_PRODUCTS = frozenset({"multi_scene_film", "video_long"})
 
-QUALITY_TIER_ORDER = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
-
+_PUBLIC_QUALITY_ROWS = video_ai_real_pricing.public_quality_catalog()
+QUALITY_TIER_ORDER = tuple(int(item["tier_id"]) for item in _PUBLIC_QUALITY_ROWS)
 QUALITY_TIERS: dict[int, dict[str, Any]] = {
-    200: {
-        "icon": "🧪",
-        "name": "Trải nghiệm",
-        "descriptions": ("Video gốc, không add-ons", "Phù hợp test nhanh"),
-        "public_level": "Thử ý tưởng nhanh",
-        "public_detail": "Chuyển động cơ bản, phù hợp thử mạch nội dung đơn giản.",
-        "capabilities": (
-            "text_to_video",
-            "text_to_video_or_scene_video",
-            "image_to_video",
-            "first_last_frame_video",
-            "first_last_frame",
-            "video_to_video",
-            "single_scene",
-            "ratio_9:16",
-            "ratio_16:9",
-            "ratio_1:1",
-            "ratio_4:5",
+    int(item["tier_id"]): {
+        **deepcopy(item),
+        "descriptions": (
+            str(item.get("quality_characteristic") or item.get("public_detail") or ""),
+            str(item.get("use_case") or ""),
         ),
-        "max_scenes": 1,
-    },
-    300: {
-        "icon": "⭐",
-        "name": "Cơ bản",
-        "descriptions": ("Video ngắn tiêu chuẩn", "Có thể dùng add-ons đơn giản"),
-        "public_level": "Cân bằng và ổn định",
-        "public_detail": "Phù hợp video phổ thông, giới thiệu ngắn và nội dung mạng xã hội.",
-    },
-    400: {
-        "icon": "🔥",
-        "name": "Tốt",
-        "descriptions": ("Prompt tốt hơn", "Phù hợp reels/shorts"),
-        "public_level": "Giữ chi tiết tốt hơn",
-        "public_detail": "Ưu tiên sự nhất quán của chủ thể, sản phẩm và bố cục giữa các cảnh.",
-    },
-    500: {
-        "icon": "💎",
-        "name": "Đẹp",
-        "descriptions": ("Chất lượng cân bằng", "Khuyên dùng"),
-        "public_level": "Hoàn thiện rõ nét",
-        "public_detail": "Cân bằng hình ảnh, chuyển động và khả năng giữ nội dung cần thiết.",
-    },
-    600: {
-        "icon": "🚀",
-        "name": "Nâng cao",
-        "descriptions": ("Cảnh chi tiết hơn", "Phù hợp bán hàng/content"),
-        "public_level": "Chất lượng nâng cao",
-        "public_detail": "Phù hợp ánh sáng, vật liệu và chuyển động có nhiều chi tiết.",
-    },
-    800: {
-        "icon": "🏆",
-        "name": "Premium",
-        "descriptions": ("Ưu tiên chất lượng", "Hậu kỳ tốt hơn"),
-        "public_level": "Ưu tiên chất lượng",
-        "public_detail": "Dành cho nội dung cần hình ảnh tinh tế và mạch cảnh được kiểm soát kỹ.",
-    },
-    1000: {
-        "icon": "🎬",
-        "name": "Pro",
-        "descriptions": ("Phim/ads chất lượng cao",),
-        "public_level": "Kiểm soát thành phần",
-        "public_detail": "Phù hợp quảng cáo, phim ngắn và cảnh có nhiều yếu tố cần giữ nguyên.",
-    },
-    1200: {
-        "icon": "🎞",
-        "name": "Studio",
-        "descriptions": ("Cảnh phức tạp hơn",),
-        "public_level": "Đường dựng chất lượng cao",
-        "public_detail": "Ưu tiên độ ổn định và chi tiết khi công nghệ phù hợp đang sẵn sàng.",
-    },
-    1500: {
-        "icon": "👑",
-        "name": "Max",
-        "descriptions": ("Mức cao nhất hiện tại",),
-        "public_level": "Mức cao nhất hiện tại",
-        "public_detail": "Ưu tiên đường dựng cao nhất và phương án dự phòng phù hợp khi hệ thống sẵn sàng.",
-    },
+    }
+    for item in _PUBLIC_QUALITY_ROWS
 }
 
 _MULTI_SCENE_CAPABILITIES = (
@@ -138,8 +69,6 @@ _MULTI_SCENE_CAPABILITIES = (
 )
 
 for _tier_id in QUALITY_TIER_ORDER:
-    if _tier_id == 200:
-        continue
     QUALITY_TIERS[_tier_id].setdefault("capabilities", _MULTI_SCENE_CAPABILITIES)
     QUALITY_TIERS[_tier_id].setdefault("max_scenes", 20)
 
@@ -209,9 +138,7 @@ def compatible_quality_tiers(
         capabilities = set(spec.get("capabilities") or ())
         if count > int(spec.get("max_scenes") or 1):
             continue
-        if tier_id == 200 and (count != 1 or not bool(contract.get("supports_single_scene"))):
-            continue
-        if aspect and aspect != "keep" and f"ratio_{aspect}" not in capabilities and tier_id != 200:
+        if aspect and aspect != "keep" and f"ratio_{aspect}" not in capabilities:
             continue
         if capability and capability not in capabilities:
             continue
