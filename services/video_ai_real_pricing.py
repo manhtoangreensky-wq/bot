@@ -8,14 +8,16 @@ provider, calls an API, creates a job, or mutates a wallet.
 from __future__ import annotations
 
 from copy import deepcopy
-from decimal import Decimal, ROUND_FLOOR
+from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
 from typing import Any
 
 
 XU_TO_VND = Decimal("100")
 SALE_MULTIPLIER = Decimal("3")
 PROVIDER_PRIORITY = ("shopaikey", "key4u")
-SOURCE_CHECKED_ON = "2026-08-09"
+SOURCE_CHECKED_ON = "2026-08-11"
+CATALOG_VERSION = "2026-08-11.video.1"
+IMAGE_CATALOG_VERSION = "2026-08-11.image.1"
 PROVIDER_USD_TO_VND = {
     "shopaikey": Decimal("3250"),
     "key4u": Decimal("3000"),
@@ -28,130 +30,452 @@ PROVIDER_SOURCE_URLS = {
 
 _MODEL_ROWS: tuple[dict[str, Any], ...] = (
     {
-        "key": "grok3_5",
-        "label": "Grok 3",
+        "key": "social_fast_5",
+        "label": "Nhanh gọn",
+        "public_icon": "⚡",
+        "public_level": "Cơ bản 720p",
         "seconds": 5,
-        "quality": "Tiêu chuẩn 720p",
+        "quality": "Nhanh gọn, chuyển động rõ",
         "resolution": "720p",
-        "description": "Clip ngắn, chuyển động rõ và có âm thanh; hợp quảng cáo hoặc nội dung mạng xã hội một hành động.",
+        "description": "Tạo nhanh một hành động ngắn, bố cục dễ nhìn và chuyển động vừa phải.",
+        "use_case": "Video thử ý tưởng, bài đăng ngắn, cảnh mở đầu hoặc sản phẩm chuyển động đơn giản.",
+        "capability_key": "text_or_image_video_basic",
+        "providers": {
+            "shopaikey": {
+                "model": "grok-video-3",
+                "request_metadata": {"duration": 5, "resolution": "720P"},
+                "usd_per_scene": "0.400",
+                "pricing_basis": "mỗi lần tạo 5 giây",
+                "source_reference": "ShopAIKey model catalog: grok-video-3",
+            },
+            "key4u": {
+                "model": "pixverse-video",
+                "request_metadata": {"duration": 5, "resolution": "720p"},
+                "usd_per_scene": "0.041",
+                "pricing_basis": "mỗi lần tạo",
+                "source_reference": "Key4U Model Hub: pixverse-video",
+            },
+        },
+    },
+    {
+        "key": "grok3_5",
+        "label": "Tiêu chuẩn có âm thanh",
+        "public_icon": "🌱",
+        "public_level": "Tiêu chuẩn 720p",
+        "seconds": 5,
+        "quality": "Tiêu chuẩn, có thể tạo âm thanh cùng cảnh",
+        "resolution": "720p",
+        "description": "Clip ngắn có chuyển động và âm thanh, giữ đúng một hành động trọn vẹn.",
+        "use_case": "Quảng cáo ngắn, video mạng xã hội và cảnh có một câu thoại hoặc hiệu ứng âm thanh.",
+        "capability_key": "text_or_image_video_with_audio",
         "providers": {
             "shopaikey": {
                 "model": "grok-video-3",
                 "catalog_model": "grok-video-3",
                 "request_metadata": {"duration": 5, "resolution": "720P"},
                 "usd_per_scene": "0.400",
+                "pricing_basis": "mỗi lần tạo 5 giây",
+                "source_reference": "ShopAIKey model catalog: grok-video-3",
+            },
+            "key4u": {
+                "model": "grok-imagine-video",
+                "request_metadata": {"duration": 5, "resolution": "720p"},
+                "usd_per_scene": "0.060",
                 "pricing_basis": "mỗi lần tạo",
-            },
-            "key4u": {
-                "model": "grok-imagine-video",
-                "usd_per_second": "0.420",
-                "pricing_basis": "mỗi giây video đầu ra 720p",
-            },
-        },
-    },
-    {
-        "key": "grok3_10",
-        "label": "Grok 3",
-        "seconds": 10,
-        "quality": "Tiêu chuẩn 720p - cảnh dài",
-        "resolution": "720p",
-        "description": "Cảnh dài hơn cho lời thoại hoặc hai nhịp chuyển động liên tục, vẫn giữ phong cách video chân thật.",
-        "providers": {
-            "shopaikey": {
-                "model": "grok-video-3",
-                "catalog_model": "grok-video-3-10s",
-                "request_metadata": {"duration": 10, "resolution": "720P"},
-                "usd_per_scene": "0.400",
-                "pricing_basis": "mỗi lần tạo 10 giây",
-            },
-            "key4u": {
-                "model": "grok-imagine-video",
-                "usd_per_second": "0.420",
-                "pricing_basis": "mỗi giây video đầu ra 720p",
+                "source_reference": "Key4U Model Hub: grok-imagine-video",
             },
         },
     },
     {
         "key": "veo31_fast_8",
-        "label": "Veo 3.1 Fast",
+        "label": "Cân bằng rõ nét",
+        "public_icon": "✨",
+        "public_level": "Cân bằng 720p đến 1080p",
         "seconds": 8,
-        "quality": "Chất lượng tốt - tạo nhanh",
+        "quality": "Hình ảnh ổn định, âm thanh đồng bộ",
         "resolution": "720p/1080p theo provider",
         "description": "Hình ảnh ổn định, chuyển động mượt và âm thanh đồng bộ; cân bằng tốt giữa tốc độ và chất lượng.",
+        "use_case": "Video bán hàng, giới thiệu dịch vụ, nội dung có lời thoại và cảnh cần rõ chủ thể.",
+        "capability_key": "text_or_image_video_balanced_audio",
         "providers": {
             "shopaikey": {
                 "model": "veo3.1-fast",
+                "request_metadata": {"duration": 8},
                 "usd_per_scene": "0.700",
                 "pricing_basis": "mỗi lần tạo",
+                "source_reference": "ShopAIKey model catalog: veo3.1-fast",
             },
             "key4u": {
                 "model": "veo_3_1-fast",
+                "request_metadata": {"duration": 8},
                 "usd_per_scene": "0.576",
                 "pricing_basis": "mỗi lần tạo",
+                "source_reference": "Key4U Model Hub: veo_3_1-fast",
             },
         },
     },
     {
-        "key": "veo31_pro_8",
-        "label": "Veo 3.1 Pro",
-        "seconds": 8,
-        "quality": "Cao cấp - ưu tiên chi tiết",
-        "resolution": "1080p/4K theo provider",
-        "description": "Ưu tiên độ chi tiết, ánh sáng và tính nhất quán; phù hợp cảnh sản phẩm hoặc hình ảnh cần chất lượng cao.",
+        "key": "motion_standard_5",
+        "label": "Chuyển động ổn định",
+        "public_icon": "🎥",
+        "public_level": "Chuyển động nâng cao",
+        "seconds": 5,
+        "quality": "Ưu tiên chuyển động người và máy quay",
+        "resolution": "720p/1080p theo chế độ",
+        "description": "Kiểm soát chuyển động nhân vật và máy quay tốt hơn, phù hợp cảnh có hành động rõ.",
+        "use_case": "Nhân vật thao tác sản phẩm, đi lại, biểu diễn hoặc cảnh cần chuyển động camera ổn định.",
+        "capability_key": "controlled_motion_video",
+        "providers": {
+            "shopaikey": {
+                "model": "veo3.1-fast",
+                "request_metadata": {"duration": 5},
+                "usd_per_scene": "0.700",
+                "pricing_basis": "mỗi lần tạo",
+                "source_reference": "ShopAIKey model catalog: veo3.1-fast",
+            },
+            "key4u": {
+                "model": "kling-video",
+                "request_metadata": {"model_name": "kling-v3", "mode": "std", "duration": 5, "sound": False},
+                "usd_per_scene": "1.020",
+                "pricing_basis": "mỗi lần tạo",
+                "source_reference": "Key4U kling-video detail: Kling-2, v3 std, no audio",
+            },
+        },
+    },
+    {
+        "key": "motion_audio_5",
+        "label": "Chuyển động có âm thanh",
+        "public_icon": "🔊",
+        "public_level": "Nâng cao có âm thanh",
+        "seconds": 5,
+        "quality": "Chuyển động ổn định và âm thanh cùng cảnh",
+        "resolution": "720p/1080p theo chế độ",
+        "description": "Giữ chuyển động rõ, đồng thời tạo âm thanh phù hợp với hành động trong cảnh.",
+        "use_case": "Cảnh hành động có tiếng động, lời thoại ngắn hoặc nội dung cần âm thanh ăn khớp hình ảnh.",
+        "capability_key": "controlled_motion_video_with_audio",
+        "providers": {
+            "shopaikey": {
+                "model": "veo3.1-fast",
+                "request_metadata": {"duration": 5},
+                "usd_per_scene": "0.700",
+                "pricing_basis": "mỗi lần tạo",
+                "source_reference": "ShopAIKey model catalog: veo3.1-fast",
+            },
+            "key4u": {
+                "model": "kling-video",
+                "request_metadata": {"model_name": "kling-v3", "mode": "std", "duration": 5, "sound": True},
+                "usd_per_scene": "1.530",
+                "pricing_basis": "mỗi lần tạo",
+                "source_reference": "Key4U kling-video detail: Kling-2, v3 std, audio",
+            },
+        },
+    },
+    {
+        "key": "motion_pro_audio_10",
+        "label": "Cao cấp linh hoạt",
+        "public_icon": "🏆",
+        "public_level": "Cao cấp 3 đến 15 giây",
+        "seconds": 10,
+        "quality": "Chuyển động phức tạp, có âm thanh",
+        "resolution": "1080p theo chế độ",
+        "description": "Cảnh dài hơn, ưu tiên độ ổn định của chủ thể, chuyển động và âm thanh.",
+        "use_case": "Cảnh quảng cáo cao cấp, hành động nhiều nhịp hoặc lời thoại dài hơn trong một cảnh.",
+        "capability_key": "pro_motion_video_with_audio",
         "providers": {
             "shopaikey": {
                 "model": "veo3.1-pro",
+                "request_metadata": {"duration": 8},
                 "usd_per_scene": "3.500",
                 "pricing_basis": "mỗi lần tạo",
+                "source_reference": "ShopAIKey model catalog: veo3.1-pro",
             },
             "key4u": {
-                "model": "veo_3_1",
-                "usd_per_scene": "0.768",
+                "model": "kling-video",
+                "request_metadata": {"model_name": "kling-v3", "mode": "pro", "duration": 10, "sound": True},
+                "usd_per_scene": "2.040",
                 "pricing_basis": "mỗi lần tạo",
+                "source_reference": "Key4U kling-video detail: Kling-2, v3 pro, audio",
+            },
+        },
+    },
+    {
+        "key": "human_performance_6",
+        "label": "Diễn xuất chân thật",
+        "public_icon": "🎭",
+        "public_level": "Diễn xuất 768p đến 1080p",
+        "seconds": 6,
+        "quality": "Ưu tiên biểu cảm và chuyển động cơ thể",
+        "resolution": "768p/1080p",
+        "description": "Tập trung biểu cảm khuôn mặt, chuyển động cơ thể và độ chân thật của nhân vật.",
+        "use_case": "Video người thật, UGC, thời trang, diễn xuất và cảnh cận mặt cần biểu cảm tự nhiên.",
+        "capability_key": "human_performance_video",
+        "providers": {
+            "shopaikey": {
+                "model": "veo3.1-pro",
+                "request_metadata": {"duration": 8},
+                "usd_per_scene": "3.500",
+                "pricing_basis": "mỗi lần tạo",
+                "source_reference": "ShopAIKey model catalog: veo3.1-pro",
+            },
+            "key4u": {
+                "model": "MiniMax-Hailuo-2.3",
+                "request_metadata": {"duration": 6, "resolution": "1080P"},
+                "usd_per_scene": "3.200",
+                "pricing_basis": "mỗi lần tạo",
+                "source_reference": "Key4U Model Hub: MiniMax-Hailuo-2.3; MiniMax official duration schema",
+            },
+        },
+    },
+    {
+        "key": "multi_angle_reference_8",
+        "label": "Đa góc máy",
+        "public_icon": "🎬",
+        "public_level": "Cao cấp 1080p đa góc máy",
+        "seconds": 8,
+        "quality": "Nhất quán tham chiếu và nhiều góc máy",
+        "resolution": "1080p",
+        "description": "Ưu tiên tính nhất quán của nhân vật, sản phẩm và góc máy khi dùng ảnh tham chiếu.",
+        "use_case": "Quảng cáo sản phẩm, nhân vật nhiều góc, chuyển cảnh có kiểm soát và storyboard tham chiếu.",
+        "capability_key": "multi_angle_reference_video",
+        "providers": {
+            "shopaikey": {
+                "model": "veo3.1-pro-components",
+                "request_metadata": {"duration": 8},
+                "usd_per_scene": "3.500",
+                "pricing_basis": "mỗi lần tạo",
+                "source_reference": "ShopAIKey model catalog: veo3.1-pro-components",
+            },
+            "key4u": {
+                "model": "viduq3-mix",
+                "request_metadata": {"duration": 8, "resolution": "1080p"},
+                "usd_per_scene": "6.250",
+                "pricing_basis": "mỗi lần tạo",
+                "source_reference": "Key4U Model Hub: viduq3-mix; Vidu official 3-16s schema",
+            },
+        },
+    },
+    {
+        "key": "cinematic_multishot_10",
+        "label": "Điện ảnh nhiều cảnh",
+        "public_icon": "👑",
+        "public_level": "Điện ảnh 1080p",
+        "seconds": 10,
+        "quality": "Kể chuyện nhiều góc quay trong một cảnh",
+        "resolution": "1080p",
+        "description": "Ưu tiên bám sát câu lệnh, chuyển động mượt và mạch kể điện ảnh nhiều góc quay.",
+        "use_case": "Phim ngắn, quảng cáo điện ảnh, cảnh nhiều chủ thể và tình tiết cần chuyển góc liền mạch.",
+        "capability_key": "cinematic_multishot_video",
+        "providers": {
+            "shopaikey": {
+                "model": "veo3.1-pro",
+                "request_metadata": {"duration": 8},
+                "usd_per_scene": "3.500",
+                "pricing_basis": "mỗi lần tạo",
+                "source_reference": "ShopAIKey model catalog: veo3.1-pro",
+            },
+            "key4u": {
+                "model": "doubao-seedance-1-0-pro-250528",
+                "request_metadata": {"duration": 10, "resolution": "1080p"},
+                "usd_per_scene": "22.500",
+                "pricing_basis": "mỗi lần tạo",
+                "source_reference": "Key4U Model Hub: Seedance 1.0 Pro, Doubao-2 group; ByteDance official multi-shot 1080p",
             },
         },
     },
 )
+
+
+QUALITY_TIER_MODEL_KEYS: dict[int, str] = {
+    200: "social_fast_5",
+    300: "grok3_5",
+    400: "veo31_fast_8",
+    500: "motion_standard_5",
+    600: "motion_audio_5",
+    800: "motion_pro_audio_10",
+    1000: "human_performance_6",
+    1200: "multi_angle_reference_8",
+    1500: "cinematic_multishot_10",
+}
 
 
 _IMAGE_MODEL_ROWS: tuple[dict[str, Any], ...] = (
     {
-        "key": "grok_image",
-        "label": "Grok Image",
-        "quality": "Nhanh - ảnh chân thật",
-        "description": "Tạo ảnh nhanh cho nội dung mạng xã hội, ảnh sản phẩm cơ bản và bản nháp hình ảnh.",
+        "key": "image_fast_clear",
+        "label": "Nhanh gọn",
+        "public_icon": "⚡",
+        "public_level": "Cơ bản rõ nét",
+        "quality": "Tạo nhanh, bố cục rõ và bám sát nội dung chính",
+        "resolution": "Độ phân giải cao",
+        "description": "Tạo nhanh ảnh rõ chủ thể, phù hợp thử ý tưởng và nội dung cần số lượng đều.",
+        "use_case": "Bản nháp, ảnh bài đăng, minh họa nội dung và thử nhiều hướng hình ảnh.",
+        "capability_key": "text_to_image_fast",
         "providers": {
             "shopaikey": {
-                "model": "grok-imagine-image",
-                "usd_per_image": "0.208",
-                "pricing_basis": "mỗi ảnh",
+                "adapter_key": "openai_image_generation",
+                "model": "doubao-seedream-3-0-t2i-250415",
+                "currency": "USD",
+                "billable_unit": "image",
+                "usd_per_image": "0.1000",
+                "pricing_basis": "mỗi lần tạo một ảnh",
+                "source_reference": "ShopAIKey Models: doubao-seedream-3-0-t2i-250415, $0.1000/lần",
             },
             "key4u": {
-                "model": "grok-imagine-image",
-                "usd_per_image": "0.208",
-                "pricing_basis": "mỗi ảnh",
+                "adapter_key": "openai_image_generation",
+                "model": "doubao-seedream-3-0-t2i-250415",
+                "currency": "USD",
+                "billable_unit": "image",
+                "usd_per_image": "0.1000",
+                "pricing_basis": "mỗi lần tạo một ảnh",
+                "source_reference": "Key4U Model Hub: doubao-seedream-3-0-t2i-250415, $0.100/lần",
             },
         },
     },
     {
-        "key": "grok_image_pro",
-        "label": "Grok Image Pro",
-        "quality": "Cao cấp - chi tiết tốt hơn",
-        "description": "Ưu tiên độ chính xác, chi tiết và độ hoàn thiện cho ảnh quảng cáo hoặc key visual.",
+        "key": "image_balanced",
+        "label": "Cân bằng",
+        "public_icon": "✨",
+        "public_level": "Tiêu chuẩn linh hoạt",
+        "quality": "Nhanh, ổn định và dễ chỉnh theo câu lệnh",
+        "resolution": "Độ phân giải cao",
+        "description": "Cân bằng tốc độ, độ chi tiết và khả năng bám nội dung cho nhu cầu sử dụng hằng ngày.",
+        "use_case": "Ảnh sản phẩm cơ bản, bài đăng mạng xã hội, nhân vật và bối cảnh thông dụng.",
+        "capability_key": "text_to_image_balanced",
         "providers": {
             "shopaikey": {
-                "model": "grok-imagine-image-pro",
-                "usd_per_image": "0.728",
-                "pricing_basis": "mỗi ảnh",
+                "adapter_key": "openai_image_generation",
+                "model": "gemini-2.5-flash-image",
+                "currency": "USD",
+                "billable_unit": "image",
+                "usd_per_image": "0.1500",
+                "pricing_basis": "mỗi lần tạo một ảnh",
+                "source_reference": "ShopAIKey Models: gemini-2.5-flash-image, $0.1500/lần",
             },
             "key4u": {
+                "adapter_key": "openai_image_generation",
+                "model": "gemini-2.5-flash-image",
+                "currency": "USD",
+                "billable_unit": "image",
+                "usd_per_image": "0.1500",
+                "pricing_basis": "mỗi lần tạo một ảnh",
+                "source_reference": "Key4U Model Hub: gemini-2.5-flash-image, $0.150/lần",
+            },
+        },
+    },
+    {
+        "key": "image_photoreal",
+        "label": "Chân thật",
+        "public_icon": "📸",
+        "public_level": "Chân thật tự nhiên",
+        "quality": "Ánh sáng, chất liệu và chủ thể tự nhiên",
+        "resolution": "Độ phân giải cao",
+        "description": "Ưu tiên cảm giác chân thật, chi tiết tự nhiên và hình ảnh dễ dùng ngay.",
+        "use_case": "Ảnh người, sản phẩm, phong cách đời thường và nội dung quảng cáo mạng xã hội.",
+        "capability_key": "text_to_image_photoreal",
+        "providers": {
+            "shopaikey": {
+                "adapter_key": "openai_image_generation",
+                "model": "grok-imagine-image",
+                "currency": "USD",
+                "billable_unit": "image",
+                "usd_per_image": "0.2080",
+                "pricing_basis": "mỗi lần tạo một ảnh",
+                "source_reference": "ShopAIKey Models: grok-imagine-image, $0.2080/lần",
+            },
+            "key4u": {
+                "adapter_key": "openai_image_generation",
+                "model": "grok-imagine-image",
+                "currency": "USD",
+                "billable_unit": "image",
+                "usd_per_image": "0.2080",
+                "pricing_basis": "mỗi lần tạo một ảnh",
+                "source_reference": "Key4U Model Hub: grok-imagine-image, $0.208/lần",
+            },
+        },
+    },
+    {
+        "key": "image_creative_detail",
+        "label": "Sáng tạo chi tiết",
+        "public_icon": "🎨",
+        "public_level": "Chi tiết quảng cáo",
+        "quality": "Chi tiết cao, chữ và bố cục sáng tạo tốt",
+        "resolution": "Độ phân giải cao",
+        "description": "Tăng độ hoàn thiện, chất liệu và khả năng trình bày chữ trong bố cục phức tạp.",
+        "use_case": "Ảnh bán hàng, poster, key visual, bao bì và thiết kế cần nhiều chi tiết.",
+        "capability_key": "text_to_image_creative_detail",
+        "providers": {
+            "shopaikey": {
+                "adapter_key": "openai_image_generation",
+                "model": "qwen-image-max",
+                "currency": "USD",
+                "billable_unit": "image",
+                "usd_per_image": "0.5000",
+                "pricing_basis": "mỗi lần tạo một ảnh",
+                "source_reference": "ShopAIKey Models: qwen-image-max, $0.5000/lần",
+            },
+            "key4u": {
+                "adapter_key": "openai_image_generation",
+                "model": "qwen-image-max",
+                "currency": "USD",
+                "billable_unit": "image",
+                "usd_per_image": "0.5000",
+                "pricing_basis": "mỗi lần tạo một ảnh",
+                "source_reference": "Key4U Model Hub: qwen-image-max, $0.500/lần",
+            },
+        },
+    },
+    {
+        "key": "image_premium_control",
+        "label": "Cao cấp",
+        "public_icon": "👑",
+        "public_level": "Cao cấp kiểm soát",
+        "quality": "Độ chính xác và hoàn thiện cao",
+        "resolution": "Độ phân giải cao",
+        "description": "Ưu tiên độ chính xác, chi tiết và độ hoàn thiện cho yêu cầu hình ảnh quan trọng.",
+        "use_case": "Key visual, ảnh quảng cáo cao cấp, hình chủ đạo thương hiệu và nội dung cần kiểm soát kỹ.",
+        "capability_key": "text_to_image_premium_control",
+        "providers": {
+            "shopaikey": {
+                "adapter_key": "openai_image_generation",
                 "model": "grok-imagine-image-pro",
-                "usd_per_image": "0.728",
-                "pricing_basis": "mỗi ảnh",
+                "currency": "USD",
+                "billable_unit": "image",
+                "usd_per_image": "0.7280",
+                "pricing_basis": "mỗi lần tạo một ảnh",
+                "source_reference": "ShopAIKey Models: grok-imagine-image-pro, $0.7280/lần",
+            },
+            "key4u": {
+                "adapter_key": "openai_image_generation",
+                "model": "grok-imagine-image-pro",
+                "currency": "USD",
+                "billable_unit": "image",
+                "usd_per_image": "0.7280",
+                "pricing_basis": "mỗi lần tạo một ảnh",
+                "source_reference": "Key4U Model Hub: grok-imagine-image-pro, $0.728/lần",
             },
         },
     },
 )
+
+
+IMAGE_TIER_MODEL_KEYS: dict[str, str] = {
+    "low": "image_fast_clear",
+    "standard": "image_balanced",
+    "standard_warranty": "image_balanced",
+    "common": "image_creative_detail",
+    "common_warranty": "image_creative_detail",
+    "high": "image_premium_control",
+    "high_warranty": "image_premium_control",
+}
+
+IMAGE_TIER_RETRY_COUNTS: dict[str, int] = {
+    "low": 0,
+    "standard": 0,
+    "standard_warranty": 1,
+    "common": 0,
+    "common_warranty": 1,
+    "high": 0,
+    "high_warranty": 1,
+}
 
 
 _MUSIC_MODEL_ROWS: tuple[dict[str, Any], ...] = (
@@ -220,8 +544,13 @@ def _provider_cost(row: dict[str, Any], provider: str) -> dict[str, Any]:
         "usd_to_vnd": int(exchange),
         "cost_vnd": int(cost_vnd),
         "pricing_basis": str(raw.get("pricing_basis") or ""),
+        "source_reference": str(raw.get("source_reference") or ""),
         "source_url": PROVIDER_SOURCE_URLS[provider],
         "checked_on": SOURCE_CHECKED_ON,
+        "verified_by": "owner_governed_catalog_review",
+        "approval_status": "canonical_approved",
+        "fallback_eligible": True,
+        "catalog_version": CATALOG_VERSION,
     }
 
 
@@ -229,7 +558,13 @@ def model_catalog() -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for source in _MODEL_ROWS:
         row = deepcopy(source)
-        costs = [_provider_cost(row, provider) for provider in PROVIDER_PRIORITY]
+        costs = [
+            _provider_cost(row, provider)
+            for provider in PROVIDER_PRIORITY
+            if provider in (row.get("providers") or {})
+        ]
+        if not costs:
+            raise ValueError("video_ai_real_provider_price_missing")
         priced_by = max(costs, key=lambda item: (int(item["cost_vnd"]), -PROVIDER_PRIORITY.index(item["provider"])))
         raw_sale_xu = Decimal(int(priced_by["cost_vnd"])) / XU_TO_VND * SALE_MULTIPLIER
         row.update({
@@ -242,6 +577,9 @@ def model_catalog() -> list[dict[str, Any]]:
             "raw_sale_xu": float(raw_sale_xu),
             "unit_xu": round_sale_xu(raw_sale_xu),
             "source_checked_on": SOURCE_CHECKED_ON,
+            "catalog_version": CATALOG_VERSION,
+            "approval_status": "canonical_approved",
+            "fallback_eligible": len(costs) > 1,
         })
         result.append(row)
     return result
@@ -255,20 +593,77 @@ def model_by_key(model_key: str) -> dict[str, Any]:
     return model
 
 
+def public_quality_catalog() -> list[dict[str, Any]]:
+    """Return customer-facing quality data without provider or model details."""
+
+    rows: list[dict[str, Any]] = []
+    for tier_id, model_key in QUALITY_TIER_MODEL_KEYS.items():
+        model = model_by_key(model_key)
+        resolution = str(model.get("resolution") or "")
+        resolution = (
+            resolution
+            .replace(" theo provider", "")
+            .replace(" theo chế độ", "")
+            .replace("/", " đến ")
+        )
+        rows.append({
+            "tier_id": int(tier_id),
+            "icon": str(model.get("public_icon") or "🎬"),
+            "name": str(model.get("label") or "Chất lượng video"),
+            "public_level": str(model.get("public_level") or model.get("quality") or "Chất lượng video"),
+            "public_detail": str(model.get("description") or ""),
+            "quality_characteristic": str(model.get("quality") or ""),
+            "resolution": resolution,
+            "use_case": str(model.get("use_case") or model.get("description") or "Video theo nội dung đã duyệt."),
+            "seconds": max(1, int(model.get("seconds") or 1)),
+            "unit_xu": max(1, int(model.get("unit_xu") or 1)),
+        })
+    return rows
+
+
+def public_quality_by_tier(tier_id: int) -> dict[str, Any]:
+    selected = int(tier_id or 0)
+    quality = next(
+        (row for row in public_quality_catalog() if int(row["tier_id"]) == selected),
+        None,
+    )
+    if not quality:
+        raise ValueError("video_quality_invalid")
+    return deepcopy(quality)
+
+
 def _image_provider_cost(row: dict[str, Any], provider: str) -> dict[str, Any]:
     raw = dict((row.get("providers") or {}).get(provider) or {})
     usd_per_image = _decimal(raw.get("usd_per_image"))
+    if usd_per_image <= 0:
+        raise ValueError("image_provider_price_missing")
     exchange = PROVIDER_USD_TO_VND[provider]
-    cost_vnd = int(usd_per_image * exchange)
+    cost_vnd = int((usd_per_image * exchange).to_integral_value(rounding=ROUND_HALF_UP))
+    fallback_eligible = len(row.get("providers") or {}) > 1
     return {
+        "provider_key": provider,
         "provider": provider,
+        "adapter_key": str(raw.get("adapter_key") or "openai_image_generation"),
+        "capability_key": str(row.get("capability_key") or "text_to_image"),
+        "model_key": str(raw.get("model") or ""),
         "model": str(raw.get("model") or ""),
+        "currency": str(raw.get("currency") or "USD"),
+        "billable_unit": str(raw.get("billable_unit") or "image"),
+        "cost_minor": int((usd_per_image * Decimal("1000000")).to_integral_value(rounding=ROUND_HALF_UP)),
+        "cost_minor_scale": 1000000,
+        "exact_cost": str(usd_per_image),
         "usd_per_image": float(usd_per_image),
         "usd_to_vnd": int(exchange),
         "cost_vnd": cost_vnd,
         "pricing_basis": str(raw.get("pricing_basis") or ""),
+        "source_reference": str(raw.get("source_reference") or ""),
         "source_url": PROVIDER_SOURCE_URLS[provider],
         "checked_on": SOURCE_CHECKED_ON,
+        "verified_at": SOURCE_CHECKED_ON,
+        "verified_by": "owner_governed_catalog_review",
+        "approval_status": "canonical_approved",
+        "fallback_eligible": fallback_eligible,
+        "catalog_version": IMAGE_CATALOG_VERSION,
     }
 
 
@@ -276,7 +671,13 @@ def image_model_catalog() -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for source in _IMAGE_MODEL_ROWS:
         row = deepcopy(source)
-        costs = [_image_provider_cost(row, provider) for provider in PROVIDER_PRIORITY]
+        costs = [
+            _image_provider_cost(row, provider)
+            for provider in PROVIDER_PRIORITY
+            if provider in (row.get("providers") or {})
+        ]
+        if not costs:
+            raise ValueError("image_provider_price_missing")
         priced_by = max(
             costs,
             key=lambda item: (
@@ -285,9 +686,11 @@ def image_model_catalog() -> list[dict[str, Any]]:
             ),
         )
         raw_sale_xu = Decimal(int(priced_by["cost_vnd"])) / XU_TO_VND * SALE_MULTIPLIER
+        provider_order = _provider_order(costs)
         row.update({
             "selectable": True,
-            "provider_priority": _provider_order(costs),
+            "provider_priority": provider_order,
+            "cost_priority": provider_order,
             "provider_costs": costs,
             "pricing_provider": str(priced_by["provider"]),
             "pricing_cost_vnd": int(priced_by["cost_vnd"]),
@@ -295,6 +698,9 @@ def image_model_catalog() -> list[dict[str, Any]]:
             "raw_sale_xu": float(raw_sale_xu),
             "unit_xu": round_sale_xu(raw_sale_xu),
             "source_checked_on": SOURCE_CHECKED_ON,
+            "catalog_version": IMAGE_CATALOG_VERSION,
+            "approval_status": "canonical_approved",
+            "fallback_eligible": len(costs) > 1,
         })
         result.append(row)
     return result
@@ -306,6 +712,48 @@ def image_model_by_key(model_key: str) -> dict[str, Any]:
     if not model:
         raise ValueError("video_ai_real_image_model_invalid")
     return model
+
+
+def public_image_quality_catalog() -> list[dict[str, Any]]:
+    """Return public image packages without exposing providers or model names."""
+
+    models = {row["key"]: row for row in image_model_catalog()}
+    rows: list[dict[str, Any]] = []
+    for tier_key, model_key in IMAGE_TIER_MODEL_KEYS.items():
+        model = models[model_key]
+        retry_count = max(0, int(IMAGE_TIER_RETRY_COUNTS.get(tier_key, 0)))
+        attempt_count = 1 + retry_count
+        raw_sale_xu = (
+            Decimal(int(model["pricing_cost_vnd"]))
+            / XU_TO_VND
+            * SALE_MULTIPLIER
+            * Decimal(attempt_count)
+        )
+        label = str(model.get("label") or "Chất lượng ảnh")
+        if retry_count:
+            label = f"{label} + bảo hành"
+        rows.append({
+            "tier_key": tier_key,
+            "icon": "🛡" if retry_count else str(model.get("public_icon") or "🖼"),
+            "name": label,
+            "public_level": str(model.get("public_level") or model.get("quality") or "Chất lượng ảnh"),
+            "quality_characteristic": str(model.get("quality") or ""),
+            "resolution": str(model.get("resolution") or ""),
+            "public_detail": str(model.get("description") or ""),
+            "use_case": str(model.get("use_case") or model.get("description") or "Ảnh theo nội dung đã duyệt."),
+            "retry_warranty_count": retry_count,
+            "attempt_count_priced": attempt_count,
+            "unit_xu": round_sale_xu(raw_sale_xu),
+        })
+    return rows
+
+
+def public_image_quality_by_tier(tier_key: str) -> dict[str, Any]:
+    key = str(tier_key or "").strip().lower()
+    quality = next((row for row in public_image_quality_catalog() if row["tier_key"] == key), None)
+    if not quality:
+        raise ValueError("image_quality_invalid")
+    return deepcopy(quality)
 
 
 def _music_provider_cost(row: dict[str, Any], provider: str) -> dict[str, Any]:

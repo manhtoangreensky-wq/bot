@@ -84,7 +84,7 @@ STATUS_STAGES = (
 )
 
 CANONICAL_QUALITY_TIERS = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
-MULTI_SCENE_QUALITY_TIERS = tuple(item for item in CANONICAL_QUALITY_TIERS if item != 200)
+MULTI_SCENE_QUALITY_TIERS = CANONICAL_QUALITY_TIERS
 
 
 PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
@@ -260,13 +260,37 @@ PRODUCT_ADAPTER_ALIASES = {
 }
 
 
+UNKNOWN_PRODUCT_ADAPTER = {
+    "flow_owner": "",
+    "engine_route": "",
+    "executor_product_type": "",
+    "source_audio_available": False,
+    "return_to": "menu|main_video",
+    "required_capability": "",
+    "input_type": "",
+    "output_type": "",
+    "worker_owner": "",
+    "public_enabled": False,
+    "public_planning_enabled": False,
+    "execution_enabled": False,
+    "execution_blocker": "product_owner_missing",
+    "scene_duration_seconds": 8,
+    "minimum_scene_count": 1,
+    "maximum_scene_count": 1,
+    "supports_single_scene": False,
+    "supported_quality_tiers": (),
+    "pricing_mode": "none",
+}
+
+
 def adapter_for(product_type: str) -> dict[str, Any]:
-    key = str(product_type or "video_ai_real").strip()
+    key = str(product_type or "").strip()
     adapter_key = PRODUCT_ADAPTER_ALIASES.get(key, key)
-    adapter = PRODUCT_ADAPTERS.get(adapter_key) or PRODUCT_ADAPTERS["video_ai_real"]
+    known = adapter_key in PRODUCT_ADAPTERS
+    adapter = PRODUCT_ADAPTERS.get(adapter_key) if known else UNKNOWN_PRODUCT_ADAPTER
     result = deepcopy(adapter)
-    result["video_product_type"] = key if adapter_key in PRODUCT_ADAPTERS else "video_ai_real"
-    result["adapter_key"] = adapter_key if adapter_key in PRODUCT_ADAPTERS else "video_ai_real"
+    result["video_product_type"] = key if known else ""
+    result["adapter_key"] = adapter_key if known else ""
     result["canonical_product_type"] = result["adapter_key"]
     result.setdefault("public_enabled", True)
     result.setdefault("public_planning_enabled", True)
@@ -328,13 +352,13 @@ def package_compatibility(
     count = max(1, int(scene_count or 1))
     tier_id = int(quality_tier_id or 0)
     blockers: list[str] = []
+    if not contract["product_type"]:
+        blockers.append("product_owner_missing")
     if not (contract["minimum_scene_count"] <= count <= contract["maximum_scene_count"]):
         blockers.append("scene_count_not_supported")
     if count == 1 and not contract["supports_single_scene"]:
         blockers.append("single_scene_not_supported")
     if tier_id and tier_id not in set(contract["supported_quality_tiers"]):
-        blockers.append("quality_tier_not_supported")
-    if tier_id == 200 and count != 1 and "quality_tier_not_supported" not in blockers:
         blockers.append("quality_tier_not_supported")
     if not input_valid:
         blockers.append("input_not_ready")
@@ -454,6 +478,8 @@ def new_state(
     return_to: str = "",
 ) -> dict[str, Any]:
     adapter = adapter_for(product_type)
+    if not adapter["adapter_key"]:
+        raise ValueError("video_product_owner_required")
     count = max(1, int(scene_count or 1))
     duration = int(estimated_duration or count * int(adapter["scene_duration_seconds"]))
     state = {
@@ -525,7 +551,7 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
         stored_flow_version = int(current.get("tail_flow_version") or 0)
     except (TypeError, ValueError):
         stored_flow_version = 0
-    adapter = adapter_for(str(current.get("video_product_type") or "video_ai_real"))
+    adapter = adapter_for(str(current.get("video_product_type") or ""))
     current["tail_flow_version"] = TAIL_FLOW_VERSION
     current["video_product_type"] = adapter["video_product_type"]
     current["video_flow_owner"] = str(current.get("video_flow_owner") or adapter["flow_owner"])
@@ -755,8 +781,16 @@ def apply_planning_audio_contract(
     entries = dict(postproduction_addons or {})
     audio = dict(current.get("audio_config") or {})
     volumes = dict(audio.get("volumes") or {})
+    addon_config = deepcopy(dict(current.get("addon_config") or {}))
     before_audio = deepcopy(audio)
+    before_addons = deepcopy(addon_config)
     before_status = str(current.get("audio_status") or "not_configured")
+
+    addon_config["postprocessing"] = {
+        str(key): deepcopy(dict(entry))
+        for key, entry in entries.items()
+        if isinstance(entry, dict)
+    }
 
     for key in TOGGLE_KEYS:
         entry = dict(entries.get(key) or {})
@@ -765,17 +799,23 @@ def apply_planning_audio_contract(
             enabled = False
         audio[key] = enabled
         value = dict(entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}
-        if key in volumes and value.get("volume") not in (None, ""):
-            volumes[key] = _volume(value.get("volume"), volumes[key])
+        selected_volume = value.get("volume_percent", value.get("volume"))
+        if key in volumes and selected_volume not in (None, ""):
+            volumes[key] = _volume(selected_volume, volumes[key])
 
     audio["volumes"] = volumes
     current["audio_config"] = audio
+    current["addon_config"] = addon_config
     if planning_complete:
         current["audio_status"] = (
             "configured" if any(bool(audio.get(key)) for key in TOGGLE_KEYS) else "skipped"
         )
 
-    if before_audio != audio or before_status != current.get("audio_status"):
+    if (
+        before_audio != audio
+        or before_addons != addon_config
+        or before_status != current.get("audio_status")
+    ):
         current["summary_status"] = "not_ready"
         current["review_status"] = "not_ready"
     return normalize_state(current)
@@ -794,7 +834,9 @@ def mark_audio_complete(state: dict[str, Any], *, skipped: bool = False) -> dict
 
 def content_contract_ready(state: dict[str, Any]) -> bool:
     current = normalize_state(state)
-    adapter = adapter_for(str(current.get("video_product_type") or "video_ai_real"))
+    adapter = adapter_for(str(current.get("video_product_type") or ""))
+    if not adapter.get("adapter_key"):
+        return False
     prompt_ready = bool(current.get("selected_prompt")) or any(
         str(
             scene.get("provider_prompt")
@@ -987,7 +1029,7 @@ def select_package(
 ) -> dict[str, Any]:
     current = normalize_state(state)
     compatibility = package_compatibility(
-        str(current.get("video_product_type") or "video_ai_real"),
+        str(current.get("video_product_type") or ""),
         scene_count=int(current.get("scene_count") or 1),
         ratio=str(current.get("ratio") or "9:16"),
         quality_tier_id=int(quality_tier_id or 0),
@@ -1098,7 +1140,7 @@ def evaluate_submit_preflight(
                 f"• Số dư hiện tại: <b>{available} Xu</b>\n"
                 f"• Còn thiếu: <b>{missing_xu} Xu</b>\n\n"
                 "Hóa đơn và toàn bộ cấu hình vẫn được giữ nguyên. Hệ thống chưa tạo tác vụ, "
-                "chưa gọi nguồn dựng và chưa trừ Xu."
+                "chưa bắt đầu xử lý video và chưa trừ Xu."
             ),
         })
         return result
@@ -1132,7 +1174,7 @@ def confirm_once(state: dict[str, Any], confirm_token: str) -> tuple[dict[str, A
     allowed, reason = invoice_allowed(current)
     if not allowed:
         raise ValueError(reason)
-    contract = commercial_contract(str(current.get("video_product_type") or "video_ai_real"))
+    contract = commercial_contract(str(current.get("video_product_type") or ""))
     if not contract.get("execution_enabled"):
         raise ValueError(str(contract.get("execution_blocker") or "execution_disabled"))
     token = str(confirm_token or "").strip()

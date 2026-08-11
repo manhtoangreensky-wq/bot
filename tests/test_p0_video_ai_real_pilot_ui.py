@@ -1708,47 +1708,24 @@ def test_video_ai_real_prompt_model_catalog_uses_verified_seconds_and_triple_fal
     catalog = bot.video_ai_real_prompt_model_catalog()
     by_key = {item["key"]: item for item in catalog}
 
-    assert list(by_key) == [
-        "grok3_5",
-        "grok3_10",
-        "veo31_fast_8",
-        "veo31_pro_8",
-    ]
-    assert (by_key["grok3_5"]["seconds"], by_key["grok3_5"]["unit_xu"]) == (5, 190)
-    assert (by_key["grok3_10"]["seconds"], by_key["grok3_10"]["unit_xu"]) == (10, 380)
-    assert (by_key["veo31_fast_8"]["seconds"], by_key["veo31_fast_8"]["unit_xu"]) == (8, 70)
-    assert (by_key["veo31_pro_8"]["seconds"], by_key["veo31_pro_8"]["unit_xu"]) == (8, 340)
-    grok_10_shop = next(
-        item
-        for item in by_key["grok3_10"]["provider_costs"]
-        if item["provider"] == "shopaikey"
-    )
-    assert grok_10_shop["catalog_model"] == "grok-video-3-10s"
-    assert grok_10_shop["model"] == "grok-video-3"
-    assert grok_10_shop["request_metadata"] == {
-        "duration": 10,
-        "resolution": "720P",
+    expected = {
+        "social_fast_5": (5, 40, ["key4u", "shopaikey"], "shopaikey"),
+        "grok3_5": (5, 40, ["key4u", "shopaikey"], "shopaikey"),
+        "veo31_fast_8": (8, 70, ["key4u", "shopaikey"], "shopaikey"),
+        "motion_standard_5": (5, 90, ["shopaikey", "key4u"], "key4u"),
+        "motion_audio_5": (5, 140, ["shopaikey", "key4u"], "key4u"),
+        "motion_pro_audio_10": (10, 340, ["key4u", "shopaikey"], "shopaikey"),
+        "human_performance_6": (6, 340, ["key4u", "shopaikey"], "shopaikey"),
+        "multi_angle_reference_8": (8, 560, ["shopaikey", "key4u"], "key4u"),
+        "cinematic_multishot_10": (10, 2030, ["shopaikey", "key4u"], "key4u"),
     }
+    assert list(by_key) == list(expected)
+    for key, (seconds, unit_xu, priority, pricing_provider) in expected.items():
+        assert (by_key[key]["seconds"], by_key[key]["unit_xu"]) == (seconds, unit_xu)
+        assert by_key[key]["provider_priority"] == priority
+        assert by_key[key]["pricing_provider"] == pricing_provider
     assert all(item["description"] and item["quality"] for item in catalog)
     assert all(item["price_multiplier"] == 3 for item in catalog)
-    assert {
-        key: item["provider_priority"]
-        for key, item in by_key.items()
-    } == {
-        "grok3_5": ["shopaikey", "key4u"],
-        "grok3_10": ["shopaikey", "key4u"],
-        "veo31_fast_8": ["key4u", "shopaikey"],
-        "veo31_pro_8": ["key4u", "shopaikey"],
-    }
-    assert {
-        key: item["pricing_provider"]
-        for key, item in by_key.items()
-    } == {
-        "grok3_5": "key4u",
-        "grok3_10": "key4u",
-        "veo31_fast_8": "shopaikey",
-        "veo31_pro_8": "shopaikey",
-    }
     for item in catalog:
         cost_by_provider = {
             cost["provider"]: cost["cost_vnd"]
@@ -1773,39 +1750,41 @@ def test_video_ai_real_image_model_catalog_uses_verified_triple_fallback_cost():
     catalog = bot.video_ai_real_pricing.image_model_catalog()
     by_key = {item["key"]: item for item in catalog}
 
-    assert list(by_key) == ["grok_image", "grok_image_pro"]
-    assert by_key["grok_image"]["unit_xu"] == 20
-    assert by_key["grok_image_pro"]["unit_xu"] == 70
-    assert by_key["grok_image"]["pricing_provider"] == "shopaikey"
-    assert by_key["grok_image"]["provider_costs"] == [
-        {
-            "provider": "shopaikey",
-            "model": "grok-imagine-image",
-            "usd_per_image": 0.208,
-            "usd_to_vnd": 3250,
-            "cost_vnd": 676,
-            "pricing_basis": "mỗi ảnh",
-            "source_url": "https://shopaikey.com/models",
-            "checked_on": "2026-08-09",
-        },
-        {
-            "provider": "key4u",
-            "model": "grok-imagine-image",
-            "usd_per_image": 0.208,
-            "usd_to_vnd": 3000,
-            "cost_vnd": 624,
-            "pricing_basis": "mỗi ảnh",
-            "source_url": "https://key4u.vn/models",
-            "checked_on": "2026-08-09",
-        },
-    ]
-    assert all(item["provider_priority"] == ["key4u", "shopaikey"] for item in catalog)
+    expected = {
+        "image_fast_clear": ("doubao-seedream-3-0-t2i-250415", 100_000, 10),
+        "image_balanced": ("gemini-2.5-flash-image", 150_000, 20),
+        "image_photoreal": ("grok-imagine-image", 208_000, 20),
+        "image_creative_detail": ("qwen-image-max", 500_000, 50),
+        "image_premium_control": ("grok-imagine-image-pro", 728_000, 70),
+    }
+    assert list(by_key) == list(expected)
     for item in catalog:
+        model_key, cost_minor, unit_xu = expected[item["key"]]
+        assert item["unit_xu"] == unit_xu
+        assert item["pricing_provider"] == "shopaikey"
+        assert item["provider_priority"] == ["key4u", "shopaikey"]
+        assert item["approval_status"] == "canonical_approved"
+        assert item["fallback_eligible"] is True
+        assert item["catalog_version"] == "2026-08-11.image.1"
         cost_by_provider = {
             cost["provider"]: cost["cost_vnd"]
             for cost in item["provider_costs"]
         }
         assert item["pricing_cost_vnd"] == max(cost_by_provider.values())
+        for cost in item["provider_costs"]:
+            assert cost["provider_key"] == cost["provider"]
+            assert cost["adapter_key"] == "openai_image_generation"
+            assert cost["model_key"] == cost["model"] == model_key
+            assert cost["currency"] == "USD"
+            assert cost["billable_unit"] == "image"
+            assert cost["cost_minor"] == cost_minor
+            assert cost["cost_minor_scale"] == 1_000_000
+            assert cost["verified_at"] == "2026-08-11"
+            assert cost["verified_by"] == "owner_governed_catalog_review"
+            assert cost["approval_status"] == "canonical_approved"
+            assert cost["fallback_eligible"] is True
+            assert cost["catalog_version"] == "2026-08-11.image.1"
+            assert cost["source_reference"]
     assert all(item["unit_xu"] % 10 == 0 for item in catalog)
 
 
@@ -2203,7 +2182,7 @@ def test_video_ai_real_prompt_edits_save_verbatim_and_return_to_exact_scene():
 
 def test_video_ai_real_quote_includes_each_paid_addon_once_and_exact_total():
     state = _ready_prompt_summary_state()
-    state = bot.video_ai_real_apply_prompt_model(state, "grok3_10")
+    state = bot.video_ai_real_apply_prompt_model(state, "motion_pro_audio_10")
     state["audio"].update({
         "music_scope": "per_scene",
         "music_source": "ai",
@@ -2215,10 +2194,10 @@ def test_video_ai_real_quote_includes_each_paid_addon_once_and_exact_total():
     quote = bot.video_ai_real_prompt_quote(state)
     assert quote["scene_count"] == 2
     assert quote["total_duration_seconds"] == 20
-    assert quote["base_xu"] == 760
+    assert quote["base_xu"] == 680
     assert quote["addons_xu"] == 610
-    assert quote["total_xu"] == 1370
-    assert quote["estimated_vnd"] == 137000
+    assert quote["total_xu"] == 1290
+    assert quote["estimated_vnd"] == 129000
     assert [(item["key"], item["price_xu"]) for item in quote["addons"]] == [
         ("music_ai", 160),
         ("subtitle_auto", 120),

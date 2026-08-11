@@ -13,6 +13,8 @@ from hashlib import sha256
 import html
 from typing import Any, Iterable, Mapping
 
+from services import video_ai_real_pricing
+
 
 PRODUCT_ID = "self_shot_cinematic_transform"
 JOB_TYPE = "self_shot_cinematic_transform"
@@ -129,21 +131,21 @@ SUBJECT_OPTIONS = (
 
 WARDROBE_OPTIONS = (
     "Giữ trang phục nguồn",
-    "Fantasy thanh lịch",
+    "Kỳ ảo thanh lịch",
     "Cổ trang điện ảnh",
     "Tương lai cao cấp",
     "Siêu anh hùng tinh tế",
-    "Thời trang runway",
+    "Thời trang trình diễn",
 )
 
 CONTENT_PROFILES = (
     "Bán hàng / quảng cáo",
-    "Review / demo sản phẩm",
-    "Affiliate / UGC",
-    "Testimonial / câu chuyện khách hàng",
+    "Đánh giá / giới thiệu sản phẩm",
+    "Tiếp thị liên kết / nội dung người dùng",
+    "Cảm nhận / câu chuyện khách hàng",
     "Thương hiệu / doanh nghiệp",
-    "Nhà sáng tạo / bắt trend",
-    "Meme / parody / hài",
+    "Nhà sáng tạo / bắt xu hướng",
+    "Ảnh chế / nhại vui / hài",
     "Sự kiện / khoảnh khắc nổi bật",
     "Hướng dẫn / kiến thức",
     "Kể chuyện / phim ngắn",
@@ -152,8 +154,8 @@ CONTENT_PROFILES = (
     "Thời trang / trình diễn",
     "Ẩm thực / đồ uống",
     "Du lịch / trải nghiệm",
-    "Ứng dụng / website / SaaS",
-    "Game / thể thao điện tử",
+    "Ứng dụng / trang web / phần mềm dịch vụ",
+    "Trò chơi / thể thao điện tử",
     "Thể thao / vận động",
     "Âm nhạc / biểu diễn",
     "Làm đẹp / chăm sóc cá nhân",
@@ -164,11 +166,11 @@ CONTENT_PROFILES = (
     "Dữ liệu / infographic",
     "Tin tức / bản tin ngắn",
     "Động lực / phát triển bản thân",
-    "ASMR / thư giãn",
+    "Âm thanh thư giãn",
     "Thú cưng / động vật",
     "Ô tô / xe máy",
     "Sản phẩm 3D / vật thể",
-    "Fantasy / điện ảnh / VFX",
+    "Kỳ ảo / điện ảnh / kỹ xảo",
 )
 
 AUDIO_LABELS = {
@@ -327,7 +329,7 @@ def _safe(value: Any) -> str:
 
 def _nav(back_screen: str) -> list[tuple[str, str]]:
     callback = "vproduct|selfshot_hub" if back_screen == "hub" else f"vproduct|ss3|show|{back_screen}"
-    return [("⬅️ Quay lại", callback), ("🏠 Menu chính", "menu|main")]
+    return [("⬅️ Quay lại", callback), ("🎬 Menu Video", "menu|main_video")]
 
 
 def _status_label(enabled: bool) -> str:
@@ -347,7 +349,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         body = (
             "Gửi video mộc để giữ đúng khuôn mặt, vóc dáng, chuyển động và tương tác nguồn trong cùng một cú máy. "
             "TOAN AAS chỉ biến đổi những lớp anh/chị cho phép như trang phục, cảnh vật, ánh sáng và hiệu ứng.\n\n"
-            "Màn này chỉ lập kế hoạch, chưa gọi nguồn dựng và chưa trừ Xu."
+            "Màn này chỉ lập kế hoạch, chưa xử lý video và chưa trừ Xu."
         )
         rows = [
             [("📎 Gửi video nguồn", "vproduct|ss3|source"), ("✨ Xem kiểu biến đổi", "vproduct|ss3|show|types")],
@@ -364,7 +366,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             f"Video nguồn: {'Đã nhận' if current.get('source_video') or current.get('source_asset') else 'Chưa có'}\n"
             f"Chủ thể: {_safe((current.get('subject_manifest') or {}).get('selection_type') or 'Chưa chọn')}\n"
             f"Kiểu biến đổi: {_safe((current.get('selected_preset') or {}).get('title') or 'Chưa chọn')}\n"
-            f"Timeline: {len(list(current.get('transformation_stages') or []))} giai đoạn"
+            f"Mạch biến đổi: {len(list(current.get('transformation_stages') or []))} giai đoạn"
         )
         resume = str(current.get("selfshot3_resume_screen") or "")
         resume_callback = f"vproduct|ss3|show|{resume}" if resume and resume != "intro" else "vproduct|ss3|source"
@@ -376,8 +378,8 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             "2. Chọn người, vật hoặc thú cưng cần giữ.\n"
             "3. Khóa những lớp phải giữ nguyên.\n"
             "4. Chọn kiểu biến đổi và chia 2–5 giai đoạn liên tục.\n"
-            "5. Xem timeline, âm thanh, prompt và preflight trước hóa đơn.\n"
-            "6. Chỉ sau xác nhận cuối hệ thống mới tạo video; chỉ trừ Xu sau khi MP4 hợp lệ đã giao thành công."
+            "5. Xem mạch biến đổi, âm thanh và toàn bộ câu lệnh trước hóa đơn.\n"
+            "6. Chỉ sau xác nhận cuối hệ thống mới tạo video; chỉ trừ Xu sau khi video hợp lệ đã giao thành công."
         )
     elif name == "source_ready":
         analysis = dict(current.get("source_analysis") or {})
@@ -385,7 +387,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         body = (
             f"Thời lượng: {float(analysis.get('duration_seconds') or 0):.1f} giây\n"
             f"Kích thước: {int(analysis.get('width') or 0)}×{int(analysis.get('height') or 0)}\n"
-            f"FPS: {float(analysis.get('fps') or 0):.2f}\n\n"
+            f"Tốc độ khung hình: {float(analysis.get('fps') or 0):.2f} hình/giây\n\n"
             "Chọn toàn bộ video hoặc đúng một đoạn trước khi khóa chủ thể."
         )
         rows = [
@@ -400,7 +402,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             f"Chuyển động camera: {_safe(report.get('camera_motion') or 'chưa phân loại')}\n"
             f"Người: {len(list(report.get('person_tracks') or []))} · Vật: {len(list(report.get('object_tracks') or []))} · Thú cưng: {len(list(report.get('pet_tracks') or []))}\n"
             f"Tương tác đã nhận diện: {len(list(report.get('interaction_graph') or []))}\n\n"
-            "Đây là phân tích cục bộ để lập kế hoạch; chưa gọi nguồn dựng."
+            "Đây là phân tích cục bộ để lập kế hoạch; chưa xử lý video."
         )
         rows = [[("➡️ Chọn đoạn video", "vproduct|ss3|show|segment"), ("📎 Gửi video khác", "vproduct|ss3|source")]]
     elif name == "segment":
@@ -441,7 +443,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             body = blocker_text
         elif len(options) == 1 and options[0][0] == "custom":
             body = (
-                "Chưa có track người/vật/thú cưng từ phân tích cục bộ. "
+                "Chưa xác định được người, vật hoặc thú cưng riêng biệt từ phân tích cục bộ. "
                 "Hãy tự mô tả chủ thể để tạo neo nguồn; hệ thống không tự đoán nhận diện."
             )
         else:
@@ -505,8 +507,8 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         options = groups[start:start + 8]
         title = "🗂️ Kho Ý tưởng video"
         body = (
-            f"Trang {page}/2. Mỗi ý tưởng đã có cấu trúc biến đổi, nhịp, camera và continuity cho video tự quay. "
-            "Chọn một ý tưởng rồi vẫn được xem và sửa timeline trước khi hoàn thiện."
+            f"Trang {page}/2. Mỗi ý tưởng đã có cấu trúc biến đổi, nhịp, máy quay và mạch liên tục cho video tự quay. "
+            "Chọn một ý tưởng rồi vẫn được xem và sửa mạch biến đổi trước khi hoàn thiện."
         )
         rows = [
             [(item["title"], f"vproduct|ss3|idea_pick|{start + index + 1}") for index, item in enumerate(options[offset:offset + 2], offset)]
@@ -524,12 +526,12 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         rows = [[("✅ Dùng nội dung gợi ý", "vproduct|ss3|content|preset"), ("✍️ Tự nhập nội dung", "vproduct|ss3|content|custom")]]
     elif name == "timeline":
         stages = list(current.get("transformation_stages") or [])
-        title = "🧭 Timeline biến đổi"
+        title = "🧭 Mạch biến đổi"
         body = "\n".join(
             f"Giai đoạn {index}: {int(item.get('start_ms') or 0) / 1000:.1f}s–{int(item.get('end_ms') or 0) / 1000:.1f}s · {_safe(item.get('target_state'))}"
             for index, item in enumerate(stages, 1)
-        ) or "Chưa có timeline."
-        rows = [[("🔄 Lập lại timeline", "vproduct|ss3|timeline|rebuild"), ("✍️ Sửa timeline", "vproduct|ss3|timeline|custom")], [("✅ Dùng timeline này", "vproduct|ss3|show|wardrobe"), ("🎬 Xem kiểu đã chọn", "vproduct|ss3|show|presets")]]
+        ) or "Chưa có mạch biến đổi."
+        rows = [[("🔄 Lập lại mạch", "vproduct|ss3|timeline|rebuild"), ("✍️ Sửa mạch", "vproduct|ss3|timeline|custom")], [("✅ Dùng mạch này", "vproduct|ss3|show|wardrobe"), ("🎬 Xem kiểu đã chọn", "vproduct|ss3|show|presets")]]
     elif name == "wardrobe":
         title = "👗 Trang phục"
         body = f"Đang chọn: {_safe(current.get('wardrobe') or 'Chưa chọn')}\nChỉ biến đổi trang phục nếu mục Trang phục đang ở trạng thái Biến đổi."
@@ -551,7 +553,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
     elif name == "audio":
         plan = dict(current.get("audio_plan") or initial_draft()["audio_plan"])
         title = "🎙️ Âm thanh và phụ đề"
-        body = "Âm lượng chỉnh từ 0–200%. Có chống vỡ tiếng và tự hạ nhạc khi có lời. Không giả vờ tách giọng/nhạc nếu video nguồn chỉ có một track đã trộn."
+        body = "Âm lượng chỉnh từ 0–200%. Có chống vỡ tiếng và tự hạ nhạc khi có lời. Nếu video nguồn chỉ có một luồng âm thanh đã trộn, hệ thống sẽ giữ đúng giới hạn đó."
         items = []
         for key in ("source", "voice", "music", "sfx", "subtitle"):
             item = dict(plan.get(key) or {})
@@ -563,7 +565,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
     elif name == "volume":
         target = str(current.get("audio_volume_target") or "source")
         title = f"🎚️ Âm lượng {AUDIO_LABELS.get(target, target)}"
-        body = "Chọn mức 0–200%. Hệ thống giữ clipping guard và ducking khi có lời."
+        body = "Chọn mức 0–200%. Hệ thống chống vỡ tiếng và tự hạ nhạc khi có lời."
         values = (0, 20, 40, 60, 80, 100, 120, 150, 180, 200)
         buttons = [(f"{value}%", f"vproduct|ss3|volume_set|{value}") for value in values]
         rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
@@ -575,36 +577,45 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             f"Đoạn nguồn: {int((current.get('source_segment') or {}).get('duration_ms') or 0) / 1000:.1f} giây\n"
             f"Chủ thể: {_safe((current.get('subject_manifest') or {}).get('selection_type'))}\n"
             f"Kiểu: {_safe(preset.get('title'))}\n"
-            f"Timeline: {len(stages)} giai đoạn\n"
+            f"Mạch biến đổi: {len(stages)} giai đoạn\n"
             f"Trang phục: {_safe(current.get('wardrobe'))}\n"
             f"Thế giới: {_safe(current.get('world'))}\n"
             f"Hiệu ứng: {_safe(', '.join(current.get('selected_effects') or []) or 'Không thêm')}\n\n"
-            "Chưa tạo job, chưa gọi nguồn dựng và chưa trừ Xu."
+            "Chưa tạo tác vụ, chưa xử lý video và chưa trừ Xu."
         )
-        rows = [[("🧭 Timeline", "vproduct|ss3|show|timeline"), ("📝 Prompt", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("🎙️ Âm thanh", "vproduct|ss3|audio_review")], [("✅ Hoàn thiện video", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
+        rows = [[("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("🎙️ Âm thanh", "vproduct|ss3|audio_review")], [("✅ Chọn chất lượng", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
     elif name == "finish":
         report = dict(current.get("selfshot3_preflight") or {})
-        title = "✅ Kiểm tra trước hóa đơn"
+        title = "✅ Kiểm tra kế hoạch trước hóa đơn"
         if report.get("ok"):
-            route = dict(report.get("engine_route") or {})
-            body = f"Đã đủ dữ liệu. Tuyến dựng: {_safe(route.get('public_label') or route.get('route'))}.\nChưa tạo job và chưa trừ Xu. Hãy chọn gói ở bước tiếp theo."
-            rows = [[("⭐ Chọn gói video", "vproduct|ss3|show|package"), ("👁️ Xem lại", "vproduct|ss3|finish_review")]]
+            body = "Đã đủ dữ liệu cần thiết. Chưa tạo tác vụ và chưa trừ Xu. Hãy chọn chất lượng ở bước tiếp theo."
+            rows = [[("⭐ Chọn chất lượng", "vproduct|ss3|show|package"), ("👁️ Xem lại", "vproduct|ss3|finish_review")]]
         else:
-            body = f"Chưa thể mở hóa đơn: {_safe(report.get('blocker') or 'chưa chạy preflight')}.\nKhông tạo job, không gọi nguồn dựng và không trừ Xu."
+            body = "Kế hoạch còn thiếu dữ liệu bắt buộc nên chưa thể mở hóa đơn. Hệ thống không tạo tác vụ và không trừ Xu."
             rows = [[("🔄 Kiểm tra lại", "vproduct|ss3|finish"), ("👁️ Xem lại", "vproduct|ss3|finish_review")]]
     elif name == "package":
         title = "⭐ Chọn gói biến đổi điện ảnh"
-        body = (
-            "Giá áp dụng cho một video nguồn trong cùng một cú máy. Gói cao hơn ưu tiên độ ổn định nhận diện, "
-            "chuyển động, ánh sáng và chi tiết hiệu ứng tốt hơn. Chưa tạo tác vụ và chưa trừ Xu."
-        )
-        package_values = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
-        package_labels = {
-            200: "🧪 200 Trải nghiệm", 300: "⭐ 300 Cơ bản", 400: "🔥 400 Tốt",
-            500: "💎 500 Đẹp", 600: "🚀 600 Nâng cao", 800: "🏆 800 Premium",
-            1000: "🎬 1000 Pro", 1200: "🎞 1200 Studio", 1500: "👑 1500 Max",
-        }
-        buttons = [(package_labels[value], f"vproduct|ss3|quality|{value}") for value in package_values]
+        scene_count = max(1, int(current.get("scene_count") or 1))
+        quality_rows = video_ai_real_pricing.public_quality_catalog()
+        lines = [
+            "Giá tính theo từng cảnh trong video nguồn. Gói cao hơn ưu tiên độ ổn định nhận diện, chuyển động, ánh sáng và chi tiết hiệu ứng.",
+        ]
+        buttons: list[tuple[str, str]] = []
+        for quality in quality_rows:
+            lines.extend([
+                "",
+                f"{quality['icon']} <b>{quality['name']}</b> · <b>{quality['seconds']} giây/cảnh</b> · <b>{quality['unit_xu']} Xu/cảnh</b>",
+                f"• Chất lượng: {quality['public_level']} · {quality['resolution']}",
+                f"• Đặc điểm: {quality['public_detail']}",
+                f"• Phù hợp: {quality['use_case']}",
+                f"• Tổng {scene_count} cảnh: <b>{quality['unit_xu'] * scene_count} Xu</b>",
+            ])
+            buttons.append((
+                f"{quality['icon']} {quality['name']} · {quality['unit_xu']} Xu",
+                f"vproduct|ss3|quality|{quality['tier_id']}",
+            ))
+        lines.extend(["", "Màn này chưa tạo tác vụ và chưa trừ Xu."])
+        body = "\n".join(lines)
         buttons.append(("👁️ Xem lại kế hoạch", "vproduct|ss3|show|review"))
         rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     else:

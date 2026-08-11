@@ -377,7 +377,7 @@ def back_callback(flow: str, screen: str, state: Mapping[str, Any] | None = None
 
 
 def _nav(flow: str, screen: str, state: Mapping[str, Any] | None = None) -> list[tuple[str, str]]:
-    return [("⬅️ Quay lại", back_callback(flow, screen, state)), ("🏠 Menu chính", "menu|main")]
+    return [("⬅️ Quay lại", back_callback(flow, screen, state)), ("🎬 Menu Video", "menu|main_video")]
 
 
 def validate_rows(rows: list[list[tuple[str, str]]], *, back_callback: str) -> dict[str, Any]:
@@ -1037,9 +1037,9 @@ def _prepare_tail(flow: str, state: dict[str, Any]) -> None:
     elif isinstance(state.get("selected_prompt_choice"), Mapping):
         selected = dict(state.get("selected_prompt_choice") or {})
     else:
-        selected = {"id": "saved", "title": "Prompt đã chọn", "text": _safe(raw_selected)}
-    note = _safe(selected.get("text"))
-    if note:
+        selected = {"id": "saved", "title": "Câu lệnh đã chọn", "text": _safe(raw_selected)}
+    note = str(selected.get("text") or "")
+    if note.strip():
         state["selected_prompt_choice"] = selected
         state["selected_prompt"] = note
         state["selected_prompt_text"] = note
@@ -1076,29 +1076,32 @@ def review_text(flow: str, state: Mapping[str, Any] | None) -> str:
     relationship = "Đã khóa" if (data.get("relationship_lock") or {}).get("enabled") else "Chưa khóa"
     if active_flow == FLOW_SS2:
         lines = [
-            "🎬 <b>Review — Tự quay & đổi cảnh AI</b>",
+            "🎬 <b>Xem lại — Tự quay và đổi cảnh AI</b>",
             f"• Đoạn nguồn: <b>{start:g}–{end:g} giây</b>",
             f"• Chủ thể giữ lại: <b>{subject}</b>",
             f"• Nội dung: <b>{content}</b>",
             f"• Số cảnh: <b>{max(1, _as_int(data.get('scene_count'), 1))}</b>",
             f"• Tỉ lệ: <b>{_display(data.get('aspect_ratio') or data.get('source_ratio') or '9:16')}</b>",
             "• Kiểu đổi cảnh: <b>Đổi bối cảnh theo chuyển động nguồn</b>",
-            f"• Identity lock: <b>{identity}</b>",
-            f"• Relationship lock: <b>{relationship}</b>",
+            f"• Giữ nhận diện: <b>{identity}</b>",
+            f"• Giữ quan hệ: <b>{relationship}</b>",
         ]
     else:
         lines = [
-            "🎬 <b>Review — Biến đổi điện ảnh</b>",
+            "🎬 <b>Xem lại — Biến đổi điện ảnh</b>",
             f"• Đoạn nguồn: <b>{start:g}–{end:g} giây</b>",
             f"• Chủ thể giữ lại: <b>{subject}</b>",
             f"• Nội dung: <b>{content}</b>",
-            f"• Timeline biến đổi: <b>{len(list(data.get('cinematic_timeline') or data.get('transformation_stages') or []))} giai đoạn</b>",
-            f"• Môi trường: <b>{_display(data.get('world') or 'Biến đổi theo preset')}</b>",
+            f"• Mạch biến đổi: <b>{len(list(data.get('cinematic_timeline') or data.get('transformation_stages') or []))} giai đoạn</b>",
+            f"• Môi trường: <b>{_display(data.get('world') or 'Biến đổi theo lựa chọn')}</b>",
             f"• Trang phục: <b>{_display(data.get('wardrobe') or 'Giữ nguyên')}</b>",
-            f"• Hiệu ứng: <b>{_display(', '.join(data.get('selected_effects') or []) or 'Theo timeline')}</b>",
-            f"• Identity/Relationship lock: <b>{identity} / {relationship}</b>",
+            f"• Hiệu ứng: <b>{_display(', '.join(data.get('selected_effects') or []) or 'Theo mạch biến đổi')}</b>",
+            f"• Giữ nhận diện / quan hệ: <b>{identity} / {relationship}</b>",
         ]
-    lines.extend(["", "Tiếp tục tới Âm thanh & Add-on, Logo/Watermark và bảng tổng hợp trước khi chọn gói."])
+    selected_prompt = str(data.get("selected_prompt_text") or data.get("selected_prompt") or "")
+    if selected_prompt.strip():
+        lines.extend(["", "<b>Câu lệnh đã chọn</b>", _display(selected_prompt)])
+    lines.extend(["", "Tiếp tục tới Âm thanh và phần bổ sung, Logo/Watermark, rồi xem bảng tổng hợp trước khi chọn chất lượng."])
     return "\n".join(lines)
 
 
@@ -1135,7 +1138,6 @@ def screen_model(flow: str, screen: str, state: Mapping[str, Any] | None = None)
             f"• Bắt đầu: <b>{start:g} giây</b>",
             f"• Kết thúc: <b>{end:g} giây</b>",
             f"• Thời lượng: <b>{duration:g} giây</b>",
-            f"• Video nguồn: <code>{_display(data.get('source_video_id') or source.get('file_id'))}</code>",
             "Đoạn này sẽ được dùng nguyên vẹn cho phân tích chủ thể và chuyển động.",
         ]
         rows = [[
@@ -1153,7 +1155,7 @@ def screen_model(flow: str, screen: str, state: Mapping[str, Any] | None = None)
             "pending": "Đang chuẩn bị phân tích đoạn đã chọn",
             "running": "Đang phân tích cục bộ",
             "ready": "Đã phân tích xong",
-            "ready_no_tracks": "Đã phân tích xong, chưa có track đủ tin cậy",
+            "ready_no_tracks": "Đã phân tích xong, chưa có chủ thể đủ tin cậy",
             "failed": "Chưa hoàn tất phân tích; vẫn có thể tự xác nhận chủ thể",
         }.get(status, "Chờ chọn đoạn video")
         lines = [
@@ -1165,7 +1167,7 @@ def screen_model(flow: str, screen: str, state: Mapping[str, Any] | None = None)
             f"Camera: <b>{_display(analysis.get('camera_summary') or analysis.get('camera_motion') or 'Chưa phân loại')}</b>",
         ]
         if status in {"ready_no_tracks", "failed"}:
-            lines.append("Không có track đủ tin cậy. Anh/chị vẫn có thể tự mô tả hoặc xác nhận chủ thể trong chính video đã gửi.")
+            lines.append("Chưa có chủ thể đủ tin cậy. Anh/chị vẫn có thể tự mô tả hoặc xác nhận chủ thể trong chính video đã gửi.")
         rows = [[
             (
                 "✨ Biến đổi liên tục một cú máy" if active_flow == FLOW_SS3 else "➡️ Chọn chủ thể",
@@ -1189,7 +1191,7 @@ def screen_model(flow: str, screen: str, state: Mapping[str, Any] | None = None)
         lines = [
             "🎯 <b>Chọn chủ thể cần giữ</b>",
             f"Hiện tại: <b>{selected}</b>",
-            "Chọn người, vật hoặc thú cưng đã tìm thấy. Có thể giữ nhiều chủ thể hoặc tự mô tả khi video không có track đủ tin cậy.",
+            "Chọn người, vật hoặc thú cưng đã tìm thấy. Có thể giữ nhiều chủ thể hoặc tự mô tả khi video chưa xác định được chủ thể đủ tin cậy.",
         ]
         rows = _subject_rows(active_flow, data)
     elif name == "subject_multiple":
@@ -1203,19 +1205,20 @@ def screen_model(flow: str, screen: str, state: Mapping[str, Any] | None = None)
     elif name == "content_source":
         lines = [
             "📝 <b>Chọn nguồn nội dung</b>",
-            "Chọn một nguồn nội dung cho đúng video nguồn. Ba đường này độc lập; Kho Ý tưởng đã có cấu trúc sẵn, còn 32 loại nội dung và Tự nhập sẽ tạo prompt từ lựa chọn của anh/chị.",
+            "Chọn một nguồn nội dung cho đúng video nguồn. Ba đường này độc lập; Kho Ý tưởng đã có cấu trúc sẵn, còn 32 loại nội dung và Tự nhập sẽ tạo câu lệnh từ lựa chọn của anh/chị.",
         ]
         rows = [[
             ("🗂️ 32 loại nội dung", callback(active_flow, "c4source", "profiles")),
             ("💡 Kho Ý tưởng video", callback(active_flow, "c4source", "ideas")),
         ], [
             ("✍️ Tự nhập nội dung", callback(active_flow, "c4source", "custom")),
+            ("👁️ Xem phân tích", callback(active_flow, "c4show", "analysis")),
         ]]
     elif name == "profiles":
         page = max(1, _as_int(data.get("selfshotflow4_profile_page"), 1))
         lines = [
             "🎯 <b>Chọn loại nội dung</b>",
-            f"Trang {page}/4 trong 32 loại nội dung. Chọn một loại để tạo đúng 5 prompt dựa trên video nguồn.",
+            f"Trang {page}/4 trong 32 loại nội dung. Chọn một loại để tạo đúng 5 câu lệnh dựa trên video nguồn.",
         ]
         rows = _page_rows(active_flow, data, kind="profile")
     elif name == "idea_groups":
@@ -1232,29 +1235,29 @@ def screen_model(flow: str, screen: str, state: Mapping[str, Any] | None = None)
         lines = [
             "💡 <b>Kho Ý tưởng video</b>",
             f"Nhóm: <b>{_display(group.get('title') or group_id)}</b> · Trang {page}/{total}.",
-            "Mỗi ý tưởng đã có chủ đề, nhịp và hướng hình ảnh; sau khi chọn sẽ mở ngay 5 prompt phù hợp với video nguồn.",
+            "Mỗi ý tưởng đã có chủ đề, nhịp và hướng hình ảnh; sau khi chọn sẽ mở ngay 5 câu lệnh phù hợp với video nguồn.",
         ]
         rows = _page_rows(active_flow, data, kind="idea")
     elif name == "prompt":
         candidates = list(data.get("selfshotflow4_prompt_candidates") or _prompt_candidates(active_flow, data))
         lines = [
-            "🎬 <b>Chọn prompt video</b>",
+            "🎬 <b>Chọn câu lệnh video</b>",
             f"Sản phẩm: <b>{flow_label(active_flow)}</b> · Nội dung: <b>{_display(_content_summary(data))}</b>",
-            "Mỗi prompt giữ video nguồn liên tục, chỉ đổi cách kể, camera và nhịp chuyển tiếp.",
+            "Mỗi câu lệnh giữ video nguồn liên tục, chỉ đổi cách kể, máy quay và nhịp chuyển tiếp.",
         ]
         lines.extend(f"{index}. <b>{_display(item.get('title'))}</b>\n{_display(item.get('text'))}" for index, item in enumerate(candidates, 1))
         rows = [
             [(str(index), callback(active_flow, "c4prompt", str(index))) for index in range(1, 6)],
-            [("🔄 Đổi 5 prompt", callback(active_flow, "c4prompt", "refresh")), ("✍️ Sửa prompt", callback(active_flow, "c4prompt", "edit"))],
+            [("🔄 Đổi 5 câu lệnh", callback(active_flow, "c4prompt", "refresh")), ("✍️ Tự viết câu lệnh", callback(active_flow, "c4prompt", "edit"))],
             [("⏭️ Bỏ qua", callback(active_flow, "c4prompt", "skip")), ("👁️ Xem nội dung", callback(active_flow, "c4prompt", "content"))],
         ]
     else:
         lines = [
             "📋 <b>Nội dung đã chọn</b>",
             f"Nguồn nội dung: <b>{_display(_content_summary(data))}</b>",
-            "Quay lại để chọn hoặc sửa prompt. Bước này chưa tạo tác vụ và chưa trừ Xu.",
+            "Quay lại để chọn hoặc sửa câu lệnh. Bước này chưa tạo tác vụ và chưa trừ Xu.",
         ]
-        rows = [[("🎬 Chọn prompt", callback(active_flow, "c4show", "prompt"))]]
+        rows = [[("🎬 Chọn câu lệnh", callback(active_flow, "c4show", "prompt")), ("🎬 Menu Video", "menu|main_video")]]
 
     rows.append(_nav(active_flow, name, data))
     return {"text": "\n\n".join(lines), "rows": rows}
@@ -1633,8 +1636,8 @@ def apply_text(flow: str, state: Mapping[str, Any] | None, pending: str, text: s
     active_flow = _flow(flow)
     current = deepcopy(dict(state or {}))
     current[FLOW_FLAGS[active_flow]] = True
-    value = _safe(text)[:5000]
     purpose = _safe(pending)
+    value = str(text or "") if purpose == "prompt" else _safe(text)[:5000]
     if purpose == "segment":
         values = value.replace("–", "-").replace("—", "-").split("-", 1)
         if len(values) != 2:
@@ -1666,9 +1669,9 @@ def apply_text(flow: str, state: Mapping[str, Any] | None, pending: str, text: s
         _refresh_prompts(active_flow, current)
         target = "prompt"
     elif purpose == "prompt":
-        if not value:
+        if not value.strip():
             raise ValueError("selfshotflow4_prompt_required")
-        current["selected_prompt"] = {"id": "custom", "title": "Prompt đã chỉnh", "text": value}
+        current["selected_prompt"] = {"id": "custom", "title": "Câu lệnh tự viết", "text": value}
         _prepare_tail(active_flow, current)
         return {"state": current, "screen": "tail_review"}
     else:
@@ -1683,6 +1686,6 @@ def pending_copy(flow: str, pending: str) -> str:
         "segment": "✂️ <b>Nhập đoạn video</b>\n\nGhi giây bắt đầu-kết thúc, ví dụ: <b>2-12</b>. Đoạn phải nằm trong video nguồn.",
         "subject": "✍️ <b>Mô tả chủ thể cần giữ</b>\n\nGhi rõ người, vật hoặc sản phẩm trong video nguồn. Hệ thống sẽ lưu đây là xác nhận của anh/chị, không giả vờ đã nhận diện tự động.",
         "content": "✍️ <b>Nhập nội dung</b>\n\nMô tả câu chuyện hoặc thay đổi mong muốn nhưng vẫn giữ chủ thể và chuyển động nguồn.",
-        "prompt": "✍️ <b>Sửa prompt video</b>\n\nGửi yêu cầu chỉnh. Hệ thống giữ khóa chủ thể và chuyển động nguồn.",
+        "prompt": "✍️ <b>Tự viết câu lệnh video</b>\n\nGửi toàn bộ câu lệnh mới. Hệ thống lưu đúng nguyên văn nội dung anh/chị gửi và vẫn giữ chủ thể cùng chuyển động nguồn.",
     }
     return copies.get(_safe(pending), f"✍️ <b>{flow_label(active_flow)}</b>\n\nNhập nội dung cần tiếp tục.")

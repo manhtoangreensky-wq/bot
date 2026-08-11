@@ -13,6 +13,8 @@ import math
 import re
 from typing import Any, Iterable, Mapping
 
+from services import video_ai_real_pricing
+
 
 PRODUCT_ID = "self_shot_scene_change"
 JOB_TYPE = "self_shot_scene_change"
@@ -24,77 +26,94 @@ SUPPORTED_RATIOS = frozenset({"9:16", "16:9", "1:1", "4:5"})
 SUBJECT_MODES = frozenset({"person", "object", "person_object", "motion_only", "custom"})
 
 CONTENT_PROFILES = (
-    "Ban hang / quang cao", "Review / demo san pham", "Affiliate / UGC",
-    "Testimonial / case study", "Thuong hieu / doanh nghiep", "Social creator / bat trend",
-    "Meme / parody / hai", "Su kien / highlight", "Kien truc ngoai that", "Noi that",
-    "Cai tao khong gian", "Bat dong san", "Video tham quan kien truc", "Hieu ung dien anh",
-    "Hoat hinh 2D/3D", "Nhan vat", "Thoi trang / trinh dien", "Trung bay san pham / 3D",
-    "Ung dung / tro choi", "Website / phan mem", "Huong dan / giai thich",
-    "Noi dung nguoi dung / mang xa hoi", "Lich su / van hoa", "The thao / eSports",
-    "Du lich / dia phuong", "Ky thuat / cong nghiep", "Tin tuc / du lieu",
-    "Dong luc / phat trien ban than", "Am thuc", "Giao duc / kien thuc",
-    "Am nhac / su kien", "ASMR / thu gian",
+    "Bán hàng / quảng cáo", "Đánh giá / giới thiệu sản phẩm", "Tiếp thị liên kết / nội dung người dùng",
+    "Cảm nhận khách hàng / câu chuyện thực tế", "Thương hiệu / doanh nghiệp", "Nhà sáng tạo / bắt xu hướng",
+    "Meme / nhại vui / hài", "Sự kiện / khoảnh khắc nổi bật", "Kiến trúc ngoại thất", "Nội thất",
+    "Cải tạo không gian", "Bất động sản", "Tham quan kiến trúc", "Hiệu ứng điện ảnh",
+    "Hoạt hình 2D/3D", "Nhân vật", "Thời trang / trình diễn", "Trưng bày sản phẩm / 3D",
+    "Ứng dụng / trò chơi", "Website / phần mềm", "Hướng dẫn / giải thích",
+    "Nội dung mạng xã hội", "Lịch sử / văn hóa", "Thể thao / thể thao điện tử",
+    "Du lịch / địa phương", "Kỹ thuật / công nghiệp", "Tin tức / dữ liệu",
+    "Động lực / phát triển bản thân", "Ẩm thực", "Giáo dục / kiến thức",
+    "Âm nhạc / sự kiện", "Âm thanh thư giãn",
 )
 
 CONTENT_DIRECTIONS = (
-    ("future_world", "Thanh pho tuong lai", "Doi the gioi xung quanh sang mot thanh pho tuong lai lien mach."),
-    ("ancient_world", "The gioi co dai", "Giu chu the va hanh dong, thay kien truc va anh sang thanh boi canh co dai."),
-    ("fantasy_world", "The gioi gia tuong", "Mo rong khong gian thanh mot the gioi gia tuong co chieu sau dien anh."),
-    ("space_world", "Khong gian vu tru", "Dat chu the vao tau vu tru hoac hanh tinh moi ma khong mat tuong tac goc."),
-    ("post_apocalyptic", "Hau tan the", "Giu nguoi/vat va chuyen dong, thay moi truong thanh hau tan the co nguyen nhan ro."),
-    ("nature_cinema", "Thien nhien dien anh", "Mo rong canh quan, thoi tiet va anh sang tu nhien quanh chu the."),
-    ("action_story", "Phim hanh dong", "Bien hanh dong goc thanh mot nhip phim hanh dong co mo dau va ket thuc tron ven."),
-    ("mystery_story", "Phim trinh tham", "Bien cac chi tiet trong video nguon thanh manh moi va cau chuyen trinh tham."),
-    ("adventure_story", "Phim phieu luu", "Dung chuyen dong nguon lam diem bat dau cho hanh trinh kham pha."),
-    ("romance_story", "Phim lang man", "Giu bieu cam va khoang cach chu the, thay doi khong gian theo mach cam xuc."),
-    ("light_comedy", "Hai tinh huong", "Giu hanh dong that va tao tinh huong hai ro rang, khong che nhan vat."),
-    ("light_horror", "Kinh di nhe", "Them anh sang, am thanh va chi tiet hoi hop ma khong bien dang chu the."),
-    ("character_trailer", "Trailer nhan vat", "Gioi thieu chu the qua nhieu canh lien quan, giu nhan dien xuyen suot."),
-    ("same_action_new_world", "Giu hanh dong, doi boi canh", "Dung dung hanh dong nguon trong moi boi canh moi."),
-    ("world_expansion", "Mo rong the gioi", "Them kien truc, phuong tien, quan chung va thoi tiet quanh chu the."),
-    ("product_hero", "San pham lam trung tam", "Giu hinh dang, logo va cach cam/su dung san pham trong khong gian cao cap."),
-    ("product_demo", "Quang cao cach su dung", "Theo sat thao tac that va lam ro cong dung cua san pham."),
-    ("before_after", "Truoc va sau", "Giu cung chu the de thay doi boi canh hoac trang thai duoc nhin thay ro."),
-    ("person_object_story", "Nguoi va vat cung ke chuyen", "Giu diem tiep xuc va vai tro cua vat trong cau chuyen quanh nguoi."),
-    ("fashion_character", "Thoi trang / nhan vat", "Doi cach trinh bay, boi canh va anh sang trong khi giu chu the da xac nhan."),
+    ("future_world", "Thành phố tương lai", "Đổi thế giới xung quanh sang một thành phố tương lai liền mạch."),
+    ("ancient_world", "Thế giới cổ đại", "Giữ chủ thể và hành động, thay kiến trúc và ánh sáng thành bối cảnh cổ đại."),
+    ("fantasy_world", "Thế giới giả tưởng", "Mở rộng không gian thành một thế giới giả tưởng có chiều sâu điện ảnh."),
+    ("space_world", "Không gian vũ trụ", "Đặt chủ thể vào tàu vũ trụ hoặc hành tinh mới mà không mất tương tác gốc."),
+    ("post_apocalyptic", "Hậu tận thế", "Giữ người, vật và chuyển động, thay môi trường thành hậu tận thế có nguyên nhân rõ."),
+    ("nature_cinema", "Thiên nhiên điện ảnh", "Mở rộng cảnh quan, thời tiết và ánh sáng tự nhiên quanh chủ thể."),
+    ("action_story", "Phim hành động", "Biến hành động gốc thành một nhịp phim có mở đầu và kết thúc trọn vẹn."),
+    ("mystery_story", "Phim trinh thám", "Biến các chi tiết trong video nguồn thành manh mối và câu chuyện trinh thám."),
+    ("adventure_story", "Phim phiêu lưu", "Dùng chuyển động nguồn làm điểm bắt đầu cho hành trình khám phá."),
+    ("romance_story", "Phim lãng mạn", "Giữ biểu cảm và khoảng cách chủ thể, thay đổi không gian theo mạch cảm xúc."),
+    ("light_comedy", "Hài tình huống", "Giữ hành động thật và tạo tình huống hài rõ ràng, không chế giễu nhân vật."),
+    ("light_horror", "Kinh dị nhẹ", "Thêm ánh sáng, âm thanh và chi tiết hồi hộp mà không biến dạng chủ thể."),
+    ("character_trailer", "Giới thiệu nhân vật", "Giới thiệu chủ thể qua nhiều cảnh liên quan, giữ nhận diện xuyên suốt."),
+    ("same_action_new_world", "Giữ hành động, đổi bối cảnh", "Dùng đúng hành động nguồn trong mỗi bối cảnh mới."),
+    ("world_expansion", "Mở rộng thế giới", "Thêm kiến trúc, phương tiện, quần chúng và thời tiết quanh chủ thể."),
+    ("product_hero", "Sản phẩm làm trung tâm", "Giữ hình dáng, logo và cách cầm hoặc sử dụng sản phẩm trong không gian cao cấp."),
+    ("product_demo", "Quảng cáo cách sử dụng", "Theo sát thao tác thật và làm rõ công dụng của sản phẩm."),
+    ("before_after", "Trước và sau", "Giữ cùng chủ thể để thay đổi bối cảnh hoặc trạng thái được nhìn thấy rõ."),
+    ("person_object_story", "Người và vật cùng kể chuyện", "Giữ điểm tiếp xúc và vai trò của vật trong câu chuyện quanh người."),
+    ("fashion_character", "Thời trang / nhân vật", "Đổi cách trình bày, bối cảnh và ánh sáng trong khi giữ chủ thể đã xác nhận."),
 )
 
 DIRECTION_OPTIONS = (
-    ("environment", "🌍 Doi boi canh", ("video_to_video", "environment_replacement")),
-    ("new_story", "🎬 Tao cau chuyen moi", ("video_to_video", "video_reference")),
-    ("cinematic_effects", "✨ Them hieu ung dien anh", ("video_to_video", "video_reference")),
-    ("world_expand", "🏙️ Mo rong khong gian", ("video_to_video", "environment_replacement")),
-    ("product_focus", "📦 Lam noi bat san pham", ("video_to_video", "object_reference", "product_logo_preservation")),
-    ("character_transform", "👤 Bien doi nhan vat", ("video_to_video", "person_identity_preservation")),
-    ("source_camera", "🎥 Giu may quay nguon", ("video_to_video", "camera_motion_transfer")),
-    ("redirect_camera", "🎞️ Dao dien lai camera", ("video_to_video", "video_reference")),
+    ("environment", "🌍 Đổi bối cảnh", ("video_to_video", "environment_replacement")),
+    ("new_story", "🎬 Tạo câu chuyện mới", ("video_to_video", "video_reference")),
+    ("cinematic_effects", "✨ Thêm hiệu ứng điện ảnh", ("video_to_video", "video_reference")),
+    ("world_expand", "🏙️ Mở rộng không gian", ("video_to_video", "environment_replacement")),
+    ("product_focus", "📦 Làm nổi bật sản phẩm", ("video_to_video", "object_reference", "product_logo_preservation")),
+    ("character_transform", "👤 Biến đổi nhân vật", ("video_to_video", "person_identity_preservation")),
+    ("source_camera", "🎥 Giữ máy quay nguồn", ("video_to_video", "camera_motion_transfer")),
+    ("redirect_camera", "🎞️ Đạo diễn lại máy quay", ("video_to_video", "video_reference")),
 )
 
 PRESERVE_LABELS = {
-    "person_identity": "👤 Nhan dien nguoi",
-    "object_identity": "📦 Nhan dien vat",
-    "wardrobe_color": "👕 Trang phuc/mau",
-    "action_expression": "🎭 Hanh dong/bieu cam",
-    "person_object_relation": "🔗 Quan he nguoi-vat",
-    "custom": "✍️ Yeu cau khac",
+    "person_identity": "👤 Nhận diện người",
+    "object_identity": "📦 Nhận diện vật",
+    "wardrobe_color": "👕 Trang phục / màu sắc",
+    "action_expression": "🎭 Hành động / biểu cảm",
+    "person_object_relation": "🔗 Quan hệ người - vật",
+    "custom": "✍️ Yêu cầu khác",
 }
 
 AUDIO_LABELS = {
-    "source": "🔊 Am thanh goc",
-    "voice": "🎙️ Long tieng",
-    "music": "🎵 Nhac nen",
-    "sfx": "💥 Hieu ung am thanh",
-    "subtitle": "💬 Phu de",
+    "source": "🔊 Âm thanh gốc",
+    "voice": "🎙️ Lồng tiếng",
+    "music": "🎵 Nhạc nền",
+    "sfx": "💥 Hiệu ứng âm thanh",
+    "subtitle": "💬 Phụ đề",
 }
 
 ADDON_POSITIONS = (
-    ("top_left", "Tren trai"),
-    ("top_right", "Tren phai"),
-    ("middle_left", "Giua trai"),
-    ("middle_right", "Giua phai"),
-    ("bottom_left", "Duoi trai"),
-    ("bottom_right", "Duoi phai"),
+    ("top_left", "Trên trái"),
+    ("top_center", "Trên giữa"),
+    ("top_right", "Trên phải"),
+    ("center_left", "Giữa trái"),
+    ("center", "Chính giữa"),
+    ("center_right", "Giữa phải"),
+    ("bottom_left", "Dưới trái"),
+    ("bottom_center", "Dưới giữa"),
+    ("bottom_right", "Dưới phải"),
 )
+
+ADDON_POSITION_LABELS = {
+    **dict(ADDON_POSITIONS),
+    "middle_left": "Giữa trái",
+    "middle_right": "Giữa phải",
+}
+
+PRESERVE_BLOCKER_MESSAGES = {
+    "subject_manifest_missing": "Chưa xác nhận người, vật hoặc chuyển động cần giữ.",
+    "person_identity_lock_missing": "Cần bật giữ nhận diện người trước khi tiếp tục.",
+    "object_identity_lock_missing": "Cần bật giữ nhận diện vật hoặc sản phẩm trước khi tiếp tục.",
+    "person_object_relationship_lock_missing": "Cần bật giữ quan hệ giữa người và vật trước khi tiếp tục.",
+    "source_action_lock_missing": "Cần bật giữ hành động và biểu cảm nguồn trước khi tiếp tục.",
+}
 
 SCREEN_PARENTS = {
     "intro": "hub",
@@ -139,7 +158,7 @@ def ratio_valid(value: Any) -> bool:
 
 def _nav(back_screen: str) -> list[tuple[str, str]]:
     callback = "vproduct|selfshot_hub" if back_screen == "hub" else f"vproduct|ss2|show|{back_screen}"
-    return [("⬅️ Quay lai", callback), ("🏠 Menu chinh", "menu|main")]
+    return [("⬅️ Quay lại", callback), ("🎬 Menu Video", "menu|main_video")]
 
 
 def initial_draft() -> dict[str, Any]:
@@ -414,18 +433,18 @@ def suggestion_catalog(
 ) -> list[dict[str, Any]]:
     report = dict(analysis or {})
     manifest = dict(subject_manifest or {})
-    subject_text = ", ".join(_safe(item.get("description")) for item in manifest.get("subjects") or []) or "chuyen dong nguon"
-    action_text = ", ".join(_safe(item) for item in report.get("main_actions") or []) or "hanh dong dang co trong video"
+    subject_text = ", ".join(_safe(item.get("description")) for item in manifest.get("subjects") or []) or "chuyển động nguồn"
+    action_text = ", ".join(_safe(item) for item in report.get("main_actions") or []) or "hành động đang có trong video"
     count = max(MIN_SCENES, min(MAX_SCENES, int(scene_count or 1)))
     ratio = aspect_ratio if ratio_valid(aspect_ratio) else "9:16"
-    profile_text = _safe(profile) or "noi dung phu hop video nguon"
+    profile_text = _safe(profile) or "nội dung phù hợp video nguồn"
     items = []
     for index, (item_id, title, summary) in enumerate(CONTENT_DIRECTIONS, 1):
         items.append({
             "id": item_id,
             "index": index,
             "title": title,
-            "summary": f"{summary} Giu {subject_text}; bam {action_text}; dung {count} canh {ratio}; theo {profile_text}.",
+            "summary": f"{summary} Giữ {subject_text}; bám {action_text}; dùng {count} cảnh {ratio}; theo {profile_text}.",
         })
     return items
 
@@ -932,6 +951,14 @@ def apply_action(state: Mapping[str, Any] | None, operation: str, argument: str 
         result["screen"] = "prompts"
         return result
     if op == "prompt":
+        if arg.startswith("edit_"):
+            prompt_index = int(arg.replace("edit_", "", 1) or 0)
+            prompts = list(draft.get("video_prompts") or [])
+            if not 1 <= prompt_index <= len(prompts):
+                raise ValueError("selfshot2_prompt_index_invalid")
+            draft["prompt_edit_index"] = prompt_index
+            result.update({"pending": "prompt", "back": "prompts"})
+            return result
         if arg == "custom":
             result.update({"pending": "prompt", "back": "prompts"})
             return result
@@ -1035,45 +1062,48 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
     rows: list[list[tuple[str, str]]] = []
     if name == "intro":
         text = (
-            "🎥 <b>Tu quay & doi canh AI</b>\n\nGui video that de giu dung nguoi, vat/san pham hoac quan he nguoi-vat, "
-            "sau do phat trien nhieu canh dien anh moi. Khong phai thay nen don gian va khong dung flow text-only.\n\n"
-            "Chua co video thi khong tao hoa don, tac vu hay tru Xu."
+            "🎥 <b>Video tự quay và đổi cảnh AI</b>\n\nGửi video thật để giữ đúng người, vật, sản phẩm hoặc quan hệ người - vật, "
+            "sau đó phát triển thành nhiều cảnh điện ảnh mới. Đây là quy trình dùng video nguồn, không phải chỉ thay nền hoặc tạo từ chữ.\n\n"
+            "Chưa có video nguồn thì hệ thống không mở hóa đơn, không tạo tác vụ và không trừ Xu."
         )
         rows = [
-            [("📎 Gui video nguon", "vproduct|ss2|source"), ("ℹ️ Cach hoat dong", "vproduct|ss2|show|help")],
-            [("👁️ Xem du an dang lam", "vproduct|ss2|show|project"), ("🗑️ Xoa phien hien tai", "vproduct|ss2|reset")],
+            [("📎 Gửi video nguồn", "vproduct|ss2|source"), ("ℹ️ Cách hoạt động", "vproduct|ss2|show|help")],
+            [("👁️ Xem dự án đang làm", "vproduct|ss2|show|project"), ("🗑️ Xóa phiên hiện tại", "vproduct|ss2|reset")],
             _nav("hub"),
         ]
     elif name == "help":
-        text = "ℹ️ <b>Cach hoat dong</b>\n\nVideo nguon → chon nguoi/vat → khoa dieu can giu → chia canh → noi dung → prompt → engine phu hop → MP4 → gui thanh cong → moi tru Xu."
+        text = "ℹ️ <b>Cách hoạt động</b>\n\nVideo nguồn → chọn người hoặc vật → xác nhận điều cần giữ → chọn số cảnh và tỉ lệ → chọn nội dung → rà câu lệnh từng cảnh → thêm âm thanh, logo hoặc watermark → chọn chất lượng → xem hóa đơn → xác nhận tạo video → theo dõi trạng thái. Chỉ trừ Xu sau khi video hợp lệ đã được gửi thành công."
         rows = [_nav("intro")]
     elif name == "project":
         source = bool(draft.get("source_video"))
-        text = f"👁️ <b>Du an dang lam</b>\n\nVideo nguon: {'Da nhan' if source else 'Chua co'}\nSo canh: {draft.get('scene_count') or 'Chua chon'}\nTi le: {draft.get('aspect_ratio') or 'Chua chon'}\nChu the: {len((draft.get('subject_manifest') or {}).get('subject_ids') or [])} da xac nhan."
+        text = f"👁️ <b>Dự án đang làm</b>\n\nVideo nguồn: {'Đã nhận' if source else 'Chưa có'}\nSố cảnh: {draft.get('scene_count') or 'Chưa chọn'}\nTỉ lệ: {draft.get('aspect_ratio') or 'Chưa chọn'}\nChủ thể: {len((draft.get('subject_manifest') or {}).get('subject_ids') or [])} đã xác nhận."
         rows = [_nav("intro")]
     elif name == "analysis":
         report = dict(draft.get("source_analysis") or {})
         text = (
-            "🔎 <b>Phan tich video nguon</b>\n\n"
-            f"Thoi luong: {report.get('duration_seconds') or 0:g}s · Khung: {report.get('width') or 0}x{report.get('height') or 0} · FPS: {report.get('fps') or 'chua doc'}\n"
-            f"Nguoi tim thay: {len(report.get('person_tracks') or [])} · Vat/san pham: {len(report.get('object_tracks') or [])} · Am thanh: {(report.get('audio_manifest') or {}).get('stream_count') or 0} stream\n\n"
-            "Chi hien thong tin local/metadata thuc su co; khong bia nhan dien."
+            "🔎 <b>Phân tích video nguồn</b>\n\n"
+            f"Thời lượng: {report.get('duration_seconds') or 0:g} giây · Kích thước: {report.get('width') or 0}×{report.get('height') or 0} · Tốc độ hình: {report.get('fps') or 'chưa đọc'}\n"
+            f"Người phát hiện: {len(report.get('person_tracks') or [])} · Vật/sản phẩm: {len(report.get('object_tracks') or [])} · Luồng âm thanh: {(report.get('audio_manifest') or {}).get('stream_count') or 0}\n\n"
+            "Hệ thống chỉ hiển thị thông tin thực sự đọc được từ video, không tự nhận diện giả."
         )
-        rows = [[("✅ Chon chu the", "vproduct|ss2|show|subject"), ("👁️ Xem chu the phat hien", "vproduct|ss2|show|detected")], _nav(screen_parent("analysis", draft))]
+        rows = [[("✅ Chọn chủ thể", "vproduct|ss2|show|subject"), ("👁️ Xem chủ thể phát hiện", "vproduct|ss2|show|detected")], _nav(screen_parent("analysis", draft))]
     elif name == "subject":
-        text = "🎯 <b>Chon chu the can giu</b>\n\nNeu video co nhieu nguoi/vat, he thong bat buoc chon subject_id ro rang; khong ghi chung chung 'theo nguoi'."
+        text = "🎯 <b>Chọn chủ thể cần giữ</b>\n\nNếu video có nhiều người hoặc vật, hãy chọn rõ chủ thể cần theo dõi để giữ nhận diện và mối quan hệ xuyên suốt."
         rows = [
-            [("👤 Giu nguoi", "vproduct|ss2|subject|person"), ("📦 Giu vat/san pham", "vproduct|ss2|subject|object")],
-            [("👤📦 Giu ca nguoi va vat", "vproduct|ss2|subject|person_object"), ("🎬 Chi giu chuyen dong", "vproduct|ss2|subject|motion_only")],
-            [("✍️ Tu mo ta chu the", "vproduct|ss2|subject|custom"), ("👁️ Xem chu the phat hien", "vproduct|ss2|show|detected")],
+            [("👤 Giữ người", "vproduct|ss2|subject|person"), ("📦 Giữ vật / sản phẩm", "vproduct|ss2|subject|object")],
+            [("👤📦 Giữ người và vật", "vproduct|ss2|subject|person_object"), ("🎬 Chỉ giữ chuyển động", "vproduct|ss2|subject|motion_only")],
+            [("✍️ Tự mô tả chủ thể", "vproduct|ss2|subject|custom"), ("👁️ Xem chủ thể phát hiện", "vproduct|ss2|show|detected")],
             _nav("analysis"),
         ]
     elif name == "detected":
         items = detected_subjects(draft.get("source_analysis"))
         selected_ids = {_safe(item) for item in draft.get("selfshot2_selected_subject_ids") or []}
         if items:
-            lines = [f"{index}. {item.get('subject_id')} — {item.get('description')}" for index, item in enumerate(items, 1)]
-            text = "👁️ <b>Chu the phat hien</b>\n\n" + "\n".join(lines)
+            lines = [
+                f"{index}. {item.get('description') or 'Chủ thể được phát hiện'}"
+                for index, item in enumerate(items, 1)
+            ]
+            text = "👁️ <b>Chủ thể phát hiện</b>\n\n" + "\n".join(lines)
             rows = _page_rows([
                 {
                     "id": item.get("subject_id"),
@@ -1081,125 +1111,136 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
                 }
                 for item in items
             ], "subject_id")
-            rows.append([("✅ Dung chu the da chon", "vproduct|ss2|confirm_subject_ids"), ("🔄 Chon lai", "vproduct|ss2|clear_subject_ids")])
+            rows.append([("✅ Dùng chủ thể đã chọn", "vproduct|ss2|confirm_subject_ids"), ("🔄 Chọn lại", "vproduct|ss2|clear_subject_ids")])
         else:
-            text = "👁️ <b>Chu the phat hien</b>\n\nRuntime local chua co track nguoi/vat. Anh/chi co the xac nhan mot chu the gan voi video nguon hoac tu mo ta; he thong khong gia vo da nhan dien."
+            text = "👁️ <b>Chủ thể phát hiện</b>\n\nHệ thống chưa xác định được người hoặc vật riêng biệt trong video này. Anh/chị có thể chọn một chủ thể gắn với video nguồn hoặc tự mô tả; hệ thống không giả vờ đã nhận diện."
         rows.append(_nav(screen_parent("detected", draft)))
     elif name == "preserve":
         rules = dict(draft.get("preserve_constraints") or {})
         blocker = _safe(draft.get("selfshot2_preserve_blocker"))
-        blocker_text = f"\n\n⚠️ Chua the tiep tuc: <code>{blocker}</code>." if blocker else ""
+        blocker_text = (
+            f"\n\n⚠️ {PRESERVE_BLOCKER_MESSAGES.get(blocker, 'Chưa đủ lựa chọn bắt buộc để tiếp tục.')}"
+            if blocker else ""
+        )
         text = (
-            "🔒 <b>Dieu phai giu nguyen</b>\n\n"
-            "Cac khoa nhan dien va quan he bat buoc khong the tat neu chu the dang dung chung."
+            "🔒 <b>Điều phải giữ nguyên</b>\n\n"
+            "Nhận diện và quan hệ đã xác nhận phải được giữ xuyên suốt khi các chủ thể xuất hiện cùng nhau."
             f"{blocker_text}"
         )
         keys = list(PRESERVE_LABELS)
         for offset in range(0, len(keys), 2):
             rows.append([(f"{'✅' if rules.get(key) else '□'} {PRESERVE_LABELS[key]}", f"vproduct|ss2|preserve|{key}") for key in keys[offset:offset + 2]])
-        rows.extend([[('✅ Xong giu nguyen', 'vproduct|ss2|preserve_done'), ('⏭️ Dung mac dinh', 'vproduct|ss2|preserve_default')], _nav(screen_parent("preserve", draft))])
+        rows.extend([[('✅ Hoàn tất lựa chọn', 'vproduct|ss2|preserve_done'), ('⏭️ Dùng mặc định', 'vproduct|ss2|preserve_default')], _nav(screen_parent("preserve", draft))])
     elif name == "scene_count":
-        text = "🎬 <b>Chon so canh dau ra</b>\n\nSo canh dau ra khong nhat thiet bang so shot nguon; moi canh ghi ro doan nguon duoc dung."
+        text = "🎬 <b>Chọn số cảnh đầu ra</b>\n\nSố cảnh đầu ra không nhất thiết bằng số đoạn trong video nguồn; mỗi cảnh sẽ ghi rõ đoạn nguồn được dùng."
         rows = [
-            [("1 canh", "vproduct|ss2|scene_count|1"), ("2 canh", "vproduct|ss2|scene_count|2")],
-            [("3 canh", "vproduct|ss2|scene_count|3"), ("5 canh", "vproduct|ss2|scene_count|5")],
-            [("10 canh", "vproduct|ss2|scene_count|10"), ("✍️ Nhap so khac", "vproduct|ss2|scene_count|custom")],
-            [("ℹ️ Luu y so canh", "vproduct|ss2|scene_count|help"), ("👁️ Xem video nguon", "vproduct|ss2|show|analysis")],
+            [("1 cảnh", "vproduct|ss2|scene_count|1"), ("2 cảnh", "vproduct|ss2|scene_count|2")],
+            [("3 cảnh", "vproduct|ss2|scene_count|3"), ("5 cảnh", "vproduct|ss2|scene_count|5")],
+            [("10 cảnh", "vproduct|ss2|scene_count|10"), ("✍️ Nhập số khác", "vproduct|ss2|scene_count|custom")],
+            [("ℹ️ Lưu ý số cảnh", "vproduct|ss2|scene_count|help"), ("👁️ Xem video nguồn", "vproduct|ss2|show|analysis")],
             _nav("preserve"),
         ]
     elif name == "ratio":
-        text = f"📐 <b>Chon ti le</b>\n\nDang chon: {draft.get('aspect_ratio') or 'Chua chon'}. Khong co nut goi y ti le."
+        text = f"📐 <b>Chọn tỉ lệ</b>\n\nĐang chọn: {draft.get('aspect_ratio') or 'Chưa chọn'}."
         rows = [
-            [("Doc 9:16", "vproduct|ss2|ratio|9:16"), ("Ngang 16:9", "vproduct|ss2|ratio|16:9")],
-            [("Vuong 1:1", "vproduct|ss2|ratio|1:1"), ("Doc 4:5", "vproduct|ss2|ratio|4:5")],
-            [("✍️ Tu nhap", "vproduct|ss2|ratio|custom"), ("👁️ Xem video nguon", "vproduct|ss2|show|analysis")],
+            [("Dọc 9:16", "vproduct|ss2|ratio|9:16"), ("Ngang 16:9", "vproduct|ss2|ratio|16:9")],
+            [("Vuông 1:1", "vproduct|ss2|ratio|1:1"), ("Dọc 4:5", "vproduct|ss2|ratio|4:5")],
+            [("✍️ Tự nhập", "vproduct|ss2|ratio|custom"), ("👁️ Xem video nguồn", "vproduct|ss2|show|analysis")],
             _nav("scene_count"),
         ]
     elif name == "content_source":
-        text = "🧭 <b>Chon cach xay noi dung</b>\n\nMoi nhanh giu nguyen subject lock da xac nhan."
+        text = "🧭 <b>Chọn cách xây nội dung</b>\n\nMỗi nhánh đều giữ nguyên chủ thể đã xác nhận từ video nguồn."
         rows = [
-            [("💡 5 goi y quanh video", "vproduct|ss2|content_source|suggestions"), ("🎯 Chon loai noi dung", "vproduct|ss2|content_source|profiles")],
-            [("🗂️ Kho Y tuong video", "vproduct|ss2|content_source|ideas"), ("✍️ Tu nhap noi dung", "vproduct|ss2|content_source|custom")],
+            [("💡 5 gợi ý quanh video", "vproduct|ss2|content_source|suggestions"), ("🎯 Chọn loại nội dung", "vproduct|ss2|content_source|profiles")],
+            [("🗂️ Kho Ý tưởng video", "vproduct|ss2|content_source|ideas"), ("✍️ Tự nhập nội dung", "vproduct|ss2|content_source|custom")],
             _nav("ratio"),
         ]
     elif name == "suggestions":
         items = suggestion_catalog(draft.get("source_analysis"), draft.get("subject_manifest"), scene_count=int(draft.get("scene_count") or 1), aspect_ratio=_safe(draft.get("aspect_ratio")) or "9:16", profile=_safe(draft.get("selected_profile")))
         page = max(1, min(4, int(draft.get("suggestion_page") or 1)))
         shown = suggestion_page(items, page)
-        text = "💡 <b>5 goi y quanh video</b>\n\n" + "\n".join(f"{index}. {item['title']}: {item['summary']}" for index, item in enumerate(shown, 1))
+        text = "💡 <b>5 gợi ý quanh video</b>\n\n" + "\n".join(f"{index}. {item['title']}: {item['summary']}" for index, item in enumerate(shown, 1))
         rows = [[(str(index), f"vproduct|ss2|suggestion|{item['id']}") for index, item in enumerate(shown, 1)]]
         rows.extend([
-            [('🔄 Doi 5 goi y', 'vproduct|ss2|suggestion_page'), ('✍️ Tu nhap', 'vproduct|ss2|content_source|custom')],
+            [('🔄 Đổi 5 gợi ý', 'vproduct|ss2|suggestion_page'), ('✍️ Tự nhập', 'vproduct|ss2|content_source|custom')],
             _nav(screen_parent("suggestions", draft)),
         ])
     elif name == "profiles":
         page = max(1, min(4, int(draft.get("profile_page") or 1)))
         chunk = CONTENT_PROFILES[(page - 1) * 8:page * 8]
-        text = f"🎯 <b>Chon loai noi dung</b>\n\nTrang {page}/4 trong 32 loai. Chon dung mot loai de nhan 5 goi y bam video nguon."
+        text = f"🎯 <b>Chọn loại nội dung</b>\n\nTrang {page}/4 trong 32 loại. Chọn một loại để nhận 5 gợi ý bám sát video nguồn."
         rows = _page_rows([{"id": str((page - 1) * 8 + index), "title": title} for index, title in enumerate(chunk, 1)], "profile")
-        rows.extend([[('➡️ Nhom sau', 'vproduct|ss2|profile_page'), ('✍️ Tu nhap noi dung', 'vproduct|ss2|content_source|custom')], _nav("content_source")])
+        rows.extend([[('➡️ Nhóm sau', 'vproduct|ss2|profile_page'), ('✍️ Tự nhập nội dung', 'vproduct|ss2|content_source|custom')], _nav("content_source")])
     elif name == "ideas":
         page = max(1, min(4, int(draft.get("idea_page") or 1)))
         chunk = idea_presets()[(page - 1) * 5:page * 5]
-        text = f"🗂️ <b>Kho Y tuong video</b>\n\nTrang {page}/4. Preset se ket hop voi nguoi/vat va chuyen dong nguon; khong hoi lai profile co san."
+        text = f"🗂️ <b>Kho Ý tưởng video</b>\n\nTrang {page}/4. Mỗi ý tưởng sẽ kết hợp với người, vật và chuyển động nguồn; không hỏi lại loại nội dung đã có."
         rows = _page_rows(chunk, "idea")
-        rows.extend([[('➡️ Nhom sau', 'vproduct|ss2|idea_page'), ('✍️ Tu nhap noi dung', 'vproduct|ss2|content_source|custom')], _nav("content_source")])
+        rows.extend([[('➡️ Nhóm sau', 'vproduct|ss2|idea_page'), ('✍️ Tự nhập nội dung', 'vproduct|ss2|content_source|custom')], _nav("content_source")])
     elif name == "direction":
-        text = "✨ <b>Chon huong bien doi</b>\n\nMoi huong ghi ro capability can co. Thieu engine phu hop se chan truoc hoa don."
+        text = "✨ <b>Chọn hướng biến đổi</b>\n\nMỗi hướng cần khả năng xử lý khác nhau. Nếu hệ thống chưa đáp ứng, video sẽ được chặn trước hóa đơn và không trừ Xu."
         for offset in range(0, len(DIRECTION_OPTIONS), 2):
             rows.append([(item[1], f"vproduct|ss2|direction|{item[0]}") for item in DIRECTION_OPTIONS[offset:offset + 2]])
         rows.append(_nav(screen_parent("direction", draft)))
     elif name == "scene_plan":
         plan = list(draft.get("scene_plan") or [])
-        lines = [f"Canh {item.get('scene_index')}: nguon {item.get('source_segment_start')}–{item.get('source_segment_end')}s · {item.get('end_state')}" for item in plan]
-        text = "🎬 <b>Ke hoach canh</b>\n\n" + ("\n".join(lines) if lines else "Chua co ke hoach.")
-        rows = [[('👁️ Xem tung canh', 'vproduct|ss2|plan_view'), ('✍️ Sua noi dung', 'vproduct|ss2|content_source|custom')], [('✅ Tao prompt tung canh', 'vproduct|ss2|compile_prompts'), ('🔄 Lap lai ke hoach', 'vproduct|ss2|rebuild_plan')], _nav(screen_parent("scene_plan", draft))]
+        lines = [f"Cảnh {item.get('scene_index')}: dùng đoạn {item.get('source_segment_start')}–{item.get('source_segment_end')} giây · {item.get('end_state')}" for item in plan]
+        text = "🎬 <b>Kế hoạch cảnh</b>\n\n" + ("\n".join(lines) if lines else "Chưa có kế hoạch.")
+        rows = [[('👁️ Xem từng cảnh', 'vproduct|ss2|plan_view'), ('✍️ Sửa nội dung', 'vproduct|ss2|content_source|custom')], [('✅ Tạo câu lệnh từng cảnh', 'vproduct|ss2|compile_prompts'), ('🔄 Lập lại kế hoạch', 'vproduct|ss2|rebuild_plan')], _nav(screen_parent("scene_plan", draft))]
     elif name == "prompts":
         prompts = list(draft.get("video_prompts") or [])
-        text = "📝 <b>Prompt video tung canh</b>\n\n" + "\n\n".join(f"Canh {item.get('scene_index')}: {item.get('prompt')}\nLoai tru: {item.get('negative_prompt')}" for item in prompts[:3])
-        if len(prompts) > 3:
-            text += f"\n\n... con {len(prompts) - 3} canh."
-        rows = [[('👁️ Xem day du', 'vproduct|ss2|prompt|full'), ('✍️ Sua noi dung', 'vproduct|ss2|prompt|custom')], [('✅ Xong prompt', 'vproduct|ss2|show|audio'), ('↩️ Tao lai prompt', 'vproduct|ss2|compile_prompts')], _nav(screen_parent("prompts", draft))]
+        text = "📝 Câu lệnh video từng cảnh\n\n" + "\n\n".join(f"Cảnh {item.get('scene_index')}:\n{item.get('prompt')}\nĐiều cần tránh:\n{item.get('negative_prompt')}" for item in prompts)
+        prompt_buttons = [
+            (str(item.get("scene_index") or index), f"vproduct|ss2|prompt|edit_{index}")
+            for index, item in enumerate(prompts, 1)
+        ]
+        rows = [prompt_buttons[offset:offset + 2] for offset in range(0, len(prompt_buttons), 2)]
+        if rows and len(rows[-1]) == 1:
+            rows[-1].append(('↩️ Tạo lại tất cả', 'vproduct|ss2|compile_prompts'))
+            rows.append([('✅ Hoàn tất câu lệnh', 'vproduct|ss2|show|audio'), ('🎬 Menu Video', 'menu|main_video')])
+        else:
+            rows.append([('↩️ Tạo lại tất cả', 'vproduct|ss2|compile_prompts'), ('✅ Hoàn tất câu lệnh', 'vproduct|ss2|show|audio')])
+        rows.append(_nav(screen_parent("prompts", draft)))
     elif name == "audio":
         plan = dict(draft.get("audio_plan") or {})
-        text = "🎚️ <b>Am thanh va add-on</b>\n\nMoi muc am luong 0–200%. Khong tuy bo tach stem neu runtime khong co."
+        text = "🎚️ <b>Âm thanh và phần bổ sung</b>\n\nMỗi mục có thể đặt âm lượng từ 0–200%. Hệ thống chỉ áp dụng những mục anh/chị bật."
         keys = list(AUDIO_LABELS)
         for offset in range(0, len(keys), 2):
             rows.append([(f"{'✅' if (plan.get(key) or {}).get('enabled') else '□'} {AUDIO_LABELS[key]}", f"vproduct|ss2|audio|{key}") for key in keys[offset:offset + 2]])
         if len(rows[-1]) == 1:
-            rows[-1].append(("👁️ Xem cau hinh", "vproduct|ss2|audio_review"))
+            rows[-1].append(("👁️ Xem cấu hình", "vproduct|ss2|audio_review"))
         rows.extend([
-            [('🔊 Am luong goc', 'vproduct|ss2|volume|source'), ('🎙️ Am luong long tieng', 'vproduct|ss2|volume|voice')],
-            [('🎵 Am luong nhac', 'vproduct|ss2|volume|music'), ('💥 Am luong hieu ung', 'vproduct|ss2|volume|sfx')],
-            [('✅ Xong am thanh', 'vproduct|ss2|show|addons'), ('⏭️ Bo qua', 'vproduct|ss2|audio|skip')],
+            [('🔊 Âm lượng gốc', 'vproduct|ss2|volume|source'), ('🎙️ Âm lượng lồng tiếng', 'vproduct|ss2|volume|voice')],
+            [('🎵 Âm lượng nhạc', 'vproduct|ss2|volume|music'), ('💥 Âm lượng hiệu ứng', 'vproduct|ss2|volume|sfx')],
+            [('✅ Hoàn tất âm thanh', 'vproduct|ss2|show|addons'), ('⏭️ Bỏ qua', 'vproduct|ss2|audio|skip')],
             _nav(screen_parent("audio", draft)),
         ])
     elif name == "volume":
         target = _safe(draft.get("audio_volume_target")) or "source"
-        text = f"🔊 <b>Am luong {AUDIO_LABELS.get(target, target)}</b>\n\nChon 0–200%. Runtime phai clamp va chan clipping khi hau ky."
-        rows = [[(f"{value}%", f"vproduct|ss2|volume_set|{value}") for value in (0, 50)], [(f"{value}%", f"vproduct|ss2|volume_set|{value}") for value in (100, 150)], [("200%", "vproduct|ss2|volume_set|200"), ("✍️ Tu nhap", "vproduct|ss2|volume_set|custom")], _nav("audio")]
+        text = f"🔊 <b>Âm lượng {AUDIO_LABELS.get(target, target)}</b>\n\nChọn mức từ 0–200%. Hệ thống sẽ giữ âm thanh trong ngưỡng an toàn khi hậu kỳ."
+        rows = [[(f"{value}%", f"vproduct|ss2|volume_set|{value}") for value in (0, 50)], [(f"{value}%", f"vproduct|ss2|volume_set|{value}") for value in (100, 150)], [("200%", "vproduct|ss2|volume_set|200"), ("✍️ Tự nhập", "vproduct|ss2|volume_set|custom")], _nav("audio")]
     elif name == "addons":
         addons = dict(draft.get("visual_addons") or {})
         logo = dict(addons.get("logo") or {})
         watermark = dict(addons.get("watermark") or {})
         text = (
-            "🖼️ <b>Logo va watermark</b>\n\n"
-            f"Logo: {'Da nhan' if logo.get('enabled') and logo.get('file_id') else 'Tat'} · vi tri {logo.get('position') or 'top_right'}\n"
-            f"Watermark: {'Da co noi dung' if watermark.get('enabled') and watermark.get('text') else 'Tat'} · vi tri {watermark.get('position') or 'bottom_right'}\n\n"
-            "Chi luu cau hinh; chua tao file, chua goi provider va chua tru Xu."
+            "🖼️ <b>Logo và watermark</b>\n\n"
+            f"Logo: {'Đã nhận' if logo.get('enabled') and logo.get('file_id') else 'Tắt'} · vị trí {ADDON_POSITION_LABELS.get(logo.get('position') or '', 'Chưa chọn')}\n"
+            f"Watermark: {'Đã có nội dung' if watermark.get('enabled') and watermark.get('text') else 'Tắt'} · vị trí {ADDON_POSITION_LABELS.get(watermark.get('position') or '', 'Chưa chọn')}\n\n"
+            "Màn này chỉ lưu cấu hình; chưa tạo tệp, chưa xử lý video và chưa trừ Xu."
         )
         rows = [
-            [("📎 Gui logo hinh anh", "vproduct|ss2|addon|logo"), ("✍️ Watermark chu", "vproduct|ss2|addon|watermark")],
-            [("📍 Vi tri logo", "vproduct|ss2|addon_position|logo"), ("📍 Vi tri watermark", "vproduct|ss2|addon_position|watermark")],
-            [("🗑️ Xoa logo", "vproduct|ss2|addon|clear_logo"), ("🗑️ Xoa watermark", "vproduct|ss2|addon|clear_watermark")],
+            [("📎 Gửi logo hình ảnh", "vproduct|ss2|addon|logo"), ("✍️ Watermark chữ", "vproduct|ss2|addon|watermark")],
+            [("📍 Vị trí logo", "vproduct|ss2|addon_position|logo"), ("📍 Vị trí watermark", "vproduct|ss2|addon_position|watermark")],
+            [("🗑️ Xóa logo", "vproduct|ss2|addon|clear_logo"), ("🗑️ Xóa watermark", "vproduct|ss2|addon|clear_watermark")],
         ]
         if screen_parent("addons", draft) != "review":
-            rows.append([("✅ Xong bo sung", "vproduct|ss2|show|review"), ("⏭️ Bo qua", "vproduct|ss2|addon|skip")])
+            rows.append([("✅ Hoàn tất bổ sung", "vproduct|ss2|show|review"), ("⏭️ Bỏ qua", "vproduct|ss2|addon|skip")])
         rows.append(_nav(screen_parent("addons", draft)))
     elif name == "addon_position":
         target = _safe(draft.get("selfshot2_addon_position_target")) or "logo"
         label = "logo" if target == "logo" else "watermark"
-        text = f"📍 <b>Vi tri {label}</b>\n\nChon vi tri co dinh, an toan trong khung hinh."
+        text = f"📍 <b>Vị trí {label}</b>\n\nChọn một vị trí cố định, an toàn trong khung hình."
         rows = []
         for offset in range(0, len(ADDON_POSITIONS), 2):
             rows.append([
@@ -1209,26 +1250,52 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         rows.append(_nav("addons"))
     elif name == "review":
         text = (
-            "👁️ <b>Review Tu quay & doi canh AI</b>\n\n"
-            f"Chu the: {len((draft.get('subject_manifest') or {}).get('subject_ids') or [])} · Canh: {draft.get('scene_count') or 0} · Ti le: {draft.get('aspect_ratio') or '-'}\n"
-            f"Noi dung: {(draft.get('selected_content') or {}).get('title') or '-'} · Huong: {(draft.get('direction_contract') or {}).get('label') or '-'}\n\n"
-            "Chua tao tac vu, chua goi provider va chua tru Xu."
+            "👁️ <b>Xem lại Video tự quay và đổi cảnh AI</b>\n\n"
+            f"Chủ thể: {len((draft.get('subject_manifest') or {}).get('subject_ids') or [])} · Cảnh: {draft.get('scene_count') or 0} · Tỉ lệ: {draft.get('aspect_ratio') or '-'}\n"
+            f"Nội dung: {(draft.get('selected_content') or {}).get('title') or '-'} · Hướng: {(draft.get('direction_contract') or {}).get('label') or '-'}\n\n"
+            "Chưa tạo tác vụ, chưa xử lý video và chưa trừ Xu."
         )
         rows = [
-            [('👁️ Xem tung canh', 'vproduct|ss2|plan_view'), ('✍️ Sua noi dung canh', 'vproduct|ss2|content_source|custom')],
-            [('👤 Nguoi/vat giu nguyen', 'vproduct|ss2|show|preserve'), ('🎬 Prompt video', 'vproduct|ss2|show|prompts')],
-            [('🎚️ Am thanh', 'vproduct|ss2|show|audio'), ('✨ Hieu ung', 'vproduct|ss2|show|direction')],
-            [('🖼️ Logo/Watermark', 'vproduct|ss2|review_addons'), ('⭐ Hoan thien video', 'vproduct|ss2|finish')],
+            [('👁️ Xem từng cảnh', 'vproduct|ss2|plan_view'), ('✍️ Sửa nội dung cảnh', 'vproduct|ss2|content_source|custom')],
+            [('👤 Người / vật giữ nguyên', 'vproduct|ss2|show|preserve'), ('🎬 Câu lệnh video', 'vproduct|ss2|show|prompts')],
+            [('🎚️ Âm thanh', 'vproduct|ss2|show|audio'), ('✨ Hiệu ứng', 'vproduct|ss2|show|direction')],
+            [('🖼️ Logo / Watermark', 'vproduct|ss2|review_addons'), ('⭐ Chọn chất lượng', 'vproduct|ss2|finish')],
             _nav("addons"),
         ]
     elif name == "finish":
         report = dict(draft.get("selfshot2_preflight") or {})
+        scene_count = max(1, int(draft.get("scene_count") or 1))
         if report.get("ok"):
-            text = "⭐ <b>Hoan thien video</b>\n\nPreflight da dat. Chon goi de xem hoa don; chua goi provider va chua tru Xu."
+            status_text = "Kế hoạch đã đủ điều kiện. Chọn một gói để xem hóa đơn."
         else:
-            blocker = _safe(report.get("blocker") or "preflight_chua_chay")
-            text = f"⭐ <b>Hoan thien video</b>\n\nChua the mo hoa don. Ly do: <code>{blocker}</code>. Job=0, outbox=0, provider=0, Xu=0."
-        rows = [[('200 Trai nghiem', 'vproduct|ss2|quality|200'), ('300 Co ban', 'vproduct|ss2|quality|300')], [('400 Tot', 'vproduct|ss2|quality|400'), ('500 Dep', 'vproduct|ss2|quality|500')], [('600 Nang cao', 'vproduct|ss2|quality|600'), ('800 Premium', 'vproduct|ss2|quality|800')], [('1000 Pro', 'vproduct|ss2|quality|1000'), ('1200 Studio', 'vproduct|ss2|quality|1200')], [('1500 Max', 'vproduct|ss2|quality|1500'), ('🔄 Kiem tra lai', 'vproduct|ss2|finish')], _nav("review")]
+            status_text = "Kế hoạch còn thiếu dữ liệu bắt buộc. Vui lòng quay lại kiểm tra trước khi mở hóa đơn."
+        quality_rows = video_ai_real_pricing.public_quality_catalog()
+        lines = [
+            "⭐ <b>Chọn chất lượng video</b>",
+            "",
+            status_text,
+            f"Sản phẩm dùng video nguồn · <b>{scene_count} cảnh</b>.",
+        ]
+        buttons: list[tuple[str, str]] = []
+        for quality in quality_rows:
+            lines.extend([
+                "",
+                f"{quality['icon']} <b>{quality['name']}</b> · <b>{quality['seconds']} giây/cảnh</b> · <b>{quality['unit_xu']} Xu/cảnh</b>",
+                f"• Chất lượng: {quality['public_level']} · {quality['resolution']}",
+                f"• Đặc điểm: {quality['public_detail']}",
+                f"• Phù hợp: {quality['use_case']}",
+                f"• Tổng {scene_count} cảnh: <b>{quality['unit_xu'] * scene_count} Xu</b>",
+            ])
+            buttons.append((
+                f"{quality['icon']} {quality['name']} · {quality['unit_xu']} Xu",
+                f"vproduct|ss2|quality|{quality['tier_id']}",
+            ))
+        lines.extend(["", "Màn này chưa tạo tác vụ và chưa trừ Xu."])
+        text = "\n".join(lines)
+        rows = [buttons[offset:offset + 2] for offset in range(0, len(buttons), 2)]
+        if len(rows[-1]) == 1:
+            rows[-1].append(("🔄 Kiểm tra lại", "vproduct|ss2|finish"))
+        rows.append(_nav("review"))
     else:
         return screen_model("intro", draft)
     return {"screen": name, "text": text, "rows": rows, "parent": screen_parent(name, draft)}
