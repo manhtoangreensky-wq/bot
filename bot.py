@@ -70538,7 +70538,7 @@ _VIDEO_EDITOR_CALLBACK_NO_VALUE_ACTIONS = frozenset({
     "brightness_custom", "color", "color_preset", "compress", "concat",
     "concat_done", "confirmation", "crop", "cut", "effect_timing", "effects",
     "enhance", "flip", "frame", "hub", "ideas", "join", "latest_status",
-    "legacy_sharpen", "logo", "logo_entry", "logo_options", "logo_remove",
+    "legacy_sharpen", "logo", "logo_entry", "logo_opacity", "logo_options", "logo_remove",
     "manual", "manual_audio", "manual_cut", "manual_done", "manual_effects",
     "manual_info", "manual_join", "manual_rotate_flip", "menu", "motion",
     "music", "overlay", "plan", "quality_source", "quality_upload", "reference",
@@ -70548,7 +70548,7 @@ _VIDEO_EDITOR_CALLBACK_NO_VALUE_ACTIONS = frozenset({
     "split_custom", "split_fixed", "split_from_manual", "split_info", "srt",
     "start", "subtitle", "text", "text_overlay", "timeline", "toggle_gaps",
     "transform", "trim_edges", "trim_range", "vertical", "volume",
-    "watermark_entry", "watermark_options", "watermark_remove", "watermark_text",
+    "watermark_entry", "watermark_opacity", "watermark_options", "watermark_remove", "watermark_text",
     "workspace",
 })
 _VIDEO_EDITOR_CALLBACK_ONE_VALUE_ACTIONS = frozenset({
@@ -85888,6 +85888,50 @@ def video_local_logo_input_back_callback(state: dict | None = None) -> str:
     return video_local_logo_parent_callback(current)
 
 
+VIDEO_LOCAL_BRANDING_POSITIONS = (
+    ("top_left", "↖️ Trên trái"),
+    ("top_center", "⬆️ Trên giữa"),
+    ("top_right", "↗️ Trên phải"),
+    ("center_left", "◀️ Giữa trái"),
+    ("center", "⏺️ Chính giữa"),
+    ("center_right", "▶️ Giữa phải"),
+    ("bottom_left", "↙️ Dưới trái"),
+    ("bottom_center", "⬇️ Dưới giữa"),
+    ("bottom_right", "↘️ Dưới phải"),
+)
+VIDEO_LOCAL_BRANDING_POSITION_LABELS = {
+    code: label.split(" ", 1)[1]
+    for code, label in VIDEO_LOCAL_BRANDING_POSITIONS
+}
+
+
+def video_local_branding_position_rows(kind: str) -> list[list[tuple[str, str]]]:
+    buttons = [
+        (label, f"videoedit|set|{kind}_position|{code}")
+        for code, label in VIDEO_LOCAL_BRANDING_POSITIONS
+    ]
+    return [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+
+
+def video_local_logo_text(state: dict | None = None, lang: str = "vi") -> str:
+    del lang
+    logo = dict(dict((state or {}).get("manual_edit_plan") or {}).get("logo_overlay") or {})
+    try:
+        opacity = float(logo.get("opacity", 1.0))
+    except (TypeError, ValueError, OverflowError):
+        opacity = 1.0
+    position = VIDEO_LOCAL_BRANDING_POSITION_LABELS.get(
+        str(logo.get("position") or "top_right"),
+        "Trên phải",
+    )
+    return (
+        "🖼 <b>Logo ảnh</b>\n\n"
+        f"• Vị trí: <b>{position}</b>\n"
+        f"• Độ rõ: <b>{int(round(max(0.01, min(1.0, opacity)) * 100))}%</b>\n\n"
+        "Logo giữ đúng tỉ lệ, rộng tối đa 18% khung hình."
+    )
+
+
 def video_local_logo_keyboard(lang: str = "vi", *, back_callback: str = "videoedit|overlay") -> InlineKeyboardMarkup:
     state_machine = globals().get("video_edit_state_machine")
     safe_parent = getattr(state_machine, "safe_parent_callback", lambda _value: "videoedit|hub")
@@ -85897,12 +85941,12 @@ def video_local_logo_keyboard(lang: str = "vi", *, back_callback: str = "videoed
         if safe_back == "videoedit|review"
         else ("✅ Xem lại", "videoedit|review")
     )
+    position_rows = video_local_branding_position_rows("logo")
     return video_scene3_keyboard([
-        [("↖️ Trên trái", "videoedit|set|logo_position|top_left"), ("↗️ Trên phải", "videoedit|set|logo_position|top_right")],
-        [("↙️ Dưới trái", "videoedit|set|logo_position|bottom_left"), ("↘️ Dưới phải", "videoedit|set|logo_position|bottom_right")],
-        [("Mờ 50%", "videoedit|set|logo_opacity|0.5"), ("Mờ 75%", "videoedit|set|logo_opacity|0.75")],
-        [("Rõ 100%", "videoedit|set|logo_opacity|1"), ("📎 Đổi ảnh", "videoedit|logo")],
-        [("🗑 Xóa logo", "videoedit|logo_remove"), review_or_watermark],
+        *position_rows[:-1],
+        [*position_rows[-1], ("🎚 Nhập độ rõ (%)", "videoedit|logo_opacity")],
+        [("📎 Đổi ảnh", "videoedit|logo"), ("🗑 Xóa logo", "videoedit|logo_remove")],
+        [review_or_watermark, ("🎞 Thông tin video", "videoedit|source_info")],
         [(ui_text(lang, "common.back"), safe_back), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
@@ -85965,12 +86009,6 @@ def video_local_watermark_input_back_callback(state: dict | None = None) -> str:
 def video_local_watermark_text(state: dict | None = None, lang: str = "vi") -> str:
     watermark = dict((state or {}).get("watermark_config") or {})
     text = str(watermark.get("text") or "").strip()
-    position_labels = {
-        "top_left": "Trên trái",
-        "top_right": "Trên phải",
-        "bottom_left": "Dưới trái",
-        "bottom_right": "Dưới phải",
-    }
     try:
         opacity = float(watermark.get("opacity", 0.45))
     except (TypeError, ValueError, OverflowError):
@@ -85978,8 +86016,8 @@ def video_local_watermark_text(state: dict | None = None, lang: str = "vi") -> s
     return (
         "🏷️ <b>Watermark chữ</b>\n\n"
         f"• Nội dung: <b>{html.escape(text[:120]) if text else 'Chưa nhập'}</b>\n"
-        f"• Vị trí: <b>{position_labels.get(str(watermark.get('position') or ''), 'Dưới phải')}</b>\n"
-        f"• Độ rõ: <b>{int(round(max(0.1, min(1.0, opacity)) * 100))}%</b>\n\n"
+        f"• Vị trí: <b>{VIDEO_LOCAL_BRANDING_POSITION_LABELS.get(str(watermark.get('position') or ''), 'Dưới phải')}</b>\n"
+        f"• Độ rõ: <b>{int(round(max(0.01, min(1.0, opacity)) * 100))}%</b>\n\n"
         "Watermark phủ toàn bộ thời lượng MP4 cuối và không ghi đè chữ theo thời gian."
     )
 
@@ -86027,7 +86065,7 @@ def video_editor_plan_with_watermark(
         "font_size": 32,
         "outline": 2,
         "font_path": "",
-        "opacity": max(0.1, min(1.0, opacity)),
+        "opacity": max(0.01, min(1.0, opacity)),
     }
     return plan
 
@@ -86045,11 +86083,10 @@ def video_local_watermark_keyboard(
         if safe_back == "videoedit|review"
         else ("✅ Xem lại", "videoedit|review")
     )
+    position_rows = video_local_branding_position_rows("watermark")
     return video_scene3_keyboard([
-        [("↖️ Trên trái", "videoedit|set|watermark_position|top_left"), ("↗️ Trên phải", "videoedit|set|watermark_position|top_right")],
-        [("↙️ Dưới trái", "videoedit|set|watermark_position|bottom_left"), ("↘️ Dưới phải", "videoedit|set|watermark_position|bottom_right")],
-        [("Mờ 30%", "videoedit|set|watermark_opacity|0.3"), ("Vừa 45%", "videoedit|set|watermark_opacity|0.45")],
-        [("Rõ 70%", "videoedit|set|watermark_opacity|0.7"), ("Rõ 100%", "videoedit|set|watermark_opacity|1")],
+        *position_rows[:-1],
+        [*position_rows[-1], ("🎚 Nhập độ rõ (%)", "videoedit|watermark_opacity")],
         [("✍️ Sửa chữ", "videoedit|watermark_text"), ("🗑 Xóa watermark", "videoedit|watermark_remove")],
         [review_or_info, ("🖼 Mở Logo ảnh", "videoedit|logo_entry")],
         [(ui_text(lang, "common.back"), safe_back), (ui_text(lang, "common.main_menu"), "menu|main")],
@@ -239041,7 +239078,7 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
         )
         await safe_edit_or_send(
             update.message,
-            "🖼 <b>Chọn vị trí và độ mờ logo</b>\n\nLogo giữ đúng tỉ lệ, rộng tối đa 18% khung hình.",
+            video_local_logo_text(current, lang),
             parse_mode="HTML",
             reply_markup=video_local_logo_keyboard(lang),
         )
@@ -239430,7 +239467,7 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
             return_to="logo_options",
         )
         await update.message.reply_text(
-            "🖼 <b>Chọn vị trí và độ mờ logo</b>\n\nLogo giữ đúng tỉ lệ, rộng tối đa 18% khung hình.",
+            video_local_logo_text(current, lang),
             parse_mode="HTML",
             reply_markup=video_local_logo_keyboard(
                 lang,
@@ -239841,6 +239878,8 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
         "await_audio_asset",
         "await_brightness",
         "await_logo",
+        "await_logo_opacity",
+        "await_watermark_opacity",
         "await_watermark_text",
         "await_concat_order",
         "await_trim_edges",
@@ -239873,6 +239912,85 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
         await update.message.reply_text(
             "📎 Bước này chỉ nhận file audio. Hãy gửi MP3, M4A, AAC, WAV, OGG, FLAC hoặc OPUS; tin nhắn chữ không chuyển sang Chat.",
             reply_markup=video_edit_audio_component_keyboard(lang, back_callback="videoedit|audio"),
+        )
+        return True
+    if step in {"await_logo_opacity", "await_watermark_opacity"}:
+        kind = "logo" if step == "await_logo_opacity" else "watermark"
+        input_back = f"videoedit|{kind}_options"
+        if not re.fullmatch(r"\d{1,3}", raw_text):
+            await update.message.reply_text(
+                "⚠️ Nhập độ rõ từ 1–100%. Ví dụ: 45",
+                reply_markup=video_local_input_keyboard(
+                    "manual",
+                    lang,
+                    back_callback=input_back,
+                ),
+            )
+            return True
+        percent = safe_int(raw_text, 0)
+        if percent < 1 or percent > 100:
+            await update.message.reply_text(
+                "⚠️ Độ rõ cần là số nguyên từ 1–100%. Vui lòng nhập lại.",
+                reply_markup=video_local_input_keyboard(
+                    "manual",
+                    lang,
+                    back_callback=input_back,
+                ),
+            )
+            return True
+        opacity = percent / 100.0
+        plan = dict(state.get("manual_edit_plan") or {})
+        if kind == "logo":
+            logo = dict(plan.get("logo_overlay") or {})
+            logo["opacity"] = opacity
+            logo.setdefault("scale", 0.12)
+            plan["logo_overlay"] = logo
+            logo_parent = video_local_logo_parent_callback(state)
+            current = update_video_editor_screen(
+                uid,
+                "logo_options",
+                parent_callback=logo_parent,
+                logo_parent_callback=logo_parent,
+                state_step="logo_options",
+                pending_field="",
+                return_to="logo_options",
+                manual_edit_plan=plan,
+            )
+            await update.message.reply_text(
+                video_local_logo_text(current, lang),
+                parse_mode="HTML",
+                reply_markup=video_local_logo_keyboard(
+                    lang,
+                    back_callback=logo_parent,
+                ),
+            )
+            return True
+        watermark = dict(state.get("watermark_config") or {})
+        watermark["opacity"] = opacity
+        watermark["enabled"] = True
+        plan = video_editor_plan_with_watermark(
+            {**state, "manual_edit_plan": plan},
+            watermark,
+        )
+        watermark_parent = video_local_watermark_parent_callback(state)
+        current = update_video_editor_screen(
+            uid,
+            "watermark_options",
+            parent_callback=watermark_parent,
+            watermark_parent_callback=watermark_parent,
+            state_step="watermark_options",
+            pending_field="",
+            return_to="watermark_options",
+            watermark_config=watermark,
+            manual_edit_plan=plan,
+        )
+        await update.message.reply_text(
+            video_local_watermark_text(current, lang),
+            parse_mode="HTML",
+            reply_markup=video_local_watermark_keyboard(
+                lang,
+                back_callback=watermark_parent,
+            ),
         )
         return True
     if step == "await_watermark_text":
@@ -243219,7 +243337,7 @@ def video_editor_current_render_model(state: dict, lang: str) -> tuple[str, obje
         )
     if screen == "logo_options":
         return (
-            "🖼 <b>Chọn vị trí và độ mờ Logo ảnh</b>\n\nLogo giữ đúng tỉ lệ, rộng tối đa 18% khung hình.",
+            video_local_logo_text(current, lang),
             video_local_logo_keyboard(
                 lang,
                 back_callback=video_local_logo_parent_callback(current),
@@ -244929,7 +245047,7 @@ async def handle_video_editor_callback(
             )
             return await safe_edit_or_send(
                 query,
-                "🖼 <b>Logo ảnh</b>\n\nĐổi vị trí, độ mờ, thay ảnh hoặc xóa Logo ảnh hiện tại.",
+                video_local_logo_text(current, lang),
                 parse_mode="HTML",
                 reply_markup=video_local_logo_keyboard(
                     lang,
@@ -245659,6 +245777,57 @@ async def handle_video_editor_callback(
                 back_callback=watermark_input_back,
             ),
         )
+    if action in {"logo_opacity", "watermark_opacity"}:
+        kind = "logo" if action == "logo_opacity" else "watermark"
+        expected_screen = f"{kind}_options"
+        pending_owned = (
+            str(state.get("current_screen") or "") == f"{kind}_opacity_input"
+            and str(state.get("step") or "") == f"await_{kind}_opacity"
+            and str(state.get("pending_field") or "") == f"{kind}_opacity"
+        )
+        product_ready = (
+            bool(dict(state.get("logo_source") or {}).get("file_id"))
+            if kind == "logo"
+            else bool(dict(state.get("watermark_config") or {}).get("enabled"))
+            and bool(str(dict(state.get("watermark_config") or {}).get("text") or "").strip())
+        )
+        if (
+            str(state.get("current_screen") or "") != expected_screen
+            and not pending_owned
+        ) or not product_ready:
+            return await query.answer(
+                "Nút nhập độ rõ đã cũ. Hãy mở lại mục Logo/Watermark.",
+                show_alert=True,
+            )
+        product_parent = (
+            video_local_logo_parent_callback(state)
+            if kind == "logo"
+            else video_local_watermark_parent_callback(state)
+        )
+        parent_field = (
+            {"logo_parent_callback": product_parent}
+            if kind == "logo"
+            else {"watermark_parent_callback": product_parent}
+        )
+        update_video_editor_screen(
+            uid,
+            f"{kind}_opacity_input",
+            parent_callback=f"videoedit|{kind}_options",
+            state_step=f"await_{kind}_opacity",
+            pending_field=f"{kind}_opacity",
+            return_to=f"{kind}_options",
+            **parent_field,
+        )
+        return await safe_edit_or_send(
+            query,
+            "🎚 <b>Nhập độ rõ từ 1–100%</b>\n\nVí dụ: <b>45</b>",
+            parse_mode="HTML",
+            reply_markup=video_local_input_keyboard(
+                "manual",
+                lang,
+                back_callback=f"videoedit|{kind}_options",
+            ),
+        )
     if action == "watermark_remove":
         watermark = dict(state.get("watermark_config") or {})
         if (
@@ -245753,7 +245922,7 @@ async def handle_video_editor_callback(
         )
         return await safe_edit_or_send(
             query,
-            "🖼 <b>Chọn vị trí và độ mờ logo</b>\n\nLogo giữ đúng tỉ lệ, rộng tối đa 18% khung hình.",
+            video_local_logo_text(current, lang),
             parse_mode="HTML",
             reply_markup=video_local_logo_keyboard(
                 lang,
@@ -245987,7 +246156,8 @@ async def handle_video_editor_callback(
             )
             return await safe_edit_or_send(
                 query,
-                "✅ Đã lưu lựa chọn logo. Có thể đổi tiếp hoặc quay lại danh sách thao tác.",
+                video_local_logo_text(current, lang),
+                parse_mode="HTML",
                 reply_markup=video_local_logo_keyboard(
                     lang,
                     back_callback=video_local_logo_parent_callback(current),

@@ -1545,6 +1545,190 @@ def _state_with_both_branding_products(user_id: int, *, screen: str) -> dict:
     return state
 
 
+def test_branding_keyboards_expose_exactly_nine_positions_and_numeric_opacity() -> None:
+    expected = {
+        "top_left": "Trên trái",
+        "top_center": "Trên giữa",
+        "top_right": "Trên phải",
+        "center_left": "Giữa trái",
+        "center": "Chính giữa",
+        "center_right": "Giữa phải",
+        "bottom_left": "Dưới trái",
+        "bottom_center": "Dưới giữa",
+        "bottom_right": "Dưới phải",
+    }
+
+    for kind, keyboard in (
+        ("logo", bot.video_local_logo_keyboard("vi")),
+        ("watermark", bot.video_local_watermark_keyboard("vi")),
+    ):
+        prefix = f"videoedit|set|{kind}_position|"
+        pairs = _button_pairs(keyboard)
+        positions = {
+            callback.removeprefix(prefix): label.removeprefix("↖️ ")
+            .removeprefix("⬆️ ")
+            .removeprefix("↗️ ")
+            .removeprefix("◀️ ")
+            .removeprefix("⏺️ ")
+            .removeprefix("▶️ ")
+            .removeprefix("↙️ ")
+            .removeprefix("⬇️ ")
+            .removeprefix("↘️ ")
+            for label, callback in pairs
+            if callback.startswith(prefix)
+        }
+
+        assert positions == expected
+        assert ("🎚 Nhập độ rõ (%)", f"videoedit|{kind}_opacity") in pairs
+        assert not any(
+            callback.startswith(f"videoedit|set|{kind}_opacity|")
+            for _label, callback in pairs
+        )
+        for row in keyboard.inline_keyboard:
+            assert sum(button.callback_data.startswith(prefix) for button in row) <= 2
+
+
+def test_all_nine_branding_positions_use_the_existing_ffmpeg_resolver() -> None:
+    expected = {
+        "top_left": ("mx", "my"),
+        "top_center": ("(fw-ow)/2", "my"),
+        "top_right": ("fw-ow-mx", "my"),
+        "center_left": ("mx", "(fh-oh)/2"),
+        "center": ("(fw-ow)/2", "(fh-oh)/2"),
+        "center_right": ("fw-ow-mx", "(fh-oh)/2"),
+        "bottom_left": ("mx", "fh-oh-my"),
+        "bottom_center": ("(fw-ow)/2", "fh-oh-my"),
+        "bottom_right": ("fw-ow-mx", "fh-oh-my"),
+    }
+
+    assert video_local_editing.OVERLAY_POSITIONS == set(expected)
+    for position, coordinates in expected.items():
+        assert video_local_editing._overlay_xy(
+            position,
+            frame_width="fw",
+            frame_height="fh",
+            overlay_width="ow",
+            overlay_height="oh",
+            margin_x="mx",
+            margin_y="my",
+            default="bottom_right",
+        ) == coordinates
+
+
+@pytest.mark.parametrize(
+    ("user_id", "kind", "percent"),
+    (
+        (91_034, "logo", 1),
+        (91_035, "logo", 45),
+        (91_036, "logo", 100),
+        (91_037, "watermark", 1),
+        (91_038, "watermark", 45),
+        (91_039, "watermark", 100),
+    ),
+)
+def test_branding_opacity_input_accepts_one_to_one_hundred_and_preserves_state(
+    user_id: int,
+    kind: str,
+    percent: int,
+) -> None:
+    bot.clear_video_editor_pending(user_id)
+    try:
+        original = _state_with_both_branding_products(
+            user_id,
+            screen=f"{kind}_options",
+        )
+        expected_logo_source = deepcopy(original["logo_source"])
+        expected_watermark_text = original["watermark_config"]["text"]
+        _store_state(user_id, original)
+
+        _press_callback(user_id, f"videoedit|{kind}_opacity")
+        waiting = deepcopy(bot.get_video_editor_pending(user_id))
+        assert waiting["step"] == f"await_{kind}_opacity"
+        assert waiting["current_screen"] == f"{kind}_opacity_input"
+        assert waiting["parent_callback"] == f"videoedit|{kind}_options"
+        assert waiting["pending_field"] == f"{kind}_opacity"
+        assert video_edit_state_machine.resume_callback(
+            waiting["current_screen"],
+            waiting["pending_field"],
+        ) == f"videoedit|{kind}_opacity"
+        resumed = _press_callback(user_id, f"videoedit|{kind}_opacity")
+        assert resumed.edits
+        assert bot.get_video_editor_pending(user_id)["step"] == f"await_{kind}_opacity"
+
+        handled, message = _run_pending_text(user_id, str(percent))
+
+        assert handled is True
+        current = deepcopy(bot.get_video_editor_pending(user_id))
+        assert current["step"] == f"{kind}_options"
+        assert current["current_screen"] == f"{kind}_options"
+        assert current["parent_callback"] == "videoedit|branding"
+        assert current["pending_field"] == ""
+        assert current["logo_source"] == expected_logo_source
+        assert current["watermark_config"]["text"] == expected_watermark_text
+        ratio = percent / 100.0
+        if kind == "logo":
+            assert current["manual_edit_plan"]["logo_overlay"]["opacity"] == ratio
+        else:
+            assert current["watermark_config"]["opacity"] == ratio
+            assert current["manual_edit_plan"]["watermark_overlay"]["opacity"] == ratio
+        assert f"Độ rõ: <b>{percent}%</b>" in message.replies[-1][0]
+        assert ("⬅️ Quay lại", "videoedit|branding") in _button_pairs(
+            message.replies[-1][1]["reply_markup"]
+        )
+
+        engine_plan = deepcopy(current["manual_edit_plan"])
+        engine_plan["input_video"] = "source.mp4"
+        engine_plan["logo_overlay"]["path"] = "logo.png"
+        normalized = video_local_editing.normalize_manual_edit_plan(
+            engine_plan,
+            source_duration_ms=60_000,
+        )
+        target = "logo_overlay" if kind == "logo" else "watermark_overlay"
+        assert normalized[target]["opacity"] == ratio
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
+@pytest.mark.parametrize(
+    ("user_id", "kind", "raw_value"),
+    (
+        (91_040, "logo", "0"),
+        (91_041, "logo", "101"),
+        (91_042, "logo", "không-phải-số"),
+        (91_043, "watermark", "0"),
+        (91_044, "watermark", "101"),
+        (91_045, "watermark", "không-phải-số"),
+    ),
+)
+def test_invalid_branding_opacity_keeps_the_previous_state_and_input_screen(
+    user_id: int,
+    kind: str,
+    raw_value: str,
+) -> None:
+    bot.clear_video_editor_pending(user_id)
+    try:
+        _store_state(
+            user_id,
+            _state_with_both_branding_products(
+                user_id,
+                screen=f"{kind}_options",
+            ),
+        )
+        _press_callback(user_id, f"videoedit|{kind}_opacity")
+        before = deepcopy(bot.get_video_editor_pending(user_id))
+
+        handled, message = _run_pending_text(user_id, raw_value)
+
+        assert handled is True
+        assert bot.get_video_editor_pending(user_id) == before
+        assert "1–100%" in message.replies[-1][0]
+        assert ("⬅️ Quay lại", f"videoedit|{kind}_options") in _button_pairs(
+            message.replies[-1][1]["reply_markup"]
+        )
+    finally:
+        bot.clear_video_editor_pending(user_id)
+
+
 def test_editing_and_removing_logo_preserves_the_text_watermark() -> None:
     user_id = 91_031
     bot.clear_video_editor_pending(user_id)

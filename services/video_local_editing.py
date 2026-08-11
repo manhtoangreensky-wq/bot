@@ -113,7 +113,7 @@ def normalize_callback_plan_choice(kind: Any, value: Any) -> tuple[str, Any]:
                 raise ValueError
             if key == "volume" and number not in VOLUME_PRESETS:
                 raise ValueError
-            if key in {"logo_opacity", "watermark_opacity"} and not 0.1 <= number <= 1.0:
+            if key in {"logo_opacity", "watermark_opacity"} and not 0.01 <= number <= 1.0:
                 raise ValueError
             return key, number
         if key == "color_preset":
@@ -779,7 +779,7 @@ def normalize_manual_edit_plan(
             or (not defer_watermark_end and watermark_start >= watermark_end)
             or not 16 <= watermark_font_size <= 120
             or not 1 <= watermark_outline <= 6
-            or not 0.1 <= watermark_opacity <= 1.0
+            or not 0.01 <= watermark_opacity <= 1.0
         ):
             raise LocalVideoEditError("watermark_overlay_invalid")
         watermark = {
@@ -836,7 +836,7 @@ def normalize_manual_edit_plan(
             not logo_path
             or requested_position not in LOGO_POSITIONS
             or not 0.02 <= scale <= 0.18
-            or not 0.1 <= opacity <= 1.0
+            or not 0.01 <= opacity <= 1.0
         ):
             raise LocalVideoEditError("logo_overlay_invalid")
         if workspace is not None:
@@ -1520,7 +1520,7 @@ def _text_filter(config: dict[str, Any]) -> str:
         opacity = float(config.get("opacity", 1.0))
     except (TypeError, ValueError, OverflowError):
         opacity = 1.0
-    opacity = max(0.1, min(1.0, opacity))
+    opacity = max(0.01, min(1.0, opacity))
     font_color = (
         f"white@{opacity:.3f}"
         if "opacity" in config
@@ -2670,7 +2670,7 @@ def public_plan_summary(
             opacity = 0.45
         if not math.isfinite(opacity):
             opacity = 0.45
-        opacity_percent = int(round(max(0.1, min(1.0, opacity)) * 100))
+        opacity_percent = int(round(max(0.01, min(1.0, opacity)) * 100))
         lines.append(f"Watermark chữ · {position} · {opacity_percent}%")
     if plan.get("logo_overlay"):
         logo = dict(plan.get("logo_overlay") or {})
