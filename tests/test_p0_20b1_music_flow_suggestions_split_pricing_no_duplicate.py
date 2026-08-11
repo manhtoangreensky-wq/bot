@@ -144,10 +144,10 @@ def test_toan_aas_sample_idea_generates_three_suggestions():
     assert len(state["music_suggestions"]) == 3
 
 
-def test_instrumental_prices_100_150_200():
+def test_instrumental_prices_130_150_200():
     labels = [label for label in _labels(bot.music_product_tier_keyboard("background", "vi")) if "Xu" in label]
-    assert labels == ["🎵 Cơ bản — 100 Xu", "🎶 Tiêu chuẩn — 150 Xu", "💎 Cao cấp — 200 Xu"]
-    assert bot.music_product_tier_price_xu("basic", "background") == 100
+    assert labels == ["🎵 Cơ bản — 130 Xu", "🎶 Tiêu chuẩn — 150 Xu", "💎 Cao cấp — 200 Xu"]
+    assert bot.music_product_tier_price_xu("basic", "background") == 130
     assert bot.music_product_tier_price_xu("standard", "background") == 150
     assert bot.music_product_tier_price_xu("premium", "background") == 200
 

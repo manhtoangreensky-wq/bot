@@ -134,6 +134,7 @@ from services.pricing_guide_content import (
     lines_to_html_page as public_lines_to_html_page,
     pricing_lines as public_pricing_lines,
     pricing_markdown as shared_pricing_markdown,
+    public_copy_locale,
 )
 from video_multiscene_engine import (
     build_detailed_multiscene_prompt_plan,
@@ -70994,6 +70995,7 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support"), InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main")],
         [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start")],
         [InlineKeyboardButton("🌐 Trung tâm", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
@@ -71009,10 +71011,8 @@ def language_choice_text() -> str:
 
 def language_choice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="lang|vi")],
-        [InlineKeyboardButton("🇺🇸 English", callback_data="lang|en")],
-        [InlineKeyboardButton("🇨🇳 中文", callback_data="lang|zh")],
-        [InlineKeyboardButton("🌍 Ngôn ngữ khác / More languages", callback_data="lang_more")],
+        [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="lang|vi"), InlineKeyboardButton("🇺🇸 English", callback_data="lang|en")],
+        [InlineKeyboardButton("🇨🇳 中文", callback_data="lang|zh"), InlineKeyboardButton("🌍 Ngôn ngữ khác / More languages", callback_data="lang_more")],
     ])
 
 def other_language_choice_text() -> str:
@@ -71045,6 +71045,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
             [InlineKeyboardButton("📝 笔记 / 文件", callback_data="menu|main_memory"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
             [InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support"), InlineKeyboardButton("💰 充值 / 价格", callback_data="pricing|main")],
             [InlineKeyboardButton("💬 反馈 / 报错", callback_data="feedback|start"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("🌍 更改语言", callback_data="back_lang")],
         ]
         if is_admin:
             rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
@@ -71058,6 +71059,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
             [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
             [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support"), InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main")],
             [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Trung tâm", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
         ]
         if is_admin:
             rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
@@ -71070,6 +71072,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         [InlineKeyboardButton("📝 Notes / Docs", callback_data="menu|main_memory"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
         [InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support"), InlineKeyboardButton("💰 Top up / Pricing", callback_data="pricing|main")],
         [InlineKeyboardButton("💬 Feedback / Bug", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("🌍 Change language", callback_data="back_lang")],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
@@ -147587,12 +147590,12 @@ MUSIC_PRODUCT_TIER_LABELS_VI = {
     MUSIC_PRODUCT_TIER_PREMIUM: "Cao cấp",
 }
 MUSIC_PRODUCT_TIER_BUTTONS_VI = {
-    MUSIC_PRODUCT_TIER_BASIC: "🎵 Cơ bản — 100 Xu",
+    MUSIC_PRODUCT_TIER_BASIC: "🎵 Cơ bản — 130 Xu",
     MUSIC_PRODUCT_TIER_STANDARD: "🎶 Tiêu chuẩn — 150 Xu",
     MUSIC_PRODUCT_TIER_PREMIUM: "💎 Cao cấp — 200 Xu",
 }
 MUSIC_PRODUCT_BACKGROUND_TIER_PRICES = {
-    MUSIC_PRODUCT_TIER_BASIC: 100,
+    MUSIC_PRODUCT_TIER_BASIC: 130,
     MUSIC_PRODUCT_TIER_STANDARD: 150,
     MUSIC_PRODUCT_TIER_PREMIUM: 200,
 }
