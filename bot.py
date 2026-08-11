@@ -53405,7 +53405,17 @@ def video_b14_autonomous_db_poll_metadata(
         except Exception:
             current_project = {}
     payload = dict(result or video_b14_job_result_payload(current_job) or {})
-    telemetry = video_b14_reconciled_provider_debug(current_job, current_project, payload, refresh_source=refresh_source) if current_job else dict(payload)
+    telemetry = (
+        video_b14_reconciled_provider_debug(
+            current_job,
+            current_project,
+            payload,
+            refresh_source=refresh_source,
+            poll_candidates=False,
+        )
+        if current_job
+        else dict(payload)
+    )
     provider_alive = bool(
         telemetry.get("provider_task_alive")
         or telemetry.get("primary_provider_task_alive")
@@ -96365,7 +96375,14 @@ def video_b14_primary_alive_attempt(result: dict | None = None) -> dict:
     return fallback
 
 
-def video_b14_reconciled_provider_debug(job: dict | None = None, project: dict | None = None, result: dict | None = None, *, refresh_source: str = "debug") -> dict:
+def video_b14_reconciled_provider_debug(
+    job: dict | None = None,
+    project: dict | None = None,
+    result: dict | None = None,
+    *,
+    refresh_source: str = "debug",
+    poll_candidates: bool = True,
+) -> dict:
     data = dict(result or {})
     try:
         route_contract = video_project_queue.canonical_product_video_route_contract(
@@ -96385,7 +96402,7 @@ def video_b14_reconciled_provider_debug(job: dict | None = None, project: dict |
                 job=dict(job or {}),
                 project=dict(project or {}),
                 result=data,
-                poll_candidates=True,
+                poll_candidates=bool(poll_candidates),
             )
             canonical_fields = _video_provider_merge_canonical_task_debug({}, canonical)
             data = _video_provider_merge_canonical_task_debug(data, canonical)
@@ -96662,18 +96679,6 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         job_id = 0
         project_id = 0
         submit_blocked = True
-    elif live_job:
-        try:
-            video_b14_fail_stale_product_job_for_status(job_id)
-            refreshed_job = video_b14_render_job_by_id(job_id)
-            if refreshed_job and video_b14_status_identity_matches(
-                refreshed_job,
-                user_id=user_id,
-                project_id=project_id,
-            ):
-                live_job = refreshed_job
-        except Exception:
-            pass
     if live_job:
         draft_status = str(draft_job.get("status") or "").strip().lower()
         if draft_status in {"failed", "error"} and not result.get("job"):
@@ -96701,7 +96706,13 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         status_identity_rejected = True
     duplicate = bool(result.get("duplicate_prevented") or draft.get("b14_duplicate_prevented"))
     job_result = video_b14_job_result_payload(job)
-    reconciled_job_result = video_b14_reconciled_provider_debug(job, project, job_result, refresh_source="public_panel")
+    reconciled_job_result = video_b14_reconciled_provider_debug(
+        job,
+        project,
+        job_result,
+        refresh_source="public_panel",
+        poll_candidates=False,
+    )
     if (
         reconciled_job_result.get("shopaikey_status_endpoint_exact")
         or reconciled_job_result.get("canonical_result_url_present")
@@ -97245,31 +97256,92 @@ def video_b14_auto_refresh_session_from_status(job: dict | None = None, project:
     }
 
 
-def video_b14_auto_refresh_status_bundle(job_id: int | str = "", *, user_id=0, job: dict | None = None, project: dict | None = None) -> dict:
+def video_b14_auto_refresh_status_bundle(
+    job_id: int | str = "",
+    *,
+    user_id=0,
+    chat_id=0,
+    project_id=0,
+    job: dict | None = None,
+    project: dict | None = None,
+) -> dict:
     jid = safe_int(job_id or (job or {}).get("id"), 0)
+    expected_user_id = safe_int(user_id, 0)
+    expected_chat_id = safe_int(chat_id, 0)
+    expected_project_id = safe_int(project_id, 0)
     current_job = dict(job or (video_b14_render_job_by_id(jid) if jid else {}) or {})
-    if current_job and not video_b14_status_identity_matches(
-        current_job,
-        user_id=user_id,
-    ):
+    actual_job_id = safe_int(current_job.get("id") or current_job.get("job_id"), 0)
+    actual_user_id = safe_int(current_job.get("user_id"), 0)
+    actual_project_id = safe_int(current_job.get("project_id"), 0)
+    payload = video_b14_job_result_payload(current_job)
+    payload_job_id = safe_int(payload.get("job_id"), 0)
+    payload_chat_id = safe_int(
+        payload.get("chat_id")
+        or payload.get("status_panel_chat_id")
+        or payload.get("progress_chat_id"),
+        0,
+    )
+    identity_ok = bool(
+        current_job
+        and actual_job_id > 0
+        and (jid <= 0 or actual_job_id == jid)
+        and (payload_job_id <= 0 or payload_job_id == actual_job_id)
+        and (expected_user_id <= 0 or actual_user_id == expected_user_id)
+        and (expected_project_id <= 0 or actual_project_id == expected_project_id)
+        and (
+            expected_chat_id <= 0
+            or (
+                (expected_user_id <= 0 or expected_chat_id == expected_user_id)
+                and payload_chat_id == expected_chat_id
+            )
+        )
+        and video_b14_status_identity_matches(
+            current_job,
+            user_id=expected_user_id,
+            project_id=expected_project_id,
+        )
+    )
+    if current_job and not identity_ok:
         current_job = {}
     current_project = dict(project or {})
-    project_id = safe_int(current_project.get("project_id") or current_job.get("project_id"), 0)
-    if project_id and not current_project:
+    if not current_job:
+        current_project = {}
+    resolved_project_id = safe_int(
+        current_project.get("project_id")
+        or current_job.get("project_id")
+        or expected_project_id,
+        0,
+    )
+    if resolved_project_id and current_job and not current_project:
         try:
-            current_project = get_video_project(project_id)
+            current_project = get_video_project(resolved_project_id)
         except Exception:
             current_project = {}
-    if current_project and not video_b14_status_identity_matches(
-        current_job,
-        current_project,
-        user_id=user_id,
-        project_id=project_id,
-    ):
+    project_identity_ok = bool(
+        current_job
+        and current_project
+        and video_b14_status_identity_matches(
+            current_job,
+            current_project,
+            user_id=expected_user_id,
+            project_id=expected_project_id or resolved_project_id,
+        )
+    )
+    if current_job and (not current_project or not project_identity_ok):
         current_job = {}
         current_project = {}
-    session = video_b14_auto_refresh_session_from_status(current_job, current_project, user_id=user_id)
-    return {"job": current_job, "project": current_project, "session": session}
+    session = video_b14_auto_refresh_session_from_status(
+        current_job,
+        current_project,
+        user_id=expected_user_id,
+    )
+    return {
+        "job": current_job,
+        "project": current_project,
+        "session": session,
+        "identity_ok": bool(current_job and current_project),
+        "blocker": "" if current_job and current_project else "status_identity_mismatch",
+    }
 
 
 def video_b14_auto_refresh_terminal_state(job: dict | None = None, project: dict | None = None) -> str:
@@ -97287,7 +97359,13 @@ def video_b14_auto_refresh_terminal_state(job: dict | None = None, project: dict
         return "cancelled"
     payload = video_b14_job_result_payload(job)
     try:
-        telemetry = video_b14_reconciled_provider_debug(job, project, payload, refresh_source="auto_refresh_terminal")
+        telemetry = video_b14_reconciled_provider_debug(
+            job,
+            project,
+            payload,
+            refresh_source="auto_refresh_terminal",
+            poll_candidates=False,
+        )
     except Exception:
         telemetry = payload
     if (
@@ -97343,12 +97421,36 @@ def video_b14_auto_refresh_stage_from_snapshot(status: str, progress: int, *, te
     return "Nhận yêu cầu"
 
 
-def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: str = "vi", job: dict | None = None, project: dict | None = None, session: dict | None = None, result: dict | None = None) -> dict:
-    bundle = video_b14_auto_refresh_status_bundle(job_id, user_id=user_id, job=job, project=project)
-    current_job = dict((result or {}).get("job") or bundle.get("job") or {})
-    current_project = dict((result or {}).get("project") or bundle.get("project") or {})
-    current_session = dict(session or bundle.get("session") or {})
-    jid = safe_int(current_job.get("id") or job_id or ((current_session.get("draft") or {}).get("b14_queue_job_id")), 0)
+def video_b14_auto_refresh_snapshot(
+    job_id: int | str = "",
+    *,
+    user_id=0,
+    chat_id=0,
+    project_id=0,
+    lang: str = "vi",
+    job: dict | None = None,
+    project: dict | None = None,
+    session: dict | None = None,
+    result: dict | None = None,
+) -> dict:
+    candidate_job = dict((result or {}).get("job") or job or {})
+    candidate_project = dict((result or {}).get("project") or project or {})
+    bundle = video_b14_auto_refresh_status_bundle(
+        job_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        project_id=project_id,
+        job=candidate_job or None,
+        project=candidate_project or None,
+    )
+    current_job = dict(bundle.get("job") or {})
+    current_project = dict(bundle.get("project") or {})
+    current_session = (
+        dict(session or bundle.get("session") or {})
+        if bundle.get("identity_ok")
+        else dict(bundle.get("session") or {})
+    )
+    jid = safe_int(current_job.get("id"), 0)
     registry_present = bool(VIDEO_STATUS_AUTO_REFRESH_JOBS.get(video_b14_auto_refresh_key(jid))) if jid else False
     terminal_before_poll = video_b14_auto_refresh_terminal_state(
         current_job,
@@ -97361,7 +97463,7 @@ def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: 
         result=video_b14_job_result_payload(current_job),
         registry_present=registry_present,
         refresh_source="auto_refresh_snapshot",
-        persist=bool(jid),
+        persist=False,
     ) if jid and terminal_before_poll != "cancelled" else {}
     text = video_b14_queue_status_text(current_session, {"job": current_job, "project": current_project}, user_id, lang)
     percent_match = re.search(r"Tiến độ:\s*<b>(\d+)%</b>", text)
@@ -97629,8 +97731,49 @@ def video_b14_auto_refresh_recovery_target(
     }
 
 
+def video_b14_recover_existing_tasks_for_worker_claim(
+    conn,
+    *,
+    limit: int = 20,
+) -> dict:
+    """Requeue recoverable Product Video tasks only at the worker claim boundary."""
+    rows = conn.execute(
+        """SELECT id FROM video_jobs
+             WHERE job_type=? AND status='failed'
+             ORDER BY id DESC LIMIT ?""",
+        (
+            video_project_queue.VIDEO_RENDER_JOB_TYPE,
+            max(1, min(100, int(limit or 20))),
+        ),
+    ).fetchall()
+    scanned = 0
+    recovered = 0
+    for row in rows:
+        job_id = safe_int(
+            row[0] if not isinstance(row, sqlite3.Row) else row["id"],
+            0,
+        )
+        if job_id <= 0:
+            continue
+        scanned += 1
+        recovery = video_project_queue.recover_product_video_existing_tasks(
+            conn,
+            job_id=job_id,
+        )
+        if recovery.get("existing_task_recovery_recovered"):
+            recovered += 1
+    return {
+        "ok": True,
+        "owner": "worker_claim",
+        "scanned": scanned,
+        "recovered": recovered,
+        "provider_submit_allowed": False,
+        "wallet_mutations": 0,
+    }
+
+
 async def video_b14_rehydrate_auto_refresh_registry(context, *, limit: int = 100) -> dict:
-    """Restore Product Video refresh loops and read-only existing-task recovery after restart."""
+    """Restore Product Video status loops from persisted state without recovery."""
     targets: list[dict] = []
     scanned = 0
     recovered_jobs = 0
@@ -97658,26 +97801,6 @@ async def video_b14_rehydrate_auto_refresh_registry(context, *, limit: int = 100
                     conn,
                     job_id=job_id,
                 )
-                if str(job.get("status") or "").strip().lower() == "failed":
-                    recovery_state = video_project_queue.product_video_existing_task_recovery_state(
-                        job,
-                        project,
-                        payload,
-                        outbox,
-                    )
-                    if recovery_state.get("existing_task_recovery_recoverable"):
-                        recovery = video_project_queue.recover_product_video_existing_tasks(
-                            conn,
-                            job_id=job_id,
-                        )
-                        if recovery.get("existing_task_recovery_recovered"):
-                            recovered_jobs += 1
-                            job = video_project_queue.get_video_render_job(conn, job_id)
-                            project = video_project_queue.get_video_project(
-                                conn,
-                                safe_int(job.get("project_id"), 0),
-                            )
-                            payload = video_b14_job_result_payload(job)
                 target = video_b14_auto_refresh_recovery_target(
                     job,
                     project,
@@ -97728,6 +97851,7 @@ async def video_b14_rehydrate_auto_refresh_registry(context, *, limit: int = 100
                 "project": target.get("project"),
             },
             start_task=True,
+            persist_metadata=False,
         )
         if not record:
             continue
@@ -97742,17 +97866,6 @@ async def video_b14_rehydrate_auto_refresh_registry(context, *, limit: int = 100
             }
         )
         VIDEO_STATUS_AUTO_REFRESH_JOBS[key] = record
-        video_b14_persist_auto_refresh_metadata(
-            target.get("job_id"),
-            {
-                "auto_refresh_recovered_from_db": True,
-                "status_panel_message_id_source": "result_json",
-                "status_panel_message_id": target.get("message_id"),
-                "latest_status_message_id": target.get("message_id"),
-                "chat_id": target.get("chat_id"),
-                "elapsed_live_tick_enabled": True,
-            },
-        )
         registered += 1
     return {
         "ok": True,
@@ -97774,14 +97887,30 @@ def video_b14_auto_refresh_register(
     session: dict | None = None,
     result: dict | None = None,
     start_task: bool = True,
+    persist_metadata: bool = True,
 ) -> dict:
     jid = safe_int(job_id, 0)
     if not VIDEO_STATUS_AUTO_REFRESH_ENABLED or jid <= 0 or not chat_id or not message_id:
         return {}
-    snapshot = video_b14_auto_refresh_snapshot(jid, user_id=user_id, lang=lang, session=session, result=result)
+    draft = dict((session or {}).get("draft") or {})
+    expected_project_id = safe_int(
+        draft.get("b14_project_id")
+        or ((result or {}).get("project") or {}).get("project_id"),
+        0,
+    )
+    snapshot = video_b14_auto_refresh_snapshot(
+        jid,
+        user_id=user_id,
+        chat_id=chat_id,
+        project_id=expected_project_id,
+        lang=lang,
+        session=session,
+        result=result,
+    )
+    if not (snapshot.get("job") and snapshot.get("project")):
+        return {}
     key = video_b14_auto_refresh_key(jid)
     current = dict(VIDEO_STATUS_AUTO_REFRESH_JOBS.get(key) or {})
-    draft = dict((session or {}).get("draft") or {})
     record = {
         **current,
         "key": key,
@@ -97829,29 +97958,30 @@ def video_b14_auto_refresh_register(
         "stopped_reason": str(snapshot.get("terminal_state") or "") if snapshot.get("terminal_state") else "",
     }
     VIDEO_STATUS_AUTO_REFRESH_JOBS[key] = record
-    video_b14_persist_auto_refresh_metadata(
-        jid,
-        {
-            "chat_id": chat_id,
-            "user_id": user_id,
-            "job_id": jid,
-            "project_id": record.get("project_id"),
-            "latest_status_message_id": message_id,
-            "status_panel_message_id": message_id,
-            "progress_message_id": message_id,
-            "current_stage": record.get("current_stage"),
-            "final_progress_after_reconcile": record.get("percent"),
-            "next_refresh_expected_at": record.get("auto_refresh_next_tick_at"),
-            "auto_refresh_enabled": True,
-            "auto_refresh_recovered_from_db": False,
-            "auto_refresh_next_tick_at": record.get("auto_refresh_next_tick_at"),
-            "auto_refresh_next_update_at": record.get("auto_refresh_next_update_at") or record.get("auto_refresh_next_tick_at"),
-            "auto_refresh_interval_seconds": int(VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS),
-            "auto_refresh_last_update_at": record.get("auto_refresh_last_update_at"),
-            "auto_refresh_skip_reason": "",
-            "status_panel_message_id_source": "telegram_send_or_edit",
-        },
-    )
+    if persist_metadata:
+        video_b14_persist_auto_refresh_metadata(
+            jid,
+            {
+                "chat_id": chat_id,
+                "user_id": user_id,
+                "job_id": jid,
+                "project_id": record.get("project_id"),
+                "latest_status_message_id": message_id,
+                "status_panel_message_id": message_id,
+                "progress_message_id": message_id,
+                "current_stage": record.get("current_stage"),
+                "final_progress_after_reconcile": record.get("percent"),
+                "next_refresh_expected_at": record.get("auto_refresh_next_tick_at"),
+                "auto_refresh_enabled": True,
+                "auto_refresh_recovered_from_db": False,
+                "auto_refresh_next_tick_at": record.get("auto_refresh_next_tick_at"),
+                "auto_refresh_next_update_at": record.get("auto_refresh_next_update_at") or record.get("auto_refresh_next_tick_at"),
+                "auto_refresh_interval_seconds": int(VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS),
+                "auto_refresh_last_update_at": record.get("auto_refresh_last_update_at"),
+                "auto_refresh_skip_reason": "",
+                "status_panel_message_id_source": "telegram_send_or_edit",
+            },
+        )
     if start_task and not record.get("stopped"):
         started = video_b14_auto_refresh_start_task(context, key)
         record = dict(VIDEO_STATUS_AUTO_REFRESH_JOBS.get(key) or record)
@@ -97922,7 +98052,24 @@ async def video_b14_auto_refresh_tick(context, key: str) -> dict:
     preflight = video_b14_auto_refresh_status_bundle(
         record.get("job_id") or "",
         user_id=record.get("user_id") or 0,
+        chat_id=record.get("chat_id") or 0,
+        project_id=record.get("project_id") or 0,
     )
+    if not preflight.get("identity_ok"):
+        record.update(
+            {
+                "stopped": True,
+                "task_alive": False,
+                "stopped_reason": "status_identity_mismatch",
+                "auto_refresh_skip_reason": "status_identity_mismatch",
+            }
+        )
+        VIDEO_STATUS_AUTO_REFRESH_JOBS[str(key or "")] = record
+        return {
+            "status": "stopped",
+            "reason": "status_identity_mismatch",
+            "record": dict(record),
+        }
     preflight_terminal = video_b14_auto_refresh_terminal_state(
         preflight.get("job"),
         preflight.get("project"),
@@ -97957,25 +98104,15 @@ async def video_b14_auto_refresh_tick(context, key: str) -> dict:
         return {"status": "stopped", "reason": "max_updates"}
     record["last_tick_at"] = now_text()
     record["task_alive"] = True
-    delivery_result = await video_b14_autonomous_materialize_and_deliver(
-        context,
-        record.get("chat_id"),
-        record.get("job_id") or "",
-        lang=record.get("lang") or "vi",
-        source="auto_refresh_tick",
-    )
-    if delivery_result.get("waiting"):
-        record["db_poll_candidate"] = True
-        record["registry_required_for_poll"] = False
-        record["registry_missing_is_blocker"] = False
-        record["next_poll_at"] = str(((delivery_result.get("autonomous_db_poll") or {}).get("next_poll_at") or ""))
-    elif delivery_result.get("sent"):
-        record["download_button_visible"] = True
-        record["autonomous_delivery_sent"] = True
     snapshot = video_b14_auto_refresh_snapshot(
         record.get("job_id") or "",
         user_id=record.get("user_id") or 0,
+        chat_id=record.get("chat_id") or 0,
+        project_id=record.get("project_id") or 0,
         lang=record.get("lang") or "vi",
+        job=preflight.get("job"),
+        project=preflight.get("project"),
+        session=preflight.get("session"),
     )
     record["update_count"] = int(record.get("update_count") or 0) + 1
     should_edit = video_b14_auto_refresh_should_edit(record, snapshot)
@@ -98000,43 +98137,14 @@ async def video_b14_auto_refresh_tick(context, key: str) -> dict:
             record["auto_refresh_edit_success"] = False
             lower = str(exc or "").lower()
             if any(fragment in lower for fragment in ("message to edit not found", "message not found", "message_id_invalid", "chat not found")):
-                if not record.get("auto_refresh_rebind_attempted"):
-                    try:
-                        new_message = await context.bot.send_message(
-                            chat_id=record.get("chat_id"),
-                            text=str(snapshot.get("text") or ""),
-                            parse_mode="HTML",
-                            reply_markup=video_b14_queue_status_keyboard(record.get("lang") or "vi", job_id=record.get("job_id") or ""),
-                        )
-                        new_message_id = getattr(new_message, "message_id", None)
-                        if new_message_id:
-                            record.update({
-                                "message_id": new_message_id,
-                                "latest_status_message_id": new_message_id,
-                                "status_panel_message_id": new_message_id,
-                                "status_panel_message_id_source": "rebind_after_edit_failed",
-                                "auto_refresh_rebind_attempted": True,
-                                "auto_refresh_rebind_success": True,
-                                "auto_refresh_skip_reason": "",
-                                "last_edit_at": now_text(),
-                                "last_update_at": now_text(),
-                                "stopped": False,
-                                "task_alive": True,
-                                "stopped_reason": "",
-                            })
-                        else:
-                            record.update({"stopped": True, "task_alive": False, "stopped_reason": "message_missing"})
-                    except Exception as send_exc:
-                        record.update({
-                            "stopped": True,
-                            "task_alive": False,
-                            "stopped_reason": "message_missing",
-                            "auto_refresh_rebind_attempted": True,
-                            "auto_refresh_rebind_success": False,
-                            "last_error": sanitize_log_text(str(send_exc))[:180],
-                        })
-                else:
-                    record.update({"stopped": True, "task_alive": False, "stopped_reason": "message_missing"})
+                record.update(
+                    {
+                        "stopped": True,
+                        "task_alive": False,
+                        "stopped_reason": "message_missing",
+                        "auto_refresh_skip_reason": "message_missing",
+                    }
+                )
     else:
         record["last_checked_at"] = now_text()
         record["auto_refresh_edit_success"] = False
@@ -98054,51 +98162,72 @@ async def video_b14_auto_refresh_tick(context, key: str) -> dict:
         "auto_refresh_next_update_at": (datetime.now() + timedelta(seconds=interval_seconds)).isoformat(timespec="seconds"),
         "auto_refresh_next_tick_at": (datetime.now() + timedelta(seconds=interval_seconds)).isoformat(timespec="seconds"),
     })
-    if safe_int(record.get("job_id"), 0):
-        video_b14_persist_auto_refresh_metadata(
-            record.get("job_id"),
-            {
-                "latest_status_message_id": record.get("message_id"),
-                "status_panel_message_id": record.get("message_id"),
-                "status_panel_message_id_source": record.get("status_panel_message_id_source") or "registry",
-                "auto_refresh_enabled": True,
-                "auto_refresh_interval_seconds": interval_seconds,
-                "auto_refresh_last_update_at": record.get("auto_refresh_last_update_at"),
-                "auto_refresh_next_update_at": record.get("auto_refresh_next_update_at"),
-                "auto_refresh_next_tick_at": record.get("auto_refresh_next_tick_at"),
-                "auto_refresh_edit_success": bool(record.get("auto_refresh_edit_success")),
-                "auto_refresh_skip_reason": str(record.get("auto_refresh_skip_reason") or ""),
-                "final_progress_after_reconcile": record.get("percent"),
-            },
-        )
     if terminal and bool(PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL):
         record.update({"stopped": True, "task_alive": False, "stopped_reason": terminal})
     VIDEO_STATUS_AUTO_REFRESH_JOBS[str(key or "")] = record
     return {"status": "updated" if should_edit else "skipped", "record": dict(record), "snapshot": snapshot}
 
 
-async def video_b14_send_or_edit_status_panel(query, context, session: dict, result: dict | None, user_id, lang: str):
+async def video_b14_edit_existing_status_message(
+    query,
+    text: str,
+    reply_markup,
+):
+    try:
+        return await query.edit_message_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+    except Exception as exc:
+        if "message is not modified" in str(exc or "").lower():
+            return getattr(query, "message", None)
+        logger.warning(
+            "product video read-only status edit failed | %s",
+            sanitize_log_text(type(exc).__name__),
+        )
+        return None
+
+
+async def video_b14_send_or_edit_status_panel(
+    query,
+    context,
+    session: dict,
+    result: dict | None,
+    user_id,
+    lang: str,
+    *,
+    register_auto_refresh: bool = True,
+    edit_existing_only: bool = False,
+):
     text = video_b14_queue_status_text(session, result, user_id, lang)
-    sent = await safe_edit_or_send(
-        query,
-        text,
-        parse_mode="HTML",
-        reply_markup=video_b14_queue_status_keyboard(lang, session=session, result=result),
-    )
+    markup = video_b14_queue_status_keyboard(lang, session=session, result=result)
+    if edit_existing_only:
+        sent = await video_b14_edit_existing_status_message(query, text, markup)
+        if sent is None:
+            return None
+    else:
+        sent = await safe_edit_or_send(
+            query,
+            text,
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
     setattr(context, "_product_video_status_panel_rendered", True)
     message = sent or getattr(query, "message", None)
     draft = dict((session or {}).get("draft") or {})
     job = dict((result or {}).get("job") or draft.get("b14_queue_job") or {})
     job_id = safe_int(job.get("id") or draft.get("b14_queue_job_id"), 0)
-    video_b14_auto_refresh_register_message(
-        message,
-        context,
-        session=session,
-        result=result,
-        user_id=user_id,
-        lang=lang,
-        start_task=job_id > 0,
-    )
+    if register_auto_refresh:
+        video_b14_auto_refresh_register_message(
+            message,
+            context,
+            session=session,
+            result=result,
+            user_id=user_id,
+            lang=lang,
+            start_task=job_id > 0,
+        )
     return sent
 
 
@@ -109259,16 +109388,32 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "b14_job_status":
         draft = dict(session.get("draft") or {})
         job_id = safe_int(draft.get("b14_queue_job_id") or (draft.get("b14_queue_job") or {}).get("id"), 0)
-        if job_id > 0:
-            await video_b14_autonomous_materialize_and_deliver(
-                context,
-                query.message.chat_id,
-                job_id,
-                lang=lang,
-                source="manual_status_refresh",
+        project_id = safe_int(draft.get("b14_project_id"), 0)
+        status_bundle = video_b14_auto_refresh_status_bundle(
+            job_id,
+            user_id=uid,
+            chat_id=getattr(query.message, "chat_id", 0),
+            project_id=project_id,
+        )
+        if not status_bundle.get("identity_ok"):
+            return await video_b14_edit_existing_status_message(
+                query,
+                "⚠️ Không tìm thấy bảng trạng thái video thuộc phiên hiện tại. TOAN AAS chưa xử lý thêm và chưa trừ Xu.",
+                video_b14_queue_status_keyboard(lang),
             )
-        session = task3d_session_step(uid, "b14_queue_status", provider_called=False)
-        return await video_b14_send_or_edit_status_panel(query, context, session, None, uid, lang)
+        return await video_b14_send_or_edit_status_panel(
+            query,
+            context,
+            status_bundle.get("session") or session,
+            {
+                "job": status_bundle.get("job") or {},
+                "project": status_bundle.get("project") or {},
+            },
+            uid,
+            lang,
+            register_auto_refresh=False,
+            edit_existing_only=True,
+        )
     if action == "b14_download_video":
         draft = dict(session.get("draft") or {})
         job_id = safe_int(value or draft.get("b14_queue_job_id"), 0)
@@ -253813,7 +253958,24 @@ async def api_worker_claim(request: Request):
         else {}
     )
     conn = db_connect()
+    recovery_report = {}
     try:
+        if owner_product_video_only and heartbeat.get("heartbeat_accepted") and (
+            not worker_compatibility
+            or worker_compatibility.get("compatible")
+        ):
+            try:
+                recovery_report = video_b14_recover_existing_tasks_for_worker_claim(
+                    conn,
+                    limit=20,
+                )
+            except Exception as exc:
+                recovery_report = {
+                    "ok": False,
+                    "owner": "worker_claim",
+                    "error": type(exc).__name__,
+                    "recovered": 0,
+                }
         claim_result = remote_worker_api.claim_remote_worker_job(
             conn,
             worker_id=worker_id,
@@ -253837,6 +253999,8 @@ async def api_worker_claim(request: Request):
             refresh_source="claim_idle",
         )
     claim_result.update(heartbeat)
+    if recovery_report:
+        claim_result["existing_task_recovery"] = recovery_report
     return claim_result
 
 
