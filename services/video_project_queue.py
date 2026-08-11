@@ -4015,6 +4015,153 @@ def confirm_video_project_invoice(
     return {"ok": True, "project": project, "job": job, "duplicate_prevented": bool(job.get("duplicate_prevented"))}
 
 
+def _persisted_product_video_route_identity_matches(payload: dict[str, Any]) -> bool:
+    """Validate the frozen route without depending on current runtime flags."""
+
+    raw_decision = payload.get("product_video_route_decision")
+    if not payload.get("product_video_durable_public_seam") or not isinstance(raw_decision, dict):
+        return False
+    decision = dict(raw_decision)
+    persisted_hash = str(decision.pop("route_decision_sha256", "")).strip().lower()
+    if len(persisted_hash) != 64 or any(
+        character not in "0123456789abcdef" for character in persisted_hash
+    ):
+        return False
+    calculated_hash = hashlib.sha256(
+        json.dumps(
+            decision,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    if calculated_hash != persisted_hash or str(
+        payload.get("product_video_route_decision_sha256") or ""
+    ).strip().lower() != persisted_hash:
+        return False
+    frozen = {**decision, "route_decision_sha256": persisted_hash}
+    flattened = product_video_public_seam.product_video_route_decision_payload(frozen)
+    for key in (
+        "product_video_route_decision_version",
+        "product_video_route_selection_sha256",
+        "product_video_engine_mode",
+        "scene_count",
+        "route_id",
+        "product_video_engine_adapter",
+        "worker_job_type",
+        "worker_owner",
+        "required_worker_capability",
+        "automatic_retry_allowed",
+        "automatic_resubmit_allowed",
+        "automatic_fallback_allowed",
+    ):
+        if payload.get(key) != flattened.get(key):
+            return False
+    return bool(
+        decision.get("canonical_engine_entry") == PRODUCT_VIDEO_CANONICAL_ENGINE_ENTRY
+        and decision.get("automatic_retry_allowed") is False
+        and decision.get("automatic_resubmit_allowed") is False
+        and decision.get("automatic_fallback_allowed") is False
+    )
+
+
+def _confirmed_uiflow3_job_for_exact_admission_replay(
+    conn: sqlite3.Connection,
+    *,
+    project_id: int,
+    user_id: int,
+    admission: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Resolve an exact UIFLOW3 confirmation replay without creating work."""
+
+    project = get_video_project(conn, int(project_id))
+    if not project or _as_int(project.get("user_id"), 0) != int(user_id):
+        return {}
+    asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
+    invoice = _json_loads(str(project.get("invoice_json") or ""), {})
+    if not isinstance(asset_pack, dict) or not isinstance(invoice, dict):
+        return {}
+    if str(asset_pack.get("uiflow3_bridge_version") or "") != video_uiflow3_execution_contract.BRIDGE_VERSION:
+        return {}
+
+    admission = dict(admission or {})
+    snapshot_id = str(admission.get("admission_snapshot_id") or "").strip()
+    consumed_ids = {
+        str(asset_pack.get("admission_snapshot_consumed_id") or "").strip(),
+        str(invoice.get("admission_snapshot_consumed_id") or "").strip(),
+    }
+    consumed_job_ids = {
+        _as_int(asset_pack.get("admission_snapshot_consumed_job_id"), 0),
+        _as_int(invoice.get("admission_snapshot_consumed_job_id"), 0),
+    }
+    if not snapshot_id or consumed_ids != {snapshot_id} or len(consumed_job_ids) != 1:
+        return {}
+    consumed_job_id = next(iter(consumed_job_ids))
+    if consumed_job_id <= 0 or _as_int(project.get("job_id"), 0) != consumed_job_id:
+        return {}
+    if any(
+        (
+            _as_int(admission.get("admission_user_id"), 0) != int(user_id),
+            _as_int(admission.get("admission_project_id"), 0) != int(project_id),
+            str(admission.get("admission_quote_fingerprint") or "")
+            != product_video_admission_quote_fingerprint(project, int(user_id)),
+            str(admission.get("admission_callback_handler_id") or "")
+            != PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID,
+            str(admission.get("admission_callback_data") or "")
+            != PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK,
+        )
+    ):
+        return {}
+
+    job = get_video_render_job(conn, consumed_job_id)
+    if (
+        not job
+        or _as_int(job.get("project_id"), 0) != int(project_id)
+        or _as_int(job.get("user_id"), 0) != int(user_id)
+        or str(job.get("job_type") or "") != VIDEO_RENDER_JOB_TYPE
+    ):
+        return {}
+    payload = _json_loads(str(job.get("result_json") or ""), {})
+    if not isinstance(payload, dict):
+        return {}
+    if any(
+        (
+            str(payload.get("admission_snapshot_id") or "") != snapshot_id,
+            _as_int(payload.get("admission_user_id"), 0) != int(user_id),
+            _as_int(payload.get("admission_project_id"), 0) != int(project_id),
+            str(payload.get("admission_quote_fingerprint") or "")
+            != str(admission.get("admission_quote_fingerprint") or ""),
+        )
+    ):
+        return {}
+    execution = video_uiflow3_execution_contract.validate_execution_contract(
+        project,
+        payload,
+        require_payload_identity=True,
+    )
+    if not execution.get("applies") or not execution.get("ok"):
+        return {}
+    if not _persisted_product_video_route_identity_matches(payload):
+        return {}
+    if str(payload.get("product_video_route_selection_sha256") or "") != str(
+        payload.get("uiflow3_route_selection_sha256") or ""
+    ):
+        return {}
+    return {
+        "ok": True,
+        "project": project,
+        "job": job,
+        "outbox": get_product_video_dispatch_outbox(conn, job_id=consumed_job_id),
+        "duplicate_prevented": True,
+        "confirmation_replay_resolved": True,
+        "job_created": False,
+        "dispatch_outbox_created": False,
+        "scene_records_created": False,
+        "charge": 0,
+        "charged_xu": 0,
+    }
+
+
 def confirm_public_product_video_invoice(
     conn: sqlite3.Connection,
     *,
@@ -4035,6 +4182,14 @@ def confirm_public_product_video_invoice(
             "charge": 0,
             "charged_xu": 0,
         }
+    replay = _confirmed_uiflow3_job_for_exact_admission_replay(
+        conn,
+        project_id=int(project_id),
+        user_id=int(user_id),
+        admission=provider_admission,
+    )
+    if replay:
+        return replay
     return confirm_video_project_invoice(
         conn,
         project_id=int(project_id),

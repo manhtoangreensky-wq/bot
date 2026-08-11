@@ -94944,6 +94944,41 @@ def video_b14_render_job_by_id(job_id: int) -> dict:
         db.close()
 
 
+def video_b14_status_identity_matches(
+    job: dict | None,
+    project: dict | None = None,
+    *,
+    user_id=0,
+    project_id=0,
+) -> bool:
+    job = dict(job or {})
+    project = dict(project or {})
+    job_id = safe_int(job.get("id") or job.get("job_id"), 0)
+    if job_id <= 0:
+        return False
+    expected_user_id = safe_int(user_id, 0)
+    expected_project_id = safe_int(project_id, 0)
+    job_user_id = safe_int(job.get("user_id"), 0)
+    job_project_id = safe_int(job.get("project_id"), 0)
+    job_type = str(job.get("job_type") or "").strip()
+    if expected_user_id > 0 and job_user_id > 0 and job_user_id != expected_user_id:
+        return False
+    if expected_project_id > 0 and job_project_id > 0 and job_project_id != expected_project_id:
+        return False
+    if job_type and job_type != video_project_queue.VIDEO_RENDER_JOB_TYPE:
+        return False
+    if project:
+        actual_project_id = safe_int(project.get("project_id"), 0)
+        project_user_id = safe_int(project.get("user_id"), 0)
+        if expected_project_id > 0 and actual_project_id > 0 and actual_project_id != expected_project_id:
+            return False
+        if job_project_id > 0 and actual_project_id > 0 and actual_project_id != job_project_id:
+            return False
+        if expected_user_id > 0 and project_user_id > 0 and project_user_id != expected_user_id:
+            return False
+    return True
+
+
 def video_b14_job_result_payload(job: dict | None = None) -> dict:
     raw = (job or {}).get("result_json")
     if isinstance(raw, dict):
@@ -95523,8 +95558,7 @@ def video_b14_status_step_rows(
     else:
         icons[1] = "✅"
         icons[2] = "✅"
-        icons[3] = "✅"
-        icons[4] = "⏳"
+        icons[3] = "⏳"
     return list(zip(icons, VIDEO_B14_STATUS_STEP_LABELS))
 
 
@@ -95575,12 +95609,36 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     duration = safe_int(invoice.get("duration_seconds"), scene_count * TASK3D_SCENE_SECONDS)
     eta = video_b14_eta_seconds(scene_count)
     job_id = safe_int(job.get("id") or draft.get("b14_queue_job_id"), 0)
+    project_id = safe_int(project.get("project_id") or draft.get("b14_project_id"), 0)
     submit_blocked = bool(submit_attempted and job_id <= 0)
-    try:
-        video_b14_fail_stale_product_job_for_status(job_id)
-    except Exception:
-        pass
     live_job = video_b14_render_job_by_id(job_id)
+    status_identity_rejected = bool(
+        live_job
+        and not video_b14_status_identity_matches(
+            live_job,
+            user_id=user_id,
+            project_id=project_id,
+        )
+    )
+    if status_identity_rejected:
+        job = {}
+        project = {}
+        live_job = {}
+        job_id = 0
+        project_id = 0
+        submit_blocked = True
+    elif live_job:
+        try:
+            video_b14_fail_stale_product_job_for_status(job_id)
+            refreshed_job = video_b14_render_job_by_id(job_id)
+            if refreshed_job and video_b14_status_identity_matches(
+                refreshed_job,
+                user_id=user_id,
+                project_id=project_id,
+            ):
+                live_job = refreshed_job
+        except Exception:
+            pass
     if live_job:
         draft_status = str(draft_job.get("status") or "").strip().lower()
         if draft_status in {"failed", "error"} and not result.get("job"):
@@ -95589,12 +95647,23 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
             job = merged_job
         else:
             job.update(live_job)
-    project_id = safe_int(project.get("project_id") or draft.get("b14_project_id"), 0)
     if project_id and not project:
         try:
             project = get_video_project(project_id)
         except Exception:
             project = {}
+    if project and not video_b14_status_identity_matches(
+        job,
+        project,
+        user_id=user_id,
+        project_id=project_id,
+    ):
+        job = {}
+        project = {}
+        job_id = 0
+        project_id = 0
+        submit_blocked = True
+        status_identity_rejected = True
     duplicate = bool(result.get("duplicate_prevented") or draft.get("b14_duplicate_prevented"))
     job_result = video_b14_job_result_payload(job)
     reconciled_job_result = video_b14_reconciled_provider_debug(job, project, job_result, refresh_source="public_panel")
@@ -95771,9 +95840,8 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
             stage = "hệ thống chưa dựng được video"
     else:
         status_label = "Chưa xác nhận"
-    final_path = str(project.get("final_video_path") or job.get("final_video_path") or "")
-    final_file_id = str(project.get("final_video_file_id") or job.get("final_video_file_id") or "")
-    has_final_artifact = bool(final_path or final_file_id)
+    artifact_state = video_b14_auto_refresh_final_artifact_state(job, project)
+    has_final_artifact = bool(artifact_state.get("valid"))
     legacy_artifact_only_status = bool(has_final_artifact and not project)
     delivery_done = bool(
         project.get("video_delivered_at")
@@ -95857,16 +95925,27 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         or job_result.get("public_processing_code")
         or (f"#{job_id or project_id}" if (job_id or project_id) else "Không có")
     )
+    failed_status_panel = bool(
+        submit_blocked
+        or status_identity_rejected
+        or failed_no_charge_terminal
+        or status in {"failed", "error"}
+        or blocked_reason
+        or visual_classification in {"partial_simple_video", "failed_no_real_visual"}
+        or (status in {"completed", "success"} and not has_final_artifact)
+    )
     confirmation_line = (
         "❌ <b>FAIL · Chưa tạo được tác vụ video</b>"
-        if submit_blocked
+        if submit_blocked or status_identity_rejected
+        else "❌ <b>FAIL · Chưa tạo được video</b>"
+        if failed_status_panel
         else "✅ <b>Đã xác nhận tạo video</b>"
         if job_id
         else "ℹ️ <b>Video chưa xác nhận</b>"
     )
     panel_title = (
         "❌ <b>Trạng thái tạo video: FAIL</b>"
-        if submit_blocked
+        if failed_status_panel
         else "🎬 <b>Trạng thái tạo video</b>"
     )
     lines = [
@@ -96134,6 +96213,11 @@ def video_b14_auto_refresh_session_from_status(job: dict | None = None, project:
 def video_b14_auto_refresh_status_bundle(job_id: int | str = "", *, user_id=0, job: dict | None = None, project: dict | None = None) -> dict:
     jid = safe_int(job_id or (job or {}).get("id"), 0)
     current_job = dict(job or (video_b14_render_job_by_id(jid) if jid else {}) or {})
+    if current_job and not video_b14_status_identity_matches(
+        current_job,
+        user_id=user_id,
+    ):
+        current_job = {}
     current_project = dict(project or {})
     project_id = safe_int(current_project.get("project_id") or current_job.get("project_id"), 0)
     if project_id and not current_project:
@@ -96141,6 +96225,14 @@ def video_b14_auto_refresh_status_bundle(job_id: int | str = "", *, user_id=0, j
             current_project = get_video_project(project_id)
         except Exception:
             current_project = {}
+    if current_project and not video_b14_status_identity_matches(
+        current_job,
+        current_project,
+        user_id=user_id,
+        project_id=project_id,
+    ):
+        current_job = {}
+        current_project = {}
     session = video_b14_auto_refresh_session_from_status(current_job, current_project, user_id=user_id)
     return {"job": current_job, "project": current_project, "session": session}
 

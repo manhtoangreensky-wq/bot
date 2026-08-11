@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from services import video_engine_contract
+from services import video_ai_real_pricing
 from services import product_video_public_seam
 from services import remote_worker_api
 from services import video_project_queue as queue
@@ -193,12 +194,22 @@ def _rich_planning_snapshot() -> dict:
 
 
 def _quote(scene_count: int) -> dict:
-    total = 300 * scene_count
+    quality = video_ai_real_pricing.public_quality_by_tier(300)
+    price = video_ai_real_pricing.video_multiscene_price(
+        quality["unit_xu"],
+        scene_count,
+    )
+    total = price["total_xu"]
     return {
         "tier": "basic",
         "package_xu": total,
         "quality_tier": 300,
+        "quality_xu": quality["unit_xu"],
+        "unit_xu": quality["unit_xu"],
         "scene_count": scene_count,
+        "subtotal_xu": price["subtotal_xu"],
+        "discount_percent": price["discount_percent"],
+        "discount_xu": price["discount_xu"],
         "total_xu": total,
         "user_visible_price_xu": total,
         "persisted_quoted_price_xu": total,
@@ -315,7 +326,7 @@ def _confirmed_uiflow3_job(
         conn,
         project_id=int(prepared["project"]["project_id"]),
         user_id=USER_ID,
-        balance_xu=300,
+        balance_xu=_quote(1)["total_xu"],
         provider_admission=_admission(prepared["project"]),
     )
     assert confirmed["ok"] is True
@@ -624,7 +635,7 @@ def test_uiflow3_bridge_explicit_confirm_is_the_first_job_and_preserves_snapshot
         conn,
         project_id=int(prepared["project"]["project_id"]),
         user_id=USER_ID,
-        balance_xu=300,
+        balance_xu=_quote(1)["total_xu"],
         provider_admission=_admission(prepared["project"]),
     )
 
@@ -641,6 +652,321 @@ def test_uiflow3_bridge_explicit_confirm_is_the_first_job_and_preserves_snapshot
     assert job["product_video_route_decision"]["mode"] == "single_scene"
     assert persisted["charge"] == 0
     assert persisted["charged_xu"] == 0
+
+
+def test_uiflow3_repeated_explicit_confirm_returns_the_same_canonical_job(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge()
+    _enabled_seam(monkeypatch)
+    conn = sqlite3.connect(tmp_path / "uiflow3-repeat-confirm.db")
+    conn.row_factory = sqlite3.Row
+    snapshot = video_uiflow3.approved_snapshot(_ready_state())
+    handoff = bridge.compile_routeengine_handoff(
+        snapshot,
+        owner_user_id=USER_ID,
+        owner_chat_id=USER_ID,
+    )
+    quote = _quote(1)
+    prepared = bridge.prepare_commercial_project(conn, handoff, quote=quote)
+    admission = _admission(prepared["project"], snapshot_id="uiflow3-repeat-confirm")
+
+    first = queue.confirm_public_product_video_invoice(
+        conn,
+        project_id=int(prepared["project"]["project_id"]),
+        user_id=USER_ID,
+        balance_xu=quote["total_xu"],
+        provider_admission=admission,
+    )
+    second = queue.confirm_public_product_video_invoice(
+        conn,
+        project_id=int(prepared["project"]["project_id"]),
+        user_id=USER_ID,
+        balance_xu=quote["total_xu"],
+        provider_admission=admission,
+    )
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert second["duplicate_prevented"] is True
+    assert second["job_created"] is False
+    assert int(second["job"]["id"]) == int(first["job"]["id"])
+    assert int(second["project"]["project_id"]) == int(first["project"]["project_id"])
+    assert _counts(conn) == (1, 1, 1, 1)
+
+
+def test_uiflow3_exact_confirm_replay_is_independent_of_current_route_flags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge()
+    _enabled_seam(monkeypatch)
+    conn = sqlite3.connect(tmp_path / "uiflow3-repeat-runtime-flags.db")
+    conn.row_factory = sqlite3.Row
+    handoff = bridge.compile_routeengine_handoff(
+        video_uiflow3.approved_snapshot(_ready_state()),
+        owner_user_id=USER_ID,
+        owner_chat_id=USER_ID,
+    )
+    quote = _quote(1)
+    prepared = bridge.prepare_commercial_project(conn, handoff, quote=quote)
+    admission = _admission(prepared["project"], snapshot_id="uiflow3-repeat-flags")
+    first = queue.confirm_public_product_video_invoice(
+        conn,
+        project_id=int(prepared["project"]["project_id"]),
+        user_id=USER_ID,
+        balance_xu=quote["total_xu"],
+        provider_admission=admission,
+    )
+    for key in (
+        "PRODUCT_VIDEO_DURABLE_PUBLIC_SEAM_ENABLED",
+        "PRODUCT_VIDEO_ONE_SCENE_ENGINE_ENABLED",
+        "PRODUCT_VIDEO_ONE_SCENE_PUBLIC_ALLOWED",
+        "PRODUCT_VIDEO_ONE_SCENE_REAL_PROVIDER_ENABLED",
+    ):
+        monkeypatch.setenv(key, "0")
+
+    replay = queue.confirm_public_product_video_invoice(
+        conn,
+        project_id=int(prepared["project"]["project_id"]),
+        user_id=USER_ID,
+        balance_xu=0,
+        provider_admission=admission,
+    )
+
+    assert first["ok"] is True
+    assert replay["ok"] is True
+    assert replay["duplicate_prevented"] is True
+    assert int(replay["job"]["id"]) == int(first["job"]["id"])
+    assert _counts(conn) == (1, 1, 1, 1)
+
+
+def test_uiflow3_exact_confirm_replay_rejects_a_tampered_route_decision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge()
+    _enabled_seam(monkeypatch)
+    conn = sqlite3.connect(tmp_path / "uiflow3-repeat-route-tamper.db")
+    conn.row_factory = sqlite3.Row
+    handoff = bridge.compile_routeengine_handoff(
+        video_uiflow3.approved_snapshot(_ready_state()),
+        owner_user_id=USER_ID,
+        owner_chat_id=USER_ID,
+    )
+    quote = _quote(1)
+    prepared = bridge.prepare_commercial_project(conn, handoff, quote=quote)
+    admission = _admission(
+        prepared["project"],
+        snapshot_id="uiflow3-repeat-route-tamper",
+    )
+    confirmed = queue.confirm_public_product_video_invoice(
+        conn,
+        project_id=int(prepared["project"]["project_id"]),
+        user_id=USER_ID,
+        balance_xu=quote["total_xu"],
+        provider_admission=admission,
+    )
+    first_job_id = int(confirmed["job"]["id"])
+    payload = json.loads(str(confirmed["job"]["result_json"] or "{}"))
+    payload["product_video_route_decision"]["worker_owner"] = "tampered-owner"
+    conn.execute(
+        "UPDATE video_jobs SET result_json=? WHERE id=?",
+        (json.dumps(payload), first_job_id),
+    )
+    conn.commit()
+
+    replay = queue.confirm_public_product_video_invoice(
+        conn,
+        project_id=int(prepared["project"]["project_id"]),
+        user_id=USER_ID,
+        balance_xu=quote["total_xu"],
+        provider_admission=admission,
+    )
+
+    assert replay["ok"] is False
+    assert replay["reason"] == "admission_snapshot_replayed"
+    assert _counts(conn) == (1, 1, 1, 1)
+
+
+def test_uiflow3_public_status_rejects_a_foreign_persisted_job(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import bot
+
+    conn = sqlite3.connect(tmp_path / "uiflow3-status-owner.db")
+    conn.row_factory = sqlite3.Row
+    _snapshot, _handoff, prepared, confirmed = _confirmed_uiflow3_job(
+        conn,
+        monkeypatch,
+    )
+    job = dict(confirmed["job"])
+    project = dict(prepared["project"])
+    foreign_job = {**job, "user_id": USER_ID + 1}
+    session = {
+        "product_id": "video_ai_real",
+        "current_step": "b14_queue_status",
+        "draft": {
+            "b14_queue_job": {"id": int(job["id"])},
+            "b14_queue_job_id": int(job["id"]),
+            "b14_project_id": int(project["project_id"]),
+            "b14_scene_count": 1,
+            "b14_submit_attempted": True,
+            "b14_invoice": {
+                "scene_count": 1,
+                "duration_seconds": 8,
+                "routing_quality_tier": 300,
+                "quality_xu": 220,
+                "package_label": "Tiêu chuẩn có âm thanh · 220 Xu/cảnh",
+            },
+        },
+    }
+    monkeypatch.setattr(bot, "video_b14_fail_stale_product_job_for_status", lambda _job_id: 0)
+    monkeypatch.setattr(bot, "video_b14_render_job_by_id", lambda _job_id: foreign_job)
+    monkeypatch.setattr(bot, "get_video_project", lambda _project_id: project)
+    monkeypatch.setattr(
+        bot,
+        "video_b14_reconciled_provider_debug",
+        lambda _job, _project, payload, **_kwargs: dict(payload or {}),
+    )
+    monkeypatch.setattr(
+        bot,
+        "video_b14_provider_telemetry",
+        lambda *_args, **_kwargs: {},
+    )
+
+    text = bot.video_b14_queue_status_text(session, None, USER_ID, "vi")
+
+    assert "Trạng thái tạo video: FAIL" in text
+    assert f"#{int(job['id'])}" not in text
+    assert "Đã xác nhận tạo video" not in text
+
+
+def test_uiflow3_auto_refresh_bundle_rejects_a_foreign_persisted_job(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import bot
+
+    conn = sqlite3.connect(tmp_path / "uiflow3-auto-refresh-owner.db")
+    conn.row_factory = sqlite3.Row
+    _snapshot, _handoff, prepared, confirmed = _confirmed_uiflow3_job(
+        conn,
+        monkeypatch,
+    )
+    job = dict(confirmed["job"])
+    project = dict(prepared["project"])
+    monkeypatch.setattr(
+        bot,
+        "video_b14_render_job_by_id",
+        lambda _job_id: {**job, "user_id": USER_ID + 1},
+    )
+    monkeypatch.setattr(bot, "get_video_project", lambda _project_id: project)
+
+    bundle = bot.video_b14_auto_refresh_status_bundle(
+        int(job["id"]),
+        user_id=USER_ID,
+    )
+
+    assert bundle["job"] == {}
+    assert bundle["project"] == {}
+    assert (bundle["session"].get("draft") or {}).get("b14_queue_job_id") == 0
+
+
+def test_uiflow3_public_status_reports_persisted_failure_and_delivery_truth(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import bot
+
+    conn = sqlite3.connect(tmp_path / "uiflow3-status-truth.db")
+    conn.row_factory = sqlite3.Row
+    _snapshot, _handoff, prepared, confirmed = _confirmed_uiflow3_job(
+        conn,
+        monkeypatch,
+    )
+    base_job = dict(confirmed["job"])
+    base_project = dict(prepared["project"])
+    live = {"job": base_job, "project": base_project}
+    session = {
+        "product_id": "video_ai_real",
+        "current_step": "b14_queue_status",
+        "draft": {
+            "b14_queue_job": {"id": int(base_job["id"])},
+            "b14_queue_job_id": int(base_job["id"]),
+            "b14_project_id": int(base_project["project_id"]),
+            "b14_scene_count": 1,
+            "b14_submit_attempted": True,
+            "b14_invoice": {
+                "scene_count": 1,
+                "duration_seconds": 8,
+                "routing_quality_tier": 300,
+                "quality_xu": 220,
+                "package_label": "Tiêu chuẩn có âm thanh · 220 Xu/cảnh",
+            },
+        },
+    }
+    monkeypatch.setattr(bot, "video_b14_fail_stale_product_job_for_status", lambda _job_id: 0)
+    monkeypatch.setattr(bot, "video_b14_render_job_by_id", lambda _job_id: dict(live["job"]))
+    monkeypatch.setattr(bot, "get_video_project", lambda _project_id: dict(live["project"]))
+    monkeypatch.setattr(
+        bot,
+        "video_b14_reconciled_provider_debug",
+        lambda _job, _project, payload, **_kwargs: dict(payload or {}),
+    )
+    monkeypatch.setattr(
+        bot,
+        "video_b14_provider_telemetry",
+        lambda *_args, **_kwargs: {},
+    )
+
+    queued = bot.video_b14_queue_status_text(session, None, USER_ID, "vi")
+    assert f"#{int(base_job['id'])}" in queued
+    assert "Đang chuẩn bị" in queued
+
+    failed_payload = json.loads(str(base_job["result_json"] or "{}"))
+    failed_payload.update({"terminal_state": "failed_no_charge", "final_decision": "failed_no_charge"})
+    live["job"] = {
+        **base_job,
+        "status": "failed",
+        "progress_percent": 80,
+        "result_json": json.dumps(failed_payload),
+    }
+    live["project"] = {
+        **base_project,
+        "status": "failed",
+        "video_terminal_state": "failed_no_charge",
+    }
+    failed = bot.video_b14_queue_status_text(session, None, USER_ID, "vi")
+    assert "Trạng thái tạo video: FAIL" in failed
+    assert "Tiến độ: <b>0%</b>" in failed
+    assert "Video đã sẵn sàng" not in failed
+
+    live["job"] = {**base_job, "status": "completed", "progress_percent": 100}
+    live["project"] = {**base_project, "status": "completed"}
+    missing_artifact = bot.video_b14_queue_status_text(session, None, USER_ID, "vi")
+    assert "Trạng thái tạo video: FAIL" in missing_artifact
+    assert "Tiến độ: <b>100%</b>" not in missing_artifact
+    assert "Video đã sẵn sàng" not in missing_artifact
+
+    live["job"] = {
+        **base_job,
+        "status": "completed",
+        "progress_percent": 100,
+        "final_video_file_id": "telegram-final-video",
+    }
+    live["project"] = {
+        **base_project,
+        "status": "completed",
+        "final_video_file_id": "telegram-final-video",
+        "video_delivered_at": "2026-08-11 20:00:00",
+    }
+    delivered = bot.video_b14_queue_status_text(session, None, USER_ID, "vi")
+    assert "Trạng thái tạo video: FAIL" not in delivered
+    assert "Tiến độ: <b>100%</b>" in delivered
+    assert "Video đã sẵn sàng" in delivered
 
 
 def test_uiflow3_bridge_never_prepares_render_blocked_plan(tmp_path: Path) -> None:
