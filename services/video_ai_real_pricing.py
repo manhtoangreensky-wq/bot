@@ -478,6 +478,13 @@ IMAGE_TIER_RETRY_COUNTS: dict[str, int] = {
 }
 
 
+MUSIC_BACKGROUND_PUBLIC_PRICES: dict[str, int] = {
+    "basic": 130,
+    "standard": 150,
+    "premium": 200,
+}
+
+
 _MUSIC_MODEL_ROWS: tuple[dict[str, Any], ...] = (
     {
         "key": "suno_music",
@@ -799,3 +806,9 @@ def music_model_catalog() -> list[dict[str, Any]]:
         })
         result.append(row)
     return result
+
+
+def public_music_background_prices() -> dict[str, int]:
+    """Return the approved public sale prices for standalone background music."""
+
+    return dict(MUSIC_BACKGROUND_PUBLIC_PRICES)
