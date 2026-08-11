@@ -1,8 +1,9 @@
 """Pure pricing policy for public Claude Opus chat.
 
-No environment, database, wallet, or provider state is read here.  Prices are
-computed from actual provider token usage and rounded once, after the approved
-3x multiplier is applied.
+No environment, database, wallet, or provider state is read here. Provider
+rates are converted with the approved 3x multiplier, then the public
+input/output tariff is rounded up to a five-Xu amount per 1K tokens. Each
+request is still rounded only once after actual usage is known.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ OPUS_CACHE_READ_USD_PER_MILLION = Decimal("0.60")
 SALE_MULTIPLIER = Decimal("3")
 DEFAULT_USD_FIXED_RATE_VND = 25_000
 DEFAULT_XU_TO_VND = 100
+PUBLIC_CHAT_VISIBLE_RATE_INCREMENT_XU = Decimal("5")
 MAX_PRO_OUTPUT_TOKENS = 4_096
 KEY4U_RATE_EFFECTIVE_DATE = date(2026, 8, 9)
 KEY4U_RATE_REVIEW_BY = date(2026, 9, 8)
@@ -101,6 +103,41 @@ def calculate_actual_xu(usage: OpusUsage, pricing: ClaudeOpusPricing) -> int:
     return int((numerator / Decimal(1_000_000)).to_integral_value(rounding=ROUND_CEILING))
 
 
+def _source_sale_rates_per_thousand(
+    *, usd_fixed_rate_vnd: Any = DEFAULT_USD_FIXED_RATE_VND, xu_to_vnd: Any = DEFAULT_XU_TO_VND
+) -> dict[str, Decimal]:
+    usd_vnd = _whole(usd_fixed_rate_vnd, "usd_fixed_rate_vnd", positive=True)
+    xu_vnd = _whole(xu_to_vnd, "xu_to_vnd", positive=True)
+    conversion = SALE_MULTIPLIER * Decimal(usd_vnd) / Decimal(xu_vnd) / Decimal(1_000)
+    return {
+        "input": OPUS_INPUT_USD_PER_MILLION * conversion,
+        "output": OPUS_OUTPUT_USD_PER_MILLION * conversion,
+        "cache_read": OPUS_CACHE_READ_USD_PER_MILLION * conversion,
+    }
+
+
+def _round_visible_rate_xu(value: Decimal) -> Decimal:
+    return (
+        value / PUBLIC_CHAT_VISIBLE_RATE_INCREMENT_XU
+    ).to_integral_value(rounding=ROUND_CEILING) * PUBLIC_CHAT_VISIBLE_RATE_INCREMENT_XU
+
+
+def public_chat_customer_pricing(
+    *, usd_fixed_rate_vnd: Any = DEFAULT_USD_FIXED_RATE_VND, xu_to_vnd: Any = DEFAULT_XU_TO_VND
+) -> ClaudeOpusPricing:
+    """Return the single retail tariff shared by Pro reservations and settlement."""
+    source = _source_sale_rates_per_thousand(
+        usd_fixed_rate_vnd=usd_fixed_rate_vnd,
+        xu_to_vnd=xu_to_vnd,
+    )
+    return ClaudeOpusPricing(
+        input_xu_per_million=_round_visible_rate_xu(source["input"]) * Decimal(1_000),
+        output_xu_per_million=_round_visible_rate_xu(source["output"]) * Decimal(1_000),
+        cache_read_xu_per_million=source["cache_read"] * Decimal(1_000),
+        multiplier=1,
+    )
+
+
 def calculate_opus_provider_cost_usd(input_tokens: Any, output_tokens: Any, cache_read_tokens: Any = 0) -> Decimal:
     usage = OpusUsage(input_tokens, output_tokens, cache_read_tokens)
     return (
@@ -118,27 +155,26 @@ def calculate_opus_charge_xu(
     usd_fixed_rate_vnd: Any = DEFAULT_USD_FIXED_RATE_VND,
     xu_to_vnd: Any = DEFAULT_XU_TO_VND,
 ) -> int:
-    usd_vnd = _whole(usd_fixed_rate_vnd, "usd_fixed_rate_vnd", positive=True)
-    xu_vnd = _whole(xu_to_vnd, "xu_to_vnd", positive=True)
-    sale = (
-        calculate_opus_provider_cost_usd(input_tokens, output_tokens, cache_read_tokens)
-        * SALE_MULTIPLIER
-        * Decimal(usd_vnd)
-        / Decimal(xu_vnd)
+    return calculate_actual_xu(
+        OpusUsage(input_tokens, output_tokens, cache_read_tokens),
+        public_chat_customer_pricing(
+            usd_fixed_rate_vnd=usd_fixed_rate_vnd,
+            xu_to_vnd=xu_to_vnd,
+        ),
     )
-    return int(sale.to_integral_value(rounding=ROUND_CEILING))
 
 
 def opus_price_per_thousand_xu(
     *, usd_fixed_rate_vnd: Any = DEFAULT_USD_FIXED_RATE_VND, xu_to_vnd: Any = DEFAULT_XU_TO_VND
 ) -> dict[str, Decimal]:
-    usd_vnd = _whole(usd_fixed_rate_vnd, "usd_fixed_rate_vnd", positive=True)
-    xu_vnd = _whole(xu_to_vnd, "xu_to_vnd", positive=True)
-    conversion = SALE_MULTIPLIER * Decimal(usd_vnd) / Decimal(xu_vnd) / Decimal(1_000)
+    pricing = public_chat_customer_pricing(
+        usd_fixed_rate_vnd=usd_fixed_rate_vnd,
+        xu_to_vnd=xu_to_vnd,
+    )
     return {
-        "input": OPUS_INPUT_USD_PER_MILLION * conversion,
-        "output": OPUS_OUTPUT_USD_PER_MILLION * conversion,
-        "cache_read": OPUS_CACHE_READ_USD_PER_MILLION * conversion,
+        "input": pricing.input_rate / Decimal(1_000),
+        "output": pricing.output_rate / Decimal(1_000),
+        "cache_read": pricing.cache_rate / Decimal(1_000),
     }
 
 
@@ -211,5 +247,6 @@ __all__ = [
     "OPUS_OUTPUT_USD_PER_MILLION", "OpusUsage", "SALE_MULTIPLIER", "TokenUsage",
     "calculate_actual_xu", "calculate_opus_charge_xu", "calculate_opus_provider_cost_usd",
     "estimate_reservation_usage", "opus_price_per_thousand_labels", "opus_price_per_thousand_xu",
+    "public_chat_customer_pricing",
     "pricing_rate_review_status", "reserve_xu",
 ]
