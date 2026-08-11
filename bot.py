@@ -112,6 +112,7 @@ from services import video_project_queue
 from services import knowledge_vault, knowledge_vault_sync, vault_importer
 from services import profile_router, video_edit_capabilities, video_edit_state_machine, video_edit_state_store, video_editengine1, video_edit_media_transport, video_edit_long_media, video_local_editing, video_local_validation, video_smart_splitter
 from services import architecture_profile_router, architecture_profile_status
+from services import video_ai_edit_catalog, video_ai_edit_state
 from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit_router, video_ai_edit_status, video_ai_edit_validation
 from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
 from services import video_profile_context_engine
@@ -61407,13 +61408,14 @@ def clear_media_creator_pending_states(user_id, preserve_translation_menu: bool 
     music_guided_cleared = clear_music_guided_pending(user_id)
     translation_menu_cleared = False if preserve_translation_menu else clear_translation_menu_pending(user_id)
     video_editor_cleared = clear_video_editor_pending(user_id)
+    ai_edit_draft_cleared = video_ai_edit_state.clear_draft(user_id)
     video_downloader_cleared = clear_video_downloader_pending(user_id)
     video_dubbing_cleared = clear_video_dubbing_pending(user_id)
     video_finalization_cleared = clear_video_finalization_state(user_id)
     video_addon_cleared = clear_video_addon_state(user_id)
     marketing_cleared = clear_marketing_pending(user_id)
     shopaikey_confirm_cleared = clear_shopaikey_pending_confirmations_for_user(user_id)
-    return bool(free_hub_cleared or support_cleared or quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared or product_context_cleared or music_guided_cleared or translation_menu_cleared or video_editor_cleared or video_downloader_cleared or video_dubbing_cleared or video_finalization_cleared or video_addon_cleared or marketing_cleared or shopaikey_confirm_cleared)
+    return bool(free_hub_cleared or support_cleared or quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared or product_context_cleared or music_guided_cleared or translation_menu_cleared or video_editor_cleared or ai_edit_draft_cleared or video_downloader_cleared or video_dubbing_cleared or video_finalization_cleared or video_addon_cleared or marketing_cleared or shopaikey_confirm_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -71028,7 +71030,7 @@ def video_editor_normalize_action(action: str) -> str:
 
 
 _VIDEO_EDITOR_CALLBACK_NO_VALUE_ACTIONS = frozenset({
-    "admin", "ai", "ai_aspect", "ai_aspect_limits", "ai_aspect_method",
+    "admin", "ai", "ai_aspect", "ai_aspect_limits", "ai_aspect_method", "ai_catalog", "ai_selected", "ai_summary", "ai_summary_back",
     "ai_custom_duration", "ai_duration", "ai_effect_timing", "ai_info",
     "ai_intensity", "ai_intent", "ai_invoice", "ai_motion", "ai_preserve",
     "ai_prompt", "ai_remove_effect", "ai_review", "ai_settings", "ai_source",
@@ -71052,7 +71054,7 @@ _VIDEO_EDITOR_CALLBACK_NO_VALUE_ACTIONS = frozenset({
     "workspace",
 })
 _VIDEO_EDITOR_CALLBACK_ONE_VALUE_ACTIONS = frozenset({
-    "ai_pick", "ai_set_aspect", "ai_set_aspect_method", "ai_set_duration",
+    "ai_cat", "ai_detail", "ai_item", "ai_pick", "ai_set_aspect", "ai_set_aspect_method", "ai_set_duration",
     "ai_set_effect_timing", "ai_set_intensity", "ai_set_motion", "ai_set_text",
     "ai_toggle", "audio_add", "audio_component", "audio_set", "brightness_set",
     "effect_pick", "method", "options", "preset", "ratio", "restore_pick",
@@ -85282,7 +85284,7 @@ def video_edit_hub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     rows = [
         [
-            ("✨ Chỉnh sửa theo mục tiêu" if is_vi else "✨ Goal-based editing", "videoedit|ai"),
+            ("🤖 Chỉnh sửa video AI" if is_vi else "🤖 AI video editing", "videoedit|ai"),
             ("✂️ Chỉnh sửa thủ công" if is_vi else "✂️ Manual editing", "videoedit|manual"),
         ],
         [
@@ -85734,13 +85736,20 @@ def video_ai_edit_intro_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 
 def video_ai_edit_upload_text(lang: str = "vi") -> str:
     return (
-        "📎 <b>Gửi video cho trợ lý chỉnh sửa theo mục tiêu</b>\n\n"
-        "Hỗ trợ MP4, MOV, MKV và WebM. Video không quá 20 MiB và 60 giây đi qua Telegram; "
-        "video lớn hơn hoặc dài hơn được tự động chuyển sang VPS/server sau khi kiểm tra dung lượng tạm. "
-        "Sau khi kiểm tra file, anh/chị có thể mô tả mục tiêu "
-        "như làm sáng, làm rõ, giảm nhiễu, cân bằng âm lượng hoặc video dọc.\n\n"
-        "Công cụ dùng bộ xử lý video cục bộ, giá 0 Xu. Chưa tạo tác vụ, chưa gọi dịch vụ bên ngoài và chưa trừ ví."
+        "🤖 <b>Gửi video cần chỉnh sửa AI</b>\n\n"
+        "Nhận video MP4 hoặc MOV, tối đa 30 giây, 50 MB và cạnh dài không quá 1920 px. "
+        "Sau khi kiểm tra video, anh/chị chọn các nội dung muốn chỉnh và nhập chi tiết cho từng mục.\n\n"
+        "Video và lựa chọn chỉ được lưu trong draft; chưa tạo tác vụ, chưa xử lý video và chưa trừ Xu."
     )
+
+
+def video_ai_edit_source_admission_error(reason: str, lang: str = "vi") -> str:
+    return {
+        "ai_edit_source_format": "🤖 Chỉnh sửa video AI hiện nhận video MP4 hoặc MOV.",
+        "ai_edit_source_duration": "🤖 Video cho Chỉnh sửa video AI cần dài tối đa 30 giây.",
+        "ai_edit_source_size": "🤖 Video cho Chỉnh sửa video AI cần có dung lượng tối đa 50 MB.",
+        "ai_edit_source_dimensions": "🤖 Video cho Chỉnh sửa video AI cần có cạnh dài tối đa 1920 px.",
+    }.get(str(reason or ""), "🤖 Video này chưa đủ điều kiện để mở Chỉnh sửa video AI.")
 
 
 def video_ai_edit_upload_keyboard(lang: str = "vi", *, back_callback: str = "videoedit|ai") -> InlineKeyboardMarkup:
@@ -85776,6 +85785,22 @@ def video_ai_edit_source_summary_text(state: dict, lang: str = "vi") -> str:
     )
 
 
+def video_ai_edit_public_source_summary_text(state: dict, lang: str = "vi") -> str:
+    metadata = dict((state or {}).get("source_metadata") or {})
+    width, height = safe_int(metadata.get("width"), 0), safe_int(metadata.get("height"), 0)
+    orientation = "Dọc" if height > width else "Ngang" if width > height else "Vuông"
+    audio = "Có" if metadata.get("has_audio") else "Không"
+    return (
+        "🤖 <b>Video AI đã được kiểm tra</b>\n\n"
+        f"• Tên: {html.escape(str((state or {}).get('source_display_name') or 'video.mp4'))}\n"
+        f"• Thời lượng: <b>{_video_local_duration_text(safe_int(metadata.get('duration_ms'), 0))}</b>\n"
+        f"• Kích thước: <b>{width}×{height}</b> · {orientation}\n"
+        f"• Âm thanh gốc: <b>{audio}</b>\n\n"
+        "✅ <b>Sẵn sàng chọn nội dung chỉnh sửa AI</b>\n"
+        "Chọn một hoặc nhiều mục rồi nhập chi tiết cho từng thay đổi."
+    )
+
+
 def video_ai_edit_entry_back(state: dict | None = None, default: str = "videoedit|hub") -> str:
     return {
         "effects": "videoedit|effects",
@@ -85787,8 +85812,188 @@ def video_ai_edit_entry_back(state: dict | None = None, default: str = "videoedi
 
 def video_ai_edit_source_summary_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("✍️ Mô tả mong muốn", "videoedit|ai_intent"), ("📎 Gửi video khác", "videoedit|ai_upload")],
+        [("🎨 Chọn nội dung cần chỉnh", "videoedit|ai_catalog"), ("📎 Gửi video khác", "videoedit|ai_upload")],
         [(ui_text(lang, "common.back"), video_ai_edit_entry_back(state, "videoedit|ai")), (ui_text(lang, "common.main_menu"), "menu|main")],
+    ])
+
+
+def video_ai_edit_catalog_home_text(state: dict | None = None, lang: str = "vi") -> str:
+    selected = video_ai_edit_catalog.normalized_selection((state or {}).get("ai_edit_selected"))
+    return (
+        "🤖 <b>Chỉnh sửa video AI</b>\n\n"
+        "Chọn một hoặc nhiều nội dung cần chỉnh. Dấu ✅ cho biết mục đã chọn; "
+        "anh/chị có thể mở nhóm khác rồi quay lại mà không mất lựa chọn.\n\n"
+        f"✅ <b>Đã chọn: {len(selected)} mục</b>\n\n"
+        "Chưa xác nhận: chưa tạo tác vụ, chưa gọi dịch vụ và chưa trừ Xu."
+    )
+
+
+def _video_ai_edit_adaptive_keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
+    normalized = video_scene3_flow.validate_adaptive_rows(rows)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(label, callback_data=callback) for label, callback in row]
+        for row in normalized
+    ])
+
+
+def video_ai_edit_catalog_home_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
+    selected = video_ai_edit_catalog.normalized_selection((state or {}).get("ai_edit_selected"))
+    categories = list(video_ai_edit_catalog.CATEGORIES)
+    rows = [
+        [
+            (category.public_label, f"videoedit|ai_cat|{category.stable_id}.0")
+            for category in categories[index:index + 2]
+        ]
+        for index in range(0, len(categories), 2)
+    ]
+    rows.extend([
+        [(f"✅ Đã chọn ({len(selected)})", "videoedit|ai_selected")],
+        [(ui_text(lang, "common.back"), "videoedit|ai_source"), (ui_text(lang, "common.main_menu"), "menu|main")],
+    ])
+    return _video_ai_edit_adaptive_keyboard(rows)
+
+
+def video_ai_edit_category_text(
+    state: dict | None,
+    category_id: str,
+    page_index: int,
+    lang: str = "vi",
+) -> str:
+    page = video_ai_edit_catalog.capability_page(category_id, page_index)
+    selected = video_ai_edit_catalog.normalized_selection((state or {}).get("ai_edit_selected"))
+    return (
+        f"{html.escape(page.category.public_label)}\n\n"
+        "Chạm để chọn hoặc bỏ chọn. Mỗi trang chỉ hiển thị tối đa 4 lựa chọn.\n\n"
+        f"📄 Trang <b>{page.page_index + 1}/{page.page_count}</b>\n"
+        f"✅ <b>Đã chọn: {len(selected)} mục</b>"
+    )
+
+
+def video_ai_edit_category_keyboard(
+    state: dict | None,
+    category_id: str,
+    page_index: int,
+    lang: str = "vi",
+) -> InlineKeyboardMarkup:
+    page = video_ai_edit_catalog.capability_page(category_id, page_index)
+    selected = set(video_ai_edit_catalog.normalized_selection((state or {}).get("ai_edit_selected")))
+    option_buttons = [
+        (
+            f"{'✅' if item.stable_id in selected else '⬜'} {item.public_label}",
+            f"videoedit|ai_item|{item.stable_id}.{category_id}.{page.page_index}",
+        )
+        for item in page.items
+    ]
+    rows = [option_buttons[index:index + 2] for index in range(0, len(option_buttons), 2)]
+    navigation = []
+    if page.page_index > 0:
+        navigation.append(("⬅️ Trang trước", f"videoedit|ai_cat|{category_id}.{page.page_index - 1}"))
+    if page.page_index + 1 < page.page_count:
+        navigation.append(("➡️ Trang sau", f"videoedit|ai_cat|{category_id}.{page.page_index + 1}"))
+    if navigation:
+        rows.append(navigation)
+    rows.extend([
+        [(f"✅ Đã chọn ({len(selected)})", "videoedit|ai_selected")],
+        [(ui_text(lang, "common.back"), "videoedit|ai_catalog"), (ui_text(lang, "common.main_menu"), "menu|main")],
+    ])
+    return _video_ai_edit_adaptive_keyboard(rows)
+
+
+def _video_ai_edit_selected_back_callback(state: dict | None) -> str:
+    candidate = str(((state or {}).get("summary_return") or {}).get("callback") or "")
+    if candidate == "videoedit|ai_catalog" or candidate.startswith("videoedit|ai_cat|"):
+        return candidate
+    return "videoedit|ai_catalog"
+
+
+def video_ai_edit_selected_text(state: dict | None, lang: str = "vi") -> str:
+    current = dict(state or {})
+    selected = video_ai_edit_catalog.normalized_selection(current.get("ai_edit_selected"))
+    if not selected:
+        return (
+            "✅ <b>Đã chọn (0)</b>\n\n"
+            "Chưa có nội dung nào. Hãy quay lại catalog để chọn mục cần chỉnh."
+        )
+    lines = ["✅ <b>Nội dung đã chọn</b>", ""]
+    missing = set(video_ai_edit_catalog.missing_detail_ids(current))
+    for index, capability_id in enumerate(selected, start=1):
+        item = video_ai_edit_catalog.capability(capability_id)
+        marker = "✍️" if capability_id in missing else "✅"
+        lines.append(f"{index}. {marker} {html.escape(item.public_label)}")
+    lines.extend([
+        "",
+        "Chạm từng mục để nhập hoặc chỉnh chi tiết. Lựa chọn chỉ được lưu trong draft AI này.",
+    ])
+    return "\n".join(lines)
+
+
+def video_ai_edit_selected_keyboard(state: dict | None, lang: str = "vi") -> InlineKeyboardMarkup:
+    current = dict(state or {})
+    selected = video_ai_edit_catalog.normalized_selection(current.get("ai_edit_selected"))
+    missing = set(video_ai_edit_catalog.missing_detail_ids(current))
+    buttons = []
+    for capability_id in selected:
+        item = video_ai_edit_catalog.capability(capability_id)
+        marker = "✍️" if capability_id in missing else "✅"
+        buttons.append((f"{marker} {item.public_label}", f"videoedit|ai_detail|{capability_id}"))
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+    if selected:
+        rows.append([("➡️ Xem lại lựa chọn", "videoedit|ai_summary")])
+    rows.append([
+        (ui_text(lang, "common.back"), _video_ai_edit_selected_back_callback(current)),
+        (ui_text(lang, "common.main_menu"), "menu|main"),
+    ])
+    return _video_ai_edit_adaptive_keyboard(rows)
+
+
+def video_ai_edit_detail_text(state: dict | None, capability_id: str, lang: str = "vi") -> str:
+    item = video_ai_edit_catalog.capability(capability_id)
+    details = dict(((state or {}).get("ai_edit_details") or {}).get(capability_id) or {})
+    if item.requires_reference_image:
+        prompt = "Gửi ảnh mẫu làm reference cho mục này. Ảnh sẽ được gắn đúng draft và nguồn hiện tại."
+    elif item.detail_kind == "text_replace":
+        prompt = "Nhập chữ cũ cần thay. Sau đó hệ thống sẽ hỏi chữ mới muốn thay vào."
+    elif item.requires_text:
+        prompt = "Nhập mô tả cụ thể cho thay đổi này."
+    else:
+        prompt = "Mục này dùng preset cố định và không cần nhập thêm."
+    existing = str(details.get("text") or details.get("new_text") or "").strip()
+    suffix = f"\n\nĐang lưu: <i>{html.escape(existing)}</i>" if existing else ""
+    return (
+        f"✍️ <b>{html.escape(item.public_label)}</b>\n\n"
+        f"{html.escape(item.public_description)}\n\n{prompt}{suffix}\n\n"
+        "Chưa tạo tác vụ, chưa gọi dịch vụ và chưa trừ Xu."
+    )
+
+
+def video_ai_edit_detail_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return _video_ai_edit_adaptive_keyboard([
+        [(ui_text(lang, "common.back"), "videoedit|ai_selected"), (ui_text(lang, "common.main_menu"), "menu|main")],
+    ])
+
+
+def video_ai_edit_summary_text(state: dict | None, lang: str = "vi") -> str:
+    current = dict(state or {})
+    selected = video_ai_edit_catalog.normalized_selection(current.get("ai_edit_selected"))
+    details = dict(current.get("ai_edit_details") or {})
+    lines = ["🤖 <b>Xem lại chỉnh sửa video AI</b>", ""]
+    for capability_id in selected:
+        item = video_ai_edit_catalog.capability(capability_id)
+        entry = dict(details.get(capability_id) or {})
+        value = str(entry.get("text") or entry.get("new_text") or "Preset đã chọn").strip()
+        lines.append(f"• {html.escape(item.public_label)} → {html.escape(value)}")
+    lines.extend([
+        "",
+        f"✅ Đã chọn: <b>{len(selected)} mục</b>",
+        "Kế hoạch này mới là bản xem lại trong giao diện; chưa tạo job, chưa xử lý video và chưa trừ Xu.",
+    ])
+    return "\n".join(lines)
+
+
+def video_ai_edit_summary_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return _video_ai_edit_adaptive_keyboard([
+        [("✏️ Chỉnh lại lựa chọn", "videoedit|ai_selected")],
+        [(ui_text(lang, "common.back"), "videoedit|ai_summary_back"), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
 
@@ -218141,6 +218346,8 @@ async def handle_pending_admin_tool_test_media(update: Update, context: ContextT
     return False
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_video_ai_edit_pending_media(update, context):
+        return
     if await handle_video_editor_pending_upload(update, context):
         return
     if await handle_caption_admin_tool_test_media(update, context):
@@ -239983,6 +240190,74 @@ async def resume_video_editor_requested_group(
     return False
 
 
+async def handle_video_ai_edit_pending_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Claim a reference image only while the isolated AI Edit UI asks for it."""
+
+    if not update.effective_user or not update.message:
+        return False
+    uid = update.effective_user.id
+    draft = video_ai_edit_state.load_draft(uid)
+    if not draft:
+        return False
+    chat_id = (
+        getattr(getattr(update, "effective_chat", None), "id", None)
+        or getattr(update.message, "chat_id", None)
+    )
+    if str(draft.get("chat_id") or "") != str(chat_id or ""):
+        await update.message.reply_text(
+            "🔒 File này không thuộc draft Chỉnh sửa video AI trong cuộc trò chuyện hiện tại."
+        )
+        return True
+    pending = dict(draft.get("pending_input") or {})
+    capability_id = str(pending.get("capability_id") or "")
+    if str(pending.get("field") or "") != "reference" or not capability_id:
+        return False
+    photos = list(getattr(update.message, "photo", None) or [])
+    document = getattr(update.message, "document", None)
+    if photos:
+        asset = photos[-1]
+    elif document and str(getattr(document, "mime_type", "") or "").lower().startswith("image/"):
+        asset = document
+    else:
+        await update.message.reply_text(
+            "Mục này cần một ảnh mẫu. Hãy gửi ảnh hoặc bấm Quay lại.",
+            reply_markup=video_ai_edit_detail_keyboard(get_user_language(uid) or "vi"),
+        )
+        return True
+    file_id = str(getattr(asset, "file_id", "") or "")
+    file_unique_id = str(getattr(asset, "file_unique_id", "") or "")
+    if not file_id or not file_unique_id:
+        await update.message.reply_text(
+            "Ảnh mẫu chưa có định danh hợp lệ. Hãy gửi lại ảnh khác.",
+            reply_markup=video_ai_edit_detail_keyboard(get_user_language(uid) or "vi"),
+        )
+        return True
+    references = dict(draft.get("ai_edit_references") or {})
+    references[capability_id] = {
+        "file_id": file_id,
+        "file_unique_id": file_unique_id,
+        "file_size": safe_int(getattr(asset, "file_size", 0), 0),
+        "user_id": str(uid),
+        "chat_id": str(chat_id),
+        "draft_id": str(draft.get("draft_id") or ""),
+        "selection_id": capability_id,
+        "source_fingerprint": str((draft.get("source") or {}).get("fingerprint") or ""),
+    }
+    current = video_ai_edit_state.update_draft(
+        uid,
+        current_screen="ai_selected",
+        ai_edit_references=references,
+        pending_input={},
+    )
+    lang = get_user_language(uid) or "vi"
+    await update.message.reply_text(
+        "✅ Đã lưu ảnh mẫu đúng với lựa chọn này.\n\n" + video_ai_edit_selected_text(current, lang),
+        parse_mode="HTML",
+        reply_markup=video_ai_edit_selected_keyboard(current, lang),
+    )
+    return True
+
+
 @product_video_media_failure_guard
 @video_editor_message_state_guard
 async def handle_video_editor_pending_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -240254,6 +240529,28 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
         source["source_display_name"] = video_local_validation.safe_display_filename(
             str(source.get("source_file_name") or "video.mp4")
         )
+        if edit_mode == "ai_edit":
+            admission = video_ai_edit_state.source_admission(
+                {
+                    "file_name": source.get("source_file_name"),
+                    "file_size": source.get("source_file_size"),
+                },
+                metadata,
+            )
+            if not admission.get("ok"):
+                waiting = video_edit_state_machine.keep_waiting_after_invalid(
+                    state,
+                    str(admission.get("reason") or "ai_edit_source_invalid"),
+                )
+                committed, current = await commit_intake_candidate(claimed_state, waiting)
+                if not committed:
+                    return True
+                await reply_after_intake_commit(
+                    current,
+                    video_ai_edit_source_admission_error(str(admission.get("reason") or ""), lang),
+                    reply_markup=video_edit_lane_upload_keyboard("ai_edit", lang),
+                )
+                return True
         completed = video_edit_state_machine.complete_intake(state, source, metadata)
         if edit_mode == "manual_edit":
             split_intake = bool(
@@ -240362,12 +240659,43 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
         )
         if not committed:
             return True
-        await reply_after_intake_commit(
-            current,
-            video_ai_edit_source_summary_text(current, lang),
-            parse_mode="HTML",
-            reply_markup=video_ai_edit_source_summary_keyboard(lang, current),
+        chat_id = (
+            getattr(getattr(update, "effective_chat", None), "id", None)
+            or getattr(update.message, "chat_id", None)
         )
+        draft = video_ai_edit_state.replace_source_draft(
+            user_id=uid,
+            chat_id=chat_id,
+            draft_id=str(current.get("edit_session_id") or current.get("session_id") or uuid.uuid4().hex),
+            source={
+                "file_id": str(current.get("source_file_id") or ""),
+                "file_unique_id": str(current.get("source_file_unique_id") or ""),
+                "file_name": str(current.get("source_display_name") or current.get("source_file_name") or "video.mp4"),
+                "file_size": safe_int(current.get("source_file_size"), 0),
+                "mime_type": str(current.get("source_mime_type") or ""),
+                "fingerprint": str(metadata.get("source_sha256") or ""),
+            },
+            metadata=metadata,
+        )
+        source_state = {
+            "source_file_id": str((draft.get("source") or {}).get("file_id") or ""),
+            "source_display_name": str((draft.get("source") or {}).get("file_name") or "video.mp4"),
+            "source_metadata": dict(draft.get("source_metadata") or {}),
+            "entry_context": "ai",
+        }
+        try:
+            await update.message.reply_text(
+                video_ai_edit_public_source_summary_text(source_state, lang),
+                parse_mode="HTML",
+                reply_markup=video_ai_edit_source_summary_keyboard(lang, source_state),
+            )
+        except ApplicationHandlerStop:
+            raise
+        except Exception as exc:
+            video_ai_edit_state.clear_draft(uid)
+            await handle_intake_reply_failure(current, exc)
+            return True
+        clear_video_editor_pending(uid)
         return True
     step = str(state.get("step") or "")
     if step not in {
@@ -240609,6 +240937,52 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
         metadata = dict(metadata)
         width, height = safe_int(metadata.get("width"), 0), safe_int(metadata.get("height"), 0)
         metadata["orientation"] = "portrait" if height > width else "landscape" if width > height else "square"
+        entry_context = str(state.get("entry_context") or "ai")
+        if entry_context == "ai":
+            admission = video_ai_edit_state.source_admission(
+                {
+                    "file_name": source.get("source_file_name"),
+                    "file_size": source.get("source_file_size"),
+                },
+                metadata,
+            )
+            if not admission.get("ok"):
+                await update.message.reply_text(
+                    video_ai_edit_source_admission_error(str(admission.get("reason") or ""), lang),
+                    reply_markup=video_ai_edit_upload_keyboard(lang),
+                )
+                return True
+            chat_id = (
+                getattr(getattr(update, "effective_chat", None), "id", None)
+                or getattr(update.message, "chat_id", None)
+            )
+            draft = video_ai_edit_state.replace_source_draft(
+                user_id=uid,
+                chat_id=chat_id,
+                draft_id=str(state.get("edit_session_id") or state.get("session_id") or uuid.uuid4().hex),
+                source={
+                    "file_id": str(source.get("source_file_id") or ""),
+                    "file_unique_id": str(source.get("source_file_unique_id") or ""),
+                    "file_name": str(source.get("source_display_name") or source.get("source_file_name") or "video.mp4"),
+                    "file_size": safe_int(source.get("source_file_size"), 0),
+                    "mime_type": str(source.get("source_mime_type") or ""),
+                    "fingerprint": str(metadata.get("source_sha256") or ""),
+                },
+                metadata=metadata,
+            )
+            source_state = {
+                "source_file_id": str((draft.get("source") or {}).get("file_id") or ""),
+                "source_display_name": str((draft.get("source") or {}).get("file_name") or "video.mp4"),
+                "source_metadata": dict(draft.get("source_metadata") or {}),
+                "entry_context": "ai",
+            }
+            await update.message.reply_text(
+                video_ai_edit_public_source_summary_text(source_state, lang),
+                parse_mode="HTML",
+                reply_markup=video_ai_edit_source_summary_keyboard(lang, source_state),
+            )
+            clear_video_editor_pending(uid)
+            return True
         base_plan = video_local_editing.default_manual_edit_plan("")
         base_plan["trim"] = {
             "start_ms": 0,
@@ -240616,7 +240990,6 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
         }
         controls = dict(video_ai_edit_router.DEFAULT_PRESERVE_CONTROLS)
         preset_intent = str(state.get("user_intent") or "")
-        entry_context = str(state.get("entry_context") or "ai")
         selected_effect = str(state.get("selected_effect") or "")
         current = update_video_editor_pending(
             uid,
@@ -240911,6 +241284,81 @@ def video_edit_runtime_recovery_keyboard(
         ],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
+
+
+async def handle_video_ai_edit_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Consume only text explicitly requested by the isolated AI Edit UI."""
+
+    if not update.effective_user or not update.message or not update.message.text:
+        return False
+    uid = update.effective_user.id
+    draft = video_ai_edit_state.load_draft(uid)
+    if not draft:
+        return False
+    chat_id = (
+        getattr(getattr(update, "effective_chat", None), "id", None)
+        or getattr(update.message, "chat_id", None)
+    )
+    if str(draft.get("chat_id") or "") != str(chat_id or ""):
+        await update.message.reply_text(
+            "🔒 Tin nhắn này không thuộc draft Chỉnh sửa video AI trong cuộc trò chuyện hiện tại."
+        )
+        return True
+    pending = dict(draft.get("pending_input") or {})
+    capability_id = str(pending.get("capability_id") or "")
+    field = str(pending.get("field") or "")
+    if not capability_id or not field:
+        return False
+    if capability_id not in video_ai_edit_catalog.normalized_selection(draft.get("ai_edit_selected")):
+        video_ai_edit_state.update_draft(uid, pending_input={})
+        await update.message.reply_text(
+            "Lựa chọn này đã được bỏ khỏi draft. Nội dung vừa gửi không được lưu.",
+            reply_markup=video_ai_edit_selected_keyboard(draft, get_user_language(uid) or "vi"),
+        )
+        return True
+    if field == "reference":
+        await update.message.reply_text(
+            "Mục này cần ảnh mẫu. Hãy gửi một ảnh hoặc bấm Quay lại.",
+            reply_markup=video_ai_edit_detail_keyboard(get_user_language(uid) or "vi"),
+        )
+        return True
+    raw_text = str(update.message.text or "").strip()
+    if len(raw_text) < 2 or len(raw_text) > 1_000:
+        await update.message.reply_text(
+            "Mô tả cần từ 2 đến 1.000 ký tự. Vui lòng nhập lại.",
+            reply_markup=video_ai_edit_detail_keyboard(get_user_language(uid) or "vi"),
+        )
+        return True
+    details = dict(draft.get("ai_edit_details") or {})
+    item_details = dict(details.get(capability_id) or {})
+    if field == "target_text":
+        item_details["target_text"] = raw_text
+        details[capability_id] = item_details
+        current = video_ai_edit_state.update_draft(
+            uid,
+            ai_edit_details=details,
+            pending_input={"capability_id": capability_id, "field": "new_text"},
+        )
+        await update.message.reply_text(
+            "✅ Đã lưu chữ cũ. Bây giờ gửi chữ mới muốn thay vào.",
+            reply_markup=video_ai_edit_detail_keyboard(get_user_language(uid) or "vi"),
+        )
+        return True
+    item_details["new_text" if field == "new_text" else "text"] = raw_text
+    details[capability_id] = item_details
+    current = video_ai_edit_state.update_draft(
+        uid,
+        current_screen="ai_selected",
+        ai_edit_details=details,
+        pending_input={},
+    )
+    lang = get_user_language(uid) or "vi"
+    await update.message.reply_text(
+        "✅ Đã lưu chi tiết.\n\n" + video_ai_edit_selected_text(current, lang),
+        parse_mode="HTML",
+        reply_markup=video_ai_edit_selected_keyboard(current, lang),
+    )
+    return True
 
 
 @video_editor_message_state_guard
@@ -244514,6 +244962,226 @@ async def notify_video_editor_state_unavailable(target) -> None:
             pass
 
 
+VIDEO_AI_EDIT_UI_ACTIONS = frozenset({
+    "ai_catalog",
+    "ai_cat",
+    "ai_detail",
+    "ai_item",
+    "ai_selected",
+    "ai_summary",
+    "ai_summary_back",
+    "ai_source",
+})
+
+
+def _video_ai_edit_category_callback_value(value: str) -> tuple[str, int]:
+    parts = str(value or "").split(".")
+    if len(parts) != 2 or not parts[1].isdigit():
+        raise ValueError("ai_edit_category_callback_invalid")
+    category_id, page_index = parts[0], int(parts[1])
+    video_ai_edit_catalog.capability_page(category_id, page_index)
+    return category_id, page_index
+
+
+def _video_ai_edit_item_callback_value(value: str) -> tuple[str, str, int]:
+    parts = str(value or "").split(".")
+    if len(parts) != 3 or not parts[2].isdigit():
+        raise ValueError("ai_edit_item_callback_invalid")
+    capability_id, category_id, page_text = parts
+    page = video_ai_edit_catalog.capability_page(category_id, int(page_text))
+    if capability_id not in {item.stable_id for item in page.items}:
+        raise ValueError("ai_edit_item_callback_invalid")
+    return capability_id, category_id, int(page_text)
+
+
+async def handle_video_ai_edit_ui_callback(
+    query,
+    *,
+    user_id: int,
+    action: str,
+    parts: list[str],
+    lang: str,
+) -> bool:
+    """Render only the isolated AI Edit catalog UI; never execute a job."""
+
+    if action not in VIDEO_AI_EDIT_UI_ACTIONS:
+        return False
+    draft = video_ai_edit_state.load_draft(user_id)
+    if not draft:
+        return False
+    query_chat_id = getattr(getattr(query, "message", None), "chat_id", None)
+    if str(draft.get("chat_id") or "") != str(query_chat_id or ""):
+        await query.answer(
+            "Nút này không thuộc phiên Chỉnh sửa video AI trong cuộc trò chuyện hiện tại.",
+            show_alert=True,
+        )
+        _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+        return True
+    try:
+        current_screen = str(draft.get("current_screen") or "")
+        parent_screens = {
+            "ai_source": {"ai_catalog"},
+            "ai_catalog": {"ai_source_summary", "ai_category", "ai_selected"},
+            "ai_cat": {"ai_catalog", "ai_category", "ai_selected"},
+            "ai_selected": {"ai_catalog", "ai_category", "ai_detail", "ai_summary"},
+            "ai_summary_back": {"ai_summary"},
+            "ai_summary": {"ai_selected"},
+        }
+        if action in parent_screens and current_screen not in parent_screens[action]:
+            raise ValueError("ai_edit_callback_wrong_parent")
+        if action == "ai_source":
+            current = video_ai_edit_state.update_draft(
+                user_id,
+                current_screen="ai_source_summary",
+            )
+            source = dict(current.get("source") or {})
+            source_state = {
+                "source_file_id": str(source.get("file_id") or ""),
+                "source_display_name": str(source.get("file_name") or "video.mp4"),
+                "source_metadata": dict(current.get("source_metadata") or {}),
+                "entry_context": "ai",
+            }
+            return await safe_edit_or_send(
+                query,
+                video_ai_edit_public_source_summary_text(source_state, lang),
+                parse_mode="HTML",
+                reply_markup=video_ai_edit_source_summary_keyboard(lang, source_state),
+            )
+        if action == "ai_catalog":
+            current = video_ai_edit_state.update_draft(user_id, current_screen="ai_catalog")
+            return await safe_edit_or_send(
+                query,
+                video_ai_edit_catalog_home_text(current, lang),
+                parse_mode="HTML",
+                reply_markup=video_ai_edit_catalog_home_keyboard(current, lang),
+            )
+        if action == "ai_cat":
+            category_id, page_index = _video_ai_edit_category_callback_value(parts[2])
+            if str(draft.get("current_screen") or "") not in {
+                "ai_catalog",
+                "ai_category",
+                "ai_selected",
+            }:
+                raise ValueError("ai_edit_category_wrong_parent")
+            current = video_ai_edit_state.update_draft(
+                user_id,
+                current_screen="ai_category",
+                origin_category=category_id,
+                origin_page=page_index,
+            )
+            return await safe_edit_or_send(
+                query,
+                video_ai_edit_category_text(current, category_id, page_index, lang),
+                parse_mode="HTML",
+                reply_markup=video_ai_edit_category_keyboard(current, category_id, page_index, lang),
+            )
+        if action in {"ai_selected", "ai_summary_back"}:
+            previous_screen = str(draft.get("current_screen") or "")
+            if previous_screen == "ai_category":
+                origin_category = str(draft.get("origin_category") or "")
+                origin_page = safe_int(draft.get("origin_page"), 0)
+                back_callback = f"videoedit|ai_cat|{origin_category}.{origin_page}"
+            elif previous_screen == "ai_catalog":
+                back_callback = "videoedit|ai_catalog"
+            else:
+                back_callback = _video_ai_edit_selected_back_callback(draft)
+            pending_input = {} if previous_screen == "ai_detail" else dict(draft.get("pending_input") or {})
+            current = video_ai_edit_state.update_draft(
+                user_id,
+                current_screen="ai_selected",
+                summary_return={"callback": back_callback},
+                pending_input=pending_input,
+            )
+            return await safe_edit_or_send(
+                query,
+                video_ai_edit_selected_text(current, lang),
+                parse_mode="HTML",
+                reply_markup=video_ai_edit_selected_keyboard(current, lang),
+            )
+        if action == "ai_detail":
+            capability_id = str(parts[2] if len(parts) > 2 else "")
+            item = video_ai_edit_catalog.capability(capability_id)
+            if str(draft.get("current_screen") or "") != "ai_selected":
+                raise ValueError("ai_edit_detail_wrong_parent")
+            if capability_id not in video_ai_edit_catalog.normalized_selection(draft.get("ai_edit_selected")):
+                raise ValueError("ai_edit_detail_not_selected")
+            pending = {}
+            if item.requires_reference_image:
+                pending = {"capability_id": capability_id, "field": "reference"}
+            elif item.requires_text:
+                pending = {
+                    "capability_id": capability_id,
+                    "field": "target_text" if item.detail_kind == "text_replace" else "text",
+                }
+            current = video_ai_edit_state.update_draft(
+                user_id,
+                current_screen="ai_detail",
+                origin_capability=capability_id,
+                pending_input=pending,
+            )
+            return await safe_edit_or_send(
+                query,
+                video_ai_edit_detail_text(current, capability_id, lang),
+                parse_mode="HTML",
+                reply_markup=video_ai_edit_detail_keyboard(lang),
+            )
+        if action == "ai_summary":
+            missing = video_ai_edit_catalog.missing_detail_ids(draft)
+            if missing:
+                await query.answer(
+                    "Hãy nhập đủ chi tiết cho các mục đang có biểu tượng ✍️ trước khi xem lại.",
+                    show_alert=True,
+                )
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+                current = video_ai_edit_state.update_draft(user_id, current_screen="ai_selected")
+                return await safe_edit_or_send(
+                    query,
+                    video_ai_edit_selected_text(current, lang),
+                    parse_mode="HTML",
+                    reply_markup=video_ai_edit_selected_keyboard(current, lang),
+                )
+            current = video_ai_edit_state.update_draft(user_id, current_screen="ai_summary")
+            return await safe_edit_or_send(
+                query,
+                video_ai_edit_summary_text(current, lang),
+                parse_mode="HTML",
+                reply_markup=video_ai_edit_summary_keyboard(lang),
+            )
+        if action == "ai_item":
+            capability_id, category_id, page_index = _video_ai_edit_item_callback_value(parts[2])
+            if (
+                str(draft.get("current_screen") or "") != "ai_category"
+                or str(draft.get("origin_category") or "") != category_id
+                or safe_int(draft.get("origin_page"), -1) != page_index
+            ):
+                raise ValueError("ai_edit_item_wrong_parent")
+            toggled = video_ai_edit_catalog.toggle_capability_state(draft, capability_id)
+            current = video_ai_edit_state.update_draft(
+                user_id,
+                current_screen="ai_category",
+                origin_category=category_id,
+                origin_page=page_index,
+                origin_capability=capability_id,
+                ai_edit_selected=toggled["ai_edit_selected"],
+                ai_edit_details=toggled["ai_edit_details"],
+                ai_edit_references=toggled["ai_edit_references"],
+            )
+            return await safe_edit_or_send(
+                query,
+                video_ai_edit_category_text(current, category_id, page_index, lang),
+                parse_mode="HTML",
+                reply_markup=video_ai_edit_category_keyboard(current, category_id, page_index, lang),
+            )
+    except (IndexError, TypeError, ValueError):
+        await query.answer(
+            "Nút lựa chọn này đã cũ hoặc không đúng màn hình. Phiên hiện tại được giữ nguyên.",
+            show_alert=True,
+        )
+        _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+        return True
+    return False
+
+
 @video_public_callback_failure_guard
 @video_editor_callback_state_guard
 async def handle_video_editor_callback(
@@ -244664,6 +245332,7 @@ async def handle_video_editor_callback(
                 raise_on_failure=True,
             )
             clear_video_editor_competing_video_states(uid, context)
+            video_ai_edit_state.clear_draft(uid)
             clear_video_session(uid)
             set_video_route_session(uid, "video_local_edit", "tool_home", product_id="video_local_edit")
 
@@ -244738,6 +245407,14 @@ async def handle_video_editor_callback(
             parse_mode="HTML",
             reply_markup=video_edit_guide_keyboard(lang, back_callback=guide_back),
         )
+    if action in VIDEO_AI_EDIT_UI_ACTIONS and await handle_video_ai_edit_ui_callback(
+        query,
+        user_id=uid,
+        action=action,
+        parts=parts,
+        lang=lang,
+    ):
+        return True
     VIDEO_EDIT_STATELESS_ACTIONS = {
         "manual", "ai", "restore", "guide", "quick", "upload",
         "ai_upload", "quality_upload", "audio_reupload",
@@ -247406,6 +248083,8 @@ async def handle_video_upload_callback(update: Update, context: ContextTypes.DEF
     return await safe_edit_or_send(query, video_upload_received_text(lang), reply_markup=video_upload_received_keyboard(uid, lang))
 
 async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_video_ai_edit_pending_media(update, context):
+        return
     if await handle_video_editor_pending_upload(update, context):
         return
     if await handle_caption_admin_tool_test_media(update, context):
@@ -248071,6 +248750,9 @@ def pending_text_owner_active(user_id) -> bool:
     uid = user_id
     if subdub_text_input_owns_message(uid):
         return True
+    ai_edit_draft = video_ai_edit_state.load_draft(uid)
+    if dict(ai_edit_draft.get("pending_input") or {}):
+        return True
     video_state = dict(get_video_editor_pending(uid) or {})
     if str(video_state.get("step") or "") in {
         "await_ai_intent",
@@ -248107,6 +248789,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid  = update.effective_user.id
 
     if await handle_state_reset_slash_command(update, context, text):
+        return
+
+    if await handle_video_ai_edit_pending_text(update, context):
         return
 
     # Video Edit owns every non-command text until its session is explicitly
