@@ -53,11 +53,13 @@ Module đang thử nghiệm hoặc chưa mở công khai phải hiển thị gua
 - Ưu đãi nạp lần đầu 30%, Launch Bonus mệnh giá 50k/100k/200k/500k, bonus cộng Xu và quà nạp khi lên hạng chỉ áp dụng cho khách nội địa Việt Nam nạp VND qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR.
 - ZaloPay, MoMo và giao dịch USD/CNY/USDT không áp dụng bonus cộng Xu.
 - Khách quốc tế vẫn giữ chiết khấu phần trăm theo hạng thành viên khi đủ điều kiện.
-- Nếu admin tặng thêm cho khách quốc tế, khoản tặng phải dùng admin grant riêng và ghi rõ lý do.
+- Tài khoản quốc tế chỉ được duyệt đúng Xu gốc đã xác minh của giao dịch; không có bonus nạp nội địa, quà nạp, referral Xu hoặc Xu điều chỉnh vượt mức.
+- Quà tặng không liên quan nạp tiền, nếu có chính sách riêng, phải được xử lý tách biệt và không làm thay đổi kết quả duyệt nạp quốc tế.
 
 ## 7. Duyệt thủ công và đối soát
 
-- Admin có thể duyệt đúng số Xu dự kiến hoặc nhập số Xu điều chỉnh.
+- Admin duyệt đúng số Xu dự kiến. Điều chỉnh chỉ dùng cho giao dịch nội địa khi có căn cứ đối soát hợp lệ.
+- Không dùng duyệt bill quốc tế để cộng bonus, mã nạp, referral Xu hoặc Xu điều chỉnh vượt mức.
 - Trường hợp điều chỉnh phải ghi lý do, ví dụ: tỉ giá, phí, chuyển thiếu/dư hoặc sai nội dung.
 - Một giao dịch chỉ được duyệt một lần.
 - TXID trùng phải được cảnh báo và không được cộng trùng.
