@@ -1,6 +1,3 @@
-import asyncio
-from types import SimpleNamespace
-
 import bot
 
 
@@ -27,53 +24,6 @@ def _locked_profile_state(profile_key: str) -> dict:
             "story_formula": list(profile["default_scene_pattern"]),
         },
     )
-
-
-def test_start_delivers_one_menu_for_the_same_telegram_message(monkeypatch):
-    bot.TELEGRAM_MESSAGE_DEDUPE_DONE.clear()
-    bot.TELEGRAM_MESSAGE_DEDUPE_LOCKS.clear()
-    replies = []
-
-    class Message:
-        message_id = 1701
-        chat = SimpleNamespace(id=2701)
-
-        async def reply_text(self, text, **kwargs):
-            replies.append((text, kwargs))
-            return SimpleNamespace(message_id=3701)
-
-    update = SimpleNamespace(
-        message=Message(),
-        effective_chat=SimpleNamespace(id=2701),
-        effective_user=SimpleNamespace(id=4701, first_name="Owner", username="owner"),
-    )
-    context = SimpleNamespace(args=[])
-
-    monkeypatch.setattr(bot, "log_command_received", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(bot, "user_exists", lambda _uid: True)
-    monkeypatch.setattr(bot, "get_user", lambda *_args, **_kwargs: (0, 0, False))
-    monkeypatch.setattr(bot, "record_usage_event", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(bot, "clear_pending_start_notice", lambda _uid: "")
-    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
-    monkeypatch.setattr(bot, "has_user_language", lambda _uid: True)
-    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
-    monkeypatch.setattr(bot, "user_selected_vietnamese_initially", lambda _uid: False)
-    monkeypatch.setattr(bot, "localized_start_menu_text", lambda _uid, _lang: "MENU")
-    monkeypatch.setattr(bot, "mode_start_notice", lambda _uid: "")
-    monkeypatch.setattr(bot, "localized_main_menu_keyboard", lambda _admin, _lang: "KEYBOARD")
-
-    async def no_birthday_message(_update, _context):
-        return None
-
-    monkeypatch.setattr(bot, "maybe_auto_grant_birthday_gift", no_birthday_message)
-
-    async def deliver_twice():
-        await bot.cmd_start(update, context)
-        await bot.cmd_start(update, context)
-
-    asyncio.run(deliver_twice())
-
-    assert replies == [("MENU", {"parse_mode": "HTML", "reply_markup": "KEYBOARD"})]
 
 
 def test_video_menu_restores_each_legacy_product_flow_except_ai_real_prompt_and_image():

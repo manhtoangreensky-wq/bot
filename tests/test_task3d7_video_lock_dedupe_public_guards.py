@@ -342,16 +342,19 @@ def test_public_buttons_stay_visible_for_unready_products():
 def test_video_flow_lock_snapshots_are_unchanged():
     assert bot.VIDEO_FLOW_LOCKED_AFTER_TASK3D7 is True
     menu = bot.main_video_keyboard("vi")
-    assert len(menu.inline_keyboard) == 6
-    assert sum(len(row) for row in menu.inline_keyboard) == 12  # 9 public products + prompt library + downloader utility + Menu chính
-    assert len([item for item in _callbacks(menu) if item.startswith("vproduct|open|")]) == 9
-    assert "vpromptlib|start" in _callbacks(menu)
-    assert "vdownload|start" in _callbacks(menu)
+    planning_enabled = bot.local_video_studio_public_enabled()
+    assert len(menu.inline_keyboard) == (7 if planning_enabled else 6)
+    assert sum(len(row) for row in menu.inline_keyboard) == (13 if planning_enabled else 12)
+    callbacks = _callbacks(menu)
+    assert len([item for item in callbacks if item.startswith("vproduct|open|")]) == 5
+    assert "videoidea|start" in callbacks
+    assert "vpromptlib|start" not in callbacks
+    assert "vdownload|start" in callbacks
+    assert ("lvs27b|open" in callbacks) is planning_enabled
     assert _labels(bot.task3d_result_keyboard("storyboard_prompt", "vi")) == [
         ["🖼 Tạo prompt ảnh", "🎥 Tạo prompt video"],
         ["📦 Xuất bộ câu lệnh", "💾 Lưu Kho câu lệnh"],
-        ["🔁 Đổi phong cách"],
-        ["🎬 Dùng để tạo video"],
+        ["🔁 Đổi phong cách", "🎬 Dùng để tạo video"],
         ["⬅️ Quay lại", "🏠 Menu chính"],
     ]
     assert _labels(bot.video_addon_confirm_keyboard("locked-token", "low", "vi")) == [

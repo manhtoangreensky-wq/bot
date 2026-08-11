@@ -71561,7 +71561,7 @@ VIDEO_UIFLOW3_STEP_ACTIONS = {
         "scene_direction", "audio_set",
     },
     "prompts": {
-        "prompt_scenes", "prompt_scene", "prompt_edit", "prompt_advanced",
+        "prompt_scenes", "prompt_page", "prompt_scene", "prompt_edit", "prompt_advanced",
         "prompt_negative_edit", "scene_advanced", "scene_direction", "prompts_done",
     },
     "branding": {
@@ -71682,7 +71682,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
             "scene_music", "scene_music_custom", "scene_advanced",
             "scene_direction", "brand", "brand_position_view", "brand_remove",
             "edit", "source_ref", "ref_add", "ref_manage", "ref_remove", "context",
-            "model", "quality", "prompt_scene", "prompt_edit", "prompt_negative_edit",
+            "model", "quality", "prompt_page", "prompt_scene", "prompt_edit", "prompt_negative_edit",
             "episode_continuity",
         )
     },
@@ -72051,7 +72051,7 @@ def video_uiflow3_canonical_screen_state(raw_state: dict) -> dict:
         "ui_view", "active_character_id", "active_location_id", "active_scene_id",
         "assignment_owner_type", "assignment_owner_id", "ui_return_callback",
         "reference_filter_type", "reference_filter_id", "source_reference_asset_id",
-        "active_reference_index",
+        "active_reference_index", "prompt_page_index",
         "pending_input",
     )
     if step not in VIDEO_UIFLOW3_RENDERED_STEPS:
@@ -74156,7 +74156,7 @@ def video_uiflow3_prepare_b14_session(
     commercial["b14_quality_xu"] = safe_int(quality.get("tier_id"), 0)
     commercial["confirmation"] = {
         "token": str(attestation.get("token") or ""),
-        "product_label": "Ảnh → Video" if str(state.get("entry_mode") or "") == "image_video" else "Câu lệnh → Video",
+        "product_label": "Ảnh → Video" if str(state.get("entry_mode") or "") == "image_video" else "Prompt → Video",
         "package_label": str(confirmation_invoice.get("package_label") or quality.get("name") or "Gói đã chọn"),
         "scene_count": safe_int(confirmation_invoice.get("scene_count"), scene_count),
         "seconds_per_scene": scene_seconds,
@@ -74246,7 +74246,6 @@ async def video_uiflow3_render_real_invoice(
             user_id,
             get_user_language(user_id) or "vi",
         ),
-        parse_mode="HTML",
         reply_markup=video_uiflow3_real_invoice_keyboard(prepared, session),
     )
     rendered_message_id = safe_int(
@@ -74765,6 +74764,55 @@ def video_ai_real_prompt_review_pages(raw_state: dict) -> list[dict]:
                     "body": body,
                 })
     return pages
+
+
+def video_ai_real_prompt_page_payload(
+    raw_state: dict,
+    page_number: int = 1,
+) -> tuple[str, InlineKeyboardMarkup]:
+    """Render one complete prompt page without truncating the stored text."""
+
+    state = video_uiflow3.normalize_state(raw_state)
+    pages = video_ai_real_prompt_review_pages(state)
+    if not pages:
+        return (
+            "🧠 Rà soát câu lệnh\n\nChưa có câu lệnh để hiển thị.",
+            video_uiflow3_keyboard([
+                [("⬅️ Quay lại", "vid3|back"), ("🎬 Menu Video", "menu|main_video")],
+            ]),
+        )
+    page_index = max(1, min(len(pages), safe_int(page_number, 1)))
+    page = dict(pages[page_index - 1])
+    scene_id = str(page.get("scene_id") or "")
+    scene_index = safe_int(page.get("scene_index"), 1)
+    part_label = str(page.get("part_label") or "Câu lệnh")
+    lines = [
+        "🧠 Rà soát câu lệnh",
+        "Toàn bộ câu lệnh hiện tại",
+        f"CẢNH {scene_index} · {part_label} · Trang {page_index}/{len(pages)}",
+        "",
+        str(page.get("body") or ""),
+        "",
+        "Nội dung được hiển thị nguyên văn. Mở chi tiết cảnh để sửa trực tiếp; mọi ký tự đều được giữ nguyên.",
+    ]
+    rows: list[list[tuple[str, str]]] = []
+    page_navigation: list[tuple[str, str]] = []
+    if page_index > 1:
+        page_navigation.append(("⬅️ Trang trước", f"vid3|prompt_page|{page_index - 1}"))
+    if page_index < len(pages):
+        page_navigation.append(("Trang sau ➡️", f"vid3|prompt_page|{page_index + 1}"))
+    if page_navigation:
+        rows.append(page_navigation)
+    rows.append([
+        ("📝 Câu lệnh từng cảnh", "vid3|prompt_scenes"),
+        ("✏️ Mở chi tiết cảnh", f"vid3|prompt_scene|{scene_id}" if scene_id else "vid3|prompt_scenes"),
+    ])
+    rows.append([
+        ("🎥 Tùy chỉnh nâng cao", "vid3|prompt_advanced"),
+        ("✅ Hoàn tất rà soát câu lệnh", "vid3|prompts_done"),
+    ])
+    rows.extend(video_ai_real_pilot_nav_rows(back="vid3|back"))
+    return "\n".join(lines), video_uiflow3_keyboard(rows)
 
 
 def video_ai_real_pilot_scene_prompt_text(state: dict, scene: dict) -> str:
@@ -75804,7 +75852,7 @@ def video_ai_real_pilot_screen_payload(
 
     if step == "entry" and not view:
         rows = [
-            [("📝 Câu lệnh → Video", "vid3|mode|prompt_video"), ("🖼 Ảnh → Video", "vid3|mode|image_video")],
+            [("📝 Prompt → Video", "vid3|mode|prompt_video"), ("🖼 Ảnh → Video", "vid3|mode|image_video")],
         ]
         rows.extend(video_ai_real_pilot_nav_rows(back="menu|main_video"))
         return (
@@ -76180,7 +76228,7 @@ def video_ai_real_pilot_screen_payload(
 
     if step == "scene_count" and not view:
         if not bool((state.get("content") or {}).get("locked")):
-            product_label = "Ảnh → Video" if entry_mode == "image_video" else "Câu lệnh → Video"
+            product_label = "Ảnh → Video" if entry_mode == "image_video" else "Prompt → Video"
             selected_count = safe_int((state.get("format") or {}).get("scene_count"), 0)
             rows = [
                 [
@@ -76322,24 +76370,11 @@ def video_ai_real_pilot_screen_payload(
         )
 
     if step == "prompts" and not view:
-        scenes = list(state.get("scenes") or [])
-        prompt_sections = []
-        for scene in scenes:
-            prompt_sections.append(
-                f"CẢNH {scene.get('scene_index') or '?'}\n"
-                f"{video_ai_real_pilot_scene_prompt_text(state, scene)}"
-            )
-        return (
-            f"{progress_prefix}🧠 Rà soát câu lệnh\n\n"
-            "Toàn bộ câu lệnh hiện tại\n\n"
-            + "\n\n".join(prompt_sections)
-            + "\n\nNội dung được hiển thị nguyên văn. Mở từng cảnh để sửa câu lệnh hình ảnh hoặc điều cần tránh; nếu đã đúng, hoàn tất để tiếp tục.",
-            video_uiflow3_keyboard([
-                [("📝 Câu lệnh từng cảnh", "vid3|prompt_scenes"), ("🎥 Tùy chỉnh nâng cao", "vid3|prompt_advanced")],
-                [("✅ Hoàn tất rà soát câu lệnh", "vid3|prompts_done")],
-                *video_ai_real_pilot_nav_rows(back="vid3|back"),
-            ]),
+        prompt_text, prompt_markup = video_ai_real_prompt_page_payload(
+            state,
+            safe_int(state.get("prompt_page_index"), 1),
         )
+        return f"{progress_prefix}{prompt_text}", prompt_markup
 
     if step == "summary" and not view:
         content = dict(state.get("content") or {})
@@ -76469,7 +76504,7 @@ def video_ai_real_pilot_screen_payload(
             len(state.get("scenes") or []),
             safe_int((state.get("format") or {}).get("scene_count"), 0),
         )
-        product_label = "Ảnh → Video" if entry_mode == "image_video" else "Câu lệnh → Video"
+        product_label = "Ảnh → Video" if entry_mode == "image_video" else "Prompt → Video"
         lines = [
             f"{progress_prefix}⭐ Chọn chất lượng",
             "",
@@ -76615,7 +76650,7 @@ def video_ai_real_pilot_screen_payload(
 
     if step == "format" and not view:
         fmt = dict(state.get("format") or {})
-        product_label = "Ảnh → Video" if entry_mode == "image_video" else "Câu lệnh → Video"
+        product_label = "Ảnh → Video" if entry_mode == "image_video" else "Prompt → Video"
         ratio = str(fmt.get("ratio") or "")
         scene_count = safe_int(fmt.get("scene_count"), 0)
         ratio_label = {
@@ -77565,7 +77600,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
     if step == "entry":
         if product == "video_ai_real":
             rows = [
-                [("📝 Câu lệnh → Video", "vid3|mode|prompt_video"), ("🖼 Ảnh → Video", "vid3|mode|image_video")],
+                [("📝 Prompt → Video", "vid3|mode|prompt_video"), ("🖼 Ảnh → Video", "vid3|mode|image_video")],
             ]
             if bool((state.get("capabilities") or {}).get("video_to_video")):
                 rows.append([("🎞 Video → Video", "vid3|mode|video_video")])
@@ -77881,7 +77916,7 @@ def video_uiflow3_clear_transient(state: dict, *, keep_return: bool = True) -> d
         "ui_view", "active_character_id", "active_location_id", "active_scene_id",
         "assignment_owner_type", "assignment_owner_id", "ui_return_callback",
         "reference_filter_type", "reference_filter_id", "source_reference_asset_id",
-        "active_reference_index",
+        "active_reference_index", "prompt_page_index",
     ):
         current.pop(key, None)
     current.pop("pending_input", None)
@@ -77910,7 +77945,7 @@ def video_uiflow3_open_view(state: dict, view: str, **fields) -> dict:
         "active_character_id", "active_location_id", "active_scene_id",
         "assignment_owner_type", "assignment_owner_id", "ui_return_callback",
         "reference_filter_type", "reference_filter_id", "source_reference_asset_id",
-        "active_reference_index",
+        "active_reference_index", "prompt_page_index",
     ):
         current.pop(key, None)
     current["ui_view"] = str(view or "")
@@ -79499,6 +79534,16 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         elif action == "prompt_scenes":
             state = video_ai_real_maybe_compile_state(state)
             state = video_uiflow3_open_view(state, "prompt_scenes")
+        elif action == "prompt_page" and values:
+            state = video_ai_real_maybe_compile_state(state)
+            pages = video_ai_real_prompt_review_pages(state)
+            if not pages:
+                raise ValueError("prompt_pages_missing")
+            state["prompt_page_index"] = max(
+                1,
+                min(len(pages), safe_int(values[0], 1)),
+            )
+            state["ui_view"] = ""
         elif action == "prompt_scene" and values:
             scene_id = values[0]
             if not video_uiflow3_find_scene(state, scene_id):
@@ -81679,7 +81724,7 @@ def video_scene3_content_mode_keyboard() -> InlineKeyboardMarkup:
 
 
 VIDEO_SCENE3_AI_INPUT_LABELS = {
-    "prompt_video": "✨ Câu lệnh → Video",
+    "prompt_video": "✨ Prompt → Video",
     "image_video": "🖼 Ảnh → Video",
 }
 
@@ -81698,7 +81743,7 @@ def video_scene3_ai_input_text(state: dict) -> str:
 
 def video_scene3_ai_input_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("✨ Câu lệnh → Video", "vprofile|ai_input|prompt_video"), ("🖼 Ảnh → Video", "vprofile|ai_input|image_video")],
+        [("✨ Prompt → Video", "vprofile|ai_input|prompt_video"), ("🖼 Ảnh → Video", "vprofile|ai_input|image_video")],
         [("🔄 Chọn lại tỉ lệ", "vprofile|ai_input|back")],
         *video_scene3_nav_rows(),
     ])
@@ -90300,7 +90345,7 @@ def video_microflow_text(step: str, product_id: str = "", session: dict | None =
     media_count = len(list(draft.get("source_media_refs") or []))
     texts = {
         "ai_prompt_menu": (
-            "✨ <b>Câu lệnh → Video</b>\n\n"
+            "✨ <b>Prompt → Video</b>\n\n"
             "Anh/chị có thể gửi câu lệnh có sẵn, xem gợi ý câu lệnh hoặc chọn một ý tưởng đã được chuẩn bị trong Kho Ý tưởng video.\n\n"
             "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu."
         ),
@@ -90994,7 +91039,7 @@ def task3d_product_intro_keyboard(
             [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "video_ai_real": [
-            [("✨ Câu lệnh → Video", "vproduct|ai_prompt_menu|video_ai_real"), ("🖼 Ảnh → Video", "vproduct|ai_image_menu|video_ai_real")],
+            [("✨ Prompt → Video", "vproduct|ai_prompt_menu|video_ai_real"), ("🖼 Ảnh → Video", "vproduct|ai_image_menu|video_ai_real")],
             [(menu_label, parent_callback), secondary_menu],
         ],
         "script_image_video": [

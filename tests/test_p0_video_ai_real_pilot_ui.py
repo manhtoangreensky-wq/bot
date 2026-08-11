@@ -613,8 +613,9 @@ def test_video_ai_real_pilot_content_hub_and_content_lock_are_clear_and_accented
 
     assert "Nội dung đã chọn" in lock_text
     assert "Chủ đề: Giới thiệu sản phẩm" in lock_text
-    assert "Giữ nguyên nội dung đã chọn" in _plain_labels(lock_markup)
-    assert "Chọn nội dung khác" in _plain_labels(lock_markup)
+    lock_labels = set(_plain_labels(lock_markup))
+    assert {"1", "Đổi 5 gợi ý", "Tự nhập nội dung"} <= lock_labels
+    assert "Giữ nguyên nội dung đã chọn" not in lock_labels
 
 
 def test_video_ai_real_pilot_restores_the_old_flow_without_numbered_steps():
@@ -1807,7 +1808,7 @@ def test_video_ai_real_music_catalog_uses_verified_triple_fallback_cost():
             "cost_vnd": 2600,
             "pricing_basis": "mỗi lần tạo track",
             "source_url": "https://shopaikey.com/models",
-            "checked_on": "2026-08-09",
+            "checked_on": "2026-08-11",
         },
         {
             "provider": "key4u",
@@ -1817,7 +1818,7 @@ def test_video_ai_real_music_catalog_uses_verified_triple_fallback_cost():
             "cost_vnd": 720,
             "pricing_basis": "mỗi lần tạo track",
             "source_url": "https://key4u.vn/models",
-            "checked_on": "2026-08-09",
+            "checked_on": "2026-08-11",
         },
     ]
 
@@ -2131,7 +2132,8 @@ def test_video_ai_real_prompt_review_pages_preserve_every_character_without_trun
 
     text, markup = bot.video_uiflow3_screen_payload(state)
     assert pages[0]["body"] in text
-    assert "Câu lệnh hiện tại · Cảnh 1" in text
+    assert "Toàn bộ câu lệnh hiện tại" in text
+    assert "CẢNH 1" in text
     assert "rút gọn" not in text.lower()
     assert "còn 1 cảnh" not in text.lower()
     assert len(text) <= 4096
@@ -3134,7 +3136,7 @@ def test_video_ai_real_prompt_review_shows_one_aggregate_prompt_before_scene_edi
 
     text, markup = bot.video_uiflow3_screen_payload(state)
 
-    assert "Câu lệnh tổng hợp" in text
+    assert "Toàn bộ câu lệnh hiện tại" in text
     assert "Nội dung" in text
     assert "Nhân vật" in text
     assert "Bối cảnh" in text
@@ -3264,10 +3266,10 @@ def test_video_ai_real_quality_screen_uses_public_authority_metadata_and_totals(
     assert "Sản phẩm: Prompt → Video" in text
     assert "Cơ bản" in text
     assert "5 giây/cảnh" in text
-    assert "Cân bằng và ổn định" in text
+    assert "Hình ảnh ổn định, âm thanh đồng bộ" in text
     assert "720p" in text
-    assert "300 Xu/cảnh" in text
-    assert "600 Xu/2 cảnh" in text
+    assert "40 Xu/cảnh" in text
+    assert "80 Xu/2 cảnh" in text
     assert "ShopAIKey" not in text
     assert "Key4U" not in text
     assert "provider" not in text.lower()
