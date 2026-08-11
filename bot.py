@@ -119,7 +119,8 @@ from services import frame_video_commercial, frame_video_flow, frame_video_publi
 from services import video_addon_planner, video_ai_real_pricing, video_ai_real_prompt_compiler, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_selfshot_local_analysis, video_selfshotflow4, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uiflow3, video_uifreeze1
 from services import ui_navigation
 from services import local_video_studio_preview
-from services import local_video_studio_public
+from services import local_video_planning_store
+from services import video_planning_assistant as local_video_studio_public
 from services import video_prompt_continuity as video_continuity
 from services import video_storyboard_planner as video_storyboard
 from services.pricing_guide_content import (
@@ -5675,6 +5676,9 @@ def init_db():
     # Public Chat owns only its isolated request/turn tables. Existing billing,
     # PayOS, CSKH, SubDub, Music and Video tables are untouched.
     public_chat_store.ensure_schema(conn)
+    # Video Planning owns one isolated saved-plan table. It never touches
+    # Product Video, Video Edit, worker, billing or wallet records.
+    local_video_planning_store.ensure_schema(conn)
     conn.commit()
     conn.close()
 
@@ -68387,6 +68391,19 @@ async def handle_local_video_studio_preview_callback(update: Update, context: Co
 # --- END LOCAL VIDEO STUDIO 27A PREVIEW ---
 
 # --- LOCAL VIDEO STUDIO 27B PUBLIC ---
+_LOCAL_VIDEO_PLANNING_PENDING_KEY = "local_video_planning_pending_brief"
+_LOCAL_VIDEO_PLANNING_VERSION_KEY = "local_video_planning_versions"
+_LOCAL_VIDEO_PLANNING_SOURCE_KEY = "local_video_planning_source_ids"
+
+
+def _local_video_studio_is_option_c() -> bool:
+    """Detect the new pure planner without changing the legacy test seam."""
+    return bool(
+        getattr(local_video_studio_public, "PLAN_SCHEMA_VERSION", None) == 1
+        and callable(getattr(local_video_studio_public, "serialize_plan", None))
+    )
+
+
 def local_video_studio_public_keyboard(view: dict[str, object]) -> InlineKeyboardMarkup:
     rows = []
     for row in view.get("rows") or ():
@@ -68431,6 +68448,205 @@ def _local_video_studio_public_identity(update: Update):
     if not user_id or not chat_id:
         return "", ""
     return str(user_id), str(chat_id)
+
+
+def _local_video_planning_db():
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    local_video_planning_store.ensure_schema(conn)
+    return conn
+
+
+def _local_video_planning_user_data(context) -> dict[str, object] | None:
+    data = getattr(context, "user_data", None)
+    return data if isinstance(data, dict) else None
+
+
+def _local_video_planning_clear_pending(context, session_id: str | None = None) -> None:
+    data = _local_video_planning_user_data(context)
+    if not data:
+        return
+    marker = data.get(_LOCAL_VIDEO_PLANNING_PENDING_KEY)
+    if session_id and isinstance(marker, dict) and str(marker.get("session_id") or "") != str(session_id):
+        return
+    data.pop(_LOCAL_VIDEO_PLANNING_PENDING_KEY, None)
+
+
+def _local_video_planning_set_pending(context, user_id: str, chat_id: str, session: dict[str, object]) -> None:
+    data = _local_video_planning_user_data(context)
+    if data is None:
+        return
+    if str(session.get("screen") or "") == "brief":
+        data[_LOCAL_VIDEO_PLANNING_PENDING_KEY] = {
+            "user_id": str(user_id),
+            "chat_id": str(chat_id),
+            "session_id": str(session.get("session_id") or ""),
+            "expires_at": int(time.time()) + int(local_video_studio_public.SESSION_TTL_SECONDS),
+        }
+    else:
+        _local_video_planning_clear_pending(context, str(session.get("session_id") or ""))
+
+
+def _local_video_planning_version_map(context) -> dict[str, int]:
+    data = _local_video_planning_user_data(context)
+    if data is None:
+        return {}
+    value = data.get(_LOCAL_VIDEO_PLANNING_VERSION_KEY)
+    if not isinstance(value, dict):
+        value = {}
+        data[_LOCAL_VIDEO_PLANNING_VERSION_KEY] = value
+    return value
+
+
+def _local_video_planning_source_map(context) -> dict[str, str]:
+    data = _local_video_planning_user_data(context)
+    if data is None:
+        return {}
+    value = data.get(_LOCAL_VIDEO_PLANNING_SOURCE_KEY)
+    if not isinstance(value, dict):
+        value = {}
+        data[_LOCAL_VIDEO_PLANNING_SOURCE_KEY] = value
+    return value
+
+
+def _local_video_planning_save(
+    context,
+    user_id: str,
+    chat_id: str,
+    session: dict[str, object],
+) -> dict[str, object]:
+    plan = local_video_studio_public.serialize_plan(session)
+    summary = local_video_studio_public.planning_summary_text(session)
+    conn = _local_video_planning_db()
+    try:
+        session_id = str(session.get("session_id") or "")
+        plan_id = str(session.get("plan_id") or "").strip()
+        versions = _local_video_planning_version_map(context)
+        if plan_id:
+            expected_version = versions.get(str(session.get("session_id") or ""))
+            if expected_version is None:
+                raise local_video_planning_store.PlanConflictError("plan_version_unknown")
+            existing = local_video_planning_store.get_plan(
+                conn,
+                owner_id=user_id,
+                chat_id=chat_id,
+                plan_key=plan_id,
+            )
+            if existing is None:
+                raise local_video_planning_store.PlanNotFoundError("plan_not_found")
+            plan["created_at"] = int(existing["plan"]["created_at"])
+            plan["updated_at"] = int(session["updated_at"])
+            saved = local_video_planning_store.update_plan(
+                conn,
+                owner_id=user_id,
+                chat_id=chat_id,
+                plan_key=plan_id,
+                expected_version=int(expected_version),
+                plan=plan,
+                summary_text=summary,
+            )
+        else:
+            source_ids = _local_video_planning_source_map(context)
+            saved = local_video_planning_store.save_plan_from_session(
+                conn,
+                owner_id=user_id,
+                chat_id=chat_id,
+                source_session_id=source_ids.get(session_id, session_id),
+                plan=plan,
+                summary_text=summary,
+            )
+            source_ids.pop(session_id, None)
+        versions[session_id] = int(saved["version"])
+        return saved
+    finally:
+        conn.close()
+
+
+def _local_video_planning_library_view(
+    session: dict[str, object],
+    plans: list[dict[str, object]],
+    *,
+    notice: str = "",
+) -> dict[str, object]:
+    sid = str(session["session_id"])
+    rows: list[tuple[tuple[str, str], ...]] = []
+    for item in plans:
+        title = html.escape(str(item.get("title") or "Kế hoạch chỉnh sửa"))[:72]
+        rows.append(((f"📄 {title}", local_video_studio_public.callback_data(sid, "view", item["plan_key"])),))
+    rows.append((("⬅️ Bản kế hoạch hiện tại", local_video_studio_public.callback_data(sid, "current")),))
+    text = "🗂 <b>KẾ HOẠCH CỦA TÔI</b>\n\n"
+    if notice:
+        text += f"{html.escape(notice)}\n\n"
+    if plans:
+        text += "Chọn một kế hoạch để xem, sửa hoặc xóa.\n"
+    else:
+        text += "Chưa có kế hoạch nào được lưu.\n"
+    text += "\nĐây chỉ là kho kế hoạch; chưa xử lý media và chưa tạo tác vụ."
+    return {"text": text, "markup": local_video_studio_public_keyboard({"rows": tuple(rows)})}
+
+
+def _local_video_planning_plan_view(
+    session: dict[str, object],
+    item: dict[str, object],
+) -> dict[str, object]:
+    sid = str(session["session_id"])
+    key = str(item["plan_key"])
+    rows = (
+        (("✏️ Mở để chỉnh sửa", local_video_studio_public.callback_data(sid, "edit", key)),),
+        (("🗑 Xóa kế hoạch", local_video_studio_public.callback_data(sid, "delete", key)),),
+        (("⬅️ Kế hoạch của tôi", local_video_studio_public.callback_data(sid, "library")),),
+    )
+    text = str(item.get("summary_text") or "")
+    text += "\n\n<b>Kế hoạch đã lưu</b>"
+    return {"text": text, "markup": local_video_studio_public_keyboard({"rows": rows})}
+
+
+def _local_video_planning_delete_view(session: dict[str, object], item: dict[str, object]) -> dict[str, object]:
+    sid = str(session["session_id"])
+    key = str(item["plan_key"])
+    rows = (
+        (("✅ Xác nhận xóa", local_video_studio_public.callback_data(sid, "delete_confirm", key)),),
+        (("⬅️ Kế hoạch của tôi", local_video_studio_public.callback_data(sid, "library")),),
+    )
+    title = html.escape(str(item.get("title") or "kế hoạch này"))
+    return {
+        "text": f"⚠️ <b>XÓA KẾ HOẠCH?</b>\n\nBạn sắp xóa <b>{title}</b>. Thao tác này chỉ xóa bản ghi kế hoạch, không ảnh hưởng video hay tác vụ nào.",
+        "markup": local_video_studio_public_keyboard({"rows": rows}),
+    }
+
+
+def _local_video_planning_get_plan(user_id: str, chat_id: str, plan_key: str) -> dict[str, object] | None:
+    conn = _local_video_planning_db()
+    try:
+        return local_video_planning_store.get_plan(
+            conn,
+            owner_id=user_id,
+            chat_id=chat_id,
+            plan_key=plan_key,
+        )
+    finally:
+        conn.close()
+
+
+def _local_video_planning_list_plans(user_id: str, chat_id: str) -> list[dict[str, object]]:
+    conn = _local_video_planning_db()
+    try:
+        return local_video_planning_store.list_plans(conn, owner_id=user_id, chat_id=chat_id)
+    finally:
+        conn.close()
+
+
+def _local_video_planning_delete(user_id: str, chat_id: str, plan_key: str) -> bool:
+    conn = _local_video_planning_db()
+    try:
+        return local_video_planning_store.soft_delete_plan(
+            conn,
+            owner_id=user_id,
+            chat_id=chat_id,
+            plan_key=plan_key,
+        )
+    finally:
+        conn.close()
 
 
 async def _local_video_studio_public_deliver(
@@ -68505,6 +68721,12 @@ async def handle_local_video_studio_public_callback(
     query = getattr(update, "callback_query", None)
     if not query:
         return None
+    if _local_video_studio_is_option_c():
+        return await _handle_option_c_video_planning_callback(
+            update,
+            context,
+            _transaction_locked=_transaction_locked,
+        )
     raw_callback = str(getattr(query, "data", "") or "")
     try:
         _sid, _verb, _args = local_video_studio_public.parse_callback(raw_callback)
@@ -68737,6 +68959,333 @@ async def handle_local_video_studio_public_callback(
         str(result["feedback"]),
         reply_only=reply_only,
     )
+
+
+async def _handle_option_c_video_planning_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    _transaction_locked: bool = False,
+):
+    query = getattr(update, "callback_query", None)
+    raw_callback = str(getattr(query, "data", "") or "") if query else ""
+    try:
+        session_id, verb, _args = local_video_studio_public.parse_callback(raw_callback)
+    except local_video_studio_public.PreviewActionError:
+        responder = getattr(query, "answer", None)
+        if callable(responder):
+            return await responder("Thao tác lập kế hoạch không hợp lệ hoặc đã cũ.", show_alert=True)
+        return None
+    if not local_video_studio_public_enabled() and verb not in {"back", "close"}:
+        responder = getattr(query, "answer", None)
+        if callable(responder):
+            return await responder("Công cụ lập kế hoạch đang tạm đóng.", show_alert=True)
+        return None
+    user_id, chat_id = _local_video_studio_public_identity(update)
+    if not user_id or not chat_id:
+        responder = getattr(query, "answer", None)
+        if callable(responder):
+            return await responder("Không xác định được phiên lập kế hoạch.", show_alert=True)
+        return None
+    if not _transaction_locked:
+        try:
+            lock = (
+                local_video_studio_public.open_transaction_lock(user_id, chat_id)
+                if verb == "open"
+                else local_video_studio_public.session_transaction_lock(user_id, chat_id, session_id)
+            )
+        except local_video_studio_public.PreviewActionError:
+            responder = getattr(query, "answer", None)
+            if callable(responder):
+                return await responder("Thao tác lập kế hoạch không hợp lệ hoặc đã cũ.", show_alert=True)
+            return None
+        async with lock:
+            return await _handle_option_c_video_planning_callback(
+                update,
+                context,
+                _transaction_locked=True,
+            )
+
+    now = time.time()
+    store = _local_video_studio_public_store(context, create=verb == "open")
+    if store is None:
+        responder = getattr(query, "answer", None)
+        if callable(responder):
+            return await responder("Phiên lập kế hoạch đã hết hạn hoặc đã đóng.", show_alert=True)
+        return None
+    callback_id = str(getattr(query, "id", "") or "").strip()
+    if verb == "open":
+        try:
+            duplicate = local_video_studio_public.store_has_callback_id(store, callback_id, now=now)
+            if duplicate:
+                return await query.answer("Thao tác này đã được nhận.")
+            result = local_video_studio_public.apply_callback(
+                local_video_studio_public.new_session(now=now),
+                raw_callback,
+                now=now,
+            )
+            view = local_video_studio_public.render_view(result["session"])
+        except (local_video_studio_public.PreviewActionError, local_video_studio_public.PreviewDataError):
+            return await query.answer("Không thể mở bản lập kế hoạch.", show_alert=True)
+
+        def commit_open():
+            candidate = local_video_studio_public.commit_callback_id(
+                result["session"], callback_id, now=time.time()
+            )
+            local_video_studio_public.put_session(store, user_id, chat_id, candidate)
+            context.user_data[local_video_studio_public.STATE_KEY] = store
+            _local_video_planning_clear_pending(context)
+
+        return await _local_video_studio_public_deliver(
+            query,
+            str(view["text"]),
+            local_video_studio_public_keyboard(view),
+            commit_open,
+            str(result["feedback"]),
+        )
+
+    try:
+        session = local_video_studio_public.get_session(
+            store, user_id, chat_id, session_id, now=now
+        )
+    except (local_video_studio_public.PreviewActionError, local_video_studio_public.PreviewDataError):
+        session = None
+    if session is None:
+        return await query.answer("Phiên lập kế hoạch đã hết hạn hoặc đã đóng.", show_alert=True)
+    if local_video_studio_public.store_has_callback_id(store, callback_id, now=now):
+        return await query.answer("Thao tác này đã được nhận.")
+
+    try:
+        result = local_video_studio_public.apply_callback(
+            session, raw_callback, now=now, callback_id=callback_id
+        )
+        custom_view = None
+    except local_video_studio_public.PublicSessionExpired:
+        return await query.answer("Phiên lập kế hoạch đã hết hạn.", show_alert=True)
+    except (local_video_studio_public.PreviewActionError, local_video_studio_public.PreviewDataError):
+        return await query.answer("Thao tác không hợp lệ; kế hoạch hiện tại được giữ nguyên.", show_alert=True)
+
+    if result.get("duplicate"):
+        return await query.answer("Thao tác này đã được nhận.")
+    candidate = result["session"]
+    if result.get("closed"):
+        text = "✖️ <b>Đã đóng bản lập kế hoạch</b>\n\nKhông có xử lý media hoặc tác vụ chạy ngầm."
+
+        def commit_close():
+            local_video_studio_public.delete_session(store, user_id, chat_id, session_id)
+            _local_video_studio_public_cleanup_store(context, store)
+            _local_video_planning_clear_pending(context, session_id)
+
+        return await _local_video_studio_public_deliver(query, text, None, commit_close, str(result["feedback"]))
+    if result.get("exit_parent"):
+        lang = normalize_user_language(get_user_language(user_id) or "vi")
+        text = menu_text_main_video_i18n(lang)
+        markup = main_video_keyboard(lang)
+
+        def commit_parent():
+            local_video_studio_public.delete_session(store, user_id, chat_id, session_id)
+            _local_video_studio_public_cleanup_store(context, store)
+            _local_video_planning_clear_pending(context, session_id)
+
+        return await _local_video_studio_public_deliver(query, text, markup, commit_parent, str(result["feedback"]))
+
+    if result.get("persist_plan") is not None:
+        try:
+            saved = _local_video_planning_save(context, user_id, chat_id, candidate)
+        except (
+            local_video_studio_public.PreviewActionError,
+            local_video_studio_public.PreviewDataError,
+            local_video_planning_store.PlanStoreError,
+            sqlite3.Error,
+        ):
+            return await query.answer("Chưa lưu được kế hoạch; dữ liệu hiện tại vẫn được giữ nguyên.", show_alert=True)
+        try:
+            candidate = local_video_studio_public.session_from_plan(
+                saved["plan"], session_id=session_id, now=now
+            )
+            text = "✅ <b>Đã lưu kế hoạch</b>\n\n" + local_video_studio_public.planning_summary_text(candidate)
+            markup = local_video_studio_public_keyboard(local_video_studio_public.render_view(candidate))
+        except (
+            local_video_studio_public.PreviewActionError,
+            local_video_studio_public.PreviewDataError,
+        ):
+            return await query.answer(
+                "Kế hoạch đã được lưu nhưng chưa thể hiển thị lại; hãy mở Kế hoạch của tôi.",
+                show_alert=True,
+            )
+
+        def commit_persist():
+            committed = local_video_studio_public.commit_callback_id(candidate, callback_id, now=time.time())
+            local_video_studio_public.put_session(store, user_id, chat_id, committed)
+            context.user_data[local_video_studio_public.STATE_KEY] = store
+            _local_video_planning_set_pending(context, user_id, chat_id, committed)
+
+        return await _local_video_studio_public_deliver(query, text, markup, commit_persist, "Đã lưu kế hoạch.")
+
+    if result.get("open_saved_plans"):
+        try:
+            plans = _local_video_planning_list_plans(user_id, chat_id)
+        except (local_video_planning_store.PlanStoreError, sqlite3.Error):
+            return await query.answer("Kho kế hoạch đang tạm thời chưa mở được.", show_alert=True)
+        custom_view = _local_video_planning_library_view(candidate, plans)
+
+    action = str(result.get("saved_plan_action") or "")
+    item = None
+    delete_key = ""
+    detached_source_id = ""
+    if action in {"view", "edit", "delete", "delete_confirm"}:
+        key = str(result.get("saved_plan_key") or "")
+        try:
+            item = _local_video_planning_get_plan(user_id, chat_id, key)
+        except (local_video_planning_store.PlanStoreError, sqlite3.Error):
+            return await query.answer("Kho kế hoạch đang tạm thời chưa mở được.", show_alert=True)
+        if item is None:
+            return await query.answer("Không tìm thấy kế hoạch trong kho của bạn.", show_alert=True)
+        if action == "view":
+            custom_view = _local_video_planning_plan_view(candidate, item)
+        elif action == "delete":
+            custom_view = _local_video_planning_delete_view(candidate, item)
+        elif action == "edit":
+            try:
+                candidate = local_video_studio_public.session_from_plan(
+                    item["plan"], session_id=session_id, now=now
+                )
+            except (local_video_studio_public.PreviewActionError, local_video_studio_public.PreviewDataError):
+                return await query.answer("Kế hoạch này không còn hợp lệ để mở.", show_alert=True)
+            custom_view = None
+        else:
+            try:
+                plans = _local_video_planning_list_plans(user_id, chat_id)
+            except (local_video_planning_store.PlanStoreError, sqlite3.Error):
+                return await query.answer("Kho kế hoạch đang tạm thời chưa mở được.", show_alert=True)
+            plans = [plan for plan in plans if str(plan.get("plan_key") or "") != key]
+            delete_key = key
+            if str(candidate.get("plan_id") or "") == key:
+                candidate = copy.deepcopy(candidate)
+                candidate["plan_id"] = ""
+                candidate = local_video_studio_public.normalize_session(candidate)
+                detached_source_id = str(
+                    local_video_studio_public.new_session(now=now)["session_id"]
+                )
+            custom_view = _local_video_planning_library_view(
+                candidate,
+                plans,
+                notice="Kế hoạch đang được xóa sau bước xác nhận này.",
+            )
+
+    if custom_view is None:
+        if result.get("saved_text"):
+            text = str(result["saved_text"])
+            markup = None
+            reply_only = True
+        else:
+            view = local_video_studio_public.render_view(candidate)
+            text = str(view["text"])
+            markup = local_video_studio_public_keyboard(view)
+            reply_only = False
+    else:
+        text = str(custom_view["text"])
+        markup = custom_view["markup"]
+        reply_only = False
+
+    def commit_forward():
+        if delete_key:
+            try:
+                deleted = _local_video_planning_delete(user_id, chat_id, delete_key)
+            except (local_video_planning_store.PlanStoreError, sqlite3.Error) as exc:
+                raise local_video_planning_store.PlanStoreError("delete_failed") from exc
+            if not deleted:
+                raise local_video_planning_store.PlanStoreError("delete_not_found")
+        if detached_source_id:
+            _local_video_planning_source_map(context)[session_id] = detached_source_id
+        if result.get("saved_text"):
+            commit_fn = getattr(
+                local_video_studio_public,
+                "commit_sent_summary_delivery",
+                local_video_studio_public.commit_saved_summary_delivery,
+            )
+            committed = commit_fn(
+                candidate,
+                callback_id,
+                result.get("saved_fingerprint"),
+                now=time.time(),
+            )
+        else:
+            committed = local_video_studio_public.commit_callback_id(candidate, callback_id, now=time.time())
+        local_video_studio_public.put_session(store, user_id, chat_id, committed)
+        context.user_data[local_video_studio_public.STATE_KEY] = store
+        if action == "edit" and item is not None:
+            _local_video_planning_version_map(context)[session_id] = int(item["version"])
+        elif detached_source_id:
+            _local_video_planning_version_map(context).pop(session_id, None)
+        _local_video_planning_set_pending(context, user_id, chat_id, committed)
+
+    return await _local_video_studio_public_deliver(
+        query,
+        text,
+        markup,
+        commit_forward,
+        "Đã xóa kế hoạch." if delete_key else str(result.get("feedback") or "Đã cập nhật kế hoạch."),
+        reply_only=reply_only,
+    )
+
+
+async def handle_local_video_planning_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not _local_video_studio_is_option_c():
+        return False
+    message = getattr(update, "message", None)
+    user = getattr(update, "effective_user", None)
+    chat = getattr(update, "effective_chat", None) or getattr(message, "chat", None)
+    data = _local_video_planning_user_data(context)
+    marker = data.get(_LOCAL_VIDEO_PLANNING_PENDING_KEY) if data else None
+    if not isinstance(marker, dict) or not message or not getattr(message, "text", None):
+        return False
+    user_id = str(getattr(user, "id", "") or "")
+    chat_id = str(getattr(chat, "id", "") or getattr(message, "chat_id", "") or "")
+    if user_id != str(marker.get("user_id") or "") or chat_id != str(marker.get("chat_id") or ""):
+        return False
+    if int(time.time()) > int(marker.get("expires_at") or 0):
+        _local_video_planning_clear_pending(context, str(marker.get("session_id") or ""))
+        return False
+    if not local_video_studio_public_enabled():
+        try:
+            await message.reply_text("Công cụ lập kế hoạch đang tạm đóng. Bạn chỉ có thể bấm Quay lại hoặc Đóng.")
+        except Exception:
+            pass
+        return True
+    store = _local_video_studio_public_store(context)
+    if store is None:
+        _local_video_planning_clear_pending(context, str(marker.get("session_id") or ""))
+        return False
+    session_id = str(marker.get("session_id") or "")
+    async with local_video_studio_public.session_transaction_lock(user_id, chat_id, session_id):
+        session = local_video_studio_public.get_session(store, user_id, chat_id, session_id, now=time.time())
+        if session is None or str(session.get("screen") or "") != "brief":
+            _local_video_planning_clear_pending(context, session_id)
+            return False
+        try:
+            result = local_video_studio_public.apply_text_input(session, message.text, now=time.time())
+        except local_video_studio_public.PreviewActionError:
+            try:
+                await message.reply_text("Hãy nhập mô tả ngắn hơn (tối đa 600 ký tự) hoặc bấm Bỏ qua.")
+            except Exception:
+                pass
+            return True
+        view = local_video_studio_public.render_view(result["session"])
+        try:
+            await message.reply_text(
+                str(view["text"]),
+                parse_mode="HTML",
+                reply_markup=local_video_studio_public_keyboard(view),
+            )
+        except Exception:
+            return True
+        committed = local_video_studio_public.put_session(
+            store, user_id, chat_id, result["session"]
+        )
+        context.user_data[local_video_studio_public.STATE_KEY] = store
+        _local_video_planning_set_pending(context, user_id, chat_id, committed)
+        return True
 # --- END LOCAL VIDEO STUDIO 27B PUBLIC ---
 
 
@@ -87661,7 +88210,7 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "product_id": "video_local_edit",
     },
     "video_edit_planning": {
-        "label_vi": "🧭 Lập kế hoạch dựng video",
+        "label_vi": "🧭 Lên kế hoạch chỉnh sửa",
         "label_en": "🧭 Video editing planner",
         "label_zh": "🧭 视频剪辑规划",
         "entry_callback": "lvs27b|open",
@@ -247590,6 +248139,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_manual_topup_pending_text(update, context):
+        return
+
+    if await handle_local_video_planning_pending_text(update, context):
         return
 
     if await handle_free_hub_pending_text(update, context):
