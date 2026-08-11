@@ -13150,15 +13150,58 @@ def normalize_user_language(lang: str | None) -> str:
         "cn": "zh",
         "zh-cn": "zh",
         "chinese": "zh",
+        "spanish": "es",
+        "es-es": "es",
+        "portuguese": "pt",
+        "pt-br": "pt",
+        "pt-pt": "pt",
+        "french": "fr",
+        "fr-fr": "fr",
+        "german": "de",
+        "de-de": "de",
         "jp": "ja",
         "japanese": "ja",
         "kr": "ko",
         "korean": "ko",
+        "hindi": "hi",
+        "hi-in": "hi",
         "thai": "th",
         "arabic": "ar",
+        "russian": "ru",
+        "ru-ru": "ru",
+        "turkish": "tr",
+        "tr-tr": "tr",
+        "filipino": "fil",
+        "tagalog": "fil",
+        "tl": "fil",
+        "tl-ph": "fil",
+        "italian": "it",
+        "it-it": "it",
+        "indonesian": "id",
+        "bahasa": "id",
+        "id-id": "id",
     }
     value = aliases.get(value, value)
     return value if value in USER_LANGUAGE_LABELS else ""
+
+
+def pricing_copy_language(lang: str | None) -> str:
+    """Keep pricing copy localized where available, otherwise use English."""
+    normalized = normalize_user_language(lang) or "vi"
+    return normalized if normalized in {"vi", "zh"} else "en"
+
+
+def public_pricing_locale(lang: str | None) -> str:
+    """Preserve every supported locale for shared public pricing and guides only."""
+
+    return public_copy_locale(normalize_user_language(lang) or "vi")
+
+
+def show_domestic_topup_promotion(user_id=None, lang: str | None = None) -> bool:
+    """Expose Vietnam-only top-up offers only on the Vietnamese interface."""
+
+    domestic_market = True if user_id is None else user_is_vietnam_market(user_id)
+    return domestic_market and public_copy_locale(lang) == "vi"
 
 def normalize_user_market(value: str | None) -> str:
     raw = str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
@@ -17791,17 +17834,46 @@ MANUAL_PAYMENT_METHODS = {
     "usdt_trc20": "🪙 USDT TRC20",
 }
 
-def manual_payment_menu_text(user_id=None) -> str:
-    domestic_market = True if user_id is None else user_is_vietnam_market(user_id)
+def manual_payment_menu_text(user_id=None, lang: str | None = None) -> str:
+    locale = public_copy_locale(lang)
+    show_domestic_promotion = show_domestic_topup_promotion(user_id, lang)
+    if not show_domestic_promotion:
+        if locale == "zh":
+            title = "💵 <b>TOAN AAS 人工充值</b>"
+            choose_currency = "请选择充值币种。"
+            review_note = "TOAN AAS 仅在管理员核验实际付款后才会记入 Xu。账单图片或 TXID 不会自动确认交易。"
+            final_note = "可用渠道与最终基础 Xu 会在确认前显示。"
+        elif locale == "vi":
+            title = "💵 <b>Nạp thủ công TOAN AAS</b>"
+            choose_currency = "Chọn loại tiền muốn nạp."
+            review_note = "TOAN AAS chỉ cộng Xu sau khi admin đối soát tiền thật. Ảnh bill hoặc TXID không tự động xác nhận giao dịch."
+            final_note = "Kênh thanh toán đang mở và Xu gốc cuối cùng sẽ hiển thị trước khi xác nhận."
+        else:
+            title = "💵 <b>TOAN AAS Manual Top-up</b>"
+            choose_currency = "Choose the currency for your top-up."
+            review_note = "TOAN AAS adds Xu only after an admin verifies the real payment. A bill image or TXID does not confirm a transaction automatically."
+            final_note = "Available payment channels and the final base Xu are shown before confirmation."
+        policy_lines = (
+            [
+                "Tài khoản này chỉ nhận Xu gốc đã xác minh; không hiển thị và không áp dụng bonus nạp Việt Nam.",
+                "Chiết khấu dịch vụ theo hạng thành viên vẫn áp dụng nếu đủ điều kiện.",
+            ]
+            if locale == "vi"
+            else international_topup_policy_lines(locale)
+        )
+        return (
+            f"{title}\n\n"
+            f"{choose_currency}\n\n"
+            f"{review_note}\n\n"
+            f"{html.escape(manual_topup_rules_text())}\n\n"
+            f"{' '.join(policy_lines)}\n\n"
+            f"{final_note}"
+        )
     market_note = (
         "Lưu ý:\n"
         "Khách Việt Nam nạp VND qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR từ 10.000đ: "
         "lần settled thứ nhất tự động +30%, lần thứ hai tự động +20%. "
         "Các ưu đãi tháng/tuần/ngày/Launch khác chỉ áp dụng khi có mã hợp lệ."
-        if domestic_market else
-        "Lưu ý:\n"
-        "Khách quốc tế chỉ nhận Xu gốc khi thanh toán quốc tế hoặc VND không thuộc thị trường nội địa; "
-        "không hiển thị và không áp dụng bonus nạp Việt Nam."
     )
     return (
         "💵 <b>Nạp thủ công TOAN AAS</b>\n\n"
@@ -17827,12 +17899,11 @@ def manual_payment_menu_keyboard(uid) -> InlineKeyboardMarkup:
     ])
     return InlineKeyboardMarkup(rows)
 
-def manual_domestic_amount_text(user_id=None) -> str:
-    if user_id is not None and not user_is_vietnam_market(user_id):
-        return (
-            "🌍 <b>Nạp VND cho tài khoản quốc tế</b>\n\n"
-            "Tài khoản này chỉ nhận Xu gốc sau khi admin đối soát; bonus nạp nội địa Việt Nam không áp dụng."
-        )
+def manual_domestic_amount_text(user_id=None, lang: str | None = None) -> str:
+    if not show_domestic_topup_promotion(user_id, lang):
+        locale = public_copy_locale(lang)
+        title = "💳 <b>TOAN AAS VND top-up</b>" if locale != "vi" else "💳 <b>Nạp VND TOAN AAS</b>"
+        return "\n\n".join([title, *international_topup_policy_lines(locale)])
     return (
         "🇻🇳 <b>Nạp Xu bằng VND</b>\n\n"
         "Chọn mệnh giá bạn muốn nạp. Sau đó bot sẽ hỏi phương thức thanh toán.\n\n"
@@ -42184,6 +42255,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         return
     _, pkg_key, uid_str = parts
     uid = int(uid_str)
+    lang = get_user_language(uid) or "vi"
 
     if query.from_user.id != uid:
         await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
@@ -42370,7 +42442,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                     "package_key": pkg_key,
                 },
             )
-            if user_is_vietnam_market(uid):
+            if show_domestic_topup_promotion(uid, lang):
                 automatic_bonus_policy_line = (
                     "🎁 Thưởng tự động sẽ được xác định sau settlement: "
                     "lần đầu đủ điều kiện +30%, lần hai đủ điều kiện +20% từ 10.000đ.\n"
@@ -42380,13 +42452,13 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                     "🌍 Tài khoản quốc tế chỉ nhận Xu gốc; không áp dụng thưởng nạp nội địa Việt Nam.\n"
                 )
             promo_line = ""
-            if promo_attach.get("attached"):
+            if show_domestic_topup_promotion(uid, lang) and promo_attach.get("attached"):
                 promo_line = (
                     f"🎁 Mã <code>{html.escape(promo_attach.get('code') or '')}</code> sẽ tặng thêm "
                     f"<b>+{int(promo_attach.get('bonus_xu') or 0)} Xu</b> sau khi thanh toán thành công.\n"
                     "• Mỗi đơn chỉ áp dụng 1 mã, không cộng dồn.\n"
                 )
-            elif promo_attach.get("code") and promo_attach.get("reason") not in {"no_pending"}:
+            elif show_domestic_topup_promotion(uid, lang) and promo_attach.get("code") and promo_attach.get("reason") not in {"no_pending"}:
                 reason_text = promo_code_status_message(str(promo_attach.get("reason") or ""))
                 promo_line = (
                     f"⚠️ Mã <code>{html.escape(promo_attach.get('code') or '')}</code> chưa đủ điều kiện cho mệnh giá này "
@@ -42532,13 +42604,13 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
                     "🇻🇳 <b>Chọn phương thức nạp VND</b>\n\n"
                     f"Mệnh giá: <b>{int(preview['amount_vnd']):,}đ</b>\n"
                     f"Xu gốc dự kiến: <b>{int(preview['base_xu']):,} Xu</b>\n\n"
-                    f"{manual_vnd_method_notice(uid)}".replace(",", "."),
+                    f"{manual_vnd_method_notice(uid, get_user_language(uid) or 'vi')}".replace(",", "."),
                     parse_mode="HTML",
                     reply_markup=manual_domestic_method_keyboard(uid),
                 )
             set_manual_bill_state(uid, order_code="MANUAL", currency="VND", foreign_manual=False, step="select_amount")
             return await query.edit_message_text(
-                manual_domestic_amount_text(uid),
+                manual_domestic_amount_text(uid, get_user_language(uid) or "vi"),
                 parse_mode="HTML",
                 reply_markup=manual_domestic_amount_keyboard(uid),
             )
@@ -42556,14 +42628,14 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         if query.from_user.id != uid:
             return await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
         if pkg_key not in PAYMENT_PACKAGES:
-            return await query.edit_message_text(manual_domestic_amount_text(uid), parse_mode="HTML", reply_markup=manual_domestic_amount_keyboard(uid))
+            return await query.edit_message_text(manual_domestic_amount_text(uid, get_user_language(uid) or "vi"), parse_mode="HTML", reply_markup=manual_domestic_amount_keyboard(uid))
         preview = manual_vnd_topup_preview(uid, pkg_key, "bank_acb")
         set_manual_bill_state(uid, order_code="MANUAL", step="select_method", **preview)
         return await query.edit_message_text(
             "🇻🇳 <b>Chọn phương thức nạp VND</b>\n\n"
             f"Mệnh giá: <b>{int(preview['amount_vnd']):,}đ</b>\n"
             f"Xu gốc dự kiến: <b>{int(preview['base_xu']):,} Xu</b>\n\n"
-            f"{manual_vnd_method_notice(uid)}".replace(",", "."),
+            f"{manual_vnd_method_notice(uid, get_user_language(uid) or 'vi')}".replace(",", "."),
             parse_mode="HTML",
             reply_markup=manual_domestic_method_keyboard(uid),
         )
@@ -42635,7 +42707,7 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         state = get_active_manual_bill_state(uid)
         if not state:
             set_manual_bill_state(uid, order_code="MANUAL")
-        return await query.edit_message_text(manual_payment_menu_text(uid), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(uid))
+        return await query.edit_message_text(manual_payment_menu_text(uid, get_user_language(uid)), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(uid))
     if action == "history":
         text, keyboard = manual_topup_history_payload(uid)
         return await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
@@ -42650,7 +42722,7 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         pkg_key = str(state.get("pkg_key") or "")
         if pkg_key not in PAYMENT_PACKAGES:
             return await query.edit_message_text(
-                manual_domestic_amount_text(uid),
+                manual_domestic_amount_text(uid, get_user_language(uid) or "vi"),
                 parse_mode="HTML",
                 reply_markup=manual_domestic_amount_keyboard(uid),
             )
@@ -42700,10 +42772,10 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
             metadata_json=payos_manual_topup_order_metadata("manual_bank_acb_vnd", "VND"),
         )
         set_manual_bill_state(uid, order_code=order_code, amount=amount, xu=xu, pkg_key=pkg_key)
-        return await query.edit_message_text(manual_payment_menu_text(uid), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(uid))
+        return await query.edit_message_text(manual_payment_menu_text(uid, get_user_language(uid)), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(uid))
     set_manual_bill_state(uid, order_code="MANUAL")
     return await query.edit_message_text(
-        manual_payment_menu_text(uid),
+        manual_payment_menu_text(uid, get_user_language(uid)),
         parse_mode="HTML",
         reply_markup=manual_payment_menu_keyboard(uid),
     )
@@ -56996,6 +57068,186 @@ def package_item_display_name(item_type: str, lang: str = "vi") -> str:
     normalized = normalize_package_item_type(item_type)
     return PACKAGE_ITEM_LABELS.get(normalized, normalized or "-")
 
+
+_PACKAGE_ITEM_LABELS_I18N = {
+    "en": {
+        "image_low": "Fast & clear image",
+        "image_standard": "Balanced image",
+        "image_standard_warranty": "Balanced image + retry",
+        "image_high": "Premium image",
+        "image_high_warranty": "Premium image + retry",
+        "video_experience": "Fast & focused Product Video",
+        "video_basic": "Basic Product Video",
+        "video_common": "Standard Product Video",
+        "video_standard": "Business Product Video",
+        "video_high": "High Product Video",
+        "video_multiscene": "Multi-scene Product Video",
+        "trend_workflow": "Trend workflow",
+        "music_prompt": "Music prompt",
+        "music_library": "Music/SFX library",
+        "music_background": "AI background music",
+        "music_song": "AI song",
+        "voice_audio": "Voice/audio",
+        "voice_words": "Voice words",
+        "custom_voice": "Custom voice",
+        "subtitle_translate": "Subtitle translation",
+        "subtitle_dub": "Dubbing",
+        "subtitle_dub_combo": "Subtitles + dubbing",
+        "custom_credit": "Custom credit",
+    },
+    "zh": {
+        "image_low": "快速清晰图片",
+        "image_standard": "平衡图片",
+        "image_standard_warranty": "平衡图片 + 重试保障",
+        "image_high": "高级图片",
+        "image_high_warranty": "高级图片 + 重试保障",
+        "video_experience": "快速聚焦 Product Video",
+        "video_basic": "基础 Product Video",
+        "video_common": "标准 Product Video",
+        "video_standard": "商务 Product Video",
+        "video_high": "高级 Product Video",
+        "video_multiscene": "多场景 Product Video",
+        "trend_workflow": "趋势工作流",
+        "music_prompt": "音乐提示词",
+        "music_library": "音乐/SFX 素材库",
+        "music_background": "AI 背景音乐",
+        "music_song": "AI 歌曲",
+        "voice_audio": "语音/音频",
+        "voice_words": "语音文字",
+        "custom_voice": "专属语音",
+        "subtitle_translate": "字幕翻译",
+        "subtitle_dub": "配音",
+        "subtitle_dub_combo": "字幕 + 配音",
+        "custom_credit": "定制额度",
+    },
+}
+
+_PACKAGE_GROUP_LABELS_I18N = {
+    "en": {
+        "image": "🖼 Image",
+        "video": "🎬 Product Video",
+        "music": "🎵 Music",
+        "music_bg": "🎵 Music",
+        "song": "🎵 Music",
+        "voice": "🎙 Voice",
+        "voice_audio": "🎙 Voice",
+        "subtitle_dub": "🌐 Subtitles / Dubbing",
+        "prompt_workflow": "🧠 Prompt / Workflow",
+        "mixed": "🧩 Mixed",
+        "video_ads": "🎬 Advertising video",
+        "shop": "🛒 Store",
+        "music_mv": "🎵 Music video",
+        "translation": "🌐 Translation / Dubbing",
+        "course": "🎓 Course",
+        "tiktok": "📱 TikTok / Reels",
+        "launch": "🚀 Product launch",
+        "business": "🏢 Small business",
+        "custom": "📩 Custom order",
+    },
+    "zh": {
+        "image": "🖼 图片",
+        "video": "🎬 Product Video",
+        "music": "🎵 音乐",
+        "music_bg": "🎵 音乐",
+        "song": "🎵 音乐",
+        "voice": "🎙 语音",
+        "voice_audio": "🎙 语音",
+        "subtitle_dub": "🌐 字幕 / 配音",
+        "prompt_workflow": "🧠 提示词 / 工作流",
+        "mixed": "🧩 混合",
+        "video_ads": "🎬 广告视频",
+        "shop": "🛒 商店",
+        "music_mv": "🎵 音乐视频",
+        "translation": "🌐 翻译 / 配音",
+        "course": "🎓 课程",
+        "tiktok": "📱 TikTok / Reels",
+        "launch": "🚀 产品发布",
+        "business": "🏢 小型企业",
+        "custom": "📩 定制订单",
+    },
+}
+
+
+def package_i18n_group_label(group: str = "", lang: str = "vi") -> str:
+    locale = pricing_copy_language(lang)
+    normalized = str(group or "").strip().lower()
+    if locale == "vi":
+        return package_task_group_label(normalized) if normalized in PACKAGE_TASK_GROUP_LABELS else package_combo_group_label(normalized)
+    return _PACKAGE_GROUP_LABELS_I18N[locale].get(normalized, "📦 Package" if locale == "en" else "📦 套餐")
+
+
+def package_i18n_item_label(item_type: str = "", lang: str = "vi") -> str:
+    normalized = normalize_package_item_type(item_type)
+    locale = pricing_copy_language(lang)
+    if locale == "vi":
+        return package_item_display_name(normalized)
+    return _PACKAGE_ITEM_LABELS_I18N[locale].get(normalized, normalized.replace("_", " ").title() if locale == "en" else normalized)
+
+
+def package_i18n_items_summary(items: dict | None = None, lang: str = "vi") -> str:
+    locale = pricing_copy_language(lang)
+    rows = [
+        f"{package_i18n_item_label(item_type, locale)} ×{int(count or 0)}"
+        for item_type, count in (items or {}).items()
+        if int(count or 0) > 0
+    ]
+    if rows:
+        return ", ".join(rows)
+    return "liên hệ admin" if locale == "vi" else ("Contact admin" if locale == "en" else "联系管理员")
+
+
+def package_i18n_entry_label(entry: dict | None, code: str = "", package_type: str = "monthly", lang: str = "vi") -> str:
+    payload = dict(entry or {})
+    locale = pricing_copy_language(lang)
+    if locale == "vi":
+        return str(payload.get("label") or payload.get("button_label") or code or "Gói")
+    group = package_i18n_group_label(str(payload.get("group") or ""), locale)
+    items = package_i18n_items_summary(payload.get("items") or {}, locale)
+    monthly = str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package"}
+    days = int(payload.get("default_days") or 0) if monthly else 0
+    if locale == "zh":
+        kind = "月度套餐" if monthly else "成品组合"
+        duration = f" / {days} 天" if days else ""
+        return f"{group} {kind} — {items}{duration}"
+    kind = "monthly plan" if monthly else "finished combo"
+    duration = f" / {days} days" if days else ""
+    return f"{group} {kind} — {items}{duration}"
+
+
+def package_i18n_button_label(entry: dict | None, code: str = "", package_type: str = "monthly", lang: str = "vi") -> str:
+    payload = dict(entry or {})
+    locale = pricing_copy_language(lang)
+    if locale == "vi":
+        return str(payload.get("button_label") or payload.get("label") or code or "Gói")
+    group = package_i18n_group_label(str(payload.get("group") or ""), locale)
+    ignored = {"monthly", "combo", "package", "plan", str(payload.get("group") or "").lower()}
+    tokens = [token for token in re.split(r"[_\-]+", str(code or "").lower()) if token and token not in ignored and not token.isdigit() and not token.endswith("k")]
+    en_words = {
+        "mini": "Mini", "basic": "Basic", "standard": "Standard", "sales": "Sales", "pro": "Pro",
+        "business": "Business", "studio": "Studio", "starter": "Starter", "creator": "Creator",
+        "shop": "Shop", "fast": "Fast", "launch": "Launch", "ads": "Ads", "tiktok": "TikTok",
+        "reels": "Reels", "music": "Music", "voice": "Voice", "image": "Image", "video": "Video",
+    }
+    zh_words = {
+        "mini": "迷你", "basic": "基础", "standard": "标准", "sales": "销售", "pro": "专业",
+        "business": "企业", "studio": "工作室", "starter": "入门", "creator": "创作",
+        "shop": "商店", "fast": "快速", "launch": "发布", "ads": "广告", "tiktok": "TikTok",
+        "reels": "Reels", "music": "音乐", "voice": "语音", "image": "图片", "video": "视频",
+    }
+    words = zh_words if locale == "zh" else en_words
+    descriptor = " ".join(words.get(token, token.title()) for token in tokens[:3])
+    if not descriptor:
+        descriptor = "套餐" if locale == "zh" else ("Plan" if str(package_type).lower() in {"monthly", "month", "plan", "task", "package"} else "Combo")
+    return f"{group} · {descriptor}"
+
+
+def package_i18n_price_text(package_type: str, code: str, lang: str = "vi") -> str:
+    price = package_purchase_price_vnd(package_type, code)
+    if price > 0:
+        return package_purchase_display_price(package_type, code)
+    locale = pricing_copy_language(lang)
+    return "liên hệ admin" if locale == "vi" else ("Contact admin" if locale == "en" else "联系管理员")
+
 def package_item_type_for_image_tier(tier: str = "") -> str:
     tier_norm = normalize_image_tier(tier)
     return f"image_{tier_norm}"
@@ -67424,45 +67676,62 @@ def guide_keyboard(section: str = "", lang: str = "vi", back_callback: str = "me
                 rows.append([InlineKeyboardButton("📄 Tải bản Word", url=f"{public_base}/download/huong-dan-toan-aas.docx")])
         rows.append([InlineKeyboardButton(back_label or "🔙 Quay lại Hướng dẫn", callback_data=back_callback), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
         return InlineKeyboardMarkup(rows)
+    chinese = lang == "zh"
+    labels = {
+        "download_pricing": "📥 下载价格表" if chinese else "📥 Download pricing",
+        "download_guide": "📘 下载使用指南" if chinese else "📘 Download guide",
+        "docx": "📄 越南语使用指南（DOCX）" if chinese else "📄 Vietnamese guide (DOCX)",
+        "create_image": "🖼 创建图片" if chinese else "🖼 Create image",
+        "create_video": "🎬 创建视频" if chinese else "🎬 Create video",
+        "trend_video": "🔥 趋势视频" if chinese else "🔥 Trend video",
+        "topup": "💰 充值 Xu" if chinese else "💰 Top up Xu",
+        "pricing": "💰 价格表" if chinese else "💰 Pricing",
+        "image_first": "🖼 先创建图片" if chinese else "🖼 Create image first",
+        "normal_video": "🎬 普通视频" if chinese else "🎬 Normal video",
+        "support": "👨‍💼 联系支持" if chinese else "👨‍💼 Support",
+        "balance": "📊 余额" if chinese else "📊 Balance",
+        "back": "🔙 返回指南" if chinese else "🔙 Back to guide",
+        "main_menu": "🏠 主菜单" if chinese else "🏠 Main menu",
+    }
     rows = []
     if not section_key:
         rows.append([
-            InlineKeyboardButton("📥 Download pricing", callback_data="pricing|download_pricing"),
-            InlineKeyboardButton("📘 Download guide", callback_data="pricing|download_guide"),
+            InlineKeyboardButton(labels["download_pricing"], callback_data="pricing|download_pricing"),
+            InlineKeyboardButton(labels["download_guide"], callback_data="pricing|download_guide"),
         ])
         public_base = effective_public_base_url()
         if public_base:
-            rows.append([InlineKeyboardButton("📄 Download full guide", url=f"{public_base}/download/huong-dan-toan-aas.docx")])
+            rows.append([InlineKeyboardButton(labels["docx"], url=f"{public_base}/download/huong-dan-toan-aas.docx")])
     if section_key == "quick_start":
         rows.extend([
-            [InlineKeyboardButton("🖼 Create image", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 Create video", callback_data="create_media|quick_video")],
-            [InlineKeyboardButton("🔥 Trend video", callback_data="trendg|start"), InlineKeyboardButton("💰 Top up Xu", callback_data="menu|main_topup")],
+            [InlineKeyboardButton(labels["create_image"], callback_data="create_media|quick_image"), InlineKeyboardButton(labels["create_video"], callback_data="create_media|quick_video")],
+            [InlineKeyboardButton(labels["trend_video"], callback_data="trendg|start"), InlineKeyboardButton(labels["topup"], callback_data="menu|main_topup")],
         ])
     elif section_key == "image_ai":
         rows.extend([
-            [InlineKeyboardButton("🖼 Create image", callback_data="create_media|quick_image")],
-            [InlineKeyboardButton("💰 Pricing", callback_data="pricing|main")],
+            [InlineKeyboardButton(labels["create_image"], callback_data="create_media|quick_image")],
+            [InlineKeyboardButton(labels["pricing"], callback_data="pricing|main")],
         ])
     elif section_key == "video_ai":
         rows.extend([
-            [InlineKeyboardButton("🎬 Create video", callback_data="create_media|quick_video")],
-            [InlineKeyboardButton("🖼 Create image first", callback_data="menu|main_image")],
-            [InlineKeyboardButton("💰 Pricing", callback_data="pricing|main")],
+            [InlineKeyboardButton(labels["create_video"], callback_data="create_media|quick_video")],
+            [InlineKeyboardButton(labels["image_first"], callback_data="menu|main_image")],
+            [InlineKeyboardButton(labels["pricing"], callback_data="pricing|main")],
         ])
     elif section_key == "guided_video":
         rows.extend([
-            [InlineKeyboardButton("🔥 Trend video", callback_data="trendg|start")],
-            [InlineKeyboardButton("🎬 Normal video", callback_data="create_media|quick_video")],
+            [InlineKeyboardButton(labels["trend_video"], callback_data="trendg|start")],
+            [InlineKeyboardButton(labels["normal_video"], callback_data="create_media|quick_video")],
         ])
     elif section_key == "credits":
         rows.extend([
-            [InlineKeyboardButton("💳 Top up Xu", callback_data="menu|main_topup")],
-            [InlineKeyboardButton("💰 Pricing", callback_data="pricing|main")],
-            [InlineKeyboardButton("📊 Balance", callback_data="menu|main_profile")],
+            [InlineKeyboardButton(labels["topup"], callback_data="menu|main_topup")],
+            [InlineKeyboardButton(labels["pricing"], callback_data="pricing|main")],
+            [InlineKeyboardButton(labels["balance"], callback_data="menu|main_profile")],
         ])
     elif section_key in {"refund", "faq"}:
-        rows.append([InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support")])
-    rows.append([InlineKeyboardButton(back_label or "🔙 Back to guide", callback_data=back_callback), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")])
+        rows.append([InlineKeyboardButton(labels["support"], callback_data="menu|support")])
+    rows.append([InlineKeyboardButton(back_label or labels["back"], callback_data=back_callback), InlineKeyboardButton(labels["main_menu"], callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def legacy_guide_download_keyboard() -> InlineKeyboardMarkup:
@@ -67640,6 +67909,8 @@ def guide_index_text_i18n(lang: str = "vi") -> str:
     lang = normalize_user_language(lang) or "vi"
     if lang == "vi":
         return guide_index_text()
+    if lang not in {"en", "zh"}:
+        return "\n".join(public_guide_index_lines(public_pricing_locale(lang)))
     if lang == "zh":
         return (
             "📚 <b>TOAN AAS 使用指南</b>\n\n"
@@ -67674,6 +67945,19 @@ def guide_section_text_i18n(section_key_or_number: str, lang: str = "vi") -> str
     if lang == "vi":
         return guide_section_text(section_key_or_number)
     section_key = normalize_guide_section_key(section_key_or_number)
+    if section_key in {"image_ai", "video_ai", "credits"}:
+        return "\n".join(public_guide_lines(section_key_or_number, public_pricing_locale(lang)))
+    if lang not in {"en", "zh"}:
+        return "\n".join(public_guide_lines(section_key_or_number, public_pricing_locale(lang)))
+    image_price_list = " / ".join(
+        str(int(item["unit_xu"]))
+        for item in video_ai_real_pricing.public_image_quality_catalog()
+    )
+    product_video_price_list = " / ".join(
+        str(int(item["unit_xu"]))
+        for item in video_ai_real_pricing.public_quality_catalog()
+    )
+    music_prices = video_ai_real_pricing.public_music_background_prices()
     english_sections = {
         "quick_start": (
             "🚀 <b>Quick Start with TOAN AAS</b>\n\n"
@@ -67686,18 +67970,20 @@ def guide_section_text_i18n(section_key_or_number: str, lang: str = "vi") -> str
         "image_ai": (
             "🖼 <b>AI Image Guide</b>\n\n"
             "Describe the subject, style, background, lighting and image ratio. Choose an image tier and confirm before generation.\n\n"
-            "Image tiers: 50, 150, 200, 300, 400, 500 and 600 Xu.\n\n"
+            f"Current public image tiers: {image_price_list} Xu per image.\n\n"
             "If generation cannot be completed, TOAN AAS will keep the step uncharged or apply the refund policy."
         ),
         "video_ai": (
             "🎬 <b>AI Video Guide</b>\n\n"
             "Choose the topic or source, select the scene count first, then choose the profile, review the per-scene plan and pick a quality package before final confirmation.\n\n"
-            "Video tiers: 200, 300, 400, 500, 600, 800, 1000, 1200 and 1500 Xu. Each scene is about 8 seconds; Product Video supports 1-20 planned scenes (up to about 160 seconds).\n\n"
+            f"Current public Product Video tiers: {product_video_price_list} Xu per scene. Each tier has its own published duration; the confirmation screen shows the scene count and total Xu.\n\n"
             "If video generation is unavailable, TOAN AAS does not process the paid step or wrongly charge Xu."
         ),
         "audio": (
             "🎧 <b>Audio Guide</b>\n\n"
             "TOAN AAS can guide text-to-speech, speech-to-text, voice selection, custom voice, background music and short songs.\n\n"
+            f"Background music: Basic {music_prices['basic']} / Standard {music_prices['standard']} / Premium {music_prices['premium']} Xu.\n"
+            "Songs with vocals: Basic 200 / Standard 250 / Premium 300 Xu.\n\n"
             "Preview is a short sample. Full output is processed only after the confirmed step."
         ),
         "subtitle_dub": (
@@ -67707,9 +67993,10 @@ def guide_section_text_i18n(section_key_or_number: str, lang: str = "vi") -> str
         ),
         "credits": (
             "💰 <b>Xu and Top-up Guide</b>\n\n"
-            "1 Xu = 100đ. Example: 1,000 Xu is equivalent to 100,000đ.\n\n"
+            "Top-up options and the final Xu amount are shown in the bot before confirmation.\n\n"
+            "International top-ups receive only verified base Xu. Vietnam domestic bonuses, extra Xu and top-up codes do not apply; eligible member service discounts remain.\n\n"
             "Use <code>/pricing</code> for the price table, <code>/naptien</code> to top up Xu and <code>/profile</code> to check balance.\n\n"
-            "Top-up promotions apply only to PayOS or Vietnamese bank transfer, not Zalo/MoMo or international channels."
+            "Review the displayed amount and payment instructions before you confirm."
         ),
         "faq": (
             "❓ <b>FAQ</b>\n\n"
@@ -67726,18 +68013,20 @@ def guide_section_text_i18n(section_key_or_number: str, lang: str = "vi") -> str
             "image_ai": (
                 "🖼 <b>AI 图片指南</b>\n\n"
                 "描述主体、背景、光线、风格和画面比例，然后选择图片套餐并确认 Xu 费用。\n\n"
-                "图片价格：50、150、200、300、400、500、600 Xu。\n\n"
+                f"当前公开图片档位：{image_price_list} Xu/张。\n\n"
                 "若无法完成生成，将按未扣费或退款政策处理。"
             ),
             "video_ai": (
                 "🎬 <b>AI 视频指南</b>\n\n"
                 "描述场景、镜头运动、风格、时长和画面比例，然后选择套餐并确认。\n\n"
-                "视频价格：200、300、400、500、600、800、1000、1200、1500 Xu。\n\n"
+                f"当前公开 Product Video 档位：{product_video_price_list} Xu/场。每个档位按已公布时长计费，确认页显示场景数与总 Xu。\n\n"
                 "系统不可用时不会开始处理，也不会扣除 Xu。"
             ),
             "audio": (
                 "🎧 <b>音频指南</b>\n\n"
                 "支持文字转语音、语音转文字、选择声音、自定义声音、背景音乐和短歌曲。\n\n"
+                f"配乐：基础 {music_prices['basic']} / 标准 {music_prices['standard']} / 高级 {music_prices['premium']} Xu。\n"
+                "有歌词歌曲：基础 200 / 标准 250 / 高级 300 Xu。\n\n"
                 "预览只是短样；完整结果只在确认后处理。"
             ),
             "subtitle_dub": (
@@ -67747,9 +68036,10 @@ def guide_section_text_i18n(section_key_or_number: str, lang: str = "vi") -> str
             ),
             "credits": (
                 "💰 <b>Xu 与充值</b>\n\n"
-                "1 Xu = 100đ。1,000 Xu 相当于 100,000đ。\n\n"
+                "国际账户的充值选项和最终 Xu 数额会在机器人确认前显示。\n\n"
+                "国际充值只获得经核验的基础 Xu；不适用越南国内充值赠 Xu、加赠或充值码。符合条件的会员服务折扣仍然适用。\n\n"
                 "使用 <code>/pricing</code> 查看价格，使用 <code>/naptien</code> 充值 Xu，使用 <code>/profile</code> 查看余额。\n\n"
-                "充值优惠仅适用于 PayOS 或越南银行转账，不适用于 Zalo/MoMo 或国际渠道。"
+                "确认前请核对显示的金额和付款说明。"
             ),
             "faq": (
                 "❓ <b>常见问题</b>\n\n"
@@ -70729,13 +71019,18 @@ def other_language_choice_text() -> str:
     return (
         "🌍 <b>Ngôn ngữ khác / More languages</b>\n\n"
         "Các ngôn ngữ này đang được chuẩn bị giao diện.\n"
-        "Một số phần có thể dùng English/tiếng Việt tạm thời nếu bản dịch chưa đầy đủ."
+        "Một số phần sẽ dùng English tạm thời nếu bản dịch chưa đầy đủ."
     )
 
 def other_language_choice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🇯🇵 日本語", callback_data="lang|ja"), InlineKeyboardButton("🇰🇷 한국어", callback_data="lang|ko")],
         [InlineKeyboardButton("🇹🇭 ไทย", callback_data="lang|th"), InlineKeyboardButton("🇸🇦 العربية", callback_data="lang|ar")],
+        [InlineKeyboardButton("🇪🇸 Español", callback_data="lang|es"), InlineKeyboardButton("🇵🇹 Português", callback_data="lang|pt")],
+        [InlineKeyboardButton("🇫🇷 Français", callback_data="lang|fr"), InlineKeyboardButton("🇩🇪 Deutsch", callback_data="lang|de")],
+        [InlineKeyboardButton("🇮🇳 हिन्दी", callback_data="lang|hi"), InlineKeyboardButton("🇷🇺 Русский", callback_data="lang|ru")],
+        [InlineKeyboardButton("🇹🇷 Türkçe", callback_data="lang|tr"), InlineKeyboardButton("🇵🇭 Filipino", callback_data="lang|fil")],
+        [InlineKeyboardButton("🇮🇹 Italiano", callback_data="lang|it"), InlineKeyboardButton("🇮🇩 Bahasa Indonesia", callback_data="lang|id")],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="back_lang")],
     ])
 
@@ -121747,26 +122042,39 @@ def menu_text_main_quick_i18n(lang: str) -> str:
 
 def menu_text_main_topup_i18n(lang: str, user_id=None) -> str:
     lang = normalize_user_language(lang) or "vi"
-    if lang == "vi":
-        if user_id is not None and not user_is_vietnam_market(user_id):
+    international_account = user_id is not None and not user_is_vietnam_market(user_id)
+    if international_account:
+        if lang == "zh":
+            return (
+                "💳 <b>国际 Xu 充值</b>\n\n"
+                "CNY 充值可使用 ZaloPay/manual 或 Binance / USDT TRC20。确认前会显示经核验的基础 Xu。\n\n"
+                f"{foreign_topup_policy_note('zh')}\n\n"
+                "请勿发送密码、OTP、私密验证码或银行卡安全信息。"
+            )
+        if lang == "vi":
             return (
                 "💳 <b>Nạp Xu quốc tế</b>\n\n"
-                "Chọn số tiền muốn nạp. Bot sẽ tạo QR thanh toán tự động nếu PayOS hoạt động.\n\n"
+                "Chọn số tiền muốn nạp. Bot sẽ hiển thị Xu gốc đã xác minh trước khi xác nhận.\n\n"
                 f"{foreign_topup_policy_note('vi')}\n\n"
                 "Các mệnh giá Xu gốc vẫn hiển thị trong nút chọn nạp; không có bonus nạp nội địa."
             )
+        return (
+            "💳 <b>INTERNATIONAL XU TOP-UP</b>\n\n"
+            "USD top-up: USDT TRC20 only. Verified base Xu is shown before confirmation.\n\n"
+            f"{foreign_topup_policy_note('en')}\n\n"
+            "Never send passwords, OTPs, private security codes or card information."
+        )
+    if lang == "vi":
         return menu_text_main_topup()
     if lang == "zh":
         return (
             "💳 <b>充值 XU</b>\n\n"
-            "请选择充值金额。PayOS 可用时会打开自动 QR，其他方式需要人工核对。\n\n"
-            f"{foreign_topup_policy_note('zh')}\n\n"
+            "请选择充值金额。越南本地付款会在确认前显示当前渠道和最终 Xu。\n\n"
             "请勿发送密码、OTP、私密验证码或银行卡安全信息。"
         )
     return (
         "💳 <b>TOP UP XU</b>\n\n"
-        "Choose an amount below. The bot will open the current PayOS QR flow or manual transfer fallback when needed.\n\n"
-        f"{foreign_topup_policy_note('en')}\n\n"
+        "Choose an amount below. Vietnam domestic payment options and final Xu are shown before confirmation.\n\n"
         "Never send passwords, OTPs, private security codes or card information."
     )
 
@@ -169447,6 +169755,7 @@ def promo_code_status_message(status: str) -> str:
 
 async def _cmd_promo_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+    lang = get_user_language(uid) or "vi"
     record_usage_event(
         uid,
         username=update.effective_user.username or update.effective_user.first_name or "",
@@ -169457,6 +169766,11 @@ async def _cmd_promo_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
         detail=normalize_promo_code(context.args[0]) if context.args else "",
     )
     if not context.args:
+        if not show_domestic_topup_promotion(uid, lang):
+            return await update.message.reply_text(
+                "\n".join(billing_promo_apply_lines(lang, uid)),
+                parse_mode="HTML",
+            )
         summary = get_user_promo_summary(uid)
         rows = summary.get("rows") or []
         pending = summary.get("pending") or {}
@@ -169535,6 +169849,12 @@ async def _cmd_promo_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(
             "❌ Mã quà tặng không hợp lệ, đã hết lượt hoặc chưa được kích hoạt.\n\n"
             f"Lý do: <code>{html.escape(status)}</code>",
+            parse_mode="HTML",
+        )
+
+    if not show_domestic_topup_promotion(uid, lang):
+        return await update.message.reply_text(
+            "\n".join(billing_promo_apply_lines(lang, uid)),
             parse_mode="HTML",
         )
 
@@ -195570,8 +195890,8 @@ async def cmd_pricing_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
-def pricing_free_lines() -> list[str]:
-    return public_pricing_lines("free", public_pricing_context())
+def pricing_free_lines(lang: str = "vi") -> list[str]:
+    return public_pricing_lines("free", public_pricing_context(), public_pricing_locale(lang))
 
 def pricing_frame_video_lines() -> list[str]:
     examples = [
@@ -195596,20 +195916,20 @@ def pricing_frame_video_lines() -> list[str]:
     ])
     return rows
 
-def pricing_voice_lines() -> list[str]:
-    return public_pricing_lines("voice", public_pricing_context())
+def pricing_voice_lines(lang: str = "vi") -> list[str]:
+    return public_pricing_lines("voice", public_pricing_context(), public_pricing_locale(lang))
 
-def pricing_music_lines() -> list[str]:
-    return public_pricing_lines("music", public_pricing_context())
+def pricing_music_lines(lang: str = "vi") -> list[str]:
+    return public_pricing_lines("music", public_pricing_context(), public_pricing_locale(lang))
 
-def pricing_subtitle_lines() -> list[str]:
-    return public_pricing_lines("subtitle", public_pricing_context())
+def pricing_subtitle_lines(lang: str = "vi") -> list[str]:
+    return public_pricing_lines("subtitle", public_pricing_context(), public_pricing_locale(lang))
 
-def pricing_guide_lines() -> list[str]:
-    return public_guide_all_lines()
+def pricing_guide_lines(lang: str = "vi") -> list[str]:
+    return public_guide_all_lines(public_pricing_locale(lang))
 
-def pricing_docs_lines() -> list[str]:
-    return public_pricing_lines("docs", public_pricing_context())
+def pricing_docs_lines(lang: str = "vi") -> list[str]:
+    return public_pricing_lines("docs", public_pricing_context(), public_pricing_locale(lang))
 
 def pricing_storage_lines() -> list[str]:
     return [
@@ -195901,8 +196221,8 @@ def public_pricing_context() -> dict:
         "member_discount_lines": discount_lines,
     }
 
-def public_pricing_markdown() -> str:
-    return shared_pricing_markdown(public_pricing_context())
+def public_pricing_markdown(context: dict | None = None, lang: str = "vi") -> str:
+    return shared_pricing_markdown(context or public_pricing_context(), public_pricing_locale(lang))
 
 async def send_generated_markdown_document(query, filename: str, content: str, caption: str = ""):
     data = io.BytesIO(content.encode("utf-8"))
@@ -195913,18 +196233,26 @@ async def send_generated_markdown_document(query, filename: str, content: str, c
         caption=caption or filename,
     )
 
-def pricing_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    lang = normalize_user_language(lang) or "vi"
+def pricing_main_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
+    lang = pricing_copy_language(lang)
+    show_domestic_promotions = lang == "vi" and (user_id is None or user_is_vietnam_market(user_id))
     if lang == "vi":
         return InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("📋 Bảng giá", callback_data="pricing|catalog"),
-                InlineKeyboardButton("🎁 Xem ưu đãi", callback_data="pricing|promotions"),
+                InlineKeyboardButton(
+                    "🎁 Xem ưu đãi" if show_domestic_promotions else "💳 Nạp Xu",
+                    callback_data="pricing|promotions" if show_domestic_promotions else "menu|main_topup",
+                ),
             ],
-            [
-                InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"),
-                InlineKeyboardButton("🎁 Gói / Combo", callback_data="pkgcombo:home"),
-            ],
+            (
+                [
+                    InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"),
+                    InlineKeyboardButton("🎁 Gói / Combo", callback_data="pkgcombo:home"),
+                ]
+                if show_domestic_promotions
+                else [InlineKeyboardButton("🎁 Gói / Combo", callback_data="pkgcombo:home")]
+            ),
             [
                 InlineKeyboardButton("📥 Tải bảng giá", callback_data="pricing|download_pricing"),
                 InlineKeyboardButton("📘 Tải hướng dẫn sử dụng", callback_data="pricing|download_guide"),
@@ -195932,27 +196260,40 @@ def pricing_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ])
     labels = {
-        "en": ("📋 Pricing", "💳 Top up Xu", "🎁 Plans / Combos", "🏠 Main menu"),
-        "zh": ("📋 价格表", "💳 充值 Xu", "🎁 月度套餐 / 组合", "🏠 主菜单"),
-    }.get(lang, ("📋 Pricing", "💳 Top up Xu", "🎁 Plans / Combos", "🏠 Main menu"))
+        "en": ("📋 Pricing", "🎁 View offers", "💳 Top up Xu", "🎁 Plans / Combos", "🏠 Main menu"),
+        "zh": ("📋 价格表", "🎁 查看优惠", "💳 充值 Xu", "🎁 月度套餐 / 组合", "🏠 主菜单"),
+    }.get(lang, ("📋 Pricing", "🎁 View offers", "💳 Top up Xu", "🎁 Plans / Combos", "🏠 Main menu"))
+    if show_domestic_promotions:
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(labels[0], callback_data="pricing|catalog"),
+                InlineKeyboardButton(labels[1], callback_data="pricing|promotions"),
+            ],
+            [
+                InlineKeyboardButton(labels[2], callback_data="menu|main_topup"),
+                InlineKeyboardButton(labels[3], callback_data="pkgcombo:home"),
+            ],
+            [InlineKeyboardButton(labels[4], callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(labels[0], callback_data="pricing|catalog"),
-            InlineKeyboardButton(labels[1], callback_data="menu|main_topup"),
+            InlineKeyboardButton(labels[2], callback_data="menu|main_topup"),
         ],
         [
-            InlineKeyboardButton(labels[2], callback_data="pkgcombo:home"),
-            InlineKeyboardButton(labels[3], callback_data="menu|main"),
+            InlineKeyboardButton(labels[3], callback_data="pkgcombo:home"),
+            InlineKeyboardButton(labels[4], callback_data="menu|main"),
         ],
     ])
 
 def pricing_catalog_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    lang = normalize_user_language(lang) or "vi"
-    labels = {
+    lang = pricing_copy_language(lang)
+    catalog_labels = {
         "vi": ("💰 Bảng giá tổng", "🎙 Giọng nói", "🎵 Nhạc AI", "🎬 Video", "🌐 Phụ đề / Lồng tiếng", "🖼 Hình ảnh", "📄 Tài liệu/PDF", "🎁 Miễn phí / Không tính Xu", "🎁 Khuyến mãi / Thành viên", "📘 Hướng dẫn sử dụng", "📥 Tải bảng giá", "📘 Tải hướng dẫn", "📝 Ghi chú/Lưu trữ", "🎁 Gói/Combo", "⬅️ Quay lại", "🏠 Menu chính"),
         "en": ("🖼 Images", "🎬 Video", "🎞 Frame video", "🎙 Voice", "📄 Docs/PDF", "📝 Notes/Storage", "🎁 Plans/Combos", "👑 Premium", "⬅️ Back", "🏠 Main menu"),
         "zh": ("🖼 图片", "🎬 视频", "🎞 图片成片", "🎙 语音", "📄 文档/PDF", "📝 笔记/存储", "🎁 套餐", "👑 高级", "⬅️ 返回", "🏠 主菜单"),
-    }.get(lang)
+    }
+    labels = catalog_labels.get(lang, catalog_labels["en"])
     if lang == "vi":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton(labels[0], callback_data="pricing|total"), InlineKeyboardButton(labels[1], callback_data="pricing|voice")],
@@ -195973,12 +196314,13 @@ def pricing_catalog_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def pricing_packages_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    lang = normalize_user_language(lang) or "vi"
-    labels = {
+    lang = pricing_copy_language(lang)
+    package_labels = {
         "vi": ("🖼 Gói Ảnh", "🎬 Gói Video", "🎵 Gói Nhạc", "🎙 Gói Voice", "🌐 Phụ đề / Lồng tiếng", "🧠 Prompt / Workflow", "🎁 Combo trọn gói", "📦 Gói của tôi", "📩 Cần gói lớn hơn", "ℹ️ Lưu ý", "⬅️ Quay lại", "🏠 Menu chính"),
         "en": ("📦 Monthly plans", "🎁 Finished combos", "📦 My packages", "📩 Custom order", "⬅️ Back", "🏠 Main menu"),
         "zh": ("📦 月度套餐", "🎁 成品组合", "📦 我的套餐", "📩 定制需求", "⬅️ 返回", "🏠 主菜单"),
-    }.get(lang)
+    }
+    labels = package_labels.get(lang, package_labels["en"])
     if lang == "vi":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton(labels[0], callback_data="pkgcombo:group:image"), InlineKeyboardButton(labels[1], callback_data="pkgcombo:group:video")],
@@ -196001,14 +196343,32 @@ def pricing_xu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def pricing_plans_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    lang = normalize_user_language(lang) or "vi"
+    lang = pricing_copy_language(lang)
+    plan_labels = {
+        "vi": (
+            "🖼 Gói Ảnh", "🎬 Gói Video", "🎵 Gói Nhạc", "🎙 Gói Voice",
+            "🌐 Phụ đề / Lồng tiếng", "🧠 Prompt / Workflow", "🧩 Gói Mixed", "📦 Gói của tôi",
+            "📩 Cần gói lớn hơn", "ℹ️ Lưu ý", "⬅️ Gói / Combo", "🏠 Menu chính",
+        ),
+        "en": (
+            "🖼 Image plans", "🎬 Video plans", "🎵 Music plans", "🎙 Voice plans",
+            "🌐 Subtitle / Dubbing", "🧠 Prompt / Workflow", "🧩 Mixed plans", "📦 My packages",
+            "📩 Larger order", "ℹ️ Notes", "⬅️ Plans / Combos", "🏠 Main menu",
+        ),
+        "zh": (
+            "🖼 图片套餐", "🎬 视频套餐", "🎵 音乐套餐", "🎙 语音套餐",
+            "🌐 字幕 / 配音", "🧠 提示词 / 工作流", "🧩 混合套餐", "📦 我的套餐",
+            "📩 大额需求", "ℹ️ 说明", "⬅️ 套餐 / 组合", "🏠 主菜单",
+        ),
+    }
+    labels = plan_labels.get(lang, plan_labels["en"])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🖼 Gói Ảnh", callback_data="pkgcombo:group:image"), InlineKeyboardButton("🎬 Gói Video", callback_data="pkgcombo:group:video")],
-        [InlineKeyboardButton("🎵 Gói Nhạc", callback_data="pkgcombo:group:music"), InlineKeyboardButton("🎙 Gói Voice", callback_data="pkgcombo:group:voice")],
-        [InlineKeyboardButton("🌐 Phụ đề / Lồng tiếng", callback_data="pkgcombo:group:subtitle_dub"), InlineKeyboardButton("🧠 Prompt / Workflow", callback_data="pkgcombo:group:prompt_workflow")],
-        [InlineKeyboardButton("🧩 Gói Mixed", callback_data="pkgcombo:group:mixed"), InlineKeyboardButton("📦 Gói của tôi", callback_data="pkgcombo:my")],
-        [InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data="pkgcombo:large_order:home"), InlineKeyboardButton("ℹ️ Lưu ý", callback_data="pkgcombo:notes")],
-        [InlineKeyboardButton("⬅️ Gói / Combo", callback_data="pkgcombo:home"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(labels[0], callback_data="pkgcombo:group:image"), InlineKeyboardButton(labels[1], callback_data="pkgcombo:group:video")],
+        [InlineKeyboardButton(labels[2], callback_data="pkgcombo:group:music"), InlineKeyboardButton(labels[3], callback_data="pkgcombo:group:voice")],
+        [InlineKeyboardButton(labels[4], callback_data="pkgcombo:group:subtitle_dub"), InlineKeyboardButton(labels[5], callback_data="pkgcombo:group:prompt_workflow")],
+        [InlineKeyboardButton(labels[6], callback_data="pkgcombo:group:mixed"), InlineKeyboardButton(labels[7], callback_data="pkgcombo:my")],
+        [InlineKeyboardButton(labels[8], callback_data="pkgcombo:large_order:home"), InlineKeyboardButton(labels[9], callback_data="pkgcombo:notes")],
+        [InlineKeyboardButton(labels[10], callback_data="pkgcombo:home"), InlineKeyboardButton(labels[11], callback_data="menu|main")],
     ])
 
 def pricing_legacy_task_group_lines(group: str) -> list[str]:
@@ -196036,7 +196396,7 @@ def vip_services_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def member_policy_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    lang = normalize_user_language(lang) or "vi"
+    lang = pricing_copy_language(lang)
     if lang == "zh":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("👑 我的等级", callback_data="menu|main_profile"), InlineKeyboardButton("🎂 更新生日", callback_data="pricing|birthday")],
@@ -196114,8 +196474,25 @@ async def edit_or_send_pricing_lines(query, lines: list[str], reply_markup: Inli
         )
 
 def pricing_hub_lines(lang: str = "vi", user_id=None) -> list[str]:
-    lang = normalize_user_language(lang) or "vi"
-    if lang == "vi" and user_id is not None and not user_is_vietnam_market(user_id):
+    lang = pricing_copy_language(lang)
+    international_account = user_id is not None and not user_is_vietnam_market(user_id)
+    if international_account and lang == "zh":
+        return [
+            "💳 <b>TOAN AAS 国际充值 / 价格</b>", "",
+            "请选择查看价格、充值 Xu 或购买月度套餐/组合。", "",
+            "• 充值：国际充值只获得经核验的基础 Xu。",
+            "• 不适用越南国内充值赠 Xu、加赠或充值码。",
+            "• 会员服务折扣和符合条件的非充值权益仍可使用。",
+        ]
+    if international_account and lang == "en":
+        return [
+            "💳 <b>TOAN AAS International Top-up / Pricing</b>", "",
+            "Choose pricing, Xu top-up, or a monthly plan/combo.", "",
+            "• International top-ups receive only verified base Xu.",
+            "• Vietnam domestic bonuses, extra Xu and top-up codes do not apply.",
+            "• Member-tier service discounts and eligible non-top-up benefits remain available.",
+        ]
+    if international_account:
         return [
             "💳 <b>Nạp Xu / Bảng giá TOAN AAS</b>", "",
             "Bạn muốn xem bảng giá, nạp Xu, xem quyền lợi quốc tế hay mua gói/combo?", "",
@@ -196133,7 +196510,7 @@ def pricing_hub_lines(lang: str = "vi", user_id=None) -> list[str]:
             "• 充值 Xu：为账户充值服务额度。",
             "• 月度套餐 / 组合：按需求购买服务权益。",
             "",
-            "越南 PayOS/银行转账充值活动仅适用于越南本地付款。国际用户仅享受会员等级折扣和符合条件的非充值权益。",
+            "会员等级服务折扣按适用政策保留。",
         ]
     if lang == "en":
         return [
@@ -196143,7 +196520,7 @@ def pricing_hub_lines(lang: str = "vi", user_id=None) -> list[str]:
             "• Top up Xu: add service credits to your account.",
             "• Plans / Combos: buy service allowances for a specific need.",
             "",
-            "Deposit promotions are available only for Vietnam PayOS/bank-transfer campaigns. International users receive member-tier discounts and eligible non-deposit benefits only.",
+            "Member-tier service discounts remain available under the applicable policy.",
         ]
     return [
         "💳 <b>Nạp Xu / Bảng giá TOAN AAS</b>", "",
@@ -196158,8 +196535,21 @@ def pricing_hub_lines(lang: str = "vi", user_id=None) -> list[str]:
     ]
 
 def billing_promotions_lines(lang: str = "vi", user_id=None) -> list[str]:
-    lang = normalize_user_language(lang) or "vi"
-    domestic = lang == "vi" if user_id is None else user_is_vietnam_market(user_id)
+    lang = pricing_copy_language(lang)
+    domestic = lang == "vi" and (user_id is None or user_is_vietnam_market(user_id))
+    foreign_ui_for_domestic_account = user_id is not None and user_is_vietnam_market(user_id) and lang != "vi"
+    if foreign_ui_for_domestic_account and lang == "zh":
+        return [
+            "🎁 <b>会员权益</b>",
+            "",
+            "符合条件的会员等级服务折扣、生日或忠诚度权益仍可使用。",
+        ]
+    if foreign_ui_for_domestic_account and lang == "en":
+        return [
+            "🎁 <b>Member Benefits</b>",
+            "",
+            "Eligible member-tier service discounts and birthday or loyalty benefits remain available.",
+        ]
     if not domestic and lang == "zh":
         return [
             "🎁 <b>国际用户权益</b>",
@@ -196226,8 +196616,8 @@ def billing_promotions_lines(lang: str = "vi", user_id=None) -> list[str]:
     ]
 
 def billing_promotions_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
-    lang = normalize_user_language(lang) or "vi"
-    domestic = lang == "vi" if user_id is None else user_is_vietnam_market(user_id)
+    lang = pricing_copy_language(lang)
+    domestic = lang == "vi" and (user_id is None or user_is_vietnam_market(user_id))
     if not domestic and lang == "zh":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📋 价格表", callback_data="pricing|catalog"), InlineKeyboardButton("💳 充值 Xu", callback_data="menu|main_topup")],
@@ -196243,6 +196633,18 @@ def billing_promotions_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboar
             [InlineKeyboardButton("📋 Bảng giá", callback_data="pricing|catalog"), InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
             [InlineKeyboardButton("⬅️ Quay lại", callback_data="pricing|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ])
+    if lang == "zh":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎁 输入优惠码", callback_data="pricing|promo_apply")],
+            [InlineKeyboardButton("💳 充值 Xu", callback_data="menu|main_topup"), InlineKeyboardButton("📋 价格表", callback_data="pricing|catalog")],
+            [InlineKeyboardButton("⬅️ 充值 / 价格", callback_data="pricing|main"), InlineKeyboardButton("🏠 主菜单", callback_data="menu|main")],
+        ])
+    if lang == "en":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎁 Enter promotion code", callback_data="pricing|promo_apply")],
+            [InlineKeyboardButton("💳 Top up Xu", callback_data="menu|main_topup"), InlineKeyboardButton("📋 Pricing", callback_data="pricing|catalog")],
+            [InlineKeyboardButton("⬅️ Top up / Pricing", callback_data="pricing|main"), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎁 Nhập mã ưu đãi", callback_data="pricing|promo_apply")],
         [InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"), InlineKeyboardButton("📋 Bảng giá", callback_data="pricing|catalog")],
@@ -196250,17 +196652,36 @@ def billing_promotions_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboar
     ])
 
 def billing_promo_apply_lines(lang: str = "vi", user_id=None) -> list[str]:
-    lang = normalize_user_language(lang) or "vi"
-    domestic = lang == "vi" if user_id is None else user_is_vietnam_market(user_id)
+    lang = pricing_copy_language(lang)
+    domestic = lang == "vi" and (user_id is None or user_is_vietnam_market(user_id))
+    foreign_ui_for_domestic_account = user_id is not None and user_is_vietnam_market(user_id) and lang != "vi"
+    if foreign_ui_for_domestic_account and lang == "zh":
+        return ["🎁 <b>会员权益</b>", "", "此界面不显示越南本地充值优惠。符合条件的会员服务折扣仍然适用。"]
+    if foreign_ui_for_domestic_account and lang == "en":
+        return ["🎁 <b>Member Benefits</b>", "", "Vietnam domestic top-up offers are not shown in this interface. Eligible member-tier service discounts remain available."]
     if not domestic and lang == "zh":
-        return ["🎁 <b>充值优惠码</b>", "", "越南本地充值活动不适用于国际付款。"]
+        return ["🌍 <b>国际账户</b>", "", "国际账户按当前报价支付；符合条件的会员服务折扣仍然适用。"]
     if not domestic and lang == "en":
-        return ["🎁 <b>Promotion code</b>", "", "Vietnam local top-up promotions are not available for international payments."]
+        return ["🌍 <b>International account</b>", "", "International accounts use the current quoted service price. Eligible member-tier service discounts remain available."]
     if not domestic:
         return [
-            "🎁 <b>Mã ưu đãi</b>",
+            "🌍 <b>Tài khoản quốc tế</b>",
             "",
-            "Tài khoản quốc tế không áp dụng mã promotion nạp VND nội địa.",
+            "Tài khoản quốc tế áp dụng giá dịch vụ đang hiển thị; chiết khấu thành viên hợp lệ vẫn được giữ.",
+        ]
+    if lang == "zh":
+        return [
+            "🎁 <b>输入优惠码</b>",
+            "",
+            "前两次符合条件的越南本地充值奖励会自动应用，无需输入代码。",
+            "其他公开优惠可在满足对应越南本地条件时使用。",
+        ]
+    if lang == "en":
+        return [
+            "🎁 <b>Enter promotion code</b>",
+            "",
+            "The first two eligible Vietnam domestic top-up bonuses apply automatically; no code is needed.",
+            "Other published promotions can be used only when their Vietnam domestic conditions are met.",
         ]
     return [
         "🎁 <b>Nhập mã ưu đãi</b>",
@@ -196344,7 +196765,7 @@ def hidden_active_features_audit(lang: str = "vi", entrypoint_labels: list[str] 
     return findings
 
 def pricing_catalog_lines(lang: str = "vi") -> list[str]:
-    lang = normalize_user_language(lang) or "vi"
+    lang = pricing_copy_language(lang)
     if lang == "zh":
         return [
             "📋 <b>TOAN AAS 价格表</b>", "", "请选择服务分类。", "",
@@ -196370,7 +196791,7 @@ def pricing_catalog_lines(lang: str = "vi") -> list[str]:
     ]
 
 def pricing_packages_lines(lang: str = "vi") -> list[str]:
-    lang = normalize_user_language(lang) or "vi"
+    lang = pricing_copy_language(lang)
     if lang == "zh":
         return [
             "🎁 <b>TOAN AAS 月度套餐 / 组合</b>", "", "请选择购买类型。", "",
@@ -196383,7 +196804,7 @@ def pricing_packages_lines(lang: str = "vi") -> list[str]:
             "🎁 <b>TOAN AAS Plans / Combos</b>", "", "What would you like to buy?", "",
             "• Monthly plans: steady monthly use with a 30-day allowance.",
             "• Finished combos: buy a complete outcome for a specific purpose.", "",
-            "After PayOS confirms payment, the item appears in My packages. It does not add normal Xu or trigger top-up bonuses.",
+            "After payment is confirmed, the item appears in My packages. It does not add normal Xu or trigger top-up bonuses.",
         ]
     return [
         "🎁 <b>Gói / Combo TOAN AAS</b>",
@@ -196399,6 +196820,37 @@ def pricing_packages_lines(lang: str = "vi") -> list[str]:
     ]
 
 def pricing_pkgcombo_notes_lines(lang: str = "vi") -> list[str]:
+    lang = pricing_copy_language(lang)
+    if lang == "zh":
+        return [
+            "ℹ️ <b>套餐 / 组合说明</b>",
+            "",
+            "• 服务套餐的有效期为 30 天。",
+            "• 成品组合按各组合注明的权益使用。",
+            "• 套餐/组合不是普通 Xu 充值。",
+            "• 每个套餐/组合每月只能购买一次。",
+            "• 套餐/组合购买金额不计入会员等级充值累计。",
+            "• 套餐/组合不增加充值 Xu 奖励，也不会自动提升会员等级。",
+            "• 仅在套餐支持自动发放权益时才可付款。",
+            "• 确认后，权益会显示在 📦 我的套餐。",
+            "• 需要管理员处理的项目不会生成虚假结账。",
+            "• 如需更大数量，请向管理员提交单独需求。",
+        ]
+    if lang == "en":
+        return [
+            "ℹ️ <b>Plans / Combos Notes</b>",
+            "",
+            "• Service plans are valid for 30 days.",
+            "• Finished combos are used according to the benefits shown for each combo.",
+            "• Plans and combos are not ordinary Xu top-ups.",
+            "• Each plan or combo can be purchased once per month.",
+            "• Plan and combo purchases do not count toward member-tier top-up progress.",
+            "• Plans and combos do not add top-up bonus Xu or automatically upgrade member tier.",
+            "• Payment is available only when the package supports automatic entitlement delivery.",
+            "• After confirmation, the entitlement appears in 📦 My packages.",
+            "• Items requiring admin handling never create a fake checkout.",
+            "• For a larger quantity, send a separate request to an admin.",
+        ]
     return [
         "ℹ️ <b>Lưu ý Gói / Combo</b>",
         "",
@@ -196408,56 +196860,101 @@ def pricing_pkgcombo_notes_lines(lang: str = "vi") -> list[str]:
         "• Mỗi gói/combo chỉ mua 1 lần/tháng.",
         "• Tiền mua gói/combo không tính vào tổng nạp để nâng hạng.",
         "• Gói/combo không cộng bonus nạp Xu và không tự nâng hạng thành viên.",
-        "• Thanh toán qua PayOS khi gói đã hỗ trợ tự cấp quyền.",
-        "• Sau khi PayOS xác nhận, quyền lợi nằm trong 📦 Gói của tôi.",
+        "• Chỉ thanh toán khi gói đã hỗ trợ tự cấp quyền.",
+        "• Sau khi xác nhận, quyền lợi nằm trong 📦 Gói của tôi.",
         "• Mục cần admin xử lý sẽ không tạo checkout giả.",
         "• Cần số lượng lớn hơn thì gửi yêu cầu riêng cho admin.",
     ]
 
 def pricing_pkgcombo_notes_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = pricing_copy_language(lang)
+    if lang == "zh":
+        labels = ("📩 大额需求", "⬅️ 套餐 / 组合", "🏠 主菜单")
+    elif lang == "en":
+        labels = ("📩 Larger order", "⬅️ Plans / Combos", "🏠 Main menu")
+    else:
+        labels = ("📩 Cần gói lớn hơn", "⬅️ Gói / Combo", "🏠 Menu chính")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data="pkgcombo:large_order:notes"), InlineKeyboardButton("⬅️ Gói / Combo", callback_data="pkgcombo:home")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(labels[0], callback_data="pkgcombo:large_order:notes"), InlineKeyboardButton(labels[1], callback_data="pkgcombo:home")],
+        [InlineKeyboardButton(labels[2], callback_data="menu|main")],
     ])
 
-def pricing_package_summary_lines() -> list[str]:
+def pricing_package_summary_lines(lang: str = "vi") -> list[str]:
+    lang = pricing_copy_language(lang)
     catalog = package_catalog_payload()
-    rows = [
-        "🎁 <b>GÓI / COMBO</b>",
-        "",
-        "• Gói tháng: dùng đều mỗi tháng, có hạn mức trong 30 ngày.",
-        "• Combo thành phẩm: mua theo mục đích hoàn chỉnh, dùng đến hết lượt.",
-        "• Nạp Xu: tự do, dùng công cụ nào tính công cụ đó.",
-        "• Mã quà tặng: chỉ admin quản lý/cấp phát.",
-        "• Mỗi gói/combo chỉ mua 1 lần/tháng; cần lớn hơn thì order riêng admin duyệt.",
-        "",
-        "<b>Gói tháng</b>",
-    ]
+    if lang == "zh":
+        rows = [
+            "🎁 <b>TOAN AAS 套餐 / 组合</b>", "",
+            "• 月度套餐：30 天内定期使用的服务额度。",
+            "• 成品组合：按完整用途购买，直至额度用完。",
+            "• 充值 Xu：可灵活用于符合条件的工具。",
+            "• 礼品码：仅由管理员管理和发放。",
+            "• 每个套餐/组合每月只能购买一次；更大数量需管理员单独审核。",
+            "", "<b>月度套餐</b>",
+        ]
+        duration_label, combo_heading, manual_label, automatic_label, buy_hint = (
+            "30 天", "<b>成品组合</b>", "联系管理员", "自动购买", "如需购买，请打开 <b>充值 / 价格 → 套餐 / 组合</b>。",
+        )
+    elif lang == "en":
+        rows = [
+            "🎁 <b>TOAN AAS Plans / Combos</b>", "",
+            "• Monthly plans: service allowances for regular use within 30 days.",
+            "• Finished combos: buy a complete outcome and use it until the allowance runs out.",
+            "• Top up Xu: a flexible balance for eligible tools.",
+            "• Gift codes: managed and issued by admins only.",
+            "• Each plan or combo can be purchased once per month; larger orders need admin review.",
+            "", "<b>Monthly plans</b>",
+        ]
+        duration_label, combo_heading, manual_label, automatic_label, buy_hint = (
+            "30 days", "<b>Finished combos</b>", "contact admin", "automatic purchase", "To buy, open <b>Top up / Pricing → Plans / Combos</b>.",
+        )
+    else:
+        rows = [
+            "🎁 <b>GÓI / COMBO</b>", "",
+            "• Gói tháng: dùng đều mỗi tháng, có hạn mức trong 30 ngày.",
+            "• Combo thành phẩm: mua theo mục đích hoàn chỉnh, dùng đến hết lượt.",
+            "• Nạp Xu: tự do, dùng công cụ nào tính công cụ đó.",
+            "• Mã quà tặng: chỉ admin quản lý/cấp phát.",
+            "• Mỗi gói/combo chỉ mua 1 lần/tháng; cần lớn hơn thì order riêng admin duyệt.",
+            "", "<b>Gói tháng</b>",
+        ]
+        duration_label, combo_heading, manual_label, automatic_label, buy_hint = (
+            "30 ngày", "<b>Combo thành phẩm</b>", "liên hệ admin", "mua tự động", "Để mua, mở <b>Nạp Xu / Bảng giá → Gói / Combo</b>.",
+        )
     for code, entry in (catalog.get("monthly") or {}).items():
         if entry.get("public") is False:
             continue
         rows.append(
-            f"• {html.escape(str(entry.get('label') or code))}: <b>{html.escape(package_purchase_display_price('monthly', code))}</b> "
-            f"— 30 ngày"
+            f"• {html.escape(package_i18n_entry_label(entry, code, 'monthly', lang))}: <b>{html.escape(package_i18n_price_text('monthly', code, lang))}</b> "
+            f"— {duration_label}"
         )
-    rows.extend(["", "<b>Combo thành phẩm</b>"])
+    rows.extend(["", combo_heading])
     for item in public_video_combo_pricing_payload():
-        status = "liên hệ admin" if item.get("manual") else "mua tự động"
+        code = str(item.get("code") or "").strip()
+        entry = package_catalog_entry(code, "combo") or item
+        status = manual_label if item.get("manual") else automatic_label
         rows.append(
-            f"• {html.escape(str(item.get('label') or item.get('code') or 'Combo'))}: "
-            f"<b>{html.escape(str(item.get('display_price') or '-'))}</b> — {html.escape(status)}"
+            f"• {html.escape(package_i18n_entry_label(entry, code, 'combo', lang))}: "
+            f"<b>{html.escape(package_i18n_price_text('combo', code, lang))}</b> — {html.escape(status)}"
         )
-    rows.extend(["", "Để mua, mở <b>Nạp Xu / Bảng giá → Gói / Combo</b>."])
+    rows.extend(["", buy_hint])
     return rows
 
 def pricing_package_summary_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = pricing_copy_language(lang)
+    if lang == "zh":
+        labels = ("🎁 购买套餐 / 组合", "⬅️ 返回价格", "🏠 主菜单")
+    elif lang == "en":
+        labels = ("🎁 Buy plans / combos", "⬅️ Back to pricing", "🏠 Main menu")
+    else:
+        labels = ("🎁 Mua Gói/Combo", "⬅️ Quay lại bảng giá", "🏠 Menu chính")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎁 Mua Gói/Combo", callback_data="pkgcombo:home"), InlineKeyboardButton("⬅️ Quay lại bảng giá", callback_data="pricing|catalog")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(labels[0], callback_data="pkgcombo:home"), InlineKeyboardButton(labels[1], callback_data="pricing|catalog")],
+        [InlineKeyboardButton(labels[2], callback_data="menu|main")],
     ])
 
-def pricing_main_lines() -> list[str]:
-    return public_pricing_lines("total", public_pricing_context())
+def pricing_main_lines(lang: str = "vi") -> list[str]:
+    return public_pricing_lines("total", public_pricing_context(), public_pricing_locale(lang))
     pricing = media_workflow_pricing_payload()
     image_tiers = pricing["image_tiers"]
     video_tiers = pricing["video_tiers"]
@@ -196555,30 +197052,44 @@ def pricing_main_lines() -> list[str]:
         "• Xu là đơn vị nội bộ trong TOAN AAS, không phải tiền/tiền điện tử, không rút tiền, không chuyển nhượng.",
     ]
 
-def pricing_image_lines() -> list[str]:
-    return public_pricing_lines("image", public_pricing_context())
+def pricing_image_lines(lang: str = "vi") -> list[str]:
+    return public_pricing_lines("image", public_pricing_context(), public_pricing_locale(lang))
 
-def pricing_video_lines() -> list[str]:
-    return public_pricing_lines("video", public_pricing_context())
+def pricing_video_lines(lang: str = "vi") -> list[str]:
+    return public_pricing_lines("video", public_pricing_context(), public_pricing_locale(lang))
 
-def pricing_combo_lines() -> list[str]:
+def pricing_combo_lines(lang: str = "vi") -> list[str]:
+    lang = pricing_copy_language(lang)
     combos = public_video_combo_pricing_payload()
-    rows = [
-        "🎁 <b>Combo trọn gói</b>",
-        "",
-        "Chọn combo theo mục đích thành phẩm.",
-        "Chi tiết giá/quyền lợi hiện ở từng combo.",
-        "",
-    ]
+    if lang == "zh":
+        rows = ["🎁 <b>成品组合</b>", "", "按完整用途选择组合。", "每个组合页面显示当前价格和权益。", ""]
+        heading = "当前可用组合："
+        tail = "每个组合每月最多购买一次；如需定制请点击 <b>📩 定制组合</b>。"
+    elif lang == "en":
+        rows = ["🎁 <b>Finished Combos</b>", "", "Choose a combo for a complete outcome.", "Each combo page shows its current price and benefits.", ""]
+        heading = "Available combos:"
+        tail = "Each combo can be purchased once per month; use <b>📩 Custom combo</b> for a tailored order."
+    else:
+        rows = [
+            "🎁 <b>Combo trọn gói</b>",
+            "",
+            "Chọn combo theo mục đích thành phẩm.",
+            "Chi tiết giá/quyền lợi hiện ở từng combo.",
+            "",
+        ]
+        heading = "Các combo đang có:"
+        tail = "Mỗi combo chỉ mua 1 lần/tháng. Cần combo riêng thì bấm <b>📩 Cần gói lớn hơn</b>."
     if combos:
-        rows.append("Các combo đang có:")
+        rows.append(heading)
     for item in combos:
-        label = str(item.get("label") or item.get("button_label") or item.get("code") or "Combo")
-        group_label = package_combo_group_label(item.get("group") or "")
+        code = str(item.get("code") or "").strip()
+        entry = package_catalog_entry(code, "combo") or item
+        label = package_i18n_entry_label(entry, code, "combo", lang)
+        group_label = package_i18n_group_label(str(entry.get("group") or ""), lang)
         rows.append(f"• <b>{html.escape(label)}</b> — {html.escape(group_label)}")
     rows.extend([
         "",
-        "Mỗi combo chỉ mua 1 lần/tháng. Cần combo riêng thì bấm <b>📩 Cần gói lớn hơn</b>.",
+        tail,
     ])
     return rows
 
@@ -196598,11 +197109,13 @@ def pricing_detail_keyboard(section: str = "main", lang: str = "vi") -> InlineKe
     return InlineKeyboardMarkup(rows)
 
 def pricing_combo_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = pricing_copy_language(lang)
     rows: list[list[InlineKeyboardButton]] = []
     pending: list[InlineKeyboardButton] = []
     for item in public_video_combo_pricing_payload():
         code = str(item.get("code") or "").strip()
-        label = str(item.get("button_label") or item.get("label") or code)
+        entry = package_catalog_entry(code, "combo") or item
+        label = package_i18n_button_label(entry, code, "combo", lang)
         callback = f"pkgcombo:combo_detail:{code}" if code else "menu|support"
         pending.append(InlineKeyboardButton(label, callback_data=callback))
         if len(pending) == 2:
@@ -196610,12 +197123,18 @@ def pricing_combo_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             pending = []
     if pending:
         rows.append(pending)
-    rows.append([InlineKeyboardButton("📩 Cần combo riêng", callback_data="pkgcombo:large_order:combo_group"), InlineKeyboardButton("⬅️ Gói / Combo", callback_data="pkgcombo:home")])
-    rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    if lang == "zh":
+        labels = ("📩 定制组合", "⬅️ 套餐 / 组合", "🏠 主菜单")
+    elif lang == "en":
+        labels = ("📩 Custom combo", "⬅️ Plans / Combos", "🏠 Main menu")
+    else:
+        labels = ("📩 Cần combo riêng", "⬅️ Gói / Combo", "🏠 Menu chính")
+    rows.append([InlineKeyboardButton(labels[0], callback_data="pkgcombo:large_order:combo_group"), InlineKeyboardButton(labels[1], callback_data="pkgcombo:home")])
+    rows.append([InlineKeyboardButton(labels[2], callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def my_packages_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    lang = normalize_user_language(lang) or "vi"
+    lang = pricing_copy_language(lang)
     if lang == "zh":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 刷新", callback_data="pricing|my_packages"), InlineKeyboardButton("🎁 购买组合套餐", callback_data="pricing|combo")],
@@ -196699,32 +197218,45 @@ def pricing_plans_lines() -> list[str]:
     ])
     return rows
 
-def pricing_task_package_group_lines(group: str) -> list[str]:
+def pricing_task_package_group_lines(group: str, lang: str = "vi") -> list[str]:
+    lang = pricing_copy_language(lang)
     group = str(group or "").strip().lower()
     entries = public_task_package_entries(group)
     if not entries:
-        return pricing_plans_lines()
-    group_label = package_task_group_label(group)
-    rows = [
-        f"{html.escape(group_label)} <b>TOAN AAS</b>",
-        "",
-        "Chọn gói phù hợp nhu cầu. Chi tiết giá/quyền lợi hiện ở màn từng gói.",
-    ]
-    labels = [str(entry.get("label") or entry.get("button_label") or code) for code, entry in entries]
+        return pricing_plans_lines_i18n(lang)
+    group_label = package_i18n_group_label(group, lang)
+    if lang == "zh":
+        rows = [f"{html.escape(group_label)} <b>TOAN AAS</b>", "", "选择符合需求的套餐；每个套餐页面显示当前价格和权益。"]
+        available = "当前可用档位："
+        tail = "每个套餐每月最多购买一次；如需更大数量请点击 <b>📩 大额需求</b>。"
+    elif lang == "en":
+        rows = [f"{html.escape(group_label)} <b>TOAN AAS</b>", "", "Choose a plan that fits the need; each plan page shows its current price and benefits."]
+        available = "Available plans:"
+        tail = "Each plan can be purchased once per month; use <b>📩 Larger order</b> for more capacity."
+    else:
+        rows = [
+            f"{html.escape(group_label)} <b>TOAN AAS</b>",
+            "",
+            "Chọn gói phù hợp nhu cầu. Chi tiết giá/quyền lợi hiện ở màn từng gói.",
+        ]
+        available = "Các mức đang có:"
+        tail = "Mỗi gói chỉ mua 1 lần/tháng. Cần lớn hơn thì bấm <b>📩 Cần gói lớn hơn</b>."
+    labels = [package_i18n_entry_label(entry, code, "monthly", lang) for code, entry in entries]
     if labels:
-        rows.extend(["", "Các mức đang có:"])
+        rows.extend(["", available])
         rows.extend(f"• {html.escape(label)}" for label in labels)
     rows.extend([
         "",
-        "Mỗi gói chỉ mua 1 lần/tháng. Cần lớn hơn thì bấm <b>📩 Cần gói lớn hơn</b>.",
+        tail,
     ])
     return rows
 
 def pricing_task_package_group_keyboard(group: str, lang: str = "vi") -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     pending: list[InlineKeyboardButton] = []
+    lang = pricing_copy_language(lang)
     for code, entry in public_task_package_entries(group):
-        label = str(entry.get("button_label") or entry.get("label") or code)
+        label = package_i18n_button_label(entry, code, "monthly", lang)
         pending.append(InlineKeyboardButton(label, callback_data=f"pkgcombo:detail:{code}"))
         if len(pending) == 2:
             rows.append(pending)
@@ -196732,8 +197264,14 @@ def pricing_task_package_group_keyboard(group: str, lang: str = "vi") -> InlineK
     if pending:
         rows.append(pending)
     normalized_group = pkgcombo_normalize_group(group) or "home"
-    rows.append([InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data=pkgcombo_large_order_callback("group", group=normalized_group)), InlineKeyboardButton("⬅️ Gói / Combo", callback_data="pkgcombo:home")])
-    rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    if lang == "zh":
+        labels = ("📩 大额需求", "⬅️ 套餐 / 组合", "🏠 主菜单")
+    elif lang == "en":
+        labels = ("📩 Larger order", "⬅️ Plans / Combos", "🏠 Main menu")
+    else:
+        labels = ("📩 Cần gói lớn hơn", "⬅️ Gói / Combo", "🏠 Menu chính")
+    rows.append([InlineKeyboardButton(labels[0], callback_data=pkgcombo_large_order_callback("group", group=normalized_group)), InlineKeyboardButton(labels[1], callback_data="pkgcombo:home")])
+    rows.append([InlineKeyboardButton(labels[2], callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def vip_services_lines() -> list[str]:
@@ -196767,7 +197305,7 @@ def vip_services_lines() -> list[str]:
     ]
 
 def member_policy_lines(lang: str = "vi") -> list[str]:
-    lang = normalize_user_language(lang) or "vi"
+    lang = pricing_copy_language(lang)
     if lang == "zh":
         return [
             "👑 <b>TOAN AAS 会员等级</b>",
@@ -196785,10 +197323,6 @@ def member_policy_lines(lang: str = "vi") -> list[str]:
             "",
             "<b>生日与忠诚度权益</b>",
             "• 符合政策条件时，可按等级获得生日或忠诚度权益。",
-            "",
-            "<b>充值活动</b>",
-            "• 越南本地充值活动仅适用于越南 PayOS/银行转账。",
-            "• 国际付款不适用越南本地充值奖励或首次活动奖励。",
         ]
     if lang == "en":
         return [
@@ -196807,10 +197341,6 @@ def member_policy_lines(lang: str = "vi") -> list[str]:
             "",
             "<b>Birthday and loyalty benefits</b>",
             "• Eligible benefits may apply according to the current member policy.",
-            "",
-            "<b>Domestic deposit campaigns</b>",
-            "• Vietnam domestic campaigns apply only to Vietnam PayOS/bank transfers.",
-            "• International payments do not receive Vietnam domestic deposit or launch bonuses.",
         ]
     return [
         "👑 <b>THÀNH VIÊN TOAN AAS</b>",
@@ -196956,18 +197486,27 @@ def pricing_main_lines_i18n(lang: str = "vi") -> list[str]:
 
 def pricing_xu_lines_i18n(lang: str = "vi", user_id=None) -> list[str]:
     lang = normalize_user_language(lang) or "vi"
-    if lang == "vi":
-        if user_id is not None and not user_is_vietnam_market(user_id):
+    if user_id is not None and not user_is_vietnam_market(user_id):
+        if lang == "zh":
             return [
-                "💰 <b>BẢNG GIÁ XU QUỐC TẾ</b>",
+                "💰 <b>国际 Xu 充值</b>",
                 "",
-                "10.000đ = 100 Xu dịch vụ theo quy đổi nội bộ.",
-                "Các mệnh giá khác nhận Xu gốc theo bảng giá.",
+                "CNY 充值可使用 ZaloPay/manual 或 Binance / USDT TRC20。",
+                "确认前会显示经核验的基础 Xu。",
                 "",
-                "Tài khoản quốc tế không áp dụng ưu đãi nạp nội địa Việt Nam và chỉ nhận Xu gốc.",
-                "Không hiển thị bonus nạp nội địa; ưu đãi khác chỉ áp dụng khi đúng điều kiện.",
-                "Hạng thành viên chỉ ảnh hưởng chiết khấu khi dùng dịch vụ, không làm tăng Xu nạp.",
+                "国际充值只获得经核验的基础 Xu；不适用越南国内充值赠 Xu、加赠或充值码。",
+                "符合条件的会员服务折扣仍然适用；会员等级不会增加充值 Xu。",
             ]
+        return [
+            "💰 <b>International Xu Top-up</b>",
+            "",
+            "USD top-up: USDT TRC20 only.",
+            "Verified base Xu is shown before confirmation.",
+            "",
+            "International top-ups receive only verified base Xu. Vietnam domestic bonuses, extra Xu and top-up codes do not apply.",
+            "Eligible membership service discounts remain; membership tier does not increase top-up Xu.",
+        ]
+    if lang == "vi":
         return pricing_xu_lines()
     if lang == "zh":
         return [
@@ -197034,7 +197573,7 @@ def pricing_plans_lines_i18n(lang: str = "vi") -> list[str]:
 async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
     try:
-        await send_pricing_lines(update.message, pricing_hub_lines(lang, update.effective_user.id if update.effective_user else None), pricing_main_keyboard(lang), limit=3600)
+        await send_pricing_lines(update.message, pricing_hub_lines(lang, update.effective_user.id if update.effective_user else None), pricing_main_keyboard(lang, update.effective_user.id if update.effective_user else None), limit=3600)
     except Exception as e:
         logger.warning("Pricing command failed | %s", sanitize_log_text(str(e))[:240])
         await update.message.reply_text("⚠️ Bảng giá đang tải lỗi tạm thời. Bot chưa trừ Xu. Vui lòng thử lại sau.")
@@ -197076,12 +197615,55 @@ def plan_purchase_keyboard(checkout_url: str = "") -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
-def package_purchase_detail_lines(package_type: str, code: str) -> list[str]:
+def package_purchase_detail_lines(package_type: str, code: str, lang: str = "vi") -> list[str]:
     package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package"} else "combo"
     code = str(code or "").strip().lower()
+    lang = pricing_copy_language(lang)
     entry = package_catalog_entry(code, package_type)
     if not entry:
+        if lang == "zh":
+            return ["⚠️ <b>无效套餐</b>", "", "机器人尚未创建订单，也未扣除 Xu。"]
+        if lang == "en":
+            return ["⚠️ <b>Invalid package</b>", "", "No order was created and no Xu was charged."]
         return ["⚠️ <b>Gói không hợp lệ</b>", "", "Bot chưa tạo đơn và chưa trừ Xu."]
+    if lang != "vi":
+        quote = package_price_quote(package_type, code)
+        price = int(quote.get("price_vnd") or 0)
+        retail = int(quote.get("retail_vnd") or price)
+        discount = int(quote.get("discount_percent") or 0)
+        label = package_i18n_entry_label(entry, code, package_type, lang)
+        price_text = f"{price:,}đ".replace(",", ".") if price > 0 else package_i18n_price_text(package_type, code, lang)
+        retail_text = f"{retail:,}đ".replace(",", ".") if retail > 0 else package_i18n_price_text(package_type, code, lang)
+        benefits = package_i18n_items_summary(entry.get("items") or {}, lang)
+        duration_days = int(entry.get("default_days") or 0) if package_type == "monthly" else 0
+        auto_checkout = package_entry_auto_checkout_enabled(entry)
+        if lang == "zh":
+            rows = [
+                f"🎁 <b>{html.escape(label)}</b>", "", "<b>权益</b>", f"• {html.escape(benefits)}",
+                f"• 有效期：<b>{duration_days} 天</b>" if duration_days else "• 按组合显示的权益使用。",
+                "• 每月最多购买 1 次。", "", "<b>价格</b>",
+                f"• 原价：<s>{html.escape(retail_text)}</s>", f"• 折扣：<b>{discount}%</b>",
+                f"• 应付价格：<b>{html.escape(price_text)}</b>",
+                "• 税费或附加费用会在结算页（如适用）明确显示。",
+            ]
+            if auto_checkout:
+                rows.extend(["", "确认后权益会显示在 <b>📦 我的套餐</b>。", "是否继续购买此套餐？"])
+            else:
+                rows.extend(["", "状态：<b>需要管理员确认 / 尚未开放自动结算</b>。", "机器人尚未创建订单、扣除 Xu 或激活此套餐。"])
+            return rows
+        rows = [
+            f"🎁 <b>{html.escape(label)}</b>", "", "<b>Benefits</b>", f"• {html.escape(benefits)}",
+            f"• Valid for: <b>{duration_days} days</b>" if duration_days else "• Used according to the benefits shown for this combo.",
+            "• Maximum purchase: <b>once per month</b>.", "", "<b>Price</b>",
+            f"• Retail price: <s>{html.escape(retail_text)}</s>", f"• Discount: <b>{discount}%</b>",
+            f"• Payable price: <b>{html.escape(price_text)}</b>",
+            "• Taxes or additional fees are shown clearly at checkout where applicable.",
+        ]
+        if auto_checkout:
+            rows.extend(["", "After confirmation, the entitlement appears in <b>📦 My packages</b>.", "Would you like to continue with this package?"])
+        else:
+            rows.extend(["", "Status: <b>admin confirmation required / automatic checkout not open</b>.", "No order was created, no Xu was charged, and this package was not activated."])
+        return rows
     kind = package_purchase_kind_label(package_type)
     label = str(entry.get("label") or code)
     quote = package_price_quote(package_type, code)
@@ -197150,23 +197732,37 @@ def package_purchase_detail_lines(package_type: str, code: str) -> list[str]:
     ]
     return [line for line in rows if line != ""]
 
-def package_purchase_manual_keyboard(package_type: str = "combo", code: str = "") -> InlineKeyboardMarkup:
+def package_purchase_manual_keyboard(package_type: str = "combo", code: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = pricing_copy_language(lang)
     back_action = package_detail_back_callback(package_type, code)
     origin = "detail" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package"} else "combo_detail"
+    if lang == "zh":
+        labels = ("📩 发送管理员请求", "📞 联系管理员", "🔙 返回", "🏠 主菜单")
+    elif lang == "en":
+        labels = ("📩 Send admin request", "📞 Contact admin", "🔙 Back", "🏠 Main menu")
+    else:
+        labels = ("📩 Gửi yêu cầu admin", "📞 Liên hệ admin", "🔙 Quay lại", "🏠 Menu chính")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📩 Gửi yêu cầu admin", callback_data=pkgcombo_large_order_callback(origin, package_type, code))],
-        [InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data=back_action), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(labels[0], callback_data=pkgcombo_large_order_callback(origin, package_type, code))],
+        [InlineKeyboardButton(labels[1], callback_data="menu|support")],
+        [InlineKeyboardButton(labels[2], callback_data=back_action), InlineKeyboardButton(labels[3], callback_data="menu|main")],
     ])
 
-def package_purchase_confirm_keyboard(package_type: str, code: str) -> InlineKeyboardMarkup:
+def package_purchase_confirm_keyboard(package_type: str, code: str, lang: str = "vi") -> InlineKeyboardMarkup:
     package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package"} else "combo"
     code = str(code or "").strip().lower()
+    lang = pricing_copy_language(lang)
     back_action = package_detail_back_callback(package_type, code)
+    if lang == "zh":
+        labels = ("✅ 确认购买", "⬅️ 取消", "📩 大额需求", "🏠 主菜单")
+    elif lang == "en":
+        labels = ("✅ Confirm purchase", "⬅️ Cancel", "📩 Larger order", "🏠 Main menu")
+    else:
+        labels = ("✅ Xác nhận thanh toán", "⬅️ Hủy", "📩 Cần gói lớn hơn", "🏠 Menu chính")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Xác nhận thanh toán", callback_data=f"pkgbuy|confirm|{package_type}|{code}"), InlineKeyboardButton("⬅️ Hủy", callback_data=back_action)],
-        [InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data=pkgcombo_large_order_callback("detail" if package_type == "monthly" else "combo_detail", package_type, code))],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(labels[0], callback_data=f"pkgbuy|confirm|{package_type}|{code}"), InlineKeyboardButton(labels[1], callback_data=back_action)],
+        [InlineKeyboardButton(labels[2], callback_data=pkgcombo_large_order_callback("detail" if package_type == "monthly" else "combo_detail", package_type, code))],
+        [InlineKeyboardButton(labels[3], callback_data="menu|main")],
     ])
 
 async def start_package_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, package_type: str, code: str, message=None):
@@ -197538,12 +198134,19 @@ def pkgcombo_large_order_keyboard(back_callback: str = "pkgcombo:home") -> Inlin
         [InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
-async def render_pkgcombo_detail(query, package_type: str, code: str):
+async def render_pkgcombo_detail(query, package_type: str, code: str, lang: str = "vi"):
+    lang = pricing_copy_language(lang)
     entry = package_catalog_entry(code, package_type)
     if not entry:
-        return await safe_edit_or_send(query, "⚠️ Gói không hợp lệ. Bot chưa tạo đơn.", parse_mode="HTML", reply_markup=pricing_packages_keyboard("vi"))
-    keyboard = package_purchase_manual_keyboard(package_type, code) if entry.get("manual") else package_purchase_confirm_keyboard(package_type, code)
-    return await edit_or_send_pricing_lines(query, package_purchase_detail_lines(package_type, code), keyboard)
+        if lang == "zh":
+            text = "⚠️ 套餐无效。机器人尚未创建订单。"
+        elif lang == "en":
+            text = "⚠️ Invalid package. No order was created."
+        else:
+            text = "⚠️ Gói không hợp lệ. Bot chưa tạo đơn."
+        return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=pricing_packages_keyboard(lang))
+    keyboard = package_purchase_manual_keyboard(package_type, code, lang) if entry.get("manual") else package_purchase_confirm_keyboard(package_type, code, lang)
+    return await edit_or_send_pricing_lines(query, package_purchase_detail_lines(package_type, code, lang), keyboard)
 
 async def render_pkgcombo_large_order(query, context: ContextTypes.DEFAULT_TYPE, origin_parts: list[str] | None = None):
     back_callback = pkgcombo_large_order_back_callback(origin_parts)
@@ -197575,13 +198178,13 @@ async def handle_pkgcombo_callback(update: Update, context: ContextTypes.DEFAULT
         if action == "back" and len(parts) >= 3:
             target = parts[2]
             if target == "group" and len(parts) >= 4:
-                return await edit_or_send_pricing_lines(query, pricing_task_package_group_lines(pkgcombo_normalize_group(parts[3])), pricing_task_package_group_keyboard(pkgcombo_normalize_group(parts[3]), lang))
+                return await edit_or_send_pricing_lines(query, pricing_task_package_group_lines(pkgcombo_normalize_group(parts[3]), lang), pricing_task_package_group_keyboard(pkgcombo_normalize_group(parts[3]), lang))
             if target == "combo_group":
-                return await edit_or_send_pricing_lines(query, pricing_combo_lines(), pricing_combo_keyboard(lang))
+                return await edit_or_send_pricing_lines(query, pricing_combo_lines(lang), pricing_combo_keyboard(lang))
             if target == "detail" and len(parts) >= 4:
-                return await render_pkgcombo_detail(query, "monthly", parts[3])
+                return await render_pkgcombo_detail(query, "monthly", parts[3], lang)
             if target == "combo_detail" and len(parts) >= 4:
-                return await render_pkgcombo_detail(query, "combo", parts[3])
+                return await render_pkgcombo_detail(query, "combo", parts[3], lang)
         return await edit_or_send_pricing_lines(query, pricing_packages_lines(lang), pricing_packages_keyboard(lang))
     if action == "notes":
         return await edit_or_send_pricing_lines(query, pricing_pkgcombo_notes_lines(lang), pricing_pkgcombo_notes_keyboard(lang))
@@ -197590,12 +198193,12 @@ async def handle_pkgcombo_callback(update: Update, context: ContextTypes.DEFAULT
     if action == "group":
         group = pkgcombo_normalize_group(parts[2] if len(parts) > 2 else "")
         if group == "combo":
-            return await edit_or_send_pricing_lines(query, pricing_combo_lines(), pricing_combo_keyboard(lang))
-        return await edit_or_send_pricing_lines(query, pricing_task_package_group_lines(group), pricing_task_package_group_keyboard(group, lang))
+            return await edit_or_send_pricing_lines(query, pricing_combo_lines(lang), pricing_combo_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_task_package_group_lines(group, lang), pricing_task_package_group_keyboard(group, lang))
     if action == "detail" and len(parts) >= 3:
-        return await render_pkgcombo_detail(query, "monthly", parts[2])
+        return await render_pkgcombo_detail(query, "monthly", parts[2], lang)
     if action == "combo_detail" and len(parts) >= 3:
-        return await render_pkgcombo_detail(query, "combo", parts[2])
+        return await render_pkgcombo_detail(query, "combo", parts[2], lang)
     if action == "pay" and len(parts) >= 3:
         return await start_package_purchase(update, context, "monthly", parts[2], message=query.message)
     if action == "combo_pay" and len(parts) >= 3:
@@ -197701,7 +198304,7 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     if query.from_user:
         clear_media_creator_pending_states(query.from_user.id)
     if action == "main":
-        return await edit_or_send_pricing_lines(query, pricing_hub_lines(lang, uid), pricing_main_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_hub_lines(lang, uid), pricing_main_keyboard(lang, uid))
     if action == "promotions":
         return await edit_or_send_pricing_lines(query, billing_promotions_lines(lang, uid), billing_promotions_keyboard(lang, uid))
     if action == "promo_apply":
@@ -197713,58 +198316,62 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     if action == "catalog":
         return await edit_or_send_pricing_lines(query, pricing_catalog_lines(lang), pricing_catalog_keyboard(lang))
     if action == "total":
-        return await edit_or_send_pricing_lines(query, pricing_main_lines(), pricing_catalog_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_main_lines(lang), pricing_catalog_keyboard(lang))
     if action == "packages":
         return await edit_or_send_pricing_lines(query, pricing_packages_lines(lang), pricing_packages_keyboard(lang))
     if action == "package_summary":
-        return await edit_or_send_pricing_lines(query, pricing_package_summary_lines(), pricing_package_summary_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_package_summary_lines(lang), pricing_package_summary_keyboard(lang))
     if action.startswith("package_group_"):
         group = action.replace("package_group_", "", 1)
-        return await edit_or_send_pricing_lines(query, pricing_task_package_group_lines(group), pricing_task_package_group_keyboard(group, lang))
+        return await edit_or_send_pricing_lines(query, pricing_task_package_group_lines(group, lang), pricing_task_package_group_keyboard(group, lang))
     if action == "need_larger":
         return await render_pkgcombo_large_order(query, context, ["home"])
     if action == "xu":
         return await edit_or_send_pricing_lines(query, pricing_xu_lines_i18n(lang, uid), pricing_xu_keyboard(lang))
     if action == "free":
-        return await edit_or_send_pricing_lines(query, pricing_free_lines(), pricing_detail_keyboard("free", lang))
+        return await edit_or_send_pricing_lines(query, pricing_free_lines(lang), pricing_detail_keyboard("free", lang))
     if action == "music":
-        return await edit_or_send_pricing_lines(query, pricing_music_lines(), pricing_detail_keyboard("music", lang))
+        return await edit_or_send_pricing_lines(query, pricing_music_lines(lang), pricing_detail_keyboard("music", lang))
     if action == "subtitle":
-        return await edit_or_send_pricing_lines(query, pricing_subtitle_lines(), pricing_detail_keyboard("subtitle", lang))
+        return await edit_or_send_pricing_lines(query, pricing_subtitle_lines(lang), pricing_detail_keyboard("subtitle", lang))
     if action == "guide":
+        guide_locale = public_pricing_locale(lang)
+        back_label = f"← {public_page_title('pricing', guide_locale)}"
         return await edit_or_send_pricing_lines(
             query,
-            pricing_guide_lines(),
-            guide_keyboard("", lang, back_callback="pricing|main", back_label="⬅️ Nạp Xu / Bảng giá"),
+            pricing_guide_lines(lang),
+            guide_keyboard("", lang, back_callback="pricing|main", back_label=back_label),
         )
     if action == "download_pricing":
+        pricing_locale = public_pricing_locale(lang)
         return await send_generated_markdown_document(
             query,
             PRICING_DOWNLOAD_FILENAME,
-            public_pricing_markdown(),
-            "📥 Bảng giá TOAN AAS",
+            public_pricing_markdown(public_pricing_context(), pricing_locale),
+            f"📥 {public_page_title('pricing', pricing_locale)}",
         )
     if action == "download_guide":
+        guide_locale = public_pricing_locale(lang)
         return await send_generated_markdown_document(
             query,
             GUIDE_DOWNLOAD_FILENAME,
-            public_guide_markdown(),
-            "📘 Hướng dẫn sử dụng TOAN AAS",
+            public_guide_markdown(guide_locale),
+            f"📘 {public_page_title('guide', guide_locale)}",
         )
     if action == "image":
-        return await edit_or_send_pricing_lines(query, pricing_image_lines(), pricing_detail_keyboard("image", lang))
+        return await edit_or_send_pricing_lines(query, pricing_image_lines(lang), pricing_detail_keyboard("image", lang))
     if action == "video":
-        return await edit_or_send_pricing_lines(query, pricing_video_lines(), pricing_detail_keyboard("video", lang))
+        return await edit_or_send_pricing_lines(query, pricing_video_lines(lang), pricing_detail_keyboard("video", lang))
     if action == "frame":
         return await edit_or_send_pricing_lines(query, pricing_frame_video_lines(), pricing_detail_keyboard("frame", lang))
     if action == "voice":
-        return await edit_or_send_pricing_lines(query, pricing_voice_lines(), pricing_detail_keyboard("voice", lang))
+        return await edit_or_send_pricing_lines(query, pricing_voice_lines(lang), pricing_detail_keyboard("voice", lang))
     if action == "docs":
-        return await edit_or_send_pricing_lines(query, pricing_docs_lines(), pricing_detail_keyboard("docs", lang))
+        return await edit_or_send_pricing_lines(query, pricing_docs_lines(lang), pricing_detail_keyboard("docs", lang))
     if action == "storage":
         return await edit_or_send_pricing_lines(query, pricing_storage_lines(), pricing_detail_keyboard("storage", lang))
     if action == "combo":
-        return await edit_or_send_pricing_lines(query, pricing_combo_lines(), pricing_combo_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_combo_lines(lang), pricing_combo_keyboard(lang))
     if action == "premium":
         return await edit_or_send_pricing_lines(query, pricing_premium_lines(), pricing_detail_keyboard("premium", lang))
     if action == "my_packages":
@@ -197774,7 +198381,7 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     if action == "vip":
         return await edit_or_send_pricing_lines(query, vip_services_lines(), vip_services_keyboard(lang))
     if action == "member":
-        return await edit_or_send_pricing_lines(query, public_pricing_lines("member", public_pricing_context()), member_policy_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, public_pricing_lines("member", public_pricing_context(), lang), member_policy_keyboard(lang))
     if action == "birthday":
         text = (
             "🎂 <b>Cập nhật ngày sinh</b>\n\n"
@@ -197786,7 +198393,7 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
         return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=member_policy_keyboard(lang))
     if action == "terms":
         return await edit_or_send_pricing_lines(query, pricing_terms_lines(), pricing_terms_keyboard(lang))
-    return await edit_or_send_pricing_lines(query, pricing_hub_lines(lang, uid), pricing_main_keyboard(lang))
+    return await edit_or_send_pricing_lines(query, pricing_hub_lines(lang, uid), pricing_main_keyboard(lang, uid))
 
 def parse_chat_pro_args(raw: str) -> dict:
     kv, remainder = parse_loose_kv_args(raw)
@@ -199399,7 +200006,8 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     USER_BILL_STATE.pop(uid, None)
-    domestic_market = user_is_vietnam_market(uid)
+    lang = get_user_language(uid) or "vi"
+    show_domestic_promotion = show_domestic_topup_promotion(uid, lang)
     record_usage_event(
         uid,
         username=update.effective_user.username or update.effective_user.first_name or "",
@@ -199411,7 +200019,7 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     credits, _, _ = get_user(uid, update.effective_user.first_name)
     pending = get_user_pending_promo(uid)
     pending_text = ""
-    if domestic_market and pending.get("promo"):
+    if show_domestic_promotion and pending.get("promo"):
         pending_text = (
             f"🎫 Mã đang áp dụng: <code>{html.escape(pending['promo']['code'])}</code> "
             f"({html.escape(promo_public_label(pending['promo']))})\n"
@@ -199422,7 +200030,7 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🇻🇳 <b>Chính sách khách Việt Nam:</b>\n"
         "Nạp VND nội địa từ 10.000đ: lần settled đầu tự động +30%, lần settled hai tự động +20%, không cần mã.\n"
         "Lần thứ ba trở đi không tự động thưởng; mã khác chỉ áp dụng khi có code hợp lệ.\n\n"
-        if domestic_market else
+        if show_domestic_promotion else
         "🌍 <b>Chính sách khách quốc tế:</b>\n"
         "Thanh toán quốc tế chỉ nhận Xu gốc; không hiển thị và không nhận bonus nạp nội địa Việt Nam.\n\n"
     )
@@ -199438,7 +200046,7 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     market_bonus_notice = (
         domestic_topup_bonus_notice()
-        if domestic_market
+        if show_domestic_promotion
         else (
             "Khách quốc tế chỉ nhận Xu gốc khi thanh toán quốc tế; "
             "không áp dụng hoặc hiển thị bonus nạp nội địa Việt Nam."
@@ -199453,7 +200061,7 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🎁 <b>Có mã ưu đãi khác?</b>\n"
             "Nhập mã admin công bố trước khi chọn mệnh giá nạp.\n"
             "Mỗi đơn chỉ áp dụng 1 mã, không cộng dồn.\n\n"
-            if domestic_market else ""
+            if show_domestic_promotion else ""
         )
         + f"{pending_text}"
         f"<b>🛒 MỆNH GIÁ NẠP XU:</b>\n"
@@ -199515,7 +200123,7 @@ async def cmd_thanhtoan_thucong(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         set_manual_bill_state(uid, order_code="MANUAL")
     await update.message.reply_text(
-        manual_payment_menu_text(uid),
+        manual_payment_menu_text(uid, get_user_language(uid)),
         parse_mode="HTML",
         reply_markup=manual_payment_menu_keyboard(uid),
     )
@@ -211851,6 +212459,7 @@ async def cmd_ref_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     lang = get_user_language(uid) or "vi"
+    show_domestic_promotion = show_domestic_topup_promotion(uid, lang)
     profile = get_member_profile(uid)
     admin_badge = admin_display_badge(uid)
     current_badge = get_role_badge(uid)
@@ -211870,7 +212479,7 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Chat Pro: miễn phí, không giới hạn\n"
             "• Quyền vận hành/admin tùy theo OWNER_IDS/ADMIN_IDS"
         )
-    promos = get_member_personal_promos(uid, include_used=False)
+    promos = get_member_personal_promos(uid, include_used=False) if show_domestic_promotion else []
     promo_line = (
         "\n".join(
             f"• <code>{html.escape(p['promo_code'])}</code> — +{p['bonus_percent']}% Xu, tối đa {p['cap_xu']} Xu"
@@ -211895,7 +212504,7 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Hạng thành viên không cộng thêm Xu định kỳ khi nạp tiền\n"
             "• Mệnh giá nạp 10k/20k/50k/100k/200k/500k nhận Xu gốc như nhau cho mọi khách"
         )
-    if lang == "en":
+    if pricing_copy_language(lang) == "en":
         next_text = (
             "You are at the highest member tier."
             if not profile["next_tier"]
@@ -211915,7 +212524,7 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• International payments do not receive Vietnam domestic deposit or launch bonuses.\n\n"
             "Policy details: <code>/vip_policy</code>"
         )
-    elif lang == "zh":
+    elif pricing_copy_language(lang) == "zh":
         next_text = (
             "你已达到最高会员等级。"
             if not profile["next_tier"]
@@ -211936,6 +212545,12 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "政策详情：<code>/vip_policy</code>"
         )
     else:
+        promo_section = (
+            "🎁 <b>Mã ưu đãi cá nhân</b>\n"
+            f"{promo_line}\n\n"
+            if show_domestic_promotion else ""
+        )
+        promo_command_line = "Mã cá nhân: <code>/my_promos</code>" if show_domestic_promotion else ""
         text = (
         "🪪 <b>THÀNH VIÊN TOAN AAS</b>\n\n"
         f"• 🪪 Cấp hiện tại: <b>{html.escape(current_badge)}</b>\n"
@@ -211950,19 +212565,18 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{service_line}\n\n"
         "Link giới thiệu:\n"
         f"<code>{html.escape(link)}</code>\n\n"
-        "🎁 <b>Mã ưu đãi cá nhân</b>\n"
-        f"{promo_line}\n\n"
+        f"{promo_section}"
         "🎂 <b>Sinh nhật</b>\n"
         f"{birthday_line}\n\n"
         "Xem thống kê: <code>/ref_stats</code>\n"
         "Bảng quyền lợi: <code>/vip_policy</code>\n"
-        "Mã cá nhân: <code>/my_promos</code>"
+        f"{promo_command_line}"
         )
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
-    if normalize_user_language(lang) in {"en", "zh"}:
+    if normalize_user_language(lang) != "vi":
         return await update.message.reply_text("\n".join(member_policy_lines(lang)), parse_mode="HTML")
     lines = [
         "🪪 <b>CHÍNH SÁCH THÀNH VIÊN TOAN AAS</b>",
@@ -250417,7 +251031,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_storage_addon_callback, pattern=r"^storage\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_memory_callback, pattern=r"^memory\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
-    tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|(?:[a-z]{2}|fil)|lang_more|back_lang)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_package_purchase_callback, pattern=r"^pkgbuy\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_pkgcombo_callback, pattern=r"^pkgcombo:"))
     tg_app.add_handler(CallbackQueryHandler(handle_pricing_callback, pattern=r"^pricing\|"))
