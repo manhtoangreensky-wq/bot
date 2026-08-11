@@ -86801,18 +86801,6 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
                     if is_vi
                     else f"• Processing time: <b>{elapsed_seconds} seconds</b>"
                 )
-        if (
-            str(canonical.get("engine_route") or "") == video_editengine1.ENGINE_ROUTE
-            and str(canonical.get("worker_owner") or "") == video_editengine1.OUTBOX_OWNER
-        ):
-            engine_label = html.escape(
-                f"{video_editengine1.ENGINE_ROUTE} · {video_editengine1.OUTBOX_OWNER}"
-            )
-            lines.append(
-                f"• Engine: <b>{engine_label}</b>"
-                if is_vi
-                else f"• Engine: <b>{engine_label}</b>"
-            )
         charge_state = str(canonical.get("charge_state") or "")
         charged_xu = strict_nonnegative_integer(canonical.get("charged_xu"))
         if confirmed_price_xu == 0 and charge_state == "not_charged":
