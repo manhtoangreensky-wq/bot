@@ -2268,10 +2268,12 @@ def test_video_ai_real_quote_includes_each_paid_addon_once_and_exact_total():
     quote = bot.video_ai_real_prompt_quote(state)
     assert quote["scene_count"] == 2
     assert quote["total_duration_seconds"] == 20
-    assert quote["base_xu"] == 680
+    assert quote["discount_percent"] == 10
+    assert quote["discount_xu"] == 74
+    assert quote["base_xu"] == 666
     assert quote["addons_xu"] == 610
-    assert quote["total_xu"] == 1290
-    assert quote["estimated_vnd"] == 129000
+    assert quote["total_xu"] == 1276
+    assert quote["estimated_vnd"] == 127600
     assert [(item["key"], item["price_xu"]) for item in quote["addons"]] == [
         ("music_ai", 160),
         ("subtitle_auto", 120),
