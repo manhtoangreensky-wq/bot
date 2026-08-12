@@ -1169,6 +1169,19 @@ _PUBLIC_ROOT_ACTION_COPY.update({
     "th": {"image_quick": "สร้างภาพด่วน", "image_prompt_from_image": "สร้างพรอมต์จากภาพ", "image_ai_edit": "แก้ไขด้วย AI", "image_edit": "แก้ไขภาพ", "notes_create": "สร้างบันทึก", "notes_saved": "บันทึกที่บันทึกไว้", "notes_reminder": "การแจ้งเตือน", "notes_save_document": "บันทึกเอกสาร", "notes_search": "ค้นหาบันทึก", "notes_delete": "ลบบันทึก", "notes_storage": "พื้นที่เก็บข้อมูลของฉัน", "notes_add_storage": "เพิ่มพื้นที่เก็บข้อมูล", "notes_clean_files": "ล้างไฟล์เก่า", "docs_tools": "เครื่องมือ PDF / Word", "docs_pdf_to_word": "แปลง PDF เป็น Word", "docs_image_to_pdf": "แปลงภาพเป็น PDF", "docs_compress_pdf": "บีบอัด PDF", "docs_split_pdf": "แยก PDF", "docs_merge_pdf": "รวม PDF", "docs_all_tools": "เครื่องมือเอกสารทั้งหมด", "translation_language": "แปลภาษา", "translation_subtitle_dubbing": "คำบรรยาย / พากย์", "translation_text": "ข้อความ", "translation_file": "แปลไฟล์", "translation_audio": "แปลเสียง", "translation_conversation": "การสนทนา", "translation_two_way": "สองทาง", "translation_auto": "แปลอัตโนมัติ", "translation_languages": "ภาษา", "translation_stop": "หยุดแปลอัตโนมัติ", "feedback_payment_topup": "เติมเงิน / ชำระเงิน", "feedback_image_error": "ปัญหาภาพ", "feedback_video_error": "ปัญหาวิดีโอ", "feedback_document_pdf": "เอกสาร / PDF", "feedback_package_combo": "แพ็กเกจ / คอมโบ", "feedback_refund": "Xu / คืนเงิน", "feedback_feature_request": "ข้อเสนอแนะฟีเจอร์", "feedback_other": "ปัญหาอื่น"},
 })
 
+# Admin-only archive access uses the existing Notes/Documents route.  Its label
+# is public presentation only; the callback stays canonical for the protected
+# archive workflow.
+for _locale, _label in {
+    "vi": "Hồ sơ nội bộ", "en": "Internal archive", "zh": "内部档案",
+    "es": "Archivo interno", "pt": "Arquivo interno", "fr": "Archives internes",
+    "de": "Internes Archiv", "ja": "社内アーカイブ", "ko": "내부 보관함",
+    "hi": "आंतरिक अभिलेख", "ar": "الأرشيف الداخلي", "ru": "Внутренний архив",
+    "tr": "Dahili arşiv", "th": "คลังเอกสารภายใน", "fil": "Panloob na arkibo",
+    "it": "Archivio interno", "id": "Arsip internal",
+}.items():
+    _PUBLIC_ROOT_ACTION_COPY[_locale]["internal_archive"] = _label
+
 
 # Feedback category selection is presentation-only.  The stable category codes
 # remain owned by the ticket flow; this table only prevents a chosen customer

@@ -114093,7 +114093,7 @@ def main_memory_keyboard(lang: str = "vi", user_id=0) -> InlineKeyboardMarkup:
         (f"🧰 {copy['docs_tools']}", "menu|main_docs"),
     ]
     if is_admin_user(user_id):
-        buttons.append(("🏢 Hồ sơ nội bộ" if lang == "vi" else "🏢 Internal archive", "menu|internal_archive"))
+        buttons.append((f"🏢 {copy['internal_archive']}", "menu|internal_archive"))
     return build_2col_keyboard(buttons, nav_back=(f"⬅️ {copy['back']}", "menu|main"), lang=lang, main_label=f"🏠 {copy['main_menu']}")
 
 def main_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
