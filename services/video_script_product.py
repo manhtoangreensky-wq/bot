@@ -574,12 +574,15 @@ def build_ai_prompt(state: Mapping[str, Any]) -> str:
     if not content:
         raise ValueError("script_content_required")
     revision = max(1, int(draft.get("script_ai_revision") or 1))
+    selected_goal = _clean(draft.get("script_goal_label"))
+    if not selected_goal:
+        selected_goal = goal_label(str(draft.get("script_goal") or ""))
     return (
         "Bạn là biên kịch Video AI của TOAN AAS. Hãy tạo MỘT KỊCH BẢN HOÀN CHỈNH bằng tiếng Việt, "
         "không tạo video, không tóm tắt đầu vào, không bỏ chi tiết và không dùng tên model/provider. "
         "Đây là kịch bản dài nhiều cảnh, KHÔNG phải một prompt video một cảnh và KHÔNG phải tập hợp các prompt rời.\n\n"
         f"Lần tạo: {revision}\n"
-        f"Mục tiêu: {goal_label(str(draft.get('script_goal') or ''))}\n"
+        f"Mục tiêu: {selected_goal}\n"
         f"Nội dung/chủ đề/sản phẩm: {content}\n"
         f"Loại nội dung: {_clean(profile.get('public_name')) or 'Tự nhập'}\n"
         f"Cấu trúc gợi ý: {' → '.join(str(item) for item in profile.get('default_scene_pattern') or []) or 'Mở → phát triển → cao trào → kết'}\n"

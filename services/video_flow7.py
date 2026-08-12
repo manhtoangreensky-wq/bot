@@ -63,9 +63,8 @@ PRODUCT_SPECS = {
     },
     "script_to_video": {
         "sequence": (
-            "scene_count", "aspect_ratio", "content_source",
-            "technical_profile_if_selected", "content_choice", "character",
-            "reference_assets", "style", "audio", "scene_plan",
+            "script_source", "content_setup_if_ai", "full_script_review",
+            "scene_boundary_review", "aspect_ratio", "scene_plan", "scene_review",
             "image_prompts_if_needed", "video_prompts", "addons", "finish",
             "invoice", "confirm",
         ),
