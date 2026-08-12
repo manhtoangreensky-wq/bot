@@ -1509,6 +1509,43 @@ def test_summary_opens_addon_without_claiming_runtime_voice_readiness(monkeypatc
     assert query.answers[-1].get("show_alert") is not True
 
 
+def test_duplicate_summary_callback_cannot_rerender_review_over_addon() -> None:
+    user_id = 970086
+    context = SimpleNamespace(user_data={})
+    state = _ready_supported_video_planning_state()
+    state["owner_user_id"] = user_id
+    state["owner_chat_id"] = user_id
+    state["navigation"]["current_step"] = "summary"
+    bot.save_video_uiflow3_state(context, state)
+
+    _text, markup = bot.video_uiflow3_screen_payload(state)
+    wire_data = next(
+        callback
+        for callback in _wire_callbacks(markup)
+        if callback.endswith("|summary_done")
+    )
+    query = FakeQuery(user_id, wire_data, "summary-live-duplicate", chat_id=user_id)
+    update = SimpleNamespace(callback_query=query)
+
+    asyncio.run(bot.handle_video_uiflow3_callback(update, context))
+    assert query.edits and "Add-on video" in query.edits[-1]["text"]
+    rendered_count = len(query.edits)
+
+    asyncio.run(bot.handle_video_uiflow3_callback(update, context))
+
+    assert len(query.edits) == rendered_count
+    assert query.answers[-1].get("text") == "Đã nhận lựa chọn này."
+    current = bot.video_uiflow3_state(context)
+    assert current[bot.VIDEO_TAIL9_STATE_KEY]["status_stage"] == "audio_addons"
+    assert current["side_effects"] == {
+        "provider_calls": 0,
+        "jobs": 0,
+        "outbox": 0,
+        "wallet_mutations": 0,
+        "xu_charged": 0,
+    }
+
+
 def test_existing_source_asset_is_reusable_from_reference_editor() -> None:
     user_id = 970083
     context = SimpleNamespace(user_data={})

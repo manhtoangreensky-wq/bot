@@ -79928,16 +79928,16 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         if owner_chat_id and callback_chat_id != owner_chat_id:
             await query.answer("Nút này không thuộc cuộc trò chuyện đang sở hữu bản kế hoạch.", show_alert=True)
             return True
-        if action != "resume" and (
-            not callback_token
-            or not hmac.compare_digest(callback_token, video_uiflow3.draft_token(state))
-        ):
-            await query.answer("Nút này thuộc bản kế hoạch cũ. Bản hiện tại vẫn được giữ nguyên.", show_alert=True)
-            return await video_uiflow3_render(query, context, state)
 
     state, claimed = video_uiflow3.claim_callback(state, str(getattr(query, "id", "") or ""))
     if not claimed:
         await query.answer("Đã nhận lựa chọn này.")
+        return True
+    if action != "entry" and action != "resume" and (
+        not callback_token
+        or not hmac.compare_digest(callback_token, video_uiflow3.draft_token(state))
+    ):
+        await query.answer("Nút này thuộc bản kế hoạch cũ. Bản hiện tại vẫn được giữ nguyên.", show_alert=True)
         return await video_uiflow3_render(query, context, state)
     save_video_uiflow3_state(context, state)
 

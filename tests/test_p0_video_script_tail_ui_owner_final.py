@@ -141,6 +141,18 @@ def test_ai_real_reuses_the_existing_tail_invoice_confirm_and_status_flow() -> N
     assert "video_b14_send_or_edit_status_panel" in status_renderer
 
 
+def test_uiflow3_duplicate_callback_is_consumed_before_stale_snapshot_render() -> None:
+    callback = _function_source("handle_video_uiflow3_callback")
+    claim = callback.index("state, claimed = video_uiflow3.claim_callback")
+    duplicate_guard = callback.index("if not claimed:", claim)
+    stale_guard = callback.index("not hmac.compare_digest")
+    duplicate_block = callback[duplicate_guard:stale_guard]
+
+    assert claim < duplicate_guard < stale_guard
+    assert "return True" in duplicate_block
+    assert "video_uiflow3_render" not in duplicate_block
+
+
 def test_selective_video_products_share_the_complete_tail_without_merging_product_flows() -> None:
     shared_tail = BOT_SOURCE[
         BOT_SOURCE.index("VIDEO_UIFLOW3_SHARED_TAIL_PRODUCTS =") :
