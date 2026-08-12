@@ -405,6 +405,29 @@ _PUBLIC_HUB_AUXILIARY_COPY = {
 }
 
 
+# Root-menu navigation is presentation-only.  These labels share the existing
+# public-copy authority so every supported locale keeps the same callback map.
+_PUBLIC_ROOT_NAVIGATION_COPY = {
+    "vi": {"free_tools_label": "Công cụ miễn phí", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio âm thanh", "translation_label": "Dịch thuật", "notes_docs_label": "Ghi chú / Tài liệu", "topup_pricing_label": "Nạp Xu / Bảng giá", "feedback_label": "Góp ý / Báo lỗi", "admin_label": "Admin"},
+    "en": {"free_tools_label": "Free tools", "chat_pro_label": "Chat Pro", "audio_studio_label": "Audio Studio", "translation_label": "Translation", "notes_docs_label": "Notes / Documents", "topup_pricing_label": "Top up Xu / Pricing", "feedback_label": "Feedback / Report a bug", "admin_label": "Admin"},
+    "zh": {"free_tools_label": "免费工具", "chat_pro_label": "专业聊天", "audio_studio_label": "音频工作室", "translation_label": "翻译", "notes_docs_label": "笔记 / 文档", "topup_pricing_label": "充值 Xu / 价格", "feedback_label": "反馈 / 报错", "admin_label": "管理员"},
+    "es": {"free_tools_label": "Herramientas gratuitas", "chat_pro_label": "Chat Pro", "audio_studio_label": "Estudio de audio", "translation_label": "Traducción", "notes_docs_label": "Notas / Documentos", "topup_pricing_label": "Recargar Xu / Precios", "feedback_label": "Opiniones / Informar de un error", "admin_label": "Administrador"},
+    "pt": {"free_tools_label": "Ferramentas gratuitas", "chat_pro_label": "Chat Pro", "audio_studio_label": "Estúdio de áudio", "translation_label": "Tradução", "notes_docs_label": "Notas / Documentos", "topup_pricing_label": "Recarregar Xu / Preços", "feedback_label": "Comentários / Reportar erro", "admin_label": "Administrador"},
+    "fr": {"free_tools_label": "Outils gratuits", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio audio", "translation_label": "Traduction", "notes_docs_label": "Notes / Documents", "topup_pricing_label": "Recharger Xu / Tarifs", "feedback_label": "Avis / Signaler un bug", "admin_label": "Administrateur"},
+    "de": {"free_tools_label": "Kostenlose Tools", "chat_pro_label": "Chat Pro", "audio_studio_label": "Audiostudio", "translation_label": "Übersetzung", "notes_docs_label": "Notizen / Dokumente", "topup_pricing_label": "Xu aufladen / Preise", "feedback_label": "Feedback / Fehler melden", "admin_label": "Admin"},
+    "ja": {"free_tools_label": "無料ツール", "chat_pro_label": "Chat Pro", "audio_studio_label": "オーディオスタジオ", "translation_label": "翻訳", "notes_docs_label": "メモ / ドキュメント", "topup_pricing_label": "Xu をチャージ / 料金", "feedback_label": "ご意見 / 不具合を報告", "admin_label": "管理者"},
+    "ko": {"free_tools_label": "무료 도구", "chat_pro_label": "Chat Pro", "audio_studio_label": "오디오 스튜디오", "translation_label": "번역", "notes_docs_label": "메모 / 문서", "topup_pricing_label": "Xu 충전 / 요금", "feedback_label": "의견 / 오류 신고", "admin_label": "관리자"},
+    "hi": {"free_tools_label": "निःशुल्क उपकरण", "chat_pro_label": "Chat Pro", "audio_studio_label": "ऑडियो स्टूडियो", "translation_label": "अनुवाद", "notes_docs_label": "नोट्स / दस्तावेज़", "topup_pricing_label": "Xu टॉप-अप / मूल्य", "feedback_label": "सुझाव / त्रुटि रिपोर्ट", "admin_label": "प्रशासक"},
+    "ar": {"free_tools_label": "أدوات مجانية", "chat_pro_label": "Chat Pro", "audio_studio_label": "استوديو الصوت", "translation_label": "الترجمة", "notes_docs_label": "ملاحظات / مستندات", "topup_pricing_label": "شحن Xu / الأسعار", "feedback_label": "ملاحظات / بلاغ خطأ", "admin_label": "المشرف"},
+    "ru": {"free_tools_label": "Бесплатные инструменты", "chat_pro_label": "Chat Pro", "audio_studio_label": "Аудиостудия", "translation_label": "Перевод", "notes_docs_label": "Заметки / Документы", "topup_pricing_label": "Пополнить Xu / Цены", "feedback_label": "Отзыв / Сообщить об ошибке", "admin_label": "Администратор"},
+    "tr": {"free_tools_label": "Ücretsiz araçlar", "chat_pro_label": "Chat Pro", "audio_studio_label": "Ses stüdyosu", "translation_label": "Çeviri", "notes_docs_label": "Notlar / Belgeler", "topup_pricing_label": "Xu yükle / Fiyatlar", "feedback_label": "Geri bildirim / Hata bildir", "admin_label": "Yönetici"},
+    "th": {"free_tools_label": "เครื่องมือฟรี", "chat_pro_label": "Chat Pro", "audio_studio_label": "สตูดิโอเสียง", "translation_label": "แปลภาษา", "notes_docs_label": "บันทึก / เอกสาร", "topup_pricing_label": "เติม Xu / ราคา", "feedback_label": "ข้อเสนอแนะ / แจ้งข้อผิดพลาด", "admin_label": "ผู้ดูแลระบบ"},
+    "fil": {"free_tools_label": "Libreng mga tool", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio ng audio", "translation_label": "Pagsasalin", "notes_docs_label": "Mga tala / Dokumento", "topup_pricing_label": "Mag-top-up ng Xu / Mga presyo", "feedback_label": "Puna / Mag-ulat ng bug", "admin_label": "Administrador"},
+    "it": {"free_tools_label": "Strumenti gratuiti", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio audio", "translation_label": "Traduzione", "notes_docs_label": "Note / Documenti", "topup_pricing_label": "Ricarica Xu / Prezzi", "feedback_label": "Feedback / Segnala un errore", "admin_label": "Amministratore"},
+    "id": {"free_tools_label": "Alat gratis", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio audio", "translation_label": "Terjemahan", "notes_docs_label": "Catatan / Dokumen", "topup_pricing_label": "Isi ulang Xu / Harga", "feedback_label": "Masukan / Laporkan bug", "admin_label": "Admin"},
+}
+
+
 _PUBLIC_PACKAGE_NAVIGATION_COPY = {
     "es": {"monthly_plans": "Planes mensuales", "finished_combos": "Combos completos", "my_packages": "Mis paquetes", "large_order": "Pedido grande", "notes": "Notas", "refresh": "Actualizar", "confirm_purchase": "Confirmar compra"},
     "pt": {"monthly_plans": "Planos mensais", "finished_combos": "Combos completos", "my_packages": "Meus pacotes", "large_order": "Pedido maior", "notes": "Notas", "refresh": "Atualizar", "confirm_purchase": "Confirmar compra"},
@@ -450,6 +473,7 @@ def public_hub_copy(lang: str | None = None) -> dict[str, str]:
     locale = public_copy_locale(lang)
     copy = dict(_PUBLIC_HUB_COPY[locale])
     copy.update(_PUBLIC_HUB_AUXILIARY_COPY[locale])
+    copy.update(_PUBLIC_ROOT_NAVIGATION_COPY[locale])
     copy.update(_PUBLIC_PACKAGE_NAVIGATION_COPY.get(locale, {}))
     return copy
 
