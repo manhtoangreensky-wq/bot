@@ -9,8 +9,11 @@ provider-free and has no database, wallet or filesystem side effects.
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import re
 from typing import Any, Iterable
+
+from services import video_script_product
 
 
 MIN_SCENES = 1
@@ -304,20 +307,69 @@ def select_single(items: Iterable[dict[str, Any]], selected_id: str) -> list[dic
 
 
 def parse_script_proposal(script: str) -> dict[str, Any]:
-    """Propose scene boundaries without silently accepting or dropping text."""
+    """Propose 2-20 contiguous scene ranges with exact source coverage."""
 
-    source = str(script or "").strip()
-    if not source:
-        return {"source_text": "", "proposed_scenes": [], "proposed_scene_count": 0, "scene_count_confirmed": False}
-    chunks = [part.strip() for part in re.split(r"(?:\r?\n){1,}", source) if part.strip()]
-    if not chunks:
-        chunks = [source]
+    return video_script_product.parse_script(str(script or ""))
+
+
+def script_contract_gate(context: dict[str, Any] | None) -> dict[str, Any]:
+    """Validate the approved script without normalizing or dropping one byte."""
+
+    def as_int(value: Any, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    state = dict(context or {})
+    source = str(state.get("manual_script_raw") or state.get("script_text") or "")
+    scenes = [str(item) for item in state.get("parsed_script_scenes") or []]
+    ranges = [
+        dict(item)
+        for item in state.get("parsed_script_ranges") or []
+        if isinstance(item, dict)
+    ]
+    coverage = dict(state.get("script_coverage") or {})
+    scene_count = as_int(state.get("scene_count"), 0)
+    if not source.strip():
+        return {"ok": False, "blocker": "script_missing"}
+    if not video_script_product.MIN_SCENES <= scene_count <= video_script_product.MAX_SCENES:
+        return {"ok": False, "blocker": "script_scene_count_invalid"}
+    if not bool(state.get("scene_count_confirmed")):
+        return {"ok": False, "blocker": "script_scene_count_not_confirmed"}
+    if len(scenes) != scene_count or len(ranges) != scene_count:
+        return {"ok": False, "blocker": "script_coverage_incomplete"}
+
+    cursor = 0
+    for index, item in enumerate(ranges, 1):
+        start = as_int(item.get("start"), -1)
+        end = as_int(item.get("end"), -1)
+        if (
+            as_int(item.get("scene_index"), index) != index
+            or start != cursor
+            or end < start
+            or source[start:end] != scenes[index - 1]
+        ):
+            return {"ok": False, "blocker": "script_coverage_incomplete"}
+        cursor = end
+
+    joined = "".join(scenes)
+    source_sha256 = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    joined_sha256 = hashlib.sha256(joined.encode("utf-8")).hexdigest()
+    exact = bool(
+        cursor == len(source)
+        and joined == source
+        and coverage.get("no_truncation")
+        and coverage.get("exact_match")
+        and as_int(coverage.get("coverage_percent"), 0) == 100
+        and str(coverage.get("source_sha256") or "").lower() == source_sha256
+        and str(coverage.get("joined_sha256") or "").lower() == joined_sha256
+    )
     return {
-        "source_text": source,
-        "proposed_scenes": chunks,
-        "proposed_scene_count": len(chunks),
-        "scene_count_confirmed": False,
-        "source_preserved": "\n".join(chunks) == "\n".join(line.strip() for line in source.splitlines() if line.strip()),
+        "ok": exact,
+        "blocker": "" if exact else "script_coverage_incomplete",
+        "scene_count": scene_count,
+        "source_sha256": source_sha256,
     }
 
 
@@ -389,8 +441,11 @@ def preflight(
     kind = product_kind(product_id)
     blockers: list[str] = []
     scene_count = int(state.get("scene_count") or state.get("panel_count") or 0)
-    if kind != "long_series" and not MIN_SCENES <= scene_count <= MAX_SCENES:
-        blockers.append("scene_count_invalid")
+    minimum_scene_count = video_script_product.MIN_SCENES if kind == "script_to_video" else MIN_SCENES
+    if kind != "long_series" and not minimum_scene_count <= scene_count <= MAX_SCENES:
+        blockers.append(
+            "script_scene_count_invalid" if kind == "script_to_video" else "scene_count_invalid"
+        )
     if str(state.get("aspect_ratio") or "") not in SUPPORTED_RATIOS:
         blockers.append("aspect_ratio_invalid")
     if kind == "ai_real":
@@ -402,10 +457,9 @@ def preflight(
         if not str(state.get("idea_preset_id") or ""):
             blockers.append("idea_preset_missing")
     elif kind == "script_to_video":
-        if not str(state.get("script_text") or "").strip():
-            blockers.append("script_missing")
-        if not bool(state.get("scene_count_confirmed")):
-            blockers.append("script_scene_count_not_confirmed")
+        script_gate = script_contract_gate(state)
+        if not script_gate["ok"]:
+            blockers.append(str(script_gate["blocker"]))
     elif kind == "storyboard":
         gate = storyboard_asset_gate(scene_count, state.get("asset_items") or [])
         if not gate["ok"]:

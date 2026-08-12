@@ -13,7 +13,7 @@ from hashlib import sha256
 import html
 from typing import Any, Iterable, Mapping
 
-from services import video_ai_real_pricing
+from services import video_profile_catalog
 
 
 PRODUCT_ID = "self_shot_cinematic_transform"
@@ -138,40 +138,12 @@ WARDROBE_OPTIONS = (
     "Thời trang trình diễn",
 )
 
-CONTENT_PROFILES = (
-    "Bán hàng / quảng cáo",
-    "Đánh giá / giới thiệu sản phẩm",
-    "Tiếp thị liên kết / nội dung người dùng",
-    "Cảm nhận / câu chuyện khách hàng",
-    "Thương hiệu / doanh nghiệp",
-    "Nhà sáng tạo / bắt xu hướng",
-    "Ảnh chế / nhại vui / hài",
-    "Sự kiện / khoảnh khắc nổi bật",
-    "Hướng dẫn / kiến thức",
-    "Kể chuyện / phim ngắn",
-    "Kiến trúc / bất động sản",
-    "Nội thất / cải tạo không gian",
-    "Thời trang / trình diễn",
-    "Ẩm thực / đồ uống",
-    "Du lịch / trải nghiệm",
-    "Ứng dụng / trang web / phần mềm dịch vụ",
-    "Trò chơi / thể thao điện tử",
-    "Thể thao / vận động",
-    "Âm nhạc / biểu diễn",
-    "Làm đẹp / chăm sóc cá nhân",
-    "Sức khỏe / thể chất",
-    "Giáo dục / đào tạo",
-    "Lịch sử / văn hóa / thần thoại",
-    "Kỹ thuật / công nghiệp",
-    "Dữ liệu / infographic",
-    "Tin tức / bản tin ngắn",
-    "Động lực / phát triển bản thân",
-    "Âm thanh thư giãn",
-    "Thú cưng / động vật",
-    "Ô tô / xe máy",
-    "Sản phẩm 3D / vật thể",
-    "Kỳ ảo / điện ảnh / kỹ xảo",
+CONTENT_PROFILE_ROWS = tuple(
+    dict(item)
+    for item in video_profile_catalog.PROFILE_SEEDS
+    if bool(item.get("is_active", 1))
 )
+CONTENT_PROFILES = tuple(str(item.get("public_name") or "") for item in CONTENT_PROFILE_ROWS)
 
 AUDIO_LABELS = {
     "source": "Âm thanh gốc",
@@ -234,7 +206,7 @@ CALLBACK_OPERATION_SCREENS = {
     "volume": frozenset({"audio"}),
     "volume_set": frozenset({"volume"}),
     "prompt": frozenset({"review"}),
-    "finish": frozenset({"review", "finish"}),
+    "finish": frozenset({"review", "finish", "package"}),
     "quality": frozenset({"package"}),
 }
 
@@ -283,6 +255,91 @@ def transformation_catalog() -> list[dict[str, Any]]:
             "presets": presets,
         })
     return rows
+
+
+def transformation_group_for_content_profile(profile_index: int) -> dict[str, Any]:
+    index = max(1, min(len(CONTENT_PROFILE_ROWS), int(profile_index or 1)))
+    profile = dict(CONTENT_PROFILE_ROWS[index - 1])
+    tags = {
+        str(value or "").strip().lower()
+        for field in (
+            "narrative_tags",
+            "industry_tags",
+            "visual_tags",
+            "platform_tags",
+            "goal_tags",
+        )
+        for value in profile.get(field) or []
+        if str(value or "").strip()
+    }
+    key = str(profile.get("profile_key") or "")
+    if key in {"fashion_lookbook", "beauty_skincare_wellness"} or "fashion" in tags:
+        group_id = "fashion_runway"
+    elif key in {"music_performance_visualizer", "event_highlight", "social_creator_trend"} or "music" in tags:
+        group_id = "music_performance"
+    elif key == "pets_animals" or {"pet", "animals"}.intersection(tags):
+        group_id = "pet_object_character"
+    elif key in {"history_culture_mythology"} or {"history", "period", "culture"}.intersection(tags):
+        group_id = "history_ancient"
+    elif key in {"game_trailer", "app_software_demo", "engineering_industrial"} or {"game", "technology", "industrial"}.intersection(tags):
+        group_id = "scifi_cyberpunk"
+    elif key in {"character_animation_vfx", "short_film_trailer"} or {"animation", "dramatic", "cinematic"}.intersection(tags):
+        group_id = "magic_vfx" if key == "character_animation_vfx" else "cinematic_story"
+    elif key in {"travel_local_culture", "architecture_real_estate"} or {"travel", "real_estate", "architecture"}.intersection(tags):
+        group_id = "travel_fantasy"
+    elif key in {"sports_esports", "automotive_transport"} or {"sport", "esports", "automotive"}.intersection(tags):
+        group_id = "hero_action"
+    elif key in {"sales_ads", "product_review_demo", "affiliate_ugc", "testimonial_case_study", "brand_corporate", "product_3d_showcase"} or {"commerce", "business", "product"}.intersection(tags):
+        group_id = "product_commercial"
+    elif key in {"asmr_relax_lofi_visualizer"} or {"ambient", "lofi"}.intersection(tags):
+        group_id = "season_time"
+    else:
+        group_id = "cinematic_story"
+    return next(
+        (dict(item) for item in transformation_catalog() if item["group_id"] == group_id),
+        dict(transformation_catalog()[0]),
+    )
+
+
+def contextual_preset_page(state: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """Return five profile-specific directions without changing transform semantics."""
+
+    current = dict(state or {})
+    group_id = str(current.get("selected_group_id") or TRANSFORMATION_GROUPS[0][0])
+    page = max(1, min(4, int(current.get("preset_page") or 1)))
+    group = next(
+        (item for item in transformation_catalog() if item["group_id"] == group_id),
+        transformation_catalog()[0],
+    )
+    start = (page - 1) * 5
+    options = [dict(item) for item in group["presets"][start:start + 5]]
+    if str(current.get("preset_source") or "") != "content_profile":
+        return options
+    profile_key = str(current.get("content_profile_key") or "")
+    profile = next(
+        (dict(item) for item in CONTENT_PROFILE_ROWS if str(item.get("profile_key") or "") == profile_key),
+        {},
+    )
+    if not profile:
+        return options
+    pattern = [str(item or "").strip() for item in profile.get("default_scene_pattern") or [] if str(item or "").strip()]
+    if not pattern:
+        pattern = ["Mở đầu", "Diễn biến", "Điểm nhấn", "Kết"]
+    description = str(profile.get("description") or profile.get("public_name") or "").strip()
+    result = []
+    for index, item in enumerate(options):
+        offset = (index + start) % len(pattern)
+        ordered = pattern[offset:] + pattern[:offset]
+        result.append({
+            **item,
+            "preset_id": f"{item['preset_id']}:{profile_key}",
+            "title": f"{ordered[0]} · {item['title']}",
+            "summary": (
+                f"{description}. Mạch riêng: {' → '.join(ordered)}. {item['summary']}"
+            ).strip(),
+            "content_profile_key": profile_key,
+        })
+    return result
 
 
 def initial_draft() -> dict[str, Any]:
@@ -477,26 +534,35 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
     elif name == "presets":
         group_id = str(current.get("selected_group_id") or TRANSFORMATION_GROUPS[0][0])
         page = max(1, min(4, int(current.get("preset_page") or 1)))
-        options = catalog_page(group_id, page)
+        options = contextual_preset_page(current)
         group = next((item for item in transformation_catalog() if item["group_id"] == group_id), transformation_catalog()[0])
         title = f"✨ {group['title']}"
         context_label = str(current.get("content_profile") or "").strip()
         context_line = f"\nBối cảnh nội dung: {_safe(context_label)}" if context_label else ""
-        body = "\n".join(f"{index}. {item['title']}: {item['summary']}" for index, item in enumerate(options, 1)) + context_line
+        body = "\n".join(
+            f"{index}. {_safe(item['title'])}: {_safe(item['summary'])}"
+            for index, item in enumerate(options, 1)
+        ) + context_line
         rows = [[(str(index), f"vproduct|ss3|preset|{index}") for index in range(1, 6)]]
         rows.append([("🔄 Đổi 5 gợi ý", "vproduct|ss3|preset_page"), ("✍️ Tự nhập", "vproduct|ss3|preset_custom")])
         rows.append([("🎯 32 loại nội dung", "vproduct|ss3|show|content_profiles"), ("🗂️ Kho Ý tưởng video", "vproduct|ss3|show|idea_library")])
     elif name == "content_profiles":
         page = max(1, min(4, int(current.get("content_profile_page") or 1)))
         start = (page - 1) * 8
-        options = CONTENT_PROFILES[start:start + 8]
+        options = CONTENT_PROFILE_ROWS[start:start + 8]
         title = "🎯 Chọn loại nội dung"
         body = (
             f"Trang {page}/4. Chọn đúng một loại nội dung; hệ thống sẽ quay lại 5 hướng biến đổi bám sát loại đã chọn. "
             "Lựa chọn này không tự ghi đè video nguồn hoặc các lớp đã khóa."
         )
         rows = [
-            [(label, f"vproduct|ss3|content_profile|{start + index + 1}") for index, label in enumerate(options[offset:offset + 2], offset)]
+            [
+                (
+                    f"{item.get('icon') or '🎯'} {item.get('short_name') or item.get('public_name') or ''}",
+                    f"vproduct|ss3|content_profile|{start + index + 1}",
+                )
+                for index, item in enumerate(options[offset:offset + 2], offset)
+            ]
             for offset in range(0, len(options), 2)
         ]
         rows.append([("➡️ Nhóm tiếp theo", "vproduct|ss3|content_profile_page"), ("🎬 Đổi nhóm biến đổi", "vproduct|ss3|show|groups")])
@@ -583,49 +649,18 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             f"Hiệu ứng: {_safe(', '.join(current.get('selected_effects') or []) or 'Không thêm')}\n\n"
             "Chưa tạo tác vụ, chưa xử lý video và chưa trừ Xu."
         )
-        rows = [[("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("🎙️ Âm thanh", "vproduct|ss3|audio_review")], [("✅ Chọn chất lượng", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
+        rows = [[("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("🎙️ Âm thanh", "vproduct|ss3|audio_review")], [("✅ Hoàn thiện video", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
     elif name == "finish":
-        report = dict(current.get("selfshot3_preflight") or {})
         title = "✅ Kiểm tra kế hoạch trước hóa đơn"
-        if report.get("ok"):
-            body = "Đã đủ dữ liệu cần thiết. Chưa tạo tác vụ và chưa trừ Xu. Hãy chọn chất lượng ở bước tiếp theo."
-            rows = [[("⭐ Chọn chất lượng", "vproduct|ss3|show|package"), ("👁️ Xem lại", "vproduct|ss3|finish_review")]]
-        else:
-            body = "Kế hoạch còn thiếu dữ liệu bắt buộc nên chưa thể mở hóa đơn. Hệ thống không tạo tác vụ và không trừ Xu."
-            rows = [[("🔄 Kiểm tra lại", "vproduct|ss3|finish"), ("👁️ Xem lại", "vproduct|ss3|finish_review")]]
+        body = (
+            "TOAN AAS sẽ mở Logo/Watermark, sau đó Tổng hợp và một bảng Chất lượng chính thức. "
+            "Chưa tạo tác vụ và chưa trừ Xu."
+        )
+        rows = [[("✅ Hoàn thiện video", "vproduct|ss3|finish"), ("👁️ Xem lại", "vproduct|ss3|finish_review")]]
     elif name == "package":
-        title = "⭐ Chọn gói biến đổi điện ảnh"
-        scene_count = max(1, int(current.get("scene_count") or 1))
-        quality_rows = video_ai_real_pricing.public_quality_catalog()
-        lines = [
-            "Giá tính theo từng cảnh trong video nguồn. Gói cao hơn ưu tiên độ ổn định nhận diện, chuyển động, ánh sáng và chi tiết hiệu ứng.",
-            "Khuyến mãi Video nhiều cảnh: 1 cảnh không giảm; 2–5 cảnh giảm 10%; 6–10 cảnh giảm 15%; 11–20 cảnh giảm 20%; add-on tính riêng.",
-        ]
-        buttons: list[tuple[str, str]] = []
-        for quality in quality_rows:
-            scene_price = video_ai_real_pricing.video_multiscene_price(quality["unit_xu"], scene_count)
-            discount_note = (
-                f" · giảm {scene_price['discount_percent']}% (-{scene_price['discount_xu']} Xu)"
-                if scene_price["discount_percent"]
-                else ""
-            )
-            lines.extend([
-                "",
-                f"{quality['icon']} <b>{quality['name']}</b> · <b>{quality['seconds']} giây/cảnh</b> · <b>{quality['unit_xu']} Xu/cảnh</b>",
-                f"• Chất lượng: {quality['public_level']} · {quality['resolution']}",
-                f"• Đặc điểm: {quality['public_detail']}",
-                f"• Phù hợp: {quality['use_case']}",
-                f"• Tạm tính {scene_count} cảnh: <b>{scene_price['subtotal_xu']} Xu</b>"
-                f"{discount_note} · còn <b>{scene_price['total_xu']} Xu</b>",
-            ])
-            buttons.append((
-                f"{quality['icon']} {quality['name']} · {quality['unit_xu']} Xu",
-                f"vproduct|ss3|quality|{quality['tier_id']}",
-            ))
-        lines.extend(["", "Màn này chưa tạo tác vụ và chưa trừ Xu."])
-        body = "\n".join(lines)
-        buttons.append(("👁️ Xem lại kế hoạch", "vproduct|ss3|show|review"))
-        rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+        title = "⭐ Chất lượng video"
+        body = "Bảng Chất lượng cũ đã được hợp nhất vào tail chính để giá, hóa đơn và RouteEngine dùng cùng một nguồn."
+        rows = [[("✅ Hoàn thiện video", "vproduct|ss3|finish"), ("👁️ Xem lại kế hoạch", "vproduct|ss3|show|review")]]
     else:
         raise ValueError("unknown_selfshot3_screen")
 
@@ -1202,7 +1237,7 @@ def validate_rows(rows: Iterable[Iterable[tuple[str, str]]], *, back_callback: s
         callbacks.extend(str(item[1]) for item in row)
     if len(callbacks) != len(set(callbacks)):
         errors.append("duplicate_callback")
-    expected_tail = [str(back_callback), "menu|main"]
+    expected_tail = [str(back_callback), "menu|main_video"]
     if not normalized or [str(item[1]) for item in normalized[-1]] != expected_tail:
         errors.append("bottom_navigation_invalid")
     return {"ok": not errors, "errors": errors, "callbacks": callbacks}

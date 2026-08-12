@@ -336,12 +336,12 @@ def test_all_rendered_selfshot_callbacks_have_a_known_single_owner_contract() ->
         "compile_prompts", "prompt", "audio_review", "audio", "volume", "volume_set",
         "addon", "addon_position", "addon_position_set",
     }
-    bot_operations = {"show", "source", "reset", "finish", "quality", "review_addons"}
+    bot_operations = {"show", "source", "resume_segment", "reset", "finish", "quality", "review_addons"}
     for screen in video_selfshot2.SCREEN_PARENTS:
         model = video_selfshot2.screen_model(screen, draft)
         for callback in _callbacks(model):
             assert video_selfshot2.callback_allowed(screen, callback, draft) is True
-            if callback in {"vproduct|selfshot_hub", "menu|main"}:
+            if callback in {"vproduct|selfshot_hub", "menu|main_video"}:
                 continue
             parts = callback.split("|")
             assert parts[:2] == ["vproduct", "ss2"]
@@ -650,6 +650,8 @@ def test_bot_has_one_selfshot2_owner_no_generic_x_and_delivery_gate() -> None:
     assert "Có lỗi khi xử lý lệnh" not in block
     assert "callback_allowed" in block
     assert "return await video_selfshot2_render(query, uid, current_screen" in block
+    finish = block[block.index('if operation == "finish":'):]
+    assert 'return await video_tail9_render(query, uid, context, "logo")' in finish
     assert "selfshot2_continuity_validation_required" in BOT_SOURCE
     assert "continuity_validation_passed" in BOT_SOURCE
     assert '@fastapi_app.get("/api/v1/worker/jobs/{job_id}/source-video")' in BOT_SOURCE

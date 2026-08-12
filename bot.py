@@ -101,6 +101,7 @@ from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subdub_long_media, subdub_media_preflight, subdub_provider_contract, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import ai_chatbot_copilot, cskh_session_memory, telegram_business_support, telegram_transport
 from services import public_chat_media, public_chat_runtime, public_chat_store
+from providers.gemini_public_chat_provider import GeminiPublicChatProvider
 from services import ffmpeg_text
 from services import voice_clone_pipeline
 from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_maintenance as storage_maintenance_service, storage_migration, video_final_output, video_provider_catalog, video_provider_router, worker_auth
@@ -114,7 +115,7 @@ from services import profile_router, video_edit_capabilities, video_edit_state_m
 from services import architecture_profile_router, architecture_profile_status
 from services import video_ai_edit_catalog, video_ai_edit_state
 from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit_router, video_ai_edit_status, video_ai_edit_validation
-from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
+from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault, video_script_product
 from services import video_profile_context_engine
 from services import frame_video_commercial, frame_video_flow, frame_video_public_seam, frame_video_runtime
 from services import video_addon_planner, video_ai_real_pricing, video_ai_real_prompt_compiler, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_selfshot_local_analysis, video_selfshotflow4, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uiflow3, video_uiflow3_routeengine, video_uifreeze1
@@ -72417,8 +72418,6 @@ VIDEO_UIFLOW3_PRODUCT_LABELS = {
 }
 VIDEO_UIFLOW3_SYNCED_PRODUCTS = frozenset({
     "video_ai_real",
-    "script_image_video",
-    "self_shot_scene_change",
 })
 VIDEO_UIFLOW3_PRODUCT_CONTEXT_GUIDANCE = {
     "script_image_video": {
@@ -83067,7 +83066,7 @@ def video_profile_scene1_count_text(state: dict, lang: str = "vi") -> str:
         "manual": "Tự nhập nội dung",
     }.get(content_mode, "Chưa chọn nguồn nội dung")
     range_line = (
-        "• Kịch bản dài dùng 5–20 cảnh; thời lượng mỗi cảnh và tổng thời lượng được tính theo gói Chất lượng.\n"
+        "• Kịch bản dùng 2–20 cảnh; thời lượng mỗi cảnh và tổng thời lượng được tính theo gói Chất lượng.\n"
         if is_script
         else "• Bộ lập kế hoạch hỗ trợ 1–20 cảnh; tổng thời lượng được tính theo gói Chất lượng.\n"
     )
@@ -83082,14 +83081,14 @@ def video_profile_scene1_count_text(state: dict, lang: str = "vi") -> str:
 
 
 def video_profile_scene_count_bounds(state: dict | None = None) -> tuple[int, int]:
-    return (5, 20) if video_flow7_kind(state or {}) == "script_to_video" else (1, 20)
+    return (2, 20) if video_flow7_kind(state or {}) == "script_to_video" else (1, 20)
 
 
 def video_profile_scene1_count_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     if video_flow7_kind(state or {}) == "script_to_video":
         count_rows = [
-            [("5 cảnh", "vprofile|count|5"), ("6 cảnh", "vprofile|count|6")],
-            [("8 cảnh", "vprofile|count|8"), ("10 cảnh", "vprofile|count|10")],
+            [("2 cảnh", "vprofile|count|2"), ("3 cảnh", "vprofile|count|3")],
+            [("5 cảnh", "vprofile|count|5"), ("10 cảnh", "vprofile|count|10")],
             [("15 cảnh", "vprofile|count|15"), ("20 cảnh", "vprofile|count|20")],
         ]
     else:
@@ -84771,10 +84770,11 @@ def video_scene3_full_review_text(state: dict) -> str:
 
 def video_scene3_full_review_keyboard(state: dict) -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("👁️ Xem từng cảnh", "video_tail|review|scenes"), ("✍️ Sửa nội dung", "video_tail|review|edit")],
-        [("🎬 Câu lệnh video", "video_tail|review|prompts"), ("🖼️ Logo/Watermark", "video_tail|review|logo")],
-        [("📄 Xem tổng hợp", "video_tail|review|summary"), ("➡️ Âm thanh & Add-on", "video_tail|review|audio")],
-        [("⬅️ Quay lại", "video_tail|review|back"), ("🏠 Menu chính", "menu|main")],
+        [("👁️ Xem cảnh", "vprofile|scene_view|1"), ("✍️ Sửa cảnh", "vprofile|edit_scene")],
+        [("🎬 Prompt video", "vprofile|review_video_prompts"), ("🔗 Chuyển cảnh", "vprofile|review_transitions")],
+        [("📝 Chữ", "vprofile|review_text"), ("🎚️ Âm thanh", "vprofile|review_audio")],
+        [("🖼️ Logo/Watermark", "vprofile|review_post"), ("⭐ Hoàn thiện video", "vprofile|review_continue")],
+        *video_scene3_nav_rows(),
     ])
 
 
@@ -85511,7 +85511,9 @@ def video_flow6_preflight_block_text(preflight: dict | None = None) -> str:
         "content_choice_missing": "chưa chọn hoặc nhập nội dung",
         "idea_preset_missing": "chưa chọn ý tưởng video",
         "script_missing": "chưa có kịch bản",
+        "script_scene_count_invalid": "Kịch bản → Video cần từ 2 đến 20 cảnh",
         "script_scene_count_not_confirmed": "chưa xác nhận số cảnh của kịch bản",
+        "script_coverage_incomplete": "kịch bản chưa được giữ nguyên và phủ đủ 100% trong kế hoạch cảnh",
         "storyboard_transition_count_invalid": "chưa cấu hình đủ điểm nối giữa các cảnh Storyboard",
         "source_video_probe_missing": "video tự quay chưa có đủ thông tin thời lượng và khung hình",
         "trend_source_or_sample_missing": "chưa có nguồn trend hoặc mẫu trend được chọn rõ ràng",
@@ -85679,6 +85681,11 @@ def video_profile_scene1_handoff(user_id: int, state: dict) -> dict:
     # idea or manual content instead of trying to infer it from a topic later.
     content_contract = video_tail12_compile_content_contract(state, product_type=product_id)
     flow_context = video_flow6.context_from_scene_state(content_contract)
+    script_state_contract = (
+        video_script_product.state_contract(state)
+        if str(flow_context.get("flow_kind") or "") == "script_to_video"
+        else {}
+    )
     execution_route = dict((state.get("flow6_preflight") or {}).get("route") or video_flow6.execution_route_for(flow_context))
     session.update({
         "product_id": product_id,
@@ -85704,6 +85711,7 @@ def video_profile_scene1_handoff(user_id: int, state: dict) -> dict:
         "content_revision": max(1, safe_int(content_contract.get("content_revision"), 1)),
         "flow_owner": str(content_contract.get("flow_owner") or "scene3"),
         "parent_session_id": str(content_contract.get("parent_session_id") or ""),
+        **deepcopy(script_state_contract),
         "b14_profile_id": profile_id,
         "b14_scene_count": count,
         "b14_scene_count_selected": True,
@@ -85769,6 +85777,7 @@ def video_profile_scene1_handoff(user_id: int, state: dict) -> dict:
             "required_capability": str(state.get("required_capability") or ""),
             "estimate": dict(state.get("estimate") or {}),
             "final_report": dict(state.get("final_report") or {}),
+            **deepcopy(script_state_contract),
             "final_confirmed": False,
         },
         "scene3_planned_addons": planned_runtime_addons,
@@ -85811,7 +85820,7 @@ async def video_profile_scene1_render(query, state: dict, lang: str = "vi"):
         "await_character_description": "✍️ <b>Mô tả nhân vật</b>\n\nMô tả nhận diện, giới tính nếu có, trang phục và đặc điểm phải giữ nhất quán. Hệ thống không tự đoán giới tính khi mô tả chưa rõ.",
         "await_suggestion": (
             "✍️ <b>Nhập kịch bản dài</b>\n\n"
-            "Gửi kịch bản hoàn chỉnh cho 5–20 cảnh; thời lượng được tính theo gói Chất lượng. "
+            "Gửi kịch bản hoàn chỉnh cho 2–20 cảnh; thời lượng được tính theo gói Chất lượng. "
             "Hệ thống giữ đúng ý, chia thành các cảnh trọn vẹn và cho xem lại trước khi dựng."
             if video_flow7_kind(state) == "script_to_video"
             else "✍️ <b>Nhập hướng nội dung riêng</b>\n\nMô tả hook, mạch kể và kết quả mong muốn. Hệ thống sẽ phân bổ đúng số cảnh đã chọn."
@@ -89275,16 +89284,20 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_vi": "🧩 Kịch bản → Video",
         "label_en": "🧩 Script → Video",
         "label_zh": "🧩 脚本 → 视频",
-        "entry_callback": "vid3|entry|script_image_video",
-        "legacy_entry_callback": "vproduct|open|script_image_video",
-        "handler": "handle_video_uiflow3_callback",
-        "expected_children": ("vid3|source_text",),
+        "entry_callback": "vproduct|open|script_image_video",
+        "handler": "handle_video_product_callback",
+        "expected_children": (
+            "vproduct|script_ai",
+            "vproduct|script_manual",
+            "vproduct|script_upload",
+            "menu|main_video",
+        ),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
-        "flow_type": "content_first_canonical",
+        "flow_type": "intro_then_profile",
         "canonical": True,
-        "first_step": "source",
+        "first_step": "intro",
         "invoice_reachable": True,
         "job_reachable": True,
         "product_id": "script_image_video",
@@ -89348,19 +89361,18 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_vi": "🎥 Video tự quay",
         "label_en": "🎥 Self-shot video",
         "label_zh": "🎥 自拍视频",
-        "entry_callback": "vid3|entry|self_shot_scene_change",
-        "legacy_entry_callback": "vproduct|open|self_shot_scene_change",
-        "handler": "handle_video_uiflow3_callback",
+        "entry_callback": "vproduct|open|self_shot_scene_change",
+        "handler": "handle_video_product_callback",
         "expected_children": (
-            "vid3|source_media",
-            "vid3|source_status",
+            "vproduct|selfshot_product|scene_change",
+            "vproduct|selfshot_product|cinematic",
         ),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
-        "flow_type": "content_first_canonical",
+        "flow_type": "self_shot_product_hub",
         "canonical": True,
-        "first_step": "source",
+        "first_step": "hub",
         "invoice_reachable": True,
         "job_reachable": True,
         "product_id": "self_shot_scene_change",
@@ -90268,54 +90280,476 @@ def start_public_video_scene2_state(
     return save_video_profile_studio_state(context, state)
 
 
-def video_flow7_script_count_text(proposal: dict) -> str:
-    scenes = [str(item).strip() for item in proposal.get("proposed_scenes") or [] if str(item).strip()]
-    count = max(5, min(20, safe_int(proposal.get("proposed_scene_count"), len(scenes) or 5)))
-    preview = "\n".join(
-        f"• Cảnh {index}: {html.escape(scene[:280])}"
-        for index, scene in enumerate(scenes[:20], 1)
-    )
+def video_script_hub_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🧩 SCRIPT → VIDEO\n\n"
+            "Create a complete script with AI, paste the full script, or upload a script file. "
+            "The full script remains editable and is approved before scene planning."
+        )
     return (
-        "📄 <b>Xác nhận số cảnh từ kịch bản</b>\n\n"
-        f"TOAN AAS đề xuất <b>{count} cảnh</b> từ đúng nội dung anh/chị đã gửi; chưa tự cắt bỏ câu nào.\n\n"
-        f"{preview}\n\n"
-        "Kịch bản → Video dùng từ 5 đến 20 cảnh; thời lượng được tính theo gói Chất lượng. "
-        "Dùng số cảnh này hoặc nhập số khác trước khi chọn tỉ lệ. Bước này chưa tạo tác vụ, "
-        "chưa gọi nguồn dựng và chưa trừ Xu."
+        "🧩 KỊCH BẢN → VIDEO\n\n"
+        "Chọn đúng nguồn kịch bản. Kịch bản luôn được hiển thị đầy đủ để anh/chị xem và sửa trước khi chia cảnh.\n\n"
+        "• Tạo kịch bản bằng AI: xây một kịch bản hoàn chỉnh rồi mới chuyển thành video.\n"
+        "• Nhập / Dán kịch bản: giữ nguyên 100% nội dung anh/chị gửi.\n"
+        "• Tải file kịch bản: đọc đầy đủ TXT, DOCX hoặc PDF rồi cùng đi vào một parser.\n\n"
+        "Chưa tạo video, chưa tạo tác vụ và chưa trừ Xu."
     )
+
+
+def video_script_hub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✨ Tạo kịch bản bằng AI" if is_vi else "✨ Create script with AI", callback_data="vproduct|script_ai"),
+            InlineKeyboardButton("✍️ Nhập / Dán kịch bản" if is_vi else "✍️ Paste script", callback_data="vproduct|script_manual"),
+        ],
+        [
+            InlineKeyboardButton("📄 Tải file kịch bản" if is_vi else "📄 Upload script file", callback_data="vproduct|script_upload"),
+            InlineKeyboardButton("⬅️ Quay lại Menu Video" if is_vi else "⬅️ Video menu", callback_data="menu|main_video"),
+        ],
+    ])
+
+
+def video_script_nav_keyboard(back_callback: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback),
+        InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
+    ]])
+
+
+def video_script_goal_text() -> str:
+    return (
+        "🎯 MỤC TIÊU KỊCH BẢN\n\n"
+        "Chọn kết quả chính mà video cần đạt. Lựa chọn này quyết định hook, diễn biến, CTA và nhịp kịch bản.\n\n"
+        "Chưa gọi AI và chưa trừ Xu."
+    )
+
+
+def video_script_goal_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛍 Bán hàng", callback_data="vproduct|script_goal|sales"), InlineKeyboardButton("✨ Giới thiệu", callback_data="vproduct|script_goal|introduce")],
+        [InlineKeyboardButton("🎓 Hướng dẫn", callback_data="vproduct|script_goal|educate"), InlineKeyboardButton("📖 Kể chuyện", callback_data="vproduct|script_goal|story")],
+        [InlineKeyboardButton("🔥 Tăng tương tác", callback_data="vproduct|script_goal|engage"), InlineKeyboardButton("✍️ Mục tiêu riêng", callback_data="vproduct|script_goal_custom")],
+        [InlineKeyboardButton("⬅️ Kịch bản → Video", callback_data="vproduct|script_hub"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+    ])
+
+
+def video_script_content_source_text(session: dict) -> str:
+    goal = video_script_product.goal_label(str((session.get("draft") or {}).get("script_goal") or ""))
+    return (
+        "🧭 CHỌN NGUỒN NỘI DUNG\n\n"
+        f"Mục tiêu: {goal}\n\n"
+        "• 32 loại nội dung: chọn đúng loại rồi nhận 5 gợi ý riêng.\n"
+        "• Kho Ý tưởng: chọn nhanh một hướng nội dung có sẵn.\n"
+        "• Tự nhập: gửi chủ đề, sản phẩm hoặc nội dung cụ thể.\n\n"
+        "Chưa gọi AI và chưa trừ Xu."
+    )
+
+
+def video_script_content_source_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📚 32 loại nội dung", callback_data="vproduct|script_profiles|1"), InlineKeyboardButton("💡 Kho Ý tưởng", callback_data="vproduct|script_ideas")],
+        [InlineKeyboardButton("✍️ Tự nhập nội dung", callback_data="vproduct|script_content_custom"), InlineKeyboardButton("⬅️ Mục tiêu", callback_data="vproduct|script_goal_screen")],
+        [InlineKeyboardButton("⬅️ Kịch bản → Video", callback_data="vproduct|script_hub"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+    ])
+
+
+def video_script_profiles_text(page: int) -> str:
+    page_number = max(1, min(video_script_product.PROFILE_PAGE_COUNT, safe_int(page, 1)))
+    return (
+        f"📚 32 LOẠI NỘI DUNG · TRANG {page_number}/4\n\n"
+        "Chọn loại gần nhất với nội dung cần làm. Mỗi loại có cấu trúc và 5 gợi ý riêng; "
+        "không dùng chung gợi ý bán hàng cho mọi sản phẩm."
+    )
+
+
+def video_script_profiles_keyboard(page: int) -> InlineKeyboardMarkup:
+    page_number = max(1, min(video_script_product.PROFILE_PAGE_COUNT, safe_int(page, 1)))
+    profiles = video_script_product.profile_page(page_number)
+    rows = []
+    for index in range(0, len(profiles), 2):
+        rows.append([
+            InlineKeyboardButton(
+                f"{item.get('icon') or '📝'} {str(item.get('short_name') or item.get('public_name') or '')[:24]}",
+                callback_data=f"vproduct|script_profile|{item.get('profile_key')}",
+            )
+            for item in profiles[index:index + 2]
+        ])
+    rows.extend([
+        [
+            InlineKeyboardButton("⬅️ Trang trước", callback_data=f"vproduct|script_profiles|{4 if page_number == 1 else page_number - 1}"),
+            InlineKeyboardButton("Trang sau ➡️", callback_data=f"vproduct|script_profiles|{1 if page_number == 4 else page_number + 1}"),
+        ],
+        [InlineKeyboardButton("⬅️ Nguồn nội dung", callback_data="vproduct|script_content_source"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def video_script_suggestions_text(session: dict) -> str:
+    draft = dict(session.get("draft") or {})
+    suggestions = video_script_product.compact_suggestions(draft.get("script_content_suggestions") or [])
+    profile_label = (
+        "💡 Kho Ý tưởng tổng hợp"
+        if str(draft.get("script_suggestion_source") or "") == "ideas"
+        else video_script_product.public_profile_label(str(draft.get("script_profile_key") or ""))
+    )
+    lines = [
+        "💡 GỢI Ý NỘI DUNG KỊCH BẢN",
+        "",
+        f"Loại nội dung: {profile_label}",
+        "",
+    ]
+    for index, item in enumerate(suggestions, 1):
+        lines.extend([
+            f"{index}. {str(item.get('title') or f'Gợi ý {index}')}",
+            f"   • Hook: {str(item.get('hook') or '')}",
+            f"   • Hướng triển khai: {str(item.get('brief') or '')}",
+            f"   • Cấu trúc: {str(item.get('structure') or '')}",
+            "",
+        ])
+    lines.append("Chọn nút 1–5. Sau khi chọn, flow chuyển thẳng sang Đối tượng xem; chưa gọi AI và chưa trừ Xu.")
+    return "\n".join(lines)
+
+
+def video_script_suggestions_keyboard(session: dict) -> InlineKeyboardMarkup:
+    draft = dict(session.get("draft") or {})
+    back_callback = str(draft.get("script_suggestion_back_callback") or "vproduct|script_content_source")
+    back_label = "⬅️ Kho Ý tưởng" if str(draft.get("script_suggestion_source") or "") == "ideas" else "⬅️ Chọn loại nội dung"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(str(index), callback_data=f"vproduct|script_suggestion|{index - 1}") for index in range(1, 6)],
+        [InlineKeyboardButton("🔄 Đổi 5 gợi ý", callback_data="vproduct|script_suggestions_refresh"), InlineKeyboardButton("✍️ Tự nhập nội dung", callback_data="vproduct|script_content_custom")],
+        [InlineKeyboardButton(back_label, callback_data=back_callback), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+    ])
+
+
+def video_script_audience_text(session: dict) -> str:
+    content = str((session.get("draft") or {}).get("script_content_brief") or "")
+    return (
+        "👥 ĐỐI TƯỢNG XEM\n\n"
+        f"Nội dung đã chọn: {content}\n\n"
+        "Chọn nhóm người xem chính để AI điều chỉnh từ ngữ, ví dụ và CTA."
+    )
+
+
+def video_script_audience_keyboard(session: dict) -> InlineKeyboardMarkup:
+    back_callback = str(
+        (session.get("draft") or {}).get("script_audience_back_callback")
+        or "vproduct|script_content_source"
+    )
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎯 Khách tiềm năng", callback_data="vproduct|script_audience|prospects"), InlineKeyboardButton("🌱 Người mới", callback_data="vproduct|script_audience|beginners")],
+        [InlineKeyboardButton("👥 Cộng đồng", callback_data="vproduct|script_audience|community"), InlineKeyboardButton("🧠 Người chuyên môn", callback_data="vproduct|script_audience|professionals")],
+        [InlineKeyboardButton("🏡 Người dùng phổ thông", callback_data="vproduct|script_audience|families"), InlineKeyboardButton("✍️ Đối tượng riêng", callback_data="vproduct|script_audience_custom")],
+        [InlineKeyboardButton("⬅️ Nội dung", callback_data=back_callback), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+    ])
+
+
+def video_script_platform_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📱 TikTok / Reels", callback_data="vproduct|script_platform|tiktok_reels"), InlineKeyboardButton("▶️ YouTube Shorts", callback_data="vproduct|script_platform|youtube_shorts")],
+        [InlineKeyboardButton("🔵 Facebook", callback_data="vproduct|script_platform|facebook"), InlineKeyboardButton("📣 Quảng cáo / website", callback_data="vproduct|script_platform|ads_landing")],
+        [InlineKeyboardButton("🌐 Nhiều nền tảng", callback_data="vproduct|script_platform|multi"), InlineKeyboardButton("✍️ Nền tảng riêng", callback_data="vproduct|script_platform_custom")],
+        [InlineKeyboardButton("⬅️ Đối tượng xem", callback_data="vproduct|script_audience_screen"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+    ])
+
+
+def video_script_style_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎥 Chân thật", callback_data="vproduct|script_style|realistic"), InlineKeyboardButton("🎬 Điện ảnh", callback_data="vproduct|script_style|cinematic")],
+        [InlineKeyboardButton("🛍 Bán hàng rõ lợi ích", callback_data="vproduct|script_style|sales_clear"), InlineKeyboardButton("📖 Kể chuyện cảm xúc", callback_data="vproduct|script_style|storytelling")],
+        [InlineKeyboardButton("🎓 Kiến thức dễ hiểu", callback_data="vproduct|script_style|educational"), InlineKeyboardButton("✍️ Phong cách riêng", callback_data="vproduct|script_style_custom")],
+        [InlineKeyboardButton("⬅️ Nền tảng", callback_data="vproduct|script_platform_screen"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+    ])
+
+
+def video_script_ratio_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📱 Dọc 9:16", callback_data="vproduct|script_ratio|9x16"), InlineKeyboardButton("🖥 Ngang 16:9", callback_data="vproduct|script_ratio|16x9")],
+        [InlineKeyboardButton("⬜ Vuông 1:1", callback_data="vproduct|script_ratio|1x1"), InlineKeyboardButton("🖼 Dọc 4:5", callback_data="vproduct|script_ratio|4x5")],
+        [InlineKeyboardButton("⬅️ Phong cách", callback_data="vproduct|script_style_screen"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+    ])
+
+
+def video_script_duration_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏱️ 15 giây", callback_data="vproduct|script_duration|15"), InlineKeyboardButton("⏱️ 30 giây", callback_data="vproduct|script_duration|30")],
+        [InlineKeyboardButton("⏱️ 45 giây", callback_data="vproduct|script_duration|45"), InlineKeyboardButton("⏱️ 60 giây", callback_data="vproduct|script_duration|60")],
+        [InlineKeyboardButton("⏱️ 90 giây", callback_data="vproduct|script_duration|90"), InlineKeyboardButton("✍️ Thời lượng riêng", callback_data="vproduct|script_duration_custom")],
+        [InlineKeyboardButton("⬅️ Tỉ lệ", callback_data="vproduct|script_ratio_screen"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+    ])
+
+
+def video_script_review_text(session: dict, *, file_review: bool = False) -> str:
+    draft = dict(session.get("draft") or {})
+    script_text = str(draft.get("script_file_text") if file_review else draft.get("script_text") or "")
+    heading = "📄 NỘI DUNG ĐỌC TỪ FILE" if file_review else "✨ KỊCH BẢN HOÀN CHỈNH"
+    source = str(draft.get("script_source") or ("file" if file_review else "ai"))
+    return (
+        f"{heading}\n\n"
+        f"Nguồn: {source}\n"
+        f"Độ dài: {len(script_text)} ký tự\n"
+        "Nội dung dưới đây được hiển thị nguyên văn, không rút gọn và không tự tóm tắt.\n\n"
+        "----- BẮT ĐẦU KỊCH BẢN -----\n"
+        f"{script_text}\n"
+        "----- KẾT THÚC KỊCH BẢN -----"
+    )
+
+
+def video_script_review_keyboard(*, file_review: bool = False) -> InlineKeyboardMarkup:
+    if file_review:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Dùng nội dung file", callback_data="vproduct|script_file_use"), InlineKeyboardButton("📄 Gửi file khác", callback_data="vproduct|script_file_replace")],
+            [InlineKeyboardButton("⬅️ Kịch bản → Video", callback_data="vproduct|script_hub"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✏️ Sửa toàn bộ kịch bản", callback_data="vproduct|script_ai_edit"), InlineKeyboardButton("🔄 Tạo lại kịch bản", callback_data="vproduct|script_ai_regenerate")],
+        [InlineKeyboardButton("✅ Dùng kịch bản", callback_data="vproduct|script_ai_use"), InlineKeyboardButton("⬅️ Thiết lập AI", callback_data="vproduct|script_duration_screen")],
+        [InlineKeyboardButton("⬅️ Kịch bản → Video", callback_data="vproduct|script_hub"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+    ])
+
+
+def video_script_proposal_review_text(proposal: dict) -> str:
+    source = str(proposal.get("source_text") or "")
+    scenes = list(proposal.get("proposed_scenes") or [])
+    coverage = dict(proposal.get("coverage") or {})
+    lines = [
+        "📄 KỊCH BẢN ĐÃ NHẬN NGUYÊN VĂN",
+        "",
+        f"Độ dài: {len(source)} ký tự",
+        f"Đề xuất: {len(scenes)} cảnh",
+        f"Phủ nội dung: {safe_int(coverage.get('coverage_percent'), 0)}%",
+        f"Không cắt nội dung: {'Có' if coverage.get('no_truncation') and coverage.get('exact_match') else 'Không'}",
+        "",
+        "----- BẮT ĐẦU KỊCH BẢN -----",
+        source,
+        "----- KẾT THÚC KỊCH BẢN -----",
+        "",
+        "Ranh giới cảnh đề xuất:",
+    ]
+    for index, scene in enumerate(scenes, 1):
+        first_line = " ".join(str(scene).strip().split())
+        lines.append(f"• Cảnh {index}: {first_line[:180]}{'…' if len(first_line) > 180 else ''}")
+    lines.extend([
+        "",
+        "Dùng số cảnh này hoặc nhập số khác từ 2 đến 20. Parser sẽ phân bổ lại toàn bộ nguyên văn kịch bản, không bỏ ký tự nào.",
+        "Chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu.",
+    ])
+    return "\n".join(lines)
+
+
+def video_flow7_script_count_text(proposal: dict) -> str:
+    return video_script_proposal_review_text(proposal)
 
 
 def video_flow7_script_count_keyboard(count: int) -> InlineKeyboardMarkup:
-    selected = max(5, min(20, safe_int(count, 5)))
+    selected = max(video_script_product.MIN_SCENES, min(video_script_product.MAX_SCENES, safe_int(count, video_script_product.MIN_SCENES)))
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(f"✅ Dùng {selected} cảnh", callback_data="vproduct|script_count_accept"),
             InlineKeyboardButton("✍️ Nhập số cảnh", callback_data="vproduct|script_count_custom"),
         ],
         [
-            InlineKeyboardButton("⬅️ Kịch bản", callback_data="vproduct|script_count_back"),
-            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+            InlineKeyboardButton("⬅️ Quay lại kịch bản", callback_data="vproduct|script_count_back"),
+            InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
         ],
     ])
+
+
+async def video_script_render_step(target, session: dict, lang: str = "vi"):
+    step = str(session.get("current_step") or "intro")
+    if step == "script_hub":
+        return await safe_edit_or_send(target, video_script_hub_text(lang), parse_mode=None, reply_markup=video_script_hub_keyboard(lang))
+    if step == "script_ai_goal":
+        return await safe_edit_or_send(target, video_script_goal_text(), parse_mode=None, reply_markup=video_script_goal_keyboard())
+    if step == "script_ai_content_source":
+        return await safe_edit_or_send(target, video_script_content_source_text(session), parse_mode=None, reply_markup=video_script_content_source_keyboard())
+    if step == "script_ai_audience":
+        return await safe_edit_or_send(target, video_script_audience_text(session), parse_mode=None, reply_markup=video_script_audience_keyboard(session))
+    if step == "script_ai_platform":
+        return await safe_edit_or_send(target, "📱 NỀN TẢNG PHÁT HÀNH\n\nChọn nơi đăng chính để kịch bản có nhịp, hook và CTA phù hợp.", parse_mode=None, reply_markup=video_script_platform_keyboard())
+    if step == "script_ai_style":
+        return await safe_edit_or_send(target, "🎨 PHONG CÁCH KỊCH BẢN\n\nChọn cách kể chính. AI sẽ giữ phong cách này xuyên suốt narrator, lời thoại, hành động và máy quay.", parse_mode=None, reply_markup=video_script_style_keyboard())
+    if step == "script_ai_ratio":
+        return await safe_edit_or_send(target, "📐 TỈ LỆ VIDEO\n\nChọn khung hình đích để kịch bản và ý đồ máy quay được viết đúng bố cục.", parse_mode=None, reply_markup=video_script_ratio_keyboard())
+    if step == "script_ai_duration":
+        return await safe_edit_or_send(target, "⏱ THỜI LƯỢNG MỤC TIÊU\n\nChọn tổng thời lượng. AI sẽ tạo tối thiểu 2 cảnh và phân bổ trọn nội dung theo thời lượng này.", parse_mode=None, reply_markup=video_script_duration_keyboard())
+    if step == "script_ai_review":
+        return await safe_edit_or_send_long_plain(target, video_script_review_text(session), reply_markup=video_script_review_keyboard())
+    if step == "script_file_review":
+        return await safe_edit_or_send_long_plain(target, video_script_review_text(session, file_review=True), reply_markup=video_script_review_keyboard(file_review=True))
+    if step == "awaiting_script_file":
+        return await safe_edit_or_send(
+            target,
+            "📄 TẢI FILE KỊCH BẢN\n\nGửi một file TXT, DOCX hoặc PDF. TOAN AAS chỉ cho tiếp tục khi đọc được toàn bộ file trong giới hạn; không lấy 3.500 ký tự đầu và không tự tóm tắt.",
+            parse_mode=None,
+            reply_markup=video_script_nav_keyboard("vproduct|script_hub"),
+        )
+    if step in {
+        "awaiting_existing_script", "awaiting_script_ai_content", "awaiting_script_ai_goal",
+        "awaiting_script_ai_audience", "awaiting_script_ai_platform", "awaiting_script_ai_style",
+        "awaiting_script_ai_duration", "awaiting_script_ai_edit",
+    }:
+        prompts = {
+            "awaiting_existing_script": "✍️ Gửi toàn bộ kịch bản nguyên văn. TOAN AAS sẽ giữ đúng nội dung và chỉ đề xuất ranh giới cảnh.",
+            "awaiting_script_ai_content": "✍️ Nhập chủ đề, sản phẩm hoặc nội dung cụ thể muốn AI viết thành kịch bản hoàn chỉnh.",
+            "awaiting_script_ai_goal": "✍️ Nhập mục tiêu cụ thể mà video cần đạt.",
+            "awaiting_script_ai_audience": "✍️ Mô tả đối tượng xem chính.",
+            "awaiting_script_ai_platform": "✍️ Nhập nền tảng hoặc nơi phát hành video.",
+            "awaiting_script_ai_style": "✍️ Mô tả phong cách kịch bản mong muốn.",
+            "awaiting_script_ai_duration": "✍️ Nhập thời lượng mục tiêu từ 10 đến 600 giây.",
+            "awaiting_script_ai_edit": "✏️ Gửi lại TOÀN BỘ kịch bản đã sửa. Nội dung mới sẽ được lưu nguyên văn.",
+        }
+        back = {
+            "awaiting_existing_script": "vproduct|script_hub",
+            "awaiting_script_ai_content": "vproduct|script_content_source",
+            "awaiting_script_ai_goal": "vproduct|script_goal_screen",
+            "awaiting_script_ai_audience": "vproduct|script_audience_screen",
+            "awaiting_script_ai_platform": "vproduct|script_platform_screen",
+            "awaiting_script_ai_style": "vproduct|script_style_screen",
+            "awaiting_script_ai_duration": "vproduct|script_duration_screen",
+            "awaiting_script_ai_edit": "vproduct|script_ai_review",
+        }
+        if step == "awaiting_script_ai_content":
+            back[step] = str(
+                (session.get("draft") or {}).get("script_content_input_back_callback")
+                or back[step]
+            )
+        return await safe_edit_or_send(target, prompts[step], parse_mode=None, reply_markup=video_script_nav_keyboard(back[step]))
+    return await safe_edit_or_send(target, video_script_hub_text(lang), parse_mode=None, reply_markup=video_script_hub_keyboard(lang))
+
+
+async def video_script_generate_ai(query, user_id: int, session: dict, lang: str = "vi"):
+    draft = dict(session.get("draft") or {})
+    try:
+        prompt = video_script_product.build_ai_prompt(draft)
+    except ValueError:
+        session = task3d_session_step(user_id, "script_ai_content_source", provider_called=False, xu_charged=0)
+        return await video_script_render_step(query, session, lang)
+    await safe_edit_or_send(
+        query,
+        "⏳ TOAN AAS đang tạo kịch bản hoàn chỉnh theo đúng mục tiêu, nội dung, đối tượng, nền tảng, phong cách, tỉ lệ và thời lượng đã chọn. Chưa tạo video và chưa trừ Xu.",
+        parse_mode=None,
+    )
+    try:
+        script_text = await generate_video_script_pack(prompt, user_id)
+    except Exception as exc:
+        logger.warning("video_script_ai_generation_failed | %s", sanitize_log_text(type(exc).__name__))
+        session = task3d_session_step(user_id, "script_ai_duration", provider_called=True, script_provider_error=type(exc).__name__, xu_charged=0)
+        return await safe_edit_or_send(
+            query,
+            "⚠️ Chưa tạo được kịch bản từ nguồn AI. TOAN AAS giữ nguyên toàn bộ lựa chọn; anh/chị có thể thử lại hoặc đổi thời lượng. Chưa tạo video và chưa trừ Xu.",
+            parse_mode=None,
+            reply_markup=video_script_duration_keyboard(),
+        )
+    script_text = str(script_text or "")
+    if not script_text.strip():
+        session = task3d_session_step(
+            user_id,
+            "script_ai_duration",
+            provider_called=True,
+            script_provider_error="empty_script",
+            job_created=False,
+            outbox_created=False,
+            xu_charged=0,
+        )
+        return await safe_edit_or_send(
+            query,
+            "⚠️ Nguồn AI chưa trả về kịch bản có nội dung. TOAN AAS giữ nguyên toàn bộ lựa chọn; anh/chị có thể thử lại hoặc đổi thời lượng. Chưa tạo video và chưa trừ Xu.",
+            parse_mode=None,
+            reply_markup=video_script_duration_keyboard(),
+        )
+    revision = max(1, safe_int(draft.get("script_ai_revision"), 1))
+    session = task3d_session_step(
+        user_id,
+        "script_ai_review",
+        script_text=script_text,
+        manual_script_raw=script_text,
+        script_source="ai",
+        script_source_parent="script_ai_review",
+        script_ai_prompt=prompt,
+        script_ai_revision=revision,
+        provider_called=True,
+        job_created=False,
+        outbox_created=False,
+        xu_charged=0,
+    )
+    return await video_script_render_step(query, session, lang)
+
+
+async def video_script_extract_document(document, context) -> tuple[bool, str, str]:
+    if not document:
+        return False, "", "⚠️ Hãy gửi file TXT, DOCX hoặc PDF."
+    file_name = str(getattr(document, "file_name", "") or "script.txt")
+    ext = os.path.splitext(file_name)[1].lower()
+    if ext not in {".txt", ".md", ".docx", ".pdf"}:
+        return False, "", "⚠️ File kịch bản chỉ hỗ trợ TXT, DOCX hoặc PDF."
+    file_size = safe_int(getattr(document, "file_size", 0), 0)
+    if file_size > DOC_MAX_FILE_BYTES:
+        return False, "", f"⚠️ File quá lớn. Giới hạn là {DOC_MAX_FILE_BYTES // (1024 * 1024)} MB."
+    try:
+        tg_file = await context.bot.get_file(str(getattr(document, "file_id", "") or ""))
+        data = bytes(await tg_file.download_as_bytearray())
+    except Exception:
+        return False, "", "⚠️ Chưa tải được file kịch bản từ Telegram. Hãy gửi lại file."
+    if ext in {".txt", ".md"}:
+        text = data.decode("utf-8-sig", errors="replace")
+        return (True, text, "") if text.strip() else (False, "", "⚠️ File không có nội dung chữ.")
+    if ext == ".docx":
+        try:
+            text = video_script_product.extract_docx_text(data)
+            return (True, text, "") if text.strip() else (False, "", "⚠️ DOCX không có nội dung chữ.")
+        except ValueError:
+            return False, "", "⚠️ Chưa đọc được toàn bộ DOCX. Chưa có nội dung nào được lưu."
+    with tempfile.TemporaryDirectory(prefix="toanaas_video_script_") as tmpdir:
+        input_path = os.path.join(tmpdir, "input" + ext)
+        with open(input_path, "wb") as file_handle:
+            file_handle.write(data)
+        if ext == ".pdf":
+            if not PdfReader:
+                return False, "", "⚠️ Máy chủ chưa có bộ đọc PDF. Chưa có nội dung nào được lưu."
+            try:
+                reader = PdfReader(input_path)
+                if len(reader.pages) > DOC_MAX_PAGES:
+                    return False, "", f"⚠️ PDF có hơn {DOC_MAX_PAGES} trang nên chưa thể đọc trọn vẹn. Hãy chia file nhỏ hơn."
+                pages = [(page.extract_text() or "") for page in reader.pages]
+                text = "\n\n".join(pages)
+                return (True, text, "") if text.strip() else (False, "", "⚠️ PDF không có lớp chữ để đọc đầy đủ.")
+            except Exception:
+                return False, "", "⚠️ Chưa đọc được toàn bộ PDF. Chưa có nội dung nào được lưu."
 
 
 def video_flow7_store_script_proposal(user_id: int, script_text: str, *, source: str) -> tuple[dict, dict]:
     proposal = video_flow7.parse_script_proposal(script_text)
     if not proposal.get("source_text"):
         raise ValueError("script_missing")
-    if safe_int(proposal.get("proposed_scene_count"), 0) > 20:
+    if safe_int(proposal.get("proposed_scene_count"), 0) > video_script_product.MAX_SCENES:
         raise ValueError("script_scene_count_over_limit")
-    proposed_scene_count = max(5, safe_int(proposal.get("proposed_scene_count"), 5))
+    coverage = dict(proposal.get("coverage") or {})
+    if not coverage.get("no_truncation") or not coverage.get("exact_match"):
+        raise ValueError("script_coverage_incomplete")
+    proposed_scene_count = max(
+        video_script_product.MIN_SCENES,
+        min(
+            video_script_product.MAX_SCENES,
+            safe_int(proposal.get("proposed_scene_count"), video_script_product.MIN_SCENES),
+        ),
+    )
     proposal["proposed_scene_count"] = proposed_scene_count
+    existing = get_video_session(user_id)
+    existing_draft = dict(existing.get("draft") or {})
     session = task3d_session_step(
         user_id,
         "flow7_script_scene_count",
         script_text=str(proposal.get("source_text") or ""),
         manual_script_raw=str(proposal.get("source_text") or ""),
         parsed_script_scenes=list(proposal.get("proposed_scenes") or []),
+        parsed_script_ranges=list(proposal.get("scene_ranges") or []),
+        script_coverage=coverage,
         proposed_scene_count=proposed_scene_count,
         scene_count_confirmed=False,
         script_source=str(source or "customer"),
+        script_source_parent=str(existing_draft.get("script_source_parent") or source or "customer"),
         provider_called=False,
         job_created=False,
         outbox_created=False,
@@ -90331,28 +90765,121 @@ def video_flow7_start_confirmed_script_state(
     scene_count: int,
 ) -> dict:
     draft = dict(session.get("draft") or {})
-    count = max(5, min(20, safe_int(scene_count, 5)))
+    count = max(
+        video_script_product.MIN_SCENES,
+        min(
+            video_script_product.MAX_SCENES,
+            safe_int(scene_count, video_script_product.MIN_SCENES),
+        ),
+    )
+    raw_script = str(draft.get("manual_script_raw") or draft.get("script_text") or "")
+    partition = video_script_product.semantic_beats(raw_script, count)
+    if not partition.get("ok") or not (partition.get("coverage") or {}).get("exact_match"):
+        raise ValueError("script_coverage_incomplete")
+    semantic_beats = list(partition.get("semantic_beats") or [])
+    selected_profile = str(draft.get("script_profile_key") or "storytelling_life")
+    selected_content = str(draft.get("script_content_brief") or raw_script)
+    script_metadata = {
+        key: deepcopy(draft.get(key))
+        for key in (
+            "script_goal",
+            "script_goal_label",
+            "script_content_choice",
+            "script_content_brief",
+            "script_topic",
+            "script_profile_key",
+            "script_audience",
+            "script_audience_label",
+            "script_platform",
+            "script_platform_label",
+            "script_style",
+            "script_style_label",
+            "script_ratio",
+            "script_duration_seconds",
+            "script_ai_revision",
+            "script_file_name",
+            "script_source_parent",
+        )
+        if key in draft
+    }
+    selected_ratio = str(draft.get("script_ratio") or "")
+    if selected_ratio not in video_flow6.SUPPORTED_RATIOS:
+        selected_ratio = ""
     state = start_public_video_scene2_state(
         context,
         user_id,
         "script_image_video",
         origin_step="script_scene_count_confirmed",
         content_mode="manual",
-        topic=str(draft.get("script_text") or "Kịch bản người dùng")[:1600],
-        script_text=str(draft.get("script_text") or ""),
-        manual_script_raw=str(draft.get("manual_script_raw") or ""),
-        parsed_script_scenes=list(draft.get("parsed_script_scenes") or []),
+        content_source="approved_script",
+        topic="Kịch bản hoàn chỉnh đã được người dùng duyệt",
+        subject=selected_content[:1600],
+        context=selected_content[:1600],
+        script_text=raw_script,
+        manual_script_raw=raw_script,
+        parsed_script_scenes=list(partition.get("scenes") or []),
+        parsed_script_ranges=list(partition.get("ranges") or []),
+        script_coverage=dict(partition.get("coverage") or {}),
+        idea_scene_beats=semantic_beats,
+        primary_profile=selected_profile,
+        primary_profile_key=selected_profile,
+        content_choice={
+            "id": "approved_full_script",
+            "title": "Kịch bản hoàn chỉnh đã duyệt",
+            "concept": selected_content[:1600],
+            "source": str(draft.get("script_source") or "customer"),
+        },
+        selected_suggestion={
+            "id": "approved_full_script",
+            "title": "Kịch bản hoàn chỉnh đã duyệt",
+            "concept": selected_content[:1600],
+        },
         scene_count_confirmed=True,
         script_source=str(draft.get("script_source") or "customer"),
+        **script_metadata,
     )
     state.update({
-        "script_text": str(draft.get("script_text") or ""),
-        "manual_script_raw": str(draft.get("manual_script_raw") or ""),
-        "parsed_script_scenes": list(draft.get("parsed_script_scenes") or []),
+        "subject": selected_content[:1600],
+        "context": selected_content[:1600],
+        "script_text": raw_script,
+        "manual_script_raw": raw_script,
+        "parsed_script_scenes": list(partition.get("scenes") or []),
+        "parsed_script_ranges": list(partition.get("ranges") or []),
+        "script_coverage": dict(partition.get("coverage") or {}),
+        "idea_scene_beats": semantic_beats,
+        "primary_profile": selected_profile,
+        "primary_profile_key": selected_profile,
+        "content_choice": {
+            "id": "approved_full_script",
+            "title": "Kịch bản hoàn chỉnh đã duyệt",
+            "concept": selected_content[:1600],
+            "source": str(draft.get("script_source") or "customer"),
+        },
+        "selected_suggestion": {
+            "id": "approved_full_script",
+            "title": "Kịch bản hoàn chỉnh đã duyệt",
+            "concept": selected_content[:1600],
+        },
         "scene_count_confirmed": True,
+        "content_source": "approved_script",
+        "script_metadata": script_metadata,
+        **script_metadata,
     })
     state = video_scene3_flow.invalidate_scene_outputs(state, count)
-    state = video_profile_studio_step(context, state, "aspect_ratio", rebuild_scene_count=False)
+    if selected_ratio:
+        state["aspect_ratio"] = selected_ratio
+        content_addons = dict(state.get("content_addons") or {})
+        content_addons["aspect_ratio"] = selected_ratio
+        state["content_addons"] = content_addons
+        state = video_flow6.sync_scene_state(state)
+        state = video_profile_studio_step(
+            context,
+            state,
+            "character",
+            rebuild_scene_count=False,
+        )
+    else:
+        state = video_profile_studio_step(context, state, "aspect_ratio", rebuild_scene_count=False)
     return state
 
 
@@ -90432,6 +90959,12 @@ def video_flow7_seed_internal_planning_state(state: dict, *, fallback_subject: s
 def video_flow7_after_ratio(state: dict) -> tuple[dict, str]:
     updated = video_flow6.sync_scene_state(dict(state or {}))
     flow_kind = video_flow7_kind(updated)
+    if (
+        flow_kind == "script_to_video"
+        and bool(updated.get("scene_count_confirmed"))
+        and str(updated.get("script_text") or updated.get("manual_script_raw") or "").strip()
+    ):
+        return updated, "character"
     if flow_kind == "ai_real" and bool(updated.get("flow8_direct_entry")):
         return updated, "ai_input_type"
     if flow_kind in {"script_to_video", "trend_video"} and bool(updated.get("flow8_direct_entry")):
@@ -90862,9 +91395,9 @@ def video_semantics_audit_payload() -> dict:
     expected_route_owners = {
         "video_trend": ("vproduct|open|video_trend", "handle_video_product_callback"),
         "video_ai_real": ("vid3|entry|video_ai_real", "handle_video_uiflow3_callback"),
-        "script_image_video": ("vid3|entry|script_image_video", "handle_video_uiflow3_callback"),
+        "script_image_video": ("vproduct|open|script_image_video", "handle_video_product_callback"),
         "frame_video_local": ("vproduct|open|frame_video_local", "handle_video_product_callback"),
-        "self_shot_scene_change": ("vid3|entry|self_shot_scene_change", "handle_video_uiflow3_callback"),
+        "self_shot_scene_change": ("vproduct|open|self_shot_scene_change", "handle_video_product_callback"),
         "storyboard_prompt": ("vproduct|open|storyboard_prompt", "handle_video_product_callback"),
         "multi_scene_film": ("longvideo|public_guard", "handle_long_video_callback"),
     }
@@ -90878,7 +91411,7 @@ def video_semantics_audit_payload() -> dict:
                 ) == expected_route_owners[product]
                 for product in expected_route_owners
             ),
-            "detail": "Các sản phẩm đã duyệt dùng UIFLOW3; Trend và Video dài tập giữ owner riêng.",
+            "detail": "Video AI chân thật dùng UIFLOW3; Kịch bản, Video tự quay và các sản phẩm khác giữ owner riêng đã chứng minh.",
         },
         {
             "name": "content_first_order_is_canonical",
@@ -92794,6 +93327,8 @@ def task3d_product_intro_text(product_id: str, lang: str = "vi") -> str:
     product = VIDEO_PRODUCT_REGISTRY.get(str(product_id or "")) or {}
     if not product:
         return "⚠️ Sản phẩm video không tồn tại. Bot chưa trừ Xu."
+    if str(product_id or "") == "script_image_video":
+        return video_script_hub_text(lang)
     if normalize_user_language(lang) != "vi":
         return (
             f"{product.get('public_label')}\n\n"
@@ -92847,6 +93382,8 @@ def task3d_product_intro_keyboard(
         return video_edit_hub_keyboard(lang)
     if str(product_id or "") == "frame_video_local":
         return ivf.frame_video_unified_menu_keyboard(lang)
+    if str(product_id or "") == "script_image_video":
+        return video_script_hub_keyboard(lang)
     is_vi = normalize_user_language(lang) == "vi"
     parent_callback = str(parent_callback_override or product.get("parent_menu_callback") or "menu|main_video")
     menu_label = "⬅️ Menu video" if is_vi else "⬅️ Video menu"
@@ -92897,11 +93434,7 @@ def task3d_product_intro_keyboard(
             [("✨ Prompt → Video", "vproduct|ai_prompt_menu|video_ai_real"), ("🖼 Ảnh → Video", "vproduct|ai_image_menu|video_ai_real")],
             [(menu_label, parent_callback), secondary_menu],
         ],
-        "script_image_video": [
-            [("📄 Gửi kịch bản có sẵn", "vproduct|script_existing|script_image_video"), ("💡 Gợi ý kịch bản", "vproduct|script_ideas|script_image_video")],
-            [("🗂 Ý tưởng video có sẵn", "vproduct|idea_library|script_image_video"), ("📖 Xem hướng dẫn video", "menu|guide_video_ai")],
-            [(menu_label, parent_callback), secondary_menu],
-        ],
+        "script_image_video": [],
         "self_shot_scene_change": [
             [("🎥 Gửi video tự quay", "vproduct|selfshot_source|upload"), ("📖 Xem hướng dẫn video", "menu|guide_video_ai")],
             [(menu_label, parent_callback), secondary_menu],
@@ -102998,6 +103531,7 @@ def video_selfshot2_invoice_keyboard() -> InlineKeyboardMarkup:
 def video_selfshot2_build_plan(draft: dict) -> list[dict]:
     return video_selfshot2.build_scene_plan(
         analysis=dict(draft.get("source_analysis") or {}),
+        source_segment=dict(draft.get("source_segment") or {}),
         subject_manifest=dict(draft.get("subject_manifest") or {}),
         constraints=dict(draft.get("preserve_constraints") or {}),
         scene_count=max(1, safe_int(draft.get("scene_count"), 1)),
@@ -103081,6 +103615,60 @@ def video_selfshot2_preflight(draft: dict) -> dict:
     return report
 
 
+def video_selfshot2_tail_host(draft: dict) -> dict:
+    current = video_selfshot2_draft({"draft": draft})
+    prompts = [dict(item) for item in current.get("video_prompts") or [] if isinstance(item, dict)]
+    current.update({
+        "plan_approved": True,
+        "plan_status": "approved",
+        "content_mode": str(current.get("content_mode") or "manual"),
+        "canonical_content_mode": str(current.get("canonical_content_mode") or "self_shot_scene_change"),
+        "per_scene_content": [dict(item) for item in current.get("scene_plan") or [] if isinstance(item, dict)],
+        "selected_prompt": "\n\n".join(
+            str(item.get("prompt") or "").strip()
+            for item in prompts
+            if str(item.get("prompt") or "").strip()
+        ),
+        "selected_prompt_revision": max(
+            [safe_int(item.get("prompt_version"), 1) for item in prompts] or [1]
+        ),
+    })
+    return current
+
+
+def video_selfshot2_branding_tail(tail: dict, draft: dict) -> dict:
+    current = video_tail9.normalize_state(tail)
+    addons = dict((draft or {}).get("visual_addons") or {})
+    logo = dict(addons.get("logo") or {})
+    watermark = dict(addons.get("watermark") or {})
+    logo_file_id = str(logo.get("file_id") or "").strip()
+    logo_position = str(logo.get("position") or "").strip()
+    watermark_text = str(watermark.get("text") or "").strip()
+    watermark_position = str(watermark.get("position") or "").strip()
+    current["logo_config"] = {
+        "enabled": bool(logo.get("enabled") and logo_file_id and logo_position in PRODUCT_VIDEO_LOGO_POSITIONS),
+        "asset_file_id": logo_file_id,
+        "file_size": max(0, safe_int(logo.get("file_size"), 0)),
+        "position": logo_position if logo_position in PRODUCT_VIDEO_LOGO_POSITIONS else "",
+    }
+    current["watermark_config"] = {
+        "enabled": bool(watermark.get("enabled") and watermark_text and watermark_position in PRODUCT_VIDEO_LOGO_POSITIONS),
+        "text": watermark_text,
+        "position": watermark_position if watermark_position in PRODUCT_VIDEO_LOGO_POSITIONS else "",
+        "opacity_percent": max(0, min(100, safe_int(watermark.get("opacity_percent"), 45))),
+    }
+    current["logo_status"] = (
+        "configured" if current["logo_config"]["enabled"] else "not_configured" if logo_file_id else "skipped"
+    )
+    current["watermark_status"] = (
+        "configured" if current["watermark_config"]["enabled"] else "not_configured" if watermark_text else "skipped"
+    )
+    current["branding_back_to"] = "product_review"
+    current["summary_status"] = "not_ready"
+    current["review_status"] = "not_ready"
+    return video_tail9.normalize_state(current)
+
+
 def video_selfshot3_draft(session: dict | None = None) -> dict:
     current = dict((session or {}).get("draft") or {})
     defaults = video_selfshot3.initial_draft()
@@ -103098,6 +103686,24 @@ def video_selfshot3_draft(session: dict | None = None) -> dict:
     defaults.setdefault("wallet_mutations", 0)
     defaults.setdefault("xu_charged", 0)
     return defaults
+
+
+def video_selfshot3_tail_host(draft: dict) -> dict:
+    current = video_selfshot3_draft({"draft": draft})
+    prompt_bundle = dict(current.get("prompt_bundle") or video_selfshot3_compile_prompt(current))
+    current.update({
+        "scene_count": 1,
+        "plan_approved": True,
+        "plan_status": "approved",
+        "content_source": str(current.get("content_source") or "source_video"),
+        "content_mode": str(current.get("content_mode") or "manual"),
+        "canonical_content_mode": "self_shot_cinematic_transform",
+        "per_scene_content": [dict(item) for item in current.get("transformation_stages") or [] if isinstance(item, dict)],
+        "selected_prompt": json.dumps(prompt_bundle, ensure_ascii=False, sort_keys=True),
+        "selected_prompt_revision": max(1, safe_int(current.get("revision"), 1)),
+        "prompt_bundle": prompt_bundle,
+    })
+    return current
 
 
 def save_video_selfshot3_draft(user_id: int, draft: dict, *, step: str = "") -> dict:
@@ -103368,6 +103974,19 @@ async def video_selfshotflow4_handle_result(target, user_id: int, context: Conte
             current["source_analysis"] = merged_analysis
             current["analysis_status"] = "failed"
             current["analysis_error"] = str(inspection.get("reason") or "local_analysis_failed")
+    if flow == "ss2" and screen == "subject":
+        current[video_selfshotflow4.FLOW_FLAGS[flow]] = False
+        current["selfshot2_screen"] = "subject"
+        current["selfshot2_full_product_flow"] = True
+        save_video_selfshot2_draft(user_id, current, step="selfshot2:subject")
+        return await video_selfshot2_render(target, user_id, "subject", draft=current)
+    if flow == "ss3" and screen == "mode":
+        current[video_selfshotflow4.FLOW_FLAGS[flow]] = False
+        current["selfshot3_screen"] = "subject"
+        current["selfshot3_full_product_flow"] = True
+        current["selfshot3_transform_mode"] = video_selfshot3.MODE_ONE_TAKE
+        save_video_selfshot3_draft(user_id, current, step="selfshot3:subject")
+        return await video_selfshot3_render(target, user_id, "subject", draft=current)
     if screen == "tail_review":
         return_to_summary = str(current.pop("video_tail_return_to", "") or "") == "summary"
         save_video_selfshotflow4_draft(user_id, flow, current, step=f"selfshot{flow[-1]}:tail_review")
@@ -103927,12 +104546,54 @@ def video_tail9_hydrate_scene3_host(host: dict | None, session: dict | None) -> 
         "manual_content",
         "manual_script_raw",
         "script_text",
+        "parsed_script_scenes",
+        "parsed_script_ranges",
+        "script_coverage",
+        "scene_count_confirmed",
+        "script_source",
+        "script_metadata",
+        "script_sha256",
+        "script_exact_match",
+        "video_prompt_versions",
+        "plan",
+        "scene_plan",
         "source_video_id",
         "storyboard_session_id",
     )
+    persisted_script = str(
+        contract.get("manual_script_raw")
+        or contract.get("script_text")
+        or draft.get("manual_script_raw")
+        or draft.get("script_text")
+        or ""
+    )
+    current_script = str(current.get("manual_script_raw") or current.get("script_text") or "")
+    script_identity_matches = bool(
+        persisted_script and (not current_script or current_script == persisted_script)
+    )
+    script_identity_fields = {
+        "script_text",
+        "manual_script_raw",
+        "parsed_script_scenes",
+        "parsed_script_ranges",
+        "script_coverage",
+        "scene_count_confirmed",
+        "script_source",
+        "script_metadata",
+        "script_sha256",
+        "script_exact_match",
+        "video_prompt_versions",
+        "plan",
+        "scene_plan",
+    }
     for field in fields:
+        if field in script_identity_fields and not script_identity_matches:
+            continue
         existing = current.get(field)
-        if existing not in (None, "", [], {}):
+        missing = existing in (None, "", [], {})
+        if field in {"scene_count_confirmed", "script_exact_match"}:
+            missing = not bool(existing)
+        if not missing:
             continue
         for source in sources:
             value = source.get(field)
@@ -104995,12 +105656,10 @@ def video_tail9_logo_text(tail: dict) -> str:
 def video_tail9_logo_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
     current = dict(tail or {})
     is_video_edit = str(current.get("video_product_type") or "") == video_editengine1.PRODUCT_TYPE
-    if str(current.get("branding_back_to") or "prompt") == "summary":
-        back_callback = "video_tail|summary|open"
-    elif is_video_edit:
+    if is_video_edit:
         back_callback = "video_tail|review|edit_operation"
     else:
-        back_callback = "video_tail|review|prompts"
+        back_callback = video_tail9.branding_back_callback(current)
     menu_button = (
         ("🏠 Menu chính", "menu|main")
         if is_video_edit
@@ -105025,7 +105684,7 @@ def video_tail9_position_text(target: str) -> str:
 def video_tail9_position_keyboard(
     target: str,
     *,
-    columns: int = 2,
+    columns: int = 3,
     menu_callback: str = "menu|main_video",
 ) -> InlineKeyboardMarkup:
     labels = (
@@ -105033,13 +105692,11 @@ def video_tail9_position_keyboard(
         ("⬅️ Giữa trái", "center_left"), ("⏺ Chính giữa", "center"), ("➡️ Giữa phải", "center_right"),
         ("↙️ Dưới trái", "bottom_left"), ("⬇️ Dưới giữa", "bottom_center"), ("↘️ Dưới phải", "bottom_right"),
     )
-    width = 3 if safe_int(columns, 2) == 3 else 2
+    del columns
     rows = [
-        [
-            (label, f"video_tail|logo|setpos|{target}|{position}")
-            for label, position in labels[offset:offset + width]
-        ]
-        for offset in range(0, len(labels), width)
+        [(label, f"video_tail|logo|setpos|{target}|{position}") for label, position in labels[0:3]],
+        [(label, f"video_tail|logo|setpos|{target}|{position}") for label, position in labels[3:6]],
+        [(label, f"video_tail|logo|setpos|{target}|{position}") for label, position in labels[6:9]],
     ]
     menu_button = (
         ("🏠 Menu chính", "menu|main")
@@ -106729,6 +107386,19 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 parse_mode="HTML",
                 reply_markup=ivf.frame_video_unified_menu_keyboard(lang),
             )
+        if value == "script_image_video":
+            clear_video_session(uid)
+            session = task3d_session_step(
+                uid,
+                "script_hub",
+                product_id="script_image_video",
+                return_to="menu|main_video",
+                provider_called=False,
+                job_created=False,
+                outbox_created=False,
+                xu_charged=0,
+            )
+            return await video_script_render_step(query, session, lang)
         if value in VIDEO_PROFILE_FIRST_PRODUCTS:
             parent_callback = str(VIDEO_PRODUCT_REGISTRY[value].get("parent_menu_callback") or "menu|main_video")
             current_session = get_video_session(uid)
@@ -106788,7 +107458,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 duration=architecture_draft.get("duration") or 0,
                 input_collected=True,
             )
-        if value in {"video_ai_real", "video_reference", "motion_prompt", "script_image_video", "multi_scene_film"}:
+        if value in {"video_ai_real", "video_reference", "motion_prompt", "multi_scene_film"}:
             return await start_public_video_scene2_step(
                 query,
                 context,
@@ -106869,6 +107539,354 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if action == "legacy":
             await query.answer()
         return await safe_edit_or_send(query, "⌛ Phiên video đã hết hạn. Bot chưa trừ Xu.", reply_markup=main_video_keyboard(lang))
+    script_actions = {
+        "script_hub", "script_ai", "script_manual", "script_upload",
+        "script_goal_screen", "script_goal", "script_goal_custom",
+        "script_content_source", "script_profiles", "script_profile", "script_ideas",
+        "script_content_custom", "script_suggestion", "script_suggestions_screen", "script_suggestions_refresh",
+        "script_audience_screen", "script_audience", "script_audience_custom",
+        "script_platform_screen", "script_platform", "script_platform_custom",
+        "script_style_screen", "script_style", "script_style_custom",
+        "script_ratio_screen", "script_ratio", "script_duration_screen", "script_duration",
+        "script_duration_custom", "script_ai_review", "script_ai_edit", "script_ai_regenerate",
+        "script_ai_use", "script_file_use", "script_file_replace", "script_count_back",
+        "script_count_accept", "script_count_custom",
+    }
+    if action in script_actions:
+        if product_id != "script_image_video":
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Nút Kịch bản này không thuộc sản phẩm đang mở. TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+                parse_mode=None,
+                reply_markup=main_video_keyboard(lang),
+            )
+        draft = dict(session.get("draft") or {})
+        if action == "script_hub":
+            session = task3d_session_step(uid, "script_hub", provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_ai":
+            clear_video_session(uid)
+            session = task3d_session_step(
+                uid,
+                "script_ai_goal",
+                product_id="script_image_video",
+                return_to="menu|main_video",
+                script_source="ai",
+                script_source_parent="script_ai_review",
+                script_ai_revision=1,
+                provider_called=False,
+                job_created=False,
+                outbox_created=False,
+                xu_charged=0,
+            )
+            return await video_script_render_step(query, session, lang)
+        if action == "script_manual":
+            clear_video_session(uid)
+            session = task3d_session_step(
+                uid,
+                "awaiting_existing_script",
+                product_id="script_image_video",
+                return_to="menu|main_video",
+                script_source="customer",
+                script_source_parent="script_manual",
+                provider_called=False,
+                xu_charged=0,
+            )
+            return await video_script_render_step(query, session, lang)
+        if action in {"script_upload", "script_file_replace"}:
+            if action == "script_upload":
+                clear_video_session(uid)
+            session = task3d_session_step(
+                uid,
+                "awaiting_script_file",
+                product_id="script_image_video",
+                return_to="menu|main_video",
+                script_source="file",
+                script_source_parent="script_file_review",
+                provider_called=False,
+                xu_charged=0,
+            )
+            return await video_script_render_step(query, session, lang)
+        if action == "script_goal_screen":
+            session = task3d_session_step(uid, "script_ai_goal", provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_goal_custom":
+            session = task3d_session_step(uid, "awaiting_script_ai_goal", provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_goal":
+            if value not in video_script_product.GOALS:
+                return await video_script_render_step(query, task3d_session_step(uid, "script_ai_goal"), lang)
+            session = task3d_session_step(
+                uid,
+                "script_ai_content_source",
+                script_goal=value,
+                script_goal_label=video_script_product.goal_label(value),
+                provider_called=False,
+                xu_charged=0,
+            )
+            return await video_script_render_step(query, session, lang)
+        if action == "script_content_source":
+            session = task3d_session_step(uid, "script_ai_content_source", provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_profiles":
+            page = max(1, min(4, safe_int(value, 1)))
+            session = task3d_session_step(uid, "script_ai_profiles", script_profile_page=page, provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(
+                query,
+                video_script_profiles_text(page),
+                parse_mode=None,
+                reply_markup=video_script_profiles_keyboard(page),
+            )
+        if action == "script_profile":
+            profile = video_script_product.profile_record(value)
+            if not profile:
+                return await safe_edit_or_send(query, video_script_profiles_text(1), parse_mode=None, reply_markup=video_script_profiles_keyboard(1))
+            profile_page = max(1, min(4, safe_int(draft.get("script_profile_page"), 1)))
+            suggestions = video_script_product.profile_content_suggestions(
+                value,
+                goal=str(draft.get("script_goal") or ""),
+                revision=0,
+            )
+            session = task3d_session_step(
+                uid,
+                "script_ai_suggestions",
+                script_profile_key=value,
+                script_suggestion_source="profiles",
+                script_suggestion_revision=0,
+                script_content_suggestions=suggestions,
+                script_suggestion_back_callback=f"vproduct|script_profiles|{profile_page}",
+                provider_called=False,
+                xu_charged=0,
+            )
+            return await safe_edit_or_send(query, video_script_suggestions_text(session), parse_mode=None, reply_markup=video_script_suggestions_keyboard(session))
+        if action == "script_ideas":
+            suggestions = video_script_product.idea_library_suggestions(
+                goal=str(draft.get("script_goal") or ""),
+                revision=0,
+            )
+            session = task3d_session_step(
+                uid,
+                "script_ai_suggestions",
+                script_profile_key="",
+                script_suggestion_source="ideas",
+                script_suggestion_revision=0,
+                script_content_suggestions=suggestions,
+                script_suggestion_back_callback="vproduct|script_content_source",
+                provider_called=False,
+                xu_charged=0,
+            )
+            return await safe_edit_or_send(query, video_script_suggestions_text(session), parse_mode=None, reply_markup=video_script_suggestions_keyboard(session))
+        if action == "script_suggestions_screen":
+            if not video_script_product.compact_suggestions(draft.get("script_content_suggestions") or []):
+                return await video_script_render_step(
+                    query,
+                    task3d_session_step(uid, "script_ai_content_source", provider_called=False, xu_charged=0),
+                    lang,
+                )
+            session = task3d_session_step(uid, "script_ai_suggestions", provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(query, video_script_suggestions_text(session), parse_mode=None, reply_markup=video_script_suggestions_keyboard(session))
+        if action == "script_content_custom":
+            back_callback = (
+                "vproduct|script_suggestions_screen"
+                if str(session.get("current_step") or "") == "script_ai_suggestions"
+                else "vproduct|script_content_source"
+            )
+            session = task3d_session_step(
+                uid,
+                "awaiting_script_ai_content",
+                script_content_input_back_callback=back_callback,
+                provider_called=False,
+                xu_charged=0,
+            )
+            return await video_script_render_step(query, session, lang)
+        if action == "script_suggestions_refresh":
+            revision = safe_int(draft.get("script_suggestion_revision"), 0) + 1
+            if str(draft.get("script_suggestion_source") or "") == "ideas":
+                suggestions = video_script_product.idea_library_suggestions(
+                    goal=str(draft.get("script_goal") or ""),
+                    revision=revision,
+                )
+            else:
+                suggestions = video_script_product.profile_content_suggestions(
+                    str(draft.get("script_profile_key") or ""),
+                    goal=str(draft.get("script_goal") or ""),
+                    revision=revision,
+                )
+            session = task3d_session_step(
+                uid,
+                "script_ai_suggestions",
+                script_suggestion_revision=revision,
+                script_content_suggestions=suggestions,
+                provider_called=False,
+                xu_charged=0,
+            )
+            return await safe_edit_or_send(query, video_script_suggestions_text(session), parse_mode=None, reply_markup=video_script_suggestions_keyboard(session))
+        if action == "script_suggestion":
+            suggestions = video_script_product.compact_suggestions(draft.get("script_content_suggestions") or [])
+            index = safe_int(value, -1)
+            if not 0 <= index < len(suggestions):
+                return await safe_edit_or_send(query, video_script_suggestions_text(session), parse_mode=None, reply_markup=video_script_suggestions_keyboard(session))
+            selected = dict(suggestions[index])
+            session = task3d_session_step(
+                uid,
+                "script_ai_audience",
+                script_profile_key=str(selected.get("profile_key") or draft.get("script_profile_key") or ""),
+                script_content_choice=selected,
+                script_content_brief=str(selected.get("brief") or selected.get("title") or ""),
+                script_topic=str(selected.get("title") or ""),
+                script_audience_back_callback="vproduct|script_suggestions_screen",
+                provider_called=False,
+                xu_charged=0,
+            )
+            return await video_script_render_step(query, session, lang)
+        if action == "script_audience_screen":
+            session = task3d_session_step(uid, "script_ai_audience", provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_audience_custom":
+            session = task3d_session_step(uid, "awaiting_script_ai_audience", provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_audience":
+            label = video_script_product.public_choice_label(video_script_product.AUDIENCES, value)
+            if not label:
+                return await video_script_render_step(query, task3d_session_step(uid, "script_ai_audience"), lang)
+            session = task3d_session_step(uid, "script_ai_platform", script_audience=value, script_audience_label=label, provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_platform_screen":
+            session = task3d_session_step(uid, "script_ai_platform", provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_platform_custom":
+            session = task3d_session_step(uid, "awaiting_script_ai_platform", provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_platform":
+            label = video_script_product.public_choice_label(video_script_product.PLATFORMS, value)
+            if not label:
+                return await video_script_render_step(query, task3d_session_step(uid, "script_ai_platform"), lang)
+            session = task3d_session_step(uid, "script_ai_style", script_platform=value, script_platform_label=label, provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_style_screen":
+            session = task3d_session_step(uid, "script_ai_style", provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_style_custom":
+            session = task3d_session_step(uid, "awaiting_script_ai_style", provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_style":
+            label = video_script_product.public_choice_label(video_script_product.STYLES, value)
+            if not label:
+                return await video_script_render_step(query, task3d_session_step(uid, "script_ai_style"), lang)
+            session = task3d_session_step(uid, "script_ai_ratio", script_style=value, script_style_label=label, provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_ratio_screen":
+            session = task3d_session_step(uid, "script_ai_ratio", provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_ratio":
+            ratio = video_script_product.RATIOS.get(value)
+            if not ratio:
+                return await video_script_render_step(query, task3d_session_step(uid, "script_ai_ratio"), lang)
+            session = task3d_session_step(uid, "script_ai_duration", script_ratio=ratio, provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_duration_screen":
+            session = task3d_session_step(uid, "script_ai_duration", provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_duration_custom":
+            session = task3d_session_step(uid, "awaiting_script_ai_duration", provider_called=False, xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_duration":
+            duration = safe_int(value, 0)
+            if duration not in video_script_product.DURATIONS:
+                return await video_script_render_step(query, task3d_session_step(uid, "script_ai_duration"), lang)
+            session = task3d_session_step(uid, "script_ai_duration", script_duration_seconds=duration, provider_called=False, xu_charged=0)
+            return await video_script_generate_ai(query, uid, session, lang)
+        if action == "script_ai_review":
+            session = task3d_session_step(uid, "script_ai_review", provider_called=bool(draft.get("script_text")), xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_ai_edit":
+            session = task3d_session_step(uid, "awaiting_script_ai_edit", provider_called=bool(draft.get("script_text")), xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_ai_regenerate":
+            session = task3d_session_step(
+                uid,
+                "script_ai_duration",
+                script_ai_revision=max(1, safe_int(draft.get("script_ai_revision"), 1) + 1),
+                provider_called=False,
+                xu_charged=0,
+            )
+            return await video_script_generate_ai(query, uid, session, lang)
+        if action == "script_ai_use":
+            script_text = str(draft.get("script_text") or "")
+            if not script_text.strip():
+                return await video_script_render_step(query, task3d_session_step(uid, "script_ai_duration"), lang)
+            task3d_session_step(uid, "script_ai_review", script_source_parent="script_ai_review")
+            try:
+                _stored, proposal = video_flow7_store_script_proposal(uid, script_text, source="ai")
+            except ValueError as exc:
+                return await safe_edit_or_send(query, f"⚠️ Kịch bản chưa thể chia cảnh: {str(exc)}. Nội dung cũ vẫn được giữ nguyên.", parse_mode=None, reply_markup=video_script_review_keyboard())
+            return await safe_edit_or_send_long_plain(query, video_flow7_script_count_text(proposal), reply_markup=video_flow7_script_count_keyboard(safe_int(proposal.get("proposed_scene_count"), 2)))
+        if action == "script_file_use":
+            script_text = str(draft.get("script_file_text") or "")
+            if not script_text.strip():
+                return await video_script_render_step(query, task3d_session_step(uid, "awaiting_script_file"), lang)
+            task3d_session_step(uid, "script_file_review", script_source_parent="script_file_review")
+            try:
+                _stored, proposal = video_flow7_store_script_proposal(
+                    uid,
+                    script_text,
+                    source=f"file:{str(draft.get('script_file_name') or 'script')}",
+                )
+            except ValueError as exc:
+                return await safe_edit_or_send(query, f"⚠️ Nội dung file chưa thể chia cảnh: {str(exc)}. File đã đọc vẫn được giữ nguyên.", parse_mode=None, reply_markup=video_script_review_keyboard(file_review=True))
+            return await safe_edit_or_send_long_plain(query, video_flow7_script_count_text(proposal), reply_markup=video_flow7_script_count_keyboard(safe_int(proposal.get("proposed_scene_count"), 2)))
+        if action == "script_count_back":
+            parent = str(draft.get("script_source_parent") or "script_manual")
+            target_step = {
+                "script_ai_review": "script_ai_review",
+                "script_file_review": "script_file_review",
+            }.get(parent, "awaiting_existing_script")
+            session = task3d_session_step(uid, target_step, provider_called=parent == "script_ai_review", xu_charged=0)
+            return await video_script_render_step(query, session, lang)
+        if action == "script_count_accept":
+            count = max(
+                video_script_product.MIN_SCENES,
+                min(
+                    video_script_product.MAX_SCENES,
+                    safe_int(draft.get("proposed_scene_count"), video_script_product.MIN_SCENES),
+                ),
+            )
+            try:
+                state = video_flow7_start_confirmed_script_state(context, uid, session, count)
+            except ValueError:
+                return await safe_edit_or_send(
+                    query,
+                    "⚠️ Chưa chứng minh được 100% nội dung kịch bản nằm trong kế hoạch cảnh. Nội dung gốc vẫn được giữ nguyên; chưa tạo tác vụ và chưa trừ Xu.",
+                    parse_mode=None,
+                    reply_markup=video_flow7_script_count_keyboard(count),
+                )
+            return await video_profile_scene1_render(query, state, lang)
+        if action == "script_count_custom":
+            session = task3d_session_step(
+                uid,
+                "awaiting_script_scene_count",
+                provider_called=False,
+                job_created=False,
+                outbox_created=False,
+                xu_charged=0,
+            )
+            return await safe_edit_or_send(
+                query,
+                "✍️ <b>Nhập số cảnh từ 2 đến 20</b>\n\nKịch bản → Video có thời lượng theo gói Chất lượng đã chọn. "
+                "Nội dung kịch bản gốc vẫn được giữ nguyên. Bước này chưa tạo tác vụ và chưa trừ Xu.",
+                parse_mode="HTML",
+                reply_markup=video_flow7_script_count_keyboard(
+                    safe_int((session.get("draft") or {}).get("proposed_scene_count"), 2)
+                ),
+            )
+    if product_id == "script_image_video":
+        current = video_profile_studio_state(context)
+        if (
+            str(current.get("source_product_id") or current.get("product_type") or "") == "script_image_video"
+            and bool(current.get("scene_count_confirmed"))
+        ):
+            return await video_profile_scene1_render(query, current, lang)
+        return await video_script_render_step(query, session, lang)
     if action == "ss2":
         # SELFSHOT2 has one callback owner. Buttons from old messages are
         # read-only unless they belong to the currently rendered screen.
@@ -106885,6 +107903,14 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         current_screen = str(current.get("selfshot2_screen") or "intro").strip()
         valid_screens = set(video_selfshot2.SCREEN_PARENTS)
         try:
+            if (
+                operation == "resume_segment"
+                and bool(current.get("source_video") or current.get("source_asset"))
+            ):
+                current[video_selfshotflow4.FLOW_FLAGS["ss2"]] = True
+                current["selfshot2_screen"] = "segment"
+                save_video_selfshot2_draft(uid, current, step="selfshot2:segment")
+                return await video_selfshot2_render(query, uid, "segment", draft=current)
             if video_selfshotflow4.enabled("ss2", current):
                 if operation.startswith("c4"):
                     result = video_selfshotflow4.apply_action("ss2", current, operation, argument)
@@ -106892,18 +107918,27 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 # A legacy callback from an earlier SelfShot2 screen is read-only.
                 return await video_selfshot2_render(query, uid, current_screen, draft=current)
             legacy_tail_screen = {
-                ("show", "review"): "review",
-                ("show", "addons"): "audio",
                 ("show", "finish"): "quality",
                 ("show", "package"): "quality",
-                ("review_addons", ""): "audio",
-                ("finish", ""): "quality",
                 ("quality", argument): "quality",
             }.get((operation, argument))
             if legacy_tail_screen:
                 return await video_tail9_render(query, uid, context, legacy_tail_screen)
             if not video_selfshot2.callback_allowed(current_screen, str(query.data or ""), current):
                 return await video_selfshot2_render(query, uid, current_screen, draft=current)
+            if operation == "review_addons":
+                overrides = dict(current.get("screen_return_overrides") or {})
+                overrides["addons"] = "review"
+                current["screen_return_overrides"] = overrides
+                save_video_selfshot2_draft(uid, current, step="selfshot2:addons")
+                return await video_selfshot2_render(query, uid, "addons", draft=current)
+            if operation == "finish":
+                current = video_selfshot2_tail_host(current)
+                save_video_selfshot2_draft(uid, current, step="selfshot2:tail")
+                tail, owner, host = video_tail9_context(uid, context)
+                tail = video_selfshot2_branding_tail(tail, current)
+                save_video_tail9_state(uid, context, tail, owner, host)
+                return await video_tail9_render(query, uid, context, "logo")
             if operation == "show":
                 screen = argument if argument in valid_screens else current_screen
                 current_parent = video_selfshot2.screen_parent(current_screen, current)
@@ -107058,6 +108093,16 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         current = video_selfshot3_draft(session)
         valid_screens = set(video_selfshot3.SCREEN_PARENTS) | {"intro", "package"}
         try:
+            if (
+                operation == "show"
+                and argument == "segment"
+                and bool(current.get("source_video") or current.get("source_asset"))
+                and not video_selfshotflow4.enabled("ss3", current)
+            ):
+                current[video_selfshotflow4.FLOW_FLAGS["ss3"]] = True
+                current["selfshot3_screen"] = "segment"
+                save_video_selfshot3_draft(uid, current, step="selfshot3:segment")
+                return await video_selfshot3_render(query, uid, "segment", draft=current)
             if video_selfshotflow4.enabled("ss3", current):
                 if operation.startswith("c4"):
                     result = video_selfshotflow4.apply_action("ss3", current, operation, argument)
@@ -107065,14 +108110,9 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 # Stale SelfShot3 callbacks are deliberately read-only.
                 return await video_selfshot3_render(query, uid, str(current.get("selfshot3_screen") or "segment"), draft=current)
             legacy_tail_screen = {
-                ("show", "review"): "review",
-                ("show", "audio"): "audio",
-                ("show", "addons"): "audio",
-                ("show", "finish"): "quality",
                 ("show", "package"): "quality",
                 ("audio_review", ""): "audio",
                 ("finish_review", ""): "review",
-                ("finish", ""): "quality",
                 ("quality", argument): "quality",
             }.get((operation, argument))
             if legacy_tail_screen:
@@ -107087,6 +108127,15 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             current_screen = str(current.get("selfshot3_screen") or "intro")
             if not video_selfshot3.callback_operation_allowed(current_screen, operation):
                 return await video_selfshot3_render(query, uid, current_screen, draft=current)
+            if operation == "finish":
+                current = video_selfshot3_tail_host(current)
+                save_video_selfshot3_draft(uid, current, step="selfshot3:tail")
+                tail, owner, host = video_tail9_context(uid, context)
+                tail["branding_back_to"] = "product_review"
+                tail["summary_status"] = "not_ready"
+                tail["review_status"] = "not_ready"
+                save_video_tail9_state(uid, context, tail, owner, host)
+                return await video_tail9_render(query, uid, context, "logo")
             if operation == "source":
                 current = video_selfshot3_draft({"draft": current})
                 current["selfshot3_canonical_flow"] = True
@@ -107201,7 +108250,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     f"<b>5 hướng mẫu:</b>\n{examples}\n\n"
                     "Đây là màn xem trước. Hãy gửi video nguồn để bắt đầu; chưa tạo tác vụ và chưa trừ Xu.",
                     parse_mode="HTML",
-                    reply_markup=video_scene3_keyboard([[('⬅️ Quay lại', 'vproduct|ss3|show|types'), ('🏠 Menu chính', 'menu|main')]]),
+                    reply_markup=video_scene3_keyboard([[('⬅️ Quay lại', 'vproduct|ss3|show|types'), ('🎬 Menu Video', 'menu|main_video')]]),
                 )
             if operation == "group":
                 group = next((item for item in video_selfshot3.transformation_catalog() if item["group_id"] == argument), None)
@@ -107209,6 +108258,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     return await video_selfshot3_render(query, uid, "groups", draft=current)
                 current["selected_group_id"] = argument
                 current["preset_page"] = 1
+                current["preset_source"] = "group"
                 save_video_selfshot3_draft(uid, current, step="selfshot3:presets")
                 return await video_selfshot3_render(query, uid, "presets", draft=current)
             if operation == "preset_page":
@@ -107224,7 +108274,9 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 if index < 1 or index > len(video_selfshot3.CONTENT_PROFILES):
                     return await video_selfshot3_render(query, uid, "content_profiles", draft=current)
                 current["content_profile"] = video_selfshot3.CONTENT_PROFILES[index - 1]
-                group = video_selfshot3.transformation_catalog()[(index - 1) % len(video_selfshot3.TRANSFORMATION_GROUPS)]
+                profile_row = dict(video_selfshot3.CONTENT_PROFILE_ROWS[index - 1])
+                current["content_profile_key"] = str(profile_row.get("profile_key") or "")
+                group = video_selfshot3.transformation_group_for_content_profile(index)
                 current["selected_group_id"] = str(group["group_id"])
                 current["preset_page"] = 1
                 current["preset_source"] = "content_profile"
@@ -107257,7 +108309,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 )
             if operation == "preset":
                 index = safe_int(argument, 0)
-                options = video_selfshot3.catalog_page(str(current.get("selected_group_id") or ""), safe_int(current.get("preset_page"), 1))
+                options = video_selfshot3.contextual_preset_page(current)
                 if index < 1 or index > len(options):
                     return await video_selfshot3_render(query, uid, "presets", draft=current)
                 current["selected_preset"] = dict(options[index - 1])
@@ -107369,12 +108421,31 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 return await safe_edit_or_send_long_plain(
                     query,
                     "📝 Câu lệnh biến đổi điện ảnh\n\n" + prompt_text + "\n\nChưa xử lý video và chưa trừ Xu.",
-                    reply_markup=video_scene3_keyboard([[('✍️ Sửa nội dung', 'vproduct|ss3|show|content'), ('⬅️ Quay lại', 'vproduct|ss3|show|review')], [('🎬 Menu Video', 'menu|main_video')]]),
+                    reply_markup=video_scene3_keyboard([
+                        [('✍️ Sửa nội dung', 'vproduct|ss3|show|content'), ('🧭 Xem mạch biến đổi', 'vproduct|ss3|show|timeline')],
+                        [('⬅️ Quay lại', 'vproduct|ss3|show|review'), ('🎬 Menu Video', 'menu|main_video')],
+                    ]),
                 )
             return await video_selfshot3_render(query, uid, "intro", draft=current)
         except (ValueError, KeyError, TypeError) as exc:
             logger.warning("selfshot3_callback_rejected | operation=%s argument=%s exception=%s", operation, argument, type(exc).__name__)
             return await video_selfshot3_render(query, uid, str(current.get("selfshot3_screen") or "intro").replace("selfshot3:", ""), draft=current)
+    if product_id == video_selfshot2.PRODUCT_ID:
+        current = video_selfshot2_draft(session)
+        return await video_selfshot2_render(
+            query,
+            uid,
+            str(current.get("selfshot2_screen") or "intro"),
+            draft=current,
+        )
+    if product_id == video_selfshot3.PRODUCT_ID:
+        current = video_selfshot3_draft(session)
+        return await video_selfshot3_render(
+            query,
+            uid,
+            str(current.get("selfshot3_screen") or "intro"),
+            draft=current,
+        )
     if action == "scene3_mode":
         requested_product = str(value or "").strip()
         requested_mode = str(parts[3] if len(parts) > 3 else "").strip()
@@ -107472,16 +108543,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             for item in (draft.get("source_media_refs") or [])
             if str(item or "").strip()
         ][:20]
-        if requested_product == "self_shot_scene_change" and not source_refs:
-            session = task3d_session_step(
-                uid,
-                "awaiting_self_shot_video",
-                input_mode="media",
-                input_purpose="primary",
-                provider_called=False,
-                xu_charged=0,
-            )
-            return await task3d_render_step(query, uid, session, lang)
         return await start_public_video_scene2_step(
             query,
             context,
@@ -107522,39 +108583,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 state = video_profile_studio_step(context, state, target_step, push=False)
                 return await video_profile_scene1_render(query, state, lang)
         return await task3d_render_step(query, uid, session, lang)
-    if action == "script_count_accept" and product_id == "script_image_video":
-        draft = dict(session.get("draft") or {})
-        count = max(5, min(20, safe_int(draft.get("proposed_scene_count"), 5)))
-        state = video_flow7_start_confirmed_script_state(context, uid, session, count)
-        return await video_profile_scene1_render(query, state, lang)
-    if action == "script_count_custom" and product_id == "script_image_video":
-        session = task3d_session_step(
-            uid,
-            "awaiting_script_scene_count",
-            provider_called=False,
-            job_created=False,
-            outbox_created=False,
-            xu_charged=0,
-        )
-        return await safe_edit_or_send(
-            query,
-            "✍️ <b>Nhập số cảnh từ 5 đến 20</b>\n\nKịch bản → Video có thời lượng theo gói Chất lượng đã chọn. "
-            "Nội dung kịch bản gốc vẫn được giữ nguyên. Bước này chưa tạo tác vụ và chưa trừ Xu.",
-            parse_mode="HTML",
-            reply_markup=video_flow7_script_count_keyboard(
-                safe_int((session.get("draft") or {}).get("proposed_scene_count"), 5)
-            ),
-        )
-    if action == "script_count_back" and product_id == "script_image_video":
-        session = task3d_session_step(
-            uid,
-            "awaiting_existing_script",
-            provider_called=False,
-            job_created=False,
-            outbox_created=False,
-            xu_charged=0,
-        )
-        return await task3d_render_step(query, uid, session, lang)
     microflow_menu_actions = {
         "ai_prompt_menu": "ai_prompt_menu",
         "ai_image_menu": "ai_image_menu",
@@ -107563,40 +108591,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action in microflow_menu_actions and product_id == "video_ai_real":
         session = task3d_session_step(uid, microflow_menu_actions[action], entry_choice=action, provider_called=False, xu_charged=0)
         return await task3d_render_step(query, uid, session, lang)
-
-    if action == "selfshot_continue" and product_id == "self_shot_scene_change":
-        draft = dict(session.get("draft") or {})
-        source_refs = [
-            str(item).strip()
-            for item in (draft.get("source_media_refs") or [])
-            if str(item or "").strip()
-        ][:20]
-        if not source_refs:
-            session = task3d_session_step(
-                uid,
-                "awaiting_self_shot_video",
-                input_mode="media",
-                input_purpose="primary",
-                provider_called=False,
-                xu_charged=0,
-            )
-            return await task3d_render_step(query, uid, session, lang)
-        return await start_public_video_scene2_step(
-            query,
-            context,
-            uid,
-            product_id,
-            lang=lang,
-            origin_step="selfshot_source_ready",
-            source_media_ref=source_refs[0],
-            source_media_refs=source_refs,
-            source_asset_items=list(draft.get("source_asset_items") or [])[:20],
-            media_type="video",
-            media_description="Video tự quay người dùng cung cấp",
-            topic="Phát triển cảnh AI quanh video tự quay",
-            input_collected=True,
-            content_mode="manual",
-        )
 
     if action in VIDEO_SUGGESTION_ACTIONS:
         step, kind, mapped_product, scene_count = VIDEO_SUGGESTION_ACTIONS[action]
@@ -107828,11 +108822,16 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             session = task3d_session_step(uid, "idea_development_path", selected_video_idea=selected, microflow_selected_index=index, topic=str(selected.get("title") or topic), provider_called=False, xu_charged=0)
             return await safe_edit_or_send(query, video_idea_development_text(session, lang), parse_mode="HTML", reply_markup=video_idea_development_keyboard(lang))
         if kind == "script":
-            script_text = "\n".join(
-                str(selected.get(key) or "").strip()
-                for key in ("title", "hook", "concept", "flow", "reason")
-                if str(selected.get(key) or "").strip()
-            )
+            script_parts = [
+                str(selected.get("title") or "").strip(),
+                str(selected.get("hook") or "").strip(),
+                str(selected.get("body") or selected.get("concept") or "").strip(),
+                *(str(item or "").strip() for item in selected.get("scenes") or []),
+                str(selected.get("cta") or "").strip(),
+                str(selected.get("style") or "").strip(),
+            ]
+            script_text = "\n".join(item for item in script_parts if item)
+            task3d_session_step(uid, str(session.get("current_step") or "script_ai_suggestions"), script_source_parent="script_manual")
             try:
                 _session, proposal = video_flow7_store_script_proposal(uid, script_text, source="aas_suggestion")
             except ValueError:
@@ -107841,12 +108840,11 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     "⚠️ Gợi ý kịch bản này chưa đủ nội dung. Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
                     reply_markup=task3d_product_intro_keyboard(product_id, lang),
                 )
-            return await safe_edit_or_send(
+            return await safe_edit_or_send_long_plain(
                 query,
                 video_flow7_script_count_text(proposal),
-                parse_mode="HTML",
                 reply_markup=video_flow7_script_count_keyboard(
-                    safe_int(proposal.get("proposed_scene_count"), 1)
+                    safe_int(proposal.get("proposed_scene_count"), 2)
                 ),
             )
         if kind == "selfshot" and not (draft.get("source_media_refs") or draft.get("source_media_ref")):
@@ -108078,35 +109076,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             task3d_media_input_prompt(product_id, lang),
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
         )
-    if action == "selfshot_source" and product_id == "self_shot_scene_change":
-        if value == "recent":
-            recent = get_recent_media_state(LAST_USER_VIDEO, uid) or {}
-            if recent.get("file_id"):
-                session = task3d_session_step(
-                    uid,
-                    "selfshot_source_ready",
-                    entry_choice="recent_video",
-                    source_media_ref=recent.get("file_id"),
-                    source_media_refs=[recent.get("file_id")],
-                    media_type="video",
-                    media_description="Video gần nhất",
-                    input_collected=True,
-                    provider_called=False,
-                    xu_charged=0,
-                )
-                return await task3d_render_step(query, uid, session, lang)
-        session = task3d_session_step(
-            uid,
-            "awaiting_self_shot_video",
-            input_mode="media",
-            input_purpose="primary",
-            entry_choice="upload_video",
-            input_origin_step=str(session.get("current_step") or "intro"),
-            profile_origin_step="awaiting_self_shot_video",
-            provider_called=False,
-            xu_charged=0,
-        )
-        return await task3d_render_step(query, uid, session, lang)
     if action == "frame_recent" and product_id == "frame_video_local":
         recent = get_recent_media_state(LAST_USER_IMAGE, uid) or {}
         if recent.get("file_id"):
@@ -110521,6 +111490,112 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
             reply_markup=(task3d_prompt_image_detail_keyboard(lang) if kind == "image" else task3d_prompt_video_detail_keyboard(lang)),
         )
         return True
+    if str(session.get("product_id") or "") == "script_image_video":
+        raw_script_input = str(update.message.text or "")
+        if current_step == "awaiting_script_scene_count":
+            count = safe_int(re.sub(r"\D+", "", raw_script_input), 0)
+            if count < video_script_product.MIN_SCENES or count > video_script_product.MAX_SCENES:
+                await update.message.reply_text(
+                    "⚠️ Số cảnh phải từ 2 đến 20. Toàn bộ kịch bản cũ vẫn được giữ nguyên.",
+                    reply_markup=video_flow7_script_count_keyboard(
+                        safe_int((session.get("draft") or {}).get("proposed_scene_count"), 2)
+                    ),
+                )
+                return True
+            try:
+                state = video_flow7_start_confirmed_script_state(context, uid, session, count)
+            except ValueError:
+                await update.message.reply_text(
+                    "⚠️ Chưa thể phân bổ đủ 100% kịch bản vào số cảnh này. Nội dung gốc vẫn được giữ nguyên; chưa tạo tác vụ và chưa trừ Xu.",
+                    reply_markup=video_flow7_script_count_keyboard(
+                        safe_int((session.get("draft") or {}).get("proposed_scene_count"), 2)
+                    ),
+                )
+                return True
+            await video_profile_scene1_render(update.message, state, lang)
+            return True
+        if current_step == "awaiting_existing_script":
+            if not raw_script_input.strip():
+                await update.message.reply_text(
+                    "⚠️ Kịch bản đang trống. Hãy gửi lại toàn bộ nội dung cần dùng.",
+                    reply_markup=video_script_nav_keyboard("vproduct|script_hub"),
+                )
+                return True
+            try:
+                _stored, proposal = video_flow7_store_script_proposal(uid, raw_script_input, source="customer")
+            except ValueError as exc:
+                error_copy = {
+                    "script_scene_count_over_limit": "⚠️ Kịch bản có hơn 20 ranh giới cảnh. Hãy gộp cảnh trước khi tiếp tục; hệ thống không tự cắt bỏ nội dung.",
+                    "script_coverage_incomplete": "⚠️ Chưa chứng minh được toàn bộ kịch bản đã được giữ. Hãy gửi lại; hệ thống chưa lưu bản rút gọn.",
+                }
+                await update.message.reply_text(
+                    error_copy.get(str(exc), "⚠️ Kịch bản chưa hợp lệ. Hãy gửi lại toàn bộ nội dung."),
+                    reply_markup=video_script_nav_keyboard("vproduct|script_hub"),
+                )
+                return True
+            await safe_reply_long_plain(
+                update.message,
+                video_flow7_script_count_text(proposal),
+                reply_markup=video_flow7_script_count_keyboard(
+                    safe_int(proposal.get("proposed_scene_count"), 2)
+                ),
+            )
+            return True
+        custom_field_steps = {
+            "awaiting_script_ai_goal": ("script_ai_content_source", "script_goal_label"),
+            "awaiting_script_ai_content": ("script_ai_audience", "script_content_brief"),
+            "awaiting_script_ai_audience": ("script_ai_platform", "script_audience_label"),
+            "awaiting_script_ai_platform": ("script_ai_style", "script_platform_label"),
+            "awaiting_script_ai_style": ("script_ai_ratio", "script_style_label"),
+        }
+        if current_step in custom_field_steps:
+            if not raw_script_input.strip():
+                await video_script_render_step(update.message, session, lang)
+                return True
+            next_step, field_name = custom_field_steps[current_step]
+            values = {field_name: raw_script_input}
+            if current_step == "awaiting_script_ai_goal":
+                values["script_goal"] = "custom"
+            elif current_step == "awaiting_script_ai_content":
+                values.update({
+                    "script_topic": raw_script_input,
+                    "script_profile_key": "",
+                    "script_content_choice": {"source": "manual", "title": raw_script_input},
+                    "script_audience_back_callback": "vproduct|script_content_custom",
+                })
+            session = task3d_session_step(uid, next_step, provider_called=False, xu_charged=0, **values)
+            await video_script_render_step(update.message, session, lang)
+            return True
+        if current_step == "awaiting_script_ai_duration":
+            duration = safe_int(re.sub(r"\D+", "", raw_script_input), 0)
+            if duration < 10 or duration > 600:
+                await update.message.reply_text(
+                    "⚠️ Thời lượng phải từ 10 đến 600 giây. Các lựa chọn trước vẫn được giữ nguyên.",
+                    reply_markup=video_script_duration_keyboard(),
+                )
+                return True
+            session = task3d_session_step(uid, "script_ai_duration", script_duration_seconds=duration, provider_called=False, xu_charged=0)
+            await video_script_generate_ai(update.message, uid, session, lang)
+            return True
+        if current_step == "awaiting_script_ai_edit":
+            if not raw_script_input.strip():
+                await update.message.reply_text(
+                    "⚠️ Kịch bản sửa không được để trống. Bản cũ vẫn được giữ nguyên.",
+                    reply_markup=video_script_review_keyboard(),
+                )
+                return True
+            session = task3d_session_step(
+                uid,
+                "script_ai_review",
+                script_text=raw_script_input,
+                manual_script_raw=raw_script_input,
+                script_source="ai_edited_by_customer",
+                script_source_parent="script_ai_review",
+                provider_called=bool((session.get("draft") or {}).get("script_ai_prompt")),
+                xu_charged=0,
+            )
+            await video_script_render_step(update.message, session, lang)
+            return True
     if current_step in VIDEO_MICROFLOW_TEXT_INPUT_STEPS:
         lang = get_user_language(uid) or "vi"
         text = re.sub(r"\s+", " ", update.message.text.strip())[:3500]
@@ -110561,38 +111636,6 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
                 input_collected=True,
                 free_generation=True,
                 content_mode="manual",
-            )
-            return True
-        if current_step == "awaiting_script_scene_count":
-            count = safe_int(re.sub(r"\D+", "", text), 0)
-            if count < 5 or count > 20:
-                await update.message.reply_text(
-                    "⚠️ Số cảnh phải từ 5 đến 20. Nội dung kịch bản cũ vẫn được giữ nguyên.",
-                    reply_markup=video_flow7_script_count_keyboard(
-                        safe_int((session.get("draft") or {}).get("proposed_scene_count"), 5)
-                    ),
-                )
-                return True
-            state = video_flow7_start_confirmed_script_state(context, uid, session, count)
-            await video_profile_scene1_render(update.message, state, lang)
-            return True
-        if current_step == "awaiting_existing_script":
-            try:
-                _session, proposal = video_flow7_store_script_proposal(uid, text, source="customer")
-            except ValueError as exc:
-                message = (
-                    "⚠️ Kịch bản vượt quá 20 phần. Hãy gộp lại trước khi tiếp tục; hệ thống không tự cắt bỏ nội dung."
-                    if str(exc) == "script_scene_count_over_limit"
-                    else "⚠️ Kịch bản đang trống. Hãy gửi lại nội dung cần dùng."
-                )
-                await update.message.reply_text(message)
-                return True
-            await update.message.reply_text(
-                video_flow7_script_count_text(proposal),
-                parse_mode="HTML",
-                reply_markup=video_flow7_script_count_keyboard(
-                    safe_int(proposal.get("proposed_scene_count"), 5)
-                ),
             )
             return True
         direct_profile_steps = {
@@ -111433,6 +112476,45 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
         )
         return True
     current_step = str(session.get("current_step") or "")
+    if (
+        str(session.get("product_id") or "") == "script_image_video"
+        and current_step == "awaiting_script_file"
+    ):
+        lang = get_user_language(uid) or "vi"
+        document = getattr(update.message, "document", None)
+        if not document:
+            await update.message.reply_text(
+                "⚠️ Hãy gửi file TXT, DOCX hoặc PDF, không gửi ảnh/video ở bước này.",
+                reply_markup=video_script_nav_keyboard("vproduct|script_hub"),
+            )
+            return True
+        message_id = safe_int(getattr(update.message, "message_id", 0), 0)
+        draft = dict(session.get("draft") or {})
+        if message_id and safe_int(draft.get("script_file_message_id"), 0) == message_id:
+            return True
+        ok, script_text, error = await video_script_extract_document(document, context)
+        if not ok:
+            await update.message.reply_text(
+                error or "⚠️ Chưa đọc được toàn bộ file kịch bản.",
+                reply_markup=video_script_nav_keyboard("vproduct|script_hub"),
+            )
+            return True
+        session = task3d_session_step(
+            uid,
+            "script_file_review",
+            script_file_text=script_text,
+            script_file_name=str(getattr(document, "file_name", "") or "script"),
+            script_file_size=safe_int(getattr(document, "file_size", 0), 0),
+            script_file_message_id=message_id,
+            script_source="file",
+            script_source_parent="script_file_review",
+            provider_called=False,
+            job_created=False,
+            outbox_created=False,
+            xu_charged=0,
+        )
+        await video_script_render_step(update.message, session, lang)
+        return True
     if current_step in VIDEO_MICROFLOW_MEDIA_INPUT_STEPS:
         media = None
         media_type = ""
@@ -204903,15 +205985,23 @@ def build_video_script_prompt(topic, niche, episodes, scenes, platforms, affilia
         "- Không dùng brand/nhân vật có bản quyền nếu không có quyền.\n- Nếu có link bán hàng, cần disclosure."
     )
 
-def generate_video_script_pack(prompt: str, user_id) -> str:
-    result = AgentGemini.chat(
-        "Bạn là AI Video Script Lite của TOAN AAS. Chỉ tạo script/prompt pack, không render video, không tự đăng bài cho khách.",
-        prompt,
-        f"film_{user_id}",
+async def generate_video_script_pack(prompt: str, user_id) -> str:
+    system_instruction = (
+        "Bạn là biên kịch Video AI chuyên sâu của TOAN AAS. Chỉ trả về MỘT KỊCH BẢN HOÀN CHỈNH "
+        "theo đúng cấu trúc và toàn bộ nội dung trong yêu cầu; không rút gọn thành brief/prompt pack, "
+        "không render video và không tự đăng bài cho khách. Viết đủ chiều sâu cho từng cảnh, gồm concept, "
+        "hook, mở bài, diễn biến, cao trào, kết, CTA, lời dẫn, hội thoại, hành động, bối cảnh, ý đồ máy quay "
+        "và ý đồ chuyển cảnh. Không bỏ sót dữ liệu khách đã chọn."
     )
-    if not result or result.strip().startswith("❌"):
-        raise RuntimeError(result or "AI provider unavailable")
-    return result
+    result = await GeminiPublicChatProvider(client=gemini_client).generate(
+        str(prompt or "").strip(),
+        system_instruction=system_instruction,
+        max_output_tokens=8192,
+        temperature=0.45,
+    )
+    if not result.get("ok") or not str(result.get("text") or "").strip():
+        raise RuntimeError(str(result.get("status") or "AI provider unavailable"))
+    return str(result["text"]).strip()
 
 def create_video_script_job(user_id, parsed: dict, cost_xu: int, status: str = "processing") -> int:
     conn = db_connect()

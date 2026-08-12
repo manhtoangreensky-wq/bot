@@ -13,7 +13,7 @@ import math
 import re
 from typing import Any, Iterable, Mapping
 
-from services import video_ai_real_pricing
+from services import video_profile_catalog
 
 
 PRODUCT_ID = "self_shot_scene_change"
@@ -25,18 +25,12 @@ SCENE_SECONDS = 8
 SUPPORTED_RATIOS = frozenset({"9:16", "16:9", "1:1", "4:5"})
 SUBJECT_MODES = frozenset({"person", "object", "person_object", "motion_only", "custom"})
 
-CONTENT_PROFILES = (
-    "Bán hàng / quảng cáo", "Đánh giá / giới thiệu sản phẩm", "Tiếp thị liên kết / nội dung người dùng",
-    "Cảm nhận khách hàng / câu chuyện thực tế", "Thương hiệu / doanh nghiệp", "Nhà sáng tạo / bắt xu hướng",
-    "Meme / nhại vui / hài", "Sự kiện / khoảnh khắc nổi bật", "Kiến trúc ngoại thất", "Nội thất",
-    "Cải tạo không gian", "Bất động sản", "Tham quan kiến trúc", "Hiệu ứng điện ảnh",
-    "Hoạt hình 2D/3D", "Nhân vật", "Thời trang / trình diễn", "Trưng bày sản phẩm / 3D",
-    "Ứng dụng / trò chơi", "Website / phần mềm", "Hướng dẫn / giải thích",
-    "Nội dung mạng xã hội", "Lịch sử / văn hóa", "Thể thao / thể thao điện tử",
-    "Du lịch / địa phương", "Kỹ thuật / công nghiệp", "Tin tức / dữ liệu",
-    "Động lực / phát triển bản thân", "Ẩm thực", "Giáo dục / kiến thức",
-    "Âm nhạc / sự kiện", "Âm thanh thư giãn",
+CONTENT_PROFILE_ROWS = tuple(
+    dict(item)
+    for item in video_profile_catalog.PROFILE_SEEDS
+    if bool(item.get("is_active", 1))
 )
+CONTENT_PROFILES = tuple(str(item.get("public_name") or "") for item in CONTENT_PROFILE_ROWS)
 
 CONTENT_DIRECTIONS = (
     ("future_world", "Thành phố tương lai", "Đổi thế giới xung quanh sang một thành phố tương lai liền mạch."),
@@ -438,13 +432,33 @@ def suggestion_catalog(
     count = max(MIN_SCENES, min(MAX_SCENES, int(scene_count or 1)))
     ratio = aspect_ratio if ratio_valid(aspect_ratio) else "9:16"
     profile_text = _safe(profile) or "nội dung phù hợp video nguồn"
+    profile_record = next(
+        (
+            dict(item)
+            for item in CONTENT_PROFILE_ROWS
+            if _safe(item.get("public_name")) == profile_text
+        ),
+        {},
+    )
+    profile_pattern = [
+        _safe(item)
+        for item in profile_record.get("default_scene_pattern") or []
+        if _safe(item)
+    ] or ["Mở đầu", "Diễn biến", "Điểm nhấn", "Kết"]
+    profile_description = _safe(profile_record.get("description")) or f"Triển khai đúng đặc trưng {profile_text}"
     items = []
     for index, (item_id, title, summary) in enumerate(CONTENT_DIRECTIONS, 1):
+        offset = (index - 1) % len(profile_pattern)
+        ordered_pattern = profile_pattern[offset:] + profile_pattern[:offset]
+        profile_focus = ordered_pattern[0]
         items.append({
             "id": item_id,
             "index": index,
-            "title": title,
-            "summary": f"{summary} Giữ {subject_text}; bám {action_text}; dùng {count} cảnh {ratio}; theo {profile_text}.",
+            "title": f"{profile_focus} · {title}",
+            "summary": (
+                f"{profile_description} Mạch riêng: {' → '.join(ordered_pattern)}. {summary} "
+                f"Giữ {subject_text}; bám {action_text}; dùng {count} cảnh {ratio}; theo {profile_text}."
+            ),
         })
     return items
 
@@ -479,6 +493,7 @@ def direction_contract(direction_id: str) -> dict[str, Any]:
 def build_scene_plan(
     *,
     analysis: Mapping[str, Any],
+    source_segment: Mapping[str, Any] | None = None,
     subject_manifest: Mapping[str, Any],
     constraints: Mapping[str, Any],
     scene_count: int,
@@ -486,12 +501,19 @@ def build_scene_plan(
     direction: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     count = max(MIN_SCENES, min(MAX_SCENES, int(scene_count or 1)))
-    duration = max(0.1, float((analysis or {}).get("duration_seconds") or 0))
+    segment = dict(source_segment or {})
+    segment_start = max(0.0, float(segment.get("start_seconds") or 0))
+    segment_end = float(segment.get("end_seconds") or 0)
+    source_duration = max(0.1, float((analysis or {}).get("duration_seconds") or 0))
+    if segment_end <= segment_start:
+        segment_start = 0.0
+        segment_end = source_duration
+    duration = max(0.1, min(source_duration, segment_end) - segment_start)
     segment_span = duration / count
     rows = []
     for index in range(1, count + 1):
-        start = round((index - 1) * segment_span, 3)
-        end = round(min(duration, index * segment_span), 3)
+        start = round(segment_start + ((index - 1) * segment_span), 3)
+        end = round(min(segment_end, segment_start + (index * segment_span)), 3)
         rows.append({
             "scene_id": index,
             "scene_index": index,
@@ -607,6 +629,12 @@ def preflight(
     source_report = source_gate(draft.get("source_video"), draft.get("source_analysis"))
     if not source_report.get("ok"):
         blockers.append(source_report.get("blocker"))
+    source_segment = dict(draft.get("source_segment") or {})
+    if not (
+        float(source_segment.get("end_seconds") or 0)
+        > float(source_segment.get("start_seconds") or 0)
+    ):
+        blockers.append("source_segment_missing")
     preserve_report = preserve_gate(draft.get("subject_manifest"), draft.get("preserve_constraints"))
     if not preserve_report.get("ok"):
         blockers.extend(preserve_report.get("blockers") or [])
@@ -915,6 +943,7 @@ def apply_action(state: Mapping[str, Any] | None, operation: str, argument: str 
         draft["selected_direction"] = arg
         draft["scene_plan"] = build_scene_plan(
             analysis=draft.get("source_analysis") or {},
+            source_segment=draft.get("source_segment") or {},
             subject_manifest=draft.get("subject_manifest") or {},
             constraints=draft.get("preserve_constraints") or {},
             scene_count=int(draft.get("scene_count") or 1),
@@ -932,6 +961,7 @@ def apply_action(state: Mapping[str, Any] | None, operation: str, argument: str 
         if op == "rebuild_plan":
             draft["scene_plan"] = build_scene_plan(
                 analysis=draft.get("source_analysis") or {},
+                source_segment=draft.get("source_segment") or {},
                 subject_manifest=draft.get("subject_manifest") or {},
                 constraints=draft.get("preserve_constraints") or {},
                 scene_count=int(draft.get("scene_count") or 1),
@@ -1080,13 +1110,24 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         rows = [_nav("intro")]
     elif name == "analysis":
         report = dict(draft.get("source_analysis") or {})
+        segment = dict(draft.get("source_segment") or {})
+        segment_text = (
+            f"{float(segment.get('start_seconds') or 0):g}–{float(segment.get('end_seconds') or 0):g} giây"
+            if float(segment.get("end_seconds") or 0) > float(segment.get("start_seconds") or 0)
+            else "Chưa chọn"
+        )
         text = (
             "🔎 <b>Phân tích video nguồn</b>\n\n"
             f"Thời lượng: {report.get('duration_seconds') or 0:g} giây · Kích thước: {report.get('width') or 0}×{report.get('height') or 0} · Tốc độ hình: {report.get('fps') or 'chưa đọc'}\n"
             f"Người phát hiện: {len(report.get('person_tracks') or [])} · Vật/sản phẩm: {len(report.get('object_tracks') or [])} · Luồng âm thanh: {(report.get('audio_manifest') or {}).get('stream_count') or 0}\n\n"
+            f"Đoạn nguồn đang dùng: {segment_text}\n\n"
             "Hệ thống chỉ hiển thị thông tin thực sự đọc được từ video, không tự nhận diện giả."
         )
-        rows = [[("✅ Chọn chủ thể", "vproduct|ss2|show|subject"), ("👁️ Xem chủ thể phát hiện", "vproduct|ss2|show|detected")], _nav(screen_parent("analysis", draft))]
+        rows = [
+            [("✅ Chọn chủ thể", "vproduct|ss2|show|subject"), ("👁️ Xem chủ thể phát hiện", "vproduct|ss2|show|detected")],
+            [("✂️ Chọn lại đoạn nguồn", "vproduct|ss2|resume_segment"), ("📎 Gửi video khác", "vproduct|ss2|source")],
+            _nav(screen_parent("analysis", draft)),
+        ]
     elif name == "subject":
         text = "🎯 <b>Chọn chủ thể cần giữ</b>\n\nNếu video có nhiều người hoặc vật, hãy chọn rõ chủ thể cần theo dõi để giữ nhận diện và mối quan hệ xuyên suốt."
         rows = [
@@ -1167,9 +1208,15 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         ])
     elif name == "profiles":
         page = max(1, min(4, int(draft.get("profile_page") or 1)))
-        chunk = CONTENT_PROFILES[(page - 1) * 8:page * 8]
+        chunk = CONTENT_PROFILE_ROWS[(page - 1) * 8:page * 8]
         text = f"🎯 <b>Chọn loại nội dung</b>\n\nTrang {page}/4 trong 32 loại. Chọn một loại để nhận 5 gợi ý bám sát video nguồn."
-        rows = _page_rows([{"id": str((page - 1) * 8 + index), "title": title} for index, title in enumerate(chunk, 1)], "profile")
+        rows = _page_rows([
+            {
+                "id": str((page - 1) * 8 + index),
+                "title": f"{item.get('icon') or '🎯'} {item.get('short_name') or item.get('public_name') or ''}",
+            }
+            for index, item in enumerate(chunk, 1)
+        ], "profile")
         rows.extend([[('➡️ Nhóm sau', 'vproduct|ss2|profile_page'), ('✍️ Tự nhập nội dung', 'vproduct|ss2|content_source|custom')], _nav("content_source")])
     elif name == "ideas":
         page = max(1, min(4, int(draft.get("idea_page") or 1)))
@@ -1197,7 +1244,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         rows = [prompt_buttons[offset:offset + 2] for offset in range(0, len(prompt_buttons), 2)]
         if rows and len(rows[-1]) == 1:
             rows[-1].append(('↩️ Tạo lại tất cả', 'vproduct|ss2|compile_prompts'))
-            rows.append([('✅ Hoàn tất câu lệnh', 'vproduct|ss2|show|audio'), ('🎬 Menu Video', 'menu|main_video')])
+            rows.append([('✅ Hoàn tất câu lệnh', 'vproduct|ss2|show|audio'), ('🎬 Xem kế hoạch cảnh', 'vproduct|ss2|show|scene_plan')])
         else:
             rows.append([('↩️ Tạo lại tất cả', 'vproduct|ss2|compile_prompts'), ('✅ Hoàn tất câu lệnh', 'vproduct|ss2|show|audio')])
         rows.append(_nav(screen_parent("prompts", draft)))
@@ -1259,51 +1306,19 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             [('👁️ Xem từng cảnh', 'vproduct|ss2|plan_view'), ('✍️ Sửa nội dung cảnh', 'vproduct|ss2|content_source|custom')],
             [('👤 Người / vật giữ nguyên', 'vproduct|ss2|show|preserve'), ('🎬 Câu lệnh video', 'vproduct|ss2|show|prompts')],
             [('🎚️ Âm thanh', 'vproduct|ss2|show|audio'), ('✨ Hiệu ứng', 'vproduct|ss2|show|direction')],
-            [('🖼️ Logo / Watermark', 'vproduct|ss2|review_addons'), ('⭐ Chọn chất lượng', 'vproduct|ss2|finish')],
+            [('🖼️ Logo / Watermark', 'vproduct|ss2|review_addons'), ('✅ Hoàn thiện video', 'vproduct|ss2|finish')],
             _nav("addons"),
         ]
     elif name == "finish":
-        report = dict(draft.get("selfshot2_preflight") or {})
-        scene_count = max(1, int(draft.get("scene_count") or 1))
-        if report.get("ok"):
-            status_text = "Kế hoạch đã đủ điều kiện. Chọn một gói để xem hóa đơn."
-        else:
-            status_text = "Kế hoạch còn thiếu dữ liệu bắt buộc. Vui lòng quay lại kiểm tra trước khi mở hóa đơn."
-        quality_rows = video_ai_real_pricing.public_quality_catalog()
-        lines = [
-            "⭐ <b>Chọn chất lượng video</b>",
-            "",
-            status_text,
-            f"Sản phẩm dùng video nguồn · <b>{scene_count} cảnh</b>.",
-            "Khuyến mãi Video nhiều cảnh: 1 cảnh không giảm; 2–5 cảnh giảm 10%; 6–10 cảnh giảm 15%; 11–20 cảnh giảm 20%; add-on tính riêng.",
+        text = (
+            "✅ <b>Hoàn thiện Video tự quay và đổi cảnh AI</b>\n\n"
+            "Logo/watermark đã chọn sẽ được giữ nguyên khi chuyển sang Tổng hợp. "
+            "Sau Tổng hợp, TOAN AAS chỉ mở một bảng Chất lượng chính thức rồi mới đến Hóa đơn và Xác nhận tạo video."
+        )
+        rows = [
+            [("✅ Tiếp tục hoàn thiện", "vproduct|ss2|finish"), ("🖼️ Sửa Logo / Watermark", "vproduct|ss2|review_addons")],
+            _nav("review"),
         ]
-        buttons: list[tuple[str, str]] = []
-        for quality in quality_rows:
-            scene_price = video_ai_real_pricing.video_multiscene_price(quality["unit_xu"], scene_count)
-            discount_note = (
-                f" · giảm {scene_price['discount_percent']}% (-{scene_price['discount_xu']} Xu)"
-                if scene_price["discount_percent"]
-                else ""
-            )
-            lines.extend([
-                "",
-                f"{quality['icon']} <b>{quality['name']}</b> · <b>{quality['seconds']} giây/cảnh</b> · <b>{quality['unit_xu']} Xu/cảnh</b>",
-                f"• Chất lượng: {quality['public_level']} · {quality['resolution']}",
-                f"• Đặc điểm: {quality['public_detail']}",
-                f"• Phù hợp: {quality['use_case']}",
-                f"• Tạm tính {scene_count} cảnh: <b>{scene_price['subtotal_xu']} Xu</b>"
-                f"{discount_note} · còn <b>{scene_price['total_xu']} Xu</b>",
-            ])
-            buttons.append((
-                f"{quality['icon']} {quality['name']} · {quality['unit_xu']} Xu",
-                f"vproduct|ss2|quality|{quality['tier_id']}",
-            ))
-        lines.extend(["", "Màn này chưa tạo tác vụ và chưa trừ Xu."])
-        text = "\n".join(lines)
-        rows = [buttons[offset:offset + 2] for offset in range(0, len(buttons), 2)]
-        if len(rows[-1]) == 1:
-            rows[-1].append(("🔄 Kiểm tra lại", "vproduct|ss2|finish"))
-        rows.append(_nav("review"))
     else:
         return screen_model("intro", draft)
     return {"screen": name, "text": text, "rows": rows, "parent": screen_parent(name, draft)}

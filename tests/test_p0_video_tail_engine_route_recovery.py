@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from pathlib import Path
 import re
 from types import SimpleNamespace
@@ -67,9 +68,21 @@ def test_logo_hub_starts_each_branding_flow_before_the_nine_position_grid() -> N
     assert "video_tail|logo|watermark" in keyboard
     assert "video_tail|logo|position|logo" not in keyboard
     assert "video_tail|logo|position|watermark" not in keyboard
-    assert "video_tail|review|prompts" in keyboard
-    assert "video_tail|summary|open" in keyboard
+    assert "video_tail9.branding_back_callback" in keyboard
     assert "video_tail|review|open" not in keyboard
+
+
+def test_selfshot_branding_back_returns_to_the_exact_product_review() -> None:
+    for product, callback in (
+        ("self_shot_scene_change", "vproduct|ss2|show|review"),
+        ("self_shot_cinematic_transform", "vproduct|ss3|show|review"),
+    ):
+        tail = video_tail9.new_state(
+            product_type=product,
+            session_id=f"back-{product}",
+        )
+        tail["branding_back_to"] = "product_review"
+        assert video_tail9.branding_back_callback(tail) == callback
 
 
 def test_local_editor_preserves_each_canonical_overlay_position() -> None:
@@ -348,6 +361,59 @@ def test_tail_hydrates_missing_scene3_content_from_its_persisted_handoff_only() 
     )
     assert newer["content_source"] == "manual"
     assert newer["selected_prompt"] == "Prompt khách vừa sửa"
+
+
+def test_tail_hydrates_the_complete_exact_script_contract_only_for_the_same_script() -> None:
+    namespace: dict = {}
+    exec(_function_source("video_tail9_hydrate_scene3_host"), namespace)
+    hydrate = namespace["video_tail9_hydrate_scene3_host"]
+    script = "Mở đầu nguyên văn.\nKết thúc nguyên văn."
+    digest = hashlib.sha256(script.encode("utf-8")).hexdigest()
+    scenes = ["Mở đầu nguyên văn.\n", "Kết thúc nguyên văn."]
+    ranges = [
+        {"scene_index": 1, "start": 0, "end": len(scenes[0])},
+        {"scene_index": 2, "start": len(scenes[0]), "end": len(script)},
+    ]
+    contract = {
+        "script_text": script,
+        "manual_script_raw": script,
+        "parsed_script_scenes": scenes,
+        "parsed_script_ranges": ranges,
+        "script_coverage": {
+            "no_truncation": True,
+            "exact_match": True,
+            "coverage_percent": 100,
+            "source_sha256": digest,
+            "joined_sha256": digest,
+        },
+        "scene_count_confirmed": True,
+        "script_source": "customer",
+        "script_metadata": {"source": "paste"},
+        "script_sha256": digest,
+        "script_exact_match": True,
+        "video_prompt_versions": {"1": {"active_version": 1}},
+        "plan": {"scenes": [{"scene_index": 1}]},
+        "scene_plan": {"scenes": [{"scene_index": 1}]},
+    }
+    restored = hydrate(
+        {"product_type": "script_image_video", "script_text": "", "scene_count_confirmed": False},
+        {"draft": {"scene3_data_contract": contract}},
+    )
+    for field, value in contract.items():
+        assert restored[field] == value
+
+    stale = hydrate(
+        {"product_type": "script_image_video", "script_text": "Kịch bản mới"},
+        {"draft": {"scene3_data_contract": contract}},
+    )
+    assert stale["script_text"] == "Kịch bản mới"
+    for field in (
+        "parsed_script_ranges",
+        "video_prompt_versions",
+        "plan",
+        "scene_plan",
+    ):
+        assert field not in stale
 
 
 def test_idea_parent_handoff_keeps_the_preset_profile_for_video_ai_preflight() -> None:
