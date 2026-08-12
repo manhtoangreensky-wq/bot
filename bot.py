@@ -141,6 +141,8 @@ from services.pricing_guide_content import (
     pricing_markdown as shared_pricing_markdown,
     public_copy_locale,
     public_hub_copy,
+    public_support_consult_choices,
+    public_video_menu_label,
     public_page_title,
 )
 from video_multiscene_engine import (
@@ -41462,10 +41464,10 @@ def clear_translation_pair_drafts(user_id) -> None:
         if str(key).startswith(prefix):
             USER_PENDING.pop(key, None)
 
-def translation_source_label_for_button(source: str) -> str:
+def translation_source_label_for_button(source: str, lang: str = "vi") -> str:
     normalized = normalize_translate_target(source)
     if normalized == "auto" or not normalized:
-        return "Tự nhận diện"
+        return public_hub_copy(normalize_user_language(lang) or "vi")["translation_picker_auto_detect"]
     return translate_target_label(normalized)
 
 def translation_detect_language_code(text: str, candidates: tuple[str, ...] = ()) -> str:
@@ -41521,72 +41523,77 @@ def translation_detect_direction_target(text: str, session: dict) -> str:
     return translation_detect_direction(text, session)[1]
 
 def translation_session_keyboard(lang: str = "vi", mode: str = "two_way") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     pair_route = "translation_live_conversation" if str(mode or "") == "live_conversation" else "translation_two_way"
     return build_2col_keyboard(
         [
-            ("🔄 Đổi chiều" if is_vi else "🔄 Swap", "menu|translation_swap_languages"),
-            ("🌍 Đổi cặp ngôn ngữ" if is_vi else "🌍 Change languages", f"menu|{pair_route}"),
-            ("🎙 Bật voice" if is_vi else "🎙 Enable voice", "menu|translation_output_voice"),
-            ("⏹ Tắt chế độ dịch" if is_vi else "⏹ Stop translation", "menu|translation_stop_session"),
+            (copy["translation_session_swap"], "menu|translation_swap_languages"),
+            (copy["translation_session_change_pair"], f"menu|{pair_route}"),
+            (copy["translation_session_enable_voice"], "menu|translation_output_voice"),
+            (copy["translation_session_stop"], "menu|translation_stop_session"),
         ],
-        nav_back=("⬅️ Dịch ngôn ngữ" if is_vi else "⬅️ Language translation", "menu|translation_language_hub"),
+        nav_back=(f"⬅️ {copy['translation_language']}", "menu|translation_language_hub"),
         nav_main=True,
         lang=lang,
+        main_label=f"🏠 {copy['main_menu']}",
     )
 
 def translation_session_started_text(session: dict, lang: str = "vi") -> str:
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     pair = translation_pair_label(session.get("lang_a"), session.get("lang_b"))
-    if normalize_user_language(lang) == "vi":
-        title = "🗣 Đã bật chế độ phiên dịch" if session.get("mode") == "live_conversation" else "🔁 Đã bật dịch 2 chiều"
-        return (
-            f"{title}\n\n"
-            f"Cặp ngôn ngữ: <b>{html.escape(pair)}</b>\n"
-            f"Đầu vào: <b>{html.escape(str(session.get('input_mode') or 'text'))}</b>\n"
-            f"Đầu ra: <b>{html.escape(str(session.get('output_mode') or 'text'))}</b>\n\n"
-            f"Gửi văn bản hoặc voice. TOAN AAS sẽ dịch sang {html.escape(translate_target_label(session.get('lang_b')))}. "
-            "Bấm Đổi chiều để dịch ngược lại. Phiên tiếp tục cho đến khi bạn bấm “Tắt chế độ dịch”.\n\n"
-            "Nếu giọng đọc chưa sẵn sàng, TOAN AAS vẫn trả bản dịch bằng văn bản. Bot chưa trừ Xu."
-        )
-    title = "🗣 Interpreter mode enabled" if session.get("mode") == "live_conversation" else "🔁 Two-way translation enabled"
+    title = copy["translation_session_live_title"] if session.get("mode") == "live_conversation" else copy["translation_session_two_way_title"]
+    input_mode = {
+        "text_voice": copy["translation_input_text_voice"],
+        "voice": copy["translation_input_voice"],
+        "text": copy["translation_output_text"],
+    }.get(str(session.get("input_mode") or "text"), copy["translation_output_text"])
+    output_mode = {
+        "voice": copy["translation_output_voice"],
+        "text": copy["translation_output_text"],
+    }.get(str(session.get("output_mode") or "text"), copy["translation_output_text"])
     return (
         f"{title}\n\n"
-        f"Language pair: <b>{html.escape(pair)}</b>\n"
-        "Send text or voice. TOAN AAS translates in both directions until you stop the session.\n\n"
-        "If voice output is unavailable, the translated text is still returned. No Xu charged."
+        f"{copy['translation_session_pair']}: <b>{html.escape(pair)}</b>\n"
+        f"{copy['translation_session_input']}: <b>{html.escape(input_mode)}</b>\n"
+        f"{copy['translation_session_output']}: <b>{html.escape(output_mode)}</b>\n\n"
+        f"{copy['translation_session_send'].format(target=html.escape(translate_target_label(session.get('lang_b'))))}\n\n"
+        f"{copy['translation_session_voice_fallback']}"
     )
 
 def translation_pair_keyboard(mode: str = "two_way", lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     draft = get_translation_pair_draft(user_id or "__customer__", mode)
     source = draft.get("source") or "auto"
     target = draft.get("target") or "en"
     return build_2col_keyboard(
         [
-            (f"🌐 Nguồn: {translation_source_label_for_button(source)}" if is_vi else f"🌐 From: {translation_source_label_for_button(source)}", f"menu|translation_pair_source_{mode}"),
-            (f"➡️ Dịch sang: {translate_target_label(target)}" if is_vi else f"➡️ To: {translate_target_label(target)}", f"menu|translation_pair_target_{mode}"),
-            ("🔁 Đổi chiều" if is_vi else "🔁 Swap", f"menu|translation_pair_swap_{mode}"),
-            ("✅ Bắt đầu" if is_vi else "✅ Start", f"menu|translation_pair_start_{mode}"),
+            (f"{copy['translation_pair_source']}: {translation_source_label_for_button(source, lang)}", f"menu|translation_pair_source_{mode}"),
+            (f"{copy['translation_pair_target']}: {translate_target_label(target)}", f"menu|translation_pair_target_{mode}"),
+            (copy["translation_session_swap"], f"menu|translation_pair_swap_{mode}"),
+            (copy["translation_pair_start"], f"menu|translation_pair_start_{mode}"),
         ],
-        nav_back=("⬅️ Dịch ngôn ngữ" if is_vi else "⬅️ Language translation", "menu|translation_language_hub"),
+        nav_back=(f"⬅️ {copy['translation_language']}", "menu|translation_language_hub"),
         nav_main=True,
         lang=lang,
+        main_label=f"🏠 {copy['main_menu']}",
     )
 
 def translation_pair_language_picker_text(kind: str, mode: str, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     is_source = kind == "source"
-    if normalize_user_language(lang) == "vi":
-        label = "ngôn ngữ cần dịch" if is_source else "ngôn ngữ dịch ra"
-        return f"🌐 <b>Chọn {label}</b>\n\nChọn nhanh bên dưới hoặc nhập cặp riêng trong bước sau. Bot chưa trừ Xu."
-    label = "source language" if is_source else "target language"
-    return f"🌐 <b>Choose {label}</b>\n\nPick a language. No Xu charged."
+    label = copy["translation_picker_source"] if is_source else copy["translation_picker_target"]
+    return f"{copy['translation_picker_choose']}: <b>{label}</b>\n\n{copy['translation_picker_no_charge']}"
 
 def translation_pair_language_picker_keyboard(kind: str, mode: str, lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     prefix = f"translation_pair_set_{kind}_{mode}"
     items = []
     if kind == "source":
-        items.append(("🌍 Tự nhận diện" if is_vi else "🌍 Auto detect", f"menu|{prefix}_auto"))
+        items.append((copy["translation_picker_auto_detect"], f"menu|{prefix}_auto"))
     items.extend([
         ("🇻🇳 Tiếng Việt", f"menu|{prefix}_vi"),
         ("🇺🇸 English", f"menu|{prefix}_en"),
@@ -41599,13 +41606,15 @@ def translation_pair_language_picker_keyboard(kind: str, mode: str, lang: str = 
     ])
     return build_2col_keyboard(
         items,
-        nav_back=("⬅️ Chọn ngôn ngữ" if is_vi else "⬅️ Language pair", f"menu|translation_pair_back_{mode}"),
+        nav_back=(copy["translation_picker_back"], f"menu|translation_pair_back_{mode}"),
         nav_main=True,
         lang=lang,
+        main_label=f"🏠 {copy['main_menu']}",
     )
 
 def translation_voice_menu_text(lang: str = "vi") -> str:
-    if normalize_user_language(lang) == "vi":
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "vi":
         return (
             "🎧 <b>Dịch audio</b>\n\n"
             "1. Chọn ngôn ngữ đích.\n"
@@ -41613,34 +41622,36 @@ def translation_voice_menu_text(lang: str = "vi") -> str:
             "3. TOAN AAS sẽ trả bản dịch theo lựa chọn của anh/chị.\n\n"
             "TOAN AAS chưa xử lý và chưa trừ Xu ở bước này."
         )
+    copy = public_hub_copy(lang)
     return (
-        "🎧 <b>Translate audio</b>\n\n"
-        "Choose a target language, then send or reply to the voice/audio to translate. TOAN AAS has not processed or charged Xu yet."
+        f"🎧 <b>{copy['translation_audio']}</b>\n\n"
+        f"{copy['translation_session_send'].format(target=copy['translation_picker_target'])}\n\n"
+        f"{copy['translation_picker_no_charge']}"
     )
 
 def translation_voice_menu_keyboard(lang: str = "vi", parent: str = "media") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     if str(parent or "") == "media":
-        back = ("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", "menu|translation_video_factory")
+        back = (f"⬅️ {copy['translation_subtitle_dubbing']}", "menu|translation_video_factory")
     else:
-        back = ("⬅️ Dịch ngôn ngữ" if is_vi else "⬅️ Language translation", "menu|translation_language_hub")
+        back = (f"⬅️ {copy['translation_language']}", "menu|translation_language_hub")
     return build_2col_keyboard(
         [
-            ("📝 Chỉ text dịch" if is_vi else "📝 Text only", "tr_pick|voice"),
-            ("🔊 Text + audio đọc" if is_vi else "🔊 Text + spoken audio", "menu|translation_output_voice"),
+            (f"📝 {copy['translation_text']}", "tr_pick|voice"),
+            (f"🔊 {copy['translation_session_enable_voice']}", "menu|translation_output_voice"),
         ],
         nav_back=back,
         nav_main=True,
         lang=lang,
+        main_label=f"🏠 {copy['main_menu']}",
     )
 
 def translation_stop_text(lang: str = "vi", changed: bool = True) -> str:
-    if normalize_user_language(lang) == "vi":
-        return (
-            "✅ Đã tắt chế độ dịch tự động. Bạn có thể bật lại trong menu Dịch thuật."
-            if changed else "ℹ️ Chế độ dịch tự động đang tắt sẵn."
-        )
-    return "✅ Translation session is off. You can enable it again from the Translation menu." if changed else "ℹ️ Translation session was already off."
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    if changed:
+        return f"✅ {copy['translation_session_stop']}. {copy['translation_picker_no_charge']}"
+    return f"ℹ️ {copy['translation_session_stop']}."
 
 def translation_source_label(source_type: str) -> str:
     return {
@@ -41681,7 +41692,9 @@ def has_recent_audio_input(update: Update) -> bool:
     cache = LAST_AUDIO_FILE.get(uid) or {}
     return bool(cache and float(cache.get("created_at_ts") or 0) + LAST_MEDIA_CACHE_TTL_SECONDS >= time.time())
 
-def translation_target_keyboard(source_type: str, more: bool = False) -> InlineKeyboardMarkup:
+def translation_target_keyboard(source_type: str, more: bool = False, lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     source = str(source_type or "text").strip()
     if source == "voice":
         if more:
@@ -41692,7 +41705,7 @@ def translation_target_keyboard(source_type: str, more: bool = False) -> InlineK
                     InlineKeyboardButton(translate_target_button_label(code), callback_data=f"tr_target|voice|{code}")
                     for code in codes[i:i + 2]
                 ])
-            rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="tr_pick|voice")])
+            rows.append([InlineKeyboardButton(copy["translation_picker_back"], callback_data="tr_pick|voice")])
             return InlineKeyboardMarkup(rows)
         return InlineKeyboardMarkup([
             [
@@ -41701,7 +41714,7 @@ def translation_target_keyboard(source_type: str, more: bool = False) -> InlineK
             ],
             [
                 InlineKeyboardButton("🇨🇳 中文", callback_data="tr_target|voice|zh"),
-                InlineKeyboardButton("🌍 Ngôn ngữ khác", callback_data="tr_more|voice"),
+                InlineKeyboardButton(copy["translation_picker_more"], callback_data="tr_more|voice"),
             ],
         ])
     if more:
@@ -41713,8 +41726,8 @@ def translation_target_keyboard(source_type: str, more: bool = False) -> InlineK
                 for code in codes[i:i + 2]
             ])
         rows.append([
-            InlineKeyboardButton("⬅️ Quay lại", callback_data=f"tr_pick|{source}"),
-            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+            InlineKeyboardButton(copy["translation_picker_back"], callback_data=f"tr_pick|{source}"),
+            InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
         ])
         return InlineKeyboardMarkup(rows)
     return InlineKeyboardMarkup([
@@ -41724,40 +41737,47 @@ def translation_target_keyboard(source_type: str, more: bool = False) -> InlineK
         ],
         [
             InlineKeyboardButton("🇨🇳 中文", callback_data=f"tr_target|{source}|zh"),
-            InlineKeyboardButton("🌍 Ngôn ngữ khác", callback_data=f"tr_more|{source}"),
+            InlineKeyboardButton(copy["translation_picker_more"], callback_data=f"tr_more|{source}"),
         ],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
-def voice_translation_action_keyboard() -> InlineKeyboardMarkup:
+def voice_translation_action_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🎙 Bóc băng", callback_data="tr_transcribe"),
-            InlineKeyboardButton("🌐 Dịch audio", callback_data="tr_pick|voice"),
+            InlineKeyboardButton(copy["translation_transcribe"], callback_data="tr_transcribe"),
+            InlineKeyboardButton(f"🌐 {copy['translation_audio']}", callback_data="tr_pick|voice"),
         ],
         [
             InlineKeyboardButton("🇺🇸 English", callback_data="tr_target|voice|en"),
             InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="tr_target|voice|vi"),
         ],
-        [InlineKeyboardButton("🌍 Ngôn ngữ khác", callback_data="tr_more|voice")],
+        [InlineKeyboardButton(copy["translation_picker_more"], callback_data="tr_more|voice")],
     ])
 
-def translation_pick_text(source_type: str) -> str:
+def translation_pick_text(source_type: str, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     if str(source_type or "").strip() == "voice":
         return (
-            "🌐 <b>Dịch voice/audio</b>\n\n"
-            "Vui lòng chọn ngôn ngữ đích:\n"
+            f"{copy['translation_picker_choose']}: <b>{copy['translation_audio']}</b>\n\n"
+            f"{copy['translation_picker_target']}:\n"
             "🇺🇸 English\n"
             "🇻🇳 Tiếng Việt\n"
             "🇨🇳 中文\n"
-            "🌍 Ngôn ngữ khác\n\n"
-            "Bot chưa trừ Xu."
+            f"{copy['translation_picker_more']}\n\n"
+            f"{copy['translation_picker_no_charge']}"
         )
-    source = translation_source_label(source_type)
+    source = copy.get({
+        "text": "translation_text",
+        "voice": "translation_audio",
+        "file": "translation_file",
+        "transcript": "translation_text",
+    }.get(str(source_type or "").strip(), "translation_text"), copy["translation_text"])
     return (
-        "🌐 <b>Chọn ngôn ngữ dịch</b>\n\n"
-        f"Nguồn: <b>{html.escape(source)}</b>\n"
-        "Chọn ngôn ngữ đích bên dưới. Bot chưa trừ Xu."
+        f"{copy['translation_picker_choose']}\n\n"
+        f"{copy['translation_pair_source']}: <b>{html.escape(source)}</b>\n"
+        f"{copy['translation_picker_target']}. {copy['translation_picker_no_charge']}"
     )
 
 async def reply_translation_surface(update: Update, text: str, parse_mode=None, reply_markup=None):
@@ -41765,13 +41785,17 @@ async def reply_translation_surface(update: Update, text: str, parse_mode=None, 
         return await update.callback_query.message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
     return await update.message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
 
-async def show_translation_picker(update: Update, source_type: str, edit: bool = False, more: bool = False):
+async def show_translation_picker(update: Update, source_type: str, edit: bool = False, more: bool = False, lang: str | None = None):
+    if lang is None:
+        uid = update.effective_user.id if update.effective_user else None
+        lang = get_user_language(uid) if uid is not None else "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     text = (
-        "🌍 <b>Ngôn ngữ khác / More languages</b>\n\n"
-        "Chọn ngôn ngữ đích. Một số ngôn ngữ có thể dùng hệ thống dự phòng nếu chưa sẵn sàng đầy đủ."
-        if more else translation_pick_text(source_type)
+        f"{copy['translation_picker_more']}\n\n{copy['translation_picker_target']}. {copy['translation_picker_no_charge']}"
+        if more else translation_pick_text(source_type, lang)
     )
-    keyboard = translation_target_keyboard(source_type, more=more)
+    keyboard = translation_target_keyboard(source_type, more=more, lang=lang)
     if edit and update.callback_query:
         return await safe_edit_query_message(update.callback_query, text, reply_markup=keyboard)
     return await reply_translation_surface(update, text, parse_mode="HTML", reply_markup=keyboard)
@@ -58292,23 +58316,15 @@ def user_package_summary_text(user_id, admin_view: bool = False) -> str:
 
 def user_package_account_short_text(user_id, lang: str = "vi") -> str:
     lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     rows = [row for row in user_package_rows(user_id) if str(row.get("status") or "") == "active" and row.get("item_type")]
     if not rows:
-        if lang == "zh":
-            return "🎁 套餐/组合：当前没有有效套餐。"
-        if lang == "en":
-            return "🎁 Packages/combos: no active package."
-        return "🎁 Gói/combo: chưa có gói đang hoạt động."
+        return f"🎁 {copy['profile_packages']}: 0"
     totals: dict[str, int] = {}
     for row in rows:
         item_type = normalize_package_item_type(row.get("item_type") or "")
         totals[item_type] = totals.get(item_type, 0) + int(row.get("remaining_quantity") or 0)
-    if lang == "zh":
-        return f"🎁 套餐/组合：{sum(totals.values())} 次剩余服务。"
-    if lang == "en":
-        return f"🎁 Packages/combos: {sum(totals.values())} service uses remaining."
-    parts = [f"{package_item_display_name(k)}: {v}" for k, v in totals.items() if v > 0]
-    return "🎁 Gói/combo còn lượt: " + (", ".join(parts) if parts else "0")
+    return f"🎁 {copy['profile_packages']}: {sum(totals.values())} {copy['profile_remaining_uses']}"
 
 def resolve_package_for_user(user_id, identifier: str) -> dict | None:
     uid = str(user_id or "").strip()
@@ -58424,106 +58440,81 @@ def support_contact_keyboard(back_to_media: bool = False, lang: str = "vi") -> I
     rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
-def human_support_text() -> str:
-    return (
-        "👨‍💼 <b>Hỗ trợ TOAN AAS</b>\n\n"
-        "Bạn muốn gặp admin, xem ticket, tư vấn gói hay đăng ký dịch vụ riêng?\n\n"
-        "Bạn có thể nhắn trực tiếp @toanaas. CSKH tự động sẽ hỗ trợ thông tin cơ bản "
-        "và chuyển admin khi cần.\n\n"
-        "Nếu bạn cần báo lỗi thanh toán, lỗi video/ảnh hoặc hoàn Xu, hãy dùng "
-        "<b>Góp ý / Báo lỗi</b> để TOAN AAS tạo ticket kiểm tra rõ hơn."
-    )
+def human_support_text(lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return f"👨‍💼 <b>{copy['support_title']}</b>\n\n{copy['support_body']}"
 
-def human_support_keyboard() -> InlineKeyboardMarkup:
+def human_support_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("👨‍💼 Nhắn admin @toanaas", callback_data="support|admin_contact"),
-            InlineKeyboardButton("🎫 Tạo ticket hỗ trợ", callback_data="support|ticket"),
+            InlineKeyboardButton(f"👨‍💼 {copy['support_admin']} @toanaas", callback_data="support|admin_contact"),
+            InlineKeyboardButton(f"🎫 {copy['support_ticket']}", callback_data="support|ticket"),
         ],
         [
-            InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine"),
-            InlineKeyboardButton("⭐ Đăng ký Premium", callback_data="support|premium"),
+            InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine"),
+            InlineKeyboardButton(f"⭐ {copy['support_premium']}", callback_data="support|premium"),
         ],
         [
-            InlineKeyboardButton("🤖 Kết nối bot riêng", callback_data="support|bot"),
-            InlineKeyboardButton("📦 Tư vấn gói dịch vụ", callback_data="support|consult"),
+            InlineKeyboardButton(f"🤖 {copy['support_custom_bot']}", callback_data="support|bot"),
+            InlineKeyboardButton(f"📦 {copy['support_consult']}", callback_data="support|consult"),
         ],
-        [InlineKeyboardButton("🤖 CSKH tự động", callback_data="support|cskh_auto")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"🤖 {copy['support_auto']}", callback_data="support|cskh_auto")],
+        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
-def support_cskh_auto_text() -> str:
-    return (
-        "🤖 <b>CSKH tự động TOAN AAS</b>\n\n"
-        "Bạn có thể nhắn trực tiếp @toanaas. CSKH tự động sẽ hỗ trợ thông tin cơ bản "
-        "như bảng giá, cách dùng, gói dịch vụ và sẽ chuyển admin khi gặp thanh toán, "
-        "hoàn Xu hoặc lỗi cần kiểm tra.\n\n"
-        "Không gửi token, mật khẩu hoặc thông tin nhạy cảm."
-    )
+def support_cskh_auto_text(lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return f"🤖 <b>{copy['support_auto_title']}</b>\n\n{copy['support_auto_body']}"
 
-def support_cskh_auto_keyboard() -> InlineKeyboardMarkup:
+def support_cskh_auto_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 Mở Telegram @toanaas", url=SUPPORT_TELEGRAM_URL)],
-        [InlineKeyboardButton("🎫 Tạo ticket hỗ trợ", callback_data="support|ticket"), InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine")],
-        [InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"💬 {copy['support_open_telegram']}", url=SUPPORT_TELEGRAM_URL)],
+        [InlineKeyboardButton(f"🎫 {copy['support_ticket']}", callback_data="support|ticket"), InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine")],
+        [InlineKeyboardButton(f"⬅️ {copy['support_back']}", callback_data="support|start"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
-def support_admin_contact_text() -> str:
-    return (
-        "👨‍💼 <b>Nhắn admin @toanaas</b>\n\n"
-        "Bạn có thể nhắn trực tiếp admin TOAN AAS tại @toanaas.\n\n"
-        "Nếu cần kiểm tra giao dịch, hoàn Xu hoặc lỗi job, bạn nên tạo ticket "
-        "trong bot để admin có đủ thông tin đối soát."
-    )
+def support_admin_contact_text(lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return f"👨‍💼 <b>{copy['support_contact_title']}</b>\n\n{copy['support_contact_body']}"
 
-def support_admin_contact_keyboard() -> InlineKeyboardMarkup:
+def support_admin_contact_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 Mở Telegram @toanaas", url=SUPPORT_TELEGRAM_URL)],
-        [InlineKeyboardButton("🎫 Tạo ticket hỗ trợ", callback_data="support|ticket"), InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine")],
-        [InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"💬 {copy['support_open_telegram']}", url=SUPPORT_TELEGRAM_URL)],
+        [InlineKeyboardButton(f"🎫 {copy['support_ticket']}", callback_data="support|ticket"), InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine")],
+        [InlineKeyboardButton(f"⬅️ {copy['support_back']}", callback_data="support|start"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
-def support_general_ticket_prompt() -> str:
-    return (
-        "🎫 <b>Tạo ticket hỗ trợ</b>\n\n"
-        "Bạn mô tả ngắn vấn đề cần hỗ trợ nhé.\n\n"
-        "Ví dụ:\n"
-        "• Tôi cần tư vấn gói video\n"
-        "• Tôi muốn làm bot riêng\n"
-        "• Tôi cần hỗ trợ dùng công cụ\n"
-        "• Tôi muốn gặp admin\n\n"
-        "Nếu nội dung liên quan thanh toán/refund/lỗi kỹ thuật, bot sẽ tự phân loại đúng nhóm."
-    )
+def support_general_ticket_prompt(lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return f"🎫 <b>{copy['support_ticket_prompt_title']}</b>\n\n{copy['support_ticket_prompt_body']}"
 
-def support_premium_text() -> str:
-    return (
-        "⭐ <b>Đăng ký Premium TOAN AAS</b>\n\n"
-        "Premium phù hợp nếu bạn dùng TOAN AAS thường xuyên, cần ưu tiên hỗ trợ, "
-        "nhiều ảnh/video/content hơn hoặc workflow riêng cho shop, affiliate và doanh nghiệp.\n\n"
-        "Bạn muốn đăng ký theo hướng nào?"
-    )
+def support_premium_text(lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return f"⭐ <b>{copy['support_premium']} TOAN AAS</b>\n\n{copy['support_premium_body']}"
 
-def support_premium_keyboard() -> InlineKeyboardMarkup:
+def support_premium_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("👤 Cá nhân/Creator", callback_data="support|premium_type|personal"), InlineKeyboardButton("🛒 Shop/Affiliate", callback_data="support|premium_type|shop")],
-        [InlineKeyboardButton("🏢 Doanh nghiệp", callback_data="support|premium_type|business"), InlineKeyboardButton("🤝 Tư vấn riêng", callback_data="support|premium_type|private")],
-        [InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine"), InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"👤 {copy['support_personal']}", callback_data="support|premium_type|personal"), InlineKeyboardButton(f"🛒 {copy['support_shop']}", callback_data="support|premium_type|shop")],
+        [InlineKeyboardButton(f"🏢 {copy['support_business']}", callback_data="support|premium_type|business"), InlineKeyboardButton(f"🤝 {copy['support_private']}", callback_data="support|premium_type|private")],
+        [InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine"), InlineKeyboardButton(f"⬅️ {copy['support_back']}", callback_data="support|start")],
+        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
-def support_custom_bot_text() -> str:
-    return (
-        "🤖 <b>Kết nối bot riêng</b>\n\n"
-        "TOAN AAS có thể tư vấn bot riêng cho shop, đội content, CSKH hoặc quy trình nội bộ doanh nghiệp.\n\n"
-        "Bạn muốn làm loại bot nào?"
-    )
+def support_custom_bot_text(lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return f"🤖 <b>{copy['support_custom_bot']}</b>\n\n{copy['support_custom_body']}"
 
-def support_custom_bot_keyboard() -> InlineKeyboardMarkup:
+def support_custom_bot_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛒 Bot bán hàng/shop online", callback_data="support|bot_type|shop"), InlineKeyboardButton("📣 Bot content/marketing", callback_data="support|bot_type|content")],
-        [InlineKeyboardButton("🎧 Bot CSKH/ticket", callback_data="support|bot_type|support"), InlineKeyboardButton("🏢 Bot nội bộ doanh nghiệp", callback_data="support|bot_type|internal")],
-        [InlineKeyboardButton("✍️ Nhập nhu cầu riêng", callback_data="support|bot_type|custom"), InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"🛒 {copy['support_bot_shop']}", callback_data="support|bot_type|shop"), InlineKeyboardButton(f"📣 {copy['support_bot_content']}", callback_data="support|bot_type|content")],
+        [InlineKeyboardButton(f"🎧 {copy['support_bot_support']}", callback_data="support|bot_type|support"), InlineKeyboardButton(f"🏢 {copy['support_bot_internal']}", callback_data="support|bot_type|internal")],
+        [InlineKeyboardButton(f"✍️ {copy['support_bot_custom']}", callback_data="support|bot_type|custom"), InlineKeyboardButton(f"⬅️ {copy['support_back']}", callback_data="support|start")],
+        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
 SUPPORT_CONSULT_OPTIONS = {
@@ -58535,12 +58526,13 @@ SUPPORT_CONSULT_OPTIONS = {
     "package": "🎁 Gói/Combo",
 }
 
-def support_consult_keyboard() -> InlineKeyboardMarkup:
+def support_consult_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(SUPPORT_CONSULT_OPTIONS["image"], callback_data="support|consult_type|image"), InlineKeyboardButton(SUPPORT_CONSULT_OPTIONS["video"], callback_data="support|consult_type|video")],
-        [InlineKeyboardButton(SUPPORT_CONSULT_OPTIONS["frame_video"], callback_data="support|consult_type|frame_video"), InlineKeyboardButton(SUPPORT_CONSULT_OPTIONS["document"], callback_data="support|consult_type|document")],
-        [InlineKeyboardButton(SUPPORT_CONSULT_OPTIONS["voice"], callback_data="support|consult_type|voice"), InlineKeyboardButton(SUPPORT_CONSULT_OPTIONS["package"], callback_data="support|consult_type|package")],
-        [InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"🖼 {copy['support_consult_image']}", callback_data="support|consult_type|image"), InlineKeyboardButton(f"🎬 {copy['support_consult_video']}", callback_data="support|consult_type|video")],
+        [InlineKeyboardButton(f"🎞 {copy['support_consult_frame_video']}", callback_data="support|consult_type|frame_video"), InlineKeyboardButton(f"📄 {copy['support_consult_document']}", callback_data="support|consult_type|document")],
+        [InlineKeyboardButton(f"🎙 {copy['support_consult_voice']}", callback_data="support|consult_type|voice"), InlineKeyboardButton(f"🎁 {copy['support_consult_package']}", callback_data="support|consult_type|package")],
+        [InlineKeyboardButton(f"⬅️ {copy['support_back']}", callback_data="support|start"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
 SUPPORT_CUSTOM_BOT_DETAILS = {
@@ -58585,23 +58577,66 @@ SUPPORT_CONSULT_DETAILS = {
     "package": ("🎁 Tư vấn Gói/Combo", ["Gói cá nhân", "Gói shop/affiliate", "Gói doanh nghiệp"], "Bạn dùng tính năng nào nhiều nhất, tần suất và ngân sách dự kiến ra sao?"),
 }
 
-def support_custom_bot_detail_text(bot_type: str) -> str:
-    detail = SUPPORT_CUSTOM_BOT_DETAILS.get(bot_type) or SUPPORT_CUSTOM_BOT_DETAILS["custom"]
-    return f"{detail['title']}\n\n{detail['body']}\n\nBạn mô tả giúp mình:\n{detail['questions']}"
 
-def support_custom_bot_detail_keyboard(bot_type: str) -> InlineKeyboardMarkup:
+def support_custom_bot_public_label(bot_type: str, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    key = {
+        "shop": "support_bot_shop",
+        "content": "support_bot_content",
+        "support": "support_bot_support",
+        "internal": "support_bot_internal",
+        "custom": "support_bot_custom",
+    }.get(str(bot_type or ""), "support_bot_custom")
+    return str(copy[key])
+
+
+def support_consult_public_label(service_type: str, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    key = {
+        "image": "support_consult_image",
+        "video": "support_consult_video",
+        "frame_video": "support_consult_frame_video",
+        "document": "support_consult_document",
+        "voice": "support_consult_voice",
+        "package": "support_consult_package",
+    }.get(str(service_type or ""), "support_consult_video")
+    return str(copy[key])
+
+
+def support_consult_choice_labels(service_type: str, lang: str = "vi") -> tuple[str, str, str]:
+    """Presentation-only choices; stable callback indexes remain unchanged."""
+    return public_support_consult_choices(service_type, normalize_user_language(lang) or "vi")
+
+
+def support_custom_bot_detail_text(bot_type: str, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return (
+        f"🤖 <b>{copy['support_detail_title']}</b>\n\n"
+        f"<b>{html.escape(support_custom_bot_public_label(bot_type, lang))}</b>\n\n"
+        f"{copy['support_detail_body']}\n\n{copy['support_detail_questions']}\n"
+        f"{copy['support_input_one_message']}"
+    )
+
+def support_custom_bot_detail_keyboard(bot_type: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✍️ Nhập nhu cầu", callback_data=f"support|bot_input|{bot_type}"), InlineKeyboardButton("🎫 Tạo lead tư vấn", callback_data=f"support|bot_input|{bot_type}")],
-        [InlineKeyboardButton("⬅️ Kết nối bot riêng", callback_data="support|bot"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"✍️ {copy['support_detail_enter_need']}", callback_data=f"support|bot_input|{bot_type}"), InlineKeyboardButton(f"🎫 {copy['support_detail_create_lead']}", callback_data=f"support|bot_input|{bot_type}")],
+        [InlineKeyboardButton(f"⬅️ {copy['support_detail_back_bot']}", callback_data="support|bot"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
-def support_consult_detail_text(service_type: str) -> str:
-    title, choices, question = SUPPORT_CONSULT_DETAILS.get(service_type) or SUPPORT_CONSULT_DETAILS["video"]
-    bullets = "\n".join(f"• {choice}" for choice in choices)
-    return f"📦 <b>{html.escape(title)}</b>\n\nTOAN AAS có thể hỗ trợ:\n{html.escape(bullets)}\n\n{html.escape(question)}"
+def support_consult_detail_text(service_type: str, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    choices = support_consult_choice_labels(service_type, lang)
+    bullets = "\n".join(f"• {html.escape(choice)}" for choice in choices)
+    return (
+        f"📦 <b>{copy['support_consult_detail_title']}</b>\n\n"
+        f"<b>{html.escape(support_consult_public_label(service_type, lang))}</b>\n\n"
+        f"{copy['support_consult_detail_intro']}\n{bullets}\n\n{copy['support_input_one_message']}"
+    )
 
-def support_consult_detail_keyboard(service_type: str) -> InlineKeyboardMarkup:
-    _title, choices, _question = SUPPORT_CONSULT_DETAILS.get(service_type) or SUPPORT_CONSULT_DETAILS["video"]
+def support_consult_detail_keyboard(service_type: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    choices = support_consult_choice_labels(service_type, lang)
     rows = []
     for index in range(0, len(choices), 2):
         rows.append([
@@ -58609,36 +58644,38 @@ def support_consult_detail_keyboard(service_type: str) -> InlineKeyboardMarkup:
             for offset, choice in enumerate(choices[index:index + 2])
         ])
     rows.extend([
-        [InlineKeyboardButton("✍️ Nhập nhu cầu riêng", callback_data=f"support|consult_input|{service_type}"), InlineKeyboardButton("🎫 Tạo ticket tư vấn", callback_data=f"support|consult_input|{service_type}")],
-        [InlineKeyboardButton("⭐ Đăng ký Premium", callback_data="support|premium"), InlineKeyboardButton("⬅️ Tư vấn gói dịch vụ", callback_data="support|consult")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"✍️ {copy['support_consult_detail_input']}", callback_data=f"support|consult_input|{service_type}"), InlineKeyboardButton(f"🎫 {copy['support_consult_detail_ticket']}", callback_data=f"support|consult_input|{service_type}")],
+        [InlineKeyboardButton(f"⭐ {copy['support_consult_detail_premium']}", callback_data="support|premium"), InlineKeyboardButton(f"⬅️ {copy['support_consult_detail_back']}", callback_data="support|consult")],
+        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
     return InlineKeyboardMarkup(rows)
 
-def support_lead_input_text(category: str, selected_option: str) -> str:
+def support_lead_input_text(category: str, selected_option: str, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     if category == "premium_lead":
         return (
-            f"⭐ <b>Đăng ký Premium - {html.escape(selected_option)}</b>\n\n"
-            "Bạn gửi giúp mình:\n"
-            "1. Mục đích sử dụng TOAN AAS\n"
-            "2. Nhu cầu chính: ảnh, video, content, tài liệu hay bot riêng\n"
-            "3. Tần suất dùng dự kiến\n"
-            "4. Số điện thoại/Zalo/email nếu muốn admin liên hệ\n\n"
-            "TOAN AAS sẽ tạo lead ưu tiên cao để admin tư vấn."
+            f"⭐ <b>{copy['support_lead_premium_title']} - {html.escape(selected_option)}</b>\n\n"
+            f"{copy['support_lead_premium_body']}"
         )
     return (
-        f"🤖 <b>Kết nối bot riêng - {html.escape(selected_option)}</b>\n\n"
-        "Bạn mô tả nhu cầu chính, quy mô sử dụng, quy trình muốn tự động hóa và "
-        "cách liên hệ thuận tiện. TOAN AAS sẽ tạo lead ưu tiên cao cho admin."
+        f"🤖 <b>{copy['support_lead_custom_title']} - {html.escape(selected_option)}</b>\n\n"
+        f"{copy['support_lead_custom_body']}"
     )
 
-def support_flow_back_keyboard(back_callback: str = "support|start", back_label: str = "⬅️ Hỗ trợ", *, include_tickets: bool = False) -> InlineKeyboardMarkup:
+def support_flow_back_keyboard(
+    back_callback: str = "support|start",
+    back_label: str = "⬅️ Hỗ trợ",
+    *,
+    include_tickets: bool = False,
+    lang: str = "vi",
+) -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     rows = []
     if include_tickets:
-        rows.append([InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine")])
+        rows.append([InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine")])
     rows.append([
         InlineKeyboardButton(back_label, callback_data=back_callback),
-        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -58698,43 +58735,79 @@ def complete_support_pending(user_id, ticket_id) -> None:
     clear_support_ticket_pending(user_id)
     remember_last_support_ticket(user_id, ticket_id)
 
-def support_ticket_menu_text() -> str:
-    return (
-        "💬 <b>Hỗ trợ TOAN AAS</b>\n\n"
-        "Bạn cần hỗ trợ vấn đề gì?\n\n"
-        "TOAN AAS sẽ tạo ticket để admin kiểm tra. Nếu liên quan đến nạp Xu, "
-        "tạo ảnh/video hoặc lỗi provider, bạn có thể gửi kèm ảnh chụp màn hình hoặc mã job nếu có."
+def public_support_ticket_category_label(category: str, lang: str = "vi") -> str:
+    """Display a stable ticket category code in the customer's active locale."""
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return copy.get(
+        {
+            "payment_topup": "feedback_payment_topup",
+            "image_error": "feedback_image_error",
+            "video_error": "feedback_video_error",
+            "document_pdf": "feedback_document_pdf",
+            "package_combo": "feedback_package_combo",
+            "refund": "feedback_refund",
+            "feature_request": "feedback_feature_request",
+            "lead_consulting": "support_consult",
+            "general_support": "support_ticket",
+            "service_consulting": "support_consult",
+            "premium_lead": "support_premium",
+            "custom_bot_lead": "support_custom_bot",
+        }.get(str(category or ""), "feedback_other"),
+        copy["feedback_other"],
     )
 
-def support_ticket_menu_keyboard() -> InlineKeyboardMarkup:
+
+def public_support_ticket_status_label(status: str, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return copy.get(f"support_ticket_status_{str(status or 'new')}", copy["support_ticket_status_new"])
+
+
+def public_support_ticket_priority_label(priority: str, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return copy.get(f"support_ticket_priority_{str(priority or 'normal')}", copy["support_ticket_priority_normal"])
+
+
+def support_ticket_customer_acknowledgement(category: str, lang: str = "vi", *, appended: bool = False) -> str:
+    """Return native acknowledgement copy without changing ticket classification."""
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    if appended:
+        return copy["support_ticket_append_success"]
+    return (
+        f"{copy['support_ticket_ack']}\n"
+        f"{copy['support_ticket_label_category']}: "
+        f"{public_support_ticket_category_label(category, lang)}"
+    )
+
+
+def support_ticket_menu_text(lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return f"💬 <b>{copy['support_title']}</b>\n\n{copy['support_ticket_prompt_body']}"
+
+
+def support_ticket_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(SUPPORT_CATEGORIES["payment_topup"], callback_data="ticket|cat|payment_topup"), InlineKeyboardButton(SUPPORT_CATEGORIES["image_error"], callback_data="ticket|cat|image_error")],
-        [InlineKeyboardButton(SUPPORT_CATEGORIES["video_error"], callback_data="ticket|cat|video_error"), InlineKeyboardButton(SUPPORT_CATEGORIES["document_pdf"], callback_data="ticket|cat|document_pdf")],
-        [InlineKeyboardButton(SUPPORT_CATEGORIES["package_combo"], callback_data="ticket|cat|package_combo"), InlineKeyboardButton(SUPPORT_CATEGORIES["refund"], callback_data="ticket|cat|refund")],
-        [InlineKeyboardButton(SUPPORT_CATEGORIES["feature_request"], callback_data="ticket|cat|feature_request"), InlineKeyboardButton(SUPPORT_CATEGORIES["lead_consulting"], callback_data="ticket|cat|lead_consulting")],
-        [InlineKeyboardButton(SUPPORT_CATEGORIES["other"], callback_data="ticket|cat|other"), InlineKeyboardButton("🔍 Xem ticket của tôi", callback_data="ticket|mine")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"💳 {copy['feedback_payment_topup']}", callback_data="ticket|cat|payment_topup"), InlineKeyboardButton(f"🖼 {copy['feedback_image_error']}", callback_data="ticket|cat|image_error")],
+        [InlineKeyboardButton(f"🎬 {copy['feedback_video_error']}", callback_data="ticket|cat|video_error"), InlineKeyboardButton(f"📄 {copy['feedback_document_pdf']}", callback_data="ticket|cat|document_pdf")],
+        [InlineKeyboardButton(f"🎁 {copy['feedback_package_combo']}", callback_data="ticket|cat|package_combo"), InlineKeyboardButton(f"💰 {copy['feedback_refund']}", callback_data="ticket|cat|refund")],
+        [InlineKeyboardButton(f"💡 {copy['feedback_feature_request']}", callback_data="ticket|cat|feature_request"), InlineKeyboardButton(f"🧑‍💼 {copy['support_consult']}", callback_data="ticket|cat|lead_consulting")],
+        [InlineKeyboardButton(f"✍️ {copy['feedback_other']}", callback_data="ticket|cat|other"), InlineKeyboardButton(f"🔍 {copy['support_my_tickets']}", callback_data="ticket|mine")],
+        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
-def support_ticket_message_prompt(category: str) -> str:
-    lead_hint = (
-        "\n\nVí dụ: tạo ảnh sản phẩm, video quảng cáo, content affiliate, bot tự động hóa hoặc gói doanh nghiệp."
-        if category == "lead_consulting" else ""
-    )
+def support_ticket_message_prompt(category: str, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    lead_hint = f"\n\n{copy['support_ticket_lead_hint']}" if category == "lead_consulting" else ""
     return (
-        f"✍️ <b>{html.escape(support_category_label(category))}</b>\n\n"
-        "Bạn hãy mô tả vấn đề cần hỗ trợ.\n\n"
-        "Ví dụ:\n"
-        "• Tôi đã nạp tiền nhưng chưa thấy Xu.\n"
-        "• Video bị lỗi khi render.\n"
-        "• Ảnh tạo ra không đúng prompt.\n"
-        "• Tôi muốn hỏi gói dịch vụ phù hợp."
+        f"✍️ <b>{html.escape(public_support_ticket_category_label(category, lang))}</b>\n\n"
+        f"{copy['support_ticket_prompt_body']}"
         f"{lead_hint}"
     )
 
-def support_ticket_input_keyboard() -> InlineKeyboardMarkup:
+def support_ticket_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⬅️ Quay lại hỗ trợ", callback_data="ticket|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"⬅️ {copy['support_back']}", callback_data="ticket|start"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
 def _support_ticket_row(row) -> dict | None:
@@ -58942,21 +59015,23 @@ def latest_support_ticket_message(ticket_id, sender_type: str = "user") -> str:
     finally:
         conn.close()
 
-def support_ticket_created_text(ticket: dict) -> str:
+def support_ticket_created_text(ticket: dict, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return (
-        "✅ <b>TOAN AAS đã nhận yêu cầu hỗ trợ của bạn.</b>\n\n"
-        f"Mã ticket: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
-        f"Nhóm vấn đề: {html.escape(support_category_label(ticket.get('category')))}\n"
-        f"Trạng thái: {html.escape(support_status_label(ticket.get('status')))}\n"
-        f"Thời gian gửi: <code>{html.escape(ticket.get('created_at') or '')}</code>\n\n"
-        "Admin sẽ kiểm tra và phản hồi sớm nhất có thể."
+        f"✅ <b>{copy['support_ticket_ack']}</b>\n\n"
+        f"{copy['support_ticket_label_code']}: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
+        f"{copy['support_ticket_label_category']}: {html.escape(public_support_ticket_category_label(ticket.get('category'), lang))}\n"
+        f"{copy['support_ticket_label_status']}: {html.escape(public_support_ticket_status_label(ticket.get('status'), lang))}\n"
+        f"{copy['support_ticket_label_time']}: <code>{html.escape(ticket.get('created_at') or '')}</code>\n\n"
+        f"{copy['support_ticket_received_notice']}"
     )
 
-def support_ticket_created_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
+def support_ticket_created_keyboard(ticket_id: int, lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📂 Xem ticket này", callback_data=f"ticket|pv|{ticket_id}"), InlineKeyboardButton("💬 Gửi thêm nội dung", callback_data=f"ticket|reply_user|{ticket_id}")],
-        [InlineKeyboardButton("📎 Gửi thêm ảnh/file", callback_data=f"ticket|attach|{ticket_id}"), InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine")],
-        [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="support|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"📂 {copy['support_ticket_view_current']}", callback_data=f"ticket|pv|{ticket_id}"), InlineKeyboardButton(f"💬 {copy['support_ticket_add_message']}", callback_data=f"ticket|reply_user|{ticket_id}")],
+        [InlineKeyboardButton(f"📎 {copy['support_ticket_add_attachment']}", callback_data=f"ticket|attach|{ticket_id}"), InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine")],
+        [InlineKeyboardButton(f"👨‍💼 {copy['support_back']}", callback_data="support|start"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
 def support_auto_reply_for_ticket_category(classification: dict, ticket_category: str) -> str:
@@ -58981,37 +59056,49 @@ def support_auto_reply_for_ticket_category(classification: dict, ticket_category
         return support_reply_for_classification(classification)
     return support_reply_for_classification(classification)
 
-def public_support_ticket_text(ticket: dict) -> str:
+def public_support_ticket_text(ticket: dict, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     reply = latest_admin_ticket_reply(ticket["id"])
     latest_user_message = latest_support_ticket_message(ticket["id"], "user") or ticket.get("message") or ""
     lines = [
-        f"🎫 <b>Ticket {html.escape(ticket.get('ticket_code') or '')}</b>", "",
-        f"Nhóm: {html.escape(support_category_label(ticket.get('category')))}",
-        f"Trạng thái: <b>{html.escape(support_status_label(ticket.get('status')))}</b>",
-        f"Ưu tiên: <b>{html.escape(support_priority_label(ticket.get('priority')))}</b>",
-        f"Thời gian: <code>{html.escape(ticket.get('created_at') or '')}</code>", "",
-        "<b>Nội dung gần nhất:</b>", html.escape(latest_user_message),
+        f"🎫 <b>{copy['support_ticket_label_code']} {html.escape(ticket.get('ticket_code') or '')}</b>", "",
+        f"{copy['support_ticket_label_category']}: {html.escape(public_support_ticket_category_label(ticket.get('category'), lang))}",
+        f"{copy['support_ticket_label_status']}: <b>{html.escape(public_support_ticket_status_label(ticket.get('status'), lang))}</b>",
+        f"{copy['support_ticket_label_priority']}: <b>{html.escape(public_support_ticket_priority_label(ticket.get('priority'), lang))}</b>",
+        f"{copy['support_ticket_label_time']}: <code>{html.escape(ticket.get('created_at') or '')}</code>", "",
+        f"<b>{copy['support_ticket_label_latest_message']}:</b>", html.escape(latest_user_message),
     ]
     if reply:
-        lines.extend(["", "<b>Phản hồi mới nhất:</b>", html.escape(reply)])
+        lines.extend(["", f"<b>{copy['support_ticket_label_latest_reply']}:</b>", html.escape(reply)])
     if ticket.get("attachment_file_id"):
-        lines.extend(["", "📎 Đã có file đính kèm."])
+        lines.extend(["", f"📎 {copy['support_ticket_attachment_present']}"])
     return "\n".join(lines)
 
-def public_support_ticket_list_keyboard(user_id) -> tuple[str, InlineKeyboardMarkup]:
+def support_ticket_detail_keyboard(ticket: dict, lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    ticket_id = int(ticket["id"])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"💬 {copy['support_ticket_add_message']}", callback_data=f"ticket|reply_user|{ticket_id}"), InlineKeyboardButton(f"📎 {copy['support_ticket_add_attachment']}", callback_data=f"ticket|attach|{ticket_id}")],
+        [InlineKeyboardButton(f"✅ {copy['support_ticket_mark_done']}", callback_data=f"ticket|done|{ticket_id}"), InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine")],
+        [InlineKeyboardButton(f"⬅️ {copy['support_back']}", callback_data="support|start"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+    ])
+
+
+def public_support_ticket_list_keyboard(user_id, lang: str = "vi") -> tuple[str, InlineKeyboardMarkup]:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     tickets = list_support_tickets(user_id=user_id, limit=10)
     if not tickets:
-        text = "📂 <b>Ticket của tôi</b>\n\nBạn chưa có ticket hỗ trợ nào.\nBạn có thể tạo ticket mới nếu cần TOAN AAS hỗ trợ riêng."
+        text = f"📂 <b>{copy['support_my_tickets']}</b>\n\n{copy['support_ticket_list_empty']}"
     else:
-        lines = ["📂 <b>Ticket của tôi</b>", "", "Các yêu cầu hỗ trợ gần đây:", ""]
+        lines = [f"📂 <b>{copy['support_my_tickets']}</b>", "", copy['support_ticket_list_recent'], ""]
         for ticket in tickets:
-            lines.append(f"• <code>{html.escape(ticket['ticket_code'])}</code> — {html.escape(support_category_label(ticket['category']))} — {html.escape(support_status_label(ticket['status']))}")
+            lines.append(f"• <code>{html.escape(ticket['ticket_code'])}</code> — {html.escape(public_support_ticket_category_label(ticket['category'], lang))} — {html.escape(public_support_ticket_status_label(ticket['status'], lang))}")
         text = "\n".join(lines)
     rows = []
     for index in range(0, len(tickets), 2):
         rows.append([InlineKeyboardButton(f"🎫 {ticket['ticket_code'][-6:]}", callback_data=f"ticket|pv|{ticket['id']}") for ticket in tickets[index:index + 2]])
-    rows.append([InlineKeyboardButton("🎫 Tạo ticket mới", callback_data="support|ticket"), InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start")])
-    rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    rows.append([InlineKeyboardButton(f"🎫 {copy['support_ticket']}", callback_data="support|ticket"), InlineKeyboardButton(f"⬅️ {copy['support_back']}", callback_data="support|start")])
+    rows.append([InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")])
     return text, InlineKeyboardMarkup(rows)
 
 def support_admin_menu_text() -> str:
@@ -59144,14 +59231,9 @@ def feedback_pending_key(user_id) -> str:
     return f"feedback:{user_id}"
 
 def feedback_start_text(lang: str = "vi") -> str:
-    if normalize_user_language(lang) == "zh":
-        return "💬 <b>反馈 / 报错</b>\n\n请选择问题类型。TOAN AAS 会创建工单供管理员核查。"
     if normalize_user_language(lang) != "vi":
-        return (
-            "💬 <b>Feedback / Bug report TOAN AAS</b>\n\n"
-            "Choose the issue you want to report. Payment, media, document and "
-            "refund issues create a ticket for admin review."
-        )
+        copy = public_hub_copy(normalize_user_language(lang) or "en")
+        return f"💬 <b>{copy['feedback_title']} TOAN AAS</b>\n\n{copy['feedback_body']}"
     return (
         "💬 <b>Góp ý / Báo lỗi TOAN AAS</b>\n\n"
         "Bạn muốn báo vấn đề nào?\n\n"
@@ -59160,24 +59242,24 @@ def feedback_start_text(lang: str = "vi") -> str:
     )
 
 def feedback_category_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    labels = FEEDBACK_CATEGORY_LABELS
-    if normalize_user_language(lang) != "vi":
-        labels = {
-            "payment_topup": "💳 Top-up/Payment",
-            "image_error": "🖼 Image issue",
-            "video_error": "🎬 Video issue",
-            "document_pdf": "📄 Document/PDF",
-            "package_combo": "🎁 Package/Combo",
-            "refund": "💰 Xu/Refund",
-            "feature_request": "💡 Feature feedback",
-            "other": "✍️ Other issue",
-        }
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
+    labels = {
+        "payment_topup": f"💳 {copy['feedback_payment_topup']}",
+        "image_error": f"🖼 {copy['feedback_image_error']}",
+        "video_error": f"🎬 {copy['feedback_video_error']}",
+        "document_pdf": f"📄 {copy['feedback_document_pdf']}",
+        "package_combo": f"🎁 {copy['feedback_package_combo']}",
+        "refund": f"💰 {copy['feedback_refund']}",
+        "feature_request": f"💡 {copy['feedback_feature_request']}",
+        "other": f"✍️ {copy['feedback_other']}",
+    }
     rows = [
         [InlineKeyboardButton(labels["payment_topup"], callback_data="feedback|cat|payment_topup"), InlineKeyboardButton(labels["image_error"], callback_data="feedback|cat|image_error")],
         [InlineKeyboardButton(labels["video_error"], callback_data="feedback|cat|video_error"), InlineKeyboardButton(labels["document_pdf"], callback_data="feedback|cat|document_pdf")],
         [InlineKeyboardButton(labels["package_combo"], callback_data="feedback|cat|package_combo"), InlineKeyboardButton(labels["refund"], callback_data="feedback|cat|refund")],
         [InlineKeyboardButton(labels["feature_request"], callback_data="feedback|cat|feature_request"), InlineKeyboardButton(labels["other"], callback_data="feedback|cat|other")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -59408,25 +59490,8 @@ def image_menu_guarded_result_text(action: str, lang: str = "vi") -> str:
     return "📐 Nâng cấp/đổi kích thước ảnh đang bảo trì/nâng cấp. TOAN AAS chưa xử lý ảnh và chưa trừ Xu."
 
 def image_menu_v5_text(lang: str = "vi") -> str:
-    if normalize_user_language(lang) != "vi":
-        return (
-            "🖼 <b>TOAN AAS Image Tools</b>\n\n"
-            "Choose a task group:\n\n"
-            "• Quick image: choose from suggestions or enter a prompt, then select ratio and tier.\n"
-            "• Prompt from image: send an image so the bot writes a matching prompt.\n"
-            "• AI edit: edit an image with AI request/confirmation guard.\n"
-            "• Edit image: crop/resize, brightness, text, logo/watermark, color presets and upscale.\n\n"
-            "All real image create/edit steps ask for confirmation before charging Xu."
-        )
-    return (
-        "🖼 <b>Hình ảnh TOAN AAS</b>\n\n"
-        "Chọn nhóm tác vụ:\n\n"
-        "• Tạo ảnh nhanh: nhập prompt hoặc chọn gợi ý để tạo ảnh.\n"
-        "• Tạo prompt từ ảnh: gửi ảnh để bot viết prompt phù hợp.\n"
-        "• Chỉnh sửa AI: sửa ảnh bằng AI theo yêu cầu, có xác nhận trước khi xử lý.\n"
-        "• Chỉnh sửa ảnh: crop/resize, chỉnh độ sáng, thêm chữ, Logo/Watermark, công thức màu và nâng chất lượng.\n\n"
-        "Các bước tạo/chỉnh ảnh thật đều có xác nhận trước khi trừ Xu."
-    )
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return f"🖼 <b>{copy['image_menu_title']}</b>\n\n{copy['image_menu_body']}"
 
 def image_tool_latest_key(user_id, tool: str = "") -> str:
     return f"{user_id}:{str(tool or '').strip().lower()}"
@@ -61691,19 +61756,20 @@ def image_aspect_ai_guard_text(lang: str = "vi") -> str:
     )
 
 def feedback_message_prompt(category: str, lang: str = "vi") -> str:
-    label = FEEDBACK_CATEGORY_LABELS.get(str(category or ""), FEEDBACK_CATEGORY_LABELS["other"])
-    if normalize_user_language(lang) != "vi":
-        return (
-            f"💬 <b>Feedback category:</b> {html.escape(label)}\n\n"
-            "Please send one message describing the issue or suggestion.\n"
-            "If relevant, include the job ID, button name, or screen where it happened.\n\n"
-            "TOAN AAS will create a ticket. The bot has not called AI/API and has not charged Xu."
-        )
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    label_key = {
+        "payment_topup": "feedback_payment_topup",
+        "image_error": "feedback_image_error",
+        "video_error": "feedback_video_error",
+        "document_pdf": "feedback_document_pdf",
+        "package_combo": "feedback_package_combo",
+        "refund": "feedback_refund",
+        "feature_request": "feedback_feature_request",
+        "other": "feedback_other",
+    }.get(str(category or ""), "feedback_other")
     return (
-        f"💬 <b>Nhóm góp ý:</b> {html.escape(label)}\n\n"
-        "Bạn hãy gửi một tin nhắn mô tả lỗi/góp ý.\n"
-        "Nếu có, hãy kèm job ID, nút đã bấm hoặc màn hình đang dùng.\n\n"
-        "TOAN AAS sẽ tạo ticket để admin kiểm tra. Bot chưa gọi AI/API và chưa trừ Xu."
+        f"💬 <b>{copy['feedback_prompt_title']}:</b> {html.escape(copy[label_key])}\n\n"
+        f"{copy['feedback_prompt_body']}"
     )
 
 def feedback_context_for_user(user_id) -> str:
@@ -69740,6 +69806,7 @@ def build_2col_keyboard(
     nav_back: tuple[str, str] | None = None,
     nav_main: bool = True,
     lang: str = "vi",
+    main_label: str | None = None,
 ) -> InlineKeyboardMarkup:
     rows = []
     current = []
@@ -69758,7 +69825,8 @@ def build_2col_keyboard(
     if nav_back:
         nav.append(InlineKeyboardButton(str(nav_back[0]), callback_data=str(nav_back[1])))
     if nav_main:
-        nav.append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"))
+        label = str(main_label or ui_text(lang, "common.main_menu"))
+        nav.append(InlineKeyboardButton(label, callback_data="menu|main"))
     if nav:
         rows.append(nav)
     return InlineKeyboardMarkup(rows)
@@ -69844,11 +69912,8 @@ FREE_HUB_SUGGESTION_BANK = {
 
 def free_hub_main_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
-        return (
-            "🆓 <b>TOAN AAS FREE TOOLS</b>\n\n"
-            "This area gathers 0-Xu/free helpers for preparing content, prompts, notes, temporary media, quick drafts and previews before paid tools.\n\n"
-            "Real image, video, dubbing and music creation will still show price and ask for confirmation before any Xu is charged."
-        )
+        copy = public_hub_copy(normalize_user_language(lang) or "en")
+        return f"🆓 <b>{copy['free_title']}</b>\n\n{copy['free_body']}"
     return (
         "🆓 <b>Công cụ miễn phí TOAN AAS</b>\n\n"
         "Khu này gom các công cụ 0 Xu/miễn phí để chuẩn bị nội dung, viết prompt, ghi chú, lưu media, thử nhanh hoặc tạo bản nháp trước khi dùng các tính năng trả phí.\n\n"
@@ -69856,26 +69921,28 @@ def free_hub_main_text(lang: str = "vi") -> str:
     )
 
 def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     keyboard = build_2col_keyboard(
         [
-            ("🤖 Prompt Meta AI" if is_vi else "🤖 Meta AI prompt", "freehub|meta"),
-            ("✍️ Caption/Hashtag" if is_vi else "✍️ Caption/hashtags", "freehub|caption"),
-            ("🧠 Ý tưởng content" if is_vi else "🧠 Content ideas", "freehub|ideas"),
-            ("🖼 Prompt ảnh/video" if is_vi else "🖼 Image/video prompts", "freehub|prompts"),
-            ("📚 Kho prompt mẫu" if is_vi else "📚 Prompt library", "freehub|library"),
-            ("📦 Gói đăng bài" if is_vi else "📦 Publish package", "freehub|publish_package"),
-            ("📝 Ghi chú / Tài liệu" if is_vi else "📝 Notes / Documents", "menu|main_memory"),
-            ("📥 Lưu media tạm" if is_vi else "📥 Save temp media", "freehub|upload"),
-            ("🎙 Script voice/SubDub" if is_vi else "🎙 Voice/SubDub script", "freehub|hook"),
-            ("🎵 Ý tưởng nhạc/SFX" if is_vi else "🎵 Music/SFX ideas", "freehub|lib_music"),
+            (f"🤖 {copy['freehub_meta']}", "freehub|meta"),
+            (f"✍️ {copy['freehub_caption']}", "freehub|caption"),
+            (f"🧠 {copy['freehub_ideas']}", "freehub|ideas"),
+            (f"🖼 {copy['freehub_prompts']}", "freehub|prompts"),
+            (f"📚 {copy['freehub_library']}", "freehub|library"),
+            (f"📦 {copy['freehub_publish_package']}", "freehub|publish_package"),
+            (f"📝 {copy['freehub_notes_docs']}", "menu|main_memory"),
+            (f"📥 {copy['freehub_save_temp_media']}", "freehub|upload"),
+            (f"🎙 {copy['freehub_voice_subdub_script']}", "freehub|hook"),
+            (f"🎵 {copy['freehub_music_sfx_ideas']}", "freehub|lib_music"),
         ],
         nav_back=None,
         nav_main=True,
         lang=lang,
+        main_label=f"🏠 {copy['main_menu']}",
     )
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("🤖 Bật AI Chatbot" if is_vi else "🤖 Enable AI Chatbot", callback_data="aichat|on")]]
+        [[InlineKeyboardButton(f"🤖 {copy['freehub_enable_ai_chatbot']}", callback_data="aichat|on")]]
         + list(keyboard.inline_keyboard)
     )
 
@@ -70802,87 +70869,55 @@ async def maybe_send_free_hub_promo(target, user_id, lang: str, success_count: i
 
 def public_chat_menu_text(user_id, lang: str = "vi") -> str:
     lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     modes = ensure_user_modes(user_id)
     mode = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") == "pro" else "free"
     admin = is_admin_user(user_id)
     credits = int(get_user(user_id)[0] or 0)
-    balance = "Vô hạn" if admin and lang == "vi" else ("Unlimited" if admin else f"{credits} Xu")
-    if lang == "en":
-        return (
-            "💬 <b>Public Chat</b>\n\n"
-            f"Mode: <b>{'Chat Pro — Opus 4.8' if mode == 'pro' else 'Free Chat — Gemini'}</b>\n"
-            f"Balance: <b>{html.escape(balance)}</b>\n"
-            "Free: 20 successful replies per Vietnam day; failures do not consume quota.\n"
-            f"Pro: Claude Opus 4.8, {public_chat_runtime.CHAT_PRO_RATE_LABEL} input/output; price includes ×3, billed by actual usage, no daily cap while Xu is sufficient.\n"
-            "Memory: 48 hours for public chat only; text replies only. Owner/Admin: free and unlimited."
-        )
-    if lang == "zh":
-        return (
-            "💬 <b>公开聊天</b>\n\n"
-            f"当前模式: <b>{'Chat Pro — Opus 4.8' if mode == 'pro' else '免费 Gemini'}</b>\n"
-            f"余额: <b>{html.escape(balance)}</b>\n"
-            "免费聊天每天每个账号 20 次成功回复；失败不扣次数。\n"
-            f"Pro 使用 Claude Opus 4.8，{public_chat_runtime.CHAT_PRO_RATE_LABEL} input/output；单价已含 ×3，按实际 usage 计费，不设每日次数上限。\n"
-            "公开聊天记忆 48 小时，仅返回文字；Owner/Admin 免费无限。"
-        )
+    balance = copy["profile_unlimited"] if admin else f"{credits} Xu"
     return (
-        "💬 <b>Chat công khai</b>\n\n"
-        f"• Chế độ hiện tại: <b>{'Chat Pro — Opus 4.8' if mode == 'pro' else 'Chat miễn phí — Gemini'}</b>\n"
-        f"• Số dư: <b>{html.escape(balance)}</b>\n"
-        "• Free: 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt\n"
-        f"• Pro: Claude Opus 4.8, {public_chat_runtime.CHAT_PRO_RATE_LABEL} input/output; đơn giá đã gồm ×3, tính usage thực tế, không giới hạn ngày khi đủ Xu\n"
-        "• Bộ nhớ nối tiếp 48 giờ, chỉ thuộc Chat công khai; chỉ trả text\n"
-        "• Owner/Admin: miễn phí và không giới hạn"
+        f"💬 <b>{copy['chat_menu_title']}</b>\n\n"
+        f"• {copy['chat_mode_label']}: <b>{copy['chat_mode_pro'] if mode == 'pro' else copy['chat_mode_free']}</b>\n"
+        f"• {copy['chat_balance_label']}: <b>{html.escape(balance)}</b>\n"
+        f"• {copy['chat_free_summary']}\n"
+        f"• {copy['chat_pro_summary'].format(rate=public_chat_runtime.CHAT_PRO_RATE_LABEL)}\n"
+        f"• {copy['chat_memory_summary']}\n"
+        f"• {copy['chat_owner_admin_summary']}"
     )
 
 
 def public_chat_menu_keyboard(user_id, lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     current = ensure_user_modes(user_id).get("chat_mode") or "normal"
     pro = normalize_chat_tier(current) == "pro"
-    if lang == "zh":
-        toggle = "⏹ 关闭 Chat Pro" if pro else "💎 开启 Chat Pro"
-        free = "🆓 免费聊天"
-        account = "👤 我的账户"
-        main = "🏠 主菜单"
-    elif lang == "en":
-        toggle = "⏹ Disable Chat Pro" if pro else "💎 Enable Chat Pro"
-        free = "🆓 Free Chat"
-        account = "👤 Account"
-        main = "🏠 Main menu"
-    else:
-        toggle = "⏹ Tắt Chat Pro" if pro else "💎 Bật Chat Pro"
-        free = "🆓 Chat miễn phí"
-        account = "👤 Tài khoản"
-        main = "🏠 Menu chính"
+    toggle = copy["chat_pro_disable"] if pro else copy["chat_pro_enable"]
     toggle_action = "menu|chat_pro_off" if pro else "menu|chat_pro_on"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(toggle, callback_data=toggle_action)],
-        [InlineKeyboardButton(free, callback_data="menu|chat_free"), InlineKeyboardButton(account, callback_data="menu|main_profile")],
-        [InlineKeyboardButton(main, callback_data="menu|main")],
+        [InlineKeyboardButton(copy["chat_free_label"], callback_data="menu|chat_free"), InlineKeyboardButton(copy["chat_account_label"], callback_data="menu|main_profile")],
+        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
 
 def public_chat_free_text(lang: str = "vi") -> str:
     lang = normalize_user_language(lang) or "vi"
-    if lang == "en":
-        return "🆓 <b>Free Chat</b>\n\nGemini 3.6 Flash; 20 successful replies per Vietnam day/account. Failed replies do not consume a turn. Memory is isolated to 48 hours and output is text-only."
-    if lang == "zh":
-        return "🆓 <b>免费 Chat</b>\n\n使用 Gemini 3.6 Flash。每个账号每天（越南日期）最多 20 次成功回复；失败不扣次数。记忆仅保留 48 小时，回复只返回文字。"
-    return "🆓 <b>Chat miễn phí</b>\n\nDùng Gemini 3.6 Flash. Mỗi tài khoản tối đa 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt. Bộ nhớ chỉ 48 giờ và câu trả lời chỉ là text."
+    copy = public_hub_copy(lang)
+    return f"🆓 <b>{copy['chat_free_title']}</b>\n\n{copy['chat_free_body']}"
 
 
 def _public_chat_failure_text(status: str, mode: str, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     normalized = str(status or "").strip().lower()
     if normalized in {"free_quota_exhausted", "quota_exhausted"}:
-        return "⚠️ Bạn đã dùng hết 20 lượt Chat miễn phí hôm nay. Ngày Việt Nam mới sẽ tự mở lại."
+        return copy["chat_error_quota"]
     if normalized in {"insufficient_balance", "insufficient_xu"}:
-        return "❌ Không đủ Xu cho Chat Pro. Bot chưa gọi Opus và chưa trừ thêm Xu."
+        return copy["chat_error_insufficient_xu"]
     if normalized == "unsupported":
-        return "⚠️ Nội dung này chưa thuộc năng lực của chế độ Chat đang chọn. Bot chưa gọi AI và chưa trừ Xu."
+        return copy["chat_error_unsupported"]
     if normalized == "duplicate":
-        return "ℹ️ Tin nhắn trùng đã được xử lý; bot không gửi lặp câu trả lời."
-    return "⚠️ AI đang bận hoặc không trả lời hợp lệ. Bot chưa trừ Xu/lượt; bạn thử lại sau."
+        return copy["chat_error_duplicate"]
+    return copy["chat_error_provider"]
 
 
 async def send_public_chat_text(
@@ -70934,13 +70969,14 @@ async def handle_public_chat_text(
         selected = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") == "pro" else "free"
     selected = "pro" if selected == "pro" else "free"
     lang = get_user_language(uid) or "vi"
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     if not attachments_override:
         intent_text = raw_text if creation_intent_override is None else str(creation_intent_override)
         creation = public_chat_media.detect_creation_intent(intent_text)
         if creation in {"image", "video"}:
-            label = "🖼 Mở Tạo ảnh AI" if creation == "image" else "🎬 Mở Tạo video AI"
+            label = copy["chat_media_redirect_image"] if creation == "image" else copy["chat_media_redirect_video"]
             callback = "menu|main_image" if creation == "image" else "menu|main_video"
-            await message.reply_text("Tác vụ tạo media dùng dịch vụ riêng có màn xác nhận. Chat chỉ trả text; bot chưa gọi provider và chưa trừ Xu.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=callback)]]))
+            await message.reply_text(copy["chat_media_redirect_body"], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=callback)]]))
             return True
     conn = db_connect()
     result: dict = {"ok": False, "status": "provider_failure", "mode": selected}
@@ -70962,15 +70998,15 @@ async def handle_public_chat_text(
             ).get("remaining", 0)
             if pending_mode == "pro":
                 pending_footer = (
-                    "💎 Chat Pro • Owner/Admin: miễn phí"
+                    copy["chat_footer_pro_admin"]
                     if admin
-                    else f"💎 Chat Pro • -{int(pending.get('charged_xu') or 0)} Xu • usage thực tế"
+                    else copy["chat_footer_pro_usage"].format(charged=int(pending.get("charged_xu") or 0))
                 )
             else:
                 pending_footer = (
-                    "🆓 Chat miễn phí • Owner/Admin: miễn phí, không giới hạn"
+                    copy["chat_footer_free_admin"]
                     if admin
-                    else f"🆓 Chat miễn phí • còn {int(pending_remaining or 0)} lượt hôm nay"
+                    else copy["chat_footer_free_remaining"].format(remaining=int(pending_remaining or 0))
                 )
             try:
                 await send_public_chat_text(
@@ -71013,12 +71049,16 @@ async def handle_public_chat_text(
             await message.reply_text(_public_chat_failure_text(str(result.get("status") or ""), selected, lang))
             return True
         if selected == "pro":
-            footer = "💎 Chat Pro • Owner/Admin: miễn phí" if admin else f"💎 Chat Pro • -{int(result.get('charged_xu') or result.get('cost_xu') or 0)} Xu • usage thực tế"
+            footer = (
+                copy["chat_footer_pro_admin"]
+                if admin
+                else copy["chat_footer_pro_usage"].format(charged=int(result.get("charged_xu") or result.get("cost_xu") or 0))
+            )
         else:
             footer = (
-                "🆓 Chat miễn phí • Owner/Admin: miễn phí, không giới hạn"
+                copy["chat_footer_free_admin"]
                 if admin
-                else f"🆓 Chat miễn phí • còn {int(remaining or 0)} lượt hôm nay"
+                else copy["chat_footer_free_remaining"].format(remaining=int(remaining or 0))
             )
         try:
             await send_public_chat_text(
@@ -71047,6 +71087,8 @@ async def handle_public_chat_attachment(update: Update, context: ContextTypes.DE
     user = getattr(update, "effective_user", None)
     if not message or not user:
         return False
+    lang = get_user_language(user.id) or "vi"
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     media = None
     mime_type = ""
     file_name = ""
@@ -71079,29 +71121,35 @@ async def handle_public_chat_attachment(update: Update, context: ContextTypes.DE
     is_text_file = mime_type == "text/plain" or Path(file_name).suffix.lower() == ".txt"
     kind = public_chat_media.classify_attachment(mime_type, file_name)
     if not is_text_file and kind is None:
-        await message.reply_text("⚠️ Chat không hỗ trợ loại file này. Bot chưa tải file, chưa gọi AI và chưa trừ Xu.")
+        await message.reply_text(copy["chat_attachment_error_unsupported_type"])
         return True
     if declared <= 0:
-        await message.reply_text("⚠️ Không xác minh được dung lượng file. Bot chưa tải file, chưa gọi AI và chưa trừ Xu.")
+        await message.reply_text(copy["chat_attachment_error_unknown_size"])
         return True
     declared_limit = 1 * 1024 * 1024 if is_text_file else public_chat_media.PUBLIC_ATTACHMENT_LIMITS[kind]
     if declared > declared_limit:
-        await message.reply_text("⚠️ File vượt quá giới hạn dung lượng của Chat. Bot chưa tải file, chưa gọi AI và chưa trừ Xu.")
+        await message.reply_text(copy["chat_attachment_error_size_limit"])
         return True
     modes = ensure_user_modes(user.id)
     selected = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") == "pro" else "free"
     if not is_text_file and public_chat_media.capability_decision(selected, [kind]).get("route") == "unsupported":
-        await message.reply_text("⚠️ Chat Pro hiện nhận text, ảnh và PDF. Audio/video hãy dùng Chat miễn phí hoặc công cụ chuyên dụng; bot chưa trừ Xu.")
+        await message.reply_text(copy["chat_attachment_error_pro_capability"])
         return True
     caption = str(getattr(message, "caption", "") or "").strip()
     creation = public_chat_media.detect_creation_intent(caption)
     if creation in {"image", "video"}:
         callback = "menu|main_image" if creation == "image" else "menu|main_video"
-        label = "🖼 Mở Tạo ảnh AI" if creation == "image" else "🎬 Mở Tạo video AI"
-        await message.reply_text("Tạo media dùng dịch vụ riêng có màn xác nhận. Bot chưa gọi provider và chưa trừ Xu.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=callback)]]))
+        label = copy["chat_media_redirect_image"] if creation == "image" else copy["chat_media_redirect_video"]
+        await message.reply_text(copy["chat_media_redirect_body"], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=callback)]]))
         return True
     if not caption:
-        caption = {"image": "Hãy phân tích ảnh này và trả lời bằng text.", "audio": "Hãy nghe, tóm tắt audio này và trả lời bằng text.", "video": "Hãy xem, tóm tắt video này và trả lời bằng text.", "pdf": "Hãy đọc, tóm tắt tài liệu PDF này và trả lời bằng text.", "text": "Hãy đọc nội dung file text này và trả lời bằng text."}[kind or "text"]
+        caption = {
+            "image": copy["chat_attachment_prompt_image"],
+            "audio": copy["chat_attachment_prompt_audio"],
+            "video": copy["chat_attachment_prompt_video"],
+            "pdf": copy["chat_attachment_prompt_pdf"],
+            "text": copy["chat_attachment_prompt_text"],
+        }[kind or "text"]
     temp_path = ""
     try:
         suffix = Path(file_name).suffix or {"image": ".jpg", "audio": ".ogg", "video": ".mp4", "pdf": ".pdf", "text": ".txt"}[kind or "text"]
@@ -71129,7 +71177,7 @@ async def handle_public_chat_attachment(update: Update, context: ContextTypes.DE
         return await handle_public_chat_text(update, context, text_override=caption, mode_override=selected, attachments_override=(attachment,))
     except Exception as exc:
         logger.warning("public chat attachment rejected | error=%s", type(exc).__name__)
-        await message.reply_text("⚠️ Không đọc được file hợp lệ. Bot đã xóa file tạm, chưa gọi AI và chưa trừ Xu.")
+        await message.reply_text(copy["chat_attachment_error_invalid_file"])
         return True
     finally:
         if temp_path:
@@ -71181,8 +71229,8 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     copy = public_hub_copy(lang)
     rows = [
         [InlineKeyboardButton(f"🆓 {copy['free_tools_label']}", callback_data="freehub|main"), InlineKeyboardButton(f"💎 {copy['chat_pro_label']} • {public_chat_runtime.CHAT_PRO_RATE_LABEL}", callback_data="menu|chat_pro")],
-        [InlineKeyboardButton(f"👤 {copy['account_label']}", callback_data="menu|main_profile"), InlineKeyboardButton(f"🖼 {copy['image_label']}", callback_data="menu|main_image")],
-        [InlineKeyboardButton(f"🎬 {copy['video_label']}", callback_data="menu|main_video"), InlineKeyboardButton(f"🎧 {copy['audio_studio_label']}", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root"))],
+        [InlineKeyboardButton(f"🎬 {copy['video_label']}", callback_data="menu|main_video"), InlineKeyboardButton(f"🖼 {copy['image_label']}", callback_data="menu|main_image")],
+        [InlineKeyboardButton(f"👤 {copy['account_label']}", callback_data="menu|main_profile"), InlineKeyboardButton(f"🎧 {copy['audio_studio_label']}", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root"))],
         [InlineKeyboardButton(f"🌐 {copy['translation_label']}", callback_data="menu|translate"), InlineKeyboardButton(f"📝 {copy['notes_docs_label']}", callback_data="menu|main_memory")],
         [InlineKeyboardButton(f"📚 {copy['guide_label']}", callback_data="menu|main_guide"), InlineKeyboardButton(f"👨‍💼 {copy['support']}", callback_data="menu|support")],
         [InlineKeyboardButton(f"💰 {copy['topup_pricing_label']}", callback_data="pricing|main"), InlineKeyboardButton(f"💬 {copy['feedback_label']}", callback_data="feedback|start")],
@@ -90150,6 +90198,9 @@ def video_public_route_for_callback(callback: str) -> dict:
 def video_public_menu_label(tool_id: str, lang: str = "vi") -> str:
     route = video_public_route_for_tool(tool_id)
     lang = normalize_user_language(lang) or "vi"
+    native_label = public_video_menu_label(tool_id, lang)
+    if native_label:
+        return native_label
     if lang == "zh":
         return str(route.get("label_zh") or route.get("label_vi") or tool_id)
     if lang != "vi":
@@ -92310,18 +92361,16 @@ def video_editor_worker_ready() -> bool:
 
 def main_video_keyboard(lang: str = "vi", *, resume_uiflow3: bool = False) -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     rows = []
     if resume_uiflow3:
-        resume_label = {
-            "vi": "↩️ Tiếp tục kế hoạch đang làm",
-            "zh": "↩️ 继续当前视频计划",
-        }.get(lang, "↩️ Resume current video plan")
+        resume_label = public_video_menu_label("video_resume", lang) or "↩️ Resume current video plan"
         rows.append([InlineKeyboardButton(resume_label, callback_data="vid3|resume")])
     for product_ids in video_public_visible_menu_rows():
         row = []
         for tool_id in product_ids:
             if tool_id == "main_menu":
-                row.append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"))
+                row.append(InlineKeyboardButton(copy["main_menu"], callback_data="menu|main"))
                 continue
             route = video_public_route_for_tool(tool_id)
             row.append(InlineKeyboardButton(video_public_menu_label(tool_id, lang), callback_data=str(route.get("entry_callback") or "")))
@@ -113709,59 +113758,61 @@ def main_ai_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def main_memory_keyboard(lang: str = "vi", user_id=0) -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     buttons = [
-        ("📝 Tạo ghi chú" if is_vi else "📝 Create note", "memory|create"),
-        ("📋 Ghi chú đã lưu" if is_vi else "📋 Saved notes", "memory|list"),
-        ("⏰ Nhắc hẹn" if is_vi else "⏰ Reminder", "menu|hint_remind"),
-        ("📄 Lưu tài liệu" if is_vi else "📄 Save document", "menu|hint_doc_save_document"),
-        ("🔍 Tìm ghi chú" if is_vi else "🔍 Search notes", "memory|search"),
-        ("🗑 Xóa ghi chú" if is_vi else "🗑 Delete note", "memory|delete_start"),
-        ("💾 Dung lượng của tôi" if is_vi else "💾 My storage", "menu|memory_storage_status"),
-        ("📦 Mua thêm dung lượng" if is_vi else "📦 Add storage", "menu|memory_storage_addon"),
-        ("🧹 Dọn file cũ" if is_vi else "🧹 Clean old files", "menu|memory_storage_cleanup"),
-        ("🧰 Công cụ PDF / Word" if is_vi else "🧰 PDF / Word tools", "menu|main_docs"),
+        (f"📝 {copy['notes_create']}", "memory|create"),
+        (f"📋 {copy['notes_saved']}", "memory|list"),
+        (f"⏰ {copy['notes_reminder']}", "menu|hint_remind"),
+        (f"📄 {copy['notes_save_document']}", "menu|hint_doc_save_document"),
+        (f"🔍 {copy['notes_search']}", "memory|search"),
+        (f"🗑 {copy['notes_delete']}", "memory|delete_start"),
+        (f"💾 {copy['notes_storage']}", "menu|memory_storage_status"),
+        (f"📦 {copy['notes_add_storage']}", "menu|memory_storage_addon"),
+        (f"🧹 {copy['notes_clean_files']}", "menu|memory_storage_cleanup"),
+        (f"🧰 {copy['docs_tools']}", "menu|main_docs"),
     ]
     if is_admin_user(user_id):
-        buttons.append(("🏢 Hồ sơ nội bộ" if is_vi else "🏢 Internal archive", "menu|internal_archive"))
-    back = ("⬅️ Quay lại", "menu|main") if is_vi else ("⬅️ Back", "menu|main")
-    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
+        buttons.append(("🏢 Hồ sơ nội bộ" if lang == "vi" else "🏢 Internal archive", "menu|internal_archive"))
+    return build_2col_keyboard(buttons, nav_back=(f"⬅️ {copy['back']}", "menu|main"), lang=lang, main_label=f"🏠 {copy['main_menu']}")
 
 def main_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     buttons = [
-        ("📄 PDF sang Word" if is_vi else "📄 PDF to Word", "menu|hint_doc_pdf_to_word"),
-        ("🖼 Ảnh sang PDF" if is_vi else "🖼 Image to PDF", "menu|hint_doc_image_to_pdf"),
-        ("🗜 Nén PDF" if is_vi else "🗜 Compress PDF", "menu|hint_doc_compress_pdf"),
-        ("✂️ Tách PDF" if is_vi else "✂️ Split PDF", "menu|hint_doc_split_pdf"),
-        ("🧩 Gộp PDF" if is_vi else "🧩 Merge PDF", "menu|hint_doc_merge_pdf"),
-        ("📋 Tất cả công cụ" if is_vi else "📋 All document tools", "menu|doc_tools"),
+        (f"📄 {copy['docs_pdf_to_word']}", "menu|hint_doc_pdf_to_word"),
+        (f"🖼 {copy['docs_image_to_pdf']}", "menu|hint_doc_image_to_pdf"),
+        (f"🗜 {copy['docs_compress_pdf']}", "menu|hint_doc_compress_pdf"),
+        (f"✂️ {copy['docs_split_pdf']}", "menu|hint_doc_split_pdf"),
+        (f"🧩 {copy['docs_merge_pdf']}", "menu|hint_doc_merge_pdf"),
+        (f"📋 {copy['docs_all_tools']}", "menu|doc_tools"),
     ]
-    back = ("⬅️ Ghi chú / Tài liệu", "menu|main_memory") if is_vi else ("⬅️ Notes / Docs", "menu|main_memory")
-    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
+    return build_2col_keyboard(buttons, nav_back=(f"⬅️ {copy['notes_docs_label']}", "menu|main_memory"), lang=lang, main_label=f"🏠 {copy['main_menu']}")
 
 def main_image_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
-    is_vi = lang == "vi"
+    copy = public_hub_copy(lang)
     buttons = [
-        ("🖼 Tạo ảnh nhanh" if is_vi else "🖼 Quick image", "create_media|quick_image"),
-        ("✍️ Tạo prompt từ ảnh" if is_vi else "✍️ Prompt from image", "menu|image_prompt_start"),
-        ("✨ Chỉnh sửa AI" if is_vi else "✨ AI edit", "imgtool|edit_ai_start"),
-        ("🧩 Chỉnh sửa ảnh" if is_vi else "🧩 Edit image", "menu|image_edit_start"),
+        (f"🖼 {copy['image_quick']}", "create_media|quick_image"),
+        (f"✍️ {copy['image_prompt_from_image']}", "menu|image_prompt_start"),
+        (f"✨ {copy['image_ai_edit']}", "imgtool|edit_ai_start"),
+        (f"🧩 {copy['image_edit']}", "menu|image_edit_start"),
     ]
-    back = ("⬅️ Quay lại", "menu|main") if is_vi else ("⬅️ Back", "menu|main")
-    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
+    return build_2col_keyboard(buttons, nav_back=(f"⬅️ {copy['back']}", "menu|main"), lang=lang, main_label=f"🏠 {copy['main_menu']}")
 
 def main_audio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    is_vi = lang == "vi"
+    copy = public_hub_copy(lang)
     buttons = [
-        ("🎙 Giọng đọc" if is_vi else "🎙 Voice", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_hub")),
-        ("🎵 Nhạc" if is_vi else "🎵 Music", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_hub")),
+        ("🎙 Giọng đọc" if is_vi else f"🎙 {copy['audio_voice']}", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_hub")),
+        ("🎵 Nhạc" if is_vi else f"🎵 {copy['audio_music']}", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_hub")),
     ]
     return build_2col_keyboard(
         buttons,
-        nav_back=("⬅️ Quay lại" if is_vi else "⬅️ Back", "menu|main"),
+        nav_back=("⬅️ Quay lại" if is_vi else f"⬅️ {copy['back_main']}", "menu|main"),
         lang=lang,
+        main_label=f"🏠 {copy['main_menu']}",
     )
 
 def translation_menu_text(lang: str = "vi") -> str:
@@ -113770,21 +113821,20 @@ def translation_menu_text(lang: str = "vi") -> str:
             "🌐 <b>Trung tâm dịch</b>\n\n"
             "Bạn muốn dùng nhóm nào?"
         )
-    return (
-        "🌐 <b>TOAN AAS Translation Center</b>\n\n"
-        "What kind of content do you want to translate?"
-    )
+    copy = public_hub_copy(lang)
+    return f"🌐 <b>{copy['translation_title']}</b>\n\n{copy['translation_body']}"
 
 def translation_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🌐 Dịch ngôn ngữ" if is_vi else "🌐 Language translation", callback_data="menu|translation_language_hub"),
-            InlineKeyboardButton("🎬 Phụ đề / Lồng tiếng" if is_vi else "🎬 Subtitles / dubbing", callback_data="menu|translation_video_factory"),
+            InlineKeyboardButton(f"🌐 {copy['translation_language']}", callback_data="menu|translation_language_hub"),
+            InlineKeyboardButton(f"🎬 {copy['translation_subtitle_dubbing']}", callback_data="menu|translation_video_factory"),
         ],
         [
-            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="menu|main"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton(f"⬅️ {copy['back']}", callback_data="menu|main"),
+            InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
         ],
     ])
 
@@ -113794,10 +113844,8 @@ def translation_language_hub_text(lang: str = "vi") -> str:
             "🌐 <b>Dịch ngôn ngữ</b>\n\n"
             "Bạn muốn dịch nội dung nào?"
         )
-    return (
-        "🌐 <b>Language translation</b>\n\n"
-        "Choose a translation mode. Short text translation does not charge Xu; voice/audio, long documents or TTS are guarded before processing."
-    )
+    copy = public_hub_copy(lang)
+    return f"🌐 <b>{copy['translation_language_title']}</b>\n\n{copy['translation_language_body']}"
 
 def translation_auto_translate_enabled(user_id=None) -> bool:
     if user_id is None:
@@ -113809,129 +113857,127 @@ def translation_auto_translate_enabled(user_id=None) -> bool:
     return bool(str((modes or {}).get("translate_mode_target") or "").strip())
 
 def translation_language_hub_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     buttons = [
-        ("📝 Văn bản" if is_vi else "📝 Text", "menu|translation_text"),
-        ("📄 Dịch file" if is_vi else "📄 Translate file", "menu|translation_media_file"),
-        ("🎧 Dịch audio" if is_vi else "🎧 Translate audio", "menu|translation_media_audio"),
-        ("💬 Hội thoại" if is_vi else "💬 Conversation", "menu|translation_live_conversation"),
-        ("🔁 Dịch 2 chiều" if is_vi else "🔁 Two-way", "menu|translation_two_way"),
-        ("🌐 Dịch tự động" if is_vi else "🌐 Auto translate", "menu|translation_auto_target"),
-        ("⚙️ Ngôn ngữ" if is_vi else "⚙️ Languages", "menu|translation_language"),
-        ("⏹ Tắt dịch tự động" if is_vi else "⏹ Stop auto translate", "menu|translation_stop_session"),
+        (f"📝 {copy['translation_text']}", "menu|translation_text"),
+        (f"📄 {copy['translation_file']}", "menu|translation_media_file"),
+        (f"🎧 {copy['translation_audio']}", "menu|translation_media_audio"),
+        (f"💬 {copy['translation_conversation']}", "menu|translation_live_conversation"),
+        (f"🔁 {copy['translation_two_way']}", "menu|translation_two_way"),
+        (f"🌐 {copy['translation_auto']}", "menu|translation_auto_target"),
+        (f"⚙️ {copy['translation_languages']}", "menu|translation_language"),
+        (f"⏹ {copy['translation_stop']}", "menu|translation_stop_session"),
     ]
     return build_2col_keyboard(
         buttons,
-        nav_back=("⬅️ Trung tâm" if is_vi else "⬅️ Translation center", "menu|translate"),
+        nav_back=(f"⬅️ {copy['translation_label']}", "menu|translate"),
         nav_main=True,
         lang=lang,
+        main_label=f"🏠 {copy['main_menu']}",
     )
 
 def translation_input_keyboard(lang: str = "vi", parent: str = "language") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     if str(parent or "") == "media":
-        back = ("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", "menu|translation_video_factory")
+        back = (f"⬅️ {copy['translation_subtitle_dubbing']}", "menu|translation_video_factory")
     else:
-        back = ("⬅️ Dịch ngôn ngữ" if is_vi else "⬅️ Language translation", "menu|translation_language_hub")
+        back = (f"⬅️ {copy['translation_language']}", "menu|translation_language_hub")
     return build_2col_keyboard(
         [],
         nav_back=back,
         nav_main=True,
         lang=lang,
+        main_label=f"🏠 {copy['main_menu']}",
     )
 
 def translation_text_confirm_text(source_text: str, target: str, lang: str = "vi") -> str:
     preview = html.escape(str(source_text or "").strip()[:700])
     target_label = html.escape(translate_target_label(target))
-    if normalize_user_language(lang) != "vi":
-        return (
-            "🌐 <b>Confirm text translation</b>\n\n"
-            f"Target: <b>{target_label}</b>\n\n"
-            f"<blockquote>{preview}</blockquote>\n\n"
-            "TOAN AAS has not translated the text and has not charged Xu. Confirm to continue."
-        )
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return (
-        "🌐 <b>Xác nhận dịch văn bản</b>\n\n"
-        f"Ngôn ngữ đích: <b>{target_label}</b>\n\n"
+        f"<b>{copy['translation_text_confirm_title']}</b>\n\n"
+        f"{copy['translation_text_confirm_target']}: <b>{target_label}</b>\n\n"
         f"<blockquote>{preview}</blockquote>\n\n"
-        "TOAN AAS chưa dịch nội dung và chưa trừ Xu. Bấm xác nhận để tiếp tục."
+        f"{copy['translation_text_confirm_continue']}"
     )
 
 def translation_text_confirm_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Xác nhận dịch" if is_vi else "✅ Confirm translation", callback_data="menu|translation_text_confirm")],
+        [InlineKeyboardButton(copy["translation_text_confirm_action"], callback_data="menu|translation_text_confirm")],
         [
-            InlineKeyboardButton("❌ Hủy" if is_vi else "❌ Cancel", callback_data="menu|translation_text_cancel"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton(copy["translation_text_cancel"], callback_data="menu|translation_text_cancel"),
+            InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
         ],
     ])
 
 def translation_text_target_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     return build_2col_keyboard(
         [
-            ("🇻🇳 Tiếng Việt" if is_vi else "🇻🇳 Vietnamese", "menu|translation_text_target_vi"),
-            ("🇺🇸 Tiếng Anh" if is_vi else "🇺🇸 English", "menu|translation_text_target_en"),
-            ("🇨🇳 Tiếng Trung" if is_vi else "🇨🇳 Chinese", "menu|translation_text_target_zh"),
-            ("🇯🇵 Tiếng Nhật" if is_vi else "🇯🇵 Japanese", "menu|translation_text_target_ja"),
-            ("🇰🇷 Tiếng Hàn" if is_vi else "🇰🇷 Korean", "menu|translation_text_target_ko"),
-            ("🇹🇭 Tiếng Thái" if is_vi else "🇹🇭 Thai", "menu|translation_text_target_th"),
-            ("✍️ Ngôn ngữ khác" if is_vi else "✍️ Other language", "menu|translation_text_target_custom"),
+            (f"🇻🇳 {copy['translation_target_label_vi']}", "menu|translation_text_target_vi"),
+            (f"🇺🇸 {copy['translation_target_label_en']}", "menu|translation_text_target_en"),
+            (f"🇨🇳 {copy['translation_target_label_zh']}", "menu|translation_text_target_zh"),
+            (f"🇯🇵 {copy['translation_target_label_ja']}", "menu|translation_text_target_ja"),
+            (f"🇰🇷 {copy['translation_target_label_ko']}", "menu|translation_text_target_ko"),
+            (f"🇹🇭 {copy['translation_target_label_th']}", "menu|translation_text_target_th"),
+            (f"✍️ {copy['translation_picker_more']}", "menu|translation_text_target_custom"),
         ],
-        nav_back=("⬅️ Dịch ngôn ngữ" if is_vi else "⬅️ Language translation", "menu|translation_language_hub"),
+        nav_back=(f"⬅️ {copy['translation_language']}", "menu|translation_language_hub"),
         nav_main=True,
         lang=lang,
+        main_label=f"🏠 {copy['main_menu']}",
     )
 
 def translation_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     return build_2col_keyboard(
         [
-            ("🔁 Dịch tiếp" if is_vi else "🔁 Translate more", "menu|translation_text"),
-            ("🌐 Đổi ngôn ngữ" if is_vi else "🌐 Change language", "menu|translation_text"),
-            ("⬅️ Dịch ngôn ngữ" if is_vi else "⬅️ Language translation", "menu|translation_language_hub"),
+            (copy["translation_result_more"], "menu|translation_text"),
+            (copy["translation_result_change"], "menu|translation_text"),
+            (f"⬅️ {copy['translation_language']}", "menu|translation_language_hub"),
         ],
         nav_main=True,
         lang=lang,
+        main_label=f"🏠 {copy['main_menu']}",
     )
 
 def translation_language_options_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     return build_2col_keyboard(
         [
-            ("🌐 Ngôn ngữ đích tự động" if is_vi else "🌐 Auto-translate target", "menu|translation_auto_target"),
-            ("🌍 Ngôn ngữ giao diện bot" if is_vi else "🌍 Bot interface language", "back_lang"),
+            (copy["translation_auto_target"], "menu|translation_auto_target"),
+            (copy["translation_interface_language"], "back_lang"),
         ],
-        nav_back=("⬅️ Dịch ngôn ngữ" if is_vi else "⬅️ Language translation", "menu|translation_language_hub"),
+        nav_back=(f"⬅️ {copy['translation_language']}", "menu|translation_language_hub"),
         nav_main=True,
         lang=lang,
+        main_label=f"🏠 {copy['main_menu']}",
     )
 
 def translate_language_keyboard(other: bool = False, lang: str = "vi") -> InlineKeyboardMarkup:
-    english_ui = normalize_user_language(lang) != "vi"
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     if other:
-        back_label = "⬅️ Main languages" if english_ui else "⬅️ 3 ngôn ngữ chính"
-        off_label = "🌐 Disable auto-translate" if english_ui else "🌐 Tắt dịch tự động"
-        main_label = "🏠 Main menu" if english_ui else "🏠 Menu chính"
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🇯🇵 日本語", callback_data="menu|translate_set_ja"), InlineKeyboardButton("🇰🇷 한국어", callback_data="menu|translate_set_ko")],
             [InlineKeyboardButton("🇹🇭 ไทย", callback_data="menu|translate_set_th"), InlineKeyboardButton("🇸🇦 العربية", callback_data="menu|translate_set_ar")],
-            [InlineKeyboardButton(back_label, callback_data="menu|translation_auto_target")],
-            [InlineKeyboardButton(off_label, callback_data="menu|translate_off")],
-            [InlineKeyboardButton(main_label, callback_data="menu|main")],
+            [InlineKeyboardButton(copy["translation_picker_back"], callback_data="menu|translation_auto_target")],
+            [InlineKeyboardButton(copy["translation_stop"], callback_data="menu|translate_off")],
+            [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
         ])
-    more_label = "🌍 More languages" if english_ui else "🌍 Ngôn ngữ khác / More languages"
-    off_label = "🌐 Disable auto-translate" if english_ui else "🌐 Tắt dịch tự động"
-    back_audio = "⬅️ Language translation" if english_ui else "⬅️ Dịch ngôn ngữ"
-    main_label = "🏠 Main menu" if english_ui else "🏠 Menu chính"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="menu|translate_set_vi")],
         [InlineKeyboardButton("🇺🇸 English", callback_data="menu|translate_set_en")],
         [InlineKeyboardButton("🇨🇳 中文", callback_data="menu|translate_set_zh")],
-        [InlineKeyboardButton(more_label, callback_data="menu|translate_more")],
-        [InlineKeyboardButton(off_label, callback_data="menu|translate_off")],
-        [InlineKeyboardButton(back_audio, callback_data="menu|translation_language_hub"), InlineKeyboardButton(main_label, callback_data="menu|main")],
+        [InlineKeyboardButton(copy["translation_picker_more"], callback_data="menu|translate_more")],
+        [InlineKeyboardButton(copy["translation_stop"], callback_data="menu|translate_off")],
+        [InlineKeyboardButton(f"⬅️ {copy['translation_language']}", callback_data="menu|translation_language_hub"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
 def main_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -124745,31 +124791,22 @@ def menu_text_main_profile(user_id) -> str:
 
 def main_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
-    if lang == "zh":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("💰 充值 Xu", callback_data="menu|main_topup"), InlineKeyboardButton("💳 价格", callback_data="pricing|main")],
-            [InlineKeyboardButton("🎁 我的套餐", callback_data="menu|profile_packages"), InlineKeyboardButton("👑 会员等级", callback_data="pricing|member")],
-            [InlineKeyboardButton("📚 Xu 指南", callback_data="menu|guide_credits"), InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support")],
-            [InlineKeyboardButton("🎁 邀请链接", callback_data="menu|profile_ref_link"), InlineKeyboardButton("👥 邀请记录", callback_data="menu|profile_ref_stats")],
-            [InlineKeyboardButton("📋 奖励规则", callback_data="menu|profile_ref_policy"), InlineKeyboardButton("🌍 更改语言", callback_data="back_lang")],
-            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ])
-    is_vi = lang == "vi"
+    copy = public_hub_copy(lang)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💰 Nạp Xu" if is_vi else "💰 Top up Xu", callback_data="menu|main_topup"), InlineKeyboardButton("💳 Bảng giá" if is_vi else "💳 Pricing", callback_data="pricing|main")],
-        [InlineKeyboardButton("🎁 Combo của tôi" if is_vi else "🎁 My packages", callback_data="menu|profile_packages"), InlineKeyboardButton("👑 Thành viên" if is_vi else "👑 Membership", callback_data="pricing|member")],
-        [InlineKeyboardButton("📚 Hướng dẫn Xu" if is_vi else "📚 Xu guide", callback_data="menu|guide_credits"), InlineKeyboardButton("👨‍💼 Hỗ trợ" if is_vi else "👨‍💼 Support", callback_data="menu|support")],
-        [InlineKeyboardButton("🎁 Link giới thiệu" if is_vi else ui_text(lang, "account.ref_link_button"), callback_data="menu|profile_ref_link"), InlineKeyboardButton("👥 Người đã giới thiệu" if is_vi else ui_text(lang, "account.ref_stats_button"), callback_data="menu|profile_ref_stats")],
-        [InlineKeyboardButton("📋 Cách nhận thưởng" if is_vi else ui_text(lang, "account.ref_policy_button"), callback_data="menu|profile_ref_policy"), InlineKeyboardButton("🌍 Đổi ngôn ngữ" if is_vi else "🌍 Change language", callback_data="back_lang")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(f"💰 {copy['profile_topup']}", callback_data="menu|main_topup"), InlineKeyboardButton(f"💳 {copy['profile_pricing']}", callback_data="pricing|main")],
+        [InlineKeyboardButton(f"🎁 {copy['profile_packages']}", callback_data="menu|profile_packages"), InlineKeyboardButton(f"👑 {copy['profile_membership']}", callback_data="pricing|member")],
+        [InlineKeyboardButton(f"📚 {copy['profile_xu_guide']}", callback_data="menu|guide_credits"), InlineKeyboardButton(f"👨‍💼 {copy['support']}", callback_data="menu|support")],
+        [InlineKeyboardButton(f"🎁 {copy['profile_referral_link']}", callback_data="menu|profile_ref_link"), InlineKeyboardButton(f"👥 {copy['profile_referral_stats']}", callback_data="menu|profile_ref_stats")],
+        [InlineKeyboardButton(f"📋 {copy['profile_referral_policy']}", callback_data="menu|profile_ref_policy"), InlineKeyboardButton(f"🌍 {copy['profile_change_language']}", callback_data="back_lang")],
+        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
 def profile_child_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔙 Quay lại Tài khoản" if is_vi else "🔙 Back to account", callback_data="menu|main_profile"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton(f"🔙 {copy['profile_back_account']}", callback_data="menu|main_profile"),
+            InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
         ]
     ])
 
@@ -124883,15 +124920,8 @@ def menu_hint_text_i18n(action: str, lang: str) -> tuple[str, str]:
 def menu_text_main_video_i18n(lang: str) -> str:
     if normalize_user_language(lang) == "vi":
         return menu_text_main_video()
-    if normalize_user_language(lang) == "zh":
-        return (
-            "🎬 <b>TOAN AAS 视频</b>\n\n"
-            "请选择要使用的视频工具。"
-        )
-    return (
-        "🎬 <b>TOAN AAS VIDEO</b>\n\n"
-        "Choose the video tool you want to use."
-    )
+    copy = public_hub_copy(lang)
+    return f"🎬 <b>{copy['video_menu_title']}</b>\n\n{copy['video_menu_body']}"
 
 def menu_text_main_ai_i18n(lang: str) -> str:
     if normalize_user_language(lang) == "vi":
@@ -124909,33 +124939,14 @@ def menu_text_main_ai_i18n(lang: str) -> str:
 def menu_text_main_memory_i18n(lang: str) -> str:
     if normalize_user_language(lang) == "vi":
         return menu_text_main_memory()
-    return (
-        "📝 <b>Notes / Documents</b>\n\n"
-        "Save notes, reminders, checklists and personal documents here.\n\n"
-        "<b>Free storage:</b>\n"
-        f"• {NOTES_TEXT_FREE_MB}MB for notes/text/reminders/checklists\n"
-        f"• {FILES_AUDIO_FREE_MB}MB for long-term files/images/audio\n"
-        f"• {TOTAL_FREE_STORAGE_MB}MB total free storage per account\n\n"
-        "<b>Add-on storage:</b>\n"
-        "• +50MB/month: 10.000đ\n"
-        "• Need more: add another +50MB block at the same unit price.\n\n"
-        "For PDF/Word conversion, compression, splitting, merging or image-to-PDF, open <b>🧰 PDF / Word tools</b>.\n\n"
-        "Text notes count by real size. Attachments count by file size. Temporary files do not count as long-term quota when auto-cleaned.\n\n"
-        "Document flows guide upload → confirm → process. No technical command is required."
-    )
+    copy = public_hub_copy(lang)
+    return f"📝 <b>{copy['memory_title']}</b>\n\n{copy['memory_body']}"
 
 def menu_text_main_docs_i18n(lang: str) -> str:
     if normalize_user_language(lang) == "vi":
         return menu_text_main_docs()
-    return (
-        "🧰 <b>PDF / Word tools</b>\n\n"
-        "Process office files quickly: image to PDF, PDF to Word, compress, split or merge PDF.\n\n"
-        "<b>How to use:</b>\n"
-        "1. Choose a tool below.\n"
-        "2. Send the requested file/image.\n"
-        "3. Confirm before processing.\n"
-        "4. Sending files one by one is safer than albums."
-    )
+    copy = public_hub_copy(lang)
+    return f"🧰 <b>{copy['docs_title']}</b>\n\n{copy['docs_body']}"
 
 def menu_text_main_image_i18n(lang: str) -> str:
     if normalize_user_language(lang) == "vi":
@@ -124945,48 +124956,30 @@ def menu_text_main_image_i18n(lang: str) -> str:
 def menu_text_main_audio_i18n(lang: str) -> str:
     if normalize_user_language(lang) == "vi":
         return menu_text_main_audio()
-    return (
-        "🎤 <b>VOICE / MEDIA</b>\n\n"
-        "Transcribe audio/video or create voice/TTS for content.\n\n"
-        "<b>Quick commands:</b>\n"
-        "• <code>/media_factory</code> — open media tools\n"
-        "• <code>/voiceover &lt;text&gt;</code> — create voice-over when enabled\n"
-        "• Send voice/audio/video to transcribe if STT is enabled.\n\n"
-        "🌐 <b>Translate</b>\n"
-        "Use <code>/translate en text</code> for one-time translation. Auto-translate is OFF by default and only turns on with <code>/translate_mode_on</code> or <code>/translate_mode</code>."
-    )
+    copy = public_hub_copy(lang)
+    return f"🎤 <b>{copy['audio_media_title']}</b>\n\n{copy['audio_media_body']}"
 
 def menu_text_main_music_i18n(lang: str) -> str:
     lang = normalize_user_language(lang) or "vi"
-    if lang == "zh":
-        return (
-            "🎧 <b>Audio Studio</b>\n\n"
-            "请选择要创建的音频类型。\n\n"
-            "This studio creates standalone audio files and is not attached to the current video."
-        )
     if lang == "vi":
         return menu_text_main_music()
-    return (
-        "🎧 <b>Audio Studio</b>\n\n"
-        "What kind of audio would you like to create?\n\n"
-        "This studio creates standalone audio files and is not attached to the current video."
-    )
+    copy = public_hub_copy(lang)
+    return f"🎧 <b>{copy['audio_title']}</b>\n\n{copy['audio_body']}"
 
 def menu_text_translate_i18n(other: bool, lang: str) -> str:
-    if normalize_user_language(lang) == "vi":
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "vi":
         return menu_text_translate(other)
+    copy = public_hub_copy(lang)
     if other:
         return (
-            "🌍 <b>MORE LANGUAGES</b>\n\n"
-            "Choose a target language for auto-translate mode.\n\n"
-            "Auto-translate only changes normal text routing after you explicitly enable it."
+            f"<b>{copy['translation_picker_more']}</b>\n\n"
+            f"{copy['translation_auto_target']}. {copy['translation_picker_no_charge']}"
         )
     return (
-        "🌐 <b>TOAN AAS TRANSLATE</b>\n\n"
-        "Use one-time translation with:\n"
-        "<code>/translate en your text</code>\n\n"
-        "Auto-translate is OFF by default. Choose a language below only if you want normal text messages to be translated instead of sent to AI chat.\n\n"
-        "Disable anytime with <code>/translate_mode_off</code>."
+        f"<b>{copy['translation_language_title']}</b>\n\n"
+        f"{copy['translation_language_body']}\n\n"
+        f"{copy['translation_picker_no_charge']}"
     )
 
 def menu_text_main_quick_i18n(lang: str) -> str:
@@ -125050,33 +125043,18 @@ def menu_text_main_topup_i18n(lang: str, user_id=None) -> str:
 
 def menu_text_main_profile_i18n(user_id, lang: str) -> str:
     lang = normalize_user_language(lang) or "vi"
-    if lang == "vi":
-        return menu_text_main_profile(user_id)
+    copy = public_hub_copy(lang)
     if not str(user_id).isdigit():
-        if lang == "zh":
-            return "👤 <b>账户</b>\n\n使用 <code>/profile</code> 查看余额、等级和账户信息。"
-        return "👤 <b>ACCOUNT</b>\n\nUse <code>/profile</code> to view balance, tier and account information."
+        return f"👤 <b>{copy['profile_title']}</b>\n\n{copy['profile_body']}"
     credits, _total_spent, _is_vip = get_user(user_id)
-    balance = "Unlimited" if is_admin_user(user_id) else f"{int(credits)} Xu"
-    if lang == "zh":
-        balance = "无限" if is_admin_user(user_id) else f"{int(credits)} Xu"
-        return (
-            "👤 <b>账户</b>\n\n"
-            f"• ID: <code>{html.escape(str(user_id))}</code>\n"
-            f"• 等级: <b>{html.escape(get_role_badge(user_id))}</b>\n"
-            f"• 余额: <b>{html.escape(balance)}</b>\n"
-            f"• {user_package_account_short_text(user_id, lang)}\n\n"
-            f"{ui_text(lang, 'account.ref_hint')}\n"
-            "使用 <code>/profile</code> 查看邀请、生日礼物和会员详情。"
-        )
+    balance = copy["profile_unlimited"] if is_admin_user(user_id) else f"{int(credits)} Xu"
     return (
-        "👤 <b>ACCOUNT</b>\n\n"
-        f"• ID: <code>{html.escape(str(user_id))}</code>\n"
-        f"• Tier: <b>{html.escape(get_role_badge(user_id))}</b>\n"
-        f"• Balance: <b>{html.escape(balance)}</b>\n"
+        f"👤 <b>{copy['profile_title']}</b>\n\n"
+        f"• {copy['profile_id']}: <code>{html.escape(str(user_id))}</code>\n"
+        f"• {copy['profile_tier']}: <b>{html.escape(get_role_badge(user_id))}</b>\n"
+        f"• {copy['profile_balance']}: <b>{html.escape(balance)}</b>\n"
         f"• {user_package_account_short_text(user_id, lang)}\n\n"
-        f"{ui_text(lang, 'account.ref_hint')}\n"
-        "Use <code>/profile</code> for referral, birthday and member details."
+        f"{copy['profile_detail_hint']}"
     )
 
 def menu_text_main_guide_i18n(lang: str) -> str:
@@ -125110,11 +125088,11 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
     if action == "main_memory":
         return menu_text_main_memory_i18n(lang), main_memory_keyboard(lang, user_id)
     if action == "memory_storage_status":
-        return memory_status_text(user_id or "__customer__"), memory_storage_nav_keyboard(lang)
+        return memory_status_text(user_id or "__customer__", lang), memory_storage_nav_keyboard(lang)
     if action == "memory_storage_addon":
         return memory_storage_addon_text(), memory_storage_addon_keyboard(lang)
     if action == "memory_storage_cleanup":
-        return memory_storage_cleanup_text(), memory_storage_nav_keyboard(lang)
+        return memory_storage_cleanup_text(lang), memory_storage_nav_keyboard(lang)
     if action == "main_docs":
         return menu_text_main_docs_i18n(lang), main_docs_keyboard(lang)
     if action == "main_image":
@@ -125144,12 +125122,11 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
         if user_id is not None:
             clear_video_dubbing_pending(user_id)
             set_translation_menu_pending(user_id, "media_file", translation_context="translate_file")
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         text = (
-            "📄 <b>Dịch file</b>\n\n"
-            "Anh/chị gửi file cần dịch. Luồng này chỉ dùng cho file, không dùng cho video hoặc audio.\n\n"
-            "TOAN AAS chưa xử lý và chưa trừ Xu ở bước này."
-            if normalize_user_language(lang) == "vi" else
-            "📄 <b>Translate file</b>\n\nSend the file to translate. This flow is for files only, not video or audio.\n\nTOAN AAS has not processed or charged Xu yet."
+            f"<b>{copy['translation_file_entry_title']}</b>\n\n"
+            f"{copy['translation_file_entry_body']}\n\n"
+            f"{copy['translation_picker_no_charge']}"
         )
         return text, translation_input_keyboard(lang, parent="language")
     if action == "translation_media_audio":
@@ -125221,11 +125198,11 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
     if action == "main_memory":
         return menu_text_main_memory(), main_memory_keyboard()
     if action == "memory_storage_status":
-        return memory_status_text("__customer__"), memory_storage_nav_keyboard()
+        return memory_status_text("__customer__", "vi"), memory_storage_nav_keyboard()
     if action == "memory_storage_addon":
         return memory_storage_addon_text(), memory_storage_addon_keyboard()
     if action == "memory_storage_cleanup":
-        return memory_storage_cleanup_text(), memory_storage_nav_keyboard()
+        return memory_storage_cleanup_text("vi"), memory_storage_nav_keyboard()
     if action == "main_docs":
         return menu_text_main_docs(), main_docs_keyboard()
     if action == "main_image":
@@ -125389,10 +125366,11 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     get_user(uid, update.effective_user.first_name)
+    lang = normalize_user_language(get_user_language(uid)) or "vi"
     await update.message.reply_text(
-        language_choice_text(),
+        language_choice_text(lang),
         parse_mode="HTML",
-        reply_markup=language_choice_keyboard(),
+        reply_markup=language_choice_keyboard(lang),
     )
 
 async def cmd_quick(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -128032,6 +128010,7 @@ async def handle_support_persona_message(update: Update, context: ContextTypes.D
     if ai_chatbot_copilot.is_enabled(aichat_state(), update.effective_user.id):
         return False
     text = update.message.text.strip()
+    lang = normalize_user_language(get_user_language(update.effective_user.id)) or "vi"
     classification = await classify_support_message(text, update.effective_user.id)
     if not classification.get("matched"):
         return False
@@ -128054,8 +128033,8 @@ async def handle_support_persona_message(update: Update, context: ContextTypes.D
             safe_reply,
             parse_mode="HTML",
             reply_markup=(
-                support_ticket_created_keyboard(ticket["id"])
-                if ticket else InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]])
+                support_ticket_created_keyboard(ticket["id"], lang)
+                if ticket else InlineKeyboardMarkup([[InlineKeyboardButton(f"🏠 {public_hub_copy(lang)['main_menu']}", callback_data="menu|main")]])
             ),
         )
     if ticket and classification.get("should_alert_admin"):
@@ -128166,14 +128145,17 @@ async def handle_cskh_continuity_message(update: Update, context: ContextTypes.D
 async def handle_support_ticket_attachment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.effective_user or not update.message:
         return False
-    state = get_support_ticket_pending(update.effective_user.id)
+    uid = update.effective_user.id
+    lang = normalize_user_language(get_user_language(uid)) or "vi"
+    copy = public_hub_copy(lang)
+    state = get_support_ticket_pending(uid)
     if not state or state.get("step") != "awaiting_attachment":
         return False
     ticket_id = int(state.get("ticket_id") or 0)
-    ticket = get_support_ticket(ticket_id, update.effective_user.id)
+    ticket = get_support_ticket(ticket_id, uid)
     if not ticket:
-        clear_support_ticket_pending(update.effective_user.id)
-        await update.message.reply_text("⚠️ Không tìm thấy ticket của bạn. Vui lòng mở lại mục Hỗ trợ.")
+        clear_support_ticket_pending(uid)
+        await update.message.reply_text(f"⚠️ {copy['support_ticket_not_found']}")
         return True
     file_id = ""
     attachment_type = ""
@@ -128197,9 +128179,9 @@ async def handle_support_ticket_attachment(update: Update, context: ContextTypes
     )
     clear_support_ticket_pending(update.effective_user.id)
     await update.message.reply_text(
-        f"✅ Đã lưu file vào ticket <code>{html.escape(ticket['ticket_code'])}</code>.\n\nAdmin sẽ dùng file này để kiểm tra yêu cầu.",
+        f"✅ {copy['support_ticket_attachment_success']}\n\n<code>{html.escape(ticket['ticket_code'])}</code>",
         parse_mode="HTML",
-        reply_markup=support_ticket_created_keyboard(ticket_id),
+        reply_markup=support_ticket_created_keyboard(ticket_id, lang),
     )
     return True
 
@@ -129082,6 +129064,8 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
     if not update.effective_user or not update.message or not update.message.text:
         return False
     uid = update.effective_user.id
+    lang = normalize_user_language(get_user_language(uid)) or "vi"
+    copy = public_hub_copy(lang)
     state = get_support_ticket_pending(uid)
     if not state:
         return False
@@ -129113,30 +129097,14 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
             classification,
         )
         complete_support_pending(uid, ticket["id"])
-        lead_name = {
-            "premium_lead": "đăng ký Premium",
-            "custom_bot_lead": "kết nối bot riêng",
-            "service_consulting": "tư vấn gói dịch vụ",
-        }.get(category, "tư vấn")
-        if category == "custom_bot_lead" and lead_type == "shop_bot":
-            auto_reply = (
-                "Dạ TOAN AAS đã nhận nhu cầu làm bot bán hàng/shop online của bạn nhé. "
-                "Admin sẽ xem quy mô shop, nền tảng đang bán và quy trình bạn muốn tự động hóa."
-            )
-        elif category == "service_consulting" and (lead_type == "video" or "video" in selected_option.lower()):
-            auto_reply = (
-                "Dạ mình nhận được nhu cầu tư vấn gói video rồi nhé. TOAN AAS sẽ xem theo "
-                "số lượng video, tần suất dùng và ngân sách phù hợp."
-            )
-        else:
-            auto_reply = f"Dạ TOAN AAS đã nhận nhu cầu {lead_name} của bạn nhé."
+        auto_reply = support_ticket_customer_acknowledgement(category, lang)
         await update.message.reply_text(
             f"✅ <b>{html.escape(auto_reply)}</b>\n\n"
-            "Mình đã ghi nhận nội dung trong ticket để hỗ trợ tiếp.\n\n"
-            f"Mã ticket: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
-            f"Trạng thái: {html.escape(support_status_label(ticket.get('status')))}",
+            f"{copy['support_ticket_received_notice']}\n\n"
+            f"{copy['support_ticket_label_code']}: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
+            f"{copy['support_ticket_label_status']}: {html.escape(public_support_ticket_status_label(ticket.get('status'), lang))}",
             parse_mode="HTML",
-            reply_markup=support_ticket_created_keyboard(ticket["id"]),
+            reply_markup=support_ticket_created_keyboard(ticket["id"], lang),
         )
         if classification.get("should_alert_admin") and (
             is_new or str(classification.get("priority") or "") == "urgent"
@@ -129152,7 +129120,7 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
         return True
     if step == "awaiting_message":
         if len(text) < 5:
-            await update.message.reply_text("Vui lòng mô tả rõ hơn để admin có đủ thông tin kiểm tra.", reply_markup=support_ticket_input_keyboard())
+            await update.message.reply_text(copy["support_ticket_message_too_short"], reply_markup=support_ticket_input_keyboard(lang))
             return True
         classification = await classify_support_message(text, uid)
         selected_category = state.get("category") or "other"
@@ -129165,35 +129133,19 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
             classification,
         )
         complete_support_pending(uid, ticket["id"])
-        if selected_category == "custom_bot_lead":
-            intro = (
-                "Dạ TOAN AAS đã nhận nhu cầu làm bot riêng của bạn nhé. Bạn có thể gửi thêm "
-                "quy mô sử dụng, nền tảng hiện tại và quy trình muốn tự động hóa để admin tư vấn đúng hơn."
-            )
-        elif selected_category == "premium_lead":
-            intro = "Dạ TOAN AAS đã nhận nhu cầu đăng ký Premium. Admin sẽ xem tần suất sử dụng và nhóm công cụ phù hợp để tư vấn."
-        elif selected_category == "service_consulting":
-            intro = (
-                "Dạ mình nhận được nhu cầu tư vấn gói dịch vụ rồi nhé. TOAN AAS sẽ xem theo "
-                "tần suất sử dụng, loại đầu ra và ngân sách phù hợp."
-            )
-        else:
-            intro = support_auto_reply_for_ticket_category(
-                classification,
-                selected_category if selected_category != "other" else "general_support",
-            )
+        intro = support_ticket_customer_acknowledgement(selected_category, lang, appended=not is_new)
         ticket_text = (
-            support_ticket_created_text(ticket)
+            support_ticket_created_text(ticket, lang)
             if is_new
             else (
-                f"✅ <b>Đã bổ sung thông tin vào ticket {html.escape(ticket.get('ticket_code') or '')}.</b>\n\n"
-                "TOAN AAS giữ cùng ticket để admin theo dõi liền mạch."
+                f"✅ <b>{copy['support_ticket_append_success']}</b>\n\n"
+                f"{copy['support_ticket_append_notice']}"
             )
         )
         await update.message.reply_text(
             f"{html.escape(intro)}\n\n{ticket_text}",
             parse_mode="HTML",
-            reply_markup=support_ticket_created_keyboard(ticket["id"]),
+            reply_markup=support_ticket_created_keyboard(ticket["id"], lang),
         )
         if is_new or str(classification.get("priority") or "") == "urgent":
             await notify_admin_new_support_ticket(
@@ -129210,10 +129162,10 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
         ticket = get_support_ticket(ticket_id, uid)
         if not ticket:
             clear_support_ticket_pending(uid)
-            await update.message.reply_text("⚠️ Không tìm thấy ticket của bạn. Vui lòng mở lại mục Ticket của tôi.")
+            await update.message.reply_text(f"⚠️ {copy['support_ticket_not_found']}")
             return True
         if len(text) < 2:
-            await update.message.reply_text("Vui lòng nhập nội dung cần bổ sung.")
+            await update.message.reply_text(copy["support_ticket_reply_too_short"])
             return True
         add_support_ticket_message(ticket_id, "user", uid, text[:4000], "recorded")
         classification = await classify_support_message(text, uid)
@@ -129225,10 +129177,10 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
         ticket = update_support_ticket(ticket_id, **update_fields) or ticket
         complete_support_pending(uid, ticket_id)
         await update.message.reply_text(
-            f"✅ Đã bổ sung nội dung vào ticket <code>{html.escape(ticket.get('ticket_code') or '')}</code>.\n\n"
-            "TOAN AAS đã ghi nhận cập nhật và sẽ báo admin nếu cần xử lý ưu tiên.",
+            f"✅ {copy['support_ticket_append_success']}\n\n<code>{html.escape(ticket.get('ticket_code') or '')}</code>\n\n"
+            f"{copy['support_ticket_append_notice']}",
             parse_mode="HTML",
-            reply_markup=support_ticket_created_keyboard(ticket_id),
+            reply_markup=support_ticket_created_keyboard(ticket_id, lang),
         )
         if classification.get("needs_admin") or str(ticket.get("priority")) in {"high", "urgent"}:
             await notify_admin_new_support_ticket(
@@ -129241,7 +129193,7 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
             )
         return True
     if step == "awaiting_attachment":
-        await update.message.reply_text("📎 Vui lòng gửi một ảnh hoặc file tài liệu. Nếu không cần đính kèm, bạn có thể mở ticket khác hoặc về Menu chính.")
+        await update.message.reply_text(f"📎 {copy['support_ticket_attachment_need_media']}")
         return True
     if step == "admin_reply_input" and is_admin_user(uid):
         ticket_id = int(state.get("ticket_id") or 0)
@@ -129292,15 +129244,16 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
     uid = query.from_user.id
+    lang = normalize_user_language(get_user_language(uid)) or "vi"
     if action == "start":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, human_support_text(), reply_markup=human_support_keyboard())
+        return await safe_edit_or_send(query, human_support_text(lang), reply_markup=human_support_keyboard(lang))
     if action == "admin_contact":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_admin_contact_text(), reply_markup=support_admin_contact_keyboard())
+        return await safe_edit_or_send(query, support_admin_contact_text(lang), reply_markup=support_admin_contact_keyboard(lang))
     if action == "cskh_auto":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_cskh_auto_text(), reply_markup=support_cskh_auto_keyboard())
+        return await safe_edit_or_send(query, support_cskh_auto_text(lang), reply_markup=support_cskh_auto_keyboard(lang))
     if action == "ticket":
         set_support_ticket_pending(
             uid,
@@ -129314,25 +129267,32 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
         )
         return await safe_edit_or_send(
             query,
-            support_general_ticket_prompt(),
-            reply_markup=support_flow_back_keyboard("support|start", "⬅️ Hỗ trợ", include_tickets=True),
+            support_general_ticket_prompt(lang),
+            reply_markup=support_flow_back_keyboard("support|start", f"⬅️ {public_hub_copy(lang)['support_back']}", include_tickets=True, lang=lang),
         )
     if action == "premium":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_premium_text(), reply_markup=support_premium_keyboard())
+        return await safe_edit_or_send(query, support_premium_text(lang), reply_markup=support_premium_keyboard(lang))
     if action == "premium_type" and len(parts) >= 3:
+        copy = public_hub_copy(lang)
         options = {
+            "personal": copy["support_personal"],
+            "shop": copy["support_shop"],
+            "business": copy["support_business"],
+            "private": copy["support_private"],
+        }
+        selected = options.get(parts[2], copy["support_premium"])
+        stored_selected = {
             "personal": "Cá nhân/Creator",
             "shop": "Shop/Affiliate",
             "business": "Doanh nghiệp",
             "private": "Tư vấn riêng",
-        }
-        selected = options.get(parts[2], "Tư vấn Premium")
+        }.get(parts[2], "Tư vấn Premium")
         set_support_ticket_pending(
             uid,
             "lead_input",
             category="premium_lead",
-            selected_option=selected,
+            selected_option=stored_selected,
             lead_type=f"premium_{parts[2]}",
             support_flow="premium_lead",
             support_origin="premium",
@@ -129341,28 +129301,29 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
         )
         return await safe_edit_or_send(
             query,
-            support_lead_input_text("premium_lead", selected),
-            reply_markup=support_flow_back_keyboard("support|premium", "⬅️ Đăng ký Premium", include_tickets=True),
+            support_lead_input_text("premium_lead", selected, lang),
+            reply_markup=support_flow_back_keyboard("support|premium", f"⬅️ {copy['support_premium']}", include_tickets=True, lang=lang),
         )
     if action == "bot":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_custom_bot_text(), reply_markup=support_custom_bot_keyboard())
+        return await safe_edit_or_send(query, support_custom_bot_text(lang), reply_markup=support_custom_bot_keyboard(lang))
     if action == "bot_type" and len(parts) >= 3:
         bot_type = parts[2] if parts[2] in SUPPORT_CUSTOM_BOT_DETAILS else "custom"
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(
             query,
-            support_custom_bot_detail_text(bot_type),
-            reply_markup=support_custom_bot_detail_keyboard(bot_type),
+            support_custom_bot_detail_text(bot_type, lang),
+            reply_markup=support_custom_bot_detail_keyboard(bot_type, lang),
         )
     if action == "bot_input" and len(parts) >= 3:
         bot_type = parts[2] if parts[2] in SUPPORT_CUSTOM_BOT_DETAILS else "custom"
         detail = SUPPORT_CUSTOM_BOT_DETAILS[bot_type]
+        stored_selected = str(detail["title"] or "")
         set_support_ticket_pending(
             uid,
             "lead_input",
             category="custom_bot_lead",
-            selected_option=detail["title"],
+            selected_option=stored_selected,
             lead_type=detail["lead_type"],
             support_flow="custom_bot_lead",
             support_origin="custom_bot",
@@ -129371,35 +129332,38 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
         )
         return await safe_edit_or_send(
             query,
-            support_custom_bot_detail_text(bot_type) + "\n\n✍️ Bạn nhập câu trả lời trong một tin nhắn nhé.",
-            reply_markup=support_flow_back_keyboard(f"support|bot_type|{bot_type}", "⬅️ Loại bot này", include_tickets=True),
+            support_custom_bot_detail_text(bot_type, lang) + f"\n\n✍️ {public_hub_copy(lang)['support_input_one_message']}",
+            reply_markup=support_flow_back_keyboard(f"support|bot_type|{bot_type}", f"⬅️ {public_hub_copy(lang)['support_detail_back_bot']}", include_tickets=True, lang=lang),
         )
     if action == "consult":
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(
             query,
-            "📦 <b>Tư vấn gói dịch vụ</b>\n\nBạn muốn tư vấn nhóm nào?",
-            reply_markup=support_consult_keyboard(),
+            f"📦 <b>{public_hub_copy(lang)['support_consult']}</b>\n\n{public_hub_copy(lang)['support_consult_body']}",
+            reply_markup=support_consult_keyboard(lang),
         )
     if action == "consult_type" and len(parts) >= 3:
         service_type = parts[2] if parts[2] in SUPPORT_CONSULT_DETAILS else "video"
         return await safe_edit_or_send(
             query,
-            support_consult_detail_text(service_type),
-            reply_markup=support_consult_detail_keyboard(service_type),
+            support_consult_detail_text(service_type, lang),
+            reply_markup=support_consult_detail_keyboard(service_type, lang),
         )
     if action in {"consult_need", "consult_input"} and len(parts) >= 3:
         service_type = parts[2] if parts[2] in SUPPORT_CONSULT_DETAILS else "video"
-        title, choices, question = SUPPORT_CONSULT_DETAILS[service_type]
-        selected = title
+        choices = support_consult_choice_labels(service_type, lang)
+        selected = support_consult_public_label(service_type, lang)
+        canonical_title, canonical_choices, _ = SUPPORT_CONSULT_DETAILS[service_type]
+        stored_selected = canonical_title
         if action == "consult_need" and len(parts) >= 4:
             choice_index = max(0, min(int(parts[3] or 0), len(choices) - 1))
-            selected = f"{title} — {choices[choice_index]}"
+            selected = f"{selected} — {choices[choice_index]}"
+            stored_selected = f"{canonical_title} — {canonical_choices[choice_index]}"
         set_support_ticket_pending(
             uid,
             "lead_input",
             category="service_consulting",
-            selected_option=selected,
+            selected_option=stored_selected,
             service_type=service_type,
             lead_type=service_type,
             support_flow="service_consulting",
@@ -129410,11 +129374,12 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
         )
         return await safe_edit_or_send(
             query,
-            f"📦 <b>{html.escape(selected)}</b>\n\n{html.escape(question)}\n\n✍️ Bạn nhập nhu cầu trong một tin nhắn nhé.",
+            f"📦 <b>{html.escape(selected)}</b>\n\n{public_hub_copy(lang)['support_input_one_message']}",
             reply_markup=support_flow_back_keyboard(
                 f"support|consult_type|{service_type}",
-                f"⬅️ {title}",
+                f"⬅️ {public_hub_copy(lang)['support_consult_detail_back']}",
                 include_tickets=True,
+                lang=lang,
             ),
         )
     return await query.answer("Thao tác hỗ trợ chưa được hỗ trợ.", show_alert=True)
@@ -129426,39 +129391,37 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     parts = data.split("|")
     action = parts[1] if len(parts) > 1 else "start"
     uid = query.from_user.id
+    lang = normalize_user_language(get_user_language(uid)) or "vi"
+    copy = public_hub_copy(lang)
     admin_actions = {"admin", "al", "av", "asearch", "stats", "templates", "st", "reply", "suggest", "send", "ask", "note", "assign", "lead", "file"}
     if action in admin_actions and not is_admin_user(uid):
-        return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+        return await query.answer(copy["support_ticket_admin_only"], show_alert=True)
     if action == "start":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_ticket_menu_text(), reply_markup=support_ticket_menu_keyboard())
+        return await safe_edit_or_send(query, support_ticket_menu_text(lang), reply_markup=support_ticket_menu_keyboard(lang))
     if action == "cat" and len(parts) >= 3:
         category = parts[2]
         if category not in SUPPORT_CATEGORIES:
             category = "other"
         set_support_ticket_pending(uid, "awaiting_message", category=category)
-        return await safe_edit_or_send(query, support_ticket_message_prompt(category), reply_markup=support_ticket_input_keyboard())
+        return await safe_edit_or_send(query, support_ticket_message_prompt(category, lang), reply_markup=support_ticket_input_keyboard(lang))
     if action == "mine":
         clear_support_ticket_pending(uid)
-        text, keyboard = public_support_ticket_list_keyboard(uid)
+        text, keyboard = public_support_ticket_list_keyboard(uid, lang)
         return await safe_edit_or_send(query, text, reply_markup=keyboard)
     if action == "pv" and len(parts) >= 3:
         ticket = get_support_ticket(int(parts[2]), uid)
         if not ticket:
-            return await query.answer("Ticket không tồn tại hoặc không thuộc tài khoản của bạn.", show_alert=True)
+            return await query.answer(copy["support_ticket_not_found"], show_alert=True)
         return await safe_edit_or_send(
             query,
-            public_support_ticket_text(ticket),
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💬 Gửi thêm nội dung", callback_data=f"ticket|reply_user|{ticket['id']}"), InlineKeyboardButton("📎 Gửi thêm ảnh/file", callback_data=f"ticket|attach|{ticket['id']}")],
-                [InlineKeyboardButton("✅ Đánh dấu đã xong", callback_data=f"ticket|done|{ticket['id']}"), InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine")],
-                [InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-            ]),
+            public_support_ticket_text(ticket, lang),
+            reply_markup=support_ticket_detail_keyboard(ticket, lang),
         )
     if action == "reply_user" and len(parts) >= 3:
         ticket = get_support_ticket(int(parts[2]), uid)
         if not ticket:
-            return await query.answer("Ticket không tồn tại hoặc không thuộc tài khoản của bạn.", show_alert=True)
+            return await query.answer(copy["support_ticket_not_found"], show_alert=True)
         set_support_ticket_pending(
             uid,
             "awaiting_ticket_reply",
@@ -129469,32 +129432,32 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         )
         return await safe_edit_or_send(
             query,
-            f"💬 <b>Bổ sung ticket {html.escape(ticket['ticket_code'])}</b>\n\nBạn nhập nội dung cần bổ sung. TOAN AAS sẽ lưu vào đúng ticket này.",
-            reply_markup=support_flow_back_keyboard(f"ticket|pv|{ticket['id']}", "⬅️ Ticket"),
+            f"💬 <b>{copy['support_ticket_back_to_ticket']} {html.escape(ticket['ticket_code'])}</b>\n\n{copy['support_ticket_reply_prompt']}",
+            reply_markup=support_flow_back_keyboard(f"ticket|pv|{ticket['id']}", f"⬅️ {copy['support_ticket_back_to_ticket']}", lang=lang),
         )
     if action == "done" and len(parts) >= 3:
         ticket = get_support_ticket(int(parts[2]), uid)
         if not ticket:
-            return await query.answer("Ticket không tồn tại hoặc không thuộc tài khoản của bạn.", show_alert=True)
+            return await query.answer(copy["support_ticket_not_found"], show_alert=True)
         ticket = update_support_ticket(ticket["id"], status="resolved") or ticket
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(
             query,
-            f"✅ Ticket <code>{html.escape(ticket['ticket_code'])}</code> đã được đánh dấu đã xong.",
+            f"✅ {copy['support_ticket_back_to_ticket']} <code>{html.escape(ticket['ticket_code'])}</code> {copy['support_ticket_done_success']}",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine"), InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start")],
-                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                [InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine"), InlineKeyboardButton(f"⬅️ {copy['support_back']}", callback_data="support|start")],
+                [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
             ]),
         )
     if action == "attach" and len(parts) >= 3:
         ticket = get_support_ticket(int(parts[2]), uid)
         if not ticket:
-            return await query.answer("Ticket không tồn tại hoặc không thuộc tài khoản của bạn.", show_alert=True)
+            return await query.answer(copy["support_ticket_not_found"], show_alert=True)
         set_support_ticket_pending(uid, "awaiting_attachment", ticket_id=ticket["id"])
         return await safe_edit_or_send(
             query,
-            f"📎 Gửi một ảnh chụp màn hình hoặc file cho ticket <code>{html.escape(ticket['ticket_code'])}</code>.\n\nNên gửi từng file một để tránh lỗi.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|pv|{ticket['id']}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]),
+            f"📎 {copy['support_ticket_attachment_prompt']}\n\n<code>{html.escape(ticket['ticket_code'])}</code>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(f"⬅️ {copy['support_ticket_back_to_ticket']}", callback_data=f"ticket|pv|{ticket['id']}"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")]]),
         )
     if action == "admin":
         clear_support_ticket_pending(uid)
@@ -129609,7 +129572,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             logger.warning("support attachment send failed | ticket_id=%s error=%s", ticket.get("id"), type(exc).__name__)
             return await query.answer("Không gửi lại được file đính kèm.", show_alert=True)
         return
-    return await query.answer("Thao tác ticket chưa được hỗ trợ.", show_alert=True)
+    return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
 
 async def handle_admin_help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -129756,8 +129719,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == "support":
         return await safe_edit_query_message(
             query,
-            human_support_text(),
-            reply_markup=human_support_keyboard(),
+            human_support_text(lang),
+            reply_markup=human_support_keyboard(lang),
         )
     if action == "internal_archive":
         return await safe_edit_query_message(
@@ -129905,13 +129868,14 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=image_resize_start_keyboard(lang),
         )
     if action == "translation_text_confirm":
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         pending = get_translation_menu_pending(query.from_user.id)
         target = normalize_translate_target(pending.get("target_language"))
         source_text = str(pending.get("source_text") or "").strip()
         if str(pending.get("source_type") or "") != "text_confirm" or not target or not source_text:
             return await safe_edit_query_message(
                 query,
-                "⚠️ Phiên xác nhận đã hết hạn. Bot chưa xử lý và chưa trừ Xu.",
+                f"⚠️ {copy['translation_service_unavailable']}",
                 reply_markup=translation_text_target_keyboard(lang),
             )
         clear_translation_menu_pending(query.from_user.id)
@@ -129922,30 +129886,29 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return await run_translate_text_to_target(translate_update, context, source_text, target)
     if action == "translation_text_cancel":
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         clear_translation_menu_pending(query.from_user.id)
         return await safe_edit_query_message(
             query,
-            "✅ Đã hủy dịch văn bản. TOAN AAS chưa xử lý và chưa trừ Xu.",
+            f"✅ {copy['translation_cancelled']}. {copy['translation_picker_no_charge']}",
             reply_markup=translation_language_hub_keyboard(lang, query.from_user.id),
         )
     if action == "translation_text":
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         return await safe_edit_query_message(
             query,
-            "🌐 <b>Dịch văn bản</b>\n\nBạn muốn dịch sang ngôn ngữ nào?"
-            if normalize_user_language(lang) == "vi"
-            else "🌐 <b>Translate text</b>\n\nWhich language do you want to translate into?",
+            f"<b>{copy['translation_text_entry_title']}</b>\n\n{copy['translation_text_entry_body']}",
             parse_mode="HTML",
             reply_markup=translation_text_target_keyboard(lang),
         )
     if action.startswith("translation_text_target_"):
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         target = action.replace("translation_text_target_", "", 1)
         if target == "custom":
             set_translation_menu_pending(query.from_user.id, "text_target_custom")
             return await safe_edit_query_message(
                 query,
-                "✍️ Nhập ngôn ngữ đích bạn muốn dùng."
-                if normalize_user_language(lang) == "vi"
-                else "✍️ Enter the target language.",
+                f"✍️ {copy['translation_text_custom_target']}.",
                 reply_markup=translation_input_keyboard(lang),
             )
         target = normalize_translate_target(target)
@@ -129954,20 +129917,15 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         set_translation_menu_pending(query.from_user.id, "text", target_language=target)
         return await safe_edit_query_message(
             query,
-            f"📝 Gửi văn bản cần dịch sang <b>{html.escape(translate_target_label(target))}</b>."
-            if normalize_user_language(lang) == "vi"
-            else f"📝 Send the text to translate into <b>{html.escape(translate_target_label(target))}</b>.",
+            f"📝 {copy['translation_picker_target']}: <b>{html.escape(translate_target_label(target))}</b>. {copy['translation_picker_no_charge']}",
             parse_mode="HTML",
             reply_markup=translation_input_keyboard(lang),
         )
     if action == "translation_transcript":
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         source_type = "transcript"
         set_translation_menu_pending(query.from_user.id, source_type)
-        text = (
-            "🧾 Hãy gửi transcript cần dịch. Sau đó bot sẽ hỏi ngôn ngữ đích. Bot chưa trừ Xu."
-            if normalize_user_language(lang) == "vi"
-            else "📝 Send the text/transcript to translate. The bot will ask for the target language. No Xu charged."
-        )
+        text = f"🧾 {copy['translation_text']}. {copy['translation_picker_target']}. {copy['translation_picker_no_charge']}"
         return await safe_edit_query_message(query, text, reply_markup=translation_input_keyboard(lang))
     if action == "translation_voice":
         return await safe_edit_query_message(
@@ -129977,20 +129935,14 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=translation_voice_menu_keyboard(lang),
         )
     if action == "translation_two_way":
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         set_translation_pair_draft(query.from_user.id, "two_way")
-        text = (
-            "🔁 <b>Dịch 2 chiều</b>\n\nChọn ngôn ngữ nguồn và ngôn ngữ dịch ra như Google Dịch. Sau khi bật, bạn gửi văn bản và TOAN AAS sẽ dịch theo cặp đã chọn. Bot chưa trừ Xu."
-            if normalize_user_language(lang) == "vi" else
-            "🔁 <b>Two-way translation</b>\n\nChoose source and target languages. Send text and TOAN AAS translates using that pair. No Xu charged."
-        )
+        text = f"<b>{copy['translation_two_way_entry']}</b>\n\n{copy['translation_pair_choose']}. {copy['translation_picker_no_charge']}"
         return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=translation_pair_keyboard("two_way", lang, query.from_user.id))
     if action == "translation_live_conversation":
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         set_translation_pair_draft(query.from_user.id, "live_conversation")
-        text = (
-            "💬 <b>Dịch hội thoại</b>\n\nChọn ngôn ngữ cần dịch và ngôn ngữ dịch ra. Sau đó bạn cứ nhắn từng câu, TOAN AAS dịch liên tục đến khi bạn tắt. Bot chưa trừ Xu."
-            if normalize_user_language(lang) == "vi" else
-            "💬 <b>Conversation translation</b>\n\nChoose source and target languages, then send messages. TOAN AAS translates until you stop the session. No Xu charged."
-        )
+        text = f"<b>{copy['translation_live_entry']}</b>\n\n{copy['translation_pair_choose']}. {copy['translation_picker_no_charge']}"
         return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=translation_pair_keyboard("live_conversation", lang, query.from_user.id))
     if action.startswith("translation_pair_source_") or action.startswith("translation_pair_target_"):
         kind = "source" if action.startswith("translation_pair_source_") else "target"
@@ -130002,6 +129954,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=translation_pair_language_picker_keyboard(kind, mode, lang),
         )
     if action.startswith("translation_pair_set_source_") or action.startswith("translation_pair_set_target_"):
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         kind = "source" if action.startswith("translation_pair_set_source_") else "target"
         rest = action.replace("translation_pair_set_source_", "", 1).replace("translation_pair_set_target_", "", 1)
         mode, code = rest.rsplit("_", 1) if "_" in rest else ("two_way", rest)
@@ -130009,23 +129962,25 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             set_translation_pair_draft(query.from_user.id, mode, source=code)
         else:
             set_translation_pair_draft(query.from_user.id, mode, target=code)
-        title = "💬 <b>Dịch hội thoại</b>" if mode == "live_conversation" else "🔁 <b>Dịch 2 chiều</b>"
+        title = copy["translation_live_entry"] if mode == "live_conversation" else copy["translation_two_way_entry"]
         return await safe_edit_query_message(
             query,
-            f"{title}\n\nChọn nguồn và đích. Bot chưa trừ Xu.",
+            f"<b>{title}</b>\n\n{copy['translation_pair_choose']}. {copy['translation_picker_no_charge']}",
             parse_mode="HTML",
             reply_markup=translation_pair_keyboard(mode, lang, query.from_user.id),
         )
     if action.startswith("translation_pair_back_"):
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         mode = action.replace("translation_pair_back_", "", 1) or "two_way"
-        title = "💬 <b>Dịch hội thoại</b>" if mode == "live_conversation" else "🔁 <b>Dịch 2 chiều</b>"
+        title = copy["translation_live_entry"] if mode == "live_conversation" else copy["translation_two_way_entry"]
         return await safe_edit_query_message(
             query,
-            f"{title}\n\nChọn nguồn và đích. Bot chưa trừ Xu.",
+            f"<b>{title}</b>\n\n{copy['translation_pair_choose']}. {copy['translation_picker_no_charge']}",
             parse_mode="HTML",
             reply_markup=translation_pair_keyboard(mode, lang, query.from_user.id),
         )
     if action.startswith("translation_pair_swap_"):
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         mode = action.replace("translation_pair_swap_", "", 1) or "two_way"
         draft = get_translation_pair_draft(query.from_user.id, mode)
         source = draft.get("source") or "auto"
@@ -130039,7 +129994,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             set_translation_pair_draft(query.from_user.id, mode, source=target, target=source)
         return await safe_edit_query_message(
             query,
-            "🔁 <b>Đã đổi chiều</b>\n\nBot chưa trừ Xu.",
+            f"<b>{copy['translation_pair_swapped']}</b>\n\n{copy['translation_picker_no_charge']}",
             parse_mode="HTML",
             reply_markup=translation_pair_keyboard(mode, lang, query.from_user.id),
         )
@@ -130068,27 +130023,22 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=translation_session_keyboard(lang, mode),
         )
     if action == "translation_auto_detect":
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         session = set_translation_session(query.from_user.id, "two_way", "vi", "en", input_mode="text", output_mode="text")
-        text = (
-            "🌍 Đã bật thử nghiệm auto-detect an toàn cho cặp Tiếng Việt ↔ English. Với cặp khác, hãy chọn cặp ngôn ngữ cụ thể. Bot chưa trừ Xu."
-            if normalize_user_language(lang) == "vi" else
-            "🌍 Safe auto-detect is enabled for Vietnamese ↔ English. Choose a specific pair for other languages. No Xu charged."
-        )
+        text = f"{copy['translation_picker_auto_detect']}: Vietnamese ↔ English. {copy['translation_picker_no_charge']}"
         return await safe_edit_query_message(query, text, reply_markup=translation_session_keyboard(lang, "two_way"))
     if action == "translation_set_source_lang":
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         set_translation_menu_pending(query.from_user.id, "pair_custom")
-        text = (
-            "✍️ Nhập cặp ngôn ngữ bạn muốn dịch qua lại, ví dụ: <code>vi-en</code>, <code>zh-vi</code>, <code>ja-vi</code>. Bot chưa trừ Xu."
-            if normalize_user_language(lang) == "vi" else
-            "✍️ Enter a language pair, for example <code>vi-en</code>, <code>zh-vi</code>, <code>ja-vi</code>. No Xu charged."
-        )
+        text = f"✍️ {copy['translation_pair_choose']}: <code>vi-en</code>, <code>zh-vi</code>, <code>ja-vi</code>. {copy['translation_picker_no_charge']}"
         return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=translation_input_keyboard(lang))
     if action == "translation_set_target_lang":
         return await safe_edit_query_message(query, menu_text_translate_i18n(False, lang), parse_mode="HTML", reply_markup=translate_language_keyboard(False, lang))
     if action == "translation_swap_languages":
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         session = get_translation_session(query.from_user.id)
         if not session:
-            return await safe_edit_query_message(query, "⚠️ Chưa có phiên dịch đang bật. Bot chưa trừ Xu.", reply_markup=translation_pair_keyboard("two_way", lang))
+            return await safe_edit_query_message(query, f"⚠️ {copy['translation_no_active_session']}. {copy['translation_picker_no_charge']}", reply_markup=translation_pair_keyboard("two_way", lang))
         old_source = normalize_translate_target(session.get("lang_a")) or "vi"
         old_target = normalize_translate_target(session.get("lang_b")) or "en"
         new_source = old_target
@@ -130109,16 +130059,18 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return await safe_edit_query_message(query, translation_session_started_text(session, lang), parse_mode="HTML", reply_markup=translation_session_keyboard(lang, session.get("mode")))
     if action == "translation_output_text":
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         session = get_translation_session(query.from_user.id)
         if session:
             session = set_translation_session(query.from_user.id, session.get("mode") or "two_way", session.get("lang_a") or "vi", session.get("lang_b") or "en", session.get("input_mode") or "text_voice", "text", translation_session_id=session.get("translation_session_id"), detected_lang_a=session.get("detected_lang_a"))
-        return await safe_edit_query_message(query, "✅ Đầu ra text đã bật. Bot chưa trừ Xu.", reply_markup=translation_session_keyboard(lang, (session or {}).get("mode")))
+        return await safe_edit_query_message(query, f"✅ {copy['translation_output_text_enabled']}. {copy['translation_picker_no_charge']}", reply_markup=translation_session_keyboard(lang, (session or {}).get("mode")))
     if action == "translation_output_voice":
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         session = get_translation_session(query.from_user.id)
         if not session:
-            return await safe_edit_query_message(query, "⚠️ Chưa có phiên dịch đang bật. Bot chưa trừ Xu.", reply_markup=translation_pair_keyboard("two_way", lang))
+            return await safe_edit_query_message(query, f"⚠️ {copy['translation_no_active_session']}. {copy['translation_picker_no_charge']}", reply_markup=translation_pair_keyboard("two_way", lang))
         if not video_tts_provider_available():
-            text = "🎙 Đầu ra voice đang chờ tài nguyên xử lý. TOAN AAS vẫn dịch và trả văn bản, chưa trừ Xu."
+            text = f"🎙 {copy['translation_session_voice_fallback']}"
             if is_admin_user(query.from_user.id):
                 text += "\n\n<b>Admin blocker:</b> <code>TTS smoke/config chưa PASS</code>"
             return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=translation_session_keyboard(lang, session.get("mode")))
@@ -130132,9 +130084,10 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             translation_session_id=session.get("translation_session_id"),
             detected_lang_a=session.get("detected_lang_a"),
         )
-        return await safe_edit_query_message(query, "✅ Đã bật voice cho bản dịch. Bản dịch text vẫn luôn được gửi.", reply_markup=translation_session_keyboard(lang, session.get("mode")))
+        return await safe_edit_query_message(query, f"✅ {copy['translation_output_voice_enabled']}. {copy['translation_session_voice_fallback']}", reply_markup=translation_session_keyboard(lang, session.get("mode")))
     if action == "translation_confirm_paid_session":
-        return await safe_edit_query_message(query, "⚠️ Hạn mức phiên dịch có phí chưa mở public. Bot chưa trừ Xu.", reply_markup=translation_session_keyboard(lang, (get_translation_session(query.from_user.id) or {}).get("mode")))
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
+        return await safe_edit_query_message(query, f"⚠️ {copy['translation_service_unavailable']}", reply_markup=translation_session_keyboard(lang, (get_translation_session(query.from_user.id) or {}).get("mode")))
     if action in {"translation_stop_session", "translation_cancel"}:
         changed_session = clear_translation_session(query.from_user.id)
         changed_mode, _ = set_user_translate_mode(
@@ -130178,22 +130131,21 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=video_dubbing_source_keyboard(lang, state),
         )
     if action == "translation_document":
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         return await safe_edit_query_message(
             query,
-            "📄 <b>Dịch tài liệu</b>\n\nHãy gửi file TXT, DOCX, PDF, SRT hoặc VTT. Sau khi nhận file, bot sẽ hiện nút chọn ngôn ngữ dịch. File dài/OCR chưa sẵn sàng sẽ được guard rõ và chưa trừ Xu."
-            if normalize_user_language(lang) == "vi" else
-            "📄 <b>Translate document</b>\n\nSend a TXT, DOCX, PDF, SRT or VTT file. The bot will then show target-language options. Unsupported long/OCR files are guarded without charging Xu.",
+            f"📄 <b>{copy['translation_document_title']}</b>\n\n{copy['translation_document_body']}",
             reply_markup=translation_input_keyboard(lang),
         )
     if action == "translation_language":
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         return await safe_edit_query_message(
             query,
-            "🌍 <b>Chọn loại ngôn ngữ</b>\n\n• Ngôn ngữ đích tự động: tin nhắn text thường sẽ được dịch khi bạn bật.\n• Ngôn ngữ giao diện bot: chỉ đổi menu/hướng dẫn, không bật chế độ dịch."
-            if normalize_user_language(lang) == "vi" else
-            "🌍 <b>Language options</b>\n\nAuto-translate target changes normal text routing. Bot interface language only changes menus and guidance.",
+            f"🌍 <b>{copy['translation_interface_language']}</b>\n\n{copy['translation_language_options_body']}",
             reply_markup=translation_language_options_keyboard(lang),
         )
     if action.startswith("translate_set_"):
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         target = normalize_translate_target(action.replace("translate_set_", "", 1))
         if not target:
             return await query.answer("Ngôn ngữ chưa hỗ trợ.", show_alert=True)
@@ -130203,31 +130155,17 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             username=query.from_user.username or query.from_user.first_name or "",
             note=f"User enabled translate mode from menu target={target}",
         )
-        if normalize_user_language(lang) == "vi":
-            text = (
-                f"✅ Đã bật dịch tự động sang <b>{html.escape(translate_target_label(target))}</b>.\n\n"
-                "Từ bây giờ, tin nhắn văn bản thường sẽ được dịch thay vì chat AI.\n"
-                "Tắt bằng <code>/translate_mode_off</code> hoặc nút bên dưới."
-            )
-        else:
-            text = (
-                f"✅ Auto-translate is ON to <b>{html.escape(translate_target_label(target))}</b>.\n\n"
-                "Normal text messages will be translated instead of going to AI chat.\n"
-                "Disable with <code>/translate_mode_off</code> or the button below."
-            )
+        text = f"✅ {copy['translation_auto_target']}: <b>{html.escape(translate_target_label(target))}</b>.\n\n{copy['translation_picker_no_charge']}"
         return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
     if action == "translate_off":
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
         set_user_translate_mode(
             query.from_user.id,
             "",
             username=query.from_user.username or query.from_user.first_name or "",
             note="User disabled translate mode from menu",
         )
-        text = (
-            "✅ Đã tắt dịch tự động. Tin nhắn thường sẽ quay về AI chat."
-            if normalize_user_language(lang) == "vi"
-            else "✅ Auto-translate is OFF. Normal text now goes back to AI chat."
-        )
+        text = f"✅ {copy['translation_session_stop']}."
         return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
     text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
     if action == "main_video":
@@ -130695,13 +130633,14 @@ async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT
     if data.startswith("feedback|cat|"):
         category = data.split("|", 2)[2]
         set_feedback_pending(uid, category)
+        copy = public_hub_copy(lang)
         return await safe_edit_or_send(
             query,
             feedback_message_prompt(category, lang),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("⬅️ Góp ý / Báo lỗi", callback_data="feedback|start"),
-                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+                InlineKeyboardButton(f"⬅️ {copy['feedback_prompt_back']}", callback_data="feedback|start"),
+                InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
             ]]),
         )
     return await query.answer("Feedback action not supported.", show_alert=True)
@@ -130760,46 +130699,48 @@ async def handle_translation_callback(update: Update, context: ContextTypes.DEFA
     await query.answer()
     data = (query.data or "").strip()
     uid = query.from_user.id
+    lang = normalize_user_language(get_user_language(uid)) or "vi"
+    copy = public_hub_copy(lang)
     enter_product_context(uid, PRODUCT_CONTEXT_SHOWROOM, origin_screen="menu|translate", product_area="translation")
     if data == "tr_transcribe":
         if not has_recent_audio_input(update):
-            return await query.message.reply_text("⚠️ Gửi voice/audio/video ngắn rồi gõ /transcribe trong vòng 2 phút.")
+            return await query.message.reply_text(f"⚠️ {copy['translation_recent_media_missing']}")
         return await cmd_transcribe(update, context)
     if data.startswith("tr_pick|"):
         source_type = data.split("|", 1)[1]
         if source_type == "voice" and not has_recent_audio_input(update):
-            return await query.message.reply_text("⚠️ Gửi voice/audio/video ngắn rồi gõ /translate_voice trong vòng 2 phút.")
+            return await query.message.reply_text(f"⚠️ {copy['translation_recent_media_missing']}")
         return await show_translation_picker(update, source_type, edit=True)
     if data.startswith("tr_more|"):
         source_type = data.split("|", 1)[1]
         return await show_translation_picker(update, source_type, edit=True, more=True)
     if not data.startswith("tr_target|"):
-        return await query.answer("Không nhận diện được lựa chọn dịch.", show_alert=True)
+        return await query.answer(copy["translation_invalid_selection"], show_alert=True)
     parts = data.split("|")
     if len(parts) != 3:
-        return await query.answer("Lựa chọn dịch không hợp lệ.", show_alert=True)
+        return await query.answer(copy["translation_invalid_target"], show_alert=True)
     _prefix, source_type, target = parts
     target = normalize_translate_target(target)
     if not target:
-        return await query.answer("Ngôn ngữ chưa hỗ trợ.", show_alert=True)
+        return await query.answer(copy["translation_invalid_target"], show_alert=True)
     if source_type == "voice":
         if not has_recent_audio_input(update):
-            return await query.message.reply_text("⚠️ Audio đã hết hạn. Gửi lại voice/audio/video ngắn rồi chọn dịch trong vòng 2 phút.")
+            return await query.message.reply_text(f"⚠️ {copy['translation_recent_media_missing']}")
         save_translation_request(uid, "voice")
         return await run_translate_voice_to_target(update, context, target)
     if source_type == "file":
         req = get_translation_request(uid, "file")
         info = (req.get("source_ref") or {}) if req else get_last_user_file(uid)
         if not info:
-            return await query.message.reply_text("⚠️ Gửi file txt/docx/pdf rồi reply hoặc gõ /translate_file trong vòng 10 phút.")
+            return await query.message.reply_text(f"⚠️ {copy['translation_recent_file_missing']}")
         return await run_translate_file_to_target(update, context, target, info=info)
     if source_type == "text":
         req = get_translation_request(uid, "text")
         source_text = (req.get("source_text") or "").strip() if req else ""
         if not source_text:
-            return await query.message.reply_text("⚠️ Gửi nội dung cần dịch, ví dụ: /translate xin chào")
+            return await query.message.reply_text(f"⚠️ {copy['translation_text']}: {copy['translation_picker_target']}.")
         return await run_translate_text_to_target(update, context, source_text, target)
-    return await query.answer("Nguồn dịch chưa hỗ trợ.", show_alert=True)
+    return await query.answer(copy["translation_unsupported_source"], show_alert=True)
 
 async def cmd_customer_surface(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -145961,11 +145902,12 @@ async def cmd_tool_test_translate(update: Update, context: ContextTypes.DEFAULT_
 async def run_translate_text_to_target(update: Update, context: ContextTypes.DEFAULT_TYPE, source_text: str, target: str):
     uid = update.effective_user.id
     lang = get_user_language(uid) or "vi"
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     text = str(source_text or "").strip()[:1800]
     if not text:
         return await reply_translation_surface(
             update,
-            "⚠️ Gửi nội dung cần dịch, ví dụ:\n/translate en xin chào\n\nBot chưa trừ Xu."
+            f"⚠️ {copy['translation_text']}: <code>/translate en</code>. {copy['translation_picker_no_charge']}"
         )
     try:
         result = await translate_to_language(text, target)
@@ -145994,8 +145936,8 @@ async def run_translate_text_to_target(update: Update, context: ContextTypes.DEF
         save_tool_test_result("translation", "PASS", f"provider={result.get('provider')}; translate success target={target}", uid)
         return await reply_translation_surface(
             update,
-            "🌐 <b>BẢN DỊCH TOAN AAS</b>\n\n"
-            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n\n"
+            f"🌐 <b>{copy['translation_result_title']}</b>\n\n"
+            f"• {copy['translation_text_confirm_target']}: <b>{html.escape(translate_target_label(target))}</b>\n\n"
             f"{html.escape(translated_text)}",
             parse_mode="HTML",
             reply_markup=translation_result_keyboard(lang),
@@ -146005,7 +145947,7 @@ async def run_translate_text_to_target(update: Update, context: ContextTypes.DEF
         save_tool_test_result("translation", "FAIL", error_text[:500], uid)
         return await reply_translation_surface(
             update,
-            "⚙️ Dịch vụ đang được kiểm tra tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu. Quý khách có thể thử lại sau hoặc chọn tác vụ khác."
+            f"⚙️ {copy['translation_service_unavailable']}"
         )
 
 async def cmd_translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -146021,13 +145963,15 @@ async def cmd_translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return await show_translation_picker(update, "text")
 
 async def cmd_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    copy = public_hub_copy(normalize_user_language(get_user_language(uid)) or "vi")
     args = context.args or []
     if not args:
         return await show_translation_language_hub_from_command(update)
     target = normalize_translate_target(args[0])
     if target:
         if len(args) < 2:
-            return await update.message.reply_text("⚠️ Thiếu nội dung cần dịch. Ví dụ: /translate en xin chào")
+            return await update.message.reply_text(copy["translation_command_missing_text"], parse_mode="HTML")
         return await run_translate_text_to_target(update, context, " ".join(args[1:]).strip(), target)
     source_text = " ".join(args).strip()
     save_translation_request(update.effective_user.id, "text", source_text=source_text[:1800])
@@ -146055,7 +145999,8 @@ async def cmd_ko_vi(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_translate_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name or ""
-    lang = get_user_language(uid) or "vi"
+    lang = normalize_user_language(get_user_language(uid)) or "vi"
+    copy = public_hub_copy(lang)
     if not context.args:
         return await update.message.reply_text(
             menu_text_translate_i18n(False, lang),
@@ -146066,34 +146011,23 @@ async def cmd_translate_mode(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not target:
         supported = ", ".join(sorted(TRANSLATE_LANGUAGE_OPTIONS.keys()))
         return await update.message.reply_text(
-            f"⚠️ Ngôn ngữ chưa hỗ trợ. Dùng: <code>/translate_mode vi|en|zh|ja|ko|th|ar</code>\n"
-            f"Hiện hỗ trợ: <code>{html.escape(supported)}</code>",
+            copy["translation_auto_mode_invalid_target"].format(
+                supported=html.escape(supported),
+            ),
             parse_mode="HTML",
         )
     set_user_translate_mode(uid, target, username=username, note=f"User enabled translate mode target={target}")
-    if normalize_user_language(lang) == "vi":
-        msg = (
-            f"✅ Đã bật chế độ dịch tự động sang <b>{html.escape(translate_target_label(target))}</b>.\n\n"
-            "Từ bây giờ, tin nhắn văn bản thường sẽ được dịch thay vì chat AI.\n"
-            "Tắt bằng <code>/translate_mode_off</code>."
-        )
-    else:
-        msg = (
-            f"✅ Auto-translate is ON to <b>{html.escape(translate_target_label(target))}</b>.\n\n"
-            "Normal text messages will be translated instead of going to AI chat.\n"
-            "Disable with <code>/translate_mode_off</code>."
-        )
+    msg = copy["translation_auto_mode_enabled"].format(
+        target=html.escape(translate_target_label(target)),
+    )
     await update.message.reply_text(msg, parse_mode="HTML")
 
 async def cmd_translate_mode_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name or ""
     changed, _ = set_user_translate_mode(uid, "", username=username, note="User disabled translate mode")
-    lang = get_user_language(uid) or "vi"
-    if normalize_user_language(lang) == "vi":
-        msg = "✅ Đã tắt chế độ dịch tự động. Tin nhắn thường sẽ quay về AI chat." if changed else "ℹ️ Chế độ dịch tự động đang tắt sẵn."
-    else:
-        msg = "✅ Auto-translate is OFF. Normal text now goes back to AI chat." if changed else "ℹ️ Auto-translate is already OFF."
+    copy = public_hub_copy(normalize_user_language(get_user_language(uid)) or "vi")
+    msg = copy["translation_auto_mode_disabled"] if changed else copy["translation_auto_mode_already_disabled"]
     await update.message.reply_text(msg)
 
 async def cmd_stop_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -146109,6 +146043,7 @@ async def cmd_stop_translate(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def cmd_translate_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+    copy = public_hub_copy(normalize_user_language(get_user_language(uid)) or "vi")
     modes = ensure_user_modes(uid)
     target = modes.get("translate_mode_target") or ""
     admin_detail = ""
@@ -146119,12 +146054,12 @@ async def cmd_translate_status(update: Update, context: ContextTypes.DEFAULT_TYP
             f"\n• OpenAI: <code>{'configured' if openai_client else 'missing'}</code>"
         )
     await update.message.reply_text(
-        "🌐 <b>TRẠNG THÁI DỊCH TỰ ĐỘNG</b>\n\n"
-        f"• Translate mode: <code>{'on' if target else 'off'}</code>\n"
-        f"• Target: <b>{html.escape(translate_target_label(target)) if target else '-'}</b>"
+        f"<b>{copy['translation_auto_status_title']}</b>\n\n"
+        f"• {copy['translation_auto_target']}: <code>{copy['translation_auto_status_enabled'] if target else copy['translation_auto_status_disabled']}</code>\n"
+        f"• {copy['translation_auto_status_target']}: <b>{html.escape(translate_target_label(target)) if target else '-'}</b>"
         + admin_detail +
-        "\n\nBật: <code>/translate_mode</code> hoặc <code>/translate_mode en</code>\n"
-        "Tắt: <code>/translate_mode_off</code>",
+        f"\n\n{copy['translation_auto_status_enable_hint']}\n"
+        f"{copy['translation_auto_status_disable_hint']}",
         parse_mode="HTML",
     )
 
@@ -146139,15 +146074,9 @@ TRANSLATE_AUDIO_TIMEOUT_TEXT = (
     "Bot chưa trừ Xu. Vui lòng gửi lại audio ngắn hơn hoặc thử lại sau."
 )
 
-def translate_voice_missing_target_text() -> str:
-    return (
-        "🌐 Dịch voice/audio\n\n"
-        "Vui lòng chọn ngôn ngữ đích:\n"
-        "• /translate_voice en — dịch sang English\n"
-        "• /translate_voice vi — dịch sang Tiếng Việt\n"
-        "• /translate_tools — xem thêm ngôn ngữ hỗ trợ\n\n"
-        "Bot chưa trừ Xu."
-    )
+def translate_voice_missing_target_text(lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return copy["translation_command_missing_target"]
 
 def is_likely_vietnamese_transcript(text: str) -> bool:
     sample = f" {(text or '').lower()} "
@@ -146162,19 +146091,21 @@ def is_likely_vietnamese_transcript(text: str) -> bool:
 
 async def run_translate_voice_to_target(update: Update, context: ContextTypes.DEFAULT_TYPE, target: str):
     uid = update.effective_user.id
+    lang = normalize_user_language(get_user_language(uid)) or "vi"
+    copy = public_hub_copy(lang)
     if not DEEPGRAM_API_KEY:
-        return await reply_translation_surface(update, TRANSLATE_AUDIO_MISSING_STT_TEXT)
+        return await reply_translation_surface(update, copy["translation_audio_missing_stt"])
     media_info = await resolve_stt_test_media(update, context)
     if not media_info:
-        return await reply_translation_surface(update, f"⚠️ Gửi voice/audio/video ngắn rồi reply hoặc gõ /translate_voice {target} trong vòng 2 phút.")
+        return await reply_translation_surface(update, f"⚠️ {copy['translation_recent_media_missing']}")
     if media_info.get("error"):
         return await reply_translation_surface(
             update,
-            TRANSLATE_AUDIO_TIMEOUT_TEXT
-            if media_info.get("error") == "telegram_timeout" else TRANSLATE_AUDIO_ERROR_TEXT,
+            copy["translation_audio_timeout"]
+            if media_info.get("error") == "telegram_timeout" else copy["translation_audio_error"],
         )
     if int(media_info.get("file_size", 0) or 0) > PIPELINE_MAX_INPUT_MB_PUBLIC * 1024 * 1024 or not media_info.get("bytes"):
-        return await reply_translation_surface(update, TRANSLATE_AUDIO_ERROR_TEXT)
+        return await reply_translation_surface(update, copy["translation_audio_error"])
     try:
         transcript = (await AgentDeepgram.transcribe(
             media_info["bytes"],
@@ -146183,35 +146114,35 @@ async def run_translate_voice_to_target(update: Update, context: ContextTypes.DE
         ) or "").strip()
         if not transcript or transcript.startswith("❌"):
             save_tool_test_result("translation_voice", "FAIL", transcript[:400] or "empty_transcript", uid)
-            return await reply_translation_surface(update, TRANSLATE_AUDIO_ERROR_TEXT)
+            return await reply_translation_surface(update, copy["translation_audio_error"])
         if target == "vi" and is_likely_vietnamese_transcript(transcript):
             save_tool_test_result("translation_voice", "PASS", "target=vi; transcript_already_vi", uid)
             return await reply_translation_surface(
                 update,
-                "🌐 <b>DỊCH VOICE/AUDIO TOAN AAS</b>\n\n"
-                "• Bóc băng: đã bật\n"
-                "• Dịch: không cần dịch thêm\n"
-                "• Đích: <b>Tiếng Việt</b>\n\n"
-                "<b>Transcript gốc:</b>\n"
+                f"<b>{copy['translation_voice_result_title']}</b>\n\n"
+                f"• {copy['translation_result_transcript_ready']}: {copy['translation_output_text']}\n"
+                f"• {copy['translation_result_already_target']}\n"
+                f"• {copy['translation_text_confirm_target']}: <b>{html.escape(translate_target_label(target))}</b>\n\n"
+                f"<b>{copy['translation_transcript_original']}:</b>\n"
                 f"<code>{html.escape(transcript[:1100])}</code>\n\n"
-                "Transcript đã là Tiếng Việt. Bot chưa cần dịch thêm.",
+                copy['translation_picker_no_charge'],
                 parse_mode="HTML",
             )
         try:
             result = await translate_to_language(transcript[:3000], target)
         except Exception:
             save_tool_test_result("translation_voice", "FAIL", "translation_provider_failed_after_stt", uid)
-            return await reply_translation_surface(update, TRANSLATE_AUDIO_TRANSLATION_ERROR_TEXT)
+            return await reply_translation_surface(update, copy["translation_audio_translation_error"])
         save_tool_test_result("translation_voice", "PASS", f"target={target}", uid)
         return await reply_translation_surface(
             update,
-            "🌐 <b>DỊCH VOICE/AUDIO TOAN AAS</b>\n\n"
-            "• Bóc băng: đã bật\n"
-            "• Dịch: đã bật\n"
-            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n\n"
-            "<b>Transcript gốc:</b>\n"
+            f"<b>{copy['translation_voice_result_title']}</b>\n\n"
+            f"• {copy['translation_result_transcript_ready']}: {copy['translation_output_text']}\n"
+            f"• {copy['translation_result_translation_ready']}: {copy['translation_output_text']}\n"
+            f"• {copy['translation_text_confirm_target']}: <b>{html.escape(translate_target_label(target))}</b>\n\n"
+            f"<b>{copy['translation_transcript_original']}:</b>\n"
             f"<code>{html.escape(transcript[:1100])}</code>\n\n"
-            "<b>Bản dịch:</b>\n"
+            f"<b>{copy['translation_result_translated']}:</b>\n"
             f"{html.escape((result.get('text') or '')[:2200])}",
             parse_mode="HTML",
         )
@@ -146219,27 +146150,17 @@ async def run_translate_voice_to_target(update: Update, context: ContextTypes.DE
         save_tool_test_result("translation_voice", "FAIL", "stt_or_translation_provider_failed", uid)
         return await reply_translation_surface(
             update,
-            TRANSLATE_AUDIO_TIMEOUT_TEXT if is_audio_timeout_error(e) else TRANSLATE_AUDIO_ERROR_TEXT,
+            copy["translation_audio_timeout"] if is_audio_timeout_error(e) else copy["translation_audio_error"],
         )
 
-def translate_tools_text() -> str:
-    return (
-        "🌐 <b>CÔNG CỤ DỊCH TOAN AAS</b>\n\n"
-        "<b>Đang hỗ trợ:</b>\n"
-        "• <code>/translate en nội dung</code> — dịch văn bản trực tiếp\n"
-        "• <code>/translate_text nội dung</code> — dịch nhanh về tiếng Việt\n"
-        "• <code>/translate_file en</code> — gửi/reply file text/doc/pdf để dịch nếu tool đã bật\n"
-        "• <code>/translate_voice en</code> — gửi/reply voice/audio, bóc băng rồi dịch nếu STT đã bật\n"
-        "• <code>/translate_audio en</code> — alias của /translate_voice\n\n"
-        "<b>Lưu ý:</b>\n"
-        "• Dịch file đang admin test, chỉ xử lý định dạng có engine local.\n"
-        "• Dịch voice/audio cần công cụ bóc băng hoạt động.\n"
-        "• Nếu công cụ lỗi hoặc quá tải: bot chưa trừ Xu.\n"
-        "• Chỉ dịch nội dung bạn sở hữu hoặc có quyền sử dụng."
-    )
+def translate_tools_text(lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return f"<b>{copy['translation_tools_title']}</b>\n\n{copy['translation_tools_body']}"
 
 async def cmd_translate_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(translate_tools_text(), parse_mode="HTML")
+    uid = update.effective_user.id
+    lang = normalize_user_language(get_user_language(uid)) or "vi"
+    await update.message.reply_text(translate_tools_text(lang), parse_mode="HTML")
 
 async def translate_file_extract_text_from_info(info: dict, context: ContextTypes.DEFAULT_TYPE) -> tuple[bool, str, str]:
     if not info:
@@ -146290,86 +146211,109 @@ async def translate_file_extract_text(update: Update, context: ContextTypes.DEFA
     info, _source = doc_input_file_info(update)
     return await translate_file_extract_text_from_info(info, context)
 
+def translation_file_error_text(error: str, lang: str = "vi") -> str:
+    """Render known file-translation failures in the customer's active locale."""
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    text = str(error or "")
+    if text == TRANSLATE_FILE_NOT_READY_TEXT:
+        return copy["translation_file_not_ready"]
+    if text == TRANSLATE_FILE_EXTRACT_ERROR_TEXT:
+        return copy["translation_file_extract_error"]
+    if text == TRANSLATE_FILE_PROVIDER_ERROR_TEXT:
+        return copy["translation_file_provider_error"]
+    if text.startswith("File quá lớn"):
+        return copy["translation_file_too_large"]
+    if text.startswith("⚠️ Gửi file txt/docx/pdf"):
+        return copy["translation_recent_file_missing"]
+    return text
+
 async def run_translate_file_to_target(update: Update, context: ContextTypes.DEFAULT_TYPE, target: str, info: dict | None = None):
     uid = update.effective_user.id
+    lang = normalize_user_language(get_user_language(uid)) or "vi"
+    copy = public_hub_copy(lang)
     if info is None:
         info, _source = doc_input_file_info(update)
     ok, source_text, error = await translate_file_extract_text_from_info(info or {}, context)
     if not ok:
-        return await reply_translation_surface(update, error or TRANSLATE_FILE_NOT_READY_TEXT)
+        return await reply_translation_surface(
+            update,
+            translation_file_error_text(error, lang) or copy["translation_file_not_ready"],
+        )
     try:
         result = await translate_to_language(source_text[:3000], target)
         save_tool_test_result("translation_file", "PASS", f"provider={result.get('provider')}; target={target}", uid)
         return await reply_translation_surface(
             update,
-            "🌐 <b>DỊCH FILE TOAN AAS</b>\n\n"
-            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n\n"
-            "<b>Nội dung gốc:</b>\n"
+            f"<b>{copy['translation_file_result_title']}</b>\n\n"
+            f"• {copy['translation_text_confirm_target']}: <b>{html.escape(translate_target_label(target))}</b>\n\n"
+            f"<b>{copy['translation_result_original']}:</b>\n"
             f"<code>{html.escape(source_text[:1000])}</code>\n\n"
-            "<b>Bản dịch:</b>\n"
+            f"<b>{copy['translation_result_translated']}:</b>\n"
             f"{html.escape((result.get('text') or '')[:2200])}",
             parse_mode="HTML",
         )
     except Exception:
         save_tool_test_result("translation_file", "FAIL", "translation provider failed", uid)
-        return await reply_translation_surface(update, TRANSLATE_FILE_PROVIDER_ERROR_TEXT)
+        return await reply_translation_surface(update, copy["translation_file_provider_error"])
 
 async def cmd_translate_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    copy = public_hub_copy(normalize_user_language(get_user_language(uid)) or "vi")
     raw_target = str((context.args or [""])[0] if context.args else "").strip()
     target = normalize_translate_target(raw_target)
     if not target:
         info, _source = doc_input_file_info(update)
         if not info:
-            return await update.message.reply_text("⚠️ Gửi file txt/docx/pdf rồi reply hoặc gõ /translate_file trong vòng 10 phút.")
-        save_translation_request(update.effective_user.id, "file", source_ref=info)
+            return await update.message.reply_text(f"⚠️ {copy['translation_recent_file_missing']}")
+        save_translation_request(uid, "file", source_ref=info)
         return await show_translation_picker(update, "file")
     return await run_translate_file_to_target(update, context, target)
 
 async def cmd_translate_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    lang = normalize_user_language(get_user_language(uid)) or "vi"
+    copy = public_hub_copy(lang)
     raw_target = str((context.args or [""])[0] if context.args else "").strip()
     if not raw_target:
         if not has_recent_audio_input(update):
-            return await update.message.reply_text("⚠️ Gửi voice/audio/video ngắn rồi reply hoặc gõ /translate_voice trong vòng 2 phút.")
-        save_translation_request(update.effective_user.id, "voice")
+            return await update.message.reply_text(f"⚠️ {copy['translation_recent_media_missing']}")
+        save_translation_request(uid, "voice")
         return await show_translation_picker(update, "voice")
     target = normalize_translate_target(raw_target)
     if not target:
-        return await update.message.reply_text(translate_voice_missing_target_text())
+        return await update.message.reply_text(translate_voice_missing_target_text(lang), parse_mode="HTML")
     return await run_translate_voice_to_target(update, context, target)
 
-def audio_voice_received_text() -> str:
+def audio_voice_received_text(lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return (
-        "✅ Đã nhận audio/voice.\n"
-        "\n"
-        "Bạn muốn làm gì?\n"
-        "• Bóc băng thành văn bản\n"
-        "• Dịch sang ngôn ngữ khác\n"
-        "• Dùng lệnh nhanh nếu muốn\n\n"
-        "Lệnh nhanh:\n"
-        "• /translate_voice — bóc băng rồi chọn ngôn ngữ dịch\n"
-        "• /transcribe — chỉ bóc băng thành văn bản\n"
-        "• /translate_tools — xem thêm ngôn ngữ hỗ trợ"
+        f"✅ {copy['translation_audio_received_body']}\n\n"
+        f"• {copy['translation_transcribe']}\n"
+        f"• {copy['translation_language']}\n\n"
+        f"/translate_voice · /transcribe · /translate_tools"
     )
 
 async def cmd_transcribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+    lang = normalize_user_language(get_user_language(uid)) or "vi"
+    copy = public_hub_copy(lang)
     if not DEEPGRAM_API_KEY:
-        return await reply_translation_surface(update, TRANSLATE_AUDIO_MISSING_STT_TEXT)
+        return await reply_translation_surface(update, copy["translation_audio_missing_stt"])
     media_info = await resolve_stt_test_media(update, context)
     if not media_info:
         return await reply_translation_surface(
             update,
-            "⚠️ Gửi voice/audio/video ngắn rồi reply hoặc gõ /transcribe trong vòng 2 phút."
+            f"⚠️ {copy['translation_recent_media_missing']}"
         )
     if media_info.get("error"):
         return await reply_translation_surface(
             update,
-            TRANSLATE_AUDIO_TIMEOUT_TEXT
-            if media_info.get("error") == "telegram_timeout" else TRANSLATE_AUDIO_ERROR_TEXT
+            copy["translation_audio_timeout"]
+            if media_info.get("error") == "telegram_timeout" else copy["translation_audio_error"]
         )
     file_size = int(media_info.get("file_size", 0) or 0)
     if file_size > PIPELINE_MAX_INPUT_MB_PUBLIC * 1024 * 1024 or not media_info.get("bytes"):
-        return await reply_translation_surface(update, TRANSLATE_AUDIO_ERROR_TEXT)
+        return await reply_translation_surface(update, copy["translation_audio_error"])
     raw_cost = calculate_dynamic_cost("whisper", file_size)
     ok_credit, _charge_preview = await preview_media_factory_credit_or_reply(update, uid, raw_cost, "spend_transcribe")
     if not ok_credit:
@@ -146382,7 +146326,7 @@ async def cmd_transcribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ) or "").strip()
         if not transcript or transcript.startswith("❌"):
             save_tool_test_result("stt", "FAIL", transcript[:400] or "empty_transcript", uid)
-            return await reply_translation_surface(update, TRANSLATE_AUDIO_ERROR_TEXT)
+            return await reply_translation_surface(update, copy["translation_audio_error"])
         charge_result = await spend_media_factory_after_success_or_reply(
             update,
             uid,
@@ -146396,19 +146340,21 @@ async def cmd_transcribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
         await reply_translation_surface(
             update,
-            "🎙 BÓC BĂNG AUDIO TOAN AAS\n\n"
-            "• Bóc băng: đã bật\n\n"
-            "<b>Nội dung:</b>\n"
+            f"<b>{copy['translation_transcribe_title']}</b>\n\n"
+            f"• {copy['translation_transcribe_ready']}\n\n"
+            f"<b>{copy['translation_transcribe_content']}:</b>\n"
             f"{html.escape(transcript[:3500])}\n\n"
-            f"💼 Còn lại: {balance} Xu | /naptien để nạp thêm",
+            f"💼 {copy['translation_transcribe_balance']}: {balance} Xu",
             parse_mode="HTML",
         )
     except Exception:
         save_tool_test_result("stt", "FAIL", "transcribe_provider_failed", uid)
-        await reply_translation_surface(update, TRANSLATE_AUDIO_ERROR_TEXT)
+        await reply_translation_surface(update, copy["translation_audio_error"])
 
 async def handle_auto_translate_message(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, target: str):
     uid = update.effective_user.id
+    lang = normalize_user_language(get_user_language(uid)) or "vi"
+    copy = public_hub_copy(lang)
     username = update.effective_user.username or update.effective_user.first_name or ""
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     try:
@@ -146426,12 +146372,12 @@ async def handle_auto_translate_message(update: Update, context: ContextTypes.DE
             detail=f"target={target}",
         )
         await update.message.reply_text(
-            "🌐 <b>BẢN DỊCH TOAN AAS</b>\n\n"
-            "• Nguồn: <code>auto</code>\n"
-            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n"
+            f"🌐 <b>{copy['translation_auto_result_title']}</b>\n\n"
+            f"• {copy['translation_auto_result_source']}: <code>auto</code>\n"
+            f"• {copy['translation_auto_result_target']}: <b>{html.escape(translate_target_label(target))}</b>\n"
             + "\n"
             f"{html.escape(translated)}\n\n"
-            "<i>/translate_mode_off để tắt</i>",
+            f"<i>{copy['translation_auto_result_disable_hint']}</i>",
             parse_mode="HTML",
         )
     except Exception as e:
@@ -146450,18 +146396,16 @@ async def handle_auto_translate_message(update: Update, context: ContextTypes.DE
         )
         if is_admin_user(uid):
             await update.message.reply_text(
-                "❌ Dịch tự động đang tạm lỗi hoặc hết quota provider.\n"
+                f"{copy['translation_auto_failed']}\n"
                 f"• Chi tiết: {html.escape(detail[:240])}\n"
-                "Không có Xu nào bị trừ.\n"
-                "Không chuyển sang AI chat để tránh trả lời sai ngữ cảnh.\n"
-                "Tắt dịch: /translate_mode_off",
+                f"{copy['translation_auto_no_chat_fallback']}\n"
+                f"{copy['translation_auto_status_disable_hint']}",
             )
         else:
             await update.message.reply_text(
-                "❌ Dịch tự động đang tạm lỗi hoặc quá tải.\n"
-                "Bot chưa trừ Xu. Vui lòng thử lại sau.\n"
-                "Không chuyển sang AI chat để tránh trả lời sai ngữ cảnh.\n"
-                "Tắt dịch: /translate_mode_off"
+                f"{copy['translation_auto_failed']}\n"
+                f"{copy['translation_auto_no_chat_fallback']}\n"
+                f"{copy['translation_auto_status_disable_hint']}"
             )
 
 async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -158895,67 +158839,64 @@ def music_license_notice_text(lang: str) -> str:
 
 def music_tools_keyboard(lang: str = "vi", back_callback: str = "menu|main") -> InlineKeyboardMarkup:
     lang = music_ui_lang(lang=lang)
-    is_vi = lang == "vi"
-    back_label = "⬅️ Quay lại video" if (back_callback or "") == "menu|main_video" else "⬅️ Quay lại"
+    copy = public_hub_copy(lang)
     ctx = PRODUCT_CONTEXT_VIDEO_ADDON if (back_callback or "") == "menu|main_video" else PRODUCT_CONTEXT_SHOWROOM
     if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
+        is_vi = lang == "vi"
         buttons = [
             ("🎙 Giọng đọc cho video" if is_vi else "🎙 Voice for video", "vfinal|voice"),
             ("🎵 Nhạc cho video" if is_vi else "🎵 Music for video", "vfinal|music"),
             ("🎞 Phụ đề / Dịch / Lồng tiếng" if is_vi else "🎞 Subtitles / translate / dub", "vfinal|addon"),
         ]
+        nav_back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", back_callback or "menu|main")
     else:
         buttons = [
-            ("🎙 Giọng đọc" if is_vi else "🎙 Voice", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_hub")),
-            ("🎵 Nhạc" if is_vi else "🎵 Music", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_hub")),
+            (f"🎙 {copy['audio_root_voice']}", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_hub")),
+            (f"🎵 {copy['audio_root_music']}", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_hub")),
         ]
+        nav_back = (f"⬅️ {copy['audio_root_back']}", back_callback or "menu|main")
     return build_2col_keyboard(
         buttons,
-        nav_back=(back_label if is_vi else ("⬅️ Back to video" if (back_callback or "") == "menu|main_video" else "⬅️ Back"), back_callback or "menu|main"),
+        nav_back=nav_back,
         lang=lang,
+        main_label=f"🏠 {copy['main_menu']}",
     )
 
 def voice_hub_text(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> str:
     ctx = normalize_product_context(product_context)
     if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
         return video_order_screen_text("voice", {}, lang)
-    if music_ui_lang(lang=lang) != "vi":
-        return (
-            "🎙 <b>Voice</b>\n\n"
-            "Choose a default voice, saved voice profile, or create a custom voice. This studio creates a separate audio file and is not attached to a video order."
-        )
-    return (
-        "🎙 <b>Giọng đọc</b>\n\n"
-        "Tạo file giọng đọc riêng, bóc băng audio hoặc quản lý Kho voice đã lưu. Chọn giọng xong chỉ cần gửi văn bản, TOAN AAS sẽ tạo file audio bằng đúng giọng đó.\n\n"
-        "Khu này không gắn vào đơn video hiện tại và chưa trừ Xu."
-    )
+    copy = public_hub_copy(music_ui_lang(lang=lang))
+    return f"🎙 <b>{copy['voice_hub_title']}</b>\n\n{copy['voice_hub_body']}"
 
 def voice_hub_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
     ctx = normalize_product_context(product_context)
     if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
         return video_finalization_voice_keyboard(lang)
-    is_vi = music_ui_lang(lang=lang) == "vi"
+    lang = music_ui_lang(lang=lang)
+    copy = public_hub_copy(lang)
     cb = lambda action: product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, action)
     buttons = [
-        ("✍️ Văn bản thành giọng nói" if is_vi else "✍️ Text to speech", cb("voice_tts_text")),
-        ("🎧 Giọng nói thành văn bản" if is_vi else "🎧 Speech to text", cb("stt")),
+        (f"✍️ {copy['voice_text_to_speech']}", cb("voice_tts_text")),
+        (f"🎧 {copy['voice_speech_to_text']}", cb("stt")),
     ]
     if default_tts_voices_distinct():
         buttons.extend([
-            ("👩 Giọng nữ" if is_vi else "👩 Female voice", cb("voice_default_female")),
-            ("👨 Giọng nam" if is_vi else "👨 Male voice", cb("voice_default_male")),
+            (f"👩 {copy['voice_default_female']}", cb("voice_default_female")),
+            (f"👨 {copy['voice_default_male']}", cb("voice_default_male")),
         ])
     else:
-        buttons.append(("🎙 Giọng mặc định sẵn sàng" if is_vi else "🎙 Ready default voice", cb("voice_default_neutral")))
+        buttons.append((f"🎙 {copy['voice_default_neutral']}", cb("voice_default_neutral")))
     buttons.extend([
-        ("📂 Kho voice" if is_vi else "📂 Voice vault", cb("voice_profiles")),
-        ("🎙 Tạo voice riêng" if is_vi else "🎙 Create custom voice", cb("voice_clone")),
+        (f"📂 {copy['voice_vault']}", cb("voice_profiles")),
+        (f"🎙 {copy['voice_create_custom']}", cb("voice_clone")),
     ])
     rows = build_2col_keyboard(
         buttons,
-        nav_back=("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio", cb("root")),
+        nav_back=(f"⬅️ {copy['audio_studio_label']}", cb("root")),
         nav_main=True,
         lang=lang,
+        main_label=f"🏠 {copy['main_menu']}",
     ).inline_keyboard
     return InlineKeyboardMarkup(rows)
 
@@ -158979,29 +158920,23 @@ def music_hub_text(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOW
     ctx = normalize_product_context(product_context)
     if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
         return video_order_screen_text("music", {}, lang)
-    if music_ui_lang(lang=lang) != "vi":
-        return (
-            "🎵 <b>Music Studio</b>\n\n"
-            "What would you like to do?"
-        )
-    return (
-        "🎵 <b>Studio nhạc</b>\n\n"
-        "Bạn muốn làm gì?"
-    )
+    copy = public_hub_copy(music_ui_lang(lang=lang))
+    return f"🎵 <b>{copy['music_hub_title']}</b>\n\n{copy['music_hub_body']}"
 
 def music_hub_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
-    is_vi = music_ui_lang(lang=lang) == "vi"
+    lang = music_ui_lang(lang=lang)
+    copy = public_hub_copy(lang)
     ctx = normalize_product_context(product_context)
     if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
         return video_finalization_music_keyboard(lang)
     cb = lambda action: product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, action)
     buttons = [
-        ("🎼 Tạo nhạc nền" if is_vi else "🎼 Create background music", cb("ai_music")),
-        ("🎤 Bài hát có lời" if is_vi else "🎤 Song with lyrics", cb("song_menu")),
-        ("📂 Kho nhạc" if is_vi else "📂 Music vault", cb("music")),
-        ("🎚 Cắt/ghép nhạc" if is_vi else "🎚 Cut/merge music", cb("music_edit")),
+        (f"🎼 {copy['music_background']}", cb("ai_music")),
+        (f"🎤 {copy['music_song']}", cb("song_menu")),
+        (f"📂 {copy['music_vault']}", cb("music")),
+        (f"🎚 {copy['music_edit']}", cb("music_edit")),
     ]
-    rows = build_2col_keyboard(buttons, nav_back=("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio", cb("root")), nav_main=True, lang=lang).inline_keyboard
+    rows = build_2col_keyboard(buttons, nav_back=(f"⬅️ {copy['audio_studio_label']}", cb("root")), nav_main=True, lang=lang, main_label=f"🏠 {copy['main_menu']}").inline_keyboard
     return InlineKeyboardMarkup(rows)
 
 def music_prompt_guide_text(lang: str = "vi") -> str:
@@ -172519,14 +172454,16 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = normalize_user_language(get_user_language(update.effective_user.id)) or "vi"
     await update.message.reply_text(
-        human_support_text(),
+        human_support_text(lang),
         parse_mode="HTML",
-        reply_markup=human_support_keyboard(),
+        reply_markup=human_support_keyboard(lang),
     )
 
 async def cmd_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text, keyboard = public_support_ticket_list_keyboard(update.effective_user.id)
+    lang = normalize_user_language(get_user_language(update.effective_user.id)) or "vi"
+    text, keyboard = public_support_ticket_list_keyboard(update.effective_user.id, lang)
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 async def cmd_support_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -174884,6 +174821,19 @@ def storage_addon_lines() -> list[str]:
         "• Cần số khác: nhập bội số 50MB hoặc số tiền tương ứng.",
     ]
 
+def memory_storage_display_addon_lines(lang: str = "vi") -> list[str]:
+    """Render existing storage tiers for a customer-facing display only."""
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    lines = []
+    for spec in storage_addon_tiers():
+        amount = int(spec.get("amount_vnd") or 0)
+        price = f"{amount:,}đ".replace(",", ".")
+        lines.append(copy["storage_addon_monthly_line"].format(
+            addon_mb=int(spec.get("addon_mb") or 0), price=price,
+        ))
+    lines.append(copy["storage_addon_custom_hint"])
+    return lines
+
 def storage_addon_tiers() -> list[dict]:
     return [
         {"code": "50mb", "addon_mb": 50, "amount_vnd": STORAGE_ADDON_BLOCK_PRICE_VND, "months": 1},
@@ -175697,39 +175647,40 @@ def memory_menu_text() -> str:
         "Basic memory dùng được nếu hệ thống đã bật. AI memory nâng cao theo cấu hình/admin test."
     )
 
-def memory_status_text(user_id) -> str:
+def memory_status_text(user_id, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     if str(user_id or "") == "__customer__":
         return (
-            "💾 <b>Dung lượng lưu trữ của bạn</b>\n\n"
-            "• Gói hiện tại: <b>Miễn phí</b>\n"
-            f"• Text/ghi chú: <b>0MB / {NOTES_TEXT_FREE_MB}MB</b>\n"
-            f"• Tệp/ảnh/âm thanh: <b>0MB / {FILES_AUDIO_FREE_MB}MB</b>\n"
-            f"• Tổng đã dùng: <b>0MB / {TOTAL_FREE_STORAGE_MB}MB</b>\n\n"
-            "<b>Mở rộng dung lượng:</b>\n"
-            + "\n".join(storage_addon_lines()[:3])
+            f"💾 <b>{copy['storage_status_title']}</b>\n\n"
+            f"• {copy['storage_status_current_plan']}: <b>{copy['storage_status_free_plan']}</b>\n"
+            f"• {copy['storage_status_text_notes']}: <b>0MB / {NOTES_TEXT_FREE_MB}MB</b>\n"
+            f"• {copy['storage_status_files_media']}: <b>0MB / {FILES_AUDIO_FREE_MB}MB</b>\n"
+            f"• {copy['storage_status_total_used']}: <b>0MB / {TOTAL_FREE_STORAGE_MB}MB</b>\n\n"
+            f"<b>{copy['storage_status_expand']}:</b>\n"
+            + "\n".join(memory_storage_display_addon_lines(lang)[:3])
         )
     status = memory_status_payload(user_id)
     plan = status["plan"]
-    plan_label = "Miễn phí"
+    plan_label = copy["storage_status_free_plan"]
     if status["addon_mb"] > 0:
-        plan_label = f"Miễn phí + {status['addon_mb']}MB mở rộng"
+        plan_label = copy["storage_status_free_plus"].format(addon_mb=status["addon_mb"])
     warning = ""
     if status["near_quota"]:
         warning = (
-            "\n\n⚠️ Bạn sắp dùng hết dung lượng lưu trữ.\n"
-            "Bạn vẫn có thể tiếp tục dùng ghi chú text nhẹ. Nếu cần lưu thêm tệp/ảnh/âm thanh, hãy mua thêm dung lượng hoặc dọn file cũ."
+            f"\n\n⚠️ {copy['storage_status_near_quota']}\n"
+            f"{copy['storage_status_near_quota_body']}"
         )
     return (
-        "💾 <b>Dung lượng lưu trữ của bạn</b>\n\n"
-        f"• Gói hiện tại: <b>{html.escape(plan_label)}</b>\n"
-        f"• Ghi chú: <b>{status['notes']}/{plan['note_limit']}</b>\n"
-        f"• Text/ghi chú: <b>{storage_bytes_to_mb_text(status['text_bytes'])} / {NOTES_TEXT_FREE_MB}MB</b>\n"
-        f"• Tệp/ảnh/âm thanh: <b>{storage_bytes_to_mb_text(status['file_bytes'])} / {FILES_AUDIO_FREE_MB}MB</b>\n"
-        f"• Tổng đã dùng: <b>{storage_bytes_to_mb_text(status['storage_bytes'])} / {status['total_limit_mb']}MB</b> ({status['used_percent']:.1f}%)\n"
-        f"• AI classify còn lại: <b>{status['ai_remaining']}/{plan['ai_classify_monthly_limit']}</b>\n"
-        f"• Reminder active: <b>{status['active_reminders']}</b>\n"
-        "\n<b>Mở rộng dung lượng:</b>\n"
-        + "\n".join(storage_addon_lines()[:3])
+        f"💾 <b>{copy['storage_status_title']}</b>\n\n"
+        f"• {copy['storage_status_current_plan']}: <b>{html.escape(plan_label)}</b>\n"
+        f"• {copy['storage_status_notes']}: <b>{status['notes']}/{plan['note_limit']}</b>\n"
+        f"• {copy['storage_status_text_notes']}: <b>{storage_bytes_to_mb_text(status['text_bytes'])} / {NOTES_TEXT_FREE_MB}MB</b>\n"
+        f"• {copy['storage_status_files_media']}: <b>{storage_bytes_to_mb_text(status['file_bytes'])} / {FILES_AUDIO_FREE_MB}MB</b>\n"
+        f"• {copy['storage_status_total_used']}: <b>{storage_bytes_to_mb_text(status['storage_bytes'])} / {status['total_limit_mb']}MB</b> ({status['used_percent']:.1f}%)\n"
+        f"• {copy['storage_status_ai_remaining']}: <b>{status['ai_remaining']}/{plan['ai_classify_monthly_limit']}</b>\n"
+        f"• {copy['storage_status_reminders_active']}: <b>{status['active_reminders']}</b>\n"
+        f"\n<b>{copy['storage_status_expand']}:</b>\n"
+        + "\n".join(memory_storage_display_addon_lines(lang)[:3])
         + warning
     )
 
@@ -175811,25 +175762,17 @@ def make_payos_storage_description(spec: dict) -> str:
     addon_mb = max(0, int((spec or {}).get("addon_mb") or 0))
     return f"AASSTOR{addon_mb}MB"[:25] or "AASSTORAGE"
 
-def memory_storage_cleanup_text() -> str:
-    return (
-        "🧹 <b>Dọn file cũ</b>\n\n"
-        "Bạn có thể xem ghi chú bằng <code>/notes</code>, tìm lại bằng <code>/search_note</code> rồi xóa/lưu trữ ghi chú không còn cần dùng.\n\n"
-        "File tạm như PDF temp, preview output, cache tải về hoặc video/image temp sẽ không tính quota lâu dài nếu hệ thống tự xóa theo TTL.\n"
-        "TOAN AAS chưa xóa dữ liệu của bạn từ màn này và chưa trừ Xu."
-    )
+def memory_storage_cleanup_text(lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    return f"🧹 <b>{copy['storage_cleanup_title']}</b>\n\n{copy['storage_cleanup_body']}"
 
 def memory_storage_nav_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📦 Add storage", callback_data="menu|memory_storage_addon"), InlineKeyboardButton("🧹 Clean old files", callback_data="menu|memory_storage_cleanup")],
-            [InlineKeyboardButton("💾 My storage", callback_data="menu|memory_storage_status"), InlineKeyboardButton("⬅️ Notes / Docs", callback_data="menu|main_memory")],
-            [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
-        ])
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 Mua thêm dung lượng", callback_data="menu|memory_storage_addon"), InlineKeyboardButton("🧹 Dọn file cũ", callback_data="menu|memory_storage_cleanup")],
-        [InlineKeyboardButton("💾 Dung lượng của tôi", callback_data="menu|memory_storage_status"), InlineKeyboardButton("⬅️ Ghi chú / Tài liệu", callback_data="menu|main_memory")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"📦 {copy['notes_add_storage']}", callback_data="menu|memory_storage_addon"), InlineKeyboardButton(f"🧹 {copy['notes_clean_files']}", callback_data="menu|memory_storage_cleanup")],
+        [InlineKeyboardButton(f"💾 {copy['notes_storage']}", callback_data="menu|memory_storage_status"), InlineKeyboardButton(f"⬅️ {copy['notes_docs_label']}", callback_data="menu|main_memory")],
+        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
 async def start_storage_addon_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, spec: dict, message=None):
@@ -176176,7 +176119,8 @@ async def cmd_memory_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_memory_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    await update.message.reply_text(memory_status_text(uid), parse_mode="HTML", reply_markup=memory_storage_nav_keyboard(user_ui_lang(uid)))
+    lang = user_ui_lang(uid)
+    await update.message.reply_text(memory_status_text(uid, lang), parse_mode="HTML", reply_markup=memory_storage_nav_keyboard(lang))
 
 async def cmd_storage_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -222060,7 +222004,7 @@ async def handle_translation_media_pending_upload(update: Update, context: Conte
                 await show_translation_picker(update, "file")
                 return True
         await message.reply_text(
-            "Luồng này chỉ dùng để dịch file. Anh/chị hãy chọn Dịch audio hoặc Phụ đề / Lồng tiếng nếu cần xử lý video hoặc audio.",
+            public_hub_copy(normalize_user_language(lang) or "vi")["translation_file_only"],
             reply_markup=translation_input_keyboard(lang, parent="media"),
         )
         return True
@@ -222068,7 +222012,7 @@ async def handle_translation_media_pending_upload(update: Update, context: Conte
     if ctx == "translate_audio":
         if video or doc_is_video:
             await message.reply_text(
-                "Luồng này chỉ dùng để dịch audio. Nếu muốn xử lý video, anh/chị hãy chọn các nút video trong Phụ đề / Lồng tiếng.",
+                public_hub_copy(normalize_user_language(lang) or "vi")["translation_audio_video_redirect"],
                 reply_markup=translation_voice_menu_keyboard(lang, parent="media"),
             )
             return True
@@ -222080,7 +222024,8 @@ async def handle_translation_media_pending_upload(update: Update, context: Conte
             await show_translation_picker(update, "voice")
             return True
         await message.reply_text(
-            "Luồng này chỉ dùng để dịch audio. Anh/chị gửi voice hoặc file âm thanh cần dịch.",
+            f"{public_hub_copy(normalize_user_language(lang) or 'vi')['translation_audio_only']} "
+            f"{public_hub_copy(normalize_user_language(lang) or 'vi')['translation_audio_need_file']}",
             reply_markup=translation_voice_menu_keyboard(lang, parent="media"),
         )
         return True
@@ -222280,7 +222225,8 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📜 Bạn cần đảm bảo có quyền sử dụng file âm thanh này.\n\n"
             "Bot chưa trừ Xu."
         )
-    await update.message.reply_text(audio_voice_received_text(), reply_markup=voice_translation_action_keyboard())
+    lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
+    await update.message.reply_text(audio_voice_received_text(lang), reply_markup=voice_translation_action_keyboard(lang))
 
 VIDEO_DUBBING_TTL_SECONDS = 10 * 60
 VIDEO_SUBTITLE_MODE_CREATE = "subtitle_create"
@@ -252184,7 +252130,8 @@ async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_
             "📜 Bạn cần đảm bảo có quyền sử dụng file âm thanh này.\n\n"
             "Bot chưa trừ Xu."
         )
-    await update.message.reply_text(audio_voice_received_text(), reply_markup=voice_translation_action_keyboard())
+    lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
+    await update.message.reply_text(audio_voice_received_text(lang), reply_markup=voice_translation_action_keyboard(lang))
 
 async def handle_feedback_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:
@@ -252227,23 +252174,16 @@ async def handle_feedback_pending_text(update: Update, context: ContextTypes.DEF
     ticket_text = text if not context_note else f"{text}\n\n[Video result context] {context_note}"
     ticket, is_new = create_or_append_support_ticket(update.effective_user, category, ticket_text, classification)
     clear_feedback_pending(uid)
-    lang = user_ui_lang(uid)
-    if normalize_user_language(lang) != "vi":
-        message = (
-            "✅ <b>Thank you.</b> TOAN AAS has created a support ticket.\n\n"
-            f"Ticket: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
-            "The bot has not called AI/API and has not charged Xu."
-        )
-    else:
-        message = (
-            "✅ <b>Cảm ơn bạn.</b> TOAN AAS đã tạo ticket góp ý/báo lỗi.\n\n"
-            f"Mã ticket: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
-            "Admin sẽ kiểm tra nội dung. Bot chưa gọi AI/API, chưa trừ và chưa tự hoàn Xu."
-        )
+    lang = normalize_user_language(user_ui_lang(uid)) or "vi"
+    copy = public_hub_copy(lang)
+    message = (
+        f"✅ <b>{copy['support_ticket_feedback_notice']}</b>\n\n"
+        f"{copy['support_ticket_label_code']}: <code>{html.escape(ticket.get('ticket_code') or '')}</code>"
+    )
     await update.message.reply_text(
         message,
         parse_mode="HTML",
-        reply_markup=support_ticket_created_keyboard(ticket["id"]),
+        reply_markup=support_ticket_created_keyboard(ticket["id"], lang),
     )
     await notify_admin_new_support_ticket(
         context,
@@ -252392,18 +252332,19 @@ async def handle_translation_menu_pending_text(update: Update, context: ContextT
     if not text:
         return True
     lang = get_user_language(uid) or "vi"
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     source_type = str(pending.get("source_type") or "text")
     if source_type == "text_target_custom":
         target = normalize_translate_target(text)
         if not target:
             await update.message.reply_text(
-                "⚠️ Ngôn ngữ này chưa được nhận diện. Hãy nhập tên hoặc mã ngôn ngữ khác.",
+                f"⚠️ {copy['translation_picker_target']}.",
                 reply_markup=translation_input_keyboard(lang),
             )
             return True
         set_translation_menu_pending(uid, "text", target_language=target)
         await update.message.reply_text(
-            f"📝 Gửi văn bản cần dịch sang <b>{html.escape(translate_target_label(target))}</b>.",
+            f"📝 {copy['translation_picker_target']}: <b>{html.escape(translate_target_label(target))}</b>. {copy['translation_picker_no_charge']}",
             parse_mode="HTML",
             reply_markup=translation_input_keyboard(lang),
         )
@@ -252413,7 +252354,7 @@ async def handle_translation_menu_pending_text(update: Update, context: ContextT
         parts = [part for part in re.split(r"[-|:]+", normalized) if part]
         if len(parts) < 2:
             await update.message.reply_text(
-                "⚠️ Vui lòng nhập cặp ngôn ngữ dạng <code>vi-en</code> hoặc <code>zh-vi</code>. Bot chưa trừ Xu.",
+                f"⚠️ {copy['translation_pair_choose']}: <code>vi-en</code> {copy['translation_pair_example_or']} <code>zh-vi</code>. {copy['translation_picker_no_charge']}",
                 parse_mode="HTML",
                 reply_markup=translation_input_keyboard(lang),
             )
@@ -252422,7 +252363,7 @@ async def handle_translation_menu_pending_text(update: Update, context: ContextT
         lang_b = normalize_translate_target(parts[1])
         if not lang_a or not lang_b:
             await update.message.reply_text(
-                "⚠️ Có ngôn ngữ chưa hỗ trợ. Ví dụ hợp lệ: <code>vi-en</code>, <code>zh-vi</code>, <code>ja-vi</code>. Bot chưa trừ Xu.",
+                f"⚠️ {copy['translation_picker_target']}: <code>vi-en</code>, <code>zh-vi</code>, <code>ja-vi</code>. {copy['translation_picker_no_charge']}",
                 parse_mode="HTML",
                 reply_markup=translation_input_keyboard(lang),
             )
@@ -252437,9 +252378,7 @@ async def handle_translation_menu_pending_text(update: Update, context: ContextT
         return True
     if len(text) > 3000:
         await update.message.reply_text(
-            "⚠️ Nội dung dài hơn 3.000 ký tự. Vui lòng chia thành từng đoạn ngắn để dịch ổn định. Bot chưa trừ Xu."
-            if normalize_user_language(lang) == "vi" else
-            "⚠️ Text is longer than 3,000 characters. Split it into shorter sections. No Xu charged.",
+            f"⚠️ {copy['translation_input_too_long']}",
             reply_markup=translation_input_keyboard(lang),
         )
         return True
@@ -252477,9 +252416,10 @@ async def handle_translation_session_text(update: Update, context: ContextTypes.
     if not text or text.startswith("/"):
         return False
     lang = get_user_language(uid) or "vi"
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     if len(text) > 1800:
         await update.message.reply_text(
-            "⚠️ Tin nhắn quá dài cho phiên dịch liên tục. Vui lòng chia nhỏ từng đoạn. Bot chưa trừ Xu.",
+            f"⚠️ {copy['translation_input_too_long']}",
             reply_markup=translation_session_keyboard(lang, session.get("mode")),
         )
         return True
@@ -252510,7 +252450,7 @@ async def handle_translation_session_text(update: Update, context: ContextTypes.
         return True
     except Exception:
         await update.message.reply_text(
-            "⚙️ Dịch vụ đang được kiểm tra tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu. Quý khách có thể thử lại sau hoặc chọn tác vụ khác.",
+            f"⚙️ {copy['translation_service_unavailable']}",
             parse_mode="HTML",
             reply_markup=translation_session_keyboard(lang, session.get("mode")),
         )
@@ -252519,16 +252459,17 @@ async def handle_translation_session_text(update: Update, context: ContextTypes.
 async def send_translation_session_result(update: Update, context: ContextTypes.DEFAULT_TYPE, session: dict, original: str, translated: str, source: str, target: str) -> None:
     uid = update.effective_user.id
     lang = get_user_language(uid) or "vi"
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     conversation = str(session.get("mode") or "") == "live_conversation"
-    title = "💬 <b>HỘI THOẠI 2 CHIỀU</b>" if conversation else "🌐 <b>TOAN AAS DỊCH 2 CHIỀU</b>"
+    title = f"💬 <b>{copy['translation_session_live_title']}</b>" if conversation else f"🌐 <b>{copy['translation_session_two_way_title']}</b>"
     body = [
         title,
         "",
-        f"• Chiều dịch: <b>{html.escape(translate_target_label(source))} → {html.escape(translate_target_label(target))}</b>",
+        f"• {copy['translation_result_direction']}: <b>{html.escape(translate_target_label(source))} → {html.escape(translate_target_label(target))}</b>",
     ]
     if conversation:
-        body.extend(["", "<b>Nội dung gốc:</b>", html.escape(str(original or "")[:1500])])
-    body.extend(["", "<b>Bản dịch:</b>", html.escape(str(translated or "")[:2600]), "", "Bot chưa trừ Xu."])
+        body.extend(["", f"<b>{copy['translation_result_original']}:</b>", html.escape(str(original or "")[:1500])])
+    body.extend(["", f"<b>{copy['translation_result_translated']}:</b>", html.escape(str(translated or "")[:2600]), "", copy['translation_result_no_charge']])
     await update.message.reply_text(
         "\n".join(body),
         parse_mode="HTML",
@@ -252550,13 +252491,13 @@ async def send_translation_session_result(update: Update, context: ContextTypes.
             await update.message.reply_audio(
                 audio=audio,
                 filename="toan_aas_translation_voice.mp3",
-                caption=f"🔊 Bản dịch giọng nói: {translate_target_label(target)}",
+                caption=f"{copy['translation_tts_caption']}: {translate_target_label(target)}",
             )
     except Exception:
         logger.info("translation session TTS unavailable | user=%s", uid)
 
-def translation_voice_guard_text(admin: bool = False) -> str:
-    text = "Dịch voice đang chờ tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu."
+def translation_voice_guard_text(lang: str = "vi", admin: bool = False) -> str:
+    text = public_hub_copy(normalize_user_language(lang) or "vi")["translation_voice_guard"]
     if admin:
         blockers = []
         if not key4u_asr_public_ready():
@@ -252577,7 +252518,7 @@ async def handle_translation_session_media(update: Update, context: ContextTypes
     media_info = await resolve_stt_test_media(update, context)
     if not media_info or media_info.get("error") or not media_info.get("bytes"):
         await update.message.reply_text(
-            translation_voice_guard_text(is_translation_admin(uid)),
+            translation_voice_guard_text(lang, is_translation_admin(uid)),
             parse_mode="HTML",
             reply_markup=translation_session_keyboard(lang, session.get("mode")),
         )
@@ -252622,7 +252563,7 @@ async def handle_translation_session_media(update: Update, context: ContextTypes
         return True
     except Exception:
         await update.message.reply_text(
-            translation_voice_guard_text(is_translation_admin(uid)),
+            translation_voice_guard_text(lang, is_translation_admin(uid)),
             parse_mode="HTML",
             reply_markup=translation_session_keyboard(lang, session.get("mode")),
         )

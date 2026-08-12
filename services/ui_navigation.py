@@ -9,12 +9,46 @@ CANONICAL_MAIN_TEXT = "🏠 Menu chính"
 CANONICAL_MAIN_CALLBACK = "menu|main"
 
 
+# These are only the older Vietnamese labels that the wrapper has always
+# normalized.  Do not use a broad language heuristic here: native labels from
+# the selected locale must pass through unchanged.
+_LEGACY_VI_BACK_LABELS = frozenset({
+    "quay lại",
+    "⬅ quay lại",
+    "⬅️ quay lại",
+    "🔙 quay lại",
+    "↩ quay lại",
+    "↩️ quay lại",
+    "⬅️ hỗ trợ",
+})
+_LEGACY_VI_MAIN_LABELS = frozenset({
+    "menu",
+    "🏠 menu",
+    "menu chính",
+    "🏠 menu chính",
+})
+
+
 def _button_text(button: Any) -> str:
     return str(getattr(button, "text", "") or "").strip()
 
 
 def _button_callback(button: Any) -> str:
     return str(getattr(button, "callback_data", "") or "").strip()
+
+
+def _normalized_back_label(text: str) -> str:
+    clean = str(text or "").strip()
+    if clean.casefold() in _LEGACY_VI_BACK_LABELS:
+        return CANONICAL_BACK_TEXT
+    return clean or CANONICAL_BACK_TEXT
+
+
+def _normalized_main_label(text: str) -> str:
+    clean = str(text or "").strip()
+    if clean.casefold() in _LEGACY_VI_MAIN_LABELS:
+        return CANONICAL_MAIN_TEXT
+    return clean or CANONICAL_MAIN_TEXT
 
 
 def is_main_menu_button(button: Any) -> bool:
@@ -110,6 +144,7 @@ def canonicalize_bottom_navigation(
         return normalized
 
     back = back_buttons[-1]
+    main = main_buttons[-1]
     kept_rows: list[list[Any]] = []
     for row in normalized:
         kept = [
@@ -127,6 +162,9 @@ def canonicalize_bottom_navigation(
         canonical_bottom_nav(
             _button_callback(back),
             button_factory=button_factory,
+            menu_callback=_button_callback(main) or CANONICAL_MAIN_CALLBACK,
+            back_text=_normalized_back_label(_button_text(back)),
+            menu_text=_normalized_main_label(_button_text(main)),
         )
     )
     return kept_rows
@@ -139,10 +177,10 @@ def navigation_audit(rows: Iterable[Sequence[Any]]) -> dict[str, Any]:
     expected = bool(back and main)
     bottom_ok = not expected or (
         len(normalized[-1]) == 2
-        and _button_text(normalized[-1][0]) == CANONICAL_BACK_TEXT
-        and _button_text(normalized[-1][1]) == CANONICAL_MAIN_TEXT
+        and _button_text(normalized[-1][0]) == _normalized_back_label(_button_text(back[-1]))
+        and _button_text(normalized[-1][1]) == _normalized_main_label(_button_text(main[-1]))
         and _button_callback(normalized[-1][0]) == _button_callback(back[-1])
-        and _button_callback(normalized[-1][1]) == CANONICAL_MAIN_CALLBACK
+        and _button_callback(normalized[-1][1]) == _button_callback(main[-1])
     )
     return {
         "has_back": bool(back),
