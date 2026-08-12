@@ -307,7 +307,7 @@ def select_single(items: Iterable[dict[str, Any]], selected_id: str) -> list[dic
 
 
 def parse_script_proposal(script: str) -> dict[str, Any]:
-    """Propose 2-20 contiguous scene ranges with exact source coverage."""
+    """Propose 5-20 contiguous scene ranges with exact source coverage."""
 
     return video_script_product.parse_script(str(script or ""))
 

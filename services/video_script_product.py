@@ -19,7 +19,7 @@ import zipfile
 from services import video_profile_catalog
 
 
-MIN_SCENES = 2
+MIN_SCENES = 5
 MAX_SCENES = 20
 PROFILE_PAGE_SIZE = 8
 PROFILE_PAGE_COUNT = 4
@@ -63,7 +63,7 @@ RATIOS = {
     "4x5": "4:5",
 }
 
-DURATIONS = (15, 30, 45, 60, 90)
+DURATION_SECONDS_PER_SCENE = (8, 12, 15)
 
 _SCENE_HEADING_RE = re.compile(
     r"(?im)^\s*(?:cảnh|scene)\s*\d{1,2}\s*[:.\-)–—]?\s*"
@@ -233,6 +233,18 @@ def idea_library_suggestions(*, goal: str = "", revision: int = 0) -> list[dict[
 def estimated_scene_count(duration_seconds: int) -> int:
     duration = max(1, int(duration_seconds or 0))
     return max(MIN_SCENES, min(MAX_SCENES, round(duration / 8)))
+
+
+def duration_options(scene_count: int) -> tuple[int, int, int]:
+    """Return short, balanced and long script durations for the chosen scenes."""
+
+    count = max(MIN_SCENES, min(MAX_SCENES, safe_count(scene_count) or MIN_SCENES))
+    return tuple(count * seconds for seconds in DURATION_SECONDS_PER_SCENE)
+
+
+def duration_bounds(scene_count: int) -> tuple[int, int]:
+    options = duration_options(scene_count)
+    return options[0], options[-1]
 
 
 def _candidate_boundaries(source: str) -> list[int]:
@@ -547,8 +559,16 @@ def safe_count(value: Any) -> int:
 
 def build_ai_prompt(state: Mapping[str, Any]) -> str:
     draft = dict(state or {})
-    duration = max(1, int(draft.get("script_duration_seconds") or 30))
-    scene_count = estimated_scene_count(duration)
+    scene_count = max(
+        MIN_SCENES,
+        min(
+            MAX_SCENES,
+            safe_count(draft.get("script_entry_scene_count")) or MIN_SCENES,
+        ),
+    )
+    minimum_duration, maximum_duration = duration_bounds(scene_count)
+    duration = safe_count(draft.get("script_duration_seconds")) or duration_options(scene_count)[1]
+    duration = max(minimum_duration, min(maximum_duration, duration))
     profile = profile_record(str(draft.get("script_profile_key") or ""))
     content = _clean(draft.get("script_content_brief") or draft.get("script_topic"))
     if not content:
@@ -556,7 +576,8 @@ def build_ai_prompt(state: Mapping[str, Any]) -> str:
     revision = max(1, int(draft.get("script_ai_revision") or 1))
     return (
         "Bạn là biên kịch Video AI của TOAN AAS. Hãy tạo MỘT KỊCH BẢN HOÀN CHỈNH bằng tiếng Việt, "
-        "không tạo video, không tóm tắt đầu vào, không bỏ chi tiết và không dùng tên model/provider.\n\n"
+        "không tạo video, không tóm tắt đầu vào, không bỏ chi tiết và không dùng tên model/provider. "
+        "Đây là kịch bản dài nhiều cảnh, KHÔNG phải một prompt video một cảnh và KHÔNG phải tập hợp các prompt rời.\n\n"
         f"Lần tạo: {revision}\n"
         f"Mục tiêu: {goal_label(str(draft.get('script_goal') or ''))}\n"
         f"Nội dung/chủ đề/sản phẩm: {content}\n"
@@ -587,8 +608,12 @@ def build_ai_prompt(state: Mapping[str, Any]) -> str:
         "- lời narrator\n"
         "- lời thoại từng nhân vật\n"
         "- ý đồ máy quay, cỡ cảnh và chuyển động camera\n"
+        "- prompt video chi tiết cho riêng cảnh đó, đủ bối cảnh, chủ thể, hành động, ánh sáng, camera và cảm xúc\n"
         "- ý đồ chuyển cảnh sang cảnh kế tiếp\n"
         "- trạng thái kết cảnh; không cắt giữa câu nói hoặc hành động\n\n"
+        "Toàn bộ các cảnh phải giữ một mạch ngữ cảnh xuyên suốt: nhất quán nhân vật, nhận diện, sản phẩm, "
+        "không gian, đạo cụ, thời gian, nguyên nhân-kết quả và trạng thái nối tiếp. Mỗi cảnh phải có chiều sâu hơn "
+        "Prompt → Video một cảnh nhưng vẫn phục vụ cùng concept, cao trào và kết thúc của kịch bản.\n\n"
         "Chỉ trả về toàn bộ kịch bản hoàn chỉnh. Không thêm lời giải thích trước hoặc sau kịch bản."
     )
 
