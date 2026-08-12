@@ -216,6 +216,19 @@ def test_root_flow_copy_keeps_existing_callbacks_and_localizes_every_supported_l
     ):
         exec(_function_source(name), namespace)
 
+    namespace["is_admin_user"] = lambda _user_id: True
+    for locale in SUPPORTED_LOCALES:
+        copy = public_copy.public_hub_copy(locale)
+        memory = namespace["main_memory_keyboard"](locale, user_id=1)
+        archive_buttons = [
+            button
+            for row in memory.inline_keyboard
+            for button in row
+            if button.callback_data == "menu|internal_archive"
+        ]
+        assert len(archive_buttons) == 1, locale
+        assert copy["internal_archive"] in archive_buttons[0].text, locale
+
     expected = {
         "main_memory_keyboard": {"memory|create", "memory|list", "menu|main_docs", "menu|main"},
         "main_docs_keyboard": {"menu|hint_doc_pdf_to_word", "menu|hint_doc_image_to_pdf", "menu|doc_tools", "menu|main_memory", "menu|main"},
