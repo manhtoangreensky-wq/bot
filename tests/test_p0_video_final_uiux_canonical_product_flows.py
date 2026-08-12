@@ -20,15 +20,19 @@ def _function_source(name: str) -> str:
     return BOT_SOURCE[start:end]
 
 
-def test_script_uses_canonical_count_ratio_source_order_and_long_form_bounds() -> None:
+def test_script_uses_canonical_script_first_order_and_long_form_bounds() -> None:
     sequence = video_flow7.product_sequence("script_image_video")
-    assert sequence[:3] == ("scene_count", "aspect_ratio", "content_source")
+    assert sequence[:6] == (
+        "script_source",
+        "content_setup_if_ai",
+        "full_script_review",
+        "scene_boundary_review",
+        "aspect_ratio",
+        "scene_plan",
+    )
     assert "script_mode" not in sequence
     assert "scene_count_confirm" not in sequence
-
-    public_open = _function_source("handle_video_product_callback")
-    assert '"script_image_video"}' in public_open
-    assert "start_at_scene_count=True" in public_open
+    assert "character" not in sequence
 
     bounds = _function_source("video_profile_scene_count_bounds")
     count_keyboard = _function_source("video_profile_scene1_count_keyboard")
@@ -41,47 +45,30 @@ def test_script_uses_canonical_count_ratio_source_order_and_long_form_bounds() -
     assert "40–160 giây" in count_text
 
 
-def test_script_three_routes_must_choose_scene_count_then_ratio_before_branch_content() -> None:
+def test_script_three_routes_start_at_their_real_input_without_count_first_detour() -> None:
     callback = _function_source("handle_video_product_callback")
-    for branch in ("script_ai", "script_manual", "script_upload"):
+    expected_steps = {
+        "script_ai": "script_ai_content_source",
+        "script_manual": "awaiting_existing_script",
+        "script_upload": "awaiting_script_file",
+    }
+    for branch, expected_step in expected_steps.items():
         start = callback.index(f'if action == "{branch}"')
         end = callback.find('\n        if action == "', start + 1)
         block = callback[start : end if end >= 0 else len(callback)]
-        assert '"script_scene_count"' in block
+        assert f'"{expected_step}"' in block
         assert f'script_entry_route="{branch}"' in block
-        assert '"script_ai_goal"' not in block
-        assert '"awaiting_existing_script"' not in block
-        assert '"awaiting_script_file"' not in block
+        assert '"script_scene_count"' not in block
 
-    count_block = callback[
-        callback.index('if action == "script_entry_count"') :
-        callback.index('if action == "script_entry_ratio"')
-    ]
-    assert '"script_scene_ratio"' in count_block
-    assert 'script_entry_scene_count=count' in count_block
-    assert 'existing_script = str(draft.get("manual_script_raw") or draft.get("script_text") or "")' in count_block
-    assert "video_script_product.semantic_beats(existing_script, count)" in count_block
-    assert "video_flow7_script_count_text(proposal)" in count_block
-
-    ratio_block = callback[
-        callback.index('if action == "script_entry_ratio"') :
-        callback.index('if action == "script_goal_screen"')
-    ]
-    assert 'script_entry_ratio=ratio' in ratio_block
-    assert '"script_ai_goal"' in ratio_block
-    assert '"awaiting_existing_script"' in ratio_block
-    assert '"awaiting_script_file"' in ratio_block
-
-    count_keyboard = _function_source("video_script_entry_count_keyboard")
-    ratio_keyboard = _function_source("video_script_entry_ratio_keyboard")
-    for count in (5, 6, 8, 10, 15, 20):
-        assert f"vproduct|script_entry_count|{count}" in count_keyboard
-    assert "vproduct|script_entry_count|2" not in count_keyboard
-    assert "vproduct|script_entry_count|20" in count_keyboard
-    assert "vproduct|script_hub" in count_keyboard
-    assert "vproduct|script_entry_ratio|9x16" in ratio_keyboard
-    assert "vproduct|script_entry_ratio|4x5" in ratio_keyboard
-    assert "vproduct|script_entry_count_screen" in ratio_keyboard
+    stale_start = callback.index(
+        'if action in {"script_entry_count_screen", "script_entry_count", '
+        '"script_entry_count_custom", "script_entry_ratio_screen", "script_entry_ratio"}'
+    )
+    stale_end = callback.index('if action == "script_goal_screen"', stale_start)
+    stale_block = callback[stale_start:stale_end]
+    assert "video_script_restore_parser_or_hub" in stale_block
+    assert '"script_scene_count"' not in stale_block
+    assert '"script_scene_ratio"' not in stale_block
 
 
 def test_script_custom_count_back_routes_and_ai_continuity_contract() -> None:
@@ -93,28 +80,32 @@ def test_script_custom_count_back_routes_and_ai_continuity_contract() -> None:
     scene_planner = (ROOT / "services" / "video_scene3_flow.py").read_text(encoding="utf-8")
 
     assert 'current_step == "awaiting_script_entry_scene_count"' in text_handler
-    assert '"script_scene_ratio"' in text_handler
-    assert 'script_entry_scene_count=count' in text_handler
-    assert '"awaiting_script_ai_style": ("script_ai_duration", "script_style_label")' in text_handler
+    assert "video_script_restore_parser_or_hub" in text_handler
+    assert 'current_step == "awaiting_script_scene_count"' in text_handler
+    assert '"awaiting_script_ai_style": ("script_ai_ratio", "script_style_label")' in text_handler
     assert "def duration_options(scene_count: int)" in ai_prompt
     assert "def duration_bounds(scene_count: int)" in ai_prompt
     duration_keyboard = _function_source("video_script_duration_keyboard")
-    assert "video_script_product.duration_options(scene_count)" in duration_keyboard
+    assert "video_script_product.duration_options(5)" in duration_keyboard
+    assert "video_script_product.duration_options(10)" in duration_keyboard
+    assert "video_script_product.duration_options(15)" in duration_keyboard
     assert "Nhịp chuẩn" in duration_keyboard
     assert "Kịch bản dài" in duration_keyboard
     assert "video_script_duration_keyboard(session)" in renderer
 
     assert 'if action == "script_upload"' in callback
     assert 'if action == "script_file_replace"' in callback
-    assert 'script_file_back_callback="vproduct|script_file_review"' in callback
+    assert '"vproduct|script_file_review"' in callback
     assert 'draft.get("script_file_back_callback")' in renderer
-    assert '"awaiting_existing_script": "vproduct|script_entry_ratio_screen"' in renderer
+    assert '"awaiting_existing_script": "vproduct|script_hub"' in renderer
 
-    character_keyboard = _function_source("video_scene3_character_keyboard")
-    assert '"vproduct|script_scene_review"' in character_keyboard
-    assert 'str((state or {}).get("flow_kind") or "") == "script_to_video"' in character_keyboard
+    scene_plan_keyboard = _function_source("video_scene3_scene_plan_keyboard")
+    assert '"vproduct|script_scene_review"' in scene_plan_keyboard
     assert '"script_scene_review"' in callback
     assert 'video_flow7_script_count_text(proposal)' in callback
+    assert 'video_scene3_flow.build_planning_package(state)' in script_handoff
+    assert '"scene_plan"' in script_handoff
+    assert '"character"' not in script_handoff
 
     assert "KHÔNG phải một prompt video một cảnh" in ai_prompt
     assert "mạch ngữ cảnh xuyên suốt" in ai_prompt
