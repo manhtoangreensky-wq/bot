@@ -71139,20 +71139,8 @@ async def handle_public_chat_attachment(update: Update, context: ContextTypes.DE
                 pass
 
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main")],
-        [InlineKeyboardButton(f"💎 Chat Pro • {public_chat_runtime.CHAT_PRO_RATE_LABEL}", callback_data="menu|chat_pro"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
-        [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
-        [InlineKeyboardButton("🎧 Studio âm thanh", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
-        [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
-        [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support"), InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main")],
-        [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start")],
-        [InlineKeyboardButton("🌐 Trung tâm", url=TOAN_AAS_COMMUNITY_URL)],
-        [InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
-    ]
-    if is_admin:
-        rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
-    return InlineKeyboardMarkup(rows)
+    """Compatibility seam for legacy Vietnamese-only callers."""
+    return localized_main_menu_keyboard(is_admin, "vi")
 
 def language_choice_text(lang: str = "vi") -> str:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
@@ -71175,7 +71163,10 @@ def language_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         InlineKeyboardButton(f"⬅️ {copy['back']}", callback_data="lang_back"),
         InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
     ])
-    return InlineKeyboardMarkup(rows)
+    # The global markup wrapper canonicalizes generic Back/Main rows to
+    # Vietnamese.  The picker itself is localized, so keep its native labels
+    # while preserving the existing callback contract.
+    return _TelegramInlineKeyboardMarkup(rows)
 
 def other_language_choice_text(lang: str = "vi") -> str:
     return language_choice_text(lang)
@@ -71189,14 +71180,16 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     lang = normalize_user_language(lang) or "vi"
     copy = public_hub_copy(lang)
     rows = [
-        [InlineKeyboardButton(f"🖼 {copy['image_label']}", callback_data="menu|main_image"), InlineKeyboardButton(f"🎬 {copy['video_label']}", callback_data="menu|main_video")],
-        [InlineKeyboardButton(f"🎵 {copy['music_label']}", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton(f"🎙 {copy['voice_label']}", callback_data="menu|translate")],
-        [InlineKeyboardButton(f"💬 {copy['chat_label']} • {public_chat_runtime.CHAT_PRO_RATE_LABEL}", callback_data="menu|chat_pro"), InlineKeyboardButton(f"📚 {copy['guide_label']}", callback_data="menu|main_guide")],
-        [InlineKeyboardButton(f"🎧 {copy['support']}", callback_data="menu|support"), InlineKeyboardButton(f"📊 {copy['center']}", url=TOAN_AAS_COMMUNITY_URL)],
-        [InlineKeyboardButton(f"🌐 {copy['change_language']}", callback_data="back_lang"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        [InlineKeyboardButton(f"🆓 {copy['free_tools_label']}", callback_data="freehub|main"), InlineKeyboardButton(f"💎 {copy['chat_pro_label']} • {public_chat_runtime.CHAT_PRO_RATE_LABEL}", callback_data="menu|chat_pro")],
+        [InlineKeyboardButton(f"👤 {copy['account_label']}", callback_data="menu|main_profile"), InlineKeyboardButton(f"🖼 {copy['image_label']}", callback_data="menu|main_image")],
+        [InlineKeyboardButton(f"🎬 {copy['video_label']}", callback_data="menu|main_video"), InlineKeyboardButton(f"🎧 {copy['audio_studio_label']}", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root"))],
+        [InlineKeyboardButton(f"🌐 {copy['translation_label']}", callback_data="menu|translate"), InlineKeyboardButton(f"📝 {copy['notes_docs_label']}", callback_data="menu|main_memory")],
+        [InlineKeyboardButton(f"📚 {copy['guide_label']}", callback_data="menu|main_guide"), InlineKeyboardButton(f"👨‍💼 {copy['support']}", callback_data="menu|support")],
+        [InlineKeyboardButton(f"💰 {copy['topup_pricing_label']}", callback_data="pricing|main"), InlineKeyboardButton(f"💬 {copy['feedback_label']}", callback_data="feedback|start")],
+        [InlineKeyboardButton(f"📊 {copy['center']}", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton(f"🌐 {copy['change_language']}", callback_data="back_lang")],
     ]
     if is_admin:
-        rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
+        rows.append([InlineKeyboardButton(f"🔐 {copy['admin_label']}", callback_data="menu|admin")])
     return InlineKeyboardMarkup(rows)
 
 def localized_start_menu_text(user_id, lang: str) -> str:

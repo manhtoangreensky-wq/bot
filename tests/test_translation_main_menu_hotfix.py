@@ -20,17 +20,23 @@ def test_main_menu_uses_the_compact_two_column_hub_layout():
         assert "menu|translate" in callbacks
         assert "back_lang" in callbacks
         assert "menu|admin" not in callbacks
-        assert [len(row) for row in public.inline_keyboard] == [2, 2, 2, 2, 2]
-        assert public.inline_keyboard[3][0].callback_data == "menu|support"
-        assert public.inline_keyboard[3][1].url == bot.TOAN_AAS_COMMUNITY_URL
-        assert [button.callback_data for button in public.inline_keyboard[4]] == [
-            "back_lang", "menu|main",
+        assert [len(row) for row in public.inline_keyboard] == [2, 2, 2, 2, 2, 2, 2]
+        assert [button.callback_data for button in public.inline_keyboard[0]] == [
+            "freehub|main", "menu|chat_pro",
         ]
+        assert [button.callback_data for button in public.inline_keyboard[4]] == [
+            "menu|main_guide", "menu|support",
+        ]
+        assert [button.callback_data for button in public.inline_keyboard[5]] == [
+            "pricing|main", "feedback|start",
+        ]
+        assert public.inline_keyboard[6][0].url == bot.TOAN_AAS_COMMUNITY_URL
+        assert public.inline_keyboard[6][1].callback_data == "back_lang"
 
         admin = bot.localized_main_menu_keyboard(True, lang)
         assert admin.inline_keyboard[-1][0].callback_data == "menu|admin"
         assert len(admin.inline_keyboard[-1]) == 1
-        assert [len(row) for row in admin.inline_keyboard[:-1]] == [2, 2, 2, 2, 2]
+        assert [len(row) for row in admin.inline_keyboard[:-1]] == [2, 2, 2, 2, 2, 2, 2]
 
 
 def test_language_picker_lists_every_supported_locale_once_before_navigation():
