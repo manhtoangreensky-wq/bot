@@ -1456,7 +1456,7 @@ def test_malformed_episode_entity_callback_is_rejected_without_mutation() -> Non
     assert query.answers and query.answers[-1].get("show_alert") is True
 
 
-def test_summary_saves_planning_voice_without_claiming_render_readiness() -> None:
+def test_summary_opens_addon_without_claiming_runtime_voice_readiness(monkeypatch) -> None:
     user_id = 970082
     context = SimpleNamespace(user_data={})
     state = _ready_supported_video_planning_state()
@@ -1483,6 +1483,13 @@ def test_summary_saves_planning_voice_without_claiming_render_readiness() -> Non
     state["owner_chat_id"] = user_id
     state["navigation"]["current_step"] = "summary"
     bot.save_video_uiflow3_state(context, state)
+    rendered: list[str] = []
+
+    async def render_tail(_query, _user_id, _context, screen):
+        rendered.append(screen)
+        return True
+
+    monkeypatch.setattr(bot, "video_tail9_render", render_tail)
 
     assert "char_01_voice_not_server_renderable" in video_uiflow3.readiness_errors(state)
     query = _click_visible(context, user_id, "vid3|summary_done", "planning-voice-save-01")
@@ -1490,6 +1497,7 @@ def test_summary_saves_planning_voice_without_claiming_render_readiness() -> Non
     current = bot.video_uiflow3_state(context)
     assert current["legacy_compat"]["approved_snapshot"]["parent_product"] == "video_ai_real"
     assert current["legacy_compat"]["commercial_tail_ready"] is False
+    assert rendered == ["addon"]
     assert current["navigation"]["current_step"] == "summary"
     assert current["side_effects"] == {
         "provider_calls": 0,
@@ -1498,8 +1506,7 @@ def test_summary_saves_planning_voice_without_claiming_render_readiness() -> Non
         "wallet_mutations": 0,
         "xu_charged": 0,
     }
-    assert query.answers[-1].get("show_alert") is True
-    assert "giọng" in str(query.answers[-1].get("text") or "").lower()
+    assert query.answers[-1].get("show_alert") is not True
 
 
 def test_existing_source_asset_is_reusable_from_reference_editor() -> None:
