@@ -25,12 +25,28 @@ def _function_source(name: str) -> str:
 
 
 def _ready_context(product_id: str) -> dict:
-    return {
+    context = {
         "scene_count": 2,
         "aspect_ratio": "9:16",
         "primary_profile_key": "character_people",
         "content_choice": {"id": "content-1", "title": "Noi dung da chon"},
     }
+    if product_id == "script_image_video":
+        source = "\n".join(
+            f"Cảnh {index}: Nội dung nguyên văn trọn vẹn cho cảnh {index}."
+            for index in range(1, 6)
+        )
+        proposal = video_script_product.parse_script(source)
+        context.update({
+            "scene_count": 5,
+            "script_text": proposal["source_text"],
+            "manual_script_raw": proposal["source_text"],
+            "parsed_script_scenes": list(proposal["proposed_scenes"]),
+            "parsed_script_ranges": list(proposal["scene_ranges"]),
+            "script_coverage": dict(proposal["coverage"]),
+            "scene_count_confirmed": True,
+        })
+    return context
 
 
 def _preflight(product_id: str, context: dict) -> dict:
@@ -176,15 +192,19 @@ def test_suggestion_catalog_has_twenty_contextual_single_select_items() -> None:
 
 
 def test_script_parser_preserves_source_and_requires_explicit_count_confirmation() -> None:
-    proposal = video_flow7.parse_script_proposal("Mo dau tron y\nHanh dong tron y\nKet thuc tron y")
+    source = "\n".join(
+        f"Cảnh {index}: Nội dung nguyên văn trọn vẹn cho cảnh {index}."
+        for index in range(1, 6)
+    )
+    proposal = video_flow7.parse_script_proposal(source)
     assert proposal["coverage"]["no_truncation"] is True
     assert proposal["coverage"]["exact_match"] is True
     assert proposal["coverage"]["coverage_percent"] == 100
-    assert proposal["proposed_scene_count"] == 3
+    assert proposal["proposed_scene_count"] == 5
     assert proposal["scene_count_confirmed"] is False
     context = _ready_context("script_image_video")
     context.update({
-        "scene_count": 3,
+        "scene_count": 5,
         "script_text": proposal["source_text"],
         "manual_script_raw": proposal["source_text"],
         "parsed_script_scenes": proposal["proposed_scenes"],
@@ -365,7 +385,6 @@ def test_long_series_stays_development_only_and_cannot_enter_short_video_preflig
             "script_image_video",
             {
                 **_ready_context("script_image_video"),
-                "script_text": "Canh 1\nCanh 2",
                 "scene_count_confirmed": True,
             },
         ),

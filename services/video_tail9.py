@@ -153,7 +153,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "required_capability": "text_to_video",
         "input_type": "long_script",
         "worker_owner": "product_video",
-        "minimum_scene_count": 2,
+        "minimum_scene_count": 5,
         "supports_single_scene": False,
         "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
