@@ -130,11 +130,17 @@ from services.pricing_guide_content import (
     all_guide_lines as public_guide_all_lines,
     all_pricing_lines as public_pricing_all_lines,
     customer_guide_sections as shared_customer_guide_sections,
+    guide_index_lines as public_guide_index_lines,
+    guide_lines as public_guide_lines,
     guide_markdown as public_guide_markdown,
+    public_guide_navigation_copy,
+    international_topup_policy_lines as public_international_topup_policy_lines,
     lines_to_html_page as public_lines_to_html_page,
     pricing_lines as public_pricing_lines,
     pricing_markdown as shared_pricing_markdown,
     public_copy_locale,
+    public_hub_copy,
+    public_page_title,
 )
 from video_multiscene_engine import (
     build_detailed_multiscene_prompt_plan,
@@ -13144,13 +13150,46 @@ USER_LANGUAGE_LABELS = {
     "vi": "Tiếng Việt",
     "en": "English",
     "zh": "中文",
+    "es": "Español",
+    "pt": "Português",
+    "fr": "Français",
+    "de": "Deutsch",
     "ja": "日本語",
     "ko": "한국어",
-    "th": "ไทย",
+    "hi": "हिन्दी",
     "ar": "العربية",
+    "ru": "Русский",
+    "tr": "Türkçe",
+    "th": "ไทย",
+    "fil": "Filipino",
+    "it": "Italiano",
+    "id": "Bahasa Indonesia",
 }
+USER_LANGUAGE_FLAGS = {
+    "vi": "🇻🇳",
+    "en": "🇬🇧",
+    "zh": "🇨🇳",
+    "es": "🇪🇸",
+    "pt": "🇵🇹",
+    "fr": "🇫🇷",
+    "de": "🇩🇪",
+    "ja": "🇯🇵",
+    "ko": "🇰🇷",
+    "hi": "🇮🇳",
+    "ar": "🌍",
+    "ru": "🇷🇺",
+    "tr": "🇹🇷",
+    "th": "🇹🇭",
+    "fil": "🇵🇭",
+    "it": "🇮🇹",
+    "id": "🇮🇩",
+}
+USER_LANGUAGE_ORDER = (
+    "vi", "en", "zh", "ja", "ko", "th", "ar", "es", "pt", "fr", "de",
+    "hi", "ru", "tr", "fil", "it", "id",
+)
 PRIMARY_USER_LANGUAGES = ("vi", "en", "zh")
-OTHER_USER_LANGUAGES = ("ja", "ko", "th", "ar")
+OTHER_USER_LANGUAGES = tuple(lang for lang in USER_LANGUAGE_ORDER if lang not in PRIMARY_USER_LANGUAGES)
 
 def normalize_user_language(lang: str | None) -> str:
     value = str(lang or "").strip().lower()
@@ -13199,7 +13238,11 @@ def normalize_user_language(lang: str | None) -> str:
 
 
 def pricing_copy_language(lang: str | None) -> str:
-    """Keep pricing copy localized where available, otherwise use English."""
+    """Resolve legacy three-language pricing-menu dictionaries.
+
+    Public pricing, guide, and downloadable pages use ``public_pricing_locale``
+    below, which preserves every supported locale.
+    """
     normalized = normalize_user_language(lang) or "vi"
     return normalized if normalized in {"vi", "zh"} else "en"
 
@@ -17924,8 +17967,12 @@ def manual_domestic_amount_text(user_id=None, lang: str | None = None) -> str:
         "khi thanh toán qua PayOS hoặc ACB/VietQR và tài khoản thuộc thị trường Việt Nam."
     )
 
-def manual_vnd_method_notice(user_id=None) -> str:
-    if user_id is not None and not user_is_vietnam_market(user_id):
+def manual_vnd_method_notice(user_id=None, lang: str | None = None) -> str:
+    selected_lang = normalize_user_language(lang) or (get_user_language(user_id) if user_id is not None else "vi") or "vi"
+    if not show_domestic_topup_promotion(user_id, selected_lang):
+        requested_locale = public_pricing_locale(selected_lang)
+        if requested_locale != "vi":
+            return " ".join(public_international_topup_policy_lines(requested_locale))
         return (
             "Tài khoản quốc tế chỉ nhận Xu gốc sau khi đối soát; "
             "ACB/VietQR không kích hoạt bonus nạp nội địa Việt Nam."
@@ -57172,7 +57219,7 @@ _PACKAGE_GROUP_LABELS_I18N = {
     },
     "zh": {
         "image": "🖼 图片",
-        "video": "🎬 Product Video",
+        "video": "🎬 产品视频",
         "music": "🎵 音乐",
         "music_bg": "🎵 音乐",
         "song": "🎵 音乐",
@@ -57195,8 +57242,22 @@ _PACKAGE_GROUP_LABELS_I18N = {
 
 
 def package_i18n_group_label(group: str = "", lang: str = "vi") -> str:
+    requested_locale = public_pricing_locale(lang)
     locale = pricing_copy_language(lang)
     normalized = str(group or "").strip().lower()
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        if "image" in normalized:
+            return f"🖼 {copy['image_label']}"
+        if "video" in normalized or normalized in {"ads", "tiktok", "reels", "launch"}:
+            return f"🎬 {copy['video_label']}"
+        if "music" in normalized:
+            return f"🎵 {copy['music_label']}"
+        if any(token in normalized for token in ("voice", "subtitle", "dub", "translation")):
+            return f"🎙 {copy['voice_label']}"
+        if "chat" in normalized:
+            return f"💬 {copy['chat_label']}"
+        return f"📦 {copy['packages_label']}"
     if locale == "vi":
         return package_task_group_label(normalized) if normalized in PACKAGE_TASK_GROUP_LABELS else package_combo_group_label(normalized)
     return _PACKAGE_GROUP_LABELS_I18N[locale].get(normalized, "📦 Package" if locale == "en" else "📦 套餐")
@@ -57204,27 +57265,38 @@ def package_i18n_group_label(group: str = "", lang: str = "vi") -> str:
 
 def package_i18n_item_label(item_type: str = "", lang: str = "vi") -> str:
     normalized = normalize_package_item_type(item_type)
+    requested_locale = public_pricing_locale(lang)
     locale = pricing_copy_language(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        return package_i18n_group_label(normalized, requested_locale)
     if locale == "vi":
         return package_item_display_name(normalized)
     return _PACKAGE_ITEM_LABELS_I18N[locale].get(normalized, normalized.replace("_", " ").title() if locale == "en" else normalized)
 
 
 def package_i18n_items_summary(items: dict | None = None, lang: str = "vi") -> str:
+    requested_locale = public_pricing_locale(lang)
     locale = pricing_copy_language(lang)
     rows = [
-        f"{package_i18n_item_label(item_type, locale)} ×{int(count or 0)}"
+        f"{package_i18n_item_label(item_type, requested_locale)} ×{int(count or 0)}"
         for item_type, count in (items or {}).items()
         if int(count or 0) > 0
     ]
     if rows:
         return ", ".join(rows)
+    if requested_locale not in {"vi", "en", "zh"}:
+        return public_hub_copy(requested_locale)["support"]
     return "liên hệ admin" if locale == "vi" else ("Contact admin" if locale == "en" else "联系管理员")
 
 
 def package_i18n_entry_label(entry: dict | None, code: str = "", package_type: str = "monthly", lang: str = "vi") -> str:
     payload = dict(entry or {})
+    requested_locale = public_pricing_locale(lang)
     locale = pricing_copy_language(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        group = package_i18n_group_label(str(payload.get("group") or ""), requested_locale)
+        items = package_i18n_items_summary(payload.get("items") or {}, requested_locale)
+        return f"{group} — {items}"
     if locale == "vi":
         return str(payload.get("label") or payload.get("button_label") or code or "Gói")
     group = package_i18n_group_label(str(payload.get("group") or ""), locale)
@@ -57242,7 +57314,12 @@ def package_i18n_entry_label(entry: dict | None, code: str = "", package_type: s
 
 def package_i18n_button_label(entry: dict | None, code: str = "", package_type: str = "monthly", lang: str = "vi") -> str:
     payload = dict(entry or {})
+    requested_locale = public_pricing_locale(lang)
     locale = pricing_copy_language(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        group = package_i18n_group_label(str(payload.get("group") or ""), requested_locale)
+        items = package_i18n_items_summary(payload.get("items") or {}, requested_locale)
+        return f"{group} · {items}"
     if locale == "vi":
         return str(payload.get("button_label") or payload.get("label") or code or "Gói")
     group = package_i18n_group_label(str(payload.get("group") or ""), locale)
@@ -57271,6 +57348,9 @@ def package_i18n_price_text(package_type: str, code: str, lang: str = "vi") -> s
     price = package_purchase_price_vnd(package_type, code)
     if price > 0:
         return package_purchase_display_price(package_type, code)
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        return public_hub_copy(requested_locale)["support"]
     locale = pricing_copy_language(lang)
     return "liên hệ admin" if locale == "vi" else ("Contact admin" if locale == "en" else "联系管理员")
 
@@ -67654,6 +67734,53 @@ def normalize_guide_section_key(section_key_or_number: str) -> str:
 def guide_keyboard(section: str = "", lang: str = "vi", back_callback: str = "menu|main_guide", back_label: str = "") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     section_key = normalize_guide_section_key(section)
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        pricing_label = public_page_title("pricing", requested_locale)
+        guide_label = public_page_title("guide", requested_locale)
+        rows = []
+        if not section_key:
+            rows.append([
+                InlineKeyboardButton(f"📥 {pricing_label}", callback_data="pricing|download_pricing"),
+                InlineKeyboardButton(f"📘 {guide_label}", callback_data="pricing|download_guide"),
+            ])
+            public_base = effective_public_base_url()
+            if public_base:
+                rows.append([InlineKeyboardButton(f"📄 {copy['vietnamese_docx']}", url=f"{public_base}/download/huong-dan-toan-aas.docx")])
+        if section_key == "quick_start":
+            rows.extend([
+                [InlineKeyboardButton(f"🖼 {copy['image_label']}", callback_data="create_media|quick_image"), InlineKeyboardButton(f"🎬 {copy['video_label']}", callback_data="create_media|quick_video")],
+                [InlineKeyboardButton(f"🎬 {copy['video_label']}", callback_data="trendg|start"), InlineKeyboardButton(f"💳 {pricing_label}", callback_data="menu|main_topup")],
+            ])
+        elif section_key == "image_ai":
+            rows.extend([
+                [InlineKeyboardButton(f"🖼 {copy['image_label']}", callback_data="create_media|quick_image")],
+                [InlineKeyboardButton(f"💳 {pricing_label}", callback_data="pricing|main")],
+            ])
+        elif section_key == "video_ai":
+            rows.extend([
+                [InlineKeyboardButton(f"🎬 {copy['video_label']}", callback_data="create_media|quick_video")],
+                [InlineKeyboardButton(f"🖼 {copy['image_label']}", callback_data="menu|main_image")],
+                [InlineKeyboardButton(f"💳 {pricing_label}", callback_data="pricing|main")],
+            ])
+        elif section_key == "guided_video":
+            rows.append([InlineKeyboardButton(f"🎬 {copy['video_label']}", callback_data="trendg|start")])
+        elif section_key == "music_add":
+            rows.append([InlineKeyboardButton(f"🎵 {copy['music_label']}", callback_data="menu|main_music")])
+        elif section_key == "credits":
+            rows.extend([
+                [InlineKeyboardButton("💳 Xu", callback_data="menu|main_topup")],
+                [InlineKeyboardButton(f"📋 {pricing_label}", callback_data="pricing|main")],
+                [InlineKeyboardButton(f"📊 {copy['balance']}", callback_data="menu|main_profile")],
+            ])
+        elif section_key in {"refund", "faq"}:
+            rows.append([InlineKeyboardButton(f"🎧 {copy['support']}", callback_data="menu|support")])
+        rows.append([
+            InlineKeyboardButton(back_label or f"🔙 {copy['guide_label']}", callback_data=back_callback),
+            InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
+        ])
+        return InlineKeyboardMarkup(rows)
     if lang == "vi":
         action_rows = {
             "quick_start": [
@@ -71026,78 +71153,46 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
     return InlineKeyboardMarkup(rows)
 
-def language_choice_text() -> str:
+def language_choice_text(lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return (
-        "🌐 <b>Chọn ngôn ngữ / Choose language / 选择语言</b>\n\n"
-        "Vui lòng chọn ngôn ngữ để TOAN AAS hiển thị menu và hướng dẫn phù hợp.\n"
-        "Please choose your language.\n"
-        "请选择你的语言。"
+        f"🌐 <b>{copy['language_picker_title']}</b>\n\n"
+        f"{copy['language_picker_intro']}"
     )
 
-def language_choice_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="lang|vi"), InlineKeyboardButton("🇺🇸 English", callback_data="lang|en")],
-        [InlineKeyboardButton("🇨🇳 中文", callback_data="lang|zh"), InlineKeyboardButton("🌍 Ngôn ngữ khác / More languages", callback_data="lang_more")],
+def language_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    buttons = [
+        InlineKeyboardButton(
+            f"{USER_LANGUAGE_FLAGS[locale]} {USER_LANGUAGE_LABELS[locale]}",
+            callback_data=f"lang|{locale}",
+        )
+        for locale in USER_LANGUAGE_ORDER
+    ]
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+    rows.append([
+        InlineKeyboardButton(f"⬅️ {copy['back']}", callback_data="lang_back"),
+        InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
     ])
+    return InlineKeyboardMarkup(rows)
 
-def other_language_choice_text() -> str:
-    return (
-        "🌍 <b>Ngôn ngữ khác / More languages</b>\n\n"
-        "Các ngôn ngữ này đang được chuẩn bị giao diện.\n"
-        "Một số phần sẽ dùng English tạm thời nếu bản dịch chưa đầy đủ."
-    )
+def other_language_choice_text(lang: str = "vi") -> str:
+    return language_choice_text(lang)
 
-def other_language_choice_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🇯🇵 日本語", callback_data="lang|ja"), InlineKeyboardButton("🇰🇷 한국어", callback_data="lang|ko")],
-        [InlineKeyboardButton("🇹🇭 ไทย", callback_data="lang|th"), InlineKeyboardButton("🇸🇦 العربية", callback_data="lang|ar")],
-        [InlineKeyboardButton("🇪🇸 Español", callback_data="lang|es"), InlineKeyboardButton("🇵🇹 Português", callback_data="lang|pt")],
-        [InlineKeyboardButton("🇫🇷 Français", callback_data="lang|fr"), InlineKeyboardButton("🇩🇪 Deutsch", callback_data="lang|de")],
-        [InlineKeyboardButton("🇮🇳 हिन्दी", callback_data="lang|hi"), InlineKeyboardButton("🇷🇺 Русский", callback_data="lang|ru")],
-        [InlineKeyboardButton("🇹🇷 Türkçe", callback_data="lang|tr"), InlineKeyboardButton("🇵🇭 Filipino", callback_data="lang|fil")],
-        [InlineKeyboardButton("🇮🇹 Italiano", callback_data="lang|it"), InlineKeyboardButton("🇮🇩 Bahasa Indonesia", callback_data="lang|id")],
-        [InlineKeyboardButton("⬅️ Quay lại", callback_data="back_lang")],
-    ])
+def other_language_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    # Keep the historical ``lang_more`` callback route valid while presenting
+    # one canonical, deduplicated picker to every user.
+    return language_choice_keyboard(lang)
 
 def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
-    if lang == "zh":
-        rows = [
-            [InlineKeyboardButton("🆓 免费工具", callback_data="freehub|main")],
-            [InlineKeyboardButton(f"💎 Chat Pro • {public_chat_runtime.CHAT_PRO_RATE_LABEL}", callback_data="menu|chat_pro"), InlineKeyboardButton("👤 我的账户", callback_data="menu|main_profile")],
-            [InlineKeyboardButton("🖼 AI 图片", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI 视频", callback_data="menu|main_video")],
-            [InlineKeyboardButton("🎧 音频 Studio", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 翻译/字幕/配音 Studio", callback_data="menu|translate")],
-            [InlineKeyboardButton("📝 笔记 / 文件", callback_data="menu|main_memory"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
-            [InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support"), InlineKeyboardButton("💰 充值 / 价格", callback_data="pricing|main")],
-            [InlineKeyboardButton("💬 反馈 / 报错", callback_data="feedback|start"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
-            [InlineKeyboardButton("🌍 更改语言", callback_data="back_lang")],
-        ]
-        if is_admin:
-            rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
-        return InlineKeyboardMarkup(rows)
-    if lang == "vi":
-        rows = [
-            [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main")],
-            [InlineKeyboardButton(f"💎 Chat Pro • {public_chat_runtime.CHAT_PRO_RATE_LABEL}", callback_data="menu|chat_pro"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
-            [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
-            [InlineKeyboardButton("🎧 Studio âm thanh", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
-            [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
-            [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support"), InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main")],
-            [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Trung tâm", url=TOAN_AAS_COMMUNITY_URL)],
-            [InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
-        ]
-        if is_admin:
-            rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
-        return InlineKeyboardMarkup(rows)
+    copy = public_hub_copy(lang)
     rows = [
-        [InlineKeyboardButton("🆓 Free tools", callback_data="freehub|main")],
-        [InlineKeyboardButton(f"💎 Chat Pro • {public_chat_runtime.CHAT_PRO_RATE_LABEL}", callback_data="menu|chat_pro"), InlineKeyboardButton("👤 My Account", callback_data="menu|main_profile")],
-        [InlineKeyboardButton("🖼 AI Image", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI Video", callback_data="menu|main_video")],
-        [InlineKeyboardButton("🎧 Audio Studio", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 Translation / Subtitle / Dubbing Studio", callback_data="menu|translate")],
-        [InlineKeyboardButton("📝 Notes / Docs", callback_data="menu|main_memory"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
-        [InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support"), InlineKeyboardButton("💰 Top up / Pricing", callback_data="pricing|main")],
-        [InlineKeyboardButton("💬 Feedback / Bug", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
-        [InlineKeyboardButton("🌍 Change language", callback_data="back_lang")],
+        [InlineKeyboardButton(f"🖼 {copy['image_label']}", callback_data="menu|main_image"), InlineKeyboardButton(f"🎬 {copy['video_label']}", callback_data="menu|main_video")],
+        [InlineKeyboardButton(f"🎵 {copy['music_label']}", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton(f"🎙 {copy['voice_label']}", callback_data="menu|translate")],
+        [InlineKeyboardButton(f"💬 {copy['chat_label']} • {public_chat_runtime.CHAT_PRO_RATE_LABEL}", callback_data="menu|chat_pro"), InlineKeyboardButton(f"📚 {copy['guide_label']}", callback_data="menu|main_guide")],
+        [InlineKeyboardButton(f"🎧 {copy['support']}", callback_data="menu|support"), InlineKeyboardButton(f"📊 {copy['center']}", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton(f"🌐 {copy['change_language']}", callback_data="back_lang"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
@@ -71105,100 +71200,24 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
 
 def localized_start_menu_text(user_id, lang: str) -> str:
     lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
     display_lang = user_language_label(lang)
     credits, _total_spent, _is_vip = get_user(user_id)
-    credits_display = "Vô hạn" if is_admin_user(user_id) and lang == "vi" else ("Unlimited" if is_admin_user(user_id) else str(credits))
+    credits_display = "∞" if is_admin_user(user_id) else str(credits)
     tier = get_role_badge(user_id)
-    if lang == "zh":
-        return (
-            "👑 <b>TOAN AAS — AI AUTOMATION SYSTEM</b>\n\n"
-            "你的日常 AI 助手，集合在一个 Telegram Bot：\n"
-            "内容创作、视频脚本、图片、语音、翻译、笔记和文档工具。\n\n"
-            f"🎁 余额: <b>{html.escape(str(credits_display))} Xu</b>\n"
-            f"👤 ID: <code>{html.escape(str(user_id))}</code>\n"
-            f"🪪 等级: <b>{html.escape(tier)}</b>\n"
-            f"🌐 语言: <b>{html.escape(display_lang)}</b>\n\n"
-            "请选择今天要使用的功能：\n\n"
-            "🎬 <b>内容创作</b>\n"
-            "视频脚本、分镜、标题、标签和 CTA。\n\n"
-            "🤖 <b>AI 助手</b>\n"
-            "写文章、想点子、优化文案、写代码和做计划。\n\n"
-            "📄 <b>文档工具</b>\n"
-            "PDF 转 Word、图片转 PDF，以及已启用的 PDF 工具。\n\n"
-            "🖼 <b>图片工具</b>\n"
-            "图片 Prompt、抠图、图片处理和视频素材准备。\n\n"
-            "🎵 <b>音乐 / SFX</b>\n"
-            "查找背景音乐、音效、音乐提示词，并为视频准备音频。\n\n"
-            "🎤 <b>语音工具</b>\n"
-            "音频/视频转文字，或生成越南语配音。\n\n"
-            "🌐 <b>翻译</b>\n"
-            "翻译文本、字幕、转写稿和视频内容。\n\n"
-            "🧠 <b>记忆/提醒</b>\n"
-            "保存笔记、查找信息和设置提醒。\n\n"
-            "💳 <b>Xu 服务</b>\n"
-            "充值 Xu、查看价格、套餐和符合条件的会员权益。\n\n"
-            "继续使用 TOAN AAS 即表示你同意 "
-            "<code>/legal</code>, <code>/privacy</code>, <code>/dieukhoan_xu</code>, "
-            "<code>/refund_policy</code> 和 TOAN AAS 知识产权政策。"
-        )
-    if lang == "vi":
-        return (
-            "👑 <b>TOAN AAS — AI AUTOMATION SYSTEM</b>\n\n"
-            "Trợ lý AI tự động hóa công việc trên Telegram:\n\n"
-            f"🎁 Số dư: <b>{html.escape(str(credits_display))} Xu</b>\n"
-            f"👤 ID: <code>{html.escape(str(user_id))}</code>\n"
-            f"🪪 Hạng: <b>{html.escape(tier)}</b>\n"
-            f"🌐 Ngôn ngữ: <b>{html.escape(display_lang)}</b>\n\n"
-            "Bạn muốn làm gì hôm nay?\n\n"
-            "🎬 <b>Tạo nội dung:</b> Kịch bản, storyboard, chia cảnh, caption, prompt video.\n"
-            "🤖 <b>Hỏi AI:</b> Viết bài, lên ý tưởng, sửa nội dung, viết code, lập kế hoạch.\n"
-            "📄 <b>Tài liệu:</b> PDF, Word, ảnh sang PDF, nén/tách/gộp tài liệu.\n"
-            "🖼 <b>Hình ảnh:</b> Prompt ảnh, xử lý ảnh, tách nền, chuẩn bị hình ảnh cho video.\n"
-            "🎵 <b>Nhạc / SFX:</b> Tìm nhạc nền, hiệu ứng âm thanh và chuẩn bị âm thanh cho video.\n"
-            "🎤 <b>Voice:</b> Bóc băng audio/video, tạo giọng đọc và chuẩn bị voice cho nội dung.\n"
-            "🌐 <b>Dịch thuật:</b> Dịch văn bản, transcript, phụ đề và nội dung video.\n"
-            "🧠 <b>Ghi nhớ:</b> Lưu ghi chú, tìm lại thông tin, đặt nhắc việc.\n"
-            "💳 <b>Xu dịch vụ:</b> dùng để sử dụng các dịch vụ của toanaasbot.\n"
-            "Nạp Xu, xem bảng giá, dùng mã quà tặng hoặc khuyến mãi đủ điều kiện.\n"
-            "Khuyến mãi nạp tiền nội địa chỉ áp dụng cho kênh ngân hàng Việt Nam đủ điều kiện; không áp dụng cho Zalo/MoMo hoặc kênh nạp quốc tế.\n\n"
-            "Bằng việc bấm Start, nạp Xu hoặc tiếp tục sử dụng TOAN AAS, bạn đồng ý "
-            "<code>/legal</code>, <code>/privacy</code>, <code>/dieukhoan_xu</code>, "
-            "<code>/refund_policy</code> và chính sách sở hữu trí tuệ của TOAN AAS."
-        )
-    fallback_note = ""
-    if lang in OTHER_USER_LANGUAGES:
-        fallback_note = f"\n\nSelected language: {html.escape(display_lang)}. Interface fallback: English while this language is being prepared."
     return (
-        "👑 <b>TOAN AAS — AI AUTOMATION SYSTEM</b>\n\n"
-        "Your daily AI assistant in one Telegram bot:\n"
-        "create content, video scripts, images, voice, translations, notes and document tools faster.\n\n"
-        f"🎁 Balance: <b>{html.escape(str(credits_display))} Xu</b>\n"
-        f"👤 ID: <code>{html.escape(str(user_id))}</code>\n"
-        f"🪪 Tier: <b>{html.escape(tier)}</b>\n"
-        f"🌐 Language: <b>{html.escape(display_lang)}</b>"
-        f"{fallback_note}\n\n"
-        "What would you like to do today?\n\n"
-        "🎬 <b>Content</b>\n"
-        "Video scripts, scene breakdowns, captions, hashtags and CTA.\n\n"
-        "🤖 <b>Ask AI</b>\n"
-        "Write posts, generate ideas, improve wording, write code and make plans.\n\n"
-        "📄 <b>Documents</b>\n"
-        "PDF to Word, image to PDF, compress/split/merge PDF when tools are enabled.\n\n"
-        "🖼 <b>Images</b>\n"
-        "Image prompts, background removal, media preparation and visual workflows.\n\n"
-        "🎵 <b>Music / SFX</b>\n"
-        "Find background music, sound effects, music prompts and prepare audio for video.\n\n"
-        "🎤 <b>Voice</b>\n"
-        "Transcribe audio/video or create Vietnamese voice-over.\n\n"
-        "🌐 <b>Translate</b>\n"
-        "Translate text, transcripts, subtitles and video content.\n\n"
-        "🧠 <b>Memory</b>\n"
-        "Save notes, find information and set reminders.\n\n"
-        "💳 <b>Xu services</b>\n"
-        "Top up Xu, view pricing, plans and eligible member benefits.\n\n"
-        "By pressing Start, topping up Xu or continuing to use TOAN AAS, you agree to "
-        "<code>/legal</code>, <code>/privacy</code>, <code>/dieukhoan_xu</code>, "
-        "<code>/refund_policy</code> and TOAN AAS intellectual property policy."
+        f"👑 <b>{html.escape(copy['hub_title'])}</b>\n\n"
+        f"{html.escape(copy['hub_intro'])}\n\n"
+        f"🎁 {html.escape(copy['balance'])}: <b>{html.escape(str(credits_display))} Xu</b>\n"
+        f"👤 {html.escape(copy['account_id'])}: <code>{html.escape(str(user_id))}</code>\n"
+        f"🪪 {html.escape(copy['tier'])}: <b>{html.escape(tier)}</b>\n"
+        f"🌐 {html.escape(copy['language'])}: <b>{html.escape(display_lang)}</b>\n\n"
+        f"🖼 <b>{html.escape(copy['image_label'])}</b>\n{html.escape(copy['image_description'])}\n\n"
+        f"🎬 <b>{html.escape(copy['video_label'])}</b>\n{html.escape(copy['video_description'])}\n\n"
+        f"🎵 <b>{html.escape(copy['music_label'])}</b>\n{html.escape(copy['music_description'])}\n\n"
+        f"🎙 <b>{html.escape(copy['voice_label'])}</b>\n{html.escape(copy['voice_description'])}\n\n"
+        f"💬 <b>{html.escape(copy['chat_label'])}</b>\n{html.escape(copy['chat_description'])}\n\n"
+        f"📚 <b>{html.escape(copy['guide_label'])}</b>\n{html.escape(copy['guide_description'])}"
     )
 
 def public_back_keyboard() -> InlineKeyboardMarkup:
@@ -112310,6 +112329,16 @@ def main_topup_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
     uid = str(user_id or "0")
     if not uid.isdigit():
         uid = "0"
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en"}:
+        copy = public_hub_copy(requested_locale)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("💳 10k", callback_data=payos_package_callback_data("10k", uid)), InlineKeyboardButton("💳 20k", callback_data=payos_package_callback_data("20k", uid))],
+            [InlineKeyboardButton("💳 50k", callback_data=payos_package_callback_data("50k", uid)), InlineKeyboardButton("💳 100k", callback_data=payos_package_callback_data("100k", uid))],
+            [InlineKeyboardButton("💳 200k", callback_data=payos_package_callback_data("200k", uid)), InlineKeyboardButton("💳 500k", callback_data=payos_package_callback_data("500k", uid))],
+            [InlineKeyboardButton(f"🏦 {copy['manual_topup']}", callback_data=manual_package_callback_data("manual_custom", uid))],
+            [InlineKeyboardButton(f"🔙 {public_page_title('pricing', requested_locale)}", callback_data="pricing|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
     back_label = "🔙 Quay lại bảng giá" if normalize_user_language(lang) == "vi" else "🔙 Back to pricing"
     main_label = ui_text(lang, "common.main_menu")
     return InlineKeyboardMarkup([
@@ -112321,6 +112350,29 @@ def main_topup_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
     ])
 
 def main_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en"}:
+        copy = public_hub_copy(requested_locale)
+        pricing_label = public_page_title("pricing", requested_locale)
+        guide_label = public_page_title("guide", requested_locale)
+        if requested_locale == "zh":
+            navigation = public_guide_navigation_copy(requested_locale)
+            return InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"🚀 {navigation['quick_start']}", callback_data="menu|guide_quick_start")],
+                [InlineKeyboardButton(f"🖼 {navigation['create_image']}", callback_data="menu|guide_image_ai"), InlineKeyboardButton(f"🎬 {navigation['create_video']}", callback_data="menu|guide_video_ai")],
+                [InlineKeyboardButton(f"🔥 {navigation['trend_video']}", callback_data="menu|guide_guided_video"), InlineKeyboardButton(f"🎵 {navigation['video_music']}", callback_data="menu|guide_music_add")],
+                [InlineKeyboardButton(f"💰 {navigation['credits_topup']}", callback_data="menu|guide_credits"), InlineKeyboardButton(f"❓ {navigation['faq_refunds']}", callback_data="menu|guide_faq")],
+                [InlineKeyboardButton(f"🎧 {copy['support']}", callback_data="menu|support"), InlineKeyboardButton(f"📊 {copy['center']}", url=TOAN_AAS_COMMUNITY_URL)],
+                [InlineKeyboardButton(f"📥 {navigation['download_pricing']}", callback_data="pricing|download_pricing"), InlineKeyboardButton(f"📘 {navigation['download_guide']}", callback_data="pricing|download_guide")],
+                [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+            ])
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"🚀 {guide_label}", callback_data="menu|guide_quick_start"), InlineKeyboardButton(f"📋 {pricing_label}", callback_data="pricing|catalog")],
+            [InlineKeyboardButton(f"🖼 {copy['image_label']}", callback_data="menu|guide_image_ai"), InlineKeyboardButton(f"🎬 {copy['video_label']}", callback_data="menu|guide_video_ai")],
+            [InlineKeyboardButton(f"🎵 {copy['music_label']}", callback_data="menu|guide_music_add"), InlineKeyboardButton(f"🎙 {copy['voice_label']}", callback_data="menu|translate")],
+            [InlineKeyboardButton(f"📥 {pricing_label}", callback_data="pricing|download_pricing"), InlineKeyboardButton(f"📘 {guide_label}", callback_data="pricing|download_guide")],
+            [InlineKeyboardButton(f"🎧 {copy['support']}", callback_data="menu|support"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🚀 Quick start", callback_data="menu|guide_quick_start")],
@@ -123331,6 +123383,9 @@ def menu_text_main_quick_i18n(lang: str) -> str:
 
 def menu_text_main_topup_i18n(lang: str, user_id=None) -> str:
     lang = normalize_user_language(lang) or "vi"
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        return "\n".join(public_guide_lines("credits", requested_locale))
     international_account = user_id is not None and not user_is_vietnam_market(user_id)
     if international_account:
         if lang == "zh":
@@ -123402,6 +123457,8 @@ def menu_text_main_guide_i18n(lang: str) -> str:
     lang = normalize_user_language(lang) or "vi"
     if lang == "vi":
         return menu_text_main_guide()
+    if lang not in {"en", "zh"}:
+        return "\n".join(public_guide_index_lines(public_pricing_locale(lang)))
     if lang == "zh":
         return (
             "📚 <b>使用指南</b>\n\n"
@@ -129029,16 +129086,25 @@ async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT
     data = (query.data or "").strip()
     uid = query.from_user.id
     if data == "lang_more":
+        current_lang = normalize_user_language(get_user_language(uid)) or "vi"
         return await safe_edit_query_message(
             query,
-            other_language_choice_text(),
-            reply_markup=other_language_choice_keyboard(),
+            language_choice_text(current_lang),
+            reply_markup=language_choice_keyboard(current_lang),
         )
     if data == "back_lang":
+        current_lang = normalize_user_language(get_user_language(uid)) or "vi"
         return await safe_edit_query_message(
             query,
-            language_choice_text(),
-            reply_markup=language_choice_keyboard(),
+            language_choice_text(current_lang),
+            reply_markup=language_choice_keyboard(current_lang),
+        )
+    if data == "lang_back":
+        previous_lang = normalize_user_language(get_user_language(uid)) or "vi"
+        return await safe_edit_query_message(
+            query,
+            localized_start_menu_text(uid, previous_lang),
+            reply_markup=localized_main_menu_keyboard(is_admin_user(uid), previous_lang),
         )
     if data.startswith("lang|"):
         lang = normalize_user_language(data.split("|", 1)[1])
@@ -171226,13 +171292,18 @@ async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("khuyenmai", update)
     uid = update.effective_user.id
     lang = get_user_language(uid) or "vi"
+    if not show_domestic_topup_promotion(uid, lang):
+        return await update.message.reply_text(
+            "\n".join(billing_promo_apply_lines(lang, uid)),
+            parse_mode="HTML",
+        )
     conn = db_connect()
     try:
         pending = get_user_pending_promo(uid, conn)
     finally:
         conn.close()
     lines = billing_promotions_lines(lang, uid)
-    if user_is_vietnam_market(uid) and pending.get("promo"):
+    if pending.get("promo"):
         lines.extend([
             "",
             f"🎫 Mã đang chờ áp dụng: <code>{html.escape(pending['promo']['code'])}</code>",
@@ -197566,6 +197637,15 @@ async def send_generated_markdown_document(query, filename: str, content: str, c
     )
 
 def pricing_main_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"📋 {public_page_title('pricing', requested_locale)}", callback_data="pricing|catalog"), InlineKeyboardButton(f"📚 {public_page_title('guide', requested_locale)}", callback_data="pricing|guide")],
+            [InlineKeyboardButton(f"📥 {public_page_title('pricing', requested_locale)}", callback_data="pricing|download_pricing"), InlineKeyboardButton(f"📘 {public_page_title('guide', requested_locale)}", callback_data="pricing|download_guide")],
+            [InlineKeyboardButton(f"🎁 {copy['packages_label']}", callback_data="pkgcombo:home"), InlineKeyboardButton("💳 Xu", callback_data="menu|main_topup")],
+            [InlineKeyboardButton(f"🎧 {copy['support']}", callback_data="menu|support"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
     lang = pricing_copy_language(lang)
     show_domestic_promotions = lang == "vi" and (user_id is None or user_is_vietnam_market(user_id))
     if lang == "vi":
@@ -197619,6 +197699,8 @@ def pricing_main_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarku
     ])
 
 def pricing_catalog_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if public_pricing_locale(lang) not in {"vi", "en", "zh"}:
+        return pricing_main_keyboard(lang)
     lang = pricing_copy_language(lang)
     catalog_labels = {
         "vi": ("💰 Bảng giá tổng", "🎙 Giọng nói", "🎵 Nhạc AI", "🎬 Video", "🌐 Phụ đề / Lồng tiếng", "🖼 Hình ảnh", "📄 Tài liệu/PDF", "🎁 Miễn phí / Không tính Xu", "🎁 Khuyến mãi / Thành viên", "📘 Hướng dẫn sử dụng", "📥 Tải bảng giá", "📘 Tải hướng dẫn", "📝 Ghi chú/Lưu trữ", "🎁 Gói/Combo", "⬅️ Quay lại", "🏠 Menu chính"),
@@ -197646,6 +197728,14 @@ def pricing_catalog_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def pricing_packages_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"📦 {copy['monthly_plans']}", callback_data="pkgcombo:home"), InlineKeyboardButton(f"🎁 {copy['finished_combos']}", callback_data="pkgcombo:group:combo")],
+            [InlineKeyboardButton(f"📦 {copy['my_packages']}", callback_data="pkgcombo:my"), InlineKeyboardButton(f"📩 {copy['large_order']}", callback_data="pkgcombo:large_order:home")],
+            [InlineKeyboardButton(f"⬅️ {public_page_title('pricing', requested_locale)}", callback_data="pricing|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
     lang = pricing_copy_language(lang)
     package_labels = {
         "vi": ("🖼 Gói Ảnh", "🎬 Gói Video", "🎵 Gói Nhạc", "🎙 Gói Voice", "🌐 Phụ đề / Lồng tiếng", "🧠 Prompt / Workflow", "🎁 Combo trọn gói", "📦 Gói của tôi", "📩 Cần gói lớn hơn", "ℹ️ Lưu ý", "⬅️ Quay lại", "🏠 Menu chính"),
@@ -197669,12 +197759,30 @@ def pricing_packages_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def pricing_xu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"💳 {copy['topup_label']}", callback_data="menu|main_topup")],
+            [InlineKeyboardButton(f"⬅️ {public_page_title('pricing', requested_locale)}", callback_data="pricing|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(ui_text(lang, "pricing.topup"), callback_data="menu|main_topup")],
         [InlineKeyboardButton(ui_text(lang, "pricing.back"), callback_data="pricing|main"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def pricing_plans_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(package_i18n_group_label("image", requested_locale), callback_data="pkgcombo:group:image"), InlineKeyboardButton(package_i18n_group_label("video", requested_locale), callback_data="pkgcombo:group:video")],
+            [InlineKeyboardButton(package_i18n_group_label("music", requested_locale), callback_data="pkgcombo:group:music"), InlineKeyboardButton(package_i18n_group_label("voice", requested_locale), callback_data="pkgcombo:group:voice")],
+            [InlineKeyboardButton(package_i18n_group_label("subtitle_dub", requested_locale), callback_data="pkgcombo:group:subtitle_dub"), InlineKeyboardButton(f"🧠 {copy['guide_label']}", callback_data="pkgcombo:group:prompt_workflow")],
+            [InlineKeyboardButton(f"📦 {copy['packages_label']}", callback_data="pkgcombo:group:mixed"), InlineKeyboardButton(f"📦 {copy['my_packages']}", callback_data="pkgcombo:my")],
+            [InlineKeyboardButton(f"📩 {copy['large_order']}", callback_data="pkgcombo:large_order:home"), InlineKeyboardButton(f"ℹ️ {copy['notes']}", callback_data="pkgcombo:notes")],
+            [InlineKeyboardButton(f"⬅️ {copy['packages_label']}", callback_data="pkgcombo:home"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
     lang = pricing_copy_language(lang)
     plan_labels = {
         "vi": (
@@ -197728,6 +197836,14 @@ def vip_services_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def member_policy_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"👤 {copy['account_label']}", callback_data="menu|main_profile"), InlineKeyboardButton(f"🎧 {copy['support']}", callback_data="menu|support")],
+            [InlineKeyboardButton(f"📜 {copy['packages_label']}", callback_data="pricing|member")],
+            [InlineKeyboardButton(f"🔙 {public_page_title('pricing', requested_locale)}", callback_data="pricing|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
     lang = pricing_copy_language(lang)
     if lang == "zh":
         return InlineKeyboardMarkup([
@@ -197806,6 +197922,9 @@ async def edit_or_send_pricing_lines(query, lines: list[str], reply_markup: Inli
         )
 
 def pricing_hub_lines(lang: str = "vi", user_id=None) -> list[str]:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        return public_pricing_lines("total", public_pricing_context(), requested_locale)
     lang = pricing_copy_language(lang)
     international_account = user_id is not None and not user_is_vietnam_market(user_id)
     if international_account and lang == "zh":
@@ -197867,6 +197986,9 @@ def pricing_hub_lines(lang: str = "vi", user_id=None) -> list[str]:
     ]
 
 def billing_promotions_lines(lang: str = "vi", user_id=None) -> list[str]:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        return public_pricing_lines("member", public_pricing_context(), requested_locale)
     lang = pricing_copy_language(lang)
     domestic = lang == "vi" and (user_id is None or user_is_vietnam_market(user_id))
     foreign_ui_for_domestic_account = user_id is not None and user_is_vietnam_market(user_id) and lang != "vi"
@@ -197948,6 +198070,13 @@ def billing_promotions_lines(lang: str = "vi", user_id=None) -> list[str]:
     ]
 
 def billing_promotions_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"📋 {public_page_title('pricing', requested_locale)}", callback_data="pricing|catalog"), InlineKeyboardButton(f"💳 {copy['topup_label']}", callback_data="menu|main_topup")],
+            [InlineKeyboardButton(f"⬅️ {copy['back']}", callback_data="pricing|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
     lang = pricing_copy_language(lang)
     domestic = lang == "vi" and (user_id is None or user_is_vietnam_market(user_id))
     if not domestic and lang == "zh":
@@ -197984,6 +198113,9 @@ def billing_promotions_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboar
     ])
 
 def billing_promo_apply_lines(lang: str = "vi", user_id=None) -> list[str]:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        return public_pricing_lines("member", public_pricing_context(), requested_locale)
     lang = pricing_copy_language(lang)
     domestic = lang == "vi" and (user_id is None or user_is_vietnam_market(user_id))
     foreign_ui_for_domestic_account = user_id is not None and user_is_vietnam_market(user_id) and lang != "vi"
@@ -198097,6 +198229,9 @@ def hidden_active_features_audit(lang: str = "vi", entrypoint_labels: list[str] 
     return findings
 
 def pricing_catalog_lines(lang: str = "vi") -> list[str]:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        return public_pricing_lines("total", public_pricing_context(), requested_locale)
     lang = pricing_copy_language(lang)
     if lang == "zh":
         return [
@@ -198123,6 +198258,9 @@ def pricing_catalog_lines(lang: str = "vi") -> list[str]:
     ]
 
 def pricing_packages_lines(lang: str = "vi") -> list[str]:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        return public_guide_lines("packages", requested_locale)
     lang = pricing_copy_language(lang)
     if lang == "zh":
         return [
@@ -198152,6 +198290,9 @@ def pricing_packages_lines(lang: str = "vi") -> list[str]:
     ]
 
 def pricing_pkgcombo_notes_lines(lang: str = "vi") -> list[str]:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        return public_guide_lines("packages", requested_locale)
     lang = pricing_copy_language(lang)
     if lang == "zh":
         return [
@@ -198199,6 +198340,13 @@ def pricing_pkgcombo_notes_lines(lang: str = "vi") -> list[str]:
     ]
 
 def pricing_pkgcombo_notes_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"📩 {copy['support']}", callback_data="pkgcombo:large_order:notes"), InlineKeyboardButton(f"⬅️ {copy['packages_label']}", callback_data="pkgcombo:home")],
+            [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
     lang = pricing_copy_language(lang)
     if lang == "zh":
         labels = ("📩 大额需求", "⬅️ 套餐 / 组合", "🏠 主菜单")
@@ -198212,6 +198360,9 @@ def pricing_pkgcombo_notes_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def pricing_package_summary_lines(lang: str = "vi") -> list[str]:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        return public_guide_lines("packages", requested_locale)
     lang = pricing_copy_language(lang)
     catalog = package_catalog_payload()
     if lang == "zh":
@@ -198273,6 +198424,13 @@ def pricing_package_summary_lines(lang: str = "vi") -> list[str]:
     return rows
 
 def pricing_package_summary_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"📦 {copy['packages_label']}", callback_data="pkgcombo:home"), InlineKeyboardButton(f"⬅️ {public_page_title('pricing', requested_locale)}", callback_data="pricing|catalog")],
+            [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
     lang = pricing_copy_language(lang)
     if lang == "zh":
         labels = ("🎁 购买套餐 / 组合", "⬅️ 返回价格", "🏠 主菜单")
@@ -198391,8 +198549,22 @@ def pricing_video_lines(lang: str = "vi") -> list[str]:
     return public_pricing_lines("video", public_pricing_context(), public_pricing_locale(lang))
 
 def pricing_combo_lines(lang: str = "vi") -> list[str]:
-    lang = pricing_copy_language(lang)
+    requested_locale = public_pricing_locale(lang)
     combos = public_video_combo_pricing_payload()
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        if not combos:
+            return public_guide_lines("packages", requested_locale)
+        rows = [f"🎁 <b>{copy['packages_label']}</b>", "", copy["guide_description"]]
+        for item in combos:
+            code = str(item.get("code") or "").strip()
+            entry = package_catalog_entry(code, "combo") or item
+            label = package_i18n_entry_label(entry, code, "combo", requested_locale)
+            group_label = package_i18n_group_label(str(entry.get("group") or ""), requested_locale)
+            rows.append(f"• <b>{html.escape(label)}</b> — {html.escape(group_label)}")
+        rows.extend(["", f"📩 {copy['support']}"])
+        return rows
+    lang = pricing_copy_language(lang)
     if lang == "zh":
         rows = ["🎁 <b>成品组合</b>", "", "按完整用途选择组合。", "每个组合页面显示当前价格和权益。", ""]
         heading = "当前可用组合："
@@ -198441,9 +198613,29 @@ def pricing_detail_keyboard(section: str = "main", lang: str = "vi") -> InlineKe
     return InlineKeyboardMarkup(rows)
 
 def pricing_combo_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    lang = pricing_copy_language(lang)
+    requested_locale = public_pricing_locale(lang)
     rows: list[list[InlineKeyboardButton]] = []
     pending: list[InlineKeyboardButton] = []
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        for item in public_video_combo_pricing_payload():
+            code = str(item.get("code") or "").strip()
+            entry = package_catalog_entry(code, "combo") or item
+            label = package_i18n_button_label(entry, code, "combo", requested_locale)
+            callback = f"pkgcombo:combo_detail:{code}" if code else "menu|support"
+            pending.append(InlineKeyboardButton(label, callback_data=callback))
+            if len(pending) == 2:
+                rows.append(pending)
+                pending = []
+        if pending:
+            rows.append(pending)
+        rows.append([
+            InlineKeyboardButton(f"📩 {copy['large_order']}", callback_data="pkgcombo:large_order:combo_group"),
+            InlineKeyboardButton(f"⬅️ {copy['packages_label']}", callback_data="pkgcombo:home"),
+        ])
+        rows.append([InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")])
+        return InlineKeyboardMarkup(rows)
+    lang = pricing_copy_language(lang)
     for item in public_video_combo_pricing_payload():
         code = str(item.get("code") or "").strip()
         entry = package_catalog_entry(code, "combo") or item
@@ -198466,6 +198658,14 @@ def pricing_combo_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 def my_packages_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"🔄 {copy['refresh']}", callback_data="pricing|my_packages"), InlineKeyboardButton(f"🎁 {copy['finished_combos']}", callback_data="pricing|combo")],
+            [InlineKeyboardButton(f"📦 {copy['monthly_plans']}", callback_data="pricing|plans"), InlineKeyboardButton(f"⬅️ {copy['packages_label']}", callback_data="pricing|packages")],
+            [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
     lang = pricing_copy_language(lang)
     if lang == "zh":
         return InlineKeyboardMarkup([
@@ -198551,9 +198751,20 @@ def pricing_plans_lines() -> list[str]:
     return rows
 
 def pricing_task_package_group_lines(group: str, lang: str = "vi") -> list[str]:
-    lang = pricing_copy_language(lang)
+    requested_locale = public_pricing_locale(lang)
     group = str(group or "").strip().lower()
     entries = public_task_package_entries(group)
+    if requested_locale not in {"vi", "en", "zh"}:
+        if not entries:
+            return public_guide_lines("packages", requested_locale)
+        copy = public_hub_copy(requested_locale)
+        group_label = package_i18n_group_label(group, requested_locale)
+        rows = [f"📦 <b>{copy['packages_label']}</b>", "", f"{html.escape(group_label)} <b>TOAN AAS</b>", copy["guide_description"]]
+        labels = [package_i18n_entry_label(entry, code, "monthly", requested_locale) for code, entry in entries]
+        rows.extend(f"• {html.escape(label)}" for label in labels)
+        rows.extend(["", f"📩 {copy['support']}"])
+        return rows
+    lang = pricing_copy_language(lang)
     if not entries:
         return pricing_plans_lines_i18n(lang)
     group_label = package_i18n_group_label(group, lang)
@@ -198586,6 +198797,24 @@ def pricing_task_package_group_lines(group: str, lang: str = "vi") -> list[str]:
 def pricing_task_package_group_keyboard(group: str, lang: str = "vi") -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     pending: list[InlineKeyboardButton] = []
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        for code, entry in public_task_package_entries(group):
+            label = package_i18n_button_label(entry, code, "monthly", requested_locale)
+            pending.append(InlineKeyboardButton(label, callback_data=f"pkgcombo:detail:{code}"))
+            if len(pending) == 2:
+                rows.append(pending)
+                pending = []
+        if pending:
+            rows.append(pending)
+        normalized_group = pkgcombo_normalize_group(group) or "home"
+        rows.append([
+            InlineKeyboardButton(f"📩 {copy['large_order']}", callback_data=pkgcombo_large_order_callback("group", group=normalized_group)),
+            InlineKeyboardButton(f"⬅️ {copy['packages_label']}", callback_data="pkgcombo:home"),
+        ])
+        rows.append([InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")])
+        return InlineKeyboardMarkup(rows)
     lang = pricing_copy_language(lang)
     for code, entry in public_task_package_entries(group):
         label = package_i18n_button_label(entry, code, "monthly", lang)
@@ -198637,6 +198866,9 @@ def vip_services_lines() -> list[str]:
     ]
 
 def member_policy_lines(lang: str = "vi") -> list[str]:
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        return public_pricing_lines("member", public_pricing_context(), requested_locale)
     lang = pricing_copy_language(lang)
     if lang == "zh":
         return [
@@ -198818,6 +199050,9 @@ def pricing_main_lines_i18n(lang: str = "vi") -> list[str]:
 
 def pricing_xu_lines_i18n(lang: str = "vi", user_id=None) -> list[str]:
     lang = normalize_user_language(lang) or "vi"
+    requested_locale = public_pricing_locale(lang)
+    if requested_locale not in {"vi", "en", "zh"}:
+        return public_guide_lines("credits", requested_locale)
     if user_id is not None and not user_is_vietnam_market(user_id):
         if lang == "zh":
             return [
@@ -198948,10 +199183,38 @@ def plan_purchase_keyboard(checkout_url: str = "") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 def package_purchase_detail_lines(package_type: str, code: str, lang: str = "vi") -> list[str]:
+    requested_locale = public_pricing_locale(lang)
     package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package"} else "combo"
     code = str(code or "").strip().lower()
-    lang = pricing_copy_language(lang)
     entry = package_catalog_entry(code, package_type)
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        if not entry:
+            return [f"⚠️ <b>{copy['packages_label']}</b>", "", *public_guide_lines("packages", requested_locale)]
+        quote = package_price_quote(package_type, code)
+        price = int(quote.get("price_vnd") or 0)
+        retail = int(quote.get("retail_vnd") or price)
+        discount = int(quote.get("discount_percent") or 0)
+        label = package_i18n_entry_label(entry, code, package_type, requested_locale)
+        price_text = f"{price:,}đ".replace(",", ".") if price > 0 else package_i18n_price_text(package_type, code, requested_locale)
+        retail_text = f"{retail:,}đ".replace(",", ".") if retail > 0 else package_i18n_price_text(package_type, code, requested_locale)
+        benefits = package_i18n_items_summary(entry.get("items") or {}, requested_locale)
+        duration_days = int(entry.get("default_days") or 0) if package_type == "monthly" else 0
+        rows = [
+            f"🎁 <b>{copy['packages_label']}: {html.escape(label)}</b>",
+            "",
+            f"📦 {html.escape(benefits)}",
+            f"📅 {duration_days}" if duration_days else "",
+            f"🏷️ <s>{html.escape(retail_text)}</s>" if retail > price else "",
+            f"🔻 {discount}%" if discount else "",
+            f"💳 <b>{html.escape(price_text)}</b>",
+            "",
+            *public_guide_lines("packages", requested_locale),
+        ]
+        if not package_entry_auto_checkout_enabled(entry):
+            rows.extend(["", f"📩 {copy['support']}"])
+        return [line for line in rows if line != ""]
+    lang = pricing_copy_language(lang)
     if not entry:
         if lang == "zh":
             return ["⚠️ <b>无效套餐</b>", "", "机器人尚未创建订单，也未扣除 Xu。"]
@@ -199065,9 +199328,17 @@ def package_purchase_detail_lines(package_type: str, code: str, lang: str = "vi"
     return [line for line in rows if line != ""]
 
 def package_purchase_manual_keyboard(package_type: str = "combo", code: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
-    lang = pricing_copy_language(lang)
+    requested_locale = public_pricing_locale(lang)
     back_action = package_detail_back_callback(package_type, code)
     origin = "detail" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package"} else "combo_detail"
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"📩 {copy['support']}", callback_data=pkgcombo_large_order_callback(origin, package_type, code))],
+            [InlineKeyboardButton(f"📞 {copy['support']}", callback_data="menu|support")],
+            [InlineKeyboardButton(f"🔙 {copy['back']}", callback_data=back_action), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
+    lang = pricing_copy_language(lang)
     if lang == "zh":
         labels = ("📩 发送管理员请求", "📞 联系管理员", "🔙 返回", "🏠 主菜单")
     elif lang == "en":
@@ -199083,8 +199354,16 @@ def package_purchase_manual_keyboard(package_type: str = "combo", code: str = ""
 def package_purchase_confirm_keyboard(package_type: str, code: str, lang: str = "vi") -> InlineKeyboardMarkup:
     package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package"} else "combo"
     code = str(code or "").strip().lower()
-    lang = pricing_copy_language(lang)
+    requested_locale = public_pricing_locale(lang)
     back_action = package_detail_back_callback(package_type, code)
+    if requested_locale not in {"vi", "en", "zh"}:
+        copy = public_hub_copy(requested_locale)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"✅ {copy['confirm_purchase']}", callback_data=f"pkgbuy|confirm|{package_type}|{code}"), InlineKeyboardButton(f"⬅️ {copy['back']}", callback_data=back_action)],
+            [InlineKeyboardButton(f"📩 {copy['support']}", callback_data=pkgcombo_large_order_callback("detail" if package_type == "monthly" else "combo_detail", package_type, code))],
+            [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
+    lang = pricing_copy_language(lang)
     if lang == "zh":
         labels = ("✅ 确认购买", "⬅️ 取消", "📩 大额需求", "🏠 主菜单")
     elif lang == "en":
@@ -199467,18 +199746,21 @@ def pkgcombo_large_order_keyboard(back_callback: str = "pkgcombo:home") -> Inlin
     ])
 
 async def render_pkgcombo_detail(query, package_type: str, code: str, lang: str = "vi"):
-    lang = pricing_copy_language(lang)
+    requested_locale = public_pricing_locale(lang)
     entry = package_catalog_entry(code, package_type)
     if not entry:
-        if lang == "zh":
+        if requested_locale not in {"vi", "en", "zh"}:
+            copy = public_hub_copy(requested_locale)
+            text = f"⚠️ <b>{copy['packages_label']}</b>\n\n{copy['guide_description']}"
+        elif requested_locale == "zh":
             text = "⚠️ 套餐无效。机器人尚未创建订单。"
-        elif lang == "en":
+        elif requested_locale == "en":
             text = "⚠️ Invalid package. No order was created."
         else:
             text = "⚠️ Gói không hợp lệ. Bot chưa tạo đơn."
-        return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=pricing_packages_keyboard(lang))
-    keyboard = package_purchase_manual_keyboard(package_type, code, lang) if entry.get("manual") else package_purchase_confirm_keyboard(package_type, code, lang)
-    return await edit_or_send_pricing_lines(query, package_purchase_detail_lines(package_type, code, lang), keyboard)
+        return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=pricing_packages_keyboard(requested_locale))
+    keyboard = package_purchase_manual_keyboard(package_type, code, requested_locale) if entry.get("manual") else package_purchase_confirm_keyboard(package_type, code, requested_locale)
+    return await edit_or_send_pricing_lines(query, package_purchase_detail_lines(package_type, code, requested_locale), keyboard)
 
 async def render_pkgcombo_large_order(query, context: ContextTypes.DEFAULT_TYPE, origin_parts: list[str] | None = None):
     back_callback = pkgcombo_large_order_back_callback(origin_parts)
@@ -213791,11 +214073,28 @@ async def cmd_ref_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     lang = get_user_language(uid) or "vi"
+    requested_locale = public_pricing_locale(lang)
     show_domestic_promotion = show_domestic_topup_promotion(uid, lang)
     profile = get_member_profile(uid)
     admin_badge = admin_display_badge(uid)
     current_badge = get_role_badge(uid)
     link = referral_link_for_user(uid, context.bot.username or BOT_USERNAME)
+    if requested_locale not in {"vi", "en", "zh"}:
+        lines = [
+            *member_policy_lines(requested_locale),
+            "",
+            f"🪪 <b>{html.escape(current_badge)}</b>",
+            f"💳 <b>{vnd_text(profile['total_paid_vnd'])}</b>",
+            f"🔻 <b>{int(get_member_service_discount_rate(uid) or 0)}%</b> Xu",
+        ]
+        if admin_badge:
+            lines.append(f"🔐 {html.escape(admin_badge)}")
+        lines.extend([
+            f"🔗 <code>{html.escape(link)}</code>",
+            "📊 <code>/ref_stats</code>",
+        ])
+        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        return
     next_line = "Bạn đang ở cấp cao nhất." if not profile["next_tier"] else (
         f"Cấp tiếp theo: <b>{html.escape(get_member_badge(profile['next_tier']))}</b> — còn cần <b>{vnd_text(profile['amount_to_next'])}</b>."
     )
@@ -213991,6 +214290,12 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_my_promos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+    lang = get_user_language(uid) or "vi"
+    if not show_domestic_topup_promotion(uid, lang):
+        return await update.message.reply_text(
+            "\n".join(billing_promo_apply_lines(lang, uid)),
+            parse_mode="HTML",
+        )
     promos = get_member_personal_promos(uid, include_used=True)
     if not promos:
         return await update.message.reply_text(
@@ -252494,7 +252799,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_storage_addon_callback, pattern=r"^storage\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_memory_callback, pattern=r"^memory\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
-    tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|(?:[a-z]{2}|fil)|lang_more|back_lang)$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|(?:[a-z]{2}|fil)|lang_more|back_lang|lang_back)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_package_purchase_callback, pattern=r"^pkgbuy\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_pkgcombo_callback, pattern=r"^pkgcombo:"))
     tg_app.add_handler(CallbackQueryHandler(handle_pricing_callback, pattern=r"^pricing\|"))
@@ -254804,24 +255109,53 @@ def markdown_attachment_response(filename: str, content: str) -> PlainTextRespon
     )
 
 @fastapi_app.get(f"/download/{PRICING_DOWNLOAD_FILENAME}")
-async def download_pricing_markdown():
-    return markdown_attachment_response(PRICING_DOWNLOAD_FILENAME, public_pricing_markdown())
+async def download_pricing_markdown(lang: str = "vi"):
+    requested_locale = public_pricing_locale(lang)
+    return markdown_attachment_response(
+        PRICING_DOWNLOAD_FILENAME,
+        public_pricing_markdown(public_pricing_context(), requested_locale),
+    )
 
 @fastapi_app.get(f"/download/{GUIDE_DOWNLOAD_FILENAME}")
-async def download_guide_markdown():
-    return markdown_attachment_response(GUIDE_DOWNLOAD_FILENAME, public_guide_markdown())
+async def download_guide_markdown(lang: str = "vi"):
+    requested_locale = public_pricing_locale(lang)
+    return markdown_attachment_response(GUIDE_DOWNLOAD_FILENAME, public_guide_markdown(requested_locale))
 
 @fastapi_app.get("/pricing")
-async def public_pricing_page():
-    return HTMLResponse(public_lines_to_html_page("Bảng giá TOAN AAS", public_pricing_all_lines(public_pricing_context())))
+async def public_pricing_page(lang: str = "vi"):
+    requested_locale = public_pricing_locale(lang)
+    return HTMLResponse(
+        public_lines_to_html_page(
+            public_page_title("pricing", requested_locale),
+            public_pricing_all_lines(public_pricing_context(), requested_locale),
+            lang=requested_locale,
+            home_href=f"/?lang={requested_locale}",
+        )
+    )
 
 @fastapi_app.get("/guide")
-async def public_guide_page():
-    return HTMLResponse(public_lines_to_html_page("Hướng dẫn sử dụng TOAN AAS", public_guide_all_lines()))
+async def public_guide_page(lang: str = "vi"):
+    requested_locale = public_pricing_locale(lang)
+    return HTMLResponse(
+        public_lines_to_html_page(
+            public_page_title("guide", requested_locale),
+            public_guide_all_lines(requested_locale),
+            lang=requested_locale,
+            home_href=f"/?lang={requested_locale}",
+        )
+    )
 
 @fastapi_app.get("/help")
-async def public_help_page():
-    return HTMLResponse(public_lines_to_html_page("Trợ giúp TOAN AAS", public_guide_all_lines()))
+async def public_help_page(lang: str = "vi"):
+    requested_locale = public_pricing_locale(lang)
+    return HTMLResponse(
+        public_lines_to_html_page(
+            public_page_title("guide", requested_locale),
+            public_guide_all_lines(requested_locale),
+            lang=requested_locale,
+            home_href=f"/?lang={requested_locale}",
+        )
+    )
 
 @fastapi_app.get("/download/dieu-khoan-su-dung-toan-aas.pdf")
 async def download_terms_pdf():

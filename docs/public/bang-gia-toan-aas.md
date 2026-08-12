@@ -14,9 +14,9 @@ TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ 
 • Cân bằng: 20 Xu / ảnh.
 • Cân bằng + bảo hành: 30 Xu / ảnh.
 • Sáng tạo chi tiết: 50 Xu / ảnh.
-• Sáng tạo chi tiết + bảo hành: 110 Xu / ảnh.
-• Cao cấp: 80 Xu / ảnh.
-• Cao cấp + bảo hành: 150 Xu / ảnh.
+• Sáng tạo chi tiết + bảo hành: 100 Xu / ảnh.
+• Cao cấp: 70 Xu / ảnh.
+• Cao cấp + bảo hành: 140 Xu / ảnh.
 • Tài nguyên tự có của anh/chị: miễn phí nếu hệ thống không cần tạo mới.
 
 Nhóm giá chính
@@ -175,9 +175,9 @@ TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ 
 • Cân bằng: 20 Xu / ảnh.
 • Cân bằng + bảo hành: 30 Xu / ảnh.
 • Sáng tạo chi tiết: 50 Xu / ảnh.
-• Sáng tạo chi tiết + bảo hành: 110 Xu / ảnh.
-• Cao cấp: 80 Xu / ảnh.
-• Cao cấp + bảo hành: 150 Xu / ảnh.
+• Sáng tạo chi tiết + bảo hành: 100 Xu / ảnh.
+• Cao cấp: 70 Xu / ảnh.
+• Cao cấp + bảo hành: 140 Xu / ảnh.
 
 Chọn chất lượng
 • Bảng trên là các mức public hiện hành; mô tả từng mức xuất hiện ngay khi chọn.

@@ -63,6 +63,12 @@ def _literal_assignment(name: str):
     return ast.literal_eval(match.group(1))
 
 
+def _tuple_assignment(name: str):
+    match = re.search(rf"^\s*{name}\s*=\s*(\([\s\S]*?\))", BOT_SOURCE, re.MULTILINE)
+    assert match is not None
+    return ast.literal_eval(match.group(1))
+
+
 class _Button:
     def __init__(self, text: str, callback_data: str | None = None, **_kwargs):
         self.text = text
@@ -93,6 +99,13 @@ def _runtime_namespace() -> dict:
         "package_catalog_payload": lambda: {"monthly": {}},
         "package_purchase_display_price": lambda _kind, _code: "-",
         "public_video_combo_pricing_payload": lambda: [],
+        "public_copy_locale": public_copy.public_copy_locale,
+        "public_pricing_locale": public_copy.public_copy_locale,
+        "public_hub_copy": public_copy.public_hub_copy,
+        "public_page_title": public_copy.public_page_title,
+        "public_guide_lines": shared_public_guide_lines,
+        "public_pricing_lines": public_copy.pricing_lines,
+        "public_pricing_context": lambda: {"member_discount_lines": ["• 0%"]},
     }
     locale_start = BOT_SOURCE.index("USER_LANGUAGE_LABELS =")
     locale_end = BOT_SOURCE.index("\ndef normalize_user_market", locale_start)
@@ -148,6 +161,9 @@ def _guide_keyboard_runtime_namespace() -> dict:
         "InlineKeyboardMarkup": _Markup,
         "normalize_user_language": lambda value: str(value or "").lower() or "vi",
         "normalize_guide_section_key": lambda value: str(value or "").lower(),
+        "public_pricing_locale": public_copy.public_copy_locale,
+        "public_hub_copy": public_copy.public_hub_copy,
+        "public_page_title": public_copy.public_page_title,
         "effective_public_base_url": lambda: "https://public.example",
     }
     exec(_function_source("guide_keyboard"), namespace)
@@ -229,6 +245,8 @@ def _package_i18n_runtime_namespace() -> dict:
     namespace = {
         "__builtins__": __builtins__,
         "pricing_copy_language": lambda lang: "vi" if lang == "vi" else ("zh" if lang == "zh" else "en"),
+        "public_pricing_locale": public_copy.public_copy_locale,
+        "public_hub_copy": public_copy.public_hub_copy,
         "normalize_package_item_type": lambda value: str(value or "").strip().lower(),
         "PACKAGE_ITEM_LABELS": {"image_standard": "Ảnh tiêu chuẩn"},
         "PACKAGE_TASK_GROUP_LABELS": {"image": "🖼 Gói Ảnh"},
@@ -260,7 +278,7 @@ def _package_i18n_runtime_namespace() -> dict:
 
 def test_requested_locale_catalog_and_aliases_preserve_existing_locales():
     labels = _literal_assignment("USER_LANGUAGE_LABELS")
-    assert set(REQUESTED_LOCALES) <= set(labels)
+    assert tuple(labels) == REQUESTED_LOCALES
     assert set(EXISTING_LOCALES) <= set(labels)
 
     aliases = _literal_assignment("aliases")
@@ -280,9 +298,26 @@ def test_requested_locale_catalog_and_aliases_preserve_existing_locales():
 
 
 def test_language_picker_exposes_every_requested_locale_and_accepts_filipino_callback():
-    picker_source = _function_source("language_choice_keyboard") + _function_source("other_language_choice_keyboard")
-    assert {f"lang|{locale}" for locale in REQUESTED_LOCALES} <= set(
-        re.findall(r'callback_data="([^"]+)"', picker_source)
+    runtime = _runtime_namespace()
+    picker_order = _tuple_assignment("USER_LANGUAGE_ORDER")
+    picker = runtime["language_choice_keyboard"]()
+    locale_buttons = [
+        button.callback_data
+        for row in picker.inline_keyboard
+        for button in row
+        if (button.callback_data or "").startswith("lang|")
+    ]
+    assert locale_buttons == [f"lang|{locale}" for locale in picker_order]
+    assert len(locale_buttons) == len(set(locale_buttons))
+    language_rows = [
+        row for row in picker.inline_keyboard
+        if any((button.callback_data or "").startswith("lang|") for button in row)
+    ]
+    assert all(len(row) == 2 for row in language_rows[:-1])
+    assert len(language_rows[-1]) == 1  # 17 locales leave one final locale button.
+    assert all(
+        not (button.callback_data or "").startswith("lang|")
+        for button in picker.inline_keyboard[-1]
     )
 
     match = re.search(
@@ -293,12 +328,17 @@ def test_language_picker_exposes_every_requested_locale_and_accepts_filipino_cal
     assert re.fullmatch(match.group(1), "lang|fil")
 
 
-def test_secondary_locales_use_the_english_copy_fallback_on_pricing_surfaces():
-    fallback_source = _function_source("pricing_copy_language")
-    assert 'normalized in {"vi", "zh"}' in fallback_source
-    assert 'else "en"' in fallback_source
-    for surface in PRICING_FALLBACK_SURFACES:
-        assert "pricing_copy_language(lang)" in _function_source(surface)
+def test_public_secondary_locales_keep_their_native_locale_authority():
+    source = _function_source("public_pricing_locale")
+    assert "public_copy_locale" in source
+    english = public_copy.public_hub_copy("en")
+    for locale in REQUESTED_LOCALES:
+        copy = public_copy.public_hub_copy(locale)
+        assert copy["hub_intro"]
+        if locale != "en":
+            assert copy["hub_intro"] != english["hub_intro"]
+            assert copy["image_description"] != english["image_description"]
+            assert copy["video_description"] != english["video_description"]
 
 
 def test_public_pricing_and_guide_renderers_keep_all_supported_locale_codes():
@@ -323,6 +363,11 @@ def test_public_pricing_and_guide_renderers_keep_all_supported_locale_codes():
 def test_secondary_public_guides_use_native_tier_labels_and_duration_words():
     english_image_labels = set(public_copy._IMAGE_LABELS["en"].values())
     english_video_labels = set(public_copy._PRODUCT_VIDEO_LABELS["en"].values())
+    canonical_image_prices = [str(int(item["unit_xu"])) for item in canonical.public_image_quality_catalog()]
+    canonical_video_prices = [
+        f"{int(item['unit_xu']):,}".replace(",", ".")
+        for item in public_copy.public_product_video_catalog()
+    ]
 
     for locale in REQUESTED_LOCALES:
         if locale in {"vi", "en", "zh"}:
@@ -332,9 +377,9 @@ def test_secondary_public_guides_use_native_tier_labels_and_duration_words():
         assert not any(label in image_text for label in english_image_labels)
         assert not any(label in video_text for label in english_video_labels)
         assert " seconds." not in video_text
-        for price in ("10", "20", "30", "50", "80", "110", "150"):
+        for price in canonical_image_prices:
             assert price in image_text
-        for price in ("200", "220", "80", "110", "160", "370", "1.260", "2.360"):
+        for price in canonical_video_prices:
             assert price in video_text
 
 
@@ -363,43 +408,13 @@ def test_secondary_language_guide_index_delegates_to_shared_public_copy():
     assert "public_pricing_locale(lang)" in source
 
 
-def test_runtime_copy_harness_renders_new_and_existing_secondary_locales_in_english():
-    runtime = _runtime_namespace()
-    visible_callbacks = {
-        button.callback_data
-        for markup in (runtime["language_choice_keyboard"](), runtime["other_language_choice_keyboard"]())
-        for row in markup.inline_keyboard
-        for button in row
-        if button.callback_data
-    }
-    assert {f"lang|{locale}" for locale in REQUESTED_LOCALES} <= visible_callbacks
-
-    english_catalog_callbacks = [
-        button.callback_data
-        for row in runtime["pricing_catalog_keyboard"]("en").inline_keyboard
-        for button in row
-    ]
+def test_runtime_copy_harness_keeps_new_and_existing_secondary_locales_native():
+    english = public_copy.public_hub_copy("en")
     for locale in (*NEW_LOCALES, "ja", "ko", "th", "ar"):
-        assert runtime["normalize_user_language"](locale) == locale
-        assert runtime["pricing_copy_language"](locale) == "en"
-        assert [
-            button.callback_data
-            for row in runtime["pricing_catalog_keyboard"](locale).inline_keyboard
-            for button in row
-        ] == english_catalog_callbacks
-        assert any(
-            "Image plans" in button.text
-            for row in runtime["pricing_plans_keyboard"](locale).inline_keyboard
-            for button in row
-        )
-        assert "Plans / Combos Notes" in "\n".join(runtime["pricing_pkgcombo_notes_lines"](locale))
-        assert "TOAN AAS Plans / Combos" in "\n".join(runtime["pricing_package_summary_lines"](locale))
-        assert "TOAN AAS Top-up / Pricing" in "\n".join(runtime["pricing_hub_lines"](locale))
-        promotions = "\n".join(runtime["billing_promotions_lines"](locale))
-        assert "International Benefits" in promotions
-        assert "+30% Xu" not in promotions
-        assert "+20% Xu" not in promotions
-        assert "Service discounts" in "\n".join(runtime["member_policy_lines"](locale))
+        copy = public_copy.public_hub_copy(locale)
+        assert copy["hub_intro"] != english["hub_intro"]
+        assert copy["music_description"] != english["music_description"]
+        assert copy["guide_description"] != english["guide_description"]
 
 
 def test_market_authority_keeps_vietnam_promotions_separate_from_new_international_locales():
@@ -473,13 +488,14 @@ def test_non_vietnamese_member_surfaces_do_not_expose_topup_promo_codes():
 def test_international_promotion_route_hides_domestic_offer_and_promo_code_copy():
     runtime = _runtime_namespace()
 
-    english = "\n".join(runtime["billing_promo_apply_lines"]("es")).lower()
+    spanish = "\n".join(runtime["billing_promo_apply_lines"]("es")).lower()
     chinese = "\n".join(runtime["billing_promo_apply_lines"]("zh"))
-    for domestic_term in ("promotion", "bonus", "code", "vietnam"):
-        assert domestic_term not in english
+    assert "recargas internacionales" in spanish
+    assert "international account" not in spanish
+    assert "+30% xu" not in spanish
+    assert "+20% xu" not in spanish
     for domestic_term in ("优惠码", "充值活动", "奖励", "越南"):
         assert domestic_term not in chinese
-    assert "international account" in english
     assert "国际账户" in chinese
 
     visible_callbacks = {
@@ -532,12 +548,13 @@ def test_vietnamese_copy_respects_market_when_showing_domestic_promotion_entry()
 def test_international_member_copy_keeps_service_discounts_without_domestic_topup_campaign_copy():
     runtime = _runtime_namespace()
 
-    english = "\n".join(runtime["member_policy_lines"]("es")).lower()
+    spanish = "\n".join(runtime["member_policy_lines"]("es")).lower()
     chinese = "\n".join(runtime["member_policy_lines"]("zh"))
 
-    assert "service discounts" in english
-    assert "vietnam domestic campaigns" not in english
-    assert "deposit or launch bonuses" not in english
+    assert "descuentos de servicio de membresía" in spanish
+    assert "service discounts" not in spanish
+    assert "+30% xu" not in spanish
+    assert "+20% xu" not in spanish
     assert "服务折扣" in chinese
     assert "越南本地充值活动" not in chinese
     assert "首次活动奖励" not in chinese
@@ -634,12 +651,13 @@ def test_chinese_guide_navigation_is_localized_and_discloses_the_vietnamese_only
     assert "创建图片" in chinese_image
     assert "价格表" in chinese_image
 
-    english_root = "\n".join(
+    spanish_root = "\n".join(
         button.text
         for row in runtime["guide_keyboard"]("", "es").inline_keyboard
         for button in row
     )
-    assert "Vietnamese guide (DOCX)" in english_root
+    assert "Guía en vietnamita (DOCX)" in spanish_root
+    assert "Vietnamese guide (DOCX)" not in spanish_root
 
 
 def test_telegram_public_pricing_and_guide_copy_passes_locale_to_shared_renderers():
@@ -699,7 +717,10 @@ def test_package_and_combo_screens_use_locale_copy_without_repricing_catalog_ent
         "items": {"image_standard": 20},
         "default_days": 30,
     }
-    assert runtime["package_i18n_entry_label"](entry, "image_basic_monthly", "monthly", "es") == "🖼 Image monthly plan — Balanced image ×20 / 30 days"
+    spanish = runtime["package_i18n_entry_label"](entry, "image_basic_monthly", "monthly", "es")
+    assert "Imágenes con IA" in spanish
+    assert "monthly plan" not in spanish
+    assert "Balanced image" not in spanish
     assert runtime["package_i18n_entry_label"](entry, "image_basic_monthly", "monthly", "zh") == "🖼 图片 月度套餐 — 平衡图片 ×20 / 30 天"
     assert runtime["package_i18n_entry_label"](entry, "image_basic_monthly", "monthly", "vi") == "🖼 Ảnh Cơ bản"
     assert runtime["package_i18n_price_text"]("monthly", "image_basic_monthly", "es") == "123k"
@@ -818,10 +839,10 @@ if __name__ == "__main__":
     direct_tests = [
         test_requested_locale_catalog_and_aliases_preserve_existing_locales,
         test_language_picker_exposes_every_requested_locale_and_accepts_filipino_callback,
-        test_secondary_locales_use_the_english_copy_fallback_on_pricing_surfaces,
+        test_public_secondary_locales_keep_their_native_locale_authority,
         test_secondary_public_guides_use_native_tier_labels_and_duration_words,
         test_help_route_keeps_the_selected_public_locale_for_its_title,
-        test_runtime_copy_harness_renders_new_and_existing_secondary_locales_in_english,
+        test_runtime_copy_harness_keeps_new_and_existing_secondary_locales_native,
         test_market_authority_keeps_vietnam_promotions_separate_from_new_international_locales,
         test_domestic_topup_promotion_is_visible_only_to_vietnamese_ui,
         test_non_vietnamese_member_surfaces_do_not_expose_topup_promo_codes,
