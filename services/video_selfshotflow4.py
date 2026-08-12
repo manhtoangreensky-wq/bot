@@ -392,7 +392,7 @@ def validate_rows(rows: list[list[tuple[str, str]]], *, back_callback: str) -> d
                 errors.append(f"row_{index}_button_invalid")
     if not rows or len(rows[-1]) != 2:
         errors.append("navigation_row_missing")
-    elif rows[-1][0][1] != back_callback or rows[-1][1][1] != "menu|main":
+    elif rows[-1][0][1] != back_callback or rows[-1][1][1] != "menu|main_video":
         errors.append("navigation_row_invalid")
     return {"ok": not errors, "errors": errors}
 

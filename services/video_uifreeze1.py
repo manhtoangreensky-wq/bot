@@ -134,6 +134,8 @@ def compatible_quality_tiers(
     for tier_id in QUALITY_TIER_ORDER:
         if tier_id not in supported_tiers:
             continue
+        if product == "script_image_video" and tier_id == 200:
+            continue
         spec = tier_spec(tier_id)
         capabilities = set(spec.get("capabilities") or ())
         if count > int(spec.get("max_scenes") or 1):

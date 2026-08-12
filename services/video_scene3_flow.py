@@ -148,6 +148,12 @@ def canonical_back_step(state: dict[str, Any] | None) -> str:
         return "technical_profile"
     if step == "technical_profile" and str(current.get("asset_requirement") or "") != "optional":
         return "asset_gate"
+    if (
+        step == "character"
+        and str(current.get("flow_kind") or "") == "script_to_video"
+        and bool(current.get("scene_count_confirmed"))
+    ):
+        return "aspect_ratio"
     if step == "character" and content_source == "manual":
         return "await_suggestion"
     if step == "character":

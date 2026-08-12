@@ -692,7 +692,7 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     current["branding_return_to"] = "summary"
     current["branding_back_to"] = (
         str(current.get("branding_back_to") or "prompt")
-        if str(current.get("branding_back_to") or "prompt") in {"prompt", "summary"}
+        if str(current.get("branding_back_to") or "prompt") in {"prompt", "summary", "product_review"}
         else "prompt"
     )
     current["summary_return_to"] = "logo"
@@ -723,6 +723,18 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     for field in STATE_FIELDS:
         current.setdefault(field, "")
     return current
+
+
+def branding_back_callback(state: dict[str, Any] | None) -> str:
+    """Return to the exact product review that opened the shared branding tail."""
+
+    current = normalize_state(dict(state or {}))
+    if str(current.get("branding_back_to") or "") == "summary":
+        return "video_tail|summary|open"
+    adapter = adapter_for(str(current.get("video_product_type") or ""))
+    if str(current.get("branding_back_to") or "") == "product_review":
+        return str(adapter.get("return_to") or "video_tail|review|prompts")
+    return "video_tail|review|prompts"
 
 
 def apply_content_contract(state: dict[str, Any], contract: dict[str, Any] | None) -> dict[str, Any]:

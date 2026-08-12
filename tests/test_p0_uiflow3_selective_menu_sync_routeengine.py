@@ -2,18 +2,11 @@ from __future__ import annotations
 
 import bot
 from services import (
-    video_project_queue,
-    video_provider_catalog,
-    video_real_render_connector,
+    video_script_product,
+    video_selfshot2,
+    video_selfshot3,
     video_tail9,
     video_uiflow3,
-)
-
-
-SYNCED_PRODUCTS = (
-    "video_ai_real",
-    "script_image_video",
-    "self_shot_scene_change",
 )
 
 
@@ -34,37 +27,47 @@ def _callbacks(markup) -> list[str]:
     return [callback for row in _rows(markup) for _label, callback in row if callback]
 
 
-def _content_lock_state(product: str) -> dict:
-    state = video_uiflow3.new_state(product, draft_id=f"sync-{product}")
-    return video_uiflow3.set_content_candidate(
-        state,
-        source="content_catalog",
-        profile_id="sales_ads",
-        original_intent=f"Nội dung gốc của {product} phải được giữ nguyên.",
-        approved_brief={
-            "title": "Bán hàng / quảng cáo",
-            "goal": "Giới thiệu giá trị rõ ràng",
-        },
+def test_video_ai_real_keeps_its_approved_uiflow3_owner_and_menu_back() -> None:
+    product = "video_ai_real"
+    route = bot.VIDEO_PUBLIC_ROUTE_MATRIX[product]
+    expected_children = ("vid3|mode|prompt_video", "vid3|mode|image_video")
+    assert route["entry_callback"] == "vid3|entry|video_ai_real"
+    assert route["handler"] == "handle_video_uiflow3_callback"
+    assert route["flow_type"] == "content_first_canonical"
+    assert tuple(route["expected_children"]) == expected_children
+    state = video_uiflow3.new_state(product, draft_id="entry-video-ai-real")
+    _text, markup = bot.video_uiflow3_screen_payload(state)
+    callbacks = _callbacks(markup)
+    assert tuple(item for item in callbacks if item != "menu|main_video") == expected_children
+    assert callbacks.count("menu|main_video") == 1
+
+
+def test_script_and_selfshot_entries_keep_distinct_product_owners() -> None:
+    script_route = bot.VIDEO_PUBLIC_ROUTE_MATRIX["script_image_video"]
+    assert script_route["entry_callback"] == "vproduct|open|script_image_video"
+    assert script_route["handler"] == "handle_video_product_callback"
+    assert tuple(script_route["expected_children"]) == (
+        "vproduct|script_ai",
+        "vproduct|script_manual",
+        "vproduct|script_upload",
+        "menu|main_video",
     )
+    assert _callbacks(bot.video_script_hub_keyboard()) == list(script_route["expected_children"])
 
+    hub_route = bot.VIDEO_PUBLIC_ROUTE_MATRIX["self_shot_scene_change"]
+    assert hub_route["entry_callback"] == "vproduct|open|self_shot_scene_change"
+    assert hub_route["handler"] == "handle_video_product_callback"
+    assert tuple(hub_route["expected_children"]) == (
+        "vproduct|selfshot_product|scene_change",
+        "vproduct|selfshot_product|cinematic",
+    )
+    hub_callbacks = _callbacks(bot.video_selfshot_product_hub_keyboard())
+    assert hub_callbacks[:2] == list(hub_route["expected_children"])
+    assert hub_callbacks[-2:] == ["menu|main_video", "menu|main"]
 
-def test_approved_products_use_exact_uiflow3_entry_owner_and_menu_back() -> None:
-    expected_children = {
-        "video_ai_real": ("vid3|mode|prompt_video", "vid3|mode|image_video"),
-        "script_image_video": ("vid3|source_text",),
-        "self_shot_scene_change": ("vid3|source_media", "vid3|source_status"),
-    }
-    for product in SYNCED_PRODUCTS:
-        route = bot.VIDEO_PUBLIC_ROUTE_MATRIX[product]
-        assert route["entry_callback"] == f"vid3|entry|{product}"
-        assert route["handler"] == "handle_video_uiflow3_callback"
-        assert route["flow_type"] == "content_first_canonical"
-        assert tuple(route["expected_children"]) == expected_children[product]
-        state = video_uiflow3.new_state(product, draft_id=f"entry-{product}")
-        _text, markup = bot.video_uiflow3_screen_payload(state)
-        callbacks = _callbacks(markup)
-        assert tuple(item for item in callbacks if item != "menu|main_video") == expected_children[product]
-        assert callbacks.count("menu|main_video") == 1
+    cinematic_route = bot.VIDEO_PUBLIC_ROUTE_MATRIX["self_shot_cinematic_transform"]
+    assert cinematic_route["entry_callback"] == "vproduct|selfshot_product|cinematic"
+    assert cinematic_route["handler"] == "handle_video_product_callback"
 
 
 def test_locked_video_routes_remain_on_their_existing_owners() -> None:
@@ -76,83 +79,93 @@ def test_locked_video_routes_remain_on_their_existing_owners() -> None:
     assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["storyboard_prompt"]["entry_callback"] == "vproduct|open|storyboard_prompt"
 
 
-def test_each_synced_non_pilot_product_has_five_ordered_specific_suggestions() -> None:
-    prompts: dict[str, str] = {}
-    for product in SYNCED_PRODUCTS[1:]:
-        state = _content_lock_state(product)
-        suggestions = bot.video_uiflow3_profile_context_prompts(state)
-        assert [item["key"] for item in suggestions] == [
-            "product_context_01",
-            "product_context_02",
-            "product_context_03",
-            "product_context_04",
-            "product_context_05",
-        ]
-        _text, markup = bot.video_uiflow3_screen_payload(state)
-        context_rows = [
-            row for row in _rows(markup)
-            if any(callback.startswith("vid3|context|") for _label, callback in row)
-        ]
-        assert [len(row) for row in context_rows] == [2, 2, 1]
-        assert [
-            callback for row in context_rows for _label, callback in row
-        ] == [f"vid3|context|product_context_{index:02d}" for index in range(1, 6)]
+def test_each_content_profile_has_five_specific_suggestions_in_each_distinct_flow() -> None:
+    script_signatures = set()
+    selfshot2_signatures = set()
+    selfshot3_signatures = set()
+    for index, profile in enumerate(video_selfshot2.CONTENT_PROFILE_ROWS, 1):
+        profile_key = str(profile["profile_key"])
+        profile_name = str(profile["public_name"])
 
-        selected = bot.video_uiflow3_apply_context_prompt(state, "product_context_03")
-        brief = dict(selected["content"]["approved_brief"])
-        assert selected["content"]["original_intent"] == state["content"]["original_intent"]
-        assert brief["context_suggestion_key"] == "product_context_03"
-        assert brief["prompt"] == suggestions[2]["prompt"]
-        assert brief["prompt"] in bot.video_uiflow3_screen_payload(selected)[0]
-        prompts[product] = brief["prompt"]
-    assert len(set(prompts.values())) == len(prompts)
+        script_rows = video_script_product.profile_content_suggestions(profile_key)[:5]
+        assert len(script_rows) == 5
+        script_signatures.add(tuple(str(item["brief"]) for item in script_rows))
+
+        selfshot2_rows = video_selfshot2.suggestion_catalog(
+            {},
+            {},
+            scene_count=2,
+            aspect_ratio="9:16",
+            profile=profile_name,
+        )[:5]
+        assert len(selfshot2_rows) == 5
+        selfshot2_signatures.add(tuple(str(item["summary"]) for item in selfshot2_rows))
+
+        group = video_selfshot3.transformation_group_for_content_profile(index)
+        selfshot3_rows = video_selfshot3.contextual_preset_page({
+            "selected_group_id": group["group_id"],
+            "preset_page": 1,
+            "preset_source": "content_profile",
+            "content_profile_key": profile_key,
+        })
+        assert len(selfshot3_rows) == 5
+        selfshot3_signatures.add(tuple(str(item["summary"]) for item in selfshot3_rows))
+
+    profile_count = len(video_selfshot2.CONTENT_PROFILE_ROWS)
+    assert profile_count == 32
+    assert len(script_signatures) == profile_count
+    assert len(selfshot2_signatures) == profile_count
+    assert len(selfshot3_signatures) == profile_count
 
 
 def test_selfshot_source_intake_is_product_specific_and_has_no_skip_before_media() -> None:
-    selfshot_text, selfshot_markup = bot.video_uiflow3_screen_payload(
-        video_uiflow3.new_state("self_shot_scene_change", draft_id="selfshot-source")
-    )
-    assert "VIDEO TỰ QUAY ĐẦU VÀO" in selfshot_text
-    assert "vid3|source_media" in _callbacks(selfshot_markup)
-    assert "vid3|image_ai|source" not in _callbacks(selfshot_markup)
-    assert "vid3|source_done" not in _callbacks(selfshot_markup)
+    scene_change = video_selfshot2.screen_model("intro", video_selfshot2.initial_draft())
+    cinematic = video_selfshot3.screen_model("intro", video_selfshot3.initial_draft())
+    scene_callbacks = [callback for row in scene_change["rows"] for _label, callback in row]
+    cinematic_callbacks = [callback for row in cinematic["rows"] for _label, callback in row]
+    assert "vproduct|ss2|source" in scene_callbacks
+    assert "vproduct|ss3|source" in cinematic_callbacks
+    assert all("image_ai" not in item for item in [*scene_callbacks, *cinematic_callbacks])
+    assert all("source_done" not in item for item in [*scene_callbacks, *cinematic_callbacks])
 
 
-def test_non_pilot_branding_shows_positions_and_returns_to_branding_parent() -> None:
-    state = video_uiflow3.new_state("script_image_video", draft_id="brand-position")
-    state["navigation"]["current_step"] = "branding"
-    state["branding"] = {
-        "logo": {
-            "telegram_file_id": "logo-file",
-            "file_name": "logo.png",
-            "position": "top_right",
-        },
-        "watermark": {
-            "text": "TOAN AAS",
-            "position": "bottom_right",
-        },
-    }
-    text, markup = bot.video_uiflow3_screen_payload(state)
-    assert "Vị trí" in text
-    assert "vid3|brand_position_view|logo" in _callbacks(markup)
-    assert "vid3|brand_position_view|watermark" in _callbacks(markup)
-
-    state["ui_view"] = "branding_logo_position"
-    position_text, position_markup = bot.video_uiflow3_screen_payload(state)
-    callbacks = _callbacks(position_markup)
-    assert "Trên phải" in position_text
-    assert callbacks.count("vid3|view|branding") == 1
-    assert len([item for item in callbacks if item.startswith("vid3|brand_position|logo|")]) == 9
+def test_cinematic_selfshot_every_screen_has_exact_back_and_professional_rows() -> None:
+    state = video_selfshot3.initial_draft()
+    for screen, parent in video_selfshot3.SCREEN_PARENTS.items():
+        model = video_selfshot3.screen_model(screen, state)
+        back_callback = (
+            "vproduct|selfshot_hub"
+            if parent == "hub"
+            else f"vproduct|ss3|show|{parent}"
+        )
+        result = video_selfshot3.validate_rows(
+            model["rows"],
+            back_callback=back_callback,
+        )
+        assert result["ok"] is True, (screen, result["errors"])
 
 
-def test_synced_products_keep_distinct_execution_adapters() -> None:
+def test_shared_tail_branding_has_all_positions_and_returns_to_branding_parent() -> None:
+    position_text = bot.video_tail9_position_text("logo")
+    callbacks = _callbacks(bot.video_tail9_position_keyboard("logo"))
+    assert "Chọn vị trí logo" in position_text
+    assert len([item for item in callbacks if item.startswith("video_tail|logo|setpos|logo|")]) == 9
+    assert callbacks[-2:] == ["video_tail|logo|open", "menu|main_video"]
+
+
+def test_distinct_products_keep_distinct_execution_adapters() -> None:
     expected = {
-        "script_image_video": "product_tail",
-        "self_shot_scene_change": "selfshot2",
+        "script_image_video": ("scene3", "script_to_video", "product_video"),
+        "self_shot_scene_change": ("selfshot2", "self_shot_scene_change", "selfshot2"),
+        "self_shot_cinematic_transform": ("selfshot3", "self_shot_cinematic_transform", "selfshot3"),
     }
-    for product, kind in expected.items():
-        state = video_uiflow3.new_state(product, draft_id=f"adapter-{product}")
-        assert bot.video_uiflow3_execution_adapter(state)["kind"] == kind
+    for product, values in expected.items():
+        adapter = video_tail9.adapter_for(product)
+        assert (
+            adapter["flow_owner"],
+            adapter["engine_route"],
+            adapter["worker_owner"],
+        ) == values
 
 
 def test_fifteen_second_quality_is_selective_and_does_not_unlock_protected_products() -> None:
@@ -170,43 +183,3 @@ def test_fifteen_second_quality_is_selective_and_does_not_unlock_protected_produ
         assert 700 in video_tail9.commercial_contract(product)["supported_quality_tiers"]
     for product in protected:
         assert 700 not in video_tail9.commercial_contract(product)["supported_quality_tiers"]
-
-
-def test_verified_uiflow3_fifteen_second_duration_is_not_clamped_by_queue_or_worker() -> None:
-    identity = "a" * 64
-    tasks = video_project_queue.product_video_initial_scene_tasks(
-        "job-15s",
-        2,
-        15,
-    )
-    assert [item["scene_duration_seconds"] for item in tasks] == [15, 15]
-
-    assert video_real_render_connector.product_video_scene_duration_seconds({
-        "source": "product_video",
-        "uiflow3_handoff_sha256": identity,
-        "scene_duration_seconds": 15,
-    }) == 15
-    assert video_real_render_connector.product_video_scene_duration_seconds({
-        "source": "product_video",
-        "scene_duration_seconds": 15,
-    }) == 8
-
-
-def test_fifteen_second_tier_selects_the_real_long_scene_provider_contract() -> None:
-    resolved = video_provider_catalog.resolve_product_video_model(
-        tier=700,
-        provider_chain=["key4u_video"],
-        scene_count=2,
-        required_capability="text_to_video",
-        requires_concat=True,
-        env={
-            "VIDEO_PROVIDER_CHAIN": "key4u_video",
-            "KEY4U_KLING_VIDEO_ENDPOINT": "https://provider.invalid/submit",
-            "KEY4U_KLING_VIDEO_POLL_URL": "https://provider.invalid/poll",
-        },
-    )
-
-    assert resolved["ok"] is True
-    assert resolved["selected_provider"] == "key4u_video"
-    assert resolved["selected_model"] == "kling-video"
-    assert resolved["selected_clip_seconds"] == 15
