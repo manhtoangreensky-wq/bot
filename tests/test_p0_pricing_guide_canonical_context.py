@@ -124,9 +124,9 @@ def test_cskh_knowledge_document_matches_current_public_image_music_and_video_co
         "Cân bằng: 20 Xu / ảnh.",
         "Cân bằng + bảo hành: 30 Xu / ảnh.",
         "Sáng tạo chi tiết: 50 Xu / ảnh.",
-        "Sáng tạo chi tiết + bảo hành: 110 Xu / ảnh.",
-        "Cao cấp: 80 Xu / ảnh.",
-        "Cao cấp + bảo hành: 150 Xu / ảnh.",
+        "Sáng tạo chi tiết + bảo hành: 100 Xu / ảnh.",
+        "Cao cấp: 70 Xu / ảnh.",
+        "Cao cấp + bảo hành: 140 Xu / ảnh.",
         "Nhạc nền AI: 130 / 150 / 200 Xu.",
         "1 cảnh không giảm; 2–5 cảnh: giảm 10%; 6–10 cảnh: giảm 15%; 11–20 cảnh: giảm 20%.",
     ):
@@ -137,6 +137,9 @@ def test_cskh_knowledge_document_matches_current_public_image_music_and_video_co
         "Video: 200 / 300 / 400 / 500 / 600 / 800 / 1000 / 1200 / 1500 Xu theo gói.",
         "Product Video scene duration: 1 cảnh = 8s",
         "Ảnh: 50 / 150 / 200 / 300 / 400 / 500 / 600 Xu.",
+        "Sáng tạo chi tiết + bảo hành: 110 Xu / ảnh.",
+        "Cao cấp: 80 Xu / ảnh.",
+        "Cao cấp + bảo hành: 150 Xu / ảnh.",
     ):
         assert stale not in text
 

@@ -13,7 +13,7 @@ def _source_between(start: str, end: str) -> str:
     return source[source.index(start):source.index(end)]
 
 
-def test_existing_locale_callback_bridge_imports_public_copy_locale():
+def test_existing_locale_callback_bridge_imports_public_copy_authorities():
     """Pricing and manual top-up both use this existing public-copy helper."""
 
     import_block = _source_between(
@@ -21,9 +21,10 @@ def test_existing_locale_callback_bridge_imports_public_copy_locale():
         ")\nfrom video_multiscene_engine import (",
     )
     assert "    public_copy_locale," in import_block
+    assert "    public_hub_copy," in import_block
 
 
-def test_existing_main_menu_restores_language_entry_and_two_column_picker():
+def test_existing_main_menu_keeps_language_entry_in_the_compact_hub_layout():
     menu_source = _source_between(
         "def localized_main_menu_keyboard",
         "def localized_start_menu_text",
@@ -33,9 +34,13 @@ def test_existing_main_menu_restores_language_entry_and_two_column_picker():
         "def other_language_choice_text",
     )
 
-    assert menu_source.count('callback_data="back_lang"') == 3
-    assert '[InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="lang|vi"), InlineKeyboardButton("🇺🇸 English", callback_data="lang|en")]' in picker_source
-    assert '[InlineKeyboardButton("🇨🇳 中文", callback_data="lang|zh"), InlineKeyboardButton("🌍 Ngôn ngữ khác / More languages", callback_data="lang_more")]' in picker_source
+    assert "copy = public_hub_copy(lang)" in menu_source
+    assert 'callback_data="menu|support"' in menu_source
+    assert 'callback_data="back_lang"' in menu_source
+    assert 'callback_data="menu|main"' in menu_source
+    assert "for locale in USER_LANGUAGE_ORDER" in picker_source
+    assert "rows.append([" in picker_source
+    assert 'callback_data="lang_back"' in picker_source
 
 
 def test_existing_background_music_price_is_130_in_button_and_runtime_map():

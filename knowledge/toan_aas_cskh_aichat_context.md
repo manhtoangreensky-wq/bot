@@ -75,9 +75,9 @@ Lưu ý vận hành: các mức dưới đây là copy công khai đã duyệt. 
   - Cân bằng: 20 Xu / ảnh.
   - Cân bằng + bảo hành: 30 Xu / ảnh.
   - Sáng tạo chi tiết: 50 Xu / ảnh.
-  - Sáng tạo chi tiết + bảo hành: 110 Xu / ảnh.
-  - Cao cấp: 80 Xu / ảnh.
-  - Cao cấp + bảo hành: 150 Xu / ảnh.
+  - Sáng tạo chi tiết + bảo hành: 100 Xu / ảnh.
+  - Cao cấp: 70 Xu / ảnh.
+  - Cao cấp + bảo hành: 140 Xu / ảnh.
 - Tạo phụ đề tự động: 0 Xu.
 - Dịch phụ đề: 0.1 Xu / ký tự.
 - Lồng tiếng mặc định: 0.10 Xu / ký tự.

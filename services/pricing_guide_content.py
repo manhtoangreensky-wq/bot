@@ -48,6 +48,24 @@ PUBLIC_COPY_LOCALES = frozenset({
 })
 
 
+# Labels for the established Chinese guide-entry keyboard.  They remain in
+# the public-copy owner so the legacy callback layout never falls back to
+# English while its routes stay unchanged.
+PUBLIC_GUIDE_NAVIGATION_I18N = {
+    "zh": {
+        "quick_start": "快速开始",
+        "create_image": "创建图片",
+        "create_video": "创建视频",
+        "trend_video": "热门视频",
+        "video_music": "视频音乐",
+        "credits_topup": "Xu 充值",
+        "faq_refunds": "常见问题与退款",
+        "download_pricing": "下载价格表",
+        "download_guide": "下载指南",
+    },
+}
+
+
 # Public documentation only. These labels do not control account market,
 # payment eligibility, promotions, prices, or any product flow.
 _PUBLIC_LOCALE_COPY = {
@@ -61,7 +79,7 @@ _PUBLIC_LOCALE_COPY = {
     "zh": {
         "pricing": "TOAN AAS 价格", "guide": "TOAN AAS 使用指南", "home": "首页", "choose": "请选择要查看的内容：",
         "quote": "系统会在处理前显示报价；只有在确认且获得有效结果后才会扣除 Xu。",
-        "images": "AI 图片", "video": "Product Video", "music": "AI 音乐", "voice": "语音",
+        "images": "AI 图片", "video": "产品视频", "music": "AI 音乐", "voice": "语音",
         "subtitles": "字幕 / 翻译 / 配音", "documents": "文档 / 文件", "member": "会员与优惠", "free": "免费项目",
         "image_unit": "张", "video_unit": "场", "input": "输入", "output": "输出",
     },
@@ -132,13 +150,13 @@ _PUBLIC_LOCALE_COPY = {
         "image_unit": "ภาพ", "video_unit": "ฉาก", "input": "อินพุต", "output": "เอาต์พุต",
     },
     "fil": {
-        "pricing": "Mga Presyo ng TOAN AAS", "guide": "Gabay para sa gumagamit ng TOAN AAS", "home": "Home", "choose": "Pumili ng seksyon:",
+        "pricing": "Mga Presyo ng TOAN AAS", "guide": "Gabay para sa gumagamit ng TOAN AAS", "home": "Pangunahing pahina", "choose": "Pumili ng seksyon:",
         "quote": "Ipinapakita ang pagtatantya bago kumpirmahin.", "images": "Mga larawang AI", "video": "Video ng produkto", "music": "Musikang AI", "voice": "Boses",
         "subtitles": "Mga subtitle / Pagsasalin / Pag-dub", "documents": "Mga dokumento", "member": "Pagiging miyembro", "free": "Mga libreng item",
         "image_unit": "larawan", "video_unit": "eksena", "input": "input", "output": "output",
     },
     "it": {
-        "pricing": "Prezzi TOAN AAS", "guide": "Guida utente TOAN AAS", "home": "Home", "choose": "Scegli una sezione:",
+        "pricing": "Prezzi TOAN AAS", "guide": "Guida utente TOAN AAS", "home": "Pagina iniziale", "choose": "Scegli una sezione:",
         "quote": "Il preventivo viene mostrato prima della conferma.", "images": "Immagini AI", "video": "Video del prodotto", "music": "Musica AI", "voice": "Voce",
         "subtitles": "Sottotitoli / Traduzione / Doppiaggio", "documents": "Documenti", "member": "Iscrizione", "free": "Elementi gratuiti",
         "image_unit": "immagine", "video_unit": "scena", "input": "input", "output": "output",
@@ -150,6 +168,296 @@ _PUBLIC_LOCALE_COPY = {
         "image_unit": "gambar", "video_unit": "adegan", "input": "masukan", "output": "keluaran",
     },
 }
+
+
+# Customer-facing Telegram Hub copy.  This is intentionally kept with the
+# public pricing/guide locale authority: it has no effect on routing, market
+# eligibility, payment, or any provider/runtime behavior.
+_PUBLIC_HUB_COPY = {
+    "vi": {
+        "hub_title": "TOAN AAS — Trợ lý AI của bạn",
+        "hub_intro": "Chọn công cụ phù hợp để tạo nội dung, xử lý hình ảnh, video, âm thanh và tài liệu ngay trên Telegram.",
+        "image_label": "Tạo ảnh AI", "image_description": "Tạo và chuẩn bị hình ảnh từ ý tưởng của bạn.",
+        "video_label": "Tạo video AI", "video_description": "Lên ý tưởng và tạo video cho sản phẩm hoặc nội dung.",
+        "music_label": "Nhạc & âm thanh", "music_description": "Chuẩn bị nhạc nền, hiệu ứng và nội dung âm thanh.",
+        "voice_label": "Voice & lồng tiếng", "voice_description": "Xử lý giọng nói, phụ đề, dịch và lồng tiếng.",
+        "chat_label": "Hỏi AI", "chat_description": "Trao đổi với AI để viết, lên ý tưởng và lập kế hoạch.",
+        "guide_label": "Hướng dẫn", "guide_description": "Xem cách dùng, bảng giá và các bước tiếp theo.",
+        "support": "Hỗ trợ", "center": "Trung tâm", "change_language": "Đổi ngôn ngữ", "main_menu": "Menu chính",
+        "balance": "Số dư", "account_id": "ID", "tier": "Hạng", "language": "Ngôn ngữ",
+    },
+    "en": {
+        "hub_title": "TOAN AAS — Your AI assistant",
+        "hub_intro": "Choose a service to create content and work with images, video, audio, and documents directly in Telegram.",
+        "image_label": "AI Images", "image_description": "Create and prepare visual assets from your ideas.",
+        "video_label": "AI Video", "video_description": "Plan and create videos for products and content.",
+        "music_label": "Music & Audio", "music_description": "Prepare background music, effects, and audio content.",
+        "voice_label": "Voice & Dubbing", "voice_description": "Work with speech, subtitles, translation, and dubbing.",
+        "chat_label": "Ask AI", "chat_description": "Talk with AI to write, develop ideas, and make plans.",
+        "guide_label": "Guide", "guide_description": "View how-to information, pricing, and next steps.",
+        "support": "Support", "center": "Center", "change_language": "Change language", "main_menu": "Main menu",
+        "balance": "Balance", "account_id": "ID", "tier": "Tier", "language": "Language",
+    },
+    "zh": {
+        "hub_title": "TOAN AAS — 您的 AI 助手",
+        "hub_intro": "在 Telegram 中选择服务，完成内容创作、图片、视频、音频和文档工作。",
+        "image_label": "AI 图片", "image_description": "根据您的想法创建并准备视觉素材。",
+        "video_label": "AI 视频", "video_description": "为产品和内容策划并创建视频。",
+        "music_label": "音乐与音频", "music_description": "准备背景音乐、音效和音频内容。",
+        "voice_label": "语音与配音", "voice_description": "处理语音、字幕、翻译和配音。",
+        "chat_label": "咨询 AI", "chat_description": "与 AI 交流，写作、构思并制定计划。",
+        "guide_label": "使用指南", "guide_description": "查看使用方法、价格和下一步。",
+        "support": "支持", "center": "中心", "change_language": "更改语言", "main_menu": "主菜单",
+        "balance": "余额", "account_id": "ID", "tier": "等级", "language": "语言",
+    },
+    "es": {
+        "hub_title": "TOAN AAS — Tu asistente de IA",
+        "hub_intro": "Elige un servicio para crear contenido y trabajar con imágenes, vídeo, audio y documentos directamente en Telegram.",
+        "image_label": "Imágenes con IA", "image_description": "Crea y prepara recursos visuales a partir de tus ideas.",
+        "video_label": "Vídeo con IA", "video_description": "Planifica y crea vídeos para productos y contenido.",
+        "music_label": "Música y audio", "music_description": "Prepara música de fondo, efectos y contenido de audio.",
+        "voice_label": "Voz y doblaje", "voice_description": "Trabaja con voz, subtítulos, traducción y doblaje.",
+        "chat_label": "Preguntar a la IA", "chat_description": "Habla con la IA para escribir, desarrollar ideas y hacer planes.",
+        "guide_label": "Guía", "guide_description": "Consulta instrucciones, precios y los próximos pasos.",
+        "support": "Ayuda", "center": "Centro", "change_language": "Cambiar idioma", "main_menu": "Menú principal",
+        "balance": "Saldo", "account_id": "ID", "tier": "Nivel", "language": "Idioma",
+    },
+    "pt": {
+        "hub_title": "TOAN AAS — Seu assistente de IA",
+        "hub_intro": "Escolha um serviço para criar conteúdo e trabalhar com imagens, vídeo, áudio e documentos diretamente no Telegram.",
+        "image_label": "Imagens com IA", "image_description": "Crie e prepare recursos visuais a partir das suas ideias.",
+        "video_label": "Vídeo com IA", "video_description": "Planeje e crie vídeos para produtos e conteúdo.",
+        "music_label": "Música e áudio", "music_description": "Prepare música de fundo, efeitos e conteúdo de áudio.",
+        "voice_label": "Voz e dublagem", "voice_description": "Trabalhe com voz, legendas, tradução e dublagem.",
+        "chat_label": "Perguntar à IA", "chat_description": "Converse com a IA para escrever, desenvolver ideias e planejar.",
+        "guide_label": "Guia", "guide_description": "Veja instruções, preços e os próximos passos.",
+        "support": "Suporte", "center": "Central", "change_language": "Mudar idioma", "main_menu": "Menu principal",
+        "balance": "Saldo", "account_id": "ID", "tier": "Nível", "language": "Idioma",
+    },
+    "fr": {
+        "hub_title": "TOAN AAS — Votre assistant IA",
+        "hub_intro": "Choisissez un service pour créer du contenu et travailler avec des images, des vidéos, de l’audio et des documents dans Telegram.",
+        "image_label": "Images IA", "image_description": "Créez et préparez des ressources visuelles à partir de vos idées.",
+        "video_label": "Vidéo IA", "video_description": "Planifiez et créez des vidéos pour vos produits et contenus.",
+        "music_label": "Musique et audio", "music_description": "Préparez musique de fond, effets et contenu audio.",
+        "voice_label": "Voix et doublage", "voice_description": "Travaillez avec la voix, les sous-titres, la traduction et le doublage.",
+        "chat_label": "Demander à l’IA", "chat_description": "Échangez avec l’IA pour écrire, développer des idées et planifier.",
+        "guide_label": "Guide", "guide_description": "Consultez les instructions, les tarifs et les prochaines étapes.",
+        "support": "Assistance", "center": "Centre", "change_language": "Changer de langue", "main_menu": "Menu principal",
+        "balance": "Solde", "account_id": "ID", "tier": "Niveau", "language": "Langue",
+    },
+    "de": {
+        "hub_title": "TOAN AAS — Ihr KI-Assistent",
+        "hub_intro": "Wählen Sie einen Dienst, um Inhalte sowie Bilder, Videos, Audio und Dokumente direkt in Telegram zu bearbeiten.",
+        "image_label": "KI-Bilder", "image_description": "Erstellen und bereiten Sie visuelle Inhalte aus Ihren Ideen vor.",
+        "video_label": "KI-Video", "video_description": "Planen und erstellen Sie Videos für Produkte und Inhalte.",
+        "music_label": "Musik und Audio", "music_description": "Bereiten Sie Hintergrundmusik, Effekte und Audioinhalte vor.",
+        "voice_label": "Stimme und Synchronisation", "voice_description": "Arbeiten Sie mit Sprache, Untertiteln, Übersetzung und Synchronisation.",
+        "chat_label": "KI fragen", "chat_description": "Sprechen Sie mit der KI zum Schreiben, Ideenentwickeln und Planen.",
+        "guide_label": "Anleitung", "guide_description": "Sehen Sie Anleitungen, Preise und die nächsten Schritte an.",
+        "support": "Support", "center": "Zentrum", "change_language": "Sprache ändern", "main_menu": "Hauptmenü",
+        "balance": "Guthaben", "account_id": "ID", "tier": "Stufe", "language": "Sprache",
+    },
+    "ja": {
+        "hub_title": "TOAN AAS — あなたの AI アシスタント",
+        "hub_intro": "Telegram でサービスを選び、コンテンツ、画像、動画、音声、文書を作成・管理できます。",
+        "image_label": "AI 画像", "image_description": "アイデアから視覚素材を作成し、準備します。",
+        "video_label": "AI 動画", "video_description": "商品やコンテンツ向けの動画を企画・作成します。",
+        "music_label": "音楽と音声", "music_description": "BGM、効果音、音声コンテンツを準備します。",
+        "voice_label": "音声と吹き替え", "voice_description": "音声、字幕、翻訳、吹き替えを扱います。",
+        "chat_label": "AI に相談", "chat_description": "AI と話して文章作成、発想、計画づくりを行います。",
+        "guide_label": "ガイド", "guide_description": "使い方、料金、次の手順を確認できます。",
+        "support": "サポート", "center": "センター", "change_language": "言語を変更", "main_menu": "メインメニュー",
+        "balance": "残高", "account_id": "ID", "tier": "ランク", "language": "言語",
+    },
+    "ko": {
+        "hub_title": "TOAN AAS — 나의 AI 도우미",
+        "hub_intro": "Telegram에서 서비스를 선택해 콘텐츠, 이미지, 동영상, 오디오, 문서를 만들고 관리하세요.",
+        "image_label": "AI 이미지", "image_description": "아이디어에서 시각 자료를 만들고 준비합니다.",
+        "video_label": "AI 동영상", "video_description": "제품과 콘텐츠를 위한 동영상을 기획하고 만듭니다.",
+        "music_label": "음악과 오디오", "music_description": "배경 음악, 효과음, 오디오 콘텐츠를 준비합니다.",
+        "voice_label": "음성 및 더빙", "voice_description": "음성, 자막, 번역, 더빙 작업을 처리합니다.",
+        "chat_label": "AI에게 물어보기", "chat_description": "AI와 대화하며 글쓰기, 아이디어 정리, 계획 수립을 합니다.",
+        "guide_label": "가이드", "guide_description": "사용 방법, 요금, 다음 단계를 확인하세요.",
+        "support": "지원", "center": "센터", "change_language": "언어 변경", "main_menu": "메인 메뉴",
+        "balance": "잔액", "account_id": "ID", "tier": "등급", "language": "언어",
+    },
+    "hi": {
+        "hub_title": "TOAN AAS — आपका AI सहायक",
+        "hub_intro": "Telegram में सेवा चुनकर सामग्री, चित्र, वीडियो, ऑडियो और दस्तावेज़ पर काम करें।",
+        "image_label": "AI चित्र", "image_description": "अपने विचारों से दृश्य सामग्री बनाएं और तैयार करें।",
+        "video_label": "AI वीडियो", "video_description": "उत्पादों और सामग्री के लिए वीडियो की योजना बनाएं और तैयार करें।",
+        "music_label": "संगीत और ऑडियो", "music_description": "पृष्ठभूमि संगीत, प्रभाव और ऑडियो सामग्री तैयार करें।",
+        "voice_label": "आवाज़ और डबिंग", "voice_description": "आवाज़, उपशीर्षक, अनुवाद और डबिंग के साथ काम करें।",
+        "chat_label": "AI से पूछें", "chat_description": "लिखने, विचार विकसित करने और योजना बनाने के लिए AI से बात करें।",
+        "guide_label": "मार्गदर्शिका", "guide_description": "उपयोग विधि, कीमतें और अगले चरण देखें।",
+        "support": "सहायता", "center": "केंद्र", "change_language": "भाषा बदलें", "main_menu": "मुख्य मेनू",
+        "balance": "शेष राशि", "account_id": "ID", "tier": "स्तर", "language": "भाषा",
+    },
+    "ar": {
+        "hub_title": "TOAN AAS — مساعدك بالذكاء الاصطناعي",
+        "hub_intro": "اختر خدمة في Telegram لإنشاء المحتوى والعمل على الصور والفيديو والصوت والمستندات.",
+        "image_label": "صور بالذكاء الاصطناعي", "image_description": "أنشئ وجهّز مواد مرئية من أفكارك.",
+        "video_label": "فيديو بالذكاء الاصطناعي", "video_description": "خطط وأنشئ فيديوهات للمنتجات والمحتوى.",
+        "music_label": "موسيقى وصوت", "music_description": "جهّز موسيقى الخلفية والمؤثرات والمحتوى الصوتي.",
+        "voice_label": "صوت ودبلجة", "voice_description": "اعمل على الصوت والترجمة النصية والترجمة والدبلجة.",
+        "chat_label": "اسأل الذكاء الاصطناعي", "chat_description": "تحدث مع الذكاء الاصطناعي للكتابة وتطوير الأفكار والتخطيط.",
+        "guide_label": "الدليل", "guide_description": "اطلع على طريقة الاستخدام والأسعار والخطوات التالية.",
+        "support": "الدعم", "center": "المركز", "change_language": "تغيير اللغة", "main_menu": "القائمة الرئيسية",
+        "balance": "الرصيد", "account_id": "المعرّف", "tier": "المستوى", "language": "اللغة",
+    },
+    "ru": {
+        "hub_title": "TOAN AAS — ваш помощник ИИ",
+        "hub_intro": "Выберите сервис в Telegram для работы с контентом, изображениями, видео, аудио и документами.",
+        "image_label": "Изображения ИИ", "image_description": "Создавайте и подготавливайте визуальные материалы по своим идеям.",
+        "video_label": "Видео ИИ", "video_description": "Планируйте и создавайте видео для продуктов и контента.",
+        "music_label": "Музыка и аудио", "music_description": "Подготавливайте фоновую музыку, эффекты и аудиоматериалы.",
+        "voice_label": "Голос и дубляж", "voice_description": "Работайте с речью, субтитрами, переводом и дубляжом.",
+        "chat_label": "Спросить ИИ", "chat_description": "Общайтесь с ИИ, чтобы писать, развивать идеи и планировать.",
+        "guide_label": "Руководство", "guide_description": "Смотрите инструкции, цены и следующие шаги.",
+        "support": "Поддержка", "center": "Центр", "change_language": "Сменить язык", "main_menu": "Главное меню",
+        "balance": "Баланс", "account_id": "ID", "tier": "Уровень", "language": "Язык",
+    },
+    "tr": {
+        "hub_title": "TOAN AAS — Yapay zekâ asistanınız",
+        "hub_intro": "Telegram’da bir hizmet seçerek içerik, görsel, video, ses ve belgelerle çalışın.",
+        "image_label": "Yapay zekâ görselleri", "image_description": "Fikirlerinizden görsel içerikler oluşturun ve hazırlayın.",
+        "video_label": "Yapay zekâ videosu", "video_description": "Ürünler ve içerikler için videolar planlayın ve oluşturun.",
+        "music_label": "Müzik ve ses", "music_description": "Arka plan müziği, efektler ve ses içeriği hazırlayın.",
+        "voice_label": "Ses ve dublaj", "voice_description": "Ses, altyazı, çeviri ve dublaj ile çalışın.",
+        "chat_label": "Yapay zekâya sor", "chat_description": "Yazmak, fikir geliştirmek ve plan yapmak için yapay zekâyla konuşun.",
+        "guide_label": "Kılavuz", "guide_description": "Kullanım bilgilerini, fiyatları ve sonraki adımları görün.",
+        "support": "Destek", "center": "Merkez", "change_language": "Dili değiştir", "main_menu": "Ana menü",
+        "balance": "Bakiye", "account_id": "ID", "tier": "Seviye", "language": "Dil",
+    },
+    "th": {
+        "hub_title": "TOAN AAS — ผู้ช่วย AI ของคุณ",
+        "hub_intro": "เลือกบริการใน Telegram เพื่อสร้างเนื้อหาและทำงานกับภาพ วิดีโอ เสียง และเอกสาร",
+        "image_label": "ภาพ AI", "image_description": "สร้างและเตรียมสื่อภาพจากไอเดียของคุณ",
+        "video_label": "วิดีโอ AI", "video_description": "วางแผนและสร้างวิดีโอสำหรับสินค้าและเนื้อหา",
+        "music_label": "เพลงและเสียง", "music_description": "เตรียมเพลงพื้นหลัง เอฟเฟกต์ และเนื้อหาเสียง",
+        "voice_label": "เสียงและพากย์", "voice_description": "ทำงานกับเสียง คำบรรยาย การแปล และการพากย์",
+        "chat_label": "ถาม AI", "chat_description": "สนทนากับ AI เพื่อเขียน พัฒนาไอเดีย และวางแผน",
+        "guide_label": "คู่มือ", "guide_description": "ดูวิธีใช้ ราคา และขั้นตอนถัดไป",
+        "support": "ช่วยเหลือ", "center": "ศูนย์กลาง", "change_language": "เปลี่ยนภาษา", "main_menu": "เมนูหลัก",
+        "balance": "ยอดคงเหลือ", "account_id": "ID", "tier": "ระดับ", "language": "ภาษา",
+    },
+    "fil": {
+        "hub_title": "TOAN AAS — Ang iyong katulong na AI",
+        "hub_intro": "Pumili ng serbisyo sa Telegram para lumikha ng nilalaman at magtrabaho sa mga larawan, bidyo, tunog at dokumento.",
+        "image_label": "Mga larawang AI", "image_description": "Gumawa at maghanda ng mga biswal na materyal mula sa iyong mga ideya.",
+        "video_label": "Bidyong AI", "video_description": "Magplano at gumawa ng mga bidyo para sa produkto at nilalaman.",
+        "music_label": "Musika at tunog", "music_description": "Maghanda ng musikang panglikuran, mga epekto at nilalamang tunog.",
+        "voice_label": "Boses at dubbing", "voice_description": "Magtrabaho sa boses, subtitle, pagsasalin at dubbing.",
+        "chat_label": "Magtanong sa AI", "chat_description": "Makipag-usap sa AI para magsulat, bumuo ng ideya at magplano.",
+        "guide_label": "Gabay", "guide_description": "Tingnan ang paraan ng paggamit, presyo at susunod na hakbang.",
+        "support": "Suporta", "center": "Sentro", "change_language": "Palitan ang wika", "main_menu": "Pangunahing menu",
+        "balance": "Balanse", "account_id": "ID", "tier": "Antas", "language": "Wika",
+    },
+    "it": {
+        "hub_title": "TOAN AAS — Il tuo assistente IA",
+        "hub_intro": "Scegli un servizio in Telegram per creare contenuti e lavorare con immagini, video, audio e documenti.",
+        "image_label": "Immagini IA", "image_description": "Crea e prepara risorse visive a partire dalle tue idee.",
+        "video_label": "Video IA", "video_description": "Pianifica e crea video per prodotti e contenuti.",
+        "music_label": "Musica e audio", "music_description": "Prepara musica di sottofondo, effetti e contenuti audio.",
+        "voice_label": "Voce e doppiaggio", "voice_description": "Lavora con voce, sottotitoli, traduzione e doppiaggio.",
+        "chat_label": "Chiedi all’IA", "chat_description": "Parla con l’IA per scrivere, sviluppare idee e pianificare.",
+        "guide_label": "Guida", "guide_description": "Consulta istruzioni, prezzi e passaggi successivi.",
+        "support": "Assistenza", "center": "Centro", "change_language": "Cambia lingua", "main_menu": "Menu principale",
+        "balance": "Saldo", "account_id": "ID", "tier": "Livello", "language": "Lingua",
+    },
+    "id": {
+        "hub_title": "TOAN AAS — Asisten AI Anda",
+        "hub_intro": "Pilih layanan di Telegram untuk membuat konten dan bekerja dengan gambar, video, audio, serta dokumen.",
+        "image_label": "Gambar AI", "image_description": "Buat dan siapkan materi visual dari ide Anda.",
+        "video_label": "Video AI", "video_description": "Rencanakan dan buat video untuk produk serta konten.",
+        "music_label": "Musik dan audio", "music_description": "Siapkan musik latar, efek, dan konten audio.",
+        "voice_label": "Suara dan dubbing", "voice_description": "Bekerja dengan suara, subtitle, terjemahan, dan dubbing.",
+        "chat_label": "Tanya AI", "chat_description": "Berbicara dengan AI untuk menulis, mengembangkan ide, dan merencanakan.",
+        "guide_label": "Panduan", "guide_description": "Lihat cara penggunaan, harga, dan langkah berikutnya.",
+        "support": "Dukungan", "center": "Pusat", "change_language": "Ganti bahasa", "main_menu": "Menu utama",
+        "balance": "Saldo", "account_id": "ID", "tier": "Tingkat", "language": "Bahasa",
+    },
+}
+
+
+# Small navigation-only additions for the same public copy authority above.
+# They are deliberately copy-only and never determine payment, package, or
+# account eligibility.
+_PUBLIC_HUB_AUXILIARY_COPY = {
+    "vi": {"back": "Quay lại", "manual_topup": "Nạp thủ công", "packages_label": "Gói & combo", "account_label": "Tài khoản", "topup_label": "Nạp Xu", "vietnamese_docx": "Hướng dẫn bằng tiếng Việt (DOCX)", "language_picker_title": "Chọn ngôn ngữ", "language_picker_intro": "Chọn ngôn ngữ bạn muốn dùng trong TOAN AAS."},
+    "en": {"back": "Back", "manual_topup": "Manual top-up", "packages_label": "Plans & combos", "account_label": "Account", "topup_label": "Top up Xu", "vietnamese_docx": "Vietnamese guide (DOCX)", "language_picker_title": "Choose language", "language_picker_intro": "Choose the language you want to use in TOAN AAS."},
+    "zh": {"back": "返回", "manual_topup": "手动充值", "packages_label": "套餐与组合", "account_label": "账户", "topup_label": "充值 Xu", "vietnamese_docx": "越南语指南（DOCX）", "language_picker_title": "选择语言", "language_picker_intro": "请选择您希望在 TOAN AAS 中使用的语言。"},
+    "es": {"back": "Volver", "manual_topup": "Recarga manual", "packages_label": "Planes y combos", "account_label": "Cuenta", "topup_label": "Recargar Xu", "vietnamese_docx": "Guía en vietnamita (DOCX)", "language_picker_title": "Elige un idioma", "language_picker_intro": "Elige el idioma que quieres usar en TOAN AAS."},
+    "pt": {"back": "Voltar", "manual_topup": "Recarga manual", "packages_label": "Planos e combos", "account_label": "Conta", "topup_label": "Recarregar Xu", "vietnamese_docx": "Guia em vietnamita (DOCX)", "language_picker_title": "Escolha um idioma", "language_picker_intro": "Escolha o idioma que deseja usar no TOAN AAS."},
+    "fr": {"back": "Retour", "manual_topup": "Recharge manuelle", "packages_label": "Forfaits et combos", "account_label": "Compte", "topup_label": "Recharger Xu", "vietnamese_docx": "Guide en vietnamien (DOCX)", "language_picker_title": "Choisissez une langue", "language_picker_intro": "Choisissez la langue à utiliser dans TOAN AAS."},
+    "de": {"back": "Zurück", "manual_topup": "Manuelle Aufladung", "packages_label": "Pakete und Kombis", "account_label": "Konto", "topup_label": "Xu aufladen", "vietnamese_docx": "Leitfaden auf Vietnamesisch (DOCX)", "language_picker_title": "Sprache wählen", "language_picker_intro": "Wähle die Sprache, die du in TOAN AAS verwenden möchtest."},
+    "ja": {"back": "戻る", "manual_topup": "手動チャージ", "packages_label": "プランとコンボ", "account_label": "アカウント", "topup_label": "Xu をチャージ", "vietnamese_docx": "ベトナム語ガイド（DOCX）", "language_picker_title": "言語を選択", "language_picker_intro": "TOAN AAS で使用する言語を選択してください。"},
+    "ko": {"back": "뒤로", "manual_topup": "수동 충전", "packages_label": "플랜 및 콤보", "account_label": "계정", "topup_label": "Xu 충전", "vietnamese_docx": "베트남어 가이드(DOCX)", "language_picker_title": "언어 선택", "language_picker_intro": "TOAN AAS에서 사용할 언어를 선택하세요."},
+    "hi": {"back": "वापस", "manual_topup": "मैन्युअल टॉप-अप", "packages_label": "प्लान और कॉम्बो", "account_label": "खाता", "topup_label": "Xu टॉप-अप", "vietnamese_docx": "वियतनामी मार्गदर्शिका (DOCX)", "language_picker_title": "भाषा चुनें", "language_picker_intro": "TOAN AAS में उपयोग करने के लिए भाषा चुनें।"},
+    "ar": {"back": "رجوع", "manual_topup": "شحن يدوي", "packages_label": "خطط وباقات", "account_label": "الحساب", "topup_label": "شحن Xu", "vietnamese_docx": "دليل باللغة الفيتنامية (DOCX)", "language_picker_title": "اختر اللغة", "language_picker_intro": "اختر اللغة التي تريد استخدامها في TOAN AAS."},
+    "ru": {"back": "Назад", "manual_topup": "Ручное пополнение", "packages_label": "Планы и комплекты", "account_label": "Аккаунт", "topup_label": "Пополнить Xu", "vietnamese_docx": "Руководство на вьетнамском (DOCX)", "language_picker_title": "Выберите язык", "language_picker_intro": "Выберите язык для использования в TOAN AAS."},
+    "tr": {"back": "Geri", "manual_topup": "Manuel yükleme", "packages_label": "Planlar ve paketler", "account_label": "Hesap", "topup_label": "Xu yükle", "vietnamese_docx": "Vietnamca kılavuz (DOCX)", "language_picker_title": "Dil seçin", "language_picker_intro": "TOAN AAS'ta kullanmak istediğiniz dili seçin."},
+    "th": {"back": "ย้อนกลับ", "manual_topup": "เติมเงินด้วยตนเอง", "packages_label": "แพ็กเกจและคอมโบ", "account_label": "บัญชี", "topup_label": "เติม Xu", "vietnamese_docx": "คู่มือภาษาเวียดนาม (DOCX)", "language_picker_title": "เลือกภาษา", "language_picker_intro": "เลือกภาษาที่ต้องการใช้ใน TOAN AAS"},
+    "fil": {"back": "Bumalik", "manual_topup": "Manwal na top-up", "packages_label": "Mga plano at combo", "account_label": "Account", "topup_label": "Mag-top-up ng Xu", "vietnamese_docx": "Gabay sa Vietnamese (DOCX)", "language_picker_title": "Pumili ng wika", "language_picker_intro": "Piliin ang wikang gusto mong gamitin sa TOAN AAS."},
+    "it": {"back": "Indietro", "manual_topup": "Ricarica manuale", "packages_label": "Piani e combo", "account_label": "Account", "topup_label": "Ricarica Xu", "vietnamese_docx": "Guida in vietnamita (DOCX)", "language_picker_title": "Scegli una lingua", "language_picker_intro": "Scegli la lingua da usare in TOAN AAS."},
+    "id": {"back": "Kembali", "manual_topup": "Isi ulang manual", "packages_label": "Paket dan kombo", "account_label": "Akun", "topup_label": "Isi ulang Xu", "vietnamese_docx": "Panduan berbahasa Vietnam (DOCX)", "language_picker_title": "Pilih bahasa", "language_picker_intro": "Pilih bahasa yang ingin digunakan di TOAN AAS."},
+}
+
+
+_PUBLIC_PACKAGE_NAVIGATION_COPY = {
+    "es": {"monthly_plans": "Planes mensuales", "finished_combos": "Combos completos", "my_packages": "Mis paquetes", "large_order": "Pedido grande", "notes": "Notas", "refresh": "Actualizar", "confirm_purchase": "Confirmar compra"},
+    "pt": {"monthly_plans": "Planos mensais", "finished_combos": "Combos completos", "my_packages": "Meus pacotes", "large_order": "Pedido maior", "notes": "Notas", "refresh": "Atualizar", "confirm_purchase": "Confirmar compra"},
+    "fr": {"monthly_plans": "Forfaits mensuels", "finished_combos": "Combos complets", "my_packages": "Mes forfaits", "large_order": "Demande importante", "notes": "Notes", "refresh": "Actualiser", "confirm_purchase": "Confirmer l’achat"},
+    "de": {"monthly_plans": "Monatspakete", "finished_combos": "Fertige Kombis", "my_packages": "Meine Pakete", "large_order": "Größere Anfrage", "notes": "Hinweise", "refresh": "Aktualisieren", "confirm_purchase": "Kauf bestätigen"},
+    "ja": {"monthly_plans": "月額プラン", "finished_combos": "完成コンボ", "my_packages": "マイパッケージ", "large_order": "大口のご相談", "notes": "注意事項", "refresh": "更新", "confirm_purchase": "購入を確認"},
+    "ko": {"monthly_plans": "월간 플랜", "finished_combos": "완성 콤보", "my_packages": "내 패키지", "large_order": "대량 문의", "notes": "안내", "refresh": "새로고침", "confirm_purchase": "구매 확인"},
+    "hi": {"monthly_plans": "मासिक प्लान", "finished_combos": "पूर्ण कॉम्बो", "my_packages": "मेरे पैकेज", "large_order": "बड़ी मात्रा का अनुरोध", "notes": "नोट्स", "refresh": "रीफ़्रेश", "confirm_purchase": "खरीद की पुष्टि"},
+    "ar": {"monthly_plans": "خطط شهرية", "finished_combos": "باقات مكتملة", "my_packages": "باقاتي", "large_order": "طلب كبير", "notes": "ملاحظات", "refresh": "تحديث", "confirm_purchase": "تأكيد الشراء"},
+    "ru": {"monthly_plans": "Ежемесячные планы", "finished_combos": "Готовые комплекты", "my_packages": "Мои пакеты", "large_order": "Крупный заказ", "notes": "Примечания", "refresh": "Обновить", "confirm_purchase": "Подтвердить покупку"},
+    "tr": {"monthly_plans": "Aylık planlar", "finished_combos": "Hazır paketler", "my_packages": "Paketlerim", "large_order": "Büyük sipariş", "notes": "Notlar", "refresh": "Yenile", "confirm_purchase": "Satın almayı onayla"},
+    "th": {"monthly_plans": "แผนรายเดือน", "finished_combos": "คอมโบสำเร็จรูป", "my_packages": "แพ็กเกจของฉัน", "large_order": "คำขอจำนวนมาก", "notes": "หมายเหตุ", "refresh": "รีเฟรช", "confirm_purchase": "ยืนยันการซื้อ"},
+    "fil": {"monthly_plans": "Mga buwanang plano", "finished_combos": "Mga kumpletong combo", "my_packages": "Mga package ko", "large_order": "Malaking order", "notes": "Mga tala", "refresh": "I-refresh", "confirm_purchase": "Kumpirmahin ang pagbili"},
+    "it": {"monthly_plans": "Piani mensili", "finished_combos": "Combo completi", "my_packages": "I miei pacchetti", "large_order": "Ordine grande", "notes": "Note", "refresh": "Aggiorna", "confirm_purchase": "Conferma acquisto"},
+    "id": {"monthly_plans": "Paket bulanan", "finished_combos": "Kombinasi lengkap", "my_packages": "Paket saya", "large_order": "Pesanan besar", "notes": "Catatan", "refresh": "Segarkan", "confirm_purchase": "Konfirmasi pembelian"},
+}
+
+
+_PUBLIC_PACKAGE_GUIDE_COPY = {
+    "vi": "Gói tháng và combo dùng theo quyền lợi hiển thị; không quy đổi thành Xu linh hoạt và không kích hoạt khuyến mãi nạp tiền.",
+    "en": "Plans and combos are used according to the benefits shown; they are not converted to flexible Xu and do not trigger top-up bonuses.",
+    "zh": "月度套餐和组合按页面列明的权益使用；不能兑换为灵活 Xu，也不会触发充值赠送。",
+    "es": "Los planes y combos se usan conforme a los beneficios mostrados; no se convierten en Xu flexible ni activan bonificaciones de recarga.",
+    "pt": "Os planos e combos são usados conforme os benefícios exibidos; não se convertem em Xu flexível nem ativam bônus de recarga.",
+    "fr": "Les forfaits et combos s'utilisent selon les avantages affichés ; ils ne sont pas convertibles en Xu flexible et ne déclenchent pas de bonus de recharge.",
+    "de": "Pakete und Kombis werden gemäß den angezeigten Leistungen genutzt; sie werden nicht in flexibles Xu umgewandelt und lösen keine Aufladeboni aus.",
+    "ja": "プランとコンボは表示された特典に従って利用します。柔軟に使える Xu への換算やチャージボーナスの対象にはなりません。",
+    "ko": "플랜과 콤보는 표시된 혜택에 따라 사용됩니다. 유연하게 사용할 수 있는 Xu로 전환되지 않으며 충전 보너스도 발생하지 않습니다.",
+    "hi": "प्लान और कॉम्बो दिखाए गए लाभों के अनुसार उपयोग होते हैं; इन्हें लचीले Xu में नहीं बदला जाता और ये टॉप-अप बोनस सक्रिय नहीं करते।",
+    "ar": "تُستخدم الخطط والباقات وفق المزايا المعروضة؛ ولا تتحول إلى Xu مرن ولا تُفعّل مكافآت الشحن.",
+    "ru": "Планы и комплекты используются согласно указанным преимуществам; они не преобразуются в гибкие Xu и не дают бонусов за пополнение.",
+    "tr": "Planlar ve paketler gösterilen avantajlara göre kullanılır; esnek Xu'ya dönüştürülmez ve yükleme bonusu sağlamaz.",
+    "th": "แพ็กเกจและคอมโบใช้ตามสิทธิประโยชน์ที่แสดงไว้ ไม่สามารถแปลงเป็น Xu แบบยืดหยุ่นและไม่ทำให้ได้รับโบนัสเติมเงิน",
+    "fil": "Ginagamit ang mga plano at combo ayon sa ipinakitang benepisyo; hindi sila naisasalin sa flexible Xu at hindi nagpapagana ng bonus sa top-up.",
+    "it": "I piani e i combo si usano secondo i vantaggi mostrati; non si convertono in Xu flessibili e non attivano bonus di ricarica.",
+    "id": "Paket dan kombo digunakan sesuai manfaat yang ditampilkan; tidak dapat diubah menjadi Xu fleksibel dan tidak memicu bonus isi ulang.",
+}
+
+
+def public_hub_copy(lang: str | None = None) -> dict[str, str]:
+    """Return direct customer-facing Hub copy for a supported locale."""
+
+    locale = public_copy_locale(lang)
+    copy = dict(_PUBLIC_HUB_COPY[locale])
+    copy.update(_PUBLIC_HUB_AUXILIARY_COPY[locale])
+    copy.update(_PUBLIC_PACKAGE_NAVIGATION_COPY.get(locale, {}))
+    return copy
+
+
+def public_guide_navigation_copy(lang: str | None = None) -> dict[str, str]:
+    """Return native labels for legacy guide-entry buttons when available."""
+
+    return dict(PUBLIC_GUIDE_NAVIGATION_I18N.get(public_copy_locale(lang), {}))
 
 
 def public_copy_locale(lang: str | None = None) -> str:
@@ -1052,6 +1360,7 @@ def _localized_international_pricing_lines(
     song_line = "• 200 / 250 / 300 Xu."
     video_discounts = video_multiscene_discount_lines(locale)
     topup_policy = international_topup_policy_lines(locale)
+    package_info = _PUBLIC_PACKAGE_GUIDE_COPY[locale]
     mapping = {
         "total": [
             f"💰 <b>{copy['pricing']}</b>", "", common, "", chat_pro_token_price_line(locale),
@@ -1071,7 +1380,7 @@ def _localized_international_pricing_lines(
         "image": [f"🖼 <b>{copy['images']}</b>", "", common, "", *image_lines],
         "docs": [f"📄 <b>{copy['documents']}</b>", "", common],
         "free": [f"🎁 <b>{copy['free']}</b>", "", common],
-        "member": [f"👑 <b>{copy['member']}</b>", "", common, "", *topup_policy],
+        "member": [f"👑 <b>{copy['member']}</b>", "", common, "", package_info, *topup_policy],
     }
     return mapping.get((section or "total").strip().lower(), mapping["total"])
 
@@ -1100,7 +1409,7 @@ def _international_pricing_lines(section: str, context: dict | None, lang: str) 
         mapping = {
             "total": [
                 "💰 <b>TOAN AAS 价格</b>", "", common, "", chat_line,
-                "<b>AI 图片</b>", *image_lines, "", "<b>Product Video</b>", *video_lines, *video_discounts,
+                "<b>AI 图片</b>", *image_lines, "", "<b>产品视频</b>", *video_lines, *video_discounts,
                 "", f"• AI 音乐：配乐基础 {music_prices['basic']} / 标准 {music_prices['standard']} / 高级 {music_prices['premium']} Xu；有歌词歌曲 200 / 250 / 300 Xu。",
                 "• 语音、字幕和配音将按所选服务在确认前显示当前报价。",
                 "• 符合资格的会员服务折扣仍然适用；国际账户按确认前显示的价格收费。",
@@ -1119,7 +1428,7 @@ def _international_pricing_lines(section: str, context: dict | None, lang: str) 
                 "• 若无法生成有效音乐文件，不扣除 Xu。",
             ],
             "video": [
-                "🎬 <b>Product Video 价格</b>", "", common, "", *video_lines, *video_discounts,
+                "🎬 <b>产品视频价格</b>", "", common, "", *video_lines, *video_discounts,
                 "", "• 每个档位按已公布时长和场景数计算；确认页显示总 Xu。",
                 "• 客户自带图片、音乐、语音或文字 logo 不收取创建资源费用。",
             ],
@@ -1687,6 +1996,7 @@ def _localized_international_guide_sections(lang: str) -> list[tuple[str, str, s
     video_discounts = video_multiscene_discount_lines(locale)
     music_prices = canonical_music_background_prices()
     music_line = f"{copy['music']}: {music_prices['basic']} / {music_prices['standard']} / {music_prices['premium']} Xu."
+    package_info = _PUBLIC_PACKAGE_GUIDE_COPY[locale]
     return [
         ("quick_start", copy["guide"], "\n".join([f"📚 <b>{copy['guide']}</b>", "", copy["quote"]])),
         ("image_ai", copy["images"], "\n".join([f"🖼 <b>{copy['images']}</b>", "", copy["quote"], "", *image_lines])),
@@ -1694,7 +2004,7 @@ def _localized_international_guide_sections(lang: str) -> list[tuple[str, str, s
         ("audio", f"{copy['voice']} / {copy['music']}", "\n".join([f"🎧 <b>{copy['voice']} / {copy['music']}</b>", "", copy["quote"], "", music_line, "200 / 250 / 300 Xu."])),
         ("subtitle_dub", copy["subtitles"], "\n".join([f"🌐 <b>{copy['subtitles']}</b>", "", copy["quote"]])),
         _international_topup_guide_section(locale),
-        ("packages", copy["member"], "\n".join([f"👑 <b>{copy['member']}</b>", "", copy["quote"]])),
+        ("packages", copy["member"], "\n".join([f"👑 <b>{copy['member']}</b>", "", copy["quote"], "", package_info])),
         ("faq", copy["free"], "\n".join([f"❓ <b>{copy['free']}</b>", "", copy["quote"]])),
     ]
 
@@ -1714,7 +2024,7 @@ def _international_guide_sections(lang: str = "en") -> list[tuple[str, str, str]
                 "快速开始",
                 "\n".join([
                     "🚀 <b>TOAN AAS 快速开始</b>", "",
-                    "1. 选择图片、Product Video、音频、字幕/翻译/配音或文档工具。",
+                    "1. 选择图片、产品视频、音频、字幕/翻译/配音或文档工具。",
                     "2. 清楚说明目标、素材、风格和用途。",
                     "3. 在任何付费处理前检查报价并确认。",
                     "4. 只有确认且获得有效结果后才会扣除 Xu。",
@@ -1732,11 +2042,11 @@ def _international_guide_sections(lang: str = "en") -> list[tuple[str, str, str]
             ),
             (
                 "video_ai",
-                "Product Video",
+                "产品视频",
                 "\n".join([
-                    "🎬 <b>Product Video</b>", "",
+                    "🎬 <b>产品视频</b>", "",
                     "先选择场景数量和质量档位，确认页会显示每场价格与总 Xu。", "",
-                    "当前公开 Product Video 档位：", *video_lines,
+                    "当前公开产品视频档位：", *video_lines,
                     *video_discounts,
                     "", "每个档位按公布时长和场景数计算。",
                 ]),

@@ -147,7 +147,7 @@ def test_public_html_and_routes_accept_and_preserve_locale():
     assert "async def public_guide_page(lang: str = \"vi\")" in BOT_SOURCE
     assert "async def download_pricing_markdown(lang: str = \"vi\")" in BOT_SOURCE
     assert "async def download_guide_markdown(lang: str = \"vi\")" in BOT_SOURCE
-    assert "requested_locale = normalize_user_language(lang) or \"vi\"" in BOT_SOURCE
+    assert "requested_locale = public_pricing_locale(lang)" in BOT_SOURCE
     assert 'home_href=f"/?lang={requested_locale}"' in BOT_SOURCE
 
 
@@ -161,7 +161,7 @@ def test_public_page_titles_use_the_existing_native_locale_labels():
 def test_public_markdown_downloads_keep_every_supported_public_locale():
     assert "public_copy_locale," in BOT_SOURCE
     assert "locale = public_copy_locale(lang)" in BOT_SOURCE
-    assert "public_guide_markdown(public_copy_locale(lang))" in BOT_SOURCE
+    assert "public_guide_markdown(requested_locale)" in BOT_SOURCE
 
 
 def test_every_international_locale_has_its_own_public_pricing_copy_and_video_matches_checkpoint():

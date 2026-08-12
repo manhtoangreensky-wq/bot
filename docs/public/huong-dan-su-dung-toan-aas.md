@@ -274,9 +274,9 @@ Bảng giá tạo ảnh:
 • Cân bằng: 20 Xu / ảnh.
 • Cân bằng + bảo hành: 30 Xu / ảnh.
 • Sáng tạo chi tiết: 50 Xu / ảnh.
-• Sáng tạo chi tiết + bảo hành: 110 Xu / ảnh.
-• Cao cấp: 80 Xu / ảnh.
-• Cao cấp + bảo hành: 150 Xu / ảnh.
+• Sáng tạo chi tiết + bảo hành: 100 Xu / ảnh.
+• Cao cấp: 70 Xu / ảnh.
+• Cao cấp + bảo hành: 140 Xu / ảnh.
 
 Ví dụ: chọn mức ảnh hiện hành để tạo ảnh sản phẩm. Nếu ảnh không tạo được hợp lệ, hệ thống không trừ Xu.
 
