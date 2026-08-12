@@ -10,7 +10,7 @@ from copy import deepcopy
 from typing import Any
 
 
-TAIL_FLOW_VERSION = 17
+TAIL_FLOW_VERSION = 18
 
 STATE_FIELDS = (
     "tail_flow_version",
@@ -553,9 +553,9 @@ def new_state(
         "return_to": str(return_to or adapter["return_to"]),
         "brand_pending_target": "",
         "brand_pending_position": "",
-        "branding_return_to": "summary",
-        "branding_back_to": "prompt",
-        "summary_return_to": "logo",
+        "branding_return_to": "addon",
+        "branding_back_to": "addon",
+        "summary_return_to": "addon",
         "submit_preflight_snapshot": {},
         "handled_callback_ids": [],
         "confirm_token": "",
@@ -595,7 +595,11 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     current["selected_prompt"] = str(current.get("selected_prompt") or "").strip()
     current["prompt_revision"] = max(0, int(current.get("prompt_revision") or 0))
     current["plan_status"] = str(current.get("plan_status") or "approved")
-    current["review_status"] = str(current.get("review_status") or "not_ready")
+    current["review_status"] = (
+        str(current.get("review_status") or "not_ready")
+        if str(current.get("review_status") or "not_ready") in {"not_ready", "ready"}
+        else "not_ready"
+    )
     audio = default_audio_config(source_audio_available=bool(adapter["source_audio_available"]))
     audio.update(dict(current.get("audio_config") or {}))
     audio["source_audio_available"] = bool(
@@ -686,16 +690,18 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
         else ""
     )
     current["brand_pending_position"] = str(current.get("brand_pending_position") or "")
-    branding_return_to = str(current.get("branding_return_to") or "summary")
-    if branding_return_to in {"review", "audio"}:
-        branding_return_to = "summary"
-    current["branding_return_to"] = "summary"
-    current["branding_back_to"] = (
-        str(current.get("branding_back_to") or "prompt")
-        if str(current.get("branding_back_to") or "prompt") in {"prompt", "summary", "product_review"}
-        else "prompt"
+    branding_return_to = str(current.get("branding_return_to") or "addon")
+    current["branding_return_to"] = (
+        branding_return_to
+        if branding_return_to in {"addon", "review"}
+        else "addon"
     )
-    current["summary_return_to"] = "logo"
+    current["branding_back_to"] = (
+        str(current.get("branding_back_to") or "addon")
+        if str(current.get("branding_back_to") or "addon") in {"addon", "product_review"}
+        else "addon"
+    )
+    current["summary_return_to"] = "addon"
     current["submit_preflight_snapshot"] = dict(current.get("submit_preflight_snapshot") or {})
     if stored_flow_version < TAIL_FLOW_VERSION:
         terminal_or_commercial = current["status_stage"] in {
@@ -714,9 +720,9 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
         else:
             current["review_status"] = "not_ready"
             current["summary_status"] = "not_ready"
-            current["branding_return_to"] = "summary"
-            current["branding_back_to"] = "prompt"
-            current["summary_return_to"] = "logo"
+            current["branding_return_to"] = "addon"
+            current["branding_back_to"] = "addon"
+            current["summary_return_to"] = "addon"
     current["handled_callback_ids"] = [
         str(item) for item in current.get("handled_callback_ids") or [] if str(item).strip()
     ][-100:]
@@ -726,15 +732,13 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def branding_back_callback(state: dict[str, Any] | None) -> str:
-    """Return to the exact product review that opened the shared branding tail."""
+    """Return branding to the shared Add-on hub or its exact product owner."""
 
     current = normalize_state(dict(state or {}))
-    if str(current.get("branding_back_to") or "") == "summary":
-        return "video_tail|summary|open"
     adapter = adapter_for(str(current.get("video_product_type") or ""))
     if str(current.get("branding_back_to") or "") == "product_review":
         return str(adapter.get("return_to") or "video_tail|review|prompts")
-    return "video_tail|review|prompts"
+    return "video_tail|addon|open"
 
 
 def apply_content_contract(state: dict[str, Any], contract: dict[str, Any] | None) -> dict[str, Any]:
@@ -885,7 +889,65 @@ def content_contract_ready(state: dict[str, Any]) -> bool:
 
 def mark_review_complete(state: dict[str, Any]) -> dict[str, Any]:
     current = normalize_state(state)
-    current["review_status"] = "ready"
+    current["review_status"] = (
+        "ready"
+        if content_contract_ready(current) and addon_complete(current)
+        else "not_ready"
+    )
+    current["summary_status"] = current["review_status"]
+    current["status_stage"] = "review"
+    return normalize_state(current)
+
+
+def addon_complete(state: dict[str, Any]) -> bool:
+    """Return whether all optional Add-on choices have an explicit outcome."""
+
+    current = normalize_state(state)
+    return all(
+        current.get(field) in {"configured", "skipped"}
+        for field in ("audio_status", "logo_status", "watermark_status")
+    )
+
+
+def mark_addon_complete(state: dict[str, Any]) -> dict[str, Any]:
+    """Finish Add-on without discarding any configured audio or branding."""
+
+    current = normalize_state(state)
+    audio = dict(current.get("audio_config") or {})
+    if current.get("audio_status") not in {"configured", "skipped"}:
+        current["audio_status"] = (
+            "configured" if any(bool(audio.get(key)) for key in TOGGLE_KEYS) else "skipped"
+        )
+
+    logo = dict(current.get("logo_config") or {})
+    if current.get("logo_status") not in {"configured", "skipped"}:
+        current["logo_status"] = (
+            "configured"
+            if logo.get("enabled") and logo.get("asset_file_id") and logo.get("position")
+            else "skipped"
+        )
+
+    watermark = dict(current.get("watermark_config") or {})
+    if current.get("watermark_status") not in {"configured", "skipped"}:
+        current["watermark_status"] = (
+            "configured"
+            if watermark.get("enabled") and watermark.get("text") and watermark.get("position")
+            else "skipped"
+        )
+
+    current["review_status"] = "not_ready"
+    current["summary_status"] = "not_ready"
+    current["status_stage"] = "audio_addons"
+    return normalize_state(current)
+
+
+def prepare_review(state: dict[str, Any]) -> dict[str, Any]:
+    """Open Review without silently approving what the customer has not confirmed."""
+
+    current = normalize_state(state)
+    current["summary_status"] = (
+        "ready" if content_contract_ready(current) and addon_complete(current) else "not_ready"
+    )
     current["status_stage"] = "review"
     return normalize_state(current)
 
@@ -950,30 +1012,17 @@ def next_required_screen(state: dict[str, Any]) -> str:
     """Return the first missing screen in the canonical shared video tail."""
 
     current = normalize_state(state)
-    if not content_contract_ready(current):
-        return "summary"
-    if (
-        current.get("logo_status") not in {"configured", "skipped"}
-        or current.get("watermark_status") not in {"configured", "skipped"}
-    ):
-        return "logo"
-    if current.get("summary_status") != "ready":
-        return "summary"
+    if not addon_complete(current):
+        return "addon"
+    if not content_contract_ready(current) or current.get("review_status") != "ready":
+        return "review"
     return ""
 
 
 def prepare_summary(state: dict[str, Any]) -> dict[str, Any]:
-    """Normalize optional tail fields without making them invoice blockers."""
+    """Compatibility entry for old Summary callbacks; Review remains explicit."""
 
-    current = normalize_state(state)
-    current["summary_status"] = "ready" if (
-        content_contract_ready(current)
-        and current.get("logo_status") in {"configured", "skipped"}
-        and current.get("watermark_status") in {"configured", "skipped"}
-    ) else "not_ready"
-    current["review_status"] = "ready" if current["summary_status"] == "ready" else "not_ready"
-    current["status_stage"] = "summary"
-    return normalize_state(current)
+    return prepare_review(state)
 
 
 def scope_key(state: dict[str, Any]) -> tuple[str, str, int]:

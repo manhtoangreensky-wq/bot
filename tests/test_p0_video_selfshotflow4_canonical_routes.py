@@ -218,5 +218,5 @@ def test_every_canonical_screen_has_its_exact_back_owner(flow: str):
         model = video_selfshotflow4.screen_model(flow, screen, state)
         expected = video_selfshotflow4.back_callback(flow, screen, state)
         assert model["rows"][-1][0][1] == expected
-        assert model["rows"][-1][1][1] == "menu|main"
+        assert model["rows"][-1][1][1] == "menu|main_video"
         assert video_selfshotflow4.validate_rows(model["rows"], back_callback=expected)["ok"]
