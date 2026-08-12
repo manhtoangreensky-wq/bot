@@ -90418,7 +90418,6 @@ def video_script_hub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("📄 Tải file kịch bản" if is_vi else "📄 Upload script file", callback_data="vproduct|script_upload"),
-            InlineKeyboardButton("⬅️ Quay lại Menu Video" if is_vi else "⬅️ Video menu", callback_data="menu|main_video"),
         ],
     ])
 
