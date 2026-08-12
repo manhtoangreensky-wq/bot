@@ -146125,7 +146125,7 @@ async def run_translate_voice_to_target(update: Update, context: ContextTypes.DE
                 f"• {copy['translation_text_confirm_target']}: <b>{html.escape(translate_target_label(target))}</b>\n\n"
                 f"<b>{copy['translation_transcript_original']}:</b>\n"
                 f"<code>{html.escape(transcript[:1100])}</code>\n\n"
-                copy['translation_picker_no_charge'],
+                + copy['translation_picker_no_charge'],
                 parse_mode="HTML",
             )
         try:

@@ -6,6 +6,7 @@ can initialize unrelated runtime services.  They protect presentation only.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -1179,6 +1180,11 @@ def test_translation_file_voice_shell_has_direct_native_copy_and_keeps_routes():
         rendered = runtime["translation_session_started_text"](session, locale)
         assert copy["translation_input_text_voice"] in rendered, locale
         assert copy["translation_output_text"] in rendered, locale
+
+
+def test_voice_translation_result_renderer_source_compiles():
+    """Protect the extracted public Voice Translation renderer from syntax drift."""
+    ast.parse(_async_function_source("run_translate_voice_to_target"))
 
 
 def test_main_menu_keeps_the_owner_approved_eight_row_layout_for_every_locale():
