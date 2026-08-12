@@ -83,8 +83,8 @@ def test_main_menu_layout_regular_user():
 
     assert labels == [
         ["🆓 Công cụ miễn phí", "💎 Chat Pro • 5/25 Xu/1K"],
-        ["👤 Tài khoản", "🖼 Tạo ảnh AI"],
-        ["🎬 Tạo video AI", "🎧 Studio âm thanh"],
+        ["🎬 Tạo video AI", "🖼 Tạo ảnh AI"],
+        ["👤 Tài khoản", "🎧 Studio âm thanh"],
         ["🌐 Dịch thuật", "📝 Ghi chú / Tài liệu"],
         ["📚 Hướng dẫn", "👨‍💼 Hỗ trợ"],
         ["💰 Nạp Xu / Bảng giá", "💬 Góp ý / Báo lỗi"],

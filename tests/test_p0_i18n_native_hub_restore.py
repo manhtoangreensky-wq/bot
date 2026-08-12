@@ -267,9 +267,9 @@ def test_hub_layout_has_the_exact_owner_rows_and_preserves_existing_routes():
             "freehub|main", "menu|chat_pro",
         ]
         assert [button.callback_data for button in markup.inline_keyboard[1]] == [
-            "menu|main_profile", "menu|main_image",
+            "menu|main_video", "menu|main_image",
         ]
-        assert markup.inline_keyboard[2][0].callback_data == "menu|main_video"
+        assert markup.inline_keyboard[2][0].callback_data == "menu|main_profile"
         assert markup.inline_keyboard[2][1].callback_data.startswith("context|")
         assert [button.callback_data for button in markup.inline_keyboard[3]] == [
             "menu|translate", "menu|main_memory",
@@ -300,8 +300,8 @@ def test_hub_layout_has_the_exact_owner_rows_and_preserves_existing_routes():
             markup.inline_keyboard,
             (
                 ("free_tools_label", "chat_pro_label"),
-                ("account_label", "image_label"),
-                ("video_label", "audio_studio_label"),
+                ("video_label", "image_label"),
+                ("account_label", "audio_studio_label"),
                 ("translation_label", "notes_docs_label"),
                 ("guide_label", "support"),
                 ("topup_pricing_label", "feedback_label"),
