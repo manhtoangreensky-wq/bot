@@ -7244,6 +7244,9 @@ MUSIC_CONFIRM_SUBMIT_BLOCKERS = {
 }
 
 def music_confirm_submit_public_failure_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        copy = public_hub_copy(lang)
+        return f"⚠️ {copy['audio_failure']} {copy['common_no_charge']} {copy['common_retry']}"
     return "⚠️ Chưa gửi được yêu cầu tạo nhạc. TOAN AAS chưa xử lý. Hệ thống chưa trừ Xu. Vui lòng thử lại sau."
 
 def music_confirm_submit_blocker_text(blocker: str = "") -> str:
@@ -8590,7 +8593,8 @@ MUSIC_PANEL_CREATOR_TRACES: dict[str, dict] = {}
 
 def music_panel_missing_job_public_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
-        return "⚠️ TOAN AAS could not create the music task right now. The system has not charged Xu. Please try again."
+        copy = public_hub_copy(lang)
+        return f"⚠️ {copy['audio_failure']} {copy['common_no_charge']} {copy['common_retry']}"
     return "⚠️ TOAN AAS chưa tạo được tác vụ nhạc lúc này. Hệ thống chưa trừ Xu. Anh/chị vui lòng thử lại."
 
 
@@ -17900,11 +17904,8 @@ def domestic_topup_bonus_notice() -> str:
 
 def foreign_topup_policy_note(lang: str = "vi") -> str:
     lang = normalize_user_language(lang) or "vi"
-    if lang == "zh":
-        return "国际充值按照 TOAN AAS 的内部固定汇率换算，不包含首次充值奖励、启动奖励或额外 Xu 充值奖励。符合条件时，会员等级折扣比例仍可使用。"
-    if lang == "en":
-        return "International top-up uses TOAN AAS fixed internal exchange rates and does not include first top-up bonus, launch bonus, or extra Xu top-up rewards. Rank-based discount percentage may still apply when eligible."
-    return "Nạp quốc tế dùng tỉ giá nội bộ cố định của TOAN AAS, chỉ nhận Xu gốc và không áp dụng bonus nạp lần đầu, lần hai, Launch Bonus hoặc ưu đãi cộng Xu nội địa. Chiết khấu theo hạng vẫn có thể áp dụng khi đủ điều kiện."
+    copy = public_account_flow_copy(lang)
+    return f"{copy['topup_verified_base']} {copy['topup_benefits_remain']}"
 
 MANUAL_PAYMENT_METHODS = {
     "bank_acb": "🏦 Ngân hàng ACB/VietQR",
@@ -17915,25 +17916,35 @@ MANUAL_PAYMENT_METHODS = {
     "usdt_trc20": "🪙 USDT TRC20",
 }
 
+def manual_payment_method_label(method: str, lang: str = "vi") -> str:
+    """Return a locale-safe public payment label without changing its callback."""
+
+    if public_copy_locale(lang) == "vi":
+        return MANUAL_PAYMENT_METHODS.get(method, method)
+    return {
+        "bank_acb": "🏦 ACB/VietQR",
+        "bank_acb_vietqr": "🏦 ACB/VietQR",
+        "zalopay_personal": "💚 ZaloPay",
+        "zalopay_merchant": "🛍 ZaloPay",
+        "momo_tuithantai": "💗 MoMo",
+        "usdt_trc20": "🪙 USDT TRC20",
+    }.get(method, method)
+
 def manual_payment_menu_text(user_id=None, lang: str | None = None) -> str:
     locale = public_copy_locale(lang)
+    copy = public_account_flow_copy(locale)
     show_domestic_promotion = show_domestic_topup_promotion(user_id, lang)
     if not show_domestic_promotion:
-        if locale == "zh":
-            title = "💵 <b>TOAN AAS 人工充值</b>"
-            choose_currency = "请选择充值币种。"
-            review_note = "TOAN AAS 仅在管理员核验实际付款后才会记入 Xu。账单图片或 TXID 不会自动确认交易。"
-            final_note = "可用渠道与最终基础 Xu 会在确认前显示。"
-        elif locale == "vi":
+        if locale == "vi":
             title = "💵 <b>Nạp thủ công TOAN AAS</b>"
             choose_currency = "Chọn loại tiền muốn nạp."
             review_note = "TOAN AAS chỉ cộng Xu sau khi admin đối soát tiền thật. Ảnh bill hoặc TXID không tự động xác nhận giao dịch."
             final_note = "Kênh thanh toán đang mở và Xu gốc cuối cùng sẽ hiển thị trước khi xác nhận."
         else:
-            title = "💵 <b>TOAN AAS Manual Top-up</b>"
-            choose_currency = "Choose the currency for your top-up."
-            review_note = "TOAN AAS adds Xu only after an admin verifies the real payment. A bill image or TXID does not confirm a transaction automatically."
-            final_note = "Available payment channels and the final base Xu are shown before confirmation."
+            title = f"💵 <b>TOAN AAS — {copy['manual_topup_section']}</b>"
+            choose_currency = copy["select_topup"]
+            review_note = copy["manual_topup_rules"]
+            final_note = copy["topup_verified_base"]
         policy_lines = (
             [
                 "Tài khoản này chỉ nhận Xu gốc đã xác minh; không hiển thị và không áp dụng bonus nạp Việt Nam.",
@@ -17942,11 +17953,7 @@ def manual_payment_menu_text(user_id=None, lang: str | None = None) -> str:
             if locale == "vi"
             else international_topup_policy_lines(locale)
         )
-        rules_text = (
-            manual_topup_rules_text()
-            if locale == "vi" else
-            "Manual top-ups are credited only after an admin verifies the real payment. They do not add Xu automatically, and each receipt or transaction ID is reviewed before approval."
-        )
+        rules_text = manual_topup_rules_text() if locale == "vi" else copy["manual_topup_rules"]
         return (
             f"{title}\n\n"
             f"{choose_currency}\n\n"
@@ -17989,7 +17996,8 @@ def manual_payment_menu_keyboard(uid, lang: str = "vi") -> InlineKeyboardMarkup:
 def manual_domestic_amount_text(user_id=None, lang: str | None = None) -> str:
     if not show_domestic_topup_promotion(user_id, lang):
         locale = public_copy_locale(lang)
-        title = "💳 <b>TOAN AAS VND top-up</b>" if locale != "vi" else "💳 <b>Nạp VND TOAN AAS</b>"
+        copy = public_account_flow_copy(locale)
+        title = f"💳 <b>TOAN AAS — {copy['manual_topup_section']}</b>" if locale != "vi" else "💳 <b>Nạp VND TOAN AAS</b>"
         return "\n\n".join([title, *international_topup_policy_lines(locale)])
     return (
         "🇻🇳 <b>Nạp Xu bằng VND</b>\n\n"
@@ -18013,7 +18021,8 @@ def manual_vnd_method_notice(user_id=None, lang: str | None = None) -> str:
         "ZaloPay không áp dụng ưu đãi cộng Xu."
     )
 
-def manual_domestic_amount_keyboard(uid) -> InlineKeyboardMarkup:
+def manual_domestic_amount_keyboard(uid, lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     rows = []
     for first, second in (("10k", "20k"), ("50k", "100k"), ("200k", "500k")):
         rows.append([
@@ -18021,11 +18030,12 @@ def manual_domestic_amount_keyboard(uid) -> InlineKeyboardMarkup:
             InlineKeyboardButton(f"💳 {PAYMENT_PACKAGES[second]['amount'] // 1000}k", callback_data=f"manual|vndamount|{second}|{uid}"),
         ])
     rows.extend([
-        [InlineKeyboardButton("⬅️ Nạp thủ công", callback_data=f"manual|menu|{uid}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"⬅️ {copy['manual_topup']}", callback_data=f"manual|menu|{uid}"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
     return InlineKeyboardMarkup(rows)
 
-def manual_domestic_method_keyboard(uid) -> InlineKeyboardMarkup:
+def manual_domestic_method_keyboard(uid, lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     methods = []
     if MANUAL_BANK_ENABLED:
         methods.append("bank_acb")
@@ -18038,18 +18048,25 @@ def manual_domestic_method_keyboard(uid) -> InlineKeyboardMarkup:
     rows = []
     for index in range(0, len(methods), 2):
         rows.append([
-            InlineKeyboardButton(MANUAL_PAYMENT_METHODS[method], callback_data=f"manual|method|{method}|{uid}")
+            InlineKeyboardButton(manual_payment_method_label(method, lang), callback_data=f"manual|method|{method}|{uid}")
             for method in methods[index:index + 2]
         ])
     rows.extend([
-        [InlineKeyboardButton("⬅️ Chọn loại tiền", callback_data=f"manual|menu|{uid}"), InlineKeyboardButton("📂 Lịch sử", callback_data=f"manual|history|{uid}")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"⬅️ {copy['topup_label']}", callback_data=f"manual|menu|{uid}"), InlineKeyboardButton(f"📂 {copy['profile_packages']}", callback_data=f"manual|history|{uid}")],
+        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
     return InlineKeyboardMarkup(rows)
 
-def manual_foreign_amount_text(currency: str) -> str:
+def manual_foreign_amount_text(currency: str, lang: str = "vi") -> str:
     currency = str(currency or "").upper()
     rate = foreign_topup_rate_vnd(currency)
+    if normalize_user_language(lang) != "vi":
+        copy = public_account_flow_copy(lang)
+        return (
+            f"{'🇺🇸' if currency == 'USD' else '🇨🇳'} <b>{copy['manual_topup_section']} — {currency}</b>\n\n"
+            f"{copy['topup_verified_base']}\n{copy['topup_benefits_remain']}\n\n"
+            f"{copy['manual_topup_rules']}"
+        )
     title = "🇺🇸 Nạp thủ công bằng USD" if currency == "USD" else "🇨🇳 Nạp thủ công bằng CNY/Nhân dân tệ"
     method_note = (
         "Phương thức đề xuất: Binance USDT TRC20."
@@ -18065,8 +18082,10 @@ def manual_foreign_amount_text(currency: str) -> str:
         f"{method_note}"
     ).replace(",", ".")
 
-def manual_foreign_amount_keyboard(currency: str, uid) -> InlineKeyboardMarkup:
+def manual_foreign_amount_keyboard(currency: str, uid, lang: str = "vi") -> InlineKeyboardMarkup:
     currency = str(currency or "").upper()
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    account_copy = public_account_flow_copy(lang)
     rows = []
     amounts = (10, 20, 50, 100, 200, 500)
     for index in range(0, len(amounts), 2):
@@ -18075,8 +18094,8 @@ def manual_foreign_amount_keyboard(currency: str, uid) -> InlineKeyboardMarkup:
             for amount in amounts[index:index + 2]
         ])
     rows.extend([
-        [InlineKeyboardButton(f"✍️ Nhập số {currency} khác", callback_data=f"manual|fxcustom|{currency}|{uid}"), InlineKeyboardButton("⬅️ Nạp thủ công", callback_data=f"manual|menu|{uid}")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"✍️ {account_copy['manual_topup_rules'][:32]}", callback_data=f"manual|fxcustom|{currency}|{uid}"), InlineKeyboardButton(f"⬅️ {copy['manual_topup']}", callback_data=f"manual|menu|{uid}")],
+        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -18084,8 +18103,17 @@ def format_foreign_amount(value) -> str:
     number = float(value or 0)
     return str(int(number)) if number.is_integer() else f"{number:.2f}".rstrip("0").rstrip(".")
 
-def manual_foreign_preview_text(preview: dict) -> str:
+def manual_foreign_preview_text(preview: dict, lang: str = "vi") -> str:
     currency = str(preview.get("currency") or "").upper()
+    if normalize_user_language(lang) != "vi":
+        copy = public_account_flow_copy(lang)
+        hub_copy = public_hub_copy(lang)
+        return (
+            f"{'🇺🇸' if currency == 'USD' else '🇨🇳'} <b>{hub_copy['common_confirm']} — {currency}</b>\n\n"
+            f"{copy['conversion']}: <b>{html.escape(format_foreign_amount(preview.get('original_amount')))} {currency}</b> → "
+            f"<b>{int(preview.get('expected_xu') or 0):,} Xu</b>\n\n"
+            f"{copy['topup_verified_base']}\n{copy['topup_benefits_remain']}\n\n{copy['manual_topup_rules']}"
+        ).replace(",", ".")
     return (
         f"{'🇺🇸' if currency == 'USD' else '🇨🇳'} <b>Xác nhận mệnh giá {currency}</b>\n\n"
         f"Số tiền: <b>{html.escape(format_foreign_amount(preview.get('original_amount')))} {currency}</b>\n"
@@ -18097,23 +18125,25 @@ def manual_foreign_preview_text(preview: dict) -> str:
         "TOAN AAS chỉ cộng Xu sau khi admin xác nhận giao dịch thật."
     ).replace(",", ".")
 
-def manual_foreign_preview_keyboard(preview: dict, uid) -> InlineKeyboardMarkup:
+def manual_foreign_preview_keyboard(preview: dict, uid, lang: str = "vi") -> InlineKeyboardMarkup:
     currency = str(preview.get("currency") or "").upper()
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    account_copy = public_account_flow_copy(lang)
     amount = format_foreign_amount(preview.get("original_amount"))
     rows = []
     if currency == "CNY":
         rows.append([
-            InlineKeyboardButton("💚 ZaloPay/manual", callback_data=f"manual|fxmethod|CNY|{amount}|zalopay_personal|{uid}"),
+            InlineKeyboardButton(manual_payment_method_label("zalopay_personal", lang), callback_data=f"manual|fxmethod|CNY|{amount}|zalopay_personal|{uid}"),
         ])
         rows.append([
-            InlineKeyboardButton("🛍 ZaloPay cửa hàng", callback_data=f"manual|fxmethod|CNY|{amount}|zalopay_merchant|{uid}"),
-            InlineKeyboardButton("🪙 USDT TRC20", callback_data=f"manual|fxmethod|CNY|{amount}|usdt_trc20|{uid}"),
+            InlineKeyboardButton(manual_payment_method_label("zalopay_merchant", lang), callback_data=f"manual|fxmethod|CNY|{amount}|zalopay_merchant|{uid}"),
+            InlineKeyboardButton(manual_payment_method_label("usdt_trc20", lang), callback_data=f"manual|fxmethod|CNY|{amount}|usdt_trc20|{uid}"),
         ])
     else:
-        rows.append([InlineKeyboardButton("🪙 Thanh toán USDT TRC20", callback_data=f"manual|fxmethod|USD|{amount}|usdt_trc20|{uid}")])
+        rows.append([InlineKeyboardButton(manual_payment_method_label("usdt_trc20", lang), callback_data=f"manual|fxmethod|USD|{amount}|usdt_trc20|{uid}")])
     rows.extend([
-        [InlineKeyboardButton(f"✍️ Đổi số {currency}", callback_data=f"manual|fxcustom|{currency}|{uid}"), InlineKeyboardButton(f"⬅️ Mệnh giá {currency}", callback_data=f"manual|currency|{currency}|{uid}")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(f"✍️ {account_copy['select_topup']}", callback_data=f"manual|fxcustom|{currency}|{uid}"), InlineKeyboardButton(f"⬅️ {currency}", callback_data=f"manual|currency|{currency}|{uid}")],
+        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -18186,7 +18216,7 @@ def manual_method_asset_path(method: str) -> str:
         path = Path(__file__).resolve().parent / path
     return str(path)
 
-def manual_payment_method_text(uid, method: str, state: dict | None = None) -> str:
+def manual_payment_method_text(uid, method: str, state: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
     amount = int(state.get("amount_vnd") or state.get("amount") or 0)
     xu = int(state.get("expected_xu") or state.get("xu") or 0)
@@ -18203,6 +18233,50 @@ def manual_payment_method_text(uid, method: str, state: dict | None = None) -> s
         "international_account": bool(market.get("international_account")),
     })
     transfer_content = str(state.get("transfer_content") or f"AAS {uid} MANUAL")
+    locale = public_copy_locale(lang)
+    if locale != "vi":
+        copy = public_hub_copy(locale)
+        account_copy = public_account_flow_copy(locale)
+        selected = (
+            f"{format_foreign_amount(state.get('original_amount'))} {currency} → {amount:,} VND"
+            if foreign_manual else
+            (f"{pkg_key} — {amount:,} VND" if amount else account_copy["select_topup"])
+        )
+        expected_xu = f"{xu} Xu" if xu else "—"
+        total = int(state.get("total_amount_vnd") or 0)
+        subtotal = int(state.get("subtotal_amount_vnd") or 0)
+        vat = int(state.get("vat_amount_vnd") or 0)
+        tax_note = (
+            f"\n💵 <b>{subtotal:,} VND</b>\n🧾 VAT: <b>{vat:,} VND</b>\n💳 <b>{total:,} VND</b>\n"
+            if total > 0 and (subtotal > 0 or vat > 0) else ""
+        )
+        method_title = manual_payment_method_label(method, locale)
+        method_details = ""
+        if method in {"bank_acb", "bank_acb_vietqr"}:
+            method_details = (
+                f"\n🏦 <b>{html.escape(MANUAL_BANK_NAME)}</b>\n"
+                f"🔢 <code>{html.escape(MANUAL_BANK_ACCOUNT)}</code>\n"
+                f"👤 <b>{html.escape(PAYMENT_ACCOUNT_OWNER_LABEL)}</b>\n"
+            )
+        elif method == "usdt_trc20":
+            method_details = (
+                "\n⛓ <b>Tron (TRC20)</b>\n"
+                f"🔗 <code>{html.escape(MANUAL_USDT_TRC20_ADDRESS)}</code>\n"
+                "⚠️ <b>TRC20</b>\n"
+            )
+        return (
+            f"{method_title}\n"
+            f"{method_details}\n"
+            f"👤 <code>{uid}</code>\n"
+            f"📦 <b>{html.escape(selected)}</b>\n"
+            f"💰 <b>{html.escape(expected_xu)}</b>\n"
+            f"🧾 {account_copy['manual_transfer_note']}: <code>{html.escape(transfer_content)}</code>\n"
+            f"{tax_note}\n"
+            f"{account_copy['manual_topup_rules']}\n\n"
+            f"{account_copy['topup_verified_base']}\n"
+            f"{account_copy['topup_benefits_remain']}\n\n"
+            f"{copy['common_no_charge']}"
+        ).replace(",", ".")
     selected = (
         f"{format_foreign_amount(state.get('original_amount'))} {currency} — quy đổi {amount:,}đ"
         if foreign_manual else
@@ -18276,8 +18350,28 @@ def manual_payment_method_text(uid, method: str, state: dict | None = None) -> s
         + common
     )
 
-def manual_method_keyboard(uid) -> InlineKeyboardMarkup:
+def manual_method_keyboard(uid, lang: str = "vi") -> InlineKeyboardMarkup:
     state = get_active_manual_bill_state(uid) or {}
+    locale = public_copy_locale(lang)
+    if locale != "vi":
+        copy = public_hub_copy(locale)
+        account_copy = public_account_flow_copy(locale)
+        if state.get("foreign_manual"):
+            currency = str(state.get("currency") or "USD").upper()
+            amount = format_foreign_amount(state.get("original_amount"))
+            back_callback = f"manual|fxamount|{currency}|{amount}|{uid}"
+        else:
+            back_callback = f"manual|vndamount|{state.get('pkg_key') or '10k'}|{uid}"
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(f"📷 {copy['docs_send_image']}", callback_data=f"manual|await_bill|{uid}"),
+                InlineKeyboardButton(f"📂 {account_copy['quick_stats']}", callback_data=f"manual|history|{uid}"),
+            ],
+            [
+                InlineKeyboardButton(f"⬅️ {copy['common_back']}", callback_data=back_callback),
+                InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
+            ],
+        ])
     if state.get("foreign_manual"):
         currency = str(state.get("currency") or "USD").upper()
         amount = format_foreign_amount(state.get("original_amount"))
@@ -18291,7 +18385,7 @@ def manual_method_keyboard(uid) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(back_label, callback_data=back_callback), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
-def manual_topup_history_payload(uid) -> tuple[str, InlineKeyboardMarkup]:
+def manual_topup_history_payload(uid, lang: str = "vi") -> tuple[str, InlineKeyboardMarkup]:
     conn = db_connect()
     try:
         rows = conn.execute(
@@ -18301,6 +18395,38 @@ def manual_topup_history_payload(uid) -> tuple[str, InlineKeyboardMarkup]:
         ).fetchall()
     finally:
         conn.close()
+    locale = public_copy_locale(lang)
+    if locale != "vi":
+        copy = public_hub_copy(locale)
+        account_copy = public_account_flow_copy(locale)
+        lines = [f"📂 <b>{account_copy['manual_topup_section']} — {account_copy['quick_stats']}</b>", ""]
+        if not rows:
+            lines.append(copy["memory_empty"])
+        else:
+            status_copy = {
+                "pending": account_copy["pending"],
+                "pending_admin_review": account_copy["pending"],
+                "approved": copy["common_success"],
+                "rejected": copy["common_failed"],
+            }
+            for deposit_id, method, amount, xu, status, submitted_at, currency, original_amount, approved_xu, admin_note, foreign_manual in rows:
+                currency = str(currency or "VND").upper()
+                credited = int(approved_xu or 0) if str(status or "") == "approved" else int(xu or 0)
+                amount_text = (
+                    f"{format_foreign_amount(original_amount)} {currency}"
+                    if int(foreign_manual or 0) else f"{int(amount or 0):,} VND"
+                )
+                translated_status = status_copy.get(str(status or ""), copy["common_processing"])
+                lines.append(
+                    f"• #{int(deposit_id)} — {amount_text} — {html.escape(manual_payment_method_label(method or 'bank_acb', locale))} — "
+                    f"<b>{html.escape(translated_status)}</b> — {credited:,} Xu — {html.escape(str(submitted_at or '')[:16])}"
+                    .replace(",", ".")
+                )
+        lines.extend(["", account_copy["topup_verified_base"], account_copy["topup_benefits_remain"]])
+        return "\n".join(lines), InlineKeyboardMarkup([[
+            InlineKeyboardButton(f"⬅️ {copy['manual_topup']}", callback_data=f"manual|menu|{uid}"),
+            InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
+        ]])
     lines = ["📂 <b>Lịch sử nạp thủ công</b>", ""]
     if not rows:
         lines.append("Bạn chưa có yêu cầu nạp thủ công nào.")
@@ -18476,7 +18602,7 @@ def manual_pending_admin_keyboard(deposit: dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📂 Lịch sử user", callback_data=f"manual|history|{uid}")],
     ])
 
-def manual_pending_user_text(deposit: dict) -> str:
+def manual_pending_user_text(deposit: dict, lang: str = "vi") -> str:
     foreign = bool(deposit.get("foreign_manual"))
     currency = str(deposit.get("currency") or "VND").upper()
     amount_text = (
@@ -18488,6 +18614,21 @@ def manual_pending_user_text(deposit: dict) -> str:
         "method": deposit.get("method"),
         "foreign_manual": foreign,
     })
+    locale = public_copy_locale(lang)
+    if locale != "vi":
+        copy = public_hub_copy(locale)
+        account_copy = public_account_flow_copy(locale)
+        return (
+            f"✅ <b>{copy['common_success']}</b>\n\n"
+            f"#<code>{int(deposit.get('id') or 0)}</code>\n"
+            f"📦 <b>{html.escape(amount_text)}</b>\n"
+            f"{account_copy['conversion']}: <b>{int(deposit.get('amount_vnd') or 0):,} VND → "
+            f"{int(deposit.get('expected_xu') or 0):,} Xu</b>\n"
+            f"{account_copy['pending']}: <b>{account_copy['manual_topup_section']}</b>\n\n"
+            f"{account_copy['manual_topup_rules']}\n"
+            f"{account_copy['topup_verified_base']}\n"
+            f"{account_copy['topup_benefits_remain']}"
+        ).replace(",", ".")
     foreign_lines = (
         "Ưu đãi cộng Xu: <b>không áp dụng cho phương thức này</b>\n"
         "Chiết khấu hạng: vẫn áp dụng khi mua/dùng dịch vụ nếu đủ điều kiện\n"
@@ -18516,7 +18657,7 @@ async def notify_manual_pending_deposit(context, deposit: dict) -> None:
         except Exception as exc:
             logger.warning("Manual bill admin alert skipped: %s", type(exc).__name__)
 
-async def _send_manual_payment_qr_to_chat(context, chat_id, method: str, caption: str, keyboard=None) -> bool:
+async def _send_manual_payment_qr_to_chat(context, chat_id, method: str, caption: str, keyboard=None, lang: str = "vi") -> bool:
     asset_path = manual_method_asset_path(method)
     if asset_path and os.path.isfile(asset_path):
         try:
@@ -18540,18 +18681,29 @@ async def _send_manual_payment_qr_to_chat(context, chat_id, method: str, caption
     send_message = getattr(context.bot, "send_message", None)
     if callable(send_message):
         try:
-            await send_message(
-                chat_id=chat_id,
-                text=(
+            locale = public_copy_locale(lang)
+            if locale == "vi":
+                fallback_text = (
                     "QR phương thức này chưa được cấu hình. TOAN AAS chưa tạo yêu cầu nạp. "
                     "Vui lòng chọn phương thức khác hoặc liên hệ admin."
-                ),
+                )
+            else:
+                copy = public_hub_copy(locale)
+                account_copy = public_account_flow_copy(locale)
+                fallback_text = (
+                    f"⚠️ {copy['common_failed']}\n\n"
+                    f"{account_copy['payment_locked']}\n\n"
+                    f"{copy['common_no_charge']}"
+                )
+            await send_message(
+                chat_id=chat_id,
+                text=fallback_text,
             )
         except Exception as exc:
             logger.warning("Manual payment QR fallback message skipped: %s", type(exc).__name__)
     return False
 
-async def send_manual_payment_qr(update, context, method: str, caption: str, keyboard=None) -> bool:
+async def send_manual_payment_qr(update, context, method: str, caption: str, keyboard=None, lang: str = "vi") -> bool:
     chat = getattr(update, "effective_chat", None)
     chat_id = getattr(chat, "id", None)
     if chat_id is None:
@@ -18560,16 +18712,18 @@ async def send_manual_payment_qr(update, context, method: str, caption: str, key
         chat_id = getattr(message, "chat_id", None)
     if chat_id is None:
         raise ValueError("manual_payment_chat_missing")
-    return await _send_manual_payment_qr_to_chat(context, chat_id, method, caption, keyboard)
+    return await _send_manual_payment_qr_to_chat(context, chat_id, method, caption, keyboard, lang)
 
 async def send_manual_method_qr(context, chat_id, uid, method: str) -> bool:
     state = get_active_manual_bill_state(uid) or {}
+    lang = get_user_language(uid) or "vi"
     return await _send_manual_payment_qr_to_chat(
         context,
         chat_id,
         method,
-        manual_payment_method_text(uid, method, state),
-        manual_method_keyboard(uid),
+        manual_payment_method_text(uid, method, state, lang),
+        manual_method_keyboard(uid, lang),
+        lang,
     )
 
 def manual_qr_url(uid: int, amount: int, order_code: int) -> str:
@@ -42702,11 +42856,14 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
             finally:
                 context.args = old_args
         return
+    lang = get_user_language(query.from_user.id) or "vi"
+    copy = public_hub_copy(lang)
+    account_copy = public_account_flow_copy(lang)
     if action == "currency" and len(parts) == 4:
         currency = str(parts[2] or "").upper()
         uid = int(parts[3]) if str(parts[3]).isdigit() else int(query.from_user.id)
         if query.from_user.id != uid:
-            return await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
+            return await query.answer(f"⚠️ {copy['common_failed']}", show_alert=True)
         if currency == "VND":
             existing_state = get_active_manual_bill_state(uid) or {}
             selected_pkg_key = str(existing_state.get("pkg_key") or "")
@@ -42719,70 +42876,68 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
                     **preview,
                 )
                 return await query.edit_message_text(
-                    "🇻🇳 <b>Chọn phương thức nạp VND</b>\n\n"
-                    f"Mệnh giá: <b>{int(preview['amount_vnd']):,}đ</b>\n"
-                    f"Xu gốc dự kiến: <b>{int(preview['base_xu']):,} Xu</b>\n\n"
+                    f"🇻🇳 <b>{account_copy['select_topup']}</b>\n\n"
+                    f"{account_copy['conversion']}: <b>{int(preview['amount_vnd']):,}đ → {int(preview['base_xu']):,} Xu</b>\n\n"
                     f"{manual_vnd_method_notice(uid, get_user_language(uid) or 'vi')}".replace(",", "."),
                     parse_mode="HTML",
-                    reply_markup=manual_domestic_method_keyboard(uid),
+                    reply_markup=manual_domestic_method_keyboard(uid, lang),
                 )
             set_manual_bill_state(uid, order_code="MANUAL", currency="VND", foreign_manual=False, step="select_amount")
             return await query.edit_message_text(
-                manual_domestic_amount_text(uid, get_user_language(uid) or "vi"),
+                manual_domestic_amount_text(uid, lang),
                 parse_mode="HTML",
-                reply_markup=manual_domestic_amount_keyboard(uid),
+                reply_markup=manual_domestic_amount_keyboard(uid, lang),
             )
         if not MANUAL_FOREIGN_TOPUP_ENABLED or currency not in SUPPORTED_MANUAL_CURRENCIES or currency not in {"USD", "CNY"}:
-            return await query.edit_message_text("⚠️ Loại tiền này chưa được mở cho nạp thủ công.", reply_markup=manual_payment_menu_keyboard(uid, get_user_language(uid)))
+            return await query.edit_message_text(f"⚠️ {copy['common_failed']}", reply_markup=manual_payment_menu_keyboard(uid, lang))
         set_manual_bill_state(uid, order_code="MANUAL", currency=currency, foreign_manual=True, step="select_amount")
         return await query.edit_message_text(
-            manual_foreign_amount_text(currency),
+            manual_foreign_amount_text(currency, lang),
             parse_mode="HTML",
-            reply_markup=manual_foreign_amount_keyboard(currency, uid),
+            reply_markup=manual_foreign_amount_keyboard(currency, uid, lang),
         )
     if action == "vndamount" and len(parts) == 4:
         pkg_key = str(parts[2] or "")
         uid = int(parts[3]) if str(parts[3]).isdigit() else int(query.from_user.id)
         if query.from_user.id != uid:
-            return await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
+            return await query.answer(f"⚠️ {copy['common_failed']}", show_alert=True)
         if pkg_key not in PAYMENT_PACKAGES:
-            return await query.edit_message_text(manual_domestic_amount_text(uid, get_user_language(uid) or "vi"), parse_mode="HTML", reply_markup=manual_domestic_amount_keyboard(uid))
+            return await query.edit_message_text(manual_domestic_amount_text(uid, lang), parse_mode="HTML", reply_markup=manual_domestic_amount_keyboard(uid, lang))
         preview = manual_vnd_topup_preview(uid, pkg_key, "bank_acb")
         set_manual_bill_state(uid, order_code="MANUAL", step="select_method", **preview)
         return await query.edit_message_text(
-            "🇻🇳 <b>Chọn phương thức nạp VND</b>\n\n"
-            f"Mệnh giá: <b>{int(preview['amount_vnd']):,}đ</b>\n"
-            f"Xu gốc dự kiến: <b>{int(preview['base_xu']):,} Xu</b>\n\n"
+            f"🇻🇳 <b>{account_copy['select_topup']}</b>\n\n"
+            f"{account_copy['conversion']}: <b>{int(preview['amount_vnd']):,}đ → {int(preview['base_xu']):,} Xu</b>\n\n"
             f"{manual_vnd_method_notice(uid, get_user_language(uid) or 'vi')}".replace(",", "."),
             parse_mode="HTML",
-            reply_markup=manual_domestic_method_keyboard(uid),
+            reply_markup=manual_domestic_method_keyboard(uid, lang),
         )
     if action == "fxamount" and len(parts) == 5:
         currency = str(parts[2] or "").upper()
         uid = int(parts[4]) if str(parts[4]).isdigit() else int(query.from_user.id)
         if query.from_user.id != uid:
-            return await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
+            return await query.answer(f"⚠️ {copy['common_failed']}", show_alert=True)
         try:
             preview = foreign_topup_preview(currency, parts[3])
         except ValueError:
-            return await query.edit_message_text("⚠️ Mệnh giá quốc tế không hợp lệ.", reply_markup=manual_foreign_amount_keyboard(currency, uid))
+            return await query.edit_message_text(f"⚠️ {copy['common_failed']}", reply_markup=manual_foreign_amount_keyboard(currency, uid, lang))
         set_manual_bill_state(uid, order_code="MANUAL", amount=preview["amount_vnd"], xu=preview["expected_xu"], **preview)
         return await query.edit_message_text(
-            manual_foreign_preview_text(preview),
+            manual_foreign_preview_text(preview, lang),
             parse_mode="HTML",
-            reply_markup=manual_foreign_preview_keyboard(preview, uid),
+            reply_markup=manual_foreign_preview_keyboard(preview, uid, lang),
         )
     if action == "fxcustom" and len(parts) == 4:
         currency = str(parts[2] or "").upper()
         uid = int(parts[3]) if str(parts[3]).isdigit() else int(query.from_user.id)
         if query.from_user.id != uid:
-            return await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
+            return await query.answer(f"⚠️ {copy['common_failed']}", show_alert=True)
         set_manual_bill_state(uid, order_code="MANUAL", currency=currency, foreign_manual=True, step="await_foreign_amount")
         return await query.edit_message_text(
-            f"✍️ Hãy nhập số {currency} muốn nạp trong tin nhắn tiếp theo.\n\nBot chỉ tạo bản quy đổi tạm tính, chưa cộng Xu và chưa tự duyệt giao dịch.",
+            f"✍️ {account_copy['manual_topup_rules']}\n\n{account_copy['topup_verified_base']}",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(f"⬅️ Mệnh giá {currency}", callback_data=f"manual|currency|{currency}|{uid}"),
-                InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+                InlineKeyboardButton(f"⬅️ {currency}", callback_data=f"manual|currency|{currency}|{uid}"),
+                InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
             ]]),
         )
     if action == "fxmethod" and len(parts) == 6:
@@ -42790,13 +42945,13 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         method = str(parts[4] or "")
         uid = int(parts[5]) if str(parts[5]).isdigit() else int(query.from_user.id)
         if query.from_user.id != uid:
-            return await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
+            return await query.answer(f"⚠️ {copy['common_failed']}", show_alert=True)
         if method not in {"zalopay_personal", "zalopay_merchant", "momo_tuithantai", "usdt_trc20"} or not manual_method_enabled(method, uid):
-            return await query.edit_message_text("⚠️ Phương thức này chưa được bật hoặc đang chờ admin kiểm tra.", reply_markup=manual_foreign_amount_keyboard(currency, uid))
+            return await query.edit_message_text(f"⚠️ {copy['common_failed']}", reply_markup=manual_foreign_amount_keyboard(currency, uid, lang))
         try:
             preview = foreign_topup_preview(currency, parts[3], method=method)
         except ValueError:
-            return await query.edit_message_text("⚠️ Mệnh giá quốc tế không hợp lệ.", reply_markup=manual_foreign_amount_keyboard(currency, uid))
+            return await query.edit_message_text(f"⚠️ {copy['common_failed']}", reply_markup=manual_foreign_amount_keyboard(currency, uid, lang))
         transfer_content = f"AAS {uid} {currency} MANUAL"
         set_manual_bill_state(
             uid,
@@ -42811,15 +42966,16 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
             update,
             context,
             method,
-            manual_payment_method_text(uid, method, get_active_manual_bill_state(uid)),
-            manual_method_keyboard(uid),
+            manual_payment_method_text(uid, method, get_active_manual_bill_state(uid), lang),
+            manual_method_keyboard(uid, lang),
+            lang,
         )
         update_manual_bill_state(uid, step="await_payment" if sent else "select_method")
         return
     uid_token = parts[-1] if len(parts) >= 3 else str(query.from_user.id)
     uid = int(uid_token) if str(uid_token).isdigit() else int(query.from_user.id)
     if query.from_user.id != uid and not (action == "history" and is_admin_user(query.from_user.id)):
-        await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
+        await query.answer(f"⚠️ {copy['common_failed']}", show_alert=True)
         return
     if action == "menu":
         state = get_active_manual_bill_state(uid)
@@ -42827,13 +42983,20 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
             set_manual_bill_state(uid, order_code="MANUAL")
         return await query.edit_message_text(manual_payment_menu_text(uid, get_user_language(uid)), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(uid, get_user_language(uid)))
     if action == "history":
-        text, keyboard = manual_topup_history_payload(uid)
+        text, keyboard = manual_topup_history_payload(uid, lang)
         return await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
     if action == "method" and len(parts) == 4:
         method = parts[2]
         if not manual_method_enabled(method, uid):
+            if public_copy_locale(lang) == "vi":
+                unavailable_text = (
+                    "⚠️ Phương thức này đang được admin kiểm tra, hiện chưa mở công khai.\n\n"
+                    "Bạn có thể dùng PayOS QR động hoặc nạp thủ công qua ngân hàng."
+                )
+            else:
+                unavailable_text = f"⚠️ {account_copy['payment_locked']}\n\n{copy['common_no_charge']}"
             return await query.edit_message_text(
-                "⚠️ Phương thức này đang được admin kiểm tra, hiện chưa mở công khai.\n\nBạn có thể dùng PayOS QR động hoặc nạp thủ công qua ngân hàng.",
+                unavailable_text,
                 reply_markup=manual_payment_menu_keyboard(uid, get_user_language(uid)),
             )
         state = get_active_manual_bill_state(uid) or {}
@@ -42842,7 +43005,7 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
             return await query.edit_message_text(
                 manual_domestic_amount_text(uid, get_user_language(uid) or "vi"),
                 parse_mode="HTML",
-                reply_markup=manual_domestic_amount_keyboard(uid),
+                reply_markup=manual_domestic_amount_keyboard(uid, lang),
             )
         preview = manual_vnd_topup_preview(uid, pkg_key, method)
         update_manual_bill_state(uid, step="select_method", **preview)
@@ -42850,8 +43013,9 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
             update,
             context,
             method,
-            manual_payment_method_text(uid, method, get_active_manual_bill_state(uid)),
-            manual_method_keyboard(uid),
+            manual_payment_method_text(uid, method, get_active_manual_bill_state(uid), lang),
+            manual_method_keyboard(uid, lang),
+            lang,
         )
         update_manual_bill_state(uid, step="await_payment" if sent else "select_method")
         return
@@ -42860,11 +43024,22 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         if not state:
             set_manual_bill_state(uid, order_code="MANUAL")
         update_manual_bill_state(uid, step="await_bill")
+        if public_copy_locale(lang) == "vi":
+            await_bill_text = (
+                "📷 <b>Gửi bill/TXID nạp thủ công</b>\n\nHãy gửi một ảnh bill hoặc TXID trong tin nhắn tiếp theo. "
+                "TOAN AAS chỉ chuyển thông tin sang chờ admin đối soát, chưa cộng Xu tự động."
+            )
+        else:
+            await_bill_text = (
+                f"📷 <b>{copy['docs_send_image']}</b>\n\n"
+                f"{account_copy['manual_topup_rules']}\n\n"
+                f"{account_copy['topup_verified_base']}\n"
+                f"{copy['common_no_charge']}"
+            )
         return await query.edit_message_text(
-            "📷 <b>Gửi bill/TXID nạp thủ công</b>\n\nHãy gửi một ảnh bill hoặc TXID trong tin nhắn tiếp theo. "
-            "TOAN AAS chỉ chuyển thông tin sang chờ admin đối soát, chưa cộng Xu tự động.",
+            await_bill_text,
             parse_mode="HTML",
-            reply_markup=manual_method_keyboard(uid),
+            reply_markup=manual_method_keyboard(uid, lang),
         )
     if action != "start":
         return
@@ -46897,10 +47072,9 @@ def canonical_image_tier_retry_warranty_count(tier: str = "") -> int:
 
 def canonical_image_tier_warranty_note(tier: str = "", lang: str = "vi") -> str:
     has_warranty = canonical_image_tier_retry_warranty_count(tier) > 0
-    if normalize_user_language(lang) == "zh":
-        return "本套餐包含同一需求内 1 次重新生成。" if has_warranty else "本套餐不包含免费重新生成。"
     if normalize_user_language(lang) != "vi":
-        return "This package includes 1 retry in the same request." if has_warranty else "This package does not include a free retry."
+        copy = public_hub_copy(lang)
+        return copy["image_warranty_included"] if has_warranty else copy["image_warranty_none"]
     return "Gói này kèm 1 lần tạo lại trong cùng yêu cầu." if has_warranty else "Gói này không kèm tạo lại miễn phí."
 
 
@@ -46926,24 +47100,16 @@ def image_tier_retry_warranty_count(tier: str = "") -> int:
 
 def image_tier_warranty_note(tier: str = "", lang: str = "vi") -> str:
     has_warranty = image_tier_retry_warranty_count(tier) > 0
-    if normalize_user_language(lang) == "zh":
-        return "本套餐包含同一需求内 1 次重新生成。" if has_warranty else "本套餐不包含免费重新生成。"
     if normalize_user_language(lang) != "vi":
-        return "This package includes 1 retry in the same request." if has_warranty else "This package does not include a free retry."
+        copy = public_hub_copy(lang)
+        return copy["image_warranty_included"] if has_warranty else copy["image_warranty_none"]
     return "Gói này kèm 1 lần tạo lại trong cùng yêu cầu." if has_warranty else "Gói này không kèm tạo lại miễn phí."
 
 def image_tier_quality_note(tier: str = "", lang: str = "vi") -> str:
     tier_norm = normalize_image_tier(tier)
     if normalize_user_language(lang) != "vi":
-        notes = {
-            "low": "Best for quick tests, simple ideas, and low-cost drafts.",
-            "standard": "Best for product images, basic advertising, and social posts.",
-            "standard_warranty": "Professional quality with one retry for the same request.",
-            "common": "Best for polished social visuals and common marketing images.",
-            "common_warranty": "Polished common-quality image with one retry for the same request.",
-            "high": "Best for advertising, key visuals, cinematic work, and controlled detail.",
-            "high_warranty": "Premium controlled quality with one retry for the same request.",
-        }
+        copy = public_hub_copy(lang)
+        return copy.get(f"image_quality_{tier_norm}") or copy["image_create_title"]
     else:
         notes = {
             "low": "Phù hợp test nhanh, ý tưởng đơn giản, chi phí thấp.",
@@ -46961,10 +47127,8 @@ def public_image_waiting_text(tier: str = "", lang: str = "vi") -> str:
     base = ui_text(lang, "image.waiting")
     if tier_norm not in {"high", "high_warranty"}:
         return base
-    if normalize_user_language(lang) == "zh":
-        return base + "\n图片质量较高时可能需要更久一点。"
     if normalize_user_language(lang) != "vi":
-        return base + "\nHigh-quality images may take a little longer."
+        return base + "\n" + public_hub_copy(lang)["image_high_wait"]
     return base + "\nẢnh chất lượng cao có thể lâu hơn một chút."
 
 def image_tier_public_status_text() -> str:
@@ -47125,6 +47289,8 @@ def build_google_genai_image_payload(
 def media_aspect_ratio_label(aspect_ratio: str = "", kind: str = "video", lang: str = "vi") -> str:
     aspect = normalize_media_aspect_ratio(aspect_ratio, "9:16", kind)
     is_vi = normalize_user_language(lang) == "vi"
+    if not is_vi:
+        return f"📐 {aspect}"
     labels_vi = {
         "9:16": "📱 9:16 — TikTok/Reels/Shorts",
         "16:9": "📺 16:9 — YouTube ngang",
@@ -47183,10 +47349,8 @@ def infer_image_aspect_ratio_from_prompt(prompt: str = "", default: str = "9:16"
 
 def image_aspect_result_line(aspect_ratio: str = "", lang: str = "vi") -> str:
     label = media_aspect_ratio_label(aspect_ratio, "image", lang)
-    if normalize_user_language(lang) == "zh":
-        return f"画面比例: {label}"
     if normalize_user_language(lang) != "vi":
-        return f"Aspect ratio: {label}"
+        return f"{public_image_deep_copy(lang)['ratio']}: {label}"
     return f"Tỷ lệ: {label}"
 
 def media_aspect_instruction(aspect_ratio: str = "", kind: str = "video") -> str:
@@ -47229,7 +47393,9 @@ def logo_watermark_position_label(position: str = "", lang: str = "vi") -> str:
     code = logo_watermark_normalize_position(position)
     labels = LOGO_WATERMARK_POSITION_LABELS.get(code) or LOGO_WATERMARK_POSITION_LABELS["bottom_right"]
     lang = normalize_user_language(lang) or "vi"
-    return labels[0] if lang == "vi" else labels[2] if lang == "zh" else labels[1]
+    if lang == "vi":
+        return labels[0]
+    return public_image_deep_copy(lang)[f"position_{code}"]
 
 def logo_watermark_position_instruction(position: str = "") -> str:
     code = logo_watermark_normalize_position(position)
@@ -47283,13 +47449,8 @@ def image_tier_button_text(tier: str = "", lang: str = "vi", include_state: bool
         }
     else:
         short_labels = {
-            "low": "Economy",
-            "standard": "Standard",
-            "standard_warranty": "Standard + warranty",
-            "common": "Common",
-            "common_warranty": "Common + warranty",
-            "high": "High",
-            "high_warranty": "High + warranty",
+            tier_name: ui_text(lang, f"image.tier.{tier_name}")
+            for tier_name in CANONICAL_IMAGE_TIER_ORDER
         }
     label = short_labels.get(tier_norm) or localized_image_tier_label(tier_norm, lang)
     return f"{IMAGE_TIER_ICONS.get(tier_norm, '🖼')} {label} — {int(payload.get('cost') or 0)} Xu{state}"
@@ -48376,10 +48537,9 @@ def product_video_charge_after_final_delivery(
 
 
 def product_video_provider_pending_public_copy(lang: str = "vi") -> str:
-    if normalize_user_language(lang) == "en":
-        return "The video system is still processing. TOAN AAS has not charged Xu and charges only after the final video is delivered."
-    if normalize_user_language(lang) == "zh":
-        return "视频系统仍在处理。TOAN AAS 尚未扣除 Xu，只有在最终视频发送后才扣除。"
+    if normalize_user_language(lang) != "vi":
+        copy = public_video_deep_copy(lang)
+        return f"{copy['waiting']}. {copy['charge_after_delivery']}. {copy['no_resend']}."
     return "Hệ thống đang dựng video. TOAN AAS chưa trừ Xu và chỉ trừ Xu khi video cuối đã gửi thành công."
 
 
@@ -48904,11 +49064,8 @@ def video_experience_tier_lock_text(lang: str = "vi", reasons: list[str] | tuple
         "invoice_total_over_base": "tổng hóa đơn vượt gói đang chọn",
     }
     if normalize_user_language(lang) != "vi":
-        if "extra_scene" in reasons:
-            return "This order currently supports 1 scene only. Please choose 1 scene or select another quality package."
-        readable = [reason_labels_en.get(item, item.replace("_", " ")) for item in reasons]
-        selected = f" Selected: {', '.join(readable)}." if readable else ""
-        return "This order currently supports one scene without paid add-ons. Remove paid add-ons or select another quality package." + selected
+        copy = public_video_deep_copy(lang)
+        return f"{copy['video_editor_guard']}. {copy['choose_scene']}. {copy['no_charge']}"
     if "extra_scene" in reasons:
         return "Đơn hiện tại chỉ hỗ trợ 1 cảnh. Vui lòng chọn 1 cảnh hoặc chọn gói chất lượng khác."
     return "Đơn hiện tại chỉ hỗ trợ 1 cảnh không add-on trả phí. Vui lòng bỏ add-on hoặc chọn gói chất lượng khác."
@@ -48944,8 +49101,9 @@ def video_package_200_lock_reasons(quote: dict | None = None) -> list[str]:
     return list(dict.fromkeys(reasons or ["paid_addon"]))
 
 def video_export_maintenance_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_video_deep_copy(lang)
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back", callback_data="videoaddon|export_back"),
+        InlineKeyboardButton(f"⬅️ {copy['back']}", callback_data="videoaddon|export_back"),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main"),
     ]])
 
@@ -58196,18 +58354,23 @@ def refund_package_item_for_job(user_id, job_id: int, reason: str = "provider_fa
 def package_offer_text(item: dict, fallback_confirm_text: str, lang: str = "vi") -> str:
     item_type = str((item or {}).get("item_type") or "")
     remaining = int((item or {}).get("remaining_quantity") or 0)
-    package_label = str((item or {}).get("package_label") or (item or {}).get("package_code") or "gói/combo")
+    package_label = str((item or {}).get("package_label") or (item or {}).get("package_code") or "")
     expires = str((item or {}).get("expires_at") or "").strip()
-    expire_line = f"\n• Hết hạn: <code>{html.escape(expires[:16])}</code>" if expires else ""
     if normalize_user_language(lang) != "vi":
+        copy = public_hub_copy(lang)
+        account_copy = public_account_flow_copy(lang)
+        label = package_label or copy["packages_label"]
+        expire_line = f"\n• {account_copy['details']}: <code>{html.escape(expires[:16])}</code>" if expires else ""
         return (
             f"{fallback_confirm_text}\n\n"
-            "🎁 <b>Package wallet available</b>\n"
-            f"• Package: <b>{html.escape(package_label)}</b>\n"
-            f"• Item: <b>{html.escape(package_item_display_name(item_type, lang))}</b>\n"
-            f"• Remaining: <b>{remaining}</b>{expire_line}\n\n"
-            "Do you want to use a package slot instead of Xu?"
+            f"🎁 <b>{copy['package_title']}</b>\n"
+            f"• {copy['package_details']}: <b>{html.escape(label)}</b>\n"
+            f"• {copy['package_choose']}: <b>{html.escape(package_i18n_item_label(item_type, lang))}</b>\n"
+            f"• {account_copy['plan_remaining'].format(remaining=remaining, total=remaining)}{expire_line}\n\n"
+            f"{copy['common_choose_option']}"
         )
+    package_label = package_label or "gói/combo"
+    expire_line = f"\n• Hết hạn: <code>{html.escape(expires[:16])}</code>" if expires else ""
     return (
         f"{fallback_confirm_text}\n\n"
         "🎁 <b>Bạn đang có lượt trong gói/combo</b>\n"
@@ -58224,8 +58387,13 @@ def package_use_choice_keyboard(
     lang: str = "vi",
     back_callback: str = "",
 ) -> InlineKeyboardMarkup:
-    use_label = "✅ Use package slot" if normalize_user_language(lang) != "vi" else "✅ Dùng lượt trong gói"
-    xu_label = "💰 Use Xu" if normalize_user_language(lang) != "vi" else "💰 Dùng Xu"
+    if normalize_user_language(lang) != "vi":
+        copy = public_hub_copy(lang)
+        use_label = f"✅ {copy['package_buy']}"
+        xu_label = f"💰 {copy['account_balance']} — Xu"
+    else:
+        use_label = "✅ Dùng lượt trong gói"
+        xu_label = "💰 Dùng Xu"
     back_label = ui_text(lang, "common.back")
     callback_prefix = back_callback or (
         "create_media|quick_image" if str(job_type or "") == "image" else "create_media|quick_video"
@@ -58238,7 +58406,8 @@ def package_use_choice_keyboard(
 
 def package_provider_fail_message(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
-        return "⚙️ The provider is temporarily busy. TOAN AAS has returned the package slot to your wallet. Please try again later."
+        copy = public_hub_copy(lang)
+        return f"⚙️ {copy['common_failed']} {copy['common_retry']} {copy['common_no_charge']}"
     return "⚙️ Model AI đang bận. TOAN AAS đã hoàn lại 1 lượt trong gói của bạn, vui lòng thử lại sau."
 
 def package_wallet_status_payload() -> dict:
@@ -65448,16 +65617,18 @@ def shopaikey_public_flow_access_guard(job_type: str) -> dict:
 
 def shopaikey_provider_submit_maintenance_message(job_type: str, lang: str = "vi", detail: str = "") -> str:
     job = str(job_type or "").strip().lower()
+    locale = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(locale)
     if job == "video":
+        if locale != "vi":
+            return f"🎬 <b>{copy['video_menu_title']}</b>\n\n{copy['common_failed']}\n{copy['common_no_charge']}"
         return (
             "🎬 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên hiện chưa xuất được video lúc này.\n"
             "TOAN AAS đã giữ lại phần kịch bản, storyboard, prompt, nhạc, phụ đề hoặc lồng tiếng bạn đã chuẩn bị.\n"
             "Bạn quay lại thử sau một chút nhé — bot chưa xử lý video và chưa trừ Xu."
         )
-    if normalize_user_language(lang) == "zh":
-        return "🛠 图片生成正在维护中。TOAN AAS 已保留你的 prompt/套餐选择；尚未提交生成，也未扣除 Xu。"
-    if normalize_user_language(lang) != "vi":
-        return "🛠 Image generation is temporarily under maintenance. TOAN AAS kept your prompt/package choice; no provider call was submitted and no Xu was charged."
+    if locale != "vi":
+        return f"🛠 <b>{copy['image_create_title']}</b>\n\n{copy['image_failure']}\n{copy['common_no_charge']}"
     return "🛠 Hệ thống tạo ảnh đang bảo trì/nâng cấp nhẹ. TOAN AAS đã giữ prompt, tỉ lệ và gói bạn chọn; bot chưa gọi provider và chưa trừ Xu."
 
 def shopaikey_provider_submit_guard(job_type: str, *, source: str = "", confirmed: bool = False) -> dict:
@@ -65559,10 +65730,9 @@ def shopaikey_recent_image_job_for_callback(user_id, minutes: int | None = None)
         conn.close()
 
 def shopaikey_processed_callback_text(lang: str = "vi", job: dict | None = None) -> str:
-    if normalize_user_language(lang) == "zh":
-        return "此请求已处理。请查看下方结果。"
     if normalize_user_language(lang) != "vi":
-        return "This request has already been processed. Please check the result below."
+        copy = public_hub_copy(lang)
+        return f"{copy['common_success']}. {copy['freehub_result_title']}."
     return "Yêu cầu này đã được xử lý. Vui lòng xem kết quả bên dưới."
 
 def record_shopaikey_billing_event(user_id, job_id: int, event_type: str, amount_xu: int = 0, balance_before: int = 0, balance_after: int = 0, reason: str = ""):
@@ -65978,10 +66148,9 @@ def shopaikey_video_queue_counts() -> dict:
     }
 
 def public_video_active_job_text(lang: str = "vi") -> str:
-    if normalize_user_language(lang) == "zh":
-        return "⏳ 你已有一个视频正在处理中。完成后会自动发送视频。请不要重复创建新任务。"
     if normalize_user_language(lang) != "vi":
-        return "⏳ You already have a video being processed. The video will be sent automatically when it is ready. Please do not create another job."
+        copy = public_video_deep_copy(lang)
+        return f"⏳ {copy['waiting']}. {copy['pending_delivery']} {copy['no_resend']}."
     return "⏳ Bạn đang có video đang xử lý. Video sẽ được gửi tự động khi hoàn tất. Vui lòng không tạo thêm job mới."
 
 def public_video_active_job_keyboard(active_job: dict | None, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -67521,7 +67690,20 @@ def legal_commands_short_text() -> str:
 def support_link_html() -> str:
     return html.escape(SUPPORT_TELEGRAM_URL or "https://t.me/toanaas")
 
-def legal_menu_text() -> str:
+def legal_menu_text(lang: str = "vi") -> str:
+    locale = normalize_user_language(lang) or "vi"
+    if locale != "vi":
+        copy = public_hub_copy(locale)
+        return (
+            f"📜 <b>{copy['guide_label']} & {copy['support']}</b>\n\n"
+            f"{copy['start_legal_notice']}\n\n"
+            f"• <code>/terms</code> · {copy['guide_label']}\n"
+            f"• <code>/privacy</code> · {copy['support']}\n"
+            f"• <code>/dieukhoan_xu</code> · {copy['topup_label']}\n"
+            f"• <code>/refund_policy</code> · {copy['support']}\n"
+            f"• <code>/content_policy</code> · {copy['guide_label']}\n\n"
+            f"{copy['support']}: {support_link_html()}"
+        )
     return (
         "📜 <b>ĐIỀU KHOẢN & PHÁP LÝ TOAN AAS</b>\n\n"
         "Vui lòng xem các mục bên dưới trước khi sử dụng bot, mua/nạp Xu dịch vụ hoặc dùng công cụ AI/media.\n\n"
@@ -67544,13 +67726,15 @@ def legal_menu_text() -> str:
         f"• Hỗ trợ/admin: {support_link_html()}"
     )
 
-def legal_menu_keyboard() -> InlineKeyboardMarkup:
+def legal_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    locale = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(locale)
     rows = []
     url = terms_pdf_download_url()
     if url:
-        rows.append([InlineKeyboardButton("📄 Tải PDF điều khoản", url=url)])
-    rows.append([InlineKeyboardButton("💬 Nhắn admin/hỗ trợ", url=SUPPORT_TELEGRAM_URL or "https://t.me/toanaas")])
-    rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|main_guide"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+        rows.append([InlineKeyboardButton(f"📄 {copy['guide_label']}", url=url)])
+    rows.append([InlineKeyboardButton(f"💬 {copy['support']}", url=SUPPORT_TELEGRAM_URL or "https://t.me/toanaas")])
+    rows.append([InlineKeyboardButton(f"⬅️ {copy['back']}", callback_data="menu|main_guide"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def log_command_received(command: str, update: Update):
@@ -69654,54 +69838,56 @@ def free_hub_image_video_prompt_pack(user_input: str, variant_seed: int = 0) -> 
         "copy_instruction": "Prompt này chỉ là nội dung chuẩn bị. Nếu muốn tạo ảnh/video thật, bot sẽ chuyển sang flow có giá và xác nhận riêng.",
     }
 
-def free_hub_prompt_result_text(result: dict, task_type: str, provider: str = "local_prompt_library") -> str:
+def free_hub_prompt_result_text(result: dict, task_type: str, provider: str = "local_prompt_library", lang: str = "vi") -> str:
+    # Result content is copy-only; keep labels in the user's selected locale.
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     task_type = str(task_type or result.get("task_type") or "")
-    title = html.escape(str(result.get("title") or "Kết quả miễn phí"))
+    title = html.escape(str(result.get("title") or copy["freehub_result_title"]))
     lines = [f"✅ <b>{title}</b>", ""]
     if result.get("topic"):
-        lines.extend([f"Chủ đề: <b>{html.escape(str(result.get('topic')))}</b>", ""])
+        lines.extend([f"{copy['freehub_meta_topic']}: <b>{html.escape(str(result.get('topic')))}</b>", ""])
     if result.get("selected_prompt"):
         lines.extend([
-            f"<b>Prompt đã chọn #{_safe_int(result.get('selected_prompt_index'), 1)}:</b>",
+            f"<b>{copy['freehub_result_copy']} #{_safe_int(result.get('selected_prompt_index'), 1)}:</b>",
             f"<code>{html.escape(str(result.get('selected_prompt')))}</code>",
             "",
         ])
     meta_prompts = list(result.get("meta_prompts") or [])
     if meta_prompts:
         for index, item in enumerate(meta_prompts[:3], 1):
-            lines.append(f"<b>{index}. {html.escape(str(item.get('label') or 'Prompt'))}:</b>")
+            lines.append(f"<b>{index}. {html.escape(str(item.get('label') or copy['freehub_result_video']))}:</b>")
             lines.append(f"<code>{html.escape(str(item.get('text') or ''))}</code>")
             lines.append("")
     captions = list(result.get("captions") or [])
     if captions:
         for index, item in enumerate(captions[:3], 1):
-            lines.append(f"<b>{index}. {html.escape(str(item.get('label') or 'Caption'))}</b>")
-            lines.append(f"Hook: {html.escape(str(item.get('hook') or ''))}")
+            lines.append(f"<b>{index}. {html.escape(str(item.get('label') or copy['freehub_result_to_caption']))}</b>")
+            lines.append(f"{copy['freehub_result_to_ideas']}: {html.escape(str(item.get('hook') or ''))}")
             lines.append(html.escape(str(item.get("body") or "")))
-            lines.append(f"CTA: {html.escape(str(item.get('cta') or ''))}")
+            lines.append(f"{copy['freehub_result_publish']}: {html.escape(str(item.get('cta') or ''))}")
             tags = " ".join(str(tag) for tag in (item.get("hashtags") or []))
             if tags:
-                lines.append(f"Hashtag: {html.escape(tags)}")
+                lines.append(f"{copy['freehub_result_to_caption']}: {html.escape(tags)}")
             lines.append("")
     video_ideas = list(result.get("video_ideas") or [])
     if video_ideas:
-        lines.append("<b>3 ý tưởng video ngắn:</b>")
+        lines.append(f"<b>{copy['freehub_result_video']}:</b>")
         lines.extend(f"{index}. {html.escape(str(item))}" for index, item in enumerate(video_ideas[:3], 1))
         lines.append("")
     post_ideas = list(result.get("post_ideas") or [])
     if post_ideas:
-        lines.append("<b>3 ý tưởng bài đăng:</b>")
+        lines.append(f"<b>{copy['freehub_result_publish']}:</b>")
         lines.extend(f"{index}. {html.escape(str(item))}" for index, item in enumerate(post_ideas[:3], 1))
         lines.append("")
     if result.get("recommended_first"):
-        lines.extend(["<b>Hướng nên làm trước:</b>", html.escape(str(result["recommended_first"])), ""])
+        lines.extend([f"<b>{copy['freehub_continue']}:</b>", html.escape(str(result["recommended_first"])), ""])
     image_video_prompts = dict(result.get("image_video_prompts") or {})
     if image_video_prompts:
         labels = {
-            "image_9x16": "Prompt ảnh 9:16",
-            "image_1x1": "Prompt ảnh 1:1",
-            "video_ai": "Prompt video AI",
-            "frame_video": "Prompt ghép ảnh/video",
+            "image_9x16": copy["freehub_result_to_prompts"],
+            "image_1x1": copy["freehub_result_to_prompts"],
+            "video_ai": copy["freehub_result_video"],
+            "frame_video": copy["freehub_result_to_cinematic"],
         }
         for key in ("image_9x16", "image_1x1", "video_ai", "frame_video"):
             if image_video_prompts.get(key):
@@ -69709,43 +69895,43 @@ def free_hub_prompt_result_text(result: dict, task_type: str, provider: str = "l
                 lines.append(f"<code>{html.escape(str(image_video_prompts[key]))}</code>")
                 lines.append("")
     if result.get("prompt"):
-        lines.extend(["<b>Prompt:</b>", f"<code>{html.escape(str(result['prompt']))}</code>", ""])
+        lines.extend([f"<b>{copy['freehub_result_copy']}:</b>", f"<code>{html.escape(str(result['prompt']))}</code>", ""])
     variants = list(result.get("variants") or [])
     if variants:
-        lines.append("<b>3 biến thể:</b>")
+        lines.append(f"<b>{copy['freehub_result_variant']}:</b>")
         for index, item in enumerate(variants[:3], 1):
             lines.append(f"{index}. {html.escape(str(item))}")
         lines.append("")
     ideas = list(result.get("ideas") or [])
     if ideas:
-        lines.append("<b>3 ý tưởng:</b>")
+        lines.append(f"<b>{copy['freehub_result_to_ideas']}:</b>")
         lines.extend(f"{index}. {html.escape(str(item))}" for index, item in enumerate(ideas[:3], 1))
         lines.append("")
     hooks = list(result.get("hooks") or [])
     if hooks:
-        lines.append("<b>Hook:</b>")
+        lines.append(f"<b>{copy['freehub_result_to_ideas']}:</b>")
         lines.extend(f"• {html.escape(str(item))}" for item in hooks[:5])
         lines.append("")
     if result.get("script_15s"):
-        lines.extend(["<b>Kịch bản 15s:</b>", html.escape(str(result["script_15s"])), ""])
+        lines.extend([f"<b>{copy['freehub_result_video']} 15s:</b>", html.escape(str(result["script_15s"])), ""])
     if result.get("script_30s"):
-        lines.extend(["<b>Kịch bản 30s:</b>", html.escape(str(result["script_30s"])), ""])
+        lines.extend([f"<b>{copy['freehub_result_video']} 30s:</b>", html.escape(str(result["script_30s"])), ""])
     if result.get("caption"):
-        lines.extend(["<b>Caption:</b>", html.escape(str(result["caption"])), ""])
+        lines.extend([f"<b>{copy['freehub_result_to_caption']}:</b>", html.escape(str(result["caption"])), ""])
     hashtags = result.get("hashtags") or []
     if hashtags:
-        lines.extend(["<b>Hashtag:</b>", html.escape(" ".join(str(item) for item in hashtags)), ""])
+        lines.extend([f"<b>{copy['freehub_result_to_caption']}:</b>", html.escape(" ".join(str(item) for item in hashtags)), ""])
     if result.get("cta"):
-        lines.extend(["<b>CTA:</b>", html.escape(str(result["cta"])), ""])
+        lines.extend([f"<b>{copy['freehub_result_publish']}:</b>", html.escape(str(result["cta"])), ""])
     if result.get("music_sfx"):
-        lines.extend(["<b>Nhạc/SFX:</b>", html.escape(str(result["music_sfx"])), ""])
+        lines.extend([f"<b>{copy['freehub_music_sfx_ideas']}:</b>", html.escape(str(result["music_sfx"])), ""])
     if result.get("negative_prompt"):
-        lines.extend(["<b>Negative:</b>", f"<code>{html.escape(str(result['negative_prompt']))}</code>", ""])
+        lines.extend([f"<b>{copy['freehub_result_edit']}:</b>", f"<code>{html.escape(str(result['negative_prompt']))}</code>", ""])
     if result.get("copy_instruction"):
         lines.extend([html.escape(str(result["copy_instruction"])), ""])
     lines.extend([
-        f"Provider: <code>{html.escape(provider or 'local_prompt_library')}</code>",
-        "Xu deducted: <code>0</code>",
+        f"{copy['freehub_service_advice']}: <code>{html.escape(provider or 'local_prompt_library')}</code>",
+        f"{copy['freehub_input_free']}: <code>0 Xu</code>",
     ])
     return "\n".join(lines)
 
@@ -69824,7 +70010,7 @@ def free_hub_library_text(lang: str = "vi") -> str:
 def free_hub_video_ai_guard_text(result: dict | None = None, lang: str = "vi") -> str:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     selected = str((result or {}).get("selected_prompt") or "").strip()
-    selected_line = f"\n\nPrompt đã chọn:\n<code>{html.escape(selected)}</code>" if selected else ""
+    selected_line = f"\n\n{copy['freehub_result_copy']}:\n<code>{html.escape(selected)}</code>" if selected else ""
     return f"🎬 <b>{copy['freehub_video_guard_title']}</b>\n\n{copy['freehub_video_guard_body']} {selected_line}"
 
 def free_hub_video_ai_guard_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -69840,6 +70026,7 @@ def free_hub_video_ai_guard_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 
 def free_hub_publish_package_text(result: dict | None = None, lang: str = "vi") -> str:
     result = dict(result or {})
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     topic = str(result.get("topic") or result.get("title") or "nội dung của bạn").strip()
     caption = str(result.get("caption") or "").strip()
     if not caption and result.get("captions"):
@@ -69859,10 +70046,12 @@ def free_hub_publish_package_text(result: dict | None = None, lang: str = "vi") 
     selected_prompt = str(result.get("selected_prompt") or "").strip()
     if normalize_user_language(lang) != "vi":
         return (
-            "📦 <b>Publish package</b>\n\n"
-            f"Title: {html.escape(topic)}\nCaption: {html.escape(caption or topic)}\n"
-            f"Hashtags: {html.escape(hashtag_text or '#TOANAAS #ContentAI')}\nCTA: {html.escape(cta)}\n\n"
-            "Checklist: review format, caption, CTA and copyright before publishing. No provider call and no Xu charge."
+            f"📦 <b>{copy['freehub_publish_title']}</b>\n\n"
+            f"{copy['freehub_meta_topic']}: {html.escape(topic)}\n"
+            f"{copy['freehub_result_to_caption']}: {html.escape(caption or topic)}\n"
+            f"{copy['freehub_result_to_caption']}: {html.escape(hashtag_text or '#TOANAAS #ContentAI')}\n"
+            f"{copy['freehub_result_publish']}: {html.escape(cta)}\n\n"
+            f"{copy['freehub_publish_checklist']}\n{copy['freehub_input_free']}"
         )
     prompt_line = f"\n<b>Prompt nền:</b>\n<code>{html.escape(selected_prompt)}</code>\n" if selected_prompt else ""
     return (
@@ -69889,17 +70078,28 @@ def free_hub_publish_package_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 
 def free_hub_library_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
-    buttons = [(label, f"freehub|lib_{key}") for key, (_category, label) in FREE_HUB_LIBRARY_CATEGORIES.items()]
+    buttons = [(free_hub_library_category_label(key, lang), f"freehub|lib_{key}") for key in FREE_HUB_LIBRARY_CATEGORIES]
     return build_2col_keyboard(
         buttons,
         nav_back=(f"⬅️ {copy['freehub_main']}", "freehub|main"),
         lang=lang,
     )
 
-def free_hub_library_suggestions_text(items: list[dict], category_label: str) -> str:
-    lines = [f"📚 <b>{html.escape(category_label)}</b>", "", "Chọn một mẫu bên dưới:"]
+def free_hub_library_category_label(key: str, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    category_labels = {
+        "video": copy["freehub_prompts_title"], "image": copy["freehub_result_to_prompts"],
+        "meta": copy["freehub_meta_title"], "caption": copy["freehub_result_to_caption"],
+        "music": copy["freehub_music_sfx_ideas"], "shop": copy["freehub_sales"],
+        "beauty": copy["freehub_realistic"], "random": copy["freehub_more"],
+    }
+    return str(category_labels.get(str(key or ""), copy["freehub_library_title"]))
+
+def free_hub_library_suggestions_text(items: list[dict], category_label: str, lang: str = "vi") -> str:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    lines = [f"📚 <b>{html.escape(category_label)}</b>", "", copy["freehub_choose_template"]]
     for index, item in enumerate(items[:3], 1):
-        lines.append(f"\n<b>{index}. {html.escape(str(item.get('title') or 'Prompt'))}</b>")
+        lines.append(f"\n<b>{index}. {html.escape(str(item.get('title') or copy['freehub_prompts_title']))}</b>")
         lines.append(html.escape(str(item.get("prompt") or "")[:420]))
     return "\n".join(lines)
 
@@ -70002,10 +70202,10 @@ def free_hub_meta_choice_keyboard(step: str, lang: str = "vi") -> InlineKeyboard
         ],
         "meta_style": [
             (f"📷 {copy['freehub_realistic']}", "freehub|meta_style_real"),
-            ("🎬 Cinematic", "freehub|meta_style_cinematic"),
+            (f"🎬 {copy['freehub_cinematic']}", "freehub|meta_style_cinematic"),
             (f"😄 {copy['freehub_fun']}", "freehub|meta_style_fun"),
             (f"✨ {copy['freehub_luxury']}", "freehub|meta_style_luxury"),
-            ("👤 UGC", "freehub|meta_style_ugc"),
+            (f"👤 {copy['freehub_ugc']}", "freehub|meta_style_ugc"),
         ],
     }
     back_action = {
@@ -70180,12 +70380,8 @@ async def maybe_send_free_hub_promo(target, user_id, lang: str, success_count: i
     ):
         return
     USER_PENDING[free_hub_promo_key(user_id)] = {"last_shown_ts": time.time()}
-    text = (
-        "Bạn đang dùng công cụ miễn phí. Nếu muốn TOAN AAS làm trọn gói video, caption, phụ đề hoặc lồng tiếng "
-        "hoặc bot riêng cho shop, bạn có thể xem dịch vụ. Đây chỉ là gợi ý, bạn vẫn có thể tiếp tục dùng miễn phí."
-        if normalize_user_language(lang) == "vi"
-        else "You can keep using free tools. Premium workflows and custom bots are available when you need them."
-    )
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    text = f"{copy['freehub_promo']} {copy['freehub_continue']}"
     await target.reply_text(text, reply_markup=free_hub_soft_promo_keyboard(lang))
 
 
@@ -91435,12 +91631,9 @@ def main_video_keyboard(lang: str = "vi", *, resume_uiflow3: bool = False) -> In
 
 def video_prompt_library_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
-        return (
-            "📚 <b>Idea templates and prompts</b>\n\n"
-            "This library is now part of Video Ideas. Choose a template for prompts, scripts, camera angles or motion. "
-            "It does not process real video and does not charge Xu.\n\n"
-            "No file/media upload is required on this screen."
-        )
+        copy = public_hub_copy(lang)
+        video_copy = public_video_deep_copy(lang)
+        return f"📚 <b>{copy['freehub_library_title']}</b>\n\n{copy['freehub_library_body']}\n\n{video_copy['no_charge']}"
     return (
         "📚 <b>Kho mẫu ý tưởng và câu lệnh</b>\n\n"
         "Kho này đã nằm trong Ý tưởng video. Chọn mẫu để tham khảo câu lệnh, kịch bản, góc quay hoặc chuyển động, "
@@ -91452,24 +91645,27 @@ def video_prompt_library_text(lang: str = "vi") -> str:
 
 def video_prompt_library_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    copy = public_hub_copy(lang)
+    video_copy = public_video_deep_copy(lang)
     buttons = [
-        ("✍️ Prompt từ ý tưởng" if is_vi else "✍️ Prompt from idea", "vpromptlib|idea"),
-        ("🖼 Prompt từ ảnh" if is_vi else "🖼 Prompt from image", "vpromptlib|image"),
-        ("🎥 Chuyển động camera" if is_vi else "🎥 Camera motion", "vpromptlib|camera"),
-        ("🛍 Prompt quảng cáo" if is_vi else "🛍 Ad prompt", "vpromptlib|ad"),
+        ("✍️ Prompt từ ý tưởng" if is_vi else f"✍️ {copy['freehub_prompts']}", "vpromptlib|idea"),
+        ("🖼 Prompt từ ảnh" if is_vi else f"🖼 {copy['image_prompt_from_image']}", "vpromptlib|image"),
+        ("🎥 Chuyển động camera" if is_vi else f"🎥 {video_copy['video_prompt']}", "vpromptlib|camera"),
+        ("🛍 Prompt quảng cáo" if is_vi else f"🛍 {copy['freehub_meta']}", "vpromptlib|ad"),
         ("🎬 Cinematic", "vpromptlib|cinematic"),
         ("📱 TikTok/Reels", "vpromptlib|reels"),
     ]
     return video_v6_keyboard(
         buttons,
         lang,
-        back=("⬅️ Ý tưởng video" if is_vi else "⬅️ Video ideas", "videoidea|start"),
+        back=("⬅️ Ý tưởng video" if is_vi else f"⬅️ {copy['video_label']}", "videoidea|start"),
     )
 
 
 def video_prompt_library_guard_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
-        return "TOAN AAS could not open this prompt group right now. No video file has been processed and no Xu has been charged."
+        copy = public_hub_copy(lang)
+        return f"{copy['common_failed']} {copy['common_no_charge']}"
     return "TOAN AAS chưa mở được nhóm prompt này lúc này. Hệ thống chưa xử lý file video và chưa trừ Xu."
 
 
@@ -91492,6 +91688,13 @@ def video_prompt_library_category_label(action: str, lang: str = "vi") -> str:
         "cinematic": "Cinematic",
         "reels": "TikTok/Reels",
     }
+    if normalize_user_language(lang) != "vi":
+        copy = public_hub_copy(lang)
+        return {
+            "idea": copy["freehub_prompts"], "image": copy["image_prompt_from_image"],
+            "camera": public_video_deep_copy(lang)["video_prompt"], "ad": copy["freehub_meta"],
+            "cinematic": copy["freehub_cinematic"], "reels": "TikTok/Reels",
+        }.get(str(action or ""), copy["freehub_library_title"])
     return labels.get(str(action or ""), "Kho mẫu ý tưởng và câu lệnh")
 
 
@@ -91549,14 +91752,15 @@ def video_prompt_library_public_preview(value: str) -> str:
 def video_prompt_library_category_text(action: str, items: list[dict] | None = None, lang: str = "vi") -> str:
     label = video_prompt_library_category_label(action, lang)
     rows = list(items or [])
+    copy = public_hub_copy(lang)
     lines = [
         f"📚 <b>{html.escape(label)}</b>",
         "",
-        "Chọn một mẫu prompt để dùng tiếp trong flow video. Bước này chỉ mở kho prompt, chưa tạo file thật và chưa trừ Xu.",
+        ("Chọn một mẫu prompt để dùng tiếp trong flow video. Bước này chỉ mở kho prompt, chưa tạo file thật và chưa trừ Xu." if normalize_user_language(lang) == "vi" else f"{copy['freehub_choose_template']}. {copy['common_no_charge']}"),
         "",
     ]
     if not rows:
-        lines.append("Chưa có mẫu phù hợp trong kho local. Anh/chị có thể quay lại nhập ý tưởng riêng.")
+        lines.append("Chưa có mẫu phù hợp trong kho local. Anh/chị có thể quay lại nhập ý tưởng riêng." if normalize_user_language(lang) == "vi" else copy["memory_empty"])
         return "\n".join(lines)
     for idx, item in enumerate(rows[:5], 1):
         prompt = video_prompt_library_public_preview(str(item.get("prompt_text") or ""))
@@ -91579,9 +91783,10 @@ def video_prompt_library_category_keyboard(action: str, items: list[dict] | None
             current_row = []
     if current_row:
         rows.append(current_row)
+    copy = public_hub_copy(lang)
     rows.append([
-        InlineKeyboardButton("⬅️ Kho mẫu" if normalize_user_language(lang) == "vi" else "⬅️ Templates", callback_data="vpromptlib|start"),
-        InlineKeyboardButton("🏠 Menu chính" if normalize_user_language(lang) == "vi" else "🏠 Main menu", callback_data="menu|main"),
+        InlineKeyboardButton(f"⬅️ {copy['freehub_library_title']}", callback_data="vpromptlib|start"),
+        InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -91825,6 +92030,13 @@ def task3d_public_copy(product_id: str, lang: str = "vi") -> str:
 
 
 def task3d_text_input_prompt(product_id: str, lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        copy = public_hub_copy(lang)
+        video_copy = public_video_deep_copy(lang)
+        return (
+            f"✍️ <b>{copy['freehub_input_title'].format(item=video_copy['video_prompt'])}</b>\n\n"
+            f"{copy['freehub_input_privacy']}\n{video_copy['no_charge']}"
+        )
     prompts = {
         "video_trend": "✍️ Bạn muốn làm video về sản phẩm/chủ đề gì? Ví dụ: nước hoa nam, quán cà phê, khóa học AI, affiliate mỹ phẩm, kênh thú cưng...",
         "video_idea": "✍️ Nhập sản phẩm, chủ đề hoặc lĩnh vực bạn muốn làm video. Ví dụ: quán cà phê, khóa học AI, mỹ phẩm, đồ gia dụng...",
@@ -91841,6 +92053,10 @@ def task3d_text_input_prompt(product_id: str, lang: str = "vi") -> str:
 
 
 def task3d_media_input_prompt(product_id: str, lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        copy = public_hub_copy(lang)
+        video_copy = public_video_deep_copy(lang)
+        return f"📷 <b>{copy['docs_send_image']}</b>\n\n{copy['freehub_input_privacy']}\n{video_copy['no_charge']}"
     if product_id == "video_ai_real":
         return "📷 Gửi ảnh tham khảo cho video. Bot chỉ lưu ảnh trong phiên; chưa hiện gói, chưa xử lý video và chưa trừ Xu."
     if product_id == "self_shot_scene_change":
@@ -91851,6 +92067,20 @@ def task3d_media_input_prompt(product_id: str, lang: str = "vi") -> str:
 def video_semantic_planning_text(step: str, product_id: str, lang: str = "vi") -> str:
     step = str(step or "")
     product_id = str(product_id or "")
+    if normalize_user_language(lang) != "vi":
+        copy = public_hub_copy(lang)
+        video_copy = public_video_deep_copy(lang)
+        title = {
+            "suggest_image": copy["image_prompt_from_image"],
+            "storyboard_images": video_copy["images_scenes"],
+            "storyboard_many_images": video_copy["images_scenes"],
+            "storyboard_idea": video_copy["profile_preview"],
+            "storyboard_to_video": video_copy["video_script_hub"],
+            "script_ideas": video_copy["video_script_hub"],
+            "script_industry": video_copy["video_script_hub"],
+            "script_voice": video_copy["video_script_hub"],
+        }.get(step, copy["freehub_prompts"])
+        return f"💡 <b>{title}</b>\n\n{copy['freehub_input_title'].format(item=title)}\n\n{video_copy['no_charge']}"
     texts = {
         "suggest_prompt": (
             "💡 <b>Gợi ý prompt video</b>\n\n"
@@ -91937,11 +92167,13 @@ def video_semantic_planning_text(step: str, product_id: str, lang: str = "vi") -
 
 
 def video_semantic_planning_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(lang)
+    video_copy = public_video_deep_copy(lang)
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("✍️ Nhập nội dung" if normalize_user_language(lang) == "vi" else "✍️ Enter text", callback_data=f"vproduct|input_text|{product_id}"),
+        InlineKeyboardButton(f"✍️ {copy['freehub_custom_input']}", callback_data=f"vproduct|input_text|{product_id}"),
         InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"),
     ], [
-        InlineKeyboardButton("⬅️ Menu video" if normalize_user_language(lang) == "vi" else "⬅️ Video menu", callback_data="menu|main_video"),
+        InlineKeyboardButton(f"⬅️ {video_copy['back_video']}", callback_data="menu|main_video"),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ]])
 
@@ -92077,11 +92309,12 @@ VIDEO_MICROFLOW_REQUIRED_STEPS = {
 def video_microflow_missing_input_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) == "vi":
         return "TOAN AAS chưa nhận đủ dữ liệu cho bước này. Anh/chị vui lòng gửi lại ảnh/video/nội dung hoặc quay lại chọn luồng khác."
-    return "TOAN AAS does not have enough input for this step yet. Please send the image/video/text again or go back to choose another flow."
+    copy = public_hub_copy(lang)
+    return f"{copy['common_failed']} {copy['freehub_input_title'].format(item=copy['video_label'])}"
 
 
 def video_ui_back_label(lang: str = "vi") -> str:
-    return "⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back"
+    return f"⬅️ {public_video_deep_copy(lang)['back']}"
 
 
 def video_microflow_menu_button(product_id: str = "", lang: str = "vi") -> InlineKeyboardButton:
@@ -92093,7 +92326,7 @@ def video_microflow_menu_button(product_id: str = "", lang: str = "vi") -> Inlin
     }
     if protected:
         return InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")
-    return InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")
+    return InlineKeyboardButton(f"🎬 {public_video_deep_copy(lang)['back_video']}", callback_data="menu|main_video")
 
 
 def video_microflow_nav_keyboard(lang: str = "vi", product_id: str = "") -> InlineKeyboardMarkup:
@@ -92104,35 +92337,37 @@ def video_microflow_nav_keyboard(lang: str = "vi", product_id: str = "") -> Inli
 
 
 def video_microflow_media_keyboard(lang: str = "vi", product_id: str = "") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    copy = public_hub_copy(lang)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Tiếp tục" if is_vi else "✅ Continue", callback_data="vproduct|media_continue"), InlineKeyboardButton("🗑 Xóa ảnh/video cuối" if is_vi else "🗑 Remove last", callback_data="vproduct|media_delete_last")],
+        [InlineKeyboardButton(f"✅ {copy['common_continue']}", callback_data="vproduct|media_continue"), InlineKeyboardButton(f"🗑 {copy['docs_remove_last_file']}", callback_data="vproduct|media_delete_last")],
         [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), video_microflow_menu_button(product_id, lang)],
     ])
 
 
 def video_microflow_scene_count_keyboard(kind: str, lang: str = "vi", product_id: str = "") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    video_copy = public_video_deep_copy(lang)
     if str(kind or "") == "storyboard":
-        unit = "khung hình/cảnh ảnh" if is_vi else "image frames"
+        unit = "khung hình/cảnh ảnh" if is_vi else video_copy["images_scenes"]
     elif str(kind or "") == "image_suggest":
-        unit = "ảnh" if is_vi else "images"
+        unit = "ảnh" if is_vi else video_copy["images"]
     else:
-        unit = "cảnh" if is_vi else "scenes"
+        unit = "cảnh" if is_vi else video_copy["scenes"]
     rows = [
         [InlineKeyboardButton(f"4 {unit}", callback_data=f"vproduct|{kind}_scene_count|4"), InlineKeyboardButton(f"6 {unit}", callback_data=f"vproduct|{kind}_scene_count|6")],
         [InlineKeyboardButton(f"8 {unit}", callback_data=f"vproduct|{kind}_scene_count|8"), InlineKeyboardButton(f"10 {unit}", callback_data=f"vproduct|{kind}_scene_count|10")],
-        [InlineKeyboardButton("✍️ Nhập số khác" if is_vi else "✍️ Custom", callback_data=f"vproduct|{kind}_scene_count|custom"), InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")],
+        [InlineKeyboardButton(f"✍️ {video_copy['custom']}", callback_data=f"vproduct|{kind}_scene_count|custom"), InlineKeyboardButton(f"📖 {video_copy['video_edit_guide']}", callback_data="menu|guide_video_ai")],
         [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), video_microflow_menu_button(product_id, lang)],
     ]
     return InlineKeyboardMarkup(rows)
 
 
 def video_storyboard_duration_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_video_deep_copy(lang)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("3 giây/cảnh", callback_data="vproduct|storyboard_video_duration|3"), InlineKeyboardButton("5 giây/cảnh", callback_data="vproduct|storyboard_video_duration|5")],
-        [InlineKeyboardButton("8 giây/cảnh", callback_data="vproduct|storyboard_video_duration|8"), InlineKeyboardButton("✍️ Tự nhập", callback_data="vproduct|storyboard_video_duration|custom")],
-        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+        [InlineKeyboardButton(f"3 {copy['seconds']}/{copy['scene']}", callback_data="vproduct|storyboard_video_duration|3"), InlineKeyboardButton(f"5 {copy['seconds']}/{copy['scene']}", callback_data="vproduct|storyboard_video_duration|5")],
+        [InlineKeyboardButton(f"8 {copy['seconds']}/{copy['scene']}", callback_data="vproduct|storyboard_video_duration|8"), InlineKeyboardButton(f"✍️ {copy['custom']}", callback_data="vproduct|storyboard_video_duration|custom")],
+        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton(f"🎬 {copy['back_video']}", callback_data="menu|main_video")],
     ])
 
 
@@ -92140,6 +92375,20 @@ def video_microflow_text(step: str, product_id: str = "", session: dict | None =
     session = dict(session or {})
     draft = dict(session.get("draft") or {})
     media_count = len(list(draft.get("source_media_refs") or []))
+    if normalize_user_language(lang) != "vi":
+        copy = public_hub_copy(lang)
+        video_copy = public_video_deep_copy(lang)
+        media_steps = set(VIDEO_MICROFLOW_MEDIA_INPUT_STEPS) | {"awaiting_source_image", "awaiting_reference_video", "awaiting_multiple_images", "awaiting_self_shot_video"}
+        if step in media_steps:
+            return f"📎 <b>{copy['docs_send_file']}</b>\n\n{copy['freehub_input_privacy']}\n{video_copy['no_charge']}"
+        title = {
+            "ai_prompt_menu": copy["freehub_prompts"],
+            "ai_image_menu": copy["image_prompt_from_image"],
+            "ai_video_menu": video_copy["video_prompt"],
+            "awaiting_existing_script": video_copy["video_script_upload"],
+            "selfshot_source_ready": copy["common_success"],
+        }.get(step, copy["freehub_custom_input"])
+        return f"✍️ <b>{title}</b>\n\n{copy['freehub_input_title'].format(item=title)}\n\n{video_copy['no_charge']}"
     texts = {
         "ai_prompt_menu": (
             "✨ <b>Prompt → Video</b>\n\n"
@@ -92206,6 +92455,10 @@ def video_microflow_text(step: str, product_id: str = "", session: dict | None =
 
 def video_microflow_keyboard(step: str, product_id: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    if not is_vi and step not in {"storyboard_suggestion_scene_count", "image_to_video_image_suggestion_scene_count"}:
+        if step in VIDEO_MICROFLOW_MEDIA_INPUT_STEPS:
+            return video_microflow_media_keyboard(lang, product_id)
+        return video_microflow_nav_keyboard(lang, product_id)
     if step == "awaiting_selfshot2_video":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ Quay lại", callback_data="vproduct|ss2|show|intro"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
@@ -92739,11 +92992,12 @@ def task3d_product_intro_text(product_id: str, lang: str = "vi") -> str:
     if str(product_id or "") == "script_image_video":
         return video_script_hub_text(lang)
     if normalize_user_language(lang) != "vi":
+        copy = public_hub_copy(lang)
+        video_copy = public_video_deep_copy(lang)
         return (
-            f"{product.get('public_label')}\n\n"
-            f"{product.get('purpose')}\n\n"
-            "Start with an idea, prompt, image or video reference. TOAN AAS will guide the next step in plain language.\n\n"
-            "Free planning does not process a paid video and does not charge Xu. Paid rendering appears only after a prompt is ready."
+            f"🎬 <b>{copy['video_label']}</b>\n\n"
+            f"{copy['freehub_input_title'].format(item=video_copy['video_prompt'])}\n\n"
+            f"{video_copy['no_charge']}"
         )
     return task3d_public_copy(product_id, lang)
 
@@ -92757,6 +93011,8 @@ def video_scene3_canonical_entry_keyboard(
     """Shared public entry for every canonical short-video product."""
 
     is_vi = normalize_user_language(lang) == "vi"
+    copy = public_hub_copy(lang)
+    video_copy = public_video_deep_copy(lang)
     protected = str(product_id or "") in {
         "frame_video_local", "image_to_video", "video_edit", "video_local_edit",
     }
@@ -92765,16 +93021,16 @@ def video_scene3_canonical_entry_keyboard(
     return video_scene3_keyboard([
         [
             (
-                "✍️ Tự nhập nội dung" if is_vi else "✍️ Enter content",
+                "✍️ Tự nhập nội dung" if is_vi else f"✍️ {copy['freehub_custom_input']}",
                 f"vproduct|scene3_mode|{product_id}|manual",
             ),
             (
-                "💡 Gợi ý nội dung" if is_vi else "💡 Content suggestions",
+                "💡 Gợi ý nội dung" if is_vi else f"💡 {copy['freehub_more_suggestions']}",
                 f"vproduct|scene3_mode|{product_id}|suggestions",
             ),
         ],
         [
-            ("⬅️ Menu video" if is_vi else "⬅️ Video menu", parent_callback),
+            (f"⬅️ {video_copy['back_video']}", parent_callback),
             (secondary_label, secondary_callback),
         ],
     ])
@@ -92794,8 +93050,10 @@ def task3d_product_intro_keyboard(
     if str(product_id or "") == "script_image_video":
         return video_script_hub_keyboard(lang)
     is_vi = normalize_user_language(lang) == "vi"
+    copy = public_hub_copy(lang)
+    video_copy = public_video_deep_copy(lang)
     parent_callback = str(parent_callback_override or product.get("parent_menu_callback") or "menu|main_video")
-    menu_label = "⬅️ Menu video" if is_vi else "⬅️ Video menu"
+    menu_label = f"⬅️ {video_copy['back_video']}"
     protected = str(product_id or "") in {
         "frame_video_local", "image_to_video", "video_edit", "video_local_edit",
     }
@@ -92870,9 +93128,14 @@ def task3d_product_intro_keyboard(
         ],
     }
     rows = rows_by_product.get(product_id, [
-        [("✍️ Nhập nội dung", f"vproduct|input_text|{product_id}"), ("📖 Xem hướng dẫn video", "menu|guide_video_ai")],
+        [("✍️ Nhập nội dung" if is_vi else f"✍️ {copy['freehub_custom_input']}", f"vproduct|input_text|{product_id}"), ("📖 Xem hướng dẫn video" if is_vi else f"📖 {video_copy['video_edit_guide']}", "menu|guide_video_ai")],
         [(menu_label, parent_callback), secondary_menu],
     ])
+    if not is_vi:
+        rows = [[
+            (f"✍️ {copy['freehub_custom_input']}", f"vproduct|input_text|{product_id}"),
+            (f"📖 {video_copy['video_edit_guide']}", "menu|guide_video_ai"),
+        ], [(menu_label, parent_callback), secondary_menu]]
     return video_scene3_keyboard(rows)
 
 
@@ -113367,7 +113630,7 @@ def main_topup_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
     if not uid.isdigit():
         uid = "0"
     requested_locale = public_pricing_locale(lang)
-    if requested_locale not in {"vi", "en"}:
+    if requested_locale != "vi":
         copy = public_hub_copy(requested_locale)
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 10k", callback_data=payos_package_callback_data("10k", uid)), InlineKeyboardButton("💳 20k", callback_data=payos_package_callback_data("20k", uid))],
@@ -113376,49 +113639,29 @@ def main_topup_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(f"🏦 {copy['manual_topup']}", callback_data=manual_package_callback_data("manual_custom", uid))],
             [InlineKeyboardButton(f"🔙 {public_page_title('pricing', requested_locale)}", callback_data="pricing|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
         ])
-    back_label = "🔙 Quay lại bảng giá" if normalize_user_language(lang) == "vi" else "🔙 Back to pricing"
+    back_label = "🔙 Quay lại bảng giá"
     main_label = ui_text(lang, "common.main_menu")
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💳 10k", callback_data=payos_package_callback_data("10k", uid)), InlineKeyboardButton("💳 20k", callback_data=payos_package_callback_data("20k", uid))],
         [InlineKeyboardButton("💳 50k", callback_data=payos_package_callback_data("50k", uid)), InlineKeyboardButton("💳 100k", callback_data=payos_package_callback_data("100k", uid))],
         [InlineKeyboardButton("💳 200k", callback_data=payos_package_callback_data("200k", uid)), InlineKeyboardButton("💳 500k", callback_data=payos_package_callback_data("500k", uid))],
-        [InlineKeyboardButton("🏦 Nạp thủ công" if normalize_user_language(lang) == "vi" else "🏦 Manual top-up", callback_data=manual_package_callback_data("manual_custom", uid))],
+        [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=manual_package_callback_data("manual_custom", uid))],
         [InlineKeyboardButton(back_label, callback_data="pricing|main"), InlineKeyboardButton(main_label, callback_data="menu|main")],
     ])
 
 def main_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     requested_locale = public_pricing_locale(lang)
-    if requested_locale not in {"vi", "en"}:
+    if requested_locale != "vi":
         copy = public_hub_copy(requested_locale)
-        pricing_label = public_page_title("pricing", requested_locale)
-        guide_label = public_page_title("guide", requested_locale)
-        if requested_locale == "zh":
-            navigation = public_guide_navigation_copy(requested_locale)
-            return InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"🚀 {navigation['quick_start']}", callback_data="menu|guide_quick_start")],
-                [InlineKeyboardButton(f"🖼 {navigation['create_image']}", callback_data="menu|guide_image_ai"), InlineKeyboardButton(f"🎬 {navigation['create_video']}", callback_data="menu|guide_video_ai")],
-                [InlineKeyboardButton(f"🔥 {navigation['trend_video']}", callback_data="menu|guide_guided_video"), InlineKeyboardButton(f"🎵 {navigation['video_music']}", callback_data="menu|guide_music_add")],
-                [InlineKeyboardButton(f"💰 {navigation['credits_topup']}", callback_data="menu|guide_credits"), InlineKeyboardButton(f"❓ {navigation['faq_refunds']}", callback_data="menu|guide_faq")],
-                [InlineKeyboardButton(f"🎧 {copy['support']}", callback_data="menu|support"), InlineKeyboardButton(f"📊 {copy['center']}", url=TOAN_AAS_COMMUNITY_URL)],
-                [InlineKeyboardButton(f"📥 {navigation['download_pricing']}", callback_data="pricing|download_pricing"), InlineKeyboardButton(f"📘 {navigation['download_guide']}", callback_data="pricing|download_guide")],
-                [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
-            ])
+        navigation = public_guide_navigation_copy(requested_locale)
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"🚀 {guide_label}", callback_data="menu|guide_quick_start"), InlineKeyboardButton(f"📋 {pricing_label}", callback_data="pricing|catalog")],
-            [InlineKeyboardButton(f"🖼 {copy['image_label']}", callback_data="menu|guide_image_ai"), InlineKeyboardButton(f"🎬 {copy['video_label']}", callback_data="menu|guide_video_ai")],
-            [InlineKeyboardButton(f"🎵 {copy['music_label']}", callback_data="menu|guide_music_add"), InlineKeyboardButton(f"🎙 {copy['voice_label']}", callback_data="menu|translate")],
-            [InlineKeyboardButton(f"📥 {pricing_label}", callback_data="pricing|download_pricing"), InlineKeyboardButton(f"📘 {guide_label}", callback_data="pricing|download_guide")],
-            [InlineKeyboardButton(f"🎧 {copy['support']}", callback_data="menu|support"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
-        ])
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🚀 Quick start", callback_data="menu|guide_quick_start")],
-            [InlineKeyboardButton("🖼 Create image", callback_data="menu|guide_image_ai"), InlineKeyboardButton("🎬 Create video", callback_data="menu|guide_video_ai")],
-            [InlineKeyboardButton("🔥 Trend video", callback_data="menu|guide_guided_video"), InlineKeyboardButton("🎵 Video music", callback_data="menu|guide_music_add")],
-            [InlineKeyboardButton("💰 Xu & top-up", callback_data="menu|guide_credits"), InlineKeyboardButton("❓ FAQ & refunds", callback_data="menu|guide_faq")],
-            [InlineKeyboardButton("👨‍💼 Admin", callback_data="menu|support"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
-            [InlineKeyboardButton("📥 Download pricing", callback_data="pricing|download_pricing"), InlineKeyboardButton("📘 Download guide", callback_data="pricing|download_guide")],
-            [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
+            [InlineKeyboardButton(f"🚀 {navigation['quick_start']}", callback_data="menu|guide_quick_start"), InlineKeyboardButton(f"📋 {public_page_title('pricing', requested_locale)}", callback_data="pricing|catalog")],
+            [InlineKeyboardButton(f"🖼 {navigation['create_image']}", callback_data="menu|guide_image_ai"), InlineKeyboardButton(f"🎬 {navigation['create_video']}", callback_data="menu|guide_video_ai")],
+            [InlineKeyboardButton(f"🔥 {navigation['trend_video']}", callback_data="menu|guide_guided_video"), InlineKeyboardButton(f"🎵 {navigation['video_music']}", callback_data="menu|guide_music_add")],
+            [InlineKeyboardButton(f"💰 {navigation['credits_topup']}", callback_data="menu|guide_credits"), InlineKeyboardButton(f"❓ {navigation['faq_refunds']}", callback_data="menu|guide_faq")],
+            [InlineKeyboardButton(f"🎧 {copy['support']}", callback_data="menu|support"), InlineKeyboardButton(f"🌐 {copy['center']}", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton(f"📥 {navigation['download_pricing']}", callback_data="pricing|download_pricing"), InlineKeyboardButton(f"📘 {navigation['download_guide']}", callback_data="pricing|download_guide")],
+            [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🚀 Bắt đầu nhanh", callback_data="menu|guide_quick_start")],
@@ -124185,33 +124428,27 @@ def referral_account_link_text(user_id, bot_username: str = "", lang: str = "vi"
 
 def referral_account_policy_text(user_id, lang: str = "vi") -> str:
     profile = get_member_profile(user_id)
-    if normalize_user_language(lang) != "vi":
-        referral_table = (
-            "• Newbie: referrals are recorded; no Xu reward yet\n"
-            "• Silver: up to 20 Xu per eligible referral\n"
-            "• Gold: up to 30 Xu per eligible referral\n"
-            "• Platinum: up to 50 Xu per eligible referral\n"
-            "• Diamond: up to 80 Xu per eligible referral\n"
-            "• VIP: up to 100 Xu per eligible referral"
-        )
+    locale = public_pricing_locale(lang)
+    if locale != "vi":
+        copy = public_account_flow_copy(locale)
         percent = int(profile.get("ref_percent") or 0)
         cap = int(profile.get("ref_cap") or 0)
         current_policy = (
-            "Newbie: referrals are recorded, but Xu rewards are not enabled yet."
+            copy["newbie_no_reward"]
             if percent <= 0 or cap <= 0 else
-            f"{percent}% of the base Xu from the first top-up, capped at {cap} Xu for each referred customer who completes a first top-up."
+            copy["ref_reward_formula"].format(percent=percent, cap=cap)
         )
         return (
-            "📋 <b>HOW REFERRAL REWARDS WORK</b>\n\n"
-            "• Your friend must use a new account.\n"
-            "• Their first Xu top-up must be completed successfully.\n"
-            "• Self-referrals, fake accounts, and spam are not allowed.\n"
-            "• Reward Xu cannot be withdrawn or transferred.\n"
-            "• TOAN AAS may disable referrals when abuse is detected.\n\n"
-            "<b>Maximum reward by member tier</b>\n"
-            f"{referral_table}\n\n"
-            f"Your current tier: <b>{html.escape(profile.get('tier_badge') or profile.get('tier_label') or '-')}</b>\n"
-            f"Current policy: <b>{html.escape(current_policy)}</b>"
+            f"📋 <b>{copy['ref_how']}</b>\n\n"
+            f"• {copy['ref_new_account']}\n"
+            f"• {copy['ref_first_topup']}\n"
+            f"• {copy['ref_no_abuse']}\n"
+            f"• {copy['ref_credit_policy']}\n"
+            f"• {copy['ref_admin_lock']}\n\n"
+            f"<b>{copy['max_ref_reward']}</b>\n"
+            f"• {html.escape(current_policy)}\n\n"
+            f"{copy['current_tier']}: <b>{html.escape(profile.get('tier_badge') or profile.get('tier_label') or '-')}</b>\n"
+            f"{copy['current_reward']}: <b>{html.escape(current_policy)}</b>"
         )
     return (
         "📋 <b>CÁCH NHẬN THƯỞNG GIỚI THIỆU</b>\n\n"
@@ -124228,7 +124465,33 @@ def referral_account_policy_text(user_id, lang: str = "vi") -> str:
 
 def referral_account_stats_text(user_id, lang: str = "vi") -> str:
     stats = referral_stats_for_user(user_id)
-    is_vi = normalize_user_language(lang) == "vi"
+    locale = public_pricing_locale(lang)
+    if locale != "vi":
+        copy = public_account_flow_copy(locale)
+        status_labels = {
+            "pending": copy["referral_status_pending"],
+            "rewarded": copy["referral_status_rewarded"],
+            "qualified_no_reward": copy["referral_status_qualified_no_reward"],
+        }
+        lines = [
+            f"👥 <b>{copy['referral_stats']}</b>", "",
+            f"• {copy['link_clicks']}: <b>{stats['total']}</b>",
+            f"• {copy['pending']}: <b>{stats['pending']}</b>",
+            f"• {copy['rewarded']}: <b>{stats['rewarded']}</b>",
+            f"• {copy['qualified_no_reward']}: <b>{stats['qualified_no_reward']}</b>",
+            f"• {copy['ref_rewards_received']}: <b>{stats['reward_xu']} Xu</b>",
+        ]
+        if stats["recent"]:
+            lines.extend(["", f"<b>{copy['recent_referrals']}</b>"])
+            for referred_id, status, reward_xu, created_at in stats["recent"]:
+                safe_referred = str(referred_id or "")
+                masked = safe_referred[:4] + "..." + safe_referred[-3:] if len(safe_referred) > 7 else safe_referred
+                localized_status = status_labels.get(str(status or "").strip().lower(), copy["pending"])
+                lines.append(f"• <code>{html.escape(masked)}</code> | {html.escape(localized_status)} | +{int(reward_xu or 0)} Xu | {html.escape(str(created_at or '-')[:16])}")
+        else:
+            lines.append(f"\n{copy['no_referrals']}")
+        return "\n".join(lines)
+    is_vi = True
     lines = [
         "👥 <b>NGƯỜI ĐÃ GIỚI THIỆU</b>" if is_vi else "👥 <b>YOUR REFERRALS</b>",
         "",
@@ -124287,29 +124550,30 @@ def menu_hint_text(action: str) -> tuple[str, str]:
 def menu_hint_text_i18n(action: str, lang: str) -> tuple[str, str]:
     if normalize_user_language(lang) == "vi":
         return menu_hint_text(action)
+    copy = public_hub_copy(lang)
     hints = {
-        "hint_film": ("main_video", "🎬 <b>Create content</b>\n\nCopy:\n<code>/film your topic</code>\n\nExample:\n<code>/film product review for TikTok, friendly tone, clear CTA</code>"),
-        "hint_ai_prompt": ("main_ai", "✍️ <b>Better AI prompts</b>\n\nTell the bot your goal, audience, platform, tone and desired output."),
-        "hint_note": ("main_memory", "📝 <b>Save a note</b>\n\nTap <b>Create note</b>, then send the note content in the next message. The bot saves it with a full timestamp and does not charge Xu."),
-        "hint_search_note": ("main_memory", "🔎 <b>Search notes</b>\n\nTap <b>Search notes</b>, then send a keyword. The bot returns notes with #id and creation time."),
-        "hint_remind": ("main_memory", "⏰ <b>Create a reminder</b>\n\nCopy:\n<code>/remind 30m reminder text</code>"),
-        "hint_doc_tools": ("main_docs", "📄 <b>Document tools</b>\n\nChoose a tool with the buttons below. The bot will guide upload → confirm → process. No technical command needed."),
-        "hint_doc_pdf_to_word": ("main_docs", "📄 <b>PDF to Word</b>\n\nSend or reply to the PDF you want to convert. The bot will ask for confirmation before processing."),
-        "hint_doc_image_to_pdf": ("main_docs", "🖼 <b>Image to PDF</b>\n\nSend images one by one, then confirm PDF creation. Albums are accepted best effort, but one-by-one is safer."),
-        "hint_doc_compress_pdf": ("main_docs", "🗜 <b>Compress PDF</b>\n\nSend a PDF, choose the compression level, then confirm processing."),
-        "hint_doc_split_pdf": ("main_docs", "✂️ <b>Split PDF</b>\n\nSend a PDF, enter a page range like 1-3, then confirm splitting."),
-        "hint_doc_merge_pdf": ("main_docs", "🧩 <b>Merge PDF</b>\n\nSend PDFs one by one. The merge order follows the order you send them."),
-        "hint_doc_save_document": ("main_memory", "📄 <b>Save document</b>\n\nSend the file you want to save to your personal document storage. TOAN AAS will check storage quota before saving."),
-        "hint_pricing": ("main_topup", "💰 <b>Pricing</b>\n\nOpening TOAN AAS pricing."),
-        "hint_image_tools": ("main_image", "🖼 <b>Image tools</b>\n\nChoose the exact image task using the image menu buttons. Opening the menu does not call APIs and does not charge Xu."),
-        "hint_image_to_video_pack": ("main_video", "🎬 <b>Image → AI Video</b>\n\nOpen <b>Real AI Video</b> and choose <b>Image → AI Video</b>. The bot will guide image upload, style, camera motion and music before any real generation.\n\nNo API call and no Xu charged."),
-        "hint_media_factory": ("main_audio", "🎤 <b>Media tools</b>\n\nCopy:\n<code>/media_factory</code>\n\nVoice, transcription and media/content packs depending on enabled tools."),
-        "hint_video_status": ("main_guide", "🔄 <b>Video status</b>\n\nWhen a video is queued, the bot adds a status button to that job message. If you no longer have it, contact support with your Telegram ID and latest job/task. Do not create duplicate jobs while one is processing."),
-        "hint_naptien": ("billing", "💳 <b>Top up Xu</b>\n\nCopy:\n<code>/naptien</code>"),
-        "hint_profile": ("billing", "👤 <b>Account</b>\n\nCopy:\n<code>/profile</code>"),
-        "hint_terms": ("support", "📜 <b>Terms</b>\n\nCopy:\n<code>/terms</code>\n\nFull policy is currently available in Vietnamese."),
+        "hint_film": ("main_video", f"🎬 <b>{copy['video_label']}</b>\n\n{copy['video_description']}\n\n<code>/film</code>"),
+        "hint_ai_prompt": ("main_ai", f"✍️ <b>{copy['ai_better_prompts']}</b>\n\n{copy['ai_menu_body']}"),
+        "hint_note": ("main_memory", f"📝 <b>{copy['notes_create']}</b>\n\n{copy['memory_create_body']}"),
+        "hint_search_note": ("main_memory", f"🔎 <b>{copy['notes_search']}</b>\n\n{copy['memory_search_body']}"),
+        "hint_remind": ("main_memory", f"⏰ <b>{copy['notes_reminder']}</b>\n\n<code>/remind</code>"),
+        "hint_doc_tools": ("main_docs", f"📄 <b>{copy['docs_tools']}</b>\n\n{copy['docs_body']}"),
+        "hint_doc_pdf_to_word": ("main_docs", f"📄 <b>{copy['docs_pdf_to_word']}</b>\n\n{copy['docs_send_pdf']}"),
+        "hint_doc_image_to_pdf": ("main_docs", f"🖼 <b>{copy['docs_image_to_pdf']}</b>\n\n{copy['docs_send_image']}"),
+        "hint_doc_compress_pdf": ("main_docs", f"🗜 <b>{copy['docs_compress_pdf']}</b>\n\n{copy['docs_send_pdf']}"),
+        "hint_doc_split_pdf": ("main_docs", f"✂️ <b>{copy['docs_split_pdf']}</b>\n\n{copy['docs_send_pdf']}"),
+        "hint_doc_merge_pdf": ("main_docs", f"🧩 <b>{copy['docs_merge_pdf']}</b>\n\n{copy['docs_send_pdf']}"),
+        "hint_doc_save_document": ("main_memory", f"📄 <b>{copy['notes_save_document']}</b>\n\n{copy['docs_send_file']}"),
+        "hint_pricing": ("main_topup", f"💰 <b>{public_page_title('pricing', lang)}</b>\n\n{copy['guide_description']}"),
+        "hint_image_tools": ("main_image", f"🖼 <b>{copy['image_menu_title']}</b>\n\n{copy['image_menu_body']}"),
+        "hint_image_to_video_pack": ("main_video", f"🎬 <b>{copy['video_label']}</b>\n\n{copy['video_description']}"),
+        "hint_media_factory": ("main_audio", f"🎤 <b>{copy['audio_media_title']}</b>\n\n{copy['audio_media_body']}"),
+        "hint_video_status": ("main_guide", f"🔄 <b>{copy['video_menu_title']}</b>\n\n{copy['video_menu_body']}"),
+        "hint_naptien": ("billing", f"💳 <b>{copy['topup_title']}</b>\n\n<code>/naptien</code>"),
+        "hint_profile": ("billing", f"👤 <b>{copy['profile_title']}</b>\n\n<code>/profile</code>"),
+        "hint_terms": ("support", f"📜 <b>{copy['guide_label']}</b>\n\n<code>/terms</code>\n\n{copy['start_legal_notice']}"),
     }
-    return hints.get(action, ("main", "Choose a function group below."))
+    return hints.get(action, ("main", copy["hint_choose_group"]))
 
 def menu_text_main_video_i18n(lang: str) -> str:
     if normalize_user_language(lang) == "vi":
@@ -124380,17 +124644,9 @@ def menu_text_main_quick_i18n(lang: str) -> str:
 def menu_text_main_topup_i18n(lang: str, user_id=None) -> str:
     lang = normalize_user_language(lang) or "vi"
     requested_locale = public_pricing_locale(lang)
-    if requested_locale not in {"vi", "en", "zh"}:
-        return "\n".join(public_guide_lines("credits", requested_locale))
+    copy = public_hub_copy(requested_locale)
     international_account = user_id is not None and not user_is_vietnam_market(user_id)
     if international_account:
-        if lang == "zh":
-            return (
-                "💳 <b>国际 Xu 充值</b>\n\n"
-                "CNY 充值可使用 ZaloPay/manual 或 Binance / USDT TRC20。确认前会显示经核验的基础 Xu。\n\n"
-                f"{foreign_topup_policy_note('zh')}\n\n"
-                "请勿发送密码、OTP、私密验证码或银行卡安全信息。"
-            )
         if lang == "vi":
             return (
                 "💳 <b>Nạp Xu quốc tế</b>\n\n"
@@ -124399,23 +124655,17 @@ def menu_text_main_topup_i18n(lang: str, user_id=None) -> str:
                 "Các mệnh giá Xu gốc vẫn hiển thị trong nút chọn nạp; không có bonus nạp nội địa."
             )
         return (
-            "💳 <b>INTERNATIONAL XU TOP-UP</b>\n\n"
-            "USD top-up: USDT TRC20 only. Verified base Xu is shown before confirmation.\n\n"
-            f"{foreign_topup_policy_note('en')}\n\n"
-            "Never send passwords, OTPs, private security codes or card information."
+            f"💳 <b>{copy['topup_policy_title']}</b>\n\n"
+            f"{copy['topup_verified_base']}\n\n"
+            f"{foreign_topup_policy_note(requested_locale)}\n\n"
+            f"{copy['service_credit_note']}"
         )
     if lang == "vi":
         return menu_text_main_topup()
-    if lang == "zh":
-        return (
-            "💳 <b>充值 XU</b>\n\n"
-            "请选择充值金额。越南本地付款会在确认前显示当前渠道和最终 Xu。\n\n"
-            "请勿发送密码、OTP、私密验证码或银行卡安全信息。"
-        )
     return (
-        "💳 <b>TOP UP XU</b>\n\n"
-        "Choose an amount below. Vietnam domestic payment options and final Xu are shown before confirmation.\n\n"
-        "Never send passwords, OTPs, private security codes or card information."
+        f"💳 <b>{copy['topup_title']}</b>\n\n"
+        f"{copy['topup_choose_amount']}\n\n"
+        f"{copy['service_credit_note']}"
     )
 
 def menu_text_main_profile_i18n(user_id, lang: str) -> str:
@@ -125056,7 +125306,8 @@ async def cmd_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_legal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("legal", update)
-    await update.message.reply_text(legal_menu_text(), parse_mode="HTML", reply_markup=legal_menu_keyboard())
+    lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
+    await update.message.reply_text(legal_menu_text(lang), parse_mode="HTML", reply_markup=legal_menu_keyboard(lang))
 
 def privacy_text() -> str:
     return (
@@ -129616,37 +129867,38 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
             reply_markup=main_memory_keyboard(lang, uid),
         )
     if action == "docs_split_merge":
+        copy = public_hub_copy(lang)
         return await safe_edit_or_send(
             query,
-            "📄 <b>Tách / ghép PDF nhỏ</b>\n\nBạn có thể dùng công cụ PDF/Word hiện có. File nhỏ/local đang giữ miễn phí; file lớn hoặc OCR/provider sẽ có guard riêng. Bot chưa trừ Xu.",
+            f"📄 <b>{copy['freehub_split_merge']}</b>\n\n{copy['docs_menu_body']}\n{copy['freehub_input_free']}",
             parse_mode="HTML",
             reply_markup=build_2col_keyboard(
                 [
-                    ("✂️ Tách PDF" if normalize_user_language(lang) == "vi" else "✂️ Split PDF", "menu|hint_doc_split_pdf"),
-                    ("🧩 Gộp PDF" if normalize_user_language(lang) == "vi" else "🧩 Merge PDF", "menu|hint_doc_merge_pdf"),
+                    (f"✂️ {copy['docs_split_pdf']}", "menu|hint_doc_split_pdf"),
+                    (f"🧩 {copy['docs_merge_pdf']}", "menu|hint_doc_merge_pdf"),
                 ],
-                nav_back=("⬅️ Tài liệu/PDF miễn phí" if normalize_user_language(lang) == "vi" else "⬅️ Free docs/PDF", "freehub|docs"),
+                nav_back=(f"⬅️ {copy['freehub_docs_title']}", "freehub|docs"),
                 lang=lang,
             ),
         )
     if action == "docs_summary_guard":
+        copy = public_hub_copy(lang)
         return await safe_edit_or_send(
             query,
-            "📝 <b>Tóm tắt ngắn</b>\n\nV1 chỉ hỗ trợ text/file nhỏ. Tóm tắt dài, OCR hoặc dịch tài liệu dài sẽ báo giá/xác nhận riêng khi mở. Bot chưa gọi provider và chưa trừ Xu.",
+            f"📝 <b>{copy['freehub_summary']}</b>\n\n{copy['docs_send_file']}\n{copy['freehub_input_free']}",
             parse_mode="HTML",
             reply_markup=build_2col_keyboard(
-                [("🧰 Mở Công cụ PDF / Word" if normalize_user_language(lang) == "vi" else "🧰 Open PDF / Word tools", "menu|main_docs")],
-                nav_back=("⬅️ Tài liệu/PDF miễn phí" if normalize_user_language(lang) == "vi" else "⬅️ Free docs/PDF", "freehub|docs"),
+                [(f"🧰 {copy['docs_tools']}", "menu|main_docs")],
+                nav_back=(f"⬅️ {copy['freehub_docs_title']}", "freehub|docs"),
                 lang=lang,
             ),
         )
     if action == "byok":
         clear_free_hub_pending(uid)
+        copy = public_hub_copy(lang)
         return await safe_edit_or_send(
             query,
-            "🔐 Kết nối API riêng chưa mở trong khu công cụ miễn phí. Vui lòng liên hệ admin nếu cần cấu hình provider riêng. Bot chưa nhận API key và chưa trừ Xu."
-            if normalize_user_language(lang) == "vi"
-            else "🔐 BYOK is not open in Free Tools yet. Contact admin if you need a private provider setup. No API key was accepted and no Xu was charged.",
+            f"🔐 <b>{copy['freehub_byok_title']}</b>\n\n{copy['freehub_byok_body']}\n{copy['freehub_input_free']}",
             reply_markup=free_hub_main_keyboard(lang),
         )
     if action == "upload":
@@ -129655,9 +129907,10 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
     if action == "publish_package":
         state = get_free_hub_pending(uid)
         if not state.get("result"):
+            copy = public_hub_copy(lang)
             return await safe_edit_or_send(
                 query,
-                "📦 <b>Gói đăng bài</b>\n\nBạn cần có prompt/kịch bản hoặc hồ sơ kênh trước để tạo gói đăng bài. Hãy tạo nội dung trong Công cụ miễn phí rồi lưu kết quả trước.\n\nBot chưa gọi API và chưa trừ Xu.",
+                f"📦 <b>{copy['freehub_publish_title']}</b>\n\n{copy['freehub_prompts_body']}\n{copy['freehub_input_free']}",
                 parse_mode="HTML",
                 reply_markup=free_hub_main_keyboard(lang),
             )
@@ -129701,16 +129954,17 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         count = free_hub_record_success(query.from_user, task_type, provider)
         await safe_edit_or_send(
             query,
-            free_hub_prompt_result_text(payload, task_type, provider),
+            free_hub_prompt_result_text(payload, task_type, provider, lang),
             parse_mode="HTML",
             reply_markup=free_hub_result_keyboard(lang, task_type, meta=task_type == "meta_ai_prompt"),
         )
         return await maybe_send_free_hub_promo(query.message, uid, lang, count)
     if action.startswith("lib_") and action not in {"lib_more", "lib_back"} and not action.startswith("lib_pick"):
         token = action.replace("lib_", "", 1)
-        category_id, label = FREE_HUB_LIBRARY_CATEGORIES.get(token, ("", "Prompt Library"))
+        category_id, _label = FREE_HUB_LIBRARY_CATEGORIES.get(token, ("", ""))
+        label = free_hub_library_category_label(token, lang)
         if not category_id:
-            return await query.answer("Nhóm prompt chưa hỗ trợ.", show_alert=True)
+            return await query.answer(public_hub_copy(lang)["freehub_video_guard_title"], show_alert=True)
         industry_id = FREE_HUB_LIBRARY_INDUSTRY_FILTERS.get(token, "")
         items = prompt_library_suggestions(
             FREE_PROMPT_LIBRARY,
@@ -129730,13 +129984,13 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         )
         return await safe_edit_or_send(
             query,
-            free_hub_library_suggestions_text(items, label),
+            free_hub_library_suggestions_text(items, label, lang),
             reply_markup=free_hub_library_suggestions_keyboard(lang),
         )
     if action in {"lib_more", "lib_back"}:
         state = get_free_hub_pending(uid)
         category_id = str(state.get("library_category") or "")
-        label = str(state.get("library_label") or "Prompt Library")
+        label = str(state.get("library_label") or public_hub_copy(lang)["freehub_library_title"])
         industry_id = str(state.get("library_industry") or "")
         if not category_id:
             return await safe_edit_or_send(query, free_hub_library_text(lang), reply_markup=free_hub_library_keyboard(lang))
@@ -129752,7 +130006,7 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         set_free_hub_pending(uid, "library_suggestions", library_ids=[item.get("id") for item in items])
         return await safe_edit_or_send(
             query,
-            free_hub_library_suggestions_text(items, label),
+            free_hub_library_suggestions_text(items, label, lang),
             reply_markup=free_hub_library_suggestions_keyboard(lang),
         )
     if action.startswith("lib_pick"):
@@ -129773,7 +130027,7 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         set_free_hub_pending(uid, "result", task_type="prompt_library", result=result, selected_prompt_id=selected.get("id"))
         return await safe_edit_or_send(
             query,
-            free_hub_prompt_result_text(result, "prompt_library"),
+            free_hub_prompt_result_text(result, "prompt_library", lang=lang),
             reply_markup=free_hub_library_item_keyboard(lang),
         )
     state = get_free_hub_pending(uid)
@@ -129794,7 +130048,7 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         set_free_hub_pending(uid, "result", result=result, selected_prompt=result["selected_prompt"])
         return await safe_edit_or_send(
             query,
-            free_hub_prompt_result_text(result, task_type, provider),
+            free_hub_prompt_result_text(result, task_type, provider, lang),
             parse_mode="HTML",
             reply_markup=free_hub_result_keyboard(lang, task_type, meta=task_type == "meta_ai_prompt"),
         )
@@ -129852,7 +130106,7 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         count = free_hub_record_success(query.from_user, "meta_ai_prompt", "local_contextual_prompt")
         await safe_edit_or_send(
             query,
-            free_hub_prompt_result_text(result, "meta_ai_prompt", "local_contextual_prompt"),
+            free_hub_prompt_result_text(result, "meta_ai_prompt", "local_contextual_prompt", lang),
             reply_markup=free_hub_result_keyboard(lang, "meta_ai_prompt", meta=True),
         )
         return await maybe_send_free_hub_promo(query.message, uid, lang, count)
@@ -129866,7 +130120,7 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         if action in {"copy", "prompt_back"}:
             return await safe_edit_or_send(
                 query,
-                free_hub_prompt_result_text(result, task_type, provider),
+                free_hub_prompt_result_text(result, task_type, provider, lang),
                 reply_markup=free_hub_result_keyboard(lang, task_type, meta=task_type == "meta_ai_prompt"),
             )
         if action == "edit":
@@ -129890,7 +130144,7 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
             count = free_hub_record_success(query.from_user, task_type, "local_prompt_library")
             await safe_edit_or_send(
                 query,
-                free_hub_prompt_result_text(result, task_type, "local_prompt_library"),
+                free_hub_prompt_result_text(result, task_type, "local_prompt_library", lang),
                 reply_markup=free_hub_result_keyboard(lang, task_type, meta=task_type == "meta_ai_prompt"),
             )
             return await maybe_send_free_hub_promo(query.message, uid, lang, count)
@@ -129901,7 +130155,7 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
             count = free_hub_record_success(query.from_user, "caption_hashtag", "local_prompt_library")
             await safe_edit_or_send(
                 query,
-                free_hub_prompt_result_text(result, task_type, "local_prompt_library"),
+                free_hub_prompt_result_text(result, task_type, "local_prompt_library", lang),
                 reply_markup=free_hub_result_keyboard(lang, task_type),
             )
             return await maybe_send_free_hub_promo(query.message, uid, lang, count)
@@ -129910,34 +130164,36 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
             task_type = "content_idea"
             set_free_hub_pending(uid, "result", result=result, task_type=task_type, user_input=source, provider="local_prompt_library")
             count = free_hub_record_success(query.from_user, task_type, "local_prompt_library")
-            await safe_edit_or_send(query, free_hub_prompt_result_text(result, task_type, "local_prompt_library"), reply_markup=free_hub_result_keyboard(lang, task_type))
+            await safe_edit_or_send(query, free_hub_prompt_result_text(result, task_type, "local_prompt_library", lang), reply_markup=free_hub_result_keyboard(lang, task_type))
             return await maybe_send_free_hub_promo(query.message, uid, lang, count)
         if action == "to_prompts":
             result = free_hub_image_video_prompt_pack(source)
             task_type = "image_video_prompt"
             set_free_hub_pending(uid, "result", result=result, task_type=task_type, user_input=source, provider="local_prompt_library")
             count = free_hub_record_success(query.from_user, task_type, "local_prompt_library")
-            await safe_edit_or_send(query, free_hub_prompt_result_text(result, task_type, "local_prompt_library"), reply_markup=free_hub_result_keyboard(lang, task_type))
+            await safe_edit_or_send(query, free_hub_prompt_result_text(result, task_type, "local_prompt_library", lang), reply_markup=free_hub_result_keyboard(lang, task_type))
             return await maybe_send_free_hub_promo(query.message, uid, lang, count)
         if action == "to_cinematic":
+            copy = public_hub_copy(lang)
             return await safe_edit_or_send(
                 query,
-                "🎬 <b>Concept quảng cáo cinematic</b>\n\nTOAN AAS đã có ý tưởng nền. Bấm nút bên dưới để mở flow concept quảng cáo và chọn/chỉnh thông điệp trước khi tạo storyboard/prompt.\n\nBot chưa gọi API ảnh/video và chưa trừ Xu.",
+                f"🎬 <b>{copy['freehub_result_to_cinematic']}</b>\n\n{copy['freehub_prompts_body']}\n{copy['freehub_input_free']}",
                 parse_mode="HTML",
                 reply_markup=build_2col_keyboard(
-                    [("🎬 Mở concept cinematic" if normalize_user_language(lang) == "vi" else "🎬 Open cinematic concept", "adconcept|start")],
-                    nav_back=("⬅️ Kết quả miễn phí" if normalize_user_language(lang) == "vi" else "⬅️ Free result", "freehub|copy"),
+                    [(f"🎬 {copy['freehub_result_to_cinematic']}", "adconcept|start")],
+                    nav_back=(f"⬅️ {copy['freehub_result_title']}", "freehub|copy"),
                     lang=lang,
                 ),
             )
         if action == "use_image":
+            copy = public_hub_copy(lang)
             return await safe_edit_or_send(
                 query,
-                "🖼 <b>Dùng prompt này để tạo ảnh</b>\n\nTOAN AAS sẽ mở khu Tạo ảnh AI. Khi tạo ảnh thật, bot sẽ cho chọn gói, hiện giá và hỏi xác nhận trước khi trừ Xu.",
+                f"🖼 <b>{copy['image_create_title']}</b>\n\n{copy['image_menu_body']}",
                 parse_mode="HTML",
                 reply_markup=build_2col_keyboard(
-                    [("🖼 Mở Tạo ảnh AI" if normalize_user_language(lang) == "vi" else "🖼 Open AI image", "menu|main_image")],
-                    nav_back=("⬅️ Kết quả miễn phí" if normalize_user_language(lang) == "vi" else "⬅️ Free result", "freehub|copy"),
+                    [(f"🖼 {copy['image_create_title']}", "menu|main_image")],
+                    nav_back=(f"⬅️ {copy['freehub_result_title']}", "freehub|copy"),
                     lang=lang,
                 ),
             )
@@ -129970,7 +130226,7 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         )
         quota_error = memory_quota_error(uid, len(content.encode("utf-8")))
         if quota_error:
-            return await query.answer("Không đủ dung lượng ghi chú để lưu mẫu này.", show_alert=True)
+            return await query.answer(public_hub_copy(lang)["memory_empty"], show_alert=True)
         note_id = memory_create_note(
             uid,
             content,
@@ -129982,17 +130238,14 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
                 "priority": "normal",
             },
         )
-        return await query.answer(f"Đã lưu vào ghi chú #{note_id}.", show_alert=True)
+        return await query.answer(f"{public_hub_copy(lang)['memory_saved']} #{note_id}.", show_alert=True)
     logger.info(
         "free hub unknown callback guarded | user=%s | action=%s",
         uid,
         sanitize_log_text(action)[:80],
     )
-    guard_text = (
-        "TOAN AAS đang hoàn thiện nút này trong khu Công cụ miễn phí. Bot chưa gọi API và chưa trừ Xu."
-        if normalize_user_language(lang) == "vi"
-        else "TOAN AAS is still preparing this free-tool button. No API was called and no Xu was charged."
-    )
+    copy = public_hub_copy(lang)
+    guard_text = f"{copy['freehub_promo']} {copy['freehub_input_free']}"
     return await safe_edit_or_send(query, guard_text, reply_markup=free_hub_main_keyboard(lang))
 
 async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -130198,10 +130451,11 @@ async def cmd_free_hub_prompt_test(update: Update, context: ContextTypes.DEFAULT
             "⛔ Prompt test bị safety guard chặn. Không gửi dữ liệu sang provider và không trừ Xu."
         )
     result = free_hub_meta_prompt_pack(topic)
+    lang = get_user_language(update.effective_user.id) or "vi"
     await update.message.reply_text(
-        free_hub_prompt_result_text(result, "meta_ai_prompt", "local_prompt_library"),
+        free_hub_prompt_result_text(result, "meta_ai_prompt", "local_prompt_library", lang),
         parse_mode="HTML",
-        reply_markup=free_hub_result_keyboard(get_user_language(update.effective_user.id) or "vi", "meta_ai_prompt", meta=True),
+        reply_markup=free_hub_result_keyboard(lang, "meta_ai_prompt", meta=True),
     )
 
 def video_public_bool_label(value) -> str:
@@ -218900,6 +219154,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_bill = bool(bill_state)
 
     if is_bill:
+        lang = get_user_language(uid) or "vi"
+        copy = public_hub_copy(lang)
         USER_BILL_STATE.pop(uid, None)
         photo = update.message.photo[-1]
         deposit = create_manual_pending_deposit(
@@ -218909,14 +219165,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_unique_id=str(getattr(photo, "file_unique_id", "") or ""),
         )
         if not deposit.get("ok"):
-            return await update.message.reply_text("⚠️ Không thể lưu bill này. Vui lòng mở lại Nạp thủ công và thử lại.")
+            if public_copy_locale(lang) == "vi":
+                failure_text = "⚠️ Không thể lưu bill này. Vui lòng mở lại Nạp thủ công và thử lại."
+            else:
+                failure_text = f"⚠️ {copy['common_failed']}\n\n{copy['common_no_charge']}"
+            return await update.message.reply_text(failure_text)
         await notify_manual_pending_deposit(context, deposit)
         await update.message.reply_text(
-            manual_pending_user_text(deposit),
+            manual_pending_user_text(deposit, lang),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📂 Lịch sử nạp thủ công", callback_data=f"manual|history|{uid}"), InlineKeyboardButton("💬 Hỗ trợ", callback_data="support|start")],
-                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                [InlineKeyboardButton(f"📂 {copy['manual_topup']}", callback_data=f"manual|history|{uid}"), InlineKeyboardButton(f"💬 {copy['support']}", callback_data="support|start")],
+                [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
             ]),
         )
         return
@@ -248932,7 +249192,7 @@ async def handle_free_hub_pending_text(update: Update, context: ContextTypes.DEF
     )
     count = free_hub_record_success(update.effective_user, task_type, provider)
     await update.message.reply_text(
-        free_hub_prompt_result_text(payload, task_type, provider),
+        free_hub_prompt_result_text(payload, task_type, provider, lang),
         parse_mode="HTML",
         reply_markup=free_hub_result_keyboard(lang, task_type, meta=task_type == "meta_ai_prompt"),
     )

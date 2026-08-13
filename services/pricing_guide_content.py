@@ -917,6 +917,29 @@ _PUBLIC_START_LEGAL_COPY = {
     "id": "Dengan mengetuk Start, mengisi ulang Xu, atau terus menggunakan TOAN AAS, Anda menyetujui /legal, /privacy, /dieukhoan_xu, /refund_policy, serta kebijakan kekayaan intelektual TOAN AAS.",
 }
 
+# Free Hub button copy that is not part of the generic deep-flow tuple.  Keep
+# this table next to the public copy owner so the early shell construction
+# below never captures the English defaults before native deep copy exists.
+_PUBLIC_FREE_HUB_CHOICE_COPY = {
+    "vi": {"choose_1": "Dùng gợi ý 1", "choose_2": "Dùng gợi ý 2", "choose_3": "Dùng gợi ý 3", "sales": "Bán hàng", "engagement": "Tăng tương tác", "brand": "Thương hiệu", "story": "Kể chuyện", "realistic": "Chân thật", "cinematic": "Điện ảnh", "fun": "Vui nhộn", "luxury": "Sang trọng", "ugc": "UGC đời thường", "split_merge": "Tách / gộp PDF", "compress": "Nén PDF", "summary": "Tóm tắt ngắn"},
+    "en": {"choose_1": "Use suggestion 1", "choose_2": "Use suggestion 2", "choose_3": "Use suggestion 3", "sales": "Sales", "engagement": "Engagement", "brand": "Brand", "story": "Story", "realistic": "Realistic", "cinematic": "Cinematic", "fun": "Fun", "luxury": "Luxury", "ugc": "Everyday UGC", "split_merge": "Split / merge PDF", "compress": "Compress PDF", "summary": "Short summary"},
+    "zh": {"choose_1": "使用建议 1", "choose_2": "使用建议 2", "choose_3": "使用建议 3", "sales": "销售", "engagement": "提升互动", "brand": "品牌", "story": "故事", "realistic": "真实风格", "cinematic": "电影感", "fun": "趣味风格", "luxury": "高级风格", "ugc": "日常 UGC", "split_merge": "拆分 / 合并 PDF", "compress": "压缩 PDF", "summary": "简短摘要"},
+    "es": {"choose_1": "Usar sugerencia 1", "choose_2": "Usar sugerencia 2", "choose_3": "Usar sugerencia 3", "sales": "Ventas", "engagement": "Interacción", "brand": "Marca", "story": "Historia", "realistic": "Realista", "cinematic": "Cinemático", "fun": "Divertido", "luxury": "Lujo", "ugc": "UGC cotidiano", "split_merge": "Dividir / combinar PDF", "compress": "Comprimir PDF", "summary": "Resumen breve"},
+    "pt": {"choose_1": "Usar sugestão 1", "choose_2": "Usar sugestão 2", "choose_3": "Usar sugestão 3", "sales": "Vendas", "engagement": "Interação", "brand": "Marca", "story": "História", "realistic": "Realista", "cinematic": "Cinematográfico", "fun": "Divertido", "luxury": "Luxo", "ugc": "UGC cotidiano", "split_merge": "Dividir / mesclar PDF", "compress": "Comprimir PDF", "summary": "Resumo curto"},
+    "fr": {"choose_1": "Utiliser la suggestion 1", "choose_2": "Utiliser la suggestion 2", "choose_3": "Utiliser la suggestion 3", "sales": "Vente", "engagement": "Interaction", "brand": "Marque", "story": "Histoire", "realistic": "Réaliste", "cinematic": "Cinématographique", "fun": "Amusant", "luxury": "Luxe", "ugc": "UGC quotidien", "split_merge": "Scinder / fusionner un PDF", "compress": "Compresser le PDF", "summary": "Résumé court"},
+    "de": {"choose_1": "Vorschlag 1 verwenden", "choose_2": "Vorschlag 2 verwenden", "choose_3": "Vorschlag 3 verwenden", "sales": "Verkauf", "engagement": "Interaktion", "brand": "Marke", "story": "Geschichte", "realistic": "Realistisch", "cinematic": "Filmisch", "fun": "Lustig", "luxury": "Luxus", "ugc": "Alltags-UGC", "split_merge": "PDF teilen / zusammenführen", "compress": "PDF komprimieren", "summary": "Kurze Zusammenfassung"},
+    "ja": {"choose_1": "候補1を使う", "choose_2": "候補2を使う", "choose_3": "候補3を使う", "sales": "販売", "engagement": "交流を増やす", "brand": "ブランド", "story": "ストーリー", "realistic": "リアル", "cinematic": "シネマティック", "fun": "楽しい", "luxury": "高級感", "ugc": "日常の UGC", "split_merge": "PDFを分割 / 結合", "compress": "PDFを圧縮", "summary": "短い要約"},
+    "ko": {"choose_1": "제안 1 사용", "choose_2": "제안 2 사용", "choose_3": "제안 3 사용", "sales": "판매", "engagement": "참여 유도", "brand": "브랜드", "story": "스토리", "realistic": "사실적", "cinematic": "시네마틱", "fun": "재미있게", "luxury": "고급스러움", "ugc": "일상 UGC", "split_merge": "PDF 분할 / 병합", "compress": "PDF 압축", "summary": "짧은 요약"},
+    "hi": {"choose_1": "सुझाव 1 उपयोग करें", "choose_2": "सुझाव 2 उपयोग करें", "choose_3": "सुझाव 3 उपयोग करें", "sales": "बिक्री", "engagement": "जुड़ाव", "brand": "ब्रांड", "story": "कहानी", "realistic": "यथार्थवादी", "cinematic": "सिनेमाई", "fun": "मज़ेदार", "luxury": "लक्ज़री", "ugc": "दैनिक UGC", "split_merge": "PDF विभाजित / जोड़ें", "compress": "PDF संपीड़ित करें", "summary": "संक्षिप्त सारांश"},
+    "ar": {"choose_1": "استخدام الاقتراح 1", "choose_2": "استخدام الاقتراح 2", "choose_3": "استخدام الاقتراح 3", "sales": "المبيعات", "engagement": "التفاعل", "brand": "العلامة التجارية", "story": "قصة", "realistic": "واقعي", "cinematic": "سينمائي", "fun": "مرح", "luxury": "فاخر", "ugc": "محتوى يومي", "split_merge": "تقسيم / دمج PDF", "compress": "ضغط PDF", "summary": "ملخص قصير"},
+    "ru": {"choose_1": "Использовать вариант 1", "choose_2": "Использовать вариант 2", "choose_3": "Использовать вариант 3", "sales": "Продажи", "engagement": "Вовлечённость", "brand": "Бренд", "story": "История", "realistic": "Реалистичный", "cinematic": "Кинематографичный", "fun": "Весёлый", "luxury": "Премиальный", "ugc": "Повседневный UGC", "split_merge": "Разделить / объединить PDF", "compress": "Сжать PDF", "summary": "Краткое резюме"},
+    "tr": {"choose_1": "Öneri 1'i kullan", "choose_2": "Öneri 2'yi kullan", "choose_3": "Öneri 3'ü kullan", "sales": "Satış", "engagement": "Etkileşim", "brand": "Marka", "story": "Hikâye", "realistic": "Gerçekçi", "cinematic": "Sinematik", "fun": "Eğlenceli", "luxury": "Lüks", "ugc": "Günlük UGC", "split_merge": "PDF'yi böl / birleştir", "compress": "PDF'yi sıkıştır", "summary": "Kısa özet"},
+    "th": {"choose_1": "ใช้คำแนะนำ 1", "choose_2": "ใช้คำแนะนำ 2", "choose_3": "ใช้คำแนะนำ 3", "sales": "การขาย", "engagement": "เพิ่มการมีส่วนร่วม", "brand": "แบรนด์", "story": "เรื่องราว", "realistic": "สมจริง", "cinematic": "ภาพยนตร์", "fun": "สนุก", "luxury": "หรูหรา", "ugc": "UGC ในชีวิตประจำวัน", "split_merge": "แยก / รวม PDF", "compress": "บีบอัด PDF", "summary": "สรุปสั้น"},
+    "fil": {"choose_1": "Gamitin ang mungkahi 1", "choose_2": "Gamitin ang mungkahi 2", "choose_3": "Gamitin ang mungkahi 3", "sales": "Benta", "engagement": "Pakikipag-ugnayan", "brand": "Brand", "story": "Kuwento", "realistic": "Makatotohanan", "cinematic": "Sinematiko", "fun": "Masaya", "luxury": "Marangya", "ugc": "Pang-araw-araw na UGC", "split_merge": "Hatiin / pagsamahin ang PDF", "compress": "I-compress ang PDF", "summary": "Maikling buod"},
+    "it": {"choose_1": "Usa suggerimento 1", "choose_2": "Usa suggerimento 2", "choose_3": "Usa suggerimento 3", "sales": "Vendite", "engagement": "Coinvolgimento", "brand": "Brand", "story": "Storia", "realistic": "Realistico", "cinematic": "Cinematografico", "fun": "Divertente", "luxury": "Lusso", "ugc": "UGC quotidiano", "split_merge": "Dividi / unisci PDF", "compress": "Comprimi PDF", "summary": "Breve riepilogo"},
+    "id": {"choose_1": "Gunakan saran 1", "choose_2": "Gunakan saran 2", "choose_3": "Gunakan saran 3", "sales": "Penjualan", "engagement": "Interaksi", "brand": "Merek", "story": "Cerita", "realistic": "Realistis", "cinematic": "Sinematik", "fun": "Menyenangkan", "luxury": "Mewah", "ugc": "UGC sehari-hari", "split_merge": "Pisahkan / gabungkan PDF", "compress": "Kompres PDF", "summary": "Ringkasan singkat"},
+}
+
 # Free Hub deep-flow presentation labels.  This is intentionally copy-only:
 # callback data, prompt banks, provider prompts and quota/charging decisions
 # remain owned by bot.py.  The aliases below let every reachable shell use the
@@ -925,6 +948,7 @@ _PUBLIC_FREE_HUB_FLOW_COPY = {}
 for _locale in PUBLIC_COPY_LOCALES:
     _root = _PUBLIC_FREE_HUB_ROOT_COPY[_locale]
     _deep = _PUBLIC_NATIVE_DEEP_FLOW_COPY.get(_locale, {}) if "_PUBLIC_NATIVE_DEEP_FLOW_COPY" in globals() else {}
+    _choice = _PUBLIC_FREE_HUB_CHOICE_COPY[_locale]
     _base = {
         "freehub_main": _root.get("freehub_library", "Free tools"),
         "freehub_input_title": _deep.get("freehub_ready", "Ready"),
@@ -935,9 +959,9 @@ for _locale in PUBLIC_COPY_LOCALES:
         "freehub_library_title": _root.get("freehub_library", "Prompt library"),
         "freehub_library_body": _deep.get("freehub_ready", "Choose a group."),
         "freehub_choose_template": _deep.get("common_choose_option", "Choose an option"),
-        "freehub_choose_1": "Choose 1",
-        "freehub_choose_2": "Choose 2",
-        "freehub_choose_3": "Choose 3",
+        "freehub_choose_1": _choice["choose_1"],
+        "freehub_choose_2": _choice["choose_2"],
+        "freehub_choose_3": _choice["choose_3"],
         "freehub_more": _deep.get("common_retry", "Try again"),
         "freehub_save_template": _deep.get("common_done", "Done"),
         "freehub_use_product": _root.get("freehub_meta", "Meta AI prompt"),
@@ -946,8 +970,8 @@ for _locale in PUBLIC_COPY_LOCALES:
         "freehub_docs_title": _deep.get("docs_upload_title", "Documents"),
         "freehub_docs_body": _deep.get("docs_send_file", "Send a file."),
         "freehub_image_to_pdf": _deep.get("docs_upload_title", "Image to PDF"),
-        "freehub_split_merge": _root.get("freehub_notes_docs", "Documents"),
-        "freehub_compress": _root.get("freehub_notes_docs", "Compress PDF"),
+        "freehub_split_merge": _choice["split_merge"],
+        "freehub_compress": _choice["compress"],
         "freehub_summary": _deep.get("docs_success", "Short summary"),
         "freehub_notes_title": _deep.get("memory_create_title", "Notes / storage"),
         "freehub_notes_body": _deep.get("memory_empty", "No notes yet."),
@@ -963,8 +987,8 @@ for _locale in PUBLIC_COPY_LOCALES:
         "freehub_meta_topic": _root.get("freehub_meta", "Topic"),
         "freehub_meta_next": _deep.get("common_choose_option", "Choose an option"),
         "freehub_meta_back": _deep.get("common_back", "Back"),
-        "freehub_sales": "Sales", "freehub_engagement": "Engagement", "freehub_brand": "Brand", "freehub_story": "Story",
-        "freehub_realistic": "Realistic", "freehub_fun": "Fun", "freehub_luxury": "Luxury",
+        "freehub_sales": _choice["sales"], "freehub_engagement": _choice["engagement"], "freehub_brand": _choice["brand"], "freehub_story": _choice["story"],
+        "freehub_realistic": _choice["realistic"], "freehub_cinematic": _choice["cinematic"], "freehub_fun": _choice["fun"], "freehub_luxury": _choice["luxury"], "freehub_ugc": _choice["ugc"],
         "freehub_video_guard_title": _deep.get("common_failed", "Video unavailable"),
         "freehub_video_guard_body": _deep.get("common_no_charge", "No Xu was charged"),
         "freehub_video_save": _deep.get("common_done", "Save prompt"),
@@ -1958,6 +1982,24 @@ _PUBLIC_VIDEO_TAIL_COPY = {
     },
 }
 
+PUBLIC_GUIDE_NAVIGATION_I18N.update({
+    "en": {"quick_start": "Quick start", "create_image": "Create image", "create_video": "Create video", "trend_video": "Trending video", "video_music": "Video music", "credits_topup": "Xu & top-up", "faq_refunds": "FAQ & refunds", "download_pricing": "Download pricing", "download_guide": "Download guide"},
+    "es": {"quick_start": "Inicio rápido", "create_image": "Crear imagen", "create_video": "Crear vídeo", "trend_video": "Vídeo de tendencias", "video_music": "Música para vídeo", "credits_topup": "Xu y recarga", "faq_refunds": "Preguntas y reembolsos", "download_pricing": "Descargar precios", "download_guide": "Descargar guía"},
+    "pt": {"quick_start": "Início rápido", "create_image": "Criar imagem", "create_video": "Criar vídeo", "trend_video": "Vídeo em alta", "video_music": "Música para vídeo", "credits_topup": "Xu e recarga", "faq_refunds": "FAQ e reembolsos", "download_pricing": "Baixar preços", "download_guide": "Baixar guia"},
+    "fr": {"quick_start": "Démarrage rapide", "create_image": "Créer une image", "create_video": "Créer une vidéo", "trend_video": "Vidéo tendance", "video_music": "Musique vidéo", "credits_topup": "Xu et recharge", "faq_refunds": "FAQ et remboursements", "download_pricing": "Télécharger les tarifs", "download_guide": "Télécharger le guide"},
+    "de": {"quick_start": "Schnellstart", "create_image": "Bild erstellen", "create_video": "Video erstellen", "trend_video": "Trendvideo", "video_music": "Videomusik", "credits_topup": "Xu und Aufladen", "faq_refunds": "FAQ und Erstattungen", "download_pricing": "Preise herunterladen", "download_guide": "Anleitung herunterladen"},
+    "ja": {"quick_start": "クイックスタート", "create_image": "画像を作成", "create_video": "動画を作成", "trend_video": "トレンド動画", "video_music": "動画音楽", "credits_topup": "Xu とチャージ", "faq_refunds": "よくある質問と返金", "download_pricing": "料金表をダウンロード", "download_guide": "ガイドをダウンロード"},
+    "ko": {"quick_start": "빠른 시작", "create_image": "이미지 만들기", "create_video": "동영상 만들기", "trend_video": "트렌드 동영상", "video_music": "동영상 음악", "credits_topup": "Xu 및 충전", "faq_refunds": "FAQ 및 환불", "download_pricing": "요금표 다운로드", "download_guide": "가이드 다운로드"},
+    "hi": {"quick_start": "त्वरित शुरुआत", "create_image": "चित्र बनाएँ", "create_video": "वीडियो बनाएँ", "trend_video": "ट्रेंड वीडियो", "video_music": "वीडियो संगीत", "credits_topup": "Xu और टॉप-अप", "faq_refunds": "अक्सर पूछे प्रश्न और रिफंड", "download_pricing": "मूल्य डाउनलोड करें", "download_guide": "मार्गदर्शिका डाउनलोड करें"},
+    "ar": {"quick_start": "البدء السريع", "create_image": "إنشاء صورة", "create_video": "إنشاء فيديو", "trend_video": "فيديو رائج", "video_music": "موسيقى الفيديو", "credits_topup": "Xu والشحن", "faq_refunds": "الأسئلة الشائعة والاسترداد", "download_pricing": "تنزيل الأسعار", "download_guide": "تنزيل الدليل"},
+    "ru": {"quick_start": "Быстрый старт", "create_image": "Создать изображение", "create_video": "Создать видео", "trend_video": "Трендовое видео", "video_music": "Музыка для видео", "credits_topup": "Xu и пополнение", "faq_refunds": "Вопросы и возвраты", "download_pricing": "Скачать цены", "download_guide": "Скачать руководство"},
+    "tr": {"quick_start": "Hızlı başlangıç", "create_image": "Görsel oluştur", "create_video": "Video oluştur", "trend_video": "Trend video", "video_music": "Video müziği", "credits_topup": "Xu ve yükleme", "faq_refunds": "SSS ve iadeler", "download_pricing": "Fiyatları indir", "download_guide": "Kılavuzu indir"},
+    "th": {"quick_start": "เริ่มต้นอย่างรวดเร็ว", "create_image": "สร้างภาพ", "create_video": "สร้างวิดีโอ", "trend_video": "วิดีโอมาแรง", "video_music": "เพลงสำหรับวิดีโอ", "credits_topup": "Xu และเติมเงิน", "faq_refunds": "คำถามที่พบบ่อยและการคืนเงิน", "download_pricing": "ดาวน์โหลดราคา", "download_guide": "ดาวน์โหลดคู่มือ"},
+    "fil": {"quick_start": "Mabilis na pagsisimula", "create_image": "Gumawa ng larawan", "create_video": "Gumawa ng bidyo", "trend_video": "Trending na bidyo", "video_music": "Musika para sa bidyo", "credits_topup": "Xu at top-up", "faq_refunds": "FAQ at refund", "download_pricing": "I-download ang presyo", "download_guide": "I-download ang gabay"},
+    "it": {"quick_start": "Avvio rapido", "create_image": "Crea immagine", "create_video": "Crea video", "trend_video": "Video di tendenza", "video_music": "Musica video", "credits_topup": "Xu e ricarica", "faq_refunds": "FAQ e rimborsi", "download_pricing": "Scarica prezzi", "download_guide": "Scarica guida"},
+    "id": {"quick_start": "Mulai cepat", "create_image": "Buat gambar", "create_video": "Buat video", "trend_video": "Video tren", "video_music": "Musik video", "credits_topup": "Xu dan isi ulang", "faq_refunds": "FAQ dan pengembalian dana", "download_pricing": "Unduh harga", "download_guide": "Unduh panduan"},
+})
+
 def public_video_deep_copy(locale: str = "vi") -> dict[str, str]:
     key = str(locale or "vi").lower().replace("-", "_")
     if key not in _PUBLIC_VIDEO_DEEP_COPY:
@@ -2521,6 +2563,26 @@ _PUBLIC_IMAGE_DEEP_COPY = {
     "id": {"prompt_title":"Prompt gambar", "purpose":"Tujuan gambar", "style":"Gaya gambar", "ratio":"Rasio gambar", "received":"Gambar diterima", "choose":"Pilih", "back":"Kembali", "confirm":"Konfirmasi", "processing":"Memproses", "style_product_1":"Studio bersih", "style_product_2":"Ruang pamer mewah", "style_product_3":"Gaya hidup sehari-hari", "resize_pixel":"Ubah ukuran piksel"},
 }
 
+_PUBLIC_IMAGE_WARRANTY_COPY = {
+    "vi": {"image_warranty_included":"Gói này kèm 1 lần tạo lại trong cùng yêu cầu.","image_warranty_none":"Gói này không kèm tạo lại miễn phí.","image_high_wait":"Ảnh chất lượng cao có thể lâu hơn một chút."},
+    "en": {"image_warranty_included":"This package includes one retry for the same request.","image_warranty_none":"This package does not include a free retry.","image_high_wait":"High-quality images may take a little longer."},
+    "zh": {"image_warranty_included":"本套餐包含同一需求内一次重新生成。","image_warranty_none":"本套餐不包含免费重新生成。","image_high_wait":"高质量图片可能需要更长时间。"},
+    "ja": {"image_warranty_included":"このプランには同じ依頼で1回の再生成が含まれます。","image_warranty_none":"このプランに無料の再生成は含まれません。","image_high_wait":"高品質の画像は少し時間がかかる場合があります。"},
+    "ko": {"image_warranty_included":"이 플랜에는 동일 요청에 대한 1회 재생성이 포함됩니다.","image_warranty_none":"이 플랜에는 무료 재생성이 포함되지 않습니다.","image_high_wait":"고품질 이미지는 시간이 조금 더 걸릴 수 있습니다."},
+    "th": {"image_warranty_included":"แพ็กเกจนี้สร้างใหม่ได้ 1 ครั้งสำหรับคำขอเดิม","image_warranty_none":"แพ็กเกจนี้ไม่รวมการสร้างใหม่ฟรี","image_high_wait":"ภาพคุณภาพสูงอาจใช้เวลานานขึ้นเล็กน้อย"},
+    "ar": {"image_warranty_included":"تتضمن هذه الباقة إعادة إنشاء واحدة للطلب نفسه.","image_warranty_none":"لا تتضمن هذه الباقة إعادة إنشاء مجانية.","image_high_wait":"قد تستغرق الصور عالية الجودة وقتًا أطول قليلًا."},
+    "es": {"image_warranty_included":"Este paquete incluye un reintento para la misma solicitud.","image_warranty_none":"Este paquete no incluye reintento gratuito.","image_high_wait":"Las imágenes de alta calidad pueden tardar un poco más."},
+    "pt": {"image_warranty_included":"Este pacote inclui uma nova tentativa para o mesmo pedido.","image_warranty_none":"Este pacote não inclui nova tentativa grátis.","image_high_wait":"Imagens de alta qualidade podem demorar um pouco mais."},
+    "fr": {"image_warranty_included":"Ce forfait inclut une nouvelle génération pour la même demande.","image_warranty_none":"Ce forfait n’inclut pas de nouvelle génération gratuite.","image_high_wait":"Les images de haute qualité peuvent prendre un peu plus de temps."},
+    "de": {"image_warranty_included":"Dieses Paket enthält eine erneute Erstellung für dieselbe Anfrage.","image_warranty_none":"Dieses Paket enthält keine kostenlose erneute Erstellung.","image_high_wait":"Hochwertige Bilder können etwas länger dauern."},
+    "hi": {"image_warranty_included":"इस पैकेज में उसी अनुरोध के लिए एक बार फिर निर्माण शामिल है।","image_warranty_none":"इस पैकेज में मुफ़्त पुनर्निर्माण शामिल नहीं है।","image_high_wait":"उच्च गुणवत्ता वाले चित्र में थोड़ा अधिक समय लग सकता है।"},
+    "ru": {"image_warranty_included":"Пакет включает одну повторную генерацию для того же запроса.","image_warranty_none":"Пакет не включает бесплатную повторную генерацию.","image_high_wait":"Создание изображения высокого качества может занять немного больше времени."},
+    "tr": {"image_warranty_included":"Bu paket aynı istek için bir yeniden oluşturma içerir.","image_warranty_none":"Bu paket ücretsiz yeniden oluşturma içermez.","image_high_wait":"Yüksek kaliteli görseller biraz daha uzun sürebilir."},
+    "fil": {"image_warranty_included":"Kasama sa package ang isang muling paggawa para sa parehong kahilingan.","image_warranty_none":"Walang libreng muling paggawa sa package na ito.","image_high_wait":"Maaaring mas matagalan nang kaunti ang mataas na kalidad na larawan."},
+    "it": {"image_warranty_included":"Questo pacchetto include una nuova generazione per la stessa richiesta.","image_warranty_none":"Questo pacchetto non include una nuova generazione gratuita.","image_high_wait":"Le immagini di alta qualità possono richiedere un po’ più di tempo."},
+    "id": {"image_warranty_included":"Paket ini mencakup satu pembuatan ulang untuk permintaan yang sama.","image_warranty_none":"Paket ini tidak mencakup pembuatan ulang gratis.","image_high_wait":"Gambar berkualitas tinggi mungkin memerlukan sedikit lebih banyak waktu."},
+}
+
 def public_image_deep_copy(locale: str = "vi") -> dict[str, str]:
     """Return direct native Image presentation copy for a supported locale."""
     key = str(locale or "vi").strip().lower()
@@ -2616,6 +2678,7 @@ _PUBLIC_MEMORY_NOTE_FIELD_COPY = {
 # earlier to keep copy definitions together).
 for _locale, _deep in _PUBLIC_NATIVE_DEEP_FLOW_COPY.items():
     _flow = _PUBLIC_FREE_HUB_FLOW_COPY.get(_locale, {})
+    _choice = _PUBLIC_FREE_HUB_CHOICE_COPY[_locale]
     _flow.update({
         "freehub_input_title": _deep.get("freehub_ready", _flow.get("freehub_input_title", "Ready")),
         "freehub_input_privacy": _deep.get("common_no_charge", _flow.get("freehub_input_privacy", "No Xu was charged")),
@@ -2645,6 +2708,21 @@ for _locale, _deep in _PUBLIC_NATIVE_DEEP_FLOW_COPY.items():
         "freehub_result_edit": _deep.get("common_edit", _flow.get("freehub_result_edit", "Edit input")),
         "freehub_result_copy": _deep.get("freehub_copy_result", _flow.get("freehub_result_copy", "Copy / use")),
         "freehub_result_save": _deep.get("common_done", _flow.get("freehub_result_save", "Save to notes")),
+        "freehub_choose_1": _choice["choose_1"],
+        "freehub_choose_2": _choice["choose_2"],
+        "freehub_choose_3": _choice["choose_3"],
+        "freehub_sales": _choice["sales"],
+        "freehub_engagement": _choice["engagement"],
+        "freehub_brand": _choice["brand"],
+        "freehub_story": _choice["story"],
+        "freehub_realistic": _choice["realistic"],
+        "freehub_cinematic": _choice["cinematic"],
+        "freehub_fun": _choice["fun"],
+        "freehub_luxury": _choice["luxury"],
+        "freehub_ugc": _choice["ugc"],
+        "freehub_split_merge": _choice["split_merge"],
+        "freehub_compress": _choice["compress"],
+        "freehub_summary": _choice["summary"],
     })
 
 
@@ -9516,6 +9594,7 @@ def public_hub_copy(lang: str | None = None) -> dict[str, str]:
     copy.update(_PUBLIC_FREE_HUB_ROOT_COPY[locale])
     copy.update(_PUBLIC_FREE_HUB_FLOW_COPY[locale])
     copy.update(_PUBLIC_IMAGE_ROOT_COPY[locale])
+    copy.update(_PUBLIC_IMAGE_WARRANTY_COPY[locale])
     copy.update(_PUBLIC_AUDIO_ROOT_COPY[locale])
     copy.update(_PUBLIC_DEEP_MENU_COPY[locale])
     copy.update({f"freehub_task_{key}": value for key, value in _PUBLIC_FREE_TASK_LABELS[locale].items()})
@@ -9566,7 +9645,24 @@ def public_image_screen_copy(lang: str | None = None) -> dict[str, str]:
 def public_guide_navigation_copy(lang: str | None = None) -> dict[str, str]:
     """Return native labels for legacy guide-entry buttons when available."""
 
-    return dict(PUBLIC_GUIDE_NAVIGATION_I18N.get(public_copy_locale(lang), {}))
+    locale = public_copy_locale(lang)
+    copy = dict(_PUBLIC_HUB_COPY[locale])
+    copy.update(_PUBLIC_HUB_AUXILIARY_COPY[locale])
+    # Chinese keeps its established, more specific guide wording.  The other
+    # locales use their already translated hub labels so the legacy guide
+    # keyboard never silently falls back to English.
+    explicit = dict(PUBLIC_GUIDE_NAVIGATION_I18N.get(locale, {}))
+    return {
+        "quick_start": explicit.get("quick_start") or copy["guide_label"],
+        "create_image": explicit.get("create_image") or copy["image_label"],
+        "create_video": explicit.get("create_video") or copy["video_label"],
+        "trend_video": explicit.get("trend_video") or copy["video_label"],
+        "video_music": explicit.get("video_music") or copy["music_label"],
+        "credits_topup": explicit.get("credits_topup") or copy["topup_label"],
+        "faq_refunds": explicit.get("faq_refunds") or copy["feedback_label"],
+        "download_pricing": explicit.get("download_pricing") or copy["guide_label"],
+        "download_guide": explicit.get("download_guide") or copy["guide_label"],
+    }
 
 
 def public_copy_locale(lang: str | None = None) -> str:
