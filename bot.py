@@ -87173,22 +87173,31 @@ def video_local_tool_text(tool: str, lang: str = "vi") -> str:
     copy = public_video_deep_copy(normalize_user_language(lang))
     if tool == "split":
         return (
-            "🧩 <b>Cắt video nhiều đoạn</b>\n\n"
-            "Tách video theo thời lượng cố định, số phần chính xác hoặc các khoảng tự chọn. Âm thanh gốc được giữ theo từng phần.\n\n"
-            "Hãy tiếp tục để gửi video."
+            (
+                "🧩 <b>Cắt video nhiều đoạn</b>\n\n"
+                "Tách video theo thời lượng cố định, số phần chính xác hoặc các khoảng tự chọn. Âm thanh gốc được giữ theo từng phần.\n\n"
+                "Hãy tiếp tục để gửi video."
+            )
+            if normalize_user_language(lang) == "vi"
             else f"🧩 <b>{copy['video_edit_manual']}</b>\n\n{copy['video_edit_hub']}."
         )
     if tool == "timeline":
         return (
-            "🎞️ <b>Cắt, ghép & sắp xếp</b>\n\n"
-            "Cắt đầu/cuối, bỏ đoạn giữa, chia đoạn, ghép nhiều video và đổi thứ tự trước khi tạo file cuối.\n\n"
-            "Hãy gửi video đầu tiên. Mọi lựa chọn mới chỉ là kế hoạch cho đến xác nhận cuối."
+            (
+                "🎞️ <b>Cắt, ghép & sắp xếp</b>\n\n"
+                "Cắt đầu/cuối, bỏ đoạn giữa, chia đoạn, ghép nhiều video và đổi thứ tự trước khi tạo file cuối.\n\n"
+                "Hãy gửi video đầu tiên. Mọi lựa chọn mới chỉ là kế hoạch cho đến xác nhận cuối."
+            )
+            if normalize_user_language(lang) == "vi"
             else f"🎞️ <b>{copy['video_edit_manual']}</b>\n\n{copy['video_edit_hub']}."
         )
     return (
-        "✂️ <b>Chỉnh sửa thủ công</b>\n\n"
-        "Cắt đầu/cuối, bỏ đoạn giữa, chia đoạn, ghép nhiều video, đổi thứ tự, đổi tốc độ và xoay/lật.\n\n"
-        "Hãy tiếp tục để gửi video."
+        (
+            "✂️ <b>Chỉnh sửa thủ công</b>\n\n"
+            "Cắt đầu/cuối, bỏ đoạn giữa, chia đoạn, ghép nhiều video, đổi thứ tự, đổi tốc độ và xoay/lật.\n\n"
+            "Hãy tiếp tục để gửi video."
+        )
+        if normalize_user_language(lang) == "vi"
         else f"✂️ <b>{copy['video_edit_manual']}</b>\n\n{copy['video_edit_hub']}."
     )
 
