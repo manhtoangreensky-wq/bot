@@ -216552,7 +216552,1693 @@ async def cmd_birthday_pending(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def cmd_birthday_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("⛔ Bạn không có qcenario")],
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        request_id = int(context.args[0])
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/birthday_approve REQUEST_ID</code>", parse_mode="HTML")
+    conn = db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        request = get_birthday_review_request(conn, request_id)
+        if not request or request.get("status") != "pending":
+            conn.rollback()
+            return await update.message.reply_text(
+                f"❌ Không tìm thấy yêu cầu sinh nhật <code>#{request_id}</code> đang chờ duyệt.\n\n"
+                "Lưu ý:\n"
+                "• <code>/birthday_approve</code> dùng <b>REQUEST_ID</b>, không phải USER_ID.\n"
+                "• Xem danh sách chờ bằng <code>/birthday_pending</code>.\n"
+                "• Nếu muốn cấp quà thủ công theo USER_ID, dùng <code>/birthday_gift_grant USER_ID</code>.\n\n"
+                "Cú pháp:\n"
+                "✅ <code>/birthday_approve REQUEST_ID</code>\n"
+                "❌ <code>/birthday_reject REQUEST_ID lý do</code>",
+                parse_mode="HTML",
+            )
+        target_id = str(request.get("user_id") or "")
+        user_row = conn.execute("SELECT 1 FROM users WHERE user_id=? LIMIT 1", (target_id,)).fetchone()
+        if not user_row:
+            conn.execute(
+                "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent) VALUES (?,?,?,?,?,?)",
+                (target_id, request.get("username") or "Unknown", 0, 0, now_text(), 0),
+            )
+        year = vn_now().year
+        if birthday_received_this_year(conn, target_id, year):
+            conn.rollback()
+            return await update.message.reply_text(
+                "⚠️ User đã nhận quà sinh nhật năm nay, không cấp trùng.\n"
+                f"Nếu muốn đóng request, dùng: <code>/birthday_reject {request_id} đã nhận quà năm nay</code>",
+                parse_mode="HTML",
+            )
+        profile = get_member_profile(target_id, conn=conn)
+        tier = normalize_member_tier(profile.get("tier") or "newbie") or "newbie"
+        gift_xu = birthday_gift_xu_for_tier(tier)
+        if gift_xu <= 0:
+            conn.rollback()
+            return await update.message.reply_text(
+                f"⚠️ User chưa đủ hạng Silver để nhận quà sinh nhật.\n"
+                f"• Tier hiện tại: <b>{html.escape(get_member_badge(tier))}</b>\n"
+                f"Nếu muốn đóng request, dùng: <code>/birthday_reject {request_id} chưa đủ hạng Silver</code>",
+                parse_mode="HTML",
+            )
+        result = grant_birthday_gift(conn, target_id, actor_id=update.effective_user.id, admin_override=True)
+        if not result.get("granted"):
+            conn.rollback()
+            return await update.message.reply_text(
+                f"⚠️ Không cấp được: <code>{html.escape(result.get('status') or '-')}</code>",
+                parse_mode="HTML",
+            )
+        conn.execute(
+            """UPDATE birthday_review_requests
+            SET status='approved', admin_id=?, decided_at=?
+            WHERE id=? AND status='pending'""",
+            (str(update.effective_user.id), now_text(), request_id),
+        )
+        record_usage_event_conn(
+            conn,
+            target_id,
+            username=request.get("username") or "",
+            event_type="birthday_gift_manual_approved",
+            tool_name="member",
+            command="/birthday_approve",
+            status="approved",
+            xu_delta=int(result.get("gift_xu") or 0),
+            provider="internal",
+            detail=f"request_id={request_id}; tier={result.get('tier') or tier}",
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    user_text = (
+        "🎂 <b>QUÀ SINH NHẬT ĐÃ ĐƯỢC DUYỆT</b>\n\n"
+        "Admin đã duyệt quà sinh nhật cho bạn.\n\n"
+        f"• Cấp thành viên: <b>{html.escape(result.get('badge') or get_member_badge(result.get('tier')))}</b>\n"
+        f"• Quà sinh nhật: +<b>{int(result.get('gift_xu') or 0)} Xu dịch vụ</b>\n"
+        f"• Số dư mới: <b>{int(result.get('balance') or 0)} Xu</b>\n\n"
+        "Chúc bạn một ngày thật nhiều năng lượng cùng TOAN AAS!"
+    )
+    try:
+        await context.bot.send_message(chat_id=str(target_id), text=user_text, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"Birthday approve user notify failed: {e}")
+    await update.message.reply_text(
+        "✅ <b>Đã duyệt quà sinh nhật</b>\n\n"
+        f"• Request: <code>#{request_id}</code>\n"
+        f"• User: <code>{html.escape(str(target_id))}</code>\n"
+        f"• Gift: +<b>{int(result.get('gift_xu') or 0)} Xu</b>\n"
+        f"• Tier: <b>{html.escape(result.get('badge') or get_member_badge(result.get('tier')))}</b>",
+        parse_mode="HTML",
+    )
+
+async def cmd_birthday_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        request_id = int(context.args[0])
+        reason = " ".join(context.args[1:]).strip()
+        if not reason:
+            raise ValueError("missing_reason")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/birthday_reject REQUEST_ID lý do</code>", parse_mode="HTML")
+    conn = db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        request = get_birthday_review_request(conn, request_id)
+        if not request or request.get("status") != "pending":
+            conn.rollback()
+            return await update.message.reply_text(
+                f"❌ Không tìm thấy yêu cầu sinh nhật <code>#{request_id}</code> đang chờ duyệt.\n\n"
+                "Lưu ý:\n"
+                "• <code>/birthday_reject</code> dùng <b>REQUEST_ID</b>, không phải USER_ID.\n"
+                "• Xem danh sách chờ bằng <code>/birthday_pending</code>.\n\n"
+                "Cú pháp: <code>/birthday_reject REQUEST_ID lý do</code>",
+                parse_mode="HTML",
+            )
+        target_id = str(request.get("user_id") or "")
+        conn.execute(
+            """UPDATE birthday_review_requests
+            SET status='rejected', admin_id=?, admin_note=?, decided_at=?
+            WHERE id=? AND status='pending'""",
+            (str(update.effective_user.id), reason, now_text(), request_id),
+        )
+        record_usage_event_conn(
+            conn,
+            target_id,
+            username=request.get("username") or "",
+            event_type="birthday_gift_rejected",
+            tool_name="member",
+            command="/birthday_reject",
+            status="rejected",
+            provider="internal",
+            detail=f"request_id={request_id}; reason={reason}",
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    user_text = (
+        "🎂 <b>YÊU CẦU QUÀ SINH NHẬT CHƯA ĐƯỢC DUYỆT</b>\n\n"
+        "Admin chưa thể duyệt quà sinh nhật cho lần này.\n\n"
+        "Lý do:\n"
+        f"{html.escape(reason)}\n\n"
+        "Bạn vẫn có thể được hệ thống tự động xét quà từ năm sau nếu ngày sinh đã được lưu đủ điều kiện.\n\n"
+        f"Hỗ trợ: {html.escape(SUPPORT_TELEGRAM_URL)}"
+    )
+    try:
+        await context.bot.send_message(chat_id=str(target_id), text=user_text, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"Birthday reject user notify failed: {e}")
+    await update.message.reply_text(f"❌ Đã từ chối request <code>#{request_id}</code>.", parse_mode="HTML")
+
+async def cmd_grant_tier_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        target_id = context.args[0]
+        tier = normalize_member_tier(context.args[1])
+        if tier not in MEMBER_TIER_PROMO_POLICY:
+            raise ValueError("invalid_tier")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/grant_tier_promo USER_ID silver|gold|platinum|diamond|vip</code>", parse_mode="HTML")
+    get_user(target_id)
+    conn = db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        promo = create_member_tier_reward(conn, target_id, tier, created_by=update.effective_user.id)
+        record_audit(
+            conn,
+            update.effective_user.id,
+            "admin",
+            "member.tier_promo_granted",
+            "member_tier_reward",
+            str(target_id),
+            before=None,
+            after=promo,
+            note="Admin granted tier promo manually",
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    status = "đã tạo" if promo.get("created") else f"đã tồn tại ({promo.get('status')})"
+    await update.message.reply_text(
+        f"✅ Mã tier promo {status}\n\n"
+        f"• User: <code>{html.escape(str(target_id))}</code>\n"
+        f"• Hạng: <b>{html.escape(get_member_badge(tier))}</b>\n"
+        f"• Mã: <code>{html.escape(promo.get('promo_code') or '')}</code>\n"
+        f"• Ưu đãi: +{int(promo.get('bonus_percent') or 0)}% Xu, tối đa {int(promo.get('cap_xu') or 0)} Xu",
+        parse_mode="HTML",
+    )
+
+async def cmd_set_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    command_name = doc_current_command_name(update, "/settier")
+    try:
+        target_id = context.args[0]
+        tier = normalize_member_tier(context.args[1])
+        if tier not in MEMBER_TIER_ORDER:
+            raise ValueError("invalid_tier")
+    except Exception:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp:\n"
+            f"<code>{command_name} &lt;ID&gt; &lt;newbie|silver|gold|platinum|diamond|vip&gt;</code>\n\n"
+            "Ví dụ:\n"
+            "<code>/settier 7817576663 platinum</code>\n\n"
+            "Lưu ý: <code>/setvip &lt;ID&gt; &lt;1|0&gt;</code> là lệnh legacy nội bộ, không dùng cho hạng thành viên mới.",
+            parse_mode="HTML",
+        )
+    if not user_exists(target_id):
+        return await update.message.reply_text(f"⚠️ Không tìm thấy user <code>{html.escape(str(target_id))}</code>. User cần bấm /start trước.", parse_mode="HTML")
+    conn = db_connect()
+    try:
+        before = get_member_profile(target_id, conn=conn)
+        conn.execute(
+            """INSERT OR REPLACE INTO member_tier_overrides (user_id, tier, reason, updated_at)
+            VALUES (?,?,?,?)""",
+            (str(target_id), tier, f"Admin override by {update.effective_user.id}", now_text()),
+        )
+        conn.execute("UPDATE users SET vip_tier_override=? WHERE user_id=?", (tier, str(target_id)))
+        record_audit(
+            conn,
+            update.effective_user.id,
+            "admin",
+            "member.tier_override_set",
+            "user",
+            str(target_id),
+            before={"tier": before.get("tier")},
+            after={"tier": tier},
+            note="Admin set member tier override",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    badge = get_member_badge(tier)
+    benefits = "\n".join(f"• {html.escape(item)}" for item in get_member_benefits(tier))
+    unlocked = ""
+    if tier in {"platinum", "diamond", "vip"}:
+        tier_discount = int(MEMBER_TOOL_DISCOUNT_POLICY.get(tier, 0) or 0)
+        unlocked = (
+            "\n\n🎁 <b>Ưu đãi hạng đã cập nhật:</b>\n"
+            f"• Giảm {tier_discount}% khi tiêu Xu cho dịch vụ đủ điều kiện\n"
+            "• Không cộng thêm Xu định kỳ theo hạng ở mỗi lần nạp\n"
+            "• Mệnh giá nạp vẫn nhận Xu gốc giống mọi khách hàng"
+        )
+    notify_warning = ""
+    try:
+        await context.bot.send_message(
+            chat_id=str(target_id),
+            text=(
+                f"🎉 <b>CHÚC MỪNG BẠN ĐÃ ĐƯỢC NÂNG HẠNG {html.escape(badge)}</b>\n\n"
+                "Admin TOAN AAS đã nâng cấp hạng thành viên cho bạn.\n\n"
+                f"• Hạng mới: <b>{html.escape(badge)}</b>\n\n"
+                "<b>Quyền lợi mới</b>\n"
+                f"{benefits}"
+                f"{unlocked}\n\n"
+                "Xem chi tiết: <code>/member</code> hoặc <code>/vip_policy</code>"
+            ),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        notify_warning = (
+            "\n\n⚠️ Đã set hạng nhưng không gửi được thông báo cho user. "
+            "Có thể user chưa bấm Start hoặc đã chặn bot.\n"
+            f"• Error: <code>{html.escape(provider_error_summary(e))}</code>"
+        )
+        logger.warning(f"Set VIP target notify failed: {e}")
+    await update.message.reply_text(
+        f"✅ Đã set hạng <b>{html.escape(badge)}</b> cho ID <code>{html.escape(str(target_id))}</code>.\n"
+        f"• ID đang thao tác: <code>{html.escape(str(update.effective_user.id))}</code>\n"
+        f"• ID được nâng hạng: <code>{html.escape(str(target_id))}</code>\n\n"
+        "Lưu ý: <code>/member</code> trong cuộc chat hiện tại chỉ hiển thị hạng của ID đang chat. "
+        "Nếu bạn set cho user khác, hãy kiểm tra bằng <code>/ref_admin</code> hoặc user đó tự gõ <code>/member</code>.\n"
+        "Không tự tạo mã ưu đãi lên hạng trong lệnh này."
+        f"{notify_warning}",
+        parse_mode="HTML",
+    )
+
+async def cmd_clear_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        target_id = context.args[0]
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: /clear_vip <USER_ID>")
+    conn = db_connect()
+    try:
+        before = get_member_profile(target_id, conn=conn)
+        conn.execute("DELETE FROM member_tier_overrides WHERE user_id=?", (str(target_id),))
+        conn.execute("UPDATE users SET vip_tier_override='' WHERE user_id=?", (str(target_id),))
+        record_audit(
+            conn,
+            update.effective_user.id,
+            "admin",
+            "member.tier_override_cleared",
+            "user",
+            str(target_id),
+            before={"tier": before.get("tier")},
+            after={"tier": member_tier_by_total_paid(member_total_paid_vnd(target_id, conn=conn))},
+            note="Admin cleared member tier override",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    await update.message.reply_text(f"✅ Đã xóa override hạng cho ID <code>{html.escape(str(target_id))}</code>.", parse_mode="HTML")
+
+async def cmd_ref_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        target_id = context.args[0]
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: /ref_admin <USER_ID>")
+    profile = get_member_profile(target_id)
+    stats = referral_stats_for_user(target_id)
+    await update.message.reply_text(
+        "🧾 <b>REFERRAL ADMIN VIEW</b>\n\n"
+        f"• User: <code>{html.escape(str(target_id))}</code>\n"
+        f"• Tier: <b>{html.escape(profile.get('tier_badge') or profile['tier_label'])}</b>\n"
+        f"• Total paid: <b>{vnd_text(profile['total_paid_vnd'])}</b>\n"
+        f"• Ref total: <b>{stats['total']}</b>\n"
+        f"• Pending: <b>{stats['pending']}</b>\n"
+        f"• Rewarded: <b>{stats['rewarded']}</b>\n"
+        f"• Qualified no reward: <b>{stats['qualified_no_reward']}</b>\n"
+        f"• Reward Xu: <b>{stats['reward_xu']} Xu</b>",
+        parse_mode="HTML",
+    )
+
+async def cmd_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    content = " ".join(context.args)
+    if not content:
+        return await update.message.reply_text(
+            "⚠️ VD: <code>/gopy Thêm thanh toán Momo đi bot</code>\n\n"
+            "Bạn cũng có thể bấm <b>💬 Góp ý / Báo lỗi</b> ở menu chính để chọn nhóm góp ý.",
+            parse_mode="HTML",
+        )
+    feedback_id = store_customer_feedback(update.effective_user, "free_text", content, "command:/gopy")
+    await update.message.reply_text(f"✅ <b>Cảm ơn!</b> Góp ý đã được ghi nhận.\nMã góp ý: <code>{feedback_id}</code>", parse_mode="HTML")
+
+# ─── ADMIN COMMANDS ───────────────────────────────────────────────────────────
+async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return
+    try:
+        target_id, amount = context.args[0], int(context.args[1])
+        if amount >= 10000 and not is_owner_user(update.effective_user.id):
+            reason = f"large_admin_credit_attempt admin={update.effective_user.id} target={target_id} amount={amount}"
+            record_anomaly("large_admin_credit_attempt", "high", reason, update.effective_user.id, update.effective_user.username or "", auto_lock=False)
+            set_system_flag("payment_freeze", "1", updated_by=update.effective_user.id, note=reason)
+            await notify_ops_alert(
+                context,
+                "⚠️ <b>Large admin credit attempt blocked</b>",
+                [
+                    f"• Admin: <code>{html.escape(str(update.effective_user.id))}</code>",
+                    f"• Target: <code>{html.escape(str(target_id))}</code>",
+                    f"• Amount: <b>{amount} Xu</b>",
+                    "• Action: payment_freeze=ON",
+                    "• Owner must review before large manual credit.",
+                ],
+            )
+            return await update.message.reply_text("⛔ Cộng Xu lớn cần owner duyệt. Đã bật payment_freeze để kiểm tra an toàn.")
+        add_credit(target_id, amount, "admin_add", "", "Admin cộng xu thủ công")
+        conn = db_connect()
+        c = conn.cursor()
+        c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
+        conn.commit()
+        conn.close()
+        credits, _, _ = get_user(target_id)
+        await update.message.reply_text(f"✅ Đã bơm {amount} Xu cho ID {target_id}. Số dư mới: {credits} Xu")
+    except Exception:
+        await update.message.reply_text("⚠️ Cú pháp: /add <ID> <Số_Xu>")
+
+async def cmd_admin_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(context.args or [])
+    conn = db_connect()
+    try:
+        if len(args) >= 2 and args[0].lower() in {"reviewed", "resolved"} and str(args[1]).isdigit():
+            status = args[0].lower()
+            field = "reviewed_at" if status == "reviewed" else "resolved_at"
+            conn.execute(
+                f"UPDATE feedback SET status=?, {field}=? WHERE id=?",
+                (status, now_text(), int(args[1])),
+            )
+            conn.commit()
+            return await update.message.reply_text(f"✅ Feedback #{int(args[1])} đã chuyển sang <b>{status}</b>.", parse_mode="HTML")
+        category_filter = args[0].strip() if args else ""
+        if category_filter and category_filter.lower() in {"all", "*", "-"}:
+            category_filter = ""
+        if category_filter:
+            rows = conn.execute(
+                """SELECT id, user_id, username, category, content, context, status, timestamp
+                FROM feedback
+                WHERE category=?
+                ORDER BY id DESC LIMIT 15""",
+                (category_filter,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT id, user_id, username, category, content, context, status, timestamp
+                FROM feedback
+                ORDER BY id DESC LIMIT 15"""
+            ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return await update.message.reply_text("📭 Hòm thư góp ý đang trống.")
+    lines = [
+        "📊 <b>GÓP Ý / BÁO LỖI MỚI NHẤT</b>",
+        "",
+        "Lọc theo nhóm: <code>/feedback image_not_right</code>",
+        "Đánh dấu: <code>/feedback reviewed &lt;id&gt;</code> hoặc <code>/feedback resolved &lt;id&gt;</code>",
+        "",
+    ]
+    for fid, user_id, username, category, content, context_text, status, timestamp in rows:
+        safe_content = html.escape(str(content or "")[:260])
+        safe_context = html.escape(str(context_text or "")[:120])
+        lines.append(
+            f"#{int(fid)} | <b>{html.escape(str(category or '-'))}</b> | <code>{html.escape(str(status or 'new'))}</code> | {html.escape(str(timestamp or '')[:16])}\n"
+            f"• User: <code>{html.escape(str(user_id or '-'))}</code> {html.escape(str(username or ''))}\n"
+            f"• Nội dung: {safe_content}\n"
+            f"• Context: <code>{safe_context or '-'}</code>"
+        )
+    await update.message.reply_text("\n\n".join(lines), parse_mode="HTML")
+
+async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return
+    approval_conn = None
+    try:
+        lookup_key, amount = context.args[0], int(context.args[1])
+        admin_adjustment_reason = sanitize_log_text(" ".join(context.args[2:]).strip())[:300]
+        lookup_conn = db_connect()
+        approval_conn = lookup_conn
+        lookup_c = lookup_conn.cursor()
+        lookup_c.execute("BEGIN IMMEDIATE")
+        pending_deposit_id = 0
+        pending_order = None
+        if str(lookup_key).isdigit():
+            lookup_c.execute(
+                "SELECT id,user_id,order_code,amount,xu,foreign_manual,currency,method,amount_vnd,base_xu,bonus_xu,expected_xu,member_points_eligible,rank_discount_percent_preserved,tx_hash "
+                "FROM pending_deposits WHERE id=? AND status IN ('pending','pending_admin_review') LIMIT 1",
+                (str(lookup_key),),
+            )
+            pending_order = lookup_c.fetchone()
+        if not pending_order:
+            lookup_c.execute(
+                "SELECT id,user_id,order_code,amount,xu,foreign_manual,currency,method,amount_vnd,base_xu,bonus_xu,expected_xu,member_points_eligible,rank_discount_percent_preserved,tx_hash "
+                "FROM pending_deposits WHERE user_id=? AND status IN ('pending','pending_admin_review') ORDER BY submitted_at DESC LIMIT 1",
+                (str(lookup_key),),
+            )
+            pending_order = lookup_c.fetchone()
+        if not pending_order:
+            lookup_conn.rollback()
+            lookup_conn.close()
+            approval_conn = None
+            return await update.message.reply_text(
+                "⚠️ Không có bill thủ công đang chờ cho ID/mã bill này.\n\n"
+                "Nếu muốn cộng Xu trực tiếp, dùng <code>/add &lt;ID&gt; &lt;Xu&gt;</code>.",
+                parse_mode="HTML",
+            )
+        pending_deposit_id = int(pending_order[0])
+        target_id = str(pending_order[1])
+        foreign_manual = bool(int(pending_order[5] or 0))
+        payment_context = {
+            "currency": str(pending_order[6] or "VND").upper(),
+            "method": str(pending_order[7] or "bank_acb"),
+            "foreign_manual": foreign_manual,
+        }
+        topup_bonus_allowed = False
+        expected_order_xu = int(pending_order[11] or pending_order[4] or 0)
+        member_points_eligible = bool(int(pending_order[12] if pending_order[12] is not None else 1))
+        first_deposit_before_credit = not user_has_successful_deposit_conn(lookup_conn, target_id)
+        user_market_snapshot = canonical_user_market_snapshot_conn(lookup_conn, target_id)
+        payment_transaction_id = str(pending_order[14] or "").strip()
+        existing_base_credit = lookup_c.execute(
+            """SELECT 1 FROM credit_events
+               WHERE user_id=? AND event_type='manual_deposit' AND ref_id=? AND delta>0
+               LIMIT 1""",
+            (str(target_id), str(pending_deposit_id)),
+        ).fetchone()
+        if not existing_base_credit:
+            lookup_c.execute(
+                "UPDATE users SET credits=credits+? WHERE user_id=?",
+                (int(amount), str(target_id)),
+            )
+            record_credit_event(
+                lookup_conn, target_id, int(amount), "manual_deposit",
+                str(pending_deposit_id), "Admin duyệt bill thủ công",
+            )
+            record_audit(
+                lookup_conn, ADMIN_ID, "admin", "credit.added", "user", str(target_id),
+                before=None,
+                after={"delta": int(amount), "event_type": "manual_deposit", "ref_id": str(pending_deposit_id)},
+                note="Admin duyệt bill thủ công",
+            )
+        conn = lookup_conn
+        c = lookup_c
+        launch_recorded = 0
+        auto_promotion = {
+            "bonus_xu": 0,
+            "promotion_id": "",
+            "label": "",
+            "successful_topup_ordinal": 0,
+            "domestic_eligibility": False,
+        }
+        auto_bonus = 0
+        promo_result = {"bonus_xu": 0, "code": "", "status": "none"}
+        pending_order_code = str(pending_order[2]) if pending_order and pending_order[2] else ""
+        order_amount = int(pending_order[8] or pending_order[3] or 0) if pending_order else 0
+        order_base_xu = int(pending_order[9] or 0) if pending_order else 0
+        invoice_row = None
+        if pending_order_code:
+            invoice_row = c.execute(
+                "SELECT subtotal_amount_vnd, vat_amount_vnd, total_amount_vnd FROM finance_invoices WHERE order_id=? LIMIT 1",
+                (pending_order_code,),
+            ).fetchone()
+        order_subtotal_amount = int(invoice_row[0] or order_amount or 0) if invoice_row else int(order_amount or 0)
+        order_vat_amount = int(invoice_row[1] or max(0, order_amount - order_subtotal_amount)) if invoice_row else 0
+        order_total_amount = int(invoice_row[2] or order_amount or 0) if invoice_row else int(order_amount or 0)
+        payment_market_snapshot = canonical_payment_market(
+            str(payment_context.get("method") or ""),
+            str(payment_context.get("currency") or "VND"),
+        )
+        credited_base_xu = max(0, int(amount or 0))
+        payment_context.update({
+            "payment_type": "topup_xu",
+            "amount_vnd": int(order_subtotal_amount or 0),
+            "package_key": str(pending_order_code or ""),
+            "user_market": str(user_market_snapshot.get("user_market") or ""),
+            "user_market_snapshot": str(user_market_snapshot.get("user_market") or ""),
+            "payment_market": payment_market_snapshot,
+            "payment_channel": canonical_topup_method(str(payment_context.get("method") or "")),
+            "international_account": bool(user_market_snapshot.get("international_account")),
+            "transaction_id": payment_transaction_id,
+            "payment_status": "SETTLED",
+            "amount_valid": int(order_subtotal_amount or 0) > 0,
+            "base_credit_success": credited_base_xu > 0,
+            "is_test": False,
+            "is_refund": False,
+            "is_cancelled": False,
+            "is_failed": False,
+        })
+        if order_base_xu <= 0 and order_subtotal_amount:
+            order_base_xu = package_base_xu(order_subtotal_amount)
+        order_base_xu = credited_base_xu or int(order_base_xu or 0)
+        topup_bonus_allowed = is_topup_bonus_allowed(payment_context)
+        is_first_deposit = bool(first_deposit_before_credit)
+        referral_result = {"reward_xu": 0, "status": "none", "referrer_user_id": ""}
+        old_total_paid = member_total_paid_vnd(target_id, conn=conn)
+        old_tier = member_tier_by_total_paid(old_total_paid)
+        tier_up_result = {"upgraded": False, "promos": []}
+        auto_order_reference = pending_order_code or f"manual:{pending_deposit_id}"
+        auto_promotion = apply_automatic_topup_promotion_conn(
+            conn,
+            target_id,
+            auto_order_reference,
+            {**payment_context, "base_xu": credited_base_xu},
+        )
+        auto_bonus = int(auto_promotion.get("bonus_xu") or 0)
+        if auto_bonus > 0:
+            c.execute(
+                "UPDATE users SET credits=credits+? WHERE user_id=?",
+                (auto_bonus, str(target_id)),
+            )
+            auto_event_type = (
+                "auto_first_topup_bonus"
+                if auto_promotion.get("promotion_id") == AUTO_FIRST_TOPUP_PROMOTION_ID
+                else "auto_second_topup_bonus"
+            )
+            record_credit_event(
+                conn,
+                target_id,
+                auto_bonus,
+                auto_event_type,
+                auto_order_reference,
+                f"{auto_promotion.get('promotion_id')} +{auto_bonus} Xu; "
+                f"ordinal={auto_promotion.get('successful_topup_ordinal')}",
+            )
+            defer_pending_code_promo_for_auto_conn(
+                conn,
+                target_id,
+                pending_order_code,
+                str(auto_promotion.get("promotion_id") or ""),
+            )
+            promo_result = {"bonus_xu": 0, "code": "", "status": "deferred_for_auto_promotion"}
+        c.execute(
+            """UPDATE pending_deposits SET status='approved',approved_xu=?,admin_note=?,approved_by=?,approved_at=?,updated_at=?,
+               user_market_snapshot=?,payment_market=?,payment_transaction_id=?,domestic_eligibility=?,
+               successful_topup_ordinal=?,first_bonus_applied=?,launch_bonus_applied=0,
+               rank_topup_reward_applied=0,extra_xu_percent_bonus_applied=0
+               WHERE id=? AND status IN ('pending','pending_admin_review')""",
+            (
+                int(amount), admin_adjustment_reason, str(update.effective_user.id), now_text(), now_text(),
+                str(user_market_snapshot.get("user_market") or ""), payment_market_snapshot,
+                payment_transaction_id, int(bool(auto_promotion.get("domestic_eligibility"))),
+                int(auto_promotion.get("successful_topup_ordinal") or 0),
+                int(
+                    auto_bonus > 0
+                    and auto_promotion.get("promotion_id") == AUTO_FIRST_TOPUP_PROMOTION_ID
+                ),
+                pending_deposit_id,
+            ),
+        )
+        if pending_order_code:
+            c.execute(
+                """UPDATE payos_orders
+                   SET status=?,paid_at=?,user_market_snapshot=?,payment_market=?,
+                       payment_transaction_id=?,domestic_eligibility=?,
+                       successful_topup_ordinal=?,base_credit_applied=1
+                   WHERE order_code=?""",
+                (
+                    PAYOS_STATUS_PAID, now_text(), str(user_market_snapshot.get("user_market") or ""),
+                    payment_market_snapshot, payment_transaction_id,
+                    int(bool(auto_promotion.get("domestic_eligibility"))),
+                    int(auto_promotion.get("successful_topup_ordinal") or 0),
+                    pending_order_code,
+                ),
+            )
+            if order_subtotal_amount and order_base_xu and topup_bonus_allowed and auto_bonus <= 0:
+                promo_result = redeem_promo_for_order(conn, target_id, pending_order_code, order_subtotal_amount, order_base_xu, payment_context=payment_context)
+        if pending_order_code:
+            update_finance_invoice_status_conn(
+                conn,
+                pending_order_code,
+                "paid",
+                paid_at=now_text(),
+                approved_by_admin_id=str(update.effective_user.id),
+            )
+        if order_subtotal_amount and (not foreign_manual or member_points_eligible):
+            c.execute(
+                "UPDATE users SET has_deposited=1, total_paid_vnd=COALESCE(total_paid_vnd,0)+? WHERE user_id=?",
+                (int(order_subtotal_amount or 0), str(target_id)),
+            )
+            new_total_paid = int(old_total_paid or 0) + int(order_subtotal_amount or 0)
+            tier_up_result = handle_member_tier_up(
+                conn,
+                target_id,
+                old_tier,
+                member_tier_by_total_paid(new_total_paid),
+                new_total_paid,
+                source="manual_approval",
+                grant_topup_rewards=(not foreign_manual and is_rank_topup_reward_allowed(payment_context)),
+            )
+        else:
+            c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
+        if topup_bonus_allowed:
+            referral_result = award_referral_bonus_if_needed(
+                conn,
+                target_id,
+                order_code=pending_order_code or f"manual:{target_id}",
+                amount_vnd=int(order_subtotal_amount or 0),
+                base_xu=int(order_base_xu or amount or 0),
+                is_first_deposit=is_first_deposit,
+            )
+        promo_bonus = int(promo_result.get("bonus_xu") or 0)
+        promo_code = promo_result.get("code") or ""
+        first_bonus_applied = int(
+            auto_bonus > 0
+            and auto_promotion.get("promotion_id") == AUTO_FIRST_TOPUP_PROMOTION_ID
+        )
+        rank_reward_applied = int(topup_bonus_allowed and any(item.get("promo_code") for item in (tier_up_result.get("promos") or [])))
+        extra_percent_applied = int(topup_bonus_allowed and promo_bonus > 0)
+        c.execute(
+            """UPDATE pending_deposits SET first_bonus_applied=?,launch_bonus_applied=?,
+               rank_topup_reward_applied=?,extra_xu_percent_bonus_applied=? WHERE id=?""",
+            (first_bonus_applied, 0, rank_reward_applied, extra_percent_applied, pending_deposit_id),
+        )
+        record_audit(
+            conn,
+            ADMIN_ID,
+            "admin",
+            "bill.approved",
+            "pending_deposit",
+            str(pending_deposit_id),
+            before={"status": "pending", "order_code": pending_order_code, "user_id": str(target_id)},
+            after={"status": "approved", "deposit_id": int(pending_deposit_id), "user_id": str(target_id), "base_xu": int(amount), "auto_promotion_id": auto_promotion.get("promotion_id") or "", "auto_bonus": auto_bonus, "promo_code": promo_code, "promo_bonus": promo_bonus},
+            note="Admin approved manual bill",
+        )
+        if int(order_subtotal_amount or 0) > 0:
+            record_finance_revenue_event_conn(
+                conn,
+                target_id,
+                "manual_revenue",
+                f"manual_deposit:{pending_deposit_id}",
+                int(order_subtotal_amount or 0),
+                int(amount or 0) + auto_bonus + int(promo_bonus or 0),
+                "bank",
+                "success",
+                f"Manual bill approved; order={pending_order_code}; vat={order_vat_amount}; total={order_total_amount}",
+                update.effective_user.id,
+            )
+        conn.commit()
+        conn.close()
+        approval_conn = None
+        record_usage_event(
+            target_id,
+            event_type="payment_manual_approved",
+            tool_name="payment",
+            command="/duyet",
+            status="approved",
+            xu_delta=int(amount or 0) + auto_bonus + int(promo_bonus or 0),
+            amount_vnd=int(order_subtotal_amount or 0),
+            provider="manual_qr",
+            detail=f"order={pending_order_code}",
+        )
+        if pending_order_code and order_subtotal_amount:
+            update_usage_event_amount_for_ref(target_id, pending_order_code, order_subtotal_amount, "xu_credit")
+        if (
+            payment_transaction_id
+            and int(auto_promotion.get("successful_topup_ordinal") or 0) == 1
+        ):
+            enqueue_broadcast_after_first_topup_safe(target_id)
+        credits, _, _ = get_user(target_id)
+        mismatch_line = ""
+        if expected_order_xu and int(amount) != int(expected_order_xu):
+            mismatch_line = (
+                f"\n⚠️ Lưu ý: pending order dự kiến <b>{expected_order_xu} Xu</b>, "
+                f"admin vừa duyệt <b>{amount} Xu</b>."
+            )
+        auto_label = str(auto_promotion.get("label") or "")
+        auto_user_line = (
+            f"🎁 {html.escape(auto_label)}: +<b>{auto_bonus} Xu</b>.\n"
+            if auto_bonus and auto_label else ""
+        )
+        promo_user_line = f"🎁 Mã {html.escape(promo_code)}: +<b>{promo_bonus} Xu</b>.\n" if promo_bonus else ""
+        auto_admin_line = f" | Auto {html.escape(auto_label)} +{auto_bonus} Xu" if auto_bonus and auto_label else ""
+        promo_admin_line = f" | Promo {html.escape(promo_code)} +{promo_bonus} Xu" if promo_bonus else ""
+        referral_admin_line = ""
+        tier_admin_line = ""
+        tier_user_line = ""
+        tier_message = format_tier_up_message(tier_up_result)
+        if tier_up_result.get("upgraded"):
+            tier_admin_line = f" | Tier {html.escape(tier_up_result.get('old_tier') or '-')}→{html.escape(tier_up_result.get('new_tier') or '-')}"
+            tier_user_line = "\n🎉 Bạn vừa lên hạng thành viên. Bot đã gửi chi tiết quyền lợi/mã ưu đãi riêng.\n"
+        if int(referral_result.get("reward_xu") or 0) > 0:
+            referral_admin_line = (
+                f" | Referral {html.escape(str(referral_result.get('referrer_user_id') or ''))} "
+                f"+{int(referral_result.get('reward_xu') or 0)} Xu"
+            )
+            try:
+                referrer_id = str(referral_result.get("referrer_user_id") or "")
+                ref_credits, _, _ = get_user(referrer_id)
+                await context.bot.send_message(
+                    chat_id=referrer_id,
+                    text=(
+                        "🎉 <b>Bạn vừa nhận thưởng giới thiệu TOAN AAS</b>\n\n"
+                        "• Người được mời đã nạp Xu lần đầu thành công.\n"
+                        f"• Cấp của bạn: <b>{html.escape(referral_result.get('tier_badge') or referral_result.get('tier_label') or '')}</b>\n"
+                        f"• Thưởng giới thiệu: +<b>{int(referral_result.get('reward_xu') or 0)} Xu dịch vụ</b>\n"
+                        f"• Số dư mới: <b>{ref_credits} Xu</b>"
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception as notify_error:
+                logger.warning(f"Referral reward notify failed: {notify_error}")
+        await context.bot.send_message(
+            chat_id=target_id,
+            text=(
+                f"🎉 <b>NẠP TIỀN THÀNH CÔNG!</b>\n\n"
+                f"• Xu đã mua: <b>+{amount} Xu</b>\n"
+                f"{auto_user_line}"
+                f"{promo_user_line}"
+                f"• Tổng nhận: <b>{int(amount) + auto_bonus + promo_bonus} Xu</b>\n"
+                f"{tier_user_line}"
+                f"🪙 Số dư mới: <b>{credits} Xu</b>\n\n"
+                f"Cảm ơn bạn đã tin dùng TOAN AAS! 🙏"
+            ),
+            parse_mode="HTML"
+        )
+        if tier_message:
+            try:
+                await context.bot.send_message(chat_id=target_id, text=tier_message, parse_mode="HTML")
+            except Exception as notify_error:
+                logger.warning(f"Tier-up notify failed: {notify_error}")
+        await update.message.reply_text(
+            f"✅ Đã duyệt bill <code>#{pending_deposit_id}</code>: +{amount} Xu cho ID <code>{html.escape(str(target_id))}</code>"
+            f"{auto_admin_line}"
+            f"{promo_admin_line}"
+            f"{referral_admin_line}"
+            f"{tier_admin_line}"
+            f"{mismatch_line}\n\n"
+            "⚠️ Nhắc lại: /duyet chỉ dùng sau khi admin đã đối soát tiền thật trong tài khoản ngân hàng. "
+            "Không duyệt chỉ dựa vào ảnh bill.",
+            parse_mode="HTML",
+        )
+    except (IndexError, ValueError):
+        if approval_conn is not None:
+            try:
+                approval_conn.rollback()
+            except Exception:
+                pass
+            try:
+                approval_conn.close()
+            except Exception:
+                pass
+            approval_conn = None
+        await update.message.reply_text("⚠️ Cú pháp: <code>/duyet &lt;deposit_id|user_id&gt; &lt;Số_Xu&gt;</code>", parse_mode="HTML")
+    except Exception:
+        if approval_conn is not None:
+            try:
+                approval_conn.rollback()
+            except Exception:
+                pass
+            try:
+                approval_conn.close()
+            except Exception:
+                pass
+        raise
+
+def billing_bridge_status_lines() -> list[str]:
+    status = web_billing_bridge_status_payload()
+    return [
+        "🌉 <b>BILLING BRIDGE STATUS</b>",
+        "",
+        f"• Web billing enabled: <code>{'YES' if status['web_billing_enabled'] else 'NO'}</code>",
+        f"• Apply confirmed/shared DB: <code>{'YES' if status['apply_confirmed'] else 'NO'}</code>",
+        f"• API base: <code>{html.escape(status['api_base'] or '-')}</code>",
+        f"• API token: <code>{'configured' if status['api_token_configured'] else 'missing'}</code>",
+        f"• Create-payment endpoint: <code>{html.escape(status['create_payment_endpoint'] or '-')}</code>",
+        f"• PayOS webhook target: <code>{html.escape(status['payos_webhook_target'] or '-')}</code>",
+        f"• Return URL: <code>{html.escape(status['return_url'] or '-')}</code>",
+        f"• Cancel URL: <code>{html.escape(status['cancel_url'] or '-')}</code>",
+        f"• Bot PayOS fallback: <code>{'ON' if status['bot_fallback_enabled'] else 'OFF'}</code>",
+        f"• Storage add-on: <code>{'ON' if status['storage_addon_enabled'] else 'OFF'}</code>",
+        f"• Risk double webhook: <code>{'YES' if status['risk_double_webhook'] else 'NO'}</code>",
+        "",
+        "Safety: Bot chỉ route checkout sang Web App khi <code>WEB_BILLING_APPLY_CONFIRMED=true</code>. Nếu chưa xác nhận DB/apply chung, bot giữ PayOS cũ để tránh mất Xu/dung lượng.",
+    ]
+
+async def cmd_billing_bridge_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text("\n".join(billing_bridge_status_lines()), parse_mode="HTML")
+
+async def cmd_billing_bridge_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = list(context.args or [])
+    kind = (args[0] if args else "topup").strip().lower()
+    dry_run = any(str(arg).lower() in {"dry_run=1", "dry=1", "--dry-run"} for arg in args)
+    if kind == "storage":
+        package_id = args[1] if len(args) > 1 else "storage_50mb"
+        spec = storage_addon_spec_by_code(package_id.replace("storage_", "")) or storage_addon_spec_by_code("50mb")
+        payment_type = "storage_addon"
+        amount = int(spec.get("amount_vnd") or STORAGE_ADDON_BLOCK_PRICE_VND)
+        metadata = {"quota_mb": int(spec.get("addon_mb") or STORAGE_ADDON_BLOCK_MB), "days": 30}
+        package_id = f"storage_{int(metadata['quota_mb'])}mb"
+    else:
+        amount = safe_int(args[1] if len(args) > 1 else 10000, 10000)
+        payment_type = "topup_xu"
+        package_id = f"{amount // 1000}k" if amount % 1000 == 0 else str(amount)
+        metadata = {"expected_xu": package_base_xu(amount)}
+    payload = build_web_billing_payment_payload(update.effective_user.id, payment_type, package_id, amount, metadata)
+    if dry_run:
+        return await update.message.reply_text(
+            "🧪 <b>BILLING BRIDGE DRY RUN</b>\n\n"
+            f"<code>{html.escape(json.dumps(payload, ensure_ascii=False, indent=2))}</code>\n\n"
+            "Không tạo thanh toán thật, không cộng Xu/dung lượng.",
+            parse_mode="HTML",
+        )
+    if not web_billing_checkout_enabled(payment_type):
+        return await update.message.reply_text(
+            "⚠️ Web Billing chưa được bật đủ an toàn cho checkout thật. Dùng <code>/billing_bridge_status</code> để kiểm tra.",
+            parse_mode="HTML",
+        )
+    result = await create_web_billing_payment_link(payload)
+    await update.message.reply_text(
+        "🧪 <b>BILLING BRIDGE TEST</b>\n\n"
+        f"• Status: <code>{'PASS' if result.get('ok') else 'FAIL'}</code>\n"
+        f"• HTTP: <code>{html.escape(str(result.get('http_status') or '-'))}</code>\n"
+        f"• Checkout URL: <code>{'yes' if result.get('checkout_url') else 'no'}</code>\n"
+        f"• Reason: <code>{html.escape(str(result.get('reason') or result.get('message') or '-'))}</code>\n\n"
+        "Không log token/secret.",
+        parse_mode="HTML",
+    )
+
+async def cmd_billing_retry_apply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    if len(context.args or []) < 2 or str(context.args[1]).lower() != "confirm_paid=1":
+        return await update.message.reply_text(
+            "Cú pháp an toàn: <code>/billing_retry_apply &lt;order_code&gt; confirm_paid=1</code>\n"
+            "Chỉ dùng khi admin đã đối soát PayOS/bank thật. Lệnh này không gọi provider và không sửa webhook.",
+            parse_mode="HTML",
+        )
+    order_code = str(context.args[0]).strip()
+    conn = db_connect()
+    try:
+        row = conn.execute("SELECT amount FROM payos_orders WHERE order_code=?", (order_code,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return await update.message.reply_text("⚠️ Không tìm thấy order_code.")
+    processed, desc, info = process_payos_paid_order(order_code, int(row[0] or 0))
+    await update.message.reply_text(
+        "🔁 <b>BILLING RETRY APPLY</b>\n\n"
+        f"• Order: <code>{html.escape(order_code)}</code>\n"
+        f"• Result: <code>{'processed' if processed else 'not_processed'}</code>\n"
+        f"• Desc: <code>{html.escape(str(desc))}</code>\n"
+        f"• Type: <code>{html.escape(str(info.get('payment_type') or info.get('order_type') or '-'))}</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_payos_confirm_webhook(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(
+        "🔗 <b>PayOS webhook target</b>\n\n"
+        f"Set trong PayOS dashboard:\n<code>{html.escape(PAYOS_WEBHOOK_URL)}</code>\n\n"
+        "Bot không tự gọi API xác nhận webhook để tránh ghi nhầm kênh PayOS. Không log Client ID/API key/checksum.",
+        parse_mode="HTML",
+    )
+
+async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return
+    command_name = (update.message.text or "/checkpayos").split()[0]
+    try:
+        order_code = context.args[0]
+    except IndexError:
+        return await update.message.reply_text(f"⚠️ Cú pháp: {html.escape(command_name)} <Mã_đơn>")
+
+    payment_link_id = get_order_payment_link_id(order_code)
+    if not payment_link_id:
+        return await update.message.reply_text(
+            "⚠️ Đơn này chưa có paymentLinkId PayOS. Nếu khách đã chuyển khoản thủ công, admin phải đối soát tiền thật trong ngân hàng trước khi dùng /duyet <ID> <Xu>."
+        )
+    if not PAYOS_CLIENT_ID or not PAYOS_API_KEY:
+        return await update.message.reply_text("❌ Thiếu PAYOS_CLIENT_ID hoặc PAYOS_API_KEY.")
+
+    headers = {"x-client-id": PAYOS_CLIENT_ID, "x-api-key": PAYOS_API_KEY}
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(
+                f"https://api-merchant.payos.vn/v2/payment-requests/{payment_link_id}",
+                headers=headers,
+                timeout=30.0
+            )
+        data = res.json()
+        payment_data = data.get("data", {})
+        status = payment_data.get("status", "")
+        amount_vnd = int(payment_data.get("amount", 0) or 0)
+        if res.status_code == 200 and data.get("code") == "00" and status == PAYOS_STATUS_PAID:
+            processed, desc, info = process_payos_paid_order(
+                str(order_code),
+                amount_vnd,
+                webhook_payment_link_id=payos_payment_link_id_from_webhook_data(payment_data) or payment_link_id,
+                transaction_id=payos_transaction_id_from_webhook_data(payment_data),
+                webhook_status=status,
+                webhook_currency=payos_payload_text(payment_data, "currency"),
+                raw_hash=hashlib.sha256(
+                    json.dumps(payment_data, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+                ).hexdigest(),
+            )
+            if processed:
+                if info.get("order_type") == "plan_purchase":
+                    target_id = info["target_id"]
+                    await context.bot.send_message(
+                        chat_id=target_id,
+                        text=plan_success_message(info),
+                        parse_mode="HTML",
+                    )
+                    return await update.message.reply_text(
+                        f"✅ Check PayOS: đã kích hoạt gói <b>{html.escape(info.get('plan_name') or '')}</b> cho user <code>{html.escape(str(target_id))}</code>.",
+                        parse_mode="HTML",
+                    )
+                if info.get("order_type") == "storage_addon":
+                    target_id = info["target_id"]
+                    addon_mb = int(info.get("addon_mb") or 0)
+                    total_limit_mb = int(info.get("total_limit_mb") or 0)
+                    await context.bot.send_message(
+                        chat_id=target_id,
+                        text=(
+                            "📦 <b>MUA THÊM DUNG LƯỢNG THÀNH CÔNG</b>\n\n"
+                            f"PayOS đã xác nhận đơn <code>{html.escape(str(order_code))}</code>.\n"
+                            f"• Dung lượng cộng thêm: <b>+{addon_mb}MB/tháng</b>\n"
+                            f"• Tổng hạn mức hiện tại: <b>{total_limit_mb}MB</b>\n\n"
+                            "Đơn này không cộng Xu, không chạy bonus nạp và không tính điểm nâng hạng."
+                        ),
+                        parse_mode="HTML",
+                    )
+                    return await update.message.reply_text(
+                        f"✅ Check PayOS: đã cộng +{addon_mb}MB dung lượng cho user <code>{html.escape(str(target_id))}</code>.",
+                        parse_mode="HTML",
+                    )
+                target_id = info["target_id"]
+                base_xu = int(info.get("base_xu") or info.get("xu") or 0)
+                auto_bonus = int(info.get("auto_bonus", 0) or 0)
+                auto_label = str(info.get("auto_promotion_label") or "")
+                promo_bonus = int(info.get("promo_bonus", 0) or 0)
+                promo_code = info.get("promo_code") or ""
+                auto_line = (
+                    f"🎁 {html.escape(auto_label)}: <b>+{auto_bonus} Xu</b>\n"
+                    if auto_bonus and auto_label else ""
+                )
+                promo_line = (
+                    f"🎁 <code>{html.escape(promo_code)}</code>: <b>+{promo_bonus} Xu</b>\n"
+                    if promo_bonus else ""
+                )
+                total_xu = base_xu + auto_bonus + promo_bonus
+                credits_now, _, _ = get_user(target_id)
+                await context.bot.send_message(
+                    chat_id=target_id,
+                    text=(
+                        f"✅ <b>NẠP XU THÀNH CÔNG</b>\n\n"
+                        f"PayOS đã xác nhận đơn <code>{order_code}</code>.\n"
+                        f"🪙 Xu gốc: <b>+{base_xu} Xu</b>\n"
+                        f"{auto_line}"
+                        f"{promo_line}"
+                        f"🧾 Tổng cộng đơn này: <b>+{total_xu} Xu</b>\n"
+                        f"💼 Số dư hiện tại: <b>{credits_now} Xu</b>"
+                    ),
+                    parse_mode="HTML"
+                )
+                tier_message = format_tier_up_message(info.get("tier_up_result") or {})
+                if tier_message:
+                    await context.bot.send_message(chat_id=target_id, text=tier_message, parse_mode="HTML")
+                referral_result = info.get("referral_result") or {}
+                if int(referral_result.get("reward_xu") or 0) > 0:
+                    referrer_id = str(referral_result.get("referrer_user_id") or "")
+                    ref_credits, _, _ = get_user(referrer_id)
+                    await context.bot.send_message(
+                        chat_id=referrer_id,
+                        text=(
+                            "🎉 <b>Bạn vừa nhận thưởng giới thiệu TOAN AAS</b>\n\n"
+                            "• Người được mời đã nạp Xu lần đầu thành công.\n"
+                            f"• Cấp của bạn: <b>{html.escape(referral_result.get('tier_badge') or referral_result.get('tier_label') or '')}</b>\n"
+                            f"• Thưởng giới thiệu: +<b>{int(referral_result.get('reward_xu') or 0)} Xu dịch vụ</b>\n"
+                            f"• Số dư mới: <b>{ref_credits} Xu</b>"
+                        ),
+                        parse_mode="HTML",
+                    )
+            return await update.message.reply_text(f"✅ Check PayOS: {desc} | status={status}")
+        await update.message.reply_text(f"ℹ️ PayOS trả về status=<b>{status or 'UNKNOWN'}</b> cho đơn <code>{order_code}</code>.", parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Check PayOS error: {e}")
+        await update.message.reply_text(f"❌ Không kiểm tra được PayOS: {str(e)}")
+
+async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return
+    if not PAYOS_CLIENT_ID or not PAYOS_API_KEY or not PAYOS_CHECKSUM_KEY:
+        set_system_setting("payos_debug_create_status", "FAIL", "Missing PayOS env", update.effective_user.id)
+        set_system_setting("payos_debug_create_at", now_text(), "Missing PayOS env", update.effective_user.id)
+        set_system_setting("payos_debug_create_note", "missing_payos_env", "Missing PayOS env", update.effective_user.id)
+        return await update.message.reply_text(
+            "❌ Thiếu PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY."
+        )
+
+    package_resolved = resolve_payment_package_arg(context.args[0] if context.args else None, default_key="50k")
+    if not package_resolved:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/payos_debug_create 10000</code> hoặc <code>/payos_debug_create 50000</code>\n"
+            "Có thể dùng key gói: <code>10k</code>, <code>50k</code>, <code>100k</code>...",
+            parse_mode="HTML",
+        )
+    pkg_key, pkg = package_resolved
+    amount = int(pkg["amount"])
+    return_url = make_payos_return_url(context)
+    description = make_payos_description(pkg_key)
+    variant = get_payos_create_signature_variant()
+    order_code = generate_order_code()
+    uid = update.effective_user.id
+    get_user(uid, update.effective_user.first_name or "PayOS debug user")
+    package_credit = calculate_package_credit_for_user(uid, amount)
+    base_xu = int(package_credit.get("base_xu") or pkg["xu"])
+    launch_preview = int(package_credit.get("launch_bonus_xu") or 0)
+    xu = int(package_credit.get("total_xu") or base_xu)
+    create_order(
+        order_code,
+        uid,
+        amount,
+        xu,
+        base_xu=base_xu,
+        launch_bonus_xu=launch_preview,
+        package_amount_vnd=amount,
+    )
+    payos_body = {
+        "orderCode": int(order_code),
+        "amount": int(amount),
+        "description": description,
+        "cancelUrl": make_payos_cancel_url(context),
+        "returnUrl": return_url,
+    }
+    try:
+        res, res_data, raw_preview, raw_str = await create_payos_payment_request(payos_body, signature_variant=variant)
+        data = res_data if isinstance(res_data, dict) else {}
+        checkout_data = data.get("data") if isinstance(data.get("data"), dict) else {}
+        checkout_url = checkout_data.get("checkoutUrl", "")
+        payment_link_id = checkout_data.get("paymentLinkId", "")
+        result = {
+            "variant": variant,
+            "order_code": order_code,
+            "http_status": getattr(res, "status_code", ""),
+            "code": str(data.get("code") or ""),
+            "desc": str(data.get("desc") or data.get("message") or raw_preview or "")[:250],
+            "signature_data": raw_str,
+            "payload_debug": payos_payload_type_summary(payos_body),
+            "raw_preview": raw_preview[:500],
+            "checkout_url": checkout_url,
+            "payment_link_id": payment_link_id,
+            "pass": getattr(res, "status_code", "") == 200 and data.get("code") == "00",
+        }
+        debug_status = "PASS" if result["pass"] else ("SIGNATURE_INVALID" if re.search(r"signature|mã kiểm tra", result["desc"], re.IGNORECASE) else "FAIL")
+        if result["pass"]:
+            update_order_checkout_info(order_code, checkout_url, payment_link_id)
+        else:
+            update_order_status(order_code, PAYOS_STATUS_CANCELLED)
+        record_api_debug(
+            "payos",
+            "create_payment_link",
+            debug_status,
+            getattr(res, "status_code", 0),
+            f"official_create_signature; pkg={pkg_key}; {result['payload_debug']}; desc={result['desc']}; raw={result['raw_preview']}",
+        )
+    except Exception as e:
+        try:
+            _signature, raw_str = sign_payos_payment_request(payos_body, variant=variant)
+        except Exception:
+            raw_str = ""
+        result = {
+            "variant": variant,
+            "order_code": order_code,
+            "http_status": "",
+            "code": "",
+            "desc": str(e)[:250],
+            "signature_data": raw_str,
+            "payload_debug": payos_payload_type_summary(payos_body),
+            "raw_preview": "",
+            "checkout_url": "",
+            "payment_link_id": "",
+            "pass": False,
+        }
+        update_order_status(order_code, PAYOS_STATUS_CANCELLED)
+        record_api_debug("payos", "create_payment_link", "FAIL", 0, f"official_create_signature; pkg={pkg_key}; {result['payload_debug']}; error={result['desc']}")
+
+    now = now_text()
+    if result["pass"]:
+        set_system_setting("payos_debug_create_status", "PASS", f"order={result['order_code']}", update.effective_user.id)
+        set_system_setting("payos_debug_create_at", now, f"order={result['order_code']}", update.effective_user.id)
+        set_system_setting("payos_debug_create_order", str(result["order_code"]), "PayOS debug checkout created", update.effective_user.id)
+        set_system_setting("payos_debug_create_variant", str(result["variant"]), "PayOS debug checkout created", update.effective_user.id)
+        set_system_setting("payos_debug_create_checkout_url", str(result["checkout_url"]), "PayOS debug checkout created", update.effective_user.id)
+        set_system_setting("payos_debug_create_payment_link_id", str(result["payment_link_id"]), "PayOS debug checkout created", update.effective_user.id)
+        set_system_setting("payos_debug_create_http_status", str(result["http_status"]), "PayOS debug checkout created", update.effective_user.id)
+        set_system_setting("payos_debug_create_code", str(result["code"]), "PayOS debug checkout created", update.effective_user.id)
+        set_system_setting("payos_debug_create_desc", str(result["desc"]), "PayOS debug checkout created", update.effective_user.id)
+        set_system_setting("payos_debug_create_note", f"checkout_url_created_official_{pkg_key}", "PayOS debug checkout created", update.effective_user.id)
+    else:
+        set_system_setting("payos_debug_create_status", "FAIL", "official_signature_failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_at", now, "official_signature_failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_order", str(result.get("order_code") or ""), "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_variant", str(result.get("variant") or ""), "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_checkout_url", "", "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_payment_link_id", "", "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_http_status", str(result.get("http_status") or ""), "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_code", str(result.get("code") or ""), "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_desc", str(result.get("desc") or ""), "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_note", "official_signature_failed", "PayOS debug create failed", update.effective_user.id)
+
+    lines = []
+    if result["pass"]:
+        lines.extend([
+            "✅ <b>PayOS debug create PASS — official signature</b>",
+            "",
+            f"Package: <code>{pkg_key}</code> | Amount: <code>{amount}</code>",
+            f"Order DB status: <code>{PAYOS_STATUS_PENDING}</code> (debug order, chưa thanh toán)",
+            f"Variant: <code>{html.escape(str(result['variant']))}</code>",
+            f"Order: <code>{html.escape(str(result['order_code']))}</code>",
+            f"paymentLinkId: <code>{html.escape(str(result['payment_link_id']))}</code>",
+            f"Checkout: {html.escape(str(result['checkout_url']))}",
+            "",
+            "Không cần thanh toán link debug này.",
+        ])
+    else:
+        lines.extend([
+            "❌ <b>PayOS debug create FAIL — official signature</b>",
+            "",
+            f"Package: <code>{pkg_key}</code> | Amount: <code>{amount}</code>",
+            "Bot đã dùng đúng signature data theo docs/SDK payOS cho API tạo link thanh toán.",
+            "",
+            "<b>Nguyên nhân khả nghi:</b>",
+            "• PAYOS_CHECKSUM_KEY không cùng bộ với PAYOS_CLIENT_ID/PAYOS_API_KEY.",
+            "• Nhầm môi trường/kênh/app PayOS.",
+            "• Merchant/app PayOS chưa active đúng.",
+            "• Đang dùng nhầm Webhook Secret hoặc checksum của app khác.",
+            "• Cần test bằng SDK chính thức/official sample ngoài bot.",
+            "",
+            "Dùng thêm: <code>/payos_key_fingerprint</code> và <code>/payos_official_debug</code>.",
+        ])
+    lines.extend(["", "<b>Headers sent</b>"])
+    lines.extend(payos_header_debug_summary())
+    lines.extend([
+        "",
+        "<b>Key fingerprint</b>",
+        f"• PAYOS_CLIENT_ID: <code>{html.escape(mask_key_fingerprint(PAYOS_CLIENT_ID))}</code>",
+        f"• PAYOS_API_KEY: <code>{html.escape(mask_key_fingerprint(PAYOS_API_KEY))}</code>",
+        f"• PAYOS_CHECKSUM_KEY: <code>{html.escape(mask_key_fingerprint(PAYOS_CHECKSUM_KEY))}</code>",
+    ])
+    ok_icon = "✅" if result["pass"] else "❌"
+    lines.extend([
+        "",
+        "<b>Official create request</b>",
+        f"{ok_icon} <code>{html.escape(str(result['variant']))}</code>",
+        f"Order: <code>{html.escape(str(result['order_code']))}</code>",
+        f"Order DB status: <code>{PAYOS_STATUS_PENDING if result['pass'] else PAYOS_STATUS_CANCELLED}</code>",
+        f"HTTP/Code: <code>{html.escape(str(result['http_status']))}</code> / <code>{html.escape(str(result['code']))}</code>",
+        f"Desc: <code>{html.escape(str(result['desc']))}</code>",
+        f"Payload: <code>{html.escape(str(result.get('payload_debug') or ''))}</code>",
+        f"Signature data: <code>{html.escape(str(result['signature_data']))}</code>",
+        f"Raw: <code>{html.escape(str(result.get('raw_preview') or '')[:500])}</code>",
+        "",
+        f"Note: <code>{html.escape(PAYOS_OFFICIAL_CREATE_SIGNATURE_NOTE)}</code>",
+    ])
+    await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
+
+async def cmd_payos_env_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return
+
+    def env_line(name: str, value: str) -> str:
+        info = env_strip_diagnostic(name, value)
+        if info["configured"]:
+            return (
+                f"• <code>{name}</code>: configured len=<b>{info['stripped_len']}</b> "
+                f"raw_len=<code>{info['raw_len']}</code> "
+                f"stripped_differs=<code>{'yes' if info['stripped_differs'] else 'no'}</code>"
+            )
+        return f"• <code>{name}</code>: <b>missing</b>"
+
+    return_url = make_payos_return_url(context)
+    lines = [
+        "💳 <b>PayOS Env Check</b>",
+        "",
+        env_line("PAYOS_CLIENT_ID", PAYOS_CLIENT_ID),
+        env_line("PAYOS_API_KEY", PAYOS_API_KEY),
+        env_line("PAYOS_CHECKSUM_KEY", PAYOS_CHECKSUM_KEY),
+        "",
+        f"public_base_url: <code>{html.escape(effective_public_base_url() or '-')}</code>",
+        f"returnUrl: <code>{html.escape(return_url)}</code>",
+        f"cancelUrl: <code>{html.escape(make_payos_cancel_url(context))}</code>",
+        f"using endpoint: <code>{html.escape(PAYOS_CREATE_PAYMENT_ENDPOINT)}</code>",
+        f"Active signature variant: <code>{html.escape(get_payos_create_signature_variant())}</code>",
+        "",
+        "Không hiển thị key/token/checksum trong log hoặc Telegram.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_payos_key_fingerprint(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return
+
+    def key_line(name: str, value: str) -> str:
+        info = env_strip_diagnostic(name, value)
+        stripped = str(os.environ.get(name, "") or "").strip()
+        return (
+            f"• <code>{name}</code>: "
+            f"configured=<code>{'yes' if info['configured'] else 'no'}</code> "
+            f"len=<code>{info['stripped_len']}</code> "
+            f"fingerprint=<code>{html.escape(mask_key_fingerprint(stripped))}</code> "
+            f"raw_len=<code>{info['raw_len']}</code> "
+            f"stripped_differs=<code>{'yes' if info['stripped_differs'] else 'no'}</code>"
+        )
+
+    lines = [
+        "🔎 <b>PayOS Key Fingerprint</b>",
+        "",
+        key_line("PAYOS_CLIENT_ID", PAYOS_CLIENT_ID),
+        key_line("PAYOS_API_KEY", PAYOS_API_KEY),
+        key_line("PAYOS_CHECKSUM_KEY", PAYOS_CHECKSUM_KEY),
+        "",
+        "Dùng fingerprint first4/last4 để đối chiếu với dashboard PayOS mà không lộ full key.",
+        "Nếu <code>/payos_debug_create</code> vẫn signature invalid với official signature, ưu tiên kiểm tra:",
+        "1. 3 key có cùng một kênh/app PayOS không.",
+        "2. Có dùng nhầm Webhook Secret hoặc checksum app khác không.",
+        "3. Merchant/app PayOS đã active đúng chưa.",
+        "4. Regenerate bộ key mới và cập nhật Railway nếu vẫn lỗi.",
+        "",
+        "Không hiển thị full key/token/checksum.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_payos_signature_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return
+    amount = 50000
+    order_code = generate_order_code()
+    return_url = make_payos_return_url(context)
+    payload = {
+        "orderCode": int(order_code),
+        "amount": int(amount),
+        "description": make_payos_description("50k"),
+        "cancelUrl": make_payos_cancel_url(context),
+        "returnUrl": return_url,
+    }
+    if PAYOS_CHECKSUM_KEY:
+        signature, signature_data = sign_payos_payment_request(payload, PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT)
+    else:
+        signature, signature_data = "", build_payos_signature_data(payload, PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT)
+    safe_payload = json.dumps(payload, ensure_ascii=False, indent=2)
+    record_api_debug(
+        "payos",
+        "signature_debug",
+        "READY" if PAYOS_CHECKSUM_KEY else "MISSING_CHECKSUM",
+        0,
+        f"{payos_payload_type_summary(payload)}; signature_data={signature_data}",
+    )
+    lines = [
+        "🧾 <b>PayOS Signature Debug</b>",
+        "",
+        f"checksum configured: <code>{'yes' if PAYOS_CHECKSUM_KEY else 'no'}</code>",
+        f"checksum key length: <code>{len(PAYOS_CHECKSUM_KEY or '')}</code>",
+        f"signature variant: <code>{html.escape(PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT)}</code>",
+        f"canonical data: <code>{html.escape(signature_data)}</code>",
+        f"signature masked: <code>{html.escape(mask_payos_signature(signature))}</code>",
+        f"payload types: <code>{html.escape(payos_payload_type_summary(payload))}</code>",
+        "payload JSON:",
+        f"<code>{html.escape(safe_payload)}</code>",
+        "",
+        "Lệnh này không gọi PayOS và không tạo đơn thanh toán.",
+    ]
+    await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
+
+async def cmd_payos_official_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return
+    sdk_ok, sdk_name = payos_sdk_availability()
+    amount = 50000
+    order_code = generate_order_code()
+    return_url = make_payos_return_url(context)
+    payload = {
+        "orderCode": int(order_code),
+        "amount": int(amount),
+        "description": make_payos_description("50k"),
+        "cancelUrl": make_payos_cancel_url(context),
+        "returnUrl": return_url,
+    }
+    signature, signature_data = sign_payos_payment_request(payload, PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT) if PAYOS_CHECKSUM_KEY else ("", build_payos_signature_data(payload, PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT))
+    record_api_debug(
+        "payos",
+        "official_debug",
+        "SDK_AVAILABLE" if sdk_ok else "SDK_NOT_INSTALLED",
+        0,
+        f"sdk={sdk_name or '-'}; {payos_payload_type_summary(payload)}; signature_data={signature_data}",
+    )
+    lines = [
+        "💳 <b>PayOS Official Debug</b>",
+        "",
+        f"• SDK available: <code>{'yes' if sdk_ok else 'no'}</code>" + (f" (<code>{html.escape(sdk_name)}</code>)" if sdk_ok else ""),
+        f"• Endpoint: <code>{html.escape(PAYOS_CREATE_PAYMENT_ENDPOINT)}</code>",
+        f"• Client ID configured: <code>{'yes' if PAYOS_CLIENT_ID else 'no'}</code> len=<code>{len(PAYOS_CLIENT_ID or '')}</code>",
+        f"• API Key configured: <code>{'yes' if PAYOS_API_KEY else 'no'}</code> len=<code>{len(PAYOS_API_KEY or '')}</code>",
+        f"• Checksum configured: <code>{'yes' if PAYOS_CHECKSUM_KEY else 'no'}</code> len=<code>{len(PAYOS_CHECKSUM_KEY or '')}</code>",
+        "",
+        "<b>Key fingerprint để đối chiếu dashboard</b>",
+        f"• PAYOS_CLIENT_ID: <code>{html.escape(mask_key_fingerprint(PAYOS_CLIENT_ID))}</code>",
+        f"• PAYOS_API_KEY: <code>{html.escape(mask_key_fingerprint(PAYOS_API_KEY))}</code>",
+        f"• PAYOS_CHECKSUM_KEY: <code>{html.escape(mask_key_fingerprint(PAYOS_CHECKSUM_KEY))}</code>",
+        "Nếu fingerprint không khớp bộ key trong cùng app/kênh PayOS, đây là lỗi key/app mismatch chứ không phải logic cộng Xu.",
+        "",
+        "<b>Headers sent by current bot</b>",
+    ]
+    lines.extend(payos_header_debug_summary())
+    lines.extend([
+        "",
+        "<b>Payload</b>",
+        f"• orderCode: <code>{payload['orderCode']}</code>",
+        f"• amount: <code>{payload['amount']}</code>",
+        f"• description: <code>{html.escape(payload['description'])}</code>",
+        f"• returnUrl: <code>{html.escape(payload['returnUrl'])}</code>",
+        f"• cancelUrl: <code>{html.escape(payload['cancelUrl'])}</code>",
+        "",
+        f"• Canonical data current: <code>{html.escape(signature_data)}</code>",
+        f"• Signature current masked: <code>{html.escape(mask_payos_signature(signature))}</code>",
+        "",
+        "<b>✅ Code đã kiểm tra</b>",
+        "• orderCode int",
+        "• amount int",
+        "• URL exact",
+        "• official create-payment signature tested bằng <code>/payos_debug_create</code>",
+        "• headers sent",
+        "",
+        "<b>⚠️ Cần admin kiểm tra ngoài code</b>",
+        "1. PAYOS_CLIENT_ID, PAYOS_API_KEY, PAYOS_CHECKSUM_KEY có cùng một app/kênh không.",
+        "2. Có copy nhầm Webhook Secret thay vì Checksum Key không.",
+        "3. Key đang dùng là live/sandbox cùng môi trường không.",
+        "4. Merchant/app PayOS có active chưa.",
+        "5. Thử regenerate keys trong PayOS dashboard.",
+        "6. Test bằng SDK/sample chính thức ngoài bot.",
+        "",
+    ])
+    if sdk_ok:
+        lines.append("Note: SDK có trong môi trường, nhưng lệnh này không gọi SDK để tránh tạo đơn ngoài ý muốn. Nếu cần test SDK thật, chạy official sample riêng với cùng bộ key.")
+    else:
+        lines.extend([
+            "Note: PayOS SDK not installed.",
+            "Dùng thêm: <code>/payos_key_fingerprint</code>.",
+        ])
+    lines.append("Lệnh này không tạo đơn thanh toán.")
+    await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
+
+async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return
+    try:
+        lookup_key = context.args[0]
+        conn = db_connect()
+        c = conn.cursor()
+        pending = None
+        if str(lookup_key).isdigit():
+            c.execute(
+                "SELECT id, user_id, order_code FROM pending_deposits WHERE id=? AND status IN ('pending','pending_admin_review') LIMIT 1",
+                (str(lookup_key),),
+            )
+            pending = c.fetchone()
+        if not pending:
+            c.execute(
+                "SELECT id, user_id, order_code FROM pending_deposits WHERE user_id=? AND status IN ('pending','pending_admin_review') ORDER BY submitted_at DESC LIMIT 1",
+                (str(lookup_key),),
+            )
+            pending = c.fetchone()
+        if not pending:
+            conn.close()
+            return await update.message.reply_text(
+                "⚠️ Không có bill thủ công đang chờ cho ID/mã bill này.",
+                parse_mode="HTML",
+            )
+        deposit_id = int(pending[0])
+        target_id = str(pending[1])
+        pending_order_code = str(pending[2] or "")
+        c.execute(
+            "UPDATE pending_deposits SET status='rejected', updated_at=? WHERE id=? AND status IN ('pending','pending_admin_review')",
+            (now_text(), deposit_id)
+        )
+        if pending_order_code:
+            update_finance_invoice_status_conn(
+                conn,
+                pending_order_code,
+                "rejected",
+                anomaly_reason="manual bill rejected by admin",
+                approved_by_admin_id=str(update.effective_user.id),
+            )
+        rejected_count = c.rowcount
+        record_audit(
+            conn,
+            ADMIN_ID,
+            "admin",
+            "bill.rejected",
+            "pending_deposit",
+            str(deposit_id),
+            before={"status": "pending", "user_id": str(target_id)},
+            after={"status": "rejected", "rows": int(rejected_count or 0), "user_id": str(target_id)},
+            note="Admin rejected manual bill",
+        )
+        conn.commit()
+        conn.close()
+        await context.bot.send_message(
+            chat_id=target_id,
+            text=(
+                f"❌ <b>BILL BỊ TỪ CHỐI</b>\n\n"
+                f"Admin không xác nhận được giao dịch.\n"
+                f"Kiểm tra lại nội dung chuyển khoản hoặc liên hệ Admin."
+            ),
+            parse_mode="HTML"
+        )
+        await update.message.reply_text(f"✅ Đã từ chối bill #{deposit_id} và thông báo ID: {target_id}")
+    except IndexError:
+        await update.message.reply_text("⚠️ Cú pháp: /tuchoi <deposit_id|user_id>")
+
+async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        "SELECT id, user_id, username, submitted_at, order_code, amount, xu FROM pending_deposits "
+        "WHERE status IN ('pending','pending_admin_review') ORDER BY submitted_at DESC LIMIT 10"
+    )
+    rows = c.fetchall()
+    conn.close()
+    if not rows:
+        return await update.message.reply_text("📭 Không có bill nào đang chờ.")
+    lines = ["📋 <b>BILL CHỜ DUYỆT (THỦ CÔNG):</b>\n"]
+    for r in rows:
+        expected = f" | {r[5]:,}đ → {r[6]} Xu | đơn {r[4]}" if r[5] and r[6] else ""
+        lines.append(
+            f"• #{r[0]} | {r[2]} | <code>{r[1]}</code>{expected} | {r[3]}\n"
+            f"  ➔ <code>/duyet {r[0]} {r[6] or '&lt;Xu&gt;'}</code>\n"
+            f"  ➔ <code>/tuchoi {r[0]}</code>"
+        )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def handle_manual_approval_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return False
+    state = get_manual_approval_state(update.effective_user.id)
+    if not state or state.get("step") not in {"await_amount", "await_reason"}:
+        return False
+    if state.get("step") == "await_reason":
+        reason = sanitize_log_text(str(update.effective_message.text or "").strip())[:300]
+        if len(reason) < 3:
+            await update.effective_message.reply_text("⚠️ Hãy nhập lý do điều chỉnh: tỉ giá, khách chuyển thiếu, phí hoặc lý do khác.")
+            return True
+        amount = int(state.get("amount") or 0)
+        set_manual_approval_state(
+            update.effective_user.id,
+            int(state["deposit_id"]),
+            state["target_id"],
+            step="confirm",
+            amount=amount,
+            expected_xu=int(state.get("expected_xu") or 0),
+            reason=reason,
+        )
+        await update.effective_message.reply_text(
+            f"✅ <b>Xác nhận duyệt Xu điều chỉnh</b>\n\n"
+            f"• Bill: <code>#{int(state['deposit_id'])}</code>\n"
+            f"• User: <code>{html.escape(str(state['target_id']))}</code>\n"
+            f"• Cộng: <b>{amount} Xu</b>\n"
+            f"• Lý do: {html.escape(reason)}\n\n"
+            "Chỉ xác nhận sau khi đã kiểm tra tiền/giao dịch thật.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Xác nhận cộng Xu", callback_data=f"manual|confirm|{int(state['deposit_id'])}|{amount}"),
+                InlineKeyboardButton("❌ Không duyệt", callback_data=f"manual|reject|{int(state['deposit_id'])}"),
+            ]]),
+        )
+        return True
+    raw = re.sub(r"[^0-9]", "", str(update.effective_message.text or ""))
+    if not raw:
+        await update.effective_message.reply_text("⚠️ Hãy nhập số Xu cần cộng, ví dụ: <code>500</code>.", parse_mode="HTML")
+        return True
+    amount = int(raw)
+    if amount <= 0:
+        await update.effective_message.reply_text("⚠️ Số Xu phải lớn hơn 0.")
+        return True
+    set_manual_approval_state(
+        update.effective_user.id,
+        int(state["deposit_id"]),
+        state["target_id"],
+        step="await_reason",
+        amount=amount,
+        expected_xu=int(state.get("expected_xu") or 0),
+    )
+    await update.effective_message.reply_text(
+        f"✍️ <b>Nhập lý do điều chỉnh Xu</b>\n\n"
+        f"• Bill: <code>#{int(state['deposit_id'])}</code>\n"
+        f"• User: <code>{html.escape(str(state['target_id']))}</code>\n"
+        f"• Xu dự kiến: <b>{int(state.get('expected_xu') or 0)} Xu</b>\n"
+        f"• Xu admin nhập: <b>{amount} Xu</b>\n\n"
+        "Hãy nhập lý do, ví dụ: tỉ giá, khách chuyển thiếu, phí hoặc lý do khác. Bot chưa cộng Xu.",
+        parse_mode="HTML",
+    )
+    return True
+
+async def handle_manual_topup_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user or not update.effective_message or not update.effective_message.text:
+        return False
+    uid = update.effective_user.id
+    state = get_active_manual_bill_state(uid)
+    if not state:
+        return False
+    step = str(state.get("step") or "")
+    text = str(update.effective_message.text or "").strip()
+    if step == "await_foreign_amount":
+        normalized = text.replace(",", ".")
+        try:
+            amount = float(normalized)
+        except ValueError:
+            amount = 0
+        currency = str(state.get("currency") or "USD").upper()
+        if amount <= 0 or amount > 1_000_000:
+            await update.effective_message.reply_text(f"⚠️ Hãy nhập số {currency} hợp lệ lớn hơn 0.")
+            return True
+        preview = foreign_topup_preview(currency, amount)
+        set_manual_bill_state(uid, order_code="MANUAL", amount=preview["amount_vnd"], xu=preview["expected_xu"], **preview)
+        await update.effective_message.reply_text(
+            manual_foreign_preview_text(preview),
+            parse_mode="HTML",
+            reply_markup=manual_foreign_preview_keyboard(preview, uid),
+        )
+        return True
+    if step == "await_bill":
+        if not state.get("foreign_manual"):
+            await update.effective_message.reply_text("📷 Vui lòng gửi ảnh bill giao dịch. Nạp VND không tự duyệt từ nội dung text.")
+            return True
+        if len(text) < 6:
+            await update.effective_message.reply_text("⚠️ TXID quá ngắn. Hãy gửi TXID/mã giao dịch đầy đủ hoặc gửi ảnh bill.")
+            return True
+        deposit = create_manual_pending_deposit(update.effective_user, state, tx_hash=text)
+        if not deposit.get("ok") and deposit.get("reason") == "duplicate_tx_hash":
+            USER_BILL_STATE.pop(uid, None)
+            await update.effective_message.reply_text(
+                f"⚠️ TXID này đã được dùng cho yêu cầu <code>#{int(deposit.get('duplicate_id') or 0)}</code>. "
+                "TOAN AAS chưa cộng thêm Xu; vui lòng kiểm tra lịch sử hoặc liên hệ hỗ trợ.",
+                parse_mode="HTML",
+            )
+            return True
+        if not deposit.get("ok"):
+            await update.effective_message.reply_text("⚠️ Không thể lưu TXID lúc này. Vui lòng thử lại sau.")
+            return True
+        USER_BILL_STATE.pop(uid, None)
+        await notify_manual_pending_deposit(context, deposit)
+        await update.effective_message.reply_text(
+            manual_pending_user_text(deposit),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📂 Lịch sử nạp thủ công", callback_data=f"manual|history|{uid}"), InlineKeyboardButton("💬 Hỗ trợ", callback_data="support|start")],
+                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+        return True
+    return False
+
+def finance_admin_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Tổng quan", callback_data="menu|finance_overview"), InlineKeyboardButton("💵 Doanh thu", callback_data="menu|finance_revenue")],
+        [InlineKeyboardButton("🧾 Thuế / VAT", callback_data="menu|finance_tax_vat"), InlineKeyboardButton("🧾 Chi phí", callback_data="menu|finance_expense_month")],
+        [InlineKeyboardButton("📈 Lợi nhuận", callback_data="menu|finance_profit"), InlineKeyboardButton("🏦 Vốn & Hòa vốn", callback_data="menu|finance_capital")],
+        [InlineKeyboardButton("🎁 Gói / Combo", callback_data="menu|admin_package_orders"), InlineKeyboardButton("⚠️ Đơn bất thường", callback_data="menu|finance_anomalies")],
+        [InlineKeyboardButton("🧮 Sổ điều chỉnh", callback_data="menu|finance_adjustments"), InlineKeyboardButton("➕ Thêm chi phí", callback_data="menu|finance_add_expense")],
+        [InlineKeyboardButton("📥 Xuất báo cáo", callback_data="menu|finance_export"), InlineKeyboardButton("📚 Hồ sơ/chứng từ", callback_data="menu|tax_checklist")],
+        [InlineKeyboardButton("📘 Hướng dẫn tài chính", callback_data="menu|finance_guide"), InlineKeyboardButton("🎟 Mã quà tặng", callback_data="menu|admin_gift_codes")],
+        [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def finance_menu_text() -> str:
+    return (
+        "📊 <b>Admin Tài chính TOAN AAS</b>\n\n"
+        "Mục này là sổ sách công ty mini: doanh thu, VAT, chi phí, lợi nhuận, vốn, hòa vốn, đơn bất thường và sổ điều chỉnh. "
+        "Các nút bên dưới chỉ đọc số liệu hoặc hướng dẫn lệnh; không tự cộng/trừ Xu và không sửa giao dịch gốc.\n"
+        f"{html.escape(TAX_PREP_DISCLAIMER)}\n\n"
+        "Nguyên tắc P0.21E: sai thì tạo bút toán điều chỉnh, không sửa/xóa giao dịch cũ."
+    )
+
+def admin_back_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]
+    ])
+
+def finance_period_keyboard(kind: str) -> InlineKeyboardMarkup:
+    if kind == "revenue":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📅 Tháng này", callback_data="menu|finance_revenue_this_month"), InlineKeyboardButton("↩️ Tháng trước", callback_data="menu|finance_revenue_last_month")],
+            [InlineKeyboardButton("📆 Năm nay", callback_data="menu|finance_revenue_year"), InlineKeyboardButton("✍️ Nhập tháng khác", callback_data="menu|finance_revenue_custom_help")],
+            [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ])
+    if kind == "expense":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📅 Tháng này", callback_data="menu|finance_expense_this_month"), InlineKeyboardButton("↩️ Tháng trước", callback_data="menu|finance_expense_last_month")],
+            [InlineKeyboardButton("📆 Năm nay", callback_data="menu|finance_expense_year"), InlineKeyboardButton("➕ Thêm chi phí", callback_data="menu|finance_add_expense")],
+            [InlineKeyboardButton("🏷 Categories", callback_data="menu|finance_expense_categories"), InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance")],
+            [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ])
+    if kind == "profit":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📅 Tháng này", callback_data="menu|finance_profit_this_month"), InlineKeyboardButton("📆 Năm nay", callback_data="menu|finance_profit_year")],
+            [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📤 Xuất tháng này", callback_data="menu|finance_export_month"), InlineKeyboardButton("📤 Xuất năm nay", callback_data="menu|finance_export_year")],
+        [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def finance_child_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def finance_tax_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🧾 Cấu hình thuế", callback_data="menu|finance_tax_settings"), InlineKeyboardButton("✏️ Đổi % GTGT", callback_data="menu|finance_vat_rate_help")],
+        [InlineKeyboardButton("📌 Chính sách B2C/B2B", callback_data="menu|finance_policy_status"), InlineKeyboardButton("🧮 Kịch bản 100k", callback_data="menu|finance_tax_scenario")],
         [InlineKeyboardButton("📦 Provider cost/FCT", callback_data="menu|finance_provider_cost_tax"), InlineKeyboardButton("🧭 Audit menu", callback_data="menu|finance_menu_audit")],
         [InlineKeyboardButton("✅ Bật GTGT", callback_data="menu|finance_vat_on"), InlineKeyboardButton("⛔ Tắt GTGT", callback_data="menu|finance_vat_off")],
         [InlineKeyboardButton("✏️ Đổi % TNDN", callback_data="menu|finance_cit_rate_help"), InlineKeyboardButton("📊 Báo cáo TNDN", callback_data="menu|finance_cit_report")],
