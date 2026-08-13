@@ -51,6 +51,7 @@ from services.public_chat_store import (
 
 
 PUBLIC_CHAT_MAX_OUTPUT_TOKENS = 1_200
+PUBLIC_CHAT_FREE_MAX_OUTPUT_TOKENS = 4_096
 PUBLIC_CHAT_MAX_TEXT_CHARS = 6_000
 _LABELS = opus_price_per_thousand_labels()
 CHAT_PRO_RATE_LABEL = f"{_LABELS['input']}/{_LABELS['output']} Xu/1K"
@@ -285,13 +286,33 @@ def resolve_public_chat_mode_action(action: str, current: str) -> str:
 
 def public_chat_system_prompt(lang: str = "vi") -> str:
     language = "Vietnamese" if str(lang or "vi").lower() == "vi" else "the user's latest language"
-    return f"You are TOAN AAS public chat. Return text only and reply in {language}. Never switch into another product flow."
+    return (
+        f"You are TOAN AAS public chat. Return text only and reply in {language}. "
+        "Answer the latest user message directly; use older turns only when they are relevant. "
+        "Do not continue an older task when the latest message changes topic. "
+        "Give a complete answer within the available output budget. "
+        "Never switch into another product flow."
+    )
 
 
 def split_public_chat_text(text: str, limit: int = 3900) -> list[str]:
     value = str(text or "").strip()
     bounded = max(256, min(int(limit or 3900), 4096))
-    return [value[index:index + bounded] for index in range(0, len(value), bounded)] if value else []
+    if not value:
+        return []
+    chunks: list[str] = []
+    cursor = 0
+    while cursor < len(value):
+        end = min(cursor + bounded, len(value))
+        if end < len(value):
+            newline = value.rfind("\n", cursor, end)
+            space = value.rfind(" ", cursor, end)
+            boundary = max(newline, space)
+            if boundary >= cursor:
+                end = boundary + 1
+        chunks.append(value[cursor:end])
+        cursor = end
+    return chunks
 
 
 def _provider_messages(context: Mapping[str, Any], text: str) -> list[dict[str, Any]]:
@@ -347,7 +368,7 @@ def _compensate_pro_request(*, conn: sqlite3.Connection, owner_id: Any, request_
 
 async def _call_provider(*, mode: str, gemini_client: Any, key4u_provider: Any, system_prompt: str, messages: list[dict[str, Any]], attachments: Sequence[PublicChatAttachment]) -> dict[str, Any]:
     if mode == "free":
-        return await generate_public_chat_text(gemini_client, system_prompt=system_prompt, messages=messages, attachments=attachments, max_output_tokens=PUBLIC_CHAT_MAX_OUTPUT_TOKENS)
+        return await generate_public_chat_text(gemini_client, system_prompt=system_prompt, messages=messages, attachments=attachments, max_output_tokens=PUBLIC_CHAT_FREE_MAX_OUTPUT_TOKENS)
     if key4u_provider is None:
         return {"ok": False, "status": "unavailable", "text": ""}
     opus_messages = _opus_messages(messages, attachments)

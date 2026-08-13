@@ -70452,7 +70452,7 @@ async def send_public_chat_text(
         chunks[-1] = f"{chunks[-1]}\n\n{footer}"
     cursor = max(0, min(int(start_index or 0), len(chunks)))
     for index, chunk in enumerate(chunks[cursor:], start=cursor):
-        await target.reply_text(chunk)
+        await target.reply_text(chunk, parse_mode=None)
         if conn is not None and request_id:
             checkpoint = public_chat_store.advance_public_chat_delivery(
                 conn,
