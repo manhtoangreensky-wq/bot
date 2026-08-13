@@ -10,6 +10,7 @@ import base64
 import os
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -1226,8 +1227,10 @@ class Key4UProvider:
             normalized.append({"role": role, "content": content})
         return normalized
 
-    def _public_headers(self, *, anthropic: bool) -> dict[str, str]:
+    def _public_headers(self, *, anthropic: bool, client_request_id: str = "") -> dict[str, str]:
         headers = {**self._headers(), "Content-Type": "application/json"}
+        if client_request_id:
+            headers["X-Client-Request-Id"] = client_request_id
         if anthropic:
             headers["anthropic-version"] = "2023-06-01"
         return headers
@@ -1260,9 +1263,17 @@ class Key4UProvider:
         if anthropic and str(system or "").strip():
             payload["system"] = str(system).strip()
         endpoint = KEY4U_PUBLIC_MESSAGES_URL if anthropic else KEY4U_PUBLIC_CHAT_COMPLETIONS_URL
+        client_request_id = f"client-{uuid.uuid4().hex}"
         try:
             async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-                response = await client.post(endpoint, headers=self._public_headers(anthropic=anthropic), json=payload)
+                response = await client.post(
+                    endpoint,
+                    headers=self._public_headers(
+                        anthropic=anthropic,
+                        client_request_id=client_request_id,
+                    ),
+                    json=payload,
+                )
         except httpx.TimeoutException:
             return self._public_failure("FAIL_TIMEOUT", error_class="FAIL_TIMEOUT")
         except Exception as exc:
@@ -1291,6 +1302,8 @@ class Key4UProvider:
                     request_id = _safe_public_request_id(value)
                     if request_id:
                         break
+        if not request_id and not legacy_shape:
+            request_id = client_request_id
         if legacy_shape and require_usage and not request_id:
             return self._public_failure("FAIL_REQUEST_ID_MISSING", http_status=int(response.status_code or 0))
         if legacy_shape:
