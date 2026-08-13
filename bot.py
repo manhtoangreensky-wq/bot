@@ -6653,6 +6653,10 @@ CANONICAL_PRICE_KEYS = (
     "video_addon_logo",
 )
 CANONICAL_DERIVED_PRICE_KEYS = {"subtitle_dub_video", "auto_subtitle_then_dub"}
+CANONICAL_VIDEO_ADDON_PRICE_ALIASES = {
+    "video_addon_subtitle": "auto_subtitle_video",
+    "video_addon_dub": "dub_video",
+}
 CANONICAL_LOCKED_VIDEO_PRICE_KEYS = {
     "video_beta_200",
     "video_beta_300",
@@ -6697,9 +6701,9 @@ CANONICAL_PRICE_LABELS = {
     "video_beta_300": "Video Tiêu chuẩn có âm thanh 220 Xu/cảnh",
     "video_beta_400": "Video Cân bằng rõ nét 80 Xu/cảnh",
     "video_addon_voice": "Video add-on voice",
-    "video_addon_subtitle": "Video add-on phụ đề",
-    "video_addon_dub": "Video add-on lồng tiếng",
-    "video_addon_music": "Video add-on nhạc",
+    "video_addon_subtitle": "Video add-on phụ đề theo giá Phụ đề/Lồng tiếng",
+    "video_addon_dub": "Video add-on lồng tiếng theo giá Phụ đề/Lồng tiếng",
+    "video_addon_music": "Video add-on nhạc theo giá Nhạc nền Cơ bản",
     "video_addon_logo": "Video add-on logo",
 }
 CANONICAL_PRICE_UNITS = {
@@ -6716,8 +6720,8 @@ CANONICAL_PRICE_UNITS = {
     "video_beta_400": "Xu",
     "video_addon_voice": "Xu",
     "video_addon_subtitle": "Xu",
-    "video_addon_dub": "Xu",
-    "video_addon_music": "Xu",
+    "video_addon_dub": "Xu/ký tự",
+    "video_addon_music": "Xu/lượt",
     "video_addon_logo": "Xu",
 }
 
@@ -6759,9 +6763,11 @@ def canonical_price_defaults() -> dict:
         "video_beta_300": canonical_price_number(VIDEO_BASIC_COST_XU),
         "video_beta_400": canonical_price_number(VIDEO_COMMON_COST_XU),
         "video_addon_voice": 0,
-        "video_addon_subtitle": canonical_price_number(globals().get("VIDEO_SUBTITLE_AUTO_BASE_XU", 120)),
-        "video_addon_dub": canonical_price_number(globals().get("VIDEO_DUB_DEFAULT_BASE_XU", 250)),
-        "video_addon_music": canonical_price_number(globals().get("VIDEO_SUNO_MUSIC_XU", 300)),
+        "video_addon_subtitle": auto_subtitle,
+        "video_addon_dub": dub_rate,
+        "video_addon_music": canonical_price_number(
+            video_ai_real_pricing.public_music_background_prices()["basic"]
+        ),
         "video_addon_logo": 0,
     }
 
@@ -6772,6 +6778,12 @@ def canonical_price_xu(key: str = ""):
         return 0
     if normalized in CANONICAL_LOCKED_VIDEO_PRICE_KEYS:
         return defaults.get(normalized, 0)
+    if normalized in CANONICAL_VIDEO_ADDON_PRICE_ALIASES:
+        return canonical_price_xu(CANONICAL_VIDEO_ADDON_PRICE_ALIASES[normalized])
+    if normalized == "video_addon_music":
+        return canonical_price_number(
+            video_ai_real_pricing.public_music_background_prices()["basic"]
+        )
     if normalized in CANONICAL_DERIVED_PRICE_KEYS:
         if normalized == "subtitle_dub_video":
             return canonical_price_number(float(canonical_price_xu("subtitle_translate_video")) + float(canonical_price_xu("dub_video")))
@@ -47729,21 +47741,26 @@ def video_tier_policy(tier: str = "") -> dict:
 
 def video_addon_pricing_matrix() -> dict:
     addon_voice = int(canonical_price_xu("video_addon_voice") or 0)
-    addon_subtitle = int(canonical_price_xu("video_addon_subtitle") or VIDEO_SUBTITLE_AUTO_BASE_XU)
-    addon_dub = int(canonical_price_xu("video_addon_dub") or VIDEO_DUB_DEFAULT_BASE_XU)
-    addon_music = int(canonical_price_xu("video_addon_music") or VIDEO_SUNO_MUSIC_XU)
-    subtitle_translate = int(canonical_price_xu("video_addon_subtitle") or VIDEO_SUBTITLE_TRANSLATE_BASE_XU)
-    translate_dub = int(subtitle_translate + addon_dub)
+    subtitle_rate = float(
+        canonical_price_xu("subtitle_translate_video")
+        or VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU
+    )
+    dub_rate = float(
+        canonical_price_xu("dub_video") or VIDEO_ONLY_DUB_DEFAULT_RATE_XU
+    )
+    addon_music = int(
+        video_ai_real_pricing.public_music_background_prices()["basic"]
+    )
     return {
         "stock_music_library": {"label": "Nhạc nền từ kho có sẵn", "price_xu": 0, "unit": "included", "display": "Miễn phí"},
         "manual_volume_basic": {"label": "Chỉnh âm lượng cơ bản", "price_xu": 0, "unit": "included", "display": "Miễn phí"},
         "subtitle_from_script": {"label": "Phụ đề từ script/text có sẵn", "price_xu": 0, "unit": "included", "display": "Miễn phí"},
         "burn_subtitle_from_script": {"label": "Gắn phụ đề đơn giản từ script", "price_xu": 0, "unit": "included", "display": "Miễn phí nếu worker/local đủ điều kiện"},
-        "subtitle_auto": {"label": "Tạo phụ đề tự động từ video", "price_xu": addon_subtitle, "unit": "job<=60s", "display": f"+{addon_subtitle} Xu"},
-        "subtitle_translate": {"label": "Dịch phụ đề 1 ngôn ngữ", "price_xu": subtitle_translate, "unit": "job<=60s", "display": f"+{subtitle_translate} Xu"},
-        "subtitle_translate_burn": {"label": "Tạo phụ đề + dịch + burn", "price_xu": VIDEO_SUBTITLE_TRANSLATE_BURN_BASE_XU, "unit": "job<=60s", "display": f"+{VIDEO_SUBTITLE_TRANSLATE_BURN_BASE_XU} Xu"},
-        "dubbing_default": {"label": "Lồng tiếng giọng mặc định", "price_xu": addon_dub, "unit": "job<=60s", "display": f"+{addon_dub} Xu"},
-        "translate_dub_default": {"label": "Dịch + lồng tiếng giọng mặc định", "price_xu": translate_dub, "unit": "job<=60s", "display": f"+{translate_dub} Xu"},
+        "subtitle_auto": {"label": "Tạo phụ đề tự động từ video", "price_xu": 0, "unit": "job", "display": "Miễn phí"},
+        "subtitle_translate": {"label": "Dịch phụ đề 1 ngôn ngữ", "price_xu": 0, "rate_xu": subtitle_rate, "unit": "character", "display": f"+{subtitle_rate:g} Xu/ký tự"},
+        "subtitle_translate_burn": {"label": "Tạo phụ đề + dịch + burn", "price_xu": 0, "rate_xu": subtitle_rate, "unit": "character", "display": f"+{subtitle_rate:g} Xu/ký tự"},
+        "dubbing_default": {"label": "Lồng tiếng giọng mặc định", "price_xu": 0, "rate_xu": dub_rate, "unit": "character", "display": f"+{dub_rate:g} Xu/ký tự"},
+        "translate_dub_default": {"label": "Dịch + lồng tiếng giọng mặc định", "price_xu": 0, "rate_xu": subtitle_rate + dub_rate, "unit": "character", "display": f"+{subtitle_rate + dub_rate:g} Xu/ký tự"},
         "voice_advanced": {"label": "Chọn giọng nâng cao", "price_xu": addon_voice, "unit": "job", "display": "Miễn phí" if addon_voice <= 0 else f"+{addon_voice} Xu"},
         "voice_transform": {"label": "Biến đổi giọng theo mẫu có sẵn", "price_xu": VIDEO_VOICE_PRESET_TRANSFORM_XU, "unit": "job", "display": f"+{VIDEO_VOICE_PRESET_TRANSFORM_XU} Xu"},
         "voice_premium_preset": {"label": "Mẫu giọng cao cấp", "price_xu": VIDEO_VOICE_PREMIUM_PRESET_XU, "unit": "job", "display": f"+{VIDEO_VOICE_PREMIUM_PRESET_XU} Xu"},
@@ -48083,6 +48100,15 @@ def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
     dubbing = str(state.get("current_video_dubbing_option") or existing_addons.get("dub") or "none").strip().lower()
     translated = bool(state.get("translation_enabled") or "translated" in subtitle or "translated" in dubbing)
     duration_seconds = max(1, int(order.get("requested_seconds") or VIDEO_ORDER_DEFAULT_BASE_SECONDS))
+    billable_chars = video_dubbing_billing_char_count({
+        "billing_chars": safe_int(
+            state.get("billing_chars")
+            or (state.get("pending_payload") or {}).get("billing_chars")
+            or (state.get("video_finalization") or {}).get("billing_chars"),
+            0,
+        ),
+        "video_duration": duration_seconds,
+    })
     voice_addon_key = str((order.get("addons") or {}).get("voice") or "").strip().lower()
     if (
         dubbing not in {"", "none"}
@@ -48094,7 +48120,11 @@ def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
         order["addons"]["dub"] = None
     if subtitle not in {"", "none"} and dubbing not in {"", "none"}:
         key = "subtitle_plus_dubbing"
-        breakdown = subtitle_dub_price_breakdown(key, duration_seconds)
+        breakdown = video_addon_external_price_breakdown(
+            key,
+            duration_seconds,
+            billable_chars=billable_chars,
+        )
         price = int(breakdown["total_xu"])
         label = breakdown["label"]
         order["addons"]["subtitle_plus_dub"] = key
@@ -48106,13 +48136,21 @@ def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
         if translated:
             order["addons"]["subtitle_translate"] = key
         if video_order_paid_addons_allowed(tier):
-            breakdown = subtitle_dub_price_breakdown("translate_subtitle" if translated else "subtitle", duration_seconds)
+            breakdown = video_addon_external_price_breakdown(
+                "translate_subtitle" if translated else "subtitle",
+                duration_seconds,
+                billable_chars=billable_chars,
+            )
             paid_items.append({"key": key, "label": breakdown["label"], "price_xu": int(breakdown["total_xu"])})
     elif dubbing not in {"", "none"}:
         key = "dubbing_default"
         order["addons"]["dub"] = key
         if video_order_paid_addons_allowed(tier):
-            breakdown = subtitle_dub_price_breakdown("dubbing", duration_seconds)
+            breakdown = video_addon_external_price_breakdown(
+                "dubbing",
+                duration_seconds,
+                billable_chars=billable_chars,
+            )
             paid_items.append({"key": key, "label": breakdown["label"], "price_xu": int(breakdown["total_xu"])})
 
     if not free_items:
@@ -48683,55 +48721,62 @@ def video_order_screen_text(screen: str, state: dict | None = None, lang: str = 
     order = video_order_from_state(state)
     is_vi = normalize_user_language(lang) == "vi"
     if screen == "music":
+        music_price = int(video_ai_real_pricing.public_music_background_prices()["basic"])
         if not is_vi:
             return (
                 "🎵 <b>Music / SFX</b>\n\n"
                 "Free options:\n• Use built-in music when available\n• Upload your own music\n• Save a mood/SFX direction\n\n"
-                f"Paid options:\n• AI music: <b>+{VIDEO_SUNO_MUSIC_XU} Xu</b>\n• AI SFX: <b>+{VIDEO_SFX_AI_XU} Xu</b>\n\n"
+                f"Paid options:\n• AI music: <b>+{music_price} Xu/request</b>\n• AI SFX: <b>+{VIDEO_SFX_AI_XU} Xu</b>\n\n"
                 "The final invoice is shown before any processing or Xu charge."
             )
         return (
             "🎵 <b>Nhạc / SFX</b>\n\n"
             "Miễn phí:\n• Dùng kho nhạc có sẵn nếu đủ điều kiện\n• Upload file nhạc của bạn\n• Lưu hướng mood/SFX vào kế hoạch\n\n"
-            f"Tùy chọn có phí:\n• Tạo nhạc AI: <b>+{VIDEO_SUNO_MUSIC_XU} Xu</b>\n• Tạo SFX AI: <b>+{VIDEO_SFX_AI_XU} Xu</b>\n\n"
+            f"Tùy chọn có phí:\n• Tạo nhạc AI: <b>+{music_price} Xu/lượt</b>\n• Tạo SFX AI: <b>+{VIDEO_SFX_AI_XU} Xu</b>\n\n"
             "TOAN AAS sẽ hiện hóa đơn cuối trước khi xử lý và trừ Xu."
         )
     if screen == "voice":
+        dub_rate = float(canonical_price_xu("dub_video") or VIDEO_ONLY_DUB_DEFAULT_RATE_XU)
         if not is_vi:
             return (
                 "🎙 <b>Voice / dubbing</b>\n\n"
                 "Free planning:\n• Save narration text\n• Upload a prepared voice file\n\n"
-                f"Paid options:\n• Default AI dubbing: <b>+{VIDEO_DUB_DEFAULT_BASE_XU} Xu</b>\n"
+                f"Paid options:\n• Default AI dubbing: <b>{dub_rate:g} Xu/character</b>\n"
                 f"• Advanced voice: <b>+{VIDEO_VOICE_ADVANCED_ADDON_XU} Xu</b>\n\n"
                 "The final invoice is shown before any processing or Xu charge."
             )
         return (
             "🎙 <b>Voice / lồng tiếng</b>\n\n"
             "Miễn phí ở bước kế hoạch:\n• Lưu nội dung đọc\n• Upload file voice đã có\n\n"
-            f"Tùy chọn có phí:\n• Lồng tiếng AI giọng mặc định: <b>+{VIDEO_DUB_DEFAULT_BASE_XU} Xu</b>\n"
+            f"Tùy chọn có phí:\n• Lồng tiếng AI giọng mặc định: <b>{dub_rate:g} Xu/ký tự</b>\n"
             f"• Chọn giọng nâng cao: <b>+{VIDEO_VOICE_ADVANCED_ADDON_XU} Xu</b>\n\n"
             "TOAN AAS sẽ hiện hóa đơn cuối trước khi xử lý và trừ Xu."
         )
     if screen == "subtitle_dub":
+        subtitle_rate = float(
+            canonical_price_xu("subtitle_translate_video")
+            or VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU
+        )
+        dub_rate = float(canonical_price_xu("dub_video") or VIDEO_ONLY_DUB_DEFAULT_RATE_XU)
         if not is_vi:
             return (
                 "🎙 <b>Subtitles & dubbing</b>\n\n"
                 f"Package: <b>{html.escape(str(order.get('tier_name')))}</b>\n"
                 "Free planning: save script/caption and use manual text when available.\n\n"
-                f"Paid options:\n• Auto subtitles: <b>+{VIDEO_SUBTITLE_AUTO_BASE_XU} Xu</b>\n"
-                f"• Translate subtitles: <b>+{VIDEO_SUBTITLE_TRANSLATE_BASE_XU} Xu</b>\n"
-                f"• Dubbing: <b>+{VIDEO_DUB_DEFAULT_BASE_XU} Xu</b>\n"
-                f"• Translate + dubbing: <b>+{VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU} Xu</b>\n\n"
+                f"Prices:\n• Auto subtitles: <b>Free</b>\n"
+                f"• Translate subtitles: <b>{subtitle_rate:g} Xu/character</b>\n"
+                f"• Dubbing: <b>{dub_rate:g} Xu/character</b>\n"
+                f"• Translate + dubbing: <b>{subtitle_rate + dub_rate:g} Xu/character</b>\n\n"
                 "The itemized invoice appears before any processing or Xu charge."
             )
         return (
             "🎙 <b>Phụ đề & lồng tiếng</b>\n\n"
             f"Gói đang chọn: <b>{html.escape(str(order.get('tier_name')))}</b>\n"
             "Miễn phí ở bước kế hoạch: lưu script/caption và dùng nội dung thủ công khi có sẵn.\n\n"
-            f"Tùy chọn có phí:\n• Tạo phụ đề tự động: <b>+{VIDEO_SUBTITLE_AUTO_BASE_XU} Xu</b>\n"
-            f"• Dịch phụ đề: <b>+{VIDEO_SUBTITLE_TRANSLATE_BASE_XU} Xu</b>\n"
-            f"• Lồng tiếng: <b>+{VIDEO_DUB_DEFAULT_BASE_XU} Xu</b>\n"
-            f"• Dịch + lồng tiếng: <b>+{VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU} Xu</b>\n\n"
+            f"Bảng giá đang dùng:\n• Tạo phụ đề tự động: <b>Miễn phí</b>\n"
+            f"• Dịch phụ đề: <b>{subtitle_rate:g} Xu/ký tự</b>\n"
+            f"• Lồng tiếng: <b>{dub_rate:g} Xu/ký tự</b>\n"
+            f"• Dịch + lồng tiếng: <b>{subtitle_rate + dub_rate:g} Xu/ký tự</b>\n\n"
             "TOAN AAS sẽ hiện hóa đơn tách từng mục trước khi xử lý và trừ Xu."
         )
     return video_addon_menu_text(state, lang)
@@ -72023,13 +72068,22 @@ VIDEO_UIFLOW3_STEP_ACTIONS = {
         "product_add", "product_image", "prop_add", "relationship_add",
         "prop_image", "source_ref", "source_ref_set", "ref_add", "ref_manage",
         "ref_remove", "image_ai", "quick_build",
+        "pilot_creative", "pilot_creative_pick", "pilot_creative_rotate",
+        "pilot_creative_custom", "pilot_creative_remove", "pilot_creative_restore",
+        "pilot_creative_done", "pilot_creative_skip", "pilot_creative_back",
+        "pilot_requirement", "pilot_requirement_pick", "pilot_requirement_rotate",
+        "pilot_requirement_custom", "pilot_requirement_remove", "pilot_requirement_restore",
+        "pilot_requirement_done", "pilot_requirement_skip", "pilot_requirement_back",
     },
     "episode": {
         "episode_identity", "episode_content", "episode_entities",
         "episode_entity", "episode_continuity", "episode_inherit", "episode_done",
     },
     "scene_count": {"scene_count", "scene_custom"},
-    "scene_plan": {"scene_plan_edit", "scene_plan_auto", "plan_scene", "plan_edit", "plan_move", "scene_plan_done"},
+    "scene_plan": {
+        "scene_plan_edit", "scene_plan_auto", "plan_scene", "plan_edit", "plan_move",
+        "scene_plan_done", "pilot_scene_plan_back",
+    },
     "scene_assignment": {
         "scene", "scene_auto", "scene_cast", "cast_toggle", "cast_clear",
         "scene_loc", "scene_loc_set", "scene_loc_clear", "scene_dialogue",
@@ -72065,6 +72119,10 @@ VIDEO_UIFLOW3_VIEW_OWNERS = {
     "references": "production_bible",
     "reference_manage": "production_bible",
     "continuity": "production_bible",
+    "pilot_creative_controls": "production_bible",
+    "pilot_creative_detail": "production_bible",
+    "pilot_requirements": "production_bible",
+    "pilot_requirement_detail": "production_bible",
     "scene_plan_list": "scene_plan",
     "prompt_scenes": "prompts",
     "prompt_advanced": "prompts",
@@ -72101,6 +72159,10 @@ VIDEO_UIFLOW3_CHILD_VIEW_STEPS = {
     "reference_manage": {"production_bible"},
     "source_reference_owner": {"production_bible"},
     "continuity": {"production_bible"},
+    "pilot_creative_controls": {"production_bible"},
+    "pilot_creative_detail": {"production_bible"},
+    "pilot_requirements": {"production_bible"},
+    "pilot_requirement_detail": {"production_bible"},
     "entity_scene_assign": {"production_bible"},
     "scene_plan_list": {"scene_plan"},
     "scene_plan_detail": {"scene_plan"},
@@ -72146,6 +72208,11 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
             "assignment_done", "prompt_scenes", "prompt_advanced", "prompts_done",
             "branding_done", "summary_done", "quality_done",
             "invoice_back", "invoice_confirm", "confirmation_back", "confirmation_submit",
+            "pilot_creative_done", "pilot_creative_skip", "pilot_creative_back",
+            "pilot_requirement_done", "pilot_requirement_skip", "pilot_requirement_back",
+            "pilot_scene_plan_back", "pilot_creative_rotate", "pilot_creative_custom",
+            "pilot_creative_remove", "pilot_creative_restore", "pilot_requirement_rotate",
+            "pilot_requirement_custom", "pilot_requirement_remove", "pilot_requirement_restore",
         )
     },
     **{
@@ -72166,6 +72233,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
             "edit", "source_ref", "ref_add", "ref_manage", "ref_remove", "context",
             "model", "quality", "prompt_page", "prompt_scene", "prompt_edit", "prompt_negative_edit",
             "episode_continuity",
+            "pilot_creative", "pilot_creative_pick", "pilot_requirement", "pilot_requirement_pick",
         )
     },
     **{
@@ -73544,7 +73612,7 @@ def _video_ai_real_visual_contract_is_current(state: dict) -> bool:
     if not existing_hash:
         return False
     try:
-        current = video_ai_real_prompt_compiler.compile_render_contract(state)
+        current = video_ai_real_compile_render_contract(state)
     except (KeyError, TypeError, ValueError):
         return False
     current_hash = str((current.get("visual") or {}).get("visual_hash") or "")
@@ -73802,6 +73870,11 @@ def video_ai_real_prompt_quote(raw_state: dict) -> dict:
     scene_price = video_ai_real_pricing.video_multiscene_price(unit_xu, scene_count)
     base_xu = int(scene_price["total_xu"])
     audio = dict(state.get("audio") or {})
+    billable_chars = sum(
+        len(str(item.get("text") or "").strip())
+        for item in audio.get("dialogue_segments") or []
+        if isinstance(item, dict) and str(item.get("text") or "").strip()
+    )
     addons: list[dict] = []
 
     def add(key: str, label: str, price_xu: int) -> None:
@@ -73824,13 +73897,32 @@ def video_ai_real_prompt_quote(raw_state: dict) -> dict:
             )
         else:
             tracks = scene_count if music_scope == "per_scene" else 1
-        per_track = video_ai_real_pricing.music_model_catalog()[0]["unit_xu"]
+        per_track = safe_int(
+            calculate_named_addon_quote("suno_music", total_duration).get("base_xu"),
+            0,
+        )
         music_label = "Nhạc AI theo từng cảnh" if music_scope == "per_scene" else "Nhạc AI toàn video"
         add("music_ai", music_label, tracks * safe_int(per_track, 0))
     if str(audio.get("subtitle_mode") or "none") == "auto":
-        add("subtitle_auto", "Phụ đề tự động", calculate_named_addon_quote("subtitle_auto", total_duration).get("total_xu") or 0)
+        add(
+            "subtitle_auto",
+            "Phụ đề tự động",
+            calculate_named_addon_quote(
+                "subtitle_auto",
+                total_duration,
+                billable_chars=billable_chars,
+            ).get("total_xu") or 0,
+        )
     if str(audio.get("dubbing_mode") or "none") == "default_ai":
-        add("dubbing_default", "Lồng tiếng AI mặc định", calculate_named_addon_quote("dubbing_default", total_duration).get("total_xu") or 0)
+        add(
+            "dubbing_default",
+            "Lồng tiếng AI mặc định",
+            calculate_named_addon_quote(
+                "dubbing_default",
+                total_duration,
+                billable_chars=billable_chars,
+            ).get("total_xu") or 0,
+        )
     if str(audio.get("sfx_mode") or "none") == "ai":
         add("sfx_ai", "Hiệu ứng âm thanh AI", calculate_named_addon_quote("sfx_ai", total_duration).get("total_xu") or 0)
 
@@ -73869,6 +73961,23 @@ def video_tail9_addon_quote(raw_tail: dict | None = None) -> dict:
         if isinstance(value, dict)
     }
     duration = max(1, safe_int(tail.get("estimated_duration"), 8))
+    billable_texts = []
+    for scene in tail.get("scene_content") or []:
+        if not isinstance(scene, dict):
+            continue
+        for field in ("dialogue_or_voiceover", "dialogue", "voiceover"):
+            value = str(scene.get(field) or "").strip()
+            if value and value not in billable_texts:
+                billable_texts.append(value)
+    dubbing_value = dict(
+        ((entries.get("dubbing") or {}).get("value") or {})
+        if isinstance((entries.get("dubbing") or {}).get("value"), dict)
+        else {}
+    )
+    direct_dialogue = str(dubbing_value.get("dialogue_text") or "").strip()
+    if direct_dialogue and direct_dialogue not in billable_texts:
+        billable_texts.append(direct_dialogue)
+    billable_chars = sum(len(value) for value in billable_texts)
     items: list[dict] = []
 
     def value_for(key: str) -> dict:
@@ -73893,7 +74002,9 @@ def video_tail9_addon_quote(raw_tail: dict | None = None) -> dict:
 
     if selected("dubbing"):
         dubbing_price = calculate_named_addon_quote(
-            "dubbing_default", duration
+            "dubbing_default",
+            duration,
+            billable_chars=billable_chars,
         ).get("total_xu") or 0
         add_item("dubbing_default", "Lồng tiếng", dubbing_price)
 
@@ -73905,7 +74016,11 @@ def video_tail9_addon_quote(raw_tail: dict | None = None) -> dict:
             in {"translated", "auto_translate", "translation"}
         )
         quote_key = "subtitle_translate" if translated else "subtitle_auto"
-        subtitle_quote = calculate_named_addon_quote(quote_key, duration)
+        subtitle_quote = calculate_named_addon_quote(
+            quote_key,
+            duration,
+            billable_chars=billable_chars,
+        )
         add_item(
             quote_key,
             "Dịch phụ đề" if translated else "Tạo phụ đề tự động",
@@ -73926,11 +74041,21 @@ def video_tail9_addon_quote(raw_tail: dict | None = None) -> dict:
             in {"ai", "create_new", "planned_generation", "generated", "music_ai"}
         )
         if paid_music:
+            music_scope = str(music_value.get("music_scope") or "whole_video").strip().lower()
+            track_count = (
+                max(1, safe_int(tail.get("scene_count"), 1))
+                if music_scope == "per_scene"
+                else 1
+            )
             music_price = safe_int(
-                video_ai_real_pricing.music_model_catalog()[0].get("unit_xu"),
+                calculate_named_addon_quote("suno_music", duration).get("base_xu"),
                 0,
             )
-            add_item("music_ai", "Tạo nhạc bằng AI", music_price)
+            add_item(
+                "music_ai",
+                "Tạo nhạc AI theo từng cảnh" if track_count > 1 else "Tạo nhạc bằng AI",
+                music_price * track_count,
+            )
         else:
             add_item("music_existing", "Nhạc nền từ kho hoặc tệp đã gửi", 0)
 
@@ -74155,58 +74280,62 @@ def video_uiflow3_build_tail_state(raw_state: dict) -> dict:
         "plan_approved": True,
     })
     audio_source = dict(snapshot.get("audio") or {})
-    audio = dict(tail.get("audio_config") or {})
-    audio.update({
-        "source_audio": False,
-        "dubbing": str(audio_source.get("dubbing_mode") or "none") != "none",
-        "music": str(audio_source.get("music_scope") or "none") != "none",
-        "sfx": str(audio_source.get("sfx_mode") or "none") != "none",
-        "subtitles": str(audio_source.get("subtitle_mode") or "none") != "none",
-    })
-    tail["audio_config"] = audio
-    music_source = str(audio_source.get("music_source") or "none").strip().lower()
-    sfx_mode = str(audio_source.get("sfx_mode") or "none").strip().lower()
-    subtitle_mode = str(audio_source.get("subtitle_mode") or "none").strip().lower()
-    dubbing_mode = str(audio_source.get("dubbing_mode") or "none").strip().lower()
     addon_config = dict(tail.get("addon_config") or {})
     addon_config["technical_profile"] = video_profile_catalog.technical_profile_for_profile(
         str(content.get("profile_id") or "")
     )
-    addon_config["postprocessing"] = {
-        "dubbing": {
-            "enabled": dubbing_mode != "none",
-            "value": {
-                "dubbing_mode": dubbing_mode,
-                "voice_source": dubbing_mode,
+    if not same_scope_existing:
+        audio = dict(tail.get("audio_config") or {})
+        audio.update({
+            "source_audio": False,
+            "dubbing": str(audio_source.get("dubbing_mode") or "none") != "none",
+            "music": str(audio_source.get("music_scope") or "none") != "none",
+            "sfx": str(audio_source.get("sfx_mode") or "none") != "none",
+            "subtitles": str(audio_source.get("subtitle_mode") or "none") != "none",
+        })
+        tail["audio_config"] = audio
+        music_source = str(audio_source.get("music_source") or "none").strip().lower()
+        sfx_mode = str(audio_source.get("sfx_mode") or "none").strip().lower()
+        subtitle_mode = str(audio_source.get("subtitle_mode") or "none").strip().lower()
+        dubbing_mode = str(audio_source.get("dubbing_mode") or "none").strip().lower()
+        addon_config["postprocessing"] = {
+            "dubbing": {
+                "enabled": dubbing_mode != "none",
+                "value": {
+                    "dubbing_mode": dubbing_mode,
+                    "voice_source": dubbing_mode,
+                    "volume_percent": safe_int((audio.get("volumes") or {}).get("dubbing"), 100),
+                },
             },
-        },
-        "subtitles": {
-            "enabled": subtitle_mode != "none",
-            "value": {
-                "source": subtitle_mode,
-                "translation": subtitle_mode in {"translated", "auto_translate"},
+            "subtitles": {
+                "enabled": subtitle_mode != "none",
+                "value": {
+                    "source": subtitle_mode,
+                    "translation": subtitle_mode in {"translated", "auto_translate"},
+                },
             },
-        },
-        "music": {
-            "enabled": str(audio_source.get("music_scope") or "none") != "none",
-            "value": {
-                "source": "planned_generation" if music_source == "ai" else music_source,
-                "paid_generation": music_source == "ai",
-                "music_scope": str(audio_source.get("music_scope") or "none"),
+            "music": {
+                "enabled": str(audio_source.get("music_scope") or "none") != "none",
+                "value": {
+                    "source": "planned_generation" if music_source == "ai" else music_source,
+                    "paid_generation": music_source == "ai",
+                    "music_scope": str(audio_source.get("music_scope") or "none"),
+                    "volume_percent": safe_int((audio.get("volumes") or {}).get("music"), 20),
+                },
             },
-        },
-        "sfx": {
-            "enabled": sfx_mode != "none",
-            "value": {
-                "source": "ai" if sfx_mode == "ai" else "library_only",
-                "paid_generation": sfx_mode == "ai",
+            "sfx": {
+                "enabled": sfx_mode != "none",
+                "value": {
+                    "source": "ai" if sfx_mode == "ai" else "library_only",
+                    "paid_generation": sfx_mode == "ai",
+                    "volume_percent": safe_int((audio.get("volumes") or {}).get("sfx"), 35),
+                },
             },
-        },
-    }
+        }
+        tail["audio_status"] = "configured" if any(
+            bool(audio.get(key)) for key in ("dubbing", "music", "sfx", "subtitles")
+        ) else "skipped"
     tail["addon_config"] = addon_config
-    tail["audio_status"] = "configured" if any(
-        bool(audio.get(key)) for key in ("dubbing", "music", "sfx", "subtitles")
-    ) else "skipped"
     if not same_scope_existing:
         branding = dict(snapshot.get("branding") or {})
         logo = dict(branding.get("logo") or {})
@@ -75153,11 +75282,108 @@ def video_ai_real_maybe_compile_state(raw_state: dict) -> dict:
     return video_ai_real_compile_state(raw_state)
 
 
+def video_ai_real_enabled_scene3_values(
+    raw_state: dict,
+    field: str,
+    labels: tuple[tuple[str, str], ...],
+) -> list[tuple[str, str, str]]:
+    entries = dict(raw_state.get(field) or {})
+    result: list[tuple[str, str, str]] = []
+    for key, label in labels:
+        entry = dict(entries.get(key) or {})
+        value = str(entry.get("value") or "").strip()
+        if entry.get("enabled") and value:
+            result.append((str(key), str(label).split(" ", 1)[-1], value))
+    return result
+
+
+def video_ai_real_compile_render_contract(raw_state: dict) -> dict:
+    state = video_uiflow3.normalize_state(raw_state)
+    contract = video_ai_real_prompt_compiler.compile_render_contract(state)
+    creative = video_ai_real_enabled_scene3_values(
+        state,
+        "creative_controls",
+        video_scene3_flow.CREATIVE_CONTROLS,
+    )
+    preservation = video_ai_real_enabled_scene3_values(
+        state,
+        "preservation_requirements",
+        VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES,
+    )
+    if not creative and not preservation:
+        return contract
+
+    creative_visual = [f"{label}: {value}" for key, label, value in creative if key != "negative"]
+    creative_negative = [value for key, _label, value in creative if key == "negative"]
+    preservation_visual = [f"{label}: {value}" for _key, label, value in preservation]
+    visual = dict(contract.get("visual") or {})
+    scenes = []
+    for raw_scene in visual.get("scenes") or []:
+        scene = dict(raw_scene or {})
+        prompt_parts = [str(scene.get("visual_prompt") or "").strip()]
+        if creative_visual:
+            prompt_parts.append("Phong cách đã chọn: " + "; ".join(creative_visual))
+        if preservation_visual:
+            prompt_parts.append("Yêu cầu giữ nguyên: " + "; ".join(preservation_visual))
+        scene["visual_prompt"] = " | ".join(item for item in prompt_parts if item)
+        if creative_negative:
+            scene["negative_prompt"] = ", ".join(
+                item
+                for item in [
+                    str(scene.get("negative_prompt") or "").strip(),
+                    *creative_negative,
+                ]
+                if item
+            )
+        scene_hash_payload = dict(scene)
+        scene_hash_payload.pop("visual_prompt_hash", None)
+        scene["visual_prompt_hash"] = hashlib.sha256(
+            json.dumps(
+                scene_hash_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        scenes.append(scene)
+    visual["scenes"] = scenes
+    visual["creative_controls"] = {
+        key: value for key, _label, value in creative
+    }
+    visual["preservation_requirements"] = {
+        key: value for key, _label, value in preservation
+    }
+    visual_hash_payload = dict(visual)
+    visual_hash_payload.pop("visual_hash", None)
+    visual["visual_hash"] = hashlib.sha256(
+        json.dumps(
+            visual_hash_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    contract["visual"] = visual
+    contract_hash_payload = {
+        "visual": visual,
+        "post_production": dict(contract.get("post_production") or {}),
+    }
+    contract["contract_hash"] = hashlib.sha256(
+        json.dumps(
+            contract_hash_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return contract
+
+
 def video_ai_real_compile_state(raw_state: dict) -> dict:
     """Persist one deterministic visual/post-production handoff contract."""
 
     state = _video_ai_real_pilot_state(raw_state)
-    contract = video_ai_real_prompt_compiler.compile_render_contract(state)
+    contract = video_ai_real_compile_render_contract(state)
     scene_prompts = {
         str(item.get("scene_id") or ""): item
         for item in (contract.get("visual") or {}).get("scenes") or []
@@ -75596,7 +75822,7 @@ VIDEO_AI_REAL_PROMPT_PAGE_BODY_LIMIT = 3600
 def video_ai_real_compiled_scene_prompt(state: dict, scene_id: str) -> dict:
     """Return exactly the prompt fields sent to the renderer for one scene."""
 
-    contract = video_ai_real_prompt_compiler.compile_render_contract(state)
+    contract = video_ai_real_compile_render_contract(state)
     return dict(next(
         (
             item
@@ -75611,7 +75837,7 @@ def video_ai_real_prompt_review_pages(raw_state: dict) -> list[dict]:
     """Split complete prompts only for Telegram transport; never summarize them."""
 
     state = video_uiflow3.normalize_state(raw_state)
-    contract = video_ai_real_prompt_compiler.compile_render_contract(state)
+    contract = video_ai_real_compile_render_contract(state)
     compiled_by_id = {
         str(item.get("scene_id") or ""): dict(item)
         for item in (contract.get("visual") or {}).get("scenes") or []
@@ -75822,6 +76048,14 @@ def video_ai_real_pilot_input_payload(
             "🤝 Quan hệ nhân vật",
             "Nhập theo mẫu: Nhân vật 1 | Nhân vật 2 | quan hệ. Ví dụ: Lan | Minh | đồng nghiệp.",
         ),
+        "pilot_creative_custom": (
+            "🎨 Tự nhập phong cách",
+            "Nhập đúng giá trị cho nhóm phong cách đang mở. Nội dung này chỉ xuất hiện một lần trong kế hoạch.",
+        ),
+        "pilot_requirement_custom": (
+            "🔒 Tự nhập yêu cầu giữ nguyên",
+            "Nhập chi tiết phải giữ nhất quán giữa các cảnh. Bối cảnh không nhập ở đây vì đã chọn tại Phong cách.",
+        ),
         "duration": (
             "⏱ Tổng thời lượng",
             "Nhập tổng thời lượng mục tiêu bằng giây. Bot sẽ tính số cảnh từ lựa chọn 6 hoặc 8 giây/cảnh.",
@@ -75896,6 +76130,142 @@ def video_ai_real_pilot_input_payload(
         rows.append([("✅ Hoàn tất chọn nguồn đầu vào", "vid3|source_done")])
     rows.extend(video_ai_real_pilot_nav_rows(back=back_callback))
     return f"{title}\n\n{guidance}", video_uiflow3_keyboard(rows)
+
+
+VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES = tuple(
+    item
+    for item in video_scene3_flow.PUBLIC_REQUIREMENT_CATEGORIES
+    if item[0] != "environment"
+)
+
+
+def video_ai_real_pilot_scene3_field_state(raw_state: dict) -> dict:
+    state = video_scene3_flow.normalize_state(dict(raw_state or {}))
+    content = dict(raw_state.get("content") or {})
+    brief = dict(content.get("approved_brief") or {})
+    fmt = dict(raw_state.get("format") or {})
+    state["subject"] = str(
+        state.get("subject")
+        or brief.get("title")
+        or content.get("original_intent")
+        or "Nội dung video"
+    )[:1200]
+    state["scene_count"] = max(1, safe_int(fmt.get("scene_count"), 1))
+    state["aspect_ratio"] = str(fmt.get("ratio") or state.get("aspect_ratio") or "9:16")
+    profile_id = str(content.get("profile_id") or "")
+    if profile_id and not str(state.get("technical_profile") or ""):
+        state["technical_profile"] = profile_id
+    return video_scene3_flow.normalize_state(state)
+
+
+def video_ai_real_pilot_merge_scene3_fields(raw_state: dict, scene3_state: dict) -> dict:
+    state = video_uiflow3.normalize_state(raw_state)
+    clean = video_scene3_flow.normalize_state(scene3_state)
+    for field in (
+        "creative_controls",
+        "preservation_requirements",
+        "requirements",
+        "field_suggestion_offsets",
+    ):
+        state[field] = deepcopy(clean.get(field) or {})
+    return video_uiflow3.normalize_state(state)
+
+
+def video_ai_real_pilot_field_detail_payload(
+    state: dict,
+    *,
+    group: str,
+    key: str,
+) -> tuple[str, InlineKeyboardMarkup]:
+    is_creative = group == "creative_controls"
+    labels = dict(
+        video_scene3_flow.CREATIVE_CONTROLS
+        if is_creative
+        else VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES
+    )
+    label = labels.get(key, "Tùy chỉnh")
+    scene3_state = video_ai_real_pilot_scene3_field_state(state)
+    suggestions = video_scene3_flow.unified_field_suggestions(scene3_state, group, key)
+    entry = dict((scene3_state.get(group) or {}).get(key) or {})
+    current = str(entry.get("value") or "").strip() if entry.get("enabled") else ""
+    page = video_scene3_flow.unified_field_suggestion_page(scene3_state, group, key)
+    lines = [
+        f"{'🎨' if is_creative else '🔒'} {label}",
+        "",
+        f"Giá trị hiện tại: {current or 'Chưa chọn'}",
+        f"Gợi ý {((page - 1) * 5) + 1}-{page * 5}/20:",
+    ]
+    lines.extend(f"{index}. {value}" for index, value in enumerate(suggestions[:5], 1))
+    lines.extend(["", "Chọn một gợi ý hoặc tự nhập. Chỉ lựa chọn đã xác nhận mới được đưa vào kế hoạch."])
+    prefix = "pilot_creative" if is_creative else "pilot_requirement"
+    rows: list[list[tuple[str, str]]] = [[
+        (str(index), f"vid3|{prefix}_pick|{index}")
+        for index in range(1, 6)
+    ]]
+    rows.append([
+        ("🔄 Đổi 5 gợi ý", f"vid3|{prefix}_rotate"),
+        ("✍️ Tự nhập", f"vid3|{prefix}_custom"),
+    ])
+    if list(entry.get("history") or []):
+        rows.append([
+            ("↩️ Khôi phục", f"vid3|{prefix}_restore"),
+            ("🚫 Bỏ chọn mục", f"vid3|{prefix}_remove"),
+        ])
+    rows.extend(video_ai_real_pilot_nav_rows(back=f"vid3|{prefix}_back"))
+    return "\n".join(lines)[:3900], video_uiflow3_keyboard(rows)
+
+
+def video_ai_real_pilot_creative_payload(state: dict) -> tuple[str, InlineKeyboardMarkup]:
+    scene3_state = video_ai_real_pilot_scene3_field_state(state)
+    entries = dict(scene3_state.get("creative_controls") or {})
+    rows: list[list[tuple[str, str]]] = []
+    values = list(video_scene3_flow.CREATIVE_CONTROLS)
+    for offset in range(0, len(values), 2):
+        rows.append([
+            (
+                f"{'✅' if (entries.get(key) or {}).get('enabled') else '➕'} {label.split(' ', 1)[-1]}",
+                f"vid3|pilot_creative|{key}",
+            )
+            for key, label in values[offset:offset + 2]
+        ])
+    rows.extend([
+        [("⚡ Tạo nhanh", "vid3|quick_build")],
+        [("✅ Xong phong cách", "vid3|pilot_creative_done"), ("⏭ Bỏ qua", "vid3|pilot_creative_skip")],
+        *video_ai_real_pilot_nav_rows(back="vid3|pilot_creative_back"),
+    ])
+    return (
+        "🎨 Tùy chỉnh phong cách\n\n"
+        "Mỗi nhóm có 5 gợi ý phù hợp nội dung, tỉ lệ và số cảnh đã chọn. "
+        "Bối cảnh chỉ được chọn tại Chủ đề/ngữ cảnh, không hỏi lặp ở màn Nhân vật hay Giữ nguyên.\n\n"
+        f"Hiện tại: {video_scene3_summary(entries, video_scene3_flow.CREATIVE_CONTROLS)}",
+        video_uiflow3_keyboard(rows),
+    )
+
+
+def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKeyboardMarkup]:
+    scene3_state = video_ai_real_pilot_scene3_field_state(state)
+    entries = dict(scene3_state.get("preservation_requirements") or {})
+    rows: list[list[tuple[str, str]]] = []
+    values = list(VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES)
+    for offset in range(0, len(values), 2):
+        rows.append([
+            (
+                f"{'✅' if (entries.get(key) or {}).get('enabled') else '➕'} {label.split(' ', 1)[-1]}",
+                f"vid3|pilot_requirement|{key}",
+            )
+            for key, label in values[offset:offset + 2]
+        ])
+    rows.extend([
+        [("⏭ Bỏ qua yêu cầu", "vid3|pilot_requirement_skip"), ("✅ Xong yêu cầu", "vid3|pilot_requirement_done")],
+        *video_ai_real_pilot_nav_rows(back="vid3|pilot_requirement_back"),
+    ])
+    return (
+        "🔒 Yêu cầu cần giữ nguyên\n\n"
+        "Chọn đúng chi tiết phải nhất quán giữa các cảnh. Mỗi mục có 5 gợi ý riêng hoặc cho phép tự nhập. "
+        "Bối cảnh/kiến trúc không xuất hiện ở đây vì đã được chọn một lần tại Phong cách.\n\n"
+        f"Đã chọn: {video_scene3_summary(entries, VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES)}",
+        video_uiflow3_keyboard(rows),
+    )
 
 
 def video_ai_real_pilot_bible_view_payload(
@@ -76726,6 +77096,23 @@ def video_ai_real_pilot_screen_payload(
         if payload is not None:
             return payload
 
+    if view == "pilot_creative_controls":
+        return video_ai_real_pilot_creative_payload(state)
+    if view == "pilot_creative_detail":
+        return video_ai_real_pilot_field_detail_payload(
+            state,
+            group="creative_controls",
+            key=str(state.get("active_pilot_creative") or ""),
+        )
+    if view == "pilot_requirements":
+        return video_ai_real_pilot_requirements_payload(state)
+    if view == "pilot_requirement_detail":
+        return video_ai_real_pilot_field_detail_payload(
+            state,
+            group="preservation_requirements",
+            key=str(state.get("active_pilot_requirement") or ""),
+        )
+
     if step == "entry" and not view:
         rows = [
             [("📝 Prompt → Video", "vid3|mode|prompt_video"), ("🖼 Ảnh → Video", "vid3|mode|image_video")],
@@ -76847,22 +77234,20 @@ def video_ai_real_pilot_screen_payload(
     if step == "production_bible" and not view:
         bible = dict(state.get("bible") or {})
         characters = list(bible.get("characters") or [])
-        locations = list(bible.get("locations") or [])
         products = list(bible.get("products") or [])
         props = list(bible.get("props") or [])
         return (
-            f"{progress_prefix}👥 Nhân vật và bối cảnh\n\n"
-            f"Nhân vật: {len(characters)} · Bối cảnh: {len(locations)}\n"
+            f"{progress_prefix}👥 Nhân vật và tham chiếu\n\n"
+            f"Nhân vật: {len(characters)}\n"
             f"Ảnh tham chiếu đã gán: {len(state.get('references') or [])}\n\n"
             f"Tùy chỉnh chi tiết: {len(products)} sản phẩm · {len(props)} đạo cụ · "
             f"{'có' if bible.get('narrator') else 'không'} người dẫn\n\n"
             "Bạn có thể nhập tổng số hoặc dùng gợi ý. Ảnh đã gửi được ưu tiên làm chuẩn; khi chưa có ảnh, bot mới hiện gợi ý mô tả phù hợp.",
             video_uiflow3_keyboard([
                 [("👥 Số nhân vật", "vid3|view|character_count"), ("👤 Danh sách nhân vật", "vid3|view|character_list")],
-                [("🏞 Số bối cảnh", "vid3|view|location_count"), ("🗺 Danh sách bối cảnh", "vid3|view|location_list")],
-                [("🖼 Ảnh tham chiếu", "vid3|view|references"), ("🔒 Giữ nhất quán", "vid3|view|continuity")],
-                [("⚡ Tạo nhanh", "vid3|quick_build"), ("🛠 Tùy chỉnh chi tiết", "vid3|view|bible_extras")],
-                [("✨ Tự động gợi ý", "vid3|bible_auto"), ("✅ Hoàn tất thiết lập nhân vật và bối cảnh", "vid3|bible_done")],
+                [("🖼 Ảnh tham chiếu", "vid3|view|references"), ("🛠 Tùy chỉnh chi tiết", "vid3|view|bible_extras")],
+                [("⚡ Tạo nhanh", "vid3|quick_build")],
+                [("✨ Tự động gợi ý", "vid3|bible_auto"), ("✅ Hoàn tất thiết lập nhân vật", "vid3|bible_done")],
                 *video_ai_real_pilot_nav_rows(back="vid3|back"),
             ]),
         )
@@ -77159,7 +77544,7 @@ def video_ai_real_pilot_screen_payload(
         rows = [[("✏️ Xem / sửa từng cảnh", "vid3|scene_plan_edit"), ("✨ Tự động phác thảo", "vid3|scene_plan_auto")]]
         if complete:
             rows.append([("✅ Duyệt kế hoạch", "vid3|scene_plan_done")])
-        rows.extend(video_ai_real_pilot_nav_rows(back="vid3|back"))
+        rows.extend(video_ai_real_pilot_nav_rows(back="vid3|pilot_scene_plan_back"))
         return "\n".join(lines), video_uiflow3_keyboard(rows)
 
     if step == "branding" and view in {
@@ -80182,6 +80567,152 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 not bool(state["bible"]["continuity"].get(key, True)),
             )
             state = video_uiflow3_open_view(state, "continuity")
+        elif action == "pilot_creative" and values:
+            key = str(values[0] or "")
+            if key not in dict(video_scene3_flow.CREATIVE_CONTROLS):
+                raise ValueError("creative_field_invalid")
+            state = video_uiflow3_open_view(
+                state,
+                "pilot_creative_detail",
+                active_pilot_creative=key,
+            )
+        elif action == "pilot_creative_pick" and values:
+            key = str(state.get("active_pilot_creative") or "")
+            scene3_state = video_scene3_flow.select_unified_field_suggestion(
+                video_ai_real_pilot_scene3_field_state(state),
+                "creative_controls",
+                key,
+                safe_int(values[0], 0),
+            )
+            state = video_ai_real_pilot_merge_scene3_fields(state, scene3_state)
+            state = video_uiflow3_open_view(
+                state,
+                "pilot_creative_detail",
+                active_pilot_creative=key,
+            )
+        elif action == "pilot_creative_rotate":
+            key = str(state.get("active_pilot_creative") or "")
+            scene3_state = video_scene3_flow.rotate_unified_field_suggestions(
+                video_ai_real_pilot_scene3_field_state(state),
+                "creative_controls",
+                key,
+            )
+            state = video_ai_real_pilot_merge_scene3_fields(state, scene3_state)
+            state = video_uiflow3_open_view(
+                state,
+                "pilot_creative_detail",
+                active_pilot_creative=key,
+            )
+        elif action == "pilot_creative_custom":
+            key = str(state.get("active_pilot_creative") or "")
+            state = video_uiflow3_await_input(
+                state,
+                "pilot_creative_custom",
+                back_callback=f"vid3|pilot_creative|{key}",
+                field_key=key,
+            )
+        elif action in {"pilot_creative_remove", "pilot_creative_restore"}:
+            key = str(state.get("active_pilot_creative") or "")
+            scene3_state = video_ai_real_pilot_scene3_field_state(state)
+            scene3_state = (
+                video_scene3_flow.remove_entry(scene3_state, "creative_controls", key)
+                if action == "pilot_creative_remove"
+                else video_scene3_flow.restore_entry(scene3_state, "creative_controls", key)
+            )
+            state = video_ai_real_pilot_merge_scene3_fields(state, scene3_state)
+            state = video_uiflow3_open_view(
+                state,
+                "pilot_creative_detail",
+                active_pilot_creative=key,
+            )
+        elif action == "pilot_creative_back":
+            if str(state.get("ui_view") or "") == "pilot_creative_detail":
+                state = video_uiflow3_open_view(state, "pilot_creative_controls")
+            else:
+                state = video_uiflow3_clear_transient(state)
+                state["navigation"]["current_step"] = "production_bible"
+        elif action in {"pilot_creative_done", "pilot_creative_skip"}:
+            state = video_uiflow3_open_view(state, "pilot_requirements")
+        elif action == "pilot_requirement" and values:
+            key = str(values[0] or "")
+            if key not in dict(VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES):
+                raise ValueError("requirement_field_invalid")
+            state = video_uiflow3_open_view(
+                state,
+                "pilot_requirement_detail",
+                active_pilot_requirement=key,
+            )
+        elif action == "pilot_requirement_pick" and values:
+            key = str(state.get("active_pilot_requirement") or "")
+            scene3_state = video_scene3_flow.select_unified_field_suggestion(
+                video_ai_real_pilot_scene3_field_state(state),
+                "preservation_requirements",
+                key,
+                safe_int(values[0], 0),
+            )
+            state = video_ai_real_pilot_merge_scene3_fields(state, scene3_state)
+            state = video_uiflow3_open_view(
+                state,
+                "pilot_requirement_detail",
+                active_pilot_requirement=key,
+            )
+        elif action == "pilot_requirement_rotate":
+            key = str(state.get("active_pilot_requirement") or "")
+            scene3_state = video_scene3_flow.rotate_unified_field_suggestions(
+                video_ai_real_pilot_scene3_field_state(state),
+                "preservation_requirements",
+                key,
+            )
+            state = video_ai_real_pilot_merge_scene3_fields(state, scene3_state)
+            state = video_uiflow3_open_view(
+                state,
+                "pilot_requirement_detail",
+                active_pilot_requirement=key,
+            )
+        elif action == "pilot_requirement_custom":
+            key = str(state.get("active_pilot_requirement") or "")
+            state = video_uiflow3_await_input(
+                state,
+                "pilot_requirement_custom",
+                back_callback=f"vid3|pilot_requirement|{key}",
+                field_key=key,
+            )
+        elif action in {"pilot_requirement_remove", "pilot_requirement_restore"}:
+            key = str(state.get("active_pilot_requirement") or "")
+            scene3_state = video_ai_real_pilot_scene3_field_state(state)
+            scene3_state = (
+                video_scene3_flow.remove_entry(scene3_state, "preservation_requirements", key)
+                if action == "pilot_requirement_remove"
+                else video_scene3_flow.restore_entry(scene3_state, "preservation_requirements", key)
+            )
+            state = video_ai_real_pilot_merge_scene3_fields(state, scene3_state)
+            state = video_uiflow3_open_view(
+                state,
+                "pilot_requirement_detail",
+                active_pilot_requirement=key,
+            )
+        elif action == "pilot_requirement_back":
+            if str(state.get("ui_view") or "") == "pilot_requirement_detail":
+                state = video_uiflow3_open_view(state, "pilot_requirements")
+            else:
+                state = video_uiflow3_open_view(state, "pilot_creative_controls")
+        elif action in {"pilot_requirement_done", "pilot_requirement_skip"}:
+            count = safe_int((state.get("format") or {}).get("scene_count"), 0)
+            if count <= 0:
+                raise ValueError("scene_count_out_of_range")
+            if not bool((state.get("format") or {}).get("scene_count_confirmed")):
+                updated = video_uiflow3.confirm_scene_count(state, count)
+                state = video_uiflow3_after_service_update(
+                    state,
+                    updated,
+                    target_step="scene_plan",
+                )
+            else:
+                state = video_uiflow3_go(state, "scene_plan")
+        elif action == "pilot_scene_plan_back":
+            state = video_uiflow3_clear_transient(state)
+            state["navigation"]["current_step"] = "production_bible"
+            state = video_uiflow3_open_view(state, "pilot_requirements")
         elif action == "bible_auto":
             state = video_ai_real_build_quick_plan(state, bible_only=True)
             for item in (state.get("bible") or {}).get("characters") or []:
@@ -80196,18 +80727,35 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state["navigation"]["current_step"] = "production_bible"
         elif action == "quick_build":
             state = video_ai_real_build_quick_plan(state)
+            state = video_uiflow3.mark_sections_complete(
+                state,
+                "prompts",
+                "branding",
+                "summary",
+            )
+            state = video_uiflow3_clear_transient(state, keep_return=False)
+            state["navigation"]["current_step"] = "summary"
+            snapshot = video_uiflow3.approved_snapshot(state)
+            legacy_compat = dict(state.get("legacy_compat") or {})
+            legacy_compat["approved_snapshot"] = snapshot
+            legacy_compat["video_tail_return_to"] = ""
+            state["legacy_compat"] = legacy_compat
+            tail = video_uiflow3_build_tail_state(state)
+            state[VIDEO_TAIL9_STATE_KEY] = tail
+            state = save_video_uiflow3_state(context, state)
+            claim_video_uiflow3_tail_owner(context, state)
+            await query.answer()
+            return await video_tail9_render(query, user_id, context, "addon")
         elif action == "bible_done":
             bible = dict(state.get("bible") or {})
             missing_counts = []
             if not bool(bible.get("character_count_confirmed")):
                 missing_counts.append("tổng số nhân vật")
-            if not bool(bible.get("location_count_confirmed")):
-                missing_counts.append("tổng số bối cảnh")
             if missing_counts:
                 await query.answer("Hãy xác nhận " + " và ".join(missing_counts) + " trước khi tiếp tục.", show_alert=True)
                 return await video_uiflow3_render(query, context, state)
             bible_exact_errors = {
-                "characters_required", "locations_required", "narrator_required",
+                "characters_required", "narrator_required",
                 "products_required", "reference_assets_required",
             }
             bible_errors = [
@@ -80229,14 +80777,8 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             elif (
                 str(state.get("parent_product") or "") == "video_ai_real"
                 and str(state.get("entry_mode") or "") in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
-                and not bool((state.get("format") or {}).get("scene_count_confirmed"))
-                and safe_int((state.get("format") or {}).get("scene_count"), 0) > 0
             ):
-                updated = video_uiflow3.confirm_scene_count(
-                    state,
-                    safe_int((state.get("format") or {}).get("scene_count"), 0),
-                )
-                state = video_uiflow3_after_service_update(state, updated, target_step="scene_plan")
+                state = video_uiflow3_open_view(state, "pilot_creative_controls")
             else:
                 next_step = "episode" if state.get("parent_product") == "multi_scene_film" else (
                     "scene_plan" if bool((state.get("format") or {}).get("scene_count_confirmed")) else "scene_count"
@@ -81127,7 +81669,8 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
         "duration", "scene_count", "scene_plan",
         "dialogue", "whole_music", "scene_music", "scene_sfx_custom",
         "scene_ambient_custom", "scene_direction", "scene_prompt",
-        "scene_negative_prompt", "watermark",
+        "scene_negative_prompt", "watermark", "pilot_creative_custom",
+        "pilot_requirement_custom",
     }:
         return False
     if not video_uiflow3_pending_step_allowed(state, kind):
@@ -81214,6 +81757,32 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
                 changes["name"] = name[:240]
             state = video_uiflow3.update_location(state, location_id, **changes)
             state = video_uiflow3_open_view(state, "location_detail", active_location_id=location_id)
+        elif kind in {"pilot_creative_custom", "pilot_requirement_custom"}:
+            is_creative = kind == "pilot_creative_custom"
+            group = "creative_controls" if is_creative else "preservation_requirements"
+            key = str(pending.get("field_key") or "")
+            allowed = dict(
+                video_scene3_flow.CREATIVE_CONTROLS
+                if is_creative
+                else VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES
+            )
+            if key not in allowed:
+                raise ValueError("video_uiflow3_field_invalid")
+            scene3_state = video_scene3_flow.set_entry(
+                video_ai_real_pilot_scene3_field_state(state),
+                group,
+                key,
+                text[:1600],
+                enabled=True,
+            )
+            state = video_ai_real_pilot_merge_scene3_fields(state, scene3_state)
+            state = video_uiflow3_open_view(
+                state,
+                "pilot_creative_detail" if is_creative else "pilot_requirement_detail",
+                **{
+                    "active_pilot_creative" if is_creative else "active_pilot_requirement": key,
+                },
+            )
         elif kind == "narrator":
             fields = [item.strip() for item in text.split("|", 2)]
             state = video_uiflow3.set_narrator(
@@ -105661,6 +106230,7 @@ def video_tail9_addon_text(tail: dict) -> str:
         for key in ("source_audio", "dubbing", "music", "sfx", "subtitles")
         if audio.get(key)
     ]
+    volumes = dict(audio.get("volumes") or {})
     quote = video_tail9_addon_quote(tail)
     quote_items = list(quote.get("items") or [])
     lines = [
@@ -105668,6 +106238,10 @@ def video_tail9_addon_text(tail: dict) -> str:
         "",
         f"• Sản phẩm: <b>{html.escape(VIDEO_TAIL9_PRODUCT_LABELS.get(str(tail.get('video_product_type') or ''), 'Video AI'))}</b>",
         f"• Âm thanh, giọng và phụ đề: <b>{html.escape(', '.join(selected_audio) or 'Không thêm')}</b>",
+        f"• Âm lượng: <b>âm thanh {safe_int(volumes.get('source_audio'), 100)}% · "
+        f"lồng tiếng {safe_int(volumes.get('dubbing'), 100)}% · "
+        f"nhạc {safe_int(volumes.get('music'), 20)}% · "
+        f"hiệu ứng {safe_int(volumes.get('sfx'), 35)}%</b>",
         f"• Logo/Watermark: <b>{html.escape(video_tail9_branding_public_summary(tail))}</b>",
     ]
     if product_type == "video_ai_real":
@@ -105687,23 +106261,280 @@ def video_tail9_addon_text(tail: dict) -> str:
         lines.extend(["", "• Tổng Add-on: <b>0 Xu</b>"])
     lines.extend([
         "",
-        "Chọn từng mục cần bổ sung. Logo và watermark chỉ được lưu sau khi đã chọn vị trí.",
+        "Chọn từng mục cần bổ sung ngay trên màn này. Âm thanh, lồng tiếng và nhạc đều có thể chỉnh âm lượng riêng.",
+        "Logo và watermark giữ nguyên quy trình gửi nội dung rồi chọn đủ một trong 9 vị trí.",
         "Khi đã đúng, bấm Hoàn tất Add-on để chuyển sang rà soát toàn bộ video.",
     ])
     return "\n".join(lines)
 
 
+def video_tail9_addon_postprocessing(tail: dict | None = None) -> dict:
+    addon_config = dict((tail or {}).get("addon_config") or {})
+    return {
+        str(key): dict(value)
+        for key, value in dict(addon_config.get("postprocessing") or {}).items()
+        if isinstance(value, dict)
+    }
+
+
+def video_tail9_addon_value(tail: dict | None, key: str) -> dict:
+    entry = dict(video_tail9_addon_postprocessing(tail).get(str(key or "")) or {})
+    return dict(entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}
+
+
+def video_tail9_addon_selected_label(tail: dict, key: str, label: str) -> str:
+    if key == "text":
+        selected = bool(video_tail9_text_items(tail))
+    elif key == "logo":
+        config = dict(tail.get("logo_config") or {})
+        selected = bool(config.get("enabled") and config.get("asset_file_id") and config.get("position"))
+    elif key == "watermark":
+        config = dict(tail.get("watermark_config") or {})
+        selected = bool(config.get("enabled") and config.get("text") and config.get("position"))
+    elif key == "sound":
+        audio = dict(tail.get("audio_config") or {})
+        selected = bool(audio.get("source_audio") or audio.get("sfx"))
+    elif key == "transitions":
+        scenes = [dict(item) for item in tail.get("scene_content") or [] if isinstance(item, dict)]
+        selected = any(
+            str(scene.get("transition_out") or scenes[index + 1].get("transition_in") or "").strip()
+            for index, scene in enumerate(scenes[:-1])
+        )
+    else:
+        selected = bool((tail.get("audio_config") or {}).get(key))
+    return f"{'✅' if selected else '➕'} {label}"
+
+
+def video_tail9_update_addon_audio(
+    tail: dict,
+    key: str,
+    *,
+    enabled: bool,
+    value_patch: dict | None = None,
+) -> dict:
+    current = video_tail9.normalize_state(tail)
+    clean_key = str(key or "")
+    if clean_key not in {"source_audio", "dubbing", "music", "sfx", "subtitles"}:
+        return current
+    audio = dict(current.get("audio_config") or {})
+    if clean_key == "source_audio" and not audio.get("source_audio_available"):
+        enabled = False
+    audio[clean_key] = bool(enabled)
+    current["audio_config"] = audio
+    addon_config = dict(current.get("addon_config") or {})
+    entries = video_tail9_addon_postprocessing(current)
+    entry = dict(entries.get(clean_key) or {})
+    value = dict(entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}
+    value.update(dict(value_patch or {}))
+    if clean_key in (audio.get("volumes") or {}):
+        value["volume_percent"] = safe_int(
+            value.get("volume_percent"),
+            safe_int((audio.get("volumes") or {}).get(clean_key), 100),
+        )
+    entries[clean_key] = {"enabled": bool(enabled), "value": value}
+    addon_config["postprocessing"] = entries
+    current["addon_config"] = addon_config
+    current["audio_status"] = "not_configured"
+    current["review_status"] = "not_ready"
+    current["summary_status"] = "not_ready"
+    current["status_stage"] = "audio_addons"
+    return video_tail9.normalize_state(current)
+
+
+def video_tail9_set_addon_option(tail: dict, key: str, option: str) -> dict:
+    clean_key = str(key or "")
+    choice = str(option or "")
+    if clean_key == "subtitles":
+        values = {
+            "none": (False, {"source": "none", "translation": False}),
+            "auto": (True, {"source": "auto", "translation": False}),
+            "translated": (True, {"source": "translated", "translation": True}),
+        }
+    elif clean_key == "dubbing":
+        values = {
+            "none": (False, {"dubbing_mode": "none", "voice_choice": ""}),
+            "follow_character": (True, {"dubbing_mode": "default_ai", "voice_choice": "follow_character"}),
+            "default_male": (True, {"dubbing_mode": "default_ai", "voice_choice": "default_male"}),
+            "default_female": (True, {"dubbing_mode": "default_ai", "voice_choice": "default_female"}),
+        }
+    elif clean_key == "music":
+        values = {
+            "none": (False, {"source": "none", "paid_generation": False, "vocal_mode": "instrumental"}),
+            "existing": (True, {"source": "library", "paid_generation": False, "music_scope": "whole_video"}),
+            "ai_instrumental": (True, {"source": "planned_generation", "paid_generation": True, "music_scope": "whole_video", "vocal_mode": "instrumental"}),
+            "ai_lyrics": (True, {"source": "planned_generation", "paid_generation": True, "music_scope": "whole_video", "vocal_mode": "with_lyrics"}),
+        }
+    elif clean_key == "sfx":
+        values = {
+            "none": (False, {"source": "none", "paid_generation": False}),
+            "library": (True, {"source": "library_only", "paid_generation": False}),
+            "ai": (True, {"source": "ai", "paid_generation": True}),
+        }
+    elif clean_key == "source_audio":
+        values = {
+            "none": (False, {"source": "none"}),
+            "preserve": (True, {"source": "source_video"}),
+        }
+    else:
+        return video_tail9.normalize_state(tail)
+    if choice not in values:
+        return video_tail9.normalize_state(tail)
+    enabled, value_patch = values[choice]
+    return video_tail9_update_addon_audio(
+        tail,
+        clean_key,
+        enabled=enabled,
+        value_patch=value_patch,
+    )
+
+
+def video_tail9_set_addon_volume(tail: dict, key: str, volume: int) -> dict:
+    clean_key = str(key or "")
+    if clean_key not in {"source_audio", "dubbing", "music", "sfx"}:
+        return video_tail9.normalize_state(tail)
+    current = video_tail9.set_volume(tail, clean_key, volume)
+    entry = dict(video_tail9_addon_postprocessing(current).get(clean_key) or {})
+    enabled = bool((current.get("audio_config") or {}).get(clean_key))
+    value = dict(entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}
+    value["volume_percent"] = max(0, min(200, safe_int(volume, 100)))
+    return video_tail9_update_addon_audio(
+        current,
+        clean_key,
+        enabled=enabled,
+        value_patch=value,
+    )
+
+
+def video_tail9_addon_detail_text(tail: dict, key: str) -> str:
+    audio = dict(tail.get("audio_config") or {})
+    volumes = dict(audio.get("volumes") or {})
+    value = video_tail9_addon_value(tail, key)
+    subtitle_rate = float(
+        canonical_price_xu("subtitle_translate_video")
+        or VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU
+    )
+    dub_rate = float(canonical_price_xu("dub_video") or VIDEO_ONLY_DUB_DEFAULT_RATE_XU)
+    music_price = int(video_ai_real_pricing.public_music_background_prices()["basic"])
+    if key == "subtitles":
+        source = str(value.get("source") or ("auto" if audio.get("subtitles") else "none"))
+        selected = {
+            "none": "Không dùng",
+            "auto": "Tạo phụ đề tự động · Miễn phí",
+            "translated": f"Dịch phụ đề · {subtitle_rate:g} Xu/ký tự",
+        }.get(source, "Theo cấu hình đã chọn")
+        return (
+            "💬 <b>Phụ đề</b>\n\n"
+            f"• Đang chọn: <b>{html.escape(selected)}</b>\n"
+            "• Nội dung phụ đề giữ nguyên lời thoại/kịch bản; không tự rút gọn.\n\n"
+            "Chọn đúng một phương án rồi quay lại Add-on."
+        )
+    if key == "dubbing":
+        voice = {
+            "follow_character": "Theo từng nhân vật",
+            "default_male": "Giọng nam mặc định",
+            "default_female": "Giọng nữ mặc định",
+        }.get(str(value.get("voice_choice") or ""), "Chưa chọn")
+        return (
+            "🎙 <b>Lồng tiếng</b>\n\n"
+            f"• Trạng thái: <b>{'Đang bật' if audio.get('dubbing') else 'Không dùng'}</b>\n"
+            f"• Giọng: <b>{html.escape(voice)}</b>\n"
+            f"• Âm lượng: <b>{safe_int(volumes.get('dubbing'), 100)}%</b>\n"
+            f"• Giá: <b>{dub_rate:g} Xu/ký tự</b>, dùng cùng giảm giá số lượng của sản phẩm Lồng tiếng."
+        )
+    if key == "music":
+        source = str(value.get("source") or "none")
+        source_label = {
+            "none": "Không dùng",
+            "library": "Nhạc có sẵn",
+            "planned_generation": "Tạo nhạc AI",
+        }.get(source, "Theo cấu hình đã chọn")
+        vocal_label = "Có lời" if str(value.get("vocal_mode") or "") == "with_lyrics" else "Không lời"
+        return (
+            "🎵 <b>Nhạc</b>\n\n"
+            f"• Đang chọn: <b>{html.escape(source_label)}</b>\n"
+            f"• Dạng nhạc: <b>{vocal_label}</b>\n"
+            f"• Âm lượng: <b>{safe_int(volumes.get('music'), 20)}%</b>\n"
+            f"• Tạo nhạc AI: <b>{music_price} Xu/lượt</b>, đúng giá Nhạc nền Cơ bản ở menu ngoài."
+        )
+    source_available = bool(audio.get("source_audio_available"))
+    sfx_value = video_tail9_addon_value(tail, "sfx")
+    sfx_source = str(sfx_value.get("source") or "none")
+    return (
+        "🔊 <b>Âm thanh</b>\n\n"
+        f"• Âm thanh gốc: <b>{'Bật' if audio.get('source_audio') else 'Tắt' if source_available else 'Nguồn không có âm thanh'}</b>"
+        f" · {safe_int(volumes.get('source_audio'), 100)}%\n"
+        f"• Hiệu ứng âm thanh: <b>{'Tắt' if not audio.get('sfx') else 'Tạo bằng AI' if sfx_source == 'ai' else 'Kho hiệu ứng'}</b>"
+        f" · {safe_int(volumes.get('sfx'), 35)}%\n\n"
+        "Âm thanh gốc và hiệu ứng được chỉnh riêng; hệ thống giữ giới hạn chống vỡ tiếng khi phối."
+    )
+
+
+def video_tail9_addon_detail_keyboard(tail: dict, key: str) -> InlineKeyboardMarkup:
+    audio = dict(tail.get("audio_config") or {})
+    if key == "subtitles":
+        rows = [
+            [("🚫 Không dùng", "video_tail|addon|option|subtitles|none"), ("💬 Tự động · Miễn phí", "video_tail|addon|option|subtitles|auto")],
+            [("🌐 Dịch · 0,1 Xu/ký tự", "video_tail|addon|option|subtitles|translated")],
+        ]
+    elif key == "dubbing":
+        rows = [
+            [("🚫 Không dùng", "video_tail|addon|option|dubbing|none"), ("🧑 Theo nhân vật", "video_tail|addon|option|dubbing|follow_character")],
+            [("👨 Giọng nam", "video_tail|addon|option|dubbing|default_male"), ("👩 Giọng nữ", "video_tail|addon|option|dubbing|default_female")],
+            [("🔊 Chỉnh âm lượng", "video_tail|addon|volume|dubbing")],
+        ]
+    elif key == "music":
+        rows = [
+            [("🚫 Không dùng", "video_tail|addon|option|music|none"), ("🎼 Nhạc có sẵn", "video_tail|addon|option|music|existing")],
+            [("🎹 Tạo AI không lời", "video_tail|addon|option|music|ai_instrumental"), ("🎤 Tạo AI có lời", "video_tail|addon|option|music|ai_lyrics")],
+            [("🔊 Chỉnh âm lượng", "video_tail|addon|volume|music")],
+        ]
+    else:
+        rows = []
+        if audio.get("source_audio_available"):
+            rows.append([
+                ("✅ Giữ âm thanh gốc" if audio.get("source_audio") else "➕ Giữ âm thanh gốc", "video_tail|addon|option|source_audio|preserve"),
+                ("🚫 Tắt âm thanh gốc", "video_tail|addon|option|source_audio|none"),
+            ])
+            rows.append([("🔊 Âm lượng gốc", "video_tail|addon|volume|source_audio")])
+        rows.extend([
+            [("🚫 Không dùng SFX", "video_tail|addon|option|sfx|none"), ("📚 Kho hiệu ứng", "video_tail|addon|option|sfx|library")],
+            [("✨ Tạo SFX AI", "video_tail|addon|option|sfx|ai"), ("🔊 Âm lượng SFX", "video_tail|addon|volume|sfx")],
+        ])
+    rows.append([("⬅️ Quay lại Add-on", "video_tail|addon|open"), ("🎬 Menu Video", "menu|main_video")])
+    return video_scene3_keyboard(rows)
+
+
+def video_tail9_addon_volume_text(tail: dict, key: str) -> str:
+    label = VIDEO_TAIL9_AUDIO_LABELS.get(str(key or ""), "Âm thanh")
+    volume = safe_int(((tail.get("audio_config") or {}).get("volumes") or {}).get(key), 100)
+    return (
+        f"🔊 <b>Âm lượng {html.escape(label)}</b>\n\n"
+        f"• Hiện tại: <b>{volume}%</b>\n\n"
+        "Chọn mức cần dùng. Mỗi nguồn âm thanh có mức riêng và không thay đổi âm lượng của mục khác."
+    )
+
+
+def video_tail9_addon_volume_keyboard(key: str) -> InlineKeyboardMarkup:
+    values = (0, 25, 50, 75, 100, 125, 150, 175, 200)
+    buttons = [(f"{value}%", f"video_tail|addon|setvol|{key}|{value}") for value in values]
+    buttons.append(("✅ Giữ mức hiện tại", f"video_tail|addon|item|{'sound' if key in {'source_audio', 'sfx'} else key}"))
+    rows = [buttons[offset:offset + 2] for offset in range(0, len(buttons), 2)]
+    rows.append([("⬅️ Quay lại", f"video_tail|addon|item|{'sound' if key in {'source_audio', 'sfx'} else key}"), ("🎬 Menu Video", "menu|main_video")])
+    return video_scene3_keyboard(rows)
+
+
 def video_tail9_addon_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
     current = dict(tail or {})
-    back_callback = str(current.get("return_to") or "menu|main_video")
     if str(current.get("video_product_type") or "") == "video_ai_real":
         return video_scene3_keyboard([
-            [("👁 Xem cảnh", "video_tail|addon|scenes"), ("✍️ Sửa cảnh", "video_tail|addon|edit_scenes")],
-            [("🎬 Prompt video", "video_tail|addon|prompts"), ("🔗 Chuyển cảnh", "video_tail|addon|transitions")],
-            [("📝 Chữ", "video_tail|addon|text"), ("🎙 Âm thanh", "video_tail|addon|audio")],
-            [("🏷 Logo/Watermark", "video_tail|addon|logo"), ("⭐ Hoàn thiện video", "video_tail|addon|complete")],
+            [(video_tail9_addon_selected_label(current, "text", "Chữ trên video"), "video_tail|addon|text"), (video_tail9_addon_selected_label(current, "subtitles", "Phụ đề"), "video_tail|addon|item|subtitles")],
+            [(video_tail9_addon_selected_label(current, "dubbing", "Lồng tiếng"), "video_tail|addon|item|dubbing"), (video_tail9_addon_selected_label(current, "music", "Nhạc"), "video_tail|addon|item|music")],
+            [(video_tail9_addon_selected_label(current, "sound", "Âm thanh"), "video_tail|addon|item|sound"), (video_tail9_addon_selected_label(current, "logo", "Logo"), "video_tail|addon|logo")],
+            [(video_tail9_addon_selected_label(current, "watermark", "Watermark"), "video_tail|addon|watermark"), (video_tail9_addon_selected_label(current, "transitions", "Chuyển cảnh"), "video_tail|addon|transitions")],
+            [("✅ Hoàn tất Add-on", "video_tail|addon|complete")],
             [("⬅️ Quay lại", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
         ])
+    back_callback = str(current.get("return_to") or "menu|main_video")
     return video_scene3_keyboard([
         [("🎙️ Âm thanh, giọng & phụ đề", "video_tail|addon|audio"), ("🖼️ Logo/Watermark", "video_tail|addon|logo")],
         [("✅ Hoàn tất Add-on", "video_tail|addon|complete")],
@@ -107292,11 +108123,48 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 video_tail9_text_text(tail),
                 reply_markup=video_tail9_text_keyboard(tail),
             )
+        if action == "item" and argument in {"subtitles", "dubbing", "music", "sound"}:
+            if str(tail.get("video_product_type") or "") != "video_ai_real":
+                return await video_tail9_render(query, uid, context, "addon")
+            return await safe_edit_or_send(
+                query,
+                video_tail9_addon_detail_text(tail, argument),
+                parse_mode="HTML",
+                reply_markup=video_tail9_addon_detail_keyboard(tail, argument),
+            )
+        if action == "option" and argument in {
+            "source_audio", "subtitles", "dubbing", "music", "sfx",
+        }:
+            tail = video_tail9_set_addon_option(tail, argument, extra)
+            save_video_tail9_state(uid, context, tail, owner, host)
+            detail_key = "sound" if argument in {"source_audio", "sfx"} else argument
+            return await safe_edit_or_send(
+                query,
+                video_tail9_addon_detail_text(tail, detail_key),
+                parse_mode="HTML",
+                reply_markup=video_tail9_addon_detail_keyboard(tail, detail_key),
+            )
+        if action == "volume" and argument in {"source_audio", "dubbing", "music", "sfx"}:
+            return await safe_edit_or_send(
+                query,
+                video_tail9_addon_volume_text(tail, argument),
+                parse_mode="HTML",
+                reply_markup=video_tail9_addon_volume_keyboard(argument),
+            )
+        if action == "setvol" and argument in {"source_audio", "dubbing", "music", "sfx"}:
+            tail = video_tail9_set_addon_volume(tail, argument, safe_int(extra, 100))
+            save_video_tail9_state(uid, context, tail, owner, host)
+            return await safe_edit_or_send(
+                query,
+                video_tail9_addon_volume_text(tail, argument),
+                parse_mode="HTML",
+                reply_markup=video_tail9_addon_volume_keyboard(argument),
+            )
         if action == "audio":
             return await video_tail9_open_planning_audio(
                 query, context, uid, tail, owner, host
             )
-        if action == "logo":
+        if action in {"logo", "watermark"}:
             tail["branding_return_to"] = "addon"
             tail["branding_back_to"] = "addon"
             tail["review_status"] = "not_ready"
@@ -166116,6 +166984,65 @@ def subtitle_dub_price_breakdown(mode: str, duration_seconds) -> dict:
         "total_xu": total,
     }
 
+
+def video_addon_external_price_breakdown(
+    mode: str,
+    duration_seconds,
+    *,
+    billable_chars: int = 0,
+) -> dict:
+    """Mirror the standalone Music/SubDub prices inside Video Add-on only."""
+
+    normalized = normalize_subtitle_dub_mode(mode)
+    if normalized not in SUBTITLE_DUB_PRICE_RULES:
+        raise ValueError(f"unsupported video addon mode: {mode}")
+    duration = max(1, int(math.ceil(float(duration_seconds or 0))))
+    chars = video_dubbing_billing_char_count({
+        "billing_chars": max(0, int(billable_chars or 0)),
+        "video_duration": duration,
+    })
+    subtitle_rate = float(
+        canonical_price_xu("subtitle_translate_video")
+        or VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU
+    )
+    dub_rate = float(
+        canonical_price_xu("dub_video") or VIDEO_ONLY_DUB_DEFAULT_RATE_XU
+    )
+    subtitle_price = calculate_video_only_char_price(chars, subtitle_rate)
+    dub_price = calculate_video_only_char_price(chars, dub_rate)
+    if normalized == "subtitle":
+        total = int(canonical_price_xu("auto_subtitle_video") or 0)
+        rate = 0.0
+        discount_percent = 0
+    elif normalized == "translate_subtitle":
+        total = int(subtitle_price["total_xu"])
+        rate = subtitle_rate
+        discount_percent = int(subtitle_price["discount_percent"])
+    elif normalized == "dubbing":
+        total = int(dub_price["total_xu"])
+        rate = dub_rate
+        discount_percent = int(dub_price["discount_percent"])
+    else:
+        total = int(subtitle_price["total_xu"] + dub_price["total_xu"])
+        rate = subtitle_rate + dub_rate
+        discount_percent = max(
+            int(subtitle_price["discount_percent"]),
+            int(dub_price["discount_percent"]),
+        )
+    return {
+        "mode": normalized,
+        "label": SUBTITLE_DUB_PRICE_RULES[normalized]["label"],
+        "duration_seconds": duration,
+        "billing_chars": chars,
+        "rate_xu": rate,
+        "discount_percent": discount_percent,
+        "base_xu": total,
+        "extra_blocks": 0,
+        "extra_block_seconds": 0,
+        "extra_block_xu": 0,
+        "total_xu": total,
+    }
+
 def calculate_subtitle_dub_price(mode: str, duration_seconds) -> int:
     return int(subtitle_dub_price_breakdown(mode, duration_seconds)["total_xu"])
 
@@ -184871,9 +185798,10 @@ def video_finalization_confirm_not_ready_keyboard(state: dict | None = None, lan
 def video_finalization_music_text(state: dict | None = None, lang: str = "vi") -> str:
     copy = public_video_deep_copy(normalize_user_language(lang))
     settings = video_audio_settings_from_state(state)
+    music_price = int(video_ai_real_pricing.public_music_background_prices()["basic"])
     return (
         f"<b>{copy['music']}</b>\n\n"
-        f"{copy['none']} · {public_hub_copy(lang)['music_create_title']} +{VIDEO_SUNO_MUSIC_XU} Xu\n\n"
+        f"{copy['none']} · {public_hub_copy(lang)['music_create_title']} +{music_price} Xu\n\n"
         f"{copy['music']}: <b>{html.escape(video_audio_speed_display(settings['video_music_speed']))}x · {settings['video_music_volume_percent']}%</b>\n\n"
         f"{copy['common_no_charge']}."
     )
@@ -184881,6 +185809,7 @@ def video_finalization_music_text(state: dict | None = None, lang: str = "vi") -
 def video_finalization_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_video_deep_copy(normalize_user_language(lang))
     hub_copy = public_hub_copy(lang)
+    music_price = int(video_ai_real_pricing.public_music_background_prices()["basic"])
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🎼 " + copy["music"], callback_data="vfinal|music_library"),
@@ -184888,7 +185817,7 @@ def video_finalization_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("📁 " + hub_copy["audio_menu_title"], callback_data="vfinal|my_media"),
-            InlineKeyboardButton(f"🎵 {hub_copy['music_create_title']} +{VIDEO_SUNO_MUSIC_XU} Xu", callback_data="vfinal|music_ai"),
+            InlineKeyboardButton(f"🎵 {hub_copy['music_create_title']} +{music_price} Xu", callback_data="vfinal|music_ai"),
         ],
         [
             InlineKeyboardButton("⏱ " + copy["music"], callback_data="vfinal|music_speed"),
@@ -188390,37 +189319,79 @@ async def cmd_video_quote_test(update: Update, context: ContextTypes.DEFAULT_TYP
     quote = calculate_short_video_quote(tier, duration, scenes, args[3:])
     await update.message.reply_text("\n".join(short_video_quote_lines(quote)), parse_mode="HTML")
 
-def calculate_named_addon_quote(addon_key: str, duration_seconds: int | float | str = 60, extra_options: list[str] | tuple[str, ...] | None = None) -> dict:
+def calculate_named_addon_quote(
+    addon_key: str,
+    duration_seconds: int | float | str = 60,
+    extra_options: list[str] | tuple[str, ...] | None = None,
+    *,
+    billable_chars: int = 0,
+) -> dict:
     key = str(addon_key or "").strip().lower()
     duration = max(1, int(math.ceil(float(duration_seconds or 60))))
     extra_options = [str(item or "").strip().lower() for item in (extra_options or [])]
     extra_blocks = max(0, int(math.ceil(max(0, duration - 60) / 60.0)))
     base = 0
     extra_block_rate = 0
+    rate_xu = 0.0
+    discount_percent = 0
+    priced_chars = max(0, safe_int(billable_chars, 0))
     label = key or "none"
     if key in {"subtitle", "subtitle_auto", "create", "create_subtitle"}:
-        label = "Tạo phụ đề tự động"
-        base = int(canonical_price_xu("video_addon_subtitle") or VIDEO_SUBTITLE_AUTO_BASE_XU)
-        extra_block_rate = VIDEO_SUBTITLE_AUTO_EXTRA_BLOCK_XU
+        breakdown = video_addon_external_price_breakdown(
+            "subtitle",
+            duration,
+            billable_chars=priced_chars,
+        )
+        label = str(breakdown["label"])
+        base = int(breakdown["total_xu"])
+        priced_chars = int(breakdown["billing_chars"])
     elif key in {"translate", "subtitle_translate", "translate_subtitle"}:
-        label = "Dịch phụ đề"
-        base = int(canonical_price_xu("video_addon_subtitle") or VIDEO_SUBTITLE_TRANSLATE_BASE_XU)
-        extra_block_rate = VIDEO_SUBTITLE_TRANSLATE_EXTRA_BLOCK_XU
+        breakdown = video_addon_external_price_breakdown(
+            "translate_subtitle",
+            duration,
+            billable_chars=priced_chars,
+        )
+        label = str(breakdown["label"])
+        base = int(breakdown["total_xu"])
+        priced_chars = int(breakdown["billing_chars"])
+        rate_xu = float(breakdown["rate_xu"])
+        discount_percent = int(breakdown["discount_percent"])
     elif key in {"full", "subtitle_translate_burn", "subtitle_full", "translate_burn"}:
-        label = "Tạo phụ đề + dịch + burn"
-        base = VIDEO_SUBTITLE_TRANSLATE_BURN_BASE_XU
-        extra_block_rate = VIDEO_SUBTITLE_FULL_EXTRA_BLOCK_XU
+        breakdown = video_addon_external_price_breakdown(
+            "translate_subtitle",
+            duration,
+            billable_chars=priced_chars,
+        )
+        label = "Tạo phụ đề + dịch + gắn vào video"
+        base = int(breakdown["total_xu"])
+        priced_chars = int(breakdown["billing_chars"])
+        rate_xu = float(breakdown["rate_xu"])
+        discount_percent = int(breakdown["discount_percent"])
     elif key in {"dub", "dubbing", "dubbing_default"}:
+        breakdown = video_addon_external_price_breakdown(
+            "dubbing",
+            duration,
+            billable_chars=priced_chars,
+        )
         label = "Lồng tiếng giọng mặc định"
-        base = int(canonical_price_xu("video_addon_dub") or VIDEO_DUB_DEFAULT_BASE_XU)
-        extra_block_rate = VIDEO_DUB_EXTRA_BLOCK_XU
+        base = int(breakdown["total_xu"])
+        priced_chars = int(breakdown["billing_chars"])
+        rate_xu = float(breakdown["rate_xu"])
+        discount_percent = int(breakdown["discount_percent"])
     elif key in {"translate_dub", "translated_dub", "subtitle_plus_dub"}:
+        breakdown = video_addon_external_price_breakdown(
+            "subtitle_plus_dubbing",
+            duration,
+            billable_chars=priced_chars,
+        )
         label = "Dịch + lồng tiếng"
-        base = int(canonical_price_xu("video_addon_subtitle") or VIDEO_SUBTITLE_TRANSLATE_BASE_XU) + int(canonical_price_xu("video_addon_dub") or VIDEO_DUB_DEFAULT_BASE_XU)
-        extra_block_rate = VIDEO_TRANSLATE_DUB_EXTRA_BLOCK_XU
+        base = int(breakdown["total_xu"])
+        priced_chars = int(breakdown["billing_chars"])
+        rate_xu = float(breakdown["rate_xu"])
+        discount_percent = int(breakdown["discount_percent"])
     elif key in {"suno", "ai_music", "suno_music"}:
         label = "Tạo nhạc AI"
-        base = int(canonical_price_xu("video_addon_music") or VIDEO_SUNO_MUSIC_XU)
+        base = int(video_ai_real_pricing.public_music_background_prices()["basic"])
         extra_block_rate = 0
     elif key in {"sfx", "sfx_ai"}:
         label = "Tạo sound effect AI"
@@ -188449,6 +189420,9 @@ def calculate_named_addon_quote(addon_key: str, duration_seconds: int | float | 
         "key": key,
         "label": label,
         "duration_seconds": duration,
+        "billing_chars": priced_chars,
+        "rate_xu": rate_xu,
+        "discount_percent": discount_percent,
         "base_xu": int(base),
         "extra_blocks": int(extra_blocks),
         "extra_block_rate_xu": int(extra_block_rate),
@@ -188465,9 +189439,17 @@ def named_addon_quote_lines(quote: dict) -> list[str]:
         "",
         f"Add-on: <b>{html.escape(str(quote.get('label') or quote.get('key') or '-'))}</b>",
         f"Thời lượng: <b>{int(quote.get('duration_seconds') or 0)} giây</b>",
-        f"Giá nền <=60s: <b>{xu_number(quote.get('base_xu'))} Xu</b>",
-        f"Block thêm: <b>{int(quote.get('extra_blocks') or 0)} x {int(quote.get('extra_block_rate_xu') or 0)} Xu = {xu_number(quote.get('extra_blocks_xu'))} Xu</b>",
     ]
+    if int(quote.get("billing_chars") or 0) and float(quote.get("rate_xu") or 0) > 0:
+        lines.extend([
+            f"Số ký tự tính giá: <b>{int(quote.get('billing_chars') or 0)}</b>",
+            f"Đơn giá sản phẩm ngoài: <b>{float(quote.get('rate_xu') or 0):g} Xu/ký tự</b>",
+            f"Giảm theo số lượng: <b>{int(quote.get('discount_percent') or 0)}%</b>",
+        ])
+    elif str(quote.get("key") or "") in {"suno", "ai_music", "suno_music"}:
+        lines.append(f"Giá Nhạc nền Cơ bản: <b>{xu_number(quote.get('base_xu'))} Xu/lượt</b>")
+    else:
+        lines.append(f"Giá sản phẩm ngoài: <b>{xu_number(quote.get('base_xu'))} Xu</b>")
     options = list(quote.get("options") or [])
     if options:
         lines.append("Tùy chọn cộng thêm:")
