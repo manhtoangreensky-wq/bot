@@ -121,6 +121,7 @@ def _runtime_namespace() -> dict:
         "PRODUCT_CONTEXT_SHOWROOM": "showroom",
         "public_chat_runtime": SimpleNamespace(CHAT_PRO_RATE_LABEL="5/25 Xu/1K"),
         "public_hub_copy": public_copy.public_hub_copy,
+        "public_ui_text_table": public_copy.public_ui_text_table,
         "get_user": lambda _user_id: (90, 0, False),
         "is_admin_user": lambda _user_id: False,
         "get_role_badge": lambda _user_id: "Newbie",
@@ -427,8 +428,14 @@ def test_secondary_public_price_surfaces_use_native_shared_copy_not_english_fall
         "public_guide_lines": public_copy.guide_lines,
         "public_pricing_lines": public_copy.pricing_lines,
         "public_pricing_context": lambda: {"member_discount_lines": ["• 0%"]},
+        "public_hub_copy": public_copy.public_hub_copy,
+        "public_account_flow_copy": public_copy.public_account_flow_copy,
+        "html": html,
         "pricing_copy_language": lambda lang: "vi" if lang == "vi" else ("zh" if lang == "zh" else "en"),
         "MEMBER_TOOL_DISCOUNT_POLICY": {tier: 0 for tier in ("newbie", "silver", "gold", "platinum", "diamond", "vip")},
+        "MEMBER_TIER_ORDER": ("newbie", "silver", "gold", "platinum", "diamond", "vip"),
+        "MEMBER_BIRTHDAY_GIFT_XU": {tier: 0 for tier in ("silver", "gold", "platinum", "diamond", "vip")},
+        "MEMBER_REFERRAL_POLICY": {tier: {"percent": 0, "cap": 0} for tier in ("newbie", "silver", "gold", "platinum", "diamond", "vip")},
     }
     for name in (
         "menu_text_main_topup_i18n",
@@ -588,8 +595,8 @@ def test_secondary_package_routes_keep_native_copy_without_changing_callbacks():
 def test_member_command_routes_secondary_locales_to_native_member_policy_copy():
     source = _async_function_source("cmd_member")
     assert "requested_locale = public_pricing_locale(lang)" in source
-    assert 'if requested_locale not in {"vi", "en", "zh"}:' in source
-    assert "member_policy_lines(requested_locale)" in source
+    assert 'if requested_locale != "vi":' in source
+    assert "public_account_flow_copy(requested_locale)" in source
 
 
 def test_secondary_package_navigation_has_distinct_native_actions():
@@ -693,6 +700,7 @@ def test_public_routes_render_selected_native_price_and_guide_copy_without_bot_i
         "markdown_attachment_response": render_markdown,
         "public_pricing_locale": public_copy.public_copy_locale,
         "public_page_title": public_copy.public_page_title,
+        "public_guide_navigation_copy": public_copy.public_guide_navigation_copy,
         "public_pricing_context": lambda: {"source": "native-hub-test"},
         "public_pricing_all_lines": public_copy.all_pricing_lines,
         "public_guide_all_lines": public_copy.all_guide_lines,
@@ -745,7 +753,9 @@ def test_korean_guide_hub_and_actions_render_native_labels_without_full_bot_impo
         "public_pricing_locale": public_copy.public_copy_locale,
         "public_hub_copy": public_copy.public_hub_copy,
         "public_page_title": public_copy.public_page_title,
+        "public_guide_navigation_copy": public_copy.public_guide_navigation_copy,
         "public_guide_index_lines": public_copy.guide_index_lines,
+        "TOAN_AAS_COMMUNITY_URL": "https://t.me/toanaas",
         "effective_public_base_url": lambda: "",
         "menu_text_main_guide": lambda: "Vietnamese guide",
     }

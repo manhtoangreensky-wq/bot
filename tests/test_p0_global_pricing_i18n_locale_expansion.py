@@ -91,8 +91,11 @@ def _runtime_namespace() -> dict:
         "__builtins__": __builtins__,
         "InlineKeyboardButton": _Button,
         "InlineKeyboardMarkup": _Markup,
+        "_TelegramInlineKeyboardMarkup": _Markup,
         "html": _Html,
         "MEMBER_TOOL_DISCOUNT_POLICY": {tier: 0 for tier in ("newbie", "silver", "gold", "platinum", "diamond", "vip")},
+        "MEMBER_TIER_ORDER": ("newbie", "silver", "gold", "platinum", "diamond", "vip"),
+        "MEMBER_REFERRAL_POLICY": {tier: {"percent": 0, "cap": 0} for tier in ("newbie", "silver", "gold", "platinum", "diamond", "vip")},
         "MEMBER_TIER_THRESHOLDS": {tier: 0 for tier in ("silver", "gold", "platinum", "diamond", "vip")},
         "MEMBER_BIRTHDAY_GIFT_XU": {tier: 0 for tier in ("silver", "gold", "platinum", "diamond", "vip")},
         "user_is_vietnam_market": lambda user_id: str(user_id) == "vn-user",
@@ -102,6 +105,7 @@ def _runtime_namespace() -> dict:
         "public_copy_locale": public_copy.public_copy_locale,
         "public_pricing_locale": public_copy.public_copy_locale,
         "public_hub_copy": public_copy.public_hub_copy,
+        "public_account_flow_copy": public_copy.public_account_flow_copy,
         "public_page_title": public_copy.public_page_title,
         "public_guide_lines": shared_public_guide_lines,
         "public_pricing_lines": public_copy.pricing_lines,
@@ -490,13 +494,14 @@ def test_international_promotion_route_hides_domestic_offer_and_promo_code_copy(
 
     spanish = "\n".join(runtime["billing_promo_apply_lines"]("es")).lower()
     chinese = "\n".join(runtime["billing_promo_apply_lines"]("zh"))
-    assert "recargas internacionales" in spanish
+    assert "beneficios de la cuenta" in spanish
     assert "international account" not in spanish
     assert "+30% xu" not in spanish
     assert "+20% xu" not in spanish
-    for domestic_term in ("优惠码", "充值活动", "奖励", "越南"):
+    for domestic_term in ("优惠码", "充值活动", "奖励"):
         assert domestic_term not in chinese
-    assert "国际账户" in chinese
+    assert "越南本地充值优惠" in chinese
+    assert "账户权益" in chinese
 
     visible_callbacks = {
         button.callback_data
@@ -538,10 +543,10 @@ def test_vietnamese_copy_respects_market_when_showing_domestic_promotion_entry()
         for button in row
     }
     foreign_ui_benefits = "\n".join(runtime["billing_promotions_lines"]("en", "vn-user"))
-    assert "<b>Member Benefits</b>" in foreign_ui_benefits
+    assert "<b>Account benefits</b>" in foreign_ui_benefits
     assert "International Benefits" not in foreign_ui_benefits
     foreign_ui_promo = "\n".join(runtime["billing_promo_apply_lines"]("en", "vn-user"))
-    assert "<b>Member Benefits</b>" in foreign_ui_promo
+    assert "<b>Account benefits</b>" in foreign_ui_promo
     assert "International account" not in foreign_ui_promo
 
 
@@ -551,7 +556,7 @@ def test_international_member_copy_keeps_service_discounts_without_domestic_topu
     spanish = "\n".join(runtime["member_policy_lines"]("es")).lower()
     chinese = "\n".join(runtime["member_policy_lines"]("zh"))
 
-    assert "descuentos de servicio de membresía" in spanish
+    assert "descuento de servicio para miembros" in spanish
     assert "service discounts" not in spanish
     assert "+30% xu" not in spanish
     assert "+20% xu" not in spanish
@@ -721,7 +726,7 @@ def test_package_and_combo_screens_use_locale_copy_without_repricing_catalog_ent
     assert "Imágenes con IA" in spanish
     assert "monthly plan" not in spanish
     assert "Balanced image" not in spanish
-    assert runtime["package_i18n_entry_label"](entry, "image_basic_monthly", "monthly", "zh") == "🖼 图片 月度套餐 — 平衡图片 ×20 / 30 天"
+    assert runtime["package_i18n_entry_label"](entry, "image_basic_monthly", "monthly", "zh") == "🖼 AI 图片 月度套餐 — 平衡图片 ×20 / 30 天"
     assert runtime["package_i18n_entry_label"](entry, "image_basic_monthly", "monthly", "vi") == "🖼 Ảnh Cơ bản"
     assert runtime["package_i18n_price_text"]("monthly", "image_basic_monthly", "es") == "123k"
 

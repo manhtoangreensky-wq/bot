@@ -1982,6 +1982,26 @@ _PUBLIC_VIDEO_TAIL_COPY = {
     },
 }
 
+_PUBLIC_VIDEO_CONFIRM_LABELS = {
+    "vi": {"quality": "Chất lượng", "public_video": "Video công khai", "enabled": "Bật"},
+    "en": {"quality": "Quality", "public_video": "Public video", "enabled": "On"},
+    "zh": {"quality": "质量", "public_video": "公开视频", "enabled": "开启"},
+    "ja": {"quality": "品質", "public_video": "公開動画", "enabled": "オン"},
+    "ko": {"quality": "품질", "public_video": "공개 동영상", "enabled": "켬"},
+    "th": {"quality": "คุณภาพ", "public_video": "วิดีโอสาธารณะ", "enabled": "เปิด"},
+    "ar": {"quality": "الجودة", "public_video": "الفيديو العام", "enabled": "مفعّل"},
+    "es": {"quality": "Calidad", "public_video": "Vídeo público", "enabled": "Activado"},
+    "pt": {"quality": "Qualidade", "public_video": "Vídeo público", "enabled": "Ativado"},
+    "fr": {"quality": "Qualité", "public_video": "Vidéo publique", "enabled": "Activée"},
+    "de": {"quality": "Qualität", "public_video": "Öffentliches Video", "enabled": "Ein"},
+    "hi": {"quality": "गुणवत्ता", "public_video": "सार्वजनिक वीडियो", "enabled": "चालू"},
+    "ru": {"quality": "Качество", "public_video": "Публичное видео", "enabled": "Включено"},
+    "tr": {"quality": "Kalite", "public_video": "Herkese açık video", "enabled": "Açık"},
+    "fil": {"quality": "Kalidad", "public_video": "Pampublikong bidyo", "enabled": "Naka-on"},
+    "it": {"quality": "Qualità", "public_video": "Video pubblico", "enabled": "Attivo"},
+    "id": {"quality": "Kualitas", "public_video": "Video publik", "enabled": "Aktif"},
+}
+
 PUBLIC_GUIDE_NAVIGATION_I18N.update({
     "en": {"quick_start": "Quick start", "create_image": "Create image", "create_video": "Create video", "trend_video": "Trending video", "video_music": "Video music", "credits_topup": "Xu & top-up", "faq_refunds": "FAQ & refunds", "download_pricing": "Download pricing", "download_guide": "Download guide"},
     "es": {"quick_start": "Inicio rápido", "create_image": "Crear imagen", "create_video": "Crear vídeo", "trend_video": "Vídeo de tendencias", "video_music": "Música para vídeo", "credits_topup": "Xu y recarga", "faq_refunds": "Preguntas y reembolsos", "download_pricing": "Descargar precios", "download_guide": "Descargar guía"},
@@ -2008,6 +2028,7 @@ def public_video_deep_copy(locale: str = "vi") -> dict[str, str]:
         **_PUBLIC_NATIVE_DEEP_FLOW_COPY[key],
         **_PUBLIC_VIDEO_DEEP_COPY[key],
         **_PUBLIC_VIDEO_TAIL_COPY.get(key, _PUBLIC_VIDEO_TAIL_COPY["en"]),
+        **_PUBLIC_VIDEO_CONFIRM_LABELS.get(key, _PUBLIC_VIDEO_CONFIRM_LABELS["en"]),
         **public_video_edit_status_copy(key),
         **public_video_finalization_shared_copy(key),
     }

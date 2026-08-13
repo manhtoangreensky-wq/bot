@@ -113654,8 +113654,11 @@ def main_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if requested_locale != "vi":
         copy = public_hub_copy(requested_locale)
         navigation = public_guide_navigation_copy(requested_locale)
+        first_row = [InlineKeyboardButton(f"🚀 {navigation['quick_start']}", callback_data="menu|guide_quick_start")]
+        if requested_locale != "zh":
+            first_row.append(InlineKeyboardButton(f"📋 {public_page_title('pricing', requested_locale)}", callback_data="pricing|catalog"))
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"🚀 {navigation['quick_start']}", callback_data="menu|guide_quick_start"), InlineKeyboardButton(f"📋 {public_page_title('pricing', requested_locale)}", callback_data="pricing|catalog")],
+            first_row,
             [InlineKeyboardButton(f"🖼 {navigation['create_image']}", callback_data="menu|guide_image_ai"), InlineKeyboardButton(f"🎬 {navigation['create_video']}", callback_data="menu|guide_video_ai")],
             [InlineKeyboardButton(f"🔥 {navigation['trend_video']}", callback_data="menu|guide_guided_video"), InlineKeyboardButton(f"🎵 {navigation['video_music']}", callback_data="menu|guide_music_add")],
             [InlineKeyboardButton(f"💰 {navigation['credits_topup']}", callback_data="menu|guide_credits"), InlineKeyboardButton(f"❓ {navigation['faq_refunds']}", callback_data="menu|guide_faq")],
@@ -185180,24 +185183,15 @@ def video_addon_menu_text(state: dict | None = None, lang: str = "vi") -> str:
     subtotal = int(quote.get("scene_list_total_xu") or base * count)
     discount_percent = int(quote.get("multiscene_discount_percent") or 0)
     discount_xu = int(quote.get("scene_discount_xu") or max(0, subtotal - total))
-    discount_en = f"; {discount_percent}% off (-{xu_number(discount_xu)} Xu)" if discount_percent else ""
-    discount_vi = f"; giảm {discount_percent}% (-{xu_number(discount_xu)} Xu)" if discount_percent else ""
-    if normalize_user_language(lang) not in {"vi", "en"}:
-        return f"<b>{copy['menu_title']}</b>\n\n{copy['voice']} · {copy['music']} · {copy['subtitles']} · {copy['none']}\n\n<b>{xu_number(total)} Xu</b>"
-    if normalize_user_language(lang) != "vi":
-        return (
-            "🎛 <b>Video finishing tools</b>\n\n"
-            f"Selected package: <b>{xu_number(base)} Xu/scene</b>\n"
-            f"Scene count: <b>{count} scene{'s' if count != 1 else ''}</b> - about <b>{duration}s</b>\n"
-            f"Video subtotal: <b>{xu_number(base)} × {count} = {xu_number(subtotal)} Xu{discount_en}; total {xu_number(total)} Xu</b>\n\n"
-            "Choose a tool, or choose None to open the final invoice. No processing starts and no Xu is charged here."
-        )
+    scene_label = copy["scene"] if count == 1 else copy["scenes"]
+    discount = f" · -{xu_number(discount_xu)} Xu ({discount_percent}%)" if discount_percent else ""
     return (
-        "🎛 <b>Công cụ hoàn thiện video</b>\n\n"
-        f"Gói đã chọn: <b>{xu_number(base)} Xu/cảnh</b>\n"
-        f"Số cảnh: <b>{count} cảnh</b> - khoảng <b>{duration} giây</b>\n"
-        f"Tạm tính video: <b>{xu_number(base)} × {count} = {xu_number(subtotal)} Xu{discount_vi}; còn {xu_number(total)} Xu</b>\n\n"
-        "Chọn công cụ cần thêm, hoặc chọn Không thêm để xem hóa đơn cuối. Màn này chưa xử lý video và chưa trừ Xu."
+        f"<b>{copy['menu_title']}</b>\n\n"
+        f"{copy['select_package']}: <b>{xu_number(base)} Xu/{copy['per_scene']}</b>\n"
+        f"{copy['scene_title']}: <b>{count} {scene_label}</b> · <b>{duration} {copy['seconds']}</b>\n"
+        f"{copy['price_by_scene']}: <b>{xu_number(base)} × {count} = {xu_number(subtotal)} Xu{discount}</b>\n"
+        f"{copy['total']}: <b>{xu_number(total)} Xu</b>\n\n"
+        f"{copy['addon_title']}\n{copy['no_charge']}"
     )
 
 def video_addon_menu_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
@@ -186050,27 +186044,19 @@ def public_video_confirm_text(tier: str, prompt: str, current_credits: int = 0, 
         credits=int(current_credits or 0),
         prompt=html.escape(shopaikey_safe_prompt_preview(prompt)),
     )
-    quality = video_tier_quality_description(tier, lang)
+    quality = localized_video_tier_label(tier, lang)
     if quality:
-        if normalize_user_language(lang) == "zh":
-            quality_line = f"\n• 质量: <code>{html.escape(quality)}</code>"
-        elif normalize_user_language(lang) != "vi":
-            quality_line = f"\n• Quality: <code>{html.escape(quality)}</code>"
-        else:
-            quality_line = f"\n• Chất lượng: <code>{html.escape(quality)}</code>"
-        marker = "\n\nVideo AI" if "Video AI" in text else ("\n\nAI video" if "AI video" in text else "")
-        text = text.replace(marker, quality_line + marker, 1) if marker else text + quality_line
+        text += f"\n• {copy['quality']}: <code>{html.escape(quality)}</code>"
     music = str(music_label or "").strip()
     if music:
-        if normalize_user_language(lang) == "zh":
-            extra = f"\n• 音乐: <code>{html.escape(music)}</code>\n• Public video: <code>ON</code>"
-        elif normalize_user_language(lang) != "vi":
-            extra = f"\n• Music: <code>{html.escape(music)}</code>\n• Public video: <code>ON</code>"
-        else:
-            extra = f"\n• Nhạc: <code>{html.escape(music)}</code>\n• Public video: <code>ON</code>"
-        marker = "\n\nVideo AI" if "Video AI" in text else ("\n\nAI video" if "AI video" in text else "")
-        text = text.replace(marker, extra + marker, 1) if marker else text + extra
-    return with_aspect_line(text, aspect_ratio, lang, "video")
+        text += (
+            f"\n• {copy['music']}: <code>{html.escape(music)}</code>"
+            f"\n• {copy['public_video']}: <code>{copy['enabled']}</code>"
+        )
+    aspect = normalize_media_aspect_ratio(aspect_ratio, "9:16", "video")
+    if aspect:
+        text += f"\n• {copy['aspect_ratio']}: <b>{html.escape(aspect)}</b>"
+    return text
 
 def video_scene_generation_instruction(package: dict | None = None, aspect_ratio: str = "") -> str:
     package = dict(package or {})
@@ -187682,52 +187668,22 @@ def clear_trend_workflow_confirm_pending(user_id) -> bool:
     return USER_PENDING.pop(trend_workflow_confirm_pending_key(user_id), None) is not None
 
 def trend_workflow_content_confirm_text(topic: str, current_credits: int = 0, lang: str = "vi") -> str:
-    copy = public_video_deep_copy(normalize_user_language(lang))
+    locale = normalize_user_language(lang)
+    copy = public_video_deep_copy(locale)
+    hub_copy = public_hub_copy(locale)
     breakdown = trend_workflow_content_cost_breakdown()
     total = int(breakdown.get("total") or 0)
-    if normalize_user_language(lang) not in {"vi", "en", "zh"}:
-        return f"<b>{copy['trend_confirm']}</b>\n\n<code>{html.escape(str(topic or '')[:180])}</code>\n\n<b>{total} Xu</b>\n\n{copy['confirm']}"
-    if normalize_user_language(lang) == "zh":
-        return (
-            "🎬 <b>确认生成 trend content workflow</b>\n\n"
-            f"主题: <code>{html.escape(str(topic or '')[:180])}</code>\n\n"
-            f"这个 content workflow 需要 <b>{total} Xu</b>，包括：\n"
-            f"• Trend 分析: <b>{int(breakdown.get('trend_analysis') or 0)} Xu</b>\n"
-            f"• Hook/script/storyboard: <b>{int(breakdown.get('script_storyboard') or 0)} Xu</b>\n"
-            f"• Prompt pack: <b>{int(breakdown.get('prompt_pack') or 0)} Xu</b>\n\n"
-            f"• 当前余额: <b>{int(current_credits or 0)} Xu</b>\n\n"
-            "此套餐只包含内容 workflow。真实图片/视频另行计费。\n"
-            f"• 生成图片: <b>{int(breakdown.get('image_separate') or 0)} Xu</b>\n"
-            f"• 生成视频: <b>{int(breakdown.get('video_separate') or 0)} Xu</b>\n\n"
-            "是否继续？Bot 只会在你确认后扣除 Xu。"
-        )
-    if normalize_user_language(lang) != "vi":
-        return (
-            "🎬 <b>Confirm trend content workflow</b>\n\n"
-            f"Topic: <code>{html.escape(str(topic or '')[:180])}</code>\n\n"
-            f"This content workflow costs <b>{total} Xu</b>, including:\n"
-            f"• Trend analysis: <b>{int(breakdown.get('trend_analysis') or 0)} Xu</b>\n"
-            f"• Hook/script/storyboard: <b>{int(breakdown.get('script_storyboard') or 0)} Xu</b>\n"
-            f"• Prompt pack: <b>{int(breakdown.get('prompt_pack') or 0)} Xu</b>\n\n"
-            f"• Current balance: <b>{int(current_credits or 0)} Xu</b>\n\n"
-            "This package only covers the content workflow. Real image/video generation is priced separately.\n"
-            f"• Image generation: <b>{int(breakdown.get('image_separate') or 0)} Xu</b>\n"
-            f"• Video generation: <b>{int(breakdown.get('video_separate') or 0)} Xu</b>\n\n"
-            "Do you want to continue? The bot charges Xu only after you confirm."
-        )
     return (
-        "🎬 <b>Xác nhận gói tạo nội dung theo trend</b>\n\n"
-        f"Chủ đề: <code>{html.escape(str(topic or '')[:180])}</code>\n\n"
-        f"Gói tạo nội dung theo trend sẽ tốn <b>{total} Xu</b>, gồm:\n"
-        f"• Phân tích trend: <b>{int(breakdown.get('trend_analysis') or 0)} Xu</b>\n"
-        f"• Hook/script/storyboard: <b>{int(breakdown.get('script_storyboard') or 0)} Xu</b>\n"
-        f"• Prompt pack: <b>{int(breakdown.get('prompt_pack') or 0)} Xu</b>\n\n"
-        f"• Số dư hiện tại: <b>{int(current_credits or 0)} Xu</b>\n\n"
-        "Gói này chỉ gồm phần nội dung workflow. Tạo ảnh và tạo video thật tính riêng:\n"
-        f"• Tạo ảnh: <b>{int(breakdown.get('image_separate') or 0)} Xu</b>\n"
-        f"• Tạo video: <b>{int(breakdown.get('video_separate') or 0)} Xu</b>\n\n"
-        "Bạn có muốn tiếp tục không?\n"
-        "Bot chỉ trừ Xu sau khi bạn bấm xác nhận."
+        f"<b>{copy['trend_confirm']}</b>\n\n"
+        f"<code>{html.escape(str(topic or '')[:180])}</code>\n\n"
+        f"{copy['total']}: <b>{total} Xu</b>\n"
+        f"• 📈 <b>{int(breakdown.get('trend_analysis') or 0)} Xu</b>\n"
+        f"• 📝 <b>{int(breakdown.get('script_storyboard') or 0)} Xu</b>\n"
+        f"• 🧩 <b>{int(breakdown.get('prompt_pack') or 0)} Xu</b>\n"
+        f"• {hub_copy['balance']}: <b>{int(current_credits or 0)} Xu</b>\n\n"
+        f"{copy['images']}: <b>{int(breakdown.get('image_separate') or 0)} Xu</b>\n"
+        f"{copy['video_prompt']}: <b>{int(breakdown.get('video_separate') or 0)} Xu</b>\n\n"
+        f"{copy['confirm']} · {copy['no_charge']}"
     )
 
 def trend_workflow_content_confirm_keyboard(lang: str = "vi", has_package: bool = False) -> InlineKeyboardMarkup:
@@ -187815,20 +187771,10 @@ async def edit_trend_workflow_insufficient_credits(query, current_credits: int, 
 
 def trend_video_pending_prompt_text(lang: str = "vi") -> str:
     copy = public_video_deep_copy(normalize_user_language(lang))
-    if normalize_user_language(lang) not in {"vi", "en"}:
-        return f"🔥 <b>{copy['trend_pending']}</b>\n\n{copy['confirm']} · TOAN AAS"
-    if normalize_user_language(lang) != "vi":
-        return (
-            "🔥 <b>Trend Video TOAN AAS</b>\n\n"
-            "What product, service or topic do you want to make a trend-based video about?\n\n"
-            "Examples: turquoise mini blender, AI content app, affiliate course, new coffee shop.\n\n"
-            "The bot will ask how you want to choose a trend first. It has not started paid image/video generation and has not charged Xu."
-        )
     return (
-        "🔥 <b>Video theo trend TOAN AAS</b>\n\n"
-        "Bạn muốn làm video theo trend cho sản phẩm/dịch vụ/chủ đề gì?\n\n"
-        "Ví dụ: máy xay sinh tố mini màu xanh ngọc, app AI tạo nội dung, khóa học affiliate, quán cà phê mới mở.\n\n"
-        "Bot sẽ hỏi cách lấy trend trước. Bot chưa bắt đầu tạo ảnh/video thật và chưa trừ Xu."
+        f"🔥 <b>{copy['trend_pending']}</b>\n\n"
+        f"{copy['profile_subject']}\n\n"
+        f"{copy['prepare_prompt']} · {copy['no_charge']}"
     )
 
 def trend_video_pending_keyboard(lang: str = "vi", back_callback: str = "trendg|topic_groups") -> InlineKeyboardMarkup:
