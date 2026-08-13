@@ -93,10 +93,17 @@ def test_manual_topup_copy_hides_domestic_bonus_when_the_interface_is_not_vietna
     source = SOURCE.read_text(encoding="utf-8")
     namespace = {
         "__builtins__": __builtins__,
-        "user_is_vietnam_market": lambda user_id: str(user_id) == "vn-user",
+        "show_domestic_topup_promotion": lambda user_id, lang: str(user_id) == "vn-user" and str(lang) == "vi",
         "manual_topup_rules_text": lambda: "rules",
         "public_copy_locale": lambda lang: str(lang or "vi").lower(),
-        "international_topup_policy_lines": lambda lang: [f"{lang} base Xu only"],
+        "public_account_flow_copy": lambda _lang: {
+            "manual_topup_section": "Manual top-up",
+            "select_topup": "Select the amount",
+            "manual_topup_rules": "Admin verifies received funds before crediting Xu.",
+            "topup_verified_base": "Verified base Xu only.",
+        },
+        "public_topup_deep_copy": lambda _lang: {"manual_channels": "ZaloPay; Binance / USDT TRC20"},
+        "public_international_topup_policy_lines": lambda lang: [f"{lang} base Xu only"],
         "html": type("Html", (), {"escape": staticmethod(str)}),
     }
     exec(_function_source(source, "manual_payment_menu_text"), namespace)

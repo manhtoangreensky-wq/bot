@@ -149,6 +149,7 @@ from services.pricing_guide_content import (
     public_page_title,
     public_ui_text_table,
     public_account_flow_copy,
+    public_topup_deep_copy,
     public_video_deep_copy,
     public_subdub_deep_copy,
 )
@@ -15556,6 +15557,38 @@ def finance_tax_block(snapshot: dict) -> str:
         return ""
     return "\n".join(finance_tax_lines(snapshot))
 
+def finance_tax_block_i18n(snapshot: dict, lang: str = "vi") -> str:
+    """Render the existing invoice amounts with locale-safe public labels."""
+
+    locale = public_copy_locale(lang)
+    if locale == "vi":
+        return finance_tax_block(snapshot)
+    if not snapshot:
+        return ""
+    copy = public_topup_deep_copy(locale)
+    def _public_vnd(value) -> str:
+        return f"{int(value or 0):,}".replace(",", ".") + " VND"
+
+    rate_percent = float(snapshot.get("vat_rate") or 0) * 100
+    separate_vat = (
+        snapshot.get("tax_display") == B2B_TAX_DISPLAY
+        or snapshot.get("customer_type") == "business"
+        or (int(snapshot.get("vat_amount_vnd") or 0) > 0 and not snapshot.get("tax_display"))
+    )
+    if not separate_vat:
+        total = int(snapshot.get("total_amount_vnd") or snapshot.get("subtotal_amount_vnd") or 0)
+        return "\n".join([
+            f"• {html.escape(copy['payment_price'])}: <b>{_public_vnd(total)}</b>",
+            f"• {html.escape(copy['total_payment'])}: <b>{_public_vnd(total)}</b>",
+            f"• {html.escape(copy['included_tax_note'])}",
+        ])
+    return "\n".join([
+        f"• {html.escape(copy['service_price'])}: <b>{_public_vnd(snapshot.get('subtotal_amount_vnd'))}</b>",
+        f"• VAT ({rate_percent:.2f}%): <b>{_public_vnd(snapshot.get('vat_amount_vnd'))}</b>",
+        f"• {html.escape(copy['total_payment'])}: <b>{_public_vnd(snapshot.get('total_amount_vnd'))}</b>",
+        f"• {html.escape(copy['separate_tax_note'])}",
+    ])
+
 def payos_invoice_total_for_order(order_code: str, fallback_amount: int = 0) -> tuple[dict, int]:
     invoice = finance_invoice_for_order(str(order_code))
     total = int(invoice.get("total_amount_vnd") or fallback_amount or 0)
@@ -16014,7 +16047,19 @@ def resolve_payment_package_arg(raw_arg: str | None, default_key: str = "50k") -
             return key, pkg
     return None
 
-def payos_checkout_unavailable_text(pkg_key: str, amount: int, order_code: int, reason: str = "") -> str:
+def payos_checkout_unavailable_text(pkg_key: str, amount: int, order_code: int, reason: str = "", lang: str = "vi") -> str:
+    locale = public_copy_locale(lang)
+    if locale != "vi":
+        copy = public_topup_deep_copy(locale)
+        return (
+            f"⚠️ <b>{html.escape(copy['payos_unavailable_title'])}</b>\n\n"
+            f"• {html.escape(copy['denomination'])}: <code>{html.escape(str(pkg_key))}</code>\n"
+            f"• {html.escape(copy['amount'])}: <b>{format_public_integer(amount)} VND</b>\n"
+            f"• {html.escape(copy['test_order_id'])}: <code>{order_code}</code>\n\n"
+            f"{html.escape(copy['order_cancelled_no_xu'])}\n"
+            f"{html.escape(copy['retry_or_manual'])}\n\n"
+            f"{html.escape(copy['safety_note'])}"
+        )
     return (
         "⚠️ <b>PayOS QR động đang tạm thời không tạo được.</b>\n\n"
         f"• Mệnh giá: <code>{html.escape(str(pkg_key))}</code>\n"
@@ -16027,7 +16072,16 @@ def payos_checkout_unavailable_text(pkg_key: str, amount: int, order_code: int, 
         "• Nếu dùng bill thủ công, admin chỉ duyệt sau khi đối soát tiền thật đã vào tài khoản."
     )
 
-def payos_unavailable_keyboard(pkg_key: str, uid: int) -> InlineKeyboardMarkup:
+def payos_unavailable_keyboard(pkg_key: str, uid: int, lang: str = "vi") -> InlineKeyboardMarkup:
+    locale = public_copy_locale(lang)
+    if locale != "vi":
+        copy = public_hub_copy(locale)
+        deep_copy = public_topup_deep_copy(locale)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"🔁 {deep_copy['retry_payos']}", callback_data=payos_package_callback_data(pkg_key, uid))],
+            [InlineKeyboardButton(f"🏦 {copy['manual_topup']}", callback_data=manual_package_callback_data(pkg_key, uid))],
+            [InlineKeyboardButton(f"⬅️ {copy['common_back']}", callback_data="menu|main_topup")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔁 Thử lại PayOS", callback_data=payos_package_callback_data(pkg_key, uid))],
         [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=manual_package_callback_data(pkg_key, uid))],
@@ -16165,7 +16219,14 @@ def manual_topup_rules_text() -> str:
         "• Phù hợp cho nạp số tiền lớn hoặc ngoại tệ như USD/CNY."
     )
 
-def payos_auto_topup_block_keyboard(uid) -> InlineKeyboardMarkup:
+def payos_auto_topup_block_keyboard(uid, lang: str = "vi") -> InlineKeyboardMarkup:
+    locale = public_copy_locale(lang)
+    if locale != "vi":
+        copy = public_hub_copy(locale)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"🏦 {copy['manual_topup']}", callback_data=manual_package_callback_data("manual_custom", uid))],
+            [InlineKeyboardButton(f"⬅️ {copy['topup_label']}", callback_data="menu|main_topup"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=manual_package_callback_data("manual_custom", uid))],
         [InlineKeyboardButton("⬅️ Nạp Xu", callback_data="menu|main_topup"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
@@ -17927,12 +17988,13 @@ def manual_payment_method_label(method: str, lang: str = "vi") -> str:
         "zalopay_personal": "💚 ZaloPay",
         "zalopay_merchant": "🛍 ZaloPay",
         "momo_tuithantai": "💗 MoMo",
-        "usdt_trc20": "🪙 USDT TRC20",
+        "usdt_trc20": "🪙 Binance / USDT TRC20",
     }.get(method, method)
 
 def manual_payment_menu_text(user_id=None, lang: str | None = None) -> str:
     locale = public_copy_locale(lang)
     copy = public_account_flow_copy(locale)
+    deep_copy = public_topup_deep_copy(locale)
     show_domestic_promotion = show_domestic_topup_promotion(user_id, lang)
     if not show_domestic_promotion:
         if locale == "vi":
@@ -17951,12 +18013,14 @@ def manual_payment_menu_text(user_id=None, lang: str | None = None) -> str:
                 "Chiết khấu dịch vụ theo hạng thành viên vẫn áp dụng nếu đủ điều kiện.",
             ]
             if locale == "vi"
-            else international_topup_policy_lines(locale)
+            else public_international_topup_policy_lines(locale)
         )
         rules_text = manual_topup_rules_text() if locale == "vi" else copy["manual_topup_rules"]
+        channels_note = f"{html.escape(deep_copy['manual_channels'])}\n\n" if locale != "vi" else ""
         return (
             f"{title}\n\n"
             f"{choose_currency}\n\n"
+            f"{channels_note}"
             f"{review_note}\n\n"
             f"{html.escape(rules_text)}\n\n"
             f"{' '.join(policy_lines)}\n\n"
@@ -17998,7 +18062,7 @@ def manual_domestic_amount_text(user_id=None, lang: str | None = None) -> str:
         locale = public_copy_locale(lang)
         copy = public_account_flow_copy(locale)
         title = f"💳 <b>TOAN AAS — {copy['manual_topup_section']}</b>" if locale != "vi" else "💳 <b>Nạp VND TOAN AAS</b>"
-        return "\n\n".join([title, *international_topup_policy_lines(locale)])
+        return "\n\n".join([title, *public_international_topup_policy_lines(locale)])
     return (
         "🇻🇳 <b>Nạp Xu bằng VND</b>\n\n"
         "Chọn mệnh giá bạn muốn nạp. Sau đó bot sẽ hỏi phương thức thanh toán.\n\n"
@@ -18103,6 +18167,13 @@ def format_foreign_amount(value) -> str:
     number = float(value or 0)
     return str(int(number)) if number.is_integer() else f"{number:.2f}".rstrip("0").rstrip(".")
 
+def format_public_integer(value) -> str:
+    return f"{int(value or 0):,}".replace(",", ".")
+
+def format_manual_vnd_amount(value, lang: str = "vi") -> str:
+    suffix = "đ" if public_copy_locale(lang) == "vi" else " VND"
+    return f"{format_public_integer(value)}{suffix}"
+
 def manual_foreign_preview_text(preview: dict, lang: str = "vi") -> str:
     currency = str(preview.get("currency") or "").upper()
     if normalize_user_language(lang) != "vi":
@@ -18111,9 +18182,9 @@ def manual_foreign_preview_text(preview: dict, lang: str = "vi") -> str:
         return (
             f"{'🇺🇸' if currency == 'USD' else '🇨🇳'} <b>{hub_copy['common_confirm']} — {currency}</b>\n\n"
             f"{copy['conversion']}: <b>{html.escape(format_foreign_amount(preview.get('original_amount')))} {currency}</b> → "
-            f"<b>{int(preview.get('expected_xu') or 0):,} Xu</b>\n\n"
+            f"<b>{format_public_integer(preview.get('expected_xu'))} Xu</b>\n\n"
             f"{copy['topup_verified_base']}\n{copy['topup_benefits_remain']}\n\n{copy['manual_topup_rules']}"
-        ).replace(",", ".")
+        )
     return (
         f"{'🇺🇸' if currency == 'USD' else '🇨🇳'} <b>Xác nhận mệnh giá {currency}</b>\n\n"
         f"Số tiền: <b>{html.escape(format_foreign_amount(preview.get('original_amount')))} {currency}</b>\n"
@@ -18238,16 +18309,18 @@ def manual_payment_method_text(uid, method: str, state: dict | None = None, lang
         copy = public_hub_copy(locale)
         account_copy = public_account_flow_copy(locale)
         selected = (
-            f"{format_foreign_amount(state.get('original_amount'))} {currency} → {amount:,} VND"
+            f"{format_foreign_amount(state.get('original_amount'))} {currency} → {format_public_integer(amount)} VND"
             if foreign_manual else
-            (f"{pkg_key} — {amount:,} VND" if amount else account_copy["select_topup"])
+            (f"{pkg_key} — {format_public_integer(amount)} VND" if amount else account_copy["select_topup"])
         )
         expected_xu = f"{xu} Xu" if xu else "—"
         total = int(state.get("total_amount_vnd") or 0)
         subtotal = int(state.get("subtotal_amount_vnd") or 0)
         vat = int(state.get("vat_amount_vnd") or 0)
         tax_note = (
-            f"\n💵 <b>{subtotal:,} VND</b>\n🧾 VAT: <b>{vat:,} VND</b>\n💳 <b>{total:,} VND</b>\n"
+            f"\n💵 <b>{format_public_integer(subtotal)} VND</b>\n"
+            f"🧾 VAT: <b>{format_public_integer(vat)} VND</b>\n"
+            f"💳 <b>{format_public_integer(total)} VND</b>\n"
             if total > 0 and (subtotal > 0 or vat > 0) else ""
         )
         method_title = manual_payment_method_label(method, locale)
@@ -18276,7 +18349,7 @@ def manual_payment_method_text(uid, method: str, state: dict | None = None, lang
             f"{account_copy['topup_verified_base']}\n"
             f"{account_copy['topup_benefits_remain']}\n\n"
             f"{copy['common_no_charge']}"
-        ).replace(",", ".")
+        )
     selected = (
         f"{format_foreign_amount(state.get('original_amount'))} {currency} — quy đổi {amount:,}đ"
         if foreign_manual else
@@ -18605,16 +18678,17 @@ def manual_pending_admin_keyboard(deposit: dict) -> InlineKeyboardMarkup:
 def manual_pending_user_text(deposit: dict, lang: str = "vi") -> str:
     foreign = bool(deposit.get("foreign_manual"))
     currency = str(deposit.get("currency") or "VND").upper()
-    amount_text = (
-        f"{format_foreign_amount(deposit.get('original_amount'))} {currency}"
-        if foreign else f"{int(deposit.get('amount_vnd') or 0):,}đ"
-    )
     bonus_allowed = is_topup_bonus_allowed({
         "currency": currency,
         "method": deposit.get("method"),
         "foreign_manual": foreign,
     })
     locale = public_copy_locale(lang)
+    amount_text = (
+        f"{format_foreign_amount(deposit.get('original_amount'))} {currency}"
+        if foreign else
+        (f"{format_public_integer(deposit.get('amount_vnd'))} VND" if locale != "vi" else f"{int(deposit.get('amount_vnd') or 0):,}đ")
+    )
     if locale != "vi":
         copy = public_hub_copy(locale)
         account_copy = public_account_flow_copy(locale)
@@ -18622,13 +18696,13 @@ def manual_pending_user_text(deposit: dict, lang: str = "vi") -> str:
             f"✅ <b>{copy['common_success']}</b>\n\n"
             f"#<code>{int(deposit.get('id') or 0)}</code>\n"
             f"📦 <b>{html.escape(amount_text)}</b>\n"
-            f"{account_copy['conversion']}: <b>{int(deposit.get('amount_vnd') or 0):,} VND → "
-            f"{int(deposit.get('expected_xu') or 0):,} Xu</b>\n"
+            f"{account_copy['conversion']}: <b>{format_public_integer(deposit.get('amount_vnd'))} VND → "
+            f"{format_public_integer(deposit.get('expected_xu'))} Xu</b>\n"
             f"{account_copy['pending']}: <b>{account_copy['manual_topup_section']}</b>\n\n"
             f"{account_copy['manual_topup_rules']}\n"
             f"{account_copy['topup_verified_base']}\n"
             f"{account_copy['topup_benefits_remain']}"
-        ).replace(",", ".")
+        )
     foreign_lines = (
         "Ưu đãi cộng Xu: <b>không áp dụng cho phương thức này</b>\n"
         "Chiết khấu hạng: vẫn áp dụng khi mua/dùng dịch vụ nếu đủ điều kiện\n"
@@ -20545,12 +20619,55 @@ def mark_beta_gift_request_approved(conn, code: str, user_id) -> int:
     )
     return int(cur.rowcount or 0)
 
-def gift_needs_assignment_message(user_or_id, code: str) -> str:
+def gift_customer_result_text(status: str, code: str, info: dict | None = None, lang: str = "vi") -> str:
+    """Render customer gift outcomes without changing redemption or credit logic."""
+
+    locale = public_copy_locale(lang)
+    copy = public_topup_deep_copy(locale)
+    gift_info = dict(info or {})
+    safe_code = html.escape(gift_info.get("code") or normalize_promo_code(code) or str(code or "").strip().upper())
+    if locale == "vi":
+        if status == "redeemed":
+            return (
+                "✅ <b>Bạn đã nhận quà TOAN AAS</b>\n\n"
+                f"• Mã: <code>{safe_code}</code>\n"
+                f"• Xu dịch vụ nhận: <b>+{int(gift_info.get('xu') or 0)} Xu</b>\n"
+                f"• Số dư mới: <b>{int(gift_info.get('balance') or 0)} Xu dịch vụ</b>"
+            )
+        if status == "already_applied":
+            return "ℹ️ Mã quà tặng này đã được nhận trên tài khoản của bạn, hệ thống không cộng trùng."
+        return (
+            "❌ Mã quà tặng không hợp lệ, đã hết lượt hoặc chưa được kích hoạt.\n\n"
+            f"Lý do: <code>{html.escape(str(status or 'invalid'))}</code>"
+        )
+    if status == "redeemed":
+        return (
+            f"✅ <b>{html.escape(copy['gift_received_title'])}</b>\n\n"
+            f"• {html.escape(copy['gift_code_label'])}: <code>{safe_code}</code>\n"
+            f"• {html.escape(copy['gift_xu_received'])}: <b>+{int(gift_info.get('xu') or 0)} Xu</b>\n"
+            f"• {html.escape(public_account_flow_copy(locale)['new_balance'])}: "
+            f"<b>{int(gift_info.get('balance') or 0)} Xu</b>"
+        )
+    if status == "already_applied":
+        return f"ℹ️ {html.escape(copy['gift_already_received'])}"
+    return f"❌ {html.escape(copy['gift_invalid'])}"
+
+def gift_needs_assignment_message(user_or_id, code: str, lang: str = "vi") -> str:
     user_id = getattr(user_or_id, "id", user_or_id)
     username, _, _ = telegram_user_contact_text(user_or_id)
     safe_code = html.escape(normalize_promo_code(code) or str(code or "").strip().upper())
-    username_line = f"@{html.escape(username)}" if username else "không có"
+    locale = public_copy_locale(lang)
+    copy = public_topup_deep_copy(locale)
+    username_line = f"@{html.escape(username)}" if username else ("không có" if locale == "vi" else "—")
     support_url = html.escape(SUPPORT_TELEGRAM_URL)
+    if locale != "vi":
+        return (
+            f"🎁 <b>{html.escape(copy['gift_assignment_required'])}</b>\n\n"
+            f"{html.escape(copy['gift_code_label'])}: <code>{safe_code}</code>\n"
+            f"<code>{html.escape(str(user_id))}</code>\n"
+            f"{username_line}\n\n"
+            f"{html.escape(copy['gift_support_instruction'])}\n{support_url}"
+        )
     return (
         "🎁 <b>Mã quà tặng cần admin kích hoạt</b>\n\n"
         f"Mã <code>{safe_code}</code> chỉ áp dụng cho tài khoản đã được admin cấp quyền.\n\n"
@@ -20563,10 +20680,19 @@ def gift_needs_assignment_message(user_or_id, code: str) -> str:
         "Mã quà tặng chỉ dùng trong sự kiện đặc biệt, chương trình test hoặc khi admin hỗ trợ riêng."
     )
 
-def gift_beta_request_pending_message(user_or_id, code: str) -> str:
+def gift_beta_request_pending_message(user_or_id, code: str, lang: str = "vi") -> str:
     user_id = getattr(user_or_id, "id", user_or_id)
     safe_code = html.escape(normalize_promo_code(code) or str(code or "").strip().upper())
+    locale = public_copy_locale(lang)
+    copy = public_topup_deep_copy(locale)
     support_url = html.escape(SUPPORT_TELEGRAM_URL)
+    if locale != "vi":
+        return (
+            f"⏳ <b>{html.escape(copy['gift_request_pending'])}</b>\n\n"
+            f"{html.escape(copy['gift_code_label'])}: <code>{safe_code}</code>\n"
+            f"<code>{html.escape(str(user_id))}</code>\n\n"
+            f"{html.escape(copy['gift_support_instruction'])}\n{support_url}"
+        )
     return (
         "⏳ <b>Yêu cầu mã BETA đã được gửi trước đó</b>\n\n"
         f"Yêu cầu mã <code>{safe_code}</code> của bạn đã được gửi cho admin trước đó. "
@@ -20576,9 +20702,11 @@ def gift_beta_request_pending_message(user_or_id, code: str) -> str:
         f"• Hỗ trợ: {support_url}"
     )
 
-def beta_gift_support_keyboard() -> InlineKeyboardMarkup:
+def beta_gift_support_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    locale = public_copy_locale(lang)
+    label = "Nhắn admin/hỗ trợ" if locale == "vi" else public_hub_copy(locale)["support_contact"]
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 Nhắn admin/hỗ trợ", url=SUPPORT_TELEGRAM_URL)]
+        [InlineKeyboardButton(f"💬 {label}", url=SUPPORT_TELEGRAM_URL)]
     ])
 
 async def notify_admin_beta_gift_request(update: Update, context: ContextTypes.DEFAULT_TYPE, code: str) -> str:
@@ -42528,9 +42656,16 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
     _, pkg_key, uid_str = parts
     uid = int(uid_str)
     lang = get_user_language(uid) or "vi"
+    locale = public_copy_locale(lang)
+    hub_copy = public_hub_copy(locale)
+    account_copy = public_account_flow_copy(locale)
+    deep_copy = public_topup_deep_copy(lang)
 
     if query.from_user.id != uid:
-        await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
+        await query.answer(
+            "⚠️ Không phải yêu cầu của bạn!" if locale == "vi" else f"⚠️ {hub_copy['common_failed']}",
+            show_alert=True,
+        )
         return
 
     if pkg_key.startswith("manual_"):
@@ -42571,6 +42706,12 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 vat_label=str(invoice.get("vat_label") or VAT_DEFAULT_LABEL),
                 base_xu=base_xu,
             )
+            if locale != "vi":
+                return await query.edit_message_text(
+                    manual_payment_menu_text(uid, lang),
+                    parse_mode="HTML",
+                    reply_markup=manual_payment_menu_keyboard(uid, lang),
+                )
             await query.edit_message_text(
                 manual_payment_text(uid, transfer_amount, xu, order_code, "Bạn đã chọn nạp thủ công."),
                 parse_mode="HTML",
@@ -42586,13 +42727,21 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 logger.error(f"Manual QR callback send error: {e}")
             return
         set_manual_bill_state(uid, order_code="MANUAL")
+        if locale != "vi":
+            return await query.edit_message_text(
+                manual_payment_menu_text(uid, lang),
+                parse_mode="HTML",
+                reply_markup=manual_payment_menu_keyboard(uid, lang),
+            )
         return await query.edit_message_text(
             manual_custom_payment_text(uid, "Bạn đã chọn nạp thủ công."),
             parse_mode="HTML",
         )
 
     if pkg_key not in PAYMENT_PACKAGES:
-        await query.edit_message_text("❌ Mệnh giá nạp không hợp lệ.")
+        await query.edit_message_text(
+            "❌ Mệnh giá nạp không hợp lệ." if locale == "vi" else f"❌ {deep_copy['invalid_amount']}"
+        )
         return
 
     pkg = PAYMENT_PACKAGES[pkg_key]
@@ -42600,12 +42749,13 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
     topup_guard = payos_auto_topup_guard(uid, amount, "VND")
     if not topup_guard.get("ok"):
         blocked_message = str(topup_guard.get("message") or PAYOS_AUTO_TOPUP_CAP_WITH_MANUAL_NOTE)
+        guard_message = blocked_message if locale == "vi" else deep_copy["retry_or_manual"]
         return await query.edit_message_text(
-            "⚠️ <b>Nạp tự động PayOS tạm dừng</b>\n\n"
-            f"{html.escape(blocked_message)}\n\n"
-            f"{html.escape(manual_topup_rules_text())}",
+            f"⚠️ <b>{'Nạp tự động PayOS tạm dừng' if locale == 'vi' else html.escape(deep_copy['auto_paused_title'])}</b>\n\n"
+            f"{html.escape(guard_message)}\n\n"
+            f"{html.escape(manual_topup_rules_text() if locale == 'vi' else account_copy['manual_topup_rules'])}",
             parse_mode="HTML",
-            reply_markup=payos_auto_topup_block_keyboard(uid),
+            reply_markup=payos_auto_topup_block_keyboard(uid, lang),
         )
     get_user(uid, query.from_user.first_name or "PayOS user")
     package_credit = calculate_package_credit_for_user(uid, amount)
@@ -42627,6 +42777,20 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         web_result = await create_web_billing_payment_link(web_payload)
         if web_result.get("ok") and web_result.get("checkout_url"):
             web_order = web_result.get("order_code") or "web_app"
+            if locale != "vi":
+                web_text = (
+                    f"⚡ <b>{html.escape(deep_copy['web_invoice_created'])}</b>\n\n"
+                    f"📋 {html.escape(deep_copy['denomination'])}: <b>{format_public_integer(amount)} VND → {format_public_integer(base_xu)} Xu</b>\n"
+                    f"💰 {html.escape(deep_copy['amount'])}: <b>{format_public_integer(amount)} VND</b>\n"
+                    f"🪙 {html.escape(deep_copy['expected_xu'])}: <b>+{base_xu} Xu</b>\n"
+                    f"🆔 {html.escape(deep_copy['web_order_id'])}: <code>{html.escape(str(web_order))}</code>\n\n"
+                    f"{html.escape(deep_copy['credited_after_webhook'])}"
+                )
+                return await query.edit_message_text(
+                    web_text,
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(f"🔗 {deep_copy['pay_now']}", url=web_result["checkout_url"])]]),
+                )
             return await query.edit_message_text(
                 "⚡ <b>ĐÃ KHỞI TẠO HÓA ĐƠN PAYOS QUA WEB APP</b>\n\n"
                 f"📋 Mệnh giá: <b>{html.escape(pkg['text'])}</b>\n"
@@ -42640,6 +42804,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         if not BOT_PAYOS_FALLBACK_ENABLED:
             return await query.edit_message_text(
                 "❌ Web Billing chưa tạo được link thanh toán. Bot chưa tạo đơn và chưa cộng/trừ Xu."
+                if locale == "vi" else f"❌ {deep_copy['generic_topup_error']}"
             )
     order_code = generate_order_code()
     create_order(
@@ -42661,9 +42826,10 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 amount,
                 order_code,
                 "PayOS QR động đang khóa an toàn. Dùng /thucong nếu cần nạp thủ công.",
+                lang=lang,
             ),
             parse_mode="HTML",
-            reply_markup=payos_unavailable_keyboard(pkg_key, uid),
+            reply_markup=payos_unavailable_keyboard(pkg_key, uid, lang),
         )
         return
 
@@ -42676,9 +42842,10 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 amount,
                 order_code,
                 "Thiếu PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY.",
+                lang=lang,
             ),
             parse_mode="HTML",
-            reply_markup=payos_unavailable_keyboard(pkg_key, uid),
+            reply_markup=payos_unavailable_keyboard(pkg_key, uid, lang),
         )
         return
 
@@ -42721,7 +42888,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 )
             else:
                 automatic_bonus_policy_line = (
-                    "🌍 Tài khoản quốc tế chỉ nhận Xu gốc; không áp dụng thưởng nạp nội địa Việt Nam.\n"
+                    f"🌍 {html.escape(account_copy['topup_verified_base'])}\n"
                 )
             promo_line = ""
             if show_domestic_topup_promotion(uid, lang) and promo_attach.get("attached"):
@@ -42736,19 +42903,34 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                     f"⚠️ Mã <code>{html.escape(promo_attach.get('code') or '')}</code> chưa đủ điều kiện cho mệnh giá này "
                     f"({html.escape(reason_text)}), đơn vẫn tạo bình thường.\n"
                 )
-            qr_text = (
-                f"⚡ <b>ĐÃ KHỞI TẠO HÓA ĐƠN QR ĐỘNG SUCCESS</b>\n\n"
-                f"📋 Mệnh giá lựa chọn: <b>{pkg['text']}</b>\n"
-                f"{finance_tax_block(invoice)}\n"
-                f"🪙 Xu gốc: <b>+{base_xu} Xu</b>\n"
-                f"{automatic_bonus_policy_line}"
-                f"{promo_line}"
-                f"🆔 Mã đơn định danh: <code>{order_code}</code>\n\n"
-                f"⏳ Hóa đơn hết hạn sau <b>{ORDER_TTL_MINUTES} phút</b>.\n\n"
-                f"👉 Nhấn vào nút liên kết dưới đây để nhận diện mã QR thanh toán động. Hệ thống sẽ tự động điền sẵn tổng thanh toán và nội dung hóa đơn chính xác!"
-            )
+            if locale == "vi":
+                qr_text = (
+                    f"⚡ <b>ĐÃ KHỞI TẠO HÓA ĐƠN QR ĐỘNG SUCCESS</b>\n\n"
+                    f"📋 Mệnh giá lựa chọn: <b>{pkg['text']}</b>\n"
+                    f"{finance_tax_block(invoice)}\n"
+                    f"🪙 Xu gốc: <b>+{base_xu} Xu</b>\n"
+                    f"{automatic_bonus_policy_line}"
+                    f"{promo_line}"
+                    f"🆔 Mã đơn định danh: <code>{order_code}</code>\n\n"
+                    f"⏳ Hóa đơn hết hạn sau <b>{ORDER_TTL_MINUTES} phút</b>.\n\n"
+                    f"👉 Nhấn vào nút liên kết dưới đây để nhận diện mã QR thanh toán động. Hệ thống sẽ tự động điền sẵn tổng thanh toán và nội dung hóa đơn chính xác!"
+                )
+                scan_label = "🔗 QUÉT MÃ QR THANH TOÁN"
+            else:
+                qr_text = (
+                    f"⚡ <b>{html.escape(deep_copy['payos_invoice_created'])}</b>\n\n"
+                    f"📋 {html.escape(deep_copy['denomination'])}: <b>{format_public_integer(amount)} VND → {format_public_integer(base_xu)} Xu</b>\n"
+                    f"{finance_tax_block_i18n(invoice, lang)}\n"
+                    f"🪙 {html.escape(deep_copy['base_xu'])}: <b>+{base_xu} Xu</b>\n"
+                    f"{automatic_bonus_policy_line}"
+                    f"🆔 {html.escape(deep_copy['order_id'])}: <code>{order_code}</code>\n\n"
+                    f"⏳ {html.escape(deep_copy['expires_in'])}: "
+                    f"<b>{ORDER_TTL_MINUTES} {html.escape(deep_copy['minutes_unit'])}</b>.\n\n"
+                    f"👉 {html.escape(deep_copy['scan_qr_instruction'])}"
+                )
+                scan_label = f"🔗 {deep_copy['scan_qr']}"
             logger.info(f"PayOS create success | order={order_code}")
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 QUÉT MÃ QR THANH TOÁN", url=checkout_url)]])
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton(scan_label, url=checkout_url)]])
             await query.edit_message_text(qr_text, parse_mode="HTML", reply_markup=kb)
         else:
             update_order_status(order_code, PAYOS_STATUS_CANCELLED)
@@ -42764,18 +42946,18 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
             desc = res_data.get("desc") or res_data.get("message") or raw_preview or "Lỗi không rõ"
             await record_payos_failure_and_maybe_alert(context, desc, user_id=uid)
             await query.edit_message_text(
-                payos_checkout_unavailable_text(pkg_key, amount, order_code, desc),
+                payos_checkout_unavailable_text(pkg_key, amount, order_code, desc, lang=lang),
                 parse_mode="HTML",
-                reply_markup=payos_unavailable_keyboard(pkg_key, uid),
+                reply_markup=payos_unavailable_keyboard(pkg_key, uid, lang),
             )
     except Exception as e:
         update_order_status(order_code, PAYOS_STATUS_CANCELLED)
         logger.error(f"PayOS Exception: {e}")
         await record_payos_failure_and_maybe_alert(context, f"{type(e).__name__}: {e}", user_id=uid)
         await query.edit_message_text(
-            payos_checkout_unavailable_text(pkg_key, amount, order_code, str(e)),
+            payos_checkout_unavailable_text(pkg_key, amount, order_code, str(e), lang=lang),
             parse_mode="HTML",
-            reply_markup=payos_unavailable_keyboard(pkg_key, uid),
+            reply_markup=payos_unavailable_keyboard(pkg_key, uid, lang),
         )
 
 async def handle_manual_package_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -42877,8 +43059,9 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
                 )
                 return await query.edit_message_text(
                     f"🇻🇳 <b>{account_copy['select_topup']}</b>\n\n"
-                    f"{account_copy['conversion']}: <b>{int(preview['amount_vnd']):,}đ → {int(preview['base_xu']):,} Xu</b>\n\n"
-                    f"{manual_vnd_method_notice(uid, get_user_language(uid) or 'vi')}".replace(",", "."),
+                    f"{account_copy['conversion']}: <b>{format_manual_vnd_amount(preview['amount_vnd'], lang)} → "
+                    f"{format_public_integer(preview['base_xu'])} Xu</b>\n\n"
+                    f"{manual_vnd_method_notice(uid, lang)}",
                     parse_mode="HTML",
                     reply_markup=manual_domestic_method_keyboard(uid, lang),
                 )
@@ -42907,8 +43090,9 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         set_manual_bill_state(uid, order_code="MANUAL", step="select_method", **preview)
         return await query.edit_message_text(
             f"🇻🇳 <b>{account_copy['select_topup']}</b>\n\n"
-            f"{account_copy['conversion']}: <b>{int(preview['amount_vnd']):,}đ → {int(preview['base_xu']):,} Xu</b>\n\n"
-            f"{manual_vnd_method_notice(uid, get_user_language(uid) or 'vi')}".replace(",", "."),
+            f"{account_copy['conversion']}: <b>{format_manual_vnd_amount(preview['amount_vnd'], lang)} → "
+            f"{format_public_integer(preview['base_xu'])} Xu</b>\n\n"
+            f"{manual_vnd_method_notice(uid, lang)}",
             parse_mode="HTML",
             reply_markup=manual_domestic_method_keyboard(uid, lang),
         )
@@ -128537,6 +128721,11 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     callback_data = ""
     if isinstance(update, Update) and update.callback_query:
         callback_data = str(update.callback_query.data or "").strip()
+    topup_error_callback = callback_data.startswith(("manual|", "payos_pkg|")) or callback_data.startswith("pkg|manual_")
+    promo_error_callback = callback_data.startswith(("pricing|promotions", "pricing|promo_apply"))
+    command_name = message_text.split(maxsplit=1)[0].lower().split("@", 1)[0] if message_text else ""
+    topup_error_command = command_name in {"/naptien", "/thucong"}
+    promo_error_command = command_name in {"/promo", "/khuyenmai", "/my_promos", "/magiamgia", "/uudai", "/promos"}
     completed_video_job = completed_video_job_for_callback_error(update)
     completed_music_job = completed_music_job_for_callback_error(update)
     suppress_subdub_error, subdub_error_job, subdub_error_reason = subdub_should_suppress_outer_error(update, error_text)
@@ -128691,12 +128880,18 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         if isinstance(update, Update) and update.effective_chat:
-            text = (
-                TRANSLATE_AUDIO_TIMEOUT_TEXT if audio_timeout_safe_error else
-                "❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu. Vui lòng thử lại sau."
-                if image_to_pdf_safe_error else
-                "❌ Có lỗi khi xử lý lệnh. Bot chưa trừ Xu. Vui lòng thử lại sau."
-            )
+            if audio_timeout_safe_error:
+                text = TRANSLATE_AUDIO_TIMEOUT_TEXT
+            elif image_to_pdf_safe_error:
+                text = "❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu. Vui lòng thử lại sau."
+            elif topup_error_callback or promo_error_callback or topup_error_command or promo_error_command:
+                error_uid = update.effective_user.id if update.effective_user else None
+                error_lang = get_user_language(error_uid) if error_uid is not None else "vi"
+                topup_error_copy = public_topup_deep_copy(error_lang or "vi")
+                error_key = "promo_error" if promo_error_callback or promo_error_command else "generic_topup_error"
+                text = f"❌ {html.escape(topup_error_copy[error_key])}"
+            else:
+                text = "❌ Có lỗi khi xử lý lệnh. Bot chưa trừ Xu. Vui lòng thử lại sau."
             if (
                 not image_to_pdf_safe_error
                 and not audio_timeout_safe_error
@@ -173237,32 +173432,28 @@ async def _cmd_promo_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ok, status, gift_info = redeem_gift_code(uid, code)
         if ok:
             return await update.message.reply_text(
-                "✅ <b>Bạn đã nhận quà TOAN AAS</b>\n\n"
-                f"• Mã: <code>{html.escape(gift_info.get('code') or normalize_promo_code(code))}</code>\n"
-                f"• Xu dịch vụ nhận: <b>+{int(gift_info.get('xu') or 0)} Xu</b>\n"
-                f"• Số dư mới: <b>{int(gift_info.get('balance') or 0)} Xu dịch vụ</b>",
+                gift_customer_result_text("redeemed", code, gift_info, lang=lang),
                 parse_mode="HTML",
             )
         if status == "assignment_required":
             request_status = await notify_admin_beta_gift_request(update, context, code)
             message = (
-                gift_beta_request_pending_message(update.effective_user, code)
+                gift_beta_request_pending_message(update.effective_user, code, lang)
                 if request_status == "pending"
-                else gift_needs_assignment_message(update.effective_user, code)
+                else gift_needs_assignment_message(update.effective_user, code, lang)
             )
             return await update.message.reply_text(
                 message,
                 parse_mode="HTML",
-                reply_markup=beta_gift_support_keyboard(),
+                reply_markup=beta_gift_support_keyboard(lang),
             )
         if status == "already_applied":
             return await update.message.reply_text(
-                "ℹ️ Mã quà tặng này đã được nhận trên tài khoản của bạn, hệ thống không cộng trùng.",
+                gift_customer_result_text(status, code, gift_info, lang=lang),
                 parse_mode="HTML",
             )
         return await update.message.reply_text(
-            "❌ Mã quà tặng không hợp lệ, đã hết lượt hoặc chưa được kích hoạt.\n\n"
-            f"Lý do: <code>{html.escape(status)}</code>",
+            gift_customer_result_text(status, code, gift_info, lang=lang),
             parse_mode="HTML",
         )
 
@@ -173310,9 +173501,15 @@ async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "cmd_promo failed\n%s",
             sanitize_log_text("".join(traceback.format_exception(type(e), e, e.__traceback__)))[:4000],
         )
+        uid = update.effective_user.id if update.effective_user else None
+        lang = get_user_language(uid) if uid is not None else "vi"
+        locale = public_copy_locale(lang or "vi")
+        deep_copy = public_topup_deep_copy(locale)
         user_text = (
             "❌ Mã ưu đãi đang lỗi xử lý tạm thời. Admin đã được ghi log để kiểm tra.\n\n"
             "Bạn có thể thử lại sau hoặc xem ưu đãi gợi ý: <code>/khuyenmai</code>"
+            if locale == "vi" else
+            f"❌ {html.escape(deep_copy['promo_error'])}"
         )
         if update.effective_user and is_admin_user(update.effective_user.id):
             user_text += f"\n\n<code>{html.escape(type(e).__name__)}: {html.escape(sanitize_log_text(str(e))[:800])}</code>"
@@ -173616,6 +173813,8 @@ async def cmd_trial_bonus_status(update: Update, context: ContextTypes.DEFAULT_T
 
 async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+    lang = get_user_language(uid) or "vi"
+    locale = public_copy_locale(lang)
     record_usage_event(
         uid,
         username=update.effective_user.username or update.effective_user.first_name or "",
@@ -173628,6 +173827,14 @@ async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         if is_admin_user(update.effective_user.id):
             text = admin_gift_code_text()
+        elif locale != "vi":
+            gift_copy = public_topup_deep_copy(locale)
+            text = (
+                f"🎁 <b>{html.escape(gift_copy['gift_code_label'])}</b>\n\n"
+                f"{html.escape(gift_copy['gift_assignment_required'])}\n\n"
+                f"<code>/gift CODE</code>\n\n"
+                f"{html.escape(gift_copy['gift_support_instruction'])}"
+            )
         else:
             text = (
                 "🎁 <b>Nhận quà TOAN AAS</b>\n\n"
@@ -173674,32 +173881,28 @@ async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ok, status, info = redeem_gift_code(update.effective_user.id, code)
     if ok:
         return await update.message.reply_text(
-            "✅ <b>Bạn đã nhận quà TOAN AAS</b>\n\n"
-            f"• Mã: <code>{html.escape(info.get('code') or normalize_promo_code(code))}</code>\n"
-            f"• Xu dịch vụ nhận: <b>+{int(info.get('xu') or 0)} Xu</b>\n"
-            f"• Số dư mới: <b>{int(info.get('balance') or 0)} Xu dịch vụ</b>",
+            gift_customer_result_text("redeemed", code, info, lang=lang),
             parse_mode="HTML",
         )
     if status == "assignment_required":
         request_status = await notify_admin_beta_gift_request(update, context, code)
         message = (
-            gift_beta_request_pending_message(update.effective_user, code)
+            gift_beta_request_pending_message(update.effective_user, code, lang)
             if request_status == "pending"
-            else gift_needs_assignment_message(update.effective_user, code)
+            else gift_needs_assignment_message(update.effective_user, code, lang)
         )
         return await update.message.reply_text(
             message,
             parse_mode="HTML",
-            reply_markup=beta_gift_support_keyboard(),
+            reply_markup=beta_gift_support_keyboard(lang),
         )
     if status == "already_applied":
         return await update.message.reply_text(
-            "ℹ️ Mã quà tặng này đã được nhận trên tài khoản của bạn, hệ thống không cộng trùng.",
+            gift_customer_result_text(status, code, info, lang=lang),
             parse_mode="HTML",
         )
     return await update.message.reply_text(
-        "❌ Mã quà tặng không hợp lệ, đã hết lượt hoặc chưa được kích hoạt.\n\n"
-        f"Lý do: <code>{html.escape(status)}</code>",
+        gift_customer_result_text(status, code, info, lang=lang),
         parse_mode="HTML",
     )
 
@@ -218134,6 +218337,10 @@ async def handle_manual_topup_pending_text(update: Update, context: ContextTypes
     if not update.effective_user or not update.effective_message or not update.effective_message.text:
         return False
     uid = update.effective_user.id
+    lang = get_user_language(uid) or "vi"
+    locale = public_copy_locale(lang)
+    copy = public_hub_copy(locale)
+    deep_copy = public_topup_deep_copy(locale)
     state = get_active_manual_bill_state(uid)
     if not state:
         return False
@@ -218147,43 +218354,59 @@ async def handle_manual_topup_pending_text(update: Update, context: ContextTypes
             amount = 0
         currency = str(state.get("currency") or "USD").upper()
         if amount <= 0 or amount > 1_000_000:
-            await update.effective_message.reply_text(f"⚠️ Hãy nhập số {currency} hợp lệ lớn hơn 0.")
+            await update.effective_message.reply_text(
+                f"⚠️ Hãy nhập số {currency} hợp lệ lớn hơn 0."
+                if locale == "vi" else f"⚠️ {deep_copy['invalid_amount']} ({currency})"
+            )
             return True
         preview = foreign_topup_preview(currency, amount)
         set_manual_bill_state(uid, order_code="MANUAL", amount=preview["amount_vnd"], xu=preview["expected_xu"], **preview)
         await update.effective_message.reply_text(
-            manual_foreign_preview_text(preview),
+            manual_foreign_preview_text(preview, lang),
             parse_mode="HTML",
-            reply_markup=manual_foreign_preview_keyboard(preview, uid),
+            reply_markup=manual_foreign_preview_keyboard(preview, uid, lang),
         )
         return True
     if step == "await_bill":
         if not state.get("foreign_manual"):
-            await update.effective_message.reply_text("📷 Vui lòng gửi ảnh bill giao dịch. Nạp VND không tự duyệt từ nội dung text.")
+            await update.effective_message.reply_text(
+                "📷 Vui lòng gửi ảnh bill giao dịch. Nạp VND không tự duyệt từ nội dung text."
+                if locale == "vi" else f"📷 {deep_copy['vnd_bill_image_only']}"
+            )
             return True
         if len(text) < 6:
-            await update.effective_message.reply_text("⚠️ TXID quá ngắn. Hãy gửi TXID/mã giao dịch đầy đủ hoặc gửi ảnh bill.")
+            await update.effective_message.reply_text(
+                "⚠️ TXID quá ngắn. Hãy gửi TXID/mã giao dịch đầy đủ hoặc gửi ảnh bill."
+                if locale == "vi" else f"⚠️ {deep_copy['txid_too_short']}"
+            )
             return True
         deposit = create_manual_pending_deposit(update.effective_user, state, tx_hash=text)
         if not deposit.get("ok") and deposit.get("reason") == "duplicate_tx_hash":
             USER_BILL_STATE.pop(uid, None)
             await update.effective_message.reply_text(
-                f"⚠️ TXID này đã được dùng cho yêu cầu <code>#{int(deposit.get('duplicate_id') or 0)}</code>. "
-                "TOAN AAS chưa cộng thêm Xu; vui lòng kiểm tra lịch sử hoặc liên hệ hỗ trợ.",
+                (
+                    f"⚠️ TXID này đã được dùng cho yêu cầu <code>#{int(deposit.get('duplicate_id') or 0)}</code>. "
+                    "TOAN AAS chưa cộng thêm Xu; vui lòng kiểm tra lịch sử hoặc liên hệ hỗ trợ."
+                    if locale == "vi" else
+                    f"⚠️ {html.escape(deep_copy['duplicate_txid'])} <code>#{int(deposit.get('duplicate_id') or 0)}</code>"
+                ),
                 parse_mode="HTML",
             )
             return True
         if not deposit.get("ok"):
-            await update.effective_message.reply_text("⚠️ Không thể lưu TXID lúc này. Vui lòng thử lại sau.")
+            await update.effective_message.reply_text(
+                "⚠️ Không thể lưu TXID lúc này. Vui lòng thử lại sau."
+                if locale == "vi" else f"⚠️ {deep_copy['txid_save_failed']}"
+            )
             return True
         USER_BILL_STATE.pop(uid, None)
         await notify_manual_pending_deposit(context, deposit)
         await update.effective_message.reply_text(
-            manual_pending_user_text(deposit),
+            manual_pending_user_text(deposit, lang),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📂 Lịch sử nạp thủ công", callback_data=f"manual|history|{uid}"), InlineKeyboardButton("💬 Hỗ trợ", callback_data="support|start")],
-                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                [InlineKeyboardButton("📂 Lịch sử nạp thủ công" if locale == "vi" else f"📂 {deep_copy['manual_history']}", callback_data=f"manual|history|{uid}"), InlineKeyboardButton("💬 Hỗ trợ" if locale == "vi" else f"💬 {copy['support']}", callback_data="support|start")],
+                [InlineKeyboardButton("🏠 Menu chính" if locale == "vi" else f"🏠 {copy['main_menu']}", callback_data="menu|main")],
             ]),
         )
         return True
