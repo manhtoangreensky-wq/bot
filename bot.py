@@ -218349,21 +218349,20 @@ def shopaikey_video_queue_counts_readonly() -> dict:
             WHERE job_type='video'
             GROUP BY UPPER(COALESCE(status, 'UNKNOWN'))"""
         ).fetchall()
-        counts = {str(status or "UNKNOWN"): int(count or 0) for stat`6 file chuẩn bị kế toán\n"
-        "• <code>/tax_config key=value</code> — ghi chú cấu hình kế toán cũ, chỉ để tham chiếu\n"
-        "• <code>/vat_rate 8</code>, <code>/vat_on</code>, <code>/vat_off</code> — cấu hình GTGT cho hóa đơn mới\n"
-        "• <code>/cit_rate 20</code>, <code>/cit_on</code>, <code>/cit_off</code> — cấu hình TNDN cho báo cáo nội bộ\n"
-        "• <code>/finance_policy_status</code> — chính sách B2C/B2B canonical\n"
-        "• <code>/tax_scenario_report</code> — kịch bản 100.000đ: VAT nội bộ/COGS/marketing/TNDN\n"
-        "• <code>/provider_cost_tax_status</code> — bảng kiểm chi phí provider/FCT\n"
-        "• <code>/pricing_voice_subdub_status</code> — kiểm tra giá Voice/SubDub hiện hành\n"
-        "• <code>/finance_menu_audit</code> — audit route/back menu tài chính\n"
-        "• <code>/internal_docs</code> — mở kho hồ sơ nội bộ admin-only\n"
-        "• <code>/expense_add ...</code> — thêm chi phí vận hành\n"
-        "• <code>/expense_add_pre ...</code> — thêm chi phí trước thành lập\n\n"
-        "Category gợi ý: <code>provider_ai</code>, <code>railway_hosting</code>, <code>domain_hosting</code>, "
-        "<code>software_subscription</code>, <code>marketing_ads</code>, <code>bank_payment_fee</code>, <code>other</code>."
-    )
+        counts = {str(status or "UNKNOWN"): int(count or 0) for status, count in rows}
+    except Exception:
+        counts = {}
+    finally:
+        conn.close()
+    active = sum(counts.get(status, 0) for status in SHOPAIKEY_ACTIVE_JOB_STATUSES)
+    return {
+        "queued": counts.get("QUEUED", 0),
+        "running": active,
+        "success": counts.get("SUCCESS", 0),
+        "failed": counts.get("FAILED", 0) + counts.get("FAILED_TIMEOUT", 0) + counts.get("TIMEOUT", 0),
+        "total": sum(counts.values()),
+        "raw": counts,
+    }
 
 def finance_invoice_adjustment_sign(adjustment_type: str, bucket: str = "revenue") -> int:
     adj = str(adjustment_type or "").strip().lower()
