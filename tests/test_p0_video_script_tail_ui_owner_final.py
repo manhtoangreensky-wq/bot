@@ -32,40 +32,44 @@ def _action_block(action: str, next_action: str) -> str:
     return callback[start:end]
 
 
-def test_script_ai_is_content_first_and_manual_file_do_not_ask_count_up_front() -> None:
+def test_script_ai_starts_with_count_then_ratio_while_manual_and_file_keep_source_first() -> None:
     ai = _action_block("script_ai", "script_manual")
     manual = _action_block("script_manual", "script_upload")
     upload = _action_block("script_upload", "script_file_replace")
 
-    assert '"script_ai_content_source"' in ai
-    assert '"script_scene_count"' not in ai
+    assert '"script_entry_count"' in ai
+    assert '"script_ai_content_source"' not in ai
     assert '"awaiting_existing_script"' in manual
     assert '"script_scene_count"' not in manual
     assert '"awaiting_script_file"' in upload
     assert '"script_scene_count"' not in upload
 
 
-def test_script_ai_order_is_content_goal_audience_platform_style_ratio_duration() -> None:
+def test_script_ai_order_is_count_ratio_content_creative_goal_audience_platform_duration() -> None:
     callback = _function_source("handle_video_product_callback")
     custom_text = _function_source("handle_video_product_pending_text")
 
     ai_entry = _action_block("script_ai", "script_manual")
+    count = _action_block("script_entry_count", "script_entry_ratio_screen")
+    ratio = _action_block("script_entry_ratio", "script_goal_screen")
     suggestion = _action_block("script_suggestion", "script_audience_screen")
     goal = _action_block("script_goal", "script_content_source")
-    style = _action_block("script_style", "script_ratio_screen")
-    ratio = _action_block("script_ratio", "script_duration_screen")
+    platform = _action_block("script_platform", "script_style_screen")
 
-    assert '"script_ai_content_source"' in ai_entry
-    assert '"script_ai_goal"' in suggestion
+    assert '"script_entry_count"' in ai_entry
+    assert '"script_entry_ratio"' in count
+    assert '"script_ai_content_source"' in ratio
+    assert "video_script_open_creative_details" in suggestion
+    assert 'phase="pre_script"' in suggestion
     assert '"script_ai_audience"' in goal
     assert '"script_ai_content_source"' not in goal
-    assert '"script_ai_ratio"' in style
-    assert '"script_ai_duration"' in ratio
-    assert '"awaiting_script_ai_content": ("script_ai_goal", "script_content_brief")' in custom_text
+    assert '"script_ai_duration"' in platform
+    assert '"script_ai_style"' not in platform
+    assert '"awaiting_script_ai_content": ("script_creative_details", "script_content_brief")' in custom_text
     assert '"awaiting_script_ai_goal": ("script_ai_audience", "script_goal_label")' in custom_text
 
 
-def test_script_count_is_parser_review_only_then_enters_scene_plan_without_character_detour() -> None:
+def test_script_parser_reuses_pre_script_creative_details_or_opens_them_once_after_ratio() -> None:
     script_spec = FLOW7_SOURCE[
         FLOW7_SOURCE.index('"script_to_video": {') :
         FLOW7_SOURCE.index('"storyboard": {')
@@ -84,11 +88,15 @@ def test_script_count_is_parser_review_only_then_enters_scene_plan_without_chara
 
     handoff = _function_source("video_flow7_start_confirmed_script_state")
     after_ratio = _function_source("video_flow7_after_ratio")
+    assert 'creative_complete = bool(draft.get("script_creative_complete"))' in handoff
+    assert '"script_creative_phase": "complete" if creative_complete else "post_parser"' in handoff
     assert "video_scene3_flow.build_planning_package(state)" in handoff
     assert '"scene_plan"' in handoff
-    assert '"character"' not in handoff
+    assert '"character"' in handoff
+    assert 'if bool(updated.get("script_creative_complete"))' in after_ratio
     assert "video_scene3_flow.build_planning_package(updated)" in after_ratio
     assert 'return updated, "scene_plan"' in after_ratio
+    assert 'return updated, "character"' in after_ratio
 
 
 def test_ai_real_reuses_the_existing_tail_invoice_confirm_and_status_flow() -> None:
@@ -236,6 +244,8 @@ def test_script_scene3_handoff_opens_the_existing_shared_tail_addon() -> None:
 
     bridge = _function_source("video_profile_scene1_open_selected_tail_invoice")
     assert "video_tail9_context(" in bridge
+    assert "if quality not in VIDEO_AI_REAL_QUALITY_MODEL_KEYS:" not in bridge
+    assert 'video_profile_studio_step(context, state, "quality")' not in bridge
     assert 'tail["review_status"] = "not_ready"' in bridge
     assert 'tail["quality_tier_id"] = ""' in bridge
     assert 'video_tail9_render(query, user_id, context, "addon")' in bridge
@@ -247,16 +257,16 @@ def test_script_back_buttons_return_to_the_exact_previous_screen() -> None:
     content_keyboard = _function_source("video_script_content_source_keyboard")
     goal_keyboard = _function_source("video_script_goal_keyboard")
     audience_keyboard = _function_source("video_script_audience_keyboard")
-    style_keyboard = _function_source("video_script_style_keyboard")
     duration_keyboard = _function_source("video_script_duration_keyboard")
     review_keyboard = _function_source("video_script_review_keyboard")
     renderer = _function_source("video_script_render_step")
 
-    assert 'callback_data="vproduct|script_hub"' in content_keyboard
+    assert 'draft.get("script_entry_route")' in content_keyboard
+    assert '"vproduct|script_entry_ratio_screen"' in content_keyboard
+    assert 'else "vproduct|script_hub"' in content_keyboard
     assert 'script_goal_back_callback' in goal_keyboard
     assert 'script_audience_back_callback' in audience_keyboard
-    assert 'callback_data="vproduct|script_platform_screen"' in style_keyboard
-    assert 'callback_data="vproduct|script_ratio_screen"' in duration_keyboard
+    assert 'callback_data="vproduct|script_platform_screen"' in duration_keyboard
     assert 'callback_data="vproduct|script_file_replace"' in review_keyboard
     assert '"awaiting_existing_script": "vproduct|script_hub"' in renderer
     assert 'or "vproduct|script_hub"' in renderer
@@ -296,6 +306,22 @@ def test_selfshot_source_upload_returns_to_the_exact_selected_product() -> None:
     assert "video_selfshotflow4_source_keyboard(flow, current)" in source_request
 
 
+def test_selfshot_scene_change_reuses_creative_controls_between_plan_and_prompts() -> None:
+    callback = _function_source("handle_video_product_callback")
+    profile_callback = _function_source("handle_video_profile_studio_callback")
+    opener = _function_source("video_selfshot2_open_creative_details")
+    finisher = _function_source("video_selfshot2_finish_creative_details")
+
+    assert 'operation == "compile_prompts"' in callback
+    assert "video_selfshot2_open_creative_details" in callback
+    assert '"creative_controls"' in opener
+    assert '"character"' not in opener
+    assert '"image_source"' not in opener
+    assert "video_selfshot2_finish_creative_details" in profile_callback
+    assert "video_selfshot2_compile_prompts" in finisher
+    assert '"prompts"' in finisher
+
+
 def test_shared_review_routes_script_and_selfshot_children_back_to_exact_review() -> None:
     tail_callback = _function_source("handle_video_tail_callback")
     review_start = tail_callback.index('if section == "review"')
@@ -332,12 +358,12 @@ def test_shared_review_routes_script_and_selfshot_children_back_to_exact_review(
     assert 'video_tail9_render(query, uid, context, tail_return)' in image_done
 
 
-def test_script_copy_and_file_review_match_the_content_first_contract() -> None:
+def test_script_copy_and_file_review_keep_full_source_before_parser_and_selected_count() -> None:
     suggestions = _function_source("video_script_suggestions_text")
     proposal = _function_source("video_script_proposal_review_text")
     file_review = _function_source("video_script_review_keyboard")
 
-    assert "chuyển thẳng sang Mục tiêu kịch bản" in suggestions
+    assert "Chi tiết sáng tạo" in suggestions
     assert "Số cảnh đề xuất" in proposal
     assert "✅ Dùng nội dung file" in file_review
     assert "⬅️ Quay lại tải file" in file_review
@@ -345,18 +371,153 @@ def test_script_copy_and_file_review_match_the_content_first_contract() -> None:
     assert "Bước tải file" not in file_review
 
 
-def test_removed_count_first_callbacks_fail_safe_without_reopening_old_screens() -> None:
+def test_count_first_callbacks_restore_the_existing_count_and_ratio_screens() -> None:
     callback = _function_source("handle_video_product_callback")
-    start = callback.index(
-        'if action in {"script_entry_count_screen", "script_entry_count", '
-        '"script_entry_count_custom", "script_entry_ratio_screen", "script_entry_ratio"}'
-    )
-    end = callback.index('if action == "script_goal_screen"', start)
-    stale = callback[start:end]
+    count_screen = _action_block("script_entry_count_screen", "script_entry_count_custom")
+    count = _action_block("script_entry_count", "script_entry_ratio_screen")
+    ratio_screen = _action_block("script_entry_ratio_screen", "script_entry_ratio")
+    ratio = _action_block("script_entry_ratio", "script_goal_screen")
 
-    assert "video_script_restore_parser_or_hub" in stale
-    assert '"script_scene_count"' not in stale
-    assert '"script_scene_ratio"' not in stale
+    assert '"script_entry_count"' in count_screen
+    assert '"awaiting_script_entry_count"' in callback
+    assert 'script_entry_scene_count=scene_count' in count
+    assert '"script_entry_ratio"' in count
+    assert '"script_entry_ratio"' in ratio_screen
+    assert 'script_ratio=ratio' in ratio
+    assert '"script_ai_content_source"' in ratio
+
+
+def test_script_duration_never_recalculates_or_overwrites_the_selected_scene_count() -> None:
+    callback = _function_source("handle_video_product_callback")
+    pending = _function_source("handle_video_product_pending_text")
+
+    duration = _action_block("script_duration", "script_ai_review")
+    duration_pending = pending[
+        pending.index('if current_step == "awaiting_script_ai_duration":') :
+        pending.index('if current_step == "awaiting_script_ai_edit":')
+    ]
+    assert "estimated_scene_count" not in duration
+    assert "script_entry_scene_count=" not in duration
+    assert "estimated_scene_count" not in duration_pending
+    assert "script_entry_scene_count=" not in duration_pending
+    assert 'current_step == "awaiting_script_entry_count"' in pending
+
+
+def test_script_ai_parser_keeps_the_selected_scene_count_locked_without_a_second_choice() -> None:
+    callback = _function_source("handle_video_product_callback")
+    use_start = callback.index('if action == "script_ai_use":')
+    use_end = callback.index('if action == "script_file_use":', use_start)
+    use_block = callback[use_start:use_end]
+    custom_start = callback.index('if action == "script_count_custom":')
+    custom_end = callback.index('if product_id == "script_image_video":', custom_start)
+    custom_block = callback[custom_start:custom_end]
+    count_keyboard = _function_source("video_flow7_script_count_keyboard")
+    pending = _function_source("handle_video_product_pending_text")
+    pending_start = pending.index('if current_step == "awaiting_script_scene_count":')
+    pending_end = pending.index('if current_step == "awaiting_existing_script":', pending_start)
+    pending_block = pending[pending_start:pending_end]
+
+    assert "locked_ai" in use_block
+    assert "locked=locked_ai" in use_block
+    assert "locked_ai" in custom_block
+    assert "if locked_ai:" in pending_block
+    assert "locked=True" in pending_block
+    assert "locked: bool = False" in count_keyboard
+
+
+def test_selfshot2_creative_controls_back_to_scene_plan() -> None:
+    creative_keyboard = _function_source("video_scene3_creative_keyboard")
+
+    assert "selfshot2_creative_setup" in creative_keyboard
+    assert 'vproduct|ss2|show|scene_plan' in creative_keyboard
+
+
+def test_storyboard_legacy_finish_preserves_completed_addon_review_then_enters_quality() -> None:
+    callback = _function_source("_handle_storyboard2_callback_impl")
+    finish_start = callback.index('if action == "finish":')
+    finish_end = callback.index('if action in deferred_answer_actions:', finish_start)
+    finish = callback[finish_start:finish_end]
+
+    assert "video_tail9.mark_addon_complete" in finish
+    assert "video_tail9.mark_review_complete" in finish
+    assert 'video_tail9_render(query, uid, context, "quality")' in finish
+    assert 'video_tail9_render(query, uid, context, "addon")' not in finish
+
+
+def test_storyboard_canonical_transition_enters_one_shared_addon_and_review_tail() -> None:
+    callback = _function_source("_handle_storyboard2_callback_impl")
+    start = callback.index('if action in {"transition_natural", "transition_done"}:')
+    end = callback.index('if action == "addons_screen":', start)
+    transition = callback[start:end]
+
+    assert 'action in {"transition_natural", "transition_done"}' in transition
+    assert "storyboard2_scene3_handoff(context, board)" in transition
+    assert 'video_tail9_render(query, uid, context, "addon")' in transition
+    assert 'video_storyboard2.move(board, "addons")' not in transition
+    assert 'board["addons"] = {}' not in transition
+
+
+def test_selfshot2_reviewed_product_addons_enter_quality_without_a_duplicate_tail() -> None:
+    callback = _function_source("handle_video_product_callback")
+    start = callback.index('if operation == "finish":')
+    end = callback.index('if operation == "compile_prompts"', start)
+    finish = callback[start:end]
+
+    assert "video_tail9.mark_addon_complete" in finish
+    assert "video_tail9.mark_review_complete" in finish
+    assert 'video_tail9_render(query, uid, context, "quality")' in finish
+    assert 'video_tail9_render(query, uid, context, "addon")' not in finish
+
+
+def test_selfshot3_keeps_the_shared_addon_for_logo_and_watermark() -> None:
+    callback = _function_source("handle_video_product_callback")
+    ss3_start = callback.index('if action == "ss3":')
+    finish_start = callback.index('if operation == "finish":', ss3_start)
+    finish_end = callback.index('if operation == "source":', finish_start)
+    finish = callback[finish_start:finish_end]
+
+    assert 'video_tail9_render(query, uid, context, "addon")' in finish
+
+
+def test_selfshot3_quality_converts_source_duration_to_billable_scene_count() -> None:
+    callback = _function_source("handle_video_tail_callback")
+    quality_start = callback.index('if section == "quality"')
+    quality_end = callback.index('if section == "confirm"', quality_start)
+    quality = callback[quality_start:quality_end]
+    helper = _function_source("video_selfshot3_scene_count_for_quality")
+    host = _function_source("video_selfshot3_tail_host")
+    quality_text = _function_source("video_tail9_quality_text")
+
+    assert "video_selfshot3_scene_count_for_quality" in quality
+    assert 'tail["scene_count"] = calculated_scene_count' in quality
+    assert 'tail["estimated_duration"] = calculated_scene_count * scene_seconds' in quality
+    assert "math.ceil" in helper
+    assert "source_duration_seconds" in helper
+    assert "video_selfshot3.PRODUCT_ID" in helper
+    assert "video_selfshot3_scene_count_for_quality" in quality_text
+    assert 'segment_duration_seconds = float(segment.get("duration_ms") or 0) / 1000.0' in host
+    assert "segment_duration_seconds or float(" in host
+
+
+def test_script_creative_details_finish_before_goal_or_scene_plan_without_opening_audio() -> None:
+    callback = _function_source("handle_video_profile_studio_callback")
+    finish = _function_source("video_script_finish_creative_details")
+
+    req_none = callback[
+        callback.index('if action == "req_none":') :
+        callback.index('if action == "req_done":')
+    ]
+    req_done = callback[
+        callback.index('if action == "req_done":') :
+        callback.index('if action == "material":')
+    ]
+    assert "video_script_finish_creative_details" in req_none
+    assert "video_script_finish_creative_details" in req_done
+    assert req_none.index("video_script_finish_creative_details") < req_none.index('"audio_plan"')
+    assert req_done.index("video_script_finish_creative_details") < req_done.index('"audio_plan"')
+    assert 'phase == "post_parser"' in finish
+    assert '"script_ai_goal"' in finish
+    assert '"scene_plan"' in finish
 
 
 def test_custom_goal_and_scene_plan_navigation_preserve_the_real_state() -> None:
