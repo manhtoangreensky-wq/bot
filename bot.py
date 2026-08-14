@@ -106760,6 +106760,12 @@ def video_tail9_addon_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup
             [("✅ Hoàn tất Add-on", "video_tail|addon|complete"), ("🧠 Xem/Sửa câu lệnh", "video_tail|addon|prompts")],
             [("⬅️ Quay lại", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
         ])
+    if str(current.get("video_product_type") or "") == "storyboard_prompt":
+        return video_scene3_keyboard([
+            [("🎙️ Âm thanh & Add-on", "video_tail|addon|audio"), ("🏷️ Logo/Watermark", "video_tail|addon|logo")],
+            [("✅ Hoàn tất Add-on", "video_tail|addon|complete"), ("🎬 Xem/Sửa câu lệnh", "video_tail|addon|prompts")],
+            [("⬅️ Quay lại chuyển cảnh", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
+        ])
     back_callback = str(current.get("return_to") or "menu|main_video")
     return video_scene3_keyboard([
         [("🎙️ Âm thanh, giọng & phụ đề", "video_tail|addon|audio"), ("🖼️ Logo/Watermark", "video_tail|addon|logo")],
@@ -107029,11 +107035,48 @@ def video_tail9_review_text(tail: dict) -> str:
     )
 
 
+def video_tail9_storyboard_assets_text(host: dict) -> str:
+    board = video_storyboard2.normalize_state(dict((host or {}).get("storyboard2") or {}))
+    asset_mode = str(board.get("asset_mode") or "start_only")
+    lines = [
+        "🖼️ <b>Ảnh Storyboard đã chọn</b>",
+        "",
+        f"• Số cảnh: <b>{safe_int(board.get('scene_count'), 0)}</b>",
+        f"• Chế độ: <b>{'Ảnh đầu và ảnh cuối' if asset_mode == 'start_end' else 'Một ảnh đầu mỗi cảnh'}</b>",
+        "",
+    ]
+    for fallback_index, scene in enumerate(board.get("scenes") or [], 1):
+        scene_index = safe_int(scene.get("scene_index"), fallback_index)
+        start_ready = str((scene.get("start_image") or {}).get("status") or "") == "ready"
+        end_ready = str((scene.get("end_image") or {}).get("status") or "") == "ready"
+        end_label = " · ảnh cuối: đã có" if end_ready else (
+            " · ảnh cuối: còn thiếu" if asset_mode == "start_end" else ""
+        )
+        lines.append(
+            f"• Cảnh {scene_index}: ảnh đầu: {'đã có' if start_ready else 'còn thiếu'}{end_label}"
+        )
+    return "\n".join(lines)[:3900]
+
+
+def video_tail9_storyboard_assets_keyboard() -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([[
+        ("⬅️ Quay lại Review", "video_tail|review|open"),
+        ("🎬 Menu Video", "menu|main_video"),
+    ]])
+
+
 def video_tail9_review_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
     current = dict(tail or {})
     if str(current.get("video_product_type") or "") == "script_image_video":
         return video_scene3_keyboard([
             [("👁️ Xem kế hoạch cảnh", "video_tail|review|scenes"), ("✍️ Sửa nội dung", "video_tail|review|edit")],
+            [("🎬 Xem/Sửa câu lệnh", "video_tail|review|prompts"), ("🏷️ Logo/Watermark", "video_tail|review|logo")],
+            [("✅ Hoàn tất rà soát", "video_tail|review|complete"), ("🎙️ Sửa âm thanh", "video_tail|review|audio")],
+            [("⬅️ Quay lại Add-on", "video_tail|review|back"), ("🎬 Menu Video", "menu|main_video")],
+        ])
+    if str(current.get("video_product_type") or "") == "storyboard_prompt":
+        return video_scene3_keyboard([
+            [("👁️ Xem kế hoạch cảnh", "video_tail|review|scenes"), ("🖼️ Xem ảnh Storyboard", "video_tail|review|assets")],
             [("🎬 Xem/Sửa câu lệnh", "video_tail|review|prompts"), ("🏷️ Logo/Watermark", "video_tail|review|logo")],
             [("✅ Hoàn tất rà soát", "video_tail|review|complete"), ("🎙️ Sửa âm thanh", "video_tail|review|audio")],
             [("⬅️ Quay lại Add-on", "video_tail|review|back"), ("🎬 Menu Video", "menu|main_video")],
@@ -108336,6 +108379,10 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             owner == "scene3"
             and str(tail.get("video_product_type") or "") == "script_image_video"
         )
+        storyboard_tail = (
+            owner == "scene3"
+            and str(tail.get("video_product_type") or "") == "storyboard_prompt"
+        )
         if action == "back" and script_tail:
             state = video_profile_studio_step(
                 context,
@@ -108351,7 +108398,27 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 state,
                 get_user_language(uid) or "vi",
             )
-        if action == "prompts" and script_tail:
+        if action == "back" and storyboard_tail:
+            board = video_storyboard2.normalize_state(dict(host.get("storyboard2") or {}))
+            audio = dict(tail.get("audio_config") or {})
+            addons = dict(board.get("addons") or {})
+            for key in ("dubbing", "subtitles", "source_audio", "music", "sfx"):
+                addons[key] = bool(audio.get(key))
+            addons["logo"] = bool(
+                (tail.get("logo_config") or {}).get("enabled")
+                or (tail.get("watermark_config") or {}).get("enabled")
+            )
+            board["addons"] = addons
+            board["addons_ready"] = True
+            board = video_storyboard2.move(
+                board,
+                "transitions",
+                push=False,
+                awaiting_input="",
+            )
+            save_storyboard2_state(context, board, host)
+            return await storyboard2_render(query, context, board)
+        if action == "prompts" and (script_tail or storyboard_tail):
             state = video_profile_studio_step(
                 context,
                 host,
@@ -108799,7 +108866,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if action == "audio":
             if (
                 owner == "scene3"
-                and str(tail.get("video_product_type") or "") == "script_image_video"
+                and str(tail.get("video_product_type") or "")
+                in {"script_image_video", "storyboard_prompt"}
             ):
                 state = video_profile_studio_step(
                     context,
@@ -108819,6 +108887,16 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             )
         if action == "continue":
             return await video_tail9_render(query, uid, context, "review")
+        if (
+            action == "assets"
+            and owner == "scene3"
+            and str(tail.get("video_product_type") or "") == "storyboard_prompt"
+        ):
+            return await safe_edit_or_send_long_html(
+                query,
+                video_tail9_storyboard_assets_text(host),
+                reply_markup=video_tail9_storyboard_assets_keyboard(),
+            )
         if owner == "video_edit":
             if action in {"scenes", "prompts", "redo"}:
                 return await safe_edit_or_send(
@@ -248221,7 +248299,7 @@ def video_profile_scene1_can_return_to_shared_tail(state: dict, screen: str) -> 
         return True
     return target == "addon" and (
         video_flow7_kind(state) == "script_to_video"
-        or video_flow6_product_id(state) == "script_image_video"
+        or video_flow6_product_id(state) in {"script_image_video", "storyboard_prompt"}
     )
 
 
@@ -249237,7 +249315,7 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             return await video_tail9_render(query, uid, context, "addon")
         if return_step == "review" and (
             video_flow7_kind(state) == "script_to_video"
-            or video_flow6_product_id(state) == "script_image_video"
+            or video_flow6_product_id(state) in {"script_image_video", "storyboard_prompt"}
         ):
             state = video_profile_studio_step(
                 context,
