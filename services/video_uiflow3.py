@@ -101,9 +101,9 @@ ENTRY_ADAPTERS: dict[str, dict[str, Any]] = {
         "initial_step": "entry",
         "source_kind": "series_content",
         "source_required": False,
-        "seconds_per_scene": 600,
+        "seconds_per_scene": 300,
         "minimum_scene_count": 1,
-        "maximum_scene_count": 12,
+        "maximum_scene_count": 20,
         "public_submit_enabled": False,
     },
 }
