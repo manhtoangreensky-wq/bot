@@ -250767,8 +250767,12 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
     if action in {"review_done", "review_continue"}:
         flow_kind = str(video_flow6.context_from_scene_state(state).get("flow_kind") or "")
         if flow_kind == "script_to_video":
-            video_profile_scene1_handoff(uid, state)
-            return await video_tail9_render(query, uid, context, "addon")
+            return await video_profile_scene1_open_selected_tail_invoice(
+                query,
+                uid,
+                context,
+                state,
+            )
         if flow_kind == "trend_video" or video_flow6_product_id(state) == "video_trend":
             return await video_tail9_render(query, uid, context, "addon")
         return await video_tail9_render(query, uid, context, "logo")
