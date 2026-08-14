@@ -93645,8 +93645,8 @@ VIDEO_PRODUCT_SEMANTICS = {
 TASK3D_PUBLIC_COPY = {
     "video_trend": (
         "🔥 <b>Video theo trend</b>\n\n"
-        "TOAN AAS sẽ giúp anh/chị tìm hướng video đang dễ thu hút, sau đó mới chọn loại video và triển khai nội dung.\n\n"
-        "Bước này chỉ chọn và chỉnh nội dung. Hệ thống chưa bắt đầu tạo video và chưa trừ Xu."
+        "TOAN AAS sẽ giúp anh/chị tìm hướng video đang dễ thu hút, rồi triển khai nhân vật, phong cách, chuyển động và kế hoạch cảnh từ nội dung trend.\n\n"
+        "Chọn một nguồn trend để bắt đầu."
     ),
     "video_idea": (
         "🧠 <b>Ý tưởng video</b>\n\n"
@@ -103453,6 +103453,12 @@ VIDEO_TREND2_LEGACY_CONTENT_ACTIONS = frozenset({
     "suggestions_more",
     "suggestion",
     "restore_content",
+    "continue",
+})
+VIDEO_TREND2_LEGACY_PENDING_INPUTS = frozenset({
+    "aspect_ratio",
+    "manual_content",
+    "edit_content",
 })
 VIDEO_TREND2_PARENT = {
     "catalog": "entry",
@@ -115522,6 +115528,32 @@ async def handle_video_trend2_pending_text(update: Update, context: ContextTypes
     if not text:
         return True
     lang = get_user_language(update.effective_user.id) or "vi"
+    if pending in VIDEO_TREND2_LEGACY_PENDING_INPUTS:
+        video_trend2_close_video_source_session(update.effective_user.id)
+        state.update({
+            "screen": "entry",
+            "screen_parents": {},
+            "pending_input": "",
+            "input_return_screen": "",
+            "selected_trend": {},
+            "scene_count": 0,
+            "aspect_ratio": "",
+            "search_owner": "",
+            "search_session_id": "",
+            "active_search_message_id": 0,
+            "upload_owner": "",
+            "upload_session_id": "",
+            "active_video_message_id": 0,
+            "source_video": {},
+            "source_analysis": {},
+        })
+        save_video_trend2_state(context, state)
+        await update.message.reply_text(
+            "🔥 <b>Video theo trend</b>\n\nHãy chọn lại nguồn trend để tiếp tục.",
+            parse_mode="HTML",
+            reply_markup=video_trend2_entry_keyboard(),
+        )
+        return True
     if pending == "trend_search":
         message_id = safe_int(getattr(update.message, "message_id", 0), 0)
         active_message_id = safe_int(state.get("active_search_message_id"), 0)
@@ -115600,7 +115632,7 @@ async def handle_video_trend2_pending_text(update: Update, context: ContextTypes
         count = safe_int(text, 0)
         if count < 1 or count > 20:
             await update.message.reply_text(
-                "⚠️ Vui lòng gửi một số từ 1 đến 20. Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+                "⚠️ Vui lòng gửi một số từ 1 đến 20.",
                 reply_markup=InlineKeyboardMarkup([video_trend2_nav("vtrend|resume")]),
             )
             return True
@@ -115610,7 +115642,7 @@ async def handle_video_trend2_pending_text(update: Update, context: ContextTypes
         normalized_ratio = text.replace(" ", "")
         if normalized_ratio not in {"9:16", "16:9", "1:1", "4:5"}:
             await update.message.reply_text(
-                "⚠️ Tỉ lệ hợp lệ là 9:16, 16:9, 1:1 hoặc 4:5. Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+                "⚠️ Tỉ lệ hợp lệ là 9:16, 16:9, 1:1 hoặc 4:5.",
                 reply_markup=InlineKeyboardMarkup([video_trend2_nav("vtrend|resume")]),
             )
             return True
@@ -117272,12 +117304,17 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
         elif getattr(update.message, "document", None):
             media = update.message.document
             mime_type = str(getattr(media, "mime_type", "") or "application/octet-stream")
+            trend_document_video = (
+                str(session.get("product_id") or "") == "video_trend"
+                and current_step == "awaiting_trend_video"
+                and video_flow7.video_document_is_supported(
+                    mime_type,
+                    str(getattr(media, "file_name", "") or ""),
+                )
+            )
             if mime_type.startswith("image/"):
                 media_type = "image"
-            elif video_flow7.video_document_is_supported(
-                mime_type,
-                str(getattr(media, "file_name", "") or ""),
-            ):
+            elif mime_type.startswith("video/") or trend_document_video:
                 media_type = "video"
             else:
                 media_type = "document"

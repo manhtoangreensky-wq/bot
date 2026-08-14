@@ -117,11 +117,54 @@ def test_legacy_content_callbacks_cannot_reopen_the_removed_trend_flow() -> None
     guard = callback[guard_start:entry_start]
     assert 'action = "entry"' in guard
 
+    action_guard = BOT_SOURCE.split("VIDEO_TREND2_LEGACY_CONTENT_ACTIONS = frozenset({", 1)[1].split("})", 1)[0]
+    for removed_action in (
+        "manual_content",
+        "edit_content",
+        "idea_catalog",
+        "idea_return",
+        "profiles",
+        "profile",
+        "suggestions_more",
+        "suggestion",
+        "restore_content",
+        "continue",
+    ):
+        assert f'"{removed_action}"' in action_guard
+
+    guarded_actions = set(re.findall(r'"([a-z_]+)"', action_guard))
+    emitted_actions = set()
+    for keyboard_name in (
+        "video_trend2_content_source_keyboard",
+        "video_trend2_profiles_keyboard",
+        "video_trend2_suggestions_keyboard",
+        "video_trend2_preview_keyboard",
+    ):
+        emitted_actions.update(
+            re.findall(r'callback_data=f?"vtrend\|([a-z_]+)', _function_source(keyboard_name))
+        )
+    assert emitted_actions - {"back", "catalog"} <= guarded_actions
+
+    pending = _function_source("handle_video_trend2_pending_text")
+    pending_guard_start = pending.index("if pending in VIDEO_TREND2_LEGACY_PENDING_INPUTS:")
+    search_start = pending.index('if pending == "trend_search":')
+    assert pending_guard_start < search_start
+    pending_guard = pending[pending_guard_start:search_start]
+    assert '"screen": "entry"' in pending_guard
+    assert "video_trend2_entry_keyboard" in pending_guard
+    assert "return True" in pending_guard
+
 
 def test_public_trend_ui_has_no_internal_side_effect_copy() -> None:
     start = BOT_SOURCE.index("VIDEO_TREND2_STATE_KEY")
     end = BOT_SOURCE.index("def storyboard2_prepare_quick_image", start)
-    public_surface = BOT_SOURCE[start:end].casefold()
+    trend_copy_start = BOT_SOURCE.index('    "video_trend": (', BOT_SOURCE.index("TASK3D_PUBLIC_COPY = {"))
+    trend_copy_end = BOT_SOURCE.index('    "video_idea": (', trend_copy_start)
+    public_surface = (
+        BOT_SOURCE[start:end]
+        + BOT_SOURCE[trend_copy_start:trend_copy_end]
+        + _function_source("handle_video_trend2_pending_text")
+    ).casefold()
 
     for forbidden in (
         "chưa tạo tác vụ",
@@ -130,6 +173,20 @@ def test_public_trend_ui_has_no_internal_side_effect_copy() -> None:
         "chưa tạo video",
     ):
         assert forbidden not in public_surface
+
+
+def test_octet_stream_extension_fallback_is_owned_only_by_trend_upload() -> None:
+    media = _function_source("handle_video_product_pending_media")
+    media_flow_start = media.index("if current_step in VIDEO_MICROFLOW_MEDIA_INPUT_STEPS:")
+    document_start = media.index('elif getattr(update.message, "document", None):', media_flow_start)
+    document_end = media.index("if not media:", document_start)
+    document_branch = media[document_start:document_end]
+
+    assert "trend_document_video = (" in document_branch
+    assert 'str(session.get("product_id") or "") == "video_trend"' in document_branch
+    assert 'current_step == "awaiting_trend_video"' in document_branch
+    assert "video_flow7.video_document_is_supported" in document_branch
+    assert 'elif mime_type.startswith("video/") or trend_document_video:' in document_branch
 
 
 def test_async_search_and_upload_results_require_current_owner() -> None:
