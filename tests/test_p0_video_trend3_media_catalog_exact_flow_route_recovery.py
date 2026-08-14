@@ -114,7 +114,12 @@ def test_refresh_without_valid_media_preserves_last_media_cache() -> None:
 
 def test_public_entry_catalog_and_ratio_contract_are_exact() -> None:
     labels = [label for row in video_flow7.entry_rows("video_trend") for label, _callback in row]
-    assert labels == ["🔥 Trend mới nhất", "✍️ Tự nhập trend"]
+    assert labels == [
+        "🔥 Trend mới nhất",
+        "✍️ Tự nhập trend",
+        "🔎 Tìm kiếm trend",
+        "📹 Gửi video trend",
+    ]
 
     entry = _between("def video_trend2_entry_keyboard", "def video_trend2_catalog_rows")
     assert "Trend theo nhóm" not in entry
@@ -150,10 +155,10 @@ def test_content_source_profiles_idea_catalog_and_flow_order_are_canonical() -> 
         assert label in content
     assert len([row for row in video_profile_catalog.PROFILE_SEEDS if row.get("is_active")]) == 32
     sequence = video_flow7.product_sequence("video_trend")
-    assert sequence[:6] == (
-        "trend_source", "scene_count", "aspect_ratio", "content_source",
-        "content_profile_or_preset", "content_choice",
-    )
+    assert sequence[:4] == ("trend_source", "scene_count", "aspect_ratio", "character")
+    assert "content_source" not in sequence
+    assert "content_profile_or_preset" not in sequence
+    assert "content_choice" not in sequence
     assert sequence[-3:] == ("finish", "invoice", "confirm")
 
 
@@ -168,7 +173,7 @@ def test_exact_back_stack_and_idea_return_are_preserved() -> None:
         assert route in handler
     assert 'back_callback="vtrend|idea_return"' in handler
     assert "screen_parents.get(screen)" in handler
-    assert 'callback_data="menu|main"' in _between("def video_trend2_nav", "def video_trend2_entry_keyboard")
+    assert 'callback_data="menu|main_video"' in _between("def video_trend2_nav", "def video_trend2_entry_keyboard")
 
 
 def test_valid_trend_callbacks_have_one_owner_no_generic_x_and_zero_preconfirm_side_effects() -> None:
@@ -191,7 +196,10 @@ def test_valid_trend_callbacks_have_one_owner_no_generic_x_and_zero_preconfirm_s
 
 def test_changed_trend_regions_compile() -> None:
     compile(
-        "VIDEO_TREND2_STATE_KEY" + _between("VIDEO_TREND2_STATE_KEY", "async def handle_video_product_callback"),
+        "VIDEO_TREND2_STATE_KEY" + _between(
+            "VIDEO_TREND2_STATE_KEY",
+            "@video_public_callback_failure_guard\nasync def handle_video_product_callback",
+        ),
         "bot.py:trend3",
         "exec",
     )

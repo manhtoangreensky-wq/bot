@@ -7,6 +7,7 @@ never creates media jobs, calls a paid provider, or mutates a customer wallet.
 from __future__ import annotations
 
 import hashlib
+import html as html_lib
 import json
 import re
 import urllib.request
@@ -330,6 +331,65 @@ def normalize_item(
         "is_active": 1 if bool(raw.get("is_active", True)) else 0,
         "version": max(1, int(raw.get("version") or SCHEMA_VERSION)),
     }
+
+
+def normalize_online_search_results(
+    query: str,
+    items: Iterable[Mapping[str, Any]],
+    *,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Normalize public search metadata for the Trend intake without provider work."""
+
+    current = now or utc_now()
+    search_query = _clean(query, 240)
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in items:
+        if not isinstance(raw, Mapping):
+            continue
+        title = _clean(raw.get("title"), 240)
+        source_url = _clean(raw.get("url") or raw.get("source_url"), 1000)
+        source_name = _clean(raw.get("source") or raw.get("source_name") or "Nguồn công khai", 160)
+        summary = _clean(
+            html_lib.unescape(re.sub(r"<[^>]+>", " ", str(raw.get("summary") or ""))),
+            500,
+        )
+        if not title or not source_url.startswith(("https://", "http://")):
+            continue
+        try:
+            item = normalize_item(
+                {
+                    "title": title,
+                    "short_title": title,
+                    "summary": summary or f"Kết quả tìm kiếm công khai cho {search_query or title}.",
+                    "platform": "Web / mạng xã hội",
+                    "region": "VN",
+                    "language": "vi",
+                    "category": "Tìm kiếm trend",
+                    "keywords": [search_query, title, "trend"],
+                    "source_name": source_name,
+                    "source_url": source_url,
+                    "source_published_at": raw.get("published_at") or raw.get("source_published_at"),
+                    "collected_at": current,
+                    "last_verified_at": current,
+                    "evidence": "Kết quả từ nguồn tìm kiếm công khai; cần rà nội dung trước khi dựng.",
+                    "content_safety": "requires_content_planning_review",
+                },
+                now=current,
+            )
+        except (TypeError, ValueError):
+            continue
+        if item["trend_id"] in seen:
+            continue
+        seen.add(item["trend_id"])
+        item.update({
+            "intake_lane": "search",
+            "search_query": search_query,
+            "online_search": True,
+        })
+        normalized.append(item)
+    return normalized
 
 
 _ITEM_COLUMNS = (

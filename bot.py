@@ -68644,6 +68644,9 @@ async def video_public_media_dedupe_guard(update: Update, context: ContextTypes.
     if active_step == "awaiting_video_tail9_logo":
         if active_product not in VIDEO_PRODUCT_REGISTRY:
             return
+    elif active_step == "awaiting_trend_video":
+        if active_product != "video_trend":
+            return
     elif active_step in {"awaiting_selfshot2_video", "awaiting_selfshot2_logo", "awaiting_selfshot3_video"}:
         expected_product = (
             video_selfshot2.PRODUCT_ID
@@ -89688,6 +89691,8 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "expected_children": (
             "vtrend|catalog|latest",
             "vtrend|manual_trend",
+            "vtrend|search",
+            "vtrend|video_upload",
         ),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
@@ -92832,6 +92837,7 @@ def video_microflow_audit_payload() -> dict:
                 "awaiting_multiple_images",
                 "awaiting_reference_video",
                 "awaiting_self_shot_video",
+                "awaiting_trend_video",
                 "awaiting_selfshot2_video",
                 "awaiting_selfshot2_logo",
                 "awaiting_selfshot3_video",
@@ -93949,6 +93955,7 @@ VIDEO_MICROFLOW_MEDIA_INPUT_STEPS = frozenset({
     "awaiting_multiple_images",
     "awaiting_reference_video",
     "awaiting_self_shot_video",
+    "awaiting_trend_video",
     "awaiting_selfshot2_video",
     "awaiting_selfshot2_logo",
     "awaiting_selfshot3_video",
@@ -103429,6 +103436,8 @@ async def handle_product_video_public_confirm_callback(update: Update, context: 
 VIDEO_TREND2_STATE_KEY = "video_trend2_state"
 VIDEO_TREND2_PARENT = {
     "catalog": "entry",
+    "search_results": "entry",
+    "video_analysis": "entry",
     "historical": "entry",
     "categories": "entry",
     "help": "entry",
@@ -103454,6 +103463,15 @@ def video_trend2_state(context) -> dict:
     state.setdefault("profile_key", "")
     state.setdefault("suggestions", [])
     state.setdefault("content_choice", {})
+    state.setdefault("search_query", "")
+    state.setdefault("search_results", [])
+    state.setdefault("search_offset", 0)
+    state.setdefault("search_error", "")
+    state.setdefault("upload_owner", "")
+    state.setdefault("upload_session_id", "")
+    state.setdefault("upload_revision", 0)
+    state.setdefault("source_video", {})
+    state.setdefault("source_analysis", {})
     state.update({
         "provider_called": False,
         "image_provider_called": False,
@@ -103524,6 +103542,10 @@ def video_trend2_entry_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("🔥 Xem 5 trend media", callback_data="vtrend|catalog|latest"),
             InlineKeyboardButton("✍️ Tự nhập trend", callback_data="vtrend|manual_trend"),
         ],
+        [
+            InlineKeyboardButton("🔎 Tìm kiếm trend", callback_data="vtrend|search"),
+            InlineKeyboardButton("📹 Gửi video trend", callback_data="vtrend|video_upload"),
+        ],
         video_trend2_nav("menu|main_video"),
     ])
 
@@ -103590,6 +103612,239 @@ def video_trend2_catalog_keyboard(state: dict, rows: list[dict]) -> InlineKeyboa
         ])
     keyboard.append(video_trend2_nav("vtrend|entry"))
     return InlineKeyboardMarkup(keyboard)
+
+
+def video_trend2_search_results_text(state: dict) -> str:
+    query = str(state.get("search_query") or "").strip()
+    rows = [dict(item) for item in state.get("search_results") or [] if isinstance(item, dict)]
+    offset = max(0, safe_int(state.get("search_offset"), 0))
+    page = rows[offset:offset + 5]
+    if str(state.get("search_error") or ""):
+        return (
+            "🔎 <b>Tìm kiếm trend</b>\n\n"
+            f"Chưa đọc được nguồn tìm kiếm công khai cho <b>{html.escape(query)}</b> ở lần này. "
+            "Anh/chị có thể tìm lại hoặc dùng bộ gợi ý trend có sẵn. Phiên hiện tại vẫn được giữ nguyên."
+        )
+    if not page:
+        return (
+            "🔎 <b>Tìm kiếm trend</b>\n\n"
+            f"Chưa tìm thấy kết quả phù hợp cho <b>{html.escape(query)}</b>. "
+            "Hãy thử cụm từ cụ thể hơn hoặc dùng bộ gợi ý trend có sẵn."
+        )
+    lines = [f"🔎 <b>Kết quả tìm kiếm: {html.escape(query)}</b>", ""]
+    for index, item in enumerate(page, 1):
+        lines.extend([
+            f"{index}. <b>{html.escape(str(item.get('short_title') or item.get('title') or ''))}</b>",
+            f"   Nguồn: {html.escape(str(item.get('source_name') or 'Nguồn công khai'))}",
+            f"   Ý chính: {html.escape(str(item.get('summary') or 'Chưa có mô tả ngắn.')[:220])}",
+            "",
+        ])
+    lines.append("Chọn một kết quả để tiếp tục sang số cảnh. Nội dung nguồn sẽ được giữ làm ngữ cảnh cho toàn bộ flow.")
+    return "\n".join(lines)
+
+
+def video_trend2_search_results_keyboard(state: dict) -> InlineKeyboardMarkup:
+    rows = [dict(item) for item in state.get("search_results") or [] if isinstance(item, dict)]
+    offset = max(0, safe_int(state.get("search_offset"), 0))
+    page = rows[offset:offset + 5]
+    keyboard: list[list[InlineKeyboardButton]] = []
+    if page:
+        keyboard.append([
+            InlineKeyboardButton(str(index), callback_data=f"vtrend|search_pick|{item.get('trend_id')}")
+            for index, item in enumerate(page, 1)
+        ])
+        keyboard.append([
+            InlineKeyboardButton("🔄 Đổi 5 kết quả", callback_data="vtrend|search_more"),
+            InlineKeyboardButton("🔎 Tìm kiếm lại", callback_data="vtrend|search"),
+        ])
+    else:
+        keyboard.append([
+            InlineKeyboardButton("🔎 Tìm kiếm lại", callback_data="vtrend|search"),
+            InlineKeyboardButton("🔥 Gợi ý trend cũ", callback_data="vtrend|catalog|latest"),
+        ])
+    keyboard.append(video_trend2_nav("vtrend|back"))
+    return InlineKeyboardMarkup(keyboard)
+
+
+def video_trend2_upload_owner_valid(session: dict, state: dict) -> bool:
+    draft = dict(session.get("draft") or {})
+    session_id = str(state.get("upload_session_id") or "")
+    revision = max(1, safe_int(state.get("upload_revision"), 1))
+    return bool(
+        session_id
+        and str(state.get("upload_owner") or "") == "video_trend_upload"
+        and str(session.get("product_id") or "") == "video_trend"
+        and str(session.get("current_step") or "") == "awaiting_trend_video"
+        and str(session.get("flow_owner") or "") == "video_trend_upload"
+        and str(session.get("flow_session_id") or "") == session_id
+        and max(1, safe_int(session.get("flow_revision"), 1)) == revision
+        and str(draft.get("trend_upload_owner") or "") == "video_trend_upload"
+        and str(draft.get("trend_upload_session_id") or "") == session_id
+        and max(1, safe_int(draft.get("trend_upload_revision"), 1)) == revision
+    )
+
+
+def video_trend2_upload_token(state: dict) -> str:
+    session_id = str(state.get("upload_session_id") or "").strip()
+    if not session_id:
+        return ""
+    return f"{session_id}:{max(1, safe_int(state.get('upload_revision'), 1))}"
+
+
+def video_trend2_upload_keyboard(state: dict) -> InlineKeyboardMarkup:
+    token = video_trend2_upload_token(state)
+    cancel_callback = f"vtrend|cancel_upload|{token}" if token else "vtrend|entry"
+    menu_callback = f"vtrend|video_menu|{token}" if token else "menu|main_video"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⬅️ Quay lại", callback_data=cancel_callback),
+            InlineKeyboardButton("🎬 Menu Video", callback_data=menu_callback),
+        ],
+    ])
+
+
+def video_trend2_close_video_source_session(user_id: int, *, next_step: str = "intro") -> dict:
+    session = get_video_session(user_id)
+    if str(session.get("product_id") or "") != "video_trend":
+        return session
+    draft = dict(session.get("draft") or {})
+    for key in (
+        "trend_upload_owner",
+        "trend_upload_session_id",
+        "trend_upload_revision",
+        "source_video_id",
+        "source_video",
+        "source_analysis",
+        "analysis_revision",
+        "analysis_provenance",
+        "trend_context",
+        "intake_lane",
+    ):
+        draft.pop(key, None)
+    current_step = str(session.get("current_step") or "")
+    session.update({
+        "previous_step": current_step,
+        "current_step": str(next_step or "intro"),
+        "awaiting_media": False,
+        "input_mode": "",
+        "input_purpose": "",
+        "flow_owner": "video_trend",
+        "flow_stack": ["video_main", "video_trend", str(next_step or "intro")],
+        "draft": draft,
+    })
+    session.pop("flow_session_id", None)
+    session.pop("flow_revision", None)
+    return save_video_session(user_id, session)
+
+
+def video_trend2_cancel_pending_on_video_menu(user_id: int, context) -> bool:
+    state = video_trend2_state(context)
+    session = get_video_session(user_id)
+    current_step = str(session.get("current_step") or "")
+    source_pending = bool(
+        str(state.get("upload_owner") or "") == "video_trend_upload"
+        or current_step in {"awaiting_trend_video", "trend_video_analysis"}
+    )
+    if not str(state.get("pending_input") or "") and not source_pending:
+        return False
+    if source_pending:
+        video_trend2_close_video_source_session(user_id)
+        state.update({
+            "upload_owner": "",
+            "upload_session_id": "",
+            "source_video": {},
+            "source_analysis": {},
+            "selected_trend": {},
+        })
+    state["pending_input"] = ""
+    state["input_return_screen"] = ""
+    save_video_trend2_state(context, state)
+    return True
+
+
+def video_trend2_mark_video_ready(user_id: int, state: dict) -> dict:
+    selected_trend = deepcopy(dict(state.get("selected_trend") or {}))
+    source_video = deepcopy(dict(state.get("source_video") or selected_trend.get("source_video") or {}))
+    source_analysis = deepcopy(dict(state.get("source_analysis") or selected_trend.get("source_analysis") or {}))
+    source_video_id = str(
+        selected_trend.get("source_video_id")
+        or source_video.get("file_id")
+        or ""
+    )
+    if not selected_trend or not source_video_id or not source_analysis:
+        raise ValueError("trend_video_analysis_missing")
+
+    session = get_video_session(user_id)
+    if str(session.get("product_id") or "") != "video_trend":
+        raise ValueError("trend_video_parent_missing")
+    current_step = str(session.get("current_step") or "")
+    history = [str(item) for item in session.get("step_history") or [] if str(item or "")]
+    if current_step and current_step != "trend_video_ready" and (not history or history[-1] != current_step):
+        history.append(current_step)
+    draft = dict(session.get("draft") or {})
+    draft.update({
+        "source_video_id": source_video_id,
+        "source_video": source_video,
+        "source_analysis": source_analysis,
+        "analysis_revision": max(1, safe_int(selected_trend.get("analysis_revision") or state.get("analysis_revision"), 1)),
+        "analysis_provenance": str(selected_trend.get("analysis_provenance") or "local_opencv"),
+        "trend_context": selected_trend,
+        "intake_lane": "video_upload",
+    })
+    for key in ("trend_upload_owner", "trend_upload_session_id", "trend_upload_revision"):
+        draft.pop(key, None)
+    session.update({
+        "previous_step": current_step,
+        "current_step": "trend_video_ready",
+        "step_history": history[-12:],
+        "awaiting_media": False,
+        "input_mode": "",
+        "input_purpose": "",
+        "flow_owner": "video_trend",
+        "flow_stack": ["video_main", "video_trend", "trend_video_ready"],
+        "draft": draft,
+    })
+    session.pop("flow_session_id", None)
+    session.pop("flow_revision", None)
+    return save_video_session(user_id, session)
+
+
+def video_trend2_video_analysis_text(state: dict) -> str:
+    source = dict(state.get("source_video") or {})
+    analysis = dict(state.get("source_analysis") or {})
+    subjects = [dict(item) for item in analysis.get("subject_candidates") or [] if isinstance(item, dict)]
+    subject_labels = ", ".join(str(item.get("label") or item.get("subject_type") or "") for item in subjects[:5])
+    width = safe_int(source.get("width"), 0)
+    height = safe_int(source.get("height"), 0)
+    duration = float(source.get("duration_seconds") or analysis.get("duration_seconds") or 0)
+    return (
+        "📹 <b>Phân tích video trend</b>\n\n"
+        f"• Thời lượng: <b>{duration:g} giây</b>\n"
+        f"• Khung hình: <b>{width} × {height}</b>\n"
+        f"• Chủ thể nhận diện: <b>{html.escape(subject_labels or 'Chưa thấy chủ thể nổi bật')}</b>\n"
+        f"• Chuyển động: {html.escape(str(analysis.get('motion_summary') or 'Chưa phân loại'))}\n"
+        f"• Camera: {html.escape(str(analysis.get('camera_summary') or 'Chưa phân loại'))}\n"
+        f"• Hình ảnh/ngữ cảnh: {html.escape(str(analysis.get('visual_context_summary') or 'Đã giữ các khung tham chiếu chính.'))}\n"
+        f"• Âm thanh nguồn: <b>{'Có' if analysis.get('source_has_audio') else 'Không hoặc chưa nhận diện'}</b>\n\n"
+        "Chọn dùng phân tích này để tiếp tục sang số cảnh. Nhân vật, bối cảnh, phong cách và chuyển động vẫn được rà ở các bước kế tiếp."
+    )
+
+
+def video_trend2_video_analysis_keyboard(state: dict) -> InlineKeyboardMarkup:
+    token = video_trend2_upload_token(state)
+    accept_callback = f"vtrend|video_accept|{token}" if token else "vtrend|entry"
+    back_callback = f"vtrend|video_back|{token}" if token else "vtrend|entry"
+    menu_callback = f"vtrend|video_menu|{token}" if token else "menu|main_video"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Dùng phân tích này", callback_data=accept_callback),
+            InlineKeyboardButton("📹 Gửi video khác", callback_data="vtrend|video_upload"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback),
+            InlineKeyboardButton("🎬 Menu Video", callback_data=menu_callback),
+        ],
+    ])
 
 
 def video_trend2_scene_count_text(state: dict) -> str:
@@ -103739,7 +103994,11 @@ def video_trend2_preview_keyboard() -> InlineKeyboardMarkup:
 
 def video_trend2_source_snapshot(state: dict) -> dict:
     trend = dict(state.get("selected_trend") or {})
+    source_video = deepcopy(dict(state.get("source_video") or trend.get("source_video") or {}))
+    source_analysis = deepcopy(dict(state.get("source_analysis") or trend.get("source_analysis") or {}))
+    source_video_id = str(trend.get("source_video_id") or source_video.get("file_id") or "")
     return {
+        "intake_lane": str(trend.get("intake_lane") or ("manual" if trend.get("manual_input") else "catalog")),
         "trend_id": str(trend.get("trend_id") or "manual_trend"),
         "title": str(trend.get("title") or "Trend tự nhập"),
         "summary": str(trend.get("summary") or ""),
@@ -103751,6 +104010,14 @@ def video_trend2_source_snapshot(state: dict) -> dict:
         "observed_at": str(trend.get("last_verified_at") or trend.get("collected_at") or datetime.now(timezone.utc).isoformat()),
         "sample_preset": bool(trend.get("manual_input")),
         "manual_input": bool(trend.get("manual_input")),
+        "search_query": str(trend.get("search_query") or ""),
+        "online_search": bool(trend.get("online_search")),
+        "source_video_id": source_video_id,
+        "source_video_hash": str(trend.get("source_video_hash") or source_video.get("source_hash") or ""),
+        "source_video": source_video,
+        "source_analysis": source_analysis,
+        "analysis_revision": max(0, safe_int(trend.get("analysis_revision") or state.get("analysis_revision"), 0)),
+        "analysis_provenance": str(trend.get("analysis_provenance") or ""),
     }
 
 
@@ -103762,8 +104029,10 @@ def video_trend_entity_bridge_key(profile_state: dict) -> str:
     )
     trend = dict(profile_state.get("trend_source") or {})
     payload = {
+        "intake_lane": str(trend.get("intake_lane") or ""),
         "trend_id": str(trend.get("trend_id") or ""),
         "observed_at": str(trend.get("observed_at") or ""),
+        "source_video_hash": str(trend.get("source_video_hash") or ""),
         "content": str(
             content.get("content")
             or content.get("summary")
@@ -103818,6 +104087,7 @@ def video_trend_prepare_entity_bridge(
         )
         state = video_uiflow3.set_source_metadata(
             state,
+            intake_lane=str(trend.get("intake_lane") or "catalog"),
             trend_id=str(trend.get("trend_id") or "manual_trend"),
             trend_title=str(trend.get("title") or subject),
             trend_summary=str(trend.get("summary") or subject),
@@ -103825,7 +104095,32 @@ def video_trend_prepare_entity_bridge(
             trend_source_name=str(trend.get("source_name") or ""),
             trend_source_url=str(trend.get("source_url") or ""),
             trend_observed_at=str(trend.get("observed_at") or ""),
+            source_video_id=str(trend.get("source_video_id") or ""),
+            source_video_hash=str(trend.get("source_video_hash") or ""),
+            analysis_revision=max(0, safe_int(trend.get("analysis_revision"), 0)),
+            analysis_provenance=str(trend.get("analysis_provenance") or ""),
         )
+        source_video = deepcopy(dict(trend.get("source_video") or {}))
+        source_analysis = deepcopy(dict(trend.get("source_analysis") or {}))
+        source_video_id = str(trend.get("source_video_id") or source_video.get("file_id") or "")
+        source_fingerprint = str(trend.get("source_video_hash") or source_video.get("source_hash") or "")
+        if str(trend.get("intake_lane") or "") == "video_upload" and source_video_id and source_fingerprint:
+            state = video_uiflow3.add_source_asset(
+                state,
+                asset_type="trend_reference_video",
+                telegram_file_id=source_video_id,
+                fingerprint=source_fingerprint,
+                file_name=str(source_video.get("file_name") or "trend-source.mp4"),
+                mime_type=str(source_video.get("mime_type") or "video/mp4"),
+                duration_seconds=float(source_video.get("duration_seconds") or 0),
+                width=safe_int(source_video.get("width"), 0),
+                height=safe_int(source_video.get("height"), 0),
+                analysis_revision=max(0, safe_int(trend.get("analysis_revision"), 0)),
+                analysis_provenance=str(trend.get("analysis_provenance") or ""),
+                visual_context=deepcopy(dict(source_analysis.get("visual_context") or {})),
+                motion_summary=str(source_analysis.get("motion_summary") or ""),
+                camera_summary=str(source_analysis.get("camera_summary") or ""),
+            )
         state = video_uiflow3.set_format(
             state,
             ratio=ratio,
@@ -104001,6 +104296,11 @@ def video_trend2_canonical_state(context, state: dict) -> dict:
         "subject": subject,
         "trend_source": trend_source,
         "selected_trend_detail": selected_trend,
+        "source_video_id": str(trend_source.get("source_video_id") or ""),
+        "source_video": deepcopy(dict(trend_source.get("source_video") or {})),
+        "source_analysis": deepcopy(dict(trend_source.get("source_analysis") or {})),
+        "analysis_revision": max(0, safe_int(trend_source.get("analysis_revision"), 0)),
+        "analysis_provenance": str(trend_source.get("analysis_provenance") or ""),
         "trend_content_choice": content,
         "provider_called": False,
         "image_provider_called": False,
@@ -104040,6 +104340,18 @@ async def video_trend2_render(target, context, state: dict, lang: str = "vi"):
     if screen == "catalog":
         rows = video_trend2_catalog_rows(state)
         return await safe_edit_or_send_long_html(target, video_trend2_catalog_text(state, rows), reply_markup=video_trend2_catalog_keyboard(state, rows))
+    if screen == "search_results":
+        return await safe_edit_or_send_long_html(
+            target,
+            video_trend2_search_results_text(state),
+            reply_markup=video_trend2_search_results_keyboard(state),
+        )
+    if screen == "video_analysis":
+        return await safe_edit_or_send_long_html(
+            target,
+            video_trend2_video_analysis_text(state),
+            reply_markup=video_trend2_video_analysis_keyboard(state),
+        )
     if screen == "categories":
         historical = str(state.get("catalog_mode") or "latest") == "historical"
         categories = video_trend2_db(
@@ -104115,15 +104427,171 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
         state = save_video_trend2_state(context, state)
 
     if action == "entry":
+        video_trend2_close_video_source_session(uid)
         state = save_video_trend2_state(context, {
             "screen": "entry",
             "screen_parents": {},
             "category": "",
             "catalog_mode": "latest",
             "catalog_offset": 0,
+            "search_query": "",
+            "search_results": [],
+            "search_offset": 0,
+            "search_error": "",
+            "selected_trend": {},
+            "scene_count": 0,
+            "aspect_ratio": "",
+            "upload_owner": "",
+            "upload_session_id": "",
+            "upload_revision": 0,
+            "source_video": {},
+            "source_analysis": {},
+            "pending_input": "",
             "last_callback_query_id": callback_query_id,
         })
         return await video_trend2_render(query, context, state, lang)
+    if action == "cancel_upload":
+        if (
+            str(state.get("upload_owner") or "") != "video_trend_upload"
+            or video_trend2_upload_token(state) != value
+        ):
+            return await video_trend2_render(query, context, state, lang)
+        video_trend2_close_video_source_session(uid)
+        state.update({
+            "screen": "entry",
+            "pending_input": "",
+            "upload_owner": "",
+            "upload_session_id": "",
+            "source_video": {},
+            "source_analysis": {},
+            "selected_trend": {},
+        })
+        state = save_video_trend2_state(context, state)
+        return await video_trend2_render(query, context, state, lang)
+    if action == "video_back":
+        if (
+            str(state.get("screen") or "") != "video_analysis"
+            or video_trend2_upload_token(state) != value
+        ):
+            return await video_trend2_render(query, context, state, lang)
+        video_trend2_close_video_source_session(uid)
+        state.update({
+            "screen": "entry",
+            "pending_input": "",
+            "upload_owner": "",
+            "upload_session_id": "",
+            "source_video": {},
+            "source_analysis": {},
+            "selected_trend": {},
+        })
+        state = save_video_trend2_state(context, state)
+        return await video_trend2_render(query, context, state, lang)
+    if action == "video_menu":
+        if (
+            video_trend2_upload_token(state) != value
+            or not (
+                str(state.get("upload_owner") or "") == "video_trend_upload"
+                or str(state.get("screen") or "") == "video_analysis"
+            )
+        ):
+            return await video_trend2_render(query, context, state, lang)
+        video_trend2_close_video_source_session(uid)
+        state.update({
+            "screen": "entry",
+            "pending_input": "",
+            "upload_owner": "",
+            "upload_session_id": "",
+            "source_video": {},
+            "source_analysis": {},
+            "selected_trend": {},
+        })
+        save_video_trend2_state(context, state)
+        return await safe_edit_query_message(
+            query,
+            menu_text_main_video_i18n(lang),
+            reply_markup=main_video_keyboard(
+                lang,
+                resume_uiflow3=bool(video_uiflow3_state(context)),
+            ),
+        )
+    if action == "video_upload":
+        video_trend2_close_video_source_session(uid)
+        upload_revision = max(1, safe_int(state.get("upload_revision"), 0) + 1)
+        upload_session_id = uuid.uuid4().hex[:20]
+        state.update({
+            "screen": str(state.get("screen") or "entry"),
+            "pending_input": "",
+            "upload_owner": "video_trend_upload",
+            "upload_session_id": upload_session_id,
+            "upload_revision": upload_revision,
+            "source_video": {},
+            "source_analysis": {},
+            "selected_trend": {},
+        })
+        state = save_video_trend2_state(context, state)
+        session = task3d_session_step(
+            uid,
+            "awaiting_trend_video",
+            input_mode="media",
+            input_purpose="trend_source_video",
+            awaiting_media=True,
+            provider_called=False,
+            job_created=False,
+            outbox_created=False,
+            generated_files=0,
+            wallet_mutations=0,
+            xu_charged=0,
+        )
+        draft = dict(session.get("draft") or {})
+        draft.update({
+            "trend_upload_owner": "video_trend_upload",
+            "trend_upload_session_id": upload_session_id,
+            "trend_upload_revision": upload_revision,
+        })
+        session.update({
+            "product_id": "video_trend",
+            "flow_owner": "video_trend_upload",
+            "flow_session_id": upload_session_id,
+            "flow_revision": upload_revision,
+            "draft": draft,
+        })
+        save_video_session(uid, session)
+        return await safe_edit_or_send(
+            query,
+            "📹 <b>Gửi video trend</b>\n\nGửi một video hoặc tệp video MP4/MOV/MKV/WebM. TOAN AAS sẽ phân tích chủ thể, chuyển động, camera và ngữ cảnh hình ảnh bằng công cụ local trước khi sang số cảnh.",
+            parse_mode="HTML",
+            reply_markup=video_trend2_upload_keyboard(state),
+        )
+    if action == "video_accept":
+        if (
+            str(state.get("screen") or "") != "video_analysis"
+            or video_trend2_upload_token(state) != value
+        ):
+            return await video_trend2_render(query, context, state, lang)
+        if not dict(state.get("source_analysis") or {}) or not dict(state.get("selected_trend") or {}):
+            state["screen"] = "video_analysis"
+            state = save_video_trend2_state(context, state)
+            return await video_trend2_render(query, context, state, lang)
+        video_trend2_mark_video_ready(uid, state)
+        state = video_trend2_open_screen(state, "scene_count", parent="video_analysis")
+        state.update({"pending_input": "", "upload_owner": ""})
+        state = save_video_trend2_state(context, state)
+        return await video_trend2_render(query, context, state, lang)
+    if action == "search":
+        return_screen = str(state.get("screen") or "entry")
+        if return_screen not in {"entry", "search_results"}:
+            return_screen = "entry"
+        state.update({
+            "pending_input": "trend_search",
+            "input_return_screen": return_screen,
+        })
+        save_video_trend2_state(context, state)
+        return await safe_edit_or_send(
+            query,
+            "🔎 <b>Tìm kiếm trend</b>\n\nGửi chủ đề, ngách hoặc cụm từ cần tìm. TOAN AAS sẽ đọc nguồn công khai và giữ nguồn của từng kết quả.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([video_trend2_nav("vtrend|resume")]),
+        )
     if action == "catalog":
         state = video_trend2_open_screen(state, "catalog")
         state.update({"category": "", "catalog_mode": "latest", "catalog_offset": 0, "pending_input": ""})
@@ -104150,6 +104618,36 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
         state["screen"] = "catalog"
         state = save_video_trend2_state(context, state)
         return await video_trend2_render(query, context, state, lang)
+    if action == "search_more":
+        rows = [dict(item) for item in state.get("search_results") or [] if isinstance(item, dict)]
+        offset = safe_int(state.get("search_offset"), 0) + 5
+        state.update({
+            "search_offset": 0 if offset >= len(rows) else offset,
+            "screen": "search_results",
+            "pending_input": "",
+        })
+        state = save_video_trend2_state(context, state)
+        return await video_trend2_render(query, context, state, lang)
+    if action == "search_pick":
+        selected = next(
+            (
+                dict(item)
+                for item in state.get("search_results") or []
+                if isinstance(item, dict) and str(item.get("trend_id") or "") == value
+            ),
+            {},
+        )
+        if not selected:
+            state["screen"] = "search_results"
+            state = save_video_trend2_state(context, state)
+            return await video_trend2_render(query, context, state, lang)
+        state = video_trend2_open_screen(state, "scene_count", parent="search_results")
+        state.update({
+            "selected_trend": {**selected, "intake_lane": "search"},
+            "pending_input": "",
+        })
+        state = save_video_trend2_state(context, state)
+        return await video_trend2_render(query, context, state, lang)
     if action == "help":
         state = video_trend2_open_screen(state, "help", parent="entry")
         state = save_video_trend2_state(context, state)
@@ -104166,7 +104664,7 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
             state = save_video_trend2_state(context, state)
             return await video_trend2_render(query, context, state, lang)
         state = video_trend2_open_screen(state, "scene_count", parent="catalog")
-        state.update({"selected_trend": trend, "pending_input": ""})
+        state.update({"selected_trend": {**trend, "intake_lane": "catalog"}, "pending_input": ""})
         state = save_video_trend2_state(context, state)
         return await video_trend2_render(query, context, state, lang)
     if action == "manual_trend":
@@ -109340,11 +109838,11 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             state = video_profile_studio_step(
                 context,
                 host,
-                "full_review",
+                "video_prompts",
                 push=False,
-                prompt_return_step="",
+                prompt_return_step="full_review",
                 audio_plan_return_step="",
-                video_tail_return_to="",
+                video_tail_return_to="addon",
             )
             return await video_profile_scene1_render(
                 query,
@@ -109935,7 +110433,9 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             )
             save_storyboard2_state(context, board, host)
             return await storyboard2_render(query, context, board)
-        if action == "cast_audio" and (script_review or storyboard_review or trend_review):
+        if action == "cast_audio" and trend_review:
+            return await video_tail9_render(query, uid, context, "addon")
+        if action == "cast_audio" and (script_review or storyboard_review):
             action = "audio"
         if action == "logo":
             tail["branding_return_to"] = "review"
@@ -114929,7 +115429,39 @@ async def handle_video_trend2_pending_text(update: Update, context: ContextTypes
     if not text:
         return True
     lang = get_user_language(update.effective_user.id) or "vi"
-    if pending == "manual_trend":
+    if pending == "trend_search":
+        input_parent = str(state.get("input_return_screen") or "entry")
+        if input_parent not in {"entry", "search_results"}:
+            input_parent = "entry"
+        try:
+            raw_results = await fetch_google_news_trends(
+                text,
+                "TikTok Reels YouTube Shorts Facebook",
+                limit=20,
+            )
+            search_results = video_trend_catalog.normalize_online_search_results(
+                text,
+                raw_results,
+            )
+            search_error = ""
+        except Exception as exc:
+            logger.warning(
+                "video_trend_search_failed | exception=%s query_length=%s",
+                type(exc).__name__,
+                len(text),
+            )
+            search_results = []
+            search_error = "public_search_unavailable"
+        state = video_trend2_open_screen(state, "search_results", parent=input_parent)
+        state.update({
+            "search_query": text[:240],
+            "search_results": search_results,
+            "search_offset": 0,
+            "search_error": search_error,
+            "pending_input": "",
+            "input_return_screen": "",
+        })
+    elif pending == "manual_trend":
         now = datetime.now(timezone.utc).isoformat()
         input_parent = str(state.get("input_return_screen") or "entry")
         if input_parent not in {"entry", "catalog"}:
@@ -114950,6 +115482,7 @@ async def handle_video_trend2_pending_text(update: Update, context: ContextTypes
                 "collected_at": now,
                 "last_verified_at": now,
                 "manual_input": True,
+                "intake_lane": "manual",
             },
             "pending_input": "",
             "input_return_screen": "",
@@ -116649,6 +117182,7 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
         video_steps = {
             "awaiting_reference_video",
             "awaiting_self_shot_video",
+            "awaiting_trend_video",
             "awaiting_selfshot2_video",
             "awaiting_selfshot3_video",
         }
@@ -116661,6 +117195,8 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 keyboard = video_selfshot_source_input_keyboard("ss2", dict(session.get("draft") or {}))
             elif current_step == "awaiting_selfshot3_video" and active_product == video_selfshot3.PRODUCT_ID:
                 keyboard = video_selfshot_source_input_keyboard("ss3", dict(session.get("draft") or {}))
+            elif current_step == "awaiting_trend_video" and active_product == "video_trend":
+                keyboard = video_trend2_upload_keyboard(video_trend2_state(context))
             else:
                 keyboard = video_microflow_keyboard(current_step, active_product, lang)
             await update.message.reply_text(video_microflow_missing_input_text(lang), reply_markup=keyboard)
@@ -116672,6 +117208,176 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
         if file_id and file_id not in refs:
             refs.append(file_id)
         refs = refs[:20]
+        if current_step == "awaiting_trend_video" and product_id == "video_trend":
+            trend_state = video_trend2_state(context)
+            if not video_trend2_upload_owner_valid(session, trend_state):
+                await update.message.reply_text(
+                    "⚠️ Phiên nhận video trend đã cũ. Hãy mở lại Video theo trend rồi chọn Gửi video trend.",
+                    reply_markup=video_trend2_entry_keyboard(),
+                )
+                return True
+            message_id = safe_int(getattr(update.message, "message_id", 0), 0)
+            if message_id and safe_int(trend_state.get("last_video_message_id"), 0) == message_id:
+                return True
+            local_probe = video_selfshot_telegram_metadata_probe(
+                media,
+                file_id=file_id,
+                mime_type=mime_type,
+                fallback_file_name="trend-source.mp4",
+            )
+            if not local_probe:
+                try:
+                    local_probe = await inspect_bounded_telegram_video_source(
+                        context,
+                        {
+                            "source_file_id": file_id,
+                            "source_file_name": str(getattr(media, "file_name", "") or "trend-source.mp4"),
+                            "source_mime_type": mime_type or "video/mp4",
+                            "source_file_size": safe_int(getattr(media, "file_size", 0), 0),
+                            "source_duration": safe_int(getattr(media, "duration", 0), 0),
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning("video_trend_probe_failed | exception=%s", type(exc).__name__)
+                    local_probe = {"ok": False, "reason": "source_video_open_failed"}
+            if not local_probe.get("ok"):
+                reason = str(local_probe.get("reason") or "invalid_video_metadata")
+                await update.message.reply_text(
+                    f"{video_local_public_error(reason)} Hãy gửi lại video trong đúng phiên Trend.",
+                    reply_markup=video_trend2_upload_keyboard(trend_state),
+                )
+                return True
+            duration_seconds = float(local_probe.get("duration") or getattr(media, "duration", 0) or 0)
+            source_asset = {
+                "media_kind": "video",
+                "file_id": file_id,
+                "file_unique_id": str(getattr(media, "file_unique_id", "") or ""),
+                "file_size": safe_int(local_probe.get("bytes"), safe_int(getattr(media, "file_size", 0), 0)),
+                "mime_type": mime_type or "video/mp4",
+                "file_name": str(getattr(media, "file_name", "") or "trend-source.mp4"),
+                "duration_seconds": duration_seconds,
+                "width": safe_int(local_probe.get("width"), safe_int(getattr(media, "width", 0), 0)),
+                "height": safe_int(local_probe.get("height"), safe_int(getattr(media, "height", 0), 0)),
+                "fps": float(local_probe.get("fps") or 0),
+                "audio_streams": safe_int(local_probe.get("audio_stream_count"), 0),
+                "format": str(local_probe.get("format_name") or mime_type or "video/mp4"),
+                "video_codec": str(local_probe.get("video_codec") or ""),
+                "probe_source": str(local_probe.get("metadata_source") or "local_ffprobe"),
+            }
+            progress = await update.message.reply_text(
+                "🔎 Đã nhận video. TOAN AAS đang phân tích chủ thể, chuyển động, camera và ngữ cảnh hình ảnh..."
+            )
+            try:
+                inspection = await inspect_selfshot_source(
+                    context,
+                    {
+                        "source_asset": source_asset,
+                        "source_video_id": file_id,
+                        "source_segment": {
+                            "start_ms": 0,
+                            "end_ms": max(1, int(duration_seconds * 1000)),
+                            "start_seconds": 0,
+                            "end_seconds": duration_seconds,
+                        },
+                        "analysis_revision": safe_int(trend_state.get("analysis_revision"), 0),
+                        "source_has_audio": bool(source_asset.get("audio_streams")),
+                    },
+                    "ss2",
+                )
+            except Exception as exc:
+                logger.warning("video_trend_local_analysis_failed | exception=%s", type(exc).__name__)
+                inspection = {"ok": False, "reason": "local_analysis_failed"}
+            if not inspection.get("ok"):
+                await safe_edit_or_send(
+                    progress,
+                    "⚠️ Chưa phân tích được video này. Anh/chị hãy gửi lại video MP4/MOV/MKV/WebM khác; phiên Trend vẫn được giữ.",
+                    reply_markup=video_trend2_upload_keyboard(trend_state),
+                )
+                return True
+            analysis = dict(inspection.get("analysis") or {})
+            metadata = dict(inspection.get("metadata") or {})
+            source_asset.update({
+                "duration_seconds": float(metadata.get("duration") or duration_seconds),
+                "width": safe_int(metadata.get("width"), source_asset.get("width")),
+                "height": safe_int(metadata.get("height"), source_asset.get("height")),
+                "fps": float(metadata.get("fps") or source_asset.get("fps") or 0),
+                "audio_streams": safe_int(metadata.get("audio_stream_count"), source_asset.get("audio_streams")),
+                "format": str(metadata.get("format_name") or source_asset.get("format") or ""),
+                "video_codec": str(metadata.get("video_codec") or source_asset.get("video_codec") or ""),
+                "source_hash": str(inspection.get("source_video_hash") or analysis.get("source_hash") or ""),
+            })
+            caption = re.sub(r"\s+", " ", str(getattr(update.message, "caption", "") or "")).strip()[:500]
+            subject_labels = ", ".join(
+                str(item.get("label") or item.get("subject_type") or "")
+                for item in analysis.get("subject_candidates") or []
+                if isinstance(item, dict)
+            )[:300]
+            summary_parts = [
+                caption,
+                str(analysis.get("motion_summary") or ""),
+                str(analysis.get("camera_summary") or ""),
+                str(analysis.get("visual_context_summary") or ""),
+                f"Chủ thể: {subject_labels}" if subject_labels else "",
+            ]
+            summary = ". ".join(part.strip(" .") for part in summary_parts if part.strip(" ."))[:1000]
+            source_hash = str(source_asset.get("source_hash") or hashlib.sha256(file_id.encode("utf-8")).hexdigest())
+            now = datetime.now(timezone.utc).isoformat()
+            selected_trend = {
+                "trend_id": f"trend_video_{source_hash[:20]}",
+                "title": caption[:240] or "Trend từ video đã gửi",
+                "short_title": caption[:64] or "Trend từ video đã gửi",
+                "summary": summary or "Video trend do người dùng cung cấp để phân tích.",
+                "platform": "Video người dùng cung cấp",
+                "region": "VN",
+                "language": "vi",
+                "category": "Phân tích video trend",
+                "source_name": "Video trend người dùng gửi",
+                "source_url": "",
+                "collected_at": now,
+                "last_verified_at": now,
+                "intake_lane": "video_upload",
+                "source_video_id": file_id,
+                "source_file_id": file_id,
+                "source_file_unique_id": str(source_asset.get("file_unique_id") or ""),
+                "source_video_hash": source_hash,
+                "source_video": source_asset,
+                "source_analysis": analysis,
+                "analysis_revision": max(1, safe_int(analysis.get("analysis_revision"), 1)),
+                "analysis_provenance": str(analysis.get("tracking_source") or "local_opencv"),
+            }
+            trend_state = video_trend2_open_screen(trend_state, "video_analysis", parent="entry")
+            trend_state.update({
+                "selected_trend": selected_trend,
+                "source_video": source_asset,
+                "source_analysis": analysis,
+                "analysis_revision": max(1, safe_int(analysis.get("analysis_revision"), 1)),
+                "last_video_message_id": message_id,
+                "pending_input": "",
+            })
+            trend_state = save_video_trend2_state(context, trend_state)
+            current_session = get_video_session(uid)
+            current_draft = dict(current_session.get("draft") or {})
+            current_draft.update({
+                "source_video_id": file_id,
+                "source_video": source_asset,
+                "source_analysis": analysis,
+                "trend_context": selected_trend,
+            })
+            for key in ("trend_upload_owner", "trend_upload_session_id", "trend_upload_revision"):
+                current_draft.pop(key, None)
+            current_session.update({
+                "current_step": "trend_video_analysis",
+                "awaiting_media": False,
+                "input_mode": "",
+                "input_purpose": "",
+                "flow_owner": "video_trend",
+                "draft": current_draft,
+            })
+            current_session.pop("flow_session_id", None)
+            current_session.pop("flow_revision", None)
+            save_video_session(uid, current_session)
+            await video_trend2_render(progress, context, trend_state, lang)
+            return True
         if current_step == "awaiting_video_tail9_logo":
             message_id = safe_int(getattr(update.message, "message_id", 0), 0)
             tail, tail_owner, tail_host = video_tail9_context(uid, context)
@@ -133717,6 +134423,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
     text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
     if action == "main_video":
+        video_trend2_cancel_pending_on_video_menu(query.from_user.id, context)
         keyboard = main_video_keyboard(
             lang,
             resume_uiflow3=bool(video_uiflow3_state(context)),
@@ -251199,6 +251906,16 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
                 )
                 return await video_tail9_render(query, uid, context, tail_return)
             return await video_profile_scene1_render(query, state, lang)
+        if video_flow6_product_id(state) == "video_trend":
+            state = video_profile_studio_step(
+                context,
+                state,
+                "full_review",
+                active_scene_index=1,
+                prompt_return_step="",
+                video_tail_return_to="",
+            )
+            return await video_tail9_render(query, uid, context, "addon")
         if (
             video_flow7_kind(state) == "script_to_video"
             or video_flow6_product_id(state) == "script_image_video"
@@ -251450,6 +252167,8 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         )
         return await video_profile_scene1_render(query, state, lang)
     if action == "review_audio":
+        if video_flow6_product_id(state) == "video_trend":
+            return await video_tail9_render(query, uid, context, "addon")
         tail, owner, host = video_tail9_context(uid, context)
         return await video_tail9_open_planning_audio(
             query, context, uid, tail, owner, host
