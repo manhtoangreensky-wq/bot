@@ -89642,8 +89642,8 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_vi": "🔥 Video theo trend",
         "label_en": "🔥 Trend video",
         "label_zh": "🔥 Trend 视频",
-        "entry_callback": "vproduct|open|video_trend",
-        "handler": "handle_video_product_callback",
+        "entry_callback": "vtrend|entry",
+        "handler": "handle_video_trend2_callback",
         "expected_children": (
             "vtrend|catalog|latest",
             "vtrend|manual_trend",
@@ -92623,7 +92623,7 @@ def video_semantics_audit_payload() -> dict:
         if step in visible_steps
     ]
     expected_route_owners = {
-        "video_trend": ("vproduct|open|video_trend", "handle_video_product_callback"),
+        "video_trend": ("vtrend|entry", "handle_video_trend2_callback"),
         "video_ai_real": ("vid3|entry|video_ai_real", "handle_video_uiflow3_callback"),
         "script_image_video": ("vproduct|open|script_image_video", "handle_video_product_callback"),
         "frame_video_local": ("vproduct|open|frame_video_local", "handle_video_product_callback"),
@@ -110348,6 +110348,15 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     # well can produce a Telegram "query is too old/already answered" error.
     if action not in {"legacy", "prompt_image_execute"}:
         await query.answer()
+    if action == "open" and value == "video_trend":
+        legacy_state = save_video_trend2_state(context, {
+            "screen": "entry",
+            "screen_parents": {},
+            "category": "",
+            "catalog_mode": "latest",
+            "catalog_offset": 0,
+        })
+        return await video_trend2_render(query, context, legacy_state, lang)
     if action in {"trend_today", "trend_more", "trend_custom", "trend_select"} or (
         action == "idea_library" and value == "video_trend"
     ):
