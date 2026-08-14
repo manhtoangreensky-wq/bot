@@ -79210,7 +79210,8 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         fmt = dict(state.get("format") or {})
         selected_ratio = str(fmt.get("ratio") or "")
         selected_duration = safe_int(fmt.get("target_duration_seconds"), 0)
-        durations = (600, 1800, 3600) if product == "multi_scene_film" else (8, 16, 24, 40)
+        is_long_video = product == "multi_scene_film"
+        durations = (300, 600, 1800, 3600) if is_long_video else (8, 16, 24, 40)
         duration_rows = []
         for offset in range(0, len(durations), 2):
             duration_rows.append([
@@ -79224,8 +79225,16 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             [("✍️ Nhập thời lượng khác", "vid3|duration_custom"), ("✅ Hoàn tất chọn định dạng video", "vid3|format_done")],
             *video_uiflow3_nav_rows(),
         ]
+        selected_duration_label = (
+            f"{selected_duration // 60} phút"
+            if is_long_video and selected_duration
+            else f"{selected_duration} giây"
+            if selected_duration
+            else "Chưa chọn"
+        )
+        long_scene_note = " Mỗi cảnh dài 5 phút." if is_long_video else ""
         return (
-            f"{prefix}📐 ĐỊNH DẠNG MỤC TIÊU\n\nTỷ lệ: {selected_ratio or 'Chưa chọn'}\nThời lượng: {selected_duration or 'Chưa chọn'} giây\n\nĐây là mục tiêu để lập kế hoạch; số cảnh được đề xuất sau khi nội dung được xác nhận.",
+            f"{prefix}📐 ĐỊNH DẠNG MỤC TIÊU\n\nTỷ lệ: {selected_ratio or 'Chưa chọn'}\nThời lượng: {selected_duration_label}\n\nĐây là mục tiêu để lập kế hoạch; số cảnh được đề xuất sau khi nội dung được xác nhận.{long_scene_note}",
             video_uiflow3_keyboard(rows),
         )
 
@@ -79349,8 +79358,13 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             adjust_row.append(("➖ Bớt 1 cảnh", f"vid3|scene_count|{count - 1}"))
         adjust_row.append(("✍️ Tự nhập", "vid3|scene_custom"))
         count_rows.append(adjust_row)
+        scene_duration_label = (
+            "5 phút"
+            if product == "multi_scene_film"
+            else f"{suggestion['seconds_per_scene']} giây"
+        )
         return (
-            f"{prefix}🎬 SỐ CẢNH ĐỀ XUẤT\n\nĐề xuất: {count} cảnh, mỗi cảnh khoảng {suggestion['seconds_per_scene']} giây. Số cảnh dựa trên nội dung và thời lượng, không chọn trước nội dung.",
+            f"{prefix}🎬 SỐ CẢNH ĐỀ XUẤT\n\nĐề xuất: {count} cảnh, mỗi cảnh khoảng {scene_duration_label}. Số cảnh dựa trên nội dung và thời lượng, không chọn trước nội dung.",
             video_uiflow3_keyboard([
                 *count_rows,
                 *video_uiflow3_nav_rows(),
@@ -89723,16 +89737,16 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_vi": "🎬 Video dài tập",
         "label_en": "🎬 Long-form episodic video",
         "label_zh": "🎬 多场景 AI 影片",
-        "entry_callback": "longvideo|public_guard",
-        "handler": "handle_long_video_callback",
+        "entry_callback": "vid3|entry|multi_scene_film",
+        "legacy_entry_callback": "longvideo|public_guard",
+        "handler": "handle_video_uiflow3_callback",
         "expected_children": (
-            "vproduct|scene3_start|multi_scene_film",
-            "vproduct|idea_library|multi_scene_film",
+            "vid3|mode|series_plan",
         ),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
-        "flow_type": "canonical_long_preview",
+        "flow_type": "canonical_long_series",
         "canonical": True,
         "first_step": "intro",
         "invoice_reachable": True,
@@ -89918,12 +89932,6 @@ def video_public_product_flow_access(product_id: str) -> dict:
             "product_id": product,
             "flow_access_allowed": False,
             "flow_block_reason": "unknown_video_product",
-        }
-    if product == "multi_scene_film":
-        return {
-            "product_id": product,
-            "flow_access_allowed": False,
-            "flow_block_reason": "long_form_video_in_development",
         }
     return {
         "product_id": product,
@@ -92219,7 +92227,7 @@ def video_semantics_audit_payload() -> dict:
         "frame_video_local": ("vproduct|open|frame_video_local", "handle_video_product_callback"),
         "self_shot_scene_change": ("vproduct|open|self_shot_scene_change", "handle_video_product_callback"),
         "storyboard_prompt": ("vproduct|open|storyboard_prompt", "handle_video_product_callback"),
-        "multi_scene_film": ("longvideo|public_guard", "handle_long_video_callback"),
+        "multi_scene_film": ("vid3|entry|multi_scene_film", "handle_video_uiflow3_callback"),
     }
     checks = [
         {
@@ -106779,6 +106787,12 @@ def video_tail9_addon_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup
             [("✅ Hoàn tất Add-on", "video_tail|addon|complete"), ("🧠 Xem/Sửa câu lệnh", "video_tail|addon|prompts")],
             [("⬅️ Quay lại", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
         ])
+    if str(current.get("video_product_type") or "") == "multi_scene_film":
+        return video_scene3_keyboard([
+            [("🎙️ Âm thanh & Add-on", "video_tail|addon|audio"), ("🏷️ Logo/Watermark", "video_tail|addon|logo")],
+            [("✅ Hoàn tất Add-on", "video_tail|addon|complete"), ("🧠 Xem/Sửa câu lệnh chương", "video_tail|addon|prompts")],
+            [("⬅️ Quay lại", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
+        ])
     if str(current.get("video_product_type") or "") in {
         video_selfshot2.PRODUCT_ID,
         video_selfshot3.PRODUCT_ID,
@@ -107163,6 +107177,15 @@ def video_tail9_branding_public_summary(tail: dict | None = None) -> str:
     return "; ".join(items) or "Không thêm"
 
 
+def video_tail9_duration_label(tail: dict | None = None) -> str:
+    current = dict(tail or {})
+    duration_seconds = max(1, safe_int(current.get("estimated_duration"), 8))
+    if str(current.get("video_product_type") or "") in {"multi_scene_film", "video_long"}:
+        scene_count = max(1, safe_int(current.get("scene_count"), 1))
+        return f"{scene_count * 5} phút · 5 phút/cảnh"
+    return f"{duration_seconds} giây"
+
+
 def video_tail9_summary_text(tail: dict) -> str:
     product_type = str(tail.get("video_product_type") or "")
     is_video_edit = product_type in {
@@ -107240,7 +107263,7 @@ def video_tail9_summary_text(tail: dict) -> str:
         f"• Nguồn nội dung: <b>{html.escape(source_labels.get(str(tail.get('content_source') or ''), 'Kế hoạch video'))}</b>\n"
         f"• Số cảnh: <b>{safe_int(tail.get('scene_count'), 1)}</b>\n"
         f"• Tỉ lệ: <b>{html.escape(str(tail.get('ratio') or '9:16'))}</b>\n"
-        f"• Thời lượng: <b>{safe_int(tail.get('estimated_duration'), 8)} giây</b>\n"
+        f"• Thời lượng: <b>{html.escape(video_tail9_duration_label(tail))}</b>\n"
         f"• Nội dung: <b>{'Đã sẵn sàng' if content_ready else 'Cần kiểm tra lại'}</b>\n"
         f"• Câu lệnh video: <b>{'Không áp dụng' if prompt_not_applicable else 'Đã sẵn sàng' if prompt_ready else 'Cần kiểm tra lại'}</b>\n"
         f"{prompt_line}"
@@ -107609,6 +107632,9 @@ def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None 
         f"• Số cảnh: <b>{scene_count}</b>",
         f"• Tỉ lệ: <b>{html.escape(str(tail.get('ratio') or '9:16'))}</b>",
     ]
+    is_long_video = str(tail.get("video_product_type") or "") in {"multi_scene_film", "video_long"}
+    if is_long_video:
+        lines.append(f"• Thời lượng: <b>{html.escape(video_tail9_duration_label(tail))}</b>")
     lines.extend([
         "",
         "Mỗi gói dưới đây ghi rõ thời lượng, chất lượng, mục đích sử dụng và giá theo cảnh:",
@@ -107617,6 +107643,11 @@ def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None 
     for offer in catalog.get("offers") or []:
         tier_id = safe_int(offer.get("tier_id"), 0)
         product = video_public_quality_product(tier_id)
+        offer_duration_label = (
+            "5 phút/cảnh"
+            if is_long_video
+            else f"{product['seconds']} giây/cảnh"
+        )
         offer_scene_count = video_selfshot3_scene_count_for_quality(tail, tier_id)
         scene_price = video_ai_real_pricing.video_multiscene_price(product["unit_xu"], scene_count)
         if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
@@ -107629,7 +107660,7 @@ def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None 
         lines.extend([
             "",
             f"{product['icon']} <b>{html.escape(product['name'])}</b> · "
-            f"<b>{product['seconds']} giây/cảnh</b> · <b>{product['unit_xu']} Xu/cảnh</b>",
+            f"<b>{html.escape(offer_duration_label)}</b> · <b>{product['unit_xu']} Xu/cảnh</b>",
             f"• Chất lượng: {html.escape(product['public_level'])} · {html.escape(product['resolution'])}",
             f"• Đặc điểm: {html.escape(product['public_detail'])}",
             "• Đầu vào: Câu lệnh hoặc ảnh tham chiếu theo sản phẩm đã chọn",
@@ -107734,7 +107765,7 @@ def video_tail9_invoice_text(tail: dict, session: dict, user_id: int, lang: str 
         f"• Mã hóa đơn: <code>{html.escape(str(tail.get('invoice_id') or 'chưa tạo'))}</code>\n"
         f"• Sản phẩm: <b>{html.escape(VIDEO_TAIL9_PRODUCT_LABELS.get(product, product))}</b>\n"
         f"• Số cảnh: <b>{safe_int(tail.get('scene_count'), 1)}</b>\n"
-        f"• Thời lượng: <b>{safe_int(tail.get('estimated_duration'), 8)} giây</b>\n"
+        f"• Thời lượng: <b>{html.escape(video_tail9_duration_label(tail))}</b>\n"
         f"• Tỉ lệ: <b>{html.escape(str(tail.get('ratio') or '9:16'))}</b>\n"
         f"• Gói: <b>{html.escape(package_label)}</b>\n"
         f"• Giá mỗi cảnh: <b>{unit_xu} Xu</b>\n"
@@ -107756,6 +107787,11 @@ def video_tail9_confirm_text(tail: dict, user_id: int) -> str:
     is_internal = video_b14_is_admin_or_owner(user_id)
     total = quoted_total
     package_label = str(pricing.get("package_label") or video_b14_package_full_label(quality))
+    long_duration_line = (
+        f"• Thời lượng: <b>{html.escape(video_tail9_duration_label(tail))}</b>\n"
+        if str(tail.get("video_product_type") or "") in {"multi_scene_film", "video_long"}
+        else ""
+    )
     balance_line = "• Tài khoản owner/admin: <b>Không trừ Xu</b>\n" if is_internal else ""
     if not is_internal:
         try:
@@ -107768,6 +107804,7 @@ def video_tail9_confirm_text(tail: dict, user_id: int) -> str:
         f"• Mã hóa đơn: <code>{html.escape(str(tail.get('invoice_id') or 'chưa tạo'))}</code>\n"
         f"• Gói: <b>{html.escape(package_label)}</b>\n"
         f"• Số cảnh: <b>{safe_int(tail.get('scene_count'), 1)}</b>\n"
+        f"{long_duration_line}"
         f"• Tổng thanh toán: <b>{xu_number(total)} Xu</b>\n"
         f"{balance_line}\n"
         "Kiểm tra lần cuối rồi bấm <b>Bắt đầu tạo video</b>. Nếu số dư chưa đủ, "
@@ -107785,16 +107822,16 @@ def video_tail9_confirm_keyboard() -> InlineKeyboardMarkup:
 def video_tail9_long_maintenance_text(tail: dict) -> str:
     return (
         "🛠️ <b>Video dài tập đang được nâng cấp</b>\n\n"
-        f"Kế hoạch <b>{safe_int(tail.get('scene_count'), 1)} cảnh</b>, khoảng "
-        f"<b>{safe_int(tail.get('estimated_duration'), 600) // 60} phút</b> và gói đã chọn vẫn được giữ nguyên.\n\n"
+        f"Kế hoạch <b>{safe_int(tail.get('scene_count'), 1)} cảnh</b>, "
+        f"<b>{html.escape(video_tail9_duration_label(tail))}</b> và gói đã chọn vẫn được giữ nguyên.\n\n"
         "Chức năng tạo video dài tập chưa khả dụng. Anh/chị có thể xem lại cấu hình hoặc kiểm tra lại sau."
     )
 
 
 def video_tail9_long_maintenance_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("🔄 Kiểm tra lại", "video_tail|confirm"), ("📄 Xem cấu hình", "video_tail|review|open")],
-        [("⬅️ Quay lại", "video_tail|quality|open"), ("🏠 Menu chính", "menu|main")],
+        [("🔄 Kiểm tra lại", "video_tail|confirm|open"), ("📄 Xem cấu hình", "video_tail|review|open")],
+        [("⬅️ Quay lại hóa đơn", "video_tail|confirm|back"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
 
@@ -109488,12 +109525,18 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if not allowed:
             await query.answer()
             return await video_tail9_render(query, uid, context, "invoice")
-        deferred_runtime_product = (
-            str(tail.get("video_product_type") or "")
-            in VIDEO_TAIL9_DEFERRED_RUNTIME_PRODUCTS
-        )
-        contract = video_tail9.commercial_contract(str(tail.get("video_product_type") or ""))
+        product_type = str(tail.get("video_product_type") or "")
+        deferred_runtime_product = product_type in VIDEO_TAIL9_DEFERRED_RUNTIME_PRODUCTS
+        contract = video_tail9.commercial_contract(product_type)
         if not contract.get("execution_enabled"):
+            if product_type in {"multi_scene_film", "video_long"}:
+                await query.answer("Video dài tập đang được nâng cấp.")
+                return await safe_edit_or_send(
+                    query,
+                    video_tail9_long_maintenance_text(tail),
+                    parse_mode="HTML",
+                    reply_markup=video_tail9_long_maintenance_keyboard(),
+                )
             if owner != "video_edit" and deferred_runtime_product:
                 await query.answer()
                 tail = video_tail9_prepare_submit_status(
@@ -109517,12 +109560,12 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 return await video_tail9_render_confirmed_status(
                     query, context, uid, tail, owner, host
                 )
-            await query.answer("Video dài tập đang được nâng cấp.")
+            await query.answer()
             return await safe_edit_or_send(
                 query,
-                video_tail9_long_maintenance_text(tail),
+                video_tail9_submit_blocker_text(),
                 parse_mode="HTML",
-                reply_markup=video_tail9_long_maintenance_keyboard(),
+                reply_markup=video_tail9_submit_blocker_keyboard(),
             )
         is_internal = video_b14_is_admin_or_owner(uid)
         try:
@@ -124126,17 +124169,15 @@ async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAU
     lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
-    if action == "public_guard":
+    if action in {"public_guard", "start"}:
         await query.answer()
-        return await start_public_video_scene2_step(
-            query,
-            context,
-            uid,
-            "multi_scene_film",
-            lang=lang,
-            origin_step="menu_video",
-            start_at_scene_count=True,
+        state = start_video_uiflow3_state(context, "multi_scene_film")
+        state["owner_user_id"] = uid
+        state["owner_chat_id"] = safe_int(
+            getattr(getattr(query, "message", None), "chat_id", 0),
+            0,
         )
+        return await video_uiflow3_render(query, context, state)
     await query.answer()
     if not video_long_planning.public_access_allowed(is_admin=is_admin_user(uid)):
         return await safe_edit_query_message(
