@@ -104360,7 +104360,9 @@ async def video_selfshot2_render(target, user_id: int, screen: str, *, draft: di
     current = video_selfshot2_draft({"draft": draft} if draft is not None else get_video_session(user_id))
     current["selfshot2_screen"] = str(screen)
     session = save_video_selfshot2_draft(user_id, current, step=f"selfshot2:{screen}")
-    shared_review_navigation = str(current.get("video_tail_return_to") or "") == "review"
+    shared_tail_return = str(current.get("video_tail_return_to") or "")
+    shared_review_navigation = shared_tail_return == "review"
+    shared_addon_navigation = shared_tail_return == "addon"
     shared_review_root = shared_review_navigation and screen in {
         "scene_plan", "content_source", "prompts",
     }
@@ -104386,12 +104388,13 @@ async def video_selfshot2_render(target, user_id: int, screen: str, *, draft: di
             ]
             expected_back = "vid3|resume"
         validation = video_selfshot2.validate_rows(model["rows"], back_callback=expected_back)
-    if shared_review_root:
+    if shared_review_root or (shared_addon_navigation and screen in {"prompt", "prompts"}):
+        return_label = "Add-on" if shared_addon_navigation else "rà soát"
         model["rows"][-1] = [
-            ("⬅️ Quay lại rà soát", "video_tail|review|open"),
+            (f"⬅️ Quay lại {return_label}", f"video_tail|{shared_tail_return}|open"),
             ("🎬 Menu Video", "menu|main_video"),
         ]
-        expected_back = "video_tail|review|open"
+        expected_back = f"video_tail|{shared_tail_return}|open"
         validation = video_selfshot2.validate_rows(model["rows"], back_callback=expected_back)
     if not validation.get("ok"):
         logger.error("selfshot2_keyboard_invalid | screen=%s errors=%s", screen, validation.get("errors"))
@@ -104762,7 +104765,9 @@ async def video_selfshot3_render(target, user_id: int, screen: str, *, draft: di
     if screen not in {"types", "project", "help", "analysis", "finish"}:
         current["selfshot3_resume_screen"] = str(screen)
     session = save_video_selfshot3_draft(user_id, current, step=f"selfshot3:{screen}")
-    shared_review_navigation = str(current.get("video_tail_return_to") or "") == "review"
+    shared_tail_return = str(current.get("video_tail_return_to") or "")
+    shared_review_navigation = shared_tail_return == "review"
+    shared_addon_navigation = shared_tail_return == "addon"
     shared_review_root = shared_review_navigation and screen in {"timeline", "content"}
     if video_selfshotflow4.enabled("ss3", session.get("draft")) and not shared_review_navigation:
         model = video_selfshotflow4.screen_model("ss3", screen, session.get("draft"))
@@ -104774,12 +104779,13 @@ async def video_selfshot3_render(target, user_id: int, screen: str, *, draft: di
         parent = video_selfshot3.screen_parent(screen)
         expected_back = "vproduct|selfshot_hub" if parent == "hub" else f"vproduct|ss3|show|{parent}"
         validation = video_selfshot3.validate_rows(model["rows"], back_callback=expected_back)
-    if shared_review_root:
+    if shared_review_root or (shared_addon_navigation and screen == "prompt"):
+        return_label = "Add-on" if shared_addon_navigation else "rà soát"
         model["rows"][-1] = [
-            ("⬅️ Quay lại rà soát", "video_tail|review|open"),
+            (f"⬅️ Quay lại {return_label}", f"video_tail|{shared_tail_return}|open"),
             ("🎬 Menu Video", "menu|main_video"),
         ]
-        expected_back = "video_tail|review|open"
+        expected_back = f"video_tail|{shared_tail_return}|open"
         validation = video_selfshot3.validate_rows(model["rows"], back_callback=expected_back)
     if not validation.get("ok"):
         logger.error("selfshot3_keyboard_invalid | screen=%s errors=%s", screen, validation.get("errors"))
@@ -104807,9 +104813,10 @@ async def video_selfshot3_render_prompt_review(target, user_id: int, draft: dict
     current["prompt_bundle"] = video_selfshot3_compile_prompt(current)
     save_video_selfshot3_draft(user_id, current, step="selfshot3:review")
     prompt_text = json.dumps(current["prompt_bundle"], ensure_ascii=False, indent=2)
+    tail_return = str(current.get("video_tail_return_to") or "")
     back_callback = (
-        "video_tail|review|open"
-        if str(current.get("video_tail_return_to") or "") == "review"
+        f"video_tail|{tail_return}|open"
+        if tail_return in {"addon", "review"}
         else "vproduct|ss3|show|review"
     )
     return await safe_edit_or_send_long_plain(
@@ -106772,6 +106779,17 @@ def video_tail9_addon_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup
             [("✅ Hoàn tất Add-on", "video_tail|addon|complete"), ("🧠 Xem/Sửa câu lệnh", "video_tail|addon|prompts")],
             [("⬅️ Quay lại", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
         ])
+    if str(current.get("video_product_type") or "") in {
+        video_selfshot2.PRODUCT_ID,
+        video_selfshot3.PRODUCT_ID,
+    }:
+        return video_scene3_keyboard([
+            [(video_tail9_addon_selected_label(current, "subtitles", "Phụ đề"), "video_tail|addon|item|subtitles"), (video_tail9_addon_selected_label(current, "dubbing", "Lồng tiếng"), "video_tail|addon|item|dubbing")],
+            [(video_tail9_addon_selected_label(current, "music", "Nhạc"), "video_tail|addon|item|music"), (video_tail9_addon_selected_label(current, "sound", "Âm thanh"), "video_tail|addon|item|sound")],
+            [(video_tail9_addon_selected_label(current, "logo", "Logo"), "video_tail|addon|logo"), (video_tail9_addon_selected_label(current, "watermark", "Watermark"), "video_tail|addon|watermark")],
+            [("✅ Hoàn tất Add-on", "video_tail|addon|complete"), ("🎬 Xem/Sửa câu lệnh", "video_tail|addon|prompts")],
+            [("⬅️ Quay lại", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
+        ])
     back_callback = str(current.get("return_to") or "menu|main_video")
     return video_scene3_keyboard([
         [("🎙️ Âm thanh, giọng & phụ đề", "video_tail|addon|audio"), ("🖼️ Logo/Watermark", "video_tail|addon|logo")],
@@ -107092,6 +107110,21 @@ def video_tail9_review_keyboard(tail: dict | None = None) -> InlineKeyboardMarku
             [("👁️ Xem kế hoạch cảnh", "video_tail|review|scenes"), ("✍️ Sửa nội dung", "video_tail|review|edit")],
             [("🎬 Xem/Sửa câu lệnh", "video_tail|review|prompts"), ("🏷️ Logo/Watermark", "video_tail|review|logo")],
             [("✅ Hoàn tất rà soát", "video_tail|review|complete"), ("🎙️ Sửa âm thanh", "video_tail|review|audio")],
+            [("⬅️ Quay lại Add-on", "video_tail|review|back"), ("🎬 Menu Video", "menu|main_video")],
+        ])
+    if str(current.get("video_product_type") or "") in {
+        video_selfshot2.PRODUCT_ID,
+        video_selfshot3.PRODUCT_ID,
+    }:
+        scene_label = (
+            "🧭 Xem timeline"
+            if str(current.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID
+            else "👁️ Xem kế hoạch cảnh"
+        )
+        return video_scene3_keyboard([
+            [(scene_label, "video_tail|review|scenes"), ("✍️ Sửa nội dung", "video_tail|review|edit")],
+            [("🎬 Xem/Sửa câu lệnh", "video_tail|review|prompts"), ("🏷️ Logo/Watermark", "video_tail|review|logo")],
+            [("✅ Hoàn tất rà soát", "video_tail|review|complete"), ("🎙️ Sửa Add-on", "video_tail|review|audio")],
             [("⬅️ Quay lại Add-on", "video_tail|review|back"), ("🎬 Menu Video", "menu|main_video")],
         ])
     if str(current.get("video_product_type") or "") != "video_ai_real":
@@ -108388,6 +108421,36 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
     if tail.get("final_confirmed") and section != "confirm":
         return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
     if section == "addon":
+        selfshot_product = str(tail.get("video_product_type") or "")
+        selfshot_tail = owner == "session" and selfshot_product in {
+            video_selfshot2.PRODUCT_ID,
+            video_selfshot3.PRODUCT_ID,
+        }
+        if action == "back" and selfshot_tail:
+            if selfshot_product == video_selfshot2.PRODUCT_ID:
+                current = video_selfshot2_draft(get_video_session(uid))
+                current.pop("video_tail_return_to", None)
+                screen = "prompt" if video_selfshotflow4.enabled("ss2", current) else "review"
+                save_video_selfshot2_draft(uid, current, step=f"selfshot2:{screen}")
+                return await video_selfshot2_render(query, uid, screen, draft=current)
+            current = video_selfshot3_draft(get_video_session(uid))
+            current.pop("video_tail_return_to", None)
+            screen = "prompt" if video_selfshotflow4.enabled("ss3", current) else "review"
+            save_video_selfshot3_draft(uid, current, step=f"selfshot3:{screen}")
+            return await video_selfshot3_render(query, uid, screen, draft=current)
+        if action == "prompts" and selfshot_tail:
+            if selfshot_product == video_selfshot2.PRODUCT_ID:
+                current = video_selfshot2_draft(get_video_session(uid))
+                current["video_tail_return_to"] = "addon"
+                screen = "prompt" if video_selfshotflow4.enabled("ss2", current) else "prompts"
+                save_video_selfshot2_draft(uid, current, step=f"selfshot2:{screen}")
+                return await video_selfshot2_render(query, uid, screen, draft=current)
+            current = video_selfshot3_draft(get_video_session(uid))
+            current["video_tail_return_to"] = "addon"
+            save_video_selfshot3_draft(uid, current, step="selfshot3:prompt")
+            if video_selfshotflow4.enabled("ss3", current):
+                return await video_selfshot3_render(query, uid, "prompt", draft=current)
+            return await video_selfshot3_render_prompt_review(query, uid, current)
         script_tail = (
             owner == "scene3"
             and str(tail.get("video_product_type") or "") == "script_image_video"
@@ -108497,7 +108560,11 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 reply_markup=video_tail9_text_keyboard(tail),
             )
         if action == "item" and argument in {"subtitles", "dubbing", "music", "sound"}:
-            if str(tail.get("video_product_type") or "") != "video_ai_real":
+            if str(tail.get("video_product_type") or "") not in {
+                "video_ai_real",
+                video_selfshot2.PRODUCT_ID,
+                video_selfshot3.PRODUCT_ID,
+            }:
                 return await video_tail9_render(query, uid, context, "addon")
             return await safe_edit_or_send(
                 query,
@@ -108881,6 +108948,11 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             save_video_tail9_state(uid, context, tail, owner, host)
             return await video_tail9_render(query, uid, context, "logo")
         if action == "audio":
+            if str(tail.get("video_product_type") or "") in {
+                video_selfshot2.PRODUCT_ID,
+                video_selfshot3.PRODUCT_ID,
+            }:
+                return await video_tail9_render(query, uid, context, "addon")
             if (
                 owner == "scene3"
                 and str(tail.get("video_product_type") or "")
@@ -110750,10 +110822,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 save_video_selfshot2_draft(uid, current, step="selfshot2:tail")
                 tail, owner, host = video_tail9_context(uid, context)
                 tail = video_selfshot2_branding_tail(tail, current)
-                tail = video_tail9.mark_addon_complete(tail)
-                tail = video_tail9.mark_review_complete(tail)
+                tail["review_status"] = "not_ready"
+                tail["summary_status"] = "not_ready"
                 save_video_tail9_state(uid, context, tail, owner, host)
-                return await video_tail9_render(query, uid, context, "quality")
+                return await video_tail9_render(query, uid, context, "addon")
             if operation == "compile_prompts" and current_screen == "scene_plan":
                 return await video_selfshot2_open_creative_details(
                     query,
