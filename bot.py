@@ -77371,10 +77371,12 @@ def video_ai_real_pilot_screen_payload(
         return None
     entry_mode = str(state.get("entry_mode") or "")
     storyboard_bridge = video_storyboard_entity_bridge_marker(state)
+    trend_bridge = video_entity_bridge_marker(state) if entry_mode == "selected_trend" else {}
     if (
         step != "entry"
         and entry_mode not in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
         and not storyboard_bridge
+        and not trend_bridge
     ):
         return None
     progress_prefix = str(prefix or "").replace("Buoc ", "Bước ")
@@ -86994,6 +86996,12 @@ async def video_profile_scene1_open_selected_tail_invoice(
 async def video_profile_scene1_render(query, state: dict, lang: str = "vi"):
     state = video_scene3_flow.normalize_state(state)
     step = str(state.get("step") or "content_mode")
+    if (
+        video_flow6_product_id(state) == "video_trend"
+        and step in {"audio_plan", "content_addons"}
+    ):
+        state = video_trend_finish_requirements_without_legacy_audio(state)
+        step = str(state.get("step") or "scene_plan")
     pending = {
         "await_count_custom": (
             "🔢 <b>Nhập số cảnh Kịch bản → Video</b>\n\nGửi một số từ 5 đến 20. Mỗi cảnh phải là một nhịp nội dung hoàn chỉnh; thời lượng được xác định theo gói Chất lượng."
@@ -104786,6 +104794,11 @@ def video_trend_prepare_entity_bridge(
         state["trend_source"] = trend
         state = video_uiflow3.normalize_state(state)
 
+    state["needs"] = dict(state.get("needs") or {})
+    state["needs"]["locations"] = "SKIP"
+    if not (state.get("bible") or {}).get("locations"):
+        state = video_uiflow3.set_location_count(state, 0)
+
     owner_message = getattr(target, "message", None) or target
     marker = {
         "active": True,
@@ -104872,6 +104885,29 @@ async def video_trend_finish_entity_bridge(
         push=False,
     )
     return await video_profile_scene1_render(target, profile_state, lang)
+
+
+def video_trend_finish_requirements_without_legacy_audio(state: dict) -> dict:
+    if video_flow6_product_id(state) != "video_trend":
+        return {}
+    current = video_scene3_flow.normalize_state(state)
+    previous_step = str(current.get("step") or "")
+    current = video_scene3_flow.finalize_audio_planning(current, skip=True)
+    history = [
+        str(item)
+        for item in current.get("history") or []
+        if str(item or "") not in {"audio_plan", "content_addons"}
+    ]
+    if previous_step not in {"", "scene_plan", "audio_plan", "content_addons"}:
+        if not history or history[-1] != previous_step:
+            history.append(previous_step)
+    current.update({
+        "step": "scene_plan",
+        "history": history[-40:],
+        "audio_plan_return_step": "",
+        "video_tail_return_to": "",
+    })
+    return video_scene3_flow.normalize_state(current)
 
 
 def video_trend2_canonical_state(context, state: dict) -> dict:
@@ -251362,8 +251398,23 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             parse_mode="HTML",
             reply_markup=main_video_keyboard(lang),
         )
+    step = str(state.get("step") or "")
+    if source_product_id == "video_trend" and step in {"audio_plan", "content_addons"}:
+        state = video_trend_finish_requirements_without_legacy_audio(state)
+        state = save_video_profile_studio_state(context, state)
+        if action in {"audio_open", "audio_review", "audio_done", "audio_skip"}:
+            if dict(state.get(VIDEO_TAIL9_STATE_KEY) or {}):
+                return await video_tail9_render(query, uid, context, "addon")
+            return await video_profile_scene1_render(query, state, lang)
     if action == "back":
         step = str(state.get("step") or "menu")
+        if (
+            source_product_id == "video_trend"
+            and step == "scene_plan"
+            and not str(state.get("video_tail_return_to") or "")
+        ):
+            state = video_profile_studio_step(context, state, "requirements", push=False)
+            return await video_profile_scene1_render(query, state, lang)
         if (
             bool(state.get("script_creative_setup"))
             and bool(state.get("script_entity_bridge_complete"))
@@ -252200,12 +252251,20 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         state["no_preservation_requirements"] = True
         if bool(state.get("script_creative_setup")):
             return await video_script_finish_creative_details(query, uid, context, state, lang)
+        if video_flow6_product_id(state) == "video_trend":
+            state = video_trend_finish_requirements_without_legacy_audio(state)
+            state = save_video_profile_studio_state(context, state)
+            return await video_profile_scene1_render(query, state, lang)
         state = video_profile_studio_step(context, state, "audio_plan")
         return await video_profile_scene1_render(query, state, lang)
     if action == "req_done":
         state["requirements"] = video_scene3_flow.public_requirements(state)
         if bool(state.get("script_creative_setup")):
             return await video_script_finish_creative_details(query, uid, context, state, lang)
+        if video_flow6_product_id(state) == "video_trend":
+            state = video_trend_finish_requirements_without_legacy_audio(state)
+            state = save_video_profile_studio_state(context, state)
+            return await video_profile_scene1_render(query, state, lang)
         state = video_profile_studio_step(context, state, "audio_plan")
         return await video_profile_scene1_render(query, state, lang)
     if action == "material":
