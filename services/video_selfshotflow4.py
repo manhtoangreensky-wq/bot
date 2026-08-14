@@ -669,7 +669,7 @@ def _page_rows(flow: str, state: Mapping[str, Any], *, kind: str) -> list[list[t
             for local_index, item in enumerate(chunk[offset:offset + 2], start + offset):
                 item_id = _safe(item.get("idea_id") or item.get("id") or item.get("preset_id"))
                 prefix = "✅ " if item_id and item_id == selected_id else ""
-                pair.append((f"{prefix}{_display(item.get('title'))[:27]}", callback(flow, "c4idea", item_id)))
+                pair.append((f"{prefix}💡 {_display(item.get('title'))[:27]}", callback(flow, "c4idea", item_id)))
             rows.append(pair)
         if rows and len(rows[-1]) == 1:
             rows[-1].append(("💡 Nhóm khác", callback(flow, "c4show", "idea_groups")))

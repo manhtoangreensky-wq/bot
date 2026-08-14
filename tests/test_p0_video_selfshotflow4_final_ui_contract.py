@@ -143,6 +143,21 @@ def test_every_canonical_selfshot_screen_has_unique_callbacks() -> None:
             )["ok"] is True
 
 
+def test_selfshot_idea_buttons_have_icons_without_changing_callback_ids() -> None:
+    for flow in ("ss2", "ss3"):
+        state = _selfshot4_state(flow)
+        state[video_selfshotflow4.FLOW_SCREEN_KEYS[flow]] = "ideas"
+        model = video_selfshotflow4.screen_model(flow, "ideas", state)
+        idea_buttons = [
+            (label, callback)
+            for row in model["rows"]
+            for label, callback in row
+            if f"vproduct|{flow}|c4idea|" in callback
+        ]
+        assert idea_buttons
+        assert all(label.startswith(("💡 ", "✅ 💡 ")) for label, _callback in idea_buttons)
+
+
 def test_selfshot_public_screens_do_not_expose_internal_side_effect_copy() -> None:
     canonical = _selfshot4_state("ss2")
     public_texts = [
