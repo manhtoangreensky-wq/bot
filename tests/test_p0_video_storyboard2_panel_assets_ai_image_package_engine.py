@@ -16,7 +16,7 @@ def _function_source(name: str) -> str:
     markers = (f"def {name}(", f"async def {name}(")
     starts = [BOT_SOURCE.find(marker) for marker in markers]
     start = min(position for position in starts if position >= 0)
-    next_def = re.search(r"\n(?:async )?def [A-Za-z_]", BOT_SOURCE[start + 1 :])
+    next_def = re.search(r"\n(?=@|(?:async )?def [A-Za-z_])", BOT_SOURCE[start + 1 :])
     end = start + 1 + next_def.start() if next_def else len(BOT_SOURCE)
     return BOT_SOURCE[start:end]
 
@@ -29,6 +29,19 @@ def _board(scene_count: int = 2) -> dict:
         board,
         "Giới thiệu một sản phẩm bằng câu chuyện liền mạch, không đổi nhận diện.",
         mode="manual",
+    )
+    board = video_storyboard2.apply_middle_contract(
+        board,
+        bible={},
+        references=[],
+        needs={},
+        entity_summary="",
+        creative_controls={},
+    )
+    board = video_storyboard2.set_reference_source_assets(
+        board,
+        [{"asset_id": "source_01", "telegram_file_id": "reference-image-01"}],
+        complete=True,
     )
     return video_storyboard2.approve_content(board)
 
@@ -509,7 +522,8 @@ def test_entry_modes_split_after_ratio_and_keep_exact_back_targets() -> None:
     assert 'if entry_mode == "existing"' in callback
     assert 'move(board, "content_source", awaiting_input="")' in callback
     assert "video_storyboard2.apply_uploaded_storyboard(board)" in callback
-    assert 'move(board, "scene_review", awaiting_input="")' in callback
+    assert "video_storyboard_prepare_reference_bridge" in callback
+    assert 'return_screen="ratio"' in callback
     assert 'if action == "profile_pick"' in callback
     assert '"vstory|upload_review" if entry_mode == "existing"' in payload
     assert 'storyboard2_nav("vstory|profiles_screen")' in suggestion_keyboard
