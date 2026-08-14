@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from services import video_flow7, video_selfshot_local_analysis, video_trend_catalog
+from services import pricing_guide_content, video_flow7, video_selfshot_local_analysis, video_trend_catalog
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -173,6 +173,36 @@ def test_public_trend_ui_has_no_internal_side_effect_copy() -> None:
         "chưa tạo video",
     ):
         assert forbidden not in public_surface
+
+
+def test_non_vietnamese_trend_intro_uses_product_specific_localized_copy() -> None:
+    intro = _runtime_function(
+        "task3d_product_intro_text",
+        {
+            "VIDEO_PRODUCT_REGISTRY": {"video_trend": {"id": "video_trend"}},
+            "normalize_user_language": lambda lang: str(lang or "en"),
+            "public_video_menu_label": pricing_guide_content.public_video_menu_label,
+            "public_video_deep_copy": pricing_guide_content.public_video_deep_copy,
+            "public_hub_copy": lambda _lang: {
+                "video_label": "GENERIC-VIDEO",
+                "freehub_input_title": "SEND {item}",
+            },
+            "video_script_hub_text": lambda _lang: "SCRIPT",
+            "task3d_public_copy": lambda _product, _lang: "VI",
+        },
+    )
+
+    for locale in (
+        "en", "zh", "ja", "ko", "th", "ar", "es", "pt",
+        "fr", "de", "hi", "ru", "tr", "fil", "it", "id",
+    ):
+        text = intro("video_trend", locale)
+        copy = pricing_guide_content.public_video_deep_copy(locale)
+        assert copy["no_charge"] not in text
+        assert pricing_guide_content.public_video_menu_label("video_trend", locale) in text
+        assert copy["trend_pending"] in text
+        assert copy["scene_title"] in text
+        assert copy["aspect_title"] in text
 
 
 def test_octet_stream_extension_fallback_is_owned_only_by_trend_upload() -> None:

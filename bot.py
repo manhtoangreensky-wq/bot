@@ -94685,7 +94685,17 @@ def task3d_product_intro_text(product_id: str, lang: str = "vi") -> str:
         return "⚠️ Sản phẩm video không tồn tại. Bot chưa trừ Xu."
     if str(product_id or "") == "script_image_video":
         return video_script_hub_text(lang)
-    if normalize_user_language(lang) != "vi":
+    locale = normalize_user_language(lang)
+    if str(product_id or "") == "video_trend" and locale != "vi":
+        video_copy = public_video_deep_copy(locale)
+        label = public_video_menu_label("video_trend", locale)
+        return (
+            f"<b>{label}</b>\n\n"
+            f"{video_copy['trend_pending']}\n\n"
+            f"{video_copy['scene_title']}\n"
+            f"{video_copy['aspect_title']}"
+        )
+    if locale != "vi":
         copy = public_hub_copy(lang)
         video_copy = public_video_deep_copy(lang)
         return (
