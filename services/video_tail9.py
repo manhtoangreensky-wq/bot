@@ -15,6 +15,11 @@ TAIL_FLOW_VERSION = 18
 STATE_FIELDS = (
     "tail_flow_version",
     "video_product_type",
+    "execution_product_type",
+    "executor_product_type",
+    "required_capability",
+    "input_type",
+    "worker_owner",
     "video_flow_owner",
     "video_session_id",
     "plan_revision",
@@ -278,6 +283,12 @@ PRODUCT_ADAPTER_ALIASES = {
 }
 
 
+VIDEO_AI_REAL_MODE_PRODUCTS = {
+    "prompt_video": "video_ai_prompt",
+    "image_video": "video_ai_image",
+}
+
+
 UNKNOWN_PRODUCT_ADAPTER = {
     "flow_owner": "",
     "engine_route": "",
@@ -325,6 +336,18 @@ def adapter_for(product_type: str) -> dict[str, Any]:
     result.setdefault("output_type", "mp4")
     result.setdefault("worker_owner", "product_video")
     return result
+
+
+def execution_product_for_mode(product_type: str, entry_mode: str = "") -> str:
+    """Resolve an internal executor without changing the public product owner."""
+
+    product = str(product_type or "").strip()
+    if product == "video_ai_real":
+        return VIDEO_AI_REAL_MODE_PRODUCTS.get(
+            str(entry_mode or "").strip(),
+            product,
+        )
+    return product
 
 
 def commercial_contract(product_type: str) -> dict[str, Any]:
@@ -487,6 +510,7 @@ def default_audio_config(*, source_audio_available: bool) -> dict[str, Any]:
 def new_state(
     *,
     product_type: str,
+    execution_product_type: str = "",
     session_id: str,
     plan_revision: int = 1,
     scene_count: int = 1,
@@ -495,15 +519,24 @@ def new_state(
     source_asset_ids: list[str] | None = None,
     return_to: str = "",
 ) -> dict[str, Any]:
-    adapter = adapter_for(product_type)
-    if not adapter["adapter_key"]:
+    public_adapter = adapter_for(product_type)
+    execution_product = str(execution_product_type or "").strip() or execution_product_for_mode(
+        product_type
+    )
+    adapter = adapter_for(execution_product)
+    if not public_adapter["adapter_key"] or not adapter["adapter_key"]:
         raise ValueError("video_product_owner_required")
     count = max(1, int(scene_count or 1))
     duration = int(estimated_duration or count * int(adapter["scene_duration_seconds"]))
     state = {
         "tail_flow_version": TAIL_FLOW_VERSION,
-        "video_product_type": adapter["video_product_type"],
-        "video_flow_owner": adapter["flow_owner"],
+        "video_product_type": public_adapter["video_product_type"],
+        "execution_product_type": adapter["adapter_key"],
+        "executor_product_type": adapter["executor_product_type"],
+        "required_capability": adapter["required_capability"],
+        "input_type": adapter["input_type"],
+        "worker_owner": adapter["worker_owner"],
+        "video_flow_owner": public_adapter["flow_owner"],
         "video_session_id": str(session_id or "").strip(),
         "plan_revision": max(1, int(plan_revision or 1)),
         "plan_approved": True,
@@ -569,10 +602,25 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
         stored_flow_version = int(current.get("tail_flow_version") or 0)
     except (TypeError, ValueError):
         stored_flow_version = 0
-    adapter = adapter_for(str(current.get("video_product_type") or ""))
+    public_product = str(current.get("video_product_type") or "")
+    public_adapter = adapter_for(public_product)
+    execution_product = str(current.get("execution_product_type") or "").strip()
+    if not execution_product:
+        execution_product = execution_product_for_mode(
+            public_product,
+            str(current.get("content_mode") or ""),
+        )
+    adapter = adapter_for(execution_product)
     current["tail_flow_version"] = TAIL_FLOW_VERSION
-    current["video_product_type"] = adapter["video_product_type"]
-    current["video_flow_owner"] = str(current.get("video_flow_owner") or adapter["flow_owner"])
+    current["video_product_type"] = public_adapter["video_product_type"]
+    current["execution_product_type"] = adapter["adapter_key"]
+    current["executor_product_type"] = str(adapter["executor_product_type"])
+    current["required_capability"] = str(adapter["required_capability"])
+    current["input_type"] = str(adapter["input_type"])
+    current["worker_owner"] = str(adapter["worker_owner"])
+    current["video_flow_owner"] = str(
+        current.get("video_flow_owner") or public_adapter["flow_owner"]
+    )
     current["video_session_id"] = str(current.get("video_session_id") or "").strip()
     current["plan_revision"] = max(1, int(current.get("plan_revision") or 1))
     current["scene_count"] = max(1, int(current.get("scene_count") or 1))
@@ -698,7 +746,7 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     )
     current["branding_back_to"] = (
         str(current.get("branding_back_to") or "addon")
-        if str(current.get("branding_back_to") or "addon") in {"addon", "product_review"}
+        if str(current.get("branding_back_to") or "addon") in {"addon", "review", "product_review"}
         else "addon"
     )
     current["summary_return_to"] = "addon"
@@ -736,6 +784,8 @@ def branding_back_callback(state: dict[str, Any] | None) -> str:
 
     current = normalize_state(dict(state or {}))
     adapter = adapter_for(str(current.get("video_product_type") or ""))
+    if str(current.get("branding_back_to") or "") == "review":
+        return "video_tail|review|open"
     if str(current.get("branding_back_to") or "") == "product_review":
         return str(adapter.get("return_to") or "video_tail|review|prompts")
     return "video_tail|addon|open"
