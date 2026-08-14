@@ -74282,12 +74282,27 @@ def video_script_entity_bridge_marker(raw_state: dict) -> dict:
     return marker if bool(marker.get("active")) else {}
 
 
+def video_trend_entity_bridge_marker(raw_state: dict) -> dict:
+    if str((raw_state or {}).get("parent_product") or "") != "video_trend":
+        return {}
+    legacy = dict((raw_state or {}).get("legacy_compat") or {})
+    marker = dict(legacy.get("trend_entity_bridge") or {})
+    return marker if bool(marker.get("active")) else {}
+
+
+def video_entity_bridge_marker(raw_state: dict) -> dict:
+    return (
+        video_script_entity_bridge_marker(raw_state)
+        or video_trend_entity_bridge_marker(raw_state)
+    )
+
+
 def video_uiflow3_uses_entity_pilot(raw_state: dict) -> bool:
     """Use the proven multi-entity editor without changing its product owner."""
 
     return bool(
         video_ai_real_is_creation_flow(raw_state)
-        or video_script_entity_bridge_marker(raw_state)
+        or video_entity_bridge_marker(raw_state)
     )
 
 
@@ -77460,7 +77475,7 @@ def video_ai_real_pilot_screen_payload(
         products = list(bible.get("products") or [])
         props = list(bible.get("props") or [])
         bridge_back = str(
-            video_script_entity_bridge_marker(state).get("back_callback")
+            video_entity_bridge_marker(state).get("back_callback")
             or "vid3|back"
         )
         return (
@@ -81013,6 +81028,16 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 )
                 return await video_uiflow3_render(query, context, state)
             state = video_uiflow3.mark_sections_complete(state, "production_bible", "references", "continuity")
+            if video_trend_entity_bridge_marker(state):
+                state = save_video_uiflow3_state(context, state)
+                await query.answer()
+                return await video_trend_finish_entity_bridge(
+                    query,
+                    user_id,
+                    context,
+                    state,
+                    get_user_language(user_id) or "vi",
+                )
             if video_script_entity_bridge_marker(state):
                 state = save_video_uiflow3_state(context, state)
                 await query.answer()
@@ -85304,7 +85329,11 @@ def video_scene3_full_review_text(state: dict) -> str:
         f"• Hậu kỳ: {html.escape(video_scene3_summary(state.get('postproduction_addons') or {}, post_without_text)[:500])}",
         "", "<b>Mạch cảnh</b>",
     ]
-    entity_summary = str(state.get("script_entity_summary") or "").strip()
+    entity_summary = str(
+        state.get("script_entity_summary")
+        or state.get("trend_entity_summary")
+        or ""
+    ).strip()
     if entity_summary:
         lines.insert(
             4,
@@ -103478,9 +103507,14 @@ def video_trend2_db(read_fn):
 
 
 def video_trend2_nav(back_callback: str) -> list[InlineKeyboardButton]:
+    target = str(back_callback or "menu|main_video")
+    if target == "menu|main_video":
+        return [
+            InlineKeyboardButton("⬅️ Quay lại Menu Video", callback_data="menu|main_video"),
+        ]
     return [
-        InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback),
-        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        InlineKeyboardButton("⬅️ Quay lại", callback_data=target),
+        InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"),
     ]
 
 
@@ -103530,7 +103564,7 @@ def video_trend2_catalog_text(state: dict, rows: list[dict]) -> str:
         ])
     lines.extend([
         "",
-        "Chọn một trend bằng hàng số hoặc đổi sang 5 trend khác. Sau đó mới chọn số cảnh, tỉ lệ và nguồn nội dung.",
+        "Chọn một trend bằng hàng số hoặc đổi sang 5 trend khác. Sau đó chọn số cảnh, tỉ lệ và thiết lập nhân vật, bối cảnh, phong cách từ chính nội dung trend.",
         "Bước này chưa tạo tác vụ và chưa trừ Xu.",
     ])
     return "\n".join(lines)
@@ -103720,10 +103754,240 @@ def video_trend2_source_snapshot(state: dict) -> dict:
     }
 
 
+def video_trend_entity_bridge_key(profile_state: dict) -> str:
+    content = dict(
+        profile_state.get("trend_content_choice")
+        or profile_state.get("content_choice")
+        or {}
+    )
+    trend = dict(profile_state.get("trend_source") or {})
+    payload = {
+        "trend_id": str(trend.get("trend_id") or ""),
+        "observed_at": str(trend.get("observed_at") or ""),
+        "content": str(
+            content.get("content")
+            or content.get("summary")
+            or content.get("title")
+            or profile_state.get("subject")
+            or ""
+        ),
+        "scene_count": max(1, min(20, safe_int(profile_state.get("scene_count"), 1))),
+        "ratio": str(profile_state.get("aspect_ratio") or ""),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:24]
+
+
+def video_trend_prepare_entity_bridge(
+    target,
+    user_id: int,
+    context,
+    profile_state: dict,
+    *,
+    return_to_review: bool = False,
+) -> dict:
+    count = max(1, min(20, safe_int(profile_state.get("scene_count"), 1)))
+    ratio = str(profile_state.get("aspect_ratio") or "")
+    if ratio not in video_flow6.SUPPORTED_RATIOS:
+        raise ValueError("trend_aspect_ratio_required")
+    content = deepcopy(dict(
+        profile_state.get("trend_content_choice")
+        or profile_state.get("content_choice")
+        or {}
+    ))
+    trend = deepcopy(dict(profile_state.get("trend_source") or {}))
+    subject = str(
+        content.get("content")
+        or content.get("summary")
+        or content.get("title")
+        or profile_state.get("subject")
+        or trend.get("title")
+        or "Video theo trend"
+    ).strip()
+    bridge_key = video_trend_entity_bridge_key(profile_state)
+    existing = video_uiflow3_state(context)
+    existing_marker = video_trend_entity_bridge_marker(existing)
+    if str(existing_marker.get("bridge_key") or "") == bridge_key:
+        state = existing
+    else:
+        state = video_uiflow3.new_state(
+            "video_trend",
+            draft_id=f"trend-{bridge_key}",
+            entry_mode="selected_trend",
+        )
+        state = video_uiflow3.set_source_metadata(
+            state,
+            trend_id=str(trend.get("trend_id") or "manual_trend"),
+            trend_title=str(trend.get("title") or subject),
+            trend_summary=str(trend.get("summary") or subject),
+            trend_platform=str(trend.get("platform") or ""),
+            trend_source_name=str(trend.get("source_name") or ""),
+            trend_source_url=str(trend.get("source_url") or ""),
+            trend_observed_at=str(trend.get("observed_at") or ""),
+        )
+        state = video_uiflow3.set_format(
+            state,
+            ratio=ratio,
+            target_duration_seconds=count * 8,
+        )
+        brief = deepcopy(content)
+        brief["title"] = str(brief.get("title") or trend.get("title") or subject)
+        brief["concept"] = str(
+            brief.get("concept")
+            or brief.get("content")
+            or brief.get("summary")
+            or trend.get("summary")
+            or subject
+        )
+        brief["trend_context"] = deepcopy(trend)
+        state = video_uiflow3.set_content_candidate(
+            state,
+            source="selected_trend",
+            original_intent=subject,
+            profile_id=str(profile_state.get("primary_profile_key") or "social_creator_trend"),
+            idea_id=str(trend.get("trend_id") or "manual_trend"),
+            approved_brief=brief,
+        )
+        state = video_uiflow3.lock_content(state)
+        state = video_uiflow3.confirm_scene_count(state, count)
+        saved_bible = deepcopy(dict(profile_state.get("trend_entity_bible") or {}))
+        saved_references = [
+            deepcopy(dict(item))
+            for item in profile_state.get("trend_entity_references") or []
+            if isinstance(item, dict)
+        ]
+        saved_needs = deepcopy(dict(profile_state.get("trend_entity_needs") or {}))
+        if saved_bible:
+            state["bible"] = saved_bible
+        if saved_references:
+            state["references"] = saved_references
+        if saved_needs:
+            state["needs"] = saved_needs
+        state["trend_source"] = trend
+        state = video_uiflow3.normalize_state(state)
+
+    owner_message = getattr(target, "message", None) or target
+    marker = {
+        "active": True,
+        "bridge_key": bridge_key,
+        "back_callback": (
+            "video_tail|review|open" if return_to_review else "vtrend|resume"
+        ),
+        "return_to": "review" if return_to_review else "creative_controls",
+        "scene_count": count,
+        "ratio": ratio,
+        "trend_id": str(trend.get("trend_id") or "manual_trend"),
+    }
+    legacy = dict(state.get("legacy_compat") or {})
+    legacy["trend_entity_bridge"] = marker
+    state["legacy_compat"] = legacy
+    state["owner_user_id"] = user_id
+    state["owner_chat_id"] = safe_int(getattr(owner_message, "chat_id", 0), 0)
+    state = video_uiflow3_clear_transient(state, keep_return=False)
+    state["navigation"].update({
+        "current_step": "production_bible",
+        "visible_step_stack": [],
+        "return_to": None,
+    })
+    return save_video_uiflow3_state(context, state)
+
+
+async def video_trend_finish_entity_bridge(
+    target,
+    user_id: int,
+    context,
+    bridge_state: dict,
+    lang: str = "vi",
+):
+    marker = video_trend_entity_bridge_marker(bridge_state)
+    if not marker:
+        raise ValueError("trend_entity_bridge_missing")
+    snapshot = video_script_entity_bridge_snapshot(bridge_state)
+    profile_state = video_profile_studio_state(context)
+    if video_flow6_product_id(profile_state) != "video_trend":
+        raise ValueError("trend_entity_parent_missing")
+    profile_state.update({
+        "character_config": deepcopy(snapshot["script_character_config"]),
+        "reference_assets": deepcopy(snapshot["script_reference_assets"]),
+        "assets": deepcopy(snapshot["script_reference_assets"]),
+        "trend_entity_bible": deepcopy(snapshot["script_entity_bible"]),
+        "trend_entity_references": deepcopy(snapshot["script_entity_references"]),
+        "trend_entity_needs": deepcopy(snapshot["script_entity_needs"]),
+        "trend_entity_summary": str(snapshot["script_entity_summary"]),
+        "trend_entity_bridge_complete": True,
+        "trend_creative_setup": True,
+    })
+    legacy = dict(bridge_state.get("legacy_compat") or {})
+    marker["completed"] = True
+    legacy["trend_entity_bridge"] = marker
+    bridge_state["legacy_compat"] = legacy
+    save_video_uiflow3_state(context, bridge_state)
+    if str(marker.get("return_to") or "") == "review":
+        embedded_tail = dict(profile_state.get(VIDEO_TAIL9_STATE_KEY) or {})
+        if embedded_tail:
+            embedded_tail = video_tail9.normalize_state(embedded_tail)
+            embedded_tail.update({
+                "review_status": "not_ready",
+                "summary_status": "not_ready",
+                "quality_tier_id": "",
+                "package_id": "",
+                "pricing_snapshot": {},
+                "capability_snapshot": {},
+                "status_stage": "review",
+            })
+            profile_state[VIDEO_TAIL9_STATE_KEY] = video_tail9.normalize_state(embedded_tail)
+        profile_state = save_video_profile_studio_state(
+            context,
+            {
+                **profile_state,
+                "step": "full_review",
+                "video_tail_return_to": "",
+            },
+        )
+        return await video_tail9_render(target, user_id, context, "review")
+    profile_state = video_profile_studio_step(
+        context,
+        profile_state,
+        "creative_controls",
+        push=False,
+    )
+    return await video_profile_scene1_render(target, profile_state, lang)
+
+
 def video_trend2_canonical_state(context, state: dict) -> dict:
-    content = dict(state.get("content_choice") or {})
-    subject = str(content.get("content") or content.get("title") or (state.get("selected_trend") or {}).get("title") or "Video theo trend")
-    profile_key = str(state.get("profile_key") or "social_creator_trend")
+    selected_trend = deepcopy(dict(state.get("selected_trend") or {}))
+    trend_source = video_trend2_source_snapshot(state)
+    trend_title = str(
+        selected_trend.get("title")
+        or trend_source.get("title")
+        or "Video theo trend"
+    ).strip()
+    trend_summary = str(
+        selected_trend.get("summary")
+        or trend_source.get("summary")
+        or ""
+    ).strip()
+    trend_content = (
+        trend_title
+        if bool(selected_trend.get("manual_input"))
+        else trend_summary or trend_title
+    )
+    content = {
+        "id": f"trend:{trend_source.get('trend_id') or 'manual_trend'}",
+        "title": trend_title,
+        "content": trend_content,
+        "summary": trend_summary,
+        "source": "selected_trend",
+    }
+    subject = str(
+        content.get("content")
+        or content.get("summary")
+        or content.get("title")
+        or selected_trend.get("title")
+        or "Video theo trend"
+    )
+    profile_key = "social_creator_trend"
     canonical = video_scene3_flow.default_state(
         product_type="video_trend",
         subject=subject,
@@ -103735,7 +103999,8 @@ def video_trend2_canonical_state(context, state: dict) -> dict:
         "aspect_ratio": str(state.get("aspect_ratio") or "9:16"),
         "content_mode": "manual" if str(content.get("id") or "").startswith("manual") else "suggestions",
         "subject": subject,
-        "trend_source": video_trend2_source_snapshot(state),
+        "trend_source": trend_source,
+        "selected_trend_detail": selected_trend,
         "trend_content_choice": content,
         "provider_called": False,
         "image_provider_called": False,
@@ -103749,14 +104014,22 @@ def video_trend2_canonical_state(context, state: dict) -> dict:
     canonical.update({
         "content_choice": content,
         "selected_suggestion": content,
-        "step": "character",
-        "history": ["content_mode", "scene_count", "aspect_ratio", "profile_select", "suggestions"],
+        "step": "creative_controls",
+        "history": ["scene_count", "aspect_ratio"],
+        "trend_entity_bridge_complete": False,
+        "trend_creative_setup": True,
     })
     return save_video_profile_studio_state(context, video_flow6.sync_scene_state(canonical))
 
 
 async def video_trend2_render(target, context, state: dict, lang: str = "vi"):
     screen = str(state.get("screen") or "entry")
+    if screen in {"content_source", "profiles", "suggestions", "preview"}:
+        state = save_video_trend2_state(
+            context,
+            {**state, "screen": "aspect_ratio", "pending_input": ""},
+        )
+        screen = "aspect_ratio"
     if screen == "entry":
         return await safe_edit_or_send(
             target,
@@ -103791,8 +104064,8 @@ async def video_trend2_render(target, context, state: dict, lang: str = "vi"):
             "📖 <b>Video theo trend</b>\n\n"
             "1. Chọn một media trend mới hoặc tự nhập.\n"
             "2. Chọn số cảnh và tỉ lệ.\n"
-            "3. Chọn loại nội dung, Kho Ý tưởng video hoặc tự nhập nội dung.\n"
-            "4. Xem, sửa prompt rồi hoàn thiện video.\n\n"
+            "3. Thiết lập nhân vật, bối cảnh và phong cách từ nội dung trend đã chọn.\n"
+            "4. Xem kế hoạch cảnh, sửa prompt rồi hoàn thiện video.\n\n"
             "Chỉ sau hóa đơn và xác nhận cuối hệ thống mới được tạo tác vụ. Xu chỉ trừ sau khi video cuối hợp lệ đã được gửi.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([video_trend2_nav("vtrend|back")]),
@@ -103935,14 +104208,26 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
     if action == "ratio":
         if value not in {"9:16", "16:9", "1:1", "4:5"}:
             return await video_trend2_render(query, context, state, lang)
-        state = video_trend2_open_screen(state, "content_source", parent="aspect_ratio")
-        state.update({"aspect_ratio": value, "pending_input": ""})
+        state.update({"aspect_ratio": value, "pending_input": "", "screen": "aspect_ratio"})
         state = save_video_trend2_state(context, state)
-        return await video_trend2_render(query, context, state, lang)
+        canonical = video_trend2_canonical_state(context, state)
+        bridge = video_trend_prepare_entity_bridge(
+            query,
+            uid,
+            context,
+            canonical,
+        )
+        return await video_uiflow3_render(query, context, bridge)
     if action == "ratio_custom":
         state["screen"] = "aspect_ratio"
         state["pending_input"] = ""
         state = save_video_trend2_state(context, state)
+        return await video_trend2_render(query, context, state, lang)
+    if action in {"manual_content", "edit_content", "idea_catalog"}:
+        state = save_video_trend2_state(
+            context,
+            {**state, "screen": "aspect_ratio", "pending_input": ""},
+        )
         return await video_trend2_render(query, context, state, lang)
     if action == "profiles":
         state = video_trend2_open_screen(state, "profiles")
@@ -104054,8 +104339,13 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
         return await video_trend2_render(query, context, state, lang)
     if action == "continue":
         canonical = video_trend2_canonical_state(context, state)
-        context.user_data.pop(VIDEO_TREND2_STATE_KEY, None)
-        return await video_profile_scene1_render(query, canonical, lang)
+        bridge = video_trend_prepare_entity_bridge(
+            query,
+            uid,
+            context,
+            canonical,
+        )
+        return await video_uiflow3_render(query, context, bridge)
     if action == "resume":
         state["pending_input"] = ""
         state = save_video_trend2_state(context, state)
@@ -108821,7 +109111,7 @@ def video_tail9_callback_guard(callback_handler):
                         query,
                         video_tail9_public_blocker_text(),
                         parse_mode="HTML",
-                        reply_markup=video_scene3_keyboard([[("⬅️ Quay lại", back_callback), ("🏠 Menu chính", "menu|main")]]),
+                        reply_markup=video_scene3_keyboard([[("⬅️ Quay lại", back_callback), ("🎬 Menu Video", "menu|main_video")]]),
                     )
                 except Exception:
                     return True
@@ -109247,7 +109537,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         uiflow3_transition_tail = (
             owner == "uiflow3"
             and str(tail.get("video_product_type") or "")
-            in {"video_ai_real", "script_image_video"}
+            in {"video_ai_real", "script_image_video", "multi_scene_film"}
         )
         script_transition_tail = (
             owner == "scene3"
@@ -109346,6 +109636,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             "script_image_video",
             "storyboard_prompt",
             "video_trend",
+            "multi_scene_film",
         }:
             return await video_tail9_render(query, uid, context, "addon")
         items = video_tail9_text_items(tail)
@@ -109618,18 +109909,21 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 phase=str(state.get("script_creative_phase") or "post_parser"),
             )
         if action == "entities" and trend_review:
-            state = video_profile_studio_step(
+            state = save_video_profile_studio_state(
                 context,
-                host,
-                "character",
-                push=False,
-                video_tail_return_to="review",
+                {
+                    **host,
+                    "video_tail_return_to": "review",
+                },
             )
-            return await video_profile_scene1_render(
+            bridge = video_trend_prepare_entity_bridge(
                 query,
+                uid,
+                context,
                 state,
-                get_user_language(uid) or "vi",
+                return_to_review=True,
             )
+            return await video_uiflow3_render(query, context, bridge)
         if action == "format" and storyboard_review:
             board = video_storyboard2.normalize_state(dict(host.get("storyboard2") or {}))
             board["video_tail_return_to"] = "review"
@@ -249380,6 +249674,24 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         ):
             bridge_state = video_uiflow3_state(context)
             if video_script_entity_bridge_marker(bridge_state):
+                bridge_state = video_uiflow3_clear_transient(
+                    bridge_state,
+                    keep_return=False,
+                )
+                bridge_state["navigation"].update({
+                    "current_step": "production_bible",
+                    "visible_step_stack": [],
+                    "return_to": None,
+                })
+                bridge_state = save_video_uiflow3_state(context, bridge_state)
+                return await video_uiflow3_render(query, context, bridge_state)
+        if (
+            bool(state.get("trend_creative_setup"))
+            and bool(state.get("trend_entity_bridge_complete"))
+            and step == "creative_controls"
+        ):
+            bridge_state = video_uiflow3_state(context)
+            if video_trend_entity_bridge_marker(bridge_state):
                 bridge_state = video_uiflow3_clear_transient(
                     bridge_state,
                     keep_return=False,
