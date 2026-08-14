@@ -73176,7 +73176,7 @@ VIDEO_AI_REAL_REFERENCE_MATERIALS = {
 
 def video_ai_real_remove_reference(raw_state: dict, asset_id: str) -> dict:
     state = video_uiflow3.normalize_state(raw_state)
-    if not video_ai_real_is_creation_flow(state):
+    if not video_uiflow3_uses_entity_pilot(state):
         raise ValueError("video_ai_real_creation_flow_required")
     target_id = str(asset_id or "").strip()
     references = [dict(item) for item in state.get("references") or []]
@@ -73771,11 +73771,7 @@ def video_ai_real_apply_quality_product(raw_state: dict, tier_id: int) -> dict:
 
 def _video_ai_real_pilot_state(raw_state: dict) -> dict:
     state = video_uiflow3.normalize_state(raw_state)
-    if (
-        str(state.get("parent_product") or "") != "video_ai_real"
-        or str(state.get("entry_mode") or "")
-        not in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
-    ):
+    if not video_uiflow3_uses_entity_pilot(state):
         raise ValueError("video_ai_real_creation_flow_required")
     return state
 
@@ -74275,6 +74271,23 @@ def video_ai_real_is_creation_flow(raw_state: dict) -> bool:
         str((raw_state or {}).get("parent_product") or "") == "video_ai_real"
         and str((raw_state or {}).get("entry_mode") or "")
         in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
+    )
+
+
+def video_script_entity_bridge_marker(raw_state: dict) -> dict:
+    if str((raw_state or {}).get("parent_product") or "") != "script_image_video":
+        return {}
+    legacy = dict((raw_state or {}).get("legacy_compat") or {})
+    marker = dict(legacy.get("script_entity_bridge") or {})
+    return marker if bool(marker.get("active")) else {}
+
+
+def video_uiflow3_uses_entity_pilot(raw_state: dict) -> bool:
+    """Use the proven multi-entity editor without changing its product owner."""
+
+    return bool(
+        video_ai_real_is_creation_flow(raw_state)
+        or video_script_entity_bridge_marker(raw_state)
     )
 
 
@@ -77283,7 +77296,7 @@ def video_ai_real_pilot_screen_payload(
     view: str,
     prefix: str,
 ) -> tuple[str, InlineKeyboardMarkup] | None:
-    if str(state.get("parent_product") or "") != "video_ai_real":
+    if not video_uiflow3_uses_entity_pilot(state):
         return None
     entry_mode = str(state.get("entry_mode") or "")
     if (
@@ -77446,6 +77459,10 @@ def video_ai_real_pilot_screen_payload(
         characters = list(bible.get("characters") or [])
         products = list(bible.get("products") or [])
         props = list(bible.get("props") or [])
+        bridge_back = str(
+            video_script_entity_bridge_marker(state).get("back_callback")
+            or "vid3|back"
+        )
         return (
             f"{progress_prefix}👥 Nhân vật và tham chiếu\n\n"
             f"Nhân vật: {len(characters)}\n"
@@ -77458,7 +77475,7 @@ def video_ai_real_pilot_screen_payload(
                 [("🖼 Ảnh tham chiếu", "vid3|view|references"), ("🛠 Tùy chỉnh chi tiết", "vid3|view|bible_extras")],
                 [("⚡ Tạo nhanh", "vid3|quick_build")],
                 [("✨ Tự động gợi ý", "vid3|bible_auto"), ("✅ Hoàn tất thiết lập nhân vật", "vid3|bible_done")],
-                *video_ai_real_pilot_nav_rows(back="vid3|back"),
+                *video_ai_real_pilot_nav_rows(back=bridge_back),
             ]),
         )
 
@@ -79722,7 +79739,7 @@ def video_ai_real_entity_count_destination(state: dict, entity: str) -> dict:
         raise ValueError("video_uiflow3_entity_invalid")
     field, id_field, detail_view, active_field, list_view = config
     items = list((state.get("bible") or {}).get(field) or [])
-    if not video_ai_real_is_creation_flow(state):
+    if not video_uiflow3_uses_entity_pilot(state):
         return video_uiflow3_open_view(state, list_view)
     if not items:
         return video_uiflow3_go(state, "production_bible")
@@ -80602,7 +80619,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state = video_uiflow3_await_input(state, "location_description", back_callback=f"vid3|location|{location_id}", location_id=location_id)
         elif action == "loc_suggest" and len(values) >= 2:
             location_id, preset_key = values[:2]
-            if not video_ai_real_is_creation_flow(state):
+            if not video_uiflow3_uses_entity_pilot(state):
                 raise ValueError("location_suggestion_not_available")
             if not video_uiflow3_find_location(state, location_id):
                 raise ValueError("location_not_found")
@@ -80644,7 +80661,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         elif action == "ref_add" and values:
             reference_kind = str(values[0] or "")
             if (
-                not video_ai_real_is_creation_flow(state)
+                not video_uiflow3_uses_entity_pilot(state)
                 or reference_kind not in VIDEO_AI_REAL_REFERENCE_MATERIALS
             ):
                 raise ValueError("reference_owner_invalid")
@@ -80656,7 +80673,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             )
         elif action == "ref_manage" and values:
             if (
-                not video_ai_real_is_creation_flow(state)
+                not video_uiflow3_uses_entity_pilot(state)
                 or str(state.get("ui_view") or "")
                 not in {"references", "reference_manage"}
             ):
@@ -80683,7 +80700,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             )
         elif action == "ref_remove" and values:
             if (
-                not video_ai_real_is_creation_flow(state)
+                not video_uiflow3_uses_entity_pilot(state)
                 or str(state.get("ui_view") or "") != "reference_manage"
             ):
                 raise ValueError("reference_owner_invalid")
@@ -80747,7 +80764,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             origin_view = str(state.get("ui_view") or "")
             if (
                 owner_type in {"frame", "storyboard_panel"}
-                and not video_ai_real_is_creation_flow(state)
+                and not video_uiflow3_uses_entity_pilot(state)
             ):
                 raise ValueError("reference_owner_invalid")
             role = {
@@ -80950,6 +80967,13 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state = video_uiflow3_clear_transient(state)
             state["navigation"]["current_step"] = "production_bible"
         elif action == "quick_build":
+            if video_script_entity_bridge_marker(state):
+                state = video_ai_real_build_quick_plan(state, bible_only=True)
+                state = video_uiflow3_clear_transient(state)
+                state["navigation"]["current_step"] = "production_bible"
+                state = save_video_uiflow3_state(context, state)
+                await query.answer()
+                return await video_uiflow3_render(query, context, state)
             state = video_ai_real_build_quick_plan(state)
             state = video_uiflow3.mark_sections_complete(
                 state,
@@ -80996,6 +81020,16 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 )
                 return await video_uiflow3_render(query, context, state)
             state = video_uiflow3.mark_sections_complete(state, "production_bible", "references", "continuity")
+            if video_script_entity_bridge_marker(state):
+                state = save_video_uiflow3_state(context, state)
+                await query.answer()
+                return await video_script_finish_entity_bridge(
+                    query,
+                    user_id,
+                    context,
+                    state,
+                    get_user_language(user_id) or "vi",
+                )
             if str((state.get("navigation") or {}).get("return_to") or "") == "summary":
                 state = video_uiflow3_clear_transient(video_uiflow3.finish_editor(state), keep_return=False)
             elif (
@@ -84197,6 +84231,17 @@ def video_scene3_profile_suggestions_keyboard(state: dict) -> InlineKeyboardMark
 
 
 def video_scene3_character_text(state: dict) -> str:
+    if (
+        video_flow6_product_id(state) == "script_image_video"
+        and bool(state.get("script_creative_setup"))
+    ):
+        summary = str(state.get("script_entity_summary") or "Chưa hoàn tất thiết lập").strip()
+        return (
+            "👥 <b>Nhân vật và tham chiếu</b>\n\n"
+            f"• Hiện tại: {html.escape(summary)}\n\n"
+            "Mở trình thiết lập đa thực thể để khai báo đầy đủ nhân vật, bối cảnh, "
+            "sản phẩm, đạo cụ và ảnh tham chiếu."
+        )
     config = dict(state.get("character_config") or {})
     labels = dict(video_scene3_flow.CHARACTER_MODES)
     mode = str(config.get("mode") or "")
@@ -84220,9 +84265,10 @@ def video_scene3_character_keyboard(state: dict | None = None) -> InlineKeyboard
     )
     if is_script_creative_setup:
         back_callback = str((state or {}).get("script_creative_back_callback") or "vproduct|script_suggestions_screen")
-        back_label = "⬅️ Nội dung đã chọn"
-        menu_callback = "menu|main_video"
-        menu_label = "🎬 Menu Video"
+        return video_scene3_keyboard([
+            [("👥 Mở nhân vật và tham chiếu", "vproduct|script_entity_bridge")],
+            [("⬅️ Nội dung đã chọn", back_callback), ("🎬 Menu Video", "menu|main_video")],
+        ])
     else:
         back_callback = "vproduct|script_scene_review" if is_confirmed_script else "vprofile|back"
         back_label = "⬅️ Quay lại duyệt phân cảnh" if is_confirmed_script else "⬅️ Quay lại"
@@ -84424,7 +84470,14 @@ def video_scene3_field_editor_keyboard(
     if list(entry.get("history") or []):
         remove_action = "req_remove" if group == "preservation_requirements" else "creative_remove"
         rows.append([("↩️ Khôi phục", f"vprofile|{restore_action}"), ("🚫 Bỏ chọn mục", f"vprofile|{remove_action}")])
-    rows.append([("⬅️ Quay lại", f"vprofile|{back_action}"), ("🏠 Menu chính", "menu|main")])
+    script_flow = video_flow6_product_id(state) == "script_image_video"
+    rows.append([
+        ("⬅️ Quay lại", f"vprofile|{back_action}"),
+        (
+            "🎬 Menu Video" if script_flow else "🏠 Menu chính",
+            "menu|main_video" if script_flow else "menu|main",
+        ),
+    ])
     return video_scene3_keyboard(rows)
 
 
@@ -85246,6 +85299,12 @@ def video_scene3_full_review_text(state: dict) -> str:
         f"• Hậu kỳ: {html.escape(video_scene3_summary(state.get('postproduction_addons') or {}, post_without_text)[:500])}",
         "", "<b>Mạch cảnh</b>",
     ]
+    entity_summary = str(state.get("script_entity_summary") or "").strip()
+    if entity_summary:
+        lines.insert(
+            4,
+            f"• Nhân vật và tham chiếu: {html.escape(entity_summary[:500])}",
+        )
     image_versions = dict(state.get("image_prompt_versions") or {})
     video_versions = dict(state.get("video_prompt_versions") or {})
     for scene in scenes[:20]:
@@ -85292,10 +85351,17 @@ def video_scene3_post_keyboard(state: dict) -> InlineKeyboardMarkup:
         active = (entries.get(key) or {}).get("enabled") if enabled is None else enabled
         return f"{'✅' if active else '☐'} {label}"
 
+    script_flow = video_flow6_product_id(state) == "script_image_video"
     return video_scene3_keyboard([
         [(_label("logo_image", "Logo hình"), "vprofile|post_toggle|logo_image"), (_label("watermark_text", "Watermark chữ"), "vprofile|post_toggle|watermark_text")],
         [("✅ Xong logo / watermark", "vprofile|post_done"), ("⏭️ Bỏ qua", "vprofile|post_skip")],
-        [("⬅️ Quay lại", "vprofile|back"), ("🏠 Menu chính", "menu|main")],
+        [
+            ("⬅️ Quay lại", "vprofile|back"),
+            (
+                "🎬 Menu Video" if script_flow else "🏠 Menu chính",
+                "menu|main_video" if script_flow else "menu|main",
+            ),
+        ],
     ])
 
 
@@ -86256,6 +86322,14 @@ def video_profile_scene1_handoff(user_id: int, state: dict) -> dict:
             "technical_profile": str(state.get("technical_profile") or ""),
             "custom_technical_profile": str(state.get("custom_technical_profile") or ""),
             "character_config": dict(state.get("character_config") or {}),
+            "script_entity_bible": deepcopy(dict(state.get("script_entity_bible") or {})),
+            "script_entity_references": [
+                deepcopy(dict(item))
+                for item in state.get("script_entity_references") or []
+                if isinstance(item, dict)
+            ],
+            "script_entity_needs": deepcopy(dict(state.get("script_entity_needs") or {})),
+            "script_entity_summary": str(state.get("script_entity_summary") or ""),
             "image_source_mode": str(state.get("image_source_mode") or ""),
             "image_generation_quote": dict(state.get("image_generation_quote") or {}),
             "image_generation_confirmed": bool(state.get("image_generation_confirmed")),
@@ -90696,6 +90770,13 @@ def video_script_creative_snapshot(state: dict) -> dict:
                 values.append(str(row.get("value") or "").strip())
         return "; ".join(values)
 
+    entity_bible = deepcopy(dict(current.get("script_entity_bible") or {}))
+    entity_references = [
+        deepcopy(dict(item))
+        for item in current.get("script_entity_references") or []
+        if isinstance(item, dict)
+    ]
+    entity_needs = deepcopy(dict(current.get("script_entity_needs") or {}))
     material_count = len([
         item for item in references.get("items") or []
         if isinstance(item, dict) and str(item.get("file_id") or item.get("path") or "").strip()
@@ -90711,12 +90792,293 @@ def video_script_creative_snapshot(state: dict) -> dict:
         "script_reference_summary": f"{material_count} ảnh tham chiếu trong phiên" if material_count else "Không dùng ảnh tham chiếu",
         "script_creative_summary": selected_values(creative) or "Dùng thiết lập phù hợp nội dung",
         "script_preservation_summary": selected_values(preservation) or "Không có ràng buộc bổ sung",
+        "script_entity_bible": entity_bible,
+        "script_entity_references": entity_references,
+        "script_entity_needs": entity_needs,
+        "script_entity_summary": str(current.get("script_entity_summary") or ""),
         "script_style_label": str(
             ((creative.get("visual_style") or {}).get("value") if isinstance(creative.get("visual_style"), dict) else "")
             or "Theo chi tiết sáng tạo đã duyệt"
         ),
         "script_creative_complete": True,
     }
+
+
+def video_script_entity_bridge_key(
+    draft: dict,
+    *,
+    phase: str,
+    scene_count: int,
+    ratio: str,
+    content: str,
+) -> str:
+    payload = {
+        "phase": str(phase or "pre_script"),
+        "scene_count": int(scene_count),
+        "ratio": str(ratio or ""),
+        "content": str(content or ""),
+        "script_revision": safe_int(draft.get("script_ai_revision"), 0),
+        "script_source": str(draft.get("script_source") or ""),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:24]
+
+
+def video_script_entity_bridge_snapshot(raw_state: dict) -> dict:
+    current = video_uiflow3.normalize_state(raw_state)
+    bible = deepcopy(dict(current.get("bible") or {}))
+    references = [
+        deepcopy(dict(item))
+        for item in current.get("references") or []
+        if isinstance(item, dict)
+    ]
+    characters = list(bible.get("characters") or [])
+    locations = list(bible.get("locations") or [])
+    products = list(bible.get("products") or [])
+    props = list(bible.get("props") or [])
+    character_lines = []
+    for index, item in enumerate(characters, 1):
+        name = str(item.get("display_name") or f"Nhân vật {index}").strip()
+        description = str(item.get("description") or "").strip()
+        character_lines.append(
+            f"{index}. {name}" + (f": {description}" if description else "")
+        )
+    first_gender = str((characters[0] if characters else {}).get("gender") or "")
+    compatibility_character = {
+        "mode": (
+            "none"
+            if not characters
+            else first_gender
+            if len(characters) == 1 and first_gender in {"male", "female"}
+            else "auto"
+        ),
+        "gender": first_gender if len(characters) == 1 else "",
+        "gender_grounded": bool(
+            len(characters) == 1 and first_gender in {"male", "female"}
+        ),
+        "description": "\n".join(character_lines)[:1600],
+        "needs_gender_confirmation": False,
+        "history": [],
+    }
+    type_map = {
+        "character": "character_person",
+        "location": "background",
+        "product": "product_object",
+        "prop": "product_object",
+        "style": "visual_style_reference",
+        "storyboard": "storyboard_frames",
+    }
+    reference_items = []
+    for item in references:
+        file_id = str(item.get("telegram_file_id") or item.get("file_id") or "").strip()
+        if not file_id:
+            continue
+        owner_type = str(item.get("owner_type") or "")
+        reference_items.append({
+            "file_id": file_id,
+            "media_kind": str(item.get("asset_type") or "image"),
+            "type": type_map.get(owner_type, "visual_style_reference"),
+            "owner_type": owner_type,
+            "owner_id": str(item.get("owner_id") or ""),
+            "role": str(item.get("role") or "reference"),
+            "fingerprint": str(item.get("fingerprint") or ""),
+            "caption": str((item.get("metadata") or {}).get("caption") or ""),
+        })
+    reference_assets = {"items": reference_items}
+    summary = (
+        f"{len(characters)} nhân vật · {len(locations)} bối cảnh · "
+        f"{len(products)} sản phẩm · {len(props)} đạo cụ · "
+        f"{len(references)} ảnh tham chiếu"
+    )
+    return {
+        "script_character_config": compatibility_character,
+        "script_reference_assets": reference_assets,
+        "script_entity_bible": bible,
+        "script_entity_references": references,
+        "script_entity_needs": deepcopy(dict(current.get("needs") or {})),
+        "script_entity_summary": summary,
+    }
+
+
+def video_script_prepare_entity_bridge(
+    target,
+    user_id: int,
+    context,
+    session: dict,
+    profile_state: dict,
+    *,
+    phase: str,
+) -> dict:
+    draft = dict((session or {}).get("draft") or {})
+    count = max(
+        video_script_product.MIN_SCENES,
+        min(
+            video_script_product.MAX_SCENES,
+            safe_int(
+                profile_state.get("scene_count")
+                or draft.get("script_entry_scene_count")
+                or draft.get("proposed_scene_count"),
+                video_script_product.MIN_SCENES,
+            ),
+        ),
+    )
+    ratio = str(profile_state.get("aspect_ratio") or draft.get("script_ratio") or "")
+    content = str(
+        profile_state.get("subject")
+        or draft.get("script_content_brief")
+        or draft.get("script_topic")
+        or draft.get("manual_script_raw")
+        or "Kịch bản đã nhận"
+    ).strip()
+    bridge_key = video_script_entity_bridge_key(
+        draft,
+        phase=phase,
+        scene_count=count,
+        ratio=ratio,
+        content=content,
+    )
+    existing = video_uiflow3_state(context)
+    existing_marker = video_script_entity_bridge_marker(existing)
+    if str(existing_marker.get("bridge_key") or "") == bridge_key:
+        state = existing
+    else:
+        state = video_uiflow3.new_state(
+            "script_image_video",
+            draft_id=f"script-{uuid.uuid4().hex}",
+            entry_mode="prompt_video",
+        )
+        state = video_uiflow3.set_source_metadata(
+            state,
+            source_text=content,
+            source_kind="approved_script",
+        )
+        state = video_uiflow3.set_format(
+            state,
+            ratio=ratio,
+            target_duration_seconds=count * 8,
+        )
+        selected = deepcopy(dict(
+            profile_state.get("content_choice")
+            or draft.get("script_content_choice")
+            or {}
+        ))
+        brief = deepcopy(selected)
+        brief["title"] = str(
+            selected.get("title")
+            or draft.get("script_topic")
+            or content[:240]
+        )
+        state = video_uiflow3.set_content_candidate(
+            state,
+            source="approved_script",
+            original_intent=content,
+            profile_id=str(draft.get("script_profile_key") or ""),
+            approved_brief=brief,
+        )
+        state = video_uiflow3.lock_content(state)
+        state = video_uiflow3.confirm_scene_count(state, count)
+        saved_bible = deepcopy(dict(
+            profile_state.get("script_entity_bible")
+            or draft.get("script_entity_bible")
+            or {}
+        ))
+        saved_references = [
+            deepcopy(dict(item))
+            for item in (
+                profile_state.get("script_entity_references")
+                or draft.get("script_entity_references")
+                or []
+            )
+            if isinstance(item, dict)
+        ]
+        if saved_bible:
+            state["bible"] = saved_bible
+        if saved_references:
+            state["references"] = saved_references
+        saved_needs = deepcopy(dict(
+            profile_state.get("script_entity_needs")
+            or draft.get("script_entity_needs")
+            or {}
+        ))
+        if saved_needs:
+            state["needs"] = saved_needs
+        state = video_uiflow3.normalize_state(state)
+
+    owner_message = getattr(target, "message", None) or target
+    marker = {
+        "active": True,
+        "bridge_key": bridge_key,
+        "phase": str(phase or "pre_script"),
+        "back_callback": str(
+            profile_state.get("script_creative_back_callback")
+            or draft.get("script_content_input_back_callback")
+            or "vproduct|script_suggestions_screen"
+        ),
+        "scene_count": count,
+        "ratio": ratio,
+    }
+    legacy = dict(state.get("legacy_compat") or {})
+    legacy["script_entity_bridge"] = marker
+    state["legacy_compat"] = legacy
+    state["owner_user_id"] = user_id
+    state["owner_chat_id"] = safe_int(getattr(owner_message, "chat_id", 0), 0)
+    state = video_uiflow3_clear_transient(state, keep_return=False)
+    state["navigation"].update({
+        "current_step": "production_bible",
+        "visible_step_stack": [],
+        "return_to": None,
+    })
+    return save_video_uiflow3_state(context, state)
+
+
+async def video_script_finish_entity_bridge(
+    target,
+    user_id: int,
+    context,
+    bridge_state: dict,
+    lang: str = "vi",
+):
+    marker = video_script_entity_bridge_marker(bridge_state)
+    if not marker:
+        raise ValueError("script_entity_bridge_missing")
+    snapshot = video_script_entity_bridge_snapshot(bridge_state)
+    profile_state = video_profile_studio_state(context)
+    if video_flow6_product_id(profile_state) != "script_image_video":
+        raise ValueError("script_entity_parent_missing")
+    profile_state.update({
+        "character_config": deepcopy(snapshot["script_character_config"]),
+        "reference_assets": deepcopy(snapshot["script_reference_assets"]),
+        "assets": deepcopy(snapshot["script_reference_assets"]),
+        "script_entity_bible": deepcopy(snapshot["script_entity_bible"]),
+        "script_entity_references": deepcopy(snapshot["script_entity_references"]),
+        "script_entity_needs": deepcopy(snapshot["script_entity_needs"]),
+        "script_entity_summary": str(snapshot["script_entity_summary"]),
+        "script_entity_bridge_complete": True,
+        "script_creative_setup": True,
+        "script_creative_phase": str(marker.get("phase") or "pre_script"),
+    })
+    task3d_session_step(
+        user_id,
+        "script_creative_details",
+        provider_called=False,
+        job_created=False,
+        outbox_created=False,
+        xu_charged=0,
+        **snapshot,
+    )
+    legacy = dict(bridge_state.get("legacy_compat") or {})
+    marker["completed"] = True
+    legacy["script_entity_bridge"] = marker
+    bridge_state["legacy_compat"] = legacy
+    save_video_uiflow3_state(context, bridge_state)
+    profile_state = video_profile_studio_step(
+        context,
+        profile_state,
+        "creative_controls",
+        push=False,
+    )
+    return await video_profile_scene1_render(target, profile_state, lang)
 
 
 async def video_script_open_creative_details(
@@ -90729,22 +91091,34 @@ async def video_script_open_creative_details(
     phase: str = "pre_script",
 ):
     draft = dict((session or {}).get("draft") or {})
+    existing = video_profile_studio_state(context)
     count = max(
         video_script_product.MIN_SCENES,
         min(
             video_script_product.MAX_SCENES,
-            safe_int(draft.get("script_entry_scene_count") or draft.get("proposed_scene_count"), video_script_product.MIN_SCENES),
+            safe_int(
+                draft.get("script_entry_scene_count")
+                or draft.get("proposed_scene_count")
+                or existing.get("scene_count"),
+                video_script_product.MIN_SCENES,
+            ),
         ),
     )
-    ratio = str(draft.get("script_ratio") or "")
+    ratio = str(draft.get("script_ratio") or existing.get("aspect_ratio") or "")
     if ratio not in video_flow6.SUPPORTED_RATIOS:
         return await video_script_render_step(
             target,
             task3d_session_step(user_id, "script_entry_ratio", provider_called=False, xu_charged=0),
             lang,
         )
-    content = str(draft.get("script_content_brief") or draft.get("script_topic") or "Kịch bản đã nhận").strip()
-    existing = video_profile_studio_state(context)
+    content = str(
+        draft.get("script_content_brief")
+        or draft.get("script_topic")
+        or draft.get("manual_script_raw")
+        or draft.get("script_text")
+        or existing.get("subject")
+        or "Kịch bản đã nhận"
+    ).strip()
     reusable = (
         video_flow6_product_id(existing) == "script_image_video"
         and str(existing.get("script_creative_phase") or "") == str(phase or "pre_script")
@@ -90759,13 +91133,17 @@ async def video_script_open_creative_details(
             "character_config": deepcopy(draft.get("script_character_config") or state.get("character_config") or {}),
             "reference_assets": deepcopy(draft.get("script_reference_assets") or {}),
             "assets": deepcopy(draft.get("script_reference_assets") or {}),
+            "script_entity_bible": deepcopy(draft.get("script_entity_bible") or {}),
+            "script_entity_references": deepcopy(draft.get("script_entity_references") or []),
+            "script_entity_needs": deepcopy(draft.get("script_entity_needs") or {}),
+            "script_entity_summary": str(draft.get("script_entity_summary") or ""),
             "image_source_mode": str(draft.get("script_image_source_mode") or ""),
             "creative_controls": deepcopy(draft.get("script_creative_controls") or state.get("creative_controls") or {}),
             "preservation_requirements": deepcopy(draft.get("script_preservation_requirements") or state.get("preservation_requirements") or {}),
             "requirements": deepcopy(draft.get("script_requirements") or {}),
         })
     state.update({
-        "step": "character",
+        "step": "creative_controls",
         "history": [],
         "source_product_id": "script_image_video",
         "product_type": "script_image_video",
@@ -90782,7 +91160,15 @@ async def video_script_open_creative_details(
         "selected_suggestion": deepcopy(draft.get("script_content_choice") or {"title": content[:240], "concept": content[:1600]}),
         "script_creative_setup": True,
         "script_creative_phase": str(phase or "pre_script"),
-        "script_creative_back_callback": str(draft.get("script_content_input_back_callback") or "vproduct|script_suggestions_screen"),
+        "script_creative_back_callback": (
+            "vproduct|script_scene_review"
+            if str(phase or "pre_script") == "post_parser"
+            else str(
+                draft.get("script_content_input_back_callback")
+                or "vproduct|script_suggestions_screen"
+            )
+        ),
+        "script_entity_bridge_complete": False,
         "scene_count_confirmed": str(phase or "pre_script") == "post_parser",
         "provider_called": False,
         "image_provider_called": False,
@@ -90794,7 +91180,15 @@ async def video_script_open_creative_details(
     })
     state = save_video_profile_studio_state(context, video_flow6.sync_scene_state(state))
     task3d_session_step(user_id, "script_creative_details", provider_called=False, xu_charged=0)
-    return await video_profile_scene1_render(target, state, lang)
+    bridge_state = video_script_prepare_entity_bridge(
+        target,
+        user_id,
+        context,
+        session,
+        state,
+        phase=str(phase or "pre_script"),
+    )
+    return await video_uiflow3_render(target, context, bridge_state)
 
 
 async def video_script_finish_creative_details(
@@ -91496,6 +91890,10 @@ def video_flow7_start_confirmed_script_state(
             "script_reference_summary",
             "script_creative_summary",
             "script_preservation_summary",
+            "script_entity_bible",
+            "script_entity_references",
+            "script_entity_needs",
+            "script_entity_summary",
             "script_creative_complete",
         )
         if key in draft
@@ -91572,6 +91970,10 @@ def video_flow7_start_confirmed_script_state(
         "creative_controls": deepcopy(draft.get("script_creative_controls") or state.get("creative_controls") or {}),
         "preservation_requirements": deepcopy(draft.get("script_preservation_requirements") or state.get("preservation_requirements") or {}),
         "requirements": deepcopy(draft.get("script_requirements") or state.get("requirements") or {}),
+        "script_entity_bible": deepcopy(draft.get("script_entity_bible") or {}),
+        "script_entity_references": deepcopy(draft.get("script_entity_references") or []),
+        "script_entity_needs": deepcopy(draft.get("script_entity_needs") or {}),
+        "script_entity_summary": str(draft.get("script_entity_summary") or ""),
         "script_creative_complete": creative_complete,
         "script_creative_setup": not creative_complete,
         "script_creative_phase": "complete" if creative_complete else "post_parser",
@@ -91597,7 +91999,7 @@ def video_flow7_start_confirmed_script_state(
             state = video_profile_studio_step(
                 context,
                 state,
-                "character",
+                "creative_controls",
                 rebuild_scene_count=False,
             )
     else:
@@ -91792,7 +92194,7 @@ def video_flow7_after_ratio(state: dict) -> tuple[dict, str]:
             "script_creative_phase": "post_parser",
             "script_creative_back_callback": "vproduct|script_scene_review",
         })
-        return updated, "character"
+        return updated, "script_entity_bridge"
     if flow_kind == "ai_real" and bool(updated.get("flow8_direct_entry")):
         return updated, "ai_input_type"
     if flow_kind in {"script_to_video", "trend_video"} and bool(updated.get("flow8_direct_entry")):
@@ -110446,6 +110848,27 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if action == "script_goal_screen":
             session = task3d_session_step(uid, "script_ai_goal", provider_called=False, xu_charged=0)
             return await video_script_render_step(query, session, lang)
+        if action == "script_entity_bridge":
+            creative_state = video_profile_studio_state(context)
+            if video_flow6_product_id(creative_state) != "script_image_video":
+                return await video_script_render_step(
+                    query,
+                    task3d_session_step(
+                        uid,
+                        "script_ai_content_source",
+                        provider_called=False,
+                        xu_charged=0,
+                    ),
+                    lang,
+                )
+            return await video_script_open_creative_details(
+                query,
+                uid,
+                context,
+                get_video_session(uid),
+                lang,
+                phase=str(creative_state.get("script_creative_phase") or "pre_script"),
+            )
         if action == "script_creative_details":
             creative_state = video_profile_studio_state(context)
             if video_flow6_product_id(creative_state) != "script_image_video":
@@ -110763,6 +111186,18 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     "⚠️ Chưa chứng minh được 100% nội dung kịch bản nằm trong kế hoạch cảnh. Nội dung gốc vẫn được giữ nguyên; chưa tạo tác vụ và chưa trừ Xu.",
                     parse_mode=None,
                     reply_markup=video_flow7_script_count_keyboard(count, locked=locked_ai),
+                )
+            if (
+                bool(state.get("script_creative_setup"))
+                and str(state.get("step") or "") != "aspect_ratio"
+            ):
+                return await video_script_open_creative_details(
+                    query,
+                    uid,
+                    context,
+                    session,
+                    lang,
+                    phase="post_parser",
                 )
             return await video_profile_scene1_render(query, state, lang)
         if action == "script_count_custom":
@@ -114511,6 +114946,19 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
                         ),
                         locked=locked_ai,
                     ),
+                )
+                return True
+            if (
+                bool(state.get("script_creative_setup"))
+                and str(state.get("step") or "") != "aspect_ratio"
+            ):
+                await video_script_open_creative_details(
+                    update.message,
+                    uid,
+                    context,
+                    session,
+                    lang,
+                    phase="post_parser",
                 )
                 return True
             await video_profile_scene1_render(update.message, state, lang)
@@ -182349,7 +182797,7 @@ def _video_uiflow3_image_target(state: dict, target_kind: str, target_id: str) -
         }
     reference_material = dict(VIDEO_AI_REAL_REFERENCE_MATERIALS.get(kind) or {})
     if reference_material:
-        if target or not video_ai_real_is_creation_flow(state):
+        if target or not video_uiflow3_uses_entity_pilot(state):
             raise ValueError("video_uiflow3_image_target_invalid")
         return {
             "kind": kind,
@@ -248175,6 +248623,18 @@ async def handle_video_profile_studio_pending_text(update: Update, context: Cont
                 lang,
             )
         state, next_step = video_flow7_after_ratio(state)
+        if next_step == "script_entity_bridge":
+            state.update({"step": "creative_controls", "input_target": ""})
+            save_video_profile_studio_state(context, state)
+            await video_script_open_creative_details(
+                update.message,
+                update.effective_user.id,
+                context,
+                get_video_session(update.effective_user.id),
+                lang,
+                phase="post_parser",
+            )
+            return True
         state = video_scene3_return_to_parent(context, state, next_step, input_target="")
         await video_profile_scene1_render(update.message, state, lang)
         return True
@@ -248210,6 +248670,21 @@ async def handle_video_profile_studio_pending_text(update: Update, context: Cont
             )
         return True
     if step == "await_character_description":
+        if video_flow6_product_id(state) == "script_image_video":
+            state.update({
+                "script_creative_setup": True,
+                "step": "creative_controls",
+            })
+            save_video_profile_studio_state(context, state)
+            await video_script_open_creative_details(
+                update.message,
+                update.effective_user.id,
+                context,
+                get_video_session(update.effective_user.id),
+                lang,
+                phase=str(state.get("script_creative_phase") or "pre_script"),
+            )
+            return True
         state = video_scene3_flow.set_character_mode(state, "custom", description=user_text[:1600])
         target = video_flow7_after_character_step(state)
         state = video_scene3_return_to_parent(context, state, target, input_target="")
@@ -248230,6 +248705,41 @@ async def handle_video_profile_studio_pending_text(update: Update, context: Cont
                 state,
                 fallback_subject=user_text[:1600],
             )
+        if video_flow6_product_id(state) == "script_image_video":
+            phase = (
+                "post_parser"
+                if bool(state.get("scene_count_confirmed"))
+                and str(state.get("script_text") or state.get("manual_script_raw") or "").strip()
+                else "pre_script"
+            )
+            state.update({
+                "selected_suggestion": custom,
+                "content_choice": custom,
+                "subject": user_text[:1600],
+                "context": user_text[:1600],
+                "profile_context": user_text[:1600],
+                "script_creative_setup": True,
+                "script_creative_phase": phase,
+                "script_creative_back_callback": (
+                    "vproduct|script_scene_review"
+                    if phase == "post_parser"
+                    else "vproduct|script_content_source"
+                ),
+                "step": "creative_controls",
+            })
+            state = save_video_profile_studio_state(
+                context,
+                video_flow6.sync_scene_state(state),
+            )
+            await video_script_open_creative_details(
+                update.message,
+                update.effective_user.id,
+                context,
+                get_video_session(update.effective_user.id),
+                lang,
+                phase=phase,
+            )
+            return True
         state = video_scene3_return_to_parent(
             context,
             state,
@@ -248512,6 +249022,24 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         )
     if action == "back":
         step = str(state.get("step") or "menu")
+        if (
+            bool(state.get("script_creative_setup"))
+            and bool(state.get("script_entity_bridge_complete"))
+            and step == "creative_controls"
+        ):
+            bridge_state = video_uiflow3_state(context)
+            if video_script_entity_bridge_marker(bridge_state):
+                bridge_state = video_uiflow3_clear_transient(
+                    bridge_state,
+                    keep_return=False,
+                )
+                bridge_state["navigation"].update({
+                    "current_step": "production_bible",
+                    "visible_step_stack": [],
+                    "return_to": None,
+                })
+                bridge_state = save_video_uiflow3_state(context, bridge_state)
+                return await video_uiflow3_render(query, context, bridge_state)
         if bool(state.get("script_creative_setup")) and step == "character":
             phase = str(state.get("script_creative_phase") or "pre_script")
             if phase == "post_parser":
@@ -249054,6 +249582,32 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             "context": str(chosen.get("concept") or chosen.get("flow") or "")[:1600],
         })
         state = video_flow6.sync_scene_state(state)
+        if video_flow6_product_id(state) == "script_image_video":
+            phase = (
+                "post_parser"
+                if bool(state.get("scene_count_confirmed"))
+                and str(state.get("script_text") or state.get("manual_script_raw") or "").strip()
+                else "pre_script"
+            )
+            state.update({
+                "script_creative_setup": True,
+                "script_creative_phase": phase,
+                "script_creative_back_callback": (
+                    "vproduct|script_scene_review"
+                    if phase == "post_parser"
+                    else "vproduct|script_content_source"
+                ),
+                "step": "creative_controls",
+            })
+            save_video_profile_studio_state(context, state)
+            return await video_script_open_creative_details(
+                query,
+                uid,
+                context,
+                get_video_session(uid),
+                lang,
+                phase=phase,
+            )
         state = video_profile_studio_step(context, state, "character")
         return await video_profile_scene1_render(query, state, lang)
     if action == "suggest_refresh":
@@ -249066,6 +249620,23 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
     if action in {"suggest_restore", "suggest_skip"}:
         state = video_profile_studio_step(context, state, "content_choice", push=False)
         return await video_profile_scene1_render(query, state, lang)
+    if (
+        action in {"character", "character_custom", "character_upload"}
+        and video_flow6_product_id(state) == "script_image_video"
+    ):
+        state.update({
+            "script_creative_setup": True,
+            "step": "creative_controls",
+        })
+        save_video_profile_studio_state(context, state)
+        return await video_script_open_creative_details(
+            query,
+            uid,
+            context,
+            get_video_session(uid),
+            lang,
+            phase=str(state.get("script_creative_phase") or "pre_script"),
+        )
     if action == "character":
         mode = str(parts[2] if len(parts) > 2 else "")
         state = video_scene3_flow.set_character_mode(state, mode)
@@ -250380,6 +250951,17 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         if video_flow7_uses_idea_catalog(state):
             return await video_flow7_open_idea_catalog_from_state(query, context, uid, state, lang)
         state, next_step = video_flow7_after_ratio(state)
+        if next_step == "script_entity_bridge":
+            state.update({"step": "creative_controls"})
+            save_video_profile_studio_state(context, state)
+            return await video_script_open_creative_details(
+                query,
+                uid,
+                context,
+                get_video_session(uid),
+                lang,
+                phase="post_parser",
+            )
         state = video_profile_studio_step(context, state, next_step)
         return await video_profile_scene1_render(query, state, lang)
     if action == "quality_info":

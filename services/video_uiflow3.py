@@ -62,7 +62,7 @@ ENTRY_ADAPTERS: dict[str, dict[str, Any]] = {
         "source_kind": "script",
         "source_required": True,
         "seconds_per_scene": 8,
-        "minimum_scene_count": 2,
+        "minimum_scene_count": 5,
         "maximum_scene_count": 20,
         "public_submit_enabled": True,
     },
