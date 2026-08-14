@@ -74313,7 +74313,11 @@ def video_uiflow3_execution_adapter(raw_state: dict) -> dict:
 
     state = video_uiflow3.normalize_state(raw_state)
     product = str(state.get("parent_product") or "")
-    commercial = video_tail9.commercial_contract(product)
+    execution_product = video_tail9.execution_product_for_mode(
+        product,
+        str(state.get("entry_mode") or ""),
+    )
+    commercial = video_tail9.commercial_contract(execution_product)
     kind = {
         "frame_video_local": "frame_video",
         "self_shot_scene_change": "selfshot2",
@@ -74326,6 +74330,7 @@ def video_uiflow3_execution_adapter(raw_state: dict) -> dict:
     return {
         "kind": kind,
         "product_type": product,
+        "execution_product_type": execution_product,
         "engine_route": str(commercial.get("engine_route") or ""),
         "executor_product_type": str(commercial.get("executor_product_type") or product),
         "required_capability": str(commercial.get("required_capability") or ""),
@@ -74413,6 +74418,7 @@ def video_uiflow3_build_tail_state(raw_state: dict) -> dict:
     else:
         tail = video_tail9.new_state(
             product_type=route["product_type"],
+            execution_product_type=route["execution_product_type"],
             session_id=str(snapshot.get("draft_id") or ""),
             plan_revision=revision,
             scene_count=max(1, len(scenes)),
@@ -74433,6 +74439,8 @@ def video_uiflow3_build_tail_state(raw_state: dict) -> dict:
             ):
                 if field in existing:
                     tail[field] = deepcopy(existing[field])
+    tail["execution_product_type"] = str(route["execution_product_type"])
+    tail = video_tail9.normalize_state(tail)
     tail["video_flow_owner"] = "uiflow3"
     tail["return_to"] = "vid3|resume"
     scene_contract = []
@@ -74552,7 +74560,25 @@ def video_uiflow3_build_tail_state(raw_state: dict) -> dict:
             if watermark_text
             else "skipped"
         )
-    return video_tail9.prepare_summary(tail)
+    return video_uiflow3_finalize_tail_rebuild(
+        tail,
+        same_scope_existing=same_scope_existing,
+    )
+
+
+def video_uiflow3_finalize_tail_rebuild(
+    tail: dict,
+    *,
+    same_scope_existing: bool,
+) -> dict:
+    current = video_tail9.normalize_state(tail)
+    if (
+        same_scope_existing
+        and str(current.get("execution_product_type") or "")
+        in {"video_ai_prompt", "video_ai_image"}
+    ):
+        return current
+    return video_tail9.prepare_review(current)
 
 
 def video_uiflow3_build_frame_state(raw_state: dict) -> dict:
@@ -106111,8 +106137,14 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
         "b14_quality_xu": safe_int(clean.get("quality_tier_id"), 0),
         "video_tail_engine_route": str(clean.get("engine_route") or ""),
         "video_tail_executor_product_type": str(
-            video_tail9.adapter_for(str(clean.get("video_product_type") or "")).get("executor_product_type") or ""
+            clean.get("executor_product_type")
+            or video_tail9.adapter_for(
+                str(clean.get("execution_product_type") or clean.get("video_product_type") or "")
+            ).get("executor_product_type")
+            or ""
         ),
+        "video_tail_required_capability": str(clean.get("required_capability") or ""),
+        "video_tail_worker_owner": str(clean.get("worker_owner") or ""),
         "charge_policy": "after_valid_mp4_delivery",
         "provider_called": False,
         "job_created": False,
@@ -106376,7 +106408,11 @@ def video_tail9_commercial_preflight(
         "reason": structural_blockers[0] if structural_blockers else "",
         "blocker": structural_blockers[0] if structural_blockers else "",
         "blockers": structural_blockers,
-        "required_capability": str(compatibility.get("required_capability") or ""),
+        "required_capability": str(
+            tail.get("required_capability")
+            or compatibility.get("required_capability")
+            or ""
+        ),
         "engine_route": str(tail.get("engine_route") or compatibility.get("engine_route") or ""),
         "runtime_ready": bool(runtime.get("ok")),
         "runtime_reason": runtime_reason,
@@ -106658,19 +106694,19 @@ def video_tail9_addon_detail_keyboard(tail: dict, key: str) -> InlineKeyboardMar
     if key == "subtitles":
         rows = [
             [("🚫 Không dùng", "video_tail|addon|option|subtitles|none"), ("💬 Tự động · Miễn phí", "video_tail|addon|option|subtitles|auto")],
-            [("🌐 Dịch · 0,1 Xu/ký tự", "video_tail|addon|option|subtitles|translated")],
+            [("🌐 Dịch · 0,1 Xu/ký tự", "video_tail|addon|option|subtitles|translated"), ("✅ Giữ lựa chọn", "video_tail|addon|keep|subtitles")],
         ]
     elif key == "dubbing":
         rows = [
             [("🚫 Không dùng", "video_tail|addon|option|dubbing|none"), ("🧑 Theo nhân vật", "video_tail|addon|option|dubbing|follow_character")],
             [("👨 Giọng nam", "video_tail|addon|option|dubbing|default_male"), ("👩 Giọng nữ", "video_tail|addon|option|dubbing|default_female")],
-            [("🔊 Chỉnh âm lượng", "video_tail|addon|volume|dubbing")],
+            [("🔊 Chỉnh âm lượng", "video_tail|addon|volume|dubbing"), ("✅ Giữ lựa chọn", "video_tail|addon|keep|dubbing")],
         ]
     elif key == "music":
         rows = [
             [("🚫 Không dùng", "video_tail|addon|option|music|none"), ("🎼 Nhạc có sẵn", "video_tail|addon|option|music|existing")],
             [("🎹 Tạo AI không lời", "video_tail|addon|option|music|ai_instrumental"), ("🎤 Tạo AI có lời", "video_tail|addon|option|music|ai_lyrics")],
-            [("🔊 Chỉnh âm lượng", "video_tail|addon|volume|music")],
+            [("🔊 Chỉnh âm lượng", "video_tail|addon|volume|music"), ("✅ Giữ lựa chọn", "video_tail|addon|keep|music")],
         ]
     else:
         rows = []
@@ -106679,7 +106715,7 @@ def video_tail9_addon_detail_keyboard(tail: dict, key: str) -> InlineKeyboardMar
                 ("✅ Giữ âm thanh gốc" if audio.get("source_audio") else "➕ Giữ âm thanh gốc", "video_tail|addon|option|source_audio|preserve"),
                 ("🚫 Tắt âm thanh gốc", "video_tail|addon|option|source_audio|none"),
             ])
-            rows.append([("🔊 Âm lượng gốc", "video_tail|addon|volume|source_audio")])
+            rows.append([("🔊 Âm lượng gốc", "video_tail|addon|volume|source_audio"), ("✅ Giữ âm gốc", "video_tail|addon|keep|sound")])
         rows.extend([
             [("🚫 Không dùng SFX", "video_tail|addon|option|sfx|none"), ("📚 Kho hiệu ứng", "video_tail|addon|option|sfx|library")],
             [("✨ Tạo SFX AI", "video_tail|addon|option|sfx|ai"), ("🔊 Âm lượng SFX", "video_tail|addon|volume|sfx")],
@@ -106715,7 +106751,7 @@ def video_tail9_addon_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup
             [(video_tail9_addon_selected_label(current, "dubbing", "Lồng tiếng"), "video_tail|addon|item|dubbing"), (video_tail9_addon_selected_label(current, "music", "Nhạc"), "video_tail|addon|item|music")],
             [(video_tail9_addon_selected_label(current, "sound", "Âm thanh"), "video_tail|addon|item|sound"), (video_tail9_addon_selected_label(current, "logo", "Logo"), "video_tail|addon|logo")],
             [(video_tail9_addon_selected_label(current, "watermark", "Watermark"), "video_tail|addon|watermark"), (video_tail9_addon_selected_label(current, "transitions", "Chuyển cảnh"), "video_tail|addon|transitions")],
-            [("✅ Hoàn tất Add-on", "video_tail|addon|complete")],
+            [("✅ Hoàn tất Add-on", "video_tail|addon|complete"), ("🧠 Xem câu lệnh", "video_tail|addon|prompts")],
             [("⬅️ Quay lại", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
         ])
     back_callback = str(current.get("return_to") or "menu|main_video")
@@ -106782,6 +106818,8 @@ def video_tail9_transitions_keyboard(tail: dict) -> InlineKeyboardMarkup:
         (f"🔗 Cảnh {index} → {index + 1}", f"video_tail|transitions|pick|{index}")
         for index in range(1, len(scenes))
     ]
+    if len(buttons) % 2:
+        buttons.append(("✅ Xong chuyển cảnh", "video_tail|transitions|done"))
     rows = [buttons[offset:offset + 2] for offset in range(0, len(buttons), 2)]
     rows.append([("⬅️ Quay lại Add-on", "video_tail|addon|open"), ("🎬 Menu Video", "menu|main_video")])
     return video_scene3_keyboard(rows)
@@ -106824,7 +106862,7 @@ def video_tail9_transition_picker_keyboard(tail: dict, boundary: int) -> InlineK
     rows = [number_buttons]
     rows.append([
         ("✂️ Cắt tự nhiên", f"video_tail|transitions|set|{boundary}|cut"),
-        ("✅ Giữ lựa chọn hiện tại", "video_tail|addon|transitions"),
+        ("✅ Giữ lựa chọn hiện tại", f"video_tail|transitions|keep|{boundary}"),
     ])
     rows.append([("⬅️ Quay lại", "video_tail|addon|transitions"), ("🎬 Menu Video", "menu|main_video")])
     return video_scene3_keyboard(rows)
@@ -106960,9 +106998,15 @@ def video_tail9_text_scope_keyboard(
         for index in range(1, max(1, safe_int(tail.get("scene_count"), 1)) + 1)
     )
     if len(buttons) % 2:
-        buttons.append(("✅ Giữ phạm vi hiện tại", "video_tail|text|review"))
+        keep_callback = (
+            f"video_tail|text|keepscope|{item_index}"
+            if item_index >= 0
+            else "video_tail|text|cancel_scope"
+        )
+        buttons.append(("✅ Giữ phạm vi hiện tại", keep_callback))
     rows = [buttons[offset:offset + 2] for offset in range(0, len(buttons), 2)]
-    rows.append([("⬅️ Quay lại", "video_tail|text|review"), ("🎬 Menu Video", "menu|main_video")])
+    back_callback = "video_tail|text|review" if item_index >= 0 else "video_tail|text|open"
+    rows.append([("⬅️ Quay lại", back_callback), ("🎬 Menu Video", "menu|main_video")])
     return video_scene3_keyboard(rows)
 
 
@@ -106991,9 +107035,8 @@ def video_tail9_review_keyboard(tail: dict | None = None) -> InlineKeyboardMarku
     return video_scene3_keyboard([
         [("📐 Sửa khung hình", "video_tail|review|format"), ("📝 Sửa nội dung", "video_tail|review|content")],
         [("👥 Nhân vật và bối cảnh", "video_tail|review|entities"), ("🎬 Kế hoạch cảnh", "video_tail|review|scenes")],
-        [("🎙 Phân vai và âm thanh", "video_tail|review|cast_audio")],
-        [("🧠 Rà soát câu lệnh", "video_tail|review|prompts"), ("🏷 Logo và watermark", "video_tail|review|logo")],
-        [("✅ Hoàn tất rà soát và chọn chất lượng", "video_tail|review|complete")],
+        [("🎙 Phân vai và âm thanh", "video_tail|review|cast_audio"), ("🏷 Logo và watermark", "video_tail|review|logo")],
+        [("🧠 Rà soát câu lệnh", "video_tail|review|prompts"), ("✅ Hoàn tất rà soát", "video_tail|review|complete")],
         [("⬅️ Quay lại", "video_tail|review|back"), ("🎬 Menu Video", "menu|main_video")],
     ])
 
@@ -107440,7 +107483,11 @@ def video_tail9_catalog_report(tail: dict, capability: dict | None = None) -> di
         required_capability = "video_to_video"
     else:
         contract = video_tail9.commercial_contract(product)
-        required_capability = str(contract.get("required_capability") or "")
+        required_capability = str(
+            tail.get("required_capability")
+            or contract.get("required_capability")
+            or ""
+        )
     return video_uifreeze1.catalog_report(
         product,
         scene_count=safe_int(tail.get("scene_count"), 1),
@@ -107744,7 +107791,13 @@ def video_tail9_status_recovery_text(tail: dict) -> str:
 
 def video_tail9_status_recovery_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
     current = dict(tail or {})
-    is_video_edit = str(current.get("video_product_type") or "") == video_editengine1.PRODUCT_TYPE
+    product_type = str(current.get("video_product_type") or "")
+    is_video_edit = product_type == video_editengine1.PRODUCT_TYPE
+    is_video_ai_real = (
+        product_type == "video_ai_real"
+        and str(current.get("execution_product_type") or "")
+        in {"video_ai_prompt", "video_ai_image"}
+    )
     menu_button = (
         ("🏠 Menu chính", "menu|main")
         if is_video_edit
@@ -107756,7 +107809,13 @@ def video_tail9_status_recovery_keyboard(tail: dict | None = None) -> InlineKeyb
         else "video_tail|confirm|status"
     )
     return video_scene3_keyboard([
-        [("🔄 Kiểm tra trạng thái", retry_callback), ("🎬 Gửi video khác", "menu|main_video")],
+        [
+            ("🔄 Kiểm tra trạng thái", retry_callback),
+            (
+                "🎬 Tạo Video AI khác" if is_video_ai_real else "🎬 Gửi video khác",
+                "vid3|entry|video_ai_real" if is_video_ai_real else "menu|main_video",
+            ),
+        ],
         [("⬅️ Quay lại hóa đơn", "video_tail|confirm|back"), menu_button],
     ])
 
@@ -108316,18 +108375,14 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 parse_mode="HTML",
                 reply_markup=video_tail9_addon_detail_keyboard(tail, argument),
             )
+        if action == "keep" and argument in {"subtitles", "dubbing", "music", "sound"}:
+            return await video_tail9_render(query, uid, context, "addon")
         if action == "option" and argument in {
             "source_audio", "subtitles", "dubbing", "music", "sfx",
         }:
             tail = video_tail9_set_addon_option(tail, argument, extra)
             save_video_tail9_state(uid, context, tail, owner, host)
-            detail_key = "sound" if argument in {"source_audio", "sfx"} else argument
-            return await safe_edit_or_send(
-                query,
-                video_tail9_addon_detail_text(tail, detail_key),
-                parse_mode="HTML",
-                reply_markup=video_tail9_addon_detail_keyboard(tail, detail_key),
-            )
+            return await video_tail9_render(query, uid, context, "addon")
         if action == "volume" and argument in {"source_audio", "dubbing", "music", "sfx"}:
             return await safe_edit_or_send(
                 query,
@@ -108338,12 +108393,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if action == "setvol" and argument in {"source_audio", "dubbing", "music", "sfx"}:
             tail = video_tail9_set_addon_volume(tail, argument, safe_int(extra, 100))
             save_video_tail9_state(uid, context, tail, owner, host)
-            return await safe_edit_or_send(
-                query,
-                video_tail9_addon_volume_text(tail, argument),
-                parse_mode="HTML",
-                reply_markup=video_tail9_addon_volume_keyboard(argument),
-            )
+            return await video_tail9_render(query, uid, context, "addon")
         if action == "audio":
             return await video_tail9_open_planning_audio(
                 query, context, uid, tail, owner, host
@@ -108391,6 +108441,14 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
     if section == "transitions":
         if owner != "uiflow3" or str(tail.get("video_product_type") or "") != "video_ai_real":
             return await video_tail9_render(query, uid, context, "addon")
+        if action == "done":
+            return await video_tail9_render(query, uid, context, "addon")
+        if action == "keep":
+            return await safe_edit_or_send_long_html(
+                query,
+                video_tail9_transitions_text(tail),
+                reply_markup=video_tail9_transitions_keyboard(tail),
+            )
         scenes = [dict(item) for item in tail.get("scene_content") or [] if isinstance(item, dict)]
         boundary = safe_int(argument, 0)
         if action == "pick":
@@ -108472,6 +108530,18 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 query,
                 video_tail9_text_review_text(tail),
                 reply_markup=video_tail9_text_review_keyboard(tail),
+            )
+        if action == "keepscope":
+            return await safe_edit_or_send_long_html(
+                query,
+                video_tail9_text_review_text(tail),
+                reply_markup=video_tail9_text_review_keyboard(tail),
+            )
+        if action == "cancel_scope":
+            return await safe_edit_or_send_long_html(
+                query,
+                video_tail9_text_text(tail),
+                reply_markup=video_tail9_text_keyboard(tail),
             )
         if action == "type":
             item_type = str(argument or "")
@@ -108646,6 +108716,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             tail["addon_config"] = addon_config
             tail["review_status"] = "not_ready"
             tail["summary_status"] = "not_ready"
+            save_video_tail9_state(uid, context, tail, owner, host)
+            return await video_tail9_render(query, uid, context, "addon")
         else:
             return await safe_edit_or_send_long_html(
                 query,
@@ -108673,8 +108745,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 return await video_tail9_render(query, uid, context, "review")
             return await video_tail9_render(query, uid, context, "quality")
         if action == "logo":
-            tail["branding_return_to"] = "summary"
-            tail["branding_back_to"] = "summary"
+            tail["branding_return_to"] = "review"
+            tail["branding_back_to"] = "review"
             tail["summary_status"] = "not_ready"
             save_video_tail9_state(uid, context, tail, owner, host)
             return await video_tail9_render(query, uid, context, "logo")
@@ -109046,7 +109118,12 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if action == "skip":
             tail = video_tail9.mark_branding_skipped(tail)
             save_video_tail9_state(uid, context, tail, owner, host)
-            return await video_tail9_render(query, uid, context, "addon")
+            return await video_tail9_render(
+                query,
+                uid,
+                context,
+                "review" if str(tail.get("branding_return_to") or "") == "review" else "addon",
+            )
         if action == "done":
             pending_target = video_tail9_pending_brand_target(tail)
             if pending_target:
@@ -109064,7 +109141,12 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 )
             tail = video_tail9.mark_branding_complete(tail)
             save_video_tail9_state(uid, context, tail, owner, host)
-            return await video_tail9_render(query, uid, context, "addon")
+            return await video_tail9_render(
+                query,
+                uid,
+                context,
+                "review" if str(tail.get("branding_return_to") or "") == "review" else "addon",
+            )
     if section == "quality":
         if tail.get("final_confirmed"):
             return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
@@ -109498,8 +109580,8 @@ async def handle_video_tail9_pending_text(update: Update, context: ContextTypes.
             user_data.pop(VIDEO_TAIL9_TEXT_INPUT_KEY, None)
         await safe_reply_long_html(
             update.message,
-            video_tail9_text_review_text(tail),
-            reply_markup=video_tail9_text_review_keyboard(tail),
+            video_tail9_addon_text(tail),
+            reply_markup=video_tail9_addon_keyboard(tail),
         )
         return True
     edit_state = dict(get_video_editor_pending(uid) or {})
