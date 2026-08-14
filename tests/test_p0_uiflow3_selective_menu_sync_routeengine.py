@@ -63,7 +63,8 @@ def test_script_and_selfshot_entries_keep_distinct_product_owners() -> None:
     )
     hub_callbacks = _callbacks(bot.video_selfshot_product_hub_keyboard())
     assert hub_callbacks[:2] == list(hub_route["expected_children"])
-    assert hub_callbacks[-2:] == ["menu|main_video", "menu|main"]
+    assert hub_callbacks[-1:] == ["menu|main_video"]
+    assert "menu|main" not in hub_callbacks
 
     cinematic_route = bot.VIDEO_PUBLIC_ROUTE_MATRIX["self_shot_cinematic_transform"]
     assert cinematic_route["entry_callback"] == "vproduct|selfshot_product|cinematic"

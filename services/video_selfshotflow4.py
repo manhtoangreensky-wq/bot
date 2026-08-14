@@ -78,10 +78,8 @@ SELF_SHOT_2_GOLDEN_FLOW = (
     "content_source",
     "content_selection",
     "prompt",
+    "addon",
     "review",
-    "audio_addons",
-    "logo_watermark",
-    "summary",
     "quality",
     "invoice",
     "confirm",
@@ -97,10 +95,8 @@ SELF_SHOT_3_GOLDEN_FLOW = (
     "content_source",
     "content_selection",
     "prompt",
+    "addon",
     "review",
-    "audio_addons",
-    "logo_watermark",
-    "summary",
     "quality",
     "invoice",
     "confirm",
@@ -215,6 +211,8 @@ SEGMENT_DEPENDENT_FIELDS = (
     "selected_prompt_revision",
     "selected_video_prompt",
     "prompt_style_note",
+    "planning_shot_count",
+    "scene_count_deferred_to_quality",
     "scene_plan",
     "scene_change_plan",
     "source_motion_map",
@@ -382,6 +380,7 @@ def _nav(flow: str, screen: str, state: Mapping[str, Any] | None = None) -> list
 
 def validate_rows(rows: list[list[tuple[str, str]]], *, back_callback: str) -> dict[str, Any]:
     errors: list[str] = []
+    callbacks: list[str] = []
     if not rows:
         errors.append("rows_missing")
     for index, row in enumerate(rows):
@@ -390,10 +389,13 @@ def validate_rows(rows: list[list[tuple[str, str]]], *, back_callback: str) -> d
         for label, callback_data in row:
             if not _safe(label) or not _safe(callback_data):
                 errors.append(f"row_{index}_button_invalid")
+            callbacks.append(_safe(callback_data))
     if not rows or len(rows[-1]) != 2:
         errors.append("navigation_row_missing")
     elif rows[-1][0][1] != back_callback or rows[-1][1][1] != "menu|main_video":
         errors.append("navigation_row_invalid")
+    if len(callbacks) != len(set(callbacks)):
+        errors.append("duplicate_callback")
     return {"ok": not errors, "errors": errors}
 
 
@@ -518,8 +520,10 @@ def _persist_segment(state: dict[str, Any], segment: Mapping[str, Any]) -> None:
 
 def _persist_derived_scene_count(flow: str, state: dict[str, Any]) -> None:
     if _flow(flow) == FLOW_SS3:
-        state["scene_count"] = 1
+        state.pop("scene_count", None)
+        state["scene_count_deferred_to_quality"] = True
         return
+    state.pop("scene_count_deferred_to_quality", None)
     selected_duration = max(1.0, _as_float(state.get("selected_duration"), 1.0))
     state["scene_count"] = max(1, min(20, ceil(selected_duration / video_selfshot2.SCENE_SECONDS)))
 
@@ -584,8 +588,6 @@ def _subject_multiple_rows(flow: str, state: Mapping[str, Any]) -> list[list[tup
         if _safe(item.get("subject_id")) in selected:
             label = f"✅ {label}"
         buttons.append((label, cb))
-    if len(buttons) % 2:
-        buttons.append(("🗑️ Xóa lựa chọn", callback(flow, "c4multi", "clear")))
     rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     rows.append([
         ("✅ Xác nhận chủ thể", callback(flow, "c4multi", "done")),
@@ -673,10 +675,13 @@ def _page_rows(flow: str, state: Mapping[str, Any], *, kind: str) -> list[list[t
             rows[-1].append(("💡 Nhóm khác", callback(flow, "c4show", "idea_groups")))
     page_size = 8 if kind == "profile" else 6
     total = max(1, (len(catalog) + page_size - 1) // page_size)
-    rows.append([
-        ("⬅️ Trang trước", callback(flow, f"c4{kind}_page", str(max(1, page - 1)))),
-        ("➡️ Trang sau", callback(flow, f"c4{kind}_page", str(min(total, page + 1)))),
-    ])
+    page_buttons = []
+    if page > 1:
+        page_buttons.append(("⬅️ Trang trước", callback(flow, f"c4{kind}_page", str(page - 1))))
+    if page < total:
+        page_buttons.append(("➡️ Trang sau", callback(flow, f"c4{kind}_page", str(page + 1))))
+    if page_buttons:
+        rows.append(page_buttons)
     return rows
 
 
@@ -851,6 +856,7 @@ def compile_selfshot2_content(state: Mapping[str, Any]) -> dict[str, Any]:
     segment_duration = float(_as_int(selected_segment.get("duration_ms")) / 1000)
     requested_scene_count = _as_int(current.get("scene_count"))
     current["scene_count"] = max(1, min(20, requested_scene_count or ceil(max(1.0, segment_duration) / video_selfshot2.SCENE_SECONDS)))
+    current.pop("scene_count_deferred_to_quality", None)
     current["aspect_ratio"] = _safe(current.get("source_ratio") or source_ratio(current))
     current["direction_contract"] = video_selfshot2.direction_contract("new_story")
     plan_analysis = dict(analysis)
@@ -975,7 +981,9 @@ def compile_selfshot3_content(state: Mapping[str, Any]) -> dict[str, Any]:
             "stages": deepcopy(current["transformation_stages"]),
         }
     ]
-    current["scene_count"] = 1
+    current.pop("scene_count", None)
+    current["planning_shot_count"] = 1
+    current["scene_count_deferred_to_quality"] = True
     current["aspect_ratio"] = _safe(current.get("source_ratio") or source_ratio(current))
     current["cinematic_timeline"] = deepcopy(current["transformation_stages"])
     current["environment_transformation"] = {
@@ -1101,7 +1109,7 @@ def review_text(flow: str, state: Mapping[str, Any] | None) -> str:
     selected_prompt = str(data.get("selected_prompt_text") or data.get("selected_prompt") or "")
     if selected_prompt.strip():
         lines.extend(["", "<b>Câu lệnh đã chọn</b>", _display(selected_prompt)])
-    lines.extend(["", "Tiếp tục tới Âm thanh và phần bổ sung, Logo/Watermark, rồi xem bảng tổng hợp trước khi chọn chất lượng."])
+    lines.extend(["", "Tiếp tục tới Add-on, Rà soát, Chất lượng, Hóa đơn, Xác nhận và Bảng trạng thái."])
     return "\n".join(lines)
 
 
@@ -1122,7 +1130,7 @@ def screen_model(flow: str, screen: str, state: Mapping[str, Any] | None = None)
             f"🎬 <b>Chọn đoạn video nguồn</b>",
             f"Sản phẩm: <b>{flow_label(active_flow)}</b>",
             f"Video nguồn: khoảng {duration} giây · đoạn đang dùng: <b>{selected}</b>",
-            "Chọn toàn bộ hoặc một đoạn liên tục. Bước này chỉ lưu kế hoạch, chưa tạo video và chưa trừ Xu.",
+            "Chọn toàn bộ hoặc một đoạn liên tục để phân tích chủ thể và chuyển động nguồn.",
         ]
         rows = [
             [("🎬 Dùng toàn bộ", callback(active_flow, "c4segment", "whole")), ("✂️ Chọn đoạn", callback(active_flow, "c4segment", "custom"))],
@@ -1140,10 +1148,7 @@ def screen_model(flow: str, screen: str, state: Mapping[str, Any] | None = None)
             f"• Thời lượng: <b>{duration:g} giây</b>",
             "Đoạn này sẽ được dùng nguyên vẹn cho phân tích chủ thể và chuyển động.",
         ]
-        rows = [[
-            ("➡️ Phân tích chủ thể", callback(active_flow, "c4show", "analysis")),
-            ("🔄 Chọn lại", callback(active_flow, "c4show", "segment")),
-        ]]
+        rows = [[("➡️ Phân tích chủ thể", callback(active_flow, "c4show", "analysis"))]]
     elif name == "analysis":
         status = _safe(data.get("analysis_status") or analysis.get("analysis_status") or "awaiting_segment")
         counts = {
@@ -1168,23 +1173,17 @@ def screen_model(flow: str, screen: str, state: Mapping[str, Any] | None = None)
         ]
         if status in {"ready_no_tracks", "failed"}:
             lines.append("Chưa có chủ thể đủ tin cậy. Anh/chị vẫn có thể tự mô tả hoặc xác nhận chủ thể trong chính video đã gửi.")
-        rows = [[
-            (
-                "✨ Biến đổi liên tục một cú máy" if active_flow == FLOW_SS3 else "➡️ Chọn chủ thể",
-                callback(active_flow, "c4show", "mode" if active_flow == FLOW_SS3 else "subject"),
-            ),
-            ("👁️ Xem đoạn", callback(active_flow, "c4show", "segment")),
-        ]]
+        rows = [[(
+            "✨ Biến đổi liên tục một cú máy" if active_flow == FLOW_SS3 else "➡️ Chọn chủ thể",
+            callback(active_flow, "c4show", "mode" if active_flow == FLOW_SS3 else "subject"),
+        )]]
     elif name == "mode":
         lines = [
             "✨ <b>Biến đổi liên tục một cú máy</b>",
             "Giữ khuôn mặt, vóc dáng và chuyển động nguồn liên tục. Trang phục, bối cảnh, ánh sáng và hiệu ứng sẽ thay đổi dần qua bốn giai đoạn, không cắt sang clip không liên quan.",
             "Bước tiếp theo là xác nhận chủ thể cần giữ.",
         ]
-        rows = [[
-            ("✅ Biến đổi liên tục một cú máy", callback(active_flow, "c4mode", "one_take")),
-            ("👁️ Xem phân tích", callback(active_flow, "c4show", "analysis")),
-        ]]
+        rows = [[("✅ Biến đổi liên tục một cú máy", callback(active_flow, "c4mode", "one_take"))]]
     elif name == "subject":
         manifest = dict(data.get("subject_manifest") or {})
         selected = ", ".join(_display(item.get("description") or item.get("label")) for item in manifest.get("subjects") or []) or "Chưa chọn"
@@ -1255,9 +1254,9 @@ def screen_model(flow: str, screen: str, state: Mapping[str, Any] | None = None)
         lines = [
             "📋 <b>Nội dung đã chọn</b>",
             f"Nguồn nội dung: <b>{_display(_content_summary(data))}</b>",
-            "Quay lại để chọn hoặc sửa câu lệnh. Bước này chưa tạo tác vụ và chưa trừ Xu.",
+            "Quay lại để chọn hoặc sửa câu lệnh trước khi tiếp tục.",
         ]
-        rows = [[("🎬 Chọn câu lệnh", callback(active_flow, "c4show", "prompt")), ("🎬 Menu Video", "menu|main_video")]]
+        rows = []
 
     rows.append(_nav(active_flow, name, data))
     return {"text": "\n\n".join(lines), "rows": rows}

@@ -178,10 +178,10 @@ def test_missing_source_duration_stays_in_segment_without_a_generic_error_path()
 def test_bot_places_the_canonical_owner_before_legacy_selfshot_handlers():
     source = Path("bot.py").read_text(encoding="utf-8")
     for flow in ("ss2", "ss3"):
-        marker = f'if video_selfshotflow4.enabled("{flow}", current):'
-        start = source.index(marker)
+        start = source.index(f'if action == "{flow}":')
         legacy = source.index("legacy_tail_screen = {", start)
         block = source[start:legacy]
+        assert f'video_selfshotflow4.enabled("{flow}", current)' in block
         assert 'if operation.startswith("c4"):' in block
         assert f'video_selfshotflow4.apply_action("{flow}", current, operation, argument)' in block
         assert "return await video_selfshotflow4_handle_result" in block

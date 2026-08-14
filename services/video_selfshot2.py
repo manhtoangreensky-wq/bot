@@ -1093,8 +1093,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
     if name == "intro":
         text = (
             "🎥 <b>Video tự quay và đổi cảnh AI</b>\n\nGửi video thật để giữ đúng người, vật, sản phẩm hoặc quan hệ người - vật, "
-            "sau đó phát triển thành nhiều cảnh điện ảnh mới. Đây là quy trình dùng video nguồn, không phải chỉ thay nền hoặc tạo từ chữ.\n\n"
-            "Chưa có video nguồn thì hệ thống không mở hóa đơn, không tạo tác vụ và không trừ Xu."
+            "sau đó phát triển thành nhiều cảnh điện ảnh mới. Đây là quy trình dùng video nguồn, không phải chỉ thay nền hoặc tạo từ chữ."
         )
         rows = [
             [("📎 Gửi video nguồn", "vproduct|ss2|source"), ("ℹ️ Cách hoạt động", "vproduct|ss2|show|help")],
@@ -1225,7 +1224,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         rows = _page_rows(chunk, "idea")
         rows.extend([[('➡️ Nhóm sau', 'vproduct|ss2|idea_page'), ('✍️ Tự nhập nội dung', 'vproduct|ss2|content_source|custom')], _nav("content_source")])
     elif name == "direction":
-        text = "✨ <b>Chọn hướng biến đổi</b>\n\nMỗi hướng cần khả năng xử lý khác nhau. Nếu hệ thống chưa đáp ứng, video sẽ được chặn trước hóa đơn và không trừ Xu."
+        text = "✨ <b>Chọn hướng biến đổi</b>\n\nMỗi hướng có yêu cầu xử lý riêng; bảng Chất lượng chỉ hiển thị những gói phù hợp với kế hoạch đã chọn."
         for offset in range(0, len(DIRECTION_OPTIONS), 2):
             rows.append([(item[1], f"vproduct|ss2|direction|{item[0]}") for item in DIRECTION_OPTIONS[offset:offset + 2]])
         rows.append(_nav(screen_parent("direction", draft)))
@@ -1274,7 +1273,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             "🖼️ <b>Logo và watermark</b>\n\n"
             f"Logo: {'Đã nhận' if logo.get('enabled') and logo.get('file_id') else 'Tắt'} · vị trí {ADDON_POSITION_LABELS.get(logo.get('position') or '', 'Chưa chọn')}\n"
             f"Watermark: {'Đã có nội dung' if watermark.get('enabled') and watermark.get('text') else 'Tắt'} · vị trí {ADDON_POSITION_LABELS.get(watermark.get('position') or '', 'Chưa chọn')}\n\n"
-            "Màn này chỉ lưu cấu hình; chưa tạo tệp, chưa xử lý video và chưa trừ Xu."
+            "Logo và watermark là tùy chọn; có thể lưu từng mục hoặc bỏ qua để tiếp tục."
         )
         rows = [
             [("📎 Gửi logo hình ảnh", "vproduct|ss2|addon|logo"), ("✍️ Watermark chữ", "vproduct|ss2|addon|watermark")],
@@ -1300,19 +1299,18 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             "👁️ <b>Xem lại Video tự quay và đổi cảnh AI</b>\n\n"
             f"Chủ thể: {len((draft.get('subject_manifest') or {}).get('subject_ids') or [])} · Cảnh: {draft.get('scene_count') or 0} · Tỉ lệ: {draft.get('aspect_ratio') or '-'}\n"
             f"Nội dung: {(draft.get('selected_content') or {}).get('title') or '-'} · Hướng: {(draft.get('direction_contract') or {}).get('label') or '-'}\n\n"
-            "Chưa tạo tác vụ, chưa xử lý video và chưa trừ Xu."
+            "Kiểm tra kế hoạch rồi mở Add-on để tiếp tục."
         )
         rows = [
             [('👁️ Xem từng cảnh', 'vproduct|ss2|plan_view'), ('✍️ Sửa nội dung cảnh', 'vproduct|ss2|content_source|custom')],
-            [('👤 Người / vật giữ nguyên', 'vproduct|ss2|show|preserve'), ('🎬 Câu lệnh video', 'vproduct|ss2|show|prompts')],
-            [('✨ Hiệu ứng', 'vproduct|ss2|show|direction'), ('🎚️ Âm thanh & Add-on', 'vproduct|ss2|finish')],
+            [('👤 Người / vật giữ nguyên', 'vproduct|ss2|show|preserve'), ('✨ Hiệu ứng', 'vproduct|ss2|show|direction')],
+            [('🧰 Add-on', 'vproduct|ss2|finish')],
             _nav("prompts"),
         ]
     elif name == "finish":
         text = (
             "✅ <b>Hoàn thiện Video tự quay và đổi cảnh AI</b>\n\n"
-            "Logo/watermark đã chọn sẽ được giữ nguyên khi chuyển sang Tổng hợp. "
-            "Sau Tổng hợp, TOAN AAS chỉ mở một bảng Chất lượng chính thức rồi mới đến Hóa đơn và Xác nhận tạo video."
+            "Tiếp tục theo đuôi chung: Add-on → Rà soát → Chất lượng → Hóa đơn → Xác nhận → Trạng thái."
         )
         rows = [
             [("✅ Tiếp tục hoàn thiện", "vproduct|ss2|finish"), ("🖼️ Sửa Logo / Watermark", "vproduct|ss2|review_addons")],
