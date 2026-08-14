@@ -111552,9 +111552,9 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 # A legacy callback from an earlier SelfShot2 screen is read-only.
                 return await video_selfshot2_render(query, uid, current_screen, draft=current)
             legacy_tail_screen = {
-                ("show", "finish"): "quality",
-                ("show", "package"): "quality",
-                ("quality", argument): "quality",
+                ("show", "finish"): "addon",
+                ("show", "package"): "addon",
+                ("quality", argument): "addon",
             }.get((operation, argument))
             if legacy_tail_screen:
                 return await video_tail9_render(query, uid, context, legacy_tail_screen)
@@ -111765,10 +111765,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 # Stale SelfShot3 callbacks are deliberately read-only.
                 return await video_selfshot3_render(query, uid, str(current.get("selfshot3_screen") or "segment"), draft=current)
             legacy_tail_screen = {
-                ("show", "package"): "quality",
-                ("audio_review", ""): "audio",
+                ("show", "package"): "addon",
+                ("audio_review", ""): "addon",
                 ("finish_review", ""): "review",
-                ("quality", argument): "quality",
+                ("quality", argument): "addon",
             }.get((operation, argument))
             if legacy_tail_screen:
                 return await video_tail9_render(query, uid, context, legacy_tail_screen)
