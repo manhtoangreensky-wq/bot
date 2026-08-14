@@ -20,6 +20,12 @@ def _function_source(name: str) -> str:
     return BOT_SOURCE[match.start() : end]
 
 
+def _runtime_function(name: str, namespace: dict) -> object:
+    source = _function_source(name).rsplit("\n@", 1)[0]
+    exec(compile(source, f"bot.py:{name}", "exec"), namespace)
+    return namespace[name]
+
+
 def test_trend_entry_has_four_lanes_in_two_rows() -> None:
     entry = _function_source("video_trend2_entry_keyboard")
 
@@ -94,6 +100,103 @@ def test_search_callbacks_and_pending_text_join_scene_count_continuation() -> No
     assert "fetch_google_news_trends" in pending
     assert "normalize_online_search_results" in pending
     assert 'screen == "search_results"' in render
+
+
+def test_legacy_content_callbacks_cannot_reopen_the_removed_trend_flow() -> None:
+    parent_map = BOT_SOURCE.split("VIDEO_TREND2_PARENT = {", 1)[1].split("}\n\n", 1)[0]
+    for removed_screen in ("content_source", "profiles", "suggestions", "preview"):
+        assert f'"{removed_screen}"' not in parent_map
+
+    state = _function_source("video_trend2_state")
+    assert "VIDEO_TREND2_PUBLIC_SCREENS" in state
+
+    callback = _function_source("_handle_video_trend2_callback_impl")
+    guard_start = callback.index("if action in VIDEO_TREND2_LEGACY_CONTENT_ACTIONS:")
+    entry_start = callback.index('if action == "entry":')
+    assert guard_start < entry_start
+    guard = callback[guard_start:entry_start]
+    assert 'action = "entry"' in guard
+
+
+def test_public_trend_ui_has_no_internal_side_effect_copy() -> None:
+    start = BOT_SOURCE.index("VIDEO_TREND2_STATE_KEY")
+    end = BOT_SOURCE.index("def storyboard2_prepare_quick_image", start)
+    public_surface = BOT_SOURCE[start:end].casefold()
+
+    for forbidden in (
+        "chưa tạo tác vụ",
+        "chưa gọi nguồn dựng",
+        "chưa trừ xu",
+        "chưa tạo video",
+    ):
+        assert forbidden not in public_surface
+
+
+def test_async_search_and_upload_results_require_current_owner() -> None:
+    pending = _function_source("handle_video_trend2_pending_text")
+    search_owner = _function_source("video_trend2_search_result_owner_valid")
+    media = _function_source("handle_video_product_pending_media")
+    upload_owner = _function_source("video_trend2_upload_result_owner_valid")
+
+    assert "search_token = video_trend2_search_token(state)" in pending
+    assert pending.index("await fetch_google_news_trends") < pending.index(
+        "video_trend2_search_result_owner_valid"
+    ) < pending.index('video_trend2_open_screen(state, "search_results"')
+    assert 'pending_input") or "") == "trend_search"' in search_owner
+    assert 'search_owner") or "") == "video_trend_search"' in search_owner
+    assert 'active_search_message_id")' in search_owner
+    assert 'state["active_search_message_id"] = message_id' in pending
+    assert "video_trend2_upload_token(state) == expected_token" in upload_owner
+    assert "video_trend2_upload_owner_valid(session, state)" in upload_owner
+    assert 'active_video_message_id")' in upload_owner
+    assert media.count("video_trend2_upload_result_owner_valid") >= 3
+    assert 'trend_state["active_video_message_id"] = message_id' in media
+
+
+def test_async_owner_helpers_reject_stale_generation_or_message() -> None:
+    search_state = {
+        "pending_input": "trend_search",
+        "search_owner": "video_trend_search",
+        "token": "search-session:2",
+        "active_search_message_id": 301,
+    }
+    search_valid = _runtime_function(
+        "video_trend2_search_result_owner_valid",
+        {
+            "video_trend2_state": lambda _context: dict(search_state),
+            "video_trend2_search_token": lambda state: state["token"],
+            "safe_int": lambda value, default=0: int(value or default),
+        },
+    )
+    assert search_valid(object(), "search-session:2", 301) is True
+    search_state["active_search_message_id"] = 302
+    assert search_valid(object(), "search-session:2", 301) is False
+    search_state["active_search_message_id"] = 301
+    search_state["pending_input"] = ""
+    assert search_valid(object(), "search-session:2", 301) is False
+    search_state.update({"pending_input": "trend_search", "token": "search-session:3"})
+    assert search_valid(object(), "search-session:2", 301) is False
+
+    upload_state = {"token": "upload-session:4", "active_video_message_id": 401}
+    upload_session = {"valid": True}
+    upload_valid = _runtime_function(
+        "video_trend2_upload_result_owner_valid",
+        {
+            "video_trend2_state": lambda _context: dict(upload_state),
+            "get_video_session": lambda _user_id: dict(upload_session),
+            "safe_int": lambda value, default=0: int(value or default),
+            "video_trend2_upload_token": lambda state: state["token"],
+            "video_trend2_upload_owner_valid": lambda session, _state: bool(session.get("valid")),
+        },
+    )
+    assert upload_valid(1, object(), "upload-session:4", 401) is True
+    upload_state["active_video_message_id"] = 402
+    assert upload_valid(1, object(), "upload-session:4", 401) is False
+    upload_state.update({"active_video_message_id": 401, "token": "upload-session:5"})
+    assert upload_valid(1, object(), "upload-session:4", 401) is False
+    upload_state["token"] = "upload-session:4"
+    upload_session["valid"] = False
+    assert upload_valid(1, object(), "upload-session:4", 401) is False
 
 
 def test_local_video_analysis_includes_visual_context() -> None:
@@ -229,10 +332,67 @@ def test_video_menu_clears_only_pending_trend_text_or_media_owner() -> None:
     assert 'str(state.get("upload_owner") or "") == "video_trend_upload"' in cleanup
     assert '"awaiting_trend_video"' in cleanup
     assert '"trend_video_analysis"' in cleanup
+    assert '"trend_video_ready"' in cleanup
     assert "video_trend2_close_video_source_session" in cleanup
     assert 'state["pending_input"] = ""' in cleanup
     assert 'if action == "main_video":' in menu
     assert "video_trend2_cancel_pending_on_video_menu" in menu
+
+
+def test_video_menu_cleanup_closes_accepted_upload_context() -> None:
+    state = {
+        "pending_input": "",
+        "upload_owner": "",
+        "upload_session_id": "upload-session",
+        "active_video_message_id": 0,
+        "source_video": {"file_id": "video-id"},
+        "source_analysis": {"analysis_revision": 1},
+        "selected_trend": {"intake_lane": "video_upload"},
+        "search_owner": "",
+        "search_session_id": "",
+    }
+    closed = []
+    saved = []
+    cleanup = _runtime_function(
+        "video_trend2_cancel_pending_on_video_menu",
+        {
+            "video_trend2_state": lambda _context: state,
+            "get_video_session": lambda _user_id: {"current_step": "trend_video_ready"},
+            "video_trend2_close_video_source_session": lambda user_id: closed.append(user_id),
+            "save_video_trend2_state": lambda _context, current: saved.append(dict(current)),
+        },
+    )
+
+    assert cleanup(77, object()) is True
+    assert closed == [77]
+    assert state["source_video"] == {}
+    assert state["source_analysis"] == {}
+    assert state["selected_trend"] == {}
+    assert saved
+
+
+def test_video_documents_use_mime_or_allowed_extension() -> None:
+    assert video_flow7.video_document_is_supported("video/mp4", "clip.bin") is True
+    assert video_flow7.video_document_is_supported("application/octet-stream", "clip.mp4") is True
+    assert video_flow7.video_document_is_supported("application/octet-stream", "clip.mkv") is True
+    assert video_flow7.video_document_is_supported("application/octet-stream", "clip.webm") is True
+    assert video_flow7.video_document_is_supported("application/pdf", "clip.pdf") is False
+    assert video_flow7.video_document_is_supported("image/png", "clip.mp4") is False
+
+
+def test_trend_contract_ends_with_exact_shared_tail() -> None:
+    sequence = video_flow7.product_sequence("video_trend")
+
+    assert sequence[-6:] == (
+        "addons",
+        "review",
+        "quality",
+        "invoice",
+        "confirm",
+        "status",
+    )
+    for legacy_step in ("audio", "transitions", "text", "finish"):
+        assert legacy_step not in sequence
 
 
 def test_uploaded_trend_source_is_valid_without_public_url() -> None:

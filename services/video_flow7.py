@@ -20,6 +20,22 @@ MIN_SCENES = 1
 MAX_SCENES = 20
 SCENE_SECONDS = 8
 SUPPORTED_RATIOS = frozenset({"9:16", "16:9", "1:1", "4:5"})
+VIDEO_DOCUMENT_EXTENSIONS = frozenset({".mp4", ".mov", ".mkv", ".webm"})
+
+
+def video_document_is_supported(mime_type: str, file_name: str) -> bool:
+    """Recognize Telegram video documents before the bounded media probe."""
+
+    mime = str(mime_type or "").strip().casefold().split(";", 1)[0]
+    if mime.startswith("video/"):
+        return True
+    if mime.startswith(("image/", "audio/", "text/")) or mime == "application/pdf":
+        return False
+    name = str(file_name or "").strip().casefold()
+    suffix = f".{name.rsplit('.', 1)[-1]}" if "." in name else ""
+    return suffix in VIDEO_DOCUMENT_EXTENSIONS and (
+        not mime or mime == "application/octet-stream" or mime.startswith("application/")
+    )
 
 PRODUCT_KIND_BY_ID = {
     "video_ai_real": "ai_real",
@@ -140,9 +156,9 @@ PRODUCT_SPECS = {
     "trend_video": {
         "sequence": (
             "trend_source", "scene_count", "aspect_ratio", "character",
-            "reference_assets", "style", "preservation", "audio", "scene_plan",
-            "image_prompts_if_needed", "video_prompts", "review", "transitions",
-            "text", "addons", "finish", "invoice", "confirm",
+            "reference_assets", "style", "preservation", "scene_plan",
+            "image_prompts_if_needed", "video_prompts", "addons", "review",
+            "quality", "invoice", "confirm", "status",
         ),
         "required_assets": "optional",
         "job_type": "product_video",

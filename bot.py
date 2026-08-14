@@ -103434,6 +103434,26 @@ async def handle_product_video_public_confirm_callback(update: Update, context: 
 
 
 VIDEO_TREND2_STATE_KEY = "video_trend2_state"
+VIDEO_TREND2_PUBLIC_SCREENS = frozenset({
+    "entry",
+    "catalog",
+    "search_results",
+    "video_analysis",
+    "help",
+    "scene_count",
+    "aspect_ratio",
+})
+VIDEO_TREND2_LEGACY_CONTENT_ACTIONS = frozenset({
+    "manual_content",
+    "edit_content",
+    "idea_catalog",
+    "idea_return",
+    "profiles",
+    "profile",
+    "suggestions_more",
+    "suggestion",
+    "restore_content",
+})
 VIDEO_TREND2_PARENT = {
     "catalog": "entry",
     "search_results": "entry",
@@ -103443,16 +103463,14 @@ VIDEO_TREND2_PARENT = {
     "help": "entry",
     "scene_count": "catalog",
     "aspect_ratio": "scene_count",
-    "content_source": "aspect_ratio",
-    "profiles": "content_source",
-    "suggestions": "profiles",
-    "preview": "suggestions",
 }
 
 
 def video_trend2_state(context) -> dict:
     state = dict((getattr(context, "user_data", {}) or {}).get(VIDEO_TREND2_STATE_KEY) or {})
     state.setdefault("screen", "entry")
+    if str(state.get("screen") or "") not in VIDEO_TREND2_PUBLIC_SCREENS:
+        state.update({"screen": "entry", "screen_parents": {}})
     state.setdefault("catalog_offset", 0)
     state.setdefault("catalog_mode", "latest")
     state.setdefault("profile_page", 1)
@@ -103467,9 +103485,14 @@ def video_trend2_state(context) -> dict:
     state.setdefault("search_results", [])
     state.setdefault("search_offset", 0)
     state.setdefault("search_error", "")
+    state.setdefault("search_owner", "")
+    state.setdefault("search_session_id", "")
+    state.setdefault("search_revision", 0)
+    state.setdefault("active_search_message_id", 0)
     state.setdefault("upload_owner", "")
     state.setdefault("upload_session_id", "")
     state.setdefault("upload_revision", 0)
+    state.setdefault("active_video_message_id", 0)
     state.setdefault("source_video", {})
     state.setdefault("source_analysis", {})
     state.update({
@@ -103570,8 +103593,7 @@ def video_trend2_catalog_text(state: dict, rows: list[dict]) -> str:
     if not page:
         return (
             "🔥 <b>Trend media</b>\n\n"
-            "Chưa có media trend phù hợp trong bộ nhớ. Anh/chị có thể tự nhập trend; "
-            "hệ thống chưa tạo video, chưa gọi nguồn dựng và chưa trừ Xu."
+            "Chưa có media trend phù hợp. Anh/chị có thể tự nhập trend hoặc tìm kiếm trend mới."
         )
     lines = ["🔥 <b>5 trend media để chọn</b>", ""]
     for index, item in enumerate(page, 1):
@@ -103587,7 +103609,6 @@ def video_trend2_catalog_text(state: dict, rows: list[dict]) -> str:
     lines.extend([
         "",
         "Chọn một trend bằng hàng số hoặc đổi sang 5 trend khác. Sau đó chọn số cảnh, tỉ lệ và thiết lập nhân vật, bối cảnh, phong cách từ chính nội dung trend.",
-        "Bước này chưa tạo tác vụ và chưa trừ Xu.",
     ])
     return "\n".join(lines)
 
@@ -103666,6 +103687,32 @@ def video_trend2_search_results_keyboard(state: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
+def video_trend2_search_token(state: dict) -> str:
+    session_id = str(state.get("search_session_id") or "").strip()
+    if not session_id:
+        return ""
+    return f"{session_id}:{max(1, safe_int(state.get('search_revision'), 1))}"
+
+
+def video_trend2_search_result_owner_valid(
+    context,
+    expected_token: str,
+    expected_message_id: int = 0,
+) -> bool:
+    state = video_trend2_state(context)
+    active_message_id = safe_int(state.get("active_search_message_id"), 0)
+    return bool(
+        expected_token
+        and str(state.get("pending_input") or "") == "trend_search"
+        and str(state.get("search_owner") or "") == "video_trend_search"
+        and video_trend2_search_token(state) == str(expected_token or "")
+        and (
+            safe_int(expected_message_id, 0) <= 0
+            or active_message_id == safe_int(expected_message_id, 0)
+        )
+    )
+
+
 def video_trend2_upload_owner_valid(session: dict, state: dict) -> bool:
     draft = dict(session.get("draft") or {})
     session_id = str(state.get("upload_session_id") or "")
@@ -103689,6 +103736,26 @@ def video_trend2_upload_token(state: dict) -> str:
     if not session_id:
         return ""
     return f"{session_id}:{max(1, safe_int(state.get('upload_revision'), 1))}"
+
+
+def video_trend2_upload_result_owner_valid(
+    user_id: int,
+    context,
+    expected_token: str,
+    expected_message_id: int,
+) -> bool:
+    state = video_trend2_state(context)
+    session = get_video_session(user_id)
+    active_message_id = safe_int(state.get("active_video_message_id"), 0)
+    return bool(
+        expected_token
+        and video_trend2_upload_token(state) == expected_token
+        and video_trend2_upload_owner_valid(session, state)
+        and (
+            safe_int(expected_message_id, 0) <= 0
+            or active_message_id == safe_int(expected_message_id, 0)
+        )
+    )
 
 
 def video_trend2_upload_keyboard(state: dict) -> InlineKeyboardMarkup:
@@ -103743,7 +103810,7 @@ def video_trend2_cancel_pending_on_video_menu(user_id: int, context) -> bool:
     current_step = str(session.get("current_step") or "")
     source_pending = bool(
         str(state.get("upload_owner") or "") == "video_trend_upload"
-        or current_step in {"awaiting_trend_video", "trend_video_analysis"}
+        or current_step in {"awaiting_trend_video", "trend_video_analysis", "trend_video_ready"}
     )
     if not str(state.get("pending_input") or "") and not source_pending:
         return False
@@ -103752,12 +103819,16 @@ def video_trend2_cancel_pending_on_video_menu(user_id: int, context) -> bool:
         state.update({
             "upload_owner": "",
             "upload_session_id": "",
+            "active_video_message_id": 0,
             "source_video": {},
             "source_analysis": {},
             "selected_trend": {},
         })
     state["pending_input"] = ""
     state["input_return_screen"] = ""
+    state["search_owner"] = ""
+    state["search_session_id"] = ""
+    state["active_search_message_id"] = 0
     save_video_trend2_state(context, state)
     return True
 
@@ -103854,7 +103925,7 @@ def video_trend2_scene_count_text(state: dict) -> str:
         f"• Trend: <b>{html.escape(str(trend.get('title') or 'Trend tự nhập'))}</b>\n"
         "• Mỗi cảnh phải hoàn tất một ý hoặc hành động; thời lượng được xác định theo gói Chất lượng.\n"
         "• Nhiều cảnh hơn sẽ tăng thời lượng, chất lượng và chi phí; giá chỉ được chọn gần cuối.\n\n"
-        "Hãy chọn đúng số cảnh cần dùng. Bước này chưa tạo tác vụ và chưa trừ Xu."
+        "Hãy chọn đúng số cảnh cần dùng."
     )
 
 
@@ -103981,7 +104052,7 @@ def video_trend2_preview_text(state: dict) -> str:
         f"• Tỉ lệ: {html.escape(str(state.get('aspect_ratio') or ''))}\n\n"
         f"<b>{html.escape(str(content.get('title') or 'Nội dung riêng'))}</b>\n"
         f"{html.escape(str(content.get('content') or ''))}\n\n"
-        "Tiếp tục sẽ mở quy trình hoàn thiện cảnh, câu lệnh, chuyển cảnh, hậu kỳ và chất lượng. Chưa tạo video và chưa trừ Xu."
+        "Tiếp tục sẽ mở quy trình hoàn thiện cảnh, câu lệnh, chuyển cảnh, hậu kỳ và chất lượng."
     )
 
 
@@ -104366,7 +104437,7 @@ async def video_trend2_render(target, context, state: dict, lang: str = "vi"):
         rows.append(video_trend2_nav("vtrend|back"))
         return await safe_edit_or_send(
             target,
-            "🔎 <b>Lọc media trend</b>\n\nChọn một dạng nội dung truyền thông. Chưa tạo video và chưa trừ Xu.",
+            "🔎 <b>Lọc media trend</b>\n\nChọn một dạng nội dung truyền thông.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(rows),
         )
@@ -104426,6 +104497,9 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
         state["last_callback_query_id"] = callback_query_id
         state = save_video_trend2_state(context, state)
 
+    if action in VIDEO_TREND2_LEGACY_CONTENT_ACTIONS:
+        action = "entry"
+
     if action == "entry":
         video_trend2_close_video_source_session(uid)
         state = save_video_trend2_state(context, {
@@ -104438,12 +104512,17 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
             "search_results": [],
             "search_offset": 0,
             "search_error": "",
+            "search_owner": "",
+            "search_session_id": "",
+            "search_revision": 0,
+            "active_search_message_id": 0,
             "selected_trend": {},
             "scene_count": 0,
             "aspect_ratio": "",
             "upload_owner": "",
             "upload_session_id": "",
             "upload_revision": 0,
+            "active_video_message_id": 0,
             "source_video": {},
             "source_analysis": {},
             "pending_input": "",
@@ -104462,6 +104541,7 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
             "pending_input": "",
             "upload_owner": "",
             "upload_session_id": "",
+            "active_video_message_id": 0,
             "source_video": {},
             "source_analysis": {},
             "selected_trend": {},
@@ -104480,6 +104560,7 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
             "pending_input": "",
             "upload_owner": "",
             "upload_session_id": "",
+            "active_video_message_id": 0,
             "source_video": {},
             "source_analysis": {},
             "selected_trend": {},
@@ -104501,6 +104582,7 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
             "pending_input": "",
             "upload_owner": "",
             "upload_session_id": "",
+            "active_video_message_id": 0,
             "source_video": {},
             "source_analysis": {},
             "selected_trend": {},
@@ -104524,6 +104606,7 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
             "upload_owner": "video_trend_upload",
             "upload_session_id": upload_session_id,
             "upload_revision": upload_revision,
+            "active_video_message_id": 0,
             "source_video": {},
             "source_analysis": {},
             "selected_trend": {},
@@ -104581,9 +104664,14 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
         return_screen = str(state.get("screen") or "entry")
         if return_screen not in {"entry", "search_results"}:
             return_screen = "entry"
+        search_revision = max(1, safe_int(state.get("search_revision"), 0) + 1)
         state.update({
             "pending_input": "trend_search",
             "input_return_screen": return_screen,
+            "search_owner": "video_trend_search",
+            "search_session_id": uuid.uuid4().hex[:20],
+            "search_revision": search_revision,
+            "active_search_message_id": 0,
         })
         save_video_trend2_state(context, state)
         return await safe_edit_or_send(
@@ -104845,7 +104933,12 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
         )
         return await video_uiflow3_render(query, context, bridge)
     if action == "resume":
-        state["pending_input"] = ""
+        state.update({
+            "pending_input": "",
+            "search_owner": "",
+            "search_session_id": "",
+            "active_search_message_id": 0,
+        })
         state = save_video_trend2_state(context, state)
         return await video_trend2_render(query, context, state, lang)
     if action == "back":
@@ -104886,7 +104979,7 @@ async def handle_video_trend2_callback(update: Update, context: ContextTypes.DEF
                 chat_id=query.message.chat_id,
                 text=(
                     "⚠️ Kho trend chưa đọc được dữ liệu ở lần này. Phiên lựa chọn vẫn được giữ; "
-                    "anh/chị có thể quay lại Video theo trend hoặc tự nhập trend. Bot chưa tạo tác vụ và chưa trừ Xu."
+                    "anh/chị có thể quay lại Video theo trend hoặc tự nhập trend."
                 ),
                 reply_markup=video_trend2_entry_keyboard(),
             )
@@ -115430,6 +115523,14 @@ async def handle_video_trend2_pending_text(update: Update, context: ContextTypes
         return True
     lang = get_user_language(update.effective_user.id) or "vi"
     if pending == "trend_search":
+        message_id = safe_int(getattr(update.message, "message_id", 0), 0)
+        active_message_id = safe_int(state.get("active_search_message_id"), 0)
+        if message_id and active_message_id and message_id <= active_message_id:
+            return True
+        if message_id:
+            state["active_search_message_id"] = message_id
+            state = save_video_trend2_state(context, state)
+        search_token = video_trend2_search_token(state)
         input_parent = str(state.get("input_return_screen") or "entry")
         if input_parent not in {"entry", "search_results"}:
             input_parent = "entry"
@@ -115452,6 +115553,11 @@ async def handle_video_trend2_pending_text(update: Update, context: ContextTypes
             )
             search_results = []
             search_error = "public_search_unavailable"
+        if not video_trend2_search_result_owner_valid(
+            context, search_token, message_id
+        ):
+            return True
+        state = video_trend2_state(context)
         state = video_trend2_open_screen(state, "search_results", parent=input_parent)
         state.update({
             "search_query": text[:240],
@@ -115460,6 +115566,9 @@ async def handle_video_trend2_pending_text(update: Update, context: ContextTypes
             "search_error": search_error,
             "pending_input": "",
             "input_return_screen": "",
+            "search_owner": "",
+            "search_session_id": "",
+            "active_search_message_id": 0,
         })
     elif pending == "manual_trend":
         now = datetime.now(timezone.utc).isoformat()
@@ -117165,7 +117274,10 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             mime_type = str(getattr(media, "mime_type", "") or "application/octet-stream")
             if mime_type.startswith("image/"):
                 media_type = "image"
-            elif mime_type.startswith("video/"):
+            elif video_flow7.video_document_is_supported(
+                mime_type,
+                str(getattr(media, "file_name", "") or ""),
+            ):
                 media_type = "video"
             else:
                 media_type = "document"
@@ -117219,6 +117331,13 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             message_id = safe_int(getattr(update.message, "message_id", 0), 0)
             if message_id and safe_int(trend_state.get("last_video_message_id"), 0) == message_id:
                 return True
+            active_message_id = safe_int(trend_state.get("active_video_message_id"), 0)
+            if message_id and active_message_id and message_id <= active_message_id:
+                return True
+            if message_id:
+                trend_state["active_video_message_id"] = message_id
+                trend_state = save_video_trend2_state(context, trend_state)
+            upload_token = video_trend2_upload_token(trend_state)
             local_probe = video_selfshot_telegram_metadata_probe(
                 media,
                 file_id=file_id,
@@ -117240,6 +117359,10 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 except Exception as exc:
                     logger.warning("video_trend_probe_failed | exception=%s", type(exc).__name__)
                     local_probe = {"ok": False, "reason": "source_video_open_failed"}
+                if not video_trend2_upload_result_owner_valid(
+                    uid, context, upload_token, message_id
+                ):
+                    return True
             if not local_probe.get("ok"):
                 reason = str(local_probe.get("reason") or "invalid_video_metadata")
                 await update.message.reply_text(
@@ -117267,6 +117390,10 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             progress = await update.message.reply_text(
                 "🔎 Đã nhận video. TOAN AAS đang phân tích chủ thể, chuyển động, camera và ngữ cảnh hình ảnh..."
             )
+            if not video_trend2_upload_result_owner_valid(
+                uid, context, upload_token, message_id
+            ):
+                return True
             try:
                 inspection = await inspect_selfshot_source(
                     context,
@@ -117287,6 +117414,10 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             except Exception as exc:
                 logger.warning("video_trend_local_analysis_failed | exception=%s", type(exc).__name__)
                 inspection = {"ok": False, "reason": "local_analysis_failed"}
+            if not video_trend2_upload_result_owner_valid(
+                uid, context, upload_token, message_id
+            ):
+                return True
             if not inspection.get("ok"):
                 await safe_edit_or_send(
                     progress,
@@ -117345,6 +117476,11 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "analysis_revision": max(1, safe_int(analysis.get("analysis_revision"), 1)),
                 "analysis_provenance": str(analysis.get("tracking_source") or "local_opencv"),
             }
+            if not video_trend2_upload_result_owner_valid(
+                uid, context, upload_token, message_id
+            ):
+                return True
+            trend_state = video_trend2_state(context)
             trend_state = video_trend2_open_screen(trend_state, "video_analysis", parent="entry")
             trend_state.update({
                 "selected_trend": selected_trend,
@@ -117352,6 +117488,7 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "source_analysis": analysis,
                 "analysis_revision": max(1, safe_int(analysis.get("analysis_revision"), 1)),
                 "last_video_message_id": message_id,
+                "active_video_message_id": 0,
                 "pending_input": "",
             })
             trend_state = save_video_trend2_state(context, trend_state)

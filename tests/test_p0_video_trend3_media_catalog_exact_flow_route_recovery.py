@@ -159,7 +159,7 @@ def test_content_source_profiles_idea_catalog_and_flow_order_are_canonical() -> 
     assert "content_source" not in sequence
     assert "content_profile_or_preset" not in sequence
     assert "content_choice" not in sequence
-    assert sequence[-3:] == ("finish", "invoice", "confirm")
+    assert sequence[-6:] == ("addons", "review", "quality", "invoice", "confirm", "status")
 
 
 def test_exact_back_stack_and_idea_return_are_preserved() -> None:

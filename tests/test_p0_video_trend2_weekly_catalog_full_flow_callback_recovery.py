@@ -185,7 +185,7 @@ def test_trend_entry_and_sequence_are_canonical() -> None:
     assert "content_source" not in sequence
     assert "content_profile_or_preset" not in sequence
     assert "content_choice" not in sequence
-    assert sequence[-3:] == ("finish", "invoice", "confirm")
+    assert sequence[-6:] == ("addons", "review", "quality", "invoice", "confirm", "status")
     assert video_flow7.PRODUCT_SPECS["trend_video"]["execution_owner"] == "owner_product_video"
 
 
