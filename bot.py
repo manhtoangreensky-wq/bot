@@ -229502,19 +229502,57 @@ def subdub_progress_stage_payload(stage: str = "") -> dict:
     percent, label, status = SUBDUB_PROGRESS_STAGES.get(token, SUBDUB_PROGRESS_STAGES["saved_input"])
     return {"stage": token, "percent": percent, "label": label, "status": status}
 
+
+def subdub_progress_bar(percent) -> str:
+    try:
+        progress = int(float(percent or 0))
+    except (TypeError, ValueError, OverflowError):
+        progress = 0
+    progress = max(0, min(100, progress))
+    filled = progress // 10
+    partial = 1 if progress % 10 else 0
+    empty = 10 - filled - partial
+    return f"0% {'🟩' * filled}{'🟨' * partial}{'⬜' * empty} 100%"
+
+
 def subdub_progress_text(stage: str = "saved_input", job_id: str = "", lang: str = "vi") -> str:
-    copy = public_subdub_deep_copy(normalize_user_language(lang))
+    normalized_lang = normalize_user_language(lang)
+    copy = public_subdub_deep_copy(normalized_lang)
     payload = subdub_progress_stage_payload(stage)
+    stage_token = str(payload.get("stage") or stage or "received_file").strip().lower()
+    progress = int(payload.get("percent") or 0)
     text = product_progress_status_text(
         "subdub",
         job_id,
-        str(payload.get("stage") or stage or "received_file"),
-        int(payload.get("percent") or 0),
-        "delivered" if str(payload.get("stage") or "") == "delivered" else "",
+        stage_token,
+        progress,
+        "delivered" if stage_token == "delivered" else "",
         lang=lang,
     )
-    heading = copy["success"] if str(payload.get("stage") or "").strip().lower() == "delivered" else copy["progress"]
-    return f"{heading} · {int(payload.get('percent') or 0)}%\n{copy['job']}: <code>{html.escape(str(job_id or '-'))}</code>"
+    progress_bar = subdub_progress_bar(progress)
+    if normalized_lang != "vi":
+        heading = copy["success"] if stage_token == "delivered" else copy["progress"]
+        return (
+            f"{heading} · {progress}%\n"
+            f"{progress_bar}\n"
+            f"{copy['job']}: <code>{html.escape(str(job_id or '-'))}</code>"
+        )
+    if stage_token == "delivered":
+        text = text.replace(
+            "🎬 TOAN AAS đang xử lý video",
+            "✅ TOAN AAS đã hoàn tất video",
+            1,
+        )
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("Tiến độ:"):
+            lines.insert(index + 1, progress_bar)
+            break
+    else:
+        lines.extend(["", progress_bar])
+    return "\n".join(lines)
+
+
 def subdub_progress_keyboard(job_id: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_subdub_deep_copy(normalize_user_language(lang))
     safe_job = re.sub(r"[^A-Za-z0-9_.:-]+", "", str(job_id or ""))[:40]
