@@ -176,7 +176,7 @@ SCREEN_PARENTS = {
     "effects": "world",
     "audio": "effects",
     "volume": "audio",
-    "review": "audio",
+    "review": "effects",
     "finish": "review",
     "package": "finish",
 }
@@ -224,7 +224,6 @@ STEP_SEQUENCE = (
     "wardrobe",
     "world",
     "effects",
-    "audio",
     "review",
     "finish",
     "package",
@@ -369,8 +368,17 @@ def initial_draft() -> dict[str, Any]:
     }
 
 
-def screen_parent(screen: str) -> str:
-    return SCREEN_PARENTS.get(str(screen or "intro"), "intro")
+def screen_parent(
+    screen: str,
+    state: Mapping[str, Any] | None = None,
+) -> str:
+    name = str(screen or "intro")
+    override = str(
+        (dict(state or {}).get("screen_return_overrides") or {}).get(name) or ""
+    )
+    if override in set(SCREEN_PARENTS) | {"hub"}:
+        return override
+    return SCREEN_PARENTS.get(name, "intro")
 
 
 def callback_operation_allowed(screen: str, operation: str) -> bool:
@@ -378,6 +386,22 @@ def callback_operation_allowed(screen: str, operation: str) -> bool:
 
     owner_screens = CALLBACK_OPERATION_SCREENS.get(str(operation or ""))
     return bool(owner_screens and str(screen or "intro") in owner_screens)
+
+
+def callback_allowed(
+    screen: str,
+    callback_data: str,
+    state: Mapping[str, Any] | None = None,
+) -> bool:
+    """Accept a button only when it belongs to the currently rendered screen."""
+
+    model = screen_model(screen, state)
+    allowed = {
+        str(callback)
+        for row in model.get("rows") or []
+        for _label, callback in row
+    }
+    return str(callback_data or "") in allowed
 
 
 def _safe(value: Any) -> str:
@@ -615,7 +639,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         buttons = [(f"{_status_label(label in selected)} {label}", f"vproduct|ss3|effect|{index + 1}") for index, label in enumerate(EFFECT_OPTIONS)]
         buttons.append(("🚫 Không thêm hiệu ứng", "vproduct|ss3|effect|none"))
         rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
-        rows.append([("✅ Xong hiệu ứng", "vproduct|ss3|show|audio"), ("↩️ Tắt toàn bộ", "vproduct|ss3|effect|clear")])
+        rows.append([("✅ Xong hiệu ứng", "vproduct|ss3|show|review"), ("↩️ Tắt toàn bộ", "vproduct|ss3|effect|clear")])
     elif name == "audio":
         plan = dict(current.get("audio_plan") or initial_draft()["audio_plan"])
         title = "🎙️ Âm thanh và phụ đề"
@@ -649,7 +673,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             f"Hiệu ứng: {_safe(', '.join(current.get('selected_effects') or []) or 'Không thêm')}\n\n"
             "Chưa tạo tác vụ, chưa xử lý video và chưa trừ Xu."
         )
-        rows = [[("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("🎙️ Âm thanh", "vproduct|ss3|audio_review")], [("✅ Hoàn thiện video", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
+        rows = [[("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("👗 Trang phục", "vproduct|ss3|show|wardrobe")], [("🎚️ Âm thanh & Add-on", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
     elif name == "finish":
         title = "✅ Kiểm tra kế hoạch trước hóa đơn"
         body = (
@@ -664,7 +688,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
     else:
         raise ValueError("unknown_selfshot3_screen")
 
-    rows.append(_nav(screen_parent(name)))
+    rows.append(_nav(screen_parent(name, current)))
     return {"screen": name, "title": title, "text": f"{title}\n\n{body}", "rows": rows}
 
 
@@ -1221,7 +1245,7 @@ def route_matrix() -> dict[str, dict[str, str]]:
         "selfshot3_world": {"owner": "vproduct", "next": "world", "back": "wardrobe"},
         "selfshot3_effect": {"owner": "vproduct", "next": "effects", "back": "world"},
         "selfshot3_audio": {"owner": "vproduct", "next": "audio", "back": "effects"},
-        "selfshot3_review": {"owner": "vproduct", "next": "review", "back": "audio"},
+        "selfshot3_review": {"owner": "vproduct", "next": "review", "back": "effects"},
     }
 
 

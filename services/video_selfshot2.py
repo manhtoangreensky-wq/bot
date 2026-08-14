@@ -130,7 +130,7 @@ SCREEN_PARENTS = {
     "volume": "audio",
     "addons": "audio",
     "addon_position": "addons",
-    "review": "addons",
+    "review": "prompts",
     "finish": "review",
 }
 
@@ -1244,9 +1244,9 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         rows = [prompt_buttons[offset:offset + 2] for offset in range(0, len(prompt_buttons), 2)]
         if rows and len(rows[-1]) == 1:
             rows[-1].append(('↩️ Tạo lại tất cả', 'vproduct|ss2|compile_prompts'))
-            rows.append([('✅ Hoàn tất câu lệnh', 'vproduct|ss2|show|audio'), ('🎬 Xem kế hoạch cảnh', 'vproduct|ss2|show|scene_plan')])
+            rows.append([('✅ Hoàn tất câu lệnh', 'vproduct|ss2|show|review'), ('🎬 Xem kế hoạch cảnh', 'vproduct|ss2|show|scene_plan')])
         else:
-            rows.append([('↩️ Tạo lại tất cả', 'vproduct|ss2|compile_prompts'), ('✅ Hoàn tất câu lệnh', 'vproduct|ss2|show|audio')])
+            rows.append([('↩️ Tạo lại tất cả', 'vproduct|ss2|compile_prompts'), ('✅ Hoàn tất câu lệnh', 'vproduct|ss2|show|review')])
         rows.append(_nav(screen_parent("prompts", draft)))
     elif name == "audio":
         plan = dict(draft.get("audio_plan") or {})
@@ -1305,9 +1305,8 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         rows = [
             [('👁️ Xem từng cảnh', 'vproduct|ss2|plan_view'), ('✍️ Sửa nội dung cảnh', 'vproduct|ss2|content_source|custom')],
             [('👤 Người / vật giữ nguyên', 'vproduct|ss2|show|preserve'), ('🎬 Câu lệnh video', 'vproduct|ss2|show|prompts')],
-            [('🎚️ Âm thanh', 'vproduct|ss2|show|audio'), ('✨ Hiệu ứng', 'vproduct|ss2|show|direction')],
-            [('🖼️ Logo / Watermark', 'vproduct|ss2|review_addons'), ('✅ Hoàn thiện video', 'vproduct|ss2|finish')],
-            _nav("addons"),
+            [('✨ Hiệu ứng', 'vproduct|ss2|show|direction'), ('🎚️ Âm thanh & Add-on', 'vproduct|ss2|finish')],
+            _nav("prompts"),
         ]
     elif name == "finish":
         text = (
