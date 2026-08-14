@@ -106766,6 +106766,12 @@ def video_tail9_addon_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup
             [("✅ Hoàn tất Add-on", "video_tail|addon|complete"), ("🎬 Xem/Sửa câu lệnh", "video_tail|addon|prompts")],
             [("⬅️ Quay lại chuyển cảnh", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
         ])
+    if str(current.get("video_product_type") or "") == "video_trend":
+        return video_scene3_keyboard([
+            [("🎙️ Âm thanh & Add-on", "video_tail|addon|audio"), ("🏷️ Logo/Watermark", "video_tail|addon|logo")],
+            [("✅ Hoàn tất Add-on", "video_tail|addon|complete"), ("🧠 Xem/Sửa câu lệnh", "video_tail|addon|prompts")],
+            [("⬅️ Quay lại", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
+        ])
     back_callback = str(current.get("return_to") or "menu|main_video")
     return video_scene3_keyboard([
         [("🎙️ Âm thanh, giọng & phụ đề", "video_tail|addon|audio"), ("🖼️ Logo/Watermark", "video_tail|addon|logo")],
@@ -107077,6 +107083,13 @@ def video_tail9_review_keyboard(tail: dict | None = None) -> InlineKeyboardMarku
     if str(current.get("video_product_type") or "") == "storyboard_prompt":
         return video_scene3_keyboard([
             [("👁️ Xem kế hoạch cảnh", "video_tail|review|scenes"), ("🖼️ Xem ảnh Storyboard", "video_tail|review|assets")],
+            [("🎬 Xem/Sửa câu lệnh", "video_tail|review|prompts"), ("🏷️ Logo/Watermark", "video_tail|review|logo")],
+            [("✅ Hoàn tất rà soát", "video_tail|review|complete"), ("🎙️ Sửa âm thanh", "video_tail|review|audio")],
+            [("⬅️ Quay lại Add-on", "video_tail|review|back"), ("🎬 Menu Video", "menu|main_video")],
+        ])
+    if str(current.get("video_product_type") or "") == "video_trend":
+        return video_scene3_keyboard([
+            [("👁️ Xem kế hoạch cảnh", "video_tail|review|scenes"), ("✍️ Sửa nội dung", "video_tail|review|edit")],
             [("🎬 Xem/Sửa câu lệnh", "video_tail|review|prompts"), ("🏷️ Logo/Watermark", "video_tail|review|logo")],
             [("✅ Hoàn tất rà soát", "video_tail|review|complete"), ("🎙️ Sửa âm thanh", "video_tail|review|audio")],
             [("⬅️ Quay lại Add-on", "video_tail|review|back"), ("🎬 Menu Video", "menu|main_video")],
@@ -108383,7 +108396,11 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             owner == "scene3"
             and str(tail.get("video_product_type") or "") == "storyboard_prompt"
         )
-        if action == "back" and script_tail:
+        trend_tail = (
+            owner == "scene3"
+            and str(tail.get("video_product_type") or "") == "video_trend"
+        )
+        if action == "back" and (script_tail or trend_tail):
             state = video_profile_studio_step(
                 context,
                 host,
@@ -108418,7 +108435,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             )
             save_storyboard2_state(context, board, host)
             return await storyboard2_render(query, context, board)
-        if action == "prompts" and (script_tail or storyboard_tail):
+        if action == "prompts" and (script_tail or storyboard_tail or trend_tail):
             state = video_profile_studio_step(
                 context,
                 host,
@@ -108867,7 +108884,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             if (
                 owner == "scene3"
                 and str(tail.get("video_product_type") or "")
-                in {"script_image_video", "storyboard_prompt"}
+                in {"script_image_video", "storyboard_prompt", "video_trend"}
             ):
                 state = video_profile_studio_step(
                     context,
@@ -248299,7 +248316,8 @@ def video_profile_scene1_can_return_to_shared_tail(state: dict, screen: str) -> 
         return True
     return target == "addon" and (
         video_flow7_kind(state) == "script_to_video"
-        or video_flow6_product_id(state) in {"script_image_video", "storyboard_prompt"}
+        or video_flow6_product_id(state)
+        in {"script_image_video", "storyboard_prompt", "video_trend"}
     )
 
 
@@ -249315,7 +249333,8 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             return await video_tail9_render(query, uid, context, "addon")
         if return_step == "review" and (
             video_flow7_kind(state) == "script_to_video"
-            or video_flow6_product_id(state) in {"script_image_video", "storyboard_prompt"}
+            or video_flow6_product_id(state)
+            in {"script_image_video", "storyboard_prompt", "video_trend"}
         ):
             state = video_profile_studio_step(
                 context,
@@ -249965,6 +249984,8 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         flow_kind = str(video_flow6.context_from_scene_state(state).get("flow_kind") or "")
         if flow_kind == "script_to_video":
             video_profile_scene1_handoff(uid, state)
+            return await video_tail9_render(query, uid, context, "addon")
+        if flow_kind == "trend_video" or video_flow6_product_id(state) == "video_trend":
             return await video_tail9_render(query, uid, context, "addon")
         return await video_tail9_render(query, uid, context, "logo")
     if action == "post_toggle":
