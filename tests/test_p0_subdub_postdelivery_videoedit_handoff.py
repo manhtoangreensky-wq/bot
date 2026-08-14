@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -194,6 +195,58 @@ def test_receipt_shows_two_balanced_handoff_buttons_only_with_complete_artifact(
     }
     assert "🛠 Chỉnh sửa video" not in incomplete_labels
     assert "🏷 Logo / Watermark" not in incomplete_labels
+
+
+def test_dub_receipt_uses_exact_three_row_postdelivery_actions() -> None:
+    job = _delivered_job()
+    job.update({
+        "mode": bot.VIDEO_SUBTITLE_MODE_DUB,
+        "final_video_available": "1",
+        "final_audio_available": "1",
+    })
+    token = bot.subdub_postdelivery_video_edit_artifact(
+        job,
+        user_id=job["user_id"],
+    )["token"]
+
+    rows = _button_rows(
+        bot.video_dubbing_receipt_keyboard("vi", "video_addon", job)
+    )
+
+    assert rows == [
+        [
+            ("📹 Tải video lồng tiếng", "videodub|download_final_video"),
+        ],
+        [
+            ("🛠 Chỉnh sửa video", f"videodub|edit|{token}"),
+            ("🏷 Logo / Watermark", f"videodub|branding|{token}"),
+        ],
+        [
+            ("🎞 Phụ đề / Lồng tiếng", "videodub|status_back_type"),
+            ("🏠 Menu chính", "menu|main"),
+        ],
+    ]
+    assert "videodub|redub_voice" not in {
+        callback for row in rows for _label, callback in row
+    }
+
+
+def test_pipeline_result_and_registry_keep_exact_delivery_identity() -> None:
+    core_source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
+    wrapper_source = inspect.getsource(bot.execute_video_dubbing_pipeline)
+    expected_fields = {
+        "video_delivery_file_id": "str(delivery.get",
+        "video_delivery_size_bytes": "int(delivery.get",
+        "video_delivery_sha256": "str(delivery.get",
+        "video_delivery_filename": "str(delivery.get",
+        "video_delivery_mime_type": "str(delivery.get",
+        "video_delivery_duration_seconds": "float(delivery.get",
+    }
+
+    for field, core_value in expected_fields.items():
+        assert f'"{field}": {core_value}' in core_source
+        assert f'"{field}": ' in wrapper_source
+        assert f'result.get("{field}")' in wrapper_source
 
 
 def test_handoff_state_uses_exact_delivered_file_without_upload_or_latest_fallback() -> None:

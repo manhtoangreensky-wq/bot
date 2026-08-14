@@ -229342,6 +229342,15 @@ def video_dubbing_receipt_keyboard(lang: str = "vi", origin: str = "translation"
         return InlineKeyboardMarkup(rows)
     elif mode == VIDEO_SUBTITLE_MODE_DUB:
         _filename, _caption, video_button = video_dubbing_final_video_label(mode, lang)
+        if postdelivery_buttons:
+            return InlineKeyboardMarkup([
+                [InlineKeyboardButton(video_button, callback_data="videodub|download_final_video")],
+                postdelivery_buttons,
+                [
+                    InlineKeyboardButton("🎞 Phụ đề / Lồng tiếng" if is_vi else "🎞 Subtitles / Dubbing", callback_data="videodub|status_back_type"),
+                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+                ],
+            ])
         first_row = []
         if str(state.get("final_video_available") or "") == "1":
             first_row.append(InlineKeyboardButton(video_button, callback_data="videodub|download_final_video"))
@@ -229352,7 +229361,7 @@ def video_dubbing_receipt_keyboard(lang: str = "vi", origin: str = "translation"
         if postdelivery_buttons:
             rows.append(postdelivery_buttons)
         rows.append([
-            InlineKeyboardButton("🔁 Lồng tiếng lại" if is_vi else "🔁 Dub again", callback_data="videodub|redub_voice"),
+            InlineKeyboardButton("🎞 Phụ đề / Lồng tiếng" if is_vi else "🎞 Subtitles / Dubbing", callback_data="videodub|status_back_type"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ])
         return InlineKeyboardMarkup(rows)
@@ -240692,6 +240701,12 @@ async def _execute_video_dubbing_pipeline_core(
         "delivery_method": str(delivery.get("delivery_method") or ""),
         "telegram_message_id": str(delivery.get("telegram_message_id") or ""),
         "video_delivery_message_id": str(delivery.get("video_delivery_message_id") or ""),
+        "video_delivery_file_id": str(delivery.get("video_delivery_file_id") or ""),
+        "video_delivery_size_bytes": int(delivery.get("video_delivery_size_bytes") or 0),
+        "video_delivery_sha256": str(delivery.get("video_delivery_sha256") or ""),
+        "video_delivery_filename": str(delivery.get("video_delivery_filename") or ""),
+        "video_delivery_mime_type": str(delivery.get("video_delivery_mime_type") or ""),
+        "video_delivery_duration_seconds": float(delivery.get("video_delivery_duration_seconds") or 0.0),
         "audio_delivery_message_id": str(delivery.get("audio_delivery_message_id") or ""),
         "srt_delivery_message_id": str(delivery.get("srt_delivery_message_id") or ""),
         "terminal_artifact_type": str(delivery.get("terminal_artifact_type") or ""),
@@ -240903,6 +240918,12 @@ async def execute_video_dubbing_pipeline(
             "final_mp4": artifacts.get("final_mp4") or "",
             "pipeline_attempted": bool(result.get("pipeline_attempted") or debug_job.get("pipeline_attempted")),
             "delivery_method": str(result.get("delivery_method") or debug_job.get("delivery_method") or ""),
+            "video_delivery_file_id": str(result.get("video_delivery_file_id") or runtime_job.get("video_delivery_file_id") or ""),
+            "video_delivery_size_bytes": int(result.get("video_delivery_size_bytes") or runtime_job.get("video_delivery_size_bytes") or 0),
+            "video_delivery_sha256": str(result.get("video_delivery_sha256") or runtime_job.get("video_delivery_sha256") or ""),
+            "video_delivery_filename": str(result.get("video_delivery_filename") or runtime_job.get("video_delivery_filename") or ""),
+            "video_delivery_mime_type": str(result.get("video_delivery_mime_type") or runtime_job.get("video_delivery_mime_type") or ""),
+            "video_delivery_duration_seconds": float(result.get("video_delivery_duration_seconds") or runtime_job.get("video_delivery_duration_seconds") or 0.0),
             "output_validation": dict(result.get("output_validation") or debug_job.get("output_validation") or {}),
             "source_duration": float(result.get("source_duration") or result_state.get("source_duration") or 0.0),
             "expected_duration": float(result.get("expected_duration") or result_state.get("source_duration") or 0.0),
@@ -247700,7 +247721,7 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
         logo_overlay.setdefault("scale", 0.12)
         logo_overlay.setdefault("opacity", 1.0)
         plan["logo_overlay"] = logo_overlay
-        update_video_editor_screen(
+        current = update_video_editor_screen(
             uid,
             "logo_options",
             parent_callback=logo_parent,
