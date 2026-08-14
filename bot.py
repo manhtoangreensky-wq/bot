@@ -107306,7 +107306,10 @@ def video_tail9_addon_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup
         ])
     if str(current.get("video_product_type") or "") == "multi_scene_film":
         return video_scene3_keyboard([
-            [("🎙️ Âm thanh & Add-on", "video_tail|addon|audio"), ("🏷️ Logo/Watermark", "video_tail|addon|logo")],
+            [(video_tail9_addon_selected_label(current, "text", "Chữ trên video"), "video_tail|addon|text"), (video_tail9_addon_selected_label(current, "subtitles", "Phụ đề"), "video_tail|addon|item|subtitles")],
+            [(video_tail9_addon_selected_label(current, "dubbing", "Lồng tiếng"), "video_tail|addon|item|dubbing"), (video_tail9_addon_selected_label(current, "music", "Nhạc"), "video_tail|addon|item|music")],
+            [(video_tail9_addon_selected_label(current, "sound", "Âm thanh"), "video_tail|addon|item|sound"), (video_tail9_addon_selected_label(current, "logo", "Logo"), "video_tail|addon|logo")],
+            [(video_tail9_addon_selected_label(current, "watermark", "Watermark"), "video_tail|addon|watermark"), (video_tail9_addon_selected_label(current, "transitions", "Chuyển cảnh"), "video_tail|addon|transitions")],
             [("✅ Hoàn tất Add-on", "video_tail|addon|complete"), ("🧠 Xem/Sửa câu lệnh chương", "video_tail|addon|prompts")],
             [("⬅️ Quay lại", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
         ])
@@ -107644,6 +107647,14 @@ def video_tail9_review_keyboard(tail: dict | None = None) -> InlineKeyboardMarku
             [("👥 Nhân vật và bối cảnh", "video_tail|review|entities"), ("🎬 Kế hoạch cảnh", "video_tail|review|scenes")],
             [("🎙 Phân vai và âm thanh", "video_tail|review|cast_audio"), ("🏷 Logo và watermark", "video_tail|review|logo")],
             [("🧠 Rà soát câu lệnh", "video_tail|review|prompts"), ("✅ Hoàn tất rà soát", "video_tail|review|complete")],
+            [("⬅️ Quay lại", "video_tail|review|back"), ("🎬 Menu Video", "menu|main_video")],
+        ])
+    if str(current.get("video_product_type") or "") == "multi_scene_film":
+        return video_scene3_keyboard([
+            [("📐 Sửa khung hình", "video_tail|review|format"), ("📝 Nội dung tập", "video_tail|review|content")],
+            [("👥 Nhân vật và bối cảnh", "video_tail|review|entities"), ("🎬 Kế hoạch chương", "video_tail|review|scenes")],
+            [("🎙 Phân vai và âm thanh", "video_tail|review|cast_audio"), ("🏷 Logo và watermark", "video_tail|review|logo")],
+            [("🧠 Rà soát câu lệnh chương", "video_tail|review|prompts"), ("✅ Hoàn tất rà soát", "video_tail|review|complete")],
             [("⬅️ Quay lại", "video_tail|review|back"), ("🎬 Menu Video", "menu|main_video")],
         ])
     if str(current.get("video_product_type") or "") in {
@@ -109129,7 +109140,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             transition_tail = (
                 owner == "uiflow3"
                 and str(tail.get("video_product_type") or "")
-                in {"video_ai_real", "script_image_video"}
+                in {"video_ai_real", "script_image_video", "multi_scene_film"}
             ) or script_tail or trend_tail
             if not transition_tail:
                 return await video_tail9_render(query, uid, context, "addon")
@@ -109144,6 +109155,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 "script_image_video",
                 "storyboard_prompt",
                 "video_trend",
+                "multi_scene_film",
             }:
                 return await video_tail9_render(query, uid, context, "addon")
             return await safe_edit_or_send_long_html(
@@ -109157,6 +109169,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 "script_image_video",
                 "storyboard_prompt",
                 "video_trend",
+                "multi_scene_film",
                 video_selfshot2.PRODUCT_ID,
                 video_selfshot3.PRODUCT_ID,
             }:
@@ -110183,11 +110196,23 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if not contract.get("execution_enabled"):
             if product_type in {"multi_scene_film", "video_long"}:
                 await query.answer("Video dài tập đang được nâng cấp.")
-                return await safe_edit_or_send(
-                    query,
-                    video_tail9_long_maintenance_text(tail),
-                    parse_mode="HTML",
-                    reply_markup=video_tail9_long_maintenance_keyboard(),
+                tail = video_tail9_prepare_submit_status(
+                    uid,
+                    context,
+                    tail,
+                    owner,
+                    host,
+                    snapshot={
+                        "allowed": False,
+                        "blocker_code": "long_video_under_upgrade",
+                        "public_message": (
+                            "Video dài tập hiện đang được nâng cấp. Hóa đơn và toàn bộ cấu hình "
+                            "đã chọn vẫn được giữ nguyên; tài khoản chưa bị trừ Xu."
+                        ),
+                    },
+                )
+                return await video_tail9_render_confirmed_status(
+                    query, context, uid, tail, owner, host
                 )
             if owner != "video_edit" and deferred_runtime_product:
                 await query.answer()

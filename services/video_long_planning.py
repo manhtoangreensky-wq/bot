@@ -6,7 +6,7 @@ from copy import deepcopy
 
 
 PUBLIC_ENABLED = False
-SCENE_DURATION_SECONDS = 600
+SCENE_DURATION_SECONDS = 300
 MIN_DURATION_MINUTES = 10
 MAX_DURATION_MINUTES = 120
 CANONICAL_PLANNING_FLOW = "video_ai_real"
@@ -18,9 +18,11 @@ INTERNAL_STEPS = (
     "video_prompts",
     "transitions",
     "addons",
-    "quality",
     "review",
+    "quality",
+    "invoice",
     "final_confirm",
+    "status",
 )
 
 
