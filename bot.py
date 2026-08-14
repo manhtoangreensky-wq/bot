@@ -82557,6 +82557,12 @@ def storyboard2_upload_panels_keyboard() -> InlineKeyboardMarkup:
 
 
 def storyboard2_ratio_keyboard(board: dict | None = None) -> InlineKeyboardMarkup:
+    if str((board or {}).get("video_tail_return_to") or "") == "review":
+        return storyboard2_keyboard([
+            [("Dọc 9:16", "vstory|ratio|9x16"), ("Ngang 16:9", "vstory|ratio|16x9")],
+            [("Vuông 1:1", "vstory|ratio|1x1"), ("Dọc 4:5", "vstory|ratio|4x5")],
+            [("⬅️ Quay lại Review", "video_tail|review|open"), ("🎬 Menu Video", "menu|main_video")],
+        ])
     back_callback = (
         "vstory|upload_review"
         if str((board or {}).get("entry_mode") or "") == "existing"
@@ -82841,7 +82847,7 @@ def storyboard2_quality_keyboard(state: dict, lang: str = "vi") -> InlineKeyboar
             else ("📋 Xem Storyboard", "vstory|review_from_quality")
         )
         rows.append([("🖼️ Quản lý ảnh", "vstory|assets_screen"), second])
-    rows.append([("⬅️ Quay lại", "vstory|review_from_quality"), ("🏠 Menu chính", "menu|main")])
+    rows.append([("⬅️ Quay lại", "vstory|review_from_quality"), ("🎬 Menu Video", "menu|main_video")])
     return storyboard2_keyboard(rows)
 
 
@@ -104198,7 +104204,9 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
     deferred_answer_actions = {
         "count_help", "count", "ratio", "profile_help", "profile_pick", "suggest_pick", "content_approve",
         "assets_done", "asset_ai_missing", "video_full", "video_done",
-        "transition_pick", "addon", "finish", "content_config", "upload_use",
+        "transition_pick", "transition_natural", "transition_done",
+        "addons_screen", "addon", "addon_done", "addon_skip",
+        "review_from_quality", "finish", "content_config", "upload_use",
     }
     if action not in deferred_answer_actions:
         await query.answer()
@@ -104206,6 +104214,36 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
     def persist(next_board: dict) -> dict:
         save_storyboard2_state(context, next_board)
         return video_storyboard2.normalize_state(next_board)
+
+    async def open_storyboard_shared_tail(
+        next_board: dict,
+        screen: str,
+        *,
+        complete_addon: bool = False,
+        branding_return_to: str = "",
+        error_prefix: str = "Chưa thể tiếp tục",
+    ):
+        current_board = dict(next_board)
+        current_board["addons_ready"] = True
+        current_board = persist(current_board)
+        try:
+            storyboard2_scene3_handoff(context, current_board)
+        except ValueError as exc:
+            return await query.answer(f"{error_prefix}: {str(exc)}", show_alert=True)
+
+        if complete_addon or branding_return_to:
+            tail, owner, host = video_tail9_context(uid, context)
+            if complete_addon:
+                tail = video_tail9.mark_addon_complete(tail)
+            if branding_return_to:
+                tail["branding_return_to"] = branding_return_to
+                tail["branding_back_to"] = branding_return_to
+                tail["review_status"] = "not_ready"
+                tail["summary_status"] = "not_ready"
+            save_video_tail9_state(uid, context, tail, owner, host)
+
+        await query.answer()
+        return await video_tail9_render(query, uid, context, screen)
 
     if action == "entry":
         board = video_storyboard2.move(board, "entry", push=False, awaiting_input="")
@@ -104295,6 +104333,28 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
             board = video_storyboard2.set_ratio(board, ratio)
         except ValueError:
             return await query.answer("Tỉ lệ này chưa được hỗ trợ.", show_alert=True)
+        if str(board.get("video_tail_return_to") or "") == "review":
+            board.pop("video_tail_return_to", None)
+            board = video_storyboard2.move(board, "review", push=False, awaiting_input="")
+            board = persist(board)
+            try:
+                storyboard2_scene3_handoff(context, board)
+            except ValueError as exc:
+                return await query.answer(f"Chưa thể cập nhật tỉ lệ: {str(exc)}", show_alert=True)
+            tail, owner, host = video_tail9_context(uid, context)
+            tail.update({
+                "ratio": ratio,
+                "review_status": "not_ready",
+                "summary_status": "not_ready",
+                "quality_tier_id": "",
+                "package_id": "",
+                "pricing_snapshot": {},
+                "capability_snapshot": {},
+                "status_stage": "review",
+            })
+            save_video_tail9_state(uid, context, tail, owner, host)
+            await query.answer()
+            return await video_tail9_render(query, uid, context, "review")
         entry_mode = str(board.get("entry_mode") or "guided")
         if entry_mode == "existing":
             try:
@@ -104598,22 +104658,15 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
     if action in {"transition_natural", "transition_done"}:
         if action == "transition_natural":
             board = video_storyboard2.build_transitions(board, "Cắt tự nhiên")
-        # Shared Tail9 now owns Add-on and Review. Mark only the retired
-        # Storyboard-specific Add-on screen complete so preflight can hand off.
-        board["addons_ready"] = True
-        board = persist(board)
-        try:
-            storyboard2_scene3_handoff(context, board)
-        except ValueError as exc:
-            return await query.answer(f"Chưa thể tiếp tục: {str(exc)}", show_alert=True)
-        await query.answer()
-        return await video_tail9_render(query, uid, context, "addon")
+        return await open_storyboard_shared_tail(board, "addon")
     if action == "addons_screen":
-        board = video_storyboard2.move(board, "addons", push=False)
-        return await storyboard2_render(query, context, persist(board))
+        return await open_storyboard_shared_tail(board, "addon")
     if action == "review_from_quality":
-        board = video_storyboard2.move(board, "review", push=False, awaiting_input="")
-        return await storyboard2_render(query, context, persist(board))
+        return await open_storyboard_shared_tail(
+            board,
+            "review",
+            complete_addon=True,
+        )
     if action == "one_image_mode":
         board = video_storyboard2.set_asset_mode(board, "start_only")
         board = video_storyboard2.move(board, "assets", push=False, awaiting_input="")
@@ -104622,28 +104675,30 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
         key = value
         if key not in {"dubbing", "subtitles", "source_audio", "music", "sfx", "logo"}:
             return await query.answer("Add-on này không hợp lệ.", show_alert=True)
-        await query.answer()
+        if key == "logo":
+            return await open_storyboard_shared_tail(
+                board,
+                "logo",
+                branding_return_to="addon",
+            )
         addons = dict(board.get("addons") or {})
         addons[key] = not bool(addons.get(key))
         board["addons"] = addons
-        return await storyboard2_render(query, context, persist(board))
+        return await open_storyboard_shared_tail(board, "addon")
     if action in {"addon_done", "addon_skip"}:
         if action == "addon_skip":
             board["addons"] = {}
-        board["addons_ready"] = True
-        board = video_storyboard2.move(board, "review")
-        return await storyboard2_render(query, context, persist(board))
+        return await open_storyboard_shared_tail(
+            board,
+            "review",
+            complete_addon=True,
+        )
     if action == "finish":
-        try:
-            storyboard2_scene3_handoff(context, board)
-        except ValueError as exc:
-            return await query.answer(f"Chưa thể hoàn thiện: {str(exc)}", show_alert=True)
-        await query.answer()
-        tail, owner, host = video_tail9_context(uid, context)
-        tail = video_tail9.mark_addon_complete(tail)
-        tail = video_tail9.mark_review_complete(tail)
-        save_video_tail9_state(uid, context, tail, owner, host)
-        return await video_tail9_render(query, uid, context, "quality")
+        return await open_storyboard_shared_tail(
+            board,
+            "addon",
+            error_prefix="Chưa thể hoàn thiện",
+        )
     if action in deferred_answer_actions:
         return await query.answer("Nút Storyboard này đã hết phiên. Hãy mở lại màn hiện tại.", show_alert=True)
     return True
@@ -106936,7 +106991,11 @@ def video_tail9_addon_text(tail: dict) -> str:
         f"hiệu ứng {safe_int(volumes.get('sfx'), 35)}%</b>",
         f"• Logo/Watermark: <b>{html.escape(video_tail9_branding_public_summary(tail))}</b>",
     ]
-    if product_type in {"video_ai_real", "script_image_video"}:
+    if product_type in {
+        "video_ai_real",
+        "script_image_video",
+        "storyboard_prompt",
+    }:
         lines.extend([
             f"• Chuyển cảnh: <b>{transition_count}/{max(0, len(scenes) - 1)} ranh giới đã chọn</b>",
             f"• Chữ trên video: <b>{len(text_items)} mục</b>",
@@ -107220,6 +107279,7 @@ def video_tail9_addon_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup
     if str(current.get("video_product_type") or "") in {
         "video_ai_real",
         "script_image_video",
+        "storyboard_prompt",
     }:
         return video_scene3_keyboard([
             [(video_tail9_addon_selected_label(current, "text", "Chữ trên video"), "video_tail|addon|text"), (video_tail9_addon_selected_label(current, "subtitles", "Phụ đề"), "video_tail|addon|item|subtitles")],
@@ -107228,12 +107288,6 @@ def video_tail9_addon_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup
             [(video_tail9_addon_selected_label(current, "watermark", "Watermark"), "video_tail|addon|watermark"), (video_tail9_addon_selected_label(current, "transitions", "Chuyển cảnh"), "video_tail|addon|transitions")],
             [("✅ Hoàn tất Add-on", "video_tail|addon|complete"), ("🧠 Xem câu lệnh", "video_tail|addon|prompts")],
             [("⬅️ Quay lại", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
-        ])
-    if str(current.get("video_product_type") or "") == "storyboard_prompt":
-        return video_scene3_keyboard([
-            [("🎙️ Âm thanh & Add-on", "video_tail|addon|audio"), ("🏷️ Logo/Watermark", "video_tail|addon|logo")],
-            [("✅ Hoàn tất Add-on", "video_tail|addon|complete"), ("🎬 Xem/Sửa câu lệnh", "video_tail|addon|prompts")],
-            [("⬅️ Quay lại chuyển cảnh", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
         ])
     if str(current.get("video_product_type") or "") == "video_trend":
         return video_scene3_keyboard([
@@ -107569,10 +107623,11 @@ def video_tail9_review_keyboard(tail: dict | None = None) -> InlineKeyboardMarku
         ])
     if str(current.get("video_product_type") or "") == "storyboard_prompt":
         return video_scene3_keyboard([
-            [("👁️ Xem kế hoạch cảnh", "video_tail|review|scenes"), ("🖼️ Xem ảnh Storyboard", "video_tail|review|assets")],
-            [("🎬 Xem/Sửa câu lệnh", "video_tail|review|prompts"), ("🏷️ Logo/Watermark", "video_tail|review|logo")],
-            [("✅ Hoàn tất rà soát", "video_tail|review|complete"), ("🎙️ Sửa âm thanh", "video_tail|review|audio")],
-            [("⬅️ Quay lại Add-on", "video_tail|review|back"), ("🎬 Menu Video", "menu|main_video")],
+            [("📐 Sửa khung hình", "video_tail|review|format"), ("📝 Sửa nội dung", "video_tail|review|content")],
+            [("🖼️ Ảnh Storyboard", "video_tail|review|assets"), ("🎬 Kế hoạch cảnh", "video_tail|review|scenes")],
+            [("🎙 Phân vai và âm thanh", "video_tail|review|cast_audio"), ("🏷 Logo và watermark", "video_tail|review|logo")],
+            [("🧠 Rà soát câu lệnh", "video_tail|review|prompts"), ("✅ Hoàn tất rà soát", "video_tail|review|complete")],
+            [("⬅️ Quay lại", "video_tail|review|back"), ("🎬 Menu Video", "menu|main_video")],
         ])
     if str(current.get("video_product_type") or "") == "video_trend":
         return video_scene3_keyboard([
@@ -109050,6 +109105,16 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 context.user_data.pop(VIDEO_UIFLOW3_ACTIVE_TAIL_KEY, None)
             save_video_uiflow3_state(context, current)
             return await video_uiflow3_render(query, context, current)
+        if action == "transitions" and storyboard_tail:
+            board = video_storyboard2.normalize_state(dict(host.get("storyboard2") or {}))
+            board = video_storyboard2.move(
+                board,
+                "transitions",
+                push=False,
+                awaiting_input="",
+            )
+            save_storyboard2_state(context, board, host)
+            return await storyboard2_render(query, context, board)
         if action == "transitions":
             transition_tail = (
                 owner == "uiflow3"
@@ -109067,6 +109132,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             if str(tail.get("video_product_type") or "") not in {
                 "video_ai_real",
                 "script_image_video",
+                "storyboard_prompt",
             }:
                 return await video_tail9_render(query, uid, context, "addon")
             return await safe_edit_or_send_long_html(
@@ -109078,6 +109144,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             if str(tail.get("video_product_type") or "") not in {
                 "video_ai_real",
                 "script_image_video",
+                "storyboard_prompt",
                 video_selfshot2.PRODUCT_ID,
                 video_selfshot3.PRODUCT_ID,
             }:
@@ -109251,6 +109318,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if str(tail.get("video_product_type") or "") not in {
             "video_ai_real",
             "script_image_video",
+            "storyboard_prompt",
         }:
             return await video_tail9_render(query, uid, context, "addon")
         items = video_tail9_text_items(tail)
@@ -109484,6 +109552,10 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             owner == "scene3"
             and str(tail.get("video_product_type") or "") == "script_image_video"
         )
+        storyboard_review = (
+            owner == "scene3"
+            and str(tail.get("video_product_type") or "") == "storyboard_prompt"
+        )
         if action == "format" and script_review:
             state = video_profile_studio_step(
                 context,
@@ -109514,7 +109586,18 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 get_user_language(uid) or "vi",
                 phase=str(state.get("script_creative_phase") or "post_parser"),
             )
-        if action == "cast_audio" and script_review:
+        if action == "format" and storyboard_review:
+            board = video_storyboard2.normalize_state(dict(host.get("storyboard2") or {}))
+            board["video_tail_return_to"] = "review"
+            board = video_storyboard2.move(
+                board,
+                "ratio",
+                push=False,
+                awaiting_input="",
+            )
+            save_storyboard2_state(context, board, host)
+            return await storyboard2_render(query, context, board)
+        if action == "cast_audio" and (script_review or storyboard_review):
             action = "audio"
         if action == "logo":
             tail["branding_return_to"] = "review"
@@ -110350,6 +110433,9 @@ async def handle_video_tail9_pending_text(update: Update, context: ContextTypes.
         ) or (
             owner in {"uiflow3", "scene3"}
             and text_product == "script_image_video"
+        ) or (
+            owner == "scene3"
+            and text_product == "storyboard_prompt"
         )
         if (
             not text_owner_ok
