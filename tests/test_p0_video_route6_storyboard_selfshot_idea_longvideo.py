@@ -114,7 +114,9 @@ def test_selfshot_uploads_are_owned_by_distinct_sessions_and_route_once():
     assert 'owner="selfshot3"' in media
     assert 'step="awaiting_selfshot2_video"' in media
     assert 'step="awaiting_selfshot3_video"' in media
-    assert "inspect_video_editor_source" in media
+    assert "video_selfshot_telegram_metadata_probe" in media
+    assert media.count("video_selfshotflow4.reset_for_new_source(") == 2
+    assert media.count('"analysis_status": "awaiting_segment"') == 4
 
 
 def test_idea_handoff_restores_exact_parent_context_and_next_step():

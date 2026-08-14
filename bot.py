@@ -105694,8 +105694,7 @@ def video_selfshot_product_hub_text() -> str:
         "🎥 <b>Video tự quay</b>\n\n"
         "Chọn đúng sản phẩm cần dùng. Hai sản phẩm dùng video nguồn nhưng có cách dựng khác nhau:\n\n"
         "• <b>Tự quay & đổi cảnh AI</b>: giữ chủ thể đã chọn rồi phát triển nhiều cảnh mới quanh chủ thể.\n"
-        "• <b>Tự quay & biến đổi điện ảnh</b>: giữ chuyển động trong cùng một cú máy, biến đổi dần trang phục, cảnh vật, ánh sáng và hiệu ứng.\n\n"
-        "Chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu."
+        "• <b>Tự quay & biến đổi điện ảnh</b>: giữ chuyển động trong cùng một cú máy, biến đổi dần trang phục, cảnh vật, ánh sáng và hiệu ứng."
     )
 
 
@@ -105705,7 +105704,7 @@ def video_selfshot_product_hub_keyboard() -> InlineKeyboardMarkup:
             ("🎥 Tự quay & đổi cảnh AI", "vproduct|selfshot_product|scene_change"),
             ("🎥 Tự quay & biến đổi điện ảnh", "vproduct|selfshot_product|cinematic"),
         ],
-        [("⬅️ Quay lại", "menu|main_video"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", "menu|main_video")],
     ])
 
 
@@ -106080,9 +106079,10 @@ def video_selfshot3_tail_host(draft: dict) -> dict:
         )),
     )
     current.update({
-        "scene_count": 1,
         "source_duration_seconds": source_duration_seconds,
         "estimated_duration": source_duration_seconds,
+        "planning_shot_count": 1,
+        "scene_count_deferred_to_quality": True,
         "plan_approved": True,
         "plan_status": "approved",
         "content_source": str(current.get("content_source") or "source_video"),
@@ -106251,7 +106251,7 @@ async def video_selfshot3_render_prompt_review(target, user_id: int, draft: dict
     )
     return await safe_edit_or_send_long_plain(
         target,
-        "📝 Câu lệnh biến đổi điện ảnh\n\n" + prompt_text + "\n\nChưa xử lý video và chưa trừ Xu.",
+        "📝 Câu lệnh biến đổi điện ảnh\n\n" + prompt_text,
         reply_markup=video_scene3_keyboard([
             [('✍️ Sửa nội dung', 'vproduct|ss3|show|content'), ('🧭 Xem mạch biến đổi', 'vproduct|ss3|show|timeline')],
             [('⬅️ Quay lại', back_callback), ('🎬 Menu Video', 'menu|main_video')],
@@ -107394,6 +107394,23 @@ def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
                 "invoice": persisted_invoice,
                 "job": persisted_job,
             })
+    if product_type == video_selfshot3.PRODUCT_ID:
+        source_segment = dict(host.get("source_segment") or {})
+        source_duration_seconds = max(
+            1,
+            safe_int(
+                host.get("source_duration_seconds")
+                or source_segment.get("duration_seconds")
+                or (safe_int(source_segment.get("duration_ms"), 0) / 1000)
+                or (host.get("source_analysis") or {}).get("duration_seconds")
+                or tail.get("source_duration_seconds")
+                or tail.get("estimated_duration"),
+                1,
+            ),
+        )
+        tail["source_duration_seconds"] = source_duration_seconds
+        tail["scene_count_deferred_to_quality"] = not bool(tail.get("quality_tier_id"))
+        tail = video_tail9.normalize_state(tail)
     if source_audio_available is not None:
         audio = dict(tail.get("audio_config") or {})
         audio["source_audio_available"] = bool(source_audio_available)
@@ -109041,12 +109058,40 @@ def video_tail9_catalog_report(tail: dict, capability: dict | None = None) -> di
             or contract.get("required_capability")
             or ""
         )
-    return video_uifreeze1.catalog_report(
+    report = video_uifreeze1.catalog_report(
         product,
         scene_count=safe_int(tail.get("scene_count"), 1),
         ratio=str(tail.get("ratio") or "9:16"),
         required_capability=required_capability,
     )
+    if product != video_selfshot3.PRODUCT_ID:
+        return report
+
+    compatible_offers = []
+    for offer in report.get("offers") or []:
+        tier_id = safe_int(offer.get("tier_id"), 0)
+        effective_scene_count = video_selfshot3_scene_count_for_quality(tail, tier_id)
+        if tier_id == 200 and effective_scene_count != 1:
+            continue
+        tier_report = video_uifreeze1.catalog_report(
+            product,
+            scene_count=effective_scene_count,
+            ratio=str(tail.get("ratio") or "9:16"),
+            required_capability=required_capability,
+        )
+        if tier_id not in set(tier_report.get("tier_ids") or []):
+            continue
+        compatible_offers.append({
+            **dict(offer),
+            "effective_scene_count": effective_scene_count,
+        })
+    report.update({
+        "ok": bool(compatible_offers),
+        "offers": compatible_offers,
+        "tier_ids": [safe_int(item.get("tier_id"), 0) for item in compatible_offers],
+        "reason": "" if compatible_offers else "no_compatible_quality_package",
+    })
+    return report
 
 
 def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None = None) -> str:
@@ -109054,10 +109099,12 @@ def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None 
     if not capability.get("ok") or not catalog.get("ok"):
         return video_tail9_public_blocker_text()
     scene_count = max(1, safe_int(tail.get("scene_count"), 1))
+    selfshot3_dynamic_scenes = str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID
+    scene_count_label = "Tính theo gói và thời lượng nguồn" if selfshot3_dynamic_scenes else str(scene_count)
     lines = [
         "⭐ <b>Chọn chất lượng video</b>", "",
         f"• Sản phẩm: <b>{html.escape(VIDEO_TAIL9_PRODUCT_LABELS.get(str(tail.get('video_product_type') or ''), str(tail.get('video_product_type') or 'Video AI')))}</b>",
-        f"• Số cảnh: <b>{scene_count}</b>",
+        f"• Số cảnh: <b>{scene_count_label}</b>",
         f"• Tỉ lệ: <b>{html.escape(str(tail.get('ratio') or '9:16'))}</b>",
     ]
     is_long_video = str(tail.get("video_product_type") or "") in {"multi_scene_film", "video_long"}
@@ -109076,9 +109123,12 @@ def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None 
             if is_long_video
             else f"{product['seconds']} giây/cảnh"
         )
-        offer_scene_count = video_selfshot3_scene_count_for_quality(tail, tier_id)
+        offer_scene_count = safe_int(
+            offer.get("effective_scene_count"),
+            video_selfshot3_scene_count_for_quality(tail, tier_id),
+        )
         scene_price = video_ai_real_pricing.video_multiscene_price(product["unit_xu"], scene_count)
-        if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
+        if selfshot3_dynamic_scenes:
             scene_price = video_ai_real_pricing.video_multiscene_price(product["unit_xu"], offer_scene_count)
         discount_note = (
             f" · giảm {scene_price['discount_percent']}% (-{scene_price['discount_xu']} Xu)"
@@ -109093,7 +109143,7 @@ def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None 
             f"• Đặc điểm: {html.escape(product['public_detail'])}",
             "• Đầu vào: Câu lệnh hoặc ảnh tham chiếu theo sản phẩm đã chọn",
             f"• Phù hợp: {html.escape(product['use_case'])}",
-            f"• Tạm tính {offer_scene_count if str(tail.get('video_product_type') or '') == video_selfshot3.PRODUCT_ID else scene_count} cảnh: <b>{scene_price['subtotal_xu']} Xu</b>"
+            f"• Tạm tính {offer_scene_count if selfshot3_dynamic_scenes else scene_count} cảnh: <b>{scene_price['subtotal_xu']} Xu</b>"
             f"{discount_note} · còn <b>{scene_price['total_xu']} Xu</b>",
         ])
     lines.extend(["", "Chọn một gói để mở hóa đơn đầy đủ trước khi xác nhận tạo video."])
@@ -110997,8 +111047,24 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 recovery_screen = "invoice" if str(tail.get("status_stage") or "") == "invoice" else "quality"
                 return await video_tail9_render(query, uid, context, recovery_screen)
             quality = max(200, min(1500, safe_int(argument, 300)))
-            capability = video_tail9_commercial_preflight(uid, context, tail, owner, host, quality)
-            catalog = video_tail9_catalog_report(tail, capability)
+            calculated_scene_count = video_selfshot3_scene_count_for_quality(tail, quality)
+            selection_tail = dict(tail)
+            if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
+                scene_seconds = max(1, safe_int(video_public_quality_product(quality).get("seconds"), 1))
+                selection_tail.update({
+                    "scene_count": calculated_scene_count,
+                    "estimated_duration": calculated_scene_count * scene_seconds,
+                    "scene_count_deferred_to_quality": False,
+                })
+            capability = video_tail9_commercial_preflight(
+                uid,
+                context,
+                selection_tail,
+                owner,
+                host,
+                quality,
+            )
+            catalog = video_tail9_catalog_report(selection_tail, capability)
             if quality not in set(catalog.get("tier_ids") or []):
                 return await video_tail9_render(query, uid, context, "quality")
             if not bool(
@@ -111014,11 +111080,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     reply_markup=video_tail9_public_blocker_keyboard(),
                 )
             try:
-                calculated_scene_count = video_selfshot3_scene_count_for_quality(tail, quality)
                 if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
-                    scene_seconds = max(1, safe_int(video_public_quality_product(quality).get("seconds"), 1))
-                    tail["scene_count"] = calculated_scene_count
-                    tail["estimated_duration"] = calculated_scene_count * scene_seconds
+                    tail = selection_tail
                 tail["quality_tier_id"] = str(quality)
                 tail["package_id"] = f"product_video_{quality}"
                 session = video_tail9_apply_to_session(uid, context, tail, owner, host)
@@ -112565,7 +112628,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 return await safe_edit_or_send(
                     query,
                     "📎 <b>Gửi video nguồn</b>\n\nGửi đúng một video có người, vật hoặc sản phẩm cần giữ. "
-                    "TOAN AAS chỉ đọc thông tin cần thiết và phân tích cục bộ ở bước này; chưa xử lý video, chưa tạo tác vụ và chưa trừ Xu.",
+                    "Sau khi nhận video, TOAN AAS mở bước chọn đoạn rồi phân tích chủ thể và chuyển động nguồn.",
                     parse_mode="HTML",
                     reply_markup=video_selfshot_source_input_keyboard("ss2", current),
                 )
@@ -112591,8 +112654,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 save_video_session(uid, pending_session)
                 return await safe_edit_or_send(
                     query,
-                    "📎 <b>Gửi logo hình ảnh</b>\n\nGửi một ảnh logo. TOAN AAS chỉ lưu ảnh và vị trí trong kế hoạch; "
-                    "chưa tạo tệp, chưa xử lý video và chưa trừ Xu.",
+                    "📎 <b>Gửi logo hình ảnh</b>\n\nGửi một ảnh logo, sau đó chọn một trong 9 vị trí và xác nhận lưu.",
                     parse_mode="HTML",
                     reply_markup=video_selfshot2_input_keyboard("addons"),
                 )
@@ -112777,7 +112839,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 return await safe_edit_or_send(
                     query,
                     "📎 <b>Gửi video mộc</b>\n\nGửi một video có người, vật hoặc thú cưng cần giữ. "
-                    "TOAN AAS chỉ đọc thông tin cục bộ để lập kế hoạch; chưa xử lý video và chưa trừ Xu.",
+                    "Sau khi nhận video, TOAN AAS mở bước chọn đoạn rồi phân tích chủ thể và chuyển động nguồn.",
                     parse_mode="HTML",
                     reply_markup=video_selfshot_source_input_keyboard("ss3", current),
                 )
@@ -112857,7 +112919,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     f"✨ <b>{html.escape(str(group.get('title') or 'Kiểu biến đổi'))}</b>\n\n"
                     f"{html.escape(str(group.get('focus') or ''))}\n\n"
                     f"<b>5 hướng mẫu:</b>\n{examples}\n\n"
-                    "Đây là màn xem trước. Hãy gửi video nguồn để bắt đầu; chưa tạo tác vụ và chưa trừ Xu.",
+                    "Đây là màn xem trước. Quay lại danh sách hoặc gửi video nguồn để bắt đầu.",
                     parse_mode="HTML",
                     reply_markup=video_scene3_keyboard([[('⬅️ Quay lại', 'vproduct|ss3|show|types'), ('🎬 Menu Video', 'menu|main_video')]]),
                 )
@@ -113034,7 +113096,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 prompt_text = json.dumps(current["prompt_bundle"], ensure_ascii=False, indent=2)
                 return await safe_edit_or_send_long_plain(
                     query,
-                    "📝 Câu lệnh biến đổi điện ảnh\n\n" + prompt_text + "\n\nChưa xử lý video và chưa trừ Xu.",
+                    "📝 Câu lệnh biến đổi điện ảnh\n\n" + prompt_text,
                     reply_markup=video_scene3_keyboard([
                         [('✍️ Sửa nội dung', 'vproduct|ss3|show|content'), ('🧭 Xem mạch biến đổi', 'vproduct|ss3|show|timeline')],
                         [('⬅️ Quay lại', 'vproduct|ss3|show|review'), ('🎬 Menu Video', 'menu|main_video')],

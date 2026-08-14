@@ -334,12 +334,11 @@ def test_shared_review_routes_script_and_selfshot_children_back_to_exact_review(
     assert 'target = "prompt" if action == "prompts" else "content"' in review
     assert 'video_tail_return_to="review"' in review
 
-    for name in (
-        "video_selfshot2_render",
-        "video_selfshot3_render",
-        "video_selfshot3_render_prompt_review",
-    ):
-        assert '"video_tail|review|open"' in _function_source(name)
+    for name in ("video_selfshot2_render", "video_selfshot3_render"):
+        assert 'f"video_tail|{shared_tail_return}|open"' in _function_source(name)
+    assert 'f"video_tail|{tail_return}|open"' in _function_source(
+        "video_selfshot3_render_prompt_review"
+    )
 
     product_callback = _function_source("handle_video_product_callback")
     for marker in (
@@ -354,7 +353,7 @@ def test_shared_review_routes_script_and_selfshot_children_back_to_exact_review(
     image_done_start = scene3_callback.index('if action == "image_prompt_done"')
     image_done_end = scene3_callback.index('if action == "video_prompt_done"', image_done_start)
     image_done = scene3_callback[image_done_start:image_done_end]
-    assert 'prompt_return == "full_review" and tail_return in {"summary", "review"}' in image_done
+    assert "video_profile_scene1_can_return_to_shared_tail(state, tail_return)" in image_done
     assert 'video_tail9_render(query, uid, context, tail_return)' in image_done
 
 
@@ -457,16 +456,16 @@ def test_storyboard_canonical_transition_enters_one_shared_addon_and_review_tail
     assert 'board["addons"] = {}' not in transition
 
 
-def test_selfshot2_reviewed_product_addons_enter_quality_without_a_duplicate_tail() -> None:
+def test_selfshot2_enters_the_same_shared_addon_tail_as_selfshot3() -> None:
     callback = _function_source("handle_video_product_callback")
     start = callback.index('if operation == "finish":')
     end = callback.index('if operation == "compile_prompts"', start)
     finish = callback[start:end]
 
-    assert "video_tail9.mark_addon_complete" in finish
-    assert "video_tail9.mark_review_complete" in finish
-    assert 'video_tail9_render(query, uid, context, "quality")' in finish
-    assert 'video_tail9_render(query, uid, context, "addon")' not in finish
+    assert "video_tail9.mark_addon_complete" not in finish
+    assert "video_tail9.mark_review_complete" not in finish
+    assert 'video_tail9_render(query, uid, context, "quality")' not in finish
+    assert 'video_tail9_render(query, uid, context, "addon")' in finish
 
 
 def test_selfshot3_keeps_the_shared_addon_for_logo_and_watermark() -> None:
@@ -489,8 +488,12 @@ def test_selfshot3_quality_converts_source_duration_to_billable_scene_count() ->
     quality_text = _function_source("video_tail9_quality_text")
 
     assert "video_selfshot3_scene_count_for_quality" in quality
-    assert 'tail["scene_count"] = calculated_scene_count' in quality
-    assert 'tail["estimated_duration"] = calculated_scene_count * scene_seconds' in quality
+    assert "selection_tail = dict(tail)" in quality
+    assert '"scene_count": calculated_scene_count' in quality
+    assert '"estimated_duration": calculated_scene_count * scene_seconds' in quality
+    assert "video_tail9_commercial_preflight" in quality
+    assert "selection_tail," in quality
+    assert "tail = selection_tail" in quality
     assert "math.ceil" in helper
     assert "source_duration_seconds" in helper
     assert "video_selfshot3.PRODUCT_ID" in helper

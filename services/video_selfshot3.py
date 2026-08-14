@@ -429,8 +429,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
     if name == "intro":
         body = (
             "Gửi video mộc để giữ đúng khuôn mặt, vóc dáng, chuyển động và tương tác nguồn trong cùng một cú máy. "
-            "TOAN AAS chỉ biến đổi những lớp anh/chị cho phép như trang phục, cảnh vật, ánh sáng và hiệu ứng.\n\n"
-            "Màn này chỉ lập kế hoạch, chưa xử lý video và chưa trừ Xu."
+            "TOAN AAS chỉ biến đổi những lớp anh/chị cho phép như trang phục, cảnh vật, ánh sáng và hiệu ứng."
         )
         rows = [
             [("📎 Gửi video nguồn", "vproduct|ss3|source"), ("✨ Xem kiểu biến đổi", "vproduct|ss3|show|types")],
@@ -483,7 +482,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             f"Chuyển động camera: {_safe(report.get('camera_motion') or 'chưa phân loại')}\n"
             f"Người: {len(list(report.get('person_tracks') or []))} · Vật: {len(list(report.get('object_tracks') or []))} · Thú cưng: {len(list(report.get('pet_tracks') or []))}\n"
             f"Tương tác đã nhận diện: {len(list(report.get('interaction_graph') or []))}\n\n"
-            "Đây là phân tích cục bộ để lập kế hoạch; chưa xử lý video."
+            "Kết quả này dùng để khóa đúng chủ thể, quan hệ và chuyển động nguồn."
         )
         rows = [[("➡️ Chọn đoạn video", "vproduct|ss3|show|segment"), ("📎 Gửi video khác", "vproduct|ss3|source")]]
     elif name == "segment":
@@ -501,7 +500,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
                 f"Bắt đầu: {int(segment.get('start_ms') or 0) / 1000:.1f} giây\n"
                 f"Kết thúc: {int(segment.get('end_ms') or 0) / 1000:.1f} giây\n"
                 f"Thời lượng: {int(segment.get('duration_ms') or 0) / 1000:.1f} giây\n\n"
-                "Đoạn này giữ nguyên chuyển động và camera nguồn; chưa tạo file mới."
+                "Đoạn này giữ nguyên chuyển động và camera nguồn."
             )
         else:
             body = "Chưa chọn đoạn video. Hãy dùng toàn bộ hoặc nhập mốc bắt đầu–kết thúc."
@@ -671,19 +670,18 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             f"Trang phục: {_safe(current.get('wardrobe'))}\n"
             f"Thế giới: {_safe(current.get('world'))}\n"
             f"Hiệu ứng: {_safe(', '.join(current.get('selected_effects') or []) or 'Không thêm')}\n\n"
-            "Chưa tạo tác vụ, chưa xử lý video và chưa trừ Xu."
+            "Kiểm tra kế hoạch rồi mở Add-on để tiếp tục."
         )
-        rows = [[("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("👗 Trang phục", "vproduct|ss3|show|wardrobe")], [("🎚️ Âm thanh & Add-on", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
+        rows = [[("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("👗 Trang phục", "vproduct|ss3|show|wardrobe")], [("🧰 Add-on", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
     elif name == "finish":
         title = "✅ Kiểm tra kế hoạch trước hóa đơn"
         body = (
-            "TOAN AAS sẽ mở Logo/Watermark, sau đó Tổng hợp và một bảng Chất lượng chính thức. "
-            "Chưa tạo tác vụ và chưa trừ Xu."
+            "Tiếp tục theo đuôi chung: Add-on → Rà soát → Chất lượng → Hóa đơn → Xác nhận → Trạng thái."
         )
         rows = [[("✅ Hoàn thiện video", "vproduct|ss3|finish"), ("👁️ Xem lại", "vproduct|ss3|finish_review")]]
     elif name == "package":
         title = "⭐ Chất lượng video"
-        body = "Bảng Chất lượng cũ đã được hợp nhất vào tail chính để giá, hóa đơn và RouteEngine dùng cùng một nguồn."
+        body = "Bảng Chất lượng dùng chung hiển thị gói phù hợp với thời lượng video nguồn."
         rows = [[("✅ Hoàn thiện video", "vproduct|ss3|finish"), ("👁️ Xem lại kế hoạch", "vproduct|ss3|show|review")]]
     else:
         raise ValueError("unknown_selfshot3_screen")

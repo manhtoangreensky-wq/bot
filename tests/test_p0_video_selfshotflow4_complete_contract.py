@@ -104,14 +104,23 @@ def test_segment_persists_exact_seconds_revision_and_pending_analysis(flow: str)
     assert state["source_ratio"] == "9:16"
     assert state["source_revision"] == 1
     assert state["analysis_status"] == "pending"
-    assert state["scene_count"] == (3 if flow == "ss2" else 1)
+    if flow == "ss2":
+        assert state["scene_count"] == 3
+        assert "scene_count_deferred_to_quality" not in state
+    else:
+        assert "scene_count" not in state
+        assert state["scene_count_deferred_to_quality"] is True
 
     custom = video_selfshotflow4.apply_text(flow, _state(flow), "segment", "2-12")["state"]
     assert custom["selected_start_seconds"] == 2
     assert custom["selected_end_seconds"] == 12
     assert custom["selected_duration"] == 10
     assert custom["analysis_status"] == "pending"
-    assert custom["scene_count"] == (2 if flow == "ss2" else 1)
+    if flow == "ss2":
+        assert custom["scene_count"] == 2
+    else:
+        assert "scene_count" not in custom
+        assert custom["scene_count_deferred_to_quality"] is True
 
 
 @pytest.mark.parametrize("flow", ["ss2", "ss3"])
@@ -766,10 +775,10 @@ def test_public_status_panel_uses_exact_selfshot_stages(product: str, expected: 
 
 
 def test_golden_flow_callbacks_are_scoped_short_and_back_exact():
-    assert video_selfshotflow4.SELF_SHOT_2_GOLDEN_FLOW[-8:] == (
-        "review", "audio_addons", "logo_watermark", "summary", "quality", "invoice", "confirm", "status"
+    assert video_selfshotflow4.SELF_SHOT_2_GOLDEN_FLOW[-6:] == (
+        "addon", "review", "quality", "invoice", "confirm", "status"
     )
-    assert video_selfshotflow4.SELF_SHOT_3_GOLDEN_FLOW[-8:] == video_selfshotflow4.SELF_SHOT_2_GOLDEN_FLOW[-8:]
+    assert video_selfshotflow4.SELF_SHOT_3_GOLDEN_FLOW[-6:] == video_selfshotflow4.SELF_SHOT_2_GOLDEN_FLOW[-6:]
     assert video_selfshotflow4.SELF_SHOT_2_GOLDEN_FLOW != video_selfshotflow4.SELF_SHOT_3_GOLDEN_FLOW
 
     for flow in ("ss2", "ss3"):

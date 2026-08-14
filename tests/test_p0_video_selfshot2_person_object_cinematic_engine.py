@@ -305,16 +305,17 @@ def test_dynamic_subscreens_render_the_exact_calling_screen_as_back(
     assert model["rows"][-1][0][1] == expected
 
 
-def test_review_exposes_logo_watermark_and_returns_to_review() -> None:
+def test_review_enters_one_shared_addon_and_returns_to_prompts() -> None:
     draft = _ready_draft()
     model = video_selfshot2.screen_model("review", draft)
     callbacks = {callback for row in model["rows"] for _label, callback in row}
-    assert "vproduct|ss2|review_addons" in callbacks
+    assert "vproduct|ss2|finish" in callbacks
+    assert "vproduct|ss2|review_addons" not in callbacks
     draft["screen_return_overrides"] = {"addons": "review"}
     assert video_selfshot2.screen_parent("addons", draft) == "review"
     assert video_selfshot2.validate_rows(
         model["rows"],
-        back_callback="vproduct|ss2|show|addons",
+        back_callback="vproduct|ss2|show|prompts",
     )["ok"] is True
 
 
@@ -651,7 +652,7 @@ def test_bot_has_one_selfshot2_owner_no_generic_x_and_delivery_gate() -> None:
     assert "callback_allowed" in block
     assert "return await video_selfshot2_render(query, uid, current_screen" in block
     finish = block[block.index('if operation == "finish":'):]
-    assert 'return await video_tail9_render(query, uid, context, "logo")' in finish
+    assert 'return await video_tail9_render(query, uid, context, "addon")' in finish
     assert "selfshot2_continuity_validation_required" in BOT_SOURCE
     assert "continuity_validation_passed" in BOT_SOURCE
     assert '@fastapi_app.get("/api/v1/worker/jobs/{job_id}/source-video")' in BOT_SOURCE
