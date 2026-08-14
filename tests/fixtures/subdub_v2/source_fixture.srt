@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:02,200
+Xin chao, day la kiem tra.
+
+2
+00:00:02,200 --> 00:00:04,800
+He thong se doc tung doan theo moc thoi gian.
+
+3
+00:00:04,800 --> 00:00:07,000
+Khong doc chong len nhau.
