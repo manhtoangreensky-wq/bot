@@ -20,6 +20,22 @@ MIN_SCENES = 1
 MAX_SCENES = 20
 SCENE_SECONDS = 8
 SUPPORTED_RATIOS = frozenset({"9:16", "16:9", "1:1", "4:5"})
+VIDEO_DOCUMENT_EXTENSIONS = frozenset({".mp4", ".mov", ".mkv", ".webm"})
+
+
+def video_document_is_supported(mime_type: str, file_name: str) -> bool:
+    """Recognize Telegram video documents before the bounded media probe."""
+
+    mime = str(mime_type or "").strip().casefold().split(";", 1)[0]
+    if mime.startswith("video/"):
+        return True
+    if mime.startswith(("image/", "audio/", "text/")) or mime == "application/pdf":
+        return False
+    name = str(file_name or "").strip().casefold()
+    suffix = f".{name.rsplit('.', 1)[-1]}" if "." in name else ""
+    return suffix in VIDEO_DOCUMENT_EXTENSIONS and (
+        not mime or mime == "application/octet-stream" or mime.startswith("application/")
+    )
 
 PRODUCT_KIND_BY_ID = {
     "video_ai_real": "ai_real",
@@ -139,11 +155,10 @@ PRODUCT_SPECS = {
     },
     "trend_video": {
         "sequence": (
-            "trend_source", "scene_count", "aspect_ratio", "content_source",
-            "content_profile_or_preset", "content_choice", "character",
-            "reference_assets", "style", "preservation", "audio", "scene_plan",
-            "image_prompts_if_needed", "video_prompts", "review", "transitions",
-            "text", "addons", "finish", "invoice", "confirm",
+            "trend_source", "scene_count", "aspect_ratio", "character",
+            "reference_assets", "style", "preservation", "scene_plan",
+            "image_prompts_if_needed", "video_prompts", "addons", "review",
+            "quality", "invoice", "confirm", "status",
         ),
         "required_assets": "optional",
         "job_type": "product_video",
@@ -164,6 +179,8 @@ ENTRY_ROWS = {
     "video_trend": (
         (("🔥 Trend mới nhất", "vtrend|catalog|latest"),
          ("✍️ Tự nhập trend", "vtrend|manual_trend")),
+        (("🔎 Tìm kiếm trend", "vtrend|search"),
+         ("📹 Gửi video trend", "vtrend|video_upload")),
     ),
     "script_image_video": (
         (("🎬 Bắt đầu lập kịch bản", "vproduct|open|script_image_video"),
@@ -472,7 +489,16 @@ def preflight(
             blockers.append(str(gate["blocker"]))
     elif kind == "trend_video":
         source = dict(state.get("trend_source") or {})
-        if not (source.get("source_url") and source.get("observed_at")) and not source.get("sample_preset"):
+        uploaded_source_ready = bool(
+            str(source.get("intake_lane") or "") == "video_upload"
+            and str(source.get("source_video_id") or "")
+            and dict(source.get("source_analysis") or {})
+        )
+        if (
+            not (source.get("source_url") and source.get("observed_at"))
+            and not source.get("sample_preset")
+            and not uploaded_source_ready
+        ):
             blockers.append("trend_source_or_sample_missing")
     elif kind == "long_series" and not bool(product_spec(kind).get("public_ready", True)):
         blockers.append("long_series_public_not_ready")

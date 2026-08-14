@@ -590,6 +590,8 @@ def test_public_route_metadata_matches_actual_uiflow3_entry_screens() -> None:
         "video_trend": (
             "vtrend|catalog|latest",
             "vtrend|manual_trend",
+            "vtrend|search",
+            "vtrend|video_upload",
         ),
         "video_ai_real": (
             "vid3|mode|prompt_video",
