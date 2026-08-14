@@ -105169,6 +105169,45 @@ def video_selfshot_media_owner_valid(session: dict, *, owner: str, product_id: s
     )
 
 
+def video_selfshot_telegram_metadata_probe(
+    media,
+    *,
+    file_id: str,
+    mime_type: str,
+    fallback_file_name: str,
+) -> dict:
+    """Accept Telegram's verified video envelope before worker materialization."""
+
+    duration = float(getattr(media, "duration", 0) or 0)
+    width = safe_int(getattr(media, "width", 0), 0)
+    height = safe_int(getattr(media, "height", 0), 0)
+    if not str(file_id or "").strip() or duration <= 0 or width <= 0 or height <= 0:
+        return {}
+    file_size = max(0, safe_int(getattr(media, "file_size", 0), 0))
+    metadata = video_local_validation.validate_source_metadata(
+        {
+            "ok": True,
+            "duration": duration,
+            "width": width,
+            "height": height,
+        },
+        file_size=file_size,
+    )
+    return {
+        **metadata,
+        "bytes": file_size,
+        "duration": duration,
+        "width": width,
+        "height": height,
+        "fps": 0.0,
+        "audio_stream_count": 0,
+        "format_name": str(mime_type or "video/mp4"),
+        "video_codec": "",
+        "file_name": str(getattr(media, "file_name", "") or fallback_file_name),
+        "metadata_source": "telegram_video_envelope",
+    }
+
+
 async def video_selfshot3_render(target, user_id: int, screen: str, *, draft: dict | None = None):
     current = video_selfshot3_draft({"draft": draft} if draft is not None else get_video_session(user_id))
     current["selfshot3_screen"] = str(screen)
@@ -116166,25 +116205,32 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             message_id = safe_int(getattr(update.message, "message_id", 0), 0)
             if message_id and safe_int(draft.get("selfshot2_last_media_message_id"), 0) == message_id:
                 return True
-            try:
-                local_probe = await inspect_bounded_telegram_video_source(
-                    context,
-                    {
-                        "source_file_id": file_id,
-                        "source_file_name": str(getattr(media, "file_name", "") or "selfshot2-source.mp4"),
-                        "source_mime_type": mime_type or "video/mp4",
-                        "source_file_size": safe_int(getattr(media, "file_size", 0), 0),
-                        "source_duration": safe_int(getattr(media, "duration", 0), 0),
-                    },
-                )
-            except Exception as exc:
-                logger.warning("selfshot2_local_probe_failed | exception=%s", type(exc).__name__)
-                await update.message.reply_text(
-                    "⚠️ Chưa đọc được video nguồn. Anh/chị hãy gửi lại video MP4/MOV/MKV/WebM trong đúng phiên này. "
-                    "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
-                    reply_markup=video_selfshot_source_input_keyboard("ss2", dict(session.get("draft") or {})),
-                )
-                return True
+            local_probe = video_selfshot_telegram_metadata_probe(
+                media,
+                file_id=file_id,
+                mime_type=mime_type,
+                fallback_file_name="selfshot2-source.mp4",
+            )
+            if not local_probe:
+                try:
+                    local_probe = await inspect_bounded_telegram_video_source(
+                        context,
+                        {
+                            "source_file_id": file_id,
+                            "source_file_name": str(getattr(media, "file_name", "") or "selfshot2-source.mp4"),
+                            "source_mime_type": mime_type or "video/mp4",
+                            "source_file_size": safe_int(getattr(media, "file_size", 0), 0),
+                            "source_duration": safe_int(getattr(media, "duration", 0), 0),
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning("selfshot2_local_probe_failed | exception=%s", type(exc).__name__)
+                    await update.message.reply_text(
+                        "⚠️ Chưa đọc được video nguồn. Anh/chị hãy gửi lại video MP4/MOV/MKV/WebM trong đúng phiên này. "
+                        "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+                        reply_markup=video_selfshot_source_input_keyboard("ss2", dict(session.get("draft") or {})),
+                    )
+                    return True
             if not local_probe.get("ok"):
                 reason = str(local_probe.get("reason") or "invalid_video_metadata")
                 await update.message.reply_text(
@@ -116206,7 +116252,7 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "audio_streams": safe_int(local_probe.get("audio_stream_count"), 0),
                 "format": str(local_probe.get("format_name") or mime_type or "video/mp4"),
                 "video_codec": str(local_probe.get("video_codec") or ""),
-                "probe_source": "local_ffprobe",
+                "probe_source": str(local_probe.get("metadata_source") or "local_ffprobe"),
             }
             try:
                 analysis = video_selfshot2.analyze_source(source_asset)
@@ -116284,25 +116330,32 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             message_id = safe_int(getattr(update.message, "message_id", 0), 0)
             if message_id and safe_int(draft.get("selfshot3_last_media_message_id"), 0) == message_id:
                 return True
-            try:
-                local_probe = await inspect_bounded_telegram_video_source(
-                    context,
-                    {
-                        "source_file_id": file_id,
-                        "source_file_name": str(getattr(media, "file_name", "") or "selfshot3-source.mp4"),
-                        "source_mime_type": mime_type or "video/mp4",
-                        "source_file_size": safe_int(getattr(media, "file_size", 0), 0),
-                        "source_duration": safe_int(getattr(media, "duration", 0), 0),
-                    },
-                )
-            except Exception as exc:
-                logger.warning("selfshot3_local_probe_failed | exception=%s", type(exc).__name__)
-                await update.message.reply_text(
-                    "⚠️ Chưa đọc được video mộc. Anh/chị hãy gửi lại video MP4/MOV/MKV/WebM trong đúng phiên này. "
-                    "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
-                    reply_markup=video_selfshot_source_input_keyboard("ss3", dict(session.get("draft") or {})),
-                )
-                return True
+            local_probe = video_selfshot_telegram_metadata_probe(
+                media,
+                file_id=file_id,
+                mime_type=mime_type,
+                fallback_file_name="selfshot3-source.mp4",
+            )
+            if not local_probe:
+                try:
+                    local_probe = await inspect_bounded_telegram_video_source(
+                        context,
+                        {
+                            "source_file_id": file_id,
+                            "source_file_name": str(getattr(media, "file_name", "") or "selfshot3-source.mp4"),
+                            "source_mime_type": mime_type or "video/mp4",
+                            "source_file_size": safe_int(getattr(media, "file_size", 0), 0),
+                            "source_duration": safe_int(getattr(media, "duration", 0), 0),
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning("selfshot3_local_probe_failed | exception=%s", type(exc).__name__)
+                    await update.message.reply_text(
+                        "⚠️ Chưa đọc được video mộc. Anh/chị hãy gửi lại video MP4/MOV/MKV/WebM trong đúng phiên này. "
+                        "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+                        reply_markup=video_selfshot_source_input_keyboard("ss3", dict(session.get("draft") or {})),
+                    )
+                    return True
             if not local_probe.get("ok"):
                 reason = str(local_probe.get("reason") or "invalid_video_metadata")
                 await update.message.reply_text(
@@ -116324,7 +116377,7 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "audio_streams": safe_int(local_probe.get("audio_stream_count"), 0),
                 "format": str(local_probe.get("format_name") or mime_type or "video/mp4"),
                 "video_codec": str(local_probe.get("video_codec") or ""),
-                "probe_source": "local_ffprobe",
+                "probe_source": str(local_probe.get("metadata_source") or "local_ffprobe"),
             }
             try:
                 analysis = video_selfshot3.analyze_source(source_asset)
@@ -116364,7 +116417,7 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "analysis_status": "awaiting_segment",
                 "analysis_revision": 0,
                 "source_materialization_required": True,
-                "source_probe_policy": "local_ffprobe_once_then_worker_revalidate",
+                "source_probe_policy": "telegram_metadata_then_worker_ffprobe",
                 "source_media_ref": file_id,
                 "source_media_refs": [file_id],
                 "source_asset_items": [source_asset],
