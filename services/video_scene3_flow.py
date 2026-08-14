@@ -318,11 +318,11 @@ REQUIREMENT_SUGGESTION_TEMPLATES: dict[str, tuple[str, ...]] = {
         "Không thêm hoa văn, vết nứt hoặc chi tiết bề mặt ngoài yêu cầu.",
     ),
     "environment": (
-        "Giữ logic kiến trúc, vị trí đồ vật và hướng không gian giữa các cảnh.",
-        "Cảnh sau tiếp nối đúng cửa, lối đi, nội thất và hướng di chuyển của cảnh trước.",
-        "Không tự đổi thời tiết, thời điểm hoặc vị trí nếu câu chuyện chưa chuyển bối cảnh.",
-        "Bám đúng ảnh bối cảnh đã gửi; giữ tỉ lệ và cấu trúc không gian hợp lý.",
-        "Mọi thay đổi bối cảnh phải có điểm chuyển rõ và phục vụ đúng mạch nội dung.",
+        "Bối cảnh thành thị hiện đại: đường phố, quảng trường hoặc khu thương mại; giữ đúng kiến trúc, biển hiệu và hướng di chuyển giữa các cảnh.",
+        "Bối cảnh thiên nhiên: rừng, núi, biển, đồng cỏ hoặc công viên; giữ thời tiết, ánh sáng và địa hình liên tục xuyên cảnh.",
+        "Bối cảnh đời sống: nhà ở, quán cà phê, cửa hàng hoặc khu dân cư; giữ vị trí đồ vật, cửa và lối đi nhất quán.",
+        "Bối cảnh bảo tàng hoặc kiến trúc văn hóa: phòng trưng bày, di tích, thư viện hay công trình lịch sử; giữ đúng tỉ lệ và đặc trưng không gian.",
+        "Bối cảnh văn phòng hoặc studio: không gian làm việc, trường quay hay phòng sáng tạo; giữ bố cục, vật liệu và nguồn sáng ổn định.",
     ),
     "wardrobe": (
         "Giữ nguyên trang phục, phụ kiện và kiểu tóc trừ khi kịch bản yêu cầu thay đổi.",
@@ -426,6 +426,7 @@ FIELD_SUGGESTION_VARIANTS = (
     " Ưu tiên tính nhất quán từ cảnh đầu đến cảnh cuối.",
     " Điều chỉnh bố cục phù hợp tỉ lệ {aspect_ratio} và vùng an toàn.",
     " Phân bổ rõ cho {scene_count} cảnh, mỗi cảnh hoàn tất một ý hoặc hành động.",
+    " Tạo một phương án khác biệt rõ nhưng vẫn giữ đúng chủ thể và nội dung đã chọn.",
 )
 
 CREATIVE_QUICK_PRESETS = (
@@ -2189,7 +2190,7 @@ def _expanded_field_suggestions(
     state: dict[str, Any],
     values: list[str],
 ) -> list[str]:
-    """Expand five approved choices into four non-repeating context pages."""
+    """Expand five approved choices into five non-repeating context pages."""
 
     updated = normalize_state(state)
     aspect_ratio = str(updated.get("aspect_ratio") or "9:16")
@@ -2202,7 +2203,7 @@ def _expanded_field_suggestions(
         )
         for value in values[:FIELD_SUGGESTION_PAGE_SIZE]:
             expanded.append(f"{str(value).rstrip('.')}.{suffix}".strip())
-    return list(dict.fromkeys(expanded))[:20]
+    return list(dict.fromkeys(expanded))[:25]
 
 
 def unified_field_suggestion_catalog(
@@ -2210,7 +2211,7 @@ def unified_field_suggestion_catalog(
     group: str,
     key: str,
 ) -> list[str]:
-    """Return the complete 20-choice catalog for one canonical field."""
+    """Return the complete 25-choice catalog for one canonical field."""
 
     clean_group = str(group or "")
     clean_key = str(key or "")
@@ -2258,7 +2259,7 @@ def rotate_unified_field_suggestions(
     group: str,
     key: str,
 ) -> dict[str, Any]:
-    """Advance five choices; the first page repeats only after all 20."""
+    """Advance five choices; the first page repeats only after all 25."""
 
     updated = normalize_state(state)
     catalog = unified_field_suggestion_catalog(updated, group, key)

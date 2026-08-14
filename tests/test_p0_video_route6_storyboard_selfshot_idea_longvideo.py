@@ -141,13 +141,13 @@ def test_idea_handoff_restores_exact_parent_context_and_next_step():
     )
     result = video_idea_handoff.apply_parent_handoff({"subject": "Preset"}, parent)
     assert result["source_product_id"] == "storyboard_prompt"
-    assert result["step"] == "storyboard_scene_review"
+    assert result["step"] == "storyboard_entity_middle"
     assert result["storyboard_session_id"] == "board-session"
     assert result["scene_count"] == 2
     assert result["aspect_ratio"] == "16:9"
     assert result["idea_parent_return_callback"] == "vstory|idea_return"
     assert result["idea_source_flow"] == "storyboard"
-    assert result["idea_return_step"] == "storyboard_scene_review"
+    assert result["idea_return_step"] == "storyboard_entity_middle"
     assert result["idea_preset_id"] == 42
     assert result["idea_content"] == "Nội dung đã duyệt"
     assert result["idea_prompt"] == "Prompt đã sửa"
@@ -186,7 +186,7 @@ def test_idea_approval_dispatches_to_each_real_parent_component():
         "async def handle_video_idea_dynamic_callback",
     )
     assert 'product_id == "storyboard_prompt"' in dispatcher
-    assert 'video_storyboard2.move(board, "scene_review"' in dispatcher
+    assert "video_storyboard_prepare_reference_bridge" in dispatcher
     assert "product_id == video_selfshot2.PRODUCT_ID" in dispatcher
     assert 'video_selfshot2_render(query, user_id, "scene_plan"' in dispatcher
     assert "product_id == video_selfshot3.PRODUCT_ID" in dispatcher
@@ -203,7 +203,7 @@ def test_idea_parent_next_step_contract_is_product_specific():
         "script_image_video": "scene_plan",
         "video_reference": "scene_plan",
         "motion_prompt": "scene_plan",
-        "storyboard_prompt": "storyboard_scene_review",
+        "storyboard_prompt": "storyboard_entity_middle",
         "self_shot_scene_change": "selfshot2_scene_plan",
         "self_shot_cinematic_transform": "selfshot3_timeline",
         "multi_scene_film": "long_chapter_plan",
