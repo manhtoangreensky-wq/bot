@@ -105599,7 +105599,7 @@ async def video_selfshot3_render(target, user_id: int, screen: str, *, draft: di
         validation = video_selfshotflow4.validate_rows(model["rows"], back_callback=expected_back)
     else:
         model = video_selfshot3.screen_model(screen, session.get("draft"))
-        parent = video_selfshot3.screen_parent(screen)
+        parent = video_selfshot3.screen_parent(screen, session.get("draft"))
         expected_back = "vproduct|selfshot_hub" if parent == "hub" else f"vproduct|ss3|show|{parent}"
         validation = video_selfshot3.validate_rows(model["rows"], back_callback=expected_back)
     if shared_review_root or (shared_addon_navigation and screen == "prompt"):
@@ -112062,6 +112062,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         operation = str(value or "").strip()
         argument = str(parts[3] if len(parts) > 3 else "").strip()
         current = video_selfshot3_draft(session)
+        current_screen = str(current.get("selfshot3_screen") or "intro")
         valid_screens = set(video_selfshot3.SCREEN_PARENTS) | {"intro", "package"}
         try:
             if (
@@ -112092,6 +112093,17 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             if legacy_tail_screen:
                 return await video_tail9_render(query, uid, context, legacy_tail_screen)
             if operation == "show":
+                if not video_selfshot3.callback_allowed(
+                    current_screen,
+                    str(query.data or ""),
+                    current,
+                ):
+                    return await video_selfshot3_render(
+                        query,
+                        uid,
+                        current_screen,
+                        draft=current,
+                    )
                 screen = argument if argument in valid_screens else "intro"
                 if (
                     str(current.get("video_tail_return_to") or "") == "review"
@@ -112101,12 +112113,18 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     current.pop("video_tail_return_to", None)
                     save_video_selfshot3_draft(uid, current, step="selfshot3:tail_review")
                     return await video_tail9_render(query, uid, context, "review")
+                current_parent = video_selfshot3.screen_parent(current_screen, current)
+                overrides = dict(current.get("screen_return_overrides") or {})
+                if screen == current_parent:
+                    overrides.pop(current_screen, None)
+                elif video_selfshot3.screen_parent(screen, current) != current_screen:
+                    overrides[screen] = current_screen
+                current["screen_return_overrides"] = overrides
                 return await video_selfshot3_render(query, uid, screen, draft=current)
             if operation == "reset":
                 clear_video_session(uid)
                 save_video_selfshot3_draft(uid, video_selfshot3.initial_draft(), step="selfshot3:intro")
                 return await video_selfshot3_render(query, uid, "intro")
-            current_screen = str(current.get("selfshot3_screen") or "intro")
             if not video_selfshot3.callback_operation_allowed(current_screen, operation):
                 return await video_selfshot3_render(query, uid, current_screen, draft=current)
             if operation == "finish":
@@ -112358,8 +112376,13 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 effects = list(current.get("selected_effects") or [])
                 if argument in {"none", "clear"}:
                     current["selected_effects"] = []
-                    save_video_selfshot3_draft(uid, current, step="selfshot3:effects")
-                    return await video_selfshot3_render(query, uid, "audio" if argument == "none" else "effects", draft=current)
+                    next_screen = "review" if argument == "none" else "effects"
+                    if next_screen == "review":
+                        overrides = dict(current.get("screen_return_overrides") or {})
+                        overrides.pop("review", None)
+                        current["screen_return_overrides"] = overrides
+                    save_video_selfshot3_draft(uid, current, step=f"selfshot3:{next_screen}")
+                    return await video_selfshot3_render(query, uid, next_screen, draft=current)
                 index = safe_int(argument, 0)
                 if index < 1 or index > len(video_selfshot3.EFFECT_OPTIONS):
                     return await video_selfshot3_render(query, uid, "effects", draft=current)
