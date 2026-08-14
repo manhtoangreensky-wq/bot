@@ -90642,7 +90642,7 @@ def video_script_entry_count_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎞 8 cảnh", callback_data="vproduct|script_entry_count|8"), InlineKeyboardButton("🎞 10 cảnh", callback_data="vproduct|script_entry_count|10")],
         [InlineKeyboardButton("🎞 15 cảnh", callback_data="vproduct|script_entry_count|15"), InlineKeyboardButton("🎞 20 cảnh", callback_data="vproduct|script_entry_count|20")],
         [InlineKeyboardButton("✍️ Nhập số khác", callback_data="vproduct|script_entry_count_custom"), InlineKeyboardButton("⬅️ Ba cách tạo", callback_data="vproduct|script_hub")],
-        [InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
     ])
 
 
@@ -106754,6 +106754,12 @@ def video_tail9_addon_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup
             [("✅ Hoàn tất Add-on", "video_tail|addon|complete"), ("🧠 Xem câu lệnh", "video_tail|addon|prompts")],
             [("⬅️ Quay lại", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
         ])
+    if str(current.get("video_product_type") or "") == "script_image_video":
+        return video_scene3_keyboard([
+            [("🎙️ Âm thanh & Add-on", "video_tail|addon|audio"), ("🏷️ Logo/Watermark", "video_tail|addon|logo")],
+            [("✅ Hoàn tất Add-on", "video_tail|addon|complete"), ("🧠 Xem/Sửa câu lệnh", "video_tail|addon|prompts")],
+            [("⬅️ Quay lại", "video_tail|addon|back"), ("🎬 Menu Video", "menu|main_video")],
+        ])
     back_callback = str(current.get("return_to") or "menu|main_video")
     return video_scene3_keyboard([
         [("🎙️ Âm thanh, giọng & phụ đề", "video_tail|addon|audio"), ("🖼️ Logo/Watermark", "video_tail|addon|logo")],
@@ -107025,6 +107031,13 @@ def video_tail9_review_text(tail: dict) -> str:
 
 def video_tail9_review_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
     current = dict(tail or {})
+    if str(current.get("video_product_type") or "") == "script_image_video":
+        return video_scene3_keyboard([
+            [("👁️ Xem kế hoạch cảnh", "video_tail|review|scenes"), ("✍️ Sửa nội dung", "video_tail|review|edit")],
+            [("🎬 Xem/Sửa câu lệnh", "video_tail|review|prompts"), ("🏷️ Logo/Watermark", "video_tail|review|logo")],
+            [("✅ Hoàn tất rà soát", "video_tail|review|complete"), ("🎙️ Sửa âm thanh", "video_tail|review|audio")],
+            [("⬅️ Quay lại Add-on", "video_tail|review|back"), ("🎬 Menu Video", "menu|main_video")],
+        ])
     if str(current.get("video_product_type") or "") != "video_ai_real":
         return video_scene3_keyboard([
             [("👁️ Xem nội dung", "video_tail|review|scenes"), ("✍️ Sửa nội dung", "video_tail|review|edit")],
@@ -108319,6 +108332,39 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
     if tail.get("final_confirmed") and section != "confirm":
         return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
     if section == "addon":
+        script_tail = (
+            owner == "scene3"
+            and str(tail.get("video_product_type") or "") == "script_image_video"
+        )
+        if action == "back" and script_tail:
+            state = video_profile_studio_step(
+                context,
+                host,
+                "full_review",
+                push=False,
+                prompt_return_step="",
+                audio_plan_return_step="",
+                video_tail_return_to="",
+            )
+            return await video_profile_scene1_render(
+                query,
+                state,
+                get_user_language(uid) or "vi",
+            )
+        if action == "prompts" and script_tail:
+            state = video_profile_studio_step(
+                context,
+                host,
+                "video_prompts",
+                push=True,
+                prompt_return_step="full_review",
+                video_tail_return_to="addon",
+            )
+            return await video_profile_scene1_render(
+                query,
+                state,
+                get_user_language(uid) or "vi",
+            )
         if action == "back" and owner == "uiflow3":
             current = video_uiflow3.normalize_state(host)
             current[VIDEO_TAIL9_STATE_KEY] = tail
@@ -108751,6 +108797,23 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             save_video_tail9_state(uid, context, tail, owner, host)
             return await video_tail9_render(query, uid, context, "logo")
         if action == "audio":
+            if (
+                owner == "scene3"
+                and str(tail.get("video_product_type") or "") == "script_image_video"
+            ):
+                state = video_profile_studio_step(
+                    context,
+                    host,
+                    "audio_plan",
+                    push=False,
+                    audio_plan_return_step="review",
+                    video_tail_return_to="review",
+                )
+                return await video_profile_scene1_render(
+                    query,
+                    state,
+                    get_user_language(uid) or "vi",
+                )
             return await video_tail9_open_planning_audio(
                 query, context, uid, tail, owner, host
             )
@@ -248152,6 +248215,16 @@ async def handle_video_profile_studio_pending_text(update: Update, context: Cont
     return True
 
 
+def video_profile_scene1_can_return_to_shared_tail(state: dict, screen: str) -> bool:
+    target = str(screen or "")
+    if target in {"summary", "review"}:
+        return True
+    return target == "addon" and (
+        video_flow7_kind(state) == "script_to_video"
+        or video_flow6_product_id(state) == "script_image_video"
+    )
+
+
 @video_public_callback_failure_guard
 async def handle_video_profile_studio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -248217,7 +248290,7 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             session = task3d_session_step(uid, "script_ai_content_source", provider_called=False, xu_charged=0)
             return await video_script_render_step(query, session, lang)
         tail_return = str(state.get("video_tail_return_to") or "")
-        if tail_return in {"summary", "review"} and step in {
+        if video_profile_scene1_can_return_to_shared_tail(state, tail_return) and step in {
             "scene_plan", "image_prompts", "video_prompts", "full_review",
         }:
             state = save_video_profile_studio_state(
@@ -249162,6 +249235,20 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
                 video_tail_return_to="",
             )
             return await video_tail9_render(query, uid, context, "addon")
+        if return_step == "review" and (
+            video_flow7_kind(state) == "script_to_video"
+            or video_flow6_product_id(state) == "script_image_video"
+        ):
+            state = video_profile_studio_step(
+                context,
+                state,
+                "full_review",
+                push=False,
+                quality_xu=0,
+                audio_plan_return_step="",
+                video_tail_return_to="",
+            )
+            return await video_tail9_render(query, uid, context, "review")
         if return_step == "full_review":
             state = video_profile_studio_step(
                 context,
@@ -249443,7 +249530,8 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             active_scene_index=1,
             prompt_return_step=(
                 "full_review"
-                if target == "video_prompts" and tail_return in {"summary", "review"}
+                if target == "video_prompts"
+                and video_profile_scene1_can_return_to_shared_tail(state, tail_return)
                 else str(state.get("prompt_return_step") or "")
             ),
         )
@@ -249507,7 +249595,10 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         tail_return = str(state.get("video_tail_return_to") or "")
         if prompt_return in {"scene_detail", "full_review"}:
             state = video_scene3_return_to_parent(context, state, prompt_return, prompt_return_step="")
-            if prompt_return == "full_review" and tail_return in {"summary", "review"}:
+            if (
+                prompt_return == "full_review"
+                and video_profile_scene1_can_return_to_shared_tail(state, tail_return)
+            ):
                 state = save_video_profile_studio_state(
                     context,
                     {**state, "video_tail_return_to": ""},
@@ -249521,7 +249612,7 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             active_scene_index=1,
             prompt_return_step=(
                 "full_review"
-                if tail_return in {"summary", "review"}
+                if video_profile_scene1_can_return_to_shared_tail(state, tail_return)
                 else str(state.get("prompt_return_step") or "")
             ),
         )
@@ -249531,7 +249622,10 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         tail_return = str(state.get("video_tail_return_to") or "")
         if prompt_return in {"scene_detail", "full_review"}:
             state = video_scene3_return_to_parent(context, state, prompt_return, prompt_return_step="")
-            if prompt_return == "full_review" and tail_return in {"summary", "review"}:
+            if (
+                prompt_return == "full_review"
+                and video_profile_scene1_can_return_to_shared_tail(state, tail_return)
+            ):
                 state = save_video_profile_studio_state(
                     context,
                     {**state, "video_tail_return_to": ""},
@@ -249543,7 +249637,7 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             return await video_profile_scene1_render(query, state, lang)
         state = video_profile_studio_step(context, state, "full_review", active_scene_index=1)
         state = save_video_profile_studio_state(context, state)
-        if tail_return in {"summary", "review"}:
+        if video_profile_scene1_can_return_to_shared_tail(state, tail_return):
             state = save_video_profile_studio_state(
                 context,
                 {**state, "video_tail_return_to": ""},
