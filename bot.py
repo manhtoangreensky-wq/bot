@@ -75736,15 +75736,25 @@ def video_ai_real_build_quick_plan(
     if needs.get("reference_assets") == "REQUIRED" and not state.get("references"):
         raise ValueError("reference_assets_required")
 
-    seed_source = "|".join([
+    quick_revision = max(
+        0,
+        safe_int(
+            (state.get("legacy_compat") or {}).get("product_quick_build_revision"),
+            0,
+        ),
+    )
+    seed_parts = [
         str(state.get("draft_id") or ""),
         str((state.get("content") or {}).get("revision") or 0),
         str((state.get("content") or {}).get("profile_id") or "general"),
         str(scene_count),
         str(fmt.get("ratio") or ""),
-    ])
+    ]
+    if quick_revision > 0:
+        seed_parts.append(str(quick_revision))
+    seed_source = "|".join(seed_parts)
     seed = hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:16]
-    seed_number = int(seed[:8], 16)
+    seed_number = quick_revision if quick_revision > 0 else int(seed[:8], 16)
     content = dict(state.get("content") or {})
     brief = dict(content.get("approved_brief") or {})
     topic = str(brief.get("title") or content.get("original_intent") or "Nội dung đã chọn").strip()
@@ -79340,14 +79350,32 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         bible = dict(state.get("bible") or {})
         characters = list(bible.get("characters") or [])
         locations = list(bible.get("locations") or [])
+        bridge_quick = bool(video_entity_bridge_marker(state))
+        bridge_quick_rows = (
+            [[("⚡ Tạo nhanh", "vid3|quick_build"), ("✅ Hoàn tất thiết lập nhân vật và bối cảnh", "vid3|bible_done")]]
+            if bridge_quick
+            else [
+                [("🛠 Tùy chỉnh chi tiết", "vid3|view|bible_extras")],
+                [("✨ Tự động gợi ý", "vid3|bible_auto"), ("✅ Hoàn tất thiết lập nhân vật và bối cảnh", "vid3|bible_done")],
+            ]
+        )
+        bridge_quick_copy = (
+            "Chọn Tạo nhanh để hệ thống tự hoàn thiện một phương án mới và chuyển thẳng sang Add-on. "
+            "Chỉ mở từng mục phía trên khi cần sửa."
+            if bridge_quick
+            else "Mặc định dùng tự động; chỉ mở từng mục khi cần sửa chi tiết."
+        )
+        bridge_detail_summary = "" if bridge_quick else (
+            f"\nTùy chỉnh thêm: {len(bible.get('products') or [])} sản phẩm, "
+            f"{len(bible.get('props') or [])} đạo cụ"
+        )
         return (
-            f"{prefix}👥 NHÂN VẬT VÀ BỐI CẢNH\n\nNhân vật: {len(characters)}\nBối cảnh: {len(locations)}\nẢnh tham chiếu: {len(state.get('references') or [])}\nTùy chỉnh thêm: {len(bible.get('products') or [])} sản phẩm, {len(bible.get('props') or [])} đạo cụ\n\nMặc định dùng tự động; chỉ mở từng mục khi cần sửa chi tiết.",
+            f"{prefix}👥 NHÂN VẬT VÀ BỐI CẢNH\n\nNhân vật: {len(characters)}\nBối cảnh: {len(locations)}\nẢnh tham chiếu: {len(state.get('references') or [])}{bridge_detail_summary}\n\n{bridge_quick_copy}",
             video_uiflow3_keyboard([
                 [("👥 Số nhân vật", "vid3|view|character_count"), ("👤 Danh sách nhân vật", "vid3|view|character_list")],
                 [("🏞 Số bối cảnh", "vid3|view|location_count"), ("🗺 Danh sách bối cảnh", "vid3|view|location_list")],
                 [("🖼 Ảnh tham chiếu", "vid3|view|references"), ("🔒 Giữ nhất quán", "vid3|view|continuity")],
-                [("🛠 Tùy chỉnh chi tiết", "vid3|view|bible_extras")],
-                [("✨ Tự động gợi ý", "vid3|bible_auto"), ("✅ Hoàn tất thiết lập nhân vật và bối cảnh", "vid3|bible_done")],
+                *bridge_quick_rows,
                 *video_uiflow3_nav_rows(),
             ]),
         )
@@ -80985,6 +81013,14 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state = video_uiflow3_clear_transient(state)
             state["navigation"]["current_step"] = "production_bible"
         elif action == "quick_build":
+            if video_entity_bridge_marker(state):
+                legacy = dict(state.get("legacy_compat") or {})
+                quick_revision = max(
+                    1,
+                    safe_int(legacy.get("product_quick_build_revision"), 0) + 1,
+                )
+                legacy["product_quick_build_revision"] = quick_revision
+                state["legacy_compat"] = legacy
             state = video_ai_real_build_quick_plan(state)
             state = video_uiflow3.mark_sections_complete(
                 state,
@@ -104428,10 +104464,18 @@ async def video_trend2_render(target, context, state: dict, lang: str = "vi"):
         rows = video_trend2_catalog_rows(state)
         return await safe_edit_or_send_long_html(target, video_trend2_catalog_text(state, rows), reply_markup=video_trend2_catalog_keyboard(state, rows))
     if screen == "search_results":
+        text = video_trend2_search_results_text(state)
+        keyboard = video_trend2_search_results_keyboard(state)
+        if not hasattr(target, "edit_message_text") and hasattr(target, "reply_text"):
+            return await safe_reply_long_html(
+                target,
+                text,
+                reply_markup=keyboard,
+            )
         return await safe_edit_or_send_long_html(
             target,
-            video_trend2_search_results_text(state),
-            reply_markup=video_trend2_search_results_keyboard(state),
+            text,
+            reply_markup=keyboard,
         )
     if screen == "video_analysis":
         return await safe_edit_or_send_long_html(
