@@ -793,6 +793,30 @@ def test_golden_flow_callbacks_are_scoped_short_and_back_exact():
                         assert callback_data.startswith(f"vproduct|{flow}|")
 
 
+@pytest.mark.parametrize("flow", ["ss2", "ss3"])
+def test_segment_analysis_rows_match_shared_two_column_renderer(flow: str):
+    state = _state(flow)
+    state = video_selfshotflow4.apply_action(flow, state, "c4segment", "whole")["state"]
+    screens = ["segment_preview", "analysis"]
+    if flow == "ss3":
+        screens.append("mode")
+
+    for screen in screens:
+        state[video_selfshotflow4.FLOW_SCREEN_KEYS[flow]] = screen
+        model = video_selfshotflow4.screen_model(flow, screen, state)
+        assert all(len(row) in {2, 5} for row in model["rows"])
+        bot_runtime.video_scene3_keyboard(model["rows"])
+
+    state[video_selfshotflow4.FLOW_SCREEN_KEYS[flow]] = "analysis"
+    upload = video_selfshotflow4.apply_action(flow, state, "c4upload")
+    assert upload["pending_media"] == "source_upload"
+
+    state[video_selfshotflow4.FLOW_SCREEN_KEYS[flow]] = "segment_preview"
+    reset = video_selfshotflow4.apply_action(flow, state, "c4segment", "reset")
+    assert reset["screen"] == "segment"
+    assert not reset["state"].get("source_segment")
+
+
 def test_bot_runs_selfshot_only_local_analysis_after_segment_selection():
     source = Path("bot.py").read_text(encoding="utf-8")
     assert "async def inspect_selfshot_source" in source

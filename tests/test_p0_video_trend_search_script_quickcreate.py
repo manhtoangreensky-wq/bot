@@ -55,6 +55,48 @@ def test_search_results_from_text_message_use_reply_renderer() -> None:
     assert result == "KEYBOARD"
 
 
+def test_video_analysis_from_media_message_edits_the_progress_message() -> None:
+    calls: list[tuple[str, str]] = []
+
+    async def reply_long(target, text, reply_markup=None):
+        raise AssertionError("editable progress Message must not leave a stale status")
+
+    async def callback_only(*_args, **_kwargs):
+        raise AssertionError("callback renderer received a normal Message")
+
+    namespace = {
+        "safe_reply_long_html": reply_long,
+        "safe_edit_or_send_long_html": callback_only,
+        "video_trend2_video_analysis_text": lambda _state: "VIDEO ANALYSIS",
+        "video_trend2_video_analysis_keyboard": lambda _state: "KEYBOARD",
+    }
+    exec(
+        "from __future__ import annotations\n" + _function_source("video_trend2_render"),
+        namespace,
+    )
+
+    class Message:
+        kind = "message"
+        reply_text = object()
+
+        async def edit_text(self, text, parse_mode=None, reply_markup=None):
+            calls.append((self.kind, text))
+            assert parse_mode == "HTML"
+            return reply_markup
+
+    message = Message()
+    result = asyncio.run(
+        namespace["video_trend2_render"](
+            message,
+            object(),
+            {"screen": "video_analysis"},
+        )
+    )
+
+    assert calls == [("message", "VIDEO ANALYSIS")]
+    assert result == "KEYBOARD"
+
+
 def test_script_and_trend_entity_bridge_show_quick_create_without_extra_detail_lane() -> None:
     payload = _function_source("_video_uiflow3_screen_payload_unscoped")
     start = payload.index('if step == "production_bible":')

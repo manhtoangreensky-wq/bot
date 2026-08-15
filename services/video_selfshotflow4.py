@@ -276,8 +276,8 @@ COMMERCIAL_COMMITMENT_FIELDS = (
 )
 
 OPERATION_SCREENS = {
-    "c4upload": frozenset({"segment"}),
-    "c4segment": frozenset({"segment"}),
+    "c4upload": frozenset({"segment", "analysis", "mode"}),
+    "c4segment": frozenset({"segment", "segment_preview", "mode"}),
     "c4mode": frozenset({"mode"}),
     "c4subject": frozenset({"subject"}),
     "c4multi": frozenset({"subject_multiple"}),
@@ -384,7 +384,7 @@ def validate_rows(rows: list[list[tuple[str, str]]], *, back_callback: str) -> d
     if not rows:
         errors.append("rows_missing")
     for index, row in enumerate(rows):
-        if len(row) not in {1, 2, 5}:
+        if len(row) not in {2, 5}:
             errors.append(f"row_{index}_invalid_width")
         for label, callback_data in row:
             if not _safe(label) or not _safe(callback_data):
@@ -675,13 +675,13 @@ def _page_rows(flow: str, state: Mapping[str, Any], *, kind: str) -> list[list[t
             rows[-1].append(("💡 Nhóm khác", callback(flow, "c4show", "idea_groups")))
     page_size = 8 if kind == "profile" else 6
     total = max(1, (len(catalog) + page_size - 1) // page_size)
-    page_buttons = []
-    if page > 1:
-        page_buttons.append(("⬅️ Trang trước", callback(flow, f"c4{kind}_page", str(page - 1))))
-    if page < total:
-        page_buttons.append(("➡️ Trang sau", callback(flow, f"c4{kind}_page", str(page + 1))))
-    if page_buttons:
-        rows.append(page_buttons)
+    if total > 1:
+        previous_page = total if page <= 1 else page - 1
+        next_page = 1 if page >= total else page + 1
+        rows.append([
+            ("⬅️ Trang trước", callback(flow, f"c4{kind}_page", str(previous_page))),
+            ("➡️ Trang sau", callback(flow, f"c4{kind}_page", str(next_page))),
+        ])
     return rows
 
 
@@ -1148,7 +1148,10 @@ def screen_model(flow: str, screen: str, state: Mapping[str, Any] | None = None)
             f"• Thời lượng: <b>{duration:g} giây</b>",
             "Đoạn này sẽ được dùng nguyên vẹn cho phân tích chủ thể và chuyển động.",
         ]
-        rows = [[("➡️ Phân tích chủ thể", callback(active_flow, "c4show", "analysis"))]]
+        rows = [[
+            ("➡️ Phân tích chủ thể", callback(active_flow, "c4show", "analysis")),
+            ("✂️ Chọn lại đoạn", callback(active_flow, "c4segment", "reset")),
+        ]]
     elif name == "analysis":
         status = _safe(data.get("analysis_status") or analysis.get("analysis_status") or "awaiting_segment")
         counts = {
@@ -1173,17 +1176,23 @@ def screen_model(flow: str, screen: str, state: Mapping[str, Any] | None = None)
         ]
         if status in {"ready_no_tracks", "failed"}:
             lines.append("Chưa có chủ thể đủ tin cậy. Anh/chị vẫn có thể tự mô tả hoặc xác nhận chủ thể trong chính video đã gửi.")
-        rows = [[(
-            "✨ Biến đổi liên tục một cú máy" if active_flow == FLOW_SS3 else "➡️ Chọn chủ thể",
-            callback(active_flow, "c4show", "mode" if active_flow == FLOW_SS3 else "subject"),
-        )]]
+        rows = [[
+            (
+                "✨ Biến đổi liên tục một cú máy" if active_flow == FLOW_SS3 else "➡️ Chọn chủ thể",
+                callback(active_flow, "c4show", "mode" if active_flow == FLOW_SS3 else "subject"),
+            ),
+            ("📎 Gửi video khác", callback(active_flow, "c4upload")),
+        ]]
     elif name == "mode":
         lines = [
             "✨ <b>Biến đổi liên tục một cú máy</b>",
             "Giữ khuôn mặt, vóc dáng và chuyển động nguồn liên tục. Trang phục, bối cảnh, ánh sáng và hiệu ứng sẽ thay đổi dần qua bốn giai đoạn, không cắt sang clip không liên quan.",
             "Bước tiếp theo là xác nhận chủ thể cần giữ.",
         ]
-        rows = [[("✅ Biến đổi liên tục một cú máy", callback(active_flow, "c4mode", "one_take"))]]
+        rows = [[
+            ("✅ Biến đổi liên tục một cú máy", callback(active_flow, "c4mode", "one_take")),
+            ("📎 Gửi video khác", callback(active_flow, "c4upload")),
+        ]]
     elif name == "subject":
         manifest = dict(data.get("subject_manifest") or {})
         selected = ", ".join(_display(item.get("description") or item.get("label")) for item in manifest.get("subjects") or []) or "Chưa chọn"

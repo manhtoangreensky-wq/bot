@@ -105467,10 +105467,30 @@ async def video_trend2_render(target, context, state: dict, lang: str = "vi"):
             reply_markup=keyboard,
         )
     if screen == "video_analysis":
+        text = video_trend2_video_analysis_text(state)
+        keyboard = video_trend2_video_analysis_keyboard(state)
+        if not hasattr(target, "edit_message_text") and hasattr(target, "reply_text"):
+            if hasattr(target, "edit_text"):
+                try:
+                    return await target.edit_text(
+                        text,
+                        parse_mode="HTML",
+                        reply_markup=keyboard,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "video_trend_analysis_progress_edit_failed | exception=%s",
+                        type(exc).__name__,
+                    )
+            return await safe_reply_long_html(
+                target,
+                text,
+                reply_markup=keyboard,
+            )
         return await safe_edit_or_send_long_html(
             target,
-            video_trend2_video_analysis_text(state),
-            reply_markup=video_trend2_video_analysis_keyboard(state),
+            text,
+            reply_markup=keyboard,
         )
     if screen == "categories":
         historical = str(state.get("catalog_mode") or "latest") == "historical"
