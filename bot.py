@@ -75753,6 +75753,210 @@ VIDEO_AI_REAL_QUICK_DIRECTIONS = (
 )
 
 
+def video_entity_bridge_compile_quick_prompts(raw_state: dict) -> dict:
+    """Compile Script/Trend quick plans without using the Video AI Real compiler."""
+
+    state = video_uiflow3.normalize_state(raw_state)
+    if not video_entity_bridge_marker(state):
+        raise ValueError("video_entity_bridge_required")
+
+    content = dict(state.get("content") or {})
+    brief = dict(content.get("approved_brief") or {})
+    bible = dict(state.get("bible") or {})
+    topic = str(
+        brief.get("concept")
+        or brief.get("content")
+        or brief.get("summary")
+        or brief.get("title")
+        or content.get("original_intent")
+        or "Nội dung đã chọn"
+    ).strip()
+    aspect_ratio = str((state.get("format") or {}).get("ratio") or "9:16")
+    product_label = {
+        "script_image_video": "Kịch bản → Video",
+        "video_trend": "Video theo trend",
+    }.get(str(state.get("parent_product") or ""), "Video")
+
+    character_map = {
+        str(item.get("character_id") or ""): dict(item)
+        for item in bible.get("characters") or []
+        if str(item.get("character_id") or "")
+    }
+    location_map = {
+        str(item.get("location_id") or ""): dict(item)
+        for item in bible.get("locations") or []
+        if str(item.get("location_id") or "")
+    }
+    product_map = {
+        str(item.get("product_id") or ""): dict(item)
+        for item in bible.get("products") or []
+        if str(item.get("product_id") or "")
+    }
+    prop_map = {
+        str(item.get("prop_id") or ""): dict(item)
+        for item in bible.get("props") or []
+        if str(item.get("prop_id") or "")
+    }
+    dialogue_by_scene: dict[str, list[str]] = {}
+    for item in (state.get("audio") or {}).get("dialogue_segments") or []:
+        scene_id = str(item.get("scene_id") or "")
+        text = str(item.get("text") or "").strip()
+        if scene_id and text:
+            dialogue_by_scene.setdefault(scene_id, []).append(text)
+
+    creative = video_ai_real_enabled_scene3_values(
+        state,
+        "creative_controls",
+        video_scene3_flow.CREATIVE_CONTROLS,
+    )
+    preservation = video_ai_real_enabled_scene3_values(
+        state,
+        "preservation_requirements",
+        VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES,
+    )
+    creative_values = [f"{label}: {value}" for key, label, value in creative if key != "negative"]
+    negative_values = [value for key, _label, value in creative if key == "negative"]
+    preservation_values = [f"{label}: {value}" for _key, label, value in preservation]
+    continuity_values = [
+        str(key).replace("_", " ")
+        for key, enabled in dict(bible.get("continuity") or {}).items()
+        if bool(enabled)
+    ]
+    negative_common = (
+        "no identity drift, no wardrobe or product change, no invented logo or text, "
+        "no geometry drift, no duplicated action, no unfinished sentence, "
+        "no mid-action cut, no unfinished camera movement, no filler beat"
+    )
+
+    for scene in state.get("scenes") or []:
+        characters = [
+            character_map[item]
+            for item in scene.get("character_ids") or []
+            if item in character_map
+        ]
+        location = dict(location_map.get(str(scene.get("location_id") or "")) or {})
+        products = [
+            product_map[item]
+            for item in scene.get("product_ids") or []
+            if item in product_map
+        ]
+        props = [
+            prop_map[item]
+            for item in scene.get("prop_ids") or []
+            if item in prop_map
+        ]
+        subject_parts = [
+            "; ".join(
+                value
+                for value in (
+                    str(item.get("display_name") or "").strip(),
+                    str(item.get("description") or "").strip(),
+                )
+                if value
+            )
+            for item in characters
+        ]
+        subject_parts.extend(
+            "; ".join(
+                value
+                for value in (
+                    str(item.get("name") or "").strip(),
+                    str(item.get("description") or "").strip(),
+                )
+                if value
+            )
+            for item in [*products, *props]
+        )
+        environment = "; ".join(
+            value
+            for value in (
+                str(location.get("name") or "").strip(),
+                str(location.get("description") or "").strip(),
+                str(location.get("indoor_outdoor") or "").strip(),
+                str(location.get("time_of_day") or "").strip(),
+            )
+            if value
+        ) or "Bối cảnh phù hợp nội dung đã khóa"
+        camera = "; ".join(
+            value
+            for value in (
+                str(scene.get("framing") or "").strip(),
+                str(scene.get("camera") or "").strip(),
+                str(scene.get("movement") or "").strip(),
+            )
+            if value
+        ) or "Khung hình rõ chủ thể, chuyển động camera hoàn tất trước khi cắt"
+        palette_lighting = "; ".join(
+            value
+            for value in (
+                *creative_values,
+                str(scene.get("lighting") or location.get("lighting") or "").strip(),
+                str(scene.get("mood") or location.get("mood") or "").strip(),
+            )
+            if value
+        ) or "Ánh sáng và bảng màu phù hợp nội dung"
+        identity_locks = [
+            str(item.get("logo_text_constraints") or "").strip()
+            for item in products
+            if str(item.get("logo_text_constraints") or "").strip()
+        ]
+        scene_id = str(scene.get("scene_id") or "")
+        prompt_scene = {
+            "scene_index": safe_int(scene.get("scene_index"), 1),
+            "main_idea": f"{product_label}: {str(scene.get('semantic_beat') or topic).strip()}",
+            "subject": " | ".join(item for item in subject_parts if item) or topic,
+            "environment": environment,
+            "start_state": str(scene.get("start_state") or "Nối tiếp hợp lý từ cảnh trước"),
+            "primary_action": str(scene.get("main_action") or scene.get("semantic_beat") or topic),
+            "development": str(scene.get("semantic_beat") or topic),
+            "completion_state": str(scene.get("completion_state") or "Hành động hoàn tất rõ ràng"),
+            "camera": camera,
+            "creative_palette_lighting": palette_lighting,
+            "identity_color_locks": "; ".join(identity_locks) or "Giữ đúng màu nhận diện của chủ thể và sản phẩm",
+            "color_conflict_policy": "Màu nhận diện đã khóa được ưu tiên hơn bảng màu sáng tạo",
+            "visual_style": "; ".join(creative_values) or "Phong cách hình ảnh phù hợp nội dung",
+            "dialogue_or_voiceover": " ".join(dialogue_by_scene.get(scene_id) or []),
+            "transition_out": str(scene.get("transition_out") or "Chuyển tự nhiên sang cảnh kế tiếp"),
+            "duration_seconds": max(1, safe_int(scene.get("duration_target"), 8)),
+            "preserve_constraints": [*continuity_values, *preservation_values],
+        }
+        continuity_contract = {
+            "must_remain_constant": [*continuity_values, *preservation_values],
+            "motion_direction": str(scene.get("movement") or "Liên tục theo hành động chính"),
+        }
+        provider_prompt = video_scene_prompt_builder.build_scene_provider_prompt(
+            prompt_scene,
+            continuity_contract=continuity_contract,
+            aspect_ratio=aspect_ratio,
+        )
+        negative_prompt = ", ".join([negative_common, *negative_values])
+        scene.update({
+            "provider_prompt": provider_prompt,
+            "visual_prompt": provider_prompt,
+            "negative_prompt": negative_prompt,
+            "visual_prompt_hash": hashlib.sha256(
+                json.dumps(
+                    {
+                        "provider_prompt": provider_prompt,
+                        "negative_prompt": negative_prompt,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest(),
+            "compiled_prompt_status": "compiled",
+            "compiled_prompt_version": "video-product-bridge-v1",
+        })
+
+    legacy = dict(state.get("legacy_compat") or {})
+    legacy["product_quick_prompt_compile"] = {
+        "version": "video-product-bridge-v1",
+        "product": str(state.get("parent_product") or ""),
+    }
+    state["legacy_compat"] = legacy
+    return video_uiflow3.normalize_state(state)
+
+
 def video_ai_real_build_quick_plan(
     raw_state: dict,
     *,
@@ -76006,7 +76210,10 @@ def video_ai_real_build_quick_plan(
         "profile_id": str(content.get("profile_id") or "general"),
     }
     state["legacy_compat"] = legacy
-    state = video_ai_real_compile_state(state)
+    if video_entity_bridge_marker(state):
+        state = video_entity_bridge_compile_quick_prompts(state)
+    else:
+        state = video_ai_real_compile_state(state)
     state = video_uiflow3_go(state, "prompts")
     return video_uiflow3.normalize_state(state)
 
@@ -104216,6 +104423,7 @@ def video_trend2_state(context) -> dict:
     state.setdefault("search_results", [])
     state.setdefault("search_offset", 0)
     state.setdefault("search_error", "")
+    state.setdefault("search_fallback", False)
     state.setdefault("search_owner", "")
     state.setdefault("search_session_id", "")
     state.setdefault("search_revision", 0)
@@ -104318,6 +104526,69 @@ def video_trend2_catalog_rows(state: dict) -> list[dict]:
     )
 
 
+def video_trend2_catalog_search_fallback(
+    query: str,
+    rows: list[dict],
+    *,
+    limit: int = 20,
+) -> list[dict]:
+    """Rank source-backed cached trends when the public search feed is unavailable."""
+
+    def folded(value: object) -> str:
+        normalized = unicodedata.normalize("NFD", str(value or "").casefold())
+        return "".join(
+            character
+            for character in normalized
+            if unicodedata.category(character) != "Mn"
+        )
+
+    query_text = re.sub(r"\s+", " ", str(query or "")).strip()[:240]
+    folded_query = folded(query_text)
+    query_terms = [
+        item
+        for item in re.split(r"[^a-z0-9]+", folded_query)
+        if len(item) >= 2
+    ]
+    ranked: list[tuple[int, int, dict]] = []
+    for index, raw in enumerate(rows or []):
+        item = dict(raw or {})
+        source_url = str(item.get("source_url") or "").strip()
+        source_name = str(item.get("source_name") or "").strip()
+        if not source_name or not source_url.startswith(("https://", "http://")):
+            continue
+        keywords = item.get("keywords") or []
+        if isinstance(keywords, str):
+            keywords = [keywords]
+        title_text = folded(item.get("title") or item.get("short_title"))
+        searchable = folded(" ".join([
+            str(item.get("title") or ""),
+            str(item.get("summary") or ""),
+            str(item.get("category") or ""),
+            str(item.get("platform") or ""),
+            *[str(value) for value in keywords],
+        ]))
+        score = 0
+        if folded_query and folded_query in searchable:
+            score += 100
+        score += 12 * sum(1 for term in query_terms if term in searchable)
+        score += 4 * sum(1 for term in query_terms if term in title_text)
+        if not item.get("stale"):
+            score += 1
+        ranked.append((score, index, item))
+    ranked.sort(key=lambda value: (-value[0], value[1]))
+    results = []
+    for _score, _index, item in ranked[: max(1, min(100, safe_int(limit, 20)))]:
+        result = deepcopy(item)
+        result.update({
+            "intake_lane": "search",
+            "search_query": query_text,
+            "online_search": False,
+            "catalog_fallback": True,
+        })
+        results.append(result)
+    return results
+
+
 def video_trend2_catalog_text(state: dict, rows: list[dict]) -> str:
     offset = max(0, safe_int(state.get("catalog_offset"), 0))
     page = rows[offset:offset + 5]
@@ -104384,6 +104655,11 @@ def video_trend2_search_results_text(state: dict) -> str:
             "Hãy thử cụm từ cụ thể hơn hoặc dùng bộ gợi ý trend có sẵn."
         )
     lines = [f"🔎 <b>Kết quả tìm kiếm: {html.escape(query)}</b>", ""]
+    if bool(state.get("search_fallback")):
+        lines.extend([
+            "Nguồn tìm kiếm công khai đang tạm gián đoạn. Đây là các kết quả phù hợp nhất từ kho trend có nguồn đã lưu.",
+            "",
+        ])
     for index, item in enumerate(page, 1):
         lines.extend([
             f"{index}. <b>{html.escape(str(item.get('short_title') or item.get('title') or ''))}</b>",
@@ -104662,9 +104938,9 @@ def video_trend2_scene_count_text(state: dict) -> str:
 
 def video_trend2_scene_count_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1 cảnh", callback_data="vtrend|scenes|1"), InlineKeyboardButton("2 cảnh", callback_data="vtrend|scenes|2")],
-        [InlineKeyboardButton("3 cảnh", callback_data="vtrend|scenes|3"), InlineKeyboardButton("5 cảnh", callback_data="vtrend|scenes|5")],
-        [InlineKeyboardButton("10 cảnh", callback_data="vtrend|scenes|10"), InlineKeyboardButton("20 cảnh", callback_data="vtrend|scenes|20")],
+        [InlineKeyboardButton("🎬 1 cảnh", callback_data="vtrend|scenes|1"), InlineKeyboardButton("🎬 2 cảnh", callback_data="vtrend|scenes|2")],
+        [InlineKeyboardButton("🎬 3 cảnh", callback_data="vtrend|scenes|3"), InlineKeyboardButton("🎬 5 cảnh", callback_data="vtrend|scenes|5")],
+        [InlineKeyboardButton("🎬 10 cảnh", callback_data="vtrend|scenes|10"), InlineKeyboardButton("🎬 20 cảnh", callback_data="vtrend|scenes|20")],
         [InlineKeyboardButton("✍️ Nhập số khác", callback_data="vtrend|scenes_custom"), InlineKeyboardButton("ℹ️ Lưu ý số cảnh", callback_data="vtrend|scene_note")],
         video_trend2_nav("vtrend|back"),
     ])
@@ -104672,8 +104948,8 @@ def video_trend2_scene_count_keyboard() -> InlineKeyboardMarkup:
 
 def video_trend2_ratio_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Dọc 9:16", callback_data="vtrend|ratio|9:16"), InlineKeyboardButton("Ngang 16:9", callback_data="vtrend|ratio|16:9")],
-        [InlineKeyboardButton("Vuông 1:1", callback_data="vtrend|ratio|1:1"), InlineKeyboardButton("Dọc 4:5", callback_data="vtrend|ratio|4:5")],
+        [InlineKeyboardButton("📱 Dọc 9:16", callback_data="vtrend|ratio|9:16"), InlineKeyboardButton("🖥 Ngang 16:9", callback_data="vtrend|ratio|16:9")],
+        [InlineKeyboardButton("⬜ Vuông 1:1", callback_data="vtrend|ratio|1:1"), InlineKeyboardButton("📱 Dọc 4:5", callback_data="vtrend|ratio|4:5")],
         video_trend2_nav("vtrend|back"),
     ])
 
@@ -105279,6 +105555,7 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
             "search_results": [],
             "search_offset": 0,
             "search_error": "",
+            "search_fallback": False,
             "search_owner": "",
             "search_session_id": "",
             "search_revision": 0,
@@ -105439,6 +105716,7 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
             "search_session_id": uuid.uuid4().hex[:20],
             "search_revision": search_revision,
             "active_search_message_id": 0,
+            "search_fallback": False,
         })
         save_video_trend2_state(context, state)
         return await safe_edit_or_send(
@@ -106614,7 +106892,7 @@ def video_selfshot_product_hub_keyboard() -> InlineKeyboardMarkup:
             ("🎥 Tự quay & đổi cảnh AI", "vproduct|selfshot_product|scene_change"),
             ("🎥 Tự quay & biến đổi điện ảnh", "vproduct|selfshot_product|cinematic"),
         ],
-        [("⬅️ Quay lại", "menu|main_video")],
+        [("⬅️ Quay lại", "menu|main_video"), ("📖 Xem hướng dẫn", "menu|guide_video_ai")],
     ])
 
 
@@ -117062,6 +117340,7 @@ async def handle_video_trend2_pending_text(update: Update, context: ContextTypes
         input_parent = str(state.get("input_return_screen") or "entry")
         if input_parent not in {"entry", "search_results"}:
             input_parent = "entry"
+        search_failed = False
         try:
             raw_results = await fetch_google_news_trends(
                 text,
@@ -117080,7 +117359,32 @@ async def handle_video_trend2_pending_text(update: Update, context: ContextTypes
                 len(text),
             )
             search_results = []
+            search_failed = True
             search_error = "public_search_unavailable"
+        search_fallback = False
+        if not search_results:
+            try:
+                cached_rows = video_trend2_catalog_rows({
+                    "category": "",
+                    "catalog_mode": "latest",
+                })
+                search_results = video_trend2_catalog_search_fallback(
+                    text,
+                    cached_rows,
+                    limit=20,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "video_trend_search_cache_failed | exception=%s query_length=%s",
+                    type(exc).__name__,
+                    len(text),
+                )
+                search_results = []
+            search_fallback = bool(search_results)
+            if search_fallback:
+                search_error = ""
+            elif search_failed:
+                search_error = "public_search_unavailable"
         if not video_trend2_search_result_owner_valid(
             context, search_token, message_id
         ):
@@ -117092,6 +117396,7 @@ async def handle_video_trend2_pending_text(update: Update, context: ContextTypes
             "search_results": search_results,
             "search_offset": 0,
             "search_error": search_error,
+            "search_fallback": search_fallback,
             "pending_input": "",
             "input_return_screen": "",
             "search_owner": "",
@@ -248141,15 +248446,14 @@ async def inspect_selfshot_source(
         return {"ok": False, "reason": "video_too_large"}
     with tempfile.TemporaryDirectory(prefix=f"toanaas_{flow}_analysis_") as tmpdir:
         path = os.path.join(tmpdir, file_name)
-        telegram_file = await context.bot.get_file(file_id)
-        if callable(getattr(telegram_file, "download_to_drive", None)):
-            await telegram_file.download_to_drive(custom_path=path)
-        else:
-            data = bytes(await telegram_file.download_as_bytearray())
-            if len(data) > video_local_validation.MAX_UPLOAD_BYTES:
-                return {"ok": False, "reason": "video_too_large"}
-            with open(path, "wb") as handle:
-                handle.write(data)
+        data = await download_video_editor_asset_bytes(
+            context,
+            {"file_id": file_id},
+            video_local_validation.MAX_UPLOAD_BYTES,
+            read_timeout=120.0,
+        )
+        with open(path, "wb") as handle:
+            handle.write(data)
         actual_size = os.path.getsize(path) if os.path.exists(path) else 0
         if actual_size <= 0 or actual_size > video_local_validation.MAX_UPLOAD_BYTES:
             return {"ok": False, "reason": "video_too_large" if actual_size else "source_video_missing"}
