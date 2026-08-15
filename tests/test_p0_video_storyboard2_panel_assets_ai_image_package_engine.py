@@ -522,7 +522,8 @@ def test_entry_modes_split_after_ratio_and_keep_exact_back_targets() -> None:
     assert 'if entry_mode == "existing"' in callback
     assert 'move(board, "content_source", awaiting_input="")' in callback
     assert "video_storyboard2.apply_uploaded_storyboard(board)" in callback
-    assert "video_storyboard_prepare_reference_bridge" in callback
+    assert "video_storyboard_open_required_assets" in callback
+    assert "seed_uploaded=True" in callback
     assert 'return_screen="ratio"' in callback
     assert 'if action == "profile_pick"' in callback
     assert '"vstory|upload_review" if entry_mode == "existing"' in payload
@@ -559,6 +560,7 @@ def test_all_touched_storyboard_bot_functions_parse_as_python311_source() -> Non
         "storyboard2_profiles_keyboard",
         "storyboard2_suggestion_keyboard",
         "storyboard2_scene_review_keyboard",
+        "storyboard2_asset_back_callback",
         "storyboard2_asset_keyboard",
         "storyboard2_asset_overview_keyboard",
         "storyboard2_image_prompt_keyboard",
@@ -572,6 +574,17 @@ def test_all_touched_storyboard_bot_functions_parse_as_python311_source() -> Non
         "storyboard2_entry_text",
         "storyboard2_screen_payload",
         "storyboard2_render",
+        "video_ai_real_uses_inline_requirements",
+        "video_ai_real_pilot_creative_payload",
+        "video_ai_real_pilot_requirements_payload",
+        "video_ai_real_pilot_requirement_review_payload",
+        "video_ai_real_pilot_screen_payload",
+        "handle_video_uiflow3_callback",
+        "video_storyboard_open_required_assets",
+        "video_storyboard_prepare_entity_bridge",
+        "video_storyboard_open_creative_details",
+        "video_storyboard_finish_entity_bridge",
+        "video_storyboard_finish_creative_details",
         "storyboard2_scene3_handoff",
         "storyboard2_prepare_quick_image",
         "_handle_storyboard2_callback_impl",

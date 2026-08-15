@@ -186,7 +186,8 @@ def test_idea_approval_dispatches_to_each_real_parent_component():
         "async def handle_video_idea_dynamic_callback",
     )
     assert 'product_id == "storyboard_prompt"' in dispatcher
-    assert "video_storyboard_prepare_reference_bridge" in dispatcher
+    assert "video_storyboard_open_required_assets" in dispatcher
+    assert "storyboard2_render" in dispatcher
     assert "product_id == video_selfshot2.PRODUCT_ID" in dispatcher
     assert 'video_selfshot2_render(query, user_id, "scene_plan"' in dispatcher
     assert "product_id == video_selfshot3.PRODUCT_ID" in dispatcher
