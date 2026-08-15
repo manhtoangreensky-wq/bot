@@ -1174,17 +1174,17 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
     elif name == "scene_count":
         text = "🎬 <b>Chọn số cảnh đầu ra</b>\n\nSố cảnh đầu ra không nhất thiết bằng số đoạn trong video nguồn; mỗi cảnh sẽ ghi rõ đoạn nguồn được dùng."
         rows = [
-            [("1 cảnh", "vproduct|ss2|scene_count|1"), ("2 cảnh", "vproduct|ss2|scene_count|2")],
-            [("3 cảnh", "vproduct|ss2|scene_count|3"), ("5 cảnh", "vproduct|ss2|scene_count|5")],
-            [("10 cảnh", "vproduct|ss2|scene_count|10"), ("✍️ Nhập số khác", "vproduct|ss2|scene_count|custom")],
+            [("🎬 1 cảnh", "vproduct|ss2|scene_count|1"), ("🎬 2 cảnh", "vproduct|ss2|scene_count|2")],
+            [("🎬 3 cảnh", "vproduct|ss2|scene_count|3"), ("🎬 5 cảnh", "vproduct|ss2|scene_count|5")],
+            [("🎬 10 cảnh", "vproduct|ss2|scene_count|10"), ("✍️ Nhập số khác", "vproduct|ss2|scene_count|custom")],
             [("ℹ️ Lưu ý số cảnh", "vproduct|ss2|scene_count|help"), ("👁️ Xem video nguồn", "vproduct|ss2|show|analysis")],
             _nav("preserve"),
         ]
     elif name == "ratio":
         text = f"📐 <b>Chọn tỉ lệ</b>\n\nĐang chọn: {draft.get('aspect_ratio') or 'Chưa chọn'}."
         rows = [
-            [("Dọc 9:16", "vproduct|ss2|ratio|9:16"), ("Ngang 16:9", "vproduct|ss2|ratio|16:9")],
-            [("Vuông 1:1", "vproduct|ss2|ratio|1:1"), ("Dọc 4:5", "vproduct|ss2|ratio|4:5")],
+            [("📱 Dọc 9:16", "vproduct|ss2|ratio|9:16"), ("🖥 Ngang 16:9", "vproduct|ss2|ratio|16:9")],
+            [("⬜ Vuông 1:1", "vproduct|ss2|ratio|1:1"), ("📱 Dọc 4:5", "vproduct|ss2|ratio|4:5")],
             [("✍️ Tự nhập", "vproduct|ss2|ratio|custom"), ("👁️ Xem video nguồn", "vproduct|ss2|show|analysis")],
             _nav("scene_count"),
         ]
