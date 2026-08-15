@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 import subprocess
 import hashlib
@@ -57,6 +58,23 @@ def _board() -> dict:
         "Một nhân vật giới thiệu sản phẩm trong cùng một bối cảnh.",
         mode="manual",
     )
+
+
+def _board_with_required_images() -> dict:
+    board = video_storyboard2.ensure_session(_board(), "storyboard-session")
+    for scene_index in range(1, int(board["scene_count"]) + 1):
+        board = video_storyboard2.assign_image(
+            board,
+            scene_index,
+            "start",
+            video_storyboard2.image_record(
+                scene_index=scene_index,
+                slot="start",
+                file_id=f"storyboard-image-{scene_index}",
+                source_type="telegram_upload",
+            ),
+        )
+    return video_storyboard2.confirm_existing_image_gate(board)
 
 
 def test_storyboard_middle_contract_persists_entities_style_and_motion() -> None:
@@ -176,55 +194,70 @@ def test_storyboard_middle_values_reach_existing_prompt_inputs() -> None:
         assert expected in video_prompt
 
 
-def test_all_storyboard_content_lanes_enter_required_reference_before_entity() -> None:
+def test_all_storyboard_content_lanes_enter_existing_assets_before_entity() -> None:
     callback = _function_source(BOT_SOURCE, "_handle_storyboard2_callback_impl")
     pending_text = _function_source(BOT_SOURCE, "handle_storyboard2_pending_text")
     idea_return = _function_source(BOT_SOURCE, "video_idea_render_exact_parent")
 
-    assert "video_storyboard_prepare_reference_bridge" in callback
-    assert callback.count("video_storyboard_prepare_reference_bridge") >= 2
-    assert "video_storyboard_prepare_reference_bridge" in pending_text
+    assert "video_storyboard_prepare_reference_bridge" not in BOT_SOURCE
+    assert "video_storyboard_store_reference_source" not in BOT_SOURCE
+    assert callback.count("video_storyboard_open_required_assets") >= 4
+    assert "video_storyboard_open_required_assets" in pending_text
     assert "video_storyboard_prepare_entity_bridge" not in pending_text
-    assert "video_uiflow3_screen_payload" in pending_text
+    assert "storyboard2_screen_payload" in pending_text
+    existing_lane = callback[
+        callback.index('if entry_mode == "existing":'):
+        callback.index('if action == "idea_source":')
+    ]
+    assert "video_storyboard_open_required_assets" in existing_lane
+    assert "seed_uploaded=True" in existing_lane
+    suggestion_lane = callback[
+        callback.index('if action == "suggest_pick":'):
+        callback.index('if action == "scene_screen":')
+    ]
+    assert "video_storyboard_open_required_assets" in suggestion_lane
     storyboard_idea = idea_return[
         idea_return.index('if product_id == "storyboard_prompt":'):
         idea_return.index('if product_id == video_selfshot2.PRODUCT_ID:')
     ]
-    assert "video_storyboard_prepare_reference_bridge" in storyboard_idea
+    assert "video_storyboard_open_required_assets" in storyboard_idea
     assert "video_storyboard_prepare_entity_bridge" not in storyboard_idea
+    assert "storyboard2_render" in storyboard_idea
     assert 'move(board, "scene_review"' not in idea_return[idea_return.index('if product_id == "storyboard_prompt":') : idea_return.index('if product_id == video_selfshot2.PRODUCT_ID:')]
 
 
-def test_storyboard_reference_gate_uses_existing_source_screen_and_exact_back_stack() -> None:
-    reference_bridge = _function_source(BOT_SOURCE, "video_storyboard_prepare_reference_bridge")
-    pilot_screen = _function_source(BOT_SOURCE, "video_ai_real_pilot_screen_payload")
+def test_storyboard_required_assets_use_existing_manager_and_exact_back_stack() -> None:
+    asset_open = _function_source(BOT_SOURCE, "video_storyboard_open_required_assets")
+    asset_back = _function_source(BOT_SOURCE, "storyboard2_asset_back_callback")
     uiflow_callback = _function_source(BOT_SOURCE, "handle_video_uiflow3_callback")
     storyboard_callback = _function_source(BOT_SOURCE, "_handle_storyboard2_callback_impl")
 
-    assert 'marker["phase"] = "reference"' in reference_bridge
-    assert 'state["source"]["kind"] = "raw_images"' in reference_bridge
-    assert 'state["source"]["required"] = True' in reference_bridge
-    assert '"current_step": "source"' in reference_bridge
-    assert 'f"vstory|reference_back|{bridge_key}"' in reference_bridge
-    assert 'storyboard_bridge.get("phase") or ""' in pilot_screen
-    assert 'storyboard_bridge.get("back_callback")' in pilot_screen
-
-    source_done = uiflow_callback[
-        uiflow_callback.index('elif action == "source_done":'):
-        uiflow_callback.index('elif action == "ratio" and values:')
+    assert 'move(current, "assets", push=False' in asset_open
+    assert '"suggestions": "vstory|suggestions_screen"' in asset_back
+    assert '"await_content": "vstory|content_manual"' in asset_back
+    assert '"ratio": "vstory|ratio_screen"' in asset_back
+    assert '"content_source": "vstory|content_screen"' in asset_back
+    assert 'str(storyboard_marker.get("phase") or "") == "reference"' in uiflow_callback
+    stale_source = uiflow_callback[
+        uiflow_callback.index('storyboard_marker = video_storyboard_entity_bridge_marker(state)'):
+        uiflow_callback.index('if action != "entry" and not video_uiflow3_action_allowed')
     ]
-    assert 'str(storyboard_marker.get("phase") or "") == "reference"' in source_done
-    assert 'storyboard_marker["phase"] = "entity"' in source_done
-    assert '"production_bible"' in source_done
-    assert "video_storyboard_store_reference_source" in source_done
+    assert 'storyboard_marker["phase"] = "assets"' in stale_source
+    assert "video_storyboard_open_required_assets" in stale_source
 
     assert 'if action == "reference_back":' in storyboard_callback
+    reference_back = storyboard_callback[
+        storyboard_callback.index('if action == "reference_back":'):
+        storyboard_callback.index('if action == "entity_back":')
+    ]
+    assert 'marker["phase"] = "assets"' in reference_back
+    assert "video_storyboard_open_required_assets" in reference_back
     entity_back = storyboard_callback[
         storyboard_callback.index('if action == "entity_back":'):
         storyboard_callback.index('if action == "creative_screen":')
     ]
-    assert 'marker["phase"] = "reference"' in entity_back
-    assert '"current_step": "source"' in entity_back
+    assert 'marker["phase"] = "assets"' in entity_back
+    assert "video_storyboard_open_required_assets" in entity_back
 
 
 def test_storyboard_stale_downstream_callbacks_cannot_bypass_the_middle() -> None:
@@ -304,7 +337,7 @@ def test_storyboard_entity_bridge_owns_one_session_and_exact_back_callback() -> 
     ):
         exec("from __future__ import annotations\n" + _function_source(BOT_SOURCE, name), namespace)
 
-    board = video_storyboard2.ensure_session(_board(), "storyboard-session")
+    board = _board_with_required_images()
     state = namespace["video_storyboard_prepare_entity_bridge"](
         SimpleNamespace(chat_id=99),
         42,
@@ -325,73 +358,34 @@ def test_storyboard_entity_bridge_owns_one_session_and_exact_back_callback() -> 
     assert context.user_data["board"]["entity_return_screen"] == "await_content"
 
 
-def test_storyboard_reference_bridge_requires_and_persists_source_image() -> None:
-    context = SimpleNamespace(user_data={})
+def test_storyboard_existing_image_gate_reuses_scene_images_without_duplicates() -> None:
+    board = _board_with_required_images()
+    assets = list(board["reference_source_assets"])
 
-    def save_board(_context, board):
-        _context.user_data["board"] = video_storyboard2.normalize_state(board)
-        return {"storyboard2": _context.user_data["board"]}
+    assert board["reference_gate_complete"] is True
+    assert len(assets) == int(board["scene_count"])
+    assert [item["owner_id"] for item in assets] == ["scene_1", "scene_2", "scene_3"]
+    assert all(item["owner_type"] == "storyboard_panel" for item in assets)
+    assert all(item["role"] == "start_frame" for item in assets)
 
-    def ui_state(_context):
-        return dict(_context.user_data.get("uiflow3") or video_uiflow3.new_state("storyboard_prompt"))
+    confirmed_again = video_storyboard2.confirm_existing_image_gate(board)
+    assert [item["asset_id"] for item in confirmed_again["reference_source_assets"]] == [
+        item["asset_id"] for item in assets
+    ]
 
-    def save_ui(_context, state):
-        clean = video_uiflow3.normalize_state(state)
-        _context.user_data["uiflow3"] = clean
-        return clean
-
-    namespace = {
-        "deepcopy": deepcopy,
-        "hashlib": hashlib,
-        "json": json,
-        "uuid": uuid,
-        "video_storyboard2": video_storyboard2,
-        "video_uiflow3": video_uiflow3,
-        "save_storyboard2_state": save_board,
-        "storyboard2_state": lambda _context: video_storyboard2.normalize_state(_context.user_data["board"]),
-        "video_uiflow3_state": ui_state,
-        "save_video_uiflow3_state": save_ui,
-        "video_uiflow3_clear_transient": lambda state, keep_return=False: state,
-        "safe_int": lambda value, default=0: int(value or default),
-    }
-    for name in (
-        "video_storyboard_entity_bridge_marker",
-        "video_storyboard_entity_bridge_key",
-        "video_storyboard_prepare_entity_bridge",
-        "video_storyboard_store_reference_source",
-        "video_storyboard_prepare_reference_bridge",
-    ):
-        exec("from __future__ import annotations\n" + _function_source(BOT_SOURCE, name), namespace)
-
-    board = video_storyboard2.ensure_session(_board(), "storyboard-reference-session")
-    state = namespace["video_storyboard_prepare_reference_bridge"](
-        SimpleNamespace(chat_id=99),
-        42,
-        context,
-        board,
-        return_screen="await_content",
+    uploaded = video_storyboard2.add_uploaded_storyboard(
+        _board(),
+        video_storyboard2.storyboard_upload_record(
+            file_id="uploaded-storyboard-image",
+            file_unique_id="uploaded-storyboard-image-unique",
+            file_name="panel.png",
+            mime_type="image/png",
+        ),
     )
-    marker = namespace["video_storyboard_entity_bridge_marker"](state)
-    assert state["navigation"]["current_step"] == "source"
-    assert state["source"]["kind"] == "raw_images"
-    assert state["source"]["required"] is True
-    assert state["source"]["complete"] is False
-    assert marker["phase"] == "reference"
-    assert marker["back_callback"].startswith("vstory|reference_back|")
-
-    state = video_uiflow3.add_source_asset(
-        state,
-        asset_type="image",
-        telegram_file_id="storyboard-reference-image",
-        fingerprint="telegram:storyboard-reference-image",
-    )
-    stored = namespace["video_storyboard_store_reference_source"](
-        context,
-        state,
-        complete=True,
-    )
-    assert stored["reference_gate_complete"] is True
-    assert stored["reference_source_assets"][0]["telegram_file_id"] == "storyboard-reference-image"
+    seeded = video_storyboard2.seed_uploaded_storyboard_images(uploaded)
+    seeded_again = video_storyboard2.seed_uploaded_storyboard_images(seeded)
+    assert video_storyboard2.asset_summary(seeded)["ready_start"] == 1
+    assert video_storyboard2.asset_summary(seeded_again)["ready_start"] == 1
 
 
 def test_storyboard_entity_and_creative_callbacks_have_exact_parent_returns() -> None:
@@ -402,6 +396,8 @@ def test_storyboard_entity_and_creative_callbacks_have_exact_parent_returns() ->
     uiflow_callback = _function_source(BOT_SOURCE, "handle_video_uiflow3_callback")
     storyboard_callback = _function_source(BOT_SOURCE, "_handle_storyboard2_callback_impl")
     scene_keyboard = _function_source(BOT_SOURCE, "storyboard2_scene_review_keyboard")
+    prompt_keyboard = _function_source(BOT_SOURCE, "storyboard2_video_prompt_keyboard")
+    creative_open = _function_source(BOT_SOURCE, "video_storyboard_open_creative_details")
 
     assert 'parent_product") or "") != "storyboard_prompt"' in marker
     assert "storyboard_entity_bridge" in marker
@@ -424,6 +420,9 @@ def test_storyboard_entity_and_creative_callbacks_have_exact_parent_returns() ->
     assert 'move(board, "scene_review"' in creative_finish
     assert 'f"vstory|entity_back|{bridge_key}"' in BOT_SOURCE
     assert '"vstory|creative_screen"' in scene_keyboard
+    assert 'return_to_requirements = marker_phase == "scene_review"' in creative_open
+    assert '"pilot_requirements" if return_to_requirements' in creative_open
+    assert '*storyboard2_nav("vstory|scene_screen")' in prompt_keyboard
 
 
 def test_storyboard_uses_realistic_character_hub_without_duplicate_context() -> None:
@@ -479,11 +478,46 @@ def test_storyboard_uses_realistic_character_hub_without_duplicate_context() -> 
         "👤 Danh sách nhân vật",
         "🖼 Ảnh tham chiếu",
         "🛠 Tùy chỉnh chi tiết",
+        "⚡ Tạo nhanh",
         "✨ Tự động gợi ý",
         "✅ Hoàn tất thiết lập nhân vật",
     }.issubset(set(labels))
-    assert "⚡ Tạo nhanh" not in labels
+    assert [(label, callback) for label, callback in rows[2]] == [
+        ("⚡ Tạo nhanh", "vid3|quick_build"),
+        ("✨ Tự động gợi ý", "vid3|bible_auto"),
+    ]
+    assert rows[3] == [("✅ Hoàn tất thiết lập nhân vật", "vid3|bible_done")]
     assert labels[-2:] == ["⬅️ Quay lại", "🎬 Menu Video"]
+
+
+def test_storyboard_style_has_auto_suggestions_without_quick_build() -> None:
+    class _SceneFlow:
+        CREATIVE_CONTROLS = video_scene3_flow.CREATIVE_CONTROLS
+
+    namespace = {
+        "video_scene3_flow": _SceneFlow,
+        "video_ai_real_pilot_scene3_field_state": lambda state: state,
+        "video_storyboard_entity_bridge_marker": lambda _state: {"active": True},
+        "video_scene3_summary": lambda _entries, _catalog: "Chưa thêm",
+        "video_uiflow3_keyboard": lambda rows: rows,
+        "video_ai_real_pilot_nav_rows": lambda back: [[("⬅️ Quay lại", back), ("🎬 Menu Video", "menu|main_video")]],
+    }
+    exec(
+        "from __future__ import annotations\n"
+        + _function_source(BOT_SOURCE, "video_ai_real_pilot_creative_payload"),
+        namespace,
+    )
+
+    text, rows = namespace["video_ai_real_pilot_creative_payload"](
+        {"creative_controls": {}}
+    )
+    labels = [label for row in rows for label, _callback in row]
+    assert "🎨 Tùy chỉnh phong cách" in text
+    assert all(len(row) == 2 for row in rows[:4])
+    assert rows[4] == [("✨ Tự động gợi ý", "vid3|pilot_creative_auto")]
+    assert "⚡ Tạo nhanh" not in labels
+    assert "✅ Xong phong cách" in labels
+    assert "⏭ Bỏ qua" in labels
 
 
 def test_standard_requirements_keep_environment_once_and_offer_automatic_suggestions() -> None:
@@ -496,14 +530,14 @@ def test_standard_requirements_keep_environment_once_and_offer_automatic_suggest
     class _SceneFlow:
         CREATIVE_CONTROLS = ()
 
-    categories = (
-        ("identity", "🔒 Nhân vật/nhận diện"),
-        ("environment", "🏞 Bối cảnh/kiến trúc"),
-    )
+    categories = video_scene3_flow.PUBLIC_REQUIREMENT_CATEGORIES
     namespace = {
+        "html": html,
         "VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES": categories,
         "video_scene3_flow": _SceneFlow,
         "video_ai_real_pilot_scene3_field_state": lambda state: state,
+        "video_ai_real_uses_inline_requirements": lambda _state: True,
+        "video_scene3_entry_label": lambda entry: str(entry.get("value") or "Chưa thêm"),
         "video_scene3_summary": lambda _entries, _catalog: "Chưa thêm",
         "video_uiflow3_keyboard": lambda rows: rows,
         "video_ai_real_pilot_nav_rows": lambda back: [[("⬅️ Quay lại", back), ("🎬 Menu Video", "menu|main_video")]],
@@ -515,16 +549,48 @@ def test_standard_requirements_keep_environment_once_and_offer_automatic_suggest
     )
 
     text, rows = namespace["video_ai_real_pilot_requirements_payload"](
-        {"preservation_requirements": {}}
+        {
+            "preservation_requirements": {
+                "identity": {"enabled": True, "value": "Khuôn mặt nhất quán"},
+            }
+        }
     )
     labels = [label for row in rows for label, _callback in row]
     callbacks = [callback for row in rows for _label, callback in row]
+    assert len(categories) == 7
+    assert all(len(row) == 2 for row in rows[:4])
     assert "➕ Bối cảnh/kiến trúc" in labels
     assert "✨ Tự động gợi ý" in labels
-    assert "👁 Xem mục đã chọn" in labels
+    assert "👁 Xem mục đã chọn" not in labels
     assert "vid3|pilot_requirement_auto" in callbacks
-    assert "vid3|pilot_requirement_view" in callbacks
+    assert "vid3|pilot_requirement_view" not in callbacks
+    assert "• 🧍 Nhân vật/nhận diện: Khuôn mặt nhất quán" in text
     assert "không hỏi lại ở màn Nhân vật" in text
+
+
+def test_inline_requirements_are_scoped_to_video_ai_and_storyboard_only() -> None:
+    namespace: dict[str, object] = {}
+    exec(
+        "from __future__ import annotations\n"
+        + _function_source(BOT_SOURCE, "video_ai_real_uses_inline_requirements"),
+        namespace,
+    )
+    uses_inline = namespace["video_ai_real_uses_inline_requirements"]
+
+    assert uses_inline({"parent_product": "video_ai_real"}) is True
+    assert uses_inline({"parent_product": "storyboard_prompt"}) is True
+    for protected_product in ("script_image_video", "video_trend", "multi_scene_film"):
+        assert uses_inline({"parent_product": protected_product}) is False
+
+    payload_source = _function_source(BOT_SOURCE, "video_ai_real_pilot_requirements_payload")
+    legacy_start = payload_source.index("else:", payload_source.index("if inline_summary:"))
+    legacy_rows = payload_source.index("rows.extend([", legacy_start)
+    legacy_branch = payload_source[
+        legacy_start:
+        payload_source.index("rows.extend([", legacy_rows + 1)
+    ]
+    assert "✨ Tự động gợi ý" in legacy_branch
+    assert "👁 Xem mục đã chọn" in legacy_branch
 
 
 def test_all_middle_suggestion_catalogs_have_five_distinct_pages() -> None:
@@ -576,18 +642,28 @@ def test_environment_catalog_covers_all_required_location_families() -> None:
         assert expected in joined
 
 
-def test_requirement_review_shows_selected_values_and_has_one_parent_back() -> None:
-    payload_source = _function_source(BOT_SOURCE, "video_ai_real_pilot_requirement_review_payload")
+def test_requirement_values_are_inline_and_legacy_review_returns_to_hub() -> None:
+    payload_source = _function_source(BOT_SOURCE, "video_ai_real_pilot_requirements_payload")
     screen = _function_source(BOT_SOURCE, "video_ai_real_pilot_screen_payload")
     callback = _function_source(BOT_SOURCE, "handle_video_uiflow3_callback")
 
     assert "preservation_requirements" in payload_source
-    assert '"⬅️ Về Yêu cầu"' in payload_source
-    assert '"vid3|pilot_requirement_review_back"' in payload_source
-    assert '"menu|main_video"' not in payload_source
+    inline_branch = payload_source[
+        payload_source.index("if inline_summary:"):
+        payload_source.index("else:", payload_source.index("if inline_summary:"))
+    ]
+    assert "✨ Tự động gợi ý" in inline_branch
+    assert "👁 Xem mục đã chọn" not in inline_branch
+    assert 'selection_copy = "Đã chọn:\\n" + selected_copy' in payload_source
     assert 'view == "pilot_requirement_review"' in screen
-    assert 'action == "pilot_requirement_view"' in callback
-    assert 'action == "pilot_requirement_review_back"' in callback
+    assert "video_ai_real_uses_inline_requirements(state)" in screen
+    stale_view = callback[
+        callback.index('elif action == "pilot_requirement_view":'):
+        callback.index('elif action == "pilot_requirement_back":')
+    ]
+    assert "video_ai_real_uses_inline_requirements(state)" in stale_view
+    assert 'else "pilot_requirement_review"' in stale_view
+    assert 'video_uiflow3_open_view(state, "pilot_requirements")' in stale_view
 
 
 def test_storyboard_middle_uses_pilot_creative_then_requirements_before_scene_plan() -> None:
@@ -597,9 +673,17 @@ def test_storyboard_middle_uses_pilot_creative_then_requirements_before_scene_pl
     callback = _function_source(BOT_SOURCE, "handle_video_uiflow3_callback")
     profile_callback = _function_source(BOT_SOURCE, "handle_video_profile_studio_callback")
 
-    assert 'video_uiflow3_open_view(bridge_state, "pilot_creative_controls")' in creative_open
+    assert '"pilot_creative_controls"' in creative_open
+    assert '"pilot_requirements"' in creative_open
     assert "video_profile_scene1_render" not in creative_open
     assert "video_storyboard_open_creative_details" in entity_finish
+    assert 'action == "pilot_creative_auto"' in callback
+    creative_auto = callback[
+        callback.index('elif action == "pilot_creative_auto":'):
+        callback.index('elif action == "pilot_creative_back":')
+    ]
+    assert "video_storyboard_entity_bridge_marker(state)" in creative_auto
+    assert 'raise ValueError("video_uiflow3_action_not_relevant")' in creative_auto
     assert 'action == "pilot_requirement_auto"' in callback
     assert 'marker["phase"] = "requirements"' in callback
     assert "video_storyboard_finish_creative_details" in callback

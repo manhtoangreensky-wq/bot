@@ -574,6 +574,94 @@ def set_reference_source_assets(
     return normalize_state(current)
 
 
+def scene_image_reference_assets(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Expose the existing Storyboard images to the entity reference editor."""
+
+    current = normalize_state(state)
+    assets: list[dict[str, Any]] = []
+    for scene in current.get("scenes") or []:
+        scene_index = _safe_int(scene.get("scene_index"), 0)
+        scene_id = str(scene.get("scene_id") or f"scene_{scene_index}")
+        for slot in ("start", "end"):
+            image = dict(scene.get(f"{slot}_image") or {})
+            if image.get("status") != "ready":
+                continue
+            file_id = _clean_text(image.get("file_id"), 1000)
+            result_url = _clean_text(image.get("result_url"), 1000)
+            media_ref = file_id or result_url
+            if not media_ref:
+                continue
+            assets.append({
+                "asset_id": f"storyboard_{scene_index}_{slot}",
+                "asset_type": "storyboard_panel",
+                "owner_type": "storyboard_panel",
+                "owner_id": scene_id,
+                "role": f"{slot}_frame",
+                "telegram_file_id": media_ref,
+                "file_id": file_id,
+                "result_url": result_url,
+                "fingerprint": f"storyboard:{current.get('storyboard_session_id')}:{scene_index}:{slot}:{media_ref}",
+                "metadata": {
+                    "scene_index": scene_index,
+                    "scene_id": scene_id,
+                    "slot": slot,
+                    "source_type": str(image.get("source_type") or "storyboard_image"),
+                    "image_id": str(image.get("image_id") or ""),
+                },
+            })
+    return assets
+
+
+def confirm_existing_image_gate(state: dict[str, Any]) -> dict[str, Any]:
+    """Use the canonical Storyboard image manager as the sole image gate."""
+
+    current = normalize_state(state)
+    summary = asset_summary(current)
+    if not summary.get("ok"):
+        raise ValueError("storyboard_reference_image_required")
+    return set_reference_source_assets(
+        current,
+        scene_image_reference_assets(current),
+        complete=True,
+    )
+
+
+def seed_uploaded_storyboard_images(state: dict[str, Any]) -> dict[str, Any]:
+    """Reuse uploaded image panels in the existing per-scene image manager."""
+
+    current = normalize_state(state)
+    assigned_file_ids = {
+        _clean_text(image.get("file_id"), 1000)
+        for scene in current.get("scenes") or []
+        for image in (
+            dict(scene.get("start_image") or {}),
+            dict(scene.get("end_image") or {}),
+        )
+        if image.get("status") == "ready" and _clean_text(image.get("file_id"), 1000)
+    }
+    for item in current.get("uploaded_storyboard_files") or []:
+        mime_type = _clean_text(item.get("mime_type"), 120).lower()
+        file_id = _clean_text(item.get("file_id"), 1000)
+        if (
+            not file_id
+            or file_id in assigned_file_ids
+            or not mime_type.startswith("image/")
+        ):
+            continue
+        if not next_missing_image_target(current):
+            break
+        current = assign_next_image(current, {
+            "file_id": file_id,
+            "source_type": "uploaded_storyboard",
+            "artifact_receipt": {},
+            "prompt_version": 0,
+            "prompt": _clean_text(item.get("caption"), 3000),
+            "negative_prompt": "",
+        })
+        assigned_file_ids.add(file_id)
+    return normalize_state(current)
+
+
 def apply_middle_contract(
     state: dict[str, Any],
     *,

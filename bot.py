@@ -72257,7 +72257,7 @@ VIDEO_UIFLOW3_STEP_ACTIONS = {
         "ref_remove", "image_ai", "quick_build",
         "pilot_creative", "pilot_creative_pick", "pilot_creative_rotate",
         "pilot_creative_custom", "pilot_creative_remove", "pilot_creative_restore",
-        "pilot_creative_done", "pilot_creative_skip", "pilot_creative_back",
+        "pilot_creative_auto", "pilot_creative_done", "pilot_creative_skip", "pilot_creative_back",
         "pilot_requirement", "pilot_requirement_pick", "pilot_requirement_rotate",
         "pilot_requirement_custom", "pilot_requirement_remove", "pilot_requirement_restore",
         "pilot_requirement_auto", "pilot_requirement_view", "pilot_requirement_review_back",
@@ -72398,7 +72398,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
             "assignment_done", "prompt_scenes", "prompt_advanced", "prompts_done",
             "branding_done", "summary_done", "quality_done",
             "invoice_back", "invoice_confirm", "confirmation_back", "confirmation_submit",
-            "pilot_creative_done", "pilot_creative_skip", "pilot_creative_back",
+            "pilot_creative_auto", "pilot_creative_done", "pilot_creative_skip", "pilot_creative_back",
             "pilot_requirement_auto", "pilot_requirement_view", "pilot_requirement_review_back",
             "pilot_requirement_done", "pilot_requirement_skip", "pilot_requirement_back",
             "pilot_scene_plan_back", "pilot_creative_rotate", "pilot_creative_custom",
@@ -76506,6 +76506,7 @@ def video_ai_real_pilot_field_detail_payload(
 def video_ai_real_pilot_creative_payload(state: dict) -> tuple[str, InlineKeyboardMarkup]:
     scene3_state = video_ai_real_pilot_scene3_field_state(state)
     entries = dict(scene3_state.get("creative_controls") or {})
+    storyboard_bridge = bool(video_storyboard_entity_bridge_marker(state))
     rows: list[list[tuple[str, str]]] = []
     values = list(video_scene3_flow.CREATIVE_CONTROLS)
     for offset in range(0, len(values), 2):
@@ -76516,7 +76517,9 @@ def video_ai_real_pilot_creative_payload(state: dict) -> tuple[str, InlineKeyboa
             )
             for key, label in values[offset:offset + 2]
         ])
-    if str(state.get("parent_product") or "") != "multi_scene_film":
+    if storyboard_bridge:
+        rows.append([("✨ Tự động gợi ý", "vid3|pilot_creative_auto")])
+    elif str(state.get("parent_product") or "") != "multi_scene_film":
         rows.append([("⚡ Tạo nhanh", "vid3|quick_build")])
     rows.extend([
         [("✅ Xong phong cách", "vid3|pilot_creative_done"), ("⏭ Bỏ qua", "vid3|pilot_creative_skip")],
@@ -76532,30 +76535,68 @@ def video_ai_real_pilot_creative_payload(state: dict) -> tuple[str, InlineKeyboa
     )
 
 
+def video_ai_real_uses_inline_requirements(state: dict) -> bool:
+    return str(state.get("parent_product") or "") in {
+        "video_ai_real",
+        "storyboard_prompt",
+    }
+
+
 def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKeyboardMarkup]:
     scene3_state = video_ai_real_pilot_scene3_field_state(state)
     entries = dict(scene3_state.get("preservation_requirements") or {})
     rows: list[list[tuple[str, str]]] = []
     values = list(VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES)
-    for offset in range(0, len(values), 2):
-        rows.append([
+    inline_summary = video_ai_real_uses_inline_requirements(state)
+    if inline_summary:
+        requirement_buttons = [
             (
                 f"{'✅' if (entries.get(key) or {}).get('enabled') else '➕'} {label.split(' ', 1)[-1]}",
                 f"vid3|pilot_requirement|{key}",
             )
-            for key, label in values[offset:offset + 2]
+            for key, label in values
+        ]
+        requirement_buttons.append(("✨ Tự động gợi ý", "vid3|pilot_requirement_auto"))
+        for offset in range(0, len(requirement_buttons), 2):
+            rows.append(requirement_buttons[offset:offset + 2])
+    else:
+        for offset in range(0, len(values), 2):
+            rows.append([
+                (
+                    f"{'✅' if (entries.get(key) or {}).get('enabled') else '➕'} {label.split(' ', 1)[-1]}",
+                    f"vid3|pilot_requirement|{key}",
+                )
+                for key, label in values[offset:offset + 2]
+            ])
+        rows.extend([
+            [("✨ Tự động gợi ý", "vid3|pilot_requirement_auto")],
+            [("👁 Xem mục đã chọn", "vid3|pilot_requirement_view")],
         ])
     rows.extend([
-        [("✨ Tự động gợi ý", "vid3|pilot_requirement_auto")],
-        [("👁 Xem mục đã chọn", "vid3|pilot_requirement_view")],
         [("⏭ Bỏ qua yêu cầu", "vid3|pilot_requirement_skip"), ("✅ Xong yêu cầu", "vid3|pilot_requirement_done")],
         *video_ai_real_pilot_nav_rows(back="vid3|pilot_requirement_back"),
     ])
+    if inline_summary:
+        selected_lines = []
+        for key, label in values:
+            entry = dict(entries.get(key) or {})
+            if not entry.get("enabled"):
+                continue
+            selected_lines.append(
+                f"• {label}: {html.escape(video_scene3_entry_label(entry))}"
+            )
+        selected_copy = "\n".join(selected_lines) if selected_lines else "• Chưa thêm"
+        selection_copy = "Đã chọn:\n" + selected_copy
+    else:
+        selection_copy = (
+            "Đã chọn: "
+            + video_scene3_summary(entries, VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES)
+        )
     return (
         "🔒 Yêu cầu cần giữ nguyên\n\n"
         "Chọn đúng chi tiết phải nhất quán giữa các cảnh. Mỗi lần hiển thị 5 gợi ý; có thể đổi sang nhóm khác hoặc tự nhập. "
         "Bối cảnh/kiến trúc được chọn tại đây và không hỏi lại ở màn Nhân vật.\n\n"
-        f"Đã chọn: {video_scene3_summary(entries, VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES)}",
+        f"{selection_copy}",
         video_uiflow3_keyboard(rows),
     )
 
@@ -77438,6 +77479,8 @@ def video_ai_real_pilot_screen_payload(
             key=str(state.get("active_pilot_requirement") or ""),
         )
     if view == "pilot_requirement_review":
+        if video_ai_real_uses_inline_requirements(state):
+            return video_ai_real_pilot_requirements_payload(state)
         return video_ai_real_pilot_requirement_review_payload(state)
 
     if step == "entry" and not view:
@@ -77576,15 +77619,17 @@ def video_ai_real_pilot_screen_payload(
             [("👥 Số nhân vật", "vid3|view|character_count"), ("👤 Danh sách nhân vật", "vid3|view|character_list")],
             [("🖼 Ảnh tham chiếu", "vid3|view|references"), ("🛠 Tùy chỉnh chi tiết", "vid3|view|bible_extras")],
         ]
-        if (
-            not storyboard_bridge
-            and str(state.get("parent_product") or "") != "multi_scene_film"
-        ):
+        if storyboard_bridge:
+            rows.append([
+                ("⚡ Tạo nhanh", "vid3|quick_build"),
+                ("✨ Tự động gợi ý", "vid3|bible_auto"),
+            ])
+            rows.append([("✅ Hoàn tất thiết lập nhân vật", "vid3|bible_done")])
+        elif str(state.get("parent_product") or "") != "multi_scene_film":
             rows.append([("⚡ Tạo nhanh", "vid3|quick_build")])
-        rows.extend([
-            [("✨ Tự động gợi ý", "vid3|bible_auto"), ("✅ Hoàn tất thiết lập nhân vật", "vid3|bible_done")],
-            *video_ai_real_pilot_nav_rows(back=bridge_back),
-        ])
+        if not storyboard_bridge:
+            rows.append([("✨ Tự động gợi ý", "vid3|bible_auto"), ("✅ Hoàn tất thiết lập nhân vật", "vid3|bible_done")])
+        rows.extend(video_ai_real_pilot_nav_rows(back=bridge_back))
         return (
             f"{progress_prefix}👥 Nhân vật và tham chiếu\n\n"
             f"Nhân vật: {len(characters)}\n"
@@ -80300,6 +80345,20 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
     save_video_uiflow3_state(context, state)
 
     try:
+        storyboard_marker = video_storyboard_entity_bridge_marker(state)
+        if str(storyboard_marker.get("phase") or "") == "reference":
+            storyboard_marker["phase"] = "assets"
+            legacy = dict(state.get("legacy_compat") or {})
+            legacy["storyboard_entity_bridge"] = storyboard_marker
+            state["legacy_compat"] = legacy
+            save_video_uiflow3_state(context, state)
+            board = video_storyboard_open_required_assets(
+                storyboard2_state(context),
+                return_screen=str(storyboard_marker.get("return_screen") or "content_source"),
+            )
+            save_storyboard2_state(context, board)
+            await query.answer()
+            return await storyboard2_render(query, context, board)
         if action != "entry" and not video_uiflow3_action_allowed(state, action):
             raise ValueError("video_uiflow3_action_not_relevant")
         if action == "entry":
@@ -80467,26 +80526,10 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             source_product = str(state.get("parent_product") or "")
             if source_product == "self_shot_scene_change" and not source_assets:
                 raise ValueError("source_video_required")
-            storyboard_marker = video_storyboard_entity_bridge_marker(state)
-            if str(storyboard_marker.get("phase") or "") == "reference":
-                video_storyboard_store_reference_source(context, state, complete=True)
-                bridge_key = str(storyboard_marker.get("bridge_key") or "")
-                storyboard_marker["phase"] = "entity"
-                storyboard_marker["back_callback"] = f"vstory|entity_back|{bridge_key}"
-                legacy = dict(state.get("legacy_compat") or {})
-                legacy["storyboard_entity_bridge"] = storyboard_marker
-                state["legacy_compat"] = legacy
-                state = video_uiflow3_clear_transient(state, keep_return=False)
-                state["navigation"].update({
-                    "current_step": "production_bible",
-                    "visible_step_stack": [],
-                    "return_to": None,
-                })
-            else:
-                state = video_uiflow3_go(
-                    state,
-                    "content_hub" if video_uiflow3.image_source_follows_format(state) else "format",
-                )
+            state = video_uiflow3_go(
+                state,
+                "content_hub" if video_uiflow3.image_source_follows_format(state) else "format",
+            )
         elif action == "ratio" and values:
             ratio = {"9x16": "9:16", "16x9": "16:9", "1x1": "1:1", "4x5": "4:5"}.get(values[0], "")
             if not ratio:
@@ -81034,6 +81077,21 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 "pilot_creative_detail",
                 active_pilot_creative=key,
             )
+        elif action == "pilot_creative_auto":
+            if not video_storyboard_entity_bridge_marker(state):
+                raise ValueError("video_uiflow3_action_not_relevant")
+            scene3_state = video_ai_real_pilot_scene3_field_state(state)
+            for key, _label in video_scene3_flow.CREATIVE_CONTROLS:
+                entry = dict((scene3_state.get("creative_controls") or {}).get(key) or {})
+                if not bool(entry.get("enabled")):
+                    scene3_state = video_scene3_flow.select_unified_field_suggestion(
+                        scene3_state,
+                        "creative_controls",
+                        key,
+                        1,
+                    )
+            state = video_ai_real_pilot_merge_scene3_fields(state, scene3_state)
+            state = video_uiflow3_open_view(state, "pilot_creative_controls")
         elif action == "pilot_creative_back":
             if str(state.get("ui_view") or "") == "pilot_creative_detail":
                 state = video_uiflow3_open_view(state, "pilot_creative_controls")
@@ -81126,7 +81184,12 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state = video_ai_real_pilot_merge_scene3_fields(state, scene3_state)
             state = video_uiflow3_open_view(state, "pilot_requirements")
         elif action == "pilot_requirement_view":
-            state = video_uiflow3_open_view(state, "pilot_requirement_review")
+            state = video_uiflow3_open_view(
+                state,
+                "pilot_requirements"
+                if video_ai_real_uses_inline_requirements(state)
+                else "pilot_requirement_review",
+            )
         elif action == "pilot_requirement_review_back":
             state = video_uiflow3_open_view(state, "pilot_requirements")
         elif action == "pilot_requirement_back":
@@ -81195,10 +81258,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             storyboard_marker = video_storyboard_entity_bridge_marker(state)
             if storyboard_marker:
                 if str(storyboard_marker.get("phase") or "") != "entity":
-                    await query.answer(
-                        "Nút Tạo nhanh này thuộc màn Nhân vật cũ. Phiên Storyboard hiện tại vẫn được giữ.",
-                        show_alert=True,
-                    )
+                    await query.answer()
                     return await video_uiflow3_render(query, context, state)
                 state = video_ai_real_build_quick_plan(state, bible_only=True)
                 state = save_video_uiflow3_state(context, state)
@@ -82790,13 +82850,13 @@ def storyboard2_keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMar
 
 
 def storyboard2_nav(back_callback: str) -> list[list[tuple[str, str]]]:
-    return [[("⬅️ Quay lại", back_callback), ("🏠 Menu chính", "menu|main")]]
+    return [[("⬅️ Quay lại", back_callback), ("🎬 Menu Video", "menu|main_video")]]
 
 
 def storyboard2_entry_keyboard() -> InlineKeyboardMarkup:
     return storyboard2_keyboard([
         [("✨ Tạo storyboard AI", "vstory|ai"), ("📎 Gửi storyboard có sẵn", "vstory|upload")],
-        [("⬅️ Quay lại", "menu|main_video"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Menu Video", "menu|main_video")],
     ])
 
 
@@ -82914,6 +82974,18 @@ def storyboard2_scene_review_keyboard(board: dict) -> InlineKeyboardMarkup:
     ])
 
 
+def storyboard2_asset_back_callback(board: dict) -> str:
+    current = video_storyboard2.normalize_state(board)
+    if bool(current.get("middle_complete")):
+        return "vstory|scene_screen"
+    return {
+        "suggestions": "vstory|suggestions_screen",
+        "await_content": "vstory|content_manual",
+        "ratio": "vstory|ratio_screen",
+        "content_source": "vstory|content_screen",
+    }.get(str(current.get("entity_return_screen") or ""), "vstory|content_screen")
+
+
 def storyboard2_asset_keyboard(board: dict) -> InlineKeyboardMarkup:
     board = video_storyboard2.normalize_state(board)
     mode = str(board.get("asset_mode") or "start_only")
@@ -82924,7 +82996,7 @@ def storyboard2_asset_keyboard(board: dict) -> InlineKeyboardMarkup:
             (("✅ " if mode == "start_end" else "□ ") + "Hai ảnh/cảnh", "vstory|asset_mode|start_end"),
         ],
         [("🗂️ Sắp xếp / thay ảnh", "vstory|asset_view"), ("✅ Dùng các ảnh này", "vstory|assets_done")],
-        *storyboard2_nav("vstory|scene_screen"),
+        *storyboard2_nav(storyboard2_asset_back_callback(board)),
     ]
     return storyboard2_keyboard(rows)
 
@@ -82959,7 +83031,7 @@ def storyboard2_video_prompt_keyboard() -> InlineKeyboardMarkup:
         [("🚫 Sửa loại trừ", "vstory|video_negative"), ("👁️ Xem đầy đủ", "vstory|video_full")],
         [("⬅️ Cảnh trước", "vstory|video_prev"), ("➡️ Cảnh sau", "vstory|video_next")],
         [("🎞️ Xem nội dung cảnh", "vstory|scene_screen"), ("✅ Xong câu lệnh", "vstory|video_done")],
-        *storyboard2_nav("vstory|assets_screen"),
+        *storyboard2_nav("vstory|scene_screen"),
     ])
 
 
@@ -83199,8 +83271,8 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
     if screen == "help":
         return (
             "ℹ️ <b>Storyboard hoạt động thế nào?</b>\n\n"
-            "Chọn số cảnh và tỉ lệ → viết nội dung → nhân vật/bối cảnh → phong cách/chuyển động → "
-            "duyệt kế hoạch cảnh → chuẩn bị ảnh đầu/ảnh cuối theo cảnh → "
+            "Chọn số cảnh và tỉ lệ → viết nội dung → chuẩn bị ảnh Storyboard bắt buộc → nhân vật → "
+            "phong cách và yêu cầu giữ nguyên → duyệt kế hoạch cảnh → "
             "duyệt câu lệnh chuyển động → chọn chuyển cảnh và phần bổ sung → chọn gói, xem hóa đơn rồi xác nhận.\n\n"
             "Ảnh AI có hóa đơn và xác nhận riêng. Video chỉ trừ Xu sau khi video hợp lệ đã được gửi thành công.",
             storyboard2_keyboard(storyboard2_nav("vstory|entry")),
@@ -83484,6 +83556,19 @@ def video_storyboard_entity_bridge_key(board: dict) -> str:
     ).hexdigest()[:24]
 
 
+def video_storyboard_open_required_assets(
+    board: dict,
+    *,
+    return_screen: str,
+    seed_uploaded: bool = False,
+) -> dict:
+    current = video_storyboard2.normalize_state(board)
+    if seed_uploaded:
+        current = video_storyboard2.seed_uploaded_storyboard_images(current)
+    current["entity_return_screen"] = str(return_screen or "content_source")
+    return video_storyboard2.move(current, "assets", push=False, awaiting_input="")
+
+
 def video_storyboard_prepare_entity_bridge(
     target,
     user_id: int,
@@ -83502,6 +83587,11 @@ def video_storyboard_prepare_entity_bridge(
         raise ValueError("storyboard_aspect_ratio_missing")
     if not content:
         raise ValueError("storyboard_content_missing")
+    if (
+        not bool(current.get("reference_gate_complete"))
+        or not bool(video_storyboard2.asset_summary(current).get("ok"))
+    ):
+        raise ValueError("storyboard_reference_image_missing")
 
     bridge_key = video_storyboard_entity_bridge_key(current)
     current["entity_return_screen"] = str(return_screen or "content_source")
@@ -83545,23 +83635,22 @@ def video_storyboard_prepare_entity_bridge(
             state["bible"] = deepcopy(dict(current.get("entity_bible") or {}))
         if list(current.get("entity_references") or []):
             state["references"] = deepcopy(list(current.get("entity_references") or []))
-        if list(current.get("reference_source_assets") or []):
-            source_assets = deepcopy(list(current.get("reference_source_assets") or []))
-            state["source"].update({
-                "kind": "raw_images",
-                "required": True,
-                "complete": True,
-                "assets": source_assets,
-                "asset_ids": [
-                    str(item.get("asset_id") or "")
-                    for item in source_assets
-                    if str(item.get("asset_id") or "")
-                ],
-            })
         if dict(current.get("entity_needs") or {}):
             state["needs"] = deepcopy(dict(current.get("entity_needs") or {}))
         state = video_uiflow3.normalize_state(state)
 
+    source_assets = deepcopy(list(current.get("reference_source_assets") or []))
+    state["source"].update({
+        "kind": "raw_images",
+        "required": True,
+        "complete": bool(source_assets),
+        "assets": source_assets,
+        "asset_ids": [
+            str(item.get("asset_id") or "")
+            for item in source_assets
+            if str(item.get("asset_id") or "")
+        ],
+    })
     state["needs"]["locations"] = "SKIP"
     if not (state.get("bible") or {}).get("locations"):
         state = video_uiflow3.set_location_count(state, 0)
@@ -83590,102 +83679,6 @@ def video_storyboard_prepare_entity_bridge(
     return save_video_uiflow3_state(context, state)
 
 
-def video_storyboard_store_reference_source(
-    context,
-    raw_state: dict,
-    *,
-    complete: bool,
-) -> dict:
-    state = video_uiflow3.normalize_state(raw_state)
-    marker = video_storyboard_entity_bridge_marker(state)
-    board = storyboard2_state(context)
-    if (
-        not marker
-        or str(marker.get("storyboard_session_id") or "")
-        != str(board.get("storyboard_session_id") or "")
-    ):
-        raise ValueError("storyboard_reference_parent_missing")
-    board = video_storyboard2.set_reference_source_assets(
-        board,
-        [dict(item) for item in (state.get("source") or {}).get("assets") or []],
-        complete=complete,
-    )
-    save_storyboard2_state(context, board)
-    return board
-
-
-def video_storyboard_prepare_reference_bridge(
-    target,
-    user_id: int,
-    context,
-    board: dict,
-    *,
-    return_screen: str,
-) -> dict:
-    current = video_storyboard2.normalize_state(board)
-    state = video_storyboard_prepare_entity_bridge(
-        target,
-        user_id,
-        context,
-        current,
-        return_screen=return_screen,
-    )
-    bridge_key = video_storyboard_entity_bridge_key(current)
-    source_assets = [
-        deepcopy(dict(item))
-        for item in (state.get("source") or {}).get("assets") or []
-        if isinstance(item, dict)
-    ]
-    if not source_assets:
-        source_assets = [
-            deepcopy(dict(item))
-            for item in current.get("reference_source_assets") or []
-            if isinstance(item, dict)
-        ]
-    if not source_assets:
-        for index, item in enumerate(current.get("uploaded_storyboard_files") or [], 1):
-            file_id = str(item.get("file_id") or "").strip()
-            if not file_id:
-                continue
-            source_assets.append({
-                "asset_id": f"source_{index:02d}",
-                "asset_type": "image",
-                "owner_type": "raw_source",
-                "owner_id": "",
-                "role": "source",
-                "telegram_file_id": file_id,
-                "fingerprint": "telegram:" + str(item.get("file_unique_id") or file_id),
-                "metadata": {
-                    "file_name": str(item.get("file_name") or ""),
-                    "mime_type": str(item.get("mime_type") or "image/*"),
-                    "source_message_id": safe_int(item.get("message_id"), 0),
-                },
-            })
-
-    state["source"]["kind"] = "raw_images"
-    state["source"]["required"] = True
-    state["source"]["assets"] = source_assets
-    state["source"]["asset_ids"] = [
-        str(item.get("asset_id") or "")
-        for item in source_assets
-        if str(item.get("asset_id") or "")
-    ]
-    state["source"]["complete"] = bool(source_assets)
-    marker = video_storyboard_entity_bridge_marker(state)
-    marker["phase"] = "reference"
-    marker["back_callback"] = f"vstory|reference_back|{bridge_key}"
-    legacy = dict(state.get("legacy_compat") or {})
-    legacy["storyboard_entity_bridge"] = marker
-    state["legacy_compat"] = legacy
-    state = video_uiflow3_clear_transient(state, keep_return=False)
-    state["navigation"].update({
-        "current_step": "source",
-        "visible_step_stack": [],
-        "return_to": None,
-    })
-    return save_video_uiflow3_state(context, state)
-
-
 async def video_storyboard_open_creative_details(
     target,
     user_id: int,
@@ -83700,9 +83693,11 @@ async def video_storyboard_open_creative_details(
         raise ValueError("storyboard_entity_bridge_missing")
     if str(marker.get("storyboard_session_id") or "") != str(current.get("storyboard_session_id") or ""):
         raise ValueError("storyboard_entity_parent_missing")
-    if str(marker.get("phase") or "") not in {"creative", "scene_review"}:
+    marker_phase = str(marker.get("phase") or "")
+    if marker_phase not in {"creative", "scene_review"}:
         raise ValueError("storyboard_entity_bridge_phase_mismatch")
-    marker["phase"] = "creative"
+    return_to_requirements = marker_phase == "scene_review"
+    marker["phase"] = "requirements" if return_to_requirements else "creative"
     bridge_state["creative_controls"] = deepcopy(dict(current.get("creative_controls") or {}))
     bridge_state["preservation_requirements"] = deepcopy(
         dict(current.get("preservation_requirements") or {})
@@ -83710,7 +83705,10 @@ async def video_storyboard_open_creative_details(
     legacy = dict(bridge_state.get("legacy_compat") or {})
     legacy["storyboard_entity_bridge"] = marker
     bridge_state["legacy_compat"] = legacy
-    bridge_state = video_uiflow3_open_view(bridge_state, "pilot_creative_controls")
+    bridge_state = video_uiflow3_open_view(
+        bridge_state,
+        "pilot_requirements" if return_to_requirements else "pilot_creative_controls",
+    )
     bridge_state = save_video_uiflow3_state(context, bridge_state)
     return await video_uiflow3_render(target, context, bridge_state)
 
@@ -105809,7 +105807,13 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
     async def render_storyboard_current_owner():
         bridge_state = video_uiflow3_state(context)
         marker = video_storyboard_entity_bridge_marker(bridge_state)
-        if marker and str(marker.get("phase") or "") in {"reference", "entity", "creative", "requirements"}:
+        if marker and str(marker.get("phase") or "") == "reference":
+            current_board = video_storyboard_open_required_assets(
+                storyboard2_state(context),
+                return_screen=str(marker.get("return_screen") or "content_source"),
+            )
+            return await storyboard2_render(query, context, persist(current_board))
+        if marker and str(marker.get("phase") or "") in {"entity", "creative", "requirements"}:
             return await video_uiflow3_render(query, context, bridge_state)
         return await storyboard2_render(query, context, storyboard2_state(context))
 
@@ -105819,17 +105823,19 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
             return_screen = "ratio" if str(board.get("entry_mode") or "") == "existing" else (
                 "suggestions" if str(board.get("content_mode") or "") == "suggestion" else "content_source"
             )
-        bridge_builder = (
-            video_storyboard_prepare_entity_bridge
-            if bool(board.get("reference_gate_complete"))
-            else video_storyboard_prepare_reference_bridge
-        )
-        bridge_state = bridge_builder(
-            query,
-            uid,
-            context,
-            board,
-            return_screen=return_screen,
+        if (
+            not bool(board.get("reference_gate_complete"))
+            or not bool(video_storyboard2.asset_summary(board).get("ok"))
+        ):
+            board = video_storyboard_open_required_assets(
+                board,
+                return_screen=return_screen,
+            )
+            if action in deferred_answer_actions:
+                await query.answer()
+            return await storyboard2_render(query, context, persist(board))
+        bridge_state = video_storyboard_prepare_entity_bridge(
+            query, uid, context, board, return_screen=return_screen
         )
         if action in deferred_answer_actions:
             await query.answer()
@@ -105951,15 +105957,13 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
                 board = video_storyboard2.apply_uploaded_storyboard(board)
             except ValueError as exc:
                 return await query.answer(f"Chưa thể dùng storyboard: {str(exc)}", show_alert=True)
-            bridge_state = video_storyboard_prepare_reference_bridge(
-                query,
-                uid,
-                context,
+            board = video_storyboard_open_required_assets(
                 board,
                 return_screen="ratio",
+                seed_uploaded=True,
             )
             await query.answer()
-            return await video_uiflow3_render(query, context, bridge_state)
+            return await storyboard2_render(query, context, persist(board))
         else:
             board = video_storyboard2.move(board, "content_source", awaiting_input="")
         await query.answer()
@@ -106019,19 +106023,14 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
         ):
             await query.answer("Nút quay lại này thuộc phiên Storyboard cũ. Phiên hiện tại vẫn được giữ.", show_alert=True)
             return await render_storyboard_current_owner()
-        video_storyboard_store_reference_source(context, bridge_state, complete=False)
-        marker["phase"] = "content"
+        marker["phase"] = "assets"
         legacy = dict(bridge_state.get("legacy_compat") or {})
         legacy["storyboard_entity_bridge"] = marker
         bridge_state["legacy_compat"] = legacy
         save_video_uiflow3_state(context, bridge_state)
-        target_screen = str(board.get("entity_return_screen") or "content_source")
-        awaiting_input = "content" if target_screen == "await_content" else ""
-        board = video_storyboard2.move(
+        board = video_storyboard_open_required_assets(
             storyboard2_state(context),
-            target_screen,
-            push=False,
-            awaiting_input=awaiting_input,
+            return_screen=str(marker.get("return_screen") or "content_source"),
         )
         await query.answer()
         return await storyboard2_render(query, context, persist(board))
@@ -106048,21 +106047,18 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
         ):
             await query.answer("Nút quay lại này thuộc phiên Storyboard cũ. Phiên hiện tại vẫn được giữ.", show_alert=True)
             return await render_storyboard_current_owner()
-        bridge_key = str(marker.get("bridge_key") or "")
-        marker["phase"] = "reference"
-        marker["back_callback"] = f"vstory|reference_back|{bridge_key}"
+        marker["phase"] = "assets"
         legacy = dict(bridge_state.get("legacy_compat") or {})
         legacy["storyboard_entity_bridge"] = marker
         bridge_state["legacy_compat"] = legacy
         bridge_state = video_uiflow3_clear_transient(bridge_state, keep_return=False)
-        bridge_state["navigation"].update({
-            "current_step": "source",
-            "visible_step_stack": [],
-            "return_to": None,
-        })
         bridge_state = save_video_uiflow3_state(context, bridge_state)
+        board = video_storyboard_open_required_assets(
+            storyboard2_state(context),
+            return_screen=str(marker.get("return_screen") or "content_source"),
+        )
         await query.answer()
-        return await video_uiflow3_render(query, context, bridge_state)
+        return await storyboard2_render(query, context, persist(board))
     if action == "creative_screen":
         bridge_state = video_uiflow3_state(context)
         marker = video_storyboard_entity_bridge_marker(bridge_state)
@@ -106147,14 +106143,11 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
             f"{item['title']}: {item['content']}",
             mode="suggestion",
         )
-        bridge_state = video_storyboard_prepare_reference_bridge(
-            query,
-            uid,
-            context,
+        board = video_storyboard_open_required_assets(
             board,
             return_screen="suggestions",
         )
-        return await video_uiflow3_render(query, context, bridge_state)
+        return await storyboard2_render(query, context, persist(board))
     if action == "scene_screen":
         board = video_storyboard2.move(board, "scene_review", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
@@ -106189,7 +106182,11 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
             await query.answer()
             return await video_uiflow3_render(query, context, bridge_state)
         await query.answer()
-        board = video_storyboard2.move(board, "assets", awaiting_input="")
+        if video_storyboard2.asset_summary(board).get("ok"):
+            board = video_storyboard2.compile_video_prompts(board)
+            board = video_storyboard2.move(board, "video_prompts", awaiting_input="")
+        else:
+            board = video_storyboard2.move(board, "assets", awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
     if action == "assets_screen" or action == "image_return":
         board = video_storyboard2.move(board, "assets", push=False, awaiting_input="")
@@ -106211,6 +106208,8 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
     if action == "asset_mode":
         try:
             board = video_storyboard2.set_asset_mode(board, value)
+            if str(board.get("content_mode") or "") == "existing_upload":
+                board = video_storyboard2.seed_uploaded_storyboard_images(board)
         except ValueError:
             board = video_storyboard2.move(board, "assets", push=False, awaiting_input="")
             return await storyboard2_render(query, context, persist(board))
@@ -106295,6 +106294,24 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
                 "Chưa đủ ảnh bắt buộc cho cảnh: " + ", ".join(str(item) for item in missing),
                 show_alert=True,
             )
+        try:
+            board = video_storyboard2.confirm_existing_image_gate(board)
+            board = persist(board)
+        except ValueError as exc:
+            return await query.answer(f"Chưa thể dùng ảnh Storyboard: {str(exc)}", show_alert=True)
+        if not bool(board.get("middle_complete")):
+            try:
+                bridge_state = video_storyboard_prepare_entity_bridge(
+                    query,
+                    uid,
+                    context,
+                    board,
+                    return_screen=str(board.get("entity_return_screen") or "content_source"),
+                )
+            except ValueError as exc:
+                return await query.answer(f"Chưa thể dùng ảnh Storyboard: {str(exc)}", show_alert=True)
+            await query.answer()
+            return await video_uiflow3_render(query, context, bridge_state)
         await query.answer()
         board = video_storyboard2.compile_video_prompts(board)
         board = video_storyboard2.move(board, "video_prompts", awaiting_input="")
@@ -117447,14 +117464,12 @@ async def handle_storyboard2_pending_text(update: Update, context: ContextTypes.
             board = video_storyboard2.move(board, "upload_review", push=False, awaiting_input="storyboard_upload")
         elif pending == "content":
             board = video_storyboard2.apply_content(board, text, mode="manual")
-            bridge_state = video_storyboard_prepare_reference_bridge(
-                update.message,
-                int(update.effective_user.id),
-                context,
+            board = video_storyboard_open_required_assets(
                 board,
                 return_screen="await_content",
             )
-            payload, keyboard = video_uiflow3_screen_payload(bridge_state)
+            save_storyboard2_state(context, board, outer)
+            payload, keyboard = storyboard2_screen_payload(board)
             await update.message.reply_text(
                 payload,
                 parse_mode="HTML",
@@ -127794,15 +127809,12 @@ async def video_idea_render_exact_parent(
                 board = video_storyboard2.set_scene_content(board, index, content)
         board.update(idea_metadata)
         board["history"] = ["content_source"]
-        save_storyboard2_state(context, board)
-        bridge_state = video_storyboard_prepare_reference_bridge(
-            query,
-            user_id,
-            context,
+        board = video_storyboard_open_required_assets(
             board,
             return_screen="content_source",
         )
-        return await video_uiflow3_render(query, context, bridge_state)
+        save_storyboard2_state(context, board)
+        return await storyboard2_render(query, context, board)
 
     if product_id == video_selfshot2.PRODUCT_ID:
         draft = video_selfshot2_draft({"draft": parent_state})
