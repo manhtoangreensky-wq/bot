@@ -83125,10 +83125,10 @@ def storyboard2_entry_keyboard() -> InlineKeyboardMarkup:
 
 def storyboard2_count_keyboard() -> InlineKeyboardMarkup:
     return storyboard2_keyboard([
-        [("2 cảnh", "vstory|count|2"), ("3 cảnh", "vstory|count|3")],
-        [("4 cảnh", "vstory|count|4"), ("5 cảnh", "vstory|count|5")],
-        [("6 cảnh", "vstory|count|6"), ("8 cảnh", "vstory|count|8")],
-        [("10 cảnh", "vstory|count|10"), ("✍️ Nhập số khác", "vstory|count_custom")],
+        [("🎬 2 cảnh", "vstory|count|2"), ("🎬 3 cảnh", "vstory|count|3")],
+        [("🎬 4 cảnh", "vstory|count|4"), ("🎬 5 cảnh", "vstory|count|5")],
+        [("🎬 6 cảnh", "vstory|count|6"), ("🎬 8 cảnh", "vstory|count|8")],
+        [("🎬 10 cảnh", "vstory|count|10"), ("✍️ Nhập số khác", "vstory|count_custom")],
         *storyboard2_nav("vstory|entry"),
     ])
 
@@ -83158,8 +83158,8 @@ def storyboard2_upload_panels_keyboard() -> InlineKeyboardMarkup:
 def storyboard2_ratio_keyboard(board: dict | None = None) -> InlineKeyboardMarkup:
     if str((board or {}).get("video_tail_return_to") or "") == "review":
         return storyboard2_keyboard([
-            [("Dọc 9:16", "vstory|ratio|9x16"), ("Ngang 16:9", "vstory|ratio|16x9")],
-            [("Vuông 1:1", "vstory|ratio|1x1"), ("Dọc 4:5", "vstory|ratio|4x5")],
+            [("📱 Dọc 9:16", "vstory|ratio|9x16"), ("🖥 Ngang 16:9", "vstory|ratio|16x9")],
+            [("⬜ Vuông 1:1", "vstory|ratio|1x1"), ("🖼 Dọc 4:5", "vstory|ratio|4x5")],
             [("⬅️ Quay lại Review", "video_tail|review|open"), ("🎬 Menu Video", "menu|main_video")],
         ])
     back_callback = (
@@ -83168,8 +83168,8 @@ def storyboard2_ratio_keyboard(board: dict | None = None) -> InlineKeyboardMarku
         else "vstory|count_screen"
     )
     return storyboard2_keyboard([
-        [("Dọc 9:16", "vstory|ratio|9x16"), ("Ngang 16:9", "vstory|ratio|16x9")],
-        [("Vuông 1:1", "vstory|ratio|1x1"), ("Dọc 4:5", "vstory|ratio|4x5")],
+        [("📱 Dọc 9:16", "vstory|ratio|9x16"), ("🖥 Ngang 16:9", "vstory|ratio|16x9")],
+        [("⬜ Vuông 1:1", "vstory|ratio|1x1"), ("🖼 Dọc 4:5", "vstory|ratio|4x5")],
         *storyboard2_nav(back_callback),
     ])
 
@@ -84467,9 +84467,9 @@ def video_profile_scene_count_bounds(state: dict | None = None) -> tuple[int, in
 def video_profile_scene1_count_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     if video_flow7_kind(state or {}) == "script_to_video":
         count_rows = [
-            [("5 cảnh", "vprofile|count|5"), ("6 cảnh", "vprofile|count|6")],
-            [("8 cảnh", "vprofile|count|8"), ("10 cảnh", "vprofile|count|10")],
-            [("15 cảnh", "vprofile|count|15"), ("20 cảnh", "vprofile|count|20")],
+            [("🎬 5 cảnh", "vprofile|count|5"), ("🎬 6 cảnh", "vprofile|count|6")],
+            [("🎬 8 cảnh", "vprofile|count|8"), ("🎬 10 cảnh", "vprofile|count|10")],
+            [("🎬 15 cảnh", "vprofile|count|15"), ("🎬 20 cảnh", "vprofile|count|20")],
         ]
     else:
         count_rows = [
@@ -86551,8 +86551,9 @@ def video_scene3_aspect_text(state: dict) -> str:
 
 
 def video_scene3_aspect_keyboard(state: dict | None = None) -> InlineKeyboardMarkup:
+    is_script = video_flow7_kind(dict(state or {})) == "script_to_video"
     is_confirmed_script = (
-        video_flow7_kind(dict(state or {})) == "script_to_video"
+        is_script
         and bool((state or {}).get("scene_count_confirmed"))
     )
     is_tail_review = str((state or {}).get("video_tail_return_to") or "") == "review"
@@ -86566,9 +86567,14 @@ def video_scene3_aspect_keyboard(state: dict | None = None) -> InlineKeyboardMar
         back_label = "⬅️ Duyệt phân cảnh" if is_confirmed_script else "⬅️ Quay lại"
         menu_callback = "menu|main_video" if is_confirmed_script else "menu|main"
         menu_label = "🎬 Menu Video" if is_confirmed_script else "🏠 Menu chính"
+    ratio_labels = (
+        ("📱 Dọc 9:16", "🖥 Ngang 16:9", "⬜ Vuông 1:1", "🖼 Dọc 4:5")
+        if is_script
+        else ("Dọc 9:16", "Ngang 16:9", "Vuông 1:1", "Dọc 4:5")
+    )
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Dọc 9:16", callback_data="vprofile|ratio|9x16"), InlineKeyboardButton("Ngang 16:9", callback_data="vprofile|ratio|16x9")],
-        [InlineKeyboardButton("Vuông 1:1", callback_data="vprofile|ratio|1x1"), InlineKeyboardButton("Dọc 4:5", callback_data="vprofile|ratio|4x5")],
+        [InlineKeyboardButton(ratio_labels[0], callback_data="vprofile|ratio|9x16"), InlineKeyboardButton(ratio_labels[1], callback_data="vprofile|ratio|16x9")],
+        [InlineKeyboardButton(ratio_labels[2], callback_data="vprofile|ratio|1x1"), InlineKeyboardButton(ratio_labels[3], callback_data="vprofile|ratio|4x5")],
         [InlineKeyboardButton(back_label, callback_data=back_callback), InlineKeyboardButton(menu_label, callback_data=menu_callback)],
     ])
 
@@ -91688,9 +91694,9 @@ def video_script_entry_count_text(session: dict) -> str:
 
 def video_script_entry_count_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎞 5 cảnh", callback_data="vproduct|script_entry_count|5"), InlineKeyboardButton("🎞 6 cảnh", callback_data="vproduct|script_entry_count|6")],
-        [InlineKeyboardButton("🎞 8 cảnh", callback_data="vproduct|script_entry_count|8"), InlineKeyboardButton("🎞 10 cảnh", callback_data="vproduct|script_entry_count|10")],
-        [InlineKeyboardButton("🎞 15 cảnh", callback_data="vproduct|script_entry_count|15"), InlineKeyboardButton("🎞 20 cảnh", callback_data="vproduct|script_entry_count|20")],
+        [InlineKeyboardButton("🎬 5 cảnh", callback_data="vproduct|script_entry_count|5"), InlineKeyboardButton("🎬 6 cảnh", callback_data="vproduct|script_entry_count|6")],
+        [InlineKeyboardButton("🎬 8 cảnh", callback_data="vproduct|script_entry_count|8"), InlineKeyboardButton("🎬 10 cảnh", callback_data="vproduct|script_entry_count|10")],
+        [InlineKeyboardButton("🎬 15 cảnh", callback_data="vproduct|script_entry_count|15"), InlineKeyboardButton("🎬 20 cảnh", callback_data="vproduct|script_entry_count|20")],
         [InlineKeyboardButton("✍️ Nhập số khác", callback_data="vproduct|script_entry_count_custom"), InlineKeyboardButton("⬅️ Ba cách tạo", callback_data="vproduct|script_hub")],
         [InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
     ])
