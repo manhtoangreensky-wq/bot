@@ -671,6 +671,60 @@ def test_video_ai_real_pilot_production_bible_uses_beginner_copy_and_zero_is_exp
     assert {"0 bối cảnh", "1 bối cảnh", "2 bối cảnh"}.issubset(set(_plain_labels(location_markup)))
 
 
+def test_video_ai_real_style_auto_suggestion_stays_in_style_and_back_is_exact(monkeypatch):
+    user_id = 981075
+    context = SimpleNamespace(user_data={})
+    state = _locked_state()
+    state["navigation"]["current_step"] = "production_bible"
+    state = bot.video_uiflow3_open_view(state, "pilot_creative_controls")
+    _save_owned(context, state, user_id)
+
+    _text, markup = bot.video_uiflow3_screen_payload(state)
+    assert "Tự động gợi ý nhanh" in _plain_labels(markup)
+    assert "vid3|pilot_creative_auto" in _callbacks(markup)
+    assert "vid3|quick_build" not in _callbacks(markup)
+
+    monkeypatch.setattr(bot.random, "choice", lambda choices: choices[-1])
+    _click_visible(context, user_id, "vid3|pilot_creative_auto", "pilot-style-auto-1")
+    suggested = bot.video_uiflow3_state(context)
+    first_values = {
+        key: str(entry.get("value") or "")
+        for key, entry in (suggested.get("creative_controls") or {}).items()
+    }
+    assert suggested.get("ui_view") == "pilot_creative_controls"
+    assert suggested["navigation"]["current_step"] == "production_bible"
+    assert all((entry or {}).get("enabled") for entry in (suggested.get("creative_controls") or {}).values())
+    assert all(first_values.values())
+    assert suggested["legacy_compat"]["pilot_creative_auto_selection"] == 5
+    assert suggested["legacy_compat"]["pilot_creative_auto_revision"] == 1
+    assert suggested["side_effects"] == {
+        "provider_calls": 0,
+        "jobs": 0,
+        "outbox": 0,
+        "wallet_mutations": 0,
+        "xu_charged": 0,
+    }
+
+    _click_visible(context, user_id, "vid3|pilot_creative_auto", "pilot-style-auto-2")
+    refreshed = bot.video_uiflow3_state(context)
+    second_values = {
+        key: str(entry.get("value") or "")
+        for key, entry in (refreshed.get("creative_controls") or {}).items()
+    }
+    assert refreshed["legacy_compat"]["pilot_creative_auto_selection"] == 4
+    assert refreshed["legacy_compat"]["pilot_creative_auto_revision"] == 2
+    assert second_values != first_values
+
+    _click_visible(context, user_id, "vid3|pilot_creative|context", "pilot-style-detail-1")
+    assert bot.video_uiflow3_state(context).get("ui_view") == "pilot_creative_detail"
+    _click_visible(context, user_id, "vid3|pilot_creative_back", "pilot-style-detail-back-1")
+    assert bot.video_uiflow3_state(context).get("ui_view") == "pilot_creative_controls"
+    _click_visible(context, user_id, "vid3|pilot_creative_back", "pilot-style-hub-back-1")
+    returned = bot.video_uiflow3_state(context)
+    assert returned["navigation"]["current_step"] == "production_bible"
+    assert not returned.get("ui_view")
+
+
 def test_video_ai_real_pilot_voice_screen_filters_by_gender_and_explains_distinct_voices():
     state = video_uiflow3.set_character_count(_locked_state(), 2)
     state = bot.video_uiflow3_open_view(

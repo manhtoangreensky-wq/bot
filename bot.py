@@ -76519,6 +76519,8 @@ def video_ai_real_pilot_creative_payload(state: dict) -> tuple[str, InlineKeyboa
         ])
     if storyboard_bridge:
         rows.append([("✨ Tự động gợi ý", "vid3|pilot_creative_auto")])
+    elif str(state.get("parent_product") or "") == "video_ai_real":
+        rows.append([("✨ Tự động gợi ý nhanh", "vid3|pilot_creative_auto")])
     elif str(state.get("parent_product") or "") != "multi_scene_film":
         rows.append([("⚡ Tạo nhanh", "vid3|quick_build")])
     rows.extend([
@@ -81078,17 +81080,33 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 active_pilot_creative=key,
             )
         elif action == "pilot_creative_auto":
-            if not video_storyboard_entity_bridge_marker(state):
+            storyboard_creative = bool(video_storyboard_entity_bridge_marker(state))
+            realistic_creative = str(state.get("parent_product") or "") == "video_ai_real"
+            if not storyboard_creative and not realistic_creative:
                 raise ValueError("video_uiflow3_action_not_relevant")
+            selection = 1
+            replace_existing = False
+            if realistic_creative:
+                legacy = dict(state.get("legacy_compat") or {})
+                previous = safe_int(legacy.get("pilot_creative_auto_selection"), 0)
+                choices = [index for index in range(1, 6) if index != previous]
+                selection = random.choice(choices or list(range(1, 6)))
+                legacy["pilot_creative_auto_selection"] = selection
+                legacy["pilot_creative_auto_revision"] = max(
+                    1,
+                    safe_int(legacy.get("pilot_creative_auto_revision"), 0) + 1,
+                )
+                state["legacy_compat"] = legacy
+                replace_existing = True
             scene3_state = video_ai_real_pilot_scene3_field_state(state)
             for key, _label in video_scene3_flow.CREATIVE_CONTROLS:
                 entry = dict((scene3_state.get("creative_controls") or {}).get(key) or {})
-                if not bool(entry.get("enabled")):
+                if replace_existing or not bool(entry.get("enabled")):
                     scene3_state = video_scene3_flow.select_unified_field_suggestion(
                         scene3_state,
                         "creative_controls",
                         key,
-                        1,
+                        selection,
                     )
             state = video_ai_real_pilot_merge_scene3_fields(state, scene3_state)
             state = video_uiflow3_open_view(state, "pilot_creative_controls")
@@ -82989,6 +83007,11 @@ def storyboard2_asset_back_callback(board: dict) -> str:
 def storyboard2_asset_keyboard(board: dict) -> InlineKeyboardMarkup:
     board = video_storyboard2.normalize_state(board)
     mode = str(board.get("asset_mode") or "start_only")
+    back_callback = (
+        "vstory|assets_screen"
+        if str(board.get("screen") or "") == "await_image"
+        else storyboard2_asset_back_callback(board)
+    )
     rows = [
         [("📎 Gửi toàn bộ ảnh", "vstory|asset_upload_all"), ("✨ Tạo ảnh AI còn thiếu", "vstory|asset_ai_missing")],
         [
@@ -82996,7 +83019,7 @@ def storyboard2_asset_keyboard(board: dict) -> InlineKeyboardMarkup:
             (("✅ " if mode == "start_end" else "□ ") + "Hai ảnh/cảnh", "vstory|asset_mode|start_end"),
         ],
         [("🗂️ Sắp xếp / thay ảnh", "vstory|asset_view"), ("✅ Dùng các ảnh này", "vstory|assets_done")],
-        *storyboard2_nav(storyboard2_asset_back_callback(board)),
+        *storyboard2_nav(back_callback),
     ]
     return storyboard2_keyboard(rows)
 
@@ -83111,9 +83134,6 @@ STORYBOARD2_FRESH_START_ACTIONS = frozenset({"entry", "start", "ai", "upload"})
 
 STORYBOARD2_MIDDLE_REQUIRED_ACTIONS = frozenset({
     "scene_screen", "scene_prev", "scene_next", "scene_edit", "content_approve",
-    "assets_screen", "image_return", "asset_view", "asset_upload_all", "asset_ai_missing", "asset_mode",
-    "asset_upload", "asset_ai", "asset_no_end", "asset_remove", "asset_replace", "asset_prev", "asset_next",
-    "asset_move_prev", "asset_move_next", "assets_done",
     "image_prompt_screen", "image_more", "image_custom", "image_negative", "image_full", "image_pick",
     "video_screen", "video_regenerate", "video_edit", "video_negative", "video_full", "video_prev", "video_next", "video_done",
     "transitions_screen", "transition_prev", "transition_next", "transition_pick", "transition_natural", "transition_done",
@@ -117552,13 +117572,13 @@ async def handle_storyboard2_pending_media(update: Update, context: ContextTypes
     if str(outer.get("step") or "") != "storyboard2" or not dict(outer.get("storyboard2") or {}):
         return False
     board = video_storyboard2.normalize_state(dict(outer.get("storyboard2") or {}))
-    pending_image_action = str(board.get("awaiting_input") or "")
-    if pending_image_action not in {"storyboard_upload", "image_upload_batch", "image_upload_replace"}:
-        return False
     message_id = safe_int(getattr(update.message, "message_id", 0), 0)
     processed = [safe_int(item, 0) for item in board.get("processed_media_message_ids") or [] if safe_int(item, 0) > 0]
     if message_id and message_id in processed:
         return True
+    pending_image_action = str(board.get("awaiting_input") or "")
+    if pending_image_action not in {"storyboard_upload", "image_upload_batch", "image_upload_replace"}:
+        return False
     board["processed_media_message_ids"] = (processed + ([message_id] if message_id else []))[-100:]
     save_storyboard2_state(context, board, outer)
     if pending_image_action == "storyboard_upload":
