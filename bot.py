@@ -72966,7 +72966,7 @@ def video_uiflow3_scene_label(state: dict, scene: dict) -> str:
 
 
 def video_uiflow3_canonical_screen_state(raw_state: dict) -> dict:
-    state = video_uiflow3.normalize_state(raw_state)
+    state = video_long_prepare_entity_pilot(raw_state)
     step = str((state.get("navigation") or {}).get("current_step") or "")
     transient_keys = (
         "ui_view", "active_character_id", "active_location_id", "active_scene_id",
@@ -74305,6 +74305,26 @@ def video_storyboard_entity_bridge_marker(raw_state: dict) -> dict:
     return marker if bool(marker.get("active")) else {}
 
 
+def video_long_uses_entity_pilot(raw_state: dict) -> bool:
+    return bool(
+        str((raw_state or {}).get("parent_product") or "") == "multi_scene_film"
+        and str(
+            (((raw_state or {}).get("navigation") or {}).get("current_step")) or ""
+        ) == "production_bible"
+    )
+
+
+def video_long_prepare_entity_pilot(raw_state: dict) -> dict:
+    state = video_uiflow3.normalize_state(raw_state)
+    if not video_long_uses_entity_pilot(state):
+        return state
+    state["needs"] = dict(state.get("needs") or {})
+    state["needs"]["locations"] = "SKIP"
+    if not (state.get("bible") or {}).get("locations"):
+        state = video_uiflow3.set_location_count(state, 0)
+    return video_uiflow3.normalize_state(state)
+
+
 def video_entity_bridge_marker(raw_state: dict) -> dict:
     return (
         video_script_entity_bridge_marker(raw_state)
@@ -74319,6 +74339,7 @@ def video_uiflow3_uses_entity_pilot(raw_state: dict) -> bool:
         video_ai_real_is_creation_flow(raw_state)
         or video_entity_bridge_marker(raw_state)
         or video_storyboard_entity_bridge_marker(raw_state)
+        or video_long_uses_entity_pilot(raw_state)
     )
 
 
@@ -76495,8 +76516,9 @@ def video_ai_real_pilot_creative_payload(state: dict) -> tuple[str, InlineKeyboa
             )
             for key, label in values[offset:offset + 2]
         ])
+    if str(state.get("parent_product") or "") != "multi_scene_film":
+        rows.append([("⚡ Tạo nhanh", "vid3|quick_build")])
     rows.extend([
-        [("⚡ Tạo nhanh", "vid3|quick_build")],
         [("✅ Xong phong cách", "vid3|pilot_creative_done"), ("⏭ Bỏ qua", "vid3|pilot_creative_skip")],
         *video_ai_real_pilot_nav_rows(back="vid3|pilot_creative_back"),
     ])
@@ -77372,11 +77394,16 @@ def video_ai_real_pilot_screen_payload(
     entry_mode = str(state.get("entry_mode") or "")
     storyboard_bridge = video_storyboard_entity_bridge_marker(state)
     trend_bridge = video_entity_bridge_marker(state) if entry_mode == "selected_trend" else {}
+    long_video_middle = bool(
+        str(state.get("parent_product") or "") == "multi_scene_film"
+        and step == "production_bible"
+    )
     if (
         step != "entry"
         and entry_mode not in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
         and not storyboard_bridge
         and not trend_bridge
+        and not long_video_middle
     ):
         return None
     progress_prefix = str(prefix or "").replace("Buoc ", "Bước ")
@@ -77549,7 +77576,10 @@ def video_ai_real_pilot_screen_payload(
             [("👥 Số nhân vật", "vid3|view|character_count"), ("👤 Danh sách nhân vật", "vid3|view|character_list")],
             [("🖼 Ảnh tham chiếu", "vid3|view|references"), ("🛠 Tùy chỉnh chi tiết", "vid3|view|bible_extras")],
         ]
-        if not storyboard_bridge:
+        if (
+            not storyboard_bridge
+            and str(state.get("parent_product") or "") != "multi_scene_film"
+        ):
             rows.append([("⚡ Tạo nhanh", "vid3|quick_build")])
         rows.extend([
             [("✨ Tự động gợi ý", "vid3|bible_auto"), ("✅ Hoàn tất thiết lập nhân vật", "vid3|bible_done")],
@@ -79458,8 +79488,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             "Thứ tự kế thừa: thiết lập chung của loạt video → thiết lập riêng của tập → thiết lập riêng của cảnh.",
             video_uiflow3_keyboard([
                 [("🔢 Số và tên tập", "vid3|episode_identity"), ("📝 Nội dung tập", "vid3|episode_content")],
-                [("👥 Nhân vật và bối cảnh của tập", "vid3|episode_entities")],
-                [("✅ Hoàn tất thiết lập nội dung tập", "vid3|episode_done")],
+                [("👥 Nhân vật/bối cảnh của tập", "vid3|episode_entities"), ("✅ Hoàn tất nội dung tập", "vid3|episode_done")],
                 *video_uiflow3_nav_rows(),
             ]),
         )
@@ -79768,6 +79797,14 @@ def video_uiflow3_after_service_update(before: dict, updated: dict, *, target_st
     current = video_uiflow3_clear_transient(updated)
     current["navigation"]["current_step"] = previous_step
     return video_uiflow3.navigate(current, target)
+
+
+def video_uiflow3_mode_target_step(updated: dict) -> str:
+    return (
+        "series_goal"
+        if str((updated or {}).get("parent_product") or "") == "multi_scene_film"
+        else "scene_count"
+    )
 
 
 def video_uiflow3_open_view(state: dict, view: str, **fields) -> dict:
@@ -80331,10 +80368,19 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                         reuse_saved=True,
                     )
         elif action == "back":
-            state = video_uiflow3_clear_transient(state)
-            state = video_uiflow3.back(state)
-            if str((state.get("navigation") or {}).get("current_step") or "") == "summary":
-                state["navigation"]["return_to"] = None
+            current_step = str((state.get("navigation") or {}).get("current_step") or "")
+            if (
+                str(state.get("parent_product") or "") == "multi_scene_film"
+                and current_step == "episode"
+            ):
+                state = video_uiflow3_clear_transient(state)
+                state["navigation"]["current_step"] = "production_bible"
+                state = video_uiflow3_open_view(state, "pilot_requirements")
+            else:
+                state = video_uiflow3_clear_transient(state)
+                state = video_uiflow3.back(state)
+                if str((state.get("navigation") or {}).get("current_step") or "") == "summary":
+                    state["navigation"]["return_to"] = None
         elif action == "mode" and values:
             if (
                 str(state.get("parent_product") or "") == "video_ai_real"
@@ -80345,7 +80391,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state = video_uiflow3_after_service_update(
                 state,
                 updated,
-                target_step="scene_count",
+                target_step=video_uiflow3_mode_target_step(updated),
             )
         elif action == "series_goal_edit":
             state = video_uiflow3_await_input(state, "series_goal", back_callback="vid3|view|series_goal")
@@ -81108,18 +81154,21 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                     state,
                     get_user_language(user_id) or "vi",
                 )
-            count = safe_int((state.get("format") or {}).get("scene_count"), 0)
-            if count <= 0:
-                raise ValueError("scene_count_out_of_range")
-            if not bool((state.get("format") or {}).get("scene_count_confirmed")):
-                updated = video_uiflow3.confirm_scene_count(state, count)
-                state = video_uiflow3_after_service_update(
-                    state,
-                    updated,
-                    target_step="scene_plan",
-                )
+            if str(state.get("parent_product") or "") == "multi_scene_film":
+                state = video_uiflow3_go(state, "episode")
             else:
-                state = video_uiflow3_go(state, "scene_plan")
+                count = safe_int((state.get("format") or {}).get("scene_count"), 0)
+                if count <= 0:
+                    raise ValueError("scene_count_out_of_range")
+                if not bool((state.get("format") or {}).get("scene_count_confirmed")):
+                    updated = video_uiflow3.confirm_scene_count(state, count)
+                    state = video_uiflow3_after_service_update(
+                        state,
+                        updated,
+                        target_step="scene_plan",
+                    )
+                else:
+                    state = video_uiflow3_go(state, "scene_plan")
         elif action == "pilot_scene_plan_back":
             state = video_uiflow3_clear_transient(state)
             state["navigation"]["current_step"] = "production_bible"
@@ -81137,6 +81186,12 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state = video_uiflow3_clear_transient(state)
             state["navigation"]["current_step"] = "production_bible"
         elif action == "quick_build":
+            if str(state.get("parent_product") or "") == "multi_scene_film":
+                await query.answer(
+                    "Video dài tập cần hoàn tất thông tin tập trước khi lập kế hoạch cảnh.",
+                    show_alert=True,
+                )
+                return await video_uiflow3_render(query, context, state)
             storyboard_marker = video_storyboard_entity_bridge_marker(state)
             if storyboard_marker:
                 if str(storyboard_marker.get("phase") or "") != "entity":
@@ -81242,8 +81297,13 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             if str((state.get("navigation") or {}).get("return_to") or "") == "summary":
                 state = video_uiflow3_clear_transient(video_uiflow3.finish_editor(state), keep_return=False)
             elif (
-                str(state.get("parent_product") or "") == "video_ai_real"
-                and str(state.get("entry_mode") or "") in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
+                str(state.get("parent_product") or "")
+                in {"video_ai_real", "multi_scene_film"}
+                and (
+                    str(state.get("parent_product") or "") == "multi_scene_film"
+                    or str(state.get("entry_mode") or "")
+                    in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
+                )
             ):
                 state = video_uiflow3_open_view(state, "pilot_creative_controls")
             else:
