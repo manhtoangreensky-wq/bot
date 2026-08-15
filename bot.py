@@ -71992,6 +71992,7 @@ VIDEO_SCENE2_ACTION_EXPECTED_STEPS = {
     "req_edit": {"requirements", "requirement_detail"},
     "req_remove": {"requirements", "requirement_detail"},
     "req_restore": {"requirements", "requirement_detail"},
+    "req_auto": {"requirements"},
     "req_none": {"requirements"},
     "req_view": {"requirements"},
     "req_done": {"requirements"},
@@ -72018,6 +72019,8 @@ VIDEO_SCENE2_ACTION_EXPECTED_STEPS = {
     "creative_edit": {"creative_controls"},
     "creative_remove": {"creative_controls", "creative_detail"},
     "creative_restore": {"creative_controls", "creative_detail"},
+    "creative_auto": {"creative_controls"},
+    "creative_auto_clear": {"creative_controls"},
     "creative_disable_all": {"creative_controls"},
     "creative_done": {"creative_controls"},
     "creative_skip": {"creative_controls"},
@@ -76521,7 +76524,9 @@ def video_ai_real_pilot_creative_payload(state: dict) -> tuple[str, InlineKeyboa
         rows.append([("✨ Tự động gợi ý", "vid3|pilot_creative_auto")])
     elif str(state.get("parent_product") or "") == "video_ai_real":
         rows.append([("✨ Tự động gợi ý nhanh", "vid3|pilot_creative_auto")])
-    elif str(state.get("parent_product") or "") != "multi_scene_film":
+    elif str(state.get("parent_product") or "") == "multi_scene_film":
+        rows.append([("✨ Tự động gợi ý nhanh", "vid3|pilot_creative_auto")])
+    else:
         rows.append([("⚡ Tạo nhanh", "vid3|quick_build")])
     rows.extend([
         [("✅ Xong phong cách", "vid3|pilot_creative_done"), ("⏭ Bỏ qua", "vid3|pilot_creative_skip")],
@@ -76570,8 +76575,13 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
                 )
                 for key, label in values[offset:offset + 2]
             ])
+        auto_label = (
+            "✨ Tự động gợi ý nhanh"
+            if str(state.get("parent_product") or "") == "multi_scene_film"
+            else "✨ Tự động gợi ý"
+        )
         rows.extend([
-            [("✨ Tự động gợi ý", "vid3|pilot_requirement_auto")],
+            [(auto_label, "vid3|pilot_requirement_auto")],
             [("👁 Xem mục đã chọn", "vid3|pilot_requirement_view")],
         ])
     rows.extend([
@@ -81082,7 +81092,8 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         elif action == "pilot_creative_auto":
             storyboard_creative = bool(video_storyboard_entity_bridge_marker(state))
             realistic_creative = str(state.get("parent_product") or "") == "video_ai_real"
-            if not storyboard_creative and not realistic_creative:
+            long_creative = str(state.get("parent_product") or "") == "multi_scene_film"
+            if not storyboard_creative and not realistic_creative and not long_creative:
                 raise ValueError("video_uiflow3_action_not_relevant")
             selection = 1
             replace_existing = False
@@ -81095,6 +81106,18 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 legacy["pilot_creative_auto_revision"] = max(
                     1,
                     safe_int(legacy.get("pilot_creative_auto_revision"), 0) + 1,
+                )
+                state["legacy_compat"] = legacy
+                replace_existing = True
+            elif long_creative:
+                legacy = dict(state.get("legacy_compat") or {})
+                previous = safe_int(legacy.get("long_creative_auto_selection"), 0)
+                choices = [index for index in range(1, 6) if index != previous]
+                selection = random.choice(choices or list(range(1, 6)))
+                legacy["long_creative_auto_selection"] = selection
+                legacy["long_creative_auto_revision"] = max(
+                    1,
+                    safe_int(legacy.get("long_creative_auto_revision"), 0) + 1,
                 )
                 state["legacy_compat"] = legacy
                 replace_existing = True
@@ -81190,14 +81213,29 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             )
         elif action == "pilot_requirement_auto":
             scene3_state = video_ai_real_pilot_scene3_field_state(state)
+            long_requirement = str(state.get("parent_product") or "") == "multi_scene_film"
+            selection = 1
+            replace_existing = False
+            if long_requirement:
+                legacy = dict(state.get("legacy_compat") or {})
+                previous = safe_int(legacy.get("long_requirement_auto_selection"), 0)
+                choices = [index for index in range(1, 6) if index != previous]
+                selection = random.choice(choices or list(range(1, 6)))
+                legacy["long_requirement_auto_selection"] = selection
+                legacy["long_requirement_auto_revision"] = max(
+                    1,
+                    safe_int(legacy.get("long_requirement_auto_revision"), 0) + 1,
+                )
+                state["legacy_compat"] = legacy
+                replace_existing = True
             for key, _label in VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES:
                 entry = dict((scene3_state.get("preservation_requirements") or {}).get(key) or {})
-                if not bool(entry.get("enabled")):
+                if replace_existing or not bool(entry.get("enabled")):
                     scene3_state = video_scene3_flow.select_unified_field_suggestion(
                         scene3_state,
                         "preservation_requirements",
                         key,
-                        1,
+                        selection,
                     )
             state = video_ai_real_pilot_merge_scene3_fields(state, scene3_state)
             state = video_uiflow3_open_view(state, "pilot_requirements")
@@ -85060,6 +85098,45 @@ def video_scene3_suggestion_keyboard(state: dict | None = None) -> InlineKeyboar
     ])
 
 
+VIDEO_SCENE3_SHARED_AUTO_SUGGEST_PRODUCTS = {
+    "script_image_video",
+    "video_trend",
+    video_selfshot2.PRODUCT_ID,
+    video_selfshot3.PRODUCT_ID,
+}
+
+
+def video_scene3_shared_auto_suggest_enabled(state: dict | None = None) -> bool:
+    product = str((state or {}).get("source_product_id") or (state or {}).get("product_type") or "")
+    return product in VIDEO_SCENE3_SHARED_AUTO_SUGGEST_PRODUCTS
+
+
+def video_scene3_apply_auto_suggestions(
+    state: dict,
+    *,
+    group: str,
+    fields: tuple,
+    selection_key: str,
+    revision_key: str,
+) -> dict:
+    current = video_scene3_flow.normalize_state(state)
+    previous = safe_int(current.get(selection_key), 0)
+    choices = [index for index in range(1, 6) if index != previous]
+    selection = random.choice(choices or list(range(1, 6)))
+    for key, _label in fields:
+        current = video_scene3_flow.select_unified_field_suggestion(
+            current,
+            group,
+            key,
+            selection,
+        )
+    current[selection_key] = selection
+    current[revision_key] = max(1, safe_int(current.get(revision_key), 0) + 1)
+    if group == "preservation_requirements":
+        current["requirements"] = video_scene3_flow.public_requirements(current)
+    return current
+
+
 def video_scene3_requirements_text(state: dict) -> str:
     return (
         "🔒 <b>Yêu cầu cần giữ nguyên</b>\n\n"
@@ -85141,8 +85218,18 @@ def video_scene3_requirements_keyboard(state: dict) -> InlineKeyboardMarkup:
             prefix = "✅" if (entries.get(key) or {}).get("enabled") else "➕"
             row.append((f"{prefix} {label.split(' ', 1)[-1]}", f"vprofile|req|{key}"))
         rows.append(row)
+    auto_suggest = video_scene3_shared_auto_suggest_enabled(state)
     if rows and len(rows[-1]) == 1:
-        rows[-1].append(("👁 Xem mục đã chọn", "vprofile|req_view"))
+        rows[-1].append(
+            ("✨ Tự động gợi ý nhanh", "vprofile|req_auto")
+            if auto_suggest
+            else ("👁 Xem mục đã chọn", "vprofile|req_view")
+        )
+    elif auto_suggest:
+        rows.append([
+            ("✨ Tự động gợi ý nhanh", "vprofile|req_auto"),
+            ("👁 Xem mục đã chọn", "vprofile|req_view"),
+        ])
     rows.extend([
         [("⏭ Bỏ qua yêu cầu", "vprofile|req_none"), ("✅ Xong yêu cầu", "vprofile|req_done")],
     ])
@@ -85271,6 +85358,11 @@ def video_scene3_creative_keyboard(state: dict) -> InlineKeyboardMarkup:
         if bool(state.get("selfshot2_creative_setup"))
         else video_scene3_nav_rows()
     )
+    if video_scene3_shared_auto_suggest_enabled(state):
+        rows.append([
+            ("✨ Tự động gợi ý nhanh", "vprofile|creative_auto"),
+            ("🧹 Xóa gợi ý nhanh", "vprofile|creative_auto_clear"),
+        ])
     rows.extend([
         [("✅ Xong phong cách", "vprofile|creative_done"), ("⏭ Bỏ qua", "vprofile|creative_skip")],
         *back_rows,
@@ -106733,6 +106825,9 @@ async def video_selfshot2_finish_creative_details(
     current["creative_controls"] = deepcopy(
         video_scene3_flow.normalize_state(state).get("creative_controls") or {}
     )
+    current["preservation_requirements"] = deepcopy(
+        video_scene3_flow.normalize_state(state).get("preservation_requirements") or {}
+    )
     current["selfshot2_creative_complete"] = True
     current["video_prompts"] = video_selfshot2_compile_prompts(current)
     current["selfshot2_screen"] = "prompts"
@@ -108435,6 +108530,17 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
     music_value = post_value("music")
     sfx_value = post_value("sfx")
     subtitle_value = post_value("subtitles")
+    subtitle_script = video_tail9_addon_script_info(clean, "subtitles")
+    dubbing_script = video_tail9_addon_script_info(clean, "dubbing")
+    subtitle_target = str(subtitle_value.get("target_language") or "").strip()
+    dubbing_target = str(dubbing_value.get("target_language") or "").strip()
+    narration_text = str(
+        dubbing_script.get("text")
+        if audio.get("dubbing")
+        else subtitle_script.get("text")
+        if audio.get("subtitles")
+        else ""
+    ).strip()[:3500]
     music_source_value = str(
         music_value.get("source")
         or music_value.get("music_source")
@@ -108455,13 +108561,21 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
         "voice_enabled": False,
         "voice_source": "none",
         "voice_volume_percent": safe_int(volumes.get("dubbing"), 100),
+        "narration_text": narration_text,
         "source_audio_enabled": bool(audio.get("source_audio")),
         "source_audio_volume_percent": safe_int(volumes.get("source_audio"), 100),
         "dub_enabled": bool(audio.get("dubbing")),
-        "dub_source": str(
-            dubbing_value.get("voice_source")
-            or dubbing_value.get("dubbing_mode")
-            or ("same_as_voice" if audio.get("dubbing") else "none")
+        "dub_source": (
+            "translated"
+            if audio.get("dubbing") and dubbing_target
+            else "from_voice"
+            if audio.get("dubbing")
+            else "none"
+        ),
+        "dub_target_language": (
+            video_tail9_language_label(dubbing_target)
+            if dubbing_target
+            else ""
         ),
         "dub_volume_percent": safe_int(volumes.get("dubbing"), 100),
         "music_enabled": bool(audio.get("music")),
@@ -108495,6 +108609,11 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
             else "auto"
             if audio.get("subtitles")
             else "none"
+        ),
+        "subtitle_target_language": (
+            video_tail9_language_label(subtitle_target)
+            if subtitle_target
+            else ""
         ),
         "logo_enabled": bool(clean.get("watermark_config", {}).get("enabled")),
         "logo_source": "text" if clean.get("watermark_config", {}).get("enabled") else "none",
@@ -108779,6 +108898,258 @@ def video_tail9_addon_value(tail: dict | None, key: str) -> dict:
     return dict(entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}
 
 
+VIDEO_TAIL9_SCRIPTABLE_ADDON_PRODUCTS = {
+    "video_ai_real",
+    "script_image_video",
+    "storyboard_prompt",
+    "video_trend",
+    "multi_scene_film",
+    video_selfshot2.PRODUCT_ID,
+    video_selfshot3.PRODUCT_ID,
+}
+
+
+def video_tail9_language_label(value: str, *, automatic: str = "Tự động nhận diện") -> str:
+    raw = str(value or "").strip()
+    normalized = normalize_translate_target(raw)
+    if not raw or normalized == "auto":
+        return automatic
+    if normalized:
+        return str((TRANSLATE_LANGUAGE_OPTIONS.get(normalized) or {}).get("name") or raw)
+    return raw[:80]
+
+
+def video_tail9_subdub_language_options() -> list[tuple[str, str]]:
+    """Reuse the public SubDub language picker while keeping Tail9 ownership."""
+
+    canonical = subtitle_plus_dub_translation_language_keyboard("vi")
+    options: list[tuple[str, str]] = []
+    prefix = "videodub|language|"
+    for row in canonical.inline_keyboard:
+        for button in row:
+            callback = str(button.callback_data or "")
+            if callback.startswith(prefix):
+                code = normalize_translate_target(callback[len(prefix):])
+                if code and code != "auto":
+                    options.append((code, str(button.text)))
+            elif callback == "videodub|language_custom":
+                options.append(("custom", str(button.text)))
+    return options
+
+
+def video_tail9_subdub_default_voice_options() -> list[tuple[str, str]]:
+    """Reuse the public SubDub default voice labels in the in-product tail."""
+
+    canonical = subtitle_plus_dub_voice_keyboard("vi", {})
+    mapping = {
+        "videodub|voice|default_female": "default_female",
+        "videodub|voice|default_male": "default_male",
+    }
+    options: list[tuple[str, str]] = []
+    for row in canonical.inline_keyboard:
+        for button in row:
+            option = mapping.get(str(button.callback_data or ""))
+            if option:
+                options.append((option, str(button.text)))
+    return options
+
+
+def video_tail9_scene_script_info(tail: dict | None = None) -> dict:
+    scenes = [
+        dict(item)
+        for item in (tail or {}).get("scene_content") or []
+        if isinstance(item, dict)
+    ]
+    dialogue_fields = (
+        "dialogue_or_voiceover",
+        "narration_line",
+        "subtitle_line",
+        "dialogue",
+        "voiceover",
+        "narration",
+    )
+    content_fields = (
+        "main_idea",
+        "semantic_beat",
+        "content",
+        "description",
+        "visual_goal",
+    )
+    lines: list[str] = []
+    used_content_fallback = False
+    for fallback_index, scene in enumerate(scenes, 1):
+        line = next(
+            (
+                str(scene.get(field) or "").strip()
+                for field in dialogue_fields
+                if str(scene.get(field) or "").strip()
+            ),
+            "",
+        )
+        if not line:
+            line = next(
+                (
+                    str(scene.get(field) or "").strip()
+                    for field in content_fields
+                    if str(scene.get(field) or "").strip()
+                ),
+                "",
+            )
+            used_content_fallback = used_content_fallback or bool(line)
+        if not line:
+            continue
+        scene_index = safe_int(scene.get("scene_index"), fallback_index)
+        clean_line = re.sub(r"\s+", " ", line).strip()
+        lines.append(f"Cảnh {scene_index}: {clean_line}")
+    text = "\n".join(lines)[:3500]
+    return {
+        "text": text,
+        "source": "scene_content" if used_content_fallback else "scene_script",
+        "source_label": (
+            "Nội dung từng cảnh"
+            if used_content_fallback
+            else "Kịch bản/lời thoại từng cảnh"
+        ) if text else "Chưa có nội dung lời",
+    }
+
+
+def video_tail9_addon_script_info(tail: dict | None, key: str) -> dict:
+    clean_key = str(key or "")
+    value = video_tail9_addon_value(tail, clean_key)
+    base = video_tail9_scene_script_info(tail)
+    if clean_key == "subtitles":
+        manual = str(
+            value.get("script_text")
+            or value.get("text")
+            or value.get("content")
+            or ""
+        ).strip()
+        info = {
+            "text": manual[:3500],
+            "source": "manual",
+            "source_label": "Nội dung phụ đề đã sửa",
+        } if manual else base
+    elif clean_key == "dubbing":
+        manual = str(
+            value.get("dialogue_text")
+            or value.get("script_text")
+            or ""
+        ).strip()
+        source_mode = str(value.get("script_source") or "script")
+        if manual:
+            info = {
+                "text": manual[:3500],
+                "source": "manual",
+                "source_label": "Nội dung lồng tiếng đã sửa",
+            }
+        elif source_mode == "subtitles":
+            subtitle_info = video_tail9_addon_script_info(tail, "subtitles")
+            info = {
+                **subtitle_info,
+                "source": "subtitles",
+                "source_label": "Theo nội dung phụ đề",
+            }
+        else:
+            info = {
+                **base,
+                "source": "script",
+                "source_label": "Theo kịch bản/nội dung từng cảnh",
+            }
+    else:
+        info = base
+    detected = translation_detect_language_code(str(info.get("text") or ""))
+    if not detected:
+        detected = normalize_translate_target(value.get("source_language") or "") or "auto"
+    return {**info, "detected_language": detected}
+
+
+def video_tail9_set_addon_language(tail: dict, key: str, target: str) -> dict:
+    clean_key = str(key or "")
+    if clean_key not in {"subtitles", "dubbing"}:
+        return video_tail9.normalize_state(tail)
+    raw_target = str(target or "").strip()
+    normalized_target = normalize_translate_target(raw_target)
+    target_language = "" if raw_target in {"", "original"} or normalized_target == "auto" else (
+        normalized_target or re.sub(r"\s+", " ", raw_target)[:80]
+    )
+    script = video_tail9_addon_script_info(tail, clean_key)
+    value_patch = {
+        "source_language": str(script.get("detected_language") or "auto"),
+        "target_language": target_language,
+        "translation": bool(target_language),
+    }
+    if clean_key == "subtitles":
+        value_patch["source"] = "translated" if target_language else "auto"
+    else:
+        current_value = video_tail9_addon_value(tail, "dubbing")
+        value_patch.update({
+            "dubbing_mode": "translated_ai" if target_language else "default_ai",
+            "voice_choice": str(current_value.get("voice_choice") or "follow_character"),
+            "script_source": str(current_value.get("script_source") or "script"),
+        })
+    return video_tail9_update_addon_audio(
+        tail,
+        clean_key,
+        enabled=True,
+        value_patch=value_patch,
+    )
+
+
+def video_tail9_set_dubbing_script_source(tail: dict, source: str) -> dict:
+    clean_source = str(source or "")
+    if clean_source not in {"subtitles", "script"}:
+        return video_tail9.normalize_state(tail)
+    source_info = (
+        video_tail9_addon_script_info(tail, "subtitles")
+        if clean_source == "subtitles"
+        else video_tail9_scene_script_info(tail)
+    )
+    detected = translation_detect_language_code(str(source_info.get("text") or "")) or "auto"
+    current_value = video_tail9_addon_value(tail, "dubbing")
+    return video_tail9_update_addon_audio(
+        tail,
+        "dubbing",
+        enabled=True,
+        value_patch={
+            "dubbing_mode": str(current_value.get("dubbing_mode") or "default_ai"),
+            "voice_choice": str(current_value.get("voice_choice") or "follow_character"),
+            "script_source": clean_source,
+            "dialogue_text": "",
+            "source_language": detected,
+        },
+    )
+
+
+def video_tail9_set_addon_script_text(tail: dict, key: str, text: str) -> dict:
+    clean_key = str(key or "")
+    clean_text = str(text or "").strip()[:3500]
+    if clean_key not in {"subtitles", "dubbing"} or not clean_text:
+        return video_tail9.normalize_state(tail)
+    detected = translation_detect_language_code(clean_text) or "auto"
+    value = video_tail9_addon_value(tail, clean_key)
+    if clean_key == "subtitles":
+        patch = {
+            "script_text": clean_text,
+            "source_language": detected,
+            "source": str(value.get("source") or "auto") if str(value.get("source") or "") != "none" else "auto",
+            "translation": bool(value.get("target_language")),
+        }
+    else:
+        patch = {
+            "dialogue_text": clean_text,
+            "script_source": "manual",
+            "source_language": detected,
+            "dubbing_mode": str(value.get("dubbing_mode") or "default_ai"),
+            "voice_choice": str(value.get("voice_choice") or "follow_character"),
+        }
+    return video_tail9_update_addon_audio(
+        tail,
+        clean_key,
+        enabled=True,
+        value_patch=patch,
+    )
+
+
 def video_tail9_addon_selected_label(tail: dict, key: str, label: str) -> str:
     if key == "text":
         selected = bool(video_tail9_text_items(tail))
@@ -108843,13 +109214,13 @@ def video_tail9_set_addon_option(tail: dict, key: str, option: str) -> dict:
     choice = str(option or "")
     if clean_key == "subtitles":
         values = {
-            "none": (False, {"source": "none", "translation": False}),
-            "auto": (True, {"source": "auto", "translation": False}),
+            "none": (False, {"source": "none", "translation": False, "target_language": ""}),
+            "auto": (True, {"source": "auto", "translation": False, "target_language": ""}),
             "translated": (True, {"source": "translated", "translation": True}),
         }
     elif clean_key == "dubbing":
         values = {
-            "none": (False, {"dubbing_mode": "none", "voice_choice": ""}),
+            "none": (False, {"dubbing_mode": "none", "voice_choice": "", "translation": False, "target_language": ""}),
             "follow_character": (True, {"dubbing_mode": "default_ai", "voice_choice": "follow_character"}),
             "default_male": (True, {"dubbing_mode": "default_ai", "voice_choice": "default_male"}),
             "default_female": (True, {"dubbing_mode": "default_ai", "voice_choice": "default_female"}),
@@ -108914,6 +109285,12 @@ def video_tail9_addon_detail_text(tail: dict, key: str) -> str:
     music_price = int(video_ai_real_pricing.public_music_background_prices()["basic"])
     if key == "subtitles":
         source = str(value.get("source") or ("auto" if audio.get("subtitles") else "none"))
+        script = video_tail9_addon_script_info(tail, "subtitles")
+        detected = video_tail9_language_label(
+            str(script.get("detected_language") or "auto"),
+            automatic="Sẽ tự nhận diện khi xử lý",
+        )
+        target = str(value.get("target_language") or "")
         selected = {
             "none": "Không dùng",
             "auto": "Tạo phụ đề tự động · Miễn phí",
@@ -108922,10 +109299,19 @@ def video_tail9_addon_detail_text(tail: dict, key: str) -> str:
         return (
             "💬 <b>Phụ đề</b>\n\n"
             f"• Đang chọn: <b>{html.escape(selected)}</b>\n"
-            "• Nội dung phụ đề giữ nguyên lời thoại/kịch bản; không tự rút gọn.\n\n"
-            "Chọn đúng một phương án rồi quay lại Add-on."
+            f"• Ngôn ngữ nguồn: <b>Tự động nhận diện · {html.escape(detected)}</b>\n"
+            f"• Ngôn ngữ phụ đề: <b>{html.escape(video_tail9_language_label(target, automatic='Giữ ngôn ngữ nguồn'))}</b>\n"
+            f"• Nội dung: <b>{html.escape(str(script.get('source_label') or 'Chưa có'))}</b>"
+            f" · {len(str(script.get('text') or ''))} ký tự\n\n"
+            "Có thể xem hoặc sửa toàn bộ nội dung trước khi hoàn tất Phụ đề."
         )
     if key == "dubbing":
+        script = video_tail9_addon_script_info(tail, "dubbing")
+        detected = video_tail9_language_label(
+            str(script.get("detected_language") or "auto"),
+            automatic="Sẽ tự nhận diện khi xử lý",
+        )
+        target = str(value.get("target_language") or "")
         voice = {
             "follow_character": "Theo từng nhân vật",
             "default_male": "Giọng nam mặc định",
@@ -108935,8 +109321,13 @@ def video_tail9_addon_detail_text(tail: dict, key: str) -> str:
             "🎙 <b>Lồng tiếng</b>\n\n"
             f"• Trạng thái: <b>{'Đang bật' if audio.get('dubbing') else 'Không dùng'}</b>\n"
             f"• Giọng: <b>{html.escape(voice)}</b>\n"
+            f"• Nguồn lời: <b>{html.escape(str(script.get('source_label') or 'Chưa có'))}</b>\n"
+            f"• Ngôn ngữ nguồn: <b>Tự động nhận diện · {html.escape(detected)}</b>\n"
+            f"• Ngôn ngữ lồng tiếng: <b>{html.escape(video_tail9_language_label(target, automatic='Giữ ngôn ngữ nguồn'))}</b>\n"
+            f"• Nội dung lời: <b>{len(str(script.get('text') or ''))} ký tự</b>\n"
             f"• Âm lượng: <b>{safe_int(volumes.get('dubbing'), 100)}%</b>\n"
-            f"• Giá: <b>{dub_rate:g} Xu/ký tự</b>, dùng cùng giảm giá số lượng của sản phẩm Lồng tiếng."
+            f"• Giá: <b>{dub_rate:g} Xu/ký tự</b>, dùng cùng giảm giá số lượng của sản phẩm Lồng tiếng.\n\n"
+            "Chọn nguồn lời, ngôn ngữ và giọng; sau đó xem hoặc sửa nội dung trước khi hoàn tất."
         )
     if key == "music":
         source = str(value.get("source") or "none")
@@ -108970,14 +109361,21 @@ def video_tail9_addon_detail_keyboard(tail: dict, key: str) -> InlineKeyboardMar
     audio = dict(tail.get("audio_config") or {})
     if key == "subtitles":
         rows = [
-            [("🚫 Không dùng", "video_tail|addon|option|subtitles|none"), ("💬 Tự động · Miễn phí", "video_tail|addon|option|subtitles|auto")],
-            [("🌐 Dịch · 0,1 Xu/ký tự", "video_tail|addon|option|subtitles|translated"), ("✅ Giữ lựa chọn", "video_tail|addon|keep|subtitles")],
+            [("🚫 Không dùng", "video_tail|addon|option|subtitles|none"), ("💬 Theo ngôn ngữ gốc", "video_tail|addon|option|subtitles|auto")],
+            [("🌐 Dịch phụ đề", "video_tail|addon|language|subtitles"), ("👁️ Xem nội dung", "video_tail|addon|script|subtitles")],
+            [("✍️ Sửa nội dung", "video_tail|addon|edit_script|subtitles"), ("✅ Xong phụ đề", "video_tail|addon|keep|subtitles")],
         ]
     elif key == "dubbing":
+        voice_buttons = [
+            (label, f"video_tail|addon|option|dubbing|{option}")
+            for option, label in video_tail9_subdub_default_voice_options()
+        ]
         rows = [
-            [("🚫 Không dùng", "video_tail|addon|option|dubbing|none"), ("🧑 Theo nhân vật", "video_tail|addon|option|dubbing|follow_character")],
-            [("👨 Giọng nam", "video_tail|addon|option|dubbing|default_male"), ("👩 Giọng nữ", "video_tail|addon|option|dubbing|default_female")],
-            [("🔊 Chỉnh âm lượng", "video_tail|addon|volume|dubbing"), ("✅ Giữ lựa chọn", "video_tail|addon|keep|dubbing")],
+            [("🚫 Không dùng", "video_tail|addon|option|dubbing|none"), ("💬 Theo phụ đề", "video_tail|addon|source|dubbing|subtitles")],
+            [("🎬 Theo kịch bản", "video_tail|addon|source|dubbing|script"), ("🧑 Theo nhân vật", "video_tail|addon|option|dubbing|follow_character")],
+            voice_buttons,
+            [("🌐 Chọn ngôn ngữ", "video_tail|addon|language|dubbing"), ("👁️ Xem nội dung", "video_tail|addon|script|dubbing")],
+            [("✍️ Sửa nội dung", "video_tail|addon|edit_script|dubbing"), ("🔊 Chỉnh âm lượng", "video_tail|addon|volume|dubbing")],
         ]
     elif key == "music":
         rows = [
@@ -108999,6 +109397,77 @@ def video_tail9_addon_detail_keyboard(tail: dict, key: str) -> InlineKeyboardMar
         ])
     rows.append([("⬅️ Quay lại Add-on", "video_tail|addon|open"), ("🎬 Menu Video", "menu|main_video")])
     return video_scene3_keyboard(rows)
+
+
+def video_tail9_addon_language_text(tail: dict, key: str) -> str:
+    label = "phụ đề" if key == "subtitles" else "lồng tiếng"
+    script = video_tail9_addon_script_info(tail, key)
+    detected = video_tail9_language_label(
+        str(script.get("detected_language") or "auto"),
+        automatic="Sẽ tự nhận diện khi xử lý",
+    )
+    return (
+        f"🌐 <b>Chọn ngôn ngữ {label}</b>\n\n"
+        f"• Ngôn ngữ nguồn: <b>Tự động nhận diện · {html.escape(detected)}</b>\n"
+        f"• Nguồn nội dung: <b>{html.escape(str(script.get('source_label') or 'Chưa có'))}</b>\n\n"
+        "Chọn ngôn ngữ đầu ra hoặc giữ nguyên ngôn ngữ nguồn."
+    )
+
+
+def video_tail9_addon_language_keyboard(key: str) -> InlineKeyboardMarkup:
+    rows = [[
+        ("🔁 Giữ ngôn ngữ gốc", f"video_tail|addon|lang|{key}|original"),
+        ("👁️ Xem nội dung", f"video_tail|addon|script|{key}"),
+    ]]
+    options = video_tail9_subdub_language_options()
+    for offset in range(0, len(options), 2):
+        rows.append([
+            (
+                label,
+                f"video_tail|addon|otherlang|{key}"
+                if code == "custom"
+                else f"video_tail|addon|lang|{key}|{code}",
+            )
+            for code, label in options[offset:offset + 2]
+        ])
+    rows.append([
+        ("⬅️ Quay lại", f"video_tail|addon|item|{key}"),
+        ("🎬 Menu Video", "menu|main_video"),
+    ])
+    return video_scene3_keyboard(rows)
+
+
+def video_tail9_addon_script_preview_text(tail: dict, key: str) -> str:
+    label = "phụ đề" if key == "subtitles" else "lồng tiếng"
+    script = video_tail9_addon_script_info(tail, key)
+    text = str(script.get("text") or "").strip()
+    preview = text[:2600] + ("\n…" if len(text) > 2600 else "")
+    return (
+        f"👁️ <b>Nội dung {label}</b>\n\n"
+        f"• Nguồn: <b>{html.escape(str(script.get('source_label') or 'Chưa có'))}</b>\n"
+        f"• Ngôn ngữ nguồn: <b>{html.escape(video_tail9_language_label(str(script.get('detected_language') or 'auto')))}</b>\n\n"
+        f"<code>{html.escape(preview or 'Chưa có nội dung. Bấm Sửa nội dung để nhập lời muốn dùng.')}</code>"
+    )
+
+
+def video_tail9_addon_script_preview_keyboard(key: str) -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
+        [
+            ("✍️ Sửa nội dung", f"video_tail|addon|edit_script|{key}"),
+            ("⬅️ Quay lại", f"video_tail|addon|item|{key}"),
+        ],
+        [
+            ("🌐 Chọn ngôn ngữ", f"video_tail|addon|language|{key}"),
+            ("🎬 Menu Video", "menu|main_video"),
+        ],
+    ])
+
+
+def video_tail9_addon_input_keyboard(key: str) -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([[
+        ("⬅️ Quay lại", f"video_tail|addon|item|{key}"),
+        ("🎬 Menu Video", "menu|main_video"),
+    ]])
 
 
 def video_tail9_addon_volume_text(tail: dict, key: str) -> str:
@@ -110945,13 +111414,99 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 parse_mode="HTML",
                 reply_markup=video_tail9_addon_detail_keyboard(tail, argument),
             )
+        if action == "language" and argument in {"subtitles", "dubbing"}:
+            if str(tail.get("video_product_type") or "") not in VIDEO_TAIL9_SCRIPTABLE_ADDON_PRODUCTS:
+                return await video_tail9_render(query, uid, context, "addon")
+            return await safe_edit_or_send(
+                query,
+                video_tail9_addon_language_text(tail, argument),
+                parse_mode="HTML",
+                reply_markup=video_tail9_addon_language_keyboard(argument),
+            )
+        if action == "lang" and argument in {"subtitles", "dubbing"}:
+            if str(tail.get("video_product_type") or "") not in VIDEO_TAIL9_SCRIPTABLE_ADDON_PRODUCTS:
+                return await video_tail9_render(query, uid, context, "addon")
+            tail = video_tail9_set_addon_language(tail, argument, extra)
+            save_video_tail9_state(uid, context, tail, owner, host)
+            return await safe_edit_or_send(
+                query,
+                video_tail9_addon_detail_text(tail, argument),
+                parse_mode="HTML",
+                reply_markup=video_tail9_addon_detail_keyboard(tail, argument),
+            )
+        if action == "otherlang" and argument in {"subtitles", "dubbing"}:
+            if str(tail.get("video_product_type") or "") not in VIDEO_TAIL9_SCRIPTABLE_ADDON_PRODUCTS:
+                return await video_tail9_render(query, uid, context, "addon")
+            if isinstance(getattr(context, "user_data", None), dict):
+                context.user_data[VIDEO_TAIL9_TEXT_INPUT_KEY] = {
+                    "draft_id": str(tail.get("video_session_id") or ""),
+                    "input_kind": "addon_language",
+                    "addon_key": argument,
+                }
+            return await safe_edit_or_send(
+                query,
+                "🌍 <b>Nhập ngôn ngữ khác</b>\n\nGửi tên ngôn ngữ muốn dùng cho "
+                + ("phụ đề." if argument == "subtitles" else "lồng tiếng."),
+                parse_mode="HTML",
+                reply_markup=video_tail9_addon_input_keyboard(argument),
+            )
+        if action == "source" and argument == "dubbing" and extra in {"subtitles", "script"}:
+            if str(tail.get("video_product_type") or "") not in VIDEO_TAIL9_SCRIPTABLE_ADDON_PRODUCTS:
+                return await video_tail9_render(query, uid, context, "addon")
+            tail = video_tail9_set_dubbing_script_source(tail, extra)
+            save_video_tail9_state(uid, context, tail, owner, host)
+            return await safe_edit_or_send(
+                query,
+                video_tail9_addon_detail_text(tail, "dubbing"),
+                parse_mode="HTML",
+                reply_markup=video_tail9_addon_detail_keyboard(tail, "dubbing"),
+            )
+        if action == "script" and argument in {"subtitles", "dubbing"}:
+            if str(tail.get("video_product_type") or "") not in VIDEO_TAIL9_SCRIPTABLE_ADDON_PRODUCTS:
+                return await video_tail9_render(query, uid, context, "addon")
+            return await safe_edit_or_send(
+                query,
+                video_tail9_addon_script_preview_text(tail, argument),
+                parse_mode="HTML",
+                reply_markup=video_tail9_addon_script_preview_keyboard(argument),
+            )
+        if action == "edit_script" and argument in {"subtitles", "dubbing"}:
+            if str(tail.get("video_product_type") or "") not in VIDEO_TAIL9_SCRIPTABLE_ADDON_PRODUCTS:
+                return await video_tail9_render(query, uid, context, "addon")
+            if isinstance(getattr(context, "user_data", None), dict):
+                context.user_data[VIDEO_TAIL9_TEXT_INPUT_KEY] = {
+                    "draft_id": str(tail.get("video_session_id") or ""),
+                    "input_kind": "addon_script",
+                    "addon_key": argument,
+                }
+            current_script = str(video_tail9_addon_script_info(tail, argument).get("text") or "")
+            preview = current_script[:900] + ("…" if len(current_script) > 900 else "")
+            return await safe_edit_or_send(
+                query,
+                ("✍️ <b>Sửa nội dung phụ đề</b>" if argument == "subtitles" else "✍️ <b>Sửa nội dung lồng tiếng</b>")
+                + "\n\nGửi lại toàn bộ nội dung muốn dùng.\n\n"
+                + f"<code>{html.escape(preview or 'Chưa có nội dung.')}</code>",
+                parse_mode="HTML",
+                reply_markup=video_tail9_addon_input_keyboard(argument),
+            )
         if action == "keep" and argument in {"subtitles", "dubbing", "music", "sound"}:
             return await video_tail9_render(query, uid, context, "addon")
         if action == "option" and argument in {
             "source_audio", "subtitles", "dubbing", "music", "sfx",
         }:
             tail = video_tail9_set_addon_option(tail, argument, extra)
+            if argument == "dubbing" and extra != "none" and not str(
+                video_tail9_addon_value(tail, "dubbing").get("script_source") or ""
+            ):
+                tail = video_tail9_set_dubbing_script_source(tail, "script")
             save_video_tail9_state(uid, context, tail, owner, host)
+            if argument in {"subtitles", "dubbing"}:
+                return await safe_edit_or_send(
+                    query,
+                    video_tail9_addon_detail_text(tail, argument),
+                    parse_mode="HTML",
+                    reply_markup=video_tail9_addon_detail_keyboard(tail, argument),
+                )
             return await video_tail9_render(query, uid, context, "addon")
         if action == "volume" and argument in {"source_audio", "dubbing", "music", "sfx"}:
             return await safe_edit_or_send(
@@ -110963,6 +111518,13 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if action == "setvol" and argument in {"source_audio", "dubbing", "music", "sfx"}:
             tail = video_tail9_set_addon_volume(tail, argument, safe_int(extra, 100))
             save_video_tail9_state(uid, context, tail, owner, host)
+            if argument == "dubbing":
+                return await safe_edit_or_send(
+                    query,
+                    video_tail9_addon_detail_text(tail, "dubbing"),
+                    parse_mode="HTML",
+                    reply_markup=video_tail9_addon_detail_keyboard(tail, "dubbing"),
+                )
             return await video_tail9_render(query, uid, context, "addon")
         if action == "audio":
             return await video_tail9_open_planning_audio(
@@ -112268,17 +112830,28 @@ async def handle_video_tail9_pending_text(update: Update, context: ContextTypes.
         tail, owner, host = video_tail9_context(uid, context)
         text = str(update.message.text or "").strip()
         text_product = str(tail.get("video_product_type") or "")
+        input_kind = str(text_pending.get("input_kind") or "overlay_text")
+        addon_key = str(text_pending.get("addon_key") or "")
+        addon_pending = (
+            input_kind in {"addon_language", "addon_script"}
+            and addon_key in {"subtitles", "dubbing"}
+        )
         text_owner_ok = (
-            owner == "uiflow3" and text_product == "video_ai_real"
-        ) or (
-            owner in {"uiflow3", "scene3"}
-            and text_product == "script_image_video"
-        ) or (
-            owner == "scene3"
-            and text_product == "storyboard_prompt"
-        ) or (
-            owner == "scene3"
-            and text_product == "video_trend"
+            owner in {"uiflow3", "scene3", "session"}
+            and text_product in VIDEO_TAIL9_SCRIPTABLE_ADDON_PRODUCTS
+        ) if addon_pending else (
+            (
+                owner == "uiflow3" and text_product == "video_ai_real"
+            ) or (
+                owner in {"uiflow3", "scene3"}
+                and text_product == "script_image_video"
+            ) or (
+                owner == "scene3"
+                and text_product == "storyboard_prompt"
+            ) or (
+                owner == "scene3"
+                and text_product == "video_trend"
+            )
         )
         if (
             not text_owner_ok
@@ -112289,6 +112862,39 @@ async def handle_video_tail9_pending_text(update: Update, context: ContextTypes.
             return False
         if not text or text.startswith("/"):
             return False
+        if addon_pending:
+            limit = 80 if input_kind == "addon_language" else 3500
+            if len(text) > limit:
+                await update.message.reply_text(
+                    (
+                        "Tên ngôn ngữ tối đa 80 ký tự. Vui lòng gửi lại."
+                        if input_kind == "addon_language"
+                        else "Nội dung tối đa 3.500 ký tự. Bot chưa cắt hoặc lưu; vui lòng gửi lại bản phù hợp."
+                    ),
+                    reply_markup=video_tail9_addon_input_keyboard(addon_key),
+                )
+                return True
+            if input_kind == "addon_language":
+                normalized = normalize_translate_target(text)
+                if normalized == "auto":
+                    await update.message.reply_text(
+                        "Hãy nhập một ngôn ngữ đầu ra cụ thể, hoặc bấm Quay lại để chọn Giữ ngôn ngữ gốc.",
+                        reply_markup=video_tail9_addon_input_keyboard(addon_key),
+                    )
+                    return True
+                target = normalized or re.sub(r"\s+", " ", text).strip()[:80]
+                tail = video_tail9_set_addon_language(tail, addon_key, target)
+            else:
+                tail = video_tail9_set_addon_script_text(tail, addon_key, text)
+            save_video_tail9_state(uid, context, tail, owner, host)
+            if isinstance(user_data, dict):
+                user_data.pop(VIDEO_TAIL9_TEXT_INPUT_KEY, None)
+            await safe_reply_long_html(
+                update.message,
+                video_tail9_addon_detail_text(tail, addon_key),
+                reply_markup=video_tail9_addon_detail_keyboard(tail, addon_key),
+            )
+            return True
         if len(text) > 800:
             await update.message.reply_text(
                 "Nội dung chữ tối đa 800 ký tự. Bot chưa cắt hoặc lưu nội dung; vui lòng gửi lại bản phù hợp.",
@@ -252337,12 +252943,27 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             state["requirements"] = video_scene3_flow.public_requirements(state)
             state = save_video_profile_studio_state(context, state)
         return await video_profile_scene1_render(query, state, lang)
+    if action == "req_auto":
+        if not video_scene3_shared_auto_suggest_enabled(state):
+            return await video_profile_scene1_render(query, state, lang)
+        state = video_scene3_apply_auto_suggestions(
+            state,
+            group="preservation_requirements",
+            fields=tuple(video_scene3_flow.PUBLIC_REQUIREMENT_CATEGORIES),
+            selection_key="requirement_auto_selection",
+            revision_key="requirement_auto_revision",
+        )
+        state.update({"step": "requirements", "no_preservation_requirements": False})
+        state = save_video_profile_studio_state(context, state)
+        return await video_profile_scene1_render(query, state, lang)
     if action == "req_none":
         state["preservation_requirements"] = video_scene3_flow.default_state()["preservation_requirements"]
         state["requirements"] = {}
         state["no_preservation_requirements"] = True
         if bool(state.get("script_creative_setup")):
             return await video_script_finish_creative_details(query, uid, context, state, lang)
+        if bool(state.get("selfshot2_creative_setup")):
+            return await video_selfshot2_finish_creative_details(query, uid, context, state, lang)
         if video_flow6_product_id(state) == "video_trend":
             state = video_trend_finish_requirements_without_legacy_audio(state)
             state = save_video_profile_studio_state(context, state)
@@ -252353,6 +252974,8 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         state["requirements"] = video_scene3_flow.public_requirements(state)
         if bool(state.get("script_creative_setup")):
             return await video_script_finish_creative_details(query, uid, context, state, lang)
+        if bool(state.get("selfshot2_creative_setup")):
+            return await video_selfshot2_finish_creative_details(query, uid, context, state, lang)
         if video_flow6_product_id(state) == "video_trend":
             state = video_trend_finish_requirements_without_legacy_audio(state)
             state = save_video_profile_studio_state(context, state)
@@ -252517,6 +253140,33 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         parent = "creative_detail" if str(state.get("step") or "") == "creative_suggestions" else "creative_controls"
         state = video_scene3_return_to_parent(context, state, parent)
         return await video_profile_scene1_render(query, state, lang)
+    if action == "creative_auto":
+        if not video_scene3_shared_auto_suggest_enabled(state):
+            return await video_profile_scene1_render(query, state, lang)
+        state = video_scene3_apply_auto_suggestions(
+            state,
+            group="creative_controls",
+            fields=tuple(video_scene3_flow.CREATIVE_CONTROLS),
+            selection_key="creative_auto_selection",
+            revision_key="creative_auto_revision",
+        )
+        state["step"] = "creative_controls"
+        state = save_video_profile_studio_state(context, state)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "creative_auto_clear":
+        if not video_scene3_shared_auto_suggest_enabled(state):
+            return await video_profile_scene1_render(query, state, lang)
+        state["creative_controls"] = deepcopy(
+            video_scene3_flow.default_state().get("creative_controls") or {}
+        )
+        state["creative_auto_selection"] = 0
+        state["creative_auto_revision"] = max(
+            1,
+            safe_int(state.get("creative_auto_revision"), 0) + 1,
+        )
+        state["step"] = "creative_controls"
+        state = save_video_profile_studio_state(context, state)
+        return await video_profile_scene1_render(query, state, lang)
     if action == "creative_quick":
         state = video_scene3_return_to_parent(context, state, "creative_controls")
         return await video_profile_scene1_render(query, state, lang)
@@ -252553,7 +253203,8 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         return await video_profile_scene1_render(query, state, lang)
     if action in {"creative_done", "creative_skip"}:
         if bool(state.get("selfshot2_creative_setup")):
-            return await video_selfshot2_finish_creative_details(query, uid, context, state, lang)
+            state = video_profile_studio_step(context, state, "requirements")
+            return await video_profile_scene1_render(query, state, lang)
         state = video_profile_studio_step(context, state, "requirements")
         return await video_profile_scene1_render(query, state, lang)
     if action == "audio_open":
