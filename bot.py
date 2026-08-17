@@ -79987,9 +79987,17 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             ep_num = safe_int(episode.get("number"), 1)
             ep_title = str(episode.get("title") or f"Tập {ep_num}")
             fmt = dict(state.get("format") or {})
-            total_sec = safe_int(fmt.get("target_duration_seconds"), len(scenes) * 8)
+            total_sec = sum(safe_int(s.get("duration_target"), 0) for s in scenes) or safe_int(fmt.get("target_duration_seconds"), len(scenes) * 8)
             series_goal_text = str((state.get("series_goal") or {}).get("text") or "").strip()
-            ep_content = str(episode.get("content") or "").strip()
+            raw_content = episode.get("content")
+            if isinstance(raw_content, dict):
+                brief = raw_content.get("approved_brief")
+                if isinstance(brief, dict):
+                    ep_content = str(brief.get("title") or brief.get("hook") or raw_content.get("original_intent") or "").strip()
+                else:
+                    ep_content = str(raw_content.get("original_intent") or brief or "").strip()
+            else:
+                ep_content = str(raw_content or "").strip()
             
             lines = [
                 f"{prefix}🎬 <b>KẾ HOẠCH VIDEO · TẬP {ep_num}: {html.escape(ep_title)}</b>",
