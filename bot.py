@@ -72240,9 +72240,44 @@ VIDEO_UIFLOW3_VOICE_ALIAS_GENDERS = {
     "vm1": "male",
     "vm2": "male",
 }
+
+VIDEO_SERIES_GOAL_SUGGESTIONS = (
+    # Trang 1: Phim ảnh, Drama & Giải trí
+    "🎬 Chuỗi phim ngắn drama kịch tính về cuộc sống và tình cảm hiện đại",
+    "☕ Phim ngắn hài hước, tình huống văn phòng & cuộc sống thường ngày",
+    "🕵️ Loạt video trinh thám, bí ẩn và giải mã các câu chuyện kỳ thú",
+    "⚡ Phim hành động ngắn, giả tưởng và thế giới tương lai cyberpunk",
+    "🎭 Tuyển tập tiểu phẩm hài, tình huống bất ngờ mang lại tiếng cười",
+    # Trang 2: Giáo dục, Tri thức & Kinh doanh
+    "📈 Khóa học & bài giảng ngắn chia sẻ kiến thức kinh doanh, tài chính thực chiến",
+    "🚀 Hành trình khởi nghiệp & phát triển bản thân từ con số 0",
+    "💼 Bí quyết quản trị, lãnh đạo và kỹ năng làm việc hiệu quả",
+    "📚 Kể chuyện lịch sử & những câu chuyện truyền cảm hứng lay động lòng người",
+    "🔮 Giải mã tâm lý học hành vi và nghệ thuật giao tiếp thu phục lòng người",
+    # Trang 3: Đời sống, Công nghệ & Review
+    "🌟 Series review sản phẩm & hướng dẫn công nghệ đời sống thế hệ mới",
+    "💎 Chuỗi video quảng bá thương hiệu, định vị phong cách sống sang trọng",
+    "🍲 Hành trình khám phá ẩm thực đường phố và văn hóa các vùng miền",
+    "✈️ Cẩm nang du lịch trải nghiệm, khám phá những vùng đất mới lạ",
+    "🏡 Cẩm nang chia sẻ mẹo vặt gia đình, chăm sóc nhà cửa và đời sống",
+    # Trang 4: Sức khỏe, Tâm hồn & Sáng tạo
+    "🧘 Chuỗi video chữa lành tâm hồn, động lực sống và tư duy tích cực",
+    "🩺 Chia sẻ kiến thức sức khỏe, thể hình và chế độ ăn lành mạnh",
+    "🎨 Series sáng tạo nghệ thuật, thiết kế và phong cách sống tối giản",
+    "🐾 Những câu chuyện dễ thương, hài hước về thú cưng và động vật",
+    "🌿 Cuộc sống nông thôn, làm vườn và tìm về với thiên nhiên an yên",
+    # Trang 5: Truyền thông & Khám phá
+    "🎤 Podcast video tâm sự đêm khuya và những bài học cuộc đời",
+    "🏙️ Phim ngắn tài liệu về nhịp sống đô thị và những góc khuất xã hội",
+    "🎮 Review thế giới game, cốt truyện game và phân tích nhân vật",
+    "👗 Series thời trang, phối đồ và phong cách đường phố cá tính",
+    "💡 Giới thiệu các ý tưởng sáng tạo và phát minh độc đáo thay đổi cuộc sống",
+)
+
+
 VIDEO_UIFLOW3_STEP_ACTIONS = {
     "entry": {"mode", "idea_catalog"},
-    "series_goal": {"series_goal_edit", "series_goal_done"},
+    "series_goal": {"series_goal_edit", "series_goal_done", "series_goal_pick", "series_goal_rotate", "series_goal_page"},
     "source": {"source_text", "source_media", "source_status", "source_done", "image_ai"},
     "format": {"ratio", "duration", "duration_scene", "duration_custom", "format_done"},
     "content_hub": {"content", "profiles", "profile", "idea_catalog"},
@@ -72390,7 +72425,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
     **{
         action: frozenset({0})
         for action in (
-            "resume", "back", "series_goal_edit", "series_goal_done",
+            "resume", "back", "series_goal_edit", "series_goal_done", "series_goal_rotate",
             "source_text", "source_media", "source_status", "source_done",
             "duration_custom", "format_done", "content_lock", "content_edit",
             "content_change", "context_page", "chars_custom", "narrator_edit", "narrator_clear",
@@ -72412,7 +72447,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
     **{
         action: frozenset({1})
         for action in (
-            "entry", "mode", "view", "profiles", "profile", "ratio", "duration", "duration_scene",
+            "entry", "mode", "view", "profiles", "profile", "ratio", "series_goal_pick", "series_goal_page", "duration", "duration_scene",
             "content", "chars", "character", "char_desc", "char_suggest", "char_image",
             "char_voice", "voice_custom", "char_scenes", "product_image",
             "prop_image", "locs", "location", "loc_desc", "loc_image",
@@ -79536,12 +79571,29 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
 
     if step == "series_goal":
         goal = str((state.get("series") or {}).get("goal") or "")
+        page = max(1, min(5, safe_int((state.get("series") or {}).get("goal_page"), 1)))
+        start_idx = (page - 1) * 5
+        page_suggestions = list(VIDEO_SERIES_GOAL_SUGGESTIONS[start_idx:start_idx + 5])
+        
+        suggestions_text = "\n".join(f"<b>{i+1}.</b> {html.escape(s)}" for i, s in enumerate(page_suggestions))
+        
+        button_row = [
+            (str(i + 1), f"vid3|series_goal_pick|{start_idx + i + 1}")
+            for i in range(len(page_suggestions))
+        ]
+        
+        text = (
+            f"{prefix}🎯 MỤC TIÊU LOẠT VIDEO (Trang {page}/5)\n\n"
+            f"Mục tiêu chung hiện tại: <b>{html.escape(goal or 'Chưa chọn/nhập')}</b>\n\n"
+            f"💡 <b>GỢI Ý MỤC TIÊU CHO LOẠT:</b>\n{suggestions_text}\n\n"
+            "👉 Bấm các số [1] [2] [3] [4] [5] để chọn nhanh gợi ý, hoặc tự nhập mục tiêu riêng bên dưới."
+        )
         return (
-            f"{prefix}🎯 MỤC TIÊU LOẠT VIDEO\n\n"
-            f"Mục tiêu chung: {goal or 'Chưa nhập'}\n\n"
-            "Mục tiêu này là nền chung cho các tập; nội dung riêng của từng tập được nhập sau khi hoàn tất thiết lập chung của loạt video.",
+            text,
             video_uiflow3_keyboard([
-                [("✏️ Nhập hoặc sửa mục tiêu", "vid3|series_goal_edit"), ("✅ Hoàn tất mục tiêu của loạt video", "vid3|series_goal_done")],
+                button_row,
+                [("🔄 Đổi 5 gợi ý khác", "vid3|series_goal_rotate"), ("✏️ Tự nhập mục tiêu", "vid3|series_goal_edit")],
+                [("✅ Hoàn tất mục tiêu của loạt video", "vid3|series_goal_done")],
                 *video_uiflow3_nav_rows(),
             ]),
         )
@@ -80671,6 +80723,15 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 updated,
                 target_step=video_uiflow3_mode_target_step(updated),
             )
+        elif action == "series_goal_pick" and values:
+            pick_idx = max(1, min(len(VIDEO_SERIES_GOAL_SUGGESTIONS), safe_int(values[0], 1))) - 1
+            picked_goal = VIDEO_SERIES_GOAL_SUGGESTIONS[pick_idx]
+            state = video_uiflow3.set_series_goal(state, picked_goal)
+        elif action in {"series_goal_rotate", "series_goal_page"}:
+            current_page = safe_int((state.get("series") or {}).get("goal_page"), 1)
+            total_pages = max(1, (len(VIDEO_SERIES_GOAL_SUGGESTIONS) + 4) // 5)
+            next_page = 1 if current_page >= total_pages else current_page + 1
+            state["series"]["goal_page"] = next_page
         elif action == "series_goal_edit":
             state = video_uiflow3_await_input(state, "series_goal", back_callback="vid3|view|series_goal")
         elif action == "series_goal_done":
