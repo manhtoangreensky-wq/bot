@@ -131566,6 +131566,80 @@ def customer_start_surface_audit_data():
         "rule": "Khách chỉ thấy menu dịch vụ/nạp tiền/hỗ trợ. Tools, MMO, operator và chẩn đoán webhook chỉ hiện trong menu Admin.",
     }
 
+
+
+async def confirm_webapp_telegram_link(code: str, telegram_uid: int, role: str = "user") -> tuple[bool, str]:
+    """Send signed HMAC callback to Web App to confirm Telegram login / link challenge."""
+    webapp_base_url = os.environ.get("WEBAPP_BASE_URL", "https://app.toanaas.vn").rstrip("/")
+    bridge_token = os.environ.get("WEBAPP_LINK_CALLBACK_TOKEN", os.environ.get("CORE_BRIDGE_CALLBACK_TOKEN", "")).strip()
+    hmac_secret = os.environ.get("WEBAPP_LINK_CALLBACK_HMAC_SECRET", os.environ.get("CORE_BRIDGE_CALLBACK_HMAC_SECRET", "")).strip()
+    if not bridge_token or not hmac_secret:
+        return False, "Cổng kết nối Web App chưa được cấu hình token và HMAC secret trên máy chủ Bot."
+
+    clean_code = code.strip().upper()
+    body_dict = {
+        "code": clean_code,
+        "canonical_user_id": f"telegram-{telegram_uid}",
+        "role": role,
+    }
+    body_bytes = json.dumps(body_dict, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    request_id = f"bot-link-{uuid.uuid4()}"
+    timestamp = str(int(time.time()))
+    path = "/api/v1/auth/internal/telegram-link/confirm"
+    digest = hashlib.sha256(body_bytes).hexdigest()
+    material = f"{timestamp}.{request_id}.POST.{path}.{digest}".encode("utf-8")
+    signature = hmac.new(hmac_secret.encode("utf-8"), material, hashlib.sha256).hexdigest()
+    headers = {
+        "X-TOAN-AAS-BRIDGE-TOKEN": bridge_token,
+        "X-TOAN-AAS-Timestamp": timestamp,
+        "X-TOAN-AAS-Request-ID": request_id,
+        "X-TOAN-AAS-Signature": signature,
+        "Content-Type": "application/json",
+    }
+    url = f"{webapp_base_url}{path}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, headers=headers, content=body_bytes)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("ok"):
+                    return True, "Xác thực thành công!"
+                return False, data.get("message", "Mã xác thực không hợp lệ hoặc đã hết hạn.")
+            else:
+                return False, f"Máy chủ Web phản hồi ({resp.status_code})."
+    except Exception as e:
+        return False, f"Lỗi kết nối Web App: {str(e)[:120]}"
+
+
+async def cmd_linkweb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_command_received("linkweb", update)
+    if not update.effective_user or not update.message:
+        return
+    uid = update.effective_user.id
+    if not context.args:
+        await update.message.reply_text(
+            "ℹ️ <b>Hướng dẫn kết nối Web App:</b>\n\n"
+            "Vui lòng nhập lệnh kèm mã 6 ký tự hiển thị trên màn hình Web App của bạn. Ví dụ:\n"
+            "<code>/linkweb AB12CD</code>",
+            parse_mode="HTML"
+        )
+        return
+    code = context.args[0].strip()
+    success, msg = await confirm_webapp_telegram_link(code, uid, role="user")
+    if success:
+        await update.message.reply_text(
+            "✅ <b>Xác thực Web App thành công!</b>\n\n"
+            "Tài khoản Telegram của bạn đã được xác nhận an toàn.\n"
+            "👉 Hãy quay lại trình duyệt để tiếp tục sử dụng TOAN AAS.",
+            parse_mode="HTML"
+        )
+    else:
+        await update.message.reply_text(
+            f"⚠️ <b>Không thể xác thực:</b> {msg}\n"
+            "Vui lòng tạo mã mới trên Web App và thử lại.",
+            parse_mode="HTML"
+        )
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("start", update)
     uid = update.effective_user.id
@@ -131579,6 +131653,24 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         command="/start",
         status="ok",
     )
+    if context.args and (context.args[0].startswith("login_") or context.args[0].startswith("link_")):
+        deep_arg = context.args[0]
+        code = deep_arg.split("_", 1)[1].strip()
+        success, msg = await confirm_webapp_telegram_link(code, uid, role="user")
+        if success:
+            await update.message.reply_text(
+                "✅ <b>Xác thực Web App thành công!</b>\n\n"
+                "Tài khoản Telegram của bạn đã được xác nhận an toàn.\n"
+                "👉 Hãy quay lại trình duyệt để tiếp tục sử dụng TOAN AAS.",
+                parse_mode="HTML"
+            )
+        else:
+            await update.message.reply_text(
+                f"⚠️ <b>Không thể xác thực:</b> {msg}\n"
+                "Vui lòng tạo mã mới trên Web App và thử lại.",
+                parse_mode="HTML"
+            )
+
     if context.args and context.args[0].startswith("ref_"):
         referrer = context.args[0].replace("ref_", "", 1)
         ref_result = register_referral(uid, referrer, user_existed_before=user_existed_before)
@@ -259462,6 +259554,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("aichat_test", cmd_aichat_test))
     tg_app.add_handler(CommandHandler("aichat_trace", cmd_aichat_trace))
     tg_app.add_handler(CommandHandler("start",       cmd_start))
+    tg_app.add_handler(CommandHandler("linkweb",     cmd_linkweb))
+    tg_app.add_handler(CommandHandler("link",        cmd_linkweb))
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
     tg_app.add_handler(CommandHandler("broadcast",   cmd_broadcast_lite))
     tg_app.add_handler(CommandHandler("language",    cmd_language))
