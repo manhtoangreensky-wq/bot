@@ -80220,7 +80220,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             rows = [
                 [("✨ Phác thảo lại cảnh", "vid3|scene_plan_auto"), ("✏️ Sửa chi tiết cảnh", "vid3|scene_plan_edit")],
                 [("✅ Tiếp tục sang Gói Add-on", "vid3|episode_tail_addon")],
-                *video_uiflow3_nav_rows(back="vid3|step|episode"),
+                *video_uiflow3_nav_rows(back="vid3|view|episode_script"),
             ]
             return "\n".join(lines), video_uiflow3_keyboard(rows)
         
@@ -81086,13 +81086,33 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                     )
         elif action == "back":
             current_step = str((state.get("navigation") or {}).get("current_step") or "")
-            if (
-                str(state.get("parent_product") or "") == "multi_scene_film"
-                and current_step == "episode"
-            ):
+            cur_view = str(state.get("ui_view") or "")
+            if str(state.get("parent_product") or "") == "multi_scene_film":
                 state = video_uiflow3_clear_transient(state)
-                state["navigation"]["current_step"] = "production_bible"
-                state = video_uiflow3_open_view(state, "pilot_requirements")
+                if cur_view == "episode_script" or current_step == "scene_plan":
+                    state["navigation"]["current_step"] = "episode"
+                    state = video_uiflow3_open_view(state, "episode_duration")
+                elif cur_view == "episode_duration":
+                    state["navigation"]["current_step"] = "episode"
+                    state = video_uiflow3_open_view(state, "episode_platform")
+                elif cur_view == "episode_platform":
+                    state["navigation"]["current_step"] = "episode"
+                    state = video_uiflow3_open_view(state, "episode_audience")
+                elif cur_view == "episode_audience":
+                    state["navigation"]["current_step"] = "episode"
+                    state = video_uiflow3_open_view(state, "episode_goal")
+                elif cur_view == "episode_goal" or current_step == "episode":
+                    state["navigation"]["current_step"] = "production_bible"
+                    state = video_uiflow3_open_view(state, "pilot_requirements")
+                elif current_step == "production_bible" and cur_view == "pilot_requirements":
+                    state = video_uiflow3_open_view(state, "pilot_creative_controls")
+                elif current_step == "production_bible" and cur_view == "pilot_creative_controls":
+                    state = video_uiflow3_open_view(state, "")
+                elif current_step == "production_bible":
+                    state["navigation"]["current_step"] = "content_hub"
+                    state = video_uiflow3_open_view(state, "profiles")
+                else:
+                    state = video_uiflow3.back(state)
             else:
                 state = video_uiflow3_clear_transient(state)
                 state = video_uiflow3.back(state)
@@ -81132,15 +81152,13 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             target = str(values[0])
             view_owner = VIDEO_UIFLOW3_VIEW_OWNERS.get(target)
             if view_owner:
-                if view_owner != str((state.get("navigation") or {}).get("current_step") or ""):
-                    raise ValueError("video_uiflow3_view_not_relevant")
+                state["navigation"]["current_step"] = view_owner
                 state = video_uiflow3_open_view(state, target)
             elif target in video_uiflow3.CANONICAL_VISIBLE_STEPS:
-                if target != str((state.get("navigation") or {}).get("current_step") or ""):
-                    raise ValueError("video_uiflow3_view_not_relevant")
-                state = video_uiflow3_go(state, target)
+                state["navigation"]["current_step"] = target
+                state = video_uiflow3_open_view(state, "")
             else:
-                raise ValueError("video_uiflow3_view_invalid")
+                state = video_uiflow3_open_view(state, target)
         elif action == "profiles" and values:
             page = max(1, min(4, safe_int(values[0], 1)))
             state = video_uiflow3_open_view(state, "profiles", profile_page=page)
@@ -112357,7 +112375,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             current[VIDEO_TAIL9_STATE_KEY] = tail
             current = video_uiflow3_clear_transient(current, keep_return=False)
             if str(current.get("parent_product") or "") == "multi_scene_film":
-                current["navigation"]["current_step"] = "scene_plan"
+                current["navigation"]["current_step"] = "episode"
+                current = video_uiflow3_open_view(current, "episode_script")
                 current["navigation"]["return_to"] = None
             else:
                 current["navigation"]["current_step"] = "summary"
