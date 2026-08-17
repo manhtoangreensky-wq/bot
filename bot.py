@@ -81134,12 +81134,27 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             page = max(1, min(4, safe_int(values[0], 1)))
             state = video_uiflow3_open_view(state, "profiles", profile_page=page)
         elif action == "profile" and values:
-            profile_key = str(values[0] or "")
-            content_dict = dict(state.get("content") or {})
-            content_dict["profile_id"] = profile_key
-            state["content"] = content_dict
-            state["profile_revision"] = 0
-            state = video_uiflow3_open_view(state, "profile_suggestions")
+            if str(state.get("parent_product") or "") == "multi_scene_film":
+                profile_key = str(values[0] or "")
+                content_dict = dict(state.get("content") or {})
+                content_dict["profile_id"] = profile_key
+                state["content"] = content_dict
+                state["profile_revision"] = 0
+                state = video_uiflow3_open_view(state, "profile_suggestions")
+            else:
+                candidate = video_uiflow3_profile_candidate(values[0])
+                updated = video_uiflow3.set_content_candidate(
+                    state,
+                    source="content_catalog",
+                    profile_id=str(candidate["profile"].get("profile_key") or ""),
+                    original_intent=candidate["intent"],
+                    approved_brief=candidate["brief"],
+                )
+                state = video_uiflow3_after_service_update(
+                    state,
+                    updated,
+                    target_step="content_lock",
+                )
         elif action == "prof_sug" and values:
             sug_idx = safe_int(values[0], 0)
             profile_key = str((state.get("content") or {}).get("profile_id") or "brand_corporate")
@@ -81970,6 +81985,10 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             if str(state.get("parent_product") or "") == "multi_scene_film":
                 if not str((state.get("format") or {}).get("ratio") or ""):
                     state["format"]["ratio"] = "9:16"
+                if safe_int((state.get("format") or {}).get("scene_count"), 0) <= 0:
+                    state["format"]["scene_count"] = 5
+                if not bool((state.get("content") or {}).get("locked")):
+                    state["content"]["locked"] = True
             state = video_ai_real_build_quick_plan(state, bible_only=True)
             for item in (state.get("bible") or {}).get("characters") or []:
                 if not item.get("locked_by_user") and not item.get("suggestion_source"):
@@ -111492,7 +111511,7 @@ def video_tail9_quality_keyboard(
 
 def video_tail9_invoice_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("✅ Xác nhận tạo video", "video_tail|confirm|open"), ("⭐ Đổi gói", "video_tail|quality|change")],
+        [("✅ Xác nhận tạo video", "video_tail|confirm|submit"), ("⭐ Đổi gói", "video_tail|quality|change")],
         [("🧰 Sửa Add-on", "video_tail|addon|open"), ("👁️ Rà soát video", "video_tail|review|open")],
         [("⬅️ Quay lại", "video_tail|quality|open"), ("🎬 Menu Video", "menu|main_video")],
     ])
@@ -113556,11 +113575,15 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             await query.answer()
             return await video_tail9_render(query, uid, context, "invoice")
         if action == "open":
-            await query.answer()
-            allowed, _reason = video_tail9.invoice_allowed(tail)
-            if not allowed:
-                return await video_tail9_render(query, uid, context, "invoice")
-            return await video_tail9_render(query, uid, context, "confirm")
+            product_type = str(tail.get("video_product_type") or "")
+            if product_type in {"multi_scene_film", "video_long"}:
+                action = "submit"
+            else:
+                await query.answer()
+                allowed, _reason = video_tail9.invoice_allowed(tail)
+                if not allowed:
+                    return await video_tail9_render(query, uid, context, "invoice")
+                return await video_tail9_render(query, uid, context, "confirm")
         if action == "back":
             await query.answer()
             return await video_tail9_render(query, uid, context, "invoice")
