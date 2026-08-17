@@ -82006,7 +82006,9 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             )
             state = video_uiflow3_go(state, "scene_plan")
         elif action == "episode_tail_addon":
+            snapshot = video_uiflow3.approved_snapshot(state)
             legacy_compat = dict(state.get("legacy_compat") or {})
+            legacy_compat["approved_snapshot"] = snapshot
             legacy_compat["video_tail9_ready"] = True
             legacy_compat["video_tail9_source"] = "multi_scene_film"
             state["legacy_compat"] = legacy_compat
@@ -111992,9 +111994,13 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             current = video_uiflow3.normalize_state(host)
             current[VIDEO_TAIL9_STATE_KEY] = tail
             current = video_uiflow3_clear_transient(current, keep_return=False)
-            current["navigation"]["current_step"] = "summary"
-            current["navigation"]["return_to"] = None
-            current = video_uiflow3.begin_summary_edit(current, "prompts")
+            if str(current.get("parent_product") or "") == "multi_scene_film":
+                current["navigation"]["current_step"] = "scene_plan"
+                current["navigation"]["return_to"] = None
+            else:
+                current["navigation"]["current_step"] = "summary"
+                current["navigation"]["return_to"] = None
+                current = video_uiflow3.begin_summary_edit(current, "prompts")
             legacy_compat = dict(current.get("legacy_compat") or {})
             legacy_compat["video_tail_return_to"] = "addon"
             current["legacy_compat"] = legacy_compat
