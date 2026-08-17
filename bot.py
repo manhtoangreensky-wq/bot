@@ -113563,7 +113563,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if required_screen:
             await query.answer()
             return await video_tail9_render(query, uid, context, required_screen)
-        if action in {"open", "submit"} and str(tail.get("status_stage") or "") != "invoice":
+        if action in {"open", "submit"} and str(tail.get("status_stage") or "") not in {"invoice", "review"}:
             await query.answer()
             return await video_tail9_render(query, uid, context, "invoice")
         if action == "open":
