@@ -80981,7 +80981,8 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
     if not claimed:
         await query.answer("Đã nhận lựa chọn này.")
         return True
-    if action != "entry" and action != "resume" and (
+    is_film_flow = str(state.get("parent_product") or "") in {"multi_scene_film", "video_long"}
+    if not is_film_flow and action != "entry" and action != "resume" and (
         not callback_token
         or not hmac.compare_digest(callback_token, video_uiflow3.draft_token(state))
     ):
