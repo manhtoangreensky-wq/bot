@@ -1,53 +1,3 @@
-
-def video_film_generate_timeline_script(state: dict) -> str:
-    episode = dict(state.get("episode") or {})
-    ep_num = int(episode.get("number") or 1)
-    ep_title = str(episode.get("title") or f"Tập {ep_num}").strip()
-    brief_dict = dict((state.get("content") or {}).get("approved_brief") or {})
-    brief_title = str(brief_dict.get("title") or (state.get("content") or {}).get("original_intent") or "Câu chuyện điện ảnh").strip()
-    goal = str(episode.get("goal_label") or "Kể chuyện / tạo cảm xúc")
-    audience = str(episode.get("audience_label") or "Khán giả đại chúng")
-    platform = str(episode.get("platform_label") or "TikTok / Reels")
-    duration = int(episode.get("duration") or 60)
-    
-    if duration <= 45:
-        scene_count = 4
-        times = ["00:00 – 00:10", "00:10 – 00:20", "00:20 – 00:30", "00:30 – 00:40"]
-    elif duration <= 60:
-        scene_count = 5
-        times = ["00:00 – 00:12", "00:12 – 00:24", "00:24 – 00:36", "00:36 – 00:48", "00:48 – 01:00"]
-    else:
-        scene_count = 6
-        times = ["00:00 – 00:15", "00:15 – 00:30", "00:30 – 00:45", "00:45 – 01:00", "01:00 – 01:15", "01:15 – 01:30"]
-        
-    chars = [c.get("display_name") for c in (state.get("bible") or {}).get("characters") or [] if c.get("display_name")] or ["Nhân vật chính"]
-    locs = [l.get("name") for l in (state.get("bible") or {}).get("locations") or [] if l.get("name")] or ["Bối cảnh trung tâm"]
-    
-    lines = [
-        f"📝 <b>KỊCH BẢN PHÂN CẢNH - TẬP {ep_num}</b>",
-        f"🎬 <b>Tên tập:</b> {html.escape(ep_title)}",
-        "",
-        f"• <b>Chủ đề & Cốt truyện:</b> {html.escape(brief_title)}",
-        f"• <b>Mục tiêu:</b> {html.escape(goal)}",
-        f"• <b>Đối tượng:</b> {html.escape(audience)} | <b>Nền tảng:</b> {html.escape(platform)}",
-        f"• <b>Thời lượng:</b> {duration}s ({scene_count} cảnh)",
-        "",
-        "━━━━━━━━━━━━━━━━━━",
-        "🎬 <b>CHI TIẾT TỪNG PHÂN CẢNH (TIMELINE):</b>",
-        "━━━━━━━━━━━━━━━━━━",
-        "",
-    ]
-    for idx, t in enumerate(times[:scene_count]):
-        lines.append(f"⏱ <b>{t} | Cảnh {idx+1}</b>")
-        lines.append(f"• <b>Góc máy & Hình ảnh:</b> {html.escape(chars[0])} tại {html.escape(locs[0])}")
-        lines.append(f"• <b>Thoại / Voiceover:</b> Diễn biến kịch tính cảnh {idx+1}")
-        lines.append("")
-    lines.append("━━━━━━━━━━━━━━━━━━")
-    lines.append(f"💡 <b>GỢI Ý NỐI TIẾP CHO TẬP {ep_num + 1}:</b>")
-    lines.append(f"Manh mối tiếp theo dẫn {html.escape(chars[0])} sang thử thách mới gay cấn hơn.")
-    lines.append("━━━━━━━━━━━━━━━━━━")
-    return "\n".join(lines)
-
 """
 ╔══════════════════════════════════════════════════════════════════╗
 ║   TOAN AAS v1.0 Beta - DYNAMIC QR READY                         ║
@@ -78877,6 +78827,56 @@ def video_ai_real_pilot_screen_payload(
         return "\n".join(lines), video_uiflow3_keyboard(rows)
 
     return None
+
+
+def video_film_generate_timeline_script(state: dict) -> str:
+    episode = dict(state.get("episode") or {})
+    ep_num = int(episode.get("number") or 1)
+    ep_title = str(episode.get("title") or f"Tập {ep_num}").strip()
+    brief_dict = dict((state.get("content") or {}).get("approved_brief") or {})
+    brief_title = str(brief_dict.get("title") or (state.get("content") or {}).get("original_intent") or "Câu chuyện điện ảnh").strip()
+    goal = str(episode.get("goal_label") or "Kể chuyện / tạo cảm xúc")
+    audience = str(episode.get("audience_label") or "Khán giả đại chúng")
+    platform = str(episode.get("platform_label") or "TikTok / Reels")
+    duration = int(episode.get("duration") or 60)
+    
+    if duration <= 45:
+        scene_count = 4
+        times = ["00:00 – 00:10", "00:10 – 00:20", "00:20 – 00:30", "00:30 – 00:40"]
+    elif duration <= 60:
+        scene_count = 5
+        times = ["00:00 – 00:12", "00:12 – 00:24", "00:24 – 00:36", "00:36 – 00:48", "00:48 – 01:00"]
+    else:
+        scene_count = 6
+        times = ["00:00 – 00:15", "00:15 – 00:30", "00:30 – 00:45", "00:45 – 01:00", "01:00 – 01:15", "01:15 – 01:30"]
+        
+    chars = [c.get("display_name") for c in (state.get("bible") or {}).get("characters") or [] if c.get("display_name")] or ["Nhân vật chính"]
+    locs = [l.get("name") for l in (state.get("bible") or {}).get("locations") or [] if l.get("name")] or ["Bối cảnh trung tâm"]
+    
+    lines = [
+        f"📝 <b>KỊCH BẢN PHÂN CẢNH - TẬP {ep_num}</b>",
+        f"🎬 <b>Tên tập:</b> {html.escape(ep_title)}",
+        "",
+        f"• <b>Chủ đề & Cốt truyện:</b> {html.escape(brief_title)}",
+        f"• <b>Mục tiêu:</b> {html.escape(goal)}",
+        f"• <b>Đối tượng:</b> {html.escape(audience)} | <b>Nền tảng:</b> {html.escape(platform)}",
+        f"• <b>Thời lượng:</b> {duration}s ({scene_count} cảnh)",
+        "",
+        "━━━━━━━━━━━━━━━━━━",
+        "🎬 <b>CHI TIẾT TỪNG PHÂN CẢNH (TIMELINE):</b>",
+        "━━━━━━━━━━━━━━━━━━",
+        "",
+    ]
+    for idx, t in enumerate(times[:scene_count]):
+        lines.append(f"⏱ <b>{t} | Cảnh {idx+1}</b>")
+        lines.append(f"• <b>Góc máy & Hình ảnh:</b> {html.escape(chars[0])} tại {html.escape(locs[0])}")
+        lines.append(f"• <b>Thoại / Voiceover:</b> Diễn biến kịch tính cảnh {idx+1}")
+        lines.append("")
+    lines.append("━━━━━━━━━━━━━━━━━━")
+    lines.append(f"💡 <b>GỢI Ý NỐI TIẾP CHO TẬP {ep_num + 1}:</b>")
+    lines.append(f"Manh mối tiếp theo dẫn {html.escape(chars[0])} sang thử thách mới gay cấn hơn.")
+    lines.append("━━━━━━━━━━━━━━━━━━")
+    return "\n".join(lines)
 
 
 def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, InlineKeyboardMarkup]:
