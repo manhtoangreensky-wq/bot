@@ -80032,7 +80032,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             rows = [
                 [("✨ Phác thảo lại cảnh", "vid3|scene_plan_auto"), ("✏️ Sửa chi tiết cảnh", "vid3|scene_plan_edit")],
                 [("✅ Tiếp tục sang Gói Add-on", "vid3|episode_tail_addon")],
-                *video_uiflow3_nav_rows(back="vid3|view|episode"),
+                *video_uiflow3_nav_rows(back="vid3|step|episode"),
             ]
             return "\n".join(lines), video_uiflow3_keyboard(rows)
         
@@ -80242,8 +80242,8 @@ async def video_uiflow3_render(query, context, state: dict | None = None):
         current = save_video_uiflow3_state(context, current)
     text, keyboard = video_uiflow3_screen_payload(current)
     if len(text) > 4096:
-        return await safe_edit_or_send_long_plain(query, text, reply_markup=keyboard)
-    return await safe_edit_or_send(query, text, parse_mode=None, reply_markup=keyboard)
+        return await safe_edit_or_send_long_html(query, text, reply_markup=keyboard)
+    return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def video_uiflow3_return_to_shared_tail_if_ready(
@@ -82009,7 +82009,19 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 state,
                 "episode", "scene_count", "scene_plan", "scene_assignment", "prompts", "branding", "summary"
             )
-            state = video_uiflow3_go(state, "scene_plan")
+            # Transition straight to Gói Add-on Shared Tail 9
+            snapshot = video_uiflow3.approved_snapshot(state)
+            legacy_compat = dict(state.get("legacy_compat") or {})
+            legacy_compat["approved_snapshot"] = snapshot
+            legacy_compat["video_tail9_ready"] = True
+            legacy_compat["video_tail9_source"] = "multi_scene_film"
+            state["legacy_compat"] = legacy_compat
+            tail = video_uiflow3_build_tail_state(state)
+            state[VIDEO_TAIL9_STATE_KEY] = tail
+            state = save_video_uiflow3_state(context, state)
+            claim_video_uiflow3_tail_owner(context, state)
+            await query.answer()
+            return await video_tail9_render(query, user_id, context, "addon")
         elif action == "episode_tail_addon":
             snapshot = video_uiflow3.approved_snapshot(state)
             legacy_compat = dict(state.get("legacy_compat") or {})
