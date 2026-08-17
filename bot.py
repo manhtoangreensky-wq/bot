@@ -81091,9 +81091,16 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                     state = video_uiflow3.back(state)
             else:
                 state = video_uiflow3_clear_transient(state)
-                state = video_uiflow3.back(state)
-                if str((state.get("navigation") or {}).get("current_step") or "") == "summary":
-                    state["navigation"]["return_to"] = None
+                if current_step == "production_bible":
+                    state["navigation"]["current_step"] = "content_hub"
+                    state = video_uiflow3_open_view(state, "profiles")
+                elif cur_view == "profiles" or current_step == "content_hub":
+                    state["navigation"]["current_step"] = "entry"
+                    state = video_uiflow3_open_view(state, "")
+                else:
+                    state = video_uiflow3.back(state)
+                    if str((state.get("navigation") or {}).get("current_step") or "") == "summary":
+                        state["navigation"]["return_to"] = None
         elif action == "mode" and values:
             if (
                 str(state.get("parent_product") or "") == "video_ai_real"
