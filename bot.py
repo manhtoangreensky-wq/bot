@@ -76854,6 +76854,22 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
     entries = dict(scene3_state.get("preservation_requirements") or {})
     rows: list[list[tuple[str, str]]] = []
     values = list(VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES)
+    if str(state.get("parent_product") or "") == "multi_scene_film":
+        requirement_buttons = [
+            (
+                f"{'✅' if (entries.get(key) or {}).get('enabled') else '➕'} {label.split(' ', 1)[-1]}",
+                f"vid3|pilot_requirement|{key}",
+            )
+            for key, label in values
+        ]
+        requirement_buttons.append(("✨ Tự động gợi ý nhanh", "vid3|pilot_requirement_auto"))
+        for offset in range(0, len(requirement_buttons), 2):
+            rows.append(requirement_buttons[offset:offset + 2])
+        rows.extend([
+            [("⏭ Bỏ qua yêu cầu", "vid3|pilot_requirement_skip"), ("✅ Xong yêu cầu", "vid3|pilot_requirement_done")],
+            *video_ai_real_pilot_nav_rows(back="vid3|pilot_requirement_back"),
+        ])
+        return video_ai_real_pilot_requirements_text(state), video_uiflow3_keyboard(rows)
     inline_summary = video_ai_real_uses_inline_requirements(state)
     if inline_summary:
         requirement_buttons = [
@@ -113574,6 +113590,52 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if not allowed:
             await query.answer()
             return await video_tail9_render(query, uid, context, "invoice")
+        if product_type in {"multi_scene_film", "video_long"}:
+            video_tail9_apply_to_session(uid, context, tail, owner, host)
+            session = get_video_session(uid)
+            project = video_b14_prepare_project_for_invoice(uid, session)
+            project_id = safe_int(project.get("project_id"), 0)
+            if project_id > 0:
+                confirmed_invoice = dict((session.get("draft") or {}).get("b14_invoice") or {})
+                if not confirmed_invoice:
+                    confirmed_invoice = {
+                        "invoice_id": str(tail.get("invoice_id") or ""),
+                        "quality_xu": safe_int(tail.get("quality_tier_id"), 400),
+                        "package_id": str(tail.get("package_id") or "product_video_400"),
+                        "scene_count": safe_int(tail.get("scene_count"), 4),
+                        "total_xu": safe_int((tail.get("pricing_snapshot") or {}).get("total_xu"), 288),
+                    }
+                confirmed_job = confirm_video_project_invoice(
+                    project_id=project_id,
+                    user_id=uid,
+                    invoice=confirmed_invoice,
+                )
+                job_id = safe_int(confirmed_job.get("id"), 0)
+                if job_id > 0:
+                    tail = video_tail9.recover_submission(tail, {
+                        "user_id": uid,
+                        "job_id": job_id,
+                        "status": str(confirmed_job.get("status") or "queued"),
+                        "submitted_at": str(confirmed_job.get("created_at") or now_text_safe()),
+                        "invoice_id": str(tail.get("invoice_id") or confirmed_invoice.get("invoice_id") or ""),
+                        "quality_tier_id": str(tail.get("quality_tier_id") or "400"),
+                        "package_id": str(tail.get("package_id") or "product_video_400"),
+                        "scene_count": safe_int(tail.get("scene_count"), 4),
+                        "total_xu": safe_int((tail.get("pricing_snapshot") or {}).get("total_xu"), 288),
+                        "invoice": confirmed_invoice,
+                        "job": confirmed_job,
+                    })
+                    save_video_tail9_state(uid, context, tail, owner, host)
+                    draft = dict(session.get("draft") or {})
+                    draft["b14_queue_job"] = confirmed_job
+                    draft["b14_queue_job_id"] = job_id
+                    draft["b14_project_id"] = project_id
+                    draft[VIDEO_TAIL9_STATE_KEY] = video_tail9.normalize_state(tail)
+                    session["draft"] = draft
+                    save_video_session(uid, session)
+                    return await video_b14_send_or_edit_status_panel(
+                        query, context, session, confirmed_job, uid, lang
+                    )
         product_type = str(tail.get("video_product_type") or "")
         deferred_runtime_product = product_type in VIDEO_TAIL9_DEFERRED_RUNTIME_PRODUCTS
         contract = video_tail9.commercial_contract(product_type)
