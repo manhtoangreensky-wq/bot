@@ -79973,7 +79973,8 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         ep_plat = str(episode.get("platform_label") or "Chưa chọn").strip()
         ep_dur = int(episode.get("duration") or 60)
 
-        if view == "episode_goal":
+        is_multi_film = str(state.get("parent_product") or "") == "multi_scene_film"
+        if view == "episode_goal" or (is_multi_film and not view):
             cur_g = str(episode.get("goal") or "")
             goals = [
                 ("sales", "🛍 Bán hàng / chuyển đổi"),
@@ -83187,6 +83188,8 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
         "scene_ambient_custom", "scene_direction", "scene_prompt",
         "scene_negative_prompt", "watermark", "pilot_creative_custom",
         "pilot_requirement_custom",
+        "film_goal_custom", "film_aud_custom", "film_plat_custom",
+        "film_dur_custom", "film_script_edit",
     }:
         return False
     if not video_uiflow3_pending_step_allowed(state, kind):
@@ -83218,11 +83221,15 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
                 original_intent=text[:12000],
                 approved_brief={"title": text[:240]},
             )
-            state = video_uiflow3_after_service_update(
-                state,
-                updated,
-                target_step="content_lock",
-            )
+            if str(state.get("parent_product") or "") == "multi_scene_film":
+                state = video_uiflow3.lock_content(updated)
+                state = video_uiflow3_go(state, "production_bible")
+            else:
+                state = video_uiflow3_after_service_update(
+                    state,
+                    updated,
+                    target_step="content_lock",
+                )
         elif kind == "content_edit":
             state = video_uiflow3.revise_content(state, original_intent=text[:12000])
             state = video_uiflow3_go(state, "content_lock")
