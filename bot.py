@@ -72315,9 +72315,9 @@ VIDEO_UIFLOW3_STEP_ACTIONS = {
     "series_goal": {"series_goal_edit", "series_goal_done", "series_goal_pick", "series_goal_rotate", "series_goal_page"},
     "source": {"source_text", "source_media", "source_status", "source_done", "image_ai"},
     "format": {"ratio", "duration", "duration_scene", "duration_custom", "format_done"},
-    "content_hub": {"content", "profiles", "profile", "idea_catalog"},
+    "content_hub": {"content", "profiles", "profile", "idea_catalog", "prof_sug", "prof_sug_more", "prof_sug_custom"},
     "content_lock": {
-        "content_lock", "content_edit", "content_change", "context", "context_page",
+        "content_lock", "content_edit", "content_change", "context", "context_page", "prof_sug", "prof_sug_more", "prof_sug_custom",
     },
     "production_bible": {
         "chars", "chars_custom", "character", "char_gender", "char_desc", "char_suggest",
@@ -72344,7 +72344,7 @@ VIDEO_UIFLOW3_STEP_ACTIONS = {
     "scene_count": {"scene_count", "scene_custom"},
     "scene_plan": {
         "scene_plan_edit", "scene_plan_auto", "plan_scene", "plan_edit", "plan_move",
-        "scene_plan_done", "pilot_scene_plan_back",
+        "scene_plan_done", "pilot_scene_plan_back", "episode_tail_addon",
     },
     "scene_assignment": {
         "scene", "scene_auto", "scene_cast", "cast_toggle", "cast_clear",
@@ -72374,6 +72374,7 @@ VIDEO_UIFLOW3_STEP_ACTIONS = {
 }
 VIDEO_UIFLOW3_VIEW_OWNERS = {
     "profiles": "content_hub",
+    "profile_suggestions": "content_hub",
     "character_count": "production_bible",
     "character_list": "production_bible",
     "location_count": "production_bible",
@@ -72412,6 +72413,7 @@ VIDEO_UIFLOW3_RENDERED_STEPS = frozenset({
 })
 VIDEO_UIFLOW3_CHILD_VIEW_STEPS = {
     "profiles": {"content_hub"},
+    "profile_suggestions": {"content_hub", "content_lock"},
     "bible_extras": {"production_bible"},
     "character_count": {"production_bible"},
     "character_list": {"production_bible"},
@@ -79301,6 +79303,38 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             video_uiflow3_keyboard(rows),
         )
 
+    if view == "profile_suggestions":
+        profile_key = str((state.get("content") or {}).get("profile_id") or "brand_corporate")
+        revision = safe_int(state.get("profile_revision"), 0)
+        suggestions = video_script_product.profile_content_suggestions(profile_key, revision=revision)
+        profile_label = video_script_product.public_profile_label(profile_key)
+        lines = [
+            f"💡 <b>GỢI Ý NỘI DUNG KỊCH BẢN</b>",
+            "",
+            f"Loại nội dung: <b>{html.escape(profile_label)}</b>",
+            "",
+        ]
+        for index, item in enumerate(suggestions, 1):
+            lines.extend([
+                f"<b>{index}. {html.escape(str(item.get('title') or f'Gợi ý {index}'))}</b>",
+                f" • Hook: {html.escape(str(item.get('hook') or ''))}",
+                f" • Hướng triển khai: {html.escape(str(item.get('brief') or ''))}",
+                f" • Cấu trúc: {html.escape(str(item.get('structure') or ''))}",
+                "",
+            ])
+        lines.append("Chọn nút 1–5. Sau khi chọn, bot chuyển sang rà soát nội dung đã chọn; chưa gọi AI và chưa trừ Xu.")
+        
+        num_buttons = [
+            (str(index), f"vid3|prof_sug|{index - 1}")
+            for index in range(1, len(suggestions) + 1)
+        ]
+        rows = [
+            num_buttons,
+            [("🔄 Đổi 5 gợi ý", "vid3|prof_sug_more"), ("✍️ Tự nhập nội dung", "vid3|prof_sug_custom")],
+            [("⬅️ Chọn loại nội dung", "vid3|view|profiles"), ("🎬 Menu Video", "menu|main_video")],
+        ]
+        return "\n".join(lines), video_uiflow3_keyboard(rows)
+
     if view == "character_count":
         count = len((state.get("bible") or {}).get("characters") or [])
         rows = [
@@ -79945,6 +79979,35 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
 
     if step == "scene_plan":
         scenes = list(state.get("scenes") or [])
+        is_multi_film = str(state.get("parent_product") or "") == "multi_scene_film"
+        if is_multi_film:
+            episode = dict(state.get("episode") or {})
+            ep_num = safe_int(episode.get("number"), 1)
+            ep_title = str(episode.get("title") or f"Tập {ep_num}")
+            fmt = dict(state.get("format") or {})
+            total_sec = safe_int(fmt.get("target_duration_seconds"), len(scenes) * 8)
+            lines = [
+                f"{prefix}🎬 <b>KẾ HOẠCH VIDEO · TẬP {ep_num}: {html.escape(ep_title)}</b>",
+                "",
+                f"• Định dạng: {len(scenes)} cảnh · khoảng {total_sec}s · tỉ lệ {fmt.get('ratio') or '9:16'}",
+                "",
+                "<b>Danh sách phân cảnh:</b>",
+            ]
+            for scene in scenes:
+                beat = str(scene.get('semantic_beat') or scene.get('main_action') or 'Một ý chính trọn vẹn')
+                dur = safe_int(scene.get('duration_target'), 8)
+                lines.append(f"• <b>Cảnh {scene.get('scene_index')}</b> ({dur}s): {html.escape(beat)}")
+            lines.extend([
+                "",
+                "Rà soát kế hoạch tập trước khi chuyển sang chọn Gói Add-on (Nhạc, Lồng tiếng, Phụ đề, SFX, Watermark).",
+            ])
+            rows = [
+                [("✨ Phác thảo lại cảnh", "vid3|scene_plan_auto"), ("✏️ Sửa chi tiết cảnh", "vid3|scene_plan_edit")],
+                [("✅ Tiếp tục sang Gói Add-on", "vid3|episode_tail_addon")],
+                *video_uiflow3_nav_rows(back="vid3|view|episode"),
+            ]
+            return "\n".join(lines), video_uiflow3_keyboard(rows)
+        
         lines = [f"{prefix}🎬 KẾ HOẠCH CẢNH", ""]
         for scene in scenes:
             lines.append(f"Cảnh {scene.get('scene_index')}: {scene.get('semantic_beat') or scene.get('main_action') or 'Một ý chính trọn vẹn'}")
@@ -80862,19 +80925,42 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             page = max(1, min(4, safe_int(values[0], 1)))
             state = video_uiflow3_open_view(state, "profiles", profile_page=page)
         elif action == "profile" and values:
-            candidate = video_uiflow3_profile_candidate(values[0])
-            updated = video_uiflow3.set_content_candidate(
-                state,
-                source="content_catalog",
-                profile_id=str(candidate["profile"].get("profile_key") or ""),
-                original_intent=candidate["intent"],
-                approved_brief=candidate["brief"],
-            )
-            state = video_uiflow3_after_service_update(
-                state,
-                updated,
-                target_step="content_lock",
-            )
+            profile_key = str(values[0] or "")
+            content_dict = dict(state.get("content") or {})
+            content_dict["profile_id"] = profile_key
+            state["content"] = content_dict
+            state["profile_revision"] = 0
+            state = video_uiflow3_open_view(state, "profile_suggestions")
+        elif action == "prof_sug" and values:
+            sug_idx = safe_int(values[0], 0)
+            profile_key = str((state.get("content") or {}).get("profile_id") or "brand_corporate")
+            revision = safe_int(state.get("profile_revision"), 0)
+            suggestions = video_script_product.profile_content_suggestions(profile_key, revision=revision)
+            if 0 <= sug_idx < len(suggestions):
+                item = suggestions[sug_idx]
+                updated = video_uiflow3.set_content_candidate(
+                    state,
+                    source="content_catalog",
+                    profile_id=profile_key,
+                    original_intent=str(item.get("brief") or item.get("title") or ""),
+                    approved_brief={
+                        "title": str(item.get("title") or ""),
+                        "hook": str(item.get("hook") or ""),
+                        "structure": str(item.get("structure") or ""),
+                        "goal": str(item.get("goal") or ""),
+                    },
+                )
+                state = video_uiflow3_after_service_update(
+                    state,
+                    updated,
+                    target_step="content_lock",
+                )
+                state = video_uiflow3_clear_transient(state)
+        elif action == "prof_sug_more":
+            state["profile_revision"] = safe_int(state.get("profile_revision"), 0) + 1
+            state = video_uiflow3_open_view(state, "profile_suggestions")
+        elif action == "prof_sug_custom":
+            state = video_uiflow3_await_input(state, "manual_content", back_callback="vid3|view|profile_suggestions")
         elif action == "source_text":
             state = video_uiflow3_await_input(state, "source_text", back_callback="vid3|view|source")
         elif action == "source_media":
@@ -81895,6 +81981,8 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 state,
                 "episode", "scene_count", "scene_plan", "scene_assignment", "prompts", "branding", "summary"
             )
+            state = video_uiflow3_go(state, "scene_plan")
+        elif action == "episode_tail_addon":
             legacy_compat = dict(state.get("legacy_compat") or {})
             legacy_compat["video_tail9_ready"] = True
             legacy_compat["video_tail9_source"] = "multi_scene_film"
