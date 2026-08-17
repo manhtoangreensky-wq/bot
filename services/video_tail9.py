@@ -921,6 +921,8 @@ def content_contract_ready(state: dict[str, Any]) -> bool:
     adapter = adapter_for(str(current.get("video_product_type") or ""))
     if not adapter.get("adapter_key"):
         return False
+    if str(current.get("video_product_type") or "") in {"multi_scene_film", "video_long"}:
+        return bool(current.get("plan_approved"))
     prompt_ready = bool(current.get("selected_prompt")) or any(
         str(
             scene.get("provider_prompt")
@@ -1062,6 +1064,8 @@ def next_required_screen(state: dict[str, Any]) -> str:
     """Return the first missing screen in the canonical shared video tail."""
 
     current = normalize_state(state)
+    if str(current.get("video_product_type") or "") in {"multi_scene_film", "video_long"}:
+        return ""
     if not addon_complete(current):
         return "addon"
     if not content_contract_ready(current) or current.get("review_status") != "ready":

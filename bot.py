@@ -82052,6 +82052,8 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             legacy_compat["video_tail_return_to"] = ""
             state["legacy_compat"] = legacy_compat
             tail = video_uiflow3_build_tail_state(state)
+            tail = video_tail9.mark_addon_complete(tail)
+            tail = video_tail9.mark_review_complete(tail)
             state[VIDEO_TAIL9_STATE_KEY] = tail
             state = save_video_uiflow3_state(context, state)
             claim_video_uiflow3_tail_owner(context, state)
@@ -82236,6 +82238,8 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             legacy_compat["video_tail9_source"] = "multi_scene_film"
             state["legacy_compat"] = legacy_compat
             tail = video_uiflow3_build_tail_state(state)
+            tail = video_tail9.mark_addon_complete(tail)
+            tail = video_tail9.mark_review_complete(tail)
             state[VIDEO_TAIL9_STATE_KEY] = tail
             state = save_video_uiflow3_state(context, state)
             claim_video_uiflow3_tail_owner(context, state)
@@ -82343,6 +82347,8 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             legacy_compat["video_tail9_source"] = "multi_scene_film"
             state["legacy_compat"] = legacy_compat
             tail = video_uiflow3_build_tail_state(state)
+            tail = video_tail9.mark_addon_complete(tail)
+            tail = video_tail9.mark_review_complete(tail)
             state[VIDEO_TAIL9_STATE_KEY] = tail
             state = save_video_uiflow3_state(context, state)
             claim_video_uiflow3_tail_owner(context, state)
@@ -82356,6 +82362,8 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             legacy_compat["video_tail9_source"] = "multi_scene_film"
             state["legacy_compat"] = legacy_compat
             tail = video_uiflow3_build_tail_state(state)
+            tail = video_tail9.mark_addon_complete(tail)
+            tail = video_tail9.mark_review_complete(tail)
             state[VIDEO_TAIL9_STATE_KEY] = tail
             state = save_video_uiflow3_state(context, state)
             claim_video_uiflow3_tail_owner(context, state)
