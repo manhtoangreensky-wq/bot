@@ -72337,8 +72337,9 @@ VIDEO_UIFLOW3_STEP_ACTIONS = {
         "pilot_requirement_done", "pilot_requirement_skip", "pilot_requirement_back",
     },
     "episode": {
-        "episode_identity", "episode_content", "episode_entities",
-        "episode_entity", "episode_continuity", "episode_inherit", "episode_done",
+        "episode_identity", "episode_number", "episode_title_edit",
+        "episode_content", "episode_content_pick", "episode_content_rotate", "episode_content_edit",
+        "episode_entities", "episode_entity", "episode_continuity", "episode_inherit", "episode_done",
     },
     "scene_count": {"scene_count", "scene_custom"},
     "scene_plan": {
