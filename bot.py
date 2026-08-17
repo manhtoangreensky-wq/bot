@@ -72483,6 +72483,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
             "pilot_scene_plan_back", "pilot_creative_rotate", "pilot_creative_custom",
             "pilot_creative_remove", "pilot_creative_restore", "pilot_requirement_rotate",
             "pilot_requirement_custom", "pilot_requirement_remove", "pilot_requirement_restore",
+            "prof_sug_more", "prof_sug_custom", "episode_tail_addon",
         )
     },
     **{
@@ -72504,6 +72505,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
             "model", "quality", "prompt_page", "prompt_scene", "prompt_edit", "prompt_negative_edit",
             "episode_continuity",
             "pilot_creative", "pilot_creative_pick", "pilot_requirement", "pilot_requirement_pick",
+            "prof_sug",
         )
     },
     **{
