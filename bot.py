@@ -1,3 +1,53 @@
+
+def video_film_generate_timeline_script(state: dict) -> str:
+    episode = dict(state.get("episode") or {})
+    ep_num = int(episode.get("number") or 1)
+    ep_title = str(episode.get("title") or f"Tập {ep_num}").strip()
+    brief_dict = dict((state.get("content") or {}).get("approved_brief") or {})
+    brief_title = str(brief_dict.get("title") or (state.get("content") or {}).get("original_intent") or "Câu chuyện điện ảnh").strip()
+    goal = str(episode.get("goal_label") or "Kể chuyện / tạo cảm xúc")
+    audience = str(episode.get("audience_label") or "Khán giả đại chúng")
+    platform = str(episode.get("platform_label") or "TikTok / Reels")
+    duration = int(episode.get("duration") or 60)
+    
+    if duration <= 45:
+        scene_count = 4
+        times = ["00:00 – 00:10", "00:10 – 00:20", "00:20 – 00:30", "00:30 – 00:40"]
+    elif duration <= 60:
+        scene_count = 5
+        times = ["00:00 – 00:12", "00:12 – 00:24", "00:24 – 00:36", "00:36 – 00:48", "00:48 – 01:00"]
+    else:
+        scene_count = 6
+        times = ["00:00 – 00:15", "00:15 – 00:30", "00:30 – 00:45", "00:45 – 01:00", "01:00 – 01:15", "01:15 – 01:30"]
+        
+    chars = [c.get("display_name") for c in (state.get("bible") or {}).get("characters") or [] if c.get("display_name")] or ["Nhân vật chính"]
+    locs = [l.get("name") for l in (state.get("bible") or {}).get("locations") or [] if l.get("name")] or ["Bối cảnh trung tâm"]
+    
+    lines = [
+        f"📝 <b>KỊCH BẢN PHÂN CẢNH - TẬP {ep_num}</b>",
+        f"🎬 <b>Tên tập:</b> {html.escape(ep_title)}",
+        "",
+        f"• <b>Chủ đề & Cốt truyện:</b> {html.escape(brief_title)}",
+        f"• <b>Mục tiêu:</b> {html.escape(goal)}",
+        f"• <b>Đối tượng:</b> {html.escape(audience)} | <b>Nền tảng:</b> {html.escape(platform)}",
+        f"• <b>Thời lượng:</b> {duration}s ({scene_count} cảnh)",
+        "",
+        "━━━━━━━━━━━━━━━━━━",
+        "🎬 <b>CHI TIẾT TỪNG PHÂN CẢNH (TIMELINE):</b>",
+        "━━━━━━━━━━━━━━━━━━",
+        "",
+    ]
+    for idx, t in enumerate(times[:scene_count]):
+        lines.append(f"⏱ <b>{t} | Cảnh {idx+1}</b>")
+        lines.append(f"• <b>Góc máy & Hình ảnh:</b> {html.escape(chars[0])} tại {html.escape(locs[0])}")
+        lines.append(f"• <b>Thoại / Voiceover:</b> Diễn biến kịch tính cảnh {idx+1}")
+        lines.append("")
+    lines.append("━━━━━━━━━━━━━━━━━━")
+    lines.append(f"💡 <b>GỢI Ý NỐI TIẾP CHO TẬP {ep_num + 1}:</b>")
+    lines.append(f"Manh mối tiếp theo dẫn {html.escape(chars[0])} sang thử thách mới gay cấn hơn.")
+    lines.append("━━━━━━━━━━━━━━━━━━")
+    return "\n".join(lines)
+
 """
 ╔══════════════════════════════════════════════════════════════════╗
 ║   TOAN AAS v1.0 Beta - DYNAMIC QR READY                         ║
@@ -72340,6 +72390,8 @@ VIDEO_UIFLOW3_STEP_ACTIONS = {
         "episode_identity", "episode_number", "episode_title_edit",
         "episode_content", "episode_content_pick", "episode_content_rotate", "episode_content_edit",
         "episode_entities", "episode_entity", "episode_continuity", "episode_inherit", "episode_done",
+        "film_goal", "film_aud", "film_plat", "film_dur", "film_ep_num",
+        "film_script_generate", "film_script_regen", "film_script_edit", "film_script_use",
     },
     "scene_count": {"scene_count", "scene_custom"},
     "scene_plan": {
@@ -72396,6 +72448,11 @@ VIDEO_UIFLOW3_VIEW_OWNERS = {
     "scene_prop": "scene_assignment",
     "episode_entities": "episode",
     "episode_content_hub": "episode",
+    "episode_goal": "episode",
+    "episode_audience": "episode",
+    "episode_platform": "episode",
+    "episode_duration": "episode",
+    "episode_script": "episode",
     "audio_options": "scene_assignment",
     "audio_music": "scene_assignment",
     "audio_music_scenes": "scene_assignment",
@@ -72431,6 +72488,11 @@ VIDEO_UIFLOW3_CHILD_VIEW_STEPS = {
     "pilot_requirement_detail": {"production_bible"},
     "pilot_requirement_review": {"production_bible"},
     "entity_scene_assign": {"production_bible"},
+    "episode_goal": {"episode"},
+    "episode_audience": {"episode"},
+    "episode_platform": {"episode"},
+    "episode_duration": {"episode"},
+    "episode_script": {"episode"},
     "scene_plan_list": {"scene_plan"},
     "scene_plan_detail": {"scene_plan"},
     "scene_cast": {"scene_assignment"},
@@ -72484,6 +72546,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
             "pilot_creative_remove", "pilot_creative_restore", "pilot_requirement_rotate",
             "pilot_requirement_custom", "pilot_requirement_remove", "pilot_requirement_restore",
             "prof_sug_more", "prof_sug_custom", "episode_tail_addon",
+            "film_script_generate", "film_script_regen", "film_script_edit", "film_script_use",
         )
     },
     **{
@@ -72506,6 +72569,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
             "episode_continuity",
             "pilot_creative", "pilot_creative_pick", "pilot_requirement", "pilot_requirement_pick",
             "prof_sug",
+            "film_goal", "film_aud", "film_plat", "film_dur", "film_ep_num",
         )
     },
     **{
@@ -72555,6 +72619,7 @@ VIDEO_UIFLOW3_PENDING_STEPS = {
     "scene_direction": {"prompts", "scene_assignment"},
     "scene_prompt": {"prompts"}, "scene_negative_prompt": {"prompts"},
     "episode_identity": {"episode"}, "episode_number": {"episode"}, "episode_title": {"episode"}, "episode_content": {"episode"},
+    "film_goal_custom": {"episode"}, "film_aud_custom": {"episode"}, "film_plat_custom": {"episode"}, "film_dur_custom": {"episode"}, "film_script_edit": {"episode"},
     "brand_logo": {"branding"}, "watermark": {"branding"},
 }
 
@@ -79901,6 +79966,128 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
 
     if step == "episode":
         episode = dict(state.get("episode") or {})
+        ep_num = int(episode.get("number") or 1)
+        ep_title = str(episode.get("title") or f"Tập {ep_num}").strip()
+        ep_goal = str(episode.get("goal_label") or "Chưa chọn").strip()
+        ep_aud = str(episode.get("audience_label") or "Chưa chọn").strip()
+        ep_plat = str(episode.get("platform_label") or "Chưa chọn").strip()
+        ep_dur = int(episode.get("duration") or 60)
+
+        if view == "episode_goal":
+            cur_g = str(episode.get("goal") or "")
+            goals = [
+                ("sales", "🛍 Bán hàng / chuyển đổi"),
+                ("branding", "✨ Giới thiệu SP / Brand"),
+                ("tutorial", "🎓 Hướng dẫn / Kiến thức"),
+                ("story", "📖 Kể chuyện / Cảm xúc"),
+                ("engagement", "🔥 Tăng tương tác"),
+            ]
+            rows = []
+            for gid, glabel in goals:
+                rows.append([(f"{'✅ ' if cur_g == gid else ''}{glabel}", f"vid3|film_goal|{gid}")])
+            rows.append([("✍️ Mục tiêu riêng", "vid3|film_goal|custom")])
+            rows.append([("⬅️ Yêu cầu kịch bản", "vid3|pilot_scene_plan_back"), ("🎬 Menu Video", "menu|main_video")])
+            return (
+                f"{prefix}🎯 <b>BƯỚC 6: MỤC TIÊU KỊCH BẢN TẬP PHIM</b>\n\n"
+                f"Tập: <b>{ep_num}</b> · Tên: <b>{html.escape(ep_title)}</b>\n\n"
+                f"Mục tiêu hiện tại: <b>{html.escape(ep_goal)}</b>\n\n"
+                "Chọn mục tiêu truyền thông / chuyển đổi của tập phim để bot xây dựng đúng góc nhìn:",
+                video_uiflow3_keyboard(rows),
+            )
+
+        if view == "episode_audience":
+            cur_a = str(episode.get("audience") or "")
+            audiences = [
+                ("prospects", "🎯 Khách tiềm năng"),
+                ("beginners", "🌱 Người mới"),
+                ("community", "👥 Cộng đồng"),
+                ("experts", "🧠 Người chuyên môn"),
+                ("general", "🏡 Gia đình / Phổ thông"),
+            ]
+            rows = []
+            for aid, alabel in audiences:
+                rows.append([(f"{'✅ ' if cur_a == aid else ''}{alabel}", f"vid3|film_aud|{aid}")])
+            rows.append([("✍️ Đối tượng riêng", "vid3|film_aud|custom")])
+            rows.append([("⬅️ Mục tiêu kịch bản", "vid3|view|episode_goal"), ("🎬 Menu Video", "menu|main_video")])
+            return (
+                f"{prefix}👥 <b>BƯỚC 7: ĐỐI TƯỢNG XEM MỤC TIÊU</b>\n\n"
+                f"Tập: <b>{ep_num}</b> · Mục tiêu: <b>{html.escape(ep_goal)}</b>\n\n"
+                f"Đối tượng hiện tại: <b>{html.escape(ep_aud)}</b>\n\n"
+                "Chọn nhóm khán giả tập trung tiếp cận để bot tối ưu hóa lời thoại và bối cảnh:",
+                video_uiflow3_keyboard(rows),
+            )
+
+        if view == "episode_platform":
+            cur_p = str(episode.get("platform") or "")
+            platforms = [
+                ("tiktok_reels", "📱 TikTok / Reels"),
+                ("youtube_shorts", "▶️ YouTube Shorts"),
+                ("facebook", "🔵 Facebook"),
+                ("ads_web", "📣 Quảng cáo / Website"),
+                ("multi_platform", "🌐 Nhiều nền tảng"),
+            ]
+            rows = []
+            for pid, plabel in platforms:
+                rows.append([(f"{'✅ ' if cur_p == pid else ''}{plabel}", f"vid3|film_plat|{pid}")])
+            rows.append([("✍️ Nền tảng riêng", "vid3|film_plat|custom")])
+            rows.append([("⬅️ Đối tượng xem", "vid3|view|episode_audience"), ("🎬 Menu Video", "menu|main_video")])
+            return (
+                f"{prefix}📱 <b>BƯỚC 8: NỀN TẢNG PHÁT HÀNH CHÍNH</b>\n\n"
+                f"Tập: <b>{ep_num}</b> · Đối tượng: <b>{html.escape(ep_aud)}</b>\n\n"
+                f"Nền tảng hiện tại: <b>{html.escape(ep_plat)}</b>\n\n"
+                "Chọn kênh phân phối nội dung video để bot căn chỉnh nhịp độ và khung hình:",
+                video_uiflow3_keyboard(rows),
+            )
+
+        if view == "episode_duration":
+            ep_num_buttons = [
+                (f"{'✅ ' if ep_num == 1 else ''}🎞 Tập 1", "vid3|film_ep_num|1"),
+                (f"{'✅ ' if ep_num == 2 else ''}🎞 Tập 2", "vid3|film_ep_num|2"),
+                (f"{'✅ ' if ep_num == 3 else ''}🎞 Tập 3", "vid3|film_ep_num|3"),
+            ]
+            dur_buttons_1 = [
+                (f"{'✅ ' if ep_dur == 40 else ''}⏱ 40s (3-5 cảnh)", "vid3|film_dur|40"),
+                (f"{'✅ ' if ep_dur == 60 else ''}⏱ 60s (4-6 cảnh)", "vid3|film_dur|60"),
+            ]
+            dur_buttons_2 = [
+                (f"{'✅ ' if ep_dur == 75 else ''}⏱ 75s (5-8 cảnh)", "vid3|film_dur|75"),
+                ("✍️ Tự nhập", "vid3|film_dur|custom"),
+            ]
+            rows = [
+                ep_num_buttons,
+                dur_buttons_1,
+                dur_buttons_2,
+                [("✨ Sinh kịch bản tập phim", "vid3|film_script_generate")],
+                [("⬅️ Nền tảng phát hành", "vid3|view|episode_platform"), ("🎬 Menu Video", "menu|main_video")],
+            ]
+            return (
+                f"{prefix}⏱ <b>BƯỚC 9: THỜI LƯỢNG & THIẾT LẬP TẬP PHIM</b>\n\n"
+                f"• Tập phim: <b>Tập {ep_num}</b>\n"
+                f"• Mục tiêu: <b>{html.escape(ep_goal)}</b>\n"
+                f"• Đối tượng: <b>{html.escape(ep_aud)}</b>\n"
+                f"• Nền tảng: <b>{html.escape(ep_plat)}</b>\n"
+                f"• Thời lượng dự kiến: <b>{ep_dur}s</b>\n\n"
+                "Bấm <b>[✨ Sinh kịch bản tập phim]</b> để bot tự động lập kịch bản phân cảnh chi tiết theo mốc thời gian:",
+                video_uiflow3_keyboard(rows),
+            )
+
+        if view == "episode_script":
+            script_text = str(episode.get("script_text") or "").strip()
+            if not script_text:
+                script_text = video_film_generate_timeline_script(state)
+                episode["script_text"] = script_text
+                state["episode"] = episode
+            rows = [
+                [("✏️ Sửa kịch bản", "vid3|film_script_edit"), ("🔄 Tạo lại kịch bản", "vid3|film_script_regen")],
+                [("✅ Dùng kịch bản & Sang Gói Add-on", "vid3|film_script_use")],
+                [("⬅️ Quay lại thiết lập", "vid3|view|episode_duration"), ("🎬 Menu Video", "menu|main_video")],
+            ]
+            return (
+                f"{prefix}<b>BƯỚC 10: KỊCH BẢN TẬP PHIM</b>\n\n{script_text}\n\n"
+                "👉 Rà soát kịch bản. Bấm <b>[✅ Dùng kịch bản & Sang Gói Add-on]</b> để vào thẳng Gói Add-on:",
+                video_uiflow3_keyboard(rows),
+            )
+
         ep_num = episode.get('number') or 1
         ep_title = episode.get('title') or f"Tập {ep_num}"
         episode_content = dict(episode.get("content") or {})
@@ -80783,6 +80970,10 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         state = start_video_uiflow3_state(context, product)
         state["owner_user_id"] = user_id
         state["owner_chat_id"] = safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0)
+        if product == "multi_scene_film":
+            state["navigation"]["current_step"] = "content_hub"
+            state["ui_view"] = "profiles"
+            state["content"]["profile_page"] = 1
     else:
         state = video_uiflow3_state(context)
         if not state:
@@ -80978,11 +81169,15 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                         "goal": str(item.get("goal") or ""),
                     },
                 )
-                state = video_uiflow3_after_service_update(
-                    state,
-                    updated,
-                    target_step="content_lock",
-                )
+                if str(state.get("parent_product") or "") == "multi_scene_film":
+                    state = video_uiflow3.lock_content(updated)
+                    state = video_uiflow3_go(state, "production_bible")
+                else:
+                    state = video_uiflow3_after_service_update(
+                        state,
+                        updated,
+                        target_step="content_lock",
+                    )
                 state = video_uiflow3_clear_transient(state)
         elif action == "prof_sug_more":
             state["profile_revision"] = safe_int(state.get("profile_revision"), 0) + 1
@@ -81762,7 +81957,8 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                     get_user_language(user_id) or "vi",
                 )
             if str(state.get("parent_product") or "") == "multi_scene_film":
-                state = video_uiflow3_go(state, "episode")
+                state["navigation"]["current_step"] = "episode"
+                state = video_uiflow3_open_view(state, "episode_goal")
             else:
                 count = safe_int((state.get("format") or {}).get("scene_count"), 0)
                 if count <= 0:
@@ -81915,6 +82111,117 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                     "scene_plan" if bool((state.get("format") or {}).get("scene_count_confirmed")) else "scene_count"
                 )
                 state = video_uiflow3_go(state, next_step)
+        elif action == "film_goal" and values:
+            gid = str(values[0] or "")
+            if gid == "custom":
+                state = video_uiflow3_await_input(state, "film_goal_custom", back_callback="vid3|view|episode_goal")
+            else:
+                gmap = {
+                    "sales": "🛍 Bán hàng / chuyển đổi",
+                    "branding": "✨ Giới thiệu SP / Brand",
+                    "tutorial": "🎓 Hướng dẫn / Kiến thức",
+                    "story": "📖 Kể chuyện / Cảm xúc",
+                    "engagement": "🔥 Tăng tương tác",
+                }
+                ep = dict(state.get("episode") or {})
+                ep["goal"] = gid
+                ep["goal_label"] = gmap.get(gid, gid)
+                state["episode"] = ep
+                state = video_uiflow3_open_view(state, "episode_audience")
+        elif action == "film_aud" and values:
+            aid = str(values[0] or "")
+            if aid == "custom":
+                state = video_uiflow3_await_input(state, "film_aud_custom", back_callback="vid3|view|episode_audience")
+            else:
+                amap = {
+                    "prospects": "🎯 Khách tiềm năng",
+                    "beginners": "🌱 Người mới",
+                    "community": "👥 Cộng đồng",
+                    "experts": "🧠 Người chuyên môn",
+                    "general": "🏡 Gia đình / Phổ thông",
+                }
+                ep = dict(state.get("episode") or {})
+                ep["audience"] = aid
+                ep["audience_label"] = amap.get(aid, aid)
+                state["episode"] = ep
+                state = video_uiflow3_open_view(state, "episode_platform")
+        elif action == "film_plat" and values:
+            pid = str(values[0] or "")
+            if pid == "custom":
+                state = video_uiflow3_await_input(state, "film_plat_custom", back_callback="vid3|view|episode_platform")
+            else:
+                pmap = {
+                    "tiktok_reels": "📱 TikTok / Reels",
+                    "youtube_shorts": "▶️ YouTube Shorts",
+                    "facebook": "🔵 Facebook",
+                    "ads_web": "📣 Quảng cáo / Website",
+                    "multi_platform": "🌐 Nhiều nền tảng",
+                }
+                ep = dict(state.get("episode") or {})
+                ep["platform"] = pid
+                ep["platform_label"] = pmap.get(pid, pid)
+                state["episode"] = ep
+                state = video_uiflow3_open_view(state, "episode_duration")
+        elif action == "film_dur" and values:
+            val = str(values[0] or "")
+            if val == "custom":
+                state = video_uiflow3_await_input(state, "film_dur_custom", back_callback="vid3|view|episode_duration")
+            else:
+                dur = max(10, safe_int(val, 60))
+                ep = dict(state.get("episode") or {})
+                ep["duration"] = dur
+                state["episode"] = ep
+                state["format"]["duration_seconds"] = dur
+                state = video_uiflow3_open_view(state, "episode_duration")
+        elif action == "film_ep_num" and values:
+            ep_n = max(1, safe_int(values[0], 1))
+            ep = dict(state.get("episode") or {})
+            ep["number"] = ep_n
+            ep["title"] = f"Tập {ep_n}"
+            state["episode"] = ep
+            state = video_uiflow3_open_view(state, "episode_duration")
+        elif action in {"film_script_generate", "film_script_regen"}:
+            ep = dict(state.get("episode") or {})
+            ep["script_text"] = video_film_generate_timeline_script(state)
+            state["episode"] = ep
+            state = video_uiflow3_open_view(state, "episode_script")
+        elif action == "film_script_edit":
+            state = video_uiflow3_await_input(state, "film_script_edit", back_callback="vid3|view|episode_script")
+        elif action == "film_script_use":
+            ep = dict(state.get("episode") or {})
+            ep_num = safe_int(ep.get("number"), 1)
+            ep_title = str(ep.get("title") or f"Tập {ep_num}")
+            brief_text = str((state.get("content") or {}).get("original_intent") or "Phim dài tập").strip()
+            
+            state["series"]["goal"] = brief_text
+            state = video_uiflow3.set_episode_identity(state, number=ep_num, title=ep_title)
+            state = video_uiflow3.set_episode_content(state, original_intent=brief_text)
+            state = video_uiflow3.lock_episode_content(state)
+            
+            dur = int(ep.get("duration") or 60)
+            scene_count = 4 if dur <= 45 else (5 if dur <= 60 else 6)
+            state["format"]["scene_count"] = scene_count
+            state["format"]["scene_count_confirmed"] = True
+            state["format"]["duration_seconds"] = dur
+            state = video_uiflow3.confirm_scene_count(state, scene_count)
+            state = video_uiflow3.suggest_scene_plan(state)
+            state = video_uiflow3.auto_assign_scenes(state)
+            state = video_uiflow3.mark_sections_complete(
+                state,
+                "series_goal", "episode", "scene_count", "scene_plan", "scene_assignment", "prompts", "branding", "summary"
+            )
+            snapshot = video_uiflow3.approved_snapshot(state)
+            legacy_compat = dict(state.get("legacy_compat") or {})
+            legacy_compat["approved_snapshot"] = snapshot
+            legacy_compat["video_tail9_ready"] = True
+            legacy_compat["video_tail9_source"] = "multi_scene_film"
+            state["legacy_compat"] = legacy_compat
+            tail = video_uiflow3_build_tail_state(state)
+            state[VIDEO_TAIL9_STATE_KEY] = tail
+            state = save_video_uiflow3_state(context, state)
+            claim_video_uiflow3_tail_owner(context, state)
+            await query.answer()
+            return await video_tail9_render(query, user_id, context, "addon")
         elif action == "episode_number":
             state = video_uiflow3_await_input(state, "episode_number", back_callback="vid3|view|episode")
         elif action == "episode_title_edit":
@@ -83056,6 +83363,37 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
                     state = video_uiflow3.set_episode_identity(state, number=int(num_match.group(1)))
                 else:
                     state = video_uiflow3.set_episode_identity(state, title=clean[:500])
+        elif kind == "film_goal_custom":
+            ep = dict(state.get("episode") or {})
+            ep["goal"] = "custom"
+            ep["goal_label"] = str(text or "").strip()[:300]
+            state["episode"] = ep
+            state = video_uiflow3_open_view(state, "episode_audience")
+        elif kind == "film_aud_custom":
+            ep = dict(state.get("episode") or {})
+            ep["audience"] = "custom"
+            ep["audience_label"] = str(text or "").strip()[:300]
+            state["episode"] = ep
+            state = video_uiflow3_open_view(state, "episode_platform")
+        elif kind == "film_plat_custom":
+            ep = dict(state.get("episode") or {})
+            ep["platform"] = "custom"
+            ep["platform_label"] = str(text or "").strip()[:300]
+            state["episode"] = ep
+            state = video_uiflow3_open_view(state, "episode_duration")
+        elif kind == "film_dur_custom":
+            num_match = re.search(r"\d+", str(text or ""))
+            dur = int(num_match.group(0)) if num_match else 60
+            ep = dict(state.get("episode") or {})
+            ep["duration"] = max(10, min(300, dur))
+            state["episode"] = ep
+            state["format"]["duration_seconds"] = ep["duration"]
+            state = video_uiflow3_open_view(state, "episode_duration")
+        elif kind == "film_script_edit":
+            ep = dict(state.get("episode") or {})
+            ep["script_text"] = str(text or "").strip()
+            state["episode"] = ep
+            state = video_uiflow3_open_view(state, "episode_script")
         elif kind == "episode_content":
             state = video_uiflow3.set_episode_content(state, text[:12000])
             state = video_uiflow3.lock_episode_content(state)
