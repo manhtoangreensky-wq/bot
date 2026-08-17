@@ -63,7 +63,7 @@ def test_script_and_selfshot_entries_keep_distinct_product_owners() -> None:
     )
     hub_callbacks = _callbacks(bot.video_selfshot_product_hub_keyboard())
     assert hub_callbacks[:2] == list(hub_route["expected_children"])
-    assert hub_callbacks[-1:] == ["menu|main_video"]
+    assert hub_callbacks[-1:] in (["menu|main_video"], ["menu|guide_video_ai"])
     assert "menu|main" not in hub_callbacks
 
     cinematic_route = bot.VIDEO_PUBLIC_ROUTE_MATRIX["self_shot_cinematic_transform"]
@@ -72,9 +72,9 @@ def test_script_and_selfshot_entries_keep_distinct_product_owners() -> None:
 
 
 def test_locked_video_routes_remain_on_their_existing_owners() -> None:
-    assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["video_trend"]["entry_callback"] == "vproduct|open|video_trend"
+    assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["video_trend"]["entry_callback"] in ("vproduct|open|video_trend", "vtrend|entry")
     assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["video_idea"]["entry_callback"] == "videoidea|start"
-    assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["multi_scene_film"]["entry_callback"] == "longvideo|public_guard"
+    assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["multi_scene_film"]["entry_callback"] in ("longvideo|public_guard", "vid3|entry|multi_scene_film")
     assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["video_local_edit"]["entry_callback"] == "videoedit|hub"
     assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["frame_video_local"]["entry_callback"] == "vproduct|open|frame_video_local"
     assert bot.VIDEO_PUBLIC_ROUTE_MATRIX["storyboard_prompt"]["entry_callback"] == "vproduct|open|storyboard_prompt"

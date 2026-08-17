@@ -44,6 +44,8 @@ BRAND_POSITIONS = frozenset(
 PRODUCT_TYPE_BY_PARENT = {
     "script_image_video": "script_to_video",
     "self_shot_scene_change": "self_shot_scene_change",
+    "video_trend": "video_trend",
+    "video_storyboard": "storyboard_prompt",
 }
 ACTIVE_DRAFT_STATUSES = (
     "draft_planning",
