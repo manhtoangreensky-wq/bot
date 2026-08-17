@@ -79983,9 +79983,9 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                 [("⬅️ Quay lại", "vid3|view|pilot_requirements"), ("🎬 Menu Video", "menu|main_video")],
             ]
             return (
-                f"{prefix}🎯 <b>BƯỚC 6: MỤC TIÊU KỊCH BẢN TẬP PHIM</b>\n\n"
-                f"Tập: <b>{ep_num}</b> · Tên: <b>{html.escape(ep_title)}</b>\n\n"
-                f"Mục tiêu hiện tại: <b>{html.escape(ep_goal)}</b>\n\n"
+                f"{prefix}🎯 BƯỚC 6: MỤC TIÊU KỊCH BẢN TẬP PHIM\n\n"
+                f"• Tập phim: Tập {ep_num} - {ep_title}\n\n"
+                f"• Mục tiêu hiện tại: {ep_goal}\n\n"
                 "Chọn mục tiêu truyền thông / chuyển đổi của tập phim để bot xây dựng đúng góc nhìn:",
                 video_uiflow3_keyboard(rows),
             )
@@ -79999,9 +79999,9 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                 [("⬅️ Quay lại", "vid3|view|episode_goal"), ("🎬 Menu Video", "menu|main_video")],
             ]
             return (
-                f"{prefix}👥 <b>BƯỚC 7: ĐỐI TƯỢNG XEM MỤC TIÊU</b>\n\n"
-                f"Tập: <b>{ep_num}</b> · Mục tiêu: <b>{html.escape(ep_goal)}</b>\n\n"
-                f"Đối tượng hiện tại: <b>{html.escape(ep_aud)}</b>\n\n"
+                f"{prefix}👥 BƯỚC 7: ĐỐI TƯỢNG XEM MỤC TIÊU\n\n"
+                f"• Tập phim: Tập {ep_num} · Mục tiêu: {ep_goal}\n\n"
+                f"• Đối tượng hiện tại: {ep_aud}\n\n"
                 "Chọn nhóm khán giả tập trung tiếp cận để bot tối ưu hóa lời thoại và bối cảnh:",
                 video_uiflow3_keyboard(rows),
             )
@@ -80015,9 +80015,9 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                 [("⬅️ Quay lại", "vid3|view|episode_audience"), ("🎬 Menu Video", "menu|main_video")],
             ]
             return (
-                f"{prefix}📱 <b>BƯỚC 8: NỀN TẢNG PHÁT HÀNH CHÍNH</b>\n\n"
-                f"Tập: <b>{ep_num}</b> · Đối tượng: <b>{html.escape(ep_aud)}</b>\n\n"
-                f"Nền tảng hiện tại: <b>{html.escape(ep_plat)}</b>\n\n"
+                f"{prefix}📱 BƯỚC 8: NỀN TẢNG PHÁT HÀNH CHÍNH\n\n"
+                f"• Tập phim: Tập {ep_num} · Đối tượng: {ep_aud}\n\n"
+                f"• Nền tảng hiện tại: {ep_plat}\n\n"
                 "Chọn kênh phân phối nội dung video để bot căn chỉnh nhịp độ và khung hình:",
                 video_uiflow3_keyboard(rows),
             )
@@ -80029,7 +80029,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             ]
             ep_num_buttons_2 = [
                 (f"{'✅ ' if ep_num == 3 else ''}🎞 Tập 3", "vid3|film_ep_num|3"),
-                (f"{'✅ ' if ep_num == 4 else ''}🎞 Tập 4", "vid3|film_ep_num|4"),
+                (f"{'✅ ' if ep_num > 3 else ''}✍️ Tự nhập", "vid3|film_ep_num|custom"),
             ]
             dur_buttons_1 = [
                 (f"{'✅ ' if ep_dur == 40 else ''}⏱ 40s (3-5 cảnh)", "vid3|film_dur|40"),
@@ -80037,7 +80037,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             ]
             dur_buttons_2 = [
                 (f"{'✅ ' if ep_dur == 75 else ''}⏱ 75s (5-8 cảnh)", "vid3|film_dur|75"),
-                ("✍️ Tự nhập", "vid3|film_dur|custom"),
+                (f"{'✅ ' if ep_dur not in {40, 60, 75} else ''}✍️ Tự nhập", "vid3|film_dur|custom"),
             ]
             rows = [
                 ep_num_buttons_1,
@@ -80048,16 +80048,15 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                 [("⬅️ Quay lại", "vid3|view|episode_platform"), ("🎬 Menu Video", "menu|main_video")],
             ]
             return (
-                f"{prefix}⏱ <b>BƯỚC 9: THỜI LƯỢNG & THIẾT LẬP TẬP PHIM</b>\n\n"
-                f"• Tập phim: <b>Tập {ep_num}</b>\n"
-                f"• Mục tiêu: <b>{html.escape(ep_goal)}</b>\n"
-                f"• Đối tượng: <b>{html.escape(ep_aud)}</b>\n"
-                f"• Nền tảng: <b>{html.escape(ep_plat)}</b>\n"
-                f"• Thời lượng dự kiến: <b>{ep_dur}s</b>\n\n"
-                "Bấm <b>[✨ Sinh kịch bản tập phim]</b> để bot tự động lập kịch bản phân cảnh chi tiết theo mốc thời gian:",
+                f"{prefix}⏱ BƯỚC 9: THỜI LƯỢNG & THIẾT LẬP TẬP PHIM\n\n"
+                f"• Tập phim: Tập {ep_num}\n"
+                f"• Mục tiêu: {ep_goal}\n"
+                f"• Đối tượng: {ep_aud}\n"
+                f"• Nền tảng: {ep_plat}\n"
+                f"• Thời lượng dự kiến: {ep_dur}s\n\n"
+                "Bấm [✨ Sinh kịch bản tập phim] để bot tự động lập kịch bản phân cảnh chi tiết theo mốc thời gian:",
                 video_uiflow3_keyboard(rows),
             )
-
         if view == "episode_script":
             script_text = str(episode.get("script_text") or "").strip()
             if not script_text:
@@ -82184,12 +82183,15 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 state["format"]["duration_seconds"] = dur
                 state = video_uiflow3_open_view(state, "episode_duration")
         elif action == "film_ep_num" and values:
-            ep_n = max(1, safe_int(values[0], 1))
-            ep = dict(state.get("episode") or {})
-            ep["number"] = ep_n
-            ep["title"] = f"Tập {ep_n}"
-            state["episode"] = ep
-            state = video_uiflow3_open_view(state, "episode_duration")
+            if values[0] == "custom":
+                state = video_uiflow3_await_input(state, "episode_number", back_callback="vid3|view|episode_duration")
+            else:
+                ep_n = max(1, safe_int(values[0], 1))
+                ep = dict(state.get("episode") or {})
+                ep["number"] = ep_n
+                ep["title"] = f"Tập {ep_n}"
+                state["episode"] = ep
+                state = video_uiflow3_open_view(state, "episode_duration")
         elif action in {"film_script_generate", "film_script_regen"}:
             ep = dict(state.get("episode") or {})
             ep["script_text"] = video_film_generate_timeline_script(state)
@@ -83369,6 +83371,8 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
             num_match = re.search(r"\d+", str(text or ""))
             ep_num = int(num_match.group(0)) if num_match else 1
             state = video_uiflow3.set_episode_identity(state, number=ep_num)
+            if str(state.get("parent_product") or "") == "multi_scene_film":
+                state = video_uiflow3_open_view(state, "episode_duration")
         elif kind == "episode_title":
             state = video_uiflow3.set_episode_identity(state, title=str(text or "").strip()[:500])
         elif kind == "episode_identity":
@@ -112582,8 +112586,11 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             return await video_tail9_render(query, uid, context, "logo")
         if action == "complete":
             tail = video_tail9.mark_addon_complete(tail)
+            if str(tail.get("video_product_type") or "") in {"multi_scene_film", "video_long"}:
+                tail = video_tail9.mark_review_complete(tail)
             save_video_tail9_state(uid, context, tail, owner, host)
-            return await video_tail9_render(query, uid, context, "review")
+            next_dest = "quality" if str(tail.get("video_product_type") or "") in {"multi_scene_film", "video_long"} else "review"
+            return await video_tail9_render(query, uid, context, next_dest)
         return await video_tail9_render(query, uid, context, "addon")
     if owner == "uiflow3":
         target_step = ""
@@ -113467,9 +113474,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             back_dest = "addon" if str(tail.get("video_product_type") or "") in {"multi_scene_film", "video_long"} else "review"
             return await video_tail9_render(query, uid, context, back_dest)
         if action == "select":
-            if str(tail.get("status_stage") or "") != "quality":
-                recovery_screen = "invoice" if str(tail.get("status_stage") or "") == "invoice" else "quality"
-                return await video_tail9_render(query, uid, context, recovery_screen)
+            tail["status_stage"] = "quality"
             quality = max(200, min(1500, safe_int(argument, 300)))
             calculated_scene_count = video_selfshot3_scene_count_for_quality(tail, quality)
             selection_tail = dict(tail)
