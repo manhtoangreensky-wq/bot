@@ -76897,8 +76897,7 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
             selected_lines.append(
                 f"• {label}: {html.escape(video_scene3_entry_label(entry))}"
             )
-        selected_copy = "
-".join(selected_lines) if selected_lines else "Chưa thêm"
+        selected_copy = "\n".join(selected_lines) if selected_lines else "Chưa thêm"
         return (
             "🔒 Yêu cầu cần giữ nguyên\n\n"
             "Chọn đúng chi tiết phải nhất quán giữa các cảnh. Mỗi lần hiển thị 5 gợi ý; "
