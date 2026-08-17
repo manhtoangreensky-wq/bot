@@ -261505,7 +261505,7 @@ async def lifespan(app: FastAPI):
                 sanitize_log_text(type(exc).__name__),
             )
         try:
-            me = await tg_app.bot.get_me()
+            me = await asyncio.wait_for(tg_app.bot.get_me(), timeout=10.0)
             ACTIVE_TELEGRAM_BOT_ID = str(getattr(me, "id", "") or "")
             ACTIVE_TELEGRAM_BOT_USERNAME = str(getattr(me, "username", "") or "")
             logger.info(
@@ -261531,7 +261531,11 @@ async def lifespan(app: FastAPI):
         ):
             active_update_mode = "webhook"
         if active_update_mode == "webhook" and PUBLIC_BASE_URL:
-            takeover_result = await set_telegram_webhook_takeover(tg_app.bot, drop_pending_updates=True)
+            try:
+                takeover_result = await asyncio.wait_for(set_telegram_webhook_takeover(tg_app.bot, drop_pending_updates=True), timeout=15.0)
+            except Exception as e:
+                logger.warning(f"Webhook takeover timed out or failed: {e}")
+                takeover_result = {"ok": False, "error": str(e)}
             webhook_url = takeover_result.get("webhook_url") or ""
             try:
                 webhook_info_payload = takeover_result.get("telegram_webhook_info") or serialize_telegram_webhook_info(await tg_app.bot.get_webhook_info(), webhook_url)

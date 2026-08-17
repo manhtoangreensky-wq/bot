@@ -6,7 +6,8 @@
   },
   "deploy": {
     "startCommand": "python bot.py",
-    "healthcheckPath": "/",
+    "healthcheckPath": "/health",
     "healthcheckTimeout": 300
   }
 }
+
