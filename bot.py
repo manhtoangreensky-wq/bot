@@ -113552,6 +113552,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     reply_markup=video_tail9_public_blocker_keyboard(),
                 )
     if section == "confirm":
+        product_type = str(tail.get("video_product_type") or "")
+        lang = get_user_language(uid) or "vi"
         if tail.get("final_confirmed") or str(tail.get("job_id") or "").strip():
             await query.answer("Yêu cầu này đã được xác nhận.")
             if action == "back":
