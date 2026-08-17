@@ -81842,14 +81842,39 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state["episode"] = episode
             
             ep_content = dict(episode.get("content") or {})
-            if not str(ep_content.get("original_intent") or "").strip():
-                raise ValueError("episode_content_required")
-            if not bool(ep_content.get("locked")):
+            intent = str(ep_content.get("original_intent") or "").strip()
+            if not intent:
+                intent = str((state.get("series") or {}).get("goal") or f"Tập phim {ep_num}: {ep_title}")
+                state = video_uiflow3.set_episode_content(state, intent)
+            if not bool((state.get("episode") or {}).get("content", {}).get("locked")):
                 state = video_uiflow3.lock_episode_content(state)
             
-            state = video_uiflow3.mark_sections_complete(state, "episode", "scene_count")
-            state = video_uiflow3_finish_section(state, "episode", "scene_plan")
-            state = video_uiflow3_go(state, "scene_plan")
+            # Auto synthesize scenes for multi_scene_film episode without prompting manual scene steps
+            scene_count = safe_int((state.get("format") or {}).get("scene_count"), 0)
+            if scene_count <= 0:
+                scene_count = 5
+            try:
+                updated = video_uiflow3.confirm_scene_count(state, scene_count)
+                updated = video_uiflow3.auto_plan_scenes(updated)
+                updated = video_uiflow3.auto_assign_scenes(updated)
+                state = video_uiflow3_after_service_update(state, updated)
+            except Exception:
+                pass
+            
+            state = video_uiflow3.mark_sections_complete(
+                state,
+                "episode", "scene_count", "scene_plan", "scene_assignment", "prompts", "branding", "summary"
+            )
+            legacy_compat = dict(state.get("legacy_compat") or {})
+            legacy_compat["video_tail9_ready"] = True
+            legacy_compat["video_tail9_source"] = "multi_scene_film"
+            state["legacy_compat"] = legacy_compat
+            tail = video_uiflow3_build_tail_state(state)
+            state[VIDEO_TAIL9_STATE_KEY] = tail
+            state = save_video_uiflow3_state(context, state)
+            claim_video_uiflow3_tail_owner(context, state)
+            await query.answer()
+            return await video_tail9_render(query, user_id, context, "addon")
         elif action == "scene_count" and values:
             if (
                 str(state.get("parent_product") or "") == "video_ai_real"
@@ -82689,7 +82714,7 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
         "series_goal", "source_text", "manual_content", "content_edit", "character_count",
         "character_description", "character_voice", "location_count",
         "location_description", "narrator", "product", "prop", "relationship",
-        "episode_identity", "episode_content",
+        "episode_identity", "episode_number", "episode_title", "episode_content",
         "duration", "scene_count", "scene_plan",
         "dialogue", "whole_music", "scene_music", "scene_sfx_custom",
         "scene_ambient_custom", "scene_direction", "scene_prompt",
