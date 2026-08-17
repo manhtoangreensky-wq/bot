@@ -997,14 +997,30 @@ def _require_content_lock(state: Mapping[str, Any]) -> dict[str, Any]:
 def set_episode_identity(
     state: Mapping[str, Any],
     *,
-    number: int,
-    title: str,
+    number: int | None = None,
+    title: str | None = None,
 ) -> dict[str, Any]:
     current = _require_content_lock(_require_series_state(state))
-    episode_number = _integer(number, 0)
-    episode_title = _text(title, 500)
-    if episode_number <= 0 or episode_number > 9999 or not episode_title:
-        raise ValueError("episode_identity_required")
+    existing_episode = dict(current.get("episode") or {})
+    existing_num = _integer(existing_episode.get("number"), 1)
+    if existing_num <= 0:
+        existing_num = 1
+    existing_title = _text(existing_episode.get("title") or f"Tập {existing_num}", 500)
+
+    if number is not None:
+        episode_number = _integer(number, existing_num)
+        if episode_number <= 0 or episode_number > 9999:
+            episode_number = existing_num
+    else:
+        episode_number = existing_num
+
+    if title is not None:
+        episode_title = _text(title, 500)
+        if not episode_title:
+            episode_title = f"Tập {episode_number}"
+    else:
+        episode_title = existing_title or f"Tập {episode_number}"
+
     current["episode"]["number"] = episode_number
     current["episode"]["title"] = episode_title
     current["navigation"]["current_step"] = "episode"

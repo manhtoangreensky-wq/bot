@@ -72275,6 +72275,41 @@ VIDEO_SERIES_GOAL_SUGGESTIONS = (
 )
 
 
+
+VIDEO_EPISODE_CONTENT_SUGGESTIONS = (
+    # Trang 1
+    "Tập phim mở màn giới thiệu nhân vật chính bước vào bối cảnh mới, vô tình phát hiện ra một sự kiện bất thường làm thay đổi hoàn toàn cuộc sống thường ngày.",
+    "Cuộc chạm trán bất ngờ giữa hai nhân vật chính tại quán cà phê quen thuộc, tạo nên mối liên kết ban đầu nhưng kèm theo một nghi vấn chưa có lời giải.",
+    "Nhân vật chính nhận được một món đồ/thông điệp bí ẩn, dẫn dắt họ phải dấn thân vào hành trình tìm kiếm câu trả lời dù biết trước đầy hiểm nguy.",
+    "Một ngày làm việc tưởng chừng bình thường bỗng đảo lộn khi sự cố lớn xảy ra tại công ty, buộc các nhân vật phải bộc lộ cá tính thật và xung đột.",
+    "Khám phá góc khuất trong quá khứ của nhân vật chính, hé lộ động lực sâu kín khiến họ quyết tâm theo đuổi mục tiêu của toàn bộ loạt phim.",
+    # Trang 2
+    "Các nhân vật bắt đầu ghép nối những manh mối đầu tiên, lần theo dấu vết đến một địa điểm bí mật nhưng phát hiện có kẻ đang theo dõi từ xa.",
+    "Xung đột nội bộ nổ ra khi hai nhân vật bất đồng quan điểm về cách xử lý tình huống, dẫn đến một quyết định liều lĩnh của người dẫn đầu.",
+    "Một nhân vật bất ngờ xuất hiện với vai trò đồng minh, mang đến nguồn thông tin quý giá nhưng lai lịch và ý định thật sự vẫn còn là ẩn số.",
+    "Tình huống hiểu lầm dở khóc dở cười giữa các nhân vật trong văn phòng, vừa mang lại tiếng cười sảng khoái vừa thắt chặt thêm tình bạn bè.",
+    "Nhân vật chính đối mặt với thử thách đầu tiên vượt quá sức tưởng tượng, phải tận dụng sự nhạy bén và công cụ hỗ trợ để vượt qua an toàn.",
+    # Trang 3
+    "Bẫy ngầm được giăng sẵn khiến nhóm nhân vật rơi vào thế bị động, buộc họ phải phối hợp ăn ý để tìm ra lối thoát hiểm trong gang tấc.",
+    "Một bí mật quan trọng bị lộ tẩy trước mặt tất cả mọi người, làm đảo lộn hoàn toàn mối quan hệ và sự tin tưởng giữa các nhân vật.",
+    "Nhân vật chính buộc phải đưa ra lựa chọn đánh đổi đau đớn giữa lợi ích cá nhân và bảo vệ sự an toàn cho đồng đội của mình.",
+    "Cuộc đối thoại căng thẳng giữa hai thế lực đối đầu, mỗi bên đều nắm giữ một phần sự thật và không ai chịu nhượng bộ.",
+    "Sự việc bất ngờ chuyển hướng khi nhân vật phụ âm thầm hành động sau lưng, tạo nên bước ngoặt cục diện ngoài dự tính của tất cả.",
+    # Trang 4
+    "Nhóm nhân vật phát hiện ra điểm yếu chí mạng của đối phương và bắt đầu lên kế hoạch phản công thông minh và bất ngờ.",
+    "Khoảnh khắc lắng đọng giữa các nhân vật sau giông bão, chia sẻ những tâm tư thầm kín và tiếp thêm cho nhau niềm tin để đi tiếp.",
+    "Trận đối đầu trực diện nghẹt thở tại địa điểm then chốt, đòi hỏi sự dũng cảm, tốc độ và bản lĩnh vững vàng của từng cá nhân.",
+    "Sự thật chấn động đằng sau chuỗi sự kiện được sáng tỏ, phơi bày động cơ thực sự của kẻ đứng sau tấm màn nhung.",
+    "Kế hoạch phản công thành công ngoài mong đợi nhưng cái giá phải trả để lại bài học sâu sắc cho toàn bộ nhóm nhân vật.",
+    # Trang 5
+    "Tập phim khép lại với việc giải quyết xong thử thách trước mắt, nhưng đồng thời hé mở một bí ẩn lớn hơn đang chờ đợi ở tập tiếp theo.",
+    "Các nhân vật cùng ăn mừng chiến thắng nhỏ và chuẩn bị trang bị, kế hoạch cho chặng đường cam go sắp tới.",
+    "Một nhân vật mới bí ẩn xuất hiện ở những giây cuối cùng, gửi lời cảnh báo đầy ẩn ý về thử thách lớn sắp đổ bộ.",
+    "Cảm xúc vỡ òa khi mục tiêu giai đoạn được hoàn thành, khẳng định sự trưởng thành vượt bậc của nhân vật chính.",
+    "Bối cảnh mở rộng ra không gian mới, đặt nền móng cho những diễn biến kịch tính và hấp dẫn tiếp theo của loạt phim.",
+)
+
+
 VIDEO_UIFLOW3_STEP_ACTIONS = {
     "entry": {"mode", "idea_catalog"},
     "series_goal": {"series_goal_edit", "series_goal_done", "series_goal_pick", "series_goal_rotate", "series_goal_page"},
@@ -72358,6 +72393,7 @@ VIDEO_UIFLOW3_VIEW_OWNERS = {
     "scene_product": "scene_assignment",
     "scene_prop": "scene_assignment",
     "episode_entities": "episode",
+    "episode_content_hub": "episode",
     "audio_options": "scene_assignment",
     "audio_music": "scene_assignment",
     "audio_music_scenes": "scene_assignment",
@@ -72410,6 +72446,7 @@ VIDEO_UIFLOW3_CHILD_VIEW_STEPS = {
     "prompt_scenes": {"prompts"},
     "prompt_advanced": {"prompts", "scene_assignment"},
     "episode_entities": {"episode"},
+    "episode_content_hub": {"episode"},
     "audio_options": {"scene_assignment"},
     "audio_music": {"scene_assignment"},
     "audio_music_scenes": {"scene_assignment"},
@@ -72430,7 +72467,8 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
             "duration_custom", "format_done", "content_lock", "content_edit",
             "content_change", "context_page", "chars_custom", "narrator_edit", "narrator_clear",
             "product_add", "prop_add", "relationship_add", "locs_custom",
-            "bible_auto", "bible_done", "quick_build", "episode_identity", "episode_content",
+            "bible_auto", "bible_done", "quick_build", "episode_identity", "episode_number", "episode_title_edit",
+            "episode_content", "episode_content_rotate", "episode_content_edit",
             "episode_entities", "episode_inherit", "episode_done", "idea_catalog", "scene_custom", "scene_plan_edit",
             "scene_plan_auto", "scene_plan_done", "scene_auto", "music_scope",
             "assignment_done", "prompt_scenes", "prompt_advanced", "prompts_done",
@@ -72447,7 +72485,7 @@ VIDEO_UIFLOW3_ACTION_ARITIES = {
     **{
         action: frozenset({1})
         for action in (
-            "entry", "mode", "view", "profiles", "profile", "ratio", "series_goal_pick", "series_goal_page", "duration", "duration_scene",
+            "entry", "mode", "view", "profiles", "profile", "ratio", "series_goal_pick", "series_goal_page", "episode_content_pick", "duration", "duration_scene",
             "content", "chars", "character", "char_desc", "char_suggest", "char_image",
             "char_voice", "voice_custom", "char_scenes", "product_image",
             "prop_image", "locs", "location", "loc_desc", "loc_image",
@@ -72511,7 +72549,7 @@ VIDEO_UIFLOW3_PENDING_STEPS = {
     "scene_ambient_custom": {"scene_assignment"},
     "scene_direction": {"prompts", "scene_assignment"},
     "scene_prompt": {"prompts"}, "scene_negative_prompt": {"prompts"},
-    "episode_identity": {"episode"}, "episode_content": {"episode"},
+    "episode_identity": {"episode"}, "episode_number": {"episode"}, "episode_title": {"episode"}, "episode_content": {"episode"},
     "brand_logo": {"branding"}, "watermark": {"branding"},
 }
 
@@ -76000,12 +76038,18 @@ def video_ai_real_build_quick_plan(
     """Fill content-based defaults and optionally build the complete quick plan."""
 
     state = _video_ai_real_pilot_state(raw_state)
-    if not bool((state.get("content") or {}).get("locked")):
-        raise ValueError("content_not_locked")
     fmt = dict(state.get("format") or {})
-    scene_count = safe_int(fmt.get("scene_count"), 0)
-    if scene_count <= 0:
-        raise ValueError("scene_count_out_of_range")
+    if str(state.get("parent_product") or "") == "multi_scene_film":
+        scene_count = max(1, safe_int(fmt.get("scene_count"), 1))
+        if not bool((state.get("content") or {}).get("locked")):
+            state["content"]["locked"] = True
+            state["content"]["original_intent"] = str((state.get("series") or {}).get("goal") or "Phim dài tập")
+    else:
+        if not bool((state.get("content") or {}).get("locked")):
+            raise ValueError("content_not_locked")
+        scene_count = safe_int(fmt.get("scene_count"), 0)
+        if scene_count <= 0:
+            raise ValueError("scene_count_out_of_range")
     if not str(fmt.get("ratio") or ""):
         raise ValueError("aspect_ratio_unsupported")
     needs = dict(state.get("needs") or {})
@@ -76808,6 +76852,21 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
         requirement_buttons.append(("✨ Tự động gợi ý", "vid3|pilot_requirement_auto"))
         for offset in range(0, len(requirement_buttons), 2):
             rows.append(requirement_buttons[offset:offset + 2])
+    elif str(state.get("parent_product") or "") == "multi_scene_film":
+        raw_buttons = [
+            (
+                f"{'✅' if (entries.get(key) or {}).get('enabled') else '➕'} {label.split(' ', 1)[-1]}",
+                f"vid3|pilot_requirement|{key}",
+            )
+            for key, label in values
+        ]
+        raw_buttons.append(("✨ Tự động gợi ý nhanh", "vid3|pilot_requirement_auto"))
+        for offset in range(0, len(raw_buttons), 2):
+            rows.append(raw_buttons[offset:offset + 2])
+        rows.extend([
+            [("✅ Xong yêu cầu", "vid3|pilot_requirement_done"), ("⏭ Bỏ qua yêu cầu", "vid3|pilot_requirement_skip")],
+            *video_ai_real_pilot_nav_rows(back="vid3|pilot_requirement_back"),
+        ])
     else:
         for offset in range(0, len(values), 2):
             rows.append([
@@ -76817,19 +76876,12 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
                 )
                 for key, label in values[offset:offset + 2]
             ])
-        auto_label = (
-            "✨ Tự động gợi ý nhanh"
-            if str(state.get("parent_product") or "") == "multi_scene_film"
-            else "✨ Tự động gợi ý"
-        )
         rows.extend([
-            [(auto_label, "vid3|pilot_requirement_auto")],
+            [("✨ Tự động gợi ý", "vid3|pilot_requirement_auto")],
             [("👁 Xem mục đã chọn", "vid3|pilot_requirement_view")],
+            [("⏭ Bỏ qua yêu cầu", "vid3|pilot_requirement_skip"), ("✅ Xong yêu cầu", "vid3|pilot_requirement_done")],
+            *video_ai_real_pilot_nav_rows(back="vid3|pilot_requirement_back"),
         ])
-    rows.extend([
-        [("⏭ Bỏ qua yêu cầu", "vid3|pilot_requirement_skip"), ("✅ Xong yêu cầu", "vid3|pilot_requirement_done")],
-        *video_ai_real_pilot_nav_rows(back="vid3|pilot_requirement_back"),
-    ])
     if inline_summary:
         selected_lines = []
         for key, label in values:
@@ -78840,7 +78892,9 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             "product": "Nhập theo mẫu: Tên sản phẩm | nhóm | mô tả và yêu cầu giữ đúng hình dáng.",
             "prop": "Nhập theo mẫu: Tên đạo cụ | mô tả cách xuất hiện trong cảnh.",
             "relationship": "Nhập theo mẫu: Nhân vật 1 | Nhân vật 2 | quan hệ giữa hai nhân vật.",
-            "episode_identity": "Nhập theo mẫu: Số tập | Tên tập. Ví dụ: 2 | Tập bắt đầu.",
+            "episode_number": "Nhập số tập trong một tin nhắn (ví dụ: 1, 2, 3...).",
+            "episode_title": "Nhập tên tập trong một tin nhắn (ví dụ: Cuộc gặp đầu tiên).",
+            "episode_identity": "Nhập số tập hoặc tên tập.",
             "episode_content": "Nhập nội dung riêng của tập đang lập; nội dung này được xác nhận trước khi chia cảnh.",
             "product_image": "Gửi một ảnh tham chiếu cho đúng sản phẩm đang chọn.",
             "prop_image": "Gửi một ảnh tham chiếu cho đúng đạo cụ đang chọn.",
@@ -79787,14 +79841,40 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
 
     if step == "episode":
         episode = dict(state.get("episode") or {})
+        ep_num = episode.get('number') or 1
+        ep_title = episode.get('title') or f"Tập {ep_num}"
         episode_content = dict(episode.get("content") or {})
         effective = video_uiflow3.effective_episode_contract(state)
         content_preview = str(episode_content.get("original_intent") or "Chưa nhập")
         if len(content_preview) > 300:
             content_preview = content_preview[:297].rstrip() + "..."
+            
+        if view == "episode_content_hub":
+            page = max(1, min(5, safe_int((state.get("episode") or {}).get("content_page"), 1)))
+            start_idx = (page - 1) * 5
+            page_plots = list(VIDEO_EPISODE_CONTENT_SUGGESTIONS[start_idx:start_idx + 5])
+            plots_text = "\n\n".join(f"{i+1}. {p}" for i, p in enumerate(page_plots))
+            button_row = [
+                (str(i + 1), f"vid3|episode_content_pick|{start_idx + i + 1}")
+                for i in range(len(page_plots))
+            ]
+            return (
+                f"{prefix}📝 NỘI DUNG TẬP {ep_num}: {ep_title} (Trang {page}/5)\n\n"
+                f"Nội dung hiện tại: {content_preview}\n\n"
+                f"💡 GỢI Ý CỐT TRUYỆN CHO TẬP {ep_num}:\n{plots_text}\n\n"
+                "👉 Bấm các số [1] [2] [3] [4] [5] để chọn nhanh cốt truyện cho tập, hoặc tự nhập nội dung riêng bên dưới.",
+                video_uiflow3_keyboard([
+                    button_row,
+                    [("🔄 Đổi 5 gợi ý khác", "vid3|episode_content_rotate"), ("✏️ Tự nhập nội dung tập", "vid3|episode_content_edit")],
+                    [("⬅️ Quay lại tập đang lập", "vid3|view|episode")],
+                    *video_uiflow3_nav_rows(),
+                ]),
+            )
+
         return (
             f"{prefix}🎞 TẬP ĐANG LẬP\n\n"
-            f"Tập {episode.get('number') or 1}: {episode.get('title') or 'Chưa đặt tên'}\n"
+            f"Tập: {ep_num}\n"
+            f"Tên tập: {ep_title}\n"
             f"Nội dung tập: {content_preview}\n"
             f"Kế thừa: {len(effective.get('character_ids') or [])} nhân vật / "
             f"{len(effective.get('location_ids') or [])} bối cảnh / "
@@ -79802,8 +79882,9 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             f"{len(effective.get('prop_ids') or [])} đạo cụ\n\n"
             "Thứ tự kế thừa: thiết lập chung của loạt video → thiết lập riêng của tập → thiết lập riêng của cảnh.",
             video_uiflow3_keyboard([
-                [("🔢 Số và tên tập", "vid3|episode_identity"), ("📝 Nội dung tập", "vid3|episode_content")],
-                [("👥 Nhân vật/bối cảnh của tập", "vid3|episode_entities"), ("✅ Hoàn tất nội dung tập", "vid3|episode_done")],
+                [("🔢 Số tập", "vid3|episode_number"), ("✏️ Nhập tên tập", "vid3|episode_title_edit")],
+                [("📝 Nội dung tập", "vid3|episode_content"), ("👥 Nhân vật/bối cảnh tập", "vid3|episode_entities")],
+                [("✅ Hoàn tất thiết lập tập", "vid3|episode_done")],
                 *video_uiflow3_nav_rows(),
             ]),
         )
@@ -81696,10 +81777,29 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                     "scene_plan" if bool((state.get("format") or {}).get("scene_count_confirmed")) else "scene_count"
                 )
                 state = video_uiflow3_go(state, next_step)
+        elif action == "episode_number":
+            state = video_uiflow3_await_input(state, "episode_number", back_callback="vid3|view|episode")
+        elif action == "episode_title_edit":
+            state = video_uiflow3_await_input(state, "episode_title", back_callback="vid3|view|episode")
+        elif action == "episode_content":
+            state = video_uiflow3_open_view(state, "episode_content_hub")
+        elif action == "episode_content_edit":
+            state = video_uiflow3_await_input(state, "episode_content", back_callback="vid3|view|episode_content_hub")
+        elif action == "episode_content_pick" and values:
+            pick_idx = max(1, min(len(VIDEO_EPISODE_CONTENT_SUGGESTIONS), safe_int(values[0], 1))) - 1
+            picked_content = VIDEO_EPISODE_CONTENT_SUGGESTIONS[pick_idx]
+            state = video_uiflow3.set_episode_content(state, picked_content)
+            state = video_uiflow3.lock_episode_content(state)
+            state = video_uiflow3_open_view(state, "episode")
+        elif action == "episode_content_rotate":
+            ep = dict(state.get("episode") or {})
+            cur_p = safe_int(ep.get("content_page"), 1)
+            tot_p = max(1, (len(VIDEO_EPISODE_CONTENT_SUGGESTIONS) + 4) // 5)
+            ep["content_page"] = 1 if cur_p >= tot_p else cur_p + 1
+            state["episode"] = ep
+            state = video_uiflow3_open_view(state, "episode_content_hub")
         elif action == "episode_identity":
             state = video_uiflow3_await_input(state, "episode_identity", back_callback="vid3|view|episode")
-        elif action == "episode_content":
-            state = video_uiflow3_await_input(state, "episode_content", back_callback="vid3|view|episode")
         elif action == "episode_entities":
             state = video_uiflow3_open_view(state, "episode_entities")
         elif action == "episode_entity" and len(values) >= 2:
@@ -81732,12 +81832,23 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state = video_uiflow3_open_view(state, "episode_entities")
         elif action == "episode_done":
             episode = dict(state.get("episode") or {})
-            if safe_int(episode.get("number"), 0) <= 0 or not str(episode.get("title") or "").strip():
-                raise ValueError("episode_identity_required")
-            if not bool((episode.get("content") or {}).get("locked")):
+            ep_num = safe_int(episode.get("number"), 1)
+            if ep_num <= 0:
+                ep_num = 1
+            ep_title = str(episode.get("title") or "").strip() or f"Tập {ep_num}"
+            episode["number"] = ep_num
+            episode["title"] = ep_title
+            state["episode"] = episode
+            
+            ep_content = dict(episode.get("content") or {})
+            if not str(ep_content.get("original_intent") or "").strip():
                 raise ValueError("episode_content_required")
-            state = video_uiflow3.mark_sections_complete(state, "episode")
-            state = video_uiflow3_finish_section(state, "episode", "scene_count")
+            if not bool(ep_content.get("locked")):
+                state = video_uiflow3.lock_episode_content(state)
+            
+            state = video_uiflow3.mark_sections_complete(state, "episode", "scene_count")
+            state = video_uiflow3_finish_section(state, "episode", "scene_plan")
+            state = video_uiflow3_go(state, "scene_plan")
         elif action == "scene_count" and values:
             if (
                 str(state.get("parent_product") or "") == "video_ai_real"
@@ -82739,13 +82850,26 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
                 relation=fields[2],
             )
             state = video_uiflow3_open_view(state, "bible_extras")
+        elif kind == "episode_number":
+            num_match = re.search(r"\d+", str(text or ""))
+            ep_num = int(num_match.group(0)) if num_match else 1
+            state = video_uiflow3.set_episode_identity(state, number=ep_num)
+        elif kind == "episode_title":
+            state = video_uiflow3.set_episode_identity(state, title=str(text or "").strip()[:500])
         elif kind == "episode_identity":
-            number_text, title = video_uiflow3_compact_pair(text)
-            state = video_uiflow3.set_episode_identity(
-                state,
-                number=safe_int(number_text, 0),
-                title=title,
-            )
+            clean = str(text or "").strip()
+            if "|" in clean or "-" in clean or ":" in clean:
+                parts = re.split(r"[\|\-\:]", clean, maxsplit=1)
+                num_match = re.search(r"\d+", parts[0])
+                num = int(num_match.group(0)) if num_match else None
+                title_val = parts[1].strip() if len(parts) > 1 else None
+                state = video_uiflow3.set_episode_identity(state, number=num, title=title_val)
+            else:
+                num_match = re.match(r"^(?:tập\s*|tap\s*|ep\s*)?(\d+)$", clean, re.IGNORECASE)
+                if num_match:
+                    state = video_uiflow3.set_episode_identity(state, number=int(num_match.group(1)))
+                else:
+                    state = video_uiflow3.set_episode_identity(state, title=clean[:500])
         elif kind == "episode_content":
             state = video_uiflow3.set_episode_content(state, text[:12000])
             state = video_uiflow3.lock_episode_content(state)
