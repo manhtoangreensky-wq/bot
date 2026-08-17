@@ -76108,18 +76108,12 @@ def video_ai_real_build_quick_plan(
     """Fill content-based defaults and optionally build the complete quick plan."""
 
     state = _video_ai_real_pilot_state(raw_state)
+    if not bool((state.get("content") or {}).get("locked")):
+        raise ValueError("content_not_locked")
     fmt = dict(state.get("format") or {})
-    if str(state.get("parent_product") or "") == "multi_scene_film":
-        scene_count = max(1, safe_int(fmt.get("scene_count"), 1))
-        if not bool((state.get("content") or {}).get("locked")):
-            state["content"]["locked"] = True
-            state["content"]["original_intent"] = str((state.get("series") or {}).get("goal") or "Phim dài tập")
-    else:
-        if not bool((state.get("content") or {}).get("locked")):
-            raise ValueError("content_not_locked")
-        scene_count = safe_int(fmt.get("scene_count"), 0)
-        if scene_count <= 0:
-            raise ValueError("scene_count_out_of_range")
+    scene_count = safe_int(fmt.get("scene_count"), 0)
+    if scene_count <= 0:
+        raise ValueError("scene_count_out_of_range")
     if not str(fmt.get("ratio") or ""):
         raise ValueError("aspect_ratio_unsupported")
     needs = dict(state.get("needs") or {})
@@ -76922,21 +76916,6 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
         requirement_buttons.append(("✨ Tự động gợi ý", "vid3|pilot_requirement_auto"))
         for offset in range(0, len(requirement_buttons), 2):
             rows.append(requirement_buttons[offset:offset + 2])
-    elif str(state.get("parent_product") or "") == "multi_scene_film":
-        raw_buttons = [
-            (
-                f"{'✅' if (entries.get(key) or {}).get('enabled') else '➕'} {label.split(' ', 1)[-1]}",
-                f"vid3|pilot_requirement|{key}",
-            )
-            for key, label in values
-        ]
-        raw_buttons.append(("✨ Tự động gợi ý nhanh", "vid3|pilot_requirement_auto"))
-        for offset in range(0, len(raw_buttons), 2):
-            rows.append(raw_buttons[offset:offset + 2])
-        rows.extend([
-            [("✅ Xong yêu cầu", "vid3|pilot_requirement_done"), ("⏭ Bỏ qua yêu cầu", "vid3|pilot_requirement_skip")],
-            *video_ai_real_pilot_nav_rows(back="vid3|pilot_requirement_back"),
-        ])
     else:
         for offset in range(0, len(values), 2):
             rows.append([
@@ -76946,12 +76925,19 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
                 )
                 for key, label in values[offset:offset + 2]
             ])
+        auto_label = (
+            "✨ Tự động gợi ý nhanh"
+            if str(state.get("parent_product") or "") == "multi_scene_film"
+            else "✨ Tự động gợi ý"
+        )
         rows.extend([
-            [("✨ Tự động gợi ý", "vid3|pilot_requirement_auto")],
+            [(auto_label, "vid3|pilot_requirement_auto")],
             [("👁 Xem mục đã chọn", "vid3|pilot_requirement_view")],
-            [("⏭ Bỏ qua yêu cầu", "vid3|pilot_requirement_skip"), ("✅ Xong yêu cầu", "vid3|pilot_requirement_done")],
-            *video_ai_real_pilot_nav_rows(back="vid3|pilot_requirement_back"),
         ])
+    rows.extend([
+        [("⏭ Bỏ qua yêu cầu", "vid3|pilot_requirement_skip"), ("✅ Xong yêu cầu", "vid3|pilot_requirement_done")],
+        *video_ai_real_pilot_nav_rows(back="vid3|pilot_requirement_back"),
+    ])
     if inline_summary:
         selected_lines = []
         for key, label in values:
@@ -109740,6 +109726,8 @@ def video_tail9_preflight(user_id: int, context, tail: dict, owner: str, host: d
         report = dict(video_selfshot2_preflight(host))
     elif product == video_selfshot3.PRODUCT_ID:
         report = dict(video_selfshot3_preflight(host))
+    elif product in {"multi_scene_film", "video_long"}:
+        report = {"ok": True, "ready": True, "reason": ""}
     else:
         report = dict(video_flow6_preflight_for_state(int(user_id or 0), host, int(quality or 300)))
     ok = bool(report.get("ok") or report.get("ready"))

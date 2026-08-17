@@ -104,7 +104,7 @@ ENTRY_ADAPTERS: dict[str, dict[str, Any]] = {
         "seconds_per_scene": 300,
         "minimum_scene_count": 1,
         "maximum_scene_count": 20,
-        "public_submit_enabled": False,
+        "public_submit_enabled": True,
     },
 }
 

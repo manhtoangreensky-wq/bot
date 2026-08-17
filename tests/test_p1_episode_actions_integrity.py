@@ -106,9 +106,35 @@ class TestFilm12StepsIntegrity(unittest.TestCase):
         snapshot = video_uiflow3.approved_snapshot(state)
         self.assertIsNotNone(snapshot)
 
-        # Step 12: Contract Execution
+        # Step 12: Contract Execution & Tail Confirmation
         contract = video_tail9.commercial_contract("multi_scene_film")
         self.assertTrue(contract.get("execution_enabled"))
+        self.assertEqual(video_uiflow3.readiness_errors(state), [])
+        self.assertEqual(video_uiflow3.render_readiness_errors(state), [])
+
+        tail = video_tail9.new_state(
+            product_type="multi_scene_film",
+            session_id="session123",
+            scene_count=5,
+            ratio="9:16",
+        )
+        tail["plan_approved"] = True
+        tail = video_tail9.mark_addon_complete(tail)
+        tail = video_tail9.mark_review_complete(tail)
+        pricing = {"quality_xu": 400, "total_xu": 2000, "package_label": "Gói 400", "scene_count": 5}
+        capability = {"ok": True, "runtime_ready": True}
+        tail = video_tail9.select_package(
+            tail,
+            quality_tier_id="400",
+            package_id="product_video_400",
+            pricing_snapshot=pricing,
+            capability_snapshot=capability,
+        )
+        allowed, reason = video_tail9.invoice_allowed(tail)
+        self.assertTrue(allowed)
+        self.assertEqual(reason, "ok")
+        self.assertEqual(tail.get("status_stage"), "invoice")
 
 if __name__ == "__main__":
     unittest.main()
+
