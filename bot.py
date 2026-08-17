@@ -92821,13 +92821,13 @@ def video_script_review_text(session: dict, *, file_review: bool = False) -> str
 def video_script_review_keyboard(*, file_review: bool = False) -> InlineKeyboardMarkup:
     if file_review:
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Dùng nội dung file", callback_data="vproduct|script_file_use")],
+            [InlineKeyboardButton("✅ Dùng nội dung & Sang Gói Add-on", callback_data="vproduct|script_file_use")],
             [InlineKeyboardButton("⬅️ Quay lại tải file", callback_data="vproduct|script_file_replace"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✏️ Sửa toàn bộ kịch bản", callback_data="vproduct|script_ai_edit"), InlineKeyboardButton("🔄 Tạo lại kịch bản", callback_data="vproduct|script_ai_regenerate")],
-        [InlineKeyboardButton("✅ Dùng kịch bản", callback_data="vproduct|script_ai_use")],
-        [InlineKeyboardButton("⬅️ Quay lại thiết lập AI", callback_data="vproduct|script_duration_screen"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
+        [InlineKeyboardButton("✏️ Sửa kịch bản", callback_data="vproduct|script_ai_edit"), InlineKeyboardButton("🔄 Tạo lại kịch bản", callback_data="vproduct|script_ai_regenerate")],
+        [InlineKeyboardButton("✅ Dùng kịch bản & Sang Gói Add-on", callback_data="vproduct|script_ai_use")],
+        [InlineKeyboardButton("⬅️ Quay lại thời lượng", callback_data="vproduct|script_duration_screen"), InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
     ])
 
 
@@ -114479,24 +114479,26 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             if not script_text.strip():
                 return await video_script_render_step(query, task3d_session_step(uid, "script_ai_duration"), lang)
             task3d_session_step(uid, "script_ai_review", script_source_parent="script_ai_review")
-            locked_ai = True
-            try:
-                _stored, proposal = video_flow7_store_script_proposal(
-                    uid,
-                    script_text,
-                    source="ai",
-                    locked=locked_ai,
-                )
-            except ValueError as exc:
-                return await safe_edit_or_send(query, f"⚠️ Kịch bản chưa thể chia cảnh: {str(exc)}. Nội dung cũ vẫn được giữ nguyên.", parse_mode=None, reply_markup=video_script_review_keyboard())
-            return await safe_edit_or_send_long_plain(
-                query,
-                video_flow7_script_count_text(proposal),
-                reply_markup=video_flow7_script_count_keyboard(
-                    safe_int(proposal.get("proposed_scene_count"), video_script_product.MIN_SCENES),
-                    locked=locked_ai,
+            count = max(
+                video_script_product.MIN_SCENES,
+                min(
+                    video_script_product.MAX_SCENES,
+                    safe_int(
+                        draft.get("script_entry_scene_count")
+                        or draft.get("proposed_scene_count")
+                        or draft.get("scene_count"),
+                        5,
+                    ),
                 ),
             )
+            try:
+                state = video_flow7_start_confirmed_script_state(context, uid, session, count)
+            except Exception:
+                _stored, proposal = video_flow7_store_script_proposal(uid, script_text, source="ai", locked=True)
+                state = video_flow7_start_confirmed_script_state(context, uid, session, count)
+            
+            # Direct transfer straight to Shared Tail 9 Add-on
+            return await video_tail9_render(query, uid, context, "addon")
         if action == "script_file_use":
             script_text = str(draft.get("script_file_text") or "")
             if not script_text.strip():
