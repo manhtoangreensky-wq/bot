@@ -81134,27 +81134,12 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             page = max(1, min(4, safe_int(values[0], 1)))
             state = video_uiflow3_open_view(state, "profiles", profile_page=page)
         elif action == "profile" and values:
-            if str(state.get("parent_product") or "") == "multi_scene_film":
-                profile_key = str(values[0] or "")
-                content_dict = dict(state.get("content") or {})
-                content_dict["profile_id"] = profile_key
-                state["content"] = content_dict
-                state["profile_revision"] = 0
-                state = video_uiflow3_open_view(state, "profile_suggestions")
-            else:
-                candidate = video_uiflow3_profile_candidate(values[0])
-                updated = video_uiflow3.set_content_candidate(
-                    state,
-                    source="content_catalog",
-                    profile_id=str(candidate["profile"].get("profile_key") or ""),
-                    original_intent=candidate["intent"],
-                    approved_brief=candidate["brief"],
-                )
-                state = video_uiflow3_after_service_update(
-                    state,
-                    updated,
-                    target_step="content_lock",
-                )
+            profile_key = str(values[0] or "")
+            content_dict = dict(state.get("content") or {})
+            content_dict["profile_id"] = profile_key
+            state["content"] = content_dict
+            state["profile_revision"] = 0
+            state = video_uiflow3_open_view(state, "profile_suggestions")
         elif action == "prof_sug" and values:
             sug_idx = safe_int(values[0], 0)
             profile_key = str((state.get("content") or {}).get("profile_id") or "brand_corporate")
@@ -81174,16 +81159,9 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                         "goal": str(item.get("goal") or ""),
                     },
                 )
-                if str(state.get("parent_product") or "") == "multi_scene_film":
-                    state = video_uiflow3.lock_content(updated)
-                    state = video_uiflow3_go(state, "production_bible")
-                else:
-                    state = video_uiflow3_after_service_update(
-                        state,
-                        updated,
-                        target_step="content_lock",
-                    )
+                state = video_uiflow3.lock_content(updated)
                 state = video_uiflow3_clear_transient(state)
+                state = video_uiflow3_go(state, "production_bible")
         elif action == "prof_sug_more":
             state["profile_revision"] = safe_int(state.get("profile_revision"), 0) + 1
             state = video_uiflow3_open_view(state, "profile_suggestions")
