@@ -79988,13 +79988,26 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             ep_title = str(episode.get("title") or f"Tập {ep_num}")
             fmt = dict(state.get("format") or {})
             total_sec = safe_int(fmt.get("target_duration_seconds"), len(scenes) * 8)
+            series_goal_text = str((state.get("series_goal") or {}).get("text") or "").strip()
+            ep_content = str(episode.get("content") or "").strip()
+            
             lines = [
                 f"{prefix}🎬 <b>KẾ HOẠCH VIDEO · TẬP {ep_num}: {html.escape(ep_title)}</b>",
                 "",
-                f"• Định dạng: {len(scenes)} cảnh · khoảng {total_sec}s · tỉ lệ {fmt.get('ratio') or '9:16'}",
-                "",
-                "<b>Danh sách phân cảnh:</b>",
             ]
+            if series_goal_text:
+                lines.extend([f"• Chuỗi phim: <b>{html.escape(series_goal_text[:120])}</b>", ""])
+            lines.extend([
+                f"• Định dạng: <b>{len(scenes)} cảnh</b> · khoảng <b>{total_sec}s</b> · tỉ lệ <b>{fmt.get('ratio') or '9:16'}</b>",
+                "",
+            ])
+            if ep_content:
+                lines.extend([
+                    "📖 <b>Nội dung tập:</b>",
+                    html.escape(ep_content[:300]) + ("…" if len(ep_content) > 300 else ""),
+                    "",
+                ])
+            lines.append("🎬 <b>Danh sách phân cảnh:</b>")
             for scene in scenes:
                 beat = str(scene.get('semantic_beat') or scene.get('main_action') or 'Một ý chính trọn vẹn')
                 dur = safe_int(scene.get('duration_target'), 8)
