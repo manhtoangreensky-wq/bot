@@ -76854,22 +76854,6 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
     entries = dict(scene3_state.get("preservation_requirements") or {})
     rows: list[list[tuple[str, str]]] = []
     values = list(VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES)
-    if str(state.get("parent_product") or "") == "multi_scene_film":
-        requirement_buttons = [
-            (
-                f"{'✅' if (entries.get(key) or {}).get('enabled') else '➕'} {label.split(' ', 1)[-1]}",
-                f"vid3|pilot_requirement|{key}",
-            )
-            for key, label in values
-        ]
-        requirement_buttons.append(("✨ Tự động gợi ý nhanh", "vid3|pilot_requirement_auto"))
-        for offset in range(0, len(requirement_buttons), 2):
-            rows.append(requirement_buttons[offset:offset + 2])
-        rows.extend([
-            [("⏭ Bỏ qua yêu cầu", "vid3|pilot_requirement_skip"), ("✅ Xong yêu cầu", "vid3|pilot_requirement_done")],
-            *video_ai_real_pilot_nav_rows(back="vid3|pilot_requirement_back"),
-        ])
-        return video_ai_real_pilot_requirements_text(state), video_uiflow3_keyboard(rows)
     inline_summary = video_ai_real_uses_inline_requirements(state)
     if inline_summary:
         requirement_buttons = [
@@ -76879,7 +76863,7 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
             )
             for key, label in values
         ]
-        requirement_buttons.append(("✨ Tự động gợi ý", "vid3|pilot_requirement_auto"))
+        requirement_buttons.append(("✨ Tự động gợi ý nhanh", "vid3|pilot_requirement_auto"))
         for offset in range(0, len(requirement_buttons), 2):
             rows.append(requirement_buttons[offset:offset + 2])
     else:
@@ -76913,18 +76897,22 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
             selected_lines.append(
                 f"• {label}: {html.escape(video_scene3_entry_label(entry))}"
             )
-        selected_copy = "\n".join(selected_lines) if selected_lines else "• Chưa thêm"
-        selection_copy = "Đã chọn:\n" + selected_copy
-    else:
-        selection_copy = (
-            "Đã chọn: "
-            + video_scene3_summary(entries, VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES)
+        selected_copy = "
+".join(selected_lines) if selected_lines else "Chưa thêm"
+        return (
+            "🔒 Yêu cầu cần giữ nguyên\n\n"
+            "Chọn đúng chi tiết phải nhất quán giữa các cảnh. Mỗi lần hiển thị 5 gợi ý; "
+            "có thể đổi sang nhóm khác hoặc tự nhập. Bối cảnh/kiến trúc được chọn tại đây "
+            "và không hỏi lại ở màn Nhân vật.\n\n"
+            f"Đã chọn: {selected_copy}",
+            video_uiflow3_keyboard(rows),
         )
     return (
         "🔒 Yêu cầu cần giữ nguyên\n\n"
-        "Chọn đúng chi tiết phải nhất quán giữa các cảnh. Mỗi lần hiển thị 5 gợi ý; có thể đổi sang nhóm khác hoặc tự nhập. "
-        "Bối cảnh/kiến trúc được chọn tại đây và không hỏi lại ở màn Nhân vật.\n\n"
-        f"{selection_copy}",
+        "Chọn đúng chi tiết phải nhất quán giữa các cảnh. Mỗi lần hiển thị 5 gợi ý; "
+        "có thể đổi sang nhóm khác hoặc tự nhập. Bối cảnh/kiến trúc được chọn tại đây "
+        "và không hỏi lại ở màn Nhân vật.\n\n"
+        f"Đã chọn: {video_scene3_summary(entries, VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES)}",
         video_uiflow3_keyboard(rows),
     )
 
