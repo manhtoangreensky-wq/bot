@@ -240,8 +240,8 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "scene_duration_seconds": 300,
         "maximum_scene_count": 20,
         "supported_quality_tiers": MULTI_SCENE_QUALITY_TIERS,
-        "execution_enabled": False,
-        "execution_blocker": "long_video_under_upgrade",
+        "execution_enabled": True,
+        "execution_blocker": "",
     },
     "video_long": {
         "flow_owner": "video_long",

@@ -80015,11 +80015,16 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                     html.escape(ep_content[:300]) + ("…" if len(ep_content) > 300 else ""),
                     "",
                 ])
-            lines.append("🎬 <b>Danh sách phân cảnh:</b>")
+            lines.append("🎬 <b>Danh sách phân cảnh chi tiết theo mốc thời gian:</b>")
+            cumulative_sec = 0
             for scene in scenes:
                 beat = str(scene.get('semantic_beat') or scene.get('main_action') or 'Một ý chính trọn vẹn')
-                dur = safe_int(scene.get('duration_target'), 8)
-                lines.append(f"• <b>Cảnh {scene.get('scene_index')}</b> ({dur}s): {html.escape(beat)}")
+                dur = safe_int(scene.get('duration_target'), max(1, total_sec // len(scenes)))
+                start_m, start_s = divmod(cumulative_sec, 60)
+                end_m, end_s = divmod(cumulative_sec + dur, 60)
+                time_range = f"{start_m:02d}:{start_s:02d} – {end_m:02d}:{end_s:02d}"
+                cumulative_sec += dur
+                lines.append(f"• <b>Cảnh {scene.get('scene_index')}</b> ({time_range} · {dur}s): {html.escape(beat)}")
             lines.extend([
                 "",
                 "Rà soát kế hoạch tập trước khi chuyển sang chọn Gói Add-on (Nhạc, Lồng tiếng, Phụ đề, SFX, Watermark).",
