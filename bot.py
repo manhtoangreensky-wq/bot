@@ -79976,18 +79976,12 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         is_multi_film = str(state.get("parent_product") or "") == "multi_scene_film"
         if view == "episode_goal" or (is_multi_film and not view):
             cur_g = str(episode.get("goal") or "")
-            goals = [
-                ("sales", "🛍 Bán hàng / chuyển đổi"),
-                ("branding", "✨ Giới thiệu SP / Brand"),
-                ("tutorial", "🎓 Hướng dẫn / Kiến thức"),
-                ("story", "📖 Kể chuyện / Cảm xúc"),
-                ("engagement", "🔥 Tăng tương tác"),
+            rows = [
+                [(f"{'✅ ' if cur_g == 'sales' else ''}🛍 Bán hàng", "vid3|film_goal|sales"), (f"{'✅ ' if cur_g == 'branding' else ''}✨ Giới thiệu SP", "vid3|film_goal|branding")],
+                [(f"{'✅ ' if cur_g == 'tutorial' else ''}🎓 Hướng dẫn", "vid3|film_goal|tutorial"), (f"{'✅ ' if cur_g == 'story' else ''}📖 Kể chuyện", "vid3|film_goal|story")],
+                [(f"{'✅ ' if cur_g == 'engagement' else ''}🔥 Tăng tương tác", "vid3|film_goal|engagement"), ("✍️ Mục tiêu riêng", "vid3|film_goal|custom")],
+                [("⬅️ Quay lại", "vid3|view|pilot_requirements"), ("🎬 Menu Video", "menu|main_video")],
             ]
-            rows = []
-            for gid, glabel in goals:
-                rows.append([(f"{'✅ ' if cur_g == gid else ''}{glabel}", f"vid3|film_goal|{gid}")])
-            rows.append([("✍️ Mục tiêu riêng", "vid3|film_goal|custom")])
-            rows.append([("⬅️ Yêu cầu kịch bản", "vid3|pilot_scene_plan_back"), ("🎬 Menu Video", "menu|main_video")])
             return (
                 f"{prefix}🎯 <b>BƯỚC 6: MỤC TIÊU KỊCH BẢN TẬP PHIM</b>\n\n"
                 f"Tập: <b>{ep_num}</b> · Tên: <b>{html.escape(ep_title)}</b>\n\n"
@@ -79998,18 +79992,12 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
 
         if view == "episode_audience":
             cur_a = str(episode.get("audience") or "")
-            audiences = [
-                ("prospects", "🎯 Khách tiềm năng"),
-                ("beginners", "🌱 Người mới"),
-                ("community", "👥 Cộng đồng"),
-                ("experts", "🧠 Người chuyên môn"),
-                ("general", "🏡 Gia đình / Phổ thông"),
+            rows = [
+                [(f"{'✅ ' if cur_a == 'prospects' else ''}🎯 Khách tiềm năng", "vid3|film_aud|prospects"), (f"{'✅ ' if cur_a == 'beginners' else ''}🌱 Người mới", "vid3|film_aud|beginners")],
+                [(f"{'✅ ' if cur_a == 'community' else ''}👥 Cộng đồng", "vid3|film_aud|community"), (f"{'✅ ' if cur_a == 'experts' else ''}🧠 Chuyên môn", "vid3|film_aud|experts")],
+                [(f"{'✅ ' if cur_a == 'general' else ''}🏡 Phổ thông", "vid3|film_aud|general"), ("✍️ Đối tượng riêng", "vid3|film_aud|custom")],
+                [("⬅️ Quay lại", "vid3|view|episode_goal"), ("🎬 Menu Video", "menu|main_video")],
             ]
-            rows = []
-            for aid, alabel in audiences:
-                rows.append([(f"{'✅ ' if cur_a == aid else ''}{alabel}", f"vid3|film_aud|{aid}")])
-            rows.append([("✍️ Đối tượng riêng", "vid3|film_aud|custom")])
-            rows.append([("⬅️ Mục tiêu kịch bản", "vid3|view|episode_goal"), ("🎬 Menu Video", "menu|main_video")])
             return (
                 f"{prefix}👥 <b>BƯỚC 7: ĐỐI TƯỢNG XEM MỤC TIÊU</b>\n\n"
                 f"Tập: <b>{ep_num}</b> · Mục tiêu: <b>{html.escape(ep_goal)}</b>\n\n"
@@ -80020,18 +80008,12 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
 
         if view == "episode_platform":
             cur_p = str(episode.get("platform") or "")
-            platforms = [
-                ("tiktok_reels", "📱 TikTok / Reels"),
-                ("youtube_shorts", "▶️ YouTube Shorts"),
-                ("facebook", "🔵 Facebook"),
-                ("ads_web", "📣 Quảng cáo / Website"),
-                ("multi_platform", "🌐 Nhiều nền tảng"),
+            rows = [
+                [(f"{'✅ ' if cur_p == 'tiktok_reels' else ''}📱 TikTok / Reels", "vid3|film_plat|tiktok_reels"), (f"{'✅ ' if cur_p == 'youtube_shorts' else ''}▶️ YouTube Shorts", "vid3|film_plat|youtube_shorts")],
+                [(f"{'✅ ' if cur_p == 'facebook' else ''}🔵 Facebook", "vid3|film_plat|facebook"), (f"{'✅ ' if cur_p == 'ads_web' else ''}📣 Quảng cáo / Web", "vid3|film_plat|ads_web")],
+                [(f"{'✅ ' if cur_p == 'multi_platform' else ''}🌐 Nhiều nền tảng", "vid3|film_plat|multi_platform"), ("✍️ Nền tảng riêng", "vid3|film_plat|custom")],
+                [("⬅️ Quay lại", "vid3|view|episode_audience"), ("🎬 Menu Video", "menu|main_video")],
             ]
-            rows = []
-            for pid, plabel in platforms:
-                rows.append([(f"{'✅ ' if cur_p == pid else ''}{plabel}", f"vid3|film_plat|{pid}")])
-            rows.append([("✍️ Nền tảng riêng", "vid3|film_plat|custom")])
-            rows.append([("⬅️ Đối tượng xem", "vid3|view|episode_audience"), ("🎬 Menu Video", "menu|main_video")])
             return (
                 f"{prefix}📱 <b>BƯỚC 8: NỀN TẢNG PHÁT HÀNH CHÍNH</b>\n\n"
                 f"Tập: <b>{ep_num}</b> · Đối tượng: <b>{html.escape(ep_aud)}</b>\n\n"
@@ -80041,10 +80023,13 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             )
 
         if view == "episode_duration":
-            ep_num_buttons = [
+            ep_num_buttons_1 = [
                 (f"{'✅ ' if ep_num == 1 else ''}🎞 Tập 1", "vid3|film_ep_num|1"),
                 (f"{'✅ ' if ep_num == 2 else ''}🎞 Tập 2", "vid3|film_ep_num|2"),
+            ]
+            ep_num_buttons_2 = [
                 (f"{'✅ ' if ep_num == 3 else ''}🎞 Tập 3", "vid3|film_ep_num|3"),
+                (f"{'✅ ' if ep_num == 4 else ''}🎞 Tập 4", "vid3|film_ep_num|4"),
             ]
             dur_buttons_1 = [
                 (f"{'✅ ' if ep_dur == 40 else ''}⏱ 40s (3-5 cảnh)", "vid3|film_dur|40"),
@@ -80055,11 +80040,12 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                 ("✍️ Tự nhập", "vid3|film_dur|custom"),
             ]
             rows = [
-                ep_num_buttons,
+                ep_num_buttons_1,
+                ep_num_buttons_2,
                 dur_buttons_1,
                 dur_buttons_2,
                 [("✨ Sinh kịch bản tập phim", "vid3|film_script_generate")],
-                [("⬅️ Nền tảng phát hành", "vid3|view|episode_platform"), ("🎬 Menu Video", "menu|main_video")],
+                [("⬅️ Quay lại", "vid3|view|episode_platform"), ("🎬 Menu Video", "menu|main_video")],
             ]
             return (
                 f"{prefix}⏱ <b>BƯỚC 9: THỜI LƯỢNG & THIẾT LẬP TẬP PHIM</b>\n\n"
@@ -81996,6 +81982,9 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state["navigation"]["current_step"] = "production_bible"
             state = video_uiflow3_open_view(state, "pilot_requirements")
         elif action == "bible_auto":
+            if str(state.get("parent_product") or "") == "multi_scene_film":
+                if not str((state.get("format") or {}).get("ratio") or ""):
+                    state["format"]["ratio"] = "9:16"
             state = video_ai_real_build_quick_plan(state, bible_only=True)
             for item in (state.get("bible") or {}).get("characters") or []:
                 if not item.get("locked_by_user") and not item.get("suggestion_source"):
@@ -113475,7 +113464,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if action in {"open", "change"}:
             return await video_tail9_render(query, uid, context, "quality")
         if action == "back":
-            return await video_tail9_render(query, uid, context, "review")
+            back_dest = "addon" if str(tail.get("video_product_type") or "") in {"multi_scene_film", "video_long"} else "review"
+            return await video_tail9_render(query, uid, context, back_dest)
         if action == "select":
             if str(tail.get("status_stage") or "") != "quality":
                 recovery_screen = "invoice" if str(tail.get("status_stage") or "") == "invoice" else "quality"
