@@ -76846,8 +76846,9 @@ def video_ai_real_uses_inline_requirements(state: dict) -> bool:
     return str(state.get("parent_product") or "") in {
         "video_ai_real",
         "storyboard_prompt",
+        "multi_scene_film",
+        "video_long",
     }
-
 
 def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKeyboardMarkup]:
     scene3_state = video_ai_real_pilot_scene3_field_state(state)
@@ -112365,8 +112366,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             current[VIDEO_TAIL9_STATE_KEY] = tail
             current = video_uiflow3_clear_transient(current, keep_return=False)
             if str(current.get("parent_product") or "") == "multi_scene_film":
-                current["navigation"]["current_step"] = "episode"
-                current = video_uiflow3_open_view(current, "episode_script")
+                current["navigation"]["current_step"] = "scene_plan"
+                current = video_uiflow3_open_view(current, "scene_plan_list")
                 current["navigation"]["return_to"] = None
             else:
                 current["navigation"]["current_step"] = "summary"
