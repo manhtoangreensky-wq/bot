@@ -79575,7 +79575,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         start_idx = (page - 1) * 5
         page_suggestions = list(VIDEO_SERIES_GOAL_SUGGESTIONS[start_idx:start_idx + 5])
         
-        suggestions_text = "\n".join(f"<b>{i+1}.</b> {html.escape(s)}" for i, s in enumerate(page_suggestions))
+        suggestions_text = "\n".join(f"{i+1}. {s}" for i, s in enumerate(page_suggestions))
         
         button_row = [
             (str(i + 1), f"vid3|series_goal_pick|{start_idx + i + 1}")
@@ -79584,16 +79584,15 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         
         text = (
             f"{prefix}🎯 MỤC TIÊU LOẠT VIDEO (Trang {page}/5)\n\n"
-            f"Mục tiêu chung hiện tại: <b>{html.escape(goal or 'Chưa chọn/nhập')}</b>\n\n"
-            f"💡 <b>GỢI Ý MỤC TIÊU CHO LOẠT:</b>\n{suggestions_text}\n\n"
-            "👉 Bấm các số [1] [2] [3] [4] [5] để chọn nhanh gợi ý, hoặc tự nhập mục tiêu riêng bên dưới."
+            f"Mục tiêu chung hiện tại: {goal or 'Chưa chọn / Chưa nhập'}\n\n"
+            f"💡 GỢI Ý MỤC TIÊU CHO LOẠT:\n{suggestions_text}\n\n"
+            "👉 Bấm các số [1] [2] [3] [4] [5] để chọn nhanh mục tiêu và tiếp tục, hoặc tự nhập mục tiêu riêng bên dưới."
         )
         return (
             text,
             video_uiflow3_keyboard([
                 button_row,
                 [("🔄 Đổi 5 gợi ý khác", "vid3|series_goal_rotate"), ("✏️ Tự nhập mục tiêu", "vid3|series_goal_edit")],
-                [("✅ Hoàn tất mục tiêu của loạt video", "vid3|series_goal_done")],
                 *video_uiflow3_nav_rows(),
             ]),
         )
@@ -80727,6 +80726,8 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             pick_idx = max(1, min(len(VIDEO_SERIES_GOAL_SUGGESTIONS), safe_int(values[0], 1))) - 1
             picked_goal = VIDEO_SERIES_GOAL_SUGGESTIONS[pick_idx]
             state = video_uiflow3.set_series_goal(state, picked_goal)
+            state = video_uiflow3.mark_sections_complete(state, "series_goal")
+            state = video_uiflow3_go(state, "format")
         elif action in {"series_goal_rotate", "series_goal_page"}:
             current_page = safe_int((state.get("series") or {}).get("goal_page"), 1)
             total_pages = max(1, (len(VIDEO_SERIES_GOAL_SUGGESTIONS) + 4) // 5)
@@ -82600,6 +82601,8 @@ async def handle_video_uiflow3_pending_text(update: Update, context: ContextType
     try:
         if kind == "series_goal":
             state = video_uiflow3.set_series_goal(state, text[:4000])
+            state = video_uiflow3.mark_sections_complete(state, "series_goal")
+            state = video_uiflow3_go(state, "format")
         elif kind == "source_text":
             before = state
             updated = video_uiflow3.set_source_metadata(state, text=text[:12000])
