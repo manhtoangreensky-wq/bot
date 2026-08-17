@@ -989,6 +989,11 @@ def revise_content(state: Mapping[str, Any], *, original_intent: str) -> dict[st
 
 def _require_content_lock(state: Mapping[str, Any]) -> dict[str, Any]:
     current = normalize_state(state)
+    if current["parent_product"] == "multi_scene_film":
+        if not bool(current["content"].get("locked")):
+            current["content"]["locked"] = True
+            current["content"]["original_intent"] = str(current["series"].get("goal") or "Phim dài tập")
+        return current
     if not current["content"].get("locked"):
         raise ValueError("content_lock_required")
     return current
@@ -2425,6 +2430,9 @@ def readiness_errors(state: Mapping[str, Any]) -> list[str]:
             errors.append("episode_identity_required")
         if not bool((current["episode"].get("content") or {}).get("locked")):
             errors.append("episode_content_not_locked")
+        if not current["scenes"]:
+            errors.append("scene_plan_missing")
+        return errors
     if not current["content"].get("locked"):
         errors.append("content_not_locked")
     if needs.get("characters") not in {"SKIP", "UNSUPPORTED"} and not current["bible"].get("character_count_confirmed"):

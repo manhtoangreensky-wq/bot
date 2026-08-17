@@ -79774,13 +79774,36 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                 )
                 for index, item in enumerate(suggestions[offset:offset + 2], offset + 1)
             ])
+        # Clean translation mapping for 32 profiles metadata
+        goal_labels = {
+            "brand_awareness": "Tăng nhận diện thương hiệu",
+            "recruitment": "Tuyển dụng nhân sự",
+            "sales_conversion": "Chuyển đổi bán hàng",
+            "product_launch": "Ra mắt sản phẩm mới",
+            "education": "Đào tạo / Hướng dẫn",
+            "entertainment": "Giải trí / Thu hút",
+        }
+        profile_labels = {
+            "brand_corporate": "Doanh nghiệp / Thương hiệu",
+            "product_showcase": "Giới thiệu sản phẩm",
+            "expert_talk": "Chuyên gia chia sẻ",
+            "viral_short": "Video ngắn lan tỏa",
+            "story_telling": "Kể chuyện cảm xúc",
+            "review_unboxing": "Review & Mở hộp",
+        }
+        raw_goal = str(brief.get("goal") or "")
+        display_goals = ", ".join(goal_labels.get(g.strip(), g.strip()) for g in raw_goal.split(",") if g.strip()) or "Theo nội dung"
+        raw_pid = str(content.get("profile_id") or "")
+        display_profile = profile_labels.get(raw_pid, raw_pid.replace("_", " ").title() if raw_pid else "Tự nhập")
+        display_intent = str(content.get("original_intent") or brief.get("title") or "Chưa có").strip()
+
         content_lines = [
             f"{prefix}✅ NỘI DUNG ĐÃ CHỌN",
             "",
-            f"Chủ đề: {brief.get('title') or content.get('original_intent') or 'Chưa có'}",
-            f"Mục tiêu: {brief.get('goal') or 'Theo nội dung'}",
-            f"Đối tượng: {brief.get('audience') or 'Chưa chọn'}",
-            f"Loại nội dung: {content.get('profile_id') or 'Tự nhập'}",
+            f"📌 Chủ đề: {display_intent}",
+            f"🎯 Mục tiêu: {display_goals}",
+            f"👥 Đối tượng: {brief.get('audience') or 'Đại chúng'}",
+            f"📚 Loại nội dung: {display_profile}",
         ]
         if suggestions:
             content_lines.extend(["", "Gợi ý riêng cho sản phẩm này (chọn 1):"])
@@ -81849,13 +81872,20 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             if not bool((state.get("episode") or {}).get("content", {}).get("locked")):
                 state = video_uiflow3.lock_episode_content(state)
             
-            # Auto synthesize scenes for multi_scene_film episode without prompting manual scene steps
+            # Ensure top-level content is also marked locked and format confirmed
+            if not bool((state.get("content") or {}).get("locked")):
+                state["content"]["locked"] = True
+                state["content"]["original_intent"] = intent
+            
             scene_count = safe_int((state.get("format") or {}).get("scene_count"), 0)
             if scene_count <= 0:
                 scene_count = 5
+            state["format"]["scene_count"] = scene_count
+            state["format"]["scene_count_confirmed"] = True
+            
             try:
                 updated = video_uiflow3.confirm_scene_count(state, scene_count)
-                updated = video_uiflow3.auto_plan_scenes(updated)
+                updated = video_uiflow3.suggest_scene_plan(updated)
                 updated = video_uiflow3.auto_assign_scenes(updated)
                 state = video_uiflow3_after_service_update(state, updated)
             except Exception:
