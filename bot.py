@@ -260340,8 +260340,6 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("aichat_test", cmd_aichat_test))
     tg_app.add_handler(CommandHandler("aichat_trace", cmd_aichat_trace))
     tg_app.add_handler(CommandHandler("start",       cmd_start))
-    tg_app.add_handler(CommandHandler("linkweb",     cmd_linkweb))
-    tg_app.add_handler(CommandHandler("link",        cmd_linkweb))
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
     tg_app.add_handler(CommandHandler("broadcast",   cmd_broadcast_lite))
     tg_app.add_handler(CommandHandler("language",    cmd_language))
@@ -261484,187 +261482,183 @@ async def lifespan(app: FastAPI):
     TELEGRAM_HANDLERS_REGISTERED = telegram_handler_count(tg_app)
     logger.info("Telegram handlers registered OK | handlers_registered=%s", TELEGRAM_HANDLERS_REGISTERED)
 
-    async def async_startup_telegram():
-        global telegram_started, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, tg_polling_task, tg_broadcast_lite_worker_task, tg_auto_backup_task, storage_weekly_task, tg_memory_reminder_task, tg_product_video_watchdog_task, tg_frame_video_watchdog_task, tg_video_trend_catalog_task, tg_shopaikey_usage_task, tg_payos_expiry_task
-        telegram_started = False
+    telegram_started = False
+    try:
+        await tg_app.initialize()
+        await tg_app.start()
+        telegram_started = True
         try:
-            await tg_app.initialize()
-            await tg_app.start()
-            telegram_started = True
-            try:
-                rehydrate_report = await video_b14_rehydrate_auto_refresh_registry(tg_app)
-                logger.info(
-                    "product video auto refresh rehydrated | scanned=%s eligible=%s registered=%s recovered=%s",
-                    rehydrate_report.get("scanned", 0),
-                    rehydrate_report.get("eligible", 0),
-                    rehydrate_report.get("registered", 0),
-                    rehydrate_report.get("recovered_jobs", 0),
-                )
-            except Exception as exc:
-                logger.warning(
-                    "product video auto refresh rehydrate skipped | %s",
-                    sanitize_log_text(type(exc).__name__),
-                )
-            try:
-                me = await asyncio.wait_for(tg_app.bot.get_me(), timeout=10.0)
-                ACTIVE_TELEGRAM_BOT_ID = str(getattr(me, "id", "") or "")
-                ACTIVE_TELEGRAM_BOT_USERNAME = str(getattr(me, "username", "") or "")
-                logger.info(
-                    "Telegram getMe OK | id=%s | username=%s",
-                    ACTIVE_TELEGRAM_BOT_ID or "-",
-                    ACTIVE_TELEGRAM_BOT_USERNAME or "-",
-                )
-            except Exception as e:
-                error_text = sanitize_log_text(str(e))
-                TELEGRAM_STARTUP_ERROR = f"Telegram getMe failed: {type(e).__name__}: {error_text}"
-                if "Unauthorized" in type(e).__name__ or "Unauthorized" in error_text:
-                    logger.error("TELEGRAM_TOKEN invalid or revoked. Update Railway TELEGRAM_TOKEN.")
-                else:
-                    logger.exception("Telegram getMe failed during startup")
-            active_update_mode = TELEGRAM_UPDATE_MODE
-            webhook_url = ""
-            webhook_info_payload = {"ok": False, "reason": "not_checked", "expected_url": expected_telegram_webhook_url()}
-            if (
-                active_update_mode == "polling"
-                and PUBLIC_BASE_URL
-                and not TELEGRAM_FORCE_POLLING
-                and (not TELEGRAM_UPDATE_MODE_RAW or is_railway_runtime())
-            ):
-                active_update_mode = "webhook"
-            if active_update_mode == "webhook" and PUBLIC_BASE_URL:
-                try:
-                    takeover_result = await asyncio.wait_for(set_telegram_webhook_takeover(tg_app.bot, drop_pending_updates=True), timeout=15.0)
-                except Exception as e:
-                    logger.warning(f"Webhook takeover timed out or failed: {e}")
-                    takeover_result = {"ok": False, "error": str(e)}
-                webhook_url = takeover_result.get("webhook_url") or ""
-                try:
-                    webhook_info_payload = takeover_result.get("telegram_webhook_info") or serialize_telegram_webhook_info(await tg_app.bot.get_webhook_info(), webhook_url)
-                except Exception as e:
-                    webhook_info_payload = {"ok": False, "error": str(e), "expected_url": webhook_url}
-                ACTIVE_TELEGRAM_UPDATE_MODE = "webhook"
-                ACTIVE_TELEGRAM_WEBHOOK_URL = webhook_url
-                if TELEGRAM_TAKEOVER_INTERVAL_SECONDS > 0:
-                    tg_webhook_watchdog_task = asyncio.create_task(telegram_webhook_watchdog())
-                logger.info(f"🚀 TOAN AAS ONLINE WEBHOOK — build={APP_BUILD} webhook={webhook_url}")
+            rehydrate_report = await video_b14_rehydrate_auto_refresh_registry(tg_app)
+            logger.info(
+                "product video auto refresh rehydrated | scanned=%s eligible=%s registered=%s recovered=%s",
+                rehydrate_report.get("scanned", 0),
+                rehydrate_report.get("eligible", 0),
+                rehydrate_report.get("registered", 0),
+                rehydrate_report.get("recovered_jobs", 0),
+            )
+        except Exception as exc:
+            logger.warning(
+                "product video auto refresh rehydrate skipped | %s",
+                sanitize_log_text(type(exc).__name__),
+            )
+        try:
+            me = await tg_app.bot.get_me()
+            ACTIVE_TELEGRAM_BOT_ID = str(getattr(me, "id", "") or "")
+            ACTIVE_TELEGRAM_BOT_USERNAME = str(getattr(me, "username", "") or "")
+            logger.info(
+                "Telegram getMe OK | id=%s | username=%s",
+                ACTIVE_TELEGRAM_BOT_ID or "-",
+                ACTIVE_TELEGRAM_BOT_USERNAME or "-",
+            )
+        except Exception as e:
+            error_text = sanitize_log_text(str(e))
+            TELEGRAM_STARTUP_ERROR = f"Telegram getMe failed: {type(e).__name__}: {error_text}"
+            if "Unauthorized" in type(e).__name__ or "Unauthorized" in error_text:
+                logger.error("TELEGRAM_TOKEN invalid or revoked. Update Railway TELEGRAM_TOKEN.")
             else:
-                active_update_mode = "polling"
-                try:
-                    if TELEGRAM_FORCE_POLLING:
-                        logger.info("FORCE POLLING ENABLED")
-                    await tg_app.bot.delete_webhook(drop_pending_updates=not TELEGRAM_FORCE_POLLING)
-                except Exception as e:
-                    logger.warning(f"Không xóa được webhook cũ trước khi polling: {e}")
-                try:
-                    webhook_info_payload = serialize_telegram_webhook_info(await tg_app.bot.get_webhook_info(), expected_telegram_webhook_url())
-                except Exception as e:
-                    webhook_info_payload = {"ok": False, "error": str(e), "expected_url": expected_telegram_webhook_url()}
-                tg_polling_task = asyncio.create_task(run_polling_guarded())
-                ACTIVE_TELEGRAM_UPDATE_MODE = "polling"
-                ACTIVE_TELEGRAM_WEBHOOK_URL = ""
-                logger.info(f"🚀 TOAN AAS ONLINE POLLING — build={APP_BUILD} deploy={APP_DEPLOY_ID or '-'}")
-            ownership = telegram_update_ownership_diagnosis(webhook_info_payload, active_update_mode)
-            if tg_broadcast_lite_worker_task is None or tg_broadcast_lite_worker_task.done():
-                tg_broadcast_lite_worker_task = asyncio.create_task(broadcast_lite_outbox_loop(tg_app.bot))
-            if ADMIN_ID:
-                try:
-                    await tg_app.bot.send_message(
-                        chat_id=ADMIN_ID,
-                        text=(
-                            "🧬 <b>TOAN AAS DEPLOYED</b>\n\n"
-                            f"• Build: <code>{APP_BUILD}</code>\n"
-                            f"• Deploy: <code>{APP_DEPLOY_ID or '-'}</code>\n"
-                            f"• Update mode: <code>{html.escape(active_update_mode)}</code>\n"
-                            f"• Raw mode: <code>{html.escape(TELEGRAM_UPDATE_MODE_RAW or '-')}</code> | force polling: <code>{str(TELEGRAM_FORCE_POLLING).lower()}</code>\n"
-                            f"• Public URL source: <code>{html.escape(PUBLIC_BASE_URL_SOURCE or '-')}</code>\n"
-                            f"• Webhook: <code>{html.escape(webhook_url or '-')}</code>\n"
-                            f"• Telegram owner: <code>{html.escape(ownership.get('level') or '-')}</code>\n"
-                            f"• Next: <code>{html.escape(ownership.get('next_action') or '/runtime')}</code>\n"
-                            "• Lệnh kiểm tra: /runtime hoặc /telegram_status"
-                        ),
-                        parse_mode="HTML"
-                    )
-                except Exception as e:
-                    logger.warning(f"Không gửi được thông báo deploy cho admin: {e}")
+                logger.exception("Telegram getMe failed during startup")
+        active_update_mode = TELEGRAM_UPDATE_MODE
+        webhook_url = ""
+        webhook_info_payload = {"ok": False, "reason": "not_checked", "expected_url": expected_telegram_webhook_url()}
+        if (
+            active_update_mode == "polling"
+            and PUBLIC_BASE_URL
+            and not TELEGRAM_FORCE_POLLING
+            and (not TELEGRAM_UPDATE_MODE_RAW or is_railway_runtime())
+        ):
+            active_update_mode = "webhook"
+        if active_update_mode == "webhook" and PUBLIC_BASE_URL:
+            takeover_result = await set_telegram_webhook_takeover(tg_app.bot, drop_pending_updates=True)
+            webhook_url = takeover_result.get("webhook_url") or ""
             try:
-                payos_ok = bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY)
-                gemini_ok = bool(GEMINI_API_KEY)
-                openai_ok = bool(OPENAI_API_KEY)
-                db_status = "✅" if os.path.exists(DB_FILE) else "⚠️ CHƯA TÌM THẤY FILE"
+                webhook_info_payload = takeover_result.get("telegram_webhook_info") or serialize_telegram_webhook_info(await tg_app.bot.get_webhook_info(), webhook_url)
+            except Exception as e:
+                webhook_info_payload = {"ok": False, "error": str(e), "expected_url": webhook_url}
+            ACTIVE_TELEGRAM_UPDATE_MODE = "webhook"
+            ACTIVE_TELEGRAM_WEBHOOK_URL = webhook_url
+            if TELEGRAM_TAKEOVER_INTERVAL_SECONDS > 0:
+                tg_webhook_watchdog_task = asyncio.create_task(telegram_webhook_watchdog())
+            logger.info(f"🚀 TOAN AAS ONLINE WEBHOOK — build={APP_BUILD} webhook={webhook_url}")
+        else:
+            active_update_mode = "polling"
+            try:
+                if TELEGRAM_FORCE_POLLING:
+                    logger.info("FORCE POLLING ENABLED")
+                await tg_app.bot.delete_webhook(drop_pending_updates=not TELEGRAM_FORCE_POLLING)
+            except Exception as e:
+                logger.warning(f"Không xóa được webhook cũ trước khi polling: {e}")
+            try:
+                webhook_info_payload = serialize_telegram_webhook_info(await tg_app.bot.get_webhook_info(), expected_telegram_webhook_url())
+            except Exception as e:
+                webhook_info_payload = {"ok": False, "error": str(e), "expected_url": expected_telegram_webhook_url()}
+            tg_polling_task = asyncio.create_task(run_polling_guarded())
+            ACTIVE_TELEGRAM_UPDATE_MODE = "polling"
+            ACTIVE_TELEGRAM_WEBHOOK_URL = ""
+            logger.info(f"🚀 TOAN AAS ONLINE POLLING — build={APP_BUILD} deploy={APP_DEPLOY_ID or '-'}")
+        ownership = telegram_update_ownership_diagnosis(webhook_info_payload, active_update_mode)
+        if tg_broadcast_lite_worker_task is None or tg_broadcast_lite_worker_task.done():
+            tg_broadcast_lite_worker_task = asyncio.create_task(broadcast_lite_outbox_loop(tg_app.bot))
+        if ADMIN_ID:
+            try:
                 await tg_app.bot.send_message(
                     chat_id=ADMIN_ID,
                     text=(
-                        f"🟢 <b>{APP_VERSION} ĐÃ KHỞI ĐỘNG</b>\n\n"
-                        f"🕐 Thời gian: <b>{now_text()}</b>\n"
-                        f"🗄️ DB: {db_status}\n"
-                        f"💳 PayOS: {'✅' if payos_ok else '❌ CHƯA CÀI KEY'}\n"
-                        f"🤖 Gemini: {'✅' if gemini_ok else '❌'} | OpenAI: {'✅' if openai_ok else '❌'}\n"
-                        f"🌐 Webhook: <code>{html.escape(ACTIVE_TELEGRAM_WEBHOOK_URL or PUBLIC_BASE_URL or 'chưa set')}</code>\n\n"
-                        f"Build: <code>{html.escape(APP_BUILD)}</code>"
+                        "🧬 <b>TOAN AAS DEPLOYED</b>\n\n"
+                        f"• Build: <code>{APP_BUILD}</code>\n"
+                        f"• Deploy: <code>{APP_DEPLOY_ID or '-'}</code>\n"
+                        f"• Update mode: <code>{html.escape(active_update_mode)}</code>\n"
+                        f"• Raw mode: <code>{html.escape(TELEGRAM_UPDATE_MODE_RAW or '-')}</code> | force polling: <code>{str(TELEGRAM_FORCE_POLLING).lower()}</code>\n"
+                        f"• Public URL source: <code>{html.escape(PUBLIC_BASE_URL_SOURCE or '-')}</code>\n"
+                        f"• Webhook: <code>{html.escape(webhook_url or '-')}</code>\n"
+                        f"• Telegram owner: <code>{html.escape(ownership.get('level') or '-')}</code>\n"
+                        f"• Next: <code>{html.escape(ownership.get('next_action') or '/runtime')}</code>\n"
+                        "• Lệnh kiểm tra: /runtime hoặc /telegram_status"
                     ),
-                    parse_mode="HTML",
+                    parse_mode="HTML"
                 )
             except Exception as e:
-                logger.warning(f"Startup alert error: {e}")
+                logger.warning(f"Không gửi được thông báo deploy cho admin: {e}")
+        try:
+            payos_ok = bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY)
+            gemini_ok = bool(GEMINI_API_KEY)
+            openai_ok = bool(OPENAI_API_KEY)
+            db_status = "✅" if os.path.exists(DB_FILE) else "⚠️ CHƯA TÌM THẤY FILE"
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"🟢 <b>{APP_VERSION} ĐÃ KHỞI ĐỘNG</b>\n\n"
+                    f"🕐 Thời gian: <b>{now_text()}</b>\n"
+                    f"🗄️ DB: {db_status}\n"
+                    f"💳 PayOS: {'✅' if payos_ok else '❌ CHƯA CÀI KEY'}\n"
+                    f"🤖 Gemini: {'✅' if gemini_ok else '❌'} | OpenAI: {'✅' if openai_ok else '❌'}\n"
+                    f"🌐 Webhook: <code>{html.escape(ACTIVE_TELEGRAM_WEBHOOK_URL or PUBLIC_BASE_URL or 'chưa set')}</code>\n\n"
+                    f"Build: <code>{html.escape(APP_BUILD)}</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning(f"Startup alert error: {e}")
 
-            async def auto_backup_loop():
-                await asyncio.sleep(60)
-                while True:
-                    try:
-                        if os.path.exists(DB_FILE):
+        async def auto_backup_loop():
+            await asyncio.sleep(60)
+            while True:
+                try:
+                    if os.path.exists(DB_FILE):
+                        try:
+                            conn = db_connect()
                             try:
-                                conn = db_connect()
-                                try:
-                                    conn.execute("PRAGMA wal_checkpoint(FULL)")
-                                    conn.commit()
-                                finally:
-                                    conn.close()
-                            except Exception as e:
-                                logger.warning(f"Auto backup checkpoint error: {e}")
-                            size = os.path.getsize(DB_FILE)
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-                            backup_name = f"toan_aas_backup_{timestamp}.db"
-                            if size <= BACKUP_MAX_BYTES:
-                                logger.info("Auto backup Telegram document suppressed | filename=%s size_kb=%s", backup_name, size // 1024)
-                                await tg_app.bot.send_message(
-                                    chat_id=ADMIN_ID,
-                                    text=(
-                                        f"🗄️ Auto backup {now_text()} đã được giữ nội bộ.\n"
-                                        f"File DB không được gửi qua Telegram.\n"
-                                        f"Size: {size // 1024}KB"
-                                    ),
-                                )
-                            else:
-                                await tg_app.bot.send_message(
-                                    chat_id=ADMIN_ID,
-                                    text=(
-                                        f"⚠️ DB quá lớn để backup qua Telegram ({size // 1024 // 1024}MB). "
-                                        "Backup thủ công bằng /backup_db."
-                                    ),
-                                )
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as e:
-                        logger.warning(f"Auto backup error: {e}")
-                    await asyncio.sleep(6 * 3600)
+                                conn.execute("PRAGMA wal_checkpoint(FULL)")
+                                conn.commit()
+                            finally:
+                                conn.close()
+                        except Exception as e:
+                            logger.warning(f"Auto backup checkpoint error: {e}")
+                        size = os.path.getsize(DB_FILE)
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+                        backup_name = f"toan_aas_backup_{timestamp}.db"
+                        if size <= BACKUP_MAX_BYTES:
+                            logger.info("Auto backup Telegram document suppressed | filename=%s size_kb=%s", backup_name, size // 1024)
+                            await tg_app.bot.send_message(
+                                chat_id=ADMIN_ID,
+                                text=(
+                                    f"🗄️ Auto backup {now_text()} đã được giữ nội bộ.\n"
+                                    f"File DB không được gửi qua Telegram.\n"
+                                    f"Size: {size // 1024}KB"
+                                ),
+                            )
+                        else:
+                            await tg_app.bot.send_message(
+                                chat_id=ADMIN_ID,
+                                text=(
+                                    f"⚠️ DB quá lớn để backup qua Telegram ({size // 1024 // 1024}MB). "
+                                    "Backup thủ công bằng /backup_db."
+                                ),
+                            )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.warning(f"Auto backup error: {e}")
+                await asyncio.sleep(6 * 3600)
 
-            tg_auto_backup_task = asyncio.create_task(auto_backup_loop())
-            if STORAGE_WEEKLY_MAINTENANCE_ENABLED:
-                storage_weekly_task = asyncio.create_task(storage_weekly_maintenance_loop())
-            tg_memory_reminder_task = asyncio.create_task(memory_reminder_loop(tg_app.bot))
-            if tg_product_video_watchdog_task is None or tg_product_video_watchdog_task.done():
-                tg_product_video_watchdog_task = asyncio.create_task(product_video_watchdog_scheduler_loop())
-            if tg_frame_video_watchdog_task is None or tg_frame_video_watchdog_task.done():
-                tg_frame_video_watchdog_task = asyncio.create_task(frame_video_watchdog_scheduler_loop())
-            if tg_video_trend_catalog_task is None or tg_video_trend_catalog_task.done():
-                tg_video_trend_catalog_task = asyncio.create_task(video_trend_catalog_scheduler_loop())
-            if SHOPAIKEY_USAGE_CHECK_ENABLED and SHOPAIKEY_API_KEY:
-                tg_shopaikey_usage_task = asyncio.create_task(shopaikey_usage_monitor_loop(tg_app.bot))
-            if PAYOS_EXPIRY_ALERT_ENABLED and PAYOS_REGISTRATION_EXPIRES_AT:
-                tg_payos_expiry_task = asyncio.create_task(payos_expiry_monitor_loop(tg_app.bot))
-
-
-    asyncio.create_task(async_startup_telegram())
+        tg_auto_backup_task = asyncio.create_task(auto_backup_loop())
+        if STORAGE_WEEKLY_MAINTENANCE_ENABLED:
+            storage_weekly_task = asyncio.create_task(storage_weekly_maintenance_loop())
+        tg_memory_reminder_task = asyncio.create_task(memory_reminder_loop(tg_app.bot))
+        if tg_product_video_watchdog_task is None or tg_product_video_watchdog_task.done():
+            tg_product_video_watchdog_task = asyncio.create_task(product_video_watchdog_scheduler_loop())
+        if tg_frame_video_watchdog_task is None or tg_frame_video_watchdog_task.done():
+            tg_frame_video_watchdog_task = asyncio.create_task(frame_video_watchdog_scheduler_loop())
+        if tg_video_trend_catalog_task is None or tg_video_trend_catalog_task.done():
+            tg_video_trend_catalog_task = asyncio.create_task(video_trend_catalog_scheduler_loop())
+        if SHOPAIKEY_USAGE_CHECK_ENABLED and SHOPAIKEY_API_KEY:
+            tg_shopaikey_usage_task = asyncio.create_task(shopaikey_usage_monitor_loop(tg_app.bot))
+        if PAYOS_EXPIRY_ALERT_ENABLED and PAYOS_REGISTRATION_EXPIRES_AT:
+            tg_payos_expiry_task = asyncio.create_task(payos_expiry_monitor_loop(tg_app.bot))
+    except Exception as e:
+        TELEGRAM_STARTUP_ERROR = str(e)
+        ACTIVE_TELEGRAM_UPDATE_MODE = "telegram_startup_error"
+        ACTIVE_TELEGRAM_WEBHOOK_URL = ""
+        logger.exception(f"Telegram startup lỗi nhưng FastAPI vẫn chạy để /runtime chẩn đoán: {e}")
     yield
     if tg_polling_task:
         try:
