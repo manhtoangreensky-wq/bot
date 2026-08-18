@@ -256,10 +256,22 @@ class VideoDownloaderProvider:
                 pass
             raise
 
-    def _latest_downloaded_file(self, output_dir: Path) -> str:
+    def _latest_downloaded_file(self, output_dir: Path, kind: str = "video") -> str:
         files = [path for path in output_dir.glob("*") if path.is_file()]
         if not files:
             return ""
+        if kind == "audio":
+            audio_files = [p for p in files if p.suffix.lower() in {".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"}]
+            if audio_files:
+                return str(max(audio_files, key=lambda item: item.stat().st_mtime))
+        elif kind == "video":
+            video_files = [p for p in files if p.suffix.lower() in {".mp4", ".mov", ".mkv", ".webm", ".m4v"}]
+            if video_files:
+                return str(max(video_files, key=lambda item: item.stat().st_mtime))
+        elif kind == "cover":
+            img_files = [p for p in files if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}]
+            if img_files:
+                return str(max(img_files, key=lambda item: item.stat().st_mtime))
         return str(max(files, key=lambda item: item.stat().st_mtime))
 
     def download(self, url: str, kind: str = "video", output_dir: str | os.PathLike | None = None) -> dict:
@@ -290,6 +302,7 @@ class VideoDownloaderProvider:
             except Exception:
                 return {"ok": False, "reason": "adapter_missing", "metadata": metadata, "detection": detection}
             outtmpl = str(output_path / "toan_aas_%(id)s.%(ext)s")
+            ffmpeg_path = shutil.which("ffmpeg") or os.environ.get("FFMPEG_PATH")
             ydl_opts = {
                 "outtmpl": outtmpl,
                 "quiet": True,
@@ -297,20 +310,26 @@ class VideoDownloaderProvider:
                 "noplaylist": True,
                 "max_filesize": self.max_bytes,
             }
+            if ffmpeg_path:
+                ydl_opts["ffmpeg_location"] = ffmpeg_path
+
             if kind == "audio":
-                ydl_opts.update({
-                    "format": "bestaudio/best",
-                    "postprocessors": [{
+                ydl_opts["format"] = "bestaudio/best[acodec!=none]/best"
+                if ffmpeg_path:
+                    ydl_opts["postprocessors"] = [{
                         "key": "FFmpegExtractAudio",
                         "preferredcodec": "mp3",
                         "preferredquality": "192",
-                    }],
-                })
+                    }]
             else:
-                ydl_opts["format"] = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+                if ffmpeg_path:
+                    ydl_opts["merge_output_format"] = "mp4"
+                    ydl_opts["format"] = "bestvideo+bestaudio/best[acodec!=none]/best[ext=mp4]/best"
+                else:
+                    ydl_opts["format"] = "best[acodec!=none]/best[ext=mp4]/best"
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.extract_info(detection["url"], download=True)
-            file_path = self._latest_downloaded_file(output_path)
+            file_path = self._latest_downloaded_file(output_path, kind=kind)
             if not file_path or not os.path.exists(file_path) or os.path.getsize(file_path) <= 0:
                 return {"ok": False, "reason": "empty_download", "metadata": metadata, "detection": detection}
             if os.path.getsize(file_path) > self.max_bytes:
