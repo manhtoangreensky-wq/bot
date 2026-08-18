@@ -111750,6 +111750,7 @@ def video_tail9_logo_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
         ("🏠 Menu chính", "menu|main")
         if is_video_edit
         else ("🎬 Menu Video", "menu|main_video")
+    )
     return video_scene3_keyboard([
         [("🖼️ Thêm logo", "video_tail|logo|upload"), ("✍️ Thêm watermark", "video_tail|logo|watermark")],
         [("🗑️ Xóa logo", "video_tail|logo|clear|logo"), ("🗑️ Xóa watermark", "video_tail|logo|clear|watermark")],
