@@ -110129,7 +110129,7 @@ def video_tail9_preflight(user_id: int, context, tail: dict, owner: str, host: d
         report = dict(video_selfshot2_preflight(host))
     elif product == video_selfshot3.PRODUCT_ID:
         report = dict(video_selfshot3_preflight(host))
-    elif product in {"multi_scene_film", "video_long"}:
+    elif product in {"multi_scene_film", "video_long"} or owner == "uiflow3":
         report = {"ok": True, "ready": True, "reason": ""}
     else:
         report = dict(video_flow6_preflight_for_state(int(user_id or 0), host, int(quality or 300)))
@@ -112693,6 +112693,14 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         await query.answer()
     if tail.get("final_confirmed") and section != "confirm":
         return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
+    if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
+        if section in {"addon", "review", "audio", "logo", "watermark", "subtitle", "dubbing", "music", "sfx"}:
+            if action == "back":
+                current = video_selfshot3_draft(get_video_session(uid))
+                current.pop("video_tail_return_to", None)
+                save_video_selfshot3_draft(uid, current, step="selfshot3:review")
+                return await video_selfshot3_render(query, uid, "review", draft=current)
+            return await video_tail9_render(query, uid, context, "quality")
     if section == "addon":
         selfshot_product = str(tail.get("video_product_type") or "")
         selfshot_tail = owner == "session" and selfshot_product in {
