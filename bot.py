@@ -113985,13 +113985,6 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             if action == "back":
                 return await video_tail9_render(query, uid, context, "invoice")
             return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
-        required_screen = video_tail9.next_required_screen(tail)
-        if required_screen:
-            await query.answer()
-            return await video_tail9_render(query, uid, context, required_screen)
-        if action in {"open", "submit"} and str(tail.get("status_stage") or "") not in {"invoice", "review"}:
-            await query.answer()
-            return await video_tail9_render(query, uid, context, "invoice")
         if action == "open":
             product_type = str(tail.get("video_product_type") or "")
             if product_type in {"multi_scene_film", "video_long"}:

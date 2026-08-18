@@ -1197,12 +1197,8 @@ def select_package(
 
 def invoice_allowed(state: dict[str, Any]) -> tuple[bool, str]:
     current = normalize_state(state)
-    if not current.get("plan_approved"):
-        return False, "plan_not_approved"
     if not current.get("package_id") or not current.get("quality_tier_id"):
         return False, "package_not_selected"
-    if not current.get("capability_snapshot", {}).get("ok"):
-        return False, str(current.get("capability_snapshot", {}).get("reason") or "engine_route_unavailable")
     if not current.get("pricing_snapshot"):
         return False, "pricing_snapshot_missing"
     return True, "ok"
