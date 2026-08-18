@@ -52,8 +52,16 @@ def _compile_bot_function(name: str, namespace: dict):
 
 
 def _compile_worker_function(name: str, namespace: dict):
+    helpers = ""
+    for helper_name in ("_video_edit_bounded_json_response", "safe_display_filename", "telegram_delivery_error_chain_safe_message"):
+        try:
+            helpers += "\n\n" + _function_source(REPO_ROOT / "local_worker.py", helper_name)
+        except AssertionError:
+            pass
     source = (
-        "from __future__ import annotations\n\n"
+        "from __future__ import annotations\n\nimport time\n_VIDEO_EDIT_TELEGRAM_JSON_MAX_BYTES = 20 * 1024 * 1024\n\n"
+        + helpers
+        + "\n\n"
         + _function_source(REPO_ROOT / "local_worker.py", name)
     )
     exec(compile(source, filename="local_worker.py", mode="exec"), namespace)

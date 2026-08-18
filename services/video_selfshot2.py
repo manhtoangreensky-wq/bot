@@ -1275,7 +1275,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             for index, item in enumerate(prompts, 1)
         ]
         rows = [prompt_buttons[offset:offset + 2] for offset in range(0, len(prompt_buttons), 2)]
-        rows.append([('↩️ Tạo lại tất cả', 'vproduct|ss2|compile_prompts'), ('✅ Hoàn tất câu lệnh', 'vproduct|ss2|show|review')])
+        rows.append([('↩️ Tạo lại tất cả', 'vproduct|ss2|compile_prompts'), ('✅ Tiếp tục tới Add-on', 'vproduct|ss2|finish')])
         rows.append(_nav("scene_plan"))
     elif name == "audio":
         plan = dict(draft.get("audio_plan") or {})

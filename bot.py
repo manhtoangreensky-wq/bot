@@ -114561,15 +114561,21 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             if legacy_tail_screen:
                 return await video_tail9_render(query, uid, context, legacy_tail_screen)
             if operation == "compile_prompts":
+                try:
+                    await query.answer("✨ Đang tạo câu lệnh từng cảnh...")
+                except Exception:
+                    pass
+                current["selfshot2_screen"] = "prompts"
                 current["video_prompts"] = video_selfshot2_compile_prompts(current)
                 save_video_selfshot2_draft(uid, current, step="selfshot2:prompts")
                 return await video_selfshot2_render(query, uid, "prompts", draft=current)
-            if operation == "finish":
+            if operation in {"finish", "addon"} or (operation == "show" and argument in {"addon", "finish"}):
                 current = video_selfshot2_tail_host(current)
                 save_video_selfshot2_draft(uid, current, step="selfshot2:tail")
                 tail, owner, host = video_tail9_context(uid, context)
                 tail = video_tail9.apply_content_contract(tail, current)
                 tail = video_selfshot2_branding_tail(tail, current)
+                tail["branding_back_to"] = "addon"
                 tail["review_status"] = "not_ready"
                 tail["summary_status"] = "not_ready"
                 save_video_tail9_state(uid, context, tail, owner, host)
@@ -114789,7 +114795,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 clear_video_session(uid)
                 save_video_selfshot3_draft(uid, video_selfshot3.initial_draft(), step="selfshot3:intro")
                 return await video_selfshot3_render(query, uid, "intro")
-            if operation == "finish":
+            if operation in {"finish", "addon"} or (operation == "show" and argument in {"addon", "finish"}):
                 current = video_selfshot3_tail_host(current)
                 save_video_selfshot3_draft(uid, current, step="selfshot3:tail")
                 tail, owner, host = video_tail9_context(uid, context)
@@ -208732,7 +208738,7 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_badge = admin_display_badge(uid)
     badge = get_role_badge(uid)
     public_mode = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") == "pro" else "free"
-    public_model = "Opus 4.8" if public_mode == "pro" else "Gemini 3.6 Flash"
+    public_model = "Opus 4.8" if public_mode == "pro" else "Gemini 3.7 Flash"
     if admin_badge:
         member_note = (
             f"🛡 Đặc quyền {html.escape(admin_badge)}:\n"
@@ -208793,7 +208799,7 @@ async def set_chat_mode_command(update: Update, mode: str, command: str, note: s
             "Bot sẽ dùng Chat Pro cho đến khi bạn tắt bằng <code>/chat_pro_off</code>."
         )
     else:
-        text = "✅ Đã chuyển về <b>Chat miễn phí — Gemini 3.6 Flash</b>."
+        text = "✅ Đã chuyển về <b>Chat miễn phí — Gemini 3.7 Flash</b>."
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_chat_pro_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -208873,7 +208879,7 @@ async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 <b>AI Models trong TOAN AAS</b>",
         "",
         "<b>Free Chat</b>",
-        "• Gemini 3.6 Flash — 0 Xu.",
+        "• Gemini 3.7 Flash — 0 Xu.",
         "• 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt.",
         "• Bộ nhớ Public Chat riêng 48 giờ.",
         "",
