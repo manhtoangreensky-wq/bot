@@ -78890,6 +78890,93 @@ def video_uiflow3_ai_enhance_scenes(state: dict) -> dict:
     return state
 
 
+def video_film_fallback_script(state: dict) -> str:
+    episode = dict(state.get("episode") or {})
+    ep_num = int(episode.get("number") or 1)
+    ep_title = str(episode.get("title") or f"Tập {ep_num}").strip()
+    brief_dict = dict((state.get("content") or {}).get("approved_brief") or {})
+    brief_title = str(brief_dict.get("title") or (state.get("content") or {}).get("original_intent") or (state.get("series") or {}).get("goal") or "Phim dài tập").strip()
+    goal = str(episode.get("goal_label") or (state.get("series") or {}).get("goal") or "Kể chuyện / tạo cảm xúc")
+    audience = str(episode.get("audience_label") or "Khán giả đại chúng")
+    platform = str(episode.get("platform_label") or "TikTok / Reels")
+    duration = int(episode.get("duration") or 60)
+    
+    if duration <= 45:
+        scene_count = 4
+        times = ["00:00 – 00:10", "00:10 – 00:20", "00:20 – 00:30", "00:30 – 00:40"]
+    elif duration <= 60:
+        scene_count = 5
+        times = ["00:00 – 00:12", "00:12 – 00:24", "00:24 – 00:36", "00:36 – 00:48", "00:48 – 01:00"]
+    else:
+        scene_count = 6
+        times = ["00:00 – 00:15", "00:15 – 00:30", "00:30 – 00:45", "00:45 – 01:00", "01:00 – 01:15", "01:15 – 01:30"]
+        
+    chars = [c.get("display_name") for c in (state.get("bible") or {}).get("characters") or [] if c.get("display_name")] or ["Nhân vật chính"]
+    locs = [l.get("name") for l in (state.get("bible") or {}).get("locations") or [] if l.get("name")] or ["Bối cảnh trung tâm"]
+
+    lines = [
+        f"📝 <b>KỊCH BẢN PHÂN CẢNH & PROMPT - TẬP {ep_num}</b>",
+        f"🎬 <b>Tên tập:</b> {html.escape(ep_title)}",
+        "━━━━━━━━━━━━━━━━━━",
+        f"📌 <b>Chủ đề:</b> {html.escape(brief_title)}",
+        f"🎯 <b>Mục tiêu:</b> {html.escape(goal)}",
+        f"👥 <b>Đối tượng:</b> {html.escape(audience)} | <b>Nền tảng:</b> {html.escape(platform)}",
+        f"⏱ <b>Thời lượng:</b> {duration}s ({scene_count} cảnh)",
+        "",
+        "━━━━━━━━━━━━━━━━━━",
+        "🎬 <b>CHI TIẾT KỊCH BẢN & PROMPT TỪNG CẢNH:</b>",
+        "━━━━━━━━━━━━━━━━━━",
+        "",
+    ]
+    
+    stage_names = ["Mở đầu / Hook", "Phát triển 1", "Phát triển 2", "Cao trào", "Kết thúc / Kêu gọi", "Nối tiếp"]
+    _fb_beats = [
+        f"Mở đầu ấn tượng — thiết lập bối cảnh và gây tò mò về {brief_title}",
+        f"Giới thiệu {chars[0]} và vấn đề/mục tiêu chính trong câu chuyện",
+        f"Hành trình phát triển — thử thách và chuyển biến quan trọng",
+        f"Cao trào — xung đột đỉnh điểm, khoảnh khắc quyết định",
+        f"Kết luận — thông điệp cốt lõi và kêu gọi hành động",
+        f"Nối tiếp — manh mối dẫn sang tập tiếp theo",
+    ]
+    _fb_visuals = [
+        f"Góc máy drone toàn cảnh {locs[0]}, ánh sáng bình minh vàng ấm, không khí kỳ bí cuốn hút.",
+        f"Cận cảnh {chars[0]} giữa {locs[0]}, ánh sáng tự nhiên mềm mại, biểu cảm đầy quyết tâm.",
+        f"Góc máy tracking theo {chars[0]} di chuyển qua bối cảnh mới, ánh sáng chuyển đổi tạo nhịp.",
+        f"Cận cảnh dramatic — slow motion, ánh sáng tương phản cao, {chars[0]} đối diện thử thách lớn nhất.",
+        f"Góc rộng — {chars[0]} tại {locs[0]}, ánh sáng golden hour, khoảnh khắc bình yên sau cao trào.",
+        f"Cảnh mở — manh mối bí ẩn xuất hiện, góc máy zoom out dần, tạo kỳ vọng cho tập sau.",
+    ]
+    _fb_voiceovers = [
+        f"Có những câu chuyện chỉ bắt đầu khi bạn dám nhìn thật sâu vào {brief_title}...",
+        f"{chars[0]} bước vào hành trình không lối quay đầu — và đó là lúc mọi thứ thay đổi.",
+        f"Mỗi bước đi mang theo một thử thách, nhưng chính thử thách tạo nên giá trị thực sự.",
+        f"Khoảnh khắc quyết định đã đến — tất cả phụ thuộc vào lựa chọn ngay lúc này.",
+        f"Và đó là cách {brief_title} thay đổi mọi thứ. Bạn đã sẵn sàng?",
+        f"Nhưng câu chuyện chưa kết thúc ở đây...",
+    ]
+    _fb_actions = [
+        f"{chars[0]} xuất hiện lần đầu tại {locs[0]}, quan sát và khám phá bối cảnh.",
+        f"{chars[0]} gặp gỡ, đối thoại, nhận ra mục tiêu chính của hành trình.",
+        f"{chars[0]} vượt qua trở ngại, thực hiện hành động quan trọng thay đổi cục diện.",
+        f"{chars[0]} đối mặt trực tiếp với thử thách lớn nhất, hành động quyết liệt.",
+        f"{chars[0]} hoàn thành mục tiêu, đưa ra thông điệp hoặc kêu gọi.",
+        f"{chars[0]} phát hiện manh mối mới, chuẩn bị cho chương tiếp theo.",
+    ]
+    for idx, t in enumerate(times[:scene_count]):
+        stage_tag = stage_names[idx] if idx < len(stage_names) else f"Cảnh {idx+1}"
+        lines.append(f"⏱ <b>{t} | CẢNH {idx+1} ({stage_tag})</b>")
+        fb_i = min(idx, len(_fb_beats) - 1)
+        lines.append(f"• 🎯 <b>Ý nghĩa:</b> {html.escape(_fb_beats[fb_i])}")
+        lines.append(f"• 🎬 <b>Visual Prompt:</b> {html.escape(_fb_visuals[fb_i])}")
+        lines.append(f"• 🎙 <b>Thoại / Voiceover:</b> {html.escape(_fb_voiceovers[fb_i])}")
+        lines.append(f"• 🏃 <b>Hành động:</b> {html.escape(_fb_actions[fb_i])}")
+        lines.append("")
+    lines.append("━━━━━━━━━━━━━━━━━━")
+    lines.append(f"💡 <b>GỢI Ý NỐI TIẾP CHO TẬP {ep_num + 1}:</b>")
+    lines.append(f"Manh mối tiếp theo dẫn {html.escape(chars[0])} sang thử thách mới gay cấn hơn trong tập tiếp theo.")
+    return "\n".join(lines)
+
+
 def video_film_generate_timeline_script(state: dict) -> str:
     episode = dict(state.get("episode") or {})
     ep_num = int(episode.get("number") or 1)
@@ -80222,7 +80309,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         if view == "episode_script":
             script_text = str(episode.get("script_text") or "").strip()
             if not script_text:
-                script_text = video_film_generate_timeline_script(state)
+                script_text = video_film_fallback_script(state)
                 episode["script_text"] = script_text
                 state["episode"] = episode
             rows = [
@@ -82338,8 +82425,19 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 state["episode"] = ep
                 state = video_uiflow3_open_view(state, "episode_duration")
         elif action in {"film_script_generate", "film_script_regen"}:
+            try:
+                await query.answer("✨ Đang tạo kịch bản AI, vui lòng đợi vài giây...")
+            except Exception:
+                pass
             ep = dict(state.get("episode") or {})
-            ep["script_text"] = video_film_generate_timeline_script(state)
+            try:
+                ep["script_text"] = await asyncio.wait_for(
+                    asyncio.to_thread(video_film_generate_timeline_script, state),
+                    timeout=8.0
+                )
+            except Exception as _e:
+                logger.warning(f"AI script gen timeout/fallback: {_e}")
+                ep["script_text"] = video_film_fallback_script(state)
             state["episode"] = ep
             state = video_uiflow3_open_view(state, "episode_script")
         elif action == "film_script_edit":

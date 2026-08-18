@@ -570,6 +570,8 @@ def _subject_rows(flow: str, state: Mapping[str, Any]) -> list[list[tuple[str, s
         buttons.extend([
             ("👤 Xác nhận có người", callback(flow, "c4subject", "person")),
             ("📦 Xác nhận có vật", callback(flow, "c4subject", "object")),
+            ("👤📦 Giữ người và vật", callback(flow, "c4subject", "person_object")),
+            ("🎞️ Giữ chuyển động", callback(flow, "c4subject", "motion")),
         ])
     buttons.extend([
         ("✍️ Tự mô tả", callback(flow, "c4subject", "custom")),
@@ -1283,23 +1285,57 @@ def _set_subject(flow: str, state: dict[str, Any], choice: str, *, custom_text: 
             raise ValueError("selfshotflow4_subject_required")
         subject_label = _safe(custom_text)
         subject_type = "custom"
-    elif choice in {"motion", "none"}:
-        subject_label = "Giữ chuyển động nguồn"
-        subject_type = "motion_only"
-    else:
-        subject_label = "Người do khách xác nhận trong video nguồn" if choice == "person" else "Vật/sản phẩm do khách xác nhận trong video nguồn"
-        subject_type = choice
-    subject_id = f"user-confirmed-{choice or 'custom'}"
-    state["subject_manifest"] = {
-        "selection_type": subject_type,
-        "subjects": [{
-            "subject_id": subject_id,
-            "subject_type": choice if choice not in {"motion", "none"} else "custom",
+        subjects = [{
+            "subject_id": "user-confirmed-custom",
+            "subject_type": "custom",
             "label": subject_label,
             "description": subject_label,
             "provenance": "user_confirmed_source_bound",
-        }],
-        "selected_ids": [subject_id],
+        }]
+    elif choice in {"motion", "none"}:
+        subject_label = "Giữ chuyển động nguồn"
+        subject_type = "motion_only"
+        subjects = [{
+            "subject_id": "user-confirmed-motion",
+            "subject_type": "custom",
+            "label": subject_label,
+            "description": subject_label,
+            "provenance": "user_confirmed_source_bound",
+        }]
+    elif choice == "person_object":
+        subject_label = "Người và vật do khách xác nhận trong video nguồn"
+        subject_type = "person_object"
+        subjects = [
+            {
+                "subject_id": "user-confirmed-person",
+                "subject_type": "person",
+                "label": "Người do khách xác nhận trong video nguồn",
+                "description": "Người do khách xác nhận trong video nguồn",
+                "provenance": "user_confirmed_source_bound",
+            },
+            {
+                "subject_id": "user-confirmed-object",
+                "subject_type": "object",
+                "label": "Vật/sản phẩm do khách xác nhận trong video nguồn",
+                "description": "Vật/sản phẩm do khách xác nhận trong video nguồn",
+                "provenance": "user_confirmed_source_bound",
+            },
+        ]
+    else:
+        subject_label = "Người do khách xác nhận trong video nguồn" if choice == "person" else "Vật/sản phẩm do khách xác nhận trong video nguồn"
+        subject_type = choice
+        subjects = [{
+            "subject_id": f"user-confirmed-{choice or 'custom'}",
+            "subject_type": choice,
+            "label": subject_label,
+            "description": subject_label,
+            "provenance": "user_confirmed_source_bound",
+        }]
+    subject_ids = [_safe(item["subject_id"]) for item in subjects]
+    state["subject_manifest"] = {
+        "selection_type": subject_type,
+        "subjects": subjects,
+        "selected_ids": subject_ids,
         "stable_ids": True,
         "description": subject_label,
         "source_bound": source_bound,
@@ -1526,7 +1562,7 @@ def apply_action(flow: str, state: Mapping[str, Any] | None, operation: str, arg
         try:
             if arg.startswith("track:"):
                 _set_track(active_flow, current, arg.split(":", 1)[1])
-            elif arg in {"person", "object", "motion", "none"}:
+            elif arg in {"person", "object", "person_object", "motion", "none"}:
                 _set_subject(active_flow, current, arg)
             else:
                 return {"state": current, "screen": "subject"}
