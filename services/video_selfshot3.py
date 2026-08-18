@@ -842,17 +842,6 @@ def select_subjects(
     selected = {str(value) for value in selected_ids if str(value)}
     if selected:
         all_subjects = [row for row in all_subjects if str(row.get("subject_id") or "") in selected]
-    elif not all_subjects and subject_type != "custom":
-        if subject_type == "person":
-            all_subjects = [_user_confirmed_subject("person")]
-        elif subject_type in {"object", "product"}:
-            all_subjects = [_user_confirmed_subject("object")]
-        elif subject_type == "pet":
-            all_subjects = [_user_confirmed_subject("pet", "thu cung duoc khach xac nhan trong video nguon")]
-        elif subject_type == "person_object":
-            all_subjects = [_user_confirmed_subject("person"), _user_confirmed_subject("object")]
-        elif subject_type == "multiple":
-            all_subjects = [_user_confirmed_subject("person"), _user_confirmed_subject("object")]
     return {
         "selection_type": subject_type,
         "subjects": deepcopy(all_subjects),
@@ -1206,7 +1195,7 @@ def preflight(
         draft["transformation_stages"] = stages
 
     subject_manifest = dict(draft.get("subject_manifest") or {})
-    if not subject_manifest.get("subjects"):
+    if not subject_manifest.get("subjects") and not subject_manifest.get("description"):
         choice = str(subject_manifest.get("selection_type") or "person")
         subject_manifest = select_subjects(analysis, choice if choice in SUBJECT_TYPES else "person")
         draft["subject_manifest"] = subject_manifest
