@@ -588,6 +588,8 @@ def _subject_multiple_rows(flow: str, state: Mapping[str, Any]) -> list[list[tup
         if _safe(item.get("subject_id")) in selected:
             label = f"✅ {label}"
         buttons.append((label, cb))
+    if len(buttons) % 2:
+        buttons.append(("🎞️ Giữ chuyển động", callback(flow, "c4multi", "motion")))
     rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     rows.append([
         ("✅ Xác nhận chủ thể", callback(flow, "c4multi", "done")),
@@ -1039,6 +1041,8 @@ def _prepare_tail(flow: str, state: dict[str, Any]) -> None:
     compiled = compile_selfshot2_content(state) if flow == FLOW_SS2 else compile_selfshot3_content(state)
     state.clear()
     state.update(compiled)
+    if flow == FLOW_SS3 and "scene_count" not in state:
+        state["scene_count"] = 1
     raw_selected = state.get("selected_prompt")
     if isinstance(raw_selected, Mapping):
         selected = dict(raw_selected)
@@ -1084,7 +1088,7 @@ def review_text(flow: str, state: Mapping[str, Any] | None) -> str:
     relationship = "Đã khóa" if (data.get("relationship_lock") or {}).get("enabled") else "Chưa khóa"
     if active_flow == FLOW_SS2:
         lines = [
-            "🎬 <b>Xem lại — Tự quay và đổi cảnh AI</b>",
+            "🎬 <b>Review — Tự quay & đổi cảnh AI</b>",
             f"• Đoạn nguồn: <b>{start:g}–{end:g} giây</b>",
             f"• Chủ thể giữ lại: <b>{subject}</b>",
             f"• Nội dung: <b>{content}</b>",
@@ -1096,7 +1100,7 @@ def review_text(flow: str, state: Mapping[str, Any] | None) -> str:
         ]
     else:
         lines = [
-            "🎬 <b>Xem lại — Biến đổi điện ảnh</b>",
+            "🎬 <b>Review — Biến đổi điện ảnh</b>",
             f"• Đoạn nguồn: <b>{start:g}–{end:g} giây</b>",
             f"• Chủ thể giữ lại: <b>{subject}</b>",
             f"• Nội dung: <b>{content}</b>",
