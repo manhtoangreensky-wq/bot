@@ -670,7 +670,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             f"• <b>Trang phục:</b> {_safe(current.get('wardrobe'))}\n"
             f"• <b>Thế giới:</b> {_safe(current.get('world'))}\n"
             f"• <b>Hiệu ứng:</b> {_safe(', '.join(current.get('selected_effects') or []) or 'Không thêm')}\n\n"
-            "Kiểm tra kế hoạch rồi bấm <b>✅ Hoàn tất</b> để tiếp tục."
+            "Kiểm tra kế hoạch rồi bấm <b>✅ Tiếp tục tới Add-on</b> để tiếp tục."
         )
         rows = [[("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("👗 Trang phục", "vproduct|ss3|show|wardrobe")], [("✅ Tiếp tục tới Add-on", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
     elif name == "finish":

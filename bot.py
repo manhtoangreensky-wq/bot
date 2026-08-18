@@ -112351,9 +112351,6 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
             reply_markup=video_tail9_addon_keyboard(tail),
         )
     if screen == "review":
-        if str(tail.get("video_product_type") or "") in {video_selfshot3.PRODUCT_ID, "self_shot_cinematic_transform"}:
-            current = video_selfshot3_draft(get_video_session(user_id))
-            return await video_selfshot3_render(query, user_id, "review", draft=current)
         if owner == "video_edit":
             tail["status_stage"] = "review"
             save_video_tail9_state(user_id, context, tail, owner, host)
@@ -112741,14 +112738,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         await query.answer()
     if tail.get("final_confirmed") and section != "confirm":
         return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
-    if str(tail.get("video_product_type") or "") in {video_selfshot3.PRODUCT_ID, "self_shot_cinematic_transform"}:
-        if section in {"addon", "review", "audio", "logo", "watermark", "subtitle", "dubbing", "music", "sfx"}:
-            if action in {"back", "open", "edit", "scenes", "prompts"} or section == "review":
-                current = video_selfshot3_draft(get_video_session(uid))
-                current.pop("video_tail_return_to", None)
-                save_video_selfshot3_draft(uid, current, step="selfshot3:review")
-                return await video_selfshot3_render(query, uid, "review", draft=current)
-            return await video_tail9_render(query, uid, context, "quality")
+
     if section == "addon":
         selfshot_product = str(tail.get("video_product_type") or "")
         selfshot_tail = owner == "session" and selfshot_product in {
