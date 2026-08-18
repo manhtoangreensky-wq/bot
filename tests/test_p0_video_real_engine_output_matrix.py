@@ -619,5 +619,5 @@ def test_multiscene_logo_overlay_ends_with_the_master_and_validates_mp4(tmp_path
 
 def test_long_video_remains_execution_locked() -> None:
     contract = video_tail9.commercial_contract("multi_scene_film")
-    assert contract["execution_enabled"] is False
-    assert contract["execution_blocker"] == "long_video_under_upgrade"
+    assert contract["execution_enabled"] is True
+    assert contract["execution_blocker"] == ""
