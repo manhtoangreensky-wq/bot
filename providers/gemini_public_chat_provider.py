@@ -253,17 +253,23 @@ class GeminiPublicChatProvider:
         config = {"max_output_tokens": max(1, int(max_output_tokens or 1)), "temperature": float(temperature)}
         if str(system_instruction or "").strip():
             config["system_instruction"] = str(system_instruction).strip()
-        try:
-            response = await _provider_call(
-                generate_content,
-                timeout_seconds=_GENERATE_TIMEOUT_SECONDS,
-                model=GEMINI_FREE_MODEL,
-                contents=contents,
-                config=config,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
+        response = None
+        for candidate_model in [GEMINI_FREE_MODEL, "gemini-2.0-flash", "gemini-1.5-flash"]:
+            try:
+                response = await _provider_call(
+                    generate_content,
+                    timeout_seconds=_GENERATE_TIMEOUT_SECONDS,
+                    model=candidate_model,
+                    contents=contents,
+                    config=config,
+                )
+                if response:
+                    break
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                continue
+        if not response:
             return _failure("FAIL_PROVIDER")
         text = _response_text(response)
         if not text:
@@ -402,13 +408,26 @@ async def generate_public_chat_text(
         contents = [{"role": role, "parts": [{"text": text}]} for role, text in history]
         if parts:
             contents[-1] = {"role": "user", "parts": [{"text": history[-1][1]}, *parts]}
-        response = await _provider_call(
-            generate_content,
-            timeout_seconds=_GENERATE_TIMEOUT_SECONDS,
-            model=GEMINI_FREE_MODEL,
-            contents=contents,
-            config={"system_instruction": system_prompt.strip(), "max_output_tokens": max_output_tokens, "response_mime_type": "text/plain"},
-        )
+        response = None
+        last_exc = None
+        for candidate_model in [GEMINI_FREE_MODEL, "gemini-2.0-flash", "gemini-1.5-flash"]:
+            try:
+                response = await _provider_call(
+                    generate_content,
+                    timeout_seconds=_GENERATE_TIMEOUT_SECONDS,
+                    model=candidate_model,
+                    contents=contents,
+                    config={"system_instruction": system_prompt.strip(), "max_output_tokens": max_output_tokens, "response_mime_type": "text/plain"},
+                )
+                if response:
+                    break
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                last_exc = exc
+                continue
+        if response is None and last_exc is not None:
+            raise last_exc
         text = _response_text(response)
         if not text:
             return _legacy_result(ok=False, status="empty_response")
