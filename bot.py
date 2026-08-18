@@ -110211,9 +110211,6 @@ def video_tail9_preflight(user_id: int, context, tail: dict, owner: str, host: d
 def video_tail9_runtime_only_blocker(value: str) -> bool:
     blocker = str(value or "").strip().lower()
     if any(token in blocker for token in (
-        "capability_missing",
-        "capability_unavailable",
-        "missing_layers",
         "source_video_missing",
         "source_segment_missing",
         "transformation_timeline_missing",
@@ -110226,28 +110223,15 @@ def video_tail9_runtime_only_blocker(value: str) -> bool:
         "pet_track_missing",
         "person_object_tracks_missing",
         "multiple_subject_tracks_missing",
-        "cinematic_transform_capability_missing",
-        "regional_identity_capability_missing",
-        "package_unavailable",
+        "interaction_lock_missing",
+        "scene_count_not_supported",
+        "single_scene_not_supported",
+        "ratio_not_supported",
+        "input_not_ready",
+        "assets_not_ready",
     )):
         return False
-    return any(token in blocker for token in (
-        "provider_unavailable",
-        "provider_not_ready",
-        "provider_not_configured",
-        "provider_disabled",
-        "provider_freeze",
-        "worker_unavailable",
-        "worker_not_ready",
-        "worker_heartbeat_stale",
-        "render_service_not_ready",
-        "execution_owner_unavailable",
-        "route_unavailable",
-        "engine_unavailable",
-        "engine_not_ready",
-        "no_healthy_provider_no_charge",
-        "all_video_providers_submit_failed",
-    ))
+    return True
 
 
 def video_tail9_deferred_runtime_blocker(value: str) -> bool:
@@ -113940,10 +113924,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             catalog = video_tail9_catalog_report(selection_tail, capability)
             if quality not in set(catalog.get("tier_ids") or []):
                 return await video_tail9_render(query, uid, context, "quality")
-            if not bool(
-                capability.get("ok")
-                and (owner != "video_edit" or capability.get("runtime_ready"))
-            ):
+            if not catalog.get("ok"):
                 tail = video_tail9.set_capability(tail, capability)
                 save_video_tail9_state(uid, context, tail, owner, host)
                 return await safe_edit_or_send(
