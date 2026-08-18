@@ -612,31 +612,60 @@ def preflight(
 ) -> dict[str, Any]:
     draft = dict(state or {})
     blockers = []
-    source_report = source_gate(draft.get("source_video"), draft.get("source_analysis"))
+    source_report = source_gate(draft.get("source_video") or draft.get("source_asset"), draft.get("source_analysis"))
     if not source_report.get("ok"):
         blockers.append(source_report.get("blocker"))
+    duration = float((draft.get("source_analysis") or {}).get("duration_seconds") or (draft.get("source_video") or {}).get("duration_seconds") or 0)
     source_segment = dict(draft.get("source_segment") or {})
     if not (
         float(source_segment.get("end_seconds") or 0)
         > float(source_segment.get("start_seconds") or 0)
     ):
-        blockers.append("source_segment_missing")
+        if duration > 0:
+            source_segment = {"start_seconds": 0.0, "end_seconds": duration, "duration_seconds": duration}
+        else:
+            blockers.append("source_segment_missing")
     preserve_report = preserve_gate(draft.get("subject_manifest"), draft.get("preserve_constraints"))
     if not preserve_report.get("ok"):
         blockers.extend(preserve_report.get("blockers") or [])
-    scene_count = int(draft.get("scene_count") or 0)
+    scene_count = int(draft.get("scene_count") or len(draft.get("scene_plan") or []) or 1)
     if not MIN_SCENES <= scene_count <= MAX_SCENES:
         blockers.append("scene_count_invalid")
-    if not ratio_valid(draft.get("aspect_ratio")):
-        blockers.append("aspect_ratio_invalid")
-    if not dict(draft.get("selected_content") or {}):
-        blockers.append("content_choice_missing")
+    aspect_ratio = str(draft.get("aspect_ratio") or (draft.get("source_analysis") or {}).get("aspect_ratio") or "9:16")
+    if not ratio_valid(aspect_ratio):
+        aspect_ratio = "9:16"
+    content = dict(draft.get("selected_content") or {})
+    if not content:
+        content = {"title": "Đổi bối cảnh video", "summary": "Tự động bám video nguồn"}
     direction = dict(draft.get("direction_contract") or {})
     if not direction:
-        blockers.append("transformation_direction_missing")
-    if len(draft.get("scene_plan") or []) != scene_count:
+        direction_id = str(draft.get("selected_direction") or "environment")
+        try:
+            direction = direction_contract(direction_id)
+        except Exception:
+            direction = direction_contract("environment")
+    scene_plan = list(draft.get("scene_plan") or [])
+    if not scene_plan and not blockers:
+        scene_plan = build_scene_plan(
+            analysis=draft.get("source_analysis") or {},
+            source_segment=source_segment,
+            subject_manifest=draft.get("subject_manifest") or {},
+            constraints=draft.get("preserve_constraints") or {},
+            scene_count=scene_count,
+            content=content,
+            direction=direction,
+        )
+    if len(scene_plan) != scene_count:
         blockers.append("scene_plan_incomplete")
-    if len(draft.get("video_prompts") or []) != scene_count:
+    video_prompts = list(draft.get("video_prompts") or [])
+    if not video_prompts and not blockers:
+        video_prompts = compile_scene_prompts(
+            scene_plan,
+            subject_manifest=draft.get("subject_manifest") or {},
+            content=content,
+            direction=direction,
+        )
+    if len(video_prompts) != scene_count:
         blockers.append("scene_prompts_incomplete")
     route = capability_route(
         capabilities=capabilities,
