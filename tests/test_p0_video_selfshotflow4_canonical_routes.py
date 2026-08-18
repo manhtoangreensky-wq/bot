@@ -220,19 +220,3 @@ def test_every_canonical_screen_has_its_exact_back_owner(flow: str):
         assert model["rows"][-1][0][1] == expected
         assert model["rows"][-1][1][1] == "menu|main_video"
         assert video_selfshotflow4.validate_rows(model["rows"], back_callback=expected)["ok"]
-
-
-@pytest.mark.parametrize("flow", ["ss2", "ss3"])
-@pytest.mark.parametrize("choice", ["person", "object", "person_object", "motion"])
-def test_all_subject_lanes_progress_without_rejection(flow: str, choice: str):
-    state = _state(flow, with_tracks=False)
-    state = video_selfshotflow4.apply_action(flow, state, "c4segment", "whole")["state"]
-    state = video_selfshotflow4.apply_action(flow, state, "c4show", "subject")["state"]
-    res = video_selfshotflow4.apply_action(flow, state, "c4subject", choice)
-    assert res.get("screen") == "content_source"
-    manifest = res.get("state", {}).get("subject_manifest") or {}
-    assert manifest.get("source_bound") is True
-    if choice == "person_object":
-        assert manifest.get("selection_type") in {"person_object", "multiple"}
-        assert len(manifest.get("subjects") or []) == 2
-

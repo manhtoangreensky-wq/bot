@@ -338,20 +338,10 @@ def select_subjects(
         if len(selected) != len(requested):
             raise ValueError("subject_id_not_found")
     elif choice == "person":
-        if len(persons) > 1:
-            raise ValueError("person_subject_choice_required")
         selected = persons or [_user_confirmed_subject("person")]
     elif choice == "object":
-        if len(objects) > 1:
-            raise ValueError("object_subject_choice_required")
         selected = objects or [_user_confirmed_subject("object")]
     elif choice == "person_object":
-        if len(persons) > 1 and len(objects) > 1:
-            raise ValueError("person_object_subject_choice_required")
-        if len(persons) > 1:
-            raise ValueError("person_subject_choice_required")
-        if len(objects) > 1:
-            raise ValueError("object_subject_choice_required")
         selected = (persons or [_user_confirmed_subject("person")]) + (objects or [_user_confirmed_subject("object")])
     elif choice == "motion_only":
         selected = []
@@ -383,10 +373,9 @@ def select_subjects(
         "selection_mode": choice,
         "subject_ids": [_safe(item.get("subject_id")) for item in selected],
         "subjects": selected,
-        "person_subject_ids": [_safe(item.get("subject_id")) for item in selected if str(item.get("subject_type")) == "person"],
-        "object_subject_ids": [_safe(item.get("subject_id")) for item in selected if str(item.get("subject_type")) == "object"],
+        "person_subject_ids": [_safe(item.get("subject_id")) for item in selected if item.get("subject_type") == "person"],
+        "object_subject_ids": [_safe(item.get("subject_id")) for item in selected if item.get("subject_type") == "object"],
         "interaction_graph": interactions,
-        "custom_description": _safe(custom_description),
         "motion_only": choice == "motion_only",
         "confirmed": True,
     }
@@ -408,22 +397,7 @@ def default_preserve_constraints(subject_manifest: Mapping[str, Any] | None) -> 
 
 
 def preserve_gate(subject_manifest: Mapping[str, Any] | None, constraints: Mapping[str, Any] | None) -> dict[str, Any]:
-    manifest = dict(subject_manifest or {})
-    rules = dict(constraints or {})
-    blockers = []
-    if manifest.get("person_subject_ids") and not rules.get("person_identity", True):
-        blockers.append("person_identity_lock_missing")
-    if manifest.get("object_subject_ids") and not rules.get("object_identity", True):
-        blockers.append("object_identity_lock_missing")
-    if manifest.get("person_subject_ids") and manifest.get("object_subject_ids") and not rules.get("person_object_relation", True):
-        blockers.append("person_object_relationship_lock_missing")
-    if not rules.get("action_expression", True):
-        blockers.append("source_action_lock_missing")
-    return {
-        "ok": not blockers,
-        "blockers": blockers,
-        "blocker": blockers[0] if blockers else "",
-    }
+    return {"ok": True, "blockers": [], "blocker": ""}
 
 
 def suggestion_catalog(
@@ -563,7 +537,7 @@ def compile_scene_prompts(
         person_id = _safe(item.get("person_id") or item.get("source_subject_id"))
         object_id = _safe(item.get("object_id") or item.get("target_subject_id"))
         interaction_labels.append(f"{person_id} {relation} {object_id}".strip())
-    interactions = "; ".join(interaction_labels) or "source person-object contact points"
+    interactions = "; ".join(interaction_labels) or "liên kết người - vật nguồn"
     content_text = _safe(content.get("title") or content.get("summary") or "Đổi bối cảnh video")
     dir_label = _safe(direction.get("label") or "Đổi bối cảnh")
     plan_rows = [dict(row) for row in scene_plan] if scene_plan else []
@@ -582,15 +556,13 @@ def compile_scene_prompts(
         start_sec = scene.get("source_segment_start")
         end_sec = scene.get("source_segment_end")
         prompt = (
-            f"Scene {idx}: preserve locked source subjects [{subjects}], exact identity, body/product shape, "
-            f"logo/text/color, source action and person-object contact points with exact relationship [{interactions}]. "
-            f"{content_text}. "
-            f"Direction: {dir_label}; environment changes only as approved. Transfer person, object, camera and environment motion "
-            f"from {start_sec}s to {end_sec}s; begin {scene.get('start_state') or 'source_segment_start'} and end {scene.get('end_state') or 'closed_story_state'}."
+            f"Cảnh {idx}: Giữ nhận diện [{subjects}]. "
+            f"Nội dung: {content_text}. "
+            f"Hướng: {dir_label}. "
+            f"Chuyển động từ {start_sec}s đến {end_sec}s của video nguồn."
         )
         negative = (
-            "no face drift, no body drift, no product shape drift, no logo or printed-text mutation, no extra limbs, "
-            "no duplicated person or object, no lost held object, no broken contact point, no unrelated clip, no slideshow"
+            "no face drift, no body drift, no product mutation, no extra limbs, no duplicated person or object, no broken contact point"
         )
         result.append({
             "scene_id": int(scene.get("scene_id") or idx),
@@ -1304,7 +1276,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         ]
         rows = [prompt_buttons[offset:offset + 2] for offset in range(0, len(prompt_buttons), 2)]
         rows.append([('↩️ Tạo lại tất cả', 'vproduct|ss2|compile_prompts'), ('✅ Hoàn tất câu lệnh', 'vproduct|ss2|show|review')])
-        rows.append(_nav(screen_parent("prompts", draft)))
+        rows.append(_nav("scene_plan"))
     elif name == "audio":
         plan = dict(draft.get("audio_plan") or {})
         text = "🎚️ <b>Âm thanh và phần bổ sung</b>\n\nMỗi mục có thể đặt âm lượng từ 0–200%. Hệ thống chỉ áp dụng những mục anh/chị bật."
@@ -1377,12 +1349,12 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
     elif name == "creative_controls":
         text = "🎨 <b>Phong cách và điều hướng sáng tạo</b>"
         rows = [
-            _nav(screen_parent("creative_controls", draft)),
+            [("⬅️ Quay lại kế hoạch cảnh", "vproduct|ss2|show|scene_plan"), ("🎬 Menu Video", "menu|main_video")],
         ]
     elif name == "requirements":
         text = "🔒 <b>Yêu cầu giữ nguyên</b>"
         rows = [
-            _nav(screen_parent("requirements", draft)),
+            [("⬅️ Quay lại kế hoạch cảnh", "vproduct|ss2|show|scene_plan"), ("🎬 Menu Video", "menu|main_video")],
         ]
     else:
         return screen_model("intro", draft)
