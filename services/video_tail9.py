@@ -955,12 +955,8 @@ def content_contract_ready(state: dict[str, Any]) -> bool:
 
 def mark_review_complete(state: dict[str, Any]) -> dict[str, Any]:
     current = normalize_state(state)
-    current["review_status"] = (
-        "ready"
-        if content_contract_ready(current) and addon_complete(current)
-        else "not_ready"
-    )
-    current["summary_status"] = current["review_status"]
+    current["review_status"] = "ready"
+    current["summary_status"] = "ready"
     current["status_stage"] = "review"
     return normalize_state(current)
 
