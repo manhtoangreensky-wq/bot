@@ -3232,6 +3232,8 @@ def _product_video_final_admission_state(
             for token in ("shopaikey", "key4u", "kling", "veo", "cloud", "generic", "http")
         )
     )
+    execution_mode = str(admission.get("execution_mode") or ("cloud" if has_cloud else "local")).strip().lower()
+    local_worker_required = bool(execution_mode == "local" or not has_cloud)
     authoritative_ok = bool(
         context_signature_valid
         and snapshot_id
@@ -3246,15 +3248,15 @@ def _product_video_final_admission_state(
         and snapshot_quote_fingerprint == quote_fingerprint
         and handler_id == PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID
         and callback_data == PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK
-        and (has_cloud or worker_version_compatible)
-        and (has_cloud or worker_connected)
-        and (has_cloud or worker_heartbeat_fresh)
-        and (has_cloud or worker_lease_valid)
-        and (has_cloud or worker_sha_match)
-        and (has_cloud or worker_capability_match)
-        and (has_cloud or not worker_identity_conflict)
-        and (has_cloud or bool(worker_generation_id and worker_git_sha and runtime_sha))
-        and (has_cloud or route_requires_provider)
+        and (not local_worker_required or worker_version_compatible)
+        and (not local_worker_required or worker_connected)
+        and (not local_worker_required or worker_heartbeat_fresh)
+        and (not local_worker_required or worker_lease_valid)
+        and (not local_worker_required or worker_sha_match)
+        and (not local_worker_required or worker_capability_match)
+        and (not local_worker_required or not worker_identity_conflict)
+        and (not local_worker_required or bool(worker_generation_id and worker_git_sha and runtime_sha))
+        and route_requires_provider
         and not duplicate_handler_detected
         and not replayed
         and admission_mode_valid
@@ -3347,6 +3349,9 @@ def _product_video_final_admission_state(
         "admission_callback_handler_id": handler_id,
         "admission_callback_data": callback_data,
         **route_contract,
+        "execution_mode": execution_mode,
+        "local_worker_required": local_worker_required,
+        "cloud_provider_ready": bool(provider_health_gate_pass and candidates),
         "admission_worker_runtime_sha": str(admission.get("admission_worker_runtime_sha") or ""),
         "admission_worker_sha": str(admission.get("admission_worker_sha") or ""),
         "admission_worker_version_compatible": worker_version_compatible,
