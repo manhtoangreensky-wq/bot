@@ -1070,10 +1070,10 @@ def next_required_screen(state: dict[str, Any]) -> str:
     current = normalize_state(state)
     if str(current.get("video_product_type") or "") in {"multi_scene_film", "video_long"}:
         return ""
-    if not content_contract_ready(current) or current.get("review_status") != "ready":
-        return "review"
     if not addon_complete(current):
         return "addon"
+    if not content_contract_ready(current) or current.get("review_status") != "ready":
+        return "review"
     return ""
 
 

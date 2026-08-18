@@ -80957,10 +80957,6 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         state = start_video_uiflow3_state(context, product)
         state["owner_user_id"] = user_id
         state["owner_chat_id"] = safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0)
-        if product == "multi_scene_film":
-            state["navigation"]["current_step"] = "content_hub"
-            state["ui_view"] = "profiles"
-            state["content"]["profile_page"] = 1
     else:
         state = video_uiflow3_state(context)
         if not state:
@@ -114168,13 +114164,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 tail["review_status"] = "not_ready"
                 tail["summary_status"] = "not_ready"
                 save_video_tail9_state(uid, context, tail, owner, host)
-                return await video_tail9_render(query, uid, context, "review")
-            if operation == "review_addons":
-                overrides = dict(current.get("screen_return_overrides") or {})
-                overrides["addons"] = "review"
-                current["screen_return_overrides"] = overrides
-                save_video_selfshot2_draft(uid, current, step="selfshot2:addons")
-                return await video_selfshot2_render(query, uid, "addons", draft=current)
+                return await video_tail9_render(query, uid, context, video_tail9.next_required_screen(tail) or "addon")
             if not video_selfshot2.callback_allowed(current_screen, str(query.data or ""), current):
                 return await video_selfshot2_render(query, uid, current_screen, draft=current)
             if operation == "show":
@@ -114399,7 +114389,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 tail["summary_status"] = "not_ready"
                 tail["review_status"] = "not_ready"
                 save_video_tail9_state(uid, context, tail, owner, host)
-                return await video_tail9_render(query, uid, context, "review")
+                return await video_tail9_render(query, uid, context, video_tail9.next_required_screen(tail) or "addon")
             if operation == "prompt":
                 return await video_selfshot3_render_prompt_review(query, uid, current)
             if not video_selfshot3.callback_operation_allowed(current_screen, operation):
@@ -267545,6 +267535,9 @@ if __name__ == "__main__":
         port=PORT,
         log_level="info"
     )
+
+
+
 
 
 

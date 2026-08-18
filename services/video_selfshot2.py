@@ -1272,8 +1272,6 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             [("📍 Vị trí logo", "vproduct|ss2|addon_position|logo"), ("📍 Vị trí watermark", "vproduct|ss2|addon_position|watermark")],
             [("🗑️ Xóa logo", "vproduct|ss2|addon|clear_logo"), ("🗑️ Xóa watermark", "vproduct|ss2|addon|clear_watermark")],
         ]
-        if screen_parent("addons", draft) != "review":
-            rows.append([("✅ Hoàn tất bổ sung", "vproduct|ss2|show|review"), ("⏭️ Bỏ qua", "vproduct|ss2|addon|skip")])
         rows.append(_nav(screen_parent("addons", draft)))
     elif name == "addon_position":
         target = _safe(draft.get("selfshot2_addon_position_target")) or "logo"
