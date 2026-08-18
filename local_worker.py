@@ -1055,9 +1055,12 @@ def _video_edit_telegram_media_config() -> video_edit_media_transport.TelegramMe
 
 def _video_edit_bounded_json_response(response, *, reason: str) -> dict:
     try:
-        body = response.read(_VIDEO_EDIT_TELEGRAM_JSON_MAX_BYTES + 1)
+        try:
+            body = response.read(_VIDEO_EDIT_TELEGRAM_JSON_MAX_BYTES + 1)
+        except TypeError:
+            body = response.read()
     except (TimeoutError, socket.timeout, urllib.error.URLError, OSError):
-        raise RuntimeError(reason) from None
+        raise RuntimeError("telegram_api_network" if reason.startswith("telegram_api") else reason) from None
     if (
         not isinstance(body, bytes)
         or not body
@@ -1174,8 +1177,10 @@ def _video_edit_multipart_request(
     body,
     follow_redirects: bool,
     deadline_monotonic: float | None = None,
-    monotonic=time.monotonic,
+    monotonic=None,
 ) -> dict:
+    if monotonic is None:
+        monotonic = time.monotonic
     if (
         follow_redirects is not False
         or method_name not in {"sendVideo", "sendDocument"}
@@ -1425,8 +1430,10 @@ def telegram_send_video_receipt(
     max_bytes: int = 0,
     prefer_document: bool = False,
     deadline_monotonic: float | None = None,
-    monotonic=time.monotonic,
+    monotonic=None,
 ) -> dict:
+    if monotonic is None:
+        monotonic = time.monotonic
     if not TELEGRAM_BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN missing")
     if not os.path.isfile(video_path) or os.path.getsize(video_path) <= 0:

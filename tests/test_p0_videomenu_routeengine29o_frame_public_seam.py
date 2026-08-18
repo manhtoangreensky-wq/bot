@@ -38,6 +38,8 @@ def _function_source(path: Path, name: str) -> str:
 
 
 def _compile_bot_function(name: str, namespace: dict):
+    from fastapi import HTTPException
+    namespace.setdefault("HTTPException", HTTPException)
     source = (
         "from __future__ import annotations\n\n"
         + _function_source(REPO_ROOT / "bot.py", name)
