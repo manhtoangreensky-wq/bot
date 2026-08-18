@@ -742,10 +742,16 @@ class GenericHttpVideoProvider:
         return str(self.env.get(self.enabled_env) or "").strip().lower() in {"1", "true", "yes", "on"}
 
     def _submit_url(self) -> str:
-        return str(self.env.get(self.submit_url_env) or "").strip()
+        url = str(self.env.get(self.submit_url_env) or "").strip()
+        if url and url.rstrip("/").endswith(("/video/generate", "/generate")):
+            return ""
+        return url
 
     def _poll_url(self) -> str:
-        return str(self.env.get(self.poll_url_env) or "").strip()
+        url = str(self.env.get(self.poll_url_env) or "").strip()
+        if url and url.rstrip("/").endswith(("/video/generate", "/generate")):
+            return ""
+        return url
 
     def _auth_header(self) -> tuple[str, str]:
         return str(self.env.get(self.auth_header_name_env) or "").strip(), str(self.env.get(self.auth_header_value_env) or "").strip()
@@ -781,6 +787,12 @@ class GenericHttpVideoProvider:
             if "auth" not in invalid_fields:
                 invalid_fields.append("auth")
             invalid_env.append(self.auth_header_value_env)
+        model = str(self.env.get(self.model_env) or "").strip() if self.model_env else ""
+        if self.model_env and not model:
+            missing.append(self.model_env)
+        elif self.model_env and not _valid_config_secret(model):
+            invalid_fields.append("model")
+            invalid_env.append(self.model_env)
         blocker = "provider_config_placeholder_or_invalid_url" if invalid_fields else ""
         return {
             "enabled": enabled,
@@ -826,6 +838,8 @@ class GenericHttpVideoProvider:
             "config_blocker": str(config.get("blocker") or ""),
             "capabilities": self._capability_list(),
             "endpoint_configured": bool(config.get("submit_url_configured") and config.get("poll_url_configured")),
+            "submit_url": submit_url,
+            "poll_url": self._poll_url(),
             "submit_url_present": submit_url_present,
             "poll_url_present": poll_url_present,
             "submit_url_configured": bool(config.get("submit_url_configured")),

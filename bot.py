@@ -5840,18 +5840,23 @@ def build_product_video_public_final_admission(
     )
     has_cloud = bool(
         candidates
-        or (SHOPAIKEY_API_KEY and (SHOPAIKEY_ENABLED or os.getenv("SHOPAIKEY_ENABLED") in {"1", "true", "yes"}))
-        or (KEY4U_API_KEY and (KEY4U_ENABLED or os.getenv("KEY4U_ENABLED") in {"1", "true", "yes"}))
+        and any(
+            token in str(c).lower()
+            for c in candidates
+            for token in ("shopaikey", "key4u", "kling", "veo", "cloud", "generic", "http")
+        )
     )
-    route_ok = bool(route_contract.get("route_requires_provider") or has_cloud)
-    worker_ok = bool(has_cloud or worker.get("worker_version_compatible"))
-    worker_connected = bool(has_cloud or worker.get("worker_connected"))
-    worker_heartbeat_fresh = bool(has_cloud or worker.get("heartbeat_fresh"))
-    worker_lease_valid = bool(has_cloud or worker.get("lease_valid"))
-    worker_sha_match = bool(has_cloud or worker.get("sha_match"))
-    worker_capability_match = bool(has_cloud or worker.get("capability_match"))
-    worker_identity_conflict = bool(not has_cloud and worker.get("worker_identity_conflict"))
+    execution_mode = "cloud" if has_cloud else "local"
+    local_worker_required = not has_cloud
+    worker_ok = bool(worker.get("worker_version_compatible"))
+    worker_connected = bool(worker.get("worker_connected"))
+    worker_heartbeat_fresh = bool(worker.get("heartbeat_fresh"))
+    worker_lease_valid = bool(worker.get("lease_valid"))
+    worker_sha_match = bool(worker.get("sha_match"))
+    worker_capability_match = bool(worker.get("capability_match"))
+    worker_identity_conflict = bool(worker.get("worker_identity_conflict"))
     gate_ok = bool(preflight.get("ok") and scene_gate.get("ok"))
+    route_ok = bool(route_contract.get("route_requires_provider") or has_cloud)
     freeze_truth = dict(
         scene_gate.get("freeze_truth")
         or preflight.get("freeze_truth")
@@ -5870,20 +5875,30 @@ def build_product_video_public_final_admission(
     ).strip()
     probation_reason = str(scene_gate.get("probation_reason") or preflight.get("probation_reason") or "").strip()
     probation_lock_clear = bool(scene_gate.get("probation_lock_clear", preflight.get("probation_lock_clear")))
-    allowed = bool(
-        candidates
-        and gate_ok
-        and worker_ok
-        and worker_connected
-        and worker_heartbeat_fresh
-        and worker_lease_valid
-        and worker_sha_match
-        and worker_capability_match
-        and not worker_identity_conflict
-        and route_ok
-        and handler_ok
-        and freeze_ok
-    )
+
+    if execution_mode == "cloud":
+        allowed = bool(
+            candidates
+            and gate_ok
+            and route_ok
+            and handler_ok
+            and freeze_ok
+        )
+    else:
+        allowed = bool(
+            candidates
+            and gate_ok
+            and worker_ok
+            and worker_connected
+            and worker_heartbeat_fresh
+            and worker_lease_valid
+            and worker_sha_match
+            and worker_capability_match
+            and not worker_identity_conflict
+            and route_ok
+            and handler_ok
+            and freeze_ok
+        )
     snapshot_id = f"pv-admission-{int(project.get('project_id') or 0)}-{uuid.uuid4().hex}"
     checked_at = now_text()
     quote_fingerprint = video_project_queue.product_video_admission_quote_fingerprint(project, int(user_id))
@@ -5924,6 +5939,9 @@ def build_product_video_public_final_admission(
         **scene_gate,
         **route_contract,
         "ok": allowed,
+        "execution_mode": execution_mode,
+        "local_worker_required": local_worker_required,
+        "cloud_provider_ready": bool(gate_ok and candidates),
         "provider_eligibility_snapshot": snapshot,
         "provider_eligibility_snapshot_id": snapshot_id,
         "admission_snapshot_id": snapshot_id,
