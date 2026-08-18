@@ -107703,7 +107703,7 @@ async def video_selfshot2_render(target, user_id: int, screen: str, *, draft: di
     shared_review_root = shared_review_navigation and screen in {
         "scene_plan", "content_source", "prompts",
     }
-    if video_selfshotflow4.enabled("ss2", session.get("draft")) and not shared_review_navigation:
+    if video_selfshotflow4.enabled("ss2", session.get("draft")) and screen in video_selfshotflow4.FLOW_SCREENS[video_selfshotflow4.FLOW_SS2] and not shared_review_navigation:
         model = video_selfshotflow4.screen_model("ss2", screen, session.get("draft"))
         parent = video_selfshotflow4.screen_parent("ss2", screen, session.get("draft"))
         expected_back = video_selfshotflow4.back_callback("ss2", screen, session.get("draft"))
@@ -108149,7 +108149,7 @@ async def video_selfshot3_render(target, user_id: int, screen: str, *, draft: di
     shared_review_navigation = shared_tail_return == "review"
     shared_addon_navigation = shared_tail_return == "addon"
     shared_review_root = shared_review_navigation and screen in {"timeline", "content"}
-    if video_selfshotflow4.enabled("ss3", session.get("draft")) and not shared_review_navigation:
+    if video_selfshotflow4.enabled("ss3", session.get("draft")) and screen in video_selfshotflow4.FLOW_SCREENS[video_selfshotflow4.FLOW_SS3] and not shared_review_navigation:
         model = video_selfshotflow4.screen_model("ss3", screen, session.get("draft"))
         parent = video_selfshotflow4.screen_parent("ss3", screen, session.get("draft"))
         expected_back = video_selfshotflow4.back_callback("ss3", screen, session.get("draft"))
