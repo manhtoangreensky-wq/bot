@@ -153,8 +153,7 @@ def test_free_tools_main_keyboard_is_compact_placeholder():
         "freehub|upload",
         "freehub|hook",
         "freehub|lib_music",
-        "support|start",
-        "feedback|start",
+        "aichat|on",
         "menu|main",
     }.issubset(callbacks)
     assert "freehub|chat" not in callbacks

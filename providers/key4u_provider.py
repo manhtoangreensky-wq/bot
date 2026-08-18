@@ -1710,7 +1710,7 @@ class Key4UProvider:
         if not self.config.minimax_clone_endpoint:
             return self._needs_docs_result("voice_clone", self.config.tts_model, "KEY4U_MINIMAX_CLONE_ENDPOINT")
         safe_file_id = str(file_id or "").strip()
-        safe_voice_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(voice_id or "").strip())[:128].strip("-")
+        safe_voice_id = re.sub(r"[^A-Za-z0-9-]+", "-", str(voice_id or "").strip())[:128].strip("-")
         if not safe_file_id or not safe_voice_id:
             return _result(ok=False, capability="voice_clone", model=self.config.tts_model, status="FAIL_BAD_REQUEST", error_class="FAIL_BAD_REQUEST", error_message_safe="missing file_id or voice_id")
         endpoint = self._minimax_url(self.config.minimax_clone_endpoint)

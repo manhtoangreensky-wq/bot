@@ -34,6 +34,7 @@ import platform
 import shutil
 import traceback
 import zipfile
+from copy import deepcopy
 import xml.etree.ElementTree as ET
 import uuid
 from decimal import Decimal, InvalidOperation
@@ -96,6 +97,7 @@ from video_product_system import (
     validate_video_prompt_bundle,
 )
 import video_image_to_video_flow as ivf
+from services import ai_chatbot_copilot, telegram_business_support, telegram_transport
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subdub_long_media, subdub_media_preflight, subdub_provider_contract, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import ai_chatbot_copilot, cskh_session_memory, telegram_business_support, telegram_transport
@@ -87896,7 +87898,7 @@ def task3d_trend_output_from_source(source: dict, user_topic: str = "") -> dict:
     return bundle
 
 
-async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
+async def task3d_render_step(target, user_id, session: dict, lang: str = "vi", context: ContextTypes.DEFAULT_TYPE | None = None):
     step = str(session.get("current_step") or "intro")
     product_id = str(session.get("product_id") or "")
     if step == "profile_select":
@@ -116368,7 +116370,8 @@ def get_chat_ai_vision_readiness() -> dict:
     }
 
 def toanaas_ai_knowledge_path() -> str:
-    return os.path.join(BASE_DIR, "docs", "knowledge", "TOAN_AAS_BOT_APP_KNOWLEDGE.md")
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_dir, "docs", "knowledge", "TOAN_AAS_BOT_APP_KNOWLEDGE.md")
 
 def toanaas_ai_status_payload() -> dict:
     path = toanaas_ai_knowledge_path()
@@ -123472,15 +123475,8 @@ def key4u_provider_usage_lines_for_admin() -> list[str]:
         "<b>Key4U</b>",
         f"• Credit diagnostic: <code>{html.escape(str(credit.get('credit') or 'unknown'))}</code> | reason <code>{html.escape(str(credit.get('reason') or '-'))}</code>",
         f"• Usage endpoint: <code>{'configured' if credit.get('endpoint_configured') else 'missing'}</code> | auth <code>{'configured' if credit.get('auth_configured') else 'missing'}</code>",
-        f"• Usage auth: source <code>{html.escape(str(credit.get('usage_auth_source') or '-'))}</code> | header <code>{html.escape(str(credit.get('usage_auth_header_name') or '-'))}</code> | scheme <code>{html.escape(str(credit.get('usage_auth_scheme_prefix') or '-'))}</code> | mode <code>{html.escape(str(credit.get('usage_auth_mode') or '-'))}</code>",
         f"• Usage HTTP: <code>{html.escape(str(credit.get('usage_http_status') or 0))}</code> | host <code>{html.escape(str(credit.get('usage_endpoint_host') or '-'))}</code> | path <code>{html.escape(str(credit.get('usage_endpoint_path') or '-'))}</code>",
-        f"• Discovery: tried <code>{len(credit.get('usage_endpoint_candidates_tried') or [])}</code> | modes <code>{html.escape(','.join(str(x) for x in (credit.get('usage_auth_modes_tried') or [])) or '-')}</code> | last_http <code>{html.escape(str(credit.get('usage_last_http_status') or 0))}</code>",
         f"• Connectivity: <code>{html.escape(str(credit.get('usage_connectivity_status') or 'UNKNOWN'))}</code> | endpoint <code>{html.escape(str(credit.get('usage_connectivity_endpoint_host_path') or '-'))}</code>",
-        f"• Health endpoint: <code>{html.escape(str(credit.get('usage_health_status') or 'UNKNOWN'))}</code> | http <code>{int(credit.get('usage_health_http') or 0)}</code> | path <code>{html.escape(str(credit.get('usage_health_endpoint_host_path') or '-'))}</code>",
-        f"• Balance endpoint: <code>{html.escape(str(credit.get('usage_balance_status') or 'UNKNOWN'))}</code> | http <code>{int(credit.get('usage_balance_http') or 0)}</code> | parse path <code>{html.escape(str(credit.get('usage_balance_parse_endpoint_host_path') or '-'))}</code> | fields <code>{html.escape(str(credit.get('usage_balance_parse_fields') or '-'))}</code>",
-        f"• Usage log endpoint: <code>{html.escape(str(credit.get('usage_log_status') or 'UNKNOWN'))}</code> | path <code>{html.escape(str(credit.get('usage_log_endpoint_host_path') or '-'))}</code>",
-        f"• Success endpoint: <code>{html.escape(str(credit.get('usage_success_endpoint_host_path') or '-'))}</code> | type <code>{html.escape(str(credit.get('usage_success_endpoint_type') or '-'))}</code> | success mode <code>{html.escape(str(credit.get('usage_success_auth_mode') or '-'))}</code>",
-        f"• Usage response shape: <code>{html.escape(str(credit.get('usage_response_shape') or '-'))}</code>",
         f"• Remote usage: <code>{html.escape(str(snapshot['remote_usage']))}</code>",
         f"• Remote balance: <code>{html.escape(str(snapshot['remote_balance']))}</code>",
         f"• Dashboard balance thủ công: <code>{html.escape(str(snapshot['manual_balance']))}</code>",
@@ -157316,7 +157312,7 @@ async def charge_media_factory_or_reply(update: Update, uid, cost: int, event_ty
 async def preview_media_factory_credit_or_reply(update: Update, uid, cost: int, event_type: str) -> tuple[bool, dict]:
     base_cost = int(cost or 0)
     if is_admin_user(uid) or base_cost <= 0:
-        tier = "admin" if is_admin_user(uid) else (member_profile(uid).get("tier") or "newbie")
+        tier = "admin" if is_admin_user(uid) else ((get_member_profile(uid) or {}).get("tier") or "newbie")
         return True, {"ok": True, "base_cost": base_cost, "final_cost": 0, "discount_xu": 0, "tier": tier}
     charge = apply_member_service_discount(uid, base_cost, event_type)
     final_cost = int(charge.get("final_cost") or 0)
@@ -157334,7 +157330,7 @@ async def preview_media_factory_credit_or_reply(update: Update, uid, cost: int, 
 async def spend_media_factory_after_success_or_reply(update: Update, uid, cost: int, event_type: str, note: str) -> dict:
     base_cost = int(cost or 0)
     if is_admin_user(uid) or base_cost <= 0:
-        tier = "admin" if is_admin_user(uid) else (member_profile(uid).get("tier") or "newbie")
+        tier = "admin" if is_admin_user(uid) else ((get_member_profile(uid) or {}).get("tier") or "newbie")
         return {"ok": True, "base_cost": base_cost, "final_cost": 0, "discount_xu": 0, "tier": tier}
     charge_result = spend_fixed_credit_info(uid, base_cost, event_type, note)
     if charge_result.get("ok"):
@@ -168526,15 +168522,30 @@ def video_finalization_summary_text(state: dict | None = None, lang: str = "vi")
     )
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
-        calc = f"每个场景/片段约 {scene_seconds} 秒" if invoice else f"1 个场景约 {scene_seconds} 秒"
-        lines = [
-            f"场景数量：<b>{count} 个</b>",
-            f"预计时长：<b>约 {duration} 秒</b>",
-            f"计算方式：<b>{html.escape(calc)}</b>",
-        ]
-        if count >= 10 and not invoice:
-            lines.append("较长的多场景视频可能需要更多时间。TOAN AAS 会在处理或扣除 Xu 前再次确认。")
-        return lines
+        local_frame_status = status(readiness["local_frame"]) if len(photos) >= 2 else (
+            "从提示词导出时不强制" if has_prompt else "缺少图片"
+        )
+        logo_value = yes if finalization["logo_watermark_enabled"] else no
+        if finalization["logo_watermark_enabled"]:
+            logo_value = f"{yes} ({html.escape(logo_watermark_position_label(finalization.get('logo_watermark_position') or '', lang))})"
+        return (
+            "🎬 <b>确认导出视频</b>\n\n"
+            f"来源: <b>{html.escape(str(source))}</b>\n"
+            f"图片: <b>{len(photos)}</b> | 参考视频: <b>{yes if state.get('has_reference_video') else no}</b>\n"
+            f"脚本: <b>{yes if state.get('has_script') else no}</b> | 视频提示词: <b>{yes if state.get('has_video_prompt') else no}</b>\n\n"
+            "<b>完善设置</b>\n"
+            f"• 音乐: <b>{yes if finalization['music_enabled'] else no}</b>\n"
+            f"• 配音/解说: <b>{yes if finalization['voice_enabled'] else no}</b>{voice_notice_en}\n"
+            f"• 字幕: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n"
+            f"• 字幕 + 配音: <b>{yes if finalization['subtitle_dub_enabled'] else no}</b>\n"
+            f"• Logo / 水印: <b>{logo_value}</b>\n\n"
+            "<b>就绪状态</b>\n"
+            f"• 本地拼接: <code>{local_frame_status}</code>\n"
+            f"• 真实 AI 视频: <code>{status(readiness['ai_video'])}</code>\n"
+            f"• ASR / TTS: <code>{status(readiness['asr'])} / {status(readiness['dub'])}</code>\n"
+            f"• 音频/字幕合成: <code>{status(readiness['voice_mux'])} / {status(readiness['subtitle_burn'])}</code>\n\n"
+            "尚未扣除 Xu。最终计费以确认页面为准。"
+        )
     if lang == "en":
         local_frame_status = status(readiness["local_frame"]) if len(photos) >= 2 else (
             "not required for prompt export" if has_prompt else "missing images"
@@ -178618,14 +178629,13 @@ async def storyboard_generate_images_for_query(query, context: ContextTypes.DEFA
 
 @video_public_callback_failure_guard
 async def handle_storyboard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # All historical ``storyboard|`` buttons are now read-only redirects.
-    # Keep this public owner name for callback-registry compatibility while
-    # the canonical mutable flow is exclusively owned by ``vstory|``.
-    return await handle_storyboard2_legacy_callback(update, context)
-
-    # Historical implementation retained below temporarily for source-level
-    # compatibility with old diagnostics; it is deliberately unreachable.
     query = update.callback_query
+    parts = (query.data or "").split("|") if query else []
+    action = parts[1] if len(parts) > 1 else "start"
+    persisted_project_actions = {"mode_back", "mode_select", "mode_frame", "render", "mode_ai", "ai_scene", "ai_motion", "mode_audio", "finalization"}
+    if action not in persisted_project_actions or len(parts) <= 2:
+        return await handle_storyboard2_legacy_callback(update, context)
+
     await query.answer()
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
@@ -209525,6 +209535,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
         )
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         return subtitle_plus_dub_completed_text(state, result, lang)
+    cost_line = subdub_success_cost_line(charged_xu, lang)
     sent_count = sum(int(result.get(key) or 0) for key in ("sent_documents", "sent_audio", "sent_video", "sent_video_document"))
     if normalize_user_language(lang) != "vi":
         if sent_count > 0:

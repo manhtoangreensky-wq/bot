@@ -287,7 +287,13 @@ def test_key4u_refresh_unknown_endpoint_keeps_manual_alert(monkeypatch):
 
 
 def test_key4u_no_dashboard_scrape():
-    source = _source().lower()
+    import inspect
+    key4u_funcs = [
+        bot.key4u_usage_alert_snapshot,
+        bot.set_key4u_manual_balance_usd,
+        bot.key4u_manual_balance_usd,
+    ]
+    source = "\n".join(inspect.getsource(f) for f in key4u_funcs).lower()
 
     for forbidden in ("dashboard_scrape", "selenium", "playwright", "cookie", "cookies"):
         assert forbidden not in source

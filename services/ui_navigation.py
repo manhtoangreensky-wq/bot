@@ -110,6 +110,9 @@ def canonicalize_bottom_navigation(
         return normalized
 
     back = back_buttons[-1]
+    main = main_buttons[-1]
+    back_label = _button_text(back) or CANONICAL_BACK_TEXT
+    main_label = _button_text(main) or CANONICAL_MAIN_TEXT
     kept_rows: list[list[Any]] = []
     for row in normalized:
         kept = [
@@ -127,6 +130,8 @@ def canonicalize_bottom_navigation(
         canonical_bottom_nav(
             _button_callback(back),
             button_factory=button_factory,
+            back_text=back_label,
+            menu_text=main_label,
         )
     )
     return kept_rows
