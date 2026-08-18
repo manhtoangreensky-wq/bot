@@ -78990,6 +78990,39 @@ def video_film_generate_timeline_script(state: dict) -> str:
     ]
     
     stage_names = ["Mở đầu / Hook", "Phát triển 1", "Phát triển 2", "Cao trào", "Kết thúc / Kêu gọi", "Nối tiếp"]
+    # Fallback per-act templates: each scene gets unique content by act
+    _fb_beats = [
+        f"Mở đầu ấn tượng — thiết lập bối cảnh và gây tò mò về {brief_title}",
+        f"Giới thiệu {chars[0]} và vấn đề/mục tiêu chính trong câu chuyện",
+        f"Hành trình phát triển — thử thách và chuyển biến quan trọng",
+        f"Cao trào — xung đột đỉnh điểm, khoảnh khắc quyết định",
+        f"Kết luận — thông điệp cốt lõi và kêu gọi hành động",
+        f"Nối tiếp — manh mối dẫn sang tập tiếp theo",
+    ]
+    _fb_visuals = [
+        f"Góc máy drone toàn cảnh {locs[0]}, ánh sáng bình minh vàng ấm, không khí kỳ bí cuốn hút.",
+        f"Cận cảnh {chars[0]} giữa {locs[0]}, ánh sáng tự nhiên mềm mại, biểu cảm đầy quyết tâm.",
+        f"Góc máy tracking theo {chars[0]} di chuyển qua bối cảnh mới, ánh sáng chuyển đổi tạo nhịp.",
+        f"Cận cảnh dramatic — slow motion, ánh sáng tương phản cao, {chars[0]} đối diện thử thách lớn nhất.",
+        f"Góc rộng — {chars[0]} tại {locs[0]}, ánh sáng golden hour, khoảnh khắc bình yên sau cao trào.",
+        f"Cảnh mở — manh mối bí ẩn xuất hiện, góc máy zoom out dần, tạo kỳ vọng cho tập sau.",
+    ]
+    _fb_voiceovers = [
+        f"Có những câu chuyện chỉ bắt đầu khi bạn dám nhìn thật sâu vào {brief_title}...",
+        f"{chars[0]} bước vào hành trình không lối quay đầu — và đó là lúc mọi thứ thay đổi.",
+        f"Mỗi bước đi mang theo một thử thách, nhưng chính thử thách tạo nên giá trị thực sự.",
+        f"Khoảnh khắc quyết định đã đến — tất cả phụ thuộc vào lựa chọn ngay lúc này.",
+        f"Và đó là cách {brief_title} thay đổi mọi thứ. Bạn đã sẵn sàng?",
+        f"Nhưng câu chuyện chưa kết thúc ở đây...",
+    ]
+    _fb_actions = [
+        f"{chars[0]} xuất hiện lần đầu tại {locs[0]}, quan sát và khám phá bối cảnh.",
+        f"{chars[0]} gặp gỡ, đối thoại, nhận ra mục tiêu chính của hành trình.",
+        f"{chars[0]} vượt qua trở ngại, thực hiện hành động quan trọng thay đổi cục diện.",
+        f"{chars[0]} đối mặt trực tiếp với thử thách lớn nhất, hành động quyết liệt.",
+        f"{chars[0]} hoàn thành mục tiêu, đưa ra thông điệp hoặc kêu gọi.",
+        f"{chars[0]} phát hiện manh mối mới, chuẩn bị cho chương tiếp theo.",
+    ]
     for idx, t in enumerate(times[:scene_count]):
         stage_tag = stage_names[idx] if idx < len(stage_names) else f"Cảnh {idx+1}"
         lines.append(f"⏱ <b>{t} | CẢNH {idx+1} ({stage_tag})</b>")
@@ -78998,13 +79031,18 @@ def video_film_generate_timeline_script(state: dict) -> str:
             beat = str(g_item.get("beat") or g_item.get("semantic_beat") or f"Ý chính cảnh {idx+1}").strip()
             vis = str(g_item.get("visual_prompt") or g_item.get("visual") or f"{chars[0]} tại {locs[0]}").strip()
             vo = str(g_item.get("voiceover") or f"Diễn biến kịch tính cảnh {idx+1}").strip()
+            act = str(g_item.get("action") or g_item.get("main_action") or "").strip()
             lines.append(f"• 🎯 <b>Ý nghĩa:</b> {html.escape(beat)}")
             lines.append(f"• 🎬 <b>Visual Prompt:</b> {html.escape(vis)}")
             lines.append(f"• 🎙 <b>Thoại / Voiceover:</b> {html.escape(vo)}")
+            if act:
+                lines.append(f"• 🏃 <b>Hành động:</b> {html.escape(act)}")
         else:
-            lines.append(f"• 🎯 <b>Ý nghĩa:</b> Phát triển câu chuyện {brief_title}")
-            lines.append(f"• 🎬 <b>Visual Prompt:</b> Góc máy điện ảnh tập trung vào {html.escape(chars[0])} tại {html.escape(locs[0])}, ánh sáng tự nhiên cuốn hút.")
-            lines.append(f"• 🎙 <b>Thoại / Voiceover:</b> Diễn biến kịch tính dẫn dắt người xem qua từng cung bậc cảm xúc của cảnh {idx+1}.")
+            fb_i = min(idx, len(_fb_beats) - 1)
+            lines.append(f"• 🎯 <b>Ý nghĩa:</b> {html.escape(_fb_beats[fb_i])}")
+            lines.append(f"• 🎬 <b>Visual Prompt:</b> {html.escape(_fb_visuals[fb_i])}")
+            lines.append(f"• 🎙 <b>Thoại / Voiceover:</b> {html.escape(_fb_voiceovers[fb_i])}")
+            lines.append(f"• 🏃 <b>Hành động:</b> {html.escape(_fb_actions[fb_i])}")
         lines.append("")
     lines.append("━━━━━━━━━━━━━━━━━━")
     lines.append(f"💡 <b>GỢI Ý NỐI TIẾP CHO TẬP {ep_num + 1}:</b>")
@@ -82327,11 +82365,13 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state["format"]["duration_seconds"] = dur
             state = video_uiflow3.confirm_scene_count(state, scene_count)
             
-            # Apply parsed scenes from script if available
+            # Apply parsed scenes from script if available (flexible match)
             parsed_scenes = list(ep.get("parsed_scenes") or [])
-            if parsed_scenes and len(parsed_scenes) == scene_count:
+            if parsed_scenes:
                 scenes = list(state.get("scenes") or [])
-                for idx, sc in enumerate(scenes):
+                apply_count = min(len(parsed_scenes), len(scenes))
+                for idx in range(apply_count):
+                    sc = scenes[idx]
                     p_item = parsed_scenes[idx]
                     if isinstance(p_item, dict):
                         sc["semantic_beat"] = str(p_item.get("beat") or p_item.get("semantic_beat") or sc.get("semantic_beat") or "").strip()
