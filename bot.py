@@ -70529,16 +70529,11 @@ async def free_provider_router_call(task_type: str, user_input: str, user_id, ma
         try:
             if provider == "gemini" and gemini_client:
                 def run_gemini_free():
-                    for m in [GEMINI_MODEL_FREE or "gemini-3.7-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
-                        try:
-                            return gemini_client.models.generate_content(
-                                model=m,
-                                config=types.GenerateContentConfig(system_instruction=system_prompt),
-                                contents=user_input,
-                            )
-                        except Exception:
-                            continue
-                    return None
+                    return gemini_client.models.generate_content(
+                        model=GEMINI_MODEL_FREE or "gemini-3.7-flash",
+                        config=types.GenerateContentConfig(system_instruction=system_prompt),
+                        contents=user_input,
+                    )
                 response = await asyncio.to_thread(run_gemini_free)
                 text = str(getattr(response, "text", "") or "").strip()
             elif provider in {"groq", "openrouter"}:
