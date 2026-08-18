@@ -661,18 +661,18 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
     elif name == "review":
         preset = dict(current.get("selected_preset") or {})
         stages = list(current.get("transformation_stages") or [])
-        title = "👁️ Xem lại kế hoạch biến đổi"
+        title = "👁️ <b>Xem lại kế hoạch biến đổi</b>"
         body = (
-            f"Đoạn nguồn: {int((current.get('source_segment') or {}).get('duration_ms') or 0) / 1000:.1f} giây\n"
-            f"Chủ thể: {_safe((current.get('subject_manifest') or {}).get('selection_type'))}\n"
-            f"Kiểu: {_safe(preset.get('title'))}\n"
-            f"Mạch biến đổi: {len(stages)} giai đoạn\n"
-            f"Trang phục: {_safe(current.get('wardrobe'))}\n"
-            f"Thế giới: {_safe(current.get('world'))}\n"
-            f"Hiệu ứng: {_safe(', '.join(current.get('selected_effects') or []) or 'Không thêm')}\n\n"
-            "Kiểm tra kế hoạch rồi mở Add-on để tiếp tục."
+            f"• <b>Đoạn nguồn:</b> {int((current.get('source_segment') or {}).get('duration_ms') or 0) / 1000:.1f} giây\n"
+            f"• <b>Chủ thể:</b> {_safe((current.get('subject_manifest') or {}).get('selection_type'))}\n"
+            f"• <b>Kiểu:</b> {_safe(preset.get('title'))}\n"
+            f"• <b>Mạch biến đổi:</b> {len(stages)} giai đoạn\n"
+            f"• <b>Trang phục:</b> {_safe(current.get('wardrobe'))}\n"
+            f"• <b>Thế giới:</b> {_safe(current.get('world'))}\n"
+            f"• <b>Hiệu ứng:</b> {_safe(', '.join(current.get('selected_effects') or []) or 'Không thêm')}\n\n"
+            "Kiểm tra kế hoạch rồi bấm <b>✅ Hoàn tất</b> để tiếp tục."
         )
-        rows = [[("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("👗 Trang phục", "vproduct|ss3|show|wardrobe")], [("➡️ Tiếp tục sang Add-on", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
+        rows = [[("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("👗 Trang phục", "vproduct|ss3|show|wardrobe")], [("✅ Hoàn tất", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
     elif name == "finish":
         title = "✅ Kiểm tra kế hoạch trước hóa đơn"
         body = (
