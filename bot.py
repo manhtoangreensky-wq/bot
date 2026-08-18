@@ -78895,8 +78895,9 @@ def video_film_generate_timeline_script(state: dict) -> str:
     ep_num = int(episode.get("number") or 1)
     ep_title = str(episode.get("title") or f"Tập {ep_num}").strip()
     brief_dict = dict((state.get("content") or {}).get("approved_brief") or {})
-    brief_title = str(brief_dict.get("title") or (state.get("content") or {}).get("original_intent") or (state.get("series") or {}).get("goal") or "Câu chuyện điện ảnh").strip()
-    goal = str(episode.get("goal_label") or "Kể chuyện / tạo cảm xúc")
+    brief_title = str(brief_dict.get("title") or (state.get("content") or {}).get("original_intent") or (state.get("series") or {}).get("goal") or "Phim dài tập").strip()
+    profile_id = str((state.get("content") or {}).get("profile_id") or "")
+    goal = str(episode.get("goal_label") or (state.get("series") or {}).get("goal") or "Kể chuyện / tạo cảm xúc")
     audience = str(episode.get("audience_label") or "Khán giả đại chúng")
     platform = str(episode.get("platform_label") or "TikTok / Reels")
     duration = int(episode.get("duration") or 60)
@@ -78915,14 +78916,26 @@ def video_film_generate_timeline_script(state: dict) -> str:
     locs = [l.get("name") for l in (state.get("bible") or {}).get("locations") or [] if l.get("name")] or ["Bối cảnh trung tâm"]
     
     gemini_scenes = []
+    # 1. Direct call to Google Gemini 3.7 Flash
     if gemini_client:
         try:
             prompt = (
-                f"Bạn là đạo diễn kịch bản video AI chuyên nghiệp. Hãy viết kịch bản phân cảnh cho Tập {ep_num}: '{ep_title}'.\n"
-                f"Chủ đề: {brief_title}\nMục tiêu: {goal}\nĐối tượng: {audience}\nSố cảnh: {scene_count} cảnh.\n"
-                f"Nhân vật: {', '.join(chars)} | Bối cảnh: {', '.join(locs)}.\n"
-                f"Trả về JSON array gồm {scene_count} object, mỗi object có: 'visual' (Mô tả góc máy, hành động hình ảnh), 'voiceover' (Lời thoại hoặc giọng dẫn cuốn hút bằng tiếng Việt có dấu).\n"
-                "Chỉ trả lời bằng JSON thuần túy, không codeblock."
+                f"Bạn là đạo diễn kiêm biên kịch video AI điện ảnh xuất sắc. Hãy tạo kịch bản phân cảnh chi tiết và Visual Prompt chính xác cho Tập {ep_num}: '{ep_title}'.\n\n"
+                f"THÔNG TIN ĐẦU VÀO:\n"
+                f"- Chủ đề / Cốt truyện: {brief_title}\n"
+                f"- Thể loại/Profile: {profile_id}\n"
+                f"- Mục tiêu: {goal}\n"
+                f"- Đối tượng xem: {audience} | Nền tảng: {platform}\n"
+                f"- Số lượng cảnh: đúng {scene_count} cảnh ({duration}s)\n"
+                f"- Nhân vật: {', '.join(chars)}\n"
+                f"- Bối cảnh: {', '.join(locs)}\n\n"
+                f"YÊU CẦU ĐẦU RA:\n"
+                f"Trả về JSON array gồm đúng {scene_count} object, mỗi object có:\n"
+                f"- 'beat': Ý chính/Mục tiêu cảm xúc của cảnh (tiếng Việt có dấu, 1 câu ngắn gọn)\n"
+                f"- 'visual_prompt': Visual Prompt điện ảnh chi tiết bằng tiếng Việt (mô tả góc máy cận/toàn/drone, ánh sáng, hành động của nhân vật, bối cảnh)\n"
+                f"- 'voiceover': Lời thoại hoặc lời dẫn chuyện (voiceover) kịch tính, hấp dẫn bằng tiếng Việt có dấu\n"
+                f"- 'action': Hành động trực quan chính của nhân vật trong cảnh\n"
+                "Chỉ trả về JSON thuần túy, không dùng codeblock markdown."
             )
             res = gemini_client.models.generate_content(
                 model="gemini-3.7-flash",
@@ -78937,35 +78950,65 @@ def video_film_generate_timeline_script(state: dict) -> str:
         except Exception as e:
             logger.warning(f"Gemini 3.7 timeline script generation fallback: {e}")
 
+    # 2. AgentGemini fallback
+    if not gemini_scenes:
+        try:
+            prompt = (
+                f"Bạn là đạo diễn kiêm biên kịch video AI điện ảnh. Tạo kịch bản phân cảnh chi tiết cho Tập {ep_num}: '{ep_title}'.\n"
+                f"Chủ đề: {brief_title} | Thể loại: {profile_id} | Mục tiêu: {goal} | Đối tượng: {audience}\n"
+                f"Số cảnh: {scene_count} cảnh | Nhân vật: {', '.join(chars)} | Bối cảnh: {', '.join(locs)}.\n"
+                f"Trả về JSON array gồm {scene_count} object: beat, visual_prompt, voiceover, action."
+            )
+            out = AgentGemini.chat("Bạn là biên kịch video AI. Trả về JSON array thuần túy.", prompt, 0, is_json=False)
+            out_clean = (out or "").strip()
+            if out_clean.startswith("```"):
+                out_clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", out_clean, flags=re.DOTALL)
+            parsed = json.loads(out_clean)
+            if isinstance(parsed, list) and len(parsed) >= scene_count:
+                gemini_scenes = parsed[:scene_count]
+        except Exception as e:
+            logger.warning(f"AgentGemini timeline script fallback: {e}")
+
+    # Store parsed scenes in episode metadata for immediate use
+    if gemini_scenes:
+        episode["parsed_scenes"] = gemini_scenes
+        state["episode"] = episode
+
     lines = [
-        f"📝 <b>KỊCH BẢN PHÂN CẢNH - TẬP {ep_num}</b>",
+        f"📝 <b>KỊCH BẢN PHÂN CẢNH & PROMPT - TẬP {ep_num}</b>",
         f"🎬 <b>Tên tập:</b> {html.escape(ep_title)}",
-        "",
-        f"• <b>Chủ đề & Cốt truyện:</b> {html.escape(brief_title)}",
-        f"• <b>Mục tiêu:</b> {html.escape(goal)}",
-        f"• <b>Đối tượng:</b> {html.escape(audience)} | <b>Nền tảng:</b> {html.escape(platform)}",
-        f"• <b>Thời lượng:</b> {duration}s ({scene_count} cảnh)",
+        "━━━━━━━━━━━━━━━━━━",
+        f"📌 <b>Chủ đề:</b> {html.escape(brief_title)}",
+        f"🎯 <b>Mục tiêu:</b> {html.escape(goal)}",
+        f"👥 <b>Đối tượng:</b> {html.escape(audience)} | <b>Nền tảng:</b> {html.escape(platform)}",
+        f"⏱ <b>Thời lượng:</b> {duration}s ({scene_count} cảnh)",
         "",
         "━━━━━━━━━━━━━━━━━━",
-        "🎬 <b>CHI TIẾT TỪNG PHÂN CẢNH (TIMELINE):</b>",
+        "🎬 <b>CHI TIẾT KỊCH BẢN & PROMPT TỪNG CẢNH:</b>",
         "━━━━━━━━━━━━━━━━━━",
         "",
     ]
+    
+    stage_names = ["Mở đầu / Hook", "Phát triển 1", "Phát triển 2", "Cao trào", "Kết thúc / Kêu gọi", "Nối tiếp"]
     for idx, t in enumerate(times[:scene_count]):
-        lines.append(f"⏱ <b>{t} | Cảnh {idx+1}</b>")
+        stage_tag = stage_names[idx] if idx < len(stage_names) else f"Cảnh {idx+1}"
+        lines.append(f"⏱ <b>{t} | CẢNH {idx+1} ({stage_tag})</b>")
         if gemini_scenes and idx < len(gemini_scenes):
             g_item = gemini_scenes[idx]
-            vis = str(g_item.get("visual") or f"{chars[0]} tại {locs[0]}").strip()
+            beat = str(g_item.get("beat") or g_item.get("semantic_beat") or f"Ý chính cảnh {idx+1}").strip()
+            vis = str(g_item.get("visual_prompt") or g_item.get("visual") or f"{chars[0]} tại {locs[0]}").strip()
             vo = str(g_item.get("voiceover") or f"Diễn biến kịch tính cảnh {idx+1}").strip()
-            lines.append(f"• <b>Góc máy & Hình ảnh:</b> {html.escape(vis)}")
-            lines.append(f"• <b>Thoại / Voiceover:</b> {html.escape(vo)}")
+            lines.append(f"• 🎯 <b>Ý nghĩa:</b> {html.escape(beat)}")
+            lines.append(f"• 🎬 <b>Visual Prompt:</b> {html.escape(vis)}")
+            lines.append(f"• 🎙 <b>Thoại / Voiceover:</b> {html.escape(vo)}")
         else:
-            lines.append(f"• <b>Góc máy & Hình ảnh:</b> {html.escape(chars[0])} tại {html.escape(locs[0])}")
-            lines.append(f"• <b>Thoại / Voiceover:</b> Diễn biến kịch tính cảnh {idx+1}")
+            lines.append(f"• 🎯 <b>Ý nghĩa:</b> Phát triển câu chuyện {brief_title}")
+            lines.append(f"• 🎬 <b>Visual Prompt:</b> Góc máy điện ảnh tập trung vào {html.escape(chars[0])} tại {html.escape(locs[0])}, ánh sáng tự nhiên cuốn hút.")
+            lines.append(f"• 🎙 <b>Thoại / Voiceover:</b> Diễn biến kịch tính dẫn dắt người xem qua từng cung bậc cảm xúc của cảnh {idx+1}.")
         lines.append("")
     lines.append("━━━━━━━━━━━━━━━━━━")
     lines.append(f"💡 <b>GỢI Ý NỐI TIẾP CHO TẬP {ep_num + 1}:</b>")
-    lines.append(f"Manh mối tiếp theo dẫn {html.escape(chars[0])} sang thử thách mới gay cấn hơn.")
+    lines.append(f"Manh mối tiếp theo dẫn {html.escape(chars[0])} sang thử thách mới gay cấn hơn trong tập tiếp theo.")
     return "\n".join(lines)
 
 
@@ -82283,7 +82326,24 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state["format"]["scene_count_confirmed"] = True
             state["format"]["duration_seconds"] = dur
             state = video_uiflow3.confirm_scene_count(state, scene_count)
-            state = video_uiflow3_ai_enhance_scenes(state)
+            
+            # Apply parsed scenes from script if available
+            parsed_scenes = list(ep.get("parsed_scenes") or [])
+            if parsed_scenes and len(parsed_scenes) == scene_count:
+                scenes = list(state.get("scenes") or [])
+                for idx, sc in enumerate(scenes):
+                    p_item = parsed_scenes[idx]
+                    if isinstance(p_item, dict):
+                        sc["semantic_beat"] = str(p_item.get("beat") or p_item.get("semantic_beat") or sc.get("semantic_beat") or "").strip()
+                        sc["main_action"] = str(p_item.get("action") or p_item.get("main_action") or sc.get("main_action") or "").strip()
+                        sc["prompt"] = str(p_item.get("visual_prompt") or p_item.get("visual") or sc.get("prompt") or "").strip()
+                        sc["dialogue"] = str(p_item.get("voiceover") or sc.get("dialogue") or "").strip()
+                        sc["planning_source"] = "gemini_37_flash"
+                        sc["planning_confidence"] = 0.98
+                state["scenes"] = scenes
+            else:
+                state = video_uiflow3_ai_enhance_scenes(state)
+                
             state = video_uiflow3.auto_assign_scenes(state)
             state = video_uiflow3.mark_sections_complete(
                 state,
@@ -114342,9 +114402,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 current["selfshot2_screen"] = "segment"
                 save_video_selfshot2_draft(uid, current, step="selfshot2:segment")
                 return await video_selfshot2_render(query, uid, "segment", draft=current)
-            if operation.startswith("c4"):
-                result = video_selfshotflow4.apply_action("ss2", current, operation, argument)
-                return await video_selfshotflow4_handle_result(query, uid, context, "ss2", result)
+            if video_selfshotflow4.enabled("ss2", current):
+                if operation.startswith("c4"):
+                    result = video_selfshotflow4.apply_action("ss2", current, operation, argument)
+                    return await video_selfshotflow4_handle_result(query, uid, context, "ss2", result)
             legacy_tail_screen = {
                 ("show", "finish"): "addon",
                 ("show", "package"): "addon",
@@ -114365,7 +114426,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 tail["review_status"] = "not_ready"
                 tail["summary_status"] = "not_ready"
                 save_video_tail9_state(uid, context, tail, owner, host)
-                return await video_tail9_render(query, uid, context, video_tail9.next_required_screen(tail) or "addon")
+                return await video_tail9_render(query, uid, context, "addon")
             if not video_selfshot2.callback_allowed(current_screen, str(query.data or ""), current):
                 return await video_selfshot2_render(query, uid, current_screen, draft=current)
             if operation == "show":
@@ -114545,9 +114606,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 current["selfshot3_screen"] = "segment"
                 save_video_selfshot3_draft(uid, current, step="selfshot3:segment")
                 return await video_selfshot3_render(query, uid, "segment", draft=current)
-            if operation.startswith("c4"):
-                result = video_selfshotflow4.apply_action("ss3", current, operation, argument)
-                return await video_selfshotflow4_handle_result(query, uid, context, "ss3", result)
+            if video_selfshotflow4.enabled("ss3", current):
+                if operation.startswith("c4"):
+                    result = video_selfshotflow4.apply_action("ss3", current, operation, argument)
+                    return await video_selfshotflow4_handle_result(query, uid, context, "ss3", result)
             legacy_tail_screen = {
                 ("show", "package"): "addon",
                 ("audio_review", ""): "addon",
@@ -114590,7 +114652,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 tail["summary_status"] = "not_ready"
                 tail["review_status"] = "not_ready"
                 save_video_tail9_state(uid, context, tail, owner, host)
-                return await video_tail9_render(query, uid, context, video_tail9.next_required_screen(tail) or "addon")
+                return await video_tail9_render(query, uid, context, "addon")
             if operation == "prompt":
                 return await video_selfshot3_render_prompt_review(query, uid, current)
             if not video_selfshot3.callback_operation_allowed(current_screen, operation):
