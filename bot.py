@@ -77322,10 +77322,12 @@ def video_ai_real_pilot_scene_view_payload(
     scene_index = safe_int(scene.get("scene_index"), 0)
 
     if view == "scene_plan_list":
-        rows = [[
+        scene_buttons = [
             (f"🎬 Cảnh {item.get('scene_index')}", f"vid3|plan_scene|{item.get('scene_id')}")
-        ] for item in scenes]
-        rows.extend(video_ai_real_pilot_nav_rows(back="vid3|view|scene_plan"))
+            for item in scenes
+        ]
+        rows = [scene_buttons[k:k+2] for k in range(0, len(scene_buttons), 2)]
+        rows.extend(video_ai_real_pilot_nav_rows(back="vid3|back"))
         return (
             "🎬 Sửa kế hoạch cảnh\n\n"
             "Mỗi cảnh chỉ nên có một ý chính, một hành động hoàn chỉnh và một kết quả rõ để cảnh sau nối tiếp tự nhiên.",
@@ -79289,8 +79291,13 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         return "🎬 GÁN THEO CẢNH\n\nBật hoặc tắt các cảnh có đối tượng này. Không chọn thì chế độ tự động theo thứ tự sẽ xử lý.", video_uiflow3_keyboard(rows)
 
     if view == "scene_plan_list":
-        rows = [[(f"🎬 Cảnh {scene.get('scene_index')}", f"vid3|plan_scene|{scene.get('scene_id')}")] for scene in state.get("scenes") or []]
-        rows.extend(video_uiflow3_nav_rows(back="vid3|view|scene_plan"))
+        scene_list = state.get("scenes") or []
+        scene_buttons = [
+            (f"🎬 Cảnh {scene.get('scene_index')}", f"vid3|plan_scene|{scene.get('scene_id')}")
+            for scene in scene_list
+        ]
+        rows = [scene_buttons[k:k+2] for k in range(0, len(scene_buttons), 2)]
+        rows.extend(video_uiflow3_nav_rows(back="vid3|back"))
         return "🎬 SỬA KẾ HOẠCH CẢNH\n\nMỗi cảnh chỉ nên có một ý chính và một hành động hoàn chỉnh.", video_uiflow3_keyboard(rows)
 
     if view == "scene_plan_detail":
@@ -81068,46 +81075,28 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                         reuse_saved=True,
                     )
         elif action == "back":
-            current_step = str((state.get("navigation") or {}).get("current_step") or "")
             cur_view = str(state.get("ui_view") or "")
-            if str(state.get("parent_product") or "") == "multi_scene_film":
-                state = video_uiflow3_clear_transient(state)
-                if cur_view == "episode_script" or current_step == "scene_plan":
-                    state["navigation"]["current_step"] = "episode"
-                    state = video_uiflow3_open_view(state, "episode_duration")
-                elif cur_view == "episode_duration":
-                    state["navigation"]["current_step"] = "episode"
-                    state = video_uiflow3_open_view(state, "episode_platform")
-                elif cur_view == "episode_platform":
-                    state["navigation"]["current_step"] = "episode"
-                    state = video_uiflow3_open_view(state, "episode_audience")
-                elif cur_view == "episode_audience":
-                    state["navigation"]["current_step"] = "episode"
-                    state = video_uiflow3_open_view(state, "episode_goal")
-                elif cur_view == "episode_goal" or current_step == "episode":
-                    state["navigation"]["current_step"] = "production_bible"
-                    state = video_uiflow3_open_view(state, "pilot_requirements")
-                elif current_step == "production_bible" and cur_view == "pilot_requirements":
-                    state = video_uiflow3_open_view(state, "pilot_creative_controls")
-                elif current_step == "production_bible" and cur_view == "pilot_creative_controls":
+            current_step = str((state.get("navigation") or {}).get("current_step") or "")
+            if cur_view:
+                if cur_view == "scene_plan_detail":
+                    state = video_uiflow3_open_view(state, "scene_plan_list")
+                elif cur_view == "scene_plan_list":
                     state = video_uiflow3_open_view(state, "")
-                elif current_step == "production_bible":
-                    state["navigation"]["current_step"] = "content_hub"
-                    state = video_uiflow3_open_view(state, "profiles")
+                elif cur_view in {"profile_suggestions", "profiles"}:
+                    state = video_uiflow3_open_view(state, "")
+                elif cur_view.startswith("pilot_"):
+                    state = video_uiflow3_open_view(state, "")
+                elif cur_view.startswith("char_") or cur_view in {"character_count", "character_list"}:
+                    state = video_uiflow3_open_view(state, "")
+                elif cur_view.startswith("loc_") or cur_view in {"location_count", "location_list"}:
+                    state = video_uiflow3_open_view(state, "")
                 else:
-                    state = video_uiflow3.back(state)
+                    state = video_uiflow3_open_view(state, "")
             else:
                 state = video_uiflow3_clear_transient(state)
-                if current_step == "production_bible":
-                    state["navigation"]["current_step"] = "content_hub"
-                    state = video_uiflow3_open_view(state, "profiles")
-                elif cur_view == "profiles" or current_step == "content_hub":
-                    state["navigation"]["current_step"] = "entry"
-                    state = video_uiflow3_open_view(state, "")
-                else:
-                    state = video_uiflow3.back(state)
-                    if str((state.get("navigation") or {}).get("current_step") or "") == "summary":
-                        state["navigation"]["return_to"] = None
+                state = video_uiflow3.back(state)
+                if str((state.get("navigation") or {}).get("current_step") or "") == "summary":
+                    state["navigation"]["return_to"] = None
         elif action == "mode" and values:
             if (
                 str(state.get("parent_product") or "") == "video_ai_real"
