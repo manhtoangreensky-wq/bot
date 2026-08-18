@@ -111877,7 +111877,7 @@ def video_tail9_catalog_report(tail: dict, capability: dict | None = None) -> di
 
 def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None = None) -> str:
     catalog = dict(catalog or video_tail9_catalog_report(tail, capability))
-    if not capability.get("ok") or not catalog.get("ok"):
+    if not catalog.get("ok") or not catalog.get("offers"):
         return video_tail9_public_blocker_text()
     scene_count = max(1, safe_int(tail.get("scene_count"), 1))
     selfshot3_dynamic_scenes = str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID
@@ -112407,7 +112407,7 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
         tail = video_tail9.set_capability(tail, capability)
         tail["status_stage"] = "quality"
         save_video_tail9_state(user_id, context, tail, owner, host)
-        if not selection_ready or not catalog.get("ok"):
+        if not catalog.get("ok") or not catalog.get("offers"):
             return await safe_edit_or_send(
                 query,
                 video_tail9_public_blocker_text(),
@@ -112415,7 +112415,7 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
                 reply_markup=video_tail9_public_blocker_keyboard(),
             )
         quality_text = video_tail9_quality_text(tail, capability, catalog)
-        quality_keyboard = video_tail9_quality_keyboard(tail, catalog, selectable=selection_ready)
+        quality_keyboard = video_tail9_quality_keyboard(tail, catalog, selectable=True)
         if owner == "video_edit":
             return await safe_edit_or_send(
                 query,
