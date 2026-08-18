@@ -699,8 +699,13 @@ def catalog_page(group_id: str, page: int = 1) -> list[dict[str, Any]]:
     return deepcopy(group["presets"][start:start + 5])
 
 
-def source_fingerprint(source: Mapping[str, Any] | None) -> str:
-    item = dict(source or {})
+def source_fingerprint(source: Mapping[str, Any] | str | None) -> str:
+    if isinstance(source, str):
+        item = {"file_id": source} if source.strip() else {}
+    elif isinstance(source, Mapping):
+        item = dict(source)
+    else:
+        item = {}
     token = "|".join(str(item.get(key) or "") for key in (
         "file_unique_id", "file_id", "file_name", "file_size", "duration_seconds", "width", "height"
     ))
@@ -708,7 +713,7 @@ def source_fingerprint(source: Mapping[str, Any] | None) -> str:
 
 
 def analyze_source(
-    source: Mapping[str, Any] | None,
+    source: Mapping[str, Any] | str | None,
     *,
     detected_people: Iterable[Mapping[str, Any]] = (),
     detected_faces: Iterable[Mapping[str, Any]] = (),
@@ -718,7 +723,12 @@ def analyze_source(
 ) -> dict[str, Any]:
     """Normalize no-cost metadata and supplied local detector results."""
 
-    item = dict(source or {})
+    if isinstance(source, str):
+        item = {"file_id": source} if source.strip() else {}
+    elif isinstance(source, Mapping):
+        item = dict(source)
+    else:
+        item = {}
     duration = max(0.0, float(item.get("duration_seconds") or item.get("duration") or 0))
     width = max(0, int(item.get("width") or 0))
     height = max(0, int(item.get("height") or 0))
@@ -770,12 +780,23 @@ def analyze_source(
     }
 
 
-def source_gate(source: Mapping[str, Any] | None, analysis: Mapping[str, Any] | None) -> dict[str, Any]:
-    item = dict(source or {})
+def source_gate(source: Mapping[str, Any] | str | None, analysis: Mapping[str, Any] | None) -> dict[str, Any]:
+    if isinstance(source, str):
+        item = {"file_id": source} if source.strip() else {}
+    elif isinstance(source, Mapping):
+        item = dict(source)
+    else:
+        item = {}
     report = dict(analysis or {})
-    has_source = bool(item.get("file_id") or item.get("path"))
-    duration_ok = float(report.get("duration_seconds") or 0) > 0
-    dimensions_ok = int(report.get("width") or 0) > 0 and int(report.get("height") or 0) > 0
+    has_source = bool(
+        item.get("file_id")
+        or item.get("path")
+        or item.get("source_file_id")
+        or item.get("asset_id")
+        or (isinstance(source, str) and source.strip())
+    )
+    duration_ok = float(report.get("duration_seconds") or item.get("duration_seconds") or item.get("duration") or 0) > 0
+    dimensions_ok = (int(report.get("width") or item.get("width") or 0) > 0 and int(report.get("height") or item.get("height") or 0) > 0)
     blocker = "" if has_source and duration_ok and dimensions_ok else (
         "source_video_missing" if not has_source else "source_video_probe_incomplete"
     )
