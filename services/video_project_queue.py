@@ -3224,6 +3224,14 @@ def _product_video_final_admission_state(
         or (snapshot_id and snapshot_id in consumed_ids)
     )
     result_value = str(admission.get("admission_result") or ("PASS" if admission.get("ok") else "BLOCKED")).upper()
+    has_cloud = bool(
+        candidates
+        and any(
+            token in str(c).lower()
+            for c in candidates
+            for token in ("shopaikey", "key4u", "kling", "veo", "cloud", "generic", "http")
+        )
+    )
     authoritative_ok = bool(
         context_signature_valid
         and snapshot_id
@@ -3238,15 +3246,15 @@ def _product_video_final_admission_state(
         and snapshot_quote_fingerprint == quote_fingerprint
         and handler_id == PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID
         and callback_data == PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK
-        and worker_version_compatible
-        and worker_connected
-        and worker_heartbeat_fresh
-        and worker_lease_valid
-        and worker_sha_match
-        and worker_capability_match
-        and not worker_identity_conflict
-        and bool(worker_generation_id and worker_git_sha and runtime_sha)
-        and route_requires_provider
+        and (has_cloud or worker_version_compatible)
+        and (has_cloud or worker_connected)
+        and (has_cloud or worker_heartbeat_fresh)
+        and (has_cloud or worker_lease_valid)
+        and (has_cloud or worker_sha_match)
+        and (has_cloud or worker_capability_match)
+        and (has_cloud or not worker_identity_conflict)
+        and (has_cloud or bool(worker_generation_id and worker_git_sha and runtime_sha))
+        and (has_cloud or route_requires_provider)
         and not duplicate_handler_detected
         and not replayed
         and admission_mode_valid
