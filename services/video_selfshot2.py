@@ -1293,12 +1293,12 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             f"• <b>Số cảnh:</b> {draft.get('scene_count') or 0} cảnh · Tỉ lệ: <b>{draft.get('aspect_ratio') or '9:16'}</b>\n"
             f"• <b>Nội dung:</b> {(draft.get('selected_content') or {}).get('title') or 'Tự động bám video nguồn'}\n"
             f"• <b>Hướng biến đổi:</b> {(draft.get('direction_contract') or {}).get('label') or 'Đổi bối cảnh'}\n\n"
-            "Kiểm tra kế hoạch rồi bấm <b>🧰 Tiếp tục Add-on</b> để hoàn thiện âm thanh, phụ đề và tạo video."
+            "Kiểm tra kế hoạch rồi bấm <b>✅ Hoàn tất</b> để tiếp tục."
         )
         rows = [
             [('👁️ Xem từng cảnh', 'vproduct|ss2|plan_view'), ('✍️ Sửa nội dung cảnh', 'vproduct|ss2|content_source|custom')],
             [('👤 Người / vật giữ nguyên', 'vproduct|ss2|show|preserve'), ('✨ Hướng biến đổi', 'vproduct|ss2|show|direction')],
-            [('🧰 Tiếp tục Add-on', 'vproduct|ss2|finish')],
+            [('✅ Hoàn tất', 'vproduct|ss2|finish')],
             _nav("prompts"),
         ]
     elif name == "finish":
