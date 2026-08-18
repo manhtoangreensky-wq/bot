@@ -267,8 +267,11 @@ class GeminiPublicChatProvider:
                     break
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                continue
+            except Exception as exc:
+                err_msg = str(exc).lower()
+                if "not found" in err_msg or "404" in err_msg or "not_found" in err_msg:
+                    continue
+                return _failure("FAIL_PROVIDER")
         if not response:
             return _failure("FAIL_PROVIDER")
         text = _response_text(response)
@@ -425,7 +428,10 @@ async def generate_public_chat_text(
                 raise
             except Exception as exc:
                 last_exc = exc
-                continue
+                err_msg = str(exc).lower()
+                if "not found" in err_msg or "404" in err_msg or "not_found" in err_msg:
+                    continue
+                raise
         if response is None and last_exc is not None:
             raise last_exc
         text = _response_text(response)
