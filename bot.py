@@ -89711,6 +89711,19 @@ def video_ai_edit_suggestions_keyboard(state: dict, lang: str = "vi") -> InlineK
     return video_scene3_keyboard(rows)
 
 
+def video_ai_edit_entry_back(state: dict | None = None, fallback: str = "videoedit|ai") -> str:
+    current = dict(state or {})
+    context = str(current.get("entry_context") or current.get("entry_parent") or "")
+    parent_map = {
+        "effects": "videoedit|effects",
+        "manual_effects": "videoedit|manual_effects",
+        "restore": "videoedit|restore",
+        "manual": "videoedit|options|manual",
+        "hub": "videoedit|hub",
+    }
+    return parent_map.get(context, fallback)
+
+
 def _video_ai_edit_lane_label(lane: str) -> str:
     return "Nâng cấp cục bộ" if str(lane or "") == "local" else "Biến đổi tạo sinh"
 

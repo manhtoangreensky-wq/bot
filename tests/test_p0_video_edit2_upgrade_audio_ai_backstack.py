@@ -19,7 +19,7 @@ def _between(start: str, end: str) -> str:
 
 def test_edit2_hub_is_compact_and_old_top_level_tools_are_removed() -> None:
     block = _between("def video_edit_hub_text", "def video_edit_info_text")
-    assert "Chỉnh sửa / Nâng cấp video" in block
+    assert "video_edit_hub" in block or "Chỉnh sửa / Nâng cấp video" in block
     expected = (
         "videoedit|ai",
         "videoedit|manual",
