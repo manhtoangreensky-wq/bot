@@ -205,6 +205,8 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "required_capability": "video_to_video",
         "input_type": "source_video",
         "worker_owner": "selfshot2",
+        "pricing_mode": "canonical",
+        "maximum_scene_count": 20,
         "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
     "self_shot_cinematic_transform": {
@@ -216,6 +218,8 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "required_capability": "video_to_video",
         "input_type": "source_video",
         "worker_owner": "selfshot3",
+        "pricing_mode": "canonical",
+        "maximum_scene_count": 20,
         "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
     "video_idea": {
