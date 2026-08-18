@@ -108394,16 +108394,20 @@ def video_selfshot3_tail_host(draft: dict) -> dict:
     current = video_selfshot3_draft({"draft": draft})
     analysis = dict(current.get("source_analysis") or {})
     segment = dict(current.get("source_segment") or {})
-    if not segment or safe_int(segment.get("duration_ms"), 0) <= 0:
+    start_ms = safe_int(segment.get("start_ms"), int(float(segment.get("start_seconds") or 0) * 1000))
+    end_ms = safe_int(segment.get("end_ms"), int(float(segment.get("end_seconds") or 0) * 1000))
+    duration_ms = safe_int(segment.get("duration_ms"), end_ms - start_ms)
+    if duration_ms <= 0 or end_ms <= start_ms:
         duration_sec = float(analysis.get("duration_seconds") or 10.0)
-        segment = {
-            "start_seconds": 0.0,
-            "end_seconds": min(duration_sec, 10.0),
-            "start_ms": 0,
-            "end_ms": int(min(duration_sec, 10.0) * 1000),
-            "duration_ms": int(min(duration_sec, 10.0) * 1000),
-        }
-        current["source_segment"] = segment
+        start_ms = 0
+        end_ms = int(min(duration_sec, 10.0) * 1000)
+        duration_ms = end_ms - start_ms
+    segment["start_ms"] = start_ms
+    segment["end_ms"] = end_ms
+    segment["duration_ms"] = duration_ms
+    segment["start_seconds"] = start_ms / 1000.0
+    segment["end_seconds"] = end_ms / 1000.0
+    current["source_segment"] = segment
 
     stages = list(current.get("transformation_stages") or [])
     if not stages:
@@ -114710,7 +114714,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "ss3":
         # SELFSHOT3 owns its callbacks end-to-end.  A callback from another
         # product or an old session is read-only and returns to the hub.
-        if product_id and product_id not in {video_selfshot3.PRODUCT_ID, "selfshot3"}:
+        if product_id and product_id not in {video_selfshot3.PRODUCT_ID, "selfshot3", "self_shot_cinematic_transform", "self_shot_scene_change"}:
             return await safe_edit_or_send(
                 query,
                 video_selfshot_product_hub_text(),
