@@ -159,6 +159,12 @@ def test_video_edit_hub_runtime_shape_excludes_detached_status_and_planning():
         'InlineKeyboardButton': FakeButton,
         'InlineKeyboardMarkup': FakeMarkup,
         'normalize_user_language': lambda _lang: 'vi',
+        'public_video_deep_copy': lambda _lang: {
+            'video_edit_ai': 'Chỉnh sửa AI',
+            'video_edit_manual': 'Chỉnh sửa thủ công',
+            'video_edit_restore': 'Nâng chất lượng',
+            'video_edit_guide': 'Hướng dẫn',
+        },
         'video_scene3_flow': importlib.import_module('services.video_scene3_flow'),
         'ui_text': lambda _lang, key: {'common.back': '⬅️ Quay lại', 'common.main_menu': '🏠 Menu chính'}[key],
         'local_video_studio_public_enabled': lambda: enabled['value'],
