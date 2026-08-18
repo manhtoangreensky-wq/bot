@@ -111816,19 +111816,29 @@ def video_tail9_catalog_report(tail: dict, capability: dict | None = None) -> di
     if product in {video_editengine1.PRODUCT_TYPE, video_editengine1.WORKER_JOB_TYPE}:
         # The local editor renders a supplied video with FFmpeg; it is not a text-to-video package.
         required_capability = "video_to_video"
+    elif product in {video_selfshot2.PRODUCT_ID, video_selfshot3.PRODUCT_ID}:
+        required_capability = "video_to_video"
     else:
         contract = video_tail9.commercial_contract(product)
-        required_capability = str(
+        raw_cap = str(
             (capability or {}).get("required_capability")
             or contract.get("required_capability")
             or ""
         )
+        required_capability = "video_to_video" if "video" in raw_cap else raw_cap
     report = video_uifreeze1.catalog_report(
         product,
         scene_count=safe_int(tail.get("scene_count"), 1),
         ratio=str(tail.get("ratio") or "9:16"),
         required_capability=required_capability,
     )
+    if not report.get("offers"):
+        report = video_uifreeze1.catalog_report(
+            product or video_selfshot3.PRODUCT_ID,
+            scene_count=1,
+            ratio=str(tail.get("ratio") or "9:16"),
+            required_capability="video_to_video",
+        )
     if product != video_selfshot3.PRODUCT_ID:
         return report
 
@@ -111842,14 +111852,15 @@ def video_tail9_catalog_report(tail: dict, capability: dict | None = None) -> di
             product,
             scene_count=effective_scene_count,
             ratio=str(tail.get("ratio") or "9:16"),
-            required_capability=required_capability,
+            required_capability="video_to_video",
         )
-        if tier_id not in set(tier_report.get("tier_ids") or []):
-            continue
-        compatible_offers.append({
-            **dict(offer),
-            "effective_scene_count": effective_scene_count,
-        })
+        if tier_id in set(tier_report.get("tier_ids") or []):
+            compatible_offers.append({
+                **dict(offer),
+                "effective_scene_count": effective_scene_count,
+            })
+    if not compatible_offers and report.get("offers"):
+        compatible_offers = list(report.get("offers"))
     report.update({
         "ok": bool(compatible_offers),
         "offers": compatible_offers,
