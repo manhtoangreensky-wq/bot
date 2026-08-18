@@ -672,7 +672,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             f"• <b>Hiệu ứng:</b> {_safe(', '.join(current.get('selected_effects') or []) or 'Không thêm')}\n\n"
             "Kiểm tra kế hoạch rồi bấm <b>✅ Hoàn tất</b> để tiếp tục."
         )
-        rows = [[("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("👗 Trang phục", "vproduct|ss3|show|wardrobe")], [("✅ Tiếp tục tới Add-on", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
+        rows = [[("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("👗 Trang phục", "vproduct|ss3|show|wardrobe")], [("✅ Hoàn tất", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
     elif name == "finish":
         title = "✅ Kiểm tra kế hoạch trước hóa đơn"
         body = (

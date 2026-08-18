@@ -112704,8 +112704,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 return await video_selfshot2_render(query, uid, screen, draft=current)
             current = video_selfshot3_draft(get_video_session(uid))
             current.pop("video_tail_return_to", None)
-            screen = "prompt" if video_selfshotflow4.enabled("ss3", current) else "review"
-            save_video_selfshot3_draft(uid, current, step=f"selfshot3:{screen}")
+            screen = "review"
+            save_video_selfshot3_draft(uid, current, step="selfshot3:review")
             return await video_selfshot3_render(query, uid, screen, draft=current)
         if action == "prompts" and selfshot_tail:
             if selfshot_product == video_selfshot2.PRODUCT_ID:
@@ -114797,16 +114797,18 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 clear_video_session(uid)
                 save_video_selfshot3_draft(uid, video_selfshot3.initial_draft(), step="selfshot3:intro")
                 return await video_selfshot3_render(query, uid, "intro")
-            if operation in {"finish", "addon"} or (operation == "show" and argument in {"addon", "finish"}):
+            if operation in {"finish", "package"} or (operation == "show" and argument in {"finish", "package"}):
                 current = video_selfshot3_tail_host(current)
                 save_video_selfshot3_draft(uid, current, step="selfshot3:tail")
                 tail, owner, host = video_tail9_context(uid, context)
                 tail = video_tail9.apply_content_contract(tail, current)
-                tail["branding_back_to"] = "addon"
-                tail["summary_status"] = "not_ready"
-                tail["review_status"] = "not_ready"
+                tail["plan_approved"] = True
+                tail["plan_status"] = "approved"
+                tail["review_status"] = "ready"
+                tail["summary_status"] = "ready"
+                tail["branding_back_to"] = "review"
                 save_video_tail9_state(uid, context, tail, owner, host)
-                return await video_tail9_render(query, uid, context, "addon")
+                return await video_tail9_render(query, uid, context, "quality")
             if operation == "prompt":
                 return await video_selfshot3_render_prompt_review(query, uid, current)
             if not video_selfshot3.callback_operation_allowed(current_screen, operation):
