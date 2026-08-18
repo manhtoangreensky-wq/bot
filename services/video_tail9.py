@@ -254,14 +254,14 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "source_audio_available": False,
         "return_to": "vproduct|open|video_long",
         "public_enabled": False,
-        "scene_duration_seconds": 300,
+        "scene_duration_seconds": 600,
         "required_capability": "text_to_video",
         "input_type": "long_form_plan",
         "worker_owner": "product_video",
         "maximum_scene_count": 20,
         "supported_quality_tiers": MULTI_SCENE_QUALITY_TIERS,
-        "execution_enabled": True,
-        "execution_blocker": "",
+        "execution_enabled": False,
+        "execution_blocker": "long_video_under_upgrade",
     },
     "video_local_edit": {
         "flow_owner": "video_edit",
@@ -283,7 +283,7 @@ PRODUCT_ADAPTER_ALIASES = {
     "storyboard_to_video": "storyboard_prompt",
     "frame_video": "frame_video_local",
     "image_to_video": "frame_video_local",
-    "long_video": "multi_scene_film",
+    "long_video": "video_long",
 }
 
 
