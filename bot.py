@@ -100601,17 +100601,37 @@ def video_b14_status_steps_text(
     return "\n".join(lines)
 
 
+def video_b14_blocker_label(blocker_code: str) -> str:
+    code = str(blocker_code or "").strip().lower()
+    mapping = {
+        "model_capability_missing": "Mô hình chưa hỗ trợ tính năng",
+        "provider_not_configured": "Hệ thống chưa cấu hình",
+        "worker_heartbeat_stale": "Hệ thống xử lý đang kết nối lại",
+        "render_service_not_ready": "Dịch vụ dựng chưa sẵn sàng",
+        "long_video_under_upgrade": "Video dài tập đang nâng cấp",
+        "bridge_preflight_blocked": "Cấu hình chưa đủ điều kiện tạo",
+        "selfshot3_video_to_video_provider_unavailable": "Chưa có kênh xử lý video to video",
+        "source_video_missing": "Chưa có video nguồn hợp lệ",
+        "invoice_invalid": "Hóa đơn chưa sẵn sàng",
+    }
+    if not code:
+        return "Chưa thể bắt đầu tạo video"
+    return mapping.get(code, f"Chưa thể tạo ({code})")
+
+
 def video_b14_queue_status_text(session: dict | None, result: dict | None = None, user_id=0, lang: str = "vi") -> str:
     session = dict(session or {})
     draft = dict(session.get("draft") or {})
     tail_state = dict(draft.get(VIDEO_TAIL9_STATE_KEY) or {})
     submit_preflight = dict(
-        draft.get("b14_submit_preflight_snapshot")
+        result.get("submit_preflight")
+        or draft.get("b14_submit_preflight_snapshot")
         or tail_state.get("submit_preflight_snapshot")
         or {}
     )
     submit_attempted = bool(
-        draft.get("b14_submit_attempted")
+        result.get("submit_attempted")
+        or draft.get("b14_submit_attempted")
         or tail_state.get("submit_attempted")
     )
     addon_plan = dict(draft.get("b14_addon_plan") or {})
@@ -100842,8 +100862,15 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         progress = max(progress, 100)
     elif status in {"failed", "error"}:
         if failed_no_charge_terminal:
-            status_label = "Chưa thể bắt đầu tạo video"
-            stage = "hệ thống chưa bắt đầu tạo video"
+            blocker_code = str(
+                submit_preflight.get("blocker_code")
+                or job_result.get("blocker")
+                or job_result.get("reason")
+                or project.get("video_terminal_state")
+                or ""
+            ).strip()
+            status_label = video_b14_blocker_label(blocker_code) if blocker_code else "Chưa thể bắt đầu tạo video"
+            stage = f"hệ thống tạm dừng: {blocker_code}" if blocker_code else "hệ thống chưa bắt đầu tạo video"
         else:
             status_label = "chưa dựng được"
             stage = "hệ thống chưa dựng được video"
@@ -110314,11 +110341,7 @@ def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None 
     for offer in catalog.get("offers") or []:
         tier_id = safe_int(offer.get("tier_id"), 0)
         product = video_public_quality_product(tier_id)
-        offer_duration_label = (
-            "5 phút/cảnh"
-            if is_long_video
-            else f"{product['seconds']} giây/cảnh"
-        )
+        offer_duration_label = f"{product['seconds']} giây/cảnh" 
         offer_scene_count = safe_int(
             offer.get("effective_scene_count"),
             video_selfshot3_scene_count_for_quality(tail, tier_id),
