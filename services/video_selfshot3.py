@@ -907,7 +907,10 @@ def subject_tracking_gate(
     else:
         if not subjects or not selected_ids or not manifest.get("stable_ids"):
             blockers.append("subject_track_missing")
-        user_confirmed = any(str(item.get("provenance") or "") == "user_confirmed_source_bound" for item in subjects)
+        user_confirmed = any(
+            isinstance(item, dict) and str(item.get("provenance") or "") == "user_confirmed_source_bound"
+            for item in subjects
+        )
         if not user_confirmed:
             if selection_type == "person" and (counts["person"] < 1 or counts["face"] < 1):
                 blockers.append("face_identity_track_missing")
