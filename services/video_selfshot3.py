@@ -670,15 +670,32 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             f"• <b>Trang phục:</b> {_safe(current.get('wardrobe'))}\n"
             f"• <b>Thế giới:</b> {_safe(current.get('world'))}\n"
             f"• <b>Hiệu ứng:</b> {_safe(', '.join(current.get('selected_effects') or []) or 'Không thêm')}\n\n"
-            "Kiểm tra kế hoạch rồi bấm <b>✅ Hoàn tất</b> để tiếp tục."
+            "Kiểm tra kế hoạch rồi bấm <b>➡️ Tiếp tục</b> để sang Kế hoạch biến đổi."
         )
-        rows = [[("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("👗 Trang phục", "vproduct|ss3|show|wardrobe")], [("✅ Tiếp tục tới Add-on", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
+        rows = [
+            [("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")],
+            [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("👗 Trang phục", "vproduct|ss3|show|wardrobe")],
+            [("➡️ Tiếp tục", "vproduct|ss3|show|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")],
+        ]
     elif name == "finish":
-        title = "✅ Kiểm tra kế hoạch trước hóa đơn"
+        preset = dict(current.get("selected_preset") or {})
+        stages = list(current.get("transformation_stages") or [])
+        title = "🎬 <b>Kế hoạch biến đổi</b>"
         body = (
-            "Tiếp tục theo đuôi chung: Add-on → Rà soát → Chất lượng → Hóa đơn → Xác nhận → Trạng thái."
+            f"• <b>Sản phẩm:</b> Tự quay & biến đổi điện ảnh\n"
+            f"• <b>Đoạn nguồn:</b> {int((current.get('source_segment') or {}).get('duration_ms') or 0) / 1000:.1f} giây\n"
+            f"• <b>Chủ thể giữ:</b> {_safe((current.get('subject_manifest') or {}).get('selection_type'))}\n"
+            f"• <b>Kiểu biến đổi:</b> {_safe(preset.get('title'))}\n"
+            f"• <b>Mạch liên tục:</b> {len(stages)} giai đoạn trong 1 cú máy\n"
+            f"• <b>Bối cảnh:</b> {_safe(current.get('world'))}\n"
+            f"• <b>Trang phục:</b> {_safe(current.get('wardrobe'))}\n"
+            f"• <b>Hiệu ứng:</b> {_safe(', '.join(current.get('selected_effects') or []) or 'Không thêm')}\n\n"
+            "Kế hoạch biến đổi đã hoàn tất. Bấm <b>✅ Tiếp tục tới Add-on</b> để sang phần âm thanh, lồng tiếng, phụ đề và logo."
         )
-        rows = [[("✅ Hoàn thiện video", "vproduct|ss3|finish"), ("👁️ Xem lại", "vproduct|ss3|finish_review")]]
+        rows = [
+            [("✅ Tiếp tục tới Add-on", "vproduct|ss3|finish"), ("📝 Xem câu lệnh", "vproduct|ss3|prompt")],
+            [("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")],
+        ]
     elif name == "package":
         title = "⭐ Chất lượng video"
         body = "Bảng Chất lượng dùng chung hiển thị gói phù hợp với thời lượng video nguồn."
@@ -863,17 +880,6 @@ def select_subjects(
     selected = {str(value) for value in selected_ids if str(value)}
     if selected:
         all_subjects = [row for row in all_subjects if str(row.get("subject_id") or "") in selected]
-    elif not all_subjects and subject_type != "custom":
-        if subject_type == "person":
-            all_subjects = [_user_confirmed_subject("person")]
-        elif subject_type in {"object", "product"}:
-            all_subjects = [_user_confirmed_subject("object")]
-        elif subject_type == "pet":
-            all_subjects = [_user_confirmed_subject("pet", "thu cung duoc khach xac nhan trong video nguon")]
-        elif subject_type == "person_object":
-            all_subjects = [_user_confirmed_subject("person"), _user_confirmed_subject("object")]
-        elif subject_type == "multiple":
-            all_subjects = [_user_confirmed_subject("person"), _user_confirmed_subject("object")]
     return {
         "selection_type": subject_type,
         "subjects": deepcopy(all_subjects),
@@ -1237,7 +1243,7 @@ def preflight(
         draft["transformation_stages"] = stages
 
     subject_manifest = dict(draft.get("subject_manifest") or {})
-    if not subject_manifest.get("subjects"):
+    if not subject_manifest.get("subjects") and subject_manifest.get("selection_type") != "custom":
         choice = str(subject_manifest.get("selection_type") or "person")
         subject_manifest = select_subjects(analysis, choice if choice in SUBJECT_TYPES else "person")
         draft["subject_manifest"] = subject_manifest
