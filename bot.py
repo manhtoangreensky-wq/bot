@@ -208743,7 +208743,7 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_badge = admin_display_badge(uid)
     badge = get_role_badge(uid)
     public_mode = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") == "pro" else "free"
-    public_model = "Opus 4.8" if public_mode == "pro" else "Gemini 3.7 Flash"
+    public_model = "Opus 4.8" if public_mode == "pro" else "Gemini 3.6 Flash"
     if admin_badge:
         member_note = (
             f"🛡 Đặc quyền {html.escape(admin_badge)}:\n"
@@ -208804,7 +208804,7 @@ async def set_chat_mode_command(update: Update, mode: str, command: str, note: s
             "Bot sẽ dùng Chat Pro cho đến khi bạn tắt bằng <code>/chat_pro_off</code>."
         )
     else:
-        text = "✅ Đã chuyển về <b>Chat miễn phí — Gemini 3.7 Flash</b>."
+        text = "✅ Đã chuyển về <b>Chat miễn phí — Gemini 3.6 Flash</b>."
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_chat_pro_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -208884,7 +208884,7 @@ async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 <b>AI Models trong TOAN AAS</b>",
         "",
         "<b>Free Chat</b>",
-        "• Gemini 3.7 Flash — 0 Xu.",
+        "• Gemini 3.6 Flash — 0 Xu.",
         "• 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt.",
         "• Bộ nhớ Public Chat riêng 48 giờ.",
         "",
