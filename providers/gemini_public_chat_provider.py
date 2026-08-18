@@ -16,7 +16,7 @@ from typing import Any, Callable, Iterable, Sequence
 from services.public_chat_media import MediaInput, assess_video_readiness, validate_media_input
 
 
-GEMINI_FREE_MODEL = "gemini-3.7-flash"
+GEMINI_FREE_MODEL = "gemini-3.6-flash"
 GEMINI_PUBLIC_CHAT_MODEL = GEMINI_FREE_MODEL
 _GENERATE_TIMEOUT_SECONDS = 90.0
 _FILE_UPLOAD_TIMEOUT_SECONDS = 60.0

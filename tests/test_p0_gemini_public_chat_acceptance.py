@@ -115,7 +115,7 @@ def test_pins_free_model_and_preserves_bounded_chronological_context() -> None:
     assert result == {"ok": True, "status": "ok", "text": "answer", "model": GEMINI_FREE_MODEL}
     assert len(client.models.calls) == 1
     request = client.models.calls[0]
-    assert request["model"] == "gemini-3.7-flash"
+    assert request["model"] == "gemini-3.6-flash"
     assert "Reply in Vietnamese." in str(request["config"])
     contents = list(request["contents"])
     assert len(contents) == 23

@@ -103,7 +103,7 @@ def test_free_routes_only_to_pinned_gemini_and_never_charges_wallet():
     assert result["ok"] is True
     assert result["mode"] == "free"
     assert len(gemini.calls) == 1
-    assert gemini.calls[0]["model"] == "gemini-3.7-flash"
+    assert gemini.calls[0]["model"] == "gemini-3.6-flash"
     assert opus.calls == []
     assert conn.execute("SELECT credits FROM users WHERE user_id='u1'").fetchone()[0] == 1000
 

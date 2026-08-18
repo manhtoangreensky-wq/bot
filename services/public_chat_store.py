@@ -259,7 +259,7 @@ def reserve_free_request(
         conn.execute(
             """INSERT INTO public_chat_requests(request_id,owner_id,chat_id,source_message_id,mode,quota_date,session_id,status,is_admin,provider,model,reason,created_at,updated_at)
                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (identifier, owner, chat, source, "free", day, _session(conn, owner, chat, timestamp), status, int(is_admin), "google", "gemini-3.7-flash", "" if status == "reserved" else "daily_limit", timestamp, timestamp),
+            (identifier, owner, chat, source, "free", day, _session(conn, owner, chat, timestamp), status, int(is_admin), "google", "gemini-3.6-flash", "" if status == "reserved" else "daily_limit", timestamp, timestamp),
         )
         return {"accepted": status == "reserved", "duplicate": False, "exhausted": status == "rejected", "request_id": identifier, "status": status, "remaining": limit if is_admin else max(0, limit - used - (status == "reserved"))}
 
@@ -329,7 +329,7 @@ def complete_free_request(conn: sqlite3.Connection, request_id: Any, *, user_con
             conn.execute("UPDATE public_chat_requests SET status='released',reason='empty_response',updated_at=? WHERE request_id=?", (timestamp, identifier))
             return {"consumed": False, "duplicate": False, "released": True, "request_id": identifier, "status": "released"}
         _insert_turns(conn, request, user, answer, timestamp)
-        delivery = _delivery_json(request, answer, model="gemini-3.7-flash")
+        delivery = _delivery_json(request, answer, model="gemini-3.6-flash")
         conn.execute("UPDATE public_chat_requests SET status='consumed',result_json=?,updated_at=? WHERE request_id=? AND status='reserved'", (delivery, timestamp, identifier))
         used = 0 if request["is_admin"] else _free_count(conn, str(request["owner_id"]), str(request["quota_date"]))
         return {"consumed": True, "duplicate": False, "request_id": identifier, "status": "consumed", "remaining": int(daily_limit) if request["is_admin"] else max(0, int(daily_limit) - used), "delivery": _decode_delivery(delivery)}

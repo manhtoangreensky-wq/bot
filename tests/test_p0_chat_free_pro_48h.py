@@ -98,7 +98,7 @@ def test_free_quota_atomic_race_allows_exactly_20_of_21(tmp_path):
 
 def test_free_duplicate_is_single_request_and_success_consumes_once(tmp_path):
     store = PublicChatStore(tmp_path / "chat.sqlite3")
-    provider = _Provider([{"ok": True, "text": " final ", "model": "gemini-3.7-flash"}])
+    provider = _Provider([{"ok": True, "text": " final ", "model": "gemini-3.6-flash"}])
     runtime = PublicChatRuntime(store=store, free_provider=provider)
     request = _request()
 
@@ -117,8 +117,8 @@ def test_free_fail_timeout_empty_and_invalid_release_without_consuming(tmp_path)
         [
             {"ok": False, "text": "", "status": "FAIL"},
             TimeoutError("slow provider"),
-            {"ok": True, "text": "   ", "model": "gemini-3.7-flash"},
-            {"ok": True, "text": {"not": "text"}, "model": "gemini-3.7-flash"},
+            {"ok": True, "text": "   ", "model": "gemini-3.6-flash"},
+            {"ok": True, "text": {"not": "text"}, "model": "gemini-3.6-flash"},
         ]
     )
     runtime = PublicChatRuntime(store=store, free_provider=provider)
