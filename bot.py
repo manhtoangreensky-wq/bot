@@ -111965,7 +111965,15 @@ def video_tail9_quality_keyboard(
     return video_scene3_keyboard(rows)
 
 
-def video_tail9_invoice_keyboard() -> InlineKeyboardMarkup:
+def video_tail9_invoice_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
+    current = dict(tail or {})
+    product_type = str(current.get("video_product_type") or "")
+    if product_type in {video_selfshot3.PRODUCT_ID, "self_shot_cinematic_transform"}:
+        return video_scene3_keyboard([
+            [("✅ Xác nhận tạo video", "video_tail|confirm|submit"), ("⭐ Đổi gói", "video_tail|quality|change")],
+            [("👁️ Xem lại kế hoạch", "video_tail|review|open")],
+            [("⬅️ Quay lại", "video_tail|quality|open"), ("🎬 Menu Video", "menu|main_video")],
+        ])
     return video_scene3_keyboard([
         [("✅ Xác nhận tạo video", "video_tail|confirm|submit"), ("⭐ Đổi gói", "video_tail|quality|change")],
         [("🧰 Sửa Add-on", "video_tail|addon|open"), ("👁️ Rà soát video", "video_tail|review|open")],
@@ -112342,8 +112350,9 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
             reply_markup=video_tail9_addon_keyboard(tail),
         )
     if screen == "review":
-        if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
-            return await video_tail9_render(query, user_id, context, "quality")
+        if str(tail.get("video_product_type") or "") in {video_selfshot3.PRODUCT_ID, "self_shot_cinematic_transform"}:
+            current = video_selfshot3_draft(get_video_session(user_id))
+            return await video_selfshot3_render(query, user_id, "review", draft=current)
         if owner == "video_edit":
             tail["status_stage"] = "review"
             save_video_tail9_state(user_id, context, tail, owner, host)
@@ -112450,7 +112459,7 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
     if screen == "invoice":
         session = video_tail9_apply_to_session(user_id, context, tail, owner, host)
         invoice_text = video_tail9_invoice_text(tail, session, user_id, get_user_language(user_id) or "vi")
-        invoice_keyboard = video_tail9_invoice_keyboard()
+        invoice_keyboard = video_tail9_invoice_keyboard(tail)
         if owner == "video_edit":
             return await safe_edit_or_send(
                 query,
@@ -112731,9 +112740,9 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         await query.answer()
     if tail.get("final_confirmed") and section != "confirm":
         return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
-    if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
+    if str(tail.get("video_product_type") or "") in {video_selfshot3.PRODUCT_ID, "self_shot_cinematic_transform"}:
         if section in {"addon", "review", "audio", "logo", "watermark", "subtitle", "dubbing", "music", "sfx"}:
-            if action == "back":
+            if action in {"back", "open", "edit", "scenes", "prompts"} or section == "review":
                 current = video_selfshot3_draft(get_video_session(uid))
                 current.pop("video_tail_return_to", None)
                 save_video_selfshot3_draft(uid, current, step="selfshot3:review")
@@ -113942,6 +113951,11 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if action in {"open", "change"}:
             return await video_tail9_render(query, uid, context, "quality")
         if action == "back":
+            if str(tail.get("video_product_type") or "") in {video_selfshot3.PRODUCT_ID, "self_shot_cinematic_transform"}:
+                current = video_selfshot3_draft(get_video_session(uid))
+                current.pop("video_tail_return_to", None)
+                save_video_selfshot3_draft(uid, current, step="selfshot3:review")
+                return await video_selfshot3_render(query, uid, "review", draft=current)
             back_dest = "addon" if str(tail.get("video_product_type") or "") in {"multi_scene_film", "video_long"} else "review"
             return await video_tail9_render(query, uid, context, back_dest)
         if action == "select":
@@ -114005,7 +114019,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     query,
                     video_tail9_invoice_text(tail, session, uid, get_user_language(uid) or "vi"),
                     parse_mode="HTML",
-                    reply_markup=video_tail9_invoice_keyboard(),
+                    reply_markup=video_tail9_invoice_keyboard(tail),
                 )
             except Exception:
                 logger.exception(
@@ -114815,10 +114829,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 result = video_selfshotflow4.apply_action("ss3", current, operation, argument)
                 return await video_selfshotflow4_handle_result(query, uid, context, "ss3", result)
             legacy_tail_screen = {
-                ("show", "package"): "addon",
-                ("audio_review", ""): "addon",
+                ("show", "package"): "quality",
+                ("audio_review", ""): "quality",
                 ("finish_review", ""): "review",
-                ("quality", argument): "addon",
+                ("quality", argument): "quality",
             }.get((operation, argument))
             if legacy_tail_screen:
                 return await video_tail9_render(query, uid, context, legacy_tail_screen)
@@ -114856,6 +114870,9 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 tail["plan_status"] = "approved"
                 tail["review_status"] = "ready"
                 tail["summary_status"] = "ready"
+                tail["audio_status"] = "skipped"
+                tail["logo_status"] = "skipped"
+                tail["watermark_status"] = "skipped"
                 tail["branding_back_to"] = "review"
                 save_video_tail9_state(uid, context, tail, owner, host)
                 return await video_tail9_render(query, uid, context, "quality")
