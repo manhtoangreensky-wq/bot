@@ -1185,8 +1185,6 @@ def select_package(
     if not compatibility.get("ok"):
         raise ValueError(str(compatibility.get("reason") or "package_not_compatible"))
     capability = dict(capability_snapshot or {})
-    if not capability.get("ok"):
-        raise ValueError(str(capability.get("reason") or "engine_route_unavailable"))
     pricing = deepcopy(dict(pricing_snapshot or {}))
     if int(pricing.get("total_xu") or pricing.get("price_xu") or 0) < 0:
         raise ValueError("invalid_pricing_snapshot")

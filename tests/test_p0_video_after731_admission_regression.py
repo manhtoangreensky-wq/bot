@@ -53,7 +53,7 @@ def test_reproduce_screenshot_capability_missing_blocks_truthfully():
     # 1. Commercial preflight must NOT fake ok=True (split-brain eliminated)
     preflight = bot.video_tail9_commercial_preflight(uid, None, tail, "ss3", draft, quality=400)
     assert preflight.get("ok") is False
-    assert "model_capability_missing" in preflight.get("blockers", [])
+    assert "model_capability_missing" in preflight.get("runtime_blockers", [])
 
     # 2. Status text rendering with blocker_code must show truthful reason
     session = {
