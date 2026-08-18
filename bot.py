@@ -71205,7 +71205,7 @@ _VIDEO_EDITOR_CALLBACK_NO_VALUE_ACTIONS = frozenset({
     "manual_info", "manual_join", "manual_rotate_flip", "menu", "motion",
     "music", "overlay", "plan", "quality_source", "quality_upload", "reference",
     "remove_middle", "reorder", "reset_manual", "resize", "resolution",
-    "restore", "restore_limits", "review", "rotation", "save", "selfscene",
+    "restore", "restore_limits", "review", "rotate_flip", "rotation", "save", "selfscene",
     "sharpen", "source_info", "source_summary", "speed", "split", "split_count",
     "split_custom", "split_fixed", "split_from_manual", "split_info", "srt",
     "start", "subtitle", "text", "text_overlay", "timeline", "toggle_gaps",
@@ -258289,7 +258289,7 @@ async def handle_video_editor_callback(
     if action == "overlay":
         update_video_editor_screen(uid, "overlay", parent_callback="videoedit|workspace", selected_tool="manual", last_section="manual", return_to="overlay")
         return await safe_edit_or_send(query, video_local_overlay_text(lang), parse_mode="HTML", reply_markup=video_local_overlay_keyboard(lang))
-    if action == "manual_cut":
+    if action in {"cut", "manual_cut"}:
         split_exit_fields = {}
         if str(state.get("selected_tool") or "") == "split":
             split_exit_fields = {"split_ranges": [], "split_mode": "", "split_part_count": 0, "coverage_required": True, "allow_gaps": False}
@@ -258303,10 +258303,10 @@ async def handle_video_editor_callback(
             **split_exit_fields,
         )
         return await safe_edit_or_send(query, video_local_cut_options_text(lang), parse_mode="HTML", reply_markup=video_local_cut_options_keyboard(lang))
-    if action == "manual_join":
+    if action in {"join", "manual_join"}:
         current = update_video_editor_screen(uid, "join", parent_callback="videoedit|workspace", selected_tool="manual", last_section="manual", return_to="join")
         return await safe_edit_or_send(query, video_local_join_options_text(current, lang), parse_mode="HTML", reply_markup=video_local_join_options_keyboard(lang))
-    if action == "manual_audio":
+    if action in {"audio", "manual_audio"}:
         current = update_video_editor_screen(
             uid,
             "audio",
@@ -258320,7 +258320,7 @@ async def handle_video_editor_callback(
             audio_pending_kind="",
         )
         return await safe_edit_or_send(query, video_edit_audio_text(current, lang), parse_mode="HTML", reply_markup=video_edit_audio_keyboard(current, lang))
-    if action == "manual_effects":
+    if action in {"effects", "manual_effects"}:
         current = update_video_editor_screen(uid, "effects", parent_callback="videoedit|workspace", selected_tool="manual", entry_context="manual_effects", last_section="manual", return_to="effects")
         return await safe_edit_or_send(
             query,
@@ -258328,7 +258328,7 @@ async def handle_video_editor_callback(
             parse_mode="HTML",
             reply_markup=video_edit_effects_keyboard(lang, back_callback="videoedit|workspace", state=current),
         )
-    if action == "manual_rotate_flip":
+    if action in {"rotate_flip", "manual_rotate_flip"}:
         update_video_editor_screen(uid, "transform", parent_callback="videoedit|transform", selected_tool="manual", last_section="manual", return_to="transform")
         return await safe_edit_or_send(query, video_local_rotate_flip_text(lang), parse_mode="HTML", reply_markup=video_local_rotate_flip_keyboard(lang))
     if action == "brightness":
