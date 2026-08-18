@@ -1646,8 +1646,12 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
             "SHOPAIKEY_VIDEO_URL",
         )
         submit_url = submit_url or str(namespace_cfg.get("submit_url") or "")
+        # Explicitly reject invalid legacy endpoint /video/generate
+        if submit_url and submit_url.rstrip("/").endswith(("/video/generate", "/generate")):
+            submit_url = ""
         if not submit_url and (env.get("SHOPAIKEY_API_KEY") or namespace_cfg.get("auth_header_value")):
-            submit_url = f"{base_url}/video/generate"
+            submit_url = f"{base_url}/video/generations"
+
         poll_url = _endpoint_alias(
             env,
             "SHOPAIKEY_VIDEO_POLL_URL",
@@ -1657,30 +1661,39 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
             "SHOPAIKEY_VIDEO_STATUS_ENDPOINT",
         )
         poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
+        if poll_url and poll_url.rstrip("/").endswith(("/video/generate", "/generate")):
+            poll_url = ""
         if not poll_url and submit_url:
-            poll_url = submit_url.rstrip("/")
+            if "{task_id}" in submit_url or "{id}" in submit_url:
+                poll_url = submit_url
+            else:
+                poll_url = f"{submit_url.rstrip('/')}/{{task_id}}"
+
         model_name = str(env.get("SHOPAIKEY_VIDEO_MODEL") or env.get("SHOPAIKEY_VIDEO_MODEL_PRIMARY") or namespace_cfg.get("model") or "")
         if not model_name and (env.get("SHOPAIKEY_API_KEY") or namespace_cfg.get("auth_header_value")):
-            model_name = "kling-v3"
+            model_name = "grok-video-3"
+
+        from services.video_provider_catalog import load_video_provider_catalog
+        catalog = load_video_provider_catalog()
+        known_models = catalog.get("providers", {}).get("shopaikey_video", {}).get("models", {})
+        model_valid = bool(model_name and model_name in known_models)
+
         generic_ready = bool(
             submit_url
             and poll_url
             and (namespace_cfg.get("auth_header_value") or env.get("SHOPAIKEY_API_KEY"))
-            and model_name
+            and model_valid
         )
-        derived = _with_derived(
-            env,
-            {
-                **_provider_namespace_metadata("shopaikey_video", namespace_cfg),
-                "SHOPAIKEY_VIDEO_ENABLED": str(env.get("SHOPAIKEY_VIDEO_ENABLED") or namespace_cfg.get("enabled") or ("1" if generic_ready else "")),
-                "SHOPAIKEY_VIDEO_SUBMIT_URL": submit_url,
-                "SHOPAIKEY_VIDEO_POLL_URL": poll_url,
-                "SHOPAIKEY_VIDEO_AUTH_HEADER_NAME": env.get("SHOPAIKEY_VIDEO_AUTH_HEADER_NAME") or namespace_cfg.get("auth_header_name") or "Authorization",
-                "SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE": env.get("SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE") or namespace_cfg.get("auth_header_value") or _bearer(env.get("SHOPAIKEY_API_KEY") or ""),
-                "SHOPAIKEY_VIDEO_MODEL": model_name,
-                "SHOPAIKEY_VIDEO_CAPABILITIES": env.get("SHOPAIKEY_VIDEO_CAPABILITIES") or namespace_cfg.get("capabilities") or "text_to_video,image_to_video,video_to_video,multi_scene_video,scene_video",
-            },
-        )
+        derived = dict(env)
+        derived.update(_provider_namespace_metadata("shopaikey_video", namespace_cfg))
+        derived["SHOPAIKEY_VIDEO_ENABLED"] = str(env.get("SHOPAIKEY_VIDEO_ENABLED") or namespace_cfg.get("enabled") or ("1" if generic_ready else ""))
+        derived["SHOPAIKEY_VIDEO_SUBMIT_URL"] = submit_url
+        derived["SHOPAIKEY_VIDEO_POLL_URL"] = poll_url
+        derived["SHOPAIKEY_VIDEO_AUTH_HEADER_NAME"] = env.get("SHOPAIKEY_VIDEO_AUTH_HEADER_NAME") or namespace_cfg.get("auth_header_name") or "Authorization"
+        derived["SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE"] = env.get("SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE") or namespace_cfg.get("auth_header_value") or _bearer(env.get("SHOPAIKEY_API_KEY") or "")
+        derived["SHOPAIKEY_VIDEO_MODEL"] = model_name if model_valid else ""
+        derived["SHOPAIKEY_VIDEO_CAPABILITIES"] = env.get("SHOPAIKEY_VIDEO_CAPABILITIES") or namespace_cfg.get("capabilities") or "text_to_video,scene_video,multi_scene_video,short_video"
+
         return GenericHttpVideoProvider(
             provider_name="shopaikey_video",
             enabled_env="SHOPAIKEY_VIDEO_ENABLED",
@@ -1698,34 +1711,46 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
         base_url = str(env.get("KEY4U_BASE_URL") or env.get("KEY4U_API_BASE") or "https://api.key4u.shop").rstrip("/")
         submit_url = _endpoint_alias(env, "KEY4U_VIDEO_SUBMIT_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_ENDPOINT", "VIDEO_KEY4U_SUBMIT_URL")
         submit_url = submit_url or str(namespace_cfg.get("submit_url") or "")
+        if submit_url and submit_url.rstrip("/").endswith(("/video/generate", "/generate")):
+            submit_url = ""
         if not submit_url and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
-            submit_url = f"{base_url}/v1/video/generate"
+            submit_url = f"{base_url}/v1/video/generations"
+
         poll_url = _endpoint_alias(env, "KEY4U_VIDEO_POLL_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_POLL_ENDPOINT", "VIDEO_KEY4U_POLL_URL")
         poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
+        if poll_url and poll_url.rstrip("/").endswith(("/video/generate", "/generate")):
+            poll_url = ""
         if not poll_url and submit_url:
-            poll_url = submit_url.rstrip("/")
+            if "{task_id}" in submit_url or "{id}" in submit_url:
+                poll_url = submit_url
+            else:
+                poll_url = f"{submit_url.rstrip('/')}/{{task_id}}"
+
         model_name = str(env.get("KEY4U_VIDEO_MODEL") or namespace_cfg.get("model") or "")
         if not model_name and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
-            model_name = "kling-v3"
+            model_name = "kling-video"
+
+        from services.video_provider_catalog import load_video_provider_catalog
+        catalog = load_video_provider_catalog()
+        known_models = catalog.get("providers", {}).get("key4u_video", {}).get("models", {})
+        model_valid = bool(model_name and model_name in known_models)
+
         generic_ready = bool(
             submit_url
             and poll_url
             and (namespace_cfg.get("auth_header_value") or env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN"))
-            and model_name
+            and model_valid
         )
-        derived = _with_derived(
-            env,
-            {
-                **_provider_namespace_metadata("key4u_video", namespace_cfg),
-                "KEY4U_VIDEO_ENABLED": str(env.get("KEY4U_VIDEO_ENABLED") or namespace_cfg.get("enabled") or ("1" if generic_ready else "")),
-                "KEY4U_VIDEO_SUBMIT_URL": submit_url,
-                "KEY4U_VIDEO_POLL_URL": poll_url,
-                "KEY4U_VIDEO_AUTH_HEADER_NAME": env.get("KEY4U_VIDEO_AUTH_HEADER_NAME") or namespace_cfg.get("auth_header_name") or "Authorization",
-                "KEY4U_VIDEO_AUTH_HEADER_VALUE": env.get("KEY4U_VIDEO_AUTH_HEADER_VALUE") or namespace_cfg.get("auth_header_value") or _bearer(env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or ""),
-                "KEY4U_VIDEO_MODEL": model_name,
-                "KEY4U_VIDEO_CAPABILITIES": env.get("KEY4U_VIDEO_CAPABILITIES") or namespace_cfg.get("capabilities") or "text_to_video,image_to_video,video_to_video,multi_scene_video,scene_video",
-            },
-        )
+        derived = dict(env)
+        derived.update(_provider_namespace_metadata("key4u_video", namespace_cfg))
+        derived["KEY4U_VIDEO_ENABLED"] = str(env.get("KEY4U_VIDEO_ENABLED") or namespace_cfg.get("enabled") or ("1" if generic_ready else ""))
+        derived["KEY4U_VIDEO_SUBMIT_URL"] = submit_url
+        derived["KEY4U_VIDEO_POLL_URL"] = poll_url
+        derived["KEY4U_VIDEO_AUTH_HEADER_NAME"] = env.get("KEY4U_VIDEO_AUTH_HEADER_NAME") or namespace_cfg.get("auth_header_name") or "Authorization"
+        derived["KEY4U_VIDEO_AUTH_HEADER_VALUE"] = env.get("KEY4U_VIDEO_AUTH_HEADER_VALUE") or namespace_cfg.get("auth_header_value") or _bearer(env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or "")
+        derived["KEY4U_VIDEO_MODEL"] = model_name if model_valid else ""
+        derived["KEY4U_VIDEO_CAPABILITIES"] = env.get("KEY4U_VIDEO_CAPABILITIES") or namespace_cfg.get("capabilities") or "text_to_video,image_to_video,video_to_video,multi_scene_video,scene_video"
+
         return GenericHttpVideoProvider(
             provider_name="key4u_video",
             enabled_env="KEY4U_VIDEO_ENABLED",
@@ -3056,7 +3081,8 @@ def resolve_product_video_public_preflight_state(
         or snapshot.get("admission_mode")
         or "blocked"
     ).strip().lower()
-    worker_eligible = bool(current.get("worker_compatible"))
+    local_worker_required = bool(current.get("local_worker_required", True) and current.get("execution_mode") != "cloud")
+    worker_eligible = bool(current.get("worker_compatible") or not local_worker_required)
     worker_reason = str(current.get("worker_admission_block_reason") or "").strip()
     lock_clear = bool(current.get("probation_lock_clear"))
     lock_active = bool(
