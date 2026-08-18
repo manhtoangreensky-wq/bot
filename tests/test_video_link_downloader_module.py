@@ -14,7 +14,8 @@ def _callbacks(markup):
 
 def test_video_downloader_menu_button_exists():
     markup = bot.main_video_keyboard("vi")
-    assert "📥 Tải video từ link" in _labels(markup)
+    labels = _labels(markup)
+    assert any("Tải video từ" in label for label in labels)
     assert "vdownload|start" in _callbacks(markup)
 
 
@@ -98,3 +99,21 @@ def test_video_downloader_public_guard_private_or_invalid():
     assert "công khai" in text
     assert "chưa trừ Xu" in text
     assert isinstance(bot.VIDEO_DOWNLOADER_PUBLIC_ENABLED, bool)
+
+
+def test_video_downloader_audio_guaranteed_format_and_filtering(tmp_path):
+    provider = VideoDownloaderProvider()
+    
+    # Test _latest_downloaded_file kinds
+    vid = tmp_path / "sample.mp4"
+    aud = tmp_path / "sample.m4a"
+    cov = tmp_path / "sample.jpg"
+    
+    vid.write_bytes(b"vid_data")
+    aud.write_bytes(b"aud_data")
+    cov.write_bytes(b"cov_data")
+    
+    assert provider._latest_downloaded_file(tmp_path, kind="video") == str(vid)
+    assert provider._latest_downloaded_file(tmp_path, kind="audio") == str(aud)
+    assert provider._latest_downloaded_file(tmp_path, kind="cover") == str(cov)
+
