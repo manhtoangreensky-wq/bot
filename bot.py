@@ -112379,25 +112379,11 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
             reply_markup=video_tail9_summary_keyboard(tail),
         )
     if screen == "quality":
-        required_screen = video_tail9.next_required_screen(tail)
-        if required_screen:
-            return await video_tail9_render(query, user_id, context, required_screen)
         capability = video_tail9_commercial_preflight(user_id, context, tail, owner, host)
         catalog = video_tail9_catalog_report(tail, capability)
-        selection_ready = bool(
-            capability.get("ok")
-            and (owner != "video_edit" or capability.get("runtime_ready"))
-        )
         tail = video_tail9.set_capability(tail, capability)
         tail["status_stage"] = "quality"
         save_video_tail9_state(user_id, context, tail, owner, host)
-        if not catalog.get("ok") or not catalog.get("offers"):
-            return await safe_edit_or_send(
-                query,
-                video_tail9_public_blocker_text(),
-                parse_mode="HTML",
-                reply_markup=video_tail9_public_blocker_keyboard(),
-            )
         quality_text = video_tail9_quality_text(tail, capability, catalog)
         quality_keyboard = video_tail9_quality_keyboard(tail, catalog, selectable=True)
         if owner == "video_edit":
@@ -113377,10 +113363,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if action == "complete":
             tail = video_tail9.mark_review_complete(tail)
             save_video_tail9_state(uid, context, tail, owner, host)
-            if tail.get("review_status") != "ready":
-                return await video_tail9_render(query, uid, context, "review")
-            next_dest = video_tail9.next_required_screen(tail) or "quality"
-            return await video_tail9_render(query, uid, context, next_dest)
+            return await video_tail9_render(query, uid, context, "quality")
         script_review = (
             owner == "scene3"
             and str(tail.get("video_product_type") or "") == "script_image_video"
