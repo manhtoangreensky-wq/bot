@@ -121,6 +121,8 @@ def compatible_quality_tiers(
     count = max(1, int(scene_count or 1))
     aspect = str(ratio or "9:16")
     capability = str(required_capability or contract.get("required_capability") or "").strip()
+    if capability in {"direct_video_to_video", "cinematic_transformation"}:
+        capability = "video_to_video"
     if not (
         int(contract.get("minimum_scene_count") or 1)
         <= count
