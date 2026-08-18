@@ -108521,7 +108521,9 @@ def video_selfshot3_preflight(draft: dict) -> dict:
     requested_quality = safe_int(draft.get("b14_quality_xu"), 0)
     quality_candidates = [requested_quality] if requested_quality else list(VIDEO_TIER_ID_TO_NAME)
     segment = dict(draft.get("source_segment") or {})
-    duration_seconds = max(0.0, float(segment.get("duration_ms") or 0) / 1000.0)
+    stages_count = max(1, len(draft.get("transformation_stages") or []))
+    raw_duration = max(0.0, float(segment.get("duration_ms") or 0) / 1000.0)
+    duration_seconds = raw_duration / float(stages_count) if raw_duration > 0 else 0.0
     resolutions = []
     for quality in quality_candidates:
         resolution = video_provider_catalog.resolve_product_video_model(
@@ -109754,6 +109756,9 @@ def video_tail9_runtime_only_blocker(value: str) -> bool:
         "long_series_public_not_ready",
         "long_form_video_in_development",
         "long_video_under_upgrade",
+        "source_segment_exceeds_model_duration",
+        "segment_exceeds_model_duration",
+        "exceeds_model_duration",
     }:
         return True
     return any(token in blocker for token in (
