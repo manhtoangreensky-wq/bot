@@ -110753,8 +110753,6 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
             ]]),
         )
     if screen == "addon":
-        if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
-            return await video_tail9_render(query, user_id, context, "quality")
         if owner == "video_edit":
             return await video_tail9_render(query, user_id, context, "review")
         if str(tail.get("video_product_type") or "") not in VIDEO_TAIL9_SHARED_UI_PRODUCTS:
