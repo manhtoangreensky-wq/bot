@@ -983,7 +983,7 @@ def compile_selfshot3_content(state: Mapping[str, Any]) -> dict[str, Any]:
             "stages": deepcopy(current["transformation_stages"]),
         }
     ]
-    current["scene_count"] = 1
+    current.pop("scene_count", None)
     current["planning_shot_count"] = 1
     current["scene_count_deferred_to_quality"] = True
     current["aspect_ratio"] = _safe(current.get("source_ratio") or source_ratio(current))
@@ -1041,6 +1041,8 @@ def _prepare_tail(flow: str, state: dict[str, Any]) -> None:
     compiled = compile_selfshot2_content(state) if flow == FLOW_SS2 else compile_selfshot3_content(state)
     state.clear()
     state.update(compiled)
+    if flow == FLOW_SS3:
+        state["scene_count"] = 1
     raw_selected = state.get("selected_prompt")
     if isinstance(raw_selected, Mapping):
         selected = dict(raw_selected)

@@ -114402,9 +114402,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 current["selfshot2_screen"] = "segment"
                 save_video_selfshot2_draft(uid, current, step="selfshot2:segment")
                 return await video_selfshot2_render(query, uid, "segment", draft=current)
-            if video_selfshotflow4.enabled("ss2", current) and operation.startswith("c4"):
-                result = video_selfshotflow4.apply_action("ss2", current, operation, argument)
-                return await video_selfshotflow4_handle_result(query, uid, context, "ss2", result)
+            if video_selfshotflow4.enabled("ss2", current):
+                if operation.startswith("c4"):
+                    result = video_selfshotflow4.apply_action("ss2", current, operation, argument)
+                    return await video_selfshotflow4_handle_result(query, uid, context, "ss2", result)
             legacy_tail_screen = {
                 ("show", "finish"): "addon",
                 ("show", "package"): "addon",
@@ -114605,9 +114606,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 current["selfshot3_screen"] = "segment"
                 save_video_selfshot3_draft(uid, current, step="selfshot3:segment")
                 return await video_selfshot3_render(query, uid, "segment", draft=current)
-            if video_selfshotflow4.enabled("ss3", current) and operation.startswith("c4"):
-                result = video_selfshotflow4.apply_action("ss3", current, operation, argument)
-                return await video_selfshotflow4_handle_result(query, uid, context, "ss3", result)
+            if video_selfshotflow4.enabled("ss3", current):
+                if operation.startswith("c4"):
+                    result = video_selfshotflow4.apply_action("ss3", current, operation, argument)
+                    return await video_selfshotflow4_handle_result(query, uid, context, "ss3", result)
             legacy_tail_screen = {
                 ("show", "package"): "addon",
                 ("audio_review", ""): "addon",
