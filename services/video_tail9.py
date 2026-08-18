@@ -1079,12 +1079,7 @@ def next_required_screen(state: dict[str, Any]) -> str:
 
     current = normalize_state(state)
     product_type = str(current.get("video_product_type") or "")
-    if product_type in {
-        "multi_scene_film",
-        "video_long",
-        "self_shot_cinematic_transform",
-        "self_shot_scene_change",
-    }:
+    if product_type in {"multi_scene_film", "video_long"}:
         return ""
     if not addon_complete(current):
         return "addon"
