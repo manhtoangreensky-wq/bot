@@ -1011,7 +1011,14 @@ def build_timeline(
     start = int(segment.get("start_ms") or 0)
     end = int(segment.get("end_ms") or 0)
     if end <= start:
-        raise ValueError("valid_source_segment_required")
+        if segment.get("end_seconds") is not None and float(segment.get("end_seconds") or 0) > float(segment.get("start_seconds") or 0):
+            start = int(float(segment.get("start_seconds") or 0) * 1000)
+            end = int(float(segment.get("end_seconds") or 0) * 1000)
+        elif segment.get("duration_ms") and int(segment.get("duration_ms")) > 0:
+            start = 0
+            end = int(segment.get("duration_ms"))
+        else:
+            raise ValueError("valid_source_segment_required")
     total = end - start
     preset_row = dict(preset or {})
     effect_list = [str(value) for value in effects if str(value)]
