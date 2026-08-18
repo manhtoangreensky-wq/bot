@@ -115091,14 +115091,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 tail["summary_status"] = "not_ready"
                 save_video_tail9_state(uid, context, tail, owner, host)
                 return await video_tail9_render(query, uid, context, "addon")
-            if operation == "compile_prompts" and current_screen in {"scene_plan", "prompts"}:
-                return await video_selfshot2_open_creative_details(
-                    query,
-                    uid,
-                    context,
-                    current,
-                    lang,
-                )
+            if operation == "compile_prompts":
+                current["video_prompts"] = video_selfshot2_compile_prompts(current)
+                save_video_selfshot2_draft(uid, current, step="selfshot2:prompts")
+                return await video_selfshot2_render(query, uid, "prompts", draft=current)
             if operation == "show":
                 screen = argument if argument in valid_screens else current_screen
                 if (
