@@ -176,9 +176,9 @@ def test_functional_free_path_uses_pinned_gemini_and_consumes_success():
     result = _run(conn, gemini_client=gemini)
 
     assert result["ok"] is True, result
-    assert result["model"] == "gemini-3.7-flash"
+    assert result["model"] == "gemini-3.6-flash"
     assert len(gemini.models.calls) == 1
-    assert gemini.models.calls[0]["model"] == "gemini-3.7-flash"
+    assert gemini.models.calls[0]["model"] == "gemini-3.6-flash"
     assert conn.execute("SELECT COUNT(*) FROM public_chat_turns").fetchone()[0] == 2
 
 

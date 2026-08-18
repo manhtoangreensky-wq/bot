@@ -233,7 +233,7 @@ def test_script_parser_preserves_source_and_requires_explicit_count_confirmation
 def test_script_ai_adapter_requests_one_complete_script_not_a_lite_prompt_pack() -> None:
     source = _function_source("generate_video_script_pack")
     caller_source = _function_source("video_script_generate_ai")
-    assert gemini_public_chat_provider.GEMINI_FREE_MODEL == "gemini-3.7-flash"
+    assert gemini_public_chat_provider.GEMINI_FREE_MODEL == "gemini-3.6-flash"
     assert "GeminiPublicChatProvider" in source
     assert "AgentGemini.chat" not in source
     assert "await generate_video_script_pack" in caller_source

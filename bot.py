@@ -1054,7 +1054,7 @@ FREE_PROVIDER_ORDER = [
     if item.strip()
 ]
 GEMINI_ENABLED = env_flag("GEMINI_ENABLED", "true" if GEMINI_API_KEY else "false")
-GEMINI_MODEL_FREE = _env("GEMINI_MODEL_FREE", "gemini-3.7-flash")
+GEMINI_MODEL_FREE = _env("GEMINI_MODEL_FREE", "gemini-2.0-flash")
 GEMINI_MAX_DAILY_REQUESTS = max(0, env_int("GEMINI_MAX_DAILY_REQUESTS", 500))
 GROQ_ENABLED = env_flag("GROQ_ENABLED", "false")
 GROQ_API_KEY = _env("GROQ_API_KEY")
@@ -39945,7 +39945,7 @@ class AgentGemini:
                 cfg["response_schema"] = AgentRouter
             try:
                 res = gemini_client.models.generate_content(
-                    model="gemini-3.7-flash",
+                    model="gemini-2.0-flash",
                     config=types.GenerateContentConfig(**cfg),
                     contents=gemini_contents,
                 )
@@ -60398,7 +60398,7 @@ def get_image_edit_provider_readiness(user_id=None) -> dict:
     if gemini_client or GEMINI_API_KEY:
         providers.append({
             "provider": "gemini_image_edit",
-            "model": _env("GEMINI_IMAGE_EDIT_MODEL", "gemini-3.7-flash-preview-image-generation"),
+            "model": _env("GEMINI_IMAGE_EDIT_MODEL", "gemini-2.0-flash-preview-image-generation"),
             "endpoint": "Gemini multimodal/image edit",
             "ready": False,
             "reason": "Gemini image edit path is not wired for real output in this bot build yet.",
@@ -70530,7 +70530,7 @@ async def free_provider_router_call(task_type: str, user_input: str, user_id, ma
             if provider == "gemini" and gemini_client:
                 def run_gemini_free():
                     return gemini_client.models.generate_content(
-                        model=GEMINI_MODEL_FREE or "gemini-3.7-flash",
+                        model=GEMINI_MODEL_FREE or "gemini-2.0-flash",
                         config=types.GenerateContentConfig(system_instruction=system_prompt),
                         contents=user_input,
                     )
@@ -139869,7 +139869,7 @@ def get_chat_ai_vision_readiness() -> dict:
     providers.append({
         "provider": "gemini_vision",
         "configured": bool(gemini_client and GEMINI_API_KEY),
-        "model": _env("GEMINI_VISION_MODEL", "gemini-3.7-flash"),
+        "model": _env("GEMINI_VISION_MODEL", "gemini-2.0-flash"),
         "reason": "ready" if (gemini_client and GEMINI_API_KEY) else "GEMINI_API_KEY missing",
         "last_smoke": preferred_tool_test_status_text("gemini_vision", "ai_chat", "ai"),
     })
@@ -146489,7 +146489,7 @@ async def cmd_tool_test_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             def run_gemini():
                 return gemini_client.models.generate_content(
-                    model="gemini-3.7-flash",
+                    model="gemini-2.0-flash",
                     contents="Reply exactly: OK TOAN AAS",
                 )
             res = await asyncio.to_thread(run_gemini)
@@ -153215,7 +153215,7 @@ async def translate_with_gemini(text: str, target_lang: str = "vi") -> str:
     )
     def run_gemini():
         return gemini_client.models.generate_content(
-            model="gemini-3.7-flash",
+            model="gemini-2.0-flash",
             config=types.GenerateContentConfig(system_instruction=prompt),
             contents=text,
         )
@@ -208511,7 +208511,7 @@ def call_chat_pro_ai(user_prompt: str, provider_payload: dict, user_id=None) -> 
     try:
         if provider == "gemini" and gemini_client:
             res = gemini_client.models.generate_content(
-                model="gemini-3.7-flash",
+                model="gemini-2.0-flash",
                 config=types.GenerateContentConfig(system_instruction=system_prompt),
                 contents=user_prompt,
             )
@@ -208600,7 +208600,7 @@ async def call_ai_chat_with_fallback(
 
             def run_gemini():
                 return gemini_client.models.generate_content(
-                    model="gemini-3.7-flash",
+                    model="gemini-2.0-flash",
                     config=types.GenerateContentConfig(system_instruction=system_prompt),
                     contents=gemini_contents,
                 )

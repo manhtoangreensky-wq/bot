@@ -61,8 +61,8 @@ def test_gemini_public_chat_uses_only_exact_model_and_returns_text_usage():
         "usage": {"input_tokens": 3, "output_tokens": 2},
         "status": "SUCCESS",
     }
-    assert GEMINI_PUBLIC_CHAT_MODEL == "gemini-3.7-flash"
-    assert [call["model"] for call in client.models.calls] == ["gemini-3.7-flash"]
+    assert GEMINI_PUBLIC_CHAT_MODEL == "gemini-3.6-flash"
+    assert [call["model"] for call in client.models.calls] == ["gemini-3.6-flash"]
 
 
 def test_gemini_public_chat_empty_or_exception_has_no_fallback():
