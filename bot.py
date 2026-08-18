@@ -113931,52 +113931,27 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             catalog = video_tail9_catalog_report(selection_tail, capability)
             tail = video_tail9.set_capability(tail, capability)
             save_video_tail9_state(uid, context, tail, owner, host)
-            try:
-                if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
-                    tail = selection_tail
-                tail["quality_tier_id"] = str(quality)
-                tail["package_id"] = f"product_video_{quality}"
-                session = video_tail9_apply_to_session(uid, context, tail, owner, host)
-                pricing = video_b14_invoice_for_session(session, uid)
-                pricing.update({
-                    "product_type": str(tail.get("video_product_type") or ""),
-                    "scene_count": calculated_scene_count,
-                    "duration_seconds": safe_int(tail.get("estimated_duration"), 8),
-                    "ratio": str(tail.get("ratio") or "9:16"),
-                })
-                tail = video_tail9.select_package(
-                    tail,
-                    quality_tier_id=str(quality),
-                    package_id=f"product_video_{quality}",
-                    pricing_snapshot=pricing,
-                    capability_snapshot=capability,
-                )
-                save_video_tail9_state(uid, context, tail, owner, host)
-                session = video_tail9_apply_to_session(uid, context, tail, owner, host)
-                return await safe_edit_or_send(
-                    query,
-                    video_tail9_invoice_text(tail, session, uid, get_user_language(uid) or "vi"),
-                    parse_mode="HTML",
-                    reply_markup=video_tail9_invoice_keyboard(tail),
-                )
-            except Exception:
-                logger.exception(
-                    "video_tail_quality_selection_failed product=%s quality=%s",
-                    tail.get("video_product_type"),
-                    quality,
-                )
-                tail = video_tail9.normalize_state(tail)
-                tail["quality_tier_id"] = ""
-                tail["package_id"] = ""
-                tail["pricing_snapshot"] = {}
-                tail = video_tail9.set_capability(tail, capability)
-                save_video_tail9_state(uid, context, tail, owner, host)
-                return await safe_edit_or_send(
-                    query,
-                    video_tail9_public_blocker_text(),
-                    parse_mode="HTML",
-                    reply_markup=video_tail9_public_blocker_keyboard(),
-                )
+            if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
+                tail = selection_tail
+            tail["quality_tier_id"] = str(quality)
+            tail["package_id"] = f"product_video_{quality}"
+            session = video_tail9_apply_to_session(uid, context, tail, owner, host)
+            pricing = video_b14_invoice_for_session(session, uid)
+            pricing.update({
+                "product_type": str(tail.get("video_product_type") or ""),
+                "scene_count": calculated_scene_count,
+                "duration_seconds": safe_int(tail.get("estimated_duration"), 8),
+                "ratio": str(tail.get("ratio") or "9:16"),
+            })
+            tail = video_tail9.select_package(
+                tail,
+                quality_tier_id=str(quality),
+                package_id=f"product_video_{quality}",
+                pricing_snapshot=pricing,
+                capability_snapshot=capability,
+            )
+            save_video_tail9_state(uid, context, tail, owner, host)
+            return await video_tail9_render(query, uid, context, "invoice")
     if section == "confirm":
         product_type = str(tail.get("video_product_type") or "")
         lang = get_user_language(uid) or "vi"
