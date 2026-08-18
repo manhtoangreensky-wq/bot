@@ -111770,15 +111770,17 @@ def video_tail9_position_keyboard(
     columns: int = 3,
     menu_callback: str = "menu|main_video",
 ) -> InlineKeyboardMarkup:
+    del columns
     labels = (
         ("↖️ Trên trái", "top_left"), ("⬆️ Trên giữa", "top_center"), ("↗️ Trên phải", "top_right"),
         ("⬅️ Giữa trái", "center_left"), ("⏺ Chính giữa", "center"), ("➡️ Giữa phải", "center_right"),
         ("↙️ Dưới trái", "bottom_left"), ("⬇️ Dưới giữa", "bottom_center"), ("↘️ Dưới phải", "bottom_right"),
-    del columns
+    )
     rows = [
         [(label, f"video_tail|logo|setpos|{target}|{position}") for label, position in labels[0:3]],
         [(label, f"video_tail|logo|setpos|{target}|{position}") for label, position in labels[3:6]],
         [(label, f"video_tail|logo|setpos|{target}|{position}") for label, position in labels[6:9]],
+    ]
     menu_button = (
         ("🏠 Menu chính", "menu|main")
         if menu_callback == "menu|main"
