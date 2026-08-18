@@ -107741,7 +107741,7 @@ async def video_selfshot2_render(target, user_id: int, screen: str, *, draft: di
             reply_markup=video_selfshot_product_hub_keyboard(),
         )
     if screen == "prompts":
-        return await safe_edit_or_send_long_plain(
+        return await safe_edit_or_send_long_html(
             target,
             model["text"],
             reply_markup=video_scene3_keyboard(model["rows"]),
@@ -115042,7 +115042,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "ss2":
         # SELFSHOT2 has one callback owner. Buttons from old messages are
         # read-only unless they belong to the currently rendered screen.
-        if product_id != video_selfshot2.PRODUCT_ID:
+        if product_id and product_id not in {video_selfshot2.PRODUCT_ID, "selfshot2"}:
             return await safe_edit_or_send(
                 query,
                 video_selfshot_product_hub_text(),
@@ -115073,14 +115073,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             }.get((operation, argument))
             if legacy_tail_screen:
                 return await video_tail9_render(query, uid, context, legacy_tail_screen)
-            if not video_selfshot2.callback_allowed(current_screen, str(query.data or ""), current):
-                return await video_selfshot2_render(query, uid, current_screen, draft=current)
-            if operation == "review_addons":
-                overrides = dict(current.get("screen_return_overrides") or {})
-                overrides["addons"] = "review"
-                current["screen_return_overrides"] = overrides
-                save_video_selfshot2_draft(uid, current, step="selfshot2:addons")
-                return await video_selfshot2_render(query, uid, "addons", draft=current)
+            if operation == "compile_prompts":
+                current["video_prompts"] = video_selfshot2_compile_prompts(current)
+                save_video_selfshot2_draft(uid, current, step="selfshot2:prompts")
+                return await video_selfshot2_render(query, uid, "prompts", draft=current)
             if operation == "finish":
                 current = video_selfshot2_tail_host(current)
                 save_video_selfshot2_draft(uid, current, step="selfshot2:tail")
@@ -115090,10 +115086,14 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 tail["summary_status"] = "not_ready"
                 save_video_tail9_state(uid, context, tail, owner, host)
                 return await video_tail9_render(query, uid, context, "addon")
-            if operation == "compile_prompts":
-                current["video_prompts"] = video_selfshot2_compile_prompts(current)
-                save_video_selfshot2_draft(uid, current, step="selfshot2:prompts")
-                return await video_selfshot2_render(query, uid, "prompts", draft=current)
+            if operation == "review_addons":
+                overrides = dict(current.get("screen_return_overrides") or {})
+                overrides["addons"] = "review"
+                current["screen_return_overrides"] = overrides
+                save_video_selfshot2_draft(uid, current, step="selfshot2:addons")
+                return await video_selfshot2_render(query, uid, "addons", draft=current)
+            if not video_selfshot2.callback_allowed(current_screen, str(query.data or ""), current):
+                return await video_selfshot2_render(query, uid, current_screen, draft=current)
             if operation == "show":
                 screen = argument if argument in valid_screens else current_screen
                 if (
@@ -115243,7 +115243,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "ss3":
         # SELFSHOT3 owns its callbacks end-to-end.  A callback from another
         # product or an old session is read-only and returns to the hub.
-        if product_id != video_selfshot3.PRODUCT_ID:
+        if product_id and product_id not in {video_selfshot3.PRODUCT_ID, "selfshot3"}:
             return await safe_edit_or_send(
                 query,
                 video_selfshot_product_hub_text(),
@@ -115302,8 +115302,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 clear_video_session(uid)
                 save_video_selfshot3_draft(uid, video_selfshot3.initial_draft(), step="selfshot3:intro")
                 return await video_selfshot3_render(query, uid, "intro")
-            if not video_selfshot3.callback_operation_allowed(current_screen, operation):
-                return await video_selfshot3_render(query, uid, current_screen, draft=current)
             if operation == "finish":
                 current = video_selfshot3_tail_host(current)
                 save_video_selfshot3_draft(uid, current, step="selfshot3:tail")
@@ -115313,6 +115311,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 tail["review_status"] = "not_ready"
                 save_video_tail9_state(uid, context, tail, owner, host)
                 return await video_tail9_render(query, uid, context, "addon")
+            if operation == "prompt":
+                return await video_selfshot3_render_prompt_review(query, uid, current)
+            if not video_selfshot3.callback_operation_allowed(current_screen, operation):
+                return await video_selfshot3_render(query, uid, current_screen, draft=current)
             if operation == "source":
                 current = video_selfshot3_draft({"draft": current})
                 current["selfshot3_canonical_flow"] = True
