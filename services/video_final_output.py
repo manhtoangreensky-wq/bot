@@ -190,6 +190,7 @@ def normalize_video_product_type(value: Any = "") -> str:
         "storyboard": "storyboard_prompt",
         "video_idea": "video_idea_to_product",
         "multiscene_video": "multi_scene_film",
+        "video_long": "multi_scene_film",
     }
     return aliases.get(token, token)
 

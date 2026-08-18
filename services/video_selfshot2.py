@@ -125,6 +125,8 @@ SCREEN_PARENTS = {
     "ideas": "content_source",
     "direction": "content_source",
     "scene_plan": "direction",
+    "creative_controls": "scene_plan",
+    "requirements": "creative_controls",
     "prompts": "scene_plan",
     "audio": "prompts",
     "volume": "audio",
@@ -1315,6 +1317,16 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         rows = [
             [("✅ Tiếp tục hoàn thiện", "vproduct|ss2|finish"), ("🖼️ Sửa Logo / Watermark", "vproduct|ss2|review_addons")],
             _nav("review"),
+        ]
+    elif name == "creative_controls":
+        text = "🎨 <b>Phong cách và điều hướng sáng tạo</b>"
+        rows = [
+            [("⬅️ Quay lại kế hoạch cảnh", "vproduct|ss2|show|scene_plan"), ("🎬 Menu Video", "menu|main_video")],
+        ]
+    elif name == "requirements":
+        text = "🔒 <b>Yêu cầu giữ nguyên</b>"
+        rows = [
+            [("⬅️ Quay lại kế hoạch cảnh", "vproduct|ss2|show|scene_plan"), ("🎬 Menu Video", "menu|main_video")],
         ]
     else:
         return screen_model("intro", draft)

@@ -256,8 +256,8 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "worker_owner": "product_video",
         "maximum_scene_count": 20,
         "supported_quality_tiers": MULTI_SCENE_QUALITY_TIERS,
-        "execution_enabled": False,
-        "execution_blocker": "long_video_under_upgrade",
+        "execution_enabled": True,
+        "execution_blocker": "",
     },
     "video_local_edit": {
         "flow_owner": "video_edit",

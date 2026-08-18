@@ -113606,7 +113606,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 confirmed_job = confirm_video_project_invoice(
                     project_id=project_id,
                     user_id=uid,
-                    invoice=confirmed_invoice,
+                    balance_xu=None,
+                    use_wallet=False,
                 )
                 job_id = safe_int(confirmed_job.get("id"), 0)
                 if job_id > 0:
@@ -115090,7 +115091,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 tail["summary_status"] = "not_ready"
                 save_video_tail9_state(uid, context, tail, owner, host)
                 return await video_tail9_render(query, uid, context, "addon")
-            if operation == "compile_prompts" and current_screen == "scene_plan":
+            if operation == "compile_prompts" and current_screen in {"scene_plan", "prompts"}:
                 return await video_selfshot2_open_creative_details(
                     query,
                     uid,
@@ -115300,14 +115301,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                         draft=current,
                     )
                 screen = argument if argument in valid_screens else "intro"
-                if (
-                    str(current.get("video_tail_return_to") or "") == "review"
-                    and str(current.get("selfshot3_screen") or "") == "timeline"
-                    and screen == "wardrobe"
-                ):
-                    current.pop("video_tail_return_to", None)
-                    save_video_selfshot3_draft(uid, current, step="selfshot3:tail_review")
-                    return await video_tail9_render(query, uid, context, "review")
                 current_parent = video_selfshot3.screen_parent(current_screen, current)
                 overrides = dict(current.get("screen_return_overrides") or {})
                 if screen == current_parent:
