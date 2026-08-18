@@ -109271,10 +109271,12 @@ def video_tail12_compile_content_contract(state: dict | None, *, product_type: s
         or source_fields.get("manual_content")
         or ""
     ).strip()
+    raw_src_vid = current.get("source_video")
+    src_vid_file_id = str(raw_src_vid.get("file_id") or "") if isinstance(raw_src_vid, dict) else str(raw_src_vid or "")
     source_video_id = str(
         current.get("source_video_id")
         or current.get("source_file_id")
-        or (current.get("source_video") or {}).get("file_id")
+        or src_vid_file_id
         or source_fields.get("source_video_id")
         or ""
     ).strip()
@@ -109611,10 +109613,12 @@ def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
                 scene_count * 8,
             ),
         )
+        raw_draft_vid = draft.get("source_video")
+        draft_vid_file_id = str(raw_draft_vid.get("file_id") or "") if isinstance(raw_draft_vid, dict) else str(raw_draft_vid or "")
         source_asset_ids = [
             str(value)
             for value in (
-                (draft.get("source_video") or {}).get("file_id"),
+                draft_vid_file_id,
                 draft.get("source_file_id"),
             )
             if str(value or "").strip()
