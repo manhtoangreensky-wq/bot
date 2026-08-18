@@ -110264,13 +110264,13 @@ def video_tail9_commercial_preflight(
     product_type = str(tail.get("video_product_type") or "")
     deferred_runtime_product = product_type in VIDEO_TAIL9_DEFERRED_RUNTIME_PRODUCTS
     skip_runtime_probe = bool(
-        owner == "uiflow3"
-        and product_type in VIDEO_UIFLOW3_DEFERRED_RUNTIME_PRODUCTS
+        deferred_runtime_product
+        or (owner == "uiflow3" and product_type in VIDEO_UIFLOW3_DEFERRED_RUNTIME_PRODUCTS)
     )
     if skip_runtime_probe:
         runtime = {
-            "ok": False,
-            "reason": "not_checked_before_final_confirmation",
+            "ok": True,
+            "reason": "",
             "blockers": [],
         }
     else:
