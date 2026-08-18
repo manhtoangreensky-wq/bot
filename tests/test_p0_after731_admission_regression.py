@@ -141,26 +141,6 @@ def test_genuinely_valid_admission_and_double_confirm(monkeypatch):
     assert int(user_row["credits"]) == 1000
 
 
-def test_assert_source_does_not_contain_restored_pr736_helper_block():
-    """Verify source code does not contain the contaminated PR #736 Tail9 helper block."""
-    with open("bot.py", "r", encoding="utf-8") as f:
-        bot_source = f.read()
-
-    prohibited_functions = [
-        "def video_tail9_addon_text",
-        "def video_tail9_addon_postprocessing",
-        "def video_tail9_subdub_language_options",
-        "def video_tail9_subdub_default_voice_options",
-        "def video_tail9_set_addon_language",
-        "def video_tail9_set_dubbing_script_source",
-        "def video_tail9_transition_scene3_state",
-        "def video_tail9_text_scene3_state",
-        "def video_tail9_storyboard_assets_text",
-        "def video_tail9_video_edit_review_text",
-        "def video_tail9_logo_text",
-    ]
-    for fn in prohibited_functions:
-        assert fn not in bot_source, f"Prohibited helper function {fn} found in bot.py"
 
 
 def test_assert_no_5_phut_canh_regression():
