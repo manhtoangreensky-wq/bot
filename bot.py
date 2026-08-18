@@ -77800,6 +77800,17 @@ def video_ai_real_pilot_screen_payload(
         return video_ai_real_pilot_requirement_review_payload(state)
 
     if step == "entry" and not view:
+        if product == "multi_scene_film":
+            rows = [
+                [("🎬 Lập kế hoạch loạt video", "vid3|mode|series_plan")],
+            ]
+            rows.extend(video_ai_real_pilot_nav_rows(back="menu|main_video"))
+            return (
+                "🎬 <b>Video dài tập</b>\n\n"
+                "TOAN AAS sẽ lập dàn cảnh, chia cảnh, tạo bảng phân cảnh và câu lệnh AI cho từng cảnh để chuẩn bị dựng phim/video dài hơn.\n\n"
+                "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu.",
+                video_uiflow3_keyboard(rows),
+            )
         rows = [
             [("📝 Prompt → Video", "vid3|mode|prompt_video"), ("🖼 Ảnh → Video", "vid3|mode|image_video")],
         ]
@@ -112591,7 +112602,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             if str(tail.get("video_product_type") or "") in {"multi_scene_film", "video_long"}:
                 tail = video_tail9.mark_review_complete(tail)
             save_video_tail9_state(uid, context, tail, owner, host)
-            next_dest = "quality" if str(tail.get("video_product_type") or "") in {"multi_scene_film", "video_long"} else "review"
+            next_dest = video_tail9.next_required_screen(tail) or "quality"
             return await video_tail9_render(query, uid, context, next_dest)
         return await video_tail9_render(query, uid, context, "addon")
     if owner == "uiflow3":
@@ -112954,7 +112965,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             save_video_tail9_state(uid, context, tail, owner, host)
             if tail.get("review_status") != "ready":
                 return await video_tail9_render(query, uid, context, "review")
-            return await video_tail9_render(query, uid, context, "quality")
+            next_dest = video_tail9.next_required_screen(tail) or "quality"
+            return await video_tail9_render(query, uid, context, next_dest)
         script_review = (
             owner == "scene3"
             and str(tail.get("video_product_type") or "") == "script_image_video"
@@ -267533,6 +267545,9 @@ if __name__ == "__main__":
         port=PORT,
         log_level="info"
     )
+
+
+
 
 
 
