@@ -537,28 +537,31 @@ def compile_scene_prompts(
         person_id = _safe(item.get("person_id") or item.get("source_subject_id"))
         object_id = _safe(item.get("object_id") or item.get("target_subject_id"))
         interaction_labels.append(f"{person_id} {relation} {object_id}".strip())
-    interactions = "; ".join(interaction_labels) or "source person-object contact points"
+    interactions = "; ".join(interaction_labels) or "liên kết người - vật nguồn"
+    content_text = _safe(content.get("title") or content.get("summary") or "Đổi bối cảnh video")
+    dir_label = _safe(direction.get("label") or "Đổi bối cảnh")
     result = []
     for row in scene_plan:
         scene = dict(row)
+        idx = int(scene.get("scene_index") or 1)
+        start_sec = scene.get("source_segment_start")
+        end_sec = scene.get("source_segment_end")
         prompt = (
-            f"Scene {scene.get('scene_index')}: preserve locked source subjects [{subjects}], exact identity, body/product shape, "
-            f"logo/text/color, source action and person-object contact points with exact relationship [{interactions}]. "
-            f"{content.get('summary') or content.get('title')}. "
-            f"Direction: {direction.get('label')}; environment changes only as approved. Transfer person, object, camera and environment motion "
-            f"from {scene.get('source_segment_start')}s to {scene.get('source_segment_end')}s; begin {scene.get('start_state')} and end {scene.get('end_state')}."
+            f"Cảnh {idx}: Giữ nhận diện [{subjects}]. "
+            f"Nội dung: {content_text}. "
+            f"Hướng: {dir_label}. "
+            f"Chuyển động từ {start_sec}s đến {end_sec}s của video nguồn."
         )
         negative = (
-            "no face drift, no body drift, no product shape drift, no logo or printed-text mutation, no extra limbs, "
-            "no duplicated person or object, no lost held object, no broken contact point, no unrelated clip, no slideshow"
+            "no face drift, no body drift, no product mutation, no extra limbs, no duplicated person or object, no broken contact point"
         )
         result.append({
-            "scene_id": int(scene.get("scene_id") or 0),
-            "scene_index": int(scene.get("scene_index") or 0),
+            "scene_id": int(scene.get("scene_id") or idx),
+            "scene_index": idx,
             "prompt": prompt,
             "negative_prompt": negative,
-            "source_segment_start": scene.get("source_segment_start"),
-            "source_segment_end": scene.get("source_segment_end"),
+            "source_segment_start": start_sec,
+            "source_segment_end": end_sec,
             "prompt_version": int(scene.get("prompt_version") or 1),
         })
     return result
@@ -1218,18 +1221,24 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         rows = [[('👁️ Xem từng cảnh', 'vproduct|ss2|plan_view'), ('✍️ Sửa nội dung', 'vproduct|ss2|content_source|custom')], [('✅ Tạo câu lệnh từng cảnh', 'vproduct|ss2|compile_prompts'), ('🔄 Lập lại kế hoạch', 'vproduct|ss2|rebuild_plan')], _nav(screen_parent("scene_plan", draft))]
     elif name == "prompts":
         prompts = list(draft.get("video_prompts") or [])
-        text = "📝 Câu lệnh video từng cảnh\n\n" + "\n\n".join(f"Cảnh {item.get('scene_index')}:\n{item.get('prompt')}\nĐiều cần tránh:\n{item.get('negative_prompt')}" for item in prompts)
+        lines = ["📝 <b>Câu lệnh video từng cảnh</b>\n"]
+        for item in prompts:
+            idx = item.get("scene_index")
+            p = _safe(item.get("prompt"))
+            neg = _safe(item.get("negative_prompt"))
+            lines.append(f"🎬 <b>Cảnh {idx}:</b>\n{p}")
+            if neg:
+                lines.append(f"<i>🚫 Điều cần tránh:</i> {neg}")
+            lines.append("")
+        lines.append("<i>Bấm số cảnh bên dưới để sửa câu lệnh, hoặc bấm Hoàn tất để tiếp tục.</i>")
+        text = "\n".join(lines)
         prompt_buttons = [
             (str(item.get("scene_index") or index), f"vproduct|ss2|prompt|edit_{index}")
             for index, item in enumerate(prompts, 1)
         ]
         rows = [prompt_buttons[offset:offset + 2] for offset in range(0, len(prompt_buttons), 2)]
-        if rows and len(rows[-1]) == 1:
-            rows[-1].append(('↩️ Tạo lại tất cả', 'vproduct|ss2|compile_prompts'))
-            rows.append([('✅ Hoàn tất câu lệnh', 'vproduct|ss2|show|review'), ('🎬 Xem kế hoạch cảnh', 'vproduct|ss2|show|scene_plan')])
-        else:
-            rows.append([('↩️ Tạo lại tất cả', 'vproduct|ss2|compile_prompts'), ('✅ Hoàn tất câu lệnh', 'vproduct|ss2|show|review')])
-        rows.append(_nav(screen_parent("prompts", draft)))
+        rows.append([('↩️ Tạo lại tất cả', 'vproduct|ss2|compile_prompts'), ('✅ Hoàn tất câu lệnh', 'vproduct|ss2|show|review')])
+        rows.append(_nav("scene_plan"))
     elif name == "audio":
         plan = dict(draft.get("audio_plan") or {})
         text = "🎚️ <b>Âm thanh và phần bổ sung</b>\n\nMỗi mục có thể đặt âm lượng từ 0–200%. Hệ thống chỉ áp dụng những mục anh/chị bật."
@@ -1279,15 +1288,17 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         rows.append(_nav("addons"))
     elif name == "review":
         text = (
-            "👁️ <b>Xem lại Video tự quay và đổi cảnh AI</b>\n\n"
-            f"Chủ thể: {len((draft.get('subject_manifest') or {}).get('subject_ids') or [])} · Cảnh: {draft.get('scene_count') or 0} · Tỉ lệ: {draft.get('aspect_ratio') or '-'}\n"
-            f"Nội dung: {(draft.get('selected_content') or {}).get('title') or '-'} · Hướng: {(draft.get('direction_contract') or {}).get('label') or '-'}\n\n"
-            "Kiểm tra kế hoạch rồi mở Add-on để tiếp tục."
+            "👁️ <b>Rà soát kế hoạch Video tự quay & đổi cảnh AI</b>\n\n"
+            f"• <b>Chủ thể giữ:</b> {len((draft.get('subject_manifest') or {}).get('subject_ids') or [])} mục được neo nguồn\n"
+            f"• <b>Số cảnh:</b> {draft.get('scene_count') or 0} cảnh · Tỉ lệ: <b>{draft.get('aspect_ratio') or '9:16'}</b>\n"
+            f"• <b>Nội dung:</b> {(draft.get('selected_content') or {}).get('title') or 'Tự động bám video nguồn'}\n"
+            f"• <b>Hướng biến đổi:</b> {(draft.get('direction_contract') or {}).get('label') or 'Đổi bối cảnh'}\n\n"
+            "Kiểm tra kế hoạch rồi bấm <b>🧰 Tiếp tục Add-on</b> để hoàn thiện âm thanh, phụ đề và tạo video."
         )
         rows = [
             [('👁️ Xem từng cảnh', 'vproduct|ss2|plan_view'), ('✍️ Sửa nội dung cảnh', 'vproduct|ss2|content_source|custom')],
-            [('👤 Người / vật giữ nguyên', 'vproduct|ss2|show|preserve'), ('✨ Hiệu ứng', 'vproduct|ss2|show|direction')],
-            [('🧰 Add-on', 'vproduct|ss2|finish')],
+            [('👤 Người / vật giữ nguyên', 'vproduct|ss2|show|preserve'), ('✨ Hướng biến đổi', 'vproduct|ss2|show|direction')],
+            [('🧰 Tiếp tục Add-on', 'vproduct|ss2|finish')],
             _nav("prompts"),
         ]
     elif name == "finish":
