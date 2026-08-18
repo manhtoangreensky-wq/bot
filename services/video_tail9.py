@@ -1178,12 +1178,8 @@ def select_package(
         ratio=str(current.get("ratio") or "9:16"),
         quality_tier_id=int(quality_tier_id or 0),
     )
-    if not compatibility.get("ok"):
-        raise ValueError(str(compatibility.get("reason") or "package_not_compatible"))
     capability = dict(capability_snapshot or {})
     pricing = deepcopy(dict(pricing_snapshot or {}))
-    if int(pricing.get("total_xu") or pricing.get("price_xu") or 0) < 0:
-        raise ValueError("invalid_pricing_snapshot")
     current["quality_tier_id"] = str(quality_tier_id or "")
     current["package_id"] = str(package_id or "")
     current["pricing_snapshot"] = pricing

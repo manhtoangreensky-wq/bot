@@ -109994,7 +109994,10 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
             require_attestation=False,
         )
     elif owner == "scene3":
-        session = video_profile_scene1_handoff(uid, host)
+        try:
+            session = video_profile_scene1_handoff(uid, host)
+        except Exception:
+            session = get_video_session(uid)
     else:
         session = get_video_session(uid)
     session = dict(session or {})

@@ -207,8 +207,13 @@ def initial_draft() -> dict[str, Any]:
     }
 
 
-def source_fingerprint(source: Mapping[str, Any] | None) -> str:
-    row = dict(source or {})
+def source_fingerprint(source: Mapping[str, Any] | str | None) -> str:
+    if isinstance(source, str):
+        row = {"file_id": source.strip()} if source.strip() else {}
+    elif isinstance(source, Mapping):
+        row = dict(source)
+    else:
+        row = {}
     stable = {
         "file_unique_id": _safe(row.get("file_unique_id")),
         "file_id": _safe(row.get("file_id")),
@@ -235,8 +240,13 @@ def _normalize_track(item: Mapping[str, Any], kind: str, index: int) -> dict[str
     }
 
 
-def analyze_source(source: Mapping[str, Any] | None) -> dict[str, Any]:
-    row = dict(source or {})
+def analyze_source(source: Mapping[str, Any] | str | None) -> dict[str, Any]:
+    if isinstance(source, str):
+        row = {"file_id": source.strip()} if source.strip() else {}
+    elif isinstance(source, Mapping):
+        row = dict(source)
+    else:
+        row = {}
     width = int(row.get("width") or 0)
     height = int(row.get("height") or 0)
     duration = float(row.get("duration_seconds") or 0)
@@ -286,10 +296,15 @@ def analyze_source(source: Mapping[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def source_gate(source: Mapping[str, Any] | None, analysis: Mapping[str, Any] | None) -> dict[str, Any]:
-    media = dict(source or {})
+def source_gate(source: Mapping[str, Any] | str | None, analysis: Mapping[str, Any] | None) -> dict[str, Any]:
+    if isinstance(source, str):
+        media = {"file_id": source.strip()} if source.strip() else {}
+    elif isinstance(source, Mapping):
+        media = dict(source)
+    else:
+        media = {}
     report = dict(analysis or {})
-    has_source = bool(_safe(media.get("file_id") or media.get("path")))
+    has_source = bool(_safe(media.get("file_id") or media.get("path") or (isinstance(source, str) and source.strip())))
     complete = (
         float(report.get("duration_seconds") or 0) > 0
         and int(report.get("width") or 0) > 0
@@ -624,7 +639,9 @@ def preflight(
     source_report = source_gate(draft.get("source_video") or draft.get("source_asset"), draft.get("source_analysis"))
     if not source_report.get("ok"):
         blockers.append(source_report.get("blocker"))
-    duration = float((draft.get("source_analysis") or {}).get("duration_seconds") or (draft.get("source_video") or {}).get("duration_seconds") or 0)
+    source_vid = draft.get("source_video")
+    source_vid_dur = float(source_vid.get("duration_seconds") or 0) if isinstance(source_vid, dict) else 0.0
+    duration = float((draft.get("source_analysis") or {}).get("duration_seconds") or source_vid_dur or 0)
     source_segment = dict(draft.get("source_segment") or {})
     if not (
         float(source_segment.get("end_seconds") or 0)
