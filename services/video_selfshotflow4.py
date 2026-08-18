@@ -570,8 +570,6 @@ def _subject_rows(flow: str, state: Mapping[str, Any]) -> list[list[tuple[str, s
         buttons.extend([
             ("👤 Xác nhận có người", callback(flow, "c4subject", "person")),
             ("📦 Xác nhận có vật", callback(flow, "c4subject", "object")),
-            ("👤📦 Giữ người và vật", callback(flow, "c4subject", "person_object")),
-            ("🎞️ Giữ chuyển động", callback(flow, "c4subject", "motion")),
         ])
     buttons.extend([
         ("✍️ Tự mô tả", callback(flow, "c4subject", "custom")),
@@ -590,8 +588,6 @@ def _subject_multiple_rows(flow: str, state: Mapping[str, Any]) -> list[list[tup
         if _safe(item.get("subject_id")) in selected:
             label = f"✅ {label}"
         buttons.append((label, cb))
-    if len(buttons) % 2:
-        buttons.append(("✍️ Tự mô tả", callback(flow, "c4subject", "custom")))
     rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     rows.append([
         ("✅ Xác nhận chủ thể", callback(flow, "c4multi", "done")),
@@ -1043,8 +1039,6 @@ def _prepare_tail(flow: str, state: dict[str, Any]) -> None:
     compiled = compile_selfshot2_content(state) if flow == FLOW_SS2 else compile_selfshot3_content(state)
     state.clear()
     state.update(compiled)
-    if flow == FLOW_SS3:
-        state["scene_count"] = 1
     raw_selected = state.get("selected_prompt")
     if isinstance(raw_selected, Mapping):
         selected = dict(raw_selected)
@@ -1090,7 +1084,7 @@ def review_text(flow: str, state: Mapping[str, Any] | None) -> str:
     relationship = "Đã khóa" if (data.get("relationship_lock") or {}).get("enabled") else "Chưa khóa"
     if active_flow == FLOW_SS2:
         lines = [
-            "🎬 <b>Review — Tự quay & đổi cảnh AI</b>",
+            "🎬 <b>Xem lại — Tự quay và đổi cảnh AI</b>",
             f"• Đoạn nguồn: <b>{start:g}–{end:g} giây</b>",
             f"• Chủ thể giữ lại: <b>{subject}</b>",
             f"• Nội dung: <b>{content}</b>",
@@ -1102,7 +1096,7 @@ def review_text(flow: str, state: Mapping[str, Any] | None) -> str:
         ]
     else:
         lines = [
-            "🎬 <b>Review — Biến đổi điện ảnh</b>",
+            "🎬 <b>Xem lại — Biến đổi điện ảnh</b>",
             f"• Đoạn nguồn: <b>{start:g}–{end:g} giây</b>",
             f"• Chủ thể giữ lại: <b>{subject}</b>",
             f"• Nội dung: <b>{content}</b>",
@@ -1285,57 +1279,23 @@ def _set_subject(flow: str, state: dict[str, Any], choice: str, *, custom_text: 
             raise ValueError("selfshotflow4_subject_required")
         subject_label = _safe(custom_text)
         subject_type = "custom"
-        subjects = [{
-            "subject_id": "user-confirmed-custom",
-            "subject_type": "custom",
-            "label": subject_label,
-            "description": subject_label,
-            "provenance": "user_confirmed_source_bound",
-        }]
     elif choice in {"motion", "none"}:
         subject_label = "Giữ chuyển động nguồn"
         subject_type = "motion_only"
-        subjects = [{
-            "subject_id": "user-confirmed-motion",
-            "subject_type": "custom",
-            "label": subject_label,
-            "description": subject_label,
-            "provenance": "user_confirmed_source_bound",
-        }]
-    elif choice == "person_object":
-        subject_label = "Người và vật do khách xác nhận trong video nguồn"
-        subject_type = "person_object"
-        subjects = [
-            {
-                "subject_id": "user-confirmed-person",
-                "subject_type": "person",
-                "label": "Người do khách xác nhận trong video nguồn",
-                "description": "Người do khách xác nhận trong video nguồn",
-                "provenance": "user_confirmed_source_bound",
-            },
-            {
-                "subject_id": "user-confirmed-object",
-                "subject_type": "object",
-                "label": "Vật/sản phẩm do khách xác nhận trong video nguồn",
-                "description": "Vật/sản phẩm do khách xác nhận trong video nguồn",
-                "provenance": "user_confirmed_source_bound",
-            },
-        ]
     else:
         subject_label = "Người do khách xác nhận trong video nguồn" if choice == "person" else "Vật/sản phẩm do khách xác nhận trong video nguồn"
         subject_type = choice
-        subjects = [{
-            "subject_id": f"user-confirmed-{choice or 'custom'}",
-            "subject_type": choice,
+    subject_id = f"user-confirmed-{choice or 'custom'}"
+    state["subject_manifest"] = {
+        "selection_type": subject_type,
+        "subjects": [{
+            "subject_id": subject_id,
+            "subject_type": choice if choice not in {"motion", "none"} else "custom",
             "label": subject_label,
             "description": subject_label,
             "provenance": "user_confirmed_source_bound",
-        }]
-    subject_ids = [_safe(item["subject_id"]) for item in subjects]
-    state["subject_manifest"] = {
-        "selection_type": subject_type,
-        "subjects": subjects,
-        "selected_ids": subject_ids,
+        }],
+        "selected_ids": [subject_id],
         "stable_ids": True,
         "description": subject_label,
         "source_bound": source_bound,
@@ -1562,7 +1522,7 @@ def apply_action(flow: str, state: Mapping[str, Any] | None, operation: str, arg
         try:
             if arg.startswith("track:"):
                 _set_track(active_flow, current, arg.split(":", 1)[1])
-            elif arg in {"person", "object", "person_object", "motion", "none"}:
+            elif arg in {"person", "object", "motion", "none"}:
                 _set_subject(active_flow, current, arg)
             else:
                 return {"state": current, "screen": "subject"}
