@@ -799,6 +799,24 @@ def update_layer_rule(rules: Mapping[str, str] | None, layer: str, state: str) -
     return updated
 
 
+def _user_confirmed_subject(kind: str, description: str = "") -> dict[str, Any]:
+    label = description or (
+        "nguoi duoc khach xac nhan trong video nguon"
+        if kind == "person"
+        else "vat/san pham duoc khach xac nhan trong video nguon"
+    )
+    return {
+        "subject_id": f"{kind}_user_confirmed_1",
+        "track_id": f"{kind}_user_confirmed_1",
+        "subject_type": kind,
+        "label": label,
+        "description": label,
+        "confidence": 1.0,
+        "provenance": "user_confirmed_source_bound",
+        "thumbnail_ref": "",
+    }
+
+
 def select_subjects(
     analysis: Mapping[str, Any] | None,
     selection_type: str,
@@ -824,6 +842,17 @@ def select_subjects(
     selected = {str(value) for value in selected_ids if str(value)}
     if selected:
         all_subjects = [row for row in all_subjects if str(row.get("subject_id") or "") in selected]
+    elif not all_subjects and subject_type != "custom":
+        if subject_type == "person":
+            all_subjects = [_user_confirmed_subject("person")]
+        elif subject_type in {"object", "product"}:
+            all_subjects = [_user_confirmed_subject("object")]
+        elif subject_type == "pet":
+            all_subjects = [_user_confirmed_subject("pet", "thu cung duoc khach xac nhan trong video nguon")]
+        elif subject_type == "person_object":
+            all_subjects = [_user_confirmed_subject("person"), _user_confirmed_subject("object")]
+        elif subject_type == "multiple":
+            all_subjects = [_user_confirmed_subject("person"), _user_confirmed_subject("object")]
     return {
         "selection_type": subject_type,
         "subjects": deepcopy(all_subjects),
@@ -878,16 +907,18 @@ def subject_tracking_gate(
     else:
         if not subjects or not selected_ids or not manifest.get("stable_ids"):
             blockers.append("subject_track_missing")
-        if selection_type == "person" and (counts["person"] < 1 or counts["face"] < 1):
-            blockers.append("face_identity_track_missing")
-        elif selection_type == "object" and counts["object"] + counts["product"] < 1:
-            blockers.append("object_track_missing")
-        elif selection_type == "pet" and counts["pet"] < 1:
-            blockers.append("pet_track_missing")
-        elif selection_type == "person_object" and (counts["person"] < 1 or counts["object"] + counts["product"] < 1):
-            blockers.append("person_object_tracks_missing")
-        elif selection_type == "multiple" and len(subjects) < 2:
-            blockers.append("multiple_subject_tracks_missing")
+        user_confirmed = any(str(item.get("provenance") or "") == "user_confirmed_source_bound" for item in subjects)
+        if not user_confirmed:
+            if selection_type == "person" and (counts["person"] < 1 or counts["face"] < 1):
+                blockers.append("face_identity_track_missing")
+            elif selection_type == "object" and counts["object"] + counts["product"] < 1:
+                blockers.append("object_track_missing")
+            elif selection_type == "pet" and counts["pet"] < 1:
+                blockers.append("pet_track_missing")
+            elif selection_type == "person_object" and (counts["person"] < 1 or counts["object"] + counts["product"] < 1):
+                blockers.append("person_object_tracks_missing")
+            elif selection_type == "multiple" and len(subjects) < 2:
+                blockers.append("multiple_subject_tracks_missing")
 
     if selection_type == "person_object" and not list(relationship_locks or []):
         blockers.append("interaction_lock_missing")
