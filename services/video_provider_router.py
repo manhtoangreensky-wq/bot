@@ -80,6 +80,11 @@ PRODUCT_VIDEO_PROVIDER_REQUIRED_TYPES = {
     "self_shot_scene_change",
     "self_shot_cinematic_transform",
     "multi_scene_film",
+    "product_video",
+    "video_ai_real",
+    "video_long",
+    "video_selfshot",
+    "prompt_video",
 }
 PRODUCT_VIDEO_PROVIDER_ADAPTERS = {
     "text_to_video",
