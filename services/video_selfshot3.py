@@ -23,7 +23,7 @@ LEGACY_JOB_TYPE = "self_shot_scene_change"
 MODE_ONE_TAKE = "one_take_cinematic"
 SUPPORTED_MODES = frozenset({MODE_ONE_TAKE})
 
-SUBJECT_TYPES = frozenset({"person", "object", "pet", "person_object", "multiple", "custom"})
+SUBJECT_TYPES = frozenset({"person", "object", "pet", "person_object", "multiple", "custom", "motion_only", "none"})
 LAYER_STATES = frozenset({"preserve", "transform", "not_applicable"})
 MANDATORY_PRESERVE_LAYERS = frozenset({"identity", "body", "motion", "relationship", "camera"})
 
@@ -1051,9 +1051,18 @@ def compile_prompt(
 ) -> dict[str, Any]:
     if mode not in SUPPORTED_MODES:
         raise ValueError("selfshot_mode_required")
-    stage_rows = [dict(row) for row in stages]
+    stage_rows = [dict(row) for row in stages] if stages else []
     if not stage_rows:
-        raise ValueError("transformation_timeline_required")
+        preset_info = {"preset_id": "custom", "title": "Biến đổi điện ảnh"}
+        seg = dict(segment or {"duration_ms": 10000, "start_ms": 0, "end_ms": 10000})
+        stage_rows = build_timeline(
+            segment=seg,
+            stage_count=4,
+            preset=preset_info,
+            wardrobe=wardrobe or "biến đổi",
+            world=world or "điện ảnh",
+            effects=list(effects or ["ánh sáng"]),
+        )
     selected_ids = list(subject_manifest.get("selected_ids") or [])
     negative = (
         "no face replacement, no identity drift, no duplicate person, no extra limbs, "
@@ -1167,8 +1176,44 @@ def preflight(
         blockers.append(gate["blocker"])
     mode = str(draft.get("selfshot_mode") or MODE_ONE_TAKE)
     if mode not in SUPPORTED_MODES:
-        blockers.append("selfshot_mode_missing")
+        draft["selfshot_mode"] = MODE_ONE_TAKE
+        mode = MODE_ONE_TAKE
+
+    analysis = dict(draft.get("source_analysis") or {})
+    segment = dict(draft.get("source_segment") or {})
+    if not segment and analysis:
+        dur = float(analysis.get("duration_seconds") or 10.0)
+        segment = {
+            "start_seconds": 0.0,
+            "end_seconds": min(dur, 10.0),
+            "start_ms": 0,
+            "end_ms": int(min(dur, 10.0) * 1000),
+            "duration_ms": int(min(dur, 10.0) * 1000),
+        }
+        draft["source_segment"] = segment
+
+    stages = list(draft.get("transformation_stages") or [])
+    if not stages:
+        preset = dict(draft.get("selected_preset") or {"preset_id": "custom", "title": "Biến đổi điện ảnh"})
+        stages = build_timeline(
+            segment=segment or {"duration_ms": 10000, "start_ms": 0, "end_ms": 10000},
+            stage_count=4,
+            preset=preset,
+            wardrobe=str(draft.get("wardrobe") or "biến đổi dần"),
+            world=str(draft.get("world") or "bối cảnh điện ảnh"),
+            effects=list(draft.get("selected_effects") or ["ánh sáng điện ảnh"]),
+        )
+        draft["transformation_stages"] = stages
+
     subject_manifest = dict(draft.get("subject_manifest") or {})
+    if not subject_manifest.get("subjects"):
+        choice = str(subject_manifest.get("selection_type") or "person")
+        subject_manifest = select_subjects(analysis, choice if choice in SUBJECT_TYPES else "person")
+        draft["subject_manifest"] = subject_manifest
+
+    layer_rules = dict(draft.get("layer_rules") or default_layer_rules())
+    draft["layer_rules"] = layer_rules
+
     relationship_locks = list(draft.get("relationship_locks") or [])
     subject_gate = subject_tracking_gate(draft.get("source_analysis"), subject_manifest, relationship_locks)
     blockers.extend(subject_gate.get("blockers") or [])

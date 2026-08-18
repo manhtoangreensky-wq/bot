@@ -540,8 +540,17 @@ def compile_scene_prompts(
     interactions = "; ".join(interaction_labels) or "liên kết người - vật nguồn"
     content_text = _safe(content.get("title") or content.get("summary") or "Đổi bối cảnh video")
     dir_label = _safe(direction.get("label") or "Đổi bối cảnh")
+    plan_rows = [dict(row) for row in scene_plan] if scene_plan else []
+    if not plan_rows:
+        plan_rows = [{
+            "scene_id": 1,
+            "scene_index": 1,
+            "source_segment_start": 0.0,
+            "source_segment_end": 5.0,
+            "prompt_version": 1,
+        }]
     result = []
-    for row in scene_plan:
+    for row in plan_rows:
         scene = dict(row)
         idx = int(scene.get("scene_index") or 1)
         start_sec = scene.get("source_segment_start")

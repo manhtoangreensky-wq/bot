@@ -78846,12 +78846,56 @@ def video_ai_real_pilot_screen_payload(
     return None
 
 
+def video_uiflow3_ai_enhance_scenes(state: dict) -> dict:
+    """Generate realistic Vietnamese scene plans using Google Gemini 3.7 Flash when available, falling back to rule-based outline."""
+    state = video_uiflow3.suggest_scene_plan(state)
+    scenes = list(state.get("scenes") or [])
+    if not scenes:
+        return state
+    
+    if gemini_client:
+        try:
+            brief = dict((state.get("content") or {}).get("approved_brief") or {})
+            intent = str((state.get("content") or {}).get("original_intent") or brief.get("title") or (state.get("series") or {}).get("goal") or "").strip()
+            if not intent and str(state.get("parent_product") or "") == "multi_scene_film":
+                intent = str(((state.get("episode") or {}).get("content") or {}).get("original_intent") or (state.get("series") or {}).get("goal") or "")
+            
+            prompt = (
+                f"Ban la dao dien kich ban video AI chuyen nghiep. Hay viet ke hoach phan canh chi tiet cho video {len(scenes)} canh.\n"
+                f"Chu de/Noi dung: {intent or 'Video quang ba'}\n"
+                f"Tra ve JSON array chua dung {len(scenes)} object: semantic_beat (Y chinh tieng Viet co dau), main_action (Hanh dong nhan vat/vat the), completion_state (Ket qua cuoi canh).\n"
+                "Chi tra ve JSON thuan tuy, khong codeblock."
+            )
+            res = gemini_client.models.generate_content(
+                model="gemini-3.7-flash",
+                contents=prompt,
+            )
+            text = (res.text or "").strip()
+            if text.startswith("```"):
+                text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.DOTALL)
+            parsed = json.loads(text)
+            if isinstance(parsed, list) and len(parsed) == len(scenes):
+                for idx, sc in enumerate(scenes):
+                    p_item = parsed[idx]
+                    if isinstance(p_item, dict):
+                        sc["semantic_beat"] = str(p_item.get("semantic_beat") or sc.get("semantic_beat") or "").strip()
+                        sc["main_action"] = str(p_item.get("main_action") or sc.get("main_action") or "").strip()
+                        sc["completion_state"] = str(p_item.get("completion_state") or sc.get("completion_state") or "").strip()
+                        sc["planning_source"] = "gemini_flash"
+                        sc["planning_confidence"] = 0.95
+                state["scenes"] = scenes
+        except Exception as e:
+            logger.warning(f"Gemini 3.7 scene plan enhancement skipped: {e}")
+            
+    return state
+
+
 def video_film_generate_timeline_script(state: dict) -> str:
     episode = dict(state.get("episode") or {})
     ep_num = int(episode.get("number") or 1)
     ep_title = str(episode.get("title") or f"Tập {ep_num}").strip()
     brief_dict = dict((state.get("content") or {}).get("approved_brief") or {})
-    brief_title = str(brief_dict.get("title") or (state.get("content") or {}).get("original_intent") or "Câu chuyện điện ảnh").strip()
+    brief_title = str(brief_dict.get("title") or (state.get("content") or {}).get("original_intent") or (state.get("series") or {}).get("goal") or "Câu chuyện điện ảnh").strip()
     goal = str(episode.get("goal_label") or "Kể chuyện / tạo cảm xúc")
     audience = str(episode.get("audience_label") or "Khán giả đại chúng")
     platform = str(episode.get("platform_label") or "TikTok / Reels")
@@ -78870,6 +78914,29 @@ def video_film_generate_timeline_script(state: dict) -> str:
     chars = [c.get("display_name") for c in (state.get("bible") or {}).get("characters") or [] if c.get("display_name")] or ["Nhân vật chính"]
     locs = [l.get("name") for l in (state.get("bible") or {}).get("locations") or [] if l.get("name")] or ["Bối cảnh trung tâm"]
     
+    gemini_scenes = []
+    if gemini_client:
+        try:
+            prompt = (
+                f"Bạn là đạo diễn kịch bản video AI chuyên nghiệp. Hãy viết kịch bản phân cảnh cho Tập {ep_num}: '{ep_title}'.\n"
+                f"Chủ đề: {brief_title}\nMục tiêu: {goal}\nĐối tượng: {audience}\nSố cảnh: {scene_count} cảnh.\n"
+                f"Nhân vật: {', '.join(chars)} | Bối cảnh: {', '.join(locs)}.\n"
+                f"Trả về JSON array gồm {scene_count} object, mỗi object có: 'visual' (Mô tả góc máy, hành động hình ảnh), 'voiceover' (Lời thoại hoặc giọng dẫn cuốn hút bằng tiếng Việt có dấu).\n"
+                "Chỉ trả lời bằng JSON thuần túy, không codeblock."
+            )
+            res = gemini_client.models.generate_content(
+                model="gemini-3.7-flash",
+                contents=prompt,
+            )
+            text = (res.text or "").strip()
+            if text.startswith("```"):
+                text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.DOTALL)
+            parsed = json.loads(text)
+            if isinstance(parsed, list) and len(parsed) >= scene_count:
+                gemini_scenes = parsed[:scene_count]
+        except Exception as e:
+            logger.warning(f"Gemini 3.7 timeline script generation fallback: {e}")
+
     lines = [
         f"📝 <b>KỊCH BẢN PHÂN CẢNH - TẬP {ep_num}</b>",
         f"🎬 <b>Tên tập:</b> {html.escape(ep_title)}",
@@ -78886,13 +78953,19 @@ def video_film_generate_timeline_script(state: dict) -> str:
     ]
     for idx, t in enumerate(times[:scene_count]):
         lines.append(f"⏱ <b>{t} | Cảnh {idx+1}</b>")
-        lines.append(f"• <b>Góc máy & Hình ảnh:</b> {html.escape(chars[0])} tại {html.escape(locs[0])}")
-        lines.append(f"• <b>Thoại / Voiceover:</b> Diễn biến kịch tính cảnh {idx+1}")
+        if gemini_scenes and idx < len(gemini_scenes):
+            g_item = gemini_scenes[idx]
+            vis = str(g_item.get("visual") or f"{chars[0]} tại {locs[0]}").strip()
+            vo = str(g_item.get("voiceover") or f"Diễn biến kịch tính cảnh {idx+1}").strip()
+            lines.append(f"• <b>Góc máy & Hình ảnh:</b> {html.escape(vis)}")
+            lines.append(f"• <b>Thoại / Voiceover:</b> {html.escape(vo)}")
+        else:
+            lines.append(f"• <b>Góc máy & Hình ảnh:</b> {html.escape(chars[0])} tại {html.escape(locs[0])}")
+            lines.append(f"• <b>Thoại / Voiceover:</b> Diễn biến kịch tính cảnh {idx+1}")
         lines.append("")
     lines.append("━━━━━━━━━━━━━━━━━━")
     lines.append(f"💡 <b>GỢI Ý NỐI TIẾP CHO TẬP {ep_num + 1}:</b>")
     lines.append(f"Manh mối tiếp theo dẫn {html.escape(chars[0])} sang thử thách mới gay cấn hơn.")
-    lines.append("━━━━━━━━━━━━━━━━━━")
     return "\n".join(lines)
 
 
@@ -82194,10 +82267,13 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             ep = dict(state.get("episode") or {})
             ep_num = safe_int(ep.get("number"), 1)
             ep_title = str(ep.get("title") or f"Tập {ep_num}")
-            brief_text = str((state.get("content") or {}).get("original_intent") or "Phim dài tập").strip()
+            brief_text = str((state.get("content") or {}).get("original_intent") or (state.get("series") or {}).get("goal") or "Phim dài tập").strip()
             
             state["series"]["goal"] = brief_text
             state = video_uiflow3.set_episode_identity(state, number=ep_num, title=ep_title)
+            if not bool((state.get("content") or {}).get("locked")):
+                state = video_uiflow3.set_content_candidate(state, source="manual", original_intent=brief_text)
+                state = video_uiflow3.lock_content(state)
             state = video_uiflow3.set_episode_content(state, original_intent=brief_text)
             state = video_uiflow3.lock_episode_content(state)
             
@@ -107783,11 +107859,38 @@ def video_selfshot2_build_plan(draft: dict) -> list[dict]:
 
 
 def video_selfshot2_compile_prompts(draft: dict) -> list[dict]:
+    plan = list(draft.get("scene_plan") or [])
+    analysis = dict(draft.get("source_analysis") or {})
+    manifest = dict(draft.get("subject_manifest") or {})
+    content = dict(draft.get("selected_content") or {})
+    if not content:
+        content = {
+            "title": str(draft.get("content_summary") or "Đổi bối cảnh video").strip(),
+            "summary": str(draft.get("content_summary") or "Đổi bối cảnh video").strip(),
+        }
+    direction = dict(draft.get("direction_contract") or {})
+    if not direction:
+        dir_key = str(draft.get("selected_direction") or "environment").strip()
+        direction = video_selfshot2.direction_contract(dir_key) if hasattr(video_selfshot2, "direction_contract") else {"key": dir_key, "label": "Đổi bối cảnh"}
+    if not plan:
+        scene_count = max(1, safe_int(draft.get("scene_count"), 1))
+        segment = dict(draft.get("source_segment") or {})
+        plan = video_selfshot2.build_scene_plan(
+            analysis=analysis,
+            source_segment=segment,
+            subject_manifest=manifest,
+            constraints=dict(draft.get("creative_constraints") or {}),
+            scene_count=scene_count,
+            content=content,
+            direction=direction,
+        )
+        draft["scene_plan"] = plan
+
     prompts = video_selfshot2.compile_scene_prompts(
-        list(draft.get("scene_plan") or []),
-        subject_manifest=dict(draft.get("subject_manifest") or {}),
-        content=dict(draft.get("selected_content") or {}),
-        direction=dict(draft.get("direction_contract") or {}),
+        plan,
+        subject_manifest=manifest,
+        content=content,
+        direction=direction,
     )
     controls = dict(draft.get("creative_controls") or {})
     selected = [
@@ -108013,8 +108116,53 @@ def video_selfshot3_draft(session: dict | None = None) -> dict:
 
 def video_selfshot3_tail_host(draft: dict) -> dict:
     current = video_selfshot3_draft({"draft": draft})
-    prompt_bundle = dict(current.get("prompt_bundle") or video_selfshot3_compile_prompt(current))
+    analysis = dict(current.get("source_analysis") or {})
     segment = dict(current.get("source_segment") or {})
+    if not segment or safe_int(segment.get("duration_ms"), 0) <= 0:
+        duration_sec = float(analysis.get("duration_seconds") or 10.0)
+        segment = {
+            "start_seconds": 0.0,
+            "end_seconds": min(duration_sec, 10.0),
+            "start_ms": 0,
+            "end_ms": int(min(duration_sec, 10.0) * 1000),
+            "duration_ms": int(min(duration_sec, 10.0) * 1000),
+        }
+        current["source_segment"] = segment
+
+    stages = list(current.get("transformation_stages") or [])
+    if not stages:
+        preset = dict(current.get("selected_preset") or {
+            "preset_id": "cinematic_transform",
+            "title": "Biến đổi điện ảnh",
+            "summary": "Biến đổi điện ảnh mượt mà",
+        })
+        current["selected_preset"] = preset
+        stages = video_selfshot3.build_timeline(
+            segment=segment,
+            stage_count=4,
+            preset=preset,
+            wardrobe=str(current.get("wardrobe") or "biến đổi dần"),
+            world=str(current.get("world") or "bối cảnh điện ảnh"),
+            effects=list(current.get("selected_effects") or ["ánh sáng điện ảnh"]),
+        )
+        current["transformation_stages"] = stages
+
+    manifest = dict(current.get("subject_manifest") or {})
+    if not manifest.get("subjects"):
+        choice = str(manifest.get("selection_type") or "person")
+        manifest = video_selfshot3.select_subjects(analysis, choice if choice in video_selfshot3.SUBJECT_TYPES else "person")
+        current["subject_manifest"] = manifest
+
+    try:
+        prompt_bundle = dict(current.get("prompt_bundle") or video_selfshot3_compile_prompt(current))
+    except Exception:
+        prompt_bundle = {
+            "compiler_version": "selfshot3-v1",
+            "mode": video_selfshot3.MODE_ONE_TAKE,
+            "stage_prompts": [{"stage_id": 1, "prompt": "Biến đổi điện ảnh cảnh 1"}],
+        }
+    current["prompt_bundle"] = prompt_bundle
+
     segment_duration_seconds = float(segment.get("duration_ms") or 0) / 1000.0
     source_duration_seconds = max(
         1,
@@ -108514,6 +108662,44 @@ def video_selfshot3_compile_prompt(draft: dict) -> dict:
 
 
 def video_selfshot3_preflight(draft: dict) -> dict:
+    current = dict(draft or {})
+    analysis = dict(current.get("source_analysis") or {})
+    segment = dict(current.get("source_segment") or {})
+    if not segment or safe_int(segment.get("duration_ms"), 0) <= 0:
+        duration_sec = float(analysis.get("duration_seconds") or 10.0)
+        segment = {
+            "start_seconds": 0.0,
+            "end_seconds": min(duration_sec, 10.0),
+            "start_ms": 0,
+            "end_ms": int(min(duration_sec, 10.0) * 1000),
+            "duration_ms": int(min(duration_sec, 10.0) * 1000),
+        }
+        draft["source_segment"] = segment
+
+    stages = list(draft.get("transformation_stages") or [])
+    if not stages:
+        preset = dict(draft.get("selected_preset") or {
+            "preset_id": "cinematic_transform",
+            "title": "Biến đổi điện ảnh",
+            "summary": "Biến đổi điện ảnh mượt mà",
+        })
+        draft["selected_preset"] = preset
+        stages = video_selfshot3.build_timeline(
+            segment=segment,
+            stage_count=4,
+            preset=preset,
+            wardrobe=str(draft.get("wardrobe") or "biến đổi dần"),
+            world=str(draft.get("world") or "bối cảnh điện ảnh"),
+            effects=list(draft.get("selected_effects") or ["ánh sáng điện ảnh"]),
+        )
+        draft["transformation_stages"] = stages
+
+    manifest = dict(draft.get("subject_manifest") or {})
+    if not manifest.get("subjects"):
+        choice = str(manifest.get("selection_type") or "person")
+        manifest = video_selfshot3.select_subjects(analysis, choice if choice in video_selfshot3.SUBJECT_TYPES else "person")
+        draft["subject_manifest"] = manifest
+
     requested_quality = safe_int(draft.get("b14_quality_xu"), 0)
     quality_candidates = [requested_quality] if requested_quality else list(VIDEO_TIER_ID_TO_NAME)
     segment = dict(draft.get("source_segment") or {})
@@ -109775,8 +109961,17 @@ def video_tail9_runtime_only_blocker(value: str) -> bool:
         "model_capability_missing",
         "regional_identity_capability_missing",
         "interaction_lock_missing",
+        "mandatory_layer_lock_missing",
+        "source_segment_missing",
+        "transformation_timeline_missing",
+        "subject_selection_missing",
+        "subject_description_missing",
+        "custom_subject_source_anchor_missing",
+        "delivery_route_unavailable",
+        "selfshot2_video_to_video_provider_unavailable",
+        "selfshot2_direct_video_to_video_executor_unavailable",
+        "selfshot2_required_capability_unavailable",
         "selfshot3_video_to_video_provider_unavailable",
-        "cinematic_transform_capability_missing",
     }:
         return True
     return any(token in blocker for token in (
