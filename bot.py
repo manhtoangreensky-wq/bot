@@ -80068,12 +80068,12 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         duration_rows = []
         for offset in range(0, len(durations), 2):
             duration_rows.append([
-                (("✅ " if selected_duration == value else "") + (f"{value // 60} phút" if value >= 60 else f"{value} giây"), f"vid3|duration|{value}")
+                (("✅ " if selected_duration == value else "⏱ ") + (f"{value // 60} phút" if value >= 60 else f"{value} giây"), f"vid3|duration|{value}")
                 for value in durations[offset:offset + 2]
             ])
         rows = [
-            [(f"{'✅ ' if selected_ratio == '9:16' else ''}9:16", "vid3|ratio|9x16"), (f"{'✅ ' if selected_ratio == '16:9' else ''}16:9", "vid3|ratio|16x9")],
-            [(f"{'✅ ' if selected_ratio == '1:1' else ''}1:1", "vid3|ratio|1x1"), (f"{'✅ ' if selected_ratio == '4:5' else ''}4:5", "vid3|ratio|4x5")],
+            [(f"{'✅ ' if selected_ratio == '9:16' else ''}📱 9:16 (Dọc)", "vid3|ratio|9x16"), (f"{'✅ ' if selected_ratio == '16:9' else ''}🖥 16:9 (Ngang)", "vid3|ratio|16x9")],
+            [(f"{'✅ ' if selected_ratio == '1:1' else ''}⬜ 1:1 (Vuông)", "vid3|ratio|1x1"), (f"{'✅ ' if selected_ratio == '4:5' else ''}🖼 4:5 (Dọc FB)", "vid3|ratio|4x5")],
             *duration_rows,
             [("✍️ Nhập thời lượng khác", "vid3|duration_custom"), ("✅ Hoàn tất chọn định dạng video", "vid3|format_done")],
             *video_uiflow3_nav_rows(),
@@ -101803,6 +101803,13 @@ async def video_b14_rehydrate_auto_refresh_registry(context, *, limit: int = 100
             }
         )
         VIDEO_STATUS_AUTO_REFRESH_JOBS[key] = record
+        video_b14_persist_auto_refresh_metadata(
+            target.get("job_id"),
+            {
+                "status_panel_message_id": target.get("message_id"),
+                "elapsed_live_tick_enabled": True,
+            },
+        )
         registered += 1
     return {
         "ok": True,
@@ -101992,7 +101999,10 @@ async def video_b14_auto_refresh_tick(context, key: str) -> dict:
         chat_id=record.get("chat_id") or 0,
         project_id=record.get("project_id") or 0,
     )
-    if not preflight.get("identity_ok"):
+    identity_ok = preflight.get("identity_ok")
+    if identity_ok is None:
+        identity_ok = bool(preflight.get("job") or preflight.get("project"))
+    if not identity_ok:
         record.update(
             {
                 "stopped": True,
@@ -262620,10 +262630,11 @@ def remote_worker_status_snapshot() -> dict:
 
 @fastapi_app.post("/internal/worker/heartbeat")
 async def internal_worker_heartbeat(request: Request):
-    worker_scope = verify_local_worker_access(request)
+    worker_scope = verify_local_worker_access(request) or "all"
     payload = await read_json_body(request)
     payload_scope = str(payload.get("job_scope") or worker_scope).strip().lower()
-    if payload_scope != worker_scope or payload_scope not in LOCAL_WORKER_JOB_SCOPES:
+    valid_scopes = globals().get("LOCAL_WORKER_JOB_SCOPES", frozenset({"all", "video_edit_only"}))
+    if payload_scope != worker_scope or payload_scope not in valid_scopes:
         raise HTTPException(status_code=403, detail="worker job scope mismatch")
     worker_id = str(payload.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
     worker_sha = frame_video_public_seam.sanitize_frame_video_worker_sha(payload.get("worker_sha"))
