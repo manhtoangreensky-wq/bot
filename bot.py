@@ -102819,14 +102819,22 @@ def product_video_provider_public_route_preflight(
     )
     public_maintenance = product_video_public_maintenance_enabled()
     worker = product_video_worker_admission_status()
+    has_cloud_provider = bool(
+        (SHOPAIKEY_API_KEY and (SHOPAIKEY_ENABLED or os.getenv("SHOPAIKEY_ENABLED") in {"1", "true", "yes"}))
+        or (KEY4U_API_KEY and (KEY4U_ENABLED or os.getenv("KEY4U_ENABLED") in {"1", "true", "yes"}))
+        or provider_configured
+    )
     worker_compatible = bool(
-        worker.get("worker_version_compatible")
-        and worker.get("worker_connected")
-        and worker.get("heartbeat_fresh")
-        and worker.get("lease_valid")
-        and worker.get("sha_match")
-        and worker.get("capability_match")
-        and not worker.get("worker_identity_conflict")
+        has_cloud_provider
+        or (
+            worker.get("worker_version_compatible")
+            and worker.get("worker_connected")
+            and worker.get("heartbeat_fresh")
+            and worker.get("lease_valid")
+            and worker.get("sha_match")
+            and worker.get("capability_match")
+            and not worker.get("worker_identity_conflict")
+        )
     )
     worker_incompatible_blocker = (
         ""
@@ -102834,9 +102842,12 @@ def product_video_provider_public_route_preflight(
         else str(worker.get("worker_admission_block_reason") or "worker_incompatible")
     )
     worker_available = bool(
-        worker.get("worker_connected")
-        and worker.get("heartbeat_fresh")
-        and worker.get("lease_valid")
+        has_cloud_provider
+        or (
+            worker.get("worker_connected")
+            and worker.get("heartbeat_fresh")
+            and worker.get("lease_valid")
+        )
     )
     provider_configured = bool(
         contract_valid_chain
