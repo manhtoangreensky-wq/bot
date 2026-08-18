@@ -1,4 +1,4 @@
-﻿"""
+"""
 ╔══════════════════════════════════════════════════════════════════╗
 ║   TOAN AAS v1.0 Beta - DYNAMIC QR READY                         ║
 ║   FastAPI + Telegram Bot (Shared Event Loop via Lifespan)        ║
@@ -114151,11 +114151,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 current = video_selfshot2_tail_host(current)
                 save_video_selfshot2_draft(uid, current, step="selfshot2:tail")
                 tail, owner, host = video_tail9_context(uid, context)
+                tail = video_tail9.apply_content_contract(tail, current)
                 tail = video_selfshot2_branding_tail(tail, current)
                 tail["review_status"] = "not_ready"
                 tail["summary_status"] = "not_ready"
                 save_video_tail9_state(uid, context, tail, owner, host)
-                return await video_tail9_render(query, uid, context, "addon")
+                return await video_tail9_render(query, uid, context, "review")
             if operation == "review_addons":
                 overrides = dict(current.get("screen_return_overrides") or {})
                 overrides["addons"] = "review"
@@ -114169,10 +114170,15 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 if (
                     str(current.get("video_tail_return_to") or "") == "review"
                     and current_screen == "prompts"
-                    and screen == "audio"
+                    and screen == "review"
                 ):
                     current.pop("video_tail_return_to", None)
+                    current = video_selfshot2_tail_host(current)
                     save_video_selfshot2_draft(uid, current, step="selfshot2:tail_review")
+                    tail, owner, host = video_tail9_context(uid, context)
+                    tail = video_tail9.apply_content_contract(tail, current)
+                    tail["review_status"] = "not_ready"
+                    save_video_tail9_state(uid, context, tail, owner, host)
                     return await video_tail9_render(query, uid, context, "review")
                 current_parent = video_selfshot2.screen_parent(current_screen, current)
                 overrides = dict(current.get("screen_return_overrides") or {})
@@ -114376,11 +114382,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 current = video_selfshot3_tail_host(current)
                 save_video_selfshot3_draft(uid, current, step="selfshot3:tail")
                 tail, owner, host = video_tail9_context(uid, context)
+                tail = video_tail9.apply_content_contract(tail, current)
                 tail["branding_back_to"] = "addon"
                 tail["summary_status"] = "not_ready"
                 tail["review_status"] = "not_ready"
                 save_video_tail9_state(uid, context, tail, owner, host)
-                return await video_tail9_render(query, uid, context, "addon")
+                return await video_tail9_render(query, uid, context, "review")
             if operation == "prompt":
                 return await video_selfshot3_render_prompt_review(query, uid, current)
             if not video_selfshot3.callback_operation_allowed(current_screen, operation):
@@ -267526,3 +267533,8 @@ if __name__ == "__main__":
         port=PORT,
         log_level="info"
     )
+
+
+
+
+
