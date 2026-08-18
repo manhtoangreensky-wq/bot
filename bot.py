@@ -102842,22 +102842,14 @@ def product_video_provider_public_route_preflight(
     )
     public_maintenance = product_video_public_maintenance_enabled()
     worker = product_video_worker_admission_status()
-    has_cloud_provider = bool(
-        (SHOPAIKEY_API_KEY and (SHOPAIKEY_ENABLED or os.getenv("SHOPAIKEY_ENABLED") in {"1", "true", "yes"}))
-        or (KEY4U_API_KEY and (KEY4U_ENABLED or os.getenv("KEY4U_ENABLED") in {"1", "true", "yes"}))
-        or provider_configured
-    )
     worker_compatible = bool(
-        has_cloud_provider
-        or (
-            worker.get("worker_version_compatible")
-            and worker.get("worker_connected")
-            and worker.get("heartbeat_fresh")
-            and worker.get("lease_valid")
-            and worker.get("sha_match")
-            and worker.get("capability_match")
-            and not worker.get("worker_identity_conflict")
-        )
+        worker.get("worker_version_compatible")
+        and worker.get("worker_connected")
+        and worker.get("heartbeat_fresh")
+        and worker.get("lease_valid")
+        and worker.get("sha_match")
+        and worker.get("capability_match")
+        and not worker.get("worker_identity_conflict")
     )
     worker_incompatible_blocker = (
         ""
@@ -102865,12 +102857,9 @@ def product_video_provider_public_route_preflight(
         else str(worker.get("worker_admission_block_reason") or "worker_incompatible")
     )
     worker_available = bool(
-        has_cloud_provider
-        or (
-            worker.get("worker_connected")
-            and worker.get("heartbeat_fresh")
-            and worker.get("lease_valid")
-        )
+        worker.get("worker_connected")
+        and worker.get("heartbeat_fresh")
+        and worker.get("lease_valid")
     )
     provider_configured = bool(
         contract_valid_chain
@@ -102883,6 +102872,16 @@ def product_video_provider_public_route_preflight(
             )
         )
     )
+    has_cloud_provider = bool(
+        provider_configured
+        and any(
+            token in str(p).lower()
+            for p in contract_valid_chain
+            for token in ("shopaikey", "key4u", "kling", "veo", "cloud", "generic", "http")
+        )
+    )
+    execution_mode = "cloud" if has_cloud_provider else "local"
+    local_worker_required = not has_cloud_provider
     freeze_admission = product_video_provider_freeze_admission_snapshot(
         chain,
         explicit_public_final_confirm=explicit_public_final_confirm,
@@ -102896,6 +102895,8 @@ def product_video_provider_public_route_preflight(
             "provider_configured": provider_configured,
             "worker_available": worker_available,
             "worker_compatible": worker_compatible,
+            "execution_mode": execution_mode,
+            "local_worker_required": local_worker_required,
         },
     )
     try:
@@ -103009,6 +103010,9 @@ def product_video_provider_public_route_preflight(
         "worker_compatible": worker_compatible,
         "worker_incompatible_blocker": worker_incompatible_blocker,
         "worker_admission_block_reason": str(worker.get("worker_admission_block_reason") or ""),
+        "execution_mode": execution_mode,
+        "local_worker_required": local_worker_required,
+        "cloud_provider_ready": bool(provider_configured),
         "provider_hard_block_reason": str(eligibility_snapshot.get("hard_block_reason") or hard_block_reason),
         "global_hard_block_reason": hard_block_reason,
         "provider_hard_block_reason_by_provider": provider_hard_blocks,
@@ -118123,6 +118127,17 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             project_id=project_id,
         )
         if not status_bundle.get("identity_ok"):
+            if job_id <= 0 and draft.get("b14_submit_preflight_snapshot"):
+                return await video_b14_send_or_edit_status_panel(
+                    query,
+                    context,
+                    session,
+                    None,
+                    uid,
+                    lang,
+                    register_auto_refresh=False,
+                    edit_existing_only=True,
+                )
             return await video_b14_edit_existing_status_message(
                 query,
                 "⚠️ Không tìm thấy bảng trạng thái video thuộc phiên hiện tại. TOAN AAS chưa xử lý thêm và chưa trừ Xu.",
