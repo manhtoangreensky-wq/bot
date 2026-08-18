@@ -74452,7 +74452,6 @@ VIDEO_UIFLOW3_SHARED_TAIL_PRODUCTS = frozenset({
 VIDEO_TAIL9_SHARED_UI_PRODUCTS = frozenset({
     *VIDEO_UIFLOW3_SHARED_TAIL_PRODUCTS,
     "self_shot_scene_change",
-    "self_shot_cinematic_transform",
 })
 
 VIDEO_UIFLOW3_DEFERRED_RUNTIME_PRODUCTS = frozenset({
@@ -88026,6 +88025,7 @@ def video_flow6_preflight_for_state(user_id: int, state: dict, quality: int) -> 
         max(1, safe_int(current.get("scene_count"), 1)),
         explicit_public_final_confirm=True,
     )
+    worker_ready = bool(worker_ready or public_preflight.get("ready"))
     result = video_flow6.preflight(
         context_state,
         package_available=bool(route_selection.get("ok")),
@@ -112288,6 +112288,8 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
             ]]),
         )
     if screen == "addon":
+        if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
+            return await video_tail9_render(query, user_id, context, "quality")
         if owner == "video_edit":
             return await video_tail9_render(query, user_id, context, "review")
         if str(tail.get("video_product_type") or "") not in VIDEO_TAIL9_SHARED_UI_PRODUCTS:
@@ -112302,6 +112304,8 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
             reply_markup=video_tail9_addon_keyboard(tail),
         )
     if screen == "review":
+        if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
+            return await video_tail9_render(query, user_id, context, "quality")
         if owner == "video_edit":
             tail["status_stage"] = "review"
             save_video_tail9_state(user_id, context, tail, owner, host)
@@ -114229,7 +114233,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 tail,
                 available_xu=available_xu,
                 provider_ready=bool(admission_evaluation.get("ready")),
-                worker_ready=bool(worker_snapshot.get("worker_version_compatible")),
+                worker_ready=bool(worker_snapshot.get("worker_version_compatible") or admission_evaluation.get("ready")),
                 is_admin_or_owner=is_internal,
                 admin_detail=internal_detail,
             )
@@ -135248,9 +135252,16 @@ async def safe_edit_query_message(query, text: str, reply_markup=None, parse_mod
     try:
         return await query.edit_message_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
     except Exception as e:
-        if "message is not modified" in str(e).lower():
+        err_str = str(e).lower()
+        if "message is not modified" in err_str:
             return None
-        if any(fragment in str(e).lower() for fragment in (
+        if "can't parse entities" in err_str or "entity" in err_str or "parse" in err_str:
+            logger.warning("safe_edit_query_message parse fallback | %s", sanitize_log_text(str(e))[:240])
+            try:
+                return await query.edit_message_text(html_message_to_plain_text(text), parse_mode=None, reply_markup=reply_markup)
+            except Exception as fallback_error:
+                logger.warning("safe_edit_query_message plain fallback failed | %s", sanitize_log_text(str(fallback_error))[:240])
+        if any(fragment in err_str for fragment in (
             "there is no text in the message to edit",
             "query is too old",
             "message to edit not found",
