@@ -823,13 +823,23 @@ def apply_content_contract(state: dict[str, Any], contract: dict[str, Any] | Non
                 source.get("idea_scene_contents"),
                 source.get("idea_scene_content"),
                 source.get("scene_drafts"),
+                source.get("video_prompts"),
+                source.get("scene_plan") if isinstance(source.get("scene_plan"), list) else [],
                 (source.get("scene_plan") or {}).get("scenes") if isinstance(source.get("scene_plan"), dict) else [],
                 (source.get("plan") or {}).get("scenes") if isinstance(source.get("plan"), dict) else [],
+                ((source.get("prompt_bundle") or {}).get("prompts") if isinstance(source.get("prompt_bundle"), dict) else []),
             )
             if value
         ),
         [],
     )
+    if not selected_prompt and isinstance(source.get("prompt_bundle"), dict):
+        selected_prompt = str(
+            source.get("prompt_bundle", {}).get("summary_prompt")
+            or source.get("prompt_bundle", {}).get("master_prompt")
+            or (source.get("prompt_bundle", {}).get("prompts") or [""])[0]
+            or ""
+        ).strip()
     if content_source:
         current["content_source"] = content_source
     if content_mode:
