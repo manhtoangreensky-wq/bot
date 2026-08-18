@@ -111870,10 +111870,12 @@ def video_tail9_catalog_report(tail: dict, capability: dict | None = None) -> di
     return report
 
 
-def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None = None) -> str:
+def video_tail9_quality_text(tail: dict, capability: dict | None = None, catalog: dict | None = None) -> str:
     catalog = dict(catalog or video_tail9_catalog_report(tail, capability))
-    if not catalog.get("ok") or not catalog.get("offers"):
-        return video_tail9_public_blocker_text()
+    offers = list(catalog.get("offers") or [])
+    if not offers:
+        fallback_cat = video_uifreeze1.catalog_report("self_shot_cinematic_transform", scene_count=1, ratio="9:16", required_capability="video_to_video")
+        offers = list(fallback_cat.get("offers") or [])
     scene_count = max(1, safe_int(tail.get("scene_count"), 1))
     selfshot3_dynamic_scenes = str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID
     scene_count_label = "Tính theo gói và thời lượng nguồn" if selfshot3_dynamic_scenes else str(scene_count)
@@ -111891,7 +111893,7 @@ def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None 
         "Mỗi gói dưới đây ghi rõ thời lượng, chất lượng, mục đích sử dụng và giá theo cảnh:",
         "Khuyến mãi Video nhiều cảnh: 1 cảnh không giảm; 2–5 cảnh giảm 10%; 6–10 cảnh giảm 15%; 11–20 cảnh giảm 20%; add-on tính riêng.",
     ])
-    for offer in catalog.get("offers") or []:
+    for offer in offers:
         tier_id = safe_int(offer.get("tier_id"), 0)
         product = video_public_quality_product(tier_id)
         offer_duration_label = f"{product['seconds']} giây/cảnh" 
@@ -111929,9 +111931,13 @@ def video_tail9_quality_keyboard(
     selectable: bool = True,
 ) -> InlineKeyboardMarkup:
     catalog = dict(catalog or video_tail9_catalog_report(tail))
+    offers = list(catalog.get("offers") or [])
+    if not offers:
+        fallback_cat = video_uifreeze1.catalog_report("self_shot_cinematic_transform", scene_count=1, ratio="9:16", required_capability="video_to_video")
+        offers = list(fallback_cat.get("offers") or [])
     buttons = [
         (video_b14_package_button_label(safe_int(offer.get("tier_id"), 0)), f"video_tail|quality|select|{safe_int(offer.get('tier_id'), 0)}")
-        for offer in catalog.get("offers") or []
+        for offer in offers
     ] if selectable else []
     rows = []
     for index in range(0, len(buttons), 2):
@@ -111940,7 +111946,17 @@ def video_tail9_quality_keyboard(
             row.append(("🔄 Kiểm tra lại", "video_tail|quality|open"))
         rows.append(row)
     if not rows:
-        return video_tail9_public_blocker_keyboard()
+        default_tiers = [300, 400, 500, 600, 700, 800, 1000, 1200, 1500]
+        buttons = [
+            (video_b14_package_button_label(t), f"video_tail|quality|select|{t}")
+            for t in default_tiers
+        ]
+        rows = []
+        for index in range(0, len(buttons), 2):
+            row = buttons[index:index + 2]
+            if len(row) == 1:
+                row.append(("🔄 Kiểm tra lại", "video_tail|quality|open"))
+            rows.append(row)
     rows.append([("⬅️ Quay lại", "video_tail|quality|back"), ("🎬 Menu Video", "menu|main_video")])
     return video_scene3_keyboard(rows)
 
@@ -113887,9 +113903,6 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
     if section == "quality":
         if tail.get("final_confirmed"):
             return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
-        required_screen = video_tail9.next_required_screen(tail)
-        if required_screen:
-            return await video_tail9_render(query, uid, context, required_screen)
         if action in {"open", "change"}:
             return await video_tail9_render(query, uid, context, "quality")
         if action == "back":
@@ -113916,17 +113929,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 quality,
             )
             catalog = video_tail9_catalog_report(selection_tail, capability)
-            if quality not in set(catalog.get("tier_ids") or []):
-                return await video_tail9_render(query, uid, context, "quality")
-            if not catalog.get("ok"):
-                tail = video_tail9.set_capability(tail, capability)
-                save_video_tail9_state(uid, context, tail, owner, host)
-                return await safe_edit_or_send(
-                    query,
-                    video_tail9_public_blocker_text(),
-                    parse_mode="HTML",
-                    reply_markup=video_tail9_public_blocker_keyboard(),
-                )
+            tail = video_tail9.set_capability(tail, capability)
+            save_video_tail9_state(uid, context, tail, owner, host)
             try:
                 if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
                     tail = selection_tail
