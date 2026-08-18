@@ -76229,7 +76229,7 @@ def video_ai_real_build_quick_plan(
 
     if not bool((state.get("format") or {}).get("scene_count_confirmed")):
         state = video_uiflow3.confirm_scene_count(state, scene_count)
-    state = video_uiflow3.suggest_scene_plan(state)
+    state = video_uiflow3_ai_enhance_scenes(state)
     state = video_uiflow3.auto_assign_scenes(state)
 
     product_ids = [
@@ -82207,7 +82207,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             state["format"]["scene_count_confirmed"] = True
             state["format"]["duration_seconds"] = dur
             state = video_uiflow3.confirm_scene_count(state, scene_count)
-            state = video_uiflow3.suggest_scene_plan(state)
+            state = video_uiflow3_ai_enhance_scenes(state)
             state = video_uiflow3.auto_assign_scenes(state)
             state = video_uiflow3.mark_sections_complete(
                 state,
@@ -82311,7 +82311,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             
             try:
                 updated = video_uiflow3.confirm_scene_count(state, scene_count)
-                updated = video_uiflow3.suggest_scene_plan(updated)
+                updated = video_uiflow3_ai_enhance_scenes(updated)
                 updated = video_uiflow3.auto_assign_scenes(updated)
                 state = video_uiflow3_after_service_update(state, updated)
             except Exception:
@@ -82367,7 +82367,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         elif action == "scene_plan_edit":
             state = video_uiflow3_open_view(state, "scene_plan_list")
         elif action == "scene_plan_auto":
-            state = video_uiflow3.suggest_scene_plan(state)
+            state = video_uiflow3_ai_enhance_scenes(state)
             state = video_uiflow3_clear_transient(state)
             state["navigation"]["current_step"] = "scene_plan"
         elif action == "plan_scene" and values:
@@ -112373,14 +112373,9 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             current = video_uiflow3.normalize_state(host)
             current[VIDEO_TAIL9_STATE_KEY] = tail
             current = video_uiflow3_clear_transient(current, keep_return=False)
-            if str(current.get("parent_product") or "") == "multi_scene_film":
-                current["navigation"]["current_step"] = "scene_plan"
-                current = video_uiflow3_open_view(current, "scene_plan_list")
-                current["navigation"]["return_to"] = None
-            else:
-                current["navigation"]["current_step"] = "summary"
-                current["navigation"]["return_to"] = None
-                current = video_uiflow3.begin_summary_edit(current, "prompts")
+            current["navigation"]["current_step"] = "summary"
+            current["navigation"]["return_to"] = None
+            current["ui_view"] = ""
             legacy_compat = dict(current.get("legacy_compat") or {})
             legacy_compat["video_tail_return_to"] = "addon"
             current["legacy_compat"] = legacy_compat
