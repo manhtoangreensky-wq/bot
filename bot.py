@@ -121292,6 +121292,10 @@ def translation_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_hub_copy(lang)
     return InlineKeyboardMarkup([
         [
+            InlineKeyboardButton("🇻🇳 Việt ⇄ 🇺🇸 Anh", callback_data="menu|translation_pair_quick_vi_en"),
+            InlineKeyboardButton("🇻🇳 Việt ⇄ 🇨🇳 Trung", callback_data="menu|translation_pair_quick_vi_zh"),
+        ],
+        [
             InlineKeyboardButton(f"🌐 {copy['translation_language']}", callback_data="menu|translation_language_hub"),
             InlineKeyboardButton(f"🎬 {copy['translation_subtitle_dubbing']}", callback_data="menu|translation_video_factory"),
         ],
@@ -121533,6 +121537,8 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
         rows.append([InlineKeyboardButton("💾 Backup DB", callback_data="menu|system_backup_help"), InlineKeyboardButton("❤️ Health", callback_data="menu|system_health_help")])
         rows.append([InlineKeyboardButton("📊 Providers", callback_data="menu|admin_provider_status"), InlineKeyboardButton("✅ Sales Ready", callback_data="menu|smoke_sales_ready")])
         rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
+    elif section == "support":
+        rows.append([InlineKeyboardButton("💰 Nạp Xu ngay", callback_data="pricing|main"), InlineKeyboardButton("📖 Hướng dẫn chi tiết", callback_data="menu|main_guide")])
     elif section == "operator" and is_admin:
         rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system")])
     rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{menu_parent_action(section)}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
@@ -137510,6 +137516,13 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             parse_mode="HTML",
             reply_markup=translation_voice_menu_keyboard(lang),
         )
+    if action.startswith("translation_pair_quick_"):
+        copy = public_hub_copy(normalize_user_language(lang) or "vi")
+        pair = action.replace("translation_pair_quick_", "")
+        src, tgt = ("vi", "en") if pair == "vi_en" else ("vi", "zh")
+        set_translation_pair_draft(query.from_user.id, "two_way", source=src, target=tgt)
+        text = f"<b>{copy['translation_two_way_entry']}</b>\n\nCặp dịch đã chọn: <b>{src.upper()} ⇄ {tgt.upper()}</b>.\n{copy['translation_picker_no_charge']}"
+        return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=translation_pair_keyboard("two_way", lang, query.from_user.id))
     if action == "translation_two_way":
         copy = public_hub_copy(normalize_user_language(lang) or "vi")
         set_translation_pair_draft(query.from_user.id, "two_way")
