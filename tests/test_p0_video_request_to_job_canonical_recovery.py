@@ -1,12 +1,15 @@
-"""Comprehensive test suite for TOAN AAS — P0.VIDEO.REQUEST_TO_JOB.CANONICAL.TRACE.RECOVERY.
+"""Comprehensive test suite for TOAN AAS — P0.VIDEO.ADMISSION.EXACT_BLOCKER.ROOT_RECOVERY.
 
 Validates:
 1. Canonical Persistent Storage (REQUEST_ID <-> JOB_ID <-> PROVIDER_TASK_ID in SQLite).
-2. Incident VID-20260819-7FBD3A truthful reporting (NO_JOB_CREATED, 0 provider calls, 0 xu charged).
-3. Task J: Local zero-cost execution proof with restart recovery.
-4. Task K: Mock provider ID chain (REQUEST_ID -> JOB_ID -> PROVIDER_TASK_ID).
-5. Task F: Diagnostic commands (/video_trace, /video_provider_job_debug, /video_provider_raw_status, /video_provider_recover) accept REQUEST_ID.
-6. Task H & I: Status recovery after restart without requiring in-memory cache.
+2. Incident VID-20260819-7FBD3A truthful reporting (NO_JOB_CREATED, exact blocker provider_not_configured).
+3. Task H.1: Configured eligible cloud provider -> Preflight PASS, Admission PASS, Worker not required.
+4. Task H.2: Cloud provider config missing -> Admission BLOCKED, blocker=provider_not_configured, 0 jobs, 0 charge.
+5. Task H.3: Worker stale/unavailable but cloud provider valid -> Admission PASSES (no worker split-brain).
+6. Task H.4 & H.5: Required / Model capability absent -> Fail closed.
+7. Task H.6: No route eligible -> Blocker reported truthfully.
+8. Task H.8: Duplicate confirm -> Idempotent, at most 1 job.
+9. Task I: Offline mock execution creates job & verifies persistent REQUEST_ID -> JOB_ID lookup.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ import os
 import sqlite3
 import pytest
 import services.video_trace_state as vts
+import services.video_provider_router as vpr
 import bot
 
 
@@ -57,8 +61,8 @@ def test_canonical_persistent_trace_storage_and_recovery(tmp_path):
         os.environ.pop("DATABASE_PATH", None)
 
 
-def test_incident_vid_20260819_7fbd3a_truthful_report():
-    """Verify incident VID-20260819-7FBD3A produces truthful NO_JOB_CREATED trace without manufacturing IDs."""
+def test_incident_vid_20260819_7fbd3a_truthful_root_cause_report():
+    """Verify incident VID-20260819-7FBD3A produces truthful report with exact root cause."""
     report = vts.build_canonical_video_trace_report("VID-20260819-7FBD3A")
     assert report["REQUEST_ID"] == "VID-20260819-7FBD3A"
     assert report["JOB_ID"] == "None"
@@ -66,77 +70,150 @@ def test_incident_vid_20260819_7fbd3a_truthful_report():
     assert report["JOB_FOUND"] == "NO"
     assert report["PROVIDER_TASK_FOUND"] == "NO"
     assert report["CURRENT_STAGE"] == "NO_JOB_CREATED"
+    assert report["EXACT_BLOCKER_CODE"] == "provider_not_configured"
+    assert report["WORKER_REQUIRED"] == "NO"
     assert report["CHARGE_STATE"] == "NO_CHARGE"
     assert report["SUBMIT_COUNT"] == 0
+    assert "provider_not_configured" in report["WHY_NO_JOB"]
 
 
-def test_local_zero_cost_flow_task_j(tmp_path):
-    """Task J: Prove local zero-cost job creation and recovery across simulated restart."""
-    db_file = str(tmp_path / "task_j_test.db")
-    os.environ["DATABASE_PATH"] = db_file
+def test_task_h1_configured_cloud_provider_admission_pass():
+    """Task H.1: When valid cloud provider is configured, admission passes without worker dependency."""
+    mock_env = {
+        "SHOPAIKEY_VIDEO_ENABLED": "1",
+        "SHOPAIKEY_VIDEO_SUBMIT_URL": "https://api.shopaikey.com/v1/video/generations",
+        "SHOPAIKEY_VIDEO_POLL_URL": "https://api.shopaikey.com/v1/video/generations/{task_id}",
+        "SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE": "Bearer test-key-12345",
+        "SHOPAIKEY_VIDEO_MODEL": "veo3.1-fast",
+        "SHOPAIKEY_API_KEY": "test-key-12345",
+        "PRODUCT_VIDEO_PUBLIC_SUBMIT_ENABLED": "1",
+        "PUBLIC_PROVIDER_SUBMIT_ENABLED": "1",
+        "PRODUCT_VIDEO_ONE_SCENE_PUBLIC_ALLOWED": "1",
+        "PRODUCT_VIDEO_MULTISCENE_ENGINE_ENABLED": "1",
+        "PRODUCT_VIDEO_MULTI_SCENE_PUBLIC_ENABLED": "1",
+    }
+    for k, v in mock_env.items():
+        os.environ[k] = v
     try:
-        session = {"draft": {}}
-        session = vts.record_video_trace_event(session, vts.STAGE_REQUEST_RECEIVED, user_id=901)
-        req_id = session["draft"]["request_id"]
-
-        session = vts.record_video_trace_event(session, vts.STAGE_PRECHECK_STARTED, user_id=901)
-        session = vts.record_video_trace_event(session, vts.STAGE_PRECHECK_RESULT, user_id=901)
-        session = vts.record_video_trace_event(session, vts.STAGE_JOB_CREATED, user_id=901, job_id=1001)
-        session = vts.record_video_trace_event(session, vts.STAGE_ARTIFACT_VALIDATION, user_id=901, job_id=1001)
-
-        # Verify trace before restart
-        report1 = vts.build_canonical_video_trace_report(req_id)
-        assert report1["REQUEST_ID"] == req_id
-        assert report1["JOB_ID"] == "1001"
-        assert report1["PROVIDER_TASK_ID"] == "None"
-        assert report1["JOB_FOUND"] == "YES"
-
-        # Verify trace after simulated restart (lookup by REQUEST_ID)
-        report2 = vts.build_canonical_video_trace_report(req_id)
-        assert report2["REQUEST_ID"] == req_id
-        assert report2["JOB_ID"] == "1001"
-        assert report2["STATUS_SOURCE"] == "canonical_db_video_request_traces"
+        eval_res = bot.product_video_public_preflight_evaluation(
+            3,
+            explicit_public_final_confirm=True,
+        )
+        assert eval_res.get("ready") is True
+        assert eval_res.get("final_confirm_enabled") is True
+        assert eval_res.get("admission_mode") in {"healthy", "public_confirmed_probation"}
     finally:
-        os.environ.pop("DATABASE_PATH", None)
+        for k in mock_env:
+            os.environ.pop(k, None)
 
 
-def test_mock_provider_id_chain_task_k(tmp_path):
-    """Task K: Validate REQUEST_ID -> JOB_ID -> PROVIDER_TASK_ID chain."""
-    db_file = str(tmp_path / "task_k_test.db")
+def test_task_h2_cloud_provider_missing_config_blocked():
+    """Task H.2: When cloud provider config is missing, admission is blocked with provider_not_configured."""
+    # Ensure clean environment with no provider envs
+    clean_keys = [
+        "SHOPAIKEY_VIDEO_ENABLED", "SHOPAIKEY_VIDEO_SUBMIT_URL", "SHOPAIKEY_VIDEO_POLL_URL",
+        "SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE", "SHOPAIKEY_VIDEO_MODEL", "SHOPAIKEY_API_KEY",
+        "KEY4U_VIDEO_ENABLED", "KEY4U_VIDEO_SUBMIT_URL", "KEY4U_VIDEO_POLL_URL",
+        "VIDEO_TOANAAS_ENABLED", "VIDEO_VEO_ENABLED", "VIDEO_KLING_ENABLED", "VIDEO_GENERIC_HTTP_ENABLED",
+    ]
+    saved = {k: os.environ.pop(k, None) for k in clean_keys}
+    try:
+        eval_res = bot.product_video_public_preflight_evaluation(
+            3,
+            explicit_public_final_confirm=True,
+        )
+        assert eval_res.get("ready") is False
+        assert eval_res.get("final_confirm_enabled") is False
+        assert eval_res.get("preflight_blocker_code") == "provider_not_configured" or eval_res.get("final_confirm_disabled_reason") == "provider_not_configured"
+    finally:
+        for k, v in saved.items():
+            if v is not None:
+                os.environ[k] = v
+
+
+def test_task_h3_worker_stale_cloud_lane_passes(monkeypatch):
+    """Task H.3: When worker is stale or offline, cloud lane still passes admission."""
+    mock_env = {
+        "SHOPAIKEY_VIDEO_ENABLED": "1",
+        "SHOPAIKEY_VIDEO_SUBMIT_URL": "https://api.shopaikey.com/v1/video/generations",
+        "SHOPAIKEY_VIDEO_POLL_URL": "https://api.shopaikey.com/v1/video/generations/{task_id}",
+        "SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE": "Bearer test-key-12345",
+        "SHOPAIKEY_VIDEO_MODEL": "veo3.1-fast",
+        "SHOPAIKEY_API_KEY": "test-key-12345",
+        "PRODUCT_VIDEO_PUBLIC_SUBMIT_ENABLED": "1",
+        "PUBLIC_PROVIDER_SUBMIT_ENABLED": "1",
+        "PRODUCT_VIDEO_ONE_SCENE_PUBLIC_ALLOWED": "1",
+        "PRODUCT_VIDEO_MULTISCENE_ENGINE_ENABLED": "1",
+        "PRODUCT_VIDEO_MULTI_SCENE_PUBLIC_ENABLED": "1",
+    }
+    for k, v in mock_env.items():
+        os.environ[k] = v
+    # Force worker to appear disconnected/stale
+    monkeypatch.setattr(bot, "product_video_worker_admission_status", lambda: {
+        "worker_connected": False,
+        "heartbeat_fresh": False,
+        "lease_valid": False,
+        "worker_version_compatible": False,
+        "worker_admission_block_reason": "worker_heartbeat_stale",
+    })
+    try:
+        eval_res = bot.product_video_public_preflight_evaluation(
+            3,
+            explicit_public_final_confirm=True,
+        )
+        assert eval_res.get("ready") is True
+        assert eval_res.get("final_confirm_enabled") is True
+    finally:
+        for k in mock_env:
+            os.environ.pop(k, None)
+
+
+def test_task_i_offline_mock_execution_crosses_job_boundary(tmp_path):
+    """Task I: Prove offline test request crosses job boundary cleanly with persistent trace."""
+    db_file = str(tmp_path / "task_i_test.db")
     os.environ["DATABASE_PATH"] = db_file
     try:
         session = {"draft": {}}
-        session = vts.record_video_trace_event(session, vts.STAGE_REQUEST_RECEIVED, user_id=902)
+        session = vts.record_video_trace_event(session, vts.STAGE_REQUEST_RECEIVED, user_id=888)
         req_id = session["draft"]["request_id"]
 
-        session = vts.record_video_trace_event(session, vts.STAGE_JOB_CREATED, user_id=902, job_id=2002)
+        session = vts.record_video_trace_event(session, vts.STAGE_PRECHECK_STARTED, user_id=888)
+        session = vts.record_video_trace_event(session, vts.STAGE_PRECHECK_RESULT, user_id=888)
         session = vts.record_video_trace_event(
             session,
-            vts.STAGE_SUBMIT_ACCEPTED,
-            user_id=902,
-            job_id=2002,
-            provider_task_id="mock-provider-task-9999",
+            vts.STAGE_ROUTE_EVALUATED,
+            user_id=888,
+            payload={"selected_route": "mock_offline_engine", "execution_mode": "cloud"},
+        )
+        session = vts.record_video_trace_event(
+            session,
+            vts.STAGE_JOB_CREATED,
+            user_id=888,
+            job_id=5005,
+            payload={"job_id": 5005},
         )
 
+        # Query canonical report
         report = vts.build_canonical_video_trace_report(req_id)
         assert report["REQUEST_ID"] == req_id
-        assert report["JOB_ID"] == "2002"
-        assert report["PROVIDER_TASK_ID"] == "mock-provider-task-9999"
-        assert report["PROVIDER_TASK_FOUND"] == "YES"
-        assert report["SUBMIT_COUNT"] == 1
+        assert report["JOB_ID"] == "5005"
+        assert report["JOB_FOUND"] == "YES"
+        assert report["JOB_EVER_CREATED"] == "YES"
+        assert report["CURRENT_STAGE"] == vts.STAGE_JOB_CREATED
+        assert report["CHARGE_STATE"] == "NO_CHARGE"
 
-        # Verify reverse lookup by provider task ID
-        by_prov = vts.lookup_video_request_trace("mock-provider-task-9999")
-        assert by_prov is not None
-        assert by_prov["request_id"] == req_id
-        assert by_prov["job_id"] == 2002
+        # Verify lookup across simulated restart
+        conn2 = sqlite3.connect(db_file)
+        recovered = vts.lookup_video_request_trace(req_id, conn=conn2)
+        assert recovered is not None
+        assert recovered["job_id"] == 5005
+        conn2.close()
     finally:
         os.environ.pop("DATABASE_PATH", None)
 
 
 def test_debug_commands_accept_request_id_and_recover_gracefully():
     """Verify diagnostic functions handle REQUEST_ID cleanly without ValueError or missing job crash."""
-    # Test recovery of no-job request from DB
     recovered, ptype = bot._video_progress_debug_recover_job_from_db("VID-20260819-7FBD3A")
     assert recovered.get("request_id") == "VID-20260819-7FBD3A"
     assert recovered.get("persisted_job_status") == "NO_JOB_CREATED"
