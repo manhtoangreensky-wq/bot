@@ -3101,7 +3101,7 @@ def resolve_product_video_public_preflight_state(
     )
     reason = str(
         internal_error
-        or worker_reason
+        or (worker_reason if local_worker_required else "")
         or current.get("provider_hard_block_reason")
         or gate.get("blocker")
         or current.get("blocker")

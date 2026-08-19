@@ -68423,7 +68423,9 @@ async def safe_mode_message_guard(update: Update, context: ContextTypes.DEFAULT_
     if not message:
         return
     if security_defense_shield is not None and getattr(message, "text", None):
-        message.text = security_defense_shield.sanitize_text_input(message.text)
+        sanitized_input = security_defense_shield.sanitize_text_input(message.text)
+        if isinstance(getattr(context, "user_data", None), dict):
+            context.user_data["sanitized_incoming_text"] = sanitized_input
     uid = update.effective_user.id if update.effective_user else ""
     command = extract_command_name(update)
     if command:
@@ -101123,14 +101125,15 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         lines.extend([scene_board_text, ""])
 
     if submit_blocked:
-        lines.extend([
-            str(
-                submit_preflight.get("public_message")
-                or "TOAN AAS chưa thể bắt đầu tạo video lúc này."
-            ),
-            "Hóa đơn và toàn bộ cấu hình vẫn được giữ nguyên.",
-            "Tài khoản chưa bị trừ Xu.",
-        ])
+        msg = str(
+            submit_preflight.get("public_message")
+            or "TOAN AAS chưa thể bắt đầu tạo video lúc này."
+        )
+        lines.append(msg)
+        if "Hóa đơn và toàn bộ cấu hình vẫn được giữ nguyên" not in msg:
+            lines.append("Hóa đơn và toàn bộ cấu hình vẫn được giữ nguyên.")
+        if "Tài khoản chưa bị trừ Xu" not in msg and "chưa trừ Xu" not in msg:
+            lines.append("Tài khoản chưa bị trừ Xu.")
     elif failed_no_charge_terminal:
         lines.extend(PRODUCT_VIDEO_FAILED_NO_CHARGE_PUBLIC_MESSAGE.splitlines())
     elif visual_classification == "partial_simple_video" or status in {"failed", "error"} or blocked_reason or (status in {"completed", "success"} and not has_final_artifact):
@@ -103008,8 +103011,9 @@ def product_video_provider_public_route_preflight(
             for token in ("shopaikey", "key4u", "kling", "veo", "cloud", "generic", "http")
         )
     )
-    execution_mode = "cloud" if has_cloud_provider else "local"
-    local_worker_required = not has_cloud_provider
+    is_cloud_product_lane = True
+    execution_mode = "cloud" if (has_cloud_provider or is_cloud_product_lane) else "local"
+    local_worker_required = False if is_cloud_product_lane else not has_cloud_provider
     freeze_admission = product_video_provider_freeze_admission_snapshot(
         chain,
         explicit_public_final_confirm=explicit_public_final_confirm,
