@@ -151,4 +151,5 @@ def test_video_b14_blocker_label_truthful_wording():
     assert "(tạm bận)" not in label_unconfigured
 
     label_unavailable = bot.video_b14_blocker_label("provider_unavailable")
-    assert "(tạm bận)" in label_unavailable
+    assert "Kênh dựng hiện chưa sẵn sàng" in label_unavailable
+    assert "(tạm bận)" not in label_unavailable

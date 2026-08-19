@@ -52972,7 +52972,33 @@ async def cmd_video_render_debug(update: Update, context: ContextTypes.DEFAULT_T
     if not is_admin_user(uid):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     args = _diagnostic_message_args(update, context)
-    job_id = safe_int(args[0] if args else 0, 0)
+    arg_raw = str(args[0] if args else "").strip()
+    if not arg_raw:
+        return await update.message.reply_text("Dùng: /video_render_debug &lt;REQUEST_ID | JOB_ID&gt;", parse_mode="HTML")
+    job_id = safe_int(arg_raw, 0)
+    if job_id <= 0:
+        trace = video_trace_state.lookup_video_request_trace(arg_raw)
+        if trace and trace.get("job_id") and safe_int(trace.get("job_id"), 0) > 0:
+            job_id = safe_int(trace.get("job_id"), 0)
+        else:
+            stage = trace.get("current_stage") if trace else "NOT_FOUND"
+            blocker = trace.get("internal_blocker_code") if trace else "not_found"
+            lines = [
+                "🔍 <b>Video Render Pre-Job Diagnostic</b>\n",
+                f"• REQUEST_ID: <code>{html.escape(str(trace.get('request_id') or arg_raw if trace else arg_raw))}</code>",
+                f"• JOB_ID: <code>Chưa tạo</code>",
+                f"• CURRENT_STAGE: <code>{html.escape(str(stage))}</code>",
+                f"• PREFLIGHT_RESULT: <code>{html.escape(str(trace.get('preflight_result') or 'BLOCKED' if trace else 'NOT_FOUND'))}</code>",
+                f"• ADMISSION_RESULT: <code>{html.escape(str(trace.get('admission_result') or 'BLOCKED' if trace else 'NOT_FOUND'))}</code>",
+                f"• EXACT_BLOCKER_CODE: <code>{html.escape(str(blocker))}</code>",
+                f"• EXACT_BLOCKER_DETAIL: <code>{html.escape(str(trace.get('blocker_detail_safe') or blocker if trace else 'Không tìm thấy'))}</code>",
+                f"• PROVIDER_CONFIGURED: <code>{'YES' if trace and trace.get('provider_configured') else 'NO'}</code>",
+                f"• ELIGIBLE_ROUTE_COUNT: <code>{trace.get('eligible_route_count', 0) if trace else 0}</code>",
+                f"• SELECTED_ROUTE: <code>{html.escape(str(trace.get('selected_route') or 'None' if trace else 'None'))}</code>",
+                f"• WORKER_REQUIRED: <code>{'YES' if trace and trace.get('worker_required') else 'NO'}</code>",
+                f"• WHY_NO_JOB: <code>{html.escape(str(trace.get('why_no_job') or f'Yêu cầu dừng tại bước {blocker}' if trace else 'Yêu cầu không tìm thấy'))}</code>",
+            ]
+            return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
     command_parts = str(getattr(update.message, "text", "") or "").split()
     command_name = command_parts[0].lstrip("/") if command_parts else "render"
     text = video_render_debug_text(job_id, mode=command_name or "render")
@@ -100886,7 +100912,7 @@ def video_b14_blocker_label(blocker_code: str) -> str:
     mapping = {
         "model_capability_missing": "Mô hình chưa hỗ trợ tính năng",
         "provider_not_configured": "Hệ thống chưa thể khởi tạo kênh dựng cho cấu hình này",
-        "provider_unavailable": "Hệ thống đang kết nối kênh dựng (tạm bận)",
+        "provider_unavailable": "Kênh dựng hiện chưa sẵn sàng",
         "worker_heartbeat_stale": "Hệ thống xử lý đang kết nối lại",
         "render_service_not_ready": "Dịch vụ dựng chưa sẵn sàng",
         "long_video_under_upgrade": "Video dài tập đang nâng cấp",
@@ -102814,6 +102840,18 @@ def _video_provider_preflight_recent_failure(conn, *, ttl_seconds: int = VIDEO_P
                 reason_by_provider[provider] = reason
         if not chain:
             chain = list(reason_by_provider.keys())
+        # If any currently configured/ready provider is not in the historical failure, do not block
+        try:
+            current_status = _product_video_provider_status_for_preflight()
+            current_ready = [
+                str(p.get("provider") or "").strip()
+                for p in current_status.get("providers", [])
+                if isinstance(p, dict) and p.get("configured") and p.get("credit_ok", True)
+            ]
+            if current_ready and any(p not in reason_by_provider for p in current_ready):
+                continue
+        except Exception:
+            pass
         configured_chain = [provider for provider in chain if provider in reason_by_provider]
         if chain and configured_chain and len(configured_chain) >= len(chain):
             return {
