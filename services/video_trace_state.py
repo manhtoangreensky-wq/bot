@@ -1,3 +1,16 @@
+from __future__ import annotations
+
+import datetime
+import html
+import json
+import logging
+import os
+import secrets
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
 """Video execution trace state model, SQLite persistence, and truthful status report.
 
 Three-Tier ID separation:
@@ -5,17 +18,6 @@ Three-Tier ID separation:
 - JOB_ID: Internal asynchronous rendering queue task ID (e.g. 101).
 - PROVIDER_TASK_ID: Upstream external AI provider reference (e.g. task_xyz123).
 """
-
-from __future__ import annotations
-
-import datetime
-import html
-import json
-import os
-import secrets
-import sqlite3
-from pathlib import Path
-from typing import Any
 
 STAGE_REQUEST_RECEIVED = "REQUEST_RECEIVED"
 STAGE_PRECHECK_STARTED = "PRECHECK_STARTED"
@@ -511,3 +513,51 @@ def build_canonical_video_trace_report(identifier: str | int, conn=None) -> dict
         "STATUS_SOURCE": truth["status_source"],
         "WHY_NO_JOB": truth["why_no_job"],
     }
+
+
+def begin_video_confirm_attempt(session: dict | None, *, user_id: int = 0, chat_id: int = 0, payload: dict | None = None, conn=None) -> dict:
+    """Canonical intake function: allocate REQUEST_ID, persist minimal request trace row with commit readback before any preflight/admission check."""
+    session = dict(session or {})
+    draft = dict(session.get("draft") or {})
+    request_id = get_or_create_video_request_id(session, user_id=user_id)
+    draft["request_id"] = request_id
+    draft["public_processing_code"] = request_id
+    session["draft"] = draft
+
+    try:
+        # Persist STAGE_REQUEST_RECEIVED event with commit & readback verification
+        updated_session = record_video_trace_event(
+            session,
+            STAGE_REQUEST_RECEIVED,
+            user_id=user_id,
+            chat_id=chat_id,
+            payload=payload or {},
+            conn=conn,
+        )
+
+        # Readback verification
+        trace = lookup_video_request_trace(request_id, conn=conn)
+        if not trace:
+            return {
+                "ok": False,
+                "request_id": request_id,
+                "session": updated_session,
+                "reason": "trace_persistence_failed",
+                "durable_persisted": False,
+            }
+        return {
+            "ok": True,
+            "request_id": request_id,
+            "session": updated_session,
+            "reason": "",
+            "durable_persisted": True,
+        }
+    except Exception as exc:
+        logger.warning("begin_video_confirm_attempt failed: %s", exc)
+        return {
+            "ok": False,
+            "request_id": request_id,
+            "session": session,
+            "reason": "trace_persistence_failed",
+            "durable_persisted": False,
+        }
