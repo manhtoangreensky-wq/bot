@@ -40,8 +40,11 @@ _SQL_INJECTION_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-# Template Injection patterns
-_TEMPLATE_INJECTION_PATTERNS = re.compile(r"(\{\{|\}\}|\$\{.*\}|<%.*%>)", re.IGNORECASE)
+# Template Injection execution patterns (prevent false positive on general {{ template }} text)
+_TEMPLATE_INJECTION_PATTERNS = re.compile(
+    r"(\{\{\s*(?:config|self|request|lipsum|cycler|joiner|\d+\s*[\*\+\-\/]\s*\d+|__class__|__mro__|__globals__|eval|exec|os\.)|<%.*%>|\$\{\s*T\(|\$\{java)",
+    re.IGNORECASE,
+)
 
 
 def sanitize_text_input(
@@ -99,7 +102,7 @@ _ALLOWED_MEDIA_EXTENSIONS = frozenset({
 
 # Magic Bytes Signatures
 _MAGIC_SIGNATURES = {
-    "jpeg": (b"\xff\xd8\xff",),
+    "jpeg": (b"\xff\xd8\xff", b"\xff\xd8"),
     "png": (b"\x89PNG\r\n\x1a\n",),
     "webp": (b"RIFF",),  # and WEBP at offset 8
     "mp4_mov": (b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip"),
@@ -135,7 +138,7 @@ def is_safe_upload_extension(filename: str) -> bool:
 
 def validate_media_magic_bytes(data: bytes, expected_kind: str = "auto") -> bool:
     """Verify file magic bytes to prevent disguised executable payloads."""
-    if not data or len(data) < 12:
+    if not data or len(data) < 4:
         return False
 
     # Check for executable headers (MZ / PE for Windows, ELF for Linux, Mach-O for macOS, Shebang)

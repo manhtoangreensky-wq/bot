@@ -63,6 +63,14 @@ from telegram.ext import (
     BusinessConnectionHandler, BusinessMessagesDeletedHandler,
 )
 from creative_suggestions import creative_suggestion_bank, rotating_suggestions
+try:
+    from services import security_defense_shield
+except Exception:
+    security_defense_shield = None
+try:
+    from services import security_defense_shield
+except Exception:
+    security_defense_shield = None
 from image_prompt_quality import (
     build_image_prompt,
     enhance_image_prompt_for_generation,
@@ -68385,6 +68393,14 @@ async def dispatch_throttle_callback_guard(update: Update, context: ContextTypes
     query = update.callback_query
     if not query or not query.from_user:
         return
+    if security_defense_shield is not None:
+        user_key = f"cb_user_{getattr(query.from_user, 'id', 0)}"
+        if not security_defense_shield.GLOBAL_RATE_LIMITER.allow(user_key):
+            try:
+                await query.answer("Thao tác quá nhanh, vui lòng thử lại sau giây lát.", show_alert=False)
+            except Exception:
+                pass
+            raise ApplicationHandlerStop
     if dispatch_throttle_allow(query.from_user.id):
         return
     try:
@@ -68398,6 +68414,8 @@ async def safe_mode_message_guard(update: Update, context: ContextTypes.DEFAULT_
     message = update.effective_message
     if not message:
         return
+    if security_defense_shield is not None and getattr(message, "text", None):
+        message.text = security_defense_shield.sanitize_text_input(message.text)
     uid = update.effective_user.id if update.effective_user else ""
     command = extract_command_name(update)
     if command:
