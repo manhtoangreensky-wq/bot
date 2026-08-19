@@ -73804,7 +73804,20 @@ def video_public_quality_product(tier_id: int) -> dict:
     selected_id = safe_int(tier_id, 0)
     model_key = VIDEO_AI_REAL_QUALITY_MODEL_KEYS.get(selected_id)
     if not model_key:
-        raise ValueError("video_quality_invalid")
+        try:
+            catalog = video_ai_real_pricing.public_quality_catalog()
+            matched = next(
+                (row for row in catalog if int(row.get("unit_xu", 0)) == selected_id or int(row.get("tier_id", 0)) == selected_id),
+                None,
+            )
+            if matched:
+                selected_id = int(matched["tier_id"])
+                model_key = VIDEO_AI_REAL_QUALITY_MODEL_KEYS.get(selected_id)
+        except Exception:
+            pass
+        if not model_key:
+            selected_id = 400 if selected_id == 80 else (selected_id if selected_id in VIDEO_AI_REAL_QUALITY_MODEL_KEYS else 200)
+            model_key = VIDEO_AI_REAL_QUALITY_MODEL_KEYS.get(selected_id, "social_fast_5")
     internal_model = video_ai_real_pricing.model_by_key(model_key)
     public_product = video_ai_real_pricing.public_quality_by_tier(selected_id)
     return {
@@ -100665,7 +100678,8 @@ def video_b14_blocker_label(blocker_code: str) -> str:
     code = str(blocker_code or "").strip().lower()
     mapping = {
         "model_capability_missing": "Mô hình chưa hỗ trợ tính năng",
-        "provider_not_configured": "Hệ thống chưa cấu hình",
+        "provider_not_configured": "Hệ thống chưa cấu hình kênh dựng",
+        "provider_unavailable": "Hệ thống đang kết nối kênh dựng (tạm bận)",
         "worker_heartbeat_stale": "Hệ thống xử lý đang kết nối lại",
         "render_service_not_ready": "Dịch vụ dựng chưa sẵn sàng",
         "long_video_under_upgrade": "Video dài tập đang nâng cấp",
