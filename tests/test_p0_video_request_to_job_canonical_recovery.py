@@ -61,20 +61,34 @@ def test_canonical_persistent_trace_storage_and_recovery(tmp_path):
         os.environ.pop("DATABASE_PATH", None)
 
 
-def test_incident_vid_20260819_7fbd3a_truthful_root_cause_report():
+def test_incident_vid_20260819_7fbd3a_truthful_root_cause_report(tmp_path):
     """Verify incident VID-20260819-7FBD3A produces truthful report with exact root cause."""
-    report = vts.build_canonical_video_trace_report("VID-20260819-7FBD3A")
+    db_file = str(tmp_path / "test_inc.db")
+    os.environ["DATABASE_PATH"] = db_file
+    conn = sqlite3.connect(db_file)
+    vts.ensure_video_trace_schema(conn)
+
+    session = {"draft": {"request_id": "VID-20260819-7FBD3A"}}
+    vts.record_video_trace_event(
+        session,
+        vts.STAGE_ADMISSION_BLOCKED,
+        blocker_code="provider_not_configured",
+        conn=conn,
+    )
+
+    report = vts.build_canonical_video_trace_report("VID-20260819-7FBD3A", conn=conn)
     assert report["REQUEST_ID"] == "VID-20260819-7FBD3A"
     assert report["JOB_ID"] == "None"
     assert report["PROVIDER_TASK_ID"] == "None"
     assert report["JOB_FOUND"] == "NO"
     assert report["PROVIDER_TASK_FOUND"] == "NO"
-    assert report["CURRENT_STAGE"] == "NO_JOB_CREATED"
+    assert report["CURRENT_STAGE"] == "ADMISSION_BLOCKED"
     assert report["EXACT_BLOCKER_CODE"] == "provider_not_configured"
     assert report["WORKER_REQUIRED"] == "NO"
     assert report["CHARGE_STATE"] == "NO_CHARGE"
     assert report["SUBMIT_COUNT"] == 0
     assert "provider_not_configured" in report["WHY_NO_JOB"]
+    conn.close()
 
 
 def test_task_h1_configured_cloud_provider_admission_pass():
