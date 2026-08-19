@@ -10710,8 +10710,41 @@ def product_progress_matrix_text() -> str:
 
 
 def _video_progress_debug_recover_job_from_db(job_id: str = "") -> tuple[dict, str]:
-    jid = safe_int(job_id, 0)
+    raw_id = str(job_id or "").strip()
+    if not raw_id:
+        return {}, ""
+    trace = video_trace_state.lookup_video_request_trace(raw_id)
+    jid = safe_int((trace or {}).get("job_id") or raw_id, 0)
     if jid <= 0:
+        if trace:
+            req_id = trace.get("request_id") or raw_id
+            stage = trace.get("current_stage") or "received_request"
+            blocker = trace.get("internal_blocker_code") or ""
+            return {
+                "request_id": req_id,
+                "job_id": "",
+                "status": "blocked",
+                "stage": stage,
+                "current_stage": stage,
+                "blocker_code": blocker,
+                "progress_percent": 5,
+                "persisted_job_status": "NO_JOB_CREATED",
+                "persisted_job_progress": 0,
+                "recovered_from_request_trace": True,
+            }, trace.get("product_type") or "multiscene_video"
+        elif raw_id.startswith("VID-"):
+            return {
+                "request_id": raw_id,
+                "job_id": "",
+                "status": "blocked",
+                "stage": "received_request",
+                "current_stage": "received_request",
+                "blocker_code": "admission_blocked",
+                "progress_percent": 5,
+                "persisted_job_status": "NO_JOB_CREATED",
+                "persisted_job_progress": 0,
+                "recovered_from_request_trace": True,
+            }, "multiscene_video"
         return {}, ""
     try:
         conn = db_connect()
@@ -52946,12 +52979,95 @@ async def cmd_video_render_debug(update: Update, context: ContextTypes.DEFAULT_T
     return await video_debug_safe_reply_text(update.message, text)
 
 
+async def cmd_video_trace(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = _diagnostic_message_args(update, context)
+    identifier = str(args[0] if args else "").strip()
+    if not identifier:
+        return await update.message.reply_text("Dùng: /video_trace &lt;REQUEST_ID | JOB_ID&gt;", parse_mode="HTML")
+
+    report = video_trace_state.build_canonical_video_trace_report(identifier)
+    lines = [
+        "🔍 <b>CANONICAL VIDEO TRACE REPORT</b>\n",
+        f"• REQUEST_ID: <code>{html.escape(str(report['REQUEST_ID']))}</code>",
+        f"• JOB_ID: <code>{html.escape(str(report['JOB_ID']))}</code>",
+        f"• PROVIDER_TASK_ID: <code>{html.escape(str(report['PROVIDER_TASK_ID']))}</code>",
+        "",
+        f"• REQUEST_FOUND: <code>{report['REQUEST_FOUND']}</code>",
+        f"• JOB_FOUND: <code>{report['JOB_FOUND']}</code>",
+        f"• PROVIDER_TASK_FOUND: <code>{report['PROVIDER_TASK_FOUND']}</code>",
+        "",
+        f"• CURRENT_STAGE: <code>{html.escape(str(report['CURRENT_STAGE']))}</code>",
+        f"• INTERNAL_BLOCKER: <code>{html.escape(str(report['INTERNAL_BLOCKER']))}</code>",
+        f"• PUBLIC_STATUS: <code>{html.escape(str(report['PUBLIC_STATUS']))}</code>",
+        "",
+        f"• ROUTE: <code>{html.escape(str(report['ROUTE']))}</code>",
+        f"• EXECUTION_MODE: <code>{html.escape(str(report['EXECUTION_MODE']))}</code>",
+        f"• PROVIDER: <code>{html.escape(str(report['PROVIDER']))}</code>",
+        f"• MODEL: <code>{html.escape(str(report['MODEL']))}</code>",
+        f"• CAPABILITY: <code>{html.escape(str(report['CAPABILITY']))}</code>",
+        "",
+        f"• SCENES_TOTAL: <code>{report['SCENES_TOTAL']}</code>",
+        f"• SCENE_TASKS_CREATED: <code>{report['SCENE_TASKS_CREATED']}</code>",
+        f"• SCENE_TASKS_SUBMITTED: <code>{report['SCENE_TASKS_SUBMITTED']}</code>",
+        "",
+        f"• SUBMIT_COUNT: <code>{report['SUBMIT_COUNT']}</code>",
+        f"• POLL_COUNT: <code>{report['POLL_COUNT']}</code>",
+        "",
+        f"• ARTIFACT: <code>{html.escape(str(report['ARTIFACT']))}</code>",
+        f"• DELIVERY_RECEIPT: <code>{html.escape(str(report['DELIVERY_RECEIPT']))}</code>",
+        f"• CHARGE_STATE: <code>{html.escape(str(report['CHARGE_STATE']))}</code>",
+        f"• STATUS_SOURCE: <code>{html.escape(str(report['STATUS_SOURCE']))}</code>",
+    ]
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
 async def cmd_video_provider_job_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
     if not is_admin_user(uid):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     args = _diagnostic_message_args(update, context)
-    job_id = safe_int(args[0] if args else 0, 0)
+    raw_arg = str(args[0] if args else "").strip()
+    if not raw_arg:
+        return await update.message.reply_text("Dùng: /video_provider_job_debug &lt;REQUEST_ID | JOB_ID&gt;", parse_mode="HTML")
+
+    trace = video_trace_state.lookup_video_request_trace(raw_arg)
+    resolved_job_id = None
+    if trace:
+        resolved_job_id = trace.get("job_id")
+        if not resolved_job_id:
+            req_id = trace.get("request_id") or raw_arg
+            stage = trace.get("current_stage") or "REQUEST_RECEIVED"
+            blocker = trace.get("internal_blocker_code") or "request_stopped_before_job_creation"
+            msg = (
+                "📊 <b>TOAN AAS Video Provider Job Debug</b>\n\n"
+                f"• REQUEST_ID: <code>{html.escape(req_id)}</code>\n"
+                "• JOB_ID: <code>Chưa tạo (NO_JOB_CREATED)</code>\n"
+                f"• Giai đoạn: <code>{html.escape(stage)}</code>\n"
+                f"• Blocker: <code>{html.escape(blocker)}</code>\n"
+                "• Reason: <code>Yêu cầu tạm dừng trước khi tạo tác vụ nội bộ</code>\n"
+                "• Provider task: <code>None</code>\n"
+                "• Bot chưa trừ Xu."
+            )
+            return await update.message.reply_text(msg, parse_mode="HTML")
+    elif raw_arg.startswith("VID-"):
+        msg = (
+            "📊 <b>TOAN AAS Video Provider Job Debug</b>\n\n"
+            f"• REQUEST_ID: <code>{html.escape(raw_arg)}</code>\n"
+            "• JOB_ID: <code>Chưa tạo (NO_JOB_CREATED)</code>\n"
+            "• Giai đoạn: <code>received_request (5%)</code>\n"
+            "• Blocker: <code>request_stopped_before_job_creation</code>\n"
+            "• Reason: <code>Yêu cầu dừng tại preflight/admission, không có tác vụ nội bộ</code>\n"
+            "• Provider task: <code>None</code>\n"
+            "• Bot chưa trừ Xu."
+        )
+        return await update.message.reply_text(msg, parse_mode="HTML")
+
+    job_id = safe_int(resolved_job_id or raw_arg, 0)
+    if job_id <= 0:
+        return await update.message.reply_text("Dùng: /video_provider_job_debug &lt;REQUEST_ID | JOB_ID&gt;", parse_mode="HTML")
     return await video_debug_safe_reply_text(update.message, video_provider_job_debug_text(job_id))
 
 
@@ -54705,9 +54821,20 @@ async def cmd_video_provider_raw_status(update: Update, context: ContextTypes.DE
     if not is_admin_user(uid):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     args = _diagnostic_message_args(update, context)
-    job_id = safe_int(args[0] if args else 0, 0)
+    raw_arg = str(args[0] if args else "").strip()
+    if not raw_arg:
+        return await update.message.reply_text("⚠️ Dùng: <code>/video_provider_raw_status &lt;REQUEST_ID | JOB_ID&gt;</code>", parse_mode="HTML")
+    trace = video_trace_state.lookup_video_request_trace(raw_arg)
+    resolved_job_id = (trace or {}).get("job_id")
+    if not resolved_job_id and raw_arg.startswith("VID-"):
+        return await update.message.reply_text(
+            f"ℹ️ Yêu cầu <code>{html.escape(raw_arg)}</code> chưa tạo tác vụ nội bộ (NO_JOB_CREATED). "
+            "Chưa gửi tác vụ sang kênh dựng và Bot chưa trừ Xu.",
+            parse_mode="HTML",
+        )
+    job_id = safe_int(resolved_job_id or raw_arg, 0)
     if job_id <= 0:
-        return await update.message.reply_text("⚠️ Dùng: <code>/video_provider_raw_status JOB_ID</code>", parse_mode="HTML")
+        return await update.message.reply_text("⚠️ Dùng: <code>/video_provider_raw_status &lt;REQUEST_ID | JOB_ID&gt;</code>", parse_mode="HTML")
     return await video_debug_safe_reply_text(update.message, video_provider_raw_status_text(job_id))
 
 
@@ -54716,9 +54843,20 @@ async def cmd_video_provider_recover(update: Update, context: ContextTypes.DEFAU
     if not is_admin_user(uid):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     args = _diagnostic_message_args(update, context)
-    job_id = safe_int(args[0] if args else 0, 0)
+    raw_arg = str(args[0] if args else "").strip()
+    if not raw_arg:
+        return await update.message.reply_text("⚠️ Dùng: <code>/video_provider_recover &lt;REQUEST_ID | JOB_ID&gt;</code>", parse_mode="HTML")
+    trace = video_trace_state.lookup_video_request_trace(raw_arg)
+    resolved_job_id = (trace or {}).get("job_id")
+    if not resolved_job_id and raw_arg.startswith("VID-"):
+        return await update.message.reply_text(
+            f"ℹ️ Yêu cầu <code>{html.escape(raw_arg)}</code> chưa tạo tác vụ nội bộ (NO_JOB_CREATED). "
+            "Không có tác vụ kênh dựng để khôi phục.",
+            parse_mode="HTML",
+        )
+    job_id = safe_int(resolved_job_id or raw_arg, 0)
     if job_id <= 0:
-        return await update.message.reply_text("⚠️ Dùng: <code>/video_provider_recover JOB_ID</code>", parse_mode="HTML")
+        return await update.message.reply_text("⚠️ Dùng: <code>/video_provider_recover &lt;REQUEST_ID | JOB_ID&gt;</code>", parse_mode="HTML")
     payload = video_provider_recover_existing_task(job_id, download=True)
     artifact = payload.get("artifact")
     artifact_path = str(getattr(artifact, "local_path", "") or "")
@@ -72367,11 +72505,10 @@ VIDEO_UIFLOW3_STEP_ACTIONS = {
     "entry": {"mode", "idea_catalog"},
     "series_goal": {"series_goal_edit", "series_goal_done", "series_goal_pick", "series_goal_rotate", "series_goal_page"},
     "source": {"source_text", "source_media", "source_status", "source_done", "image_ai"},
-    "format": {"ratio", "duration", "duration_scene", "duration_custom", "format_done"},
-    "content_hub": {"content", "profiles", "profile", "idea_catalog", "prof_sug", "prof_sug_more", "prof_sug_custom"},
+    "format": {"ratio", "duration", "duration_scene", "duration_custom", "format_done", "quick_build", "scene_count", "scene_custom"},
+    "content_hub": {"content", "profiles", "profile", "idea_catalog", "prof_sug", "prof_sug_more", "prof_sug_custom", "quick_build", "mode"},
     "content_lock": {
-        "content_lock", "content_edit", "content_change", "context", "context_page", "prof_sug", "prof_sug_more", "prof_sug_custom",
-    },
+        "content_lock", "content_edit", "content_change", "context", "context_page", "prof_sug", "prof_sug_more", "prof_sug_custom", "quick_build", "mode"},
     "production_bible": {
         "chars", "chars_custom", "character", "char_gender", "char_desc", "char_suggest",
         "char_image", "char_voice", "voice_gender", "voice", "voice_custom", "char_scenes",
@@ -72396,7 +72533,7 @@ VIDEO_UIFLOW3_STEP_ACTIONS = {
         "film_goal", "film_aud", "film_plat", "film_dur", "film_ep_num",
         "film_script_generate", "film_script_regen", "film_script_edit", "film_script_use",
     },
-    "scene_count": {"scene_count", "scene_custom"},
+    "scene_count": {"scene_count", "scene_custom", "quick_build", "mode", "ratio", "format_done", "duration", "bible_auto", "bible_done"},
     "scene_plan": {
         "scene_plan_edit", "scene_plan_auto", "plan_scene", "plan_edit", "plan_move",
         "scene_plan_done", "pilot_scene_plan_back", "episode_tail_addon",
@@ -76146,16 +76283,21 @@ def video_ai_real_build_quick_plan(
 
     state = _video_ai_real_pilot_state(raw_state)
     if not bool((state.get("content") or {}).get("locked")):
-        raise ValueError("content_not_locked")
+        content = dict(state.get("content") or {})
+        brief = dict(content.get("approved_brief") or {})
+        topic = str(brief.get("title") or content.get("original_intent") or (state.get("series") or {}).get("goal") or "Video AI chân thật").strip()
+        state = video_uiflow3.set_content_candidate(state, source="manual", original_intent=topic)
+        state = video_uiflow3.lock_content(state)
     fmt = dict(state.get("format") or {})
     scene_count = safe_int(fmt.get("scene_count"), 0)
     if scene_count <= 0:
-        raise ValueError("scene_count_out_of_range")
+        scene_count = 3
+        fmt["scene_count"] = scene_count
+        fmt["scene_count_confirmed"] = True
     if not str(fmt.get("ratio") or ""):
-        raise ValueError("aspect_ratio_unsupported")
+        fmt["ratio"] = "9:16"
+    state["format"] = fmt
     needs = dict(state.get("needs") or {})
-    if needs.get("reference_assets") == "REQUIRED" and not state.get("references"):
-        raise ValueError("reference_assets_required")
 
     quick_revision = max(
         0,
@@ -76169,7 +76311,7 @@ def video_ai_real_build_quick_plan(
         str((state.get("content") or {}).get("revision") or 0),
         str((state.get("content") or {}).get("profile_id") or "general"),
         str(scene_count),
-        str(fmt.get("ratio") or ""),
+        str(fmt.get("ratio") or "9:16"),
     ]
     if quick_revision > 0:
         seed_parts.append(str(quick_revision))
@@ -76314,9 +76456,9 @@ def video_ai_real_build_quick_plan(
         state["navigation"]["current_step"] = "production_bible"
         return video_uiflow3.normalize_state(state)
 
-    if not bool((state.get("format") or {}).get("scene_count_confirmed")):
+    if not bool((state.get("format") or {}).get("scene_count_confirmed")) or len(state.get("scenes") or []) != scene_count:
         state = video_uiflow3.confirm_scene_count(state, scene_count)
-    state = video_uiflow3_ai_enhance_scenes(state)
+    state = video_uiflow3.suggest_scene_plan(state)
     state = video_uiflow3.auto_assign_scenes(state)
 
     product_ids = [
@@ -77837,6 +77979,7 @@ def video_ai_real_pilot_screen_payload(
 ) -> tuple[str, InlineKeyboardMarkup] | None:
     if not video_uiflow3_uses_entity_pilot(state):
         return None
+    product = str(state.get("parent_product") or "")
     entry_mode = str(state.get("entry_mode") or "")
     storyboard_bridge = video_storyboard_entity_bridge_marker(state)
     trend_bridge = video_entity_bridge_marker(state) if entry_mode == "selected_trend" else {}
@@ -77889,27 +78032,7 @@ def video_ai_real_pilot_screen_payload(
         return video_ai_real_pilot_requirement_review_payload(state)
 
     if step == "entry" and not view:
-        if product == "multi_scene_film":
-            rows = [
-                [("🎬 Lập kế hoạch loạt video", "vid3|mode|series_plan")],
-            ]
-            rows.extend(video_ai_real_pilot_nav_rows(back="menu|main_video"))
-            return (
-                "🎬 <b>Video dài tập</b>\n\n"
-                "TOAN AAS sẽ lập dàn cảnh, chia cảnh, tạo bảng phân cảnh và câu lệnh AI cho từng cảnh để chuẩn bị dựng phim/video dài hơn.\n\n"
-                "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu.",
-                video_uiflow3_keyboard(rows),
-            )
-        rows = [
-            [("📝 Prompt → Video", "vid3|mode|prompt_video"), ("🖼 Ảnh → Video", "vid3|mode|image_video")],
-        ]
-        rows.extend(video_ai_real_pilot_nav_rows(back="menu|main_video"))
-        return (
-            "🎬 Video AI chân thật\n\n"
-            "Chọn đúng sản phẩm để bot mở đúng quy trình, giữ đúng nút quay lại và chỉ hỏi những thông tin cần cho loại video đó.\n\n"
-            "Mọi lựa chọn hiện tại chỉ lập kế hoạch; chưa tạo tác vụ và chưa trừ Xu.",
-            video_uiflow3_keyboard(rows),
-        )
+        return None
 
     if step == "source" and not view:
         source = dict(state.get("source") or {})
@@ -78939,14 +79062,14 @@ def video_uiflow3_ai_enhance_scenes(state: dict) -> dict:
     scenes = list(state.get("scenes") or [])
     if not scenes:
         return state
-    
+
     if gemini_client:
         try:
             brief = dict((state.get("content") or {}).get("approved_brief") or {})
             intent = str((state.get("content") or {}).get("original_intent") or brief.get("title") or (state.get("series") or {}).get("goal") or "").strip()
             if not intent and str(state.get("parent_product") or "") == "multi_scene_film":
                 intent = str(((state.get("episode") or {}).get("content") or {}).get("original_intent") or (state.get("series") or {}).get("goal") or "")
-            
+
             prompt = (
                 f"Ban la dao dien kich ban video AI chuyen nghiep. Hay viet ke hoach phan canh chi tiet cho video {len(scenes)} canh.\n"
                 f"Chu de/Noi dung: {intent or 'Video quang ba'}\n"
@@ -78973,8 +79096,8 @@ def video_uiflow3_ai_enhance_scenes(state: dict) -> dict:
                 state["scenes"] = scenes
         except Exception as e:
             logger.warning(f"Gemini 3.7 scene plan enhancement skipped: {e}")
-            
-    return state
+
+    return video_uiflow3.auto_assign_scenes(state)
 
 
 def video_film_fallback_script(state: dict) -> str:
@@ -78987,7 +79110,7 @@ def video_film_fallback_script(state: dict) -> str:
     audience = str(episode.get("audience_label") or "Khán giả đại chúng")
     platform = str(episode.get("platform_label") or "TikTok / Reels")
     duration = int(episode.get("duration") or 60)
-    
+
     if duration <= 45:
         scene_count = 4
         times = ["00:00 – 00:10", "00:10 – 00:20", "00:20 – 00:30", "00:30 – 00:40"]
@@ -78997,7 +79120,7 @@ def video_film_fallback_script(state: dict) -> str:
     else:
         scene_count = 6
         times = ["00:00 – 00:15", "00:15 – 00:30", "00:30 – 00:45", "00:45 – 01:00", "01:00 – 01:15", "01:15 – 01:30"]
-        
+
     chars = [c.get("display_name") for c in (state.get("bible") or {}).get("characters") or [] if c.get("display_name")] or ["Nhân vật chính"]
     locs = [l.get("name") for l in (state.get("bible") or {}).get("locations") or [] if l.get("name")] or ["Bối cảnh trung tâm"]
 
@@ -79015,7 +79138,7 @@ def video_film_fallback_script(state: dict) -> str:
         "━━━━━━━━━━━━━━━━━━",
         "",
     ]
-    
+
     stage_names = ["Mở đầu / Hook", "Phát triển 1", "Phát triển 2", "Cao trào", "Kết thúc / Kêu gọi", "Nối tiếp"]
     _fb_beats = [
         f"Mở đầu ấn tượng — thiết lập bối cảnh và gây tò mò về {brief_title}",
@@ -79075,7 +79198,7 @@ def video_film_generate_timeline_script(state: dict) -> str:
     audience = str(episode.get("audience_label") or "Khán giả đại chúng")
     platform = str(episode.get("platform_label") or "TikTok / Reels")
     duration = int(episode.get("duration") or 60)
-    
+
     if duration <= 45:
         scene_count = 4
         times = ["00:00 – 00:10", "00:10 – 00:20", "00:20 – 00:30", "00:30 – 00:40"]
@@ -79085,10 +79208,10 @@ def video_film_generate_timeline_script(state: dict) -> str:
     else:
         scene_count = 6
         times = ["00:00 – 00:15", "00:15 – 00:30", "00:30 – 00:45", "00:45 – 01:00", "01:00 – 01:15", "01:15 – 01:30"]
-        
+
     chars = [c.get("display_name") for c in (state.get("bible") or {}).get("characters") or [] if c.get("display_name")] or ["Nhân vật chính"]
     locs = [l.get("name") for l in (state.get("bible") or {}).get("locations") or [] if l.get("name")] or ["Bối cảnh trung tâm"]
-    
+
     gemini_scenes = []
     # 1. Direct call to Google Gemini 3.7 Flash
     if gemini_client:
@@ -79162,7 +79285,7 @@ def video_film_generate_timeline_script(state: dict) -> str:
         "━━━━━━━━━━━━━━━━━━",
         "",
     ]
-    
+
     stage_names = ["Mở đầu / Hook", "Phát triển 1", "Phát triển 2", "Cao trào", "Kết thúc / Kêu gọi", "Nối tiếp"]
     # Fallback per-act templates: each scene gets unique content by act
     _fb_beats = [
@@ -79726,7 +79849,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                 "",
             ])
         lines.append("Chọn nút 1–5. Sau khi chọn, bot chuyển sang rà soát nội dung đã chọn; chưa gọi AI và chưa trừ Xu.")
-        
+
         num_buttons = [
             (str(index), f"vid3|prof_sug|{index - 1}")
             for index in range(1, len(suggestions) + 1)
@@ -80066,14 +80189,14 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         page = max(1, min(5, safe_int((state.get("series") or {}).get("goal_page"), 1)))
         start_idx = (page - 1) * 5
         page_suggestions = list(VIDEO_SERIES_GOAL_SUGGESTIONS[start_idx:start_idx + 5])
-        
+
         suggestions_text = "\n".join(f"{i+1}. {s}" for i, s in enumerate(page_suggestions))
-        
+
         button_row = [
             (str(i + 1), f"vid3|series_goal_pick|{start_idx + i + 1}")
             for i in range(len(page_suggestions))
         ]
-        
+
         text = (
             f"{prefix}🎯 MỤC TIÊU LOẠT VIDEO (Trang {page}/5)\n\n"
             f"Mục tiêu chung hiện tại: {goal or 'Chưa chọn / Chưa nhập'}\n\n"
@@ -80417,7 +80540,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         content_preview = str(episode_content.get("original_intent") or "Chưa nhập")
         if len(content_preview) > 300:
             content_preview = content_preview[:297].rstrip() + "..."
-            
+
         if view == "episode_content_hub":
             page = max(1, min(5, safe_int((state.get("episode") or {}).get("content_page"), 1)))
             start_idx = (page - 1) * 5
@@ -80507,7 +80630,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                     ep_content = str(raw_content.get("original_intent") or brief or "").strip()
             else:
                 ep_content = str(raw_content or "").strip()
-            
+
             lines = [
                 f"{prefix}🎬 <b>KẾ HOẠCH VIDEO · TẬP {ep_num}: {html.escape(ep_title)}</b>",
                 "",
@@ -80544,7 +80667,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                 *video_uiflow3_nav_rows(back="vid3|view|episode_script"),
             ]
             return "\n".join(lines), video_uiflow3_keyboard(rows)
-        
+
         lines = [f"{prefix}🎬 KẾ HOẠCH CẢNH", ""]
         for scene in scenes:
             lines.append(f"Cảnh {scene.get('scene_index')}: {scene.get('semantic_beat') or scene.get('main_action') or 'Một ý chính trọn vẹn'}")
@@ -81041,7 +81164,7 @@ def video_uiflow3_character_input_id(state: dict, value: str) -> str:
 
 
 def video_uiflow3_action_allowed(state: dict, action: str) -> bool:
-    if action in {"back", "resume", "view"}:
+    if action in {"back", "resume", "view", "quick_build", "entry"}:
         return True
     current_step = str((state.get("navigation") or {}).get("current_step") or "")
     return str(action or "") in VIDEO_UIFLOW3_STEP_ACTIONS.get(current_step, set())
@@ -82305,8 +82428,14 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                     state = video_uiflow3_go(state, "scene_plan")
         elif action == "pilot_scene_plan_back":
             state = video_uiflow3_clear_transient(state)
-            state["navigation"]["current_step"] = "production_bible"
-            state = video_uiflow3_open_view(state, "pilot_requirements")
+            if (
+                str(state.get("parent_product") or "") == "video_ai_real"
+                and str(state.get("entry_mode") or "") in video_uiflow3.VIDEO_AI_REAL_PRODUCT_FIRST_MODES
+            ):
+                state = video_uiflow3_go(state, "production_bible")
+            else:
+                state["navigation"]["current_step"] = "production_bible"
+                state = video_uiflow3_open_view(state, "pilot_requirements")
         elif action == "bible_auto":
             if str(state.get("parent_product") or "") == "multi_scene_film":
                 if not str((state.get("format") or {}).get("ratio") or ""):
@@ -82546,7 +82675,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             ep_num = safe_int(ep.get("number"), 1)
             ep_title = str(ep.get("title") or f"Tập {ep_num}")
             brief_text = str((state.get("content") or {}).get("original_intent") or (state.get("series") or {}).get("goal") or "Phim dài tập").strip()
-            
+
             state["series"]["goal"] = brief_text
             state = video_uiflow3.set_episode_identity(state, number=ep_num, title=ep_title)
             if not bool((state.get("content") or {}).get("locked")):
@@ -82554,14 +82683,14 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 state = video_uiflow3.lock_content(state)
             state = video_uiflow3.set_episode_content(state, original_intent=brief_text)
             state = video_uiflow3.lock_episode_content(state)
-            
+
             dur = int(ep.get("duration") or 60)
             scene_count = 4 if dur <= 45 else (5 if dur <= 60 else 6)
             state["format"]["scene_count"] = scene_count
             state["format"]["scene_count_confirmed"] = True
             state["format"]["duration_seconds"] = dur
             state = video_uiflow3.confirm_scene_count(state, scene_count)
-            
+
             # Apply parsed scenes from script if available (flexible match)
             parsed_scenes = list(ep.get("parsed_scenes") or [])
             if parsed_scenes:
@@ -82580,7 +82709,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 state["scenes"] = scenes
             else:
                 state = video_uiflow3_ai_enhance_scenes(state)
-                
+
             state = video_uiflow3.auto_assign_scenes(state)
             state = video_uiflow3.mark_sections_complete(
                 state,
@@ -82662,7 +82791,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             episode["number"] = ep_num
             episode["title"] = ep_title
             state["episode"] = episode
-            
+
             ep_content = dict(episode.get("content") or {})
             intent = str(ep_content.get("original_intent") or "").strip()
             if not intent:
@@ -82670,18 +82799,18 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 state = video_uiflow3.set_episode_content(state, intent)
             if not bool((state.get("episode") or {}).get("content", {}).get("locked")):
                 state = video_uiflow3.lock_episode_content(state)
-            
+
             # Ensure top-level content is also marked locked and format confirmed
             if not bool((state.get("content") or {}).get("locked")):
                 state["content"]["locked"] = True
                 state["content"]["original_intent"] = intent
-            
+
             scene_count = safe_int((state.get("format") or {}).get("scene_count"), 0)
             if scene_count <= 0:
                 scene_count = 5
             state["format"]["scene_count"] = scene_count
             state["format"]["scene_count_confirmed"] = True
-            
+
             try:
                 updated = video_uiflow3.confirm_scene_count(state, scene_count)
                 updated = video_uiflow3_ai_enhance_scenes(updated)
@@ -82689,7 +82818,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 state = video_uiflow3_after_service_update(state, updated)
             except Exception:
                 pass
-            
+
             state = video_uiflow3.mark_sections_complete(
                 state,
                 "episode", "scene_count", "scene_plan", "scene_assignment", "prompts", "branding", "summary"
@@ -89645,7 +89774,7 @@ def video_ai_edit_category_keyboard(
             rows.append([sel_btn, extra_action])
     else:
         rows.append([custom_btn, sel_btn])
-    
+
     rows.append([
         (ui_text(lang, "common.back"), video_ai_edit_callback("a650_catalog", callback_state)),
         (ui_text(lang, "common.main_menu"), "menu|main"),
@@ -112093,7 +112222,7 @@ def video_tail9_quality_text(tail: dict, capability: dict | None = None, catalog
     for offer in offers:
         tier_id = safe_int(offer.get("tier_id"), 0)
         product = video_public_quality_product(tier_id)
-        offer_duration_label = f"{product['seconds']} giây/cảnh" 
+        offer_duration_label = f"{product['seconds']} giây/cảnh"
         offer_scene_count = safe_int(
             offer.get("effective_scene_count"),
             video_selfshot3_scene_count_for_quality(tail, tier_id),
@@ -116056,7 +116185,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             except Exception:
                 _stored, proposal = video_flow7_store_script_proposal(uid, script_text, source="ai", locked=True)
                 state = video_flow7_start_confirmed_script_state(context, uid, session, count)
-            
+
             # Direct transfer straight to Shared Tail 9 Add-on
             return await video_tail9_render(query, uid, context, "addon")
         if action == "script_file_use":
@@ -261033,6 +261162,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_render_debug", cmd_video_render_debug))
     tg_app.add_handler(CommandHandler("video_delivery_debug", cmd_video_render_debug))
     tg_app.add_handler(CommandHandler("video_artifact_debug", cmd_video_render_debug))
+    tg_app.add_handler(CommandHandler("video_trace", cmd_video_trace))
     tg_app.add_handler(CommandHandler("video_provider_job_debug", cmd_video_provider_job_debug))
     tg_app.add_handler(CommandHandler("video_job_finance_debug", cmd_video_job_finance_debug))
     tg_app.add_handler(CommandHandler("video_provider_raw_status", cmd_video_provider_raw_status))
