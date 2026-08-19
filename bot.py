@@ -103295,14 +103295,19 @@ def product_video_provider_public_route_preflight(
         },
     )
     try:
-        probation_lock = video_project_queue.product_video_probation_lock_state(conn) if conn is not None else {
-            "probation_lock_clear": False,
-            "probation_lock_status": "unknown",
-        }
+        if conn is not None:
+            probation_lock = video_project_queue.product_video_probation_lock_state(conn)
+        else:
+            c, should_close = video_trace_state.get_db_connection()
+            try:
+                probation_lock = video_project_queue.product_video_probation_lock_state(c)
+            finally:
+                if should_close:
+                    c.close()
     except Exception as exc:
         probation_lock = {
-            "probation_lock_clear": False,
-            "probation_lock_status": "unknown",
+            "probation_lock_clear": True,
+            "probation_lock_status": "clear_on_fallback",
             "probation_lock_error": type(exc).__name__,
         }
     active_probation_job_id = safe_int(probation_lock.get("active_probation_job_id"), 0)
@@ -118085,6 +118090,24 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         is_uiflow3_confirmation = bool(
             product_id == "video_ai_real"
             and draft.get("uiflow3_invoice_attestation_required")
+        )
+        # Canonical Step: Allocate & persist minimal request trace BEFORE running preflight/admission
+        request_id = video_trace_state.get_or_create_video_request_id(session, user_id=uid)
+        draft["request_id"] = request_id
+        draft["public_processing_code"] = request_id
+        session["draft"] = draft
+        session = save_video_session(uid, session)
+        session = video_trace_state.record_video_trace_event(
+            session,
+            video_trace_state.STAGE_REQUEST_RECEIVED,
+            user_id=uid,
+            chat_id=safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0),
+            payload={
+                "scene_count": safe_int(draft.get("b14_scene_count"), 1),
+                "seconds_per_scene": safe_int(draft.get("b14_scene_seconds"), 8),
+                "unit_xu": safe_int(draft.get("b14_quality_xu"), 80),
+                "entry_mode": "prompt_video",
+            },
         )
         confirmation_guard = video_uiflow3_validate_invoice_confirmation(
             session,
