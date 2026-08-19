@@ -52975,30 +52975,29 @@ async def cmd_video_render_debug(update: Update, context: ContextTypes.DEFAULT_T
     arg_raw = str(args[0] if args else "").strip()
     if not arg_raw:
         return await update.message.reply_text("Dùng: /video_render_debug &lt;REQUEST_ID | JOB_ID&gt;", parse_mode="HTML")
-    job_id = safe_int(arg_raw, 0)
+    truth = video_trace_state.resolve_video_request_truth(arg_raw)
+    job_id = safe_int(truth.get("job_id"), 0)
     if job_id <= 0:
-        trace = video_trace_state.lookup_video_request_trace(arg_raw)
-        if trace and trace.get("job_id") and safe_int(trace.get("job_id"), 0) > 0:
-            job_id = safe_int(trace.get("job_id"), 0)
-        else:
-            stage = trace.get("current_stage") if trace else "NOT_FOUND"
-            blocker = trace.get("internal_blocker_code") if trace else "not_found"
-            lines = [
-                "🔍 <b>Video Render Pre-Job Diagnostic</b>\n",
-                f"• REQUEST_ID: <code>{html.escape(str(trace.get('request_id') or arg_raw if trace else arg_raw))}</code>",
-                f"• JOB_ID: <code>Chưa tạo</code>",
-                f"• CURRENT_STAGE: <code>{html.escape(str(stage))}</code>",
-                f"• PREFLIGHT_RESULT: <code>{html.escape(str(trace.get('preflight_result') or 'BLOCKED' if trace else 'NOT_FOUND'))}</code>",
-                f"• ADMISSION_RESULT: <code>{html.escape(str(trace.get('admission_result') or 'BLOCKED' if trace else 'NOT_FOUND'))}</code>",
-                f"• EXACT_BLOCKER_CODE: <code>{html.escape(str(blocker))}</code>",
-                f"• EXACT_BLOCKER_DETAIL: <code>{html.escape(str(trace.get('blocker_detail_safe') or blocker if trace else 'Không tìm thấy'))}</code>",
-                f"• PROVIDER_CONFIGURED: <code>{'YES' if trace and trace.get('provider_configured') else 'NO'}</code>",
-                f"• ELIGIBLE_ROUTE_COUNT: <code>{trace.get('eligible_route_count', 0) if trace else 0}</code>",
-                f"• SELECTED_ROUTE: <code>{html.escape(str(trace.get('selected_route') or 'None' if trace else 'None'))}</code>",
-                f"• WORKER_REQUIRED: <code>{'YES' if trace and trace.get('worker_required') else 'NO'}</code>",
-                f"• WHY_NO_JOB: <code>{html.escape(str(trace.get('why_no_job') or f'Yêu cầu dừng tại bước {blocker}' if trace else 'Yêu cầu không tìm thấy'))}</code>",
-            ]
-            return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        lines = [
+            "🔍 <b>Video Render Pre-Job Diagnostic</b>\n",
+            f"• REQUEST_ID: <code>{html.escape(str(truth.get('request_id') or arg_raw))}</code>",
+            f"• JOB_ID: <code>Chưa tạo</code>",
+            f"• REQUEST_FOUND: <code>{truth.get('request_found', 'NO')}</code>",
+            f"• DURABLE_REQUEST_FOUND: <code>{truth.get('durable_request_found', 'NO')}</code>",
+            f"• CURRENT_STAGE: <code>{html.escape(str(truth.get('current_stage') or 'NOT_FOUND'))}</code>",
+            f"• PREFLIGHT_RESULT: <code>{html.escape(str(truth.get('preflight_result') or 'NOT_FOUND'))}</code>",
+            f"• ADMISSION_RESULT: <code>{html.escape(str(truth.get('admission_result') or 'NOT_FOUND'))}</code>",
+            f"• EXACT_BLOCKER_CODE: <code>{html.escape(str(truth.get('exact_blocker_code') or 'not_found'))}</code>",
+            f"• EXACT_BLOCKER_DETAIL: <code>{html.escape(str(truth.get('exact_blocker_detail') or 'Không tìm thấy'))}</code>",
+            f"• PROVIDER_CONFIGURED_AT_REQUEST: <code>{truth.get('provider_configured_at_request', 'UNKNOWN')}</code>",
+            f"• CURRENT_PROVIDER_CONFIGURED: <code>{truth.get('current_provider_configured', 'NO')}</code>",
+            f"• CURRENT_ELIGIBLE_ROUTE_COUNT: <code>{truth.get('current_eligible_route_count', 0)}</code>",
+            f"• CURRENT_SELECTED_ROUTE: <code>{html.escape(str(truth.get('current_selected_route') or 'None'))}</code>",
+            f"• WORKER_REQUIRED: <code>{truth.get('worker_required', 'NO')}</code>",
+            f"• WHY_NO_JOB: <code>{html.escape(str(truth.get('why_no_job') or 'Yêu cầu không tìm thấy'))}</code>",
+            f"• STATUS_SOURCE: <code>{html.escape(str(truth.get('status_source') or 'canonical_db_not_found'))}</code>",
+        ]
+        return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
     command_parts = str(getattr(update.message, "text", "") or "").split()
     command_name = command_parts[0].lstrip("/") if command_parts else "render"
     text = video_render_debug_text(job_id, mode=command_name or "render")
@@ -53022,6 +53021,7 @@ async def cmd_video_trace(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• PROVIDER_TASK_ID: <code>{html.escape(str(report['PROVIDER_TASK_ID']))}</code>",
         "",
         f"• REQUEST_FOUND: <code>{report['REQUEST_FOUND']}</code>",
+        f"• DURABLE_REQUEST_FOUND: <code>{report.get('DURABLE_REQUEST_FOUND', 'NO')}</code>",
         f"• JOB_FOUND: <code>{report['JOB_FOUND']}</code>",
         f"• PROVIDER_TASK_FOUND: <code>{report['PROVIDER_TASK_FOUND']}</code>",
         "",
@@ -53036,14 +53036,17 @@ async def cmd_video_trace(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• PACKAGE: <code>{html.escape(str(report.get('PACKAGE', '8s_per_scene')))}</code>",
         f"• REQUIRED_CAPABILITY: <code>{html.escape(str(report.get('REQUIRED_CAPABILITY', 'None')))}</code>",
         f"• ROUTE_CANDIDATES: <code>{html.escape(str(report.get('ROUTE_CANDIDATES', 'None')))}</code>",
-        f"• ELIGIBLE_ROUTE_COUNT: <code>{report.get('ELIGIBLE_ROUTE_COUNT', 0)}</code>",
-        f"• SELECTED_ROUTE: <code>{html.escape(str(report.get('SELECTED_ROUTE', 'None')))}</code>",
+        f"• ELIGIBLE_ROUTE_COUNT_AT_REQUEST: <code>{report.get('ELIGIBLE_ROUTE_COUNT_AT_REQUEST', 0)}</code>",
+        f"• SELECTED_ROUTE_AT_REQUEST: <code>{html.escape(str(report.get('SELECTED_ROUTE_AT_REQUEST', 'None')))}</code>",
+        f"• PROVIDER_CONFIGURED_AT_REQUEST: <code>{html.escape(str(report.get('PROVIDER_CONFIGURED_AT_REQUEST', 'NO')))}</code>",
+        f"• PROVIDER_READY_AT_REQUEST: <code>{html.escape(str(report.get('PROVIDER_READY_AT_REQUEST', 'NO')))}</code>",
+        "",
+        f"• CURRENT_PROVIDER_CONFIGURED: <code>{html.escape(str(report.get('CURRENT_PROVIDER_CONFIGURED', 'NO')))}</code>",
+        f"• CURRENT_PROVIDER_READY: <code>{html.escape(str(report.get('CURRENT_PROVIDER_READY', 'NO')))}</code>",
+        f"• CURRENT_ELIGIBLE_ROUTE_COUNT: <code>{report.get('CURRENT_ELIGIBLE_ROUTE_COUNT', 0)}</code>",
+        f"• CURRENT_SELECTED_ROUTE: <code>{html.escape(str(report.get('CURRENT_SELECTED_ROUTE', 'None')))}</code>",
         "",
         f"• EXECUTION_MODE: <code>{html.escape(str(report['EXECUTION_MODE']))}</code>",
-        f"• PROVIDER: <code>{html.escape(str(report['PROVIDER']))}</code>",
-        f"• MODEL: <code>{html.escape(str(report['MODEL']))}</code>",
-        f"• PROVIDER_CONFIGURED: <code>{html.escape(str(report.get('PROVIDER_CONFIGURED', 'NO')))}</code>",
-        f"• PROVIDER_READY: <code>{html.escape(str(report.get('PROVIDER_READY', 'NO')))}</code>",
         f"• WORKER_REQUIRED: <code>{html.escape(str(report.get('WORKER_REQUIRED', 'NO')))}</code>",
         f"• WORKER_READY: <code>{html.escape(str(report.get('WORKER_READY', 'YES')))}</code>",
         "",
