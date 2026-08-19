@@ -89490,16 +89490,16 @@ def _video_ai_edit_adaptive_keyboard(rows: list[list[tuple[str, str]]]) -> Inlin
 def video_ai_edit_catalog_home_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
     selected = video_ai_edit_catalog.normalized_selection((state or {}).get("ai_edit_selected"))
     categories = list(video_ai_edit_catalog.CATEGORIES)
-    rows = [
-        [
-            (category.public_label, video_ai_edit_callback("a650_cat", state, f"{category.stable_id}.0"))
-            for category in categories[index:index + 2]
-        ]
-        for index in range(0, len(categories), 2)
+    cat_buttons = [
+        (category.public_label, video_ai_edit_callback("a650_cat", state, f"{category.stable_id}.0"))
+        for category in categories
     ]
-    rows.extend([
-        [(f"✅ Đã chọn ({len(selected)})", video_ai_edit_callback("a650_selected", state))],
-        [(ui_text(lang, "common.back"), video_ai_edit_callback("a650_source", state)), (ui_text(lang, "common.main_menu"), "menu|main")],
+    # Pair the 5 categories + 'Đã chọn' into exactly 2 buttons per row
+    cat_buttons.append((f"✅ Đã chọn ({len(selected)})", video_ai_edit_callback("a650_selected", state)))
+    rows = [cat_buttons[index:index + 2] for index in range(0, len(cat_buttons), 2)]
+    rows.append([
+        (ui_text(lang, "common.back"), video_ai_edit_callback("a650_source", state)),
+        (ui_text(lang, "common.main_menu"), "menu|main"),
     ])
     return _video_ai_edit_adaptive_keyboard(rows)
 
@@ -89541,16 +89541,40 @@ def video_ai_edit_category_keyboard(
         for item in page.items
     ]
     rows = [option_buttons[index:index + 2] for index in range(0, len(option_buttons), 2)]
-    navigation = []
-    if page.page_index > 0:
-        navigation.append(("⬅️ Trang trước", video_ai_edit_callback("a650_cat", callback_state, f"{category_id}.{page.page_index - 1}")))
-    if page.page_index + 1 < page.page_count:
-        navigation.append(("➡️ Trang sau", video_ai_edit_callback("a650_cat", callback_state, f"{category_id}.{page.page_index + 1}")))
-    if navigation:
-        rows.append(navigation)
-    rows.extend([
-        [(f"✅ Đã chọn ({len(selected)})", video_ai_edit_callback("a650_selected", callback_state))],
-        [(ui_text(lang, "common.back"), video_ai_edit_callback("a650_catalog", callback_state)), (ui_text(lang, "common.main_menu"), "menu|main")],
+    custom_cap_id = f"{category_id}_custom" if f"{category_id}_custom" in video_ai_edit_catalog._CAPABILITY_BY_ID else "custom_request"
+    custom_btn = ("✍️ Tự nhập mô tả", video_ai_edit_callback("a650_detail", callback_state, custom_cap_id))
+    sel_btn = (f"✅ Đã chọn ({len(selected)})", video_ai_edit_callback("a650_selected", callback_state))
+    extra_action = (
+        ("➡️ Xem lại", video_ai_edit_callback("a650_summary", callback_state))
+        if selected
+        else ("📎 Đổi video", video_ai_edit_callback("a650_upload", callback_state))
+    )
+
+    if page.page_count > 1:
+        if page.page_index > 0 and page.page_index + 1 < page.page_count:
+            rows.append([
+                ("⬅️ Trang trước", video_ai_edit_callback("a650_cat", callback_state, f"{category_id}.{page.page_index - 1}")),
+                ("➡️ Trang sau", video_ai_edit_callback("a650_cat", callback_state, f"{category_id}.{page.page_index + 1}")),
+            ])
+            rows.append([custom_btn, sel_btn])
+        elif page.page_index == 0:
+            rows.append([
+                ("➡️ Trang sau", video_ai_edit_callback("a650_cat", callback_state, f"{category_id}.1")),
+                custom_btn,
+            ])
+            rows.append([sel_btn, extra_action])
+        else:
+            rows.append([
+                ("⬅️ Trang trước", video_ai_edit_callback("a650_cat", callback_state, f"{category_id}.{page.page_index - 1}")),
+                custom_btn,
+            ])
+            rows.append([sel_btn, extra_action])
+    else:
+        rows.append([custom_btn, sel_btn])
+    
+    rows.append([
+        (ui_text(lang, "common.back"), video_ai_edit_callback("a650_catalog", callback_state)),
+        (ui_text(lang, "common.main_menu"), "menu|main"),
     ])
     return _video_ai_edit_adaptive_keyboard(rows)
 
@@ -89602,7 +89626,15 @@ def video_ai_edit_selected_keyboard(state: dict | None, lang: str = "vi") -> Inl
         buttons.append((f"{marker} {item.public_label}", video_ai_edit_callback("a650_detail", current, capability_id)))
     rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     if selected:
-        rows.append([("➡️ Xem lại lựa chọn", video_ai_edit_callback("a650_summary", current))])
+        rows.append([
+            ("➡️ Xem lại lựa chọn", video_ai_edit_callback("a650_summary", current)),
+            ("📎 Đổi video", video_ai_edit_callback("a650_upload", current)),
+        ])
+    else:
+        rows.append([
+            ("📎 Đổi video", video_ai_edit_callback("a650_upload", current)),
+            ("✍️ Tự nhập mô tả", video_ai_edit_callback("a650_detail", current, "custom_request")),
+        ])
     rows.append([
         (ui_text(lang, "common.back"), _video_ai_edit_selected_back_callback(current)),
         (ui_text(lang, "common.main_menu"), "menu|main"),
@@ -89656,7 +89688,10 @@ def video_ai_edit_summary_text(state: dict | None, lang: str = "vi") -> str:
 
 def video_ai_edit_summary_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     return _video_ai_edit_adaptive_keyboard([
-        [("✏️ Chỉnh lại lựa chọn", video_ai_edit_callback("a650_selected", state))],
+        [
+            ("✏️ Chỉnh lại lựa chọn", video_ai_edit_callback("a650_selected", state)),
+            ("🚀 Bắt đầu xử lý AI", video_ai_edit_callback("a650_upload", state)),
+        ],
         [(ui_text(lang, "common.back"), _video_ai_edit_selected_back_callback(state)), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
@@ -256376,7 +256411,12 @@ async def handle_video_ai_edit_ui_callback(
 
     if action not in VIDEO_AI_EDIT_UI_ACTIONS:
         return False
-    query_chat_id = getattr(getattr(query, "message", None), "chat_id", None)
+    query_chat_id = (
+        getattr(getattr(query, "message", None), "chat_id", None)
+        or getattr(getattr(getattr(query, "message", None), "chat", None), "id", None)
+        or getattr(getattr(query, "from_user", None), "id", None)
+        or user_id
+    )
     try:
         value, callback_token, callback_revision = _video_ai_edit_ui_callback_identity(action, parts)
         draft = video_ai_edit_state.load_draft(user_id)
@@ -256410,7 +256450,7 @@ async def handle_video_ai_edit_ui_callback(
                 reply_markup=video_ai_edit_upload_keyboard(lang, state=draft),
             )
         parent_screens = {
-            "a650_source": {"ai650_catalog"},
+            "a650_source": {"ai650_catalog", "ai650_source_summary"},
             "a650_catalog": {"ai650_source_summary", "ai650_category", "ai650_selected", "ai650_summary"},
             "a650_cat": {"ai650_catalog", "ai650_category", "ai650_selected", "ai650_summary"},
             "a650_selected": {"ai650_catalog", "ai650_category", "ai650_detail", "ai650_summary"},
@@ -256495,8 +256535,17 @@ async def handle_video_ai_edit_ui_callback(
         if action == "a650_detail":
             capability_id = value
             item = video_ai_edit_catalog.capability(capability_id)
-            if capability_id not in video_ai_edit_catalog.normalized_selection(draft.get("ai_edit_selected")):
-                raise ValueError("ai650_detail_not_selected")
+            selected_set = set(video_ai_edit_catalog.normalized_selection(draft.get("ai_edit_selected")))
+            if capability_id not in selected_set:
+                toggled = video_ai_edit_catalog.toggle_capability_state(draft, capability_id)
+                draft = video_ai_edit_state.update_draft(
+                    user_id,
+                    expected_revision=callback_revision,
+                    ai_edit_selected=toggled["ai_edit_selected"],
+                    ai_edit_details=toggled["ai_edit_details"],
+                    ai_edit_references=toggled["ai_edit_references"],
+                )
+                callback_revision = safe_int(draft.get("revision"), 1)
             pending = {}
             if item.requires_reference_image:
                 pending = {"capability_id": capability_id, "field": "reference"}

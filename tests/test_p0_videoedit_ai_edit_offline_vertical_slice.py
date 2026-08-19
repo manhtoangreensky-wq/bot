@@ -225,8 +225,10 @@ def test_catalog_is_one_39_item_authority_with_compact_pages_and_visible_checkma
             ("📦 Vật thể & sản phẩm", "videoedit|ai_cat|object.0"),
             ("✨ Phong cách hình ảnh", "videoedit|ai_cat|style.0"),
         ],
-        [("📝 Chữ & yêu cầu khác", "videoedit|ai_cat|text.0")],
-        [("✅ Đã chọn (2)", "videoedit|ai_selected")],
+        [
+            ("📝 Chữ & yêu cầu khác", "videoedit|ai_cat|text.0"),
+            ("✅ Đã chọn (2)", "videoedit|ai_selected"),
+        ],
         [
             ("⬅️ Quay lại", "videoedit|ai_source"),
             ("🏠 Menu chính", "menu|main"),
