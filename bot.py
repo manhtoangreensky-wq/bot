@@ -96778,8 +96778,6 @@ def video_scene3_canonical_entry_keyboard(
     protected = str(product_id or "") in {
         "frame_video_local", "image_to_video", "video_edit", "video_local_edit",
     }
-    secondary_label = ui_text(lang, "common.main_menu") if protected else "🎬 Menu Video"
-    secondary_callback = "menu|main" if protected else "menu|main_video"
     return video_scene3_keyboard([
         [
             (
@@ -96792,8 +96790,8 @@ def video_scene3_canonical_entry_keyboard(
             ),
         ],
         [
-            (f"⬅️ {video_copy['back_video']}", parent_callback),
-            (secondary_label, secondary_callback),
+            (f"⬅️ {video_copy['back_video']}" if parent_callback == "menu|main_video" else "⬅️ Quay lại", parent_callback),
+            (ui_text(lang, "common.main_menu"), "menu|main"),
         ],
     ])
 
@@ -96819,11 +96817,7 @@ def task3d_product_intro_keyboard(
     protected = str(product_id or "") in {
         "frame_video_local", "image_to_video", "video_edit", "video_local_edit",
     }
-    secondary_menu = (
-        (ui_text(lang, "common.main_menu"), "menu|main")
-        if protected
-        else ("🎬 Menu Video", "menu|main_video")
-    )
+    secondary_menu = (ui_text(lang, "common.main_menu"), "menu|main")
     if (
         str(product_id or "") in video_flow7.ENTRY_ROWS
         and str(product_id or "") != "script_image_video"
