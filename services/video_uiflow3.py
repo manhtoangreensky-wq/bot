@@ -741,12 +741,12 @@ def set_entry_mode(state: Mapping[str, Any], mode: str) -> dict[str, Any]:
     current["source"]["complete"] = bool(current["source"].get("assets")) if current["source"]["required"] else True
     current["entry_mode"] = selected
     if product == "multi_scene_film":
-        current["navigation"]["current_step"] = "series_goal"
+        target_step = "series_goal"
     elif product == "video_ai_real" and selected in VIDEO_AI_REAL_PRODUCT_FIRST_MODES:
-        current["navigation"]["current_step"] = "scene_count"
+        target_step = "scene_count"
     else:
-        current["navigation"]["current_step"] = "source" if current["source"]["required"] else "format"
-    return normalize_state(current)
+        target_step = "source" if current["source"]["required"] else "format"
+    return navigate(current, target_step)
 
 
 def image_source_follows_format(state: Mapping[str, Any]) -> bool:
