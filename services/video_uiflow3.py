@@ -2863,13 +2863,10 @@ def callback(action: str, *parts: Any) -> str:
 
 def draft_token(state: Mapping[str, Any]) -> str:
     current = normalize_state(state)
-    if not _text(current.get("draft_id"), 120):
+    draft_id = _text(current.get("draft_id"), 120)
+    if not draft_id:
         raise ValueError("video_uiflow3_draft_id_required")
-    # Bind callbacks to the visible draft snapshot, not only its lifetime.
-    # This makes an old same-draft screen harmless after navigation or edits.
-    current.pop("handled_callback_ids", None)
-    encoded = json.dumps(current, ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=str)
-    return sha256(encoded.encode("utf-8")).hexdigest()[:8]
+    return sha256(draft_id.encode("utf-8")).hexdigest()[:8]
 
 
 def scope_callback(state: Mapping[str, Any], value: str) -> str:

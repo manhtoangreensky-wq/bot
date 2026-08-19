@@ -81250,7 +81250,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         await query.answer("Đã nhận lựa chọn này.")
         return True
     is_film_flow = str(state.get("parent_product") or "") in {"multi_scene_film", "video_long"}
-    if not is_film_flow and action != "entry" and action != "resume" and (
+    if not is_film_flow and action not in {"entry", "resume", "back"} and (
         not callback_token
         or not hmac.compare_digest(callback_token, video_uiflow3.draft_token(state))
     ):
@@ -81360,6 +81360,18 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                     state = video_uiflow3_open_view(state, "")
             else:
                 state = video_uiflow3_clear_transient(state)
+                nav = dict(state.get("navigation") or {})
+                stack = list(nav.get("visible_step_stack") or [])
+                if not stack:
+                    await query.answer()
+                    user_id = safe_int(getattr(getattr(query, "from_user", None), "id", 0), 0)
+                    lang = (get_user_language(user_id) or "vi") if user_id else "vi"
+                    return await safe_edit_or_send(
+                        query,
+                        menu_text_main_video_i18n(lang),
+                        parse_mode="HTML",
+                        reply_markup=main_video_keyboard(lang),
+                    )
                 state = video_uiflow3.back(state)
                 if str((state.get("navigation") or {}).get("current_step") or "") == "summary":
                     state["navigation"]["return_to"] = None
