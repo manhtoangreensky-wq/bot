@@ -118083,28 +118083,28 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         prefix = (html.escape(str(scene_policy.get("message") or "")) + "\n\n") if scene_policy.get("message") else ""
         return await safe_edit_or_send(query, prefix + video_b14_invoice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
     if action == "b14_confirm":
+        # Canonical Intake Boundary: Allocate & commit durable request trace with readback verification before ANY guard/preflight
+        intake_result = video_trace_state.begin_video_confirm_attempt(
+            session,
+            user_id=uid,
+            chat_id=safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0),
+            payload={
+                "scene_count": safe_int((session.get("draft") or {}).get("b14_scene_count"), 1),
+                "seconds_per_scene": safe_int((session.get("draft") or {}).get("b14_scene_seconds"), 8),
+                "unit_xu": safe_int((session.get("draft") or {}).get("b14_quality_xu"), 80),
+                "entry_mode": "prompt_video",
+            },
+        )
+        if not intake_result.get("ok"):
+            return await safe_edit_or_send(
+                query,
+                "Hệ thống chưa thể ghi nhận yêu cầu xử lý lúc này. TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+            )
+        session = intake_result.get("session") or session
         draft = dict(session.get("draft") or {})
         is_uiflow3_confirmation = bool(
             product_id == "video_ai_real"
             and draft.get("uiflow3_invoice_attestation_required")
-        )
-        # Canonical Step: Allocate & persist minimal request trace BEFORE running preflight/admission
-        request_id = video_trace_state.get_or_create_video_request_id(session, user_id=uid)
-        draft["request_id"] = request_id
-        draft["public_processing_code"] = request_id
-        session["draft"] = draft
-        session = save_video_session(uid, session)
-        session = video_trace_state.record_video_trace_event(
-            session,
-            video_trace_state.STAGE_REQUEST_RECEIVED,
-            user_id=uid,
-            chat_id=safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0),
-            payload={
-                "scene_count": safe_int(draft.get("b14_scene_count"), 1),
-                "seconds_per_scene": safe_int(draft.get("b14_scene_seconds"), 8),
-                "unit_xu": safe_int(draft.get("b14_quality_xu"), 80),
-                "entry_mode": "prompt_video",
-            },
         )
         confirmation_guard = video_uiflow3_validate_invoice_confirmation(
             session,
@@ -118255,6 +118255,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         scene_health_gate = dict(admission_evaluation.get("scene_gate") or {})
         provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
         session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
+        session = video_trace_state.record_video_trace_event(
+            session,
+            video_trace_state.STAGE_PRECHECK_PASSED,
+            user_id=uid,
+            chat_id=safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0),
+        )
         draft = dict(session.get("draft") or {})
         draft.update({
             "submit_source": "public_user_final_confirm",
