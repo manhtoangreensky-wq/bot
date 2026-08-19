@@ -92324,10 +92324,36 @@ VIDEO_STEP_BACK_MATRIX = {
         "asset_storyboard_prompt": "asset_intake",
         "b14_creative_controls": "asset_intake",
         "storyboard_preview": "b14_creative_controls",
+        "b14_addons": "storyboard_preview",
+        "b14_aspect": "intro",
+        "b14_quality": "b14_scene_count",
+        "b14_scene_count": "intro",
+        "scene_count": "intro",
+        "waiting_scene_count": "b14_scene_count",
+        "b14_invoice": "b14_scene_count",
+        "b14_queue_status": "b14_invoice",
         "style": "profile_select",
         "color": "style",
         "movement": "color",
         "result": "movement",
+    },
+    "product_video": {
+        "intro": VIDEO_BACK_MENU_TARGET,
+        "collect_input": "intro",
+        "profile_select": "intro",
+        "idea_suggestions": "profile_select",
+        "asset_intake": "idea_suggestions",
+        "b14_creative_controls": "intro",
+        "storyboard_preview": "b14_creative_controls",
+        "b14_addons": "storyboard_preview",
+        "b14_aspect": "intro",
+        "b14_quality": "b14_scene_count",
+        "b14_scene_count": "intro",
+        "scene_count": "intro",
+        "waiting_scene_count": "b14_scene_count",
+        "b14_invoice": "b14_scene_count",
+        "b14_queue_status": "b14_invoice",
+        "result": "storyboard_preview",
     },
     "self_shot_scene_change": {
         "intro": VIDEO_BACK_MENU_TARGET,
@@ -92464,6 +92490,8 @@ def video_back_matrix_target(session: dict | None = None) -> str:
     for candidate in reversed(history):
         if candidate and candidate != current:
             return candidate
+    if current in {"b14_scene_count", "scene_count", "waiting_scene_count", "b14_aspect", "b14_creative_controls"}:
+        return "intro"
     return VIDEO_BACK_MENU_TARGET
 
 
@@ -253908,7 +253936,7 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             board = video_storyboard2.normalize_state(dict(state.get("storyboard2") or {}))
             board = video_storyboard2.move(board, "review", push=False, awaiting_input="")
             return await storyboard2_render(query, context, save_storyboard2_state(context, board, state).get("storyboard2"))
-        if step in {"content_mode", "subject", "await_subject"} and source_product_id in VIDEO_PRODUCT_REGISTRY:
+        if step in {"scene_count", "content_mode", "subject", "await_subject"} and source_product_id in VIDEO_PRODUCT_REGISTRY:
             parent_override = "archprofile|output" if "architecture" in str(state.get("origin_step") or "") else ""
             return await safe_edit_or_send(
                 query,
