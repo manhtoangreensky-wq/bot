@@ -911,9 +911,28 @@ def image_pricing_reply(*, runtime_facts: dict | None = None) -> str:
 
 
 def video_pricing_reply(*, runtime_facts: dict | None = None) -> str:
-    unknown, facts = _runtime_unknown_or_legacy(runtime_facts, "video_tiers")
+    unknown, facts = _runtime_unknown_or_legacy(runtime_facts, "video_tiers", "scene_seconds")
     if unknown:
         return PRICE_UNKNOWN_SAFE_REPLY
+    if facts:
+        video_tiers = _runtime_tiers(facts, "video_tiers") or []
+        seconds = int(_runtime_number(facts, "scene_seconds", minimum=1) or 5)
+        if len(video_tiers) == 1:
+            name, price = video_tiers[0]
+            price_str = format_xu(price)
+            return (
+                f"Dạ video AI có gói {name}: {price_str} (1 cảnh = {seconds}s). "
+                f"{VIDEO_MULTISCENE_DISCOUNT_COPY} "
+                f"Ví dụ {name} 3 cảnh: {price} × 3 = {price * 3} Xu, giảm 10% còn {int(round(price * 3 * 0.9))} Xu tiền video. "
+                "Bot sẽ dừng ở màn hóa đơn để mình tự xác nhận. Anh/chị muốn làm video về sản phẩm gì để em gợi ý gói phù hợp?"
+            )
+        summary = "; ".join(f"{name} {seconds} giây {format_xu(price)}/cảnh" for name, price in video_tiers)
+        return (
+            f"Dạ video AI có các gói: {summary}. "
+            f"{VIDEO_MULTISCENE_DISCOUNT_COPY} "
+            "Ví dụ Nhanh gọn 3 cảnh: 200 × 3 = 600 Xu, giảm 10% còn 540 Xu tiền video. "
+            "Bot sẽ dừng ở màn hóa đơn để mình tự xác nhận. Anh/chị muốn làm video về sản phẩm gì để em gợi ý gói phù hợp?"
+        )
     return (
         f"Dạ video AI có các gói: {_video_price_summary()}. "
         f"{VIDEO_MULTISCENE_DISCOUNT_COPY} "

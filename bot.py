@@ -6837,22 +6837,29 @@ def cskh_live_pricing_snapshot() -> dict:
     honest unavailable snapshot rather than a stale price claim.
     """
     try:
-        image_payload = canonical_image_tier_pricing_payload()
+        if "canonical_image_tier_pricing_payload" in globals() and callable(globals()["canonical_image_tier_pricing_payload"]):
+            image_payload = canonical_image_tier_pricing_payload()
+        elif "image_tier_pricing_payload" in globals() and callable(globals()["image_tier_pricing_payload"]):
+            image_payload = image_tier_pricing_payload()
+        else:
+            image_payload = {}
         video_payload = video_tier_pricing_payload()
+        image_order = globals().get("CANONICAL_IMAGE_TIER_ORDER") or globals().get("IMAGE_TIER_ORDER") or list(image_payload.keys())
         image_tiers = [
             (
                 str((image_payload.get(tier) or {}).get("label") or tier),
                 int((image_payload.get(tier) or {}).get("cost") or 0),
             )
-            for tier in CANONICAL_IMAGE_TIER_ORDER
+            for tier in image_order
             if tier in image_payload
         ]
+        video_order = globals().get("CANONICAL_VIDEO_TIER_ORDER") or globals().get("VIDEO_TIER_ORDER") or list(video_payload.keys())
         video_tiers = [
             (
                 str((video_payload.get(tier) or {}).get("label") or tier),
                 int((video_payload.get(tier) or {}).get("cost") or 0),
             )
-            for tier in VIDEO_TIER_ORDER
+            for tier in video_order
             if tier in video_payload
         ]
         music_background_tiers = [
@@ -6884,7 +6891,8 @@ def cskh_live_pricing_snapshot() -> dict:
             "scene_seconds": scene_seconds,
         }
     except Exception as exc:
-        logger.warning("cskh runtime pricing snapshot unavailable | error=%s", type(exc).__name__)
+        if "logger" in globals() and globals()["logger"] is not None:
+            logger.warning("cskh runtime pricing snapshot unavailable | error=%s", type(exc).__name__)
         return {"available": False, "source": "runtime_unavailable"}
 
 
