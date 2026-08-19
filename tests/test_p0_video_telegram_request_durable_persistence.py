@@ -38,6 +38,8 @@ def temp_conn(tmp_path):
     os.environ["DB_PATH"] = db_file
     conn = sqlite3.connect(db_file)
     vts.ensure_video_trace_schema(conn)
+    from services import video_project_queue as queue
+    queue.ensure_video_project_queue_schema(conn)
     yield conn
     conn.close()
     os.environ.pop("DATABASE_PATH", None)

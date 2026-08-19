@@ -101274,10 +101274,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         or ""
     ).strip()
     if not request_id or request_id in {"Không có", "-"}:
-        if submit_attempted or job_id > 0:
-            request_id = video_trace_state.get_or_create_video_request_id(session, user_id=user_id)
-            draft["request_id"] = request_id
-            draft["public_processing_code"] = request_id
+        request_id = ""
 
     provider_task_id = str(
         job.get("provider_task_id")
@@ -118385,6 +118382,14 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         })
         session["draft"] = draft
         save_video_session(uid, session)
+        if job_id > 0:
+            session = video_trace_state.record_video_trace_event(
+                session,
+                video_trace_state.STAGE_JOB_CREATED,
+                job_id=job_id,
+                user_id=uid,
+                chat_id=safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0),
+            )
         session = task3d_session_step(uid, "b14_queue_status", provider_called=False)
         return await video_b14_send_or_edit_status_panel(query, context, session, result, uid, lang)
     if action == "b14_job_status":
