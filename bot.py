@@ -127,7 +127,7 @@ from services import video_idea_catalog, video_idea_script_intake, video_idea_st
 from services import video_profile_context_engine
 from services import frame_video_commercial, frame_video_flow, frame_video_public_seam, frame_video_runtime
 from services import video_addon_planner, video_ai_real_pricing, video_ai_real_prompt_compiler, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_selfshot_local_analysis, video_selfshotflow4, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uiflow3, video_uiflow3_routeengine, video_uifreeze1
-from services import ui_navigation
+from services import ui_navigation, video_trace_state
 from services import local_video_studio_preview
 from services import local_video_planning_store
 from services import video_planning_assistant as local_video_studio_public
@@ -75291,7 +75291,7 @@ def video_uiflow3_prepare_no_job_status(
     blocker_code: str,
     public_message: str,
 ) -> dict:
-    """Persist a truthful failed submit attempt without inventing a task."""
+    """Persist a truthful failed submit attempt with REQUEST_ID and without inventing a task."""
 
     current = dict(session or get_video_session(user_id) or {})
     draft = dict(current.get("draft") or {})
@@ -75304,6 +75304,8 @@ def video_uiflow3_prepare_no_job_status(
         current["current_step"] = "b14_queue_status"
         return save_video_session(user_id, current)
 
+    request_id = video_trace_state.get_or_create_video_request_id(current, user_id=user_id)
+
     preflight = {
         "allowed": False,
         "blocker_code": str(blocker_code or "job_not_created")[:160],
@@ -75314,6 +75316,8 @@ def video_uiflow3_prepare_no_job_status(
     }
     draft.pop("b14_preflight_ui_context", None)
     draft.update({
+        "request_id": request_id,
+        "public_processing_code": request_id,
         "b14_submit_attempted": True,
         "b14_submit_preflight_snapshot": preflight,
         "b14_queue_job": {},
@@ -75325,6 +75329,23 @@ def video_uiflow3_prepare_no_job_status(
     })
     current["draft"] = draft
     current["current_step"] = "b14_queue_status"
+    current = video_trace_state.record_video_trace_event(
+        current,
+        video_trace_state.STAGE_REQUEST_RECEIVED,
+        user_id=user_id,
+    )
+    current = video_trace_state.record_video_trace_event(
+        current,
+        video_trace_state.STAGE_PRECHECK_STARTED,
+        user_id=user_id,
+    )
+    current = video_trace_state.record_video_trace_event(
+        current,
+        video_trace_state.STAGE_ADMISSION_BLOCKED,
+        user_id=user_id,
+        blocker_code=blocker_code,
+        payload={"public_message": public_message},
+    )
     return save_video_session(user_id, current)
 
 
@@ -100728,7 +100749,7 @@ def video_b14_blocker_label(blocker_code: str) -> str:
     code = str(blocker_code or "").strip().lower()
     mapping = {
         "model_capability_missing": "Mô hình chưa hỗ trợ tính năng",
-        "provider_not_configured": "Hệ thống chưa cấu hình kênh dựng",
+        "provider_not_configured": "Hệ thống chưa thể khởi tạo kênh dựng cho cấu hình này",
         "provider_unavailable": "Hệ thống đang kết nối kênh dựng (tạm bận)",
         "worker_heartbeat_stale": "Hệ thống xử lý đang kết nối lại",
         "render_service_not_ready": "Dịch vụ dựng chưa sẵn sàng",
@@ -101080,11 +101101,46 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         progress_line = "Tiến độ: <b>Theo từng cảnh</b>"
     else:
         progress_line = f"Tiến độ: <b>{max(0, min(100, progress))}%</b>"
-    public_processing_code = str(
-        draft.get("public_processing_code")
-        or job_result.get("public_processing_code")
-        or (f"#{job_id or project_id}" if (job_id or project_id) else "Không có")
+    trace = dict(draft.get("video_trace") or {})
+    request_id = str(
+        draft.get("request_id")
+        or trace.get("request_id")
+        or draft.get("public_processing_code")
+        or ""
+    ).strip()
+    if not request_id or request_id in {"Không có", "-"}:
+        if submit_attempted or job_id > 0:
+            request_id = video_trace_state.get_or_create_video_request_id(session, user_id=user_id)
+            draft["request_id"] = request_id
+            draft["public_processing_code"] = request_id
+
+    provider_task_id = str(
+        job.get("provider_task_id")
+        or draft_job.get("provider_task_id")
+        or provider_telemetry.get("provider_task_id")
+        or job_result.get("provider_task_id")
+        or trace.get("provider_task_id")
+        or ""
+    ).strip()
+
+    job_id_label = f"#{job_id}" if job_id > 0 else "Chưa tạo"
+    current_stage_label = str(
+        trace.get("current_stage_label")
+        or (
+            "Đang kiểm tra cấu hình"
+            if submit_blocked
+            else "Đã tạo tác vụ nội bộ"
+            if job_id > 0 and status in {"queued", "queued_for_worker"}
+            else "Đang dựng video"
+            if status in {"processing", "running"}
+            else "Đã hoàn tất"
+            if status in {"completed", "success"} and has_final_artifact
+            else "Tạm dừng tại bước kiểm tra"
+            if failed_no_charge_terminal or status in {"failed", "error"}
+            else "Đã nhận yêu cầu"
+        )
     )
+
     failed_status_panel = bool(
         submit_blocked
         or status_identity_rejected
@@ -101108,13 +101164,21 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         if failed_status_panel
         else "🎬 <b>Trạng thái tạo video</b>"
     )
+    id_lines = []
+    if request_id:
+        id_lines.append(f"Mã yêu cầu: <b>{html.escape(request_id)}</b>")
+    id_lines.append(f"Mã tác vụ: <b>{html.escape(job_id_label)}</b>")
+    if provider_task_id and provider_task_id != "None":
+        id_lines.append(f"Mã provider: <b>{html.escape(provider_task_id)}</b>")
+
     lines = [
         panel_title,
         "",
         confirmation_line,
         "",
-        f"Mã xử lý: <b>{html.escape(public_processing_code)}</b>",
+        *id_lines,
         f"Gói: <b>{html.escape(package_label)}</b>",
+        f"Bước hiện tại: <b>{html.escape(current_stage_label)}</b>",
         progress_line,
         f"Trạng thái: <b>{html.escape(status_label)}</b>",
         "",
