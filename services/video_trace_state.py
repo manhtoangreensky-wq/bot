@@ -173,7 +173,10 @@ def persist_video_request_trace(trace: dict, conn=None) -> bool:
             created_at, updated_at
         ))
         c.commit()
-        return True
+        # Readback verification
+        cursor = c.execute("SELECT request_id FROM video_request_traces WHERE request_id = ? LIMIT 1", (request_id,))
+        row = cursor.fetchone()
+        return bool(row and row[0] == request_id)
     except Exception:
         return False
     finally:
