@@ -531,6 +531,7 @@ def product_video_freeze_truth(
 
     public_submit_enabled = _context_bool("public_submit_enabled", True)
     provider_configured = _context_bool("provider_configured", True)
+    local_worker_required = _context_bool("local_worker_required", False)
     worker_available = _context_bool("worker_available", True)
     worker_compatible = _context_bool("worker_compatible", True)
     public_limits_exceeded = _context_bool("public_limits_exceeded")
@@ -554,8 +555,8 @@ def product_video_freeze_truth(
         ),
         (not public_submit_enabled, "public_provider_submit_disabled", "runtime:public_submit_switch"),
         (not provider_configured, "provider_not_configured", "runtime:provider_configuration"),
-        (not worker_available, "worker_unavailable", "runtime:owner_product_video_worker"),
-        (not worker_compatible, "worker_incompatible", "runtime:owner_product_video_worker"),
+        (local_worker_required and not worker_available, "worker_unavailable", "runtime:owner_product_video_worker"),
+        (local_worker_required and not worker_compatible, "worker_incompatible", "runtime:owner_product_video_worker"),
         (public_limits_exceeded, "public_limits_exceeded", "runtime:public_limits"),
     ):
         if blocked:
@@ -2712,6 +2713,7 @@ def product_video_provider_eligibility_snapshot(
     admission_source: str = "",
     public_user_confirmed: bool = False,
     public_submit_enabled: bool = False,
+    local_worker_required: bool = False,
     worker_compatible: bool = False,
     probation_lock_clear: bool = False,
     probation_lock_owner_job_id: int = 0,
@@ -2795,10 +2797,11 @@ def product_video_provider_eligibility_snapshot(
     current_job_matches_lock = bool(lock_owner_job_id > 0 and evaluated_job_id == lock_owner_job_id)
     lock_owned_by_other_job = bool(lock_owner_job_id > 0 and not current_job_matches_lock)
     effective_probation_lock_clear = bool(probation_lock_clear or current_job_matches_lock)
+    worker_check_passed = bool(worker_compatible) if local_worker_required else True
     public_confirm_probation_allowed = bool(
         allow_public_confirmed_probation
         and probation_source_policy.get("provider_submit_allowed")
-        and bool(worker_compatible)
+        and worker_check_passed
         and effective_probation_lock_clear
     )
     if not allow_public_confirmed_probation:
@@ -2808,7 +2811,7 @@ def product_video_provider_eligibility_snapshot(
             probation_source_policy.get("provider_submit_block_reason")
             or "probation_submit_source_blocked"
         )
-    elif not worker_compatible:
+    elif local_worker_required and not worker_compatible:
         probation_context_reject_reason = "worker_incompatible"
     elif not effective_probation_lock_clear:
         probation_context_reject_reason = (

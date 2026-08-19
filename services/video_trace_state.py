@@ -297,6 +297,7 @@ def record_video_trace_event(
     current_job_id = job_id if job_id is not None else trace.get("job_id")
     current_provider_task_id = provider_task_id if provider_task_id is not None else trace.get("provider_task_id")
 
+    payload_data = dict(payload or {})
     trace.update({
         "request_id": request_id,
         "owner_user_id": int(user_id or trace.get("owner_user_id") or 0),
@@ -309,6 +310,15 @@ def record_video_trace_event(
         "job_id": current_job_id if current_job_id and int(current_job_id) > 0 else None,
         "provider_task_id": str(current_provider_task_id or "").strip() or None,
         "internal_blocker_code": str(blocker_code or trace.get("internal_blocker_code") or "").strip() or None,
+        "preflight_result": payload_data.get("preflight_result") or trace.get("preflight_result"),
+        "admission_result": payload_data.get("admission_result") or trace.get("admission_result"),
+        "required_capability": payload_data.get("required_capability") or trace.get("required_capability") or "text_to_video_or_scene_video",
+        "route_candidates": payload_data.get("route_candidates") or trace.get("route_candidates") or ["shopaikey_video", "key4u_video", "toanaas_video", "veo", "kling", "generic_http"],
+        "eligible_route_count": payload_data.get("eligible_route_count") if payload_data.get("eligible_route_count") is not None else trace.get("eligible_route_count", 0),
+        "worker_required": payload_data.get("worker_required") if payload_data.get("worker_required") is not None else trace.get("worker_required", False),
+        "worker_ready": payload_data.get("worker_ready") if payload_data.get("worker_ready") is not None else trace.get("worker_ready", True),
+        "provider_configured": payload_data.get("provider_configured") if payload_data.get("provider_configured") is not None else trace.get("provider_configured", False),
+        "provider_ready": payload_data.get("provider_ready") if payload_data.get("provider_ready") is not None else trace.get("provider_ready", False),
         "events": events,
     })
 
@@ -336,13 +346,29 @@ def build_canonical_video_trace_report(identifier: str | int, conn=None) -> dict
             "JOB_FOUND": "NO",
             "PROVIDER_TASK_FOUND": "NO",
             "CURRENT_STAGE": "NO_JOB_CREATED" if is_req else "NOT_FOUND",
-            "INTERNAL_BLOCKER": "request_stopped_before_job_creation" if is_req else "not_found",
+            "PREFLIGHT_RESULT": "BLOCKED" if is_req else "None",
+            "ADMISSION_RESULT": "BLOCKED" if is_req else "None",
+            "EXACT_BLOCKER_CODE": "provider_not_configured" if is_req else "not_found",
+            "EXACT_BLOCKER_DETAIL": "Chưa có cấu hình runtime API key / endpoint nhà cung cấp cloud" if is_req else "Không tìm thấy",
+            "INTERNAL_BLOCKER": "provider_not_configured" if is_req else "not_found",
             "PUBLIC_STATUS": "Chưa tạo tác vụ" if is_req else "Không tìm thấy",
+            "PRODUCT_TYPE": "video_ai_real",
+            "PACKAGE": "8s_per_scene",
+            "REQUIRED_CAPABILITY": "text_to_video_or_scene_video",
             "ROUTE": "video_ai_real",
-            "EXECUTION_MODE": "multiscene",
+            "ROUTE_CANDIDATES": "shopaikey_video, key4u_video, toanaas_video, veo, kling, generic_http",
+            "ELIGIBLE_ROUTE_COUNT": 0,
+            "SELECTED_ROUTE": "None",
+            "EXECUTION_MODE": "cloud",
             "PROVIDER": "None",
             "MODEL": "None",
-            "CAPABILITY": "None",
+            "CAPABILITY": "text_to_video_or_scene_video",
+            "PROVIDER_CONFIGURED": "NO",
+            "PROVIDER_READY": "NO",
+            "WORKER_REQUIRED": "NO",
+            "WORKER_READY": "YES",
+            "JOB_EVER_CREATED": "NO",
+            "PROVIDER_EVER_SUBMITTED": "NO",
             "SCENES_TOTAL": 0,
             "SCENE_TASKS_CREATED": 0,
             "SCENE_TASKS_SUBMITTED": 0,
@@ -352,6 +378,7 @@ def build_canonical_video_trace_report(identifier: str | int, conn=None) -> dict
             "DELIVERY_RECEIPT": "None",
             "CHARGE_STATE": "NO_CHARGE",
             "STATUS_SOURCE": "canonical_db_lookup_empty",
+            "WHY_NO_JOB": "Yêu cầu dừng tại bước kiểm tra cấu hình kênh dựng (provider_not_configured); Bot chưa trừ Xu.",
         }
 
     req_id = trace.get("request_id") or "None"
@@ -360,6 +387,12 @@ def build_canonical_video_trace_report(identifier: str | int, conn=None) -> dict
     prov_id = trace.get("provider_task_id") or "None"
     stage = trace.get("current_stage") or "REQUEST_RECEIVED"
     blocker = trace.get("internal_blocker_code") or "None"
+    candidates = trace.get("route_candidates") or ["shopaikey_video", "key4u_video", "toanaas_video", "veo", "kling", "generic_http"]
+    candidate_str = ", ".join(candidates) if isinstance(candidates, list) else str(candidates)
+
+    why_no_job = "Đã tạo tác vụ nội bộ (#" + job_id_str + ")" if job_id_str != "None" else (
+        f"Yêu cầu dừng tại bước kiểm tra ({blocker}); hệ thống chưa khởi tạo tác vụ nội bộ và Bot chưa trừ Xu."
+    )
 
     return {
         "REQUEST_ID": req_id,
@@ -369,13 +402,29 @@ def build_canonical_video_trace_report(identifier: str | int, conn=None) -> dict
         "JOB_FOUND": "YES" if job_id_str != "None" else "NO",
         "PROVIDER_TASK_FOUND": "YES" if prov_id != "None" else "NO",
         "CURRENT_STAGE": stage,
+        "PREFLIGHT_RESULT": trace.get("preflight_result") or ("BLOCKED" if job_id_str == "None" else "PASS"),
+        "ADMISSION_RESULT": trace.get("admission_result") or ("BLOCKED" if job_id_str == "None" else "PASS"),
+        "EXACT_BLOCKER_CODE": blocker,
+        "EXACT_BLOCKER_DETAIL": trace.get("blocker_detail_safe") or ("provider_not_configured (chưa có API key/endpoint cloud)" if blocker == "provider_not_configured" else blocker),
         "INTERNAL_BLOCKER": blocker,
         "PUBLIC_STATUS": STAGE_LABELS.get(stage, stage),
+        "PRODUCT_TYPE": trace.get("product_type") or "video_ai_real",
+        "PACKAGE": trace.get("package") or "8s_per_scene",
+        "REQUIRED_CAPABILITY": trace.get("required_capability") or "text_to_video_or_scene_video",
         "ROUTE": trace.get("product_type") or "video_ai_real",
-        "EXECUTION_MODE": "multiscene",
+        "ROUTE_CANDIDATES": candidate_str,
+        "ELIGIBLE_ROUTE_COUNT": trace.get("eligible_route_count", 1 if job_id_str != "None" else 0),
+        "SELECTED_ROUTE": trace.get("selected_route") or ("shopaikey_video" if job_id_str != "None" else "None"),
+        "EXECUTION_MODE": trace.get("execution_mode") or "cloud",
         "PROVIDER": trace.get("provider") or "None",
         "MODEL": trace.get("model") or "None",
-        "CAPABILITY": trace.get("capability") or "None",
+        "CAPABILITY": trace.get("capability") or "text_to_video_or_scene_video",
+        "PROVIDER_CONFIGURED": "YES" if trace.get("provider_configured") or job_id_str != "None" else "NO",
+        "PROVIDER_READY": "YES" if trace.get("provider_ready") or job_id_str != "None" else "NO",
+        "WORKER_REQUIRED": "YES" if trace.get("worker_required") else "NO",
+        "WORKER_READY": "YES" if trace.get("worker_ready", True) else "NO",
+        "JOB_EVER_CREATED": "YES" if job_id_str != "None" else "NO",
+        "PROVIDER_EVER_SUBMITTED": "YES" if prov_id != "None" else "NO",
         "SCENES_TOTAL": trace.get("scene_count") or 0,
         "SCENE_TASKS_CREATED": trace.get("scene_tasks_created") or 0,
         "SCENE_TASKS_SUBMITTED": trace.get("scene_tasks_submitted") or 0,
@@ -385,4 +434,5 @@ def build_canonical_video_trace_report(identifier: str | int, conn=None) -> dict
         "DELIVERY_RECEIPT": trace.get("delivery_receipt") or "None",
         "CHARGE_STATE": trace.get("charge_state") or "NO_CHARGE",
         "STATUS_SOURCE": "canonical_db_video_request_traces",
+        "WHY_NO_JOB": why_no_job,
     }
