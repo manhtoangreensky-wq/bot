@@ -719,7 +719,7 @@ _PUBLIC_ROOT_SCREEN_COPY = {
         "support_admin": "Message admin", "support_ticket": "Create support ticket", "support_my_tickets": "My tickets", "support_auto": "Automated support",
     },
     "vi": {
-        "free_title": "Công cụ miễn phí TOAN AAS", "free_body": "Dùng các công cụ 0 Xu để chuẩn bị nội dung, prompt, ghi chú và bản nháp trước khi dùng công cụ trả phí. Tác vụ tạo thật luôn báo giá và hỏi xác nhận trước khi trừ Xu.",
+        "free_title": "Công cụ miễn phí TOAN AAS", "free_body": "Dùng các công cụ miễn phí để chuẩn bị nội dung, prompt, ghi chú và bản nháp trước khi dùng công cụ trả phí. Tác vụ tạo thật luôn báo giá và hỏi xác nhận trước khi trừ Xu.",
         "audio_title": "Studio âm thanh", "audio_body": "Chọn loại âm thanh bạn muốn tạo. Studio này tạo file âm thanh riêng và không gắn vào video hiện tại.",
         "audio_voice": "Giọng đọc", "audio_music": "Nhạc", "back_main": "Quay lại", "main_menu_label": "Menu chính",
         "feedback_title": "Góp ý / Báo lỗi", "feedback_body": "Chọn vấn đề bạn muốn báo. Vấn đề thanh toán, media, tài liệu hoặc hoàn Xu sẽ tạo ticket để admin kiểm tra.",
