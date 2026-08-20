@@ -226973,18 +226973,260 @@ def admin_packages_help_text(kind: str) -> str:
     }
     return pages.get(kind, admin_packages_text())
 
+
+# =====================================================================
+# ADMIN MARKETING & AUTO-AFFILIATE COCKPIT UI
+# =====================================================================
+
+def admin_growth_marketing_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔗 Kho Link Affiliate", callback_data="admin_growth|affiliates"),
+            InlineKeyboardButton("🧠 Tạo Nội Dung & Gắn Link", callback_data="admin_growth|ideas"),
+        ],
+        [
+            InlineKeyboardButton("🗓️ Lịch Đăng MXH", callback_data="admin_growth|calendar"),
+            InlineKeyboardButton("📊 Báo Cáo Doanh Thu & Click", callback_data="admin_growth|cockpit"),
+        ],
+        [
+            InlineKeyboardButton("📡 Kênh Đăng Bài", callback_data="admin_growth|channels"),
+            InlineKeyboardButton("📦 Gói Đăng Bài", callback_data="admin_growth|packages"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quản trị", callback_data="menu|admin"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ],
+    ])
+
+async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    if not is_admin_user(uid):
+        return await safe_edit_or_send(query, "⛔ Chỉ dành cho Quản trị viên.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
+
+    action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else "main"
+
+    if action == "main":
+        pack = affiliate_campaign_cockpit_data(uid, days=30, limit=5)
+        summary = pack.get("summary") or {}
+        text = (
+            "🚀 <b>MARKETING & AUTO-AFFILIATE COCKPIT</b>\n\n"
+            "Trung tâm điều khiển chiến dịch nội dung, quản lý kho link affiliate riêng và lịch đăng bài đa nền tảng (Facebook, TikTok, YouTube, Telegram).\n\n"
+            f"📊 <b>Tổng quan 30 ngày:</b>\n"
+            f"• Lượt xem: <b>{summary.get('affiliate_views', 0):,}</b> | Click: <b>{summary.get('affiliate_clicks', 0):,}</b> | Chuyển đổi: <b>{summary.get('affiliate_conversions', 0):,}</b>\n"
+            f"• Doanh thu: <b>{int(summary.get('affiliate_revenue') or 0):,}đ</b> | Ước tính lợi nhuận: <b>{int(summary.get('affiliate_profit_estimate') or 0):,}đ</b>\n\n"
+            "Chọn chức năng bên dưới để quản lý:"
+        )
+        return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=admin_growth_marketing_keyboard())
+
+    if action == "affiliates":
+        active_rows = list_affiliate_links(uid, limit=15)
+        lines = ["🔗 <b>KHO LINK AFFILIATE CỦA BẠN</b>\n"]
+        if not active_rows:
+            lines.append("📭 Chưa có link affiliate nào.\n\nThêm link mới bằng lệnh:\n<code>/addlink url=https://... product=\'Tên sản phẩm\' niche=\'công nghệ\'</code>\nhoặc <code>/affiliate_import</code> để nhập hàng loạt.")
+        else:
+            for aid, network, product, niche, url, note, status, price_vnd, comm_rate, aud, allowed_cl, blocked_cl, p_score in active_rows[:10]:
+                lines.append(
+                    f"• <code>#{aid}</code> | <b>{html.escape(str(product or '-'))}</b> | {html.escape(str(niche or '-'))}\n"
+                    f"  Mạng: <code>{html.escape(str(network or '-'))}</code> | Score: <b>{p_score or 0}</b> | Hoa hồng: <b>{comm_rate or 0}%</b>\n"
+                    f"  Link: <code>{html.escape(short_url_display(url or ''))}</code>\n"
+                    f"  Cam kết cho phép: <i>{html.escape(str(allowed_cl or 'Chuẩn'))[:50]}</i>"
+                )
+            if len(active_rows) > 10:
+                lines.append(f"\n<i>... còn {len(active_rows) - 10} link khác. Dùng /affiliates để xem hết.</i>")
+        lines.append("\n💡 <b>Lệnh nhanh:</b> <code>/affiliate_import</code> (Nhập file/text hàng loạt)")
+        return await safe_edit_or_send(
+            query,
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("➕ Thêm link mới", callback_data="admin_growth|aff_add"), InlineKeyboardButton("📥 Nhập hàng loạt", callback_data="admin_growth|aff_import")],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+
+    if action == "aff_add":
+        return await safe_edit_or_send(
+            query,
+            "➕ <b>Thêm Link Affiliate Mới</b>\n\n"
+            "Gửi cú pháp lệnh sau vào khung chat để thêm link mới:\n"
+            "<code>/addlink url=https://... product=\'Tên sản phẩm\' niche=\'ngách\' network=\'Shopee\' rate=10</code>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Kho Affiliate", callback_data="admin_growth|affiliates")],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main")],
+            ]),
+        )
+
+    if action == "aff_import":
+        return await safe_edit_or_send(
+            query,
+            "📥 <b>Nhập Hàng Loạt Link Affiliate</b>\n\n"
+            "Gửi lệnh theo định dạng sau vào khung chat:\n"
+            "<code>/affiliate_import niche=cong_nghe\nhttps://shorten.asia/link1 (Tai nghe Bluetooth TWS)\nhttps://shorten.asia/link2 (Bàn phím cơ không dây)</code>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Kho Affiliate", callback_data="admin_growth|affiliates")],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main")],
+            ]),
+        )
+
+    if action == "ideas":
+        active_rows = list_affiliate_links(uid, limit=5)
+        lines = [
+            "🧠 <b>AI TẠO NỘI DUNG & KHỚP LINK AFFILIATE</b>\n",
+            "Hệ thống tự động phân tích sản phẩm trong kho để sinh kịch bản video UGC, Review hoặc Before/After phù hợp với chính sách cam kết (Zero Overclaim).\n",
+        ]
+        if active_rows:
+            lines.append("<b>Sản phẩm tiêu biểu sẵn sàng tạo nội dung:</b>")
+            for aid, net, prod, niche, url, note, st, pr, cr, aud, allowed_cl, blocked_cl, sc in active_rows[:3]:
+                lines.append(f"• <code>#{aid}</code> <b>{html.escape(str(prod))}</b> ({html.escape(str(niche))})")
+                lines.append(f"  👉 Lệnh: <code>/affiliate_ideas aff={aid}</code>")
+        else:
+            lines.append("<i>Chưa có sản phẩm trong kho affiliate. Hãy thêm link trước để AI tự sinh kịch bản.</i>")
+        lines.append("\n💡 Gõ: <code>/growth_ai topic=\'review công nghệ\'</code> để AI chạy tự động.")
+        return await safe_edit_or_send(
+            query,
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔗 Kho Link", callback_data="admin_growth|affiliates"), InlineKeyboardButton("📦 Gói đăng bài", callback_data="admin_growth|packages")],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+
+    if action == "calendar":
+        slots = list_calendar_slots(uid, limit=10)
+        camps = list_campaigns(uid, limit=5)
+        lines = ["🗓️ <b>LỊCH ĐĂNG BÀI & CHIẾN DỊCH MARKETING</b>\n"]
+        if camps:
+            lines.append("<b>Chiến dịch đang chạy:</b>")
+            for cid, name, niche, plats, aff_url, st in camps[:3]:
+                lines.append(f"• Campaign <code>#{cid}</code>: <b>{html.escape(str(name))}</b> ({html.escape(str(plats))})")
+            lines.append("")
+        if slots:
+            lines.append("<b>Lịch đăng sắp tới:</b>")
+            for sid, jid, cid, aid, pdate, plat, top, note in slots[:5]:
+                lines.append(f"• <code>{pdate}</code> [<b>{html.escape(str(plat).upper())}</b>]: {html.escape(str(top)[:50])} (Slot #{sid})")
+        else:
+            lines.append("<i>Chưa có slot đăng bài trong lịch.</i>\nThêm lịch bằng lệnh:\n<code>/addcal date=tomorrow platform=tiktok topic=\'Review sản phẩm A\' aff=1</code>")
+        return await safe_edit_or_send(
+            query,
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📌 Quản lý Campaign", callback_data="admin_growth|campaigns")],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+
+    if action == "campaigns":
+        camps = list_campaigns(uid, limit=10)
+        lines = ["📌 <b>DANH SÁCH CHIẾN DỊCH MARKETING</b>\n"]
+        if camps:
+            for cid, name, niche, plats, aff_url, st in camps:
+                lines.append(f"• <code>#{cid}</code> | <b>{html.escape(str(name))}</b> | Ngách: {html.escape(str(niche))} | Nền tảng: <code>{html.escape(str(plats))}</code>")
+        else:
+            lines.append("<i>Chưa có chiến dịch nào. Tạo bằng:</i>\n<code>/campaign name=\'Tech Deals\' niche=\'công nghệ\' platforms=facebook,tiktok,youtube</code>")
+        return await safe_edit_or_send(
+            query,
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🗓️ Xem lịch đăng", callback_data="admin_growth|calendar")],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main")],
+            ]),
+        )
+
+    if action == "cockpit":
+        pack = affiliate_campaign_cockpit_data(uid, days=30, limit=10)
+        summary = pack.get("summary") or {}
+        lines = [
+            "📊 <b>BÁO CÁO DOANH THU & CHUYỂN ĐỔI (30 NGÀY)</b>\n",
+            f"• Tổng lượt xem: <b>{summary.get('affiliate_views', 0):,}</b>",
+            f"• Lượt click link: <b>{summary.get('affiliate_clicks', 0):,}</b>",
+            f"• Số lượt mua/chuyển đổi: <b>{summary.get('affiliate_conversions', 0):,}</b>",
+            f"• Tổng doanh thu ghi nhận: <b>{int(summary.get('affiliate_revenue') or 0):,} VNĐ</b>",
+            f"• Chi phí ước tính: <b>{int(summary.get('affiliate_cost') or 0):,} VNĐ</b>",
+            f"• Lợi nhuận ước tính: <b>{int(summary.get('affiliate_profit_estimate') or 0):,} VNĐ</b>\n",
+        ]
+        winners = pack.get("winners") or []
+        if winners:
+            lines.append("<b>Top link hiệu quả nhất:</b>")
+            for item in winners[:5]:
+                label = item.get("product") or item.get("product_name") or "-"
+                lines.append(f"• <b>{html.escape(str(label)[:40])}</b>: {item.get('clicks', 0)} clicks · {int(item.get('revenue') or 0):,}đ")
+        else:
+            lines.append("<i>Chưa có dữ liệu winner. Dùng /affiliate_report để xem chi tiết.</i>")
+        return await safe_edit_or_send(
+            query,
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Làm mới", callback_data="admin_growth|cockpit")],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+
+    if action == "channels":
+        rows = list_social_publish_readiness(uid)
+        lines = ["📡 <b>TRẠNG THÁI KẾT NỐI KÊNH XUẤT BẢN MXH</b>\n"]
+        if not rows:
+            lines.append("<i>Chưa cấu hình kênh MXH riêng. Mặc định hệ thống xuất bản dạng gói nội dung thủ công (Manual Safe Export).</i>\n")
+            lines.append("• <b>TikTok:</b> Chế độ Manual (API: Chưa kích hoạt / Cần xác thực OAuth)")
+            lines.append("• <b>Facebook:</b> Chế độ Manual (API: Sẵn sàng khi cấu hình Page Token)")
+            lines.append("• <b>YouTube:</b> Chế độ Manual (API: Sẵn sàng khi cấu hình OAuth)")
+            lines.append("• <b>Telegram:</b> Chế độ Kênh (Hỗ trợ bot gửi vào Channel/Group)")
+        else:
+            for r in rows:
+                status_code, msg = channel_publish_readiness(r)
+                cid, plat, cname, acclabel, st, pmode, tenv, pid = r
+                lines.append(f"• <b>{html.escape(str(plat).upper())}</b> (<i>{html.escape(str(cname))}</i>): Chế độ <code>{pmode or 'manual'}</code> · Trạng thái: <b>{status_code}</b>")
+        lines.append("\n🔒 <i>Lưu ý: Mọi tác vụ xuất bản thật luôn yêu cầu xác nhận phê duyệt từ Owner. Token và Secret không bao giờ hiển thị trên màn hình.</i>")
+        return await safe_edit_or_send(
+            query,
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📦 Gói đăng bài", callback_data="admin_growth|packages")],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+
+    if action == "packages":
+        queue = list_publish_queue(uid, limit=5)
+        lines = ["📦 <b>GÓI ĐĂNG BÀI HOÀN CHỈNH (PUBLISH PACKAGES)</b>\n"]
+        if queue:
+            for item in queue:
+                lines.append(
+                    f"• Gói <code>#{item.get('id')}</code> | Nền tảng: <b>{html.escape(str(item.get('platform') or '-'))}</b> | Trạng thái: <code>{item.get('status')}</code>\n"
+                    f"  Tiêu đề: <b>{html.escape(str(item.get('topic') or '-')[:60])}</b>\n"
+                    f"  Link đính kèm: <code>{html.escape(short_url_display(item.get('affiliate_url') or ''))}</code>"
+                )
+        else:
+            lines.append("<i>Chưa có gói đăng bài nào trong hàng đợi.</i>\nKhi tạo video hoặc chạy <code>/growth_ai</code>, hệ thống sẽ đóng gói sẵn video, thumbnail, caption, hashtag và link affiliate tại đây.")
+        lines.append("\n🔒 Chế độ mặc định: <b>Xem trước & Xuất file thủ công</b> (An toàn tuyệt đối).")
+        return await safe_edit_or_send(
+            query,
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🧠 Tạo nội dung mới", callback_data="admin_growth|ideas")],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+
 def admin_control_center_keyboard() -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton("👤 User / Xu", callback_data="menu|admin_users"), InlineKeyboardButton("💳 Bill / PayOS", callback_data="menu|admin_billing")],
         [InlineKeyboardButton("🎁 Gói / Combo", callback_data="menu|admin_packages"), InlineKeyboardButton("🧊 Queue / Freeze", callback_data="menu|admin_queue")],
         [InlineKeyboardButton("🛡 Bảo mật / DB", callback_data="menu|admin_security_db"), InlineKeyboardButton("🖥 Hệ thống", callback_data="menu|admin_system_ops")],
         [InlineKeyboardButton("🤖 Provider / Worker", callback_data="menu|admin_provider_worker"), InlineKeyboardButton("💰 Tài chính", callback_data="menu|admin_finance")],
-        [InlineKeyboardButton("🎧 CSKH / Góp ý", callback_data="menu|admin_support"), InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook")],
+        [InlineKeyboardButton("🚀 Marketing / Affiliate", callback_data="admin_growth|main"), InlineKeyboardButton("🎧 CSKH / Góp ý", callback_data="menu|admin_support")],
+        [InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook"), InlineKeyboardButton("📣 Thông báo khách hàng", callback_data="menu|admin_broadcast_lite")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ]
-    rows.append([
-        InlineKeyboardButton("📣 Thông báo khách hàng", callback_data="menu|admin_broadcast_lite"),
-        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
-    ])
     return InlineKeyboardMarkup(rows)
 
 ADMIN_CONTROL_MODULES = {
