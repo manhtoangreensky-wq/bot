@@ -70015,6 +70015,8 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_hub_copy(lang)
     keyboard = build_2col_keyboard(
         [
+            (f"🤖 {copy['freehub_enable_ai_chatbot']}", "aichat|on"),
+            ("💱 Tỷ giá & Tiện ích", "freehub|open_utilities"),
             (f"🤖 {copy['freehub_meta']}", "freehub|meta"),
             (f"✍️ {copy['freehub_caption']}", "freehub|caption"),
             (f"🧠 {copy['freehub_ideas']}", "freehub|ideas"),
@@ -70027,17 +70029,13 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             (f"🎵 {copy['freehub_music_sfx_ideas']}", "freehub|lib_music"),
             ("🌐 Dịch thuật", "freehub|open_translate"),
             ("📥 Tải video từ link", "vdownload|start"),
-            ("💱 Tỷ giá & Tiện ích", "freehub|open_utilities"),
         ],
         nav_back=None,
         nav_main=True,
         lang=lang,
         main_label=f"🏠 {copy['main_menu']}",
     )
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(f"🤖 {copy['freehub_enable_ai_chatbot']}", callback_data="aichat|on")]]
-        + list(keyboard.inline_keyboard)
-    )
+    return keyboard
 
 def free_hub_input_text(task_type: str, lang: str = "vi") -> str:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
@@ -138253,9 +138251,6 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
                 [
                     InlineKeyboardButton("📱 Tạo mã QR nhanh", callback_data="freehub|util_qr"),
                     InlineKeyboardButton("🎭 Sinh Avatar AI", callback_data="freehub|util_avatar"),
-                ],
-                [
-                    InlineKeyboardButton("📥 Tải video từ link", callback_data="vdownload|start"),
                 ],
                 [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")],
             ]),
