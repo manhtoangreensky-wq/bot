@@ -127,7 +127,7 @@ from services import video_idea_catalog, video_idea_script_intake, video_idea_st
 from services import video_profile_context_engine
 from services import frame_video_commercial, frame_video_flow, frame_video_public_seam, frame_video_runtime
 from services import video_addon_planner, video_ai_real_pricing, video_ai_real_prompt_compiler, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_selfshot_local_analysis, video_selfshotflow4, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uiflow3, video_uiflow3_routeengine, video_uifreeze1
-from services import ui_navigation, video_trace_state
+from services import ui_navigation, video_trace_state, open_public_tools as opt
 from services import local_video_studio_preview
 from services import local_video_planning_store
 from services import video_planning_assistant as local_video_studio_public
@@ -70025,6 +70025,8 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             (f"📥 {copy['freehub_save_temp_media']}", "freehub|upload"),
             (f"🎙 {copy['freehub_voice_subdub_script']}", "freehub|hook"),
             (f"🎵 {copy['freehub_music_sfx_ideas']}", "freehub|lib_music"),
+            ("🌐 Dịch thuật mở (0 Xu)", "freehub|open_translate"),
+            ("💱 Tỷ giá & Tiện ích mở", "freehub|open_utilities"),
         ],
         nav_back=None,
         nav_main=True,
@@ -138222,6 +138224,94 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
             free_hub_publish_package_text(state.get("result"), lang),
             parse_mode="HTML",
             reply_markup=free_hub_publish_package_keyboard(lang),
+        )
+    if action == "open_translate":
+        set_free_hub_pending(uid, "input", task_type="open_translate")
+        return await safe_edit_or_send(
+            query,
+            "🌐 <b>Dịch thuật mở (0 Xu)</b>\n\n"
+            "Nhập hoặc dán đoạn kịch bản / prompt (tiếng Anh hoặc tiếng Việt) bạn muốn dịch:\n\n"
+            "<i>• Dịch Anh ➔ Việt hoặc Việt ➔ Anh tự động.\n"
+            "• Hoàn toàn 0 Xu và không giới hạn.</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")]
+            ]),
+        )
+    if action == "open_utilities":
+        clear_free_hub_pending(uid)
+        return await safe_edit_or_send(
+            query,
+            "💱 <b>Tiện ích Mở Rộng TOAN AAS (0 Xu)</b>\n\n"
+            "Chọn tiện ích miễn phí bạn muốn sử dụng:",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("💱 Tra cứu Tỷ giá & Xu", callback_data="freehub|util_rate"),
+                    InlineKeyboardButton("🌤 Dự báo thời tiết", callback_data="freehub|util_weather"),
+                ],
+                [
+                    InlineKeyboardButton("📱 Tạo mã QR nhanh", callback_data="freehub|util_qr"),
+                    InlineKeyboardButton("🎭 Sinh Avatar AI", callback_data="freehub|util_avatar"),
+                ],
+                [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")],
+            ]),
+        )
+    if action == "util_rate":
+        rate_info = opt.fetch_usd_vnd_rate()
+        return await safe_edit_or_send(
+            query,
+            f"💱 <b>TỶ GIÁ NGOẠI TỆ & QUY ĐỔI XU TOAN AAS</b>\n\n"
+            f"💵 <b>1 USD</b> = {int(rate_info['usd_vnd']):,} VNĐ\n"
+            f"🪙 <b>1 Xu</b> = {int(rate_info['vnd_per_xu']):,} VNĐ\n"
+            f"💎 <b>1 USD</b> ≈ {rate_info['xu_per_usd']} Xu\n\n"
+            f"<i>Nguồn dữ liệu: {rate_info['source']}</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Làm mới tỷ giá", callback_data="freehub|util_rate")],
+                [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
+                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+    if action == "util_weather":
+        w_hanoi = opt.fetch_weather_report("hanoi")
+        w_hcm = opt.fetch_weather_report("hcm")
+        w_danang = opt.fetch_weather_report("danang")
+        return await safe_edit_or_send(
+            query,
+            "🌤 <b>DỰ BÁO THỜI TIẾT THỜI GIAN THỰC</b>\n\n"
+            f"📍 <b>Hà Nội:</b> {w_hanoi['temperature']}°C · Gió {w_hanoi['windspeed']} km/h\n"
+            f"📍 <b>Đà Nẵng:</b> {w_danang['temperature']}°C · Gió {w_danang['windspeed']} km/h\n"
+            f"📍 <b>TP. HCM:</b> {w_hcm['temperature']}°C · Gió {w_hcm['windspeed']} km/h\n\n"
+            f"<i>Nguồn dữ liệu: Open-Meteo Public API</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Làm mới thời tiết", callback_data="freehub|util_weather")],
+                [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
+                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+    if action == "util_qr":
+        set_free_hub_pending(uid, "input", task_type="util_qr")
+        return await safe_edit_or_send(
+            query,
+            "📱 <b>Tạo mã QR nhanh (0 Xu)</b>\n\n"
+            "Nhập link website, số tài khoản hoặc văn bản bạn muốn tạo mã QR:",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")]
+            ]),
+        )
+    if action == "util_avatar":
+        set_free_hub_pending(uid, "input", task_type="util_avatar")
+        return await safe_edit_or_send(
+            query,
+            "🎭 <b>Sinh Avatar Nhân Vật AI (0 Xu)</b>\n\n"
+            "Nhập tên nhân vật, biệt danh hoặc ID để sinh ảnh avatar AI độc đáo:",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")]
+            ]),
         )
     if action == "library":
         clear_free_hub_pending(uid)
@@ -260083,6 +260173,68 @@ async def handle_free_hub_pending_text(update: Update, context: ContextTypes.DEF
         payload, task_type, provider = free_hub_generate_task_payload(task_type, text)
     elif task_type == "hook_script":
         payload, task_type, provider = free_hub_generate_task_payload(task_type, text)
+    elif task_type == "open_translate":
+        clear_free_hub_pending(uid)
+        is_vi = any(ch in text.lower() for ch in "àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ")
+        source_lang = "vi" if is_vi else "en"
+        target_lang = "en" if is_vi else "vi"
+        res = opt.translate_free_text(text, source_lang=source_lang, target_lang=target_lang)
+        await update.message.reply_text(
+            f"🌐 <b>KẾT QUẢ DỊCH THUẬT ({source_lang.upper()} ➔ {target_lang.upper()})</b>\n\n"
+            f"<b>Gốc:</b>\n{text}\n\n"
+            f"<b>Bản dịch:</b>\n<code>{res['translated_text']}</code>\n\n"
+            f"<i>Nguồn: {res.get('source', 'Open API')} · 0 Xu</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🌐 Dịch đoạn khác", callback_data="freehub|open_translate")],
+                [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")],
+            ]),
+        )
+        return True
+    elif task_type == "util_qr":
+        clear_free_hub_pending(uid)
+        qr_url = opt.generate_qr_code_url(text, 400)
+        try:
+            await update.message.reply_photo(
+                photo=qr_url,
+                caption=f"📱 <b>MÃ QR ĐÃ TẠO THÀNH CÔNG (0 Xu)</b>\n\nNội dung: <code>{text[:100]}</code>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📱 Tạo mã QR khác", callback_data="freehub|util_qr")],
+                    [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
+                ]),
+            )
+        except Exception:
+            await update.message.reply_text(
+                f"📱 <b>MÃ QR CỦA BẠN (0 Xu):</b>\n<a href='{qr_url}'>Bấm vào đây để tải ảnh QR</a>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
+                ]),
+            )
+        return True
+    elif task_type == "util_avatar":
+        clear_free_hub_pending(uid)
+        avatar_url = opt.generate_avatar_ai_url(text, 1)
+        try:
+            await update.message.reply_photo(
+                photo=avatar_url,
+                caption=f"🎭 <b>AVATAR AI CỦA BẠN (0 Xu)</b>\n\nNhân vật: <b>{text[:50]}</b>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🎭 Sinh Avatar khác", callback_data="freehub|util_avatar")],
+                    [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
+                ]),
+            )
+        except Exception:
+            await update.message.reply_text(
+                f"🎭 <b>AVATAR AI CỦA BẠN (0 Xu):</b>\n<a href='{avatar_url}'>Bấm vào đây để xem ảnh</a>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
+                ]),
+            )
+        return True
     elif task_type == "free_chat":
         result = await free_provider_router_call(task_type, text, uid)
         if result.get("blocked"):
