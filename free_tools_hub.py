@@ -21,6 +21,12 @@ FREE_TOOL_TYPES = {
     "prompt_library",
     "byok_api",
     "upload_for_postprocess",
+    "open_translate",
+    "util_qr",
+    "util_avatar",
+    "util_rate",
+    "util_weather",
+    "vdownload",
 }
 
 ALLOWED_FREE_PROVIDER_TASKS = {
@@ -35,6 +41,12 @@ ALLOWED_FREE_PROVIDER_TASKS = {
     "summarize_light",
     "rewrite_light",
     "support_classification_safe",
+    "open_translate",
+    "util_qr",
+    "util_avatar",
+    "util_rate",
+    "util_weather",
+    "vdownload",
 }
 
 BLOCKED_FREE_TASK_MARKERS = {
@@ -200,6 +212,8 @@ def sensitive_free_task_reason(user_input: str, task_type: str = "") -> str:
     task = _clean_text(task_type, 80).lower()
     if task and task not in ALLOWED_FREE_PROVIDER_TASKS:
         return "task_not_allowed"
+    if task in {"util_qr", "open_translate", "util_avatar", "util_rate", "util_weather", "vdownload"}:
+        return ""
     normalized = _clean_text(user_input, 4000).lower()
     for reason, markers in BLOCKED_FREE_TASK_MARKERS.items():
         if any(marker in normalized for marker in markers):
