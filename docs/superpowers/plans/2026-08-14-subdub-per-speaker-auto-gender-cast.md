@@ -439,8 +439,8 @@ cross-pair return false. Later Tasks 6–7 must import this helper rather than
 restate the expression.
 
 Add tests that generate 16 kHz mono `s16le` fixtures for 120 Hz, 155 Hz,
-170 Hz, 185 Hz, 220 Hz, noise, overlap, and silence. Require
-`low, low, unknown, high, high` for the tones; noisy, overlapping, silent,
+160 Hz, 165 Hz, 170 Hz, 185 Hz, 220 Hz, noise, overlap, and silence. Require
+`low, low, unknown, high, high, high, high` for the tones; noisy, overlapping, silent,
 insufficient, unstable, and timed-out inputs raise
 `AutoCastManualRequired("AUTO_CAST_MANUAL_REQUIRED")`.
 
@@ -473,7 +473,7 @@ Use this exact confidence boundary:
 
 ```python
 assert speaker_cast.pitch_register(154.9, confidence=0.75) == "low"
-assert speaker_cast.pitch_register(185.0, confidence=0.75) == "high"
+assert speaker_cast.pitch_register(165.0, confidence=0.75) == "high"
 assert speaker_cast.pitch_register(120.0, confidence=0.7499) == "unknown"
 ```
 
@@ -502,7 +502,7 @@ Expected: FAIL because the central predicate, classifier, whole-job cap,
 manual-required error, nonblocking worker boundary, and separate Auto preflight
 wrapper do not exist yet; no provider fixture is called.
 
-- [ ] **Step 3: Implement bounded streaming reads and FFT autocorrelation**
+- [ ] **Step 3: Implement bounded streaming reads and pitch analysis**
 
 Define the one repository-wide Auto predicate in
 `services/subdub_blackboxes/auto_speaker.py`:
@@ -529,7 +529,7 @@ MAX_JOB_SAMPLE_SECONDS = 48.0
 MAX_WORK_BUFFER_BYTES = 1_048_576
 CLASSIFIER_WALL_TIMEOUT_SECONDS = 30.0
 LOW_MAX_HZ = 155.0
-HIGH_MIN_HZ = 185.0
+HIGH_MIN_HZ = 165.0
 MIN_REGISTER_CONFIDENCE = 0.75
 
 class AutoCastManualRequired(RuntimeError):
@@ -548,10 +548,13 @@ def pitch_register(median_hz: float, *, confidence: float) -> str:
 
 Add `ordered_auto_speaker_labels(cues)` to retain first-cue order and raise on
 the 17th distinct chunk-scoped label. Read raw `s16le` only with
-`read(PCM_WINDOW_BYTES)`. Normalize one window, reject low RMS, compute bounded
-autocorrelation, and aggregate a median without exceeding the 1 MiB budget.
+`read(PCM_WINDOW_BYTES)`. Normalize one window, reject low RMS, compute
+short-frame YIN estimates with bounded full-rate refinement, harmonic-purity and
+fundamental-share checks, plus a bounded 512-point FFT competing-pitch gate, and
+aggregate a median without exceeding the 1 MiB budget. The FFT overlap gate
+requires a stable competing pitch across at least two short frames.
 
-Map `median_hz <= 155.0` to `low`, `median_hz >= 185.0` to `high`, and the open
+Map `median_hz <= 155.0` to `low`, `median_hz >= 165.0` to `high`, and the open
 interval to `unknown`. A classified result is usable only at confidence
 `>= 0.75`. Ambiguous/noisy/overlapping/insufficient/unstable input, timeout,
 resource overflow, or `unknown` raises `AutoCastManualRequired`; do not return a
@@ -561,15 +564,16 @@ Expose `classify_speaker_registers(pcm_path: str,
 ranges_by_speaker: dict[str, list[tuple[float, float]]], *,
 deadline_monotonic: float, stop_requested: Callable[[], bool]) ->
 dict[str, dict]`. Check the cooperative stop signal and `time.monotonic()` both
-before and after every seek/read and within bounded normalization,
-FFT/autocorrelation, peak-selection, and aggregation loops. Raise
+before and after every seek/read and within bounded normalization, short-frame
+YIN, full-rate refinement, FFT competing-pitch, peak-selection, and aggregation
+loops. Raise
 `AutoCastManualRequired` when stop is requested or the deadline is reached. The
 classifier receives one caller-owned absolute deadline for the whole job; it
 must not add 30 seconds again inside a thread, per-speaker, or per-window loop.
 
 Each in-memory result contains only `speaker_id`, `voice_register`,
 `confidence`, `voiced_seconds`, `sample_count`, and `reason`. Persist no raw
-PCM, embeddings, sample arrays, FFT/autocorrelation arrays, or NumPy values.
+PCM, embeddings, sample arrays, YIN/FFT working arrays, or NumPy values.
 
 Create `services/subdub_blackboxes/auto_speaker.py` as an Auto-only adapter.
 Task 4 exposes only `run_auto_speaker_preflight(...)`, accepting state, the

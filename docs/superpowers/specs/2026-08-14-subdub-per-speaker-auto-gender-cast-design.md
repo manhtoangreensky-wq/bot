@@ -491,8 +491,8 @@ reason
 ```
 
 Pitch thresholds are inclusive at the classified edges: median fundamental
-frequency `<= 155 Hz` is `low`, `>= 185 Hz` is `high`, and values strictly
-between 155 Hz and 185 Hz are `unknown`. A `low` or `high` result is usable only
+frequency `<= 155 Hz` is `low`, `>= 165 Hz` is `high`, and values strictly
+between 155 Hz and 165 Hz are `unknown`. A `low` or `high` result is usable only
 when confidence is `>= 0.75`; otherwise it is `unknown`.
 
 Resource boundaries apply to the whole job:
@@ -523,7 +523,9 @@ cancelled while its OS thread continues running.
 
 The synchronous implementation accepts a cooperative stop signal and checks
 both that signal and `time.monotonic() >= deadline_monotonic` before and after
-every seek/read and inside bounded FFT/autocorrelation/aggregation loops. On
+every seek/read and inside bounded short-frame YIN, full-rate refinement, FFT
+competing-pitch, and aggregation loops. The FFT overlap gate requires a stable
+competing pitch across at least two short frames. On
 timeout, task cancellation, or wrapper failure, the wrapper signals stop and
 awaits the still-live worker's cooperative termination under cancellation
 shielding before it deletes the PCM artifact. The initial protected wait and
@@ -540,7 +542,7 @@ male, default, or dominant-register fallback.
 PCM stays in the existing temporary job workspace. The Auto wrapper is its sole
 cleanup owner and removes it only after the cooperative classifier worker has
 terminated on success, failure, timeout, or cancellation. Raw PCM, embeddings,
-FFT/autocorrelation arrays, and sample values are never persisted in job state,
+YIN/FFT working arrays, and sample values are never persisted in job state,
 sidecars, checkpoints, logs, diagnostics, or public output. Only bounded scalar
 classification results may be retained.
 
@@ -730,7 +732,7 @@ All automated checks use fixtures/mocks and make zero real provider calls.
    focused tests remain green.
 2. Whole-job label tests accept 16 chunk-scoped labels and fail the 17th before
    classification/TTS with `AUTO_CAST_MANUAL_REQUIRED`.
-3. Synthetic `s16le` fixtures prove `<=155 Hz` low, `>=185 Hz` high, the open
+3. Synthetic `s16le` fixtures prove `<=155 Hz` low, `>=165 Hz` high, the open
    interval between them unknown, and confidence `>=0.75` for usable results.
 4. Noise, overlap, silence, insufficient material, instability, and the exact
    30.0-second classifier wall timeout all require manual selection without a
