@@ -6,11 +6,14 @@ import asyncio
 import hashlib
 import inspect
 import json
+import math
 import os
 import re
 import tempfile
 import time
 from typing import Any, Awaitable, Callable, Iterable
+
+from services import subdub_canonical_cues, subdub_speaker_cast
 
 
 ChunkExtractor = Callable[[bytes, str, float, float], Awaitable[tuple[bytes, str, str]] | tuple[bytes, str, str]]
@@ -30,6 +33,46 @@ def _float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _valid_speaker_value(value: Any) -> bool:
+    return subdub_speaker_cast.valid_speaker_index(value)
+
+
+def _finite_checkpoint_number(value: Any) -> bool:
+    if type(value) not in {int, float}:
+        return False
+    try:
+        return math.isfinite(value)
+    except (TypeError, OverflowError):
+        return False
+
+
+def _valid_checkpoint_speaker_identity(segment: dict[str, Any], chunk_index: int) -> bool:
+    cue_id = segment.get("cue_id")
+    start = segment.get("start")
+    end = segment.get("end")
+    speaker_confidence = segment.get("speaker_confidence")
+    if (
+        type(cue_id) is not str
+        or not cue_id
+        or cue_id != cue_id.strip()
+        or not _finite_checkpoint_number(start)
+        or not _finite_checkpoint_number(end)
+        or start < 0
+        or end <= start
+        or type(speaker_confidence) is not float
+        or not math.isfinite(speaker_confidence)
+        or not 0.0 <= speaker_confidence <= 1.0
+    ):
+        return False
+    try:
+        identity_chunk, _identity_speaker, _speaker_id = (
+            subdub_speaker_cast.validated_speaker_identity(segment)
+        )
+    except subdub_speaker_cast.AutoCastUnavailable:
+        return False
+    return identity_chunk == chunk_index
 
 
 _NO_SPEECH_STATUSES = frozenset(
@@ -271,6 +314,8 @@ def build_project_child_state(state: dict[str, Any], part: dict[str, Any], part_
         "translated_subtitle_ref",
         "source_subtitle",
         "translated_subtitle",
+        "speaker_sidecar_path",
+        "speaker_sidecar_sha256",
     ):
         current.pop(key, None)
     part_token = f"{source_token}:part:{part_index}"
@@ -309,6 +354,8 @@ def offset_chunk_segments(
     chunk_start: float,
     chunk_end: float,
     fallback_text: str = "",
+    chunk_index: int | None = None,
+    require_diarization: bool = False,
 ) -> list[dict[str, Any]]:
     """Map chunk-local cue times onto the absolute media timeline."""
     start_offset = max(0.0, _float(chunk_start))
@@ -329,13 +376,41 @@ def offset_chunk_segments(
             local_end = min(chunk_duration, local_start + 0.5)
         if local_end <= local_start:
             continue
-        normalized.append(
-            {
-                **dict(source or {}),
-                "start": round(start_offset + local_start, 3),
-                "end": round(min(absolute_end, start_offset + local_end), 3),
-                "text": text,
-            }
+        item = {
+            **dict(source or {}),
+            "start": round(start_offset + local_start, 3),
+            "end": round(min(absolute_end, start_offset + local_end), 3),
+            "text": text,
+        }
+        if require_diarization:
+            try:
+                speaker = max(0, int(item.get("speaker")))
+            except (TypeError, ValueError, OverflowError):
+                speaker = -1
+            try:
+                confidence = float(item.get("speaker_confidence") or 0.0)
+            except (TypeError, ValueError, OverflowError):
+                confidence = 0.0
+            if not math.isfinite(confidence):
+                confidence = 0.0
+            safe_chunk_index = max(0, int(chunk_index or 0))
+            item.update(
+                {
+                    "speaker": speaker,
+                    "speaker_confidence": max(0.0, min(1.0, confidence)),
+                    "speaker_id": subdub_speaker_cast.normalized_speaker_key(
+                        safe_chunk_index,
+                        speaker,
+                    ),
+                    "chunk_index": safe_chunk_index,
+                }
+            )
+        normalized.append(item)
+    if require_diarization and normalized:
+        return subdub_canonical_cues.canonicalize_segments(
+            normalized,
+            extraction_source="long_media_asr",
+            source_language="auto",
         )
     return normalized
 
@@ -382,6 +457,7 @@ async def transcribe_long_media_chunks(
     input_duration_seconds: float = 0.0,
     source_hash: str = "",
     checkpoint_path: str = "",
+    require_diarization: bool = False,
 ) -> dict[str, Any]:
     """Transcribe deterministic audio chunks with durable, no-resubmit recovery."""
     ranges = [dict(item or {}) for item in (chunk_ranges or [])]
@@ -396,28 +472,75 @@ async def transcribe_long_media_chunks(
             "chunk_strategy": "asr_audio_chunks",
         }
 
-    source_fingerprint = str(source_hash or hashlib.sha256(bytes(source_bytes)).hexdigest())
+    require_diarization = bool(require_diarization)
+    actual_source_hash = hashlib.sha256(bytes(source_bytes)).hexdigest()
+    source_fingerprint = str(source_hash or actual_source_hash)
+    metadata_contract = "subdub.diarized_cues.v1"
     checkpoint: dict[str, Any] = {
         "schema_version": "subdub.asr_chunks.v1",
         "source_hash": source_fingerprint,
         "chunks": {},
     }
-    if checkpoint_path and os.path.isfile(checkpoint_path):
+    if require_diarization:
+        checkpoint["metadata_contract"] = metadata_contract
+    auto_checkpoint_invalid_detail = (
+        "auto_source_hash_mismatch"
+        if require_diarization
+        and source_hash not in (None, "")
+        and (type(source_hash) is not str or source_hash != actual_source_hash)
+        else ""
+    )
+    if not auto_checkpoint_invalid_detail and checkpoint_path and os.path.isfile(checkpoint_path):
         try:
             with open(checkpoint_path, "r", encoding="utf-8") as handle:
                 loaded = json.load(handle)
-            if (
-                isinstance(loaded, dict)
-                and str(loaded.get("source_hash") or "") == source_fingerprint
-                and isinstance(loaded.get("chunks"), dict)
-            ):
+            if require_diarization:
+                checkpoint_receipt_valid = bool(
+                    isinstance(loaded, dict)
+                    and loaded.get("schema_version") == "subdub.asr_chunks.v1"
+                    and type(loaded.get("source_hash")) is str
+                    and loaded.get("source_hash") == source_fingerprint
+                    and loaded.get("metadata_contract") == metadata_contract
+                    and isinstance(loaded.get("chunks"), dict)
+                )
+            else:
+                checkpoint_receipt_valid = bool(
+                    isinstance(loaded, dict)
+                    and str(loaded.get("source_hash") or "") == source_fingerprint
+                    and isinstance(loaded.get("chunks"), dict)
+                    and str(
+                        loaded.get("metadata_contract")
+                        or "subdub.default_cues.v1"
+                    ) == "subdub.default_cues.v1"
+                )
+            if checkpoint_receipt_valid:
                 checkpoint = loaded
+                if require_diarization and any(
+                    not isinstance(raw_chunk, dict)
+                    or (
+                        "segments" in raw_chunk
+                        and (
+                            not isinstance(raw_chunk.get("segments"), list)
+                            or any(
+                                not isinstance(segment, dict)
+                                for segment in raw_chunk.get("segments")
+                            )
+                        )
+                    )
+                    for raw_chunk in loaded.get("chunks", {}).values()
+                ):
+                    auto_checkpoint_invalid_detail = "auto_checkpoint_chunk_shape_invalid"
+            elif require_diarization:
+                auto_checkpoint_invalid_detail = "auto_checkpoint_receipt_invalid"
         except (OSError, ValueError, TypeError):
-            checkpoint = {
-                "schema_version": "subdub.asr_chunks.v1",
-                "source_hash": source_fingerprint,
-                "chunks": {},
-            }
+            if require_diarization:
+                auto_checkpoint_invalid_detail = "auto_checkpoint_parse_invalid"
+            else:
+                checkpoint = {
+                    "schema_version": "subdub.asr_chunks.v1",
+                    "source_hash": source_fingerprint,
+                    "chunks": {},
+                }
 
     def _persist_checkpoint() -> None:
         if not checkpoint_path:
@@ -456,6 +579,57 @@ async def transcribe_long_media_chunks(
             "ownership_end_ms": max(ownership_start_ms, ownership_end_ms),
         }
 
+    def _valid_auto_chunk_receipt(
+        chunk_key: str,
+        raw: Any,
+        expected: dict[str, Any],
+    ) -> bool:
+        if not isinstance(raw, dict):
+            return False
+        status = raw.get("status")
+        if type(status) is not str or status not in {
+            "COMPLETED",
+            "NO_SPEECH",
+            "ACCEPTANCE_UNKNOWN",
+        }:
+            return False
+        for field in (
+            "index",
+            "extract_start_ms",
+            "extract_end_ms",
+            "ownership_start_ms",
+            "ownership_end_ms",
+        ):
+            if type(raw.get(field)) is not int or raw.get(field) != expected.get(field):
+                return False
+        if (
+            type(chunk_key) is not str
+            or type(raw.get("chunk_id")) is not str
+            or raw.get("chunk_id") != chunk_key
+            or chunk_key != expected.get("chunk_id")
+            or type(raw.get("source_hash")) is not str
+            or raw.get("source_hash") != source_fingerprint
+            or type(raw.get("artifact_hash")) is not str
+            or not re.fullmatch(r"[0-9a-f]{64}", raw.get("artifact_hash"))
+            or type(raw.get("updated_at")) is not float
+            or not math.isfinite(raw.get("updated_at"))
+        ):
+            return False
+        if status == "COMPLETED":
+            transcript = raw.get("transcript")
+            segments = raw.get("segments")
+            return bool(
+                type(transcript) is str
+                and transcript
+                and transcript == transcript.strip()
+                and isinstance(segments, list)
+                and segments
+                and all(isinstance(segment, dict) for segment in segments)
+                and type(raw.get("provider")) is str
+                and type(raw.get("language")) is str
+            )
+        return bool("transcript" not in raw and "segments" not in raw)
+
     candidate_segments: list[dict[str, Any]] = []
     providers: list[str] = []
     detected_languages: list[str] = []
@@ -465,8 +639,49 @@ async def transcribe_long_media_chunks(
     provider_submit_count = 0
     checkpoint_reused_count = 0
 
-    for position, item in enumerate(ranges, start=1):
-        bounds = _chunk_bounds(item, position)
+    def _auto_checkpoint_unavailable(
+        detail: str,
+        *,
+        failed_chunk_index: int | None = None,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "ok": False,
+            "status": "AUTO_CAST_UNAVAILABLE",
+            "detail": str(detail or "auto_checkpoint_invalid"),
+            "segments": [],
+            "text": "",
+            "chunk_count": len(ranges),
+            "chunk_strategy": "checkpointed_audio_chunks",
+            "provider_submit_count": provider_submit_count,
+            "checkpoint_reused_count": checkpoint_reused_count,
+            "global_timing_preserved": True,
+        }
+        if failed_chunk_index is not None:
+            result["failed_chunk_index"] = failed_chunk_index
+        return result
+
+    planned_bounds = [
+        _chunk_bounds(item, position)
+        for position, item in enumerate(ranges, start=1)
+    ]
+    if require_diarization and not auto_checkpoint_invalid_detail:
+        expected_by_chunk_id = {
+            str(bounds.get("chunk_id")): bounds
+            for bounds in planned_bounds
+        }
+        for chunk_key, raw_receipt in (checkpoint.get("chunks") or {}).items():
+            expected = expected_by_chunk_id.get(chunk_key)
+            if expected is None or not _valid_auto_chunk_receipt(
+                chunk_key,
+                raw_receipt,
+                expected,
+            ):
+                auto_checkpoint_invalid_detail = "auto_checkpoint_chunk_receipt_invalid"
+                break
+    if auto_checkpoint_invalid_detail:
+        return _auto_checkpoint_unavailable(auto_checkpoint_invalid_detail)
+
+    for item, bounds in zip(ranges, planned_bounds):
         chunk_index = int(bounds["index"])
         chunk_id = str(bounds["chunk_id"])
         chunk_start = float(bounds["extract_start_ms"]) / 1000.0
@@ -483,7 +698,13 @@ async def transcribe_long_media_chunks(
                 "chunk_count": len(ranges),
                 "chunk_strategy": "asr_audio_chunks",
             }
-        stored = dict((checkpoint.get("chunks") or {}).get(chunk_id) or {})
+        raw_stored = (checkpoint.get("chunks") or {}).get(chunk_id)
+        if require_diarization and raw_stored is not None and not isinstance(raw_stored, dict):
+            return _auto_checkpoint_unavailable(
+                f"chunk={chunk_index}; auto_checkpoint_chunk_invalid",
+                failed_chunk_index=chunk_index,
+            )
+        stored = dict(raw_stored or {})
         stored_status = str(stored.get("status") or "").upper()
         if stored_status == "ACCEPTANCE_UNKNOWN":
             return {
@@ -505,7 +726,37 @@ async def transcribe_long_media_chunks(
                 skipped_chunk_indices.append(chunk_index)
                 skipped_chunk_details.append(f"chunk={chunk_index}; status=checkpoint_no_speech")
                 continue
-            stored_segments = [dict(segment or {}) for segment in list(stored.get("segments") or [])]
+            raw_stored_segments = stored.get("segments")
+            stored_segments_shape_valid = bool(
+                isinstance(raw_stored_segments, list)
+                and all(isinstance(segment, dict) for segment in raw_stored_segments)
+            )
+            stored_segments = (
+                [dict(segment) for segment in raw_stored_segments]
+                if stored_segments_shape_valid
+                else []
+            )
+            if require_diarization and (
+                not stored_segments_shape_valid
+                or not stored_segments
+                or any(
+                    not _valid_checkpoint_speaker_identity(segment, chunk_index)
+                    for segment in stored_segments
+                )
+            ):
+                return {
+                    "ok": False,
+                    "status": "AUTO_CAST_UNAVAILABLE",
+                    "detail": f"chunk={chunk_index}; diarized_checkpoint_metadata_missing",
+                    "segments": [],
+                    "text": "",
+                    "failed_chunk_index": chunk_index,
+                    "chunk_count": len(ranges),
+                    "chunk_strategy": "checkpointed_audio_chunks",
+                    "provider_submit_count": provider_submit_count,
+                    "checkpoint_reused_count": checkpoint_reused_count,
+                    "global_timing_preserved": True,
+                }
             for segment in stored_segments:
                 text_only_fallback = bool(segment.pop("_text_only_fallback", False))
                 segment.update({
@@ -641,8 +892,45 @@ async def transcribe_long_media_chunks(
                 "skipped_chunk_indices": skipped_chunk_indices,
             }
 
-        provider_segments = list(result.get("segments") or [])
+        raw_provider_segments = result.get("segments")
+        provider_segments_shape_valid = bool(
+            raw_provider_segments is None
+            or (
+                isinstance(raw_provider_segments, list)
+                and all(isinstance(segment, dict) for segment in raw_provider_segments)
+            )
+        )
+        if require_diarization and not provider_segments_shape_valid:
+            return _auto_checkpoint_unavailable(
+                f"chunk={chunk_index}; provider_segments_shape_invalid",
+                failed_chunk_index=chunk_index,
+            )
+        provider_segments = (
+            [dict(segment) for segment in (raw_provider_segments or [])]
+            if provider_segments_shape_valid
+            else list(raw_provider_segments or [])
+        )
         text_only_fallback = not provider_segments
+        if require_diarization and (
+            text_only_fallback
+            or any(
+                not _valid_speaker_value((segment or {}).get("speaker"))
+                for segment in provider_segments
+            )
+        ):
+            return {
+                "ok": False,
+                "status": "AUTO_CAST_UNAVAILABLE",
+                "detail": f"chunk={chunk_index}; diarized_segments_missing",
+                "segments": [],
+                "text": "",
+                "failed_chunk_index": chunk_index,
+                "chunk_count": len(ranges),
+                "chunk_strategy": "asr_audio_chunks",
+                "provider_submit_count": provider_submit_count,
+                "checkpoint_reused_count": checkpoint_reused_count,
+                "global_timing_preserved": True,
+            }
         segment_window_start = (
             float(bounds["ownership_start_ms"]) / 1000.0
             if text_only_fallback
@@ -658,6 +946,8 @@ async def transcribe_long_media_chunks(
             chunk_start=segment_window_start,
             chunk_end=segment_window_end,
             fallback_text=transcript,
+            chunk_index=chunk_index,
+            require_diarization=require_diarization,
         )
         if not absolute_segments:
             return {
@@ -677,7 +967,21 @@ async def transcribe_long_media_chunks(
             public_segment = {
                 key: value
                 for key, value in dict(segment or {}).items()
-                if key in {"index", "start", "end", "text", "confidence", "speaker", "language"}
+                if key in {
+                    "index",
+                    "start",
+                    "end",
+                    "text",
+                    "confidence",
+                    "speaker",
+                    "speaker_confidence",
+                    "speaker_id",
+                    "chunk_index",
+                    "cue_id",
+                    "voice_register",
+                    "tts_voice_id",
+                    "language",
+                }
             }
             stored_segments.append({
                 **public_segment,
@@ -799,6 +1103,38 @@ async def transcribe_long_media_chunks(
     all_segments.sort(key=lambda item: (_float(item.get("start")), _float(item.get("end"))))
     for index, item in enumerate(all_segments, start=1):
         item["index"] = index
+    if require_diarization:
+        canonical_input = []
+        for item in all_segments:
+            current = dict(item)
+            current.pop("cue_id", None)
+            canonical_input.append(current)
+        all_segments = subdub_canonical_cues.canonicalize_segments(
+            canonical_input,
+            extraction_source="long_media_asr",
+            source_language="auto",
+        )
+        cue_ids_by_timeline = {
+            (
+                int(round(_float(item.get("start")) * 1000)),
+                int(round(_float(item.get("end")) * 1000)),
+                str(item.get("text") or ""),
+                str(item.get("speaker_id") or ""),
+            ): str(item.get("cue_id") or "")
+            for item in all_segments
+        }
+        for stored_chunk in (checkpoint.get("chunks") or {}).values():
+            for stored_segment in list((stored_chunk or {}).get("segments") or []):
+                receipt_key = (
+                    int(round(_float(stored_segment.get("start")) * 1000)),
+                    int(round(_float(stored_segment.get("end")) * 1000)),
+                    str(stored_segment.get("text") or ""),
+                    str(stored_segment.get("speaker_id") or ""),
+                )
+                cue_id = cue_ids_by_timeline.get(receipt_key)
+                if cue_id:
+                    stored_segment["cue_id"] = cue_id
+        _persist_checkpoint()
     duration = max(
         _float(input_duration_seconds),
         max((_float(item.get("end")) for item in all_segments), default=0.0),
