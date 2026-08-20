@@ -70016,7 +70016,7 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     keyboard = build_2col_keyboard(
         [
             (f"🤖 {copy['freehub_enable_ai_chatbot']}", "aichat|on"),
-            ("💱 Tỷ giá & Tiện ích", "freehub|open_utilities"),
+            (f"💱 {copy.get('freehub_utilities', 'Tỷ giá & Tiện ích')}", "freehub|open_utilities"),
             (f"🤖 {copy['freehub_meta']}", "freehub|meta"),
             (f"✍️ {copy['freehub_caption']}", "freehub|caption"),
             (f"🧠 {copy['freehub_ideas']}", "freehub|ideas"),
@@ -70027,8 +70027,8 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             (f"📥 {copy['freehub_save_temp_media']}", "freehub|upload"),
             (f"🎙 {copy['freehub_voice_subdub_script']}", "freehub|hook"),
             (f"🎵 {copy['freehub_music_sfx_ideas']}", "freehub|lib_music"),
-            ("🌐 Dịch thuật", "freehub|open_translate"),
-            ("📥 Tải video từ link", "vdownload|start"),
+            (f"🌐 {copy.get('freehub_translation', 'Dịch thuật')}", "freehub|open_translate"),
+            (f"📥 {copy.get('freehub_video_downloader', 'Tải video từ link')}", "vdownload|start"),
         ],
         nav_back=None,
         nav_main=True,
@@ -138254,26 +138254,29 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         )
     if action == "open_utilities":
         clear_free_hub_pending(uid)
+        lang = get_user_language(uid) or "vi"
+        copy = public_hub_copy(lang)
         return await safe_edit_or_send(
             query,
-            "💱 <b>Tiện ích Mở Rộng TOAN AAS</b>\n\n"
-            "Chọn tiện ích bạn muốn sử dụng:",
+            f"💱 <b>{copy.get('freehub_open_utilities_title', 'Tiện ích Mở Rộng TOAN AAS')}</b>\n\n"
+            f"{copy.get('freehub_open_utilities_body', 'Chọn tiện ích bạn muốn sử dụng:')}",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("💱 Tra cứu & Quy đổi Tỷ giá", callback_data="freehub|util_rate"),
-                    InlineKeyboardButton("🌤 Dự báo thời tiết", callback_data="freehub|util_weather"),
+                    InlineKeyboardButton(f"💱 {copy.get('freehub_util_rate', 'Tra cứu & Quy đổi Tỷ giá')}", callback_data="freehub|util_rate"),
+                    InlineKeyboardButton(f"🌤 {copy.get('freehub_util_weather', 'Dự báo thời tiết')}", callback_data="freehub|util_weather"),
                 ],
                 [
-                    InlineKeyboardButton("📱 Tạo mã QR nhanh", callback_data="freehub|util_qr"),
-                    InlineKeyboardButton("🎭 Sinh Avatar AI", callback_data="freehub|util_avatar"),
+                    InlineKeyboardButton(f"📱 {copy.get('freehub_util_qr', 'Tạo mã QR nhanh')}", callback_data="freehub|util_qr"),
+                    InlineKeyboardButton(f"🎭 {copy.get('freehub_util_avatar', 'Sinh Avatar AI')}", callback_data="freehub|util_avatar"),
                 ],
-                [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")],
+                [InlineKeyboardButton(f"⬅️ {copy.get('freehub_back_freehub', 'Công cụ miễn phí')}", callback_data="freehub|main")],
             ]),
         )
     if action in {"util_rate", "util_rate_input"}:
         set_free_hub_pending(uid, "input", task_type="util_rate")
         lang = get_user_language(uid) or "vi"
+        copy = public_hub_copy(lang)
         if action == "util_rate_input":
             prompt_titles = {
                 "en": "💱 <b>CONVERT CURRENCY & TOAN AAS XU</b>\n\n👉 <b>Enter any currency amount or conversion formula:</b>\n• Example: <code>1000 HKD</code>\n• Example: <code>1 USD = ? CNY</code>\n• Example: <code>500 EUR to VND</code>\n• Example: <code>250 Xu</code>",
@@ -138282,10 +138285,10 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
             }
             return await safe_edit_or_send(
                 query,
-                prompt_titles.get(lang, prompt_titles["vi"]),
+                prompt_titles.get(lang, prompt_titles["en"] if lang != "vi" else prompt_titles["vi"]),
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
+                    [InlineKeyboardButton(f"⬅️ {copy.get('freehub_utilities', 'Tiện ích mở')}", callback_data="freehub|open_utilities")],
                 ]),
             )
         overview_text = opt.format_exchange_rate_overview(lang)
@@ -138295,61 +138298,72 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("✍️ Nhập số tiền / Công thức", callback_data="freehub|util_rate_input"),
-                    InlineKeyboardButton("🔄 Làm mới tỷ giá", callback_data="freehub|util_rate"),
+                    InlineKeyboardButton(f"✍️ {copy.get('freehub_rate_input_btn', 'Nhập số tiền')}", callback_data="freehub|util_rate_input"),
+                    InlineKeyboardButton(f"🔄 {copy.get('freehub_rate_refresh_btn', 'Làm mới tỷ giá')}", callback_data="freehub|util_rate"),
                 ],
                 [
-                    InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities"),
-                    InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+                    InlineKeyboardButton(f"⬅️ {copy.get('freehub_utilities', 'Tiện ích mở')}", callback_data="freehub|open_utilities"),
+                    InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
                 ],
             ]),
         )
     if action in {"util_weather", "util_weather_input"}:
         set_free_hub_pending(uid, "input", task_type="util_weather")
+        lang = get_user_language(uid) or "vi"
+        copy = public_hub_copy(lang)
         if action == "util_weather_input":
+            prompt_titles = {
+                "en": "🌤 <b>WEATHER LOOKUP FOR ANY LOCATION</b>\n\n👉 <b>Enter any city or location name:</b>\n• Examples: <code>Tokyo</code>, <code>Paris</code>, <code>London</code>, <code>New York</code>, <code>Seoul</code>, <code>Da Lat</code>...",
+                "zh": "🌤 <b>全球任意城市实时天气查询</b>\n\n👉 <b>请输入城市或地点名称：</b>\n• 示例: <code>北京</code>, <code>东京</code>, <code>巴黎</code>, <code>伦敦</code>, <code>纽约</code>, <code>首尔</code>...",
+                "vi": "🌤 <b>TRA CỨU THỜI TIẾT ĐỊA ĐIỂM BẤT KỲ</b>\n\n👉 <b>Hãy nhập tên thành phố / địa điểm vào khung chat bên dưới:</b>\n• Việt Nam: <code>Đà Lạt</code>, <code>Nha Trang</code>, <code>Hải Phòng</code>, <code>Cần Thơ</code>, <code>Sa Pa</code>...\n• Quốc tế: <code>Tokyo</code>, <code>Paris</code>, <code>London</code>, <code>New York</code>, <code>Seoul</code>...",
+            }
             return await safe_edit_or_send(
                 query,
-                "🌤 <b>TRA CỨU THỜI TIẾT ĐỊA ĐIỂM BẤT KỲ</b>\n\n"
-                "👉 <b>Hãy nhập tên thành phố / địa điểm vào khung chat bên dưới:</b>\n"
-                "• Việt Nam: <code>Đà Lạt</code>, <code>Nha Trang</code>, <code>Hải Phòng</code>, <code>Cần Thơ</code>, <code>Sa Pa</code>...\n"
-                "• Quốc tế: <code>Tokyo</code>, <code>Paris</code>, <code>London</code>, <code>New York</code>, <code>Seoul</code>, <code>Bangkok</code>...",
+                prompt_titles.get(lang, prompt_titles["en"] if lang != "vi" else prompt_titles["vi"]),
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
+                    [InlineKeyboardButton(f"⬅️ {copy.get('freehub_utilities', 'Tiện ích mở')}", callback_data="freehub|open_utilities")],
                 ]),
             )
         w_hanoi = opt.fetch_weather_report("Hà Nội")
         w_danang = opt.fetch_weather_report("Đà Nẵng")
         w_hcm = opt.fetch_weather_report("Hồ Chí Minh")
+        w_title = copy.get("freehub_weather_title", "DỰ BÁO THỜI TIẾT THỜI GIAN THỰC")
         return await safe_edit_or_send(
             query,
-            "🌤 <b>DỰ BÁO THỜI TIẾT THỜI GIAN THỰC</b>\n\n"
+            f"🌤 <b>{w_title}</b>\n\n"
             f"📍 <b>Hà Nội:</b> {w_hanoi['temperature']}°C · {w_hanoi.get('description', 'Trời đẹp')} · Gió {w_hanoi['windspeed']} km/h\n"
             f"📍 <b>Đà Nẵng:</b> {w_danang['temperature']}°C · {w_danang.get('description', 'Trời đẹp')} · Gió {w_danang['windspeed']} km/h\n"
             f"📍 <b>TP. HCM:</b> {w_hcm['temperature']}°C · {w_hcm.get('description', 'Trời đẹp')} · Gió {w_hcm['windspeed']} km/h\n\n"
             f"<i>Nguồn: Open-Meteo Live API</i>\n\n"
-            f"👉 <b>Bấm nút '✍️ Nhập địa điểm' hoặc gửi trực tiếp tên địa điểm bạn muốn xem:</b>",
+            f"👉 <b>Bấm nút bên dưới hoặc gửi trực tiếp tên địa điểm bạn muốn xem:</b>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("✍️ Nhập địa điểm", callback_data="freehub|util_weather_input"),
-                    InlineKeyboardButton("🔄 Làm mới thời tiết", callback_data="freehub|util_weather"),
+                    InlineKeyboardButton(f"✍️ {copy.get('freehub_weather_input_btn', 'Nhập địa điểm')}", callback_data="freehub|util_weather_input"),
+                    InlineKeyboardButton(f"🔄 {copy.get('freehub_weather_refresh_btn', 'Làm mới thời tiết')}", callback_data="freehub|util_weather"),
                 ],
                 [
-                    InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities"),
-                    InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+                    InlineKeyboardButton(f"⬅️ {copy.get('freehub_utilities', 'Tiện ích mở')}", callback_data="freehub|open_utilities"),
+                    InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
                 ],
             ]),
         )
     if action == "util_qr":
         set_free_hub_pending(uid, "input", task_type="util_qr")
+        lang = get_user_language(uid) or "vi"
+        copy = public_hub_copy(lang)
+        prompt_text = {
+            "en": "📱 <b>Quick QR Code Generator</b>\n\nType any website URL, text, or account info to generate your QR Code image:",
+            "zh": "📱 <b>快速生成二维码</b>\n\n请输入网址、文字或任何内容即可立即生成二维码图片：",
+            "vi": "📱 <b>Tạo mã QR nhanh</b>\n\nNhập link website, số tài khoản ngân hàng hoặc đoạn văn bản bất kỳ bạn muốn tạo mã QR:",
+        }
         return await safe_edit_or_send(
             query,
-            "📱 <b>Tạo mã QR nhanh</b>\n\n"
-            "Nhập link website, số tài khoản ngân hàng hoặc đoạn văn bản bất kỳ bạn muốn tạo mã QR:",
+            prompt_text.get(lang, prompt_text["en"] if lang != "vi" else prompt_text["vi"]),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")]
+                [InlineKeyboardButton(f"⬅️ {copy.get('freehub_utilities', 'Tiện ích mở')}", callback_data="freehub|open_utilities")]
             ]),
         )
     if action.startswith("avatar_set|") or action == "util_avatar":
@@ -138360,24 +138374,33 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
             except Exception:
                 set_id = 1
         set_free_hub_pending(uid, "input", task_type="util_avatar", avatar_set=set_id)
-        set_names = {1: "Robot AI", 2: "Quái vật cute", 4: "Mèo Robot", 5: "Người hoạt hình"}
+        lang = get_user_language(uid) or "vi"
+        copy = public_hub_copy(lang)
+        set_names = {
+            "en": {1: "AI Robot", 2: "Cute Monster", 4: "Robot Cat", 5: "Cartoon Human"},
+            "zh": {1: "AI 机器人", 2: "可爱怪物", 4: "机器猫", 5: "卡通人物"},
+            "vi": {1: "Robot AI", 2: "Quái vật cute", 4: "Mèo Robot", 5: "Người hoạt hình"},
+        }
+        curr_set_name = set_names.get(lang, set_names["vi"]).get(set_id, "Robot AI")
+        titles = {
+            "en": f"🎭 <b>AI Avatar Generator</b>\n\nStyle: <b>{curr_set_name}</b>\n\n👉 <b>Enter any character name, nickname or text</b> to generate avatar:",
+            "zh": f"🎭 <b>AI 头像生成器</b>\n\n当前风格: <b>{curr_set_name}</b>\n\n👉 <b>请输入角色名称、昵称或任意文本</b> 即可生成专属头像：",
+            "vi": f"🎭 <b>Sinh Avatar Nhân Vật AI</b>\n\nBộ phong cách đang chọn: <b>{curr_set_name}</b>\n\n👉 <b>Nhập tên nhân vật, biệt danh hoặc chuỗi ký tự bất kỳ</b> để sinh ảnh đại diện:",
+        }
         return await safe_edit_or_send(
             query,
-            f"🎭 <b>Sinh Avatar Nhân Vật AI</b>\n\n"
-            f"Bộ phong cách đang chọn: <b>{set_names.get(set_id, 'Robot AI')}</b>\n\n"
-            f"👉 <b>Nhập tên nhân vật, biệt danh hoặc chuỗi ký tự bất kỳ</b> để sinh ảnh đại diện:\n\n"
-            f"<i>Hoặc chọn phong cách khác bên dưới:</i>",
+            titles.get(lang, titles["en"] if lang != "vi" else titles["vi"]),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("🤖 Robot AI", callback_data="freehub|avatar_set|1"),
-                    InlineKeyboardButton("👾 Quái vật", callback_data="freehub|avatar_set|2"),
+                    InlineKeyboardButton("🤖 " + ("Robot AI" if lang == "vi" else ("AI Robot" if lang == "en" else "AI 机器人")), callback_data="freehub|avatar_set|1"),
+                    InlineKeyboardButton("👾 " + ("Quái vật" if lang == "vi" else ("Monster" if lang == "en" else "可爱怪物")), callback_data="freehub|avatar_set|2"),
                 ],
                 [
-                    InlineKeyboardButton("🐱 Mèo Robot", callback_data="freehub|avatar_set|4"),
-                    InlineKeyboardButton("🧑 Người hoạt hình", callback_data="freehub|avatar_set|5"),
+                    InlineKeyboardButton("🐱 " + ("Mèo Robot" if lang == "vi" else ("Robot Cat" if lang == "en" else "机器猫")), callback_data="freehub|avatar_set|4"),
+                    InlineKeyboardButton("🧑 " + ("Người hoạt hình" if lang == "vi" else ("Cartoon Human" if lang == "en" else "卡通人物")), callback_data="freehub|avatar_set|5"),
                 ],
-                [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
+                [InlineKeyboardButton(f"⬅️ {copy.get('freehub_utilities', 'Tiện ích mở')}", callback_data="freehub|open_utilities")],
             ]),
         )
     if action == "library":
