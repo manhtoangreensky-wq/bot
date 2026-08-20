@@ -27,6 +27,8 @@ STAGE_ROUTE_EVALUATED = "ROUTE_EVALUATED"
 STAGE_PREFLIGHT_BLOCKED = "PREFLIGHT_BLOCKED"
 STAGE_ADMISSION_BLOCKED = "ADMISSION_BLOCKED"
 STAGE_JOB_CREATED = "JOB_CREATED"
+STAGE_JOB_CREATE_FAILED = "JOB_CREATE_FAILED"
+STAGE_READY_TO_SUBMIT = "READY_TO_SUBMIT"
 STAGE_SUBMIT_STARTED = "SUBMIT_STARTED"
 STAGE_SUBMIT_ACCEPTED = "SUBMIT_ACCEPTED"
 STAGE_PROVIDER_SUBMITTED = "SUBMIT_ACCEPTED"
@@ -43,6 +45,8 @@ STAGE_LABELS = {
     STAGE_PREFLIGHT_BLOCKED: "Tạm dừng tại bước kiểm tra",
     STAGE_ADMISSION_BLOCKED: "Tạm dừng tại bước kiểm tra",
     STAGE_JOB_CREATED: "Đã tạo tác vụ nội bộ",
+    STAGE_JOB_CREATE_FAILED: "Không thể tạo tác vụ nội bộ",
+    STAGE_READY_TO_SUBMIT: "Sẵn sàng gửi kênh dựng",
     STAGE_SUBMIT_STARTED: "Đang gửi sang kênh dựng",
     STAGE_SUBMIT_ACCEPTED: "Kênh dựng đã nhận tác vụ",
     STAGE_POLL_RESULT: "Đang theo dõi tiến độ",
@@ -80,11 +84,14 @@ def get_db_connection(conn=None):
 
 def ensure_video_trace_schema(conn=None) -> None:
     c, should_close = get_db_connection(conn)
+    caller_transaction_active = bool(c.in_transaction)
     try:
         c.execute("""
             CREATE TABLE IF NOT EXISTS video_request_traces (
                 request_id TEXT PRIMARY KEY,
                 job_id INTEGER NULL,
+                project_id INTEGER NULL,
+                confirm_attempt_key TEXT NULL,
                 provider_task_id TEXT NULL,
                 owner_user_id INTEGER NOT NULL DEFAULT 0,
                 owner_chat_id INTEGER NOT NULL DEFAULT 0,
@@ -96,9 +103,21 @@ def ensure_video_trace_schema(conn=None) -> None:
                 updated_at TEXT NOT NULL
             );
         """)
+        columns = {str(row[1]) for row in c.execute("PRAGMA table_info(video_request_traces)").fetchall()}
+        if "project_id" not in columns:
+            c.execute("ALTER TABLE video_request_traces ADD COLUMN project_id INTEGER NULL")
+        if "confirm_attempt_key" not in columns:
+            c.execute("ALTER TABLE video_request_traces ADD COLUMN confirm_attempt_key TEXT NULL")
         c.execute("CREATE INDEX IF NOT EXISTS idx_video_request_traces_job_id ON video_request_traces(job_id);")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_video_request_traces_project_id ON video_request_traces(project_id);")
+        c.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_video_request_traces_confirm_attempt
+               ON video_request_traces(confirm_attempt_key)
+               WHERE confirm_attempt_key IS NOT NULL AND confirm_attempt_key != ''"""
+        )
         c.execute("CREATE INDEX IF NOT EXISTS idx_video_request_traces_user_id ON video_request_traces(owner_user_id);")
-        c.commit()
+        if not caller_transaction_active:
+            c.commit()
     finally:
         if should_close:
             c.close()
@@ -126,7 +145,7 @@ def get_or_create_video_request_id(session: dict | None = None, user_id: int = 0
     return generate_video_request_id()
 
 
-def persist_video_request_trace(trace: dict, conn=None) -> bool:
+def persist_video_request_trace(trace: dict, conn=None, *, commit: bool = True) -> bool:
     """Persist the canonical request trace to SQLite."""
     if not isinstance(trace, dict):
         return False
@@ -145,6 +164,13 @@ def persist_video_request_trace(trace: dict, conn=None) -> bool:
                 job_id = int(job_id) if int(job_id) > 0 else None
             except (ValueError, TypeError):
                 job_id = None
+        project_id = trace.get("project_id")
+        if project_id is not None:
+            try:
+                project_id = int(project_id) if int(project_id) > 0 else None
+            except (ValueError, TypeError):
+                project_id = None
+        confirm_attempt_key = str(trace.get("confirm_attempt_key") or "").strip() or None
         provider_task_id = str(trace.get("provider_task_id") or "").strip() or None
         owner_user_id = int(trace.get("owner_user_id") or 0)
         owner_chat_id = int(trace.get("owner_chat_id") or 0)
@@ -155,26 +181,29 @@ def persist_video_request_trace(trace: dict, conn=None) -> bool:
 
         c.execute("""
             INSERT INTO video_request_traces (
-                request_id, job_id, provider_task_id, owner_user_id, owner_chat_id,
+                request_id, job_id, project_id, confirm_attempt_key, provider_task_id, owner_user_id, owner_chat_id,
                 product_type, current_stage, internal_blocker_code, trace_payload_json,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(request_id) DO UPDATE SET
                 job_id=COALESCE(excluded.job_id, video_request_traces.job_id),
+                project_id=COALESCE(excluded.project_id, video_request_traces.project_id),
+                confirm_attempt_key=COALESCE(excluded.confirm_attempt_key, video_request_traces.confirm_attempt_key),
                 provider_task_id=COALESCE(excluded.provider_task_id, video_request_traces.provider_task_id),
                 owner_user_id=CASE WHEN excluded.owner_user_id > 0 THEN excluded.owner_user_id ELSE video_request_traces.owner_user_id END,
                 owner_chat_id=CASE WHEN excluded.owner_chat_id > 0 THEN excluded.owner_chat_id ELSE video_request_traces.owner_chat_id END,
                 product_type=excluded.product_type,
                 current_stage=excluded.current_stage,
-                internal_blocker_code=COALESCE(excluded.internal_blocker_code, video_request_traces.internal_blocker_code),
+                internal_blocker_code=excluded.internal_blocker_code,
                 trace_payload_json=excluded.trace_payload_json,
                 updated_at=excluded.updated_at
         """, (
-            request_id, job_id, provider_task_id, owner_user_id, owner_chat_id,
+            request_id, job_id, project_id, confirm_attempt_key, provider_task_id, owner_user_id, owner_chat_id,
             product_type, current_stage, internal_blocker_code, trace_json,
             created_at, updated_at
         ))
-        c.commit()
+        if commit:
+            c.commit()
         # Readback verification
         cursor = c.execute("SELECT request_id FROM video_request_traces WHERE request_id = ? LIMIT 1", (request_id,))
         row = cursor.fetchone()
@@ -184,6 +213,33 @@ def persist_video_request_trace(trace: dict, conn=None) -> bool:
     finally:
         if should_close:
             c.close()
+
+
+def _trace_payload_from_row(row: sqlite3.Row | tuple) -> dict:
+    data = dict(row)
+    try:
+        payload = json.loads(data.get("trace_payload_json") or "{}")
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    payload.update(
+        {
+            "request_id": data["request_id"],
+            "job_id": data["job_id"],
+            "project_id": data.get("project_id"),
+            "confirm_attempt_key": data.get("confirm_attempt_key"),
+            "provider_task_id": data["provider_task_id"],
+            "owner_user_id": data["owner_user_id"],
+            "owner_chat_id": data["owner_chat_id"],
+            "product_type": data["product_type"],
+            "current_stage": data["current_stage"],
+            "internal_blocker_code": data["internal_blocker_code"],
+            "created_at": data["created_at"],
+            "updated_at": data["updated_at"],
+        }
+    )
+    return payload
 
 
 def lookup_video_request_trace(identifier: str | int, conn=None) -> dict | None:
@@ -199,21 +255,7 @@ def lookup_video_request_trace(identifier: str | int, conn=None) -> dict | None:
         cursor = c.execute("SELECT * FROM video_request_traces WHERE request_id = ? LIMIT 1", (raw,))
         row = cursor.fetchone()
         if row:
-            data = dict(row)
-            try:
-                payload = json.loads(data.get("trace_payload_json") or "{}")
-            except Exception:
-                payload = {}
-            payload.setdefault("request_id", data["request_id"])
-            payload.setdefault("job_id", data["job_id"])
-            payload.setdefault("provider_task_id", data["provider_task_id"])
-            payload.setdefault("owner_user_id", data["owner_user_id"])
-            payload.setdefault("owner_chat_id", data["owner_chat_id"])
-            payload.setdefault("current_stage", data["current_stage"])
-            payload.setdefault("internal_blocker_code", data["internal_blocker_code"])
-            payload.setdefault("created_at", data["created_at"])
-            payload.setdefault("updated_at", data["updated_at"])
-            return payload
+            return _trace_payload_from_row(row)
 
         # 2. Check by job_id
         try:
@@ -224,29 +266,13 @@ def lookup_video_request_trace(identifier: str | int, conn=None) -> dict | None:
             cursor = c.execute("SELECT * FROM video_request_traces WHERE job_id = ? ORDER BY updated_at DESC LIMIT 1", (jid,))
             row = cursor.fetchone()
             if row:
-                data = dict(row)
-                try:
-                    payload = json.loads(data.get("trace_payload_json") or "{}")
-                except Exception:
-                    payload = {}
-                payload.setdefault("request_id", data["request_id"])
-                payload.setdefault("job_id", data["job_id"])
-                payload.setdefault("provider_task_id", data["provider_task_id"])
-                return payload
+                return _trace_payload_from_row(row)
 
         # 3. Check by provider_task_id
         cursor = c.execute("SELECT * FROM video_request_traces WHERE provider_task_id = ? ORDER BY updated_at DESC LIMIT 1", (raw,))
         row = cursor.fetchone()
         if row:
-            data = dict(row)
-            try:
-                payload = json.loads(data.get("trace_payload_json") or "{}")
-            except Exception:
-                payload = {}
-            payload.setdefault("request_id", data["request_id"])
-            payload.setdefault("job_id", data["job_id"])
-            payload.setdefault("provider_task_id", data["provider_task_id"])
-            return payload
+            return _trace_payload_from_row(row)
 
         return None
     finally:
@@ -256,6 +282,23 @@ def lookup_video_request_trace(identifier: str | int, conn=None) -> dict | None:
 
 def lookup_video_request_trace_by_job_id(job_id: int, conn=None) -> dict | None:
     return lookup_video_request_trace(job_id, conn=conn)
+
+
+def lookup_video_request_trace_by_attempt_key(confirm_attempt_key: str, conn=None) -> dict | None:
+    key = str(confirm_attempt_key or "").strip()
+    if not key:
+        return None
+    ensure_video_trace_schema(conn)
+    c, should_close = get_db_connection(conn)
+    try:
+        row = c.execute(
+            "SELECT request_id FROM video_request_traces WHERE confirm_attempt_key=? LIMIT 1",
+            (key,),
+        ).fetchone()
+        return lookup_video_request_trace(str(row[0]), conn=c) if row else None
+    finally:
+        if should_close:
+            c.close()
 
 
 def record_video_trace_event(
@@ -311,6 +354,8 @@ def record_video_trace_event(
         "created_at": str(trace.get("created_at") or now_iso),
         "updated_at": now_iso,
         "job_id": current_job_id if current_job_id and int(current_job_id) > 0 else None,
+        "project_id": payload_data.get("project_id") or trace.get("project_id") or draft.get("b14_project_id"),
+        "confirm_attempt_key": payload_data.get("confirm_attempt_key") or trace.get("confirm_attempt_key"),
         "provider_task_id": str(current_provider_task_id or "").strip() or None,
         "internal_blocker_code": str(blocker_code or trace.get("internal_blocker_code") or "").strip() or None,
         "preflight_result": payload_data.get("preflight_result") or trace.get("preflight_result"),
@@ -333,6 +378,72 @@ def record_video_trace_event(
     # Write to SQLite
     persist_video_request_trace(trace, conn=conn)
     return session
+
+
+def resolve_video_status_identity(
+    session: dict | None,
+    result: dict | None = None,
+    *,
+    user_id: int = 0,
+    conn=None,
+) -> dict[str, Any]:
+    """Resolve truthful request/job identity for a read-only status render."""
+
+    from services import video_project_queue
+
+    session = dict(session or {})
+    result = dict(result or {})
+    draft = dict(session.get("draft") or {})
+    cached_trace = dict(draft.get("video_trace") or {})
+    result_job = dict(result.get("job") or {})
+    cached_job = dict(draft.get("b14_queue_job") or {})
+    request_id = str(
+        draft.get("request_id")
+        or cached_trace.get("request_id")
+        or draft.get("public_processing_code")
+        or ""
+    ).strip()
+    cached_job_id = int(
+        result_job.get("id")
+        or cached_job.get("id")
+        or draft.get("b14_queue_job_id")
+        or 0
+    )
+
+    connection, should_close = get_db_connection(conn)
+    try:
+        trace = None
+        if request_id and request_id not in {"Không có", "-"}:
+            trace = lookup_video_request_trace(request_id, conn=connection)
+        if trace is None and cached_job_id > 0:
+            trace = lookup_video_request_trace_by_job_id(cached_job_id, conn=connection)
+        if trace and int(trace.get("owner_user_id") or 0) not in {0, int(user_id or 0)}:
+            trace = None
+        trace = dict(trace or cached_trace or {})
+        request_id = str(trace.get("request_id") or request_id or "").strip()
+        job_id = int(trace.get("job_id") or cached_job_id or 0)
+
+        durable_job = video_project_queue.get_video_render_job(connection, job_id) if job_id > 0 else {}
+        if durable_job and int(durable_job.get("user_id") or 0) != int(user_id or 0):
+            durable_job = {}
+            job_id = 0
+        job = dict(durable_job or {})
+        if not durable_job:
+            if cached_job and int(cached_job.get("id") or 0) == job_id:
+                job.update(cached_job)
+            if result_job and int(result_job.get("id") or 0) == job_id:
+                job.update(result_job)
+        return {
+            "request_id": request_id if request_id not in {"Không có", "-"} else "",
+            "job_id": job_id,
+            "trace": trace,
+            "job": job,
+            "durable_trace_found": bool(trace and trace.get("request_id")),
+            "durable_job_found": bool(durable_job),
+        }
+    finally:
+        if should_close:
+            connection.close()
 
 
 def resolve_video_request_truth(identifier: str | int, conn=None) -> dict[str, Any]:
@@ -417,8 +528,8 @@ def resolve_video_request_truth(identifier: str | int, conn=None) -> dict[str, A
         blocker = trace.get("internal_blocker_code") or "None"
         prov_cfg_at_req = "YES" if trace.get("provider_configured") else "NO"
         prov_ready_at_req = "YES" if trace.get("provider_ready") else "NO"
-        eligible_at_req = trace.get("eligible_route_count", 1 if job_id else 0)
-        selected_at_req = trace.get("selected_route") or ("shopaikey_video" if job_id else "None")
+        eligible_at_req = trace.get("eligible_route_count", 0)
+        selected_at_req = trace.get("selected_route") or "None"
 
         return {
             "identifier_type": "request_id" if raw.startswith("VID-") else "job_id",
@@ -427,7 +538,7 @@ def resolve_video_request_truth(identifier: str | int, conn=None) -> dict[str, A
             "request_source": "canonical_db_video_request_traces",
             "durable_request_found": "YES",
             "job_id": str(job_id) if job_id else "None",
-            "job_found": "YES" if job_record or (job_id and job_id > 0) else "NO",
+            "job_found": "YES" if job_record else "NO",
             "provider_task_id": str(prov_task_id or "None"),
             "provider_task_found": "YES" if prov_task_id and prov_task_id != "None" else "NO",
             "current_stage": stage,
@@ -435,7 +546,13 @@ def resolve_video_request_truth(identifier: str | int, conn=None) -> dict[str, A
             "admission_result": trace.get("admission_result") or ("PASS" if job_id else "BLOCKED"),
             "exact_blocker_code": blocker,
             "exact_blocker_detail": trace.get("blocker_detail_safe") or blocker,
-            "why_no_job": f"Đã tạo tác vụ nội bộ (#{job_id})" if job_id else f"Yêu cầu dừng tại bước kiểm tra ({blocker}); Bot chưa trừ Xu.",
+            "why_no_job": (
+                f"Đã tạo tác vụ nội bộ (#{job_id})"
+                if job_record
+                else f"Trace tham chiếu tác vụ #{job_id} nhưng không còn tìm thấy row video_jobs"
+                if job_id
+                else f"Yêu cầu dừng tại bước kiểm tra ({blocker}); Bot chưa trừ Xu."
+            ),
             "provider_configured_at_request": prov_cfg_at_req,
             "provider_ready_at_request": prov_ready_at_req,
             "eligible_route_count_at_request": eligible_at_req,
@@ -505,8 +622,9 @@ def build_canonical_video_trace_report(identifier: str | int, conn=None) -> dict
         "SCENES_TOTAL": trace.get("scene_count", 0),
         "SCENE_TASKS_CREATED": trace.get("scene_tasks_created", 0),
         "SCENE_TASKS_SUBMITTED": trace.get("scene_tasks_submitted", 0),
-        "SUBMIT_COUNT": 1 if truth["job_found"] == "YES" else 0,
+        "SUBMIT_COUNT": int(trace.get("submit_count") or 0),
         "POLL_COUNT": trace.get("poll_count", 0),
+        "CHARGE_COUNT": int(trace.get("charge_count") or 0),
         "ARTIFACT": trace.get("final_video_path", "None"),
         "DELIVERY_RECEIPT": trace.get("delivery_receipt", "None"),
         "CHARGE_STATE": trace.get("charge_state", "NO_CHARGE"),
@@ -561,3 +679,420 @@ def begin_video_confirm_attempt(session: dict | None, *, user_id: int = 0, chat_
             "reason": "trace_persistence_failed",
             "durable_persisted": False,
         }
+
+
+def _append_trace_event(trace: dict, stage: str, payload: dict | None = None, blocker_code: str = "") -> dict:
+    updated = dict(trace or {})
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    events = list(updated.get("events") or [])
+    event = {"stage": str(stage), "timestamp": now_iso, "payload": dict(payload or {})}
+    if blocker_code:
+        event["blocker_code"] = str(blocker_code)
+    events.append(event)
+    updated.update(
+        {
+            "current_stage": str(stage),
+            "current_stage_label": STAGE_LABELS.get(str(stage), str(stage)),
+            "created_at": str(updated.get("created_at") or now_iso),
+            "updated_at": now_iso,
+            "events": events,
+        }
+    )
+    return updated
+
+
+def _begin_sqlite_transaction(connection: sqlite3.Connection) -> str:
+    if connection.in_transaction:
+        savepoint = f"video_confirm_{secrets.token_hex(4)}"
+        connection.execute(f"SAVEPOINT {savepoint}")
+        return savepoint
+    connection.execute("BEGIN IMMEDIATE")
+    return ""
+
+
+def _commit_sqlite_transaction(connection: sqlite3.Connection, savepoint: str) -> None:
+    if savepoint:
+        connection.execute(f"RELEASE SAVEPOINT {savepoint}")
+    else:
+        connection.commit()
+
+
+def _rollback_sqlite_transaction(connection: sqlite3.Connection, savepoint: str) -> None:
+    if savepoint:
+        connection.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+        connection.execute(f"RELEASE SAVEPOINT {savepoint}")
+    else:
+        connection.rollback()
+
+
+def begin_video_confirm_execution(
+    session: dict | None,
+    *,
+    user_id: int,
+    chat_id: int,
+    project_id: int,
+    idempotency_key: str,
+    payload: dict | None = None,
+    product_type: str = "video_ai_real",
+    conn=None,
+) -> dict:
+    """Atomically persist one request and one non-claimable internal job."""
+
+    from services import video_project_queue
+
+    session = dict(session or {})
+    draft = dict(session.get("draft") or {})
+    clean_project_id = int(project_id or 0)
+    clean_user_id = int(user_id or 0)
+    clean_chat_id = int(chat_id or 0)
+    attempt_key = str(idempotency_key or "").strip()[:240]
+    if clean_project_id <= 0 or clean_user_id <= 0 or not attempt_key:
+        return {
+            "ok": False,
+            "request_id": "",
+            "job_id": 0,
+            "session": session,
+            "reason": "invalid_confirm_identity",
+            "durable_persisted": False,
+        }
+
+    connection, should_close = get_db_connection(conn)
+    savepoint = ""
+    identity_valid = False
+    request_id = ""
+    job_id = 0
+    job: dict[str, Any] = {}
+    transaction_committed = False
+    try:
+        ensure_video_trace_schema(connection)
+        video_project_queue.ensure_video_project_queue_schema(connection)
+        savepoint = _begin_sqlite_transaction(connection)
+
+        project_row = connection.execute(
+            "SELECT project_id,user_id FROM video_projects WHERE project_id=? LIMIT 1",
+            (clean_project_id,),
+        ).fetchone()
+        if not project_row:
+            raise ValueError("project_not_found")
+        if int(project_row[1]) != clean_user_id:
+            raise PermissionError("project_user_mismatch")
+        identity_valid = True
+
+        existing = lookup_video_request_trace_by_attempt_key(attempt_key, conn=connection)
+        if existing and int(existing.get("owner_user_id") or 0) not in {0, clean_user_id}:
+            raise PermissionError("confirm_attempt_owner_mismatch")
+        request_id = str(
+            (existing or {}).get("request_id")
+            or draft.get("request_id")
+            or draft.get("trace_id")
+            or generate_video_request_id()
+        ).strip()
+        trace = dict(existing or draft.get("video_trace") or {})
+        prior_job_id = int(trace.get("job_id") or 0)
+        trace.update(
+            {
+                **dict(payload or {}),
+                "request_id": request_id,
+                "project_id": clean_project_id,
+                "confirm_attempt_key": attempt_key,
+                "owner_user_id": clean_user_id,
+                "owner_chat_id": clean_chat_id,
+                "product_type": str(product_type or trace.get("product_type") or "video_ai_real"),
+            }
+        )
+        if not existing:
+            trace.update(
+                {
+                    "provider_task_id": None,
+                    "preflight_result": "RUNNING",
+                    "admission_result": "NOT_RUN",
+                    "submit_count": 0,
+                    "poll_count": 0,
+                    "charge_count": 0,
+                    "charge_state": "NO_CHARGE",
+                }
+            )
+        if not trace.get("events"):
+            trace = _append_trace_event(trace, STAGE_REQUEST_RECEIVED, payload)
+        if not persist_video_request_trace(trace, conn=connection, commit=False):
+            raise RuntimeError("trace_persistence_failed")
+
+        job = video_project_queue.begin_video_precheck_job(
+            connection,
+            project_id=clean_project_id,
+            user_id=clean_user_id,
+            chat_id=clean_chat_id,
+            request_id=request_id,
+            confirm_attempt_key=attempt_key,
+        )
+        job_id = int(job.get("id") or 0)
+        if job_id <= 0:
+            raise RuntimeError("job_create_failed")
+        trace["job_id"] = job_id
+        if prior_job_id <= 0:
+            trace["internal_blocker_code"] = None
+            trace = _append_trace_event(
+                trace,
+                STAGE_JOB_CREATED,
+                {"project_id": clean_project_id, "job_id": job_id},
+            )
+        if not persist_video_request_trace(trace, conn=connection, commit=False):
+            raise RuntimeError("request_job_link_failed")
+        _commit_sqlite_transaction(connection, savepoint)
+        savepoint = ""
+        transaction_committed = True
+
+        trace_readback = lookup_video_request_trace(request_id, conn=connection)
+        job_readback = video_project_queue.get_video_render_job(connection, job_id)
+        if not trace_readback or int(trace_readback.get("job_id") or 0) != job_id or not job_readback:
+            raise RuntimeError("request_job_readback_failed")
+        draft.update(
+            {
+                "request_id": request_id,
+                "public_processing_code": request_id,
+                "video_trace": trace_readback,
+                "b14_project_id": clean_project_id,
+                "b14_queue_job_id": job_id,
+                "b14_queue_job": job_readback,
+                "b14_duplicate_prevented": bool(job.get("duplicate_prevented")),
+                "b14_submit_attempted": True,
+                "provider_called": False,
+                "job_created": True,
+                "outbox_created": False,
+                "xu_charged": 0,
+            }
+        )
+        session["draft"] = draft
+        return {
+            "ok": True,
+            "request_id": request_id,
+            "job_id": job_id,
+            "job": job_readback,
+            "session": session,
+            "reason": "",
+            "durable_persisted": True,
+            "duplicate_prevented": bool(job.get("duplicate_prevented")),
+        }
+    except Exception as exc:
+        try:
+            _rollback_sqlite_transaction(connection, savepoint)
+        except Exception:
+            pass
+        reason = str(exc or "job_create_failed")
+        if transaction_committed and job_id > 0 and reason == "request_job_readback_failed":
+            draft.update(
+                {
+                    "request_id": request_id,
+                    "public_processing_code": request_id,
+                    "b14_project_id": clean_project_id,
+                    "b14_queue_job_id": job_id,
+                    "b14_queue_job": dict(job or {}),
+                    "b14_duplicate_prevented": bool(job.get("duplicate_prevented")),
+                    "b14_submit_attempted": True,
+                    "provider_called": False,
+                    "job_created": True,
+                    "outbox_created": False,
+                    "xu_charged": 0,
+                }
+            )
+            session["draft"] = draft
+            logger.warning("begin_video_confirm_execution committed but readback failed")
+            return {
+                "ok": False,
+                "request_id": request_id,
+                "job_id": job_id,
+                "job": dict(job or {}),
+                "session": session,
+                "reason": "request_job_readback_failed",
+                "durable_persisted": True,
+                "duplicate_prevented": bool(job.get("duplicate_prevented")),
+            }
+        if reason not in {
+            "project_not_found",
+            "project_user_mismatch",
+            "confirm_attempt_owner_mismatch",
+            "trace_persistence_failed",
+        }:
+            reason = "job_create_failed"
+        durable_failure = False
+        if identity_valid and reason == "job_create_failed":
+            request_id = request_id or str(draft.get("request_id") or generate_video_request_id())
+            failure_trace = {
+                "request_id": request_id,
+                "project_id": clean_project_id,
+                "confirm_attempt_key": attempt_key,
+                "owner_user_id": clean_user_id,
+                "owner_chat_id": clean_chat_id,
+                "product_type": str(product_type or "video_ai_real"),
+                "job_id": None,
+                "provider_task_id": None,
+                "internal_blocker_code": "job_create_failed",
+                "preflight_result": "NOT_RUN",
+                "admission_result": "NOT_RUN",
+                "submit_count": 0,
+                "poll_count": 0,
+                "charge_count": 0,
+                "charge_state": "NO_CHARGE",
+            }
+            failure_trace = _append_trace_event(
+                failure_trace,
+                STAGE_JOB_CREATE_FAILED,
+                {"project_id": clean_project_id},
+                "job_create_failed",
+            )
+            durable_failure = persist_video_request_trace(failure_trace, conn=connection)
+            draft.update(
+                {
+                    "request_id": request_id,
+                    "public_processing_code": request_id,
+                    "video_trace": failure_trace,
+                    "b14_queue_job_id": 0,
+                    "b14_queue_job": {},
+                    "provider_called": False,
+                    "job_created": False,
+                    "outbox_created": False,
+                    "xu_charged": 0,
+                }
+            )
+            session["draft"] = draft
+        logger.warning("begin_video_confirm_execution failed: %s", reason)
+        return {
+            "ok": False,
+            "request_id": request_id,
+            "job_id": 0,
+            "session": session,
+            "reason": reason,
+            "durable_persisted": bool(durable_failure),
+        }
+    finally:
+        if should_close:
+            connection.close()
+
+
+def record_video_confirm_precheck_result(
+    session: dict | None,
+    *,
+    user_id: int,
+    chat_id: int,
+    job_id: int,
+    preflight_result: str,
+    admission_result: str,
+    blocker_code: str = "",
+    payload: dict | None = None,
+    conn=None,
+) -> dict:
+    """Update the same durable job after preflight without submitting it."""
+
+    from services import video_project_queue
+
+    session = dict(session or {})
+    draft = dict(session.get("draft") or {})
+    clean_job_id = int(job_id or 0)
+    clean_user_id = int(user_id or 0)
+    connection, should_close = get_db_connection(conn)
+    savepoint = ""
+    try:
+        ensure_video_trace_schema(connection)
+        video_project_queue.ensure_video_project_queue_schema(connection)
+        savepoint = _begin_sqlite_transaction(connection)
+        trace = lookup_video_request_trace_by_job_id(clean_job_id, conn=connection)
+        if not trace:
+            raise ValueError("request_trace_not_found")
+        if int(trace.get("owner_user_id") or 0) not in {0, clean_user_id}:
+            raise PermissionError("request_owner_mismatch")
+
+        preflight = str(preflight_result or "NOT_RUN").strip().upper()
+        admission = str(admission_result or "NOT_RUN").strip().upper()
+        effective_chat_id = int(chat_id or trace.get("owner_chat_id") or 0)
+        precheck_payload = dict(payload or {})
+        if effective_chat_id > 0:
+            precheck_payload["chat_id"] = effective_chat_id
+        job = video_project_queue.record_video_precheck_job_result(
+            connection,
+            job_id=clean_job_id,
+            user_id=clean_user_id,
+            preflight_result=preflight,
+            admission_result=admission,
+            blocker_code=blocker_code,
+            payload=precheck_payload,
+        )
+        if preflight == "PASS" and admission == "PASS":
+            stage = STAGE_READY_TO_SUBMIT
+        elif admission == "BLOCKED":
+            stage = STAGE_ADMISSION_BLOCKED
+        else:
+            stage = STAGE_PREFLIGHT_BLOCKED
+        trace.update(
+            {
+                **precheck_payload,
+                "job_id": clean_job_id,
+                "owner_user_id": clean_user_id,
+                "owner_chat_id": effective_chat_id,
+                "preflight_result": preflight,
+                "admission_result": admission,
+                "internal_blocker_code": str(blocker_code or "").strip() or None,
+                "provider_task_id": None,
+                "submit_count": 0,
+                "poll_count": 0,
+                "charge_count": 0,
+                "charge_state": "NO_CHARGE",
+            }
+        )
+        trace = _append_trace_event(
+            trace,
+            stage,
+            {
+                **precheck_payload,
+                "job_id": clean_job_id,
+                "preflight_result": preflight,
+                "admission_result": admission,
+            },
+            blocker_code,
+        )
+        if not persist_video_request_trace(trace, conn=connection, commit=False):
+            raise RuntimeError("precheck_trace_persistence_failed")
+        _commit_sqlite_transaction(connection, savepoint)
+        savepoint = ""
+
+        trace_readback = lookup_video_request_trace_by_job_id(clean_job_id, conn=connection)
+        job_readback = video_project_queue.get_video_render_job(connection, clean_job_id)
+        draft.update(
+            {
+                "request_id": str(trace_readback.get("request_id") or ""),
+                "public_processing_code": str(trace_readback.get("request_id") or ""),
+                "video_trace": trace_readback,
+                "b14_queue_job_id": clean_job_id,
+                "b14_queue_job": job_readback,
+                "b14_submit_attempted": True,
+                "provider_called": False,
+                "job_created": True,
+                "outbox_created": False,
+                "xu_charged": 0,
+            }
+        )
+        session["draft"] = draft
+        return {
+            "ok": True,
+            "request_id": str(trace_readback.get("request_id") or ""),
+            "job_id": clean_job_id,
+            "job": job_readback,
+            "trace": trace_readback,
+            "session": session,
+            "reason": "",
+        }
+    except Exception as exc:
+        try:
+            _rollback_sqlite_transaction(connection, savepoint)
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "request_id": str(draft.get("request_id") or ""),
+            "job_id": clean_job_id,
+            "job": {},
+            "session": session,
+            "reason": str(exc or "precheck_persistence_failed"),
+        }
+    finally:
+        if should_close:
+            connection.close()
