@@ -25,32 +25,36 @@ jobs:
         run: |
           python -m py_compile bot.py services/*.py
 
-      - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
+      - name: Deploy to VPS via SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf "%s\n" "$VPS_SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=10 "$VPS_USER@$VPS_HOST" "
             set -euo pipefail
-            echo "=== Pulling Bot Repo on VPS ==="
+            echo '=== Pulling Bot Repo on VPS ==='
             cd /opt/toanaas/bot
             git fetch origin --prune
             git checkout main
             git pull origin main
 
-            echo "=== Pulling Worker Repo on VPS ==="
+            echo '=== Pulling Worker Repo on VPS ==='
             cd /opt/toanaas-worker
             git fetch origin --prune
             git checkout main
             git pull origin main
 
-            echo "=== Restarting Bot and Worker Services ==="
+            echo '=== Restarting Bot and Worker Services ==='
             systemctl restart toanaas-bot.service toanaas-worker-owner-product-video.service toanaas-video-edit-worker.service
 
-            echo "=== Verifying Active Services ==="
+            echo '=== Verifying Active Services ==='
             systemctl is-active toanaas-bot.service
             systemctl is-active toanaas-worker-owner-product-video.service
             systemctl is-active toanaas-video-edit-worker.service
 
-            echo "=== BOT DEPLOY SUCCESS ==="
+            echo '=== BOT DEPLOY SUCCESS ==='
+          "
