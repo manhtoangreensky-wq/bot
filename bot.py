@@ -70025,8 +70025,9 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             (f"📥 {copy['freehub_save_temp_media']}", "freehub|upload"),
             (f"🎙 {copy['freehub_voice_subdub_script']}", "freehub|hook"),
             (f"🎵 {copy['freehub_music_sfx_ideas']}", "freehub|lib_music"),
-            ("🌐 Dịch thuật mở (0 Xu)", "freehub|open_translate"),
-            ("💱 Tỷ giá & Tiện ích mở", "freehub|open_utilities"),
+            ("🌐 Dịch thuật", "freehub|open_translate"),
+            ("📥 Tải video từ link", "vdownload|start"),
+            ("💱 Tỷ giá & Tiện ích", "freehub|open_utilities"),
         ],
         nav_back=None,
         nav_main=True,
@@ -138229,10 +138230,9 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         set_free_hub_pending(uid, "input", task_type="open_translate")
         return await safe_edit_or_send(
             query,
-            "🌐 <b>Dịch thuật mở (0 Xu)</b>\n\n"
+            "🌐 <b>Dịch thuật</b>\n\n"
             "Nhập hoặc dán đoạn kịch bản / prompt (tiếng Anh hoặc tiếng Việt) bạn muốn dịch:\n\n"
-            "<i>• Dịch Anh ➔ Việt hoặc Việt ➔ Anh tự động.\n"
-            "• Hoàn toàn 0 Xu và không giới hạn.</i>",
+            "<i>• Tự động dịch Anh ➔ Việt hoặc Việt ➔ Anh nhanh chóng.</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")]
@@ -138242,30 +138242,36 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         clear_free_hub_pending(uid)
         return await safe_edit_or_send(
             query,
-            "💱 <b>Tiện ích Mở Rộng TOAN AAS (0 Xu)</b>\n\n"
-            "Chọn tiện ích miễn phí bạn muốn sử dụng:",
+            "💱 <b>Tiện ích Mở Rộng TOAN AAS</b>\n\n"
+            "Chọn tiện ích bạn muốn sử dụng:",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("💱 Tra cứu Tỷ giá & Xu", callback_data="freehub|util_rate"),
+                    InlineKeyboardButton("💱 Tra cứu & Quy đổi Tỷ giá", callback_data="freehub|util_rate"),
                     InlineKeyboardButton("🌤 Dự báo thời tiết", callback_data="freehub|util_weather"),
                 ],
                 [
                     InlineKeyboardButton("📱 Tạo mã QR nhanh", callback_data="freehub|util_qr"),
                     InlineKeyboardButton("🎭 Sinh Avatar AI", callback_data="freehub|util_avatar"),
                 ],
+                [
+                    InlineKeyboardButton("📥 Tải video từ link", callback_data="vdownload|start"),
+                ],
                 [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")],
             ]),
         )
     if action == "util_rate":
         rate_info = opt.fetch_usd_vnd_rate()
+        set_free_hub_pending(uid, "input", task_type="util_rate")
         return await safe_edit_or_send(
             query,
             f"💱 <b>TỶ GIÁ NGOẠI TỆ & QUY ĐỔI XU TOAN AAS</b>\n\n"
             f"💵 <b>1 USD</b> = {int(rate_info['usd_vnd']):,} VNĐ\n"
+            f"💶 <b>1 EUR</b> = {int(rate_info.get('eur_vnd', 27500)):,} VNĐ\n"
             f"🪙 <b>1 Xu</b> = {int(rate_info['vnd_per_xu']):,} VNĐ\n"
             f"💎 <b>1 USD</b> ≈ {rate_info['xu_per_usd']} Xu\n\n"
-            f"<i>Nguồn dữ liệu: {rate_info['source']}</i>",
+            f"<i>Nguồn: {rate_info['source']}</i>\n\n"
+            f"👉 <b>Nhập số tiền muốn quy đổi</b> (Ví dụ: <code>50 USD</code>, <code>500.000 VND</code>, <code>200 Xu</code>):",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔄 Làm mới tỷ giá", callback_data="freehub|util_rate")],
@@ -138274,16 +138280,18 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
             ]),
         )
     if action == "util_weather":
-        w_hanoi = opt.fetch_weather_report("hanoi")
-        w_hcm = opt.fetch_weather_report("hcm")
-        w_danang = opt.fetch_weather_report("danang")
+        w_hanoi = opt.fetch_weather_report("Hà Nội")
+        w_danang = opt.fetch_weather_report("Đà Nẵng")
+        w_hcm = opt.fetch_weather_report("Hồ Chí Minh")
+        set_free_hub_pending(uid, "input", task_type="util_weather")
         return await safe_edit_or_send(
             query,
             "🌤 <b>DỰ BÁO THỜI TIẾT THỜI GIAN THỰC</b>\n\n"
-            f"📍 <b>Hà Nội:</b> {w_hanoi['temperature']}°C · Gió {w_hanoi['windspeed']} km/h\n"
-            f"📍 <b>Đà Nẵng:</b> {w_danang['temperature']}°C · Gió {w_danang['windspeed']} km/h\n"
-            f"📍 <b>TP. HCM:</b> {w_hcm['temperature']}°C · Gió {w_hcm['windspeed']} km/h\n\n"
-            f"<i>Nguồn dữ liệu: Open-Meteo Public API</i>",
+            f"📍 <b>Hà Nội:</b> {w_hanoi['temperature']}°C · {w_hanoi.get('description', 'Trời đẹp')} · Gió {w_hanoi['windspeed']} km/h\n"
+            f"📍 <b>Đà Nẵng:</b> {w_danang['temperature']}°C · {w_danang.get('description', 'Trời đẹp')} · Gió {w_danang['windspeed']} km/h\n"
+            f"📍 <b>TP. HCM:</b> {w_hcm['temperature']}°C · {w_hcm.get('description', 'Trời đẹp')} · Gió {w_hcm['windspeed']} km/h\n\n"
+            f"<i>Nguồn: Open-Meteo Live API</i>\n\n"
+            f"👉 <b>Nhập tên địa điểm bất kỳ</b> (Việt Nam hoặc Quốc tế - Ví dụ: <code>Đà Lạt</code>, <code>Nha Trang</code>, <code>Hải Phòng</code>, <code>Tokyo</code>, <code>Paris</code>, <code>London</code>, <code>New York</code>):",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔄 Làm mới thời tiết", callback_data="freehub|util_weather")],
@@ -138295,22 +138303,39 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         set_free_hub_pending(uid, "input", task_type="util_qr")
         return await safe_edit_or_send(
             query,
-            "📱 <b>Tạo mã QR nhanh (0 Xu)</b>\n\n"
-            "Nhập link website, số tài khoản hoặc văn bản bạn muốn tạo mã QR:",
+            "📱 <b>Tạo mã QR nhanh</b>\n\n"
+            "Nhập link website, số tài khoản ngân hàng hoặc đoạn văn bản bất kỳ bạn muốn tạo mã QR:",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")]
             ]),
         )
-    if action == "util_avatar":
-        set_free_hub_pending(uid, "input", task_type="util_avatar")
+    if action.startswith("avatar_set|") or action == "util_avatar":
+        set_id = 1
+        if action.startswith("avatar_set|"):
+            try:
+                set_id = int(action.split("|")[1])
+            except Exception:
+                set_id = 1
+        set_free_hub_pending(uid, "input", task_type="util_avatar", avatar_set=set_id)
+        set_names = {1: "Robot AI", 2: "Quái vật cute", 4: "Mèo Robot", 5: "Người hoạt hình"}
         return await safe_edit_or_send(
             query,
-            "🎭 <b>Sinh Avatar Nhân Vật AI (0 Xu)</b>\n\n"
-            "Nhập tên nhân vật, biệt danh hoặc ID để sinh ảnh avatar AI độc đáo:",
+            f"🎭 <b>Sinh Avatar Nhân Vật AI</b>\n\n"
+            f"Bộ phong cách đang chọn: <b>{set_names.get(set_id, 'Robot AI')}</b>\n\n"
+            f"👉 <b>Nhập tên nhân vật, biệt danh hoặc chuỗi ký tự bất kỳ</b> để sinh ảnh đại diện:\n\n"
+            f"<i>Hoặc chọn phong cách khác bên dưới:</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")]
+                [
+                    InlineKeyboardButton("🤖 Robot AI", callback_data="freehub|avatar_set|1"),
+                    InlineKeyboardButton("👾 Quái vật", callback_data="freehub|avatar_set|2"),
+                ],
+                [
+                    InlineKeyboardButton("🐱 Mèo Robot", callback_data="freehub|avatar_set|4"),
+                    InlineKeyboardButton("🧑 Người hoạt hình", callback_data="freehub|avatar_set|5"),
+                ],
+                [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
             ]),
         )
     if action == "library":
