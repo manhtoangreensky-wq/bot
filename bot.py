@@ -40221,6 +40221,7 @@ class AgentDeepgram:
         content_type: str = "application/octet-stream",
         *,
         require_diarization: bool = False,
+        timeout_seconds: float = 60.0,
     ) -> dict:
         if not DEEPGRAM_API_KEY:
             return {"status": "MISSING", "http_status": 0, "error": "DEEPGRAM_API_KEY missing"}
@@ -40236,7 +40237,7 @@ class AgentDeepgram:
                         "Content-Type": content_type or "application/octet-stream",
                     },
                     content=file_bytes,
-                    timeout=60.0,
+                    timeout=max(1.0, float(timeout_seconds or 60.0)),
                 )
             body_preview = sanitize_log_text(res.text or "")[:500]
             data = {}
@@ -40257,6 +40258,14 @@ class AgentDeepgram:
                 "transcript_json": data,
                 "stats": stats,
                 "error": str((data or {}).get("error") or (data or {}).get("message") or "")[:240],
+            }
+        except httpx.TimeoutException:
+            return {
+                "status": "TIMEOUT" if require_diarization else "FAIL",
+                "http_status": 0,
+                "error": "deepgram_timeout",
+                "stats": {},
+                "body_preview": "",
             }
         except Exception as e:
             return {"status": "FAIL", "http_status": 0, "error": str(e)[:240], "stats": {}, "body_preview": ""}
@@ -40445,6 +40454,7 @@ async def deepgram_asr_adapter(
     content_type: str = "application/octet-stream",
     *,
     require_diarization: bool = False,
+    timeout_seconds: float = 60.0,
 ) -> dict:
     if not DEEPGRAM_API_KEY:
         return {
@@ -40459,10 +40469,18 @@ async def deepgram_asr_adapter(
             audio_bytes,
             content_type,
             require_diarization=True,
+            timeout_seconds=timeout_seconds,
         )
     else:
         diagnostic = await AgentDeepgram.diagnostic(audio_bytes, content_type)
     http_status = int(diagnostic.get("http_status") or 0)
+    if str(diagnostic.get("status") or "").upper() == "TIMEOUT":
+        return {
+            "ok": False,
+            "status": "deepgram_timeout",
+            "detail": "deepgram_timeout",
+            "http_status": 0,
+        }
     if http_status == 401:
         return {"ok": False, "status": "deepgram_http_401", "detail": diagnostic.get("error") or diagnostic.get("body_preview") or ""}
     if 400 <= http_status < 500:
@@ -64885,6 +64903,7 @@ async def asr_transcribe_audio(
     updated_by="",
     context: ContextTypes.DEFAULT_TYPE | None = None,
     require_diarization: bool = False,
+    timeout_seconds: float = 60.0,
 ) -> dict:
     del response_format, context
     require_diarization = bool(require_diarization)
@@ -65010,6 +65029,7 @@ async def asr_transcribe_audio(
                     audio_bytes,
                     content_type,
                     require_diarization=True,
+                    timeout_seconds=timeout_seconds,
                 )
             else:
                 result = await deepgram_asr_adapter(audio_bytes, content_type)
@@ -65053,6 +65073,15 @@ async def asr_transcribe_audio(
                     "text": "",
                     "segments": [],
                     "detail": str(result.get("detail") or "deepgram_speaker_labels_missing"),
+                }
+            if require_diarization and status == "deepgram_timeout":
+                return {
+                    "ok": False,
+                    "status": "deepgram_timeout",
+                    "provider": "deepgram",
+                    "text": "",
+                    "segments": [],
+                    "detail": str(result.get("detail") or "deepgram_timeout"),
                 }
             if subdub_long_media.is_no_speech_result(result, transcript):
                 return {
@@ -242993,6 +243022,11 @@ async def transcribe_media_to_segments(
         duration_seconds = int(duration_seconds or _safe_int(file_ref.get("duration_seconds") or file_ref.get("duration") or file_ref.get("source_duration"), 0))
         source_hash = str(file_ref.get("source_hash") or file_ref.get("source_sha256") or "").strip().lower()
         checkpoint_path = str(file_ref.get("asr_checkpoint_path") or "").strip()
+    auto_asr_timeout_seconds = (
+        float(subdub_delivery_timeout_seconds_for_duration(duration_seconds))
+        if require_diarization
+        else 60.0
+    )
     if not source_bytes and context is not None and isinstance(file_ref, dict):
         try:
             source_bytes, content_type = await video_dubbing_download_source(context, file_ref)
@@ -243145,7 +243179,14 @@ async def transcribe_media_to_segments(
                 allow_confirmed_product=allow_confirmed_product,
                 updated_by=updated_by,
                 context=context,
-                **({"require_diarization": True} if require_diarization else {}),
+                **(
+                    {
+                        "require_diarization": True,
+                        "timeout_seconds": auto_asr_timeout_seconds,
+                    }
+                    if require_diarization
+                    else {}
+                ),
             )
 
         chunk_result = await subdub_long_media.transcribe_long_media_chunks(
@@ -243276,7 +243317,14 @@ async def transcribe_media_to_segments(
                 allow_confirmed_product=allow_confirmed_product,
                 updated_by=updated_by,
                 context=context,
-                **({"require_diarization": True} if require_diarization else {}),
+                **(
+                    {
+                        "require_diarization": True,
+                        "timeout_seconds": auto_asr_timeout_seconds,
+                    }
+                    if require_diarization
+                    else {}
+                ),
             )
         provider = str(asr_result.get("provider") or "")
         transcript = str(asr_result.get("text") or "").strip()
@@ -243305,6 +243353,18 @@ async def transcribe_media_to_segments(
             "duration_seconds": int(duration_seconds or 0),
             "confidence": 0.0,
             "provider": str(provider or ""),
+        }
+    if asr_status == "deepgram_timeout":
+        return {
+            "output_valid": False,
+            "status": "deepgram_timeout",
+            "detail": sanitize_log_text(str(detail or "deepgram_timeout"))[:180],
+            "transcript_text": "",
+            "segments": [],
+            "detected_language": "",
+            "duration_seconds": int(duration_seconds or 0),
+            "confidence": 0.0,
+            "provider": str(provider or "deepgram"),
         }
     transcript = str(transcript or "").strip()
     if not transcript or transcript.startswith("❌"):
@@ -243444,7 +243504,10 @@ async def video_dubbing_resolve_source_script(
         **({"require_diarization": True} if require_diarization else {}),
     )
     if not result.get("output_valid"):
-        raise RuntimeError(str(result.get("status") or "asr_failed"))
+        failure_status = str(result.get("status") or "asr_failed")
+        if require_diarization and failure_status == AUTO_CAST_UNAVAILABLE:
+            raise subdub_speaker_cast.AutoCastUnavailable()
+        raise RuntimeError(failure_status)
     transcript = str(result.get("transcript_text") or "").strip()
     subtitle_text = video_dubbing_srt_from_segments(list(result.get("segments") or []))
     if not subtitle_text:
