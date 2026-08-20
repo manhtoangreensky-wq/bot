@@ -138484,11 +138484,27 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         )
     if action == "open_translate":
         set_free_hub_pending(uid, "input", task_type="open_translate")
+        lang = get_user_language(uid) or "vi"
+        prompt_map = {
+            "en": (
+                "🌐 <b>GLOBAL AUTO-DETECT TRANSLATION</b>\n\n"
+                "👉 <b>Enter or paste any text / script / prompt in ANY world language (Russian, Chinese, Japanese, French, German, Spanish, Korean, Vietnamese...):</b>\n\n"
+                "<i>• Automatically detects source language and translates directly into your selected bot language.</i>"
+            ),
+            "zh": (
+                "🌐 <b>全球多语言智能翻译</b>\n\n"
+                "👉 <b>请输入或粘贴任何语言的文本/提示词/脚本（俄语、英语、日语、韩语、法语、德语、越南语等）：</b>\n\n"
+                "<i>• 自动智能识别输入语言并直接翻译为系统设置语言。</i>"
+            ),
+            "vi": (
+                "🌐 <b>DỊCH THUẬT ĐA NGÔN NGỮ TỰ ĐỘNG</b>\n\n"
+                "👉 <b>Nhập hoặc dán bất kỳ văn bản / prompt / kịch bản nào bằng MỌI ngôn ngữ trên thế giới (Tiếng Nga, Tiếng Anh, Tiếng Trung, Tiếng Nhật, Tiếng Hàn, Tiếng Pháp, Tiếng Đức...):</b>\n\n"
+                "<i>• Hệ thống tự động nhận diện ngôn ngữ gốc và dịch trực tiếp sang Tiếng Việt (hoặc ngôn ngữ bot bạn đang chọn).</i>"
+            ),
+        }
         return await safe_edit_or_send(
             query,
-            "🌐 <b>Dịch thuật</b>\n\n"
-            "Nhập hoặc dán đoạn kịch bản / prompt (tiếng Anh hoặc tiếng Việt) bạn muốn dịch:\n\n"
-            "<i>• Tự động dịch Anh ➔ Việt hoặc Việt ➔ Anh nhanh chóng.</i>",
+            prompt_map.get(lang, prompt_map["vi"]),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")]
@@ -138514,34 +138530,30 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
             ]),
         )
     if action in {"util_rate", "util_rate_input"}:
-        rate_info = opt.fetch_usd_vnd_rate()
         set_free_hub_pending(uid, "input", task_type="util_rate")
+        lang = get_user_language(uid) or "vi"
         if action == "util_rate_input":
+            prompt_titles = {
+                "en": "💱 <b>CONVERT CURRENCY & TOAN AAS XU</b>\n\n👉 <b>Enter any currency amount or conversion formula:</b>\n• Example: <code>1000 HKD</code>\n• Example: <code>1 USD = ? CNY</code>\n• Example: <code>500 EUR to VND</code>\n• Example: <code>250 Xu</code>",
+                "zh": "💱 <b>全球汇率 & TOAN AAS 币换算</b>\n\n👉 <b>请输入您要换算的金额或换算公式：</b>\n• 示例: <code>1000 HKD</code>\n• 示例: <code>1 USD = ? CNY</code>\n• 示例: <code>500 EUR to VND</code>\n• 示例: <code>250 Xu</code>",
+                "vi": "💱 <b>QUY ĐỔI TỶ GIÁ & XU</b>\n\n👉 <b>Hãy nhập số tiền hoặc công thức bạn muốn quy đổi:</b>\n• Ví dụ HKD: <code>1000 HKD</code>\n• Ví dụ công thức: <code>1 USD = ? CNY</code>\n• Ví dụ USD: <code>50 USD</code>\n• Ví dụ VND: <code>500.000 VND</code>\n• Ví dụ Xu: <code>200 Xu</code>",
+            }
             return await safe_edit_or_send(
                 query,
-                "💱 <b>QUY ĐỔI TỶ GIÁ & XU</b>\n\n"
-                "👉 <b>Hãy nhập số tiền bạn muốn quy đổi vào khung chat bên dưới:</b>\n"
-                "• Ví dụ USD: <code>50 USD</code> hoặc <code>100$</code>\n"
-                "• Ví dụ VND: <code>500.000 VND</code> hoặc <code>2000000</code>\n"
-                "• Ví dụ Xu: <code>200 Xu</code>",
+                prompt_titles.get(lang, prompt_titles["vi"]),
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
                 ]),
             )
+        overview_text = opt.format_exchange_rate_overview(lang)
         return await safe_edit_or_send(
             query,
-            f"💱 <b>TỶ GIÁ NGOẠI TỆ & QUY ĐỔI XU TOAN AAS</b>\n\n"
-            f"💵 <b>1 USD</b> = {int(rate_info['usd_vnd']):,} VNĐ\n"
-            f"💶 <b>1 EUR</b> = {int(rate_info.get('eur_vnd', 27500)):,} VNĐ\n"
-            f"🪙 <b>1 Xu</b> = {int(rate_info['vnd_per_xu']):,} VNĐ\n"
-            f"💎 <b>1 USD</b> ≈ {rate_info['xu_per_usd']} Xu\n\n"
-            f"<i>Nguồn: {rate_info['source']}</i>\n\n"
-            f"👉 <b>Bấm nút '✍️ Nhập số tiền' hoặc gửi tin nhắn số tiền muốn tính (VD: 50 USD, 500k VND, 200 Xu):</b>",
+            overview_text,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("✍️ Nhập số tiền", callback_data="freehub|util_rate_input"),
+                    InlineKeyboardButton("✍️ Nhập số tiền / Công thức", callback_data="freehub|util_rate_input"),
                     InlineKeyboardButton("🔄 Làm mới tỷ giá", callback_data="freehub|util_rate"),
                 ],
                 [
@@ -260730,35 +260742,30 @@ async def handle_free_hub_pending_text(update: Update, context: ContextTypes.DEF
         payload, task_type, provider = free_hub_generate_task_payload(task_type, text)
     elif task_type == "open_translate":
         clear_free_hub_pending(uid)
-        is_vi = any(ch in text.lower() for ch in "àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ")
-        source_lang = "vi" if is_vi else "en"
-        target_lang = "en" if is_vi else "vi"
-        res = opt.translate_free_text(text, source_lang=source_lang, target_lang=target_lang)
+        lang = get_user_language(uid) or "vi"
+        res = opt.translate_free_text(text, target_lang=lang)
+        result_text = opt.format_translation_result(res, text, user_lang=lang)
+        btn_label = "🌐 Dịch đoạn khác" if lang == "vi" else ("🌐 Translate another" if lang == "en" else "🌐 翻译其他文本")
         await update.message.reply_text(
-            f"🌐 <b>KẾT QUẢ DỊCH THUẬT ({source_lang.upper()} ➔ {target_lang.upper()})</b>\n\n"
-            f"<b>Văn bản gốc:</b>\n{text}\n\n"
-            f"<b>Bản dịch:</b>\n<code>{res['translated_text']}</code>\n\n"
-            f"<i>Nguồn: {res.get('source', 'Open API')}</i>",
+            result_text,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🌐 Dịch đoạn khác", callback_data="freehub|open_translate")],
+                [InlineKeyboardButton(btn_label, callback_data="freehub|open_translate")],
                 [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")],
             ]),
         )
         return True
     elif task_type == "util_rate":
         clear_free_hub_pending(uid)
-        conv = opt.convert_custom_currency(text)
+        lang = get_user_language(uid) or "vi"
+        conv = opt.convert_custom_currency(text, target_lang=lang)
+        result_text = opt.format_currency_conversion_result(conv, lang=lang)
+        btn_label = "✍️ Nhập số tiền / Công thức khác" if lang == "vi" else ("✍️ Convert another" if lang == "en" else "✍️ 换算其他金额")
         await update.message.reply_text(
-            f"💱 <b>KẾT QUẢ QUY ĐỔI TIỀN TỆ & XU</b>\n\n"
-            f"💵 Số tiền nhập: <b>{conv['amount_in']:,.2f} {conv['currency_in']}</b>\n\n"
-            f"🇻🇳 Tương đương: <b>{int(conv['vnd']):,} VNĐ</b>\n"
-            f"🪙 Quy đổi Xu: <b>{conv.get('xu', conv['vnd']/1000.0):,.2f} Xu</b>\n"
-            f"🇺🇸 Quy đổi USD: <b>${conv.get('usd', conv['vnd']/conv['rate_usd']):,.2f} USD</b>\n\n"
-            f"<i>(Tỷ giá áp dụng: 1 USD = {int(conv['rate_usd']):,} VNĐ · 1 Xu = 1,000 VNĐ)</i>",
+            result_text,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✍️ Nhập số tiền khác", callback_data="freehub|util_rate_input")],
+                [InlineKeyboardButton(btn_label, callback_data="freehub|util_rate_input")],
                 [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
                 [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
             ]),
