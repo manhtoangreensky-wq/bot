@@ -25,16 +25,18 @@ jobs:
         run: |
           python -m py_compile bot.py services/*.py
 
-      - name: Setup SSH Key
+      - name: Setup SSH Key & Pinned Host Key
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+          echo "${{ secrets.VPS_HOST }} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMRv/Pu2EIwXzMN2cqi0pMJXcn/J5dBrfuWLKJ/r+O2C" >> ~/.ssh/known_hosts
+          echo "tg.toanaas.vn ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMRv/Pu2EIwXzMN2cqi0pMJXcn/J5dBrfuWLKJ/r+O2C" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
 
       - name: Deploy to VPS
         run: |
-          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+          ssh -i ~/.ssh/id_ed25519 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
             set -euo pipefail
             echo '=== Pulling Bot Repo on VPS ==='
             cd /opt/toanaas/bot
