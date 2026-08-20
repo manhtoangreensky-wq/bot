@@ -10819,6 +10819,33 @@ def music_progress_reconcile_debug_text(state: dict | None = None, job: dict | N
     return "\n".join(lines) + "\n"
 
 
+def video_request_debug_identity(identifier: str | int) -> dict:
+    """Return one canonical request/job identity preamble for admin video diagnostics."""
+
+    report = video_trace_state.build_canonical_video_trace_report(identifier)
+    resolved_job_id = safe_int(report.get("JOB_ID"), 0)
+    lines = [
+        "🔗 <b>Canonical request/job identity</b>",
+        f"• REQUEST_ID: <code>{html.escape(str(report.get('REQUEST_ID') or 'None'))}</code>",
+        f"• REQUEST_FOUND: <code>{html.escape(str(report.get('REQUEST_FOUND') or 'NO'))}</code>",
+        f"• DURABLE_REQUEST_FOUND: <code>{html.escape(str(report.get('DURABLE_REQUEST_FOUND') or 'NO'))}</code>",
+        f"• JOB_FOUND: <code>{html.escape(str(report.get('JOB_FOUND') or 'NO'))}</code>",
+        f"• JOB_ID: <code>{html.escape(str(report.get('JOB_ID') or 'None'))}</code>",
+        f"• PREFLIGHT_RESULT: <code>{html.escape(str(report.get('PREFLIGHT_RESULT') or 'None'))}</code>",
+        f"• ADMISSION_RESULT: <code>{html.escape(str(report.get('ADMISSION_RESULT') or 'None'))}</code>",
+        f"• EXACT_BLOCKER_CODE: <code>{html.escape(str(report.get('EXACT_BLOCKER_CODE') or 'None'))}</code>",
+        f"• PROVIDER_TASK_ID: <code>{html.escape(str(report.get('PROVIDER_TASK_ID') or 'None'))}</code>",
+        f"• SUBMIT_COUNT: <code>{safe_int(report.get('SUBMIT_COUNT'), 0)}</code>",
+        f"• POLL_COUNT: <code>{safe_int(report.get('POLL_COUNT'), 0)}</code>",
+        f"• CHARGE_COUNT: <code>{safe_int(report.get('CHARGE_COUNT'), 0)}</code>",
+    ]
+    return {
+        "report": report,
+        "resolved_job_id": resolved_job_id,
+        "text": "\n".join(lines),
+    }
+
+
 def product_progress_debug_text(job_id: str = "", product_type: str = "", job: dict | None = None) -> str:
     input_job_id = str(job_id or "").strip()
     if progress_product_type_is_music(product_type, job_id):
@@ -11066,10 +11093,18 @@ async def cmd_progress_status_debug(update: Update, context: ContextTypes.DEFAUL
     job_id = str(args[0] if args else "").strip()
     product_type = str(args[1] if len(args) > 1 else "").strip()
     try:
+        identity = {}
+        if job_id.upper().startswith("VID-"):
+            identity = video_request_debug_identity(job_id)
+            resolved_job_id = safe_int(identity.get("resolved_job_id"), 0)
+            if resolved_job_id > 0:
+                job_id = str(resolved_job_id)
         if progress_product_type_is_music(product_type, job_id):
             job_id = canonical_music_job_id(job_id) or job_id
         job = get_engine_async_job(job_id) if job_id else {}
         text = product_progress_debug_text(job_id, product_type, job)
+        if identity:
+            text = str(identity.get("text") or "") + "\n\n" + text
     except Exception as exc:
         text = (
             "📊 <b>TOAN AAS progress status</b>\n\n"
@@ -52975,10 +53010,13 @@ async def cmd_video_render_debug(update: Update, context: ContextTypes.DEFAULT_T
     arg_raw = str(args[0] if args else "").strip()
     if not arg_raw:
         return await update.message.reply_text("Dùng: /video_render_debug &lt;REQUEST_ID | JOB_ID&gt;", parse_mode="HTML")
+    identity = video_request_debug_identity(arg_raw)
     truth = video_trace_state.resolve_video_request_truth(arg_raw)
-    job_id = safe_int(truth.get("job_id"), 0)
+    job_id = safe_int(identity.get("resolved_job_id") or truth.get("job_id"), 0)
     if job_id <= 0:
         lines = [
+            str(identity.get("text") or ""),
+            "",
             "🔍 <b>Video Render Pre-Job Diagnostic</b>\n",
             f"• REQUEST_ID: <code>{html.escape(str(truth.get('request_id') or arg_raw))}</code>",
             f"• JOB_ID: <code>Chưa tạo</code>",
@@ -53000,7 +53038,10 @@ async def cmd_video_render_debug(update: Update, context: ContextTypes.DEFAULT_T
         return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
     command_parts = str(getattr(update.message, "text", "") or "").split()
     command_name = command_parts[0].lstrip("/") if command_parts else "render"
-    text = video_render_debug_text(job_id, mode=command_name or "render")
+    text = str(identity.get("text") or "") + "\n\n" + video_render_debug_text(
+        job_id,
+        mode=command_name or "render",
+    )
     return await video_debug_safe_reply_text(update.message, text)
 
 
@@ -53054,6 +53095,8 @@ async def cmd_video_trace(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• PROVIDER_EVER_SUBMITTED: <code>{html.escape(str(report.get('PROVIDER_EVER_SUBMITTED', 'NO')))}</code>",
         f"• SCENES_TOTAL: <code>{report['SCENES_TOTAL']}</code>",
         f"• SUBMIT_COUNT: <code>{report['SUBMIT_COUNT']}</code>",
+        f"• POLL_COUNT: <code>{report['POLL_COUNT']}</code>",
+        f"• CHARGE_COUNT: <code>{report['CHARGE_COUNT']}</code>",
         f"• CHARGE_STATE: <code>{html.escape(str(report['CHARGE_STATE']))}</code>",
         f"• STATUS_SOURCE: <code>{html.escape(str(report['STATUS_SOURCE']))}</code>",
     ]
@@ -75404,7 +75447,8 @@ def video_uiflow3_validate_invoice_confirmation(
     draft = dict((session or {}).get("draft") or {})
     if not draft.get("uiflow3_invoice_attestation_required"):
         return {"ok": True, "reason": ""}
-    if str((session or {}).get("current_step") or "") != "b14_invoice":
+    current_step = str((session or {}).get("current_step") or "")
+    if current_step not in {"b14_invoice", "b14_queue_status"}:
         return {"ok": False, "reason": "invoice_step_changed"}
     attestation = dict(draft.get("uiflow3_invoice_attestation") or {})
     if not attestation:
@@ -75432,7 +75476,31 @@ def video_uiflow3_validate_invoice_confirmation(
         or str(snapshot.get("config_hash") or "") != str(attestation.get("config_hash") or "")
     ):
         return {"ok": False, "reason": "invoice_snapshot_replaced"}
-    return {"ok": True, "reason": ""}
+    if current_step == "b14_queue_status" and not (
+        draft.get("b14_submit_attempted")
+        and (draft.get("request_id") or safe_int(draft.get("b14_queue_job_id"), 0) > 0)
+    ):
+        return {"ok": False, "reason": "invoice_step_changed"}
+    return {"ok": True, "reason": "", "exact_replay": current_step == "b14_queue_status"}
+
+
+def video_confirm_execution_idempotency_key(session: dict, user_id: int, project_id: int) -> str:
+    draft = dict((session or {}).get("draft") or {})
+    attestation = dict(draft.get("uiflow3_invoice_attestation") or {})
+    invoice = dict(draft.get("b14_invoice") or {})
+    identity = {
+        "version": "video_confirm_execution_v1",
+        "user_id": int(user_id or 0),
+        "project_id": int(project_id or 0),
+        "draft_id": str(attestation.get("draft_id") or ""),
+        "config_hash": str(attestation.get("config_hash") or ""),
+        "scene_count": safe_int(invoice.get("scene_count") or draft.get("b14_scene_count"), 0),
+        "quality_xu": safe_int(invoice.get("quality_xu") or draft.get("b14_quality_xu"), 0),
+    }
+    digest = hashlib.sha256(
+        json.dumps(identity, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return f"video-confirm:{digest}"
 
 
 def video_uiflow3_update_invoice_message_id(user_id: int, session: dict, message_id: int) -> dict:
@@ -75520,6 +75588,42 @@ def video_uiflow3_prepare_no_job_status(
         blocker_code=blocker_code,
         payload={"public_message": public_message},
     )
+    return save_video_session(user_id, current)
+
+
+def video_uiflow3_prepare_existing_job_precheck_status(
+    user_id: int,
+    session: dict,
+    *,
+    job_id: int,
+    blocker_code: str,
+    public_message: str,
+    preflight_result: str = "BLOCKED",
+    admission_result: str = "NOT_RUN",
+    payload: dict | None = None,
+) -> dict:
+    preflight_payload = {
+        "allowed": False,
+        "blocker_code": str(blocker_code or "precheck_blocked")[:160],
+        "public_message": str(public_message or "TOAN AAS chưa thể bắt đầu tạo video lúc này.")[:1200],
+        **dict(payload or {}),
+    }
+    recorded = video_trace_state.record_video_confirm_precheck_result(
+        session,
+        user_id=int(user_id),
+        chat_id=safe_int(((session or {}).get("draft") or {}).get("owner_chat_id"), 0),
+        job_id=int(job_id),
+        preflight_result=preflight_result,
+        admission_result=admission_result,
+        blocker_code=blocker_code,
+        payload=preflight_payload,
+    )
+    current = dict(recorded.get("session") or session or {})
+    draft = dict(current.get("draft") or {})
+    draft.pop("b14_preflight_ui_context", None)
+    draft["b14_submit_preflight_snapshot"] = preflight_payload
+    current["draft"] = draft
+    current["current_step"] = "b14_queue_status"
     return save_video_session(user_id, current)
 
 
@@ -100462,8 +100566,8 @@ def video_b14_fail_stale_product_job_for_status(job_id: int) -> int:
 
 VIDEO_B14_STATUS_STEP_LABELS = (
     "Nhận yêu cầu",
-    "Kiểm tra cấu hình",
     "Tạo tác vụ",
+    "Kiểm tra cấu hình",
     "Dựng video",
     "Kiểm tra file",
     "Gửi kết quả",
@@ -100852,6 +100956,21 @@ def video_b14_status_step_rows(
 
     if status in {"draft", ""}:
         return list(zip(icons, VIDEO_B14_STATUS_STEP_LABELS))
+    if status in {
+        video_project_queue.VIDEO_JOB_PRECHECK_RUNNING,
+        video_project_queue.VIDEO_JOB_PRECHECK_BLOCKED,
+        video_project_queue.VIDEO_JOB_READY_TO_SUBMIT,
+    }:
+        icons[0] = "✅"
+        icons[1] = "✅"
+        if status == video_project_queue.VIDEO_JOB_PRECHECK_RUNNING:
+            icons[2] = "⏳"
+        elif status == video_project_queue.VIDEO_JOB_PRECHECK_BLOCKED:
+            icons[2] = "⚠️"
+        else:
+            icons[2] = "✅"
+            icons[3] = "⏸"
+        return list(zip(icons, VIDEO_B14_STATUS_STEP_LABELS))
     if status in {"completed", "success"} and has_final_artifact:
         return list(zip(["✅"] * (len(icons) - 1) + ["✅" if delivery_done else "⏳"], VIDEO_B14_STATUS_STEP_LABELS))
     if failed:
@@ -100934,6 +101053,13 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     session = dict(session or {})
     result = dict(result or {})
     draft = dict(session.get("draft") or {})
+    status_identity = video_trace_state.resolve_video_status_identity(
+        session,
+        result,
+        user_id=safe_int(user_id, 0),
+    )
+    trace = dict(status_identity.get("trace") or draft.get("video_trace") or {})
+    request_id = str(status_identity.get("request_id") or "").strip()
     tail_state = dict(draft.get(VIDEO_TAIL9_STATE_KEY) or {})
     submit_preflight = dict(
         result.get("submit_preflight")
@@ -100948,13 +101074,13 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     )
     addon_plan = dict(draft.get("b14_addon_plan") or {})
     draft_job = dict(draft.get("b14_queue_job") or {})
-    job = dict(result.get("job") or draft_job or {})
+    job = dict(status_identity.get("job") or result.get("job") or draft_job or {})
     project = dict(result.get("project") or {})
     invoice = dict(draft.get("b14_invoice") or {})
     scene_count = safe_int(invoice.get("scene_count") or draft.get("b14_scene_count"), 3)
     duration = safe_int(invoice.get("duration_seconds"), scene_count * TASK3D_SCENE_SECONDS)
     eta = video_b14_eta_seconds(scene_count)
-    job_id = safe_int(job.get("id") or draft.get("b14_queue_job_id"), 0)
+    job_id = safe_int(status_identity.get("job_id") or job.get("id") or draft.get("b14_queue_job_id"), 0)
     project_id = safe_int(project.get("project_id") or draft.get("b14_project_id"), 0)
     submit_blocked = bool(submit_attempted and job_id <= 0)
     live_job = video_b14_render_job_by_id(job_id)
@@ -101127,7 +101253,25 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         else:
             progress = max(progress, safe_int(provider_telemetry.get("final_progress_after_reconcile") or provider_telemetry.get("final_progress"), 20))
     stage = "chưa bắt đầu xử lý"
-    if status in {"queued", "queued_for_worker"}:
+    if status == video_project_queue.VIDEO_JOB_PRECHECK_RUNNING:
+        status_label = "Đang kiểm tra cấu hình"
+        stage = "hệ thống đang kiểm tra cấu hình"
+        progress = max(progress, 5)
+    elif status == video_project_queue.VIDEO_JOB_PRECHECK_BLOCKED:
+        blocker_code = str(
+            submit_preflight.get("blocker_code")
+            or trace.get("internal_blocker_code")
+            or job_result.get("exact_blocker_code")
+            or ""
+        ).strip()
+        status_label = video_b14_blocker_label(blocker_code) if blocker_code else "Kiểm tra cấu hình chưa đạt"
+        stage = "hệ thống tạm dừng tại bước kiểm tra cấu hình"
+        progress = max(progress, 5)
+    elif status == video_project_queue.VIDEO_JOB_READY_TO_SUBMIT:
+        status_label = "Sẵn sàng gửi kênh dựng"
+        stage = "hệ thống đang chờ lệnh gửi kênh dựng"
+        progress = max(progress, 10)
+    elif status in {"queued", "queued_for_worker"}:
         status_label = "Đang chuẩn bị"
         stage = "hệ thống đang chờ bắt đầu tạo các cảnh" if zero_task_progress_guard else "hệ thống đang xếp lịch dựng video"
         if outbox_wait.get("dispatch_outbox_status") == "retry_wait":
@@ -101267,13 +101411,6 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         progress_line = "Tiến độ: <b>Theo từng cảnh</b>"
     else:
         progress_line = f"Tiến độ: <b>{max(0, min(100, progress))}%</b>"
-    trace = dict(draft.get("video_trace") or {})
-    request_id = str(
-        draft.get("request_id")
-        or trace.get("request_id")
-        or draft.get("public_processing_code")
-        or ""
-    ).strip()
     if not request_id or request_id in {"Không có", "-"}:
         request_id = ""
 
@@ -101383,6 +101520,16 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
             lines.append("Hóa đơn và toàn bộ cấu hình vẫn được giữ nguyên.")
         if "Tài khoản chưa bị trừ Xu" not in msg and "chưa trừ Xu" not in msg:
             lines.append("Tài khoản chưa bị trừ Xu.")
+    elif status == video_project_queue.VIDEO_JOB_PRECHECK_BLOCKED:
+        msg = str(
+            submit_preflight.get("public_message")
+            or "TOAN AAS đã tạo tác vụ nhưng bước kiểm tra cấu hình chưa đạt."
+        )
+        lines.append(msg)
+        lines.append("Hệ thống chưa gửi lệnh dựng và chưa trừ Xu.")
+    elif status == video_project_queue.VIDEO_JOB_READY_TO_SUBMIT:
+        lines.append("Tác vụ đã qua bước kiểm tra và đang chờ lệnh gửi kênh dựng.")
+        lines.append("Hệ thống chưa gửi lệnh dựng và chưa trừ Xu.")
     elif failed_no_charge_terminal:
         lines.extend(PRODUCT_VIDEO_FAILED_NO_CHARGE_PUBLIC_MESSAGE.splitlines())
     elif visual_classification == "partial_simple_video" or status in {"failed", "error"} or blocked_reason or (status in {"completed", "success"} and not has_final_artifact):
@@ -118084,24 +118231,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         prefix = (html.escape(str(scene_policy.get("message") or "")) + "\n\n") if scene_policy.get("message") else ""
         return await safe_edit_or_send(query, prefix + video_b14_invoice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
     if action == "b14_confirm":
-        # Canonical Intake Boundary: Allocate & commit durable request trace with readback verification before ANY guard/preflight
-        intake_result = video_trace_state.begin_video_confirm_attempt(
-            session,
-            user_id=uid,
-            chat_id=safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0),
-            payload={
-                "scene_count": safe_int((session.get("draft") or {}).get("b14_scene_count"), 1),
-                "seconds_per_scene": safe_int((session.get("draft") or {}).get("b14_scene_seconds"), 8),
-                "unit_xu": safe_int((session.get("draft") or {}).get("b14_quality_xu"), 80),
-                "entry_mode": "prompt_video",
-            },
-        )
-        if not intake_result.get("ok"):
-            return await safe_edit_or_send(
-                query,
-                "Hệ thống chưa thể ghi nhận yêu cầu xử lý lúc này. TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
-            )
-        session = intake_result.get("session") or session
         draft = dict(session.get("draft") or {})
         is_uiflow3_confirmation = bool(
             product_id == "video_ai_real"
@@ -118129,20 +118258,130 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     [InlineKeyboardButton("🎬 Menu Video", callback_data="menu|main_video")],
                 ]),
             )
+        project_id = safe_int(draft.get("b14_project_id"), 0)
+        project = get_video_project(project_id) if project_id > 0 else {}
+        if not project:
+            project = video_b14_prepare_project_for_invoice(uid, session)
+            project_id = safe_int(project.get("project_id"), 0)
+            session = get_video_session(uid)
+            draft = dict(session.get("draft") or {})
+        if (
+            project_id <= 0
+            or not project
+            or safe_int(project.get("user_id"), 0) != int(uid)
+        ):
+            return await safe_edit_or_send(
+                query,
+                "TOAN AAS chưa thể xác định đúng hồ sơ tạo video cho xác nhận này. "
+                "Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+            )
+
+        chat_id = safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0)
+        intake_result = video_trace_state.begin_video_confirm_execution(
+            session,
+            user_id=uid,
+            chat_id=chat_id,
+            project_id=project_id,
+            idempotency_key=video_confirm_execution_idempotency_key(session, uid, project_id),
+            product_type=video_engine_product_type_for_session(session),
+            payload={
+                "scene_count": safe_int(draft.get("b14_scene_count"), 1),
+                "seconds_per_scene": safe_int(draft.get("b14_scene_seconds"), 8),
+                "unit_xu": safe_int(draft.get("b14_quality_xu"), 80),
+                "entry_mode": "prompt_video",
+            },
+        )
+        session = dict(intake_result.get("session") or session)
+        if not intake_result.get("ok"):
+            committed_job_id = safe_int(intake_result.get("job_id"), 0)
+            if committed_job_id > 0:
+                blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                    uid,
+                    session,
+                    job_id=committed_job_id,
+                    blocker_code="request_job_readback_failed",
+                    public_message=(
+                        "TOAN AAS đã tạo tác vụ nhưng chưa thể đọc lại đầy đủ trạng thái xử lý. "
+                        "Hệ thống chưa gửi lệnh dựng và chưa trừ Xu."
+                    ),
+                )
+                return await video_b14_send_or_edit_status_panel(
+                    query, context, blocked_session, None, uid, lang
+                )
+            blocked_session = video_uiflow3_prepare_no_job_status(
+                uid,
+                session,
+                blocker_code="job_create_failed",
+                public_message=(
+                    "TOAN AAS đã ghi nhận yêu cầu nhưng chưa thể khởi tạo tác vụ xử lý. "
+                    "Hệ thống chưa gửi lệnh dựng và chưa trừ Xu."
+                ),
+            )
+            return await video_b14_send_or_edit_status_panel(
+                query, context, blocked_session, None, uid, lang
+            )
+        save_video_session(uid, session)
+        draft = dict(session.get("draft") or {})
+        job_id = safe_int(intake_result.get("job_id"), 0)
+        precheck_job = dict(intake_result.get("job") or {})
+        if (
+            intake_result.get("duplicate_prevented")
+            and str(precheck_job.get("status") or "")
+            != video_project_queue.VIDEO_JOB_PRECHECK_RUNNING
+        ):
+            session["current_step"] = "b14_queue_status"
+            save_video_session(uid, session)
+            return await video_b14_send_or_edit_status_panel(
+                query,
+                context,
+                session,
+                {"job": precheck_job, "project": project, "duplicate_prevented": True},
+                uid,
+                lang,
+            )
+        session = video_trace_state.record_video_trace_event(
+            session,
+            video_trace_state.STAGE_PRECHECK_STARTED,
+            user_id=uid,
+            chat_id=chat_id,
+            job_id=job_id,
+            payload={"preflight_result": "RUNNING", "admission_result": "NOT_RUN"},
+        )
+        save_video_session(uid, session)
         if product_id == video_selfshot2.PRODUCT_ID:
             selfshot2_report = video_selfshot2_preflight(video_selfshot2_draft(session))
             if not selfshot2_report.get("ok"):
+                blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                    uid,
+                    session,
+                    job_id=job_id,
+                    blocker_code=str(selfshot2_report.get("reason") or "selfshot2_preflight_blocked"),
+                    public_message="TOAN AAS đã tạo tác vụ nhưng cấu hình video tự quay chưa đủ điều kiện xử lý.",
+                    payload={"selfshot2_preflight": selfshot2_report},
+                )
                 current = video_selfshot2_draft(session)
                 current["selfshot2_preflight"] = selfshot2_report
                 save_video_selfshot2_draft(uid, current, step="selfshot2:finish")
-                return await video_selfshot2_render(query, uid, "finish", draft=current)
+                return await video_b14_send_or_edit_status_panel(
+                    query, context, blocked_session, None, uid, lang
+                )
         if product_id == video_selfshot3.PRODUCT_ID:
             selfshot3_report = video_selfshot3_preflight(video_selfshot3_draft(session))
             if not selfshot3_report.get("ok"):
+                blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                    uid,
+                    session,
+                    job_id=job_id,
+                    blocker_code=str(selfshot3_report.get("reason") or "selfshot3_preflight_blocked"),
+                    public_message="TOAN AAS đã tạo tác vụ nhưng cấu hình biến đổi điện ảnh chưa đủ điều kiện xử lý.",
+                    payload={"selfshot3_preflight": selfshot3_report},
+                )
                 current = video_selfshot3_draft(session)
                 current["selfshot3_preflight"] = selfshot3_report
                 save_video_selfshot3_draft(uid, current, step="selfshot3:finish")
-                return await video_selfshot3_render(query, uid, "finish", draft=current)
+                return await video_b14_send_or_edit_status_panel(
+                    query, context, blocked_session, None, uid, lang
+                )
         tail_guard = video_uiflow3_commercial_tail_guard(
             context,
             uid,
@@ -118150,8 +118389,25 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             session,
         )
         if not tail_guard.get("ok"):
-            return await video_uiflow3_render(query, context)
+            blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                uid,
+                session,
+                job_id=job_id,
+                blocker_code=str(tail_guard.get("reason") or "commercial_tail_blocked"),
+                public_message="TOAN AAS đã tạo tác vụ nhưng cấu hình video cần được kiểm tra lại.",
+                payload={"tail_guard": tail_guard},
+            )
+            return await video_b14_send_or_edit_status_panel(
+                query, context, blocked_session, None, uid, lang
+            )
         if tail_guard.get("uiflow3") and safe_int(draft.get("b14_quality_xu"), 0) <= 0:
+            video_uiflow3_prepare_existing_job_precheck_status(
+                uid,
+                session,
+                job_id=job_id,
+                blocker_code="quality_not_selected",
+                public_message="TOAN AAS đã tạo tác vụ nhưng gói chất lượng chưa được chọn.",
+            )
             return await safe_edit_or_send(
                 query,
                 video_b14_quality_text(lang),
@@ -118162,16 +118418,17 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 ),
             )
         if not draft.get("b14_scene_count_selected"):
+            blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                uid,
+                session,
+                job_id=job_id,
+                blocker_code="scene_count_not_selected",
+                public_message=(
+                    "Bản kế hoạch chưa còn đủ số cảnh để bắt đầu tạo video. "
+                    "Hóa đơn được giữ nguyên để anh/chị quay lại kiểm tra."
+                ),
+            )
             if is_uiflow3_confirmation:
-                blocked_session = video_uiflow3_prepare_no_job_status(
-                    uid,
-                    session,
-                    blocker_code="scene_count_not_selected",
-                    public_message=(
-                        "Bản kế hoạch chưa còn đủ số cảnh để bắt đầu tạo video. "
-                        "Hóa đơn được giữ nguyên để anh/chị quay lại kiểm tra."
-                    ),
-                )
                 return await video_b14_send_or_edit_status_panel(
                     query, context, blocked_session, None, uid, lang
                 )
@@ -118196,16 +118453,17 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if video_b14_is_trial_quality((draft.get("b14_invoice") or {}).get("quality_xu") or draft.get("b14_quality_xu")) and not video_b14_is_admin_or_owner(uid):
             trial_usage = video_b14_trial_usage_allowed(uid)
             if not trial_usage.get("ok"):
+                blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                    uid,
+                    session,
+                    job_id=job_id,
+                    blocker_code="trial_limit_reached",
+                    public_message=(
+                        "Gói đã chọn đã đạt giới hạn sử dụng trong kỳ này. "
+                        "TOAN AAS chưa gửi lệnh dựng và chưa trừ Xu."
+                    ),
+                )
                 if is_uiflow3_confirmation:
-                    blocked_session = video_uiflow3_prepare_no_job_status(
-                        uid,
-                        session,
-                        blocker_code="trial_limit_reached",
-                        public_message=(
-                            "Gói đã chọn đã đạt giới hạn sử dụng trong kỳ này. "
-                            "TOAN AAS chưa tạo tác vụ và chưa trừ Xu."
-                        ),
-                    )
                     return await video_b14_send_or_edit_status_panel(
                         query, context, blocked_session, None, uid, lang
                     )
@@ -118227,27 +118485,31 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 admission_evaluation.get("preflight_resolved_state"),
                 PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
             )
+            blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                uid,
+                session,
+                job_id=job_id,
+                blocker_code=str(
+                    admission_evaluation.get("blocker_code")
+                    or admission_evaluation.get("reason")
+                    or "render_service_not_ready"
+                ),
+                public_message=(
+                    "TOAN AAS đã nhận xác nhận nhưng hệ thống dựng chưa sẵn sàng. "
+                    "Hóa đơn và toàn bộ cấu hình được giữ nguyên; tài khoản chưa bị trừ Xu."
+                ),
+                preflight_result="BLOCKED",
+                admission_result="NOT_RUN",
+                payload={"admission_evaluation": admission_evaluation},
+            )
             if is_uiflow3_confirmation:
-                blocked_session = video_uiflow3_prepare_no_job_status(
-                    uid,
-                    session,
-                    blocker_code=str(
-                        admission_evaluation.get("blocker_code")
-                        or admission_evaluation.get("reason")
-                        or "render_service_not_ready"
-                    ),
-                    public_message=(
-                        "TOAN AAS đã nhận xác nhận nhưng hệ thống dựng chưa sẵn sàng. "
-                        "Hóa đơn và toàn bộ cấu hình được giữ nguyên; tài khoản chưa bị trừ Xu."
-                    ),
-                )
                 return await video_b14_send_or_edit_status_panel(
                     query, context, blocked_session, None, uid, lang
                 )
             return await product_video_show_public_preflight_panel(
                 query,
                 uid,
-                session,
+                blocked_session,
                 lang,
                 confirm_scene_count,
                 evaluation=admission_evaluation,
@@ -118256,12 +118518,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         scene_health_gate = dict(admission_evaluation.get("scene_gate") or {})
         provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
         session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
-        session = video_trace_state.record_video_trace_event(
-            session,
-            video_trace_state.STAGE_PRECHECK_PASSED,
-            user_id=uid,
-            chat_id=safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0),
-        )
         draft = dict(session.get("draft") or {})
         draft.update({
             "submit_source": "public_user_final_confirm",
@@ -118273,10 +118529,9 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session["draft"] = draft
         save_video_session(uid, session)
         try:
-            project = video_b14_prepare_project_for_invoice(uid, session)
-            project_id = safe_int(project.get("project_id"), project_id)
-            if project_id <= 0:
-                raise ValueError("project_not_created")
+            project = get_video_project(project_id)
+            if not project or safe_int(project.get("user_id"), 0) != int(uid):
+                raise ValueError("project_identity_lost")
             final_admission = build_product_video_public_final_admission(
                 project,
                 int(uid),
@@ -118284,121 +118539,124 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 scene_health_gate,
             )
             credits, _, _ = get_user(uid)
-            result = confirm_video_project_invoice(
-                project_id,
-                uid,
-                balance_xu=None if is_internal else int(credits or 0),
-                use_wallet=False,
-                provider_admission=final_admission,
-                require_provider_admission=True,
-            )
         except Exception as exc:
-            if not is_uiflow3_confirmation:
-                raise
             logger.error(
-                "video_uiflow3_submit_failed_closed | user_id=%s | error_class=%s",
+                "video_confirm_admission_build_failed | user_id=%s | job_id=%s | error_class=%s",
                 uid,
+                job_id,
                 type(exc).__name__,
             )
-            blocked_session = video_uiflow3_prepare_no_job_status(
+            blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
                 uid,
-                get_video_session(uid),
-                blocker_code="submit_transaction_failed",
+                session,
+                job_id=job_id,
+                blocker_code="admission_build_failed",
                 public_message=(
-                    "TOAN AAS đã nhận xác nhận nhưng chưa thể tạo tác vụ video. "
+                    "TOAN AAS đã tạo tác vụ nhưng chưa thể hoàn tất bước kiểm tra cấu hình. "
                     "Hóa đơn và toàn bộ cấu hình được giữ nguyên; tài khoản chưa bị trừ Xu."
                 ),
+                preflight_result="PASS",
+                admission_result="BLOCKED",
             )
             return await video_b14_send_or_edit_status_panel(
                 query, context, blocked_session, None, uid, lang
             )
-        if not result.get("ok"):
-            reason = str(result.get("reason") or "confirm_failed")
-            if is_uiflow3_confirmation:
-                public_message = (
+
+        required_xu = safe_int(
+            (draft.get("b14_invoice") or {}).get("total_xu")
+            or project.get("total_xu_estimated"),
+            0,
+        )
+        if not is_internal and int(credits or 0) < required_xu:
+            blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                uid,
+                session,
+                job_id=job_id,
+                blocker_code="insufficient_balance",
+                public_message=(
                     "Số dư Xu hiện tại chưa đủ để bắt đầu tạo video. "
                     "Hóa đơn được giữ nguyên và tài khoản chưa bị trừ Xu."
-                    if reason == "insufficient_balance"
-                    else (
-                        "TOAN AAS đã nhận xác nhận nhưng chưa thể tạo tác vụ video. "
-                        "Hóa đơn và toàn bộ cấu hình được giữ nguyên; tài khoản chưa bị trừ Xu."
-                    )
-                )
-                blocked_session = video_uiflow3_prepare_no_job_status(
-                    uid,
-                    session,
-                    blocker_code=reason,
-                    public_message=public_message,
-                )
-                return await video_b14_send_or_edit_status_panel(
-                    query, context, blocked_session, None, uid, lang
-                )
-            if reason == "insufficient_balance":
-                required = int(result.get("required_xu") or (draft.get("b14_invoice") or {}).get("total_xu") or 0)
-                return await safe_edit_or_send(
-                    query,
-                    video_b14_insufficient_balance_text(int(credits or 0), required, lang),
-                    parse_mode="HTML",
-                    reply_markup=video_b14_insufficient_balance_keyboard(uid, lang),
-                )
-            if reason in {
-                "no_eligible_product_video_provider",
-                "no_eligible_provider_before_scene_dispatch",
-                "no_healthy_video_provider_no_charge",
-                "product_video_probation_lock_active",
-                "probation_lock_not_clear",
-                "probation_requires_public_final_confirm",
-            }:
-                return await product_video_show_public_preflight_panel(query, uid, session, lang, confirm_scene_count)
-            if result.get("public_message"):
-                return await product_video_show_public_preflight_panel(query, uid, session, lang, confirm_scene_count)
-            return await safe_edit_or_send(query, f"⚠️ Chưa thể xác nhận video: {html.escape(reason)}. TOAN AAS chưa xử lý thêm.", parse_mode="HTML")
-        session = get_video_session(uid)
-        draft = dict(session.get("draft") or {})
-        job = dict(result.get("job") or {})
-        job_id = safe_int(job.get("id"), 0)
-        if is_uiflow3_confirmation and job_id <= 0:
-            blocked_session = video_uiflow3_prepare_no_job_status(
-                uid,
-                session,
-                blocker_code="job_not_created",
-                public_message=(
-                    "TOAN AAS đã nhận xác nhận nhưng chưa nhận được mã tác vụ video. "
-                    "Hóa đơn và toàn bộ cấu hình được giữ nguyên; tài khoản chưa bị trừ Xu."
                 ),
+                preflight_result="PASS",
+                admission_result="BLOCKED",
+                payload={"required_xu": required_xu, "balance_checked": True},
             )
             return await video_b14_send_or_edit_status_panel(
                 query, context, blocked_session, None, uid, lang
             )
-        job_payload = video_b14_job_result_payload(job)
-        draft.update({
-            "b14_queue_job": job,
-            "b14_queue_job_id": job_id,
-            "b14_duplicate_prevented": bool(result.get("duplicate_prevented")),
-            "b14_submit_attempted": True,
-            "provider_called": False,
-            "job_created": job_id > 0,
-            "outbox_created": bool(
-                result.get("dispatch_outbox_created")
-                or result.get("outbox")
-                or job_payload.get("dispatch_outbox_present")
-                or draft.get("outbox_created")
-            ),
-            "xu_charged": 0,
-            "charge_policy": "after_valid_mp4_delivery",
-        })
-        session["draft"] = draft
-        save_video_session(uid, session)
-        if job_id > 0:
-            session = video_trace_state.record_video_trace_event(
-                session,
-                video_trace_state.STAGE_JOB_CREATED,
-                job_id=job_id,
-                user_id=uid,
-                chat_id=safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0),
+
+        if not final_admission.get("ok"):
+            blocker_code = str(
+                final_admission.get("admission_block_reason")
+                or final_admission.get("blocker_code")
+                or "admission_blocked"
             )
-        session = task3d_session_step(uid, "b14_queue_status", provider_called=False)
-        return await video_b14_send_or_edit_status_panel(query, context, session, result, uid, lang)
+            blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                uid,
+                session,
+                job_id=job_id,
+                blocker_code=blocker_code,
+                public_message=(
+                    "TOAN AAS đã tạo tác vụ nhưng kênh dựng chưa đủ điều kiện tiếp nhận. "
+                    "Hệ thống chưa gửi lệnh dựng và chưa trừ Xu."
+                ),
+                preflight_result="PASS",
+                admission_result="BLOCKED",
+                payload={"final_admission": final_admission},
+            )
+            return await video_b14_send_or_edit_status_panel(
+                query, context, blocked_session, None, uid, lang
+            )
+
+        ready = video_trace_state.record_video_confirm_precheck_result(
+            session,
+            user_id=uid,
+            chat_id=chat_id,
+            job_id=job_id,
+            preflight_result="PASS",
+            admission_result="PASS",
+            blocker_code="",
+            payload={
+                "provider_configured": bool(provider_preflight.get("configured")),
+                "provider_ready": bool(admission_evaluation.get("ready")),
+                "eligible_route_count": safe_int(final_admission.get("admission_candidate_count"), 0),
+                "selected_route": str((final_admission.get("admission_candidate_keys") or [""])[0]),
+                "required_xu": required_xu,
+                "balance_checked": not is_internal,
+                "owner_provider_gate_approved": False,
+            },
+        )
+        if not ready.get("ok"):
+            blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                uid,
+                session,
+                job_id=job_id,
+                blocker_code="precheck_persistence_failed",
+                public_message=(
+                    "TOAN AAS đã tạo tác vụ nhưng chưa thể lưu kết quả kiểm tra cấu hình. "
+                    "Hệ thống chưa gửi lệnh dựng và chưa trừ Xu."
+                ),
+                preflight_result="PASS",
+                admission_result="BLOCKED",
+            )
+            return await video_b14_send_or_edit_status_panel(
+                query, context, blocked_session, None, uid, lang
+            )
+        session = dict(ready.get("session") or session)
+        session["current_step"] = "b14_queue_status"
+        save_video_session(uid, session)
+        return await video_b14_send_or_edit_status_panel(
+            query,
+            context,
+            session,
+            {
+                "job": ready.get("job") or {},
+                "project": project,
+                "duplicate_prevented": bool(intake_result.get("duplicate_prevented")),
+            },
+            uid,
+            lang,
+        )
     if action == "b14_job_status":
         draft = dict(session.get("draft") or {})
         job_id = safe_int(draft.get("b14_queue_job_id") or (draft.get("b14_queue_job") or {}).get("id"), 0)

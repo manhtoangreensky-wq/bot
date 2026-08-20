@@ -51,6 +51,9 @@ PROJECT_DRAFT_STATUSES = tuple(status for status in PROJECT_STATUSES if status.s
 SCENE_STATUSES = ("pending", "gen_audio", "gen_image", "gen_video", "postprocess", "done", "failed", "terminal_failed")
 JOB_STATUSES = ("queued", "processing", "completed", "failed", "cancelled")
 VIDEO_RENDER_JOB_TYPE = "video_render"
+VIDEO_JOB_PRECHECK_RUNNING = "precheck_running"
+VIDEO_JOB_PRECHECK_BLOCKED = "precheck_blocked"
+VIDEO_JOB_READY_TO_SUBMIT = "ready_to_submit"
 PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER = "owner_product_video"
 PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID = "product_video_public_confirm_v1"
 PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK = "vproduct|b14_confirm"
@@ -3067,6 +3070,177 @@ def enqueue_video_render_job(
         if active:
             return {**active, "duplicate_prevented": True}
         raise
+
+
+def begin_video_precheck_job(
+    conn: sqlite3.Connection,
+    *,
+    project_id: int,
+    user_id: int,
+    chat_id: int,
+    request_id: str,
+    confirm_attempt_key: str,
+) -> dict[str, Any]:
+    """Create or resume one durable job without making it worker-claimable."""
+
+    ensure_video_project_queue_schema(conn)
+    project = get_video_project(conn, int(project_id))
+    if not project:
+        raise ValueError("project_not_found")
+    if int(project.get("user_id") or 0) != int(user_id):
+        raise PermissionError("project_user_mismatch")
+
+    linked_job_id = _as_int(project.get("job_id"), 0)
+    if linked_job_id > 0:
+        linked_job = get_video_render_job(conn, linked_job_id)
+        if (
+            linked_job
+            and int(linked_job.get("project_id") or 0) == int(project_id)
+            and int(linked_job.get("user_id") or 0) == int(user_id)
+        ):
+            return {**linked_job, "duplicate_prevented": True}
+
+    existing_row = conn.execute(
+        """SELECT id,project_id,user_id,job_type,status,priority,attempts,max_attempts,
+                  locked_by,locked_at,lease_expires_at,last_error,result_json,created_at,
+                  updated_at,started_at,completed_at,progress_percent,progress_message
+             FROM video_jobs
+            WHERE project_id=? AND user_id=? AND job_type=?
+            ORDER BY id ASC LIMIT 1""",
+        (int(project_id), int(user_id), VIDEO_RENDER_JOB_TYPE),
+    ).fetchone()
+    existing_job = _job_from_row(existing_row)
+    if existing_job:
+        conn.execute(
+            "UPDATE video_projects SET job_id=?,updated_at=? WHERE project_id=? AND user_id=?",
+            (int(existing_job["id"]), now_text(), int(project_id), int(user_id)),
+        )
+        return {**existing_job, "duplicate_prevented": True}
+
+    current = now_text()
+    result_payload = {
+        "request_id": str(request_id),
+        "confirm_attempt_key": str(confirm_attempt_key),
+        "chat_id": int(chat_id or 0),
+        "preflight_result": "RUNNING",
+        "admission_result": "NOT_RUN",
+        "exact_blocker_code": "",
+        "provider_task_id": None,
+        "submit_count": 0,
+        "poll_count": 0,
+        "charge_count": 0,
+        "charge_state": "NO_CHARGE",
+        "dispatch_outbox_created": False,
+    }
+    cursor = conn.execute(
+        """INSERT INTO video_jobs
+           (project_id,user_id,job_type,status,priority,attempts,max_attempts,result_json,
+            progress_percent,progress_message,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            int(project_id),
+            int(user_id),
+            VIDEO_RENDER_JOB_TYPE,
+            VIDEO_JOB_PRECHECK_RUNNING,
+            100,
+            0,
+            3,
+            _json_dumps(result_payload),
+            5,
+            VIDEO_JOB_PRECHECK_RUNNING,
+            current,
+            current,
+        ),
+    )
+    job_id = int(cursor.lastrowid or 0)
+    if job_id <= 0:
+        raise RuntimeError("job_create_failed")
+    conn.execute(
+        "UPDATE video_projects SET job_id=?,updated_at=? WHERE project_id=? AND user_id=?",
+        (job_id, current, int(project_id), int(user_id)),
+    )
+    job = get_video_render_job(conn, job_id)
+    if not job:
+        raise RuntimeError("job_create_readback_failed")
+    return {**job, "duplicate_prevented": False}
+
+
+def record_video_precheck_job_result(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int,
+    user_id: int,
+    preflight_result: str,
+    admission_result: str,
+    blocker_code: str = "",
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist a zero-submit precheck result on the already-created job."""
+
+    ensure_video_project_queue_schema(conn)
+    job = get_video_render_job(conn, int(job_id))
+    if not job:
+        raise ValueError("job_not_found")
+    if int(job.get("user_id") or 0) != int(user_id):
+        raise PermissionError("job_user_mismatch")
+
+    allowed_statuses = {
+        VIDEO_JOB_PRECHECK_RUNNING,
+        VIDEO_JOB_PRECHECK_BLOCKED,
+        VIDEO_JOB_READY_TO_SUBMIT,
+    }
+    if str(job.get("status") or "") not in allowed_statuses:
+        raise ValueError("job_not_in_precheck_state")
+
+    preflight = str(preflight_result or "NOT_RUN").strip().upper()
+    admission = str(admission_result or "NOT_RUN").strip().upper()
+    blocked = preflight == "BLOCKED" or admission == "BLOCKED"
+    ready = preflight == "PASS" and admission == "PASS"
+    if not blocked and not ready:
+        raise ValueError("invalid_precheck_result")
+    status = VIDEO_JOB_PRECHECK_BLOCKED if blocked else VIDEO_JOB_READY_TO_SUBMIT
+    progress = 5 if blocked else 10
+
+    result_payload = _json_loads(str(job.get("result_json") or ""), {})
+    if not isinstance(result_payload, dict):
+        result_payload = {}
+    result_payload.update(dict(payload or {}))
+    result_payload.update(
+        {
+            "preflight_result": preflight,
+            "admission_result": admission,
+            "exact_blocker_code": str(blocker_code or ""),
+            "provider_task_id": None,
+            "submit_count": 0,
+            "poll_count": 0,
+            "charge_count": 0,
+            "charge_state": "NO_CHARGE",
+            "dispatch_outbox_created": False,
+        }
+    )
+    cursor = conn.execute(
+        """UPDATE video_jobs
+              SET status=?,result_json=?,progress_percent=?,progress_message=?,updated_at=?
+            WHERE id=? AND user_id=? AND status IN (?,?,?)""",
+        (
+            status,
+            _json_dumps(result_payload),
+            progress,
+            status,
+            now_text(),
+            int(job_id),
+            int(user_id),
+            VIDEO_JOB_PRECHECK_RUNNING,
+            VIDEO_JOB_PRECHECK_BLOCKED,
+            VIDEO_JOB_READY_TO_SUBMIT,
+        ),
+    )
+    if cursor.rowcount != 1:
+        raise RuntimeError("job_precheck_state_changed")
+    updated = get_video_render_job(conn, int(job_id))
+    if not updated:
+        raise RuntimeError("job_precheck_readback_failed")
+    return updated
 
 
 def _product_video_final_admission_state(
