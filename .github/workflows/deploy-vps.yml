@@ -25,38 +25,32 @@ jobs:
         run: |
           python -m py_compile bot.py services/*.py
 
-      - name: Setup SSH Key & Pinned Host Key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          echo "${{ secrets.VPS_HOST }} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMRv/Pu2EIwXzMN2cqi0pMJXcn/J5dBrfuWLKJ/r+O2C" >> ~/.ssh/known_hosts
-          echo "tg.toanaas.vn ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMRv/Pu2EIwXzMN2cqi0pMJXcn/J5dBrfuWLKJ/r+O2C" >> ~/.ssh/known_hosts
-          chmod 644 ~/.ssh/known_hosts
-
       - name: Deploy to VPS
-        run: |
-          ssh -i ~/.ssh/id_ed25519 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
             set -euo pipefail
-            echo '=== Pulling Bot Repo on VPS ==='
+            echo "=== Pulling Bot Repo on VPS ==="
             cd /opt/toanaas/bot
             git fetch origin --prune
             git checkout main
             git pull origin main
 
-            echo '=== Pulling Worker Repo on VPS ==='
+            echo "=== Pulling Worker Repo on VPS ==="
             cd /opt/toanaas-worker
             git fetch origin --prune
             git checkout main
             git pull origin main
 
-            echo '=== Restarting Bot and Worker Services ==='
+            echo "=== Restarting Bot and Worker Services ==="
             systemctl restart toanaas-bot.service toanaas-worker-owner-product-video.service toanaas-video-edit-worker.service
 
-            echo '=== Verifying Active Services ==='
+            echo "=== Verifying Active Services ==="
             systemctl is-active toanaas-bot.service
             systemctl is-active toanaas-worker-owner-product-video.service
             systemctl is-active toanaas-video-edit-worker.service
 
-            echo '=== DEPLOY SUCCESS ==='
-          "
+            echo "=== BOT DEPLOY SUCCESS ==="
