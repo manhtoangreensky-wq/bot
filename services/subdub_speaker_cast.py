@@ -47,7 +47,22 @@ _MIN_SPECTRAL_PURITY = 0.75
 _MIN_PITCH_HZ = 70.0
 _MAX_PITCH_HZ = 300.0
 _AUTOCORRELATION_STRIDE = 4
-_MAX_RELATIVE_PITCH_SPREAD = 0.08
+_MAX_RELATIVE_PITCH_SPREAD = 0.18
+_PITCH_ANALYSIS_DECIMATION = 8
+_PITCH_ANALYSIS_SAMPLE_RATE = PCM_SAMPLE_RATE // _PITCH_ANALYSIS_DECIMATION
+_PITCH_FRAME_SAMPLES = 400
+_PITCH_FRAME_HOP_SAMPLES = 200
+_PITCH_DIFFERENCE_STRIDE = 1
+_PITCH_YIN_THRESHOLD = 0.24
+_PITCH_YIN_MAXIMUM = 0.32
+_MIN_PITCH_FRAME_CONFIDENCE = 0.68
+_MIN_PITCH_FRAMES = 2
+_MAX_FRAME_RELATIVE_PITCH_DEVIATION = 0.22
+_HARMONIC_PURITY_STRIDE = 1
+_MAX_HARMONIC_PURITY_COMPONENTS = 4
+_MAX_HARMONIC_PURITY_HZ = 900.0
+_MIN_HARMONIC_SERIES_PURITY = 0.02
+_STABILITY_CONFIDENCE_SLOPE = 5.0 / 3.0
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SPEAKER_ID_RE = re.compile(r"^chunk_(\d+):speaker_(\d+)$")
@@ -690,6 +705,247 @@ def _speaker_window_offsets(
     return offsets
 
 
+def _estimate_frame_pitch_yin(
+    frame: array,
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+) -> tuple[float, float] | None:
+    """Estimate one short voiced frame without assuming a stationary pure tone."""
+
+    frame_length = len(frame)
+    if frame_length != _PITCH_FRAME_SAMPLES:
+        return None
+    total = 0.0
+    for index, sample in enumerate(frame):
+        if index % 256 == 0:
+            _ensure_classifier_active(deadline_monotonic, stop_requested)
+        total += float(sample)
+    mean = total / frame_length
+    centered = array("f")
+    energy = 0.0
+    try:
+        for index, sample in enumerate(frame):
+            if index % 256 == 0:
+                _ensure_classifier_active(deadline_monotonic, stop_requested)
+            value = float(sample) - mean
+            centered.append(value)
+            energy += value * value
+    except (MemoryError, OverflowError) as exc:
+        raise AutoCastManualRequired() from exc
+    rms = math.sqrt(energy / frame_length) / 32_768.0
+    if not math.isfinite(rms) or rms < _MIN_WINDOW_RMS:
+        return None
+
+    minimum_lag = max(2, int(_PITCH_ANALYSIS_SAMPLE_RATE / _MAX_PITCH_HZ))
+    maximum_lag = min(
+        frame_length - 2,
+        int(_PITCH_ANALYSIS_SAMPLE_RATE / _MIN_PITCH_HZ),
+    )
+    differences = array("d", [0.0])
+    try:
+        for lag in range(1, maximum_lag + 1):
+            _ensure_classifier_active(deadline_monotonic, stop_requested)
+            difference = 0.0
+            count = 0
+            for step, index in enumerate(
+                range(0, frame_length - lag, _PITCH_DIFFERENCE_STRIDE)
+            ):
+                if step % 256 == 0:
+                    _ensure_classifier_active(deadline_monotonic, stop_requested)
+                delta = float(centered[index]) - float(centered[index + lag])
+                difference += delta * delta
+                count += 1
+            differences.append(difference / max(1, count))
+    except (MemoryError, OverflowError, ValueError) as exc:
+        raise AutoCastManualRequired() from exc
+
+    normalized = array("d", [1.0])
+    cumulative = 0.0
+    for lag in range(1, maximum_lag + 1):
+        if lag % 64 == 0:
+            _ensure_classifier_active(deadline_monotonic, stop_requested)
+        cumulative += float(differences[lag])
+        normalized.append(
+            (float(differences[lag]) * lag / cumulative)
+            if cumulative > 0.0
+            else 1.0
+        )
+
+    candidate = 0
+    lag = minimum_lag
+    while lag <= maximum_lag:
+        if normalized[lag] < _PITCH_YIN_THRESHOLD:
+            while (
+                lag < maximum_lag
+                and normalized[lag + 1] < normalized[lag]
+            ):
+                lag += 1
+            candidate = lag
+            break
+        lag += 1
+    if not candidate:
+        candidate = min(
+            range(minimum_lag, maximum_lag + 1),
+            key=normalized.__getitem__,
+        )
+        if normalized[candidate] > _PITCH_YIN_MAXIMUM:
+            return None
+
+    refined_lag = float(candidate)
+    if minimum_lag < candidate < maximum_lag:
+        left = float(normalized[candidate - 1])
+        center = float(normalized[candidate])
+        right = float(normalized[candidate + 1])
+        curvature = left - (2.0 * center) + right
+        if abs(curvature) > 1e-12:
+            refined_lag += max(-0.5, min(0.5, 0.5 * (left - right) / curvature))
+    if refined_lag <= 0.0:
+        return None
+    estimated_hz = _PITCH_ANALYSIS_SAMPLE_RATE / refined_lag
+    confidence = max(0.0, min(1.0, 1.0 - float(normalized[candidate])))
+    if (
+        not math.isfinite(estimated_hz)
+        or not _MIN_PITCH_HZ <= estimated_hz <= _MAX_PITCH_HZ
+        or confidence < _MIN_PITCH_FRAME_CONFIDENCE
+    ):
+        return None
+    return estimated_hz, confidence
+
+
+def _harmonic_series_purity(
+    samples: array,
+    estimated_hz: float,
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+) -> float:
+    """Measure full-window harmonic coherence to reject competing pitches."""
+
+    sampled = [
+        float(samples[index])
+        for index in range(0, len(samples), _HARMONIC_PURITY_STRIDE)
+    ]
+    if not sampled:
+        return 0.0
+    mean = sum(sampled) / len(sampled)
+    centered = [value - mean for value in sampled]
+    energy = sum(value * value for value in centered)
+    if not math.isfinite(energy) or energy <= 0.0:
+        return 0.0
+
+    component_count = min(
+        _MAX_HARMONIC_PURITY_COMPONENTS,
+        int(_MAX_HARMONIC_PURITY_HZ / estimated_hz),
+    )
+    purity = 0.0
+    for harmonic in range(1, component_count + 1):
+        _ensure_classifier_active(deadline_monotonic, stop_requested)
+        phase_step = (
+            2.0
+            * math.pi
+            * estimated_hz
+            * harmonic
+            * _HARMONIC_PURITY_STRIDE
+            / _PITCH_ANALYSIS_SAMPLE_RATE
+        )
+        phase_cos = 1.0
+        phase_sin = 0.0
+        step_cos = math.cos(phase_step)
+        step_sin = math.sin(phase_step)
+        projection_cos = 0.0
+        projection_sin = 0.0
+        for index, value in enumerate(centered):
+            if index % 512 == 0:
+                _ensure_classifier_active(deadline_monotonic, stop_requested)
+            projection_cos += value * phase_cos
+            projection_sin += value * phase_sin
+            next_cos = (phase_cos * step_cos) - (phase_sin * step_sin)
+            phase_sin = (phase_sin * step_cos) + (phase_cos * step_sin)
+            phase_cos = next_cos
+        purity += (
+            2.0
+            * ((projection_cos * projection_cos) + (projection_sin * projection_sin))
+            / (len(centered) * energy)
+        )
+    return purity if math.isfinite(purity) else 0.0
+
+
+def _refine_full_rate_pitch(
+    samples: array,
+    estimated_hz: float,
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+) -> float:
+    """Refine one bounded estimate at 16 kHz without a broad lag search."""
+
+    if not math.isfinite(estimated_hz) or estimated_hz <= 0.0:
+        return estimated_hz
+    total = 0.0
+    for index, sample in enumerate(samples):
+        if index % 1_024 == 0:
+            _ensure_classifier_active(deadline_monotonic, stop_requested)
+        total += float(sample)
+    mean = total / len(samples)
+    centered = array("f")
+    try:
+        centered.extend(float(sample) - mean for sample in samples)
+    except (MemoryError, OverflowError, ValueError) as exc:
+        raise AutoCastManualRequired() from exc
+
+    minimum_lag = max(1, int(PCM_SAMPLE_RATE / _MAX_PITCH_HZ))
+    maximum_lag = min(len(centered) - 2, int(PCM_SAMPLE_RATE / _MIN_PITCH_HZ))
+    center_lag = int(round(PCM_SAMPLE_RATE / estimated_hz))
+    start_lag = max(minimum_lag, center_lag - 2)
+    end_lag = min(maximum_lag, center_lag + 2)
+    scores: dict[int, float] = {}
+    for lag in range(start_lag, end_lag + 1):
+        _ensure_classifier_active(deadline_monotonic, stop_requested)
+        cross = 0.0
+        left_energy = 0.0
+        right_energy = 0.0
+        for step, index in enumerate(
+            range(lag, len(centered), _AUTOCORRELATION_STRIDE)
+        ):
+            if step % 512 == 0:
+                _ensure_classifier_active(deadline_monotonic, stop_requested)
+            left = float(centered[index])
+            right = float(centered[index - lag])
+            cross += left * right
+            left_energy += left * left
+            right_energy += right * right
+        denominator = math.sqrt(left_energy * right_energy)
+        scores[lag] = cross / denominator if denominator > 0.0 else 0.0
+    if not scores:
+        return estimated_hz
+
+    best_lag = max(scores, key=scores.__getitem__)
+    best_score = scores[best_lag]
+    if not math.isfinite(best_score) or best_score < 0.35:
+        return estimated_hz
+    refined_lag = float(best_lag)
+    if best_lag - 1 in scores and best_lag + 1 in scores:
+        left = scores[best_lag - 1]
+        center = scores[best_lag]
+        right = scores[best_lag + 1]
+        curvature = left - (2.0 * center) + right
+        if abs(curvature) > 1e-12:
+            refined_lag += max(
+                -0.5,
+                min(0.5, 0.5 * (left - right) / curvature),
+            )
+    if refined_lag <= 0.0:
+        return estimated_hz
+    refined_hz = PCM_SAMPLE_RATE / refined_lag
+    if (
+        not math.isfinite(refined_hz)
+        or abs(refined_hz - estimated_hz) / estimated_hz > 0.05
+    ):
+        return estimated_hz
+    return refined_hz
+
+
 def _estimate_window_pitch(
     raw: bytes,
     *,
@@ -710,127 +966,88 @@ def _estimate_window_pitch(
     if len(samples) != PCM_WINDOW_SAMPLES:
         return None
 
-    total = 0.0
-    for index, sample in enumerate(samples):
-        if index % 512 == 0:
-            _ensure_classifier_active(deadline_monotonic, stop_requested)
-        total += float(sample)
-    mean = total / PCM_WINDOW_SAMPLES
-
-    centered = array("f")
-    energy = 0.0
+    analysis_samples = array("h")
     try:
-        for index, sample in enumerate(samples):
-            if index % 512 == 0:
+        for offset in range(0, len(samples), _PITCH_ANALYSIS_DECIMATION):
+            if offset % 2_048 == 0:
                 _ensure_classifier_active(deadline_monotonic, stop_requested)
-            normalized = float(sample) - mean
-            centered.append(normalized)
-            energy += normalized * normalized
-    except (MemoryError, OverflowError) as exc:
+            block = samples[offset : offset + _PITCH_ANALYSIS_DECIMATION]
+            if len(block) != _PITCH_ANALYSIS_DECIMATION:
+                return None
+            analysis_samples.append(int(round(sum(block) / len(block))))
+    except (MemoryError, OverflowError, ValueError) as exc:
         raise AutoCastManualRequired() from exc
-    rms = math.sqrt(energy / PCM_WINDOW_SAMPLES) / 32_768.0
-    if not math.isfinite(rms) or rms < _MIN_WINDOW_RMS:
-        return None
 
-    minimum_lag = max(1, int(PCM_SAMPLE_RATE / _MAX_PITCH_HZ))
-    maximum_lag = min(PCM_WINDOW_SAMPLES - 2, int(PCM_SAMPLE_RATE / _MIN_PITCH_HZ))
-    correlation_count = maximum_lag - minimum_lag + 1
+    maximum_lag = int(_PITCH_ANALYSIS_SAMPLE_RATE / _MIN_PITCH_HZ)
     transient_bytes = (
         len(raw)
         + len(samples) * samples.itemsize
-        + len(centered) * centered.itemsize
-        + correlation_count * 8
+        + len(analysis_samples) * analysis_samples.itemsize
+        + len(samples) * 4
+        + _PITCH_FRAME_SAMPLES * 4
+        + (maximum_lag + 1) * 16
     )
     if transient_bytes > MAX_WORK_BUFFER_BYTES:
         raise AutoCastManualRequired()
 
-    correlations = array("d")
-    try:
-        for lag in range(minimum_lag, maximum_lag + 1):
-            _ensure_classifier_active(deadline_monotonic, stop_requested)
-            cross = 0.0
-            left_energy = 0.0
-            right_energy = 0.0
-            for step, index in enumerate(
-                range(lag, PCM_WINDOW_SAMPLES, _AUTOCORRELATION_STRIDE)
-            ):
-                if step % 256 == 0:
-                    _ensure_classifier_active(deadline_monotonic, stop_requested)
-                left = float(centered[index])
-                right = float(centered[index - lag])
-                cross += left * right
-                left_energy += left * left
-                right_energy += right * right
-            denominator = math.sqrt(left_energy * right_energy)
-            correlations.append(cross / denominator if denominator > 0.0 else 0.0)
-    except (MemoryError, OverflowError, ValueError) as exc:
-        raise AutoCastManualRequired() from exc
-    _ensure_classifier_active(deadline_monotonic, stop_requested)
-
-    if len(correlations) != correlation_count:
-        raise AutoCastManualRequired()
-    maximum_score = max(correlations)
-    if not math.isfinite(maximum_score) or maximum_score < _MIN_AUTOCORRELATION:
+    estimates: list[tuple[float, float]] = []
+    for offset in range(
+        0,
+        len(analysis_samples) - _PITCH_FRAME_SAMPLES + 1,
+        _PITCH_FRAME_HOP_SAMPLES,
+    ):
+        _ensure_classifier_active(deadline_monotonic, stop_requested)
+        estimate = _estimate_frame_pitch_yin(
+            analysis_samples[offset : offset + _PITCH_FRAME_SAMPLES],
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+        )
+        if estimate is not None:
+            estimates.append(estimate)
+    if len(estimates) < _MIN_PITCH_FRAMES:
         return None
 
-    candidate_indices = [
-        index
-        for index in range(1, len(correlations) - 1)
-        if correlations[index] >= correlations[index - 1]
-        and correlations[index] >= correlations[index + 1]
-        and correlations[index] >= maximum_score - 0.015
+    median_hz = _bounded_median([item[0] for item in estimates])
+    if not math.isfinite(median_hz) or median_hz <= 0.0:
+        return None
+    inliers = [
+        item
+        for item in estimates
+        if abs(item[0] - median_hz) / median_hz
+        <= _MAX_FRAME_RELATIVE_PITCH_DEVIATION
     ]
-    if candidate_indices:
-        peak_index = candidate_indices[0]
-    else:
-        peak_index = max(range(len(correlations)), key=correlations.__getitem__)
-    _ensure_classifier_active(deadline_monotonic, stop_requested)
-
-    refined_offset = 0.0
-    if 0 < peak_index < len(correlations) - 1:
-        left = float(correlations[peak_index - 1])
-        center = float(correlations[peak_index])
-        right = float(correlations[peak_index + 1])
-        curvature = left - (2.0 * center) + right
-        if abs(curvature) > 1e-12:
-            refined_offset = 0.5 * (left - right) / curvature
-            refined_offset = max(-0.5, min(0.5, refined_offset))
-    refined_lag = minimum_lag + peak_index + refined_offset
-    if refined_lag <= 0.0:
+    minimum_inliers = max(_MIN_PITCH_FRAMES, math.ceil(len(estimates) * 0.60))
+    if len(inliers) < minimum_inliers:
         return None
-    estimated_hz = PCM_SAMPLE_RATE / refined_lag
-    if not math.isfinite(estimated_hz) or not _MIN_PITCH_HZ <= estimated_hz <= _MAX_PITCH_HZ:
-        return None
-
-    phase_step = 2.0 * math.pi * estimated_hz / PCM_SAMPLE_RATE
-    phase_cos = 1.0
-    phase_sin = 0.0
-    step_cos = math.cos(phase_step)
-    step_sin = math.sin(phase_step)
-    projection_cos = 0.0
-    projection_sin = 0.0
-    for index, sample in enumerate(centered):
-        if index % 512 == 0:
-            _ensure_classifier_active(deadline_monotonic, stop_requested)
-        value = float(sample)
-        projection_cos += value * phase_cos
-        projection_sin += value * phase_sin
-        next_cos = (phase_cos * step_cos) - (phase_sin * step_sin)
-        phase_sin = (phase_sin * step_cos) + (phase_cos * step_sin)
-        phase_cos = next_cos
-    spectral_purity = (
-        2.0 * ((projection_cos * projection_cos) + (projection_sin * projection_sin))
-        / (PCM_WINDOW_SAMPLES * energy)
-        if energy > 0.0
-        else 0.0
+    refined_hz = _bounded_median([item[0] for item in inliers])
+    refined_hz = _refine_full_rate_pitch(
+        samples,
+        refined_hz,
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
     )
-    if not math.isfinite(spectral_purity) or spectral_purity < _MIN_SPECTRAL_PURITY:
-        return None
+    relative_spread = _bounded_median(
+        [abs(item[0] - refined_hz) / refined_hz for item in inliers]
+    )
+    stability = max(0.0, 1.0 - (relative_spread / 0.32))
+    support = min(1.0, len(inliers) / 4.0)
+    periodicity = _bounded_median([item[1] for item in inliers])
     confidence = max(
         0.0,
-        min(1.0, float(correlations[peak_index]), spectral_purity),
+        min(1.0, (0.60 * periodicity) + (0.25 * stability) + (0.15 * support)),
     )
-    return estimated_hz, confidence
+    harmonic_purity = _harmonic_series_purity(
+        analysis_samples,
+        refined_hz,
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+    )
+    if (
+        confidence < MIN_REGISTER_CONFIDENCE
+        or harmonic_purity < _MIN_HARMONIC_SERIES_PURITY
+    ):
+        return None
+    return refined_hz, confidence
 
 
 def classify_speaker_registers(
@@ -873,8 +1090,7 @@ def classify_speaker_registers(
                 )
                 speaker_seconds = len(offsets) * _PCM_WINDOW_SECONDS
                 if (
-                    speaker_seconds < _MIN_VOICED_SECONDS
-                    or speaker_seconds > MAX_SPEAKER_VOICED_SECONDS + 1e-12
+                    speaker_seconds > MAX_SPEAKER_VOICED_SECONDS + 1e-12
                     or sampled_job_seconds + speaker_seconds > MAX_JOB_SAMPLE_SECONDS + 1e-12
                 ):
                     raise AutoCastManualRequired()
@@ -894,12 +1110,15 @@ def classify_speaker_registers(
                         stop_requested=stop_requested,
                     )
                     if estimate is None:
-                        raise AutoCastManualRequired()
+                        continue
                     frequency, confidence = estimate
                     frequencies.append(frequency)
                     confidences.append(confidence)
 
                 _ensure_classifier_active(absolute_deadline, stop_requested)
+                voiced_seconds = len(frequencies) * _PCM_WINDOW_SECONDS
+                if voiced_seconds < _MIN_VOICED_SECONDS:
+                    raise AutoCastManualRequired()
                 median_hz = _bounded_median(frequencies)
                 median_confidence = _bounded_median(confidences)
                 relative_spread = 0.0
@@ -916,7 +1135,7 @@ def classify_speaker_registers(
                     raise AutoCastManualRequired()
                 stability_confidence = max(
                     0.0,
-                    1.0 - (relative_spread / _MAX_RELATIVE_PITCH_SPREAD),
+                    1.0 - (_STABILITY_CONFIDENCE_SLOPE * relative_spread),
                 )
                 confidence = min(median_confidence, stability_confidence)
                 register = pitch_register(median_hz, confidence=confidence)
@@ -926,8 +1145,8 @@ def classify_speaker_registers(
                     "speaker_id": speaker_id,
                     "voice_register": register,
                     "confidence": round(float(confidence), 6),
-                    "voiced_seconds": round(float(speaker_seconds), 3),
-                    "sample_count": int(len(offsets) * PCM_WINDOW_SAMPLES),
+                    "voiced_seconds": round(float(voiced_seconds), 3),
+                    "sample_count": int(len(frequencies) * PCM_WINDOW_SAMPLES),
                     "reason": "classified",
                 }
                 sampled_job_seconds += speaker_seconds
