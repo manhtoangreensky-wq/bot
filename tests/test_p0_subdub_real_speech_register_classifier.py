@@ -33,15 +33,21 @@ def _speech_like_register(seconds: float, fundamental_hz: float) -> array:
     return samples
 
 
-def _tone_pcm(seconds: float, *frequencies: float) -> bytes:
+def _tone_pcm(
+    seconds: float,
+    *frequencies: float,
+    amplitudes: tuple[float, ...] | None = None,
+) -> bytes:
     samples = array("h")
     sample_rate = subdub_speaker_cast.PCM_SAMPLE_RATE
     scale = 12_000.0 if len(frequencies) == 1 else 7_000.0
+    weights = amplitudes or tuple(1.0 for _ in frequencies)
+    assert len(weights) == len(frequencies)
     for index in range(int(seconds * sample_rate)):
         timestamp = index / sample_rate
         value = scale * sum(
-            math.sin(2.0 * math.pi * frequency * timestamp)
-            for frequency in frequencies
+            weight * math.sin(2.0 * math.pi * frequency * timestamp)
+            for frequency, weight in zip(frequencies, weights)
         )
         samples.append(max(-32768, min(32767, int(round(value)))))
     return samples.tobytes()
@@ -66,8 +72,11 @@ def test_classifier_handles_harmonic_rich_low_and_high_speech_registers():
     assert subdub_speaker_cast.pitch_register(high[0], confidence=high[1]) == "high"
 
 
-def test_ambiguous_mid_register_remains_fail_closed():
-    assert subdub_speaker_cast.pitch_register(175.0, confidence=0.90) == "unknown"
+def test_register_boundaries_and_ambiguous_band():
+    assert subdub_speaker_cast.pitch_register(155.0, confidence=0.90) == "low"
+    assert subdub_speaker_cast.pitch_register(160.0, confidence=0.90) == "unknown"
+    assert subdub_speaker_cast.pitch_register(165.0, confidence=0.90) == "high"
+    assert subdub_speaker_cast.pitch_register(170.0, confidence=0.90) == "high"
 
 
 def test_classifier_keeps_natural_intonation_inside_one_low_register(tmp_path):
@@ -124,17 +133,65 @@ def test_classifier_preserves_inclusive_low_edge_after_pitch_estimation(tmp_path
     assert result["chunk_00:speaker_0"]["voice_register"] == "low"
 
 
+def test_competing_pitch_must_persist_across_two_short_frames(monkeypatch):
+    raw = _tone_pcm(0.5, 120.0)
+
+    for competing_frames, must_reject in (({0}, False), ({0, 1}, True)):
+        call_index = 0
+
+        def competing_pitch(*_args, **_kwargs):
+            nonlocal call_index
+            current = call_index
+            call_index += 1
+            if current in competing_frames:
+                return 0.1, 220.0
+            return 0.0, 0.0
+
+        monkeypatch.setattr(
+            subdub_speaker_cast,
+            "_frame_competing_pitch",
+            competing_pitch,
+        )
+        estimate = subdub_speaker_cast._estimate_window_pitch(
+            raw,
+            deadline_monotonic=time.monotonic() + 30.0,
+            stop_requested=lambda: False,
+        )
+
+        assert (estimate is None) is must_reject
+
+
 def test_classifier_keeps_two_overlapping_pitches_fail_closed(tmp_path):
-    pcm_path = tmp_path / "overlap-120-220.pcm"
-    pcm_path.write_bytes(_tone_pcm(3.0, 120.0, 220.0))
+    for amplitudes in ((0.5, 0.5), (0.3, 0.7), (0.9, 0.1), (0.1, 0.9)):
+        pcm_path = tmp_path / f"overlap-{amplitudes[0]}-{amplitudes[1]}.pcm"
+        pcm_path.write_bytes(
+            _tone_pcm(3.0, 120.0, 220.0, amplitudes=amplitudes)
+        )
+        try:
+            subdub_speaker_cast.classify_speaker_registers(
+                str(pcm_path),
+                {"chunk_00:speaker_0": [(0.0, 3.0)]},
+                deadline_monotonic=time.monotonic() + 30.0,
+                stop_requested=lambda: False,
+            )
+        except subdub_speaker_cast.AutoCastManualRequired:
+            continue
+        raise AssertionError(
+            f"overlapping pitches must require manual selection: {amplitudes}"
+        )
+
+
+def test_classifier_rejects_truncated_pcm_window(tmp_path):
+    pcm_path = tmp_path / "truncated-window.pcm"
+    pcm_path.write_bytes(_tone_pcm(0.75, 120.0))
 
     try:
         subdub_speaker_cast.classify_speaker_registers(
             str(pcm_path),
-            {"chunk_00:speaker_0": [(0.0, 3.0)]},
+            {"chunk_00:speaker_0": [(0.0, 1.0)]},
             deadline_monotonic=time.monotonic() + 30.0,
             stop_requested=lambda: False,
         )
     except subdub_speaker_cast.AutoCastManualRequired:
         return
-    raise AssertionError("overlapping pitches must require manual voice selection")
+    raise AssertionError("truncated PCM must fail closed")

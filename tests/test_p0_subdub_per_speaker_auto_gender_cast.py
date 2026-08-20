@@ -2160,7 +2160,14 @@ def test_exact_state_requires_only_the_central_exact_pair():
 
 @pytest.mark.parametrize(
     ("frequency", "expected_register"),
-    ((120.0, "low"), (155.0, "low"), (185.0, "high"), (220.0, "high")),
+    (
+        (120.0, "low"),
+        (155.0, "low"),
+        (165.0, "high"),
+        (170.0, "high"),
+        (185.0, "high"),
+        (220.0, "high"),
+    ),
 )
 def test_register_classifier_reads_synthetic_pcm_tones(tmp_path, frequency, expected_register):
     speaker_cast = _speaker_cast_module()
@@ -2175,6 +2182,7 @@ def test_register_classifier_reads_synthetic_pcm_tones(tmp_path, frequency, expe
     )
 
     assert speaker_cast.pitch_register(154.9, confidence=0.75) == "low"
+    assert speaker_cast.pitch_register(165.0, confidence=0.75) == "high"
     assert speaker_cast.pitch_register(185.0, confidence=0.75) == "high"
     assert speaker_cast.pitch_register(120.0, confidence=0.7499) == "unknown"
     assert result["chunk_00:speaker_0"]["voice_register"] == expected_register
@@ -2184,7 +2192,7 @@ def test_register_classifier_reads_synthetic_pcm_tones(tmp_path, frequency, expe
 @pytest.mark.parametrize(
     ("kind", "seconds", "range_end"),
     (
-        (170.0, 3.0, 3.0),
+        (160.0, 3.0, 3.0),
         ("noise", 3.0, 3.0),
         ("overlap", 3.0, 3.0),
         ("silence", 3.0, 3.0),

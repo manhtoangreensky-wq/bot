@@ -35,15 +35,13 @@ MAX_JOB_SAMPLE_SECONDS = 48.0
 MAX_WORK_BUFFER_BYTES = 1_048_576
 CLASSIFIER_WALL_TIMEOUT_SECONDS = 30.0
 LOW_MAX_HZ = 155.0
-HIGH_MIN_HZ = 185.0
+HIGH_MIN_HZ = 165.0
 MIN_REGISTER_CONFIDENCE = 0.75
 
 _PCM_BYTES_PER_SAMPLE = 2
 _PCM_WINDOW_SECONDS = PCM_WINDOW_SAMPLES / PCM_SAMPLE_RATE
 _MIN_VOICED_SECONDS = 1.0
 _MIN_WINDOW_RMS = 0.01
-_MIN_AUTOCORRELATION = 0.82
-_MIN_SPECTRAL_PURITY = 0.75
 _MIN_PITCH_HZ = 70.0
 _MAX_PITCH_HZ = 300.0
 _AUTOCORRELATION_STRIDE = 4
@@ -58,10 +56,15 @@ _PITCH_YIN_MAXIMUM = 0.32
 _MIN_PITCH_FRAME_CONFIDENCE = 0.68
 _MIN_PITCH_FRAMES = 2
 _MAX_FRAME_RELATIVE_PITCH_DEVIATION = 0.22
-_HARMONIC_PURITY_STRIDE = 1
 _MAX_HARMONIC_PURITY_COMPONENTS = 4
 _MAX_HARMONIC_PURITY_HZ = 900.0
 _MIN_HARMONIC_SERIES_PURITY = 0.02
+_MIN_FUNDAMENTAL_HARMONIC_SHARE = 0.03
+_MAX_COMPETING_PITCH_RATIO = 0.0075
+_COMPETING_FFT_SIZE = 512
+_HARMONIC_EXCLUSION_HZ = 15.0
+_COMPETING_PITCH_STABILITY_HZ = 8.0
+_MIN_COMPETING_PITCH_FRAMES = 2
 _STABILITY_CONFIDENCE_SLOPE = 5.0 / 3.0
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -775,20 +778,23 @@ def _estimate_frame_pitch_yin(
     candidate = 0
     lag = minimum_lag
     while lag <= maximum_lag:
+        _ensure_classifier_active(deadline_monotonic, stop_requested)
         if normalized[lag] < _PITCH_YIN_THRESHOLD:
             while (
                 lag < maximum_lag
                 and normalized[lag + 1] < normalized[lag]
             ):
+                _ensure_classifier_active(deadline_monotonic, stop_requested)
                 lag += 1
             candidate = lag
             break
         lag += 1
     if not candidate:
-        candidate = min(
-            range(minimum_lag, maximum_lag + 1),
-            key=normalized.__getitem__,
-        )
+        candidate = minimum_lag
+        for current_lag in range(minimum_lag + 1, maximum_lag + 1):
+            _ensure_classifier_active(deadline_monotonic, stop_requested)
+            if normalized[current_lag] < normalized[candidate]:
+                candidate = current_lag
         if normalized[candidate] > _PITCH_YIN_MAXIMUM:
             return None
 
@@ -813,62 +819,229 @@ def _estimate_frame_pitch_yin(
     return estimated_hz, confidence
 
 
-def _harmonic_series_purity(
-    samples: array,
-    estimated_hz: float,
+def _spectral_projection_power(
+    centered: list[float],
+    energy: float,
+    frequency_hz: float,
     *,
     deadline_monotonic: float,
     stop_requested: Callable[[], bool],
 ) -> float:
-    """Measure full-window harmonic coherence to reject competing pitches."""
+    phase_step = 2.0 * math.pi * frequency_hz / _PITCH_ANALYSIS_SAMPLE_RATE
+    phase_cos = 1.0
+    phase_sin = 0.0
+    step_cos = math.cos(phase_step)
+    step_sin = math.sin(phase_step)
+    projection_cos = 0.0
+    projection_sin = 0.0
+    for index, value in enumerate(centered):
+        if index % 256 == 0:
+            _ensure_classifier_active(deadline_monotonic, stop_requested)
+        projection_cos += value * phase_cos
+        projection_sin += value * phase_sin
+        next_cos = (phase_cos * step_cos) - (phase_sin * step_sin)
+        phase_sin = (phase_sin * step_cos) + (phase_cos * step_sin)
+        phase_cos = next_cos
+    return (
+        2.0
+        * ((projection_cos * projection_cos) + (projection_sin * projection_sin))
+        / (len(centered) * energy)
+        if centered and energy > 0.0
+        else 0.0
+    )
 
-    sampled = [
-        float(samples[index])
-        for index in range(0, len(samples), _HARMONIC_PURITY_STRIDE)
-    ]
+
+def _fft_competing_peak(
+    centered: list[float],
+    energy: float,
+    harmonic_frequencies: list[float],
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+) -> tuple[float, float]:
+    """Find the strongest non-harmonic pitch bin with a bounded radix-2 FFT."""
+
+    if len(centered) > _COMPETING_FFT_SIZE or energy <= 0.0:
+        return math.inf, 0.0
+    spectrum = [complex(value, 0.0) for value in centered]
+    spectrum.extend([0j] * (_COMPETING_FFT_SIZE - len(spectrum)))
+
+    swap_index = 0
+    for index in range(1, _COMPETING_FFT_SIZE):
+        if index % 256 == 0:
+            _ensure_classifier_active(deadline_monotonic, stop_requested)
+        bit = _COMPETING_FFT_SIZE >> 1
+        while swap_index & bit:
+            swap_index ^= bit
+            bit >>= 1
+        swap_index ^= bit
+        if index < swap_index:
+            spectrum[index], spectrum[swap_index] = (
+                spectrum[swap_index],
+                spectrum[index],
+            )
+
+    block_size = 2
+    while block_size <= _COMPETING_FFT_SIZE:
+        _ensure_classifier_active(deadline_monotonic, stop_requested)
+        angle = -2.0 * math.pi / block_size
+        twiddle_step = complex(math.cos(angle), math.sin(angle))
+        half = block_size // 2
+        for block_start in range(0, _COMPETING_FFT_SIZE, block_size):
+            twiddle = 1.0 + 0.0j
+            for offset in range(half):
+                if offset % 256 == 0:
+                    _ensure_classifier_active(deadline_monotonic, stop_requested)
+                even = spectrum[block_start + offset]
+                odd = spectrum[block_start + offset + half] * twiddle
+                spectrum[block_start + offset] = even + odd
+                spectrum[block_start + offset + half] = even - odd
+                twiddle *= twiddle_step
+        block_size *= 2
+
+    minimum_bin = math.ceil(
+        _MIN_PITCH_HZ * _COMPETING_FFT_SIZE / _PITCH_ANALYSIS_SAMPLE_RATE
+    )
+    maximum_bin = math.floor(
+        _MAX_PITCH_HZ * _COMPETING_FFT_SIZE / _PITCH_ANALYSIS_SAMPLE_RATE
+    )
+    strongest = 0.0
+    strongest_hz = 0.0
+    for bin_index in range(minimum_bin, maximum_bin + 1):
+        _ensure_classifier_active(deadline_monotonic, stop_requested)
+        frequency_hz = (
+            bin_index * _PITCH_ANALYSIS_SAMPLE_RATE / _COMPETING_FFT_SIZE
+        )
+        if any(
+            abs(frequency_hz - harmonic_hz) <= _HARMONIC_EXCLUSION_HZ
+            for harmonic_hz in harmonic_frequencies
+        ):
+            continue
+        magnitude = abs(spectrum[bin_index])
+        power = 2.0 * magnitude * magnitude / (len(centered) * energy)
+        if power > strongest:
+            strongest = power
+            strongest_hz = frequency_hz
+    return strongest, strongest_hz
+
+
+def _frame_competing_pitch(
+    frame: array,
+    estimated_hz: float,
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+) -> tuple[float, float]:
+    sampled: list[float] = []
+    total = 0.0
+    for index, sample in enumerate(frame):
+        if index % 128 == 0:
+            _ensure_classifier_active(deadline_monotonic, stop_requested)
+        value = float(sample)
+        sampled.append(value)
+        total += value
     if not sampled:
-        return 0.0
-    mean = sum(sampled) / len(sampled)
-    centered = [value - mean for value in sampled]
-    energy = sum(value * value for value in centered)
+        return math.inf, 0.0
+    mean = total / len(sampled)
+    centered: list[float] = []
+    energy = 0.0
+    for index, value in enumerate(sampled):
+        if index % 128 == 0:
+            _ensure_classifier_active(deadline_monotonic, stop_requested)
+        normalized = value - mean
+        centered.append(normalized)
+        energy += normalized * normalized
     if not math.isfinite(energy) or energy <= 0.0:
-        return 0.0
+        return math.inf, 0.0
 
     component_count = min(
         _MAX_HARMONIC_PURITY_COMPONENTS,
         int(_MAX_HARMONIC_PURITY_HZ / estimated_hz),
     )
-    purity = 0.0
+    harmonic_frequencies = [
+        estimated_hz * harmonic
+        for harmonic in range(1, component_count + 1)
+    ]
+    harmonic_purity = 0.0
+    for harmonic_hz in harmonic_frequencies:
+        _ensure_classifier_active(deadline_monotonic, stop_requested)
+        harmonic_purity += _spectral_projection_power(
+            centered,
+            energy,
+            harmonic_hz,
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+        )
+    if not math.isfinite(harmonic_purity) or harmonic_purity <= 0.0:
+        return math.inf, 0.0
+    competing_power, competing_hz = _fft_competing_peak(
+        centered,
+        energy,
+        harmonic_frequencies,
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+    )
+    return competing_power / harmonic_purity, competing_hz
+
+
+def _pitch_spectrum_metrics(
+    samples: array,
+    estimated_hz: float,
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+) -> tuple[float, float]:
+    """Return full-window harmonic purity and fundamental share."""
+
+    sampled: list[float] = []
+    for index, sample in enumerate(samples):
+        if index % 256 == 0:
+            _ensure_classifier_active(deadline_monotonic, stop_requested)
+        sampled.append(float(sample))
+    if not sampled:
+        return 0.0, 0.0
+    total = 0.0
+    for index, value in enumerate(sampled):
+        if index % 256 == 0:
+            _ensure_classifier_active(deadline_monotonic, stop_requested)
+        total += value
+    mean = total / len(sampled)
+    centered: list[float] = []
+    energy = 0.0
+    for index, value in enumerate(sampled):
+        if index % 256 == 0:
+            _ensure_classifier_active(deadline_monotonic, stop_requested)
+        normalized = value - mean
+        centered.append(normalized)
+        energy += normalized * normalized
+    if not math.isfinite(energy) or energy <= 0.0:
+        return 0.0, 0.0
+
+    component_count = min(
+        _MAX_HARMONIC_PURITY_COMPONENTS,
+        int(_MAX_HARMONIC_PURITY_HZ / estimated_hz),
+    )
+    harmonic_frequencies = [
+        estimated_hz * harmonic
+        for harmonic in range(1, component_count + 1)
+    ]
+    harmonic_powers: list[float] = []
     for harmonic in range(1, component_count + 1):
         _ensure_classifier_active(deadline_monotonic, stop_requested)
-        phase_step = (
-            2.0
-            * math.pi
-            * estimated_hz
-            * harmonic
-            * _HARMONIC_PURITY_STRIDE
-            / _PITCH_ANALYSIS_SAMPLE_RATE
+        harmonic_powers.append(
+            _spectral_projection_power(
+                centered,
+                energy,
+                estimated_hz * harmonic,
+                deadline_monotonic=deadline_monotonic,
+                stop_requested=stop_requested,
+            )
         )
-        phase_cos = 1.0
-        phase_sin = 0.0
-        step_cos = math.cos(phase_step)
-        step_sin = math.sin(phase_step)
-        projection_cos = 0.0
-        projection_sin = 0.0
-        for index, value in enumerate(centered):
-            if index % 512 == 0:
-                _ensure_classifier_active(deadline_monotonic, stop_requested)
-            projection_cos += value * phase_cos
-            projection_sin += value * phase_sin
-            next_cos = (phase_cos * step_cos) - (phase_sin * step_sin)
-            phase_sin = (phase_sin * step_cos) + (phase_cos * step_sin)
-            phase_cos = next_cos
-        purity += (
-            2.0
-            * ((projection_cos * projection_cos) + (projection_sin * projection_sin))
-            / (len(centered) * energy)
-        )
-    return purity if math.isfinite(purity) else 0.0
+    purity = sum(harmonic_powers)
+    if not math.isfinite(purity) or purity <= 0.0:
+        return 0.0, 0.0
+    fundamental_share = harmonic_powers[0] / purity if harmonic_powers else 0.0
+    return purity, fundamental_share
 
 
 def _refine_full_rate_pitch(
@@ -990,20 +1163,29 @@ def _estimate_window_pitch(
     if transient_bytes > MAX_WORK_BUFFER_BYTES:
         raise AutoCastManualRequired()
 
-    estimates: list[tuple[float, float]] = []
+    estimates: list[tuple[float, float, float, float]] = []
     for offset in range(
         0,
         len(analysis_samples) - _PITCH_FRAME_SAMPLES + 1,
         _PITCH_FRAME_HOP_SAMPLES,
     ):
         _ensure_classifier_active(deadline_monotonic, stop_requested)
+        frame = analysis_samples[offset : offset + _PITCH_FRAME_SAMPLES]
         estimate = _estimate_frame_pitch_yin(
-            analysis_samples[offset : offset + _PITCH_FRAME_SAMPLES],
+            frame,
             deadline_monotonic=deadline_monotonic,
             stop_requested=stop_requested,
         )
         if estimate is not None:
-            estimates.append(estimate)
+            competing_ratio, competing_hz = _frame_competing_pitch(
+                frame,
+                estimate[0],
+                deadline_monotonic=deadline_monotonic,
+                stop_requested=stop_requested,
+            )
+            estimates.append(
+                (estimate[0], estimate[1], competing_ratio, competing_hz)
+            )
     if len(estimates) < _MIN_PITCH_FRAMES:
         return None
 
@@ -1019,6 +1201,20 @@ def _estimate_window_pitch(
     minimum_inliers = max(_MIN_PITCH_FRAMES, math.ceil(len(estimates) * 0.60))
     if len(inliers) < minimum_inliers:
         return None
+    competing_frames = [
+        item
+        for item in inliers
+        if item[2] >= _MAX_COMPETING_PITCH_RATIO and item[3] > 0.0
+    ]
+    if len(competing_frames) >= _MIN_COMPETING_PITCH_FRAMES:
+        for position, first in enumerate(competing_frames):
+            for second in competing_frames[position + 1 :]:
+                _ensure_classifier_active(deadline_monotonic, stop_requested)
+                if (
+                    abs(first[3] - second[3])
+                    <= _COMPETING_PITCH_STABILITY_HZ
+                ):
+                    return None
     refined_hz = _bounded_median([item[0] for item in inliers])
     refined_hz = _refine_full_rate_pitch(
         samples,
@@ -1036,7 +1232,7 @@ def _estimate_window_pitch(
         0.0,
         min(1.0, (0.60 * periodicity) + (0.25 * stability) + (0.15 * support)),
     )
-    harmonic_purity = _harmonic_series_purity(
+    harmonic_purity, fundamental_share = _pitch_spectrum_metrics(
         analysis_samples,
         refined_hz,
         deadline_monotonic=deadline_monotonic,
@@ -1045,6 +1241,7 @@ def _estimate_window_pitch(
     if (
         confidence < MIN_REGISTER_CONFIDENCE
         or harmonic_purity < _MIN_HARMONIC_SERIES_PURITY
+        or fundamental_share < _MIN_FUNDAMENTAL_HARMONIC_SHARE
     ):
         return None
     return refined_hz, confidence
@@ -1104,6 +1301,8 @@ def classify_speaker_registers(
                     _ensure_classifier_active(absolute_deadline, stop_requested)
                     raw = handle.read(PCM_WINDOW_BYTES)
                     _ensure_classifier_active(absolute_deadline, stop_requested)
+                    if len(raw) != PCM_WINDOW_BYTES:
+                        raise AutoCastManualRequired()
                     estimate = _estimate_window_pitch(
                         raw,
                         deadline_monotonic=absolute_deadline,
