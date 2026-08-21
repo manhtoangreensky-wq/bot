@@ -74,6 +74,10 @@ from services.autopost_ui import (
     autopost_draft_keyboard,
     autopost_guide_text,
     autopost_guide_keyboard,
+    autopost_guide_single_text,
+    autopost_guide_plan_text,
+    autopost_guide_telegram_text,
+    autopost_guide_sub_keyboard,
 )
 
 @pytest.fixture
@@ -259,16 +263,36 @@ def test_10_task_b_home_screen_11_buttons():
 
 def test_12_autopost_guide_renderer():
     guide_text = autopost_guide_text()
-    assert "HƯỚNG DẪN SỬ DỤNG HỆ THỐNG ĐĂNG BÀI TỰ ĐỘNG" in guide_text
-    assert "Thiết lập Thương hiệu" in guide_text
-    assert "Kho Affiliate" in guide_text
-    assert "Tạo Nguyên liệu" in guide_text
+    assert "HƯỚNG DẪN CHI TIẾT TỪNG BƯỚC ĐĂNG BÀI TỰ ĐỘNG" in guide_text
+    assert "CÁCH 1: TẠO BÀI LẺ & ĐĂNG NGAY TỨC THÌ" in guide_text
+    assert "CÁCH 2: LẬP KẾ HOẠCH & ĐĂNG TỰ ĐỘNG HOÀN TOÀN 7 NGÀY" in guide_text
+    assert "3 BƯỚC THIẾT LẬP BAN ĐẦU" in guide_text
     
     guide_kb = autopost_guide_keyboard()
-    assert len(guide_kb.inline_keyboard) >= 2
     callbacks = [btn.callback_data for row in guide_kb.inline_keyboard for btn in row if btn.callback_data]
+    assert "autopost|guide_single" in callbacks
+    assert "autopost|guide_plan" in callbacks
+    assert "autopost|guide_telegram" in callbacks
     assert "autopost|content_input_menu" in callbacks
     assert "autopost|main" in callbacks
+    
+    # Sub guides
+    single_text = autopost_guide_single_text()
+    assert "HƯỚNG DẪN TẠO 1 BÀI ĐĂNG ĐƠN LẺ" in single_text
+    assert "Bước 1: Chọn nguồn nguyên liệu đầu vào" in single_text
+    assert "Bước 2: AI tự động viết bài hoàn chỉnh" in single_text
+    
+    plan_text = autopost_guide_plan_text()
+    assert "HƯỚNG DẪN LẬP KẾ HOẠCH & ĐĂNG TỰ ĐỘNG 7 NGÀY" in plan_text
+    assert "14 bài" in plan_text
+    
+    tg_text = autopost_guide_telegram_text()
+    assert "HƯỚNG DẪN KẾT NỐI KÊNH TELEGRAM NHẬN BÀI" in tg_text
+    assert "Thêm Bot làm Quản trị viên" in tg_text
+    
+    sub_kb = autopost_guide_sub_keyboard()
+    sub_callbacks = [btn.callback_data for row in sub_kb.inline_keyboard for btn in row if btn.callback_data]
+    assert "autopost|guide" in sub_callbacks
 
 def test_11_telegram_adapter_simulation():
     import asyncio

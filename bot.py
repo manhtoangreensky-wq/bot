@@ -15,7 +15,7 @@ from services.autopost_ui import (
     autopost_brand_preview_text, autopost_aff_seed_success_text, autopost_aff_clear_confirm_text,
     autopost_aff_clear_done_text, autopost_conn_telegram_prompt_text, autopost_conn_oauth_prompt_text, autopost_test_tg_conn_text,
     autopost_job_publish_result_text, autopost_set_mode_text, autopost_draft_publish_result_text,
-    autopost_draft_approved_text, autopost_guide_text, autopost_guide_keyboard
+    autopost_draft_approved_text, autopost_guide_text, autopost_guide_keyboard, autopost_guide_single_text, autopost_guide_plan_text, autopost_guide_telegram_text, autopost_guide_sub_keyboard
 )
 from services.autopost_db import (
     init_autopost_durable_db, save_content_input, get_content_input,
