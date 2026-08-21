@@ -98,6 +98,28 @@ def _seed_combo(uid):
     )
 
 
+def _seed_translated_combo(uid):
+    state = _seed_combo(uid)
+    translated_ref = bot.set_video_dubbing_artifact(
+        uid,
+        "translated_subtitle",
+        "1\n00:00:00,000 --> 00:00:02,000\nHello\n",
+    )
+    bot.set_video_dubbing_pending(
+        uid,
+        "translated_subtitle_ready",
+        target_language="English",
+        translate_requested="1",
+        output_type="video_subtitle",
+        output_format="video_subtitle",
+    )
+    return bot.set_video_dubbing_pending(
+        uid,
+        "translated_subtitle_ready",
+        translated_subtitle_ref=translated_ref,
+    )
+
+
 async def _press(uid, data, context=None):
     query = DummyQuery(uid, data)
     await bot.handle_video_dubbing_callback(_callback_update(query), context or SimpleNamespace())
@@ -228,7 +250,7 @@ def test_subtitle_plus_dub_preview_only_short_audio(monkeypatch):
 
 def test_subtitle_plus_dub_full_requires_confirm(monkeypatch):
     uid = 630111
-    _seed_combo(uid)
+    _seed_translated_combo(uid)
     calls = {"full": 0}
 
     async def fake_full(*_args, **_kwargs):
@@ -240,7 +262,7 @@ def test_subtitle_plus_dub_full_requires_confirm(monkeypatch):
 
     monkeypatch.setattr(bot, "execute_video_dubbing_pipeline", fake_full)
     monkeypatch.setattr(bot, "execute_engine", fake_execute_engine)
-    asyncio.run(_press(uid, "videodub|combo_dub_original"))
+    asyncio.run(_press(uid, "videodub|combo_dub_translated"))
     asyncio.run(_press(uid, "videodub|voice|default_female"))
     assert calls["full"] == 0
     query = asyncio.run(_press(uid, "videodub|combo_full_dub"))
@@ -285,7 +307,8 @@ def test_subtitle_plus_dub_back_routing():
     assert bot.get_video_dubbing_pending(uid)["step"] == "choosing_translation_language"
     asyncio.run(_press(uid, "videodub|combo_back_original"))
     assert bot.get_video_dubbing_pending(uid)["step"] == "original_subtitle_ready"
-    asyncio.run(_press(uid, "videodub|combo_dub_original"))
+    _seed_translated_combo(uid)
+    asyncio.run(_press(uid, "videodub|combo_dub_translated"))
     asyncio.run(_press(uid, "videodub|voice|default_female"))
     assert bot.get_video_dubbing_pending(uid)["step"] == "dub_confirmation"
     asyncio.run(_press(uid, "videodub|combo_back_voice"))

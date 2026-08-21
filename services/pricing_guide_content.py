@@ -52,7 +52,7 @@ PUBLIC_COPY_LOCALES = frozenset({
 # the public-copy owner so the legacy callback layout never falls back to
 # English while its routes stay unchanged.
 PUBLIC_GUIDE_NAVIGATION_I18N = {
-    "zh": {
+    "zh": {"autopost_label": "自动发帖与营销", 
         "quick_start": "快速开始",
         "create_image": "创建图片",
         "create_video": "创建视频",
@@ -69,7 +69,7 @@ PUBLIC_GUIDE_NAVIGATION_I18N = {
 # Public documentation only. These labels do not control account market,
 # payment eligibility, promotions, prices, or any product flow.
 _PUBLIC_LOCALE_COPY = {
-    "en": {
+    "en": {"autopost_label": "Auto Post & Marketing", 
         "pricing": "TOAN AAS Pricing", "guide": "TOAN AAS Customer Guide", "home": "Home", "choose": "Choose a section:",
         "quote": "TOAN AAS shows the quote before processing and charges Xu only after confirmation and a valid result.",
         "images": "AI Images", "video": "Product Video", "music": "AI Music", "voice": "Voice",
@@ -83,85 +83,85 @@ _PUBLIC_LOCALE_COPY = {
         "subtitles": "字幕 / 翻译 / 配音", "documents": "文档 / 文件", "member": "会员与优惠", "free": "免费项目",
         "image_unit": "张", "video_unit": "场", "input": "输入", "output": "输出",
     },
-    "es": {
+    "es": {"autopost_label": "Publicación automática", 
         "pricing": "Precios TOAN AAS", "guide": "Guía del usuario TOAN AAS", "home": "Inicio", "choose": "Elige una sección:",
         "quote": "El presupuesto se muestra antes de confirmar.", "images": "Imágenes con IA", "video": "Video de producto", "music": "Música con IA", "voice": "Voz",
         "subtitles": "Subtítulos / Traducción / Doblaje", "documents": "Documentos", "member": "Membresía", "free": "Elementos gratuitos",
         "image_unit": "imagen", "video_unit": "escena", "input": "entrada", "output": "salida",
     },
-    "pt": {
+    "pt": {"autopost_label": "Postagem automática", 
         "pricing": "Preços TOAN AAS", "guide": "Guia do usuário TOAN AAS", "home": "Início", "choose": "Escolha uma seção:",
         "quote": "O orçamento é exibido antes da confirmação.", "images": "Imagens com IA", "video": "Vídeo do produto", "music": "Música com IA", "voice": "Voz",
         "subtitles": "Legendas / Tradução / Dublagem", "documents": "Documentos", "member": "Associação", "free": "Itens gratuitos",
         "image_unit": "imagem", "video_unit": "cena", "input": "entrada", "output": "saída",
     },
-    "fr": {
+    "fr": {"autopost_label": "Publication automatique", 
         "pricing": "Tarifs TOAN AAS", "guide": "Guide d’utilisation TOAN AAS", "home": "Accueil", "choose": "Choisissez une section :",
         "quote": "Le devis s’affiche avant la confirmation.", "images": "Images IA", "video": "Vidéo produit", "music": "Musique IA", "voice": "Voix",
         "subtitles": "Sous-titres / Traduction / Doublage", "documents": "Documents", "member": "Adhésion", "free": "Éléments gratuits",
         "image_unit": "image", "video_unit": "scène", "input": "entrée", "output": "sortie",
     },
-    "de": {
+    "de": {"autopost_label": "Automatisches Posten", 
         "pricing": "TOAN AAS Preise", "guide": "TOAN AAS Benutzerhandbuch", "home": "Startseite", "choose": "Wähle einen Bereich:",
         "quote": "Das Angebot wird vor der Bestätigung angezeigt.", "images": "KI-Bilder", "video": "Produktvideo", "music": "KI-Musik", "voice": "Stimme",
         "subtitles": "Untertitel / Übersetzung / Synchronisation", "documents": "Dokumente", "member": "Mitgliedschaft", "free": "Kostenlose Elemente",
         "image_unit": "Bild", "video_unit": "Szene", "input": "Eingabe", "output": "Ausgabe",
     },
-    "ja": {
+    "ja": {"autopost_label": "自動投稿・マーケティング", 
         "pricing": "TOAN AAS 料金", "guide": "TOAN AAS ユーザーガイド", "home": "ホーム", "choose": "項目を選択:",
         "quote": "確認前に見積もりが表示されます。", "images": "AI画像", "video": "商品動画", "music": "AI音楽", "voice": "音声",
         "subtitles": "字幕 / 翻訳 / 吹き替え", "documents": "ドキュメント", "member": "メンバーシップ", "free": "無料項目",
         "image_unit": "枚", "video_unit": "シーン", "input": "入力", "output": "出力",
     },
-    "ko": {
+    "ko": {"autopost_label": "자동 포스팅 및 마케팅", 
         "pricing": "TOAN AAS 요금", "guide": "TOAN AAS 사용자 가이드", "home": "홈", "choose": "섹션을 선택하세요:",
         "quote": "확인 전에 견적이 표시됩니다.", "images": "AI 이미지", "video": "제품 동영상", "music": "AI 음악", "voice": "음성",
         "subtitles": "자막 / 번역 / 더빙", "documents": "문서", "member": "멤버십", "free": "무료 항목",
         "image_unit": "장", "video_unit": "장면", "input": "입력", "output": "출력",
     },
-    "hi": {
+    "hi": {"autopost_label": "स्वचालित पोस्टिंग", 
         "pricing": "TOAN AAS मूल्य", "guide": "TOAN AAS उपयोगकर्ता मार्गदर्शिका", "home": "होम", "choose": "एक अनुभाग चुनें:",
         "quote": "पुष्टि से पहले अनुमान दिखाया जाता है।", "images": "AI चित्र", "video": "उत्पाद वीडियो", "music": "AI संगीत", "voice": "आवाज़",
         "subtitles": "उपशीर्षक / अनुवाद / डबिंग", "documents": "दस्तावेज़", "member": "सदस्यता", "free": "मुफ़्त आइटम",
         "image_unit": "चित्र", "video_unit": "दृश्य", "input": "इनपुट", "output": "आउटपुट",
     },
-    "ar": {
+    "ar": {"autopost_label": "النشر التلقائي", 
         "pricing": "أسعار TOAN AAS", "guide": "دليل المستخدم TOAN AAS", "home": "الرئيسية", "choose": "اختر قسمًا:",
         "quote": "يظهر عرض السعر قبل التأكيد.", "images": "صور بالذكاء الاصطناعي", "video": "فيديو المنتج", "music": "موسيقى بالذكاء الاصطناعي", "voice": "الصوت",
         "subtitles": "الترجمة النصية / الترجمة / الدبلجة", "documents": "المستندات", "member": "العضوية", "free": "العناصر المجانية",
         "image_unit": "صورة", "video_unit": "مشهد", "input": "إدخال", "output": "إخراج",
     },
-    "ru": {
+    "ru": {"autopost_label": "Автопостинг", 
         "pricing": "Цены TOAN AAS", "guide": "Руководство пользователя TOAN AAS", "home": "Главная", "choose": "Выберите раздел:",
         "quote": "Расчёт отображается перед подтверждением.", "images": "Изображения с ИИ", "video": "Видео о продукте", "music": "Музыка с ИИ", "voice": "Голос",
         "subtitles": "Субтитры / Перевод / Озвучка", "documents": "Документы", "member": "Членство", "free": "Бесплатные элементы",
         "image_unit": "изображение", "video_unit": "сцена", "input": "ввод", "output": "вывод",
     },
-    "tr": {
+    "tr": {"autopost_label": "Otomatik Paylaşım", 
         "pricing": "TOAN AAS Fiyatları", "guide": "TOAN AAS Kullanım Kılavuzu", "home": "Ana sayfa", "choose": "Bir bölüm seçin:",
         "quote": "Fiyat teklifi onaydan önce gösterilir.", "images": "Yapay zekâ görselleri", "video": "Ürün videosu", "music": "Yapay zekâ müziği", "voice": "Ses",
         "subtitles": "Altyazılar / Çeviri / Dublaj", "documents": "Belgeler", "member": "Üyelik", "free": "Ücretsiz öğeler",
         "image_unit": "görsel", "video_unit": "sahne", "input": "girdi", "output": "çıktı",
     },
-    "th": {
+    "th": {"autopost_label": "โพสต์อัตโนมัติ", 
         "pricing": "ราคา TOAN AAS", "guide": "คู่มือผู้ใช้ TOAN AAS", "home": "หน้าหลัก", "choose": "เลือกหัวข้อ:",
         "quote": "ระบบจะแสดงใบเสนอราคาก่อนยืนยัน", "images": "ภาพ AI", "video": "วิดีโอสินค้า", "music": "เพลง AI", "voice": "เสียง",
         "subtitles": "คำบรรยาย / แปลภาษา / พากย์เสียง", "documents": "เอกสาร", "member": "สมาชิกภาพ", "free": "รายการฟรี",
         "image_unit": "ภาพ", "video_unit": "ฉาก", "input": "อินพุต", "output": "เอาต์พุต",
     },
-    "fil": {
+    "fil": {"autopost_label": "Awtomatikong Pag-post", 
         "pricing": "Mga Presyo ng TOAN AAS", "guide": "Gabay para sa gumagamit ng TOAN AAS", "home": "Pangunahing pahina", "choose": "Pumili ng seksyon:",
         "quote": "Ipinapakita ang pagtatantya bago kumpirmahin.", "images": "Mga larawang AI", "video": "Video ng produkto", "music": "Musikang AI", "voice": "Boses",
         "subtitles": "Mga subtitle / Pagsasalin / Pag-dub", "documents": "Mga dokumento", "member": "Pagiging miyembro", "free": "Mga libreng item",
         "image_unit": "larawan", "video_unit": "eksena", "input": "input", "output": "output",
     },
-    "it": {
+    "it": {"autopost_label": "Pubblicazione automatica", 
         "pricing": "Prezzi TOAN AAS", "guide": "Guida utente TOAN AAS", "home": "Pagina iniziale", "choose": "Scegli una sezione:",
         "quote": "Il preventivo viene mostrato prima della conferma.", "images": "Immagini AI", "video": "Video del prodotto", "music": "Musica AI", "voice": "Voce",
         "subtitles": "Sottotitoli / Traduzione / Doppiaggio", "documents": "Documenti", "member": "Iscrizione", "free": "Elementi gratuiti",
         "image_unit": "immagine", "video_unit": "scena", "input": "input", "output": "output",
     },
-    "id": {
+    "id": {"autopost_label": "Posting Otomatis", 
         "pricing": "Harga TOAN AAS", "guide": "Panduan Pengguna TOAN AAS", "home": "Beranda", "choose": "Pilih bagian:",
         "quote": "Penawaran harga ditampilkan sebelum konfirmasi.", "images": "Gambar AI", "video": "Video produk", "music": "Musik AI", "voice": "Suara",
         "subtitles": "Subtitle / Terjemahan / Dubbing", "documents": "Dokumen", "member": "Keanggotaan", "free": "Item gratis",
@@ -174,7 +174,7 @@ _PUBLIC_LOCALE_COPY = {
 # public pricing/guide locale authority: it has no effect on routing, market
 # eligibility, payment, or any provider/runtime behavior.
 _PUBLIC_HUB_COPY = {
-    "vi": {
+    "vi": {"autopost_label": "Đăng bài tự động", 
         "hub_title": "TOAN AAS — Trợ lý AI của bạn",
         "hub_intro": "Chọn công cụ phù hợp để tạo nội dung, xử lý hình ảnh, video, âm thanh và tài liệu ngay trên Telegram.",
         "image_label": "Tạo ảnh AI", "image_description": "Tạo và chuẩn bị hình ảnh từ ý tưởng của bạn.",
@@ -408,23 +408,23 @@ _PUBLIC_HUB_AUXILIARY_COPY = {
 # Root-menu navigation is presentation-only.  These labels share the existing
 # public-copy authority so every supported locale keeps the same callback map.
 _PUBLIC_ROOT_NAVIGATION_COPY = {
-    "vi": {"free_tools_label": "Công cụ miễn phí", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio âm thanh", "translation_label": "Dịch thuật", "notes_docs_label": "Ghi chú / Tài liệu", "topup_pricing_label": "Nạp Xu / Bảng giá", "feedback_label": "Góp ý / Báo lỗi", "admin_label": "Admin"},
-    "en": {"free_tools_label": "Free tools", "chat_pro_label": "Chat Pro", "audio_studio_label": "Audio Studio", "translation_label": "Translation", "notes_docs_label": "Notes / Documents", "topup_pricing_label": "Top up Xu / Pricing", "feedback_label": "Feedback / Report a bug", "admin_label": "Admin"},
-    "zh": {"free_tools_label": "免费工具", "chat_pro_label": "专业聊天", "audio_studio_label": "音频工作室", "translation_label": "翻译", "notes_docs_label": "笔记 / 文档", "topup_pricing_label": "充值 Xu / 价格", "feedback_label": "反馈 / 报错", "admin_label": "管理员"},
-    "es": {"free_tools_label": "Herramientas gratuitas", "chat_pro_label": "Chat Pro", "audio_studio_label": "Estudio de audio", "translation_label": "Traducción", "notes_docs_label": "Notas / Documentos", "topup_pricing_label": "Recargar Xu / Precios", "feedback_label": "Opiniones / Informar de un error", "admin_label": "Administrador"},
-    "pt": {"free_tools_label": "Ferramentas gratuitas", "chat_pro_label": "Chat Pro", "audio_studio_label": "Estúdio de áudio", "translation_label": "Tradução", "notes_docs_label": "Notas / Documentos", "topup_pricing_label": "Recarregar Xu / Preços", "feedback_label": "Comentários / Reportar erro", "admin_label": "Administrador"},
-    "fr": {"free_tools_label": "Outils gratuits", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio audio", "translation_label": "Traduction", "notes_docs_label": "Notes / Documents", "topup_pricing_label": "Recharger Xu / Tarifs", "feedback_label": "Avis / Signaler un bug", "admin_label": "Administrateur"},
-    "de": {"free_tools_label": "Kostenlose Tools", "chat_pro_label": "Chat Pro", "audio_studio_label": "Audiostudio", "translation_label": "Übersetzung", "notes_docs_label": "Notizen / Dokumente", "topup_pricing_label": "Xu aufladen / Preise", "feedback_label": "Feedback / Fehler melden", "admin_label": "Admin"},
-    "ja": {"free_tools_label": "無料ツール", "chat_pro_label": "Chat Pro", "audio_studio_label": "オーディオスタジオ", "translation_label": "翻訳", "notes_docs_label": "メモ / ドキュメント", "topup_pricing_label": "Xu をチャージ / 料金", "feedback_label": "ご意見 / 不具合を報告", "admin_label": "管理者"},
-    "ko": {"free_tools_label": "무료 도구", "chat_pro_label": "Chat Pro", "audio_studio_label": "오디오 스튜디오", "translation_label": "번역", "notes_docs_label": "메모 / 문서", "topup_pricing_label": "Xu 충전 / 요금", "feedback_label": "의견 / 오류 신고", "admin_label": "관리자"},
-    "hi": {"free_tools_label": "निःशुल्क उपकरण", "chat_pro_label": "Chat Pro", "audio_studio_label": "ऑडियो स्टूडियो", "translation_label": "अनुवाद", "notes_docs_label": "नोट्स / दस्तावेज़", "topup_pricing_label": "Xu टॉप-अप / मूल्य", "feedback_label": "सुझाव / त्रुटि रिपोर्ट", "admin_label": "प्रशासक"},
-    "ar": {"free_tools_label": "أدوات مجانية", "chat_pro_label": "Chat Pro", "audio_studio_label": "استوديو الصوت", "translation_label": "الترجمة", "notes_docs_label": "ملاحظات / مستندات", "topup_pricing_label": "شحن Xu / الأسعار", "feedback_label": "ملاحظات / بلاغ خطأ", "admin_label": "المشرف"},
-    "ru": {"free_tools_label": "Бесплатные инструменты", "chat_pro_label": "Chat Pro", "audio_studio_label": "Аудиостудия", "translation_label": "Перевод", "notes_docs_label": "Заметки / Документы", "topup_pricing_label": "Пополнить Xu / Цены", "feedback_label": "Отзыв / Сообщить об ошибке", "admin_label": "Администратор"},
-    "tr": {"free_tools_label": "Ücretsiz araçlar", "chat_pro_label": "Chat Pro", "audio_studio_label": "Ses stüdyosu", "translation_label": "Çeviri", "notes_docs_label": "Notlar / Belgeler", "topup_pricing_label": "Xu yükle / Fiyatlar", "feedback_label": "Geri bildirim / Hata bildir", "admin_label": "Yönetici"},
-    "th": {"free_tools_label": "เครื่องมือฟรี", "chat_pro_label": "Chat Pro", "audio_studio_label": "สตูดิโอเสียง", "translation_label": "แปลภาษา", "notes_docs_label": "บันทึก / เอกสาร", "topup_pricing_label": "เติม Xu / ราคา", "feedback_label": "ข้อเสนอแนะ / แจ้งข้อผิดพลาด", "admin_label": "ผู้ดูแลระบบ"},
-    "fil": {"free_tools_label": "Libreng mga tool", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio ng audio", "translation_label": "Pagsasalin", "notes_docs_label": "Mga tala / Dokumento", "topup_pricing_label": "Mag-top-up ng Xu / Mga presyo", "feedback_label": "Puna / Mag-ulat ng bug", "admin_label": "Administrador"},
-    "it": {"free_tools_label": "Strumenti gratuiti", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio audio", "translation_label": "Traduzione", "notes_docs_label": "Note / Documenti", "topup_pricing_label": "Ricarica Xu / Prezzi", "feedback_label": "Feedback / Segnala un errore", "admin_label": "Amministratore"},
-    "id": {"free_tools_label": "Alat gratis", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio audio", "translation_label": "Terjemahan", "notes_docs_label": "Catatan / Dokumen", "topup_pricing_label": "Isi ulang Xu / Harga", "feedback_label": "Masukan / Laporkan bug", "admin_label": "Admin"},
+    "vi": {"autopost_label": "Đăng bài tự động", "free_tools_label": "Công cụ miễn phí", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio âm thanh", "translation_label": "Dịch thuật", "notes_docs_label": "Ghi chú / Tài liệu", "topup_pricing_label": "Nạp Xu / Bảng giá", "feedback_label": "Góp ý / Báo lỗi", "admin_label": "Admin"},
+    "en": {"autopost_label": "Auto Post & Marketing", "free_tools_label": "Free tools", "chat_pro_label": "Chat Pro", "audio_studio_label": "Audio Studio", "translation_label": "Translation", "notes_docs_label": "Notes / Documents", "topup_pricing_label": "Top up Xu / Pricing", "feedback_label": "Feedback / Report a bug", "admin_label": "Admin"},
+    "zh": {"autopost_label": "自动发帖与营销", "free_tools_label": "免费工具", "chat_pro_label": "专业聊天", "audio_studio_label": "音频工作室", "translation_label": "翻译", "notes_docs_label": "笔记 / 文档", "topup_pricing_label": "充值 Xu / 价格", "feedback_label": "反馈 / 报错", "admin_label": "管理员"},
+    "es": {"autopost_label": "Publicación automática", "free_tools_label": "Herramientas gratuitas", "chat_pro_label": "Chat Pro", "audio_studio_label": "Estudio de audio", "translation_label": "Traducción", "notes_docs_label": "Notas / Documentos", "topup_pricing_label": "Recargar Xu / Precios", "feedback_label": "Opiniones / Informar de un error", "admin_label": "Administrador"},
+    "pt": {"autopost_label": "Postagem automática", "free_tools_label": "Ferramentas gratuitas", "chat_pro_label": "Chat Pro", "audio_studio_label": "Estúdio de áudio", "translation_label": "Tradução", "notes_docs_label": "Notas / Documentos", "topup_pricing_label": "Recarregar Xu / Preços", "feedback_label": "Comentários / Reportar erro", "admin_label": "Administrador"},
+    "fr": {"autopost_label": "Publication automatique", "free_tools_label": "Outils gratuits", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio audio", "translation_label": "Traduction", "notes_docs_label": "Notes / Documents", "topup_pricing_label": "Recharger Xu / Tarifs", "feedback_label": "Avis / Signaler un bug", "admin_label": "Administrateur"},
+    "de": {"autopost_label": "Automatisches Posten", "free_tools_label": "Kostenlose Tools", "chat_pro_label": "Chat Pro", "audio_studio_label": "Audiostudio", "translation_label": "Übersetzung", "notes_docs_label": "Notizen / Dokumente", "topup_pricing_label": "Xu aufladen / Preise", "feedback_label": "Feedback / Fehler melden", "admin_label": "Admin"},
+    "ja": {"autopost_label": "自動投稿・マーケティング", "free_tools_label": "無料ツール", "chat_pro_label": "Chat Pro", "audio_studio_label": "オーディオスタジオ", "translation_label": "翻訳", "notes_docs_label": "メモ / ドキュメント", "topup_pricing_label": "Xu をチャージ / 料金", "feedback_label": "ご意見 / 不具合を報告", "admin_label": "管理者"},
+    "ko": {"autopost_label": "자동 포스팅 및 마케팅", "free_tools_label": "무료 도구", "chat_pro_label": "Chat Pro", "audio_studio_label": "오디오 스튜디오", "translation_label": "번역", "notes_docs_label": "메모 / 문서", "topup_pricing_label": "Xu 충전 / 요금", "feedback_label": "의견 / 오류 신고", "admin_label": "관리자"},
+    "hi": {"autopost_label": "स्वचालित पोस्टिंग", "free_tools_label": "निःशुल्क उपकरण", "chat_pro_label": "Chat Pro", "audio_studio_label": "ऑडियो स्टूडियो", "translation_label": "अनुवाद", "notes_docs_label": "नोट्स / दस्तावेज़", "topup_pricing_label": "Xu टॉप-अप / मूल्य", "feedback_label": "सुझाव / त्रुटि रिपोर्ट", "admin_label": "प्रशासक"},
+    "ar": {"autopost_label": "النشر التلقائي", "free_tools_label": "أدوات مجانية", "chat_pro_label": "Chat Pro", "audio_studio_label": "استوديو الصوت", "translation_label": "الترجمة", "notes_docs_label": "ملاحظات / مستندات", "topup_pricing_label": "شحن Xu / الأسعار", "feedback_label": "ملاحظات / بلاغ خطأ", "admin_label": "المشرف"},
+    "ru": {"autopost_label": "Автопостинг", "free_tools_label": "Бесплатные инструменты", "chat_pro_label": "Chat Pro", "audio_studio_label": "Аудиостудия", "translation_label": "Перевод", "notes_docs_label": "Заметки / Документы", "topup_pricing_label": "Пополнить Xu / Цены", "feedback_label": "Отзыв / Сообщить об ошибке", "admin_label": "Администратор"},
+    "tr": {"autopost_label": "Otomatik Paylaşım", "free_tools_label": "Ücretsiz araçlar", "chat_pro_label": "Chat Pro", "audio_studio_label": "Ses stüdyosu", "translation_label": "Çeviri", "notes_docs_label": "Notlar / Belgeler", "topup_pricing_label": "Xu yükle / Fiyatlar", "feedback_label": "Geri bildirim / Hata bildir", "admin_label": "Yönetici"},
+    "th": {"autopost_label": "โพสต์อัตโนมัติ", "free_tools_label": "เครื่องมือฟรี", "chat_pro_label": "Chat Pro", "audio_studio_label": "สตูดิโอเสียง", "translation_label": "แปลภาษา", "notes_docs_label": "บันทึก / เอกสาร", "topup_pricing_label": "เติม Xu / ราคา", "feedback_label": "ข้อเสนอแนะ / แจ้งข้อผิดพลาด", "admin_label": "ผู้ดูแลระบบ"},
+    "fil": {"autopost_label": "Awtomatikong Pag-post", "free_tools_label": "Libreng mga tool", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio ng audio", "translation_label": "Pagsasalin", "notes_docs_label": "Mga tala / Dokumento", "topup_pricing_label": "Mag-top-up ng Xu / Mga presyo", "feedback_label": "Puna / Mag-ulat ng bug", "admin_label": "Administrador"},
+    "it": {"autopost_label": "Pubblicazione automatica", "free_tools_label": "Strumenti gratuiti", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio audio", "translation_label": "Traduzione", "notes_docs_label": "Note / Documenti", "topup_pricing_label": "Ricarica Xu / Prezzi", "feedback_label": "Feedback / Segnala un errore", "admin_label": "Amministratore"},
+    "id": {"autopost_label": "Posting Otomatis", "free_tools_label": "Alat gratis", "chat_pro_label": "Chat Pro", "audio_studio_label": "Studio audio", "translation_label": "Terjemahan", "notes_docs_label": "Catatan / Dokumen", "topup_pricing_label": "Isi ulang Xu / Harga", "feedback_label": "Masukan / Laporkan bug", "admin_label": "Admin"},
 }
 
 

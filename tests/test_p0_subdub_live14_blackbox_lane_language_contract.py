@@ -42,7 +42,7 @@ def test_lane_blackboxes_are_independent_and_dub_defaults_to_muted_source():
     assert subtitle.lane == "subtitle"
     assert subtitle.uses_subtitles and subtitle.uses_translation and not subtitle.uses_tts
     assert dub.lane == "dub"
-    assert dub.uses_translation and dub.uses_tts and not dub.keep_original_audio_default
+    assert not dub.uses_translation and dub.uses_tts and not dub.keep_original_audio_default
     assert combo.lane == "combo"
     assert combo.uses_subtitles and combo.uses_translation and combo.uses_tts
     assert not combo.keep_original_audio_default
