@@ -252038,7 +252038,11 @@ async def handle_video_dubbing_callback(
                 parse_mode="HTML",
                 reply_markup=video_dubbing_source_keyboard(lang, state),
             )
-        if action in {"combo_dub_translated", "voice", "combo_full_dub"} and not state.get("translated_subtitle_ref"):
+        if (
+            action in {"combo_dub_translated", "voice", "combo_full_dub"}
+            and not state.get("translated_subtitle_ref")
+            and not subtitle_plus_dub_single_lane_pending(state)
+        ):
             if not state.get("subtitle_ref"):
                 state = set_video_dubbing_pending(
                     uid,
