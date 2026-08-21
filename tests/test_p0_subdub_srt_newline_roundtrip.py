@@ -1,10 +1,21 @@
 import re
+import unicodedata
 from pathlib import Path
 
 
 TARGET_FUNCTIONS = {
     "deepgram_srt_from_response",
     "deepgram_vtt_from_srt",
+    "subdub_ass_escape",
+    "subdub_ass_text_chunks",
+    "subdub_broken_glyph_ratio",
+    "subdub_normalize_subtitle_text",
+    "subdub_parse_srt_timestamp",
+    "subdub_placeholder_only_text",
+    "subdub_srt_blocks",
+    "subdub_validate_subtitle_text_for_delivery",
+    "subdub_visible_subtitle_text",
+    "_subdub_auto_selected_text",
     "video_dubbing_plain_script",
     "video_dubbing_segments_from_subtitle",
     "video_dubbing_srt_from_segments",
@@ -31,7 +42,11 @@ def _load_srt_helpers() -> dict:
         blocks.append("".join(lines[index:end]))
         found.add(match.group(1))
     assert found == TARGET_FUNCTIONS
-    namespace = {"re": re}
+    namespace = {
+        "re": re,
+        "unicodedata": unicodedata,
+        "SUBDUB_BROKEN_GLYPH_CHARS": {"\ufffd", "□", "▯", "■", "�", "▢", "▣"},
+    }
     exec(compile("\n".join(blocks), str(bot_path), "exec"), namespace)
     return namespace
 
@@ -60,6 +75,15 @@ def test_subdub_srt_vtt_and_plain_text_use_real_newlines_roundtrip() -> None:
     assert "\\n" not in vtt_text
     assert "00:00:00.000 --> 00:00:02.000" in vtt_text
 
+    normalized = helpers["subdub_normalize_subtitle_text"](srt_text.replace("\n", "\r\n"))
+    assert normalized == srt_text.strip()
+    validation = helpers["subdub_validate_subtitle_text_for_delivery"](normalized)
+    assert validation["ok"] is True
+    assert validation["cue_count"] == 2
+    assert helpers["subdub_visible_subtitle_text"](normalized) == plain
+    assert helpers["subdub_ass_escape"]("line one\\Nline two") == r"line one\Nline two"
+    assert helpers["_subdub_auto_selected_text"](segments) == plain
+
 
 def test_deepgram_srt_and_vtt_use_real_newlines() -> None:
     helpers = _load_srt_helpers()
@@ -82,7 +106,17 @@ def test_deepgram_srt_and_vtt_use_real_newlines() -> None:
     assert "," not in "\n".join(line for line in vtt_text.splitlines() if "-->" in line)
 
 
+def test_active_subdub_region_has_no_literal_backslash_n_regression() -> None:
+    bot_path = Path(__file__).resolve().parents[1] / "bot.py"
+    source = bot_path.read_text(encoding="utf-8")
+    start = source.index("def translation_voice_gate_status_text")
+    end = source.index("def marketing_pending_key", start)
+
+    assert "\\\\n" not in source[start:end]
+
+
 if __name__ == "__main__":
     test_subdub_srt_vtt_and_plain_text_use_real_newlines_roundtrip()
     test_deepgram_srt_and_vtt_use_real_newlines()
-    print("SUBDUB_SRT_NEWLINE_ROUNDTRIP=2_PASS")
+    test_active_subdub_region_has_no_literal_backslash_n_regression()
+    print("SUBDUB_SRT_NEWLINE_ROUNDTRIP=3_PASS")
