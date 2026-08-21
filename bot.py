@@ -138131,7 +138131,7 @@ AUTOPOST_NICHES = [
     ("✨ Thương hiệu cá nhân", "ca_nhan"),
 ]
 
-autopost_engine_code = '''
+autopost_engine_code = r'''
 def autopost_hub_text(lang: str = "vi", user_id: int = 0) -> str:
     return autopost_main_dashboard_text(lang, user_id)
 
