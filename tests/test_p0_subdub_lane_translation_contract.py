@@ -27,7 +27,8 @@ def test_combo_normalization_forces_translated_subtitle_video_contract():
     assert state["dub_text_source"] == "translated"
     assert state["output_type"] == "video_subtitle"
     assert state["output_format"] == "video_subtitle"
-    assert state["combo_subpath"] == "create_then_dub"
+    assert state["flow_type"] == "no_subtitle"
+    assert state["combo_subpath"] == ""
     assert state["dub_source"] == "translated_subtitle"
 
 

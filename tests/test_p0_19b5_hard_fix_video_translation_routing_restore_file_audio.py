@@ -374,6 +374,64 @@ def test_combo_fresh_upload_language_voice_then_one_final_pipeline(monkeypatch):
     assert "đang tạo video" in final_query.outputs[0]["text"]
 
 
+def test_combo_auto_voice_skips_original_subtitle_step(monkeypatch):
+    uid = 919513
+    _patch_upload_basics(monkeypatch)
+    monkeypatch.setattr(bot, "get_subdub_lane_readiness", lambda *_args, **_kwargs: {"effective_ready": True})
+    monkeypatch.setattr(bot, "subdub_auto_provider_capacity_ready", lambda: True)
+    _seed(uid, bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, active_flow=bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB)
+
+    upload = CaptureMessage(video=Media())
+    asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, upload), SimpleNamespace()))
+    language_query = CaptureQuery(uid, "videodub|language|English")
+    asyncio.run(bot.handle_video_dubbing_callback(_query_update(language_query), SimpleNamespace()))
+
+    voice_query = CaptureQuery(uid, "videodub|voice|auto_speaker_gender")
+    asyncio.run(bot.handle_video_dubbing_callback(_query_update(voice_query), SimpleNamespace()))
+    state = bot.get_video_dubbing_pending(uid)
+    callbacks = _callbacks(voice_query.outputs[-1]["reply_markup"])
+
+    assert state["step"] == "dub_confirmation"
+    assert "videodub|combo_full_dub" in callbacks
+    assert "videodub|confirm_original_subtitle" not in callbacks
+    assert "Tạo phụ đề gốc" not in voice_query.outputs[-1]["text"]
+
+
+def test_legacy_combo_subpath_is_canonicalized_before_language_and_auto_voice(monkeypatch):
+    uid = 919514
+    _patch_upload_basics(monkeypatch)
+    monkeypatch.setattr(bot, "subdub_auto_provider_capacity_ready", lambda: True)
+    _seed(
+        uid,
+        bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        step="language",
+        active_flow=bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+        flow_type=bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE,
+        combo_subpath=bot.VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB,
+        video_file_id="legacy-combo-video",
+        source_file_id="legacy-combo-video",
+    )
+
+    language_query = CaptureQuery(uid, "videodub|language|English")
+    asyncio.run(bot.handle_video_dubbing_callback(_query_update(language_query), SimpleNamespace()))
+    state = bot.get_video_dubbing_pending(uid)
+    language_callbacks = _callbacks(language_query.outputs[-1]["reply_markup"])
+
+    assert state["step"] == "choosing_voice"
+    assert state["combo_subpath"] == ""
+    assert "videodub|confirm_original_subtitle" not in language_callbacks
+    assert "Tạo phụ đề gốc" not in language_query.outputs[-1]["text"]
+
+    voice_query = CaptureQuery(uid, "videodub|voice|auto_speaker_gender")
+    asyncio.run(bot.handle_video_dubbing_callback(_query_update(voice_query), SimpleNamespace()))
+    state = bot.get_video_dubbing_pending(uid)
+    voice_callbacks = _callbacks(voice_query.outputs[-1]["reply_markup"])
+
+    assert state["step"] == "dub_confirmation"
+    assert "videodub|combo_full_dub" in voice_callbacks
+    assert "videodub|confirm_original_subtitle" not in voice_callbacks
+
+
 def test_combo_fresh_custom_language_routes_to_voice_without_processing(monkeypatch):
     uid = 919511
     calls = {"provider": 0, "charge": 0}
