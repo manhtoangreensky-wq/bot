@@ -46,6 +46,8 @@ _MIN_PITCH_HZ = 70.0
 _MAX_PITCH_HZ = 300.0
 _AUTOCORRELATION_STRIDE = 4
 _MAX_RELATIVE_PITCH_SPREAD = 0.18
+_MIN_REGISTER_VOTE_RATIO = 2.0 / 3.0
+_MIN_REGISTER_TOTAL_RATIO = 0.50
 _PITCH_ANALYSIS_DECIMATION = 8
 _PITCH_ANALYSIS_SAMPLE_RATE = PCM_SAMPLE_RATE // _PITCH_ANALYSIS_DECIMATION
 _PITCH_FRAME_SAMPLES = 400
@@ -653,26 +655,35 @@ def _speaker_window_offsets(
     *,
     deadline_monotonic: float,
     stop_requested: Callable[[], bool],
+    max_windows: int,
 ) -> list[int]:
-    if not isinstance(ranges, (list, tuple)) or len(ranges) > MAX_SIDECAR_CUES:
+    if (
+        not isinstance(ranges, (list, tuple))
+        or len(ranges) > MAX_SIDECAR_CUES
+        or type(max_windows) is not int
+        or max_windows < 1
+    ):
         raise AutoCastManualRequired()
     offsets: list[int] = []
-    remaining_seconds = MAX_SPEAKER_VOICED_SECONDS
     pending_start: float | None = None
     pending_end: float | None = None
     previous_start = -1.0
 
     def consume_interval(start: float, end: float) -> None:
-        nonlocal remaining_seconds
-        cursor = start
-        while (
-            remaining_seconds + 1e-12 >= _PCM_WINDOW_SECONDS
-            and end - cursor + 1e-12 >= _PCM_WINDOW_SECONDS
-        ):
+        duration = end - start
+        available = duration - _PCM_WINDOW_SECONDS
+        if available < -1e-12 or len(offsets) >= max_windows:
+            return
+        candidate_count = min(
+            int(MAX_SPEAKER_VOICED_SECONDS / _PCM_WINDOW_SECONDS),
+            max(1, int(math.floor((duration + 1e-12) / _PCM_WINDOW_SECONDS))),
+            max_windows - len(offsets),
+        )
+        for candidate_index in range(candidate_count):
             _ensure_classifier_active(deadline_monotonic, stop_requested)
+            fraction = (candidate_index + 1) / (candidate_count + 1)
+            cursor = start + max(0.0, available) * fraction
             offsets.append(int(round(cursor * PCM_SAMPLE_RATE)) * _PCM_BYTES_PER_SAMPLE)
-            cursor += _PCM_WINDOW_SECONDS
-            remaining_seconds -= _PCM_WINDOW_SECONDS
 
     for position, raw_range in enumerate(ranges):
         if position % 64 == 0:
@@ -701,11 +712,72 @@ def _speaker_window_offsets(
             pending_end = max(pending_end, end)
             continue
         consume_interval(pending_start, pending_end)
+        if len(offsets) >= max_windows:
+            break
         pending_start, pending_end = start, end
 
-    if pending_start is not None and pending_end is not None:
+    if (
+        len(offsets) < max_windows
+        and pending_start is not None
+        and pending_end is not None
+    ):
         consume_interval(pending_start, pending_end)
     return offsets
+
+
+def _stable_register_evidence(
+    frequencies: list[float],
+    confidences: list[float],
+) -> tuple[str, float, float, int]:
+    if len(frequencies) != len(confidences) or len(frequencies) < 2:
+        raise AutoCastManualRequired()
+    groups: dict[str, list[tuple[float, float]]] = {"low": [], "high": []}
+    for frequency, confidence in zip(frequencies, confidences):
+        register = pitch_register(frequency, confidence=confidence)
+        if register in groups:
+            groups[register].append((frequency, confidence))
+    known_count = sum(len(items) for items in groups.values())
+    ranked = sorted(groups.items(), key=lambda item: len(item[1]), reverse=True)
+    register, evidence = ranked[0]
+    runner_up_count = len(ranked[1][1])
+    if (
+        len(evidence) < 2
+        or len(evidence) == runner_up_count
+        or known_count < 2
+        or len(evidence) / known_count < _MIN_REGISTER_VOTE_RATIO
+        or len(evidence) / len(frequencies) < _MIN_REGISTER_TOTAL_RATIO
+    ):
+        raise AutoCastManualRequired()
+
+    initial_median = _bounded_median([item[0] for item in evidence])
+    inliers = [
+        item
+        for item in evidence
+        if abs(item[0] - initial_median) / initial_median
+        <= _MAX_RELATIVE_PITCH_SPREAD
+    ]
+    if len(inliers) < 2:
+        raise AutoCastManualRequired()
+    median_hz = _bounded_median([item[0] for item in inliers])
+    relative_spread = max(
+        abs(item[0] - median_hz) / median_hz for item in inliers
+    )
+    if (
+        not math.isfinite(relative_spread)
+        or relative_spread > _MAX_RELATIVE_PITCH_SPREAD
+    ):
+        raise AutoCastManualRequired()
+    stability_confidence = max(
+        0.0,
+        1.0 - (_STABILITY_CONFIDENCE_SLOPE * relative_spread),
+    )
+    confidence = min(
+        _bounded_median([item[1] for item in inliers]),
+        stability_confidence,
+    )
+    if pitch_register(median_hz, confidence=confidence) != register:
+        raise AutoCastManualRequired()
+    return register, median_hz, confidence, len(inliers)
 
 
 def _estimate_frame_pitch_yin(
@@ -1275,6 +1347,14 @@ def classify_speaker_registers(
     _ensure_classifier_active(absolute_deadline, stop_requested)
 
     sampled_job_seconds = 0.0
+    maximum_accepted_windows = int(
+        MAX_SPEAKER_VOICED_SECONDS / _PCM_WINDOW_SECONDS
+    )
+    maximum_job_windows = int(MAX_JOB_SAMPLE_SECONDS / _PCM_WINDOW_SECONDS)
+    candidate_windows_per_speaker = max(
+        maximum_accepted_windows,
+        maximum_job_windows // len(labels),
+    )
     results: dict[str, dict] = {}
     try:
         with open(str(pcm_path or ""), "rb") as handle:
@@ -1284,17 +1364,15 @@ def classify_speaker_registers(
                     ranges_by_speaker.get(speaker_id),
                     deadline_monotonic=absolute_deadline,
                     stop_requested=stop_requested,
+                    max_windows=candidate_windows_per_speaker,
                 )
-                speaker_seconds = len(offsets) * _PCM_WINDOW_SECONDS
-                if (
-                    speaker_seconds > MAX_SPEAKER_VOICED_SECONDS + 1e-12
-                    or sampled_job_seconds + speaker_seconds > MAX_JOB_SAMPLE_SECONDS + 1e-12
-                ):
-                    raise AutoCastManualRequired()
 
                 frequencies: list[float] = []
                 confidences: list[float] = []
                 for offset in offsets:
+                    sampled_job_seconds += _PCM_WINDOW_SECONDS
+                    if sampled_job_seconds > MAX_JOB_SAMPLE_SECONDS + 1e-12:
+                        raise AutoCastManualRequired()
                     _ensure_classifier_active(absolute_deadline, stop_requested)
                     handle.seek(offset)
                     _ensure_classifier_active(absolute_deadline, stop_requested)
@@ -1313,42 +1391,27 @@ def classify_speaker_registers(
                     frequency, confidence = estimate
                     frequencies.append(frequency)
                     confidences.append(confidence)
+                    if len(frequencies) >= maximum_accepted_windows:
+                        break
 
                 _ensure_classifier_active(absolute_deadline, stop_requested)
-                voiced_seconds = len(frequencies) * _PCM_WINDOW_SECONDS
-                if voiced_seconds < _MIN_VOICED_SECONDS:
-                    raise AutoCastManualRequired()
-                median_hz = _bounded_median(frequencies)
-                median_confidence = _bounded_median(confidences)
-                relative_spread = 0.0
-                for frequency in frequencies:
-                    _ensure_classifier_active(absolute_deadline, stop_requested)
-                    relative_spread = max(
-                        relative_spread,
-                        abs(frequency - median_hz) / median_hz,
-                    )
-                if (
-                    not math.isfinite(relative_spread)
-                    or relative_spread > _MAX_RELATIVE_PITCH_SPREAD
-                ):
-                    raise AutoCastManualRequired()
-                stability_confidence = max(
-                    0.0,
-                    1.0 - (_STABILITY_CONFIDENCE_SLOPE * relative_spread),
+                register, _median_hz, confidence, inlier_count = (
+                    _stable_register_evidence(frequencies, confidences)
                 )
-                confidence = min(median_confidence, stability_confidence)
-                register = pitch_register(median_hz, confidence=confidence)
-                if register == "unknown":
+                voiced_seconds = inlier_count * _PCM_WINDOW_SECONDS
+                if (
+                    voiced_seconds < _MIN_VOICED_SECONDS
+                    or voiced_seconds > MAX_SPEAKER_VOICED_SECONDS + 1e-12
+                ):
                     raise AutoCastManualRequired()
                 results[speaker_id] = {
                     "speaker_id": speaker_id,
                     "voice_register": register,
                     "confidence": round(float(confidence), 6),
                     "voiced_seconds": round(float(voiced_seconds), 3),
-                    "sample_count": int(len(frequencies) * PCM_WINDOW_SAMPLES),
+                    "sample_count": int(inlier_count * PCM_WINDOW_SAMPLES),
                     "reason": "classified",
                 }
-                sampled_job_seconds += speaker_seconds
                 _ensure_classifier_active(absolute_deadline, stop_requested)
     except AutoCastManualRequired:
         raise

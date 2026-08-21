@@ -42,6 +42,9 @@ def normalize_combo_state(state: dict | None) -> dict:
     if not is_combo_state(current):
         return current
     normalized = dict(current)
+    combo_subpath = _token(normalized.get("combo_subpath"))
+    if combo_subpath == "direct_dub":
+        combo_subpath = "create_then_dub"
     normalized.update(
         {
             "mode": COMBO_MODE,
@@ -50,7 +53,14 @@ def normalize_combo_state(state: dict | None) -> dict:
             "requested_mode": COMBO_MODE,
             "active_flow": COMBO_FLOW,
             "product_type": "subtitle_dub",
+            "translate_requested": "1",
+            "dub_text_source": "translated",
+            "dub_source": "translated_subtitle",
+            "output_type": "video_subtitle",
+            "output_format": "video_subtitle",
             "_subdub_combo_blackbox_active": True,
         }
     )
+    if combo_subpath:
+        normalized["combo_subpath"] = combo_subpath
     return normalized
