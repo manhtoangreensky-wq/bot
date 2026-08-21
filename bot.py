@@ -190675,6 +190675,7 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
             admin_real_test
             and getattr(video_dubbing_capability, "__name__", "") == "video_dubbing_capability"
             and not video_dubbing_state_has_subtitle_or_transcript(state)
+            and not subdub_final_confirmed_state(state)
             and not subdub_public_flag_with_override("VIDEO_ASR_ENABLED", VIDEO_ASR_ENABLED)
             and "asr_adapter_missing" not in technical_missing
         ):
@@ -237606,7 +237607,7 @@ def subtitle_dub_find_latest_dub_job_for_user_mode(user_id, mode: str = "", stat
                 "video_file_unique_id",
             )
         )
-        return 1 if any(token and token in haystack for token in source_tokens) else 0
+        return 1 if any(token and token[:160] in haystack for token in source_tokens) else 0
 
     def _active_or_delivered_score(item: dict) -> int:
         if subdub_should_suppress_late_public_failure(item) or subdub_job_blocks_public_fail(item):
@@ -237632,6 +237633,8 @@ def subtitle_dub_find_latest_dub_job_for_user_mode(user_id, mode: str = "", stat
                 candidates.append(item)
     except Exception:
         pass
+    if source_tokens:
+        candidates = [item for item in candidates if _source_score(item)]
     if not candidates:
         return {}
     candidates.sort(
@@ -252350,7 +252353,12 @@ async def handle_video_dubbing_callback(
                     output_format="video_subtitle",
                     processing="1",
                 )
-            await safe_edit_or_send(query, "TOAN AAS đang tạo video phụ đề + lồng tiếng hoàn chỉnh...")
+            await safe_edit_or_send(
+                query,
+                subdub_progress_text("received_file", "", lang),
+                parse_mode="HTML",
+                reply_markup=subdub_progress_keyboard("", lang),
+            )
             result = await execute_subtitle_plus_dub_full_from_callback(query, context, state, lang)
             if str(result.get("status") or "") == "AUTO_EXACT_CONFIRMATION_REQUIRED":
                 return await render_subdub_auto_exact_confirmation(
