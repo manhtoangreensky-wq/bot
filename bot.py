@@ -1,3 +1,15 @@
+from services.autopost_ui import (
+    autopost_main_dashboard_text, autopost_main_keyboard, autopost_content_plan_text,
+    autopost_plan_result_text, autopost_brands_text, autopost_affiliate_text,
+    autopost_calendar_text, autopost_channels_text, autopost_queue_text,
+    autopost_metrics_text, autopost_ads_center_text, autopost_settings_text,
+    autopost_kill_switch_text, autopost_resume_ads_text
+)
+from services.autopost_brand import get_platform_brand_policy, validate_brand_compliance_for_platform, DEFAULT_BRAND_PROFILE
+from services.autopost_strategy import create_content_plan, CONTENT_GOALS
+from services.autopost_affiliate import match_affiliate_for_post, check_paid_ads_affiliate_policy
+from services.autopost_publish import check_platform_capability, OmnichannelPublishQueue
+from services.autopost_ads import evaluate_organic_to_ads, validate_ad_spend_request, DEFAULT_OWNER_BUDGET_ENVELOPE
 """
 ╔══════════════════════════════════════════════════════════════════╗
 ║   TOAN AAS v1.0 Beta - DYNAMIC QR READY                         ║
@@ -138091,48 +138103,12 @@ AUTOPOST_NICHES = [
     ("✨ Thương hiệu cá nhân", "ca_nhan"),
 ]
 
+autopost_engine_code = '''
 def autopost_hub_text(lang: str = "vi", user_id: int = 0) -> str:
-    lang = normalize_user_language(lang) or "vi"
-    if lang == "en":
-        return (
-            "📢 <b>AUTO POST & MARKETING GROWTH HUB</b>\\n\\n"
-            "Automate content creation, multi-platform publishing, and affiliate monetization:\\n\\n"
-            "• 🚀 <b>AI Post & Campaign Planner:</b> Generate viral hooks, full captions, hashtags & golden posting hours.\\n"
-            "• 📱 <b>Telegram Auto-Publish:</b> Publish posts directly to your connected Telegram Channels & Groups.\\n"
-            "• 🔗 <b>Affiliate Marketing:</b> Share your personal referral link and earn 10% commission Xu on every top-up.\\n"
-            "• 📅 <b>Post Scheduler:</b> Queue and schedule future posts automatically.\\n\\n"
-            "<i>Select a feature below to start:</i>"
-        )
-    elif lang == "zh":
-        return (
-            "📢 <b>自动发帖与营销增长中心 (Marketing Hub)</b>\\n\\n"
-            "全自动化内容策划、多平台发帖与联盟营销变现：\\n\\n"
-            "• 🚀 <b>AI 爆款发帖策划：</b> 自动生成吸引人的开头（Hook）、完整文案、热门标签与最佳发布时间。\\n"
-            "• 📱 <b>Telegram 频道自动发布：</b> 直接将文案与媒体发布到您关联的频道与群组。\\n"
-            "• 🔗 <b>联盟营销推广：</b> 分享个人推广专属链接，好友充值即可赚取 10% 佣金 Xu。\\n"
-            "• 📅 <b>定时发帖队列：</b> 自动化排期与发布内容。\\n\\n"
-            "<i>请在下方选择功能以开始：</i>"
-        )
-    return (
-        "📢 <b>ĐĂNG BÀI TỰ ĐỘNG & MARKETING HUB</b>\\n\\n"
-        "Hệ thống tự động hóa sáng tạo nội dung, đăng bài đa nền tảng và tiếp thị liên kết thông minh:\\n\\n"
-        "• 🚀 <b>Lập kế hoạch bài đăng AI:</b> Tự động tạo Tiêu đề thu hút (Hook), bài viết hoàn chỉnh (Caption), Hashtags và Khung giờ vàng.\\n"
-        "• 📱 <b>Đăng ngay lên Kênh/Nhóm Telegram:</b> Đẩy bài viết trực tiếp lên Kênh Telegram của bạn tự động.\\n"
-        "• 🔗 <b>Tiếp thị liên kết (Affiliate):</b> Chia sẻ link giới thiệu độc quyền, nhận ngay <b>10% hoa hồng Xu</b> khi người dùng nạp tiền.\\n"
-        "• 📅 <b>Lên lịch đăng tự động:</b> Quản lý hàng đợi và lịch phát hành bài viết định kỳ.\\n\\n"
-        "<i>Chọn một tính năng bên dưới để bắt đầu:</i>"
-    )
+    return autopost_main_dashboard_text(lang)
 
 def autopost_hub_keyboard(lang: str = "vi", is_admin: bool = False) -> InlineKeyboardMarkup:
-    lang = normalize_user_language(lang) or "vi"
-    copy = public_hub_copy(lang)
-    rows = [
-        [InlineKeyboardButton("🚀 Lập kế hoạch đăng bài AI", callback_data="autopost|niches")],
-        [InlineKeyboardButton("📱 Đăng bài lên Telegram", callback_data="autopost|publish_tg"), InlineKeyboardButton("🔗 Tiếp thị liên kết (Affiliate)", callback_data="autopost|affiliate")],
-        [InlineKeyboardButton("📺 Quản lý Kênh liên kết", callback_data="autopost|channels"), InlineKeyboardButton("📅 Lịch đăng bài", callback_data="autopost|schedule")],
-        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
-    ]
-    return InlineKeyboardMarkup(rows)
+    return autopost_main_keyboard(lang)
 
 async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -138140,141 +138116,114 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     copy = public_hub_copy(lang)
-    is_admin = is_admin_user(uid)
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "main"
     value = parts[2] if len(parts) > 2 else ""
 
-    if action in {"main", "hub"}:
+    if action in {"main", "hub", "dashboard"}:
         return await safe_edit_query_message(
             query,
-            autopost_hub_text(lang, uid),
+            autopost_main_dashboard_text(lang),
             parse_mode="HTML",
-            reply_markup=autopost_hub_keyboard(lang, is_admin),
+            reply_markup=autopost_main_keyboard(lang),
         )
 
-    if action == "niches":
-        keyboard_rows = []
-        for name, code in AUTOPOST_NICHES:
-            keyboard_rows.append([InlineKeyboardButton(name, callback_data=f"autopost|gen|{code}")])
-        keyboard_rows.append([
-            InlineKeyboardButton(f"⬅️ {copy['back']}", callback_data="autopost|main"),
-            InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
-        ])
-        text = (
-            "🎯 <b>CHỌN NGÀNH HÀNG CẦN LẬP KẾ HOẠCH ĐĂNG BÀI:</b>\\n\\n"
-            "AI sẽ tự động nghiên cứu insight khách hàng, tạo hook thu hút, kịch bản caption, hashtags và gợi ý giờ đăng tối ưu cho bạn."
-        )
-        return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard_rows))
-
-    if action == "gen":
-        niche_code = value or "cong_nghe"
-        niche_name = dict(AUTOPOST_NICHES).get(niche_code, "Kinh doanh & Sáng tạo")
-        await safe_edit_query_message(query, f"⏳ <b>AI đang lập kế hoạch bài đăng cho ngành {html.escape(niche_name)}...</b>", parse_mode="HTML")
-        
-        # Build prompt for AI post planner
-        prompt = (
-            f"Bạn là chuyên gia Content Marketing & Copywriting hàng đầu cho mạng xã hội (Facebook, TikTok, Telegram, Instagram).\\n"
-            f"Hãy viết một bài đăng mẫu cực kỳ thu hút cho ngành: {niche_name}.\\n"
-            f"Cấu trúc yêu cầu:\\n"
-            f"1. 🎯 HOOK / TIÊU ĐỀ: 2 câu giật tít gây tò mò.\\n"
-            f"2. 📝 NỘI DUNG CHÍNH (CAPTION): Ngắn gọn, nêu vấn đề, giải pháp và lợi ích nổi bật (150-250 từ).\\n"
-            f"3. 🔔 CALL TO ACTION (CTA): Kêu gọi bình luận hoặc click link.\\n"
-            f"4. 🏷️ HASHTAGS: 5-8 hashtag chuẩn SEO.\\n"
-            f"5. ⏰ KHUNG GIỜ ĐĂNG VÀNG: Gợi ý 2 khung giờ tốt nhất trong ngày."
-        )
-        
-        try:
-            ai_res = await call_ai_chat_with_fallback("Bạn là Giám đốc Marketing AI chuyên nghiệp của TOAN AAS.", prompt, uid, max_tokens=1500)
-            post_content = ai_res.get("text") if ai_res.get("ok") else ""
-        except Exception:
-            post_content = ""
-            
-        if not post_content:
-            post_content = (
-                f"🎯 <b>[HOOK]</b> Bí quyết bứt phá doanh số ngành {niche_name} mà 90% người làm chưa biết!\\n\\n"
-                f"📝 <b>[NỘI DUNG]</b>\\n"
-                f"Bạn đang tìm cách thu hút khách hàng tiềm năng mỗi ngày mà không tốn hàng giờ viết bài?\\n"
-                f"TOAN AAS mang đến giải pháp tự động hóa nội dung và hình ảnh thông minh giúp bạn tiết kiệm 80% thời gian.\\n\\n"
-                f"🔔 <b>[CTA]</b> Trải nghiệm ngay hôm nay để nhận ưu đãi đặc biệt!\\n\\n"
-                f"🏷️ <b>[HASHTAGS]</b> #{niche_code} #Marketing #AIAutomation #TOANAAS #KinhDoanhOnline\\n\\n"
-                f"⏰ <b>[GIỜ VÀNG]</b> 11:30 - 13:00 và 20:00 - 21:30 hàng ngày."
-            )
-            
-        context.user_data["last_generated_post"] = post_content
-        
+    if action == "content_plan":
         reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 Tạo bài khác", callback_data=f"autopost|gen|{niche_code}")],
-            [InlineKeyboardButton("📱 Đăng bài này lên Kênh Telegram", callback_data="autopost|publish_tg"), InlineKeyboardButton("📅 Lưu vào lịch đăng", callback_data="autopost|save_calendar")],
-            [InlineKeyboardButton("🎯 Đổi ngành khác", callback_data="autopost|niches"), InlineKeyboardButton(f"⬅️ {copy['back']}", callback_data="autopost|main")],
+            [InlineKeyboardButton("👗 Thời trang", callback_data="autopost|gen_plan|thoi_trang"), InlineKeyboardButton("💄 Mỹ phẩm", callback_data="autopost|gen_plan|my_pham")],
+            [InlineKeyboardButton("📱 Công nghệ & AI", callback_data="autopost|gen_plan|cong_nghe"), InlineKeyboardButton("🎓 Khóa học", callback_data="autopost|gen_plan|khoa_hoc")],
+            [InlineKeyboardButton("🏡 Bất động sản", callback_data="autopost|gen_plan|bat_dong_san"), InlineKeyboardButton("☕ F&B Ăn uống", callback_data="autopost|gen_plan|an_uong")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
         ])
-        
-        return await safe_edit_query_message(
-            query,
-            f"🚀 <b>KẾ HOẠCH BÀI ĐĂNG AI — {html.escape(niche_name).upper()}</b>\\n\\n{html.escape(post_content)}",
-            parse_mode="HTML",
-            reply_markup=reply_kb,
-        )
+        return await safe_edit_query_message(query, autopost_content_plan_text(), parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "gen_plan":
+        niche = value or "cong_nghe"
+        plan = create_content_plan(str(uid), DEFAULT_BRAND_PROFILE, niche, duration_days=7)
+        context.user_data["active_content_plan"] = plan
+        msg = autopost_plan_result_text(niche, plan["total_posts"], plan["items"][0])
+        reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📅 Xem toàn bộ lịch 7 ngày", callback_data="autopost|calendar"), InlineKeyboardButton("🚀 Đăng ngay bài 1", callback_data="autopost|queue")],
+            [InlineKeyboardButton("⬅️ Đổi ngành", callback_data="autopost|content_plan"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ])
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "brands":
+        msg = autopost_brands_text(DEFAULT_BRAND_PROFILE)
+        reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
     if action == "affiliate":
+        msg = autopost_affiliate_text(uid)
         ref_link = f"https://t.me/toanaasbot?start=ref_{uid}"
-        text = (
-            "🔗 <b>CHƯƠNG TRÌNH TIẾP THỊ LIÊN KẾT (AFFILIATE) TOAN AAS</b>\\n\\n"
-            "Kiếm Xu hoa hồng thụ động không giới hạn bằng cách giới thiệu người dùng:\\n\\n"
-            f"• Link giới thiệu của bạn:\\n<code>{ref_link}</code>\\n\\n"
-            "🎁 <b>Chính sách hoa hồng:</b>\\n"
-            "• Nhận ngay <b>10% Xu</b> giá trị mỗi lần người được giới thiệu nạp Xu thành công.\\n"
-            "• Xu hoa hồng được cộng tự động vào số dư ví và dùng được cho mọi dịch vụ AI.\\n\\n"
-            "📊 <b>Thống kê tài khoản:</b>\\n"
-            f"• Mã đối tác: <code>{uid}</code>\\n"
-            "• Trạng thái đối tác: <b>Đang hoạt động ✅</b>\\n"
-            "• Tỷ lệ chia sẻ: <b>10%</b>"
-        )
         reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📲 Chia sẻ link này", url=f"https://t.me/share/url?url={ref_link}&text={urllib.parse.quote('Trải nghiệm Bot AI đa năng TOAN AAS - Tạo video, ảnh, âm thanh và dịch thuật thông minh!')}")],
-            [InlineKeyboardButton(f"⬅️ {copy['back']}", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+            [InlineKeyboardButton("📲 Chia sẻ link giới thiệu", url=f"https://t.me/share/url?url={ref_link}&text={urllib.parse.quote('Trải nghiệm Bot AI TOAN AAS!')}")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
         ])
-        return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=reply_kb)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
-    if action == "publish_tg":
-        text = (
-            "📱 <b>HƯỚNG DẪN ĐĂNG BÀI LÊN KÊNH / NHÓM TELEGRAM:</b>\\n\\n"
-            "1. Thêm Bot <b>@toanaasbot</b> vào Kênh hoặc Nhóm của bạn với tư cách <b>Quản trị viên (Admin)</b> có quyền Đăng bài.\\n"
-            "2. Gửi lệnh sau trực tiếp vào chat:\\n"
-            "<code>/post_channel @ten_kenh_cua_ban Nội dung bài viết...</code>\\n\\n"
-            "Bot sẽ tự động định dạng và đẩy bài viết lên Kênh ngay lập tức!"
-        )
+    if action == "calendar":
+        msg = autopost_calendar_text()
         reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"⬅️ {copy['back']}", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+            [InlineKeyboardButton("🧠 Tạo kế hoạch mới", callback_data="autopost|content_plan")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
         ])
-        return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=reply_kb)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
     if action == "channels":
-        rows = list_social_channels(uid) if 'list_social_channels' in globals() else []
-        channel_list = "\\n".join([f"• 📺 {html.escape(r[3] or 'Kênh')} ({r[2]}) - Trạng thái: {r[7]}" for r in rows]) if rows else "• Chưa có kênh nào được liên kết."
-        text = (
-            "📺 <b>QUẢN LÝ KÊNH MẠNG XÃ HỘI & PHÁT SÓNG:</b>\\n\\n"
-            f"<b>Danh sách kênh của bạn:</b>\\n{channel_list}\\n\\n"
-            "💡 <i>Để thêm kênh mới, hãy thêm Bot làm Quản trị viên của Kênh/Nhóm rồi liên kết.</i>"
-        )
+        msg = autopost_channels_text()
         reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"⬅️ {copy['back']}", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
         ])
-        return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=reply_kb)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
-    if action in {"schedule", "save_calendar"}:
-        text = (
-            "📅 <b>LỊCH ĐĂNG BÀI TỰ ĐỘNG (CONTENT CALENDAR)</b>\\n\\n"
-            "✅ Bài viết đã được lưu vào hàng đợi lập lịch phát hành tự động.\\n\\n"
-            "Hệ thống sẽ tự động đăng bài theo các khung giờ vàng tối ưu đã được phân tích."
-        )
+    if action == "queue":
+        msg = autopost_queue_text()
         reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🚀 Tạo thêm bài khác", callback_data="autopost|niches")],
-            [InlineKeyboardButton(f"⬅️ {copy['back']}", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
         ])
-        return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=reply_kb)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
-    return await safe_edit_query_message(query, autopost_hub_text(lang, uid), parse_mode="HTML", reply_markup=autopost_hub_keyboard(lang, is_admin))
+    if action == "metrics":
+        msg = autopost_metrics_text()
+        reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📣 Xem đề xuất quảng cáo", callback_data="autopost|ads_center")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "ads_center":
+        env = DEFAULT_OWNER_BUDGET_ENVELOPE
+        msg = autopost_ads_center_text(env)
+        reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🛑 Dừng toàn bộ quảng cáo (Kill Switch)", callback_data="autopost|kill_switch")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "kill_switch":
+        DEFAULT_OWNER_BUDGET_ENVELOPE["emergency_kill_switch"] = True
+        reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🟢 Bật lại", callback_data="autopost|resume_ads")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|ads_center"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ])
+        return await safe_edit_query_message(query, autopost_kill_switch_text(), parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "resume_ads":
+        DEFAULT_OWNER_BUDGET_ENVELOPE["emergency_kill_switch"] = False
+        return await safe_edit_query_message(query, autopost_resume_ads_text(), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại Ads", callback_data="autopost|ads_center")]]))
+
+    if action == "settings":
+        reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
+        return await safe_edit_query_message(query, autopost_settings_text(), parse_mode="HTML", reply_markup=reply_kb)
+
+    return await safe_edit_query_message(query, autopost_main_dashboard_text(lang), parse_mode="HTML", reply_markup=autopost_main_keyboard(lang))
+'''
+exec(compile(autopost_engine_code, f"{__file__}:autopost_engine", "exec"), globals())
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -138316,12 +138265,11 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         clear_memory_guided_pending(query.from_user.id)
     clear_music_guided_pending(query.from_user.id)
     if action == "autopost":
-        is_admin = is_admin_user(query.from_user.id)
         return await safe_edit_query_message(
             query,
-            autopost_hub_text(lang, query.from_user.id),
+            autopost_main_dashboard_text(lang),
             parse_mode="HTML",
-            reply_markup=autopost_hub_keyboard(lang, is_admin),
+            reply_markup=autopost_main_keyboard(lang),
         )
     if action == "chat_pro":
         return await safe_edit_query_message(query, public_chat_menu_text(query.from_user.id, lang), reply_markup=public_chat_menu_keyboard(query.from_user.id, lang))
