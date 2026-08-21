@@ -234,6 +234,32 @@ def test_lane_probe_with_empty_state_cannot_skip_asr_chain(monkeypatch):
     assert readiness["effective_ready"] is False
 
 
+def test_exact_auto_speaker_route_uses_deepgram_when_global_asr_is_auto(monkeypatch):
+    _patch_settings_store(monkeypatch)
+    _patch_ready_runtime(monkeypatch)
+    monkeypatch.setattr(bot, "ASR_PROVIDER", "auto")
+    monkeypatch.setattr(bot, "subdub_auto_provider_capacity_ready", lambda provider=None: True)
+    state = {
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "media_kind": "video",
+        "translate_requested": "1",
+        "target_language": "en",
+    }
+
+    readiness = bot.get_subdub_lane_readiness(
+        bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        state,
+        public=True,
+        confirmed_product=True,
+    )
+
+    assert readiness["asr_required"] is True
+    assert readiness["asr_provider"] == "deepgram"
+    assert "asr_provider_policy_required" not in readiness["blockers"]
+    assert readiness["effective_ready"] is True
+
+
 def test_job_state_with_subtitle_file_still_skips_asr(monkeypatch):
     _patch_settings_store(monkeypatch)
     _patch_ready_runtime(monkeypatch)
