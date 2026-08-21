@@ -138668,12 +138668,13 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
                 "<i>• Hệ thống tự động nhận diện ngôn ngữ gốc và dịch trực tiếp sang Tiếng Việt (hoặc ngôn ngữ bot bạn đang chọn).</i>"
             ),
         }
+        copy = public_hub_copy(lang)
         return await safe_edit_or_send(
             query,
             prompt_map.get(lang, prompt_map["vi"]),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")]
+                [InlineKeyboardButton(f"⬅️ {copy.get('free_tools_label', 'Công cụ miễn phí')}", callback_data="freehub|main")]
             ]),
         )
     if action == "open_utilities":
@@ -138694,7 +138695,7 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
                     InlineKeyboardButton(f"📱 {copy.get('freehub_util_qr', 'Tạo mã QR nhanh')}", callback_data="freehub|util_qr"),
                     InlineKeyboardButton(f"🎭 {copy.get('freehub_util_avatar', 'Sinh Avatar AI')}", callback_data="freehub|util_avatar"),
                 ],
-                [InlineKeyboardButton(f"⬅️ {copy.get('freehub_back_freehub', 'Công cụ miễn phí')}", callback_data="freehub|main")],
+                [InlineKeyboardButton(f"⬅️ {copy.get('free_tools_label', 'Công cụ miễn phí')}", callback_data="freehub|main")],
             ]),
         )
     if action in {"util_rate", "util_rate_input"}:
@@ -231942,27 +231943,36 @@ def video_downloader_start_text(lang: str = "vi") -> str:
     )
 
 def video_downloader_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⬅️ Video Studio" if is_vi else "⬅️ Video Studio", callback_data="menu|main_video")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [
+            InlineKeyboardButton(f"⬅️ {copy.get('video_label', 'Video Studio')}", callback_data="menu|main_video"),
+            InlineKeyboardButton(f"🆓 {copy.get('free_tools_label', 'Công cụ miễn phí')}", callback_data="freehub|main"),
+        ],
+        [InlineKeyboardButton(f"🏠 {copy.get('main_menu', 'Menu chính')}", callback_data="menu|main")],
     ])
 
 def video_downloader_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
     is_vi = normalize_user_language(lang) == "vi"
+    dl_video = "🎬 Tải video" if is_vi else "🎬 Download video"
+    dl_audio = "🎵 Tải audio" if is_vi else "🎵 Download audio"
+    dl_cover = "🖼 Tải ảnh bìa" if is_vi else "🖼 Cover image"
+    send_another = "✏️ Gửi link khác" if is_vi else "✏️ Another link"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🎬 Tải video" if is_vi else "🎬 Video", callback_data="vdownload|download|video"),
-            InlineKeyboardButton("🎵 Tải audio" if is_vi else "🎵 Audio", callback_data="vdownload|download|audio"),
+            InlineKeyboardButton(dl_video, callback_data="vdownload|download|video"),
+            InlineKeyboardButton(dl_audio, callback_data="vdownload|download|audio"),
         ],
         [
-            InlineKeyboardButton("🖼 Tải ảnh bìa" if is_vi else "🖼 Cover", callback_data="vdownload|download|cover"),
-            InlineKeyboardButton("✏️ Gửi link khác" if is_vi else "✏️ Another link", callback_data="vdownload|start"),
+            InlineKeyboardButton(dl_cover, callback_data="vdownload|download|cover"),
+            InlineKeyboardButton(send_another, callback_data="vdownload|start"),
         ],
         [
-            InlineKeyboardButton("⬅️ Video Studio" if is_vi else "⬅️ Video Studio", callback_data="menu|main_video"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton(f"⬅️ {copy.get('video_label', 'Video Studio')}", callback_data="menu|main_video"),
+            InlineKeyboardButton(f"🆓 {copy.get('free_tools_label', 'Công cụ miễn phí')}", callback_data="freehub|main"),
         ],
+        [InlineKeyboardButton(f"🏠 {copy.get('main_menu', 'Menu chính')}", callback_data="menu|main")],
     ])
 
 def video_downloader_guard_text(reason: str = "", lang: str = "vi", detection: dict | None = None) -> str:
@@ -263763,11 +263773,12 @@ async def handle_free_hub_pending_text(update: Update, context: ContextTypes.DEF
     reason = sensitive_free_task_reason(text, task_type)
     if reason:
         clear_free_hub_pending(uid)
+        copy = public_hub_copy(lang)
         await update.message.reply_text(
             free_hub_sensitive_text(lang),
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
-                [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")],
+                [InlineKeyboardButton(f"👨‍💼 {copy['support']}", callback_data="menu|support")],
+                [InlineKeyboardButton(f"⬅️ {copy.get('free_tools_label', 'Công cụ miễn phí')}", callback_data="freehub|main")],
             ]),
         )
         return True
@@ -263791,102 +263802,133 @@ async def handle_free_hub_pending_text(update: Update, context: ContextTypes.DEF
     elif task_type == "open_translate":
         clear_free_hub_pending(uid)
         lang = get_user_language(uid) or "vi"
+        copy = public_hub_copy(lang)
         res = opt.translate_free_text(text, target_lang=lang)
         result_text = opt.format_translation_result(res, text, user_lang=lang)
-        btn_label = "🌐 Dịch đoạn khác" if lang == "vi" else ("🌐 Translate another" if lang == "en" else "🌐 翻译其他文本")
+        btn_label = f"🌐 {copy.get('freehub_translate_another', 'Dịch đoạn khác')}"
         await update.message.reply_text(
             result_text,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton(btn_label, callback_data="freehub|open_translate")],
-                [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")],
+                [InlineKeyboardButton(f"⬅️ {copy.get('free_tools_label', 'Công cụ miễn phí')}", callback_data="freehub|main")],
             ]),
         )
         return True
     elif task_type == "util_rate":
         clear_free_hub_pending(uid)
         lang = get_user_language(uid) or "vi"
+        copy = public_hub_copy(lang)
         conv = opt.convert_custom_currency(text, target_lang=lang)
         result_text = opt.format_currency_conversion_result(conv, lang=lang)
-        btn_label = "✍️ Nhập số tiền / Công thức khác" if lang == "vi" else ("✍️ Convert another" if lang == "en" else "✍️ 换算其他金额")
+        btn_label = f"✍️ {copy.get('freehub_rate_another', 'Nhập số tiền / Công thức khác')}"
         await update.message.reply_text(
             result_text,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton(btn_label, callback_data="freehub|util_rate_input")],
-                [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
-                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                [InlineKeyboardButton(f"⬅️ {copy.get('freehub_utilities', 'Tỷ giá & Tiện ích')}", callback_data="freehub|open_utilities")],
+                [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
             ]),
         )
         return True
     elif task_type == "util_weather":
         clear_free_hub_pending(uid)
+        lang = get_user_language(uid) or "vi"
+        copy = public_hub_copy(lang)
         w_data = opt.fetch_weather_report(text)
         country_str = f", {w_data['country']}" if w_data.get("country") else ""
+        weather_header = {
+            "en": f"🌤 <b>WEATHER AT: {w_data['city'].upper()}{country_str.upper()}</b>",
+            "zh": f"🌤 <b>实时天气查询: {w_data['city'].upper()}{country_str.upper()}</b>",
+            "vi": f"🌤 <b>THỜI TIẾT TẠI: {w_data['city'].upper()}{country_str.upper()}</b>",
+        }.get(lang, f"🌤 <b>WEATHER AT: {w_data['city'].upper()}{country_str.upper()}</b>")
+        temp_label = {"en": "Temperature", "zh": "温度", "vi": "Nhiệt độ"}.get(lang, "Temperature")
+        wind_label = {"en": "Wind speed", "zh": "风速", "vi": "Tốc độ gió"}.get(lang, "Wind speed")
+        cond_label = {"en": "Condition", "zh": "天气状况", "vi": "Tình trạng"}.get(lang, "Condition")
+        source_label = {"en": "Source", "zh": "数据来源", "vi": "Nguồn dữ liệu"}.get(lang, "Source")
         await update.message.reply_text(
-            f"🌤 <b>THỜI TIẾT TẠI: {w_data['city'].upper()}{country_str.upper()}</b>\n\n"
-            f"🌡 <b>Nhiệt độ:</b> {w_data['temperature']}°C\n"
-            f"💨 <b>Tốc độ gió:</b> {w_data['windspeed']} km/h\n"
-            f"☁️ <b>Tình trạng:</b> {w_data.get('description', 'Ổn định')}\n\n"
-            f"<i>Nguồn dữ liệu: {w_data.get('source', 'Open-Meteo')}</i>",
+            f"{weather_header}\n\n"
+            f"🌡 <b>{temp_label}:</b> {w_data['temperature']}°C\n"
+            f"💨 <b>{wind_label}:</b> {w_data['windspeed']} km/h\n"
+            f"☁️ <b>{cond_label}:</b> {w_data.get('description', 'OK')}\n\n"
+            f"<i>{source_label}: {w_data.get('source', 'Open-Meteo')}</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✍️ Xem địa điểm khác", callback_data="freehub|util_weather_input")],
-                [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
-                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                [InlineKeyboardButton(f"✍️ {copy.get('freehub_weather_another', 'Xem địa điểm khác')}", callback_data="freehub|util_weather_input")],
+                [InlineKeyboardButton(f"⬅️ {copy.get('freehub_utilities', 'Tỷ giá & Tiện ích')}", callback_data="freehub|open_utilities")],
+                [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
             ]),
         )
         return True
     elif task_type == "util_qr":
         clear_free_hub_pending(uid)
+        lang = get_user_language(uid) or "vi"
+        copy = public_hub_copy(lang)
         qr_url = opt.generate_qr_code_url(text, 500)
-        caption_text = f"📱 <b>MÃ QR ĐÃ TẠO THÀNH CÔNG</b>\n\nNội dung: <code>{text[:120]}</code>"
+        qr_title = {
+            "en": "📱 <b>QR CODE GENERATED SUCCESSFULLY</b>",
+            "zh": "📱 <b>二维码生成成功</b>",
+            "vi": "📱 <b>MÃ QR ĐÃ TẠO THÀNH CÔNG</b>",
+        }.get(lang, "📱 <b>QR CODE GENERATED SUCCESSFULLY</b>")
+        content_label = {"en": "Content", "zh": "内容", "vi": "Nội dung"}.get(lang, "Content")
+        caption_text = f"{qr_title}\n\n{content_label}: <code>{text[:120]}</code>"
+        btn_another = f"📱 {copy.get('freehub_qr_another', 'Tạo mã QR khác')}"
+        btn_back = f"⬅️ {copy.get('freehub_utilities', 'Tỷ giá & Tiện ích')}"
         try:
             await update.message.reply_photo(
                 photo=qr_url,
                 caption=caption_text,
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📱 Tạo mã QR khác", callback_data="freehub|util_qr")],
-                    [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
+                    [InlineKeyboardButton(btn_another, callback_data="freehub|util_qr")],
+                    [InlineKeyboardButton(btn_back, callback_data="freehub|open_utilities")],
                 ]),
             )
         except Exception:
             await update.message.reply_text(
-                f"📱 <b>MÃ QR CỦA BẠN:</b>\n\n"
-                f"Nội dung: <code>{text[:120]}</code>\n\n"
-                f"🔗 <a href=\'{qr_url}\'>Bấm vào đây để tải ảnh mã QR</a>",
+                f"{caption_text}\n\n"
+                f"🔗 <a href='{qr_url}'>Click here to download QR image</a>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📱 Tạo mã QR khác", callback_data="freehub|util_qr")],
-                    [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
+                    [InlineKeyboardButton(btn_another, callback_data="freehub|util_qr")],
+                    [InlineKeyboardButton(btn_back, callback_data="freehub|open_utilities")],
                 ]),
             )
         return True
     elif task_type == "util_avatar":
         avatar_set = int(state.get("avatar_set") or 1)
         clear_free_hub_pending(uid)
+        lang = get_user_language(uid) or "vi"
+        copy = public_hub_copy(lang)
         avatar_url = opt.generate_avatar_ai_url(text, avatar_set)
-        caption_text = f"🎭 <b>AVATAR AI CỦA BẠN</b>\n\nNhân vật: <b>{text[:60]}</b>"
+        avatar_title = {
+            "en": "🎭 <b>YOUR AI AVATAR</b>",
+            "zh": "🎭 <b>您的专属 AI 头像</b>",
+            "vi": "🎭 <b>AVATAR AI CỦA BẠN</b>",
+        }.get(lang, "🎭 <b>YOUR AI AVATAR</b>")
+        char_label = {"en": "Character", "zh": "角色/昵称", "vi": "Nhân vật"}.get(lang, "Character")
+        caption_text = f"{avatar_title}\n\n{char_label}: <b>{text[:60]}</b>"
+        btn_another = f"🎭 {copy.get('freehub_avatar_another', 'Sinh Avatar khác')}"
+        btn_back = f"⬅️ {copy.get('freehub_utilities', 'Tỷ giá & Tiện ích')}"
         try:
             await update.message.reply_photo(
                 photo=avatar_url,
                 caption=caption_text,
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🎭 Sinh Avatar khác", callback_data="freehub|util_avatar")],
-                    [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
+                    [InlineKeyboardButton(btn_another, callback_data="freehub|util_avatar")],
+                    [InlineKeyboardButton(btn_back, callback_data="freehub|open_utilities")],
                 ]),
             )
         except Exception:
             await update.message.reply_text(
-                f"🎭 <b>AVATAR AI CỦA BẠN:</b>\n\n"
-                f"Nhân vật: <b>{text[:60]}</b>\n\n"
-                f"🔗 <a href=\'{avatar_url}\'>Bấm vào đây để xem ảnh Avatar</a>",
+                f"{caption_text}\n\n"
+                f"🔗 <a href='{avatar_url}'>Click here to view Avatar</a>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🎭 Sinh Avatar khác", callback_data="freehub|util_avatar")],
-                    [InlineKeyboardButton("⬅️ Tiện ích mở", callback_data="freehub|open_utilities")],
+                    [InlineKeyboardButton(btn_another, callback_data="freehub|util_avatar")],
+                    [InlineKeyboardButton(btn_back, callback_data="freehub|open_utilities")],
                 ]),
             )
         return True
