@@ -35,6 +35,7 @@ from services.multiscene_video_pipeline import (
 )
 from services import video_final_output
 from services import video_ai_edit_provider
+from services import product_video_addon_materialization
 from services import video_project_queue as video_project_queue_service
 from services.video_provider_base import VideoGenerationRequest
 from services.video_provider_router import (
@@ -1035,6 +1036,26 @@ def _addon_plan(job: dict | None = None) -> dict:
         if isinstance(value, dict) and value:
             return value
     return {}
+
+
+def product_video_materialize_addons(
+    job: dict | None,
+    *,
+    workspace: str,
+    scene_count: int,
+    scene_duration: float,
+) -> dict:
+    """Resolve the strict worker Add-on contract before provider readiness."""
+
+    logo_material = product_video_logo_material(job)
+    return product_video_addon_materialization.materialize_product_video_addons(
+        job,
+        workspace=workspace,
+        scene_count=scene_count,
+        scene_duration=scene_duration,
+        logo_fallback_path=str(logo_material.get("logo_path") or ""),
+        ffmpeg_path=_ffmpeg_binary(),
+    )
 
 
 def original_prompt_from_job(job: dict | None = None) -> str:
@@ -4595,12 +4616,55 @@ def _scene_specs_from_plan(plan: dict[str, Any]) -> list[SceneSpec]:
     return specs
 
 
+def _product_video_addon_render_kwargs(
+    addon_plan: dict,
+    addon_materials: dict | None,
+    *,
+    bgm_audio_path: str | None = None,
+) -> dict[str, Any]:
+    materials = dict(addon_materials or {})
+    if not materials.get("strict"):
+        return {
+            "bgm_audio_path": bgm_audio_path,
+            "enable_voice": False,
+            "enable_subtitle": bool(
+                addon_plan.get("subtitle_enabled", True)
+                and _has_user_facing_subtitle_text({"addon_plan": addon_plan})
+            ),
+            "enable_logo": _logo_enabled(addon_plan),
+            "logo_text": str(addon_plan.get("logo_text") or ""),
+            "logo_position": str(addon_plan.get("logo_position") or "bottom_right"),
+        }
+    return {
+        "voice_audio_path": materials.get("voice_audio_path") or None,
+        "voice_volume_percent": int(materials.get("voice_volume_percent") or 100),
+        "enable_voice": bool(materials.get("voice_audio_path")),
+        "bgm_audio_path": materials.get("bgm_audio_path") or None,
+        "music_volume_percent": int(materials.get("music_volume_percent") or 20),
+        "sfx_audio_paths": list(materials.get("sfx_audio_paths") or []),
+        "sfx_assets": list(materials.get("sfx_assets") or []),
+        "sfx_volume_percent": int(materials.get("sfx_volume_percent") or 35),
+        "subtitle_path": materials.get("subtitle_path") or None,
+        "enable_subtitle": bool(materials.get("subtitle_path")),
+        "logo_path": materials.get("logo_path") or None,
+        "enable_logo": bool(materials.get("logo_path")),
+        "logo_position": str(materials.get("logo_position") or "top_left"),
+        "watermark_text": str(materials.get("watermark_text") or ""),
+        "watermark_position": str(materials.get("watermark_position") or "bottom_right"),
+        "watermark_opacity_percent": int(materials.get("watermark_opacity_percent") or 45),
+        "text_overlays": list(materials.get("text_overlays") or []),
+        "transition_plan": list(materials.get("transition_plan") or []),
+        "requested_addons": list(materials.get("requested_addons") or []),
+    }
+
+
 def _run_per_scene_provider_orchestrator(
     job: dict,
     workspace: str,
     *,
     provider_order: list[str],
     bgm_audio_path: str | None = None,
+    addon_materials: dict | None = None,
     provider_events: list[dict[str, Any]],
     debug_results: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -5046,7 +5110,11 @@ def _run_per_scene_provider_orchestrator(
         return base
 
     addon = _addon_plan(job)
-    subtitle_requested = bool(addon.get("subtitle_enabled", True))
+    render_addon_kwargs = _product_video_addon_render_kwargs(
+        addon,
+        addon_materials,
+        bgm_audio_path=bgm_audio_path,
+    )
     final_result = finalize_multiscene_scene_clips(
         user_id=str(job.get("user_id") or ""),
         job_id=str(job.get("job_id") or job.get("id") or ""),
@@ -5054,12 +5122,7 @@ def _run_per_scene_provider_orchestrator(
         scenes=scene_specs,
         scene_clip_paths=scene_outputs,
         manifest=manifest,
-        bgm_audio_path=bgm_audio_path,
-        enable_voice=False,
-        enable_subtitle=bool(subtitle_requested and _has_user_facing_subtitle_text(job)),
-        enable_logo=_logo_enabled(addon),
-        logo_text=str(addon.get("logo_text") or ""),
-        logo_position=str(addon.get("logo_position") or "bottom_right"),
+        **render_addon_kwargs,
         output_width=_canvas_size(_aspect_ratio(job))[0],
         output_height=_canvas_size(_aspect_ratio(job))[1],
     )
@@ -5489,10 +5552,20 @@ def _default_bgm_path(addon_plan: dict, workspace: str, duration_seconds: float)
         return None
 
 
-def _run_multiscene_render(job: dict, workspace: str, *, render_video_func, bgm_audio_path: str | None = None) -> dict:
+def _run_multiscene_render(
+    job: dict,
+    workspace: str,
+    *,
+    render_video_func,
+    bgm_audio_path: str | None = None,
+    addon_materials: dict | None = None,
+) -> dict:
     addon = _addon_plan(job)
-    subtitle_requested = bool(addon.get("subtitle_enabled", True))
-    subtitle_enabled = bool(subtitle_requested and _has_user_facing_subtitle_text(job))
+    render_addon_kwargs = _product_video_addon_render_kwargs(
+        addon,
+        addon_materials,
+        bgm_audio_path=bgm_audio_path,
+    )
     if product_video_orchestration_mode(job) == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S:
         per_scene_duration = float(product_video_scene_duration_seconds(job))
     else:
@@ -5508,12 +5581,7 @@ def _run_multiscene_render(job: dict, workspace: str, *, render_video_func, bgm_
         max_scenes=_scene_count(job),
         default_scene_duration=per_scene_duration,
         aspect_ratio=_aspect_ratio(job),
-        enable_voice=False,
-        bgm_audio_path=bgm_audio_path,
-        enable_subtitle=subtitle_enabled,
-        enable_logo=_logo_enabled(addon),
-        logo_text=str(addon.get("logo_text") or ""),
-        logo_position=str(addon.get("logo_position") or "bottom_right"),
+        **render_addon_kwargs,
         output_width=output_width,
         output_height=output_height,
     )
@@ -5523,10 +5591,51 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     addon = _addon_plan(job)
     workspace = os.path.abspath(work_dir)
     total_duration = max(1.0, float(product_video_expected_duration_seconds(job)))
-    bgm_audio_path = _default_bgm_path(addon, workspace, total_duration)
-    degrade_notes = _addon_degrade_notes(addon, bgm_audio_path=bgm_audio_path, job=job)
-    readiness = real_video_provider_readiness(job)
     is_product_video = bool(str(job.get("source") or "") == "product_video" or job.get("product_video"))
+    addon_materials = product_video_materialize_addons(
+        job,
+        workspace=workspace,
+        scene_count=_scene_count(job),
+        scene_duration=product_video_scene_duration_seconds(job),
+    )
+    if addon_materials.get("strict") and not addon_materials.get("ok"):
+        blocker = str(addon_materials.get("blocker") or "addon_materialization_failed")
+        raise RealVideoRenderError(
+            blocker,
+            diagnostics={
+                "ok": False,
+                "status": "failed_no_charge",
+                "terminal_state": "failed_no_charge",
+                "final_decision": "failed_no_charge",
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "provider_poll_called": False,
+                "provider_submit_allowed": False,
+                "no_charge": True,
+                "addon_materialization": {
+                    "contract_version": product_video_addon_materialization.CONTRACT_VERSION,
+                    "requested_addons": list(addon_materials.get("requested_addons") or []),
+                    "materialized_addons": list(addon_materials.get("materialized_addons") or []),
+                    "blocker": blocker,
+                    "silent_drop_allowed": False,
+                },
+                "blocker": blocker,
+                "provider_error": blocker,
+            },
+        )
+    job["_product_video_addon_materials"] = dict(addon_materials)
+    strict_addons = bool(addon_materials.get("strict"))
+    bgm_audio_path = (
+        str(addon_materials.get("bgm_audio_path") or "").strip()
+        if strict_addons
+        else _default_bgm_path(addon, workspace, total_duration)
+    ) or None
+    degrade_notes = [] if strict_addons else _addon_degrade_notes(
+        addon,
+        bgm_audio_path=bgm_audio_path,
+        job=job,
+    )
+    readiness = real_video_provider_readiness(job)
     product_type = _product_type(job)
     product_route = video_final_output.route_for_product_type(product_type)
     required_capability = product_video_required_capability(job)
@@ -5920,6 +6029,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
                     workspace,
                     provider_order=_provider_order(job),
                     bgm_audio_path=bgm_audio_path,
+                    addon_materials=addon_materials,
                     provider_events=provider_events,
                     debug_results=provider_runtime_debug,
                 )
@@ -5933,6 +6043,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
                     workspace,
                     render_video_func=real_scene_renderer,
                     bgm_audio_path=bgm_audio_path,
+                    addon_materials=addon_materials,
                 )
         except RealVideoRenderError as exc:
             provider_error = str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE
@@ -5971,7 +6082,13 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         fallback_used = True
         fallback_reason = provider_error or "provider_unavailable"
         try:
-            result = _run_multiscene_render(job, local_workspace, render_video_func=build_local_scene_card_renderer(job), bgm_audio_path=bgm_audio_path)
+            result = _run_multiscene_render(
+                job,
+                local_workspace,
+                render_video_func=build_local_scene_card_renderer(job),
+                bgm_audio_path=bgm_audio_path,
+                addon_materials=addon_materials,
+            )
         except RealVideoRenderError as exc:
             _raise_render_error(str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE, dict(getattr(exc, "diagnostics", {}) or {}))
         result["renderer"] = LOCAL_SCENE_CARD_RENDERER
@@ -6000,7 +6117,13 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         fallback_used = True
         fallback_reason = provider_error or "provider_unavailable"
         try:
-            result = _run_multiscene_render(job, local_workspace, render_video_func=build_local_scene_composer(job), bgm_audio_path=bgm_audio_path)
+            result = _run_multiscene_render(
+                job,
+                local_workspace,
+                render_video_func=build_local_scene_composer(job),
+                bgm_audio_path=bgm_audio_path,
+                addon_materials=addon_materials,
+            )
         except RealVideoRenderError as exc:
             _raise_render_error(str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE, dict(getattr(exc, "diagnostics", {}) or {}))
         result["renderer"] = LOCAL_PLACEHOLDER_RENDERER
@@ -6075,7 +6198,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
             _raise_render_error(str(duration_contract.get("reason") or "final_duration_invalid"), result)
         result["final_duration_seconds"] = float(result.get("output_duration") or 0)
         logo_material = product_video_logo_material(job)
-        if logo_material.get("logo_enabled"):
+        if logo_material.get("logo_enabled") and not strict_addons:
             result["logo_overlay_requested"] = True
             logo_path = str(logo_material.get("logo_path") or "")
             overlay_path = os.path.join(workspace, "final_with_logo.mp4")
@@ -6163,13 +6286,30 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     result["placeholder_forbidden"] = bool(route_requires_provider)
     result["fallback_policy"] = fallback_capability
     result["original_user_prompt"] = original_prompt_from_job(job)
-    result["addon_degrade_notes"] = degrade_notes
-    result["partial_addons"] = any(item.get("requested") and not item.get("applied") for item in degrade_notes)
-    result["voice_requested"] = bool(addon.get("voice_enabled"))
-    result["music_requested"] = bool(addon.get("music_enabled"))
-    result["subtitle_requested"] = bool(addon.get("subtitle_enabled"))
+    result["addon_degrade_notes"] = [] if strict_addons else degrade_notes
+    result["partial_addons"] = (
+        False
+        if strict_addons
+        else any(item.get("requested") and not item.get("applied") for item in degrade_notes)
+    )
+    requested_addon_names = set(str(item or "") for item in addon_materials.get("requested_addons") or [])
+    result["voice_requested"] = bool(addon.get("voice_enabled") or "dubbing" in requested_addon_names)
+    result["music_requested"] = bool(addon.get("music_enabled") or "music" in requested_addon_names)
+    result["subtitle_requested"] = bool(addon.get("subtitle_enabled") or "subtitle" in requested_addon_names)
     result["subtitle_user_facing_source"] = bool(_has_user_facing_subtitle_text(job))
-    result["logo_requested"] = bool(addon.get("logo_enabled"))
+    result["logo_requested"] = bool(addon.get("logo_enabled") or "logo" in requested_addon_names)
+    if strict_addons:
+        result["addon_materialization"] = {
+            "contract_version": product_video_addon_materialization.CONTRACT_VERSION,
+            "requested_addons": list(addon_materials.get("requested_addons") or []),
+            "materialized_addons": list(addon_materials.get("materialized_addons") or []),
+            "silent_drop_allowed": False,
+        }
+        result["addon_application"] = dict(result.get("addon_application") or {
+            "requested": list(addon_materials.get("requested_addons") or []),
+            "applied": list(addon_materials.get("materialized_addons") or []),
+            "missing": [],
+        })
     if bgm_audio_path:
         result["bgm_audio_path"] = bgm_audio_path
     orchestration_mode = product_video_orchestration_mode(job)

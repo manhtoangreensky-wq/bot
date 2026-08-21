@@ -59,11 +59,11 @@ Lưu ý vận hành: các mức dưới đây là copy công khai đã duyệt. 
 - Nhạc nền AI: 130 / 150 / 200 Xu.
 - Bài hát có lời: 200 / 250 / 300 Xu.
 - Video theo cảnh:
-  - Nhanh gọn — 5 giây/cảnh: 200 Xu/cảnh.
-  - Tiêu chuẩn có âm thanh — 5 giây/cảnh: 220 Xu/cảnh.
-  - Cân bằng rõ nét — 8 giây/cảnh: 80 Xu/cảnh.
+  - Nhanh gọn — 8 giây/cảnh: 80 Xu/cảnh.
   - Chuyển động ổn định — 5 giây/cảnh: 110 Xu/cảnh.
   - Chuyển động có âm thanh — 5 giây/cảnh: 160 Xu/cảnh.
+  - Cân bằng rõ nét — 5 giây/cảnh: 200 Xu/cảnh.
+  - Tiêu chuẩn có âm thanh — 5 giây/cảnh: 220 Xu/cảnh.
   - Cảnh dài có âm thanh — 15 giây/cảnh: 220 Xu/cảnh.
   - Cao cấp linh hoạt — 10 giây/cảnh: 370 Xu/cảnh.
   - Diễn xuất chân thật — 6 giây/cảnh: 370 Xu/cảnh.
@@ -206,7 +206,7 @@ Xin lỗi, ghi nhận đúng lỗi, xin mã xử lý và nói sẽ chuyển admi
 - examples: tạo video bao nhiêu, video 30s tính sao
 - answer_policy: trả bảng gói video và scene duration 8s.
 - required_context: pricing_facts
-- response_template: Dạ video AI có các gói 200 / 300 / 400 / 500 / 600 / 800 / 1000 / 1200 / 1500 Xu. Product Video hiện tính 1 cảnh = 8s; video khoảng 30s thường cần 4 cảnh. Bot sẽ hiện hóa đơn trước khi mình xác nhận.
+- response_template: Dạ video AI có các gói từ Nhanh gọn 80 Xu/cảnh đến Điện ảnh nhiều cảnh 2.360 Xu/cảnh, được sắp từ thấp đến cao. Mỗi gói có thời lượng cảnh riêng; video khoảng 30s thường cần khoảng 4 cảnh 8s. Bot sẽ hiện hóa đơn trước khi mình xác nhận.
 - follow_up_question: Anh/chị muốn làm video về sản phẩm gì để em gợi ý gói phù hợp?
 - safety_notes: Không tự tạo video thật.
 
@@ -410,12 +410,12 @@ Bot: Dạ anh/chị yên tâm nha. Xem menu, nhập thử nội dung, chọn gó
 ### tạo video giá bao nhiêu
 
 Khách: Tạo video giá sao em?
-Bot: Dạ video AI có các gói 200 / 300 / 400 / 500 / 600 / 800 / 1000 / 1200 / 1500 Xu. Product Video hiện tính 1 cảnh = 8s. Bot sẽ hiện hóa đơn trước khi xử lý. Anh/chị muốn làm video về sản phẩm gì để em gợi ý gói phù hợp?
+Bot: Dạ video AI có các gói từ Nhanh gọn 80 Xu/cảnh đến Điện ảnh nhiều cảnh 2.360 Xu/cảnh, được sắp từ thấp đến cao. Mỗi gói có thời lượng cảnh riêng và bot sẽ hiện hóa đơn trước khi xử lý. Anh/chị muốn làm video về sản phẩm gì để em gợi ý gói phù hợp?
 
 ### video 30s tính sao
 
 Khách: Anh muốn video 30 giây, tính sao em?
-Bot: Dạ khoảng 30 giây thường cần 4 cảnh nếu mỗi cảnh 8s, tức khoảng 32s. Ví dụ gói Cơ bản 300 Xu/cảnh thì 4 cảnh là 1.200 Xu trước ưu đãi nếu có. Bot vẫn hiển thị hóa đơn cuối cùng trước khi anh/chị xác nhận.
+Bot: Dạ khoảng 30 giây thường cần 4 cảnh nếu mỗi cảnh 8s, tức khoảng 32s. Ví dụ gói Nhanh gọn 80 Xu/cảnh thì 4 cảnh là 320 Xu, giảm 10% còn 288 Xu tiền video. Bot vẫn hiển thị hóa đơn cuối cùng trước khi anh/chị xác nhận.
 
 ### dùng ảnh/logo/nhạc có sẵn
 

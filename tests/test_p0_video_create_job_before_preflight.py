@@ -337,14 +337,28 @@ def test_trial_limit_blocks_existing_job_before_product_specific_render():
     )
 
 
-def test_zero_cost_confirm_stops_before_submit_and_outbox_creation():
+def test_zero_cost_confirm_promotes_ready_job_before_rendering_status():
     block = _confirm_handler_block()
 
-    assert "confirm_video_project_invoice(" not in block
+    ready = block.index("ready = video_trace_state.record_video_confirm_precheck_result")
+    promote = block.index("queue_result = confirm_video_project_invoice(", ready)
+    status_state = block.index('session["current_step"] = "b14_queue_status"', promote)
+    status = block.index("return await video_b14_send_or_edit_status_panel(", status_state)
+    promotion_branch = block[promote:status_state]
+
+    assert ready < promote < status_state < status
+    assert "project_id," in promotion_branch
+    assert "uid," in promotion_branch
+    assert "balance_xu=credits" in promotion_branch
+    assert "use_wallet=False" in promotion_branch
+    assert "provider_admission=final_admission" in promotion_branch
+    assert "require_provider_admission=True" in promotion_branch
+    assert 'queue_job_id != job_id' in promotion_branch
+    assert 'blocker_code="same_job_promotion_failed"' in promotion_branch
     assert "kickoff_product_video_job_after_confirm" not in block
-    assert "dispatch_outbox" not in block
-    assert 'preflight_result="PASS"' in block
-    assert 'admission_result="PASS"' in block
+    assert "spend_fixed_credit_info" not in block
+    assert "provider_submit" not in promotion_branch
+    assert '"xu_charged": 0' in promotion_branch
 
 
 def test_invoice_rerender_token_does_not_change_durable_attempt_key():

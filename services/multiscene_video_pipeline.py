@@ -6,6 +6,7 @@ confirmation, queueing, provider selection, and final delivery.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import os
@@ -122,8 +123,14 @@ class MultisceneManifest:
     master_video_path: str | None = None
     voice_audio_path: str | None = None
     bgm_audio_path: str | None = None
+    sfx_audio_paths: list[str] = field(default_factory=list)
     subtitle_path: str | None = None
     logo_path: str | None = None
+    watermark_text: str = ""
+    watermark_position: str = "bottom_right"
+    text_overlays: list[dict[str, Any]] = field(default_factory=list)
+    addon_application: dict[str, Any] = field(default_factory=dict)
+    composition_signature: str = ""
     final_video_path: str | None = None
     status: str = "pending"
     created_at: float = field(default_factory=time.time)
@@ -897,6 +904,22 @@ def _drawtext_escape(text: str) -> str:
     return ffmpeg_text.escape_filter_text(re.sub(r"\s+", " ", str(text or "").strip())[:120])
 
 
+def _drawtext_font_path() -> str:
+    candidates = (
+        os.getenv("LOCAL_FFMPEG_FONT_PATH", ""),
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf",
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
+    )
+    for candidate in candidates:
+        selected = str(candidate or "").strip()
+        if selected and os.path.isfile(selected):
+            return os.path.abspath(selected)
+    return ""
+
+
 def _drawtext_expr(position: str) -> tuple[str, str]:
     key = str(position or "bottom_right").lower().replace("-", "_")
     if key == "top_left":
@@ -905,11 +928,131 @@ def _drawtext_expr(position: str) -> tuple[str, str]:
         return "(w-text_w)/2", "24"
     if key == "top_right":
         return "w-text_w-24", "24"
+    if key == "center_left":
+        return "24", "(h-text_h)/2"
+    if key == "center":
+        return "(w-text_w)/2", "(h-text_h)/2"
+    if key == "center_right":
+        return "w-text_w-24", "(h-text_h)/2"
     if key == "bottom_left":
         return "24", "h-text_h-24"
     if key == "bottom_center":
         return "(w-text_w)/2", "h-text_h-24"
     return "w-text_w-24", "h-text_h-24"
+
+
+def _clamped_percent(value: Any, default: int) -> int:
+    try:
+        selected = int(value)
+    except (TypeError, ValueError):
+        selected = int(default)
+    return max(0, min(200, selected))
+
+
+def _file_signature(path: str | None) -> dict[str, Any]:
+    selected = str(path or "").strip()
+    if not selected:
+        return {}
+    absolute = os.path.abspath(selected)
+    try:
+        stat = os.stat(absolute)
+    except OSError:
+        return {"missing": True}
+    digest = hashlib.sha256()
+    try:
+        with open(absolute, "rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+    except OSError:
+        return {"missing": True}
+    return {"size": int(stat.st_size), "sha256": digest.hexdigest()}
+
+
+def _scene_windows(
+    scene_durations: list[float],
+    transition_overlaps: list[float],
+) -> dict[int, tuple[float, float]]:
+    windows: dict[int, tuple[float, float]] = {}
+    cursor = 0.0
+    for index, duration in enumerate(scene_durations, start=1):
+        selected_duration = max(0.0, float(duration or 0.0))
+        windows[index] = (cursor, cursor + selected_duration)
+        overlap = (
+            max(0.0, float(transition_overlaps[index - 1] or 0.0))
+            if index - 1 < len(transition_overlaps)
+            else 0.0
+        )
+        cursor += max(0.0, selected_duration - overlap)
+    return windows
+
+
+def _overlay_window(
+    overlay: dict[str, Any],
+    scene_windows: dict[int, tuple[float, float]],
+) -> tuple[float, float] | None:
+    scope = str(overlay.get("scene_scope") or "").strip().lower()
+    if scope.isdigit() and int(scope) in scene_windows:
+        start, end = scene_windows[int(scope)]
+    elif "start_seconds" in overlay:
+        try:
+            start = max(0.0, float(overlay.get("start_seconds") or 0.0))
+        except (TypeError, ValueError):
+            start = 0.0
+        end = float("inf")
+    else:
+        return None
+    try:
+        duration = float(overlay.get("duration_seconds") or 0.0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    if duration > 0.0:
+        end = min(end, start + duration)
+    if end == float("inf") or end <= start:
+        return None
+    return start, end
+
+
+def _composition_signature(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _validate_composed_video(path: str, *, require_audio: bool) -> dict[str, Any]:
+    selected = ensure_video_output(path)
+    streams = probe_media_streams(selected)
+    stream_rows = [item for item in list(streams.get("streams") or []) if isinstance(item, dict)]
+    video_streams = [item for item in stream_rows if item.get("codec_type") == "video"]
+    audio_streams = [item for item in stream_rows if item.get("codec_type") == "audio"]
+    if not video_streams:
+        raise RuntimeError("final_video_stream_missing")
+    if require_audio and not audio_streams:
+        raise RuntimeError("final_audio_stream_missing")
+    ffmpeg = _ffmpeg_path()
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg_missing")
+    decoded = safe_run_ffmpeg(
+        [ffmpeg, "-v", "error", "-i", selected, "-f", "null", "-"],
+        timeout=300,
+    )
+    if decoded.returncode != 0:
+        raise RuntimeError(f"final_full_decode_failed:{(decoded.stderr or '')[-300:]}")
+    return {
+        "container_probe": True,
+        "full_decode": True,
+        "video_stream_count": len(video_streams),
+        "audio_stream_count": len(audio_streams),
+        "bytes": int(os.path.getsize(selected)),
+        "streams": stream_rows,
+    }
 
 
 def build_scene_subtitle(scenes: list[SceneSpec], durations: list[float], output_srt_path: str) -> str:
@@ -1002,12 +1145,21 @@ def mux_final_multiscene_video(
     output_path: str,
     voice_audio_path: str | None = None,
     bgm_audio_path: str | None = None,
+    sfx_audio_paths: list[str] | None = None,
+    sfx_assets: list[dict[str, Any]] | None = None,
     subtitle_path: str | None = None,
     logo_path: str | None = None,
     logo_text: str | None = None,
+    watermark_text: str | None = None,
     burn_subtitles: bool = True,
     logo_position: str = "top-right",
     watermark_position: str | None = None,
+    watermark_opacity_percent: int = 45,
+    text_overlays: list[dict[str, Any]] | None = None,
+    scene_windows: dict[int, tuple[float, float]] | None = None,
+    voice_volume_percent: int = 100,
+    music_volume_percent: int = 20,
+    sfx_volume_percent: int = 35,
     preserve_master_audio: bool = False,
     audio_sample_rate: int = DEFAULT_AUDIO_SAMPLE_RATE,
     audio_channels: int = DEFAULT_AUDIO_CHANNELS,
@@ -1031,27 +1183,74 @@ def mux_final_multiscene_video(
         cmd += ["-i", ensure_video_output(bgm_audio_path)]
         bgm_input_index = next_input_index
         next_input_index += 1
+    sfx_input_indexes: list[int] = []
+    selected_sfx_paths = list(sfx_audio_paths or [])
+    for sfx_path in selected_sfx_paths:
+        cmd += ["-i", ensure_video_output(sfx_path)]
+        sfx_input_indexes.append(next_input_index)
+        next_input_index += 1
     logo_input_index = None
     if logo_path:
         logo_input_index = next_input_index
         cmd += ["-loop", "1", "-i", ensure_video_output(logo_path)]
+        next_input_index += 1
     video_map = "0:v:0"
     if subtitle_path and burn_subtitles:
         # Was the only site that escaped the backslash and colon but left the
         # quote alone, so a path containing one could close the value.
-        sub = ffmpeg_text.escape_filter_path(subtitle_path)
+        sub = ffmpeg_text.escape_filter_path(ensure_video_output(subtitle_path))
         filters.append(f"[{video_map}]subtitles='{sub}'[vsub]")
         video_map = "vsub"
-    clean_logo_text = _drawtext_escape(logo_text or "")
-    if clean_logo_text:
+    clean_watermark_text = _drawtext_escape(watermark_text or logo_text or "")
+    selected_text_overlays = [
+        dict(item) for item in list(text_overlays or []) if isinstance(item, dict)
+    ]
+    drawtext_font = ""
+    if clean_watermark_text or any(_drawtext_escape(str(item.get("text") or "")) for item in selected_text_overlays):
+        drawtext_font_path = _drawtext_font_path()
+        if not drawtext_font_path:
+            raise RuntimeError("drawtext_font_missing")
+        drawtext_font = f"fontfile='{ffmpeg_text.escape_filter_path(drawtext_font_path)}':"
+    if clean_watermark_text:
         x_expr, y_expr = _drawtext_expr(watermark_position or logo_position)
         input_label = f"[{video_map}]"
+        watermark_alpha = max(0.0, min(1.0, int(watermark_opacity_percent or 0) / 100.0))
         filters.append(
-            f"{input_label}drawtext=text='{clean_logo_text}':{ffmpeg_text.DRAWTEXT_NO_EXPANSION}:fontcolor=white:"
+            f"{input_label}drawtext={drawtext_font}text='{clean_watermark_text}':{ffmpeg_text.DRAWTEXT_NO_EXPANSION}:"
+            f"fontcolor=white@{watermark_alpha:.3f}:"
             f"fontsize=36:borderw=2:bordercolor=black@0.65:"
             f"box=1:boxcolor=black@0.25:boxborderw=10:x={x_expr}:y={y_expr}[vtxt]"
         )
         video_map = "vtxt"
+    selected_scene_windows = dict(scene_windows or {})
+    for index, overlay in enumerate(
+        selected_text_overlays,
+        start=1,
+    ):
+        clean_text = _drawtext_escape(str(overlay.get("text") or ""))
+        if not clean_text:
+            continue
+        x_expr, y_expr = _drawtext_expr(str(overlay.get("position") or "center"))
+        try:
+            font_size = max(14, min(96, int(overlay.get("font_size") or 32)))
+        except (TypeError, ValueError):
+            font_size = 32
+        try:
+            opacity = max(0.0, min(1.0, int(overlay.get("opacity_percent") or 100) / 100.0))
+        except (TypeError, ValueError):
+            opacity = 1.0
+        enable = ""
+        time_window = _overlay_window(overlay, selected_scene_windows)
+        if time_window:
+            enable = f":enable='between(t,{time_window[0]:.6f},{time_window[1]:.6f})'"
+        output_label = f"vtext{index}"
+        filters.append(
+            f"[{video_map}]drawtext={drawtext_font}text='{clean_text}':{ffmpeg_text.DRAWTEXT_NO_EXPANSION}:"
+            f"fontcolor=white@{opacity:.3f}:fontsize={font_size}:borderw=2:"
+            f"bordercolor=black@0.75:box=1:boxcolor=black@0.30:boxborderw=8:"
+            f"x={x_expr}:y={y_expr}{enable}[{output_label}]"
+        )
+        video_map = output_label
     if logo_input_index is not None:
         position = str(logo_position or "bottom_right").strip().lower().replace("-", "_")
         if position in {"top_left", "center_left", "bottom_left"}:
@@ -1082,11 +1281,30 @@ def mux_final_multiscene_video(
         filters.append("[0:a:0]volume=1.0[amaster]")
         audio_labels.append("[amaster]")
     if voice_input_index is not None:
-        filters.append(f"[{voice_input_index}:a:0]volume=1.0[avoice]")
+        voice_volume = _clamped_percent(voice_volume_percent, 100) / 100.0
+        filters.append(f"[{voice_input_index}:a:0]volume={voice_volume:.4f}[avoice]")
         audio_labels.append("[avoice]")
     if bgm_input_index is not None:
-        filters.append(f"[{bgm_input_index}:a:0]volume=0.10[abgm]")
+        music_volume = _clamped_percent(music_volume_percent, 20) / 100.0
+        filters.append(f"[{bgm_input_index}:a:0]volume={music_volume:.4f}[abgm]")
         audio_labels.append("[abgm]")
+    selected_sfx_assets = [
+        dict(item) if isinstance(item, dict) else {}
+        for item in list(sfx_assets or [])
+    ]
+    sfx_volume = _clamped_percent(sfx_volume_percent, 35) / 100.0
+    for index, input_index in enumerate(sfx_input_indexes):
+        asset = selected_sfx_assets[index] if index < len(selected_sfx_assets) else {}
+        try:
+            delay_ms = max(0, int(round(float(asset.get("start_seconds") or 0.0) * 1000.0)))
+        except (TypeError, ValueError):
+            delay_ms = 0
+        output_label = f"asfx{index}"
+        filters.append(
+            f"[{input_index}:a:0]volume={sfx_volume:.4f},"
+            f"adelay={delay_ms}:all=1[{output_label}]"
+        )
+        audio_labels.append(f"[{output_label}]")
     if len(audio_labels) > 1:
         filters.append(
             "".join(audio_labels)
@@ -1145,14 +1363,26 @@ def finalize_multiscene_scene_clips(
     scene_clip_paths: dict[int, str],
     manifest: MultisceneManifest | None = None,
     tts_func=None,
+    voice_audio_path: str | None = None,
+    voice_volume_percent: int = 100,
     bgm_audio_path: str | None = None,
+    music_volume_percent: int = 20,
+    sfx_audio_paths: list[str] | None = None,
+    sfx_assets: list[dict[str, Any]] | None = None,
+    sfx_volume_percent: int = 35,
+    subtitle_path: str | None = None,
     logo_path: str | None = None,
     enable_voice: bool = False,
     enable_subtitle: bool = True,
     enable_logo: bool = False,
     logo_text: str | None = None,
     logo_position: str = "bottom_right",
+    watermark_text: str | None = None,
     watermark_position: str | None = None,
+    watermark_opacity_percent: int = 45,
+    text_overlays: list[dict[str, Any]] | None = None,
+    transition_plan: list[str] | tuple[str, ...] | None = None,
+    requested_addons: list[str] | tuple[str, ...] | None = None,
     final_duration_tolerance_sec: float | None = None,
     output_width: int | None = None,
     output_height: int | None = None,
@@ -1171,14 +1401,102 @@ def finalize_multiscene_scene_clips(
     active_manifest.workspace_dir = workspace
     ordered_scenes = sorted(list(scenes or []), key=lambda item: int(item.scene_id))
     required_indexes = [int(scene.scene_id) for scene in ordered_scenes]
+    requested_addon_names = list(
+        dict.fromkeys(
+            _transition_key(item)
+            for item in list(requested_addons or [])
+            if str(item or "").strip()
+        )
+    )
+    selected_sfx_paths = [str(item or "").strip() for item in list(sfx_audio_paths or []) if str(item or "").strip()]
+    selected_sfx_assets = [dict(item) for item in list(sfx_assets or []) if isinstance(item, dict)]
+    selected_text_overlays = [
+        dict(item)
+        for item in list(text_overlays or [])
+        if isinstance(item, dict) and str(item.get("text") or "").strip()
+    ]
+    selected_subtitle_path = str(subtitle_path or "").strip()
+    selected_voice_path = str(voice_audio_path or "").strip()
+    selected_music_path = str(bgm_audio_path or "").strip()
+    selected_logo_path = str(logo_path or "").strip()
+    selected_watermark_text = str(watermark_text or logo_text or "").strip()
     scene_durations = [
         max(1.0, float(scene.target_duration_sec or 0.0))
         for scene in ordered_scenes
     ]
+    selected_transition_source: str | list[str] | tuple[str, ...] | None = [
+        scene.transition or "cut" for scene in ordered_scenes[:-1]
+    ]
+    if transition_plan:
+        selected_transition_source = transition_plan
     requested_transition_plan, implementation_transition_plan = _transition_plan(
-        [scene.transition or "cut" for scene in ordered_scenes[:-1]],
+        selected_transition_source,
         max(0, len(ordered_scenes) - 1),
     )
+    missing_addons: list[str] = []
+
+    def _material_file_present(path: str) -> bool:
+        try:
+            return bool(path and os.path.isfile(path) and os.path.getsize(path) > 0)
+        except OSError:
+            return False
+
+    for addon_name in requested_addon_names:
+        if addon_name == "subtitle" and not _material_file_present(selected_subtitle_path):
+            missing_addons.append(addon_name)
+        elif addon_name == "dubbing" and not _material_file_present(selected_voice_path):
+            missing_addons.append(addon_name)
+        elif addon_name == "music" and not _material_file_present(selected_music_path):
+            missing_addons.append(addon_name)
+        elif addon_name == "sfx" and (
+            not selected_sfx_paths
+            or any(not _material_file_present(path) for path in selected_sfx_paths)
+        ):
+            missing_addons.append(addon_name)
+        elif addon_name == "logo" and (
+            not enable_logo or not _material_file_present(selected_logo_path)
+        ):
+            missing_addons.append(addon_name)
+        elif addon_name == "watermark" and not selected_watermark_text:
+            missing_addons.append(addon_name)
+        elif addon_name == "text" and not selected_text_overlays:
+            missing_addons.append(addon_name)
+        elif addon_name == "transitions" and len(ordered_scenes) > 1 and (
+            not transition_plan
+            or len(list(transition_plan)) != len(ordered_scenes) - 1
+        ):
+            missing_addons.append(addon_name)
+        elif addon_name not in {
+            "subtitle",
+            "dubbing",
+            "music",
+            "sfx",
+            "logo",
+            "watermark",
+            "text",
+            "transitions",
+        }:
+            missing_addons.append(addon_name)
+    if missing_addons:
+        active_manifest.status = "addon_material_blocked"
+        active_manifest.concat_state = "not_ready"
+        active_manifest.addon_application = {
+            "requested": requested_addon_names,
+            "applied": [],
+            "missing": list(dict.fromkeys(missing_addons)),
+        }
+        active_manifest.errors["addons"] = f"addon_material_missing:{missing_addons[0]}"
+        manifest_path = _write_manifest(active_manifest)
+        return {
+            "ok": False,
+            "status": "addon_material_blocked",
+            "continue_polling": False,
+            "concat_attempted": False,
+            "concat_ready": False,
+            "manifest_path": manifest_path,
+            "addon_application": dict(active_manifest.addon_application),
+            "error": f"addon_material_missing:{missing_addons[0]}",
+        }
     selected_fps = max(1, min(120, int(output_fps or DEFAULT_NORMALIZED_FPS)))
     selected_transition_duration = max(0.0, float(transition_duration_sec or 0.0))
     transition_overlaps = [
@@ -1191,6 +1509,7 @@ def finalize_multiscene_scene_clips(
         )
         for index, effect in enumerate(implementation_transition_plan)
     ]
+    selected_scene_windows = _scene_windows(scene_durations, transition_overlaps)
     target_duration = sum(scene_durations) - sum(transition_overlaps)
     active_manifest.scene_specs = [asdict(scene) for scene in ordered_scenes]
     active_manifest.required_scene_indexes = required_indexes
@@ -1245,12 +1564,59 @@ def finalize_multiscene_scene_clips(
     previous_profile = dict(active_manifest.normalization_profile or {})
     previous_transition_plan = list(active_manifest.transition_plan or [])
     previous_transition_duration = float(active_manifest.transition_duration_sec or 0.0)
+    previous_composition_signature = str(active_manifest.composition_signature or "")
     active_manifest.normalization_profile = dict(normalization_profile)
     active_manifest.transition_plan = list(requested_transition_plan)
     active_manifest.transition_implementation_plan = list(
         implementation_transition_plan
     )
     active_manifest.transition_duration_sec = selected_transition_duration
+    active_manifest.voice_audio_path = os.path.abspath(selected_voice_path) if selected_voice_path else None
+    active_manifest.bgm_audio_path = os.path.abspath(selected_music_path) if selected_music_path else None
+    active_manifest.sfx_audio_paths = [os.path.abspath(path) for path in selected_sfx_paths]
+    active_manifest.subtitle_path = os.path.abspath(selected_subtitle_path) if selected_subtitle_path else None
+    active_manifest.logo_path = os.path.abspath(selected_logo_path) if selected_logo_path else None
+    active_manifest.watermark_text = selected_watermark_text
+    active_manifest.watermark_position = str(watermark_position or logo_position or "bottom_right")
+    active_manifest.text_overlays = [dict(item) for item in selected_text_overlays]
+    active_manifest.addon_application = {
+        "requested": requested_addon_names,
+        "applied": [],
+        "missing": [],
+    }
+    composition_contract = {
+        "scene_inputs": [
+            _file_signature(str(scene_clip_paths.get(index) or ""))
+            for index in required_indexes
+        ],
+        "normalization_profile": normalization_profile,
+        "transition_plan": requested_transition_plan,
+        "transition_implementation_plan": implementation_transition_plan,
+        "transition_duration_sec": selected_transition_duration,
+        "requested_addons": requested_addon_names,
+        "enable_voice": bool(enable_voice),
+        "enable_subtitle": bool(enable_subtitle),
+        "enable_logo": bool(enable_logo),
+        "voice": _file_signature(selected_voice_path),
+        "voice_volume_percent": _clamped_percent(voice_volume_percent, 100),
+        "music": _file_signature(selected_music_path),
+        "music_volume_percent": _clamped_percent(music_volume_percent, 20),
+        "sfx": [_file_signature(path) for path in selected_sfx_paths],
+        "sfx_assets": selected_sfx_assets,
+        "sfx_volume_percent": _clamped_percent(sfx_volume_percent, 35),
+        "subtitle": _file_signature(selected_subtitle_path),
+        "logo": _file_signature(selected_logo_path),
+        "logo_position": str(logo_position or "bottom_right"),
+        "watermark_text": selected_watermark_text,
+        "watermark_position": str(watermark_position or logo_position or "bottom_right"),
+        "watermark_opacity_percent": max(0, min(100, int(watermark_opacity_percent or 0))),
+        "text_overlays": selected_text_overlays,
+        "preserve_scene_audio": bool(preserve_scene_audio),
+        "audio_sample_rate": int(audio_sample_rate or DEFAULT_AUDIO_SAMPLE_RATE),
+        "audio_channels": int(audio_channels or DEFAULT_AUDIO_CHANNELS),
+    }
+    current_composition_signature = _composition_signature(composition_contract)
+    active_manifest.composition_signature = current_composition_signature
     tolerance = (
         max(0.25, float(final_duration_tolerance_sec))
         if final_duration_tolerance_sec is not None
@@ -1261,13 +1627,34 @@ def finalize_multiscene_scene_clips(
         previous_profile == normalization_profile
         and previous_transition_plan == requested_transition_plan
         and abs(previous_transition_duration - selected_transition_duration) <= 0.000001
+        and previous_composition_signature == current_composition_signature
     )
     if reuse_contract_matches and persisted_final and os.path.isfile(persisted_final) and os.path.getsize(persisted_final) > 0:
-        persisted_duration = probe_duration(persisted_final)
-        if abs(persisted_duration - target_duration) <= tolerance:
+        persisted_duration = 0.0
+        persisted_validation: dict[str, Any] | None = None
+        try:
+            persisted_duration = probe_duration(persisted_final)
+            if abs(persisted_duration - target_duration) <= tolerance:
+                persisted_validation = _validate_composed_video(
+                    persisted_final,
+                    require_audio=bool(
+                        preserve_scene_audio
+                        or selected_voice_path
+                        or selected_music_path
+                        or selected_sfx_paths
+                    ),
+                )
+        except (OSError, RuntimeError, ValueError):
+            persisted_validation = None
+        if persisted_validation:
             active_manifest.status = "final_ready"
             active_manifest.concat_state = "completed"
             active_manifest.final_duration_sec = persisted_duration
+            active_manifest.addon_application = {
+                "requested": requested_addon_names,
+                "applied": list(requested_addon_names),
+                "missing": [],
+            }
             manifest_path = _write_manifest(active_manifest)
             return {
                 "ok": True,
@@ -1297,6 +1684,9 @@ def finalize_multiscene_scene_clips(
                 "concat_output_valid": True,
                 "final_mp4_valid": True,
                 "final_reused_from_manifest": True,
+                "artifact_validation": persisted_validation,
+                "addon_application": dict(active_manifest.addon_application),
+                "composition_signature": current_composition_signature,
                 "delivery_state": active_manifest.delivery_state,
                 "charge_state": active_manifest.charge_state,
                 "error": None,
@@ -1384,35 +1774,56 @@ def finalize_multiscene_scene_clips(
             "error": "final_duration_out_of_tolerance",
         }
 
-    subtitle_path = None
+    resolved_subtitle_path = None
     if enable_subtitle:
-        subtitle_durations = [
-            max(0.1, duration - (transition_overlaps[index] if index < len(transition_overlaps) else 0.0))
-            for index, duration in enumerate(durations)
-        ]
-        subtitle_path = build_scene_subtitle(ordered_scenes, subtitle_durations, os.path.join(workspace, "scene_subtitles.srt"))
-        active_manifest.subtitle_path = subtitle_path
-    voice_path = None
+        if selected_subtitle_path:
+            resolved_subtitle_path = ensure_video_output(selected_subtitle_path)
+        else:
+            subtitle_durations = [
+                max(0.1, duration - (transition_overlaps[index] if index < len(transition_overlaps) else 0.0))
+                for index, duration in enumerate(durations)
+            ]
+            resolved_subtitle_path = build_scene_subtitle(
+                ordered_scenes,
+                subtitle_durations,
+                os.path.join(workspace, "scene_subtitles.srt"),
+            )
+        active_manifest.subtitle_path = resolved_subtitle_path
+    resolved_voice_path = None
     if enable_voice:
-        voice_path = create_master_voice_audio(
-            ordered_scenes,
-            workspace_dir=workspace,
-            tts_func=tts_func,
-            default_silence=True,
-        )
-        active_manifest.voice_audio_path = voice_path
+        if selected_voice_path:
+            resolved_voice_path = ensure_video_output(selected_voice_path)
+        else:
+            resolved_voice_path = create_master_voice_audio(
+                ordered_scenes,
+                workspace_dir=workspace,
+                tts_func=tts_func,
+                default_silence=True,
+            )
+        active_manifest.voice_audio_path = resolved_voice_path
     final = mux_final_multiscene_video(
         master_video_path=master,
         output_path=os.path.join(workspace, "final_output.mp4"),
-        voice_audio_path=voice_path,
-        bgm_audio_path=bgm_audio_path,
-        subtitle_path=subtitle_path,
-        logo_path=logo_path if enable_logo else None,
-        logo_text=logo_text if enable_logo else None,
+        voice_audio_path=resolved_voice_path,
+        voice_volume_percent=voice_volume_percent,
+        bgm_audio_path=selected_music_path or None,
+        music_volume_percent=music_volume_percent,
+        sfx_audio_paths=selected_sfx_paths,
+        sfx_assets=selected_sfx_assets,
+        sfx_volume_percent=sfx_volume_percent,
+        subtitle_path=resolved_subtitle_path,
+        logo_path=selected_logo_path if enable_logo else None,
+        logo_text=logo_text,
+        watermark_text=selected_watermark_text,
         burn_subtitles=bool(enable_subtitle),
         logo_position=logo_position,
         watermark_position=watermark_position,
+        watermark_opacity_percent=watermark_opacity_percent,
+        text_overlays=selected_text_overlays,
+        scene_windows=selected_scene_windows,
         preserve_master_audio=preserve_scene_audio,
+        audio_sample_rate=audio_sample_rate,
+        audio_channels=audio_channels,
     )
     final_duration = probe_duration(final)
     if abs(final_duration - target_duration) > tolerance:
@@ -1432,12 +1843,26 @@ def finalize_multiscene_scene_clips(
             "target_duration_sec": target_duration,
             "error": "final_duration_out_of_tolerance",
         }
+    artifact_validation = _validate_composed_video(
+        final,
+        require_audio=bool(
+            preserve_scene_audio
+            or resolved_voice_path
+            or selected_music_path
+            or selected_sfx_paths
+        ),
+    )
     active_manifest.final_video_path = final
     active_manifest.final_duration_sec = final_duration
     active_manifest.status = "final_ready"
     active_manifest.concat_state = "completed"
     active_manifest.delivery_state = "pending"
     active_manifest.charge_state = "pending"
+    active_manifest.addon_application = {
+        "requested": requested_addon_names,
+        "applied": list(requested_addon_names),
+        "missing": [],
+    }
     active_manifest.errors.pop("final", None)
     manifest_path = _write_manifest(active_manifest)
     return {
@@ -1446,7 +1871,7 @@ def finalize_multiscene_scene_clips(
         "continue_polling": False,
         "final_video_path": final,
         "master_video_path": master,
-        "subtitle_path": subtitle_path,
+        "subtitle_path": resolved_subtitle_path,
         "manifest_path": manifest_path,
         "scene_count": len(ordered_scenes),
         "scene_order": required_indexes,
@@ -1467,6 +1892,9 @@ def finalize_multiscene_scene_clips(
         "concat_ready": True,
         "concat_output_valid": True,
         "final_mp4_valid": True,
+        "artifact_validation": artifact_validation,
+        "addon_application": dict(active_manifest.addon_application),
+        "composition_signature": current_composition_signature,
         "delivery_state": "pending",
         "charge_state": "pending",
         "error": None,
@@ -1482,7 +1910,14 @@ def process_multiscene_video_pipeline(
     render_video_func,
     llm_func=None,
     tts_func=None,
+    voice_audio_path: str | None = None,
+    voice_volume_percent: int = 100,
     bgm_audio_path: str | None = None,
+    music_volume_percent: int = 20,
+    sfx_audio_paths: list[str] | None = None,
+    sfx_assets: list[dict[str, Any]] | None = None,
+    sfx_volume_percent: int = 35,
+    subtitle_path: str | None = None,
     logo_path: str | None = None,
     max_scenes: int = 3,
     default_scene_duration: float = 6.0,
@@ -1492,6 +1927,12 @@ def process_multiscene_video_pipeline(
     enable_logo: bool = False,
     logo_text: str | None = None,
     logo_position: str = "bottom_right",
+    watermark_text: str | None = None,
+    watermark_position: str | None = None,
+    watermark_opacity_percent: int = 45,
+    text_overlays: list[dict[str, Any]] | None = None,
+    transition_plan: list[str] | tuple[str, ...] | None = None,
+    requested_addons: list[str] | tuple[str, ...] | None = None,
     output_width: int | None = None,
     output_height: int | None = None,
 ) -> dict[str, Any]:
@@ -1555,13 +1996,26 @@ def process_multiscene_video_pipeline(
             scene_clip_paths=raw_paths,
             manifest=manifest,
             tts_func=tts_func,
+            voice_audio_path=voice_audio_path,
+            voice_volume_percent=voice_volume_percent,
             bgm_audio_path=bgm_audio_path,
+            music_volume_percent=music_volume_percent,
+            sfx_audio_paths=sfx_audio_paths,
+            sfx_assets=sfx_assets,
+            sfx_volume_percent=sfx_volume_percent,
+            subtitle_path=subtitle_path,
             logo_path=logo_path,
             enable_voice=enable_voice,
             enable_subtitle=enable_subtitle,
             enable_logo=enable_logo,
             logo_text=logo_text,
             logo_position=logo_position,
+            watermark_text=watermark_text,
+            watermark_position=watermark_position,
+            watermark_opacity_percent=watermark_opacity_percent,
+            text_overlays=text_overlays,
+            transition_plan=transition_plan,
+            requested_addons=requested_addons,
             output_width=output_width,
             output_height=output_height,
         )

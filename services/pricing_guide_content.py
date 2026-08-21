@@ -11037,6 +11037,12 @@ _PRODUCT_VIDEO_LABELS = {
     },
 }
 
+for _localized_video_labels in _PRODUCT_VIDEO_LABELS.values():
+    _localized_video_labels[200], _localized_video_labels[400] = (
+        _localized_video_labels[400],
+        _localized_video_labels[200],
+    )
+
 
 _PRODUCT_VIDEO_DURATION_UNITS = {
     "en": "seconds",
@@ -11058,23 +11064,9 @@ _PRODUCT_VIDEO_DURATION_UNITS = {
 }
 
 
-# Public-copy snapshot authorized from the Video canonical checkpoint
-# 3ba5986712d4dbab38c35b07be193edfa7289ca5.  This module is intentionally
-# display-only: it must not control Product Video routing, invoice, wallet, or
-# engine behavior while the separately-owned runtime change is integrated.
-PUBLIC_PRODUCT_VIDEO_CATALOG_VERSION = "2026-08-11.video.5"
-_PUBLIC_PRODUCT_VIDEO_CATALOG = (
-    {"tier_id": 200, "name": "Nhanh gọn", "seconds": 5, "unit_xu": 200},
-    {"tier_id": 300, "name": "Tiêu chuẩn có âm thanh", "seconds": 5, "unit_xu": 220},
-    {"tier_id": 400, "name": "Cân bằng rõ nét", "seconds": 8, "unit_xu": 80},
-    {"tier_id": 500, "name": "Chuyển động ổn định", "seconds": 5, "unit_xu": 110},
-    {"tier_id": 600, "name": "Chuyển động có âm thanh", "seconds": 5, "unit_xu": 160},
-    {"tier_id": 700, "name": "Cảnh dài có âm thanh", "seconds": 15, "unit_xu": 220},
-    {"tier_id": 800, "name": "Cao cấp linh hoạt", "seconds": 10, "unit_xu": 370},
-    {"tier_id": 1000, "name": "Diễn xuất chân thật", "seconds": 6, "unit_xu": 370},
-    {"tier_id": 1200, "name": "Đa góc máy", "seconds": 8, "unit_xu": 1260},
-    {"tier_id": 1500, "name": "Điện ảnh nhiều cảnh", "seconds": 10, "unit_xu": 2360},
-)
+# Display-only catalog. Product Video routing, invoices and wallet behavior
+# remain owned by the canonical pricing/runtime modules.
+PUBLIC_PRODUCT_VIDEO_CATALOG_VERSION = "2026-08-21.video.6"
 
 
 _VIDEO_MULTISCENE_DISCOUNT_COPY = {
@@ -11202,17 +11194,26 @@ def canonical_image_price_lines(lang: str = "vi") -> list[str]:
 
 
 def public_product_video_catalog() -> list[dict[str, int | str]]:
-    """Return the approved public Video catalog without touching Video runtime."""
+    """Return the canonical public Video catalog in sale-price order."""
 
-    return [dict(entry) for entry in _PUBLIC_PRODUCT_VIDEO_CATALOG]
+    return [
+        {
+            "tier_id": int(entry["tier_id"]),
+            "icon": str(entry["icon"]),
+            "name": str(entry["name"]),
+            "seconds": int(entry["seconds"]),
+            "unit_xu": int(entry["unit_xu"]),
+        }
+        for entry in video_ai_real_pricing.public_quality_catalog()
+    ]
 
 
 def public_video_price_lines() -> list[str]:
-    """Return Vietnamese Markdown-ready public Video prices from the checkpoint."""
+    """Return Vietnamese public Video prices from the canonical catalog."""
 
     return [
         (
-            f"• {entry['name']} — {int(entry['seconds'])} giây/cảnh: "
+            f"• {entry['icon']} {entry['name']} — {int(entry['seconds'])} giây/cảnh: "
             f"{int(entry['unit_xu']):,} Xu/cảnh."
         ).replace(",", ".")
         for entry in public_product_video_catalog()
@@ -11222,15 +11223,12 @@ def public_video_price_lines() -> list[str]:
 def canonical_product_video_price_lines(lang: str = "vi") -> list[str]:
     locale = public_copy_locale(lang)
     if locale == "vi":
-        return [
-            f"• {entry['name']}: <b>{_format_public_xu(int(entry['unit_xu']))} Xu / cảnh</b> — {int(entry['seconds'])} giây."
-            for entry in public_product_video_catalog()
-        ]
+        return public_video_price_lines()
     copy = _public_locale_copy(locale)
     labels = _PRODUCT_VIDEO_LABELS[locale]
     duration_unit = _PRODUCT_VIDEO_DURATION_UNITS[locale]
     return [
-        f"• {labels.get(int(entry['tier_id']), str(entry['tier_id']))}: "
+        f"• {entry['icon']} {labels.get(int(entry['tier_id']), str(entry['tier_id']))}: "
         f"<b>{_format_public_xu(int(entry['unit_xu']))} Xu / {copy['video_unit']}</b> — {int(entry['seconds'])} {duration_unit}."
         for entry in public_product_video_catalog()
     ]
@@ -11430,8 +11428,8 @@ def pricing_video_lines(context: dict | None = None) -> list[str]:
         "• Logo tự tạo bằng công cụ ảnh riêng: tính theo bảng giá Hình ảnh, không tính trong video nếu khách tự đưa tài nguyên.",
         "",
         "<b>Ví dụ</b>",
-        "• Nhanh gọn 1 cảnh: 200 Xu; không áp dụng giảm giá nhiều cảnh.",
-        "• Nhanh gọn 3 cảnh: 200 × 3 = 600 Xu; giảm 10% là 60 Xu; tiền video còn 540 Xu.",
+        "• Nhanh gọn 1 cảnh: 80 Xu; không áp dụng giảm giá nhiều cảnh.",
+        "• Nhanh gọn 3 cảnh: 80 × 3 = 240 Xu; giảm 10% là 24 Xu; tiền video còn 216 Xu.",
         "• Nếu anh/chị chọn tạo ảnh/logo AI riêng bên ngoài, phần ảnh sẽ tính theo bảng giá Hình ảnh.",
     ]
 
@@ -11912,7 +11910,7 @@ def customer_guide_sections() -> list[tuple[str, str, str]]:
                 *video_multiscene_discount_lines(),
                 "• Add-on được cộng riêng và không nằm trong phần giảm theo số cảnh.",
                 "",
-                "Ví dụ: Nhanh gọn 3 cảnh = 200 × 3 = 600 Xu; giảm 10% là 60 Xu; tiền video còn 540 Xu.",
+                "Ví dụ: Nhanh gọn 3 cảnh = 80 × 3 = 240 Xu; giảm 10% là 24 Xu; tiền video còn 216 Xu.",
             ]),
         ),
         (

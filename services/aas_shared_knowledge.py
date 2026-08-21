@@ -930,13 +930,13 @@ def video_pricing_reply(*, runtime_facts: dict | None = None) -> str:
         return (
             f"Dạ video AI có các gói: {summary}. "
             f"{VIDEO_MULTISCENE_DISCOUNT_COPY} "
-            "Ví dụ Nhanh gọn 3 cảnh: 200 × 3 = 600 Xu, giảm 10% còn 540 Xu tiền video. "
+            "Ví dụ Nhanh gọn 3 cảnh: 80 × 3 = 240 Xu, giảm 10% còn 216 Xu tiền video. "
             "Bot sẽ dừng ở màn hóa đơn để mình tự xác nhận. Anh/chị muốn làm video về sản phẩm gì để em gợi ý gói phù hợp?"
         )
     return (
         f"Dạ video AI có các gói: {_video_price_summary()}. "
         f"{VIDEO_MULTISCENE_DISCOUNT_COPY} "
-        "Ví dụ Nhanh gọn 3 cảnh: 200 × 3 = 600 Xu, giảm 10% còn 540 Xu tiền video. "
+        "Ví dụ Nhanh gọn 3 cảnh: 80 × 3 = 240 Xu, giảm 10% còn 216 Xu tiền video. "
         "Bot sẽ dừng ở màn hóa đơn để mình tự xác nhận. Anh/chị muốn làm video về sản phẩm gì để em gợi ý gói phù hợp?"
     )
 

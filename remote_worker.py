@@ -957,6 +957,29 @@ def download_product_video_logo(job: dict, work_dir: str) -> str:
     asset_pack = dict(raw_pack) if isinstance(raw_pack, dict) else {}
     material = dict(asset_pack.get("logo_material") or {})
     if not material.get("logo_enabled"):
+        raw_plan = job.get("addon_plan") or job.get("addon_plan_json") or {}
+        if isinstance(raw_plan, str):
+            try:
+                raw_plan = json.loads(raw_plan)
+            except Exception:
+                raw_plan = {}
+        addon_plan = dict(raw_plan) if isinstance(raw_plan, dict) else {}
+        logo = dict(addon_plan.get("logo") or {})
+        strict_logo = bool(
+            addon_plan.get("contract_version") == "product-video-addons-v1"
+            and "logo" in list(addon_plan.get("requested_addons") or [])
+        )
+        if strict_logo and logo.get("enabled"):
+            material = {
+                "logo_enabled": True,
+                "logo_file_id": str(
+                    logo.get("telegram_file_id") or logo.get("file_id") or ""
+                ).strip(),
+                "logo_position": str(
+                    logo.get("position") or "top_right"
+                ).strip(),
+            }
+    if not material.get("logo_enabled"):
         return ""
     job_id = str(job.get("job_id") or job.get("id") or "").strip()
     file_id = str(material.get("logo_file_id") or "").strip()
@@ -1338,6 +1361,8 @@ def process_claimed_job(job: dict) -> dict:
             "raw_prompt_burned_into_frame": bool(connector_result.get("raw_prompt_burned_into_frame")),
             "partial_addons": bool(connector_result.get("partial_addons")),
             "addon_degrade_notes": connector_result.get("addon_degrade_notes") or [],
+            "addon_materialization": connector_result.get("addon_materialization") or {},
+            "addon_application": connector_result.get("addon_application") or {},
         }
         send_heartbeat(job_id, 90, "uploading final video")
         return complete_job(job_id, result, final_path)

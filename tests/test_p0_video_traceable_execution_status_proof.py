@@ -5,7 +5,7 @@ Validates:
 2. Status panel UI rendering:
    - No internal job -> "Mã yêu cầu: <REQUEST_ID>", "Mã tác vụ: Chưa tạo".
    - Internal job created -> "Mã yêu cầu: <REQUEST_ID>", "Mã tác vụ: #<JOB_ID>".
-   - Provider submit succeeded -> "Mã provider: <PROVIDER_TASK_ID>".
+   - Provider submit succeeded -> provider task ID remains internal.
 3. Honest blocker copy for provider_not_configured vs provider_unavailable.
 4. Event trace recording and persistence.
 5. Idempotent status refresh preserving REQUEST_ID.
@@ -141,7 +141,8 @@ def test_status_panel_text_when_provider_task_submitted():
     )
     assert "Mã yêu cầu: <b>VID-20260819-PROV99</b>" in panel_text
     assert "Mã tác vụ: <b>#9999</b>" in panel_text
-    assert "Mã provider: <b>luma-task-abc-123</b>" in panel_text
+    assert "Mã provider:" not in panel_text
+    assert "luma-task-abc-123" not in panel_text
 
 
 def test_video_b14_blocker_label_truthful_wording():

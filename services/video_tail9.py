@@ -9,6 +9,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from services import video_ai_real_pricing
+
 
 TAIL_FLOW_VERSION = 18
 
@@ -88,21 +90,15 @@ STATUS_STAGES = (
     "failed",
 )
 
-CANONICAL_QUALITY_TIERS = (200, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500)
-LEGACY_LOCKED_QUALITY_TIERS = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
-MULTI_SCENE_QUALITY_TIERS = CANONICAL_QUALITY_TIERS
-UIFLOW3_EXTENDED_QUALITY_TIERS = (
-    200,
-    300,
-    400,
-    500,
-    600,
-    700,
-    800,
-    1000,
-    1200,
-    1500,
+CANONICAL_QUALITY_TIERS = tuple(
+    int(row["tier_id"])
+    for row in video_ai_real_pricing.public_quality_catalog()
 )
+LEGACY_LOCKED_QUALITY_TIERS = tuple(
+    tier_id for tier_id in CANONICAL_QUALITY_TIERS if tier_id != 700
+)
+MULTI_SCENE_QUALITY_TIERS = CANONICAL_QUALITY_TIERS
+UIFLOW3_EXTENDED_QUALITY_TIERS = CANONICAL_QUALITY_TIERS
 
 
 PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
@@ -243,7 +239,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "worker_owner": "product_video",
         "scene_duration_seconds": 300,
         "maximum_scene_count": 20,
-        "supported_quality_tiers": MULTI_SCENE_QUALITY_TIERS,
+        "supported_quality_tiers": LEGACY_LOCKED_QUALITY_TIERS,
         "execution_enabled": True,
         "execution_blocker": "",
     },
@@ -259,7 +255,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "input_type": "long_form_plan",
         "worker_owner": "product_video",
         "maximum_scene_count": 20,
-        "supported_quality_tiers": MULTI_SCENE_QUALITY_TIERS,
+        "supported_quality_tiers": LEGACY_LOCKED_QUALITY_TIERS,
         "execution_enabled": False,
         "execution_blocker": "long_video_under_upgrade",
     },

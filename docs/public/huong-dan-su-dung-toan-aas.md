@@ -169,16 +169,16 @@ Quy trình tạo video:
 10. Add-on được thực hiện sau khi ghép; video hoàn chỉnh được kiểm tra và gửi về bot.
 
 Bảng giá video theo gói:
-• Nhanh gọn: 200 Xu / cảnh — 5 giây.
-• Tiêu chuẩn có âm thanh: 220 Xu / cảnh — 5 giây.
-• Cân bằng rõ nét: 80 Xu / cảnh — 8 giây.
-• Chuyển động ổn định: 110 Xu / cảnh — 5 giây.
-• Chuyển động có âm thanh: 160 Xu / cảnh — 5 giây.
-• Cảnh dài có âm thanh: 220 Xu / cảnh — 15 giây.
-• Cao cấp linh hoạt: 370 Xu / cảnh — 10 giây.
-• Diễn xuất chân thật: 370 Xu / cảnh — 6 giây.
-• Đa góc máy: 1.260 Xu / cảnh — 8 giây.
-• Điện ảnh nhiều cảnh: 2.360 Xu / cảnh — 10 giây.
+• ⚡ Nhanh gọn — 8 giây/cảnh: 80 Xu/cảnh.
+• 🎥 Chuyển động ổn định — 5 giây/cảnh: 110 Xu/cảnh.
+• 🔊 Chuyển động có âm thanh — 5 giây/cảnh: 160 Xu/cảnh.
+• ✨ Cân bằng rõ nét — 5 giây/cảnh: 200 Xu/cảnh.
+• 🌱 Tiêu chuẩn có âm thanh — 5 giây/cảnh: 220 Xu/cảnh.
+• ⏱️ Cảnh dài có âm thanh — 15 giây/cảnh: 220 Xu/cảnh.
+• 🏆 Cao cấp linh hoạt — 10 giây/cảnh: 370 Xu/cảnh.
+• 🎭 Diễn xuất chân thật — 6 giây/cảnh: 370 Xu/cảnh.
+• 🎬 Đa góc máy — 8 giây/cảnh: 1.260 Xu/cảnh.
+• 👑 Điện ảnh nhiều cảnh — 10 giây/cảnh: 2.360 Xu/cảnh.
 
 Khuyến mãi Video nhiều cảnh:
 Khuyến mãi chỉ áp dụng cho một đơn Video có từ 2 cảnh trở lên; 1 cảnh không giảm.
@@ -188,7 +188,7 @@ Khuyến mãi chỉ áp dụng cho một đơn Video có từ 2 cảnh trở lê
 • 11–20 cảnh: giảm 20%.
 • Add-on được cộng riêng và không nằm trong phần giảm theo số cảnh.
 
-Ví dụ: Nhanh gọn 3 cảnh = 200 × 3 = 600 Xu; giảm 10% là 60 Xu; tiền video còn 540 Xu.
+Ví dụ: Nhanh gọn 3 cảnh = 80 × 3 = 240 Xu; giảm 10% là 24 Xu; tiền video còn 216 Xu.
 
 Mục lục: /huongdan
 

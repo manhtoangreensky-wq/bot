@@ -6745,9 +6745,9 @@ CANONICAL_PRICE_LABELS = {
     "dub_video": "Lồng tiếng video",
     "subtitle_dub_video": "Phụ đề + lồng tiếng",
     "auto_subtitle_then_dub": "Tạo phụ đề rồi lồng tiếng",
-    "video_beta_200": "Video Nhanh gọn 200 Xu/cảnh",
+    "video_beta_200": "Video Cân bằng rõ nét 200 Xu/cảnh",
     "video_beta_300": "Video Tiêu chuẩn có âm thanh 220 Xu/cảnh",
-    "video_beta_400": "Video Cân bằng rõ nét 80 Xu/cảnh",
+    "video_beta_400": "Video Nhanh gọn 80 Xu/cảnh",
     "video_addon_voice": "Video add-on voice",
     "video_addon_subtitle": "Video add-on phụ đề theo giá Phụ đề/Lồng tiếng",
     "video_addon_dub": "Video add-on lồng tiếng theo giá Phụ đề/Lồng tiếng",
@@ -47894,19 +47894,14 @@ VIDEO_TIER_ID_TO_NAME = {
     1200: "future_1200",
     1500: "future_1500",
 }
-VIDEO_TIER_ORDER = tuple(VIDEO_TIER_ID_TO_NAME.values())
 VIDEO_TIER_NAME_TO_ID = {name: tier_id for tier_id, name in VIDEO_TIER_ID_TO_NAME.items()}
+VIDEO_TIER_ORDER = tuple(
+    VIDEO_TIER_ID_TO_NAME[int(item["tier_id"])]
+    for item in video_ai_real_pricing.public_quality_catalog()
+)
 VIDEO_TIER_ICONS = {
-    "low": "⚡",
-    "basic": "🌱",
-    "common": "✨",
-    "advanced": "🎥",
-    "standard": "🔊",
-    "long": "⏱️",
-    "high": "🏆",
-    "future_1000": "🎭",
-    "future_1200": "🎬",
-    "future_1500": "👑",
+    VIDEO_TIER_ID_TO_NAME[int(item["tier_id"])]: str(item.get("icon") or "🎬")
+    for item in video_ai_real_pricing.public_quality_catalog()
 }
 
 def video_tier_pricing_payload() -> dict:
@@ -47917,7 +47912,9 @@ def video_tier_pricing_payload() -> dict:
         if isinstance(item, dict) and str(item.get("key") or "")
     }
     payload: dict[str, dict] = {}
-    for tier_id, tier_name in VIDEO_TIER_ID_TO_NAME.items():
+    for public_quality in video_ai_real_pricing.public_quality_catalog():
+        tier_id = int(public_quality["tier_id"])
+        tier_name = VIDEO_TIER_ID_TO_NAME[tier_id]
         model_key = str(video_ai_real_pricing.QUALITY_TIER_MODEL_KEYS.get(tier_id) or "")
         model = dict(catalog_by_key.get(model_key) or {})
         if not model:
@@ -47932,8 +47929,9 @@ def video_tier_pricing_payload() -> dict:
         )
         payload[tier_name] = {
             "tier_id": tier_id,
-            "label": str(model.get("label") or "Chất lượng video"),
-            "cost": max(1, safe_int(model.get("unit_xu"), 1)),
+            "label": str(public_quality.get("name") or "Chất lượng video"),
+            "icon": str(public_quality.get("icon") or "🎬"),
+            "cost": max(1, safe_int(public_quality.get("unit_xu"), 1)),
             "provider_cost": max(0, safe_int(primary_cost.get("cost_vnd"), 0) // 100),
             "model": str(primary_cost.get("model") or ""),
             "seconds": max(1, safe_int(model.get("seconds"), 1)),
@@ -73106,12 +73104,14 @@ def video_uiflow3_compile_routeengine_handoff(
     *,
     owner_user_id: int,
     owner_chat_id: int,
+    tail_state: dict | None = None,
 ) -> dict:
     snapshot = video_uiflow3.approved_snapshot(state)
     return video_uiflow3_routeengine.compile_routeengine_handoff(
         snapshot,
         owner_user_id=int(owner_user_id),
         owner_chat_id=int(owner_chat_id),
+        tail_state=tail_state,
     )
 
 
@@ -75086,7 +75086,7 @@ def video_uiflow3_build_tail_state(raw_state: dict) -> dict:
     addon_config["technical_profile"] = video_profile_catalog.technical_profile_for_profile(
         str(content.get("profile_id") or "")
     )
-    if not same_scope_existing:
+    if not same_draft_existing:
         audio = dict(tail.get("audio_config") or {})
         audio.update({
             "source_audio": False,
@@ -75138,7 +75138,7 @@ def video_uiflow3_build_tail_state(raw_state: dict) -> dict:
             bool(audio.get(key)) for key in ("dubbing", "music", "sfx", "subtitles")
         ) else "skipped"
     tail["addon_config"] = addon_config
-    if not same_scope_existing:
+    if not same_draft_existing:
         branding = dict(snapshot.get("branding") or {})
         logo = dict(branding.get("logo") or {})
         watermark = dict(branding.get("watermark") or {})
@@ -75172,6 +75172,7 @@ def video_uiflow3_build_tail_state(raw_state: dict) -> dict:
         )
     return video_uiflow3_finalize_tail_rebuild(
         tail,
+        same_draft_existing=same_draft_existing,
         same_scope_existing=same_scope_existing,
     )
 
@@ -75179,6 +75180,7 @@ def video_uiflow3_build_tail_state(raw_state: dict) -> dict:
 def video_uiflow3_finalize_tail_rebuild(
     tail: dict,
     *,
+    same_draft_existing: bool,
     same_scope_existing: bool,
 ) -> dict:
     current = video_tail9.normalize_state(tail)
@@ -75188,6 +75190,28 @@ def video_uiflow3_finalize_tail_rebuild(
         in {"video_ai_prompt", "video_ai_image"}
     ):
         return current
+    if same_draft_existing:
+        current.update({
+            "review_status": "not_ready",
+            "summary_status": "not_ready",
+            "quality_tier_id": "",
+            "package_id": "",
+            "pricing_snapshot": {},
+            "capability_snapshot": {},
+            "invoice_id": "",
+            "final_confirmed": False,
+            "job_id": "",
+            "submit_user_id": "",
+            "public_processing_code": "",
+            "submitted_at": "",
+            "execution_state": "",
+            "delivery_message_id": "",
+            "receipt_state": "not_created",
+            "charge_state": "not_charged",
+            "submit_preflight_snapshot": {},
+            "status_stage": "audio_addons",
+        })
+        return video_tail9.normalize_state(current)
     return video_tail9.prepare_review(current)
 
 
@@ -75805,9 +75829,6 @@ def video_uiflow3_prepare_b14_session(
     """Persist a real B14 invoice handoff without submitting or charging yet."""
 
     state = video_ai_real_maybe_compile_state(raw_state)
-    routeengine_handoff = dict(
-        (state.get("legacy_compat") or {}).get("routeengine_handoff") or {}
-    )
     state["navigation"]["current_step"] = "invoice"
     product_id = str(state.get("parent_product") or "").strip()
     product_route = video_uiflow3_execution_adapter(state)
@@ -75860,6 +75881,33 @@ def video_uiflow3_prepare_b14_session(
     branding = dict(state.get("branding") or {})
     commercial = dict((state.get("legacy_compat") or {}).get("pilot_commercial") or {})
     tail = video_tail9.normalize_state(tail_state) if tail_state else {}
+    routeengine_handoff = dict(
+        (state.get("legacy_compat") or {}).get("routeengine_handoff") or {}
+    )
+    if tail:
+        routeengine_handoff = video_uiflow3_compile_routeengine_handoff(
+            state,
+            owner_user_id=int(user_id),
+            owner_chat_id=(
+                int(owner_chat_id)
+                or safe_int(state.get("owner_chat_id"), 0)
+            ),
+            tail_state=tail,
+        )
+        if not video_uiflow3_routeengine_handoff_is_ready(routeengine_handoff):
+            raise ValueError(
+                "video_uiflow3_routeengine_not_ready:"
+                + str(
+                    routeengine_handoff.get("commercial_blocker")
+                    or routeengine_handoff.get("blocker")
+                    or "unknown"
+                )
+            )
+        legacy_compat = dict(state.get("legacy_compat") or {})
+        legacy_compat["approved_snapshot"] = approved_snapshot
+        legacy_compat["routeengine_handoff"] = deepcopy(routeengine_handoff)
+        legacy_compat["commercial_tail_ready"] = True
+        state["legacy_compat"] = legacy_compat
     if tail:
         selected_quality = safe_int(tail.get("quality_tier_id"), 0)
         quality = {
@@ -97391,7 +97439,7 @@ VIDEO_B14_2_ASSET_SKIP_WARNING_VI = (
 )
 VIDEO_B14_2_WORKER_NOT_READY_VI = "Hệ thống dựng video nền chưa sẵn sàng. TOAN AAS chưa xử lý và chưa trừ Xu."
 VIDEO_B14_2_PUBLIC_MULTISCENE_OFF_VI = "Video dài tập 1–2 giờ đang mở thử nghiệm nội bộ. TOAN AAS chưa xử lý và chưa trừ Xu."
-VIDEO_B14_2_PACKAGE_200_NOTE_VI = "Nhanh gọn là gói video bình thường, tính theo từng cảnh và vẫn dùng được các phần bổ sung đã chọn."
+VIDEO_B14_2_PACKAGE_200_NOTE_VI = "Cân bằng rõ nét là gói video bình thường, tính theo từng cảnh và vẫn dùng được các phần bổ sung đã chọn."
 VIDEO_B14_2_QUALITY_OPTIONS = video_uifreeze1.QUALITY_TIER_ORDER
 VIDEO_B14_2_SCENE_OPTIONS = (1, 3, 5, 10, 20)
 PRODUCT_VIDEO_TRIAL_QUALITY_XU = 200
@@ -97400,7 +97448,7 @@ PRODUCT_VIDEO_TRIAL_DURATION_SECONDS = 8
 PRODUCT_VIDEO_TRIAL_LIMIT_DAY = 1
 PRODUCT_VIDEO_TRIAL_LIMIT_WEEK = 3
 PRODUCT_VIDEO_TRIAL_LIMIT_MONTH = 10
-PRODUCT_VIDEO_TRIAL_LIMIT_COPY_VI = "Gói Nhanh gọn tính theo từng cảnh như các gói video khác."
+PRODUCT_VIDEO_TRIAL_LIMIT_COPY_VI = "Gói Cân bằng rõ nét tính theo từng cảnh như các gói video khác."
 PRODUCT_VIDEO_R9E_ADDONS_LOCKED = True
 PRODUCT_VIDEO_R9E_ADDONS_LOCK_COPY_VI = "Hậu kỳ đang khóa tạm thời cho Product Video. Hóa đơn này chỉ tính video chính."
 PRODUCT_VIDEO_R9E_PROVIDER_LOCK_COPY_VI = "Hệ thống dựng video đang tạm khóa để bảo vệ Xu. TOAN AAS chưa xử lý và chưa trừ Xu. Anh/chị vui lòng thử lại sau."
@@ -101580,15 +101628,6 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     if not request_id or request_id in {"Không có", "-"}:
         request_id = ""
 
-    provider_task_id = str(
-        job.get("provider_task_id")
-        or draft_job.get("provider_task_id")
-        or provider_telemetry.get("provider_task_id")
-        or job_result.get("provider_task_id")
-        or trace.get("provider_task_id")
-        or ""
-    ).strip()
-
     job_id_label = f"#{job_id}" if job_id > 0 else "Chưa tạo"
     current_stage_label = str(
         trace.get("current_stage_label")
@@ -101634,8 +101673,6 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     if request_id:
         id_lines.append(f"Mã yêu cầu: <b>{html.escape(request_id)}</b>")
     id_lines.append(f"Mã tác vụ: <b>{html.escape(job_id_label)}</b>")
-    if provider_task_id and provider_task_id != "None":
-        id_lines.append(f"Mã provider: <b>{html.escape(provider_task_id)}</b>")
 
     lines = [
         panel_title,
@@ -110670,13 +110707,14 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
             "scene_count": 1,
         }
     if owner == "uiflow3":
-        _prepared, session = video_uiflow3_prepare_b14_session(
+        prepared, session = video_uiflow3_prepare_b14_session(
             uid,
             host,
             owner_chat_id=safe_int(host.get("owner_chat_id"), 0),
             tail_state=clean,
             require_attestation=False,
         )
+        host = save_video_uiflow3_state(context, prepared)
     elif owner == "scene3":
         try:
             session = video_profile_scene1_handoff(uid, host)
@@ -110812,6 +110850,15 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
         "logo_text": str(clean.get("watermark_config", {}).get("text") or ""),
         "logo_position": str(clean.get("watermark_config", {}).get("position") or ""),
     })
+    if owner == "uiflow3":
+        routeengine_addon_plan = dict(
+            video_uiflow3_handoff_from_session(session).get("addon_plan") or {}
+        )
+        if (
+            routeengine_addon_plan.get("contract_version")
+            == "product-video-addons-v1"
+        ):
+            addon_plan = deepcopy(routeengine_addon_plan)
     draft["b14_addon_plan"] = addon_plan
     addon_quote = video_tail9_addon_quote(clean)
     draft["b14_addon_quote_items"] = deepcopy(addon_quote.get("items") or [])
@@ -111260,13 +111307,36 @@ def video_tail9_set_addon_language(tail: dict, key: str, target: str) -> dict:
             "dubbing_mode": "translated_ai" if target_language else "default_ai",
             "voice_choice": str(current_value.get("voice_choice") or "follow_character"),
             "script_source": str(current_value.get("script_source") or "script"),
+            "target_language_explicit": True,
+            "target_language_inherited_from": "",
         })
-    return video_tail9_update_addon_audio(
+    updated = video_tail9_update_addon_audio(
         tail,
         clean_key,
         enabled=True,
         value_patch=value_patch,
     )
+    if clean_key != "subtitles":
+        return updated
+    dubbing_value = video_tail9_addon_value(updated, "dubbing")
+    if (
+        bool((updated.get("audio_config") or {}).get("dubbing"))
+        and str(dubbing_value.get("script_source") or "") == "subtitles"
+        and not bool(dubbing_value.get("target_language_explicit"))
+    ):
+        updated = video_tail9_update_addon_audio(
+            updated,
+            "dubbing",
+            enabled=True,
+            value_patch={
+                "target_language": target_language,
+                "translation": bool(target_language),
+                "dubbing_mode": "translated_ai" if target_language else "default_ai",
+                "target_language_explicit": False,
+                "target_language_inherited_from": "subtitles",
+            },
+        )
+    return updated
 
 
 def video_tail9_set_dubbing_script_source(tail: dict, source: str) -> dict:
@@ -111280,17 +111350,28 @@ def video_tail9_set_dubbing_script_source(tail: dict, source: str) -> dict:
     )
     detected = translation_detect_language_code(str(source_info.get("text") or "")) or "auto"
     current_value = video_tail9_addon_value(tail, "dubbing")
+    value_patch = {
+        "dubbing_mode": str(current_value.get("dubbing_mode") or "default_ai"),
+        "voice_choice": str(current_value.get("voice_choice") or "follow_character"),
+        "script_source": clean_source,
+        "dialogue_text": "",
+        "source_language": detected,
+    }
+    if clean_source == "subtitles" and not bool(current_value.get("target_language_explicit")):
+        subtitle_value = video_tail9_addon_value(tail, "subtitles")
+        inherited_target = str(subtitle_value.get("target_language") or "").strip()
+        value_patch.update({
+            "target_language": inherited_target,
+            "translation": bool(inherited_target),
+            "dubbing_mode": "translated_ai" if inherited_target else "default_ai",
+            "target_language_explicit": False,
+            "target_language_inherited_from": "subtitles",
+        })
     return video_tail9_update_addon_audio(
         tail,
         "dubbing",
         enabled=True,
-        value_patch={
-            "dubbing_mode": str(current_value.get("dubbing_mode") or "default_ai"),
-            "voice_choice": str(current_value.get("voice_choice") or "follow_character"),
-            "script_source": clean_source,
-            "dialogue_text": "",
-            "source_language": detected,
-        },
+        value_patch=value_patch,
     )
 
 
@@ -118493,7 +118574,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if (
             intake_result.get("duplicate_prevented")
             and str(precheck_job.get("status") or "")
-            != video_project_queue.VIDEO_JOB_PRECHECK_RUNNING
+            not in {
+                video_project_queue.VIDEO_JOB_PRECHECK_RUNNING,
+                video_project_queue.VIDEO_JOB_READY_TO_SUBMIT,
+            }
         ):
             session["current_step"] = "b14_queue_status"
             save_video_session(uid, session)
@@ -118809,17 +118893,72 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 query, context, blocked_session, None, uid, lang
             )
         session = dict(ready.get("session") or session)
+        queue_result = confirm_video_project_invoice(
+            project_id,
+            uid,
+            balance_xu=credits,
+            use_wallet=False,
+            provider_admission=final_admission,
+            require_provider_admission=True,
+        )
+        queue_job = dict(queue_result.get("job") or {})
+        queue_job_id = safe_int(queue_job.get("id"), 0)
+        if (
+            not queue_result.get("ok")
+            or queue_job_id != job_id
+            or str(queue_job.get("status") or "") != "queued"
+        ):
+            logger.error(
+                "product_video_same_job_promotion_failed | user_id=%s | expected_job_id=%s | returned_job_id=%s | reason=%s",
+                uid,
+                job_id,
+                queue_job_id,
+                str(queue_result.get("reason") or "queue_promotion_invalid"),
+            )
+            blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                uid,
+                session,
+                job_id=job_id,
+                blocker_code="same_job_promotion_failed",
+                public_message=(
+                    "TOAN AAS đã hoàn tất kiểm tra nhưng chưa thể đưa tác vụ vào hàng đợi. "
+                    "Hóa đơn và toàn bộ cấu hình được giữ nguyên; hệ thống chưa gửi lệnh dựng "
+                    "và chưa trừ Xu."
+                ),
+                preflight_result="PASS",
+                admission_result="BLOCKED",
+                payload={
+                    "promotion_reason": str(
+                        queue_result.get("reason") or "queue_promotion_invalid"
+                    ),
+                    "expected_job_id": job_id,
+                    "returned_job_id": queue_job_id,
+                },
+            )
+            return await video_b14_send_or_edit_status_panel(
+                query, context, blocked_session, None, uid, lang
+            )
+        draft = dict(session.get("draft") or {})
+        draft.update({
+            "b14_queue_job": queue_job,
+            "b14_queue_job_id": queue_job_id,
+            "b14_project_id": safe_int(
+                (queue_result.get("project") or {}).get("project_id"),
+                project_id,
+            ),
+            "job_created": True,
+            "outbox_created": bool(queue_result.get("dispatch_outbox_created")),
+            "provider_called": False,
+            "xu_charged": 0,
+        })
+        session["draft"] = draft
         session["current_step"] = "b14_queue_status"
         save_video_session(uid, session)
         return await video_b14_send_or_edit_status_panel(
             query,
             context,
             session,
-            {
-                "job": ready.get("job") or {},
-                "project": project,
-                "duplicate_prevented": bool(intake_result.get("duplicate_prevented")),
-            },
+            queue_result,
             uid,
             lang,
         )
@@ -268235,9 +268374,33 @@ async def api_worker_product_video_logo_material(job_id: int, request: Request):
         asset_pack = json.loads(str(project.get("asset_pack_json") or "{}"))
     except Exception:
         asset_pack = {}
-    if not isinstance(asset_pack, dict) or str(asset_pack.get("source") or "") != "product_video":
+    if not isinstance(asset_pack, dict):
+        asset_pack = {}
+    try:
+        addon_plan = json.loads(str(project.get("addon_plan_json") or "{}"))
+    except Exception:
+        addon_plan = {}
+    if not isinstance(addon_plan, dict):
+        addon_plan = {}
+    strict_logo = bool(
+        addon_plan.get("contract_version") == "product-video-addons-v1"
+        and "logo" in list(addon_plan.get("requested_addons") or [])
+    )
+    if str(asset_pack.get("source") or "") != "product_video" and not strict_logo:
         raise HTTPException(status_code=404, detail="product_video_logo_not_found")
     material = dict(asset_pack.get("logo_material") or {})
+    if not material.get("logo_enabled"):
+        logo = dict(addon_plan.get("logo") or {})
+        if strict_logo and logo.get("enabled"):
+            material = {
+                "logo_enabled": True,
+                "logo_file_id": str(
+                    logo.get("telegram_file_id") or logo.get("file_id") or ""
+                ).strip(),
+                "logo_position": str(
+                    logo.get("position") or "top_right"
+                ).strip(),
+            }
     file_id = str(material.get("logo_file_id") or "").strip()
     if not material.get("logo_enabled") or not file_id:
         raise HTTPException(status_code=404, detail="product_video_logo_file_id_missing")

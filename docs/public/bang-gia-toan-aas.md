@@ -10,6 +10,7 @@ TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ 
 • Tạo phụ đề tự động: miễn phí.
 • Dịch phụ đề: 0.1 Xu / ký tự.
 • Lồng tiếng giọng mặc định: 0.10 Xu / ký tự.
+• 👥 Tự nhận giọng (tối đa 16): 0.5 Xu mỗi từ tính phí; giảm 10% từ 1,000 từ, giảm 20% từ 10,000 từ; phần Tự nhận giọng được làm tròn lên riêng.
 • Nhanh gọn: 10 Xu / ảnh.
 • Cân bằng: 20 Xu / ảnh.
 • Cân bằng + bảo hành: 30 Xu / ảnh.
@@ -98,16 +99,16 @@ Ví dụ
 Giá dưới đây tính cho từng cảnh theo đúng gói chất lượng đã chọn.
 TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tác vụ tạo ra kết quả hợp lệ.
 
-• Nhanh gọn: 200 Xu / cảnh — 5 giây.
-• Tiêu chuẩn có âm thanh: 220 Xu / cảnh — 5 giây.
-• Cân bằng rõ nét: 80 Xu / cảnh — 8 giây.
-• Chuyển động ổn định: 110 Xu / cảnh — 5 giây.
-• Chuyển động có âm thanh: 160 Xu / cảnh — 5 giây.
-• Cảnh dài có âm thanh: 220 Xu / cảnh — 15 giây.
-• Cao cấp linh hoạt: 370 Xu / cảnh — 10 giây.
-• Diễn xuất chân thật: 370 Xu / cảnh — 6 giây.
-• Đa góc máy: 1.260 Xu / cảnh — 8 giây.
-• Điện ảnh nhiều cảnh: 2.360 Xu / cảnh — 10 giây.
+• ⚡ Nhanh gọn — 8 giây/cảnh: 80 Xu/cảnh.
+• 🎥 Chuyển động ổn định — 5 giây/cảnh: 110 Xu/cảnh.
+• 🔊 Chuyển động có âm thanh — 5 giây/cảnh: 160 Xu/cảnh.
+• ✨ Cân bằng rõ nét — 5 giây/cảnh: 200 Xu/cảnh.
+• 🌱 Tiêu chuẩn có âm thanh — 5 giây/cảnh: 220 Xu/cảnh.
+• ⏱️ Cảnh dài có âm thanh — 15 giây/cảnh: 220 Xu/cảnh.
+• 🏆 Cao cấp linh hoạt — 10 giây/cảnh: 370 Xu/cảnh.
+• 🎭 Diễn xuất chân thật — 6 giây/cảnh: 370 Xu/cảnh.
+• 🎬 Đa góc máy — 8 giây/cảnh: 1.260 Xu/cảnh.
+• 👑 Điện ảnh nhiều cảnh — 10 giây/cảnh: 2.360 Xu/cảnh.
 
 Khuyến mãi Video nhiều cảnh
 Khuyến mãi chỉ áp dụng khi tạo từ 2 cảnh trong cùng một đơn Video nhiều cảnh.
@@ -126,8 +127,8 @@ Miễn phí trong video khi dùng tài nguyên có sẵn
 • Logo tự tạo bằng công cụ ảnh riêng: tính theo bảng giá Hình ảnh, không tính trong video nếu khách tự đưa tài nguyên.
 
 Ví dụ
-• Nhanh gọn 1 cảnh: 200 Xu; không áp dụng giảm giá nhiều cảnh.
-• Nhanh gọn 3 cảnh: 200 × 3 = 600 Xu; giảm 10% là 60 Xu; tiền video còn 540 Xu.
+• Nhanh gọn 1 cảnh: 80 Xu; không áp dụng giảm giá nhiều cảnh.
+• Nhanh gọn 3 cảnh: 80 × 3 = 240 Xu; giảm 10% là 24 Xu; tiền video còn 216 Xu.
 • Nếu anh/chị chọn tạo ảnh/logo AI riêng bên ngoài, phần ảnh sẽ tính theo bảng giá Hình ảnh.
 
 -----
@@ -136,20 +137,21 @@ Ví dụ
 
 TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tác vụ tạo ra kết quả hợp lệ.
 
+• 👥 Tự nhận giọng (tối đa 16): 0.5 Xu mỗi từ tính phí; giảm 10% từ 1,000 từ, giảm 20% từ 10,000 từ; phần Tự nhận giọng được làm tròn lên riêng.
 
 A. Tạo phụ đề tự động
-• Miễn phí.
+• Miễn phí nếu chỉ tạo phụ đề gốc trong luồng hiện tại.
 • Chỉ tạo phụ đề gốc từ video/audio/lời đọc.
 • Không dịch, không lồng tiếng nếu chưa chọn thêm tác vụ.
 
 B. Dịch phụ đề
-• 0.1 Xu / ký tự.
+• Theo bảng giá trung tâm ở trên.
 • Trên 1.000 ký tự: giảm 10%.
 • Trên 10.000 ký tự: giảm 20%.
 • Hệ thống hiển thị rõ số ký tự tính phí trước khi xử lý.
 
 C. Lồng tiếng giọng mặc định
-• 0.10 Xu / ký tự.
+• Theo bảng giá trung tâm ở trên.
 • Trên 1.000 ký tự: giảm 10%.
 • Trên 10.000 ký tự: giảm 20%.
 

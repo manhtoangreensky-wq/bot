@@ -166,8 +166,8 @@ def test_public_markdown_downloads_keep_every_supported_public_locale():
 
 def test_every_international_locale_has_its_own_public_pricing_copy_and_video_matches_checkpoint():
     vietnamese_video = "\n".join(guide.pricing_lines("video", lang="vi"))
-    assert "Nhanh gọn: <b>200 Xu / cảnh</b> — 5 giây." in vietnamese_video
-    assert "Điện ảnh nhiều cảnh: <b>2.360 Xu / cảnh</b> — 10 giây." in vietnamese_video
+    assert "Nhanh gọn — 8 giây/cảnh: 80 Xu/cảnh." in vietnamese_video
+    assert "Điện ảnh nhiều cảnh — 10 giây/cảnh: 2.360 Xu/cảnh." in vietnamese_video
     assert "2–5 cảnh: giảm 10%." in vietnamese_video
     assert "2-9 cảnh" not in vietnamese_video
 
