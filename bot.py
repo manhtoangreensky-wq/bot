@@ -1,13 +1,20 @@
+import urllib.parse
 from services.autopost_ui import (
     autopost_main_dashboard_text, autopost_main_keyboard, autopost_content_plan_text,
     autopost_plan_result_text, autopost_brands_text, autopost_affiliate_text,
-    autopost_calendar_text, autopost_channels_text, autopost_queue_text,
-    autopost_metrics_text, autopost_ads_center_text, autopost_settings_text,
-    autopost_kill_switch_text, autopost_resume_ads_text
+    autopost_affiliate_keyboard, autopost_affiliate_import_prompt_text,
+    autopost_affiliate_import_success_text, autopost_affiliate_list_text,
+    autopost_affiliate_list_keyboard, autopost_calendar_text, autopost_channels_text,
+    autopost_queue_text, autopost_metrics_text, autopost_ads_center_text,
+    autopost_settings_text, autopost_kill_switch_text, autopost_resume_ads_text
 )
 from services.autopost_brand import get_platform_brand_policy, validate_brand_compliance_for_platform, DEFAULT_BRAND_PROFILE
 from services.autopost_strategy import create_content_plan, CONTENT_GOALS
-from services.autopost_affiliate import match_affiliate_for_post, check_paid_ads_affiliate_policy
+from services.autopost_affiliate import (
+    match_affiliate_for_post, check_paid_ads_affiliate_policy, get_user_affiliate_stats,
+    get_user_affiliate_links, count_user_affiliate_links, import_affiliate_links_for_user,
+    seed_default_curated_vault_for_user, delete_user_affiliate_link, clear_user_affiliate_vault
+)
 from services.autopost_publish import check_platform_capability, OmnichannelPublishQueue
 from services.autopost_ads import evaluate_organic_to_ads, validate_ad_spend_request, DEFAULT_OWNER_BUDGET_ENVELOPE
 """
@@ -138156,13 +138163,55 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
     if action == "affiliate":
-        msg = autopost_affiliate_text(uid)
-        ref_link = f"https://t.me/toanaasbot?start=ref_{uid}"
+        stats = get_user_affiliate_stats(uid)
+        if stats.get("total", 0) == 0 and is_admin_user(uid):
+            seed_default_curated_vault_for_user(uid)
+            stats = get_user_affiliate_stats(uid)
+        msg = autopost_affiliate_text(uid, stats, lang)
+        reply_kb = autopost_affiliate_keyboard(uid, stats, lang)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "aff_import_prompt":
+        context.user_data["awaiting_affiliate_import"] = True
+        msg = autopost_affiliate_import_prompt_text(lang)
         reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📲 Chia sẻ link giới thiệu", url=f"https://t.me/share/url?url={ref_link}&text={urllib.parse.quote('Trải nghiệm Bot AI TOAN AAS!')}")],
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+            [InlineKeyboardButton("⬅️ Quay lại Kho Affiliate", callback_data="autopost|affiliate"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
         ])
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "aff_seed":
+        seed_default_curated_vault_for_user(uid)
+        stats = get_user_affiliate_stats(uid)
+        msg = "⚡ <b>ĐÃ NẠP THÀNH CÔNG 66+ CHIẾN DỊCH GỢI Ý VÀO KHO CÁ NHÂN!</b>\n\n" + autopost_affiliate_text(uid, stats, lang)
+        reply_kb = autopost_affiliate_keyboard(uid, stats, lang)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "aff_clear_confirm":
+        msg = "⚠️ <b>XÁC NHẬN XÓA TOÀN BỘ KHO AFFILIATE CÁ NHÂN:</b>\n\nHành động này sẽ xóa toàn bộ link trong kho riêng của tài khoản này. Bạn có thể nạp lại link bất cứ lúc nào."
+        reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🗑️ Xác nhận xóa sạch", callback_data="autopost|aff_clear_done")],
+            [InlineKeyboardButton("❌ Hủy bỏ", callback_data="autopost|affiliate")],
+        ])
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "aff_clear_done":
+        clear_user_affiliate_vault(uid)
+        stats = get_user_affiliate_stats(uid)
+        msg = "🗑️ <b>ĐÃ XÓA TOÀN BỘ KHO AFFILIATE CÁ NHÂN THÀNH CÔNG.</b>\n\n" + autopost_affiliate_text(uid, stats, lang)
+        reply_kb = autopost_affiliate_keyboard(uid, stats, lang)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "aff_view":
+        niche = value or "all"
+        page = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+        total = count_user_affiliate_links(uid, niche=niche)
+        items = get_user_affiliate_links(uid, niche=niche, limit=5, offset=page * 5)
+        msg = autopost_affiliate_list_text(uid, items, total, niche, page, 5, lang)
+        reply_kb = autopost_affiliate_list_keyboard(uid, items, total, niche, page, 5, lang)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "aff_noop":
+        return
 
     if action == "calendar":
         msg = autopost_calendar_text()
@@ -230511,6 +230560,28 @@ async def handle_translation_media_pending_upload(update: Update, context: Conte
     return False
 
 async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Personal Affiliate Vault Document Intake (.txt, .csv, .json, .md)
+    if update.message and update.message.document:
+        doc_name = (update.message.document.file_name or "").lower()
+        if context.user_data.get("awaiting_affiliate_import") or (any(doc_name.endswith(ext) for ext in [".txt", ".csv", ".json", ".md"]) and ("affiliate" in doc_name or "link" in doc_name)):
+            try:
+                uid = update.effective_user.id
+                lang = get_user_language(uid) or "vi"
+                file_obj = await update.message.document.get_file()
+                byte_arr = await file_obj.download_as_bytearray()
+                raw_text = byte_arr.decode("utf-8", errors="ignore")
+                res = import_affiliate_links_for_user(uid, raw_text)
+                if res.get("added_count", 0) > 0:
+                    context.user_data["awaiting_affiliate_import"] = False
+                    reply_kb = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📂 Xem kho link cá nhân", callback_data="autopost|aff_view|all|0"), InlineKeyboardButton("📥 Thêm tiếp", callback_data="autopost|aff_import_prompt")],
+                        [InlineKeyboardButton("⬅️ Quay lại Kho Affiliate", callback_data="autopost|affiliate"), InlineKeyboardButton(f"🏠 {public_hub_copy(lang)['main_menu']}", callback_data="menu|main")],
+                    ])
+                    msg = autopost_affiliate_import_success_text(res["added_count"], res["total_in_vault"], res["by_niche"], lang)
+                    return await update.message.reply_text(msg, parse_mode="HTML", reply_markup=reply_kb)
+            except Exception as aff_doc_err:
+                logger.error(f"Affiliate document import error: {aff_doc_err}")
+
     if await handle_video_ai_edit_pending_media(update, context):
         return
     if await handle_video_editor_pending_upload(update, context):
@@ -265078,6 +265149,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if await handle_state_reset_slash_command(update, context, text):
         return
+
+    # Personal Affiliate Vault Text Link Intake
+    if context.user_data.get("awaiting_affiliate_import") or (("http://" in text or "https://" in text) and any(d in text for d in ["shorten.asia", "trackecom.asia", "attracking.asia", "trackfin.asia", "goecom.asia", "goeco.mobi", "trackmobi.asia", "trackec.asia", "shopee.vn", "lazada.vn", "tiktok.com"])):
+        try:
+            res = import_affiliate_links_for_user(uid, text)
+            if res.get("added_count", 0) > 0:
+                context.user_data["awaiting_affiliate_import"] = False
+                reply_kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📂 Xem kho link cá nhân", callback_data="autopost|aff_view|all|0"), InlineKeyboardButton("📥 Thêm tiếp", callback_data="autopost|aff_import_prompt")],
+                    [InlineKeyboardButton("⬅️ Quay lại Kho Affiliate", callback_data="autopost|affiliate"), InlineKeyboardButton(f"🏠 {public_hub_copy(get_user_language(uid) or 'vi')['main_menu']}", callback_data="menu|main")],
+                ])
+                msg = autopost_affiliate_import_success_text(res["added_count"], res["total_in_vault"], res["by_niche"], get_user_language(uid) or "vi")
+                return await update.message.reply_text(msg, parse_mode="HTML", reply_markup=reply_kb)
+        except Exception as aff_err:
+            logger.error(f"Affiliate text import error: {aff_err}")
+
 
     if await handle_video_ai_edit_pending_text(update, context):
         return
