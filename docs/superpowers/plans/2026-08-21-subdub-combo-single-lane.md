@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Expose one SubDub combo path from video upload to language, voice, confirmation, and final MP4 without a public original-subtitle step.
+**Goal:** Expose one SubDub combo path from video upload to language, default/automatic voice, confirmation, and exactly one final MP4 without a public original-subtitle step.
 
-**Architecture:** Reuse the existing `videodub|source_upload` route and current combo upload state machine. Change only the combo source keyboard; preserve legacy callback handlers and all engine/billing behavior.
+**Architecture:** Reuse the existing `videodub|source_upload` route and current combo pipeline. The fresh lane records language and voice before confirmation; only final confirmation starts internal ASR, translation, TTS, and mux on VPS. Resolve the existing `ASR_PROVIDER=auto` value through existing adapters without changing provider configuration. Preserve legacy callback handlers, large-MP4 document delivery, and billing behavior.
 
 **Tech Stack:** Python, python-telegram-bot inline keyboards, pytest.
 
@@ -15,15 +15,15 @@
 **Files:**
 - Modify: `tests/test_p0_19b5_hard_fix_video_translation_routing_restore_file_audio.py`
 
-- [ ] **Step 1: Replace the old two-path assertion with a failing single-lane assertion**
+- [x] **Step 1: Replace the old two-path assertion with a failing single-lane assertion**
 
 Assert that the combo keyboard contains exactly one `videodub|source_upload`, contains no callback beginning with `videodub|path|`, and does not expose the no-subtitle path.
 
-- [ ] **Step 2: Strengthen the upload-routing assertion**
+- [x] **Step 2: Strengthen the upload-routing assertion**
 
 After a fresh combo video upload, assert `step == "language"`, `step != "original_subtitle_confirm"`, and no reply button uses `videodub|confirm_original_subtitle`.
 
-- [ ] **Step 3: Run the exact selector and confirm RED**
+- [x] **Step 3: Run the exact selector and confirm RED**
 
 Run:
 
@@ -38,9 +38,11 @@ Expected: the first test fails because the current keyboard exposes two `videodu
 **Files:**
 - Modify: `bot.py:231667`
 
-- [ ] **Step 1: Make the minimal production change**
+- [x] **Step 1: Make the minimal production change**
 
 For `VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB`, return one item using the existing localized upload label and `videodub|source_upload`. Do not remove legacy handlers or constants.
+
+Route preset/custom language directly to the voice picker for the fresh lane. Hide intermediate download actions and fail closed unless the final MP4 is delivered. Keep MP4 document fallback for large files.
 
 - [ ] **Step 2: Run the focused GREEN selector**
 

@@ -250,14 +250,14 @@ def test_subtitle_plus_dub_preview_only_short_audio(monkeypatch):
     assert "Preview đang tạm khóa" in query.message.outputs[-1]["text"]
 
 
-def test_subtitle_plus_dub_full_requires_confirm(monkeypatch):
+def test_subtitle_plus_dub_full_requires_confirm_and_final_mp4(monkeypatch):
     uid = 630111
     _seed_translated_combo(uid)
     calls = {"full": 0}
 
     async def fake_full(*_args, **_kwargs):
         calls["full"] += 1
-        return {"ok": True, "has_audio": True, "has_subtitle": True, "has_video": False}
+        return {"ok": True, "has_audio": True, "has_subtitle": True, "has_video": True}
 
     async def fake_execute_engine(_feature, params, _context):
         return {"ok": True, "runner_result": await params["runner"]()}
@@ -269,22 +269,25 @@ def test_subtitle_plus_dub_full_requires_confirm(monkeypatch):
     assert calls["full"] == 0
     query = asyncio.run(_press(uid, "videodub|combo_full_dub"))
     assert calls["full"] == 1
-    assert bot.get_video_dubbing_pending(uid)["step"] == "completed"
-    assert "đã tạo được audio/phụ đề" in query.message.outputs[-1]["text"]
-    assert "chưa ghép được thành video hoàn chỉnh" in query.message.outputs[-1]["text"]
+    assert bot.get_video_dubbing_pending(uid)["step"] == "dub_confirmation"
+    assert "chưa xử lý được video" in query.message.outputs[-1]["text"]
+    assert "audio/phụ đề" not in query.message.outputs[-1]["text"]
 
 
-def test_subtitle_plus_dub_outputs_audio_or_video_cleanly():
+def test_subtitle_plus_dub_completed_keyboard_hides_intermediate_assets():
     audio_state = {"final_audio_available": "1", "final_video_available": "0"}
     video_state = {"final_audio_available": "1", "final_video_available": "1"}
-    assert "📹 Tải video" not in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", audio_state))
-    assert "🔁 Thử ghép lại video" in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", audio_state))
-    assert "📹 Tải video hoàn chỉnh" in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", video_state))
+    for state in (audio_state, video_state):
+        callbacks = _callbacks(bot.subtitle_plus_dub_completed_keyboard("vi", state))
+        assert not any(callback.startswith("videodub|combo_download_final_") for callback in callbacks)
+        assert "videodub|combo_retry_mux" not in callbacks
+        assert f"videodub|type|{bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}" in callbacks
 
 
 def test_subtitle_plus_dub_mux_unavailable_no_fake_mp4():
     text = bot.subtitle_plus_dub_completed_text({}, {"has_audio": True, "has_video": False}, "vi")
-    assert "đã tạo được audio/phụ đề" in text
+    assert "chưa xử lý được video" in text
+    assert "audio/phụ đề" not in text
     assert "MP4" not in text
 
 

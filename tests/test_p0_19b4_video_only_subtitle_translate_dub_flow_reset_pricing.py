@@ -350,7 +350,7 @@ def test_combo_price_summary_adds_subtitle_and_dub():
     assert "Tổng cộng: <b>360 Xu</b>" in text
 
 
-def test_combo_outputs_final_mp4_srt_mp3():
+def test_combo_outputs_only_one_final_mp4():
     message = CaptureMessage()
     sent = asyncio.run(
         bot.send_public_subtitle_dub_final_outputs(
@@ -363,13 +363,14 @@ def test_combo_outputs_final_mp4_srt_mp3():
         )
     )
     assert sent["video"] == 1
+    assert sent["audio"] == 0
+    assert sent["documents"] == 0
+    assert len(message.outputs) == 1
 
 
-def test_combo_mux_retry_uses_existing_real_artifacts():
+def test_combo_completed_ui_hides_intermediate_artifacts_and_retry():
     labels = _labels(bot.subtitle_plus_dub_completed_keyboard("vi", {"final_video_available": "0"}))
-    assert "🔁 Thử ghép lại video" in labels
-    assert "🎧 Tải audio" in labels
-    assert "📄 Tải phụ đề" in labels
+    assert labels == ["🔁 Làm video khác", "🏠 Menu chính"]
 
 
 def test_subtitle_price_counts_all_chars():
@@ -459,4 +460,5 @@ def test_no_generic_error_for_expected_guard():
 def test_no_fake_success_copy():
     text = bot.subtitle_plus_dub_completed_text({}, {"has_video": False, "has_audio": True}, "vi")
     assert "✅" not in text
-    assert "chưa ghép được thành video hoàn chỉnh" in text
+    assert "chưa xử lý được video hoàn chỉnh" in text
+    assert "không gửi audio/phụ đề rời" in text
