@@ -72,6 +72,8 @@ from services.autopost_ui import (
     autopost_settings_keyboard,
     autopost_draft_view_text,
     autopost_draft_keyboard,
+    autopost_guide_text,
+    autopost_guide_keyboard,
 )
 
 @pytest.fixture
@@ -237,10 +239,9 @@ def test_09_publish_modes(test_db):
 
 def test_10_task_b_home_screen_11_buttons():
     kb = autopost_main_keyboard("vi")
-    # Must have 6 rows (5 rows of 2 + 1 home button = 11 buttons total)
     assert len(kb.inline_keyboard) == 6
     total_buttons = sum(len(row) for row in kb.inline_keyboard)
-    assert total_buttons == 11
+    assert total_buttons == 12
     
     btn_callbacks = [btn.callback_data for row in kb.inline_keyboard for btn in row if btn.callback_data]
     assert "autopost|content_input_menu" in btn_callbacks
@@ -253,7 +254,21 @@ def test_10_task_b_home_screen_11_buttons():
     assert "autopost|published_history" in btn_callbacks
     assert "autopost|metrics" in btn_callbacks
     assert "autopost|ads_center" in btn_callbacks
+    assert "autopost|guide" in btn_callbacks
     assert "menu|main" in btn_callbacks
+
+def test_12_autopost_guide_renderer():
+    guide_text = autopost_guide_text()
+    assert "HƯỚNG DẪN SỬ DỤNG HỆ THỐNG ĐĂNG BÀI TỰ ĐỘNG" in guide_text
+    assert "Thiết lập Thương hiệu" in guide_text
+    assert "Kho Affiliate" in guide_text
+    assert "Tạo Nguyên liệu" in guide_text
+    
+    guide_kb = autopost_guide_keyboard()
+    assert len(guide_kb.inline_keyboard) >= 2
+    callbacks = [btn.callback_data for row in guide_kb.inline_keyboard for btn in row if btn.callback_data]
+    assert "autopost|content_input_menu" in callbacks
+    assert "autopost|main" in callbacks
 
 def test_11_telegram_adapter_simulation():
     import asyncio

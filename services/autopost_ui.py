@@ -46,7 +46,7 @@ def autopost_main_dashboard_text(lang: str = "vi", user_id: int = 0) -> str:
     return "\n".join(lines)
 
 def autopost_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    """11-button keyboard layout (5 rows of 2 buttons + 1 home button)."""
+    """12-button keyboard layout (5 rows of 2 buttons + Guide & Home buttons)."""
     rows = [
         [
             InlineKeyboardButton("✍️ Tạo nội dung", callback_data="autopost|content_input_menu"),
@@ -69,6 +69,7 @@ def autopost_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton("📣 Quảng cáo", callback_data="autopost|ads_center"),
         ],
         [
+            InlineKeyboardButton("📖 Hướng dẫn sử dụng", callback_data="autopost|guide"),
             InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
         ],
     ]
@@ -663,3 +664,58 @@ def autopost_conn_oauth_prompt_text(platform: str) -> str:
         f"Nền tảng {platform.upper()} yêu cầu cấp quyền OAuth bảo mật máy chủ.",
         "Trạng thái: <b>NEEDS_OAUTH</b> (Chưa có token cấu hình)."
     ])
+
+# ----------------- Guide: Hướng dẫn sử dụng chi tiết -----------------
+def autopost_guide_text() -> str:
+    lines = [
+        "📖 <b>HƯỚNG DẪN SỬ DỤNG HỆ THỐNG ĐĂNG BÀI TỰ ĐỘNG (AUTOPOST)</b>",
+        "",
+        "Hệ thống TOAN AAS AutoPost giúp bạn tự động hóa toàn bộ quy trình từ ý tưởng, viết bài, chèn link Affiliate cá nhân đến phát hành đa kênh theo đúng lịch trình tối ưu.",
+        "",
+        "<b>QUY TRÌNH 7 BƯỚC VẬN HÀNH CHUẨN:</b>",
+        "",
+        "1️⃣ <b>Thiết lập Thương hiệu (<code>🎨 Thương hiệu</code>):</b>",
+        "• Cài đặt Tên thương hiệu, Giọng văn (Thân thiện, Uy tín, Trẻ trung...), Lời kêu gọi hành động (CTA) và Hashtag.",
+        "• AI sẽ tự động cá nhân hóa từng bài đăng theo đúng phong cách riêng của bạn.",
+        "",
+        "2️⃣ <b>Kết nối Kênh phát hành (<code>📡 Kết nối MXH</code>):</b>",
+        "• <b>Telegram:</b> Thêm Bot làm Quản trị viên (Admin) vào Kênh/Nhóm -> Gửi <code>@username</code> kênh để kích hoạt.",
+        "• <b>Facebook / Instagram / YouTube / TikTok:</b> Kết nối qua giao thức OAuth bảo mật máy chủ.",
+        "",
+        "3️⃣ <b>Nạp Kho Affiliate cá nhân (<code>🔗 Affiliate</code>):</b>",
+        "• Dán link hoặc gửi file <code>.txt, .csv, .json</code> danh sách link tiếp thị liên kết của riêng bạn.",
+        "• AI sẽ tự động phân loại ngành hàng và ưu tiên chèn link của bạn vào bài đăng bán hàng.",
+        "",
+        "4️⃣ <b>Tạo Nguyên liệu & Bài viết (<code>✍️ Tạo nội dung</code>):</b>",
+        "• Hỗ trợ 7 nguồn đầu vào: Nhập chủ đề, Dán link URL, Chọn link Affiliate, Gửi ảnh/video hoặc dùng Video/Ảnh đã tạo từ AI Studio.",
+        "• AI tự động tạo Hook thu hút, Caption chuẩn SEO, Hashtag và nút CTA.",
+        "",
+        "5️⃣ <b>Lập Kế hoạch dài hạn (<code>🧠 Lập kế hoạch</code>):</b>",
+        "• Chọn ngành hàng (Thời trang, Công nghệ, BĐS, F&B...) để AI tự tạo kế hoạch 7/14/30 ngày theo các trụ cột (Giáo dục, Ưu đãi, Bán hàng, Tương tác).",
+        "",
+        "6️⃣ <b>Quản lý Lịch & Hàng đợi (<code>📅 Lịch đăng</code> & <code>🚀 Hàng đợi</code>):</b>",
+        "• Xem lịch trình các khung giờ vàng (11:30, 20:00).",
+        "• Tại <b>Hàng đợi</b>, bạn có thể xem lại bài chờ đăng hoặc bấm <b>[🚀 Đăng ngay]</b> để phát hành tức thì.",
+        "",
+        "7️⃣ <b>Đo lường & Quảng cáo (<code>✅ Đã đăng</code> & <code>📊 Hiệu quả</code>):</b>",
+        "• Xem biên lai Remote Receipt thật và đường link trực tiếp đến bài viết trên mạng xã hội.",
+        "• Đo lường hiệu quả chuyển đổi và kích hoạt Quảng cáo trong hộp ngân sách an toàn.",
+    ]
+    return "\n".join(lines)
+
+def autopost_guide_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton("✍️ Tạo nội dung ngay", callback_data="autopost|content_input_menu"),
+            InlineKeyboardButton("🎨 Cài đặt thương hiệu", callback_data="autopost|brands"),
+        ],
+        [
+            InlineKeyboardButton("📡 Kết nối kênh MXH", callback_data="autopost|channels"),
+            InlineKeyboardButton("🔗 Kho Affiliate cá nhân", callback_data="autopost|affiliate"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại Hub", callback_data="autopost|main"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ]
+    ]
+    return InlineKeyboardMarkup(rows)
