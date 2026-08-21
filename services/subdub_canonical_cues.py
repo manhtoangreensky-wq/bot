@@ -400,6 +400,245 @@ def wrap_cue_text(text: str, *, max_chars: int = 42, max_lines: int = 2) -> str:
     return "\n".join(line for line in lines if line).strip()
 
 
+def _balanced_two_line_text(text: str, max_chars_per_line: int) -> str:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not clean or len(clean) <= max_chars_per_line:
+        return clean
+    words = clean.split(" ")
+    if len(words) <= 1:
+        midpoint = max(1, (len(clean) + 1) // 2)
+        return f"{clean[:midpoint]}\n{clean[midpoint:]}".strip()
+    best_index = 1
+    best_score = float("inf")
+    for index in range(1, len(words)):
+        left = " ".join(words[:index])
+        right = " ".join(words[index:])
+        overflow = max(0, len(left) - max_chars_per_line) + max(
+            0, len(right) - max_chars_per_line
+        )
+        score = (overflow * 1000) + abs(len(left) - len(right))
+        if score < best_score:
+            best_score = score
+            best_index = index
+    return f"{' '.join(words[:best_index])}\n{' '.join(words[best_index:])}".strip()
+
+
+def _cue_text_chunks(
+    text: str,
+    *,
+    max_event_chars: int,
+    max_chars_per_line: int,
+    max_lines: int,
+) -> list[str]:
+    clean = normalize_cue_text(text).replace("\n", " ")
+    if not clean:
+        return []
+    line_limit = min(max_chars_per_line, 24) if _contains_wide_script(clean) else max_chars_per_line
+    event_limit = max(line_limit, min(max_event_chars, line_limit * max_lines))
+    separator = " " if " " in clean else ""
+    source_tokens = clean.split() if separator else [clean]
+    tokens: list[str] = []
+    for token in source_tokens:
+        if len(token) <= line_limit:
+            tokens.append(token)
+            continue
+        tokens.extend(
+            token[index:index + line_limit]
+            for index in range(0, len(token), line_limit)
+        )
+
+    chunks: list[str] = []
+    current = ""
+    for token in tokens:
+        candidate = token if not current else f"{current}{separator}{token}"
+        candidate_lines = wrap_cue_text(
+            candidate,
+            max_chars=line_limit,
+            max_lines=max_lines,
+        ).splitlines()
+        candidate_fits = bool(
+            len(candidate) <= event_limit
+            and len(candidate_lines) <= max_lines
+            and all(len(line) <= line_limit for line in candidate_lines)
+            and "..." not in candidate_lines[-1]
+        )
+        if current and not candidate_fits:
+            chunks.append(current)
+            current = token
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def fit_timed_subtitle_segments(
+    segments: Iterable[dict],
+    *,
+    preserve_timestamps: bool = False,
+    max_chars_per_line: int = 42,
+    max_lines: int = 2,
+    metadata_fields: Iterable[str] = (),
+    strict_frame_fit: bool = False,
+) -> list[dict]:
+    """Fit timed text with the canonical SubDub cue rules.
+
+    Synthetic text may be split inside its source window. Source/ASR timing
+    stays one-to-one and is only wrapped, matching the Translation SubDub path.
+    """
+
+    fitted: list[dict] = []
+    selected_fields = tuple(str(field) for field in metadata_fields or ())
+    line_chars = max(8, int(max_chars_per_line or 42))
+    line_count = max(1, min(2, int(max_lines or 2)))
+    for raw in segments or []:
+        source = dict(raw or {})
+        text = re.sub(r"\s+", " ", str(source.get("text") or source.get("source_text") or "")).strip()
+        if not text:
+            continue
+        start = max(
+            0.0,
+            float(
+                source.get("start")
+                if source.get("start") not in (None, "")
+                else float(source.get("start_ms") or 0) / 1000.0
+            ),
+        )
+        end = float(
+            source.get("end")
+            if source.get("end") not in (None, "")
+            else float(source.get("end_ms") or 0) / 1000.0
+        )
+        if end <= start:
+            end = start + 1.0
+        duration = max(0.1, end - start)
+        metadata = {field: source[field] for field in selected_fields if field in source}
+        if preserve_timestamps:
+            fitted.append(
+                {
+                    **metadata,
+                    "index": int(source.get("index") or len(fitted) + 1),
+                    "start": round(start, 3),
+                    "end": round(end, 3),
+                    "text": _balanced_two_line_text(text, line_chars),
+                    "confidence": source.get("confidence"),
+                    "translate_missing": bool(source.get("translate_missing")),
+                }
+            )
+            continue
+
+        max_event_chars = max(
+            24,
+            min(line_chars * line_count, int(duration * 20)),
+        )
+        if strict_frame_fit:
+            chunks = _cue_text_chunks(
+                text,
+                max_event_chars=max_event_chars,
+                max_chars_per_line=line_chars,
+                max_lines=line_count,
+            ) or [text]
+        else:
+            chunks: list[str] = []
+            current: list[str] = []
+            for word in text.split():
+                candidate = " ".join([*current, word])
+                if current and len(candidate) > max_event_chars:
+                    chunks.append(" ".join(current))
+                    current = [word]
+                else:
+                    current.append(word)
+            if current:
+                chunks.append(" ".join(current))
+            chunks = chunks or [text]
+        slot = duration / len(chunks)
+        for chunk_index, chunk in enumerate(chunks):
+            chunk_start = start + (chunk_index * slot)
+            natural_end = end if chunk_index == len(chunks) - 1 else start + ((chunk_index + 1) * slot)
+            if strict_frame_fit:
+                chunk_end = min(
+                    end,
+                    max(chunk_start + 0.1, min(chunk_start + 7.0, natural_end)),
+                )
+                wrapped = wrap_cue_text(
+                    chunk,
+                    max_chars=line_chars,
+                    max_lines=line_count,
+                )
+            else:
+                chunk_end = max(
+                    chunk_start + 1.0,
+                    min(chunk_start + 7.0, natural_end),
+                )
+                lines: list[str] = []
+                line = ""
+                for word in chunk.split():
+                    candidate = f"{line} {word}".strip()
+                    if line and len(candidate) > line_chars and len(lines) < line_count - 1:
+                        lines.append(line)
+                        line = word
+                    else:
+                        line = candidate
+                if line:
+                    lines.append(line)
+                wrapped = "\n".join(lines[:line_count]).strip()
+            fitted.append(
+                {
+                    **metadata,
+                    "index": len(fitted) + 1,
+                    "start": round(chunk_start, 3),
+                    "end": round(chunk_end, 3),
+                    "text": wrapped,
+                    "confidence": source.get("confidence"),
+                }
+            )
+    return fitted
+
+
+def _srt_timestamp_ms(value: str) -> int:
+    text = str(value or "").strip().replace(",", ".")
+    try:
+        hours, minutes, seconds = text.split(":", 2)
+        return max(
+            0,
+            int(round(((int(hours) * 3600) + (int(minutes) * 60) + float(seconds)) * 1000)),
+        )
+    except (TypeError, ValueError):
+        return -1
+
+
+def parse_srt_segments(srt_text: str) -> list[dict]:
+    """Parse a timed SRT into canonical-input segments without retiming it."""
+
+    body = str(srt_text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not body:
+        return []
+    segments: list[dict] = []
+    for raw_block in re.split(r"\n\s*\n", body):
+        lines = [line.strip() for line in raw_block.splitlines() if line.strip()]
+        timing_index = next((index for index, line in enumerate(lines) if "-->" in line), -1)
+        if timing_index < 0:
+            continue
+        start_text, end_text = [
+            part.strip().split()[0]
+            for part in lines[timing_index].split("-->", 1)
+        ]
+        start_ms = _srt_timestamp_ms(start_text)
+        end_ms = _srt_timestamp_ms(end_text)
+        text = normalize_cue_text("\n".join(lines[timing_index + 1 :]))
+        if start_ms < 0 or end_ms <= start_ms or not text:
+            continue
+        segments.append(
+            {
+                "index": len(segments) + 1,
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "text": text,
+            }
+        )
+    return segments
+
+
 def apply_translations(
     source_cues: Iterable[dict],
     translations: Iterable[dict],

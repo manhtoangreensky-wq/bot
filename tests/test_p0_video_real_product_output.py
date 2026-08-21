@@ -22,6 +22,7 @@ import remote_worker
 
 from services import (
     multiscene_video_pipeline,
+    product_video_addon_materialization,
     product_video_one_scene_engine,
     video_ai_real_pricing,
     video_profile_catalog,
@@ -1473,7 +1474,11 @@ def test_worker_passes_every_materialized_addon_to_product_compositor(
     assert captured["voice_audio_path"] == str(voice)
     assert captured["bgm_audio_path"] == str(music)
     assert captured["sfx_audio_paths"] == [str(sfx)]
-    assert Path(captured["subtitle_path"]).read_text(encoding="utf-8").count("-->") == 2
+    subtitle_render = Path(captured["subtitle_path"])
+    subtitle_ass = subtitle_render.read_text(encoding="utf-8")
+    assert subtitle_render.suffix == ".ass"
+    assert subtitle_ass.count("Dialogue: 0,") == 2
+    assert "canonical_subdub_profile: vi_telegram_general_v1" in subtitle_ass
     assert captured["logo_path"] == str(logo)
     assert captured["logo_position"] == "top_left"
     assert captured["watermark_text"] == "TOAN AAS"
@@ -1541,7 +1546,29 @@ def _finalize_all_addon_fixture(tmp_path: Path, scene_count: int) -> dict:
     music = _render_audio_fixture(tmp_path / "fixture-music.m4a", 660, total_duration)
     sfx = _render_audio_fixture(tmp_path / "fixture-sfx.wav", 880, 0.75)
     logo = _render_logo_fixture(tmp_path / "fixture-logo.png")
-    subtitle = _write_subtitle_fixture(tmp_path / "fixture-subtitle.srt", scene_count)
+    subtitle_materials = product_video_addon_materialization.materialize_product_video_addons(
+        {
+            "output_width": 180,
+            "output_height": 320,
+            "addon_plan": {
+                "contract_version": "product-video-addons-v1",
+                "requested_addons": ["subtitle"],
+                "subtitle": {
+                    "enabled": True,
+                    "target_language": "vi",
+                    "script_text": "\n".join(
+                        f"Lời phụ đề SubDub cho cảnh {index}."
+                        for index in range(1, scene_count + 1)
+                    ),
+                },
+            },
+        },
+        workspace=str(tmp_path),
+        scene_count=scene_count,
+        scene_duration=2.0,
+    )
+    assert subtitle_materials["ok"] is True
+    subtitle = Path(subtitle_materials["subtitle_path"])
     transitions = ["dissolve"] if scene_count == 2 else []
     requested = [
         "subtitle",
