@@ -206,6 +206,85 @@ def test_local_prompt_vault_fallback_covers_trend_script_and_long_form() -> None
         assert video_uiflow3.scene_plan_complete(planned) is True
 
 
+def test_script_local_vault_uses_the_existing_source_parser() -> None:
+    script = (
+        "Mai mở cửa xưởng rang. "
+        "Cô cân từng mẻ hạt. "
+        "Lửa rang đổi màu hạt. "
+        "Mai kiểm tra mùi thơm. "
+        "Cô rót cà phê và mời khách."
+    )
+    expected_actions = (
+        "mở cửa xưởng rang",
+        "cân từng mẻ hạt",
+        "lửa rang đổi màu hạt",
+        "kiểm tra mùi thơm",
+        "rót cà phê và mời khách",
+    )
+    state = video_uiflow3.new_state("script_image_video", draft_id="vault-script-source")
+    state = video_uiflow3.set_source_metadata(
+        state,
+        source_kind="approved_script",
+        source_text=script,
+    )
+    state = video_uiflow3.set_format(state, ratio="9:16", target_duration_seconds=40)
+    state = video_uiflow3.set_content_candidate(
+        state,
+        source="approved_script",
+        original_intent="Kịch bản đã nhận",
+        profile_id="storytelling_life",
+        approved_brief={"title": "Một ngày ở xưởng cà phê"},
+    )
+    state = video_uiflow3.lock_content(state)
+    state = video_uiflow3.confirm_scene_count(state, 5)
+
+    planned = video_uiflow3.suggest_scene_plan_from_vault(state)
+
+    assert all(
+        action in scene["main_action"].lower()
+        for action, scene in zip(expected_actions, planned["scenes"])
+    )
+    assert len({scene["semantic_beat"] for scene in planned["scenes"]}) == 5
+
+
+def test_local_vault_uses_distinct_profile_beats_for_every_video_product() -> None:
+    profile_by_product = {
+        "video_trend": "social_creator_trend",
+        "video_ai_real": "product_review_demo",
+        "script_image_video": "storytelling_life",
+        "frame_video_local": "product_3d_showcase",
+        "self_shot_scene_change": "affiliate_ugc",
+        "storyboard_prompt": "short_film_trailer",
+        "multi_scene_film": "short_film_trailer",
+    }
+    for product_id, profile_id in profile_by_product.items():
+        state = video_uiflow3.new_state(product_id, draft_id=f"vault-profile-{product_id}")
+        if product_id == "multi_scene_film":
+            state = video_uiflow3.set_series_goal(state, "Hành trình xây dựng quán cà phê")
+            state = video_uiflow3.set_episode_content(state, "Tập mở đầu giới thiệu Mai và xưởng rang.")
+            state = video_uiflow3.lock_episode_content(state)
+        state = video_uiflow3.set_format(
+            state,
+            ratio="9:16",
+            target_duration_seconds=5 * int(state["format"]["seconds_per_scene"]),
+        )
+        state = video_uiflow3.set_content_candidate(
+            state,
+            source="manual",
+            original_intent="Giới thiệu hành trình cà phê thủ công.",
+            profile_id=profile_id,
+            approved_brief={"title": "Hành trình cà phê"},
+        )
+        state = video_uiflow3.lock_content(state)
+        state = video_uiflow3.confirm_scene_count(state, 5)
+
+        planned = video_uiflow3.suggest_scene_plan_from_vault(state)
+
+        assert all(scene["planning_source"] == "local_prompt_vault" for scene in planned["scenes"])
+        assert len({scene["semantic_beat"] for scene in planned["scenes"]}) == 5
+        assert video_uiflow3.scene_plan_complete(planned) is True
+
+
 def test_scene_plan_screen_uses_real_newlines() -> None:
     source = BOT_SOURCE.read_text(encoding="utf-8")
     screen = _block(

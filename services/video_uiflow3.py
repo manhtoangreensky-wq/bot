@@ -15,7 +15,9 @@ from typing import Any, Iterable, Mapping
 from uuid import uuid4
 
 from services import video_profile_context_engine
+from services import video_profile_catalog
 from services import video_product_profiles as video_profiles
+from services import video_script_product
 
 
 FLOW_SCHEMA_VERSION = 3
@@ -1976,6 +1978,19 @@ def _scene_plan_marked_actions(value: Any, scene_count: int) -> list[str]:
     return actions
 
 
+def _scene_plan_profile_beats(state: Mapping[str, Any], scene_count: int) -> list[dict[str, Any]]:
+    requested = _text((state.get("content") or {}).get("profile_id"), 120)
+    profile_key = video_profile_catalog.canonical_profile_key(requested)
+    if not profile_key:
+        profile, _context = _scene_plan_profile_context(state, scene_count)
+        profile_key = video_profile_catalog.canonical_profile_key(profile.profile_id)
+    return video_profile_catalog.semantic_beats_for_bundle(
+        profile_key or "storytelling_life",
+        (),
+        scene_count,
+    )
+
+
 def _scene_plan_vault_actions(state: Mapping[str, Any], scene_count: int) -> list[str]:
     count = max(1, int(scene_count or 1))
     scene_intents = [
@@ -1989,8 +2004,20 @@ def _scene_plan_vault_actions(state: Mapping[str, Any], scene_count: int) -> lis
     content = dict(state.get("content") or {})
     brief = dict(content.get("approved_brief") or {})
     source_metadata = dict((state.get("source") or {}).get("metadata") or {})
+    if str(state.get("parent_product") or "") == "script_image_video":
+        source_text = _text(source_metadata.get("source_text") or content.get("original_intent"), 12000)
+        parsed = video_script_product.semantic_beats(source_text, count) if source_text else {}
+        actions = [
+            _text(item.get("action"), 800)
+            for item in list(parsed.get("semantic_beats") or [])
+            if isinstance(item, Mapping)
+        ]
+        if len(actions) == count and all(actions):
+            return actions
+
     candidates = [
         _scene_plan_intent(state),
+        source_metadata.get("source_text"),
         source_metadata.get("trend_analysis"),
         source_metadata.get("video_analysis"),
         source_metadata.get("analysis"),
@@ -2024,6 +2051,7 @@ def suggest_scene_plan_from_vault(state: Mapping[str, Any]) -> dict[str, Any]:
     product = str(current.get("parent_product") or "")
     total = len(scenes)
     scene_actions = _scene_plan_vault_actions(current, total)
+    profile_beats = _scene_plan_profile_beats(current, total)
     subject = _text(intent.split("|", 1)[0], 180) or "Nội dung đã khóa"
     for index, scene in enumerate(scenes, 1):
         if bool(scene.get("locked_by_user")) or str(scene.get("planning_source") or "") == "user":
@@ -2038,34 +2066,57 @@ def suggest_scene_plan_from_vault(state: Mapping[str, Any]) -> dict[str, Any]:
                 1600,
             )
         action = scene_actions[index - 1] if index <= len(scene_actions) else ""
+        profile_beat = (
+            dict(profile_beats[index - 1])
+            if not action and index <= len(profile_beats)
+            else {}
+        )
+        beat_idea = _text(profile_beat.get("main_idea"), 300)
+        beat_action = _text(profile_beat.get("action"), 500)
+        beat_completion = _text(profile_beat.get("completion"), 500)
+        if profile_beat.get("role"):
+            scene["scene_role"] = _text(profile_beat.get("role"), 80)
+        scene["original_scene_intent"] = _text(action or beat_idea or scene.get("original_scene_intent"), 1600)
         if product == "video_ai_real":
             duration = max(1, _integer(scene.get("duration_target"), _integer(current["format"].get("seconds_per_scene"), 8)))
-            scene["semantic_beat"] = _text(action or f"{subject} · Cảnh {index}", 800)
+            scene["semantic_beat"] = _text(action or (f"{beat_idea}: {subject}" if beat_idea else f"{subject} · Cảnh {index}"), 800)
             scene["main_action"] = _text(
                 (
                     f"{action}. Hoàn tất trọn hành động trong {duration} giây."
                     if action
-                    else f"Thực hiện một hành động duy nhất cho Cảnh {index} và hoàn tất trong {duration} giây."
+                    else (
+                        f"{beat_action} cho {subject}; hoàn tất trong {duration} giây."
+                        if beat_action
+                        else f"Thực hiện một hành động duy nhất cho Cảnh {index} và hoàn tất trong {duration} giây."
+                    )
                 ),
                 800,
             )
             scene["completion_state"] = _text(
-                f"Hành động Cảnh {index} đã hoàn tất rõ ràng trong {duration} giây.",
+                (
+                    f"{beat_completion} Hành động Cảnh {index} hoàn tất rõ ràng trong {duration} giây."
+                    if beat_completion
+                    else f"Hành động Cảnh {index} đã hoàn tất rõ ràng trong {duration} giây."
+                ),
                 800,
             )
         else:
             purpose = _text(template.get("purpose") or template.get("title"), 240) or f"Phát triển nội dung Cảnh {index}"
-            scene["semantic_beat"] = _text(action or f"{purpose}: {subject}", 800)
+            scene["semantic_beat"] = _text(action or (f"{beat_idea}: {subject}" if beat_idea else f"{purpose}: {subject}"), 800)
             scene["main_action"] = _text(
                 (
                     f"Thể hiện trọn vẹn: {action}."
                     if action
-                    else f"Thể hiện {purpose.lower()} bằng một hành động rõ ràng, bám nội dung đã khóa."
+                    else (
+                        f"{beat_action}; bám trực tiếp nội dung {subject}."
+                        if beat_action
+                        else f"Thể hiện {purpose.lower()} bằng một hành động rõ ràng, bám nội dung đã khóa."
+                    )
                 ),
                 800,
             )
             scene["completion_state"] = _text(
-                f"Ý {purpose.lower()} đã hoàn tất và tạo trạng thái nối sang cảnh kế tiếp.",
+                beat_completion or f"Ý {purpose.lower()} đã hoàn tất và tạo trạng thái nối sang cảnh kế tiếp.",
                 800,
             )
         scene["planning_source"] = "local_prompt_vault"
