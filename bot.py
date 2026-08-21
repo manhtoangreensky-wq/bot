@@ -40437,7 +40437,7 @@ def deepgram_srt_from_response(data: dict, max_words_per_block: int = 12) -> str
         srt_blocks.append(
             f"{idx}\n{video_dubbing_srt_timestamp(start)} --> {video_dubbing_srt_timestamp(end)}\n{text}"
         )
-    return "\\n\\n".join(srt_blocks).strip() + "\\n"
+    return "\n\n".join(srt_blocks).strip() + "\n"
 
 def deepgram_segments_from_response(data: dict, max_words_per_segment: int = 12) -> list[dict]:
     words = deepgram_word_items(data)
@@ -40476,13 +40476,13 @@ def deepgram_segments_from_response(data: dict, max_words_per_segment: int = 12)
 
 def deepgram_vtt_from_srt(srt_text: str) -> str:
     lines = ["WEBVTT", ""]
-    for line in str(srt_text or "").replace("\r", "").split("\\n"):
+    for line in str(srt_text or "").replace("\r", "").split("\n"):
         if line.strip().isdigit():
             continue
         if "-->" in line:
             line = line.replace(",", ".")
         lines.append(line)
-    return "\\n".join(lines).strip() + "\\n"
+    return "\n".join(lines).strip() + "\n"
 
 def srt_has_timestamp_blocks(srt_text: str) -> bool:
     return bool(re.search(r"\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}", str(srt_text or "")))
@@ -231788,7 +231788,7 @@ def translation_voice_gate_status_text(lang: str = "vi") -> str:
         "",
         "Không gọi provider, không xử lý file, không trừ Xu." if is_vi else "No provider call, no file processing, no Xu charge.",
     ]
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 def video_dubbing_menu_keyboard(lang: str = "vi", origin: str = "video") -> InlineKeyboardMarkup:
     copy = public_subdub_deep_copy(normalize_user_language(lang))
@@ -232837,7 +232837,7 @@ def linkdl_yes_no(value) -> str:
 def linkdl_audit_text() -> str:
     audit = video_downloader_provider().audit()
     platforms = ", ".join(str(item) for item in audit.get("supported_platforms") or [])
-    return "\\n".join([
+    return "\n".join([
         "📥 <b>LinkDL audit</b>",
         "",
         f"• public_enabled: <code>{linkdl_yes_no(VIDEO_DOWNLOADER_PUBLIC_ENABLED)}</code>",
@@ -232861,7 +232861,7 @@ def linkdl_status_text(job_id: str) -> str:
             f"• job_id: <code>{html.escape(str(status.get('job_id') or job_id or '-'))}</code>\n"
             "• blocker: <code>job_not_found</code>"
         )
-    return "\\n".join([
+    return "\n".join([
         "📥 <b>LinkDL status</b>",
         "",
         f"• job_id: <code>{html.escape(str(status.get('job_id') or '-'))}</code>",
@@ -234142,7 +234142,7 @@ def _video_dubbing_manual_invoice_breakdown(state: dict | None = None) -> dict:
 def _subdub_auto_selected_text(segments: object) -> str:
     if not isinstance(segments, list):
         return ""
-    return "\\n".join(
+    return "\n".join(
         str(item.get("text") or "").strip()
         for item in segments
         if isinstance(item, dict) and str(item.get("text") or "").strip()
@@ -234438,7 +234438,7 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
                         f"• total: <b>{int(invoice.get('total_xu') or 0)} Xu</b>",
                     ])
         lines.extend(["", copy["confirm"]])
-        return "\\n".join(lines)
+        return "\n".join(lines)
     language = html.escape(target or "-")
     lines = [f"{copy['confirm']}", "", f"• {copy['current']}: ✅"]
     if active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT:
@@ -234451,7 +234451,7 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
             f"• total: <b>{price_xu} Xu</b>",
         ])
     lines.extend(["", copy["locked"]])
-    return "\\n".join(lines)
+    return "\n".join(lines)
     # Legacy binary copy removed: all customer confirmation text above now
     # resolves from the direct 17-locale SubDub presentation authority.
 
@@ -235360,7 +235360,7 @@ def subdub_postdelivery_video_edit_artifact(
         and subdub_duration_validation_allows_success(current)
     ):
         return {}
-    identity = "\\n".join((job_key, str(owner_user_id), message_id, file_id, sha256))
+    identity = "\n".join((job_key, str(owner_user_id), message_id, file_id, sha256))
     artifact_token = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
     if token and str(token).strip().lower() != artifact_token:
         return {}
@@ -235792,7 +235792,7 @@ def subdub_public_state_debug_text() -> str:
             f" | smoke={readiness.get('asr_smoke_status') or 'NOT_TESTED'}"
             f" | blockers={','.join(readiness.get('blockers') or []) or '-'}"
         )
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def video_dubbing_public_flag(mode: str) -> bool:
@@ -237062,7 +237062,7 @@ def subdub_progress_text(stage: str = "saved_input", job_id: str = "", lang: str
             break
     else:
         lines.extend(["", progress_bar])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def subdub_progress_keyboard(job_id: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
@@ -240587,10 +240587,10 @@ def subdub_normalize_subtitle_text(text) -> str:
         value = text.decode("utf-8-sig", errors="replace")
     else:
         value = str(text or "")
-    value = value.replace("\ufeff", "").replace("\r\n", "\\n").replace("\r", "\\n")
+    value = value.replace("\ufeff", "").replace("\r\n", "\n").replace("\r", "\n")
     cleaned = []
     for char in value:
-        if char in {"\\n", "\t"}:
+        if char in {"\n", "\t"}:
             cleaned.append(char)
             continue
         if char == "\x00":
@@ -240751,14 +240751,14 @@ def subdub_visible_subtitle_text(srt_text: str) -> str:
     text = subdub_normalize_subtitle_text(srt_text)
     blocks = subdub_srt_blocks(text)
     if blocks:
-        return "\\n".join(str(block.get("text") or "") for block in blocks)
+        return "\n".join(str(block.get("text") or "") for block in blocks)
     lines = []
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or "-->" in stripped or re.fullmatch(r"\d+", stripped):
             continue
         lines.append(stripped)
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 def subdub_broken_glyph_ratio(text: str) -> float:
     visible = [char for char in str(text or "") if not char.isspace()]
@@ -241266,7 +241266,7 @@ def subdub_srt_blocks(srt_text: str) -> list[dict]:
     text = subdub_normalize_subtitle_text(srt_text)
     blocks: list[dict] = []
     for raw_block in re.split(r"\n\s*\n", text):
-        lines = [line.strip() for line in raw_block.split("\\n") if line.strip()]
+        lines = [line.strip() for line in raw_block.split("\n") if line.strip()]
         if not lines:
             continue
         if re.fullmatch(r"\d+", lines[0]) and len(lines) > 1:
@@ -241275,7 +241275,7 @@ def subdub_srt_blocks(srt_text: str) -> list[dict]:
         if time_index < 0:
             continue
         start_text, end_text = [part.strip().split()[0] for part in lines[time_index].split("-->", 1)]
-        body = "\\n".join(lines[time_index + 1:]).strip()
+        body = "\n".join(lines[time_index + 1:]).strip()
         if not body:
             continue
         start = subdub_parse_srt_timestamp(start_text)
@@ -241286,7 +241286,7 @@ def subdub_srt_blocks(srt_text: str) -> list[dict]:
     return blocks
 
 def subdub_ass_escape(text: str, max_lines: int = 2) -> str:
-    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\\n")
+    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
     normalized = re.sub(r"[{}]", "", normalized)
     lines = [re.sub(r"\s+", " ", line).strip().replace("\\", r"\\") for line in normalized.splitlines()]
     lines = [line for line in lines if line]
@@ -241324,7 +241324,7 @@ def subdub_ass_wrap_text(text: str, style: dict, max_lines: int = 2) -> str:
     return rf"{{\fs{int(layout.get('font_size') or style.get('render_size') or 48)}}}" + escaped
 
 def subdub_ass_text_chunks(text: str, style: dict, max_lines: int = 2) -> list[str]:
-    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\\n")
+    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
     normalized = re.sub(r"[{}]", "", normalized)
     words = [word for word in re.sub(r"\s+", " ", normalized).strip().split(" ") if word]
     if not words:
@@ -241345,7 +241345,7 @@ def subdub_ass_text_chunks(text: str, style: dict, max_lines: int = 2) -> list[s
     if current:
         lines.append(current)
     line_limit = max(1, min(2, int(max_lines or 2)))
-    return ["\\n".join(lines[index:index + line_limit]) for index in range(0, len(lines), line_limit)]
+    return ["\n".join(lines[index:index + line_limit]) for index in range(0, len(lines), line_limit)]
 
 def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = None) -> str:
     style = subdub_normalize_style(
@@ -241481,7 +241481,7 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
             last_dialogue_end = max(last_dialogue_end, chunk_end)
     if len(header) >= 5:
         header.insert(5, f"; subtitle_overlap_events_suppressed: {overlap_suppressed}")
-    return "\\n".join(header + events) + "\\n"
+    return "\n".join(header + events) + "\n"
 
 def subdub_ffmpeg_filter_path(path: str) -> str:
     # Single definition lives in services/ffmpeg_text: a quote cannot be
@@ -242511,7 +242511,7 @@ def video_dubbing_srt_from_text(text: str, duration_seconds: int = 0) -> str:
         blocks.append(
             f"{idx}\n{video_dubbing_srt_timestamp(start)} --> {video_dubbing_srt_timestamp(end)}\n{chunk}"
         )
-    return "\\n\\n".join(blocks) + "\\n"
+    return "\n\n".join(blocks) + "\n"
 
 async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, state: dict) -> tuple[bytes, str]:
     file_id = str(state.get("video_file_id") or state.get("source_file_id") or "")
@@ -242589,25 +242589,25 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
 
 def video_dubbing_plain_script(subtitle_or_text: str) -> str:
     lines = []
-    for raw_line in str(subtitle_or_text or "").replace("\r", "").split("\\n"):
+    for raw_line in str(subtitle_or_text or "").replace("\r", "").split("\n"):
         line = raw_line.strip()
         if not line or line.isdigit() or "-->" in line:
             continue
         line = re.sub(r"<[^>]+>", "", line).strip()
         if line:
             lines.append(line)
-    return "\\n".join(lines).strip()
+    return "\n".join(lines).strip()
 
 def video_dubbing_srt_to_vtt_text(srt_text: str) -> str:
     body = str(srt_text or "").replace("\r", "").strip()
     if not body:
         return "WEBVTT\n"
     body = re.sub(r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", body)
-    return "WEBVTT\n\n" + body + "\\n"
+    return "WEBVTT\n\n" + body + "\n"
 
 def video_dubbing_subtitle_plain_text(srt_text: str) -> str:
     plain = video_dubbing_plain_script(srt_text)
-    return (plain or str(srt_text or "").strip()) + ("\\n" if plain or str(srt_text or "").strip() else "")
+    return (plain or str(srt_text or "").strip()) + ("\n" if plain or str(srt_text or "").strip() else "")
 
 def video_dubbing_subtitle_output_items(srt_text: str, output_type: str = "srt", mode: str = "") -> list[dict]:
     output_type = str(output_type or "srt").strip().lower()
@@ -242823,7 +242823,7 @@ async def video_dubbing_extract_visual_subtitle(
         )
     if result.get("ok"):
         result["subtitle"] = video_dubbing_srt_from_segments(list(result.get("segments") or []))
-        result["script"] = "\\n".join(str(item.get("text") or "") for item in (result.get("segments") or [])).strip()
+        result["script"] = "\n".join(str(item.get("text") or "") for item in (result.get("segments") or [])).strip()
         result["source_kind"] = "visual_hardsub_ocr"
     return result
 
@@ -243275,7 +243275,7 @@ def video_dubbing_srt_from_segments(segments: list[dict]) -> str:
         blocks.append(
             f"{len(blocks) + 1}\n{video_dubbing_srt_timestamp(start)} --> {video_dubbing_srt_timestamp(end)}\n{text}"
         )
-    return ("\\n\\n".join(blocks) + "\\n") if blocks else ""
+    return ("\n\n".join(blocks) + "\n") if blocks else ""
 
 def video_dubbing_timestamp_seconds(value: str) -> float:
     clean = str(value or "").strip().replace(",", ".")
@@ -243292,7 +243292,7 @@ def video_dubbing_segments_from_subtitle(subtitle_text: str) -> list[dict]:
     if not body:
         return []
     if body.startswith("WEBVTT"):
-        body = body.split("\\n", 1)[1] if "\\n" in body else ""
+        body = body.split("\n", 1)[1] if "\n" in body else ""
     blocks = re.split(r"\n\s*\n", body)
     segments = []
     for block in blocks:
@@ -243986,7 +243986,7 @@ async def video_dubbing_render_video(
             if not readability.get("ok"):
                 return b"", f"subtitle_text_unreadable:{readability.get('blocker') or 'subtitle_text_invalid'}"
             subtitle_text = str(readability.get("normalized_text") or subtitle_text)
-            with open(subtitle_path, "w", encoding="utf-8", newline="\\n") as handle:
+            with open(subtitle_path, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(subtitle_text)
             if style.get("show_subtitles"):
                 fallback_subtitle_filter = subdub_subtitle_filter_for_file(subtitle_path)
@@ -243995,7 +243995,7 @@ async def video_dubbing_render_video(
                 ass_text = subdub_generate_ass_from_srt(subtitle_text, style)
                 if not ass_text:
                     return b"", "subtitle_ass_generation_failed"
-                with open(ass_path, "w", encoding="utf-8", newline="\\n") as handle:
+                with open(ass_path, "w", encoding="utf-8", newline="\n") as handle:
                     handle.write(ass_text)
                 subtitle_filter = subdub_subtitle_filter_for_file(ass_path)
         if subtitle_filter and subdub_advanced_style_enabled(subtitle_style):
@@ -244290,7 +244290,7 @@ async def execute_video_dubbing_preview(
         lines = [line.strip() for line in video_dubbing_plain_script(preview_subtitle).splitlines() if line.strip()][:4]
         await query.message.reply_text(
             "▶️ <b>Phụ đề xem thử</b>\n\n"
-            + html.escape("\\n".join(lines)[:700])
+            + html.escape("\n".join(lines)[:700])
             + f"\n\nĐây là bản thử từ đoạn {preview_seconds} giây; chưa xuất file đầy đủ và chưa trừ Xu final.",
             parse_mode="HTML",
         )
@@ -245151,7 +245151,7 @@ def subdub_mode_requests_translation(mode: str, state: dict | None = None) -> bo
 
 def subdub_speaker_sidecar_subtitle_sha256(subtitle_text: str) -> str:
     normalized = unicodedata.normalize("NFC", str(subtitle_text or ""))
-    normalized = normalized.replace("\r\n", "\\n").replace("\r", "\\n").strip()
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n").strip()
     return hashlib.sha256(normalized.encode("utf-8", errors="strict")).hexdigest()
 
 
@@ -245703,7 +245703,7 @@ def subdub_auto_effective_charge_status(
 
 def _subdub_auto_text_sha256(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", str(value or ""))
-    normalized = normalized.replace("\r\n", "\\n").replace("\r", "\\n").strip()
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n").strip()
     return hashlib.sha256(normalized.encode("utf-8", errors="strict")).hexdigest()
 
 
@@ -246663,7 +246663,7 @@ def subdub_auto_exact_confirmation_text(
         f"• {copy['voice_auto_price_rule']}",
         f"• {copy['voice_auto_total']}: <b>{total_xu} Xu</b>",
     ])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def _subdub_auto_exact_callback_token(job: dict) -> str:
@@ -247954,7 +247954,7 @@ async def _execute_video_dubbing_pipeline_core(
             srt_text
             or output_subtitle
             or (srt_bytes.decode("utf-8-sig", errors="replace") if srt_bytes else "")
-            or "\\n\\n".join(
+            or "\n\n".join(
                 (bytes(item.get("bytes") or b"").decode("utf-8-sig", errors="replace") if isinstance(item, dict) else "")
                 for item in subtitle_items
             )
@@ -250731,7 +250731,7 @@ def subtitle_editor_lines(state: dict | None = None) -> list[str]:
 def subtitle_editor_text(state: dict | None = None, lang: str = "vi") -> str:
     copy = public_subdub_deep_copy(normalize_user_language(lang))
     lines = subtitle_editor_lines(state)
-    preview = "\\n".join(f"{idx}. {html.escape(line[:160])}" for idx, line in enumerate(lines[:10], start=1))
+    preview = "\n".join(f"{idx}. {html.escape(line[:160])}" for idx, line in enumerate(lines[:10], start=1))
     return f"<b>{copy['editor']}</b>\n\n{copy['preview']} · {copy['find']} · {copy['edit']} · {copy['add']} · {copy['delete']} · {copy['shift']}\n\n{preview}"
 
 def subtitle_editor_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -250755,14 +250755,14 @@ def subtitle_editor_replace_line(state: dict, line_no: int, replacement: str) ->
     if line_no < 1 or line_no > len(lines):
         raise ValueError("line_out_of_range")
     lines[line_no - 1] = str(replacement or "").strip()[:500]
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 def subtitle_editor_find_replace_text(state: dict, find_text: str, replace_text: str) -> str:
     lines = subtitle_editor_lines(state)
     needle = str(find_text or "")
     if not needle:
-        return "\\n".join(lines)
-    return "\\n".join(line.replace(needle, str(replace_text or "")) for line in lines)
+        return "\n".join(lines)
+    return "\n".join(line.replace(needle, str(replace_text or "")) for line in lines)
 
 def create_social_link_import_job(user_id, chat_id, state: dict) -> int:
     payload = {
@@ -251022,7 +251022,7 @@ async def handle_video_dubbing_pending_text(update: Update, context: ContextType
         try:
             draft = subtitle_editor_replace_line(state, line_no, update.message.text)
         except ValueError:
-            draft = "\\n".join(subtitle_editor_lines(state))
+            draft = "\n".join(subtitle_editor_lines(state))
         state = set_video_dubbing_pending(uid, "subtitle_editor", subtitle_draft=draft)
         await update.message.reply_text(
             "✅ Đã lưu dòng phụ đề nháp.",
@@ -252551,19 +252551,19 @@ async def handle_video_dubbing_callback(
         set_video_dubbing_pending(uid, "subtitle_find_text")
         return await safe_edit_or_send(query, "🔎 Gửi nội dung cần tìm.", reply_markup=subtitle_editor_keyboard(lang))
     if action == "subtitle_add_line":
-        draft = "\\n".join(subtitle_editor_lines(state) + ["Dòng phụ đề mới"])
+        draft = "\n".join(subtitle_editor_lines(state) + ["Dòng phụ đề mới"])
         state = set_video_dubbing_pending(uid, "subtitle_editor", subtitle_draft=draft)
         return await safe_edit_or_send(query, subtitle_editor_text(state, lang), parse_mode="HTML", reply_markup=subtitle_editor_keyboard(lang))
     if action == "subtitle_delete_line":
         lines = subtitle_editor_lines(state)
-        draft = "\\n".join(lines[:-1] or lines)
+        draft = "\n".join(lines[:-1] or lines)
         state = set_video_dubbing_pending(uid, "subtitle_editor", subtitle_draft=draft)
         return await safe_edit_or_send(query, subtitle_editor_text(state, lang), parse_mode="HTML", reply_markup=subtitle_editor_keyboard(lang))
     if action == "subtitle_shift_time":
         set_video_dubbing_pending(uid, "subtitle_time_shift")
         return await safe_edit_or_send(query, "⏱ Nhập số mili-giây muốn dịch thời gian, ví dụ: +500 hoặc -300.", reply_markup=subtitle_editor_keyboard(lang))
     if action == "subtitle_save":
-        state = set_video_dubbing_pending(uid, "subtitle_editor", subtitle_draft="\\n".join(subtitle_editor_lines(state)))
+        state = set_video_dubbing_pending(uid, "subtitle_editor", subtitle_draft="\n".join(subtitle_editor_lines(state)))
         return await safe_edit_or_send(query, "✅ Đã lưu phụ đề nháp.", reply_markup=subtitle_editor_keyboard(lang))
     if action == "return_origin":
         if origin == "video_addon":
