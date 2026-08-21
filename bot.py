@@ -250161,6 +250161,13 @@ async def video_dubbing_create_original_subtitle_for_next_step(
         )
     except Exception as exc:
         detail = sanitize_log_text(str(exc))[:160]
+        logger.warning(
+            "subdub original subtitle prepare failed | user=%s | requested=%s | error_class=%s | detail=%s",
+            user_id,
+            requested,
+            type(exc).__name__,
+            detail,
+        )
         state = set_video_dubbing_pending(user_id, "original_subtitle_confirm", processing="0", processing_error=detail)
         await message.reply_text(video_dubbing_asr_failure_text(lang), reply_markup=video_dubbing_asr_failure_keyboard(lang))
         return state
