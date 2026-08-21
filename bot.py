@@ -15,7 +15,7 @@ from services.autopost_ui import (
     autopost_brand_preview_text, autopost_aff_seed_success_text, autopost_aff_clear_confirm_text,
     autopost_aff_clear_done_text, autopost_conn_telegram_prompt_text, autopost_conn_oauth_prompt_text, autopost_test_tg_conn_text,
     autopost_job_publish_result_text, autopost_set_mode_text, autopost_draft_publish_result_text,
-    autopost_draft_approved_text
+    autopost_draft_approved_text, autopost_guide_text, autopost_guide_keyboard
 )
 from services.autopost_db import (
     init_autopost_durable_db, save_content_input, get_content_input,
@@ -190850,7 +190850,6 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
             admin_real_test
             and getattr(video_dubbing_capability, "__name__", "") == "video_dubbing_capability"
             and not video_dubbing_state_has_subtitle_or_transcript(state)
-            and not subdub_final_confirmed_state(state)
             and not subdub_public_flag_with_override("VIDEO_ASR_ENABLED", VIDEO_ASR_ENABLED)
             and "asr_adapter_missing" not in technical_missing
         ):
@@ -237804,7 +237803,7 @@ def subtitle_dub_find_latest_dub_job_for_user_mode(user_id, mode: str = "", stat
                 "video_file_unique_id",
             )
         )
-        return 1 if any(token and token[:160] in haystack for token in source_tokens) else 0
+        return 1 if any(token and token in haystack for token in source_tokens) else 0
 
     def _active_or_delivered_score(item: dict) -> int:
         if subdub_should_suppress_late_public_failure(item) or subdub_job_blocks_public_fail(item):
@@ -237830,8 +237829,6 @@ def subtitle_dub_find_latest_dub_job_for_user_mode(user_id, mode: str = "", stat
                 candidates.append(item)
     except Exception:
         pass
-    if source_tokens:
-        candidates = [item for item in candidates if _source_score(item)]
     if not candidates:
         return {}
     candidates.sort(
@@ -252238,11 +252235,7 @@ async def handle_video_dubbing_callback(
                 parse_mode="HTML",
                 reply_markup=video_dubbing_source_keyboard(lang, state),
             )
-        if (
-            action in {"combo_dub_translated", "voice", "combo_full_dub"}
-            and not state.get("translated_subtitle_ref")
-            and not subtitle_plus_dub_single_lane_pending(state)
-        ):
+        if action in {"combo_dub_translated", "voice", "combo_full_dub"} and not state.get("translated_subtitle_ref"):
             if not state.get("subtitle_ref"):
                 state = set_video_dubbing_pending(
                     uid,
@@ -252549,17 +252542,8 @@ async def handle_video_dubbing_callback(
                     output_type="video_subtitle",
                     output_format="video_subtitle",
                     processing="1",
-                    subdub_final_confirmed=True,
-                    subdub_confirmation_source="videodub|combo_full_dub",
-                    subdub_confirmed_at_ts=int(time.time()),
-                    pending_video_action=action,
                 )
-            await safe_edit_or_send(
-                query,
-                subdub_progress_text("received_file", "", lang),
-                parse_mode="HTML",
-                reply_markup=subdub_progress_keyboard("", lang),
-            )
+            await safe_edit_or_send(query, "TOAN AAS đang tạo video phụ đề + lồng tiếng hoàn chỉnh...")
             result = await execute_subtitle_plus_dub_full_from_callback(query, context, state, lang)
             if str(result.get("status") or "") == "AUTO_EXACT_CONFIRMATION_REQUIRED":
                 return await render_subdub_auto_exact_confirmation(
