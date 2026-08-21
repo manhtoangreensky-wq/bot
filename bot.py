@@ -118,7 +118,7 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
-from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_auto_settlement, subdub_auto_word_pricing, subdub_blackboxes, subdub_canonical_cues, subdub_combo_blackbox, subdub_long_media, subdub_media_preflight, subdub_provider_contract, subdub_speaker_cast, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
+from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_ass_layout, subdub_auto_settlement, subdub_auto_word_pricing, subdub_blackboxes, subdub_canonical_cues, subdub_combo_blackbox, subdub_long_media, subdub_media_preflight, subdub_provider_contract, subdub_speaker_cast, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services.subdub_blackboxes import auto_speaker
 from services import ai_chatbot_copilot, cskh_session_memory, telegram_business_support, telegram_transport
 from services import public_chat_media, public_chat_runtime, public_chat_store
@@ -241069,135 +241069,19 @@ def subdub_ass_escape(text: str, max_lines: int = 2) -> str:
 
 
 def subdub_ass_fit_text_layout(text: str, style: dict, max_lines: int = 2) -> dict:
-    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
-    normalized = re.sub(r"[{}]", "", normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    play_res_x = max(1, int((style or {}).get("play_res_x") or 1280))
-    margin_l = max(0, int((style or {}).get("subtitle_margin_l_after") or round(play_res_x * 0.04)))
-    margin_r = max(0, int((style or {}).get("subtitle_margin_r_after") or round(play_res_x * 0.04)))
-    requested_size = max(6, int((style or {}).get("render_size") or (style or {}).get("size") or 48))
-    line_limit = max(1, min(2, int(max_lines or 2)))
-    if not normalized:
-        return {
-            "text": "",
-            "font_size": requested_size,
-            "line_count": 0,
-            "max_line_width_px": 0,
-            "available_width_px": max(1, play_res_x - margin_l - margin_r),
-            "fits_width": True,
-        }
-
-    font_cache = {}
-    measurement_cache = {}
-    measurement_draw = (
-        ImageDraw.Draw(Image.new("L", (1, 1), 0))
-        if Image is not None and ImageDraw is not None
-        else None
+    layout = subdub_ass_layout.fit_text_layout(
+        text,
+        style,
+        max_lines,
+        normalize_text=subdub_normalize_subtitle_text,
+        font_loader=lambda size: load_operator_font(size, bold=True),
     )
-
-    def _font(size: int):
-        if size in font_cache:
-            return font_cache[size]
-        if ImageFont is None:
-            return None
-        path = str((style or {}).get("subtitle_font_path") or "").strip()
-        try:
-            if path and os.path.isfile(path):
-                font_cache[size] = ImageFont.truetype(path, size)
-            else:
-                font_cache[size] = load_operator_font(size, bold=True)
-        except Exception:
-            font_cache[size] = None
-        return font_cache[size]
-
-    def _measure(value: str, size: int, font) -> float:
-        cache_key = (size, value)
-        if cache_key in measurement_cache:
-            return measurement_cache[cache_key]
-        if measurement_draw is not None and font is not None:
-            try:
-                box = measurement_draw.textbbox((0, 0), value, font=font)
-                measurement_cache[cache_key] = float(max(0, box[2] - box[0]))
-                return measurement_cache[cache_key]
-            except Exception:
-                pass
-        units = 0.0
-        for char in value:
-            if char.isspace():
-                units += 0.34
-            elif unicodedata.east_asian_width(char) in {"W", "F"}:
-                units += 1.0
-            elif char.isupper():
-                units += 0.68
-            elif char.isalnum():
-                units += 0.56
-            else:
-                units += 0.42
-        measurement_cache[cache_key] = units * float(size)
-        return measurement_cache[cache_key]
-
-    last_layout = None
-    for font_size in range(requested_size, 5, -1):
-        font = _font(font_size)
-        outline = max(0, int((style or {}).get("outline") or 0))
-        shadow = max(0, int((style or {}).get("shadow") or 0))
-        box_padding = int(round(font_size * 0.10)) if (style or {}).get("boxed_background") else 0
-        available = max(1, play_res_x - margin_l - margin_r - (2 * (outline + shadow + box_padding)))
-        single_width = _measure(normalized, font_size, font)
-        if single_width <= available:
-            return {
-                "text": normalized,
-                "font_size": font_size,
-                "line_count": 1,
-                "max_line_width_px": single_width,
-                "available_width_px": available,
-                "fits_width": True,
-            }
-        if line_limit < 2:
-            last_layout = (normalized, font_size, single_width, available)
-            continue
-
-        whitespace_splits = [index for index, char in enumerate(normalized) if char == " "]
-        split_points = whitespace_splits or list(range(1, len(normalized)))
-        best = None
-        for split_at in split_points:
-            if whitespace_splits:
-                first = normalized[:split_at].rstrip()
-                second = normalized[split_at + 1 :].lstrip()
-            else:
-                first = normalized[:split_at]
-                second = normalized[split_at:]
-            if not first or not second:
-                continue
-            first_width = _measure(first, font_size, font)
-            second_width = _measure(second, font_size, font)
-            score = (max(first_width, second_width), abs(first_width - second_width))
-            if best is None or score < best[0]:
-                best = (score, first, second, first_width, second_width)
-        if best is None:
-            last_layout = (normalized, font_size, single_width, available)
-            continue
-        max_width = max(best[3], best[4])
-        layout_text = best[1] + r"\N" + best[2]
-        last_layout = (layout_text, font_size, max_width, available)
-        if max_width <= available:
-            return {
-                "text": layout_text,
-                "font_size": font_size,
-                "line_count": 2,
-                "max_line_width_px": max_width,
-                "available_width_px": available,
-                "fits_width": True,
-            }
-
-    layout_text, font_size, max_width, available = last_layout or (normalized, 6, 0.0, play_res_x)
+    available_width_px = float(layout.get("available_width_px") or 0.0)
+    fits_width = bool(layout.get("fits_width"))
     return {
-        "text": layout_text,
-        "font_size": font_size,
-        "line_count": 1 + int(r"\N" in layout_text),
-        "max_line_width_px": max_width,
-        "available_width_px": available,
-        "fits_width": bool(max_width <= available),
+        **layout,
+        "available_width_px": available_width_px,
+        "fits_width": fits_width,
     }
 
 
@@ -243114,71 +242998,13 @@ def subdub_speaker_cue_metadata(item: dict | None = None) -> dict:
 
 
 def video_dubbing_qc_segments(segments: list[dict], *, preserve_timestamps: bool = False) -> list[dict]:
-    qc_segments = []
-    for source in segments or []:
-        text = re.sub(r"\s+", " ", str((source or {}).get("text") or "")).strip()
-        if not text:
-            continue
-        start = max(0.0, float((source or {}).get("start") or 0))
-        end = float((source or {}).get("end") or 0)
-        if end <= start:
-            end = start + 1.0
-        duration = max(0.1, end - start)
-        if preserve_timestamps:
-            qc_segments.append({
-                **subdub_speaker_cue_metadata(source),
-                "index": int((source or {}).get("index") or len(qc_segments) + 1),
-                "start": round(start, 3),
-                "end": round(end, 3),
-                "text": subdub_wrap_cue_text_two_lines(text),
-                "confidence": (source or {}).get("confidence"),
-                "translate_missing": bool((source or {}).get("translate_missing")),
-            })
-            continue
-        max_chars = 84 if preserve_timestamps else max(24, min(84, int(duration * 20)))
-        words = text.split()
-        chunks = []
-        current = []
-        for word in words:
-            candidate = " ".join([*current, word])
-            if current and len(candidate) > max_chars:
-                chunks.append(" ".join(current))
-                current = [word]
-            else:
-                current.append(word)
-        if current:
-            chunks.append(" ".join(current))
-        chunks = chunks or [text]
-        slot = duration / len(chunks)
-        for index, chunk in enumerate(chunks):
-            if preserve_timestamps and len(chunks) == 1:
-                chunk_start = start
-                chunk_end = end
-            else:
-                chunk_start = start + (index * slot)
-                chunk_end = end if index == len(chunks) - 1 else min(end, start + ((index + 1) * slot))
-            if not preserve_timestamps:
-                chunk_end = max(chunk_start + 1.0, min(chunk_start + 7.0, chunk_end))
-            lines = []
-            line = ""
-            for word in chunk.split():
-                candidate = f"{line} {word}".strip()
-                if line and len(candidate) > 42 and len(lines) < 1:
-                    lines.append(line)
-                    line = word
-                else:
-                    line = candidate
-            if line:
-                lines.append(line)
-            qc_segments.append({
-                **subdub_speaker_cue_metadata(source),
-                "index": len(qc_segments) + 1,
-                "start": round(chunk_start, 3),
-                "end": round(max(chunk_start + 0.1, chunk_end), 3),
-                "text": "\n".join(lines[:2]).strip(),
-                "confidence": (source or {}).get("confidence"),
-            })
-    return qc_segments
+    return subdub_canonical_cues.fit_timed_subtitle_segments(
+        segments,
+        preserve_timestamps=preserve_timestamps,
+        max_chars_per_line=42,
+        max_lines=2,
+        metadata_fields=SUBDUB_SPEAKER_CUE_METADATA_FIELDS,
+    )
 
 def subdub_retime_translated_segments_to_source(source_segments: list[dict], translated_segments: list[dict]) -> list[dict]:
     source = [dict(item or {}) for item in (source_segments or []) if str((item or {}).get("text") or "").strip()]

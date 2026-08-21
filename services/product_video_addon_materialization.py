@@ -18,7 +18,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
-from services.multiscene_video_pipeline import SceneSpec, build_scene_subtitle
+from services import subdub_ass_layout, subdub_canonical_cues
 from services.video_local_validation import (
     ALLOWED_AUDIO_EXTENSIONS,
     find_ffprobe,
@@ -193,46 +193,238 @@ def _materialize_stock_audio(
     return os.path.abspath(target) if _audio_valid(target, ffmpeg_path=ffmpeg_path) else ""
 
 
-def _subtitle_scenes(script_text: str, scene_count: int, duration: float) -> list[SceneSpec]:
+def _subtitle_scene_segments(script_text: str, scene_count: int, duration: float) -> list[dict]:
     lines = [line.strip() for line in str(script_text or "").splitlines() if line.strip()]
     if not lines:
         return []
     count = max(1, int(scene_count or 1))
     if len(lines) < count:
         lines.extend([lines[-1]] * (count - len(lines)))
+    scene_duration = max(0.5, float(duration or 1.0))
     return [
-        SceneSpec(
-            scene_id=index,
-            title=f"Scene {index}",
-            visual_prompt="",
-            video_prompt="",
-            narration_text=lines[index - 1],
-            target_duration_sec=max(0.5, float(duration or 1.0)),
-        )
+        {
+            "index": index,
+            "scene_index": index,
+            "start": round((index - 1) * scene_duration, 3),
+            "end": round(index * scene_duration, 3),
+            "text": lines[index - 1],
+        }
         for index in range(1, count + 1)
     ]
 
 
-def _materialize_subtitle(material: dict, *, workspace: str, scene_count: int, scene_duration: float) -> str:
-    existing = _addon_file(material.get("artifact_path"))
-    if existing and Path(existing).suffix.lower() == ".srt":
-        return existing
-    scenes = _subtitle_scenes(
-        str(material.get("script_text") or material.get("text") or ""),
-        scene_count,
-        scene_duration,
-    )
-    if not scenes:
-        return ""
-    output = os.path.join(workspace, "product_video_subtitles.srt")
-    try:
-        return build_scene_subtitle(
-            scenes,
-            [max(0.5, float(scene_duration or 1.0))] * len(scenes),
-            output,
+def _subtitle_profile_name(language: str) -> str:
+    code = str(language or "vi").strip().lower().replace("_", "-").split("-", 1)[0]
+    if code in {"zh", "ja", "ko"}:
+        return f"{code}_telegram_general_v1"
+    if code in {"th", "vi", "en"}:
+        return f"{code}_telegram_general_v1"
+    return "en_telegram_general_v1"
+
+
+def _subtitle_timestamp(milliseconds: int) -> str:
+    milliseconds = max(0, int(milliseconds or 0))
+    hours, remainder = divmod(milliseconds, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds, millis = divmod(remainder, 1_000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
+
+def _subtitle_ass_timestamp(milliseconds: int) -> str:
+    centiseconds = max(0, int(round(int(milliseconds or 0) / 10.0)))
+    hours, remainder = divmod(centiseconds, 360_000)
+    minutes, remainder = divmod(remainder, 6_000)
+    seconds, centis = divmod(remainder, 100)
+    return f"{hours}:{minutes:02d}:{seconds:02d}.{centis:02d}"
+
+
+def _render_subdub_srt(cues: list[dict]) -> str:
+    blocks = []
+    for cue in cues or []:
+        text = str(cue.get("source_text") or cue.get("text") or "").strip()
+        start_ms = int(cue.get("source_start_ms") or cue.get("start_ms") or 0)
+        end_ms = int(cue.get("source_end_ms") or cue.get("end_ms") or 0)
+        if not text or end_ms <= start_ms:
+            return ""
+        blocks.append(
+            f"{len(blocks) + 1}\n"
+            f"{_subtitle_timestamp(start_ms)} --> {_subtitle_timestamp(end_ms)}\n"
+            f"{text}"
         )
-    except Exception:
-        return ""
+    return ("\n\n".join(blocks) + "\n") if blocks else ""
+
+
+def _subtitle_design_size(width: int, height: int) -> int:
+    vertical = bool(height >= width * 1.15)
+    if height <= 720:
+        return 40 if vertical else 38
+    if height <= 1080:
+        return 42 if vertical else 40
+    return 44 if vertical else 42
+
+
+def _render_subdub_ass(
+    cues: list[dict],
+    *,
+    width: int,
+    height: int,
+    language: str,
+) -> tuple[str, list[dict]]:
+    width = max(160, min(3840, int(width or 720)))
+    height = max(160, min(3840, int(height or 1280)))
+    code = str(language or "vi").strip().lower().replace("_", "-").split("-", 1)[0]
+    profile_name = _subtitle_profile_name(code)
+    font_name = "Noto Sans CJK SC" if code in {"zh", "ja", "ko"} else "Noto Sans"
+    design_size = _subtitle_design_size(width, height)
+    margin_l = max(2, min(max(2, int(width * 0.05)), int(round(width * 0.04))))
+    margin_r = margin_l
+    margin_v = max(6, min(14, int(round(height * 0.008))))
+    style = {
+        "play_res_x": width,
+        "play_res_y": height,
+        "render_size": design_size,
+        "size": design_size,
+        "subtitle_margin_l_after": margin_l,
+        "subtitle_margin_r_after": margin_r,
+        "outline": 4,
+        "shadow": 1,
+        "boxed_background": True,
+    }
+    header = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        "; subdub_renderer: translation_v1_shared_autofit",
+        f"; canonical_subdub_profile: {profile_name}",
+        "; subtitle_max_lines: 2",
+        "; subtitle_cue_timestamps_mutated: no",
+        "WrapStyle: 2",
+        "ScaledBorderAndShadow: yes",
+        f"PlayResX: {width}",
+        f"PlayResY: {height}",
+        "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        (
+            f"Style: Default,{font_name},{design_size},&H00FFFFFF,&H00FFFFFF,"
+            f"&H00000000,&HB2000000,-1,0,0,0,100,100,0,0,3,4,1,2,"
+            f"{margin_l},{margin_r},{margin_v},1"
+        ),
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    events = []
+    layouts = []
+    for cue in cues or []:
+        text = str(cue.get("source_text") or cue.get("text") or "").strip()
+        start_ms = int(cue.get("source_start_ms") or cue.get("start_ms") or 0)
+        end_ms = int(cue.get("source_end_ms") or cue.get("end_ms") or 0)
+        if not text or end_ms <= start_ms:
+            return "", []
+        layout = subdub_ass_layout.fit_text_layout(text, style, 2)
+        fitted = str(layout.get("text") or "")
+        if (
+            not fitted
+            or not layout.get("fits_width")
+            or int(layout.get("line_count") or 0) > 2
+        ):
+            return "", []
+        escaped = r"\N".join(
+            line.replace("\\", r"\\")
+            for line in fitted.split(r"\N")
+        )
+        events.append(
+            "Dialogue: 0,"
+            f"{_subtitle_ass_timestamp(start_ms)},"
+            f"{_subtitle_ass_timestamp(end_ms)},"
+            f"Default,,0,0,0,,{{\\fs{int(layout.get('font_size') or design_size)}}}{escaped}"
+        )
+        layouts.append(dict(layout))
+    return "\n".join([*header, *events]) + ("\n" if events else ""), layouts
+
+
+def _materialize_subtitle(
+    material: dict,
+    *,
+    workspace: str,
+    scene_count: int,
+    scene_duration: float,
+    output_width: int,
+    output_height: int,
+) -> dict:
+    existing = _addon_file(material.get("artifact_path"))
+    timed_source = False
+    if existing and Path(existing).suffix.lower() == ".srt":
+        try:
+            scene_segments = subdub_canonical_cues.parse_srt_segments(
+                Path(existing).read_text(encoding="utf-8")
+            )
+        except OSError:
+            return {}
+        timed_source = True
+    else:
+        scene_segments = _subtitle_scene_segments(
+            str(material.get("script_text") or material.get("text") or ""),
+            scene_count,
+            scene_duration,
+        )
+    if not scene_segments:
+        return {}
+    language = str(material.get("target_language") or material.get("language") or "vi").strip().lower()
+    fitted = subdub_canonical_cues.fit_timed_subtitle_segments(
+        scene_segments,
+        preserve_timestamps=timed_source,
+        max_chars_per_line=42,
+        max_lines=2,
+        metadata_fields=("scene_index",),
+        strict_frame_fit=True,
+    )
+    canonical = subdub_canonical_cues.canonicalize_segments(
+        fitted,
+        extraction_source=(
+            "user_timed_subtitle"
+            if timed_source
+            else "product_video_scene_timeline"
+        ),
+        source_language=language,
+    )
+    if not canonical:
+        return {}
+    srt_text = _render_subdub_srt(canonical)
+    if not srt_text.strip():
+        return {}
+    ass_text, layouts = _render_subdub_ass(
+        canonical,
+        width=output_width,
+        height=output_height,
+        language=language,
+    )
+    if not ass_text.strip() or len(layouts) != len(canonical):
+        return {}
+    srt_output = os.path.join(workspace, "product_video_subtitles.srt")
+    ass_output = os.path.join(workspace, "product_video_subtitles.ass")
+    try:
+        Path(srt_output).write_text(srt_text.rstrip() + "\n", encoding="utf-8")
+        Path(ass_output).write_text(ass_text.rstrip() + "\n", encoding="utf-8")
+    except OSError:
+        return {}
+    output_cues = list(canonical)
+    profile_name = _subtitle_profile_name(language)
+    return {
+        "path": os.path.abspath(ass_output),
+        "srt_path": os.path.abspath(srt_output),
+        "cues": output_cues,
+        "timeline_signature": subdub_canonical_cues.timeline_signature(output_cues),
+        "profile": profile_name,
+        "qc": {
+            "status": "PASS",
+            "renderer": "translation_v1_shared_autofit",
+            "timeline_equal_to_source": True,
+            "max_lines_pass": all(int(item.get("line_count") or 0) <= 2 for item in layouts),
+            "frame_fit_pass": all(bool(item.get("fits_width")) for item in layouts),
+            "blocking_failures": [],
+        },
+    }
 
 
 def _edge_voice(material: dict) -> str:
@@ -291,6 +483,11 @@ def materialize_product_video_addons(
         "strict": True,
         "requested_addons": requested,
         "subtitle_path": "",
+        "subtitle_srt_path": "",
+        "subtitle_cues": [],
+        "subtitle_timeline_signature": [],
+        "subtitle_profile": "",
+        "subtitle_qc": {},
         "voice_audio_path": "",
         "bgm_audio_path": "",
         "sfx_audio_paths": [],
@@ -312,15 +509,34 @@ def materialize_product_video_addons(
 
     selected_ffmpeg = _ffmpeg_path(ffmpeg_path)
     if "subtitle" in requested:
-        path = _materialize_subtitle(
+        data = dict(job or {})
+        project = dict(data.get("project") or {})
+        raw_asset_pack = data.get("asset_pack") or data.get("asset_pack_json") or project.get("asset_pack_json") or {}
+        if isinstance(raw_asset_pack, str):
+            try:
+                raw_asset_pack = json.loads(raw_asset_pack)
+            except (TypeError, ValueError):
+                raw_asset_pack = {}
+        asset_pack = dict(raw_asset_pack) if isinstance(raw_asset_pack, dict) else {}
+        geometry = dict(asset_pack.get("output_geometry") or {})
+        output_width = int(geometry.get("width") or data.get("output_width") or project.get("output_width") or 720)
+        output_height = int(geometry.get("height") or data.get("output_height") or project.get("output_height") or 1280)
+        subtitle = _materialize_subtitle(
             dict(plan.get("subtitle") or {}),
             workspace=workspace,
             scene_count=scene_count,
             scene_duration=scene_duration,
+            output_width=output_width,
+            output_height=output_height,
         )
-        if not path:
+        if not subtitle.get("path"):
             return block("subtitle")
-        result["subtitle_path"] = path
+        result["subtitle_path"] = str(subtitle["path"])
+        result["subtitle_srt_path"] = str(subtitle.get("srt_path") or "")
+        result["subtitle_cues"] = list(subtitle.get("cues") or [])
+        result["subtitle_timeline_signature"] = list(subtitle.get("timeline_signature") or [])
+        result["subtitle_profile"] = str(subtitle.get("profile") or "")
+        result["subtitle_qc"] = dict(subtitle.get("qc") or {})
     if "dubbing" in requested:
         dubbing = dict(plan.get("dubbing") or {})
         result["voice_audio_path"] = _materialize_dubbing(
