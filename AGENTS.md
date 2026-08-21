@@ -1,96 +1,66 @@
-# TOAN AAS Agent Rules
+# Owner-Governed Codex & Auto Git/VPS Pipeline Rules (All AI Models)
 
-You are the Senior Developer for TOAN AAS.
+Áp dụng cho TOÀN BỘ các phiên làm việc và toàn bộ các model AI khi thực hiện nhiệm vụ kỹ thuật trong hệ sinh thái TOAN AAS.
 
-## Operating Rules
+---
 
-- Do not code in a hurry.
-- Do not rewrite the whole `bot.py`.
-- Do not delete PayOS logic.
-- Do not delete Telegram handlers.
-- Do not delete billing, credit, refund, referral, or database logic.
-- Do not hardcode API keys, tokens, account secrets, or private URLs.
-- Do not log secrets.
-- Do not auto-publish, send external messages, call paid APIs, or trigger money-spending services without explicit approval.
-- Keep Railway entrypoint `bot:fastapi_app` / `python bot.py` compatible unless a task explicitly approves changing it.
-- Keep admin-only tools hidden from normal users.
+## 1. BẮT ĐẦU MỖI TASK (TASK STARTUP DISCIPLINE)
 
-## Required Workflow
+1. Trước khi kiểm tra hoặc chỉnh sửa mã nguồn, bắt buộc đọc và áp dụng các skill cốt lõi:
+   - `owner-governed-codex`
+   - `locked-focus-engineering`
+   - `single-agent-anti-overengineering`
+   - `toanaas-system-design-and-open-apis`
 
-Every task must go through:
+2. Ở đầu mỗi báo cáo task, bắt buộc tuyên bố:
+   `Đang đọc và áp dụng skill owner-governed-codex cho task này.`
 
-1. Brainstorm
-2. Spec
-3. Plan
-4. Test Plan
-5. Implement
-6. Review
-7. Ship Report
+3. Tuân thủ nghiêm ngặt vòng đời 7 bước FSM:
+   `READ -> CONTRACT -> BUILD -> REVIEW -> VERIFY -> REPORT -> LEARN`
 
-## Branch, PR, And Release Discipline
+4. Thực thi chế độ **Single-Agent by Default** + **Anti-Overengineering**:
+   - 1 Agent duy nhất làm chủ vòng đời task từ A-Z, cấm tự ý spawn subagent khi chưa thỏa mãn 4 điều kiện ngoại lệ.
+   - Sửa đúng trọng tâm, tối thiểu dòng code (`MINIMAL_CODE_FOOTPRINT=ON`), không over-engineer (`YAGNI=ON`), dừng ngay khi test pass (`EARLY_STOP=ON`).
+   - Không tự ý tái cấu trúc (refactor) các luồng mã nguồn đã khóa ổn định.
 
-- Use one main branch for each large work cluster. Do not create small branches or PRs for related buttons, copy changes, back routes, or regressions in the same flow.
-- Fix small issues discovered in a flow on that flow's existing branch.
-- Push only after the whole work cluster is complete and the full relevant test suite passes.
-- Create a PR only when the user explicitly requests it or the task is genuinely complete and ready for review.
-- Do not merge or deploy piecemeal.
-- If `main` changes, rebase or merge `main` into the current branch when safe; do not create another branch without a real isolation need.
-- Use a separate branch when isolating dangerous work in PayOS, wallet/Xu, payment webhooks, DB migrations, provider internals, or a large export-core rewrite.
-- Keep current video-flow regressions together on one P0 branch. Start multi-scene work only on its dedicated branch after the video-flow regression cluster is complete.
+---
 
-## Before Editing Code
+## 2. KẾT THÚC MỖI TASK (AUTO-PR, AUTO-PUSH, AUTO-MERGE, AUTO-DEPLOY TO VPS)
 
-- Read `bot.py`.
-- Read this `AGENTS.md`.
-- Run `python -m py_compile bot.py`.
-- Report the real current state before changing code.
+Khi hoàn thành chỉnh sửa mã nguồn và vượt qua toàn bộ các bài kiểm thử tự động (`python -m py_compile bot.py`, `pytest`):
 
-## After Editing Code
+1. **Tự động Commit & Push**:
+   - `git add <files>`
+   - `git commit -m "<semantic message>"`
+   - `git push origin <branch>`
 
-- Run `python -m py_compile bot.py`.
-- If tests exist, run `pytest -q`.
-- Report:
-  - Files changed
-  - Functions changed
-  - Test result
-  - Remaining risk
-  - Next recommended task
+2. **Tự động Tạo PR & Merge vào `main`**:
+   - Tạo PR qua GitHub CLI: `gh pr create --title "<title>" --body "<summary>"`
+   - Tự động Merge vào nhánh `main`: `gh pr merge <pr_number> --squash --admin`
 
-## TOAN AAS Priorities
+3. **Tự động Theo Dõi & Xác Minh Deploy Lên VPS**:
+   - Theo dõi workflow GitHub Actions CI/CD: `gh run watch <run_id>`
+   - Kiểm tra trạng thái dịch vụ thực tế trên Ubuntu VPS (`tg.toanaas.vn`) qua SSH:
+     `ssh -i C:\Users\toann\.ssh\toanaas_vps_cowork root@tg.toanaas.vn "systemctl status toanaas-bot.service toanaas-web.service nginx.service --no-pager"`
 
-1. Keep the current revenue bot stable.
-2. Protect payment, Telegram, billing, and customer trust.
-3. Document the current system before extracting modules.
-4. Add migrations safely, one phase at a time.
-5. Build Video Factory only after the revenue bot is stable.
+4. **Báo Cáo Bằng Chứng Thực Nghiệm**:
+   - Xuất đầy đủ bằng chứng test passed, link PR đã merged và trạng thái Active Running trên VPS.
 
-## 30 Day Operating Target
+---
 
-1. Protect the current revenue bot.
-2. Verify database persistence and backup.
-3. Keep PayOS and manual bill fallback trustworthy.
-4. Add trial upsell only after payment flow is stable.
-5. Build Video Factory Lite for Facebook, TikTok, and YouTube only after the bot foundation is healthy.
-6. Do not render or auto-publish without an explicit approval gate.
+## 3. CÁC CHỐT CHẶN AN TOÀN BẤT BIẾN CỦA OWNER (OWNER SAFETY GATES)
 
-Do not start the next task without approval.
+Tuyệt đối KHÔNG tự ý thực hiện khi chưa có lệnh rõ ràng từ Owner:
+1. Thay đổi biến môi trường ENV / API Keys / Secrets;
+2. Xóa bảng dữ liệu SQLite / User data / Dropping tables;
+3. Gọi API bên ngoài có tính phí trong lúc kiểm thử (`PROVIDER_CALLS`);
+4. Thay đổi logic ví tiền Xu, nạp rút, PayOS / thanh toán (`WALLET_MUTATIONS`);
+5. Tự động thăng cấp bài học thành luật toàn cục (`AUTO_PROMOTION=OFF`).
 
-## Owner-Governed Codex for TOAN AAS
+---
 
-Before doing engineering work in this repository:
-
-- Apply `owner-governed-codex`.
-- Read project-specific approved knowledge only when relevant.
-- One task / one branch / one PR unless Owner specifies otherwise.
-- merged != deployed != LIVE.
-- No provider calls in regression tests.
-- No fake success.
-- No wallet mutation unless explicitly authorized.
-- PayOS/wallet, DB schema, provider ENV and unrelated modules are protected.
-- Video Edit is protected from Video creation tasks unless explicitly authorized.
-- SubDub and Music/Suno are protected unless task explicitly owns them.
-- Record BASE SHA, HEAD SHA, files changed and test evidence.
-- New failures introduced must equal 0 unless Owner explicitly accepts otherwise.
-- No deploy without Owner approval.
-
-Do not hardcode current SHAs or time-sensitive provider status in this file. Do not copy long memory into `AGENTS.md`.
+## 4. CHÂN LÝ TRIỂN KHAI VÀ XÁC MINH
+- `MERGED != DEPLOYED != LIVE`.
+- `HTTP 200 != FINAL OUTPUT SUCCESS`.
+- `BUILD != PASS` (Chỉ công nhận PASS khi có output thực tế từ terminal).
+- Toàn bộ hệ thống production vận hành trên Ubuntu VPS (`tg.toanaas.vn`), không sử dụng Railway cho runtime hiện tại.
