@@ -2383,7 +2383,12 @@ _PUBLIC_SUBDUB_DEEP_KEYS = (
     "output", "language", "voice", "confirm", "continue", "progress",
     "update", "another", "failure", "success", "fail", "job",
     "editor", "preview", "find", "edit", "add", "delete", "shift",
-    "save", "locked", "saved_voice",
+    "save", "locked", "saved_voice", "voice_auto_speaker",
+    "voice_auto_explanation", "voice_auto_manual_required",
+    "voice_auto_billable_words", "voice_auto_price_rule",
+    "voice_auto_exact_required", "voice_auto_exact_confirm",
+    "voice_auto_exact_cancel", "voice_auto_exact_expired", "voice_auto_total",
+    "pricing_dub_default", "pricing_dub_saved", "pricing_manual_discount",
 )
 
 _PUBLIC_SUBDUB_DEEP_VALUES = {
@@ -2397,6 +2402,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 Trạng thái tác vụ", "📝 Chỉnh phụ đề", "👁 Xem 10 dòng đầu", "🔎 Tìm và thay thế",
         "✏️ Sửa theo số dòng", "➕ Thêm dòng", "🗑 Xóa dòng", "⏱ Dịch thời gian", "✅ Lưu bản nháp",
         "🔒 Chức năng đang được hoàn thiện; chưa xử lý và chưa trừ Xu.", "🎙 Kho giọng đã lưu",
+        "👥 Tự nhận giọng (tối đa 16)", "Ghép giọng theo đặc điểm âm thanh cho tối đa 16 nhãn người nói; không xác định danh tính hay giới tính cá nhân.", "Không thể ghép giọng tự động một cách an toàn. Vui lòng chọn giọng thủ công.",
+        "🧮 Số từ tính phí", "0.5 Xu mỗi từ tính phí; giảm 10% từ 1,000 từ, giảm 20% từ 10,000 từ; phần Tự nhận giọng được làm tròn lên riêng.", "⚠️ Giá chính xác đã sẵn sàng. Vui lòng xác nhận lại trước khi tiếp tục.", "✅ Xác nhận giá chính xác", "❌ Hủy tác vụ", "⌛ Xác nhận giá chính xác đã hết hạn. Vui lòng bắt đầu lại.", "Tổng", "Lồng tiếng giọng mặc định", "Lồng tiếng bằng giọng đã lưu", "Giảm 10% từ 1.000 ký tự, giảm 20% từ 10.000 ký tự.",
     ),
     "en": (
         "🎬 Subtitles / dubbing", "Choose the type of content to process.",
@@ -2408,6 +2415,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 Task status", "📝 Subtitle editor", "👁 View first 10 lines", "🔎 Find and replace",
         "✏️ Edit by line number", "➕ Add line", "🗑 Delete line", "⏱ Shift timing", "✅ Save draft",
         "🔒 This function is being completed; no processing or Xu charge started.", "🎙 Saved voice library",
+        "👥 Auto voice matching (up to 16)", "Matches voices from acoustic traits for up to 16 speaker labels; it does not identify people or personal gender.", "Auto could not match voices safely. Please choose a voice manually.",
+        "🧮 Billable words", "0.5 Xu per billable word; 10% off from 1,000 words, 20% off from 10,000 words; the Auto voice component is rounded up separately.", "⚠️ The exact price is ready. Confirm it again before continuing.", "✅ Confirm exact price", "❌ Cancel job", "⌛ The exact-price confirmation expired. Please start again.", "Total", "Dubbing with default voice", "Dubbing with saved custom voice", "10% off from 1,000 characters and 20% off from 10,000 characters.",
     ),
     "zh": (
         "🎬 字幕 / 配音", "请选择要处理的内容类型。",
@@ -2419,6 +2428,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 任务状态", "📝 字幕编辑器", "👁 查看前 10 行", "🔎 查找并替换",
         "✏️ 按行号编辑", "➕ 添加行", "🗑 删除行", "⏱ 调整时间", "✅ 保存草稿",
         "🔒 此功能正在完善，尚未处理且未扣除 Xu。", "🎙 已保存的声音",
+        "👥 自动匹配声音（最多 16 个）", "根据声学特征为最多 16 个说话人标签匹配声音；不识别身份或个人性别。", "无法安全地自动匹配声音。请选择手动声音。",
+        "🧮 计费字数", "每个计费字 0.5 Xu；达到 1,000 字优惠 10%，达到 10,000 字优惠 20%；自动配音部分单独向上取整。", "⚠️ 精确价格已生成。继续前请再次确认。", "✅ 确认精确价格", "❌ 取消任务", "⌛ 精确价格确认已过期。请重新开始。", "总计", "使用默认声音配音", "使用已保存的自定义声音配音", "达到 1,000 个字符优惠 10%，达到 10,000 个字符优惠 20%。",
     ),
     "ja": (
         "🎬 字幕 / 吹き替え", "処理する内容の種類を選択してください。",
@@ -2430,6 +2441,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 タスクの状態", "📝 字幕エディター", "👁 最初の10行を見る", "🔎 検索と置換",
         "✏️ 行番号で編集", "➕ 行を追加", "🗑 行を削除", "⏱ 時間をずらす", "✅ 下書きを保存",
         "🔒 この機能は準備中です。処理もXuの消費もありません。", "🎙 保存済み音声",
+        "👥 音声を自動割り当て（最大 16）", "音響的な特徴から最大 16 個の話者ラベルに音声を割り当てます。人物の特定や個人の性別判定は行いません。", "安全に自動割り当てできませんでした。音声を手動で選択してください。",
+        "🧮 課金対象語数", "課金対象1語あたり 0.5 Xu。1,000語以上で10%割引、10,000語以上で20%割引。自動音声分は個別に切り上げます。", "⚠️ 正確な料金が確定しました。続行前にもう一度確認してください。", "✅ 正確な料金を確認", "❌ 処理をキャンセル", "⌛ 正確な料金の確認期限が切れました。最初からやり直してください。", "合計", "デフォルト音声で吹き替え", "保存済みカスタム音声で吹き替え", "1,000文字以上で10%割引、10,000文字以上で20%割引。",
     ),
     "ko": (
         "🎬 자막 / 더빙", "처리할 콘텐츠 유형을 선택하세요.",
@@ -2441,6 +2454,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 작업 상태", "📝 자막 편집기", "👁 처음 10줄 보기", "🔎 찾기 및 바꾸기",
         "✏️ 줄 번호로 편집", "➕ 줄 추가", "🗑 줄 삭제", "⏱ 시간 이동", "✅ 초안 저장",
         "🔒 이 기능은 준비 중이며 처리나 Xu 차감이 없습니다.", "🎙 저장된 음성 보관함",
+        "👥 음성 자동 배정(최대 16)", "음향 특성으로 최대 16개 화자 라벨에 음성을 배정하며, 사람의 신원이나 개인 성별을 식별하지 않습니다.", "음성을 안전하게 자동 배정하지 못했습니다. 음성을 직접 선택해 주세요.",
+        "🧮 과금 단어 수", "과금 단어당 0.5 Xu; 1,000단어부터 10% 할인, 10,000단어부터 20% 할인; 자동 음성 금액은 별도로 올림 처리합니다.", "⚠️ 정확한 금액이 준비되었습니다. 계속하기 전에 다시 확인해 주세요.", "✅ 정확한 금액 확인", "❌ 작업 취소", "⌛ 정확한 금액 확인 시간이 만료되었습니다. 다시 시작해 주세요.", "합계", "기본 음성으로 더빙", "저장된 사용자 음성으로 더빙", "1,000자부터 10%, 10,000자부터 20% 할인.",
     ),
     "th": (
         "🎬 คำบรรยาย / พากย์เสียง", "เลือกประเภทเนื้อหาที่ต้องการประมวลผล",
@@ -2452,6 +2467,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 สถานะงาน", "📝 ตัวแก้ไขคำบรรยาย", "👁 ดู 10 บรรทัดแรก", "🔎 ค้นหาและแทนที่",
         "✏️ แก้ตามหมายเลขบรรทัด", "➕ เพิ่มบรรทัด", "🗑 ลบบรรทัด", "⏱ เลื่อนเวลา", "✅ บันทึกร่าง",
         "🔒 ฟังก์ชันนี้กำลังพัฒนา ยังไม่ประมวลผลและไม่หัก Xu", "🎙 คลังเสียงที่บันทึกไว้",
+        "👥 จับคู่เสียงอัตโนมัติ (สูงสุด 16)", "จับคู่เสียงจากลักษณะทางเสียงให้ป้ายผู้พูดได้สูงสุด 16 ป้าย โดยไม่ระบุตัวบุคคลหรือเพศส่วนบุคคล", "ไม่สามารถจับคู่เสียงอัตโนมัติได้อย่างปลอดภัย โปรดเลือกเสียงด้วยตนเอง",
+        "🧮 จำนวนคำที่คิดค่าบริการ", "0.5 Xu ต่อคำที่คิดค่าบริการ; ลด 10% ตั้งแต่ 1,000 คำ และลด 20% ตั้งแต่ 10,000 คำ; ส่วนค่าเสียงอัตโนมัติปัดขึ้นแยกต่างหาก", "⚠️ ราคาที่แน่นอนพร้อมแล้ว โปรดยืนยันอีกครั้งก่อนดำเนินการต่อ", "✅ ยืนยันราคาที่แน่นอน", "❌ ยกเลิกงาน", "⌛ การยืนยันราคาที่แน่นอนหมดอายุแล้ว โปรดเริ่มใหม่", "รวม", "พากย์ด้วยเสียงเริ่มต้น", "พากย์ด้วยเสียงที่บันทึกไว้", "ลด 10% ตั้งแต่ 1,000 อักขระ และ 20% ตั้งแต่ 10,000 อักขระ",
     ),
     "ar": (
         "🎬 الترجمة النصية / الدبلجة", "اختر نوع المحتوى المطلوب معالجته.",
@@ -2463,6 +2480,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 حالة المهمة", "📝 محرر الترجمة", "👁 عرض أول 10 أسطر", "🔎 بحث واستبدال",
         "✏️ تعديل برقم السطر", "➕ إضافة سطر", "🗑 حذف سطر", "⏱ إزاحة التوقيت", "✅ حفظ المسودة",
         "🔒 هذه الوظيفة قيد الإكمال؛ لم تبدأ المعالجة ولم يُخصم Xu.", "🎙 مكتبة الأصوات المحفوظة",
+        "👥 تعيين تلقائي للأصوات (حتى 16)", "يطابق الأصوات حسب الخصائص الصوتية لما يصل إلى 16 تسمية متحدث، ولا يحدد هوية الأشخاص أو جنسهم الشخصي.", "تعذر تعيين الأصوات تلقائياً بأمان. يرجى اختيار صوت يدوياً.",
+        "🧮 عدد الكلمات المحتسبة", "0.5 Xu لكل كلمة محتسبة؛ خصم 10% ابتداءً من 1,000 كلمة و20% ابتداءً من 10,000 كلمة؛ يُقرَّب مكوّن الصوت التلقائي إلى الأعلى بصورة منفصلة.", "⚠️ أصبح السعر الدقيق جاهزاً. يرجى تأكيده مرة أخرى قبل المتابعة.", "✅ تأكيد السعر الدقيق", "❌ إلغاء المهمة", "⌛ انتهت صلاحية تأكيد السعر الدقيق. يرجى البدء من جديد.", "الإجمالي", "الدبلجة بالصوت الافتراضي", "الدبلجة بصوت مخصص محفوظ", "خصم 10% ابتداءً من 1,000 حرف و20% ابتداءً من 10,000 حرف.",
     ),
     "es": (
         "🎬 Subtítulos / doblaje", "Elige el tipo de contenido que quieres procesar.",
@@ -2474,6 +2493,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 Estado de la tarea", "📝 Editor de subtítulos", "👁 Ver las primeras 10 líneas", "🔎 Buscar y reemplazar",
         "✏️ Editar por número de línea", "➕ Añadir línea", "🗑 Eliminar línea", "⏱ Desplazar tiempos", "✅ Guardar borrador",
         "🔒 Esta función está en preparación; no se procesó nada ni se cobraron Xu.", "🎙 Biblioteca de voces guardadas",
+        "👥 Asignación automática de voces (máx. 16)", "Asigna voces por rasgos acústicos a un máximo de 16 etiquetas de hablante; no identifica personas ni su género personal.", "No se pudieron asignar las voces automáticamente de forma segura. Elige una voz manualmente.",
+        "🧮 Palabras facturables", "0.5 Xu por palabra facturable; 10% de descuento desde 1,000 palabras y 20% desde 10,000; el componente de voz automática se redondea por separado hacia arriba.", "⚠️ El precio exacto está listo. Confírmalo de nuevo antes de continuar.", "✅ Confirmar precio exacto", "❌ Cancelar tarea", "⌛ La confirmación del precio exacto caducó. Empieza de nuevo.", "Importe total", "Doblaje con voz predeterminada", "Doblaje con voz personalizada guardada", "10% de descuento desde 1,000 caracteres y 20% desde 10,000 caracteres.",
     ),
     "pt": (
         "🎬 Legendas / dublagem", "Escolha o tipo de conteúdo a processar.",
@@ -2485,6 +2506,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 Status da tarefa", "📝 Editor de legendas", "👁 Ver as primeiras 10 linhas", "🔎 Localizar e substituir",
         "✏️ Editar por número da linha", "➕ Adicionar linha", "🗑 Excluir linha", "⏱ Deslocar tempo", "✅ Salvar rascunho",
         "🔒 Esta função está sendo preparada; nada foi processado e nenhum Xu foi cobrado.", "🎙 Biblioteca de vozes salvas",
+        "👥 Atribuição automática de vozes (máx. 16)", "Associa vozes por características acústicas a até 16 rótulos de falante; não identifica pessoas nem gênero pessoal.", "Não foi possível associar as vozes automaticamente com segurança. Escolha uma voz manualmente.",
+        "🧮 Palavras faturáveis", "0.5 Xu por palavra faturável; 10% de desconto a partir de 1,000 palavras e 20% a partir de 10,000; o componente de voz automática é arredondado para cima separadamente.", "⚠️ O preço exato está pronto. Confirme-o novamente antes de continuar.", "✅ Confirmar preço exato", "❌ Cancelar tarefa", "⌛ A confirmação do preço exato expirou. Comece novamente.", "Montante total", "Dublagem com voz padrão", "Dublagem com voz personalizada salva", "10% de desconto a partir de 1,000 caracteres e 20% a partir de 10,000 caracteres.",
     ),
     "fr": (
         "🎬 Sous-titres / doublage", "Choisissez le type de contenu à traiter.",
@@ -2496,6 +2519,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 État de la tâche", "📝 Éditeur de sous-titres", "👁 Voir les 10 premières lignes", "🔎 Rechercher et remplacer",
         "✏️ Modifier par numéro de ligne", "➕ Ajouter une ligne", "🗑 Supprimer une ligne", "⏱ Décaler le temps", "✅ Enregistrer le brouillon",
         "🔒 Cette fonction est en préparation ; aucun traitement ni débit de Xu n’a commencé.", "🎙 Bibliothèque des voix enregistrées",
+        "👥 Attribution automatique des voix (16 max.)", "Associe des voix selon des caractéristiques acoustiques pour 16 étiquettes de locuteur au maximum, sans identifier une personne ni son genre.", "L’attribution automatique n’a pas pu être faite de façon sûre. Choisissez une voix manuellement.",
+        "🧮 Mots facturables", "0.5 Xu par mot facturable ; remise de 10% dès 1,000 mots et de 20% dès 10,000 mots ; la composante de voix automatique est arrondie séparément à l’entier supérieur.", "⚠️ Le prix exact est prêt. Confirmez-le de nouveau avant de continuer.", "✅ Confirmer le prix exact", "❌ Annuler la tâche", "⌛ La confirmation du prix exact a expiré. Veuillez recommencer.", "Montant total", "Doublage avec la voix par défaut", "Doublage avec une voix personnalisée enregistrée", "10 % de remise dès 1,000 caractères et 20 % dès 10,000 caractères.",
     ),
     "de": (
         "🎬 Untertitel / Synchronisation", "Wähle die Art des zu verarbeitenden Inhalts.",
@@ -2507,6 +2532,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 Aufgabenstatus", "📝 Untertitel-Editor", "👁 Erste 10 Zeilen anzeigen", "🔎 Suchen und ersetzen",
         "✏️ Nach Zeilennummer bearbeiten", "➕ Zeile hinzufügen", "🗑 Zeile löschen", "⏱ Zeit verschieben", "✅ Entwurf speichern",
         "🔒 Diese Funktion wird fertiggestellt; keine Verarbeitung und keine Xu-Abbuchung.", "🎙 Gespeicherte Stimmen",
+        "👥 Automatische Stimmenzuordnung (max. 16)", "Ordnet bis zu 16 Sprecherlabels anhand akustischer Merkmale Stimmen zu; Personen oder persönliches Geschlecht werden nicht erkannt.", "Die Stimmen konnten nicht sicher automatisch zugeordnet werden. Bitte wählen Sie eine Stimme manuell.",
+        "🧮 Abrechenbare Wörter", "0.5 Xu pro abrechenbarem Wort; 10% Rabatt ab 1,000 Wörtern und 20% ab 10,000 Wörtern; die Komponente für automatische Stimmen wird separat aufgerundet.", "⚠️ Der genaue Preis steht fest. Bestätigen Sie ihn erneut, bevor Sie fortfahren.", "✅ Genauen Preis bestätigen", "❌ Auftrag abbrechen", "⌛ Die Bestätigung des genauen Preises ist abgelaufen. Bitte beginnen Sie erneut.", "Gesamt", "Synchronisation mit Standardstimme", "Synchronisation mit gespeicherter eigener Stimme", "10 % Rabatt ab 1.000 Zeichen und 20 % ab 10.000 Zeichen.",
     ),
     "hi": (
         "🎬 उपशीर्षक / डबिंग", "प्रोसेस करने के लिए सामग्री का प्रकार चुनें।",
@@ -2518,6 +2545,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 कार्य स्थिति", "📝 उपशीर्षक संपादक", "👁 पहली 10 पंक्तियाँ देखें", "🔎 खोजें और बदलें",
         "✏️ पंक्ति संख्या से संपादित करें", "➕ पंक्ति जोड़ें", "🗑 पंक्ति हटाएँ", "⏱ समय खिसकाएँ", "✅ ड्राफ्ट सहेजें",
         "🔒 यह सुविधा तैयार हो रही है; कोई प्रोसेस या Xu शुल्क शुरू नहीं हुआ।", "🎙 सहेजी गई आवाज़ों की लाइब्रेरी",
+        "👥 आवाज़ों का अपने-आप मिलान (अधिकतम 16)", "ध्वनिक गुणों से अधिकतम 16 वक्ता लेबलों के लिए आवाज़ मिलाता है; यह व्यक्ति की पहचान या निजी लिंग निर्धारित नहीं करता।", "आवाज़ों का सुरक्षित स्वचालित मिलान नहीं हो सका। कृपया आवाज़ मैन्युअल रूप से चुनें।",
+        "🧮 बिल योग्य शब्द", "प्रति बिल योग्य शब्द 0.5 Xu; 1,000 शब्द से 10% और 10,000 शब्द से 20% छूट; स्वतः आवाज़ घटक को अलग से ऊपर की ओर पूर्णांकित किया जाता है।", "⚠️ सटीक मूल्य तैयार है। आगे बढ़ने से पहले इसकी फिर से पुष्टि करें।", "✅ सटीक मूल्य की पुष्टि करें", "❌ कार्य रद्द करें", "⌛ सटीक मूल्य की पुष्टि की समय-सीमा समाप्त हो गई। कृपया फिर से शुरू करें।", "कुल", "डिफ़ॉल्ट आवाज़ से डबिंग", "सहेजी गई कस्टम आवाज़ से डबिंग", "1,000 अक्षरों से 10% और 10,000 अक्षरों से 20% छूट।",
     ),
     "ru": (
         "🎬 Субтитры / озвучка", "Выберите тип содержимого для обработки.",
@@ -2529,6 +2558,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 Статус задачи", "📝 Редактор субтитров", "👁 Показать первые 10 строк", "🔎 Найти и заменить",
         "✏️ Изменить по номеру строки", "➕ Добавить строку", "🗑 Удалить строку", "⏱ Сдвинуть время", "✅ Сохранить черновик",
         "🔒 Функция дорабатывается; обработка и списание Xu не начались.", "🎙 Сохранённые голоса",
+        "👥 Автоподбор голосов (до 16)", "Подбирает голоса по акустическим признакам максимум для 16 меток говорящих; не определяет личность или личный гендер.", "Безопасно подобрать голоса автоматически не удалось. Выберите голос вручную.",
+        "🧮 Оплачиваемые слова", "0.5 Xu за оплачиваемое слово; скидка 10% от 1,000 слов и 20% от 10,000 слов; компонент автоозвучки отдельно округляется вверх.", "⚠️ Точная цена рассчитана. Подтвердите её ещё раз перед продолжением.", "✅ Подтвердить точную цену", "❌ Отменить задачу", "⌛ Срок подтверждения точной цены истёк. Начните заново.", "Итого", "Озвучивание голосом по умолчанию", "Озвучивание сохранённым пользовательским голосом", "Скидка 10% от 1 000 символов и 20% от 10 000 символов.",
     ),
     "tr": (
         "🎬 Altyazı / dublaj", "İşlenecek içerik türünü seçin.",
@@ -2540,6 +2571,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 Görev durumu", "📝 Altyazı düzenleyici", "👁 İlk 10 satırı gör", "🔎 Bul ve değiştir",
         "✏️ Satır numarasıyla düzenle", "➕ Satır ekle", "🗑 Satırı sil", "⏱ Zamanı kaydır", "✅ Taslağı kaydet",
         "🔒 Bu işlev hazırlanıyor; işlem ve Xu kesintisi başlamadı.", "🎙 Kayıtlı ses kitaplığı",
+        "👥 Otomatik ses eşleme (en fazla 16)", "Akustik özelliklere göre en fazla 16 konuşmacı etiketine ses eşler; kişi kimliği veya kişisel cinsiyet belirlemez.", "Sesler güvenli biçimde otomatik eşlenemedi. Lütfen sesi elle seçin.",
+        "🧮 Ücretlendirilen kelimeler", "Ücretlendirilen kelime başına 0.5 Xu; 1,000 kelimeden itibaren 10% indirim, 10,000 kelimeden itibaren 20% indirim; otomatik ses bileşeni ayrı olarak yukarı yuvarlanır.", "⚠️ Kesin fiyat hazır. Devam etmeden önce yeniden onaylayın.", "✅ Kesin fiyatı onayla", "❌ Görevi iptal et", "⌛ Kesin fiyat onayının süresi doldu. Lütfen yeniden başlayın.", "Toplam", "Varsayılan sesle dublaj", "Kayıtlı özel sesle dublaj", "1.000 karakterden itibaren %10, 10.000 karakterden itibaren %20 indirim.",
     ),
     "fil": (
         "🎬 Subtitle / dubbing", "Piliin ang uri ng content na ipoproseso.",
@@ -2551,6 +2584,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 Status ng gawain", "📝 Tagapag-ayos ng subtitle", "👁 Tingnan ang unang 10 linya", "🔎 Hanapin at palitan",
         "✏️ I-edit ayon sa numero ng linya", "➕ Magdagdag ng linya", "🗑 Magtanggal ng linya", "⏱ Ilipat ang oras", "✅ I-save ang draft",
         "🔒 Inihahanda pa ang function; walang proseso o singil na Xu.", "🎙 Naka-save na voice library",
+        "👥 Awtomatikong pagtutugma ng boses (hanggang 16)", "Itinutugma ang boses ayon sa katangiang akustiko para sa hanggang 16 label ng tagapagsalita; hindi nito kinikilala ang tao o personal na kasarian.", "Hindi ligtas na naitugma nang awtomatiko ang mga boses. Pumili ng boses nang manu-mano.",
+        "🧮 Mga salitang sinisingil", "0.5 Xu sa bawat salitang sinisingil; 10% bawas mula 1,000 salita at 20% mula 10,000 salita; hiwalay na itinataas sa susunod na buong Xu ang bahagi ng awtomatikong boses.", "⚠️ Handa na ang eksaktong presyo. Kumpirmahin itong muli bago magpatuloy.", "✅ Kumpirmahin ang eksaktong presyo", "❌ Kanselahin ang gawain", "⌛ Lumagpas na sa oras ang pagkumpirma ng eksaktong presyo. Magsimulang muli.", "Kabuuan", "Pag-dub gamit ang default na boses", "Pag-dub gamit ang naka-save na custom na boses", "10% bawas mula 1,000 character at 20% mula 10,000 character.",
     ),
     "it": (
         "🎬 Sottotitoli / doppiaggio", "Scegli il tipo di contenuto da elaborare.",
@@ -2562,6 +2597,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 Stato attività", "📝 Editor sottotitoli", "👁 Vedi le prime 10 righe", "🔎 Cerca e sostituisci",
         "✏️ Modifica per numero di riga", "➕ Aggiungi riga", "🗑 Elimina riga", "⏱ Sposta tempi", "✅ Salva bozza",
         "🔒 Questa funzione è in preparazione; nessuna elaborazione né addebito Xu.", "🎙 Libreria voci salvate",
+        "👥 Assegnazione automatica delle voci (max 16)", "Abbina le voci in base a caratteristiche acustiche per un massimo di 16 etichette di parlante; non identifica persone né il genere personale.", "Non è stato possibile abbinare automaticamente le voci in modo sicuro. Scegli una voce manualmente.",
+        "🧮 Parole fatturabili", "0.5 Xu per parola fatturabile; sconto del 10% da 1,000 parole e del 20% da 10,000 parole; il componente voce automatica viene arrotondato separatamente per eccesso.", "⚠️ Il prezzo esatto è pronto. Confermalo di nuovo prima di continuare.", "✅ Conferma il prezzo esatto", "❌ Annulla attività", "⌛ La conferma del prezzo esatto è scaduta. Ricomincia.", "Totale", "Doppiaggio con voce predefinita", "Doppiaggio con voce personalizzata salvata", "Sconto del 10% da 1.000 caratteri e del 20% da 10.000 caratteri.",
     ),
     "id": (
         "🎬 Subtitle / sulih suara", "Pilih jenis konten yang akan diproses.",
@@ -2573,6 +2610,8 @@ _PUBLIC_SUBDUB_DEEP_VALUES = {
         "📊 Status tugas", "📝 Editor subtitle", "👁 Lihat 10 baris pertama", "🔎 Cari dan ganti",
         "✏️ Edit berdasarkan nomor baris", "➕ Tambah baris", "🗑 Hapus baris", "⏱ Geser waktu", "✅ Simpan draf",
         "🔒 Fitur ini sedang disiapkan; belum ada proses atau potongan Xu.", "🎙 Pustaka suara tersimpan",
+        "👥 Pencocokan suara otomatis (maks. 16)", "Mencocokkan suara dari ciri akustik untuk maksimal 16 label pembicara; tidak mengidentifikasi orang atau gender pribadi.", "Suara tidak dapat dicocokkan secara otomatis dengan aman. Silakan pilih suara secara manual.",
+        "🧮 Kata yang ditagihkan", "0.5 Xu per kata yang ditagihkan; diskon 10% mulai 1,000 kata dan 20% mulai 10,000 kata; komponen suara otomatis dibulatkan ke atas secara terpisah.", "⚠️ Harga pasti sudah tersedia. Konfirmasikan lagi sebelum melanjutkan.", "✅ Konfirmasi harga pasti", "❌ Batalkan tugas", "⌛ Konfirmasi harga pasti telah kedaluwarsa. Silakan mulai lagi.", "Jumlah keseluruhan", "Sulih suara dengan suara bawaan", "Sulih suara dengan suara khusus tersimpan", "Diskon 10% mulai 1.000 karakter dan 20% mulai 10.000 karakter.",
     ),
 }
 
@@ -2586,6 +2625,11 @@ def public_subdub_deep_copy(locale: str = "vi") -> dict[str, str]:
     if key not in _PUBLIC_SUBDUB_DEEP_COPY:
         key = "en"
     return dict(_PUBLIC_SUBDUB_DEEP_COPY[key])
+
+
+def public_subdub_auto_pricing_line(locale: str = "vi") -> str:
+    copy = public_subdub_deep_copy(locale)
+    return f"• {copy['voice_auto_speaker']}: {copy['voice_auto_price_rule']}"
 
 # Image deep-flow labels are kept in the same public-copy owner as the root
 # image menu.  bot.py consumes this table for presentation only; callbacks,
@@ -10993,6 +11037,12 @@ _PRODUCT_VIDEO_LABELS = {
     },
 }
 
+for _localized_video_labels in _PRODUCT_VIDEO_LABELS.values():
+    _localized_video_labels[200], _localized_video_labels[400] = (
+        _localized_video_labels[400],
+        _localized_video_labels[200],
+    )
+
 
 _PRODUCT_VIDEO_DURATION_UNITS = {
     "en": "seconds",
@@ -11014,23 +11064,9 @@ _PRODUCT_VIDEO_DURATION_UNITS = {
 }
 
 
-# Public-copy snapshot authorized from the Video canonical checkpoint
-# 3ba5986712d4dbab38c35b07be193edfa7289ca5.  This module is intentionally
-# display-only: it must not control Product Video routing, invoice, wallet, or
-# engine behavior while the separately-owned runtime change is integrated.
-PUBLIC_PRODUCT_VIDEO_CATALOG_VERSION = "2026-08-11.video.5"
-_PUBLIC_PRODUCT_VIDEO_CATALOG = (
-    {"tier_id": 200, "name": "Nhanh gọn", "seconds": 5, "unit_xu": 200},
-    {"tier_id": 300, "name": "Tiêu chuẩn có âm thanh", "seconds": 5, "unit_xu": 220},
-    {"tier_id": 400, "name": "Cân bằng rõ nét", "seconds": 8, "unit_xu": 80},
-    {"tier_id": 500, "name": "Chuyển động ổn định", "seconds": 5, "unit_xu": 110},
-    {"tier_id": 600, "name": "Chuyển động có âm thanh", "seconds": 5, "unit_xu": 160},
-    {"tier_id": 700, "name": "Cảnh dài có âm thanh", "seconds": 15, "unit_xu": 220},
-    {"tier_id": 800, "name": "Cao cấp linh hoạt", "seconds": 10, "unit_xu": 370},
-    {"tier_id": 1000, "name": "Diễn xuất chân thật", "seconds": 6, "unit_xu": 370},
-    {"tier_id": 1200, "name": "Đa góc máy", "seconds": 8, "unit_xu": 1260},
-    {"tier_id": 1500, "name": "Điện ảnh nhiều cảnh", "seconds": 10, "unit_xu": 2360},
-)
+# Display-only catalog. Product Video routing, invoices and wallet behavior
+# remain owned by the canonical pricing/runtime modules.
+PUBLIC_PRODUCT_VIDEO_CATALOG_VERSION = "2026-08-21.video.6"
 
 
 _VIDEO_MULTISCENE_DISCOUNT_COPY = {
@@ -11158,17 +11194,26 @@ def canonical_image_price_lines(lang: str = "vi") -> list[str]:
 
 
 def public_product_video_catalog() -> list[dict[str, int | str]]:
-    """Return the approved public Video catalog without touching Video runtime."""
+    """Return the canonical public Video catalog in sale-price order."""
 
-    return [dict(entry) for entry in _PUBLIC_PRODUCT_VIDEO_CATALOG]
+    return [
+        {
+            "tier_id": int(entry["tier_id"]),
+            "icon": str(entry["icon"]),
+            "name": str(entry["name"]),
+            "seconds": int(entry["seconds"]),
+            "unit_xu": int(entry["unit_xu"]),
+        }
+        for entry in video_ai_real_pricing.public_quality_catalog()
+    ]
 
 
 def public_video_price_lines() -> list[str]:
-    """Return Vietnamese Markdown-ready public Video prices from the checkpoint."""
+    """Return Vietnamese public Video prices from the canonical catalog."""
 
     return [
         (
-            f"• {entry['name']} — {int(entry['seconds'])} giây/cảnh: "
+            f"• {entry['icon']} {entry['name']} — {int(entry['seconds'])} giây/cảnh: "
             f"{int(entry['unit_xu']):,} Xu/cảnh."
         ).replace(",", ".")
         for entry in public_product_video_catalog()
@@ -11178,15 +11223,12 @@ def public_video_price_lines() -> list[str]:
 def canonical_product_video_price_lines(lang: str = "vi") -> list[str]:
     locale = public_copy_locale(lang)
     if locale == "vi":
-        return [
-            f"• {entry['name']}: <b>{_format_public_xu(int(entry['unit_xu']))} Xu / cảnh</b> — {int(entry['seconds'])} giây."
-            for entry in public_product_video_catalog()
-        ]
+        return public_video_price_lines()
     copy = _public_locale_copy(locale)
     labels = _PRODUCT_VIDEO_LABELS[locale]
     duration_unit = _PRODUCT_VIDEO_DURATION_UNITS[locale]
     return [
-        f"• {labels.get(int(entry['tier_id']), str(entry['tier_id']))}: "
+        f"• {entry['icon']} {labels.get(int(entry['tier_id']), str(entry['tier_id']))}: "
         f"<b>{_format_public_xu(int(entry['unit_xu']))} Xu / {copy['video_unit']}</b> — {int(entry['seconds'])} {duration_unit}."
         for entry in public_product_video_catalog()
     ]
@@ -11275,6 +11317,7 @@ def pricing_total_lines(context: dict | None = None) -> list[str]:
             "• Tạo phụ đề tự động: miễn phí.",
             "• Dịch phụ đề: 0.1 Xu / ký tự.",
             "• Lồng tiếng giọng mặc định: 0.10 Xu / ký tự.",
+            public_subdub_auto_pricing_line("vi"),
         ]),
         *image_lines,
         *(video_addon_lines if video_addon_lines else []),
@@ -11385,14 +11428,17 @@ def pricing_video_lines(context: dict | None = None) -> list[str]:
         "• Logo tự tạo bằng công cụ ảnh riêng: tính theo bảng giá Hình ảnh, không tính trong video nếu khách tự đưa tài nguyên.",
         "",
         "<b>Ví dụ</b>",
-        "• Nhanh gọn 1 cảnh: 200 Xu; không áp dụng giảm giá nhiều cảnh.",
-        "• Nhanh gọn 3 cảnh: 200 × 3 = 600 Xu; giảm 10% là 60 Xu; tiền video còn 540 Xu.",
+        "• Nhanh gọn 1 cảnh: 80 Xu; không áp dụng giảm giá nhiều cảnh.",
+        "• Nhanh gọn 3 cảnh: 80 × 3 = 240 Xu; giảm 10% là 24 Xu; tiền video còn 216 Xu.",
         "• Nếu anh/chị chọn tạo ảnh/logo AI riêng bên ngoài, phần ảnh sẽ tính theo bảng giá Hình ảnh.",
     ]
 
 
 def pricing_subtitle_lines(context: dict | None = None) -> list[str]:
     subtitle_lines = _context_value(context, "subtitle_price_lines")
+    auto_subdub_line = public_subdub_auto_pricing_line("vi")
+    if auto_subdub_line not in subtitle_lines:
+        subtitle_lines.append(auto_subdub_line)
     return [
         "🌐 <b>Bảng giá Phụ đề / Lồng tiếng</b>",
         "",
@@ -11517,6 +11563,7 @@ def _localized_international_pricing_lines(
     common = copy["quote"]
     music_line = f"• {copy['music']}: {music_prices['basic']} / {music_prices['standard']} / {music_prices['premium']} Xu."
     song_line = "• 200 / 250 / 300 Xu."
+    auto_subdub_line = public_subdub_auto_pricing_line(locale)
     video_discounts = video_multiscene_discount_lines(locale)
     topup_policy = international_topup_policy_lines(locale)
     package_info = _PUBLIC_PACKAGE_GUIDE_COPY[locale]
@@ -11527,15 +11574,15 @@ def _localized_international_pricing_lines(
             "", f"<b>{copy['video']}</b>", *video_lines, *video_discounts,
             "", music_line, song_line,
             f"• {copy['voice']}: 0 Xu / 50 Xu.",
-            f"• {copy['subtitles']}: {common}",
+            f"• {copy['subtitles']}: {common}", auto_subdub_line,
             f"• {copy['member']}: {common}",
             *topup_policy,
         ],
         "voice": [f"🎙 <b>{copy['voice']}</b>", "", common, "", "• 0 Xu / 50 Xu."],
         "music": [f"🎵 <b>{copy['music']}</b>", "", common, "", music_line, song_line],
         "video": [f"🎬 <b>{copy['video']}</b>", "", common, "", *video_lines, *video_discounts],
-        "subtitle": [f"🌐 <b>{copy['subtitles']}</b>", "", common],
-        "subtitle_dub": [f"🌐 <b>{copy['subtitles']}</b>", "", common],
+        "subtitle": [f"🌐 <b>{copy['subtitles']}</b>", "", common, "", auto_subdub_line],
+        "subtitle_dub": [f"🌐 <b>{copy['subtitles']}</b>", "", common, "", auto_subdub_line],
         "image": [f"🖼 <b>{copy['images']}</b>", "", common, "", *image_lines],
         "docs": [f"📄 <b>{copy['documents']}</b>", "", common],
         "free": [f"🎁 <b>{copy['free']}</b>", "", common],
@@ -11555,6 +11602,7 @@ def _international_pricing_lines(section: str, context: dict | None, lang: str) 
     music_prices = canonical_music_background_prices()
     chat_line = chat_pro_token_price_line(locale)
     topup_policy = international_topup_policy_lines(locale)
+    auto_subdub_line = public_subdub_auto_pricing_line(locale)
     if locale not in {"en", "zh"}:
         return _localized_international_pricing_lines(
             section,
@@ -11571,6 +11619,7 @@ def _international_pricing_lines(section: str, context: dict | None, lang: str) 
                 "<b>AI 图片</b>", *image_lines, "", "<b>产品视频</b>", *video_lines, *video_discounts,
                 "", f"• AI 音乐：配乐基础 {music_prices['basic']} / 标准 {music_prices['standard']} / 高级 {music_prices['premium']} Xu；有歌词歌曲 200 / 250 / 300 Xu。",
                 "• 语音、字幕和配音将按所选服务在确认前显示当前报价。",
+                auto_subdub_line,
                 "• 符合资格的会员服务折扣仍然适用；国际账户按确认前显示的价格收费。",
                 *topup_policy,
             ],
@@ -11595,6 +11644,7 @@ def _international_pricing_lines(section: str, context: dict | None, lang: str) 
                 "🌐 <b>字幕 / 翻译 / 配音</b>", "", common, "",
                 "• 原始字幕在当前支持的流程中免费。",
                 "• 翻译和配音会在确认前显示当前报价。",
+                auto_subdub_line,
             ],
             "image": [
                 "🖼 <b>AI 图片价格</b>", "", common, "", *image_lines,
@@ -11625,6 +11675,7 @@ def _international_pricing_lines(section: str, context: dict | None, lang: str) 
                 "<b>AI Images</b>", *image_lines, "", "<b>Product Video</b>", *video_lines, *video_discounts,
                 "", f"• AI music: background {music_prices['basic']} / {music_prices['standard']} / {music_prices['premium']} Xu; songs with vocals 200 / 250 / 300 Xu.",
                 "• Voice, subtitles and dubbing show their current quote for the selected service before confirmation.",
+                auto_subdub_line,
                 "• Member service discounts remain available when eligible. International accounts are charged at the price shown before confirmation.",
                 *topup_policy,
             ],
@@ -11649,6 +11700,7 @@ def _international_pricing_lines(section: str, context: dict | None, lang: str) 
                 "🌐 <b>Subtitles / Translation / Dubbing</b>", "", common, "",
                 "• Original subtitles are free in supported current flows.",
                 "• Translation and dubbing show their current quote before confirmation.",
+                auto_subdub_line,
             ],
             "image": [
                 "🖼 <b>AI Image Pricing</b>", "", common, "", *image_lines,
@@ -11858,7 +11910,7 @@ def customer_guide_sections() -> list[tuple[str, str, str]]:
                 *video_multiscene_discount_lines(),
                 "• Add-on được cộng riêng và không nằm trong phần giảm theo số cảnh.",
                 "",
-                "Ví dụ: Nhanh gọn 3 cảnh = 200 × 3 = 600 Xu; giảm 10% là 60 Xu; tiền video còn 540 Xu.",
+                "Ví dụ: Nhanh gọn 3 cảnh = 80 × 3 = 240 Xu; giảm 10% là 24 Xu; tiền video còn 216 Xu.",
             ]),
         ),
         (

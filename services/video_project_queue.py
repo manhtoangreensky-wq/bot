@@ -51,6 +51,9 @@ PROJECT_DRAFT_STATUSES = tuple(status for status in PROJECT_STATUSES if status.s
 SCENE_STATUSES = ("pending", "gen_audio", "gen_image", "gen_video", "postprocess", "done", "failed", "terminal_failed")
 JOB_STATUSES = ("queued", "processing", "completed", "failed", "cancelled")
 VIDEO_RENDER_JOB_TYPE = "video_render"
+VIDEO_JOB_PRECHECK_RUNNING = "precheck_running"
+VIDEO_JOB_PRECHECK_BLOCKED = "precheck_blocked"
+VIDEO_JOB_READY_TO_SUBMIT = "ready_to_submit"
 PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER = "owner_product_video"
 PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID = "product_video_public_confirm_v1"
 PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK = "vproduct|b14_confirm"
@@ -3069,6 +3072,177 @@ def enqueue_video_render_job(
         raise
 
 
+def begin_video_precheck_job(
+    conn: sqlite3.Connection,
+    *,
+    project_id: int,
+    user_id: int,
+    chat_id: int,
+    request_id: str,
+    confirm_attempt_key: str,
+) -> dict[str, Any]:
+    """Create or resume one durable job without making it worker-claimable."""
+
+    ensure_video_project_queue_schema(conn)
+    project = get_video_project(conn, int(project_id))
+    if not project:
+        raise ValueError("project_not_found")
+    if int(project.get("user_id") or 0) != int(user_id):
+        raise PermissionError("project_user_mismatch")
+
+    linked_job_id = _as_int(project.get("job_id"), 0)
+    if linked_job_id > 0:
+        linked_job = get_video_render_job(conn, linked_job_id)
+        if (
+            linked_job
+            and int(linked_job.get("project_id") or 0) == int(project_id)
+            and int(linked_job.get("user_id") or 0) == int(user_id)
+        ):
+            return {**linked_job, "duplicate_prevented": True}
+
+    existing_row = conn.execute(
+        """SELECT id,project_id,user_id,job_type,status,priority,attempts,max_attempts,
+                  locked_by,locked_at,lease_expires_at,last_error,result_json,created_at,
+                  updated_at,started_at,completed_at,progress_percent,progress_message
+             FROM video_jobs
+            WHERE project_id=? AND user_id=? AND job_type=?
+            ORDER BY id ASC LIMIT 1""",
+        (int(project_id), int(user_id), VIDEO_RENDER_JOB_TYPE),
+    ).fetchone()
+    existing_job = _job_from_row(existing_row)
+    if existing_job:
+        conn.execute(
+            "UPDATE video_projects SET job_id=?,updated_at=? WHERE project_id=? AND user_id=?",
+            (int(existing_job["id"]), now_text(), int(project_id), int(user_id)),
+        )
+        return {**existing_job, "duplicate_prevented": True}
+
+    current = now_text()
+    result_payload = {
+        "request_id": str(request_id),
+        "confirm_attempt_key": str(confirm_attempt_key),
+        "chat_id": int(chat_id or 0),
+        "preflight_result": "RUNNING",
+        "admission_result": "NOT_RUN",
+        "exact_blocker_code": "",
+        "provider_task_id": None,
+        "submit_count": 0,
+        "poll_count": 0,
+        "charge_count": 0,
+        "charge_state": "NO_CHARGE",
+        "dispatch_outbox_created": False,
+    }
+    cursor = conn.execute(
+        """INSERT INTO video_jobs
+           (project_id,user_id,job_type,status,priority,attempts,max_attempts,result_json,
+            progress_percent,progress_message,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            int(project_id),
+            int(user_id),
+            VIDEO_RENDER_JOB_TYPE,
+            VIDEO_JOB_PRECHECK_RUNNING,
+            100,
+            0,
+            3,
+            _json_dumps(result_payload),
+            5,
+            VIDEO_JOB_PRECHECK_RUNNING,
+            current,
+            current,
+        ),
+    )
+    job_id = int(cursor.lastrowid or 0)
+    if job_id <= 0:
+        raise RuntimeError("job_create_failed")
+    conn.execute(
+        "UPDATE video_projects SET job_id=?,updated_at=? WHERE project_id=? AND user_id=?",
+        (job_id, current, int(project_id), int(user_id)),
+    )
+    job = get_video_render_job(conn, job_id)
+    if not job:
+        raise RuntimeError("job_create_readback_failed")
+    return {**job, "duplicate_prevented": False}
+
+
+def record_video_precheck_job_result(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int,
+    user_id: int,
+    preflight_result: str,
+    admission_result: str,
+    blocker_code: str = "",
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist a zero-submit precheck result on the already-created job."""
+
+    ensure_video_project_queue_schema(conn)
+    job = get_video_render_job(conn, int(job_id))
+    if not job:
+        raise ValueError("job_not_found")
+    if int(job.get("user_id") or 0) != int(user_id):
+        raise PermissionError("job_user_mismatch")
+
+    allowed_statuses = {
+        VIDEO_JOB_PRECHECK_RUNNING,
+        VIDEO_JOB_PRECHECK_BLOCKED,
+        VIDEO_JOB_READY_TO_SUBMIT,
+    }
+    if str(job.get("status") or "") not in allowed_statuses:
+        raise ValueError("job_not_in_precheck_state")
+
+    preflight = str(preflight_result or "NOT_RUN").strip().upper()
+    admission = str(admission_result or "NOT_RUN").strip().upper()
+    blocked = preflight == "BLOCKED" or admission == "BLOCKED"
+    ready = preflight == "PASS" and admission == "PASS"
+    if not blocked and not ready:
+        raise ValueError("invalid_precheck_result")
+    status = VIDEO_JOB_PRECHECK_BLOCKED if blocked else VIDEO_JOB_READY_TO_SUBMIT
+    progress = 5 if blocked else 10
+
+    result_payload = _json_loads(str(job.get("result_json") or ""), {})
+    if not isinstance(result_payload, dict):
+        result_payload = {}
+    result_payload.update(dict(payload or {}))
+    result_payload.update(
+        {
+            "preflight_result": preflight,
+            "admission_result": admission,
+            "exact_blocker_code": str(blocker_code or ""),
+            "provider_task_id": None,
+            "submit_count": 0,
+            "poll_count": 0,
+            "charge_count": 0,
+            "charge_state": "NO_CHARGE",
+            "dispatch_outbox_created": False,
+        }
+    )
+    cursor = conn.execute(
+        """UPDATE video_jobs
+              SET status=?,result_json=?,progress_percent=?,progress_message=?,updated_at=?
+            WHERE id=? AND user_id=? AND status IN (?,?,?)""",
+        (
+            status,
+            _json_dumps(result_payload),
+            progress,
+            status,
+            now_text(),
+            int(job_id),
+            int(user_id),
+            VIDEO_JOB_PRECHECK_RUNNING,
+            VIDEO_JOB_PRECHECK_BLOCKED,
+            VIDEO_JOB_READY_TO_SUBMIT,
+        ),
+    )
+    if cursor.rowcount != 1:
+        raise RuntimeError("job_precheck_state_changed")
+    updated = get_video_render_job(conn, int(job_id))
+    if not updated:
+        raise RuntimeError("job_precheck_readback_failed")
+    return updated
+
+
 def _product_video_final_admission_state(
     project: dict[str, Any],
     admission: dict[str, Any] | None,
@@ -3769,27 +3943,79 @@ def _confirm_product_video_invoice_atomic(
             and admission_state.get("automatic_retry_allowed") is False
             else 3
         )
-        cursor = conn.execute(
-            """INSERT INTO video_jobs
-               (project_id,user_id,job_type,status,priority,attempts,max_attempts,result_json,
-                progress_percent,progress_message,created_at,updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                int(project["project_id"]),
-                int(user_id),
-                VIDEO_RENDER_JOB_TYPE,
-                "queued",
-                100,
-                0,
-                route_max_attempts,
-                _json_dumps(admission_state),
-                10,
-                "dispatch_outbox_pending",
-                current,
-                current,
-            ),
+        linked_job_id = _as_int(locked[2], 0)
+        linked_job = get_video_render_job(conn, linked_job_id) if linked_job_id > 0 else {}
+        linked_status = str(linked_job.get("status") or "")
+        preflight_payload = _json_loads(str(linked_job.get("result_json") or ""), {})
+        if not isinstance(preflight_payload, dict):
+            preflight_payload = {}
+        job_promoted = bool(
+            linked_job
+            and _as_int(linked_job.get("project_id"), 0) == int(project["project_id"])
+            and _as_int(linked_job.get("user_id"), 0) == int(user_id)
+            and str(linked_job.get("job_type") or "") == VIDEO_RENDER_JOB_TYPE
+            and linked_status == VIDEO_JOB_READY_TO_SUBMIT
         )
-        job_id = int(cursor.lastrowid or 0)
+        if linked_status in {
+            VIDEO_JOB_PRECHECK_RUNNING,
+            VIDEO_JOB_PRECHECK_BLOCKED,
+            VIDEO_JOB_READY_TO_SUBMIT,
+        } and not job_promoted:
+            conn.rollback()
+            return {
+                "ok": False,
+                "reason": "product_video_preflight_job_not_ready",
+                "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này. Hệ thống chưa trừ Xu.",
+                "job_created": False,
+                "job_promoted": False,
+                "dispatch_outbox_created": False,
+                "charge": 0,
+                "charged_xu": 0,
+            }
+        if job_promoted and any((
+            str(preflight_payload.get("preflight_result") or "").upper() != "PASS",
+            str(preflight_payload.get("admission_result") or "").upper() != "PASS",
+            bool(preflight_payload.get("provider_task_id")),
+            _as_int(preflight_payload.get("submit_count"), 0) != 0,
+            _as_int(preflight_payload.get("poll_count"), 0) != 0,
+            _as_int(preflight_payload.get("charge_count"), 0) != 0,
+            not str(preflight_payload.get("request_id") or "").strip(),
+        )):
+            conn.rollback()
+            return {
+                "ok": False,
+                "reason": "product_video_preflight_job_identity_invalid",
+                "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này. Hệ thống chưa trừ Xu.",
+                "job_created": False,
+                "job_promoted": False,
+                "dispatch_outbox_created": False,
+                "charge": 0,
+                "charged_xu": 0,
+            }
+        if job_promoted:
+            job_id = linked_job_id
+        else:
+            cursor = conn.execute(
+                """INSERT INTO video_jobs
+                   (project_id,user_id,job_type,status,priority,attempts,max_attempts,result_json,
+                    progress_percent,progress_message,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    int(project["project_id"]),
+                    int(user_id),
+                    VIDEO_RENDER_JOB_TYPE,
+                    "queued",
+                    100,
+                    0,
+                    route_max_attempts,
+                    _json_dumps(admission_state),
+                    10,
+                    "dispatch_outbox_pending",
+                    current,
+                    current,
+                ),
+            )
+            job_id = int(cursor.lastrowid or 0)
         if str(admission_state.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
             admission_state.update(
                 {
@@ -3864,6 +4090,7 @@ def _confirm_product_video_invoice_atomic(
         if failure_stage == "after_outbox_insert":
             raise RuntimeError("injected_after_outbox_insert")
         payload = {
+            **preflight_payload,
             **kickoff,
             **admission_state,
             "dispatch_outbox_present": True,
@@ -3893,11 +4120,31 @@ def _confirm_product_video_invoice_atomic(
             "canonical_manifest_id": f"product-video-{job_id}-manifest",
             "scene_dispatch_count": len(scene_indexes),
             "finalizer_reached": False,
+            "job_promoted_from_preflight": job_promoted,
+            "preflight_job_status_before_promotion": (
+                VIDEO_JOB_READY_TO_SUBMIT if job_promoted else ""
+            ),
+            "provider_task_id": None,
+            "submit_count": 0,
+            "poll_count": 0,
+            "charge_count": 0,
         }
-        conn.execute(
-            "UPDATE video_jobs SET result_json=?,progress_percent=10,progress_message='dispatch_outbox_pending',updated_at=? WHERE id=?",
-            (_json_dumps(payload), current, job_id),
+        promoted = conn.execute(
+            """UPDATE video_jobs
+                  SET status='queued',max_attempts=?,result_json=?,last_error='',progress_percent=10,
+                      progress_message='dispatch_outbox_pending',locked_by='',locked_at=NULL,
+                      lease_expires_at=NULL,completed_at=NULL,updated_at=?
+                WHERE id=? AND status IN (?, 'queued')""",
+            (
+                route_max_attempts,
+                _json_dumps(payload),
+                current,
+                job_id,
+                VIDEO_JOB_READY_TO_SUBMIT,
+            ),
         )
+        if promoted.rowcount != 1:
+            raise RuntimeError("product_video_same_job_promotion_conflict")
         if failure_stage == "before_snapshot_consume":
             raise RuntimeError("injected_before_snapshot_consume")
         if require_authoritative_snapshot:
@@ -3932,7 +4179,8 @@ def _confirm_product_video_invoice_atomic(
             "job": get_video_render_job(conn, job_id),
             "outbox": get_product_video_dispatch_outbox(conn, job_id=job_id),
             "duplicate_prevented": False,
-            "job_created": True,
+            "job_created": not job_promoted,
+            "job_promoted": job_promoted,
             "dispatch_outbox_created": True,
             "scene_records_created": True,
         }
@@ -5504,7 +5752,15 @@ def sweep_product_video_zero_task_watchdog(
                 and bool(outbox.get("last_attempt_at"))
             )
         )
-        if not candidates and not active_lease and not claim_retries_exhausted:
+        explicit_admission_block = bool(
+            eligibility and eligibility.get("ok") is False
+        )
+        if (
+            not candidates
+            and not active_lease
+            and not claim_retries_exhausted
+            and not explicit_admission_block
+        ):
             if not outbox:
                 outbox = ensure_product_video_dispatch_outbox(
                     conn,

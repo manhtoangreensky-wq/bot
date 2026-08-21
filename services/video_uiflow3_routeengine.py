@@ -86,6 +86,15 @@ def _canonical_json(value: Any) -> str:
     )
 
 
+def _prompt_json(value: Any) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
 def _sha256(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
@@ -190,6 +199,244 @@ def _branding_worker_contract(branding: Mapping[str, Any] | None) -> dict[str, A
     }
 
 
+PRODUCT_VIDEO_ADDON_ORDER = (
+    "subtitle",
+    "dubbing",
+    "music",
+    "sfx",
+    "logo",
+    "watermark",
+    "text",
+    "transitions",
+)
+
+
+def _tail_addon_value(tail: Mapping[str, Any], name: str) -> dict[str, Any]:
+    addon_config = dict(tail.get("addon_config") or {})
+    postprocessing = dict(addon_config.get("postprocessing") or {})
+    entry = dict(postprocessing.get(name) or {})
+    value = entry.get("value")
+    return deepcopy(dict(value)) if isinstance(value, Mapping) else {}
+
+
+def _tail_scene_script(tail: Mapping[str, Any]) -> str:
+    lines: list[str] = []
+    fields = (
+        "subtitle_line",
+        "dialogue_or_voiceover",
+        "narration_line",
+        "dialogue",
+        "voiceover",
+        "narration",
+        "main_idea",
+        "content",
+    )
+    for raw_scene in tail.get("scene_content") or []:
+        if not isinstance(raw_scene, Mapping):
+            continue
+        line = next(
+            (
+                _clean(raw_scene.get(field), 3500)
+                for field in fields
+                if _clean(raw_scene.get(field), 3500)
+            ),
+            "",
+        )
+        if line:
+            lines.append(line)
+    return "\n".join(lines)[:8000]
+
+
+def _audio_asset(value: Mapping[str, Any]) -> dict[str, Any]:
+    selected = value.get("selected_asset") or value.get("asset") or value
+    asset = deepcopy(dict(selected)) if isinstance(selected, Mapping) else {}
+    return {
+        **asset,
+        "asset_id": _clean(
+            asset.get("asset_id")
+            or asset.get("id")
+            or value.get("asset_id"),
+            240,
+        ),
+        "source_url": _clean(
+            asset.get("source_url")
+            or asset.get("download_url")
+            or asset.get("preview_url")
+            or value.get("source_url"),
+            2048,
+        ),
+        "artifact_path": _clean(
+            asset.get("artifact_path")
+            or asset.get("local_path")
+            or value.get("artifact_path"),
+            2048,
+        ),
+    }
+
+
+def product_video_addon_worker_contract(
+    tail_state: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Compile selected Tail9 Add-ons into one immutable worker contract."""
+
+    tail = deepcopy(dict(tail_state or {}))
+    audio = dict(tail.get("audio_config") or {})
+    volumes = dict(audio.get("volumes") or {})
+    base_script = _tail_scene_script(tail)
+    subtitle_value = _tail_addon_value(tail, "subtitles")
+    dubbing_value = _tail_addon_value(tail, "dubbing")
+    music_value = _tail_addon_value(tail, "music")
+    sfx_value = _tail_addon_value(tail, "sfx")
+    subtitle_script = _clean(
+        subtitle_value.get("script_text")
+        or subtitle_value.get("text")
+        or base_script,
+        8000,
+    )
+    dubbing_script = _clean(
+        dubbing_value.get("dialogue_text")
+        or dubbing_value.get("script_text")
+        or subtitle_script
+        if _clean(dubbing_value.get("script_source"), 40) == "subtitles"
+        else dubbing_value.get("dialogue_text")
+        or dubbing_value.get("script_text")
+        or base_script,
+        8000,
+    )
+    music = _audio_asset(music_value)
+    raw_sfx_assets = sfx_value.get("assets") or []
+    sfx_assets = [
+        _audio_asset(dict(item))
+        for item in raw_sfx_assets
+        if isinstance(item, Mapping)
+    ]
+    if not sfx_assets and any(
+        sfx_value.get(key)
+        for key in ("asset_id", "source_url", "artifact_path", "selected_asset")
+    ):
+        sfx_assets = [_audio_asset(sfx_value)]
+    logo_config = dict(tail.get("logo_config") or {})
+    watermark_config = dict(tail.get("watermark_config") or {})
+    logo = {
+        "enabled": bool(
+            logo_config.get("enabled")
+            and _clean(logo_config.get("asset_file_id"), 1024)
+        ),
+        "telegram_file_id": _clean(logo_config.get("asset_file_id"), 1024),
+        "artifact_path": _clean(logo_config.get("artifact_path"), 2048),
+        "position": _brand_position(logo_config.get("position"), "top_left"),
+    }
+    watermark = {
+        "enabled": bool(
+            watermark_config.get("enabled")
+            and _clean(watermark_config.get("text"), 240)
+        ),
+        "text": _clean(watermark_config.get("text"), 240),
+        "position": _brand_position(
+            watermark_config.get("position"), "bottom_right"
+        ),
+        "opacity_percent": max(
+            0,
+            min(100, _positive_int(watermark_config.get("opacity_percent")) or 45),
+        ),
+    }
+    text_overlays = [
+        deepcopy(dict(item))
+        for item in (tail.get("addon_config") or {}).get("automatic_text") or []
+        if isinstance(item, Mapping) and _clean(item.get("text"), 500)
+    ]
+    scenes = [
+        deepcopy(dict(item))
+        for item in tail.get("scene_content") or []
+        if isinstance(item, Mapping)
+    ]
+    transition_plan = [
+        _clean(
+            scene.get("transition_out")
+            or scenes[index + 1].get("transition_in"),
+            80,
+        )
+        for index, scene in enumerate(scenes[:-1])
+    ]
+    transition_plan = [item or "cut" for item in transition_plan]
+    requested = {
+        "subtitle": bool(audio.get("subtitles")),
+        "dubbing": bool(audio.get("dubbing")),
+        "music": bool(audio.get("music")),
+        "sfx": bool(audio.get("sfx")),
+        "logo": bool(logo["enabled"]),
+        "watermark": bool(watermark["enabled"]),
+        "text": bool(text_overlays),
+        "transitions": bool(transition_plan),
+    }
+    payloads = {
+        "subtitle": {
+            **subtitle_value,
+            "enabled": requested["subtitle"],
+            "script_text": subtitle_script,
+            "volume_percent": 100,
+        },
+        "dubbing": {
+            **dubbing_value,
+            "enabled": requested["dubbing"],
+            "script_text": dubbing_script,
+            "volume_percent": int(volumes.get("dubbing") or 100),
+        },
+        "music": {
+            **music_value,
+            **music,
+            "enabled": requested["music"],
+            "volume_percent": int(volumes.get("music") or 20),
+        },
+        "sfx": {
+            **sfx_value,
+            "enabled": requested["sfx"],
+            "assets": sfx_assets,
+            "volume_percent": int(volumes.get("sfx") or 35),
+        },
+        "logo": logo,
+        "watermark": watermark,
+    }
+    identities = {
+        "subtitle": _sha256(payloads["subtitle"]),
+        "dubbing": _sha256(payloads["dubbing"]),
+        "music": music.get("asset_id") or _sha256(music),
+        "sfx": _sha256(sfx_assets),
+        "logo": logo.get("telegram_file_id") or _sha256(logo),
+        "watermark": _sha256(watermark),
+        "text": _sha256(text_overlays),
+        "transitions": _sha256(transition_plan),
+    }
+    requested_addons = [name for name in PRODUCT_VIDEO_ADDON_ORDER if requested[name]]
+    materialization_requirements = [
+        {
+            "name": name,
+            "required": True,
+            "material_identity": identities[name],
+            "material_kind": {
+                "subtitle": "subtitle_script",
+                "dubbing": "tts_audio",
+                "music": "stock_audio",
+                "sfx": "stock_sfx",
+                "logo": "telegram_image",
+                "watermark": "inline_text",
+                "text": "inline_text_overlays",
+                "transitions": "inline_transition_plan",
+            }[name],
+        }
+        for name in requested_addons
+    ]
+    return {
+        "contract_version": "product-video-addons-v1",
+        "requested_addons": requested_addons,
+        **payloads,
+        "text_overlays": text_overlays,
+        "transition_plan": transition_plan,
+        "materialization_requirements": materialization_requirements,
+        "silent_drop_allowed": False,
+    }
+
+
 def _scene_dialogue(
     scene_id: str,
     dialogue_segments: list[dict[str, Any]],
@@ -211,6 +458,29 @@ def _entity_index(bible: Mapping[str, Any], key: str, id_key: str) -> dict[str, 
     }
 
 
+def _selected_control_values(value: Mapping[str, Any] | None) -> dict[str, str]:
+    selected: dict[str, str] = {}
+    for raw_key, raw_entry in dict(value or {}).items():
+        key = _clean(raw_key, 120)
+        if not key:
+            continue
+        if isinstance(raw_entry, Mapping):
+            entry = dict(raw_entry)
+            if "enabled" in entry and not bool(entry.get("enabled")):
+                continue
+            text = _clean(
+                entry.get("value")
+                or entry.get("prompt")
+                or entry.get("label"),
+                800,
+            )
+        else:
+            text = _clean(raw_entry, 800)
+        if text:
+            selected[key] = text
+    return selected
+
+
 def _scene_prompt(
     scene: Mapping[str, Any],
     *,
@@ -222,6 +492,8 @@ def _scene_prompt(
     references: list[dict[str, Any]],
     dialogue: list[dict[str, Any]],
     voice_cast: Mapping[str, Any],
+    creative_controls: Mapping[str, str],
+    preservation_requirements: Mapping[str, str],
 ) -> tuple[str, str]:
     characters = _entity_index(bible, "characters", "character_id")
     locations = _entity_index(bible, "locations", "location_id")
@@ -243,6 +515,42 @@ def _scene_prompt(
         if item in props
     ]
     location = locations.get(_clean(scene.get("location_id"), 120), {})
+    approved_visual_prompt = _clean(
+        scene.get("provider_prompt")
+        or scene.get("visual_prompt")
+        or scene.get("prompt_override"),
+        4000,
+    )
+    character_lock = [
+        {
+            key: item.get(key)
+            for key in (
+                "character_id",
+                "display_name",
+                "role",
+                "gender",
+                "description",
+                "wardrobe",
+                "continuity_lock",
+            )
+            if item.get(key) not in (None, "")
+        }
+        for item in character_rows
+    ]
+    location_lock = {
+        key: location.get(key)
+        for key in (
+            "location_id",
+            "name",
+            "description",
+            "indoor_outdoor",
+            "time_of_day",
+            "weather",
+            "lighting",
+            "mood",
+        )
+        if location.get(key) not in (None, "")
+    }
     scene_reference_ids = set(scene.get("reference_asset_ids") or [])
     scoped_references = [
         item
@@ -265,6 +573,9 @@ def _scene_prompt(
         "scene_role": _clean(scene.get("scene_role"), 80),
         "content_intent": _clean(content.get("original_intent")),
         "approved_brief": deepcopy(dict(content.get("approved_brief") or {})),
+        "approved_visual_prompt": approved_visual_prompt,
+        "creative_controls": dict(creative_controls),
+        "preservation_requirements": dict(preservation_requirements),
         "semantic_beat": _clean(scene.get("semantic_beat"), 1600),
         "start_state": _clean(scene.get("start_state"), 1600),
         "main_action": _clean(scene.get("main_action"), 1600),
@@ -299,18 +610,23 @@ def _scene_prompt(
             f"Scene {prompt_material['scene_index']}/{scene_count} ({prompt_material['scene_id']})",
             f"Aspect ratio {ratio}; output {geometry['width']}x{geometry['height']}",
             f"Duration {prompt_material['duration_seconds']} seconds",
-            f"Content lock: {_canonical_json(prompt_material['approved_brief'])}",
+            f"Content lock: {_prompt_json(prompt_material['approved_brief'])}",
+            f"Style controls: {_prompt_json(prompt_material['creative_controls'])}",
+            f"Preservation requirements: {_prompt_json(prompt_material['preservation_requirements'])}",
+            f"Character lock: {_prompt_json(character_lock)}",
+            f"Location lock: {_prompt_json(location_lock)}",
+            f"Approved visual direction: {prompt_material['approved_visual_prompt']}",
             f"Beat: {prompt_material['semantic_beat']}",
             f"Start state: {prompt_material['start_state']}",
             f"One complete action: {prompt_material['main_action']}",
             f"Completed end state: {prompt_material['completion_state']}",
-            f"Characters: {_canonical_json(character_rows)}",
-            f"Location: {_canonical_json(location)}",
-            f"Products and props: {_canonical_json([*product_rows, *prop_rows])}",
-            f"Dialogue and voices: {_canonical_json({'dialogue': dialogue, 'voices': prompt_material['voice_bindings']})}",
+            f"Characters: {_prompt_json(character_rows)}",
+            f"Location: {_prompt_json(location)}",
+            f"Products and props: {_prompt_json([*product_rows, *prop_rows])}",
+            f"Dialogue and voices: {_prompt_json({'dialogue': dialogue, 'voices': prompt_material['voice_bindings']})}",
             f"Camera: {prompt_material['camera']}; framing={prompt_material['framing']}; movement={prompt_material['movement']}",
             f"Light and mood: {prompt_material['lighting']}; {prompt_material['mood']}",
-            f"References: {_canonical_json(scoped_references)}",
+            f"References: {_prompt_json(scoped_references)}",
             "Preserve stable character, product, location, wardrobe, logo, color, and continuity IDs",
             "Finish every spoken line, action, and camera movement before the scene boundary",
         )
@@ -319,10 +635,14 @@ def _scene_prompt(
         (
             f"Keyframe for scene {prompt_material['scene_index']}/{scene_count}",
             f"Canvas {geometry['width']}x{geometry['height']} ({ratio})",
+            f"Style controls: {_prompt_json(prompt_material['creative_controls'])}",
+            f"Preservation requirements: {_prompt_json(prompt_material['preservation_requirements'])}",
+            f"Character lock: {_prompt_json(character_lock)}",
+            f"Location lock: {_prompt_json(location_lock)}",
             f"Beat: {prompt_material['semantic_beat']}",
-            f"Characters: {_canonical_json(character_rows)}",
-            f"Location: {_canonical_json(location)}",
-            f"Products and props: {_canonical_json([*product_rows, *prop_rows])}",
+            f"Characters: {_prompt_json(character_rows)}",
+            f"Location: {_prompt_json(location)}",
+            f"Products and props: {_prompt_json([*product_rows, *prop_rows])}",
             f"Camera and light: {prompt_material['camera']}; {prompt_material['lighting']}",
             "Preserve exact identity, brand, wardrobe, product geometry, and reference ownership",
         )
@@ -341,6 +661,16 @@ def _scene_cards(snapshot: Mapping[str, Any], *, ratio: str, geometry: Mapping[s
         if isinstance(item, Mapping)
     ]
     voice_cast = dict(audio.get("voice_cast") or {})
+    creative_controls = _selected_control_values(
+        snapshot.get("creative_controls")
+        if isinstance(snapshot.get("creative_controls"), Mapping)
+        else {}
+    )
+    preservation_requirements = _selected_control_values(
+        snapshot.get("preservation_requirements")
+        if isinstance(snapshot.get("preservation_requirements"), Mapping)
+        else {}
+    )
     scenes = [deepcopy(dict(item)) for item in snapshot.get("scenes") or [] if isinstance(item, Mapping)]
     result: list[dict[str, Any]] = []
     for scene in scenes:
@@ -356,6 +686,8 @@ def _scene_cards(snapshot: Mapping[str, Any], *, ratio: str, geometry: Mapping[s
             references=references,
             dialogue=dialogue,
             voice_cast=voice_cast,
+            creative_controls=creative_controls,
+            preservation_requirements=preservation_requirements,
         )
         dialogue_text = " ".join(_clean(item.get("text"), 4000) for item in dialogue if _clean(item.get("text"), 4000))
         result.append(
@@ -428,6 +760,7 @@ def compile_routeengine_handoff(
     *,
     owner_user_id: int,
     owner_chat_id: int,
+    tail_state: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compile one immutable, side-effect-free RouteEngine handoff."""
 
@@ -467,6 +800,10 @@ def compile_routeengine_handoff(
 
     content = deepcopy(dict(snapshot.get("content") or {}))
     production_bible = deepcopy(dict(snapshot.get("production_bible") or {}))
+    creative_controls = deepcopy(dict(snapshot.get("creative_controls") or {}))
+    preservation_requirements = deepcopy(
+        dict(snapshot.get("preservation_requirements") or {})
+    )
     story_bible = {
         **production_bible,
         "primary_profile": _clean(content.get("profile_id"), 160),
@@ -475,6 +812,8 @@ def compile_routeengine_handoff(
         "uiflow3_series": deepcopy(dict(snapshot.get("series") or {})),
         "uiflow3_episode": deepcopy(dict(snapshot.get("episode") or {})),
         "uiflow3_effective_episode": deepcopy(snapshot.get("effective_episode")),
+        "uiflow3_creative_controls": creative_controls,
+        "uiflow3_preservation_requirements": preservation_requirements,
         "uiflow3_snapshot_config_hash": _clean(snapshot.get("config_hash"), 64),
     }
     cards = _scene_cards(snapshot, ratio=ratio, geometry=geometry)
@@ -490,6 +829,12 @@ def compile_routeengine_handoff(
             route_selection=selection,
         )
     audio = deepcopy(dict(snapshot.get("audio") or {}))
+    selected_tail = deepcopy(dict(tail_state or {}))
+    tail_addons = (
+        product_video_addon_worker_contract(selected_tail)
+        if selected_tail
+        else {}
+    )
     voice_policy = {
         "voice_cast": deepcopy(dict(audio.get("voice_cast") or {})),
         "narrator": deepcopy(dict(production_bible.get("narrator") or {})),
@@ -505,6 +850,35 @@ def compile_routeengine_handoff(
         "voice_cast": deepcopy(dict(audio.get("voice_cast") or {})),
     }
     branding = deepcopy(dict(snapshot.get("branding") or {}))
+    if selected_tail:
+        tail_logo = dict(tail_addons.get("logo") or {})
+        tail_watermark = dict(tail_addons.get("watermark") or {})
+        if tail_logo.get("enabled"):
+            branding["logo"] = {
+                "enabled": True,
+                "telegram_file_id": _clean(
+                    tail_logo.get("telegram_file_id"), 1024
+                ),
+                "file_id": _clean(tail_logo.get("telegram_file_id"), 1024),
+                "position": _brand_position(
+                    tail_logo.get("position"), "top_left"
+                ),
+            }
+        else:
+            branding.pop("logo", None)
+        if tail_watermark.get("enabled"):
+            branding["watermark"] = {
+                "enabled": True,
+                "text": _clean(tail_watermark.get("text"), 240),
+                "position": _brand_position(
+                    tail_watermark.get("position"), "bottom_right"
+                ),
+                "opacity_percent": int(
+                    tail_watermark.get("opacity_percent") or 45
+                ),
+            }
+        else:
+            branding.pop("watermark", None)
     branding_worker_contract = _branding_worker_contract(branding)
     addon_plan = {
         "voice": deepcopy(voice_policy),
@@ -519,6 +893,22 @@ def compile_routeengine_handoff(
         "silent_drop_allowed": False,
         **deepcopy(dict(branding_worker_contract["addon_plan"])),
     }
+    if tail_addons:
+        addon_plan.update(deepcopy(tail_addons))
+        addon_plan.update({
+            "voice_enabled": bool((tail_addons.get("dubbing") or {}).get("enabled")),
+            "voice_source": str(
+                (tail_addons.get("dubbing") or {}).get("voice_choice") or "none"
+            ),
+            "dub_enabled": bool((tail_addons.get("dubbing") or {}).get("enabled")),
+            "music_enabled": bool((tail_addons.get("music") or {}).get("enabled")),
+            "sfx_enabled": bool((tail_addons.get("sfx") or {}).get("enabled")),
+            "subtitle_enabled": bool((tail_addons.get("subtitle") or {}).get("enabled")),
+            "logo_enabled": bool(
+                (tail_addons.get("logo") or {}).get("enabled")
+                or (tail_addons.get("watermark") or {}).get("enabled")
+            ),
+        })
     references = [deepcopy(dict(item)) for item in snapshot.get("references") or [] if isinstance(item, Mapping)]
     source = deepcopy(dict(snapshot.get("source") or {}))
     render_blockers = [_clean(item, 240) for item in snapshot.get("render_blockers") or [] if _clean(item, 240)]
@@ -537,15 +927,20 @@ def compile_routeengine_handoff(
             )
         ):
             bridge_blockers.append("uiflow3_product_duration_contract_mismatch")
-        if audio.get("voice_cast") or audio.get("dialogue_segments"):
-            bridge_blockers.append("uiflow3_voice_materialization_missing")
-        if _clean(audio.get("music_scope"), 40) not in {"", "none"}:
-            bridge_blockers.append("uiflow3_music_materialization_missing")
-        if audio.get("sfx_plan") or audio.get("ambient_plan"):
-            bridge_blockers.append("uiflow3_scene_audio_materialization_missing")
+        if not tail_addons:
+            if audio.get("voice_cast") or audio.get("dialogue_segments"):
+                bridge_blockers.append("uiflow3_voice_materialization_missing")
+            if _clean(audio.get("music_scope"), 40) not in {"", "none"}:
+                bridge_blockers.append("uiflow3_music_materialization_missing")
+            if audio.get("sfx_plan") or audio.get("ambient_plan"):
+                bridge_blockers.append("uiflow3_scene_audio_materialization_missing")
         if references:
             bridge_blockers.append("uiflow3_reference_materialization_missing")
-        if branding_worker_contract.get("logo_file_id") and branding_worker_contract.get("watermark_text"):
+        if (
+            not tail_addons
+            and branding_worker_contract.get("logo_file_id")
+            and branding_worker_contract.get("watermark_text")
+        ):
             bridge_blockers.append("uiflow3_dual_branding_materialization_missing")
     bridge_blockers = list(dict.fromkeys(bridge_blockers))
     commercial_ready = not render_blockers and not bridge_blockers
@@ -585,6 +980,8 @@ def compile_routeengine_handoff(
         "addon_plan": addon_plan,
         "branding_worker_contract": branding_worker_contract,
         "creative_controls": {
+            "style_controls": creative_controls,
+            "preservation_requirements": preservation_requirements,
             "continuity": deepcopy(dict(production_bible.get("continuity") or {})),
             "references": references,
             "scene_directions": [

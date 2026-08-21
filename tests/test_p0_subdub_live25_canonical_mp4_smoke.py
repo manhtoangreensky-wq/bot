@@ -404,6 +404,7 @@ def test_tts_failure_keeps_sanitized_provider_detail_for_admin_debug():
 
 def test_generated_video_delivery_waits_for_message_id_without_retry():
     calls = []
+    base_timeout = float(bot.SUBDUB_TELEGRAM_DELIVERY_TIMEOUT_SECONDS)
 
     class DeliveryMessage:
         async def reply_video(self, **kwargs):
@@ -425,7 +426,116 @@ def test_generated_video_delivery_waits_for_message_id_without_retry():
     assert result["sent"] is True
     assert result["telegram_message_id"] == "55225"
     assert len(calls) == 1
-    assert calls[0]["read_timeout"] >= 60
-    assert calls[0]["write_timeout"] >= 60
-    assert calls[0]["connect_timeout"] >= 20
-    assert calls[0]["pool_timeout"] >= 20
+    assert calls[0]["read_timeout"] == base_timeout
+    assert calls[0]["write_timeout"] == base_timeout
+    assert calls[0]["connect_timeout"] == min(30.0, base_timeout)
+    assert calls[0]["pool_timeout"] == min(30.0, base_timeout)
+
+
+@pytest.mark.parametrize(
+    ("duration", "expected"),
+    [
+        (0, 5 * 60),
+        (5 * 60 - 0.001, 5 * 60),
+        (5 * 60, 15 * 60),
+        (10 * 60 - 0.001, 15 * 60),
+        (10 * 60, 25 * 60),
+        (20 * 60 - 0.001, 25 * 60),
+        (20 * 60, 30 * 60),
+    ],
+)
+def test_subdub_delivery_timeout_uses_duration_buckets(duration, expected):
+    assert bot.subdub_delivery_timeout_seconds_for_duration(duration) == expected
+
+
+@pytest.mark.parametrize(
+    ("payload_size", "expected_method"),
+    [
+        (1024, "video"),
+        (1024 * 1024 + 1, "document"),
+    ],
+)
+def test_generated_video_delivery_applies_exact_adaptive_timeout(payload_size, expected_method):
+    calls = []
+
+    class DeliveryMessage:
+        async def reply_video(self, **kwargs):
+            calls.append(("video", dict(kwargs)))
+            return SimpleNamespace(
+                message_id=55226,
+                video=SimpleNamespace(file_id="adaptive-timeout-video-file"),
+            )
+
+        async def reply_document(self, **kwargs):
+            calls.append(("document", dict(kwargs)))
+            return SimpleNamespace(
+                message_id=55227,
+                document=SimpleNamespace(file_id="adaptive-timeout-document-file"),
+            )
+
+    result = asyncio.run(
+        bot.send_generated_video_bytes_for_delivery(
+            DeliveryMessage(),
+            b"x" * payload_size,
+            filename="subdub-adaptive-timeout.mp4",
+            caption="SubDub adaptive delivery",
+            preview_max_mb=1,
+            document_max_mb=2,
+            generated_max_mb=2,
+            delivery_timeout_seconds=25 * 60,
+        )
+    )
+
+    assert result["sent"] is True
+    assert result["delivery_method"] == expected_method
+    assert len(calls) == 1
+    assert calls[0][0] == expected_method
+    assert calls[0][1]["read_timeout"] == 25 * 60
+    assert calls[0][1]["write_timeout"] == 25 * 60
+    assert calls[0][1]["connect_timeout"] == 30
+    assert calls[0][1]["pool_timeout"] == 30
+
+
+def test_subdub_final_video_delivery_uses_adaptive_timeout(monkeypatch):
+    captured = []
+
+    async def validate_video(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "detail": "ok",
+            "duration": 960.0,
+            "actual_duration": 960.0,
+            "duration_coverage_ok": True,
+            "has_video": True,
+            "has_audio": True,
+        }
+
+    async def deliver_video(_message, _payload, **kwargs):
+        captured.append(dict(kwargs))
+        return {
+            "sent": True,
+            "delivery_method": "document",
+            "telegram_message_id": "long-subdub-delivered",
+            "file_id": "long-subdub-file",
+            "file_size_mb": 1.0,
+            "size_limit_used": 50.0,
+        }
+
+    monkeypatch.setattr(bot, "subdub_validate_video_output", validate_video)
+    monkeypatch.setattr(bot, "send_generated_video_bytes_for_delivery", deliver_video)
+
+    result = asyncio.run(
+        bot.send_public_subtitle_dub_final_outputs(
+            SimpleNamespace(),
+            mode=bot.VIDEO_SUBTITLE_MODE_DUB,
+            video_bytes=b"validated-long-subdub-mp4",
+            strict_validation=True,
+            expected_duration_seconds=960,
+            require_final_audio=True,
+        )
+    )
+
+    assert result["video_delivery_message_id"] == "long-subdub-delivered"
+    assert len(captured) == 1
+    assert captured[0]["delivery_timeout_seconds"] == 25 * 60
+    assert bot.SUBDUB_LONG_VIDEO_DELIVERY_TIMEOUT_SECONDS == 30 * 60

@@ -15,7 +15,7 @@ from services.pricing_guide_content import (  # noqa: E402
     PRICING_DOWNLOAD_FILENAME,
     guide_markdown,
     pricing_markdown,
-    public_video_price_lines,
+    public_product_video_catalog,
     video_multiscene_discount_lines,
 )
 from services import video_ai_real_pricing  # noqa: E402
@@ -30,7 +30,13 @@ def _image_price_values() -> str:
 
 
 def guide_v2_markdown() -> str:
-    video_prices = "".join(f"- {line.removeprefix('• ')}\n" for line in public_video_price_lines())
+    video_prices = "".join(
+        (
+            f"- {row['name']} — {int(row['seconds'])} giây/cảnh: "
+            f"{int(row['unit_xu']):,} Xu/cảnh.\n"
+        ).replace(",", ".")
+        for row in public_product_video_catalog()
+    )
     video_discounts = "".join(
         f"- {line.removeprefix('• ')}\n" for line in video_multiscene_discount_lines()
     )
@@ -38,7 +44,7 @@ def guide_v2_markdown() -> str:
         "# TOAN AAS - Hướng dẫn sử dụng cho khách hàng\n\n"
         "**Phiên bản:** V2\n\n"
         "**Cập nhật nền:** 23/06/2026\n\n"
-        "**Cập nhật bảng giá/hướng dẫn:** 11/08/2026\n\n"
+        "**Cập nhật bảng giá/hướng dẫn:** 21/08/2026\n\n"
         "**Bot Telegram:** @toanaasbot\n\n"
         "**Website:** www.toanaas.vn\n\n"
         "**Định hướng:** Công cụ AI hỗ trợ sáng tạo nội dung và công việc hằng ngày\n\n"

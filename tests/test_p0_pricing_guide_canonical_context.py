@@ -12,24 +12,16 @@ from services import aas_shared_knowledge as shared_knowledge
 from scripts import export_public_pricing_guides as exporter
 
 
-APPROVED_PUBLIC_VIDEO_ROWS = (
-    ("Nhanh gọn", 5, 200),
-    ("Tiêu chuẩn có âm thanh", 5, 220),
-    ("Cân bằng rõ nét", 8, 80),
-    ("Chuyển động ổn định", 5, 110),
-    ("Chuyển động có âm thanh", 5, 160),
-    ("Cảnh dài có âm thanh", 15, 220),
-    ("Cao cấp linh hoạt", 10, 370),
-    ("Diễn xuất chân thật", 6, 370),
-    ("Đa góc máy", 8, 1260),
-    ("Điện ảnh nhiều cảnh", 10, 2360),
+APPROVED_PUBLIC_VIDEO_ROWS = tuple(
+    (str(row["name"]), int(row["seconds"]), int(row["unit_xu"]))
+    for row in canonical.public_quality_catalog()
 )
 
 
 def _approved_video_markers() -> list[str]:
     return [
-        f"• {name}: <b>{price:,} Xu / cảnh</b> — {seconds} giây.".replace(",", ".")
-        for name, seconds, price in APPROVED_PUBLIC_VIDEO_ROWS
+        f"• {row['icon']} {row['name']} — {row['seconds']} giây/cảnh: {row['unit_xu']:,} Xu/cảnh.".replace(",", ".")
+        for row in canonical.public_quality_catalog()
     ]
 
 
@@ -71,7 +63,7 @@ def test_customer_guide_uses_canonical_image_prices_and_owner_approved_video_exa
         assert name in markdown
         assert f"{price:,} Xu".replace(",", ".") in markdown
         assert f"{seconds} giây" in markdown
-    assert "Nhanh gọn 3 cảnh = 200 × 3 = 600 Xu; giảm 10% là 60 Xu; tiền video còn 540 Xu." in markdown
+    assert "Nhanh gọn 3 cảnh = 80 × 3 = 240 Xu; giảm 10% là 24 Xu; tiền video còn 216 Xu." in markdown
 
 
 def test_v2_download_guide_uses_canonical_image_prices_and_owner_approved_video_quick_prices():

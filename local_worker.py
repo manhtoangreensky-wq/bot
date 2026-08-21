@@ -33,6 +33,7 @@ from services.multiscene_video_pipeline import (
     process_multiscene_video_pipeline,
     safe_run_ffmpeg,
 )
+from services import product_video_addon_materialization
 from services.video_real_render_connector import (
     REAL_VIDEO_RENDER_UNAVAILABLE,
     build_real_scene_renderer,
@@ -4743,6 +4744,38 @@ def video_project_addon_plan(job: dict | None = None) -> dict:
     return {}
 
 
+PRODUCT_VIDEO_ADDON_CONTRACT_VERSION = product_video_addon_materialization.CONTRACT_VERSION
+
+
+def product_video_materialize_addons(
+    job: dict | None,
+    *,
+    workspace: str,
+    scene_count: int,
+    scene_duration: float,
+) -> dict:
+    asset_pack = {}
+    raw_asset_pack = (job or {}).get("asset_pack") or (job or {}).get("asset_pack_json") or {}
+    if isinstance(raw_asset_pack, str):
+        try:
+            raw_asset_pack = json.loads(raw_asset_pack)
+        except (TypeError, ValueError):
+            raw_asset_pack = {}
+    if isinstance(raw_asset_pack, dict):
+        asset_pack = raw_asset_pack
+    logo_material = dict(asset_pack.get("logo_material") or {})
+    return product_video_addon_materialization.materialize_product_video_addons(
+        job,
+        workspace=workspace,
+        scene_count=scene_count,
+        scene_duration=scene_duration,
+        download_url=download_url_file,
+        telegram_download=telegram_download_file,
+        logo_fallback_path=str(logo_material.get("logo_path") or ""),
+        ffmpeg_path=local_ffmpeg_path(),
+    )
+
+
 def video_project_real_scene_renderer(job: dict | None = None):
     try:
         return build_real_scene_renderer(job or {})
@@ -4803,6 +4836,12 @@ def run_video_render_job(job: dict) -> None:
         prompt = original_prompt_from_job(job)[:4000]
         addon_plan = video_project_addon_plan(job)
         mode = video_project_render_mode(job)
+        workspace = create_multiscene_workspace(f"video-project-{job_id}")
+        addon_materials = {
+            "ok": True,
+            "strict": False,
+            "requested_addons": [],
+        }
         if mode == RENDER_MODE_ADMIN_TEST_PATTERN:
             if not local_admin_test_pattern_allowed(job):
                 update_video_render_job(job_id, "failed", "unsafe_test_pattern_route")
@@ -4814,6 +4853,16 @@ def run_video_render_job(job: dict) -> None:
             send_caption = "ADMIN TEST PATTERN — video test kỹ thuật, không phải video dựng thật."
             result_mode = RENDER_MODE_ADMIN_TEST_PATTERN
         else:
+            addon_materials = product_video_materialize_addons(
+                job,
+                workspace=workspace,
+                scene_count=scene_count,
+                scene_duration=duration,
+            )
+            if not addon_materials.get("ok"):
+                raise RuntimeError(
+                    str(addon_materials.get("blocker") or "addon_materialization_failed")
+                )
             try:
                 render_func = video_project_real_scene_renderer(job)
             except RuntimeError as exc:
@@ -4821,10 +4870,18 @@ def run_video_render_job(job: dict) -> None:
                 return
             send_caption = "✅ Video đã dựng xong. TOAN AAS gửi file kết quả cuối."
             result_mode = RENDER_MODE_REAL
-        workspace = create_multiscene_workspace(f"video-project-{job_id}")
         logo_material = product_video_logo_material(job)
-        logo_path = str(logo_material.get("logo_path") or "").strip()
-        if logo_material.get("logo_enabled") and not logo_path and logo_material.get("logo_file_id"):
+        logo_path = str(
+            addon_materials.get("logo_path")
+            or logo_material.get("logo_path")
+            or ""
+        ).strip()
+        if (
+            not addon_materials.get("strict")
+            and logo_material.get("logo_enabled")
+            and not logo_path
+            and logo_material.get("logo_file_id")
+        ):
             logo_path = os.path.join(workspace, "product_logo.png")
             telegram_download_file(str(logo_material.get("logo_file_id") or ""), logo_path, max_bytes=10 * 1024 * 1024)
         watermark = {}
@@ -4836,17 +4893,24 @@ def run_video_render_job(job: dict) -> None:
         except Exception:
             watermark = {}
         logo_text = str(
-            addon_plan.get("logo_text")
+            "" if addon_materials.get("strict") else addon_plan.get("logo_text")
             or watermark.get("text")
             or ""
         ).strip()[:240]
         logo_position = str(
-            logo_material.get("logo_position")
+            addon_materials.get("logo_position")
+            or logo_material.get("logo_position")
             or addon_plan.get("logo_position")
             or watermark.get("position")
             or "bottom_right"
         )
-        logo_enabled = bool(logo_path or (addon_plan.get("logo_enabled") and logo_text) or watermark.get("enabled") and logo_text)
+        logo_enabled = bool(
+            logo_path
+            if addon_materials.get("strict")
+            else logo_path
+            or (addon_plan.get("logo_enabled") and logo_text)
+            or watermark.get("enabled") and logo_text
+        )
         def _execute_pipeline(prepared: dict, routed_scene_count: int):
             return process_multiscene_video_pipeline(
                 user_id=user_id,
@@ -4858,12 +4922,30 @@ def run_video_render_job(job: dict) -> None:
                 max_scenes=routed_scene_count,
                 default_scene_duration=duration,
                 aspect_ratio=str(project.get("ratio") or "9:16"),
-                enable_voice=False,
-                enable_subtitle=bool(addon_plan.get("subtitle_enabled", True)),
+                enable_voice=bool(addon_materials.get("voice_audio_path")),
+                voice_audio_path=addon_materials.get("voice_audio_path") or None,
+                voice_volume_percent=int(addon_materials.get("voice_volume_percent") or 100),
+                bgm_audio_path=addon_materials.get("bgm_audio_path") or None,
+                music_volume_percent=int(addon_materials.get("music_volume_percent") or 20),
+                sfx_audio_paths=list(addon_materials.get("sfx_audio_paths") or []),
+                sfx_assets=list(addon_materials.get("sfx_assets") or []),
+                sfx_volume_percent=int(addon_materials.get("sfx_volume_percent") or 35),
+                enable_subtitle=(
+                    bool(addon_materials.get("subtitle_path"))
+                    if addon_materials.get("strict")
+                    else bool(addon_plan.get("subtitle_enabled", True))
+                ),
+                subtitle_path=addon_materials.get("subtitle_path") or None,
                 logo_path=logo_path or None,
                 enable_logo=logo_enabled,
                 logo_text=logo_text,
                 logo_position=logo_position,
+                watermark_text=str(addon_materials.get("watermark_text") or ""),
+                watermark_position=str(addon_materials.get("watermark_position") or "bottom_right"),
+                watermark_opacity_percent=int(addon_materials.get("watermark_opacity_percent") or 45),
+                text_overlays=list(addon_materials.get("text_overlays") or []),
+                transition_plan=list(addon_materials.get("transition_plan") or []),
+                requested_addons=list(addon_materials.get("requested_addons") or []),
             )
 
         result = product_video_public_seam.execute_product_video_worker_route(
@@ -4884,6 +4966,13 @@ def run_video_render_job(job: dict) -> None:
             raise RuntimeError(str(result.get("error") or result.get("status") or "video_render_failed"))
         result["render_mode"] = result_mode
         result["test_pattern"] = result_mode == RENDER_MODE_ADMIN_TEST_PATTERN
+        if addon_materials.get("strict"):
+            result["product_video_addon_materialization"] = {
+                "contract_version": PRODUCT_VIDEO_ADDON_CONTRACT_VERSION,
+                "requested_addons": list(addon_materials.get("requested_addons") or []),
+                "materialized_addons": list(addon_materials.get("materialized_addons") or []),
+                "silent_drop_allowed": False,
+            }
         delivery = telegram_send_video_receipt(
             user_id,
             final_path,

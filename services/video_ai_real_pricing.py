@@ -390,6 +390,11 @@ QUALITY_TIER_MODEL_KEYS: dict[int, str] = {
     1500: "cinematic_multishot_10",
 }
 
+PUBLIC_QUALITY_IDENTITY_OVERRIDES: dict[int, dict[str, str]] = {
+    400: {"name": "Nhanh gọn", "icon": "⚡"},
+    200: {"name": "Cân bằng rõ nét", "icon": "✨"},
+}
+
 VIDEO_RUNTIME_FALLBACK_MODEL_KEYS = frozenset({
     "social_fast_5",
     "grok3_5",
@@ -788,10 +793,11 @@ def public_quality_catalog() -> list[dict[str, Any]]:
             .replace(" theo chế độ", "")
             .replace("/", " đến ")
         )
+        identity = PUBLIC_QUALITY_IDENTITY_OVERRIDES.get(int(tier_id), {})
         rows.append({
             "tier_id": int(tier_id),
-            "icon": str(model.get("public_icon") or "🎬"),
-            "name": str(model.get("label") or "Chất lượng video"),
+            "icon": str(identity.get("icon") or model.get("public_icon") or "🎬"),
+            "name": str(identity.get("name") or model.get("label") or "Chất lượng video"),
             "public_level": str(model.get("public_level") or model.get("quality") or "Chất lượng video"),
             "public_detail": str(model.get("description") or ""),
             "quality_characteristic": str(model.get("quality") or ""),
@@ -800,7 +806,7 @@ def public_quality_catalog() -> list[dict[str, Any]]:
             "seconds": max(1, int(model.get("seconds") or 1)),
             "unit_xu": max(1, int(model.get("unit_xu") or 1)),
         })
-    return rows
+    return sorted(rows, key=lambda item: (int(item["unit_xu"]), int(item["tier_id"])))
 
 
 def public_quality_by_tier(tier_id: int) -> dict[str, Any]:
@@ -812,6 +818,79 @@ def public_quality_by_tier(tier_id: int) -> dict[str, Any]:
     if not quality:
         raise ValueError("video_quality_invalid")
     return deepcopy(quality)
+
+
+def video_quality_unit_economics(
+    tier_id: int,
+    *,
+    scene_count: Any = 1,
+) -> dict[str, Any]:
+    """Report first-route and conservative Product Video economics."""
+
+    selected_tier = int(tier_id or 0)
+    model_key = str(QUALITY_TIER_MODEL_KEYS.get(selected_tier) or "")
+    if not model_key:
+        raise ValueError("video_quality_invalid")
+    model = model_by_key(model_key)
+    quality = public_quality_by_tier(selected_tier)
+    costs = [
+        dict(item)
+        for item in model.get("provider_costs") or []
+        if isinstance(item, dict)
+    ]
+    if not costs:
+        raise ValueError("video_ai_real_provider_price_missing")
+    priority = [str(item) for item in model.get("provider_priority") or []]
+    first_provider = priority[0] if priority else str(costs[0].get("provider") or "")
+    first_cost = next(
+        (item for item in costs if str(item.get("provider") or "") == first_provider),
+        costs[0],
+    )
+    conservative_cost = max(
+        costs,
+        key=lambda item: (
+            _decimal(item.get("exact_cost")),
+            -PROVIDER_PRIORITY.index(str(item.get("provider") or "")),
+        ),
+    )
+    first_cost_vnd = max(0, int(first_cost.get("cost_vnd") or 0))
+    conservative_cost_vnd = max(
+        0,
+        int(_decimal(conservative_cost.get("exact_cost")) * DEFAULT_PROVIDER_USD_TO_VND),
+    )
+    price = video_multiscene_price(quality["unit_xu"], scene_count)
+    count = int(price["scene_count"])
+    revenue_vnd = int(price["total_xu"] * XU_TO_VND)
+    first_total_vnd = first_cost_vnd * count
+    conservative_total_vnd = conservative_cost_vnd * count
+    first_profit_vnd = revenue_vnd - first_total_vnd
+    conservative_profit_vnd = revenue_vnd - conservative_total_vnd
+    conservative_margin = (
+        Decimal(conservative_profit_vnd) / Decimal(revenue_vnd) * Decimal("100")
+        if revenue_vnd > 0
+        else Decimal("0")
+    )
+    return {
+        "tier_id": selected_tier,
+        "quality_name": str(quality["name"]),
+        "unit_xu": int(quality["unit_xu"]),
+        **price,
+        "revenue_vnd": revenue_vnd,
+        "first_route_provider": str(first_cost.get("provider") or ""),
+        "first_route_cost_vnd_per_scene": first_cost_vnd,
+        "first_route_cost_vnd": first_total_vnd,
+        "first_route_gross_profit_vnd": first_profit_vnd,
+        "conservative_fallback_provider": str(conservative_cost.get("provider") or ""),
+        "conservative_fallback_cost_vnd_per_scene": conservative_cost_vnd,
+        "conservative_fallback_cost_vnd": conservative_total_vnd,
+        "conservative_gross_profit_vnd": conservative_profit_vnd,
+        "conservative_margin_percent": float(
+            conservative_margin.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+        ),
+        "profitable_after_discount": conservative_profit_vnd > 0,
+        "cost_catalog_version": str(model.get("catalog_version") or CATALOG_VERSION),
+        "source_checked_on": str(model.get("source_checked_on") or SOURCE_CHECKED_ON),
+    }
 
 
 def _image_provider_cost(row: dict[str, Any], provider: str) -> dict[str, Any]:

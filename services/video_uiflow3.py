@@ -2836,6 +2836,10 @@ def approved_snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
             else None
         ),
         "production_bible": deepcopy(current["bible"]),
+        "creative_controls": deepcopy(current.get("creative_controls") or {}),
+        "preservation_requirements": deepcopy(
+            current.get("preservation_requirements") or {}
+        ),
         "references": deepcopy(current["references"]),
         "scenes": deepcopy(current["scenes"]),
         "audio": deepcopy(current["audio"]),

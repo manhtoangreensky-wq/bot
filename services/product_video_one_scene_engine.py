@@ -35,8 +35,18 @@ REQUIRED_WORKER_CAPABILITIES = (
     "owner_product_video",
     CANONICAL_WORKER_CAPABILITY,
 )
-ADDON_NAMES = ("voice", "music", "sfx", "subtitle", "logo")
-SUPPORTED_ADDONS = ("subtitle", "logo")
+ADDON_NAMES = (
+    "voice",
+    "subtitle",
+    "dubbing",
+    "music",
+    "sfx",
+    "logo",
+    "watermark",
+    "text",
+    "transitions",
+)
+SUPPORTED_ADDONS = ADDON_NAMES
 MINIMUM_ARTIFACT_BYTES = 4096
 ACCEPTED_VIDEO_CODECS = frozenset({"h264", "hevc", "av1", "vp9"})
 
