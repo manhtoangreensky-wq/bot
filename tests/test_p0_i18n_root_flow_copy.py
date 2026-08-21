@@ -1232,32 +1232,41 @@ def test_main_menu_keeps_the_owner_approved_eight_row_layout_for_every_locale():
     exec(_function_source("localized_main_menu_keyboard"), namespace)
 
     expected_callbacks = (
-        ("freehub|main", "menu|chat_pro"),
+        ("freehub|main",),
         ("menu|main_video", "menu|main_image"),
-        ("menu|main_profile", "music_quick|showroom|root"),
-        ("menu|translate", "menu|main_memory"),
-        ("menu|main_guide", "menu|support"),
-        ("pricing|main", "feedback|start"),
+        ("menu|translate", "music_quick|showroom|root"),
+        ("menu|main_profile", "pricing|main"),
+        ("menu|autopost", "menu|chat_pro"),
+        ("menu|main_memory", "menu|support"),
+        ("menu|main_guide", "feedback|start"),
         (None, "back_lang"),
     )
     for locale in SUPPORTED_LOCALES:
         copy = public_copy.public_hub_copy(locale)
         markup = namespace["localized_main_menu_keyboard"](False, locale)
         rows = markup.inline_keyboard
-        assert len(rows) == 7, (locale, len(rows))
+        assert len(rows) == 8, (locale, len(rows))
         assert tuple(tuple(button.callback_data for button in row) for row in rows) == expected_callbacks, locale
-        assert [len(row) for row in rows] == [2, 2, 2, 2, 2, 2, 2], locale
+        assert [len(row) for row in rows] == [1, 2, 2, 2, 2, 2, 2, 2], locale
         assert copy["free_tools_label"] in rows[0][0].text, locale
-        assert copy["chat_pro_label"] in rows[0][1].text, locale
-        assert copy["support"] in rows[4][1].text, locale
-        assert copy["topup_pricing_label"] in rows[5][0].text, locale
-        assert copy["feedback_label"] in rows[5][1].text, locale
-        assert copy["center"] in rows[6][0].text, locale
-        assert rows[6][0].url == "https://example.invalid/center", locale
-        assert copy["change_language"] in rows[6][1].text, locale
+        assert copy["video_label"] in rows[1][0].text, locale
+        assert copy["image_label"] in rows[1][1].text, locale
+        assert copy["translation_label"] in rows[2][0].text, locale
+        assert copy["audio_studio_label"] in rows[2][1].text, locale
+        assert copy["account_label"] in rows[3][0].text, locale
+        assert copy["topup_pricing_label"] in rows[3][1].text, locale
+        assert copy["autopost_label"] in rows[4][0].text, locale
+        assert copy["chat_pro_label"] in rows[4][1].text, locale
+        assert copy["notes_docs_label"] in rows[5][0].text, locale
+        assert copy["support"] in rows[5][1].text, locale
+        assert copy["guide_label"] in rows[6][0].text, locale
+        assert copy["feedback_label"] in rows[6][1].text, locale
+        assert copy["center"] in rows[7][0].text, locale
+        assert rows[7][0].url == "https://example.invalid/center", locale
+        assert copy["change_language"] in rows[7][1].text, locale
 
     admin_markup = namespace["localized_main_menu_keyboard"](True, "ko")
-    assert len(admin_markup.inline_keyboard) == 8
+    assert len(admin_markup.inline_keyboard) == 9
     assert [button.callback_data for button in admin_markup.inline_keyboard[-1]] == ["menu|admin"]
     assert len(admin_markup.inline_keyboard[-1]) == 1
 
