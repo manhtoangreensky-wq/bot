@@ -1,13 +1,20 @@
+import urllib.parse
 from services.autopost_ui import (
     autopost_main_dashboard_text, autopost_main_keyboard, autopost_content_plan_text,
     autopost_plan_result_text, autopost_brands_text, autopost_affiliate_text,
-    autopost_calendar_text, autopost_channels_text, autopost_queue_text,
-    autopost_metrics_text, autopost_ads_center_text, autopost_settings_text,
-    autopost_kill_switch_text, autopost_resume_ads_text
+    autopost_affiliate_keyboard, autopost_affiliate_import_prompt_text,
+    autopost_affiliate_import_success_text, autopost_affiliate_list_text,
+    autopost_affiliate_list_keyboard, autopost_calendar_text, autopost_channels_text,
+    autopost_queue_text, autopost_metrics_text, autopost_ads_center_text,
+    autopost_settings_text, autopost_kill_switch_text, autopost_resume_ads_text
 )
 from services.autopost_brand import get_platform_brand_policy, validate_brand_compliance_for_platform, DEFAULT_BRAND_PROFILE
 from services.autopost_strategy import create_content_plan, CONTENT_GOALS
-from services.autopost_affiliate import match_affiliate_for_post, check_paid_ads_affiliate_policy
+from services.autopost_affiliate import (
+    match_affiliate_for_post, check_paid_ads_affiliate_policy, get_user_affiliate_stats,
+    get_user_affiliate_links, count_user_affiliate_links, import_affiliate_links_for_user,
+    seed_default_curated_vault_for_user, delete_user_affiliate_link, clear_user_affiliate_vault
+)
 from services.autopost_publish import check_platform_capability, OmnichannelPublishQueue
 from services.autopost_ads import evaluate_organic_to_ads, validate_ad_spend_request, DEFAULT_OWNER_BUDGET_ENVELOPE
 """
@@ -120,7 +127,7 @@ from video_product_system import (
 import video_image_to_video_flow as ivf
 from services import ai_chatbot_copilot, telegram_business_support, telegram_transport
 from services import multiscene_video_pipeline as multiscene_blackbox
-from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_ass_layout, subdub_auto_settlement, subdub_auto_word_pricing, subdub_blackboxes, subdub_canonical_cues, subdub_combo_blackbox, subdub_long_media, subdub_media_preflight, subdub_provider_contract, subdub_speaker_cast, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
+from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_auto_settlement, subdub_auto_word_pricing, subdub_blackboxes, subdub_canonical_cues, subdub_combo_blackbox, subdub_long_media, subdub_media_preflight, subdub_provider_contract, subdub_speaker_cast, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services.subdub_blackboxes import auto_speaker
 from services import ai_chatbot_copilot, cskh_session_memory, telegram_business_support, telegram_transport
 from services import public_chat_media, public_chat_runtime, public_chat_store
@@ -138158,13 +138165,55 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
     if action == "affiliate":
-        msg = autopost_affiliate_text(uid)
-        ref_link = f"https://t.me/toanaasbot?start=ref_{uid}"
+        stats = get_user_affiliate_stats(uid)
+        if stats.get("total", 0) == 0 and is_admin_user(uid):
+            seed_default_curated_vault_for_user(uid)
+            stats = get_user_affiliate_stats(uid)
+        msg = autopost_affiliate_text(uid, stats, lang)
+        reply_kb = autopost_affiliate_keyboard(uid, stats, lang)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "aff_import_prompt":
+        context.user_data["awaiting_affiliate_import"] = True
+        msg = autopost_affiliate_import_prompt_text(lang)
         reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📲 Chia sẻ link giới thiệu", url=f"https://t.me/share/url?url={ref_link}&text={urllib.parse.quote('Trải nghiệm Bot AI TOAN AAS!')}")],
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+            [InlineKeyboardButton("⬅️ Quay lại Kho Affiliate", callback_data="autopost|affiliate"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
         ])
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "aff_seed":
+        seed_default_curated_vault_for_user(uid)
+        stats = get_user_affiliate_stats(uid)
+        msg = "⚡ <b>ĐÃ NẠP THÀNH CÔNG 66+ CHIẾN DỊCH GỢI Ý VÀO KHO CÁ NHÂN!</b>\n\n" + autopost_affiliate_text(uid, stats, lang)
+        reply_kb = autopost_affiliate_keyboard(uid, stats, lang)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "aff_clear_confirm":
+        msg = "⚠️ <b>XÁC NHẬN XÓA TOÀN BỘ KHO AFFILIATE CÁ NHÂN:</b>\n\nHành động này sẽ xóa toàn bộ link trong kho riêng của tài khoản này. Bạn có thể nạp lại link bất cứ lúc nào."
+        reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🗑️ Xác nhận xóa sạch", callback_data="autopost|aff_clear_done")],
+            [InlineKeyboardButton("❌ Hủy bỏ", callback_data="autopost|affiliate")],
+        ])
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "aff_clear_done":
+        clear_user_affiliate_vault(uid)
+        stats = get_user_affiliate_stats(uid)
+        msg = "🗑️ <b>ĐÃ XÓA TOÀN BỘ KHO AFFILIATE CÁ NHÂN THÀNH CÔNG.</b>\n\n" + autopost_affiliate_text(uid, stats, lang)
+        reply_kb = autopost_affiliate_keyboard(uid, stats, lang)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "aff_view":
+        niche = value or "all"
+        page = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+        total = count_user_affiliate_links(uid, niche=niche)
+        items = get_user_affiliate_links(uid, niche=niche, limit=5, offset=page * 5)
+        msg = autopost_affiliate_list_text(uid, items, total, niche, page, 5, lang)
+        reply_kb = autopost_affiliate_list_keyboard(uid, items, total, niche, page, 5, lang)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "aff_noop":
+        return
 
     if action == "calendar":
         msg = autopost_calendar_text()
@@ -190671,7 +190720,6 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
             admin_real_test
             and getattr(video_dubbing_capability, "__name__", "") == "video_dubbing_capability"
             and not video_dubbing_state_has_subtitle_or_transcript(state)
-            and not subdub_final_confirmed_state(state)
             and not subdub_public_flag_with_override("VIDEO_ASR_ENABLED", VIDEO_ASR_ENABLED)
             and "asr_adapter_missing" not in technical_missing
         ):
@@ -230507,6 +230555,28 @@ async def handle_translation_media_pending_upload(update: Update, context: Conte
     return False
 
 async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Personal Affiliate Vault Document Intake (.txt, .csv, .json, .md)
+    if update.message and update.message.document:
+        doc_name = (update.message.document.file_name or "").lower()
+        if context.user_data.get("awaiting_affiliate_import") or (any(doc_name.endswith(ext) for ext in [".txt", ".csv", ".json", ".md"]) and ("affiliate" in doc_name or "link" in doc_name)):
+            try:
+                uid = update.effective_user.id
+                lang = get_user_language(uid) or "vi"
+                file_obj = await update.message.document.get_file()
+                byte_arr = await file_obj.download_as_bytearray()
+                raw_text = byte_arr.decode("utf-8", errors="ignore")
+                res = import_affiliate_links_for_user(uid, raw_text)
+                if res.get("added_count", 0) > 0:
+                    context.user_data["awaiting_affiliate_import"] = False
+                    reply_kb = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📂 Xem kho link cá nhân", callback_data="autopost|aff_view|all|0"), InlineKeyboardButton("📥 Thêm tiếp", callback_data="autopost|aff_import_prompt")],
+                        [InlineKeyboardButton("⬅️ Quay lại Kho Affiliate", callback_data="autopost|affiliate"), InlineKeyboardButton(f"🏠 {public_hub_copy(lang)['main_menu']}", callback_data="menu|main")],
+                    ])
+                    msg = autopost_affiliate_import_success_text(res["added_count"], res["total_in_vault"], res["by_niche"], lang)
+                    return await update.message.reply_text(msg, parse_mode="HTML", reply_markup=reply_kb)
+            except Exception as aff_doc_err:
+                logger.error(f"Affiliate document import error: {aff_doc_err}")
+
     if await handle_video_ai_edit_pending_media(update, context):
         return
     if await handle_video_editor_pending_upload(update, context):
@@ -235822,7 +235892,6 @@ def get_subdub_lane_readiness(
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
     confirmed_product = bool(confirmed_product or subdub_final_confirmed_state(state))
-    auto_speaker_route = subdub_auto_speaker_route_enabled(state)
     force_open = bool(public and subdub_public_force_override_active())
     admin_interactive_confirm = bool(admin_interactive_confirm and not public)
     if admin_interactive_confirm:
@@ -235845,11 +235914,7 @@ def get_subdub_lane_readiness(
             for key in ("source_file_name", "source_mime_type", "mime_type", "media_kind", "source_media_kind")
         )
     )
-    if auto_speaker_route:
-        # Auto speaker casting always needs Deepgram diarization, even when a
-        # subtitle/transcript is already present for the normal lane.
-        asr_required = True
-    elif asr_state_known:
+    if asr_state_known:
         asr_required = bool(mode and video_dubbing_mode_needs_asr_provider(mode, state))
     else:
         # Lane-level probe (no customer input yet): assume the worst-case job for this
@@ -235860,7 +235925,7 @@ def get_subdub_lane_readiness(
         asr_required = bool(mode and video_dubbing_state_requires_asr(mode, {"media_kind": "video"}))
     translation_required = bool(mode and video_dubbing_needs_translation_provider(mode, state))
     tts_required = mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
-    asr_provider = "deepgram" if auto_speaker_route else subdub_asr_provider_name()
+    asr_provider = subdub_asr_provider_name()
     translation_provider = subdub_translation_provider_name()
     tts_provider = subdub_tts_provider_name()
     asr_configured = subdub_provider_configured("asr", asr_provider)
@@ -237608,7 +237673,7 @@ def subtitle_dub_find_latest_dub_job_for_user_mode(user_id, mode: str = "", stat
                 "video_file_unique_id",
             )
         )
-        return 1 if any(token and token[:160] in haystack for token in source_tokens) else 0
+        return 1 if any(token and token in haystack for token in source_tokens) else 0
 
     def _active_or_delivered_score(item: dict) -> int:
         if subdub_should_suppress_late_public_failure(item) or subdub_job_blocks_public_fail(item):
@@ -237634,8 +237699,6 @@ def subtitle_dub_find_latest_dub_job_for_user_mode(user_id, mode: str = "", stat
                 candidates.append(item)
     except Exception:
         pass
-    if source_tokens:
-        candidates = [item for item in candidates if _source_score(item)]
     if not candidates:
         return {}
     candidates.sort(
@@ -241065,19 +241128,135 @@ def subdub_ass_escape(text: str, max_lines: int = 2) -> str:
 
 
 def subdub_ass_fit_text_layout(text: str, style: dict, max_lines: int = 2) -> dict:
-    layout = subdub_ass_layout.fit_text_layout(
-        text,
-        style,
-        max_lines,
-        normalize_text=subdub_normalize_subtitle_text,
-        font_loader=lambda size: load_operator_font(size, bold=True),
+    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
+    normalized = re.sub(r"[{}]", "", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    play_res_x = max(1, int((style or {}).get("play_res_x") or 1280))
+    margin_l = max(0, int((style or {}).get("subtitle_margin_l_after") or round(play_res_x * 0.04)))
+    margin_r = max(0, int((style or {}).get("subtitle_margin_r_after") or round(play_res_x * 0.04)))
+    requested_size = max(6, int((style or {}).get("render_size") or (style or {}).get("size") or 48))
+    line_limit = max(1, min(2, int(max_lines or 2)))
+    if not normalized:
+        return {
+            "text": "",
+            "font_size": requested_size,
+            "line_count": 0,
+            "max_line_width_px": 0,
+            "available_width_px": max(1, play_res_x - margin_l - margin_r),
+            "fits_width": True,
+        }
+
+    font_cache = {}
+    measurement_cache = {}
+    measurement_draw = (
+        ImageDraw.Draw(Image.new("L", (1, 1), 0))
+        if Image is not None and ImageDraw is not None
+        else None
     )
-    available_width_px = float(layout.get("available_width_px") or 0.0)
-    fits_width = bool(layout.get("fits_width"))
+
+    def _font(size: int):
+        if size in font_cache:
+            return font_cache[size]
+        if ImageFont is None:
+            return None
+        path = str((style or {}).get("subtitle_font_path") or "").strip()
+        try:
+            if path and os.path.isfile(path):
+                font_cache[size] = ImageFont.truetype(path, size)
+            else:
+                font_cache[size] = load_operator_font(size, bold=True)
+        except Exception:
+            font_cache[size] = None
+        return font_cache[size]
+
+    def _measure(value: str, size: int, font) -> float:
+        cache_key = (size, value)
+        if cache_key in measurement_cache:
+            return measurement_cache[cache_key]
+        if measurement_draw is not None and font is not None:
+            try:
+                box = measurement_draw.textbbox((0, 0), value, font=font)
+                measurement_cache[cache_key] = float(max(0, box[2] - box[0]))
+                return measurement_cache[cache_key]
+            except Exception:
+                pass
+        units = 0.0
+        for char in value:
+            if char.isspace():
+                units += 0.34
+            elif unicodedata.east_asian_width(char) in {"W", "F"}:
+                units += 1.0
+            elif char.isupper():
+                units += 0.68
+            elif char.isalnum():
+                units += 0.56
+            else:
+                units += 0.42
+        measurement_cache[cache_key] = units * float(size)
+        return measurement_cache[cache_key]
+
+    last_layout = None
+    for font_size in range(requested_size, 5, -1):
+        font = _font(font_size)
+        outline = max(0, int((style or {}).get("outline") or 0))
+        shadow = max(0, int((style or {}).get("shadow") or 0))
+        box_padding = int(round(font_size * 0.10)) if (style or {}).get("boxed_background") else 0
+        available = max(1, play_res_x - margin_l - margin_r - (2 * (outline + shadow + box_padding)))
+        single_width = _measure(normalized, font_size, font)
+        if single_width <= available:
+            return {
+                "text": normalized,
+                "font_size": font_size,
+                "line_count": 1,
+                "max_line_width_px": single_width,
+                "available_width_px": available,
+                "fits_width": True,
+            }
+        if line_limit < 2:
+            last_layout = (normalized, font_size, single_width, available)
+            continue
+
+        whitespace_splits = [index for index, char in enumerate(normalized) if char == " "]
+        split_points = whitespace_splits or list(range(1, len(normalized)))
+        best = None
+        for split_at in split_points:
+            if whitespace_splits:
+                first = normalized[:split_at].rstrip()
+                second = normalized[split_at + 1 :].lstrip()
+            else:
+                first = normalized[:split_at]
+                second = normalized[split_at:]
+            if not first or not second:
+                continue
+            first_width = _measure(first, font_size, font)
+            second_width = _measure(second, font_size, font)
+            score = (max(first_width, second_width), abs(first_width - second_width))
+            if best is None or score < best[0]:
+                best = (score, first, second, first_width, second_width)
+        if best is None:
+            last_layout = (normalized, font_size, single_width, available)
+            continue
+        max_width = max(best[3], best[4])
+        layout_text = best[1] + r"\N" + best[2]
+        last_layout = (layout_text, font_size, max_width, available)
+        if max_width <= available:
+            return {
+                "text": layout_text,
+                "font_size": font_size,
+                "line_count": 2,
+                "max_line_width_px": max_width,
+                "available_width_px": available,
+                "fits_width": True,
+            }
+
+    layout_text, font_size, max_width, available = last_layout or (normalized, 6, 0.0, play_res_x)
     return {
-        **layout,
-        "available_width_px": available_width_px,
-        "fits_width": fits_width,
+        "text": layout_text,
+        "font_size": font_size,
+        "line_count": 1 + int(r"\N" in layout_text),
+        "max_line_width_px": max_width,
+        "available_width_px": available,
+        "fits_width": bool(max_width <= available),
     }
 
 
@@ -242994,13 +243173,71 @@ def subdub_speaker_cue_metadata(item: dict | None = None) -> dict:
 
 
 def video_dubbing_qc_segments(segments: list[dict], *, preserve_timestamps: bool = False) -> list[dict]:
-    return subdub_canonical_cues.fit_timed_subtitle_segments(
-        segments,
-        preserve_timestamps=preserve_timestamps,
-        max_chars_per_line=42,
-        max_lines=2,
-        metadata_fields=SUBDUB_SPEAKER_CUE_METADATA_FIELDS,
-    )
+    qc_segments = []
+    for source in segments or []:
+        text = re.sub(r"\s+", " ", str((source or {}).get("text") or "")).strip()
+        if not text:
+            continue
+        start = max(0.0, float((source or {}).get("start") or 0))
+        end = float((source or {}).get("end") or 0)
+        if end <= start:
+            end = start + 1.0
+        duration = max(0.1, end - start)
+        if preserve_timestamps:
+            qc_segments.append({
+                **subdub_speaker_cue_metadata(source),
+                "index": int((source or {}).get("index") or len(qc_segments) + 1),
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "text": subdub_wrap_cue_text_two_lines(text),
+                "confidence": (source or {}).get("confidence"),
+                "translate_missing": bool((source or {}).get("translate_missing")),
+            })
+            continue
+        max_chars = 84 if preserve_timestamps else max(24, min(84, int(duration * 20)))
+        words = text.split()
+        chunks = []
+        current = []
+        for word in words:
+            candidate = " ".join([*current, word])
+            if current and len(candidate) > max_chars:
+                chunks.append(" ".join(current))
+                current = [word]
+            else:
+                current.append(word)
+        if current:
+            chunks.append(" ".join(current))
+        chunks = chunks or [text]
+        slot = duration / len(chunks)
+        for index, chunk in enumerate(chunks):
+            if preserve_timestamps and len(chunks) == 1:
+                chunk_start = start
+                chunk_end = end
+            else:
+                chunk_start = start + (index * slot)
+                chunk_end = end if index == len(chunks) - 1 else min(end, start + ((index + 1) * slot))
+            if not preserve_timestamps:
+                chunk_end = max(chunk_start + 1.0, min(chunk_start + 7.0, chunk_end))
+            lines = []
+            line = ""
+            for word in chunk.split():
+                candidate = f"{line} {word}".strip()
+                if line and len(candidate) > 42 and len(lines) < 1:
+                    lines.append(line)
+                    line = word
+                else:
+                    line = candidate
+            if line:
+                lines.append(line)
+            qc_segments.append({
+                **subdub_speaker_cue_metadata(source),
+                "index": len(qc_segments) + 1,
+                "start": round(chunk_start, 3),
+                "end": round(max(chunk_start + 0.1, chunk_end), 3),
+                "text": "\n".join(lines[:2]).strip(),
+                "confidence": (source or {}).get("confidence"),
+            })
+    return qc_segments
 
 def subdub_retime_translated_segments_to_source(source_segments: list[dict], translated_segments: list[dict]) -> list[dict]:
     source = [dict(item or {}) for item in (source_segments or []) if str((item or {}).get("text") or "").strip()]
@@ -251868,11 +252105,7 @@ async def handle_video_dubbing_callback(
                 parse_mode="HTML",
                 reply_markup=video_dubbing_source_keyboard(lang, state),
             )
-        if (
-            action in {"combo_dub_translated", "voice", "combo_full_dub"}
-            and not state.get("translated_subtitle_ref")
-            and not subtitle_plus_dub_single_lane_pending(state)
-        ):
+        if action in {"combo_dub_translated", "voice", "combo_full_dub"} and not state.get("translated_subtitle_ref"):
             if not state.get("subtitle_ref"):
                 state = set_video_dubbing_pending(
                     uid,
@@ -252180,12 +252413,7 @@ async def handle_video_dubbing_callback(
                     output_format="video_subtitle",
                     processing="1",
                 )
-            await safe_edit_or_send(
-                query,
-                subdub_progress_text("received_file", "", lang),
-                parse_mode="HTML",
-                reply_markup=subdub_progress_keyboard("", lang),
-            )
+            await safe_edit_or_send(query, "TOAN AAS đang tạo video phụ đề + lồng tiếng hoàn chỉnh...")
             result = await execute_subtitle_plus_dub_full_from_callback(query, context, state, lang)
             if str(result.get("status") or "") == "AUTO_EXACT_CONFIRMATION_REQUIRED":
                 return await render_subdub_auto_exact_confirmation(
@@ -264917,6 +265145,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if await handle_state_reset_slash_command(update, context, text):
         return
+
+    # Personal Affiliate Vault Text Link Intake
+    if context.user_data.get("awaiting_affiliate_import") or (("http://" in text or "https://" in text) and any(d in text for d in ["shorten.asia", "trackecom.asia", "attracking.asia", "trackfin.asia", "goecom.asia", "goeco.mobi", "trackmobi.asia", "trackec.asia", "shopee.vn", "lazada.vn", "tiktok.com"])):
+        try:
+            res = import_affiliate_links_for_user(uid, text)
+            if res.get("added_count", 0) > 0:
+                context.user_data["awaiting_affiliate_import"] = False
+                reply_kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📂 Xem kho link cá nhân", callback_data="autopost|aff_view|all|0"), InlineKeyboardButton("📥 Thêm tiếp", callback_data="autopost|aff_import_prompt")],
+                    [InlineKeyboardButton("⬅️ Quay lại Kho Affiliate", callback_data="autopost|affiliate"), InlineKeyboardButton(f"🏠 {public_hub_copy(get_user_language(uid) or 'vi')['main_menu']}", callback_data="menu|main")],
+                ])
+                msg = autopost_affiliate_import_success_text(res["added_count"], res["total_in_vault"], res["by_niche"], get_user_language(uid) or "vi")
+                return await update.message.reply_text(msg, parse_mode="HTML", reply_markup=reply_kb)
+        except Exception as aff_err:
+            logger.error(f"Affiliate text import error: {aff_err}")
+
 
     if await handle_video_ai_edit_pending_text(update, context):
         return
