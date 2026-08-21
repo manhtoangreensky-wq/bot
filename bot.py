@@ -235826,6 +235826,7 @@ def get_subdub_lane_readiness(
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
     confirmed_product = bool(confirmed_product or subdub_final_confirmed_state(state))
+    auto_speaker_route = subdub_auto_speaker_route_enabled(state)
     force_open = bool(public and subdub_public_force_override_active())
     admin_interactive_confirm = bool(admin_interactive_confirm and not public)
     if admin_interactive_confirm:
@@ -235848,7 +235849,11 @@ def get_subdub_lane_readiness(
             for key in ("source_file_name", "source_mime_type", "mime_type", "media_kind", "source_media_kind")
         )
     )
-    if asr_state_known:
+    if auto_speaker_route:
+        # Auto speaker casting always needs Deepgram diarization, even when a
+        # subtitle/transcript is already present for the normal lane.
+        asr_required = True
+    elif asr_state_known:
         asr_required = bool(mode and video_dubbing_mode_needs_asr_provider(mode, state))
     else:
         # Lane-level probe (no customer input yet): assume the worst-case job for this
@@ -235859,7 +235864,7 @@ def get_subdub_lane_readiness(
         asr_required = bool(mode and video_dubbing_state_requires_asr(mode, {"media_kind": "video"}))
     translation_required = bool(mode and video_dubbing_needs_translation_provider(mode, state))
     tts_required = mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
-    asr_provider = subdub_asr_provider_name()
+    asr_provider = "deepgram" if auto_speaker_route else subdub_asr_provider_name()
     translation_provider = subdub_translation_provider_name()
     tts_provider = subdub_tts_provider_name()
     asr_configured = subdub_provider_configured("asr", asr_provider)
