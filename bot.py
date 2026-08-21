@@ -138400,6 +138400,46 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
         ])
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
+    if action == "guide":
+        msg = autopost_guide_text()
+        reply_kb = autopost_guide_keyboard()
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "guide_single":
+        msg = autopost_guide_single_text()
+        reply_kb = autopost_guide_sub_keyboard()
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "guide_plan":
+        msg = autopost_guide_plan_text()
+        reply_kb = autopost_guide_sub_keyboard()
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "guide_telegram":
+        msg = autopost_guide_telegram_text()
+        reply_kb = autopost_guide_sub_keyboard()
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "guide":
+        msg = autopost_guide_text()
+        reply_kb = autopost_guide_keyboard()
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "guide_single":
+        msg = autopost_guide_single_text()
+        reply_kb = autopost_guide_sub_keyboard()
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "guide_plan":
+        msg = autopost_guide_plan_text()
+        reply_kb = autopost_guide_sub_keyboard()
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "guide_telegram":
+        msg = autopost_guide_telegram_text()
+        reply_kb = autopost_guide_sub_keyboard()
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
     return await safe_edit_query_message(query, autopost_main_dashboard_text(lang, uid), parse_mode="HTML", reply_markup=autopost_main_keyboard(lang))
 '''
 exec(compile(autopost_engine_code, f"{__file__}:autopost_engine", "exec"), globals())
