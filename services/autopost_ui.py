@@ -665,56 +665,131 @@ def autopost_conn_oauth_prompt_text(platform: str) -> str:
         "Trạng thái: <b>NEEDS_OAUTH</b> (Chưa có token cấu hình)."
     ])
 
-# ----------------- Guide: Hướng dẫn sử dụng chi tiết -----------------
+# ----------------- Guide: Hướng dẫn sử dụng chi tiết từng bước -----------------
 def autopost_guide_text() -> str:
     lines = [
-        "📖 <b>HƯỚNG DẪN SỬ DỤNG HỆ THỐNG ĐĂNG BÀI TỰ ĐỘNG (AUTOPOST)</b>",
+        "📖 <b>HƯỚNG DẪN CHI TIẾT TỪNG BƯỚC ĐĂNG BÀI TỰ ĐỘNG (AUTOPOST A-Z)</b>",
         "",
-        "Hệ thống TOAN AAS AutoPost giúp bạn tự động hóa toàn bộ quy trình từ ý tưởng, viết bài, chèn link Affiliate cá nhân đến phát hành đa kênh theo đúng lịch trình tối ưu.",
+        "Hệ thống TOAN AAS AutoPost hỗ trợ 2 quy trình tạo & phát hành bài viết chính:",
         "",
-        "<b>QUY TRÌNH 7 BƯỚC VẬN HÀNH CHUẨN:</b>",
+        "<b>1️⃣ CÁCH 1: TẠO BÀI LẺ & ĐĂNG NGAY TỨC THÌ</b>",
+        "• <b>Bước 1:</b> Bấm <code>[✍️ Tạo nội dung]</code> -> Chọn 1 trong 7 nguồn nguyên liệu (chủ đề, URL, link affiliate, ảnh/video...).",
+        "• <b>Bước 2:</b> AI tự động ghép Thương hiệu + Link Affiliate để viết bài hoàn chỉnh (Hook, Caption, CTA, Hashtag).",
+        "• <b>Bước 3:</b> Xem trước bản nháp: Bấm <code>[🚀 Đăng ngay]</code> để phát hành tức thì hoặc <code>[✅ Duyệt & Lên lịch]</code>.",
+        "• <b>Bước 4:</b> Bấm <code>[✅ Đã đăng]</code> để lấy link bài thật đã đăng trên mạng xã hội.",
         "",
-        "1️⃣ <b>Thiết lập Thương hiệu (<code>🎨 Thương hiệu</code>):</b>",
-        "• Cài đặt Tên thương hiệu, Giọng văn (Thân thiện, Uy tín, Trẻ trung...), Lời kêu gọi hành động (CTA) và Hashtag.",
-        "• AI sẽ tự động cá nhân hóa từng bài đăng theo đúng phong cách riêng của bạn.",
+        "<b>2️⃣ CÁCH 2: LẬP KẾ HOẠCH & ĐĂNG TỰ ĐỘNG HOÀN TOÀN 7 NGÀY</b>",
+        "• <b>Bước 1:</b> Bấm <code>[🧠 Lập kế hoạch]</code> -> Chọn ngành hàng của bạn (Thời trang, Mỹ phẩm, Công nghệ, BĐS...).",
+        "• <b>Bước 2:</b> AI tự động tạo lịch trình 14 bài / 7 ngày vào 2 khung giờ vàng (11:30 & 20:00).",
+        "• <b>Bước 3:</b> Bấm <code>[📅 Lịch đăng]</code> hoặc <code>[🚀 Hàng đợi]</code> để xem danh sách bài chờ phát hành.",
+        "• <b>Bước 4:</b> Hệ thống tự động đăng bài đúng giờ mà bạn không cần canh thời gian.",
         "",
-        "2️⃣ <b>Kết nối Kênh phát hành (<code>📡 Kết nối MXH</code>):</b>",
-        "• <b>Telegram:</b> Thêm Bot làm Quản trị viên (Admin) vào Kênh/Nhóm -> Gửi <code>@username</code> kênh để kích hoạt.",
-        "• <b>Facebook / Instagram / YouTube / TikTok:</b> Kết nối qua giao thức OAuth bảo mật máy chủ.",
+        "<b>⚙️ 3 BƯỚC THIẾT LẬP BAN ĐẦU (Chỉ làm 1 lần):</b>",
+        "• <b>Bước 1:</b> <code>[🎨 Thương hiệu]</code>: Cài đặt Tên shop, Giọng văn, CTA.",
+        "• <b>Bước 2:</b> <code>[📡 Kết nối MXH]</code>: Thêm bot làm Admin kênh Telegram và gửi @username.",
+        "• <b>Bước 3:</b> <code>[🔗 Affiliate]</code>: Nạp link tiếp thị của bạn để nhận 100% hoa hồng đơn hàng.",
         "",
-        "3️⃣ <b>Nạp Kho Affiliate cá nhân (<code>🔗 Affiliate</code>):</b>",
-        "• Dán link hoặc gửi file <code>.txt, .csv, .json</code> danh sách link tiếp thị liên kết của riêng bạn.",
-        "• AI sẽ tự động phân loại ngành hàng và ưu tiên chèn link của bạn vào bài đăng bán hàng.",
-        "",
-        "4️⃣ <b>Tạo Nguyên liệu & Bài viết (<code>✍️ Tạo nội dung</code>):</b>",
-        "• Hỗ trợ 7 nguồn đầu vào: Nhập chủ đề, Dán link URL, Chọn link Affiliate, Gửi ảnh/video hoặc dùng Video/Ảnh đã tạo từ AI Studio.",
-        "• AI tự động tạo Hook thu hút, Caption chuẩn SEO, Hashtag và nút CTA.",
-        "",
-        "5️⃣ <b>Lập Kế hoạch dài hạn (<code>🧠 Lập kế hoạch</code>):</b>",
-        "• Chọn ngành hàng (Thời trang, Công nghệ, BĐS, F&B...) để AI tự tạo kế hoạch 7/14/30 ngày theo các trụ cột (Giáo dục, Ưu đãi, Bán hàng, Tương tác).",
-        "",
-        "6️⃣ <b>Quản lý Lịch & Hàng đợi (<code>📅 Lịch đăng</code> & <code>🚀 Hàng đợi</code>):</b>",
-        "• Xem lịch trình các khung giờ vàng (11:30, 20:00).",
-        "• Tại <b>Hàng đợi</b>, bạn có thể xem lại bài chờ đăng hoặc bấm <b>[🚀 Đăng ngay]</b> để phát hành tức thì.",
-        "",
-        "7️⃣ <b>Đo lường & Quảng cáo (<code>✅ Đã đăng</code> & <code>📊 Hiệu quả</code>):</b>",
-        "• Xem biên lai Remote Receipt thật và đường link trực tiếp đến bài viết trên mạng xã hội.",
-        "• Đo lường hiệu quả chuyển đổi và kích hoạt Quảng cáo trong hộp ngân sách an toàn.",
+        "👉 <i>Chọn mục chi tiết bên dưới để xem hướng dẫn từng bước cụ thể:</i>"
     ]
     return "\n".join(lines)
 
 def autopost_guide_keyboard() -> InlineKeyboardMarkup:
     rows = [
         [
+            InlineKeyboardButton("📝 Hướng dẫn tạo bài lẻ (A-Z)", callback_data="autopost|guide_single"),
+        ],
+        [
+            InlineKeyboardButton("🧠 Hướng dẫn lập lịch tự động 7 ngày", callback_data="autopost|guide_plan"),
+        ],
+        [
+            InlineKeyboardButton("📡 Hướng dẫn kết nối Kênh Telegram", callback_data="autopost|guide_telegram"),
+        ],
+        [
             InlineKeyboardButton("✍️ Tạo nội dung ngay", callback_data="autopost|content_input_menu"),
             InlineKeyboardButton("🎨 Cài đặt thương hiệu", callback_data="autopost|brands"),
         ],
         [
-            InlineKeyboardButton("📡 Kết nối kênh MXH", callback_data="autopost|channels"),
-            InlineKeyboardButton("🔗 Kho Affiliate cá nhân", callback_data="autopost|affiliate"),
+            InlineKeyboardButton("⬅️ Quay lại Hub", callback_data="autopost|main"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ]
+    ]
+    return InlineKeyboardMarkup(rows)
+
+def autopost_guide_single_text() -> str:
+    lines = [
+        "📝 <b>HƯỚNG DẪN TẠO 1 BÀI ĐĂNG ĐƠN LẺ (SINGLE POST WORKFLOW):</b>",
+        "",
+        "<b>Bước 1: Chọn nguồn nguyên liệu đầu vào</b>",
+        "Bấm <code>[✍️ Tạo nội dung]</code> và chọn 1 trong các hình thức:",
+        "• <code>✏️ Nhập chủ đề</code>: Gửi tin nhắn mô tả ý tưởng (VD: <i>'Review tai nghe bluetooth chống ồn'</i>).",
+        "• <code>🔗 Nhập URL</code>: Dán link bài báo, trang sản phẩm shopee/lazada.",
+        "• <code>🛒 Chọn sản phẩm Affiliate</code>: Chọn trực tiếp từ kho link của bạn.",
+        "• <code>📎 Gửi ảnh/video</code>: Gửi file ảnh/video tư liệu trực tiếp.",
+        "• <code>🎬/🖼 Chọn Video/Ảnh AI</code>: Lấy video/ảnh đã tạo trong Studio TOAN AAS.",
+        "",
+        "<b>Bước 2: AI tự động viết bài hoàn chỉnh</b>",
+        "AI sẽ kết hợp phong cách thương hiệu của bạn để tạo ra:",
+        "• Tiêu đề Hook giữ chân người đọc.",
+        "• Caption chi tiết hấp dẫn.",
+        "• Link Affiliate tiếp thị của riêng bạn.",
+        "• Nút kêu gọi hành động (CTA) và bộ Hashtag chuẩn SEO.",
+        "",
+        "<b>Bước 3: Duyệt và Phát hành</b>",
+        "• Bấm <b>[🚀 Đăng ngay]</b>: Đăng thẳng lên kênh Telegram/MXH ngay lập tức.",
+        "• Bấm <b>[✅ Duyệt & Lên lịch]</b>: Đưa vào Hàng đợi để phát hành sau.",
+        "• Bấm <b>[✏️ Sửa]</b> hoặc <b>[🔄 Viết lại]</b>: Nếu muốn chỉnh sửa lại ý văn.",
+        "",
+        "<b>Bước 4: Xem bài đăng thực tế</b>",
+        "Bấm <code>[✅ Đã đăng]</code> để lấy link bài thật và kiểm tra lượt xem/click tại <code>[📊 Hiệu quả]</code>."
+    ]
+    return "\n".join(lines)
+
+def autopost_guide_plan_text() -> str:
+    lines = [
+        "🧠 <b>HƯỚNG DẪN LẬP KẾ HOẠCH & ĐĂNG TỰ ĐỘNG 7 NGÀY:</b>",
+        "",
+        "<b>Bước 1: Chọn Ngành hàng mục tiêu</b>",
+        "Bấm <code>[🧠 Lập kế hoạch]</code> -> Chọn lĩnh vực của bạn (Thời trang, Mỹ phẩm, Công nghệ, BĐS, F&B, Khóa học...).",
+        "",
+        "<b>Bước 2: AI lập ma trận nội dung 14 bài</b>",
+        "AI tự động phân bổ 14 bài đăng cho 7 ngày vào 2 khung giờ vàng:",
+        "• <b>11:30 Trưa:</b> Bài kiến thức, chia sẻ giá trị hoặc tương tác.",
+        "• <b>20:00 Tối:</b> Bài giới thiệu sản phẩm, bán hàng, ưu đãi kèm link Affiliate.",
+        "",
+        "<b>Bước 3: Quản lý và Phát hành tự động</b>",
+        "• Bấm <code>[📅 Lịch đăng]</code>: Xem lịch trình chi tiết từng ngày.",
+        "• Bấm <code>[🚀 Hàng đợi]</code>: Xem các bài đang xếp hàng chờ phát hành.",
+        "• Hệ thống tự động đăng bài theo đúng khung giờ mà bạn không cần mở bot hay thao tác thủ công!"
+    ]
+    return "\n".join(lines)
+
+def autopost_guide_telegram_text() -> str:
+    lines = [
+        "📡 <b>HƯỚNG DẪN KẾT NỐI KÊNH TELEGRAM NHẬN BÀI:</b>",
+        "",
+        "<b>Bước 1: Thêm Bot làm Quản trị viên (Admin) của Kênh</b>",
+        "1. Mở Kênh hoặc Nhóm Telegram của bạn.",
+        "2. Vào mục Cài đặt Kênh (Channel Settings) -> Chọn <b>Administrators (Quản trị viên)</b>.",
+        "3. Bấm <b>Add Admin</b> -> Tìm kiếm <code>@toanaasbot</code> (hoặc bot của bạn) và cấp quyền <b>Post Messages (Đăng bài viết)</b>.",
+        "",
+        "<b>Bước 2: Kết nối kênh với hệ thống AutoPost</b>",
+        "1. Quay lại Bot, bấm <code>[📡 Kết nối MXH]</code> -> Chọn <code>[🔗 Kết nối Telegram]</code>.",
+        "2. Gửi <b>@username</b> của kênh (hoặc Chat ID) vào ô chat.",
+        "<i>(Ví dụ: <code>@kenh_tin_tuc_ai</code> hoặc <code>-1001234567890</code>)</i>",
+        "",
+        "<b>Bước 3: Kiểm tra đường truyền</b>",
+        "Bấm <code>[🧪 Kiểm tra kết nối]</code>. Khi thấy trạng thái <b>READY ✅</b> là bạn đã hoàn tất!"
+    ]
+    return "\n".join(lines)
+
+def autopost_guide_sub_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton("✍️ Bắt đầu tạo nội dung", callback_data="autopost|content_input_menu"),
+            InlineKeyboardButton("🧠 Lập kế hoạch 7 ngày", callback_data="autopost|content_plan"),
         ],
         [
-            InlineKeyboardButton("⬅️ Quay lại Hub", callback_data="autopost|main"),
+            InlineKeyboardButton("⬅️ Quay lại Hướng dẫn", callback_data="autopost|guide"),
             InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
         ]
     ]

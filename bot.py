@@ -15,7 +15,7 @@ from services.autopost_ui import (
     autopost_brand_preview_text, autopost_aff_seed_success_text, autopost_aff_clear_confirm_text,
     autopost_aff_clear_done_text, autopost_conn_telegram_prompt_text, autopost_conn_oauth_prompt_text, autopost_test_tg_conn_text,
     autopost_job_publish_result_text, autopost_set_mode_text, autopost_draft_publish_result_text,
-    autopost_draft_approved_text, autopost_guide_text, autopost_guide_keyboard
+    autopost_draft_approved_text, autopost_guide_text, autopost_guide_keyboard, autopost_guide_single_text, autopost_guide_plan_text, autopost_guide_telegram_text, autopost_guide_sub_keyboard
 )
 from services.autopost_db import (
     init_autopost_durable_db, save_content_input, get_content_input,
@@ -210184,7 +210184,7 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_badge = admin_display_badge(uid)
     badge = get_role_badge(uid)
     public_mode = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") == "pro" else "free"
-    public_model = "Opus 4.8" if public_mode == "pro" else "Gemini 3.7 Flash"
+    public_model = "Opus 4.8" if public_mode == "pro" else "Gemini 3.6 Flash"
     if admin_badge:
         member_note = (
             f"🛡 Đặc quyền {html.escape(admin_badge)}:\n"
@@ -210245,7 +210245,7 @@ async def set_chat_mode_command(update: Update, mode: str, command: str, note: s
             "Bot sẽ dùng Chat Pro cho đến khi bạn tắt bằng <code>/chat_pro_off</code>."
         )
     else:
-        text = "✅ Đã chuyển về <b>Chat miễn phí — Gemini 3.7 Flash</b>."
+        text = "✅ Đã chuyển về <b>Chat miễn phí — Gemini 3.6 Flash</b>."
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_chat_pro_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -210325,7 +210325,7 @@ async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 <b>AI Models trong TOAN AAS</b>",
         "",
         "<b>Free Chat</b>",
-        "• Gemini 3.7 Flash — 0 Xu.",
+        "• Gemini 3.6 Flash — 0 Xu.",
         "• 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt.",
         "• Bộ nhớ Public Chat riêng 48 giờ.",
         "",
@@ -231633,14 +231633,6 @@ def normalize_video_dubbing_combo_pending_state(user_id, state: dict | None) -> 
     """Persist the canonical combo contract before any legacy callback can route."""
     current = dict(state or {})
     normalized = subdub_combo_blackbox.normalize_combo_state(current)
-    legacy_step = str(normalized.get("step") or "")
-    collapsed_legacy_step = subdub_combo_blackbox.is_combo_state(normalized) and legacy_step in {
-        "no_subtitle_menu",
-        "original_subtitle_confirm",
-        "original_subtitle_ready",
-    }
-    if collapsed_legacy_step:
-        normalized["step"] = "language" if video_dubbing_has_media(normalized) else "source"
     if normalized == current:
         return current
     canonical_fields = {
@@ -231653,8 +231645,6 @@ def normalize_video_dubbing_combo_pending_state(user_id, state: dict | None) -> 
         )
         if normalized.get(key) is not None
     }
-    if collapsed_legacy_step:
-        canonical_fields["processing"] = "0"
     return set_video_dubbing_pending(
         user_id,
         str(normalized.get("step") or current.get("step") or "source"),
@@ -251353,7 +251343,39 @@ def video_dubbing_next_screen_after_source(user_id, state: dict, lang: str = "vi
         state = set_video_dubbing_pending(user_id, "locked_public", processing="0")
         return state, video_dubbing_public_locked_text(video_dubbing_public_gate_mode(mode, state), lang), video_dubbing_public_locked_keyboard(lang)
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-        state = normalize_video_dubbing_combo_pending_state(user_id, state)
+        explicit_flow_type = str(state.get("flow_type") or "").strip()
+        flow_type = explicit_flow_type or VIDEO_DUBBING_FLOW_NO_SUBTITLE
+        combo_subpath = subtitle_plus_dub_no_subtitle_subpath(state)
+        if flow_type == VIDEO_DUBBING_FLOW_NO_SUBTITLE and explicit_flow_type and not combo_subpath:
+            state = set_video_dubbing_pending(
+                user_id,
+                "no_subtitle_menu",
+                mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                process_type=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                video_processing_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                requested_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+                flow_type=VIDEO_DUBBING_FLOW_NO_SUBTITLE,
+                processing="0",
+            )
+            return state, subtitle_plus_dub_no_subtitle_menu_text(lang), subtitle_plus_dub_no_subtitle_menu_keyboard(lang)
+        if flow_type == VIDEO_DUBBING_FLOW_NO_SUBTITLE and combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB:
+            state = set_video_dubbing_pending(
+                user_id,
+                "original_subtitle_confirm",
+                mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                process_type=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                video_processing_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                requested_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+                flow_type=VIDEO_DUBBING_FLOW_NO_SUBTITLE,
+                combo_subpath=VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB,
+                output_type="video_subtitle",
+                output_format="video_subtitle",
+                translate_requested="0",
+            )
+            return state, video_dubbing_original_subtitle_confirm_text(state, lang), video_dubbing_original_subtitle_confirm_keyboard(lang, state)
+        output_type = "video" if combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB else "video_subtitle"
         state = set_video_dubbing_pending(
             user_id,
             "language",
@@ -251362,10 +251384,10 @@ def video_dubbing_next_screen_after_source(user_id, state: dict, lang: str = "vi
             video_processing_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
             requested_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
             active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
-            flow_type=VIDEO_DUBBING_FLOW_NO_SUBTITLE,
-            combo_subpath="",
-            output_type="video_subtitle",
-            output_format="video_subtitle",
+            flow_type=flow_type,
+            combo_subpath=combo_subpath,
+            output_type=output_type,
+            output_format=output_type,
             translate_requested="1",
         )
         return state, video_dubbing_language_text(state, lang), video_dubbing_language_keyboard(lang, state)
@@ -252249,20 +252271,12 @@ async def handle_video_dubbing_callback(
                 reply_markup=subtitle_plus_dub_translation_language_keyboard(lang),
             )
         if action in {"combo_back_original", "combo_back_subtitle_ready"}:
-            state = set_video_dubbing_pending(
-                uid,
-                "choosing_translation_language",
-                target_language="",
-                translate_requested="1",
-                dub_text_source="translated",
-                dub_source="translated_subtitle",
-                processing="0",
-            )
+            state = set_video_dubbing_pending(uid, "original_subtitle_ready", processing="0")
             return await safe_edit_or_send(
                 query,
-                subtitle_plus_dub_translation_language_text(lang),
+                subtitle_plus_dub_original_ready_text(state, lang),
                 parse_mode="HTML",
-                reply_markup=subtitle_plus_dub_translation_language_keyboard(lang),
+                reply_markup=subtitle_plus_dub_original_ready_keyboard(lang),
             )
         if action == "combo_translate":
             state = set_video_dubbing_pending(uid, "choosing_translation_language", target_language="", processing="0")
