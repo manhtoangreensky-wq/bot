@@ -40437,7 +40437,7 @@ def deepgram_srt_from_response(data: dict, max_words_per_block: int = 12) -> str
         srt_blocks.append(
             f"{idx}\n{video_dubbing_srt_timestamp(start)} --> {video_dubbing_srt_timestamp(end)}\n{text}"
         )
-    return "\\n\\n".join(srt_blocks).strip() + "\\n"
+    return "\n\n".join(srt_blocks).strip() + "\n"
 
 def deepgram_segments_from_response(data: dict, max_words_per_segment: int = 12) -> list[dict]:
     words = deepgram_word_items(data)
@@ -40476,13 +40476,13 @@ def deepgram_segments_from_response(data: dict, max_words_per_segment: int = 12)
 
 def deepgram_vtt_from_srt(srt_text: str) -> str:
     lines = ["WEBVTT", ""]
-    for line in str(srt_text or "").replace("\r", "").split("\\n"):
+    for line in str(srt_text or "").replace("\r", "").split("\n"):
         if line.strip().isdigit():
             continue
         if "-->" in line:
             line = line.replace(",", ".")
         lines.append(line)
-    return "\\n".join(lines).strip() + "\\n"
+    return "\n".join(lines).strip() + "\n"
 
 def srt_has_timestamp_blocks(srt_text: str) -> bool:
     return bool(re.search(r"\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}", str(srt_text or "")))
@@ -242627,7 +242627,7 @@ def video_dubbing_srt_from_text(text: str, duration_seconds: int = 0) -> str:
         blocks.append(
             f"{idx}\n{video_dubbing_srt_timestamp(start)} --> {video_dubbing_srt_timestamp(end)}\n{chunk}"
         )
-    return "\\n\\n".join(blocks) + "\\n"
+    return "\n\n".join(blocks) + "\n"
 
 async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, state: dict) -> tuple[bytes, str]:
     file_id = str(state.get("video_file_id") or state.get("source_file_id") or "")
@@ -242705,25 +242705,25 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
 
 def video_dubbing_plain_script(subtitle_or_text: str) -> str:
     lines = []
-    for raw_line in str(subtitle_or_text or "").replace("\r", "").split("\\n"):
+    for raw_line in str(subtitle_or_text or "").replace("\r", "").split("\n"):
         line = raw_line.strip()
         if not line or line.isdigit() or "-->" in line:
             continue
         line = re.sub(r"<[^>]+>", "", line).strip()
         if line:
             lines.append(line)
-    return "\\n".join(lines).strip()
+    return "\n".join(lines).strip()
 
 def video_dubbing_srt_to_vtt_text(srt_text: str) -> str:
     body = str(srt_text or "").replace("\r", "").strip()
     if not body:
         return "WEBVTT\n"
     body = re.sub(r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", body)
-    return "WEBVTT\n\n" + body + "\\n"
+    return "WEBVTT\n\n" + body + "\n"
 
 def video_dubbing_subtitle_plain_text(srt_text: str) -> str:
     plain = video_dubbing_plain_script(srt_text)
-    return (plain or str(srt_text or "").strip()) + ("\\n" if plain or str(srt_text or "").strip() else "")
+    return (plain or str(srt_text or "").strip()) + ("\n" if plain or str(srt_text or "").strip() else "")
 
 def video_dubbing_subtitle_output_items(srt_text: str, output_type: str = "srt", mode: str = "") -> list[dict]:
     output_type = str(output_type or "srt").strip().lower()
@@ -243449,7 +243449,7 @@ def video_dubbing_srt_from_segments(segments: list[dict]) -> str:
         blocks.append(
             f"{len(blocks) + 1}\n{video_dubbing_srt_timestamp(start)} --> {video_dubbing_srt_timestamp(end)}\n{text}"
         )
-    return ("\\n\\n".join(blocks) + "\\n") if blocks else ""
+    return ("\n\n".join(blocks) + "\n") if blocks else ""
 
 def video_dubbing_timestamp_seconds(value: str) -> float:
     clean = str(value or "").strip().replace(",", ".")
@@ -243466,7 +243466,7 @@ def video_dubbing_segments_from_subtitle(subtitle_text: str) -> list[dict]:
     if not body:
         return []
     if body.startswith("WEBVTT"):
-        body = body.split("\\n", 1)[1] if "\\n" in body else ""
+        body = body.split("\n", 1)[1] if "\n" in body else ""
     blocks = re.split(r"\n\s*\n", body)
     segments = []
     for block in blocks:
