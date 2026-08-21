@@ -11,7 +11,11 @@ from services.autopost_ui import (
     autopost_settings_keyboard, autopost_kill_switch_text, autopost_resume_ads_text,
     autopost_content_input_menu_text, autopost_content_input_menu_keyboard,
     autopost_input_prompt_text, autopost_brand_view_text, autopost_brand_keyboard,
-    autopost_draft_view_text, autopost_draft_keyboard
+    autopost_draft_view_text, autopost_draft_keyboard, autopost_brand_edit_prompt_text,
+    autopost_brand_preview_text, autopost_aff_seed_success_text, autopost_aff_clear_confirm_text,
+    autopost_aff_clear_done_text, autopost_conn_telegram_prompt_text, autopost_conn_oauth_prompt_text, autopost_test_tg_conn_text,
+    autopost_job_publish_result_text, autopost_set_mode_text, autopost_draft_publish_result_text,
+    autopost_draft_approved_text
 )
 from services.autopost_db import (
     init_autopost_durable_db, save_content_input, get_content_input,
@@ -489,7 +493,7 @@ def _telegram_proxy_env(
     reason: str,
 ) -> str:
     raw = str(os.environ.get(str(name or ""), default) or "")
-    if "\r" in raw or "\n" in raw:
+    if "\r" in raw or "\\n" in raw:
         raise ValueError(str(reason or "telegram_proxy_env_invalid"))
     return raw.strip()
 
@@ -8050,7 +8054,7 @@ def engine_async_waiting_text(job: dict, *, admin: bool = False) -> str:
     ]
     if admin:
         lines.append(f"Mã xử lý: <code>{html.escape(internal_id)}</code>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def _engine_async_parse_time(value) -> datetime | None:
     raw = str(value or "").strip()
@@ -8160,7 +8164,7 @@ def engine_async_status_text(job: dict, *, admin: bool = False) -> str:
             lines.append(f"• Parsed fields: <code>{html.escape(suno_parsed_fields_text(parsed_fields))}</code>")
         if str(current.get("feature") or "").lower() in {"music_suno", "music_song"}:
             lines.append(f"• Fallback: <code>{html.escape(sanitize_provider_status_text(suno_fallback_status_text(str(current.get('provider') or 'key4u_suno')), provider_task_id, 260))}</code>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def engine_async_status_keyboard(internal_job_id: str, kind: str = "music") -> InlineKeyboardMarkup:
     safe_id = re.sub(r"[^A-Za-z0-9_.:-]", "", str(internal_job_id or ""))[:40]
@@ -10738,7 +10742,7 @@ def progress_auto_refresh_status_text(job_id: str = "") -> str:
             f"• stopped: <code>{'true' if record.get('stopped') else 'false'} {html.escape(str(record.get('stop_reason') or ''))}</code>",
             "",
         ])
-    return "\n".join(lines).strip()
+    return "\\n".join(lines).strip()
 
 
 def video_product_progress_text(product_type: str, job_id: str = "", stage: str = "rendering_video", percent: int | None = None, lang: str = "vi") -> str:
@@ -10754,7 +10758,7 @@ def addon_logo_config_saved_text(lang: str = "vi") -> str:
 
 
 def product_progress_matrix_text() -> str:
-    return "\n".join(product_progress_status.product_progress_matrix_lines())
+    return "\\n".join(product_progress_status.product_progress_matrix_lines())
 
 
 def _video_progress_debug_recover_job_from_db(job_id: str = "") -> tuple[dict, str]:
@@ -10864,7 +10868,7 @@ def music_progress_reconcile_debug_text(state: dict | None = None, job: dict | N
         f"• artifact_wait_terminal_exhausted: <code>{'yes' if current.get('artifact_wait_terminal_exhausted') else 'no'}</code>",
         f"• terminal_fail_allowed: <code>{'yes' if current.get('terminal_fail_allowed') else 'no'}</code>",
     ]
-    return "\n".join(lines) + "\n"
+    return "\\n".join(lines) + "\\n"
 
 
 def video_request_debug_identity(identifier: str | int) -> dict:
@@ -10890,7 +10894,7 @@ def video_request_debug_identity(identifier: str | int) -> dict:
     return {
         "report": report,
         "resolved_job_id": resolved_job_id,
-        "text": "\n".join(lines),
+        "text": "\\n".join(lines),
     }
 
 
@@ -10993,7 +10997,7 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
     persisted_job_progress = safe_int((job or {}).get("persisted_job_progress") or (job or {}).get("progress_percent"), 0)
     video_provider_debug_text = ""
     if normalized_progress_type in product_progress_status.VIDEO_PROGRESS_TYPES:
-        video_provider_debug_text = "\n".join(_video_scene_ledger_debug_lines(job)) + "\n" + (
+        video_provider_debug_text = "\\n".join(_video_scene_ledger_debug_lines(job)) + "\\n" + (
             f"• status_source_priority_used: <code>{html.escape(str((job or {}).get('status_source_priority_used') or '-'))}</code>\n"
             f"• provider_state_overrode_registry: <code>{'yes' if (job or {}).get('provider_state_overrode_registry') else 'no'}</code>\n"
             f"• provider_state_overrode_persisted_status: <code>{'yes' if (job or {}).get('provider_state_overrode_persisted_status') else 'no'}</code>\n"
@@ -11101,7 +11105,7 @@ def progress_audit_text(title: str, payload: dict) -> str:
     lines = [f"{html.escape(str(title or 'Progress audit'))}", "", f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>", ""]
     for check in payload.get("checks") or []:
         lines.append(f"• {html.escape(str(check.get('name') or ''))}: <b>{'PASS' if check.get('ok') else 'FAIL'}</b>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 async def cmd_progress_status_matrix(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -11152,7 +11156,7 @@ async def cmd_progress_status_debug(update: Update, context: ContextTypes.DEFAUL
         job = get_engine_async_job(job_id) if job_id else {}
         text = product_progress_debug_text(job_id, product_type, job)
         if identity:
-            text = str(identity.get("text") or "") + "\n\n" + text
+            text = str(identity.get("text") or "") + "\\n\\n" + text
     except Exception as exc:
         text = (
             "📊 <b>TOAN AAS progress status</b>\n\n"
@@ -11206,7 +11210,7 @@ def workflow_graph_audit_text(kind: str = "graph") -> str:
         "terminal": "WORKFLOW TERMINAL AUDIT",
         "callback": "WORKFLOW CALLBACK AUDIT",
     }.get(str(kind or "graph").strip().lower(), "WORKFLOW GRAPH AUDIT")
-    return "\n".join([
+    return "\\n".join([
         f"🧭 <b>{title}</b>",
         "",
         f"• ok: <code>{'yes' if payload.get('ok') else 'no'}</code>",
@@ -11375,7 +11379,7 @@ def music_job_debug_telegram_safe_text(text: str = "", *, limit: int = 3900) -> 
         tail_lines.append(line)
         tail_len += add_len
     tail_lines.reverse()
-    safe = "\n".join(head_lines).rstrip() + marker + "\n".join(tail_lines).lstrip()
+    safe = "\\n".join(head_lines).rstrip() + marker + "\\n".join(tail_lines).lstrip()
     if len(safe) <= max_len:
         return safe
     return safe[: max_len - 20].rstrip() + "\n<code>...</code>"
@@ -11771,7 +11775,7 @@ def music_failed_job_audit_text(input_job_id: str = "") -> str:
         lines.append(f"• {html.escape(str(check.get('name') or ''))}: <b>{'PASS' if check.get('ok') else 'FAIL'}</b>")
     if payload.get("debug_exception_type"):
         lines.append(f"• debug_exception_type: <code>{html.escape(str(payload.get('debug_exception_type')))}</code>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 async def cmd_music_failed_job_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -12145,7 +12149,7 @@ def music_panel_creator_audit_text() -> str:
                 f"lookup_found=<code>{'yes' if music_progress_job_lookup_found(str(trace.get('normalized_job_id') or job_id), lookup_job) else 'no'}</code> "
                 f"real_job_created_before_panel=<code>{'yes' if trace.get('real_job_created_before_panel') else 'no'}</code>"
             )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 async def cmd_music_panel_creator_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -13110,7 +13114,7 @@ def provider_spend_audit_text(limit: int = 80) -> str:
         "• This command does not call <code>/shopaikey_usage</code>, smoke tests, video generation, AI image generation, or TTS.",
         "• Music is read-only in this audit; no Music behavior is changed.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def latest_api_debug_event(provider: str, actions: list[str]) -> dict:
     action_list = [str(item or "")[:80] for item in actions if str(item or "").strip()]
@@ -15724,7 +15728,7 @@ def finance_tax_lines(snapshot: dict) -> list[str]:
 def finance_tax_block(snapshot: dict) -> str:
     if not snapshot:
         return ""
-    return "\n".join(finance_tax_lines(snapshot))
+    return "\\n".join(finance_tax_lines(snapshot))
 
 def finance_tax_block_i18n(snapshot: dict, lang: str = "vi") -> str:
     """Render the existing invoice amounts with locale-safe public labels."""
@@ -15746,12 +15750,12 @@ def finance_tax_block_i18n(snapshot: dict, lang: str = "vi") -> str:
     )
     if not separate_vat:
         total = int(snapshot.get("total_amount_vnd") or snapshot.get("subtotal_amount_vnd") or 0)
-        return "\n".join([
+        return "\\n".join([
             f"• {html.escape(copy['payment_price'])}: <b>{_public_vnd(total)}</b>",
             f"• {html.escape(copy['total_payment'])}: <b>{_public_vnd(total)}</b>",
             f"• {html.escape(copy['included_tax_note'])}",
         ])
-    return "\n".join([
+    return "\\n".join([
         f"• {html.escape(copy['service_price'])}: <b>{_public_vnd(snapshot.get('subtotal_amount_vnd'))}</b>",
         f"• VAT ({rate_percent:.2f}%): <b>{_public_vnd(snapshot.get('vat_amount_vnd'))}</b>",
         f"• {html.escape(copy['total_payment'])}: <b>{_public_vnd(snapshot.get('total_amount_vnd'))}</b>",
@@ -16753,7 +16757,7 @@ def payos_risk_lock_list_text(review_required: bool | None = True, limit: int = 
             f"  Until: <code>{html.escape(item.get('locked_until') or 'review')}</code> | Review: <b>{'yes' if item.get('review_required') else 'no'}</b>",
         ])
     lines.append("\nKhông hiển thị raw payload/checksum/secret.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def payos_risk_lock_list_keyboard(review_required: bool | None = True, limit: int = 5) -> InlineKeyboardMarkup:
     locks = payos_risk_active_locks(review_required=review_required, limit=limit)
@@ -16996,7 +17000,7 @@ def payos_risk_orders_text(user_id: str = "", suspicious_only: bool = False) -> 
             f"<b>{_payos_risk_vnd(order['amount'])}</b> status=<code>{html.escape(order['status'])}</code>{risk_suffix}"
         )
     lines.append("\nKhông hiển thị raw payload/checksum/secret.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def payos_risk_orders_keyboard(user_id: str = "", suspicious_only: bool = False) -> InlineKeyboardMarkup:
     orders = payos_risk_recent_orders(user_id=user_id, suspicious_only=suspicious_only, limit=5)
@@ -17258,7 +17262,7 @@ def payos_risk_user_detail_text(target: str) -> str:
     else:
         lines.append("• Chưa có anomaly.")
     lines.append("\nKhông hiển thị raw payload/checksum/secret.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def payos_risk_user_detail_keyboard(user_id: str) -> InlineKeyboardMarkup:
     uid = str(user_id or "")[:24]
@@ -17330,9 +17334,9 @@ def payos_risk_report_text() -> str:
     def top_lines(items):
         if not items:
             return "• Chưa có dữ liệu."
-        return "\n".join(f"• <code>{html.escape(uid)}</code>: <b>{_payos_risk_vnd(amount)}</b>" for uid, amount in items[:5])
+        return "\\n".join(f"• <code>{html.escape(uid)}</code>: <b>{_payos_risk_vnd(amount)}</b>" for uid, amount in items[:5])
     manual_lines = payload.get("manual_large") or []
-    manual_text = "\n".join(
+    manual_text = "\\n".join(
         f"• #{item['id']} user <code>{html.escape(item['user_id'])}</code>: <b>{_payos_risk_vnd(item['amount_vnd'])}</b> status=<code>{html.escape(item['status'])}</code>"
         for item in manual_lines
     ) or "• Chưa có yêu cầu lớn đang chờ."
@@ -18231,7 +18235,7 @@ def manual_domestic_amount_text(user_id=None, lang: str | None = None) -> str:
         locale = public_copy_locale(lang)
         copy = public_account_flow_copy(locale)
         title = f"💳 <b>TOAN AAS — {copy['manual_topup_section']}</b>" if locale != "vi" else "💳 <b>Nạp VND TOAN AAS</b>"
-        return "\n\n".join([title, *public_international_topup_policy_lines(locale)])
+        return "\\n\\n".join([title, *public_international_topup_policy_lines(locale)])
     return (
         "🇻🇳 <b>Nạp Xu bằng VND</b>\n\n"
         "Chọn mệnh giá bạn muốn nạp. Sau đó bot sẽ hỏi phương thức thanh toán.\n\n"
@@ -18547,7 +18551,7 @@ def manual_payment_method_text(uid, method: str, state: dict | None = None, lang
             "total_amount_vnd": int(state.get("total_amount_vnd") or amount or 0),
             "vat_label": state.get("vat_label") or VAT_DEFAULT_LABEL,
             "vat_mode": state.get("vat_mode") or VAT_DEFAULT_MODE,
-        }) + "\n"
+        }) + "\\n"
     common = (
         f"\n\n👤 ID của bạn: <code>{uid}</code>\n"
         f"📦 Mệnh giá đã chọn: <b>{html.escape(selected)}</b>\n"
@@ -18665,7 +18669,7 @@ def manual_topup_history_payload(uid, lang: str = "vi") -> tuple[str, InlineKeyb
                     .replace(",", ".")
                 )
         lines.extend(["", account_copy["topup_verified_base"], account_copy["topup_benefits_remain"]])
-        return "\n".join(lines), InlineKeyboardMarkup([[
+        return "\\n".join(lines), InlineKeyboardMarkup([[
             InlineKeyboardButton(f"⬅️ {copy['manual_topup']}", callback_data=f"manual|menu|{uid}"),
             InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
         ]])
@@ -18692,7 +18696,7 @@ def manual_topup_history_payload(uid, lang: str = "vi") -> tuple[str, InlineKeyb
                 f"<code>{html.escape(str(status or ''))}</code> — {credited:,} Xu — {bonus_text}{adjustment} — {html.escape(str(submitted_at or '')[:16])}"
                 .replace(",", ".")
             )
-    return "\n".join(lines), InlineKeyboardMarkup([
+    return "\\n".join(lines), InlineKeyboardMarkup([
         [InlineKeyboardButton("⬅️ Nạp thủ công", callback_data=f"manual|menu|{uid}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -19678,14 +19682,14 @@ def format_tier_up_message(result: dict) -> str:
         return ""
     new_tier = result.get("new_tier") or "newbie"
     badge = get_member_badge(new_tier)
-    benefits = "\n".join(f"• {html.escape(item)}" for item in get_member_benefits(new_tier))
+    benefits = "\\n".join(f"• {html.escape(item)}" for item in get_member_benefits(new_tier))
     promo_lines = []
     for promo in result.get("promos") or []:
         if promo.get("promo_code"):
             promo_lines.append(
                 f"• <code>{html.escape(promo['promo_code'])}</code> — +{int(promo.get('bonus_percent') or 0)}% Xu, tối đa {int(promo.get('cap_xu') or 0)} Xu"
             )
-    promo_block = "\n".join(promo_lines) or "• Không có mã mới."
+    promo_block = "\\n".join(promo_lines) or "• Không có mã mới."
     return (
         f"🎉 <b>CHÚC MỪNG BẠN ĐÃ LÊN HẠNG {html.escape(badge)}</b>\n\n"
         f"Bạn vừa đạt cấp thành viên: <b>{html.escape(badge)}</b>\n"
@@ -22973,8 +22977,8 @@ def parse_affiliate_import_items(raw_text, default_niche="", default_network="")
         label_match = re.match(r"\s*\(([^)]+)\)", tail)
         product = label_match.group(1).strip() if label_match else ""
         if not product:
-            line_start = (raw_text or "").rfind("\n", 0, match.start()) + 1
-            line_end = (raw_text or "").find("\n", match.end())
+            line_start = (raw_text or "").rfind("\\n", 0, match.start()) + 1
+            line_end = (raw_text or "").find("\\n", match.end())
             if line_end < 0:
                 line_end = len(raw_text or "")
             line = (raw_text or "")[line_start:line_end]
@@ -23264,10 +23268,10 @@ def build_affiliate_link_bundle(owner_id, affiliate_id=0, job_id=0, brand="", ni
         "all_links": all_links,
         "placement_plan": {
             "caption": caption_links,
-            "pinned_comment": "\n".join(pinned_lines),
+            "pinned_comment": "\\n".join(pinned_lines),
             "bio": primary["tracking"]["bio"] if primary else "",
-            "status": "\n".join([item["tracking"]["status"] for item in all_links[:8]]),
-            "reply_comment": "\n".join([item["tracking"]["reply_comment"] for item in related_links[:5]]),
+            "status": "\\n".join([item["tracking"]["status"] for item in all_links[:8]]),
+            "reply_comment": "\\n".join([item["tracking"]["reply_comment"] for item in related_links[:5]]),
         },
         "performance_rule": (
             "Mỗi placement có src riêng trong tracking URL. Sau khi đăng, dùng tracking_report/affiliate_report "
@@ -23281,7 +23285,7 @@ def format_related_affiliate_links(related, max_items=8):
         aid, network, product_name, aff_niche, url, *_ = row
         reason_text = "; ".join(reasons[:2]) if reasons else f"score={score}"
         lines.append(f"#{aid} | {network or '-'} | {product_name or '-'} | {url or '-'} | {reason_text}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def build_affiliate_comment_pack(owner_id, job_id, max_comments=10, delay_seconds=30):
     job = get_production_job(job_id, owner_id)
@@ -23413,7 +23417,7 @@ def fallback_affiliate_video_ideas(affiliate, platform="tiktok", limit=5):
             f"   Nền tảng: {platform}\n"
             f"   CTA: Xem link {product} trong bio/mô tả nếu phù hợp nhu cầu."
         )
-    return "\n\n".join(ideas)
+    return "\\n\\n".join(ideas)
 
 def create_calendar_slot(owner_id, channel_id, campaign_id, affiliate_id, post_date, platform, topic, notes="") -> int:
     conn = db_connect()
@@ -30248,7 +30252,7 @@ def format_video_pattern_for_prompt(pattern):
         f"Pattern: {pattern.get('id')} - {pattern.get('name')}\n"
         f"Hook formula: {pattern.get('hook_formula')}\n"
         f"Scene goals: {', '.join(pattern.get('scene_goals') or [])}\n"
-        f"Proof assets required:\n- " + "\n- ".join(pattern.get("proof_assets_required") or []) + "\n"
+        f"Proof assets required:\n- " + "\n- ".join(pattern.get("proof_assets_required") or []) + "\\n"
         f"CTA style: {pattern.get('cta_style')}"
     )
 
@@ -31363,7 +31367,7 @@ def build_manifest_prompt(job, variant=None, duration=45):
             f"- {ref.get('title') or '-'} | source={ref.get('path_or_url') or '-'} | "
             f"pattern={ref.get('pattern_hint') or '-'} | tags={ref.get('tags') or '-'}"
         )
-    reference_text = "\n".join(reference_lines) if reference_lines else "Chưa có reference cụ thể; dùng video pattern bank."
+    reference_text = "\\n".join(reference_lines) if reference_lines else "Chưa có reference cụ thể; dùng video pattern bank."
     return (
         "Bạn là AI production director cho video ngắn affiliate. Hãy tạo PRODUCTION MANIFEST dạng JSON thuần, "
         "để Claude/Gemini/Runway/Kling/Fish/CapCut/FFmpeg có thể thực thi từng bước. "
@@ -32019,7 +32023,7 @@ def build_manifest_handoff_prompt(job, manifest_row, target_tool):
         f"Affiliate: {network or '-'} / {product_name or '-'} / {affiliate_url or '-'}\n\n"
         f"VIDEO PATTERN: {video_pattern.get('id','-')} - {video_pattern.get('name','-')}\n"
         f"Hook formula: {video_pattern.get('hook_formula','-')}\n"
-        "Proof cần có:\n" + "\n".join(f"- {item}" for item in proof_assets[:6]) + "\n\n"
+        "Proof cần có:\n" + "\\n".join(f"- {item}" for item in proof_assets[:6]) + "\\n\\n"
         "QUY TẮC:\n"
         "- Ưu tiên công cụ tốt/có phí trước, nếu lỗi/quota/hết tiền thì ghi fallback và báo admin.\n"
         "- Không spam, không mạo danh, không dùng likeness/người thật nếu chưa có consent rõ ràng, đủ 18 tuổi.\n"
@@ -32040,7 +32044,7 @@ def build_manifest_handoff_prompt(job, manifest_row, target_tool):
             common +
             "NHIỆM VỤ VISUAL VIDEO:\n"
             "Tạo từng scene video 9:16 theo prompt. Giữ style nhất quán, không dùng logo/nhân vật bản quyền khi chưa có quyền.\n\n"
-            + "\n\n".join(scene_lines) +
+            + "\\n\\n".join(scene_lines) +
             "\n\nOUTPUT:\n"
             "1. Link/file từng scene.\n"
             "2. Scene nào lỗi và fallback đề xuất.\n"
@@ -32095,7 +32099,7 @@ def build_manifest_handoff_prompt(job, manifest_row, target_tool):
         return (
             common +
             "NHIỆM VỤ REVIEW GATE:\n"
-            "Checklist manifest:\n" + "\n".join(f"- {item}" for item in compliance) + "\n\n"
+            "Checklist manifest:\n" + "\\n".join(f"- {item}" for item in compliance) + "\\n\\n"
             "Kiểm tra thêm: quyền hình ảnh/voice/nhạc, affiliate claim, nội dung người mẫu/OnlyFans nếu có, CTA, link, publish URL.\n"
             "OUTPUT: APPROVE/FIX/BLOCK, lý do, sửa gì trước khi đăng."
         )
@@ -32197,7 +32201,7 @@ def create_tasks_from_manifest(owner_id, manifest_row):
     ))
     created.append(create_production_task(
         owner_id, job_id, manifest_id, "review", "review_gate", 0,
-        "Compliance review", "\n".join(str(item) for item in (manifest.get("compliance_checklist") or [])), "queued", "", ""
+        "Compliance review", "\\n".join(str(item) for item in (manifest.get("compliance_checklist") or [])), "queued", "", ""
     ))
     created.append(create_production_task(
         owner_id, job_id, manifest_id, "publish", "manual", 0,
@@ -32600,9 +32604,9 @@ def operator_task_prompt_pack_data(owner_id, task_id=0, job_id=0, tool=""):
             f"- Caption/on-screen: {worker_prompt.get('caption') or '-'}\n"
             f"- Scene pack API: {base_url}/api/operator/jobs/{row_job_id}/scene-pack?scene={scene_no}\n"
         )
-    required_output = "\n".join(f"- {item}" for item in runbook.get("required_output", [])) or "- output_url hoặc file upload thật"
-    success_criteria = "\n".join(f"- {item}" for item in runbook.get("success_criteria", [])) or "- Output dùng được cho bước kế tiếp"
-    worker_steps = "\n".join(f"{idx}. {step}" for idx, step in enumerate(runbook.get("worker_steps", []), start=1)) or "1. Thực hiện prompt task.\n2. Upload/complete output."
+    required_output = "\\n".join(f"- {item}" for item in runbook.get("required_output", [])) or "- output_url hoặc file upload thật"
+    success_criteria = "\\n".join(f"- {item}" for item in runbook.get("success_criteria", [])) or "- Output dùng được cho bước kế tiếp"
+    worker_steps = "\\n".join(f"{idx}. {step}" for idx, step in enumerate(runbook.get("worker_steps", []), start=1)) or "1. Thực hiện prompt task.\n2. Upload/complete output."
     prompt_text = (
         "Bạn là AI/tool worker trong hệ thống TOAN AAS. Chỉ thực hiện đúng task được giao, "
         "không tự publish, không đổi affiliate link, không bịa output.\n\n"
@@ -33101,7 +33105,7 @@ def operator_video_brief_data(owner_id, job_id=0, task_id=0, tool="", include_fu
         "template": template,
         "job": serialize_production_job(job),
         "task": task_payload,
-        "ai_worker_prompt": "\n".join(prompt_lines),
+        "ai_worker_prompt": "\\n".join(prompt_lines),
         "production_manifest": {
             "title": manifest.get("title"),
             "series_title": manifest.get("series_title"),
@@ -33241,7 +33245,7 @@ def operator_voice_script_from_prompt(prompt=""):
     match = re.search(r"Script:\s*(.+)", text, flags=re.IGNORECASE | re.DOTALL)
     if match:
         text = match.group(1)
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    text = re.sub(r"\n{3,}", "\\n\\n", text).strip()
     return text[:4500]
 
 def first_labeled_line(text="", labels=None, default=""):
@@ -35577,7 +35581,7 @@ def build_publisher_handoff(queue_payload):
         handoff_text(pack.get("cta", "")),
         handoff_text(pack.get("hashtags", "")),
     ]
-    caption = "\n\n".join([part for part in caption_parts if part]).strip()
+    caption = "\\n\\n".join([part for part in caption_parts if part]).strip()
     pinned_comment = handoff_text(pack.get("pinned_comment") or "")
     related_links = pack.get("related_links") or []
     affiliate_bundle = pack.get("affiliate_bundle") or {}
@@ -35718,7 +35722,7 @@ def format_publisher_handoff_summary(queue_id, handoff):
     if handoff.get("can_auto_publish") and (handoff.get("platform") or "") in {"facebook", "fb", "meta", "reels"}:
         lines.append(f"\nKiểm tra auto: <code>/publisher_auto_check queue={queue_id}</code>")
         lines.append(f"Auto chính thức: <code>/publisher_auto queue={queue_id}</code>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 async def send_publisher_handoff_packet(context: ContextTypes.DEFAULT_TYPE, chat_id: int, owner_id, queue_id: int, send_media=True):
     item = get_publish_queue_item(owner_id, queue_id)
@@ -36385,7 +36389,7 @@ async def publish_facebook_page_video(queue_payload: dict):
         copy.get("pinned_comment") or "",
         copy.get("disclosure") or "",
     ]
-    description = "\n\n".join([part for part in description_parts if part]).strip()
+    description = "\\n\\n".join([part for part in description_parts if part]).strip()
     graph_base = f"https://graph.facebook.com/{META_GRAPH_VERSION.strip('/')}/{page_id}/videos"
     data = {
         "access_token": token,
@@ -38408,7 +38412,7 @@ def format_video_review_summary(summary):
     elif commands.get("fix_next"):
         lines.append(f"• Sửa điểm thiếu: <code>{html.escape(commands.get('fix_next') or '')}</code>")
     lines.append(f"• Sau đăng: <code>{html.escape(commands.get('mark_published') or '')}</code>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def operator_review_job_ids_from_result(owner_id, result, limit=3):
     result = result or {}
@@ -38663,7 +38667,7 @@ def format_post_publish_handoff(handoff):
         f"• <code>{html.escape(commands.get('tracking_report') or '')}</code>",
         f"• <code>{html.escape(commands.get('scale_plan') or '')}</code>",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def build_creative_test_prompt(job, count=5):
     (
@@ -40433,7 +40437,7 @@ def deepgram_srt_from_response(data: dict, max_words_per_block: int = 12) -> str
         srt_blocks.append(
             f"{idx}\n{video_dubbing_srt_timestamp(start)} --> {video_dubbing_srt_timestamp(end)}\n{text}"
         )
-    return "\n\n".join(srt_blocks).strip() + "\n"
+    return "\\n\\n".join(srt_blocks).strip() + "\\n"
 
 def deepgram_segments_from_response(data: dict, max_words_per_segment: int = 12) -> list[dict]:
     words = deepgram_word_items(data)
@@ -40472,13 +40476,13 @@ def deepgram_segments_from_response(data: dict, max_words_per_segment: int = 12)
 
 def deepgram_vtt_from_srt(srt_text: str) -> str:
     lines = ["WEBVTT", ""]
-    for line in str(srt_text or "").replace("\r", "").split("\n"):
+    for line in str(srt_text or "").replace("\r", "").split("\\n"):
         if line.strip().isdigit():
             continue
         if "-->" in line:
             line = line.replace(",", ".")
         lines.append(line)
-    return "\n".join(lines).strip() + "\n"
+    return "\\n".join(lines).strip() + "\\n"
 
 def srt_has_timestamp_blocks(srt_text: str) -> bool:
     return bool(re.search(r"\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}", str(srt_text or "")))
@@ -43783,7 +43787,7 @@ def broadcast_lite_market_text(draft: dict) -> str:
     ]
     if scope:
         lines.extend(["", f"✅ Đang chọn: {selected}"])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def broadcast_lite_market_keyboard(draft: dict) -> InlineKeyboardMarkup:
@@ -43847,7 +43851,7 @@ def broadcast_lite_draft_text(draft: dict) -> str:
     action_hint = "➡️ Bước tiếp theo: Chọn nút hành động."
     cta_hint = f"\n🔘 Nút: {cta_labels}" if cta_labels else "\n🔘 Nút: Chưa chọn"
     return (
-        "📝 Soạn thông báo\n\n" + media_hint + (message or "(chưa có nội dung)") + "\n\n"
+        "📝 Soạn thông báo\n\n" + media_hint + (message or "(chưa có nội dung)") + "\\n\\n"
         f"👥 Người nhận: {audience}{broadcast_lite_audience_estimate(draft)}{cta_hint}\n\n{action_hint}"
     )
 
@@ -44087,7 +44091,7 @@ def broadcast_lite_schedule_list_text(schedules: list[dict]) -> str:
             f"\n{str(item.get('name') or '')[:100]}"
             f"\nLần tới: {item.get('next_run_at') or '-'}"
         )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def broadcast_lite_schedule_list_keyboard(schedules: list[dict]) -> InlineKeyboardMarkup:
@@ -44534,7 +44538,7 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
         if draft:
             return await _broadcast_lite_edit(
                 query,
-                "⚠️ Cần xác nhận lần hai\n\n" + str(warning) + "\n\n" + broadcast_lite_review_text(draft),
+                "⚠️ Cần xác nhận lần hai\n\n" + str(warning) + "\\n\\n" + broadcast_lite_review_text(draft),
                 broadcast_lite_force_confirm_keyboard(draft),
             )
         return await _broadcast_lite_edit(query, str(warning), broadcast_lite_admin_menu_keyboard())
@@ -44554,7 +44558,7 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
                 return await _broadcast_lite_edit(query, "⚠️ " + str(error)[:300], broadcast_lite_cta_keyboard(draft))
             return await _broadcast_lite_edit(
                 query,
-                "⚠️ " + str(error)[:300] + "\n\n" + broadcast_lite_draft_text(draft),
+                "⚠️ " + str(error)[:300] + "\\n\\n" + broadcast_lite_draft_text(draft),
                 broadcast_lite_draft_keyboard(draft),
             )
         return await _broadcast_lite_edit(query, str(error)[:400], broadcast_lite_admin_menu_keyboard())
@@ -44809,7 +44813,7 @@ async def cmd_admin_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
         warnings.append("⚠️ OWNER_IDS đang rỗng, hãy set OWNER_IDS trên Railway.")
     if not is_owner_user(uid):
         warnings.append("Nếu đây là tài khoản chủ, thêm ID này vào OWNER_IDS trên Railway.")
-    warning_block = ("\n\n" + "\n".join(warnings)) if warnings else ""
+    warning_block = ("\\n\\n" + "\\n".join(warnings)) if warnings else ""
     await update.message.reply_text(
         "🛡 <b>ADMIN DEBUG</b>\n\n"
         f"• Telegram ID: <code>{html.escape(str(uid))}</code>\n"
@@ -45258,7 +45262,7 @@ async def cmd_member_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user_exists(target_id):
         return await update.message.reply_text(f"⚠️ Không tìm thấy user <code>{html.escape(target_id)}</code>.", parse_mode="HTML")
     profile = get_member_profile(target_id)
-    benefits = "\n".join(f"• {html.escape(item)}" for item in get_member_benefits(profile.get("tier") or "newbie"))
+    benefits = "\\n".join(f"• {html.escape(item)}" for item in get_member_benefits(profile.get("tier") or "newbie"))
     await update.message.reply_text(
         "🪪 <b>ADMIN MEMBER USER</b>\n\n"
         f"• User ID: <code>{html.escape(target_id)}</code>\n"
@@ -45294,7 +45298,7 @@ async def cmd_ledger_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{int(delta or 0):+d} Xu | bal={int(balance or 0)} | "
             f"{html.escape(str(event_type or '-'))} | {html.escape(str(ref_id or '-'))}"
         )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_admin_deduct(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -45829,13 +45833,13 @@ async def reply_html_lines(update: Update, lines: list[str], limit: int = 3600):
         line = str(line)
         add_len = len(line) + 1
         if chunk and current_len + add_len > limit:
-            await update.message.reply_text("\n".join(chunk), parse_mode="HTML")
+            await update.message.reply_text("\\n".join(chunk), parse_mode="HTML")
             chunk = []
             current_len = 0
         chunk.append(line)
         current_len += add_len
     if chunk:
-        await update.message.reply_text("\n".join(chunk), parse_mode="HTML")
+        await update.message.reply_text("\\n".join(chunk), parse_mode="HTML")
 
 def tool_test_setting_key(tool_name: str, field: str) -> str:
     clean_tool = re.sub(r"[^a-z0-9_:-]", "_", str(tool_name or "").strip().lower())
@@ -47582,7 +47586,7 @@ def public_image_waiting_text(tier: str = "", lang: str = "vi") -> str:
     if tier_norm not in {"high", "high_warranty"}:
         return base
     if normalize_user_language(lang) != "vi":
-        return base + "\n" + public_hub_copy(lang)["image_high_wait"]
+        return base + "\\n" + public_hub_copy(lang)["image_high_wait"]
     return base + "\nẢnh chất lượng cao có thể lâu hơn một chút."
 
 def image_tier_public_status_text() -> str:
@@ -49704,7 +49708,7 @@ async def cmd_video_last_export_error(update: Update, context: ContextTypes.DEFA
     for key in ("recorded_at", "callback_data", "function_path", "package_id", "product_id", "has_legacy_order", "has_token", "has_prompt", "has_media", "exception_class", "error_after_output_sent", "user_notified", "task_id", "job_id"):
         lines.append(f"• {html.escape(key)}: <code>{html.escape(str(item.get(key) or '-'))}</code>")
     lines.extend(["", "<b>Traceback đã lọc:</b>", f"<pre>{html.escape(str(item.get('traceback') or '-'))}</pre>"])
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 def completed_video_job_for_callback_error(update: object) -> dict | None:
     if not isinstance(update, Update) or not update.callback_query:
@@ -51022,7 +51026,7 @@ def _b14_make_subtitle(path: str, plan=None) -> str:
     else:
         lines = ["1", "00:00:00,000 --> 00:00:01,800", "TOAN AAS generated subtitle", ""]
     with open(path, "w", encoding="utf-8") as handle:
-        handle.write("\n".join(lines))
+        handle.write("\\n".join(lines))
     return path
 
 
@@ -51170,7 +51174,7 @@ async def cmd_tool_test_cinematic_continuity(update: Update, context: ContextTyp
         scene_count=scenes,
     )
     ledger = dict(plan.continuity_ledger or {})
-    first_prompts = "\n\n".join(card.provider_prompt[:900] for card in plan.scene_cards[:2])
+    first_prompts = "\\n\\n".join(card.provider_prompt[:900] for card in plan.scene_cards[:2])
     return await update.message.reply_text(
         "🧪 <b>ADMIN TEST MODE — cinematic continuity</b>\n\n"
         f"Main subject: <code>{html.escape(str(ledger.get('main_subject') or ''))}</code>\n"
@@ -51197,7 +51201,7 @@ async def cmd_tool_test_prompt_chain(update: Update, context: ContextTypes.DEFAU
         creative_controls={"color_tone": "bright clean lighting", "camera_motion": "macro close-up and snappy cuts"},
     )
     context_summary = dict(plan.prompt_context or {})
-    first_two = "\n\n".join(card.provider_prompt[:1100] for card in plan.scene_cards[:2])
+    first_two = "\\n\\n".join(card.provider_prompt[:1100] for card in plan.scene_cards[:2])
     return await update.message.reply_text(
         "🧪 <b>ADMIN TEST MODE — prompt chain</b>\n\n"
         f"Prompt context: <code>{html.escape(str(context_summary.get('product_domain') or 'general'))}</code>\n"
@@ -51245,7 +51249,7 @@ async def cmd_tool_test_video_full_addons(update: Update, context: ContextTypes.
         multiscene_blackbox.process_multiscene_video_pipeline,
         user_id=str(uid),
         job_id=f"b14-{uid}-{int(time.time())}",
-        user_prompt="\n\n".join(card.provider_prompt or card.visual_goal for card in plan.scene_cards),
+        user_prompt="\\n\\n".join(card.provider_prompt or card.visual_goal for card in plan.scene_cards),
         workspace_dir=workspace,
         render_video_func=multiscene_blackbox_fake_renderer(6),
         max_scenes=scenes,
@@ -51357,7 +51361,7 @@ async def cmd_tool_test_live_video_ux_regression(update: Update, context: Contex
     for key, passed in dict(report.get("checks") or {}).items():
         lines.append(("✅ " if passed else "❌ ") + key)
     lines.extend(["", "No provider call. No Xu charge."])
-    return await update.message.reply_text("\n".join(lines))
+    return await update.message.reply_text("\\n".join(lines))
 
 
 def video_b14_live_buttons_regression_report(user_id: int = 0) -> dict:
@@ -51454,7 +51458,7 @@ async def cmd_tool_test_live_video_buttons_regression(update: Update, context: C
     for key, passed in dict(report.get("checks") or {}).items():
         lines.append(("✅ " if passed else "❌ ") + key)
     lines.extend(["", "No provider call. No Xu charge."])
-    return await update.message.reply_text("\n".join(lines))
+    return await update.message.reply_text("\\n".join(lines))
 
 
 async def cmd_tool_test_video_backstack(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -51554,7 +51558,7 @@ async def cmd_tool_test_video_delivery_worker(update: Update, context: ContextTy
         "",
         "Kết quả đúng chỉ chứng minh đường gửi MP4 hoạt động, không tính là LIVE PASS video thật.",
     ]
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 
 def _diagnostic_message_args(update: Update, context: ContextTypes.DEFAULT_TYPE) -> list[str]:
@@ -51697,7 +51701,7 @@ async def cmd_tool_test_video_product_worker_claim(update: Update, context: Cont
         "VPS product service khi mở public:",
         "<code>python remote_worker.py --product-video --once</code>",
     ]
-    return await _reply_product_claim_diagnostic(update, "\n".join(lines))
+    return await _reply_product_claim_diagnostic(update, "\\n".join(lines))
 
 
 def _video_provider_readiness_lines(readiness: dict | None = None) -> list[str]:
@@ -51787,7 +51791,7 @@ def video_worker_status_text(status: dict | None = None, product: dict | None = 
         "<code>journalctl -u toanaas-worker-owner-product-video -n 100 --no-pager -l</code>",
         "<code>systemctl status toanaas-worker-admin-canary --no-pager -l</code>",
     ]
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 async def cmd_video_worker_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -51855,7 +51859,7 @@ def video_worker_claim_debug_text(debug: dict) -> str:
         "• admin_canary: <code>python remote_worker.py --admin-canary --once</code>",
         "• owner_product_video: <code>python remote_worker.py --owner-product-video --once</code>",
     ]
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 async def cmd_video_worker_claim_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -52015,11 +52019,11 @@ def _video_debug_plain_compact_text(text: str, *, reason: str = "message_too_lon
         if len(clean) > 260:
             clean = clean[:257] + "..."
         safe_lines.append(clean)
-        if len("\n".join(safe_lines)) > VIDEO_DEBUG_REPLY_LIMIT - 220:
+        if len("\\n".join(safe_lines)) > VIDEO_DEBUG_REPLY_LIMIT - 220:
             break
     safe_lines.append(f"debug_truncated=yes reason={reason}")
     safe_lines.append("Bot chưa trừ Xu.")
-    compact = "\n".join(safe_lines)
+    compact = "\\n".join(safe_lines)
     if len(compact) > VIDEO_DEBUG_REPLY_LIMIT:
         compact = compact[: VIDEO_DEBUG_REPLY_LIMIT - 80] + "\ndebug_truncated=yes"
     return compact
@@ -52134,7 +52138,7 @@ def video_render_debug_compact_text(
         "",
         *_video_debug_compact_attempt_lines(result, limit=4),
     ]
-    text = "\n".join(lines)
+    text = "\\n".join(lines)
     return text if len(text) <= VIDEO_DEBUG_REPLY_LIMIT else text[: VIDEO_DEBUG_REPLY_LIMIT - 80] + "\n• debug_truncated=<code>hard_limit</code>"
 
 
@@ -52418,7 +52422,7 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• charged Xu: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
     ]
     lines.extend(_video_provider_attempt_summary_lines(result))
-    text = "\n".join(lines)
+    text = "\\n".join(lines)
     if len(text) > VIDEO_DEBUG_REPLY_LIMIT:
         return video_render_debug_compact_text(
             jid,
@@ -52759,7 +52763,7 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• blocker: <code>{html.escape(blocker[:240])}</code>",
     ]
     lines.extend(_video_provider_attempt_summary_lines(result))
-    text = "\n".join(lines)
+    text = "\\n".join(lines)
     if len(text) <= VIDEO_DEBUG_REPLY_LIMIT:
         return text
     compact_lines = [
@@ -52863,7 +52867,7 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         "",
         *_video_debug_compact_attempt_lines(result, limit=5),
     ]
-    compact_text = "\n".join(compact_lines)
+    compact_text = "\\n".join(compact_lines)
     return compact_text if len(compact_text) <= VIDEO_DEBUG_REPLY_LIMIT else _video_debug_plain_compact_text(compact_text, reason="provider_job_debug_hard_limit")
 
 
@@ -53146,7 +53150,7 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         f"• wallet truth: <code>{'charge tx present' if charged > 0 else 'no wallet charge recorded'}</code>",
         f"• manual check hint: <code>{'refund/manual review if charged without valid MP4' if charged > 0 and not charge_gate.get('ok') else 'ok/no-charge until valid MP4'}</code>",
     ]
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 async def cmd_video_render_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -53182,10 +53186,10 @@ async def cmd_video_render_debug(update: Update, context: ContextTypes.DEFAULT_T
             f"• WHY_NO_JOB: <code>{html.escape(str(truth.get('why_no_job') or 'Yêu cầu không tìm thấy'))}</code>",
             f"• STATUS_SOURCE: <code>{html.escape(str(truth.get('status_source') or 'canonical_db_not_found'))}</code>",
         ]
-        return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
     command_parts = str(getattr(update.message, "text", "") or "").split()
     command_name = command_parts[0].lstrip("/") if command_parts else "render"
-    text = str(identity.get("text") or "") + "\n\n" + video_render_debug_text(
+    text = str(identity.get("text") or "") + "\\n\\n" + video_render_debug_text(
         job_id,
         mode=command_name or "render",
     )
@@ -53247,7 +53251,7 @@ async def cmd_video_trace(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• CHARGE_STATE: <code>{html.escape(str(report['CHARGE_STATE']))}</code>",
         f"• STATUS_SOURCE: <code>{html.escape(str(report['STATUS_SOURCE']))}</code>",
     ]
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_video_provider_job_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -54962,7 +54966,7 @@ def video_provider_recover_text(payload: dict) -> str:
         f"• charge: <code>0</code>",
         f"• blocker: <code>{blocker}</code>",
     ]
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_provider_raw_status_text(job_id: int) -> str:
@@ -55039,7 +55043,7 @@ def video_provider_raw_status_text(job_id: int) -> str:
             "• charge: <code>0</code>",
         ]
     )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 async def cmd_video_provider_raw_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -55158,7 +55162,7 @@ def multiscene_job_status_text(job: dict, *, admin: bool = True) -> str:
     lines.append("Provider task id thô không hiển thị; chỉ dùng masked diagnostics cho admin.")
     if admin and multiscene_job_has_overloaded_failure(job):
         lines.extend(["", multiscene_overloaded_admin_copy()])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def multiscene_failed_scene_indexes(job: dict) -> list[int]:
     indexes: list[int] = []
@@ -55215,7 +55219,7 @@ def multiscene_retry_help_text(job: dict, *, confirmed: bool = False, fallback_v
         if confirmed
         else "• Xác nhận: <code>cần xác nhận trước khi retry thật</code>."
     )
-    return "\n".join([
+    return "\\n".join([
         "🔁 <b>Retry cảnh lỗi multiscene</b>",
         "",
         multiscene_overloaded_admin_copy() if multiscene_job_has_overloaded_failure(job) else "Chỉ retry các cảnh lỗi, không đụng cảnh đã thành công.",
@@ -55352,7 +55356,7 @@ async def cmd_video_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     if len(lines) == 2:
         lines.append("Chưa có video job nội bộ.")
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_video_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -55468,7 +55472,7 @@ def shopaikey_video_route_status_lines() -> list[str]:
 async def cmd_shopaikey_video_route_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
-    return await update.message.reply_text("\n".join(shopaikey_video_route_status_lines()), parse_mode="HTML", disable_web_page_preview=True)
+    return await update.message.reply_text("\\n".join(shopaikey_video_route_status_lines()), parse_mode="HTML", disable_web_page_preview=True)
 
 async def cmd_shopaikey_video_status_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -55521,7 +55525,7 @@ async def cmd_shopaikey_video_content_probe(update: Update, context: ContextType
             f"mp4_bytes=<code>{int(item.get('mp4_bytes') or 0)}</code>"
         )
     lines.append("• Provider secret: <code>hidden</code>")
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_key4u_video_route_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -55536,7 +55540,7 @@ async def cmd_key4u_video_route_status(update: Update, context: ContextTypes.DEF
         f"• No /v1/v1: <code>{'yes' if '/v1/v1/' not in str(status.get('video_submit_final_url') or '') + str(status.get('video_fetch_final_url') or '') else 'no'}</code>",
         "• Provider secret: <code>hidden</code>",
     ]
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
 
 async def cmd_key4u_video_status_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -55576,7 +55580,7 @@ async def cmd_video_prompt_context_debug(update: Update, context: ContextTypes.D
         f"• platform: <code>{html.escape(str(summary.get('platform') or '-'))}</code>",
         "• Secrets: <code>none / hidden</code>",
     ])
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_video_prompt_vault_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -55615,7 +55619,7 @@ async def cmd_video_prompt_plan_preview(update: Update, context: ContextTypes.DE
         f"• Aspect: <code>{html.escape(str(project.get('aspect_ratio') or '-'))}</code>\n"
         f"• Scenes: <code>{int(project.get('scene_count') or 0)}</code>\n"
         f"• Estimated duration: <code>khoảng {int(project.get('estimated_total_seconds') or 0)}s</code>\n\n"
-        + "\n".join(scene_lines)
+        + "\\n".join(scene_lines)
         + "\n\n• Provider call: <code>NO</code>\n• Xu charge: <code>NO</code>",
         parse_mode="HTML",
     )
@@ -55672,7 +55676,7 @@ def public_product_guard_status_text() -> str:
         return "OPEN" if payload.get(name) else "GUARDED"
 
     standard = dict(payload.get("default_duration_standard") or {})
-    return "\n".join([
+    return "\\n".join([
         "🧰 <b>PUBLIC PRODUCT GUARD STATUS</b>",
         "",
         f"• Voice clone: <code>{state('voice_clone')}</code>",
@@ -58343,7 +58347,7 @@ def package_catalog_text() -> str:
         "",
         "Các gói/combo là lượt dịch vụ, không quy đổi thành Xu, không tính điểm rank/top-up.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def package_items_summary(items: dict) -> str:
     return ", ".join(f"{package_item_display_name(k)} x{int(v or 0)}" for k, v in (items or {}).items()) or "liên hệ admin để chốt hạn mức"
@@ -58726,7 +58730,7 @@ def admin_package_orders_text(limit: int = 10) -> str:
         "",
         "Ghi nhớ: không dùng lệnh này để sửa transaction gốc. Nếu cần chỉnh quyền lợi, dùng grant/adjust package có lý do.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def admin_package_orders_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -59105,7 +59109,7 @@ def user_package_summary_text(user_id, admin_view: bool = False, lang: str = "vi
             item_parts.append(f"{package_i18n_item_label(item.get('item_type') or '', lang)}: {remaining}/{total}")
         if item_parts:
             lines.append("  " + html.escape("; ".join(item_parts)))
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def user_package_account_short_text(user_id, lang: str = "vi") -> str:
     lang = normalize_user_language(lang) or "vi"
@@ -59220,7 +59224,7 @@ def support_contact_text(lang: str = "vi") -> str:
     if website_url:
         safe_website = html.escape(website_url)
         lines.append(f"• Website: <a href=\"{safe_website}\">{safe_website}</a>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def support_contact_keyboard(back_to_media: bool = False, lang: str = "vi") -> InlineKeyboardMarkup:
     rows = []
@@ -59416,7 +59420,7 @@ def support_custom_bot_detail_keyboard(bot_type: str, lang: str = "vi") -> Inlin
 def support_consult_detail_text(service_type: str, lang: str = "vi") -> str:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     choices = support_consult_choice_labels(service_type, lang)
-    bullets = "\n".join(f"• {html.escape(choice)}" for choice in choices)
+    bullets = "\\n".join(f"• {html.escape(choice)}" for choice in choices)
     return (
         f"📦 <b>{copy['support_consult_detail_title']}</b>\n\n"
         f"<b>{html.escape(support_consult_public_label(service_type, lang))}</b>\n\n"
@@ -59861,7 +59865,7 @@ def public_support_ticket_text(ticket: dict, lang: str = "vi") -> str:
         lines.extend(["", f"<b>{copy['support_ticket_label_latest_reply']}:</b>", html.escape(reply)])
     if ticket.get("attachment_file_id"):
         lines.extend(["", f"📎 {copy['support_ticket_attachment_present']}"])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def support_ticket_detail_keyboard(ticket: dict, lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
@@ -59882,7 +59886,7 @@ def public_support_ticket_list_keyboard(user_id, lang: str = "vi") -> tuple[str,
         lines = [f"📂 <b>{copy['support_my_tickets']}</b>", "", copy['support_ticket_list_recent'], ""]
         for ticket in tickets:
             lines.append(f"• <code>{html.escape(ticket['ticket_code'])}</code> — {html.escape(public_support_ticket_category_label(ticket['category'], lang))} — {html.escape(public_support_ticket_status_label(ticket['status'], lang))}")
-        text = "\n".join(lines)
+        text = "\\n".join(lines)
     rows = []
     for index in range(0, len(tickets), 2):
         rows.append([InlineKeyboardButton(f"🎫 {ticket['ticket_code'][-6:]}", callback_data=f"ticket|pv|{ticket['id']}") for ticket in tickets[index:index + 2]])
@@ -59925,7 +59929,7 @@ def support_ticket_admin_text(ticket: dict) -> str:
         f"Admin phụ trách: <code>{html.escape(ticket.get('assigned_admin_id') or '-')}</code>",
         f"Ghi chú admin: {html.escape(ticket.get('admin_note') or '-')}",
     ]
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def support_ticket_admin_keyboard(ticket: dict, source: str = "new") -> InlineKeyboardMarkup:
     ticket_id = int(ticket["id"])
@@ -59972,7 +59976,7 @@ def support_admin_list_payload(list_kind: str, offset: int = 0) -> tuple[str, In
     if nav:
         rows.append(nav)
     rows.append([InlineKeyboardButton("⬅️ CSKH/Ticket", callback_data="ticket|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
-    return "\n".join(lines), InlineKeyboardMarkup(rows)
+    return "\\n".join(lines), InlineKeyboardMarkup(rows)
 
 def support_ticket_stats_text() -> str:
     conn = db_connect()
@@ -59988,13 +59992,13 @@ def support_ticket_stats_text() -> str:
     lines.extend(["", "<b>Theo nhóm:</b>"])
     lines.extend(f"• {html.escape(support_category_label(category))}: <b>{count}</b>" for category, count in category_rows)
     lines.extend(["", f"⚠️ Quá hạn cần kiểm tra: <b>{overdue}</b>"])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def support_reply_templates_text() -> str:
     lines = ["📚 <b>Mẫu trả lời CSKH</b>", "", "Mẫu chỉ dùng để gợi ý. Bot không tự gửi cho khách."]
     for category in ("video_error", "image_error", "payment_topup", "refund", "document_pdf", "lead_consulting"):
         lines.extend(["", f"<b>{html.escape(support_category_label(category))}</b>", html.escape(support_suggested_reply(category, 0))])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def support_ticket_overdue_rows() -> list[tuple[dict, str]]:
     tickets = list_support_tickets(limit=100)
@@ -60326,7 +60330,7 @@ def image_prompt_style_text(state: dict, lang: str = "vi") -> str:
     lines = [f"🎨 <b>{public_image_screen_copy(lang)['style_title']}</b>", ""]
     for idx, item in enumerate(suggestions, 1):
         lines.append(f"{idx}. {html.escape(item)}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def image_prompt_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_hub_copy(lang)
@@ -60714,7 +60718,7 @@ def image_edit_options_text(state: dict, lang: str = "vi") -> str:
             lines.append(f"• {html.escape(part)}")
         lines.append("")
     lines.append(public_hub_copy(lang)["common_no_charge"])
-    return "\n".join(lines).strip()
+    return "\\n".join(lines).strip()
 
 def image_edit_options_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_image_deep_copy(lang)
@@ -60734,7 +60738,7 @@ def image_edit_suggestion_text(edit_type: str = "", lang: str = "vi") -> str:
         lines.append(f"{idx}. {html.escape(item)}")
     lines.append("")
     lines.append(public_hub_copy(lang)["common_no_charge"])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def image_edit_suggestion_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_image_deep_copy(lang)
@@ -62110,7 +62114,7 @@ def create_media_menu_text(lang: str = "vi") -> str:
 def create_media_open_text(user_id) -> str:
     lang = user_ui_lang(user_id)
     if clear_media_creator_pending_states(user_id):
-        return ui_text(lang, "media.old_cancelled") + "\n\n" + create_media_menu_text(lang)
+        return ui_text(lang, "media.old_cancelled") + "\\n\\n" + create_media_menu_text(lang)
     return create_media_menu_text(lang)
 
 def create_media_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -62445,7 +62449,7 @@ def provider_quota_alert_text(provider_key: str, usage: dict) -> str:
         lines.append("No local quota cycle baseline set.")
         lines.append(f"Admin: dùng /provider_quota_reset {payload['provider_key']} 100 để đặt lại mốc cảnh báo.")
     lines.append("Không có key/URL secret trong cảnh báo.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def parse_key_value_detail(detail: str) -> dict:
     parsed = {}
@@ -66805,7 +66809,7 @@ def shopaikey_active_video_admin_block_text(job: dict | None, user_id) -> str:
     lines.append(f"Nếu đã xác nhận job kẹt: <code>/clear_job_lock {html.escape(str(user_id or ''))}</code>")
     lines.append("")
     lines.append("Bot chưa gửi thêm job mới để tránh submit trùng và tốn credit provider thật.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def shopaikey_video_queue_counts() -> dict:
     mark_stale_public_video_jobs()
@@ -68446,14 +68450,14 @@ def guide_index_text() -> str:
         "Người mới nên bắt đầu với <code>/huongdan 1</code>.",
         "Hệ thống chỉ xử lý bước có phí sau khi bạn xem giá và xác nhận.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def guide_index_text_i18n(lang: str = "vi") -> str:
     lang = normalize_user_language(lang) or "vi"
     if lang == "vi":
         return guide_index_text()
     if lang not in {"en", "zh"}:
-        return "\n".join(public_guide_index_lines(public_pricing_locale(lang)))
+        return "\\n".join(public_guide_index_lines(public_pricing_locale(lang)))
     if lang == "zh":
         return (
             "📚 <b>TOAN AAS 使用指南</b>\n\n"
@@ -68489,9 +68493,9 @@ def guide_section_text_i18n(section_key_or_number: str, lang: str = "vi") -> str
         return guide_section_text(section_key_or_number)
     section_key = normalize_guide_section_key(section_key_or_number)
     if section_key in {"image_ai", "video_ai", "credits"}:
-        return "\n".join(public_guide_lines(section_key_or_number, public_pricing_locale(lang)))
+        return "\\n".join(public_guide_lines(section_key_or_number, public_pricing_locale(lang)))
     if lang not in {"en", "zh"}:
-        return "\n".join(public_guide_lines(section_key_or_number, public_pricing_locale(lang)))
+        return "\\n".join(public_guide_lines(section_key_or_number, public_pricing_locale(lang)))
     image_price_list = " / ".join(
         str(int(item["unit_xu"]))
         for item in video_ai_real_pricing.public_image_quality_catalog()
@@ -68720,7 +68724,7 @@ def freeze_block_message(reason: str, state: dict) -> str:
 async def notify_ops_alert(context: ContextTypes.DEFAULT_TYPE, title: str, lines: list[str], exclude_user_id=None):
     if not context or not getattr(context, "bot", None):
         return
-    body = "\n".join([title, "", *lines])[:3800]
+    body = "\\n".join([title, "", *lines])[:3800]
     excluded = str(exclude_user_id) if exclude_user_id is not None else ""
     for chat_id in owner_and_admin_ids():
         if excluded and str(chat_id) == excluded:
@@ -70385,7 +70389,7 @@ def free_hub_suggestions_text(task_type: str, suggestions: list[str], lang: str 
     for index, item in enumerate(suggestions[:3], 1):
         lines.append(f"{index}. {html.escape(str(item))}")
     lines.extend(["", html.escape(copy["freehub_input_free"])])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def free_hub_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
@@ -70635,7 +70639,7 @@ def free_hub_prompt_result_text(result: dict, task_type: str, provider: str = "l
         f"{copy['freehub_service_advice']}: <code>{html.escape(provider or 'local_prompt_library')}</code>",
         f"{copy['freehub_input_free']}: <code>0 Xu</code>",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def free_hub_prompt_choices(result: dict | None = None) -> list[str]:
     result = dict(result or {})
@@ -70803,7 +70807,7 @@ def free_hub_library_suggestions_text(items: list[dict], category_label: str, la
     for index, item in enumerate(items[:3], 1):
         lines.append(f"\n<b>{index}. {html.escape(str(item.get('title') or copy['freehub_prompts_title']))}</b>")
         lines.append(html.escape(str(item.get("prompt") or "")[:420]))
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def free_hub_library_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
@@ -74072,7 +74076,7 @@ def video_ai_real_profile_context_prompts(raw_state: dict) -> list[dict]:
             "pacing": post_guidance["pacing"],
             "constraints": constraints,
         }
-        visual_prompt = "\n".join([
+        visual_prompt = "\\n".join([
             f"Loại nội dung: {profile_name}",
             f"Mục tiêu nội dung: {description}",
             f"Tình tiết chính: {beat}",
@@ -74087,7 +74091,7 @@ def video_ai_real_profile_context_prompts(raw_state: dict) -> list[dict]:
             f"Nhịp dựng: {post_guidance['pacing']}",
             f"Giới hạn: {constraints}",
         ])
-        prompt = "\n".join([
+        prompt = "\\n".join([
             visual_prompt,
             f"Giọng: {post_guidance['voice']}",
             f"Nhạc: {post_guidance['music']}",
@@ -74161,7 +74165,7 @@ def video_uiflow3_profile_context_prompts(raw_state: dict) -> list[dict]:
     avoid = str(creative.get("avoid") or "Không tự ý đổi nhận diện, vật thể hoặc ý nghĩa nội dung đã chọn.")
     suggestions: list[dict] = []
     for index, beat in enumerate(beats[:5], 1):
-        full_prompt = "\n".join([
+        full_prompt = "\\n".join([
             f"Sản phẩm: {product_guidance['name']}",
             f"Loại nội dung: {profile_name}",
             f"Mục tiêu: {description}",
@@ -75547,7 +75551,7 @@ def video_uiflow3_b14_storyboard_payload(raw_state: dict) -> dict:
             or scene.get("visual_prompt")
             or f"{visual_goal}. {action}"
         ).strip()
-        narration = "\n".join(dialogue_by_scene.get(scene_id) or [])
+        narration = "\\n".join(dialogue_by_scene.get(scene_id) or [])
         cards.append({
             "scene_index": scene_index,
             "role": str(scene.get("scene_role") or "scene"),
@@ -76044,7 +76048,7 @@ def video_uiflow3_prepare_b14_session(
         "logo_source": "text" if watermark_text else "none",
         "logo_text": watermark_text,
         "logo_file_id": logo_file_id,
-        "narration_text": "\n".join(dialogues),
+        "narration_text": "\\n".join(dialogues),
         "music_note": f"{music_source}:{music_scope}" if music_scope != "none" else "",
     })
     source_refs = [
@@ -77123,7 +77127,7 @@ def video_ai_real_prompt_page_payload(
         ("✅ Hoàn tất rà soát câu lệnh", "vid3|prompts_done"),
     ])
     rows.extend(video_ai_real_pilot_nav_rows(back="vid3|back"))
-    return "\n".join(lines), video_uiflow3_keyboard(rows)
+    return "\\n".join(lines), video_uiflow3_keyboard(rows)
 
 
 def video_ai_real_pilot_scene_prompt_text(state: dict, scene: dict) -> str:
@@ -77424,7 +77428,7 @@ def video_ai_real_pilot_field_detail_payload(
             ("🚫 Bỏ chọn mục", f"vid3|{prefix}_remove"),
         ])
     rows.extend(video_ai_real_pilot_nav_rows(back=f"vid3|{prefix}_back"))
-    return "\n".join(lines)[:3900], video_uiflow3_keyboard(rows)
+    return "\\n".join(lines)[:3900], video_uiflow3_keyboard(rows)
 
 
 def video_ai_real_pilot_creative_payload(state: dict) -> tuple[str, InlineKeyboardMarkup]:
@@ -77519,7 +77523,7 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
             selected_lines.append(
                 f"• {label}: {html.escape(video_scene3_entry_label(entry))}"
             )
-        selected_copy = "\n".join(selected_lines) if selected_lines else "Chưa thêm"
+        selected_copy = "\\n".join(selected_lines) if selected_lines else "Chưa thêm"
         return (
             "🔒 Yêu cầu cần giữ nguyên\n\n"
             "Chọn đúng chi tiết phải nhất quán giữa các cảnh. Mỗi lần hiển thị 5 gợi ý; "
@@ -77555,7 +77559,7 @@ def video_ai_real_pilot_requirement_review_payload(
     if not selected_count:
         lines.append("Chưa chọn yêu cầu nào. Quay lại để dùng gợi ý hoặc tự nhập.")
     return (
-        "\n".join(lines)[:3900],
+        "\\n".join(lines)[:3900],
         video_uiflow3_keyboard([
             [("⬅️ Về Yêu cầu", "vid3|pilot_requirement_review_back")],
         ]),
@@ -77875,7 +77879,7 @@ def video_ai_real_pilot_bible_view_payload(
             ("✅ Hoàn tất chọn ảnh tham chiếu", back_callback),
             ("🎬 Menu Video", "menu|main_video"),
         ])
-        return "\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\\n".join(lines), video_uiflow3_keyboard(rows)
 
     if view == "continuity":
         continuity = dict(bible.get("continuity") or {})
@@ -78042,7 +78046,7 @@ def video_ai_real_pilot_scene_view_payload(
                 lines.append(f"{index}. {speaker}: {str(item.get('text') or '')[:120]}")
                 rows.append([("🗑 Xóa câu " + str(index), f"vid3|dialogue_remove|{scene_id}|{item.get('dialogue_id')}")])
         rows.extend(video_ai_real_pilot_nav_rows(back=f"vid3|scene|{scene_id}"))
-        return "\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\\n".join(lines), video_uiflow3_keyboard(rows)
 
     if view == "scene_voice":
         cast = set(scene.get("character_ids") or [])
@@ -78301,7 +78305,7 @@ def video_ai_real_pilot_prompt_view_payload(
             ("🎬 Menu Video", "menu|main_video"),
         ])
         return (
-            "\n".join(lines),
+            "\\n".join(lines),
             video_uiflow3_keyboard(rows),
         )
 
@@ -78520,7 +78524,7 @@ def video_ai_real_pilot_screen_payload(
             f"{index}. {item.get('label')}: {item.get('guidance')}"
             for index, item in enumerate(visible_suggestions, 1)
         ]
-        suggestion_copy = "\n\n".join(suggestion_lines)
+        suggestion_copy = "\\n\\n".join(suggestion_lines)
         return (
             f"{progress_prefix}✅ Nội dung đã chọn\n\n"
             f"Chủ đề: {brief.get('title') or content.get('original_intent') or 'Chưa có'}\n"
@@ -78864,7 +78868,7 @@ def video_ai_real_pilot_screen_payload(
         if complete:
             rows.append([("✅ Duyệt kế hoạch", "vid3|scene_plan_done")])
         rows.extend(video_ai_real_pilot_nav_rows(back="vid3|pilot_scene_plan_back"))
-        return "\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\\n".join(lines), video_uiflow3_keyboard(rows)
 
     if step == "branding" and view in {
         "branding_logo_position",
@@ -79072,7 +79076,7 @@ def video_ai_real_pilot_screen_payload(
             [("✅ Hoàn tất rà soát và chọn chất lượng", "vid3|summary_done")],
             *video_ai_real_pilot_nav_rows(back="vid3|back"),
         ]
-        return "\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\\n".join(lines), video_uiflow3_keyboard(rows)
 
     if step == "package" and not view:
         commercial = dict((state.get("legacy_compat") or {}).get("pilot_commercial") or {})
@@ -79138,7 +79142,7 @@ def video_ai_real_pilot_screen_payload(
         ]
         rows = [buttons[offset:offset + 2] for offset in range(0, len(buttons), 2)]
         rows.extend(video_ai_real_pilot_nav_rows(back="vid3|back"))
-        return "\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\\n".join(lines), video_uiflow3_keyboard(rows)
 
     if step == "invoice" and not view:
         try:
@@ -79184,7 +79188,7 @@ def video_ai_real_pilot_screen_payload(
             "",
             "Đây là báo giá xác nhận; chưa tạo tác vụ và chưa trừ Xu.",
         ])
-        return "\n".join(lines), video_uiflow3_keyboard([
+        return "\\n".join(lines), video_uiflow3_keyboard([
             [("✅ Tiếp tục xác nhận tạo video", "vid3|invoice_confirm")],
             *video_ai_real_pilot_nav_rows(back="vid3|back"),
         ])
@@ -79443,7 +79447,7 @@ def video_ai_real_pilot_screen_payload(
             [("✅ Hoàn tất phân vai và âm thanh", "vid3|assignment_done")],
             *video_ai_real_pilot_nav_rows(back="vid3|back"),
         ])
-        return "\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\\n".join(lines), video_uiflow3_keyboard(rows)
 
     return None
 
@@ -79576,7 +79580,7 @@ def video_film_fallback_script(state: dict) -> str:
     lines.append("━━━━━━━━━━━━━━━━━━")
     lines.append(f"💡 <b>GỢI Ý NỐI TIẾP CHO TẬP {ep_num + 1}:</b>")
     lines.append(f"Manh mối tiếp theo dẫn {html.escape(chars[0])} sang thử thách mới gay cấn hơn trong tập tiếp theo.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_film_generate_timeline_script(state: dict) -> str:
@@ -79736,7 +79740,7 @@ def video_film_generate_timeline_script(state: dict) -> str:
     lines.append("━━━━━━━━━━━━━━━━━━")
     lines.append(f"💡 <b>GỢI Ý NỐI TIẾP CHO TẬP {ep_num + 1}:</b>")
     lines.append(f"Manh mối tiếp theo dẫn {html.escape(chars[0])} sang thử thách mới gay cấn hơn trong tập tiếp theo.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, InlineKeyboardMarkup]:
@@ -80031,7 +80035,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             if len(dialogue) > 12:
                 lines.append(f"Còn {len(dialogue) - 12} câu; xóa bớt để xem tiếp.")
         rows.append([("✅ Hoàn tất thêm lời thoại cho cảnh", f"vid3|scene|{scene_id}"), ("🎬 Menu Video", "menu|main_video")])
-        return "\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\\n".join(lines), video_uiflow3_keyboard(rows)
 
     if view == "scene_voice":
         scene_id = str(state.get("active_scene_id") or "")
@@ -80160,7 +80164,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             f"Cảnh {scene.get('scene_index')}: {scene.get('compiled_prompt_status') or 'chưa hoàn tất'}"
             for scene in state.get("scenes") or []
         ]
-        return "\n".join(lines), video_uiflow3_keyboard([
+        return "\\n".join(lines), video_uiflow3_keyboard([
             [("✅ Hoàn tất rà soát câu lệnh từng cảnh", "vid3|view|prompts"), ("🎬 Menu Video", "menu|main_video")],
         ])
 
@@ -80251,7 +80255,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             [("🔄 Đổi 5 gợi ý", "vid3|prof_sug_more"), ("✍️ Tự nhập nội dung", "vid3|prof_sug_custom")],
             [("⬅️ Chọn loại nội dung", "vid3|view|profiles"), ("🎬 Menu Video", "menu|main_video")],
         ]
-        return "\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\\n".join(lines), video_uiflow3_keyboard(rows)
 
     if view == "character_count":
         count = len((state.get("bible") or {}).get("characters") or [])
@@ -80437,7 +80441,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         else:
             back_callback = "vid3|view|production_bible"
         rows.append([("✅ Hoàn tất rà soát ảnh tham chiếu", back_callback), ("🎬 Menu Video", "menu|main_video")])
-        return "\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\\n".join(lines), video_uiflow3_keyboard(rows)
 
     if view == "continuity":
         continuity = dict((state.get("bible") or {}).get("continuity") or {})
@@ -80582,7 +80586,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         start_idx = (page - 1) * 5
         page_suggestions = list(VIDEO_SERIES_GOAL_SUGGESTIONS[start_idx:start_idx + 5])
 
-        suggestions_text = "\n".join(f"{i+1}. {s}" for i, s in enumerate(page_suggestions))
+        suggestions_text = "\\n".join(f"{i+1}. {s}" for i, s in enumerate(page_suggestions))
 
         button_row = [
             (str(i + 1), f"vid3|series_goal_pick|{start_idx + i + 1}")
@@ -80777,7 +80781,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             [("🔄 Chọn nguồn nội dung khác", "vid3|content_change")],
             *video_uiflow3_nav_rows(),
         ]
-        return "\n".join(content_lines), video_uiflow3_keyboard(content_rows)
+        return "\\n".join(content_lines), video_uiflow3_keyboard(content_rows)
 
     if step == "production_bible":
         bible = dict(state.get("bible") or {})
@@ -80937,7 +80941,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             page = max(1, min(5, safe_int((state.get("episode") or {}).get("content_page"), 1)))
             start_idx = (page - 1) * 5
             page_plots = list(VIDEO_EPISODE_CONTENT_SUGGESTIONS[start_idx:start_idx + 5])
-            plots_text = "\n\n".join(f"{i+1}. {p}" for i, p in enumerate(page_plots))
+            plots_text = "\\n\\n".join(f"{i+1}. {p}" for i, p in enumerate(page_plots))
             button_row = [
                 (str(i + 1), f"vid3|episode_content_pick|{start_idx + i + 1}")
                 for i in range(len(page_plots))
@@ -81058,7 +81062,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
                 [("✅ Tiếp tục sang Gói Add-on", "vid3|episode_tail_addon")],
                 *video_uiflow3_nav_rows(back="vid3|view|episode_script"),
             ]
-            return "\n".join(lines), video_uiflow3_keyboard(rows)
+            return "\\n".join(lines), video_uiflow3_keyboard(rows)
 
         lines = [f"{prefix}🎬 KẾ HOẠCH CẢNH", ""]
         for scene in scenes:
@@ -81070,7 +81074,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         if complete:
             rows.append([("✅ Hoàn tất duyệt kế hoạch cảnh", "vid3|scene_plan_done")])
         rows.extend(video_uiflow3_nav_rows())
-        return "\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\\n".join(lines), video_uiflow3_keyboard(rows)
 
     if step == "scene_assignment":
         scenes = list(state.get("scenes") or [])
@@ -81093,8 +81097,8 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
             *video_uiflow3_nav_rows(),
         ])
         if characters:
-            lines.append("\n" + " / ".join(f"NV{index}: {item.get('display_name') or ''}" for index, item in enumerate(characters, 1)))
-        return "\n".join(lines), video_uiflow3_keyboard(rows)
+            lines.append("\\n" + " / ".join(f"NV{index}: {item.get('display_name') or ''}" for index, item in enumerate(characters, 1)))
+        return "\\n".join(lines), video_uiflow3_keyboard(rows)
 
     if step == "prompts":
         return (
@@ -81200,7 +81204,7 @@ def _video_uiflow3_screen_payload_unscoped(raw_state: dict) -> tuple[str, Inline
         if not bool(fmt.get("scene_count_confirmed")):
             summary_rows.append([("🎬 Rà soát số cảnh", "vid3|edit|scene_count")])
         summary_rows.extend([summary_actions, *video_uiflow3_nav_rows()])
-        return "\n".join(lines), video_uiflow3_keyboard(summary_rows)
+        return "\\n".join(lines), video_uiflow3_keyboard(summary_rows)
 
     state["navigation"]["current_step"] = video_uiflow3.next_required_step(state)
     return _video_uiflow3_screen_payload_unscoped(state)
@@ -81835,7 +81839,6 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         return await video_uiflow3_render(query, context, state)
     save_video_uiflow3_state(context, state)
 
-    callback_answered = False
     try:
         storyboard_marker = video_storyboard_entity_bridge_marker(state)
         if str(storyboard_marker.get("phase") or "") == "reference":
@@ -83262,8 +83265,6 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         elif action == "scene_plan_edit":
             state = video_uiflow3_open_view(state, "scene_plan_list")
         elif action == "scene_plan_auto":
-            await query.answer()
-            callback_answered = True
             state = video_uiflow3_ai_enhance_scenes(state)
             state = video_uiflow3_clear_transient(state)
             state["navigation"]["current_step"] = "scene_plan"
@@ -84061,8 +84062,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         else:
             raise ValueError("video_uiflow3_stale_action")
     except ValueError as exc:
-        if not callback_answered:
-            await query.answer(video_uiflow3_input_error(exc), show_alert=True)
+        await query.answer(video_uiflow3_input_error(exc), show_alert=True)
         return await video_uiflow3_render(query, context, state)
 
     shared_review = await video_uiflow3_return_to_shared_tail_if_ready(
@@ -84072,11 +84072,9 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         state,
     )
     if shared_review is not None:
-        if not callback_answered:
-            await query.answer()
-        return shared_review
-    if not callback_answered:
         await query.answer()
+        return shared_review
+    await query.answer()
     return await video_uiflow3_render(query, context, state)
 
 
@@ -85068,7 +85066,7 @@ def storyboard2_quality_text(state: dict, lang: str = "vi") -> str:
         ])
         if capability == "first_last_frame_video":
             lines.append("Có thể chuyển về một ảnh đầu mỗi cảnh hoặc quay lại quản lý ảnh.")
-        return "\n".join(lines)
+        return "\\n".join(lines)
     lines.append("Các gói phù hợp với ảnh đầu/ảnh cuối, tỉ lệ và số cảnh đã chọn:")
     for item in packages:
         price = safe_int(item.get("price"), 0)
@@ -85085,7 +85083,7 @@ def storyboard2_quality_text(state: dict, lang: str = "vi") -> str:
         "",
         "Chọn một gói để kiểm tra điều kiện xử lý và mở hóa đơn. Màn này chưa tạo video và chưa trừ Xu.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def storyboard2_quality_keyboard(state: dict, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -85197,7 +85195,7 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
         )
     if screen == "profiles":
         profile_rows, selected_page, page_count = storyboard2_profile_rows(safe_int(board.get("profile_page"), 1))
-        labels = "\n".join(
+        labels = "\\n".join(
             f"• {html.escape(str(item.get('icon') or '🎬'))} {html.escape(str(item.get('public_name') or ''))}"
             for item in profile_rows
         )
@@ -85237,7 +85235,7 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
         for item in suggestions:
             lines.append(f"{item['index']}. <b>{html.escape(item['title'])}</b>: {html.escape(item['content'])}")
         lines.extend(["", "Chọn một số hoặc đổi sang 5 gợi ý tiếp theo. Chưa tạo tác vụ và chưa trừ Xu."])
-        return "\n".join(lines), storyboard2_suggestion_keyboard(board)
+        return "\\n".join(lines), storyboard2_suggestion_keyboard(board)
     if screen in {"scene_review", "await_scene_edit"}:
         if screen == "await_scene_edit":
             return (
@@ -85291,7 +85289,7 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
             f"đủ ảnh đầu <b>{summary['ready_start']}/{count}</b> cảnh.",
             "Chọn Ảnh trước/Ảnh sau để đổi mục đang thao tác. Thay, xóa hoặc đổi vị trí chỉ áp dụng cho ảnh đang chọn.",
         ])
-        return "\n".join(lines), storyboard2_asset_overview_keyboard(board)
+        return "\\n".join(lines), storyboard2_asset_overview_keyboard(board)
     if screen in {"assets", "await_image"}:
         summary = video_storyboard2.asset_summary(board)
         target = video_storyboard2.next_missing_image_target(board)
@@ -85335,7 +85333,7 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
             "🖼️ <b>Ảnh Storyboard</b>\n\n"
             f"• Chế độ: <b>{mode_label}</b>\n"
             f"• Đã có: <b>{summary['ready_images']}/{summary['required_images']}</b> ảnh cần dùng\n\n"
-            + "\n".join(scene_lines)
+            + "\\n".join(scene_lines)
             + "\n\nMột nút nhận toàn bộ ảnh; ảnh được gắn lần lượt cho các cảnh, ảnh đầu trước rồi ảnh cuối. "
             "Tạo ảnh AI dùng thẳng nội dung và câu lệnh Storyboard đã chọn, không mở thêm bộ gợi ý chung."
             + wait_copy,
@@ -85367,7 +85365,7 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
             prompt = video_storyboard2.image_prompt(board, index, slot, offset + choice - 1)
             lines.append(f"{choice}. {html.escape(prompt['prompt'][:220])}…")
         lines.extend(["", "Sau khi chọn, hệ thống mở gói ảnh và hóa đơn riêng; chưa tạo ảnh ở màn này."])
-        return "\n".join(lines), storyboard2_image_prompt_keyboard()
+        return "\\n".join(lines), storyboard2_image_prompt_keyboard()
     if screen in {"video_prompts", "await_video_prompt", "await_video_negative"}:
         if screen == "await_video_prompt":
             return (
@@ -86035,7 +86033,7 @@ def video_profile_studio_preview_text(draft: dict, lang: str = "vi") -> str:
     clarification_text = f"\n\n<b>Cần làm rõ thêm:</b> {html.escape(clarification)}" if clarification else ""
     return (
         f"🧠 <b>{copy['profile_preview']}</b>\n\n"
-        f"{html.escape(prompt)}\n\n" + "\n".join(scene_lines) + clarification_text +
+        f"{html.escape(prompt)}\n\n" + "\\n".join(scene_lines) + clarification_text +
         f"\n\n{copy['no_charge']}."
     )
 
@@ -86264,8 +86262,8 @@ def video_profile_scene1_quality_text(state: dict, lang: str = "vi") -> str:
         "⭐ <b>Chọn chất lượng gần cuối</b>\n\n"
         f"Kế hoạch đã có <b>{scene_count} cảnh</b>. Thời lượng và giá được tính riêng theo gói đã chọn.\n\n"
         "Khuyến mãi Video nhiều cảnh: 1 cảnh không giảm; 2–5 cảnh giảm 10%; 6–10 cảnh giảm 15%; 11–20 cảnh giảm 20%; add-on tính riêng.\n\n"
-        + "\n\n".join(quality_rows)
-        + "\n\n"
+        + "\\n\\n".join(quality_rows)
+        + "\\n\\n"
         "Hệ thống tự chọn đường dựng phù hợp theo năng lực của gói và phương án dự phòng; giá không đổi sau khi xác nhận. "
         "Màn này chưa tạo video và chưa trừ Xu."
     )
@@ -86698,7 +86696,7 @@ def video_scene3_profile_links_text(state: dict) -> str:
     notice = str(state.get("profile_link_notice") or "").strip()
     if notice:
         lines.extend(["", f"⚠️ {html.escape(notice)}"])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_scene3_profile_links_keyboard(state: dict) -> InlineKeyboardMarkup:
@@ -86723,7 +86721,7 @@ def video_scene3_profile_suggestions_text(state: dict) -> str:
     ]
     for index, key in enumerate(suggestions, 1):
         lines.append(f"{index}. {html.escape(video_profile_public_label(state, key))}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_scene3_profile_suggestions_keyboard(state: dict) -> InlineKeyboardMarkup:
@@ -86901,7 +86899,7 @@ def video_scene3_suggestion_text(state: dict) -> str:
         ])
     page = max(1, min(4, safe_int((state.get("video_flow_context") or {}).get("suggestion_page"), 1)))
     lines.append(f"Bộ gợi ý {page}/4. Chọn một hướng hoặc tự nhập nội dung riêng; mỗi profile có 20 hướng không lặp sớm.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_scene3_prepare_content_choices(state: dict, *, rotate: bool = False) -> dict:
@@ -87010,7 +87008,7 @@ def video_scene3_field_editor_text(
     for index, suggestion in enumerate(suggestions[:5], 1):
         lines.append(f"<b>{index}.</b> {html.escape(str(suggestion))}")
     lines.extend(["", "Chọn một gợi ý hoặc tự nhập. Chỉ giá trị anh/chị chọn mới được lưu vào kế hoạch."])
-    return "\n".join(lines)[:3900]
+    return "\\n".join(lines)[:3900]
 
 
 def video_scene3_field_editor_keyboard(
@@ -87159,7 +87157,7 @@ def video_scene3_materials_manage_text(state: dict) -> str:
         f"• Đang chọn: <b>{active_index or '-'}</b>",
         "Chọn ảnh trước/sau để sửa mô tả hoặc xóa đúng tệp; không ảnh hưởng các tệp còn lại.",
     ])
-    return "\n".join(lines)[:3900]
+    return "\\n".join(lines)[:3900]
 
 
 def video_scene3_materials_manage_keyboard() -> InlineKeyboardMarkup:
@@ -87256,7 +87254,7 @@ def video_scene3_creative_suggestions_text(state: dict) -> str:
     for index, suggestion in enumerate(suggestions, 1):
         lines.append(f"<b>{index}.</b> {html.escape(suggestion)}")
     lines.extend(["", "Chọn một số hoặc tự nhập nội dung riêng. Các gợi ý chỉ lập kế hoạch, chưa tạo file và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_scene3_creative_suggestions_keyboard(state: dict) -> InlineKeyboardMarkup:
@@ -87355,7 +87353,7 @@ def video_scene3_content_suggestions_text(state: dict) -> str:
     for index, suggestion in enumerate(suggestions, 1):
         lines.append(f"<b>{index}.</b> {html.escape(suggestion)}")
     lines.extend(["", "Chọn một số hoặc tự nhập. Đây mới là nội dung kế hoạch, chưa thực thi hậu kỳ."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_scene3_content_suggestions_keyboard(state: dict) -> InlineKeyboardMarkup:
@@ -87414,7 +87412,7 @@ def video_scene3_scene_plan_text(state: dict) -> str:
         "Mỗi cảnh là một ý/hành động trọn vẹn; không cắt giữa câu nói, hành động hoặc chuyển động camera.",
         "Chuyển cảnh sẽ được chọn ở bước riêng sau khi câu lệnh từng cảnh đã hoàn chỉnh.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_scene3_scene_plan_keyboard(state: dict | None = None) -> InlineKeyboardMarkup:
@@ -87466,7 +87464,7 @@ def video_scene3_scene_detail_text(state: dict) -> str:
     if preserve:
         rows.append(f"• Cần giữ nguyên: {html.escape('; '.join(preserve)[:650])}")
     rows.extend(["", "Cảnh này phải hoàn tất ý, hành động, lời nói và chuyển động camera trước khi nối sang cảnh sau."])
-    return "\n".join(rows)
+    return "\\n".join(rows)
 
 
 def video_scene3_scene_detail_keyboard(state: dict | None = None) -> InlineKeyboardMarkup:
@@ -87496,7 +87494,7 @@ def video_scene3_transitions_text(state: dict) -> str:
         public = video_scene3_flow.transition_public(transition)
         lines.append(f"• Cảnh {index} → {index + 1}: <b>{html.escape(public['label'])}</b>")
     lines.extend(["", "Chọn tuần tự từng điểm nối. Bước này chỉ cập nhật câu lệnh, chưa tạo video."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_scene3_transitions_keyboard(state: dict) -> InlineKeyboardMarkup:
@@ -87533,7 +87531,7 @@ def video_scene3_transition_text(state: dict) -> str:
         label, description = video_scene3_flow.TRANSITIONS[key]
         lines.append(f"<b>{number}.</b> <b>{html.escape(label)}</b>: {html.escape(description)}")
     lines.extend(["", "Chọn một số, hoặc dùng Cắt tự nhiên nếu không cần hiệu ứng. Chưa có file nào được tạo."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_scene3_transition_keyboard(state: dict | None = None) -> InlineKeyboardMarkup:
@@ -87613,7 +87611,7 @@ def video_scene3_automatic_text_review_text(state: dict) -> str:
         "Thẻ giới thiệu nhân vật dùng chữ dễ đọc, đậm vừa và hiệu ứng nhẹ. Mỗi nhân vật mới cần một mục có tên/nội dung do anh/chị cung cấp; hệ thống không tự bịa tên hay chức danh.",
         "Khi chưa có nhận diện hình ảnh thật, hệ thống dùng vị trí cố định an toàn thay vì giả vờ chữ đang chạy theo người/vật.",
     ])
-    return "\n".join(lines)[:3900]
+    return "\\n".join(lines)[:3900]
 
 
 def video_scene3_automatic_text_scope_text(state: dict) -> str:
@@ -87905,7 +87903,7 @@ def video_scene3_full_review_text(state: dict) -> str:
         "Mỗi cảnh phải hoàn tất một ý hoặc hành động trước khi nối sang cảnh tiếp theo.",
         "Logo/Watermark và bản tổng hợp đã được giữ. Khi mọi phần đã đúng, tiếp tục sang Âm thanh & Add-on rồi chọn gói phù hợp.",
     ])
-    return "\n".join(lines)[:4050]
+    return "\\n".join(lines)[:4050]
 
 
 def video_scene3_full_review_keyboard(state: dict) -> InlineKeyboardMarkup:
@@ -88013,7 +88011,7 @@ def video_scene3_post_detail_text(state: dict) -> str:
                 continue
             lines.append(f"• {html.escape(label.capitalize())}: {html.escape(video_scene3_public_config_value(field, value.get(field)))}")
     lines.extend(["", "Đây là cấu hình kế hoạch. Hệ thống chỉ báo đã áp dụng sau khi hậu kỳ thật và kiểm tra video cuối."])
-    return "\n".join(lines)[:3900]
+    return "\\n".join(lines)[:3900]
 
 
 def video_scene3_post_detail_keyboard(state: dict) -> InlineKeyboardMarkup:
@@ -88234,7 +88232,7 @@ def video_scene3_quality_guide_text() -> str:
         )
         lines.append(f"↳ {html.escape(product['use_case'])}")
     lines.extend(["", "Thông số là định hướng chọn gói, không phải lời hứa hoàn tất. Chỉ video cuối hợp lệ đã gửi mới được tính Xu."])
-    return "\n".join(lines)[:3900]
+    return "\\n".join(lines)[:3900]
 
 
 def video_scene3_quality_guide_keyboard() -> InlineKeyboardMarkup:
@@ -88749,7 +88747,7 @@ def video_scene3_frame_quality_guide_text(state: dict | None = None) -> str:
         "",
         "Giá được tính theo bảng giá ghép ảnh hiện tại và chỉ được ghi sau khi MP4 hợp lệ đã gửi thành công.",
     ])
-    return "\n".join(rows)
+    return "\\n".join(rows)
 
 
 def video_flow6_quality_text(state: dict, lang: str = "vi") -> str:
@@ -88833,7 +88831,7 @@ def video_profile_scene1_handoff(user_id: int, state: dict) -> dict:
         "subtitle_source": "from_narration" if post_addons.get("subtitle_rendering") else "none",
         "dub_enabled": bool(post_addons.get("dubbing_mix")),
         "dub_source": "same_as_voice" if post_addons.get("dubbing_mix") else "none",
-        "narration_text": "\n".join(
+        "narration_text": "\\n".join(
             str(scene.get("dialogue_or_voiceover") or "").strip()
             for scene in plan.get("scenes") or []
             if str(scene.get("dialogue_or_voiceover") or "").strip()
@@ -89373,7 +89371,7 @@ def architecture_preview_text(state: dict, *, full: bool = False) -> str:
         + (f" · Thời lượng: {html.escape(str(answers.get('duration') or 'theo kế hoạch'))}" if output == "video" else "")
         + f"\n• Tư liệu tham chiếu: {refs}"
         + (f"\n• Phân loại: <b>{html.escape(truth_label)}</b>" if truth_label else "")
-        + "\n\n<b>Kế hoạch cảnh</b>\n" + ("\n".join(scene_lines) if scene_lines else "• Không cần kế hoạch cảnh cho ảnh tĩnh")
+        + "\n\n<b>Kế hoạch cảnh</b>\n" + ("\\n".join(scene_lines) if scene_lines else "• Không cần kế hoạch cảnh cho ảnh tĩnh")
         + f"\n\n<b>Prompt chuyên nghiệp</b>\n{html.escape(prompt[:prompt_limit])}"
         + f"\n\n<b>Điều cần tránh</b>\n{html.escape(negative[:negative_limit])}"
         + "\n\nBản nháp này miễn phí. Hệ thống chưa tạo file, chưa gọi nguồn xử lý và chưa trừ Xu."
@@ -89415,7 +89413,7 @@ def architecture_scene_plan_text(state: dict) -> str:
         )
     if not scenes:
         lines.append("Ảnh tĩnh không cần kế hoạch walkthrough.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def architecture_prepare_image_handoff(user_id: int, state: dict) -> dict:
@@ -89665,7 +89663,7 @@ def video_edit_audio_text(state: dict | None = None, lang: str = "vi") -> str:
     else:
         volume = safe_int(current.get("audio_volume_percent"), 100)
     warning = "\n• Lưu ý: mức trên 100% có thể gây vỡ tiếng; hệ thống sẽ chặn mức vượt giới hạn." if volume > 100 else ""
-    track_text = "\n".join(
+    track_text = "\\n".join(
         f"• {index}. {str(item.get('kind') or 'audio').upper()} · "
         f"{video_local_validation.safe_display_filename(str(item.get('file_name') or 'audio'))}"
         for index, item in enumerate(audio_sources, start=1)
@@ -89830,7 +89828,7 @@ def video_quality_enhance_source_text(state: dict, lang: str = "vi") -> str:
             )
         lines.append("")
     lines.append("Chọn một hướng phù hợp. Hệ thống chưa tạo file, chưa gọi nguồn xử lý và chưa trừ Xu.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_quality_enhance_source_keyboard(
@@ -89871,7 +89869,7 @@ def video_edit_restore_limits_text() -> str:
     names = [str(item.get("public_name") or "") for item in unavailable if not item.get("enabled")]
     return (
         "ℹ️ <b>Nâng cấp chuyên sâu</b>\n\n"
-        + "\n".join(f"• {html.escape(name)}" for name in names)
+        + "\\n".join(f"• {html.escape(name)}" for name in names)
         + "\n\nCác mục này chỉ xuất hiện thành thao tác khi hệ thống làm được thật. Hiện hệ thống chưa tạo tác vụ và chưa trừ Xu."
     )
 
@@ -89906,7 +89904,7 @@ def video_edit_plan_text(state: dict | None = None, lang: str = "vi") -> str:
     if current.get("effect_timing"):
         lines.append(f"• Thời điểm hiệu ứng: {html.escape(str(current.get('effect_timing') or ''))}")
     lines.extend(["", "Đây mới là kế hoạch. Chưa tạo file, chưa gọi nguồn xử lý và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_edit_plan_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -90027,7 +90025,7 @@ def video_ai_edit_source_summary_text(state: dict, lang: str = "vi") -> str:
         suggestion_lines.append(
             f"• {html.escape(str(capability.get('public_name') or 'Kiểm tra thêm'))}: {html.escape(str(item.get('reason') or ''))}"
         )
-    suggestions_text = "\n".join(suggestion_lines) or "• Chưa có gợi ý cục bộ đáng tin cậy từ thông tin tệp hiện tại."
+    suggestions_text = "\\n".join(suggestion_lines) or "• Chưa có gợi ý cục bộ đáng tin cậy từ thông tin tệp hiện tại."
     return (
         "🎞 <b>Video đã được kiểm tra</b>\n\n"
         f"• Tên: {html.escape(str((state or {}).get('source_display_name') or 'video'))}\n"
@@ -90213,7 +90211,7 @@ def video_ai_edit_selected_text(state: dict | None, lang: str = "vi") -> str:
         "",
         "Chạm từng mục để nhập hoặc chỉnh chi tiết. Lựa chọn chỉ được lưu trong draft AI này.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_ai_edit_selected_keyboard(state: dict | None, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -90284,7 +90282,7 @@ def video_ai_edit_summary_text(state: dict | None, lang: str = "vi") -> str:
         f"✅ Đã chọn: <b>{len(selected)} mục</b>",
         "📝 Yêu cầu chỉnh sửa đã được lưu. Hiện chỉ ở bước chuẩn bị; chưa bắt đầu xử lý video AI, chưa tạo job và chưa trừ Xu.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_ai_edit_summary_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
@@ -90329,7 +90327,7 @@ def video_ai_edit_suggestions_text(state: dict, lang: str = "vi") -> str:
     if not suggestions:
         lines.append("Chưa đủ thông tin để gợi ý. Anh/chị hãy mô tả rõ chủ thể và kết quả mong muốn.")
     lines.append("Chọn một hướng để tùy chỉnh chi tiết. Hệ thống chưa tạo tác vụ và chưa trừ Xu.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_ai_edit_suggestions_keyboard(state: dict, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -90438,7 +90436,7 @@ def video_ai_edit_preserve_text(state: dict, lang: str = "vi") -> str:
     for key, label in VIDEO_AI_EDIT_PRESERVE_LABELS:
         lines.append(f"{'✅' if controls.get(key) else '⬜'} {label}")
     lines.extend(["", "Thay nền và biến đổi toàn cảnh chỉ bật khi anh/chị chọn rõ."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_ai_edit_preserve_keyboard(state: dict, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -90487,7 +90485,7 @@ def video_ai_edit_aspect_limits_text() -> str:
     ]
     return (
         "ℹ️ <b>Khả năng đổi tỉ lệ chuyên sâu</b>\n\n"
-        + "\n".join(
+        + "\\n".join(
             f"• {html.escape(str(item.get('public_name') or ''))}: {html.escape(str(item.get('description') or ''))}"
             for item in items
         )
@@ -90538,7 +90536,7 @@ def video_ai_edit_prompt_text(state: dict, lang: str = "vi") -> str:
             0,
         ),
     )
-    plan_text = "\n".join(f"• {html.escape(str(item))}" for item in plan_lines)
+    plan_text = "\\n".join(f"• {html.escape(str(item))}" for item in plan_lines)
     return (
         "🧾 <b>Kế hoạch chỉnh sửa</b>\n\n"
         f"• Hồ sơ: <b>{html.escape(str(route.get('profile_title') or '-'))}</b>\n"
@@ -90612,7 +90610,7 @@ def video_ai_edit_invoice_text(state: dict, invoice: dict, lang: str = "vi") -> 
             "no_local_capability_match": str(invoice.get("message_vi") or "Chưa nhận ra thao tác cục bộ; hãy mô tả làm sáng, làm rõ, giảm nhiễu hoặc video dọc TikTok."),
         }.get(reason, "Hệ thống chưa có thao tác cục bộ phù hợp; chưa tạo tác vụ và chưa trừ Xu.")
         lines.extend([public, "Chưa tạo tác vụ, chưa gọi dịch vụ bên ngoài và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_ai_edit_invoice_keyboard(invoice: dict, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -90815,7 +90813,7 @@ def video_local_manual_options_text(state: dict, lang: str = "vi") -> str:
     )
     return (
         f"🛠️ <b>{copy['video_edit_hub']}</b>\n\n"
-        + "\n".join(f"• {html.escape(item)}" for item in selected)
+        + "\\n".join(f"• {html.escape(item)}" for item in selected)
         + f"\n\n{copy['video_edit_manual']}. {copy['confirm']}."
     )
 
@@ -91362,7 +91360,7 @@ def video_local_confirmation_text(
             f"• Phần {index}: {_video_local_duration_text(int(item.get('start_ms') or 0))} → {_video_local_duration_text(int(item.get('end_ms') or 0))}"
             for index, item in enumerate(ranges, start=1)
         ]
-        summary = "\n".join(details[:30])
+        summary = "\\n".join(details[:30])
         title = f"Cắt thành {len(ranges)} phần"
         artifact_policy = f"• Gửi đúng {len(ranges)} file MP4; từng phần đều được kiểm tra kỹ thuật hợp lệ."
         expected_duration_ms = sum(
@@ -91372,7 +91370,7 @@ def video_local_confirmation_text(
     else:
         plan = dict((state or {}).get("manual_edit_plan") or {})
         title = "Chỉnh sửa thủ công"
-        summary = "\n".join(
+        summary = "\\n".join(
             f"• {html.escape(item)}"
             for item in video_local_editing.public_plan_summary(
                 plan,
@@ -92004,7 +92002,7 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
         lines.append(f"• {copy['charged']}: <b>0 Xu</b>")
     else:
         lines.append(f"• {copy['pending_delivery']}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 async def show_video_editor_job_status_panel(
@@ -93537,7 +93535,7 @@ def video_script_entity_bridge_snapshot(raw_state: dict) -> dict:
         "gender_grounded": bool(
             len(characters) == 1 and first_gender in {"male", "female"}
         ),
-        "description": "\n".join(character_lines)[:1600],
+        "description": "\\n".join(character_lines)[:1600],
         "needs_gender_confirmation": False,
         "history": [],
     }
@@ -94061,7 +94059,7 @@ def video_script_suggestions_text(session: dict) -> str:
             "",
         ])
     lines.append("Chọn nút 1–5. Sau khi chọn, flow mở Chi tiết sáng tạo rồi mới đến Mục tiêu kịch bản; chưa gọi AI và chưa trừ Xu.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_script_suggestions_keyboard(session: dict) -> InlineKeyboardMarkup:
@@ -94202,7 +94200,7 @@ def video_script_proposal_review_text(proposal: dict) -> str:
         else "Kiểm tra ranh giới từng cảnh rồi xác nhận. Nếu cần, chọn Đổi số cảnh; parser sẽ phân bổ lại toàn bộ nguyên văn kịch bản, không bỏ ký tự nào."
     )
     lines.extend(["", guidance, "Chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_flow7_script_count_text(proposal: dict) -> str:
@@ -94425,7 +94423,7 @@ async def video_script_extract_document(document, context) -> tuple[bool, str, s
                 if len(reader.pages) > DOC_MAX_PAGES:
                     return False, "", f"⚠️ PDF có hơn {DOC_MAX_PAGES} trang nên chưa thể đọc trọn vẹn. Hãy chia file nhỏ hơn."
                 pages = [(page.extract_text() or "") for page in reader.pages]
-                text = "\n\n".join(pages)
+                text = "\\n\\n".join(pages)
                 return (True, text, "") if text.strip() else (False, "", "⚠️ PDF không có lớp chữ để đọc đầy đủ.")
             except Exception:
                 return False, "", "⚠️ Chưa đọc được toàn bộ PDF. Chưa có nội dung nào được lưu."
@@ -95142,7 +95140,7 @@ def video_route_audit_text() -> str:
             f"  parent/back: <code>{html.escape(str(row.get('parent_menu') or ''))}</code> / <code>{html.escape(str(row.get('back_target') or ''))}</code>\n"
             f"  children: <code>{html.escape(children)}</code>"
         )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_route_matrix_text() -> str:
@@ -95154,7 +95152,7 @@ def video_route_matrix_text() -> str:
             f"<code>{html.escape(str(row.get('entry_callback') or ''))}</code> | "
             f"parent <code>{html.escape(str(row.get('parent_menu') or ''))}</code>"
         )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_back_audit_payload() -> dict:
@@ -95188,7 +95186,7 @@ def video_back_audit_text() -> str:
             f"• {html.escape(str(row.get('video_tool') or ''))}/{html.escape(str(row.get('step') or ''))}: "
             f"<code>{html.escape(str(row.get('actual') or ''))}</code> — <b>{status}</b>"
         )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 VIDEO_FLOW_PLACEHOLDER_TERMS = (
@@ -95257,7 +95255,7 @@ def video_placeholder_audit_text() -> str:
             f"• {html.escape(str(row.get('label') or ''))}: <b>{status}</b> "
             f"<code>{html.escape(matches)}</code>"
         )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_flow_audit_rows() -> list[dict]:
@@ -95535,7 +95533,7 @@ def video_callback_audit_text() -> str:
     lines = ["🔘 <b>Video Callback Audit</b>", "", f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>", ""]
     for row in payload.get("rows") or []:
         lines.append(f"• {html.escape(str(row.get('product_id') or ''))}: <b>{'PASS' if row.get('ok') else 'FAIL'}</b>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_microflow_audit_text() -> str:
@@ -95544,7 +95542,7 @@ def video_microflow_audit_text() -> str:
     for check in payload.get("checks") or []:
         lines.append(f"• {html.escape(str(check.get('name') or ''))}: <b>{'PASS' if check.get('ok') else 'FAIL'}</b>")
     lines.append(f"• callback coverage: <b>{'PASS' if (payload.get('callbacks') or {}).get('ok') else 'FAIL'}</b>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 VIDEO_UI_PUBLIC_FORBIDDEN_TERMS = (
@@ -95711,7 +95709,7 @@ def video_ui_audit_text() -> str:
     lines = ["🎬 <b>Video UI Audit</b>", "", f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>", ""]
     for check in payload.get("checks") or []:
         lines.append(f"• {html.escape(str(check.get('name') or ''))}: <b>{'PASS' if check.get('ok') else 'FAIL'}</b>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 VIDEO_FLOW_LOCKED_MENU_ROWS = (
@@ -95742,7 +95740,7 @@ def video_flow_contract_audit_text() -> str:
     lines = ["🔒 <b>Video Flow Contract Audit</b>", "", f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>", ""]
     for check in payload.get("checks") or []:
         lines.append(f"• {html.escape(str(check.get('name') or ''))}: <b>{'PASS' if check.get('ok') else 'FAIL'}</b>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_engine_route_audit_payload() -> dict:
@@ -95779,7 +95777,7 @@ def video_engine_route_audit_text() -> str:
     lines.append("")
     for product_type, route in sorted((payload.get("routes") or {}).items()):
         lines.append(f"• <code>{html.escape(product_type)}</code>: {html.escape(str(route.get('adapter') or '-'))}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_final_output_audit_payload() -> dict:
@@ -95800,7 +95798,7 @@ def video_final_output_audit_text() -> str:
     lines = ["✅ <b>Video Final Output Audit</b>", "", f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>", ""]
     for check in payload.get("checks") or []:
         lines.append(f"• {html.escape(str(check.get('name') or ''))}: <b>{'PASS' if check.get('ok') else 'FAIL'}</b>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_semantics_audit_text() -> str:
@@ -95816,7 +95814,7 @@ def video_semantics_audit_text() -> str:
             f"• {html.escape(str(check.get('name') or ''))}: <b>{'PASS' if check.get('ok') else 'FAIL'}</b>\n"
             f"  {html.escape(str(check.get('detail') or ''))}"
         )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_flow_audit_payload() -> dict:
@@ -95847,7 +95845,7 @@ def video_flow_audit_text() -> str:
             f"  provider/worker: <b>{'YES' if row.get('requires_provider') else 'NO'}</b>/<b>{'YES' if row.get('requires_worker') else 'NO'}</b>\n"
             f"  back: <code>{html.escape(str(row.get('back_target') or ''))}</code>"
         )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 async def cmd_video_route_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -96088,14 +96086,14 @@ def video_prompt_library_category_text(action: str, items: list[dict] | None = N
     ]
     if not rows:
         lines.append("Chưa có mẫu phù hợp trong kho local. Anh/chị có thể quay lại nhập ý tưởng riêng." if normalize_user_language(lang) == "vi" else copy["memory_empty"])
-        return "\n".join(lines)
+        return "\\n".join(lines)
     for idx, item in enumerate(rows[:5], 1):
         prompt = video_prompt_library_public_preview(str(item.get("prompt_text") or ""))
         if len(prompt) > 220:
             prompt = prompt[:217].rstrip() + "..."
         style = video_prompt_library_public_preview(str(item.get("style") or item.get("category") or "video"))
         lines.append(f"{idx}. <b>{html.escape(style)}</b>\n<code>{html.escape(prompt)}</code>")
-    return "\n\n".join(lines)
+    return "\\n\\n".join(lines)
 
 
 def video_prompt_library_category_keyboard(action: str, items: list[dict] | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -97163,7 +97161,7 @@ def video_microflow_options_text(kind: str, topic: str, product_id: str = "", sc
                 lines.append(f"   • {html.escape(str(detail))}")
         lines.append("")
     lines.append("Chọn một lựa chọn bằng nút số bên dưới. Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu.")
-    return "\n".join(lines).strip()
+    return "\\n".join(lines).strip()
 
 
 def video_microflow_select_label(kind: str, index: int) -> str:
@@ -97251,7 +97249,7 @@ def video_storyboard_image_scenes_text(session: dict | None = None, lang: str = 
             f"   Giữ ổn định: {html.escape(str(scene.get('continuity_note') or ''))}",
         ])
     lines.extend(["", "Sau khi xác nhận storyboard/ảnh, TOAN AAS mới tạo cảnh video cuối có motion và số giây riêng. Chưa tạo file thật và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_storyboard_image_scenes_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -97278,7 +97276,7 @@ def video_storyboard_final_video_scenes_text(session: dict | None = None, lang: 
             f"{html.escape(str(scene.get('transition') or 'cắt mềm'))}"
         )
     lines.extend(["", "Bước này chỉ lập kế hoạch, chưa render video thật và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_storyboard_final_video_scenes_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -97302,7 +97300,7 @@ def video_image_prompt_set_text(session: dict | None = None, lang: str = "vi") -
     for item in images[:12]:
         lines.append(f"{safe_int(item.get('index'), 0)}. {html.escape(str(item.get('image_prompt') or ''))}")
     lines.extend(["", "Bước này chỉ lập kế hoạch ảnh đầu vào, chưa tạo ảnh/video thật và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_image_prompt_set_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -97888,7 +97886,7 @@ def video_b14_idea_suggestions_text(session: dict | None = None, lang: str = "vi
     ]
     for index, idea in enumerate(ideas[:5], 1):
         lines.append(f"{index}. {html.escape(idea)}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_b14_idea_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -98074,7 +98072,7 @@ def video_b14_storyboard_preview_text(plan) -> str:
             f"   Góc quay: {html.escape(card.camera_motion)}"
         )
     lines.extend(["", "Màn này chỉ là kế hoạch dạng văn bản. Chưa tạo tệp thật, chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_b14_prompt_bundle_from_plan(plan) -> dict:
@@ -98215,7 +98213,7 @@ def video_b14_prompt_text_from_session(session: dict, kind: str = "video") -> st
         else:
             prompt = str(card.get("provider_prompt") or card.get("video_prompt") or card.get("visual_goal") or "")
         lines.append(f"Cảnh {index}\n{prompt}")
-    return "\n\n".join(lines)
+    return "\\n\\n".join(lines)
 
 
 def video_b14_prompt_video_text_from_session(session: dict, lang: str = "vi") -> str:
@@ -98256,7 +98254,7 @@ def video_b14_prompt_video_text_from_session(session: dict, lang: str = "vi") ->
         if prompt:
             lines.extend(["• Câu lệnh nguyên văn:", prompt])
         lines.append("")
-    return "\n".join(lines).strip()
+    return "\\n".join(lines).strip()
 
 
 def video_b14_prompt_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -98563,7 +98561,7 @@ def video_b14_creative_controls_text(session: dict | None = None, user_id=0, lan
         "Cảm xúc là cảm giác người xem nhận được, không phải màu sắc hay góc máy.",
         "Bước này chỉ bổ sung cách dựng và lời mô tả cảnh. Chưa xử lý video và chưa trừ Xu.",
     ])
-    return video_b14_with_admin_label("\n".join(lines), user_id, lang)
+    return video_b14_with_admin_label("\\n".join(lines), user_id, lang)
 
 
 def video_b14_creative_controls_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -98795,7 +98793,7 @@ def product_video_duration_predictor_text(session: dict | None = None, user_id=0
         f"Bước tiếp theo: <b>{html.escape(str(prediction.get('next_action') or 'Chọn số cảnh'))}</b>.",
         "Gợi ý này chỉ để lập kế hoạch, chưa dựng video và chưa trừ Xu.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_b14_build_storyboard_for_session(user_id, session: dict, *, scene_count: int | None = None):
@@ -99079,7 +99077,7 @@ def video_b14_narration_from_storyboard(session: dict | None = None) -> str:
         if line:
             lines.append(f"Cảnh {safe_int(card.get('scene_index'), len(lines) + 1)}: {line}")
     if lines:
-        return "\n".join(lines)[:3500]
+        return "\\n".join(lines)[:3500]
     topic = str((session or {}).get("topic") or draft.get("topic") or "video của anh/chị").strip()
     return f"Cảnh 1: {topic}\nCảnh 2: nhấn lợi ích chính.\nCảnh 3: kết thúc bằng lời kêu gọi hành động."
 
@@ -99097,7 +99095,7 @@ def video_b14_narration_source(session: dict | None = None) -> dict:
         if line:
             lines.append(f"Cảnh {safe_int(card.get('scene_index'), len(lines) + 1)}: {line}")
     if lines:
-        return {"ok": True, "source": "storyboard", "text": "\n".join(lines)[:3500]}
+        return {"ok": True, "source": "storyboard", "text": "\\n".join(lines)[:3500]}
     generated = video_b14_narration_from_storyboard(session)
     if generated.strip():
         return {"ok": True, "source": "generated", "text": generated[:3500]}
@@ -99254,7 +99252,7 @@ def video_b14_subtitle_text(session: dict | None = None, lang: str = "vi") -> st
     lines.extend([
         "TOAN AAS chỉ lưu lựa chọn phụ đề vào kế hoạch video. File thật chỉ tạo sau bước xác nhận cuối.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_b14_subtitle_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -99316,7 +99314,7 @@ def video_b14_dub_text(session: dict | None = None, lang: str = "vi") -> str:
         "TOAN AAS sẽ dùng lời đọc theo kịch bản từng cảnh. Anh/chị có thể sửa lại lời đọc trước khi tạo video.",
         "Bước này chỉ lưu kế hoạch, chưa tạo file thật và chưa trừ Xu.",
     ]
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_b14_dub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -99371,7 +99369,7 @@ def video_b14_voice_text(session: dict | None = None, user_id=0, lang: str = "vi
         "TOAN AAS sẽ dùng lời đọc theo kịch bản từng cảnh. Anh/chị có thể sửa lại lời đọc trước khi tạo video.",
         "Bước này chỉ lưu lựa chọn giọng vào kế hoạch video. Chưa tạo tệp thật, chưa trừ Xu.",
     ]
-    return video_b14_with_admin_label("\n".join(lines), user_id, lang)
+    return video_b14_with_admin_label("\\n".join(lines), user_id, lang)
 
 
 def video_b14_voice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -99675,7 +99673,7 @@ def video_audio_invoice_block(state: dict | None = None, lang: str = "vi") -> st
         lines.append(f"• Tùy chỉnh giọng: tốc độ {html.escape(video_audio_speed_display(settings['video_voice_speed']))}x, âm lượng {settings['video_voice_volume_percent']}%: <b>0 Xu</b>")
     if music_selected or settings["video_music_speed"] != VIDEO_AUDIO_DEFAULT_MUSIC_SPEED or settings["video_music_volume_percent"] != VIDEO_AUDIO_DEFAULT_MUSIC_VOLUME_PERCENT:
         lines.append(f"• Tùy chỉnh nhạc: tốc độ {html.escape(video_audio_speed_display(settings['video_music_speed']))}x, âm lượng {settings['video_music_volume_percent']}%: <b>0 Xu</b>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_b14_music_text(session: dict | None = None, user_id=0, lang: str = "vi") -> str:
@@ -99691,7 +99689,7 @@ def video_b14_music_text(session: dict | None = None, user_id=0, lang: str = "vi
         "",
         "Nhạc mặc định sẽ lấy theo loại video đã chọn; nếu anh/chị đã gửi nhạc riêng, TOAN AAS sẽ ưu tiên tư liệu đó. Chưa tạo file thật, chưa trừ Xu.",
     ]
-    return video_b14_with_admin_label("\n".join(lines), user_id, lang)
+    return video_b14_with_admin_label("\\n".join(lines), user_id, lang)
 
 
 def video_b14_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -99871,7 +99869,7 @@ def video_b14_logo_text(session: dict | None = None, lang: str = "vi") -> str:
     ]
     if note:
         lines.extend(["", html.escape(note)])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_b14_logo_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -99950,7 +99948,7 @@ def video_b14_addon_text(session: dict | None = None, lang: str = "vi") -> str:
     if plan.get("logo_enabled"):
         logo_text_value = logo_watermark_clean_text(plan.get("logo_text") or "")
         logo_tail = f"{logo_tail} · {html.escape(logo_text_value or 'chưa nhập')} · {html.escape(video_b14_addon_label('logo', str(plan['logo_position'])))}"
-    return "\n".join([
+    return "\\n".join([
         "🎙 <b>Giọng đọc / nhạc / phụ đề / logo</b>",
         "",
         f"• Giọng đọc: <b>{yes if plan['voice_enabled'] else no}</b> · {html.escape(voice_label)} · tốc độ <b>{html.escape(video_audio_speed_display(video_audio_settings_from_state(plan)['video_voice_speed']))}x</b> · âm lượng <b>{video_audio_settings_from_state(plan)['video_voice_volume_percent']}%</b>",
@@ -100044,7 +100042,7 @@ def video_b14_quality_text(lang: str = "vi") -> str:
             "",
         ])
     lines.append("\nMàn này chỉ chọn gói. Chưa xử lý video và chưa trừ Xu.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_b14_quality_keyboard(
@@ -100079,7 +100077,7 @@ def video_b14_quality_selected_text(quality_xu: int, lang: str = "vi") -> str:
         f"• Phù hợp: {html.escape(product['use_case'])}",
     ]
     lines.extend(["", "Tiếp theo: chọn số cảnh để TOAN AAS tính tổng Xu. Chưa xử lý video và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_b14_public_max_scene_count() -> int:
@@ -100496,7 +100494,7 @@ def video_b14_invoice_text(session: dict, user_id=0, lang: str = "vi") -> str:
         if logo_material_line:
             lines.append(f"• {html.escape(logo_material_line)}")
     lines.extend(["", "Bấm xác nhận để đưa tác vụ vào hàng chờ xử lý. TOAN AAS chỉ trừ Xu khi video hợp lệ đã được gửi thành công."])
-    return video_b14_with_admin_label("\n".join(lines), user_id, lang)
+    return video_b14_with_admin_label("\\n".join(lines), user_id, lang)
 
 
 def video_b14_invoice_keyboard(
@@ -100551,7 +100549,7 @@ def video_uiflow3_confirmation_text(
     profile_id = str(draft.get("b14_profile_id") or video_b14_profile_id_for_session(session))
     profile_label = video_b14_profile_button_label(profile_id)
     return video_b14_with_admin_label(
-        "\n".join([
+        "\\n".join([
             "✅ <b>Xác nhận cuối</b>",
             "",
             f"• Loại video: <b>{html.escape(profile_label)}</b>",
@@ -100982,7 +100980,7 @@ def video_b14_provider_rendering_block(telemetry: dict | None = None) -> str:
         lines.append("Cập nhật lần cuối: <b>vừa xong</b>")
     lines.append("Video AI có thể mất vài phút tùy tải hệ thống.")
     lines.append("TOAN AAS sẽ tự cập nhật khi có video hoàn chỉnh.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_b14_primary_alive_attempt(result: dict | None = None) -> dict:
@@ -101284,7 +101282,7 @@ def video_b14_status_steps_text(
     )
     lines = ["<b>Tiến trình:</b>"]
     lines.extend(f"{icon} {label}" for icon, label in rows)
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_b14_blocker_label(blocker_code: str) -> str:
@@ -101797,7 +101795,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         lines.append("TOAN AAS sẽ tự cập nhật khi có video hoàn chỉnh.")
         lines.append("Anh/chị không cần bấm nhiều lần.")
     lines.append("TOAN AAS không báo hoàn tất khi chưa có video cuối.")
-    return video_b14_with_admin_label("\n".join(lines), user_id, lang)
+    return video_b14_with_admin_label("\\n".join(lines), user_id, lang)
 
 
 def video_b14_queue_status_keyboard(lang: str = "vi", *, session: dict | None = None, result: dict | None = None, job_id: int | str = 0) -> InlineKeyboardMarkup:
@@ -103056,7 +103054,7 @@ def video_b14_auto_refresh_status_text(job_id: str = "") -> str:
             f"• edit_success/fail: <code>{int(record.get('edit_success_count') or 0)}/{int(record.get('edit_fail_count') or 0)}</code>",
             "",
         ])
-    return "\n".join(lines).strip()
+    return "\\n".join(lines).strip()
 
 
 def video_b14_insufficient_balance_text(current_credits: int, required_credits: int, lang: str = "vi") -> str:
@@ -104840,7 +104838,7 @@ def task3d_idea_suggestions_text(session: dict, lang: str = "vi") -> str:
     for idx, idea in enumerate(ideas[:5], 1):
         lines.append(f"{idx}. {html.escape(idea)}")
     lines.append("\nBạn cũng có thể quay lại để nhập thủ công. Bước này chưa xử lý video và chưa trừ Xu.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def task3d_idea_suggestions_keyboard(session: dict, lang: str = "vi") -> InlineKeyboardMarkup:
     ideas = task3d_idea_suggestions(str(session.get("product_id") or ""), lang, safe_int((session.get("draft") or {}).get("idea_offset"), 0))
@@ -105079,7 +105077,7 @@ def task3d_motion_text(session: dict, lang: str = "vi") -> str:
     for _, label in suggestions:
         lines.append(f"• {html.escape(label)}")
     lines.append("\nBước này chỉ tối ưu prompt, chưa xử lý video và chưa trừ Xu.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def task3d_motion_keyboard(lang: str = "vi", product_id: str = "") -> InlineKeyboardMarkup:
     suggestions = list(TASK3D_MOTION_SUGGESTIONS)
@@ -105306,7 +105304,7 @@ def task3d_result_text(session: dict, lang: str = "vi") -> str:
         batch_text = ", ".join(f"B{item.get('batch_number')}: {','.join(map(str, item.get('shot_numbers') or []))}" for item in batches)
         lines.extend(["", f"<b>Gợi ý chia cảnh:</b> <code>{html.escape(batch_text)}</code>"])
     lines.extend(["", "Bước này miễn phí: chưa xử lý video AI, chưa tạo lệnh xử lý trả phí và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def task3d_result_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -105336,7 +105334,7 @@ def task3d_prompt_vault_item_from_session(session: dict, bundle: dict | None = N
     draft = dict(session.get("draft") or {})
     bundle = dict(bundle or draft.get("prompt_bundle") or draft.get("prepared_prompt_bundle") or {})
     product_id = str(session.get("product_id") or draft.get("product_id") or "storyboard_prompt")
-    prompt_text = "\n\n".join(str(item or "") for item in (bundle.get("video_prompts") or bundle.get("image_prompts") or []) if str(item or "").strip())
+    prompt_text = "\\n\\n".join(str(item or "") for item in (bundle.get("video_prompts") or bundle.get("image_prompts") or []) if str(item or "").strip())
     if not prompt_text:
         prompt_text = str(bundle.get("short_summary") or session.get("topic") or draft.get("topic") or "").strip()
     style = str(session.get("style") or draft.get("style") or (bundle.get("guided_choices") or {}).get("style") or "default")
@@ -105420,7 +105418,7 @@ def task3d_scene_count_video_prompt(session: dict, scene_count: int) -> tuple[st
     selected = prompts[:max(1, int(scene_count or 1))]
     if not selected:
         selected = [str(bundle.get("short_summary") or bundle.get("script") or "Tạo video ngắn rõ chủ thể, nhất quán phong cách.")[:1200]]
-    prompt = "\n\n".join(f"Cảnh {index}: {text}" for index, text in enumerate(selected, start=1))
+    prompt = "\\n\\n".join(f"Cảnh {index}: {text}" for index, text in enumerate(selected, start=1))
     note = ""
     if existing_count and scene_count > existing_count:
         note = f"Prompt hiện có {existing_count} cảnh. Bạn đã chọn {scene_count} cảnh. TOAN AAS sẽ mở rộng storyboard/prompt lên {scene_count} cảnh."
@@ -105486,7 +105484,7 @@ def task3d_video_package_payloads(session: dict) -> tuple[dict, dict]:
                 if str(shot.get("video_prompt") or "").strip()
             ]
         if prompts:
-            video_prompt = "\n\n".join(f"Cảnh {index}: {text}" for index, text in enumerate(prompts, start=1))
+            video_prompt = "\\n\\n".join(f"Cảnh {index}: {text}" for index, text in enumerate(prompts, start=1))
         else:
             video_prompt = str(bundle.get("short_summary") or bundle.get("script") or "Tạo video ngắn rõ chủ thể, nhất quán phong cách.")[:1200]
     source_state = {
@@ -105602,7 +105600,7 @@ def task3d_prompt_detail_text(session: dict, kind: str, copy_hint: bool = False)
     icon = "🖼" if kind == "image" else "🎥"
     title_tail = str(selected[0][0]) if len(selected) == 1 else f"{len(selected)} {noun.lower()}"
     blocks = [f"{noun} {index}\n{prompt}" for index, prompt in selected]
-    prompt_text = "\n\n".join(blocks) or "Câu lệnh chưa sẵn sàng."
+    prompt_text = "\\n\\n".join(blocks) or "Câu lệnh chưa sẵn sàng."
     hint = "\n\n📋 Câu lệnh đang ở dạng văn bản nguyên vẹn để anh/chị xem và sao chép." if copy_hint else ""
     return (
         f"{icon} Câu lệnh {'tạo ảnh' if kind == 'image' else 'tạo video'} — {title_tail}\n\n"
@@ -105854,7 +105852,7 @@ def task3d_prompt_export_markdown(bundle: dict) -> str:
             f"- Negative prompt: {shot.get('negative_prompt') or bundle.get('negative_prompt')}",
         ])
     lines.extend(["", "## Batch grouping", json.dumps((bundle.get("render_plan") or {}).get("batches") or [], ensure_ascii=False, indent=2)])
-    return "\n".join(lines).strip() + "\n"
+    return "\\n".join(lines).strip() + "\\n"
 
 
 def task3d_prompt_export_done_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -105886,7 +105884,7 @@ def task3d_trend_ideas_text(session: dict, lang: str = "vi") -> str:
             lines.append(f"   Hook mẫu: {html.escape(str(hooks[0]))}")
         lines.append("")
     lines.append("Chọn một trend để TOAN AAS tạo hook, kịch bản, storyboard, caption và prompt video miễn phí.")
-    return "\n".join(lines).strip()
+    return "\\n".join(lines).strip()
 
 
 def task3d_trend_ideas_keyboard(session: dict, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -106463,7 +106461,7 @@ def video_trend2_catalog_text(state: dict, rows: list[dict]) -> str:
         "",
         "Chọn một trend bằng hàng số hoặc đổi sang 5 trend khác. Sau đó chọn số cảnh, tỉ lệ và thiết lập nhân vật, bối cảnh, phong cách từ chính nội dung trend.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_trend2_catalog_keyboard(state: dict, rows: list[dict]) -> InlineKeyboardMarkup:
@@ -106519,7 +106517,7 @@ def video_trend2_search_results_text(state: dict) -> str:
             "",
         ])
     lines.append("Chọn một kết quả để tiếp tục sang số cảnh. Nội dung nguồn sẽ được giữ làm ngữ cảnh cho toàn bộ flow.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_trend2_search_results_keyboard(state: dict) -> InlineKeyboardMarkup:
@@ -106830,7 +106828,7 @@ def video_trend2_profile_rows(page: int) -> tuple[list[dict], int, int]:
 def video_trend2_profiles_text(state: dict, page: int) -> str:
     rows, selected_page, page_count = video_trend2_profile_rows(page)
     trend = dict(state.get("selected_trend") or {})
-    labels = "\n".join(
+    labels = "\\n".join(
         f"• {html.escape(str(item.get('icon') or '🎬'))} {html.escape(str(item.get('public_name') or ''))}"
         for item in rows
     )
@@ -106885,7 +106883,7 @@ def video_trend2_suggestions_text(state: dict) -> str:
     for index, item in enumerate(page, 1):
         lines.append(f"{index}. <b>{html.escape(str(item.get('title') or ''))}</b>\n{html.escape(str(item.get('content') or ''))}")
     lines.extend(["", "Chọn bằng hàng số hoặc tự nhập nội dung riêng."])
-    return "\n\n".join(lines)
+    return "\\n\\n".join(lines)
 
 
 def video_trend2_suggestions_keyboard(state: dict) -> InlineKeyboardMarkup:
@@ -109090,7 +109088,7 @@ def video_selfshot2_tail_host(draft: dict) -> dict:
         "content_mode": str(current.get("content_mode") or "manual"),
         "canonical_content_mode": str(current.get("canonical_content_mode") or "self_shot_scene_change"),
         "per_scene_content": [dict(item) for item in current.get("scene_plan") or [] if isinstance(item, dict)],
-        "selected_prompt": "\n\n".join(
+        "selected_prompt": "\\n\\n".join(
             str(item.get("prompt") or "").strip()
             for item in prompts
             if str(item.get("prompt") or "").strip()
@@ -110027,7 +110025,7 @@ def video_tail12_compile_content_contract(state: dict | None, *, product_type: s
                 ).strip()
                 if prompt_text:
                     restored_prompts.append(prompt_text)
-        selected_prompt = "\n\n".join(restored_prompts)
+        selected_prompt = "\\n\\n".join(restored_prompts)
     manual_text = str(
         current.get("manual_content")
         or current.get("manual_script_raw")
@@ -111145,7 +111143,7 @@ def video_tail9_addon_text(tail: dict) -> str:
         "Logo và watermark giữ nguyên quy trình gửi nội dung rồi chọn đủ một trong 9 vị trí.",
         "Khi đã đúng, bấm Hoàn tất Add-on để chuyển sang rà soát toàn bộ video.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_tail9_addon_postprocessing(tail: dict | None = None) -> dict:
@@ -111265,7 +111263,7 @@ def video_tail9_scene_script_info(tail: dict | None = None) -> dict:
         scene_index = safe_int(scene.get("scene_index"), fallback_index)
         clean_line = re.sub(r"\s+", " ", line).strip()
         lines.append(f"Cảnh {scene_index}: {clean_line}")
-    text = "\n".join(lines)[:3500]
+    text = "\\n".join(lines)[:3500]
     return {
         "text": text,
         "source": "scene_content" if used_content_fallback else "scene_script",
@@ -111878,7 +111876,7 @@ def video_tail9_transitions_text(tail: dict) -> str:
             label = video_scene3_flow.transition_public(transition)["label"] if transition else "Tự nhiên theo nội dung"
             lines.append(f"• Cảnh {index} → {index + 1}: <b>{html.escape(label)}</b>")
     lines.extend(["", "Chưa bắt đầu tạo video và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_tail9_transitions_keyboard(tail: dict) -> InlineKeyboardMarkup:
@@ -111919,7 +111917,7 @@ def video_tail9_transition_picker_text(tail: dict, boundary: int) -> str:
         "",
         "Chọn một số hoặc dùng Cắt tự nhiên. Nội dung, nhân vật và hành động của hai cảnh vẫn được giữ nguyên.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_tail9_transition_picker_keyboard(tail: dict, boundary: int) -> InlineKeyboardMarkup:
@@ -112112,7 +112110,7 @@ def video_tail9_storyboard_assets_text(host: dict) -> str:
         lines.append(
             f"• Cảnh {scene_index}: ảnh đầu: {'đã có' if start_ready else 'còn thiếu'}{end_label}"
         )
-    return "\n".join(lines)[:3900]
+    return "\\n".join(lines)[:3900]
 
 
 def video_tail9_storyboard_assets_keyboard() -> InlineKeyboardMarkup:
@@ -112395,7 +112393,7 @@ def video_tail9_video_edit_review_text(tail: dict, host: dict) -> str:
         "",
         "Video này chỉ chỉnh sửa từ tệp đã gửi. Không tạo cảnh, không tạo câu lệnh tạo sinh và không chuyển sang quy trình tạo video mới.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_tail9_video_edit_review_keyboard() -> InlineKeyboardMarkup:
@@ -112418,7 +112416,7 @@ def video_tail9_video_edit_operations_text(host: dict) -> str:
         "",
         "Các thao tác chỉ áp dụng lên video nguồn đã gửi khi anh/chị xác nhận tạo video.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_tail9_video_edit_operations_keyboard() -> InlineKeyboardMarkup:
@@ -112541,7 +112539,7 @@ def video_tail9_logo_text(tail: dict) -> str:
     if len(lines) == 2:
         lines.append("• Chưa thêm logo hoặc watermark.")
     lines.extend(["", "Logo dùng ảnh; watermark dùng chữ. Mỗi mục chỉ được lưu sau khi chọn vị trí."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 def video_tail9_logo_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
     current = dict(tail or {})
     is_video_edit = str(current.get("video_product_type") or "") == video_editengine1.PRODUCT_TYPE
@@ -112736,7 +112734,7 @@ def video_tail9_quality_text(tail: dict, capability: dict | None = None, catalog
             f"{discount_note} · còn <b>{scene_price['total_xu']} Xu</b>",
         ])
     lines.extend(["", "Chọn một gói để mở hóa đơn đầy đủ trước khi xác nhận tạo video."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_tail9_quality_keyboard(
@@ -112831,7 +112829,7 @@ def video_tail9_invoice_text(tail: dict, session: dict, user_id: int, lang: str 
     ]
     addon_lines = ""
     if addon_items:
-        addon_rows = "\n".join(
+        addon_rows = "\\n".join(
             f"  ◦ {html.escape(str(item.get('label') or 'Phần bổ sung'))}: "
             f"<b>{xu_number(safe_int(item.get('price_xu'), 0))} Xu</b>"
             for item in addon_items
@@ -115654,7 +115652,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 group = next((item for item in video_selfshot3.transformation_catalog() if item["group_id"] == argument), None)
                 if not group:
                     return await video_selfshot3_render(query, uid, "types", draft=current)
-                examples = "\n".join(
+                examples = "\\n".join(
                     f"{index}. {html.escape(str(item.get('title') or ''))}"
                     for index, item in enumerate(list(group.get("presets") or [])[:5], 1)
                 )
@@ -117183,7 +117181,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 str(selected.get("cta") or "").strip(),
                 str(selected.get("style") or "").strip(),
             ]
-            script_text = "\n".join(item for item in script_parts if item)
+            script_text = "\\n".join(item for item in script_parts if item)
             task3d_session_step(uid, str(session.get("current_step") or "script_ai_suggestions"), script_source_parent="script_manual")
             try:
                 _session, proposal = video_flow7_store_script_proposal(uid, script_text, source="aas_suggestion")
@@ -118224,7 +118222,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         )
     if action == "b14_subtitle_preview":
         srt_preview = video_b14_narration_from_storyboard(session).splitlines()[:5]
-        preview = "\n".join(f"{idx}\n00:00:{idx * 2:02d},000 --> 00:00:{idx * 2 + 2:02d},000\n{line.split(': ', 1)[-1]}" for idx, line in enumerate(srt_preview, 1))
+        preview = "\\n".join(f"{idx}\n00:00:{idx * 2:02d},000 --> 00:00:{idx * 2 + 2:02d},000\n{line.split(': ', 1)[-1]}" for idx, line in enumerate(srt_preview, 1))
         return await safe_edit_or_send(
             query,
             "👀 <b>Xem thử SRT</b>\n\n<code>" + html.escape(preview or "Chưa có lời đọc để xem thử.") + "</code>\n\nĐây chỉ là bản xem text trong kế hoạch. Chưa tạo file thật và chưa trừ Xu.",
@@ -118287,7 +118285,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if value == "none":
             session = video_b14_set_addon_plan(uid, session, logo_enabled=False, logo_source="none", logo_text="", logo_file_id="", logo_note="")
             session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-            return await safe_edit_or_send(query, addon_logo_config_saved_text(lang) + "\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
+            return await safe_edit_or_send(query, addon_logo_config_saved_text(lang) + "\\n\\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
         session = task3d_session_step(uid, "b14_logo_text_wait", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_logo_input_text(lang), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_logo"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
     if action == "b14_logo_position_screen":
@@ -118324,11 +118322,11 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             logo_note="",
         )
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, addon_logo_config_saved_text(lang) + "\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
+        return await safe_edit_or_send(query, addon_logo_config_saved_text(lang) + "\\n\\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_logo_clear":
         session = video_b14_set_addon_plan(uid, session, logo_enabled=False, logo_source="none", logo_text="", logo_file_id="", logo_note="")
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, addon_logo_config_saved_text(lang) + "\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
+        return await safe_edit_or_send(query, addon_logo_config_saved_text(lang) + "\\n\\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_logo_done":
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
@@ -118518,7 +118516,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         video_b14_prepare_project_for_invoice(uid, session)
         session = get_video_session(uid)
         session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)
-        prefix = (html.escape(str(scene_policy.get("message") or "")) + "\n\n") if scene_policy.get("message") else ""
+        prefix = (html.escape(str(scene_policy.get("message") or "")) + "\\n\\n") if scene_policy.get("message") else ""
         return await safe_edit_or_send(query, prefix + video_b14_invoice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
     if action == "b14_confirm":
         draft = dict(session.get("draft") or {})
@@ -119401,7 +119399,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         selected = task3d_video_prompt_selected_entries(session, "video")
         if not selected:
             return await safe_edit_or_send(query, "⚠️ Hãy chọn lại cảnh cần tạo video. Bot chưa trừ Xu.", reply_markup=task3d_prompt_video_selector_keyboard(session, lang))
-        selected_prompt = "\n\n".join(f"Cảnh {index}: {prompt}" for index, prompt in selected)
+        selected_prompt = "\\n\\n".join(f"Cảnh {index}: {prompt}" for index, prompt in selected)
         session = task3d_session_step(
             uid,
             "storyboard_preview",
@@ -120119,13 +120117,13 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
             session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)
             prefix = ""
             if scene_policy.get("message"):
-                prefix += html.escape(str(scene_policy.get("message"))) + "\n\n"
+                prefix += html.escape(str(scene_policy.get("message"))) + "\\n\\n"
             if resize_note:
-                prefix += resize_note + "\n\n"
+                prefix += resize_note + "\\n\\n"
             await update.message.reply_text(prefix + video_b14_invoice_text(get_video_session(uid), uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
             return True
         session = task3d_session_step(uid, "b14_quality", provider_called=False, xu_charged=0)
-        prefix = (resize_note + "\n\n") if resize_note else ""
+        prefix = (resize_note + "\\n\\n") if resize_note else ""
         await update.message.reply_text(prefix + video_b14_quality_text(lang), parse_mode="HTML", reply_markup=video_b14_quality_keyboard(lang))
         return True
     current_step = str(session.get("current_step") or "")
@@ -123783,7 +123781,7 @@ def prompt_video_topic_suggestions_text(state: dict | None = None, lang: str = "
         lines.append(f"{idx}. {html.escape(item)}")
     lines.append("")
     lines.append("This step only saves your choice and does not charge Xu." if normalize_user_language(lang) != "vi" else "Bước này chỉ lưu lựa chọn và chưa trừ Xu.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def prompt_video_topic_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -123880,7 +123878,7 @@ def prompt_video_choices_text(state: dict | None = None, lang: str = "vi") -> st
     for idx, prompt in enumerate(prompts, 1):
         lines.extend([f"<b>{idx}. Prompt {'ABC'[idx - 1]}</b>", html.escape(prompt), ""])
     lines.append("Chọn một prompt để tiếp tục." if normalize_user_language(lang) == "vi" else "Choose one prompt to continue.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def prompt_video_choices_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -123950,7 +123948,7 @@ def guided_video_motion_text(state: dict | None = None, lang: str = "vi", from_i
     for idx, item in enumerate(suggestions, 1):
         lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
     lines.extend(["", "This step only saves your choice and does not charge Xu." if normalize_user_language(lang) != "vi" else "Bước này chỉ lưu lựa chọn và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def guided_video_motion_keyboard(prefix: str, lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -123979,7 +123977,7 @@ def guided_video_music_text(state: dict | None = None, lang: str = "vi") -> str:
     for idx, item in enumerate(suggestions, 1):
         lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
     lines.extend(["", "Legacy music choices now continue through the video finishing options." if normalize_user_language(lang) != "vi" else "Các lựa chọn nhạc cũ sẽ được chuyển qua Tùy chọn hoàn thiện video."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def guided_video_music_suggestions(state: dict | None = None, lang: str = "vi") -> list[dict]:
     state = state or {}
@@ -124197,7 +124195,7 @@ def detailed_video_scene_prompts_text(plan: dict | None, flow: str, lang: str = 
                 "",
             ])
         lines.append("Planning only. No video provider call and no Xu charged.")
-        return "\n".join(lines)
+        return "\\n".join(lines)
     lines = ["🎬 <b>Prompt video từng cảnh — bản chi tiết</b>", ""]
     for idx in range(1, scene_count + 1):
         phase = "hook thu hút" if idx == 1 else ("kết quả và CTA nhẹ" if idx == scene_count else ("before/after làm bằng chứng" if idx == scene_count - 1 else f"phát triển ý {idx}"))
@@ -124213,7 +124211,7 @@ def detailed_video_scene_prompts_text(plan: dict | None, flow: str, lang: str = 
             "",
         ])
     lines.append("Đây là bước lập kế hoạch. Bot chưa gọi provider video và chưa trừ Xu.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def structured_video_preview_text(state: dict | None = None, lang: str = "vi", flow: str = "promptvideo") -> str:
     package = structured_video_plan(state, flow)
@@ -124349,7 +124347,7 @@ def image_video_style_text(lang: str = "vi", state: dict | None = None) -> str:
     for idx, item in enumerate(suggestions, 1):
         lines.append(f"{idx}. {html.escape(item)}")
     lines.extend(["", ui_text(lang, "common.no_api_no_charge")])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def image_video_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -124490,7 +124488,7 @@ def reference_catalog_text(user_id, lang: str = "vi") -> str:
         item = serialize_reference_video(row) or {}
         lines.append(f"\n• <b>#{item.get('id')}</b> {html.escape(str(item.get('title') or 'Reference'))} | {html.escape(str(item.get('platform') or 'other'))}")
     lines.extend(["", html.escape(REFERENCE_SAFETY_NOTE)])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def publish_package_text(package: dict, lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -124501,7 +124499,7 @@ def publish_package_text(package: dict, lang: str = "vi") -> str:
             f"CTA: {html.escape(package.get('cta') or '-')}\nPinned comment: {html.escape(package.get('pinned_comment') or '-')}\n\n"
             "Manual publish only. Auto-publish stays disabled until a valid channel is connected and confirmed."
         )
-    checklist = "\n".join(f"□ {html.escape(item)}" for item in package.get("checklist") or [])
+    checklist = "\\n".join(f"□ {html.escape(item)}" for item in package.get("checklist") or [])
     return (
         "📦 <b>Gói đăng bài TOAN AAS</b>\n\n"
         f"Nền tảng: <b>{html.escape(package.get('platform') or '-')}</b>\n"
@@ -124695,7 +124693,7 @@ def video_reference_topic_text(state: dict | None = None, lang: str = "vi") -> s
     for idx, item in enumerate(video_reference_topic_suggestions(state, lang), 1):
         lines.append(f"{idx}. {html.escape(item)}")
     lines.extend(["", ui_text(lang, "common.no_api_no_charge")])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def video_reference_topic_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -124799,7 +124797,7 @@ def video_reference_plan_text(state: dict | None = None, lang: str = "vi") -> st
             "",
             "This step only creates suggestions/plans. No render, no processing start and no Xu charge.",
         ])
-        return "\n".join(lines)
+        return "\\n".join(lines)
     lines = [
         "📊 <b>Phân tích chi tiết và kế hoạch video</b>" if detailed else "🎞 <b>Kế hoạch video mới từ video mẫu</b>",
         "",
@@ -124861,7 +124859,7 @@ def video_reference_plan_text(state: dict | None = None, lang: str = "vi") -> st
         "",
         "Bước này chỉ tạo gợi ý/kế hoạch. TOAN AAS chưa render video, chưa bắt đầu xử lý và chưa trừ Xu.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def video_reference_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -125413,7 +125411,7 @@ def self_scene_start_text(lang: str = "vi", state: dict | None = None) -> str:
         for idx, item in enumerate(suggestions, 1):
             lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
         lines.extend(["", "This step only prepares the plan. Nothing is processed and no Xu is charged."])
-        return "\n".join(lines)
+        return "\\n".join(lines)
     lines = [
         "🎥 <b>Tự quay & đổi cảnh AI</b>",
         "",
@@ -125426,7 +125424,7 @@ def self_scene_start_text(lang: str = "vi", state: dict | None = None) -> str:
     for idx, item in enumerate(suggestions, 1):
         lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
     lines.extend(["", "Bước này chỉ chuẩn bị prompt/kế hoạch. TOAN AAS chưa xử lý video và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def self_scene_input_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -125501,11 +125499,11 @@ def self_scene_context_text(state: dict, lang: str = "vi") -> str:
         lines = ["🌍 <b>Choose a new scene/context</b>", ""]
         for idx, item in enumerate(suggestions, 1):
             lines.append(f"{idx}. {html.escape(item)}")
-        return "\n".join(lines)
+        return "\\n".join(lines)
     lines = ["🌍 <b>TOAN AAS gợi ý 3 ngữ cảnh đổi cảnh</b>", ""]
     for idx, item in enumerate(suggestions, 1):
         lines.append(f"{idx}. {html.escape(item)}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def self_scene_context_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -125536,7 +125534,7 @@ def self_scene_style_text(state: dict, lang: str = "vi") -> str:
     for idx, item in enumerate(suggestions, 1):
         lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
     lines.extend(["", ui_text(lang, "common.no_api_no_charge")])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def self_scene_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -125808,7 +125806,7 @@ def long_video_topic_suggestions_text(state: dict | None = None, lang: str = "vi
         lines.append(f"{idx}. {html.escape(item)}")
     lines.append("")
     lines.append(ui_text(lang, "common.no_api_no_charge"))
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def long_video_topic_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -126115,7 +126113,7 @@ def long_video_plan_text(state: dict, lang: str = "vi") -> str:
             "Hook → explanation/demo → proof/example → transition sentence. Keep narration clear and editable.\n\n"
             "<b>5. Required scenes</b>\n"
             "Host/subject close-up, wide context shot, screen/product demo, proof/before-after, recap and CTA scene.\n\n"
-            + "\n".join(long_video_character_bible_lines(topic, style_label, lang)) +
+            + "\\n".join(long_video_character_bible_lines(topic, style_label, lang)) +
             "<b>6. Image prompt template</b>\n"
             f"<code>Key visual for {html.escape(topic)}, chapter objective clearly visible, {html.escape(style_label)}, clean composition, consistent subject, high quality.</code>\n\n"
             "<b>7. Video prompt template</b>\n"
@@ -126145,7 +126143,7 @@ def long_video_plan_text(state: dict, lang: str = "vi") -> str:
         "Hook → giải thích/demo → ví dụ/bằng chứng → câu chuyển. Lời đọc rõ, câu ngắn, dễ sửa và dễ chia voice.\n\n"
         "<b>5. Cảnh cần có</b>\n"
         "Cận cảnh chủ thể, toàn cảnh bối cảnh, demo màn hình/sản phẩm, before/after hoặc bằng chứng, recap và cảnh CTA.\n\n"
-        + "\n".join(long_video_character_bible_lines(topic, style_label, lang)) +
+        + "\\n".join(long_video_character_bible_lines(topic, style_label, lang)) +
         "<b>6. Prompt ảnh từng cảnh</b>\n"
         f"<code>Key visual cho {html.escape(topic)}, thể hiện rõ mục tiêu chương, phong cách {html.escape(style_label)}, bố cục sạch, chủ thể nhất quán, chất lượng cao.</code>\n\n"
         "<b>7. Prompt video từng cảnh</b>\n"
@@ -126243,7 +126241,7 @@ def long_video_followup_text(action: str, plan: dict | None, lang: str = "vi") -
                     "",
                 ])
         lines.append("No final image/video processing has started and no Xu has been charged.")
-        return "\n".join(lines)
+        return "\\n".join(lines)
     if action == "music":
         return (
             "🎵 <b>Gợi ý âm thanh cho video dài</b>\n\n"
@@ -126293,7 +126291,7 @@ def long_video_followup_text(action: str, plan: dict | None, lang: str = "vi") -
                 "",
             ])
     lines.append("TOAN AAS chưa xử lý ảnh/video thật và chưa trừ Xu.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 STORYBOARD_PACK_TEMPLATE_LABELS = {
     "product_ad": "Quảng cáo sản phẩm",
@@ -126531,7 +126529,7 @@ def storyboard_pack_concepts_text(state: dict, lang: str = "vi") -> str:
             f"• Dùng tốt cho: {html.escape(concept['platform'])}",
             "",
         ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def storyboard_pack_concepts_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -126714,7 +126712,7 @@ def storyboard_pack_result_text(state: dict, lang: str = "vi") -> str:
         "",
     ])
     lines.append("TOAN AAS chỉ bắt đầu xử lý sau khi quý khách xác nhận ở bước cuối.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def storyboard_pack_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -126790,7 +126788,7 @@ def storyboard_pack_scene_prompts_text(state: dict, prompt_type: str = "image", 
             f"• Negative: <code>{html.escape(shot['negative_prompt'])}</code>",
             "",
         ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def storyboard_pack_scene_prompts_keyboard(prompt_type: str = "image", lang: str = "vi") -> InlineKeyboardMarkup:
     is_video = str(prompt_type or "") == "video"
@@ -126840,7 +126838,7 @@ def storyboard_pack_meta_ai_text(state: dict, lang: str = "vi") -> str:
         "<b>Hashtag:</b> #TOANAAS #MetaAI #AIVideo #PromptVideo",
         "<b>CTA:</b> Lưu prompt này và thử dựng bản đầu tiên.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def storyboard_pack_meta_ai_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return video_v6_keyboard(
@@ -127052,7 +127050,7 @@ def video_idea_dynamic_page_text(page: int = 1, lang: str = "vi") -> str:
         f"Trang {selected_page}/{total_pages} · {len(categories)} nhóm · {safe_int(counts.get('presets'), 0)} mẫu đang bật.",
         "Đây là bước tham khảo và chỉnh nội dung; hệ thống chưa bắt đầu tạo video và chưa trừ Xu.",
     ])
-    return "\n\n".join(lines)
+    return "\\n\\n".join(lines)
 
 
 def video_idea_dynamic_page_keyboard(
@@ -127108,7 +127106,7 @@ def video_idea_dynamic_category_text(category: dict, presets: list[dict]) -> str
         "",
         "Mỗi mẫu đã có sẵn nội dung để anh/chị chọn số cảnh rồi sửa lại. Hệ thống chưa bắt đầu tạo video và chưa trừ Xu.",
     ])
-    return "\n\n".join(lines)
+    return "\\n\\n".join(lines)
 
 
 def video_idea_dynamic_category_keyboard(
@@ -127215,11 +127213,11 @@ def video_idea_dynamic_preview_text(state: dict) -> str:
         editable_lines.append(f"<code>{html.escape(f'Cảnh {index}: {content}')}</code>")
     lines.extend([
         "Nội dung đã được chia sẵn theo từng cảnh. Bấm <b>Sửa nội dung</b>, sao chép phần dưới, chỉnh cảnh cần đổi rồi gửi lại:",
-        "\n\n".join(editable_lines),
+        "\\n\\n".join(editable_lines),
         "",
         "Hệ thống chưa bắt đầu tạo video và chưa trừ Xu.",
     ])
-    return "\n\n".join(lines)
+    return "\\n\\n".join(lines)
 
 
 def video_idea_dynamic_preview_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -127270,7 +127268,7 @@ def video_idea_prompt_preset_detail_text(state: dict) -> str:
         "Năm prompt chỉ thay đổi cách kể, camera, ánh sáng, nhịp và chuyển tiếp; không thay chủ thể hoặc nội dung của preset.",
         "Bước này chưa gọi nguồn dựng, chưa tạo tác vụ và chưa trừ Xu.",
     ])
-    return "\n".join(lines)[:4050]
+    return "\\n".join(lines)[:4050]
 
 
 def video_idea_prompt_preset_list_payload(
@@ -127315,7 +127313,7 @@ def video_idea_dynamic_edit_text(state: dict) -> str:
         scene_number = safe_int(row.get("scene_index"), index)
         content = str(row.get("content") or row.get("goal") or "").strip()
         editable_lines.append(f"<code>{html.escape(f'Cảnh {scene_number}: {content}')}</code>")
-    editable = "\n\n".join(editable_lines)
+    editable = "\\n\\n".join(editable_lines)
     return (
         "✍️ <b>Sửa nội dung từng cảnh</b>\n\n"
         "Sao chép toàn bộ phần dưới, sửa nội dung cần đổi rồi gửi lại. Giữ tiêu đề "
@@ -127372,7 +127370,7 @@ def video_idea_prompt_selection_text(state: dict) -> str:
             "Bỏ qua sẽ dùng prompt mặc định đã biên soạn, không để prompt rỗng.",
         ])
     lines.extend(["", "Bước này chưa gọi nguồn dựng, chưa tạo tác vụ và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_idea_prompt_selection_keyboard(state: dict) -> InlineKeyboardMarkup:
@@ -127461,7 +127459,7 @@ def video_idea_catalog_categories_text(lang: str = "vi") -> str:
     for index, (_key, label) in enumerate(video_idea_catalog.list_categories(), 1):
         lines.append(f"{index}. {html.escape(label)}")
     lines.extend(["", f"Kho hiện có {video_idea_catalog.catalog_status()['ideas']} ý tưởng tham khảo. Tất cả chỉ là kế hoạch có thể sửa; hệ thống chưa tạo file và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_idea_catalog_categories_keyboard(
@@ -127508,7 +127506,7 @@ def video_idea_catalog_options_text(state: dict | None = None, lang: str = "vi")
     for index, item in enumerate(video_idea_catalog_options(state), 1):
         lines.append(f"{index}. <b>{html.escape(str(item.get('title') or ''))}</b>\n{html.escape(str(item.get('summary') or ''))}")
     lines.extend(["", "Chưa tạo file, chưa gọi hệ thống dựng và chưa trừ Xu."])
-    return "\n\n".join(lines)
+    return "\\n\\n".join(lines)
 
 
 def video_idea_catalog_options_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -127740,7 +127738,7 @@ def video_idea_product_suggestions_text(state: dict | None = None, lang: str = "
         lines.append(f"{idx}. {html.escape(item)}")
     lines.append("")
     lines.append(ui_text(lang, "common.no_api_no_charge"))
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def video_idea_product_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -127782,7 +127780,7 @@ def video_idea_context_text(state: dict | None = None, lang: str = "vi") -> str:
     lines = ["🌍 <b>Bạn muốn quảng cáo theo ngữ cảnh nào?</b>" if normalize_user_language(lang) == "vi" else "🌍 <b>Which advertising context do you want?</b>", ""]
     for idx, item in enumerate(options, 1):
         lines.append(f"{idx}. {html.escape(item)}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def video_idea_context_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -127888,7 +127886,7 @@ def video_idea_cinema_suggestions_text(state: dict | None = None, lang: str = "v
         lines.append(f"{idx}. {html.escape(item)}")
     lines.append("")
     lines.append(ui_text(lang, "common.no_api_no_charge"))
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def video_idea_cinema_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -130473,7 +130471,7 @@ async def handle_storyboard_pack_callback(update: Update, context: ContextTypes.
         prefix = "✅ Đã chốt shot pack." if action == "lock" else "💾 Đã lưu kế hoạch."
         if normalize_user_language(lang) != "vi":
             prefix = "✅ Shot pack locked." if action == "lock" else "💾 Plan saved."
-        suffix = f"\nPack ID: <code>{pack_id}</code>\n\n" if pack_id else "\n\n"
+        suffix = f"\nPack ID: <code>{pack_id}</code>\n\n" if pack_id else "\\n\\n"
         return await safe_edit_or_send_long_html(query, prefix + suffix + storyboard_pack_result_text(state, lang), reply_markup=storyboard_pack_result_keyboard(lang))
     if action in {"image_keyframes", "preview", "create_or_upload_images", "upload_images_guard"}:
         text = storyboard_pack_guard_text(action, lang)
@@ -130534,7 +130532,7 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
         or "9:16"
     ).strip()
     selected_prompt = str(source.get("idea_selected_prompt") or "").strip()
-    custom_note = "\n\n".join(
+    custom_note = "\\n\\n".join(
         item
         for item in (
             str(source.get("customer_brief") or "").strip(),
@@ -131997,7 +131995,7 @@ def video_idea_admin_categories_text(rows: list[dict], page: int, total_pages: i
             f"v{safe_int(row.get('version'), 1)}"
         )
     lines.extend(["", f"Trang {page}/{total_pages}"])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_idea_admin_categories_keyboard(rows: list[dict], page: int, total_pages: int) -> InlineKeyboardMarkup:
@@ -132029,7 +132027,7 @@ def video_idea_admin_presets_text(rows: list[dict], page: int, total_pages: int)
             f"v{safe_int(row.get('version'), 1)}"
         )
     lines.extend(["", f"Trang {page}/{total_pages}"])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_idea_admin_presets_keyboard(rows: list[dict], page: int, total_pages: int) -> InlineKeyboardMarkup:
@@ -132329,7 +132327,7 @@ async def handle_video_idea_admin_callback(update: Update, context: ContextTypes
             )
         if not rows:
             lines.append("Chưa có thay đổi admin.")
-        return await safe_edit_or_send_long_html(query, "\n".join(lines), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quản lý", callback_data="viadm|main|1")]]))
+        return await safe_edit_or_send_long_html(query, "\\n".join(lines), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quản lý", callback_data="viadm|main|1")]]))
 
     if action == "cancel":
         context.user_data.pop("video_idea_admin_input", None)
@@ -133025,9 +133023,9 @@ def menu_text_main_memory() -> str:
         "📝 <b>Ghi chú / Tài liệu</b>\n\n"
         "Bạn có thể lưu ghi chú, nhắc hẹn, checklist và tài liệu cá nhân tại đây.\n\n"
         "<b>Dung lượng miễn phí:</b>\n"
-        + "\n".join(storage_policy_short_lines()) + "\n\n"
+        + "\\n".join(storage_policy_short_lines()) + "\\n\\n"
         "<b>Mở rộng dung lượng:</b>\n"
-        + "\n".join(storage_addon_lines()) + "\n\n"
+        + "\\n".join(storage_addon_lines()) + "\\n\\n"
         "Nếu cần xử lý PDF/Word như nén, tách, gộp hoặc ảnh sang PDF, hãy vào <b>🧰 Công cụ PDF / Word</b>.\n\n"
         "<b>Cách tính dung lượng:</b>\n"
         "• Ghi chú text nhỏ vẫn tính dung lượng thật.\n"
@@ -133055,7 +133053,7 @@ def menu_text_main_docs() -> str:
         "3. Bấm xác nhận để xử lý.",
         "4. Nên gửi từng file một để tránh lỗi Telegram.",
     ]
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def menu_text_main_image() -> str:
     return image_menu_v5_text("vi")
@@ -133091,7 +133089,7 @@ def menu_text_main_audio() -> str:
         "• Nếu công cụ lỗi: không trừ Xu hoặc hoàn Xu theo flow hiện có.",
         "• Chỉ dịch nội dung bạn sở hữu hoặc có quyền sử dụng.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def menu_text_main_music() -> str:
     return (
@@ -133158,7 +133156,7 @@ def menu_text_main_quick() -> str:
         "• Muốn xử lý file → bấm 📄 PDF/Word",
         "• Hết Xu → bấm 💳 Nạp Xu",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def menu_text_main_topup() -> str:
     return (
@@ -133280,7 +133278,7 @@ def referral_account_stats_text(user_id, lang: str = "vi") -> str:
                 lines.append(f"• <code>{html.escape(masked)}</code> | {html.escape(localized_status)} | +{int(reward_xu or 0)} Xu | {html.escape(str(created_at or '-')[:16])}")
         else:
             lines.append(f"\n{copy['no_referrals']}")
-        return "\n".join(lines)
+        return "\\n".join(lines)
     is_vi = True
     lines = [
         "👥 <b>NGƯỜI ĐÃ GIỚI THIỆU</b>" if is_vi else "👥 <b>YOUR REFERRALS</b>",
@@ -133299,7 +133297,7 @@ def referral_account_stats_text(user_id, lang: str = "vi") -> str:
             lines.append(f"• <code>{html.escape(masked)}</code> | {html.escape(str(status))} | +{int(reward_xu or 0)} Xu | {html.escape(str(created_at or '-')[:16])}")
     else:
         lines.append("\nChưa có referral nào được ghi nhận." if is_vi else "\nNo referrals have been recorded yet.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def menu_text_main_guide() -> str:
     return (
@@ -133479,7 +133477,7 @@ def menu_text_main_guide_i18n(lang: str) -> str:
     if lang == "vi":
         return menu_text_main_guide()
     if lang not in {"en", "zh"}:
-        return "\n".join(public_guide_index_lines(public_pricing_locale(lang)))
+        return "\\n".join(public_guide_index_lines(public_pricing_locale(lang)))
     if lang == "zh":
         return (
             "📚 <b>使用指南</b>\n\n"
@@ -134135,7 +134133,7 @@ async def cmd_guide_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     for idx, path in enumerate(candidates, 1):
         lines.append(f"{idx}. <code>{html.escape(os.path.basename(path))}</code> — <code>{'exists' if os.path.exists(path) else 'missing'}</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 def terms_keyboard() -> InlineKeyboardMarkup:
     rows = []
@@ -134457,7 +134455,7 @@ async def cmd_admin_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Không mở auto publish/ads/affiliate vault.",
         "• Legal/accounting export là sổ quản trị nội bộ, không thay thế tư vấn luật sư/kế toán.",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_admin_doc_ip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_admin_doc_by_key(update, context, "ip")
@@ -134668,7 +134666,7 @@ def db_status_admin_text() -> str:
             f"• <code>{safe_html(item.get('masked_name') or '-')}</code> "
             f"reason=<code>{safe_html(item.get('reason') or '-')}</code> dir=<code>{safe_html(item.get('dir') or '-')}</code>"
         )
-    risk_text = "\n".join(risk_lines[:6]) if risk_lines else "• Không phát hiện file backup/secret nguy hiểm trong thư mục public."
+    risk_text = "\\n".join(risk_lines[:6]) if risk_lines else "• Không phát hiện file backup/secret nguy hiểm trong thư mục public."
     return (
         "🗄 <b>DB trạng thái</b>\n\n"
         f"• DB ok: <code>{'yes' if payload.get('db_exists') and payload.get('db_writable') else 'check'}</code>\n"
@@ -134728,7 +134726,7 @@ def security_log_text(limit: int = 8) -> str:
                 f"<code>{safe_html(item.get('event_type') or '-')}</code> "
                 f"user=<code>{safe_html(item.get('user_id') or '-')}</code>"
             )
-        body = "\n".join(rows)
+        body = "\\n".join(rows)
     return (
         "🛡 <b>Nhật ký bảo mật</b>\n\n"
         "Xem các sự kiện bảo mật gần đây: webhook sai chữ ký, nạp bị chặn, thao tác admin, backup DB.\n\n"
@@ -134764,7 +134762,7 @@ async def cmd_security_status(update: Update, context: ContextTypes.DEFAULT_TYPE
         "",
         "2FA/secret checklist là thao tác thủ công: dùng /security_checklist để rà.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_db_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -135915,7 +135913,7 @@ async def cmd_data_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_legal_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin/internal.")
-    content = "\n\n".join([
+    content = "\\n\\n".join([
         "# TOAN AAS Legal Export",
         "## Official Channels\n" + re.sub(r"<[^>]+>", "", html.unescape(official_channels_text())),
         "## Legal Menu\n" + re.sub(r"<[^>]+>", "", html.unescape(legal_menu_text())),
@@ -135988,7 +135986,7 @@ async def cmd_mydata(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Lệnh này không gửi bill, file, audio, video hoặc dữ liệu nhạy cảm.",
         "Yêu cầu hỗ trợ/xóa dữ liệu phù hợp: <code>/data_delete</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     error = context.error
@@ -136232,8 +136230,8 @@ async def safe_edit_query_message(query, text: str, reply_markup=None, parse_mod
 
 def html_message_to_plain_text(text: str) -> str:
     plain = re.sub(r"<a\s+href=\"([^\"]+)\"[^>]*>(.*?)</a>", r"\2: \1", str(text or ""), flags=re.I | re.S)
-    plain = re.sub(r"<br\s*/?>", "\n", plain, flags=re.I)
-    plain = re.sub(r"</p\s*>", "\n", plain, flags=re.I)
+    plain = re.sub(r"<br\s*/?>", "\\n", plain, flags=re.I)
+    plain = re.sub(r"</p\s*>", "\\n", plain, flags=re.I)
     plain = re.sub(r"<[^>]+>", "", plain)
     return html.unescape(plain)
 
@@ -136265,8 +136263,8 @@ def split_telegram_html_text(text: str, limit: int = 3600) -> list[str]:
         return [raw_text]
     chunks: list[str] = []
     current = ""
-    for paragraph in raw_text.split("\n\n"):
-        piece = paragraph if not current else "\n\n" + paragraph
+    for paragraph in raw_text.split("\\n\\n"):
+        piece = paragraph if not current else "\\n\\n" + paragraph
         if len(current) + len(piece) <= limit:
             current += piece
             continue
@@ -136801,7 +136799,7 @@ def cskh_business_trace_lines(payload: dict) -> list[str]:
         lines.append("Chưa có business message trace.")
         return lines
     for index, item in enumerate(trace, 1):
-        text = str(item.get("text") or "").replace("\n", " ")[:160]
+        text = str(item.get("text") or "").replace("\\n", " ")[:160]
         lines.extend(
             [
                 f"<b>{index}.</b> <code>{html.escape(text or '-')}</code>",
@@ -136866,7 +136864,7 @@ async def notify_cskh_business_admin(
 ) -> None:
     if not ADMIN_ID:
         return
-    text = title + "\n\n" + "\n".join(lines)
+    text = title + "\\n\\n" + "\\n".join(lines)
     for admin_id in owner_and_admin_ids():
         try:
             await context.bot.send_message(chat_id=admin_id, text=text[:3500], parse_mode="HTML")
@@ -136947,7 +136945,7 @@ def aichat_trace_text(payload: dict) -> str:
     lines = ["🧭 <b>AI Chatbot Trace</b>", ""]
     if not trace:
         lines.append("Chưa có trace AI Chatbot.")
-        return "\n".join(lines)
+        return "\\n".join(lines)
     for index, item in enumerate(trace, 1):
         flow = item.get("target_flow") or {}
         lines.extend(
@@ -136968,7 +136966,7 @@ def aichat_trace_text(payload: dict) -> str:
                 f"   reply=<code>{html.escape(str(item.get('reply_preview') or '-')[:220])}</code>",
             ]
         )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def aichat_image_flow_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return quick_image_prepared_prompt_keyboard(
@@ -137070,7 +137068,7 @@ async def cmd_aichat_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         f"Reply:\n{result.get('reply') or '-'}",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_aichat_trace(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not update.message:
@@ -137265,7 +137263,7 @@ async def cmd_cskh_business_status(update: Update, context: ContextTypes.DEFAULT
         bot_status=bot_status,
         allowed_updates=allowed_updates,
     )
-    await update.message.reply_text("\n".join(cskh_status_lines(payload, bot_status)), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(cskh_status_lines(payload, bot_status)), parse_mode="HTML")
 
 async def cmd_cskh_business_trace(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not is_admin_user(update.effective_user.id):
@@ -137279,7 +137277,7 @@ async def cmd_cskh_business_trace(update: Update, context: ContextTypes.DEFAULT_
         bot_status=bot_status,
         allowed_updates=allowed_updates,
     )
-    await update.message.reply_text("\n".join(cskh_business_trace_lines(payload)), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(cskh_business_trace_lines(payload)), parse_mode="HTML")
 
 async def cmd_cskh_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not is_admin_user(update.effective_user.id):
@@ -137444,7 +137442,7 @@ async def cmd_cskh_intents(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Scenario count: <code>{len(scenarios)}</code>",
         "AI default: <code>off / rules_only</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def handle_cskh_business_connection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     connection = getattr(update, "business_connection", None)
@@ -137587,7 +137585,7 @@ def support_admin_search_payload(search: str) -> tuple[str, InlineKeyboardMarkup
     for index in range(0, len(tickets), 2):
         rows.append([InlineKeyboardButton(f"🎫 {ticket['ticket_code'][-6:]}", callback_data=f"ticket|av|{ticket['id']}|new") for ticket in tickets[index:index + 2]])
     rows.append([InlineKeyboardButton("⬅️ CSKH/Ticket", callback_data="ticket|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
-    return "\n".join(lines), InlineKeyboardMarkup(rows)
+    return "\\n".join(lines), InlineKeyboardMarkup(rows)
 
 async def handle_support_pending_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.effective_user or not update.message or not update.message.text:
@@ -138131,7 +138129,7 @@ AUTOPOST_NICHES = [
     ("✨ Thương hiệu cá nhân", "ca_nhan"),
 ]
 
-autopost_engine_code = r'''
+autopost_engine_code = '''
 def autopost_hub_text(lang: str = "vi", user_id: int = 0) -> str:
     return autopost_main_dashboard_text(lang, user_id)
 
@@ -138202,7 +138200,7 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
 
     if action == "brand_edit_prompt":
         context.user_data["awaiting_brand_edit"] = True
-        msg = "✏️ <b>CẬP NHẬT THƯƠNG HIỆU:</b>\n\nHãy gửi tin nhắn với định dạng:\n<code>Tên thương hiệu | Giọng văn | CTA chính</code>\n\nVí dụ:\n<code>Shop Mẹ & Bé | Thân thiện, chu đáo | Mua ngay tại shopmebe.vn</code>"
+        msg = autopost_brand_edit_prompt_text()
         reply_kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|brands")],
         ])
@@ -138211,7 +138209,7 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
     if action == "brand_preview":
         brand = get_effective_brand_profile(uid)
         draft = generate_single_post_draft(uid, "Bí quyết kinh doanh bứt phá doanh số", brand)
-        msg = "👁 <b>XEM TRƯỚC MẪU NỘI DUNG THƯƠNG HIỆU:</b>\n\n" + draft["caption"]
+        msg = autopost_brand_preview_text(draft)
         reply_kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ Quay lại Thương hiệu", callback_data="autopost|brands")],
         ])
@@ -138237,12 +138235,12 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
     if action == "aff_seed":
         seed_default_curated_vault_for_user(uid)
         stats = get_user_affiliate_stats(uid)
-        msg = "⚡ <b>ĐÃ NẠP THÀNH CÔNG 66+ CHIẾN DỊCH GỢI Ý VÀO KHO CÁ NHÂN!</b>\n\n" + autopost_affiliate_text(uid, stats, lang)
+        msg = autopost_aff_seed_success_text(uid, stats, lang)
         reply_kb = autopost_affiliate_keyboard(uid, stats, lang)
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
     if action == "aff_clear_confirm":
-        msg = "⚠️ <b>XÁC NHẬN XÓA TOÀN BỘ KHO AFFILIATE CÁ NHÂN:</b>\n\nHành động này sẽ xóa toàn bộ link trong kho riêng của tài khoản này. Bạn có thể nạp lại link bất cứ lúc nào."
+        msg = autopost_aff_clear_confirm_text()
         reply_kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🗑️ Xác nhận xóa sạch", callback_data="autopost|aff_clear_done")],
             [InlineKeyboardButton("❌ Hủy bỏ", callback_data="autopost|affiliate")],
@@ -138252,7 +138250,7 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
     if action == "aff_clear_done":
         clear_user_affiliate_vault(uid)
         stats = get_user_affiliate_stats(uid)
-        msg = "🗑️ <b>ĐÃ XÓA TOÀN BỘ KHO AFFILIATE CÁ NHÂN THÀNH CÔNG.</b>\n\n" + autopost_affiliate_text(uid, stats, lang)
+        msg = autopost_aff_clear_done_text(uid, stats, lang)
         reply_kb = autopost_affiliate_keyboard(uid, stats, lang)
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
@@ -138277,23 +138275,17 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
         platform = value or "telegram"
         if platform == "telegram":
             context.user_data["awaiting_telegram_channel_id"] = True
-            msg = "🔗 <b>KẾT NỐI KÊNH TELEGRAM:</b>\n\n1. Thêm Bot làm Quản trị viên (Admin) vào Kênh hoặc Nhóm Telegram của bạn.\n2. Gửi <b>@username</b> của kênh (hoặc Chat ID) vào đây:\n\n<i>Ví dụ: <code>@toanaas_channel</code> hoặc <code>-1001234567890</code></i>"
+            msg = autopost_conn_telegram_prompt_text()
             return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|channels")]]))
         else:
-            msg = f"🔗 <b>KẾT NỐI {platform.upper()}:</b>\n\nNền tảng {platform.upper()} yêu cầu cấp quyền OAuth bảo mật máy chủ.\nTrạng thái: <b>NEEDS_OAUTH</b> (Chưa có token cấu hình)."
+            msg = autopost_conn_oauth_prompt_text(platform)
             return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|channels")]]))
 
     if action == "test_tg_conn":
         accounts = get_user_social_accounts(uid)
         tg_acc = next((a for a in accounts if a["platform"] == "telegram"), None)
-        if not tg_acc:
-            msg = "⚠️ <b>Chưa có Kênh Telegram nào được cấu hình.</b>\nVui lòng bấm 'Kết nối Telegram' và nhập @channel_username."
-        else:
-            v = await TelegramAdapter.validate(tg_acc["account_id"], bot_instance=context.bot)
-            if v.get("valid"):
-                msg = f"✅ <b>KẾT NỐI TELEGRAM HOẠT ĐỘNG TỐT!</b>\n\n• Kênh: <code>{tg_acc['display_name']}</code>\n• Chat ID: <code>{v.get('chat_id', tg_acc['account_id'])}</code>\n• Trạng thái: <b>READY ✅</b>"
-            else:
-                msg = f"⚠️ <b>KIỂM TRA KẾT NỐI THẤT BẠI:</b>\n{v.get('error')}"
+        v = await TelegramAdapter.validate(tg_acc["account_id"] if tg_acc else "", bot_instance=context.bot) if tg_acc else {"valid": False}
+        msg = autopost_test_tg_conn_text(tg_acc, v)
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại Channels", callback_data="autopost|channels")]]))
 
     if action == "calendar":
@@ -138317,10 +138309,7 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
             msg = "⚠️ Không tìm thấy bài đăng trong hàng đợi."
         else:
             res = await execute_publish_job(job, bot_instance=context.bot)
-            if res.get("ok"):
-                msg = f"✅ <b>ĐÃ PHÁT HÀNH BÀI ĐĂNG THỰC TẾ THÀNH CÔNG!</b>\n\n• Remote ID: <code>{res['remote_post_id']}</code>\n• Nền tảng: {job['platform'].upper()}\n• URL: {res.get('remote_url', '#')}"
-            else:
-                msg = f"❌ <b>LỖI PHÁT HÀNH:</b>\n{res.get('error')}"
+            msg = autopost_job_publish_result_text(res, job)
         reply_kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Xem lịch sử đã đăng", callback_data="autopost|published_history"), InlineKeyboardButton("🚀 Hàng đợi", callback_data="autopost|queue")],
             [InlineKeyboardButton("⬅️ Quay lại Hub", callback_data="autopost|main")],
@@ -138368,7 +138357,7 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
 
     if action == "set_mode":
         set_user_publish_mode(uid, value or "MANUAL")
-        msg = f"✅ <b>ĐÃ CẬP NHẬT CHẾ ĐỘ PHÁT HÀNH: {value}</b>\n\n" + autopost_settings_text(uid)
+        msg = autopost_set_mode_text(value, uid)
         reply_kb = autopost_settings_keyboard(uid)
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
@@ -138387,11 +138376,7 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
                 "id": job_id, "owner_user_id": uid, "platform": "telegram",
                 "channel_id": target_chat, "payload": {"caption": draft["caption"]}
             }, bot_instance=context.bot)
-            
-            if res.get("ok"):
-                msg = f"✅ <b>ĐÃ PHÁT HÀNH BÀI ĐĂNG THÀNH CÔNG!</b>\n\n• Remote ID: <code>{res['remote_post_id']}</code>\n• URL: {res.get('remote_url', '#')}"
-            else:
-                msg = f"❌ <b>LỖI PHÁT HÀNH:</b>\n{res.get('error')}"
+            msg = autopost_draft_publish_result_text(res)
                 
         reply_kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Xem lịch sử đã đăng", callback_data="autopost|published_history"), InlineKeyboardButton("🚀 Hàng đợi", callback_data="autopost|queue")],
@@ -138409,7 +138394,7 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
             target_chat = tg_acc["account_id"] if tg_acc else str(uid)
             sched_time = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)).isoformat()
             job_id = create_publish_job(None, uid, "telegram", target_chat, sched_time)
-            msg = f"✅ <b>ĐÃ DUYỆT & LÊN LỊCH BÀI ĐĂNG THÀNH CÔNG!</b>\n\n• Mã tác vụ: <b>#{job_id}</b>\n• Thời gian phát hành: <code>{sched_time[:16].replace('T', ' ')} UTC</code>\n• Kênh: <code>{target_chat}</code>"
+            msg = autopost_draft_approved_text(job_id, sched_time, target_chat)
         reply_kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🚀 Xem hàng đợi", callback_data="autopost|queue"), InlineKeyboardButton("⬅️ Quay lại Hub", callback_data="autopost|main")],
         ])
@@ -138418,6 +138403,8 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
     return await safe_edit_query_message(query, autopost_main_dashboard_text(lang, uid), parse_mode="HTML", reply_markup=autopost_main_keyboard(lang))
 '''
 exec(compile(autopost_engine_code, f"{__file__}:autopost_engine", "exec"), globals())
+
+
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -139611,17 +139598,17 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
                 parse_mode="HTML",
                 reply_markup=free_hub_video_ai_guard_keyboard(lang),
             )
-        content = "\n\n".join(
+        content = "\\n\\n".join(
             value for value in [
                 str(result.get("title") or ""),
                 str(result.get("prompt") or ""),
                 str(result.get("caption") or ""),
-                "\n".join(str((item or {}).get("text") or item) for item in (result.get("meta_prompts") or [])),
-                "\n".join(str((item or {}).get("body") or item) for item in (result.get("captions") or [])),
-                "\n".join(str(item) for item in (result.get("video_ideas") or [])),
-                "\n".join(str(item) for item in (result.get("post_ideas") or [])),
-                "\n".join(str(item) for item in (result.get("hooks") or [])),
-                "\n".join(str(item) for item in (result.get("image_video_prompts") or {}).values()),
+                "\\n".join(str((item or {}).get("text") or item) for item in (result.get("meta_prompts") or [])),
+                "\\n".join(str((item or {}).get("body") or item) for item in (result.get("captions") or [])),
+                "\\n".join(str(item) for item in (result.get("video_ideas") or [])),
+                "\\n".join(str(item) for item in (result.get("post_ideas") or [])),
+                "\\n".join(str(item) for item in (result.get("hooks") or [])),
+                "\\n".join(str(item) for item in (result.get("image_video_prompts") or {}).values()),
                 " ".join(str(item) for item in (result.get("hashtags") or [])),
             ] if value
         )
@@ -139792,7 +139779,7 @@ async def cmd_customer_surface(update: Update, context: ContextTypes.DEFAULT_TYP
         "",
         "Nếu Telegram vẫn hiện A-TOOLS khi audit OK, vấn đề nằm ở webhook/process cũ cùng TELEGRAM_TOKEN; chạy <code>/telegram_status</code> và <code>/telegram_takeover</code>.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_free_hub_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -139821,7 +139808,7 @@ async def cmd_free_hub_status(update: Update, context: ContextTypes.DEFAULT_TYPE
         "<b>Prompt categories:</b>",
     ]
     lines.extend(f"• {html.escape(key)}: <code>{value}</code>" for key, value in sorted(counts.items()))
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_free_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -139838,7 +139825,7 @@ async def cmd_free_provider_status(update: Update, context: ContextTypes.DEFAULT
         "• Sensitive/payment/admin tasks: <code>BLOCKED</code>",
         "• API keys shown/logged: <code>NO</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_free_hub_prompt_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -141016,7 +141003,7 @@ def video_public_status_text() -> str:
     ])
     for key, value in conclusion.items():
         lines.append(f"• {html.escape(key.replace('_', ' ').title())}: <code>{html.escape(str(value))}</code>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_public_status_chunks(max_chars: int = 3900) -> list[str]:
@@ -141039,13 +141026,13 @@ def video_public_status_chunks(max_chars: int = 3900) -> list[str]:
         piece = line if len(line) <= safe_max - 10 else line[: safe_max - 40] + "…"
         piece_len = len(piece) + 1
         if current and current_len + piece_len > safe_max:
-            chunks.append("\n".join(current))
+            chunks.append("\\n".join(current))
             current = []
             current_len = 0
         current.append(piece)
         current_len += piece_len
     if current:
-        chunks.append("\n".join(current))
+        chunks.append("\\n".join(current))
     if chunks:
         chunks[0] = chunks[0].replace(
             "• video_public_status_chunked: <code>no</code>",
@@ -141141,7 +141128,7 @@ def video_gate_status_text() -> str:
     if blockers:
         lines.extend(["", "<b>Blockers</b>"])
         lines.extend(f"• <code>{html.escape(str(item))}</code>" for item in blockers[:12])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def video_public_open_safe_result(admin_id) -> dict:
     global VIDEO_PLANNING_PUBLIC_ENABLED, VIDEO_TREND_CONTENT_PUBLIC_ENABLED, VIDEO_STORYBOARD_PUBLIC_ENABLED
@@ -141262,7 +141249,7 @@ def video_public_open_safe_text(result: dict) -> str:
         "",
         "Không gọi provider trong lệnh này. Không trừ Xu.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def video_cost_status_text() -> str:
     rows = video_public_beta_cost_rows()
@@ -141297,10 +141284,10 @@ def video_cost_status_text() -> str:
         "• long render: <code>OFF</code>",
         "• image-to-video / video-to-video: <code>OFF until separate smoke pass</code>",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def video_beta_limits_text() -> str:
-    return "\n".join([
+    return "\\n".join([
         "🎬 <b>VIDEO BETA LIMITS</b>",
         "",
         f"• Beta enabled: <code>{video_public_bool_label(video_public_beta_enabled_runtime())}</code>",
@@ -141435,11 +141422,11 @@ def image_edit_status_text() -> str:
             f"| reason=<code>{html.escape(str(item.get('reason') or '-'))}</code>"
         )
     lines.append("\nUser-facing guard is friendly; admin status above is the technical checklist. No API key is shown.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def chat_ai_status_text() -> str:
     vision = get_chat_ai_vision_readiness()
-    return "\n".join([
+    return "\\n".join([
         "🤖 <b>CHAT AI STATUS</b>",
         "",
         f"• Text chat provider: <code>{'READY' if (gemini_client or openai_client or shopaikey_public_chat_fallback_enabled()) else 'MISSING'}</code>",
@@ -141453,7 +141440,7 @@ def chat_ai_status_text() -> str:
 
 def toanaas_ai_status_text() -> str:
     payload = toanaas_ai_status_payload()
-    return "\n".join([
+    return "\\n".join([
         "🧠 <b>TOAN AAS AI STATUS</b>",
         "",
         f"• Knowledge base: <code>{'FOUND' if payload.get('knowledge_exists') else 'MISSING'}</code>",
@@ -141480,7 +141467,7 @@ def video_tier_status_text() -> str:
         "• 500/600/700/800/1000/1200/1500 limits: <code>queue/job lock/auto-freeze still apply</code>",
         "• 1000/1200/1500: <code>PUBLIC when allowlist + billing safety pass; provider/job guard still applies</code>",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def subtitle_dub_status_text() -> str:
     pipeline = video_pipeline_status_payload()
@@ -141495,7 +141482,7 @@ def subtitle_dub_status_text() -> str:
             f"reason=<code>{html.escape(str(cap.get('reason') or '-'))}</code> | "
             f"missing=<code>{html.escape(', '.join(blockers) if blockers else '-')}</code>"
         )
-    return "\n".join([
+    return "\\n".join([
         "🎙 <b>SUBTITLE / DUB STATUS</b>",
         "",
         f"• ASR: <code>{html.escape(str(pipeline.get('asr_provider') or '-'))}</code> | test <code>{html.escape(str(pipeline.get('asr_test') or '-'))}</code>",
@@ -142120,7 +142107,7 @@ def translation_provider_status_text() -> str:
     ):
         static_blockers.extend(video_translation_admin_blockers(mode, public=True))
     last_blocker = ", ".join(dict.fromkeys(static_blockers)) or "No static blocker; run smoke checks"
-    return "\n".join([
+    return "\\n".join([
         "🌐 <b>TRANSLATION PROVIDER STATUS</b>",
         "",
         f"• Key4U ASR configured: <code>{'YES' if key4u_asr_configured() else 'NO'}</code> | smoke <code>{html.escape(key4u_asr_smoke)}</code>",
@@ -142155,7 +142142,7 @@ def voice_status_text() -> str:
     clone_gate_note = ""
     if minimax.get("public_enabled") and not clone.get("public_enabled"):
         clone_gate_note = " — clone smoke not tested" if not provider_status_is_pass(str(clone.get("clone_smoke") or "")) else " — clone gate closed"
-    return "\n".join([
+    return "\\n".join([
         "🎙 <b>VOICE / TTS STATUS</b>",
         "",
         f"• ShopAIKey TTS: <code>{'READY_CONFIGURED' if (SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY) else 'GUARDED/MISSING'}</code> | smoke <code>{html.escape(preferred_tool_test_status_text('shopaikey_tts', 'tts'))}</code>",
@@ -142226,7 +142213,7 @@ def music_status_text() -> str:
         ),
         "-",
     )
-    return "\n".join([
+    return "\\n".join([
         "🎵 <b>MUSIC / SFX STATUS</b>",
         "",
         f"• Preferred Suno provider: <code>{html.escape(str(readiness.get('provider') or '-'))}</code>",
@@ -142261,7 +142248,7 @@ def music_status_text() -> str:
 
 def suno_status_text() -> str:
     readiness = get_suno_music_readiness()
-    return "\n".join([
+    return "\\n".join([
         "🎼 <b>SUNO STATUS</b>",
         "",
         f"• Provider: <code>{html.escape(str(readiness.get('provider') or '-'))}</code>",
@@ -142818,7 +142805,7 @@ def get_media_ai_public_status() -> dict:
 def system_public_status_text() -> str:
     video = video_public_status_payload()
     media_ai = get_media_ai_public_status()
-    return "\n".join([
+    return "\\n".join([
         "🌐 <b>TOAN AAS PUBLIC STATUS</b>",
         "",
         f"• Free tools: <code>ON</code>",
@@ -142986,7 +142973,7 @@ def video_beta_open_text(result: dict) -> str:
         "Giữ OFF: long render, image-to-video và video-to-video.",
         "Không gọi provider trong lệnh này. Không trừ Xu.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def video_beta_close_result(admin_id) -> dict:
     global VIDEO_PUBLIC_BETA_ENABLED, VIDEO_AI_PUBLIC_ENABLED, VIDEO_AI_MASTER_ENABLED, VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED, SHOPAIKEY_PUBLIC_VIDEO_ENABLED
@@ -143062,7 +143049,7 @@ def video_open_all_current_tiers_text(result: dict) -> str:
         "",
         "Không gọi provider trong lệnh này. Không trừ Xu.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def video_open_high_tiers_result(admin_id, args: list[str] | tuple[str, ...] | None = None) -> dict:
     requested = [
@@ -143103,7 +143090,7 @@ def video_open_high_tiers_text(result: dict) -> str:
         "Giữ OFF: long render, premium, Kling/Seedance future.",
         "Không gọi provider trong lệnh này. Không trừ Xu.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def video_close_high_tiers_result(admin_id) -> dict:
     current = [tier for tier in video_public_allowed_tiers() if tier not in video_high_tiers()]
@@ -143125,7 +143112,7 @@ def video_close_high_tiers_result(admin_id) -> dict:
     return {"status": "CLOSED", "allowed_tiers": safe_allowed, "closed_tiers": list(video_high_tiers())}
 
 def video_close_high_tiers_text(result: dict) -> str:
-    return "\n".join([
+    return "\\n".join([
         "🧊 <b>VIDEO HIGH TIERS CLOSE</b>",
         "",
         "Đã đóng 500/600/800/1000/1200/1500 trong runtime hiện tại.",
@@ -143777,7 +143764,7 @@ def subtitle_dub_job_status_text(job: dict) -> str:
         return "⚠️ Chưa có subtitle/dub internal job. Pipeline hiện xử lý immediate khi có media thật."
     return (
         engine_async_status_text(job, admin=True)
-        + "\n"
+        + "\\n"
         + f"• SRT blocks: <code>{int(job.get('srt_blocks') or 0)}</code>\n"
         + f"• Audio bytes: <code>{int(job.get('audio_bytes') or 0)}</code>\n"
         + f"• Video bytes: <code>{int(job.get('video_bytes') or 0)}</code>\n"
@@ -143790,7 +143777,7 @@ def subtitle_dub_debug_text(job: dict) -> str:
     if job.get("_lookup_missing"):
         searched = ", ".join(job.get("searched") or []) or "-"
         stores = ", ".join(job.get("lookup_stores_checked") or []) or "-"
-        return "\n".join([
+        return "\\n".join([
             "⚠️ <b>Chưa có subtitle/dub job để debug.</b>",
             "",
             f"• input: <code>{html.escape(str(job.get('lookup_input') or '-'))}</code>",
@@ -143827,7 +143814,7 @@ def subtitle_dub_debug_text(job: dict) -> str:
         normalized = text.replace("\\", "/").rstrip("/")
         name = normalized.rsplit("/", 1)[-1] if "/" in normalized else normalized
         return html.escape(name or "path_hidden")
-    return "\n".join([
+    return "\\n".join([
         "🛠 <b>SUBTITLE/DUB DEBUG</b>",
         "",
         f"• job: <code>{esc(job.get('internal_job_id'))}</code>",
@@ -144057,7 +144044,7 @@ def subdub_voice_debug_text(job: dict) -> str:
     if job.get("_lookup_missing"):
         searched = ", ".join(job.get("searched") or []) or "-"
         stores = ", ".join(job.get("lookup_stores_checked") or []) or "-"
-        return "\n".join([
+        return "\\n".join([
             "⚠️ <b>Chưa có SubDub voice job để debug.</b>",
             "",
             f"• input: <code>{html.escape(str(job.get('lookup_input') or '-'))}</code>",
@@ -144081,7 +144068,7 @@ def subdub_voice_debug_text(job: dict) -> str:
         return "yes" if value else "no"
     def intval(value, default: int = 0) -> int:
         return _safe_int(value, default)
-    return "\n".join([
+    return "\\n".join([
         "🎙 <b>SUBDUB VOICE DEBUG</b>",
         "",
         f"• job: <code>{esc(job.get('internal_job_id') or job.get('job_id'))}</code>",
@@ -144146,7 +144133,7 @@ def subdub_delivery_debug_text(job: dict | None = None, arg: str = "") -> str:
         stage=job.get("last_error_stage") or job.get("stage") or "",
         job=job,
     ))
-    text = "\n".join([
+    text = "\\n".join([
         "📦 <b>SUBDUB DELIVERY DEBUG</b>",
         "",
         f"• public_code: <code>{esc(job.get('public_code'))}</code>",
@@ -144186,7 +144173,7 @@ def subdub_job_debug_text(job: dict | None = None, arg: str = "") -> str:
         return _safe_int(value, default)
     blocker = str(job.get("input_save_blocker") or job.get("pipeline_blocker") or job.get("no_charge_reason") or "")
     telegram_failed = bool("telegram_download_failed" in blocker or blocker == "large_telegram_download_unsupported")
-    text = "\n".join([
+    text = "\\n".join([
         "🛠 <b>SUBDUB JOB DEBUG</b>",
         "",
         f"• public_code: <code>{esc(job.get('public_code'))}</code>",
@@ -144285,7 +144272,7 @@ def tts_backend_status_text() -> str:
     payload = tts_backend_status_payload()
     vox = dict(payload.get("voxcpm2") or {})
     languages = ", ".join(str(item) for item in (vox.get("supported_languages") or [])) or "-"
-    return "\n".join([
+    return "\\n".join([
         "🎙 <b>TTS BACKEND STATUS</b>",
         "",
         f"• Voice TTS backend: <code>{html.escape(str(payload.get('voice_tts_backend') or '-'))}</code>",
@@ -144305,7 +144292,7 @@ def tts_backend_status_text() -> str:
 def voxcpm2_status_text() -> str:
     status = voxcpm2_status_payload()
     languages = ", ".join(str(item) for item in (status.get("supported_languages") or [])) or "-"
-    return "\n".join([
+    return "\\n".join([
         "🎙 <b>VOXCPM2 STATUS</b>",
         "",
         f"• enabled: <code>{_safe_backend_bool(status.get('enabled'))}</code>",
@@ -144625,7 +144612,7 @@ def subdub_language_debug_text(job: dict | None = None) -> str:
         return html.escape(str(value if value not in (None, "") else "-"))
     def intval(value, default: int = 0) -> int:
         return _safe_int(value, default)
-    return "\n".join([
+    return "\\n".join([
         "🌐 <b>SUBDUB LANGUAGE DEBUG</b>",
         "",
         f"• job: <code>{esc(job.get('internal_job_id') or job.get('job_id'))}</code>",
@@ -144664,7 +144651,7 @@ def subdub_long_video_audit_payload() -> dict:
     full_limit = int(subdub_full_duration_limit_seconds(False))
     duration_unbounded = full_limit <= 0
     preview_limit = int(subdub_preview_duration_seconds())
-    source = "\n".join([
+    source = "\\n".join([
         inspect.getsource(subdub_duration_gate_payload),
         inspect.getsource(subdub_duration_gate_payload_for_saved_input),
         inspect.getsource(_execute_video_dubbing_pipeline_core),
@@ -144713,7 +144700,7 @@ def subdub_audit_text(title: str, payload: dict) -> str:
         if isinstance(value, (dict, list, tuple)):
             value = json.dumps(value, ensure_ascii=False, sort_keys=True)
         lines.append(f"• {html.escape(str(key))}: <code>{html.escape(str(value))}</code>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def subdub_normalize_lookup_id(value: str = "") -> str:
     text = str(value or "").strip()
@@ -144946,7 +144933,7 @@ async def cmd_subtitle_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"audio=<code>{int(job.get('audio_bytes') or 0)}</code> "
             f"mux=<code>{html.escape(str(job.get('mux_status') or '-'))}</code>"
         )
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_subtitle_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -144979,7 +144966,7 @@ async def cmd_subdub_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def subdub_admin_debug_chunks(text: str, limit: int = 3200) -> list[str]:
     safe_limit = max(800, min(3600, int(limit or 3200)))
-    plain = re.sub(r"<br\s*/?>", "\n", str(text or ""), flags=re.IGNORECASE)
+    plain = re.sub(r"<br\s*/?>", "\\n", str(text or ""), flags=re.IGNORECASE)
     plain = html.unescape(re.sub(r"<[^>]+>", "", plain)).strip()
     if not plain:
         plain = "no recent SubDub job"
@@ -144989,7 +144976,7 @@ def subdub_admin_debug_chunks(text: str, limit: int = 3200) -> list[str]:
         if len(remaining) <= safe_limit:
             chunks.append(remaining)
             break
-        cut = remaining.rfind("\n", 0, safe_limit + 1)
+        cut = remaining.rfind("\\n", 0, safe_limit + 1)
         if cut < safe_limit // 2:
             cut = remaining.rfind(" ", 0, safe_limit + 1)
         if cut < safe_limit // 2:
@@ -145133,7 +145120,7 @@ async def cmd_video_status_debug(update: Update, context: ContextTypes.DEFAULT_T
         return await update.message.reply_text("Chưa tìm thấy video job. Dùng /video_status_debug <job_id hoặc task_id>.")
     def esc(value):
         return html.escape(str(value if value not in (None, "") else "-"))
-    text = "\n".join([
+    text = "\\n".join([
         "🎬 <b>VIDEO STATUS DEBUG</b>",
         "",
         f"• job id: <code>{esc(job.get('id'))}</code>",
@@ -145160,7 +145147,7 @@ async def cmd_subdub_style_preview(update: Update, context: ContextTypes.DEFAULT
             f"size=<code>{int(style.get('size') or 0)}</code> | "
             f"cover=<code>{'yes' if style.get('cover_original') else 'no'}</code>"
         )
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_dub_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_subtitle_job(update, context)
@@ -145431,7 +145418,7 @@ async def cmd_tool_test_translation_factory(update: Update, context: ContextType
         for name, status, detail in results
     ]
     await update.message.reply_text(
-        "\n".join([
+        "\\n".join([
             "🧪 <b>TRANSLATION FACTORY SMOKE</b>",
             "",
             *rows,
@@ -145466,7 +145453,7 @@ def music_provider_audit_text() -> str:
         or music_attempt.get("error")
         or "-"
     )
-    return "\n".join([
+    return "\\n".join([
         "🎵 <b>MUSIC PROVIDER AUDIT</b>",
         "",
         f"• Key4U Suno base: <code>{html.escape(KEY4U_SUNO_BASE_URL or '-')}</code>",
@@ -145533,7 +145520,7 @@ def audio_provider_curl_text() -> str:
     shopaikey_tts_url = shopaikey_tts_final_url(SHOPAIKEY_TTS_ENDPOINT)
     shopaikey_suno_submit_url = shopaikey_suno_final_url(SHOPAIKEY_MUSIC_ENDPOINT)
     shopaikey_suno_fetch_url = shopaikey_suno_fetch_final_url("<TASK_ID>")
-    return "\n".join([
+    return "\\n".join([
         "AUDIO PROVIDER cURL - admin only",
         "Never paste a real token into chat history.",
         "",
@@ -146005,7 +145992,7 @@ async def cmd_minimax_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "",
         "Voice clone/profile requires explicit user consent and stays user-scoped. No key/token is shown.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_tool_test_minimax_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -146130,7 +146117,7 @@ async def cmd_tool_test_minimax_tts(update: Update, context: ContextTypes.DEFAUL
         "🎙 <b>MiniMax TTS Smoke</b>\n\n"
         f"• Status: <code>{html.escape(overall)}</code>\n"
         f"• Model: <code>{html.escape(MINIMAX_TTS_MODEL or '-')}</code>\n"
-        + "\n".join(result_lines) + "\n"
+        + "\\n".join(result_lines) + "\\n"
         "• No Xu deducted: <code>yes</code>\n"
         "• Nếu không có audio, xem detail đã lưu trong tool test result.",
         parse_mode="HTML",
@@ -146438,7 +146425,7 @@ async def cmd_audio_public_status(update: Update, context: ContextTypes.DEFAULT_
         else "no full audio result; requires PASS_FULL_RESULT and download PASS"
     )
     await update.message.reply_text(
-        "\n".join([
+        "\\n".join([
             "🎧 <b>AUDIO PUBLIC STATUS</b>",
             "",
             f"• Voice TTS: smoke <code>{html.escape(voice_smoke)}</code> | public <code>{'CONTROLLED_ON' if voice.get('public_enabled') else 'OFF'}</code>",
@@ -146707,7 +146694,7 @@ async def cmd_video_dub_public_open(update: Update, context: ContextTypes.DEFAUL
         lines.extend(["", "<b>Blockers</b>"])
         lines.extend(f"• <code>{html.escape(str(item))}</code>" for item in blockers[:10])
     lines.append("\nKhông gọi provider trong lệnh này và không trừ Xu.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_video_dub_public_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -146871,7 +146858,7 @@ def image_public_status_text() -> str:
     ]
     if payload.get("provider_submit_message"):
         lines.append(f"• Guard message: <code>{html.escape(str(payload['provider_submit_message'])[:220])}</code>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 async def cmd_image_public_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -147142,7 +147129,7 @@ def providers_compact_text() -> str:
     key4u_alert = key4u_usage_alert_snapshot()
     multiscene = video_multiscene_status_payload()
     media = providers.get("media_factory") or {}
-    return "\n".join([
+    return "\\n".join([
         "🔐 <b>TOAN AAS Providers Compact</b>",
         "",
         "<b>Core</b>",
@@ -147185,14 +147172,14 @@ def provider_detail_text(section: str) -> str:
     section = str(section or "").strip().lower()
     providers = provider_status_payload()
     if section in {"", "help"}:
-        return "\n".join([
+        return "\\n".join([
             "📋 <b>Provider Detail</b>",
             "Dùng: <code>/provider_detail core|ai|shopaikey|key4u|audio|video|publish</code>",
             "Không gọi provider mới, chỉ đọc trạng thái hiện có.",
         ])
     if section == "core":
         db_status = db_status_payload()
-        return "\n".join([
+        return "\\n".join([
             "🧩 <b>Provider Detail — Core</b>",
             f"• Telegram: <code>{provider_status_text(providers['core']['telegram'])}</code>",
             f"• Public URL: <code>{provider_status_text(providers['core']['public_base_url'])}</code>",
@@ -147200,7 +147187,7 @@ def provider_detail_text(section: str) -> str:
             f"• System mode: <code>{html.escape(str(current_system_mode().get('label') or 'NORMAL'))}</code>",
         ])
     if section == "ai":
-        return "\n".join([
+        return "\\n".join([
             "🤖 <b>Provider Detail — AI</b>",
             f"• Gemini: <code>{provider_runtime_status_text(providers['ai']['gemini'], 'ai_gemini', 'ai_chat', 'ai')}</code>",
             f"• OpenAI: <code>{provider_runtime_status_text(providers['ai']['openai'], 'ai_openai', 'ai_chat', 'ai')}</code>",
@@ -147209,7 +147196,7 @@ def provider_detail_text(section: str) -> str:
         ])
     if section == "shopaikey":
         usage = shopaikey_last_usage_snapshot()
-        return "\n".join([
+        return "\\n".join([
             "🧾 <b>Provider Detail — ShopAIKey</b>",
             f"• Enabled/configured: <code>{'YES' if providers['ai'].get('shopaikey') else 'NO'}</code>",
             f"• Remaining: <code>{html.escape(str(usage.get('remaining') or '-'))}</code>",
@@ -147220,7 +147207,7 @@ def provider_detail_text(section: str) -> str:
         ])
     if section == "key4u":
         snapshot = key4u_usage_alert_snapshot()
-        return "\n".join([
+        return "\\n".join([
             "🔑 <b>Provider Detail — Key4U</b>",
             f"• Remote usage: <code>{html.escape(str(snapshot.get('remote_usage') or '-'))}</code>",
             f"• Manual balance: <code>{html.escape(str(snapshot.get('manual_balance') or 'not_set'))}</code>",
@@ -147231,7 +147218,7 @@ def provider_detail_text(section: str) -> str:
             "• Commands: <code>/key4u_usage_refresh</code> | <code>/key4u_usage_set_manual &lt;amount&gt;</code> | <code>/key4u_usage_status</code> | <code>/key4u_usage_alert</code>",
         ])
     if section == "audio":
-        return "\n".join([
+        return "\\n".join([
             "🎙 <b>Provider Detail — Audio</b>",
             f"• Deepgram: <code>{provider_status_text(providers['audio']['deepgram'])}</code>",
             f"• Fish Audio: <code>{provider_runtime_status_text(providers['audio']['fish_audio'], 'tts:fish', 'tts')}</code>",
@@ -147242,7 +147229,7 @@ def provider_detail_text(section: str) -> str:
         ])
     if section == "video":
         item = video_multiscene_status_payload()
-        return "\n".join([
+        return "\\n".join([
             "🎞 <b>Provider Detail — Video</b>",
             f"• Multiscene admin ready: <code>{'YES' if item.get('admin_multiscene_smoke_ready') else 'NO'}</code>",
             f"• Missing: <code>{html.escape(', '.join(item.get('exact_missing_components') or []) or '-')}</code>",
@@ -147252,7 +147239,7 @@ def provider_detail_text(section: str) -> str:
         ])
     if section == "publish":
         media = providers.get("media_factory") or {}
-        return "\n".join([
+        return "\\n".join([
             "📣 <b>Provider Detail — Publish</b>",
             f"• Customer publish: <code>{'ON' if media.get('customer_publish') else 'OFF'}</code>",
             f"• Auto publish: <code>{'ON' if media.get('auto_publish') else 'OFF'}</code>",
@@ -147319,7 +147306,7 @@ def core_4_status_text() -> str:
 
     providers = provider_status_payload()
     media = providers.get("media_factory") or {}
-    return "\n".join([
+    return "\\n".join([
         "🧭 <b>P0 Core Blockers</b>",
         "",
         "<b>1. Voice clone</b>",
@@ -147447,7 +147434,7 @@ async def cmd_local_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <code>LOCAL_FFMPEG_PATH</code>",
         "• <code>TELEGRAM_BOT_TOKEN</code> hoặc <code>BOT_TOKEN</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_local_worker_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -147654,7 +147641,7 @@ async def cmd_video_local_job_debug(update: Update, context: ContextTypes.DEFAUL
         f"• Failure reason: <code>{html.escape(failure)}</code>",
         f"• Charged amount: <code>{safe_int(progress.get('charge'), safe_int(job.get('xu_cost'), 0))} Xu</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 
 def _last_video_ai_edit_job() -> dict:
@@ -147701,7 +147688,7 @@ async def cmd_video_ai_edit_status(update: Update, context: ContextTypes.DEFAULT
         f"• Last provider status: <code>{html.escape(str(payload.get('last_provider_status') or '-'))}</code>",
         f"• Last failure: <code>{html.escape(_video_local_safe_failure_reason(str(payload.get('last_failure_reason') or '')))}</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_video_ai_edit_job_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -147735,7 +147722,7 @@ async def cmd_video_ai_edit_job_debug(update: Update, context: ContextTypes.DEFA
         f"• Cleanup: <code>{html.escape(str(payload.get('cleanup') or '-'))}</code>",
         f"• Failure: <code>{html.escape(_video_local_safe_failure_reason(str(payload.get('failure_reason') or '')))}</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_local_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -147748,7 +147735,7 @@ async def cmd_local_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for job in jobs:
         lines.append(local_worker_job_line(job))
         lines.append(f"   Xem: <code>/local_job {job.get('id')}</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_local_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -147774,7 +147761,7 @@ async def cmd_local_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Output URL: <code>{html.escape(str(job.get('output_url') or '-'))}</code>",
         f"• Xu cost: <code>{int(job.get('xu_cost') or 0)}</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_render_center(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -147800,7 +147787,7 @@ async def cmd_render_center(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "Không mở customer render, không gọi ComfyUI, không trừ Xu ở Phase 1.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_ai_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
@@ -147999,10 +147986,10 @@ async def cmd_tool_test_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 <b>AI Smoke Test</b>\n\n"
         f"• Gemini: <code>{html.escape(gemini_status)}</code>"
         + (f" — <code>{html.escape(gemini_detail[:180])}</code>" if gemini_detail else "")
-        + "\n"
+        + "\\n"
         f"• OpenAI fallback: <code>{html.escape(openai_status)}</code>"
         + (f" — <code>{html.escape(openai_detail[:180])}</code>" if openai_detail else "")
-        + "\n"
+        + "\\n"
         f"• Overall: <code>{html.escape(overall)}</code>\n"
         f"• Provider used: <code>{'Gemini' if gemini_status == 'PASS' else ('OpenAI' if openai_status == 'PASS' else '-')}</code>\n"
         f"• Result: <code>{html.escape(result_preview or '-')}</code>\n\n"
@@ -149431,7 +149418,7 @@ async def cmd_music_suno_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
     lines.append("")
     lines.append("Poll: <code>/music_suno_poll MUS-xxxx</code>")
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_music_suno_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -149445,7 +149432,7 @@ async def cmd_music_suno_job(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if entry:
             job = get_engine_async_job(job_id) or job
     return await update.message.reply_text(
-        "\n".join(_music_suno_job_lines(job, admin=True)),
+        "\\n".join(_music_suno_job_lines(job, admin=True)),
         parse_mode="HTML",
         reply_markup=engine_async_status_keyboard(job_id, "music") if job else None,
     )
@@ -149472,7 +149459,7 @@ async def cmd_music_suno_poll(update: Update, context: ContextTypes.DEFAULT_TYPE
         upsert_music_vault_from_completed_job(job, updated_by=update.effective_user.id)
         job = get_engine_async_job(job_id) or job
     return await update.message.reply_text(
-        "\n".join(_music_suno_job_lines(job, admin=True)),
+        "\\n".join(_music_suno_job_lines(job, admin=True)),
         parse_mode="HTML",
         reply_markup=engine_async_status_keyboard(job_id, "music"),
     )
@@ -149547,7 +149534,7 @@ async def cmd_music_prompt_debug(update: Update, context: ContextTypes.DEFAULT_T
         f"• Provider prompt hash: <code>{html.escape(str(job.get('provider_prompt_sha256') or '-'))}</code>",
         "• Provider secret/task id: <code>hidden</code>",
     ]
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_music_vault_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -149562,20 +149549,20 @@ async def cmd_music_vault_status(update: Update, context: ContextTypes.DEFAULT_T
     lines.extend([f"• {status}: <code>{count}</code>" for status, count in counts.items()])
     lines.append(f"• Backfill checked/upserted: <code>{int(backfill.get('checked') or 0)}/{int(backfill.get('upserted') or 0)}</code>")
     lines.extend(["", "Commands: /music_vault_unused, /music_vault_used, /music_vault_detail &lt;vault_id&gt;"])
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_music_vault_unused(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     backfill_completed_music_vault_entries(updated_by=update.effective_user.id)
     lines = ["🗂 <b>MUSIC VAULT UNUSED</b>", "", *music_vault_status_lines({"generated_unused", "preview_sent", "reserved"}, limit=12)]
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_music_vault_used(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     lines = ["🗂 <b>MUSIC VAULT USED</b>", "", *music_vault_status_lines({"used"}, limit=12)]
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 def _music_vault_arg(context: ContextTypes.DEFAULT_TYPE) -> str:
     return str((getattr(context, "args", []) or [""])[0] or "").strip()
@@ -149605,7 +149592,7 @@ async def cmd_music_vault_detail(update: Update, context: ContextTypes.DEFAULT_T
         f"• Updated: <code>{html.escape(str(entry.get('updated_at') or '-'))}</code>",
         "• Provider task id: <code>hidden</code>",
     ]
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def _cmd_music_vault_mark(update: Update, context: ContextTypes.DEFAULT_TYPE, status: str):
     if not is_admin_user(update.effective_user.id):
@@ -149689,7 +149676,7 @@ async def cmd_preview_quota_policy(update: Update, context: ContextTypes.DEFAULT
         "• <code>/preview_quota_status &lt;user_id&gt;</code>",
         "• <code>/preview_quota_reset &lt;user_id&gt; &lt;product_type&gt;</code>",
     ]
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_preview_quota_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -149717,7 +149704,7 @@ async def cmd_preview_quota_status(update: Update, context: ContextTypes.DEFAULT
             f"next=<code>{html.escape(str(snap.get('next_available_at') or '-'))}</code>; "
             f"duration=<code>{preview_duration_seconds(product)}s</code>"
         )
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_preview_quota_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -149753,7 +149740,7 @@ async def cmd_vip_music_vault(update: Update, context: ContextTypes.DEFAULT_TYPE
         lines.append("Nhận: <code>/vip_music_claim &lt;vault_id&gt;</code>")
     else:
         lines.append("Chưa có bản generated_unused có thể tái dùng.")
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_vip_music_claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -149827,7 +149814,7 @@ async def cmd_key4u_suno_route_status(update: Update, context: ContextTypes.DEFA
         "• Result fields inspected: <code>task_id, job_id, id, status, state, data, result, output, audio_url, url, file_url, download_url, stream_url</code>",
         "• Provider secret: <code>hidden</code>",
     ]
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
 
 async def cmd_key4u_suno_job_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -149912,7 +149899,7 @@ async def handle_engine_async_job_callback(update: Update, context: ContextTypes
                 job = get_engine_async_job(job_id) or job
         return await safe_edit_or_send(
             query,
-            "\n".join(_music_suno_job_lines(job, admin=bool(is_admin_user(uid)))),
+            "\\n".join(_music_suno_job_lines(job, admin=bool(is_admin_user(uid)))),
             reply_markup=engine_async_status_keyboard(job_id, "music"),
             parse_mode="HTML",
         )
@@ -150280,7 +150267,7 @@ async def cmd_image_provider_status(update: Update, context: ContextTypes.DEFAUL
         "",
         "Không hiển thị API key/token/raw provider response. Public flow vẫn qua confirm/refund guard.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_maintenance_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -150347,7 +150334,7 @@ async def cmd_maintenance_status(update: Update, context: ContextTypes.DEFAULT_T
         "Commands: <code>/freeze_status</code> | <code>/freeze_video &lt;reason&gt;</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status &lt;job_id&gt;</code> | <code>/refund_job &lt;job_id&gt;</code> | <code>/clear_job_lock &lt;user_id&gt;</code>",
         "Không hiển thị API key/token/raw response.",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_provider_freeze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -150433,7 +150420,7 @@ async def cmd_freeze_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Commands: <code>/freeze_video &lt;reason&gt;</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status &lt;job_id&gt;</code> | <code>/refund_job &lt;job_id&gt;</code> | <code>/clear_job_lock &lt;user_id&gt;</code>",
         "Không hiển thị API key/token/raw provider response.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_freeze_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -150472,7 +150459,7 @@ async def cmd_queue_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     queue = shopaikey_video_queue_counts()
     raw = queue.get("raw") or {}
     raw_text = ", ".join(f"{key}={value}" for key, value in sorted(raw.items())) or "-"
-    admin_canary_block = "\n".join(remote_worker_admin_canary_queue_lines())
+    admin_canary_block = "\\n".join(remote_worker_admin_canary_queue_lines())
     await update.message.reply_text(
         "🎞 <b>ShopAIKey Video Queue</b>\n\n"
         f"• Queued: <code>{int(queue.get('queued') or 0)}</code>\n"
@@ -151137,7 +151124,7 @@ async def cmd_shopaikey_music_test(update: Update, context: ContextTypes.DEFAULT
         lines.append(f"Poll: <code>/shopaikey_music_job {html.escape(task_id)}</code>")
     else:
         lines.append("Không có task_id vì provider chưa nhận job; không chạy /shopaikey_music_job cho lần test này.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_shopaikey_music_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -153802,7 +153789,7 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
             panel_text, panel_keyboard = video_scene3_image_handoff_panel(scene3_return_state or {})
             return await safe_edit_or_send(
                 query,
-                public_image_provider_fail_message(0, False, lang) + "\n\n" + panel_text,
+                public_image_provider_fail_message(0, False, lang) + "\\n\\n" + panel_text,
                 parse_mode="HTML",
                 reply_markup=panel_keyboard,
             )
@@ -153822,7 +153809,7 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
                 return await safe_edit_or_send(
                     query,
                     public_image_provider_fail_message(0, False, lang)
-                    + "\n\n"
+                    + "\\n\\n"
                     + panel_text,
                     parse_mode=None,
                     reply_markup=panel_keyboard,
@@ -155219,7 +155206,7 @@ async def translate_file_extract_text_from_info(info: dict, context: ContextType
                     page_text = (page.extract_text() or "").strip()
                     if page_text:
                         chunks.append(page_text)
-                text = "\n\n".join(chunks).strip()
+                text = "\\n\\n".join(chunks).strip()
                 return (True, text[:3500], "") if text else (False, "", TRANSLATE_FILE_EXTRACT_ERROR_TEXT)
             except Exception:
                 return False, "", TRANSLATE_FILE_EXTRACT_ERROR_TEXT
@@ -155228,7 +155215,7 @@ async def translate_file_extract_text_from_info(info: dict, context: ContextType
                 return False, "", TRANSLATE_FILE_NOT_READY_TEXT
             try:
                 doc = DocxDocument(input_path)
-                text = "\n".join(p.text for p in getattr(doc, "paragraphs", []) if p.text).strip()
+                text = "\\n".join(p.text for p in getattr(doc, "paragraphs", []) if p.text).strip()
                 return (True, text[:3500], "") if text else (False, "", TRANSLATE_FILE_EXTRACT_ERROR_TEXT)
             except Exception:
                 return False, "", TRANSLATE_FILE_EXTRACT_ERROR_TEXT
@@ -155402,7 +155389,7 @@ async def handle_auto_translate_message(update: Update, context: ContextTypes.DE
             f"🌐 <b>{copy['translation_auto_result_title']}</b>\n\n"
             f"• {copy['translation_auto_result_source']}: <code>auto</code>\n"
             f"• {copy['translation_auto_result_target']}: <b>{html.escape(translate_target_label(target))}</b>\n"
-            + "\n"
+            + "\\n"
             f"{html.escape(translated)}\n\n"
             f"<i>{copy['translation_auto_result_disable_hint']}</i>",
             parse_mode="HTML",
@@ -155470,8 +155457,8 @@ async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
     await update.message.reply_text(
         ("✅ <b>Image provider PASS</b>\n\n" if output_bytes else "❌ <b>Image provider FAIL</b>\n\n")
-        + "\n".join(image_provider_block("RemoveBG", remove_info)) + "\n"
-        + "\n".join(image_provider_block("Cutout", cutout_info)) + "\n"
+        + "\\n".join(image_provider_block("RemoveBG", remove_info)) + "\\n"
+        + "\\n".join(image_provider_block("Cutout", cutout_info)) + "\\n"
         f"• Output sent: <code>{'yes' if output_bytes else 'no'}</code>\n"
         + (f"• Provider: <code>{html.escape(output_provider)}</code>\n" if output_bytes else "")
         + (f"• Error: <code>{html.escape(detail[:500])}</code>\n" if detail and not output_bytes else "")
@@ -155532,7 +155519,7 @@ async def cmd_tool_test_image_debug(update: Update, context: ContextTypes.DEFAUL
         f"• Provider: <code>{html.escape(output_provider or '-')}</code>",
         "Không hiển thị API key.",
     ])
-    await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines)[:3900], parse_mode="HTML")
 
 async def tts_elevenlabs_bytes(text: str) -> tuple[str, bytes, str, int]:
     if not ELEVENLABS_API_KEY:
@@ -155661,7 +155648,7 @@ async def cmd_tool_test_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "Không hiển thị API key và không trừ Xu nếu provider lỗi.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_tool_test_subdub_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -157081,7 +157068,7 @@ async def cmd_tool_test_stt_debug(update: Update, context: ContextTypes.DEFAULT_
     if transcript:
         lines.append(f"\nTranscript preview:\n<code>{html.escape(transcript[:700])}</code>")
     lines.append("\nKhông hiển thị API key.")
-    await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines)[:3900], parse_mode="HTML")
 
 async def cmd_tool_test_downloader(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -159046,7 +159033,7 @@ def music_prompt_suggestions_text(description: str, offset: int = 0, lang: str =
             "",
         ])
     lines.append(music_no_xu_text(lang))
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def music_prompt_result_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM, result: dict | None = None) -> InlineKeyboardMarkup:
     ctx = normalize_product_context(product_context)
@@ -159806,7 +159793,7 @@ def music_provider_strip_lyrics_vocal_conflicts(lyrics: str = "", vocal_mode: st
                 current = re.sub(pattern, "", current, flags=re.I)
         if not remove_line:
             cleaned_lines.append(current.rstrip())
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(cleaned_lines)).strip()
+    return re.sub(r"\n{3,}", "\\n\\n", "\\n".join(cleaned_lines)).strip()
 
 def music_provider_locked_style_prompt(style_prompt: str = "", vocal_mode: str = "auto") -> str:
     mode = normalize_song_vocal_mode(vocal_mode)
@@ -159927,8 +159914,8 @@ def music_product_duet_lyrics(lyrics: str = "") -> str:
     if not lines:
         return text
     midpoint = max(1, len(lines) // 2)
-    male = "\n".join(lines[:midpoint]).strip()
-    female = "\n".join(lines[midpoint:]).strip() or male
+    male = "\\n".join(lines[:midpoint]).strip()
+    female = "\\n".join(lines[midpoint:]).strip() or male
     chorus = lines[-1].strip()
     return f"[Male Verse]\n{male}\n\n[Female Verse]\n{female}\n\n[Duet Chorus]\n{chorus}"
 
@@ -160188,7 +160175,7 @@ def music_confirm_route_audit_text() -> str:
     lines.append("")
     lines.append("• persist_helper_called: <code>recorded per confirmed job</code>")
     lines.append("• panel_created_by: <code>handle_music_product_confirm</code>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def music_product_text_looks_like_lyrics(text: str = "") -> bool:
     raw = str(text or "").strip()
@@ -160255,7 +160242,7 @@ def music_product_parse_details(text: str = "", mode: str = "background", tier: 
                 parsed[current_key] = match.group(2).strip()
                 continue
         if current_key:
-            parsed[current_key] = (parsed.get(current_key, "") + "\n" + line).strip()
+            parsed[current_key] = (parsed.get(current_key, "") + "\\n" + line).strip()
     mode_key = normalize_music_product_mode(mode)
     if not parsed:
         if mode_key == "song":
@@ -160687,7 +160674,7 @@ def music_product_suggestions_text(result: dict | None = None, lang: str = "vi")
                 f"• {_audio_copy(lang, 'tempo')}: {html.escape(tempo)}",
             ])
     lines.extend(["", music_no_xu_text(lang)])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def music_product_suggestions_keyboard(
     mode: str = "background",
@@ -160730,7 +160717,7 @@ def music_product_invoice_text(result: dict | None = None, lang: str = "vi") -> 
     if mode == "song":
         lines.append(f"• {_audio_label(lang, 'voice')}: {html.escape(music_product_vocal_label(result.get('song_vocal') or result.get('vocal_mode') or 'auto', lang))}")
     lines.extend([f"• {_audio_copy(lang, 'total')}: <b>{price} Xu</b>", "", _audio_copy(lang, "confirm_charge")])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def music_product_invoice_keyboard(result: dict | None = None, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
     result = dict(result or {})
@@ -167138,7 +167125,7 @@ def user_voice_profiles_summary(user_id, lang: str = "vi", limit: int = 5, produ
         lines.append(f"{_audio_label(lang, 'choose')}: 1–999 · {_audio_label(lang, 'use_for_video')}")
     else:
         lines.append(f"{_audio_label(lang, 'choose')}: 1–999 · {_audio_copy(lang, 'preview')} / {_audio_label(lang, 'create_audio')} / {_audio_copy(lang, 'download')}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def voice_vault_keyboard(user_id, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM, page: int = 0) -> InlineKeyboardMarkup:
     ctx = normalize_product_context(product_context)
@@ -170081,7 +170068,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "policy":
         await query.answer()
         return await query.message.reply_text(
-            "\n".join(music_policy_lines_i18n(lang)),
+            "\\n".join(music_policy_lines_i18n(lang)),
             parse_mode="HTML",
             disable_web_page_preview=True,
         )
@@ -170219,7 +170206,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 lang,
                 str(result.get("music_ai_kind") or ""),
             )
-            prompt_text = "\n\n".join(
+            prompt_text = "\\n\\n".join(
                 music_prompt_from_suggestion(item)
                 for item in suggestions[:3]
             )
@@ -171289,7 +171276,7 @@ def media_preview_failure_text(item: dict, reason: str = "", lang: str = "vi") -
     if preview_url:
         lines.append(f"Preview: {preview_url}")
     lines.append(music_no_xu_text(lang))
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 async def send_audio_item_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id, item: dict, lang: str = "vi"):
     preview_url = str(item.get("preview_url") or "").strip()
@@ -172365,7 +172352,7 @@ async def send_music_library_results(message, user_id, query: str):
         f"📜 {music_license_notice_text(lang)}",
         music_no_xu_text(lang),
     ]
-    await message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+    await message.reply_text("\\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
     preview_items = [jamendo_preview_item(item) for item in results[:8]]
     save_media_preview_results("music", user_id, query, preview_items)
     kb = media_preview_keyboard("music", preview_items, lang, current_product_context(user_id))
@@ -172436,7 +172423,7 @@ async def send_sfx_library_results(message, user_id, query: str):
         f"📜 {music_license_notice_text(lang)}",
         music_no_xu_text(lang),
     ]
-    await message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+    await message.reply_text("\\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
     preview_items = [freesound_preview_item(item) for item in results[:5]]
     save_media_preview_results("sfx", user_id, query, preview_items)
     kb = media_preview_keyboard("sfx", preview_items, lang, current_product_context(user_id))
@@ -172486,7 +172473,7 @@ async def send_media_library_results(message, user_id, query: str):
         f"📜 {music_license_notice_text(lang)}",
         music_no_xu_text(lang),
     ])
-    await message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+    await message.reply_text("\\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
     save_pixabay_media_results(user_id, query, media_items)
     kb = pixabay_media_keyboard(media_items, lang)
     if kb:
@@ -174694,7 +174681,7 @@ def img2vid_ai_prompt_set_text(state: dict | None) -> str:
     for row in prompts:
         preview = str(row.get("prompt") or "")[:90]
         lines.append(f"• Ảnh {int(row.get('index') or 0)}: {html.escape(preview)}{'…' if len(str(row.get('prompt') or '')) > 90 else ''}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def img2vid_ai_prompt_set_keyboard(state: dict | None) -> InlineKeyboardMarkup:
@@ -174818,7 +174805,7 @@ def img2vid_ai_tier_text(state: dict | None) -> str:
         )
     if not available:
         lines.extend(["", "⚠️ Chưa có gói ảnh hợp lệ đang bật. Hệ thống không tạo tác vụ và không trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def img2vid_ai_tier_keyboard() -> InlineKeyboardMarkup:
@@ -175832,7 +175819,7 @@ def frame_video_job_status_text(job: dict) -> str:
         lines.append(f"• Đã ghi Xu: {int(job.get('wallet_charge_amount_xu') or 0)}")
     elif status == "delivered_charge_pending":
         lines.append("• Video đã gửi; hệ thống đang đối soát phần ghi Xu, không gửi lại video.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def frame_video_job_status_keyboard(job_id: str) -> InlineKeyboardMarkup:
     job_id = str(job_id or "")
@@ -176009,7 +175996,7 @@ def frame_video_images_text(state: dict) -> str:
     for index, item in enumerate(clean.get("photos") or [], start=1):
         marker = "👉 " if item.get("image_id") == selected else ""
         rows.append(f"{marker}{index}. Ảnh {index}" + (" · ảnh bìa" if item.get("is_cover") else ""))
-    listing = "\n".join(rows) if rows else "Chưa có ảnh."
+    listing = "\\n".join(rows) if rows else "Chưa có ảnh."
     return (
         "🗂️ <b>Quản lý và sắp xếp ảnh</b>\n\n"
         f"{listing}\n\n"
@@ -176424,7 +176411,7 @@ def frame_video_text_list_text(state: dict) -> str:
             f"{index}. {html.escape(str(item.get('content') or ''))} · {scope} · "
             f"{_safe_float(item.get('start_seconds'), 0):g}–{_safe_float(item.get('end_seconds'), 0):g}s"
         )
-    return "👁️ <b>Chữ đã thêm</b>\n\n" + ("\n".join(rows) if rows else "Chưa có chữ trên video.")
+    return "👁️ <b>Chữ đã thêm</b>\n\n" + ("\\n".join(rows) if rows else "Chưa có chữ trên video.")
 
 
 def frame_video_text_list_keyboard(state: dict) -> InlineKeyboardMarkup:
@@ -176564,7 +176551,7 @@ def frame_video_quality_text(state: dict) -> str:
             "",
             "Giá đầy đủ sẽ được hiển thị ở bước báo giá trước khi xác nhận dựng video.",
         ])
-        return "\n".join(lines)
+        return "\\n".join(lines)
     preflight = frame_video_commercial_preflight(clean)
     route = str(preflight.get("execution_owner") or "")
     route_label = {
@@ -176606,7 +176593,7 @@ def frame_video_quality_text(state: dict) -> str:
         "Dịch vụ tạo thêm nếu có được ghi riêng ở hóa đơn. Preflight chạy lại "
         "ngay trước hóa đơn và không tạo job khi chưa đạt.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def frame_video_review_text(state: dict, user_id=0, invoice: bool = False) -> str:
@@ -176658,7 +176645,7 @@ def frame_video_review_text(state: dict, user_id=0, invoice: bool = False) -> st
         )
     else:
         lines.extend(["", "Màn này chỉ xem kế hoạch, chưa tạo file và chưa trừ Xu."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def frame_video_review_keyboard(invoice: bool = False, state: dict | None = None) -> InlineKeyboardMarkup:
@@ -176697,11 +176684,11 @@ def frame_video_planning_text(state: dict | None = None, lang: str = "vi") -> st
     count = len(state.get("photos") or [])
     suggestions = frame_video_planning_suggestions(state, lang)
     is_vi = normalize_user_language(lang) == "vi"
-    style_lines = "\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("styles") or [], start=1))
-    motion_lines = "\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("motions") or [], start=1))
-    transition_lines = "\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("transitions") or [], start=1))
-    music_lines = "\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("music") or [], start=1))
-    cta_lines = "\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("ctas") or [], start=1))
+    style_lines = "\\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("styles") or [], start=1))
+    motion_lines = "\\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("motions") or [], start=1))
+    transition_lines = "\\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("transitions") or [], start=1))
+    music_lines = "\\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("music") or [], start=1))
+    cta_lines = "\\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("ctas") or [], start=1))
     if not is_vi:
         return (
             "🎞 <b>Image slideshow video plan</b>\n\n"
@@ -177022,7 +177009,7 @@ def storyboard_scripts_text(idea: str, scripts: list[dict]) -> str:
             f"• Phong cách hình ảnh: {html.escape(item['style'])}",
             "",
         ])
-    return "\n".join(lines).strip()
+    return "\\n".join(lines).strip()
 
 def storyboard_scripts_keyboard() -> InlineKeyboardMarkup:
     return video_v6_keyboard(
@@ -177094,7 +177081,7 @@ def storyboard_text(scenes: list[dict], project_id: int = 0) -> str:
             f"• Caption/voice: {html.escape(scene.get('caption') or '')}",
             "",
         ])
-    return "\n".join(lines).strip()
+    return "\\n".join(lines).strip()
 
 def storyboard_ready_keyboard() -> InlineKeyboardMarkup:
     return video_v6_keyboard(
@@ -178556,7 +178543,7 @@ async def cmd_add_music_status(update: Update, context: ContextTypes.DEFAULT_TYP
         "",
         "Không hiển thị key. Không trừ Xu trong admin test.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_video_upscale(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -178837,7 +178824,7 @@ async def cmd_tool_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/tool_test_kling_video prompt</code> | <code>/tool_test_runway_video prompt</code> | <code>/tool_test_heygen_avatar script</code>",
             "• <code>/memory_set_plan USER_ID pro</code> | <code>/memory_admin USER_ID</code>",
         ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_admin_api_roadmap(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -178854,7 +178841,7 @@ async def cmd_admin_api_roadmap(update: Update, context: ContextTypes.DEFAULT_TY
         "",
         "Lệnh kiểm tra: <code>/tool_audit</code>, <code>/providers</code>, <code>/tool_status</code>, <code>/tool_catalog</code>.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -178959,7 +178946,7 @@ async def cmd_api_debug_status(update: Update, context: ContextTypes.DEFAULT_TYP
                 f"<code>{html.escape(created_at or '-')}</code>"
             )
     lines.append("\nKhông hiển thị API key/token/secret.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -178999,7 +178986,7 @@ async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "Nguyên tắc: nếu API lỗi sau khi trừ Xu thì phải hoàn Xu; admin test provider thật trước khi mở bán public.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 def parse_mark_payos_test_args(args: list[str]) -> tuple[str, str, str]:
     raw = " ".join(args or []).strip()
@@ -179499,7 +179486,7 @@ def finance_report_text(payload: dict, report_type: str = "dashboard") -> str:
     ])
     if report_type == "export_hint":
         lines.append("Export CSV: <code>/finance_export YYYY-MM</code> hoặc <code>/finance_export YYYY</code>")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def finance_csv(kind: str, start_at: str, end_at: str) -> str:
     buffer = io.StringIO()
@@ -179693,7 +179680,7 @@ def finance_compliance_status_text() -> str:
             f"  Ngày cập nhật: <code>{html.escape(str(note.get('updated_at') or '-'))}</code>",
         ])
     lines.extend(["", f"⚠️ <i>{html.escape(TAX_PREP_DISCLAIMER)}</i>"])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def tax_estimate_payload(start_at: str, end_at: str, label: str, admin_id) -> dict:
     finance = finance_summary_payload(start_at, end_at, label)
@@ -179731,11 +179718,11 @@ def tax_estimate_text(payload: dict) -> str:
     if not has_data:
         lines.extend(["", "Chưa có dữ liệu cho kỳ này."])
     lines.extend(["", f"⚠️ <i>{html.escape(TAX_PREP_DISCLAIMER)}</i>"])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def tax_profile_text(admin_id) -> str:
     config = get_tax_profile(admin_id)
-    return "\n".join([
+    return "\\n".join([
         "⚙️ <b>Ghi chú cấu hình kế toán nội bộ</b>",
         "",
         f"• Loại hình: <code>{html.escape(str(config.get('business_type') or 'chưa cấu hình'))}</code>",
@@ -180211,7 +180198,7 @@ def format_admin_report(payload: dict) -> str:
         lines.extend(["", "<b>Top commands</b>", *top_command_lines[:6]])
     lines.append("")
     lines.append("Lệnh AI insight: <code>/report_ai_today</code> | chart: <code>/report_chart_week</code>")
-    return "\n".join(lines[:120])
+    return "\\n".join(lines[:120])
 
 def admin_report_plain(payload: dict) -> str:
     text = format_admin_report(payload)
@@ -180263,7 +180250,7 @@ def offline_admin_insight(payload: dict, ai_error: str = "") -> str:
     ]
     if revenue <= 0:
         actions.insert(0, "Đăng/tư vấn gói dùng thử và hướng khách nạp 50k/100k nếu tool đã ổn.")
-    return "\n".join([
+    return "\\n".join([
         "⚠️ AI provider đang hết quota/tạm lỗi, hệ thống dùng đánh giá nội bộ tạm thời.",
         (f"<i>Lỗi AI: {html.escape(str(ai_error)[:180])}</i>" if ai_error else ""),
         "",
@@ -180353,7 +180340,7 @@ def report_chart_payload(start_at: str, end_at: str, label: str) -> str:
         if len(days) > 31:
             lines.append("")
             lines.append("<i>Chart text fallback chỉ hiển thị 31 ngày cuối để không vượt giới hạn Telegram.</i>")
-        return "\n".join(lines)
+        return "\\n".join(lines)
     finally:
         conn.close()
 
@@ -180781,7 +180768,7 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("• BETA READY — cần admin xác nhận PayOS real payment 10k để chuyển SALES READY.")
     if data["status"] == "SALES READY":
         lines.append("• ✅ Có thể bắt đầu bán thử Beta cho nhóm nhỏ 3–10 khách.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 def format_emergency_status() -> str:
     state = current_system_mode()
@@ -180847,7 +180834,7 @@ async def cmd_emergency_lock(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"• Reason: <code>{html.escape(reason)}</code>",
     ]
     await notify_ops_alert(context, "🚨 <b>EMERGENCY LOCK ENABLED</b>", lines, exclude_user_id=update.effective_user.id)
-    await update.message.reply_text("🚨 <b>EMERGENCY LOCK ENABLED</b>\n\n" + "\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("🚨 <b>EMERGENCY LOCK ENABLED</b>\n\n" + "\\n".join(lines), parse_mode="HTML")
 
 async def cmd_emergency_unlock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner_user(update.effective_user.id):
@@ -181032,7 +181019,7 @@ async def cmd_ticket_overdue(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         for ticket, reason in rows:
             lines.append(f"• <code>{ticket['ticket_code']}</code> — {html.escape(reason)} — {html.escape(support_status_label(ticket['status']))}")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=support_admin_menu_keyboard())
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML", reply_markup=support_admin_menu_keyboard())
 
 async def cmd_support_persona_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -181063,7 +181050,7 @@ async def cmd_support_persona_test(update: Update, context: ContextTypes.DEFAULT
         "",
         "Không tạo ticket, không gọi refund và không cộng/trừ Xu.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_support_auto_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -181095,7 +181082,7 @@ async def cmd_support_auto_test(update: Update, context: ContextTypes.DEFAULT_TY
         "",
         "Không tạo ticket thật, không gọi refund và không cộng/trừ Xu.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
@@ -181138,7 +181125,7 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "Lệnh nhanh: <code>/khuyenmai</code> | <code>/naptien</code> | <code>/film chủ đề</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_promo_seed_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -181215,7 +181202,7 @@ async def _cmd_promo_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         if not show_domestic_topup_promotion(uid, lang):
             return await update.message.reply_text(
-                "\n".join(billing_promo_apply_lines(lang, uid)),
+                "\\n".join(billing_promo_apply_lines(lang, uid)),
                 parse_mode="HTML",
             )
         summary = get_user_promo_summary(uid)
@@ -181258,7 +181245,7 @@ async def _cmd_promo_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"• <code>{html.escape(str(code))}</code>: <code>{html.escape(str(status))}</code>"
                     f" | {html.escape(label)}{order_part}"
                 )
-        return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
     code = context.args[0]
     conn = db_connect()
@@ -181297,7 +181284,7 @@ async def _cmd_promo_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not show_domestic_topup_promotion(uid, lang):
         return await update.message.reply_text(
-            "\n".join(billing_promo_apply_lines(lang, uid)),
+            "\\n".join(billing_promo_apply_lines(lang, uid)),
             parse_mode="HTML",
         )
 
@@ -181325,7 +181312,7 @@ async def _cmd_promo_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
     return await update.message.reply_text(
-        "❌ " + html.escape(promo_code_status_message(status)) + "\n\n"
+        "❌ " + html.escape(promo_code_status_message(status)) + "\\n\\n"
         "Xem các ưu đãi gợi ý: <code>/khuyenmai</code>",
         parse_mode="HTML",
     )
@@ -181372,7 +181359,7 @@ async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_user_language(uid) or "vi"
     if not show_domestic_topup_promotion(uid, lang):
         return await update.message.reply_text(
-            "\n".join(billing_promo_apply_lines(lang, uid)),
+            "\\n".join(billing_promo_apply_lines(lang, uid)),
             parse_mode="HTML",
         )
     conn = db_connect()
@@ -181389,7 +181376,7 @@ async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Mã chỉ áp dụng khi đơn nạp đạt mức tối thiểu cấu hình của mã.",
             "Nếu nhập mã khác, mã mới sẽ thay mã này.",
         ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_promo_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("promo_debug", update)
@@ -181438,7 +181425,7 @@ async def cmd_promo_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             state = "used current period" if used else "available current period"
             lines.append(f"• <code>{code}</code>: <b>{state}</b> | <code>{pkey}</code> | reset <code>{reset}</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_promo_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -181474,7 +181461,7 @@ async def cmd_promo_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Max bonus: <b>{int(max_bonus or 0):,} Xu</b>",
             f"Note: {html.escape(str(note or '-'))}",
         ])
-    await update.message.reply_text("\n".join(lines[:90]), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines[:90]), parse_mode="HTML")
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("ping", update)
@@ -181496,7 +181483,7 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• DB: <code>{'OK' if db_ok else 'FAIL'}</code>",
         f"• Time: <code>{html.escape(now_text())}</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_promo_create(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -181647,7 +181634,7 @@ async def cmd_trial_bonus_status(update: Update, context: ContextTypes.DEFAULT_T
         "Telegram /start không có IP người dùng; IP hash chỉ enforce khi có web/HTTP/WebApp claim an toàn.",
         "Không lưu raw IP và không đụng PayOS/top-up/member tier.",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -181825,7 +181812,7 @@ async def cmd_gift_seed_beta(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "<code>/gift BETA10000 USER_ID</code>",
         "Dùng: <code>/gift_list</code> | <code>/gift_request_list</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_gift_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -181859,7 +181846,7 @@ async def cmd_gift_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
         if int(requires_assignment or 0):
             lines.append(f"Admin cấp: <code>/gift {html.escape(str(code))} USER_ID</code>")
-    await update.message.reply_text("\n".join(lines[:120]), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines[:120]), parse_mode="HTML")
 
 async def cmd_gift_request_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -181892,7 +181879,7 @@ async def cmd_gift_request_list(update: Update, context: ContextTypes.DEFAULT_TY
             f"• Repeat count: <b>{int(notify_count or 0)}</b>",
             f"• Cấp: <code>/gift {html.escape(str(code))} {html.escape(str(user_id))}</code>",
         ])
-    await update.message.reply_text("\n".join(lines[:140]), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines[:140]), parse_mode="HTML")
 
 async def cmd_gift_disable(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -181988,9 +181975,9 @@ async def reply_long_text(update: Update, text: str):
         return await update.message.reply_text("⚠️ Không có nội dung để gửi.")
     chunk_size = 3600
     while len(text) > chunk_size:
-        cut = text.rfind("\n\n", 0, chunk_size)
+        cut = text.rfind("\\n\\n", 0, chunk_size)
         if cut < 1200:
-            cut = text.rfind("\n", 0, chunk_size)
+            cut = text.rfind("\\n", 0, chunk_size)
         if cut < 1200:
             cut = chunk_size
         await update.message.reply_text(text[:cut].strip())
@@ -182233,7 +182220,7 @@ def doc_tool_files_summary(files: list[dict], unit: str = "file") -> str:
         lines.append(f"{idx}. {html.escape(name[:80])}")
     if len(files) > 10:
         lines.append(f"... +{len(files) - 10} file")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def doc_tool_received_text(state: dict, lang: str = "vi") -> str:
     tool = str(state.get("doc_tool_current") or "")
@@ -182350,7 +182337,7 @@ def doc_tool_confirm_text(state: dict, lang: str = "vi") -> str:
     if files:
         lines.extend(["", doc_tool_files_summary(files, unit)])
     lines.extend(["", copy["common_confirm"]])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def doc_tool_confirm_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
@@ -182410,7 +182397,7 @@ async def doc_charge_after_success(update: Update, uid, cost: int, event_type: s
     if charge.get("ok"):
         credits, _, _ = get_user(uid)
         discount_line = member_discount_display_line(charge)
-        prefix = (discount_line + "\n") if discount_line else ""
+        prefix = (discount_line + "\\n") if discount_line else ""
         await update.message.reply_text(
             f"{prefix}💼 Còn lại: {int(credits)} Xu | /naptien để nạp thêm"
         )
@@ -182719,7 +182706,7 @@ def doc_ocr_pdf_to_text(input_pdf: str, output_dir: str) -> tuple[bool, str, str
             chunks.append(f"=== Trang {idx} ===\n{text or '[Không đọc được]'}")
     finally:
         doc.close()
-    output = "\n\n".join(chunks).strip()
+    output = "\\n\\n".join(chunks).strip()
     if not output:
         return False, "", "OCR không đọc được nội dung PDF."
     return True, output, ""
@@ -183021,7 +183008,7 @@ async def cmd_tool_test_doc_tools(update: Update, context: ContextTypes.DEFAULT_
         "",
         "Không gọi API ngoài. Không xử lý file user trong test này.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_pdf_to_word(update: Update, context: ContextTypes.DEFAULT_TYPE, test_mode: bool = False):
     uid = update.effective_user.id
@@ -183989,7 +183976,7 @@ def memory_notes_list_text(notes: list[dict], title: str = "", lang: str = "vi")
             f"{copy['memory_field_priority']}: {html.escape(note.get('priority') or '-')}\n"
             f"• {copy['memory_field_updated']}: <code>{html.escape(note.get('updated_at') or note.get('created_at') or '-')}</code>"
         )
-    return "\n\n".join(lines)
+    return "\\n\\n".join(lines)
 
 def memory_notes_list_keyboard(notes: list[dict], lang: str = "vi", delete_mode: bool = False) -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
@@ -184077,7 +184064,7 @@ def memory_plan_text() -> str:
         f"• {FILES_AUDIO_FREE_MB}MB cho tệp/ảnh/âm thanh lưu lâu dài\n"
         f"• Tổng {TOTAL_FREE_STORAGE_MB}MB miễn phí cho mỗi tài khoản\n\n"
         "<b>Mở rộng dung lượng:</b>\n"
-        + "\n".join(storage_addon_lines()) + "\n"
+        + "\\n".join(storage_addon_lines()) + "\\n"
         "• Dung lượng lớn hơn: liên hệ admin hoặc tính theo block +50MB.\n\n"
         "<b>Lưu ý:</b>\n"
         f"• File tạm tự xóa sau {STORAGE_TEMP_FILE_TTL_DAYS_MIN}–{STORAGE_TEMP_FILE_TTL_DAYS_MAX} ngày tùy cấu hình và không tính quota lâu dài.\n"
@@ -184096,17 +184083,17 @@ def memory_menu_text(lang: str = "vi") -> str:
         return (
             f"📝 <b>{copy['notes_docs_title']}</b>\n\n"
             "Save notes, checklists, reminders and personal documents here.\n\n"
-            "<b>Free storage:</b>\n" + "\n".join(storage_policy_short_lines()) + "\n\n"
-            "<b>Storage add-ons:</b>\n" + "\n".join(memory_storage_display_addon_lines(lang)) + "\n\n"
+            "<b>Free storage:</b>\n" + "\\n".join(storage_policy_short_lines()) + "\\n\\n"
+            "<b>Storage add-ons:</b>\n" + "\\n".join(memory_storage_display_addon_lines(lang)) + "\\n\\n"
             "Document flows guide you through upload → confirmation → processing; no technical command is required."
         )
     return (
         "📝 <b>Ghi chú / Tài liệu</b>\n\n"
         "Bạn có thể lưu ghi chú, checklist, nhắc hẹn và tài liệu quan trọng tại đây.\n\n"
         "<b>Miễn phí:</b>\n"
-        + "\n".join(storage_policy_short_lines()) + "\n\n"
+        + "\\n".join(storage_policy_short_lines()) + "\\n\\n"
         "<b>Mở rộng dung lượng:</b>\n"
-        + "\n".join(storage_addon_lines()) + "\n\n"
+        + "\\n".join(storage_addon_lines()) + "\\n\\n"
         "<b>Lưu ý nhỏ:</b>\n"
         "Hiện TOAN AAS vẫn đang trong giai đoạn đầu, dung lượng hạ tầng chưa quá lớn nên phần lưu trữ miễn phí còn giới hạn. "
         "Mong bạn thông cảm cho sự bất tiện này. Khi hệ thống được nâng cấp lên hạ tầng lưu trữ lớn hơn, TOAN AAS sẽ tăng dung lượng miễn phí và tối ưu giá lưu trữ tốt hơn cho bạn.\n\n"
@@ -184138,7 +184125,7 @@ def memory_status_text(user_id, lang: str = "vi") -> str:
             f"• {copy['storage_status_files_media']}: <b>0MB / {FILES_AUDIO_FREE_MB}MB</b>\n"
             f"• {copy['storage_status_total_used']}: <b>0MB / {TOTAL_FREE_STORAGE_MB}MB</b>\n\n"
             f"<b>{copy['storage_status_expand']}:</b>\n"
-            + "\n".join(memory_storage_display_addon_lines(lang)[:3])
+            + "\\n".join(memory_storage_display_addon_lines(lang)[:3])
         )
     status = memory_status_payload(user_id)
     plan = status["plan"]
@@ -184161,7 +184148,7 @@ def memory_status_text(user_id, lang: str = "vi") -> str:
         f"• {copy['storage_status_ai_remaining']}: <b>{status['ai_remaining']}/{plan['ai_classify_monthly_limit']}</b>\n"
         f"• {copy['storage_status_reminders_active']}: <b>{status['active_reminders']}</b>\n"
         f"\n<b>{copy['storage_status_expand']}:</b>\n"
-        + "\n".join(memory_storage_display_addon_lines(lang)[:3])
+        + "\\n".join(memory_storage_display_addon_lines(lang)[:3])
         + warning
     )
 
@@ -184170,7 +184157,7 @@ def memory_storage_addon_text(lang: str = "vi") -> str:
     return (
         f"📦 <b>{html.escape(copy['storage_addon_title'])}</b>\n\n"
         f"{html.escape(copy['storage_addon_intro'])}\n\n"
-        + "\n".join(memory_storage_display_addon_lines(lang)) + "\n\n"
+        + "\\n".join(memory_storage_display_addon_lines(lang)) + "\\n\\n"
     )
 
 def memory_storage_addon_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -184473,7 +184460,7 @@ async def handle_memory_callback(update: Update, context: ContextTypes.DEFAULT_T
         set_memory_guided_pending(uid, "delete_id")
         return await safe_edit_or_send(
             query,
-            "🗑 <b>Chọn ghi chú muốn xóa</b>\n\n" + "\n\n".join(memory_format_note_item_with_time(note) for note in notes),
+            "🗑 <b>Chọn ghi chú muốn xóa</b>\n\n" + "\\n\\n".join(memory_format_note_item_with_time(note) for note in notes),
             parse_mode="HTML",
             reply_markup=memory_notes_list_keyboard(notes, lang, delete_mode=True),
         )
@@ -184628,7 +184615,7 @@ async def cmd_storage_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"• File/audio: <b>{FILES_AUDIO_FREE_MB}MB/user</b>\n"
         f"• Total: <b>{TOTAL_FREE_STORAGE_MB}MB/user</b>\n\n"
         "<b>Add-on:</b>\n"
-        + "\n".join(storage_addon_lines()) + "\n"
+        + "\\n".join(storage_addon_lines()) + "\\n"
         + "\n<b>System:</b>\n"
         f"• Users with notes: <b>{user_count}</b>\n"
         f"• Permanent notes/files rows: <b>{note_count}</b>\n"
@@ -184828,11 +184815,11 @@ async def cmd_note_tags(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if priority:
             priorities[str(priority)] = priorities.get(str(priority), 0) + 1
     def top_items(data: dict[str, int]) -> str:
-        return "\n".join(f"• {html.escape(k)}: <b>{v}</b>" for k, v in sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]) or "• Chưa có"
+        return "\\n".join(f"• {html.escape(k)}: <b>{v}</b>" for k, v in sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]) or "• Chưa có"
     await update.message.reply_text(
         "🏷 <b>Memory Tags/Categories</b>\n\n"
-        "<b>Tags:</b>\n" + top_items(tags) + "\n\n"
-        "<b>Categories:</b>\n" + top_items(categories) + "\n\n"
+        "<b>Tags:</b>\n" + top_items(tags) + "\\n\\n"
+        "<b>Categories:</b>\n" + top_items(categories) + "\\n\\n"
         "<b>Priorities:</b>\n" + top_items(priorities),
         parse_mode="HTML",
     )
@@ -185609,7 +185596,7 @@ def fallback_trend_ai_pack(topic: str) -> str:
             "",
         ])
     lines.append("TOAN AAS hiện tạo content/video pack để bạn tự đăng. Trend Live mới nhất đang tắt trong bản public.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def fallback_image_prompt_pack(topic: str, advanced: bool = False) -> str:
     topic = topic or "sản phẩm/dịch vụ"
@@ -185635,7 +185622,7 @@ def fallback_image_prompt_pack(topic: str, advanced: bool = False) -> str:
             "",
         ])
     lines.append("Trạng thái: công cụ tạo ảnh thật chưa mở public, bot trả prompt pack nâng cao để bạn dùng với công cụ tạo ảnh." if advanced else "Bước tiếp theo: dùng prompt này ở công cụ tạo ảnh bạn chọn hoặc chạy /image_to_video_pack <mô tả ảnh>.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def fallback_video_from_image_pack(topic: str) -> str:
     topic = topic or "ảnh/chủ đề bạn gửi"
@@ -185814,7 +185801,7 @@ async def cmd_trend_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "",
             "Không fake dữ liệu live/latest. Khách hiện tự kiểm tra xu hướng trước khi đăng.",
         ]
-        return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
     providers = provider_status_payload()
     serpapi_configured = bool(providers["search"].get("serpapi"))
     trend_live_stage = providers["media_factory"].get("trend_live_stage") or "DISABLED"
@@ -185842,7 +185829,7 @@ async def cmd_trend_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "Không hiển thị API key. Không fake dữ liệu live/latest nếu chưa có provider.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def run_image_prompt_topic(update: Update, uid: int, topic: str) -> None:
     topic = re.sub(r"\s+", " ", str(topic or "").strip())[:1200]
@@ -185945,7 +185932,7 @@ def image_story_pack_text(goal: str, aspect: str = "9:16") -> str:
         "",
         "Bot chưa trừ Xu.",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 async def cmd_image_story(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
@@ -186270,7 +186257,7 @@ def creative_motion_suggestions_text(state: dict | None = None, lang: str = "vi"
             "",
         ])
     lines.append(ui_text(lang, "common.no_api_no_charge"))
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def creative_motion_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -187370,7 +187357,7 @@ def cinematic_ad_image_prompts_from_concept_text(concept: dict, lang: str = "vi"
             lines.append(f"<b>{html.escape(labels[idx-1])}</b>\n<code>{html.escape(prompt)}</code>")
         else:
             lines.append(f"<b>{idx}. {html.escape(labels[idx-1])}</b>\n<code>{html.escape(prompt)}</code>")
-    return "\n\n".join(lines)
+    return "\\n\\n".join(lines)
 
 def cinematic_ad_selected_image_prompt_text(concept: dict, index: int = 1, lang: str = "vi") -> str:
     idx = max(1, min(3, int(index or 1)))
@@ -188349,7 +188336,7 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
             concept["music_choice"] = "ai_prompt"
             concept["music_saved"] = True
             LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
-            return await safe_edit_query_message(query, cinematic_ad_music_ai_text(concept, lang) + "\n\n" + ("Bot đã lưu prompt nhạc AI. Tạo nhạc AI thật sẽ mở sau." if normalize_user_language(lang) == "vi" else "The bot saved this AI music prompt. Real AI music generation will open later."), reply_markup=cinematic_ad_music_ai_selected_keyboard(lang))
+            return await safe_edit_query_message(query, cinematic_ad_music_ai_text(concept, lang) + "\\n\\n" + ("Bot đã lưu prompt nhạc AI. Tạo nhạc AI thật sẽ mở sau." if normalize_user_language(lang) == "vi" else "The bot saved this AI music prompt. Real AI music generation will open later."), reply_markup=cinematic_ad_music_ai_selected_keyboard(lang))
         if action == "music_none":
             concept["music_choice"] = "none"
             concept["no_music"] = True
@@ -188778,7 +188765,7 @@ def canonical_image_quality_catalog_lines(lang: str = "vi") -> list[str]:
 
 
 def public_image_tier_selection_text(lang: str = "vi") -> str:
-    return "\n".join(canonical_image_quality_catalog_lines(lang))
+    return "\\n".join(canonical_image_quality_catalog_lines(lang))
 
 QUICK_IMAGE_FLOW_TTL_SECONDS = 10 * 60
 QUICK_IMAGE_FLOW_STEPS = {
@@ -189489,7 +189476,7 @@ def quick_image_suggestions_text(state: dict | None = None, lang: str = "vi") ->
         lines = ["✨ <b>5 ý tưởng gợi ý tạo ảnh</b>", "", "Chọn một ý tưởng. TOAN AAS sẽ soạn prompt hoàn chỉnh trước khi chọn tỉ lệ và giá.", ""]
     lines.extend(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions, 1))
     lines.extend(["", ui_text(lang, "common.no_api_no_charge")])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def quick_image_suggestions_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
@@ -189573,7 +189560,7 @@ def quick_image_prepared_prompt_text(state: dict | None = None, lang: str = "vi"
         + (f"Lưu ý: {html.escape(caution)}\n\n" if caution else "")
         + vague_note
         + (storyboard_instruction if is_storyboard else "Nếu prompt đã phù hợp, hãy chọn tỉ lệ. Bạn cũng có thể viết lại hoặc đổi ý tưởng.")
-        + "\n"
+        + "\\n"
         "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
     )
 
@@ -189721,7 +189708,7 @@ def quick_image_tier_text(state: dict | None = None, lang: str = "vi") -> str:
         f"Tỉ lệ: <b>{html.escape(media_aspect_ratio_label(aspect, 'image', lang))}</b>",
         "",
     ]
-    return "\n".join(item for item in context_lines if item is not None) + "\n" + public_image_tier_selection_text(lang)
+    return "\\n".join(item for item in context_lines if item is not None) + "\\n" + public_image_tier_selection_text(lang)
 
 def quick_image_tier_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     tier_buttons = [
@@ -190519,7 +190506,7 @@ def image_to_video_public_off_prompt(job_id: int = 0, user_id=0, lang: str = "vi
     )
     text = ui_text(lang, "video.from_image_public_off", prompt=html.escape(prompt[:900]))
     if is_admin_user(user_id):
-        text += "\n\n" + ui_text(lang, "video.admin_smoke_warning")
+        text += "\\n\\n" + ui_text(lang, "video.admin_smoke_warning")
     return text
 
 VIDEO_FINALIZATION_STATE_TTL_SECONDS = 30 * 60
@@ -192667,7 +192654,7 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
         f"{copy['voice']}: <b>{yes if finalization['voice_enabled'] else no}</b>\n"
         f"{copy['subtitles']}: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n\n"
         f"{copy['select_package']}:\n"
-        + "\n".join(video_tier_price_line(tier, lang) for tier in VIDEO_PUBLIC_TIER_UI_ORDER)
+        + "\\n".join(video_tier_price_line(tier, lang) for tier in VIDEO_PUBLIC_TIER_UI_ORDER)
         + f"\n\n{copy['choose_scene_next']}.\n\n{copy['common_no_charge']}."
     )
 
@@ -192723,7 +192710,7 @@ def video_finalization_scene_count_text(state: dict | None = None, lang: str = "
     lang = normalize_user_language(lang) or "vi"
     copy = public_video_deep_copy(lang)
     tier = normalize_video_tier(state.get("selected_video_tier") or state.get("video_tier") or "low")
-    price_lines = "\n".join(video_scene_count_price_line(tier, count, lang) for count in TASK3D_SCENE_COUNT_OPTIONS)
+    price_lines = "\\n".join(video_scene_count_price_line(tier, count, lang) for count in TASK3D_SCENE_COUNT_OPTIONS)
     price = product_video_r9_scene_pricing(1, tier=tier)
     unit = int(price["unit_charge_xu"])
     scene_seconds = int(price["scene_seconds"])
@@ -194532,7 +194519,7 @@ async def handle_video_finalization_pending_media(update: Update, context: Conte
     set_video_finalization_state(uid, state)
     lang = get_user_language(uid) or "vi"
     await update.message.reply_text(
-        note + "\n\n" + video_finalization_menu_text(state, lang),
+        note + "\\n\\n" + video_finalization_menu_text(state, lang),
         parse_mode="HTML",
         reply_markup=video_finalization_menu_keyboard(lang),
     )
@@ -194729,7 +194716,7 @@ def _legacy_video_quote_invoice_text(quote: dict, state: dict | None = None, lan
     scene_seconds = max(1, int(quote.get("scene_seconds") or max(1, seconds // max(1, count))))
     package_label = str(quote.get("package_label") or video_tier_short_label(tier, "vi"))
     quote_paid_items = video_order_dedupe_items(quote.get("paid_items") or [])
-    addon_lines = "\n".join(
+    addon_lines = "\\n".join(
         f"• {html.escape(str(item.get('label') or 'Phần bổ sung'))}: <b>+{xu_number(item.get('price_xu'))} Xu</b>"
         for item in quote_paid_items
     ) or "• Không thêm: <b>0 Xu</b>"
@@ -194857,11 +194844,11 @@ def _legacy_video_quote_invoice_text(quote: dict, state: dict | None = None, lan
 
     def paid_lines(default_lines: list[str]) -> str:
         if paid_items:
-            return "\n".join(
+            return "\\n".join(
                 f"• {html.escape(str(item.get('label') or item.get('key') or 'Add-on'))}: <b>+{xu_number(item.get('price_xu'))} Xu</b>"
                 for item in paid_items
             )
-        return "\n".join(default_lines)
+        return "\\n".join(default_lines)
 
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
@@ -194881,7 +194868,7 @@ def _legacy_video_quote_invoice_text(quote: dict, state: dict | None = None, lan
                 "• 不添加音乐：<b>0 Xu</b>",
                 "• 不添加字幕：<b>0 Xu</b>",
             ])
-            + "\n\n"
+            + "\\n\\n"
             f"总计：<b>{xu_number(total_xu)} Xu</b>\n"
             f"折合：<b>{xu_number(equivalent)} VND</b>\n\n"
             f"{voice_note_zh}"
@@ -194905,7 +194892,7 @@ def _legacy_video_quote_invoice_text(quote: dict, state: dict | None = None, lan
                 "• No subtitles: <b>0 Xu</b>",
             ])
             + (("\n\nFree audio settings:\n" + audio_invoice_block) if audio_invoice_block else "")
-            + "\n\n"
+            + "\\n\\n"
             f"Total: <b>{xu_number(total_xu)} Xu</b>\n"
             f"Equivalent: <b>{xu_number(equivalent)} VND</b>\n\n"
             f"{voice_note_en}"
@@ -194929,7 +194916,7 @@ def _legacy_video_quote_invoice_text(quote: dict, state: dict | None = None, lan
             "• Không phụ đề: <b>0 Xu</b>",
         ])
         + (("\n\nTùy chỉnh âm thanh miễn phí:\n" + audio_invoice_block) if audio_invoice_block else "")
-        + "\n\n"
+        + "\\n\\n"
         f"Tổng: <b>{xu_number(total_xu)} Xu</b>\n"
         f"Tương đương: <b>{xu_number(equivalent)}đ</b>\n\n"
         f"{voice_note_vi}"
@@ -194974,7 +194961,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
         return copy["addons"]
 
     paid_items = video_order_dedupe_items(quote.get("paid_items") or [])
-    addon_lines = "\n".join(
+    addon_lines = "\\n".join(
         f"• {addon_label(item)}: <b>+{xu_number(item.get('price_xu'))} Xu</b>"
         for item in paid_items
     ) or f"• {copy['none']}: <b>0 Xu</b>"
@@ -195066,7 +195053,7 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
     raw_tier = str(order.get("tier") or state.get("video_tier") or "").strip()
     tier_norm = normalize_video_tier(raw_tier) if raw_tier in set(VIDEO_TIER_ORDER) else ""
     def lines(items):
-        return "\n".join(
+        return "\\n".join(
             f"• {html.escape(str(item.get('label')))}: <b>{'+' if int(item.get('price_xu') or 0) > 0 else ''}{xu_number(item.get('price_xu'))} Xu</b>"
             for item in (items or [])
         )
@@ -195107,8 +195094,8 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
     )
     scene_invoice_lines_en = video_scene_selection_summary_lines(state, "en", invoice=True)
     scene_invoice_lines_vi = video_scene_selection_summary_lines(state, "vi", invoice=True)
-    duration_line_en = "\n".join(scene_invoice_lines_en) if scene_invoice_lines_en else f"Duration: <b>{duration} seconds</b>"
-    duration_line_vi = "\n".join(scene_invoice_lines_vi) if scene_invoice_lines_vi else f"Thời lượng: <b>{duration} giây</b>"
+    duration_line_en = "\\n".join(scene_invoice_lines_en) if scene_invoice_lines_en else f"Duration: <b>{duration} seconds</b>"
+    duration_line_vi = "\\n".join(scene_invoice_lines_vi) if scene_invoice_lines_vi else f"Thời lượng: <b>{duration} giây</b>"
 
     if normalize_user_language(lang) != "vi":
         discount_block = f"\nDiscounts:\n{discount_lines}\n" if discount_lines else ""
@@ -195127,7 +195114,7 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
             f"Free items:\n{free_lines_en}\n\n"
             f"Paid add-ons:\n{paid_lines_en}\n"
             f"{discount_block}"
-            "\n"
+            "\\n"
             f"Total: <b>{xu_number(total_xu)} Xu</b>\n"
             f"Equivalent: <b>{xu_number(equivalent)} VND</b>\n\n"
             "Processing starts only after you press the final confirmation button."
@@ -195148,7 +195135,7 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
         f"Mục miễn phí:\n{free_lines_vi}\n\n"
         f"Công cụ bổ sung có phí:\n{paid_lines_vi}\n"
         f"{discount_block}"
-        "\n"
+        "\\n"
         f"Tổng: <b>{xu_number(total_xu)} Xu</b>\n"
         f"Tương đương: <b>{xu_number(equivalent)}đ</b>\n\n"
         "TOAN AAS chỉ bắt đầu xử lý và trừ Xu sau khi bạn bấm xác nhận cuối."
@@ -195286,7 +195273,7 @@ def video_paid_preview_text(state: dict | None = None, lang: str = "vi") -> str:
         lines.append("• " + copy["subtitles"])
     if has_paid_dub:
         lines.append("• " + copy["voice"])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def video_paid_preview_keyboard(token: str, lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_video_deep_copy(normalize_user_language(lang))
@@ -196431,7 +196418,7 @@ async def cmd_video_quote_test(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception:
         return await update.message.reply_text("⚠️ seconds và scenes phải là số dương.")
     quote = calculate_short_video_quote(tier, duration, scenes, args[3:])
-    await update.message.reply_text("\n".join(short_video_quote_lines(quote)), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(short_video_quote_lines(quote)), parse_mode="HTML")
 
 def calculate_named_addon_quote(
     addon_key: str,
@@ -196583,7 +196570,7 @@ async def cmd_subtitle_quote_test(update: Update, context: ContextTypes.DEFAULT_
     kind = args[0] if args else "subtitle"
     duration = args[1] if len(args) > 1 else 60
     quote = calculate_named_addon_quote(kind, duration, args[2:])
-    await update.message.reply_text("\n".join(named_addon_quote_lines(quote)), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(named_addon_quote_lines(quote)), parse_mode="HTML")
 
 async def cmd_dub_quote_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -196592,7 +196579,7 @@ async def cmd_dub_quote_test(update: Update, context: ContextTypes.DEFAULT_TYPE)
     kind = args[0] if args else "dub"
     duration = args[1] if len(args) > 1 else 60
     quote = calculate_named_addon_quote(kind, duration, args[2:])
-    await update.message.reply_text("\n".join(named_addon_quote_lines(quote)), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(named_addon_quote_lines(quote)), parse_mode="HTML")
 
 async def cmd_music_quote_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -196601,7 +196588,7 @@ async def cmd_music_quote_test(update: Update, context: ContextTypes.DEFAULT_TYP
     kind = args[0] if args else "suno_music"
     duration = args[1] if len(args) > 1 else 60
     quote = calculate_named_addon_quote(kind, duration, args[2:])
-    await update.message.reply_text("\n".join(named_addon_quote_lines(quote)), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(named_addon_quote_lines(quote)), parse_mode="HTML")
 
 def video_pricing_status_lines() -> list[str]:
     lines = [
@@ -196649,7 +196636,7 @@ async def cmd_pricing_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "",
         "Commands: <code>/video_pricing_status</code> | <code>/addon_pricing_status</code> | <code>/image_pricing_status</code> | <code>/pricing_preview 600</code> | <code>/pricing_validate</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_video_pricing_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -196674,7 +196661,7 @@ async def cmd_pricing_preview(update: Update, context: ContextTypes.DEFAULT_TYPE
     duration = args[1] if len(args) > 1 else VIDEO_SHORT_BASE_SECONDS
     scenes = args[2] if len(args) > 2 else VIDEO_SHORT_BASE_SCENES
     quote = calculate_short_video_quote(tier, duration, scenes, args[3:])
-    await update.message.reply_text("\n".join(short_video_quote_lines(quote)), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(short_video_quote_lines(quote)), parse_mode="HTML")
 
 async def cmd_pricing_validate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -196701,7 +196688,7 @@ async def cmd_pricing_validate(update: Update, context: ContextTypes.DEFAULT_TYP
         lines.extend([f"• {html.escape(item)}" for item in blockers])
     else:
         lines.append("No blocking pricing gaps in current public short-video matrix.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_video_kling_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -196720,7 +196707,7 @@ async def cmd_video_kling_status(update: Update, context: ContextTypes.DEFAULT_T
         "",
         "Manual smoke: <code>/tool_test_key4u_video_model kling-video</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 def public_video_provider_fail_message(amount_xu: int = 0, refund_done: bool = False, lang: str = "vi") -> str:
     amount = int(amount_xu or 0)
@@ -197490,7 +197477,7 @@ def trend_guided_topic_suggestions_text(state: dict | None = None, lang: str = "
         lines.append(f"{idx}. {html.escape(item)}")
     lines.append("")
     lines.append(ui_text(lang, "common.no_api_no_charge"))
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def trend_guided_topic_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -197681,22 +197668,22 @@ def trend_guided_trend_choices_text(topic: str, lang: str = "vi") -> str:
             "🔥 <b>Choose 1 of 3 trend ideas</b>\n\n"
             f"Topic: <b>{html.escape(safe_topic)}</b>\n\n"
             f"{source}"
-            + "\n\n".join(
+            + "\\n\\n".join(
                 f"<b>{idx}. {html.escape(item['title'])}</b>\n• {html.escape(item['summary'])}"
                 for idx, item in enumerate(ideas, 1)
             )
-            + "\n\n"
+            + "\\n\\n"
             "The bot has not called image/video APIs and has not charged Xu."
         )
     return (
         "🔥 <b>Chọn 1 trong 3 trend video</b>\n\n"
         f"Chủ đề: <b>{html.escape(safe_topic)}</b>\n\n"
         f"{source}"
-        + "\n\n".join(
+        + "\\n\\n".join(
             f"<b>{idx}️⃣ {html.escape(item['title'])}</b>\n• {html.escape(item['summary'])}"
             for idx, item in enumerate(ideas, 1)
         )
-        + "\n\n"
+        + "\\n\\n"
         "Bot chưa gọi API ảnh/video và chưa trừ Xu."
     )
 
@@ -197716,7 +197703,7 @@ def trend_guided_trend_choices_text_from_state(state: dict, lang: str = "vi") ->
         for idx, item in enumerate(ideas, 1):
             lines.extend([f"<b>{idx}. {html.escape(item['title'])}</b>", f"• {html.escape(item['summary'])}", ""])
         lines.append("No image/video provider call and no Xu deducted.")
-        return "\n".join(lines)
+        return "\\n".join(lines)
     lines = [
         "🔥 <b>Chọn 1 trong 3 trend video</b>",
         "",
@@ -197728,7 +197715,7 @@ def trend_guided_trend_choices_text_from_state(state: dict, lang: str = "vi") ->
     for idx, item in enumerate(ideas, 1):
         lines.extend([f"<b>{idx}️⃣ {html.escape(item['title'])}</b>", f"• {html.escape(item['summary'])}", ""])
     lines.append("Bot chưa gọi API ảnh/video và chưa trừ Xu.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def trend_guided_trend_choices_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -197828,7 +197815,7 @@ def trend_guided_motion_choices_text(state: dict, lang: str = "vi") -> str:
     for idx, item in enumerate(ideas, 1):
         lines.extend([f"<b>{idx}. {html.escape(item['title'])}</b>", f"• {html.escape(item['summary'])}", ""])
     lines.append(ui_text(lang, "common.no_api_no_charge"))
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def trend_guided_motion_choices_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -198630,7 +198617,7 @@ def trend_video_flow_sections(topic: str, billing_note: str = "") -> list[str]:
         f"Không cần quay phức tạp, {safe_topic} vẫn có thể thành video 15 giây.",
         f"Affiliate/bán hàng với {safe_topic}: đừng hứa quá mức, hãy chứng minh bằng demo.",
     ]
-    hook_lines = "\n".join(f"{i}. {hook}" for i, hook in enumerate(hooks, 1))
+    hook_lines = "\\n".join(f"{i}. {hook}" for i, hook in enumerate(hooks, 1))
 
     sections = [
         (
@@ -199675,7 +199662,7 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
             text = "✅ Đã lưu prompt video. Bot chưa gọi API video và chưa trừ Xu."
         return await safe_edit_or_send(
             query,
-            text + "\n\n" + image_to_video_selected_prompt_text(job_id, uid, idx, lang),
+            text + "\\n\\n" + image_to_video_selected_prompt_text(job_id, uid, idx, lang),
             parse_mode="HTML",
             reply_markup=image_to_video_selected_prompt_keyboard(job_id, idx, lang, is_admin_user(uid)),
         )
@@ -203267,7 +203254,7 @@ async def handle_storyboard_callback(update: Update, context: ContextTypes.DEFAU
         scripts = list(state.get("scripts") or [])
         idx = max(1, min(3, int(parts[2] or 1))) - 1
         selected = scripts[idx] if idx < len(scripts) else {}
-        selected_script = "\n".join([
+        selected_script = "\\n".join([
             str(selected.get("title") or ""),
             str(selected.get("hook") or ""),
             str(selected.get("main") or ""),
@@ -203761,7 +203748,7 @@ async def _handle_create_media_callback_impl(
     lang = get_user_language(uid) or "vi"
     if action == "main":
         notice = clear_pending_start_notice(uid)
-        text = (notice or (ui_text(lang, "media.open_main") + "\n\n")) + localized_start_menu_text(uid, lang)
+        text = (notice or (ui_text(lang, "media.open_main") + "\\n\\n")) + localized_start_menu_text(uid, lang)
         return await safe_edit_or_send(
             query,
             text,
@@ -203780,7 +203767,7 @@ async def _handle_create_media_callback_impl(
         clear_media_creator_pending_states(uid)
         return await safe_edit_or_send(
             query,
-            "\n".join(pricing_hub_lines(lang, uid)),
+            "\\n".join(pricing_hub_lines(lang, uid)),
             parse_mode="HTML",
             reply_markup=pricing_main_keyboard(lang),
         )
@@ -205496,7 +205483,7 @@ async def cmd_video_provider_curl(update: Update, context: ContextTypes.DEFAULT_
         "final_submit_url": key4u.get("video_submit_final_url") or "",
         "final_fetch_url": key4u.get("video_fetch_final_url") or "",
     }
-    curls = provider_curl_examples(status) + "\n\n" + provider_curl_examples(key4u_curl_status)
+    curls = provider_curl_examples(status) + "\\n\\n" + provider_curl_examples(key4u_curl_status)
     await update.message.reply_text(
         "🧪 <b>Masked video provider cURL</b>\n\n<pre>" + html.escape(curls) + "</pre>",
         parse_mode="HTML",
@@ -205549,7 +205536,7 @@ async def cmd_prompt_vault_search(update: Update, context: ContextTypes.DEFAULT_
         lines.append(f"• <code>{html.escape(str(item.get('prompt_id')))}</code> · {html.escape(str(item.get('category')))} · score {item.get('quality_score')}")
     if not matches:
         lines.append("Không có kết quả.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_prompt_vault_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -205637,7 +205624,7 @@ def vault_prompt_list_text(prompts: list[dict], *, title: str = "📚 Kho Prompt
     lines = [f"<b>{html.escape(title)}</b>", ""]
     if not prompts:
         lines.append("Chưa có prompt phù hợp hoặc prompt chưa được admin duyệt.")
-        return "\n".join(lines)
+        return "\\n".join(lines)
     for prompt in prompts[:10]:
         tags = ", ".join(prompt.get("style_tags_json") or []) or "-"
         lines.append(
@@ -205648,14 +205635,14 @@ def vault_prompt_list_text(prompts: list[dict], *, title: str = "📚 Kho Prompt
         preview = str(prompt.get("prompt_text") or "").strip()
         if preview:
             lines.append(f"  {html.escape(preview[:220])}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def vault_asset_list_text(assets: list[dict], *, title: str) -> str:
     lines = [f"<b>{html.escape(title)}</b>", ""]
     if not assets:
         lines.append("Chưa có asset phù hợp.")
-        return "\n".join(lines)
+        return "\\n".join(lines)
     for asset in assets[:12]:
         tags = ", ".join(asset.get("tags_json") or []) or "-"
         lines.append(
@@ -205666,7 +205653,7 @@ def vault_asset_list_text(assets: list[dict], *, title: str) -> str:
         title_value = str(asset.get("title") or "").strip()
         if title_value:
             lines.append(f"  {html.escape(title_value[:220])}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def vault_media_meta_from_message(message) -> dict:
@@ -206067,7 +206054,7 @@ async def cmd_trend_source_list(update: Update, context: ContextTypes.DEFAULT_TY
             f"• <code>{html.escape(str(item.get('trend_id')))}</code> · "
             f"{html.escape(str(item.get('title')))} · {html.escape(str(item.get('source_name')))}"
         )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_trend_source_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -206191,7 +206178,7 @@ def video_provider_status_text(status: dict | None = None, key4u_credit: dict | 
         )
     lines.append("")
     lines.append("Nếu không có provider phù hợp, video product phải fail sạch với provider_capability_missing và chưa trừ Xu.")
-    text = "\n".join(lines)
+    text = "\\n".join(lines)
     if len(text) > VIDEO_DEBUG_REPLY_LIMIT:
         return video_provider_status_compact_text(status, key4u_credit, reason="message_too_long")
     return text
@@ -206258,7 +206245,7 @@ def video_provider_status_compact_text(status: dict | None = None, key4u_credit:
         )
     lines.append("")
     lines.append("Nếu không có provider phù hợp, video product fail sạch với provider_capability_missing và chưa trừ Xu.")
-    text = "\n".join(lines)
+    text = "\\n".join(lines)
     return text if len(text) <= VIDEO_DEBUG_REPLY_LIMIT else text[: VIDEO_DEBUG_REPLY_LIMIT - 80] + "\n• debug_truncated=<code>hard_limit</code>"
 
 
@@ -206298,7 +206285,7 @@ def video_provider_env_audit_text(audit: dict | None = None) -> str:
         )
     lines.append("")
     lines.append("Lệnh này chỉ hiển thị host/path/header-present/model-present, không hiển thị token hoặc URL ký.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_provider_setup_text(status: dict | None = None) -> str:
@@ -206365,7 +206352,7 @@ def video_provider_setup_text(status: dict | None = None) -> str:
         "",
         "Ghi chú: lệnh này không hiện token thật và không gọi provider.",
     ]
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 async def cmd_video_provider_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -206455,7 +206442,7 @@ def video_provider_smoke_debug_text(provider: str, capability: str, result: dict
         f"• result_field_path: <code>{html.escape(str(payload.get('result_field_path') or '-'))}</code>",
         "• charge: <code>no</code>",
     ]
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 async def cmd_video_provider_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -206666,7 +206653,7 @@ async def cmd_remove_bg_help(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"• Public access: <code>{public}</code>",
             "• Admin test: reply ảnh rồi chạy <code>/tool_test_image</code> hoặc <code>/tool_test_image_debug</code>.",
         ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_source_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
@@ -206779,7 +206766,7 @@ async def cmd_feature_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "Allowed: <code>PLANNED</code>, <code>ADMIN_ONLY</code>, <code>BETA_PRIVATE</code>, <code>PUBLIC_READY</code>, <code>DISABLED</code>",
         "Lưu ý: đổi stage không tự tạo API key, không tự bật env và không bỏ qua smoke test.",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_feature_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -207121,7 +207108,7 @@ async def cmd_pricing_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Không có đặc quyền Chat 0 Xu theo hạng và không tăng Xu theo mệnh giá nạp.",
         "• Video/render thật sau này phải có bảng giá riêng.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 def pricing_free_lines(lang: str = "vi") -> list[str]:
     return public_pricing_lines("free", public_pricing_context(), public_pricing_locale(lang))
@@ -207349,8 +207336,8 @@ def price_set_help_text() -> str:
         "Cú pháp: <code>/price_set &lt;key&gt; &lt;gia_xu&gt;</code>\n"
         "Chỉ owner được đổi giá. Admin mặc định chỉ xem audit/key bằng <code>/price_keys</code>.\n\n"
         "Key có thể đổi:\n"
-        + "\n".join(f"• <code>{key}</code>" for key in editable)
-        + "\n\n"
+        + "\\n".join(f"• <code>{key}</code>" for key in editable)
+        + "\\n\\n"
         "Ví dụ nhanh: <code>/price_set video_300 300</code>\n"
         "Key cộng tự động, không nhập tay: <code>subtitle_dub_video</code>, <code>auto_subtitle_then_dub</code>.\n"
         "Giá B2C giữ gross fixed; VAT/TNDN không cộng thêm vào khách lẻ."
@@ -207721,13 +207708,13 @@ async def send_pricing_lines(message, lines: list[str], reply_markup: InlineKeyb
         line = str(line)
         add_len = len(line) + 1
         if chunk and current_len + add_len > limit:
-            await message.reply_text("\n".join(chunk), parse_mode="HTML")
+            await message.reply_text("\\n".join(chunk), parse_mode="HTML")
             chunk = []
             current_len = 0
         chunk.append(line)
         current_len += add_len
     if chunk:
-        await message.reply_text("\n".join(chunk), parse_mode="HTML", reply_markup=reply_markup)
+        await message.reply_text("\\n".join(chunk), parse_mode="HTML", reply_markup=reply_markup)
 
 def chunk_pricing_lines(lines: list[str], limit: int = 3600) -> list[str]:
     chunks: list[str] = []
@@ -207737,13 +207724,13 @@ def chunk_pricing_lines(lines: list[str], limit: int = 3600) -> list[str]:
         line = str(line)
         add_len = len(line) + 1
         if chunk and current_len + add_len > limit:
-            chunks.append("\n".join(chunk))
+            chunks.append("\\n".join(chunk))
             chunk = []
             current_len = 0
         chunk.append(line)
         current_len += add_len
     if chunk:
-        chunks.append("\n".join(chunk))
+        chunks.append("\\n".join(chunk))
     return chunks
 
 async def edit_or_send_pricing_lines(query, lines: list[str], reply_markup: InlineKeyboardMarkup | None = None, limit: int = 3600):
@@ -208022,7 +208009,7 @@ def billing_gift_code_lines(lang: str = "vi") -> list[str]:
     ]
 
 def admin_gift_code_text() -> str:
-    return "\n".join(billing_gift_code_lines("vi"))
+    return "\\n".join(billing_gift_code_lines("vi"))
 
 def admin_gift_code_action_text(action: str = "") -> str:
     action = str(action or "").strip()
@@ -209303,7 +209290,7 @@ async def start_package_purchase(update: Update, context: ContextTypes.DEFAULT_T
         return await message.reply_text(
             "⚠️ Tài khoản đang có nhiều đơn gói/combo chưa thanh toán trong thời gian ngắn.\n\n"
             + package_anomaly_public_text()
-            + "\n\n"
+            + "\\n\\n"
             + package_order_request_text(request),
             parse_mode="HTML",
             reply_markup=package_need_larger_keyboard(back_action, large_action),
@@ -209667,7 +209654,7 @@ async def render_pkgcombo_large_order(query, context: ContextTypes.DEFAULT_TYPE,
     )
     return await safe_edit_or_send(
         query,
-        "\n".join(pkgcombo_large_order_lines(request)),
+        "\\n".join(pkgcombo_large_order_lines(request)),
         parse_mode="HTML",
         reply_markup=pkgcombo_large_order_keyboard(back_callback),
     )
@@ -210197,7 +210184,7 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_badge = admin_display_badge(uid)
     badge = get_role_badge(uid)
     public_mode = "pro" if normalize_chat_tier(modes.get("chat_mode") or "normal") == "pro" else "free"
-    public_model = "Opus 4.8" if public_mode == "pro" else "Gemini 3.7 Flash"
+    public_model = "Opus 4.8" if public_mode == "pro" else "Gemini 3.6 Flash"
     if admin_badge:
         member_note = (
             f"🛡 Đặc quyền {html.escape(admin_badge)}:\n"
@@ -210237,7 +210224,7 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Mode giữ nguyên cho đến khi bạn đổi/tắt; <code>/start</code> không reset mode.",
     ]
     record_usage_event(uid, username=update.effective_user.username or "", event_type="command", tool_name="user_mode", command="/mode", status="ok")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def set_chat_mode_command(update: Update, mode: str, command: str, note: str):
     uid = update.effective_user.id
@@ -210258,7 +210245,7 @@ async def set_chat_mode_command(update: Update, mode: str, command: str, note: s
             "Bot sẽ dùng Chat Pro cho đến khi bạn tắt bằng <code>/chat_pro_off</code>."
         )
     else:
-        text = "✅ Đã chuyển về <b>Chat miễn phí — Gemini 3.7 Flash</b>."
+        text = "✅ Đã chuyển về <b>Chat miễn phí — Gemini 3.6 Flash</b>."
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_chat_pro_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -210338,7 +210325,7 @@ async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 <b>AI Models trong TOAN AAS</b>",
         "",
         "<b>Free Chat</b>",
-        "• Gemini 3.7 Flash — 0 Xu.",
+        "• Gemini 3.6 Flash — 0 Xu.",
         "• 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt.",
         "• Bộ nhớ Public Chat riêng 48 giờ.",
         "",
@@ -210358,7 +210345,7 @@ async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Gemini Pro style: <code>{provider_status_text(providers['ai']['gemini'])}</code>",
         )
         lines.insert(-4, "• Claude/Grok: planned / pending provider setup.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_payos_test_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -210404,7 +210391,7 @@ async def cmd_payos_test_plan(update: Update, context: ContextTypes.DEFAULT_TYPE
         "",
         "Nếu PayOS lỗi, dùng <code>/thucong</code> là fallback. Admin chỉ <code>/duyet</code> sau khi đối soát tiền thật vào tài khoản.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_tool_test_remote_worker_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
@@ -210471,7 +210458,7 @@ async def cmd_tool_test_remote_worker_api(update: Update, context: ContextTypes.
             "no charge: OK",
             "provider call: NO",
         ]
-        return await update.message.reply_text("\n".join(lines))
+        return await update.message.reply_text("\\n".join(lines))
     except Exception as exc:
         logger.warning(f"remote worker api admin test failed: {type(exc).__name__}")
         return await update.message.reply_text(
@@ -210540,7 +210527,7 @@ def _format_remote_worker_canary_status(status: dict) -> str:
     sent = "yes" if status.get("sent_to_admin") else "no"
     failure = status.get("safe_failure_reason") or "-"
     stage = status.get("stage") or status.get("progress_message") or status.get("status") or "-"
-    return "\n".join(
+    return "\\n".join(
         [
             "🧪 <b>Remote Worker Canary Status</b>",
             "",
@@ -210587,7 +210574,7 @@ def _format_remote_worker_prod_canary_status(status: dict) -> str:
     reason_code = status.get("reason_code") or status.get("safe_failure_reason_code") or "-"
     failure = status.get("safe_failure_reason") or "-"
     next_action = _remote_worker_prod_canary_next_action(status)
-    return "\n".join(
+    return "\\n".join(
         [
             "🧪 <b>VPS Worker Production Canary Status</b>",
             "",
@@ -210664,7 +210651,7 @@ async def cmd_remote_worker_canary(update: Update, context: ContextTypes.DEFAULT
         f"Kiểm tra: <code>/remote_worker_canary_status {html.escape(canary_ref)}</code>",
     ]
     return await update.message.reply_text(
-        "\n".join(lines),
+        "\\n".join(lines),
         parse_mode="HTML",
         reply_markup=_remote_worker_canary_keyboard(str(canary_ref)),
     )
@@ -210725,7 +210712,7 @@ async def handle_remote_worker_canary_callback(update: Update, context: ContextT
             set_system_setting("remote_worker:last_canary_status", "canary_queued", "last remote worker canary status", uid)
         except Exception:
             logger.warning("remote worker canary callback setting skipped")
-        text = "\n".join(
+        text = "\\n".join(
             [
                 "🧪 <b>Remote Worker Canary</b>",
                 "",
@@ -210825,7 +210812,7 @@ async def cmd_remote_worker_prod_canary(update: Update, context: ContextTypes.DE
         f"Kiểm tra: <code>/remote_worker_prod_canary_status {html.escape(canary_ref)}</code>",
     ]
     return await update.message.reply_text(
-        "\n".join(lines),
+        "\\n".join(lines),
         parse_mode="HTML",
         reply_markup=_remote_worker_prod_canary_keyboard(str(canary_ref)),
     )
@@ -210886,7 +210873,7 @@ async def handle_remote_worker_prod_canary_callback(update: Update, context: Con
             set_system_setting("remote_worker:last_admin_prod_canary_status", "admin_canary_queued", "last remote worker admin prod canary status", uid)
         except Exception:
             logger.warning("remote worker admin prod canary callback setting skipped")
-        text = "\n".join(
+        text = "\\n".join(
             [
                 "🧪 <b>VPS Worker Production Canary</b>",
                 "",
@@ -210968,7 +210955,7 @@ async def cmd_remote_worker_status(update: Update, context: ContextTypes.DEFAULT
         "Admin prod canary: <code>python remote_worker.py --admin-canary --once</code>",
         "Chưa route job video thật cho VPS cho tới khi B14.5 ổn định.",
     ]
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_tool_test_remote_worker_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -211003,7 +210990,7 @@ async def cmd_tool_test_remote_worker_ping(update: Update, context: ContextTypes
         "charge: NO",
         "provider call: NO",
     ]
-    return await update.message.reply_text("\n".join(lines))
+    return await update.message.reply_text("\\n".join(lines))
 
 
 def subdub_ass_filter_probe(ffmpeg_status: dict | None = None) -> dict:
@@ -211088,7 +211075,7 @@ def subdub_runtime_status_payload() -> dict:
 def subdub_runtime_status_text(payload: dict | None = None) -> str:
     current = dict(payload or subdub_runtime_status_payload())
     flag = lambda value: "PASS" if value else "FAIL"
-    return "\n".join([
+    return "\\n".join([
         "🧩 <b>SUBDUB RUNTIME STATUS</b>",
         "",
         f"• Build: <code>{html.escape(str(current.get('build') or '-'))}</code>",
@@ -211144,7 +211131,7 @@ def subdub_provider_status_text() -> str:
             "",
         ])
     lines.extend(["provider_calls=0", "wallet_mutation=0", "Xu_charged=0"])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 async def cmd_subdub_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     del context
@@ -211215,7 +211202,7 @@ async def cmd_subdub_public_open_safe(update: Update, context: ContextTypes.DEFA
             "provider_calls=0 | wallet_mutation=0 | Xu_charged=0",
         ]
     )
-    for chunk in subdub_admin_debug_chunks("\n".join(lines)):
+    for chunk in subdub_admin_debug_chunks("\\n".join(lines)):
         await update.message.reply_text(chunk)
 
 async def cmd_subdub_public_open_force(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -211278,7 +211265,7 @@ async def cmd_subdub_public_open_force(update: Update, context: ContextTypes.DEF
         "Runtime override persisted in system_settings and survives Railway restart.",
         "provider_calls=0 | jobs_created=0 | wallet_mutation=0 | Xu_charged=0",
     ])
-    for chunk in subdub_admin_debug_chunks("\n".join(lines)):
+    for chunk in subdub_admin_debug_chunks("\\n".join(lines)):
         await update.message.reply_text(chunk)
 
 async def cmd_subdub_public_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -211301,7 +211288,7 @@ async def cmd_subdub_public_close(update: Update, context: ContextTypes.DEFAULT_
             "provider_calls=0 | wallet_mutation=0 | Xu_charged=0",
         ]
     )
-    await update.message.reply_text("\n".join(lines))
+    await update.message.reply_text("\\n".join(lines))
 
 async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
@@ -211410,7 +211397,7 @@ async def cmd_telegram_status(update: Update, context: ContextTypes.DEFAULT_TYPE
         "",
         "Nếu <code>/start</code> vẫn ra A_TOOLSX nhưng dòng Telegram webhook ở đây đúng URL TOAN AAS, hãy chụp lại <code>/runtime</code> và HTTP logs để kiểm tra update có vào endpoint không.",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_telegram_takeover(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -211434,7 +211421,7 @@ async def cmd_telegram_takeover(update: Update, context: ContextTypes.DEFAULT_TY
         f"• Owner: <code>{html.escape(ownership.get('level') or '-')}</code>",
         f"• Next: <code>{html.escape(ownership.get('next_action') or '/start')}</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
@@ -212961,7 +212948,7 @@ def brain_command_preview(plan):
                     f"/performance_add job={int(plan.get('job') or 0)} type={event_type} "
                     f"value={int(payload.get('value') or 0)} amount={int(payload.get('amount') or 0)} note=brain_performance"
                 )
-            return "\n".join(parts) if parts else "/performance"
+            return "\\n".join(parts) if parts else "/performance"
         return f"/performance_add job={int(plan.get('job') or 0)} type=view value=0 note=brain_performance"
     if intent == "tracking_report":
         return f"/tracking_report days={max(1, min(int(plan.get('days') or 30), 180))} limit={max(3, min(int(plan.get('limit') or 10), 30))}"
@@ -213414,7 +213401,7 @@ async def run_brain_plan(update, context, plan):
             if not event_lines:
                 return await update.message.reply_text("❌ Không ghi được performance. Kiểm tra job ID hoặc số liệu.")
             return await update.message.reply_text(
-                f"✅ <b>Đã ghi performance cho job #{job_id}</b>\n" + "\n".join(event_lines) +
+                f"✅ <b>Đã ghi performance cho job #{job_id}</b>\n" + "\\n".join(event_lines) +
                 "\n\nXem funnel: <code>/tracking_report days=30</code> hoặc <code>/scale_plan</code>",
                 parse_mode="HTML"
             )
@@ -213959,7 +213946,7 @@ def affiliate_row_to_context(row) -> str:
         parts.append(f"Commission rate: {float(commission_rate):g}%")
     if product_score:
         parts.append(f"Internal fit score: {product_score}/100")
-    return "\n".join(parts)
+    return "\\n".join(parts)
 
 def parse_affiliate_id_value(data: dict) -> int:
     value = data.get("affiliate_id") or data.get("affiliate") or data.get("aff") or data.get("link_id") or data.get("id")
@@ -214652,7 +214639,7 @@ def build_campaign_report_txt(summary: dict) -> str:
     for idx, action in enumerate(report_next_actions(summary), 1):
         lines.append(f"{idx}. {action}")
     lines.extend(["", "SAFETY", "- No customer auto posting.", "- No social API used.", "- Affiliate disclosure required."])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def build_campaign_report_csv(summary: dict) -> str:
     buffer = io.StringIO()
@@ -215004,7 +214991,7 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Gói: <b>{html.escape(str(parsed.get('tier') or 'basic'))}</b>\n"
             f"Chi phí: <b>{cost} Xu</b>\n"
             + (f"{html.escape(member_discount_display_line(charge))}\n" if int((charge or {}).get("discount_xu") or 0) > 0 else "")
-            + "\n"
+            + "\\n"
             "✅ Đã tạo: outline, scene prompts, caption từng nền tảng, CTA/hashtag, quality check.\n\n"
             f"<b>Preview:</b>\n<pre>{preview}</pre>\n\n"
             f"💼 Số dư còn lại: <b>{credits_after} Xu</b>\n"
@@ -215136,7 +215123,7 @@ async def cmd_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(active_rows) > 20:
         lines.append(f"\n... còn {len(active_rows) - 20} link khác.")
     lines.append("\nThêm link mới: <code>/addlink url=https://... product=\"Tên\" niche=\"nhóm\"</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_addcal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -215221,7 +215208,7 @@ async def cmd_campaign(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 lines.append(f"• <code>#{cid}</code> | <b>{html.escape(name or '-')}</b> | {html.escape(niche or '-')} | <code>{html.escape(platforms or '-')}</code> | {status}")
         else:
             lines.append("\n📭 Chưa có campaign nào.")
-        return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
     data, remainder = parse_loose_kv_args(raw)
     name = (data.get("name") or data.get("ten") or remainder).strip()[:120]
@@ -215291,7 +215278,7 @@ async def cmd_campaigns(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = ["📌 <b>CAMPAIGN ĐANG CÓ</b>\n"]
     for cid, name, niche, platforms, affiliate_url, status in rows:
         lines.append(f"• #{cid} | <b>{name}</b> | {niche} | <code>{platforms}</code> | {status}")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_campaign_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -215315,7 +215302,7 @@ async def cmd_campaign_preset(update: Update, context: ContextTypes.DEFAULT_TYPE
             "<code>/campaign_preset preset=tech platform=tiktok limit=3</code>\n"
             "<code>/campaign_preset preset=finance platform=facebook execute=1 build=1</code>"
         )
-        return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
     preset = data.get("preset") or data.get("p") or data.get("loai") or raw.split()[0]
     topic = data.get("topic") or data.get("chude") or data.get("niche") or ""
     platform = (data.get("platform") or data.get("nen") or "all").lower()
@@ -215376,7 +215363,7 @@ async def cmd_campaign_preset(update: Update, context: ContextTypes.DEFAULT_TYPE
         for item in errors[:4]:
             lines.append(f"• {html.escape(item.get('platform') or '-')} — {html.escape(str(item.get('reason') or '-'))}")
     lines.append("\nAPI: <code>POST /api/operator/campaign-preset</code>")
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_video_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -215479,7 +215466,7 @@ async def cmd_campaign_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ]
     for jid, topic, platforms, status, created_at in recent_jobs:
         lines.append(f"• #{jid} | {status} | <code>{platforms}</code> | {topic}")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_channel_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -215526,7 +215513,7 @@ async def cmd_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• #{cid} | <code>{html.escape(platform)}</code> | <b>{html.escape(name)}</b> | "
             f"{html.escape(account or '-') } | {html.escape(focus or '-') } | {html.escape(slots or '-') } | {status}"
         )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_channel_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -215572,7 +215559,7 @@ async def cmd_channel_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "",
         "API: <code>GET /api/operator/channel-router?platform=tiktok&amp;niche=công nghệ AI&amp;limit=10</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_channel_publish_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -215624,7 +215611,7 @@ async def cmd_publish_readiness(update: Update, context: ContextTypes.DEFAULT_TY
     lines.append(
         "\nCấu hình: <code>/channel_publish_set id=&lt;ID&gt; mode=api token_env=TIKTOK_ACCESS_TOKEN page_id=...</code>"
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_publisher_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -215663,7 +215650,7 @@ async def cmd_publisher_status(update: Update, context: ContextTypes.DEFAULT_TYP
         for blocker in data["blockers"][:8]:
             lines.append(f"• {html.escape(blocker['detail'])}\n  <code>{html.escape(blocker['next'])}</code>")
     lines.append("\nAPI: <code>GET /api/operator/publisher/status</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_publisher_capabilities(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -215698,10 +215685,10 @@ async def cmd_publisher_capabilities(update: Update, context: ContextTypes.DEFAU
             )
     lines.append(
         "\n<b>Luật an toàn:</b>\n"
-        + "\n".join(f"• {html.escape(rule)}" for rule in (pack.get("safe_rules") or [])[:4])
+        + "\\n".join(f"• {html.escape(rule)}" for rule in (pack.get("safe_rules") or [])[:4])
     )
     lines.append("\nAPI: <code>GET /api/operator/publisher/capabilities</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_platform_adapters(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -215732,10 +215719,10 @@ async def cmd_platform_adapters(update: Update, context: ContextTypes.DEFAULT_TY
         )
     lines.append(
         "\n<b>Luật:</b>\n"
-        + "\n".join(f"• {html.escape(rule)}" for rule in (plan.get("safety_rules") or [])[:4])
+        + "\\n".join(f"• {html.escape(rule)}" for rule in (plan.get("safety_rules") or [])[:4])
     )
     lines.append("\nAPI: <code>GET /api/operator/platform-adapters</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_publish_cockpit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -215784,7 +215771,7 @@ async def cmd_publish_cockpit(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"• Mark published: <code>/publish_queue_set id=&lt;QUEUE_ID&gt; status=published url=https://...</code>\n"
         f"• API: <code>GET /api/operator/publish-cockpit?platform={html.escape(pack.get('platform') or 'all')}</code>"
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -215850,7 +215837,7 @@ async def cmd_affiliate_seed(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if len(skipped) > 10:
             lines.append(f"• ... và {len(skipped) - 10} link khác.")
     lines.append("\nDùng <code>/affiliates</code> để xem ID, hoặc <code>/affiliate_match niche=...</code> để chọn link theo trend.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_import(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -215901,7 +215888,7 @@ async def cmd_affiliate_import(update: Update, context: ContextTypes.DEFAULT_TYP
         for item in errors[:5]:
             lines.append(f"• <code>{html.escape(item.get('url') or '-')}</code>: {html.escape(item.get('error') or '-')}")
     lines.append("\nDùng tiếp: <code>/affiliate_match niche=...</code> hoặc <code>/affiliate_related brand=...</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_admin_import_affiliate_inventory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -215933,7 +215920,7 @@ async def cmd_affiliates(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  note={html.escape(note or '-')}\n"
             f"  <code>{html.escape(url_display or 'chưa có link')}</code>"
         )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -216024,7 +216011,7 @@ async def cmd_affiliate_match(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"  claim cấm={html.escape(blocked_claims or '-')}"
         )
     lines.append("\nDùng ID phù hợp trong /trend_search, /operator hoặc /operator_auto bằng <code>aff=&lt;ID&gt;</code>.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -216161,7 +216148,7 @@ async def cmd_affiliate_related(update: Update, context: ContextTypes.DEFAULT_TY
         "<code>/affiliate_ideas aff=&lt;AFF_ID&gt; platform=tiktok n=5 topic=...</code>\n"
         "<code>/affiliate_scale aff=&lt;AFF_ID&gt; platform=tiktok channel=all limit=3 build=1</code>"
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_bundle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -216207,7 +216194,7 @@ async def cmd_affiliate_bundle(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Auto chọn link chính: <b>{'YES' if bundle.get('auto_selected_primary') else 'NO'}</b>",
         "",
         "<b>Caption link:</b>",
-        "<pre>" + html_pre("\n".join((bundle.get("placement_plan") or {}).get("caption") or []) or "-", 700) + "</pre>",
+        "<pre>" + html_pre("\\n".join((bundle.get("placement_plan") or {}).get("caption") or []) or "-", 700) + "</pre>",
         "<b>Comment ghim:</b>",
         "<pre>" + html_pre((bundle.get("placement_plan") or {}).get("pinned_comment") or "-", 1400) + "</pre>",
         "<b>Status/mô tả/bio:</b>",
@@ -216223,7 +216210,7 @@ async def cmd_affiliate_bundle(update: Update, context: ContextTypes.DEFAULT_TYP
             f"  lý do: {html.escape('; '.join(item.get('reasons') or []) or '-')}"
         )
     lines.append("\nBáo cáo hiệu quả: <code>/tracking_report days=30</code> hoặc <code>/affiliate_report days=30</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_calendar_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -216289,7 +216276,7 @@ async def cmd_calendar_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for slot_id, post_date, platform, name, topic in preview:
         lines.append(f"• #{slot_id} | {post_date} | <code>{html.escape(platform)}</code> | {html.escape(name)} | {html.escape(topic)}")
     lines.append("\nXem tiếp: /calendar")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -216341,7 +216328,7 @@ async def cmd_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(filtered) > 30:
         lines.append(f"\n... còn {len(filtered) - 30} lịch khác.")
     lines.append("\nThêm lịch: <code>/addcal date=tomorrow platform=tiktok topic=\"...\" aff=&lt;ID&gt;</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -216580,7 +216567,7 @@ async def cmd_operator_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  lý do: {html.escape(reason or '-')}"
         )
     lines.append("\nBước tiếp: /operator_dashboard hoặc /operator_next id=<JOB_ID> stage=script")
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_autopilot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -216667,7 +216654,7 @@ async def cmd_autopilot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "\nBước tiếp: <code>/tasks job=&lt;JOB_ID&gt;</code>, "
         "<code>/next_task job=&lt;JOB_ID&gt;</code>, hoặc <code>/job_ready job=&lt;JOB_ID&gt;</code>."
     )
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -216812,7 +216799,7 @@ async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<code>{html.escape((result.get('automation_next') or {}).get('worker_autorun') or '/worker_autorun execute=1')}</code>\n"
         "<code>/review_gate job=&lt;JOB_ID&gt;</code> → <code>/approve_publish job=&lt;JOB_ID&gt; queue=1</code>"
     )
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
     if autorun_result:
         review_report = await send_operator_review_packets(
             context,
@@ -217190,7 +217177,7 @@ async def cmd_tao_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         + platform_note
         + "\nAPI cho Claude/n8n: <code>POST /api/operator/launch</code>"
     )
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -217318,7 +217305,7 @@ async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"• Sau đăng: <code>{html.escape(post_publish_cmd)}</code>",
         ])
     lines.append("\nAPI cho Claude/n8n: <code>POST /api/operator/launch</code>")
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
     if autorun_result:
         review_report = await send_operator_review_packets(
             context,
@@ -217444,7 +217431,7 @@ async def cmd_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  aff={html.escape(product_name or '-')} | {updated_at or '-'}"
         )
     lines.append("\nXem chi tiết: <code>/pipeline &lt;id&gt;</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_pipeline_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -217573,7 +217560,7 @@ async def cmd_operator_dashboard(update: Update, context: ContextTypes.DEFAULT_T
         "\nLệnh nhanh: <code>/operator topic=... channel=... aff=...</code> | "
         "<code>/operator_next id=... stage=script</code>"
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -217628,7 +217615,7 @@ async def cmd_operator_daily(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         lines.append("• Không có queue mở.")
     lines.append("\nLệnh nhanh: /operator_dashboard | /publish_queue | /performance | /operator_auto")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_daily_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -217685,7 +217672,7 @@ async def cmd_operator_daily_pack(update: Update, context: ContextTypes.DEFAULT_
         f"<code>GET /api/operator/daily-pack?days={days}&amp;platform={html.escape(platform)}&amp;limit={limit}</code>\n"
         "<b>Rule:</b> xử lý từng rank, không vượt review/publish gate, sau đăng phải ghi performance."
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_daily_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -217747,7 +217734,7 @@ async def cmd_operator_daily_run(update: Update, context: ContextTypes.DEFAULT_T
         "",
         "Chạy thật: <code>/operator_daily_run rank=%s execute=1</code>" % result.get("rank"),
     ])
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_daily_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -217809,7 +217796,7 @@ async def cmd_operator_daily_cycle(update: Update, context: ContextTypes.DEFAULT
         "Lệnh tiếp: <code>/operator_daily_pack</code> | <code>/operator_daily_run rank=1 execute=1</code> | "
         "<code>/operator_daily_cycle execute=1 max=3</code>",
     ])
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -217847,7 +217834,7 @@ async def cmd_operator_status(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         lines.append("• Không có job blocked.")
     lines.append("\nLệnh nhanh: <code>/operator_menu</code> | <code>/affiliate_scale aff=&lt;ID&gt; build=1</code> | <code>/operator_loop</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_bootstrap(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -217907,7 +217894,7 @@ async def cmd_operator_bootstrap(update: Update, context: ContextTypes.DEFAULT_T
         "<code>/operator_mission</code>\n"
         "<code>/make_video topic=công nghệ AI platform=tiktok channel=all limit=3 build=1</code>"
     )
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -217942,7 +217929,7 @@ async def cmd_operator_audit(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "",
         f"Next: <code>{html.escape(data['next_command'])}</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -217971,7 +217958,7 @@ async def cmd_operator_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE)
         for item in data["warnings"][:12]:
             lines.append(f"• {html.escape(item['section'])}.<code>{html.escape(item['key'])}</code>")
     lines.append("\nAPI: <code>GET /api/operator/smoke-test</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_playbook(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -218042,7 +218029,7 @@ async def cmd_operator_today(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"• score={score} | CTR={ctr:.2f}% | CVR={cvr:.2f}% | ROI={roi:.1f}% | revenue={int(revenue or 0):,}đ"
         )
     lines.append("\nMở checklist đầy đủ: <code>/operator_playbook</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -218086,7 +218073,7 @@ async def cmd_operator_command(update: Update, context: ContextTypes.DEFAULT_TYP
     revenue_total = sum(row.get("amount", 0) for row in center["money"]["events"] if row.get("type") in {"revenue", "order", "lead"})
     lines.append(f"\n<b>Money snapshot:</b> revenue/order/lead amount=<b>{revenue_total:,}đ</b>")
     lines.append("\nAPI: <code>GET /api/operator/command-center</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_mission_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -218147,7 +218134,7 @@ async def cmd_missions(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  <code>/mission_prompt id={item['id']}</code> | <code>/mission_complete id={item['id']} status=done note=...</code>"
         )
     lines.append("\nAPI: <code>GET /api/operator/missions</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_mission_claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -218227,7 +218214,7 @@ async def cmd_mission_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<code>/tasks</code> → <code>/review_gate job=&lt;ID&gt;</code> → <code>/approve_publish job=&lt;ID&gt;</code>",
         "API: <code>POST /api/operator/missions/run</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_mission_workorders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -218270,7 +218257,7 @@ async def cmd_mission_workorders(update: Update, context: ContextTypes.DEFAULT_T
         "Worker dùng prompt/upload/complete trong gói này, sau đó dừng ở review/publish gate.",
         f"API: <code>GET /api/operator/missions/{mission_id}/work-orders</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_mission_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -218324,7 +218311,7 @@ async def cmd_operator_next_run(update: Update, context: ContextTypes.DEFAULT_TY
         "",
         "API: <code>GET /api/operator/next-run</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -218368,7 +218355,7 @@ async def cmd_operator_dispatch(update: Update, context: ContextTypes.DEFAULT_TY
         if task:
             lines.append(f"• Claimed task: <code>#{task.get('id')}</code> | prompt_pack=<b>{'YES' if result.get('prompt_pack') else 'NO'}</b>")
     lines.append("\nAPI: <code>GET/POST /api/operator/dispatch</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -218416,7 +218403,7 @@ async def cmd_operator_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"• Claim an toàn: <code>/operator_cycle execute=1 max={max_steps}</code>",
         "API: <code>GET/POST /api/operator/run-cycle</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -218468,7 +218455,7 @@ async def cmd_operator_mission(update: Update, context: ContextTypes.DEFAULT_TYP
         "\n<b>Rule:</b> đọc video tham khảo để học cấu trúc, không copy y nguyên; luôn review trước đăng; luôn đo click/order/revenue.\n"
         "API pack: <code>GET /api/operator/mission</code>"
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_commander_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -218546,7 +218533,7 @@ async def cmd_operator_contract(update: Update, context: ContextTypes.DEFAULT_TY
         f"• API: <code>{html.escape(str((next_step.get('api') or {}).get('url') or '/api/operator/next-run'))}</code>\n"
         "API đầy đủ: <code>GET /api/operator/control-contract?days=30&amp;platform=tiktok</code>"
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_goal_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -218593,7 +218580,7 @@ async def cmd_goal_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <code>{html.escape(audit.get('next_command') or next_run.get('telegram') or '/operator_next_run')}</code>\n"
         f"• API: <code>GET /api/operator/goal-audit?days={days}&amp;platform={html.escape(platform)}&amp;limit={limit}</code>"
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_head_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -218647,7 +218634,7 @@ async def cmd_head_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "\nAPI: <code>GET /api/operator/head-brain?days=30&amp;platform=tiktok&amp;limit=8</code>\n"
         "Rule: không tự publish ngoài review/approve gate; sau đăng bắt buộc ghi performance."
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_head_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -218748,7 +218735,7 @@ async def cmd_head_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Growth: <code>{html.escape(next_cmds.get('growth_loop') or '/growth_loop')}</code>\n"
         "API: <code>POST /api/operator/head-run</code>"
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
     if execute and send_review and reviewable_jobs:
         review_report = await send_operator_review_packets(
             context,
@@ -219092,7 +219079,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("\n⚠️ Chưa set <code>OPERATOR_API_TOKEN</code> trên server nên API bridge đang đóng.")
     if not PUBLIC_BASE_URL:
         lines.append("⚠️ Chưa set <code>PUBLIC_BASE_URL</code>, hãy dùng domain Railway thật trong n8n.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_worker_spec(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -219140,7 +219127,7 @@ async def cmd_operator_toolchain(update: Update, context: ContextTypes.DEFAULT_T
     for rule in data["failure_protocol"][:4]:
         lines.append(f"• {html.escape(rule)}")
     lines.append("\nAPI: <code>GET /api/operator/toolchain</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_tool_readiness(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -219167,7 +219154,7 @@ async def cmd_operator_tool_readiness(update: Update, context: ContextTypes.DEFA
             f"  next: <code>{html.escape(item['next'])}</code>"
         )
     lines.append("\nAPI: <code>GET /api/operator/tool-readiness</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_api_recommend(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -219239,7 +219226,7 @@ async def cmd_api_recommend(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Deepgram: reply audio ngắn rồi chạy <code>/tool_test_stt</code>",
         "• Cobalt: self-host trước, rồi chạy <code>/tool_test_downloader https://...</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_tool_events(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -219290,7 +219277,7 @@ async def cmd_operator_tool_events(update: Update, context: ContextTypes.DEFAULT
             f"• job=<code>{job_id or '-'}</code> task=<code>{task_id or '-'}</code> fallback=<code>{html.escape(fallback_tool or '-')}</code>\n"
             f"• {html.escape(message or '-')}"
         )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_n8n_template(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -219604,7 +219591,7 @@ async def cmd_operator_build(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "\nBước tiếp: <code>/task_handoff id=&lt;TASK_ID&gt;</code> để giao từng việc, "
         "hoặc <code>/manifest_handoff manifest=%s tool=kling</code> để giao theo tool." % manifest_id
     )
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_creative_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -219638,7 +219625,7 @@ async def cmd_creative_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         buttons.append([InlineKeyboardButton(f"✅ Chọn variant #{variant_id}", callback_data=f"creative|select|{variant_id}")])
     lines.append("\nSau khi đăng/test: <code>/performance_add job=%s variant=&lt;ID&gt; type=click value=...</code>" % job_id)
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
 
 async def cmd_creative_variants(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -219662,7 +219649,7 @@ async def cmd_creative_variants(update: Update, context: ContextTypes.DEFAULT_TY
             f"  Hashtags: <code>{html.escape(hashtags or '-')}</code>"
         )
         buttons.append([InlineKeyboardButton(f"✅ Chọn variant #{vid}", callback_data=f"creative|select|{vid}")])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
 
 async def cmd_creative_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -219723,7 +219710,7 @@ async def cmd_creative_report(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"  Hook: {html.escape(hook or '-')}"
         )
     lines.append("\nGhi dữ liệu: <code>/performance_add job=%s variant=&lt;ID&gt; type=click value=...</code>" % job_id)
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_video_patterns(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -219741,7 +219728,7 @@ async def cmd_video_patterns(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "\nCác pattern này tự được gắn vào <code>/creative_test</code>, <code>/manifest</code>, "
         "<code>/task_plan</code>, <code>/publish_pack</code> và API make-video."
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_film_blueprint(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -219771,7 +219758,7 @@ async def cmd_film_blueprint(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "<code>/mission_add title=Phim AI affiliate platform=tiktok priority=9 objective=Tạo series 5 tập theo blueprint phim AI, gắn link affiliate phù hợp, review trước đăng.</code>",
         "<code>GET /api/operator/film-blueprint</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_film_project_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -219820,7 +219807,7 @@ async def cmd_film_project_pack(update: Update, context: ContextTypes.DEFAULT_TY
         "<b>API JSON đầy đủ:</b>",
         "<code>GET /api/operator/film-project-pack?topic=&lt;TOPIC&gt;&amp;platform=tiktok</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_film_series(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -219888,7 +219875,7 @@ async def cmd_film_series(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<code>/review_video job=&lt;JOB_ID&gt; send=1</code>",
         "API: <code>POST /api/operator/film-series</code>",
     ])
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
     if autorun:
         review_report = await send_operator_review_packets(
             context,
@@ -219937,7 +219924,7 @@ async def cmd_film_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<code>{html.escape(cmds.get('approve') or '')}</code>",
         f"<code>{html.escape(cmds.get('review_video') or '')}</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_film_rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -220139,7 +220126,7 @@ async def cmd_reference_pack(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "\nAPI worker: <code>GET /api/operator/reference-pack</code>\n"
         "Pattern: <code>/video_patterns</code>"
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_reference_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -220181,7 +220168,7 @@ async def cmd_reference_videos(update: Update, context: ContextTypes.DEFAULT_TYP
         "Import thư mục: <code>/reference_scan path=D:\\mybot\\video AI tham khảo</code>\n"
         "API worker: <code>GET /api/operator/reference-videos?limit=40</code>"
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_reference_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -220290,7 +220277,7 @@ async def cmd_viral_remix(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<pre>{html_pre(pack.get('worker_prompt') or '-', 1600)}</pre>",
         "API: <code>GET /api/operator/viral-remix?url=&lt;URL&gt;&amp;topic=&lt;TOPIC&gt;</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_reference_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -220334,7 +220321,7 @@ async def cmd_reference_scan(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "\nDùng tiếp: <code>/reference_videos</code> hoặc <code>/reference_pack</code>. "
         "Worker sẽ chỉ học format/hook/nhịp dựng, không copy nguyên video."
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 
 async def handle_creative_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -220512,7 +220499,7 @@ async def cmd_performance_report(update: Update, context: ContextTypes.DEFAULT_T
             f"   Views: <b>{int(views or 0):,}</b> | Clicks: <b>{int(clicks or 0):,}</b> | Revenue: <b>{float(revenue or 0):,.0f}đ</b> | Score: <b>{score}</b>"
         )
     lines.append("\nGợi ý tiếp: <code>/growth_loop</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw = " ".join(context.args).strip()
@@ -220532,7 +220519,7 @@ async def cmd_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Status: <b>{html.escape(status or '-')}</b> | Campaign: <code>{campaign_id or '-'}</code> | Affiliate: <code>{affiliate_id or '-'}</code>\n"
             f"Dùng: <code>/performance_add post_id={post_id} views=... clicks=... revenue=...</code>\n"
         )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_growth_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -220597,7 +220584,7 @@ async def cmd_growth_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Tổng revenue: <b>{money_vnd(totals['revenue'])}</b>\n"
             f"• Chi phí: <b>{cost} Xu</b>\n"
             + (f"{html.escape(member_discount_display_line(charge))}\n" if int((charge or {}).get("discount_xu") or 0) > 0 else "")
-            + "\n"
+            + "\\n"
         )
         if len(output_text) > 3200:
             await status_msg.edit_text(
@@ -220721,7 +220708,7 @@ async def cmd_growth_loop_manual(update: Update, context: ContextTypes.DEFAULT_T
             f"Lệnh gợi ý: <code>/film topic=\"{html.escape((item['topic'] or 'ý tưởng video')[:80])}\" platforms=facebook,tiktok,youtube</code>\n"
         )
     lines.append("\nMuốn phân tích sâu bằng AI: <code>/growth_ai</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_performance_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw = " ".join(context.args).strip()
@@ -220853,7 +220840,7 @@ async def cmd_publish_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not ok:
         return await update.message.reply_text(f"❌ Không ghi được publish_done: <code>{html.escape(reason)}</code>", parse_mode="HTML")
     events = info.get("recorded_events") or []
-    event_text = "\n".join(
+    event_text = "\\n".join(
         f"• {html.escape(e.get('type') or '-')}: value=<b>{int(e.get('value') or 0)}</b> amount=<b>{int(e.get('amount') or 0):,}đ</b>"
         for e in events
     ) or "• Chưa có metric mới."
@@ -220945,7 +220932,7 @@ async def cmd_distribution_pack(update: Update, context: ContextTypes.DEFAULT_TY
         "",
         f"API: <code>/api/operator/jobs/{job_id}/distribution-pack</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_comment_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -220984,7 +220971,7 @@ async def cmd_comment_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Tracking: <code>{html.escape(commands.get('tracking_report') or '')}</code>",
         f"API: <code>/api/operator/jobs/{job_id}/comment-pack?max_comments={max_comments}</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_pipeline_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -221039,7 +221026,7 @@ async def cmd_pipeline_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for cmd in (pack.get("telegram_sequence") or [])[:8]:
         lines.append(f"• <code>{html.escape(cmd)}</code>")
     lines.append("\nAPI: <code>GET /api/operator/pipeline-pack</code> hoặc <code>GET /api/operator/jobs/&lt;JOB_ID&gt;/pipeline-pack</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_queue_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -221112,7 +221099,7 @@ async def cmd_approve_publish(update: Update, context: ContextTypes.DEFAULT_TYPE
             lines = [f"⚠️ <b>Job #{job_id} chưa đủ điều kiện duyệt đăng</b>\n"]
             for item in missing[:8]:
                 lines.append(f"• <code>{html.escape(item['key'])}</code>: {html.escape(item['detail'])}\n  Next: <code>{html.escape(item['next'])}</code>")
-            return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+            return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
         return await update.message.reply_text(f"❌ Không duyệt được: <code>{html.escape(reason)}</code>", parse_mode="HTML")
     await update.message.reply_text(
         f"✅ <b>Đã duyệt publish job #{job_id}</b>\n"
@@ -221176,7 +221163,7 @@ async def cmd_approve_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"• job <code>#{item.get('job_id')}</code> | <code>{html.escape(item.get('reason') or '-')}</code>"
                 + (f" | Next: <code>{html.escape(item.get('next') or '')}</code>" if item.get("next") else "")
             )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
     if send_handoff:
         for item in approved[:3]:
             queue_id = safe_int(item.get("queue_id"), 0)
@@ -221247,7 +221234,7 @@ async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  file_id=<code>{html.escape(file_id or '-')}</code>\n"
             f"  note={html.escape(note or '-')}"
         )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_asset_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -221369,7 +221356,7 @@ async def cmd_manifest(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     lines.append("\nXem JSON đầy đủ: <code>/manifests %s</code>" % job_id)
     lines.append("Handoff tiếp: <code>/handoff job=%s tool=kling stage=visuals</code> hoặc <code>/handoff job=%s tool=capcut stage=edit</code>" % (job_id, job_id))
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_manifests(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -221401,7 +221388,7 @@ async def cmd_manifests(update: Update, context: ContextTypes.DEFAULT_TYPE):
             first = scenes[0]
             lines.append(f"  first_scene={html.escape(str(first.get('visual_prompt') or first.get('voice_line') or '-'))[:400]}")
     lines.append("\nTạo lại manifest: <code>/manifest job=%s duration=45</code>" % job_id)
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_manifest_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -221496,7 +221483,7 @@ async def cmd_task_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  {html.escape(title or '-')}"
         )
     lines.append("\nGiao việc: <code>/task_handoff id=&lt;TASK_ID&gt;</code> | Cập nhật: <code>/task_set id=&lt;TASK_ID&gt; status=ready url=https://...</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -221522,7 +221509,7 @@ async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  output={html.escape(output_url or '-')}"
         )
     lines.append("\nChi tiết/giao việc: <code>/task_handoff id=&lt;TASK_ID&gt;</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_next_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -221552,7 +221539,7 @@ async def cmd_next_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_task = full_task or get_production_task(update.effective_user.id, tid)
     prompt = full_task[7] if full_task else ""
     runbook = operator_task_execution_runbook(task_type, tool, prompt, row_job_id)
-    required_output = "\n".join("- " + str(x) for x in runbook.get("required_output", [])) or "-"
+    required_output = "\\n".join("- " + str(x) for x in runbook.get("required_output", [])) or "-"
     fallback_tools = ", ".join(str(x) for x in runbook.get("fallback_tools", [])) or "-"
     update_production_task(update.effective_user.id, tid, status="working", note=note or "next_task_selected")
     kb = InlineKeyboardMarkup([
@@ -221609,7 +221596,7 @@ async def cmd_worker_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  Claim: <code>{html.escape(item.get('claim_task_url') or '')}</code>"
         )
     lines.append("\nAPI peek: <code>GET /api/operator/worker-next?job_id=&lt;JOB_ID&gt;&amp;tool=fish</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_scene_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -221644,7 +221631,7 @@ async def cmd_scene_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  upload: <code>{html.escape((item.get('submit') or {}).get('upload_url') or '-')}</code>"
         )
     lines.append("\nNext: <code>/worker_intake job=%s claim=1</code> | <code>/compose_video job=%s voice=1</code>" % (pack.get("job_id"), pack.get("job_id")))
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_worker_autorun(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -221702,7 +221689,7 @@ async def cmd_worker_autorun(update: Update, context: ContextTypes.DEFAULT_TYPE)
             + "\nBot sẽ gửi video + caption/link affiliate ngay sau tin này."
         )
     lines.append("\nAPI: <code>POST /api/operator/worker-autorun</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
     if execute and send_review and reviewable_jobs:
         review_report = await send_operator_review_packets(
             context,
@@ -221766,7 +221753,7 @@ async def cmd_worker_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<code>/review_video job={pack.get('job_id')} send=1</code>",
         "API: <code>GET/POST /api/operator/worker-intake</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_task_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -221781,9 +221768,9 @@ async def cmd_task_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("❌ Không tìm thấy production task.")
     tid, job_id, manifest_id, task_type, tool, scene_no, title, prompt, status, output_url, note, updated_at = task
     runbook = operator_task_execution_runbook(task_type, tool, prompt, job_id)
-    required_output = "\n".join("- " + str(x) for x in runbook.get("required_output", [])) or "-"
+    required_output = "\\n".join("- " + str(x) for x in runbook.get("required_output", [])) or "-"
     fallback_tools = ", ".join(str(x) for x in runbook.get("fallback_tools", [])) or "-"
-    worker_steps = "\n".join(f"{idx}. {step}" for idx, step in enumerate(runbook.get("worker_steps", []), start=1)) or "-"
+    worker_steps = "\\n".join(f"{idx}. {step}" for idx, step in enumerate(runbook.get("worker_steps", []), start=1)) or "-"
     update_production_task(update.effective_user.id, task_id, status="working", note=note or "handoff_started")
     await update.message.reply_text(
         f"🤝 <b>TASK HANDOFF #{tid}</b>\n"
@@ -221814,7 +221801,7 @@ async def cmd_task_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     task = pack.get("task") or {}
     runbook = pack.get("runbook") or {}
-    required = "\n".join("- " + str(x) for x in (runbook.get("required_output") or [])[:5]) or "-"
+    required = "\\n".join("- " + str(x) for x in (runbook.get("required_output") or [])[:5]) or "-"
     lines = [
         "🧾 <b>TASK PROMPT PACK</b>",
         f"• Job: <code>#{pack.get('job_id')}</code> | Task: <code>#{pack.get('task_id')}</code>",
@@ -221830,7 +221817,7 @@ async def cmd_task_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Upload: <code>{html.escape((pack.get('contract') or {}).get('upload_url') or '')}</code>",
         f"• Check: <code>{html.escape((pack.get('contract') or {}).get('acceptance_url') or '')}</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_worker_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -221867,7 +221854,7 @@ async def cmd_worker_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Rule:</b> không copy video tham khảo, không publish trước review/approve, lỗi tool thì ghi tool event/fallback.",
         "API đầy đủ: <code>GET /api/operator/jobs/&lt;JOB_ID&gt;/worker-pack</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_video_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -221905,7 +221892,7 @@ async def cmd_video_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         f"API: <code>GET /api/operator/jobs/{brief.get('job_id')}/video-brief</code>",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_video_work_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -221971,7 +221958,7 @@ async def cmd_video_work_orders(update: Update, context: ContextTypes.DEFAULT_TY
         "<b>Luồng bắt buộc:</b>",
         "Worker tạo video thật → upload/complete → <code>/review_video job=&lt;JOB_ID&gt;</code> → <code>/approve_publish job=&lt;JOB_ID&gt;</code>.",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_output_acceptance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -222017,7 +222004,7 @@ async def cmd_output_acceptance(update: Update, context: ContextTypes.DEFAULT_TY
             task_label = f"task #{item.get('task_id')} | " if item.get("task_id") else ""
             lines.append(f"• {task_label}{html.escape(item.get('detail') or item.get('key') or '-')}\n  <code>{html.escape(item.get('next') or '-')}</code>")
     lines.append("\nAPI: <code>GET /api/operator/output-acceptance?job_id=&lt;JOB_ID&gt;</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_storyboard_crop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -222226,7 +222213,7 @@ async def cmd_job_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         lines.append("• Chưa có. Dùng /task_plan job=%s." % job_id)
     lines.append("\nLệnh tiếp theo: /creative_test, /manifest, /task_plan, /review_gate, /publish_pack, /queue_publish hoặc /performance_add tùy checklist.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_job_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -222326,7 +222313,7 @@ async def cmd_job_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb_rows.append([InlineKeyboardButton("✅ Mark ready", callback_data=f"pipe|status|ready|{job_id}")])
     kb_rows.append([InlineKeyboardButton("🛡 Review gate", callback_data=f"pipe|stage|review|{job_id}")])
     await update.message.reply_text(
-        "\n".join(lines),
+        "\\n".join(lines),
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb_rows)
     )
@@ -222352,7 +222339,7 @@ async def cmd_publish_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<code>/publisher_auto queue=&lt;QUEUE_ID&gt;</code> — chỉ Facebook Page api_ready\n"
         "<code>/publish_queue_set id=&lt;QUEUE_ID&gt; status=published url=https://...</code>"
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_publisher_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -222410,7 +222397,7 @@ async def cmd_publisher_handoff(update: Update, context: ContextTypes.DEFAULT_TY
     if handoff.get("can_auto_publish") and (handoff.get("platform") or "") in {"facebook", "fb", "meta", "reels"}:
         lines.append(f"\nKiểm tra auto: <code>/publisher_auto_check queue={queue_id}</code>")
         lines.append(f"Auto chính thức: <code>/publisher_auto queue={queue_id}</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_publisher_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -222444,7 +222431,7 @@ async def cmd_publisher_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if result.get("decision") == "api_ready" and (queue.get("platform") or "").lower() in {"facebook", "fb", "meta", "reels"}:
         lines.append(f"Kiểm tra auto: <code>/publisher_auto_check queue={queue.get('id')}</code>")
         lines.append(f"Auto chính thức: <code>/publisher_auto queue={queue.get('id')}</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_publisher_auto_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -222475,7 +222462,7 @@ async def cmd_publisher_auto_check(update: Update, context: ContextTypes.DEFAULT
         lines.append(f"\nCó thể đăng thật bằng: <code>/publisher_auto queue={queue_id}</code>")
     else:
         lines.append(f"\nChuyển manual: <code>/publisher_handoff queue={queue_id}</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_publisher_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -222573,7 +222560,7 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     else:
         lines.append("• Chưa có sự kiện.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_money_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -222634,7 +222621,7 @@ async def cmd_money_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "API: <code>GET /api/operator/money-pack?days=30&amp;platform=tiktok</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_cockpit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -222712,7 +222699,7 @@ async def cmd_affiliate_cockpit(update: Update, context: ContextTypes.DEFAULT_TY
         "",
         "API: <code>GET /api/operator/affiliate-cockpit?days=30&amp;platform=tiktok</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_revenue_destinations(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -222765,7 +222752,7 @@ async def cmd_revenue_destinations(update: Update, context: ContextTypes.DEFAULT
         "",
         "API: <code>GET /api/operator/revenue-destinations</code>",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_tracking_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -222819,7 +222806,7 @@ async def cmd_tracking_report(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         lines.append("• Chưa có job performance.")
     lines.append("\nAPI: <code>GET /api/operator/tracking-report?days=30</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_postback_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -222870,7 +222857,7 @@ async def cmd_postback_setup(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         lines.append("\n📭 Chưa tìm thấy affiliate phù hợp filter. Dùng /affiliate_seed hoặc /affiliate_import trước.")
     lines.append("\nAPI: <code>GET /api/operator/postback-setup</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_scale_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -222911,7 +222898,7 @@ async def cmd_scale_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Next: <code>{html.escape(item['command'])}</code>"
         )
     lines.append("\nAPI: <code>GET /api/operator/scale-plan?days=30</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_scale_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -222972,7 +222959,7 @@ async def cmd_scale_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"{html.escape(item.get('skip_reason') or item.get('reason') or '-')}"
             )
     lines.append("\nTiếp theo: <code>/operator_loop</code> hoặc <code>/tasks</code>")
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_growth_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw = " ".join(context.args).strip()
@@ -223033,7 +223020,7 @@ async def cmd_growth_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"  <code>{html.escape(item.get('telegram') or '-')}</code>"
             )
     lines.append("\nLặp tiếp: <code>/growth_loop execute=1</code> hoặc xem <code>/affiliate_decisions</code>")
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -223089,7 +223076,7 @@ async def cmd_affiliate_report(update: Update, context: ContextTypes.DEFAULT_TYP
         "<code>/operator_auto niche=... platform=tiktok channel=all aff=&lt;ID&gt; campaign=&lt;ID&gt; limit=5</code>\n"
         "<code>/performance_add job=&lt;JOB_ID&gt; type=click|order|revenue value=1 amount=...</code>"
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_decisions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -223145,7 +223132,7 @@ async def cmd_affiliate_decisions(update: Update, context: ContextTypes.DEFAULT_
         "<code>/performance_add job=&lt;JOB_ID&gt; type=click value=20</code>\n"
         "<code>/performance_add job=&lt;JOB_ID&gt; type=revenue value=1 amount=150000</code>"
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_director(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -223197,7 +223184,7 @@ async def cmd_operator_director(update: Update, context: ContextTypes.DEFAULT_TY
         "\nAPI cho Claude/n8n: "
         "<code>GET /api/operator/director?days=30&amp;platform=tiktok</code>"
     )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -223241,7 +223228,7 @@ async def cmd_operator_execute(update: Update, context: ContextTypes.DEFAULT_TYP
     if result.get("next"):
         lines.append(f"\n<b>Next:</b>\n<pre>{html_pre(json.dumps(result.get('next'), ensure_ascii=False), 900)}</pre>")
     lines.append("\nXem tiếp: <code>/operator_director</code> | <code>/operator_loop</code> | <code>/publish_queue</code>")
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_scale(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -223376,7 +223363,7 @@ async def cmd_affiliate_scale(update: Update, context: ContextTypes.DEFAULT_TYPE
             duration,
         )
     )
-    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_growth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -223447,7 +223434,7 @@ async def cmd_growth(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"• <code>{html.escape(cmd)}</code>")
 
     if (gemini_client or openai_client) and job_rows:
-        compact = "\n".join(
+        compact = "\\n".join(
             f"job {row[0]} | {row[2]} | {row[3]} | views={row[5]} clicks={row[6]} conv={row[7]} rev={row[8]} | {row[1]}"
             for row in job_rows[:8]
         )
@@ -223459,7 +223446,7 @@ async def cmd_growth(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         lines.append(f"\n<b>AI nhận định:</b>\n<pre>{html_pre(advice, 1200)}</pre>")
 
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -223516,7 +223503,7 @@ async def cmd_operator_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         lines.append("• Không có job nghẽn rõ ràng.")
     lines.append("\nLệnh liên quan: <code>/operator_dashboard</code> | <code>/publish_queue</code> | <code>/growth</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_publish_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -223721,7 +223708,7 @@ async def cmd_trend_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }))
         buttons.append([InlineKeyboardButton(f"🎬 Tạo video trend #{trend_id} ({scores['trend_score']})", callback_data=f"trend|video|{trend_id}")])
     lines.append("\nChọn nút bên dưới để đưa trend vào pipeline affiliate.")
-    await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+    await msg.edit_text("\\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
     if suggestion_lines:
         await reply_html_lines(update, ["🧭 <b>GỢI Ý TREND → IMAGE → VIDEO</b>", *suggestion_lines], limit=3600)
 
@@ -223746,7 +223733,7 @@ async def cmd_trend_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  {created_at or '-'}"
         )
     lines.append("\nTạo video: bấm nút trong /trend_search hoặc tìm lại kèm channel/aff.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def handle_trend_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -223877,7 +223864,7 @@ async def handle_video_job_callback(update: Update, context: ContextTypes.DEFAUL
     if action == "stats":
         total_campaigns, job_counts, recent_jobs = campaign_stats(query.from_user.id)
         lines = [f"📊 Campaign: {total_campaigns}", "Jobs: " + (", ".join(f"{k}={v}" for k, v in job_counts.items()) or "0")]
-        return await query.edit_message_text("\n".join(lines))
+        return await query.edit_message_text("\\n".join(lines))
     try:
         job_id = int(job_id_raw)
     except ValueError:
@@ -223940,10 +223927,10 @@ async def cmd_ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🎯 {html.escape(copy['current_reward'])}: <b>{html.escape(current_referral_reward)}</b>\n\n"
             f"<b>{html.escape(copy['max_ref_reward'])}</b>\n"
             f"• {html.escape(copy['newbie_no_reward'])}\n"
-            + "\n".join(
+            + "\\n".join(
                 f"• {tier.title()}: {html.escape(copy['ref_reward_formula'].format(percent=MEMBER_REFERRAL_POLICY.get(tier, {}).get('percent', 0), cap=MEMBER_REFERRAL_POLICY.get(tier, {}).get('cap', 0)))}"
                 for tier in ("silver", "gold", "platinum", "diamond", "vip")
-            ) + "\n\n"
+            ) + "\\n\\n"
             f"<b>{html.escape(copy['conditions'])}</b>\n"
             f"• {html.escape(copy['ref_no_abuse'])}\n• {html.escape(copy['ref_credit_policy'])}\n• {html.escape(copy['ref_admin_lock'])}\n\n"
             f"📊 <b>{html.escape(copy['quick_stats'])}</b>\n"
@@ -224033,7 +224020,7 @@ async def cmd_ref_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 masked = safe_referred[:4] + "..." + safe_referred[-3:] if len(safe_referred) > 7 else safe_referred
                 localized_status = referral_status_labels.get(str(status), copy["status"])
                 lines.append(f"• <code>{html.escape(masked)}</code> | {html.escape(localized_status)} | +{int(reward_xu or 0)} Xu | {html.escape(str(created_at or '-')[:16])}")
-        return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        return await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
     lines = [
         "📊 <b>THỐNG KÊ GIỚI THIỆU</b>",
         "",
@@ -224049,7 +224036,7 @@ async def cmd_ref_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             safe_referred = str(referred_id or "")
             masked = safe_referred[:4] + "..." + safe_referred[-3:] if len(safe_referred) > 7 else safe_referred
             lines.append(f"• <code>{html.escape(masked)}</code> | {html.escape(str(status))} | +{int(reward_xu or 0)} Xu | {html.escape(str(created_at or '-')[:16])}")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -224097,12 +224084,12 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         if admin_badge:
             lines.append(f"🔐 {html.escape(admin_badge)}")
-        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
         return
     next_line = "Bạn đang ở cấp cao nhất." if not profile["next_tier"] else (
         f"Cấp tiếp theo: <b>{html.escape(get_member_badge(profile['next_tier']))}</b> — còn cần <b>{vnd_text(profile['amount_to_next'])}</b>."
     )
-    benefits = "\n".join(f"• {html.escape(item)}" for item in get_member_benefits(profile["tier"]))
+    benefits = "\\n".join(f"• {html.escape(item)}" for item in get_member_benefits(profile["tier"]))
     admin_note = ""
     if admin_badge:
         admin_note = (
@@ -224116,7 +224103,7 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     promos = get_member_personal_promos(uid, include_used=False) if show_domestic_promotion else []
     promo_line = (
-        "\n".join(
+        "\\n".join(
             f"• <code>{html.escape(p['promo_code'])}</code> — +{p['bonus_percent']}% Xu, tối đa {p['cap_xu']} Xu"
             for p in promos[:5]
         )
@@ -224224,7 +224211,7 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
     if normalize_user_language(lang) != "vi":
-        return await update.message.reply_text("\n".join(member_policy_lines(lang)), parse_mode="HTML")
+        return await update.message.reply_text("\\n".join(member_policy_lines(lang)), parse_mode="HTML")
     lines = [
         "🪪 <b>CHÍNH SÁCH THÀNH VIÊN TOAN AAS</b>",
         "",
@@ -224302,14 +224289,14 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• TOAN AAS có quyền từ chối thưởng nếu phát hiện spam/tài khoản ảo/gian lận.",
         "• Chat Pro tính theo usage thực tế; Owner/Admin miễn phí.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_my_promos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     lang = get_user_language(uid) or "vi"
     if not show_domestic_topup_promotion(uid, lang):
         return await update.message.reply_text(
-            "\n".join(billing_promo_apply_lines(lang, uid)),
+            "\\n".join(billing_promo_apply_lines(lang, uid)),
             parse_mode="HTML",
         )
     promos = get_member_personal_promos(uid, include_used=True)
@@ -224335,7 +224322,7 @@ async def cmd_my_promos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Dùng mã: <code>/promo MÃ_CỦA_BẠN</code> rồi <code>/naptien</code>.",
         "Mã cá nhân chỉ dùng cho đúng tài khoản của bạn, không chuyển nhượng.",
     ])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_birthday(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await maybe_auto_grant_birthday_gift(update, context)
@@ -224653,7 +224640,7 @@ async def cmd_birthday_pending(update: Update, context: ContextTypes.DEFAULT_TYP
     remaining = max(0, int(total or 0) - len(requests))
     if remaining:
         lines.extend(["", f"Còn <b>{remaining}</b> request khác."])
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_birthday_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -224905,7 +224892,7 @@ async def cmd_set_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         conn.close()
     badge = get_member_badge(tier)
-    benefits = "\n".join(f"• {html.escape(item)}" for item in get_member_benefits(tier))
+    benefits = "\\n".join(f"• {html.escape(item)}" for item in get_member_benefits(tier))
     unlocked = ""
     if tier in {"platinum", "diamond", "vip"}:
         tier_discount = int(MEMBER_TOOL_DISCOUNT_POLICY.get(tier, 0) or 0)
@@ -225094,7 +225081,7 @@ async def cmd_admin_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Nội dung: {safe_content}\n"
             f"• Context: <code>{safe_context or '-'}</code>"
         )
-    await update.message.reply_text("\n\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n\\n".join(lines), parse_mode="HTML")
 
 async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -225504,7 +225491,7 @@ def billing_bridge_status_lines() -> list[str]:
 async def cmd_billing_bridge_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
-    await update.message.reply_text("\n".join(billing_bridge_status_lines()), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(billing_bridge_status_lines()), parse_mode="HTML")
 
 async def cmd_billing_bridge_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -225886,7 +225873,7 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
         "",
         f"Note: <code>{html.escape(PAYOS_OFFICIAL_CREATE_SIGNATURE_NOTE)}</code>",
     ])
-    await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines)[:3900], parse_mode="HTML")
 
 async def cmd_payos_env_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -225918,7 +225905,7 @@ async def cmd_payos_env_check(update: Update, context: ContextTypes.DEFAULT_TYPE
         "",
         "Không hiển thị key/token/checksum trong log hoặc Telegram.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_payos_key_fingerprint(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -225952,7 +225939,7 @@ async def cmd_payos_key_fingerprint(update: Update, context: ContextTypes.DEFAUL
         "",
         "Không hiển thị full key/token/checksum.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_payos_signature_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -225993,7 +225980,7 @@ async def cmd_payos_signature_debug(update: Update, context: ContextTypes.DEFAUL
         "",
         "Lệnh này không gọi PayOS và không tạo đơn thanh toán.",
     ]
-    await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines)[:3900], parse_mode="HTML")
 
 async def cmd_payos_official_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -226071,7 +226058,7 @@ async def cmd_payos_official_debug(update: Update, context: ContextTypes.DEFAULT
             "Dùng thêm: <code>/payos_key_fingerprint</code>.",
         ])
     lines.append("Lệnh này không tạo đơn thanh toán.")
-    await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines)[:3900], parse_mode="HTML")
 
 async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -226162,7 +226149,7 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  ➔ <code>/duyet {r[0]} {r[6] or '&lt;Xu&gt;'}</code>\n"
             f"  ➔ <code>/tuchoi {r[0]}</code>"
         )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def handle_manual_approval_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.effective_user or not is_admin_user(update.effective_user.id):
@@ -226447,7 +226434,7 @@ def finance_brief_report_text(payload: dict, title: str) -> str:
         f"• Lãi/lỗ vận hành: <b>{finance_money_or_no_data(payload, 'profit_operating')}</b>",
         f"• Lãi/lỗ quản trị: <b>{finance_money_or_no_data(payload, 'profit_management')}</b>",
     ]
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def admin_pending_bill_count() -> int:
     conn = db_connect()
@@ -226681,7 +226668,7 @@ def finance_tax_dashboard_text(raw: str = "", default_period: str = "month") -> 
         f"• {html.escape(str(kind or 'topup'))}: trước VAT <b>{vnd_text(subtotal)}</b> | VAT <b>{vnd_text(vat)}</b> ({int(count or 0)} đơn)"
         for kind, count, subtotal, vat, _total in payload["by_type"][:6]
     ] or ["• Chưa có dữ liệu"]
-    return "\n".join([
+    return "\\n".join([
         "🧾 <b>Thuế / VAT / TNDN</b>",
         f"• Kỳ: <code>{html.escape(label)}</code>",
         "",
@@ -226737,7 +226724,7 @@ def finance_tax_dashboard_text_for_bounds(start_at: str, end_at: str, label: str
         f"• {html.escape(str(kind or 'topup'))}: trước VAT <b>{vnd_text(subtotal)}</b> | VAT <b>{vnd_text(vat)}</b> ({int(count or 0)} đơn)"
         for kind, count, subtotal, vat, _total in payload["by_type"][:6]
     ] or ["• Chưa có dữ liệu"]
-    return "\n".join([
+    return "\\n".join([
         "🧾 <b>Thuế / VAT / TNDN</b>",
         f"• Kỳ: <code>{html.escape(label)}</code>",
         "",
@@ -226784,7 +226771,7 @@ def finance_tax_dashboard_text_for_bounds(start_at: str, end_at: str, label: str
 
 def finance_tax_settings_text() -> str:
     config = finance_tax_config()
-    return "\n".join([
+    return "\\n".join([
         "🧾 <b>Cấu hình thuế</b>",
         "",
         "<b>GTGT / VAT</b>",
@@ -226809,7 +226796,7 @@ def finance_tax_settings_text() -> str:
 
 def finance_policy_status_text() -> str:
     config = finance_tax_config()
-    return "\n".join([
+    return "\\n".join([
         "📌 <b>Chính sách tài chính canonical</b>",
         "",
         "<b>B2C / khách lẻ</b>",
@@ -226865,7 +226852,7 @@ def finance_tax_scenario_report_text(gross_vnd: int = 100_000) -> str:
     payload = finance_tax_scenario_report_payload(gross_vnd)
     cit_percent = f"{payload['cit_rate_scenario'] * 100:g}%"
     cit_suffix = "" if payload.get("cit_scenario_enabled") else " (đang tắt dự phòng)"
-    return "\n".join([
+    return "\\n".join([
         "🧮 <b>Kịch bản thuế nội bộ B2C</b>",
         "",
         f"• Khách lẻ trả: <b>{vnd_text(payload['gross_cash_received'])}</b>",
@@ -226927,10 +226914,10 @@ def provider_cost_tax_status_text() -> str:
             "",
         ])
     lines.append("Ưu tiên bù hao hụt bằng pricing Voice/SubDub + kiểm soát COGS/API, không đè VAT vào video hoặc nạp Xu B2C.")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def pricing_voice_subdub_status_text() -> str:
-    return "\n".join([
+    return "\\n".join([
         "🎙 <b>Voice/SubDub pricing status</b>",
         "",
         f"• Voice TTS: <b>{VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU:g} Xu / từ</b>.",
@@ -226953,7 +226940,7 @@ def finance_menu_audit_text() -> str:
     except Exception:
         finance_callbacks = set()
     missing = sorted(cb for cb in finance_callbacks if cb not in ADMIN_MENU_PAGE_HANDLERS and cb not in {"admin", "main", "admin_package_orders", "admin_gift_codes", "tax_checklist"})
-    return "\n".join([
+    return "\\n".join([
         "🧭 <b>Finance menu audit</b>",
         "",
         "• admin_finance_entry_handler: <code>menu|admin_finance -> finance_menu_text</code>",
@@ -226968,7 +226955,7 @@ def finance_menu_audit_text() -> str:
 
 def finance_vat_rate_help_text() -> str:
     config = finance_tax_config()
-    return "\n".join([
+    return "\\n".join([
         "✏️ <b>Đổi % GTGT</b>",
         "",
         f"GTGT hiện tại: <b>{float(config.get('vat_rate') or 0) * 100:.2f}%</b>",
@@ -226982,7 +226969,7 @@ def finance_vat_rate_help_text() -> str:
 
 def finance_cit_rate_help_text() -> str:
     config = finance_tax_config()
-    return "\n".join([
+    return "\\n".join([
         "✏️ <b>Đổi % TNDN</b>",
         "",
         f"TNDN hiện tại: <b>{float(config.get('cit_rate') or 0) * 100:.2f}%</b>",
@@ -227044,7 +227031,7 @@ def finance_adjustment_help_text(kind: str) -> str:
         "vat": "🧾 Điều chỉnh VAT",
         "cit": "🏢 Điều chỉnh TNDN",
     }.get(kind, "🧮 Điều chỉnh")
-    return "\n".join([
+    return "\\n".join([
         f"{title}",
         "",
         "Không sửa giao dịch gốc. Sai thì tạo bút toán điều chỉnh có lý do.",
@@ -227063,7 +227050,7 @@ def finance_adjustment_help_text(kind: str) -> str:
     ])
 
 def finance_adjust_allowed_types_text() -> str:
-    return "\n".join(f"• <code>{html.escape(kind)}</code>" for kind in FINANCE_ADJUST_TAX_COMMAND_TYPES)
+    return "\\n".join(f"• <code>{html.escape(kind)}</code>" for kind in FINANCE_ADJUST_TAX_COMMAND_TYPES)
 
 def finance_adjust_command_help_text(prefix: str = "") -> str:
     lines = [
@@ -227092,8 +227079,8 @@ def finance_adjust_command_help_text(prefix: str = "") -> str:
     ]
     clean_prefix = str(prefix or "").strip()
     if clean_prefix:
-        return clean_prefix + "\n\n" + "\n".join(lines)
-    return "\n".join(lines)
+        return clean_prefix + "\\n\\n" + "\\n".join(lines)
+    return "\\n".join(lines)
 
 def finance_adjust_validation_text(message: str, *, show_help: bool = False, allowed_types: bool = True) -> str:
     lines = [f"⚠️ {html.escape(str(message or '').strip() or 'Cú pháp chưa hợp lệ.')}"]
@@ -227101,7 +227088,7 @@ def finance_adjust_validation_text(message: str, *, show_help: bool = False, all
         lines.extend(["", "Loại bút toán được hỗ trợ:", finance_adjust_allowed_types_text()])
     if show_help:
         lines.extend(["", finance_adjust_command_help_text()])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def parse_finance_adjust_amount(raw) -> int | None:
     text = str(raw or "").strip().lower()
@@ -227120,7 +227107,7 @@ def finance_adjust_token_looks_amount(raw) -> bool:
 def finance_profit_dashboard_text(raw: str = "", default_period: str = "month") -> str:
     start_at, end_at, label, _kind = finance_period_bounds(raw, default_period)
     payload = finance_business_report_payload(start_at, end_at, label)
-    return "\n".join([
+    return "\\n".join([
         "📈 <b>Lợi nhuận nội bộ</b>",
         f"• Kỳ: <code>{html.escape(label)}</code>",
         f"• Doanh thu trước thuế: <b>{vnd_text(payload['revenue_before_tax'])}</b>",
@@ -227136,7 +227123,7 @@ def finance_profit_dashboard_text(raw: str = "", default_period: str = "month") 
 def finance_capital_breakeven_text() -> str:
     month_start, month_end, month_label, _kind = finance_period_bounds("", "month")
     month = finance_business_report_payload(month_start, month_end, month_label)
-    return "\n".join([
+    return "\\n".join([
         "🏦 <b>Vốn & Hòa vốn</b>",
         f"• Vốn ròng đã ghi nhận: <b>{vnd_text(month['capital_total'])}</b>",
         f"• Chi phí tháng này: <b>{vnd_text(month['monthly_burn'])}</b>",
@@ -227180,7 +227167,7 @@ def finance_adjustments_text(limit: int = 8) -> str:
             lines.append(
                 f"• #{int(adj_id)} <code>{html.escape(str(kind))}</code> <b>{vnd_text(amount)}</b>{order_part} — {html.escape(str(reason or '')[:100])} — {html.escape(str(created_at or '')[:16])}"
             )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def finance_anomaly_text(limit: int = 10) -> str:
     conn = db_connect()
@@ -227209,10 +227196,10 @@ def finance_anomaly_text(limit: int = 10) -> str:
                 f"<code>{html.escape(str(kind))}</code> expected <b>{vnd_text(expected)}</b> actual <b>{vnd_text(actual)}</b> — "
                 f"{html.escape(str(reason or '')[:120])} — {html.escape(str(created_at or '')[:16])}"
             )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def finance_admin_guide_text() -> str:
-    return "\n".join([
+    return "\\n".join([
         "📘 <b>Hướng dẫn Admin Tài chính</b>",
         "",
         "1. Doanh thu tiền thật vào <b>finance_invoices</b> với snapshot giá, VAT public nếu có và tổng thanh toán.",
@@ -227240,7 +227227,7 @@ def finance_admin_guide_text() -> str:
 def finance_expense_categories_text() -> str:
     return (
         "🏷 <b>Category chi phí</b>\n\n"
-        + "\n".join(f"• <code>{html.escape(category)}</code>" for category in sorted(FINANCE_EXPENSE_CATEGORIES))
+        + "\\n".join(f"• <code>{html.escape(category)}</code>" for category in sorted(FINANCE_EXPENSE_CATEGORIES))
     )
 
 def finance_revenue_period_text(raw: str, title: str, default_period: str = "month") -> str:
@@ -227253,7 +227240,7 @@ def finance_expense_period_text(raw: str, title: str, default_period: str = "mon
         f"• {html.escape(str(category or 'other'))}: <b>{vnd_text(amount)}</b> ({int(count or 0)} khoản)"
         for category, count, amount in rows[:10]
     ] or ["• Chưa có dữ liệu"]
-    return "\n".join([
+    return "\\n".join([
         finance_brief_report_text(payload, title),
         "",
         "<b>Theo category</b>",
@@ -227310,7 +227297,7 @@ def tax_export_menu_text() -> str:
     )
 
 def tax_checklist_text() -> str:
-    return "\n".join([
+    return "\\n".join([
         "📚 <b>Hồ sơ/chứng từ nên chuẩn bị</b>",
         "",
         "1. Sao kê PayOS / ngân hàng.",
@@ -227464,7 +227451,7 @@ def freeze_queue_status_text() -> str:
     frame = frame_video_status_payload()
     worker = local_worker_status_payload()
     admin_canary_lines = remote_worker_admin_canary_queue_lines()
-    return "\n".join([
+    return "\\n".join([
         "📊 <b>Queue Status</b>",
         "",
         "Đọc nhanh hàng đợi để biết job đang chờ, đang chạy, đã xong hoặc lỗi. Trang này chỉ đọc dữ liệu, không gọi provider và không trừ Xu.",
@@ -227507,7 +227494,7 @@ def freeze_status_menu_text() -> str:
     shopaikey = provider_freeze_display("shopaikey")
     video = provider_freeze_display("shopaikey_video")
     system_mode = current_system_mode()
-    return "\n".join([
+    return "\\n".join([
         "🧊 <b>Freeze Status</b>",
         "",
         "Trang này cho biết hệ thống đang khóa ở phạm vi nào. Chỉ mở lại sau khi smoke test hoặc provider check đã ổn.",
@@ -227815,7 +227802,7 @@ def admin_provider_status_text() -> str:
     shopaikey = provider_freeze_display("shopaikey")
     video = provider_freeze_display("shopaikey_video")
     usage = shopaikey_last_usage_snapshot()
-    return "\n".join([
+    return "\\n".join([
         "📊 <b>Provider Status</b>",
         "",
         "Dùng <code>/providers</code> để xem đầy đủ provider/payment/worker/pricing/freeze status.",
@@ -228015,7 +228002,7 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
         lines.append("\n💡 <b>Lệnh nhanh:</b> <code>/affiliate_import</code> (Nhập file/text hàng loạt)")
         return await safe_edit_or_send(
             query,
-            "\n".join(lines),
+            "\\n".join(lines),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("➕ Thêm link mới", callback_data="admin_growth|aff_add"), InlineKeyboardButton("📥 Nhập hàng loạt", callback_data="admin_growth|aff_import")],
@@ -228065,7 +228052,7 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
         lines.append("\n💡 Gõ: <code>/growth_ai topic=\'review công nghệ\'</code> để AI chạy tự động.")
         return await safe_edit_or_send(
             query,
-            "\n".join(lines),
+            "\\n".join(lines),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔗 Kho Link", callback_data="admin_growth|affiliates"), InlineKeyboardButton("📦 Gói đăng bài", callback_data="admin_growth|packages")],
@@ -228090,7 +228077,7 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
             lines.append("<i>Chưa có slot đăng bài trong lịch.</i>\nThêm lịch bằng lệnh:\n<code>/addcal date=tomorrow platform=tiktok topic=\'Review sản phẩm A\' aff=1</code>")
         return await safe_edit_or_send(
             query,
-            "\n".join(lines),
+            "\\n".join(lines),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📌 Quản lý Campaign", callback_data="admin_growth|campaigns")],
@@ -228108,7 +228095,7 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
             lines.append("<i>Chưa có chiến dịch nào. Tạo bằng:</i>\n<code>/campaign name=\'Tech Deals\' niche=\'công nghệ\' platforms=facebook,tiktok,youtube</code>")
         return await safe_edit_or_send(
             query,
-            "\n".join(lines),
+            "\\n".join(lines),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🗓️ Xem lịch đăng", callback_data="admin_growth|calendar")],
@@ -228138,7 +228125,7 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
             lines.append("<i>Chưa có dữ liệu winner. Dùng /affiliate_report để xem chi tiết.</i>")
         return await safe_edit_or_send(
             query,
-            "\n".join(lines),
+            "\\n".join(lines),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔄 Làm mới", callback_data="admin_growth|cockpit")],
@@ -228163,7 +228150,7 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
         lines.append("\n🔒 <i>Lưu ý: Mọi tác vụ xuất bản thật luôn yêu cầu xác nhận phê duyệt từ Owner. Token và Secret không bao giờ hiển thị trên màn hình.</i>")
         return await safe_edit_or_send(
             query,
-            "\n".join(lines),
+            "\\n".join(lines),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📦 Gói đăng bài", callback_data="admin_growth|packages")],
@@ -228186,7 +228173,7 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
         lines.append("\n🔒 Chế độ mặc định: <b>Xem trước & Xuất file thủ công</b> (An toàn tuyệt đối).")
         return await safe_edit_or_send(
             query,
-            "\n".join(lines),
+            "\\n".join(lines),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🧠 Tạo nội dung mới", callback_data="admin_growth|ideas")],
@@ -228482,13 +228469,13 @@ ADMIN_CONTROL_MODULES = {
 }
 
 def admin_module_command_lines(commands: list[tuple[str, str]]) -> str:
-    return "\n".join(
+    return "\\n".join(
         f"• <code>{safe_html(command)}</code> — {safe_html(description)}"
         for command, description in commands
     )
 
 def admin_module_bullet_lines(items: list[str]) -> str:
-    return "\n".join(f"• {safe_html(item)}" for item in items)
+    return "\\n".join(f"• {safe_html(item)}" for item in items)
 
 def admin_module_quick_labels(module: dict) -> list[str]:
     labels = []
@@ -228852,7 +228839,7 @@ def admin_provider_compact_table_lines(rows: list[tuple[str, str, str, str, str]
     return lines
 
 def admin_provider_menu_text_v2() -> str:
-    return "\n".join([
+    return "\\n".join([
         "🤖 <b>Provider Management</b>",
         "",
         "<b>Mục đích:</b>",
@@ -228894,7 +228881,7 @@ def admin_provider_key4u_action_keyboard() -> InlineKeyboardMarkup:
     ])
 
 def admin_provider_status_text_v2() -> str:
-    return "\n".join([
+    return "\\n".join([
         "📊 <b>Provider Status</b>",
         "",
         "Màn này chỉ đọc trạng thái tổng quan, không gọi provider mới.",
@@ -228945,11 +228932,11 @@ def admin_provider_usage_text_v2() -> str:
         "",
         "Không hiển thị khóa bí mật.",
     ]
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def admin_provider_key4u_manual_text() -> str:
     snapshot = key4u_usage_alert_snapshot()
-    return "\n".join([
+    return "\\n".join([
         "✍️ <b>Cập nhật số dư Key4U</b>",
         "",
         "Dùng lệnh admin:",
@@ -228964,7 +228951,7 @@ def admin_provider_key4u_manual_text() -> str:
 
 def admin_provider_key4u_freeze_low_text() -> str:
     snapshot = key4u_usage_alert_snapshot()
-    return "\n".join([
+    return "\\n".join([
         "🧊 <b>Freeze Key4U nếu thấp</b>",
         "",
         f"Alert level: <code>{html.escape(str(snapshot.get('alert_level') or 'UNKNOWN_BALANCE'))}</code>",
@@ -228980,7 +228967,7 @@ def admin_provider_key4u_freeze_low_text() -> str:
     ])
 
 def admin_provider_routes_text() -> str:
-    return "\n".join([
+    return "\\n".join([
         "🧾 <b>Route/Group Info</b>",
         "",
         "• ShopAIKey: cheap, gemini, claude_code, veo_3, veo_1, veo_2 nếu đã cấu hình.",
@@ -229057,7 +229044,7 @@ ADMIN_MENU_PAGE_HANDLERS = {
     "admin_provider_status": lambda: (admin_provider_status_text_v2(), admin_provider_child_keyboard("admin_provider_status")),
     "admin_provider_test": lambda: (admin_provider_test_text_v2(), admin_provider_child_keyboard("admin_provider_test")),
     "admin_provider_usage": lambda: (admin_provider_usage_text_v2(), admin_provider_child_keyboard("admin_provider_usage")),
-    "admin_provider_key4u_alert": lambda: ("\n".join(key4u_usage_alert_lines()), admin_provider_key4u_action_keyboard()),
+    "admin_provider_key4u_alert": lambda: ("\\n".join(key4u_usage_alert_lines()), admin_provider_key4u_action_keyboard()),
     "admin_provider_key4u_manual": lambda: (admin_provider_key4u_manual_text(), admin_provider_key4u_action_keyboard()),
     "admin_provider_key4u_freeze_low": lambda: (admin_provider_key4u_freeze_low_text(), admin_provider_key4u_action_keyboard()),
     "admin_provider_routes": lambda: (admin_provider_routes_text(), admin_provider_child_keyboard("admin_provider_routes")),
@@ -229343,7 +229330,7 @@ async def cmd_finance_dashboard(update: Update, context: ContextTypes.DEFAULT_TY
         "",
         "Báo cáo này phục vụ quản trị nội bộ. Số liệu thuế chính thức cần đối chiếu hóa đơn/chứng từ và quy định thuế.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=finance_admin_keyboard())
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML", reply_markup=finance_admin_keyboard())
 
 async def cmd_revenue_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -229378,7 +229365,7 @@ async def cmd_expense_report(update: Update, context: ContextTypes.DEFAULT_TYPE)
         lines.append("• Chưa có chi phí trong kỳ.")
     for category, count, amount in rows[:12]:
         lines.append(f"• {html.escape(str(category or 'other'))}: <b>{vnd_text(amount)}</b> ({int(count or 0)} khoản)")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_profit_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -229408,8 +229395,8 @@ async def cmd_profit_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Doanh thu năm: <b>{vnd_text(payload.get('revenue_success'))}</b>",
             f"• Lãi/lỗ năm: <b>{vnd_text(payload.get('profit_management'))}</b>",
         ])
-    lines.append("\n" + TAX_PREP_DISCLAIMER)
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    lines.append("\\n" + TAX_PREP_DISCLAIMER)
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_expense_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -229761,7 +229748,7 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for user_id, delta, balance_after, event_type, created_at in recent_credit:
         lines.append(f"• {created_at} | {user_id} | {delta:+} Xu | còn {balance_after} | {event_type}")
 
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 async def cmd_setvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -229931,7 +229918,7 @@ def internal_archive_department_text(department: str) -> str:
         department,
         "Dùng để lưu tài liệu nội bộ theo nhóm nghiệp vụ.",
     )
-    type_lines = "\n".join(
+    type_lines = "\\n".join(
         f"{index}. {html.escape(document_type_label(value))}"
         for index, value in enumerate(types[:7], 1)
     ) or "1. Hồ sơ nội bộ"
@@ -230001,7 +229988,7 @@ def internal_archive_type_text(department: str) -> str:
 def internal_archive_help_text(department: str) -> str:
     label = INTERNAL_DOC_DEPARTMENTS.get(department, department or "Hồ sơ nội bộ")
     payload = INTERNAL_DOC_DEPARTMENT_HELP.get(department) or {}
-    examples = "\n".join(f"• <code>{html.escape(value)}</code>" for value in payload.get("examples", ())) or "• Đặt tên ngắn gọn, có ngày."
+    examples = "\\n".join(f"• <code>{html.escape(value)}</code>" for value in payload.get("examples", ())) or "• Đặt tên ngắn gọn, có ngày."
     return (
         f"ℹ️ <b>Hướng dẫn lưu — {html.escape(label)}</b>\n\n"
         f"<b>Mẫu tên:</b> <code>{html.escape(str(payload.get('name') or 'NHOM_NoiDung_YYYYMMDD'))}</code>\n\n"
@@ -230039,7 +230026,7 @@ def internal_archive_recent_text(rows: list[dict], department: str) -> str:
             f"{index}. <b>{html.escape(str(item.get('title') or item.get('file_name') or 'Hồ sơ'))}</b>\n"
             f"   {html.escape(document_type_label(item.get('document_type')))} · {html.escape(str(item.get('created_at') or '-'))}"
         )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def internal_archive_results_keyboard(rows: list[dict], department: str = "", search: bool = False) -> InlineKeyboardMarkup:
     buttons = [(f"{index}️⃣ Xem {index}", f"archive|view|{item['id']}") for index, item in enumerate(rows[:5], 1)]
@@ -230110,7 +230097,7 @@ def internal_archive_preview_text(state: dict) -> str:
     confidentiality_labels = {
         "internal": "Nội bộ", "confidential": "Bảo mật", "restricted": "Hạn chế",
     }
-    return "\n".join([
+    return "\\n".join([
         "✅ <b>Đã nhận hồ sơ</b>",
         "",
         f"<b>Tên file:</b> {html.escape(str(info.get('file_name') or 'file'))}",
@@ -230230,13 +230217,13 @@ def internal_archive_search_results_text(rows: list[dict], keyword: str, departm
             f"   {html.escape(INTERNAL_DOC_DEPARTMENTS.get(item.get('department'), str(item.get('department') or '-')))} · "
             f"{html.escape(document_type_label(item.get('document_type')))} · {html.escape(str(item.get('created_at') or '-'))}"
         )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def internal_archive_search_keyboard(rows: list[dict]) -> InlineKeyboardMarkup:
     return internal_archive_results_keyboard(rows, search=True)
 
 def internal_archive_document_text(item: dict) -> str:
-    return "\n".join([
+    return "\\n".join([
         f"🏢 <b>Hồ sơ #{int(item.get('id') or 0)}</b>",
         "",
         f"• Tên: <b>{html.escape(str(item.get('title') or '-'))}</b>",
@@ -231784,7 +231771,7 @@ def translation_voice_gate_status_text(lang: str = "vi") -> str:
         "",
         "Không gọi provider, không xử lý file, không trừ Xu." if is_vi else "No provider call, no file processing, no Xu charge.",
     ]
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def video_dubbing_menu_keyboard(lang: str = "vi", origin: str = "video") -> InlineKeyboardMarkup:
     copy = public_subdub_deep_copy(normalize_user_language(lang))
@@ -232807,7 +232794,7 @@ def linkdl_yes_no(value) -> str:
 def linkdl_audit_text() -> str:
     audit = video_downloader_provider().audit()
     platforms = ", ".join(str(item) for item in audit.get("supported_platforms") or [])
-    return "\n".join([
+    return "\\n".join([
         "📥 <b>LinkDL audit</b>",
         "",
         f"• public_enabled: <code>{linkdl_yes_no(VIDEO_DOWNLOADER_PUBLIC_ENABLED)}</code>",
@@ -232831,7 +232818,7 @@ def linkdl_status_text(job_id: str) -> str:
             f"• job_id: <code>{html.escape(str(status.get('job_id') or job_id or '-'))}</code>\n"
             "• blocker: <code>job_not_found</code>"
         )
-    return "\n".join([
+    return "\\n".join([
         "📥 <b>LinkDL status</b>",
         "",
         f"• job_id: <code>{html.escape(str(status.get('job_id') or '-'))}</code>",
@@ -234115,7 +234102,7 @@ def _video_dubbing_manual_invoice_breakdown(state: dict | None = None) -> dict:
 def _subdub_auto_selected_text(segments: object) -> str:
     if not isinstance(segments, list):
         return ""
-    return "\n".join(
+    return "\\n".join(
         str(item.get("text") or "").strip()
         for item in segments
         if isinstance(item, dict) and str(item.get("text") or "").strip()
@@ -234411,7 +234398,7 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
                         f"• total: <b>{int(invoice.get('total_xu') or 0)} Xu</b>",
                     ])
         lines.extend(["", copy["confirm"]])
-        return "\n".join(lines)
+        return "\\n".join(lines)
     language = html.escape(target or "-")
     lines = [f"{copy['confirm']}", "", f"• {copy['current']}: ✅"]
     if active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT:
@@ -234424,7 +234411,7 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
             f"• total: <b>{price_xu} Xu</b>",
         ])
     lines.extend(["", copy["locked"]])
-    return "\n".join(lines)
+    return "\\n".join(lines)
     # Legacy binary copy removed: all customer confirmation text above now
     # resolves from the direct 17-locale SubDub presentation authority.
 
@@ -235333,7 +235320,7 @@ def subdub_postdelivery_video_edit_artifact(
         and subdub_duration_validation_allows_success(current)
     ):
         return {}
-    identity = "\n".join((job_key, str(owner_user_id), message_id, file_id, sha256))
+    identity = "\\n".join((job_key, str(owner_user_id), message_id, file_id, sha256))
     artifact_token = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
     if token and str(token).strip().lower() != artifact_token:
         return {}
@@ -235765,7 +235752,7 @@ def subdub_public_state_debug_text() -> str:
             f" | smoke={readiness.get('asr_smoke_status') or 'NOT_TESTED'}"
             f" | blockers={','.join(readiness.get('blockers') or []) or '-'}"
         )
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def video_dubbing_public_flag(mode: str) -> bool:
@@ -237037,7 +237024,7 @@ def subdub_progress_text(stage: str = "saved_input", job_id: str = "", lang: str
             break
     else:
         lines.extend(["", progress_bar])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def subdub_progress_keyboard(job_id: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
@@ -240562,10 +240549,10 @@ def subdub_normalize_subtitle_text(text) -> str:
         value = text.decode("utf-8-sig", errors="replace")
     else:
         value = str(text or "")
-    value = value.replace("\ufeff", "").replace("\r\n", "\n").replace("\r", "\n")
+    value = value.replace("\ufeff", "").replace("\r\n", "\\n").replace("\r", "\\n")
     cleaned = []
     for char in value:
-        if char in {"\n", "\t"}:
+        if char in {"\\n", "\t"}:
             cleaned.append(char)
             continue
         if char == "\x00":
@@ -240726,14 +240713,14 @@ def subdub_visible_subtitle_text(srt_text: str) -> str:
     text = subdub_normalize_subtitle_text(srt_text)
     blocks = subdub_srt_blocks(text)
     if blocks:
-        return "\n".join(str(block.get("text") or "") for block in blocks)
+        return "\\n".join(str(block.get("text") or "") for block in blocks)
     lines = []
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or "-->" in stripped or re.fullmatch(r"\d+", stripped):
             continue
         lines.append(stripped)
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def subdub_broken_glyph_ratio(text: str) -> float:
     visible = [char for char in str(text or "") if not char.isspace()]
@@ -241241,7 +241228,7 @@ def subdub_srt_blocks(srt_text: str) -> list[dict]:
     text = subdub_normalize_subtitle_text(srt_text)
     blocks: list[dict] = []
     for raw_block in re.split(r"\n\s*\n", text):
-        lines = [line.strip() for line in raw_block.split("\n") if line.strip()]
+        lines = [line.strip() for line in raw_block.split("\\n") if line.strip()]
         if not lines:
             continue
         if re.fullmatch(r"\d+", lines[0]) and len(lines) > 1:
@@ -241250,7 +241237,7 @@ def subdub_srt_blocks(srt_text: str) -> list[dict]:
         if time_index < 0:
             continue
         start_text, end_text = [part.strip().split()[0] for part in lines[time_index].split("-->", 1)]
-        body = "\n".join(lines[time_index + 1:]).strip()
+        body = "\\n".join(lines[time_index + 1:]).strip()
         if not body:
             continue
         start = subdub_parse_srt_timestamp(start_text)
@@ -241261,7 +241248,7 @@ def subdub_srt_blocks(srt_text: str) -> list[dict]:
     return blocks
 
 def subdub_ass_escape(text: str, max_lines: int = 2) -> str:
-    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
+    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\\n")
     normalized = re.sub(r"[{}]", "", normalized)
     lines = [re.sub(r"\s+", " ", line).strip().replace("\\", r"\\") for line in normalized.splitlines()]
     lines = [line for line in lines if line]
@@ -241271,7 +241258,7 @@ def subdub_ass_escape(text: str, max_lines: int = 2) -> str:
 
 
 def subdub_ass_fit_text_layout(text: str, style: dict, max_lines: int = 2) -> dict:
-    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
+    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\\n")
     normalized = re.sub(r"[{}]", "", normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()
     play_res_x = max(1, int((style or {}).get("play_res_x") or 1280))
@@ -241415,7 +241402,7 @@ def subdub_ass_wrap_text(text: str, style: dict, max_lines: int = 2) -> str:
     return rf"{{\fs{int(layout.get('font_size') or style.get('render_size') or 48)}}}" + escaped
 
 def subdub_ass_text_chunks(text: str, style: dict, max_lines: int = 2) -> list[str]:
-    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
+    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\\n")
     normalized = re.sub(r"[{}]", "", normalized)
     words = [word for word in re.sub(r"\s+", " ", normalized).strip().split(" ") if word]
     if not words:
@@ -241436,7 +241423,7 @@ def subdub_ass_text_chunks(text: str, style: dict, max_lines: int = 2) -> list[s
     if current:
         lines.append(current)
     line_limit = max(1, min(2, int(max_lines or 2)))
-    return ["\n".join(lines[index:index + line_limit]) for index in range(0, len(lines), line_limit)]
+    return ["\\n".join(lines[index:index + line_limit]) for index in range(0, len(lines), line_limit)]
 
 def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = None) -> str:
     style = subdub_normalize_style(
@@ -241572,7 +241559,7 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
             last_dialogue_end = max(last_dialogue_end, chunk_end)
     if len(header) >= 5:
         header.insert(5, f"; subtitle_overlap_events_suppressed: {overlap_suppressed}")
-    return "\n".join(header + events) + "\n"
+    return "\\n".join(header + events) + "\\n"
 
 def subdub_ffmpeg_filter_path(path: str) -> str:
     # Single definition lives in services/ffmpeg_text: a quote cannot be
@@ -242606,7 +242593,7 @@ def video_dubbing_srt_from_text(text: str, duration_seconds: int = 0) -> str:
         blocks.append(
             f"{idx}\n{video_dubbing_srt_timestamp(start)} --> {video_dubbing_srt_timestamp(end)}\n{chunk}"
         )
-    return "\n\n".join(blocks) + "\n"
+    return "\\n\\n".join(blocks) + "\\n"
 
 async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, state: dict) -> tuple[bytes, str]:
     file_id = str(state.get("video_file_id") or state.get("source_file_id") or "")
@@ -242684,25 +242671,25 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
 
 def video_dubbing_plain_script(subtitle_or_text: str) -> str:
     lines = []
-    for raw_line in str(subtitle_or_text or "").replace("\r", "").split("\n"):
+    for raw_line in str(subtitle_or_text or "").replace("\r", "").split("\\n"):
         line = raw_line.strip()
         if not line or line.isdigit() or "-->" in line:
             continue
         line = re.sub(r"<[^>]+>", "", line).strip()
         if line:
             lines.append(line)
-    return "\n".join(lines).strip()
+    return "\\n".join(lines).strip()
 
 def video_dubbing_srt_to_vtt_text(srt_text: str) -> str:
     body = str(srt_text or "").replace("\r", "").strip()
     if not body:
         return "WEBVTT\n"
     body = re.sub(r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", body)
-    return "WEBVTT\n\n" + body + "\n"
+    return "WEBVTT\n\n" + body + "\\n"
 
 def video_dubbing_subtitle_plain_text(srt_text: str) -> str:
     plain = video_dubbing_plain_script(srt_text)
-    return (plain or str(srt_text or "").strip()) + ("\n" if plain or str(srt_text or "").strip() else "")
+    return (plain or str(srt_text or "").strip()) + ("\\n" if plain or str(srt_text or "").strip() else "")
 
 def video_dubbing_subtitle_output_items(srt_text: str, output_type: str = "srt", mode: str = "") -> list[dict]:
     output_type = str(output_type or "srt").strip().lower()
@@ -242918,7 +242905,7 @@ async def video_dubbing_extract_visual_subtitle(
         )
     if result.get("ok"):
         result["subtitle"] = video_dubbing_srt_from_segments(list(result.get("segments") or []))
-        result["script"] = "\n".join(str(item.get("text") or "") for item in (result.get("segments") or [])).strip()
+        result["script"] = "\\n".join(str(item.get("text") or "") for item in (result.get("segments") or [])).strip()
         result["source_kind"] = "visual_hardsub_ocr"
     return result
 
@@ -243377,7 +243364,7 @@ def video_dubbing_qc_segments(segments: list[dict], *, preserve_timestamps: bool
                 "index": len(qc_segments) + 1,
                 "start": round(chunk_start, 3),
                 "end": round(max(chunk_start + 0.1, chunk_end), 3),
-                "text": "\n".join(lines[:2]).strip(),
+                "text": "\\n".join(lines[:2]).strip(),
                 "confidence": (source or {}).get("confidence"),
             })
     return qc_segments
@@ -243428,7 +243415,7 @@ def video_dubbing_srt_from_segments(segments: list[dict]) -> str:
         blocks.append(
             f"{len(blocks) + 1}\n{video_dubbing_srt_timestamp(start)} --> {video_dubbing_srt_timestamp(end)}\n{text}"
         )
-    return ("\n\n".join(blocks) + "\n") if blocks else ""
+    return ("\\n\\n".join(blocks) + "\\n") if blocks else ""
 
 def video_dubbing_timestamp_seconds(value: str) -> float:
     clean = str(value or "").strip().replace(",", ".")
@@ -243445,7 +243432,7 @@ def video_dubbing_segments_from_subtitle(subtitle_text: str) -> list[dict]:
     if not body:
         return []
     if body.startswith("WEBVTT"):
-        body = body.split("\n", 1)[1] if "\n" in body else ""
+        body = body.split("\\n", 1)[1] if "\\n" in body else ""
     blocks = re.split(r"\n\s*\n", body)
     segments = []
     for block in blocks:
@@ -244139,7 +244126,7 @@ async def video_dubbing_render_video(
             if not readability.get("ok"):
                 return b"", f"subtitle_text_unreadable:{readability.get('blocker') or 'subtitle_text_invalid'}"
             subtitle_text = str(readability.get("normalized_text") or subtitle_text)
-            with open(subtitle_path, "w", encoding="utf-8", newline="\n") as handle:
+            with open(subtitle_path, "w", encoding="utf-8", newline="\\n") as handle:
                 handle.write(subtitle_text)
             if style.get("show_subtitles"):
                 fallback_subtitle_filter = subdub_subtitle_filter_for_file(subtitle_path)
@@ -244148,7 +244135,7 @@ async def video_dubbing_render_video(
                 ass_text = subdub_generate_ass_from_srt(subtitle_text, style)
                 if not ass_text:
                     return b"", "subtitle_ass_generation_failed"
-                with open(ass_path, "w", encoding="utf-8", newline="\n") as handle:
+                with open(ass_path, "w", encoding="utf-8", newline="\\n") as handle:
                     handle.write(ass_text)
                 subtitle_filter = subdub_subtitle_filter_for_file(ass_path)
         if subtitle_filter and subdub_advanced_style_enabled(subtitle_style):
@@ -244443,7 +244430,7 @@ async def execute_video_dubbing_preview(
         lines = [line.strip() for line in video_dubbing_plain_script(preview_subtitle).splitlines() if line.strip()][:4]
         await query.message.reply_text(
             "▶️ <b>Phụ đề xem thử</b>\n\n"
-            + html.escape("\n".join(lines)[:700])
+            + html.escape("\\n".join(lines)[:700])
             + f"\n\nĐây là bản thử từ đoạn {preview_seconds} giây; chưa xuất file đầy đủ và chưa trừ Xu final.",
             parse_mode="HTML",
         )
@@ -245290,7 +245277,7 @@ def subdub_mode_requests_translation(mode: str, state: dict | None = None) -> bo
 
 def subdub_speaker_sidecar_subtitle_sha256(subtitle_text: str) -> str:
     normalized = unicodedata.normalize("NFC", str(subtitle_text or ""))
-    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n").strip()
+    normalized = normalized.replace("\r\n", "\\n").replace("\r", "\\n").strip()
     return hashlib.sha256(normalized.encode("utf-8", errors="strict")).hexdigest()
 
 
@@ -245842,7 +245829,7 @@ def subdub_auto_effective_charge_status(
 
 def _subdub_auto_text_sha256(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", str(value or ""))
-    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n").strip()
+    normalized = normalized.replace("\r\n", "\\n").replace("\r", "\\n").strip()
     return hashlib.sha256(normalized.encode("utf-8", errors="strict")).hexdigest()
 
 
@@ -246802,7 +246789,7 @@ def subdub_auto_exact_confirmation_text(
         f"• {copy['voice_auto_price_rule']}",
         f"• {copy['voice_auto_total']}: <b>{total_xu} Xu</b>",
     ])
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 
 def _subdub_auto_exact_callback_token(job: dict) -> str:
@@ -248094,7 +248081,7 @@ async def _execute_video_dubbing_pipeline_core(
             srt_text
             or output_subtitle
             or (srt_bytes.decode("utf-8-sig", errors="replace") if srt_bytes else "")
-            or "\n\n".join(
+            or "\\n\\n".join(
                 (bytes(item.get("bytes") or b"").decode("utf-8-sig", errors="replace") if isinstance(item, dict) else "")
                 for item in subtitle_items
             )
@@ -250886,7 +250873,7 @@ def subtitle_editor_lines(state: dict | None = None) -> list[str]:
 def subtitle_editor_text(state: dict | None = None, lang: str = "vi") -> str:
     copy = public_subdub_deep_copy(normalize_user_language(lang))
     lines = subtitle_editor_lines(state)
-    preview = "\n".join(f"{idx}. {html.escape(line[:160])}" for idx, line in enumerate(lines[:10], start=1))
+    preview = "\\n".join(f"{idx}. {html.escape(line[:160])}" for idx, line in enumerate(lines[:10], start=1))
     return f"<b>{copy['editor']}</b>\n\n{copy['preview']} · {copy['find']} · {copy['edit']} · {copy['add']} · {copy['delete']} · {copy['shift']}\n\n{preview}"
 
 def subtitle_editor_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -250910,14 +250897,14 @@ def subtitle_editor_replace_line(state: dict, line_no: int, replacement: str) ->
     if line_no < 1 or line_no > len(lines):
         raise ValueError("line_out_of_range")
     lines[line_no - 1] = str(replacement or "").strip()[:500]
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def subtitle_editor_find_replace_text(state: dict, find_text: str, replace_text: str) -> str:
     lines = subtitle_editor_lines(state)
     needle = str(find_text or "")
     if not needle:
-        return "\n".join(lines)
-    return "\n".join(line.replace(needle, str(replace_text or "")) for line in lines)
+        return "\\n".join(lines)
+    return "\\n".join(line.replace(needle, str(replace_text or "")) for line in lines)
 
 def create_social_link_import_job(user_id, chat_id, state: dict) -> int:
     payload = {
@@ -251180,7 +251167,7 @@ async def handle_video_dubbing_pending_text(update: Update, context: ContextType
         try:
             draft = subtitle_editor_replace_line(state, line_no, update.message.text)
         except ValueError:
-            draft = "\n".join(subtitle_editor_lines(state))
+            draft = "\\n".join(subtitle_editor_lines(state))
         state = set_video_dubbing_pending(uid, "subtitle_editor", subtitle_draft=draft)
         await update.message.reply_text(
             "✅ Đã lưu dòng phụ đề nháp.",
@@ -252902,19 +252889,19 @@ async def handle_video_dubbing_callback(
         set_video_dubbing_pending(uid, "subtitle_find_text")
         return await safe_edit_or_send(query, "🔎 Gửi nội dung cần tìm.", reply_markup=subtitle_editor_keyboard(lang))
     if action == "subtitle_add_line":
-        draft = "\n".join(subtitle_editor_lines(state) + ["Dòng phụ đề mới"])
+        draft = "\\n".join(subtitle_editor_lines(state) + ["Dòng phụ đề mới"])
         state = set_video_dubbing_pending(uid, "subtitle_editor", subtitle_draft=draft)
         return await safe_edit_or_send(query, subtitle_editor_text(state, lang), parse_mode="HTML", reply_markup=subtitle_editor_keyboard(lang))
     if action == "subtitle_delete_line":
         lines = subtitle_editor_lines(state)
-        draft = "\n".join(lines[:-1] or lines)
+        draft = "\\n".join(lines[:-1] or lines)
         state = set_video_dubbing_pending(uid, "subtitle_editor", subtitle_draft=draft)
         return await safe_edit_or_send(query, subtitle_editor_text(state, lang), parse_mode="HTML", reply_markup=subtitle_editor_keyboard(lang))
     if action == "subtitle_shift_time":
         set_video_dubbing_pending(uid, "subtitle_time_shift")
         return await safe_edit_or_send(query, "⏱ Nhập số mili-giây muốn dịch thời gian, ví dụ: +500 hoặc -300.", reply_markup=subtitle_editor_keyboard(lang))
     if action == "subtitle_save":
-        state = set_video_dubbing_pending(uid, "subtitle_editor", subtitle_draft="\n".join(subtitle_editor_lines(state)))
+        state = set_video_dubbing_pending(uid, "subtitle_editor", subtitle_draft="\\n".join(subtitle_editor_lines(state)))
         return await safe_edit_or_send(query, "✅ Đã lưu phụ đề nháp.", reply_markup=subtitle_editor_keyboard(lang))
     if action == "return_origin":
         if origin == "video_addon":
@@ -253913,7 +253900,7 @@ def marketing_suggestions_text(state: dict | None = None) -> str:
     state = state or {}
     kind = marketing_type_label(state.get("kind"))
     suggestions = marketing_suggestions(state)
-    lines = "\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions, start=1))
+    lines = "\\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions, start=1))
     return (
         "📣 <b>Chọn hướng chiến dịch</b>\n\n"
         f"Ngành: <b>{html.escape(kind)}</b>\n\n"
@@ -257589,7 +257576,7 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
             revision=max(1, safe_int(state.get("revision"), 1)) + 1,
         )
         await update.message.reply_text(
-            video_local_manual_options_text(current, lang) + "\n\n" + str(compiled.get("message_vi") or "Đã lập kế hoạch cục bộ; 0 Xu."),
+            video_local_manual_options_text(current, lang) + "\\n\\n" + str(compiled.get("message_vi") or "Đã lập kế hoạch cục bộ; 0 Xu."),
             parse_mode="HTML",
             reply_markup=video_local_manual_options_keyboard(lang, current),
         )
@@ -258079,7 +258066,7 @@ async def cmd_architecture_profile_status(update: Update, context: ContextTypes.
         f"• Last validation error: <code>{html.escape(str(payload['last_validation_error']))}</code>",
         "• Provider calls from studio: <code>no</code>",
     ]
-    await update.effective_message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.effective_message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_architecture_profile_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -258103,7 +258090,7 @@ async def cmd_architecture_profile_debug(update: Update, context: ContextTypes.D
         "• Provider task created by studio: <code>no</code>",
         "• Charge created by studio: <code>no</code>",
     ]
-    await update.effective_message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.effective_message.reply_text("\\n".join(lines), parse_mode="HTML")
 
 
 async def handle_video_profile_studio_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -264989,7 +264976,7 @@ async def send_translation_session_result(update: Update, context: ContextTypes.
         body.extend(["", f"<b>{copy['translation_result_original']}:</b>", html.escape(str(original or "")[:1500])])
     body.extend(["", f"<b>{copy['translation_result_translated']}:</b>", html.escape(str(translated or "")[:2600]), "", copy['translation_result_no_charge']])
     await update.message.reply_text(
-        "\n".join(body),
+        "\\n".join(body),
         parse_mode="HTML",
         reply_markup=translation_session_keyboard(lang, session.get("mode")),
     )
@@ -270993,7 +270980,7 @@ async def api_operator_launch(payload: OperatorLaunchRequest, request: Request):
                     f"• Video briefs: <b>{len(video_orders)}</b>\n"
                     f"• Autorun: <b>{'ON' if autorun else 'OFF'}</b>"
                     + (f" | Completed: <b>{autorun.get('completed_count') or 0}</b> | Review: <code>{html.escape(','.join(str(jid) for jid in reviewable_jobs) or '-')}</code>" if autorun else "")
-                    + "\n"
+                    + "\\n"
                     f"• First job: <code>#{launch_next.get('first_job_id') or '-'}</code>\n"
                     f"• Next: <code>{html.escape(telegram.get('video_brief') or '/video_brief job=<JOB_ID>')}</code>"
                 ),
@@ -271108,7 +271095,7 @@ async def api_operator_film_series(payload: OperatorFilmSeriesRequest, request: 
                     f"• Episodes: <b>{series.get('episodes') or payload.episodes}</b> | Jobs: <b>{len(result.get('created_jobs') or [])}</b> | Built: <b>{len(result.get('built_jobs') or [])}</b>\n"
                     f"• Autorun: <b>{'ON' if autorun else 'OFF'}</b>"
                     + (f" | Completed: <b>{autorun.get('completed_count') or 0}</b> | Review: <code>{html.escape(','.join(str(jid) for jid in reviewable_jobs) or '-')}</code>" if autorun else "")
-                    + "\n"
+                    + "\\n"
                     f"• First job: <code>#{first_job or '-'}</code>\n"
                     f"• Next: <code>{'/worker_intake job=' + str(first_job) + ' claim=0' if first_job else '/worker_intake claim=0'}</code>"
                 ),
@@ -271783,7 +271770,7 @@ async def api_operator_approve_ready(payload: OperatorApproveReadyRequest, reque
                     f"• job <code>#{item.get('job_id')}</code> → queue <code>#{item.get('queue_id') or '-'}</code> | "
                     f"<code>/publisher_handoff queue={item.get('queue_id') or '<QUEUE_ID>'}</code>"
                 )
-            await tg_app.bot.send_message(chat_id=ADMIN_ID, text="\n".join(lines), parse_mode="HTML")
+            await tg_app.bot.send_message(chat_id=ADMIN_ID, text="\\n".join(lines), parse_mode="HTML")
             if payload.send_handoff:
                 for item in approved[:3]:
                     queue_id = safe_int(item.get("queue_id"), 0)
@@ -271973,7 +271960,7 @@ async def api_operator_make_video(payload: OperatorMakeVideoRequest, request: Re
                     f"• Video briefs: <b>{len(video_orders)}</b>\n"
                     f"• Autorun: <b>{'ON' if autorun else 'OFF'}</b>"
                     + (f" | Completed: <b>{autorun.get('completed_count') or 0}</b> | Review: <code>{html.escape(','.join(str(jid) for jid in reviewable_jobs) or '-')}</code>" if autorun else "")
-                    + "\n"
+                    + "\\n"
                     "• Next: <code>/video_brief job=&lt;JOB_ID&gt;</code> → <code>/review_gate</code> → <code>/approve_publish</code>"
                 ),
                 parse_mode="HTML"
@@ -272069,7 +272056,7 @@ async def api_operator_affiliate_scale(payload: OperatorAffiliateScaleRequest, r
                     f"• Niche: <b>{html.escape(scale_niche)}</b>\n"
                     f"• Campaign: <code>{campaign_id or 'chưa gắn'}</code>"
                     + (f" | auto score={campaign_match_score}" if matched_campaign else "")
-                    + "\n"
+                    + "\\n"
                     f"• Platform/channel: <code>{html.escape(payload.platform or 'tiktok')}</code> / <code>{html.escape(payload.channel or 'all')}</code>\n"
                     f"• Jobs: <b>{len(created_jobs)}</b> | Built: <b>{len(built)}</b> | Failed: <b>{len(failed)}</b>\n"
                     f"• Xem: <code>/affiliate_report days=30</code> hoặc <code>/operator_dashboard</code>"

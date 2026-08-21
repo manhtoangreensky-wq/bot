@@ -555,3 +555,111 @@ def autopost_kill_switch_text() -> str:
 
 def autopost_resume_ads_text() -> str:
     return "🟢 <b>Hệ thống quảng cáo đã khôi phục trạng thái chờ lệnh an toàn.</b>"
+
+# ----------------- Additional Action Text Builders -----------------
+def autopost_brand_edit_prompt_text() -> str:
+    return "\n".join([
+        "✏️ <b>CẬP NHẬT THƯƠNG HIỆU:</b>",
+        "",
+        "Hãy gửi tin nhắn với định dạng:",
+        "<code>Tên thương hiệu | Giọng văn | CTA chính</code>",
+        "",
+        "Ví dụ:",
+        "<code>Shop Mẹ & Bé | Thân thiện, chu đáo | Mua ngay tại shopmebe.vn</code>"
+    ])
+
+def autopost_brand_preview_text(draft: Dict[str, Any]) -> str:
+    return "👁 <b>XEM TRƯỚC MẪU NỘI DUNG THƯƠNG HIỆU:</b>\n\n" + draft.get("caption", "")
+
+def autopost_aff_seed_success_text(uid: int, stats: Dict[str, Any], lang: str = "vi") -> str:
+    return "⚡ <b>ĐÃ NẠP THÀNH CÔNG 66+ CHIẾN DỊCH GỢI Ý VÀO KHO CÁ NHÂN!</b>\n\n" + autopost_affiliate_text(uid, stats, lang)
+
+def autopost_aff_clear_confirm_text() -> str:
+    return "\n".join([
+        "⚠️ <b>XÁC NHẬN XÓA TOÀN BỘ KHO AFFILIATE CÁ NHÂN:</b>",
+        "",
+        "Hành động này sẽ xóa toàn bộ link trong kho riêng của tài khoản này. Bạn có thể nạp lại link bất cứ lúc nào."
+    ])
+
+def autopost_aff_clear_done_text(uid: int, stats: Dict[str, Any], lang: str = "vi") -> str:
+    return "🗑️ <b>ĐÃ XÓA TOÀN BỘ KHO AFFILIATE CÁ NHÂN THÀNH CÔNG.</b>\n\n" + autopost_affiliate_text(uid, stats, lang)
+
+def autopost_conn_telegram_prompt_text() -> str:
+    return "\n".join([
+        "🔗 <b>KẾT NỐI KÊNH TELEGRAM:</b>",
+        "",
+        "1. Thêm Bot làm Quản trị viên (Admin) vào Kênh hoặc Nhóm Telegram của bạn.",
+        "2. Gửi <b>@username</b> của kênh (hoặc Chat ID) vào đây:",
+        "",
+        "<i>Ví dụ: <code>@toanaas_channel</code> hoặc <code>-1001234567890</code></i>"
+    ])
+
+def autopost_test_tg_conn_text(tg_acc: Optional[Dict[str, Any]], v: Dict[str, Any]) -> str:
+    if not tg_acc:
+        return "\n".join([
+            "⚠️ <b>Chưa có Kênh Telegram nào được cấu hình.</b>",
+            "Vui lòng bấm 'Kết nối Telegram' và nhập @channel_username."
+        ])
+    if v.get("valid"):
+        return "\n".join([
+            "✅ <b>KẾT NỐI TELEGRAM HOẠT ĐỘNG TỐT!</b>",
+            "",
+            f"• Kênh: <code>{tg_acc['display_name']}</code>",
+            f"• Chat ID: <code>{v.get('chat_id', tg_acc['account_id'])}</code>",
+            "• Trạng thái: <b>READY ✅</b>"
+        ])
+    return "\n".join([
+        "⚠️ <b>KIỂM TRA KẾT NỐI THẤT BẠI:</b>",
+        str(v.get("error", "Lỗi không xác định"))
+    ])
+
+def autopost_job_publish_result_text(res: Dict[str, Any], job: Dict[str, Any]) -> str:
+    if res.get("ok"):
+        return "\n".join([
+            "✅ <b>ĐÃ PHÁT HÀNH BÀI ĐĂNG THỰC TẾ THÀNH CÔNG!</b>",
+            "",
+            f"• Remote ID: <code>{res['remote_post_id']}</code>",
+            f"• Nền tảng: {job['platform'].upper()}",
+            f"• URL: {res.get('remote_url', '#')}"
+        ])
+    return "\n".join([
+        "❌ <b>LỖI PHÁT HÀNH:</b>",
+        str(res.get("error", "Lỗi không xác định"))
+    ])
+
+def autopost_set_mode_text(value: str, uid: int) -> str:
+    return "\n".join([
+        f"✅ <b>ĐÃ CẬP NHẬT CHẾ ĐỘ PHÁT HÀNH: {value}</b>",
+        "",
+        autopost_settings_text(uid)
+    ])
+
+def autopost_draft_publish_result_text(res: Dict[str, Any]) -> str:
+    if res.get("ok"):
+        return "\n".join([
+            "✅ <b>ĐÃ PHÁT HÀNH BÀI ĐĂNG THÀNH CÔNG!</b>",
+            "",
+            f"• Remote ID: <code>{res['remote_post_id']}</code>",
+            f"• URL: {res.get('remote_url', '#')}"
+        ])
+    return "\n".join([
+        "❌ <b>LỖI PHÁT HÀNH:</b>",
+        str(res.get("error", "Lỗi không xác định"))
+    ])
+
+def autopost_draft_approved_text(job_id: int, sched_time: str, target_chat: str) -> str:
+    return "\n".join([
+        "✅ <b>ĐÃ DUYỆT & LÊN LỊCH BÀI ĐĂNG THÀNH CÔNG!</b>",
+        "",
+        f"• Mã tác vụ: <b>#{job_id}</b>",
+        f"• Thời gian phát hành: <code>{sched_time[:16].replace('T', ' ')} UTC</code>",
+        f"• Kênh: <code>{target_chat}</code>"
+    ])
+
+def autopost_conn_oauth_prompt_text(platform: str) -> str:
+    return "\n".join([
+        f"🔗 <b>KẾT NỐI {platform.upper()}:</b>",
+        "",
+        f"Nền tảng {platform.upper()} yêu cầu cấp quyền OAuth bảo mật máy chủ.",
+        "Trạng thái: <b>NEEDS_OAUTH</b> (Chưa có token cấu hình)."
+    ])
