@@ -3468,6 +3468,15 @@ def test_auto_button_is_built_for_both_lanes_but_activation_closed(monkeypatch, 
 
     monkeypatch.setattr(bot, "SUBDUB_AUTO_SPEAKER_ACTIVATION_ENABLED", True)
     visible = bot.video_dubbing_voice_keyboard("ja", state)
+    callback_rows = [
+        [str(button.callback_data or "") for button in row]
+        for row in visible.inline_keyboard
+    ]
+    assert callback_rows[0] == [
+        "videodub|voice|default_female",
+        "videodub|voice|default_male",
+    ]
+    assert callback_rows[1] == ["videodub|voice|auto_speaker_gender"]
     buttons = [button for row in visible.inline_keyboard for button in row]
     auto_buttons = [
         button for button in buttons

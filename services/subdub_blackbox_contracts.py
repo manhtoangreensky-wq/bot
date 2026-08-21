@@ -119,7 +119,7 @@ def resolve_lane_blackbox(mode: object) -> LaneBlackbox:
     if value in {"subtitle_plus_dub", "subtitle_dub", "subdub", "combo", "video_subtitle_dub"}:
         return LaneBlackbox("combo", True, True, True, False)
     if value in {"dub", "dubbing", "voice", "video_dub"}:
-        return LaneBlackbox("dub", False, False, True, False)
+        return LaneBlackbox("dub", False, True, True, False)
     if value in {"create", "auto_subtitle", "subtitle_create", "original_subtitle"}:
         return LaneBlackbox("auto_subtitle", True, False, False, True)
     return LaneBlackbox("subtitle", True, True, False, True)
