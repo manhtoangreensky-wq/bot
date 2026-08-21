@@ -114,16 +114,13 @@ def _combo_state(uid, *, flow_type="", combo_subpath=""):
     )
 
 
-def test_subtitle_plus_dub_entry_shows_has_subtitle_and_no_subtitle():
-    labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
+def test_subtitle_plus_dub_entry_uses_single_upload_lane():
     callbacks = _callbacks(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
-    assert "🎞 Video đã có phụ đề" in labels
-    assert "🎧 Video chưa có phụ đề" in labels
-    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_HAS_SUBTITLE}" in callbacks
-    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE}" in callbacks
+    assert callbacks.count("videodub|source_upload") == 1
+    assert not any(callback.startswith("videodub|path|") for callback in callbacks)
 
 
-def test_no_subtitle_path_shows_only_canonical_create_translate_dub_choice(monkeypatch):
+def test_legacy_no_subtitle_path_routes_to_single_upload_lane(monkeypatch):
     uid = 919701
     _combo_state(uid)
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
@@ -131,33 +128,32 @@ def test_no_subtitle_path_shows_only_canonical_create_translate_dub_choice(monke
     asyncio.run(bot.handle_video_dubbing_callback(_query_update(query), SimpleNamespace()))
     labels = _labels(query.outputs[-1]["reply_markup"])
     callbacks = _callbacks(query.outputs[-1]["reply_markup"])
-    assert "🎬 Tạo phụ đề rồi lồng tiếng" in labels
-    assert "🎙 Lồng tiếng trực tiếp" not in labels
-    assert f"videodub|no_subtitle_flow|{bot.VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB}" in callbacks
-    assert f"videodub|no_subtitle_flow|{bot.VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB}" not in callbacks
-    assert bot.get_video_dubbing_pending(uid)["step"] == "no_subtitle_menu"
+    assert any("Gửi video" in label for label in labels)
+    assert "videodub|source_upload" in callbacks
+    assert not any(callback.startswith("videodub|no_subtitle_flow|") for callback in callbacks)
+    assert bot.get_video_dubbing_pending(uid)["step"] == "source"
 
 
-def test_no_subtitle_create_subtitle_then_dub_flow_order(monkeypatch):
+def test_legacy_create_then_dub_routes_to_single_upload_language_flow(monkeypatch):
     uid = 919702
     _combo_state(uid, flow_type=bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE)
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
     query = CaptureQuery(uid, f"videodub|no_subtitle_flow|{bot.VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB}")
     asyncio.run(bot.handle_video_dubbing_callback(_query_update(query), SimpleNamespace()))
     state = bot.get_video_dubbing_pending(uid)
-    assert state["step"] == "await_video"
-    assert state["combo_subpath"] == bot.VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB
-    assert "tạo phụ đề gốc trước" in query.outputs[-1]["text"]
-    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE}" in _callbacks(query.outputs[-1]["reply_markup"])
+    assert state["step"] == "source"
+    assert state["combo_subpath"] == ""
+    assert "Tạo phụ đề gốc" not in query.outputs[-1]["text"]
+    assert "videodub|source_upload" in _callbacks(query.outputs[-1]["reply_markup"])
 
     _patch_video_upload(monkeypatch)
     message = CaptureMessage(video=SimpleNamespace(file_id="tg-video-19b7"))
     asyncio.run(bot.handle_video_dubbing_pending_upload(_message_update(uid, message), SimpleNamespace()))
     state = bot.get_video_dubbing_pending(uid)
-    assert state["step"] == "original_subtitle_confirm"
+    assert state["step"] == "language"
     assert state["output_type"] == "video_subtitle"
-    assert "Tạo phụ đề gốc" in message.outputs[-1]["text"]
-    assert "videodub|confirm_original_subtitle" in _callbacks(message.outputs[-1]["reply_markup"])
+    assert "Tạo phụ đề gốc" not in message.outputs[-1]["text"]
+    assert "videodub|confirm_original_subtitle" not in _callbacks(message.outputs[-1]["reply_markup"])
 
 
 def test_legacy_no_subtitle_direct_dub_is_rerouted_to_canonical_flow(monkeypatch):
@@ -167,20 +163,20 @@ def test_legacy_no_subtitle_direct_dub_is_rerouted_to_canonical_flow(monkeypatch
     query = CaptureQuery(uid, f"videodub|no_subtitle_flow|{bot.VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB}")
     asyncio.run(bot.handle_video_dubbing_callback(_query_update(query), SimpleNamespace()))
     state = bot.get_video_dubbing_pending(uid)
-    assert state["step"] == "await_video"
-    assert state["combo_subpath"] == bot.VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB
+    assert state["step"] == "source"
+    assert state["combo_subpath"] == ""
     assert state["output_type"] == "video_subtitle"
     assert state["translate_requested"] == "1"
     assert "Lồng tiếng trực tiếp" not in query.outputs[-1]["text"]
-    assert "lồng tiếng" in query.outputs[-1]["text"].lower()
+    assert "gửi video" in query.outputs[-1]["text"].lower()
 
     _patch_video_upload(monkeypatch)
     message = CaptureMessage(video=SimpleNamespace(file_id="tg-video-19b7"))
     asyncio.run(bot.handle_video_dubbing_pending_upload(_message_update(uid, message), SimpleNamespace()))
     state = bot.get_video_dubbing_pending(uid)
-    assert state["step"] == "original_subtitle_confirm"
+    assert state["step"] == "language"
     assert state["output_type"] == "video_subtitle"
-    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE}" in _callbacks(message.outputs[-1]["reply_markup"])
+    assert "videodub|confirm_original_subtitle" not in _callbacks(message.outputs[-1]["reply_markup"])
 
 
 def test_legacy_combo_dub_original_routes_to_translation_language(monkeypatch):
@@ -297,7 +293,7 @@ def test_no_provider_before_confirm_on_no_subtitle_upload(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", forbidden_prepare)
     message = CaptureMessage(video=SimpleNamespace(file_id="tg-video-19b7"))
     asyncio.run(bot.handle_video_dubbing_pending_upload(_message_update(uid, message), SimpleNamespace()))
-    assert bot.get_video_dubbing_pending(uid)["step"] == "original_subtitle_confirm"
+    assert bot.get_video_dubbing_pending(uid)["step"] == "language"
 
 
 def test_back_routing_for_subtitle_plus_dub_no_subtitle_branch():
@@ -374,7 +370,7 @@ def test_legacy_direct_combo_contract_requires_translated_subtitle_video():
         "billing_chars": 100,
         "output_type": "video",
     })
-    assert state["combo_subpath"] == bot.VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB
+    assert state["combo_subpath"] == ""
     assert state["dub_text_source"] == "translated"
     assert state["output_type"] == "video_subtitle"
 

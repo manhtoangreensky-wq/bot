@@ -172,8 +172,8 @@ def test_new_subdub_lane_starts_with_position_two_of_seven(monkeypatch):
         assert state["subtitle_position"] == "slot_2"
         callbacks = _callbacks(result["reply_markup"])
         if mode == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-            assert "videodub|path|has_subtitle" in callbacks
-            assert "videodub|path|no_subtitle" in callbacks
+            assert callbacks.count("videodub|source_upload") == 1
+            assert not any(callback.startswith("videodub|path|") for callback in callbacks)
         else:
             assert "videodub|source_upload" in callbacks
 

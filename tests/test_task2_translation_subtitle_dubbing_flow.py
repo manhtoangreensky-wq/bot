@@ -153,9 +153,9 @@ def test_no_copied_source_menu_inside_product_flows():
     assert "🎞 Video đã có phụ đề" not in dub_labels
     assert "🎧 Video chỉ có tiếng" not in dub_labels
 
-    combo_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
-    assert "🎞 Video đã có phụ đề" in combo_labels
-    assert "🎧 Video chưa có phụ đề" in combo_labels
+    combo_callbacks = _callbacks(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
+    assert combo_callbacks.count("videodub|source_upload") == 1
+    assert not any(callback.startswith("videodub|path|") for callback in combo_callbacks)
 
 
 def test_auto_subtitle_input_and_output_are_basic_product():
