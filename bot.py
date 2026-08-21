@@ -143100,7 +143100,7 @@ def video_duration2_capability_lines() -> list[str]:
         "<b>Public contract hiện tại</b>",
         *[html.escape(line) for line in public_contract_lines(config)],
         "",
-        f"1 cảnh: giá gốc <code>{int(price['list_price'])} Xu</code>, ưu đãi <code>{int(price['promo_price'])} Xu</code> đến <code>{html.escape(price['promo_until'])}</code>.",
+        f"1 cảnh: giá niêm yết <code>{int(price['list_price'])} Xu</code>, ưu đãi <code>{int(price['promo_price'])} Xu</code> đến <code>{html.escape(price['promo_until'])}</code>.",
         "",
         "Provider smoke thật: <code>KHÓA CHI PHÍ</code> — chỉ chạy khi Toan duyệt riêng.",
         "Provider call: <code>NO</code> | Xu deducted: <code>NO</code>",
@@ -201780,7 +201780,7 @@ async def handle_img2vid_lock1_callback(query, context: ContextTypes.DEFAULT_TYP
                 if unit_price <= 0 or charge_amount <= 0:
                     return await safe_edit_or_send(
                         query,
-                        "⚠️ Biên nhận ảnh đang thiếu giá gốc. Hệ thống không gọi lại nguồn ảnh và chưa ghi Xu.",
+                        "⚠️ Biên nhận ảnh đang thiếu thông tin đơn giá. Hệ thống không gọi lại nguồn ảnh và chưa ghi Xu.",
                         parse_mode=None,
                         reply_markup=img2vid_ai_confirm_keyboard(latest),
                     )
@@ -209588,7 +209588,7 @@ def chat_pro_usage_text() -> str:
         "<code>/chat_pro phân tích kế hoạch bán hàng trong 7 ngày</code>\n\n"
         "Chính sách:\n"
         "• Free Gemini: <b>0 Xu</b>, 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt\n"
-        f"• Chat Pro Opus 4.8: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; đơn giá đã gồm ×3 và tính theo usage thực tế\n"
+        f"• Chat Pro Opus 4.8: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; tính theo usage thực tế\n"
         "• Pro không giới hạn lượt/ngày khi đủ Xu\n"
         "• Owner/Admin: miễn phí và không giới hạn\n"
         "AI lỗi/quota/công cụ quá tải: không trừ Xu; bộ nhớ Public Chat giữ 48 giờ."
@@ -209875,7 +209875,7 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Public Chat</b>",
         "• Free Gemini: <b>0 Xu</b>, 20 câu trả lời thành công/ngày Việt Nam; lỗi không trừ lượt",
-        f"• Pro Opus 4.8: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; đơn giá đã gồm ×3, tính usage thực tế, không giới hạn lượt/ngày khi đủ Xu",
+        f"• Pro Opus 4.8: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; tính usage thực tế, không giới hạn lượt/ngày khi đủ Xu",
         "• Owner/Admin miễn phí và không giới hạn ở cả hai chế độ",
         "• AI lỗi/quota/công cụ quá tải: không trừ Xu",
         "",
@@ -209905,7 +209905,7 @@ async def set_chat_mode_command(update: Update, mode: str, command: str, note: s
     if mode == "pro":
         text = (
             "✅ <b>Đã bật Chat Pro.</b>\n\n"
-            f"• Giá: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; đơn giá đã gồm ×3 và tính theo usage thực tế.\n"
+            f"• Giá: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; tính theo usage thực tế.\n"
             "• Không giới hạn lượt/ngày khi đủ Xu; Owner/Admin miễn phí và không giới hạn.\n"
             "• Nếu AI lỗi hoặc công cụ quá tải, không trừ Xu.\n\n"
             "Bot sẽ dùng Chat Pro cho đến khi bạn tắt bằng <code>/chat_pro_off</code>."
@@ -209997,7 +209997,7 @@ async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Chat Pro</b>",
         "• Claude Opus 4.8 — tính usage thực tế, không giới hạn lượt/ngày khi đủ Xu.",
-        f"• Giá: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; đơn giá đã gồm ×3.",
+        f"• Giá: <b>{public_chat_runtime.CHAT_PRO_RATE_LABEL}</b> input/output; tính theo usage thực tế.",
         "",
         "• Owner/Admin miễn phí và không giới hạn.",
         "• AI lỗi/quota/công cụ quá tải: không trừ Xu.",

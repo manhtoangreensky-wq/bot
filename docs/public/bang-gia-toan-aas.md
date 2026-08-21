@@ -227,7 +227,7 @@ Chiết khấu thành viên hiện tại
 • Chiết khấu thành viên: chưa kích hoạt.
 
 Cách cộng dồn
-1. Tính giá gốc theo sản phẩm.
+1. Tính giá niêm yết theo sản phẩm.
 2. Áp dụng chiết khấu theo số lượng/ký tự nếu có.
 3. Áp dụng chiết khấu thành viên trên số còn lại.
 4. Áp dụng voucher/khuyến mãi nếu hệ thống có, theo chính sách hiện có.
