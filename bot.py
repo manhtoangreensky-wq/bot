@@ -231634,6 +231634,14 @@ def normalize_video_dubbing_combo_pending_state(user_id, state: dict | None) -> 
     """Persist the canonical combo contract before any legacy callback can route."""
     current = dict(state or {})
     normalized = subdub_combo_blackbox.normalize_combo_state(current)
+    legacy_step = str(normalized.get("step") or "")
+    collapsed_legacy_step = subdub_combo_blackbox.is_combo_state(normalized) and legacy_step in {
+        "no_subtitle_menu",
+        "original_subtitle_confirm",
+        "original_subtitle_ready",
+    }
+    if collapsed_legacy_step:
+        normalized["step"] = "language" if video_dubbing_has_media(normalized) else "source"
     if normalized == current:
         return current
     canonical_fields = {
@@ -231646,6 +231654,8 @@ def normalize_video_dubbing_combo_pending_state(user_id, state: dict | None) -> 
         )
         if normalized.get(key) is not None
     }
+    if collapsed_legacy_step:
+        canonical_fields["processing"] = "0"
     return set_video_dubbing_pending(
         user_id,
         str(normalized.get("step") or current.get("step") or "source"),
@@ -251346,39 +251356,7 @@ def video_dubbing_next_screen_after_source(user_id, state: dict, lang: str = "vi
         state = set_video_dubbing_pending(user_id, "locked_public", processing="0")
         return state, video_dubbing_public_locked_text(video_dubbing_public_gate_mode(mode, state), lang), video_dubbing_public_locked_keyboard(lang)
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-        explicit_flow_type = str(state.get("flow_type") or "").strip()
-        flow_type = explicit_flow_type or VIDEO_DUBBING_FLOW_NO_SUBTITLE
-        combo_subpath = subtitle_plus_dub_no_subtitle_subpath(state)
-        if flow_type == VIDEO_DUBBING_FLOW_NO_SUBTITLE and explicit_flow_type and not combo_subpath:
-            state = set_video_dubbing_pending(
-                user_id,
-                "no_subtitle_menu",
-                mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-                process_type=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-                video_processing_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-                requested_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-                active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
-                flow_type=VIDEO_DUBBING_FLOW_NO_SUBTITLE,
-                processing="0",
-            )
-            return state, subtitle_plus_dub_no_subtitle_menu_text(lang), subtitle_plus_dub_no_subtitle_menu_keyboard(lang)
-        if flow_type == VIDEO_DUBBING_FLOW_NO_SUBTITLE and combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB:
-            state = set_video_dubbing_pending(
-                user_id,
-                "original_subtitle_confirm",
-                mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-                process_type=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-                video_processing_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-                requested_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-                active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
-                flow_type=VIDEO_DUBBING_FLOW_NO_SUBTITLE,
-                combo_subpath=VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB,
-                output_type="video_subtitle",
-                output_format="video_subtitle",
-                translate_requested="0",
-            )
-            return state, video_dubbing_original_subtitle_confirm_text(state, lang), video_dubbing_original_subtitle_confirm_keyboard(lang, state)
-        output_type = "video" if combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB else "video_subtitle"
+        state = normalize_video_dubbing_combo_pending_state(user_id, state)
         state = set_video_dubbing_pending(
             user_id,
             "language",
@@ -251387,10 +251365,10 @@ def video_dubbing_next_screen_after_source(user_id, state: dict, lang: str = "vi
             video_processing_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
             requested_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
             active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
-            flow_type=flow_type,
-            combo_subpath=combo_subpath,
-            output_type=output_type,
-            output_format=output_type,
+            flow_type=VIDEO_DUBBING_FLOW_NO_SUBTITLE,
+            combo_subpath="",
+            output_type="video_subtitle",
+            output_format="video_subtitle",
             translate_requested="1",
         )
         return state, video_dubbing_language_text(state, lang), video_dubbing_language_keyboard(lang, state)
@@ -252278,12 +252256,20 @@ async def handle_video_dubbing_callback(
                 reply_markup=subtitle_plus_dub_translation_language_keyboard(lang),
             )
         if action in {"combo_back_original", "combo_back_subtitle_ready"}:
-            state = set_video_dubbing_pending(uid, "original_subtitle_ready", processing="0")
+            state = set_video_dubbing_pending(
+                uid,
+                "choosing_translation_language",
+                target_language="",
+                translate_requested="1",
+                dub_text_source="translated",
+                dub_source="translated_subtitle",
+                processing="0",
+            )
             return await safe_edit_or_send(
                 query,
-                subtitle_plus_dub_original_ready_text(state, lang),
+                subtitle_plus_dub_translation_language_text(lang),
                 parse_mode="HTML",
-                reply_markup=subtitle_plus_dub_original_ready_keyboard(lang),
+                reply_markup=subtitle_plus_dub_translation_language_keyboard(lang),
             )
         if action == "combo_translate":
             state = set_video_dubbing_pending(uid, "choosing_translation_language", target_language="", processing="0")
