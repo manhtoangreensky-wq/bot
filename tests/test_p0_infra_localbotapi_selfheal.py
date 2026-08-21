@@ -717,7 +717,7 @@ def test_snapshot_storage_rejects_wrong_mode_and_owner(monkeypatch, tmp_path):
     monkeypatch.setattr(
         apply_module.os,
         "lstat",
-        lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o640, st_uid=0, st_nlink=1),
+        lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o640, st_uid=0, st_nlink=1, st_file_attributes=0),
     )
     with pytest.raises(apply_module.ApplyError, match="storage mode"):
         apply_module._validate_snapshot_storage(snapshot_file, 0o600)
@@ -725,7 +725,7 @@ def test_snapshot_storage_rejects_wrong_mode_and_owner(monkeypatch, tmp_path):
     monkeypatch.setattr(
         apply_module.os,
         "lstat",
-        lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=1000, st_nlink=1),
+        lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=1000, st_nlink=1, st_file_attributes=0),
     )
     with pytest.raises(apply_module.ApplyError, match="owner"):
         apply_module._validate_snapshot_storage(snapshot_file, 0o600)
@@ -733,7 +733,7 @@ def test_snapshot_storage_rejects_wrong_mode_and_owner(monkeypatch, tmp_path):
     monkeypatch.setattr(
         apply_module.os,
         "lstat",
-        lambda _path: SimpleNamespace(st_mode=stat.S_IFIFO | 0o600, st_uid=0, st_nlink=1),
+        lambda _path: SimpleNamespace(st_mode=stat.S_IFIFO | 0o600, st_uid=0, st_nlink=1, st_file_attributes=0),
     )
     with pytest.raises(apply_module.ApplyError, match="type"):
         apply_module._validate_snapshot_storage(snapshot_file, 0o600)
@@ -741,7 +741,7 @@ def test_snapshot_storage_rejects_wrong_mode_and_owner(monkeypatch, tmp_path):
     monkeypatch.setattr(
         apply_module.os,
         "lstat",
-        lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=0, st_nlink=2),
+        lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=0, st_nlink=2, st_file_attributes=0),
     )
     with pytest.raises(apply_module.ApplyError, match="hard link"):
         apply_module._validate_snapshot_storage(snapshot_file, 0o600)

@@ -91,3 +91,4 @@ Các tiện ích mở rộng trong **Bộ Công Cụ Miễn Phí** sử dụng c
 - **Tạo mã QR:** `QR Server API` (Sinh ảnh mã QR tức thì)
 - **Sinh Avatar AI:** `DiceBear Open Avatar Engine` (Bottts, Avataaars, Croodles, Personas)
 - **Dịch thuật:** `MyMemory Open Translation API` (Hỗ trợ hơn 100+ ngôn ngữ)
+>>>>>>> origin/main

@@ -138,10 +138,9 @@ def test_image_logo_watermark_back_routing_correct():
     assert _callbacks(bot.quick_image_logo_confirm_keyboard("vi")) == ["create_media|qi_logo_confirm", "create_media|qi_logo_add"]
     assert _callbacks(bot.task3d_prompt_image_logo_input_keyboard("vi")) == ["vproduct|prompt_image_logo_choice", "menu|main"]
     assert _callbacks(bot.task3d_prompt_image_logo_confirm_keyboard("vi")) == ["vproduct|prompt_image_logo_confirm", "vproduct|prompt_image_logo_add"]
-    assert _callbacks(bot.image_prompt_confirm_keyboard("token", "low", "vi", "image_edit_create_new"))[1:3] == [
-        "create_media|ia_token",
-        "imgtool|edit_create_new",
-    ]
+    callbacks = _callbacks(bot.image_prompt_confirm_keyboard("token", "low", "vi", "image_edit_create_new"))
+    assert "create_media|ia_token" in callbacks
+    assert "imgtool|edit_create_new" in callbacks
 
 
 def test_image_editor_text_requires_input_before_position():

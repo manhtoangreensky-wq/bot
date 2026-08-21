@@ -64,6 +64,7 @@ def test_music_menu_still_visible():
 
 def test_video_subtitle_public_action_allows_real_srt_without_mux(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "get_subdub_lane_readiness", lambda *_args, **_kwargs: {"effective_ready": True, "blockers": []})
     monkeypatch.setattr(bot, "is_asr_ready", lambda: True)
     monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": False, "ffmpeg_path_configured": True})
     assert bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_CREATE)
@@ -71,6 +72,7 @@ def test_video_subtitle_public_action_allows_real_srt_without_mux(monkeypatch):
 
 def test_video_dub_public_action_allows_real_audio_without_mux(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "get_subdub_lane_readiness", lambda *_args, **_kwargs: {"effective_ready": True, "blockers": []})
     monkeypatch.setattr(bot, "is_asr_ready", lambda: True)
     monkeypatch.setattr(bot, "is_dub_ready", lambda: True)
     monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": False, "ffmpeg_path_configured": True})
@@ -79,6 +81,7 @@ def test_video_dub_public_action_allows_real_audio_without_mux(monkeypatch):
 
 def test_subtitle_plus_dub_public_action_allows_partial_outputs_without_mux(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "get_subdub_lane_readiness", lambda *_args, **_kwargs: {"effective_ready": True, "blockers": []})
     monkeypatch.setattr(bot, "is_asr_ready", lambda: True)
     monkeypatch.setattr(bot, "is_translate_ready", lambda: True)
     monkeypatch.setattr(bot, "is_dub_ready", lambda: True)
@@ -88,6 +91,7 @@ def test_subtitle_plus_dub_public_action_allows_partial_outputs_without_mux(monk
 
 def test_translation_public_ready_does_not_require_mux_for_partial_outputs(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "get_subdub_lane_readiness", lambda *_args, **_kwargs: {"effective_ready": True, "blockers": []})
     monkeypatch.setattr(bot, "is_asr_ready", lambda: True)
     monkeypatch.setattr(bot, "is_translate_ready", lambda: True)
     monkeypatch.setattr(bot, "is_dub_ready", lambda: True)

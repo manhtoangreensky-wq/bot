@@ -6,9 +6,13 @@ from services import storage_maintenance
 
 def _sqlite_backup(path: Path, value: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as conn:
+    conn = sqlite3.connect(path)
+    try:
         conn.execute("create table t (value integer)")
         conn.execute("insert into t values (?)", (value,))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _config(root: Path) -> storage_maintenance.StorageConfig:

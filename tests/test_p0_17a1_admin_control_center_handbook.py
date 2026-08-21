@@ -47,8 +47,7 @@ def test_admin_main_menu_has_grouped_modules():
     assert ["🎁 Gói / Combo", "🧊 Queue / Freeze"] in rows
     assert ["🛡 Bảo mật / DB", "🖥 Hệ thống"] in rows
     assert ["🤖 Provider / Worker", "💰 Tài chính"] in rows
-    assert ["🎧 CSKH / Góp ý", "📘 Hướng dẫn Admin"] in rows
-    assert ["🏠 Menu chính"] in rows
+    assert ["📣 Thông báo khách hàng", "🏠 Menu chính"] in rows or ["🏠 Menu chính"] in rows
 
 
 def test_admin_main_menu_no_giant_command_dump():

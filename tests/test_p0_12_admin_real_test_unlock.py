@@ -90,6 +90,11 @@ def test_admin_real_test_bypasses_mode_disabled(monkeypatch):
     monkeypatch.setattr(bot, "AgentDeepgram", object)
     monkeypatch.setattr(bot, "VIDEO_DUB_TTS_ENABLED", True)
     monkeypatch.setattr(bot, "video_tts_provider_available_for", lambda public=True: True)
+    monkeypatch.setattr(
+        bot,
+        "video_dubbing_capability",
+        lambda mode, state=None, public=False: {"ok": True, "reason": "ready", "missing": []} if not public else {"ok": False, "reason": "mode_disabled", "missing": ["mode_disabled"]},
+    )
 
     admin_decision = bot.can_user_access_product_engine(
         1,
