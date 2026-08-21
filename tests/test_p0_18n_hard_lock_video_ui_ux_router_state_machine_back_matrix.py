@@ -352,7 +352,7 @@ def test_video_back_never_main_menu_unless_main_button():
     _open(user_id, "video_trend")
     text, markup, session = _press(user_id, "vproduct|back")
     assert "Video TOAN AAS" in text
-    assert "vproduct|open|video_trend" in _callbacks(markup)
+    assert "vid3|entry|video_trend" in _callbacks(markup)
     assert "menu|main" in _callbacks(markup)
     assert session["current_step"] == bot.VIDEO_BACK_MENU_TARGET
 

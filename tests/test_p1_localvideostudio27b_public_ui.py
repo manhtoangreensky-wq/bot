@@ -3,11 +3,14 @@ from __future__ import annotations
 import ast
 import asyncio
 import copy
+import html
 import importlib
 import inspect
 import json
+import sqlite3
 import subprocess
 import textwrap
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,8 +26,6 @@ PREFIX = 'lvs27b'
 STATE_KEY = 'local_video_studio27b_public'
 ENTRY_LABEL = '🧭 Lập kế hoạch dựng video'
 ENTRY_CALLBACK = 'lvs27b|open'
-STATUS_LABEL = '📊 Trạng thái chỉnh sửa'
-STATUS_CALLBACK = 'videoedit|latest_status'
 PUBLIC_READINESS = {'CONTRACT_ONLY', 'LOCAL_PLANNING_READY', 'REQUIRES_RUNTIME', 'REQUIRES_PLANNED_SHOOT', 'NOT_SUPPORTED'}
 GOAL_IDS = {'cut_pacing', 'reframe', 'transition_motion', 'sound_post'}
 
@@ -81,6 +82,8 @@ def compile_public_adapter(svc, enabled):
         'ContextTypes': SimpleNamespace(DEFAULT_TYPE=object),
         'local_video_studio_public': svc,
         'local_video_studio_public_enabled': lambda: enabled['value'],
+        'menu_text_main_video_i18n': lambda _lang: 'MAIN VIDEO',
+        'main_video_keyboard': lambda _lang: FakeMarkup([]),
         'video_edit_hub_text': lambda _lang: 'VIDEO EDIT HUB',
         'video_edit_hub_keyboard': lambda _lang: FakeMarkup([]),
         'get_user_language': lambda _user_id: 'vi',
@@ -130,13 +133,13 @@ def test_flag_off_row_is_empty_and_flag_on_adds_exactly_one_secondary_action():
     assert svc.public_entry_rows('1') == ((ENTRY_LABEL, ENTRY_CALLBACK),)
     source = BOT_PATH.read_text(encoding='utf-8')
     assert 'LOCAL_VIDEO_STUDIO_PUBLIC_ENABLED' in source
-    assert ENTRY_LABEL in source
+    assert '🧭 Lên kế hoạch chỉnh sửa' in source
     assert ENTRY_CALLBACK in source
-    assert source.count(ENTRY_CALLBACK) == 1
+    assert source.count(ENTRY_CALLBACK) >= 1
     assert 'videoedit|ai' in source and 'videoedit|manual' in source
 
 
-def test_video_edit_hub_runtime_shape_keeps_status_between_primary_actions_and_optional_planning():
+def test_video_edit_hub_runtime_shape_excludes_detached_status_and_planning():
     source = BOT_PATH.read_text(encoding='utf-8')
     start = source.index('def video_edit_hub_keyboard(')
     end = source.index('\ndef video_edit_info_text(', start)
@@ -156,6 +159,12 @@ def test_video_edit_hub_runtime_shape_keeps_status_between_primary_actions_and_o
         'InlineKeyboardButton': FakeButton,
         'InlineKeyboardMarkup': FakeMarkup,
         'normalize_user_language': lambda _lang: 'vi',
+        'public_video_deep_copy': lambda _lang: {
+            'video_edit_ai': 'Chỉnh sửa AI',
+            'video_edit_manual': 'Chỉnh sửa thủ công',
+            'video_edit_restore': 'Nâng chất lượng',
+            'video_edit_guide': 'Hướng dẫn',
+        },
         'video_scene3_flow': importlib.import_module('services.video_scene3_flow'),
         'ui_text': lambda _lang, key: {'common.back': '⬅️ Quay lại', 'common.main_menu': '🏠 Menu chính'}[key],
         'local_video_studio_public_enabled': lambda: enabled['value'],
@@ -166,18 +175,18 @@ def test_video_edit_hub_runtime_shape_keeps_status_between_primary_actions_and_o
     assert [[button.callback_data for button in row] for row in off_rows] == [
         ['videoedit|ai', 'videoedit|manual'],
         ['videoedit|restore', 'videoedit|guide'],
-        [STATUS_CALLBACK],
         ['menu|main_video', 'menu|main'],
     ]
     enabled['value'] = True
     on_rows = keyboard('vi').inline_keyboard
-    assert [[button.callback_data for button in row] for row in on_rows[:2]] == [
+    assert [[button.callback_data for button in row] for row in on_rows] == [
         ['videoedit|ai', 'videoedit|manual'],
         ['videoedit|restore', 'videoedit|guide'],
+        ['menu|main_video', 'menu|main'],
     ]
-    assert [(button.text, button.callback_data) for button in on_rows[2]] == [(STATUS_LABEL, STATUS_CALLBACK)]
-    assert [(button.text, button.callback_data) for button in on_rows[3]] == [(ENTRY_LABEL, ENTRY_CALLBACK)]
-    assert [button.callback_data for button in on_rows[4]] == ['menu|main_video', 'menu|main']
+    callbacks = [button.callback_data for row in on_rows for button in row]
+    assert 'videoedit|latest_status' not in callbacks
+    assert ENTRY_CALLBACK not in callbacks
 
 def test_canonical_index_is_reused_without_public_capability_data_copy():
     svc = service()
@@ -996,6 +1005,8 @@ def test_fake_public_adapter_transactions_sessions_duplicate_and_root_back(monke
         'ContextTypes': SimpleNamespace(DEFAULT_TYPE=object),
         'local_video_studio_public': svc,
         'local_video_studio_public_enabled': lambda: True,
+        'menu_text_main_video_i18n': lambda _lang: 'MAIN VIDEO',
+        'main_video_keyboard': lambda _lang: FakeMarkup([]),
         'video_edit_hub_text': lambda _lang: 'VIDEO EDIT HUB',
         'video_edit_hub_keyboard': lambda _lang: FakeMarkup([]),
         'get_user_language': lambda _user_id: 'vi',
@@ -1257,10 +1268,10 @@ def test_flag_off_mid_session_allows_back_and_close_but_denies_forward(monkeypat
     events.clear()
     back = FakeQuery('q-back-off', svc.callback_data(opened['session_id'], 'back'))
     assert asyncio.run(handler(update_for(back), context)) is True
-    assert events[0][0:2] == ('edit', 'VIDEO EDIT HUB')
+    assert events[0][0:2] == ('edit', 'MAIN VIDEO')
     assert events[1:] == [
         'delete',
-        ('answer', 'Đã quay lại Chỉnh sửa video.', {}),
+        ('answer', 'Đã quay lại Menu Video.', {}),
     ]
     assert STATE_KEY not in context.user_data
 
@@ -1419,3 +1430,658 @@ def test_public_adapter_has_no_runtime_or_secret_path():
     assert 'planning_only' in source and 'provider_executable' in source and 'public_ui' in source
     assert 'runtime_registered' in source
     assert inspect.iscoroutinefunction(service().deliver_then_commit)
+
+
+# Option C adapter contract.  The capability adapter above remains as legacy
+# evidence, while the public bot route is now owned by video_planning_assistant.
+def planning_service():
+    return importlib.import_module('services.video_planning_assistant')
+
+
+def planning_store_module():
+    return importlib.import_module('services.local_video_planning_store')
+
+
+def planning_summary_session(svc, session_id='plan001'):
+    state = svc.new_session(session_id, now=int(time.time()))
+
+    def choose(verb, *args):
+        nonlocal state
+        state = svc.apply_callback(
+            state,
+            svc.callback_data(state['session_id'], verb, *args),
+        )['session']
+
+    choose('goal', 'cut_pacing')
+    state = svc.apply_text_input(
+        state,
+        'Video bán hàng cần nhanh, sáng, rõ lời nói và logo không che sản phẩm.',
+    )['session']
+    choose('platform', 'tiktok_9x16')
+    choose('source', '60_120')
+    choose('target', '30')
+    choose('asset', 'video')
+    choose('asset', 'logo')
+    choose('assets_done')
+    choose('priority', 'pace')
+    choose('priority', 'product_focus')
+    choose('priorities_done')
+    choose('operations_done')
+    choose('safety_done')
+    assert state['screen'] == 'summary'
+    return state
+
+
+class PlanningStoreProbe:
+    def __init__(self, module, events):
+        self._module = module
+        self._events = events
+
+    def __getattr__(self, name):
+        return getattr(self._module, name)
+
+    def save_plan_from_session(self, *args, **kwargs):
+        saved = self._module.save_plan_from_session(*args, **kwargs)
+        self._events.append(('persist', saved['plan_key'], saved['version']))
+        return saved
+
+    def soft_delete_plan(self, *args, **kwargs):
+        deleted = self._module.soft_delete_plan(*args, **kwargs)
+        self._events.append(('delete_commit', kwargs.get('plan_key'), deleted))
+        return deleted
+
+
+class PlanningFakeButton:
+    def __init__(self, text, callback_data):
+        self.text = text
+        self.callback_data = callback_data
+
+
+class PlanningFakeMarkup:
+    def __init__(self, rows):
+        self.inline_keyboard = rows
+
+
+class PlanningFakeMessage:
+    def __init__(self, events, *, chat_id=70, fail_reply=False):
+        self.events = events
+        self.chat_id = chat_id
+        self.chat = SimpleNamespace(id=chat_id)
+        self.fail_reply = fail_reply
+        self.replies = []
+
+    async def reply_text(self, text, **kwargs):
+        if self.fail_reply:
+            self.events.append(('reply_failed', text))
+            raise RuntimeError('reply failed')
+        self.events.append(('reply', text))
+        self.replies.append((text, kwargs.get('reply_markup')))
+        return True
+
+
+class PlanningFakeQuery:
+    def __init__(self, data, callback_id, events, *, chat_id=70, fail_edit=False, fail_reply=False):
+        self.data = data
+        self.id = callback_id
+        self.events = events
+        self.message = PlanningFakeMessage(events, chat_id=chat_id, fail_reply=fail_reply)
+        self.fail_edit = fail_edit
+        self.edits = []
+        self.answers = []
+
+    async def edit_message_text(self, text, **kwargs):
+        if self.fail_edit:
+            self.events.append(('edit_failed', text))
+            raise RuntimeError('edit failed')
+        self.events.append(('edit', text))
+        self.edits.append((text, kwargs.get('reply_markup')))
+        return True
+
+    async def answer(self, text='', **kwargs):
+        self.events.append(('answer', text))
+        self.answers.append((text, kwargs))
+        return True
+
+
+def compile_option_c_adapter(db_path, events, enabled=None):
+    source = BOT_PATH.read_text(encoding='utf-8')
+    start = source.index('# --- LOCAL VIDEO STUDIO 27B PUBLIC ---')
+    end = source.index('# --- END LOCAL VIDEO STUDIO 27B PUBLIC ---')
+    svc = planning_service()
+    store = planning_store_module()
+    enabled = enabled if isinstance(enabled, dict) else {'value': True}
+    namespace = {
+        'InlineKeyboardButton': PlanningFakeButton,
+        'InlineKeyboardMarkup': PlanningFakeMarkup,
+        'Update': object,
+        'ContextTypes': SimpleNamespace(DEFAULT_TYPE=object),
+        'local_video_studio_public': svc,
+        'local_video_planning_store': PlanningStoreProbe(store, events),
+        'local_video_studio_public_enabled': lambda: enabled['value'],
+        '_planning_enabled': enabled,
+        'menu_text_main_video_i18n': lambda _lang: 'MAIN VIDEO',
+        'main_video_keyboard': lambda _lang: PlanningFakeMarkup([]),
+        'get_user_language': lambda _user_id: 'vi',
+        'normalize_user_language': lambda _lang: 'vi',
+        'db_connect': lambda: sqlite3.connect(str(db_path)),
+        'copy': copy,
+        'html': html,
+        'sqlite3': sqlite3,
+        'time': time,
+    }
+    exec(compile(source[start:end], '<option_c_adapter>', 'exec'), namespace)
+    return namespace
+
+
+def planning_update(query=None, *, user_id=7, chat_id=70, message=None):
+    return SimpleNamespace(
+        callback_query=query,
+        message=message,
+        effective_user=SimpleNamespace(id=user_id),
+        effective_chat=SimpleNamespace(id=chat_id),
+    )
+
+
+def planning_context_with_session(svc, state, *, user_id=7, chat_id=70):
+    store = svc.new_store()
+    svc.put_session(store, str(user_id), str(chat_id), state)
+    return SimpleNamespace(user_data={svc.STATE_KEY: store, 'video_edit_sentinel': {'unchanged': True}})
+
+
+def markup_callbacks(markup):
+    return [button.callback_data for row in markup.inline_keyboard for button in row]
+
+
+def test_option_c_bot_wiring_uses_new_service_schema_and_public_route_copy():
+    source = BOT_PATH.read_text(encoding='utf-8')
+    assert 'from services import video_planning_assistant as local_video_studio_public' in source
+    assert 'from services import local_video_planning_store' in source
+    init_start = source.index('def init_db():')
+    init_end = source.index('\ndef now_text():', init_start)
+    init_source = source[init_start:init_end]
+    assert 'local_video_planning_store.ensure_schema(conn)' in init_source
+    public_start = source.index('# --- LOCAL VIDEO STUDIO 27B PUBLIC ---')
+    public_end = source.index('# --- END LOCAL VIDEO STUDIO 27B PUBLIC ---')
+    public_source = source[public_start:public_end]
+    assert 'conn.row_factory = sqlite3.Row' in public_source
+    route_start = source.index('"video_edit_planning": {')
+    route_end = source.index('\n    "video_guide": {', route_start)
+    route_source = source[route_start:route_end]
+    assert '"label_vi": "🧭 Lên kế hoạch chỉnh sửa"' in route_source
+    assert '"invoice_reachable": False' in route_source
+    assert '"job_reachable": False' in route_source
+    assert source.count('CallbackQueryHandler(handle_local_video_studio_public_callback, pattern=r"^lvs27b\\|")') == 1
+
+
+def test_option_c_persist_precedes_success_copy_and_failed_confirmation_is_idempotent(tmp_path):
+    svc = planning_service()
+    store = planning_store_module()
+    db_path = tmp_path / 'plans.sqlite3'
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        store.ensure_schema(conn)
+    state = planning_summary_session(svc)
+    context = planning_context_with_session(svc, state)
+    callback = svc.callback_data(state['session_id'], 'persist')
+
+    failed_events = []
+    failed_ns = compile_option_c_adapter(db_path, failed_events)
+    failed_query = PlanningFakeQuery(
+        callback,
+        'persist-failed',
+        failed_events,
+        fail_edit=True,
+        fail_reply=True,
+    )
+    assert asyncio.run(failed_ns['handle_local_video_studio_public_callback'](
+        planning_update(failed_query), context,
+    )) is False
+    assert failed_events and failed_events[0][0] == 'persist'
+    assert not any('Đã lưu' in event[1] for event in failed_events if event[0] in {'edit', 'reply'})
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute('SELECT COUNT(*) FROM local_video_plans').fetchone()[0] == 1
+
+    retry_events = []
+    retry_ns = compile_option_c_adapter(db_path, retry_events)
+    retry_query = PlanningFakeQuery(callback, 'persist-retry', retry_events)
+    assert asyncio.run(retry_ns['handle_local_video_studio_public_callback'](
+        planning_update(retry_query), context,
+    )) is True
+    assert retry_events[0][0] == 'persist'
+    assert retry_events[0][1:] == failed_events[0][1:]
+    assert retry_events[1][0] == 'edit' and 'Đã lưu' in retry_events[1][1]
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute('SELECT COUNT(*) FROM local_video_plans').fetchone()[0] == 1
+
+
+def test_option_c_library_view_and_confirmed_delete_are_owner_chat_scoped(tmp_path):
+    svc = planning_service()
+    store = planning_store_module()
+    db_path = tmp_path / 'plans.sqlite3'
+    state = planning_summary_session(svc, 'plan002')
+    foreign_owner_state = planning_summary_session(svc, 'plan003')
+    foreign_chat_state = planning_summary_session(svc, 'plan005')
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        store.ensure_schema(conn)
+        saved = store.save_plan_from_session(
+            conn,
+            owner_id='7',
+            chat_id='70',
+            source_session_id=state['session_id'],
+            plan=svc.serialize_plan(state),
+            summary_text=svc.planning_summary_text(state),
+        )
+        foreign_owner_saved = store.save_plan_from_session(
+            conn,
+            owner_id='8',
+            chat_id='70',
+            source_session_id=foreign_owner_state['session_id'],
+            plan=svc.serialize_plan(foreign_owner_state),
+            summary_text=svc.planning_summary_text(foreign_owner_state),
+        )
+        foreign_chat_saved = store.save_plan_from_session(
+            conn,
+            owner_id='7',
+            chat_id='71',
+            source_session_id=foreign_chat_state['session_id'],
+            plan=svc.serialize_plan(foreign_chat_state),
+            summary_text=svc.planning_summary_text(foreign_chat_state),
+        )
+    plan_key = saved['plan_key']
+    events = []
+    namespace = compile_option_c_adapter(db_path, events)
+    context = planning_context_with_session(svc, state)
+    handler = namespace['handle_local_video_studio_public_callback']
+
+    list_query = PlanningFakeQuery(svc.callback_data(state['session_id'], 'plans'), 'plans-1', events)
+    assert asyncio.run(handler(planning_update(list_query), context)) is True
+    listed_callbacks = markup_callbacks(list_query.edits[-1][1])
+    assert svc.callback_data(state['session_id'], 'view', plan_key) in listed_callbacks
+    assert not any(foreign_owner_saved['plan_key'] in callback for callback in listed_callbacks)
+    assert not any(foreign_chat_saved['plan_key'] in callback for callback in listed_callbacks)
+
+    view_query = PlanningFakeQuery(
+        svc.callback_data(state['session_id'], 'view', plan_key),
+        'view-owner',
+        events,
+    )
+    assert asyncio.run(handler(planning_update(view_query), context)) is True
+    assert saved['summary_text'] in view_query.edits[-1][0]
+    owner_view_callbacks = markup_callbacks(view_query.edits[-1][1])
+    assert svc.callback_data(state['session_id'], 'edit', plan_key) in owner_view_callbacks
+    assert svc.callback_data(state['session_id'], 'delete', plan_key) in owner_view_callbacks
+    assert svc.callback_data(state['session_id'], 'library') in owner_view_callbacks
+
+    library_back_query = PlanningFakeQuery(
+        svc.callback_data(state['session_id'], 'library'),
+        'library-back',
+        events,
+    )
+    assert asyncio.run(handler(planning_update(library_back_query), context)) is True
+    assert svc.callback_data(state['session_id'], 'view', plan_key) in markup_callbacks(library_back_query.edits[-1][1])
+    current_callback = svc.callback_data(state['session_id'], 'current')
+    assert current_callback in markup_callbacks(library_back_query.edits[-1][1])
+    current_query = PlanningFakeQuery(current_callback, 'library-current', events)
+    assert asyncio.run(handler(planning_update(current_query), context)) is True
+    assert 'KẾ HOẠCH CHỈNH SỬA' in current_query.edits[-1][0]
+
+    edit_query = PlanningFakeQuery(
+        svc.callback_data(state['session_id'], 'edit', plan_key),
+        'edit-owner',
+        events,
+    )
+    assert asyncio.run(handler(planning_update(edit_query), context)) is True
+    reopened = svc.get_session(context.user_data[svc.STATE_KEY], '7', '70', state['session_id'])
+    assert reopened['screen'] == 'summary' and reopened['plan_id'] == plan_key
+
+    for callback_id, verb, args in (
+        ('edit-back-safety', 'back', ()),
+        ('edit-back-operations', 'back', ()),
+        ('edit-toggle-watermark', 'op', ('watermark',)),
+        ('edit-operations-done', 'operations_done', ()),
+        ('edit-safety-done', 'safety_done', ()),
+        ('edit-persist', 'persist', ()),
+    ):
+        current = svc.get_session(context.user_data[svc.STATE_KEY], '7', '70', state['session_id'])
+        query = PlanningFakeQuery(
+            svc.callback_data(current['session_id'], verb, *args),
+            callback_id,
+            events,
+        )
+        assert asyncio.run(handler(planning_update(query), context)) is True
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        updated_saved = store.get_plan(conn, owner_id='7', chat_id='70', plan_key=plan_key)
+        assert updated_saved['version'] == 2
+        assert 'watermark' in updated_saved['plan']['selected_operations']
+        assert conn.execute(
+            "SELECT COUNT(*) FROM local_video_plans WHERE owner_id='7' AND chat_id='70' AND deleted_at=''"
+        ).fetchone()[0] == 1
+
+    foreign_context = planning_context_with_session(svc, foreign_owner_state, user_id=8, chat_id=70)
+    foreign_query = PlanningFakeQuery(
+        svc.callback_data(foreign_owner_state['session_id'], 'view', plan_key),
+        'view-foreign',
+        events,
+    )
+    asyncio.run(handler(planning_update(foreign_query, user_id=8), foreign_context))
+    assert not foreign_query.edits
+
+    foreign_chat_context = planning_context_with_session(svc, foreign_chat_state, user_id=7, chat_id=71)
+    foreign_chat_query = PlanningFakeQuery(
+        svc.callback_data(foreign_chat_state['session_id'], 'view', plan_key),
+        'view-foreign-chat',
+        events,
+        chat_id=71,
+    )
+    asyncio.run(handler(planning_update(foreign_chat_query, user_id=7, chat_id=71), foreign_chat_context))
+    assert not foreign_chat_query.edits
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        assert store.get_plan(conn, owner_id='7', chat_id='70', plan_key=plan_key) is not None
+
+    delete_query = PlanningFakeQuery(
+        svc.callback_data(state['session_id'], 'delete', plan_key),
+        'delete-ask',
+        events,
+    )
+    assert asyncio.run(handler(planning_update(delete_query), context)) is True
+    assert svc.callback_data(state['session_id'], 'delete_confirm', plan_key) in markup_callbacks(delete_query.edits[-1][1])
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        assert store.get_plan(conn, owner_id='7', chat_id='70', plan_key=plan_key) is not None
+
+    failed_delete_events_start = len(events)
+    failed_confirm_query = PlanningFakeQuery(
+        svc.callback_data(state['session_id'], 'delete_confirm', plan_key),
+        'delete-confirm-failed',
+        events,
+        fail_edit=True,
+        fail_reply=True,
+    )
+    assert asyncio.run(handler(planning_update(failed_confirm_query), context)) is False
+    assert not any(event[0] == 'delete_commit' for event in events[failed_delete_events_start:])
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        assert store.get_plan(conn, owner_id='7', chat_id='70', plan_key=plan_key) is not None
+
+    success_events_start = len(events)
+    confirm_query = PlanningFakeQuery(
+        svc.callback_data(state['session_id'], 'delete_confirm', plan_key),
+        'delete-confirm',
+        events,
+    )
+    assert asyncio.run(handler(planning_update(confirm_query), context)) is True
+    success_events = events[success_events_start:]
+    assert next(i for i, event in enumerate(success_events) if event[0] == 'edit') < next(
+        i for i, event in enumerate(success_events) if event[0] == 'delete_commit'
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        assert store.get_plan(conn, owner_id='7', chat_id='70', plan_key=plan_key) is None
+    active_sid = context.user_data[svc.STATE_KEY]['active_by_chat']['7:70']
+    assert active_sid == state['session_id']
+    after_delete = svc.get_session(context.user_data[svc.STATE_KEY], '7', '70', active_sid)
+    assert after_delete['plan_id'] == ''
+
+    current_after_delete = PlanningFakeQuery(
+        svc.callback_data(active_sid, 'current'),
+        'current-after-delete',
+        events,
+    )
+    assert asyncio.run(handler(planning_update(current_after_delete), context)) is True
+    save_again = PlanningFakeQuery(
+        svc.callback_data(active_sid, 'persist'),
+        'save-after-delete',
+        events,
+    )
+    assert asyncio.run(handler(planning_update(save_again), context)) is True
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        assert len(store.list_plans(conn, owner_id='7', chat_id='70')) == 1
+
+
+def test_option_c_pending_brief_is_exact_session_scoped_and_precedes_generic_routing(tmp_path):
+    svc = planning_service()
+    events = []
+    namespace = compile_option_c_adapter(tmp_path / 'plans.sqlite3', events)
+    assert 'handle_local_video_planning_pending_text' in namespace
+    state = svc.new_session('plan004')
+    context = planning_context_with_session(svc, state)
+    goal_query = PlanningFakeQuery(
+        svc.callback_data(state['session_id'], 'goal', 'cut_pacing'),
+        'goal-1',
+        events,
+    )
+    handler = namespace['handle_local_video_studio_public_callback']
+    assert asyncio.run(handler(planning_update(goal_query), context)) is True
+    stored = svc.get_session(context.user_data[svc.STATE_KEY], '7', '70', state['session_id'])
+    assert stored['screen'] == 'brief'
+
+    other_message = PlanningFakeMessage(events, chat_id=71)
+    other_message.text = 'Không được lấy nhầm chat này.'
+    assert asyncio.run(namespace['handle_local_video_planning_pending_text'](
+        planning_update(user_id=7, chat_id=71, message=other_message), context,
+    )) is False
+    assert svc.get_session(context.user_data[svc.STATE_KEY], '7', '70', state['session_id'])['screen'] == 'brief'
+
+    other_user_message = PlanningFakeMessage(events, chat_id=70)
+    other_user_message.text = 'Không được lấy nhầm người dùng này.'
+    assert asyncio.run(namespace['handle_local_video_planning_pending_text'](
+        planning_update(user_id=8, chat_id=70, message=other_user_message), context,
+    )) is False
+    assert svc.get_session(context.user_data[svc.STATE_KEY], '7', '70', state['session_id'])['screen'] == 'brief'
+
+    namespace['_planning_enabled']['value'] = False
+    disabled_message = PlanningFakeMessage(events, chat_id=70)
+    disabled_message.text = 'Không được nhận nội dung khi tính năng đang tắt.'
+    assert asyncio.run(namespace['handle_local_video_planning_pending_text'](
+        planning_update(user_id=7, chat_id=70, message=disabled_message), context,
+    )) is True
+    disabled_state = svc.get_session(context.user_data[svc.STATE_KEY], '7', '70', state['session_id'])
+    assert disabled_state['screen'] == 'brief' and disabled_state['editing_brief'] == ''
+    namespace['_planning_enabled']['value'] = True
+
+    message = PlanningFakeMessage(events, chat_id=70)
+    message.text = 'Giữ đoạn 00:08–00:28, tăng sáng nhẹ và logo không che sản phẩm.'
+    assert asyncio.run(namespace['handle_local_video_planning_pending_text'](
+        planning_update(user_id=7, chat_id=70, message=message), context,
+    )) is True
+    updated = svc.get_session(context.user_data[svc.STATE_KEY], '7', '70', state['session_id'])
+    assert updated['screen'] == 'platform'
+    assert updated['editing_brief'] == message.text
+    assert context.user_data['video_edit_sentinel'] == {'unchanged': True}
+
+    source = BOT_PATH.read_text(encoding='utf-8')
+    start = source.index('async def handle_message(')
+    end = source.index('\n    normalized_music_command', start)
+    message_source = source[start:end]
+    planning_index = message_source.index('handle_local_video_planning_pending_text')
+    assert message_source.index('get_video_editor_pending') < planning_index
+    assert message_source.index('handle_manual_topup_pending_text') < planning_index
+    assert planning_index < message_source.index('handle_video_product_pending_text')
+    assert planning_index < message_source.index('handle_aichat_message')
+
+
+def test_option_c_expired_pending_brief_is_released_even_when_feature_is_off(tmp_path):
+    svc = planning_service()
+    events = []
+    enabled = {'value': False}
+    namespace = compile_option_c_adapter(tmp_path / 'plans.sqlite3', events, enabled=enabled)
+    state = svc.new_session('plan006')
+    state = svc.apply_callback(
+        state,
+        svc.callback_data(state['session_id'], 'goal', 'cut_pacing'),
+    )['session']
+    context = planning_context_with_session(svc, state)
+    marker_key = namespace['_LOCAL_VIDEO_PLANNING_PENDING_KEY']
+    context.user_data[marker_key] = {
+        'user_id': '7',
+        'chat_id': '70',
+        'session_id': state['session_id'],
+        'expires_at': int(time.time()) - 1,
+    }
+    message = PlanningFakeMessage(events, chat_id=70)
+    message.text = 'Tin nhắn này không còn thuộc phiên planner.'
+
+    consumed = asyncio.run(namespace['handle_local_video_planning_pending_text'](
+        planning_update(user_id=7, chat_id=70, message=message), context,
+    ))
+
+    assert consumed is False
+    assert marker_key not in context.user_data
+    assert not message.replies
+
+
+def test_deleting_opened_plan_then_saving_never_overwrites_another_source_plan(tmp_path):
+    svc = planning_service()
+    store = planning_store_module()
+    db_path = tmp_path / 'plans.sqlite3'
+    state_a = planning_summary_session(svc, 'plan101')
+    state_a['editing_brief'] = 'Nội dung riêng của kế hoạch A.'
+    state_a = svc.normalize_session(state_a)
+    state_b = planning_summary_session(svc, 'plan102')
+    state_b['editing_brief'] = 'Nội dung riêng của kế hoạch B.'
+    state_b = svc.normalize_session(state_b)
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        store.ensure_schema(conn)
+        saved_a = store.save_plan_from_session(
+            conn,
+            owner_id='7',
+            chat_id='70',
+            source_session_id=state_a['session_id'],
+            plan=svc.serialize_plan(state_a),
+            summary_text=svc.planning_summary_text(state_a),
+        )
+        saved_b = store.save_plan_from_session(
+            conn,
+            owner_id='7',
+            chat_id='70',
+            source_session_id=state_b['session_id'],
+            plan=svc.serialize_plan(state_b),
+            summary_text=svc.planning_summary_text(state_b),
+        )
+
+    events = []
+    namespace = compile_option_c_adapter(db_path, events)
+    context = planning_context_with_session(svc, state_a)
+    handler = namespace['handle_local_video_studio_public_callback']
+
+    edit_query = PlanningFakeQuery(
+        svc.callback_data(state_a['session_id'], 'edit', saved_b['plan_key']),
+        'identity-edit-b',
+        events,
+    )
+    assert asyncio.run(handler(planning_update(edit_query), context)) is True
+    delete_query = PlanningFakeQuery(
+        svc.callback_data(state_a['session_id'], 'delete_confirm', saved_b['plan_key']),
+        'identity-delete-b',
+        events,
+    )
+    assert asyncio.run(handler(planning_update(delete_query), context)) is True
+
+    active_sid = context.user_data[svc.STATE_KEY]['active_by_chat']['7:70']
+    persist_query = PlanningFakeQuery(
+        svc.callback_data(active_sid, 'persist'),
+        'identity-save-detached-b',
+        events,
+    )
+    assert asyncio.run(handler(planning_update(persist_query), context)) is True
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        preserved_a = store.get_plan(
+            conn, owner_id='7', chat_id='70', plan_key=saved_a['plan_key']
+        )
+        active = store.list_plans(conn, owner_id='7', chat_id='70')
+    assert preserved_a['plan']['editing_brief'] == state_a['editing_brief']
+    assert len(active) == 2
+    assert any(item['plan']['editing_brief'] == state_b['editing_brief'] for item in active)
+
+
+def test_delete_commit_failure_keeps_the_existing_session_and_callbacks_usable(tmp_path):
+    svc = planning_service()
+    store = planning_store_module()
+    db_path = tmp_path / 'plans.sqlite3'
+    state = planning_summary_session(svc, 'plan201')
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        store.ensure_schema(conn)
+        saved = store.save_plan_from_session(
+            conn,
+            owner_id='7',
+            chat_id='70',
+            source_session_id=state['session_id'],
+            plan=svc.serialize_plan(state),
+            summary_text=svc.planning_summary_text(state),
+        )
+    events = []
+    namespace = compile_option_c_adapter(db_path, events)
+    context = planning_context_with_session(svc, state)
+    handler = namespace['handle_local_video_studio_public_callback']
+    edit_query = PlanningFakeQuery(
+        svc.callback_data(state['session_id'], 'edit', saved['plan_key']),
+        'delete-failure-edit',
+        events,
+    )
+    assert asyncio.run(handler(planning_update(edit_query), context)) is True
+
+    def fail_delete(*_args, **_kwargs):
+        raise sqlite3.OperationalError('forced delete failure')
+
+    namespace['local_video_planning_store'].soft_delete_plan = fail_delete
+    delete_query = PlanningFakeQuery(
+        svc.callback_data(state['session_id'], 'delete_confirm', saved['plan_key']),
+        'delete-failure-confirm',
+        events,
+    )
+    assert asyncio.run(handler(planning_update(delete_query), context)) is False
+
+    active_sid = context.user_data[svc.STATE_KEY]['active_by_chat']['7:70']
+    assert active_sid == state['session_id']
+    retained = svc.get_session(context.user_data[svc.STATE_KEY], '7', '70', active_sid)
+    assert retained['plan_id'] == saved['plan_key']
+    assert all(callback.startswith(f"lvs27b|{active_sid}|") for callback in markup_callbacks(delete_query.edits[-1][1]))
+
+
+def test_deleting_another_plan_preserves_current_plan_optimistic_version(tmp_path):
+    svc = planning_service()
+    store = planning_store_module()
+    db_path = tmp_path / 'plans.sqlite3'
+    state_a = planning_summary_session(svc, 'plan301')
+    state_b = planning_summary_session(svc, 'plan302')
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        store.ensure_schema(conn)
+        saved_a = store.save_plan_from_session(
+            conn,
+            owner_id='7', chat_id='70', source_session_id=state_a['session_id'],
+            plan=svc.serialize_plan(state_a), summary_text=svc.planning_summary_text(state_a),
+        )
+        saved_b = store.save_plan_from_session(
+            conn,
+            owner_id='7', chat_id='70', source_session_id=state_b['session_id'],
+            plan=svc.serialize_plan(state_b), summary_text=svc.planning_summary_text(state_b),
+        )
+    events = []
+    namespace = compile_option_c_adapter(db_path, events)
+    context = planning_context_with_session(svc, state_a)
+    handler = namespace['handle_local_video_studio_public_callback']
+    edit_a = PlanningFakeQuery(
+        svc.callback_data(state_a['session_id'], 'edit', saved_a['plan_key']),
+        'version-edit-a', events,
+    )
+    assert asyncio.run(handler(planning_update(edit_a), context)) is True
+    delete_b = PlanningFakeQuery(
+        svc.callback_data(state_a['session_id'], 'delete_confirm', saved_b['plan_key']),
+        'version-delete-b', events,
+    )
+    assert asyncio.run(handler(planning_update(delete_b), context)) is True
+    persist_a = PlanningFakeQuery(
+        svc.callback_data(state_a['session_id'], 'persist'),
+        'version-persist-a', events,
+    )
+    assert asyncio.run(handler(planning_update(persist_a), context)) is True
+    assert persist_a.edits and 'Đã lưu kế hoạch' in persist_a.edits[-1][0]

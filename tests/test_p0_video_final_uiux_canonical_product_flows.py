@@ -20,15 +20,19 @@ def _function_source(name: str) -> str:
     return BOT_SOURCE[start:end]
 
 
-def test_script_uses_canonical_count_ratio_source_order_and_long_form_bounds() -> None:
+def test_script_uses_canonical_script_first_order_and_long_form_bounds() -> None:
     sequence = video_flow7.product_sequence("script_image_video")
-    assert sequence[:3] == ("scene_count", "aspect_ratio", "content_source")
+    assert sequence[:6] == (
+        "script_source",
+        "content_setup_if_ai",
+        "full_script_review",
+        "scene_boundary_review",
+        "aspect_ratio",
+        "scene_plan",
+    )
     assert "script_mode" not in sequence
     assert "scene_count_confirm" not in sequence
-
-    public_open = _function_source("handle_video_product_callback")
-    assert '"script_image_video"}' in public_open
-    assert "start_at_scene_count=True" in public_open
+    assert "character" not in sequence
 
     bounds = _function_source("video_profile_scene_count_bounds")
     count_keyboard = _function_source("video_profile_scene1_count_keyboard")
@@ -37,7 +41,82 @@ def test_script_uses_canonical_count_ratio_source_order_and_long_form_bounds() -
     for count in (5, 6, 8, 10, 15, 20):
         assert f'"vprofile|count|{count}"' in count_keyboard
     assert '"vprofile|count|1"' in count_keyboard
+    assert "5–20 cảnh" in count_text
     assert "40–160 giây" in count_text
+
+
+def test_script_three_routes_start_at_their_real_input_without_count_first_detour() -> None:
+    callback = _function_source("handle_video_product_callback")
+    expected_steps = {
+        "script_ai": "script_ai_content_source",
+        "script_manual": "awaiting_existing_script",
+        "script_upload": "awaiting_script_file",
+    }
+    for branch, expected_step in expected_steps.items():
+        start = callback.index(f'if action == "{branch}"')
+        end = callback.find('\n        if action == "', start + 1)
+        block = callback[start : end if end >= 0 else len(callback)]
+        assert f'"{expected_step}"' in block
+        assert f'script_entry_route="{branch}"' in block
+        assert '"script_scene_count"' not in block
+
+    stale_start = callback.index(
+        'if action in {"script_entry_count_screen", "script_entry_count", '
+        '"script_entry_count_custom", "script_entry_ratio_screen", "script_entry_ratio"}'
+    )
+    stale_end = callback.index('if action == "script_goal_screen"', stale_start)
+    stale_block = callback[stale_start:stale_end]
+    assert "video_script_restore_parser_or_hub" in stale_block
+    assert '"script_scene_count"' not in stale_block
+    assert '"script_scene_ratio"' not in stale_block
+
+
+def test_script_custom_count_back_routes_and_ai_continuity_contract() -> None:
+    callback = _function_source("handle_video_product_callback")
+    text_handler = _function_source("handle_video_product_pending_text")
+    renderer = _function_source("video_script_render_step")
+    ai_prompt = (ROOT / "services" / "video_script_product.py").read_text(encoding="utf-8")
+    script_handoff = _function_source("video_flow7_start_confirmed_script_state")
+    scene_planner = (ROOT / "services" / "video_scene3_flow.py").read_text(encoding="utf-8")
+
+    assert 'current_step == "awaiting_script_entry_scene_count"' in text_handler
+    assert "video_script_restore_parser_or_hub" in text_handler
+    assert 'current_step == "awaiting_script_scene_count"' in text_handler
+    assert '"awaiting_script_ai_style": ("script_ai_ratio", "script_style_label")' in text_handler
+    assert "def duration_options(scene_count: int)" in ai_prompt
+    assert "def duration_bounds(scene_count: int)" in ai_prompt
+    duration_keyboard = _function_source("video_script_duration_keyboard")
+    assert "video_script_product.duration_options(5)" in duration_keyboard
+    assert "video_script_product.duration_options(10)" in duration_keyboard
+    assert "video_script_product.duration_options(15)" in duration_keyboard
+    assert "Nhịp chuẩn" in duration_keyboard
+    assert "Kịch bản dài" in duration_keyboard
+    assert "video_script_duration_keyboard(session)" in renderer
+
+    assert 'if action == "script_upload"' in callback
+    assert 'if action == "script_file_replace"' in callback
+    assert '"vproduct|script_file_review"' in callback
+    assert 'draft.get("script_file_back_callback")' in renderer
+    assert '"awaiting_existing_script": "vproduct|script_hub"' in renderer
+
+    scene_plan_keyboard = _function_source("video_scene3_scene_plan_keyboard")
+    assert '"vproduct|script_scene_review"' in scene_plan_keyboard
+    assert '"script_scene_review"' in callback
+    assert 'video_flow7_script_count_text(proposal)' in callback
+    assert 'video_scene3_flow.build_planning_package(state)' in script_handoff
+    assert '"scene_plan"' in script_handoff
+    assert '"character"' not in script_handoff
+
+    assert "KHÔNG phải một prompt video một cảnh" in ai_prompt
+    assert "mạch ngữ cảnh xuyên suốt" in ai_prompt
+    assert "prompt video chi tiết cho riêng cảnh đó" in ai_prompt
+    assert 'idea_scene_beats=semantic_beats' in script_handoff
+    assert 'script_text=raw_script' in script_handoff
+    assert 'manual_script_raw=raw_script' in script_handoff
+    assert 'context=selected_content[:1600]' not in script_handoff
+    assert '"context": selected_content[:1600]' in script_handoff
+    assert 'updated.get("idea_scene_beats")' in scene_planner
+    assert 'semantic_beats=semantic_beats' in scene_planner
 
 
 def test_ai_real_keeps_three_input_types_then_three_distinct_content_sources() -> None:
@@ -68,6 +147,70 @@ def test_ai_real_keeps_three_input_types_then_three_distinct_content_sources() -
         "vprofile|source|manual",
     ):
         assert callback in source_keyboard
+
+
+def test_reference_and_motion_entries_keep_their_distinct_product_flows() -> None:
+    callback = _function_source("handle_video_product_callback")
+    text_handler = _function_source("handle_video_product_pending_text")
+    media_handler = _function_source("handle_video_product_pending_media")
+    handoff = _function_source("video_flow7_start_single_scene_motion_state")
+    after_ratio = _function_source("video_flow7_after_ratio")
+    profile_callback = _function_source("handle_video_profile_studio_callback")
+    intro_keyboard = _function_source("task3d_product_intro_keyboard")
+
+    reference_block = callback[
+        callback.index('if value == "video_reference"') :
+        callback.index('if value == "motion_prompt"')
+    ]
+    assert "video_reference_hub_text(lang)" in reference_block
+    assert "video_reference_hub_keyboard(lang)" in reference_block
+    assert "start_public_video_scene2_step" not in reference_block
+
+    motion_block = callback[
+        callback.index('if value == "motion_prompt"') :
+        callback.index("current_session = get_video_session(uid)")
+    ]
+    assert "selected_scene_count=1" in motion_block
+    assert "scene_count=1" in motion_block
+    assert "task3d_product_intro_keyboard(value, lang)" in motion_block
+    assert '"video_ai_real", "video_reference", "motion_prompt", "multi_scene_film"' not in callback
+    assert '"vproduct|input_text|motion_prompt"' in intro_keyboard
+    assert '"vproduct|input_media|motion_prompt"' in intro_keyboard
+    assert 'product_id == "motion_prompt"' in text_handler
+    assert "video_flow7_start_single_scene_motion_state(" in text_handler
+    assert 'product_id == "motion_prompt"' in media_handler
+    assert "video_flow7_start_single_scene_motion_state(" in media_handler
+    assert '"motion_prompt"' in handoff
+    assert '"scene_count": 1' in handoff
+    assert '"selected_scene_count": 1' in handoff
+    assert '"step": "aspect_ratio"' in handoff
+    assert 'source_product_id == "motion_prompt"' in after_ratio
+    assert 'return updated, "content_source"' in after_ratio
+    assert 'source_product_id == "motion_prompt"' in profile_callback
+    assert "task3d_product_intro_text(source_product_id, lang)" in profile_callback
+
+    owner_guard_start = callback.index(
+        'session = get_video_session(uid)\n    product_id = str(session.get("product_id") or "")'
+    )
+    owner_guard = callback[
+        owner_guard_start : callback.index("script_actions =", owner_guard_start)
+    ]
+    assert 'if product_id == "video_reference":' in owner_guard
+    assert "video_reference_hub_keyboard(lang)" in owner_guard
+    assert 'if product_id == "motion_prompt" and (' in owner_guard
+    assert '(action, value)' in owner_guard
+    assert '("input_text", "motion_prompt")' in owner_guard
+    assert '("input_media", "motion_prompt")' in owner_guard
+    assert 'task3d_product_intro_keyboard("motion_prompt", lang)' in owner_guard
+
+    route_matrix = BOT_SOURCE[
+        BOT_SOURCE.index("VIDEO_PUBLIC_ROUTE_MATRIX =") :
+        BOT_SOURCE.index("def video_public_route_for_tool")
+    ]
+    assert '"flow_type": "reference_video_owner"' in route_matrix
+    assert '"first_step": "hub"' in route_matrix
+    assert '"flow_type": "single_scene_motion_prompt"' in route_matrix
+    assert '"videoref|start"' in route_matrix
 
 
 def test_all_public_product_ratio_screens_expose_only_four_ratios_and_navigation() -> None:

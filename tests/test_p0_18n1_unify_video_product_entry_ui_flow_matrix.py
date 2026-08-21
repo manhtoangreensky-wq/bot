@@ -402,7 +402,7 @@ def test_frame_video_back_menu_video():
     text, markup, session = _press(user_id, "vproduct|back")
     assert session["current_step"] == bot.VIDEO_BACK_MENU_TARGET
     assert "Video TOAN AAS" in text
-    assert "vproduct|open|video_trend" in _callbacks(markup)
+    assert "vid3|entry|video_trend" in _callbacks(markup)
 
 
 def test_prompt_vault_direct_search_no_profile_required():

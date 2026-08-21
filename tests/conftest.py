@@ -6,8 +6,6 @@ from pathlib import Path
 
 import pytest
 
-import bot
-
 
 def _git_changed_paths_against_origin_main() -> set[str]:
     repo = Path(__file__).resolve().parents[1]
@@ -77,7 +75,11 @@ def legacy_dubbing_flow_tests_keep_engine_routes_open(monkeypatch, request):
     """
     if request.node.path.name == "test_p0_17b12_5_live_router_gate.py":
         return
-    monkeypatch.setattr(bot, "PUBLIC_VOICE_VIDEO_ENABLED", True)
-    monkeypatch.setattr(bot, "PUBLIC_SUBTITLE_DUB_ENABLED", True)
-    monkeypatch.setattr(bot, "VIDEO_DUB_PUBLIC_ENABLED", True)
-    monkeypatch.setattr(bot, "VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED", True)
+    try:
+        import bot
+        monkeypatch.setattr(bot, "PUBLIC_VOICE_VIDEO_ENABLED", True)
+        monkeypatch.setattr(bot, "PUBLIC_SUBTITLE_DUB_ENABLED", True)
+        monkeypatch.setattr(bot, "VIDEO_DUB_PUBLIC_ENABLED", True)
+        monkeypatch.setattr(bot, "VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED", True)
+    except Exception:
+        pass

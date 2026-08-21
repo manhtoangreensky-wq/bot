@@ -17,6 +17,8 @@ from types import SimpleNamespace
 
 import pytest
 
+import local_worker
+
 from services import (
     video_edit_capabilities,
     video_edit_media_transport,
@@ -73,6 +75,11 @@ def _isolated_callback_flags() -> dict[str, ContextVar]:
 
 def _isolated_guard_dependencies(pending: dict) -> tuple[ContextVar, dict]:
     tracker = ContextVar("test_video_editor_state_write", default=None)
+    guard_snapshot = ContextVar("test_video_editor_guard_snapshot", default=None)
+    submission_committed = ContextVar(
+        "test_video_editor_submission_committed",
+        default=False,
+    )
 
     def snapshot(value) -> dict:
         return deepcopy(dict(value or {}))
@@ -97,19 +104,38 @@ def _isolated_guard_dependencies(pending: dict) -> tuple[ContextVar, dict]:
     async def rerender(*_args, **_kwargs):
         return None
 
+    async def notify_unavailable(*_args, **_kwargs):
+        return None
+
     class ApplicationHandlerStop(Exception):
+        pass
+
+    class VideoEditorStateCommitError(RuntimeError):
+        def __init__(self, reason: str, winner: dict | None = None) -> None:
+            super().__init__(reason)
+            self.winner = snapshot(winner)
+
+    class VideoEditorStateUnavailableError(RuntimeError):
         pass
 
     return tracker, {
         "ApplicationHandlerStop": ApplicationHandlerStop,
+        "VideoEditorStateCommitError": VideoEditorStateCommitError,
+        "VideoEditorStateUnavailableError": VideoEditorStateUnavailableError,
         "safe_int": lambda value, default=0: int(value or default),
         "video_editor_pending_key": lambda user_id: f"video_editor:{user_id}",
+        "get_video_editor_pending": lambda user_id: snapshot(
+            pending.get(f"video_editor:{user_id}") or {}
+        ),
         "video_editor_state_snapshot": snapshot,
         "rollback_video_editor_guard_state": rollback,
         "rerender_video_editor_after_stale_commit": rerender,
+        "notify_video_editor_state_unavailable": notify_unavailable,
         "get_user_language": lambda _uid: "vi",
         "html": html,
         "_VIDEO_EDITOR_STATE_WRITE": tracker,
+        "_VIDEO_EDITOR_GUARD_SNAPSHOT": guard_snapshot,
+        "_VIDEO_EDITOR_SUBMISSION_COMMITTED": submission_committed,
         "USER_PENDING": pending,
         **_isolated_callback_flags(),
     }
@@ -474,7 +500,8 @@ def test_restore_pick_without_source_enters_quality_upload_before_filter_gate() 
     source_guard = block.index('or not state.get("source_file_id")')
     filter_gate = block.index("video_edit_runtime_capability_admission")
     assert source_guard < filter_gate
-    assert "start_video_edit_lane_state(" in block
+    assert "replace_video_edit_lane_state(" in block
+    assert "callback_entry_state" in block
     assert '"quality_enhance"' in block
     assert 'video_edit_lane_upload_text("quality_enhance", lang)' in block
     assert 'selected_effect=feature_key' in block
@@ -797,7 +824,9 @@ def test_waiting_lane_reentry_rerenders_the_same_upload_screen() -> None:
             "get_video_editor_pending": lambda _uid: deepcopy(current_state),
             "video_edit_state_machine": video_edit_state_machine,
             "video_editor_normalize_action": lambda value: value,
+            "video_editor_callback_arity_valid": lambda _parts: True,
             "video_editor_split_callback_allowed": VIDEO_EDITOR_SPLIT_CALLBACK_ALLOWED,
+            "video_editor_state_snapshot": lambda value: deepcopy(dict(value or {})),
             "safe_edit_or_send": render,
             "video_edit_lane_upload_text": lambda mode, _lang: f"upload:{mode}",
             "video_edit_lane_upload_keyboard": lambda mode, _lang: f"keyboard:{mode}",
@@ -842,7 +871,9 @@ def test_hub_entry_does_not_clear_any_video_state_before_telegram_render_succeed
             "get_video_editor_pending": lambda _uid: {},
             "video_edit_state_machine": video_edit_state_machine,
             "video_editor_normalize_action": lambda value: value,
+            "video_editor_callback_arity_valid": lambda _parts: True,
             "video_editor_split_callback_allowed": VIDEO_EDITOR_SPLIT_CALLBACK_ALLOWED,
+            "video_editor_state_snapshot": lambda value: deepcopy(dict(value or {})),
             "clear_video_editor_competing_video_states": lambda *_args: events.append("clear-competing"),
             "clear_video_session": lambda *_args: events.append("clear-session"),
             "clear_video_editor_pending": lambda *_args: events.append("clear-pending"),
@@ -884,12 +915,14 @@ def test_lane_entry_commits_state_only_after_telegram_render(callback: str, edit
             "get_video_editor_pending": lambda _uid: {},
             "video_edit_state_machine": video_edit_state_machine,
             "video_editor_normalize_action": lambda value: value,
+            "video_editor_callback_arity_valid": lambda _parts: True,
             "video_editor_split_callback_allowed": VIDEO_EDITOR_SPLIT_CALLBACK_ALLOWED,
+            "video_editor_state_snapshot": lambda value: deepcopy(dict(value or {})),
             "clear_video_editor_competing_video_states": lambda *_args: events.append("clear-competing"),
             "clear_video_session": lambda *_args: events.append("clear-session"),
             "clear_video_editor_pending": lambda *_args: events.append("clear-pending"),
             "set_video_route_session": lambda *_args, **_kwargs: events.append("set-route"),
-            "start_video_edit_lane_state": lambda *_args, **_kwargs: events.append(f"start:{edit_mode}"),
+            "replace_video_edit_lane_state": lambda *_args, **_kwargs: events.append(f"replace:{edit_mode}"),
             "safe_edit_or_send": failed_render,
             "video_edit_lane_upload_text": lambda mode, _lang: f"upload:{mode}",
             "video_edit_lane_upload_keyboard": lambda mode, _lang: f"keyboard:{mode}",
@@ -1011,7 +1044,8 @@ def test_stale_review_recreates_a_complete_manual_upload_intake() -> None:
     review_end = callback.index('if action == "confirmation":', review_start)
     review = callback[review_start:review_end]
 
-    assert "start_video_edit_lane_state" in review
+    assert "replace_video_edit_lane_state" in review
+    assert "callback_entry_state" in review
     assert '"manual_edit"' in review
     assert video_edit_state_machine.start_lane("manual_edit")["awaiting_media"] is True
 
@@ -1092,12 +1126,15 @@ def test_runtime_capability_ui_requires_fresh_matching_worker_snapshot() -> None
     admission = _function_source("video_edit_runtime_capability_admission")
     status = _function_source("video_edit_worker_status_payload")
     assert 'worker.get("connected")' in admission
+    assert 'worker.get("job_scope")' in admission
     assert 'worker.get("worker_owner")' in admission
     assert 'worker.get("engine_route")' in admission
     assert 'worker.get("worker_id")' in admission
     assert 'worker.get("video_edit_filter_worker_id")' in admission
     assert "local_worker_filter_snapshot_owner_mismatch" in admission
-    assert 'get_system_setting("local_worker:ffmpeg_path_seen"' in status
+    assert '"local_worker:video_edit_ffmpeg_path_seen"' in status
+    assert '"local_worker:video_edit_job_scope"' in status
+    assert '"local_worker:video_edit_worker_id"' in status
     assert '"ffmpeg_path": reported_ffmpeg_path' in status
 
     heartbeat = _function_source("internal_worker_heartbeat")
@@ -1117,6 +1154,7 @@ def test_runtime_capability_ui_fails_closed_on_worker_identity_or_heartbeat() ->
         "ffprobe_path_configured": True,
         "heartbeat_contract_version": 1,
         "heartbeat_age_seconds": 1,
+        "job_scope": "video_edit_only",
         "worker_id": "video-edit-worker-1",
         "worker_owner": video_editengine1.OUTBOX_OWNER,
         "engine_route": video_editengine1.ENGINE_ROUTE,
@@ -1142,6 +1180,7 @@ def test_runtime_capability_ui_fails_closed_on_worker_identity_or_heartbeat() ->
     blockers = (
         ({"connected": False}, "local_worker_heartbeat_stale"),
         ({"heartbeat_contract_version": 0}, "local_worker_contract_missing"),
+        ({"job_scope": "all"}, "local_worker_job_scope_mismatch"),
         ({"heartbeat_age_seconds": video_editengine1.HEARTBEAT_TTL_SECONDS + 1}, "local_worker_heartbeat_stale"),
         ({"worker_owner": "another-product"}, "local_worker_owner_mismatch"),
         ({"engine_route": "provider-route"}, "local_worker_route_mismatch"),
@@ -1156,7 +1195,7 @@ def test_runtime_capability_ui_fails_closed_on_worker_identity_or_heartbeat() ->
         assert result["reason"] == reason
 
 
-def test_local_confirmation_and_status_back_targets_stay_in_videoedit_namespace() -> None:
+def test_local_confirmation_and_job_status_navigation_stay_in_videoedit_namespace() -> None:
     review = _function_source("video_local_review_keyboard")
     confirmation = _function_source("video_local_confirmation_keyboard")
     confirmation_text = _function_source("video_local_confirmation_text")
@@ -1168,7 +1207,10 @@ def test_local_confirmation_and_status_back_targets_stay_in_videoedit_namespace(
     assert "video_edit_state_machine.confirmation_token" in confirmation
     assert '"videoedit|review"' in confirmation
     assert "videoedit|options|" not in confirmation
-    assert 'callback_data="videoedit|hub"' in status
+    assert 'callback_data=f"videoedit|status_hub|{int(job_id)}"' in status
+    assert 'callback_data=f"videoedit|status_menu|{int(job_id)}"' in status
+    assert 'callback_data="videoedit|hub"' not in status
+    assert 'callback_data="menu|main"' not in status
     assert "quyền sử dụng" in confirmation_text.lower()
     assert "logo" in confirmation_text.lower()
     assert "âm thanh" in confirmation_text.lower()
@@ -1256,7 +1298,7 @@ def test_local_submit_requires_the_final_confirmation_screen() -> None:
     assert confirm_block.index("confirmation_token") < confirm_block.index("submit_video_edit_local_free_job")
 
 
-def test_latest_and_legacy_status_actions_are_stateless_read_only_owned_refreshes() -> None:
+def test_detached_and_job_bound_status_actions_are_stateless_owned_refreshes() -> None:
     callback = _function_source("handle_video_editor_callback")
     stateless_start = callback.index("VIDEO_EDIT_STATELESS_ACTIONS = {")
     stateless_end = callback.index("VIDEO_EDIT_COMPAT_UPLOAD_ACTIONS", stateless_start)
@@ -1267,10 +1309,11 @@ def test_latest_and_legacy_status_actions_are_stateless_read_only_owned_refreshe
     latest_start = callback.index('if action == "latest_status":')
     latest_end = callback.index("\n    if ", latest_start + 1)
     latest_block = callback[latest_start:latest_end]
-    assert "get_latest_video_editor_job(uid)" in latest_block
-    assert "video_editor_job_status_text(job, lang)" in latest_block
-    assert "video_editor_status_keyboard(job_id, lang)" in latest_block
-    assert "video_editor_latest_status_fallback_keyboard(lang)" in latest_block
+    assert "query.answer" in latest_block
+    assert "show_alert=True" in latest_block
+    assert "get_latest_video_editor_job" not in latest_block
+    assert "video_editor_job_status_text" not in latest_block
+    assert "safe_edit_or_send" not in latest_block
     assert "set_video_editor_pending" not in latest_block
     assert "update_video_editor_pending" not in latest_block
     assert "submit_video_edit" not in latest_block
@@ -1278,23 +1321,31 @@ def test_latest_and_legacy_status_actions_are_stateless_read_only_owned_refreshe
     status_start = callback.index('if action == "status":')
     status_end = callback.index('if action == "quick":', status_start)
     status_block = callback[status_start:status_end]
-    assert "get_local_worker_job_readonly(job_id)" in status_block
+    assert "video_edit_progress_callback_binding(job_id, uid, query)" in status_block
+    assert "video_edit_progress_read_status(job_id, user_id=uid)" in status_block
+    assert "owner_user_id = 0 if is_admin_user(uid) else uid" not in status_block
+    assert "get_local_worker_job_readonly(job_id)" not in status_block
     assert "except sqlite3.Error" in status_block
-    assert "video_editor_latest_status_unavailable_text(lang)" in status_block
-    assert "str(job.get(\"user_id\") or \"\") != str(uid) and not is_admin_user(uid)" in status_block
+    assert "query.edit_message_text" in status_block
+    assert "video_editor_latest_status_unavailable_text(lang)" not in status_block
     assert "set_video_editor_pending" not in status_block
     assert "submit_video_edit" not in status_block
 
     start = callback.index('if action == "ai_status":')
     end = callback.index('if action.startswith("ai_"):', start)
     ai_status_block = callback[start:end]
+    assert "video_edit_progress_callback_binding(job_id, uid, query)" in ai_status_block
+    assert "owner_user_id = 0 if is_admin_user(uid) else uid" not in ai_status_block
+    assert "video_edit_progress_read_status(" in ai_status_block
+    assert "user_id=uid" in ai_status_block
     assert "get_local_worker_job_readonly(job_id)" in ai_status_block
     assert "except sqlite3.Error" in ai_status_block
-    assert "video_editor_latest_status_unavailable_text(lang)" in ai_status_block
-    assert "video_editengine1.WORKER_JOB_TYPE" in ai_status_block
-    assert "video_editor_job_status_text(job, lang)" in ai_status_block
+    assert "video_editor_latest_status_unavailable_text(lang)" not in ai_status_block
+    assert 'job_type != "video_ai_edit"' in ai_status_block
+    assert "video_editor_job_status_text(canonical_job, lang)" in ai_status_block
     assert "video_editor_status_keyboard(job_id, lang)" in ai_status_block
-    assert "str(job.get(\"user_id\") or \"\") != str(uid) and not is_admin_user(uid)" in ai_status_block
+    assert "str(job.get(\"user_id\") or \"\") != str(uid)" in ai_status_block
+    assert "not is_admin_user(uid)" not in ai_status_block
     assert "create_job(" not in ai_status_block
     assert "set_video_editor_pending" not in ai_status_block
     assert "submit_video_edit" not in ai_status_block
@@ -1600,10 +1651,19 @@ def test_local_free_job_render_failure_is_not_silently_swallowed_after_commit() 
 
 def test_local_free_job_status_commits_before_callback_answer() -> None:
     submit = _function_source("submit_video_edit_local_free_job")
+    commit_start = submit.rindex("committed, winner = finish_video_editor_submission(")
+    marker_start = submit.index("mark_video_editor_submission_committed()", commit_start)
+    render_start = submit.index("await show_video_editor_job_status_panel(", marker_start)
+    commit_block = submit[commit_start:marker_start]
 
-    assert "def commit_job_status" in submit
-    assert 'update_video_editor_pending(uid, "job_status", **candidate)' in submit
-    assert "post_render=commit_job_status" in submit
+    assert "committed, winner = finish_video_editor_submission(" in commit_block
+    assert "uid," in commit_block
+    assert "reserved_state," in commit_block
+    assert "candidate," in commit_block
+    assert "replacement_exists=True," in commit_block
+    assert "if not committed:" in commit_block
+    assert commit_start < marker_start < render_start
+    assert "post_render=" not in submit
 
 
 def test_legacy_videoedit_start_only_reopens_confirmation_and_cannot_create_a_job() -> None:
@@ -1643,7 +1703,8 @@ def test_legacy_no_source_recovery_creates_a_complete_local_lane_session() -> No
     )
     recovery_end = callback.index('if action == "workspace":', missing_source_commit)
     recovery = callback[recovery_start:recovery_end]
-    assert "start_video_edit_lane_state(" in recovery
+    assert "replace_video_edit_lane_state(" in recovery
+    assert "callback_entry_state" in recovery
     assert "requested_group=requested_group" in recovery
     assert 'set_video_editor_pending(\n            uid,\n            "await_video"' not in recovery
 
@@ -1657,9 +1718,14 @@ def test_delivery_unknown_status_is_terminal_and_never_claims_waiting_or_retry()
 
 def test_free_delivered_status_never_claims_a_pending_fee() -> None:
     status = _function_source("video_editor_job_status_text")
-    assert "confirmed_price_xu <= 0" in status
-    assert "miễn phí 0 Xu" in status
-    free_branch = status[status.index("confirmed_price_xu <= 0"):status.index('elif charge_state == "charged"')]
+    free_condition = 'confirmed_price_xu == 0 and charge_state == "not_charged"'
+    assert free_condition in status
+    assert "• Đã trừ: <b>0 Xu</b>" in status
+    free_branch = status[
+        status.index(free_condition) : status.index(
+            "elif (\n            confirmed_price_xu is not None"
+        )
+    ]
     assert "đang được ghi nhận" not in free_branch
     assert "local" not in free_branch.lower()
 
@@ -1719,7 +1785,9 @@ def test_workspace_back_preserves_the_lane_that_created_the_local_plan() -> None
     manual_end = callback.index('state = dict(get_video_editor_pending(uid) or {})', manual_start)
     manual_block = callback[manual_start:manual_end]
     assert "entry_parent_callback" in manual_block
-    assert manual_block.index("source_file_id") < manual_block.index("clear_video_editor_pending")
+    assert manual_block.index("source_file_id") < manual_block.index("replace_video_edit_lane_state")
+    assert "callback_entry_state" in manual_block
+    assert "clear_video_editor_pending" not in manual_block
     assert "video_local_source_summary_text" in manual_block
     assert "video_local_manual_options_text" not in manual_block
 
@@ -1915,7 +1983,11 @@ def test_local_status_rejects_non_video_edit_worker_jobs() -> None:
     status_start = callback.index('if action == "status":')
     status_end = callback.index('if action == "quick":', status_start)
     status_block = callback[status_start:status_end]
-    assert 'str(job.get("job_type") or "") != video_editengine1.WORKER_JOB_TYPE' in status_block
+    assert "video_edit_progress_callback_binding(job_id, uid, query)" in status_block
+    assert "video_edit_progress_read_status(job_id, user_id=uid)" in status_block
+    adapter = _function_source("video_edit_progress_read_status")
+    assert 'str(worker_job.get("job_type") or "") != video_editengine1.WORKER_JOB_TYPE' in adapter
+    assert 'str(canonical.get("product_type") or "") != video_editengine1.PRODUCT_TYPE' in adapter
 
 
 def test_source_info_back_resolves_quality_and_assistant_parents() -> None:
@@ -1976,6 +2048,38 @@ def test_stale_state_and_videoedit_only_failure_guard_restore_contract_is_presen
     assert "_video_edit_render_failed" not in shared_guard
 
 
+def test_videoedit_lane_replacement_never_clears_before_atomic_set() -> None:
+    callback = _function_source("handle_video_editor_callback")
+    tree = ast.parse(callback)
+    replacement_closures = {
+        "commit_quality_entry",
+        "commit_quality_reupload",
+        "commit_quality_pick_upload",
+        "commit_ai_entry",
+        "commit_ai_reupload",
+        "commit_manual_entry",
+        "commit_manual_upload",
+        "commit_legacy_upload",
+    }
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in replacement_closures:
+            found.add(node.name)
+            source = ast.get_source_segment(callback, node) or ""
+            assert "clear_video_editor_pending" not in source
+            assert (
+                "replace_video_edit_lane_state" in source
+                or "compare_and_replace_video_editor_pending" in source
+            )
+    assert found == replacement_closures
+
+    quick_start = callback.index('if action == "quick":')
+    quick_end = callback.index('if action == "manual":', quick_start)
+    quick_block = callback[quick_start:quick_end]
+    assert "clear_video_editor_pending" not in quick_block
+    assert "set_video_editor_pending" in quick_block
+
+
 def test_videoedit_failure_guard_restores_a_hard_render_failure() -> None:
     pending = {"video_editor:904": {"step": "workspace", "manual_edit_plan": {"speed": 1.0}}}
     tracker, dependencies = _isolated_guard_dependencies(pending)
@@ -1999,6 +2103,88 @@ def test_videoedit_failure_guard_restores_a_hard_render_failure() -> None:
         "step": "workspace",
         "manual_edit_plan": {"speed": 1.0},
     }
+
+
+def test_videoedit_submission_side_effect_fence_preserves_job_state_after_render_failure() -> None:
+    """A created job must win over the pre-submit rollback snapshot."""
+
+    pending = {
+        "video_editor:905": {
+            "step": "confirmation",
+            "current_screen": "confirmation",
+            "status": "confirmation_ready",
+        }
+    }
+    tracker, dependencies = _isolated_guard_dependencies(pending)
+    committed = ContextVar("test_video_editor_submission_committed", default=False)
+    dependencies["_VIDEO_EDITOR_SUBMISSION_COMMITTED"] = committed
+    guard = _compile_function("video_editor_callback_state_guard", dependencies)
+    winner = {
+        "step": "job_status",
+        "current_screen": "job_status",
+        "status": "queued",
+        "job_id": 812,
+    }
+
+    async def handler(update, _context):
+        pending["video_editor:905"] = deepcopy(winner)
+        tracker.set({"user_id": "905", "exists": True, "state": deepcopy(winner)})
+        committed.set(True)
+        raise RuntimeError("telegram render failed after job creation")
+
+    query = _Query(905, "videoedit|confirm_local")
+    update = SimpleNamespace(callback_query=query)
+    with pytest.raises(RuntimeError, match="after job creation"):
+        asyncio.run(guard(handler)(update, SimpleNamespace()))
+    assert pending["video_editor:905"] == winner
+
+
+def test_videoedit_submit_paths_mark_irreversible_job_before_ui_render() -> None:
+    for name in (
+        "submit_video_ai_edit_job",
+        "submit_video_edit_local_free_job",
+        "submit_local_video_editor_job",
+    ):
+        source = _function_source(name)
+        assert "mark_video_editor_submission_committed()" in source, name
+
+    local_free = _function_source("submit_video_edit_local_free_job")
+    commit = local_free.rindex("finish_video_editor_submission(")
+    render = local_free.index("await show_video_editor_job_status_panel(", commit)
+    assert commit < render
+    assert "post_render=commit_job_status" not in local_free
+
+
+def test_videoedit_media_dispatch_precedes_admin_tool_media_dispatch() -> None:
+    for name in ("handle_media", "handle_media_cache_only"):
+        source = _function_source(name)
+        video = source.index("handle_video_editor_pending_upload")
+        caption = source.index("handle_caption_admin_tool_test_media")
+        pending_admin = source.index("handle_pending_admin_tool_test_media")
+        assert video < caption < pending_admin, name
+
+
+def test_videoedit_submit_db_connect_failure_rolls_back_reserved_state(tmp_path: Path) -> None:
+    saved = _default_state(
+        913,
+        step="confirmation",
+        current_screen="confirmation",
+        status="confirmation_ready",
+        review_revision=3,
+        state_revision=3,
+    )
+    saved["manual_edit_plan"]["brightness_percent"] = 120
+    namespace = _submit_namespace(tmp_path / "unused.sqlite3", saved)
+    namespace["db_connect"] = lambda: (_ for _ in ()).throw(OSError("database unavailable"))
+    submit = _compile_function("submit_video_edit_local_free_job", namespace)
+    query = _Query(913, "videoedit|confirm_local")
+    update = SimpleNamespace(callback_query=query, message=None, effective_user=query.from_user)
+
+    assert asyncio.run(submit(update, SimpleNamespace(), deepcopy(saved))) is True
+    assert saved["step"] == "confirmation"
+    assert saved["status"] == "confirmation_ready"
+    assert query.edits
+    assert "chưa tạo tác vụ" in query.edits[-1][0].lower()
 
 
 def test_message_state_guard_commits_success_and_rolls_back_failed_reply() -> None:
@@ -2055,9 +2241,15 @@ def _init_job_db(path: Path) -> None:
                 status TEXT,
                 provider TEXT,
                 input_file_id TEXT,
+                output_file_id TEXT,
+                output_url TEXT,
+                error_short TEXT,
                 created_at TEXT,
+                started_at TEXT,
+                finished_at TEXT,
                 xu_cost INTEGER,
                 admin_only INTEGER,
+                worker_id TEXT,
                 updated_at TEXT
             )"""
         )
@@ -2105,6 +2297,72 @@ def _ready_worker() -> dict:
 
 
 def _submit_namespace(db_path: Path, saved: dict) -> dict:
+    def snapshot(value) -> dict:
+        return deepcopy(dict(value or {}))
+
+    last_submit_user_id = {"value": ""}
+
+    def worker_job(job_id):
+        return {
+            "id": int(job_id),
+            "user_id": last_submit_user_id["value"] or "905",
+            "job_type": video_editengine1.WORKER_JOB_TYPE,
+            "status": "queued",
+            "xu_cost": 0,
+        }
+
+    class VideoEditorStateCommitError(RuntimeError):
+        def __init__(self, reason: str, winner: dict | None = None) -> None:
+            super().__init__(reason)
+            self.winner = snapshot(winner)
+
+    def begin_submission(user_id, expected_state: dict, *, lane: str) -> dict:
+        last_submit_user_id["value"] = str(user_id)
+        current = snapshot(saved)
+        # The isolated submit harness receives the durable confirmation state as
+        # the function argument; an empty fixture is that initial durable row.
+        if current and current != snapshot(expected_state):
+            raise VideoEditorStateCommitError(
+                "video_editor_submit_state_conflict",
+                current,
+            )
+        reserved = snapshot(expected_state)
+        reserved.update(
+            {
+                "step": "submitting",
+                "current_screen": "submitting",
+                "status": "submitting",
+                "pending_field": "",
+                "awaiting_media": False,
+                "submission_lane": str(lane or "local")[:40],
+            }
+        )
+        return reserved
+
+    def finish_submission(
+        user_id,
+        expected_reserved_state: dict,
+        replacement_state: dict | None = None,
+        *,
+        replacement_exists: bool = True,
+    ) -> tuple[bool, dict]:
+        current = snapshot(saved)
+        if current and current != snapshot(expected_reserved_state):
+            return False, current
+        replacement = snapshot(replacement_state)
+        saved.clear()
+        if replacement_exists:
+            saved.update(replacement)
+        return True, replacement if replacement_exists else {}
+
+    async def rerender_after_stale_commit(query, winner: dict, _lang: str):
+        job_id = int(dict(winner or {}).get("job_id") or 0)
+        if job_id:
+            await query.edit_message_text(
+                f"✅ Đã nhận yêu cầu xử lý video · tác vụ #{job_id}",
+                reply_markup=f"status:{job_id}",
+            )
+
     async def render(query, text: str, **kwargs):
         post_render = kwargs.pop("post_render", None)
         result = await query.edit_message_text(text, **kwargs)
@@ -2112,9 +2370,29 @@ def _submit_namespace(db_path: Path, saved: dict) -> dict:
             post_render()
         return result
 
+    async def show_status_panel(update, context, job_id, lang, *, user_id=0, job=None):
+        query = getattr(update, "callback_query", None)
+        message = getattr(update, "message", None) or getattr(query, "message", None)
+        panel_job = dict(job or worker_job(job_id) or {"id": int(job_id)})
+        text = namespace_status_text(panel_job, lang)
+        markup = f"status:{int(job_id)}"
+        if query:
+            await namespace["safe_edit_or_send"](
+                query,
+                text,
+                parse_mode="HTML",
+                reply_markup=markup,
+            )
+        elif message:
+            await message.reply_text(text, parse_mode="HTML", reply_markup=markup)
+        return True
+
+    namespace_status_text = lambda job, _lang: f"Trạng thái tác vụ #{job['id']} · 0 Xu"
+
     namespace = {
         "get_user_language": lambda _uid: "vi",
         "html": html,
+        "re": re,
         "safe_int": lambda value, default=0: int(value or default),
         "video_local_editing": video_local_editing,
         "video_local_validation": video_local_validation,
@@ -2133,14 +2411,15 @@ def _submit_namespace(db_path: Path, saved: dict) -> dict:
         "time": time,
         "safe_edit_or_send": render,
         "video_editor_status_keyboard": lambda job_id, _lang: f"status:{job_id}",
+        "show_video_editor_job_status_panel": show_status_panel,
+        "video_editor_state_snapshot": snapshot,
+        "begin_video_editor_submission": begin_submission,
+        "finish_video_editor_submission": finish_submission,
+        "mark_video_editor_submission_committed": lambda: None,
+        "VideoEditorStateCommitError": VideoEditorStateCommitError,
+        "rerender_video_editor_after_stale_commit": rerender_after_stale_commit,
         "video_tail9_quality_keyboard": lambda *_args, **_kwargs: "quality-keyboard",
-        "get_local_worker_job": lambda job_id: {
-            "id": int(job_id),
-            "user_id": "905",
-            "job_type": video_editengine1.WORKER_JOB_TYPE,
-            "status": "queued",
-            "xu_cost": 0,
-        },
+        "get_local_worker_job": worker_job,
         "video_editor_job_status_text": lambda job, _lang: f"Trạng thái tác vụ #{job['id']} · 0 Xu",
         "video_local_manual_options_keyboard": lambda *_args, **_kwargs: "workspace-keyboard",
         "video_edit_lane_upload_keyboard": lambda *_args: "upload-keyboard",
@@ -2148,6 +2427,14 @@ def _submit_namespace(db_path: Path, saved: dict) -> dict:
         "video_local_public_error": lambda reason, _lang="vi": reason,
         "update_video_editor_pending": lambda _uid, step, **fields: saved.update({"step": step, **fields}) or deepcopy(saved),
     }
+    namespace["video_editor_plan_with_watermark"] = _compile_function(
+        "video_editor_plan_with_watermark",
+        {
+            "re": re,
+            "safe_int": lambda value, default=0: int(value or default),
+            "video_local_editing": video_local_editing,
+        },
+    )
     namespace["video_edit_submit_inspection_evidence"] = _compile_video_edit_submit_evidence_helper()
     return namespace
 
@@ -2306,7 +2593,10 @@ def test_video_edit_submit_inspection_evidence_fails_closed_for_invalid_evidence
     assert "source_sha256" not in evidence, case
 
 
-def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_path: Path) -> None:
+def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     db_path = tmp_path / "videoedit.sqlite3"
     _init_job_db(db_path)
     saved: dict = {}
@@ -2376,8 +2666,16 @@ def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_
     try:
         assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM video_edit_outbox").fetchone()[0] == 1
         payload = json.loads(conn.execute("SELECT input_file_id FROM local_worker_jobs").fetchone()[0])
         canonical = conn.execute("SELECT quality_tier_id,price_xu,tail_json FROM video_edit_jobs").fetchone()
+        claimed = video_editengine1.claim_next_video_local_edit(
+            conn,
+            lease_owner="video-edit-worker:test:1",
+            now="2030-01-02 03:04:05",
+            lease_seconds=300,
+        )
+        conn.commit()
     finally:
         conn.close()
 
@@ -2385,6 +2683,8 @@ def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_
     assert payload["price_xu"] == 0
     assert payload["quoted_price_xu"] == 0
     assert payload["provider_call"] is False
+    assert payload["engine_route"] == video_editengine1.ENGINE_ROUTE
+    assert payload["worker_owner"] == video_editengine1.OUTBOX_OWNER
     assert payload["media_lane"] == "large_media"
     assert payload["source_file_size"] == large_bytes
     assert payload["source_video_hash"] == "b" * 64
@@ -2398,6 +2698,17 @@ def test_confirm_local_creates_exactly_one_free_job_and_duplicate_reuses_it(tmp_
     assert payload["rights_confirmation"]["review_revision"] == 3
     assert payload["rights_confirmation"]["confirmed_at_unix"] > 0
     assert canonical == ("local-free", 0, "{}")
+    assert claimed["job_type"] == video_editengine1.WORKER_JOB_TYPE
+    assert json.loads(claimed["input_file_id"]) == payload
+    dispatched: list[dict] = []
+    monkeypatch.setattr(local_worker, "LOCAL_WORKER_JOB_SCOPE", "video_edit_only")
+    monkeypatch.setattr(
+        local_worker,
+        "run_video_local_edit",
+        lambda job: dispatched.append(dict(job)),
+    )
+    local_worker.process_job(claimed)
+    assert [job["id"] for job in dispatched] == [claimed["id"]]
     assert saved["step"] == "job_status"
     assert create_calls == 1
     assert query.edits and all("0 Xu" in text for text, _kwargs in query.edits)
@@ -2452,7 +2763,57 @@ def test_confirm_local_invalid_inspection_evidence_creates_no_job_or_preflight(t
         ).fetchone()[0] == 0
     finally:
         conn.close()
-    assert query.edits == [("invalid_video", {"reply_markup": "upload-keyboard"})]
+    assert len(query.edits) == 1
+    recovery_text, recovery_kwargs = query.edits[0]
+    assert "Kế hoạch chỉnh sửa vẫn được giữ" in recovery_text
+    assert "chưa tạo tác vụ và chưa trừ Xu" in recovery_text
+    assert recovery_kwargs == {"reply_markup": "upload-keyboard"}
+    assert saved == {}
+
+
+def test_local_free_submit_surfaces_preflight_reason_without_creating_job(tmp_path: Path) -> None:
+    db_path = tmp_path / "videoedit-preflight-reason.sqlite3"
+    _init_job_db(db_path)
+    saved: dict = {}
+    namespace = _submit_namespace(db_path, saved)
+
+    class _EngineSpy:
+        def __getattr__(self, name):
+            return getattr(video_editengine1, name)
+
+        @staticmethod
+        def preflight(*_args, **_kwargs):
+            return {"ok": False, "reason": "local_worker_heartbeat_stale"}
+
+        @staticmethod
+        def create_job(*_args, **_kwargs):
+            raise AssertionError("create_job must not run when preflight is blocked")
+
+    namespace["video_editengine1"] = _EngineSpy()
+    submit = _compile_function("submit_video_edit_local_free_job", namespace)
+    state = _default_state(
+        907,
+        step="confirmation",
+        current_screen="confirmation",
+        status="confirmation_ready",
+        review_revision=3,
+        state_revision=3,
+    )
+    query = _Query(907, "videoedit|confirm_local")
+    update = SimpleNamespace(callback_query=query, message=None, effective_user=query.from_user)
+
+    assert asyncio.run(submit(update, SimpleNamespace(), state)) is True
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 0
+    finally:
+        conn.close()
+    assert len(query.edits) == 1
+    blocker_text, blocker_kwargs = query.edits[0]
+    assert "local_worker_heartbeat_stale" in blocker_text
+    assert "chưa tạo tác vụ và chưa trừ Xu" in blocker_text
+    assert blocker_kwargs["parse_mode"] == "HTML"
     assert saved == {}
 
 
@@ -2631,6 +2992,14 @@ def test_paid_submit_preflights_exact_final_plan_and_assets_before_side_effects(
     )
     state["manual_edit_plan"]["trim"] = {"start_ms": 0, "end_ms": 0}
     state["manual_edit_plan"]["speed"] = 0.5
+    state["manual_edit_plan"]["text_overlay"] = {
+        "content": "Tiêu đề thường",
+        "position": "top_center",
+        "start_ms": 0,
+        "end_ms": 4_000,
+        "font_size": 42,
+        "outline": 2,
+    }
     tail = _paid_video_edit_tail(price_xu=500)
     tail.update({
         "quality_tier_id": "500",
@@ -2675,9 +3044,13 @@ def test_paid_submit_preflights_exact_final_plan_and_assets_before_side_effects(
         "scale": 0.12,
         "opacity": 1.0,
     }
-    assert final_plan["text_overlay"]["content"] == "TOAN AAS"
-    assert final_plan["text_overlay"]["position"] == "bottom_center"
-    assert final_plan["text_overlay"]["end_ms"] == 24_000
+    assert final_plan["text_overlay"]["content"] == "Tiêu đề thường"
+    assert final_plan["text_overlay"]["position"] == "top_center"
+    assert final_plan["text_overlay"]["end_ms"] == 4_000
+    assert final_plan["watermark_overlay"]["content"] == "TOAN AAS"
+    assert final_plan["watermark_overlay"]["position"] == "bottom_center"
+    assert final_plan["watermark_overlay"]["opacity"] == 0.45
+    assert final_plan["watermark_overlay"]["end_ms"] == 0
     assert preflight_state["logo_source"] == {
         "file_id": "tail-logo-final",
         "file_name": "logo.png",
@@ -2801,7 +3174,7 @@ def test_paid_confirmation_retry_reuses_canonical_identity_without_charge(tmp_pa
     assert payload["concat_sources"] == state["concat_sources"]
     assert payload["logo_source"] == state["logo_source"]
     assert payload["subtitle_source"] == state["subtitle_source"]
-    assert calls == {"create": 2, "claim": 0, "charge": 0}
+    assert calls == {"create": 1, "claim": 0, "charge": 0}
     assert second_query.edits and "Đã nhận yêu cầu xử lý video" in second_query.edits[-1][0]
 
 
@@ -2952,7 +3325,7 @@ def test_paid_retry_reuses_pre_feature_worker_identity_without_charge(tmp_path: 
     assert lookup_keys[0] == ("v3", seeded["idempotency_key"])
     assert [version for version, _key in lookup_keys] == ["v3", "v2"]
     assert calls == {"create": 1, "claim": 0, "charge": 0}
-    assert query.edits and "Đã nhận yêu cầu xử lý video" in query.edits[-1][0]
+    assert query.edits and "Trạng thái tác vụ #1" in query.edits[-1][0]
 
 
 def test_paid_submit_value_error_fails_closed_without_job_or_charge(tmp_path: Path) -> None:
@@ -3008,7 +3381,10 @@ def test_paid_submit_value_error_fails_closed_without_job_or_charge(tmp_path: Pa
             {"reply_markup": "quality-keyboard"},
         )
     ]
-    assert saved == {}
+    assert saved.get("edit_session_id") == "edit-911"
+    assert saved.get("step") == "options"
+    assert saved.get("current_screen") == "workspace"
+    assert saved.get("status") == "source_ready"
 
 
 def test_paid_submit_invalid_evidence_stops_before_preflight_or_job(tmp_path: Path) -> None:
@@ -3046,7 +3422,11 @@ def test_paid_submit_invalid_evidence_stops_before_preflight_or_job(tmp_path: Pa
         ).fetchone()[0] == 0
     finally:
         conn.close()
-    assert query.edits == [("invalid_video", {"parse_mode": None, "reply_markup": "upload-keyboard"})]
+    assert len(query.edits) == 1
+    recovery_text, recovery_kwargs = query.edits[0]
+    assert "Kế hoạch chỉnh sửa vẫn được giữ" in recovery_text
+    assert "chưa tạo tác vụ và chưa trừ Xu" in recovery_text
+    assert recovery_kwargs == {"parse_mode": None, "reply_markup": "upload-keyboard"}
     assert saved == {}
 
 
@@ -3068,7 +3448,7 @@ def test_confirmation_retry_after_ui_failure_reuses_full_split_identity(tmp_path
         nonlocal render_attempts
         render_attempts += 1
         if render_attempts == 1:
-            raise RuntimeError("telegram edit failed before state commit")
+            raise RuntimeError("telegram edit failed after state commit")
         post_render = kwargs.pop("post_render", None)
         result = await query.edit_message_text(text, **kwargs)
         if post_render:
@@ -3100,9 +3480,10 @@ def test_confirmation_retry_after_ui_failure_reuses_full_split_identity(tmp_path
         message=None,
         effective_user=first_query.from_user,
     )
-    with pytest.raises(RuntimeError, match="telegram edit failed before state commit"):
+    with pytest.raises(RuntimeError, match="telegram edit failed after state commit"):
         asyncio.run(submit(first_update, SimpleNamespace(), deepcopy(state)))
-    assert saved == {}
+    assert saved["step"] == "job_status"
+    assert saved["job_id"] > 0
 
     retry_query = _Query(907, "videoedit|confirm_local")
     retry_update = SimpleNamespace(
@@ -3110,7 +3491,7 @@ def test_confirmation_retry_after_ui_failure_reuses_full_split_identity(tmp_path
         message=None,
         effective_user=retry_query.from_user,
     )
-    assert asyncio.run(submit(retry_update, SimpleNamespace(), deepcopy(state))) is True
+    assert asyncio.run(submit(retry_update, SimpleNamespace(), deepcopy(saved))) is True
 
     conn = sqlite3.connect(db_path)
     try:
@@ -3119,7 +3500,7 @@ def test_confirmation_retry_after_ui_failure_reuses_full_split_identity(tmp_path
     finally:
         conn.close()
     assert retry_query.edits
-    assert "Đã nhận tác vụ chỉnh sửa cục bộ" in retry_query.edits[-1][0]
+    assert "Trạng thái tác vụ" in retry_query.edits[-1][0]
     assert "đang có một tác vụ" not in retry_query.edits[-1][0]
     assert saved["step"] == "job_status"
 
@@ -3165,6 +3546,10 @@ def test_videoedit_stale_render_model_covers_every_owned_screen_family() -> None
         "video_local_transform_text",
         "video_local_color_text",
         "video_local_overlay_text",
+        "video_local_branding_text",
+        "video_local_watermark_text",
+        "video_local_logo_keyboard",
+        "video_local_watermark_keyboard",
         "video_local_cut_options_text",
         "video_local_join_options_text",
         "video_edit_audio_text",
@@ -3229,7 +3614,9 @@ def test_videoedit_summary_copy_is_vietnamese_without_changing_other_products() 
         ]
         assert "Tổng hợp chỉnh sửa video" in text
         assert "chọn gói" not in text.lower()
-        assert any("Sửa logo và watermark" in label for label in labels)
+        assert "🖼 Logo ảnh" in labels
+        assert "🏷️ Watermark chữ" in labels
+        assert not any("logo và watermark" in label.lower() for label in labels)
 
     product_tail = {
         "video_product_type": "product_video",

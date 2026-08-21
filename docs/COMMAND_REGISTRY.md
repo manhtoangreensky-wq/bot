@@ -128,20 +128,20 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/toanaas_ai_status` | `cmd_toanaas_ai_status` | YES | YES | TOAN AAS assistant knowledge-base and AI provider readiness. |
 | `/video_public_status` | `cmd_video_public_status` | YES | YES | Video public flags, provider smoke, worker readiness, tier status and blocked tiers. |
 | `/video_gate_status` | `cmd_video_gate_status` | YES | YES | Video gate matrix for planning, frame video, Video AI, image/video-to-video and long render. |
-| `/video_tier_status` | `cmd_video_tier_status` | YES | YES | Video 200/300/400/500/600/800/1000/1200/1500 tier status and provider/billing guard summary. |
-| `/video_tier_matrix` | `cmd_video_tier_matrix` | YES | YES | Admin safe matrix for 200/300/400/500/600/800/1000/1200/1500 tiers; no provider call and no Xu charge. |
+| `/video_tier_status` | `cmd_video_tier_status` | YES | YES | Video tier ID 200/300/400/500/600/700/800/1000/1200/1500 status and provider/billing guard summary. |
+| `/video_tier_matrix` | `cmd_video_tier_matrix` | YES | YES | Admin safe matrix for all 10 stable tier IDs; no provider call and no Xu charge. |
 | `/video_debug_tier_payload` | `cmd_video_debug_tier_payload` | YES | YES | Admin duration/payload debug for a video tier; shows whether submit payload contains seconds/duration without calling provider. |
 | `/video_test_tier_duration` | `cmd_video_test_tier_duration` | YES | YES | Admin safe duration smoke dry-run; confirms current payload cannot prove extra seconds before selling duration add-ons. |
 | `/video_cost_status` | `cmd_video_cost_status` | YES | YES | Video 200/300/400/500/600/800/1000 cost ratio and margin status; no payment changes. |
-| `/video_test_tier_200` | `cmd_video_test_tier_200` | YES | YES | Admin safe dry-run for 200 Xu video tier; no provider call and no Xu charge. |
-| `/video_test_tier_300` | `cmd_video_test_tier_300` | YES | YES | Admin safe dry-run for 300 Xu video tier; no provider call and no Xu charge. |
-| `/video_test_tier_400` | `cmd_video_test_tier_400` | YES | YES | Admin safe dry-run for 400 Xu video tier; no provider call and no Xu charge. |
-| `/video_test_tier_500` | `cmd_video_test_tier_500` | YES | YES | Admin safe dry-run for 500 Xu video tier; no provider call and no Xu charge. |
-| `/video_test_tier_600` | `cmd_video_test_tier_600` | YES | YES | Admin safe dry-run for 600 Xu video tier; no provider call and no Xu charge. |
-| `/video_test_tier_800` | `cmd_video_test_tier_800` | YES | YES | Admin safe dry-run for 800 Xu video tier; no provider call and no Xu charge. |
-| `/video_test_tier_1000` | `cmd_video_test_tier_1000` | YES | YES | Admin safe dry-run for 1000 Xu video tier; no provider call and no Xu charge. |
-| `/video_test_tier_1200` | `cmd_video_test_tier_1200` | YES | YES | Admin safe dry-run for 1200 Xu video tier; no provider call and no Xu charge. |
-| `/video_test_tier_1500` | `cmd_video_test_tier_1500` | YES | YES | Admin safe dry-run for 1500 Xu video tier; no provider call and no Xu charge. |
+| `/video_test_tier_200` | `cmd_video_test_tier_200` | YES | YES | Admin safe dry-run for tier ID 200 (Nhanh gọn, 200 Xu/cảnh); no provider call and no Xu charge. |
+| `/video_test_tier_300` | `cmd_video_test_tier_300` | YES | YES | Admin safe dry-run for tier ID 300 (Tiêu chuẩn có âm thanh, 220 Xu/cảnh); no provider call and no Xu charge. |
+| `/video_test_tier_400` | `cmd_video_test_tier_400` | YES | YES | Admin safe dry-run for tier ID 400 (Cân bằng rõ nét, 80 Xu/cảnh); no provider call and no Xu charge. |
+| `/video_test_tier_500` | `cmd_video_test_tier_500` | YES | YES | Admin safe dry-run for tier ID 500 (Chuyển động ổn định, 110 Xu/cảnh); no provider call and no Xu charge. |
+| `/video_test_tier_600` | `cmd_video_test_tier_600` | YES | YES | Admin safe dry-run for tier ID 600 (Chuyển động có âm thanh, 160 Xu/cảnh); no provider call and no Xu charge. |
+| `/video_test_tier_800` | `cmd_video_test_tier_800` | YES | YES | Admin safe dry-run for tier ID 800 (Cao cấp linh hoạt, 370 Xu/cảnh); no provider call and no Xu charge. |
+| `/video_test_tier_1000` | `cmd_video_test_tier_1000` | YES | YES | Admin safe dry-run for tier ID 1000 (Diễn xuất chân thật, 370 Xu/cảnh); no provider call and no Xu charge. |
+| `/video_test_tier_1200` | `cmd_video_test_tier_1200` | YES | YES | Admin safe dry-run for tier ID 1200 (Đa góc máy, 1.260 Xu/cảnh); no provider call and no Xu charge. |
+| `/video_test_tier_1500` | `cmd_video_test_tier_1500` | YES | YES | Admin safe dry-run for tier ID 1500 (Điện ảnh nhiều cảnh, 2.360 Xu/cảnh); no provider call and no Xu charge. |
 | `/video_test_all_tiers` | `cmd_video_test_all_tiers` | YES | YES | Admin safe dry-run summary for all current video tiers; no provider call and no Xu charge. |
 | `/video_recent_jobs` | `cmd_video_recent_jobs` | YES | YES | Lists recent video jobs from `shopaikey_jobs` with sanitized IDs/messages. |
 | `/video_failed_jobs` | `cmd_video_failed_jobs` | YES | YES | Lists failed video jobs from `shopaikey_jobs` with sanitized error summaries. |
@@ -156,9 +156,9 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/video_open_all_current_tiers` | `cmd_video_open_all_current_tiers` | YES | YES | Opens 200/300/400/500/600/800/1000 current Video AI tiers; keeps 1500/long/Kling/Seedance/Key4U public OFF. |
 | `/video_open_high_tiers` | `cmd_video_open_high_tiers` | YES | YES | Opens 500/600/800/1000 Video AI tiers after provider smoke and billing safety; no daily high-tier limit in this phase. |
 | `/video_close_high_tiers` | `cmd_video_close_high_tiers` | YES | YES | Closes only 500/600/800/1000 tiers and leaves lower beta tiers unchanged. |
-| `/video_smoke_tier_500` | `cmd_video_smoke_tier_500` | YES | YES | Admin-only/no-Xu smoke path for the 500 Xu tier; delegates to ShopAIKey video smoke. |
-| `/video_smoke_tier_600` | `cmd_video_smoke_tier_600` | YES | YES | Admin-only/no-Xu smoke path for the 600 Xu sales tier; delegates to ShopAIKey video smoke. |
-| `/video_smoke_tier_800` | `cmd_video_smoke_tier_800` | YES | YES | Admin-only/no-Xu smoke path for the 800 Xu high tier; delegates to ShopAIKey video smoke. |
+| `/video_smoke_tier_500` | `cmd_video_smoke_tier_500` | YES | YES | Admin-only/no-Xu smoke path for tier ID 500; delegates to the configured Video route. |
+| `/video_smoke_tier_600` | `cmd_video_smoke_tier_600` | YES | YES | Admin-only/no-Xu smoke path for tier ID 600; delegates to the configured Video route. |
+| `/video_smoke_tier_800` | `cmd_video_smoke_tier_800` | YES | YES | Admin-only/no-Xu smoke path for tier ID 800; delegates to the configured Video route. |
 | `/runtime` | `cmd_runtime` | YES | YES | Runtime/webhook diagnostics. |
 | `/data_status` | `cmd_data_status` | YES | YES | Persistent DB/backup/volume status. |
 | `/storage_status` | `cmd_storage_status` | YES | YES | Admin read-only storage policy and aggregate usage; no secrets. |

@@ -104,14 +104,23 @@ def test_segment_persists_exact_seconds_revision_and_pending_analysis(flow: str)
     assert state["source_ratio"] == "9:16"
     assert state["source_revision"] == 1
     assert state["analysis_status"] == "pending"
-    assert state["scene_count"] == (3 if flow == "ss2" else 1)
+    if flow == "ss2":
+        assert state["scene_count"] == 3
+        assert "scene_count_deferred_to_quality" not in state
+    else:
+        assert "scene_count" not in state
+        assert state["scene_count_deferred_to_quality"] is True
 
     custom = video_selfshotflow4.apply_text(flow, _state(flow), "segment", "2-12")["state"]
     assert custom["selected_start_seconds"] == 2
     assert custom["selected_end_seconds"] == 12
     assert custom["selected_duration"] == 10
     assert custom["analysis_status"] == "pending"
-    assert custom["scene_count"] == (2 if flow == "ss2" else 1)
+    if flow == "ss2":
+        assert custom["scene_count"] == 2
+    else:
+        assert "scene_count" not in custom
+        assert custom["scene_count_deferred_to_quality"] is True
 
 
 @pytest.mark.parametrize("flow", ["ss2", "ss3"])
@@ -766,10 +775,10 @@ def test_public_status_panel_uses_exact_selfshot_stages(product: str, expected: 
 
 
 def test_golden_flow_callbacks_are_scoped_short_and_back_exact():
-    assert video_selfshotflow4.SELF_SHOT_2_GOLDEN_FLOW[-8:] == (
-        "review", "audio_addons", "logo_watermark", "summary", "quality", "invoice", "confirm", "status"
+    assert video_selfshotflow4.SELF_SHOT_2_GOLDEN_FLOW[-6:] == (
+        "addon", "review", "quality", "invoice", "confirm", "status"
     )
-    assert video_selfshotflow4.SELF_SHOT_3_GOLDEN_FLOW[-8:] == video_selfshotflow4.SELF_SHOT_2_GOLDEN_FLOW[-8:]
+    assert video_selfshotflow4.SELF_SHOT_3_GOLDEN_FLOW[-6:] == video_selfshotflow4.SELF_SHOT_2_GOLDEN_FLOW[-6:]
     assert video_selfshotflow4.SELF_SHOT_2_GOLDEN_FLOW != video_selfshotflow4.SELF_SHOT_3_GOLDEN_FLOW
 
     for flow in ("ss2", "ss3"):
@@ -782,6 +791,30 @@ def test_golden_flow_callbacks_are_scoped_short_and_back_exact():
                     assert len(callback_data.encode("utf-8")) <= 64
                     if callback_data.startswith("vproduct|ss"):
                         assert callback_data.startswith(f"vproduct|{flow}|")
+
+
+@pytest.mark.parametrize("flow", ["ss2", "ss3"])
+def test_segment_analysis_rows_match_shared_two_column_renderer(flow: str):
+    state = _state(flow)
+    state = video_selfshotflow4.apply_action(flow, state, "c4segment", "whole")["state"]
+    screens = ["segment_preview", "analysis"]
+    if flow == "ss3":
+        screens.append("mode")
+
+    for screen in screens:
+        state[video_selfshotflow4.FLOW_SCREEN_KEYS[flow]] = screen
+        model = video_selfshotflow4.screen_model(flow, screen, state)
+        assert all(len(row) in {2, 5} for row in model["rows"])
+        bot_runtime.video_scene3_keyboard(model["rows"])
+
+    state[video_selfshotflow4.FLOW_SCREEN_KEYS[flow]] = "analysis"
+    upload = video_selfshotflow4.apply_action(flow, state, "c4upload")
+    assert upload["pending_media"] == "source_upload"
+
+    state[video_selfshotflow4.FLOW_SCREEN_KEYS[flow]] = "segment_preview"
+    reset = video_selfshotflow4.apply_action(flow, state, "c4segment", "reset")
+    assert reset["screen"] == "segment"
+    assert not reset["state"].get("source_segment")
 
 
 def test_bot_runs_selfshot_only_local_analysis_after_segment_selection():

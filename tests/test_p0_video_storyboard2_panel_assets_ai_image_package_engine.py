@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 from services import video_flow6, video_flow7, video_profile_catalog, video_scene3_flow, video_storyboard2
 
@@ -16,7 +18,7 @@ def _function_source(name: str) -> str:
     markers = (f"def {name}(", f"async def {name}(")
     starts = [BOT_SOURCE.find(marker) for marker in markers]
     start = min(position for position in starts if position >= 0)
-    next_def = re.search(r"\n(?:async )?def [A-Za-z_]", BOT_SOURCE[start + 1 :])
+    next_def = re.search(r"\n(?=@|(?:async )?def [A-Za-z_])", BOT_SOURCE[start + 1 :])
     end = start + 1 + next_def.start() if next_def else len(BOT_SOURCE)
     return BOT_SOURCE[start:end]
 
@@ -29,6 +31,19 @@ def _board(scene_count: int = 2) -> dict:
         board,
         "Giới thiệu một sản phẩm bằng câu chuyện liền mạch, không đổi nhận diện.",
         mode="manual",
+    )
+    board = video_storyboard2.apply_middle_contract(
+        board,
+        bible={},
+        references=[],
+        needs={},
+        entity_summary="",
+        creative_controls={},
+    )
+    board = video_storyboard2.set_reference_source_assets(
+        board,
+        [{"asset_id": "source_01", "telegram_file_id": "reference-image-01"}],
+        complete=True,
     )
     return video_storyboard2.approve_content(board)
 
@@ -132,6 +147,152 @@ def test_storyboard_batch_image_order_is_all_starts_then_all_ends() -> None:
     assert [scene["start_image"]["file_id"] for scene in board["scenes"]] == ["batch-1", "batch-2"]
     assert [scene["end_image"]["file_id"] for scene in board["scenes"]] == ["batch-3", "batch-4"]
     assert video_storyboard2.asset_summary(board)["ok"] is True
+
+
+def test_storyboard_batch_controls_bypass_the_middle_flow_guard() -> None:
+    asset_actions = {
+        "assets_screen", "image_return", "asset_view", "asset_upload_all", "asset_ai_missing", "asset_mode",
+        "asset_upload", "asset_ai", "asset_no_end", "asset_remove", "asset_replace", "asset_prev", "asset_next",
+        "asset_move_prev", "asset_move_next", "assets_done",
+    }
+    marker = "STORYBOARD2_MIDDLE_REQUIRED_ACTIONS = frozenset({"
+    start = BOT_SOURCE.index(marker)
+    end = BOT_SOURCE.index("})", start)
+    guarded_actions = set(re.findall(r'"([a-z0-9_]+)"', BOT_SOURCE[start:end]))
+    assert asset_actions.isdisjoint(guarded_actions)
+
+    callback = _function_source("_handle_storyboard2_callback_impl")
+    assert 'if action == "asset_upload_all":' in callback
+    assert 'move(board, "await_image", awaiting_input="image_upload_batch")' in callback
+    assert callback.index('if action == "asset_upload_all":') < callback.index('if action == "assets_done":')
+    asset_keyboard = _function_source("storyboard2_asset_keyboard")
+    assert 'if str(board.get("screen") or "") == "await_image"' in asset_keyboard
+    assert '"vstory|assets_screen"' in asset_keyboard
+
+
+def test_storyboard_batch_album_assigns_each_photo_once_without_provider_calls() -> None:
+    board = video_storyboard2.ensure_session(_board(2), "storyboard-batch-session")
+    board = video_storyboard2.move(
+        board,
+        "await_image",
+        push=False,
+        awaiting_input="image_upload_batch",
+    )
+    holder = {
+        "outer": {
+            "step": "storyboard2",
+            "source_product_id": "storyboard_prompt",
+            "product_type": "storyboard_prompt",
+            "storyboard2": board,
+        }
+    }
+
+    def save_board(_context, next_board, _outer=None):
+        holder["outer"]["step"] = "storyboard2"
+        holder["outer"]["storyboard2"] = video_storyboard2.normalize_state(next_board)
+        return holder["outer"]
+
+    namespace = {
+        "video_profile_studio_state": lambda _context: dict(holder["outer"]),
+        "video_storyboard2": video_storyboard2,
+        "safe_int": lambda value, default=0: int(value or default),
+        "save_storyboard2_state": save_board,
+        "storyboard2_screen_payload": lambda _board: ("Ảnh Storyboard", "keyboard"),
+        "storyboard2_keyboard": lambda rows: rows,
+        "storyboard2_nav": lambda callback: [[("Quay lại", callback)]],
+        "re": re,
+    }
+    handler_source = _function_source("handle_storyboard2_pending_media")
+    exec("from __future__ import annotations\n" + handler_source, namespace)
+    handler = namespace["handle_storyboard2_pending_media"]
+
+    class FakeMessage:
+        def __init__(self, message_id: int, file_id: str) -> None:
+            self.message_id = message_id
+            self.photo = [
+                SimpleNamespace(
+                    file_id=file_id,
+                    file_unique_id=f"unique-{file_id}",
+                )
+            ]
+            self.replies = []
+
+        async def reply_text(self, text, **kwargs):
+            self.replies.append((text, kwargs))
+
+    context = SimpleNamespace(user_data={})
+    user = SimpleNamespace(id=90101)
+    first = FakeMessage(501, "album-photo-1")
+    second = FakeMessage(502, "album-photo-2")
+
+    assert asyncio.run(handler(SimpleNamespace(message=first, effective_user=user), context)) is True
+    assert asyncio.run(handler(SimpleNamespace(message=second, effective_user=user), context)) is True
+
+    saved = video_storyboard2.normalize_state(holder["outer"]["storyboard2"])
+    assert [scene["start_image"]["file_id"] for scene in saved["scenes"]] == [
+        "album-photo-1",
+        "album-photo-2",
+    ]
+    assert saved["awaiting_input"] == ""
+    assert saved["processed_media_message_ids"] == [501, 502]
+    assert len(first.replies) == 1
+    assert len(second.replies) == 1
+
+    assert asyncio.run(handler(SimpleNamespace(message=second, effective_user=user), context)) is True
+    assert len(second.replies) == 1
+    assert saved["processed_media_message_ids"] == [501, 502]
+
+    for forbidden in ("provider", "enqueue", "outbox", "invoice", "charge_xu", "deduct_xu"):
+        assert forbidden not in handler_source.lower()
+
+
+def test_realistic_style_uses_automatic_suggestion_callback_and_keeps_other_products_unchanged() -> None:
+    class _SceneFlow:
+        CREATIVE_CONTROLS = video_scene3_flow.CREATIVE_CONTROLS
+
+    namespace = {
+        "video_scene3_flow": _SceneFlow,
+        "video_ai_real_pilot_scene3_field_state": lambda state: state,
+        "video_storyboard_entity_bridge_marker": lambda state: state.get("storyboard_marker") or {},
+        "video_scene3_summary": lambda _entries, _catalog: "Chưa thêm",
+        "video_uiflow3_keyboard": lambda rows: rows,
+        "video_ai_real_pilot_nav_rows": lambda back: [[("⬅️ Quay lại", back), ("🎬 Menu Video", "menu|main_video")]],
+    }
+    exec(
+        "from __future__ import annotations\n"
+        + _function_source("video_ai_real_pilot_creative_payload"),
+        namespace,
+    )
+    payload = namespace["video_ai_real_pilot_creative_payload"]
+
+    _text, realistic_rows = payload({"parent_product": "video_ai_real", "creative_controls": {}})
+    assert [(label, callback) for row in realistic_rows for label, callback in row if callback == "vid3|pilot_creative_auto"] == [
+        ("✨ Tự động gợi ý nhanh", "vid3|pilot_creative_auto")
+    ]
+    assert all(callback != "vid3|quick_build" for row in realistic_rows for _label, callback in row)
+
+    _text, trend_rows = payload({"parent_product": "video_trend", "creative_controls": {}})
+    assert [(label, callback) for row in trend_rows for label, callback in row if callback == "vid3|quick_build"] == [
+        ("⚡ Tạo nhanh", "vid3|quick_build")
+    ]
+
+    callback = _function_source("handle_video_uiflow3_callback")
+    automatic = callback[
+        callback.index('elif action == "pilot_creative_auto":'):
+        callback.index('elif action == "pilot_creative_back":')
+    ]
+    assert 'str(state.get("parent_product") or "") == "video_ai_real"' in automatic
+    assert "random.choice" in automatic
+    assert "range(1, 6)" in automatic
+    assert 'video_uiflow3_open_view(state, "pilot_creative_controls")' in automatic
+    assert 'state["navigation"]["current_step"] = "summary"' not in automatic
+
+    back = callback[
+        callback.index('elif action == "pilot_creative_back":'):
+        callback.index('elif action in {"pilot_creative_done", "pilot_creative_skip"}:')
+    ]
+    assert 'video_uiflow3_open_view(state, "pilot_creative_controls")' in back
+    assert 'state["navigation"]["current_step"] = "production_bible"' in back
 
 
 def test_storyboard_batch_targets_scale_to_twenty_or_forty_without_per_scene_buttons() -> None:
@@ -509,7 +670,9 @@ def test_entry_modes_split_after_ratio_and_keep_exact_back_targets() -> None:
     assert 'if entry_mode == "existing"' in callback
     assert 'move(board, "content_source", awaiting_input="")' in callback
     assert "video_storyboard2.apply_uploaded_storyboard(board)" in callback
-    assert 'move(board, "scene_review", awaiting_input="")' in callback
+    assert "video_storyboard_open_required_assets" in callback
+    assert "seed_uploaded=True" in callback
+    assert 'return_screen="ratio"' in callback
     assert 'if action == "profile_pick"' in callback
     assert '"vstory|upload_review" if entry_mode == "existing"' in payload
     assert 'storyboard2_nav("vstory|profiles_screen")' in suggestion_keyboard
@@ -545,6 +708,7 @@ def test_all_touched_storyboard_bot_functions_parse_as_python311_source() -> Non
         "storyboard2_profiles_keyboard",
         "storyboard2_suggestion_keyboard",
         "storyboard2_scene_review_keyboard",
+        "storyboard2_asset_back_callback",
         "storyboard2_asset_keyboard",
         "storyboard2_asset_overview_keyboard",
         "storyboard2_image_prompt_keyboard",
@@ -558,6 +722,17 @@ def test_all_touched_storyboard_bot_functions_parse_as_python311_source() -> Non
         "storyboard2_entry_text",
         "storyboard2_screen_payload",
         "storyboard2_render",
+        "video_ai_real_uses_inline_requirements",
+        "video_ai_real_pilot_creative_payload",
+        "video_ai_real_pilot_requirements_payload",
+        "video_ai_real_pilot_requirement_review_payload",
+        "video_ai_real_pilot_screen_payload",
+        "handle_video_uiflow3_callback",
+        "video_storyboard_open_required_assets",
+        "video_storyboard_prepare_entity_bridge",
+        "video_storyboard_open_creative_details",
+        "video_storyboard_finish_entity_bridge",
+        "video_storyboard_finish_creative_details",
         "storyboard2_scene3_handoff",
         "storyboard2_prepare_quick_image",
         "_handle_storyboard2_callback_impl",

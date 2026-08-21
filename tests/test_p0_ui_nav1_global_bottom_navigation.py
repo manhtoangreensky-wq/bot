@@ -114,3 +114,36 @@ def test_stale_callbacks_are_not_mutated_by_navigation_normalization():
     ]]
     result = ui_navigation.canonicalize_bottom_navigation(rows, button_factory=Button)
     assert callbacks(result) == [[stale_callback, "menu|main"]]
+
+
+def test_non_vietnamese_navigation_labels_survive_global_normalization():
+    """The wrapper may reorder navigation, but must never translate it for us."""
+    cases = (
+        ("⬅️ Back", "🏠 Main menu"),
+        ("⬅️ 戻る", "🏠 メインメニュー"),
+        ("⬅️ 뒤로", "🏠 메인 메뉴"),
+        ("⬅️ رجوع", "🏠 القائمة الرئيسية"),
+        ("⬅️ Volver", "🏠 Menú principal"),
+    )
+
+    for back_text, main_text in cases:
+        rows = [
+            [Button("Continue", callback_data="flow|next")],
+            [
+                Button(back_text, callback_data="flow|back"),
+                Button(main_text, callback_data="menu|main"),
+            ],
+        ]
+        result = ui_navigation.canonicalize_bottom_navigation(rows, button_factory=Button)
+        assert labels(result[-1:]) == [[back_text, main_text]]
+        assert callbacks(result[-1:]) == [["flow|back", "menu|main"]]
+        assert ui_navigation.navigation_audit(result)["bottom_row_ok"] is True
+
+
+def test_noncanonical_vietnamese_parent_label_survives_normalization():
+    rows = [[
+        Button("⬅️ Về menu ảnh", callback_data="image|parent"),
+        Button("🏠 Menu chính", callback_data="menu|main"),
+    ]]
+    result = ui_navigation.canonicalize_bottom_navigation(rows, button_factory=Button)
+    assert labels(result) == [["⬅️ Về menu ảnh", "🏠 Menu chính"]]

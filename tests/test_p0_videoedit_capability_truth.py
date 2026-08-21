@@ -112,6 +112,70 @@ def test_vietnamese_intent_compiler_is_deterministic_and_local() -> None:
     assert "0 Xu" in first["message_vi"]
 
 
+def test_numeric_brightness_and_master_volume_are_preserved_from_one_goal() -> None:
+    intent = "Làm sáng video lên 120% và tăng âm lượng lên 110%"
+
+    result = capabilities.compile_local_intent(intent)
+
+    assert result["ok"] is True
+    assert result["feature_keys"] == ["enhance_light_color", "audio_master_volume"]
+    assert result["plan_patch"] == {"brightness_percent": 120, "volume": 1.1}
+    assert result["manual_edit_plan"] == {"brightness_percent": 120, "volume": 1.1}
+    assert "color_preset" not in result["plan_patch"]
+    assert result["provider_called"] is False
+    assert result["job_created"] is False
+    assert result["wallet_mutated"] is False
+    assert result["file_generated"] is False
+    assert result["input_text"] == intent
+
+
+def test_brightness_does_not_capture_percentage_from_later_volume_clause() -> None:
+    result = capabilities.compile_local_intent("Làm sáng và tăng âm lượng lên 110%")
+
+    assert result["ok"] is True
+    assert result["plan_patch"] == {"color_preset": "bright_clear", "volume": 1.1}
+    assert "brightness_percent" not in result["plan_patch"]
+
+
+def test_volume_does_not_capture_percentage_from_later_brightness_clause() -> None:
+    result = capabilities.compile_local_intent("Âm lượng và làm sáng lên 120%")
+
+    assert result["ok"] is True
+    assert result["plan_patch"] == {"brightness_percent": 120}
+    assert "volume" not in result["plan_patch"]
+
+
+def test_numeric_targets_tolerate_natural_punctuation_without_losing_the_sign() -> None:
+    brightness = capabilities.compile_local_intent("Độ sáng: 120%")
+    volume = capabilities.compile_local_intent("Âm lượng, 110%")
+
+    assert brightness["plan_patch"] == {"brightness_percent": 120}
+    assert volume["plan_patch"] == {"volume": 1.1}
+
+
+def test_explicit_numeric_percent_outside_local_bounds_fails_closed() -> None:
+    cases = (
+        ("Độ sáng 19%", "brightness_percent_out_of_range", "20% đến 200%"),
+        ("Độ sáng 201%", "brightness_percent_out_of_range", "20% đến 200%"),
+        ("Âm lượng -1%", "master_volume_percent_out_of_range", "0% đến 200%"),
+        ("Âm lượng 201%", "master_volume_percent_out_of_range", "0% đến 200%"),
+    )
+
+    for intent, reason, allowed_range in cases:
+        result = capabilities.compile_local_intent(intent)
+
+        assert result["ok"] is False
+        assert result["reason"] == reason
+        assert allowed_range in result["message_vi"]
+        assert result["feature_keys"] == []
+        assert result["plan_patch"] == {}
+        assert result["manual_edit_plan"] == {}
+        assert result["provider_called"] is False
+        assert result["job_created"] is False
+        assert result["wallet_mutated"] is False
+        assert result["file_generated"] is False
+
+
 def test_vietnamese_vertical_tiktok_intent_maps_to_local_ratio() -> None:
     result = capabilities.compile_local_intent("video dọc TikTok")
     assert result["ok"] is True

@@ -18,9 +18,11 @@ INTERNAL_STEPS = (
     "video_prompts",
     "transitions",
     "addons",
-    "quality",
     "review",
+    "quality",
+    "invoice",
     "final_confirm",
+    "status",
 )
 
 

@@ -4,6 +4,7 @@ import asyncio
 from contextvars import ContextVar
 import json
 from pathlib import Path
+import re
 from types import SimpleNamespace
 
 
@@ -88,8 +89,9 @@ def _tail() -> dict:
 
 
 class _TailOps:
-    def __init__(self, *, technical_ready: bool = True):
+    def __init__(self, *, technical_ready: bool = True, execution_enabled: bool = True):
         self.technical_ready = technical_ready
+        self.execution_enabled = execution_enabled
 
     @staticmethod
     def claim_callback(state: dict, _callback_id: str):
@@ -103,9 +105,11 @@ class _TailOps:
     def invoice_allowed(_state: dict):
         return True, ""
 
-    @staticmethod
-    def commercial_contract(_product_type: str) -> dict:
-        return {"execution_enabled": True}
+    def commercial_contract(self, _product_type: str) -> dict:
+        return {
+            "execution_enabled": self.execution_enabled,
+            "execution_blocker": "long_video_under_upgrade" if not self.execution_enabled else "",
+        }
 
     def evaluate_submit_preflight(
         self,
@@ -215,7 +219,10 @@ def test_video_edit_no_job_recovery_is_truthful_and_retries_submit() -> None:
     recovery_text = _function_source("video_tail9_status_recovery_text")
     recovery_keyboard = _load_function(
         "video_tail9_status_recovery_keyboard",
-        {"video_scene3_keyboard": lambda rows: rows},
+        {
+            "video_editengine1": SimpleNamespace(PRODUCT_TYPE="video_local_edit"),
+            "video_scene3_keyboard": lambda rows: rows,
+        },
     )
     tail = {
         "submit_attempted": True,
@@ -226,7 +233,8 @@ def test_video_edit_no_job_recovery_is_truthful_and_retries_submit() -> None:
     rows = recovery_keyboard(tail)
 
     assert "submit_attempted" in recovery_text
-    assert "Chưa thể bắt đầu tạo video" in recovery_text
+    assert "FAIL - Chưa tạo được tác vụ" in recovery_text
+    assert "Tài khoản chưa bị trừ Xu" in recovery_text
     assert rows[0][0][1] == "video_tail|confirm|submit"
     assert rows[1][0][1] == "video_tail|confirm|back"
 
@@ -268,6 +276,7 @@ def test_public_confirm_wrapper_accepts_context_override_with_readonly_query() -
                 "duplicate_callback_pattern_detected": False,
             },
             "handle_video_product_callback": product_handler,
+            "re": re,
         },
     )
     context = SimpleNamespace(
@@ -387,6 +396,7 @@ def _submit_handler_namespace(
     local_result=None,
     product_type: str = "video_ai_real",
     content_source: str = "selected_content",
+    execution_enabled: bool = True,
 ):
     state = _tail()
     state.update(
@@ -443,10 +453,31 @@ def _submit_handler_namespace(
 
     namespace = {
         "video_tail9_context": lambda _uid, _context: (dict(state), owner, {}),
-        "video_tail9": _TailOps(technical_ready=technical_ready),
+        "video_tail9": _TailOps(
+            technical_ready=technical_ready,
+            execution_enabled=execution_enabled,
+        ),
         "save_video_tail9_state": lambda *_args, **_kwargs: None,
         "video_tail9_render": render,
         "video_tail9_apply_to_session": lambda *_args, **_kwargs: session,
+        "video_uiflow3_b14_execution_blockers": lambda _host: (
+            [] if technical_ready else ["renderer_missing"]
+        ),
+        "video_tail9_preflight": lambda *_args, **_kwargs: {
+            "ok": technical_ready,
+            "reason": "" if technical_ready else "renderer_missing",
+            "blockers": [] if technical_ready else ["renderer_missing"],
+        },
+        "VIDEO_TAIL9_DEFERRED_RUNTIME_PRODUCTS": {
+            "video_ai_real",
+            "script_image_video",
+            "video_trend",
+            "storyboard_prompt",
+            "multi_scene_film",
+            "self_shot_scene_change",
+            "self_shot_cinematic_transform",
+            "video_long",
+        },
         "video_b14_is_admin_or_owner": lambda _uid: False,
         "get_user": lambda _uid: (200, None, None),
         "safe_int": _safe_int,
@@ -591,12 +622,13 @@ def test_video_edit_without_persisted_job_opens_its_status_recovery_panel() -> N
     assert namespace["_status_calls"] == []
 
 
-def test_status_handoff_covers_shared_products_and_embedded_idea_source() -> None:
+def test_status_handoff_covers_owner_approved_products_and_embedded_idea_source() -> None:
     products = (
-        ("video_ai_real", "scene3"),
+        ("video_ai_real", "uiflow3"),
         ("video_trend", "scene3"),
         ("script_image_video", "scene3"),
         ("storyboard_prompt", "scene3"),
+        ("multi_scene_film", "uiflow3"),
         ("self_shot_scene_change", "session"),
         ("self_shot_cinematic_transform", "session"),
     )
@@ -620,3 +652,25 @@ def test_status_handoff_covers_shared_products_and_embedded_idea_source() -> Non
             assert bridge_calls == []
             assert namespace["_status_calls"][0]["owner"] == owner
             assert namespace["_status_calls"][0]["tail"]["content_source"] == content_source
+
+
+def test_long_video_execution_lock_opens_canonical_status_after_confirmation() -> None:
+    namespace, rendered, blocker_calls, bridge_calls = _submit_handler_namespace(
+        owner="uiflow3",
+        product_type="multi_scene_film",
+        execution_enabled=False,
+    )
+    handler = _load_function("handle_video_tail_callback", namespace)
+
+    result = asyncio.run(
+        handler(SimpleNamespace(callback_query=_Query()), SimpleNamespace())
+    )
+
+    assert result == "status-panel"
+    assert rendered == []
+    assert blocker_calls == []
+    assert bridge_calls == []
+    status_tail = namespace["_status_calls"][0]["tail"]
+    assert status_tail["job_id"] == ""
+    assert status_tail["final_confirmed"] is False
+    assert status_tail["submit_preflight_snapshot"]["blocker_code"] == "long_video_under_upgrade"

@@ -13,6 +13,8 @@ from hashlib import sha256
 import html
 from typing import Any, Iterable, Mapping
 
+from services import video_profile_catalog
+
 
 PRODUCT_ID = "self_shot_cinematic_transform"
 JOB_TYPE = "self_shot_cinematic_transform"
@@ -21,7 +23,7 @@ LEGACY_JOB_TYPE = "self_shot_scene_change"
 MODE_ONE_TAKE = "one_take_cinematic"
 SUPPORTED_MODES = frozenset({MODE_ONE_TAKE})
 
-SUBJECT_TYPES = frozenset({"person", "object", "pet", "person_object", "multiple", "custom"})
+SUBJECT_TYPES = frozenset({"person", "object", "pet", "person_object", "multiple", "custom", "motion_only", "none"})
 LAYER_STATES = frozenset({"preserve", "transform", "not_applicable"})
 MANDATORY_PRESERVE_LAYERS = frozenset({"identity", "body", "motion", "relationship", "camera"})
 
@@ -129,47 +131,19 @@ SUBJECT_OPTIONS = (
 
 WARDROBE_OPTIONS = (
     "Giữ trang phục nguồn",
-    "Fantasy thanh lịch",
+    "Kỳ ảo thanh lịch",
     "Cổ trang điện ảnh",
     "Tương lai cao cấp",
     "Siêu anh hùng tinh tế",
-    "Thời trang runway",
+    "Thời trang trình diễn",
 )
 
-CONTENT_PROFILES = (
-    "Bán hàng / quảng cáo",
-    "Review / demo sản phẩm",
-    "Affiliate / UGC",
-    "Testimonial / câu chuyện khách hàng",
-    "Thương hiệu / doanh nghiệp",
-    "Nhà sáng tạo / bắt trend",
-    "Meme / parody / hài",
-    "Sự kiện / khoảnh khắc nổi bật",
-    "Hướng dẫn / kiến thức",
-    "Kể chuyện / phim ngắn",
-    "Kiến trúc / bất động sản",
-    "Nội thất / cải tạo không gian",
-    "Thời trang / trình diễn",
-    "Ẩm thực / đồ uống",
-    "Du lịch / trải nghiệm",
-    "Ứng dụng / website / SaaS",
-    "Game / thể thao điện tử",
-    "Thể thao / vận động",
-    "Âm nhạc / biểu diễn",
-    "Làm đẹp / chăm sóc cá nhân",
-    "Sức khỏe / thể chất",
-    "Giáo dục / đào tạo",
-    "Lịch sử / văn hóa / thần thoại",
-    "Kỹ thuật / công nghiệp",
-    "Dữ liệu / infographic",
-    "Tin tức / bản tin ngắn",
-    "Động lực / phát triển bản thân",
-    "ASMR / thư giãn",
-    "Thú cưng / động vật",
-    "Ô tô / xe máy",
-    "Sản phẩm 3D / vật thể",
-    "Fantasy / điện ảnh / VFX",
+CONTENT_PROFILE_ROWS = tuple(
+    dict(item)
+    for item in video_profile_catalog.PROFILE_SEEDS
+    if bool(item.get("is_active", 1))
 )
+CONTENT_PROFILES = tuple(str(item.get("public_name") or "") for item in CONTENT_PROFILE_ROWS)
 
 AUDIO_LABELS = {
     "source": "Âm thanh gốc",
@@ -202,7 +176,7 @@ SCREEN_PARENTS = {
     "effects": "world",
     "audio": "effects",
     "volume": "audio",
-    "review": "audio",
+    "review": "effects",
     "finish": "review",
     "package": "finish",
 }
@@ -232,7 +206,7 @@ CALLBACK_OPERATION_SCREENS = {
     "volume": frozenset({"audio"}),
     "volume_set": frozenset({"volume"}),
     "prompt": frozenset({"review"}),
-    "finish": frozenset({"review", "finish"}),
+    "finish": frozenset({"review", "finish", "package"}),
     "quality": frozenset({"package"}),
 }
 
@@ -250,7 +224,6 @@ STEP_SEQUENCE = (
     "wardrobe",
     "world",
     "effects",
-    "audio",
     "review",
     "finish",
     "package",
@@ -283,6 +256,91 @@ def transformation_catalog() -> list[dict[str, Any]]:
     return rows
 
 
+def transformation_group_for_content_profile(profile_index: int) -> dict[str, Any]:
+    index = max(1, min(len(CONTENT_PROFILE_ROWS), int(profile_index or 1)))
+    profile = dict(CONTENT_PROFILE_ROWS[index - 1])
+    tags = {
+        str(value or "").strip().lower()
+        for field in (
+            "narrative_tags",
+            "industry_tags",
+            "visual_tags",
+            "platform_tags",
+            "goal_tags",
+        )
+        for value in profile.get(field) or []
+        if str(value or "").strip()
+    }
+    key = str(profile.get("profile_key") or "")
+    if key in {"fashion_lookbook", "beauty_skincare_wellness"} or "fashion" in tags:
+        group_id = "fashion_runway"
+    elif key in {"music_performance_visualizer", "event_highlight", "social_creator_trend"} or "music" in tags:
+        group_id = "music_performance"
+    elif key == "pets_animals" or {"pet", "animals"}.intersection(tags):
+        group_id = "pet_object_character"
+    elif key in {"history_culture_mythology"} or {"history", "period", "culture"}.intersection(tags):
+        group_id = "history_ancient"
+    elif key in {"game_trailer", "app_software_demo", "engineering_industrial"} or {"game", "technology", "industrial"}.intersection(tags):
+        group_id = "scifi_cyberpunk"
+    elif key in {"character_animation_vfx", "short_film_trailer"} or {"animation", "dramatic", "cinematic"}.intersection(tags):
+        group_id = "magic_vfx" if key == "character_animation_vfx" else "cinematic_story"
+    elif key in {"travel_local_culture", "architecture_real_estate"} or {"travel", "real_estate", "architecture"}.intersection(tags):
+        group_id = "travel_fantasy"
+    elif key in {"sports_esports", "automotive_transport"} or {"sport", "esports", "automotive"}.intersection(tags):
+        group_id = "hero_action"
+    elif key in {"sales_ads", "product_review_demo", "affiliate_ugc", "testimonial_case_study", "brand_corporate", "product_3d_showcase"} or {"commerce", "business", "product"}.intersection(tags):
+        group_id = "product_commercial"
+    elif key in {"asmr_relax_lofi_visualizer"} or {"ambient", "lofi"}.intersection(tags):
+        group_id = "season_time"
+    else:
+        group_id = "cinematic_story"
+    return next(
+        (dict(item) for item in transformation_catalog() if item["group_id"] == group_id),
+        dict(transformation_catalog()[0]),
+    )
+
+
+def contextual_preset_page(state: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """Return five profile-specific directions without changing transform semantics."""
+
+    current = dict(state or {})
+    group_id = str(current.get("selected_group_id") or TRANSFORMATION_GROUPS[0][0])
+    page = max(1, min(4, int(current.get("preset_page") or 1)))
+    group = next(
+        (item for item in transformation_catalog() if item["group_id"] == group_id),
+        transformation_catalog()[0],
+    )
+    start = (page - 1) * 5
+    options = [dict(item) for item in group["presets"][start:start + 5]]
+    if str(current.get("preset_source") or "") != "content_profile":
+        return options
+    profile_key = str(current.get("content_profile_key") or "")
+    profile = next(
+        (dict(item) for item in CONTENT_PROFILE_ROWS if str(item.get("profile_key") or "") == profile_key),
+        {},
+    )
+    if not profile:
+        return options
+    pattern = [str(item or "").strip() for item in profile.get("default_scene_pattern") or [] if str(item or "").strip()]
+    if not pattern:
+        pattern = ["Mở đầu", "Diễn biến", "Điểm nhấn", "Kết"]
+    description = str(profile.get("description") or profile.get("public_name") or "").strip()
+    result = []
+    for index, item in enumerate(options):
+        offset = (index + start) % len(pattern)
+        ordered = pattern[offset:] + pattern[:offset]
+        result.append({
+            **item,
+            "preset_id": f"{item['preset_id']}:{profile_key}",
+            "title": f"{ordered[0]} · {item['title']}",
+            "summary": (
+                f"{description}. Mạch riêng: {' → '.join(ordered)}. {item['summary']}"
+            ).strip(),
+            "content_profile_key": profile_key,
+        })
+    return result
+
+
 def initial_draft() -> dict[str, Any]:
     return {
         "product_id": PRODUCT_ID,
@@ -310,8 +368,17 @@ def initial_draft() -> dict[str, Any]:
     }
 
 
-def screen_parent(screen: str) -> str:
-    return SCREEN_PARENTS.get(str(screen or "intro"), "intro")
+def screen_parent(
+    screen: str,
+    state: Mapping[str, Any] | None = None,
+) -> str:
+    name = str(screen or "intro")
+    override = str(
+        (dict(state or {}).get("screen_return_overrides") or {}).get(name) or ""
+    )
+    if override in set(SCREEN_PARENTS) | {"hub"}:
+        return override
+    return SCREEN_PARENTS.get(name, "intro")
 
 
 def callback_operation_allowed(screen: str, operation: str) -> bool:
@@ -321,13 +388,29 @@ def callback_operation_allowed(screen: str, operation: str) -> bool:
     return bool(owner_screens and str(screen or "intro") in owner_screens)
 
 
+def callback_allowed(
+    screen: str,
+    callback_data: str,
+    state: Mapping[str, Any] | None = None,
+) -> bool:
+    """Accept a button only when it belongs to the currently rendered screen."""
+
+    model = screen_model(screen, state)
+    allowed = {
+        str(callback)
+        for row in model.get("rows") or []
+        for _label, callback in row
+    }
+    return str(callback_data or "") in allowed
+
+
 def _safe(value: Any) -> str:
     return html.escape(str(value or ""), quote=False)
 
 
 def _nav(back_screen: str) -> list[tuple[str, str]]:
     callback = "vproduct|selfshot_hub" if back_screen == "hub" else f"vproduct|ss3|show|{back_screen}"
-    return [("⬅️ Quay lại", callback), ("🏠 Menu chính", "menu|main")]
+    return [("⬅️ Quay lại", callback), ("🎬 Menu Video", "menu|main_video")]
 
 
 def _status_label(enabled: bool) -> str:
@@ -346,8 +429,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
     if name == "intro":
         body = (
             "Gửi video mộc để giữ đúng khuôn mặt, vóc dáng, chuyển động và tương tác nguồn trong cùng một cú máy. "
-            "TOAN AAS chỉ biến đổi những lớp anh/chị cho phép như trang phục, cảnh vật, ánh sáng và hiệu ứng.\n\n"
-            "Màn này chỉ lập kế hoạch, chưa gọi nguồn dựng và chưa trừ Xu."
+            "TOAN AAS chỉ biến đổi những lớp anh/chị cho phép như trang phục, cảnh vật, ánh sáng và hiệu ứng."
         )
         rows = [
             [("📎 Gửi video nguồn", "vproduct|ss3|source"), ("✨ Xem kiểu biến đổi", "vproduct|ss3|show|types")],
@@ -364,7 +446,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             f"Video nguồn: {'Đã nhận' if current.get('source_video') or current.get('source_asset') else 'Chưa có'}\n"
             f"Chủ thể: {_safe((current.get('subject_manifest') or {}).get('selection_type') or 'Chưa chọn')}\n"
             f"Kiểu biến đổi: {_safe((current.get('selected_preset') or {}).get('title') or 'Chưa chọn')}\n"
-            f"Timeline: {len(list(current.get('transformation_stages') or []))} giai đoạn"
+            f"Mạch biến đổi: {len(list(current.get('transformation_stages') or []))} giai đoạn"
         )
         resume = str(current.get("selfshot3_resume_screen") or "")
         resume_callback = f"vproduct|ss3|show|{resume}" if resume and resume != "intro" else "vproduct|ss3|source"
@@ -376,8 +458,8 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             "2. Chọn người, vật hoặc thú cưng cần giữ.\n"
             "3. Khóa những lớp phải giữ nguyên.\n"
             "4. Chọn kiểu biến đổi và chia 2–5 giai đoạn liên tục.\n"
-            "5. Xem timeline, âm thanh, prompt và preflight trước hóa đơn.\n"
-            "6. Chỉ sau xác nhận cuối hệ thống mới tạo video; chỉ trừ Xu sau khi MP4 hợp lệ đã giao thành công."
+            "5. Xem mạch biến đổi, âm thanh và toàn bộ câu lệnh trước hóa đơn.\n"
+            "6. Chỉ sau xác nhận cuối hệ thống mới tạo video; chỉ trừ Xu sau khi video hợp lệ đã giao thành công."
         )
     elif name == "source_ready":
         analysis = dict(current.get("source_analysis") or {})
@@ -385,7 +467,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         body = (
             f"Thời lượng: {float(analysis.get('duration_seconds') or 0):.1f} giây\n"
             f"Kích thước: {int(analysis.get('width') or 0)}×{int(analysis.get('height') or 0)}\n"
-            f"FPS: {float(analysis.get('fps') or 0):.2f}\n\n"
+            f"Tốc độ khung hình: {float(analysis.get('fps') or 0):.2f} hình/giây\n\n"
             "Chọn toàn bộ video hoặc đúng một đoạn trước khi khóa chủ thể."
         )
         rows = [
@@ -400,7 +482,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             f"Chuyển động camera: {_safe(report.get('camera_motion') or 'chưa phân loại')}\n"
             f"Người: {len(list(report.get('person_tracks') or []))} · Vật: {len(list(report.get('object_tracks') or []))} · Thú cưng: {len(list(report.get('pet_tracks') or []))}\n"
             f"Tương tác đã nhận diện: {len(list(report.get('interaction_graph') or []))}\n\n"
-            "Đây là phân tích cục bộ để lập kế hoạch; chưa gọi nguồn dựng."
+            "Kết quả này dùng để khóa đúng chủ thể, quan hệ và chuyển động nguồn."
         )
         rows = [[("➡️ Chọn đoạn video", "vproduct|ss3|show|segment"), ("📎 Gửi video khác", "vproduct|ss3|source")]]
     elif name == "segment":
@@ -418,7 +500,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
                 f"Bắt đầu: {int(segment.get('start_ms') or 0) / 1000:.1f} giây\n"
                 f"Kết thúc: {int(segment.get('end_ms') or 0) / 1000:.1f} giây\n"
                 f"Thời lượng: {int(segment.get('duration_ms') or 0) / 1000:.1f} giây\n\n"
-                "Đoạn này giữ nguyên chuyển động và camera nguồn; chưa tạo file mới."
+                "Đoạn này giữ nguyên chuyển động và camera nguồn."
             )
         else:
             body = "Chưa chọn đoạn video. Hãy dùng toàn bộ hoặc nhập mốc bắt đầu–kết thúc."
@@ -441,7 +523,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
             body = blocker_text
         elif len(options) == 1 and options[0][0] == "custom":
             body = (
-                "Chưa có track người/vật/thú cưng từ phân tích cục bộ. "
+                "Chưa xác định được người, vật hoặc thú cưng riêng biệt từ phân tích cục bộ. "
                 "Hãy tự mô tả chủ thể để tạo neo nguồn; hệ thống không tự đoán nhận diện."
             )
         else:
@@ -475,26 +557,35 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
     elif name == "presets":
         group_id = str(current.get("selected_group_id") or TRANSFORMATION_GROUPS[0][0])
         page = max(1, min(4, int(current.get("preset_page") or 1)))
-        options = catalog_page(group_id, page)
+        options = contextual_preset_page(current)
         group = next((item for item in transformation_catalog() if item["group_id"] == group_id), transformation_catalog()[0])
         title = f"✨ {group['title']}"
         context_label = str(current.get("content_profile") or "").strip()
         context_line = f"\nBối cảnh nội dung: {_safe(context_label)}" if context_label else ""
-        body = "\n".join(f"{index}. {item['title']}: {item['summary']}" for index, item in enumerate(options, 1)) + context_line
+        body = "\n".join(
+            f"{index}. {_safe(item['title'])}: {_safe(item['summary'])}"
+            for index, item in enumerate(options, 1)
+        ) + context_line
         rows = [[(str(index), f"vproduct|ss3|preset|{index}") for index in range(1, 6)]]
         rows.append([("🔄 Đổi 5 gợi ý", "vproduct|ss3|preset_page"), ("✍️ Tự nhập", "vproduct|ss3|preset_custom")])
         rows.append([("🎯 32 loại nội dung", "vproduct|ss3|show|content_profiles"), ("🗂️ Kho Ý tưởng video", "vproduct|ss3|show|idea_library")])
     elif name == "content_profiles":
         page = max(1, min(4, int(current.get("content_profile_page") or 1)))
         start = (page - 1) * 8
-        options = CONTENT_PROFILES[start:start + 8]
+        options = CONTENT_PROFILE_ROWS[start:start + 8]
         title = "🎯 Chọn loại nội dung"
         body = (
             f"Trang {page}/4. Chọn đúng một loại nội dung; hệ thống sẽ quay lại 5 hướng biến đổi bám sát loại đã chọn. "
             "Lựa chọn này không tự ghi đè video nguồn hoặc các lớp đã khóa."
         )
         rows = [
-            [(label, f"vproduct|ss3|content_profile|{start + index + 1}") for index, label in enumerate(options[offset:offset + 2], offset)]
+            [
+                (
+                    f"{item.get('icon') or '🎯'} {item.get('short_name') or item.get('public_name') or ''}",
+                    f"vproduct|ss3|content_profile|{start + index + 1}",
+                )
+                for index, item in enumerate(options[offset:offset + 2], offset)
+            ]
             for offset in range(0, len(options), 2)
         ]
         rows.append([("➡️ Nhóm tiếp theo", "vproduct|ss3|content_profile_page"), ("🎬 Đổi nhóm biến đổi", "vproduct|ss3|show|groups")])
@@ -505,8 +596,8 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         options = groups[start:start + 8]
         title = "🗂️ Kho Ý tưởng video"
         body = (
-            f"Trang {page}/2. Mỗi ý tưởng đã có cấu trúc biến đổi, nhịp, camera và continuity cho video tự quay. "
-            "Chọn một ý tưởng rồi vẫn được xem và sửa timeline trước khi hoàn thiện."
+            f"Trang {page}/2. Mỗi ý tưởng đã có cấu trúc biến đổi, nhịp, máy quay và mạch liên tục cho video tự quay. "
+            "Chọn một ý tưởng rồi vẫn được xem và sửa mạch biến đổi trước khi hoàn thiện."
         )
         rows = [
             [(item["title"], f"vproduct|ss3|idea_pick|{start + index + 1}") for index, item in enumerate(options[offset:offset + 2], offset)]
@@ -524,12 +615,12 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         rows = [[("✅ Dùng nội dung gợi ý", "vproduct|ss3|content|preset"), ("✍️ Tự nhập nội dung", "vproduct|ss3|content|custom")]]
     elif name == "timeline":
         stages = list(current.get("transformation_stages") or [])
-        title = "🧭 Timeline biến đổi"
+        title = "🧭 Mạch biến đổi"
         body = "\n".join(
             f"Giai đoạn {index}: {int(item.get('start_ms') or 0) / 1000:.1f}s–{int(item.get('end_ms') or 0) / 1000:.1f}s · {_safe(item.get('target_state'))}"
             for index, item in enumerate(stages, 1)
-        ) or "Chưa có timeline."
-        rows = [[("🔄 Lập lại timeline", "vproduct|ss3|timeline|rebuild"), ("✍️ Sửa timeline", "vproduct|ss3|timeline|custom")], [("✅ Dùng timeline này", "vproduct|ss3|show|wardrobe"), ("🎬 Xem kiểu đã chọn", "vproduct|ss3|show|presets")]]
+        ) or "Chưa có mạch biến đổi."
+        rows = [[("🔄 Lập lại mạch", "vproduct|ss3|timeline|rebuild"), ("✍️ Sửa mạch", "vproduct|ss3|timeline|custom")], [("✅ Dùng mạch này", "vproduct|ss3|show|wardrobe"), ("🎬 Xem kiểu đã chọn", "vproduct|ss3|show|presets")]]
     elif name == "wardrobe":
         title = "👗 Trang phục"
         body = f"Đang chọn: {_safe(current.get('wardrobe') or 'Chưa chọn')}\nChỉ biến đổi trang phục nếu mục Trang phục đang ở trạng thái Biến đổi."
@@ -547,11 +638,11 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         buttons = [(f"{_status_label(label in selected)} {label}", f"vproduct|ss3|effect|{index + 1}") for index, label in enumerate(EFFECT_OPTIONS)]
         buttons.append(("🚫 Không thêm hiệu ứng", "vproduct|ss3|effect|none"))
         rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
-        rows.append([("✅ Xong hiệu ứng", "vproduct|ss3|show|audio"), ("↩️ Tắt toàn bộ", "vproduct|ss3|effect|clear")])
+        rows.append([("✅ Xong hiệu ứng", "vproduct|ss3|show|review"), ("↩️ Tắt toàn bộ", "vproduct|ss3|effect|clear")])
     elif name == "audio":
         plan = dict(current.get("audio_plan") or initial_draft()["audio_plan"])
         title = "🎙️ Âm thanh và phụ đề"
-        body = "Âm lượng chỉnh từ 0–200%. Có chống vỡ tiếng và tự hạ nhạc khi có lời. Không giả vờ tách giọng/nhạc nếu video nguồn chỉ có một track đã trộn."
+        body = "Âm lượng chỉnh từ 0–200%. Có chống vỡ tiếng và tự hạ nhạc khi có lời. Nếu video nguồn chỉ có một luồng âm thanh đã trộn, hệ thống sẽ giữ đúng giới hạn đó."
         items = []
         for key in ("source", "voice", "music", "sfx", "subtitle"):
             item = dict(plan.get(key) or {})
@@ -563,54 +654,56 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
     elif name == "volume":
         target = str(current.get("audio_volume_target") or "source")
         title = f"🎚️ Âm lượng {AUDIO_LABELS.get(target, target)}"
-        body = "Chọn mức 0–200%. Hệ thống giữ clipping guard và ducking khi có lời."
+        body = "Chọn mức 0–200%. Hệ thống chống vỡ tiếng và tự hạ nhạc khi có lời."
         values = (0, 20, 40, 60, 80, 100, 120, 150, 180, 200)
         buttons = [(f"{value}%", f"vproduct|ss3|volume_set|{value}") for value in values]
         rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     elif name == "review":
         preset = dict(current.get("selected_preset") or {})
         stages = list(current.get("transformation_stages") or [])
-        title = "👁️ Xem lại kế hoạch biến đổi"
+        title = "👁️ <b>Xem lại kế hoạch biến đổi</b>"
         body = (
-            f"Đoạn nguồn: {int((current.get('source_segment') or {}).get('duration_ms') or 0) / 1000:.1f} giây\n"
-            f"Chủ thể: {_safe((current.get('subject_manifest') or {}).get('selection_type'))}\n"
-            f"Kiểu: {_safe(preset.get('title'))}\n"
-            f"Timeline: {len(stages)} giai đoạn\n"
-            f"Trang phục: {_safe(current.get('wardrobe'))}\n"
-            f"Thế giới: {_safe(current.get('world'))}\n"
-            f"Hiệu ứng: {_safe(', '.join(current.get('selected_effects') or []) or 'Không thêm')}\n\n"
-            "Chưa tạo job, chưa gọi nguồn dựng và chưa trừ Xu."
+            f"• <b>Đoạn nguồn:</b> {int((current.get('source_segment') or {}).get('duration_ms') or 0) / 1000:.1f} giây\n"
+            f"• <b>Chủ thể:</b> {_safe((current.get('subject_manifest') or {}).get('selection_type'))}\n"
+            f"• <b>Kiểu:</b> {_safe(preset.get('title'))}\n"
+            f"• <b>Mạch biến đổi:</b> {len(stages)} giai đoạn\n"
+            f"• <b>Trang phục:</b> {_safe(current.get('wardrobe'))}\n"
+            f"• <b>Thế giới:</b> {_safe(current.get('world'))}\n"
+            f"• <b>Hiệu ứng:</b> {_safe(', '.join(current.get('selected_effects') or []) or 'Không thêm')}\n\n"
+            "Kiểm tra kế hoạch rồi bấm <b>➡️ Tiếp tục</b> để sang Kế hoạch biến đổi."
         )
-        rows = [[("🧭 Timeline", "vproduct|ss3|show|timeline"), ("📝 Prompt", "vproduct|ss3|prompt")], [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("🎙️ Âm thanh", "vproduct|ss3|audio_review")], [("✅ Hoàn thiện video", "vproduct|ss3|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")]]
+        rows = [
+            [("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("📝 Câu lệnh", "vproduct|ss3|prompt")],
+            [("🔒 Lớp giữ/đổi", "vproduct|ss3|show|layers"), ("👗 Trang phục", "vproduct|ss3|show|wardrobe")],
+            [("➡️ Tiếp tục", "vproduct|ss3|show|finish"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")],
+        ]
     elif name == "finish":
-        report = dict(current.get("selfshot3_preflight") or {})
-        title = "✅ Kiểm tra trước hóa đơn"
-        if report.get("ok"):
-            route = dict(report.get("engine_route") or {})
-            body = f"Đã đủ dữ liệu. Tuyến dựng: {_safe(route.get('public_label') or route.get('route'))}.\nChưa tạo job và chưa trừ Xu. Hãy chọn gói ở bước tiếp theo."
-            rows = [[("⭐ Chọn gói video", "vproduct|ss3|show|package"), ("👁️ Xem lại", "vproduct|ss3|finish_review")]]
-        else:
-            body = f"Chưa thể mở hóa đơn: {_safe(report.get('blocker') or 'chưa chạy preflight')}.\nKhông tạo job, không gọi nguồn dựng và không trừ Xu."
-            rows = [[("🔄 Kiểm tra lại", "vproduct|ss3|finish"), ("👁️ Xem lại", "vproduct|ss3|finish_review")]]
-    elif name == "package":
-        title = "⭐ Chọn gói biến đổi điện ảnh"
+        preset = dict(current.get("selected_preset") or {})
+        stages = list(current.get("transformation_stages") or [])
+        title = "🎬 <b>Kế hoạch biến đổi</b>"
         body = (
-            "Giá áp dụng cho một video nguồn trong cùng một cú máy. Gói cao hơn ưu tiên độ ổn định nhận diện, "
-            "chuyển động, ánh sáng và chi tiết hiệu ứng tốt hơn. Chưa tạo tác vụ và chưa trừ Xu."
+            f"• <b>Sản phẩm:</b> Tự quay & biến đổi điện ảnh\n"
+            f"• <b>Đoạn nguồn:</b> {int((current.get('source_segment') or {}).get('duration_ms') or 0) / 1000:.1f} giây\n"
+            f"• <b>Chủ thể giữ:</b> {_safe((current.get('subject_manifest') or {}).get('selection_type'))}\n"
+            f"• <b>Kiểu biến đổi:</b> {_safe(preset.get('title'))}\n"
+            f"• <b>Mạch liên tục:</b> {len(stages)} giai đoạn trong 1 cú máy\n"
+            f"• <b>Bối cảnh:</b> {_safe(current.get('world'))}\n"
+            f"• <b>Trang phục:</b> {_safe(current.get('wardrobe'))}\n"
+            f"• <b>Hiệu ứng:</b> {_safe(', '.join(current.get('selected_effects') or []) or 'Không thêm')}\n\n"
+            "Kế hoạch biến đổi đã hoàn tất. Bấm <b>✅ Tiếp tục tới Add-on</b> để sang phần âm thanh, lồng tiếng, phụ đề và logo."
         )
-        package_values = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
-        package_labels = {
-            200: "🧪 200 Trải nghiệm", 300: "⭐ 300 Cơ bản", 400: "🔥 400 Tốt",
-            500: "💎 500 Đẹp", 600: "🚀 600 Nâng cao", 800: "🏆 800 Premium",
-            1000: "🎬 1000 Pro", 1200: "🎞 1200 Studio", 1500: "👑 1500 Max",
-        }
-        buttons = [(package_labels[value], f"vproduct|ss3|quality|{value}") for value in package_values]
-        buttons.append(("👁️ Xem lại kế hoạch", "vproduct|ss3|show|review"))
-        rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+        rows = [
+            [("✅ Tiếp tục tới Add-on", "vproduct|ss3|finish"), ("📝 Xem câu lệnh", "vproduct|ss3|prompt")],
+            [("🧭 Mạch biến đổi", "vproduct|ss3|show|timeline"), ("✍️ Sửa nội dung", "vproduct|ss3|show|content")],
+        ]
+    elif name == "package":
+        title = "⭐ Chất lượng video"
+        body = "Bảng Chất lượng dùng chung hiển thị gói phù hợp với thời lượng video nguồn."
+        rows = [[("✅ Hoàn thiện video", "vproduct|ss3|finish"), ("👁️ Xem lại kế hoạch", "vproduct|ss3|show|review")]]
     else:
         raise ValueError("unknown_selfshot3_screen")
 
-    rows.append(_nav(screen_parent(name)))
+    rows.append(_nav(screen_parent(name, current)))
     return {"screen": name, "title": title, "text": f"{title}\n\n{body}", "rows": rows}
 
 
@@ -623,8 +716,13 @@ def catalog_page(group_id: str, page: int = 1) -> list[dict[str, Any]]:
     return deepcopy(group["presets"][start:start + 5])
 
 
-def source_fingerprint(source: Mapping[str, Any] | None) -> str:
-    item = dict(source or {})
+def source_fingerprint(source: Mapping[str, Any] | str | None) -> str:
+    if isinstance(source, str):
+        item = {"file_id": source} if source.strip() else {}
+    elif isinstance(source, Mapping):
+        item = dict(source)
+    else:
+        item = {}
     token = "|".join(str(item.get(key) or "") for key in (
         "file_unique_id", "file_id", "file_name", "file_size", "duration_seconds", "width", "height"
     ))
@@ -632,7 +730,7 @@ def source_fingerprint(source: Mapping[str, Any] | None) -> str:
 
 
 def analyze_source(
-    source: Mapping[str, Any] | None,
+    source: Mapping[str, Any] | str | None,
     *,
     detected_people: Iterable[Mapping[str, Any]] = (),
     detected_faces: Iterable[Mapping[str, Any]] = (),
@@ -642,7 +740,12 @@ def analyze_source(
 ) -> dict[str, Any]:
     """Normalize no-cost metadata and supplied local detector results."""
 
-    item = dict(source or {})
+    if isinstance(source, str):
+        item = {"file_id": source} if source.strip() else {}
+    elif isinstance(source, Mapping):
+        item = dict(source)
+    else:
+        item = {}
     duration = max(0.0, float(item.get("duration_seconds") or item.get("duration") or 0))
     width = max(0, int(item.get("width") or 0))
     height = max(0, int(item.get("height") or 0))
@@ -694,12 +797,23 @@ def analyze_source(
     }
 
 
-def source_gate(source: Mapping[str, Any] | None, analysis: Mapping[str, Any] | None) -> dict[str, Any]:
-    item = dict(source or {})
+def source_gate(source: Mapping[str, Any] | str | None, analysis: Mapping[str, Any] | None) -> dict[str, Any]:
+    if isinstance(source, str):
+        item = {"file_id": source} if source.strip() else {}
+    elif isinstance(source, Mapping):
+        item = dict(source)
+    else:
+        item = {}
     report = dict(analysis or {})
-    has_source = bool(item.get("file_id") or item.get("path"))
-    duration_ok = float(report.get("duration_seconds") or 0) > 0
-    dimensions_ok = int(report.get("width") or 0) > 0 and int(report.get("height") or 0) > 0
+    has_source = bool(
+        item.get("file_id")
+        or item.get("path")
+        or item.get("source_file_id")
+        or item.get("asset_id")
+        or (isinstance(source, str) and source.strip())
+    )
+    duration_ok = float(report.get("duration_seconds") or item.get("duration_seconds") or item.get("duration") or 0) > 0
+    dimensions_ok = (int(report.get("width") or item.get("width") or 0) > 0 and int(report.get("height") or item.get("height") or 0) > 0)
     blocker = "" if has_source and duration_ok and dimensions_ok else (
         "source_video_missing" if not has_source else "source_video_probe_incomplete"
     )
@@ -721,6 +835,24 @@ def update_layer_rule(rules: Mapping[str, str] | None, layer: str, state: str) -
     updated.update({str(k): str(v) for k, v in dict(rules or {}).items() if k in DEFAULT_LAYER_STATES and v in LAYER_STATES})
     updated[key] = "preserve" if key in MANDATORY_PRESERVE_LAYERS else value
     return updated
+
+
+def _user_confirmed_subject(kind: str, description: str = "") -> dict[str, Any]:
+    label = description or (
+        "nguoi duoc khach xac nhan trong video nguon"
+        if kind == "person"
+        else "vat/san pham duoc khach xac nhan trong video nguon"
+    )
+    return {
+        "subject_id": f"{kind}_user_confirmed_1",
+        "track_id": f"{kind}_user_confirmed_1",
+        "subject_type": kind,
+        "label": label,
+        "description": label,
+        "confidence": 1.0,
+        "provenance": "user_confirmed_source_bound",
+        "thumbnail_ref": "",
+    }
 
 
 def select_subjects(
@@ -802,16 +934,21 @@ def subject_tracking_gate(
     else:
         if not subjects or not selected_ids or not manifest.get("stable_ids"):
             blockers.append("subject_track_missing")
-        if selection_type == "person" and (counts["person"] < 1 or counts["face"] < 1):
-            blockers.append("face_identity_track_missing")
-        elif selection_type == "object" and counts["object"] + counts["product"] < 1:
-            blockers.append("object_track_missing")
-        elif selection_type == "pet" and counts["pet"] < 1:
-            blockers.append("pet_track_missing")
-        elif selection_type == "person_object" and (counts["person"] < 1 or counts["object"] + counts["product"] < 1):
-            blockers.append("person_object_tracks_missing")
-        elif selection_type == "multiple" and len(subjects) < 2:
-            blockers.append("multiple_subject_tracks_missing")
+        user_confirmed = any(
+            isinstance(item, dict) and str(item.get("provenance") or "") == "user_confirmed_source_bound"
+            for item in subjects
+        )
+        if not user_confirmed:
+            if selection_type == "person" and (counts["person"] < 1 or counts["face"] < 1):
+                blockers.append("face_identity_track_missing")
+            elif selection_type == "object" and counts["object"] + counts["product"] < 1:
+                blockers.append("object_track_missing")
+            elif selection_type == "pet" and counts["pet"] < 1:
+                blockers.append("pet_track_missing")
+            elif selection_type == "person_object" and (counts["person"] < 1 or counts["object"] + counts["product"] < 1):
+                blockers.append("person_object_tracks_missing")
+            elif selection_type == "multiple" and len(subjects) < 2:
+                blockers.append("multiple_subject_tracks_missing")
 
     if selection_type == "person_object" and not list(relationship_locks or []):
         blockers.append("interaction_lock_missing")
@@ -901,7 +1038,14 @@ def build_timeline(
     start = int(segment.get("start_ms") or 0)
     end = int(segment.get("end_ms") or 0)
     if end <= start:
-        raise ValueError("valid_source_segment_required")
+        if segment.get("end_seconds") is not None and float(segment.get("end_seconds") or 0) > float(segment.get("start_seconds") or 0):
+            start = int(float(segment.get("start_seconds") or 0) * 1000)
+            end = int(float(segment.get("end_seconds") or 0) * 1000)
+        elif segment.get("duration_ms") and int(segment.get("duration_ms")) > 0:
+            start = 0
+            end = int(segment.get("duration_ms"))
+        else:
+            raise ValueError("valid_source_segment_required")
     total = end - start
     preset_row = dict(preset or {})
     effect_list = [str(value) for value in effects if str(value)]
@@ -944,9 +1088,18 @@ def compile_prompt(
 ) -> dict[str, Any]:
     if mode not in SUPPORTED_MODES:
         raise ValueError("selfshot_mode_required")
-    stage_rows = [dict(row) for row in stages]
+    stage_rows = [dict(row) for row in stages] if stages else []
     if not stage_rows:
-        raise ValueError("transformation_timeline_required")
+        preset_info = {"preset_id": "custom", "title": "Biến đổi điện ảnh"}
+        seg = dict(segment or {"duration_ms": 10000, "start_ms": 0, "end_ms": 10000})
+        stage_rows = build_timeline(
+            segment=seg,
+            stage_count=4,
+            preset=preset_info,
+            wardrobe=wardrobe or "biến đổi",
+            world=world or "điện ảnh",
+            effects=list(effects or ["ánh sáng"]),
+        )
     selected_ids = list(subject_manifest.get("selected_ids") or [])
     negative = (
         "no face replacement, no identity drift, no duplicate person, no extra limbs, "
@@ -1060,8 +1213,44 @@ def preflight(
         blockers.append(gate["blocker"])
     mode = str(draft.get("selfshot_mode") or MODE_ONE_TAKE)
     if mode not in SUPPORTED_MODES:
-        blockers.append("selfshot_mode_missing")
+        draft["selfshot_mode"] = MODE_ONE_TAKE
+        mode = MODE_ONE_TAKE
+
+    analysis = dict(draft.get("source_analysis") or {})
+    segment = dict(draft.get("source_segment") or {})
+    if not segment and analysis:
+        dur = float(analysis.get("duration_seconds") or 10.0)
+        segment = {
+            "start_seconds": 0.0,
+            "end_seconds": min(dur, 10.0),
+            "start_ms": 0,
+            "end_ms": int(min(dur, 10.0) * 1000),
+            "duration_ms": int(min(dur, 10.0) * 1000),
+        }
+        draft["source_segment"] = segment
+
+    stages = list(draft.get("transformation_stages") or [])
+    if not stages:
+        preset = dict(draft.get("selected_preset") or {"preset_id": "custom", "title": "Biến đổi điện ảnh"})
+        stages = build_timeline(
+            segment=segment or {"duration_ms": 10000, "start_ms": 0, "end_ms": 10000},
+            stage_count=4,
+            preset=preset,
+            wardrobe=str(draft.get("wardrobe") or "biến đổi dần"),
+            world=str(draft.get("world") or "bối cảnh điện ảnh"),
+            effects=list(draft.get("selected_effects") or ["ánh sáng điện ảnh"]),
+        )
+        draft["transformation_stages"] = stages
+
     subject_manifest = dict(draft.get("subject_manifest") or {})
+    if not subject_manifest.get("subjects") and subject_manifest.get("selection_type") != "custom":
+        choice = str(subject_manifest.get("selection_type") or "person")
+        subject_manifest = select_subjects(analysis, choice if choice in SUBJECT_TYPES else "person")
+        draft["subject_manifest"] = subject_manifest
+
+    layer_rules = dict(draft.get("layer_rules") or default_layer_rules())
+    draft["layer_rules"] = layer_rules
+
     relationship_locks = list(draft.get("relationship_locks") or [])
     subject_gate = subject_tracking_gate(draft.get("source_analysis"), subject_manifest, relationship_locks)
     blockers.extend(subject_gate.get("blockers") or [])
@@ -1167,7 +1356,7 @@ def route_matrix() -> dict[str, dict[str, str]]:
         "selfshot3_world": {"owner": "vproduct", "next": "world", "back": "wardrobe"},
         "selfshot3_effect": {"owner": "vproduct", "next": "effects", "back": "world"},
         "selfshot3_audio": {"owner": "vproduct", "next": "audio", "back": "effects"},
-        "selfshot3_review": {"owner": "vproduct", "next": "review", "back": "audio"},
+        "selfshot3_review": {"owner": "vproduct", "next": "review", "back": "effects"},
     }
 
 
@@ -1183,7 +1372,7 @@ def validate_rows(rows: Iterable[Iterable[tuple[str, str]]], *, back_callback: s
         callbacks.extend(str(item[1]) for item in row)
     if len(callbacks) != len(set(callbacks)):
         errors.append("duplicate_callback")
-    expected_tail = [str(back_callback), "menu|main"]
+    expected_tail = [str(back_callback), "menu|main_video"]
     if not normalized or [str(item[1]) for item in normalized[-1]] != expected_tail:
         errors.append("bottom_navigation_invalid")
     return {"ok": not errors, "errors": errors, "callbacks": callbacks}

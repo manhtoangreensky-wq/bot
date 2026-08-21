@@ -26,15 +26,14 @@ def test_live10_four_lane_menu_callbacks_are_isolated():
     assert 'callback_data="menu|translation_media_audio"' not in source
 
 
-def test_live10_source_and_combo_buttons_route_to_subdub_only():
+def test_live10_source_and_combo_buttons_use_single_upload_lane():
     source = _function_source("video_dubbing_source_keyboard")
     assert 'callback_data="videodub|source_upload"' in source
     assert 'callback_data="videodub|back_type"' in source
     assert 'callback_data="menu|main"' in source
-    assert "VIDEO_DUBBING_FLOW_HAS_SUBTITLE" in source
     assert "VIDEO_DUBBING_FLOW_NO_SUBTITLE" in source
-    assert 'f"videodub|path|{VIDEO_DUBBING_FLOW_HAS_SUBTITLE}"' in source
-    assert 'f"videodub|path|{VIDEO_DUBBING_FLOW_NO_SUBTITLE}"' in source
+    assert "items = [(copy['send'], \"videodub|source_upload\")]" in source
+    assert "videodub|path|" not in source
 
 
 def test_live10_language_voice_and_audio_buttons_have_matching_handlers():

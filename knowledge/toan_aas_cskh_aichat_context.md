@@ -49,18 +49,35 @@ File này là não ngữ cảnh chung cho AI Chatbot và CSKH Business support. 
 
 ## pricing_facts
 
-Lưu ý vận hành: các con số dưới đây là tài liệu tham khảo/kiểm thử tương thích, không phải nguồn giá để trả lời khách khi bot đang chạy. Khi có dữ liệu giá hiện tại từ hệ thống, CSKH và AI Chatbot chỉ dùng dữ liệu đó; nếu dữ liệu chưa đủ thì báo khách kiểm tra ở màn hóa đơn, không đoán hoặc dùng lại giá cũ.
+Lưu ý vận hành: các mức dưới đây là copy công khai đã duyệt. Hóa đơn và màn xác nhận vẫn là nguồn cuối cùng cho một yêu cầu cụ thể; CSKH/AI Chatbot không tự tính lại, không đoán và không dùng bảng giá cũ.
 
 - 1 Xu = 100đ.
 - 100.000đ = 1.000 Xu.
 - Voice riêng đầu tiên tạo thành công: 0 Xu.
 - Voice riêng từ lần 2: 50 Xu.
 - Audio từ voice: 0.10 Xu / từ, tối thiểu 1 Xu.
-- Nhạc nền AI: 100 / 150 / 200 Xu.
+- Nhạc nền AI: 130 / 150 / 200 Xu.
 - Bài hát có lời: 200 / 250 / 300 Xu.
-- Video: 200 / 300 / 400 / 500 / 600 / 800 / 1000 / 1200 / 1500 Xu theo gói.
-- Product Video scene duration: 1 cảnh = 8s trên luồng Product Video đang chạy.
-- Ảnh: 50 / 150 / 200 / 300 / 400 / 500 / 600 Xu.
+- Video theo cảnh:
+  - Nhanh gọn — 8 giây/cảnh: 80 Xu/cảnh.
+  - Chuyển động ổn định — 5 giây/cảnh: 110 Xu/cảnh.
+  - Chuyển động có âm thanh — 5 giây/cảnh: 160 Xu/cảnh.
+  - Cân bằng rõ nét — 5 giây/cảnh: 200 Xu/cảnh.
+  - Tiêu chuẩn có âm thanh — 5 giây/cảnh: 220 Xu/cảnh.
+  - Cảnh dài có âm thanh — 15 giây/cảnh: 220 Xu/cảnh.
+  - Cao cấp linh hoạt — 10 giây/cảnh: 370 Xu/cảnh.
+  - Diễn xuất chân thật — 6 giây/cảnh: 370 Xu/cảnh.
+  - Đa góc máy — 8 giây/cảnh: 1.260 Xu/cảnh.
+  - Điện ảnh nhiều cảnh — 10 giây/cảnh: 2.360 Xu/cảnh.
+- Khuyến mãi Video nhiều cảnh: 1 cảnh không giảm; 2–5 cảnh: giảm 10%; 6–10 cảnh: giảm 15%; 11–20 cảnh: giảm 20%. Add-on tính riêng.
+- Ảnh:
+  - Nhanh gọn: 10 Xu / ảnh.
+  - Cân bằng: 20 Xu / ảnh.
+  - Cân bằng + bảo hành: 30 Xu / ảnh.
+  - Sáng tạo chi tiết: 50 Xu / ảnh.
+  - Sáng tạo chi tiết + bảo hành: 100 Xu / ảnh.
+  - Cao cấp: 70 Xu / ảnh.
+  - Cao cấp + bảo hành: 140 Xu / ảnh.
 - Tạo phụ đề tự động: 0 Xu.
 - Dịch phụ đề: 0.1 Xu / ký tự.
 - Lồng tiếng mặc định: 0.10 Xu / ký tự.
@@ -76,11 +93,11 @@ Chọn đúng công cụ, nhập mô tả rõ mục tiêu, chọn gói nếu có
 
 ### tạo video
 
-Hỏi khách sản phẩm/ngành, nền tảng đăng, tỉ lệ khung hình và số cảnh mong muốn. Nếu khách có ảnh/logo/nhạc sẵn, hướng dẫn gửi đúng bước. Product Video hiện tính 1 cảnh = 8s. Bot phải dừng ở hóa đơn/xác nhận.
+Hỏi khách sản phẩm/ngành, nền tảng đăng, tỉ lệ khung hình và số cảnh mong muốn. Nếu khách có ảnh/logo/nhạc sẵn, hướng dẫn gửi đúng bước. Mỗi gói có thời lượng/cảnh công khai riêng; chỉ báo đúng bảng 10 gói ở trên. Bot phải dừng ở hóa đơn/xác nhận.
 
 ### tạo ảnh
 
-Hỏi loại ảnh cần tạo nếu còn thiếu: ảnh sản phẩm, ảnh người mẫu, ảnh quảng cáo hay ảnh minh họa. Nếu khách hỏi giá thì trả các mức 50 / 150 / 200 / 300 / 400 / 500 / 600 Xu.
+Hỏi loại ảnh cần tạo nếu còn thiếu: ảnh sản phẩm, ảnh người mẫu, ảnh quảng cáo hay ảnh minh họa. Nếu khách hỏi giá thì trả đúng các mức công khai 10 / 20 / 30 / 50 / 110 / 80 / 150 Xu theo tên gói ở trên.
 
 ### phụ đề, dịch, lồng tiếng
 
@@ -92,7 +109,7 @@ Voice riêng đầu tiên tạo thành công miễn phí. Voice riêng từ lầ
 
 ### nhạc AI
 
-Nhạc nền AI: 100 / 150 / 200 Xu. Bài hát có lời: 200 / 250 / 300 Xu. Không được tự gọi provider hoặc nói đã tạo xong nếu chưa có file thật.
+Nhạc nền AI: 130 / 150 / 200 Xu. Bài hát có lời: 200 / 250 / 300 Xu. Không được tự gọi provider hoặc nói đã tạo xong nếu chưa có file thật.
 
 ### nạp Xu
 
@@ -189,7 +206,7 @@ Xin lỗi, ghi nhận đúng lỗi, xin mã xử lý và nói sẽ chuyển admi
 - examples: tạo video bao nhiêu, video 30s tính sao
 - answer_policy: trả bảng gói video và scene duration 8s.
 - required_context: pricing_facts
-- response_template: Dạ video AI có các gói 200 / 300 / 400 / 500 / 600 / 800 / 1000 / 1200 / 1500 Xu. Product Video hiện tính 1 cảnh = 8s; video khoảng 30s thường cần 4 cảnh. Bot sẽ hiện hóa đơn trước khi mình xác nhận.
+- response_template: Dạ video AI có các gói từ Nhanh gọn 80 Xu/cảnh đến Điện ảnh nhiều cảnh 2.360 Xu/cảnh, được sắp từ thấp đến cao. Mỗi gói có thời lượng cảnh riêng; video khoảng 30s thường cần khoảng 4 cảnh 8s. Bot sẽ hiện hóa đơn trước khi mình xác nhận.
 - follow_up_question: Anh/chị muốn làm video về sản phẩm gì để em gợi ý gói phù hợp?
 - safety_notes: Không tự tạo video thật.
 
@@ -393,12 +410,12 @@ Bot: Dạ anh/chị yên tâm nha. Xem menu, nhập thử nội dung, chọn gó
 ### tạo video giá bao nhiêu
 
 Khách: Tạo video giá sao em?
-Bot: Dạ video AI có các gói 200 / 300 / 400 / 500 / 600 / 800 / 1000 / 1200 / 1500 Xu. Product Video hiện tính 1 cảnh = 8s. Bot sẽ hiện hóa đơn trước khi xử lý. Anh/chị muốn làm video về sản phẩm gì để em gợi ý gói phù hợp?
+Bot: Dạ video AI có các gói từ Nhanh gọn 80 Xu/cảnh đến Điện ảnh nhiều cảnh 2.360 Xu/cảnh, được sắp từ thấp đến cao. Mỗi gói có thời lượng cảnh riêng và bot sẽ hiện hóa đơn trước khi xử lý. Anh/chị muốn làm video về sản phẩm gì để em gợi ý gói phù hợp?
 
 ### video 30s tính sao
 
 Khách: Anh muốn video 30 giây, tính sao em?
-Bot: Dạ khoảng 30 giây thường cần 4 cảnh nếu mỗi cảnh 8s, tức khoảng 32s. Ví dụ gói Cơ bản 300 Xu/cảnh thì 4 cảnh là 1.200 Xu trước ưu đãi nếu có. Bot vẫn hiển thị hóa đơn cuối cùng trước khi anh/chị xác nhận.
+Bot: Dạ khoảng 30 giây thường cần 4 cảnh nếu mỗi cảnh 8s, tức khoảng 32s. Ví dụ gói Nhanh gọn 80 Xu/cảnh thì 4 cảnh là 320 Xu, giảm 10% còn 288 Xu tiền video. Bot vẫn hiển thị hóa đơn cuối cùng trước khi anh/chị xác nhận.
 
 ### dùng ảnh/logo/nhạc có sẵn
 

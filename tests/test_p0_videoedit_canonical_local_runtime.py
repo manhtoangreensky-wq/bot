@@ -34,6 +34,61 @@ def _probe(*, duration_ms: int = 4_000, audio: bool = True) -> dict:
     }
 
 
+def test_videoedit_full_decode_is_capped_by_the_remaining_shared_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "decode-deadline.mp4"
+    target.write_bytes(b"mp4-payload")
+    observed_timeouts: list[float] = []
+
+    def fake_run(command, **kwargs):
+        observed_timeouts.append(float(kwargs["timeout"]))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(validation, "find_ffmpeg", lambda _path="": "ffmpeg")
+    monkeypatch.setattr(validation.subprocess, "run", fake_run)
+
+    result = validation.full_decode_video_file(
+        target,
+        ffmpeg_path="ffmpeg",
+        timeout=45,
+        deadline_monotonic=102.5,
+        monotonic=lambda: 100.0,
+    )
+
+    assert result == {"ok": True, "full_decode": True, "reason": ""}
+    assert observed_timeouts == [2.5]
+
+
+def test_videoedit_full_decode_stops_before_spawn_after_shared_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "decode-expired.mp4"
+    target.write_bytes(b"mp4-payload")
+    monkeypatch.setattr(validation, "find_ffmpeg", lambda _path="": "ffmpeg")
+    monkeypatch.setattr(
+        validation.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("decode process must not start"),
+    )
+
+    result = validation.full_decode_video_file(
+        target,
+        ffmpeg_path="ffmpeg",
+        timeout=45,
+        deadline_monotonic=99.0,
+        monotonic=lambda: 100.0,
+    )
+
+    assert result == {
+        "ok": False,
+        "full_decode": False,
+        "reason": "output_full_decode_timeout",
+    }
+
+
 def test_public_plan_summary_uses_vietnamese_labels_not_internal_tokens() -> None:
     summary = editing.public_plan_summary(
         {
@@ -157,6 +212,42 @@ def test_split_plan_requires_one_duration_independent_canonical_neutral_plan() -
     ) is True
 
 
+def test_split_reset_treats_an_empty_audio_track_list_as_neutral_work() -> None:
+    canonical = editing.neutral_split_manual_plan()
+    sparse = {"audio_tracks": []}
+
+    assert editing.manual_plan_requires_split_reset(
+        canonical,
+        source_duration_ms=10_000,
+    ) is False
+    assert editing.manual_plan_requires_split_reset(
+        sparse,
+        source_duration_ms=10_000,
+    ) is False
+
+    with_track = editing.neutral_split_manual_plan()
+    with_track["audio_tracks"] = [
+        {
+            "path": "music.mp3",
+            "kind": "music",
+            "volume": 0.35,
+            "start_ms": 0,
+            "end_ms": 0,
+        }
+    ]
+    assert editing.manual_plan_requires_split_reset(
+        with_track,
+        source_duration_ms=10_000,
+    ) is True
+
+    wrong_container = editing.neutral_split_manual_plan()
+    wrong_container["audio_tracks"] = {}
+    assert editing.manual_plan_requires_split_reset(
+        wrong_container,
+        source_duration_ms=10_000,
+    ) is True
+
+
 def test_videoedit_unknown_requested_plan_field_fails_closed(tmp_path: Path) -> None:
     plan = _source_plan(tmp_path)
     plan["provider_magic_effect"] = True
@@ -222,7 +313,7 @@ def test_videoedit_text_wholly_after_post_speed_output_fails_closed(tmp_path: Pa
 def test_videoedit_srt_with_every_cue_after_output_fails_closed(tmp_path: Path) -> None:
     subtitle = tmp_path / "late.srt"
     subtitle.write_text(
-        "1\n00:00:03,000 --> 00:00:03,800\nPhụ đề quá muộn\n",
+        "1\n00:00:05,000 --> 00:00:05,800\nPhụ đề quá muộn\n",
         encoding="utf-8",
     )
     plan = _source_plan(tmp_path)
@@ -287,6 +378,40 @@ def test_videoedit_srt_validation_returns_exact_positive_cue_windows(
         {"start_ms": 200, "end_ms": 800},
         {"start_ms": 1_250, "end_ms": 2_500},
     ]
+
+
+@pytest.mark.parametrize(
+    "malformed_block",
+    [
+        "2\nkhông có dòng thời gian\nNội dung bị mất",
+        "00:00:01,000 --> 00:00:01,500\n123",
+    ],
+)
+def test_videoedit_srt_rejects_any_malformed_block_before_partial_render(
+    tmp_path: Path,
+    malformed_block: str,
+) -> None:
+    subtitle = tmp_path / "partially-malformed.srt"
+    subtitle.write_text(
+        (
+            "1\n00:00:00,200 --> 00:00:00,800\nCue hợp lệ\n\n"
+            f"{malformed_block}\n"
+        ),
+        encoding="utf-8",
+    )
+    plan = _source_plan(tmp_path)
+    plan["subtitle_file"] = str(subtitle)
+
+    assert validation.validate_srt_file(subtitle, workspace=tmp_path) == {
+        "ok": False,
+        "reason": "subtitle_format_invalid",
+    }
+    with pytest.raises(editing.LocalVideoEditError, match="subtitle_format_invalid"):
+        editing.normalize_manual_edit_plan(
+            plan,
+            source_duration_ms=4_000,
+            workspace=tmp_path,
+        )
 
 
 @pytest.mark.parametrize(
@@ -1429,6 +1554,53 @@ def test_videoedit_manual_executor_propagates_deadline_and_custom_workspace_budg
         "deadline": 200.0,
         "budget": 999,
     }
+
+
+def test_videoedit_manual_executor_full_decodes_only_the_final_atomic_artifact_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = _source_plan(tmp_path)
+    output = tmp_path / "final-output.mp4"
+    validation_calls: list[tuple[Path, bool]] = []
+    monkeypatch.setattr(editing, "find_ffmpeg", lambda value="": "ffmpeg")
+    monkeypatch.setattr(editing, "find_ffprobe", lambda value="", **kwargs: "ffprobe")
+    monkeypatch.setattr(editing, "probe_video_file", lambda *args, **kwargs: _probe())
+    monkeypatch.setattr(
+        editing,
+        "available_ffmpeg_filters",
+        lambda *_args, **_kwargs: frozenset({"format", "scale", "setsar"}),
+    )
+    monkeypatch.setattr(editing, "enforce_workspace_limit", lambda *_args, **_kwargs: None)
+
+    def fake_run(command, *, timeout, deadline_monotonic=None):
+        del timeout, deadline_monotonic
+        Path(command[-1]).write_bytes(b"rendered-output")
+
+    def validate_output(path, *args, **kwargs):
+        del args
+        validation_calls.append(
+            (Path(path).resolve(), bool(kwargs.get("require_full_decode")))
+        )
+        return _probe()
+
+    monkeypatch.setattr(editing, "_run_checked", fake_run)
+    monkeypatch.setattr(editing, "validate_mp4_output", validate_output)
+
+    result = editing.execute_manual_edit(
+        plan,
+        output_path=str(output),
+        workspace=tmp_path,
+        deadline_monotonic=200.0,
+        workspace_budget_bytes=999,
+    )
+
+    assert result["ok"] is True
+    assert [
+        path
+        for path, require_full_decode in validation_calls
+        if require_full_decode
+    ] == [output.resolve()]
 
 
 def test_videoedit_split_executor_propagates_deadline_and_preserves_legacy_workspace_budget(

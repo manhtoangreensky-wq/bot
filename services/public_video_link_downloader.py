@@ -594,9 +594,23 @@ class PublicVideoLinkDownloader:
             raise ValueError("empty_download")
         return total
 
-    def _latest_file(self, directory: Path) -> Path | None:
+    def _latest_file(self, directory: Path, asset: str = "video") -> Path | None:
         files = [item for item in directory.glob("*") if item.is_file() and item.name != "job.json"]
-        return max(files, key=lambda item: item.stat().st_mtime) if files else None
+        if not files:
+            return None
+        if asset == "audio":
+            audio_files = [p for p in files if p.suffix.lower() in {".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"}]
+            if audio_files:
+                return max(audio_files, key=lambda item: item.stat().st_mtime)
+        elif asset == "video":
+            video_files = [p for p in files if p.suffix.lower() in {".mp4", ".mov", ".mkv", ".webm", ".m4v"}]
+            if video_files:
+                return max(video_files, key=lambda item: item.stat().st_mtime)
+        elif asset in {"cover", "thumbnail"}:
+            img_files = [p for p in files if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}]
+            if img_files:
+                return max(img_files, key=lambda item: item.stat().st_mtime)
+        return max(files, key=lambda item: item.stat().st_mtime)
 
     def _download_with_ytdlp(self, url: str, asset: str, output_dir: Path, limit_bytes: int | None = None) -> tuple[Path | None, str]:
         yt_dlp = _lazy_import_yt_dlp()
@@ -613,17 +627,30 @@ class PublicVideoLinkDownloader:
             "socket_timeout": self.timeout_seconds,
             "max_filesize": limit_bytes,
         }
+        ffmpeg_path = shutil.which("ffmpeg") or os.environ.get("FFMPEG_PATH")
+        if ffmpeg_path:
+            opts["ffmpeg_location"] = ffmpeg_path
+
         if asset == "audio":
-            opts["format"] = "bestaudio[ext=m4a]/bestaudio/best"
+            opts["format"] = "bestaudio/best[acodec!=none]/best"
+            if ffmpeg_path:
+                opts["postprocessors"] = [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }]
         else:
-            opts["format"] = "best[ext=mp4]/best"
-            opts["merge_output_format"] = "mp4"
+            if ffmpeg_path:
+                opts["merge_output_format"] = "mp4"
+                opts["format"] = "bestvideo+bestaudio/best[acodec!=none]/best[ext=mp4]/best"
+            else:
+                opts["format"] = "best[acodec!=none]/best[ext=mp4]/best"
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.extract_info(url, download=True)
         except Exception as exc:
             return None, "private_or_login_required" if _looks_private_error(exc) else "download_failed"
-        return self._latest_file(output_dir), ""
+        return self._latest_file(output_dir, asset=asset), ""
 
     def download(
         self,

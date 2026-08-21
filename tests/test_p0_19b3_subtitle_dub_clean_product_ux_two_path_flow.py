@@ -110,10 +110,8 @@ def test_translate_and_dub_source_keyboards_are_clean_closed_video_flows():
     assert _callbacks(translate)[:3] == ["videodub|source_upload", "videodub|back_type", "menu|main"]
     assert _labels(dub)[:1] == ["📤 Gửi video cần lồng tiếng"]
     assert _callbacks(dub)[:1] == ["videodub|source_upload"]
-    assert "🎞 Video đã có phụ đề" in _labels(combo)
-    assert "🎧 Video chưa có phụ đề" in _labels(combo)
-    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_HAS_SUBTITLE}" in _callbacks(combo)
-    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE}" in _callbacks(combo)
+    assert _callbacks(combo).count("videodub|source_upload") == 1
+    assert not any(callback.startswith("videodub|path|") for callback in _callbacks(combo))
 
 
 def test_upload_video_waits_for_original_subtitle_confirm(monkeypatch):

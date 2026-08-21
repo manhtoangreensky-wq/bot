@@ -412,6 +412,66 @@ def _validated_duration(request: VideoGenerationRequest) -> int:
     return max(1, min(30, int(round(duration))))
 
 
+def _selected_request_defaults(
+    request: VideoGenerationRequest,
+    provider_name: str = "",
+) -> dict[str, Any]:
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    provider_defaults = metadata.get("provider_request_defaults")
+    provider_defaults = provider_defaults if isinstance(provider_defaults, dict) else {}
+    raw = provider_defaults.get(str(provider_name or "").strip().lower())
+    if not isinstance(raw, dict):
+        raw = metadata.get("selected_request_defaults")
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(key): value
+        for key, value in raw.items()
+        if str(key).strip() and value not in (None, "")
+    }
+
+
+def _apply_selected_request_defaults(
+    data: dict[str, Any],
+    request: VideoGenerationRequest,
+    provider_name: str = "",
+) -> dict[str, Any]:
+    """Apply the immutable tier variant and reject silent duration downgrades."""
+
+    defaults = _selected_request_defaults(request, provider_name)
+    if not defaults:
+        return data
+    expected_duration = defaults.get("duration")
+    if expected_duration not in (None, ""):
+        try:
+            expected = max(1, int(round(float(expected_duration))))
+        except (TypeError, ValueError) as exc:
+            raise VideoProviderContractError(
+                "provider_selected_duration_invalid",
+                debug={"selected_request_defaults": defaults, "no_charge": True},
+            ) from exc
+        actual = _validated_duration(request)
+        if actual != expected:
+            raise VideoProviderContractError(
+                "provider_duration_mismatch_no_charge",
+                debug={
+                    "requested_duration": actual,
+                    "selected_duration": expected,
+                    "no_charge": True,
+                },
+            )
+        data["duration"] = expected
+        data["duration_seconds"] = expected
+    for field in ("model_name", "mode", "sound", "resolution"):
+        if field in defaults:
+            data[field] = defaults[field]
+    metadata = dict(data.get("metadata") or {})
+    metadata["selected_request_defaults"] = dict(defaults)
+    metadata["duration_contract"] = "selected_tier_exact"
+    data["metadata"] = metadata
+    return data
+
+
 def _validated_ratio(request: VideoGenerationRequest) -> str:
     ratio = str(request.ratio or "").strip()
     if not ratio:
@@ -452,9 +512,11 @@ def _base_video_payload(request: VideoGenerationRequest, env: dict[str, str] | o
         "selected_capabilities",
         "selected_clip_seconds",
         "selected_payload_adapter",
+        "selected_request_defaults",
         "selected_cost_tier",
         "selected_role",
         "provider_model_map",
+        "provider_request_defaults",
         "provider_catalog_model_found",
         "supports_concat",
         "contract_validation_status",
@@ -514,6 +576,21 @@ def _shopaikey_uses_historical_small_clip_contract(request: VideoGenerationReque
     )
 
 
+def _shopaikey_selected_clip_seconds(request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str] | None = None) -> int:
+    defaults = _selected_request_defaults(request, "shopaikey_video")
+    try:
+        selected = int(round(float(defaults.get("duration") or 0)))
+    except (TypeError, ValueError):
+        selected = 0
+    if selected > 0:
+        return max(1, min(30, selected))
+    try:
+        configured = int(float((env or os.environ).get("SHOPAIKEY_VIDEO_SMALL_CLIP_SECONDS") or 8))
+    except Exception:
+        configured = 8
+    return max(1, min(8, configured))
+
+
 def build_key4u_video_payload(request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str] | None = None) -> dict[str, Any]:
     data = _base_video_payload(request, env)
     model = str(
@@ -546,6 +623,7 @@ def build_key4u_video_payload(request: VideoGenerationRequest, env: dict[str, st
             )
         data["model"] = model
         data["metadata"] = enrich_metadata_with_model_contract(data.get("metadata"), "key4u_video", model, env=env)
+        data = _apply_selected_request_defaults(data, request, "key4u_video")
         data = enforce_payload_contract("key4u_video", model, data, env=env)
     return data
 
@@ -567,12 +645,9 @@ def build_shopaikey_video_payload(request: VideoGenerationRequest, env: dict[str
             )
         data["model"] = model
         data["metadata"] = enrich_metadata_with_model_contract(data.get("metadata"), "shopaikey_video", model, env=env)
+        data = _apply_selected_request_defaults(data, request, "shopaikey_video")
     if _shopaikey_uses_historical_small_clip_contract(request):
-        try:
-            small_clip_seconds = int(float((env or os.environ).get("SHOPAIKEY_VIDEO_SMALL_CLIP_SECONDS") or 8))
-        except Exception:
-            small_clip_seconds = 8
-        small_clip_seconds = max(1, min(8, small_clip_seconds))
+        small_clip_seconds = _shopaikey_selected_clip_seconds(request, env)
         data["duration"] = small_clip_seconds
         data["duration_seconds"] = small_clip_seconds
         data.pop("scenes", None)
@@ -603,6 +678,7 @@ def _build_provider_payload(provider_name: str, request: VideoGenerationRequest,
     model = str(env.get("VIDEO_GENERIC_HTTP_MODEL") or env.get("VIDEO_PROVIDER_MODEL") or "").strip()
     if model:
         data["model"] = model
+    data = _apply_selected_request_defaults(data, request, provider_name)
     return data
 
 
@@ -666,10 +742,16 @@ class GenericHttpVideoProvider:
         return str(self.env.get(self.enabled_env) or "").strip().lower() in {"1", "true", "yes", "on"}
 
     def _submit_url(self) -> str:
-        return str(self.env.get(self.submit_url_env) or "").strip()
+        url = str(self.env.get(self.submit_url_env) or "").strip()
+        if url and url.rstrip("/").endswith(("/video/generate", "/generate")):
+            return ""
+        return url
 
     def _poll_url(self) -> str:
-        return str(self.env.get(self.poll_url_env) or "").strip()
+        url = str(self.env.get(self.poll_url_env) or "").strip()
+        if url and url.rstrip("/").endswith(("/video/generate", "/generate")):
+            return ""
+        return url
 
     def _auth_header(self) -> tuple[str, str]:
         return str(self.env.get(self.auth_header_name_env) or "").strip(), str(self.env.get(self.auth_header_value_env) or "").strip()
@@ -705,6 +787,12 @@ class GenericHttpVideoProvider:
             if "auth" not in invalid_fields:
                 invalid_fields.append("auth")
             invalid_env.append(self.auth_header_value_env)
+        model = str(self.env.get(self.model_env) or "").strip() if self.model_env else ""
+        if self.model_env and not model:
+            missing.append(self.model_env)
+        elif self.model_env and not _valid_config_secret(model):
+            invalid_fields.append("model")
+            invalid_env.append(self.model_env)
         blocker = "provider_config_placeholder_or_invalid_url" if invalid_fields else ""
         return {
             "enabled": enabled,
@@ -750,6 +838,8 @@ class GenericHttpVideoProvider:
             "config_blocker": str(config.get("blocker") or ""),
             "capabilities": self._capability_list(),
             "endpoint_configured": bool(config.get("submit_url_configured") and config.get("poll_url_configured")),
+            "submit_url": submit_url,
+            "poll_url": self._poll_url(),
             "submit_url_present": submit_url_present,
             "poll_url_present": poll_url_present,
             "submit_url_configured": bool(config.get("submit_url_configured")),

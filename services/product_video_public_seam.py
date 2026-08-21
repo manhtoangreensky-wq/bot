@@ -17,6 +17,7 @@ from services import (
     product_video_multiscene_engine,
     product_video_one_scene_engine,
     video_engine_contract,
+    video_uiflow3_execution_contract,
 )
 
 
@@ -412,6 +413,17 @@ def prepare_product_video_worker_job(
             _clean(validation.get("blocker"))
             or "product_video_route_decision_invalid"
         )
+    uiflow3_contract = video_uiflow3_execution_contract.validate_execution_contract(
+        payload=prepared,
+        require_payload_identity=True,
+    )
+    if not uiflow3_contract.get("ok"):
+        raise RuntimeError(
+            _clean(uiflow3_contract.get("blocker"))
+            or "uiflow3_execution_contract_invalid"
+        )
+    if uiflow3_contract.get("applies"):
+        prepared["uiflow3_execution_contract"] = uiflow3_contract
     decision = validation.get("decision")
     if isinstance(decision, Mapping):
         prepared.update(product_video_route_decision_payload(decision))

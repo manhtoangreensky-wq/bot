@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import time
@@ -32,6 +33,39 @@ class AiEditProviderError(RuntimeError):
         super().__init__(reason)
         self.reason = reason
         self.terminal = terminal
+
+
+def _remaining_timeout(
+    configured_seconds: int | float,
+    *,
+    deadline_monotonic: float | None,
+    monotonic: Callable[[], float],
+) -> float:
+    try:
+        configured = float(configured_seconds)
+        if configured <= 0 or not math.isfinite(configured) or not callable(monotonic):
+            raise ValueError
+        if deadline_monotonic is None:
+            return configured
+        if (
+            isinstance(deadline_monotonic, bool)
+            or not isinstance(deadline_monotonic, (int, float))
+            or not math.isfinite(float(deadline_monotonic))
+        ):
+            raise ValueError
+        current = monotonic()
+        if (
+            isinstance(current, bool)
+            or not isinstance(current, (int, float))
+            or not math.isfinite(float(current))
+        ):
+            raise ValueError
+        remaining = float(deadline_monotonic) - float(current)
+    except (TypeError, ValueError, OverflowError):
+        raise AiEditProviderError("provider_deadline_invalid") from None
+    if remaining <= 0:
+        raise AiEditProviderError("provider_deadline_exceeded")
+    return min(configured, remaining)
 
 
 def _flag(env: dict[str, str] | os._Environ[str], name: str, default: str = "false") -> bool:
@@ -356,6 +390,8 @@ def submit_video_edit(
     submit_source: str,
     public_user_confirmed: bool,
     opener: Callable[..., Any] | None = None,
+    deadline_monotonic: float | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     validation = validate_provider_config(config)
     if not validation.get("ok"):
@@ -382,7 +418,14 @@ def submit_video_edit(
     request = urllib.request.Request(config.submit_url, data=body, headers=headers, method="POST")
     transport = opener or urllib.request.urlopen
     try:
-        response = transport(request, timeout=config.timeout_seconds)
+        response = transport(
+            request,
+            timeout=_remaining_timeout(
+                config.timeout_seconds,
+                deadline_monotonic=deadline_monotonic,
+                monotonic=monotonic,
+            ),
+        )
         status, payload = _json_response(response)
     except urllib.error.HTTPError as exc:
         raise AiEditProviderError(f"provider_submit_http_{exc.code}") from exc
@@ -420,6 +463,8 @@ def poll_video_edit(
     provider_task_id: str,
     *,
     opener: Callable[..., Any] | None = None,
+    deadline_monotonic: float | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     if not provider_task_id:
         raise AiEditProviderError("provider_task_id_required")
@@ -435,7 +480,14 @@ def poll_video_edit(
     )
     transport = opener or urllib.request.urlopen
     try:
-        response = transport(request, timeout=config.timeout_seconds)
+        response = transport(
+            request,
+            timeout=_remaining_timeout(
+                config.timeout_seconds,
+                deadline_monotonic=deadline_monotonic,
+                monotonic=monotonic,
+            ),
+        )
         status, payload = _json_response(response)
     except urllib.error.HTTPError as exc:
         raise AiEditProviderError(f"provider_poll_http_{exc.code}", terminal=False) from exc
@@ -458,6 +510,8 @@ def download_result(
     *,
     maximum_bytes: int = 200 * 1024 * 1024,
     opener: Callable[..., Any] | None = None,
+    deadline_monotonic: float | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     if not _valid_url(result_url):
         raise AiEditProviderError("provider_result_url_invalid")
@@ -468,12 +522,25 @@ def download_result(
     transport = opener or urllib.request.urlopen
     downloaded = 0
     try:
-        response = transport(request, timeout=180)
+        response = transport(
+            request,
+            timeout=_remaining_timeout(
+                180,
+                deadline_monotonic=deadline_monotonic,
+                monotonic=monotonic,
+            ),
+        )
         status = int(getattr(response, "status", 0) or getattr(response, "code", 0) or 0)
         if status < 200 or status >= 300:
             raise AiEditProviderError(f"provider_result_http_{status or 0}")
         with target.open("wb") as handle:
             while True:
+                if deadline_monotonic is not None:
+                    _remaining_timeout(
+                        180,
+                        deadline_monotonic=deadline_monotonic,
+                        monotonic=monotonic,
+                    )
                 chunk = response.read(1024 * 256)
                 if not chunk:
                     break
@@ -525,13 +592,35 @@ def wait_for_result(
     sleeper: Callable[[float], None] = time.sleep,
     now: Callable[[], float] = time.monotonic,
     progress: Callable[[dict[str, Any]], None] | None = None,
+    deadline_monotonic: float | None = None,
 ) -> dict[str, Any]:
     started = now()
     poll_count = 0
     while now() - started <= config.max_wait_seconds:
-        sleeper(config.poll_interval_seconds)
+        sleep_seconds = float(config.poll_interval_seconds)
+        if deadline_monotonic is not None:
+            sleep_seconds = _remaining_timeout(
+                sleep_seconds,
+                deadline_monotonic=deadline_monotonic,
+                monotonic=now,
+            )
+        sleeper(sleep_seconds)
+        if deadline_monotonic is not None:
+            _remaining_timeout(
+                config.timeout_seconds,
+                deadline_monotonic=deadline_monotonic,
+                monotonic=now,
+            )
         poll_count += 1
-        result = poller(config, provider_task_id)
+        if deadline_monotonic is None:
+            result = poller(config, provider_task_id)
+        else:
+            result = poller(
+                config,
+                provider_task_id,
+                deadline_monotonic=deadline_monotonic,
+                monotonic=now,
+            )
         result["poll_count"] = poll_count
         result["elapsed_seconds"] = max(0, int(now() - started))
         if progress:

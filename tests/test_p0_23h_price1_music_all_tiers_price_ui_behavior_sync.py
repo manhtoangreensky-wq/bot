@@ -201,7 +201,7 @@ def test_music_lyrics_200_250_300_same_delivery_contract(monkeypatch):
 def test_music_instrumental_200_250_300_same_delivery_contract(monkeypatch):
     base_summary = None
     for tier, price in [
-        (bot.MUSIC_PRODUCT_TIER_BASIC, 100),
+        (bot.MUSIC_PRODUCT_TIER_BASIC, 130),
         (bot.MUSIC_PRODUCT_TIER_STANDARD, 150),
         (bot.MUSIC_PRODUCT_TIER_PREMIUM, 200),
     ]:
@@ -248,7 +248,7 @@ def test_music_all_tiers_correct_price_display():
         ("song", "200"): (bot.MUSIC_PRODUCT_TIER_BASIC, 200),
         ("song", "250"): (bot.MUSIC_PRODUCT_TIER_STANDARD, 250),
         ("song", "300"): (bot.MUSIC_PRODUCT_TIER_PREMIUM, 300),
-        ("background", "100"): (bot.MUSIC_PRODUCT_TIER_BASIC, 100),
+        ("background", "100"): (bot.MUSIC_PRODUCT_TIER_BASIC, 130),
         ("background", "150"): (bot.MUSIC_PRODUCT_TIER_STANDARD, 150),
         ("background", "200"): (bot.MUSIC_PRODUCT_TIER_PREMIUM, 200),
     }

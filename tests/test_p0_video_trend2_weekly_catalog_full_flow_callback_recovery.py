@@ -173,14 +173,19 @@ def test_trend_entry_and_sequence_are_canonical() -> None:
     rows = video_flow7.ENTRY_ROWS["video_trend"]
     labels = [label for row in rows for label, _callback in row]
     callbacks = [callback for row in rows for _label, callback in row]
-    assert labels == ["🔥 Trend mới nhất", "✍️ Tự nhập trend"]
+    assert labels == [
+        "🔥 Trend mới nhất",
+        "✍️ Tự nhập trend",
+        "🔎 Tìm kiếm trend",
+        "📹 Gửi video trend",
+    ]
     assert all("idea" not in callback for callback in callbacks)
     sequence = video_flow7.PRODUCT_SPECS["trend_video"]["sequence"]
-    assert sequence[:6] == (
-        "trend_source", "scene_count", "aspect_ratio", "content_source",
-        "content_profile_or_preset", "content_choice",
-    )
-    assert sequence[-3:] == ("finish", "invoice", "confirm")
+    assert sequence[:4] == ("trend_source", "scene_count", "aspect_ratio", "character")
+    assert "content_source" not in sequence
+    assert "content_profile_or_preset" not in sequence
+    assert "content_choice" not in sequence
+    assert sequence[-6:] == ("addons", "review", "quality", "invoice", "confirm", "status")
     assert video_flow7.PRODUCT_SPECS["trend_video"]["execution_owner"] == "owner_product_video"
 
 
@@ -213,7 +218,7 @@ def test_legacy_trend_callbacks_have_one_read_only_redirect_owner() -> None:
     assert '("tvflow|", "handle_video_trend2_legacy_callback")' in BOT_SOURCE
     redirect = _between(
         "async def handle_video_trend2_legacy_callback",
-        "async def handle_video_product_callback",
+        "def video_selfshot_product_hub_text",
     )
     assert "save_video_trend2_state" not in redirect
     assert "set_trend_video_flow_pending" not in redirect
@@ -235,7 +240,7 @@ def test_trend_screen_parent_stack_preserves_exact_back_target() -> None:
 def test_changed_bot_regions_compile_as_python_311_source() -> None:
     trend_region = "VIDEO_TREND2_STATE_KEY" + _between(
         "VIDEO_TREND2_STATE_KEY",
-        "async def handle_video_product_callback",
+        "@video_public_callback_failure_guard\nasync def handle_video_product_callback",
     )
     scheduler_region = "def run_video_trend_catalog_refresh_once" + _between(
         "def run_video_trend_catalog_refresh_once",
@@ -259,6 +264,13 @@ def test_public_layout_catalog_ratio_content_and_back_contracts_are_present() ->
     source = _between("VIDEO_TREND2_STATE_KEY", "async def handle_video_trend2_callback")
     entry = _between("def video_trend2_entry_keyboard", "def video_trend2_catalog_rows")
     catalog = _between("def video_trend2_catalog_keyboard", "def video_trend2_scene_count_text")
+    for callback in (
+        'callback_data="vtrend|catalog|latest"',
+        'callback_data="vtrend|manual_trend"',
+        'callback_data="vtrend|search"',
+        'callback_data="vtrend|video_upload"',
+    ):
+        assert callback in entry
     assert 'callback_data="vtrend|categories"' not in entry + catalog
     assert 'callback_data="vtrend|historical"' not in entry + catalog
     assert 'callback_data="vtrend|help"' not in entry + catalog
@@ -266,30 +278,27 @@ def test_public_layout_catalog_ratio_content_and_back_contracts_are_present() ->
     assert 'callback_data="vtrend|ratio_suggest"' not in source
     assert 'callback_data="vtrend|sources"' not in source
     assert 'callback_data="vtrend|freshness"' not in source
-    assert 'callback_data="vtrend|idea_catalog"' in source
-    assert 'callback_data="vtrend|manual_content"' in source
+    assert 'callback_data="vtrend|idea_catalog"' not in entry
+    assert 'callback_data="vtrend|manual_content"' not in entry
     assert "[InlineKeyboardButton(str(index)" in source
     assert 'InlineKeyboardButton("⬅️ Quay lại"' in source
-    assert 'InlineKeyboardButton("🏠 Menu chính"' in source
+    assert 'InlineKeyboardButton("🎬 Menu Video"' in source
 
 
-def test_trend_idea_catalog_has_exact_return_owner() -> None:
+def test_legacy_trend_idea_callback_is_read_only_and_not_public() -> None:
+    entry = _between("def video_trend2_entry_keyboard", "def video_trend2_catalog_rows")
     trend_handler = _between(
         "async def _handle_video_trend2_callback_impl",
         "async def handle_video_trend2_callback",
     )
-    assert 'back_callback="vtrend|idea_return"' in trend_handler
-    assert 'if action == "idea_return":' in trend_handler
-    assert 'video_trend2_open_screen(state, "content_source", parent="aspect_ratio")' in trend_handler
-    assert 'context.user_data.pop(key, None)' in trend_handler
-
-    catalog_helper = _between(
-        "async def video_flow7_open_idea_catalog_from_state",
-        "async def start_public_video_scene2_step",
-    )
-    assert 'back_callback: str = ""' in catalog_helper
-    assert '"return_callback": return_callback' in catalog_helper
-    assert 'context.user_data["video_idea_return_callback"] = return_callback' in catalog_helper
+    redirect = trend_handler.split(
+        'if action in {"manual_content", "edit_content", "idea_catalog"}:',
+        1,
+    )[1].split('if action == "profiles":', 1)[0]
+    assert "idea_catalog" not in entry
+    assert '"screen": "aspect_ratio"' in redirect
+    assert "video_trend2_render" in redirect
+    assert "video_flow7_open_idea_catalog_from_state" not in redirect
 
 
 def test_stale_trend_idea_back_is_read_only_and_does_not_clear_session() -> None:
@@ -315,9 +324,7 @@ def test_idea_callback_is_idempotent_and_trend_errors_are_specific() -> None:
     )
     assert "video_idea_processed_callback_ids" in handler
     assert 'await query.answer("Đã nhận lựa chọn này.")' in handler
-    assert 'if origin_product == "video_trend":' in handler
-    assert "video_trend_idea_handoff_rejected" in handler
-    assert "video_trend_idea_handoff_failed" in handler
+    assert "video_idea_parent_handoff" in handler
     assert "Có lỗi khi xử lý lệnh" not in handler
 
 
@@ -356,9 +363,14 @@ def test_every_public_trend_button_has_one_action_branch() -> None:
 
 def test_trend_handoff_persists_source_and_has_zero_preconfirm_side_effects() -> None:
     handoff = _between("def video_trend2_canonical_state", "async def video_trend2_render")
-    assert '"trend_source": video_trend2_source_snapshot(state)' in handoff
+    assert "trend_source = video_trend2_source_snapshot(state)" in handoff
+    assert '"trend_source": trend_source' in handoff
+    assert '"source_video_id": str(trend_source.get("source_video_id") or "")' in handoff
+    assert '"source_analysis": deepcopy(dict(trend_source.get("source_analysis") or {}))' in handoff
     assert '"source_product_id": "video_trend"' in handoff
-    assert '"step": "character"' in handoff
+    assert '"step": "creative_controls"' in handoff
+    bridge = _between("def video_trend_prepare_entity_bridge", "async def video_trend_finish_entity_bridge")
+    assert '"current_step": "production_bible"' in bridge
     for contract in (
         '"provider_called": False',
         '"image_provider_called": False',

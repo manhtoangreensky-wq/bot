@@ -72,11 +72,8 @@ def _callback_set(markup):
     }
 
 
-def test_free_hub_menu_visible():
+def test_free_hub_remains_available_from_its_existing_legacy_entrypoint():
     assert "freehub|main" in _callbacks(bot.main_menu_keyboard(False))
-    assert "freehub|main" in _callbacks(bot.localized_main_menu_keyboard(False, "vi"))
-    assert "freehub|main" in _callbacks(bot.localized_main_menu_keyboard(False, "en"))
-    assert "freehub|main" in _callbacks(bot.localized_main_menu_keyboard(False, "zh"))
     assert "miễn phí không giới hạn" not in bot.free_hub_main_text("vi").lower()
 
 
@@ -84,10 +81,16 @@ def test_main_menu_layout_regular_user():
     markup = bot.localized_main_menu_keyboard(False, "vi")
     labels = _labels(markup)
 
-    assert labels[0] == ["🆓 Công cụ miễn phí", "👤 Tài khoản"]
-    assert labels[1] == ["🖼 Tạo ảnh AI", "🎬 Tạo video AI"]
-    assert all(len(row) == 2 for row in markup.inline_keyboard)
-    assert labels[-1] == ["💬 Góp ý / Báo lỗi", "🌐 Trung tâm"]
+    assert labels == [
+        ["🆓 Công cụ miễn phí", "💎 Chat Pro • 5/25 Xu/1K"],
+        ["🎬 Tạo video AI", "🖼 Tạo ảnh AI"],
+        ["👤 Tài khoản", "🎧 Studio âm thanh"],
+        ["🌐 Dịch thuật", "📝 Ghi chú / Tài liệu"],
+        ["📚 Hướng dẫn", "👨‍💼 Hỗ trợ"],
+        ["💰 Nạp Xu / Bảng giá", "💬 Góp ý / Báo lỗi"],
+        ["📊 Trung tâm", "🌐 Đổi ngôn ngữ"],
+    ]
+    assert [len(row) for row in markup.inline_keyboard] == [2, 2, 2, 2, 2, 2, 2]
     assert all("🔐 Admin" not in label for row in labels for label in row)
     assert "menu|main_video" in _callback_set(markup)
 
@@ -96,11 +99,12 @@ def test_main_menu_layout_admin():
     markup = bot.localized_main_menu_keyboard(True, "vi")
     labels = _labels(markup)
 
-    assert labels[0] == ["🆓 Công cụ miễn phí", "👤 Tài khoản"]
+    assert labels[0] == ["🆓 Công cụ miễn phí", "💎 Chat Pro • 5/25 Xu/1K"]
+    assert labels[5] == ["💰 Nạp Xu / Bảng giá", "💬 Góp ý / Báo lỗi"]
+    assert labels[6] == ["📊 Trung tâm", "🌐 Đổi ngôn ngữ"]
     assert labels[-1] == ["🔐 Admin"]
     assert len(markup.inline_keyboard[-1]) == 1
-    assert labels[-2] == ["💬 Góp ý / Báo lỗi", "🌐 Trung tâm"]
-    assert all(len(row) == 2 for row in markup.inline_keyboard[:-1])
+    assert [len(row) for row in markup.inline_keyboard[:-1]] == [2, 2, 2, 2, 2, 2, 2]
 
 
 def test_main_menu_callbacks_have_handlers():
@@ -110,23 +114,25 @@ def test_main_menu_callbacks_have_handlers():
 
     assert callbacks == {
         "freehub|main",
+        "menu|chat_pro",
         "menu|main_profile",
         "menu|main_image",
         "menu|main_video",
-        "menu|main_memory",
         "menu|translate",
+        "menu|main_memory",
         "music_quick|showroom|root",
-        "pricing|main",
         "menu|main_guide",
         "menu|support",
+        "pricing|main",
         "feedback|start",
+        "back_lang",
         "menu|admin",
     }
     assert 'CallbackQueryHandler(handle_free_hub_callback, pattern=r"^freehub\\|")' in source
     assert 'CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\\|")' in source
     assert 'CallbackQueryHandler(handle_pricing_callback, pattern=r"^pricing\\|")' in source
     assert 'CallbackQueryHandler(handle_feedback_callback, pattern=r"^feedback\\|")' in source
-    assert 'CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\\|[a-z]{2}|lang_more|back_lang)$")' in source
+    assert 'CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\\|(?:[a-z]{2}|fil)|lang_more|back_lang|lang_back)$")' in source
 
 
 def test_video_main_button_opens_video_menu():

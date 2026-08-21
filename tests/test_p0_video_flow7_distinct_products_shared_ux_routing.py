@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import io
 import re
 from pathlib import Path
+import zipfile
 
 import pytest
 
-from services import video_flow6, video_flow7
+from providers import gemini_public_chat_provider
+from services import video_flow6, video_flow7, video_script_product
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,12 +25,28 @@ def _function_source(name: str) -> str:
 
 
 def _ready_context(product_id: str) -> dict:
-    return {
+    context = {
         "scene_count": 2,
         "aspect_ratio": "9:16",
         "primary_profile_key": "character_people",
         "content_choice": {"id": "content-1", "title": "Noi dung da chon"},
     }
+    if product_id == "script_image_video":
+        source = "\n".join(
+            f"Cảnh {index}: Nội dung nguyên văn trọn vẹn cho cảnh {index}."
+            for index in range(1, 6)
+        )
+        proposal = video_script_product.parse_script(source)
+        context.update({
+            "scene_count": 5,
+            "script_text": proposal["source_text"],
+            "manual_script_raw": proposal["source_text"],
+            "parsed_script_scenes": list(proposal["proposed_scenes"]),
+            "parsed_script_ranges": list(proposal["scene_ranges"]),
+            "script_coverage": dict(proposal["coverage"]),
+            "scene_count_confirmed": True,
+        })
+    return context
 
 
 def _preflight(product_id: str, context: dict) -> dict:
@@ -173,16 +192,90 @@ def test_suggestion_catalog_has_twenty_contextual_single_select_items() -> None:
 
 
 def test_script_parser_preserves_source_and_requires_explicit_count_confirmation() -> None:
-    proposal = video_flow7.parse_script_proposal("Mo dau tron y\nHanh dong tron y\nKet thuc tron y")
-    assert proposal["source_preserved"] is True
-    assert proposal["proposed_scene_count"] == 3
+    source = "\n".join(
+        f"Cảnh {index}: Nội dung nguyên văn trọn vẹn cho cảnh {index}."
+        for index in range(1, 6)
+    )
+    proposal = video_flow7.parse_script_proposal(source)
+    assert proposal["coverage"]["no_truncation"] is True
+    assert proposal["coverage"]["exact_match"] is True
+    assert proposal["coverage"]["coverage_percent"] == 100
+    assert proposal["proposed_scene_count"] == 5
     assert proposal["scene_count_confirmed"] is False
     context = _ready_context("script_image_video")
-    context.update({"script_text": proposal["source_text"], "scene_count_confirmed": False})
+    context.update({
+        "scene_count": 5,
+        "script_text": proposal["source_text"],
+        "manual_script_raw": proposal["source_text"],
+        "parsed_script_scenes": proposal["proposed_scenes"],
+        "parsed_script_ranges": proposal["scene_ranges"],
+        "script_coverage": proposal["coverage"],
+        "scene_count_confirmed": False,
+    })
     blocked = _preflight("script_image_video", context)
     assert "script_scene_count_not_confirmed" in blocked["blockers"]
     context["scene_count_confirmed"] = True
     assert _preflight("script_image_video", context)["ok"] is True
+    context["parsed_script_scenes"][1] += " sai"
+    assert "script_coverage_incomplete" in _preflight("script_image_video", context)["blockers"]
+
+    restored = video_script_product.parse_script(proposal["source_text"])
+    context["parsed_script_scenes"] = list(restored["proposed_scenes"])
+    contract = video_script_product.state_contract(context)
+    assert contract["script_text"] == proposal["source_text"]
+    assert contract["manual_script_raw"] == proposal["source_text"]
+    assert contract["parsed_script_ranges"] == proposal["scene_ranges"]
+    assert contract["script_coverage"]["coverage_percent"] == 100
+    assert contract["scene_count_confirmed"] is True
+    assert not any(key.startswith("script_execution_") for key in contract)
+
+
+def test_script_ai_adapter_requests_one_complete_script_not_a_lite_prompt_pack() -> None:
+    source = _function_source("generate_video_script_pack")
+    caller_source = _function_source("video_script_generate_ai")
+    assert gemini_public_chat_provider.GEMINI_FREE_MODEL == "gemini-3.6-flash"
+    assert "GeminiPublicChatProvider" in source
+    assert "AgentGemini.chat" not in source
+    assert "await generate_video_script_pack" in caller_source
+    assert "to_thread(generate_video_script_pack" not in caller_source
+    assert "biên kịch Video AI chuyên sâu" in source
+    assert "MỘT KỊCH BẢN HOÀN CHỈNH" in source
+    assert "Script Lite" not in source
+
+
+def test_script_parser_merges_more_than_twenty_headings_without_losing_text() -> None:
+    source = "\n".join(f"Cảnh {index}: Nội dung nguyên văn {index}." for index in range(1, 26))
+    proposal = video_script_product.parse_script(source)
+    assert proposal.get("error") in (None, "")
+    assert proposal["proposed_scene_count"] == video_script_product.MAX_SCENES
+    assert "".join(proposal["proposed_scenes"]) == source
+    assert proposal["coverage"]["exact_match"] is True
+    assert proposal["coverage"]["coverage_percent"] == 100
+
+
+def test_docx_extractor_keeps_table_header_footer_and_textbox_text() -> None:
+    document_xml = """<?xml version="1.0" encoding="UTF-8"?>
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body>
+        <w:p><w:r><w:t>Đoạn chính</w:t></w:r></w:p>
+        <w:tbl><w:tr>
+          <w:tc><w:p><w:r><w:t>Ô bảng A</w:t></w:r></w:p></w:tc>
+          <w:tc><w:p><w:r><w:t>Ô bảng B</w:t></w:r></w:p></w:tc>
+        </w:tr></w:tbl>
+        <w:p><w:r><w:pict><w:txbxContent><w:p><w:r><w:t>Chữ trong hộp</w:t></w:r></w:p></w:txbxContent></w:pict></w:r></w:p>
+      </w:body>
+    </w:document>"""
+    header_xml = """<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>Đầu trang</w:t></w:r></w:p></w:hdr>"""
+    footer_xml = """<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>Chân trang</w:t></w:r></w:p></w:ftr>"""
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("word/document.xml", document_xml)
+        archive.writestr("word/header1.xml", header_xml)
+        archive.writestr("word/footer1.xml", footer_xml)
+
+    extracted = video_script_product.extract_docx_text(payload.getvalue())
+    for expected in ("Đoạn chính", "Ô bảng A", "Ô bảng B", "Chữ trong hộp", "Đầu trang", "Chân trang"):
+        assert expected in extracted
 
 
 def test_storyboard_requires_one_mapped_image_per_panel_and_n_minus_one_transitions() -> None:
@@ -292,7 +385,6 @@ def test_long_series_stays_development_only_and_cannot_enter_short_video_preflig
             "script_image_video",
             {
                 **_ready_context("script_image_video"),
-                "script_text": "Canh 1\nCanh 2",
                 "scene_count_confirmed": True,
             },
         ),

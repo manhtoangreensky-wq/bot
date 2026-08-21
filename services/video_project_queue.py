@@ -20,9 +20,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from services import product_video_public_seam, video_final_output
+from services import (
+    product_video_public_seam,
+    video_final_output,
+    video_uiflow3_execution_contract,
+)
+from services.video_ai_real_pricing import public_quality_catalog
 from services.video_provider_catalog import (
     model_metadata_from_resolution,
+    normalize_tier,
     resolve_product_video_model,
 )
 
@@ -45,6 +51,9 @@ PROJECT_DRAFT_STATUSES = tuple(status for status in PROJECT_STATUSES if status.s
 SCENE_STATUSES = ("pending", "gen_audio", "gen_image", "gen_video", "postprocess", "done", "failed", "terminal_failed")
 JOB_STATUSES = ("queued", "processing", "completed", "failed", "cancelled")
 VIDEO_RENDER_JOB_TYPE = "video_render"
+VIDEO_JOB_PRECHECK_RUNNING = "precheck_running"
+VIDEO_JOB_PRECHECK_BLOCKED = "precheck_blocked"
+VIDEO_JOB_READY_TO_SUBMIT = "ready_to_submit"
 PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER = "owner_product_video"
 PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID = "product_video_public_confirm_v1"
 PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK = "vproduct|b14_confirm"
@@ -150,18 +159,8 @@ _PRODUCT_VIDEO_FINAL_ADMISSION_SIGNED_FIELDS = (
     "public_user_confirmed",
 )
 PRODUCT_VIDEO_TIER_PRICE_MAP = {
-    "low": 200,
-    "trial": 200,
-    "basic": 300,
-    "common": 400,
-    "good": 400,
-    "standard": 500,
-    "advanced": 600,
-    "premium": 800,
-    "pro": 1000,
-    "studio": 1200,
-    "high": 1200,
-    "max": 1500,
+    normalize_tier(row["tier_id"]): int(row["unit_xu"])
+    for row in public_quality_catalog()
 }
 
 
@@ -218,48 +217,44 @@ def _json_loads(value: str | None, fallback: Any = None) -> Any:
 
 
 def _product_video_selected_tier(value: Any) -> str:
-    raw = str(value or "").strip().lower()
-    if raw in {"200", "trial", "low"}:
-        return "low"
-    if raw in {"300", "basic"}:
-        return "basic"
-    if raw in {"400", "good", "common"}:
-        return "common"
-    if raw in {"500", "standard"}:
-        return "standard"
-    if raw in {"600", "advanced"}:
-        return "advanced"
-    if raw in {"800", "premium"}:
-        return "premium"
-    if raw in {"1000", "pro"}:
-        return "pro"
-    if raw in {"1200", "studio", "high"}:
-        return "studio"
-    if raw in {"1500", "max"}:
-        return "max"
-    return raw or "basic"
+    return normalize_tier(value)
+
+
+def _product_video_route_tier_value(invoice: dict[str, Any], project: dict[str, Any]) -> Any:
+    return (
+        invoice.get("tier")
+        or invoice.get("tier_key")
+        or invoice.get("routing_quality_tier")
+        or invoice.get("quality_tier")
+        or project.get("quality_tier")
+        or "basic"
+    )
 
 
 def _product_video_quote_consistency(invoice: dict[str, Any], project: dict[str, Any]) -> dict[str, Any]:
     invoice = dict(invoice or {})
     project = dict(project or {})
-    selected_tier = _product_video_selected_tier(
-        invoice.get("tier")
-        or invoice.get("tier_key")
-        or invoice.get("package_xu")
-        or invoice.get("quality_tier")
-        or project.get("quality_tier")
-        or project.get("total_xu_estimated")
-        or "basic"
+    selected_tier = _product_video_selected_tier(_product_video_route_tier_value(invoice, project))
+    scene_count = max(1, _as_int(invoice.get("scene_count") or project.get("scene_count"), 1))
+    unit_price = _as_int(
+        invoice.get("quality_xu")
+        or invoice.get("unit_xu")
+        or PRODUCT_VIDEO_TIER_PRICE_MAP.get(selected_tier),
+        PRODUCT_VIDEO_TIER_PRICE_MAP.get("basic", 220),
+    )
+    calculated_total = max(1, unit_price) * scene_count + max(
+        0,
+        _as_int(invoice.get("addons_xu") or invoice.get("addon_total_xu"), 0),
     )
     user_visible = _as_int(
         invoice.get("user_visible_price_xu")
         or invoice.get("package_xu")
         or invoice.get("package_price_xu")
-        or invoice.get("quality_tier")
-        or PRODUCT_VIDEO_TIER_PRICE_MAP.get(selected_tier)
-        or 300,
-        300,
+        or invoice.get("total_xu")
+        or invoice.get("total")
+        or project.get("total_xu_estimated")
+        or calculated_total,
+        calculated_total,
     )
     persisted = _as_int(
         invoice.get("persisted_quoted_price_xu")
@@ -3077,6 +3072,177 @@ def enqueue_video_render_job(
         raise
 
 
+def begin_video_precheck_job(
+    conn: sqlite3.Connection,
+    *,
+    project_id: int,
+    user_id: int,
+    chat_id: int,
+    request_id: str,
+    confirm_attempt_key: str,
+) -> dict[str, Any]:
+    """Create or resume one durable job without making it worker-claimable."""
+
+    ensure_video_project_queue_schema(conn)
+    project = get_video_project(conn, int(project_id))
+    if not project:
+        raise ValueError("project_not_found")
+    if int(project.get("user_id") or 0) != int(user_id):
+        raise PermissionError("project_user_mismatch")
+
+    linked_job_id = _as_int(project.get("job_id"), 0)
+    if linked_job_id > 0:
+        linked_job = get_video_render_job(conn, linked_job_id)
+        if (
+            linked_job
+            and int(linked_job.get("project_id") or 0) == int(project_id)
+            and int(linked_job.get("user_id") or 0) == int(user_id)
+        ):
+            return {**linked_job, "duplicate_prevented": True}
+
+    existing_row = conn.execute(
+        """SELECT id,project_id,user_id,job_type,status,priority,attempts,max_attempts,
+                  locked_by,locked_at,lease_expires_at,last_error,result_json,created_at,
+                  updated_at,started_at,completed_at,progress_percent,progress_message
+             FROM video_jobs
+            WHERE project_id=? AND user_id=? AND job_type=?
+            ORDER BY id ASC LIMIT 1""",
+        (int(project_id), int(user_id), VIDEO_RENDER_JOB_TYPE),
+    ).fetchone()
+    existing_job = _job_from_row(existing_row)
+    if existing_job:
+        conn.execute(
+            "UPDATE video_projects SET job_id=?,updated_at=? WHERE project_id=? AND user_id=?",
+            (int(existing_job["id"]), now_text(), int(project_id), int(user_id)),
+        )
+        return {**existing_job, "duplicate_prevented": True}
+
+    current = now_text()
+    result_payload = {
+        "request_id": str(request_id),
+        "confirm_attempt_key": str(confirm_attempt_key),
+        "chat_id": int(chat_id or 0),
+        "preflight_result": "RUNNING",
+        "admission_result": "NOT_RUN",
+        "exact_blocker_code": "",
+        "provider_task_id": None,
+        "submit_count": 0,
+        "poll_count": 0,
+        "charge_count": 0,
+        "charge_state": "NO_CHARGE",
+        "dispatch_outbox_created": False,
+    }
+    cursor = conn.execute(
+        """INSERT INTO video_jobs
+           (project_id,user_id,job_type,status,priority,attempts,max_attempts,result_json,
+            progress_percent,progress_message,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            int(project_id),
+            int(user_id),
+            VIDEO_RENDER_JOB_TYPE,
+            VIDEO_JOB_PRECHECK_RUNNING,
+            100,
+            0,
+            3,
+            _json_dumps(result_payload),
+            5,
+            VIDEO_JOB_PRECHECK_RUNNING,
+            current,
+            current,
+        ),
+    )
+    job_id = int(cursor.lastrowid or 0)
+    if job_id <= 0:
+        raise RuntimeError("job_create_failed")
+    conn.execute(
+        "UPDATE video_projects SET job_id=?,updated_at=? WHERE project_id=? AND user_id=?",
+        (job_id, current, int(project_id), int(user_id)),
+    )
+    job = get_video_render_job(conn, job_id)
+    if not job:
+        raise RuntimeError("job_create_readback_failed")
+    return {**job, "duplicate_prevented": False}
+
+
+def record_video_precheck_job_result(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int,
+    user_id: int,
+    preflight_result: str,
+    admission_result: str,
+    blocker_code: str = "",
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist a zero-submit precheck result on the already-created job."""
+
+    ensure_video_project_queue_schema(conn)
+    job = get_video_render_job(conn, int(job_id))
+    if not job:
+        raise ValueError("job_not_found")
+    if int(job.get("user_id") or 0) != int(user_id):
+        raise PermissionError("job_user_mismatch")
+
+    allowed_statuses = {
+        VIDEO_JOB_PRECHECK_RUNNING,
+        VIDEO_JOB_PRECHECK_BLOCKED,
+        VIDEO_JOB_READY_TO_SUBMIT,
+    }
+    if str(job.get("status") or "") not in allowed_statuses:
+        raise ValueError("job_not_in_precheck_state")
+
+    preflight = str(preflight_result or "NOT_RUN").strip().upper()
+    admission = str(admission_result or "NOT_RUN").strip().upper()
+    blocked = preflight == "BLOCKED" or admission == "BLOCKED"
+    ready = preflight == "PASS" and admission == "PASS"
+    if not blocked and not ready:
+        raise ValueError("invalid_precheck_result")
+    status = VIDEO_JOB_PRECHECK_BLOCKED if blocked else VIDEO_JOB_READY_TO_SUBMIT
+    progress = 5 if blocked else 10
+
+    result_payload = _json_loads(str(job.get("result_json") or ""), {})
+    if not isinstance(result_payload, dict):
+        result_payload = {}
+    result_payload.update(dict(payload or {}))
+    result_payload.update(
+        {
+            "preflight_result": preflight,
+            "admission_result": admission,
+            "exact_blocker_code": str(blocker_code or ""),
+            "provider_task_id": None,
+            "submit_count": 0,
+            "poll_count": 0,
+            "charge_count": 0,
+            "charge_state": "NO_CHARGE",
+            "dispatch_outbox_created": False,
+        }
+    )
+    cursor = conn.execute(
+        """UPDATE video_jobs
+              SET status=?,result_json=?,progress_percent=?,progress_message=?,updated_at=?
+            WHERE id=? AND user_id=? AND status IN (?,?,?)""",
+        (
+            status,
+            _json_dumps(result_payload),
+            progress,
+            status,
+            now_text(),
+            int(job_id),
+            int(user_id),
+            VIDEO_JOB_PRECHECK_RUNNING,
+            VIDEO_JOB_PRECHECK_BLOCKED,
+            VIDEO_JOB_READY_TO_SUBMIT,
+        ),
+    )
+    if cursor.rowcount != 1:
+        raise RuntimeError("job_precheck_state_changed")
+    updated = get_video_render_job(conn, int(job_id))
+    if not updated:
+        raise RuntimeError("job_precheck_readback_failed")
+    return updated
+
+
 def _product_video_final_admission_state(
     project: dict[str, Any],
     admission: dict[str, Any] | None,
@@ -3232,6 +3398,16 @@ def _product_video_final_admission_state(
         or (snapshot_id and snapshot_id in consumed_ids)
     )
     result_value = str(admission.get("admission_result") or ("PASS" if admission.get("ok") else "BLOCKED")).upper()
+    has_cloud = bool(
+        candidates
+        and any(
+            token in str(c).lower()
+            for c in candidates
+            for token in ("shopaikey", "key4u", "kling", "veo", "cloud", "generic", "http")
+        )
+    )
+    execution_mode = str(admission.get("execution_mode") or ("cloud" if has_cloud else "local")).strip().lower()
+    local_worker_required = bool(execution_mode == "local" or not has_cloud)
     authoritative_ok = bool(
         context_signature_valid
         and snapshot_id
@@ -3246,14 +3422,14 @@ def _product_video_final_admission_state(
         and snapshot_quote_fingerprint == quote_fingerprint
         and handler_id == PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID
         and callback_data == PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK
-        and worker_version_compatible
-        and worker_connected
-        and worker_heartbeat_fresh
-        and worker_lease_valid
-        and worker_sha_match
-        and worker_capability_match
-        and not worker_identity_conflict
-        and bool(worker_generation_id and worker_git_sha and runtime_sha)
+        and (not local_worker_required or worker_version_compatible)
+        and (not local_worker_required or worker_connected)
+        and (not local_worker_required or worker_heartbeat_fresh)
+        and (not local_worker_required or worker_lease_valid)
+        and (not local_worker_required or worker_sha_match)
+        and (not local_worker_required or worker_capability_match)
+        and (not local_worker_required or not worker_identity_conflict)
+        and (not local_worker_required or bool(worker_generation_id and worker_git_sha and runtime_sha))
         and route_requires_provider
         and not duplicate_handler_detected
         and not replayed
@@ -3347,6 +3523,9 @@ def _product_video_final_admission_state(
         "admission_callback_handler_id": handler_id,
         "admission_callback_data": callback_data,
         **route_contract,
+        "execution_mode": execution_mode,
+        "local_worker_required": local_worker_required,
+        "cloud_provider_ready": bool(provider_health_gate_pass and candidates),
         "admission_worker_runtime_sha": str(admission.get("admission_worker_runtime_sha") or ""),
         "admission_worker_sha": str(admission.get("admission_worker_sha") or ""),
         "admission_worker_version_compatible": worker_version_compatible,
@@ -3764,27 +3943,79 @@ def _confirm_product_video_invoice_atomic(
             and admission_state.get("automatic_retry_allowed") is False
             else 3
         )
-        cursor = conn.execute(
-            """INSERT INTO video_jobs
-               (project_id,user_id,job_type,status,priority,attempts,max_attempts,result_json,
-                progress_percent,progress_message,created_at,updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                int(project["project_id"]),
-                int(user_id),
-                VIDEO_RENDER_JOB_TYPE,
-                "queued",
-                100,
-                0,
-                route_max_attempts,
-                _json_dumps(admission_state),
-                10,
-                "dispatch_outbox_pending",
-                current,
-                current,
-            ),
+        linked_job_id = _as_int(locked[2], 0)
+        linked_job = get_video_render_job(conn, linked_job_id) if linked_job_id > 0 else {}
+        linked_status = str(linked_job.get("status") or "")
+        preflight_payload = _json_loads(str(linked_job.get("result_json") or ""), {})
+        if not isinstance(preflight_payload, dict):
+            preflight_payload = {}
+        job_promoted = bool(
+            linked_job
+            and _as_int(linked_job.get("project_id"), 0) == int(project["project_id"])
+            and _as_int(linked_job.get("user_id"), 0) == int(user_id)
+            and str(linked_job.get("job_type") or "") == VIDEO_RENDER_JOB_TYPE
+            and linked_status == VIDEO_JOB_READY_TO_SUBMIT
         )
-        job_id = int(cursor.lastrowid or 0)
+        if linked_status in {
+            VIDEO_JOB_PRECHECK_RUNNING,
+            VIDEO_JOB_PRECHECK_BLOCKED,
+            VIDEO_JOB_READY_TO_SUBMIT,
+        } and not job_promoted:
+            conn.rollback()
+            return {
+                "ok": False,
+                "reason": "product_video_preflight_job_not_ready",
+                "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này. Hệ thống chưa trừ Xu.",
+                "job_created": False,
+                "job_promoted": False,
+                "dispatch_outbox_created": False,
+                "charge": 0,
+                "charged_xu": 0,
+            }
+        if job_promoted and any((
+            str(preflight_payload.get("preflight_result") or "").upper() != "PASS",
+            str(preflight_payload.get("admission_result") or "").upper() != "PASS",
+            bool(preflight_payload.get("provider_task_id")),
+            _as_int(preflight_payload.get("submit_count"), 0) != 0,
+            _as_int(preflight_payload.get("poll_count"), 0) != 0,
+            _as_int(preflight_payload.get("charge_count"), 0) != 0,
+            not str(preflight_payload.get("request_id") or "").strip(),
+        )):
+            conn.rollback()
+            return {
+                "ok": False,
+                "reason": "product_video_preflight_job_identity_invalid",
+                "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này. Hệ thống chưa trừ Xu.",
+                "job_created": False,
+                "job_promoted": False,
+                "dispatch_outbox_created": False,
+                "charge": 0,
+                "charged_xu": 0,
+            }
+        if job_promoted:
+            job_id = linked_job_id
+        else:
+            cursor = conn.execute(
+                """INSERT INTO video_jobs
+                   (project_id,user_id,job_type,status,priority,attempts,max_attempts,result_json,
+                    progress_percent,progress_message,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    int(project["project_id"]),
+                    int(user_id),
+                    VIDEO_RENDER_JOB_TYPE,
+                    "queued",
+                    100,
+                    0,
+                    route_max_attempts,
+                    _json_dumps(admission_state),
+                    10,
+                    "dispatch_outbox_pending",
+                    current,
+                    current,
+                ),
+            )
+            job_id = int(cursor.lastrowid or 0)
         if str(admission_state.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
             admission_state.update(
                 {
@@ -3859,6 +4090,7 @@ def _confirm_product_video_invoice_atomic(
         if failure_stage == "after_outbox_insert":
             raise RuntimeError("injected_after_outbox_insert")
         payload = {
+            **preflight_payload,
             **kickoff,
             **admission_state,
             "dispatch_outbox_present": True,
@@ -3888,11 +4120,31 @@ def _confirm_product_video_invoice_atomic(
             "canonical_manifest_id": f"product-video-{job_id}-manifest",
             "scene_dispatch_count": len(scene_indexes),
             "finalizer_reached": False,
+            "job_promoted_from_preflight": job_promoted,
+            "preflight_job_status_before_promotion": (
+                VIDEO_JOB_READY_TO_SUBMIT if job_promoted else ""
+            ),
+            "provider_task_id": None,
+            "submit_count": 0,
+            "poll_count": 0,
+            "charge_count": 0,
         }
-        conn.execute(
-            "UPDATE video_jobs SET result_json=?,progress_percent=10,progress_message='dispatch_outbox_pending',updated_at=? WHERE id=?",
-            (_json_dumps(payload), current, job_id),
+        promoted = conn.execute(
+            """UPDATE video_jobs
+                  SET status='queued',max_attempts=?,result_json=?,last_error='',progress_percent=10,
+                      progress_message='dispatch_outbox_pending',locked_by='',locked_at=NULL,
+                      lease_expires_at=NULL,completed_at=NULL,updated_at=?
+                WHERE id=? AND status IN (?, 'queued')""",
+            (
+                route_max_attempts,
+                _json_dumps(payload),
+                current,
+                job_id,
+                VIDEO_JOB_READY_TO_SUBMIT,
+            ),
         )
+        if promoted.rowcount != 1:
+            raise RuntimeError("product_video_same_job_promotion_conflict")
         if failure_stage == "before_snapshot_consume":
             raise RuntimeError("injected_before_snapshot_consume")
         if require_authoritative_snapshot:
@@ -3927,7 +4179,8 @@ def _confirm_product_video_invoice_atomic(
             "job": get_video_render_job(conn, job_id),
             "outbox": get_product_video_dispatch_outbox(conn, job_id=job_id),
             "duplicate_prevented": False,
-            "job_created": True,
+            "job_created": not job_promoted,
+            "job_promoted": job_promoted,
             "dispatch_outbox_created": True,
             "scene_records_created": True,
         }
@@ -4023,6 +4276,153 @@ def confirm_video_project_invoice(
     return {"ok": True, "project": project, "job": job, "duplicate_prevented": bool(job.get("duplicate_prevented"))}
 
 
+def _persisted_product_video_route_identity_matches(payload: dict[str, Any]) -> bool:
+    """Validate the frozen route without depending on current runtime flags."""
+
+    raw_decision = payload.get("product_video_route_decision")
+    if not payload.get("product_video_durable_public_seam") or not isinstance(raw_decision, dict):
+        return False
+    decision = dict(raw_decision)
+    persisted_hash = str(decision.pop("route_decision_sha256", "")).strip().lower()
+    if len(persisted_hash) != 64 or any(
+        character not in "0123456789abcdef" for character in persisted_hash
+    ):
+        return False
+    calculated_hash = hashlib.sha256(
+        json.dumps(
+            decision,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    if calculated_hash != persisted_hash or str(
+        payload.get("product_video_route_decision_sha256") or ""
+    ).strip().lower() != persisted_hash:
+        return False
+    frozen = {**decision, "route_decision_sha256": persisted_hash}
+    flattened = product_video_public_seam.product_video_route_decision_payload(frozen)
+    for key in (
+        "product_video_route_decision_version",
+        "product_video_route_selection_sha256",
+        "product_video_engine_mode",
+        "scene_count",
+        "route_id",
+        "product_video_engine_adapter",
+        "worker_job_type",
+        "worker_owner",
+        "required_worker_capability",
+        "automatic_retry_allowed",
+        "automatic_resubmit_allowed",
+        "automatic_fallback_allowed",
+    ):
+        if payload.get(key) != flattened.get(key):
+            return False
+    return bool(
+        decision.get("canonical_engine_entry") == PRODUCT_VIDEO_CANONICAL_ENGINE_ENTRY
+        and decision.get("automatic_retry_allowed") is False
+        and decision.get("automatic_resubmit_allowed") is False
+        and decision.get("automatic_fallback_allowed") is False
+    )
+
+
+def _confirmed_uiflow3_job_for_exact_admission_replay(
+    conn: sqlite3.Connection,
+    *,
+    project_id: int,
+    user_id: int,
+    admission: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Resolve an exact UIFLOW3 confirmation replay without creating work."""
+
+    project = get_video_project(conn, int(project_id))
+    if not project or _as_int(project.get("user_id"), 0) != int(user_id):
+        return {}
+    asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
+    invoice = _json_loads(str(project.get("invoice_json") or ""), {})
+    if not isinstance(asset_pack, dict) or not isinstance(invoice, dict):
+        return {}
+    if str(asset_pack.get("uiflow3_bridge_version") or "") != video_uiflow3_execution_contract.BRIDGE_VERSION:
+        return {}
+
+    admission = dict(admission or {})
+    snapshot_id = str(admission.get("admission_snapshot_id") or "").strip()
+    consumed_ids = {
+        str(asset_pack.get("admission_snapshot_consumed_id") or "").strip(),
+        str(invoice.get("admission_snapshot_consumed_id") or "").strip(),
+    }
+    consumed_job_ids = {
+        _as_int(asset_pack.get("admission_snapshot_consumed_job_id"), 0),
+        _as_int(invoice.get("admission_snapshot_consumed_job_id"), 0),
+    }
+    if not snapshot_id or consumed_ids != {snapshot_id} or len(consumed_job_ids) != 1:
+        return {}
+    consumed_job_id = next(iter(consumed_job_ids))
+    if consumed_job_id <= 0 or _as_int(project.get("job_id"), 0) != consumed_job_id:
+        return {}
+    if any(
+        (
+            _as_int(admission.get("admission_user_id"), 0) != int(user_id),
+            _as_int(admission.get("admission_project_id"), 0) != int(project_id),
+            str(admission.get("admission_quote_fingerprint") or "")
+            != product_video_admission_quote_fingerprint(project, int(user_id)),
+            str(admission.get("admission_callback_handler_id") or "")
+            != PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID,
+            str(admission.get("admission_callback_data") or "")
+            != PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK,
+        )
+    ):
+        return {}
+
+    job = get_video_render_job(conn, consumed_job_id)
+    if (
+        not job
+        or _as_int(job.get("project_id"), 0) != int(project_id)
+        or _as_int(job.get("user_id"), 0) != int(user_id)
+        or str(job.get("job_type") or "") != VIDEO_RENDER_JOB_TYPE
+    ):
+        return {}
+    payload = _json_loads(str(job.get("result_json") or ""), {})
+    if not isinstance(payload, dict):
+        return {}
+    if any(
+        (
+            str(payload.get("admission_snapshot_id") or "") != snapshot_id,
+            _as_int(payload.get("admission_user_id"), 0) != int(user_id),
+            _as_int(payload.get("admission_project_id"), 0) != int(project_id),
+            str(payload.get("admission_quote_fingerprint") or "")
+            != str(admission.get("admission_quote_fingerprint") or ""),
+        )
+    ):
+        return {}
+    execution = video_uiflow3_execution_contract.validate_execution_contract(
+        project,
+        payload,
+        require_payload_identity=True,
+    )
+    if not execution.get("applies") or not execution.get("ok"):
+        return {}
+    if not _persisted_product_video_route_identity_matches(payload):
+        return {}
+    if str(payload.get("product_video_route_selection_sha256") or "") != str(
+        payload.get("uiflow3_route_selection_sha256") or ""
+    ):
+        return {}
+    return {
+        "ok": True,
+        "project": project,
+        "job": job,
+        "outbox": get_product_video_dispatch_outbox(conn, job_id=consumed_job_id),
+        "duplicate_prevented": True,
+        "confirmation_replay_resolved": True,
+        "job_created": False,
+        "dispatch_outbox_created": False,
+        "scene_records_created": False,
+        "charge": 0,
+        "charged_xu": 0,
+    }
+
+
 def confirm_public_product_video_invoice(
     conn: sqlite3.Connection,
     *,
@@ -4043,6 +4443,14 @@ def confirm_public_product_video_invoice(
             "charge": 0,
             "charged_xu": 0,
         }
+    replay = _confirmed_uiflow3_job_for_exact_admission_replay(
+        conn,
+        project_id=int(project_id),
+        user_id=int(user_id),
+        admission=provider_admission,
+    )
+    if replay:
+        return replay
     return confirm_video_project_invoice(
         conn,
         project_id=int(project_id),
@@ -4162,6 +4570,7 @@ def heartbeat_video_job(
 
 
 PRODUCT_VIDEO_SCENE_SECONDS = 8
+PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS = 15
 PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS = 0.7
 PRODUCT_VIDEO_DEFAULT_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
 PRODUCT_VIDEO_ORCHESTRATION_MODE_RAW_DELIVERY = "single_task_legacy"
@@ -4197,6 +4606,12 @@ def _split_product_video_provider_chain(value: Any) -> list[str]:
         if token and token not in result:
             result.append(token)
     return result
+
+
+def normalize_product_video_provider_chain(value: Any) -> list[str]:
+    """Normalize a configured provider chain for service-layer callers."""
+
+    return _split_product_video_provider_chain(value)
 
 
 def resolve_product_video_provider_chain(environ: dict[str, str] | None = None) -> list[str]:
@@ -4360,7 +4775,13 @@ def product_video_initial_scene_tasks(
 ) -> list[dict[str, Any]]:
     safe_job_id = str(job_id or "").strip() or "job"
     safe_count = max(1, min(20, int(scene_count or 1)))
-    safe_duration = max(1, min(PRODUCT_VIDEO_SCENE_SECONDS, int(scene_duration_seconds or PRODUCT_VIDEO_SCENE_SECONDS)))
+    safe_duration = max(
+        1,
+        min(
+            PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS,
+            int(scene_duration_seconds or PRODUCT_VIDEO_SCENE_SECONDS),
+        ),
+    )
     cards_by_index: dict[int, dict[str, Any]] = {}
     for fallback_index, raw_card in enumerate(scene_cards or [], start=1):
         if not isinstance(raw_card, dict):
@@ -4452,7 +4873,6 @@ def build_product_video_confirm_kickoff_payload(
 ) -> dict[str, Any]:
     current_dt = now or datetime.now()
     scene_count = _product_video_scene_count(project)
-    scene_duration = PRODUCT_VIDEO_SCENE_SECONDS
     invoice = _json_loads(str(project.get("invoice_json") or ""), {})
     if not isinstance(invoice, dict):
         invoice = {}
@@ -4460,6 +4880,24 @@ def build_product_video_confirm_kickoff_payload(
     asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
     if not isinstance(asset_pack, dict):
         asset_pack = {}
+    scene_duration_limit = (
+        PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
+        if str(asset_pack.get("uiflow3_handoff_sha256") or "").strip()
+        else PRODUCT_VIDEO_SCENE_SECONDS
+    )
+    scene_duration = max(
+        1,
+        min(
+            scene_duration_limit,
+            _as_int(
+                invoice.get("scene_duration_seconds")
+                or invoice.get("scene_seconds")
+                or asset_pack.get("scene_duration_seconds")
+                or asset_pack.get("scene_seconds"),
+                PRODUCT_VIDEO_SCENE_SECONDS,
+            ),
+        ),
+    )
     requested_product_type = _product_video_requested_product_type(project, asset_pack, invoice)
     engine_contract = product_video_engine_contract(requested_product_type)
     execution_product_type = str(engine_contract.get("product_type") or requested_product_type)
@@ -4511,13 +4949,7 @@ def build_product_video_confirm_kickoff_payload(
         )
         chain = _split_product_video_provider_chain(source_chain) or resolve_product_video_provider_chain()
     model_resolution = resolve_product_video_model(
-        tier=invoice.get("tier")
-        or invoice.get("tier_key")
-        or invoice.get("package_xu")
-        or invoice.get("quality_tier")
-        or project.get("quality_tier")
-        or project.get("total_xu_estimated")
-        or "basic",
+        tier=_product_video_route_tier_value(invoice, project),
         provider_chain=chain,
         scene_count=scene_count,
         required_capability=required_capability,
@@ -4533,9 +4965,15 @@ def build_product_video_confirm_kickoff_payload(
                     "selected_family": model_metadata.get("selected_family") or "",
                     "selected_model_source": model_metadata.get("selected_model_source") or "",
                     "selected_payload_adapter": model_metadata.get("selected_payload_adapter") or "",
+                    "selected_request_defaults": dict(model_metadata.get("selected_request_defaults") or {}),
                     "model_used": model_metadata.get("selected_model") or "",
                     "model_used_in_payload": model_metadata.get("selected_model") or "",
                     "provider_model_map": dict(model_metadata.get("provider_model_map") or {}),
+                    "provider_request_defaults": {
+                        str(key): dict(value)
+                        for key, value in (model_metadata.get("provider_request_defaults") or {}).items()
+                        if isinstance(value, dict)
+                    },
                     "contract_validation_status": model_metadata.get("contract_validation_status") or "",
                     "supports_concat": bool(model_metadata.get("supports_concat")),
                 }
@@ -4571,6 +5009,24 @@ def build_product_video_confirm_kickoff_payload(
         or invoice.get("multi_scene_health_gate")
         or {}
     )
+    # Keep the immutable UIFLOW3 handoff identity at the worker payload
+    # boundary as well as inside the durable project asset pack.  Recovery,
+    # worker admission, and artifact validation must be able to verify the
+    # exact approved plan without reconstructing it from UI state.
+    uiflow3_identity = {
+        key: asset_pack.get(key) or invoice.get(key)
+        for key in (
+            "uiflow3_bridge_version",
+            "uiflow3_draft_id",
+            "uiflow3_owner_user_id",
+            "uiflow3_owner_chat_id",
+            "uiflow3_snapshot_config_hash",
+            "uiflow3_handoff_sha256",
+            "uiflow3_quote_sha256",
+            "uiflow3_route_selection_sha256",
+        )
+        if asset_pack.get(key) not in (None, "") or invoice.get(key) not in (None, "")
+    }
     return {
         "source": "product_video",
         "product_video": True,
@@ -4677,6 +5133,7 @@ def build_product_video_confirm_kickoff_payload(
         "provider_attempted": False,
         "provider_task_id_saved": False,
         "no_new_paid_submit": True,
+        **uiflow3_identity,
     }
 
 
@@ -5295,7 +5752,15 @@ def sweep_product_video_zero_task_watchdog(
                 and bool(outbox.get("last_attempt_at"))
             )
         )
-        if not candidates and not active_lease and not claim_retries_exhausted:
+        explicit_admission_block = bool(
+            eligibility and eligibility.get("ok") is False
+        )
+        if (
+            not candidates
+            and not active_lease
+            and not claim_retries_exhausted
+            and not explicit_admission_block
+        ):
             if not outbox:
                 outbox = ensure_product_video_dispatch_outbox(
                     conn,
@@ -5913,6 +6378,19 @@ def product_video_expected_duration_seconds(project: dict | None = None, payload
     invoice = _json_loads(str(project.get("invoice_json") or payload.get("invoice_json") or ""), {})
     if not isinstance(invoice, dict):
         invoice = {}
+    asset_pack = _json_loads(str(project.get("asset_pack_json") or payload.get("asset_pack_json") or ""), {})
+    if not isinstance(asset_pack, dict):
+        asset_pack = {}
+    scene_duration_limit = (
+        PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
+        if str(
+            payload.get("uiflow3_handoff_sha256")
+            or asset_pack.get("uiflow3_handoff_sha256")
+            or invoice.get("uiflow3_handoff_sha256")
+            or ""
+        ).strip()
+        else PRODUCT_VIDEO_SCENE_SECONDS
+    )
     scene_count = _as_int(project.get("scene_count") or payload.get("scene_count") or invoice.get("scene_count"), 1)
     orchestration_mode = str(
         payload.get("orchestration_mode")
@@ -5928,7 +6406,7 @@ def product_video_expected_duration_seconds(project: dict | None = None, payload
             or invoice.get("scene_seconds"),
             PRODUCT_VIDEO_SCENE_SECONDS,
         )
-        return max(1, min(20, scene_count)) * max(1, min(PRODUCT_VIDEO_SCENE_SECONDS, scene_seconds))
+        return max(1, min(20, scene_count)) * max(1, min(scene_duration_limit, scene_seconds))
     direct = _as_int(
         payload.get("expected_duration_seconds")
         or payload.get("duration_seconds")
@@ -8078,6 +8556,46 @@ def complete_video_job(
                 return blocked
             conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(payload), int(job_id)))
             return fail_video_job(conn, job_id=int(job_id), error=str(validation.get("reason") or "final_output_invalid"), retry=False)
+        uiflow3_contract = video_uiflow3_execution_contract.validate_execution_contract(
+            project,
+            payload,
+            artifact_validation=validation,
+            require_payload_identity=True,
+            require_artifact=True,
+        )
+        if uiflow3_contract.get("applies"):
+            payload["uiflow3_execution_contract"] = uiflow3_contract
+        if not uiflow3_contract.get("ok"):
+            blocker = str(
+                uiflow3_contract.get("blocker")
+                or "uiflow3_execution_contract_invalid"
+            )
+            payload.update(
+                {
+                    "terminal_state": "failed_no_charge",
+                    "final_decision": "failed_no_charge",
+                    "blocker": blocker,
+                    "provider_error": blocker,
+                    "continue_polling": False,
+                    "no_charge": True,
+                    "charge": 0,
+                    "charged_xu": 0,
+                }
+            )
+            blocked, _locked_job, _locked_project = begin_completion_mutation()
+            if blocked is not None:
+                return blocked
+            conn.execute(
+                "UPDATE video_jobs SET result_json=? WHERE id=?",
+                (_json_dumps(payload), int(job_id)),
+            )
+            failed = fail_video_job(
+                conn,
+                job_id=int(job_id),
+                error=blocker,
+                retry=False,
+            )
+            return {**failed, "ok": False, "reason": blocker}
         duration_contract = product_video_duration_contract(project, payload, validation)
         payload["final_duration_contract"] = duration_contract
         payload["expected_duration_seconds"] = duration_contract["expected_duration_seconds"]
@@ -8240,6 +8758,28 @@ def note_video_delivery_result(
             "reason": str(
                 route_validation.get("blocker")
                 or "product_video_route_decision_invalid"
+            ),
+            "job": job,
+            "project": project,
+        }
+    uiflow3_contract = video_uiflow3_execution_contract.validate_execution_contract(
+        project,
+        payload,
+        artifact_validation=(
+            payload.get("final_output_validation")
+            if isinstance(payload.get("final_output_validation"), dict)
+            else None
+        ),
+        require_payload_identity=True,
+        require_artifact=True,
+    )
+    if not uiflow3_contract.get("ok"):
+        return {
+            "ok": False,
+            "sent": False,
+            "reason": str(
+                uiflow3_contract.get("blocker")
+                or "uiflow3_execution_contract_invalid"
             ),
             "job": job,
             "project": project,

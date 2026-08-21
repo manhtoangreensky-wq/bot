@@ -12,6 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from services import video_editengine1 as video_editengine1_service
+
 
 ROOT = Path(__file__).resolve().parents[1]
 BOT_SOURCE = (ROOT / "bot.py").read_text(encoding="utf-8")
@@ -143,10 +145,19 @@ def _status_text(
     progress = _compile_function(
         "video_local_job_progress_payload", {"json": __import__("json")}
     )
+    receipt_complete = _compile_function(
+        "video_edit_delivery_receipt_is_complete",
+        {
+            "re": __import__("re"),
+            "video_editengine1": video_editengine1_service,
+        },
+    )
     status = _compile_function(
         "video_editor_job_status_text",
         {
             "video_local_job_progress_payload": progress,
+            "video_edit_delivery_receipt_is_complete": receipt_complete,
+            "video_editengine1": video_editengine1_service,
             "video_editengine1_job_for_worker": lambda _job_id: dict(canonical or {}),
             "safe_int": lambda value, default=0: int(value or default),
             "html": html,
@@ -205,6 +216,7 @@ def _handler(
     lang: str = "vi",
     log_messages: list[str] | None = None,
     status_renderer=None,
+    status_reader=None,
 ):
     global _HANDLER_FUNCTION, _HANDLER_NAMESPACE
 
@@ -222,14 +234,28 @@ def _handler(
     dependencies = {
         "get_user_language": lambda _uid: lang,
         "get_video_editor_pending": lambda _uid: deepcopy(state),
+        "video_editor_state_snapshot": lambda value: deepcopy(dict(value or {})),
         "video_edit_state_machine": SimpleNamespace(
             requested_group=lambda _action: "",
             canonical_compatibility_action=lambda action: action,
         ),
         "video_editor_normalize_action": lambda action: action,
+        "video_editor_callback_arity_valid": lambda _parts: True,
+        "video_edit_progress_callback_binding": lambda job_id, owner_id, _query: {
+            "key": f"video_edit:{job_id}",
+            "record": {"user_id": owner_id},
+            "job_id": int(job_id),
+            "user_id": int(owner_id),
+            "chat_id": int(owner_id),
+            "message_id": int(job_id),
+            "restart_recovery": False,
+        },
+        "_VIDEO_EDIT_CALLBACK_ANSWERED": SimpleNamespace(set=lambda _value: None),
         "safe_edit_or_send": render,
         "get_latest_video_editor_job": get_latest,
         "get_local_worker_job_readonly": get_job,
+        "video_edit_progress_read_status": status_reader
+        or (lambda job_id, user_id=0: get_job(job_id)),
         "video_editengine1": SimpleNamespace(WORKER_JOB_TYPE="video_local_edit"),
         "video_editor_job_status_text": status_renderer
         or (lambda job, selected_lang: _status_text(job, selected_lang)),
@@ -260,11 +286,20 @@ def _handler(
         assert _HANDLER_NAMESPACE is not None
         _HANDLER_NAMESPACE.update(dependencies)
     handler = _HANDLER_FUNCTION
-    return handler, rendered, state, _Query(user_id, "videoedit|latest_status")
+    query = _Query(user_id, "videoedit|latest_status")
+    query.message = SimpleNamespace(chat_id=user_id, message_id=71)
+
+    async def edit_message_text(text: str, **kwargs):
+        return await render(query, text, **kwargs)
+
+    query.edit_message_text = edit_message_text
+    return handler, rendered, state, query
 
 
-def test_hub_has_one_status_row_after_four_primary_actions_and_no_legacy_video_menu_status() -> None:
+def test_hub_keeps_four_primary_actions_without_detached_status_or_planning() -> None:
     hub = _function_source("video_edit_hub_keyboard")
+    workspace = _function_source("video_local_manual_options_keyboard")
+    panel = _function_source("video_editor_status_keyboard")
     expected_primary = (
         '"videoedit|ai"',
         '"videoedit|manual"',
@@ -275,14 +310,49 @@ def test_hub_has_one_status_row_after_four_primary_actions_and_no_legacy_video_m
     assert [hub.index(callback) for callback in expected_primary] == sorted(
         hub.index(callback) for callback in expected_primary
     )
-    assert hub.count('"videoedit|latest_status"') == 1
-    assert hub.index('"videoedit|guide"') < hub.index('"videoedit|latest_status"')
-    assert hub.index('"videoedit|latest_status"') < hub.index('"lvs27b|open"')
-    assert '"📊 Trạng thái chỉnh sửa"' in hub
+    assert '"videoedit|latest_status"' not in hub
+    assert '"lvs27b|open"' not in hub
+    assert '"📊 Trạng thái chỉnh sửa"' not in hub
     assert "videoedit|history" not in hub
     assert "videoedit|history" not in _function_source("handle_video_editor_callback")
     assert "latest_status" not in _function_source("video_editor_menu_keyboard")
     assert "latest_status" not in _function_source("main_video_keyboard")
+    assert "latest_status" not in workspace
+    assert "Trạng thái chỉnh sửa" not in workspace
+    assert 'callback_data=f"videoedit|status|{int(job_id)}"' in panel
+    assert "latest_status" not in panel
+
+
+def test_stale_detached_latest_status_callback_fails_closed_without_opening_a_job_panel() -> None:
+    lookups: list[int] = []
+    job = {
+        "id": 71,
+        "user_id": "41",
+        "job_type": "video_local_edit",
+        "status": "queued",
+        "xu_cost": 0,
+    }
+    handler, rendered, state, query = _handler(
+        lambda uid: lookups.append(int(uid)) or job,
+        lambda _job_id: job,
+        pending={"step": "workspace", "source_file_id": "source-file"},
+    )
+
+    assert asyncio.run(
+        handler(
+            SimpleNamespace(callback_query=query, effective_user=query.from_user),
+            SimpleNamespace(),
+        )
+    ) is True
+    assert lookups == []
+    assert rendered == []
+    assert state == {"step": "workspace", "source_file_id": "source-file"}
+    assert query.answers == [
+        (
+            ("Nút Trạng thái chỉnh sửa chung đã được gỡ. Bảng tiến độ chỉ có trong từng job Chỉnh sửa video.",),
+            {"show_alert": True},
+        )
+    ]
 
 
 def test_latest_lookup_returns_only_newest_owned_exact_local_edit_job(tmp_path: Path) -> None:
@@ -407,16 +477,21 @@ def test_canonical_receipt_lookup_is_select_only_and_never_ensures_schema() -> N
         conn.close()
 
 
-def test_latest_status_renders_owned_job_after_pending_state_is_cleared_with_six_stage_refresh() -> None:
+def test_exact_job_status_renders_owned_six_stage_panel_after_pending_state_is_cleared() -> None:
     job = {"id": 71, "user_id": "41", "job_type": "video_local_edit", "status": "queued", "xu_cost": 0}
-    calls: list[int] = []
+    calls: list[tuple[int, int]] = []
     handler, rendered, state, query = _handler(
-        lambda uid: calls.append(uid) or job,
+        lambda _uid: {},
         lambda _job_id: job,
+        status_reader=lambda job_id, user_id=0: calls.append(
+            (int(job_id), int(user_id))
+        )
+        or job,
     )
+    query.data = "videoedit|status|71"
 
     assert asyncio.run(handler(SimpleNamespace(callback_query=query, effective_user=query.from_user), SimpleNamespace())) is True
-    assert calls == [41]
+    assert calls == [(71, 41)]
     assert state == {}
     assert len(rendered) == 1
     text, markup = rendered[0]
@@ -426,10 +501,13 @@ def test_latest_status_renders_owned_job_after_pending_state_is_cleared_with_six
     assert "%" not in text
     callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
     assert "videoedit|status|71" in callbacks
-    assert "videoedit|hub" in callbacks
+    assert "videoedit|status_hub|71" in callbacks
+    assert "videoedit|status_menu|71" in callbacks
+    assert "videoedit|hub" not in callbacks
+    assert "menu|main" not in callbacks
 
 
-def test_latest_status_preserves_saved_english_language_for_the_six_stage_panel() -> None:
+def test_exact_job_status_preserves_saved_english_language_for_the_six_stage_panel() -> None:
     job = {
         "id": 73,
         "user_id": "41",
@@ -438,10 +516,14 @@ def test_latest_status_preserves_saved_english_language_for_the_six_stage_panel(
         "xu_cost": 0,
     }
     handler, rendered, state, query = _handler(
-        lambda _uid: job,
+        lambda _uid: {},
         lambda _job_id: job,
         lang="en",
+        status_reader=lambda job_id, user_id=0: job
+        if (int(job_id), int(user_id)) == (73, 41)
+        else {},
     )
+    query.data = "videoedit|status|73"
 
     assert asyncio.run(
         handler(
@@ -465,7 +547,7 @@ def test_latest_status_preserves_saved_english_language_for_the_six_stage_panel(
     assert "Trạng thái chỉnh sửa video" not in text
     labels = [button.text for row in markup.inline_keyboard for button in row]
     assert "🔄 Update status" in labels
-    assert "⬅️ Video Edit" in labels
+    assert "🛠 Open Video Edit" in labels
 
 
 def test_unverified_delivered_stage_never_completes_the_sixth_receipt_step() -> None:
@@ -510,7 +592,7 @@ def test_unverified_multipart_delivered_stage_never_claims_every_part_was_sent()
     text = _status_text(job, "vi")
 
     assert "⚠️ Gửi kết quả" in text
-    assert "Đã có biên nhận: <b>1/3</b> phần" in text
+    assert "Đã có biên nhận: <b>0/3</b> phần" in text
     assert "Đã gửi: <b>3/3</b> phần" not in text
 
 
@@ -542,104 +624,14 @@ def test_incomplete_canonical_delivered_receipt_is_delivery_uncertain() -> None:
     assert "• Trạng thái: <b>Hoàn tất</b>" not in text
 
 
-def test_latest_status_empty_is_useful_vietnamese_and_back_to_exact_hub() -> None:
-    handler, rendered, state, query = _handler(lambda _uid: {}, lambda _job_id: {})
-    assert asyncio.run(handler(SimpleNamespace(callback_query=query, effective_user=query.from_user), SimpleNamespace())) is True
-    assert state == {}
-    assert len(rendered) == 1
-    text, markup = rendered[0]
-    assert "chưa có tác vụ chỉnh sửa video" in text.lower()
-    assert len(text) <= 360
-    callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
-    assert callbacks == ["videoedit|hub", "menu|main"]
-
-
-def test_latest_status_database_failure_is_sanitized_and_back_to_exact_hub() -> None:
+def test_stale_detached_status_never_touches_database_or_renders_a_fallback_panel() -> None:
     logs: list[str] = []
 
-    def latest(_uid):
-        raise sqlite3.OperationalError("db unavailable PRIVATE_DATABASE_PATH")
-
     handler, rendered, state, query = _handler(
-        latest,
-        lambda _job_id: {},
-        log_messages=logs,
-    )
-    assert asyncio.run(handler(SimpleNamespace(callback_query=query, effective_user=query.from_user), SimpleNamespace())) is True
-    assert state == {}
-    assert len(rendered) == 1
-    text, markup = rendered[0]
-    assert "chưa đọc được trạng thái chỉnh sửa" in text.lower()
-    assert len(text) <= 360
-    assert "db unavailable" not in text
-    assert "PRIVATE_DATABASE_PATH" not in text
-    assert "PRIVATE_DATABASE_PATH" not in "\n".join(logs)
-    callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
-    assert callbacks == ["videoedit|hub", "menu|main"]
-
-
-def test_latest_status_canonical_receipt_database_failure_is_sanitized_and_fail_closed() -> None:
-    logs: list[str] = []
-    job = {
-        "id": 762,
-        "user_id": "41",
-        "job_type": "video_local_edit",
-        "status": "running",
-        "xu_cost": 0,
-    }
-
-    def fail_status(_job, _lang):
-        raise sqlite3.DatabaseError("PRIVATE_CANONICAL_RECEIPT_PATH")
-
-    handler, rendered, state, query = _handler(
-        lambda _uid: job,
-        lambda _job_id: job,
-        log_messages=logs,
-        status_renderer=fail_status,
-    )
-
-    assert asyncio.run(
-        handler(
-            SimpleNamespace(callback_query=query, effective_user=query.from_user),
-            SimpleNamespace(),
-        )
-    ) is True
-
-    assert state == {}
-    assert len(rendered) == 1
-    text, markup = rendered[0]
-    assert "chưa đọc được trạng thái chỉnh sửa" in text.lower()
-    assert "PRIVATE_CANONICAL_RECEIPT_PATH" not in text
-    assert "PRIVATE_CANONICAL_RECEIPT_PATH" not in "\n".join(logs)
-    callbacks = [
-        button.callback_data
-        for row in markup.inline_keyboard
-        for button in row
-    ]
-    assert callbacks == ["videoedit|hub", "menu|main"]
-
-
-@pytest.mark.parametrize(
-    ("lookup", "expected_copy"),
-    [
-        (lambda _uid: {}, "You have not submitted a Video Edit task yet"),
-        (
-            lambda _uid: (_ for _ in ()).throw(
-                sqlite3.OperationalError("PRIVATE_ENGLISH_DATABASE_PATH")
-            ),
-            "Edit status is temporarily unavailable",
+        lambda _uid: (_ for _ in ()).throw(
+            sqlite3.OperationalError("PRIVATE_DETACHED_STATUS_DATABASE_PATH")
         ),
-    ],
-)
-def test_latest_status_empty_and_unavailable_views_preserve_saved_english(
-    lookup,
-    expected_copy: str,
-) -> None:
-    logs: list[str] = []
-    handler, rendered, state, query = _handler(
-        lookup,
         lambda _job_id: {},
-        lang="en",
         log_messages=logs,
     )
 
@@ -651,56 +643,14 @@ def test_latest_status_empty_and_unavailable_views_preserve_saved_english(
     ) is True
 
     assert state == {}
-    assert len(rendered) == 1
-    text, markup = rendered[0]
-    assert expected_copy in text
-    assert "Trạng thái chỉnh sửa" not in text
-    labels = [button.text for row in markup.inline_keyboard for button in row]
-    callbacks = [
-        button.callback_data
-        for row in markup.inline_keyboard
-        for button in row
-    ]
-    assert labels == ["⬅️ Video Edit", "🏠 Main menu"]
-    assert callbacks == ["videoedit|hub", "menu|main"]
-    assert "PRIVATE_ENGLISH_DATABASE_PATH" not in "\n".join(logs)
+    assert rendered == []
+    assert logs == []
+    assert query.answers[-1][1].get("show_alert") is True
+    assert "Bảng tiến độ chỉ có trong từng job" in query.answers[-1][0][0]
+    assert "PRIVATE_DETACHED_STATUS_DATABASE_PATH" not in str(query.answers)
 
 
-@pytest.mark.parametrize(
-    "job",
-    [
-        {"id": 74, "user_id": "99", "job_type": "video_local_edit", "status": "queued"},
-        {"id": 75, "user_id": "41", "job_type": "product_video", "status": "queued"},
-        {"id": 0, "user_id": "41", "job_type": "video_local_edit", "status": "queued"},
-    ],
-)
-def test_latest_status_revalidates_owned_video_edit_job_before_render(job: dict) -> None:
-    handler, rendered, state, query = _handler(
-        lambda _uid: job,
-        lambda _job_id: job,
-    )
-
-    assert asyncio.run(
-        handler(
-            SimpleNamespace(callback_query=query, effective_user=query.from_user),
-            SimpleNamespace(),
-        )
-    ) is True
-
-    assert state == {}
-    assert len(rendered) == 1
-    text, markup = rendered[0]
-    assert "chưa có tác vụ chỉnh sửa video" in text.lower()
-    assert f"#{job['id']}" not in text
-    callbacks = [
-        button.callback_data
-        for row in markup.inline_keyboard
-        for button in row
-    ]
-    assert callbacks == ["videoedit|hub", "menu|main"]
-
-
-def test_duplicate_latest_status_clicks_are_deterministic_read_only_edits() -> None:
+def test_duplicate_stale_detached_status_clicks_are_deterministic_noop_alerts() -> None:
     job = {
         "id": 72,
         "user_id": "41",
@@ -718,19 +668,38 @@ def test_duplicate_latest_status_clicks_are_deterministic_read_only_edits() -> N
     assert asyncio.run(handler(update, SimpleNamespace())) is True
     assert asyncio.run(handler(update, SimpleNamespace())) is True
 
-    assert lookups == [41, 41]
+    assert lookups == []
     assert state == {}
-    assert len(rendered) == 2
-    assert rendered[0][0] == rendered[1][0]
-    assert [
-        button.callback_data
-        for row in rendered[0][1].inline_keyboard
-        for button in row
-    ] == [
-        button.callback_data
-        for row in rendered[1][1].inline_keyboard
-        for button in row
-    ]
+    assert rendered == []
+    assert len(query.answers) == 2
+    assert query.answers[0] == query.answers[1]
+    assert query.answers[0][1].get("show_alert") is True
+
+
+def test_exact_job_status_database_failure_keeps_the_bound_panel_unchanged() -> None:
+    logs: list[str] = []
+    handler, rendered, state, query = _handler(
+        lambda _uid: {},
+        lambda _job_id: {},
+        log_messages=logs,
+        status_reader=lambda _job_id, user_id=0: (_ for _ in ()).throw(
+            sqlite3.DatabaseError("PRIVATE_CANONICAL_RECEIPT_PATH")
+        ),
+    )
+    query.data = "videoedit|status|762"
+
+    assert asyncio.run(
+        handler(
+            SimpleNamespace(callback_query=query, effective_user=query.from_user),
+            SimpleNamespace(),
+        )
+    ) is True
+    assert state == {}
+    assert rendered == []
+    assert query.answers[-1][1].get("show_alert") is True
+    assert "chưa đọc được trạng thái job này" in query.answers[-1][0][0].lower()
+    assert "PRIVATE_CANONICAL_RECEIPT_PATH" not in str(query.answers)
+    assert "PRIVATE_CANONICAL_RECEIPT_PATH" not in "\n".join(logs)
 
 
 @pytest.mark.parametrize("action", ["status|71", "ai_status|71"])
@@ -743,6 +712,78 @@ def test_existing_status_refreshes_remain_owned_and_stateless_after_hub_clear(ac
     assert state == {}
     assert len(rendered) == 1
     assert "Trạng thái chỉnh sửa video" in rendered[0][0]
+
+
+def test_exact_status_refresh_uses_canonical_owner_bound_adapter() -> None:
+    reads: list[tuple[int, int]] = []
+
+    def unsafe_direct_worker_read(_job_id):
+        raise AssertionError("manual refresh must not bypass canonical owner validation")
+
+    def rejected_canonical_read(job_id, user_id=0):
+        reads.append((int(job_id), int(user_id)))
+        return {}
+
+    handler, rendered, state, query = _handler(
+        lambda _uid: {},
+        unsafe_direct_worker_read,
+        status_reader=rejected_canonical_read,
+    )
+    query.data = "videoedit|status|71"
+
+    assert asyncio.run(
+        handler(
+            SimpleNamespace(callback_query=query, effective_user=query.from_user),
+            SimpleNamespace(),
+        )
+    ) is True
+    assert reads == [(71, 41)]
+    assert rendered == []
+    assert state == {}
+    assert query.answers[-1] == (
+        ("Không tìm thấy job video này.",),
+        {"show_alert": True},
+    )
+
+
+def test_ai_status_cannot_render_a_local_job_rejected_by_canonical_adapter() -> None:
+    reads: list[tuple[int, int]] = []
+    direct_reads: list[int] = []
+
+    def direct_worker_read(job_id):
+        direct_reads.append(int(job_id))
+        return {
+            "id": 71,
+            "user_id": "41",
+            "job_type": "video_local_edit",
+            "status": "queued",
+        }
+
+    def rejected_canonical_read(job_id, user_id=0):
+        reads.append((int(job_id), int(user_id)))
+        return {}
+
+    handler, rendered, state, query = _handler(
+        lambda _uid: {},
+        direct_worker_read,
+        status_reader=rejected_canonical_read,
+    )
+    query.data = "videoedit|ai_status|71"
+
+    assert asyncio.run(
+        handler(
+            SimpleNamespace(callback_query=query, effective_user=query.from_user),
+            SimpleNamespace(),
+        )
+    ) is True
+    assert reads == [(71, 41)]
+    assert direct_reads == [71]
+    assert rendered == []
+    assert state == {}
+    assert query.answers[-1] == (
+        ("Không tìm thấy tác vụ chỉnh sửa video này.",),
+        {"show_alert": True},
+    )
 
 
 @pytest.mark.parametrize("action", ["status|71", "ai_status|71"])
@@ -769,25 +810,25 @@ def test_existing_status_refresh_database_failure_is_sanitized_and_fail_closed(
     ) is True
 
     assert state == {}
-    assert len(rendered) == 1
-    text, markup = rendered[0]
-    assert "chưa đọc được trạng thái chỉnh sửa" in text.lower()
+    assert rendered == []
+    assert query.answers
+    text = str(query.answers[-1][0][0])
+    assert "chưa đọc được trạng thái job này" in text.lower()
+    assert query.answers[-1][1].get("show_alert") is True
     assert "PRIVATE_REFRESH_DATABASE_PATH" not in text
     assert "PRIVATE_REFRESH_DATABASE_PATH" not in "\n".join(logs)
-    callbacks = [
-        button.callback_data
-        for row in markup.inline_keyboard
-        for button in row
-    ]
-    assert callbacks == ["videoedit|hub", "menu|main"]
 
 
-def test_latest_status_never_uses_admin_or_owner_privilege_to_read_another_users_job() -> None:
+def test_stale_detached_status_callback_has_no_job_lookup_render_or_state_side_effect() -> None:
     callback = _function_source("handle_video_editor_callback")
     start = callback.index('if action == "latest_status":')
     end = callback.index("\n    if ", start + 1)
     latest = callback[start:end]
-    assert "get_latest_video_editor_job(uid)" in latest
+    assert "get_latest_video_editor_job" not in latest
+    assert "get_local_worker_job" not in latest
+    assert "video_edit_progress_read_status" not in latest
+    assert "safe_edit_or_send" not in latest
+    assert "edit_message_text" not in latest
     assert "parts[2]" not in latest
     assert "is_admin_user" not in latest
     assert "product_video" not in latest
@@ -802,3 +843,5 @@ def test_latest_status_never_uses_admin_or_owner_privilege_to_read_another_users
     assert "wallet" not in latest
     assert "send_video" not in latest
     assert "reply_text" not in latest
+    assert "query.answer" in latest
+    assert "show_alert=True" in latest

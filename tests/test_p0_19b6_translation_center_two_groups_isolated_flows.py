@@ -138,13 +138,10 @@ def test_every_video_subflow_back_returns_subtitle_dub_center():
         assert "⬅️ Phụ đề / Lồng tiếng" in labels
 
 
-def test_subtitle_plus_dub_two_path_screen_restored():
-    labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "origin": "translation"}))
+def test_subtitle_plus_dub_single_upload_lane():
     callbacks = _callbacks(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "origin": "translation"}))
-    assert "🎞 Video đã có phụ đề" in labels
-    assert "🎧 Video chưa có phụ đề" in labels
-    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_HAS_SUBTITLE}" in callbacks
-    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE}" in callbacks
+    assert callbacks.count("videodub|source_upload") == 1
+    assert not any(callback.startswith("videodub|path|") for callback in callbacks)
 
 
 def test_no_random_cross_route_callbacks():

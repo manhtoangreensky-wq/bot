@@ -352,6 +352,7 @@ def _artifact(index: int) -> dict:
             "width": 640,
             "height": 360,
             "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "full_decode": True,
         },
     }
 
@@ -1000,6 +1001,7 @@ def test_split_worker_marks_partial_delivery_unknown_with_artifact_manifest(
                     "width": 640,
                     "height": 360,
                     "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+                    "full_decode": True,
                 },
             }
         )
@@ -1191,6 +1193,7 @@ def test_manual_delivery_receipt_survives_workspace_cleanup_failure(
                 "duration_ms": 2_000,
                 "width": 640,
                 "height": 360,
+                "full_decode": True,
             },
         }
 
@@ -1375,6 +1378,15 @@ def _run_manual_delivery_case(
         "probe_video_file",
         probe_video,
     )
+    monkeypatch.setattr(
+        local_worker.video_local_validation,
+        "full_decode_video_file",
+        lambda *_args, **_kwargs: {
+            "ok": True,
+            "full_decode": True,
+            "reason": "",
+        },
+    )
 
     def write_checkpoint(
         destination: str | Path,
@@ -1406,6 +1418,7 @@ def _run_manual_delivery_case(
                 "duration_ms": 2_000,
                 "width": 640,
                 "height": 360,
+                "full_decode": True,
             },
         }
 
@@ -1963,12 +1976,22 @@ def _run_split_checkpoint_case(
             "duration_ms": 1_000,
             "video_codec": "h264",
             "bytes": artifact.stat().st_size,
+            "full_decode": True,
         }
 
     monkeypatch.setattr(
         local_worker.video_local_validation,
         "probe_video_file",
         probe_video,
+    )
+    monkeypatch.setattr(
+        local_worker.video_local_validation,
+        "full_decode_video_file",
+        lambda *_args, **_kwargs: {
+            "ok": True,
+            "full_decode": True,
+            "reason": "",
+        },
     )
 
     def execute_split(_source, ranges, *, workspace, **_kwargs) -> dict:
@@ -2260,6 +2283,7 @@ def test_deterministic_transport_rejection_persists_rejected_before_terminal_ack
     assert checkpoint_states == ["sending", "rejected"]
     assert result["terminal"]["status"] == "failed"
     assert terminal_detail["stage"] == "failed_no_charge"
+    assert terminal_detail["failed_stage"] == "delivering"
     assert terminal_cursor.state == "rejected"
     assert terminal_cursor.output_index == 1
     assert terminal_cursor.deterministic is True

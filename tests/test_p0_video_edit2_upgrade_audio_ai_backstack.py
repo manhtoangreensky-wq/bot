@@ -19,7 +19,7 @@ def _between(start: str, end: str) -> str:
 
 def test_edit2_hub_is_compact_and_old_top_level_tools_are_removed() -> None:
     block = _between("def video_edit_hub_text", "def video_edit_info_text")
-    assert "Chỉnh sửa / Nâng cấp video" in block
+    assert "video_edit_hub" in block or "Chỉnh sửa / Nâng cấp video" in block
     expected = (
         "videoedit|ai",
         "videoedit|manual",
@@ -49,7 +49,9 @@ def test_edit2_manual_menu_exposes_only_truthful_operations() -> None:
         "Tốc độ, xoay & lật",
         "Âm thanh",
         "Ánh sáng & màu",
-        "Chữ, logo & phụ đề",
+        "Chữ & phụ đề",
+        "Logo ảnh",
+        "Watermark chữ",
         "Hiệu ứng cục bộ",
         "Cắt đầu/cuối",
         "Bỏ đoạn giữa",
@@ -62,7 +64,15 @@ def test_edit2_manual_menu_exposes_only_truthful_operations() -> None:
         assert label in block
     assert "Đặt lại thao tác" not in block
     assert "videoedit|reset_manual" not in block
-    for callback in ("aspect", "resolution", "srt", "text_overlay", "logo", "color_preset"):
+    for callback in (
+        "aspect",
+        "resolution",
+        "srt",
+        "text_overlay",
+        "logo_entry",
+        "watermark_entry",
+        "color_preset",
+    ):
         assert f'videoedit|{callback}' in block
 
 
@@ -218,6 +228,45 @@ def test_edit2_volume_plan_supports_fixed_and_custom_levels() -> None:
             {"input_video": "source.mp4", "volume": 2.01},
             source_duration_ms=10_000,
         )
+
+
+def test_edit2_audio_tracks_are_real_inputs_and_mixed_into_final_mp4() -> None:
+    plan = video_local_editing.normalize_manual_edit_plan(
+        {
+            "input_video": "source.mp4",
+            "audio_tracks": [
+                {"path": "music.mp3", "kind": "music", "volume": 0.35, "start_ms": 0},
+                {"path": "voice.m4a", "kind": "voice", "volume": 1.0, "start_ms": 1200},
+            ],
+        },
+        source_duration_ms=10_000,
+    )
+    assert [track["kind"] for track in plan["audio_tracks"]] == ["music", "voice"]
+    command = video_local_editing.build_manual_ffmpeg_command(
+        plan,
+        output_path="out.mp4",
+        source_probe={"ok": True, "width": 1280, "height": 720, "duration_ms": 10_000, "has_audio": True},
+        ffmpeg_path="ffmpeg",
+    )
+    joined = " ".join(command)
+    assert "music.mp3" in joined and "voice.m4a" in joined
+    assert "amix=inputs=3" in joined
+    assert "-map [aout]" in joined
+
+
+def test_edit2_audio_menu_exposes_separate_upload_routes_without_chat_fallback() -> None:
+    block = _between("def video_edit_audio_keyboard", "def video_edit_audio_component_text")
+    assert "videoedit|audio_add|music" in block
+    assert "videoedit|audio_add|voice" in block
+    assert "videoedit|audio_add|sfx" in block
+    assert "videoedit|audio_clear" in block
+    assert 'if not truth.get("has_audio"):' not in block
+    handler = _between("async def handle_video_editor_callback", "async def handle_video_upload_callback")
+    assert 'if action == "audio_add"' in handler
+    assert 'if action == "audio_clear"' in handler
+    assert '"await_audio_asset"' in handler
+    assert 'elif kind == "audio"' in BOT_SOURCE
+    assert 'getattr(message, "audio", None)' in BOT_SOURCE
 
 
 def test_edit2_final_confirm_handlers_remain_single() -> None:

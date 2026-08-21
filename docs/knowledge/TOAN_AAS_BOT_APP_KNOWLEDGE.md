@@ -1,6 +1,6 @@
 # TOAN AAS Bot/App Knowledge Base
 
-Last updated: 2026-06-17
+Last updated: 2026-08-11
 
 ## TOAN AAS là gì
 
@@ -24,20 +24,26 @@ App là trung tâm dài hạn cho tài khoản, ví Xu, dashboard, workspace, qu
 
 ## Gói video public
 
-- 200 Xu: Video Trải Nghiệm, gói mồi marketing. Giới hạn 3 video/ngày, 10 video/tuần, 30 video/tháng mỗi tài khoản. Gói này chỉ dùng flow mặc định và tài nguyên miễn phí/kho có sẵn, không mở add-on trả phí.
-- 300 Xu: Video Cơ Bản, cùng dòng model/chất lượng nền với 200 nhưng là gói trả phí ổn định hơn, bắt đầu mở add-on trả phí như phụ đề/lồng tiếng/nhạc AI khi provider sẵn sàng.
-- 400 Xu: Video Phổ Thông, chất lượng/prompt xử lý tốt hơn.
-- 500 Xu: Video Nâng Cao, mở khi smoke/cost gate pass.
-- 600 Xu: Video Bán Hàng, gói kiếm tiền quan trọng, mở khi smoke/cost gate pass.
-- 800 Xu: Video Cao Cấp, mở khi smoke/cost gate pass.
-- 1000 Xu: Video Chuyên Nghiệp public-controlled, chỉ chạy khi provider/job gate sẵn sàng.
-- 1500 Xu: đang phát triển cho provider cao cấp, chưa mở public.
+- Tier ID 200: Nhanh gọn, 5 giây/cảnh, 200 Xu/cảnh.
+- Tier ID 300: Tiêu chuẩn có âm thanh, 5 giây/cảnh, 220 Xu/cảnh.
+- Tier ID 400: Cân bằng rõ nét, 8 giây/cảnh, 80 Xu/cảnh.
+- Tier ID 500: Chuyển động ổn định, 5 giây/cảnh, 110 Xu/cảnh.
+- Tier ID 600: Chuyển động có âm thanh, 5 giây/cảnh, 160 Xu/cảnh.
+- Tier ID 700: Cảnh dài có âm thanh, 15 giây/cảnh, 220 Xu/cảnh.
+- Tier ID 800: Cao cấp linh hoạt, 10 giây/cảnh, 370 Xu/cảnh.
+- Tier ID 1000: Diễn xuất chân thật, 6 giây/cảnh, 370 Xu/cảnh.
+- Tier ID 1200: Đa góc máy, 8 giây/cảnh, 1.260 Xu/cảnh.
+- Tier ID 1500: Điện ảnh nhiều cảnh, 10 giây/cảnh, 2.360 Xu/cảnh.
 
-## Vì sao gói 200 không có phụ đề/lồng tiếng/tạo nhạc AI
+Tier ID là mã route/package ổn định, không phải giá bán.
 
-Gói 200 Xu là gói trải nghiệm để khách dùng thử quy trình tạo video và xem kết quả nhanh. Các add-on trả phí như tạo phụ đề tự động, dịch phụ đề, lồng tiếng, tạo nhạc AI, tăng thời lượng hoặc thêm cảnh sẽ phát sinh chi phí provider/xử lý, nên bắt đầu từ gói 300 Xu trở lên.
+## Khuyến mãi Video nhiều cảnh
 
-Nếu khách muốn giữ giá rẻ nhất, chọn gói 200 và không thêm add-on. Nếu muốn tạo tiếp, tăng chất lượng hoặc thêm phụ đề/lồng tiếng/nhạc AI, bot sẽ gợi ý nâng lên 300/400/500/600/800/1000 tùy nhu cầu.
+- 1 cảnh không giảm.
+- 2–5 cảnh giảm 10%.
+- 6–10 cảnh giảm 15%.
+- 11–20 cảnh giảm 20%.
+- Khuyến mãi chỉ giảm phần Video theo cảnh; add-on tính riêng.
 
 ## Cách tạo video
 
@@ -59,7 +65,7 @@ Pipeline chuẩn: video đầu vào -> ASR -> phụ đề -> dịch nếu cần 
 
 Chỉnh sửa ảnh AI, Suno music, MiniMax Voice và pipeline phụ đề/lồng tiếng đều đi qua cùng nguyên tắc: provider readiness -> admin smoke -> public gate -> pricing -> confirm -> job -> output thật -> lỗi thân thiện. Nếu chưa có endpoint/model/tài liệu thật, hệ thống trả NEED_DOCS/NOT_CONFIGURED cho admin và báo bảo trì/nâng cấp cho khách, không fake output.
 
-Gói Video Trải Nghiệm 200 Xu khóa toàn bộ add-on trả phí. Suno, MiniMax Voice, phụ đề/lồng tiếng chỉ mở từ gói 300 Xu trở lên hoặc thành sản phẩm riêng có màn xác nhận giá.
+Add-on chỉ chạy khi tuyến tương ứng sẵn sàng và luôn được ghi riêng trong hóa đơn trước khi xác nhận.
 
 ## Nạp Xu
 

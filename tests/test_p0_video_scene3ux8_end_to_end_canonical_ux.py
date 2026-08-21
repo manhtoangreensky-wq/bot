@@ -40,7 +40,13 @@ def test_canonical_order_puts_ratio_after_scene_count_and_quality_near_the_end()
     assert video_scene3_flow.BACK_STEP["technical_profile"] == "aspect_ratio"
 
 
-def test_every_unified_field_has_twenty_choices_in_four_non_overlapping_pages():
+def test_every_unified_field_has_twenty_five_choices_in_five_non_overlapping_pages():
+    editor = BOT_SOURCE[
+        BOT_SOURCE.index("def video_scene3_field_editor_text("):
+        BOT_SOURCE.index("\ndef video_scene3_field_editor_keyboard(")
+    ]
+    assert "unified_field_suggestion_catalog" in editor
+    assert "/20" not in editor
     for group, fields in (
         ("creative_controls", video_scene3_flow.CREATIVE_CONTROLS),
         ("preservation_requirements", video_scene3_flow.PUBLIC_REQUIREMENT_CATEGORIES),
@@ -48,15 +54,15 @@ def test_every_unified_field_has_twenty_choices_in_four_non_overlapping_pages():
         for key, _label in fields:
             state = _base_state()
             catalog = video_scene3_flow.unified_field_suggestion_catalog(state, group, key)
-            assert len(catalog) == 20
+            assert len(catalog) == 25
             pages = []
-            for expected_page in range(1, 5):
+            for expected_page in range(1, 6):
                 assert video_scene3_flow.unified_field_suggestion_page(state, group, key) == expected_page
                 page = video_scene3_flow.unified_field_suggestions(state, group, key)
                 assert len(page) == 5
                 pages.extend(page)
                 state = video_scene3_flow.rotate_unified_field_suggestions(state, group, key)
-            assert len(set(pages)) == 20
+            assert len(set(pages)) == 25
             assert video_scene3_flow.unified_field_suggestion_page(state, group, key) == 1
 
 

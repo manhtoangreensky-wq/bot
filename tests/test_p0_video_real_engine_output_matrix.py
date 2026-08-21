@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from PIL import Image
+import pytest
 
 import remote_worker
 from services import video_final_output
@@ -185,7 +186,34 @@ def test_storyboard_scene_request_uses_only_that_scenes_images(tmp_path) -> None
     assert video_real_render_connector.storyboard_scene_image_paths(job, 2) == [str(second)]
 
 
-def test_remote_worker_materializes_one_storyboard_image_per_scene(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("product_type", ["storyboard_prompt", "video_ai_image", "image_to_video"])
+def test_scene_image_products_use_only_the_current_scenes_materialized_image(
+    tmp_path,
+    product_type,
+) -> None:
+    first = tmp_path / f"{product_type}-scene-1.png"
+    second = tmp_path / f"{product_type}-scene-2.png"
+    first.write_bytes(b"scene-one")
+    second.write_bytes(b"scene-two")
+    job = {
+        "product_type": product_type,
+        "scene_cards": [
+            {"scene_index": 1, "start_image_path": str(first)},
+            {"scene_index": 2, "start_image_path": str(second)},
+        ],
+        "image_paths": [str(first), str(second)],
+    }
+
+    assert video_real_render_connector.product_video_scene_image_paths(job, 1) == [str(first)]
+    assert video_real_render_connector.product_video_scene_image_paths(job, 2) == [str(second)]
+
+
+@pytest.mark.parametrize("product_type", ["storyboard_prompt", "video_ai_image", "image_to_video"])
+def test_remote_worker_materializes_one_required_image_per_scene(
+    tmp_path,
+    monkeypatch,
+    product_type,
+) -> None:
     class _Response:
         def __init__(self, payload: bytes):
             self.payload = payload
@@ -213,7 +241,7 @@ def test_remote_worker_materializes_one_storyboard_image_per_scene(tmp_path, mon
     monkeypatch.setattr(remote_worker.urllib.request, "urlopen", fake_urlopen)
     job = {
         "job_id": "storyboard-job",
-        "product_type": "storyboard_prompt",
+        "product_type": product_type,
         "scene_cards": [
             {"scene_index": 1, "start_image_file_id": "image-1"},
             {"scene_index": 2, "start_image_file_id": "image-2"},
@@ -238,9 +266,70 @@ def test_bot_exposes_authenticated_storyboard_image_transfer() -> None:
         '@fastapi_app.get("/api/v1/worker/jobs/{job_id}/source-video")',
     )
     assert "verify_remote_worker_api_access(request)" in section
-    assert 'product_type != "storyboard_prompt"' in section
+    assert "product_type not in PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES" in section
     assert "start_image_file_id" in section
     assert "end_image_file_id" in section
+    assert "tg_app.bot.get_file(file_id)" in section
+
+
+def test_remote_worker_materializes_product_video_logo(tmp_path, monkeypatch) -> None:
+    class _Response:
+        def __init__(self, payload: bytes):
+            self.payload = payload
+            self.offset = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, size: int) -> bytes:
+            chunk = self.payload[self.offset : self.offset + size]
+            self.offset += len(chunk)
+            return chunk
+
+    observed: list[str] = []
+
+    def fake_urlopen(request, timeout):
+        observed.append(request.full_url)
+        return _Response(b"logo-image-bytes")
+
+    monkeypatch.setattr(remote_worker, "endpoint", lambda path: f"https://worker.invalid{path}")
+    monkeypatch.setattr(remote_worker.urllib.request, "urlopen", fake_urlopen)
+    job = {
+        "job_id": "logo-job",
+        "product_type": "video_ai_prompt",
+        "asset_pack": {
+            "logo_material": {
+                "logo_enabled": True,
+                "logo_file_id": "telegram-logo",
+                "logo_position": "bottom_left",
+            },
+        },
+    }
+
+    path = remote_worker.download_product_video_logo(job, str(tmp_path))
+    material = job["asset_pack"]["logo_material"]
+
+    assert Path(path).read_bytes() == b"logo-image-bytes"
+    assert material["logo_path"] == path
+    assert material["logo_file_id"] == "telegram-logo"
+    assert observed == [
+        "https://worker.invalid/api/v1/worker/jobs/logo-job/logo-material",
+    ]
+
+
+def test_bot_exposes_authenticated_product_video_logo_transfer() -> None:
+    route = '@fastapi_app.get("/api/v1/worker/jobs/{job_id}/logo-material")'
+    assert route in BOT_SOURCE
+    section = _source_section(
+        BOT_SOURCE,
+        "async def api_worker_product_video_logo_material",
+        '@fastapi_app.get("/api/v1/worker/jobs/{job_id}/source-video")',
+    )
+    assert "verify_remote_worker_api_access(request)" in section
+    assert "logo_material" in section
     assert "tg_app.bot.get_file(file_id)" in section
 
 
@@ -282,6 +371,8 @@ def test_storyboard_entry_owner_and_confirm_audit_see_the_real_handler() -> None
     )
     assert '"entry_callback": "vproduct|open|storyboard_prompt"' in route_section
     assert '"handler": "handle_video_product_callback"' in route_section
+    assert '"vstory|ai"' in route_section
+    assert '"vstory|upload"' in route_section
 
     guard_section = _source_section(
         BOT_SOURCE,
@@ -327,6 +418,9 @@ def test_confirm_kickoff_resolves_the_parent_product_capability(monkeypatch) -> 
                 "render_mode": "real",
                 "product_type": "storyboard_prompt",
                 "scene_count": 2,
+                "scene_seconds": 5,
+                "scene_duration_seconds": 5,
+                "duration_seconds": 10,
                 "total_xu": 300,
                 "customer_charge_planned_xu": 300,
                 "persisted_quoted_price_xu": 300,
@@ -342,6 +436,9 @@ def test_confirm_kickoff_resolves_the_parent_product_capability(monkeypatch) -> 
     assert captured["required_capability"] == "image_to_video"
     assert payload["product_type"] == "storyboard_prompt"
     assert payload["required_capability"] == "image_to_video"
+    assert payload["scene_duration_seconds"] == 5
+    assert payload["duration_seconds"] == 10
+    assert [item["scene_duration_seconds"] for item in payload["scene_tasks"]] == [5, 5]
 
 
 def test_remote_worker_model_resolution_keeps_each_product_capability(monkeypatch) -> None:
@@ -522,5 +619,5 @@ def test_multiscene_logo_overlay_ends_with_the_master_and_validates_mp4(tmp_path
 
 def test_long_video_remains_execution_locked() -> None:
     contract = video_tail9.commercial_contract("multi_scene_film")
-    assert contract["execution_enabled"] is False
-    assert contract["execution_blocker"] == "long_video_under_upgrade"
+    assert contract["execution_enabled"] is True
+    assert contract["execution_blocker"] == ""

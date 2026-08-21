@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import io
 import json
 import threading
 import time
 import urllib.error
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
+import bot
 import local_worker
 from services import (
     video_edit_media_transport,
@@ -25,6 +30,7 @@ def _run_job(
     mode: str,
     price_xu: int = 0,
     manual_plan: dict | None = None,
+    manual_result_patch: dict | None = None,
     payload_patch: dict | None = None,
     observed_plans: list[dict] | None = None,
     downloaded_probe: dict | None = None,
@@ -208,12 +214,17 @@ def _run_job(
         class FakeVideoEditJobLiveness:
             def __init__(self) -> None:
                 self._stopped = False
+                self._stage = ""
 
             def start(self) -> None:
                 liveness_evidence.append("start")
 
             def update_stage(self, stage: str) -> None:
+                self._stage = stage
                 liveness_evidence.append(f"stage:{stage}")
+
+            def current_stage(self) -> str:
+                return self._stage
 
             def assert_healthy(self) -> None:
                 nonlocal health_check_count
@@ -268,6 +279,12 @@ def _run_job(
             )
         if source_download_receipt_override is not None:
             return source_download_receipt_override
+        role = str(_args[4] if len(_args) > 4 else "")
+        if role == "logo":
+            suffix = Path(str(_args[1] if len(_args) > 1 else "logo.png")).suffix.lower()
+            logo_path = tmp_path / f"logo{suffix if suffix in {'.png', '.jpg', '.jpeg', '.webp'} else '.png'}"
+            materialize_image_fixture(logo_path)
+            return str(logo_path)
         return str(source)
 
     def materialize_bounded_fixture(
@@ -290,6 +307,17 @@ def _run_job(
                 digest.update(chunk)
                 remaining -= len(chunk)
         return digest.hexdigest()
+
+    def materialize_image_fixture(destination: str | Path) -> str:
+        target = Path(destination)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        suffix = target.suffix.lower()
+        image_format = "JPEG" if suffix in {".jpg", ".jpeg"} else "WEBP" if suffix == ".webp" else "PNG"
+        buffer = io.BytesIO()
+        Image.new("RGB", (3, 2), (220, 40, 90)).save(buffer, format=image_format)
+        payload = buffer.getvalue()
+        target.write_bytes(payload)
+        return hashlib.sha256(payload).hexdigest()
 
     def bounded_file_sha256(path: str | Path) -> str:
         digest = hashlib.sha256()
@@ -366,12 +394,16 @@ def _run_job(
             **_kwargs,
         ):
             expected = expected_bytes if expected_bytes is not None else expected_size
-            logical_size = fixture_size_for(str(file_id or ""), expected)
-            sha256 = materialize_bounded_fixture(
-                destination,
-                logical_size=logical_size,
-                marker=str(file_id or "asset"),
-            )
+            if Path(destination).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+                sha256 = materialize_image_fixture(destination)
+                logical_size = Path(destination).stat().st_size
+            else:
+                logical_size = fixture_size_for(str(file_id or ""), expected)
+                sha256 = materialize_bounded_fixture(
+                    destination,
+                    logical_size=logical_size,
+                    marker=str(file_id or "asset"),
+                )
             transport = (
                 "local_bot_api"
                 if bool(getattr(config, "is_local", False))
@@ -575,17 +607,23 @@ def _run_job(
                 logical_size=output_size,
                 marker="rendered-video",
             )
+        validation = {
+            "ok": True,
+            "has_video": True,
+            "video_codec": "h264",
+            "duration_ms": 2_000,
+            "width": 640,
+            "height": 360,
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            # A real executor must report successful full decode before the
+            # worker can checkpoint or deliver an MP4.  Existing fixtures are
+            # successful artifacts unless a test overrides this field.
+            "full_decode": True,
+        }
+        validation.update(dict(manual_result_patch or {}))
         return {
             "ok": True,
-            "validation": {
-                "ok": True,
-                "has_video": True,
-                "video_codec": "h264",
-                "duration_ms": 2_000,
-                "width": 640,
-                "height": 360,
-                "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
-            },
+            "validation": validation,
         }
 
     def fake_split_plan(*_args, **_kwargs) -> dict:
@@ -616,6 +654,7 @@ def _run_job(
                         "width": 640,
                         "height": 360,
                         "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+                        "full_decode": True,
                     },
                 }
             )
@@ -991,6 +1030,7 @@ def test_cleanup_intent_is_durable_before_first_workspace_download(
     )
 
     assert terminal["status"] == "succeeded"
+    assert json.loads(terminal["detail"])["operation_summary"] == ["Độ sáng 110%"]
     assert setup[:4] == [
         "ffmpeg_lookup",
         "workspace",
@@ -1023,6 +1063,46 @@ def test_cleanup_intent_persistence_failure_stops_before_download_and_delivery(
     assert "download" not in setup
     assert "execute" not in runtime
     assert "delivery" not in runtime
+    assert captions == []
+
+
+def test_video_edit_delivery_probe_rejects_metadata_valid_full_decode_failure() -> None:
+    metadata_valid_but_decode_failed = {
+        "ok": True,
+        "has_video": True,
+        "video_codec": "h264",
+        "duration_ms": 2_000,
+        "width": 640,
+        "height": 360,
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "full_decode": False,
+    }
+
+    assert video_editengine1.valid_mp4_delivery_probe(
+        metadata_valid_but_decode_failed
+    ) is False
+
+
+def test_video_edit_worker_fences_metadata_valid_full_decode_failed_mp4_before_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    observed_steps: list[str] = []
+
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        manual_result_patch={"full_decode": False},
+        observed_worker_steps=observed_steps,
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["stage"] == "failed_no_charge"
+    assert detail["reason"] == "output_validation_failed"
+    assert "delivery" not in observed_steps
+    assert terminal["output_file_id"] == ""
     assert captions == []
 
 
@@ -1784,6 +1864,7 @@ def _durable_resume_artifact(index: int) -> dict:
             "width": 640,
             "height": 360,
             "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "full_decode": True,
         },
         "delivery_method": "sendVideo",
         "bytes_sent": 4_096,
@@ -2643,6 +2724,7 @@ def test_video_edit_worker_liveness_tracks_real_stages_without_percent_events(
         "assert_healthy",
         "probe",
         "validate",
+        "stage:preparing_plan",
         "stage:processing_video",
         "assert_healthy",
         "execute",
@@ -2678,6 +2760,7 @@ def test_video_edit_liveness_failure_stops_before_one_terminal_and_fences_delive
     detail = json.loads(terminal["detail"])
     assert terminal["status"] == "failed"
     assert detail["stage"] == "failed_no_charge"
+    assert detail["failed_stage"] == "delivering"
     assert detail["charged_xu"] == 0
     assert detail["reason"] == "video_local_edit_worker_lease_lost"
     assert captions == []
@@ -2690,6 +2773,7 @@ def test_video_edit_liveness_failure_stops_before_one_terminal_and_fences_delive
         "assert_healthy",
         "probe",
         "validate",
+        "stage:preparing_plan",
         "stage:processing_video",
         "assert_healthy",
         "execute",
@@ -2721,6 +2805,7 @@ def test_video_edit_liveness_loss_after_manual_delivery_preserves_receipt_withou
     receipt = json.loads(terminal["output_url"])
     assert terminal["status"] == "failed"
     assert detail["stage"] == "delivery_unknown"
+    assert detail["failed_stage"] == "delivering"
     assert detail["delivered"] == 1
     assert detail["charge"] == 0
     assert terminal["output_file_id"] == "file-1"
@@ -2736,6 +2821,7 @@ def test_video_edit_liveness_loss_after_manual_delivery_preserves_receipt_withou
         "assert_healthy",
         "probe",
         "validate",
+        "stage:preparing_plan",
         "stage:processing_video",
         "assert_healthy",
         "execute",
@@ -2769,6 +2855,7 @@ def test_video_edit_liveness_loss_during_shutdown_preserves_receipt_without_retr
     receipt = json.loads(terminal["output_url"])
     assert terminal["status"] == "failed"
     assert detail["stage"] == "delivery_unknown"
+    assert detail["failed_stage"] == "delivering"
     assert detail["reason"] == "video_local_edit_worker_lease_lost"
     assert detail["delivered"] == 1
     assert detail["charge"] == 0
@@ -2788,6 +2875,7 @@ def test_video_edit_liveness_loss_during_shutdown_preserves_receipt_without_retr
         "assert_healthy",
         "probe",
         "validate",
+        "stage:preparing_plan",
         "stage:processing_video",
         "assert_healthy",
         "execute",
@@ -2829,6 +2917,7 @@ def test_split_delivery_fences_each_artifact_before_and_after_send(
         "assert_healthy",
         "probe",
         "validate",
+        "stage:preparing_plan",
         "stage:processing_video",
         "assert_healthy",
         "execute",
@@ -3046,6 +3135,204 @@ def test_video_edit_worker_streams_source_concat_logo_and_subtitle_with_asset_po
     assert Path(executed_plan["logo_overlay"]["path"]).name == "logo.png"
     assert Path(executed_plan["subtitle_file"]).name == "subtitle.srt"
     assert evidence["full_file_reads"] == 0
+
+
+def test_public_logo_and_watermark_state_reaches_the_local_worker_plan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    user_id = 91_041
+    bot.clear_video_editor_pending(user_id)
+
+    class Message:
+        def __init__(self, *, text: str = "", document=None, message_id: int) -> None:
+            self.text = text
+            self.document = document
+            self.photo = []
+            self.video = None
+            self.audio = None
+            self.voice = None
+            self.animation = None
+            self.message_id = message_id
+            self.chat_id = user_id
+            self.replies: list[tuple[str, dict]] = []
+
+        async def reply_text(self, text: str, **kwargs):
+            self.replies.append((text, kwargs))
+            return self
+
+    class Query:
+        def __init__(self, data: str) -> None:
+            self.id = f"public-worker-{data}"
+            self.data = data
+            self.from_user = SimpleNamespace(id=user_id, first_name="Video Edit")
+            self.message = Message(message_id=7_002)
+            self.answers: list[tuple[tuple, dict]] = []
+            self.edits: list[tuple[str, dict]] = []
+
+        async def answer(self, *args, **kwargs):
+            self.answers.append((args, kwargs))
+
+        async def edit_message_text(self, text: str, **kwargs):
+            self.edits.append((text, kwargs))
+            return self.message
+
+    try:
+        manual_plan = video_local_editing.default_manual_edit_plan("")
+        manual_plan["trim"] = {"start_ms": 0, "end_ms": 2_000}
+        bot.set_video_editor_pending(
+            user_id,
+            "await_logo",
+            edit_mode="manual_edit",
+            current_screen="logo_input",
+            screen_id="logo_input",
+            parent_callback="videoedit|branding",
+            entry_parent_callback="videoedit|manual",
+            logo_parent_callback="videoedit|branding",
+            selected_tool="manual",
+            entry_context="manual",
+            last_section="manual",
+            source_file_id="source-file",
+            source_file_name="source.mp4",
+            source_file_size=2 * 1024 * 1024,
+            source_duration=2,
+            source_duration_ms=2_000,
+            source_video_hash="a" * 64,
+            media_lane="short_media",
+            source_metadata={
+                "ok": True,
+                "duration": 2.0,
+                "duration_ms": 2_000,
+                "width": 640,
+                "height": 360,
+                "has_audio": True,
+            },
+            inspection_complete=True,
+            manual_edit_plan=manual_plan,
+            concat_sources=[],
+            logo_source={},
+            watermark_config={},
+            subtitle_source={},
+            edit_session_id=f"edit-{user_id}",
+            session_id=f"edit-{user_id}",
+            state_revision=3,
+            revision=3,
+            status="source_ready",
+            pending_field="logo",
+        )
+
+        logo_message = Message(
+            document=SimpleNamespace(
+                file_id="public-logo-file",
+                file_name="logo.png",
+                mime_type="image/png",
+                file_size=256 * 1024,
+            ),
+            message_id=7_003,
+        )
+        assert asyncio.run(
+            bot.handle_video_editor_pending_upload(
+                SimpleNamespace(
+                    callback_query=None,
+                    message=logo_message,
+                    effective_user=SimpleNamespace(id=user_id),
+                ),
+                SimpleNamespace(user_data={}),
+            )
+        ) is True
+
+        watermark_query = Query("videoedit|watermark_entry")
+        assert asyncio.run(
+            bot.handle_video_editor_callback(
+                SimpleNamespace(callback_query=watermark_query),
+                SimpleNamespace(user_data={}),
+            )
+        ) is not False
+        watermark_message = Message(text="© TOAN AAS", message_id=7_004)
+        assert asyncio.run(
+            bot.handle_video_editor_pending_text(
+                SimpleNamespace(
+                    callback_query=None,
+                    message=watermark_message,
+                    effective_user=SimpleNamespace(id=user_id),
+                ),
+                SimpleNamespace(user_data={}),
+            )
+        ) is True
+
+        public_state = deepcopy(bot.get_video_editor_pending(user_id) or {})
+        assert public_state["logo_source"]["file_id"] == "public-logo-file"
+        assert public_state["manual_edit_plan"]["logo_overlay"] == {
+            "position": "top_right",
+            "scale": 0.12,
+            "opacity": 1.0,
+        }
+        assert public_state["manual_edit_plan"]["watermark_overlay"]["content"] == "© TOAN AAS"
+        assert public_state["manual_edit_plan"]["watermark_overlay"]["opacity"] == 0.45
+
+        observed_plans: list[dict] = []
+        transport_evidence: dict = {
+            "downloads": [],
+            "deliveries": [],
+            "full_file_reads": 0,
+        }
+        terminal, captions = _run_job(
+            monkeypatch,
+            tmp_path,
+            mode="manual",
+            manual_plan=deepcopy(public_state["manual_edit_plan"]),
+            payload_patch={
+                "user_id": str(user_id),
+                "chat_id": str(user_id),
+                "media_lane": "short_media",
+                "source_file_size": 2 * 1024 * 1024,
+                "logo_source": deepcopy(public_state["logo_source"]),
+                "rights_confirmation": {
+                    "confirmed": True,
+                    "policy": "video_edit_rights_v1",
+                    "user_id": str(user_id),
+                    "review_revision": 3,
+                    "confirmed_at_unix": 1_750_000_000,
+                },
+            },
+            observed_plans=observed_plans,
+            downloaded_probe={
+                "ok": True,
+                "reason": "",
+                "duration": 2.0,
+                "duration_ms": 2_000,
+                "width": 640,
+                "height": 360,
+                "fps": 25.0,
+                "has_video": True,
+                "has_audio": True,
+                "audio_stream_count": 1,
+                "format_name": "mp4",
+                "bytes": 2 * 1024 * 1024,
+            },
+            transport_evidence=transport_evidence,
+            job_user_id=str(user_id),
+        )
+
+        assert terminal["status"] == "succeeded"
+        assert len(observed_plans) == 1
+        worker_plan = observed_plans[0]
+        assert Path(worker_plan["logo_overlay"]["path"]).name == "logo.png"
+        assert worker_plan["logo_overlay"]["position"] == "top_right"
+        assert worker_plan["watermark_overlay"]["content"] == "© TOAN AAS"
+        assert worker_plan["watermark_overlay"]["opacity"] == 0.45
+        assert transport_evidence["downloads"] == ["local_bot_api", "local_bot_api"]
+        assert transport_evidence["full_file_reads"] == 0
+        detail = json.loads(terminal["detail"])
+        receipt = json.loads(terminal["output_url"])
+        assert detail["price_xu"] == 0
+        assert detail["charged_xu"] == 0
+        assert receipt["charge_policy"] == "free_local_tool"
+        assert receipt["charge_status"] == "not_required_free"
+        assert receipt["charged_xu"] == 0
+        assert captions and all("0 Xu" in caption for caption in captions)
+    finally:
+        bot.clear_video_editor_pending(user_id)
 
 
 @pytest.mark.parametrize(
@@ -3515,6 +3802,100 @@ def test_manual_worker_rejects_unbound_plan_assets(
     assert terminal["status"] == "failed"
     assert "video_local_edit_asset_contract_invalid" in terminal["detail"]
     assert captions == []
+
+
+def test_paid_worker_never_silently_drops_unbound_legacy_audio_tracks(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        price_xu=125,
+        manual_plan={
+            "trim": {"start_ms": 0, "end_ms": 2_000},
+            "audio_tracks": [
+                {
+                    "path": "legacy-worker-audio.mp3",
+                    "kind": "voice",
+                    "volume": 1.0,
+                    "start_ms": 0,
+                    "end_ms": 1_000,
+                }
+            ],
+        },
+    )
+
+    detail = json.loads(terminal["detail"])
+    assert terminal["status"] == "failed"
+    assert detail["reason"] == "video_local_edit_asset_contract_invalid"
+    assert captions == []
+
+
+@pytest.mark.parametrize("track_volume", [0.0, 0.35])
+def test_worker_materializes_audio_only_telegram_asset_into_executed_plan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    track_volume: float,
+) -> None:
+    observed_plans: list[dict] = []
+    transport_evidence: dict = {}
+    terminal, captions = _run_job(
+        monkeypatch,
+        tmp_path,
+        mode="manual",
+        manual_plan={
+            "trim": {"start_ms": 0, "end_ms": 2_000},
+            "audio_tracks": [
+                {
+                    "path": "",
+                    "kind": "music",
+                    "volume": track_volume,
+                    "start_ms": 0,
+                    "end_ms": 0,
+                }
+            ],
+        },
+        payload_patch={
+            "audio_sources": [
+                {
+                    "file_id": "telegram-music-only",
+                    "file_name": "music.m4a",
+                    "file_size": 1_024,
+                    "kind": "music",
+                    "volume": track_volume,
+                    "start_ms": 0,
+                    "end_ms": 0,
+                }
+            ],
+        },
+        observed_plans=observed_plans,
+        transport_evidence=transport_evidence,
+    )
+
+    assert terminal["status"] == "succeeded"
+    assert captions
+    audio_downloads = [
+        call
+        for call in transport_evidence["download_calls"]
+        if call["file_id"] == "telegram-music-only"
+    ]
+    assert len(audio_downloads) == 1
+    materialized_audio = Path(audio_downloads[0]["destination"])
+    assert materialized_audio.is_file()
+    assert materialized_audio.stat().st_size > 0
+    assert len(observed_plans) == 1
+    executed_tracks = observed_plans[0]["audio_tracks"]
+    assert executed_tracks == [
+        {
+            "path": str(materialized_audio),
+            "kind": "music",
+            "volume": track_volume,
+            "start_ms": 0,
+            "end_ms": 0,
+        }
+    ]
 
 
 @pytest.mark.parametrize("malformed_plan", ["not-a-plan", ["trim"]])

@@ -31,7 +31,9 @@ def test_public_video_menu_order_is_frozen_without_callback_changes() -> None:
     )
     assert "VIDEO_PUBLIC_MENU_ROWS = video_uifreeze1.PUBLIC_MENU_ROWS" in BOT_SOURCE
     menu_builder = _function_source("main_video_keyboard")
-    assert "VIDEO_PUBLIC_MENU_ROWS" in menu_builder
+    visible_rows = _function_source("video_public_visible_menu_rows")
+    assert "video_public_visible_menu_rows" in menu_builder
+    assert "VIDEO_PUBLIC_MENU_ROWS" in visible_rows
     assert "entry_callback" in menu_builder
     assert "callback_data=str(route.get(\"entry_callback\")" in menu_builder
 
@@ -41,7 +43,7 @@ def test_long_video_opens_catalog_but_keeps_execution_locked() -> None:
     assert "multi_scene_film" in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
     report = video_uifreeze1.catalog_report("multi_scene_film", scene_count=1)
     assert report["ok"] is True
-    assert report["tier_ids"] == [300, 400, 500, 600, 800, 1000, 1200, 1500]
+    assert report["tier_ids"] == [400, 500, 600, 200, 300, 800, 1000, 1200, 1500]
 
 
 def test_storyboard_catalog_keeps_compatible_image_video_packages_visible() -> None:
@@ -59,7 +61,7 @@ def test_storyboard_catalog_keeps_compatible_image_video_packages_visible() -> N
     )
     assert image_to_video["ok"] is True
     assert first_last["ok"] is True
-    assert image_to_video["tier_ids"] == [300, 400, 500, 600, 800, 1000, 1200, 1500]
+    assert image_to_video["tier_ids"] == [400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500]
     assert first_last["tier_ids"] == image_to_video["tier_ids"]
     package_source = _function_source("storyboard2_package_resolutions")
     assert "video_uifreeze1.catalog_report" in package_source
@@ -81,7 +83,7 @@ def test_canonical_products_share_one_tier_identity_and_order() -> None:
     for product in expected:
         report = video_uifreeze1.catalog_report(
             product,
-            scene_count=2,
+            scene_count=5 if product == "script_image_video" else 2,
             ratio="9:16",
             required_capability="image_to_video" if product == "storyboard_prompt" else "",
         )
@@ -140,7 +142,7 @@ def test_menu_and_quality_callbacks_have_one_owner_and_exact_back_rows() -> None
     assert "all(row.get(\"ok\") for row in rows)" in audit
     storyboard_keyboard = _function_source("storyboard2_quality_keyboard")
     assert 'f"vprofile|tier|{price}"' in storyboard_keyboard
-    assert '[("⬅️ Quay lại", "vstory|review_from_quality"), ("🏠 Menu chính", "menu|main")]' in storyboard_keyboard
+    assert '[("⬅️ Quay lại", "vstory|review_from_quality"), ("🎬 Menu Video", "menu|main_video")]' in storyboard_keyboard
     assert BOT_SOURCE.count(
         'CallbackQueryHandler(handle_storyboard2_callback, pattern=r"^vstory\\|")'
     ) == 1

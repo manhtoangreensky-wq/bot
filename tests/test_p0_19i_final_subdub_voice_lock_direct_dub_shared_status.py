@@ -275,11 +275,14 @@ def test_subdub_no_fail_then_success_public_conflict():
     assert not job.get("output_sent")
 
 
-def test_subdub_no_duplicate_success_message():
-    text = bot.subtitle_plus_dub_completed_text({}, {"has_video": True, "sent_video": 1}, "vi")
+def test_subdub_success_handler_does_not_append_receipt_after_final_mp4():
+    source = inspect.getsource(bot.handle_video_dubbing_callback)
+    start = source.index('final_dub_video_asset_id=str(result.get("dub_video_asset_id") or "")')
+    end = source.index('if action == "combo_redub_voice"', start)
+    success_tail = source[start:end]
 
-    assert "Kết quả đã gửi phía trên" in text
-    assert "Đã tạo video" not in text
+    assert "return None" in success_tail
+    assert "reply_text" not in success_tail
 
 
 def test_subdub_single_terminal_state():

@@ -13,7 +13,7 @@ def _between(start: str, end: str) -> str:
     return BOT_SOURCE[begin:finish]
 
 
-def test_edit3_public_hub_keeps_four_primary_actions_then_one_status_action() -> None:
+def test_edit3_public_hub_keeps_only_four_primary_actions() -> None:
     keyboard = _between("def video_edit_hub_keyboard", "def video_edit_info_text")
     expected = (
         "videoedit|ai",
@@ -26,9 +26,8 @@ def test_edit3_public_hub_keeps_four_primary_actions_then_one_status_action() ->
     assert keyboard.index('"videoedit|ai"') < keyboard.index('"videoedit|manual"')
     assert keyboard.index('"videoedit|manual"') < keyboard.index('"videoedit|restore"')
     assert keyboard.index('"videoedit|restore"') < keyboard.index('"videoedit|guide"')
-    assert keyboard.count('"videoedit|latest_status"') == 1
-    assert keyboard.index('"videoedit|guide"') < keyboard.index('"videoedit|latest_status"')
-    assert keyboard.index('"videoedit|latest_status"') < keyboard.index('"lvs27b|open"')
+    assert '"videoedit|latest_status"' not in keyboard
+    assert '"lvs27b|open"' not in keyboard
     for removed in (
         "videoedit|audio",
         "videoedit|timeline",
@@ -94,9 +93,11 @@ def test_edit3_manual_submenus_are_complete_and_back_one_screen() -> None:
 def test_edit3_entry_clears_stale_product_video_session() -> None:
     handler = _between("async def handle_video_editor_callback", "async def handle_video_upload_callback")
     hub = handler[handler.index('if raw_action == "hub":'):handler.index('if raw_action == "menu":')]
-    assert hub.index("clear_video_session(uid)") < hub.index("clear_video_editor_pending(uid)")
+    assert hub.index("compare_and_replace_video_editor_pending(") < hub.index("clear_video_session(uid)")
+    assert "clear_video_editor_pending(uid)" not in hub
     manual = handler[handler.index('if action == "manual"'):handler.index("state = dict(get_video_editor_pending(uid) or {})", handler.index('if action == "manual"'))]
-    assert manual.index("clear_video_session(uid)") < manual.index("clear_video_editor_pending(uid)")
+    assert manual.index("replace_video_edit_lane_state(") < manual.index("clear_video_session(uid)")
+    assert "clear_video_editor_pending(uid)" not in manual
     pending = _between("async def handle_video_editor_pending_text", "async def handle_video_editor_callback")
     assert all(step in pending for step in (
         '"await_split_fixed"',
@@ -118,5 +119,5 @@ def test_edit3_legacy_buttons_are_read_only_and_cannot_reset_plan() -> None:
 
 def test_edit3_route_contract_matches_visible_hub() -> None:
     route = _between('"video_local_edit": {', "def video_public_route_for_tool")
-    assert '"expected_children": ("videoedit|ai", "videoedit|manual", "videoedit|restore", "videoedit|guide", "videoedit|latest_status")' in route
+    assert '"expected_children": ("videoedit|ai", "videoedit|manual", "videoedit|restore", "videoedit|guide")' in route
     assert '"back_target": "menu|main_video"' in route

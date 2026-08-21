@@ -199,6 +199,46 @@ def analyze_observations(
     ]
     average_motion = fmean(motion_scores) if motion_scores else 0.0
     average_shift = fmean(shifts) if shifts else 0.0
+    brightness_samples = [
+        max(0.0, min(1.0, _number(item.get("mean_brightness"))))
+        for item in rows
+        if item.get("mean_brightness") is not None
+    ]
+    saturation_samples = [
+        max(0.0, min(1.0, _number(item.get("mean_saturation"))))
+        for item in rows
+        if item.get("mean_saturation") is not None
+    ]
+    rgb_samples = [
+        [_number(value) for value in list(item.get("mean_rgb") or [])[:3]]
+        for item in rows
+        if len(list(item.get("mean_rgb") or [])) >= 3
+    ]
+    average_brightness = fmean(brightness_samples) if brightness_samples else 0.5
+    average_saturation = fmean(saturation_samples) if saturation_samples else 0.35
+    average_rgb = [
+        fmean(sample[channel] for sample in rgb_samples)
+        for channel in range(3)
+    ] if rgb_samples else [128.0, 128.0, 128.0]
+    dimensions = [
+        (max(1.0, _number(item.get("width"), 1)), max(1.0, _number(item.get("height"), 1)))
+        for item in rows
+    ]
+    if dimensions:
+        average_width = fmean(width for width, _height in dimensions)
+        average_height = fmean(height for _width, height in dimensions)
+        orientation = (
+            "vertical" if average_height > average_width * 1.1
+            else "horizontal" if average_width > average_height * 1.1
+            else "square"
+        )
+    else:
+        orientation = "unknown"
+    lighting = "bright" if average_brightness >= 0.68 else "dark" if average_brightness <= 0.32 else "balanced"
+    color_style = "vivid" if average_saturation >= 0.55 else "muted" if average_saturation <= 0.22 else "balanced"
+    red, _green, blue = average_rgb
+    color_temperature = "warm" if red - blue >= 20 else "cool" if blue - red >= 20 else "neutral"
+    scene_change_count = sum(1 for score in motion_scores if score >= 0.18)
     motion_summary = (
         "Chuyển động mạnh, cần giữ đúng hướng và nhịp nguồn"
         if average_motion >= 0.18
@@ -212,6 +252,23 @@ def analyze_observations(
         else "Camera chuyển nhẹ"
         if average_shift >= 0.8
         else "Camera tương đối ổn định"
+    )
+    visual_context = {
+        "orientation": orientation,
+        "lighting": lighting,
+        "color_style": color_style,
+        "color_temperature": color_temperature,
+        "average_brightness": round(average_brightness, 4),
+        "average_saturation": round(average_saturation, 4),
+        "average_rgb": [round(value, 2) for value in average_rgb],
+        "scene_change_count": scene_change_count,
+        "people_count": len(people),
+        "object_count": len(objects),
+        "pet_count": len(pets),
+    }
+    visual_context_summary = (
+        f"Khung hình {orientation}; ánh sáng {lighting}; màu {color_style}; "
+        f"tông {color_temperature}; {scene_change_count} nhịp đổi cảnh rõ."
     )
     references = [
         {
@@ -243,6 +300,8 @@ def analyze_observations(
         "interaction_graph": deepcopy(relationships),
         "motion_summary": motion_summary,
         "camera_summary": camera_summary,
+        "visual_context": visual_context,
+        "visual_context_summary": visual_context_summary,
         "track_confidence": round(confidence, 4),
         "track_stability": round(stability, 4),
         "source_reference_frames": references,
@@ -383,6 +442,8 @@ def analyze_video_file(
                     })
                 detections.extend(sorted(moving, key=lambda item: item["bbox"][2] * item["bbox"][3], reverse=True)[:4])
             previous_gray = gray
+            hsv = cv2.cvtColor(working, cv2.COLOR_BGR2HSV)
+            mean_bgr = np.mean(working.reshape(-1, 3), axis=0)
             observations.append({
                 "timestamp_seconds": float(timestamp - start),
                 "source_timestamp_seconds": float(timestamp),
@@ -392,6 +453,9 @@ def analyze_video_file(
                 "detections": detections,
                 "camera_shift": list(camera_shift),
                 "motion_score": motion_score,
+                "mean_brightness": float(np.mean(hsv[:, :, 2]) / 255.0),
+                "mean_saturation": float(np.mean(hsv[:, :, 1]) / 255.0),
+                "mean_rgb": [float(mean_bgr[2]), float(mean_bgr[1]), float(mean_bgr[0])],
             })
     finally:
         capture.release()

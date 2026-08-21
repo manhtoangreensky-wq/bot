@@ -10,11 +10,17 @@ import base64
 import os
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+
+
+KEY4U_PUBLIC_CHAT_MODEL = "claude-opus-4-8"
+KEY4U_PUBLIC_CHAT_COMPLETIONS_URL = "https://api.key4u.vn/v1/chat/completions"
+KEY4U_PUBLIC_MESSAGES_URL = "https://api.key4u.vn/v1/messages"
 
 
 def _env(name: str, default: str = "") -> str:
@@ -87,6 +93,84 @@ def _safe_message(value: Any, limit: int = 220) -> str:
                 end = min(len(text), idx + len(marker) + 32)
             text = text[:idx] + f"{marker}***" + text[end:]
     return text[:limit]
+
+
+def _public_response_text(payload: Any) -> str:
+    """Extract text without retaining raw provider payloads."""
+    if not isinstance(payload, dict):
+        return ""
+    choices = payload.get("choices")
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        message = choices[0].get("message")
+        content = message.get("content") if isinstance(message, dict) else ""
+    else:
+        content = payload.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        return "".join(
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and str(part.get("type") or "text") == "text"
+        ).strip()
+    return ""
+
+
+def _public_usage(payload: Any, *, anthropic: bool) -> dict[str, int | bool] | None:
+    usage = payload.get("usage") if isinstance(payload, dict) else None
+    if not isinstance(usage, dict):
+        return None
+    input_key = "input_tokens" if anthropic else "prompt_tokens"
+    output_key = "output_tokens" if anthropic else "completion_tokens"
+    input_value = usage.get(input_key)
+    output_value = usage.get(output_key)
+    if isinstance(input_value, bool) or isinstance(output_value, bool):
+        return None
+    if isinstance(input_value, float) and not input_value.is_integer():
+        return None
+    if isinstance(output_value, float) and not output_value.is_integer():
+        return None
+    if isinstance(input_value, str) and not input_value.strip().isdigit():
+        return None
+    if isinstance(output_value, str) and not output_value.strip().isdigit():
+        return None
+    try:
+        input_tokens = int(input_value)
+        output_tokens = int(output_value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if input_tokens < 0 or output_tokens < 0:
+        return None
+    cache_value = usage.get("cache_read_tokens", usage.get("cache_read_input_tokens", 0))
+    if isinstance(cache_value, bool):
+        return None
+    if cache_value in (None, 0, ""):
+        details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or usage.get("input_token_details")
+        if isinstance(details, dict):
+            cache_value = details.get("cached_tokens", details.get("cache_read_tokens", details.get("cache_read", 0)))
+    if isinstance(cache_value, bool):
+        return None
+    if isinstance(cache_value, float) and not cache_value.is_integer():
+        return None
+    if isinstance(cache_value, str) and not cache_value.strip().isdigit():
+        return None
+    try:
+        cache_tokens = int(cache_value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if cache_tokens < 0:
+        return None
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_read_tokens": cache_tokens,
+        "input_tokens_include_cache": not anthropic,
+    }
+
+
+def _safe_public_request_id(value: Any) -> str:
+    text = str(value or "").strip()
+    return text if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", text) else ""
 
 
 GROUP_UNAVAILABLE_MARKERS = (
@@ -396,6 +480,7 @@ class Key4UConfig:
     usage_auth_mode: str = ""
     base_url: str = "https://api.key4u.shop"
     openai_base_url: str = "https://api.key4u.shop/v1"
+    public_chat_base_url: str = "https://api.key4u.vn"
     minimax_base_url: str = "https://api.key4u.shop/minimax"
     minimax_tts_base_url: str = ""
     voice_base_url: str = "https://voice.key4u.shop/api/v1"
@@ -411,6 +496,7 @@ class Key4UConfig:
     usage_discovery_enabled: bool = False
     models_endpoint: str = ""
     chat_endpoint: str = "/v1/chat/completions"
+    messages_endpoint: str = "/v1/messages"
     image_edit_endpoint: str = "/v1/images/edits"
     nano_banana_edit_endpoint: str = "/fal-ai/nano-banana/edit"
     video_create_endpoint: str = "/v1/video/create"
@@ -458,6 +544,7 @@ def config_from_env() -> Key4UConfig:
         usage_auth_mode=_env("KEY4U_USAGE_AUTH_MODE", ""),
         base_url=api_base,
         openai_base_url=_env("KEY4U_OPENAI_BASE_URL", safe_join_url(api_base, "/v1")),
+        public_chat_base_url=_env("KEY4U_PUBLIC_CHAT_BASE_URL", "https://api.key4u.vn"),
         minimax_base_url=_env("KEY4U_MINIMAX_BASE", safe_join_url(api_base, "/minimax")),
         minimax_tts_base_url=_env("KEY4U_MINIMAX_TTS_BASE", "https://api.key4u.vn/minimax"),
         voice_base_url=_env("KEY4U_VOICE_BASE", "https://voice.key4u.shop/api/v1"),
@@ -473,6 +560,7 @@ def config_from_env() -> Key4UConfig:
         usage_discovery_enabled=_flag("KEY4U_USAGE_DISCOVERY_ENABLED", "false"),
         models_endpoint=_env("KEY4U_MODELS_ENDPOINT", ""),
         chat_endpoint=_env("KEY4U_CHAT_COMPLETIONS_ENDPOINT", _env("KEY4U_CHAT_ENDPOINT", "/v1/chat/completions")),
+        messages_endpoint=_env("KEY4U_MESSAGES_ENDPOINT", "/v1/messages"),
         image_edit_endpoint=_env("KEY4U_IMAGE_EDITS_ENDPOINT", _env("KEY4U_IMAGE_EDIT_ENDPOINT", "/v1/images/edits")),
         nano_banana_edit_endpoint=_env("KEY4U_NANO_BANANA_EDIT_ENDPOINT", "/fal-ai/nano-banana/edit"),
         video_create_endpoint=_env("KEY4U_VIDEO_CREATE_ENDPOINT", "/v1/video/create"),
@@ -1095,13 +1183,276 @@ class Key4UProvider:
             error_message_safe="KEY4U_ENABLED/API_KEY/ADMIN_SMOKE not configured",
         )
 
+    def public_chat_is_configured(self) -> bool:
+        """Gate the paid public route independently from admin smoke routes."""
+        return bool(self.config.enabled and self.config.public_enabled and self.config.api_key)
+
+    def chat_is_configured(self) -> bool:
+        """Compatibility alias for callers that use the public-chat gate."""
+        return self.public_chat_is_configured()
+
+    def _public_failure(
+        self,
+        status: str,
+        *,
+        http_status: int = 0,
+        error_class: str = "",
+    ) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "provider": "key4u",
+            "model": KEY4U_PUBLIC_CHAT_MODEL,
+            "text": "",
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "status": status,
+            "http_status": int(http_status or 0),
+            "error_class": error_class or status,
+            "error_message_safe": "public provider request failed",
+        }
+
+    @staticmethod
+    def _public_messages(messages: Any) -> list[dict[str, Any]] | None:
+        if not isinstance(messages, list) or not messages:
+            return None
+        normalized: list[dict[str, Any]] = []
+        for message in messages:
+            if not isinstance(message, dict):
+                return None
+            role = str(message.get("role") or "").strip()
+            if role not in {"system", "user", "assistant"}:
+                return None
+            content = message.get("content")
+            if not isinstance(content, (str, list)):
+                return None
+            normalized.append({"role": role, "content": content})
+        return normalized
+
+    def _public_headers(self, *, anthropic: bool, client_request_id: str = "") -> dict[str, str]:
+        headers = {**self._headers(), "Content-Type": "application/json"}
+        if client_request_id:
+            headers["X-Client-Request-Id"] = client_request_id
+        if anthropic:
+            headers["anthropic-version"] = "2023-06-01"
+        return headers
+
+    async def _public_request(
+        self,
+        messages: Any,
+        *,
+        anthropic: bool,
+        system: str = "",
+        timeout_seconds: float = 60.0,
+        max_tokens: int = 4096,
+        temperature: float = 0.2,
+        require_usage: bool = True,
+        legacy_shape: bool = False,
+    ) -> dict[str, Any]:
+        if not self.public_chat_is_configured():
+            return self._public_failure("NOT_CONFIGURED")
+        normalized = self._public_messages(messages)
+        if normalized is None:
+            return self._public_failure("FAIL_BAD_REQUEST")
+
+        request_messages = normalized
+        payload: dict[str, Any] = {
+            "model": KEY4U_PUBLIC_CHAT_MODEL,
+            "messages": request_messages,
+            "max_tokens": max(1, min(16_000, int(max_tokens or 1))),
+            "temperature": float(temperature),
+        }
+        if anthropic and str(system or "").strip():
+            payload["system"] = str(system).strip()
+        endpoint = KEY4U_PUBLIC_MESSAGES_URL if anthropic else KEY4U_PUBLIC_CHAT_COMPLETIONS_URL
+        client_request_id = f"client-{uuid.uuid4().hex}"
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                response = await client.post(
+                    endpoint,
+                    headers=self._public_headers(
+                        anthropic=anthropic,
+                        client_request_id=client_request_id,
+                    ),
+                    json=payload,
+                )
+        except httpx.TimeoutException:
+            return self._public_failure("FAIL_TIMEOUT", error_class="FAIL_TIMEOUT")
+        except Exception as exc:
+            return self._public_failure("FAIL_EXCEPTION", error_class=type(exc).__name__)
+
+        try:
+            data = response.json()
+        except Exception:
+            data = {}
+        if not (200 <= int(response.status_code or 0) < 300):
+            return self._public_failure(
+                _classify_http(int(response.status_code or 0)),
+                http_status=int(response.status_code or 0),
+                error_class=_classify_http(int(response.status_code or 0)),
+            )
+        text = _public_response_text(data)
+        if not text:
+            return self._public_failure("FAIL_CONTENT_EMPTY", http_status=int(response.status_code or 0))
+        usage = _public_usage(data, anthropic=anthropic)
+        if usage is None:
+            return self._public_failure("FAIL_USAGE_MISSING" if legacy_shape else "FAIL_USAGE_REQUIRED", http_status=int(response.status_code or 0))
+        request_id = _safe_public_request_id(data.get("id") if isinstance(data, dict) else "")
+        if not request_id:
+            for key, value in (getattr(response, "headers", {}) or {}).items():
+                if str(key).lower() in {"x-request-id", "request-id", "x-key4u-request-id"}:
+                    request_id = _safe_public_request_id(value)
+                    if request_id:
+                        break
+        if not request_id and not legacy_shape:
+            request_id = client_request_id
+        if legacy_shape and require_usage and not request_id:
+            return self._public_failure("FAIL_REQUEST_ID_MISSING", http_status=int(response.status_code or 0))
+        if legacy_shape:
+            result = _result(ok=True, capability="text_brain", model=KEY4U_PUBLIC_CHAT_MODEL, status="PASS", http_status=response.status_code, text=text, raw_debug_admin_only={"response_shape": sorted(data.keys())[:8] if isinstance(data, dict) else []})
+            result.update(usage)
+            result["cache_read_input_tokens"] = usage.get("cache_read_tokens", 0)
+            result["provider_request_id"] = request_id
+            return result
+        return {
+            "ok": True,
+            "provider": "key4u",
+            "model": KEY4U_PUBLIC_CHAT_MODEL,
+            "text": text,
+            "usage": dict(usage),
+            **usage,
+            "status": "SUCCESS",
+            "http_status": int(response.status_code or 0),
+            "provider_request_id": request_id,
+        }
+
+    async def public_chat_completion(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        timeout_seconds: float = 60.0,
+        max_tokens: int = 4096,
+        temperature: float = 0.2,
+    ) -> dict[str, Any]:
+        """Call the exact OpenAI-compatible public Opus route once."""
+        return await self._public_request(
+            messages,
+            anthropic=False,
+            timeout_seconds=timeout_seconds,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            legacy_shape=False,
+        )
+
+    async def public_anthropic_messages(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        system: str = "",
+        timeout_seconds: float = 60.0,
+        max_tokens: int = 4096,
+        temperature: float = 0.2,
+    ) -> dict[str, Any]:
+        """Call the exact Anthropic-compatible public Opus route once."""
+        return await self._public_request(
+            messages,
+            anthropic=True,
+            system=system,
+            timeout_seconds=timeout_seconds,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            legacy_shape=False,
+        )
+
+    async def document_completion(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        pdf_bytes: bytes,
+        model: str = KEY4U_PUBLIC_CHAT_MODEL,
+        max_tokens: int = 1800,
+        timeout_seconds: float = 60.0,
+        require_usage: bool = True,
+    ) -> dict[str, Any]:
+        """Send one validated PDF request to the exact native Messages route."""
+        selected_model = KEY4U_PUBLIC_CHAT_MODEL
+        if not self.chat_is_configured():
+            return self._missing_result("document_brain", selected_model)
+        if not isinstance(pdf_bytes, (bytes, bytearray)) or not pdf_bytes or len(pdf_bytes) > 20 * 1024 * 1024 or not bytes(pdf_bytes).startswith(b"%PDF-"):
+            return _result(ok=False, capability="document_brain", model=selected_model, status="FAIL_BAD_REQUEST", error_class="FAIL_BAD_REQUEST", error_message_safe="invalid PDF bytes")
+        normalized = self._public_messages(messages)
+        if normalized is None:
+            return _result(ok=False, capability="document_brain", model=selected_model, status="FAIL_BAD_REQUEST", error_class="FAIL_BAD_REQUEST", error_message_safe="invalid messages")
+        import base64
+        system_parts: list[str] = []
+        native: list[dict[str, Any]] = []
+        for item in normalized:
+            if item["role"] == "system":
+                if isinstance(item["content"], str):
+                    system_parts.append(item["content"])
+                continue
+            native.append(dict(item))
+        document = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(bytes(pdf_bytes)).decode("ascii")}, "cache_control": {"type": "ephemeral"}}
+        user_index = next((index for index in range(len(native) - 1, -1, -1) if native[index]["role"] == "user"), None)
+        if user_index is None:
+            native.append({"role": "user", "content": [document]})
+        elif isinstance(native[user_index]["content"], str):
+            native[user_index]["content"] = [document, {"type": "text", "text": native[user_index]["content"]}]
+        else:
+            native[user_index]["content"] = [document, *native[user_index]["content"]]
+        payload: dict[str, Any] = {"model": selected_model, "max_tokens": max(1, min(16_000, int(max_tokens or 1))), "messages": native}
+        if system_parts:
+            payload["system"] = "\n\n".join(system_parts)[:12_000]
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                response = await client.post(KEY4U_PUBLIC_MESSAGES_URL, headers=self._public_headers(anthropic=True), json=payload)
+            try:
+                data = response.json()
+            except Exception:
+                data = {}
+        except httpx.TimeoutException as exc:
+            return _timeout_result("document_brain", selected_model, exc)
+        except Exception as exc:
+            return _result(ok=False, capability="document_brain", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+        if not (200 <= int(response.status_code or 0) < 300):
+            return _result(ok=False, capability="document_brain", model=selected_model, status="FAIL", http_status=response.status_code, error_class=_classify_http(response.status_code, data), error_message_safe=data)
+        text = _public_response_text(data)
+        if not text:
+            return _result(ok=False, capability="document_brain", model=selected_model, status="FAIL_CONTENT_EMPTY", http_status=response.status_code, error_class="FAIL_CONTENT_EMPTY", error_message_safe="empty content")
+        usage = _public_usage(data, anthropic=True)
+        if usage is None:
+            return _result(ok=False, capability="document_brain", model=selected_model, status="FAIL_USAGE_MISSING", http_status=response.status_code, error_class="FAIL_USAGE_MISSING", error_message_safe="provider usage missing")
+        request_id = _safe_public_request_id(data.get("id") if isinstance(data, dict) else "")
+        if not request_id:
+            for key, value in (getattr(response, "headers", {}) or {}).items():
+                if str(key).lower() in {"x-request-id", "request-id", "x-key4u-request-id"}:
+                    request_id = _safe_public_request_id(value)
+                    break
+        if require_usage and not request_id:
+            return _result(ok=False, capability="document_brain", model=selected_model, status="FAIL_REQUEST_ID_MISSING", http_status=response.status_code, error_class="FAIL_REQUEST_ID_MISSING", error_message_safe="provider request id missing")
+        result = _result(ok=True, capability="document_brain", model=selected_model, status="PASS", http_status=response.status_code, text=text, raw_debug_admin_only={"response_shape": sorted(data.keys())[:8] if isinstance(data, dict) else []})
+        result.update(usage)
+        result["cache_read_input_tokens"] = usage.get("cache_read_tokens", 0)
+        result["provider_request_id"] = request_id
+        return result
+
     async def chat_completion(
         self,
         prompt: str = "Trả lời đúng một câu tiếng Việt có chữ TEST_OK.",
         model: str = "",
         timeout_seconds: float = 30.0,
         max_tokens: int = 1200,
+        *,
+        messages: list[dict[str, Any]] | None = None,
+        require_usage: bool = False,
     ) -> dict[str, Any]:
+        if messages is not None or str(model or "").strip() == KEY4U_PUBLIC_CHAT_MODEL:
+            return await self._public_request(
+                messages if messages is not None else [{"role": "user", "content": str(prompt or "")}],
+                anthropic=False,
+                timeout_seconds=timeout_seconds,
+                max_tokens=max_tokens,
+                require_usage=require_usage,
+                legacy_shape=True,
+            )
         selected_model = model or self.config.chat_model
         if not self.is_configured():
             return self._missing_result("text_brain", selected_model)

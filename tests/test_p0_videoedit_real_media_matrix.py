@@ -9,11 +9,12 @@ from __future__ import annotations
 import re
 import subprocess
 from array import array
-from math import isfinite, sqrt
+from math import cos, isfinite, pi, sin, sqrt
 from pathlib import Path
 
 import pytest
 
+from services import video_edit_capabilities as capabilities
 from services import video_local_editing as editing
 from services import video_local_validation as validation
 from services import video_smart_splitter as splitter
@@ -220,6 +221,41 @@ def _audio_rms(path: Path, *, at_seconds: float, duration: float = 0.3) -> float
     return sqrt(sum(float(sample) ** 2 for sample in samples) / len(samples))
 
 
+def _tone_amplitude(
+    path: Path,
+    *,
+    frequency: float,
+    at_seconds: float,
+    duration: float = 0.25,
+    sample_rate: int = 16_000,
+) -> float:
+    """Measure one generated fixture tone from decoded PCM."""
+
+    ffmpeg, _ = _require_tools()
+    completed = subprocess.run(
+        [
+            ffmpeg,
+            "-v", "error",
+            "-ss", f"{at_seconds:.3f}",
+            "-i", str(path),
+            "-t", f"{duration:.3f}",
+            "-vn", "-ac", "1", "-ar", str(sample_rate),
+            "-f", "s16le", "pipe:1",
+        ],
+        capture_output=True,
+        timeout=45,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")[-1200:]
+    samples = array("h")
+    samples.frombytes(completed.stdout)
+    assert samples
+    angular = 2.0 * pi * float(frequency) / float(sample_rate)
+    real = sum(float(sample) * cos(angular * index) for index, sample in enumerate(samples))
+    imag = sum(float(sample) * sin(angular * index) for index, sample in enumerate(samples))
+    return 2.0 * sqrt(real * real + imag * imag) / len(samples)
+
+
 def _gray_region_pixels(
     path: Path,
     *,
@@ -359,6 +395,46 @@ def source_clip(tmp_path: Path) -> Path:
     source = tmp_path / "source-red.mp4"
     _make_clip(source, color="red", frequency=440)
     return source
+
+
+def test_videoedit_numeric_goal_executes_observable_brightness_and_volume(
+    source_clip: Path,
+    tmp_path: Path,
+) -> None:
+    compiled = capabilities.compile_local_intent(
+        "Làm sáng video lên 120% và tăng âm lượng lên 110%"
+    )
+    assert compiled["ok"] is True
+    assert compiled["manual_edit_plan"] == {
+        "brightness_percent": 120,
+        "volume": 1.1,
+    }
+
+    baseline = tmp_path / "numeric-goal-baseline.mp4"
+    output = tmp_path / "numeric-goal-output.mp4"
+    _run_edit(
+        source_clip,
+        baseline,
+        tmp_path,
+        trim={"start_ms": 0, "end_ms": 1_500},
+    )
+    result = _run_edit(
+        source_clip,
+        output,
+        tmp_path,
+        trim={"start_ms": 0, "end_ms": 1_500},
+        **compiled["manual_edit_plan"],
+    )
+
+    assert result["validation"]["full_decode"] is True
+    baseline_light = sum(_frame_mean_rgb(baseline, at_seconds=0.7))
+    edited_light = sum(_frame_mean_rgb(output, at_seconds=0.7))
+    assert edited_light > baseline_light * 1.10
+    volume_ratio = _audio_rms(output, at_seconds=0.7) / _audio_rms(
+        baseline,
+        at_seconds=0.7,
+    )
+    assert 1.04 <= volume_ratio <= 1.16
 
 
 def test_videoedit_trim_preserves_audio_with_local_fade_effect(source_clip: Path, tmp_path: Path) -> None:
@@ -969,6 +1045,260 @@ def test_videoedit_logo_watermark_position_and_opacity_are_visible(
     ) < 6
 
 
+def test_videoedit_real_audio_tracks_are_downloaded_inputs_and_mixed_into_mp4(
+    source_clip: Path,
+    tmp_path: Path,
+) -> None:
+    ffmpeg, _ = _require_tools()
+    music = tmp_path / "music.mp3"
+    voice = tmp_path / "voice.m4a"
+    for target, frequency, codec in ((music, 880, "libmp3lame"), (voice, 1320, "aac")):
+        created = subprocess.run(
+            [
+                ffmpeg, "-y", "-f", "lavfi", "-i",
+                f"sine=frequency={frequency}:sample_rate=48000",
+                "-t", "1.5", "-vn", "-c:a", codec, str(target),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=45,
+            check=False,
+        )
+        assert created.returncode == 0, created.stderr[-1200:]
+    output = tmp_path / "mixed-audio.mp4"
+    result = _run_edit(
+        source_clip,
+        output,
+        tmp_path,
+        audio_tracks=[
+            {"path": str(music), "kind": "music", "volume": 0.35, "start_ms": 0},
+            {"path": str(voice), "kind": "voice", "volume": 0.8, "start_ms": 700},
+        ],
+    )
+    assert result["validation"]["has_audio"] is True
+    assert abs(int(result["validation"]["duration_ms"]) - 2_000) <= 700
+    assert _audio_rms(output, at_seconds=0.3, duration=0.15) > 0.001
+    assert _audio_rms(output, at_seconds=1.1, duration=0.15) > 0.001
+    music_early = _tone_amplitude(output, frequency=880, at_seconds=0.25)
+    voice_early = _tone_amplitude(output, frequency=1320, at_seconds=0.25)
+    voice_late = _tone_amplitude(output, frequency=1320, at_seconds=0.95)
+    assert music_early > 100
+    assert voice_late > 100
+    assert voice_early < voice_late * 0.25
+
+
+def test_videoedit_master_mute_silences_source_and_every_added_track(
+    source_clip: Path,
+    tmp_path: Path,
+) -> None:
+    ffmpeg, _ = _require_tools()
+    music = tmp_path / "mute-music.wav"
+    created = subprocess.run(
+        [
+            ffmpeg, "-y", "-f", "lavfi", "-i",
+            "sine=frequency=880:sample_rate=48000",
+            "-t", "2", "-vn", "-c:a", "pcm_s16le", str(music),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=False,
+    )
+    assert created.returncode == 0, created.stderr[-1200:]
+    output = tmp_path / "master-muted.mp4"
+    result = _run_edit(
+        source_clip,
+        output,
+        tmp_path,
+        volume=0.0,
+        audio_tracks=[
+            {"path": str(music), "kind": "music", "volume": 1.0, "start_ms": 0},
+        ],
+    )
+    assert result["validation"]["has_audio"] is True
+    assert _audio_rms(output, at_seconds=0.5, duration=0.4) < 5
+
+
+def test_videoedit_text_watermark_and_logo_coexist_on_the_real_final_timeline(
+    source_clip: Path,
+    tmp_path: Path,
+) -> None:
+    ffmpeg, _ = _require_tools()
+    appended = tmp_path / "branding-appended.mp4"
+    _make_clip(appended, color="yellow", frequency=660, duration=1.0)
+    logo = tmp_path / "branding-logo.png"
+    created = subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=magenta:s=80x40",
+            "-frames:v",
+            "1",
+            "-update",
+            "1",
+            str(logo),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=False,
+    )
+    assert created.returncode == 0, created.stderr[-1200:]
+
+    baseline = tmp_path / "branding-baseline.mp4"
+    branded = tmp_path / "branding-all-three.mp4"
+    watermark_full = tmp_path / "branding-watermark-full.mp4"
+    common = {
+        "trim": {"start_ms": 0, "end_ms": 2_000},
+        "concat_inputs": [str(appended)],
+    }
+    _run_edit(source_clip, baseline, tmp_path, **common)
+    result = _run_edit(
+        source_clip,
+        branded,
+        tmp_path,
+        **common,
+        text_overlay={
+            "content": "TITLE",
+            "position": "top_center",
+            "start_ms": 100,
+            "end_ms": 900,
+            "font_size": 36,
+            "outline": 2,
+        },
+        watermark_overlay={
+            "content": "TOAN AAS",
+            "position": "bottom_right",
+            "start_ms": 0,
+            "end_ms": 3_000,
+            "font_size": 28,
+            "outline": 2,
+            "opacity": 0.45,
+        },
+        logo_overlay={
+            "path": str(logo),
+            "position": "top_left",
+            "scale": 0.12,
+            "opacity": 0.75,
+        },
+    )
+    _run_edit(
+        source_clip,
+        watermark_full,
+        tmp_path,
+        **common,
+        watermark_overlay={
+            "content": "TOAN AAS",
+            "position": "bottom_right",
+            "start_ms": 0,
+            "end_ms": 3_000,
+            "font_size": 28,
+            "outline": 2,
+            "opacity": 1.0,
+        },
+    )
+
+    assert result["validation"]["ok"] is True
+    assert result["validation"]["has_audio"] is True
+    assert abs(int(result["validation"]["duration_ms"]) - 3_000) <= 900
+
+    title_active = _region_mean_rgb(
+        branded, x=75, y=4, width=170, height=50, at_seconds=0.5
+    )
+    title_baseline = _region_mean_rgb(
+        baseline, x=75, y=4, width=170, height=50, at_seconds=0.5
+    )
+    title_after = _region_mean_rgb(
+        branded, x=75, y=4, width=170, height=50, at_seconds=2.5
+    )
+    title_after_baseline = _region_mean_rgb(
+        baseline, x=75, y=4, width=170, height=50, at_seconds=2.5
+    )
+    assert sum(abs(a - b) for a, b in zip(title_active, title_baseline)) > 10
+    assert sum(abs(a - b) for a, b in zip(title_after, title_after_baseline)) < 8
+
+    for at_seconds in (0.5, 2.5):
+        watermark = _region_mean_rgb(
+            branded, x=175, y=122, width=140, height=52, at_seconds=at_seconds
+        )
+        watermark_baseline = _region_mean_rgb(
+            baseline, x=175, y=122, width=140, height=52, at_seconds=at_seconds
+        )
+        logo_region = _region_mean_rgb(
+            branded, x=10, y=4, width=50, height=28, at_seconds=at_seconds
+        )
+        logo_baseline = _region_mean_rgb(
+            baseline, x=10, y=4, width=50, height=28, at_seconds=at_seconds
+        )
+        assert sum(abs(a - b) for a, b in zip(watermark, watermark_baseline)) > 5
+        assert sum(abs(a - b) for a, b in zip(logo_region, logo_baseline)) > 20
+
+    half_watermark = _region_mean_rgb(
+        branded, x=175, y=122, width=140, height=52, at_seconds=2.5
+    )
+    full_watermark = _region_mean_rgb(
+        watermark_full, x=175, y=122, width=140, height=52, at_seconds=2.5
+    )
+    watermark_baseline = _region_mean_rgb(
+        baseline, x=175, y=122, width=140, height=52, at_seconds=2.5
+    )
+    half_delta = sum(
+        abs(value - base)
+        for value, base in zip(half_watermark, watermark_baseline)
+    )
+    full_delta = sum(
+        abs(value - base)
+        for value, base in zip(full_watermark, watermark_baseline)
+    )
+    assert full_delta > 10
+    assert 0.25 <= half_delta / full_delta <= 0.70
+
+
+def test_videoedit_default_watermark_covers_remove_concat_and_speed_timeline(
+    source_clip: Path,
+    tmp_path: Path,
+) -> None:
+    appended = tmp_path / "watermark-default-appended.mp4"
+    _make_clip(appended, color="yellow", frequency=660, duration=1.0)
+    baseline = tmp_path / "watermark-default-baseline.mp4"
+    branded = tmp_path / "watermark-default-branded.mp4"
+    common = {
+        "trim": {"start_ms": 0, "end_ms": 2_000},
+        "remove_middle": {"start_ms": 500, "end_ms": 1_000},
+        "concat_inputs": [str(appended)],
+        "speed": 0.5,
+    }
+    _run_edit(source_clip, baseline, tmp_path, **common)
+    result = _run_edit(
+        source_clip,
+        branded,
+        tmp_path,
+        **common,
+        watermark_overlay={
+            "content": "TOAN AAS",
+            "position": "bottom_right",
+            "start_ms": 0,
+            "font_size": 28,
+            "outline": 2,
+            "opacity": 0.55,
+        },
+    )
+
+    assert result["validation"]["ok"] is True
+    assert result["validation"]["has_audio"] is True
+    assert abs(int(result["validation"]["duration_ms"]) - 5_000) <= 1_000
+    watermark = _region_mean_rgb(
+        branded, x=175, y=122, width=140, height=52, at_seconds=4.2
+    )
+    watermark_baseline = _region_mean_rgb(
+        baseline, x=175, y=122, width=140, height=52, at_seconds=4.2
+    )
+    assert sum(abs(a - b) for a, b in zip(watermark, watermark_baseline)) > 5
+
+
 def test_videoedit_text_and_srt_are_visible_only_during_the_requested_window(
     source_clip: Path,
     tmp_path: Path,
@@ -1058,6 +1388,139 @@ def test_videoedit_text_and_srt_are_visible_only_during_the_requested_window(
         abs(before - inactive)
         for before, inactive in zip(subtitle_before, subtitle_inactive)
     ) < 5
+
+
+@pytest.mark.parametrize(
+    ("timeline_updates", "srt_timing", "expected_at", "stale_at"),
+    [
+        pytest.param(
+            {"trim": {"start_ms": 1_000, "end_ms": 3_000}},
+            "00:00:00,800 --> 00:00:01,400",
+            0.2,
+            1.1,
+            id="trim_rebases_source_cue",
+        ),
+        pytest.param(
+            {
+                "trim": {"start_ms": 0, "end_ms": 4_000},
+                "remove_middle": {"start_ms": 1_000, "end_ms": 2_000},
+            },
+            "00:00:01,800 --> 00:00:02,400",
+            1.2,
+            2.1,
+            id="remove_middle_shifts_later_cue",
+        ),
+        pytest.param(
+            {"trim": {"start_ms": 0, "end_ms": 4_000}, "speed": 2.0},
+            "00:00:01,000 --> 00:00:02,000",
+            0.75,
+            1.5,
+            id="speed_rebases_cue_to_post_speed_clock",
+        ),
+    ],
+)
+def test_videoedit_srt_is_intersected_and_rebased_after_trim_remove_and_speed(
+    tmp_path: Path,
+    timeline_updates: dict,
+    srt_timing: str,
+    expected_at: float,
+    stale_at: float,
+) -> None:
+    """Subtitle timestamps must follow the final edited timeline, not source PTS."""
+
+    source = tmp_path / "srt-timeline-source.mp4"
+    _make_clip(source, color="red", frequency=440, duration=4.0)
+    subtitle = tmp_path / "srt-timeline.srt"
+    subtitle.write_text(
+        f"1\n{srt_timing}\nSRT RETIME\n",
+        encoding="utf-8",
+    )
+    baseline = tmp_path / "srt-timeline-baseline.mp4"
+    output = tmp_path / "srt-timeline-output.mp4"
+    _run_edit(source, baseline, tmp_path, **timeline_updates)
+    result = _run_edit(
+        source,
+        output,
+        tmp_path,
+        **timeline_updates,
+        subtitle_file=str(subtitle),
+    )
+
+    assert result["validation"]["ok"] is True
+
+    def subtitle_delta(at_seconds: float) -> float:
+        with_subtitle = _region_mean_rgb(
+            output,
+            x=50,
+            y=118,
+            width=220,
+            height=58,
+            at_seconds=at_seconds,
+        )
+        without_subtitle = _region_mean_rgb(
+            baseline,
+            x=50,
+            y=118,
+            width=220,
+            height=58,
+            at_seconds=at_seconds,
+        )
+        return sum(
+            abs(active - plain)
+            for active, plain in zip(with_subtitle, without_subtitle)
+        )
+
+    assert subtitle_delta(expected_at) > 12
+    assert subtitle_delta(stale_at) < 8
+
+
+def test_videoedit_srt_in_appended_timeline_is_retained_after_concat(
+    tmp_path: Path,
+) -> None:
+    """A cue in an appended clip must use the combined timeline, not vanish."""
+
+    primary = tmp_path / "srt-concat-primary.mp4"
+    appended = tmp_path / "srt-concat-appended.mp4"
+    _make_clip(primary, color="red", frequency=440, duration=2.0)
+    _make_clip(appended, color="blue", frequency=660, duration=2.0)
+    subtitle = tmp_path / "srt-concat.srt"
+    subtitle.write_text(
+        "1\n00:00:02,200 --> 00:00:02,800\nSRT APPENDED\n",
+        encoding="utf-8",
+    )
+
+    baseline = tmp_path / "srt-concat-baseline.mp4"
+    output = tmp_path / "srt-concat-output.mp4"
+    _run_edit(primary, baseline, tmp_path, concat_inputs=[str(appended)])
+    result = _run_edit(
+        primary,
+        output,
+        tmp_path,
+        concat_inputs=[str(appended)],
+        subtitle_file=str(subtitle),
+    )
+
+    assert result["validation"]["ok"] is True
+    with_subtitle = _region_mean_rgb(
+        output,
+        x=50,
+        y=118,
+        width=220,
+        height=58,
+        at_seconds=2.5,
+    )
+    without_subtitle = _region_mean_rgb(
+        baseline,
+        x=50,
+        y=118,
+        width=220,
+        height=58,
+        at_seconds=2.5,
+    )
+    assert sum(
+        abs(active - plain)
+        for active, plain in zip(with_subtitle, without_subtitle)
+    ) > 12
 
 
 def test_videoedit_remove_middle_discards_distinguishable_center_scene(tmp_path: Path) -> None:

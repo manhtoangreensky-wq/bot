@@ -124,6 +124,17 @@ def default_state() -> dict[str, Any]:
         "continuity": {},
         "profile": {},
         "style": {},
+        "entity_bible": {},
+        "entity_references": [],
+        "entity_needs": {},
+        "entity_summary": "",
+        "reference_source_assets": [],
+        "reference_gate_complete": False,
+        "creative_controls": {},
+        "preservation_requirements": {},
+        "middle_complete": False,
+        "entity_return_screen": "",
+        "entity_bridge_key": "",
         "addons": {},
         "addons_ready": False,
         "image_generation": {},
@@ -196,6 +207,42 @@ def normalize_state(value: dict[str, Any] | None) -> dict[str, Any]:
     state["image_prompt_offset"] = max(0, min(15, _safe_int(state.get("image_prompt_offset"), 0)))
     state["profile_page"] = max(1, _safe_int(state.get("profile_page"), 1))
     state["profile"] = dict(state.get("profile") or {})
+    state["continuity"] = dict(state.get("continuity") or {})
+    state["style"] = dict(state.get("style") or {})
+    state["entity_bible"] = dict(state.get("entity_bible") or {})
+    state["entity_references"] = [
+        dict(item)
+        for item in state.get("entity_references") or []
+        if isinstance(item, dict)
+    ][:100]
+    state["entity_needs"] = dict(state.get("entity_needs") or {})
+    state["entity_summary"] = _clean_text(state.get("entity_summary"), 800)
+    state["reference_source_assets"] = [
+        deepcopy(dict(item))
+        for item in state.get("reference_source_assets") or []
+        if isinstance(item, dict)
+        and _clean_text(
+            item.get("telegram_file_id") or item.get("file_id") or item.get("result_url"),
+            1000,
+        )
+    ][:100]
+    state["reference_gate_complete"] = bool(
+        state.get("reference_gate_complete")
+        and state["reference_source_assets"]
+    )
+    state["creative_controls"] = {
+        str(key): dict(item)
+        for key, item in dict(state.get("creative_controls") or {}).items()
+        if isinstance(item, dict)
+    }
+    state["preservation_requirements"] = {
+        str(key): dict(item)
+        for key, item in dict(state.get("preservation_requirements") or {}).items()
+        if isinstance(item, dict)
+    }
+    state["middle_complete"] = bool(state.get("middle_complete"))
+    state["entity_return_screen"] = _clean_text(state.get("entity_return_screen"), 80)
+    state["entity_bridge_key"] = _clean_text(state.get("entity_bridge_key"), 80)
     if state.get("asset_mode") not in {"start_only", "start_end"}:
         state["asset_mode"] = "start_only"
     state["addons"] = dict(state.get("addons") or {})
@@ -447,7 +494,12 @@ def apply_content(state: dict[str, Any], content: str, *, mode: str) -> dict[str
     if not value:
         raise ValueError("storyboard_content_missing")
     current = normalize_state(state)
-    current.update({"content": value, "content_mode": str(mode or "manual")})
+    current.update({
+        "content": value,
+        "content_mode": str(mode or "manual"),
+        "middle_complete": False,
+        "reference_gate_complete": False,
+    })
     profile_pattern = [
         _clean_text(item, 160)
         for item in dict(current.get("profile") or {}).get("default_scene_pattern") or []
@@ -495,6 +547,225 @@ def approve_content(state: dict[str, Any]) -> dict[str, Any]:
     for scene in current["scenes"]:
         scene["content_approved"] = True
     return current
+
+
+def set_reference_source_assets(
+    state: dict[str, Any],
+    assets: list[dict[str, Any]],
+    *,
+    complete: bool,
+) -> dict[str, Any]:
+    """Persist the mandatory pre-entity reference intake without assigning owners."""
+
+    current = normalize_state(state)
+    clean_assets = [
+        deepcopy(dict(item))
+        for item in assets or []
+        if isinstance(item, dict)
+        and _clean_text(
+            item.get("telegram_file_id") or item.get("file_id") or item.get("result_url"),
+            1000,
+        )
+    ][:100]
+    if complete and not clean_assets:
+        raise ValueError("storyboard_reference_image_required")
+    current["reference_source_assets"] = clean_assets
+    current["reference_gate_complete"] = bool(complete and clean_assets)
+    return normalize_state(current)
+
+
+def scene_image_reference_assets(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Expose the existing Storyboard images to the entity reference editor."""
+
+    current = normalize_state(state)
+    assets: list[dict[str, Any]] = []
+    for scene in current.get("scenes") or []:
+        scene_index = _safe_int(scene.get("scene_index"), 0)
+        scene_id = str(scene.get("scene_id") or f"scene_{scene_index}")
+        for slot in ("start", "end"):
+            image = dict(scene.get(f"{slot}_image") or {})
+            if image.get("status") != "ready":
+                continue
+            file_id = _clean_text(image.get("file_id"), 1000)
+            result_url = _clean_text(image.get("result_url"), 1000)
+            media_ref = file_id or result_url
+            if not media_ref:
+                continue
+            assets.append({
+                "asset_id": f"storyboard_{scene_index}_{slot}",
+                "asset_type": "storyboard_panel",
+                "owner_type": "storyboard_panel",
+                "owner_id": scene_id,
+                "role": f"{slot}_frame",
+                "telegram_file_id": media_ref,
+                "file_id": file_id,
+                "result_url": result_url,
+                "fingerprint": f"storyboard:{current.get('storyboard_session_id')}:{scene_index}:{slot}:{media_ref}",
+                "metadata": {
+                    "scene_index": scene_index,
+                    "scene_id": scene_id,
+                    "slot": slot,
+                    "source_type": str(image.get("source_type") or "storyboard_image"),
+                    "image_id": str(image.get("image_id") or ""),
+                },
+            })
+    return assets
+
+
+def confirm_existing_image_gate(state: dict[str, Any]) -> dict[str, Any]:
+    """Use the canonical Storyboard image manager as the sole image gate."""
+
+    current = normalize_state(state)
+    summary = asset_summary(current)
+    if not summary.get("ok"):
+        raise ValueError("storyboard_reference_image_required")
+    return set_reference_source_assets(
+        current,
+        scene_image_reference_assets(current),
+        complete=True,
+    )
+
+
+def seed_uploaded_storyboard_images(state: dict[str, Any]) -> dict[str, Any]:
+    """Reuse uploaded image panels in the existing per-scene image manager."""
+
+    current = normalize_state(state)
+    assigned_file_ids = {
+        _clean_text(image.get("file_id"), 1000)
+        for scene in current.get("scenes") or []
+        for image in (
+            dict(scene.get("start_image") or {}),
+            dict(scene.get("end_image") or {}),
+        )
+        if image.get("status") == "ready" and _clean_text(image.get("file_id"), 1000)
+    }
+    for item in current.get("uploaded_storyboard_files") or []:
+        mime_type = _clean_text(item.get("mime_type"), 120).lower()
+        file_id = _clean_text(item.get("file_id"), 1000)
+        if (
+            not file_id
+            or file_id in assigned_file_ids
+            or not mime_type.startswith("image/")
+        ):
+            continue
+        if not next_missing_image_target(current):
+            break
+        current = assign_next_image(current, {
+            "file_id": file_id,
+            "source_type": "uploaded_storyboard",
+            "artifact_receipt": {},
+            "prompt_version": 0,
+            "prompt": _clean_text(item.get("caption"), 3000),
+            "negative_prompt": "",
+        })
+        assigned_file_ids.add(file_id)
+    return normalize_state(current)
+
+
+def apply_middle_contract(
+    state: dict[str, Any],
+    *,
+    bible: dict[str, Any],
+    references: list[dict[str, Any]],
+    needs: dict[str, Any],
+    entity_summary: str,
+    creative_controls: dict[str, Any],
+    preservation_requirements: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist the Storyboard-only entity and creative middle contract."""
+
+    current = normalize_state(state)
+    clean_bible = deepcopy(dict(bible or {}))
+    clean_references = [
+        deepcopy(dict(item))
+        for item in references or []
+        if isinstance(item, dict)
+    ][:100]
+    clean_creative = {
+        str(key): deepcopy(dict(item))
+        for key, item in dict(creative_controls or {}).items()
+        if isinstance(item, dict)
+    }
+    clean_requirements = {
+        str(key): deepcopy(dict(item))
+        for key, item in dict(preservation_requirements or {}).items()
+        if isinstance(item, dict)
+    }
+    selected = {
+        key: _clean_text(item.get("value"), 1200)
+        for key, item in clean_creative.items()
+        if bool(item.get("enabled")) and _clean_text(item.get("value"), 1200)
+    }
+
+    current.update({
+        "entity_bible": clean_bible,
+        "entity_references": clean_references,
+        "entity_needs": deepcopy(dict(needs or {})),
+        "entity_summary": _clean_text(entity_summary, 800),
+        "creative_controls": clean_creative,
+        "preservation_requirements": clean_requirements,
+        "middle_complete": True,
+    })
+
+    style = dict(current.get("style") or {})
+    style_mapping = {
+        "context": "context",
+        "colors": "colors",
+        "visual_style": "visual",
+        "pacing": "pacing",
+        "emotion": "emotion",
+    }
+    for source_key, target_key in style_mapping.items():
+        if selected.get(source_key):
+            style[target_key] = selected[source_key]
+        elif source_key in clean_creative:
+            style.pop(target_key, None)
+    current["style"] = style
+
+    continuity = dict(clean_bible.get("continuity") or current.get("continuity") or {})
+    entity_fields = (
+        ("characters", "display_name", "characters"),
+        ("locations", "name", "locations"),
+        ("products", "name", "products"),
+        ("props", "name", "props"),
+    )
+    for source_field, label_field, target_field in entity_fields:
+        labels = [
+            _clean_text(item.get(label_field), 240)
+            for item in clean_bible.get(source_field) or []
+            if isinstance(item, dict) and _clean_text(item.get(label_field), 240)
+        ]
+        if labels:
+            continuity[target_field] = labels
+    current["continuity"] = continuity
+
+    selected_requirements = [
+        _clean_text(item.get("value"), 1200)
+        for item in clean_requirements.values()
+        if bool(item.get("enabled")) and _clean_text(item.get("value"), 1200)
+    ]
+    if selected_requirements:
+        continuity["requirements"] = selected_requirements
+    else:
+        continuity.pop("requirements", None)
+    current["continuity"] = continuity
+
+    camera = selected.get("camera", "")
+    motion = selected.get("motion", "")
+    negative = selected.get("negative", "")
+    requirement_copy = "; ".join(selected_requirements)
+    for scene in current.get("scenes") or []:
+        scene["camera_motion"] = camera or "Camera chuyển động có chủ đích và dừng tự nhiên trước điểm cắt"
+        scene["subject_motion"] = motion or str(scene.get("main_action") or "")
+        scene["negative_constraints"] = "; ".join(
+            item
+            for item in (
+                negative or "không cắt giữa hành động, không đổi nhận diện, không tạo chữ giả",
+                requirement_copy,
+            )
+            if item
+        )
+    return normalize_state(current)
 
 
 def image_record(
@@ -865,6 +1136,10 @@ def preflight(state: dict[str, Any]) -> dict[str, Any]:
         blockers.append("storyboard_aspect_ratio_missing")
     if not current.get("content"):
         blockers.append("storyboard_content_missing")
+    if not current.get("reference_gate_complete"):
+        blockers.append("storyboard_reference_image_missing")
+    if not current.get("middle_complete"):
+        blockers.append("storyboard_middle_incomplete")
     if any(not scene.get("content_approved") for scene in current["scenes"]):
         blockers.append("storyboard_scene_content_not_approved")
     summary = asset_summary(current)

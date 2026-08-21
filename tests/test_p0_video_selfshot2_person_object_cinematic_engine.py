@@ -305,16 +305,17 @@ def test_dynamic_subscreens_render_the_exact_calling_screen_as_back(
     assert model["rows"][-1][0][1] == expected
 
 
-def test_review_exposes_logo_watermark_and_returns_to_review() -> None:
+def test_review_enters_one_shared_addon_and_returns_to_prompts() -> None:
     draft = _ready_draft()
     model = video_selfshot2.screen_model("review", draft)
     callbacks = {callback for row in model["rows"] for _label, callback in row}
-    assert "vproduct|ss2|review_addons" in callbacks
+    assert "vproduct|ss2|finish" in callbacks
+    assert "vproduct|ss2|review_addons" not in callbacks
     draft["screen_return_overrides"] = {"addons": "review"}
     assert video_selfshot2.screen_parent("addons", draft) == "review"
     assert video_selfshot2.validate_rows(
         model["rows"],
-        back_callback="vproduct|ss2|show|addons",
+        back_callback="vproduct|ss2|show|prompts",
     )["ok"] is True
 
 
@@ -336,12 +337,12 @@ def test_all_rendered_selfshot_callbacks_have_a_known_single_owner_contract() ->
         "compile_prompts", "prompt", "audio_review", "audio", "volume", "volume_set",
         "addon", "addon_position", "addon_position_set",
     }
-    bot_operations = {"show", "source", "reset", "finish", "quality", "review_addons"}
+    bot_operations = {"show", "source", "resume_segment", "reset", "finish", "quality", "review_addons"}
     for screen in video_selfshot2.SCREEN_PARENTS:
         model = video_selfshot2.screen_model(screen, draft)
         for callback in _callbacks(model):
             assert video_selfshot2.callback_allowed(screen, callback, draft) is True
-            if callback in {"vproduct|selfshot_hub", "menu|main"}:
+            if callback in {"vproduct|selfshot_hub", "menu|main_video"}:
                 continue
             parts = callback.split("|")
             assert parts[:2] == ["vproduct", "ss2"]
@@ -650,6 +651,8 @@ def test_bot_has_one_selfshot2_owner_no_generic_x_and_delivery_gate() -> None:
     assert "Có lỗi khi xử lý lệnh" not in block
     assert "callback_allowed" in block
     assert "return await video_selfshot2_render(query, uid, current_screen" in block
+    finish = block[block.index('if operation == "finish":'):]
+    assert 'return await video_tail9_render(query, uid, context, "addon")' in finish
     assert "selfshot2_continuity_validation_required" in BOT_SOURCE
     assert "continuity_validation_passed" in BOT_SOURCE
     assert '@fastapi_app.get("/api/v1/worker/jobs/{job_id}/source-video")' in BOT_SOURCE

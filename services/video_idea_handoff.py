@@ -26,7 +26,7 @@ NEXT_STEPS = {
     "script_image_video": "scene_plan",
     "video_reference": "scene_plan",
     "motion_prompt": "scene_plan",
-    "storyboard_prompt": "storyboard_scene_review",
+    "storyboard_prompt": "storyboard_entity_middle",
     "self_shot_scene_change": "selfshot2_scene_plan",
     "self_shot_cinematic_transform": "selfshot3_timeline",
     "multi_scene_film": "long_chapter_plan",
@@ -54,7 +54,7 @@ CONTINUATION_REGISTRY = {
     },
     "storyboard_prompt": {
         "public_product_type": "storyboard_to_video",
-        "continuation": "scene_review",
+        "continuation": "entity_middle",
         "flow_owner": "storyboard",
         "engine_route": "storyboard_to_video",
     },

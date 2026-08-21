@@ -12,6 +12,7 @@ ARCH1_SCOPE_MARKER = "test_arch1_scope_lock"
 SCENE3UX2_BRANCH_PREFIX = "hotfix/p0-video-scene3ux2-"
 VIDEO_EDIT3_BRANCH_PREFIX = "hotfix/p0-video-edit3-"
 VIDEO_EDIT_COMPLETION_BRANCH_PREFIX = "fix/p0-videoedit-completion-"
+VIDEO_EDIT_FLOW_ISOLATION_BRANCH_PREFIX = "fix/p0-videoedit-flow-isolation"
 VIDEO_EDIT_COMPLETION_SCOPE_FILES = frozenset(
     {
         "bot.py",
@@ -56,6 +57,18 @@ VIDEO_EDIT3_SCOPE_FILES = frozenset(
         "services/video_edit_state_machine.py",
         "services/video_local_validation.py",
         "tests/test_p0_video_edit3_canonical_intake_route_state_machine.py",
+    }
+)
+VIDEO_EDIT_FLOW_ISOLATION_EXTRA_FILES = frozenset(
+    {
+        ".gitignore",
+        "services/video_edit_long_media.py",
+        "services/video_edit_state_store.py",
+        "tests/test_p0_admin_broadcast2.py",
+        "tests/test_p0_video_edit4_editor_state_ownership.py",
+        "tests/test_p0_videoedit_audio_contract.py",
+        "tests/test_p0_videoedit_filter_admission.py",
+        "tests/test_p0_videoedit_flow_isolation_branding.py",
     }
 )
 SCENE3UX2_SCOPE_FILES = frozenset(
@@ -200,6 +213,9 @@ def aiedit1_scope_files(paths=()):
         allowed.update(VIDEO_EDIT3_SCOPE_FILES)
     if _current_branch().startswith(VIDEO_EDIT_COMPLETION_BRANCH_PREFIX):
         allowed.update(VIDEO_EDIT_COMPLETION_SCOPE_FILES)
+    if _current_branch().startswith(VIDEO_EDIT_FLOW_ISOLATION_BRANCH_PREFIX):
+        allowed.update(VIDEO_EDIT_COMPLETION_SCOPE_FILES)
+        allowed.update(VIDEO_EDIT_FLOW_ISOLATION_EXTRA_FILES)
     marker_path = Path(__file__).resolve().parents[1] / LOCAL1_BOOT_COMPAT_TEST
     marker_present = (
         marker_path.is_file()

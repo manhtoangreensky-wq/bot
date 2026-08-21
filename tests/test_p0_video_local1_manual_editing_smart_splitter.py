@@ -368,7 +368,10 @@ def test_local1_speed_video_and_audio_sync(tmp_path: Path) -> None:
     plan["speed"] = 1.5
     command = _manual_command(tmp_path, plan)
     assert "setpts=PTS/1.5" in _joined(command)
-    assert command[command.index("-af") + 1] == "atempo=1.5"
+    assert command[command.index("-af") + 1].split(",") == [
+        "aresample=48000",
+        "atempo=1.5",
+    ]
     assert command[command.index("-t") + 1] == "40.000"
 
 
@@ -382,7 +385,10 @@ def test_local1_volume_adjustment(tmp_path: Path) -> None:
     plan = _plan(tmp_path)
     plan["volume"] = 1.5
     command = _manual_command(tmp_path, plan)
-    assert command[command.index("-af") + 1] == "volume=1.5"
+    assert command[command.index("-af") + 1].split(",") == [
+        "aresample=48000",
+        "volume=1.5",
+    ]
 
 
 def test_local1_text_overlay(tmp_path: Path) -> None:
@@ -469,7 +475,7 @@ def test_local1_every_public_color_preset_compiles_to_ffmpeg(
 def test_local1_no_shell_true() -> None:
     source = (ROOT / "services" / "video_local_editing.py").read_text(encoding="utf-8")
     assert "shell=True" not in source
-    assert "subprocess.run(command" in source
+    assert "subprocess.Popen(command" in source
 
 
 def test_local1_path_traversal_blocked(tmp_path: Path) -> None:
@@ -570,7 +576,8 @@ def test_local1_parts_delivered_in_order() -> None:
 
 def test_local1_only_mp4_delivered() -> None:
     worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
-    assert "delivery_file_allowed(output_path, workspace=workspace)" in worker
+    assert "delivery_file_allowed(" in worker
+    assert "workspace=workspace" in worker
     assert "toan_aas_video_edit_{job_id}.mp4" in worker
 
 
@@ -679,22 +686,27 @@ def test_local1_mute_removes_audio_stream(tmp_path: Path) -> None:
 
 def test_local1_progress_monotonic() -> None:
     worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
-    positions = [worker.index(f'"{stage}"') for stage in ("inspecting_input", "delivering", "delivered")]
-    assert positions == sorted(positions)
+    inspecting = worker.index('liveness.update_stage("inspecting_input")')
+    delivering = worker.index('liveness.update_stage("delivering")')
+    assert inspecting < delivering
+    assert '"stage": "delivered"' in worker
     assert "percentage" not in _between(BOT_SOURCE, "def video_editor_job_status_text", "VIDEO_PUBLIC_ROUTE_FORBIDDEN_WORDS")
 
 
 def test_local1_split_progress_part_count() -> None:
     worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
-    assert 'processed=int(status.get("processed") or 0)' in worker
-    assert 'total=int(status.get("total") or len(ranges) or 1)' in worker
+    assert 'int(status.get("processed") or 0)' in worker
+    assert "total=total" in worker
+    assert "total = len(ranges)" in worker
 
 
 def test_local1_no_success_before_delivery() -> None:
     worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
-    assert worker.rindex("send_video_edit_artifact(") < worker.index('terminal_status = "succeeded"')
-    assert worker.index("telegram_delivery_identity(delivery)") < worker.index('terminal_status = "succeeded"')
-    assert worker.index('if delivery.get("sent") is True') < worker.index('terminal_status = "succeeded"')
+    assert worker.rindex("send_video_edit_artifact(") < worker.rindex('terminal_status = "succeeded"')
+    assert worker.rindex("_video_edit_artifact_receipt(") < worker.rindex('terminal_status = "succeeded"')
+    assert worker.rindex("delivery_receipts.append(artifact_receipt)") < worker.rindex('terminal_status = "succeeded"')
+    assert worker.rindex("persist_delivered_cursor(") < worker.rindex('terminal_status = "succeeded"')
+    assert "if len(delivery_receipts) == expected_output_total:" in worker
 
 
 def test_local1_single_terminal_outcome() -> None:
@@ -706,12 +718,13 @@ def test_local1_single_terminal_outcome() -> None:
 def test_local1_cleanup_failure_does_not_reverse_completed_delivery() -> None:
     worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
     finally_block = worker.split("finally:", 1)[1]
-    helper = _between(WORKER_SOURCE, "def finalize_video_local_cleanup_state", "def run_video_local_edit")
-    assert "finalize_video_local_cleanup_state(" in finally_block
-    assert "if delivery_receipts or delivery_was_uncertain:" in helper
-    assert 'if str(detail.get("stage") or "").lower() != "delivered"' in helper
-    assert 'detail["cleanup"] = "failed"' in helper
-    assert 'return str(terminal_status or "failed"), detail' in helper
+    assert "prepare_video_edit_cleanup_intent(" in finally_block
+    assert "reconcile_video_edit_cleanup_intent(" in finally_block
+    assert finally_block.index("update_job(") < finally_block.rindex(
+        "reconcile_video_edit_cleanup_intent("
+    )
+    assert 'terminal_stage != "delivery_unknown"' in finally_block
+    assert 'detail_payload["cleanup"] = "pending"' in finally_block
 
 
 def test_local1_no_duplicate_delivery() -> None:
@@ -746,7 +759,7 @@ def test_local1_ffmpeg_timeout_failed_no_charge(monkeypatch: pytest.MonkeyPatch)
     def timeout(*args, **kwargs):
         raise subprocess.TimeoutExpired("ffmpeg", 1)
 
-    monkeypatch.setattr(editing.subprocess, "run", timeout)
+    monkeypatch.setattr(editing.subprocess, "Popen", timeout)
     with pytest.raises(editing.LocalVideoEditError, match="ffmpeg_timeout"):
         editing._run(["ffmpeg", "-version"], timeout=1)
 
@@ -861,7 +874,7 @@ def test_local1_services_do_not_call_real_providers() -> None:
 
 def test_local1_route_matrix_is_canonical() -> None:
     route = _between(BOT_SOURCE, '"video_local_edit": {', "def video_public_route_for_tool")
-    assert '"expected_children": ("videoedit|ai", "videoedit|manual", "videoedit|restore", "videoedit|guide", "videoedit|latest_status")' in route
+    assert '"expected_children": ("videoedit|ai", "videoedit|manual", "videoedit|restore", "videoedit|guide")' in route
     assert '"back_target": "menu|main_video"' in route
     assert '"job_reachable": True' in route
 

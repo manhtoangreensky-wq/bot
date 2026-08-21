@@ -15,6 +15,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from services import video_ai_real_pricing
+
 
 PRODUCT_FIELDS = (
     "product_id",
@@ -43,6 +45,18 @@ PUBLIC_VIDEO_PACKAGES = (
     "package_400",
     "package_500",
     "package_600",
+    "package_800",
+    "package_1000",
+    "package_1200",
+    "package_1500",
+)
+UIFLOW3_EXTENDED_VIDEO_PACKAGES = (
+    "package_200",
+    "package_300",
+    "package_400",
+    "package_500",
+    "package_600",
+    "package_700",
     "package_800",
     "package_1000",
     "package_1200",
@@ -117,21 +131,21 @@ VIDEO_PRODUCT_REGISTRY: dict[str, dict[str, Any]] = {
         "script_image_video", "🧩 Kịch bản → Ảnh → Video",
         "Tạo kịch bản, shot list, prompt ảnh rồi prompt chuyển động/video từng cảnh.",
         "topic|script|product", "script|shot_list|image_prompts|video_prompts", "free_planning_paid_render",
-        PUBLIC_VIDEO_PACKAGES, template="product_ad", max_duration=60,
+        UIFLOW3_EXTENDED_VIDEO_PACKAGES, template="product_ad", max_duration=60,
         next_steps=("export_prompt_pack", "create_scene_image", "render_scene", "assemble_multiscene"),
     ),
     "video_ai_real": _product(
         "video_ai_real", "🎬 Video AI chân thật",
         "Biến prompt hoặc ảnh tham chiếu thành một video AI ngắn, chân thật.",
         "text_prompt|optional_reference_image", "rendered_video", "paid_after_final_confirm",
-        PUBLIC_VIDEO_PACKAGES, provider=True, template="realistic_video", max_duration=12,
+        UIFLOW3_EXTENDED_VIDEO_PACKAGES, provider=True, template="realistic_video", max_duration=12,
         next_steps=("improve_prompt", "choose_package", "final_confirm", "provider_job"),
     ),
     "image_to_video": _product(
         "image_to_video", "🖼 Ảnh → Video",
         "Tạo motion prompt miễn phí hoặc render video từ 1–4 ảnh.",
         "1_to_4_images|scene_description", "motion_prompt|rendered_video", "free_prompt_paid_render",
-        PUBLIC_VIDEO_PACKAGES, provider=True, template="image_to_video_motion", max_duration=12,
+        UIFLOW3_EXTENDED_VIDEO_PACKAGES, provider=True, template="image_to_video_motion", max_duration=12,
         next_steps=("motion_prompt", "choose_package", "final_confirm", "provider_job"),
     ),
     "frame_video_local": _product(
@@ -144,14 +158,14 @@ VIDEO_PRODUCT_REGISTRY: dict[str, dict[str, Any]] = {
         "self_shot_scene_change", "🎥 Tự quay & đổi cảnh AI",
         "Giữ chủ thể/hướng chuyển động từ video hoặc ảnh nguồn rồi đổi bối cảnh, ánh sáng và phong cách.",
         "user_video|user_image", "video_to_video_plan|edited_video", "free_plan_paid_guarded_render",
-        PUBLIC_VIDEO_PACKAGES, provider=True, template="transformation_video", max_duration=12,
+        UIFLOW3_EXTENDED_VIDEO_PACKAGES, provider=True, template="transformation_video", max_duration=12,
         next_steps=("collect_source", "preserve_subject", "scene_plan", "choose_package"),
     ),
     "self_shot_cinematic_transform": _product(
         "self_shot_cinematic_transform", "🎥 Tự quay & biến đổi điện ảnh",
         "Giữ khuôn mặt, vóc dáng, chuyển động và tương tác nguồn trong một cú máy; biến đổi trang phục, thế giới và hiệu ứng theo từng giai đoạn.",
         "source_video", "cinematic_transform_plan|final_mp4", "free_plan_paid_guarded_render",
-        PUBLIC_VIDEO_PACKAGES, provider=True, template="one_take_cinematic_transform", max_duration=120,
+        UIFLOW3_EXTENDED_VIDEO_PACKAGES, provider=True, template="one_take_cinematic_transform", max_duration=120,
         next_steps=("collect_source", "analyze_source", "lock_subject", "build_timeline", "choose_package"),
     ),
     "multi_scene_film": _product(
@@ -200,72 +214,88 @@ VIDEO_MENU_ROWS: tuple[tuple[str, ...], ...] = (
 )
 
 
+def _canonical_video_package_fields(tier_id: int) -> dict[str, int]:
+    quality = video_ai_real_pricing.public_quality_by_tier(tier_id)
+    return {
+        "tier_id": int(tier_id),
+        "price_xu": int(quality["unit_xu"]),
+        "duration_seconds": int(quality["seconds"]),
+    }
+
+
 VIDEO_PACKAGE_REGISTRY: dict[str, dict[str, Any]] = {
     "package_200": {
-        "package_id": "package_200", "price_xu": 200, "duration_seconds": 6,
+        "package_id": "package_200", **_canonical_video_package_fields(200),
         "max_scenes": 1, "max_shots": 1, "aspect_ratios": ["9:16", "16:9", "1:1"],
         "provider_quality": "basic_short_default", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "self_shot_cinematic_transform", "multi_scene_film"],
         "allowed_addons": ["none", "default_no_audio", "stock_music_free"], "preview_policy": "not_required",
         "public_enabled": True, "cost_gate": "intentional_starter_boundary",
     },
     "package_300": {
-        "package_id": "package_300", "price_xu": 300, "duration_seconds": 8,
+        "package_id": "package_300", **_canonical_video_package_fields(300),
         "max_scenes": 2, "max_shots": 2, "aspect_ratios": ["9:16", "16:9", "1:1"],
         "provider_quality": "standard_short", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "self_shot_cinematic_transform", "multi_scene_film"],
         "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script"], "preview_policy": "optional",
         "public_enabled": True, "cost_gate": "provider_cost_must_be_known_safe",
     },
     "package_400": {
-        "package_id": "package_400", "price_xu": 400, "duration_seconds": 12,
+        "package_id": "package_400", **_canonical_video_package_fields(400),
         "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
         "provider_quality": "enhanced_short", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "self_shot_cinematic_transform", "multi_scene_film"],
         "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"], "preview_policy": "optional",
         "public_enabled": True, "cost_gate": "provider_cost_must_be_known_safe",
     },
     "package_500": {
-        "package_id": "package_500", "price_xu": 500, "duration_seconds": 12,
+        "package_id": "package_500", **_canonical_video_package_fields(500),
         "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
         "provider_quality": "advanced", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "self_shot_cinematic_transform", "multi_scene_film"],
         "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"],
         "preview_policy": "optional", "public_enabled": True, "cost_gate": "open_business_package",
     },
     "package_600": {
-        "package_id": "package_600", "price_xu": 600, "duration_seconds": 12,
+        "package_id": "package_600", **_canonical_video_package_fields(600),
         "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
         "provider_quality": "business", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "self_shot_cinematic_transform", "multi_scene_film"],
         "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"],
         "preview_policy": "optional", "public_enabled": True, "cost_gate": "open_business_package",
     },
+    "package_700": {
+        "package_id": "package_700", **_canonical_video_package_fields(700),
+        "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
+        "provider_quality": "long_audio", "allowed_products": ["video_ai_real", "image_to_video", "script_image_video", "self_shot_scene_change", "self_shot_cinematic_transform"],
+        "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"],
+        "preview_policy": "optional", "public_enabled": True, "cost_gate": "open_business_package",
+    },
     "package_800": {
-        "package_id": "package_800", "price_xu": 800, "duration_seconds": 12,
+        "package_id": "package_800", **_canonical_video_package_fields(800),
         "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
         "provider_quality": "high", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "self_shot_cinematic_transform", "multi_scene_film"],
         "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"],
         "preview_policy": "optional", "public_enabled": True, "cost_gate": "open_business_package",
     },
     "package_1000": {
-        "package_id": "package_1000", "price_xu": 1000, "duration_seconds": 12,
+        "package_id": "package_1000", **_canonical_video_package_fields(1000),
         "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
         "provider_quality": "professional", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "self_shot_cinematic_transform", "multi_scene_film"],
         "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"],
         "preview_policy": "optional", "public_enabled": True, "cost_gate": "open_business_package",
     },
     "package_1200": {
-        "package_id": "package_1200", "price_xu": 1200, "duration_seconds": 12,
+        "package_id": "package_1200", **_canonical_video_package_fields(1200),
         "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
         "provider_quality": "pro_plus", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "self_shot_cinematic_transform", "multi_scene_film"],
         "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"],
         "preview_policy": "optional", "public_enabled": True, "cost_gate": "open_business_package",
     },
     "package_1500": {
-        "package_id": "package_1500", "price_xu": 1500, "duration_seconds": 12,
+        "package_id": "package_1500", **_canonical_video_package_fields(1500),
         "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
         "provider_quality": "premium", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "self_shot_cinematic_transform", "multi_scene_film"],
         "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"],
         "preview_policy": "optional", "public_enabled": True, "cost_gate": "open_business_package",
     },
     "package_600_off": {
-        "package_id": "package_600_off", "price_xu": 600, "duration_seconds": 0, "max_scenes": 0, "max_shots": 0,
+        "package_id": "package_600_off", "price_xu": 0, "duration_seconds": 0, "max_scenes": 0, "max_shots": 0,
         "aspect_ratios": [], "provider_quality": "off", "allowed_products": [], "allowed_addons": [],
         "preview_policy": "off", "public_enabled": False, "cost_gate": "hidden_until_task3e",
     },
@@ -279,7 +309,7 @@ VIDEO_PACKAGE_REGISTRY: dict[str, dict[str, Any]] = {
 
 LEGACY_TIER_TO_PACKAGE = {
     "low": "package_200", "basic": "package_300", "common": "package_400",
-    "advanced": "package_500", "standard": "package_600", "high": "package_800",
+    "advanced": "package_500", "standard": "package_600", "long": "package_700", "high": "package_800",
     "future_1000": "package_1000", "future_1200": "package_1200", "future_1500": "package_1500",
 }
 

@@ -13,20 +13,50 @@ def _callbacks(markup):
     return {button.callback_data for button in _buttons(markup) if button.callback_data}
 
 
-def test_main_menu_has_translation_button_and_public_rows_are_balanced():
-    for lang in ("vi", "en", "zh"):
+def test_main_menu_uses_the_compact_two_column_hub_layout():
+    for lang in ("vi", "en", "zh", "ko", "id"):
         public = bot.localized_main_menu_keyboard(False, lang)
         callbacks = _callbacks(public)
         assert "menu|translate" in callbacks
-        assert "back_lang" not in callbacks
+        assert "back_lang" in callbacks
         assert "menu|admin" not in callbacks
-        assert all(len(row) == 2 for row in public.inline_keyboard)
+        assert [len(row) for row in public.inline_keyboard] == [2, 2, 2, 2, 2, 2, 2]
+        assert [button.callback_data for button in public.inline_keyboard[0]] == [
+            "freehub|main", "menu|chat_pro",
+        ]
+        assert [button.callback_data for button in public.inline_keyboard[4]] == [
+            "menu|main_guide", "menu|support",
+        ]
+        assert [button.callback_data for button in public.inline_keyboard[5]] == [
+            "pricing|main", "feedback|start",
+        ]
+        assert public.inline_keyboard[6][0].url == bot.TOAN_AAS_COMMUNITY_URL
+        assert public.inline_keyboard[6][1].callback_data == "back_lang"
 
         admin = bot.localized_main_menu_keyboard(True, lang)
         assert admin.inline_keyboard[-1][0].callback_data == "menu|admin"
         assert len(admin.inline_keyboard[-1]) == 1
-        assert len(admin.inline_keyboard[-2]) == 2
-        assert all(len(row) == 2 for row in admin.inline_keyboard[:-1])
+        assert [len(row) for row in admin.inline_keyboard[:-1]] == [2, 2, 2, 2, 2, 2, 2]
+
+
+def test_language_picker_lists_every_supported_locale_once_before_navigation():
+    picker = bot.language_choice_keyboard().inline_keyboard
+    locale_callbacks = [
+        button.callback_data
+        for row in picker
+        for button in row
+        if (button.callback_data or "").startswith("lang|")
+    ]
+    assert locale_callbacks == [f"lang|{locale}" for locale in bot.USER_LANGUAGE_ORDER]
+    assert len(locale_callbacks) == len(set(locale_callbacks))
+    language_rows = [
+        row for row in picker
+        if any((button.callback_data or "").startswith("lang|") for button in row)
+    ]
+    assert all(len(row) == 2 for row in language_rows[:-1])
+    assert len(language_rows[-1]) == 1
+    assert all(not (button.callback_data or "").startswith("lang|") for button in picker[-1])
+    assert [button.callback_data for button in picker[-1]] == ["lang_back", "menu|main"]
 
 
 def test_language_entry_is_in_account_and_translation_menu_opens():

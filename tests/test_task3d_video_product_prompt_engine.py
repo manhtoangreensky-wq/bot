@@ -1501,9 +1501,8 @@ def test_video_output_menu_has_prompt_image_video_buttons():
     markup = bot.task3d_result_keyboard("storyboard_prompt", "vi")
     assert [[button.text for button in row] for row in markup.inline_keyboard] == [
         ["🖼 Tạo prompt ảnh", "🎥 Tạo prompt video"],
-        ["📦 Xuất bộ prompt", "💾 Lưu Kho prompt"],
-        ["🔁 Đổi phong cách"],
-        ["🎬 Dùng để tạo video"],
+        ["📦 Xuất bộ câu lệnh", "💾 Lưu Kho câu lệnh"],
+        ["🔁 Đổi phong cách", "🎬 Dùng để tạo video"],
         ["⬅️ Quay lại", "🏠 Menu chính"],
     ]
     assert _callbacks(markup)[:2] == ["vproduct|prompt_image", "vproduct|prompt_video"]

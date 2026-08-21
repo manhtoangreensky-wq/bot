@@ -66,11 +66,11 @@ def test_music_studio_has_instrumental_song_vault_edit():
 def test_music_creation_has_three_tiers_only():
     labels = _labels(bot.music_product_tier_keyboard("background", "vi"))
     tier_labels = [item for item in labels if "Xu" in item]
-    assert tier_labels == ["🎵 Cơ bản — 100 Xu", "🎶 Tiêu chuẩn — 150 Xu", "💎 Cao cấp — 200 Xu"]
+    assert tier_labels == ["🎵 Cơ bản — 130 Xu", "🎶 Tiêu chuẩn — 150 Xu", "💎 Cao cấp — 200 Xu"]
 
 
-def test_music_tier_basic_price_100():
-    assert bot.music_product_tier_price_xu("basic") == 100
+def test_music_tier_basic_price_130():
+    assert bot.music_product_tier_price_xu("basic") == 130
 
 
 def test_music_tier_standard_price_150():
