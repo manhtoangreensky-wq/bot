@@ -10,6 +10,7 @@ from copy import deepcopy
 from hashlib import sha256
 import json
 from math import ceil
+import re
 from typing import Any, Iterable, Mapping
 from uuid import uuid4
 
@@ -36,6 +37,9 @@ DEFAULT_CONTINUITY = {
     "location": True,
 }
 VIDEO_AI_REAL_PRODUCT_FIRST_MODES = frozenset({"prompt_video", "image_video"})
+_SCENE_PLAN_MARKER_RE = re.compile(
+    r"(?i)\b(?:cảnh|scene)\s*(\d{1,2})\s*[:.\-)–—]?\s*"
+)
 
 
 ENTRY_ADAPTERS: dict[str, dict[str, Any]] = {
@@ -1956,6 +1960,59 @@ def suggest_scene_plan(state: Mapping[str, Any]) -> dict[str, Any]:
     return normalize_state(current)
 
 
+def _scene_plan_marked_actions(value: Any, scene_count: int) -> list[str]:
+    text = str(value or "").strip()
+    matches = list(_SCENE_PLAN_MARKER_RE.finditer(text))
+    expected = list(range(1, max(1, int(scene_count or 1)) + 1))
+    if [int(match.group(1)) for match in matches] != expected:
+        return []
+    actions = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        action = _text(text[match.end():end].strip(" \t\r\n:;|,-–—"), 800)
+        if not action:
+            return []
+        actions.append(action)
+    return actions
+
+
+def _scene_plan_vault_actions(state: Mapping[str, Any], scene_count: int) -> list[str]:
+    count = max(1, int(scene_count or 1))
+    scene_intents = [
+        _text(item.get("original_scene_intent"), 800)
+        for item in list(state.get("scenes") or [])
+        if str(item.get("planning_source") or "") != "local_prompt_vault"
+    ]
+    if len(scene_intents) == count and all(scene_intents) and len(set(scene_intents)) == count:
+        return scene_intents
+
+    content = dict(state.get("content") or {})
+    brief = dict(content.get("approved_brief") or {})
+    source_metadata = dict((state.get("source") or {}).get("metadata") or {})
+    candidates = [
+        _scene_plan_intent(state),
+        source_metadata.get("trend_analysis"),
+        source_metadata.get("video_analysis"),
+        source_metadata.get("analysis"),
+        source_metadata.get("transcript"),
+    ]
+    for candidate in candidates:
+        actions = _scene_plan_marked_actions(candidate, count)
+        if actions:
+            return actions
+
+    sequence = str((brief.get("prompt_blueprint") or {}).get("sequence") or "")
+    for candidate in [sequence, *candidates]:
+        parts = [
+            _text(item, 800)
+            for item in re.split(r"\s*(?:→|->|;|\r?\n)\s*", str(candidate or ""))
+            if _text(item, 800)
+        ]
+        if len(parts) == count:
+            return parts
+    return []
+
+
 def suggest_scene_plan_from_vault(state: Mapping[str, Any]) -> dict[str, Any]:
     """Apply the existing local prompt vault when Gemini is unavailable."""
 
@@ -1966,6 +2023,8 @@ def suggest_scene_plan_from_vault(state: Mapping[str, Any]) -> dict[str, Any]:
     intent = _scene_plan_intent(current)
     product = str(current.get("parent_product") or "")
     total = len(scenes)
+    scene_actions = _scene_plan_vault_actions(current, total)
+    subject = _text(intent.split("|", 1)[0], 180) or "Nội dung đã khóa"
     for index, scene in enumerate(scenes, 1):
         if bool(scene.get("locked_by_user")) or str(scene.get("planning_source") or "") == "user":
             continue
@@ -1978,11 +2037,16 @@ def suggest_scene_plan_from_vault(state: Mapping[str, Any]) -> dict[str, Any]:
                 f"{template.get('purpose') or template.get('title') or scene['scene_role']}: {intent}",
                 1600,
             )
+        action = scene_actions[index - 1] if index <= len(scene_actions) else ""
         if product == "video_ai_real":
             duration = max(1, _integer(scene.get("duration_target"), _integer(current["format"].get("seconds_per_scene"), 8)))
-            scene["semantic_beat"] = _text(f"{intent} · Cảnh {index}", 800)
+            scene["semantic_beat"] = _text(action or f"{subject} · Cảnh {index}", 800)
             scene["main_action"] = _text(
-                f"Thực hiện một hành động duy nhất theo nội dung cảnh và hoàn tất trong {duration} giây.",
+                (
+                    f"{action}. Hoàn tất trọn hành động trong {duration} giây."
+                    if action
+                    else f"Thực hiện một hành động duy nhất cho Cảnh {index} và hoàn tất trong {duration} giây."
+                ),
                 800,
             )
             scene["completion_state"] = _text(
@@ -1991,9 +2055,13 @@ def suggest_scene_plan_from_vault(state: Mapping[str, Any]) -> dict[str, Any]:
             )
         else:
             purpose = _text(template.get("purpose") or template.get("title"), 240) or f"Phát triển nội dung Cảnh {index}"
-            scene["semantic_beat"] = _text(f"{purpose}: {intent}", 800)
+            scene["semantic_beat"] = _text(action or f"{purpose}: {subject}", 800)
             scene["main_action"] = _text(
-                f"Thể hiện {purpose.lower()} bằng một hành động rõ ràng, bám nội dung đã khóa.",
+                (
+                    f"Thể hiện trọn vẹn: {action}."
+                    if action
+                    else f"Thể hiện {purpose.lower()} bằng một hành động rõ ràng, bám nội dung đã khóa."
+                ),
                 800,
             )
             scene["completion_state"] = _text(

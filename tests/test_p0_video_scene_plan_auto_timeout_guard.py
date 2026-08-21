@@ -141,12 +141,28 @@ def test_scene_prompt_distinguishes_trend_script_and_long_form_products() -> Non
 
 def test_scene_plan_uses_local_prompt_vault_when_gemini_is_unavailable() -> None:
     state = _video_ai_real_state()
+    full_intent = (
+        "Cà phê thủ công cao cấp | giới thiệu quy trình trong 2 cảnh | "
+        "Mai, cảnh 1 rang hạt trong xưởng gạch đỏ; "
+        "cảnh 2 rót cà phê vào ly tại quầy sáng ấm"
+    )
+    state["content"]["original_intent"] = full_intent
+    state["content"]["approved_brief"]["title"] = full_intent
 
     planned = video_uiflow3.suggest_scene_plan_from_vault(state)
 
     assert all(scene["planning_source"] == "local_prompt_vault" for scene in planned["scenes"])
     assert all("6 giây" in scene["main_action"] for scene in planned["scenes"])
+    assert "rang hạt" in planned["scenes"][0]["main_action"].lower()
+    assert "rót cà phê" in planned["scenes"][1]["main_action"].lower()
+    assert all(full_intent not in scene["semantic_beat"] for scene in planned["scenes"])
     assert video_uiflow3.scene_plan_complete(planned) is True
+
+    replanned = video_uiflow3.suggest_scene_plan_from_vault(planned)
+
+    assert "rang hạt" in replanned["scenes"][0]["main_action"].lower()
+    assert "rót cà phê" in replanned["scenes"][1]["main_action"].lower()
+    assert all(full_intent not in scene["semantic_beat"] for scene in replanned["scenes"])
 
 
 def test_local_prompt_vault_fallback_covers_trend_script_and_long_form() -> None:
@@ -156,8 +172,15 @@ def test_local_prompt_vault_fallback_covers_trend_script_and_long_form() -> None
         ("multi_scene_film", 3),
     ):
         state = video_uiflow3.new_state(product_id, draft_id=f"vault-{product_id}")
+        scene_actions = [f"Hành động riêng của cảnh {index}" for index in range(1, count + 1)]
+        marked_content = "; ".join(
+            f"Cảnh {index}: {action}"
+            for index, action in enumerate(scene_actions, 1)
+        )
         if product_id == "multi_scene_film":
             state = video_uiflow3.set_series_goal(state, "Mạch phim xuyên suốt")
+            state = video_uiflow3.set_episode_content(state, marked_content)
+            state = video_uiflow3.lock_episode_content(state)
         state = video_uiflow3.set_format(
             state,
             ratio="9:16",
@@ -166,8 +189,8 @@ def test_local_prompt_vault_fallback_covers_trend_script_and_long_form() -> None
         state = video_uiflow3.set_content_candidate(
             state,
             source="manual",
-            original_intent="Nội dung sản phẩm đã khóa.",
-            approved_brief={"title": "Nội dung sản phẩm đã khóa"},
+            original_intent=marked_content,
+            approved_brief={"title": marked_content},
         )
         state = video_uiflow3.lock_content(state)
         state = video_uiflow3.confirm_scene_count(state, count)
@@ -175,7 +198,11 @@ def test_local_prompt_vault_fallback_covers_trend_script_and_long_form() -> None
         planned = video_uiflow3.suggest_scene_plan_from_vault(state)
 
         assert all(scene["planning_source"] == "local_prompt_vault" for scene in planned["scenes"])
-        assert all("nội dung đã khóa" in scene["main_action"].lower() for scene in planned["scenes"])
+        assert all(
+            action.lower() in scene["main_action"].lower()
+            for action, scene in zip(scene_actions, planned["scenes"])
+        )
+        assert len({scene["semantic_beat"] for scene in planned["scenes"]}) == count
         assert video_uiflow3.scene_plan_complete(planned) is True
 
 
