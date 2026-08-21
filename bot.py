@@ -138075,7 +138075,6 @@ async def handle_admin_help_callback(update: Update, context: ContextTypes.DEFAU
     )
 
 
-autopost_engine_code = '''
 # ==============================================================================
 #                      AUTO-POST & MARKETING GROWTH ENGINE
 # ==============================================================================
@@ -138275,9 +138274,6 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
         return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=reply_kb)
 
     return await safe_edit_query_message(query, autopost_hub_text(lang, uid), parse_mode="HTML", reply_markup=autopost_hub_keyboard(lang, is_admin))
-'''
-exec(compile(autopost_engine_code, f"{__file__}:autopost_engine", "exec"), globals())
-
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
