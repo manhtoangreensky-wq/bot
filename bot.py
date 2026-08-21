@@ -78867,7 +78867,7 @@ def video_ai_real_pilot_screen_payload(
         if complete:
             rows.append([("✅ Duyệt kế hoạch", "vid3|scene_plan_done")])
         rows.extend(video_ai_real_pilot_nav_rows(back="vid3|pilot_scene_plan_back"))
-        return "\\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\n".join(lines), video_uiflow3_keyboard(rows)
 
     if step == "branding" and view in {
         "branding_logo_position",
@@ -79451,29 +79451,28 @@ def video_ai_real_pilot_screen_payload(
     return None
 
 
+VIDEO_UIFLOW3_SCENE_PLAN_AI_HTTP_TIMEOUT_MS = 12_000
+VIDEO_UIFLOW3_SCENE_PLAN_AI_WAIT_TIMEOUT_SECONDS = 15.0
+
+
 def video_uiflow3_ai_enhance_scenes(state: dict) -> dict:
-    """Generate realistic Vietnamese scene plans using Google Gemini 3.7 Flash when available, falling back to rule-based outline."""
-    state = video_uiflow3.suggest_scene_plan(state)
+    """Generate product-aware scene plans with Gemini 3.7 Flash and the local prompt vault."""
+    state = video_uiflow3.suggest_scene_plan_from_vault(state)
     scenes = list(state.get("scenes") or [])
     if not scenes:
         return state
 
     if gemini_client:
         try:
-            brief = dict((state.get("content") or {}).get("approved_brief") or {})
-            intent = str((state.get("content") or {}).get("original_intent") or brief.get("title") or (state.get("series") or {}).get("goal") or "").strip()
-            if not intent and str(state.get("parent_product") or "") == "multi_scene_film":
-                intent = str(((state.get("episode") or {}).get("content") or {}).get("original_intent") or (state.get("series") or {}).get("goal") or "")
-
-            prompt = (
-                f"Ban la dao dien kich ban video AI chuyen nghiep. Hay viet ke hoach phan canh chi tiet cho video {len(scenes)} canh.\n"
-                f"Chu de/Noi dung: {intent or 'Video quang ba'}\n"
-                f"Tra ve JSON array chua dung {len(scenes)} object: semantic_beat (Y chinh tieng Viet co dau), main_action (Hanh dong nhan vat/vat the), completion_state (Ket qua cuoi canh).\n"
-                "Chi tra ve JSON thuan tuy, khong codeblock."
-            )
+            prompt = video_uiflow3.build_scene_plan_ai_prompt(state, scenes)
             res = gemini_client.models.generate_content(
                 model="gemini-3.7-flash",
                 contents=prompt,
+                config=types.GenerateContentConfig(
+                    http_options=types.HttpOptions(
+                        timeout=VIDEO_UIFLOW3_SCENE_PLAN_AI_HTTP_TIMEOUT_MS,
+                    ),
+                ),
             )
             text = (res.text or "").strip()
             if text.startswith("```"):
@@ -79493,6 +79492,22 @@ def video_uiflow3_ai_enhance_scenes(state: dict) -> dict:
             logger.warning(f"Gemini 3.7 scene plan enhancement skipped: {e}")
 
     return video_uiflow3.auto_assign_scenes(state)
+
+
+async def video_uiflow3_ai_enhance_scenes_bounded(state: dict) -> dict:
+    fallback = video_uiflow3.auto_assign_scenes(
+        video_uiflow3.suggest_scene_plan_from_vault(state)
+    )
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(video_uiflow3_ai_enhance_scenes, state),
+            timeout=VIDEO_UIFLOW3_SCENE_PLAN_AI_WAIT_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Gemini 3.7 scene plan enhancement timed out; using local prompt vault"
+        )
+        return fallback
 
 
 def video_film_fallback_script(state: dict) -> str:
@@ -83264,7 +83279,9 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         elif action == "scene_plan_edit":
             state = video_uiflow3_open_view(state, "scene_plan_list")
         elif action == "scene_plan_auto":
-            state = video_uiflow3_ai_enhance_scenes(state)
+            await query.answer("Đang phác thảo kế hoạch cảnh...")
+            callback_answered = True
+            state = await video_uiflow3_ai_enhance_scenes_bounded(state)
             state = video_uiflow3_clear_transient(state)
             state["navigation"]["current_step"] = "scene_plan"
         elif action == "plan_scene" and values:

@@ -13,6 +13,9 @@ from math import ceil
 from typing import Any, Iterable, Mapping
 from uuid import uuid4
 
+from services import video_profile_context_engine
+from services import video_product_profiles as video_profiles
+
 
 FLOW_SCHEMA_VERSION = 3
 MIN_CHARACTERS = 0
@@ -1665,6 +1668,209 @@ def scene_plan_complete(state: Mapping[str, Any]) -> bool:
     )
 
 
+def _scene_plan_intent(state: Mapping[str, Any]) -> str:
+    content = dict(state.get("content") or {})
+    brief = dict(content.get("approved_brief") or {})
+    episode = dict((state.get("episode") or {}).get("content") or {})
+    candidates = []
+    if str(state.get("parent_product") or "") == "multi_scene_film":
+        candidates.extend((episode.get("original_intent"), (state.get("series") or {}).get("goal")))
+    candidates.extend((
+        content.get("original_intent"),
+        brief.get("prompt"),
+        brief.get("visual_prompt"),
+        brief.get("title"),
+    ))
+    return _text(next((item for item in candidates if _text(item, 1200)), "Nội dung đã khóa"), 1200)
+
+
+def _scene_plan_selected_fields(state: Mapping[str, Any], group: str) -> dict[str, str]:
+    selected: dict[str, str] = {}
+    for key, raw in dict(state.get(group) or {}).items():
+        item = dict(raw) if isinstance(raw, Mapping) else {"enabled": True, "value": raw}
+        value = _text(item.get("value"), 240)
+        if bool(item.get("enabled")) and value:
+            selected[_text(key, 80)] = value
+    return selected
+
+
+def _scene_plan_profile_context(state: Mapping[str, Any], scene_count: int):
+    intent = _scene_plan_intent(state)
+    requested = _text((state.get("content") or {}).get("profile_id"), 120)
+    try:
+        profile = (
+            video_profiles.get_video_profile(requested)
+            if requested
+            else video_profiles.resolve_profile_for_menu_product(
+                str(state.get("parent_product") or ""),
+                user_text=intent,
+            )
+        )
+    except KeyError:
+        profile = video_profiles.resolve_profile_for_menu_product(
+            str(state.get("parent_product") or ""),
+            user_text=intent,
+        )
+    context = video_profile_context_engine.select_prompt_context(
+        profile.profile_id,
+        user_idea=intent,
+        creative_controls=_scene_plan_selected_fields(state, "creative_controls"),
+        scene_count=max(1, scene_count),
+        language="vi",
+    )
+    return profile, context
+
+
+def _scene_plan_reference_context(state: Mapping[str, Any]) -> tuple[int, str]:
+    rows = [
+        dict(item)
+        for item in list((state.get("source") or {}).get("assets") or [])
+        + list(state.get("references") or [])
+        if isinstance(item, Mapping)
+    ]
+    image_types = {"image", "frame", "photo", "storyboard", "storyboard_frame", "raw_image"}
+    images = [item for item in rows if str(item.get("asset_type") or "").lower() in image_types]
+    notes = []
+    for item in images[:5]:
+        metadata = dict(item.get("metadata") or {})
+        note = _text(
+            metadata.get("caption")
+            or metadata.get("description")
+            or item.get("role"),
+            120,
+        )
+        if note and note not in notes:
+            notes.append(note)
+    return len(images), "; ".join(notes)
+
+
+def build_scene_plan_ai_prompt(state: Mapping[str, Any], scenes: Iterable[Mapping[str, Any]]) -> str:
+    """Build a compact, product-aware Gemini instruction from existing planning state."""
+
+    current = normalize_state(state)
+    scene_rows = [dict(item) for item in scenes if isinstance(item, Mapping)]
+    product = str(current.get("parent_product") or "")
+    scene_count = max(1, len(scene_rows))
+    seconds = max(
+        1,
+        _integer(
+            (current.get("format") or {}).get("seconds_per_scene"),
+            _integer((scene_rows[0] if scene_rows else {}).get("duration_target"), 8),
+        ),
+    )
+    profile, context = _scene_plan_profile_context(current, scene_count)
+    intent = _scene_plan_intent(current)
+    brief = dict((current.get("content") or {}).get("approved_brief") or {})
+
+    if product == "video_ai_real":
+        product_rule = (
+            f"Video AI chân thật ngắn. Mỗi cảnh dài đúng {seconds} giây; mỗi cảnh chỉ một hành động cụ thể "
+            "có thể hoàn tất trong thời lượng đó; không viết thành kịch bản dài và không nhồi nhiều diễn biến."
+        )
+    elif product == "video_trend":
+        product_rule = "Bám dữ liệu trend đã phân tích và nội dung đầu vào đã khóa; không tự thêm một tuyến truyện khác."
+    elif product == "script_image_video":
+        product_rule = "Bám sát kịch bản đã khóa, chia đúng ý kịch bản vào từng cảnh và không tự đổi cốt truyện."
+    elif product == "multi_scene_film":
+        product_rule = "Giữ mạch liên tục của series và tập; bám nhân vật, bối cảnh, tình tiết và trạng thái nối tiếp."
+    elif product == "storyboard_prompt":
+        product_rule = "Bám đúng thứ tự và nội dung các khung storyboard đã có; không đảo hoặc phát minh khung mới."
+    elif product == "frame_video_local":
+        product_rule = "Bám thứ tự ảnh nguồn; mỗi cảnh chỉ mô tả chuyển động phù hợp với đúng ảnh của cảnh đó."
+    elif product == "self_shot_scene_change":
+        product_rule = "Bám chủ thể và chuyển động của video tự quay; chỉ thay đổi theo lựa chọn đã khóa."
+    else:
+        product_rule = f"Video ngắn; mỗi cảnh hoàn tất một hành động rõ ràng trong khoảng {seconds} giây."
+
+    characters = []
+    voice_cast = dict((current.get("audio") or {}).get("voice_cast") or {})
+    for item in list((current.get("bible") or {}).get("characters") or [])[:5]:
+        character_id = str(item.get("character_id") or "")
+        details = [
+            _text(item.get("display_name") or item.get("name") or "Nhân vật", 80),
+            _text(item.get("wardrobe") or item.get("appearance") or item.get("body"), 120),
+        ]
+        has_voice = bool(item.get("voice_id") or (voice_cast.get(character_id) or {}).get("voice_id"))
+        if has_voice:
+            details.append("giọng đã gán")
+        characters.append(" (".join([details[0], ", ".join(value for value in details[1:] if value)]) + ")" if any(details[1:]) else details[0])
+
+    locations = [
+        _text(item.get("name") or item.get("description"), 140)
+        for item in list((current.get("bible") or {}).get("locations") or [])[:5]
+        if _text(item.get("name") or item.get("description"), 140)
+    ]
+    image_count, image_notes = _scene_plan_reference_context(current)
+    audio = dict(current.get("audio") or {})
+    dialogue = [
+        _text(item.get("text"), 160)
+        for item in list(audio.get("dialogue_segments") or [])[:4]
+        if _text(item.get("text"), 160)
+    ]
+    music_plan = dict(audio.get("music_plan") or {})
+    music_detail = _text(
+        music_plan.get("track_id") or music_plan.get("prompt") or music_plan.get("title"),
+        120,
+    )
+    source_metadata = dict((current.get("source") or {}).get("metadata") or {})
+    source_analysis = _text(
+        source_metadata.get("trend_analysis")
+        or source_metadata.get("video_analysis")
+        or source_metadata.get("analysis")
+        or source_metadata.get("transcript"),
+        500,
+    )
+    selected_context = _text(
+        brief.get("selected_context_prompt")
+        or brief.get("prompt")
+        or brief.get("visual_prompt")
+        or brief.get("context_guidance"),
+        700,
+    )
+    creative = _scene_plan_selected_fields(current, "creative_controls")
+    requirements = _scene_plan_selected_fields(current, "preservation_requirements")
+
+    lines = [
+        "Bạn là đạo diễn lập kế hoạch cảnh video AI.",
+        f"Sản phẩm: {product}. {product_rule}",
+        f"Nội dung: {intent}",
+        f"Kho nội bộ: {profile.profile_id}; phong cách={context.selected_visual_style}; máy quay={context.selected_camera_language}; chuyển động={context.selected_motion_language}.",
+        f"Ảnh tham chiếu: {image_count}" + (f"; {image_notes}" if image_notes else "") + ". Giữ nhận dạng và bối cảnh theo ảnh đã gắn.",
+    ]
+    if product != "video_ai_real" and context.selected_script_formula:
+        lines.append(f"Cấu trúc phù hợp: {context.selected_script_formula}.")
+    if source_analysis:
+        lines.append(f"Phân tích nguồn: {source_analysis}")
+    if selected_context:
+        lines.append(f"Ngữ cảnh triển khai đã chọn: {selected_context}")
+    if creative:
+        lines.append("Phong cách đã chọn: " + "; ".join(f"{key}={value}" for key, value in creative.items()))
+    if requirements:
+        lines.append("Yêu cầu giữ nguyên: " + "; ".join(f"{key}={value}" for key, value in requirements.items()))
+    if characters:
+        lines.append("Nhân vật: " + "; ".join(characters))
+    if locations:
+        lines.append("Bối cảnh: " + "; ".join(locations))
+    if dialogue or str(audio.get("subtitle_mode") or ""):
+        lines.append(
+            "Lời thoại/phụ đề: "
+            + (" | ".join(dialogue) if dialogue else "theo nội dung đã chọn")
+            + f"; chế độ={str(audio.get('subtitle_mode') or 'theo dữ liệu hiện có')}. Mọi câu phải nói xong trong thời lượng cảnh."
+        )
+    if str(audio.get("music_scope") or "none") != "none":
+        lines.append(
+            f"Nhạc: {str(audio.get('music_scope') or 'none')}"
+            + (f"; {music_detail}" if music_detail else "")
+            + ". Giữ nhịp cảnh khớp nhạc đã chọn."
+        )
+    lines.extend([
+        f"Trả về JSON array đúng {scene_count} object, theo thứ tự cảnh.",
+        "Mỗi object chỉ có semantic_beat, main_action, completion_state; viết tiếng Việt có dấu, ngắn, cụ thể và khả thi.",
+        "Chỉ trả JSON thuần, không codeblock.",
+    ])
+    return "\n".join(lines)
+
+
 def suggest_scene_plan(state: Mapping[str, Any]) -> dict[str, Any]:
     """Fill only missing scene semantics with a provider-free content outline."""
 
@@ -1747,6 +1953,57 @@ def suggest_scene_plan(state: Mapping[str, Any]) -> dict[str, Any]:
         list(current["navigation"].get("dirty_sections") or [])
         + ["scene_plan", "scene_assignment", "dialogue", "prompts", "summary"]
     )
+    return normalize_state(current)
+
+
+def suggest_scene_plan_from_vault(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Apply the existing local prompt vault when Gemini is unavailable."""
+
+    current = suggest_scene_plan(state)
+    scenes = list(current.get("scenes") or [])
+    _profile, context = _scene_plan_profile_context(current, len(scenes))
+    templates = list(context.selected_scene_role_templates or [])
+    intent = _scene_plan_intent(current)
+    product = str(current.get("parent_product") or "")
+    total = len(scenes)
+    for index, scene in enumerate(scenes, 1):
+        if bool(scene.get("locked_by_user")) or str(scene.get("planning_source") or "") == "user":
+            continue
+        template: dict[str, Any] = {}
+        if templates:
+            template_index = 0 if total <= 1 else round((index - 1) * (len(templates) - 1) / (total - 1))
+            template = dict(templates[template_index])
+            scene["scene_role"] = _text(template.get("role"), 80) or str(scene.get("scene_role") or "complete")
+            scene["original_scene_intent"] = _text(
+                f"{template.get('purpose') or template.get('title') or scene['scene_role']}: {intent}",
+                1600,
+            )
+        if product == "video_ai_real":
+            duration = max(1, _integer(scene.get("duration_target"), _integer(current["format"].get("seconds_per_scene"), 8)))
+            scene["semantic_beat"] = _text(f"{intent} · Cảnh {index}", 800)
+            scene["main_action"] = _text(
+                f"Thực hiện một hành động duy nhất theo nội dung cảnh và hoàn tất trong {duration} giây.",
+                800,
+            )
+            scene["completion_state"] = _text(
+                f"Hành động Cảnh {index} đã hoàn tất rõ ràng trong {duration} giây.",
+                800,
+            )
+        else:
+            purpose = _text(template.get("purpose") or template.get("title"), 240) or f"Phát triển nội dung Cảnh {index}"
+            scene["semantic_beat"] = _text(f"{purpose}: {intent}", 800)
+            scene["main_action"] = _text(
+                f"Thể hiện {purpose.lower()} bằng một hành động rõ ràng, bám nội dung đã khóa.",
+                800,
+            )
+            scene["completion_state"] = _text(
+                f"Ý {purpose.lower()} đã hoàn tất và tạo trạng thái nối sang cảnh kế tiếp.",
+                800,
+            )
+        scene["planning_source"] = "local_prompt_vault"
+        scene["planning_confidence"] = 0.7
+    _link_scene_states(scenes)
+    current["scenes"] = scenes
     return normalize_state(current)
 
 
