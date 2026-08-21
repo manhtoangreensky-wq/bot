@@ -1,8 +1,9 @@
 """
 Brand Profile Engine for TOAN AAS Marketing Automation.
-Manages brand voice, multi-brand ownership, and platform-specific branding policies.
+Manages persistent user brand profiles, brand voice, and platform-specific branding policies.
 """
 from typing import Dict, Any, List, Optional
+from services.autopost_db import get_user_brand_profile, save_user_brand_profile
 
 PLATFORM_BRAND_POLICIES = {
     "telegram": {
@@ -71,6 +72,15 @@ DEFAULT_BRAND_PROFILE = {
     "content_tone": "Truyền cảm hứng & Hướng dẫn thực chiến",
     "language": "vi",
 }
+
+def get_effective_brand_profile(owner_user_id: int) -> Dict[str, Any]:
+    """Retrieve user's custom brand profile from DB or fallback to default."""
+    p = get_user_brand_profile(owner_user_id)
+    if not p.get("is_configured"):
+        merged = dict(DEFAULT_BRAND_PROFILE)
+        merged["owner_user_id"] = owner_user_id
+        return merged
+    return p
 
 def get_platform_brand_policy(platform: str) -> Dict[str, bool]:
     """Return platform-specific branding constraints."""

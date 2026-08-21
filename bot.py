@@ -5,17 +5,30 @@ from services.autopost_ui import (
     autopost_affiliate_keyboard, autopost_affiliate_import_prompt_text,
     autopost_affiliate_import_success_text, autopost_affiliate_list_text,
     autopost_affiliate_list_keyboard, autopost_calendar_text, autopost_channels_text,
-    autopost_queue_text, autopost_metrics_text, autopost_ads_center_text,
-    autopost_settings_text, autopost_kill_switch_text, autopost_resume_ads_text
+    autopost_channels_keyboard, autopost_queue_text, autopost_queue_keyboard,
+    autopost_published_history_text, autopost_published_history_keyboard,
+    autopost_metrics_text, autopost_ads_center_text, autopost_settings_text,
+    autopost_settings_keyboard, autopost_kill_switch_text, autopost_resume_ads_text,
+    autopost_content_input_menu_text, autopost_content_input_menu_keyboard,
+    autopost_input_prompt_text, autopost_brand_view_text, autopost_brand_keyboard,
+    autopost_draft_view_text, autopost_draft_keyboard
 )
-from services.autopost_brand import get_platform_brand_policy, validate_brand_compliance_for_platform, DEFAULT_BRAND_PROFILE
-from services.autopost_strategy import create_content_plan, CONTENT_GOALS
+from services.autopost_db import (
+    init_autopost_durable_db, save_content_input, get_content_input,
+    get_user_brand_profile, save_user_brand_profile, get_user_social_accounts,
+    save_user_social_account, disconnect_user_social_account, save_content_plan_with_items,
+    get_content_items, create_publish_job, claim_due_publish_jobs, record_publish_receipt,
+    record_publish_failure, get_user_published_receipts, get_user_publish_queue,
+    get_user_autopost_overview_stats, get_user_publish_mode, set_user_publish_mode
+)
+from services.autopost_brand import get_platform_brand_policy, validate_brand_compliance_for_platform, get_effective_brand_profile, DEFAULT_BRAND_PROFILE
+from services.autopost_strategy import create_content_plan, generate_single_post_draft, CONTENT_GOALS
 from services.autopost_affiliate import (
     match_affiliate_for_post, check_paid_ads_affiliate_policy, get_user_affiliate_stats,
     get_user_affiliate_links, count_user_affiliate_links, import_affiliate_links_for_user,
     seed_default_curated_vault_for_user, delete_user_affiliate_link, clear_user_affiliate_vault
 )
-from services.autopost_publish import check_platform_capability, OmnichannelPublishQueue
+from services.autopost_publish import check_platform_capability, OmnichannelPublishQueue, TelegramAdapter, execute_publish_job, process_due_publish_jobs
 from services.autopost_ads import evaluate_organic_to_ads, validate_ad_spend_request, DEFAULT_OWNER_BUDGET_ENVELOPE
 """
 ╔══════════════════════════════════════════════════════════════════╗
@@ -138114,7 +138127,7 @@ AUTOPOST_NICHES = [
 
 autopost_engine_code = '''
 def autopost_hub_text(lang: str = "vi", user_id: int = 0) -> str:
-    return autopost_main_dashboard_text(lang)
+    return autopost_main_dashboard_text(lang, user_id)
 
 def autopost_hub_keyboard(lang: str = "vi", is_admin: bool = False) -> InlineKeyboardMarkup:
     return autopost_main_keyboard(lang)
@@ -138132,10 +138145,27 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
     if action in {"main", "hub", "dashboard"}:
         return await safe_edit_query_message(
             query,
-            autopost_main_dashboard_text(lang),
+            autopost_main_dashboard_text(lang, uid),
             parse_mode="HTML",
             reply_markup=autopost_main_keyboard(lang),
         )
+
+    if action == "content_input_menu":
+        return await safe_edit_query_message(
+            query,
+            autopost_content_input_menu_text(),
+            parse_mode="HTML",
+            reply_markup=autopost_content_input_menu_keyboard(),
+        )
+
+    if action == "input":
+        input_type = value or "topic"
+        context.user_data["awaiting_content_input_type"] = input_type
+        msg = autopost_input_prompt_text(input_type)
+        reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|content_input_menu"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+        ])
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
     if action == "content_plan":
         reply_kb = InlineKeyboardMarkup([
@@ -138148,19 +138178,36 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
 
     if action == "gen_plan":
         niche = value or "cong_nghe"
-        plan = create_content_plan(str(uid), DEFAULT_BRAND_PROFILE, niche, duration_days=7)
+        brand = get_effective_brand_profile(uid)
+        plan = create_content_plan(str(uid), brand, niche, duration_days=7, persist_db=True)
         context.user_data["active_content_plan"] = plan
         msg = autopost_plan_result_text(niche, plan["total_posts"], plan["items"][0])
         reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📅 Xem toàn bộ lịch 7 ngày", callback_data="autopost|calendar"), InlineKeyboardButton("🚀 Đăng ngay bài 1", callback_data="autopost|queue")],
+            [InlineKeyboardButton("📅 Xem lịch đăng", callback_data="autopost|calendar"), InlineKeyboardButton("🚀 Xem hàng đợi", callback_data="autopost|queue")],
             [InlineKeyboardButton("⬅️ Đổi ngành", callback_data="autopost|content_plan"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ])
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
     if action == "brands":
-        msg = autopost_brands_text(DEFAULT_BRAND_PROFILE)
+        brand = get_effective_brand_profile(uid)
+        msg = autopost_brand_view_text(brand)
+        reply_kb = autopost_brand_keyboard()
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "brand_edit_prompt":
+        context.user_data["awaiting_brand_edit"] = True
+        msg = "✏️ <b>CẬP NHẬT THƯƠNG HIỆU:</b>\n\nHãy gửi tin nhắn với định dạng:\n<code>Tên thương hiệu | Giọng văn | CTA chính</code>\n\nVí dụ:\n<code>Shop Mẹ & Bé | Thân thiện, chu đáo | Mua ngay tại shopmebe.vn</code>"
         reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|brands")],
+        ])
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "brand_preview":
+        brand = get_effective_brand_profile(uid)
+        draft = generate_single_post_draft(uid, "Bí quyết kinh doanh bứt phá doanh số", brand)
+        msg = "👁 <b>XEM TRƯỚC MẪU NỘI DUNG THƯƠNG HIỆU:</b>\n\n" + draft["caption"]
+        reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Quay lại Thương hiệu", callback_data="autopost|brands")],
         ])
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
@@ -138215,32 +138262,74 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
     if action == "aff_noop":
         return
 
-    if action == "calendar":
-        msg = autopost_calendar_text()
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🧠 Tạo kế hoạch mới", callback_data="autopost|content_plan")],
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
-        ])
+    if action == "channels":
+        msg = autopost_channels_text(uid)
+        reply_kb = autopost_channels_keyboard()
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
-    if action == "channels":
-        msg = autopost_channels_text()
+    if action == "conn":
+        platform = value or "telegram"
+        if platform == "telegram":
+            context.user_data["awaiting_telegram_channel_id"] = True
+            msg = "🔗 <b>KẾT NỐI KÊNH TELEGRAM:</b>\n\n1. Thêm Bot làm Quản trị viên (Admin) vào Kênh hoặc Nhóm Telegram của bạn.\n2. Gửi <b>@username</b> của kênh (hoặc Chat ID) vào đây:\n\n<i>Ví dụ: <code>@toanaas_channel</code> hoặc <code>-1001234567890</code></i>"
+            return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|channels")]]))
+        else:
+            msg = f"🔗 <b>KẾT NỐI {platform.upper()}:</b>\n\nNền tảng {platform.upper()} yêu cầu cấp quyền OAuth bảo mật máy chủ.\nTrạng thái: <b>NEEDS_OAUTH</b> (Chưa có token cấu hình)."
+            return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|channels")]]))
+
+    if action == "test_tg_conn":
+        accounts = get_user_social_accounts(uid)
+        tg_acc = next((a for a in accounts if a["platform"] == "telegram"), None)
+        if not tg_acc:
+            msg = "⚠️ <b>Chưa có Kênh Telegram nào được cấu hình.</b>\nVui lòng bấm 'Kết nối Telegram' và nhập @channel_username."
+        else:
+            v = await TelegramAdapter.validate(tg_acc["account_id"], bot_instance=context.bot)
+            if v.get("valid"):
+                msg = f"✅ <b>KẾT NỐI TELEGRAM HOẠT ĐỘNG TỐT!</b>\n\n• Kênh: <code>{tg_acc['display_name']}</code>\n• Chat ID: <code>{v.get('chat_id', tg_acc['account_id'])}</code>\n• Trạng thái: <b>READY ✅</b>"
+            else:
+                msg = f"⚠️ <b>KIỂM TRA KẾT NỐI THẤT BẠI:</b>\n{v.get('error')}"
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại Channels", callback_data="autopost|channels")]]))
+
+    if action == "calendar":
+        msg = autopost_calendar_text(uid)
         reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🧠 Lập kế hoạch mới", callback_data="autopost|content_plan")],
             [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
         ])
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
     if action == "queue":
-        msg = autopost_queue_text()
+        msg = autopost_queue_text(uid)
+        reply_kb = autopost_queue_keyboard(uid)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "job_publish_now":
+        job_id = int(value) if value.isdigit() else 0
+        queue = get_user_publish_queue(uid)
+        job = next((q for q in queue if q["id"] == job_id), None)
+        if not job:
+            msg = "⚠️ Không tìm thấy bài đăng trong hàng đợi."
+        else:
+            res = await execute_publish_job(job, bot_instance=context.bot)
+            if res.get("ok"):
+                msg = f"✅ <b>ĐÃ PHÁT HÀNH BÀI ĐĂNG THỰC TẾ THÀNH CÔNG!</b>\n\n• Remote ID: <code>{res['remote_post_id']}</code>\n• Nền tảng: {job['platform'].upper()}\n• URL: {res.get('remote_url', '#')}"
+            else:
+                msg = f"❌ <b>LỖI PHÁT HÀNH:</b>\n{res.get('error')}"
         reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+            [InlineKeyboardButton("✅ Xem lịch sử đã đăng", callback_data="autopost|published_history"), InlineKeyboardButton("🚀 Hàng đợi", callback_data="autopost|queue")],
+            [InlineKeyboardButton("⬅️ Quay lại Hub", callback_data="autopost|main")],
         ])
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
+    if action == "published_history":
+        msg = autopost_published_history_text(uid)
+        reply_kb = autopost_published_history_keyboard()
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
     if action == "metrics":
-        msg = autopost_metrics_text()
+        msg = autopost_metrics_text(uid)
         reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📣 Xem đề xuất quảng cáo", callback_data="autopost|ads_center")],
+            [InlineKeyboardButton("📣 Quản trị quảng cáo", callback_data="autopost|ads_center")],
             [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
         ])
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
@@ -138267,12 +138356,60 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
         return await safe_edit_query_message(query, autopost_resume_ads_text(), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại Ads", callback_data="autopost|ads_center")]]))
 
     if action == "settings":
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
-        ])
-        return await safe_edit_query_message(query, autopost_settings_text(), parse_mode="HTML", reply_markup=reply_kb)
+        msg = autopost_settings_text(uid)
+        reply_kb = autopost_settings_keyboard(uid)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
-    return await safe_edit_query_message(query, autopost_main_dashboard_text(lang), parse_mode="HTML", reply_markup=autopost_main_keyboard(lang))
+    if action == "set_mode":
+        set_user_publish_mode(uid, value or "MANUAL")
+        msg = f"✅ <b>ĐÃ CẬP NHẬT CHẾ ĐỘ PHÁT HÀNH: {value}</b>\n\n" + autopost_settings_text(uid)
+        reply_kb = autopost_settings_keyboard(uid)
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "draft_publish_now":
+        draft = context.user_data.get("current_draft")
+        if not draft:
+            msg = "⚠️ Không tìm thấy bản nháp để phát hành."
+        else:
+            accounts = get_user_social_accounts(uid)
+            tg_acc = next((a for a in accounts if a["platform"] == "telegram"), None)
+            target_chat = tg_acc["account_id"] if tg_acc else f"@{query.from_user.username}" if query.from_user.username else str(uid)
+            now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            
+            job_id = create_publish_job(None, uid, "telegram", target_chat, now_str)
+            res = await execute_publish_job({
+                "id": job_id, "owner_user_id": uid, "platform": "telegram",
+                "channel_id": target_chat, "payload": {"caption": draft["caption"]}
+            }, bot_instance=context.bot)
+            
+            if res.get("ok"):
+                msg = f"✅ <b>ĐÃ PHÁT HÀNH BÀI ĐĂNG THÀNH CÔNG!</b>\n\n• Remote ID: <code>{res['remote_post_id']}</code>\n• URL: {res.get('remote_url', '#')}"
+            else:
+                msg = f"❌ <b>LỖI PHÁT HÀNH:</b>\n{res.get('error')}"
+                
+        reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Xem lịch sử đã đăng", callback_data="autopost|published_history"), InlineKeyboardButton("🚀 Hàng đợi", callback_data="autopost|queue")],
+            [InlineKeyboardButton("⬅️ Quay lại Hub", callback_data="autopost|main")],
+        ])
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    if action == "draft_approve":
+        draft = context.user_data.get("current_draft")
+        if not draft:
+            msg = "⚠️ Không tìm thấy bản nháp để lên lịch."
+        else:
+            accounts = get_user_social_accounts(uid)
+            tg_acc = next((a for a in accounts if a["platform"] == "telegram"), None)
+            target_chat = tg_acc["account_id"] if tg_acc else str(uid)
+            sched_time = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)).isoformat()
+            job_id = create_publish_job(None, uid, "telegram", target_chat, sched_time)
+            msg = f"✅ <b>ĐÃ DUYỆT & LÊN LỊCH BÀI ĐĂNG THÀNH CÔNG!</b>\n\n• Mã tác vụ: <b>#{job_id}</b>\n• Thời gian phát hành: <code>{sched_time[:16].replace('T', ' ')} UTC</code>\n• Kênh: <code>{target_chat}</code>"
+        reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚀 Xem hàng đợi", callback_data="autopost|queue"), InlineKeyboardButton("⬅️ Quay lại Hub", callback_data="autopost|main")],
+        ])
+        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    return await safe_edit_query_message(query, autopost_main_dashboard_text(lang, uid), parse_mode="HTML", reply_markup=autopost_main_keyboard(lang))
 '''
 exec(compile(autopost_engine_code, f"{__file__}:autopost_engine", "exec"), globals())
 
@@ -265145,6 +265282,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if await handle_state_reset_slash_command(update, context, text):
         return
+
+    # AutoPost Content Input Text Handling
+    if context.user_data.get("awaiting_content_input_type"):
+        in_type = context.user_data.pop("awaiting_content_input_type")
+        input_id = save_content_input(uid, in_type, text=text)
+        brand = get_effective_brand_profile(uid)
+        aff_res = match_affiliate_for_post(text, "cong_nghe", user_id=uid)
+        draft = generate_single_post_draft(uid, text, brand, affiliate=aff_res.get("primary_affiliate"), content_input_id=input_id)
+        context.user_data["current_draft"] = draft
+        msg = autopost_draft_view_text(draft)
+        reply_kb = autopost_draft_keyboard(0)
+        return await update.message.reply_text(msg, parse_mode="HTML", reply_markup=reply_kb)
+
+    # AutoPost Telegram Channel Connect Handling
+    if context.user_data.get("awaiting_telegram_channel_id"):
+        context.user_data.pop("awaiting_telegram_channel_id")
+        channel_ref = text.strip()
+        save_user_social_account(uid, "telegram", channel_ref, channel_ref, "ACTIVE", "READY")
+        reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🧪 Kiểm tra kết nối", callback_data="autopost|test_tg_conn"), InlineKeyboardButton("📡 Danh sách kênh", callback_data="autopost|channels")],
+            [InlineKeyboardButton("⬅️ Quay lại Hub", callback_data="autopost|main")],
+        ])
+        return await update.message.reply_text(f"✅ <b>ĐÃ LƯU KÊNH TELEGRAM:</b> <code>{channel_ref}</code>\n\nHãy chắc chắn rằng Bot đã được cấp quyền Đăng bài trong kênh này.", parse_mode="HTML", reply_markup=reply_kb)
+
+    # AutoPost Brand Profile Edit Handling
+    if context.user_data.get("awaiting_brand_edit"):
+        context.user_data.pop("awaiting_brand_edit")
+        parts_b = [p.strip() for p in text.split("|")]
+        b_name = parts_b[0] if len(parts_b) > 0 else "TOAN AAS"
+        b_voice = parts_b[1] if len(parts_b) > 1 else "Chuyên nghiệp & Hiện đại"
+        b_cta = parts_b[2] if len(parts_b) > 2 else "Trải nghiệm ngay"
+        save_user_brand_profile(uid, {"brand_name": b_name, "brand_voice": b_voice, "primary_cta": b_cta})
+        reply_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎨 Xem hồ sơ thương hiệu", callback_data="autopost|brands"), InlineKeyboardButton("⬅️ Quay lại Hub", callback_data="autopost|main")],
+        ])
+        return await update.message.reply_text(f"✅ <b>ĐÃ CẬP NHẬT HỒ SƠ THƯƠNG HIỆU THÀNH CÔNG!</b>\n• Tên: <b>{b_name}</b>\n• Giọng văn: <i>{b_voice}</i>\n• CTA: <i>{b_cta}</i>", parse_mode="HTML", reply_markup=reply_kb)
+
 
     # Personal Affiliate Vault Text Link Intake
     if context.user_data.get("awaiting_affiliate_import") or (("http://" in text or "https://" in text) and any(d in text for d in ["shorten.asia", "trackecom.asia", "attracking.asia", "trackfin.asia", "goecom.asia", "goeco.mobi", "trackmobi.asia", "trackec.asia", "shopee.vn", "lazada.vn", "tiktok.com"])):
