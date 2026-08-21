@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import inspect
 from types import SimpleNamespace
 
@@ -255,15 +256,17 @@ def test_dubbing_partial_copy_not_success():
     assert not message.outputs[-1]["caption"].startswith("✅")
 
 
-def test_combo_two_path_screen_restored():
-    labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
+def test_combo_single_upload_lane():
+    markup = bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB})
+    callbacks = _callbacks(markup)
     ui = _ui_text(
         bot.video_dubbing_source_text({"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}, "vi"),
-        bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}),
+        markup,
     )
-    assert "🎞 Video đã có phụ đề" in labels
-    assert "🎧 Video chưa có phụ đề" in labels
-    assert "chưa có phụ đề" in ui
+    assert callbacks.count("videodub|source_upload") == 1
+    assert not any(callback.startswith("videodub|path|") for callback in callbacks)
+    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE}" not in callbacks
+    assert "chưa có phụ đề" not in ui
 
 
 def test_combo_internal_transcript_after_confirm_only(monkeypatch):
@@ -280,7 +283,160 @@ def test_combo_internal_transcript_after_confirm_only(monkeypatch):
     asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), SimpleNamespace()))
     state = bot.get_video_dubbing_pending(uid)
     assert state["step"] == "language"
+    assert state["step"] != "original_subtitle_confirm"
     assert state["active_flow"] == bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB
+    assert "videodub|confirm_original_subtitle" not in _callbacks(message.outputs[-1]["reply_markup"])
+
+
+def test_combo_fresh_upload_language_voice_then_one_final_pipeline(monkeypatch):
+    uid = 919510
+    calls = {"provider": 0, "charge": 0, "full": 0}
+    _patch_upload_basics(monkeypatch)
+    monkeypatch.setattr(bot, "get_subdub_lane_readiness", lambda *_args, **_kwargs: {"effective_ready": True})
+    monkeypatch.setattr(bot, "subdub_auto_provider_capacity_ready", lambda: True)
+
+    async def forbidden_provider(*_args, **_kwargs):
+        calls["provider"] += 1
+        raise AssertionError("fresh combo must not call ASR/translation/TTS before final confirm")
+
+    for name in (
+        "video_dubbing_prepare_subtitles",
+        "video_dubbing_create_original_subtitle_for_next_step",
+        "video_dubbing_create_original_subtitle_then_output",
+        "subtitle_plus_dub_translate_current_subtitle",
+        "translate_subtitle_text",
+        "video_dubbing_transcribe_bytes",
+        "video_dubbing_tts_bytes",
+        "execute_video_dubbing_pipeline",
+    ):
+        monkeypatch.setattr(bot, name, forbidden_provider)
+
+    def forbidden_charge(*_args, **_kwargs):
+        calls["charge"] += 1
+        raise AssertionError("fresh combo must not charge before final confirm")
+
+    async def fake_full(_query, _context, _state, _lang):
+        calls["full"] += 1
+        return {
+            "ok": True,
+            "has_audio": True,
+            "has_subtitle": True,
+            "has_video": True,
+            "video_delivery_message_id": "91951001",
+        }
+
+    monkeypatch.setattr(bot, "spend_fixed_credit_info", forbidden_charge)
+    monkeypatch.setattr(bot, "execute_subtitle_plus_dub_full_from_callback", fake_full)
+    _seed(uid, bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, active_flow=bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB)
+
+    upload = CaptureMessage(video=Media())
+    asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, upload), SimpleNamespace()))
+    assert bot.get_video_dubbing_pending(uid)["step"] == "language"
+    upload_callbacks = _callbacks(upload.outputs[-1]["reply_markup"])
+    assert "videodub|back_language_to_source" in upload_callbacks
+    assert "videodub|combo_back_original" not in upload_callbacks
+    assert calls == {"provider": 0, "charge": 0, "full": 0}
+
+    language_query = CaptureQuery(uid, "videodub|language|English")
+    asyncio.run(bot.handle_video_dubbing_callback(_query_update(language_query), SimpleNamespace()))
+    state = bot.get_video_dubbing_pending(uid)
+    language_callbacks = _callbacks(language_query.outputs[-1]["reply_markup"])
+    assert state["step"] in {"choosing_voice", "voice"}
+    assert state["target_language"] == "English"
+    assert "videodub|confirm_original_subtitle" not in language_callbacks
+    assert "videodub|back_voice" in language_callbacks
+    assert "videodub|combo_back_subtitle_ready" not in language_callbacks
+    assert {"videodub|voice|default_female", "videodub|voice|default_male", "videodub|voice|auto_speaker_gender"}.issubset(language_callbacks)
+    assert calls == {"provider": 0, "charge": 0, "full": 0}
+
+    back_query = CaptureQuery(uid, "videodub|back_voice")
+    asyncio.run(bot.handle_video_dubbing_callback(_query_update(back_query), SimpleNamespace()))
+    assert bot.get_video_dubbing_pending(uid)["step"] == "language"
+    assert "videodub|combo_back_original" not in _callbacks(back_query.outputs[-1]["reply_markup"])
+    language_query = CaptureQuery(uid, "videodub|language|English")
+    asyncio.run(bot.handle_video_dubbing_callback(_query_update(language_query), SimpleNamespace()))
+    assert bot.get_video_dubbing_pending(uid)["step"] in {"choosing_voice", "voice"}
+    assert calls == {"provider": 0, "charge": 0, "full": 0}
+
+    voice_query = CaptureQuery(uid, "videodub|voice|default_female")
+    asyncio.run(bot.handle_video_dubbing_callback(_query_update(voice_query), SimpleNamespace()))
+    confirm_callbacks = _callbacks(voice_query.outputs[-1]["reply_markup"])
+    assert bot.get_video_dubbing_pending(uid)["step"] == "dub_confirmation"
+    assert "videodub|combo_full_dub" in confirm_callbacks
+    assert "videodub|confirm_original_subtitle" not in confirm_callbacks
+    assert calls == {"provider": 0, "charge": 0, "full": 0}
+
+    final_query = CaptureQuery(uid, "videodub|combo_full_dub")
+    asyncio.run(bot.handle_video_dubbing_callback(_query_update(final_query), SimpleNamespace()))
+    assert calls == {"provider": 0, "charge": 0, "full": 1}
+    assert bot.get_video_dubbing_pending(uid)["step"] == "completed"
+    assert len(final_query.outputs) == 1
+    assert "đang tạo video" in final_query.outputs[0]["text"]
+
+
+def test_combo_fresh_custom_language_routes_to_voice_without_processing(monkeypatch):
+    uid = 919511
+    calls = {"provider": 0, "charge": 0}
+    _patch_upload_basics(monkeypatch)
+    monkeypatch.setattr(bot, "get_subdub_lane_readiness", lambda *_args, **_kwargs: {"effective_ready": True})
+
+    async def forbidden_provider(*_args, **_kwargs):
+        calls["provider"] += 1
+        raise AssertionError("custom language must not process before final confirm")
+
+    monkeypatch.setattr(bot, "subtitle_plus_dub_translate_current_subtitle", forbidden_provider)
+    monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", forbidden_provider)
+    monkeypatch.setattr(bot, "spend_fixed_credit_info", lambda *_args, **_kwargs: calls.__setitem__("charge", calls["charge"] + 1))
+    _seed(uid, bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, active_flow=bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB)
+
+    upload = CaptureMessage(video=Media())
+    asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, upload), SimpleNamespace()))
+    custom_query = CaptureQuery(uid, "videodub|language_custom")
+    asyncio.run(bot.handle_video_dubbing_callback(_query_update(custom_query), SimpleNamespace()))
+    assert bot.get_video_dubbing_pending(uid)["step"] == "language_custom"
+    assert "videodub|confirm_original_subtitle" not in _callbacks(custom_query.outputs[-1]["reply_markup"])
+
+    custom_message = CaptureMessage()
+    custom_message.text = "Français"
+    asyncio.run(bot.handle_video_dubbing_pending_text(_update(uid, custom_message), SimpleNamespace()))
+    state = bot.get_video_dubbing_pending(uid)
+    assert state["step"] in {"choosing_voice", "voice"}
+    assert state["target_language"] == "Français"
+    custom_callbacks = _callbacks(custom_message.outputs[-1]["reply_markup"])
+    assert "videodub|confirm_original_subtitle" not in custom_callbacks
+    assert "videodub|back_voice" in custom_callbacks
+    assert "videodub|combo_back_subtitle_ready" not in custom_callbacks
+    assert calls == {"provider": 0, "charge": 0}
+
+
+def test_combo_new_entry_clears_legacy_create_then_dub_state(monkeypatch):
+    uid = 919512
+    _patch_upload_basics(monkeypatch)
+    monkeypatch.setattr(bot, "get_subdub_lane_readiness", lambda *_args, **_kwargs: {"effective_ready": True})
+    _seed(
+        uid,
+        bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        step="no_subtitle_menu",
+        active_flow=bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+        flow_type=bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE,
+        combo_subpath=bot.VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB,
+    )
+
+    entry_query = CaptureQuery(uid, f"videodub|type|{bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}")
+    asyncio.run(bot.handle_video_dubbing_callback(_query_update(entry_query), SimpleNamespace()))
+    state = bot.get_video_dubbing_pending(uid)
+    assert state["step"] == "source"
+    assert state["flow_type"] == bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE
+    assert state["combo_subpath"] == ""
+
+    upload = CaptureMessage(video=Media())
+    asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, upload), SimpleNamespace()))
+    state = bot.get_video_dubbing_pending(uid)
+    assert state["step"] == "language"
+    assert state["combo_subpath"] == ""
+    callbacks = _callbacks(upload.outputs[-1]["reply_markup"])
+    assert "videodub|confirm_original_subtitle" not in callbacks
+    assert "videodub|combo_back_original" not in callbacks
 
 
 def test_combo_price_summary_total_before_confirm():
@@ -318,6 +474,63 @@ def test_combo_final_mp4_required_for_full_success():
         )
     )
     assert sent["video"] == 1
+    assert sent["audio"] == 0
+    assert sent["documents"] == 0
+    assert sent["video_document"] == 0
+    assert sent["final_mp4_delivered"] is True
+    assert sent["video_delivery_message_id"] == "919603"
+    assert sent["video_delivery_file_id"] == "video-file"
+    assert sent["video_delivery_filename"].endswith(".mp4")
+    assert sent["video_delivery_mime_type"] == "video/mp4"
+    assert sent["video_delivery_sha256"] == hashlib.sha256(b"video").hexdigest()
+    assert len(message.outputs) == 1
+
+
+def test_combo_missing_mp4_never_falls_back_to_audio_or_subtitle(monkeypatch):
+    monkeypatch.setattr(bot, "SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED", True)
+    message = CaptureMessage()
+    sent = asyncio.run(
+        bot.send_public_subtitle_dub_final_outputs(
+            message,
+            mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+            subtitle_items=[{"output_type": "srt", "bytes": b"srt", "filename": "translated.srt"}],
+            srt_text="translated subtitle",
+            audio_bytes=b"audio",
+            video_bytes=b"",
+            include_subtitle_outputs=True,
+            lang="vi",
+        )
+    )
+    assert sent["video"] == 0
+    assert sent["video_document"] == 0
+    assert sent["audio"] == 0
+    assert sent["documents"] == 0
+    assert sent["full_video_failed"] is True
+    assert sent["charged_xu"] == 0
+    assert message.outputs == []
+
+
+def test_combo_oversized_mp4_uses_one_mp4_document_without_intermediate_assets(monkeypatch):
+    monkeypatch.setattr(bot, "subdub_output_delivery_limit_mb", lambda kind: 1 if kind == "video" else 2)
+    monkeypatch.setattr(bot, "GENERATED_MEDIA_MAX_MB", 2)
+    monkeypatch.setattr(bot, "SUBDUB_COMPRESS_IF_OVER_MB", 99)
+    message = CaptureMessage()
+    sent = asyncio.run(
+        bot.send_public_subtitle_dub_final_outputs(
+            message,
+            mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+            video_bytes=b"x" * (1024 * 1024 + 1),
+            lang="vi",
+        )
+    )
+    assert sent["video"] == 0
+    assert sent["video_document"] == 1
+    assert sent["documents"] == 1
+    assert sent["audio"] == 0
+    assert sent["final_mp4_delivered"] is True
+    assert len(message.outputs) == 1
+    assert message.outputs[0]["document"] is True
+    assert message.outputs[0]["filename"].endswith(".mp4")
 
 
 def test_no_adapter_missing_code_provider_api_asr_tts_mux_ffmpeg_in_product_ui():
@@ -346,6 +559,12 @@ def test_product_failure_copy_clean_no_technical_words():
     lowered = "\n".join(texts).lower()
     for forbidden in ("adapter_missing", "provider", "api", "asr", "tts", "mux", "ffmpeg", "traceback", "runtimeerror", "debug", "route", "payload", "fake", "sample", "redacted", "code"):
         assert forbidden not in lowered
+
+
+def test_combo_mux_failure_copy_never_promises_partial_audio():
+    text = bot.subtitle_plus_dub_safe_fail_text("mux_failed", "vi")
+    assert "không gửi audio/phụ đề rời" in text
+    assert "gửi audio trước" not in text
 
 
 def test_back_from_each_video_translation_subflow_returns_correct_parent():

@@ -8172,10 +8172,8 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
         callbacks = [button.callback_data for row in result["reply_markup"].inline_keyboard for button in row]
         assert "videodub|link_start" not in callbacks
         if mode == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-            assert "videodub|source_upload" not in callbacks
-            assert "videodub|path|has_subtitle" in callbacks
-            assert "videodub|path|no_subtitle" in callbacks
-            result = asyncio.run(press("videodub|path|no_subtitle", uid))
+            assert callbacks.count("videodub|source_upload") == 1
+            assert not any(callback.startswith("videodub|path|") for callback in callbacks)
         result = asyncio.run(press("videodub|source_upload", uid))
         state = bot.get_video_dubbing_pending(uid)
         assert state["step"] == "await_video"
