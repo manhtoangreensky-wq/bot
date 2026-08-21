@@ -64929,6 +64929,7 @@ async def asr_transcribe_audio(
         ["deepgram"]
         if require_diarization
         else {
+            "auto": ["key4u", "shopaikey", "deepgram"],
             "key4u": ["key4u"],
             "shopaikey": ["shopaikey"],
             "shopai": ["shopaikey"],
@@ -231691,10 +231692,7 @@ def video_dubbing_source_keyboard(lang: str = "vi", state: dict | None = None) -
     elif mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         if str(state.get("flow_type") or "") == VIDEO_DUBBING_FLOW_NO_SUBTITLE and str(state.get("step") or "") == "no_subtitle_menu":
             return subtitle_plus_dub_no_subtitle_menu_keyboard(lang)
-        items = [
-            (f"🎞 {copy['send_subtitle']}", f"videodub|path|{VIDEO_DUBBING_FLOW_HAS_SUBTITLE}"),
-            (f"🎧 {copy['send']}", f"videodub|path|{VIDEO_DUBBING_FLOW_NO_SUBTITLE}"),
-        ]
+        items = [(copy['send'], "videodub|source_upload")]
     else:
         items = [(copy['send'], "videodub|source_upload")]
     if str(state.get("origin") or "") == "video_addon":

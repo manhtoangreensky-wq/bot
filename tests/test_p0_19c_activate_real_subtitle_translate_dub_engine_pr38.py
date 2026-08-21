@@ -132,15 +132,13 @@ def _patch_dub(monkeypatch, calls, *, render_video=True):
     monkeypatch.setattr(bot, "video_dubbing_video_render_ready", lambda *_args, **_kwargs: True)
 
 
-def test_p0_19c_combo_menu_keeps_only_canonical_create_translate_dub_path():
-    source_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
+def test_p0_19c_combo_menu_uses_single_upload_lane_and_keeps_legacy_submenu():
+    source_callbacks = _callbacks(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
     no_subtitle_labels = _labels(bot.subtitle_plus_dub_no_subtitle_menu_keyboard("vi"))
-    assert "🎞 Video đã có phụ đề" in source_labels
-    assert "🎧 Video chưa có phụ đề" in source_labels
+    assert source_callbacks.count("videodub|source_upload") == 1
+    assert not any(callback.startswith("videodub|path|") for callback in source_callbacks)
     assert "🎬 Tạo phụ đề rồi lồng tiếng" in no_subtitle_labels
     assert "🎙 Lồng tiếng trực tiếp" not in no_subtitle_labels
-    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_HAS_SUBTITLE}" in _callbacks(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
-    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE}" in _callbacks(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
 
 
 def test_auto_subtitle_calls_real_pipeline_not_admin_test(monkeypatch):

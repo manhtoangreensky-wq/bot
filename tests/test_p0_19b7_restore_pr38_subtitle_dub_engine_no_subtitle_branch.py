@@ -114,13 +114,10 @@ def _combo_state(uid, *, flow_type="", combo_subpath=""):
     )
 
 
-def test_subtitle_plus_dub_entry_shows_has_subtitle_and_no_subtitle():
-    labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
+def test_subtitle_plus_dub_entry_uses_single_upload_lane():
     callbacks = _callbacks(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
-    assert "🎞 Video đã có phụ đề" in labels
-    assert "🎧 Video chưa có phụ đề" in labels
-    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_HAS_SUBTITLE}" in callbacks
-    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE}" in callbacks
+    assert callbacks.count("videodub|source_upload") == 1
+    assert not any(callback.startswith("videodub|path|") for callback in callbacks)
 
 
 def test_no_subtitle_path_shows_only_canonical_create_translate_dub_choice(monkeypatch):

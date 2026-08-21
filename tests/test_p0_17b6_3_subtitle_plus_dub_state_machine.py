@@ -173,13 +173,15 @@ def test_subtitle_plus_dub_no_generic_video_fallthrough(monkeypatch):
     assert "Phiên Phụ đề + Lồng tiếng đang ở bước khác" in message.outputs[-1]["text"]
 
 
-def test_subtitle_plus_dub_creates_original_subtitle_first():
+def test_subtitle_plus_dub_entry_uses_single_upload_lane():
     text = bot.video_dubbing_source_text({"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}, "vi")
-    labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
+    markup = bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB})
+    labels = _labels(markup)
+    callbacks = _callbacks(markup)
     assert "xử lý video" in text.lower()
-    assert "🎞 Video đã có phụ đề" in labels
-    assert "🎧 Video chưa có phụ đề" in labels
-    assert "📤 Gửi video cần xử lý" not in labels
+    assert labels[0] == "📤 Gửi video"
+    assert callbacks.count("videodub|source_upload") == 1
+    assert not any(callback.startswith("videodub|path|") for callback in callbacks)
 
 
 def test_subtitle_plus_dub_no_confirm_full_before_original_subtitle():

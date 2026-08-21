@@ -312,10 +312,10 @@ def test_dub_partial_result_not_marked_full_success():
     assert not message.outputs[-1]["caption"].startswith("✅")
 
 
-def test_combo_menu_has_two_paths():
-    labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
-    assert "🎞 Video đã có phụ đề" in labels
-    assert "🎧 Video chưa có phụ đề" in labels
+def test_combo_menu_has_single_upload_lane():
+    callbacks = _callbacks(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
+    assert callbacks.count("videodub|source_upload") == 1
+    assert not any(callback.startswith("videodub|path|") for callback in callbacks)
 
 
 def test_combo_existing_subtitle_translates_then_dubs(monkeypatch):

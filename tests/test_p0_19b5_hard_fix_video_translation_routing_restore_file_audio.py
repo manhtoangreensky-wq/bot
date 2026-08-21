@@ -255,15 +255,17 @@ def test_dubbing_partial_copy_not_success():
     assert not message.outputs[-1]["caption"].startswith("✅")
 
 
-def test_combo_two_path_screen_restored():
-    labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
+def test_combo_single_upload_lane():
+    markup = bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB})
+    callbacks = _callbacks(markup)
     ui = _ui_text(
         bot.video_dubbing_source_text({"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}, "vi"),
-        bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}),
+        markup,
     )
-    assert "🎞 Video đã có phụ đề" in labels
-    assert "🎧 Video chưa có phụ đề" in labels
-    assert "chưa có phụ đề" in ui
+    assert callbacks.count("videodub|source_upload") == 1
+    assert not any(callback.startswith("videodub|path|") for callback in callbacks)
+    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE}" not in callbacks
+    assert "chưa có phụ đề" not in ui
 
 
 def test_combo_internal_transcript_after_confirm_only(monkeypatch):
@@ -280,7 +282,9 @@ def test_combo_internal_transcript_after_confirm_only(monkeypatch):
     asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), SimpleNamespace()))
     state = bot.get_video_dubbing_pending(uid)
     assert state["step"] == "language"
+    assert state["step"] != "original_subtitle_confirm"
     assert state["active_flow"] == bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB
+    assert "videodub|confirm_original_subtitle" not in _callbacks(message.outputs[-1]["reply_markup"])
 
 
 def test_combo_price_summary_total_before_confirm():
