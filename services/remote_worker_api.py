@@ -209,6 +209,8 @@ def strip_secret_fields(value: Any) -> Any:
             key_text = str(key)
             lowered = key_text.lower()
             if any(marker in lowered for marker in SECRET_KEY_MARKERS):
+                if lowered == "wallet_mutations" and type(item) is int and item == 0:
+                    safe[key_text] = 0
                 continue
             safe[key_text] = strip_secret_fields(item)
         return safe
