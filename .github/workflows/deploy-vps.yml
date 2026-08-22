@@ -48,6 +48,9 @@ jobs:
             git checkout main
             git pull origin main
 
+            echo '=== Routing Worker to Local VPS Bot API ==='
+            sed -i '/^[[:space:]]*BOT_API_URL=/s#https://bot-production-2dd7.up.railway.app#http://127.0.0.1:8080#' /etc/toanaas-worker.env
+
             echo '=== Restarting Bot and Worker Services ==='
             systemctl restart toanaas-bot.service toanaas-worker-owner-product-video.service toanaas-video-edit-worker.service
 

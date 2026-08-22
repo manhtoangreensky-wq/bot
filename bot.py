@@ -715,12 +715,7 @@ OWNER_IDS           = parse_id_set(OWNER_IDS_RAW)
 PUBLIC_VERSION      = "v1.0 Beta"
 APP_VERSION         = f"TOAN AAS {PUBLIC_VERSION}"
 START_TIME          = time.time()
-APP_BUILD_SHA       = (
-    _env("RAILWAY_GIT_COMMIT_SHA")
-    or _env("GIT_COMMIT_SHA")
-    or _env("SOURCE_VERSION")
-    or ""
-)
+APP_BUILD_SHA       = remote_worker_api.resolve_runtime_sha(os.environ, cwd=os.getcwd())
 APP_BUILD           = APP_BUILD_SHA[:7] if APP_BUILD_SHA else "local"
 APP_DEPLOY_ID       = (
     _env("RAILWAY_DEPLOYMENT_ID")
@@ -100996,7 +100991,7 @@ def video_b14_provider_rendering_block(telemetry: dict | None = None) -> str:
         lines.append("Cập nhật lần cuối: <b>vừa xong</b>")
     lines.append("Video AI có thể mất vài phút tùy tải hệ thống.")
     lines.append("TOAN AAS sẽ tự cập nhật khi có video hoàn chỉnh.")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def video_b14_primary_alive_attempt(result: dict | None = None) -> dict:
@@ -101811,7 +101806,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         lines.append("TOAN AAS sẽ tự cập nhật khi có video hoàn chỉnh.")
         lines.append("Anh/chị không cần bấm nhiều lần.")
     lines.append("TOAN AAS không báo hoàn tất khi chưa có video cuối.")
-    return video_b14_with_admin_label("\\n".join(lines), user_id, lang)
+    return video_b14_with_admin_label("\n".join(lines), user_id, lang)
 
 
 def video_b14_queue_status_keyboard(lang: str = "vi", *, session: dict | None = None, result: dict | None = None, job_id: int | str = 0) -> InlineKeyboardMarkup:

@@ -11,9 +11,10 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from services import (
     video_engine_contract,
@@ -83,6 +84,29 @@ REMOTE_WORKER_MAX_ADMIN_CANARY_ACTIVE_ENV = "REMOTE_WORKER_MAX_ADMIN_CANARY_ACTI
 REMOTE_WORKER_PRODUCT_VIDEO_QUEUE_TIMEOUT_SECONDS_ENV = "REMOTE_WORKER_PRODUCT_VIDEO_QUEUE_TIMEOUT_SECONDS"
 REMOTE_WORKER_ADMIN_CANARY_DEFAULT_DURATION_SECONDS = 3
 REMOTE_WORKER_ADMIN_CANARY_QUEUE_LABEL = "OWNER/ADMIN WORKER CANARY — không trừ Xu"
+
+
+def resolve_runtime_sha(environ: Mapping[str, str] | None = None, *, cwd: str | Path | None = None) -> str:
+    env = os.environ if environ is None else environ
+    for key in ("RAILWAY_GIT_COMMIT_SHA", "GIT_COMMIT_SHA", "SOURCE_VERSION"):
+        value = str(env.get(key) or "").strip()
+        if value:
+            return value
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(cwd or Path(__file__).resolve().parents[1]),
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except Exception:
+        return ""
+    git_sha = str(result.stdout or "").strip()[:40]
+    if result.returncode == 0 and re.fullmatch(r"[0-9A-Fa-f]{7,40}", git_sha):
+        return git_sha
+    return ""
 
 
 def _json_loads(value: Any, fallback: Any = None) -> Any:
