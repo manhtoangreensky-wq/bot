@@ -1622,6 +1622,86 @@ def test_auto_source_hash_must_match_actual_source_bytes():
     assert calls == {"extractor": 0, "provider": 0}
 
 
+@pytest.mark.parametrize("cached_subtitle", [False, True])
+def test_auto_prepare_uses_processing_sha_for_normalized_media(
+    monkeypatch,
+    tmp_path,
+    cached_subtitle,
+):
+    normalized_bytes = b"normalized-video-bytes"
+    original_sha256 = hashlib.sha256(b"original-video-bytes").hexdigest()
+    processing_sha256 = hashlib.sha256(normalized_bytes).hexdigest()
+    source_srt = "1\n00:00:00,000 --> 00:00:01,000\nhello\n"
+    calls = []
+
+    async def diarized_asr(
+        _source_bytes,
+        _content_type,
+        _context,
+        *,
+        source_hash="",
+        require_diarization=False,
+        **_kwargs,
+    ):
+        calls.append((source_hash, require_diarization))
+        return {
+            "source_kind": "asr",
+            "subtitle": source_srt,
+            "script": "hello",
+            "asr_provider": "fixture",
+            "segments": [{
+                "index": 1,
+                "start": 0.0,
+                "end": 1.0,
+                "text": "hello",
+                "speaker": 0,
+                "speaker_confidence": 0.95,
+            }],
+            "detected_language": "en",
+        }
+
+    monkeypatch.setattr(bot, "USER_PENDING", {})
+    monkeypatch.setattr(
+        bot,
+        "get_video_dubbing_artifact",
+        lambda *_args: source_srt if cached_subtitle else "",
+    )
+    monkeypatch.setattr(bot, "set_video_dubbing_artifact", lambda *_args: "source-ref")
+    monkeypatch.setattr(bot, "video_dubbing_has_media", lambda *_args: True)
+    monkeypatch.setattr(bot, "video_dubbing_resolve_source_script", diarized_asr)
+    monkeypatch.setattr(bot, "subdub_mode_requests_translation", lambda *_args: False)
+    state = {
+        "pending_action": "video_dubbing",
+        "step": "processing",
+        "video_processing_mode": "dub",
+        "mode": "dub",
+        "active_flow": "dub_audio",
+        "source_file_id": "media-id",
+        "source_media_type": "video",
+        "source_mime_type": "video/mp4",
+        "source_sha256": original_sha256,
+        "processing_source_sha256": processing_sha256,
+        "_pipeline_workspace": str(tmp_path),
+        "_pipeline_source_bytes_override": normalized_bytes,
+        "_pipeline_source_content_type_override": "video/mp4",
+    }
+    if cached_subtitle:
+        state["subtitle_ref"] = "cached-source"
+
+    prepared = asyncio.run(
+        bot.video_dubbing_prepare_subtitles(
+            None,
+            state,
+            123,
+            allow_confirmed_product=True,
+            require_auto_cast=True,
+        )
+    )
+
+    assert calls == [(processing_sha256, True)]
+    assert prepared["source_segments"][0]["speaker_id"] == "chunk_00:speaker_0"
+
+
 @pytest.mark.parametrize(
     "case",
     [
