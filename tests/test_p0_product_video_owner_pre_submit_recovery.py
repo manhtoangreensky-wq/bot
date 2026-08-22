@@ -10,6 +10,7 @@ from services import video_uiflow3_execution_contract
 
 USER_ID = 3901
 PRE_SUBMIT_ERROR = "RuntimeError:uiflow3_approved_snapshot_hash_mismatch"
+ADDON_SUBTITLE_ERROR = "RuntimeError:addon_material_missing:subtitle"
 
 
 def _hash_bound_snapshot() -> dict:
@@ -37,6 +38,11 @@ def _failed_pre_submit_job(
     tmp_path,
     *,
     sqlite_rows: bool = True,
+    error: str = PRE_SUBMIT_ERROR,
+    attempts: int = 1,
+    outbox_attempts: int = 1,
+    result_updates: dict | None = None,
+    worker_compatibility: dict | None = None,
 ) -> tuple[sqlite3.Connection, int, dict]:
     conn = sqlite3.connect(tmp_path / "uiflow3-owner-recovery.db")
     if sqlite_rows:
@@ -138,7 +144,7 @@ def _failed_pre_submit_job(
                 2,
                 1,
                 "failed_no_charge",
-                PRE_SUBMIT_ERROR,
+                error,
             ),
         ).lastrowid
     )
@@ -160,13 +166,14 @@ def _failed_pre_submit_job(
         "final_decision": "failed_no_charge",
         "automatic_retry_allowed": False,
     }
+    result.update(result_updates or {})
     job_id = int(
         conn.execute(
             """INSERT INTO video_jobs
                (project_id,user_id,job_type,status,attempts,max_attempts,last_error,
                 result_json,progress_percent,progress_message,completed_at)
-               VALUES (?,?,'video_render','failed',1,3,?,?,10,'scene_dispatch_claimed',CURRENT_TIMESTAMP)""",
-            (project_id, USER_ID, PRE_SUBMIT_ERROR, json.dumps(result)),
+               VALUES (?,?,'video_render','failed',?,3,?,?,10,'scene_dispatch_claimed',CURRENT_TIMESTAMP)""",
+            (project_id, USER_ID, attempts, error, json.dumps(result)),
         ).lastrowid
     )
     conn.execute(
@@ -181,8 +188,8 @@ def _failed_pre_submit_job(
         """INSERT INTO video_dispatch_outbox
            (job_id,project_id,scene_indexes_json,dispatch_status,attempt_count,
             lease_owner,acknowledged_at)
-           VALUES (?,?,?,'acknowledged',1,'vps-toanaas-01',CURRENT_TIMESTAMP)""",
-        (job_id, project_id, "[1,2]"),
+           VALUES (?,?,?,'acknowledged',?,'vps-toanaas-01',CURRENT_TIMESTAMP)""",
+        (job_id, project_id, "[1,2]", outbox_attempts),
     )
     conn.commit()
     worker_payload = {
@@ -190,9 +197,19 @@ def _failed_pre_submit_job(
         "project_id": str(project_id),
         "user_id": str(USER_ID),
         "asset_pack": asset_pack,
+        "worker_compatibility": dict(worker_compatibility or {}),
         **identity,
     }
     return conn, job_id, worker_payload
+
+
+def _compatible_worker() -> dict:
+    return {
+        "compatible": True,
+        "block_reason": "",
+        "authoritative_worker_generation_id": "owner-product-video-generation-job19",
+        "worker_sha": "e" * 40,
+    }
 
 
 def test_owner_recovery_requeues_the_same_pre_submit_job_once(tmp_path) -> None:
@@ -252,6 +269,127 @@ def test_owner_recovery_requeues_the_same_pre_submit_job_once(tmp_path) -> None:
     )
     assert repeated["owner_pre_submit_recovered"] is False
     assert repeated["owner_pre_submit_recovery_block_reason"] == "job_not_failed"
+
+
+def test_owner_recovery_requeues_same_job_after_fixed_subtitle_materialization_once(
+    tmp_path,
+) -> None:
+    conn, job_id, worker_payload = _failed_pre_submit_job(
+        tmp_path,
+        error=ADDON_SUBTITLE_ERROR,
+        attempts=2,
+        outbox_attempts=2,
+        result_updates={
+            "owner_pre_submit_recovery_used": True,
+            "owner_pre_submit_recovery_count": 1,
+            "owner_pre_submit_recovered_reason": PRE_SUBMIT_ERROR,
+        },
+        worker_compatibility=_compatible_worker(),
+    )
+
+    recovered = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=worker_payload,
+        owner_authorized=True,
+    )
+
+    assert recovered["owner_pre_submit_recovered"] is True
+    assert recovered["recovery_kind"] == "addon_subtitle_materialization"
+    job = dict(conn.execute("SELECT * FROM video_jobs WHERE id=?", (job_id,)).fetchone())
+    project = dict(
+        conn.execute(
+            "SELECT * FROM video_projects WHERE project_id=?",
+            (int(job["project_id"]),),
+        ).fetchone()
+    )
+    outbox = dict(
+        conn.execute(
+            "SELECT * FROM video_dispatch_outbox WHERE job_id=?",
+            (job_id,),
+        ).fetchone()
+    )
+    result = json.loads(job["result_json"])
+    assert job["status"] == "queued"
+    assert int(job["attempts"]) == 2
+    assert project["status"] == "queued_for_worker"
+    assert outbox["dispatch_status"] == "acknowledged"
+    assert int(outbox["attempt_count"]) == 2
+    assert result["owner_pre_submit_recovery_used"] is True
+    assert result["owner_pre_submit_recovered_reason"] == PRE_SUBMIT_ERROR
+    assert result["owner_addon_subtitle_recovery_used"] is True
+    assert result["owner_addon_subtitle_recovery_count"] == 1
+    assert result["owner_addon_subtitle_recovered_reason"] == ADDON_SUBTITLE_ERROR
+    assert result["provider_submit_called"] is False
+    assert int(result["submit_count"]) == 0
+    assert int(result["charge_count"]) == 0
+    assert int(result["charged_xu"]) == 0
+    assert conn.execute("SELECT COUNT(*) FROM video_jobs").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM video_dispatch_outbox").fetchone()[0] == 1
+
+    conn.execute(
+        "UPDATE video_jobs SET status='failed',last_error=? WHERE id=?",
+        (ADDON_SUBTITLE_ERROR, job_id),
+    )
+    conn.execute(
+        "UPDATE video_projects SET status='failed' WHERE project_id=?",
+        (int(job["project_id"]),),
+    )
+    conn.commit()
+    repeated = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=worker_payload,
+        owner_authorized=True,
+    )
+    assert repeated["owner_pre_submit_recovered"] is False
+    assert (
+        repeated["owner_pre_submit_recovery_block_reason"]
+        == "addon_subtitle_recovery_already_used"
+    )
+
+
+def test_owner_addon_subtitle_recovery_requires_compatible_worker(tmp_path) -> None:
+    conn, job_id, worker_payload = _failed_pre_submit_job(
+        tmp_path,
+        error=ADDON_SUBTITLE_ERROR,
+        attempts=2,
+        result_updates={"owner_pre_submit_recovery_used": True},
+        worker_compatibility={
+            "compatible": False,
+            "block_reason": "worker_sha_mismatch",
+        },
+    )
+
+    recovery = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=worker_payload,
+        owner_authorized=True,
+    )
+
+    assert recovery["owner_pre_submit_recovered"] is False
+    assert recovery["owner_pre_submit_recovery_block_reason"] == "worker_sha_mismatch"
+
+
+def test_owner_addon_subtitle_recovery_rejects_exhausted_attempts(tmp_path) -> None:
+    conn, job_id, worker_payload = _failed_pre_submit_job(
+        tmp_path,
+        error=ADDON_SUBTITLE_ERROR,
+        attempts=3,
+        result_updates={"owner_pre_submit_recovery_used": True},
+        worker_compatibility=_compatible_worker(),
+    )
+
+    recovery = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=worker_payload,
+        owner_authorized=True,
+    )
+
+    assert recovery["owner_pre_submit_recovered"] is False
+    assert recovery["owner_pre_submit_recovery_block_reason"] == "job_attempts_exhausted"
 
 
 def test_owner_recovery_rejects_any_provider_attempt(tmp_path) -> None:
