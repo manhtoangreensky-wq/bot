@@ -245240,7 +245240,9 @@ async def _subdub_auto_bootstrap_cached_media_source(
         resolve_kwargs["progress_callback"] = progress_callback
     if "source_hash" in resolve_parameters:
         resolve_kwargs["source_hash"] = str(
-            state.get("source_sha256") or hashlib.sha256(source_bytes).hexdigest()
+            state.get("processing_source_sha256")
+            or state.get("source_sha256")
+            or hashlib.sha256(source_bytes).hexdigest()
         )
     if "asr_checkpoint_path" in resolve_parameters:
         workspace = str(state.get("_pipeline_workspace") or "")
@@ -245390,7 +245392,13 @@ async def video_dubbing_prepare_subtitles(
                     resolve_kwargs["progress_callback"] = progress_callback
                 if "source_hash" in resolve_parameters:
                     resolve_kwargs["source_hash"] = str(
-                        state.get("source_sha256") or hashlib.sha256(source_bytes).hexdigest()
+                        (
+                            state.get("processing_source_sha256")
+                            if require_auto_cast
+                            else ""
+                        )
+                        or state.get("source_sha256")
+                        or hashlib.sha256(source_bytes).hexdigest()
                     )
                 if "asr_checkpoint_path" in resolve_parameters:
                     workspace = str(state.get("_pipeline_workspace") or "")
