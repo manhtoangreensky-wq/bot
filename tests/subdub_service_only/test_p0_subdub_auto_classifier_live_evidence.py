@@ -49,6 +49,36 @@ def test_live_two_speaker_strong_unopposed_pitch_evidence_is_accepted(
 
 @pytest.mark.parametrize(
     "estimate",
+    (
+        (166.667, 0.793447),
+        (210.526, 0.766003),
+    ),
+)
+def test_live_high_register_observations_are_accepted(
+    tmp_path,
+    monkeypatch,
+    estimate,
+):
+    estimates = iter([estimate, None, None, None, None, None])
+    monkeypatch.setattr(
+        speaker_cast,
+        "_estimate_window_pitch",
+        lambda *_args, **_kwargs: next(estimates),
+    )
+
+    result = speaker_cast.classify_speaker_registers(
+        str(_pcm_file(tmp_path, 3.0)),
+        {"chunk_00:speaker_0": [(0.0, 3.0)]},
+        deadline_monotonic=time.monotonic() + 10.0,
+        stop_requested=lambda: False,
+    )
+
+    assert result["chunk_00:speaker_0"]["voice_register"] == "high"
+    assert result["chunk_00:speaker_0"]["confidence"] == pytest.approx(estimate[1])
+
+
+@pytest.mark.parametrize(
+    "estimate",
     ((160.0, 0.99), (172.576, 0.74), (145.5, 0.99)),
 )
 def test_single_ambiguous_or_low_confidence_window_remains_manual(

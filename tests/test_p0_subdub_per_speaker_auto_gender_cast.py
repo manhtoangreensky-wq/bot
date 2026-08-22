@@ -323,6 +323,104 @@ def test_long_media_transcription_forwards_scoped_diarization(monkeypatch):
     assert forwarded == [True]
 
 
+@pytest.mark.parametrize(
+    ("require_diarization", "duration_seconds", "expected_threshold", "expected_chunked"),
+    (
+        (True, 98, 300, False),
+        (True, 301, 300, True),
+        (False, 98, 60, True),
+    ),
+    ids=("auto-under-five-minutes", "auto-over-five-minutes", "default-lane-unchanged"),
+)
+def test_auto_diarization_uses_one_global_speaker_namespace_through_five_minutes(
+    monkeypatch,
+    require_diarization,
+    duration_seconds,
+    expected_threshold,
+    expected_chunked,
+):
+    real_plan = bot.subdub_long_video_chunk_plan
+    thresholds = []
+    long_calls = []
+    direct_calls = []
+
+    def capture_plan(*args, **kwargs):
+        thresholds.append(kwargs.get("direct_threshold_seconds"))
+        return real_plan(*args, **kwargs)
+
+    async def fake_long_media(*_args, **_kwargs):
+        long_calls.append(True)
+        return {
+            "ok": True,
+            "status": "PASS",
+            "provider": "deepgram",
+            "text": "hello",
+            "segments": [
+                {
+                    "index": 1,
+                    "start": 0.0,
+                    "end": 1.0,
+                    "text": "hello",
+                    "speaker": 0,
+                    "speaker_confidence": 0.9,
+                }
+            ],
+            "language": "en",
+            "duration_seconds": duration_seconds,
+            "chunk_count": 1,
+            "chunk_strategy": "asr_audio_chunks",
+            "global_timing_preserved": True,
+            "skipped_chunk_count": 0,
+            "skipped_chunk_indices": [],
+            "speech_chunk_count": 1,
+        }
+
+    async def fake_asr(*_args, require_diarization=False, **_kwargs):
+        direct_calls.append(require_diarization)
+        return {
+            "ok": True,
+            "status": "PASS",
+            "provider": "deepgram",
+            "text": "hello",
+            "segments": [
+                {
+                    "index": 1,
+                    "start": 0.0,
+                    "end": 1.0,
+                    "text": "hello",
+                    "speaker": 0,
+                    "speaker_confidence": 0.9,
+                }
+            ],
+            "language": "en",
+            "duration_seconds": duration_seconds,
+            "detail": "scoped_deepgram",
+        }
+
+    monkeypatch.setattr(bot, "subdub_long_video_chunk_plan", capture_plan)
+    monkeypatch.setattr(bot.subdub_long_media, "transcribe_long_media_chunks", fake_long_media)
+    monkeypatch.setattr(bot, "asr_transcribe_audio", fake_asr)
+
+    result = asyncio.run(
+        bot.transcribe_media_to_segments(
+            {
+                "bytes": b"audio",
+                "content_type": "audio/wav",
+                "media_kind": "audio",
+                "duration_seconds": duration_seconds,
+            },
+            duration_seconds=duration_seconds,
+            allow_confirmed_product=True,
+            require_diarization=require_diarization,
+        )
+    )
+
+    assert result["output_valid"] is True
+    assert thresholds == [expected_threshold]
+    assert bool(long_calls) is expected_chunked
+    assert direct_calls == ([] if expected_chunked else [True])
+
+
 def test_sidecar_requires_media_subtitle_and_exact_timeline_identity():
     speaker_cast = _speaker_cast_module()
     cues = [
@@ -5099,6 +5197,137 @@ def test_task7_cached_prepare_restart_resume_has_zero_asr_and_translation(
     ):
         assert resume_state[field] == expected
         assert cached["state"][field] == expected
+
+
+def test_task7_exact_resume_reuses_verified_media_without_save_or_normalize(
+    monkeypatch,
+    tmp_path,
+):
+    workspace = tmp_path / "workspace"
+    state, prepared = _task7_pause_fixture(workspace)
+    monkeypatch.setattr(
+        bot,
+        "subtitle_dub_workspace_path_safety",
+        lambda _workspace: {"allowed": True},
+    )
+    pause = asyncio.run(bot._subdub_auto_post_prepare_gate(prepared, state))
+    claimed_receipt = {
+        **pause["receipt"],
+        "consumed": True,
+        "claim_state": "resuming",
+        "claimed_at": time.time(),
+        "claim_token": "claimtoken123456",
+    }
+    resume_state = {
+        **state,
+        "auto_exact_resume": True,
+        "auto_exact_receipt": claimed_receipt,
+        "auto_exact_cache": dict(state["auto_exact_cache"]),
+    }
+    job = {
+        **_task7_durable_job(),
+        "workspace": str(workspace),
+        "auto_exact_receipt": claimed_receipt,
+        "auto_exact_cache": dict(state["auto_exact_cache"]),
+    }
+    cached = bot._subdub_auto_load_cached_prepared(job, resume_state)
+    cached_path = Path(cached["state"]["_pipeline_saved_source_path"])
+    cached_bytes_before = cached_path.read_bytes()
+    calls = {"save": 0, "normalize": 0}
+
+    async def forbidden_save(*_args, **_kwargs):
+        calls["save"] += 1
+        raise AssertionError("exact resume must not save the verified media again")
+
+    async def forbidden_normalize(*_args, **_kwargs):
+        calls["normalize"] += 1
+        raise AssertionError("exact resume must not normalize the verified media again")
+
+    async def fake_duration_gate(*_args, **_kwargs):
+        return {
+            "input_duration": 1,
+            "telegram_duration": 1,
+            "ffprobe_duration": 1,
+            "detected_duration_source": "cached_auto_exact_receipt",
+            "duration_gate_result": "pass",
+            "duration_limit": 0,
+        }
+
+    async def no_progress(*_args, **_kwargs):
+        return None
+
+    async def stop_after_cached_prepare(**kwargs):
+        resumed = await kwargs["prepare_subtitles"](
+            kwargs["state"],
+            require_auto_cast=True,
+        )
+        assert resumed["asr_provider"] == "cached_auto_exact_receipt"
+        return {
+            "ok": False,
+            "status": "AUTO_CAST_MANUAL_REQUIRED",
+            "state": dict(kwargs["state"]),
+        }
+
+    monkeypatch.setattr(bot, "SUBDUB_AUTO_SPEAKER_ACTIVATION_ENABLED", True)
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    monkeypatch.setattr(bot, "video_dubbing_save_input_for_pipeline", forbidden_save)
+    monkeypatch.setattr(bot, "subdub_normalize_video_bytes_if_needed", forbidden_normalize)
+    monkeypatch.setattr(bot, "subdub_duration_gate_payload_for_saved_input", fake_duration_gate)
+    monkeypatch.setattr(bot, "subdub_send_progress_update", no_progress)
+    monkeypatch.setattr(bot, "update_subtitle_dub_pipeline_job", lambda *_args, **fields: fields)
+    monkeypatch.setattr(
+        bot,
+        "video_dubbing_engine_access_decision",
+        lambda *_args, **_kwargs: {"allowed": True},
+    )
+    monkeypatch.setattr(
+        bot,
+        "video_dubbing_product_gate_matrix",
+        lambda *_args, **_kwargs: {"product_route_allowed": True, "gate_blockers": []},
+    )
+    monkeypatch.setattr(
+        bot,
+        "video_dubbing_product_gate_allows_pipeline",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(bot.auto_speaker, "run_auto_speaker_blackbox", stop_after_cached_prepare)
+    monkeypatch.setattr(
+        bot,
+        "subdub_auto_manual_required_recovery",
+        lambda _uid, current, **_kwargs: {
+            "ok": False,
+            "status": "AUTO_CAST_MANUAL_REQUIRED",
+            "state": dict(current),
+            "text": "manual",
+            "reply_markup": None,
+            "charge_status": "not_charged",
+        },
+    )
+
+    pipeline_state = {
+        **resume_state,
+        **dict(cached["state"]),
+        "_auto_exact_cached_prepared": cached,
+        "_pipeline_source_bytes_override": bytes(cached["source_bytes"]),
+        "_pipeline_source_content_type_override": str(cached["content_type"]),
+    }
+    query = SimpleNamespace(
+        from_user=SimpleNamespace(id=97_100),
+        message=SimpleNamespace(chat_id=97_100),
+    )
+    result = asyncio.run(
+        bot._execute_video_dubbing_pipeline_core(
+            query,
+            SimpleNamespace(),
+            pipeline_state,
+            "vi",
+            admin_interactive_confirm=True,
+        )
+    )
+
+    assert result["status"] == "AUTO_CAST_MANUAL_REQUIRED"
+    assert calls == {"save": 0, "normalize": 0}
+    assert cached_path.read_bytes() == cached_bytes_before
 
 
 def test_task7_cached_prepare_exception_after_cas_fails_closed_terminal(
