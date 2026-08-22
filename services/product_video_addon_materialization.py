@@ -77,6 +77,50 @@ def addon_plan(job: dict | None = None) -> dict:
     return {}
 
 
+def _persisted_scene_subtitle_script(job: dict | None = None) -> str:
+    data = dict(job or {})
+    project = dict(data.get("project") or {})
+    cards: list[dict] = []
+    for candidate in (
+        data.get("scene_cards"),
+        data.get("scenes"),
+        project.get("scene_cards_json"),
+    ):
+        if isinstance(candidate, str):
+            try:
+                candidate = json.loads(candidate)
+            except (TypeError, ValueError):
+                candidate = []
+        if isinstance(candidate, list):
+            cards = [dict(item) for item in candidate if isinstance(item, dict)]
+            if cards:
+                break
+    fields = (
+        "subtitle_line",
+        "narration_line",
+        "script_text",
+        "dialogue_or_voiceover",
+        "dialogue",
+        "voiceover",
+        "narration",
+        "main_idea",
+        "content",
+    )
+    lines: list[str] = []
+    for card in cards:
+        line = next(
+            (
+                " ".join(str(card.get(field) or "").split())
+                for field in fields
+                if str(card.get(field) or "").strip()
+            ),
+            "",
+        )
+        if line:
+            lines.append(line)
+    return "\n".join(lines)[:8000]
+
+
 def _addon_file(value: Any) -> str:
     path = str(value or "").strip()
     try:
@@ -521,8 +565,14 @@ def materialize_product_video_addons(
         geometry = dict(asset_pack.get("output_geometry") or {})
         output_width = int(geometry.get("width") or data.get("output_width") or project.get("output_width") or 720)
         output_height = int(geometry.get("height") or data.get("output_height") or project.get("output_height") or 1280)
+        subtitle_material = dict(plan.get("subtitle") or {})
+        if not any(
+            str(subtitle_material.get(key) or "").strip()
+            for key in ("script_text", "text", "artifact_path")
+        ):
+            subtitle_material["script_text"] = _persisted_scene_subtitle_script(job)
         subtitle = _materialize_subtitle(
-            dict(plan.get("subtitle") or {}),
+            subtitle_material,
             workspace=workspace,
             scene_count=scene_count,
             scene_duration=scene_duration,
