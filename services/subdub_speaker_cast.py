@@ -48,6 +48,9 @@ _AUTOCORRELATION_STRIDE = 4
 _MAX_RELATIVE_PITCH_SPREAD = 0.18
 _MIN_REGISTER_VOTE_RATIO = 2.0 / 3.0
 _MIN_REGISTER_TOTAL_RATIO = 0.50
+_STRONG_SINGLE_WINDOW_MIN_CONFIDENCE = 0.78
+_STRONG_SINGLE_WINDOW_LOW_MAX_HZ = 145.0
+_STRONG_SINGLE_WINDOW_HIGH_MIN_HZ = 170.0
 _PITCH_ANALYSIS_DECIMATION = 8
 _PITCH_ANALYSIS_SAMPLE_RATE = PCM_SAMPLE_RATE // _PITCH_ANALYSIS_DECIMATION
 _PITCH_FRAME_SAMPLES = 400
@@ -729,8 +732,27 @@ def _stable_register_evidence(
     frequencies: list[float],
     confidences: list[float],
 ) -> tuple[str, float, float, int]:
-    if len(frequencies) != len(confidences) or len(frequencies) < 2:
+    if len(frequencies) != len(confidences) or not frequencies:
         raise AutoCastManualRequired()
+    if len(frequencies) == 1:
+        try:
+            frequency = float(frequencies[0])
+            confidence = float(confidences[0])
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise AutoCastManualRequired() from exc
+        if (
+            not math.isfinite(frequency)
+            or not math.isfinite(confidence)
+            or not _STRONG_SINGLE_WINDOW_MIN_CONFIDENCE <= confidence <= 1.0
+        ):
+            raise AutoCastManualRequired()
+        if frequency <= _STRONG_SINGLE_WINDOW_LOW_MAX_HZ:
+            register = "low"
+        elif frequency >= _STRONG_SINGLE_WINDOW_HIGH_MIN_HZ:
+            register = "high"
+        else:
+            raise AutoCastManualRequired()
+        return register, frequency, confidence, 1
     groups: dict[str, list[tuple[float, float]]] = {"low": [], "high": []}
     for frequency, confidence in zip(frequencies, confidences):
         register = pitch_register(frequency, confidence=confidence)
@@ -759,8 +781,8 @@ def _stable_register_evidence(
     if len(inliers) < 2:
         raise AutoCastManualRequired()
     median_hz = _bounded_median([item[0] for item in inliers])
-    relative_spread = max(
-        abs(item[0] - median_hz) / median_hz for item in inliers
+    relative_spread = _bounded_median(
+        [abs(item[0] - median_hz) / median_hz for item in inliers]
     )
     if (
         not math.isfinite(relative_spread)
@@ -1399,8 +1421,13 @@ def classify_speaker_registers(
                     _stable_register_evidence(frequencies, confidences)
                 )
                 voiced_seconds = inlier_count * _PCM_WINDOW_SECONDS
+                minimum_voiced_seconds = (
+                    _PCM_WINDOW_SECONDS
+                    if inlier_count == 1
+                    else _MIN_VOICED_SECONDS
+                )
                 if (
-                    voiced_seconds < _MIN_VOICED_SECONDS
+                    voiced_seconds < minimum_voiced_seconds
                     or voiced_seconds > MAX_SPEAKER_VOICED_SECONDS + 1e-12
                 ):
                     raise AutoCastManualRequired()
