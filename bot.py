@@ -247227,7 +247227,15 @@ async def _execute_video_dubbing_pipeline_core(
             **state,
             "_pipeline_source_bytes_override": bytes(input_save.get("source_bytes") or b""),
             "_pipeline_source_content_type_override": str(input_save.get("content_type") or state.get("source_mime_type") or "video/mp4"),
-            "_pipeline_saved_source_path": str(input_save.get("path") or ""),
+            "_pipeline_saved_source_path": str(
+                (
+                    input_save.get("normalized_path")
+                    if subdub_auto_speaker_route_enabled(state)
+                    else ""
+                )
+                or input_save.get("path")
+                or ""
+            ),
         }
         workspace_artifacts["source"] = str(input_save.get("path") or "")
         if str(input_save.get("content_type") or "").lower().startswith("audio/"):
