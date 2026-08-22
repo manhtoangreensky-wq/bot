@@ -5199,6 +5199,95 @@ def test_task7_cached_prepare_restart_resume_has_zero_asr_and_translation(
         assert cached["state"][field] == expected
 
 
+def test_task7_durable_resume_restores_confirmed_exact_price_before_core(
+    monkeypatch,
+    tmp_path,
+):
+    user_id = 97_100
+    chat_id = 97_100
+    job = _task7_durable_job(
+        job_id="task7-exact-price-resume",
+        user_id=user_id,
+        chat_id=chat_id,
+    )
+    receipt = {
+        **job["auto_exact_receipt"],
+        "consumed": True,
+        "claim_state": "resuming",
+        "claimed_at": time.time(),
+        "claim_token": "claimtoken123456",
+    }
+    job.update({
+        "status": "resuming_auto_exact_confirmation",
+        "workspace": str(tmp_path / "workspace"),
+        "auto_exact_receipt": receipt,
+        "auto_exact_cache": {"version": bot.SUBDUB_AUTO_EXACT_RECEIPT_VERSION},
+        "auto_exact_resume_state": {
+            "mode": "dub",
+            "process_type": "dub",
+            "video_processing_mode": "dub",
+            "voice_kind": "auto_speaker_gender",
+            "voice_selection_mode": "auto_speaker",
+        },
+    })
+    captured = {}
+
+    def load_cached(_job, resume_state):
+        return {
+            "state": dict(resume_state),
+            "source_bytes": b"cached-source",
+            "content_type": "video/mp4",
+        }
+
+    async def capture_core(_query, _context, pipeline_state, _lang, **_kwargs):
+        captured.update(pipeline_state)
+        return {
+            "ok": False,
+            "status": "AUTO_EXACT_CONFIRMATION_REQUIRED",
+            "state": pipeline_state,
+            "receipt": receipt,
+        }
+
+    def capture_update(job_key, **fields):
+        return {**job, **fields, "job_key": job_key}
+
+    monkeypatch.setattr(
+        bot.subdub_blackboxes,
+        "normalize_standalone_video_lane_entry_state",
+        lambda value: dict(value),
+    )
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    monkeypatch.setattr(bot, "_subdub_auto_load_cached_prepared", load_cached)
+    monkeypatch.setattr(bot, "_execute_video_dubbing_pipeline_core", capture_core)
+    monkeypatch.setattr(bot, "update_subtitle_dub_pipeline_job", capture_update)
+    monkeypatch.setattr(
+        bot,
+        "persist_subtitle_dub_pipeline_job_snapshot",
+        lambda *_args, **_kwargs: True,
+    )
+
+    query = SimpleNamespace(
+        from_user=SimpleNamespace(id=user_id),
+        message=SimpleNamespace(chat_id=chat_id),
+    )
+    asyncio.run(
+        bot.execute_video_dubbing_pipeline(
+            query,
+            SimpleNamespace(),
+            job["auto_exact_resume_state"],
+            "vi",
+            admin_interactive_confirm=True,
+            resume_job=job,
+        )
+    )
+
+    assert captured["auto_exact_actual_billable_words"] == 2
+    assert captured["auto_exact_actual_auto_xu"] == 1
+    assert captured["auto_exact_actual_subtitle_xu"] == 0
+    assert captured["auto_exact_actual_total_xu"] == 1
+    assert captured["auto_exact_receipt_confirmed"] is True
+
+
 def test_task7_exact_resume_reuses_verified_media_without_save_or_normalize(
     monkeypatch,
     tmp_path,

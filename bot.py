@@ -249135,14 +249135,37 @@ async def execute_video_dubbing_pipeline(
         }
     if durable_resume_job:
         workspace = str(job.get("workspace") or "")
+        exact_receipt = dict(job.get("auto_exact_receipt") or {})
+        exact_receipt_claimed = bool(
+            exact_receipt.get("consumed") is True
+            and exact_receipt.get("claim_state") == "resuming"
+        )
+        exact_price_fields = {}
+        if exact_receipt_claimed:
+            exact_price_fields = {
+                "auto_exact_actual_billable_words": int(
+                    exact_receipt.get("actual_billable_words") or 0
+                ),
+                "auto_exact_actual_auto_xu": int(
+                    exact_receipt.get("actual_auto_xu") or 0
+                ),
+                "auto_exact_actual_subtitle_xu": int(
+                    exact_receipt.get("actual_subtitle_xu") or 0
+                ),
+                "auto_exact_actual_total_xu": int(
+                    exact_receipt.get("actual_total_xu") or 0
+                ),
+                "auto_exact_receipt_confirmed": True,
+            }
         resume_state = {
             **dict(job.get("auto_exact_resume_state") or {}),
+            **exact_price_fields,
             "voice_kind": "auto_speaker_gender",
             "voice_selection_mode": "auto_speaker",
             "auto_exact_session_nonce": str(
-                dict(job.get("auto_exact_receipt") or {}).get("session_nonce") or ""
+                exact_receipt.get("session_nonce") or ""
             ),
-            "auto_exact_receipt": dict(job.get("auto_exact_receipt") or {}),
+            "auto_exact_receipt": exact_receipt,
             "auto_exact_cache": dict(job.get("auto_exact_cache") or {}),
             "auto_exact_resume": True,
             "auto_quote_version": SUBDUB_AUTO_EXACT_QUOTE_VERSION,
