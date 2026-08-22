@@ -3779,9 +3779,12 @@ def test_dispatch_matrix_calls_one_blackbox_and_prepares_once(
 ):
     source = tmp_path / "source.mp4"
     source.write_bytes(b"video")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
     route_calls = {"auto": 0, "manual": 0}
     prepare_flags = []
     asr_calls = []
+    saved_source_paths = []
     dependency_checks = []
 
     monkeypatch.setattr(bot, "SUBDUB_AUTO_SPEAKER_ACTIVATION_ENABLED", activation)
@@ -3817,17 +3820,17 @@ def test_dispatch_matrix_calls_one_blackbox_and_prepares_once(
     async def fake_media_preflight(video_bytes, *, content_type="video/mp4"):
         return {
             "ok": True,
-            "normalized": False,
-            "normalization_count": 0,
-            "source_bytes": bytes(video_bytes),
+            "normalized": True,
+            "normalization_count": 1,
+            "source_bytes": b"normalized-video",
             "content_type": content_type,
             "source_sha256": "fixture-source",
-            "normalized_sha256": "fixture-source",
+            "normalized_sha256": "fixture-normalized",
             "source_duration": 1.0,
             "source_probe": {
                 "ok": True,
                 "duration": 1.0,
-                "normalization_required": False,
+                "normalization_required": True,
             },
         }
 
@@ -3852,6 +3855,7 @@ def test_dispatch_matrix_calls_one_blackbox_and_prepares_once(
     ):
         del allow_admin, progress_callback, allow_confirmed_product
         prepare_flags.append(bool(require_auto_cast))
+        saved_source_paths.append(service_state.get("_pipeline_saved_source_path"))
         asr_calls.append("asr")
         srt = "1\n00:00:00,000 --> 00:00:01,000\nhello\n"
         segments = [{"index": 1, "start": 0.0, "end": 1.0, "text": "hello"}]
@@ -3953,7 +3957,7 @@ def test_dispatch_matrix_calls_one_blackbox_and_prepares_once(
         "source_duration": 1,
         "target_language": "original",
         "subdub_final_confirmed": True,
-        "_pipeline_workspace": str(tmp_path / "workspace"),
+        "_pipeline_workspace": str(workspace),
         **voice_state,
     }
     result = asyncio.run(
@@ -3970,6 +3974,11 @@ def test_dispatch_matrix_calls_one_blackbox_and_prepares_once(
     assert route_calls[expected_route] == 1
     assert route_calls[{"auto": "manual", "manual": "auto"}[expected_route]] == 0
     assert prepare_flags == [expected_auto_prepare]
+    assert saved_source_paths == [
+        str(workspace / "normalized_source.mp4")
+        if expected_route == "auto"
+        else str(source)
+    ]
     assert asr_calls == ["asr"]
     assert dependency_checks
     assert all(all(check[1:]) for check in dependency_checks)
