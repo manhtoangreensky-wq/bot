@@ -10,8 +10,12 @@ from typing import Any, Mapping
 from services import video_uiflow3_execution_contract
 
 
+ADDON_SUBTITLE_ERROR = "RuntimeError:addon_material_missing:subtitle"
 RECOVERABLE_ERRORS = frozenset(
-    {"RuntimeError:uiflow3_approved_snapshot_hash_mismatch"}
+    {
+        "RuntimeError:uiflow3_approved_snapshot_hash_mismatch",
+        ADDON_SUBTITLE_ERROR,
+    }
 )
 TASK_ID_KEYS = (
     "provider_task_id",
@@ -149,7 +153,16 @@ def recover_product_video_owner_pre_submit_failure(
         return _blocked("acknowledged_outbox_required")
     if error not in RECOVERABLE_ERRORS:
         return _blocked("failure_reason_not_recoverable")
-    if result.get("owner_pre_submit_recovery_used"):
+    addon_subtitle_recovery = error == ADDON_SUBTITLE_ERROR
+    recovery_kind = (
+        "addon_subtitle_materialization"
+        if addon_subtitle_recovery
+        else "approved_snapshot_hash"
+    )
+    if addon_subtitle_recovery:
+        if result.get("owner_addon_subtitle_recovery_used"):
+            return _blocked("addon_subtitle_recovery_already_used")
+    elif result.get("owner_pre_submit_recovery_used"):
         return _blocked("recovery_already_used")
     if _integer(job.get("attempts")) >= max(1, _integer(job.get("max_attempts"))):
         return _blocked("job_attempts_exhausted")
@@ -178,6 +191,15 @@ def recover_product_video_owner_pre_submit_failure(
         )
     ):
         return _blocked("worker_payload_identity_mismatch")
+    worker_compatibility = _json_mapping(payload.get("worker_compatibility"))
+    if addon_subtitle_recovery and not worker_compatibility.get("compatible"):
+        return _blocked(
+            str(
+                worker_compatibility.get("block_reason")
+                or worker_compatibility.get("worker_admission_block_reason")
+                or "worker_compatibility_required"
+            )
+        )
     execution = video_uiflow3_execution_contract.validate_execution_contract(
         project,
         payload,
@@ -189,6 +211,24 @@ def recover_product_video_owner_pre_submit_failure(
         )
 
     current = (now or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+    recovery_metadata = (
+        {
+            "owner_addon_subtitle_recovery_used": True,
+            "owner_addon_subtitle_recovery_count": 1,
+            "owner_addon_subtitle_recovered_at": current,
+            "owner_addon_subtitle_recovered_reason": error,
+            "owner_addon_subtitle_recovery_source": "explicit_owner_authorization",
+            "owner_addon_subtitle_recovery_worker_compatible": True,
+        }
+        if addon_subtitle_recovery
+        else {
+            "owner_pre_submit_recovery_used": True,
+            "owner_pre_submit_recovery_count": 1,
+            "owner_pre_submit_recovered_at": current,
+            "owner_pre_submit_recovered_reason": error,
+            "owner_pre_submit_recovery_source": "explicit_owner_authorization",
+        }
+    )
     result.update(
         {
             "status": "queued",
@@ -198,12 +238,12 @@ def recover_product_video_owner_pre_submit_failure(
             "terminal": False,
             "continue_polling": True,
             "next_poll_scheduled": True,
-            "owner_pre_submit_recovery_used": True,
-            "owner_pre_submit_recovery_count": 1,
-            "owner_pre_submit_recovered_at": current,
-            "owner_pre_submit_recovered_reason": error,
-            "owner_pre_submit_recovery_source": "explicit_owner_authorization",
-            "worker_claim_result": "owner_pre_submit_recovery_queued",
+            **recovery_metadata,
+            "worker_claim_result": (
+                "owner_addon_subtitle_recovery_queued"
+                if addon_subtitle_recovery
+                else "owner_pre_submit_recovery_queued"
+            ),
             "worker_claim_block_reason": "",
             "provider_submit_allowed": False,
             "provider_submit_block_reason": "owner_recovery_awaiting_worker_revalidation",
@@ -263,6 +303,7 @@ def recover_product_video_owner_pre_submit_failure(
         "project_id": _integer(project.get("project_id")),
         "outbox_id": _integer(outbox.get("outbox_id")),
         "outbox_status": str(outbox.get("dispatch_status") or ""),
+        "recovery_kind": recovery_kind,
         "jobs_created": 0,
         "outboxes_created": 0,
         "provider_calls": 0,
