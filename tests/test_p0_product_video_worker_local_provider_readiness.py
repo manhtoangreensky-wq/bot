@@ -183,3 +183,28 @@ def test_worker_readiness_never_overrides_external_hard_block(monkeypatch) -> No
 
     assert eligibility["runtime_candidate_keys"] == []
     assert eligibility["provider_submit_allowed"] is False
+
+
+def test_worker_readiness_requires_compatible_worker(monkeypatch) -> None:
+    _patch_bot_missing_provider_env(monkeypatch)
+    result = _runtime_result()
+    result.update(
+        {
+            "worker_compatible": False,
+            "admission_worker_version_compatible": False,
+            "worker_connected": False,
+        }
+    )
+    conn = _readiness_conn(result, ready=True)
+
+    eligibility = remote_worker_api._product_video_runtime_eligibility(
+        {"id": 19, "project_id": 23, "user_id": 7126457028},
+        result,
+        {"project_id": 23, "user_id": 7126457028, "profile_id": "video_ai_prompt"},
+        now=datetime(2026, 8, 22, 10, 0, 0),
+        conn=conn,
+    )
+
+    assert eligibility["runtime_candidate_keys"] == []
+    assert eligibility["provider_submit_allowed"] is False
+    assert eligibility["worker_local_provider_hydration"] is False

@@ -2617,6 +2617,7 @@ def _product_video_runtime_eligibility(
     if (
         not runtime_candidates
         and worker_ready_provider_keys
+        and worker_compatible
         and public_confirmed_submit
         and runtime_freeze_truth.get("public_live_allowed")
         and (probation_lock_clear or current_job_matches_lock)
