@@ -231496,14 +231496,28 @@ def reset_subdub_voice_selection(state: dict, *, selecting_auto: bool) -> dict:
 def _persist_subdub_voice_reset(user_id, state: dict) -> dict:
     """Persist a reset without deleting the lane's cached media artifacts."""
 
+    key = video_dubbing_pending_key(user_id)
+    current = dict(USER_PENDING.get(key) or {})
     cleaned = dict(state or {})
+    if current.get("pending_action") == "video_dubbing":
+        preserved = dict(current)
+        for field in (
+            SUBDUB_MANUAL_VOICE_FIELDS
+            | SUBDUB_AUTO_VOICE_FIELDS
+            | SUBDUB_VOICE_CONFIRMATION_FIELDS
+        ):
+            if field not in cleaned:
+                preserved.pop(field, None)
+        preserved.update(cleaned)
+        cleaned = preserved
     for field in (
         "speaker_classifications",
         "speaker_casts",
         "per_cue_voice_assignments",
     ):
         cleaned.pop(field, None)
-    USER_PENDING[video_dubbing_pending_key(user_id)] = cleaned
+    cleaned["pending_action"] = "video_dubbing"
+    USER_PENDING[key] = cleaned
     return cleaned
 
 
@@ -234377,7 +234391,7 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
             VIDEO_SUBTITLE_MODE_DUB: copy["dub"],
             VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: copy["combo"],
         }.get(mode, copy["confirm"])
-        lines = [f"{title}", f"<b>{copy['confirm']}</b>", "", f"• {copy['current']}: ✅"]
+        lines = [f"<b>{title}</b>", "", f"• {copy['current']}: ✅"]
         if target:
             lines.append(f"• {copy['language']}: <b>{html.escape(target)}</b>")
         if voice:
@@ -234432,7 +234446,6 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
                         f"• discount: <b>{max(int(invoice.get('subtitle_discount_percent') or 0), int(invoice.get('dub_discount_percent') or 0))}%</b>",
                         f"• total: <b>{int(invoice.get('total_xu') or 0)} Xu</b>",
                     ])
-        lines.extend(["", copy["confirm"]])
         return "\n".join(lines)
     language = html.escape(target or "-")
     lines = [f"{copy['confirm']}", "", f"• {copy['current']}: ✅"]
@@ -234462,13 +234475,6 @@ def video_dubbing_confirm_keyboard(lang: str = "vi", state: dict | None = None) 
     )
     if subtitle_plus_dub_is_active(state) and active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB and not video_dubbing_is_video_only_mode(mode):
         return subtitle_plus_dub_confirm_keyboard(lang, state)
-    confirm_action = {
-        VIDEO_SUBTITLE_MODE_CREATE: "confirm_subtitle_create",
-        VIDEO_SUBTITLE_MODE_TRANSLATE: "confirm_subtitle_translate",
-        VIDEO_SUBTITLE_MODE_DUB: "confirm_dub",
-        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "confirm_subtitle_plus_dub",
-    }.get(mode, "confirm")
-    preview_label = copy["continue"]
     final_label = copy["confirm"]
     if mode in {
         VIDEO_SUBTITLE_MODE_CREATE,
@@ -234537,10 +234543,7 @@ def video_dubbing_confirm_keyboard(lang: str = "vi", state: dict | None = None) 
             ],
         ])
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(preview_label, callback_data=f"videodub|{confirm_action}"),
-            InlineKeyboardButton(final_label, callback_data="videodub|final"),
-        ],
+        [InlineKeyboardButton(final_label, callback_data="videodub|final")],
         [
             InlineKeyboardButton(copy["back"], callback_data="videodub|back_confirm"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
