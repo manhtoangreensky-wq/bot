@@ -64,6 +64,21 @@ REMOTE_WORKER_ADMIN_VIDEO_QUEUE_LABEL = "OWNER/ADMIN TEST PATTERN — kiểm tra
 REMOTE_WORKER_PRODUCT_VIDEO_SOURCE = "product_video"
 REMOTE_WORKER_PRODUCT_VIDEO_CAPABILITY = "product_video"
 REMOTE_WORKER_OWNER_PRODUCT_VIDEO_CAPABILITY = "owner_product_video"
+REMOTE_WORKER_PRODUCT_VIDEO_PROVIDER_READY_CAPABILITY_PREFIX = (
+    "product_video_provider_ready:"
+)
+REMOTE_WORKER_PRODUCT_VIDEO_WORKER_LOCAL_CONFIG_BLOCKERS = frozenset(
+    {
+        "provider_disabled",
+        "not_configured",
+        "provider_not_configured",
+        "submit_route_missing",
+        "poll_route_missing",
+        "provider_credentials_missing",
+        "provider_model_missing",
+        "provider_capability_or_payload_builder_missing",
+    }
+)
 RENDER_MODE_REAL = "real"
 RENDER_MODE_ADMIN_TEST_PATTERN = "admin_test_pattern"
 RENDER_MODE_UNAVAILABLE = "unavailable"
@@ -131,6 +146,35 @@ def _safe_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _worker_local_ready_provider_keys(
+    conn: sqlite3.Connection | None,
+) -> list[str]:
+    if conn is None:
+        return []
+    try:
+        row = conn.execute(
+            "SELECT value FROM system_settings WHERE key=?",
+            ("remote_worker:owner_product_video:worker_capabilities",),
+        ).fetchone()
+    except sqlite3.Error:
+        return []
+    raw = row[0] if row else "[]"
+    capabilities = _json_loads(raw, [])
+    if not isinstance(capabilities, list):
+        return []
+    providers: list[str] = []
+    for raw_capability in capabilities:
+        capability = str(raw_capability or "").strip().lower()
+        if not capability.startswith(
+            REMOTE_WORKER_PRODUCT_VIDEO_PROVIDER_READY_CAPABILITY_PREFIX
+        ):
+            continue
+        provider = capability.split(":", 1)[1]
+        if re.fullmatch(r"[a-z0-9_]{1,48}", provider) and provider not in providers:
+            providers.append(provider)
+    return providers
 
 
 def _env_bool(environ: dict[str, str], name: str, default: bool = False) -> bool:
@@ -2568,6 +2612,93 @@ def _product_video_runtime_eligibility(
         persisted_snapshot_id=str(result.get("admission_snapshot_id") or result.get("provider_eligibility_snapshot_id") or ""),
     )
     runtime_candidates = list(evaluated.get("eligible_provider_keys") or [])
+    worker_ready_provider_keys = _worker_local_ready_provider_keys(conn)
+    worker_local_hydration_used = False
+    if (
+        not runtime_candidates
+        and worker_ready_provider_keys
+        and public_confirmed_submit
+        and runtime_freeze_truth.get("public_live_allowed")
+        and (probation_lock_clear or current_job_matches_lock)
+        and not bool(lock_owner_job_id > 0 and not current_job_matches_lock)
+    ):
+        hard_blocks = dict(evaluated.get("hard_block_reason_by_provider") or {})
+        worker_local_candidates: list[str] = []
+        for provider in persisted_candidates:
+            reasons = {
+                str(reason or "").strip()
+                for reason in hard_blocks.get(provider) or []
+                if str(reason or "").strip()
+            }
+            selected_contract_ok = bool(
+                not selected_probation_provider
+                or provider != selected_probation_provider
+                or selected_probation_contract_valid
+            )
+            if (
+                provider in worker_ready_provider_keys
+                and provider in contract_chain
+                and selected_contract_ok
+                and reasons
+                and reasons.issubset(
+                    REMOTE_WORKER_PRODUCT_VIDEO_WORKER_LOCAL_CONFIG_BLOCKERS
+                )
+            ):
+                worker_local_candidates.append(provider)
+        if worker_local_candidates:
+            runtime_candidates = worker_local_candidates[:1]
+            selected_provider = runtime_candidates[0]
+            probation_reasons = dict(
+                evaluated.get("probation_reason_by_provider") or {}
+            )
+            cleaned_hard_blocks = dict(hard_blocks)
+            cleaned_hard_blocks[selected_provider] = []
+            rejection_reasons = dict(
+                evaluated.get("candidate_rejection_reason_by_provider") or {}
+            )
+            rejection_reasons[selected_provider] = list(
+                probation_reasons.get(selected_provider) or []
+            )
+            worker_local_hydration_used = True
+            evaluated.update(
+                {
+                    "provider_eligibility_snapshot_source": "authenticated_worker_local_provider_readiness",
+                    "eligible_provider_keys": runtime_candidates,
+                    "runtime_candidate_keys": runtime_candidates,
+                    "candidate_keys": runtime_candidates,
+                    "candidate_count": 1,
+                    "candidates_after_route_filter": runtime_candidates,
+                    "candidates_after_freeze_filter": runtime_candidates,
+                    "candidates_after_health_filter": runtime_candidates,
+                    "candidates_after_hard_block_filter": runtime_candidates,
+                    "candidate_count_after_route_filter": 1,
+                    "candidate_count_after_freeze_filter": 1,
+                    "candidate_count_after_health_filter": 1,
+                    "candidate_count_after_hard_block_filter": 1,
+                    "probation_candidate_keys": runtime_candidates,
+                    "hard_blocked_candidate_keys": [],
+                    "hard_block_reason": "",
+                    "hard_block_reason_by_provider": cleaned_hard_blocks,
+                    "candidate_rejection_reason_by_provider": rejection_reasons,
+                    "eligibility_state": "worker_local_hydration",
+                    "admission_mode": "worker_local_hydration",
+                    "probation_admission_allowed": True,
+                    "probation_candidate_selected": selected_provider,
+                    "probation_eligible": True,
+                    "probation_reject_reason": "",
+                    "final_eligible_provider_count": 1,
+                    "ok": True,
+                    "blocker": "",
+                }
+            )
+    evaluated.update(
+        {
+            "worker_local_provider_hydration": worker_local_hydration_used,
+            "worker_local_ready_provider_keys": worker_ready_provider_keys,
+            "provider_credentials_forwarded": False,
+            "worker_local_provider_config_not_forwarded": True,
+        }
+    )
     submit_allowed = bool(
         runtime_candidates
         and submit_policy.get("provider_submit_allowed")
