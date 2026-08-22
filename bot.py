@@ -252283,6 +252283,17 @@ async def handle_video_dubbing_callback(
                     result.get("text") or subtitle_plus_dub_safe_fail_text("tts_failed", lang),
                     reply_markup=subtitle_plus_dub_confirm_keyboard(lang, state),
                 )
+            latest_combo_job = subtitle_dub_find_latest_dub_job_for_user_mode(
+                uid,
+                VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                state,
+            )
+            result = subdub_reconcile_delivered_video_result(
+                VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                result,
+                latest_combo_job,
+                state,
+            )
             state = set_video_dubbing_pending(
                 uid,
                 "completed",
@@ -252293,10 +252304,16 @@ async def handle_video_dubbing_callback(
                 final_dub_asset_id=str(result.get("dub_asset_id") or ""),
                 final_dub_video_asset_id=str(result.get("dub_video_asset_id") or ""),
             )
+            receipt_state = {
+                **state,
+                **dict(result.get("state") or {}),
+                **result,
+                **latest_combo_job,
+            }
             return await query.message.reply_text(
-                subtitle_plus_dub_completed_text(state, result, lang),
+                video_dubbing_receipt_text(receipt_state, result, lang),
                 parse_mode="HTML",
-                reply_markup=subtitle_plus_dub_completed_keyboard(lang, state),
+                reply_markup=video_dubbing_receipt_keyboard(lang, origin, receipt_state),
             )
         if action == "combo_redub_voice":
             state = _clear_subdub_voice_for_navigation(uid, state)
