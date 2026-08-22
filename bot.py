@@ -243506,11 +243506,14 @@ async def transcribe_media_to_segments(
             for parameter in chunk_plan_parameters.values()
         )
     )
+    direct_threshold_seconds = (
+        5 * 60 if require_diarization else SUBDUB_DIRECT_ASR_MAX_SECONDS
+    )
     if chunk_plan_accepts_metadata:
         long_plan = subdub_long_video_chunk_plan(
             duration_seconds,
             source_hash=source_hash,
-            direct_threshold_seconds=SUBDUB_DIRECT_ASR_MAX_SECONDS,
+            direct_threshold_seconds=direct_threshold_seconds,
         )
     else:
         long_plan = subdub_long_video_chunk_plan(duration_seconds)
@@ -247076,7 +247079,94 @@ async def _execute_video_dubbing_pipeline_core(
         if job_key and job_id:
             await subdub_send_progress_update(query, job_key, job_id, stage, lang)
 
-    input_save = await video_dubbing_save_input_for_pipeline(context, state, workspace)
+    exact_resume_requested = bool(state.get("auto_exact_resume"))
+    cached_auto_prepared = state.get("_auto_exact_cached_prepared")
+    if exact_resume_requested:
+        cached_prepared = (
+            dict(cached_auto_prepared)
+            if isinstance(cached_auto_prepared, dict)
+            else {}
+        )
+        cached_state = dict(cached_prepared.get("state") or {})
+        cached_bytes = cached_prepared.get("source_bytes")
+        if isinstance(cached_bytes, bytearray):
+            cached_bytes = bytes(cached_bytes)
+        if not isinstance(cached_bytes, bytes):
+            cached_bytes = b""
+        cached_path = str(cached_state.get("_pipeline_saved_source_path") or "")
+        cached_receipt = dict(state.get("auto_exact_receipt") or {})
+        cached_metadata = dict(state.get("auto_exact_cache") or {})
+        expected_media_sha256 = str(cached_receipt.get("media_sha256") or "").strip().lower()
+        cached_media_sha256 = hashlib.sha256(cached_bytes).hexdigest() if cached_bytes else ""
+        cached_path_sha256 = ""
+        try:
+            if cached_path and os.path.isfile(cached_path):
+                cached_path_sha256 = artifact_storage.artifact_sha256(cached_path)
+        except OSError:
+            cached_path_sha256 = ""
+        cached_input_valid = bool(
+            cached_bytes
+            and cached_path
+            and _workspace_path_is_descendant(cached_path, workspace)
+            and cached_receipt.get("version") == SUBDUB_AUTO_EXACT_RECEIPT_VERSION
+            and cached_metadata.get("version") == SUBDUB_AUTO_EXACT_RECEIPT_VERSION
+            and expected_media_sha256
+            and cached_media_sha256 == expected_media_sha256
+            and cached_path_sha256 == expected_media_sha256
+            and str(cached_prepared.get("media_sha256") or "").strip().lower()
+            == expected_media_sha256
+        )
+        cached_blocker = "" if cached_input_valid else "auto_exact_cached_resume_invalid"
+        cached_content_type = str(cached_prepared.get("content_type") or "video/mp4")
+        input_save = {
+            "ok": cached_input_valid,
+            "file_id": str(state.get("video_file_id") or state.get("source_file_id") or ""),
+            "path": cached_path,
+            "normalized_path": cached_path if cached_input_valid else "",
+            "exists": cached_input_valid,
+            "size": len(cached_bytes),
+            "transport_input_size": len(cached_bytes),
+            "duration": _safe_int(
+                cached_prepared.get("duration_seconds")
+                or state.get("input_duration")
+                or state.get("video_duration")
+                or state.get("source_duration"),
+                0,
+            ),
+            "content_type": cached_content_type,
+            "original_filename": os.path.basename(cached_path) or "source.mp4",
+            "file_saved": cached_input_valid,
+            "error": "" if cached_input_valid else "RuntimeError",
+            "detail": cached_blocker,
+            "source_bytes": cached_bytes if cached_input_valid else b"",
+            "input_save_attempted": False,
+            "input_save_success": cached_input_valid,
+            "telegram_file_size": _safe_int(
+                state.get("video_file_size") or state.get("source_file_size"),
+                len(cached_bytes),
+            ),
+            "telegram_download_method": "source_bytes_override",
+            "telegram_api_source": "cached_auto_exact_receipt",
+            "telegram_download_limit_hit": False,
+            "large_telegram_media_detected": bool(
+                len(cached_bytes) > SUBDUB_LARGE_MEDIA_DETECTED_THRESHOLD_BYTES
+            ),
+            "large_media_intake_supported": True,
+            "large_media_intake_source": "source_bytes_override",
+            "input_save_blocker": cached_blocker,
+            "input_save_public_action": "",
+            "no_charge_reason": cached_blocker,
+            "media_normalized": bool(state.get("media_normalized")),
+            "media_normalization_count": int(state.get("media_normalization_count") or 0),
+            "media_normalization_reasons": list(state.get("media_normalization_reasons") or []),
+            "original_source_sha256": str(
+                cached_receipt.get("source_sha256") or state.get("source_sha256") or ""
+            ),
+            "processing_source_sha256": cached_media_sha256,
+            "source_duration_exact": float(state.get("source_duration_exact") or 0.0),
+        }
+    else:
+        input_save = await video_dubbing_save_input_for_pipeline(context, state, workspace)
     if input_save.get("ok") and input_save.get("source_bytes"):
         # The download is complete. Persist this before potentially long
         # probe/normalization work so long media never appears stuck at 5%.
@@ -247085,6 +247175,7 @@ async def _execute_video_dubbing_pipeline_core(
     if (
         input_save.get("ok")
         and input_save.get("source_bytes")
+        and not exact_resume_requested
         and str(input_save.get("content_type") or "").lower().startswith("video/")
     ):
         media_preflight = await subdub_normalize_video_bytes_if_needed(
