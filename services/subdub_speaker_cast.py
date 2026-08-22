@@ -469,6 +469,49 @@ def sidecar_matches(
         return False
 
 
+def restore_cached_cue_ids_from_sidecar(
+    sidecar: dict,
+    cues: list[dict],
+    *,
+    media_sha256: str,
+    subtitle_sha256: str,
+) -> list[dict]:
+    """Restore canonical cue IDs lost by SRT serialization, fail closed."""
+
+    try:
+        if (
+            not isinstance(sidecar, dict)
+            or type(sidecar.get("version")) is not int
+            or sidecar.get("version") != SIDECAR_VERSION
+        ):
+            raise AutoCastUnavailable()
+        media_hash = _normalized_sha256(media_sha256)
+        subtitle_hash = _normalized_sha256(subtitle_sha256)
+        if (
+            not media_hash
+            or not subtitle_hash
+            or _normalized_sha256(sidecar.get("media_sha256")) != media_hash
+            or _normalized_sha256(sidecar.get("subtitle_sha256")) != subtitle_hash
+        ):
+            raise AutoCastUnavailable()
+        source = _canonical_cues(cues)
+        source_rows = _timeline_rows(source)
+        stored_rows = _sidecar_rows(sidecar)
+        if len(source_rows) != len(stored_rows):
+            raise AutoCastUnavailable()
+        restored: list[dict] = []
+        for cue, source_row, stored_row in zip(source, source_rows, stored_rows):
+            stored_cue_id, stored_start_ms, stored_end_ms = stored_row
+            if source_row[1:] != (stored_start_ms, stored_end_ms):
+                raise AutoCastUnavailable()
+            restored.append({**cue, "cue_id": stored_cue_id})
+        return restored
+    except AutoCastUnavailable:
+        raise
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise AutoCastUnavailable() from exc
+
+
 def join_sidecar(sidecar: dict, cues: list[dict]) -> list[dict]:
     if (
         not isinstance(sidecar, dict)
