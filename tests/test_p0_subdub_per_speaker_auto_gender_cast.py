@@ -4688,6 +4688,7 @@ def _task7_pause_fixture(
     job_key: str = "97100|97100|source|dub_audio|auto_speaker",
     user_id: int = 97_100,
     chat_id: int = 97_100,
+    source_cue_id: str = "",
 ):
     speaker_cast = _speaker_cast_module()
     workspace.mkdir(parents=True, exist_ok=True)
@@ -4702,6 +4703,8 @@ def _task7_pause_fixture(
         extraction_source="cached_auto_exact_receipt",
         source_language="auto",
     )
+    if source_cue_id:
+        source_segments[0]["cue_id"] = source_cue_id
     sidecar = speaker_cast.build_sidecar(
         [
             {
@@ -5021,12 +5024,21 @@ def test_task7_exact_known_quote_still_persists_consumed_auto_receipt(
     assert persisted[-1][2] == "auto_exact_known_receipt_claimed"
 
 
+@pytest.mark.parametrize(
+    "source_cue_id",
+    ("", "cue-0001-sidecar-stable"),
+    ids=("native-id", "serialized-id-drift"),
+)
 def test_task7_cached_prepare_restart_resume_has_zero_asr_and_translation(
     monkeypatch,
     tmp_path,
+    source_cue_id,
 ):
     workspace = tmp_path / "workspace"
-    state, prepared = _task7_pause_fixture(workspace)
+    state, prepared = _task7_pause_fixture(
+        workspace,
+        source_cue_id=source_cue_id,
+    )
     monkeypatch.setattr(
         bot,
         "subtitle_dub_workspace_path_safety",
@@ -5075,6 +5087,9 @@ def test_task7_cached_prepare_restart_resume_has_zero_asr_and_translation(
     assert cached["asr_provider"] == "cached_auto_exact_receipt"
     assert cached["translation_provider"] == ""
     assert cached["source_segments"][0]["speaker_id"] == "chunk_00:speaker_0"
+    assert cached["source_segments"][0]["cue_id"] == (
+        source_cue_id or prepared["source_segments"][0]["cue_id"]
+    )
     for field, expected in (
         ("auto_exact_actual_billable_words", 2),
         ("auto_exact_actual_auto_xu", 1),

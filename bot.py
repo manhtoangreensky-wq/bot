@@ -246272,6 +246272,12 @@ def _subdub_auto_load_cached_prepared(job: dict, state: dict) -> dict:
         expected_sha256=sidecar_sha256,
         workspace=workspace,
     )
+    source_segments = subdub_speaker_cast.restore_cached_cue_ids_from_sidecar(
+        sidecar,
+        source_segments,
+        media_sha256=media_sha256,
+        subtitle_sha256=subdub_speaker_sidecar_subtitle_sha256(source_subtitle),
+    )
     source_segments = subdub_speaker_cast.require_matching_sidecar(
         sidecar,
         source_segments,
