@@ -89,6 +89,46 @@ def test_product_video_subtitles_use_subdub_cues_without_crossing_scene_boundari
     assert "Alignment, MarginL, MarginR, MarginV" in ass_text
 
 
+def test_product_video_subtitles_fall_back_to_persisted_scene_scripts(
+    tmp_path: Path,
+) -> None:
+    result = product_video_addon_materialization.materialize_product_video_addons(
+        {
+            "scene_cards": [
+                {"scene_index": 1, "script_text": "Rang hạt cà phê thủ công."},
+                {"scene_index": 2, "script_text": "Barista rót cà phê vào ly."},
+            ],
+            "addon_plan": {
+                "contract_version": "product-video-addons-v1",
+                "requested_addons": ["subtitle", "transitions"],
+                "subtitle": {
+                    "enabled": True,
+                    "source": "script",
+                    "script_text": "",
+                },
+                "transition_plan": ["cut"],
+            },
+        },
+        workspace=str(tmp_path),
+        scene_count=2,
+        scene_duration=8.0,
+    )
+
+    assert result["ok"] is True
+    cues = _srt_cues(Path(result["subtitle_srt_path"]))
+    assert cues[0]["start"] == 0.0
+    assert all(cue["end"] <= 8.0 for cue in cues if cue["start"] < 8.0)
+    assert all(8.0 <= cue["start"] < cue["end"] <= 16.0 for cue in cues if cue["start"] >= 8.0)
+    assert any(cue["start"] < 8.0 for cue in cues)
+    assert any(cue["start"] >= 8.0 for cue in cues)
+    assert "Rang hạt cà phê thủ công." in Path(result["subtitle_srt_path"]).read_text(
+        encoding="utf-8"
+    )
+    assert "Barista rót cà phê vào ly." in Path(result["subtitle_srt_path"]).read_text(
+        encoding="utf-8"
+    )
+
+
 def test_translation_subdub_and_product_video_share_the_same_cue_fitter() -> None:
     source = (ROOT / "bot.py").read_text(encoding="utf-8")
     start = source.index("def video_dubbing_qc_segments(")
