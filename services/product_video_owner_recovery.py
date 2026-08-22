@@ -133,11 +133,30 @@ def recover_product_video_owner_pre_submit_failure(
         return _blocked("durable_job_scope_missing")
     result = _json_mapping(job.get("result_json"))
     error = str(job.get("last_error") or "").strip()
+    job_status = str(job.get("status") or "").strip()
+    project_status = str(project.get("status") or "").strip()
+    worker_poll_source = "worker_poll_existing_task"
+    stale_poll_only_mode = bool(
+        result.get("recovery_existing_tasks_only")
+        or str(result.get("submit_source") or "").strip() == worker_poll_source
+        or str(result.get("provider_submit_source") or "").strip()
+        == worker_poll_source
+    )
+    max_attempts = max(1, _integer(job.get("max_attempts")))
+    addon_subtitle_poll_only_repair = bool(
+        job_status in {"queued", "processing"}
+        and project_status in {"queued_for_worker", "processing"}
+        and _integer(job.get("attempts")) > max_attempts
+        and result.get("owner_addon_subtitle_recovery_used")
+        and not result.get("owner_addon_subtitle_poll_only_repair_used")
+        and stale_poll_only_mode
+        and error in {"", "provider_in_progress", "provider_stalled_not_start"}
+    )
     if str(job.get("job_type") or "") != "video_render":
         return _blocked("job_type_mismatch")
-    if str(job.get("status") or "") != "failed":
+    if job_status != "failed" and not addon_subtitle_poll_only_repair:
         return _blocked("job_not_failed")
-    if str(project.get("status") or "") != "failed":
+    if project_status != "failed" and not addon_subtitle_poll_only_repair:
         return _blocked("project_not_failed")
     if not _integer(project.get("is_confirmed")):
         return _blocked("public_confirmation_missing")
@@ -151,20 +170,27 @@ def recover_product_video_owner_pre_submit_failure(
         or str(outbox.get("dispatch_status") or "") != "acknowledged"
     ):
         return _blocked("acknowledged_outbox_required")
-    if error not in RECOVERABLE_ERRORS:
+    if error not in RECOVERABLE_ERRORS and not addon_subtitle_poll_only_repair:
         return _blocked("failure_reason_not_recoverable")
-    addon_subtitle_recovery = error == ADDON_SUBTITLE_ERROR
+    addon_subtitle_recovery = bool(
+        error == ADDON_SUBTITLE_ERROR or addon_subtitle_poll_only_repair
+    )
     recovery_kind = (
-        "addon_subtitle_materialization"
+        "addon_subtitle_poll_only_repair"
+        if addon_subtitle_poll_only_repair
+        else "addon_subtitle_materialization"
         if addon_subtitle_recovery
         else "approved_snapshot_hash"
     )
-    if addon_subtitle_recovery:
+    if addon_subtitle_poll_only_repair:
+        if result.get("owner_addon_subtitle_poll_only_repair_used"):
+            return _blocked("addon_subtitle_poll_only_repair_already_used")
+    elif addon_subtitle_recovery:
         if result.get("owner_addon_subtitle_recovery_used"):
             return _blocked("addon_subtitle_recovery_already_used")
     elif result.get("owner_pre_submit_recovery_used"):
         return _blocked("recovery_already_used")
-    if _integer(job.get("attempts")) >= max(1, _integer(job.get("max_attempts"))):
+    if not addon_subtitle_poll_only_repair and _integer(job.get("attempts")) >= max_attempts:
         return _blocked("job_attempts_exhausted")
     provider_attempted = bool(
         result.get("provider_submit_called")
@@ -210,8 +236,41 @@ def recover_product_video_owner_pre_submit_failure(
             str(execution.get("blocker") or "worker_payload_execution_contract_invalid")
         )
 
+    if addon_subtitle_recovery:
+        if stale_poll_only_mode:
+            resume_submit_source = str(
+                result.get("original_submit_source") or ""
+            ).strip()
+            if not resume_submit_source or resume_submit_source == worker_poll_source:
+                if result.get("public_user_confirmed") and result.get("invoice_confirmed"):
+                    resume_submit_source = "public_user_final_confirm"
+                else:
+                    return _blocked("owner_recovery_original_submit_source_missing")
+            result.update(
+                {
+                    "recovery_existing_tasks_only": False,
+                    "provider_poll_existing_task": False,
+                    "poll_existing_task_allowed": False,
+                    "submit_source": resume_submit_source,
+                    "provider_submit_source": resume_submit_source,
+                    "original_submit_source": resume_submit_source,
+                    "provider_stalled_not_start": False,
+                    "error": "",
+                    "owner_addon_subtitle_recovery_cleared_stale_poll_only_mode": True,
+                }
+            )
+
     current = (now or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
     recovery_metadata = (
+        {
+            "owner_addon_subtitle_poll_only_repair_used": True,
+            "owner_addon_subtitle_poll_only_repair_count": 1,
+            "owner_addon_subtitle_poll_only_repaired_at": current,
+            "owner_addon_subtitle_poll_only_repair_source": "explicit_owner_authorization",
+            "owner_addon_subtitle_recovery_worker_compatible": True,
+        }
+        if addon_subtitle_poll_only_repair
+        else
         {
             "owner_addon_subtitle_recovery_used": True,
             "owner_addon_subtitle_recovery_count": 1,
@@ -240,7 +299,9 @@ def recover_product_video_owner_pre_submit_failure(
             "next_poll_scheduled": True,
             **recovery_metadata,
             "worker_claim_result": (
-                "owner_addon_subtitle_recovery_queued"
+                "owner_addon_subtitle_poll_only_repair_queued"
+                if addon_subtitle_poll_only_repair
+                else "owner_addon_subtitle_recovery_queued"
                 if addon_subtitle_recovery
                 else "owner_pre_submit_recovery_queued"
             ),
@@ -260,20 +321,44 @@ def recover_product_video_owner_pre_submit_failure(
     original_result_json = str(job.get("result_json") or "")
     try:
         conn.execute("BEGIN IMMEDIATE")
-        cursor = conn.execute(
-            """UPDATE video_jobs
-                  SET status='queued',result_json=?,last_error='',progress_percent=10,
-                      progress_message='queued_waiting_for_dispatch',locked_by='',locked_at=NULL,
-                      lease_expires_at=NULL,completed_at=NULL,updated_at=?
-                WHERE id=? AND status='failed' AND last_error=? AND result_json=?""",
-            (
-                json.dumps(result, ensure_ascii=True, separators=(",", ":"), sort_keys=True),
-                current,
-                _integer(job_id),
-                error,
-                original_result_json,
-            ),
+        encoded_result = json.dumps(
+            result, ensure_ascii=True, separators=(",", ":"), sort_keys=True
         )
+        if addon_subtitle_poll_only_repair:
+            cursor = conn.execute(
+                """UPDATE video_jobs
+                      SET status='queued',attempts=?,result_json=?,last_error='',
+                          progress_percent=10,progress_message='queued_waiting_for_dispatch',
+                          locked_by='',locked_at=NULL,lease_expires_at=NULL,
+                          completed_at=NULL,updated_at=?
+                    WHERE id=? AND status=? AND attempts=? AND last_error=?
+                      AND result_json=?""",
+                (
+                    max_attempts - 1,
+                    encoded_result,
+                    current,
+                    _integer(job_id),
+                    job_status,
+                    _integer(job.get("attempts")),
+                    error,
+                    original_result_json,
+                ),
+            )
+        else:
+            cursor = conn.execute(
+                """UPDATE video_jobs
+                      SET status='queued',result_json=?,last_error='',progress_percent=10,
+                          progress_message='queued_waiting_for_dispatch',locked_by='',locked_at=NULL,
+                          lease_expires_at=NULL,completed_at=NULL,updated_at=?
+                    WHERE id=? AND status='failed' AND last_error=? AND result_json=?""",
+                (
+                    encoded_result,
+                    current,
+                    _integer(job_id),
+                    error,
+                    original_result_json,
+                ),
+            )
         if cursor.rowcount != 1:
             conn.rollback()
             return _blocked("recovery_claim_lost")
@@ -281,8 +366,13 @@ def recover_product_video_owner_pre_submit_failure(
             """UPDATE video_projects
                   SET status='queued_for_worker',video_terminal_state='',
                       video_terminal_locked_at=NULL,error_log='',completed_at=NULL,updated_at=?
-                WHERE project_id=? AND status='failed' AND job_id=?""",
-            (current, _integer(project.get("project_id")), _integer(job_id)),
+                WHERE project_id=? AND status=? AND job_id=?""",
+            (
+                current,
+                _integer(project.get("project_id")),
+                project_status,
+                _integer(job_id),
+            ),
         )
         if project_cursor.rowcount != 1:
             conn.rollback()

@@ -349,6 +349,127 @@ def test_owner_recovery_requeues_same_job_after_fixed_subtitle_materialization_o
     )
 
 
+def test_owner_addon_recovery_clears_stale_existing_task_poll_only_mode(
+    tmp_path,
+) -> None:
+    conn, job_id, worker_payload = _failed_pre_submit_job(
+        tmp_path,
+        error=ADDON_SUBTITLE_ERROR,
+        attempts=2,
+        outbox_attempts=2,
+        result_updates={
+            "owner_pre_submit_recovery_used": True,
+            "recovery_existing_tasks_only": True,
+            "existing_task_recovery_recovered": True,
+            "existing_task_recovery_count": 1,
+            "submit_source": "worker_poll_existing_task",
+            "provider_submit_source": "worker_poll_existing_task",
+            "original_submit_source": "public_user_final_confirm",
+            "provider_poll_existing_task": True,
+            "provider_submit_block_reason": "existing_task_recovery_read_only",
+            "provider_stalled_not_start": True,
+            "error": "provider_stalled_not_start",
+        },
+        worker_compatibility=_compatible_worker(),
+    )
+
+    recovered = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=worker_payload,
+        owner_authorized=True,
+    )
+
+    assert recovered["owner_pre_submit_recovered"] is True
+    job = dict(conn.execute("SELECT * FROM video_jobs WHERE id=?", (job_id,)).fetchone())
+    result = json.loads(job["result_json"])
+    assert result.get("recovery_existing_tasks_only") is False
+    assert result.get("provider_poll_existing_task") is False
+    assert result["submit_source"] == "public_user_final_confirm"
+    assert result["provider_submit_source"] == "public_user_final_confirm"
+    assert result["provider_submit_block_reason"] == "owner_recovery_awaiting_worker_revalidation"
+    assert result.get("provider_stalled_not_start") is False
+    assert result.get("error") == ""
+    assert int(job["attempts"]) == 2
+    assert conn.execute("SELECT COUNT(*) FROM video_jobs").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM video_dispatch_outbox").fetchone()[0] == 1
+
+
+def test_owner_repair_requeues_same_job_after_stale_poll_only_claim_loop(
+    tmp_path,
+) -> None:
+    conn, job_id, worker_payload = _failed_pre_submit_job(
+        tmp_path,
+        error=ADDON_SUBTITLE_ERROR,
+        attempts=2,
+        outbox_attempts=2,
+        result_updates={
+            "owner_pre_submit_recovery_used": True,
+            "owner_addon_subtitle_recovery_used": True,
+            "owner_addon_subtitle_recovery_count": 1,
+            "recovery_existing_tasks_only": True,
+            "existing_task_recovery_recovered": True,
+            "submit_source": "worker_poll_existing_task",
+            "provider_submit_source": "worker_poll_existing_task",
+            "original_submit_source": "public_user_final_confirm",
+            "provider_poll_existing_task": True,
+            "provider_stalled_not_start": True,
+            "error": "provider_stalled_not_start",
+        },
+        worker_compatibility=_compatible_worker(),
+    )
+    stuck_job = dict(conn.execute("SELECT * FROM video_jobs WHERE id=?", (job_id,)).fetchone())
+    stuck_result = json.loads(stuck_job["result_json"])
+    conn.execute(
+        """UPDATE video_jobs
+              SET status='queued',attempts=11,last_error='provider_in_progress',
+                  result_json=?,progress_percent=60,progress_message='provider_in_progress'
+            WHERE id=?""",
+        (json.dumps(stuck_result), job_id),
+    )
+    conn.execute(
+        """UPDATE video_projects
+              SET status='processing',video_terminal_state='final_rendering'
+            WHERE project_id=?""",
+        (int(stuck_job["project_id"]),),
+    )
+    conn.commit()
+
+    repaired = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=worker_payload,
+        owner_authorized=True,
+    )
+
+    assert repaired["owner_pre_submit_recovered"] is True
+    assert repaired["recovery_kind"] == "addon_subtitle_poll_only_repair"
+    job = dict(conn.execute("SELECT * FROM video_jobs WHERE id=?", (job_id,)).fetchone())
+    project = dict(
+        conn.execute(
+            "SELECT * FROM video_projects WHERE project_id=?",
+            (int(job["project_id"]),),
+        ).fetchone()
+    )
+    result = json.loads(job["result_json"])
+    assert job["status"] == "queued"
+    assert int(job["attempts"]) == 2
+    assert project["status"] == "queued_for_worker"
+    assert project["video_terminal_state"] == ""
+    assert result["owner_addon_subtitle_poll_only_repair_used"] is True
+    assert result.get("recovery_existing_tasks_only") is False
+    assert result.get("provider_poll_existing_task") is False
+    assert result["submit_source"] == "public_user_final_confirm"
+    assert result["provider_submit_source"] == "public_user_final_confirm"
+    assert result["provider_submit_called"] is False
+    assert int(result["submit_count"]) == 0
+    assert int(result["charged_xu"]) == 0
+    assert repaired["jobs_created"] == 0
+    assert repaired["outboxes_created"] == 0
+    assert repaired["provider_calls"] == 0
+    assert repaired["wallet_mutations"] == 0
+
+
 def test_owner_addon_subtitle_recovery_requires_compatible_worker(tmp_path) -> None:
     conn, job_id, worker_payload = _failed_pre_submit_job(
         tmp_path,
