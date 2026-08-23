@@ -11,6 +11,7 @@ from services import video_uiflow3_execution_contract
 USER_ID = 3901
 PRE_SUBMIT_ERROR = "RuntimeError:uiflow3_approved_snapshot_hash_mismatch"
 ADDON_SUBTITLE_ERROR = "RuntimeError:addon_material_missing:subtitle"
+POST_POLL_FINALIZER_ERROR = "RuntimeError:provider_render_failed:RuntimeError"
 
 
 def _hash_bound_snapshot() -> dict:
@@ -468,6 +469,173 @@ def test_owner_repair_requeues_same_job_after_stale_poll_only_claim_loop(
     assert repaired["outboxes_created"] == 0
     assert repaired["provider_calls"] == 0
     assert repaired["wallet_mutations"] == 0
+
+
+def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure(
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "product-video-19-existing-clips"
+    workspace.mkdir()
+    scene_paths = {
+        "1": str(workspace / "provider_scene_001.mp4"),
+        "2": str(workspace / "provider_scene_002.mp4"),
+    }
+    for index, path in scene_paths.items():
+        (workspace / f"provider_scene_{int(index):03d}.mp4").write_bytes(
+            f"validated-scene-{index}".encode("ascii")
+        )
+    task_ids_by_scene = {
+        "1": ["task_existing_scene_1"],
+        "2": ["task_existing_scene_2"],
+    }
+    manifest_path = workspace / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "job_id": "1",
+                "user_id": str(USER_ID),
+                "workspace_dir": str(workspace),
+                "required_scene_indexes": [1, 2],
+                "task_ids_by_scene": task_ids_by_scene,
+                "provider_status_by_scene": {
+                    "1": "scene_clip_validated",
+                    "2": "scene_clip_validated",
+                },
+                "raw_clip_paths_by_scene": scene_paths,
+                "normalized_clip_paths_by_scene": {},
+                "scene_order": [1, 2],
+                "concat_state": "normalizing",
+                "delivery_state": "pending",
+                "charge_state": "pending",
+                "final_video_path": None,
+                "status": "normalizing_scenes",
+            }
+        ),
+        encoding="utf-8",
+    )
+    conn, job_id, worker_payload = _failed_pre_submit_job(
+        tmp_path,
+        error=POST_POLL_FINALIZER_ERROR,
+        attempts=3107,
+        outbox_attempts=3,
+        result_updates={
+            "recovery_existing_tasks_only": True,
+            "existing_task_recovery_recovered": True,
+            "submit_source": "worker_poll_existing_task",
+            "provider_submit_source": "worker_poll_existing_task",
+            "original_submit_source": "public_user_final_confirm",
+            "provider_poll_called": True,
+            "provider_poll_http_status": 200,
+            "provider_submit_called": True,
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "existing_task_recovery_read_only",
+            "submit_count": 0,
+            "no_new_submit": True,
+            "no_new_paid_submit": True,
+            "provider_task_ids": ["task_existing_scene_2"],
+            "scene_task_map": task_ids_by_scene,
+            "result_task_id_by_scene": {
+                "1": "task_existing_scene_1",
+                "2": "task_existing_scene_2",
+            },
+            "manifest_path": str(manifest_path),
+            "canonical_multiscene_manifest_path": str(manifest_path),
+            "canonical_multiscene_workspace": str(workspace),
+            "scene_clip_coverage_complete": True,
+            "scene_clip_valid_by_index": {"1": True, "2": True},
+            "scene_clip_validation_by_index": {
+                "1": {"ok": True, "path_present": True, "bytes": 17},
+                "2": {"ok": True, "path_present": True, "bytes": 17},
+            },
+            "valid_scene_clip_count": 2,
+            "completed_scene_count": 2,
+            "final_mp4_valid": False,
+            "final_delivered": False,
+            "delivery_succeeded": False,
+            "charged_xu": 0,
+            "charge_count": 0,
+        },
+        worker_compatibility=_compatible_worker(),
+    )
+    before = json.loads(
+        conn.execute(
+            "SELECT result_json FROM video_jobs WHERE id=?",
+            (job_id,),
+        ).fetchone()[0]
+    )
+
+    recovered = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=worker_payload,
+        owner_authorized=True,
+    )
+
+    assert recovered["owner_pre_submit_recovered"] is True
+    assert recovered["recovery_kind"] == "post_poll_finalizer"
+    job = dict(conn.execute("SELECT * FROM video_jobs WHERE id=?", (job_id,)).fetchone())
+    project = dict(
+        conn.execute(
+            "SELECT * FROM video_projects WHERE project_id=?",
+            (int(job["project_id"]),),
+        ).fetchone()
+    )
+    outbox = dict(
+        conn.execute(
+            "SELECT * FROM video_dispatch_outbox WHERE job_id=?",
+            (job_id,),
+        ).fetchone()
+    )
+    result = json.loads(job["result_json"])
+    assert job["status"] == "queued"
+    assert int(job["attempts"]) == 2
+    assert project["status"] == "queued_for_worker"
+    assert outbox["dispatch_status"] == "acknowledged"
+    assert int(outbox["attempt_count"]) == 3
+    assert result["owner_post_poll_finalizer_recovery_used"] is True
+    assert result["owner_post_poll_finalizer_recovery_count"] == 1
+    assert result["recovery_existing_tasks_only"] is True
+    assert result["provider_poll_existing_task"] is True
+    assert result["poll_existing_task_allowed"] is True
+    assert result["no_new_submit"] is True
+    assert result["no_new_paid_submit"] is True
+    assert result["provider_submit_allowed"] is False
+    assert result["provider_submit_block_reason"] == "post_poll_finalizer_recovery_read_only"
+    assert result["provider_submit_called"] is before["provider_submit_called"]
+    assert result["provider_task_ids"] == before["provider_task_ids"]
+    assert result["scene_task_map"] == before["scene_task_map"]
+    assert result["result_task_id_by_scene"] == before["result_task_id_by_scene"]
+    assert result["manifest_path"] == before["manifest_path"]
+    assert int(result["submit_count"]) == 0
+    assert int(result["charged_xu"]) == 0
+    assert int(result["charge_count"]) == 0
+    assert recovered["jobs_created"] == 0
+    assert recovered["outboxes_created"] == 0
+    assert recovered["provider_calls"] == 0
+    assert recovered["wallet_mutations"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM video_jobs").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM video_dispatch_outbox").fetchone()[0] == 1
+
+    conn.execute(
+        "UPDATE video_jobs SET status='failed',last_error=? WHERE id=?",
+        (POST_POLL_FINALIZER_ERROR, job_id),
+    )
+    conn.execute(
+        "UPDATE video_projects SET status='failed' WHERE project_id=?",
+        (int(job["project_id"]),),
+    )
+    conn.commit()
+    repeated = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=worker_payload,
+        owner_authorized=True,
+    )
+    assert repeated["owner_pre_submit_recovered"] is False
+    assert (
+        repeated["owner_pre_submit_recovery_block_reason"]
+        == "post_poll_finalizer_recovery_already_used"
+    )
 
 
 def test_owner_addon_subtitle_recovery_requires_compatible_worker(tmp_path) -> None:

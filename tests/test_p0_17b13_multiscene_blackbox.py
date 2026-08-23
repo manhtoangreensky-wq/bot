@@ -106,6 +106,33 @@ def test_normalize_scene_duration_trims_and_extends(monkeypatch, tmp_path):
     assert 5.7 <= mvp.probe_duration(extended) <= 6.4
 
 
+def test_normalize_scene_duration_relies_on_ffmpeg_default_autorotation(
+    monkeypatch, tmp_path
+):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    captured = {}
+
+    def fake_run(command, timeout):
+        captured["command"] = list(command)
+        Path(command[-1]).write_bytes(b"normalized")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(mvp, "_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(mvp, "probe_duration", lambda _path: 8.0)
+    monkeypatch.setattr(mvp, "safe_run_ffmpeg", fake_run)
+
+    mvp.normalize_scene_duration(
+        str(source),
+        str(tmp_path / "normalized.mp4"),
+        8,
+        target_width=540,
+        target_height=960,
+    )
+
+    assert "-autorotate" not in captured["command"]
+
+
 def test_stitch_scenes_concat_outputs_mp4(tmp_path):
     clips = [_make_clip(tmp_path / f"scene_{idx}.mp4", duration=1, color=color) for idx, color in enumerate(["0x1E88E5", "0x43A047", "0xF4511E"], start=1)]
     output = mvp.stitch_scenes(clips, str(tmp_path / "stitched.mp4"))
