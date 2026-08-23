@@ -72,6 +72,33 @@ def test_voice_reset_keeps_combo_media_translation_and_audio_state():
     assert "subdub_final_confirmed" not in restored
 
 
+def test_auto_combo_translation_choice_marks_translated_subtitle_as_dub_source():
+    start = BOT_SOURCE.index("def subdub_apply_voice_choice(")
+    end = BOT_SOURCE.index("\ndef subdub_auto_manual_required_recovery(", start)
+    namespace = {
+        "subdub_auto_provider_capacity_ready": lambda: True,
+        "reset_subdub_voice_selection": lambda state, *, selecting_auto: dict(state),
+        "subtitle_plus_dub_is_active": lambda state: state.get("mode") == "subtitle_plus_dub",
+        "video_dubbing_voice_payload": lambda *_args, **_kwargs: {},
+    }
+    exec(compile(BOT_SOURCE[start:end], str(BOT_PATH), "exec"), namespace)
+    choose = namespace["subdub_apply_voice_choice"]
+    selected = choose(
+        {
+            "mode": "subtitle_plus_dub",
+            "active_flow": "subtitle_plus_dub",
+            "target_language": "日本語",
+            "translate_requested": "1",
+        },
+        "auto_speaker_gender",
+    )
+
+    assert selected is not None
+    assert selected["target_language"] == "日本語"
+    assert selected["dub_source"] == "translated_subtitle"
+    assert selected["voice_kind"] == "auto_speaker_gender"
+
+
 def _confirmation_namespace() -> dict:
     copy = {
         "voice_auto_speaker": "👥 Tự nhận giọng (tối đa 16)",
