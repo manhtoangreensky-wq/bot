@@ -233884,6 +233884,12 @@ def subdub_apply_voice_choice(
     if selecting_auto:
         selected["voice_kind"] = "auto_speaker_gender"
         selected["voice_selection_mode"] = "auto_speaker"
+        if (
+            subtitle_plus_dub_is_active(selected)
+            and str(selected.get("translate_requested") or "") == "1"
+            and str(selected.get("target_language") or "").strip()
+        ):
+            selected["dub_source"] = "translated_subtitle"
         return selected
     selected.update(video_dubbing_voice_payload(value, profile, lang))
     return selected
