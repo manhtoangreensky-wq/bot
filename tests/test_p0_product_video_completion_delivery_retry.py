@@ -175,3 +175,126 @@ def test_duplicate_delivery_retry_persists_receipt_and_settlement(monkeypatch, t
     assert response.status_code == 200
     assert [name for name, _payload in calls] == ["delivery", "settlement"]
     assert calls[0][1]["delivery_message_id"] == "903"
+    assert response.json()["delivery_receipt"]["sent"] is True
+
+
+def test_delivery_settlement_waits_for_durable_receipt(monkeypatch, tmp_path):
+    final_path = tmp_path / "final.mp4"
+    final_path.write_bytes(b"real-product-video")
+    completion = _duplicate_result(final_path)
+    settlement_calls = []
+
+    class FakeConn:
+        def close(self):
+            return None
+
+    async def deliver(_result):
+        return {"sent": True, "telegram_message_id": "904"}
+
+    monkeypatch.setattr(bot, "verify_remote_worker_api_access", lambda _request: None)
+    monkeypatch.setattr(
+        bot,
+        "_record_owner_product_video_worker_identity",
+        lambda *_args, **_kwargs: {"owner_heartbeat_request_received": False},
+    )
+    monkeypatch.setattr(bot, "db_connect", lambda: FakeConn())
+    monkeypatch.setattr(
+        bot.remote_worker_api,
+        "complete_remote_worker_job",
+        lambda *_args, **_kwargs: completion,
+    )
+    monkeypatch.setattr(bot, "maybe_send_remote_worker_final_video", deliver)
+    monkeypatch.setattr(
+        bot.video_project_queue,
+        "note_video_delivery_result",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "sent": False,
+            "reason": "receipt_not_persisted",
+        },
+    )
+    monkeypatch.setattr(
+        bot,
+        "product_video_charge_after_final_delivery",
+        lambda *_args, **_kwargs: settlement_calls.append(True),
+    )
+
+    response = TestClient(bot.fastapi_app).post(
+        "/api/v1/worker/complete",
+        json={"worker_id": "vps-toanaas-01", "job_id": 19, "result": {}},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["delivery_receipt"]["reason"] == "receipt_not_persisted"
+    assert settlement_calls == []
+
+
+def test_probation_delivery_records_receipt_without_promoting_provider(
+    monkeypatch,
+    tmp_path,
+):
+    conn = sqlite3.connect(tmp_path / "probation-delivery.db")
+    conn.row_factory = sqlite3.Row
+    queue.ensure_video_project_queue_schema(conn)
+    project = queue.create_video_project(
+        conn,
+        user_id=7126457028,
+        asset_pack={"source": "product_video", "render_mode": "real"},
+    )
+    project_id = int(project["project_id"])
+    job = queue.enqueue_video_render_job(
+        conn,
+        project_id=project_id,
+        user_id=7126457028,
+    )
+    job_id = int(job["id"])
+    payload = {
+        "admission_mode": queue.PRODUCT_VIDEO_PROBATION_ADMISSION_MODE,
+        "scene_tasks": [
+            {"scene_index": 1, "clip_valid": True},
+            {"scene_index": 2, "clip_valid": True},
+        ],
+        "scene_coverage_expected": 2,
+        "scene_coverage_count": 2,
+        "scene_clip_coverage_complete": True,
+        "final_mp4_valid": True,
+        "final_mp4_validated": True,
+        "output_bytes": 1191503,
+        "result_url": "",
+        "provider_result_url": "",
+    }
+    conn.execute(
+        "UPDATE video_jobs SET status='completed',result_json=? WHERE id=?",
+        (json.dumps(payload), job_id),
+    )
+    conn.execute(
+        "UPDATE video_projects SET status='completed' WHERE project_id=?",
+        (project_id,),
+    )
+    conn.commit()
+    monkeypatch.setattr(
+        queue.video_uiflow3_execution_contract,
+        "validate_execution_contract",
+        lambda *_args, **_kwargs: {"ok": True, "applies": False, "blocker": ""},
+    )
+
+    receipt = queue.note_video_delivery_result(
+        conn,
+        job_id=job_id,
+        sent=True,
+        delivery_message_id="905",
+        success_message_id="905",
+    )
+
+    assert receipt["ok"] is True
+    assert receipt["sent"] is True
+    stored_job = queue.get_video_render_job(conn, job_id)
+    stored_project = queue.get_video_project(conn, project_id)
+    stored = json.loads(stored_job["result_json"])
+    assert stored_project["video_delivery_message_id"] == "905"
+    assert stored["delivery_succeeded"] is True
+    assert stored["final_mp4_delivered"] is True
+    assert stored["provider_health_promotion_eligible"] is False
+    assert stored["probation_result"] == "pending"
+    assert stored["probation_result_validation_blocker"]
+    conn.close()
