@@ -12,6 +12,7 @@ USER_ID = 3901
 PRE_SUBMIT_ERROR = "RuntimeError:uiflow3_approved_snapshot_hash_mismatch"
 ADDON_SUBTITLE_ERROR = "RuntimeError:addon_material_missing:subtitle"
 POST_POLL_FINALIZER_ERROR = "RuntimeError:provider_render_failed:RuntimeError"
+COMPLETION_409_ERROR = "HTTPError:HTTP Error 409: Conflict"
 
 
 def _hash_bound_snapshot() -> dict:
@@ -635,6 +636,138 @@ def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure
     assert (
         repeated["owner_pre_submit_recovery_block_reason"]
         == "post_poll_finalizer_recovery_already_used"
+    )
+
+
+def test_owner_recovery_requeues_same_job_once_after_completion_coverage_409(
+    tmp_path,
+) -> None:
+    final_path = tmp_path / "final_output.mp4"
+    final_path.write_bytes(b"validated-two-scene-final-output")
+    scene_tasks = [
+        {
+            "scene_index": index,
+            "provider_task_id": f"task_completion_scene_{index}",
+            "winning_task_id": f"task_completion_scene_{index}",
+            "status": "scene_clip_validated",
+            "clip_valid": True,
+            "clip_bytes": 1024 * index,
+        }
+        for index in (1, 2)
+    ]
+    conn, job_id, worker_payload = _failed_pre_submit_job(
+        tmp_path,
+        error=COMPLETION_409_ERROR,
+        attempts=3,
+        outbox_attempts=3,
+        result_updates={
+            "recovery_existing_tasks_only": True,
+            "owner_post_poll_finalizer_recovery_used": True,
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "post_poll_finalizer_recovery_read_only",
+            "provider_submit_called": True,
+            "submit_count": 0,
+            "no_new_submit": True,
+            "no_new_paid_submit": True,
+            "scene_count": 2,
+            "scene_tasks": scene_tasks,
+            "provider_scene_tasks": scene_tasks,
+            "provider_task_ids": [
+                "task_completion_scene_1",
+                "task_completion_scene_2",
+            ],
+            "scene_clip_coverage_complete": True,
+            "valid_scene_clip_count": 2,
+            "completed_scene_count": 2,
+            "unresolved_scene_indexes": [],
+            "canonical_multiscene_workspace": str(tmp_path),
+            "final_video_path": str(final_path),
+            "final_mp4_valid": True,
+            "final_duration_contract": {
+                "ok": True,
+                "expected_duration_seconds": 16,
+                "actual_duration_seconds": 16.0,
+            },
+            "final_delivered": False,
+            "delivery_succeeded": False,
+            "charged_xu": 0,
+            "charge_count": 0,
+        },
+        worker_compatibility=_compatible_worker(),
+    )
+    before = json.loads(
+        conn.execute(
+            "SELECT result_json FROM video_jobs WHERE id=?",
+            (job_id,),
+        ).fetchone()[0]
+    )
+
+    recovered = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=worker_payload,
+        owner_authorized=True,
+    )
+
+    assert recovered["owner_pre_submit_recovered"] is True, recovered
+    assert recovered["recovery_kind"] == "completion_409"
+    job = dict(conn.execute("SELECT * FROM video_jobs WHERE id=?", (job_id,)).fetchone())
+    project = dict(
+        conn.execute(
+            "SELECT * FROM video_projects WHERE project_id=?",
+            (int(job["project_id"]),),
+        ).fetchone()
+    )
+    outbox = dict(
+        conn.execute(
+            "SELECT * FROM video_dispatch_outbox WHERE job_id=?",
+            (job_id,),
+        ).fetchone()
+    )
+    result = json.loads(job["result_json"])
+    assert job["status"] == "queued"
+    assert int(job["attempts"]) == 2
+    assert project["status"] == "queued_for_worker"
+    assert outbox["dispatch_status"] == "acknowledged"
+    assert int(outbox["attempt_count"]) == 3
+    assert result["owner_completion_409_recovery_used"] is True
+    assert result["owner_completion_409_recovery_count"] == 1
+    assert result["recovery_existing_tasks_only"] is True
+    assert result["provider_submit_allowed"] is False
+    assert result["provider_submit_block_reason"] == "completion_409_recovery_read_only"
+    assert result["provider_task_ids"] == before["provider_task_ids"]
+    assert result["scene_tasks"] == before["scene_tasks"]
+    assert result["final_video_path"] == before["final_video_path"]
+    assert result["final_mp4_valid"] is True
+    assert int(result["submit_count"]) == 0
+    assert int(result["charged_xu"]) == 0
+    assert int(result["charge_count"]) == 0
+    assert recovered["jobs_created"] == 0
+    assert recovered["outboxes_created"] == 0
+    assert recovered["provider_calls"] == 0
+    assert recovered["wallet_mutations"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM video_jobs").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM video_dispatch_outbox").fetchone()[0] == 1
+
+    conn.execute(
+        "UPDATE video_jobs SET status='failed',last_error=? WHERE id=?",
+        (COMPLETION_409_ERROR, job_id),
+    )
+    conn.execute(
+        "UPDATE video_projects SET status='failed' WHERE project_id=?",
+        (int(job["project_id"]),),
+    )
+    conn.commit()
+    repeated = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=worker_payload,
+        owner_authorized=True,
+    )
+    assert repeated["owner_pre_submit_recovered"] is False
+    assert (
+        repeated["owner_pre_submit_recovery_block_reason"]
+        == "completion_409_recovery_already_used"
     )
 
 

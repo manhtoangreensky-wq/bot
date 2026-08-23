@@ -13,11 +13,13 @@ from services import video_uiflow3_execution_contract
 
 ADDON_SUBTITLE_ERROR = "RuntimeError:addon_material_missing:subtitle"
 POST_POLL_FINALIZER_ERROR = "RuntimeError:provider_render_failed:RuntimeError"
+COMPLETION_409_ERROR = "HTTPError:HTTP Error 409: Conflict"
 RECOVERABLE_ERRORS = frozenset(
     {
         "RuntimeError:uiflow3_approved_snapshot_hash_mismatch",
         ADDON_SUBTITLE_ERROR,
         POST_POLL_FINALIZER_ERROR,
+        COMPLETION_409_ERROR,
     }
 )
 TASK_ID_KEYS = (
@@ -189,6 +191,63 @@ def _post_poll_finalizer_block_reason(
     return ""
 
 
+def _completion_409_block_reason(result: Mapping[str, Any]) -> str:
+    if not result.get("recovery_existing_tasks_only"):
+        return "completion_409_existing_task_mode_required"
+    if not result.get("owner_post_poll_finalizer_recovery_used"):
+        return "completion_409_post_poll_recovery_required"
+    if not result.get("no_new_submit") or not result.get("no_new_paid_submit"):
+        return "completion_409_no_new_submit_guard_missing"
+    if _integer(result.get("submit_count")) != 0 or result.get("provider_submit_allowed"):
+        return "completion_409_new_submit_detected"
+    if not _has_provider_task(result):
+        return "completion_409_provider_tasks_missing"
+    if (
+        result.get("final_delivered")
+        or result.get("delivery_succeeded")
+        or result.get("final_mp4_delivered")
+    ):
+        return "completion_409_final_output_already_delivered"
+
+    scene_count = _integer(result.get("scene_count"))
+    if (
+        scene_count <= 0
+        or not result.get("scene_clip_coverage_complete")
+        or _integer(result.get("valid_scene_clip_count")) < scene_count
+        or _integer(result.get("completed_scene_count")) < scene_count
+        or list(result.get("unresolved_scene_indexes") or [])
+    ):
+        return "completion_409_scene_coverage_incomplete"
+    if not result.get("final_mp4_valid"):
+        return "completion_409_final_mp4_invalid"
+    duration_contract = _json_mapping(result.get("final_duration_contract"))
+    try:
+        actual_duration = float(duration_contract.get("actual_duration_seconds") or 0)
+    except (TypeError, ValueError):
+        actual_duration = 0.0
+    if not duration_contract.get("ok") or actual_duration <= 0:
+        return "completion_409_duration_contract_invalid"
+
+    raw_workspace = str(result.get("canonical_multiscene_workspace") or "").strip()
+    raw_final_path = str(result.get("final_video_path") or "").strip()
+    if not os.path.isabs(raw_workspace) or not os.path.isabs(raw_final_path):
+        return "completion_409_final_artifact_missing"
+    workspace = os.path.realpath(raw_workspace)
+    final_path = os.path.realpath(raw_final_path)
+    try:
+        path_inside_workspace = os.path.commonpath([workspace, final_path]) == workspace
+    except ValueError:
+        path_inside_workspace = False
+    if (
+        not workspace
+        or not path_inside_workspace
+        or not os.path.isfile(final_path)
+        or os.path.getsize(final_path) <= 0
+    ):
+        return "completion_409_final_artifact_missing"
+    return ""
+
+
 def _blocked(reason: str) -> dict[str, Any]:
     return {
         "owner_pre_submit_recovered": False,
@@ -255,6 +314,7 @@ def recover_product_video_owner_pre_submit_failure(
     )
     max_attempts = max(1, _integer(job.get("max_attempts")))
     post_poll_finalizer_recovery = error == POST_POLL_FINALIZER_ERROR
+    completion_409_recovery = error == COMPLETION_409_ERROR
     addon_subtitle_poll_only_repair = bool(
         job_status in {"queued", "processing"}
         and project_status in {"queued_for_worker", "processing"}
@@ -288,7 +348,9 @@ def recover_product_video_owner_pre_submit_failure(
         error == ADDON_SUBTITLE_ERROR or addon_subtitle_poll_only_repair
     )
     recovery_kind = (
-        "post_poll_finalizer"
+        "completion_409"
+        if completion_409_recovery
+        else "post_poll_finalizer"
         if post_poll_finalizer_recovery
         else "addon_subtitle_poll_only_repair"
         if addon_subtitle_poll_only_repair
@@ -296,7 +358,10 @@ def recover_product_video_owner_pre_submit_failure(
         if addon_subtitle_recovery
         else "approved_snapshot_hash"
     )
-    if post_poll_finalizer_recovery:
+    if completion_409_recovery:
+        if result.get("owner_completion_409_recovery_used"):
+            return _blocked("completion_409_recovery_already_used")
+    elif post_poll_finalizer_recovery:
         if result.get("owner_post_poll_finalizer_recovery_used"):
             return _blocked("post_poll_finalizer_recovery_already_used")
     elif addon_subtitle_poll_only_repair:
@@ -310,6 +375,7 @@ def recover_product_video_owner_pre_submit_failure(
     if (
         not addon_subtitle_poll_only_repair
         and not post_poll_finalizer_recovery
+        and not completion_409_recovery
         and _integer(job.get("attempts")) >= max_attempts
     ):
         return _blocked("job_attempts_exhausted")
@@ -319,7 +385,7 @@ def recover_product_video_owner_pre_submit_failure(
         or _integer(result.get("provider_http_status")) > 0
         or _integer(result.get("submit_count")) > 0
     )
-    if not post_poll_finalizer_recovery and (
+    if not post_poll_finalizer_recovery and not completion_409_recovery and (
         provider_attempted or _has_provider_task(result)
     ):
         return _blocked("provider_already_attempted")
@@ -342,7 +408,9 @@ def recover_product_video_owner_pre_submit_failure(
         return _blocked("worker_payload_identity_mismatch")
     worker_compatibility = _json_mapping(payload.get("worker_compatibility"))
     if (
-        addon_subtitle_recovery or post_poll_finalizer_recovery
+        addon_subtitle_recovery
+        or post_poll_finalizer_recovery
+        or completion_409_recovery
     ) and not worker_compatibility.get("compatible"):
         return _blocked(
             str(
@@ -359,6 +427,10 @@ def recover_product_video_owner_pre_submit_failure(
         )
         if post_poll_blocker:
             return _blocked(post_poll_blocker)
+    if completion_409_recovery:
+        completion_blocker = _completion_409_block_reason(result)
+        if completion_blocker:
+            return _blocked(completion_blocker)
     execution = video_uiflow3_execution_contract.validate_execution_contract(
         project,
         payload,
@@ -395,6 +467,16 @@ def recover_product_video_owner_pre_submit_failure(
 
     current = (now or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
     recovery_metadata = (
+        {
+            "owner_completion_409_recovery_used": True,
+            "owner_completion_409_recovery_count": 1,
+            "owner_completion_409_recovered_at": current,
+            "owner_completion_409_recovered_reason": error,
+            "owner_completion_409_recovery_source": "explicit_owner_authorization",
+            "owner_completion_409_recovery_worker_compatible": True,
+        }
+        if completion_409_recovery
+        else
         {
             "owner_post_poll_finalizer_recovery_used": True,
             "owner_post_poll_finalizer_recovery_count": 1,
@@ -436,7 +518,7 @@ def recover_product_video_owner_pre_submit_failure(
             "status": "queued",
             "canonical_status": (
                 "queued_existing_task_recovery"
-                if post_poll_finalizer_recovery
+                if post_poll_finalizer_recovery or completion_409_recovery
                 else "queued_waiting_for_dispatch"
             ),
             "terminal_state": "",
@@ -446,7 +528,9 @@ def recover_product_video_owner_pre_submit_failure(
             "next_poll_scheduled": True,
             **recovery_metadata,
             "worker_claim_result": (
-                "owner_post_poll_finalizer_recovery_queued"
+                "owner_completion_409_recovery_queued"
+                if completion_409_recovery
+                else "owner_post_poll_finalizer_recovery_queued"
                 if post_poll_finalizer_recovery
                 else "owner_addon_subtitle_poll_only_repair_queued"
                 if addon_subtitle_poll_only_repair
@@ -463,7 +547,7 @@ def recover_product_video_owner_pre_submit_failure(
             "wallet_charge_recorded": False,
         }
     )
-    if post_poll_finalizer_recovery:
+    if post_poll_finalizer_recovery or completion_409_recovery:
         result.update(
             {
                 "recovery_existing_tasks_only": True,
@@ -471,7 +555,11 @@ def recover_product_video_owner_pre_submit_failure(
                 "poll_existing_task_allowed": True,
                 "submit_source": worker_poll_source,
                 "provider_submit_source": worker_poll_source,
-                "provider_submit_block_reason": "post_poll_finalizer_recovery_read_only",
+                "provider_submit_block_reason": (
+                    "completion_409_recovery_read_only"
+                    if completion_409_recovery
+                    else "post_poll_finalizer_recovery_read_only"
+                ),
                 "no_new_submit": True,
                 "no_new_paid_submit": True,
                 "error": "",
@@ -492,7 +580,11 @@ def recover_product_video_owner_pre_submit_failure(
         encoded_result = json.dumps(
             result, ensure_ascii=True, separators=(",", ":"), sort_keys=True
         )
-        if addon_subtitle_poll_only_repair or post_poll_finalizer_recovery:
+        if (
+            addon_subtitle_poll_only_repair
+            or post_poll_finalizer_recovery
+            or completion_409_recovery
+        ):
             cursor = conn.execute(
                 """UPDATE video_jobs
                       SET status='queued',attempts=?,result_json=?,last_error='',
