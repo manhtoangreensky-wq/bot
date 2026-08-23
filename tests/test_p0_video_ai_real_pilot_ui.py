@@ -3078,6 +3078,50 @@ def test_video_ai_real_quick_build_is_deterministic_and_reaches_quality_without_
     assert {"Logo và watermark", "Hoàn tất rà soát và chọn chất lượng"}.issubset(set(_plain_labels(summary_markup)))
 
 
+def test_video_ai_real_quick_build_prefers_explicit_character_identity_from_brief():
+    state = video_uiflow3.new_state(
+        "video_ai_real",
+        draft_id="pilot-explicit-character-identity",
+    )
+    state = video_uiflow3.set_entry_mode(state, "prompt_video")
+    state = video_uiflow3.set_scene_count_preference(state, 2)
+    state = video_uiflow3.set_format(
+        state,
+        ratio="9:16",
+        target_duration_seconds=16,
+    )
+    state = video_uiflow3.set_content_candidate(
+        state,
+        source="manual",
+        original_intent=(
+            "Nhân vật Linh, nữ nghệ nhân gốm Việt Nam, tạo bình gốm xanh "
+            "trong xưởng ấm."
+        ),
+        approved_brief={
+            "title": "Nữ nghệ nhân Linh làm bình gốm xanh",
+            "needs_characters": True,
+            "needs_locations": True,
+            "needs_dialogue": False,
+            "needs_voice": False,
+            "needs_music": False,
+        },
+    )
+    state = video_uiflow3.lock_content(state)
+
+    quick = bot.video_ai_real_build_quick_plan(state, bible_only=True)
+
+    assert len(quick["bible"]["characters"]) == 1
+    character = quick["bible"]["characters"][0]
+    assert character["display_name"] == "Linh"
+    assert character["gender"] == "female"
+
+
+def test_explicit_character_identity_does_not_treat_product_gender_as_character_gender():
+    assert video_uiflow3.infer_explicit_character_identity(
+        "Giới thiệu nước hoa nam hương gỗ trong studio tối giản."
+    ) == {}
+
+
 def test_video_ai_real_compile_hook_is_a_noop_for_other_products():
     state = video_uiflow3.new_state("script_image_video", draft_id="protected-other-product")
     before = video_uiflow3.normalize_state(state)
