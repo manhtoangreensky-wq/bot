@@ -247726,6 +247726,17 @@ async def _execute_video_dubbing_pipeline_core(
         if subtitle_payload:
             render_state["subtitle_text"] = subdub_normalize_subtitle_text(subtitle_payload)
         render_style = subdub_normalize_style(render_state)
+        if auto_speaker.is_auto_speaker_state(state):
+            subtitle_script = subdub_detect_subtitle_script(
+                str(render_state.get("subtitle_text") or ""),
+                str(state.get("target_language") or state.get("source_language") or ""),
+            )
+            render_style = auto_speaker.guard_subtitle_font(
+                render_style,
+                script=subtitle_script,
+            )
+            if subtitle_payload and not render_style.get("subtitle_font_resolution_ok"):
+                return b"", str(render_style.get("subtitle_font_blocker") or "subtitle_font_missing")
         render_style["advanced_style_enabled"] = subdub_advanced_style_enabled(render_state)
         render_debug["advanced_style_enabled"] = bool(render_style.get("advanced_style_enabled"))
         render_debug["subtitle_style_profile"] = str(render_style.get("subtitle_style_profile") or "")
