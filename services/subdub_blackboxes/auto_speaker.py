@@ -6,6 +6,9 @@ import asyncio
 import hashlib
 import inspect
 import math
+import os
+import shutil
+import subprocess
 import threading
 import time
 import unicodedata
@@ -19,6 +22,16 @@ from services import subtitle_dub_product_pipeline
 
 AUTO_SPEAKER_PREFLIGHT_READY = "AUTO_SPEAKER_PREFLIGHT_READY"
 
+_SUBTITLE_SCRIPT_CHARSET = {
+    "japanese": "3042",
+    "chinese": "4e2d",
+    "korean": "ac00",
+    "thai": "0e01",
+    "arabic": "0627",
+    "devanagari": "0915",
+    "cyrillic": "0416",
+}
+
 
 def is_auto_speaker_state(state: Mapping[str, object] | None) -> bool:
     """Return true only for the repository-wide exact Auto state pair."""
@@ -28,6 +41,53 @@ def is_auto_speaker_state(state: Mapping[str, object] | None) -> bool:
         current.get("voice_kind") == "auto_speaker_gender"
         and current.get("voice_selection_mode") == "auto_speaker"
     )
+
+
+def _font_path_supports_script(path: str, script: str) -> bool:
+    font_path = os.path.abspath(os.path.expandvars(os.path.expanduser(str(path or ""))))
+    if not font_path or not os.path.isfile(font_path):
+        return False
+    charset = str(_SUBTITLE_SCRIPT_CHARSET.get(str(script or "").strip().lower()) or "")
+    if not charset:
+        return True
+    fc_list = shutil.which("fc-list")
+    if not fc_list:
+        return False
+    try:
+        proc = subprocess.run(
+            [fc_list, "-f", "%{file}\\n", f":charset={charset}"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except Exception:
+        return False
+    supported = {
+        os.path.normcase(os.path.realpath(item.strip()))
+        for item in str(proc.stdout or "").splitlines()
+        if item.strip()
+    }
+    return proc.returncode == 0 and os.path.normcase(os.path.realpath(font_path)) in supported
+
+
+def guard_subtitle_font(style: Mapping[str, object] | None, *, script: str) -> dict:
+    current = dict(style or {})
+    normalized_script = str(script or "latin").strip().lower()
+    if normalized_script == "latin" or _font_path_supports_script(
+        str(current.get("subtitle_font_path") or ""),
+        normalized_script,
+    ):
+        return current
+    current.update(
+        {
+            "subtitle_font_resolution_ok": False,
+            "subtitle_font_blocker": f"subtitle_font_missing:{normalized_script}",
+            "subtitle_font_script": normalized_script,
+            "subtitle_font_fallback_reason": "resolved_font_missing_required_script",
+        }
+    )
+    return current
 
 
 async def _maybe_await(value: Any) -> Any:
