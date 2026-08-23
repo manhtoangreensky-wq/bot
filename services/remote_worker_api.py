@@ -4162,6 +4162,14 @@ def complete_remote_worker_job(
     if not isinstance(persisted_payload, dict):
         persisted_payload = {}
     if persisted_payload.get("recovery_existing_tasks_only"):
+        for key in (
+            "scene_ledger",
+            "scene_tasks",
+            "provider_scene_tasks",
+            "product_video_scene_tasks",
+        ):
+            if not payload.get(key) and persisted_payload.get(key):
+                payload[key] = persisted_payload[key]
         payload.update(
             {
                 "recovery_existing_tasks_only": True,
