@@ -4152,7 +4152,7 @@ def complete_remote_worker_job(
     if str(job.get("status") or "") == "completed":
         if not worker_owns_job(job, worker):
             return {"ok": False, "reason": "job_already_completed_by_other_worker"}
-        return {"ok": True, "duplicate": True, "job": job}
+        return {"ok": True, "duplicate": True, "job": job, "project": project}
     if str(job.get("status") or "") != "processing":
         return {"ok": False, "reason": "job_not_processing", "job": job}
     if not worker_owns_job(job, worker):
