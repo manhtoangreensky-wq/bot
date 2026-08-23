@@ -276,6 +276,8 @@ def _audio_asset(value: Mapping[str, Any]) -> dict[str, Any]:
 
 def product_video_addon_worker_contract(
     tail_state: Mapping[str, Any] | None,
+    *,
+    production_bible: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compile selected Tail9 Add-ons into one immutable worker contract."""
 
@@ -285,6 +287,23 @@ def product_video_addon_worker_contract(
     base_script = _tail_scene_script(tail)
     subtitle_value = _tail_addon_value(tail, "subtitles")
     dubbing_value = _tail_addon_value(tail, "dubbing")
+    if _clean(dubbing_value.get("voice_choice"), 80).lower() == "follow_character":
+        characters = [
+            dict(item)
+            for item in dict(production_bible or {}).get("characters") or []
+            if isinstance(item, Mapping)
+        ]
+        if len(characters) == 1:
+            gender = _clean(characters[0].get("gender"), 40).lower()
+            if gender in {"female", "male"}:
+                dubbing_value.update({
+                    "requested_voice_choice": "follow_character",
+                    "voice_choice": f"default_{gender}",
+                    "resolved_character_id": _clean(
+                        characters[0].get("character_id"), 120
+                    ),
+                    "resolved_character_gender": gender,
+                })
     music_value = _tail_addon_value(tail, "music")
     sfx_value = _tail_addon_value(tail, "sfx")
     subtitle_script = _clean(
@@ -831,7 +850,10 @@ def compile_routeengine_handoff(
     audio = deepcopy(dict(snapshot.get("audio") or {}))
     selected_tail = deepcopy(dict(tail_state or {}))
     tail_addons = (
-        product_video_addon_worker_contract(selected_tail)
+        product_video_addon_worker_contract(
+            selected_tail,
+            production_bible=production_bible,
+        )
         if selected_tail
         else {}
     )
