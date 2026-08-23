@@ -248605,7 +248605,6 @@ async def _execute_video_dubbing_pipeline_core(
                         "settled_at": now_text(),
                     })
                     auto_settlement_fields = {
-                        "job_key": delivery_job_key,
                         "voice_kind": "auto_speaker_gender",
                         "voice_selection_mode": "auto_speaker",
                         "auto_exact_receipt": admin_receipt,
@@ -248650,7 +248649,6 @@ async def _execute_video_dubbing_pipeline_core(
                         )[:120]
                         pending_receipt = dict(state.get("auto_exact_receipt") or {})
                         auto_settlement_fields = {
-                            "job_key": delivery_job_key,
                             "voice_kind": "auto_speaker_gender",
                             "voice_selection_mode": "auto_speaker",
                             "auto_exact_receipt": pending_receipt,
@@ -248681,7 +248679,6 @@ async def _execute_video_dubbing_pipeline_core(
                             or {}
                         )
                         auto_settlement_fields = {
-                            "job_key": delivery_job_key,
                             "voice_kind": "auto_speaker_gender",
                             "voice_selection_mode": "auto_speaker",
                             "auto_exact_receipt": settled_receipt,

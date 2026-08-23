@@ -538,6 +538,19 @@ def test_auto_pipeline_source_defers_charge_until_durable_delivery():
     assert "spend_fixed_credit_info(" in core
 
 
+def test_auto_postdelivery_settlement_does_not_repass_positional_job_key():
+    source = (Path(__file__).parents[1] / "bot.py").read_text(encoding="utf-8")
+    start = source.index("async def _execute_video_dubbing_pipeline_core(")
+    end = source.index("\nasync def execute_video_dubbing_pipeline(", start)
+    core = source[start:end]
+    settlement_start = core.index("auto_settlement_fields: dict = {}")
+    settlement_end = core.index("\n    except Exception:\n", settlement_start)
+    postdelivery = core[settlement_start:settlement_end]
+
+    assert postdelivery.count("update_subtitle_dub_pipeline_job(") == 3
+    assert '"job_key": delivery_job_key' not in postdelivery
+
+
 def test_bot_auto_branch_settles_only_after_durable_delivery_mark_source_contract():
     bot_path = Path(__file__).resolve().parents[1] / "bot.py"
     source = bot_path.read_text(encoding="utf-8")
