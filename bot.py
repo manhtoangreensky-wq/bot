@@ -231872,11 +231872,8 @@ def video_dubbing_source_keyboard(lang: str = "vi", state: dict | None = None) -
     elif mode == VIDEO_SUBTITLE_MODE_DUB:
         items = [(copy['send'], "videodub|source_upload")]
     elif mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-        if str(state.get("flow_type") or "") == VIDEO_DUBBING_FLOW_NO_SUBTITLE and str(state.get("step") or "") == "no_subtitle_menu":
-            return subtitle_plus_dub_no_subtitle_menu_keyboard(lang)
         items = [
             (f"🎞 {copy['send_subtitle']}", f"videodub|path|{VIDEO_DUBBING_FLOW_HAS_SUBTITLE}"),
-            (f"🎧 {copy['send']}", f"videodub|path|{VIDEO_DUBBING_FLOW_NO_SUBTITLE}"),
         ]
     else:
         items = [(copy['send'], "videodub|source_upload")]
@@ -241505,8 +241502,12 @@ def subdub_cover_filter(style_or_state: dict | None = None) -> str:
         return f"drawbox=x=0:y=ih*0.90:w=iw:h=ih*0.06:color=black@{opacity:.2f}:t=fill"
     return f"drawbox=x=iw*0.10:y=ih*0.88:w=iw*0.80:h=ih*0.06:color=black@{opacity:.2f}:t=fill"
 
-def subdub_subtitle_filter_for_file(path: str) -> str:
-    return f"subtitles=filename='{subdub_ffmpeg_filter_path(path)}'"
+def subdub_subtitle_filter_for_file(path: str, font_path: str = "") -> str:
+    subtitle_filter = f"subtitles=filename='{subdub_ffmpeg_filter_path(path)}'"
+    font_dir = os.path.dirname(str(font_path or "").strip())
+    if font_dir:
+        subtitle_filter += f":fontsdir='{subdub_ffmpeg_filter_path(font_dir)}'"
+    return subtitle_filter
 
 def subdub_original_audio_volume(mode: str = "", keep_original_audio: bool = False) -> float:
     token = str(mode or "").strip().lower()
@@ -243992,7 +243993,10 @@ async def video_dubbing_render_video(
             with open(subtitle_path, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(subtitle_text)
             if style.get("show_subtitles"):
-                fallback_subtitle_filter = subdub_subtitle_filter_for_file(subtitle_path)
+                fallback_subtitle_filter = subdub_subtitle_filter_for_file(
+                    subtitle_path,
+                    str(style.get("subtitle_font_path") or ""),
+                )
                 if not style.get("subtitle_font_resolution_ok"):
                     return b"", str(style.get("subtitle_font_blocker") or "subtitle_font_missing")
                 ass_text = subdub_generate_ass_from_srt(subtitle_text, style)
@@ -244000,7 +244004,10 @@ async def video_dubbing_render_video(
                     return b"", "subtitle_ass_generation_failed"
                 with open(ass_path, "w", encoding="utf-8", newline="\n") as handle:
                     handle.write(ass_text)
-                subtitle_filter = subdub_subtitle_filter_for_file(ass_path)
+                subtitle_filter = subdub_subtitle_filter_for_file(
+                    ass_path,
+                    str(style.get("subtitle_font_path") or ""),
+                )
         if subtitle_filter and subdub_advanced_style_enabled(subtitle_style):
             cover_filter = subdub_cover_filter(style)
             if cover_filter:
@@ -246927,8 +246934,57 @@ async def handle_subdub_auto_exact_callback(
     )
     result = dict(engine_result.get("runner_result") or {})
     if result.get("ok"):
-        set_video_dubbing_pending(uid, "completed", processing="0")
-        return None
+        completed_state = set_video_dubbing_pending(
+            uid,
+            "completed",
+            processing="0",
+            terminal_state="delivered",
+        )
+        job_key = str(current.get("job_key") or "")
+        completed_job_id = str(
+            result.get("job_id")
+            or current.get("job_id")
+            or current.get("internal_job_id")
+            or ""
+        )
+        subdub_mark_delivered_terminal(job_key, result)
+        finalized_panel = await subdub_finalize_delivered_panel(
+            query,
+            context,
+            job_key,
+            completed_job_id,
+            lang,
+            result,
+        )
+        if finalized_panel is None:
+            update_subtitle_dub_pipeline_job(
+                job_key,
+                receipt_send_state="blocked_until_terminal_panel",
+                receipt_blocked_reason="terminal_panel_not_confirmed",
+            )
+            return None
+        receipt_text = video_dubbing_receipt_text(completed_state, result, lang)
+        receipt_keyboard_state = {
+            **completed_state,
+            **result,
+            **dict(SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {}),
+        }
+        origin = str(
+            resume_state.get("origin")
+            or current.get("menu_origin")
+            or current.get("origin")
+            or "translation"
+        )
+        return await subdub_send_success_receipt_once(
+            query.message,
+            job_key,
+            receipt_text,
+            reply_markup=video_dubbing_receipt_keyboard(
+                lang,
+                origin,
+                receipt_keyboard_state,
+            ),
+        )
     job_key = str(current.get("job_key") or "")
     await send_subdub_fail_once(
         query,
@@ -248284,7 +248340,7 @@ async def _execute_video_dubbing_pipeline_core(
         "transformed_artifact_identity_blocker": str(transformed_identity.get("blocker") or ""),
     }
     tts_price = int(video_dubbing_tts_price_estimate(mode, output_text=output_text).get("price_xu") or 0)
-    auto_pricing_active = subdub_auto_speaker_route_enabled(state)
+    auto_pricing_active = auto_speaker.is_auto_speaker_state(state)
     if auto_pricing_active:
         final_price_xu = int(state.get("auto_exact_actual_total_xu") or 0)
         if (
