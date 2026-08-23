@@ -2293,6 +2293,7 @@ def subdub_delivery_timeout_seconds_for_duration(duration_seconds: float) -> int
 
 SUBDUB_MEDIA_BINARY_PROBE_TIMEOUT_SECONDS = max(1, min(15, env_int("SUBDUB_MEDIA_BINARY_PROBE_TIMEOUT_SECONDS", 5)))
 SUBDUB_STAGE_TIMEOUT_MAX_SECONDS = max(60, env_int("SUBDUB_STAGE_TIMEOUT_MAX_SECONDS", 7200))
+SUBDUB_AUTO_RENDER_TIMEOUT_SECONDS = 30 * 60
 SUBDUB_COMPRESS_IF_OVER_MB = max(1, env_int("SUBDUB_COMPRESS_IF_OVER_MB", 40))
 SUBDUB_ENABLE_DOCUMENT_FALLBACK = env_flag("SUBDUB_ENABLE_DOCUMENT_FALLBACK", "true")
 SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK = env_flag("SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK", "false")
@@ -243940,6 +243941,7 @@ async def video_dubbing_render_video(
     target_duration_seconds: int | float = 0.0,
     preserve_source_duration: bool = True,
     require_audio: bool | None = None,
+    render_timeout_seconds: int | float = 0.0,
 ) -> tuple[bytes, str]:
     ffmpeg = frame_video_ffmpeg_path()
     if not ffmpeg or not source_bytes:
@@ -244059,6 +244061,11 @@ async def video_dubbing_render_video(
                 size_bytes=len(source_bytes) + len(dubbed_audio or b""),
                 max_timeout_seconds=SUBDUB_STAGE_TIMEOUT_MAX_SECONDS,
             )
+            if float(render_timeout_seconds or 0.0) > 0:
+                render_timeout = max(
+                    render_timeout,
+                    min(SUBDUB_STAGE_TIMEOUT_MAX_SECONDS, int(round(float(render_timeout_seconds)))),
+                )
             ok, detail = await run_subdub_ffmpeg_command(command, timeout=render_timeout)
             if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
                 return b"", f"{label}_render_failed:{sanitize_log_text(str(detail or 'video_render_failed'))[:180]}"
@@ -247732,6 +247739,8 @@ async def _execute_video_dubbing_pipeline_core(
             else:
                 kwargs.setdefault("original_audio_mode", audio_mode)
         kwargs.setdefault("require_audio", mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB})
+        if subdub_auto_speaker_route_enabled(state):
+            kwargs.setdefault("render_timeout_seconds", SUBDUB_AUTO_RENDER_TIMEOUT_SECONDS)
         try:
             signature = inspect.signature(video_dubbing_render_video)
             supported = set(signature.parameters)
