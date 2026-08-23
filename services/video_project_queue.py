@@ -8836,18 +8836,6 @@ def note_video_delivery_result(
                         "probation_result_validation_blocker": "valid_result_scene_coverage_final_mp4_delivery_message_required",
                     }
                 )
-                conn.execute(
-                    "UPDATE video_jobs SET result_json=?,updated_at=? WHERE id=?",
-                    (_json_dumps(payload), current, int(job_id)),
-                )
-                conn.commit()
-                return {
-                    "ok": False,
-                    "sent": False,
-                    "reason": "probation_final_delivery_requirements_missing",
-                    "job": get_video_render_job(conn, int(job_id)),
-                    "project": get_video_project(conn, int(project["project_id"])),
-                }
         payload.update(
             {
                 "final_delivery_attempted": True,

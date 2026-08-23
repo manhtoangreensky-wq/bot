@@ -268623,6 +268623,8 @@ async def api_worker_complete(request: Request):
     project = result.get("project") or {}
     is_safe_worker_canary = remote_worker_api.is_remote_worker_canary_job(job, project)
     is_admin_prod_canary = remote_worker_api.is_remote_worker_admin_canary_job(job, project)
+    delivery_receipt = {}
+    delivery_settlement = {}
     if is_safe_worker_canary or is_admin_prod_canary:
         conn = db_connect()
         try:
@@ -268648,7 +268650,7 @@ async def api_worker_complete(request: Request):
     ):
         conn = db_connect()
         try:
-            video_project_queue.note_video_delivery_result(
+            delivery_receipt = video_project_queue.note_video_delivery_result(
                 conn,
                 job_id=job_id,
                 sent=bool(delivery.get("sent")),
@@ -268656,8 +268658,8 @@ async def api_worker_complete(request: Request):
                 success_message_id=str(delivery.get("success_message_id") or delivery.get("telegram_message_id") or ""),
                 reason=str(delivery.get("reason") or delivery.get("delivery_reason") or "telegram_delivery_failed"),
             )
-            if delivery.get("sent"):
-                product_video_charge_after_final_delivery(
+            if delivery_receipt.get("sent"):
+                delivery_settlement = product_video_charge_after_final_delivery(
                     job_id,
                     conn=conn,
                     source="worker_complete_delivery",
@@ -268668,6 +268670,8 @@ async def api_worker_complete(request: Request):
         "ok": True,
         "result": result,
         "delivery": delivery,
+        "delivery_receipt": delivery_receipt,
+        "delivery_settlement": delivery_settlement,
         "artifact_storage": artifact_storage.public_metadata(artifact_meta),
         "local_cleanup": local_cleanup,
         **heartbeat,
