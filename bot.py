@@ -268483,10 +268483,19 @@ async def api_worker_heartbeat(request: Request):
 
 
 async def maybe_send_remote_worker_final_video(result: dict) -> dict:
-    if not result.get("ok") or result.get("duplicate") or not tg_app:
+    if not result.get("ok") or not tg_app:
         return {"sent": False, "reason": "not_ready_or_duplicate"}
     job = result.get("job") or {}
     project = result.get("project") or {}
+    if result.get("duplicate") and (
+        project.get("video_delivered_at")
+        or project.get("video_delivery_message_id")
+    ):
+        return {
+            "sent": False,
+            "reason": "already_delivered",
+            "duplicate_prevented": True,
+        }
     user_id = str(project.get("user_id") or "").strip()
     final_path = str(project.get("final_video_path") or "")
     job_result = video_b14_job_result_payload(job)
@@ -268634,7 +268643,9 @@ async def api_worker_complete(request: Request):
                 set_system_setting("remote_worker:last_canary_status", str(job.get("status") or "completed"), "last remote worker canary status", worker_id)
         except Exception:
             logger.warning("remote worker canary complete setting skipped")
-    elif result.get("ok") and not result.get("duplicate"):
+    elif result.get("ok") and not (
+        result.get("duplicate") and delivery.get("duplicate_prevented")
+    ):
         conn = db_connect()
         try:
             video_project_queue.note_video_delivery_result(
