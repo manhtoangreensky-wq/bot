@@ -20,11 +20,13 @@ def test_confirm_webapp_telegram_link_success(monkeypatch):
 
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
         mock_post.return_value = MockResponse()
-        ok, msg = asyncio.run(bot.confirm_webapp_telegram_link("AB12CD", 123456789))
+        ok, msg = asyncio.run(bot.confirm_webapp_telegram_link("  aB12CdEfGh  ", 123456789))
         assert ok is True
         assert "thành công" in msg.lower()
         assert mock_post.called
         call_kwargs = mock_post.call_args
+        body = json.loads(call_kwargs[1]["content"].decode("utf-8"))
+        assert body["code"] == "aB12CdEfGh"
         headers = call_kwargs[1]["headers"]
         assert headers["X-TOAN-AAS-BRIDGE-TOKEN"] == "test-token"
         assert "X-TOAN-AAS-Signature" in headers
