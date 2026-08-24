@@ -5115,6 +5115,14 @@ def _run_per_scene_provider_orchestrator(
         addon_materials,
         bgm_audio_path=bgm_audio_path,
     )
+    scene_audio_probes = [
+        dict(video_final_output.probe_video(path) or {})
+        for _, path in sorted(scene_outputs.items())
+    ]
+    preserve_scene_audio = bool(scene_audio_probes) and all(
+        probe.get("ok") and probe.get("has_audio")
+        for probe in scene_audio_probes
+    )
     final_result = finalize_multiscene_scene_clips(
         user_id=str(job.get("user_id") or ""),
         job_id=str(job.get("job_id") or job.get("id") or ""),
@@ -5123,6 +5131,7 @@ def _run_per_scene_provider_orchestrator(
         scene_clip_paths=scene_outputs,
         manifest=manifest,
         **render_addon_kwargs,
+        preserve_scene_audio=preserve_scene_audio,
         output_width=_canvas_size(_aspect_ratio(job))[0],
         output_height=_canvas_size(_aspect_ratio(job))[1],
     )
