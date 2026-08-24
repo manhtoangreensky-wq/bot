@@ -35,6 +35,37 @@ def _callback_rows(markup) -> list[list[str]]:
     ]
 
 
+def test_product_video_public_renderers_do_not_emit_literal_backslash_newlines() -> None:
+    planning_renderers = re.findall(
+        r"^def (video_ai_real_(?:prompt_page|pilot_)[A-Za-z0-9_]*(?:payload|text))\(",
+        BOT_SOURCE,
+        re.MULTILINE,
+    )
+    tail_renderers = [
+        name
+        for name in re.findall(
+            r"^def (video_tail9_[A-Za-z0-9_]*_text)\(",
+            BOT_SOURCE,
+            re.MULTILINE,
+        )
+        if "video_edit" not in name
+    ]
+    renderer_names = [
+        *planning_renderers,
+        *tail_renderers,
+        "video_tail9_scene_script_info",
+    ]
+    offenders = [
+        name
+        for name in renderer_names
+        if re.search(r"\\\\n", _function_source(name))
+    ]
+
+    assert planning_renderers
+    assert tail_renderers
+    assert offenders == []
+
+
 def _ready_tail(source: str = "content_profiles", scene_count: int = 1) -> dict:
     state = video_tail9.new_state(
         product_type="video_ai_real",
