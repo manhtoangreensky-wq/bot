@@ -612,7 +612,7 @@ def test_exact_known_auto_quote_claims_and_persists_receipt_before_continue():
         'if not decision.get("exact_confirmation_required"):', build_at
     )
     claim_at = gate.index('"claim_state": "resuming"', exact_known_at)
-    persist_at = gate.index('reason="auto_exact_known_receipt_claimed"', claim_at)
+    persist_at = gate.index('"auto_exact_known_receipt_claimed"', claim_at)
     continue_at = gate.index('return {"continue": True}', persist_at)
 
     assert build_at < exact_known_at < claim_at < persist_at < continue_at

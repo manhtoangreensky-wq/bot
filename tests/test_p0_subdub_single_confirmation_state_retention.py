@@ -1,6 +1,10 @@
 import ast
+import asyncio
 import html
 from pathlib import Path
+from types import SimpleNamespace
+import time
+import uuid
 
 
 BOT_PATH = Path(__file__).resolve().parents[1] / "bot.py"
@@ -174,3 +178,116 @@ def test_fallback_confirmation_keyboard_has_one_submit_action():
 
     assert labels.count("✅ Xác nhận") == 1
     assert "✅ Tiếp tục" not in labels
+
+
+def test_owner_initial_confirmation_claims_exact_auto_receipt_without_second_prompt():
+    persisted = []
+    state = {
+        "_pipeline_is_admin": True,
+        "_pipeline_job_key": "owner-auto-job-key",
+        "_pipeline_job_id": "owner-auto-job",
+        "_pipeline_owner_user_id": "7",
+        "_pipeline_chat_id": "7",
+        "subdub_final_confirmed": True,
+        "auto_quote_exact_known": False,
+        "auto_quote_billable_words": None,
+        "auto_quote_total_xu": None,
+    }
+    initial_state = dict(state)
+    receipt = {
+        "session_nonce": "nonce12345678",
+        "consumed": False,
+        "claim_state": "unconsumed",
+    }
+
+    def update_job(job_key, **fields):
+        return {"job_key": job_key, **fields}
+
+    def persist_job(job_key, snapshot=None, *, reason=""):
+        persisted.append((job_key, dict(snapshot or {}), reason))
+        return True
+
+    namespace = {
+        "subdub_auto_speaker_route_enabled": lambda _state: True,
+        "subtitle_dub_product_pipeline": SimpleNamespace(
+            resolve_subdub_dub_audio_policy=lambda _state, _prepared: {
+                "tts_segments": [{"text": "xin chào"}],
+            }
+        ),
+        "_subdub_auto_selected_text": lambda _segments: "xin chào",
+        "_subdub_auto_actual_components": lambda *_args: (2, 1, 0),
+        "_subdub_auto_read_balance_xu": lambda _user_id: 100,
+        "_workspace_truthy": bool,
+        "subdub_auto_word_pricing": SimpleNamespace(
+            auto_exact_confirmation_state=lambda **_kwargs: {
+                "exact_confirmation_required": True,
+            }
+        ),
+        "SUBDUB_AUTO_EXACT_RECEIPT_VERSION": "exact-v1",
+        "_subdub_auto_build_exact_receipt": lambda *_args, **_kwargs: {
+            "ok": True,
+            "receipt": receipt,
+            "cache": {},
+            "resume_state": {
+                "keep_original_audio": "1",
+                "original_audio_volume_percent": 20,
+                "dubbed_voice_volume_percent": 100,
+            },
+        },
+        "subdub_final_confirmed_state": lambda current: bool(
+            current.get("subdub_final_confirmed")
+        ),
+        "uuid": uuid,
+        "time": time,
+        "update_subtitle_dub_pipeline_job": update_job,
+        "persist_subtitle_dub_pipeline_job_snapshot": persist_job,
+    }
+    gate = _load_function("_subdub_auto_post_prepare_gate", namespace)
+
+    result = asyncio.run(gate({"state": dict(state)}, state))
+
+    assert result == {"continue": True}
+    assert state["auto_exact_receipt"]["consumed"] is True
+    assert state["auto_exact_receipt"]["claim_state"] == "resuming"
+    assert state["auto_exact_receipt_confirmed"] is True
+    assert persisted[-1][2] == "auto_exact_initial_confirmation_claimed"
+    assert persisted[-1][1]["auto_exact_resume_state"] == {
+        "keep_original_audio": "1",
+        "original_audio_volume_percent": 20,
+        "dubbed_voice_volume_percent": 100,
+    }
+
+    public_state = {**initial_state, "_pipeline_is_admin": False}
+    public_result = asyncio.run(
+        gate({"state": dict(public_state)}, public_state)
+    )
+
+    assert public_result["status"] == "AUTO_EXACT_CONFIRMATION_REQUIRED"
+    assert public_result["resume_required"] is True
+    assert public_state["auto_exact_receipt"]["consumed"] is False
+    assert public_state["auto_exact_receipt"]["claim_state"] == "unconsumed"
+
+
+def test_auto_pause_resume_snapshot_keeps_user_audio_mix_percentages():
+    namespace = {
+        "video_dubbing_sync_state_fields": lambda state, exclude=None: {
+            key: value
+            for key, value in state.items()
+            if key not in set(exclude or ())
+        }
+    }
+    snapshot = _load_function("_subdub_auto_resume_state", namespace)
+
+    result = snapshot(
+        {
+            "keep_original_audio": "1",
+            "original_audio_volume_percent": 20,
+            "dubbed_voice_volume_percent": 100,
+            "provider_route": "internal-only",
+        }
+    )
+
+    assert result["keep_original_audio"] == "1"
+    assert result["original_audio_volume_percent"] == 20
+    assert result["dubbed_voice_volume_percent"] == 100
+    assert "provider_route" not in result
