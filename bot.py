@@ -247136,6 +247136,7 @@ async def _extract_subdub_auto_pcm(
     command = [
         ffmpeg, "-y", "-i", source_path, "-t", f"{bounded_seconds:g}",
         "-vn", "-ac", str(int(channels)),
+        "-af", "highpass=f=70,lowpass=f=320,afftdn=nr=6:nf=-50",
         "-ar", str(int(sample_rate)), "-f", str(sample_format), pcm_path,
     ]
     timeout = subdub_media_preflight.timeout_for_stage(
