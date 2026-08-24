@@ -73031,6 +73031,8 @@ VIDEO_UIFLOW3_PENDING_STEPS = {
     "product_image": {"production_bible"}, "prop": {"production_bible"},
     "prop_image": {"production_bible"}, "relationship": {"production_bible"},
     "reference_image": {"production_bible"},
+    "pilot_creative_custom": {"production_bible"},
+    "pilot_requirement_custom": {"production_bible"},
     "scene_count": {"scene_count"}, "scene_plan": {"scene_plan"},
     "dialogue": {"scene_assignment"}, "whole_music": {"scene_assignment"},
     "scene_music": {"scene_assignment"},

@@ -1413,6 +1413,62 @@ def test_resume_drops_pending_input_whose_entity_owner_no_longer_exists() -> Non
     assert "ui_view" not in resumed
 
 
+def test_pilot_custom_fields_keep_the_immediate_input_screen_and_back_target() -> None:
+    cases = (
+        (
+            "vid3|pilot_requirement_custom",
+            "pilot_requirement_detail",
+            "active_pilot_requirement",
+            "environment",
+            "pilot_requirement_custom",
+            "vid3|pilot_requirement|environment",
+            "Tự nhập yêu cầu giữ nguyên",
+        ),
+        (
+            "vid3|pilot_creative_custom",
+            "pilot_creative_detail",
+            "active_pilot_creative",
+            "visual_style",
+            "pilot_creative_custom",
+            "vid3|pilot_creative|visual_style",
+            "Tự nhập phong cách",
+        ),
+    )
+
+    for index, (
+        callback,
+        view,
+        active_field,
+        field_key,
+        pending_kind,
+        back_callback,
+        expected_title,
+    ) in enumerate(cases, 1):
+        user_id = 970090 + index
+        context = SimpleNamespace(user_data={})
+        state = _locked_state()
+        state["owner_user_id"] = user_id
+        state["owner_chat_id"] = user_id
+        state["navigation"]["current_step"] = "production_bible"
+        state = bot.video_uiflow3_open_view(
+            state,
+            view,
+            **{active_field: field_key},
+        )
+        bot.save_video_uiflow3_state(context, state)
+
+        _click_visible(context, user_id, callback, f"custom-field-{index}")
+
+        current = bot.video_uiflow3_state(context)
+        assert current.get("ui_view") == "input_prompt"
+        assert current["pending_input"]["kind"] == pending_kind
+        assert current["pending_input"]["field_key"] == field_key
+        assert current["pending_input"]["back_callback"] == back_callback
+        text, markup = bot.video_uiflow3_screen_payload(current)
+        assert expected_title in text
+        assert back_callback in _callbacks(markup)
+
+
 def test_non_series_episode_step_and_history_fail_closed() -> None:
     state = _locked_state()
     state["navigation"]["current_step"] = "episode"
