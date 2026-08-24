@@ -115017,7 +115017,14 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             tail["submit_preflight_snapshot"] = dict(submit_preflight)
             save_video_tail9_state(uid, context, tail, owner, host)
             if not submit_preflight.get("allowed"):
-                await query.answer()
+                try:
+                    await query.answer()
+                except Exception as exc:
+                    logger.warning(
+                        "video_tail_submit_callback_ack_failed | user_id=%s | error=%s",
+                        uid,
+                        type(exc).__name__,
+                    )
                 tail = video_tail9_prepare_submit_status(
                     uid, context, tail, owner, host, snapshot=submit_preflight
                 )
