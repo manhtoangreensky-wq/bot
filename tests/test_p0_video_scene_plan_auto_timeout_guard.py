@@ -42,6 +42,14 @@ def test_scene_plan_auto_acknowledges_and_falls_back_after_bounded_gemini_wait()
     assert bounded_call in callback
     assert callback.index(acknowledgement) < callback.index(bounded_call)
 
+    handler = _block(
+        source,
+        "async def handle_video_uiflow3_callback",
+        "async def handle_video_uiflow3_pending_text",
+    )
+    assert "callback_answered = False" in handler
+    assert "if not callback_answered:\n        await query.answer()" in handler
+
 
 def _video_ai_real_state() -> dict:
     state = video_uiflow3.new_state("video_ai_real", draft_id="scene-plan-context")

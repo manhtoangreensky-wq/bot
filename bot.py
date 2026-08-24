@@ -81876,6 +81876,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         await query.answer("Nút này thuộc bản kế hoạch cũ. Bản hiện tại vẫn được giữ nguyên.", show_alert=True)
         return await video_uiflow3_render(query, context, state)
     save_video_uiflow3_state(context, state)
+    callback_answered = False
 
     try:
         storyboard_marker = video_storyboard_entity_bridge_marker(state)
@@ -84112,9 +84113,11 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         state,
     )
     if shared_review is not None:
-        await query.answer()
+        if not callback_answered:
+            await query.answer()
         return shared_review
-    await query.answer()
+    if not callback_answered:
+        await query.answer()
     return await video_uiflow3_render(query, context, state)
 
 
