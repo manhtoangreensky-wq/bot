@@ -97,6 +97,6 @@ def test_deploy_restarts_only_bot_and_verifies_nginx_and_json_health() -> None:
     assert "systemctl is-active toanaas-bot.service" in WORKFLOW
     assert "systemctl is-active nginx.service" in WORKFLOW
     assert "http://127.0.0.1:8080/health" in WORKFLOW
-    assert "for attempt in {1..10}" in WORKFLOW
+    assert "for attempt in {1..120}" in WORKFLOW
     assert "sleep 2" in WORKFLOW
     assert 'data.get("status") == "ok"' in REMOTE_CONTRACT
