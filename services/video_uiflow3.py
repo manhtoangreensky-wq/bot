@@ -12,6 +12,7 @@ import json
 from math import ceil
 import re
 from typing import Any, Iterable, Mapping
+import unicodedata
 from uuid import uuid4
 
 from services import video_profile_context_engine
@@ -238,6 +239,68 @@ def _allocate_id(state: dict[str, Any], prefix: str, values: Iterable[Any]) -> s
 
 def _dedupe(values: Iterable[Any]) -> list[str]:
     return list(dict.fromkeys(_text(value, 120) for value in values if _text(value, 120)))
+
+
+def infer_explicit_character_identity(value: Any) -> dict[str, str]:
+    """Extract only character identity that is explicit in a Vietnamese brief."""
+
+    text = _text(value, 4000)
+    if not text:
+        return {}
+    name_token = r"[A-ZÀ-ỴĐ][A-Za-zÀ-ỹĐđ'-]*"
+    full_name = rf"{name_token}(?:\s+{name_token}){{0,3}}"
+    person_roles = (
+        r"nghệ\s+nhân|diễn\s+viên|người\s+mẫu|bác\s+sĩ|đầu\s+bếp|"
+        r"giáo\s+viên|chuyên\s+gia|người\s+dẫn|kiến\s+trúc\s+sư|"
+        r"kỹ\s+sư|doanh\s+nhân"
+    )
+    name_match = None
+    for pattern in (
+        rf"(?i:\bnhân\s+vật)\s+(?P<name>{full_name})(?=\s*(?:[,;:.]|(?i:\blà\b)|$))",
+        rf"(?P<name>{full_name})\s*,\s*(?i:(?:một\s+)?(?:nữ|nam)\b)",
+        rf"(?i:\b(?:nữ|nam)\s+(?:{person_roles}))\s+(?P<name>{full_name})"
+        rf"(?=\s*(?:[,;:.]|(?i:\b(?:là|làm|đang|tạo|giới\s+thiệu)\b)|$))",
+    ):
+        name_match = re.search(pattern, text)
+        if name_match:
+            break
+
+    folded = "".join(
+        character
+        for character in unicodedata.normalize("NFD", text.lower().replace("đ", "d"))
+        if unicodedata.category(character) != "Mn"
+    )
+    role_pattern = (
+        r"nghe\s+nhan|dien\s+vien|nguoi\s+mau|bac\s+si|dau\s+bep|"
+        r"giao\s+vien|chuyen\s+gia|nguoi\s+dan|kien\s+truc\s+su|"
+        r"ky\s+su|doanh\s+nhan"
+    )
+    female = bool(re.search(
+        rf"\b(?:nhan\s+vat\s+nu|nu\s+(?:{role_pattern})|nguoi\s+phu\s+nu|co\s+gai|be\s+gai|nu\s+chinh)\b",
+        folded,
+    ))
+    male = bool(re.search(
+        rf"\b(?:nhan\s+vat\s+nam|nam\s+(?:{role_pattern})|nguoi\s+dan\s+ong|chang\s+trai|be\s+trai|nam\s+chinh)\b",
+        folded,
+    ))
+    if name_match and female == male:
+        tail = text[name_match.end() : name_match.end() + 80]
+        folded_tail = "".join(
+            character
+            for character in unicodedata.normalize("NFD", tail.lower().replace("đ", "d"))
+            if unicodedata.category(character) != "Mn"
+        )
+        direct_gender = re.match(r"\s*,?\s*(?:la\s+|mot\s+)?(nu|nam)\b", folded_tail)
+        if direct_gender:
+            female = direct_gender.group(1) == "nu"
+            male = direct_gender.group(1) == "nam"
+
+    result = {}
+    if name_match:
+        result["display_name"] = name_match.group("name").strip()
+    if female != male:
+        result["gender"] = "female" if female else "male"
+    return result
 
 
 def _character(ordinal: int) -> dict[str, Any]:

@@ -76712,6 +76712,13 @@ def video_ai_real_build_quick_plan(
     content = dict(state.get("content") or {})
     brief = dict(content.get("approved_brief") or {})
     topic = str(brief.get("title") or content.get("original_intent") or "Nội dung đã chọn").strip()
+    explicit_character = (
+        video_uiflow3.infer_explicit_character_identity(
+            " ".join(filter(None, (content.get("original_intent"), brief.get("title"))))
+        )
+        if str(state.get("parent_product") or "") == "video_ai_real"
+        else {}
+    )
 
     bible = dict(state.get("bible") or {})
     wants_characters = needs.get("characters") not in {"SKIP", "UNSUPPORTED"}
@@ -76734,8 +76741,19 @@ def video_ai_real_build_quick_plan(
     for index, character in enumerate((state.get("bible") or {}).get("characters") or [], 1):
         was_locked_by_user = bool(character.get("locked_by_user"))
         changes = {}
+        current_name = str(character.get("display_name") or "").strip()
+        if (
+            index == 1
+            and explicit_character.get("display_name")
+            and current_name in {"", f"Nhan vat {index}", f"Nhân vật {index}", f"Character {index}"}
+        ):
+            changes["display_name"] = explicit_character["display_name"]
         if str(character.get("gender") or "unspecified") == "unspecified":
-            changes["gender"] = "female" if (seed_number + index) % 2 else "male"
+            changes["gender"] = (
+                explicit_character.get("gender")
+                if index == 1 and explicit_character.get("gender")
+                else "female" if (seed_number + index) % 2 else "male"
+            )
         if not str(character.get("description") or "").strip():
             provisional = video_uiflow3.update_character(state, str(character.get("character_id") or ""), **changes) if changes else state
             changes["description"] = video_ai_real_default_character_description(
