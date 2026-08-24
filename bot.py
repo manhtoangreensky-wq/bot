@@ -77152,7 +77152,7 @@ def video_ai_real_prompt_page_payload(
         ("✅ Hoàn tất rà soát câu lệnh", "vid3|prompts_done"),
     ])
     rows.extend(video_ai_real_pilot_nav_rows(back="vid3|back"))
-    return "\\n".join(lines), video_uiflow3_keyboard(rows)
+    return "\n".join(lines), video_uiflow3_keyboard(rows)
 
 
 def video_ai_real_pilot_scene_prompt_text(state: dict, scene: dict) -> str:
@@ -77453,7 +77453,7 @@ def video_ai_real_pilot_field_detail_payload(
             ("🚫 Bỏ chọn mục", f"vid3|{prefix}_remove"),
         ])
     rows.extend(video_ai_real_pilot_nav_rows(back=f"vid3|{prefix}_back"))
-    return "\\n".join(lines)[:3900], video_uiflow3_keyboard(rows)
+    return "\n".join(lines)[:3900], video_uiflow3_keyboard(rows)
 
 
 def video_ai_real_pilot_creative_payload(state: dict) -> tuple[str, InlineKeyboardMarkup]:
@@ -77548,7 +77548,7 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
             selected_lines.append(
                 f"• {label}: {html.escape(video_scene3_entry_label(entry))}"
             )
-        selected_copy = "\\n".join(selected_lines) if selected_lines else "Chưa thêm"
+        selected_copy = "\n".join(selected_lines) if selected_lines else "Chưa thêm"
         return (
             "🔒 Yêu cầu cần giữ nguyên\n\n"
             "Chọn đúng chi tiết phải nhất quán giữa các cảnh. Mỗi lần hiển thị 5 gợi ý; "
@@ -77584,7 +77584,7 @@ def video_ai_real_pilot_requirement_review_payload(
     if not selected_count:
         lines.append("Chưa chọn yêu cầu nào. Quay lại để dùng gợi ý hoặc tự nhập.")
     return (
-        "\\n".join(lines)[:3900],
+        "\n".join(lines)[:3900],
         video_uiflow3_keyboard([
             [("⬅️ Về Yêu cầu", "vid3|pilot_requirement_review_back")],
         ]),
@@ -77904,7 +77904,7 @@ def video_ai_real_pilot_bible_view_payload(
             ("✅ Hoàn tất chọn ảnh tham chiếu", back_callback),
             ("🎬 Menu Video", "menu|main_video"),
         ])
-        return "\\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\n".join(lines), video_uiflow3_keyboard(rows)
 
     if view == "continuity":
         continuity = dict(bible.get("continuity") or {})
@@ -78071,7 +78071,7 @@ def video_ai_real_pilot_scene_view_payload(
                 lines.append(f"{index}. {speaker}: {str(item.get('text') or '')[:120]}")
                 rows.append([("🗑 Xóa câu " + str(index), f"vid3|dialogue_remove|{scene_id}|{item.get('dialogue_id')}")])
         rows.extend(video_ai_real_pilot_nav_rows(back=f"vid3|scene|{scene_id}"))
-        return "\\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\n".join(lines), video_uiflow3_keyboard(rows)
 
     if view == "scene_voice":
         cast = set(scene.get("character_ids") or [])
@@ -78330,7 +78330,7 @@ def video_ai_real_pilot_prompt_view_payload(
             ("🎬 Menu Video", "menu|main_video"),
         ])
         return (
-            "\\n".join(lines),
+            "\n".join(lines),
             video_uiflow3_keyboard(rows),
         )
 
@@ -78549,7 +78549,7 @@ def video_ai_real_pilot_screen_payload(
             f"{index}. {item.get('label')}: {item.get('guidance')}"
             for index, item in enumerate(visible_suggestions, 1)
         ]
-        suggestion_copy = "\\n\\n".join(suggestion_lines)
+        suggestion_copy = "\n\n".join(suggestion_lines)
         return (
             f"{progress_prefix}✅ Nội dung đã chọn\n\n"
             f"Chủ đề: {brief.get('title') or content.get('original_intent') or 'Chưa có'}\n"
@@ -79101,7 +79101,7 @@ def video_ai_real_pilot_screen_payload(
             [("✅ Hoàn tất rà soát và chọn chất lượng", "vid3|summary_done")],
             *video_ai_real_pilot_nav_rows(back="vid3|back"),
         ]
-        return "\\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\n".join(lines), video_uiflow3_keyboard(rows)
 
     if step == "package" and not view:
         commercial = dict((state.get("legacy_compat") or {}).get("pilot_commercial") or {})
@@ -79167,7 +79167,7 @@ def video_ai_real_pilot_screen_payload(
         ]
         rows = [buttons[offset:offset + 2] for offset in range(0, len(buttons), 2)]
         rows.extend(video_ai_real_pilot_nav_rows(back="vid3|back"))
-        return "\\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\n".join(lines), video_uiflow3_keyboard(rows)
 
     if step == "invoice" and not view:
         try:
@@ -79213,7 +79213,7 @@ def video_ai_real_pilot_screen_payload(
             "",
             "Đây là báo giá xác nhận; chưa tạo tác vụ và chưa trừ Xu.",
         ])
-        return "\\n".join(lines), video_uiflow3_keyboard([
+        return "\n".join(lines), video_uiflow3_keyboard([
             [("✅ Tiếp tục xác nhận tạo video", "vid3|invoice_confirm")],
             *video_ai_real_pilot_nav_rows(back="vid3|back"),
         ])
@@ -79472,7 +79472,7 @@ def video_ai_real_pilot_screen_payload(
             [("✅ Hoàn tất phân vai và âm thanh", "vid3|assignment_done")],
             *video_ai_real_pilot_nav_rows(back="vid3|back"),
         ])
-        return "\\n".join(lines), video_uiflow3_keyboard(rows)
+        return "\n".join(lines), video_uiflow3_keyboard(rows)
 
     return None
 
@@ -111188,7 +111188,7 @@ def video_tail9_addon_text(tail: dict) -> str:
         "Logo và watermark giữ nguyên quy trình gửi nội dung rồi chọn đủ một trong 9 vị trí.",
         "Khi đã đúng, bấm Hoàn tất Add-on để chuyển sang rà soát toàn bộ video.",
     ])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def video_tail9_addon_postprocessing(tail: dict | None = None) -> dict:
@@ -111308,7 +111308,7 @@ def video_tail9_scene_script_info(tail: dict | None = None) -> dict:
         scene_index = safe_int(scene.get("scene_index"), fallback_index)
         clean_line = re.sub(r"\s+", " ", line).strip()
         lines.append(f"Cảnh {scene_index}: {clean_line}")
-    text = "\\n".join(lines)[:3500]
+    text = "\n".join(lines)[:3500]
     return {
         "text": text,
         "source": "scene_content" if used_content_fallback else "scene_script",
@@ -111921,7 +111921,7 @@ def video_tail9_transitions_text(tail: dict) -> str:
             label = video_scene3_flow.transition_public(transition)["label"] if transition else "Tự nhiên theo nội dung"
             lines.append(f"• Cảnh {index} → {index + 1}: <b>{html.escape(label)}</b>")
     lines.extend(["", "Chưa bắt đầu tạo video và chưa trừ Xu."])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def video_tail9_transitions_keyboard(tail: dict) -> InlineKeyboardMarkup:
@@ -111962,7 +111962,7 @@ def video_tail9_transition_picker_text(tail: dict, boundary: int) -> str:
         "",
         "Chọn một số hoặc dùng Cắt tự nhiên. Nội dung, nhân vật và hành động của hai cảnh vẫn được giữ nguyên.",
     ])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def video_tail9_transition_picker_keyboard(tail: dict, boundary: int) -> InlineKeyboardMarkup:
@@ -112155,7 +112155,7 @@ def video_tail9_storyboard_assets_text(host: dict) -> str:
         lines.append(
             f"• Cảnh {scene_index}: ảnh đầu: {'đã có' if start_ready else 'còn thiếu'}{end_label}"
         )
-    return "\\n".join(lines)[:3900]
+    return "\n".join(lines)[:3900]
 
 
 def video_tail9_storyboard_assets_keyboard() -> InlineKeyboardMarkup:
@@ -112584,7 +112584,7 @@ def video_tail9_logo_text(tail: dict) -> str:
     if len(lines) == 2:
         lines.append("• Chưa thêm logo hoặc watermark.")
     lines.extend(["", "Logo dùng ảnh; watermark dùng chữ. Mỗi mục chỉ được lưu sau khi chọn vị trí."])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 def video_tail9_logo_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
     current = dict(tail or {})
     is_video_edit = str(current.get("video_product_type") or "") == video_editengine1.PRODUCT_TYPE
@@ -112779,7 +112779,7 @@ def video_tail9_quality_text(tail: dict, capability: dict | None = None, catalog
             f"{discount_note} · còn <b>{scene_price['total_xu']} Xu</b>",
         ])
     lines.extend(["", "Chọn một gói để mở hóa đơn đầy đủ trước khi xác nhận tạo video."])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def video_tail9_quality_keyboard(
@@ -112874,7 +112874,7 @@ def video_tail9_invoice_text(tail: dict, session: dict, user_id: int, lang: str 
     ]
     addon_lines = ""
     if addon_items:
-        addon_rows = "\\n".join(
+        addon_rows = "\n".join(
             f"  ◦ {html.escape(str(item.get('label') or 'Phần bổ sung'))}: "
             f"<b>{xu_number(safe_int(item.get('price_xu'), 0))} Xu</b>"
             for item in addon_items
@@ -115017,7 +115017,14 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             tail["submit_preflight_snapshot"] = dict(submit_preflight)
             save_video_tail9_state(uid, context, tail, owner, host)
             if not submit_preflight.get("allowed"):
-                await query.answer()
+                try:
+                    await query.answer()
+                except Exception as exc:
+                    logger.warning(
+                        "video_tail_submit_callback_ack_failed | user_id=%s | error=%s",
+                        uid,
+                        type(exc).__name__,
+                    )
                 tail = video_tail9_prepare_submit_status(
                     uid, context, tail, owner, host, snapshot=submit_preflight
                 )

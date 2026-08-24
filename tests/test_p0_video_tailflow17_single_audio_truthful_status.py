@@ -35,6 +35,37 @@ def _callback_rows(markup) -> list[list[str]]:
     ]
 
 
+def test_product_video_public_renderers_do_not_emit_literal_backslash_newlines() -> None:
+    planning_renderers = re.findall(
+        r"^def (video_ai_real_(?:prompt_page|pilot_)[A-Za-z0-9_]*(?:payload|text))\(",
+        BOT_SOURCE,
+        re.MULTILINE,
+    )
+    tail_renderers = [
+        name
+        for name in re.findall(
+            r"^def (video_tail9_[A-Za-z0-9_]*_text)\(",
+            BOT_SOURCE,
+            re.MULTILINE,
+        )
+        if "video_edit" not in name
+    ]
+    renderer_names = [
+        *planning_renderers,
+        *tail_renderers,
+        "video_tail9_scene_script_info",
+    ]
+    offenders = [
+        name
+        for name in renderer_names
+        if re.search(r"\\\\n", _function_source(name))
+    ]
+
+    assert planning_renderers
+    assert tail_renderers
+    assert offenders == []
+
+
 def _ready_tail(source: str = "content_profiles", scene_count: int = 1) -> dict:
     state = video_tail9.new_state(
         product_type="video_ai_real",
@@ -354,6 +385,72 @@ def test_insufficient_balance_callback_stops_before_admission_job_and_bridge() -
     assert len(messages) == 1
     assert "Còn thiếu: <b>100 Xu</b>" in messages[0]
     assert saved[-1]["submit_preflight_snapshot"]["blocker_code"] == "insufficient_balance"
+    assert saved[-1]["job_id"] == ""
+    assert saved[-1]["final_confirmed"] is False
+
+
+def test_submit_preflight_ack_timeout_preserves_truthful_blocker_and_stops_before_bridge() -> None:
+    tail = _invoice_tail(300)
+    saved: list[dict] = []
+    rendered: list[dict] = []
+    bridge_calls = 0
+
+    async def bridge(_update, _context):
+        nonlocal bridge_calls
+        bridge_calls += 1
+        return None
+
+    def prepare(_uid, _context, state, _owner, _host, *, snapshot):
+        prepared = dict(state)
+        prepared["submit_preflight_snapshot"] = dict(snapshot)
+        return prepared
+
+    async def render(_query, _context, _uid, state, _owner, _host):
+        rendered.append(dict(state))
+        return state["submit_preflight_snapshot"]["blocker_code"]
+
+    handler = _load_function(
+        "handle_video_tail_callback",
+        {
+            "video_tail9_context": lambda _uid, _context: (dict(tail), "scene3", {}),
+            "video_tail9": video_tail9,
+            "VIDEO_TAIL9_TEXT_INPUT_KEY": "video_tail9_text_input",
+            "VIDEO_TAIL9_DEFERRED_RUNTIME_PRODUCTS": frozenset(),
+            "save_video_tail9_state": lambda _uid, _context, state, _owner, _host: saved.append(dict(state)),
+            "get_user_language": lambda _uid: "vi",
+            "logger": SimpleNamespace(warning=lambda *_args, **_kwargs: None),
+            "video_b14_is_admin_or_owner": lambda _uid: True,
+            "get_user": lambda _uid: (200, None, None),
+            "safe_int": lambda value, default=0: int(value) if str(value).isdigit() else default,
+            "product_video_public_preflight_evaluation": lambda *_args, **_kwargs: {
+                "ready": False,
+                "preflight_resolved_state": "blocked",
+                "blocker_code": "provider_probation_lock",
+            },
+            "product_video_worker_admission_status": lambda: {
+                "worker_version_compatible": False,
+                "worker_admission_block_reason": "provider_probation_lock",
+            },
+            "video_tail9_prepare_submit_status": prepare,
+            "video_tail9_render_confirmed_status": render,
+            "handle_product_video_public_confirm_callback": bridge,
+        },
+    )
+
+    class Query:
+        id = "tailflow17-provider-blocked"
+        data = "video_tail|confirm|submit"
+        from_user = SimpleNamespace(id=17002)
+
+        async def answer(self, *_args, **_kwargs):
+            raise TimeoutError("Telegram callback ACK timed out")
+
+    result = asyncio.run(handler(SimpleNamespace(callback_query=Query()), SimpleNamespace()))
+
+    assert result == "provider_unavailable"
+    assert bridge_calls == 0
+    assert rendered[-1]["submit_preflight_snapshot"]["blocker_code"] == "provider_unavailable"
+    assert saved[-1]["submit_preflight_snapshot"]["blocker_code"] == "provider_unavailable"
     assert saved[-1]["job_id"] == ""
     assert saved[-1]["final_confirmed"] is False
 

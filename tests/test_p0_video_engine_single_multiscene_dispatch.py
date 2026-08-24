@@ -430,6 +430,75 @@ def test_integrated_product_render_outputs_one_or_multiscene_mp4_without_network
     assert validation["ok"] is True
 
 
+def test_orchestrator_preserves_provider_audio_when_every_scene_has_audio(
+    monkeypatch,
+    tmp_path,
+):
+    probe_calls: list[str] = []
+    captured: dict = {}
+
+    async def fake_render(scene, raw_path, _provider_order):
+        Path(raw_path).write_bytes(f"scene-{scene.scene_id}".encode("utf-8"))
+        return {
+            "ok": True,
+            "output_path": raw_path,
+            "scene_index": int(scene.scene_id),
+            "result_url_present": True,
+        }
+
+    def fake_probe(path):
+        probe_calls.append(str(path))
+        return {
+            "ok": True,
+            "has_video": True,
+            "has_audio": True,
+            "bytes": Path(path).stat().st_size,
+            "duration": 8.0,
+        }
+
+    final_path = tmp_path / "final-with-provider-audio.mp4"
+
+    def fake_finalize(**kwargs):
+        captured.update(kwargs)
+        final_path.write_bytes(b"final-provider-audio")
+        return {
+            "ok": True,
+            "final_video_path": str(final_path),
+            "duration_sec": 16.0,
+            "scene_order": [1, 2],
+        }
+
+    monkeypatch.setattr(connector, "_render_scene_async", fake_render)
+    monkeypatch.setattr(
+        connector,
+        "_canonical_product_video_workspace",
+        lambda _job: str(tmp_path / "provider-audio-workspace"),
+    )
+    monkeypatch.setattr(connector.video_final_output, "probe_video", fake_probe)
+    monkeypatch.setattr(connector, "finalize_multiscene_scene_clips", fake_finalize)
+
+    result = connector._run_per_scene_provider_orchestrator(
+        {
+            "id": 902,
+            "job_id": 902,
+            "source": "product_video",
+            "product_video": True,
+            "scene_count": 2,
+            "orchestration_mode": "per_scene_8s",
+            "public_user_confirmed": True,
+            "invoice_confirmed": True,
+        },
+        str(tmp_path / "discarded-worker-dir"),
+        provider_order=[PROVIDER],
+        provider_events=[],
+        debug_results=[],
+    )
+
+    assert result["ok"] is True
+    assert len(probe_calls) == 2
+    assert captured.get("preserve_scene_audio") is True
+
+
 def test_same_job_probation_dispatches_provider_once(monkeypatch, tmp_path):
     adapter = _PendingAdapter()
     monkeypatch.setattr(router, "provider_status_payload", lambda _env=None: _provider_status())
