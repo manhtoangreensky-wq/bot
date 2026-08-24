@@ -303,6 +303,55 @@ def infer_explicit_character_identity(value: Any) -> dict[str, str]:
     return result
 
 
+def infer_explicit_location(value: Any) -> dict[str, str]:
+    """Extract a location that is stated explicitly in a Vietnamese brief."""
+
+    text = _text(value, 4000)
+    if not text:
+        return {}
+    location_types = (
+        r"xưởng|studio|phòng|nhà|quán|cửa\s+hàng|showroom|văn\s+phòng|"
+        r"bảo\s+tàng|thư\s+viện|trường|bệnh\s+viện|phòng\s+khám|nhà\s+hàng|"
+        r"bếp|đường\s+phố|công\s+viên|bãi\s+biển|khu\s+rừng|rừng|núi|"
+        r"cánh\s+đồng|sân|ga|sân\s+bay|khách\s+sạn|nhà\s+máy"
+    )
+    match = re.search(
+        rf"\b(?:trong|tại|ở)\s+(?P<phrase>(?:{location_types})\b.{{0,160}}?)"
+        rf"(?=\s*(?:[.;!?|]|\bCảnh\s+\d+\b|$))",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return {}
+    phrase = re.sub(r"\s+", " ", match.group("phrase")).strip(" ,:-")
+    name = re.split(
+        r"\s+(?:ánh\s+sáng|vào\s+buổi|buổi|ban\s+(?:ngày|đêm)|lúc|với|có)\b",
+        phrase,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip(" ,:-")
+    if not name:
+        return {}
+    name = name[:1].upper() + name[1:]
+    folded = "".join(
+        character
+        for character in unicodedata.normalize("NFD", phrase.lower().replace("đ", "d"))
+        if unicodedata.category(character) != "Mn"
+    )
+    outdoor = bool(re.match(
+        r"(?:duong\s+pho|cong\s+vien|bai\s+bien|khu\s+rung|rung|nui|canh\s+dong|san\b)",
+        folded,
+    ))
+    warm = bool(re.search(r"\b(?:anh\s+sang\s+am|am\s+ap)\b", folded))
+    return {
+        "name": name,
+        "description": f"Bối cảnh được nêu rõ trong nội dung: {phrase}.",
+        "indoor_outdoor": "outdoor" if outdoor else "indoor",
+        "lighting": "warm_soft" if warm else "natural_daylight" if outdoor else "natural_soft",
+        "mood": "warm_realistic" if warm else "fresh_calm" if outdoor else "realistic",
+    }
+
+
 def _character(ordinal: int) -> dict[str, Any]:
     return {
         "character_id": _stable_id("char", ordinal),

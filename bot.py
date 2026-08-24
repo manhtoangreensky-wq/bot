@@ -76719,6 +76719,13 @@ def video_ai_real_build_quick_plan(
         if str(state.get("parent_product") or "") == "video_ai_real"
         else {}
     )
+    explicit_location = (
+        video_uiflow3.infer_explicit_location(
+            " ".join(filter(None, (content.get("original_intent"), brief.get("title"))))
+        )
+        if str(state.get("parent_product") or "") == "video_ai_real"
+        else {}
+    )
 
     bible = dict(state.get("bible") or {})
     wants_characters = needs.get("characters") not in {"SKIP", "UNSUPPORTED"}
@@ -76788,7 +76795,10 @@ def video_ai_real_build_quick_plan(
         if str(location.get("description") or "").strip():
             continue
         was_locked_by_user = bool(location.get("locked_by_user"))
-        preset = location_presets[(seed_number + index - 1) % len(location_presets)]
+        is_explicit = bool(index == 1 and explicit_location)
+        preset = dict(location_presets[(seed_number + index - 1) % len(location_presets)])
+        if is_explicit:
+            preset.update(explicit_location)
         state = video_uiflow3.update_location(
             state,
             str(location.get("location_id") or ""),
@@ -76811,8 +76821,8 @@ def video_ai_real_build_quick_plan(
             if updated_location is not None:
                 updated_location.update({
                     "locked_by_user": False,
-                    "suggestion_source": "content_needs",
-                    "suggestion_confidence": 0.65,
+                    "suggestion_source": "explicit_content" if is_explicit else "content_needs",
+                    "suggestion_confidence": 0.95 if is_explicit else 0.65,
                 })
 
     if has_required_source_image and needs.get("locations") == "REQUIRED":
