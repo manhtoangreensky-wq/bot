@@ -145,7 +145,7 @@ import video_image_to_video_flow as ivf
 from services import ai_chatbot_copilot, telegram_business_support, telegram_transport
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_ass_layout, subdub_auto_settlement, subdub_auto_word_pricing, subdub_blackboxes, subdub_canonical_cues, subdub_combo_blackbox, subdub_long_media, subdub_media_preflight, subdub_provider_contract, subdub_speaker_cast, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
-from services.subdub_blackboxes import auto_speaker
+from services.subdub_blackboxes import auto_multi_speaker, auto_speaker
 from services import ai_chatbot_copilot, cskh_session_memory, telegram_business_support, telegram_transport
 from services import public_chat_media, public_chat_runtime, public_chat_store
 from providers.gemini_public_chat_provider import GeminiPublicChatProvider
@@ -231495,6 +231495,21 @@ def subdub_auto_speaker_route_enabled(state: dict | None = None) -> bool:
     )
 
 
+def subdub_auto_multi_speaker_route_enabled(
+    state: dict | None = None,
+) -> bool:
+    return bool(
+        subdub_auto_speaker_route_enabled(state)
+        and auto_multi_speaker.is_auto_multi_speaker_state(state)
+    )
+
+
+def subdub_auto_blackbox_runner(state: dict | None = None):
+    if subdub_auto_multi_speaker_route_enabled(state):
+        return auto_multi_speaker.run_auto_multi_speaker_blackbox
+    return auto_speaker.run_auto_speaker_blackbox
+
+
 SUBDUB_MANUAL_VOICE_FIELDS = frozenset({
     "voice_style", "voice_id", "voice_profile_id", "selected_voice_label",
     "selected_voice", "selected_voice_gender", "selected_voice_id", "requested_gender",
@@ -231506,7 +231521,8 @@ SUBDUB_MANUAL_VOICE_FIELDS = frozenset({
 })
 
 SUBDUB_AUTO_VOICE_FIELDS = frozenset({
-    "voice_selection_mode", "speaker_sidecar_path", "speaker_sidecar_sha256",
+    "voice_selection_mode", "auto_speaker_lane",
+    "speaker_sidecar_path", "speaker_sidecar_sha256",
     "speaker_classifications", "speaker_casts", "per_cue_voice_assignments",
     "auto_exact_receipt_version", "auto_exact_media_sha256",
     "auto_exact_subtitle_sha256", "auto_exact_sidecar_sha256",
@@ -231517,6 +231533,14 @@ SUBDUB_AUTO_VOICE_FIELDS = frozenset({
     "auto_quote_exact_known", "auto_quote_billable_words",
     "auto_quote_auto_xu", "auto_quote_subtitle_xu",
     "auto_quote_total_xu", "auto_quote_text_source",
+})
+
+SUBDUB_AUTO_PROFILE_PRIVATE_FIELDS = frozenset({
+    "auto_exact_receipt",
+    "auto_exact_cache",
+    "auto_exact_resume_state",
+    "auto_exact_claim_token",
+    "auto_exact_resume",
 })
 
 SUBDUB_VOICE_CONFIRMATION_FIELDS = frozenset({
@@ -232343,6 +232367,15 @@ def subdub_auto_voice_choice(lang: str = "vi") -> tuple[str, str]:
     copy = public_subdub_deep_copy(normalize_user_language(lang))
     return copy["voice_auto_speaker"], "videodub|voice|auto_speaker_gender"
 
+
+def subdub_auto_multi_voice_choice(lang: str = "vi") -> tuple[str, str]:
+    label = (
+        "👥 Tự nhận nhiều giọng"
+        if normalize_user_language(lang) == "vi"
+        else "👥 Multi-speaker Auto"
+    )
+    return label, "videodub|voice|auto_multi_speaker"
+
 def subtitle_plus_dub_voice_keyboard(
     lang: str = "vi",
     state: dict | None = None,
@@ -232369,8 +232402,13 @@ def subtitle_plus_dub_voice_keyboard(
     )
     if include_auto and subdub_auto_provider_capacity_ready():
         label, callback = subdub_auto_voice_choice(lang)
+        multi_label, multi_callback = subdub_auto_multi_voice_choice(lang)
         rows = [list(row) for row in markup.inline_keyboard]
         rows.insert(1, [InlineKeyboardButton(label, callback_data=callback)])
+        rows.insert(
+            2,
+            [InlineKeyboardButton(multi_label, callback_data=multi_callback)],
+        )
         return InlineKeyboardMarkup(rows)
     return markup
 
@@ -233786,8 +233824,13 @@ def video_dubbing_voice_keyboard(
     )
     if include_auto and subdub_auto_provider_capacity_ready():
         label, callback = subdub_auto_voice_choice(lang)
+        multi_label, multi_callback = subdub_auto_multi_voice_choice(lang)
         rows = [list(row) for row in markup.inline_keyboard]
         rows.insert(1, [InlineKeyboardButton(label, callback_data=callback)])
+        rows.insert(
+            2,
+            [InlineKeyboardButton(multi_label, callback_data=multi_callback)],
+        )
         return InlineKeyboardMarkup(rows)
     return markup
 
@@ -233919,7 +233962,18 @@ def subdub_apply_voice_choice(
     """Reset first, then assign exactly one Auto or existing manual mode."""
 
     value = str(choice or "").strip()
-    selecting_auto = value == "auto_speaker_gender"
+    selecting_auto = value in {"auto_speaker_gender", "auto_multi_speaker"}
+    selected_auto_lane = (
+        auto_multi_speaker.AUTO_MULTI_SPEAKER_LANE
+        if value == "auto_multi_speaker"
+        else ""
+    )
+    switching_auto_profile = bool(
+        selecting_auto
+        and auto_speaker.is_auto_speaker_state(state)
+        and str((state or {}).get("auto_speaker_lane") or "")
+        != selected_auto_lane
+    )
     enabled = (
         subdub_auto_provider_capacity_ready()
         if activation_enabled is None
@@ -233932,8 +233986,17 @@ def subdub_apply_voice_choice(
         selecting_auto=selecting_auto,
     )
     if selecting_auto:
+        if switching_auto_profile:
+            for field in (
+                SUBDUB_AUTO_VOICE_FIELDS
+                | SUBDUB_AUTO_PROFILE_PRIVATE_FIELDS
+            ):
+                selected.pop(field, None)
         selected["voice_kind"] = "auto_speaker_gender"
         selected["voice_selection_mode"] = "auto_speaker"
+        selected.pop("auto_speaker_lane", None)
+        if value == "auto_multi_speaker":
+            selected["auto_speaker_lane"] = selected_auto_lane
         if (
             subtitle_plus_dub_is_active(selected)
             and str(selected.get("translate_requested") or "") == "1"
@@ -238601,7 +238664,11 @@ def subtitle_dub_pipeline_job_key(user_id, chat_id, state: dict | None = None) -
     active_flow = str(state.get("active_flow") or mode or "pipeline")
     parts = [str(user_id or 0), str(chat_id or user_id or 0), source[:160], active_flow[:80]]
     if subdub_auto_speaker_route_enabled(state):
-        parts.append("auto_speaker")
+        parts.append(
+            "auto_multi_speaker"
+            if subdub_auto_multi_speaker_route_enabled(state)
+            else "auto_speaker"
+        )
     return "|".join(parts)
 
 def subdub_job_timestamp(value, default: float = 0.0) -> float:
@@ -247080,6 +247147,7 @@ async def _extract_subdub_auto_pcm(
     channels: int,
     sample_rate: int,
     sample_format: str,
+    audio_filter: str = "",
 ) -> str:
     """Create one bounded transient PCM artifact inside the current workspace."""
 
@@ -247153,9 +247221,12 @@ async def _extract_subdub_auto_pcm(
     command = [
         ffmpeg, "-y", "-i", source_path, "-t", f"{bounded_seconds:g}",
         "-vn", "-ac", str(int(channels)),
-        "-af", "highpass=f=70,lowpass=f=320,afftdn=nr=6:nf=-50",
-        "-ar", str(int(sample_rate)), "-f", str(sample_format), pcm_path,
     ]
+    if str(audio_filter or ""):
+        command.extend(["-af", str(audio_filter)])
+    command.extend([
+        "-ar", str(int(sample_rate)), "-f", str(sample_format), pcm_path,
+    ])
     timeout = subdub_media_preflight.timeout_for_stage(
         "extract",
         duration_seconds=float((prepared or {}).get("duration_seconds") or 0.0),
@@ -247913,7 +247984,8 @@ async def _execute_video_dubbing_pipeline_core(
     # Compatibility: run_subdub_pipeline delegates to subtitle_dub_product_pipeline.process_subtitle_dub_job.
     render_debug["subdub_blackbox_lane"] = subdub_blackboxes.subdub_lane_name(mode)
     if subdub_auto_speaker_route_enabled(state):
-        product_result = await auto_speaker.run_auto_speaker_blackbox(
+        auto_blackbox_runner = subdub_auto_blackbox_runner(state)
+        product_result = await auto_blackbox_runner(
             lane_mode=mode,
             run_lane_blackbox=subdub_blackboxes.run_subdub_lane_blackbox,
             runner=subtitle_dub_product_pipeline.run_subdub_pipeline,
