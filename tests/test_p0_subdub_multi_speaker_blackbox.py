@@ -93,6 +93,41 @@ def test_auto_choices_set_and_clear_only_the_multi_marker(monkeypatch):
     assert "voice_selection_mode" not in manual
 
 
+def test_switching_auto_profiles_clears_the_previous_profile_cache():
+    stale_fields = {
+        "speaker_sidecar_path": "C:/job/speaker_cast.sidecar.json",
+        "speaker_sidecar_sha256": "a" * 64,
+        "speaker_classifications": {"old": True},
+        "speaker_casts": {"old": True},
+        "per_cue_voice_assignments": [{"old": True}],
+        "auto_exact_receipt": {"claim_state": "resuming"},
+        "auto_exact_cache": {"prepared": "old"},
+        "auto_exact_resume_state": {"mode": "dub"},
+        "auto_exact_claim_token": "old-claim",
+        "auto_exact_receipt_confirmed": True,
+        "auto_quote_billable_words": 42,
+    }
+    multi = bot.subdub_apply_voice_choice(
+        {**EXACT_AUTO_STATE, **stale_fields},
+        "auto_multi_speaker",
+        activation_enabled=True,
+    )
+
+    assert multi["auto_speaker_lane"] == "multi"
+    assert not (set(stale_fields) & set(multi))
+
+    old = bot.subdub_apply_voice_choice(
+        {**multi, **stale_fields},
+        "auto_speaker_gender",
+        activation_enabled=True,
+    )
+
+    assert old["voice_kind"] == "auto_speaker_gender"
+    assert old["voice_selection_mode"] == "auto_speaker"
+    assert "auto_speaker_lane" not in old
+    assert not (set(stale_fields) & set(old))
+
+
 @pytest.mark.parametrize(
     "state",
     (

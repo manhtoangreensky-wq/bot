@@ -1,5 +1,5 @@
 task_id: p0-subdub-multi-blackbox
-phase: BUILD_RED_WRITTEN_WAITING_CPU
+phase: VERIFY_PRE_REBASE_COMPLETE
 branch: fix/p0-subdub-multi-blackbox
 base_sha: 7b4053acd9a2bd44c29a15ebc5e0e86152fab24f
 design_commit: 1028e79
@@ -34,4 +34,34 @@ acceptance:
 external_actions_allowed_now: false
 provider_calls_allowed_now: false
 wallet_mutations_allowed: false
-next_action: run the focused RED file after exact CPU release; do not edit production first
+verification:
+  red: 9 failed and 2 passed in 132.83s for missing multi seams
+  focused_green: 12 passed in 133.96s
+  protected_old_route: 3 passed in 156.90s
+  protected_manual_zero_charge: 7 passed in 163.23s
+  classifier_comparators: 16 passed and 1 baseline failure in 145.50s
+  rollback_anchor_comparator: same baseline failure at 2.0 versus 1.5 in 145.92s
+  py_compile: exit 0 for four runtime files
+issues:
+  - id: MULTI-01
+    status: done
+    summary: marker dispatch and distinct job lease
+  - id: MULTI-02
+    status: done
+    summary: multi-only filtered PCM and single-frame classifier profile
+  - id: MULTI-03
+    status: done
+    summary: cross-profile sidecar and exact-receipt cache isolation
+  - id: PROTECTED-01
+    status: done
+    summary: old Auto default PCM classifier route and manual lanes protected
+  - id: BASELINE-01
+    status: known_nonblocking
+    summary: voiced-with-pauses comparator expects 1.5 seconds but returns 2.0 identically at rollback SHA
+  - id: SHIP-01
+    status: pending
+    summary: rebase current origin main then rerun focused and compile gates
+  - id: LIVE-01
+    status: pending
+    summary: one authorized Download.mp4 multi-speaker live job to MP4 SRT receipt and zero Xu
+next_action: wait for PRODUCT VIDEO LIVE RELEASED then rebase and reverify before ship

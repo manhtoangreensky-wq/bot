@@ -3787,6 +3787,11 @@ def test_manual_modes_remain_scalar_and_auto_activation_cannot_be_inferred_from_
 
 
 def test_route_gate_requires_activation_and_exact_pair(monkeypatch):
+    monkeypatch.setattr(
+        bot,
+        "subdub_auto_provider_capacity_ready",
+        lambda *_args, **_kwargs: True,
+    )
     matrix = (
         ({}, False),
         ({"voice_kind": "auto_speaker_gender"}, False),
@@ -3922,6 +3927,22 @@ def test_dispatch_matrix_calls_one_blackbox_and_prepares_once(
 
     monkeypatch.setattr(bot, "SUBDUB_AUTO_SPEAKER_ACTIVATION_ENABLED", activation)
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    monkeypatch.setattr(
+        bot,
+        "subdub_auto_provider_capacity_ready",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        bot,
+        "apply_member_service_discount",
+        lambda _uid, amount, _service: {
+            "base_cost": int(amount),
+            "final_cost": int(amount),
+            "discount_rate": 0,
+            "discount_xu": 0,
+        },
+    )
+    monkeypatch.setattr(bot, "get_user", lambda _uid: (0, "fixture", ""))
     monkeypatch.setattr(
         bot,
         "video_dubbing_engine_access_decision",
@@ -4359,6 +4380,11 @@ def test_auto_job_key_isolated_from_byte_stable_manual_key(monkeypatch):
     }
 
     monkeypatch.setattr(bot, "SUBDUB_AUTO_SPEAKER_ACTIVATION_ENABLED", True)
+    monkeypatch.setattr(
+        bot,
+        "subdub_auto_provider_capacity_ready",
+        lambda *_args, **_kwargs: True,
+    )
     auto_key = bot.subtitle_dub_pipeline_job_key(7, 8, state)
     assert auto_key == "7|8|source|dub_audio|auto_speaker"
     acquired, auto_job = bot.acquire_subtitle_dub_pipeline_job(auto_key, mode="dub")
