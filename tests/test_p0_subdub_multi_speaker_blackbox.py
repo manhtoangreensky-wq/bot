@@ -183,6 +183,50 @@ def test_old_and_multi_states_select_different_blackboxes(monkeypatch):
     ) is True
 
 
+def test_multi_adapter_preserves_exact_price_fields_created_by_preflight(
+    monkeypatch,
+):
+    multi_module = _multi_module()
+
+    async def copied_lane_state_before_preflight(**payload):
+        payload["state"].update({
+            "auto_exact_receipt_confirmed": True,
+            "auto_exact_actual_billable_words": 181,
+            "auto_exact_actual_auto_xu": 91,
+            "auto_exact_actual_subtitle_xu": 0,
+            "auto_exact_actual_total_xu": 91,
+            "auto_exact_claim_token": "claimed-once",
+        })
+        return {
+            "ok": True,
+            "state": {
+                **EXACT_AUTO_STATE,
+                "auto_speaker_lane": "multi",
+                "protected_lane_state": "kept",
+            },
+        }
+
+    monkeypatch.setattr(
+        auto_speaker,
+        "run_auto_speaker_blackbox",
+        copied_lane_state_before_preflight,
+    )
+    result = asyncio.run(
+        multi_module.run_auto_multi_speaker_blackbox(
+            extract_pcm=lambda *_args, **_kwargs: "unused.pcm",
+            state={**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"},
+        )
+    )
+
+    assert result["state"]["protected_lane_state"] == "kept"
+    assert result["state"]["auto_exact_receipt_confirmed"] is True
+    assert result["state"]["auto_exact_actual_billable_words"] == 181
+    assert result["state"]["auto_exact_actual_auto_xu"] == 91
+    assert result["state"]["auto_exact_actual_subtitle_xu"] == 0
+    assert result["state"]["auto_exact_actual_total_xu"] == 91
+    assert result["state"]["auto_exact_claim_token"] == "claimed-once"
+
+
 def test_old_and_multi_jobs_have_separate_retry_leases(monkeypatch):
     monkeypatch.setattr(
         bot,
