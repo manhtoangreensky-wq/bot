@@ -1,0 +1,37 @@
+task_id: p0-subdub-multi-blackbox
+phase: CONTRACT
+branch: fix/p0-subdub-multi-blackbox
+base_sha: 7b4053acd9a2bd44c29a15ebc5e0e86152fab24f
+design_commit: 1028e79
+live_boundary: product_video_acquired
+cpu_boundary: product_video_local_acquired
+allowed_source_files:
+  - bot.py
+  - services/subdub_speaker_cast.py
+  - services/subdub_blackboxes/auto_speaker.py
+  - services/subdub_blackboxes/auto_multi_speaker.py
+  - tests/test_p0_subdub_multi_speaker_blackbox.py
+  - tests/test_p0_subdub_per_speaker_auto_gender_cast.py
+protected_paths:
+  - services/subdub_blackboxes/__init__.py
+  - services/subdub_blackboxes/base.py
+  - services/subdub_blackboxes/dub_only.py
+  - services/subdub_blackboxes/subtitle_dub.py
+  - services/subtitle_dub_product_pipeline.py
+  - services/subdub_auto_word_pricing.py
+  - services/subdub_auto_settlement.py
+rollback:
+  pr: 844
+  sha: 0c5e0dc9b0b11bb864124fa44403c7c049a06904
+  live_job: 5ECF6FB24B
+acceptance:
+  - no marker dispatches only the proven auto_speaker blackbox
+  - marker auto_speaker_lane=multi dispatches only auto_multi_speaker
+  - multi preserves 2 through 16 provider-returned speaker labels without invention
+  - three or more labels receive distinct validated voices while capacity allows
+  - default/manual/subtitle pricing settlement mux and delivery remain unchanged
+  - owner live fixture produces one MP4 one SRT one green receipt and zero Xu
+external_actions_allowed_now: false
+provider_calls_allowed_now: false
+wallet_mutations_allowed: false
+next_action: write and commit the implementation plan while waiting for CPU release
