@@ -1,5 +1,5 @@
 task_id: p0-subdub-multi-blackbox
-phase: CONTRACT
+phase: BUILD_RED_WRITTEN_WAITING_CPU
 branch: fix/p0-subdub-multi-blackbox
 base_sha: 7b4053acd9a2bd44c29a15ebc5e0e86152fab24f
 design_commit: 1028e79
@@ -34,4 +34,4 @@ acceptance:
 external_actions_allowed_now: false
 provider_calls_allowed_now: false
 wallet_mutations_allowed: false
-next_action: write and commit the implementation plan while waiting for CPU release
+next_action: run the focused RED file after exact CPU release; do not edit production first

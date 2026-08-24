@@ -2367,7 +2367,7 @@ def test_register_classifier_reads_synthetic_pcm_tones(tmp_path, frequency, expe
     assert result["chunk_00:speaker_0"]["confidence"] >= 0.75
 
 
-def test_short_speaker_window_accepts_one_confident_pitch_frame(monkeypatch):
+def test_default_lane_rejects_one_confident_pitch_frame(monkeypatch):
     speaker_cast = _speaker_cast_module()
     frame_estimates = iter(((220.0, 0.74), None, None, None))
 
@@ -2398,9 +2398,7 @@ def test_short_speaker_window_accepts_one_confident_pitch_frame(monkeypatch):
         stop_requested=lambda: False,
     )
 
-    assert result is not None
-    assert result[0] >= speaker_cast.HIGH_MIN_HZ
-    assert result[1] >= speaker_cast.MIN_REGISTER_CONFIDENCE
+    assert result is None
 
 
 @pytest.mark.parametrize(
@@ -3809,7 +3807,8 @@ def test_exact_pair_dispatch_and_default_blackbox_source_contract():
     route_source = inspect.getsource(bot.subdub_auto_speaker_route_enabled)
     assert "SUBDUB_AUTO_SPEAKER_ACTIVATION_ENABLED" in route_source
     assert "auto_speaker.is_auto_speaker_state(state)" in route_source
-    assert "product_result = await auto_speaker.run_auto_speaker_blackbox(" in source
+    assert "auto_blackbox_runner = subdub_auto_blackbox_runner(state)" in source
+    assert "product_result = await auto_blackbox_runner(" in source
     assert "run_lane_blackbox=subdub_blackboxes.run_subdub_lane_blackbox" in source
     assert "runner=subtitle_dub_product_pipeline.run_subdub_pipeline" in source
     assert "post_prepare_gate=_subdub_auto_post_prepare_gate" in source
@@ -4159,7 +4158,6 @@ def test_default_blackbox_pcm_extractor_uses_bounded_existing_ffmpeg_runner(tmp_
     assert calls == [
         ([
             "ffmpeg", "-y", "-i", str(source_path), "-t", "12", "-vn", "-ac", "1",
-            "-af", "highpass=f=70,lowpass=f=320,afftdn=nr=6:nf=-50",
             "-ar", "16000", "-f", "s16le",
             str(tmp_path / "auto_speaker_16000_mono_s16le.pcm"),
         ], 77.0)
