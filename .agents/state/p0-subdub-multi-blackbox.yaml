@@ -1,10 +1,11 @@
 task_id: p0-subdub-multi-blackbox
-phase: VERIFY_PRE_REBASE_COMPLETE
+phase: SHIP_READY
 branch: fix/p0-subdub-multi-blackbox
-base_sha: 7b4053acd9a2bd44c29a15ebc5e0e86152fab24f
+base_sha: afbe4acf651e6ef17320bc15d441a749a16f7ae3
+verified_source_sha: e7450ccfc6ac2d06ae0d7ce7b8ad9ce77c27bbc8
 design_commit: 1028e79
-live_boundary: product_video_acquired
-cpu_boundary: product_video_local_acquired
+live_boundary: subdub_auto_acquired
+cpu_boundary: product_video_local_only_subdub_vps_released
 allowed_source_files:
   - bot.py
   - services/subdub_speaker_cast.py
@@ -31,8 +32,8 @@ acceptance:
   - three or more labels receive distinct validated voices while capacity allows
   - default/manual/subtitle pricing settlement mux and delivery remain unchanged
   - owner live fixture produces one MP4 one SRT one green receipt and zero Xu
-external_actions_allowed_now: false
-provider_calls_allowed_now: false
+external_actions_allowed_now: exact_authorized_fixture_only
+provider_calls_allowed_now: one_download_mp4_multi_speaker_job_only
 wallet_mutations_allowed: false
 verification:
   red: 9 failed and 2 passed in 132.83s for missing multi seams
@@ -41,7 +42,13 @@ verification:
   protected_manual_zero_charge: 7 passed in 163.23s
   classifier_comparators: 16 passed and 1 baseline failure in 145.50s
   rollback_anchor_comparator: same baseline failure at 2.0 versus 1.5 in 145.92s
-  py_compile: exit 0 for four runtime files
+  post_rebase_focused: 17 passed in 175.95s on VPS clone
+  post_rebase_multilingual: vi ja en ko zh all passed inside focused suite
+  post_rebase_old_lane: 3 passed in 8.92s
+  post_rebase_broad_diff: branch 34 passed 10 baseline failures; baseline 33 passed 11 failures
+  post_rebase_manual_diff: branch 5 passed 2 baseline failures; baseline 4 passed 3 failures
+  post_rebase_classifier_diff: branch 16 passed 1 baseline failure at 2.0; baseline 16 passed 1 failure at 2.5
+  py_compile: exit 0 for four runtime files on VPS production venv
 issues:
   - id: MULTI-01
     status: done
@@ -59,9 +66,9 @@ issues:
     status: known_nonblocking
     summary: voiced-with-pauses comparator expects 1.5 seconds but returns 2.0 identically at rollback SHA
   - id: SHIP-01
-    status: pending
-    summary: rebase current origin main then rerun focused and compile gates
+    status: done
+    summary: rebased afbe4acf and passed focused protected differential and compile gates
   - id: LIVE-01
     status: pending
     summary: one authorized Download.mp4 multi-speaker live job to MP4 SRT receipt and zero Xu
-next_action: wait for PRODUCT VIDEO LIVE RELEASED then rebase and reverify before ship
+next_action: push branch create and merge PR deploy exact SHA then run one authorized Download.mp4 live job
