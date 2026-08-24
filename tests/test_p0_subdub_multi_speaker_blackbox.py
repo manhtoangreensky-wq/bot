@@ -434,6 +434,47 @@ def test_multi_adapter_injects_only_classifier_and_pcm_filter(monkeypatch):
     }
 
 
+@pytest.mark.parametrize("target_language", ("vi", "ja", "en", "ko", "zh"))
+def test_multi_adapter_preserves_translation_target_language(
+    monkeypatch,
+    target_language,
+):
+    multi_module = _multi_module()
+    captured = {}
+
+    async def fake_old_blackbox(**kwargs):
+        captured["state"] = dict(kwargs["state"])
+        return {"ok": True, "status": "fixture"}
+
+    monkeypatch.setattr(
+        auto_speaker,
+        "run_auto_speaker_blackbox",
+        fake_old_blackbox,
+    )
+    state = bot.subdub_apply_voice_choice(
+        {
+            "mode": "subtitle_plus_dub",
+            "active_flow": "subtitle_plus_dub",
+            "target_language": target_language,
+            "translate_requested": "1",
+        },
+        "auto_multi_speaker",
+        activation_enabled=True,
+    )
+
+    result = asyncio.run(
+        multi_module.run_auto_multi_speaker_blackbox(
+            extract_pcm=lambda *_args, **_kwargs: "fixture.pcm",
+            state=state,
+        )
+    )
+
+    assert result == {"ok": True, "status": "fixture"}
+    assert captured["state"]["target_language"] == target_language
+    assert captured["state"]["translate_requested"] == "1"
+    assert captured["state"]["auto_speaker_lane"] == "multi"
+
+
 def test_multi_filter_is_opt_in_to_the_shared_bounded_extractor(
     tmp_path,
     monkeypatch,
