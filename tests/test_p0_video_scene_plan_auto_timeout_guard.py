@@ -48,7 +48,10 @@ def test_scene_plan_auto_acknowledges_and_falls_back_after_bounded_gemini_wait()
         "async def handle_video_uiflow3_pending_text",
     )
     assert "callback_answered = False" in handler
-    assert "if not callback_answered:\n        await query.answer()" in handler
+    assert (
+        "if not callback_answered:\n"
+        "        await video_uiflow3_ack_without_interrupting_flow(query)"
+    ) in handler
 
 
 def _video_ai_real_state() -> dict:

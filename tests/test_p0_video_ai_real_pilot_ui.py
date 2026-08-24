@@ -2233,6 +2233,44 @@ def test_video_ai_real_prompt_review_shows_detailed_scene_prompt_and_exact_paren
     assert "vid3|view|prompt_scenes" in _callbacks(detail_markup)
 
 
+def test_video_ai_real_prompt_scene_back_survives_telegram_ack_network_failure():
+    user_id = 981073
+    context = SimpleNamespace(user_data={})
+    state = _ready_prompt_summary_state()
+    state["navigation"]["current_step"] = "prompts"
+    state = bot.video_uiflow3_open_view(
+        state,
+        "prompt_scene_detail",
+        active_scene_id="scene_01",
+    )
+    _save_owned(context, state, user_id)
+
+    _text, markup = bot.video_uiflow3_screen_payload(state)
+    wire_callback = next(
+        str(button.callback_data or "")
+        for row in markup.inline_keyboard
+        for button in row
+        if _logical_callback(str(button.callback_data or "")) == "vid3|view|prompt_scenes"
+    )
+    query = _PilotQuery(user_id, wire_callback, "prompt-scene-ack-502")
+
+    async def fail_acknowledgement(*_args, **_kwargs):
+        raise RuntimeError("Telegram callback ACK returned 502")
+
+    query.answer = fail_acknowledgement
+    asyncio.run(
+        bot.handle_video_uiflow3_callback(
+            SimpleNamespace(callback_query=query),
+            context,
+        )
+    )
+
+    saved = bot.video_uiflow3_state(context)
+    assert saved.get("ui_view") == "prompt_scenes"
+    assert query.edits
+    assert "Câu lệnh từng cảnh" in query.edits[-1]["text"]
+
+
 def test_video_ai_real_prompt_review_pages_preserve_every_character_without_truncation():
     state = _ready_prompt_summary_state()
     state["navigation"]["current_step"] = "prompts"
