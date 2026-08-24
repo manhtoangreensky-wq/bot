@@ -251621,7 +251621,14 @@ async def handle_video_dubbing_callback(
             lang=lang,
         )
     if not _subdub_background:
-        await query.answer()
+        try:
+            await query.answer()
+        except Exception as error:
+            logger.warning(
+                "SubDub callback answer failed; continuing | action=%s | error=%s",
+                action,
+                type(error).__name__,
+            )
     if action in {"auto_exact_confirm", "auto_exact_cancel"}:
         return await handle_subdub_auto_exact_callback(
             query,

@@ -170,6 +170,45 @@ def test_uploaded_srt_language_selection_enters_translate_confirm(monkeypatch):
     bot.clear_video_dubbing_pending(uid)
 
 
+def test_combo_language_selection_continues_when_callback_ack_times_out(monkeypatch):
+    uid = 901913
+    bot.clear_video_dubbing_pending(uid)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    bot.set_video_dubbing_pending(
+        uid,
+        "language",
+        mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        process_type=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        video_processing_mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        requested_mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        active_flow=bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+        source_file_id="tg-video",
+        video_file_id="tg-video",
+        source_file_name="Download.mp4",
+        source_mime_type="video/mp4",
+        media_kind="video",
+        source_kind="media",
+    )
+    query = FakeQuery(uid, "videodub|language|Tiếng Việt")
+
+    async def timeout_answer(*_args, **_kwargs):
+        raise TimeoutError("callback_ack_timeout")
+
+    query.answer = timeout_answer
+    result = asyncio.run(
+        bot.handle_video_dubbing_callback(
+            SimpleNamespace(callback_query=query),
+            SimpleNamespace(),
+        )
+    )
+
+    state = bot.get_video_dubbing_pending(uid)
+    assert state["step"] == "voice"
+    assert state["target_language"] == "Tiếng Việt"
+    assert result is not None
+    bot.clear_video_dubbing_pending(uid)
+
+
 def test_language_callback_missing_state_recovery(monkeypatch):
     uid = 901912
     bot.clear_video_dubbing_pending(uid)
