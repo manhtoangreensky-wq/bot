@@ -133863,7 +133863,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         command="/start",
         status="ok",
     )
-    if context.args and (context.args[0].startswith("login_") or context.args[0].startswith("link_")):
+    if context.args and (context.args[0].startswith("login_") or context.args[0].startswith("link_") or context.args[0].startswith("web_")):
         deep_arg = context.args[0]
         code = deep_arg.split("_", 1)[1].strip()
         success, msg = await confirm_webapp_telegram_link(code, uid, role="user")
@@ -265736,6 +265736,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("aichat_test", cmd_aichat_test))
     tg_app.add_handler(CommandHandler("aichat_trace", cmd_aichat_trace))
     tg_app.add_handler(CommandHandler("start",       cmd_start))
+    tg_app.add_handler(CommandHandler("linkweb", cmd_linkweb))
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
     tg_app.add_handler(CommandHandler("broadcast",   cmd_broadcast_lite))
     tg_app.add_handler(CommandHandler("language",    cmd_language))
