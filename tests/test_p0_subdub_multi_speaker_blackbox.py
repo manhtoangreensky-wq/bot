@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from array import array
 import asyncio
 import importlib
 import importlib.util
 import inspect
 from pathlib import Path
+import sys
 import time
 
 import pytest
@@ -339,6 +341,71 @@ def test_multi_classifier_preserves_three_provider_labels_without_invention(
             deadline_monotonic=123.0,
             stop_requested=lambda: False,
         )
+
+
+def test_multi_classifier_recovers_dense_evidence_after_sparse_vote_failure(
+    tmp_path,
+    monkeypatch,
+):
+    multi_module = _multi_module()
+    pcm_path = tmp_path / "multi-dense-evidence.pcm"
+    samples = array(
+        "h",
+        (
+            sample_index // int(speaker_cast.PCM_SAMPLE_RATE * 0.02)
+            for sample_index in range(speaker_cast.PCM_SAMPLE_RATE * 9)
+        ),
+    )
+    if sys.byteorder != "little":
+        samples.byteswap()
+    pcm_path.write_bytes(samples.tobytes())
+
+    speaker_0_ranges = [
+        (index * 0.6, (index * 0.6) + 0.5)
+        for index in range(12)
+    ]
+    speaker_1_ranges = [(8.0, 8.74)]
+    sparse_tie_then_low = {
+        0: (130.0, 0.90),
+        30: (220.0, 0.90),
+        60: (135.0, 0.90),
+        90: (225.0, 0.90),
+        120: (140.0, 0.90),
+        150: (230.0, 0.90),
+        180: (132.0, 0.90),
+        210: (134.0, 0.90),
+        240: (136.0, 0.90),
+        270: (138.0, 0.90),
+        300: (140.0, 0.90),
+        330: (142.0, 0.90),
+        408: (131.0, 0.90),
+    }
+
+    def fake_estimate(raw, **_kwargs):
+        marker = int.from_bytes(raw[:2], "little", signed=True)
+        return sparse_tie_then_low.get(marker)
+
+    monkeypatch.setattr(
+        speaker_cast,
+        "_estimate_window_pitch",
+        fake_estimate,
+    )
+    result = multi_module.classify_multi_speaker_registers(
+        str(pcm_path),
+        {
+            "chunk_00:speaker_0": speaker_0_ranges,
+            "chunk_00:speaker_1": speaker_1_ranges,
+        },
+        deadline_monotonic=time.monotonic() + 10.0,
+        stop_requested=lambda: False,
+    )
+
+    assert list(result) == [
+        "chunk_00:speaker_0",
+        "chunk_00:speaker_1",
+    ]
+    assert result["chunk_00:speaker_0"]["voice_register"] == "low"
+    assert result["chunk_00:speaker_1"]["voice_register"] == "low"
 
 
 def test_three_provider_labels_keep_distinct_validated_voices():
