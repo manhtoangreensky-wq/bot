@@ -133803,7 +133803,7 @@ async def confirm_webapp_telegram_link(code: str, telegram_uid: int, role: str =
     if not bridge_token or not hmac_secret:
         return False, "Cổng kết nối Web App chưa được cấu hình token và HMAC secret trên máy chủ Bot."
 
-    clean_code = code.strip().upper()
+    clean_code = code.strip()
     body_dict = {
         "code": clean_code,
         "canonical_user_id": f"telegram-{telegram_uid}",
