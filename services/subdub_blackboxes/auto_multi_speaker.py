@@ -299,9 +299,26 @@ async def run_auto_multi_speaker_blackbox(
             )
         )
 
-    return await auto_speaker.run_auto_speaker_blackbox(
+    result = await auto_speaker.run_auto_speaker_blackbox(
         extract_pcm=extract_multi_pcm,
         classify_speakers=classify_multi_speaker_registers,
         state=current,
         **payload,
     )
+    result_state = result.get("state") if isinstance(result, dict) else None
+    if (
+        isinstance(result, dict)
+        and result.get("ok") is True
+        and isinstance(result_state, Mapping)
+    ):
+        exact_fields = {
+            key: value
+            for key, value in current.items()
+            if isinstance(key, str) and key.startswith("auto_exact_")
+        }
+        if exact_fields:
+            result = {
+                **result,
+                "state": {**dict(result_state), **exact_fields},
+            }
+    return result
