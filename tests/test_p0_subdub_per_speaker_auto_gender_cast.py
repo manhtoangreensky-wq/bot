@@ -2367,6 +2367,42 @@ def test_register_classifier_reads_synthetic_pcm_tones(tmp_path, frequency, expe
     assert result["chunk_00:speaker_0"]["confidence"] >= 0.75
 
 
+def test_short_speaker_window_accepts_one_confident_pitch_frame(monkeypatch):
+    speaker_cast = _speaker_cast_module()
+    frame_estimates = iter(((220.0, 0.74), None, None, None))
+
+    monkeypatch.setattr(
+        speaker_cast,
+        "_estimate_frame_pitch_yin",
+        lambda *_args, **_kwargs: next(frame_estimates),
+    )
+    monkeypatch.setattr(
+        speaker_cast,
+        "_frame_competing_pitch",
+        lambda *_args, **_kwargs: (0.0, 0.0),
+    )
+    monkeypatch.setattr(
+        speaker_cast,
+        "_refine_full_rate_pitch",
+        lambda _samples, estimated_hz, **_kwargs: estimated_hz,
+    )
+    monkeypatch.setattr(
+        speaker_cast,
+        "_pitch_spectrum_metrics",
+        lambda *_args, **_kwargs: (1.0, 1.0),
+    )
+
+    result = speaker_cast._estimate_window_pitch(
+        _task4_pcm_bytes(220.0, seconds=0.5),
+        deadline_monotonic=time.monotonic() + 10.0,
+        stop_requested=lambda: False,
+    )
+
+    assert result is not None
+    assert result[0] >= speaker_cast.HIGH_MIN_HZ
+    assert result[1] >= speaker_cast.MIN_REGISTER_CONFIDENCE
+
+
 @pytest.mark.parametrize(
     ("kind", "seconds", "range_end"),
     (
@@ -4123,6 +4159,7 @@ def test_default_blackbox_pcm_extractor_uses_bounded_existing_ffmpeg_runner(tmp_
     assert calls == [
         ([
             "ffmpeg", "-y", "-i", str(source_path), "-t", "12", "-vn", "-ac", "1",
+            "-af", "highpass=f=70,lowpass=f=320,afftdn=nr=6:nf=-50",
             "-ar", "16000", "-f", "s16le",
             str(tmp_path / "auto_speaker_16000_mono_s16le.pcm"),
         ], 77.0)
