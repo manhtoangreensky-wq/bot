@@ -81314,6 +81314,16 @@ async def video_uiflow3_render(query, context, state: dict | None = None):
     return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=keyboard)
 
 
+async def video_uiflow3_ack_without_interrupting_flow(query) -> None:
+    try:
+        await query.answer()
+    except Exception as exc:
+        logger.warning(
+            "video_uiflow3 callback ACK failed; continuing | error=%s",
+            type(exc).__name__,
+        )
+
+
 async def video_uiflow3_return_to_shared_tail_if_ready(
     target,
     context,
@@ -84116,10 +84126,10 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
     )
     if shared_review is not None:
         if not callback_answered:
-            await query.answer()
+            await video_uiflow3_ack_without_interrupting_flow(query)
         return shared_review
     if not callback_answered:
-        await query.answer()
+        await video_uiflow3_ack_without_interrupting_flow(query)
     return await video_uiflow3_render(query, context, state)
 
 
