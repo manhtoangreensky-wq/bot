@@ -411,6 +411,49 @@ class PublicVideoLinkDownloader:
             "reason": "",
         }
 
+    def _tikwm_metadata(self, url: str) -> dict | None:
+        try:
+            api_url = "https://www.tikwm.com/api/?url=" + urllib.parse.quote(url)
+            req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=15) as res:
+                data = json.loads(res.read())
+                if data.get("code") == 0 and data.get("data"):
+                    info = data["data"]
+                    return {
+                        "ok": True,
+                        "title": str(info.get("title") or ""),
+                        "author": str(info.get("author", {}).get("nickname") or ""),
+                        "duration_seconds": int(info.get("duration") or 0),
+                        "size_bytes": int(info.get("size") or 0),
+                        "thumbnail_url": str(info.get("cover") or ""),
+                        "format": "mp4",
+                        "id": str(info.get("id") or ""),
+                    }
+        except Exception:
+            pass
+        return None
+
+    def _tikwm_download(self, url: str, asset: str, output_dir: Path, limit_bytes: int) -> tuple[Path | None, str]:
+        try:
+            api_url = "https://www.tikwm.com/api/?url=" + urllib.parse.quote(url)
+            req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=15) as res:
+                data = json.loads(res.read())
+                if data.get("code") == 0 and data.get("data"):
+                    info = data["data"]
+                    dl_url = info.get("play")
+                    suffix = ".mp4"
+                    if asset == "audio":
+                        dl_url = info.get("music")
+                        suffix = ".mp3"
+                    if dl_url:
+                        target = output_dir / f"{asset}{suffix}"
+                        self._download_url_to_file(dl_url, target, limit_bytes)
+                        return target, ""
+        except Exception:
+            pass
+        return None, "tikwm_failed"
+
     def _direct_metadata(self, resolved: dict[str, Any], request: LinkDownloadRequest) -> dict[str, Any]:
         size_bytes = 0
         url = str(resolved.get("final_url") or resolved.get("input_url") or request.url)
@@ -489,7 +532,16 @@ class PublicVideoLinkDownloader:
         if resolved.get("direct_media"):
             metadata = self._direct_metadata(resolved, request)
         else:
-            metadata, blocker = self._metadata_from_ytdlp(str(resolved.get("final_url") or request.url))
+            final_url_str = str(resolved.get("final_url") or request.url)
+            if resolved.get("platform") == "TikTok" or "tiktok" in final_url_str.lower():
+                tk_meta = self._tikwm_metadata(final_url_str)
+                if tk_meta:
+                    metadata = tk_meta
+                    blocker = ""
+                else:
+                    metadata, blocker = self._metadata_from_ytdlp(final_url_str)
+            else:
+                metadata, blocker = self._metadata_from_ytdlp(final_url_str)
             if metadata is None:
                 return {
                     "ok": False,
@@ -721,7 +773,13 @@ class PublicVideoLinkDownloader:
                 bytes_written = self._download_url_to_file(final_url, target, output_limit_bytes)
                 file_path = target
             else:
-                file_path, blocker = self._download_with_ytdlp(final_url, asset, job_dir, output_limit_bytes)
+                final_url_str = str(final_url)
+                if prepared.platform == "TikTok" or "tiktok" in final_url_str.lower():
+                    file_path, blocker = self._tikwm_download(final_url_str, asset, job_dir, output_limit_bytes)
+                    if not file_path:
+                        file_path, blocker = self._download_with_ytdlp(final_url_str, asset, job_dir, output_limit_bytes)
+                else:
+                    file_path, blocker = self._download_with_ytdlp(final_url_str, asset, job_dir, output_limit_bytes)
                 if blocker:
                     result = LinkDownloadResult(False, platform=prepared.platform, blocker=blocker, public_message=_blocker_public_message(blocker), job_id=job_id, input_url=request.url, final_url=final_url, requested_asset=asset)
                     self._save_job({**job, "blocker": blocker, "requested_asset": asset})
