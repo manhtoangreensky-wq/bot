@@ -478,15 +478,17 @@ def test_owner_repair_requeues_same_job_after_stale_poll_only_claim_loop(
 
 
 @pytest.mark.parametrize(
-    "post_poll_error",
+    ("post_poll_error", "concat_state"),
     [
-        POST_POLL_FINALIZER_ERROR,
-        "RuntimeError:provider_render_failed:TimeoutExpired",
+        (POST_POLL_FINALIZER_ERROR, "normalizing"),
+        ("RuntimeError:provider_render_failed:TimeoutExpired", "normalizing"),
+        ("RuntimeError:provider_render_failed:TimeoutExpired", "running"),
     ],
 )
 def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure(
     tmp_path,
     post_poll_error,
+    concat_state,
 ) -> None:
     workspace = tmp_path / "product-video-19-existing-clips"
     workspace.mkdir()
@@ -518,7 +520,7 @@ def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure
                 "raw_clip_paths_by_scene": scene_paths,
                 "normalized_clip_paths_by_scene": {},
                 "scene_order": [1, 2],
-                "concat_state": "normalizing",
+                "concat_state": concat_state,
                 "delivery_state": "pending",
                 "charge_state": "pending",
                 "final_video_path": None,

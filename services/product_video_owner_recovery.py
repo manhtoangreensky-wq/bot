@@ -95,6 +95,7 @@ def _post_poll_finalizer_block_reason(
     *,
     job_id: int,
     user_id: int,
+    allow_stale_running: bool = False,
 ) -> str:
     if not result.get("recovery_existing_tasks_only"):
         return "post_poll_existing_task_mode_required"
@@ -143,8 +144,11 @@ def _post_poll_finalizer_block_reason(
         or _integer(manifest.get("user_id")) != _integer(user_id)
     ):
         return "post_poll_manifest_identity_mismatch"
+    recoverable_concat_states = {"normalizing"}
+    if allow_stale_running:
+        recoverable_concat_states.add("running")
     if (
-        str(manifest.get("concat_state") or "") != "normalizing"
+        str(manifest.get("concat_state") or "") not in recoverable_concat_states
         or str(manifest.get("delivery_state") or "") != "pending"
         or str(manifest.get("charge_state") or "") != "pending"
         or str(manifest.get("final_video_path") or "").strip()
@@ -432,6 +436,7 @@ def recover_product_video_owner_pre_submit_failure(
             result,
             job_id=_integer(job_id),
             user_id=_integer(project.get("user_id")),
+            allow_stale_running=(error == POST_POLL_FINALIZER_TIMEOUT_ERROR),
         )
         if post_poll_blocker:
             return _blocked(post_poll_blocker)
