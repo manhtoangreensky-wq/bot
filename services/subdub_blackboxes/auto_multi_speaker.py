@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from collections.abc import Callable, Mapping
+import hashlib
+import json
 import math
 from typing import Any
 
@@ -249,7 +251,7 @@ def classify_multi_speaker_registers(
 ) -> dict[str, dict]:
     if (
         not isinstance(ranges_by_speaker, dict)
-        or not 2 <= len(ranges_by_speaker) <= speaker_cast.MAX_AUTO_SPEAKER_LABELS
+        or not 3 <= len(ranges_by_speaker) <= speaker_cast.MAX_AUTO_SPEAKER_LABELS
     ):
         raise speaker_cast.AutoCastManualRequired()
     try:
@@ -299,26 +301,96 @@ async def run_auto_multi_speaker_blackbox(
             )
         )
 
-    result = await auto_speaker.run_auto_speaker_blackbox(
-        extract_pcm=extract_multi_pcm,
-        classify_speakers=classify_multi_speaker_registers,
-        state=current,
-        **payload,
-    )
+    observed_casts: dict[str, str] = {}
+    base_synthesize = payload.get("synthesize_segments")
+    lane_payload = dict(payload)
+    if callable(base_synthesize):
+        async def synthesize_multi_segments(
+            segments: list[dict],
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            if not isinstance(segments, list) or not segments:
+                raise speaker_cast.AutoCastManualRequired()
+            voice_id = kwargs.get("voice_id")
+            if type(voice_id) is not str or not voice_id:
+                raise speaker_cast.AutoCastManualRequired()
+            pending_casts: dict[str, str] = {}
+            for raw_segment in segments:
+                if not isinstance(raw_segment, Mapping):
+                    raise speaker_cast.AutoCastManualRequired()
+                speaker_id = raw_segment.get("speaker_id")
+                segment_voice_id = raw_segment.get("tts_voice_id")
+                if (
+                    type(speaker_id) is not str
+                    or not speaker_id
+                    or type(segment_voice_id) is not str
+                    or not segment_voice_id
+                    or segment_voice_id != voice_id
+                    or observed_casts.get(speaker_id, voice_id) != voice_id
+                ):
+                    raise speaker_cast.AutoCastManualRequired()
+                pending_casts[speaker_id] = voice_id
+            synthesized = await auto_speaker._maybe_await(
+                base_synthesize(segments, *args, **kwargs)
+            )
+            observed_casts.update(pending_casts)
+            return synthesized
+
+        lane_payload["synthesize_segments"] = synthesize_multi_segments
+
+    try:
+        result = await auto_speaker.run_auto_speaker_blackbox(
+            extract_pcm=extract_multi_pcm,
+            classify_speakers=classify_multi_speaker_registers,
+            state=current,
+            **lane_payload,
+        )
+    except (speaker_cast.AutoCastUnavailable, speaker_cast.AutoCastManualRequired) as exc:
+        return auto_speaker._manual_required_result(current, exc)
     result_state = result.get("state") if isinstance(result, dict) else None
     if (
         isinstance(result, dict)
         and result.get("ok") is True
         and isinstance(result_state, Mapping)
     ):
+        proof_fields: dict[str, object] = {}
+        if callable(base_synthesize):
+            speaker_count = len(observed_casts)
+            distinct_voice_count = len(set(observed_casts.values()))
+            if (
+                not 3 <= speaker_count <= speaker_cast.MAX_AUTO_SPEAKER_LABELS
+                or distinct_voice_count != speaker_count
+            ):
+                return auto_speaker._manual_required_result(
+                    current,
+                    speaker_cast.AutoCastManualRequired(),
+                )
+            cast_payload = json.dumps(
+                sorted(observed_casts.items()),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            proof_fields = {
+                "auto_detected_speaker_count": speaker_count,
+                "auto_distinct_voice_count": distinct_voice_count,
+                "auto_multi_voice_verified": True,
+                "auto_multi_cast_sha256": hashlib.sha256(
+                    cast_payload
+                ).hexdigest(),
+            }
         exact_fields = {
             key: value
             for key, value in current.items()
             if isinstance(key, str) and key.startswith("auto_exact_")
         }
-        if exact_fields:
+        if proof_fields or exact_fields:
             result = {
                 **result,
-                "state": {**dict(result_state), **exact_fields},
+                "state": {
+                    **dict(result_state),
+                    **exact_fields,
+                    **proof_fields,
+                },
             }
     return result

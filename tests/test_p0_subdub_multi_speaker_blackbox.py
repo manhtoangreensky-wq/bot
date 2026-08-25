@@ -378,6 +378,13 @@ def test_multi_classifier_preserves_three_provider_labels_without_invention(
     with pytest.raises(speaker_cast.AutoCastManualRequired):
         multi_module.classify_multi_speaker_registers(
             "fixture.pcm",
+            {label: ranges[label] for label in labels[:2]},
+            deadline_monotonic=123.0,
+            stop_requested=lambda: False,
+        )
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        multi_module.classify_multi_speaker_registers(
+            "fixture.pcm",
             {
                 f"chunk_00:speaker_{index}": [(0.0, 1.0)]
                 for index in range(17)
@@ -439,6 +446,7 @@ def test_multi_classifier_recovers_dense_evidence_after_sparse_vote_failure(
         {
             "chunk_00:speaker_0": speaker_0_ranges,
             "chunk_00:speaker_1": speaker_1_ranges,
+            "chunk_00:speaker_2": speaker_1_ranges,
         },
         deadline_monotonic=time.monotonic() + 10.0,
         stop_requested=lambda: False,
@@ -447,9 +455,11 @@ def test_multi_classifier_recovers_dense_evidence_after_sparse_vote_failure(
     assert list(result) == [
         "chunk_00:speaker_0",
         "chunk_00:speaker_1",
+        "chunk_00:speaker_2",
     ]
     assert result["chunk_00:speaker_0"]["voice_register"] == "low"
     assert result["chunk_00:speaker_1"]["voice_register"] == "low"
+    assert result["chunk_00:speaker_2"]["voice_register"] == "low"
 
 
 def test_three_provider_labels_keep_distinct_validated_voices():
@@ -484,6 +494,177 @@ def test_three_provider_labels_keep_distinct_validated_voices():
     assert list(casts) == labels
     assert {item["speaker_id"] for item in casts.values()} == set(labels)
     assert len({item["voice_id"] for item in casts.values()}) == 3
+
+
+def test_multi_adapter_persists_three_distinct_voices_used_by_tts(monkeypatch):
+    multi_module = _multi_module()
+    labels = [f"chunk_00:speaker_{index}" for index in range(3)]
+    voices = [f"voice-{index}" for index in range(3)]
+
+    async def base_synthesize(segments, *_args, **_kwargs):
+        return {
+            "chunks": [{"index": 0, "audio": b"audio"}],
+            "provider": "fixture",
+        }
+
+    async def fake_old_blackbox(**kwargs):
+        for label, voice_id in zip(labels, voices, strict=True):
+            await kwargs["synthesize_segments"](
+                [{"speaker_id": label, "tts_voice_id": voice_id}],
+                voice_id=voice_id,
+            )
+        return {
+            "ok": True,
+            "state": {
+                **EXACT_AUTO_STATE,
+                "auto_speaker_lane": "multi",
+            },
+        }
+
+    monkeypatch.setattr(
+        auto_speaker,
+        "run_auto_speaker_blackbox",
+        fake_old_blackbox,
+    )
+    result = asyncio.run(
+        multi_module.run_auto_multi_speaker_blackbox(
+            extract_pcm=lambda *_args, **_kwargs: "fixture.pcm",
+            synthesize_segments=base_synthesize,
+            state={**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"},
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["state"]["auto_speaker_lane"] == "multi"
+    assert result["state"]["auto_detected_speaker_count"] == 3
+    assert result["state"]["auto_distinct_voice_count"] == 3
+    assert result["state"]["auto_multi_voice_verified"] is True
+    assert len(result["state"]["auto_multi_cast_sha256"]) == 64
+
+
+def test_multi_adapter_fails_closed_when_tts_reuses_one_voice(monkeypatch):
+    multi_module = _multi_module()
+
+    async def base_synthesize(segments, *_args, **_kwargs):
+        return {
+            "chunks": [{"index": 0, "audio": b"audio"}],
+            "provider": "fixture",
+        }
+
+    async def fake_old_blackbox(**kwargs):
+        for index in range(3):
+            await kwargs["synthesize_segments"](
+                [{
+                    "speaker_id": f"chunk_00:speaker_{index}",
+                    "tts_voice_id": "same-voice",
+                }],
+                voice_id="same-voice",
+            )
+        return {
+            "ok": True,
+            "state": {
+                **EXACT_AUTO_STATE,
+                "auto_speaker_lane": "multi",
+            },
+        }
+
+    monkeypatch.setattr(
+        auto_speaker,
+        "run_auto_speaker_blackbox",
+        fake_old_blackbox,
+    )
+    result = asyncio.run(
+        multi_module.run_auto_multi_speaker_blackbox(
+            extract_pcm=lambda *_args, **_kwargs: "fixture.pcm",
+            synthesize_segments=base_synthesize,
+            state={**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"},
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    assert result["public_copy_key"] == "voice_auto_manual_required"
+
+
+def test_multi_completion_receipt_names_fixture_lane_casts_and_component_prices():
+    state = {
+        "mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "terminal_state": "delivered",
+        "target_language": "Tiếng Việt",
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "auto_speaker_lane": "multi",
+        "source_file_name": "test nhiều giọng.mp4",
+        "auto_detected_speaker_count": 4,
+        "auto_distinct_voice_count": 4,
+        "auto_multi_voice_verified": True,
+        "auto_multi_cast_sha256": "c" * 64,
+        "auto_exact_actual_auto_xu": 205,
+        "auto_exact_actual_subtitle_xu": 161,
+        "auto_exact_actual_total_xu": 366,
+    }
+    result = {
+        **state,
+        "terminal_public_outcome_type": "success",
+        "final_mp4_delivered": True,
+        "video_delivered": True,
+        "video_delivery_message_id": "multi-video-1",
+        "canonical_final_artifact_duration": 133.375,
+        "duration_coverage_ok": True,
+        "public_job_id": "MULTI-RECEIPT-1",
+        "final_price_xu": 366,
+        "charged_xu": 0,
+        "account_balance_xu": 200,
+    }
+
+    text = bot.video_dubbing_receipt_text(state, result, "vi")
+
+    assert "Tệp nguồn: <b>test nhiều giọng.mp4</b>" in text
+    assert "Loại lồng tiếng: <b>Tự nhận nhiều giọng</b>" in text
+    assert "Số người nói nhận diện: <b>4</b>" in text
+    assert "Số giọng lồng tiếng đã dùng: <b>4</b>" in text
+    assert "Giá phụ đề: <b>161 Xu</b>" in text
+    assert "Giá lồng tiếng: <b>205 Xu</b>" in text
+    assert "Giá: <b>366 Xu</b>" in text
+
+
+def test_multi_terminal_job_persists_proof_without_touching_default_auto_lane():
+    state = {
+        **EXACT_AUTO_STATE,
+        "auto_speaker_lane": "multi",
+        "source_file_name": "test nhiều giọng.mp4",
+        "auto_detected_speaker_count": 4,
+        "auto_distinct_voice_count": 4,
+        "auto_multi_voice_verified": True,
+        "auto_multi_cast_sha256": "c" * 64,
+        "auto_exact_actual_auto_xu": 205,
+        "auto_exact_actual_subtitle_xu": 161,
+        "auto_exact_actual_total_xu": 366,
+    }
+    expected = {
+        "auto_speaker_lane": "multi",
+        "source_file_name": "test nhiều giọng.mp4",
+        "auto_detected_speaker_count": 4,
+        "auto_distinct_voice_count": 4,
+        "auto_multi_voice_verified": True,
+        "auto_multi_cast_sha256": "c" * 64,
+        "auto_exact_actual_auto_xu": 205,
+        "auto_exact_actual_subtitle_xu": 161,
+        "auto_exact_actual_total_xu": 366,
+    }
+
+    assert bot.subdub_auto_multi_terminal_proof_fields(state) == expected
+    assert bot.subdub_auto_multi_terminal_proof_fields(EXACT_AUTO_STATE) == {}
+    assert bot.subdub_auto_multi_terminal_proof_fields(
+        {**state, "auto_distinct_voice_count": 2}
+    ) == {}
+    pipeline_source = inspect.getsource(
+        bot._execute_video_dubbing_pipeline_core
+    )
+    assert pipeline_source.count(
+        "**subdub_auto_multi_terminal_proof_fields(state)"
+    ) == 1
 
 
 def test_multi_adapter_injects_only_classifier_and_pcm_filter(monkeypatch):

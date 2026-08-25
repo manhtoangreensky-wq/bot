@@ -1,11 +1,11 @@
 task_id: p0-subdub-multi-blackbox
 phase: SHIP_READY
-branch: fix/p0-subdub-multi-blackbox
-base_sha: afbe4acf651e6ef17320bc15d441a749a16f7ae3
-verified_source_sha: e7450ccfc6ac2d06ae0d7ce7b8ad9ce77c27bbc8
+branch: fix/p0-subdub-multi-proof-receipt
+base_sha: 8f2d1290cd7f38039f6feca71fa50e28563a42ea
+verified_source_sha: pending_pr_head
 design_commit: 1028e79
 live_boundary: subdub_auto_acquired
-cpu_boundary: product_video_local_only_subdub_vps_released
+cpu_boundary: subdub_auto_owned
 allowed_source_files:
   - bot.py
   - services/subdub_speaker_cast.py
@@ -22,20 +22,34 @@ protected_paths:
   - services/subdub_auto_word_pricing.py
   - services/subdub_auto_settlement.py
 rollback:
-  pr: 844
-  sha: 0c5e0dc9b0b11bb864124fa44403c7c049a06904
-  live_job: 5ECF6FB24B
+  protected_two_voice_pr: 842
+  protected_two_voice_sha: 71c7e881f2af24d59c4873f8ca3999f59618daec
+  protected_two_voice_live_job: 7BC3037DF8
+  protected_two_voice_fixture_sha256: a89b16b896d4efa8157f7de5cea47695b5edf7d5595c4fc03ad62346cdfa0292
+live_fixture:
+  path: C:\Users\toann\Downloads\test sub\test nhiều giọng.mp4
+  size_bytes: 9869032
+  sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
 acceptance:
   - no marker dispatches only the proven auto_speaker blackbox
   - marker auto_speaker_lane=multi dispatches only auto_multi_speaker
-  - multi preserves 2 through 16 provider-returned speaker labels without invention
-  - three or more labels receive distinct validated voices while capacity allows
+  - no-marker Auto remains the protected one/two-speaker lane
+  - multi requires 3 through 16 provider-returned speaker labels without invention
+  - every multi label receives a distinct validated TTS voice
+  - durable receipt shows source filename multi lane speaker/voice counts and price components
   - default/manual/subtitle pricing settlement mux and delivery remain unchanged
   - owner live fixture produces one MP4 one SRT one green receipt and zero Xu
-external_actions_allowed_now: exact_authorized_fixture_only
-provider_calls_allowed_now: one_download_mp4_multi_speaker_job_only
+external_actions_allowed_now: false_until_product_video_release
+provider_calls_allowed_now: one_test_nhieu_giong_mp4_job_after_reacquire
 wallet_mutations_allowed: false
 verification:
+  proof_red: 5 failed in 9.72s for missing 3-speaker cast receipt and terminal proof
+  proof_green: 23 passed in 6.27s for full multi-speaker blackbox file
+  protected_branch: 7 passed and 4 baseline failures in 9.72s
+  protected_baseline: same 4 failures at a6d54a6 in 528.69s
+  proof_py_compile: exit 0 for bot.py and auto_multi_speaker.py
+  post_rebase_proof_green: 23 passed in 459.44s on 8f2d129 plus patch
+  post_rebase_py_compile: exit 0 for bot.py and auto_multi_speaker.py
   red: 9 failed and 2 passed in 132.83s for missing multi seams
   focused_green: 12 passed in 133.96s
   protected_old_route: 3 passed in 156.90s
@@ -69,6 +83,9 @@ issues:
     status: done
     summary: rebased afbe4acf and passed focused protected differential and compile gates
   - id: LIVE-01
-    status: pending
-    summary: one authorized Download.mp4 multi-speaker live job to MP4 SRT receipt and zero Xu
-next_action: push branch create and merge PR deploy exact SHA then run one authorized Download.mp4 live job
+    status: invalid_fixture
+    summary: E576D4ACE9 delivered Download.mp4 not the Owner-selected test nhiều giọng.mp4
+  - id: MULTI-04
+    status: source_green
+    summary: require 3+ distinct speaker/voice evidence and render the multi receipt fields
+next_action: commit push PR merge deploy exact SHA then run only test nhiều giọng.mp4
