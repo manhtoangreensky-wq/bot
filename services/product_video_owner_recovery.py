@@ -107,7 +107,18 @@ def _post_poll_finalizer_block_reason(
             return "post_poll_http_success_required"
     elif _integer(provider_poll_http_status) != 200:
         return "post_poll_http_success_required"
-    if not result.get("no_new_submit") or not result.get("no_new_paid_submit"):
+    no_new_submit = result.get("no_new_submit")
+    missing_no_new_submit_evidenced = bool(
+        allow_stale_running
+        and no_new_submit in (None, "")
+        and result.get("provider_submit_allowed") is False
+        and str(result.get("provider_submit_block_reason") or "")
+        == "existing_task_recovery_read_only"
+        and _integer(result.get("submit_count")) == 0
+    )
+    if (
+        not no_new_submit and not missing_no_new_submit_evidenced
+    ) or not result.get("no_new_paid_submit"):
         return "post_poll_no_new_submit_guard_missing"
     if _integer(result.get("submit_count")) != 0:
         return "post_poll_new_submit_detected"
