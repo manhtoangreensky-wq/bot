@@ -414,6 +414,36 @@ def test_probation_health_promotion_metadata_appears_only_after_delivery(tmp_pat
     assert queue.product_video_probation_lock_state(conn)["probation_lock_clear"] is True
 
 
+def test_terminal_delivered_job_releases_stale_pending_probation_lock(tmp_path):
+    conn = _conn(tmp_path)
+    project = _project(conn, user_id=808)
+    created = _confirm(
+        conn,
+        project,
+        _probation_admission(project, snapshot_id="r18s8-stale-terminal-lock"),
+    )
+    job_id = int(created["job"]["id"])
+    payload = json.loads(created["job"]["result_json"])
+    payload.update(
+        {
+            "probation_result": "pending",
+            "final_delivered": True,
+            "delivery_succeeded": True,
+            "final_mp4_valid": True,
+        }
+    )
+    conn.execute(
+        "UPDATE video_jobs SET status='completed',result_json=? WHERE id=?",
+        (json.dumps(payload), job_id),
+    )
+    conn.commit()
+
+    lock = queue.product_video_probation_lock_state(conn)
+
+    assert lock["probation_active"] is False
+    assert lock["probation_lock_clear"] is True
+
+
 def test_probation_delivery_marker_without_valid_final_mp4_does_not_promote_health(tmp_path):
     conn = _conn(tmp_path)
     project = _project(conn, user_id=806)
