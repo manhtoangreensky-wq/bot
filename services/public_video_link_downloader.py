@@ -413,6 +413,8 @@ class PublicVideoLinkDownloader:
 
     def _tikwm_metadata(self, url: str) -> dict | None:
         try:
+            import time
+            time.sleep(1.5)
             api_url = "https://www.tikwm.com/api/?url=" + urllib.parse.quote(url)
             req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=15) as res:
@@ -436,6 +438,8 @@ class PublicVideoLinkDownloader:
     def _tikwm_download(self, url: str, asset: str, output_dir: Path, limit_bytes: int) -> tuple[Path | None, str]:
         import subprocess
         try:
+            import time
+            time.sleep(1.5)
             api_url = "https://www.tikwm.com/api/?url=" + urllib.parse.quote(url)
             req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=15) as res:
@@ -449,10 +453,7 @@ class PublicVideoLinkDownloader:
                         suffix = ".mp3"
                     if dl_url:
                         target = output_dir / f"{asset}{suffix}"
-                        if shutil.which("curl"):
-                            subprocess.run(["curl", "-s", "-L", "-o", str(target), dl_url], check=True, timeout=120)
-                        else:
-                            self._download_url_to_file(dl_url, target, limit_bytes)
+                        self._download_url_to_file(dl_url, target, limit_bytes)
                         if target.exists() and target.stat().st_size > 0:
                             return target, ""
         except Exception as e:
