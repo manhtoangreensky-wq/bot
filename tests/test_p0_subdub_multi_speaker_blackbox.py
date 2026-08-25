@@ -141,7 +141,7 @@ def test_switching_auto_profiles_clears_the_previous_profile_cache():
         },
     ),
 )
-def test_voice_menus_expose_one_old_and_one_multi_choice(
+def test_voice_menus_place_named_two_and_multi_auto_choices_on_one_row(
     monkeypatch,
     state,
 ):
@@ -151,10 +151,27 @@ def test_voice_menus_expose_one_old_and_one_multi_choice(
         lambda *_args, **_kwargs: True,
     )
 
-    callbacks = _callbacks(bot.video_dubbing_voice_keyboard("vi", state))
+    markup = bot.video_dubbing_voice_keyboard("vi", state)
+    callbacks = _callbacks(markup)
+    auto_row = next(
+        row
+        for row in markup.inline_keyboard
+        if any(
+            button.callback_data == "videodub|voice|auto_speaker_gender"
+            for button in row
+        )
+    )
 
     assert callbacks.count("videodub|voice|auto_speaker_gender") == 1
     assert callbacks.count("videodub|voice|auto_multi_speaker") == 1
+    assert [button.callback_data for button in auto_row] == [
+        "videodub|voice|auto_speaker_gender",
+        "videodub|voice|auto_multi_speaker",
+    ]
+    assert [button.text for button in auto_row] == [
+        "👥 Tự động 2 giọng",
+        "👥 Tự động nhiều giọng",
+    ]
 
 
 def test_old_and_multi_states_select_different_blackboxes(monkeypatch):
@@ -181,6 +198,35 @@ def test_old_and_multi_states_select_different_blackboxes(monkeypatch):
     assert multi_route(
         {**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"}
     ) is True
+
+
+@pytest.mark.parametrize(
+    ("state", "expected_label"),
+    (
+        (EXACT_AUTO_STATE, "👥 Tự động 2 giọng"),
+        (
+            {**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"},
+            "👥 Tự động nhiều giọng",
+        ),
+    ),
+)
+def test_auto_confirmation_names_the_selected_lane(
+    monkeypatch,
+    state,
+    expected_label,
+):
+    monkeypatch.setattr(
+        bot,
+        "subdub_auto_provider_capacity_ready",
+        lambda *_args, **_kwargs: True,
+    )
+
+    text = bot.video_dubbing_confirm_text(
+        {**state, "mode": "dub"},
+        "vi",
+    )
+
+    assert f"<b>{expected_label}</b>" in text
 
 
 def test_multi_adapter_preserves_exact_price_fields_created_by_preflight(
@@ -309,6 +355,138 @@ def test_default_classifier_rejects_but_multi_profile_accepts_one_frame(
     assert multi_result is not None
     assert multi_result[0] >= speaker_cast.HIGH_MIN_HZ
     assert multi_result[1] >= speaker_cast.MIN_REGISTER_CONFIDENCE
+
+
+def test_multi_adapter_refines_one_mixed_provider_label_before_exact_gate(
+    tmp_path,
+    monkeypatch,
+):
+    multi_module = _multi_module()
+    labels = ["chunk_00:speaker_0", "chunk_00:speaker_1"]
+    cue_speakers = [0, 1, 0, 1, 1, 1]
+    source_segments = bot.subdub_canonical_auto_speaker_segments(
+        [
+            {
+                "index": index + 1,
+                "start": float(index),
+                "end": float(index + 1),
+                "text": f"cue {index + 1}",
+                "speaker": speaker,
+                "speaker_confidence": 0.9,
+                "speaker_id": labels[speaker],
+                "chunk_index": 0,
+            }
+            for index, speaker in enumerate(cue_speakers)
+        ],
+        extraction_source="asr",
+    )
+    sidecar = speaker_cast.build_sidecar(
+        source_segments,
+        media_sha256="a" * 64,
+        subtitle_sha256="b" * 64,
+    )
+    receipt = speaker_cast.persist_sidecar(
+        sidecar,
+        workspace=str(tmp_path),
+    )
+    prepared = {
+        "source_segments": source_segments,
+        "output_segments": [dict(item) for item in source_segments],
+        "media_sha256": "a" * 64,
+        "subtitle_sha256": "b" * 64,
+        "state": {
+            "_pipeline_workspace": str(tmp_path),
+            "speaker_sidecar_path": receipt["path"],
+            "speaker_sidecar_sha256": receipt["sha256"],
+        },
+    }
+
+    pcm_path = tmp_path / "underclustered.pcm"
+    markers = [100, 200, 100, 200, 120, 120]
+    samples = array("h")
+    for marker in markers:
+        samples.extend([marker] * speaker_cast.PCM_SAMPLE_RATE)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    pcm_path.write_bytes(samples.tobytes())
+
+    def fake_estimate(raw, **_kwargs):
+        marker = int.from_bytes(raw[:2], "little", signed=True)
+        if marker == 200:
+            return 220.0, 0.95
+        if marker in {100, 120}:
+            return 120.0, 0.95
+        return None
+
+    monkeypatch.setattr(
+        speaker_cast,
+        "_estimate_window_pitch",
+        fake_estimate,
+    )
+    captured = {"extract_calls": 0}
+
+    async def base_prepare(_state, *, require_auto_cast):
+        assert require_auto_cast is True
+        return prepared
+
+    async def base_extract(_prepared, _state, **kwargs):
+        captured["extract_calls"] += 1
+        captured["audio_filter"] = kwargs.get("audio_filter")
+        return str(pcm_path)
+
+    async def fake_old_blackbox(**kwargs):
+        refined = await kwargs["prepare_subtitles"](
+            kwargs["state"],
+            require_auto_cast=True,
+        )
+        return {"ok": True, "status": "fixture", "prepared": refined}
+
+    monkeypatch.setattr(
+        auto_speaker,
+        "run_auto_speaker_blackbox",
+        fake_old_blackbox,
+    )
+    result = asyncio.run(
+        multi_module.run_auto_multi_speaker_blackbox(
+            lane_mode="subtitle_plus_dub",
+            extract_pcm=base_extract,
+            prepare_subtitles=base_prepare,
+            state={
+                **EXACT_AUTO_STATE,
+                "auto_speaker_lane": "multi",
+            },
+        )
+    )
+
+    refined = result["prepared"]
+    assert [item["speaker_id"] for item in refined["source_segments"]] == [
+        "chunk_00:speaker_0",
+        "chunk_00:speaker_1",
+        "chunk_00:speaker_0",
+        "chunk_00:speaker_1",
+        "chunk_00:speaker_2",
+        "chunk_00:speaker_2",
+    ]
+    assert [item["speaker_id"] for item in refined["output_segments"]] == [
+        item["speaker_id"] for item in refined["source_segments"]
+    ]
+    refined_state = refined["state"]
+    refined_sidecar = speaker_cast.load_sidecar(
+        refined_state["speaker_sidecar_path"],
+        expected_sha256=refined_state["speaker_sidecar_sha256"],
+        workspace=str(tmp_path),
+    )
+    assert speaker_cast.ordered_auto_speaker_labels(
+        refined_sidecar["cues"]
+    ) == [
+        "chunk_00:speaker_0",
+        "chunk_00:speaker_1",
+        "chunk_00:speaker_2",
+    ]
+    assert captured == {
+        "extract_calls": 1,
+        "audio_filter": multi_module.MULTI_PCM_AUDIO_FILTER,
+    }
 
 
 def test_multi_classifier_preserves_three_provider_labels_without_invention(
@@ -460,6 +638,72 @@ def test_multi_classifier_recovers_dense_evidence_after_sparse_vote_failure(
     assert result["chunk_00:speaker_0"]["voice_register"] == "low"
     assert result["chunk_00:speaker_1"]["voice_register"] == "low"
     assert result["chunk_00:speaker_2"]["voice_register"] == "low"
+
+
+def test_dense_multi_classifier_keeps_short_refined_cues_beside_a_long_cue(
+    tmp_path,
+    monkeypatch,
+):
+    multi_module = _multi_module()
+    pcm_path = tmp_path / "multi-balanced-refined-cues.pcm"
+    samples = array("h", [0]) * (speaker_cast.PCM_SAMPLE_RATE * 16)
+    markers = {
+        0.0: 100,
+        0.6: 200,
+        2.26: 300,
+        13.0: 400,
+        14.0: 500,
+    }
+    for seconds, marker in markers.items():
+        samples[int(round(seconds * speaker_cast.PCM_SAMPLE_RATE))] = marker
+    if sys.byteorder != "little":
+        samples.byteswap()
+    pcm_path.write_bytes(samples.tobytes())
+
+    estimates = {
+        100: (220.0, 0.90),
+        200: (225.0, 0.90),
+        300: (130.0, 0.90),
+        400: (135.0, 0.90),
+        500: (230.0, 0.90),
+    }
+
+    def fake_estimate(raw, **_kwargs):
+        marker = int.from_bytes(raw[:2], "little", signed=True)
+        return estimates.get(marker)
+
+    def force_dense_fallback(*_args, **_kwargs):
+        raise speaker_cast.AutoCastManualRequired()
+
+    monkeypatch.setattr(
+        speaker_cast,
+        "_estimate_window_pitch",
+        fake_estimate,
+    )
+    monkeypatch.setattr(
+        speaker_cast,
+        "classify_speaker_registers",
+        force_dense_fallback,
+    )
+
+    result = multi_module.classify_multi_speaker_registers(
+        str(pcm_path),
+        {
+            "chunk_00:speaker_0": [
+                (0.0, 0.5),
+                (0.6, 1.1),
+                (2.0, 12.0),
+            ],
+            "chunk_00:speaker_1": [(13.0, 13.5)],
+            "chunk_00:speaker_2": [(14.0, 14.5)],
+        },
+        deadline_monotonic=time.monotonic() + 10.0,
+        stop_requested=lambda: False,
+    )
+
+    assert result["chunk_00:speaker_0"]["voice_register"] == "high"
+    assert result["chunk_00:speaker_1"]["voice_register"] == "low"
+    assert result["chunk_00:speaker_2"]["voice_register"] == "high"
 
 
 def test_three_provider_labels_keep_distinct_validated_voices():
@@ -621,7 +865,7 @@ def test_multi_completion_receipt_names_fixture_lane_casts_and_component_prices(
     text = bot.video_dubbing_receipt_text(state, result, "vi")
 
     assert "Tệp nguồn: <b>test nhiều giọng.mp4</b>" in text
-    assert "Loại lồng tiếng: <b>Tự nhận nhiều giọng</b>" in text
+    assert "Loại lồng tiếng: <b>Tự động nhiều giọng</b>" in text
     assert "Số người nói nhận diện: <b>4</b>" in text
     assert "Số giọng lồng tiếng đã dùng: <b>4</b>" in text
     assert "Giá phụ đề: <b>161 Xu</b>" in text
@@ -767,11 +1011,14 @@ def test_multi_adapter_preserves_translation_target_language(
     assert captured["state"]["auto_speaker_lane"] == "multi"
 
 
-def test_multi_filter_is_opt_in_to_the_shared_bounded_extractor(
+def test_multi_filter_matches_the_protected_two_speaker_profile(
     tmp_path,
     monkeypatch,
 ):
     multi_module = _multi_module()
+    assert multi_module.MULTI_PCM_AUDIO_FILTER == (
+        auto_speaker.AUTO_SPEAKER_PCM_AUDIO_FILTER
+    )
     source_path = tmp_path / "source.mp4"
     source_path.write_bytes(b"source")
     calls = []

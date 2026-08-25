@@ -2367,38 +2367,36 @@ def test_register_classifier_reads_synthetic_pcm_tones(tmp_path, frequency, expe
     assert result["chunk_00:speaker_0"]["confidence"] >= 0.75
 
 
-def test_default_lane_rejects_one_confident_pitch_frame(monkeypatch):
+def test_protected_two_speaker_lane_enables_one_confident_pitch_frame(
+    monkeypatch,
+):
+    auto_speaker = importlib.import_module(
+        "services.subdub_blackboxes.auto_speaker"
+    )
     speaker_cast = _speaker_cast_module()
-    frame_estimates = iter(((220.0, 0.74), None, None, None))
+    captured = {}
+
+    def classify(_pcm_path, ranges, **kwargs):
+        captured.update(kwargs)
+        return {
+            label: {"voice_register": "high", "confidence": 0.75}
+            for label in ranges
+        }
 
     monkeypatch.setattr(
         speaker_cast,
-        "_estimate_frame_pitch_yin",
-        lambda *_args, **_kwargs: next(frame_estimates),
+        "classify_speaker_registers",
+        classify,
     )
-    monkeypatch.setattr(
-        speaker_cast,
-        "_frame_competing_pitch",
-        lambda *_args, **_kwargs: (0.0, 0.0),
-    )
-    monkeypatch.setattr(
-        speaker_cast,
-        "_refine_full_rate_pitch",
-        lambda _samples, estimated_hz, **_kwargs: estimated_hz,
-    )
-    monkeypatch.setattr(
-        speaker_cast,
-        "_pitch_spectrum_metrics",
-        lambda *_args, **_kwargs: (1.0, 1.0),
+    result = asyncio.run(
+        auto_speaker._classify_off_event_loop(
+            Path("protected-two-speaker.pcm"),
+            {"chunk_00:speaker_0": [(0.0, 0.5)]},
+        )
     )
 
-    result = speaker_cast._estimate_window_pitch(
-        _task4_pcm_bytes(220.0, seconds=0.5),
-        deadline_monotonic=time.monotonic() + 10.0,
-        stop_requested=lambda: False,
-    )
-
-    assert result is None
+    assert captured["allow_single_pitch_frame"] is True
+    assert result["chunk_00:speaker_0"]["voice_register"] == "high"
 
 
 @pytest.mark.parametrize(
@@ -3688,7 +3686,10 @@ def test_auto_button_is_built_for_both_lanes_but_activation_closed(monkeypatch, 
         "videodub|voice|default_female",
         "videodub|voice|default_male",
     ]
-    assert callback_rows[1] == ["videodub|voice|auto_speaker_gender"]
+    assert callback_rows[1] == [
+        "videodub|voice|auto_speaker_gender",
+        "videodub|voice|auto_multi_speaker",
+    ]
     buttons = [button for row in visible.inline_keyboard for button in row]
     auto_buttons = [
         button for button in buttons
@@ -4138,7 +4139,10 @@ def test_dispatch_matrix_calls_one_blackbox_and_prepares_once(
     assert all(all(check[1:]) for check in dependency_checks)
 
 
-def test_default_blackbox_pcm_extractor_uses_bounded_existing_ffmpeg_runner(tmp_path, monkeypatch):
+def test_protected_two_speaker_pcm_extractor_restores_working_filter(
+    tmp_path,
+    monkeypatch,
+):
     source_path = tmp_path / "source.mp4"
     source_path.write_bytes(b"source")
     calls = []
@@ -4179,6 +4183,7 @@ def test_default_blackbox_pcm_extractor_uses_bounded_existing_ffmpeg_runner(tmp_
     assert calls == [
         ([
             "ffmpeg", "-y", "-i", str(source_path), "-t", "12", "-vn", "-ac", "1",
+            "-af", bot.auto_speaker.AUTO_SPEAKER_PCM_AUDIO_FILTER,
             "-ar", "16000", "-f", "s16le",
             str(tmp_path / "auto_speaker_16000_mono_s16le.pcm"),
         ], 77.0)

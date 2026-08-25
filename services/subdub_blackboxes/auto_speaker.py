@@ -21,6 +21,9 @@ from services import subtitle_dub_product_pipeline
 
 
 AUTO_SPEAKER_PREFLIGHT_READY = "AUTO_SPEAKER_PREFLIGHT_READY"
+AUTO_SPEAKER_PCM_AUDIO_FILTER = (
+    "highpass=f=70,lowpass=f=320,afftdn=nr=6:nf=-50"
+)
 
 _SUBTITLE_SCRIPT_CHARSET = {
     "japanese": "3042",
@@ -289,13 +292,18 @@ async def _classify_off_event_loop(
         classifier_started + speaker_cast.CLASSIFIER_WALL_TIMEOUT_SECONDS
     )
     stop_event = threading.Event()
+    classifier_kwargs = {
+        "deadline_monotonic": classifier_deadline,
+        "stop_requested": stop_event.is_set,
+    }
+    if classify_speakers is None:
+        classifier_kwargs["allow_single_pitch_frame"] = True
     worker = asyncio.create_task(
         asyncio.to_thread(
             classifier,
             str(pcm_path),
             ranges_by_speaker,
-            deadline_monotonic=classifier_deadline,
-            stop_requested=stop_event.is_set,
+            **classifier_kwargs,
         )
     )
     remaining_seconds = max(0.0, classifier_deadline - time.monotonic())

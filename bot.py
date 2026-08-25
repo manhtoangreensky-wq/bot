@@ -232443,15 +232443,22 @@ def subtitle_plus_dub_voice_text(
 
 
 def subdub_auto_voice_choice(lang: str = "vi") -> tuple[str, str]:
-    copy = public_subdub_deep_copy(normalize_user_language(lang))
-    return copy["voice_auto_speaker"], "videodub|voice|auto_speaker_gender"
+    normalized_lang = normalize_user_language(lang)
+    label = {
+        "vi": "👥 Tự động 2 giọng",
+        "en": "👥 Auto 2 speakers",
+    }.get(
+        normalized_lang,
+        public_subdub_deep_copy(normalized_lang)["voice_auto_speaker"],
+    )
+    return label, "videodub|voice|auto_speaker_gender"
 
 
 def subdub_auto_multi_voice_choice(lang: str = "vi") -> tuple[str, str]:
     label = (
-        "👥 Tự nhận nhiều giọng"
+        "👥 Tự động nhiều giọng"
         if normalize_user_language(lang) == "vi"
-        else "👥 Multi-speaker Auto"
+        else "👥 Auto multiple speakers"
     )
     return label, "videodub|voice|auto_multi_speaker"
 
@@ -232483,11 +232490,10 @@ def subtitle_plus_dub_voice_keyboard(
         label, callback = subdub_auto_voice_choice(lang)
         multi_label, multi_callback = subdub_auto_multi_voice_choice(lang)
         rows = [list(row) for row in markup.inline_keyboard]
-        rows.insert(1, [InlineKeyboardButton(label, callback_data=callback)])
-        rows.insert(
-            2,
-            [InlineKeyboardButton(multi_label, callback_data=multi_callback)],
-        )
+        rows.insert(1, [
+            InlineKeyboardButton(label, callback_data=callback),
+            InlineKeyboardButton(multi_label, callback_data=multi_callback),
+        ])
         return InlineKeyboardMarkup(rows)
     return markup
 
@@ -232506,7 +232512,11 @@ def subtitle_plus_dub_confirm_text(state: dict | None = None, lang: str = "vi") 
         language = "ngôn ngữ gốc" if normalize_user_language(lang) == "vi" else "original language"
     copy = public_subdub_deep_copy(normalize_user_language(lang))
     voice = str(
-        copy["voice_auto_speaker"]
+        (
+            subdub_auto_multi_voice_choice(lang)[0]
+            if subdub_auto_multi_speaker_route_enabled(state)
+            else subdub_auto_voice_choice(lang)[0]
+        )
         if subdub_auto_speaker_route_enabled(state)
         else state.get("voice_style") or state.get("selected_voice") or copy["voice"]
     ).strip()
@@ -233905,11 +233915,10 @@ def video_dubbing_voice_keyboard(
         label, callback = subdub_auto_voice_choice(lang)
         multi_label, multi_callback = subdub_auto_multi_voice_choice(lang)
         rows = [list(row) for row in markup.inline_keyboard]
-        rows.insert(1, [InlineKeyboardButton(label, callback_data=callback)])
-        rows.insert(
-            2,
-            [InlineKeyboardButton(multi_label, callback_data=multi_callback)],
-        )
+        rows.insert(1, [
+            InlineKeyboardButton(label, callback_data=callback),
+            InlineKeyboardButton(multi_label, callback_data=multi_callback),
+        ])
         return InlineKeyboardMarkup(rows)
     return markup
 
@@ -234568,7 +234577,11 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
         return subtitle_plus_dub_confirm_text(state, lang)
     target = _short_pending_text(state.get("target_language"), 80)
     voice = _short_pending_text(
-        copy["voice_auto_speaker"]
+        (
+            subdub_auto_multi_voice_choice(lang)[0]
+            if subdub_auto_multi_speaker_route_enabled(state)
+            else subdub_auto_voice_choice(lang)[0]
+        )
         if subdub_auto_speaker_route_enabled(state)
         else state.get("voice_style"),
         100,
@@ -235478,7 +235491,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
             if is_vi:
                 multi_detail_lines = (
                     f"• Tệp nguồn: <b>{source_name}</b>\n"
-                    "• Loại lồng tiếng: <b>Tự nhận nhiều giọng</b>\n"
+                    "• Loại lồng tiếng: <b>Tự động nhiều giọng</b>\n"
                     f"• Số người nói nhận diện: <b>{speaker_count}</b>\n"
                     f"• Số giọng lồng tiếng đã dùng: <b>{voice_count}</b>\n"
                     f"• Giá phụ đề: <b>{subtitle_xu} Xu</b>\n"
@@ -247266,7 +247279,7 @@ async def _extract_subdub_auto_pcm(
     channels: int,
     sample_rate: int,
     sample_format: str,
-    audio_filter: str = "",
+    audio_filter: str = auto_speaker.AUTO_SPEAKER_PCM_AUDIO_FILTER,
 ) -> str:
     """Create one bounded transient PCM artifact inside the current workspace."""
 
