@@ -478,11 +478,16 @@ def test_owner_repair_requeues_same_job_after_stale_poll_only_claim_loop(
 
 
 @pytest.mark.parametrize(
-    ("post_poll_error", "concat_state", "provider_poll_http_status"),
+    (
+        "post_poll_error",
+        "concat_state",
+        "provider_poll_http_status",
+        "no_new_submit",
+    ),
     [
-        (POST_POLL_FINALIZER_ERROR, "normalizing", 200),
-        ("RuntimeError:provider_render_failed:TimeoutExpired", "normalizing", 200),
-        ("RuntimeError:provider_render_failed:TimeoutExpired", "running", None),
+        (POST_POLL_FINALIZER_ERROR, "normalizing", 200, True),
+        ("RuntimeError:provider_render_failed:TimeoutExpired", "normalizing", 200, True),
+        ("RuntimeError:provider_render_failed:TimeoutExpired", "running", None, None),
     ],
 )
 def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure(
@@ -490,6 +495,7 @@ def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure
     post_poll_error,
     concat_state,
     provider_poll_http_status,
+    no_new_submit,
 ) -> None:
     workspace = tmp_path / "product-video-19-existing-clips"
     workspace.mkdir()
@@ -547,7 +553,7 @@ def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure
             "provider_submit_allowed": False,
             "provider_submit_block_reason": "existing_task_recovery_read_only",
             "submit_count": 0,
-            "no_new_submit": True,
+            "no_new_submit": no_new_submit,
             "no_new_paid_submit": True,
             "provider_task_ids": ["task_existing_scene_2"],
             "scene_task_map": task_ids_by_scene,
@@ -591,6 +597,17 @@ def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure
                 allow_stale_running=True,
             )
             == "post_poll_http_success_required"
+        )
+        explicit_submit_failure = dict(before)
+        explicit_submit_failure["no_new_submit"] = False
+        assert (
+            product_video_owner_recovery._post_poll_finalizer_block_reason(
+                explicit_submit_failure,
+                job_id=job_id,
+                user_id=USER_ID,
+                allow_stale_running=True,
+            )
+            == "post_poll_no_new_submit_guard_missing"
         )
 
     recovered = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
