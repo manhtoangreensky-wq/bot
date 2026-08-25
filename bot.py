@@ -232545,8 +232545,16 @@ def subtitle_plus_dub_confirm_text(state: dict | None = None, lang: str = "vi") 
 
 def subtitle_plus_dub_confirm_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    confirm_row = [
+        InlineKeyboardButton(
+            "✅ Tạo video hoàn chỉnh" if is_vi else "✅ Create final video",
+            callback_data="videodub|combo_full_dub",
+        )
+    ]
+    if video_dubbing_subtitle_position_available(state):
+        confirm_row.append(video_dubbing_subtitle_position_button(lang, state))
     rows = [
-        [InlineKeyboardButton("✅ Tạo video hoàn chỉnh" if is_vi else "✅ Create final video", callback_data="videodub|combo_full_dub")],
+        confirm_row,
         [
             InlineKeyboardButton("⬅️ Đổi voice" if is_vi else "⬅️ Change voice", callback_data="videodub|combo_back_voice"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
@@ -232554,8 +232562,6 @@ def subtitle_plus_dub_confirm_keyboard(lang: str = "vi", state: dict | None = No
     ]
     if subdub_audio_mix_available(state):
         rows.insert(1, [InlineKeyboardButton("🎚 Âm thanh" if is_vi else "🎚 Audio", callback_data="videodub|audio_mix")])
-    if video_dubbing_subtitle_position_available(state):
-        rows.insert(1, [video_dubbing_subtitle_position_button(lang, state)])
     return InlineKeyboardMarkup(rows)
 
 def subtitle_plus_dub_preview_ready_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -234716,9 +234722,10 @@ def video_dubbing_confirm_keyboard(lang: str = "vi", state: dict | None = None) 
             voice_row = [InlineKeyboardButton(copy["voice"], callback_data="videodub|back_voice")]
             if subdub_audio_mix_available(state):
                 voice_row.append(InlineKeyboardButton(copy["edit"], callback_data="videodub|audio_mix"))
-            rows = [[InlineKeyboardButton(copy["confirm"], callback_data="videodub|final")]]
+            confirm_row = [InlineKeyboardButton(copy["confirm"], callback_data="videodub|final")]
             if video_dubbing_subtitle_position_available(state):
-                rows.append([video_dubbing_subtitle_position_button(lang, state)])
+                confirm_row.append(video_dubbing_subtitle_position_button(lang, state))
+            rows = [confirm_row]
             rows.extend([
                 voice_row,
                 [
@@ -247279,7 +247286,6 @@ async def _extract_subdub_auto_pcm(
     channels: int,
     sample_rate: int,
     sample_format: str,
-    audio_filter: str = auto_speaker.AUTO_SPEAKER_PCM_AUDIO_FILTER,
 ) -> str:
     """Create one bounded transient PCM artifact inside the current workspace."""
 
@@ -247353,12 +247359,9 @@ async def _extract_subdub_auto_pcm(
     command = [
         ffmpeg, "-y", "-i", source_path, "-t", f"{bounded_seconds:g}",
         "-vn", "-ac", str(int(channels)),
-    ]
-    if str(audio_filter or ""):
-        command.extend(["-af", str(audio_filter)])
-    command.extend([
+        "-af", "highpass=f=70,lowpass=f=320,afftdn=nr=6:nf=-50",
         "-ar", str(int(sample_rate)), "-f", str(sample_format), pcm_path,
-    ])
+    ]
     timeout = subdub_media_preflight.timeout_for_stage(
         "extract",
         duration_seconds=float((prepared or {}).get("duration_seconds") or 0.0),

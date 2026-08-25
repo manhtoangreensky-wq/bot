@@ -21,9 +21,6 @@ from services import subtitle_dub_product_pipeline
 
 
 AUTO_SPEAKER_PREFLIGHT_READY = "AUTO_SPEAKER_PREFLIGHT_READY"
-AUTO_SPEAKER_PCM_AUDIO_FILTER = (
-    "highpass=f=70,lowpass=f=320,afftdn=nr=6:nf=-50"
-)
 
 _SUBTITLE_SCRIPT_CHARSET = {
     "japanese": "3042",
@@ -282,28 +279,19 @@ async def _drain_worker(worker: asyncio.Task) -> None:
 async def _classify_off_event_loop(
     pcm_path: Path,
     ranges_by_speaker: dict[str, list[tuple[float, float]]],
-    classify_speakers: Callable[..., dict[str, dict]] | None = None,
 ) -> dict[str, dict]:
-    classifier = classify_speakers or speaker_cast.classify_speaker_registers
-    if not callable(classifier):
-        raise speaker_cast.AutoCastUnavailable()
     classifier_started = time.monotonic()
     classifier_deadline = (
         classifier_started + speaker_cast.CLASSIFIER_WALL_TIMEOUT_SECONDS
     )
     stop_event = threading.Event()
-    classifier_kwargs = {
-        "deadline_monotonic": classifier_deadline,
-        "stop_requested": stop_event.is_set,
-    }
-    if classify_speakers is None:
-        classifier_kwargs["allow_single_pitch_frame"] = True
     worker = asyncio.create_task(
         asyncio.to_thread(
-            classifier,
+            speaker_cast.classify_speaker_registers,
             str(pcm_path),
             ranges_by_speaker,
-            **classifier_kwargs,
+            deadline_monotonic=classifier_deadline,
+            stop_requested=stop_event.is_set,
         )
     )
     remaining_seconds = max(0.0, classifier_deadline - time.monotonic())
@@ -567,7 +555,6 @@ async def run_auto_speaker_preflight(
     prepare_subtitles: Callable[..., Any],
     post_prepare_gate: Callable[[dict, Mapping[str, object]], Any],
     extract_pcm: Callable[..., Any],
-    classify_speakers: Callable[..., dict[str, dict]] | None = None,
 ) -> dict[str, Any]:
     """Prepare, gate, stream-classify, clean up, and stop before Task 5 work."""
 
@@ -597,7 +584,6 @@ async def run_auto_speaker_preflight(
         classifications = await _classify_off_event_loop(
             pcm_path,
             ranges_by_speaker,
-            classify_speakers,
         )
         result = {
             "ok": True,
@@ -633,7 +619,6 @@ async def run_auto_speaker_blackbox(
     extract_pcm: Callable[..., Any],
     validated_pools: Mapping[str, object],
     required_pool_capacity: int = 1,
-    classify_speakers: Callable[..., dict[str, dict]] | None = None,
     **payload: Any,
 ) -> dict[str, Any]:
     """Run the Auto-only wrappers, then delegate once to the protected lane."""
@@ -671,7 +656,6 @@ async def run_auto_speaker_blackbox(
             prepare_subtitles=prepare_subtitles,
             post_prepare_gate=post_prepare_gate,
             extract_pcm=extract_pcm,
-            classify_speakers=classify_speakers,
         )
         if not isinstance(preflight, Mapping):
             raise speaker_cast.AutoCastUnavailable()

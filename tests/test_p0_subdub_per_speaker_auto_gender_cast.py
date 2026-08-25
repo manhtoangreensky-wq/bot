@@ -2367,36 +2367,69 @@ def test_register_classifier_reads_synthetic_pcm_tones(tmp_path, frequency, expe
     assert result["chunk_00:speaker_0"]["confidence"] >= 0.75
 
 
-def test_protected_two_speaker_lane_enables_one_confident_pitch_frame(
-    monkeypatch,
-):
+def test_short_speaker_window_accepts_one_confident_pitch_frame(monkeypatch):
+    speaker_cast = _speaker_cast_module()
+    frame_estimates = iter(((220.0, 0.74), None, None, None))
+
+    monkeypatch.setattr(
+        speaker_cast,
+        "_estimate_frame_pitch_yin",
+        lambda *_args, **_kwargs: next(frame_estimates),
+    )
+    monkeypatch.setattr(
+        speaker_cast,
+        "_frame_competing_pitch",
+        lambda *_args, **_kwargs: (0.0, 0.0),
+    )
+    monkeypatch.setattr(
+        speaker_cast,
+        "_refine_full_rate_pitch",
+        lambda _samples, estimated_hz, **_kwargs: estimated_hz,
+    )
+    monkeypatch.setattr(
+        speaker_cast,
+        "_pitch_spectrum_metrics",
+        lambda *_args, **_kwargs: (1.0, 1.0),
+    )
+
+    result = speaker_cast._estimate_window_pitch(
+        _task4_pcm_bytes(220.0, seconds=0.5),
+        deadline_monotonic=time.monotonic() + 10.0,
+        stop_requested=lambda: False,
+    )
+
+    assert result is not None
+    assert result[0] >= speaker_cast.HIGH_MIN_HZ
+    assert result[1] >= speaker_cast.MIN_REGISTER_CONFIDENCE
+
+
+def test_protected_two_speaker_code_has_no_multi_lane_seams():
     auto_speaker = importlib.import_module(
         "services.subdub_blackboxes.auto_speaker"
     )
     speaker_cast = _speaker_cast_module()
-    captured = {}
 
-    def classify(_pcm_path, ranges, **kwargs):
-        captured.update(kwargs)
-        return {
-            label: {"voice_register": "high", "confidence": 0.75}
-            for label in ranges
-        }
-
-    monkeypatch.setattr(
-        speaker_cast,
-        "classify_speaker_registers",
-        classify,
-    )
-    result = asyncio.run(
-        auto_speaker._classify_off_event_loop(
-            Path("protected-two-speaker.pcm"),
-            {"chunk_00:speaker_0": [(0.0, 0.5)]},
-        )
-    )
-
-    assert captured["allow_single_pitch_frame"] is True
-    assert result["chunk_00:speaker_0"]["voice_register"] == "high"
+    assert speaker_cast._MIN_PITCH_FRAMES == 1
+    assert "allow_single_pitch_frame" not in inspect.signature(
+        speaker_cast._estimate_window_pitch
+    ).parameters
+    assert "allow_single_pitch_frame" not in inspect.signature(
+        speaker_cast.classify_speaker_registers
+    ).parameters
+    assert "classify_speakers" not in inspect.signature(
+        auto_speaker._classify_off_event_loop
+    ).parameters
+    assert "classify_speakers" not in inspect.signature(
+        auto_speaker.run_auto_speaker_preflight
+    ).parameters
+    assert "classify_speakers" not in inspect.signature(
+        auto_speaker.run_auto_speaker_blackbox
+    ).parameters
+    assert "AUTO_SPEAKER_PCM_AUDIO_FILTER" not in vars(auto_speaker)
+    assert "audio_filter" not in inspect.signature(
+        bot._extract_subdub_auto_pcm
+    ).parameters
+    assert "classify_speakers" not in inspect.getsource(auto_speaker)
 
 
 @pytest.mark.parametrize(
@@ -4183,7 +4216,7 @@ def test_protected_two_speaker_pcm_extractor_restores_working_filter(
     assert calls == [
         ([
             "ffmpeg", "-y", "-i", str(source_path), "-t", "12", "-vn", "-ac", "1",
-            "-af", bot.auto_speaker.AUTO_SPEAKER_PCM_AUDIO_FILTER,
+            "-af", "highpass=f=70,lowpass=f=320,afftdn=nr=6:nf=-50",
             "-ar", "16000", "-f", "s16le",
             str(tmp_path / "auto_speaker_16000_mono_s16le.pcm"),
         ], 77.0)

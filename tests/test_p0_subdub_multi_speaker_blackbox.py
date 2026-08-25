@@ -253,8 +253,8 @@ def test_multi_adapter_preserves_exact_price_fields_created_by_preflight(
         }
 
     monkeypatch.setattr(
-        auto_speaker,
-        "run_auto_speaker_blackbox",
+        multi_module,
+        "_run_isolated_multi_speaker_blackbox",
         copied_lane_state_before_preflight,
     )
     result = asyncio.run(
@@ -331,30 +331,21 @@ def test_multi_marker_does_not_change_auto_pricing(monkeypatch):
     )
 
 
-def test_default_classifier_rejects_but_multi_profile_accepts_one_frame(
-    monkeypatch,
-):
+def test_restored_classifier_accepts_one_frame_without_lane_flag(monkeypatch):
     raw = b"\0" * speaker_cast.PCM_WINDOW_BYTES
     _patch_one_frame_evidence(monkeypatch)
-    default_result = speaker_cast._estimate_window_pitch(
+    result = speaker_cast._estimate_window_pitch(
         raw,
         deadline_monotonic=time.monotonic() + 10.0,
         stop_requested=lambda: False,
     )
 
-    assert default_result is None
-
-    _patch_one_frame_evidence(monkeypatch)
-    multi_result = speaker_cast._estimate_window_pitch(
-        raw,
-        deadline_monotonic=time.monotonic() + 10.0,
-        stop_requested=lambda: False,
-        allow_single_pitch_frame=True,
-    )
-
-    assert multi_result is not None
-    assert multi_result[0] >= speaker_cast.HIGH_MIN_HZ
-    assert multi_result[1] >= speaker_cast.MIN_REGISTER_CONFIDENCE
+    assert result is not None
+    assert result[0] >= speaker_cast.HIGH_MIN_HZ
+    assert result[1] >= speaker_cast.MIN_REGISTER_CONFIDENCE
+    assert "allow_single_pitch_frame" not in inspect.signature(
+        speaker_cast._estimate_window_pitch
+    ).parameters
 
 
 def test_multi_adapter_refines_one_mixed_provider_label_before_exact_gate(
@@ -431,7 +422,7 @@ def test_multi_adapter_refines_one_mixed_provider_label_before_exact_gate(
 
     async def base_extract(_prepared, _state, **kwargs):
         captured["extract_calls"] += 1
-        captured["audio_filter"] = kwargs.get("audio_filter")
+        captured["extract_kwargs"] = kwargs
         return str(pcm_path)
 
     async def fake_old_blackbox(**kwargs):
@@ -442,8 +433,8 @@ def test_multi_adapter_refines_one_mixed_provider_label_before_exact_gate(
         return {"ok": True, "status": "fixture", "prepared": refined}
 
     monkeypatch.setattr(
-        auto_speaker,
-        "run_auto_speaker_blackbox",
+        multi_module,
+        "_run_isolated_multi_speaker_blackbox",
         fake_old_blackbox,
     )
     result = asyncio.run(
@@ -485,7 +476,11 @@ def test_multi_adapter_refines_one_mixed_provider_label_before_exact_gate(
     ]
     assert captured == {
         "extract_calls": 1,
-        "audio_filter": multi_module.MULTI_PCM_AUDIO_FILTER,
+        "extract_kwargs": {
+            "channels": 1,
+            "sample_rate": speaker_cast.PCM_SAMPLE_RATE,
+            "sample_format": "s16le",
+        },
     }
 
 
@@ -506,7 +501,6 @@ def test_multi_classifier_preserves_three_provider_labels_without_invention(
         *,
         deadline_monotonic,
         stop_requested,
-        allow_single_pitch_frame,
     ):
         captured.update(
             {
@@ -514,7 +508,6 @@ def test_multi_classifier_preserves_three_provider_labels_without_invention(
                 "labels": list(ranges_by_speaker),
                 "deadline": deadline_monotonic,
                 "stopped": stop_requested(),
-                "single_frame": allow_single_pitch_frame,
             }
         )
         return {
@@ -544,7 +537,6 @@ def test_multi_classifier_preserves_three_provider_labels_without_invention(
         "labels": labels,
         "deadline": 123.0,
         "stopped": False,
-        "single_frame": True,
     }
     with pytest.raises(speaker_cast.AutoCastManualRequired):
         multi_module.classify_multi_speaker_registers(
@@ -766,8 +758,8 @@ def test_multi_adapter_persists_three_distinct_voices_used_by_tts(monkeypatch):
         }
 
     monkeypatch.setattr(
-        auto_speaker,
-        "run_auto_speaker_blackbox",
+        multi_module,
+        "_run_isolated_multi_speaker_blackbox",
         fake_old_blackbox,
     )
     result = asyncio.run(
@@ -813,8 +805,8 @@ def test_multi_adapter_fails_closed_when_tts_reuses_one_voice(monkeypatch):
         }
 
     monkeypatch.setattr(
-        auto_speaker,
-        "run_auto_speaker_blackbox",
+        multi_module,
+        "_run_isolated_multi_speaker_blackbox",
         fake_old_blackbox,
     )
     result = asyncio.run(
@@ -911,7 +903,7 @@ def test_multi_terminal_job_persists_proof_without_touching_default_auto_lane():
     ) == 1
 
 
-def test_multi_adapter_injects_only_classifier_and_pcm_filter(monkeypatch):
+def test_multi_adapter_owns_classifier_without_touching_protected_lane(monkeypatch):
     multi_module = _multi_module()
     captured = {"delegate": 0, "extract": 0}
 
@@ -922,11 +914,11 @@ def test_multi_adapter_injects_only_classifier_and_pcm_filter(monkeypatch):
         channels,
         sample_rate,
         sample_format,
-        audio_filter="",
+        **extract_kwargs,
     ):
         del prepared, state, channels, sample_rate, sample_format
         captured["extract"] += 1
-        captured["audio_filter"] = audio_filter
+        captured["extract_kwargs"] = extract_kwargs
         return "fixture.pcm"
 
     async def fake_old_blackbox(**kwargs):
@@ -945,9 +937,14 @@ def test_multi_adapter_injects_only_classifier_and_pcm_filter(monkeypatch):
         return {"ok": True, "status": "fixture"}
 
     monkeypatch.setattr(
+        multi_module,
+        "_run_isolated_multi_speaker_blackbox",
+        fake_old_blackbox,
+    )
+    monkeypatch.setattr(
         auto_speaker,
         "run_auto_speaker_blackbox",
-        fake_old_blackbox,
+        lambda **_kwargs: pytest.fail("multi called protected two-speaker runner"),
     )
     result = asyncio.run(
         multi_module.run_auto_multi_speaker_blackbox(
@@ -964,10 +961,120 @@ def test_multi_adapter_injects_only_classifier_and_pcm_filter(monkeypatch):
     assert captured == {
         "delegate": 1,
         "extract": 1,
-        "audio_filter": multi_module.MULTI_PCM_AUDIO_FILTER,
+        "extract_kwargs": {},
         "classifier": multi_module.classify_multi_speaker_registers,
         "pcm": "fixture.pcm",
     }
+
+
+def test_isolated_multi_runner_assigns_and_synthesizes_three_voices(monkeypatch):
+    multi_module = _multi_module()
+    labels = [f"chunk_00:speaker_{index}" for index in range(3)]
+    state = {
+        **EXACT_AUTO_STATE,
+        "auto_speaker_lane": "multi",
+        "mode": "dub",
+        "dub_text_source": "source",
+    }
+    source_segments = [
+        {
+            "cue_id": f"cue-{index}",
+            "index": index + 1,
+            "start": float(index),
+            "end": float(index + 1),
+            "text": f"speaker {index}",
+            "speaker_id": label,
+        }
+        for index, label in enumerate(labels)
+    ]
+    prepared = {
+        "state": {**state, "speaker_sidecar_sha256": "a" * 64},
+        "source_segments": source_segments,
+        "output_segments": [dict(item) for item in source_segments],
+    }
+    classifications = {
+        label: {
+            "speaker_id": label,
+            "voice_register": "low" if index < 2 else "high",
+            "confidence": 0.9,
+        }
+        for index, label in enumerate(labels)
+    }
+
+    async def fake_preflight(_state, **_kwargs):
+        return {
+            "ok": True,
+            "status": auto_speaker.AUTO_SPEAKER_PREFLIGHT_READY,
+            "prepared": prepared,
+            "speaker_labels": labels,
+            "classifications": classifications,
+        }
+
+    monkeypatch.setattr(
+        multi_module,
+        "_run_multi_speaker_preflight",
+        fake_preflight,
+    )
+    monkeypatch.setattr(
+        auto_speaker,
+        "run_auto_speaker_blackbox",
+        lambda **_kwargs: pytest.fail("isolated multi called protected runner"),
+    )
+    synthesized_voices = []
+
+    async def synthesize_segments(segments, **kwargs):
+        cue = segments[0]
+        synthesized_voices.append(kwargs["voice_id"])
+        return {
+            "chunks": [{
+                "start": cue["start"],
+                "end": cue["end"],
+                "audio_bytes": b"audio",
+            }],
+            "provider": "fixture",
+        }
+
+    async def run_lane_blackbox(*, lane_mode, runner, **payload):
+        assert lane_mode == "dub"
+        assert runner is runner_token
+        annotated = await payload["prepare_subtitles"](payload["state"])
+        compatibility_voice = payload["resolve_voice_id"](
+            7,
+            payload["state"],
+        )
+        aggregate = await payload["synthesize_segments"](
+            annotated["source_segments"],
+            voice_id=compatibility_voice,
+        )
+        return {"ok": True, "aggregate": aggregate}
+
+    async def runner_token(**_kwargs):
+        raise AssertionError("focused lane stub owns the runner seam")
+
+    result = asyncio.run(
+        multi_module._run_isolated_multi_speaker_blackbox(
+            lane_mode="dub",
+            run_lane_blackbox=run_lane_blackbox,
+            runner=runner_token,
+            prepare_subtitles=lambda *_args, **_kwargs: prepared,
+            resolve_voice_id=lambda *_args, **_kwargs: "forbidden",
+            synthesize_segments=synthesize_segments,
+            post_prepare_gate=lambda *_args, **_kwargs: {"continue": True},
+            extract_pcm=lambda *_args, **_kwargs: "unused.pcm",
+            validated_pools={
+                "low": ["low-a", "low-b", "low-c"],
+                "high": ["high-a", "high-b", "high-c"],
+            },
+            classify_speakers=multi_module.classify_multi_speaker_registers,
+            required_pool_capacity=3,
+            state=state,
+            mode="dub",
+        )
+    )
+
+    assert result["ok"] is True
+    assert len(synthesized_voices) == 3
+    assert len(set(synthesized_voices)) == 3
 
 
 @pytest.mark.parametrize("target_language", ("vi", "ja", "en", "ko", "zh"))
@@ -983,8 +1090,8 @@ def test_multi_adapter_preserves_translation_target_language(
         return {"ok": True, "status": "fixture"}
 
     monkeypatch.setattr(
-        auto_speaker,
-        "run_auto_speaker_blackbox",
+        multi_module,
+        "_run_isolated_multi_speaker_blackbox",
         fake_old_blackbox,
     )
     state = bot.subdub_apply_voice_choice(
@@ -1011,14 +1118,15 @@ def test_multi_adapter_preserves_translation_target_language(
     assert captured["state"]["auto_speaker_lane"] == "multi"
 
 
-def test_multi_filter_matches_the_protected_two_speaker_profile(
+def test_multi_filter_is_owned_without_modifying_protected_two_speaker_code(
     tmp_path,
     monkeypatch,
 ):
     multi_module = _multi_module()
     assert multi_module.MULTI_PCM_AUDIO_FILTER == (
-        auto_speaker.AUTO_SPEAKER_PCM_AUDIO_FILTER
+        "highpass=f=70,lowpass=f=320,afftdn=nr=6:nf=-50"
     )
+    assert "AUTO_SPEAKER_PCM_AUDIO_FILTER" not in vars(auto_speaker)
     source_path = tmp_path / "source.mp4"
     source_path.write_bytes(b"source")
     calls = []
@@ -1054,7 +1162,6 @@ def test_multi_filter_matches_the_protected_two_speaker_profile(
             channels=1,
             sample_rate=16_000,
             sample_format="s16le",
-            audio_filter=multi_module.MULTI_PCM_AUDIO_FILTER,
         )
     )
 

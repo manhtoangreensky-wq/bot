@@ -1,17 +1,40 @@
 task_id: p0-subdub-multi-blackbox
 phase: SHIP_READY
-branch: fix/p0-subdub-multi-undercluster
-base_sha: d43343a0157ba6e6916e92b97ee2dccb1ddfb168
-verified_source_sha: pending_pr_head_on_d43343a
+branch: fix/p0-subdub-two-rollback-multi-isolation
+base_sha: e079d14ad8618c542bcee02851adc09867d80428
+verified_source_sha: final_one_pr_head_recorded_after_state_amend
 design_commit: 1028e79
 live_boundary: product_video_owned
 cpu_boundary: released_by_subdub_auto
 allowed_source_files:
   - bot.py
+  - services/subdub_speaker_cast.py
   - services/subdub_blackboxes/auto_speaker.py
   - services/subdub_blackboxes/auto_multi_speaker.py
   - tests/test_p0_subdub_multi_speaker_blackbox.py
   - tests/test_p0_subdub_per_speaker_auto_gender_cast.py
+  - tests/test_p0_subdub_subtitle_position7_vertical_ratio.py
+ordered_specs:
+  - id: SPEC-01
+    status: verified_source
+    acceptance: protected two-speaker files and PCM extractor match PR 853 exactly
+    evidence: protected file diff is empty and PCM_EXTRACTOR_EXACT_PR853=True
+  - id: SPEC-02
+    status: verified_source
+    acceptance: multi owns its classifier and orchestration without invoking protected runner
+    evidence: isolated three-voice runner regression is GREEN inside final focused batch
+  - id: SPEC-03
+    status: verified_source
+    acceptance: confirm and subtitle position controls share the first keyboard row
+    evidence: compact keyboard regression is GREEN inside final focused batch
+  - id: SPEC-04
+    status: verified_fixture
+    acceptance: inspect test nhiều giọng.mp4 and confirm it is suitable for automatic multi-speaker recognition
+    evidence: SHA-256 pinned; ffprobe and full decode exit 0; contact sheet and waveform show multiple alternating speakers
+  - id: SPEC-05
+    status: pending_resource_order
+    acceptance: one PR then live two-speaker fixture before multi-speaker fixture
+    evidence: requires Product Video resource release and Owner-authorized live gates
 protected_paths:
   - services/subdub_blackboxes/__init__.py
   - services/subdub_blackboxes/base.py
@@ -24,6 +47,7 @@ rollback:
   protected_two_voice_pr: 842
   protected_two_voice_sha: 71c7e881f2af24d59c4873f8ca3999f59618daec
   protected_two_voice_live_job: 7BC3037DF8
+  protected_two_voice_fixture_path: C:\Users\toann\Downloads\test sub\test 2 giọng.mp4
   protected_two_voice_fixture_sha256: a89b16b896d4efa8157f7de5cea47695b5edf7d5595c4fc03ad62346cdfa0292
 live_fixture:
   path: C:\Users\toann\Downloads\test sub\test nhiều giọng.mp4
@@ -42,6 +66,19 @@ external_actions_allowed_now: false_until_product_video_release
 provider_calls_allowed_now: one_test_nhieu_giong_mp4_job_after_reacquire
 wallet_mutations_allowed: false
 verification:
+  post_rebase_focused_current: 34 passed and 4 protected anchor failures in 1150.57s
+  post_rebase_focused_pass_scope: full multi file plus short-window no-multi-seam protected PCM and compact UI selectors
+  post_rebase_anchor_failures: synthetic 165 170 185 and 220 Hz tone comparator; production classifier and test are exact PR 853
+  post_rebase_anchor_comparator: auto_speaker.py and subdub_speaker_cast.py diff exit 0 versus 7b4053a; tone test unchanged at anchor
+  post_rebase_py_compile_current: exit 0 for bot.py auto_speaker.py auto_multi_speaker.py and subdub_speaker_cast.py
+  final_focused_batch: 34 passed and 1 warning in 729.99s
+  final_focused_warning: google.genai deprecation only
+  final_py_compile_current: exit 0 for bot.py auto_speaker.py auto_multi_speaker.py and subdub_speaker_cast.py
+  final_diff_check_current: exit 0
+  protected_pr853_files: auto_speaker.py and subdub_speaker_cast.py have empty diff versus 7b4053a
+  protected_pcm_extractor: PCM_EXTRACTOR_EXACT_PR853=True with 3831 normalized characters
+  fixture_full_decode: exit 0 for test nhiều giọng.mp4; duration 133.375420 seconds
+  skill_quick_validate: Skill is valid; exit 0
   historical_two_voice_green_pr: 853
   historical_two_voice_green_sha: 7b4053acd9a2bd44c29a15ebc5e0e86152fab24f
   historical_two_voice_contract: filtered_pcm_and_single_pitch_frame
@@ -77,7 +114,7 @@ issues:
     summary: marker dispatch and distinct job lease
   - id: MULTI-02
     status: done
-    summary: multi-only filtered PCM and single-frame classifier profile
+    summary: multi owns isolated classifier and runner while two-speaker code matches PR 853
   - id: MULTI-03
     status: done
     summary: cross-profile sidecar and exact-receipt cache isolation
@@ -89,11 +126,11 @@ issues:
     summary: voiced-with-pauses comparator expects 1.5 seconds but returns 2.0 identically at rollback SHA
   - id: SHIP-01
     status: ready_waiting_product_video_release
-    summary: rebased d43343a and final focused gate passed; Product Video released LIVE CHROME VPS DEPLOY
+    summary: source gate passed on cd4acb8; Product Video currently owns LIVE CHROME VPS DEPLOY
   - id: LIVE-01
     status: invalid_fixture
     summary: E576D4ACE9 delivered Download.mp4 not the Owner-selected test nhiều giọng.mp4
   - id: MULTI-04
     status: source_green
     summary: require 3+ distinct speaker/voice evidence and render the multi receipt fields
-next_action: local commit allowed; push PR squash merge deploy only after Product Video releases LIVE CHROME VPS DEPLOY
+next_action: amend one commit with terminal evidence then push one PR squash merge deploy and run ordered two-speaker then multi-speaker live jobs

@@ -145,6 +145,26 @@ def test_position_button_appears_only_for_outputs_with_visible_subtitles():
     assert "videodub|subtitle_position" in original
 
 
+def test_combo_confirm_and_position_share_one_compact_row():
+    state = {
+        "mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "output_type": "video_subtitle",
+        "subtitle_position_slot": 2,
+    }
+
+    combo = bot.subtitle_plus_dub_confirm_keyboard("vi", state)
+    fallback = bot.video_dubbing_confirm_keyboard("vi", state)
+
+    assert [button.callback_data for button in combo.inline_keyboard[0]] == [
+        "videodub|combo_full_dub",
+        "videodub|subtitle_position",
+    ]
+    assert [button.callback_data for button in fallback.inline_keyboard[0]] == [
+        "videodub|final",
+        "videodub|subtitle_position",
+    ]
+
+
 def test_new_subdub_lane_starts_with_position_two_of_seven(monkeypatch):
     monkeypatch.setattr(
         bot,
