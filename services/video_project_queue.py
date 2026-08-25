@@ -2221,13 +2221,24 @@ def product_video_probation_lock_state(
         ).strip()
         if wanted_provider and candidate != wanted_provider:
             continue
+        delivered_terminal = bool(
+            status == "completed"
+            and payload.get("final_delivered")
+            and payload.get("delivery_succeeded")
+            and payload.get("final_mp4_valid")
+        )
+        probation_result = (
+            "success"
+            if delivered_terminal
+            else str(payload.get("probation_result") or "pending").strip().lower()
+        )
         record = {
             "job_id": job_id,
             "project_id": project_id,
             "user_id": user_id,
             "status": status,
             "provider": candidate,
-            "probation_result": str(payload.get("probation_result") or "pending"),
+            "probation_result": probation_result,
             "probation_started_at": str(payload.get("probation_started_at") or ""),
             "probation_terminal_at": str(payload.get("probation_terminal_at") or ""),
             "probation_cooldown_until": str(payload.get("probation_cooldown_until") or ""),
@@ -2235,7 +2246,6 @@ def product_video_probation_lock_state(
         }
         lock_expiry_epoch = _parse_time_epoch(record["probation_lock_expires_at"])
         lock_expired = bool(lock_expiry_epoch and lock_expiry_epoch <= current_epoch)
-        probation_result = str(payload.get("probation_result") or "pending").strip().lower()
         pending_delivery = bool(
             probation_result == "pending"
             and status not in {"failed", "cancelled"}
@@ -8836,18 +8846,6 @@ def note_video_delivery_result(
                         "probation_result_validation_blocker": "valid_result_scene_coverage_final_mp4_delivery_message_required",
                     }
                 )
-                conn.execute(
-                    "UPDATE video_jobs SET result_json=?,updated_at=? WHERE id=?",
-                    (_json_dumps(payload), current, int(job_id)),
-                )
-                conn.commit()
-                return {
-                    "ok": False,
-                    "sent": False,
-                    "reason": "probation_final_delivery_requirements_missing",
-                    "job": get_video_render_job(conn, int(job_id)),
-                    "project": get_video_project(conn, int(project["project_id"])),
-                }
         payload.update(
             {
                 "final_delivery_attempted": True,

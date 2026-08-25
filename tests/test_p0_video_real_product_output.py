@@ -818,6 +818,38 @@ def test_routeengine_handoff_embeds_tail_materials_without_legacy_audio_blockers
     ] == "TOAN AAS"
 
 
+def test_routeengine_handoff_resolves_follow_character_from_approved_single_character() -> None:
+    tail = _selected_tail_addons()
+    dubbing_value = tail["addon_config"]["postprocessing"]["dubbing"]["value"]
+    dubbing_value["voice_choice"] = "follow_character"
+    snapshot = _ready_routeengine_snapshot()
+    character = snapshot["production_bible"]["characters"][0]
+
+    handoff = video_uiflow3_routeengine.compile_routeengine_handoff(
+        snapshot,
+        owner_user_id=880051,
+        owner_chat_id=880051,
+        tail_state=tail,
+    )
+
+    assert tail["addon_config"]["postprocessing"]["dubbing"]["value"][
+        "voice_choice"
+    ] == "follow_character"
+    material = handoff["addon_plan"]["dubbing"]
+    assert material["requested_voice_choice"] == "follow_character"
+    assert material["voice_choice"] == "default_female"
+    assert material["resolved_character_id"] == character["character_id"]
+    assert material["resolved_character_gender"] == "female"
+    requirement = next(
+        item
+        for item in handoff["addon_plan"]["materialization_requirements"]
+        if item["name"] == "dubbing"
+    )
+    assert requirement["material_identity"] == video_uiflow3_routeengine._sha256(
+        material
+    )
+
+
 def test_routeengine_provider_prompt_preserves_character_style_and_requirements() -> None:
     snapshot = _ready_routeengine_snapshot()
     handoff = video_uiflow3_routeengine.compile_routeengine_handoff(

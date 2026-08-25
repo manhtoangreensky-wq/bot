@@ -23,8 +23,7 @@ SUBDUB_SHARED_CORE_MODES = {
 
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
-        raw = default if value is None or str(value).strip() == "" else value
-        return int(float(raw))
+        return int(float(value or default))
     except Exception:
         return int(default)
 
@@ -101,30 +100,6 @@ def resolve_subdub_dub_audio_policy(state: dict, prepared: dict) -> dict[str, An
     prepared = dict(prepared or {})
     source_segments = list(prepared.get("source_segments") or [])
     output_segments = list(prepared.get("output_segments") or [])
-    mode_tokens = {
-        str(current.get(key) or "").strip().lower()
-        for key in (
-            "mode",
-            "process_type",
-            "video_processing_mode",
-            "requested_mode",
-            "active_flow",
-            "product_type",
-        )
-    }
-    combo_mode = bool(
-        mode_tokens.intersection(
-            {
-                VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-                "subtitle_dub",
-                "subtitle_dub_video",
-                "subtitle_plus_dub_video",
-            }
-        )
-    )
-    dub_only_mode = not combo_mode and bool(
-        mode_tokens.intersection({VIDEO_SUBTITLE_MODE_DUB, "dub_only", "video_dub"})
-    )
     requested_source = str(
         current.get("dub_text_source")
         or current.get("voice_text_source")
@@ -144,18 +119,7 @@ def resolve_subdub_dub_audio_policy(state: dict, prepared: dict) -> dict[str, An
     )
     source_requested = requested_source in source_aliases or target_language in source_aliases
 
-    if dub_only_mode:
-        dub_text_source = "source"
-        tts_segments = source_segments
-    elif combo_mode:
-        dub_text_source = "translated"
-        tts_segments = [
-            dict(item or {})
-            for item in output_segments
-            if str((item or {}).get("text") or "").strip()
-            and not _truthy((item or {}).get("translate_missing"))
-        ]
-    elif source_requested or not translated_requested:
+    if source_requested or not translated_requested:
         dub_text_source = "source"
         tts_segments = source_segments or output_segments
     else:
@@ -168,14 +132,6 @@ def resolve_subdub_dub_audio_policy(state: dict, prepared: dict) -> dict[str, An
         ]
 
     keep_original_audio = _truthy(current.get("keep_original_audio"))
-    original_audio_volume_percent = max(
-        0,
-        min(100, _safe_int(current.get("original_audio_volume_percent"), 20)),
-    ) if keep_original_audio else 0
-    dubbed_voice_volume_percent = max(
-        0,
-        min(200, _safe_int(current.get("dubbed_voice_volume_percent"), 100)),
-    )
     policy_fields = {
         "dub_text_source": dub_text_source,
         "original_audio_policy": "kept_low_volume" if keep_original_audio else "muted",
@@ -183,8 +139,6 @@ def resolve_subdub_dub_audio_policy(state: dict, prepared: dict) -> dict[str, An
         "source_tts_rendered": dub_text_source == "source" and bool(tts_segments),
         "target_tts_rendered": dub_text_source == "translated" and bool(tts_segments),
         "keep_original_audio": keep_original_audio,
-        "original_audio_volume_percent": original_audio_volume_percent,
-        "dubbed_voice_volume_percent": dubbed_voice_volume_percent,
     }
     return {**policy_fields, "tts_segments": tts_segments}
 
@@ -525,12 +479,6 @@ async def process_subtitle_dub_job(
                         dubbed_audio=audio_bytes,
                         subtitle_bytes=srt_bytes if wants_subtitle_video else b"",
                         keep_original_audio=bool(dub_audio_policy.get("keep_original_audio")),
-                        original_audio_volume_percent=int(
-                            dub_audio_policy.get("original_audio_volume_percent") or 0
-                        ),
-                        dubbed_voice_volume_percent=int(
-                            dub_audio_policy.get("dubbed_voice_volume_percent", 100)
-                        ),
                         target_duration_seconds=final_video_expected_duration,
                     )
                 )

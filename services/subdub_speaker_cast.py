@@ -48,6 +48,9 @@ _AUTOCORRELATION_STRIDE = 4
 _MAX_RELATIVE_PITCH_SPREAD = 0.18
 _MIN_REGISTER_VOTE_RATIO = 2.0 / 3.0
 _MIN_REGISTER_TOTAL_RATIO = 0.50
+_STRONG_SINGLE_WINDOW_MIN_CONFIDENCE = MIN_REGISTER_CONFIDENCE
+_STRONG_SINGLE_WINDOW_LOW_MAX_HZ = 145.0
+_STRONG_SINGLE_WINDOW_HIGH_MIN_HZ = HIGH_MIN_HZ
 _PITCH_ANALYSIS_DECIMATION = 8
 _PITCH_ANALYSIS_SAMPLE_RATE = PCM_SAMPLE_RATE // _PITCH_ANALYSIS_DECIMATION
 _PITCH_FRAME_SAMPLES = 400
@@ -466,6 +469,49 @@ def sidecar_matches(
         return False
 
 
+def restore_cached_cue_ids_from_sidecar(
+    sidecar: dict,
+    cues: list[dict],
+    *,
+    media_sha256: str,
+    subtitle_sha256: str,
+) -> list[dict]:
+    """Restore canonical cue IDs lost by SRT serialization, fail closed."""
+
+    try:
+        if (
+            not isinstance(sidecar, dict)
+            or type(sidecar.get("version")) is not int
+            or sidecar.get("version") != SIDECAR_VERSION
+        ):
+            raise AutoCastUnavailable()
+        media_hash = _normalized_sha256(media_sha256)
+        subtitle_hash = _normalized_sha256(subtitle_sha256)
+        if (
+            not media_hash
+            or not subtitle_hash
+            or _normalized_sha256(sidecar.get("media_sha256")) != media_hash
+            or _normalized_sha256(sidecar.get("subtitle_sha256")) != subtitle_hash
+        ):
+            raise AutoCastUnavailable()
+        source = _canonical_cues(cues)
+        source_rows = _timeline_rows(source)
+        stored_rows = _sidecar_rows(sidecar)
+        if len(source_rows) != len(stored_rows):
+            raise AutoCastUnavailable()
+        restored: list[dict] = []
+        for cue, source_row, stored_row in zip(source, source_rows, stored_rows):
+            stored_cue_id, stored_start_ms, stored_end_ms = stored_row
+            if source_row[1:] != (stored_start_ms, stored_end_ms):
+                raise AutoCastUnavailable()
+            restored.append({**cue, "cue_id": stored_cue_id})
+        return restored
+    except AutoCastUnavailable:
+        raise
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise AutoCastUnavailable() from exc
+
+
 def join_sidecar(sidecar: dict, cues: list[dict]) -> list[dict]:
     if (
         not isinstance(sidecar, dict)
@@ -729,8 +775,27 @@ def _stable_register_evidence(
     frequencies: list[float],
     confidences: list[float],
 ) -> tuple[str, float, float, int]:
-    if len(frequencies) != len(confidences) or len(frequencies) < 2:
+    if len(frequencies) != len(confidences) or not frequencies:
         raise AutoCastManualRequired()
+    if len(frequencies) == 1:
+        try:
+            frequency = float(frequencies[0])
+            confidence = float(confidences[0])
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise AutoCastManualRequired() from exc
+        if (
+            not math.isfinite(frequency)
+            or not math.isfinite(confidence)
+            or not _STRONG_SINGLE_WINDOW_MIN_CONFIDENCE <= confidence <= 1.0
+        ):
+            raise AutoCastManualRequired()
+        if frequency <= _STRONG_SINGLE_WINDOW_LOW_MAX_HZ:
+            register = "low"
+        elif frequency >= _STRONG_SINGLE_WINDOW_HIGH_MIN_HZ:
+            register = "high"
+        else:
+            raise AutoCastManualRequired()
+        return register, frequency, confidence, 1
     groups: dict[str, list[tuple[float, float]]] = {"low": [], "high": []}
     for frequency, confidence in zip(frequencies, confidences):
         register = pitch_register(frequency, confidence=confidence)
@@ -759,8 +824,8 @@ def _stable_register_evidence(
     if len(inliers) < 2:
         raise AutoCastManualRequired()
     median_hz = _bounded_median([item[0] for item in inliers])
-    relative_spread = max(
-        abs(item[0] - median_hz) / median_hz for item in inliers
+    relative_spread = _bounded_median(
+        [abs(item[0] - median_hz) / median_hz for item in inliers]
     )
     if (
         not math.isfinite(relative_spread)
@@ -1196,8 +1261,11 @@ def _estimate_window_pitch(
     *,
     deadline_monotonic: float,
     stop_requested: Callable[[], bool],
+    allow_single_pitch_frame: bool = False,
 ) -> tuple[float, float] | None:
     _ensure_classifier_active(deadline_monotonic, stop_requested)
+    if type(allow_single_pitch_frame) is not bool:
+        raise AutoCastManualRequired()
     if not isinstance(raw, bytes) or len(raw) != PCM_WINDOW_BYTES:
         return None
 
@@ -1258,7 +1326,8 @@ def _estimate_window_pitch(
             estimates.append(
                 (estimate[0], estimate[1], competing_ratio, competing_hz)
             )
-    if len(estimates) < _MIN_PITCH_FRAMES:
+    minimum_pitch_frames = 1 if allow_single_pitch_frame else _MIN_PITCH_FRAMES
+    if len(estimates) < minimum_pitch_frames:
         return None
 
     median_hz = _bounded_median([item[0] for item in estimates])
@@ -1270,7 +1339,10 @@ def _estimate_window_pitch(
         if abs(item[0] - median_hz) / median_hz
         <= _MAX_FRAME_RELATIVE_PITCH_DEVIATION
     ]
-    minimum_inliers = max(_MIN_PITCH_FRAMES, math.ceil(len(estimates) * 0.60))
+    minimum_inliers = max(
+        minimum_pitch_frames,
+        math.ceil(len(estimates) * 0.60),
+    )
     if len(inliers) < minimum_inliers:
         return None
     competing_frames = [
@@ -1298,7 +1370,11 @@ def _estimate_window_pitch(
         [abs(item[0] - refined_hz) / refined_hz for item in inliers]
     )
     stability = max(0.0, 1.0 - (relative_spread / 0.32))
-    support = min(1.0, len(inliers) / 4.0)
+    support = (
+        0.5
+        if allow_single_pitch_frame and len(inliers) == 1
+        else min(1.0, len(inliers) / 4.0)
+    )
     periodicity = _bounded_median([item[1] for item in inliers])
     confidence = max(
         0.0,
@@ -1325,12 +1401,15 @@ def classify_speaker_registers(
     *,
     deadline_monotonic: float,
     stop_requested: Callable[[], bool],
+    allow_single_pitch_frame: bool = False,
 ) -> dict[str, dict]:
     """Classify bounded speaker ranges from streaming mono 16 kHz s16le PCM."""
 
     if not isinstance(ranges_by_speaker, dict) or not ranges_by_speaker:
         raise AutoCastManualRequired()
     if not callable(stop_requested):
+        raise AutoCastManualRequired()
+    if type(allow_single_pitch_frame) is not bool:
         raise AutoCastManualRequired()
     try:
         absolute_deadline = float(deadline_monotonic)
@@ -1385,6 +1464,7 @@ def classify_speaker_registers(
                         raw,
                         deadline_monotonic=absolute_deadline,
                         stop_requested=stop_requested,
+                        allow_single_pitch_frame=allow_single_pitch_frame,
                     )
                     if estimate is None:
                         continue
@@ -1399,8 +1479,13 @@ def classify_speaker_registers(
                     _stable_register_evidence(frequencies, confidences)
                 )
                 voiced_seconds = inlier_count * _PCM_WINDOW_SECONDS
+                minimum_voiced_seconds = (
+                    _PCM_WINDOW_SECONDS
+                    if inlier_count == 1
+                    else _MIN_VOICED_SECONDS
+                )
                 if (
-                    voiced_seconds < _MIN_VOICED_SECONDS
+                    voiced_seconds < minimum_voiced_seconds
                     or voiced_seconds > MAX_SPEAKER_VOICED_SECONDS + 1e-12
                 ):
                     raise AutoCastManualRequired()

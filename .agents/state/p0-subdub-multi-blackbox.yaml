@@ -1,0 +1,91 @@
+task_id: p0-subdub-multi-blackbox
+phase: SHIP_READY
+branch: fix/p0-subdub-multi-proof-receipt
+base_sha: 8f2d1290cd7f38039f6feca71fa50e28563a42ea
+verified_source_sha: pending_pr_head
+design_commit: 1028e79
+live_boundary: subdub_auto_acquired
+cpu_boundary: subdub_auto_owned
+allowed_source_files:
+  - bot.py
+  - services/subdub_speaker_cast.py
+  - services/subdub_blackboxes/auto_speaker.py
+  - services/subdub_blackboxes/auto_multi_speaker.py
+  - tests/test_p0_subdub_multi_speaker_blackbox.py
+  - tests/test_p0_subdub_per_speaker_auto_gender_cast.py
+protected_paths:
+  - services/subdub_blackboxes/__init__.py
+  - services/subdub_blackboxes/base.py
+  - services/subdub_blackboxes/dub_only.py
+  - services/subdub_blackboxes/subtitle_dub.py
+  - services/subtitle_dub_product_pipeline.py
+  - services/subdub_auto_word_pricing.py
+  - services/subdub_auto_settlement.py
+rollback:
+  protected_two_voice_pr: 842
+  protected_two_voice_sha: 71c7e881f2af24d59c4873f8ca3999f59618daec
+  protected_two_voice_live_job: 7BC3037DF8
+  protected_two_voice_fixture_sha256: a89b16b896d4efa8157f7de5cea47695b5edf7d5595c4fc03ad62346cdfa0292
+live_fixture:
+  path: C:\Users\toann\Downloads\test sub\test nhiều giọng.mp4
+  size_bytes: 9869032
+  sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
+acceptance:
+  - no marker dispatches only the proven auto_speaker blackbox
+  - marker auto_speaker_lane=multi dispatches only auto_multi_speaker
+  - no-marker Auto remains the protected one/two-speaker lane
+  - multi requires 3 through 16 provider-returned speaker labels without invention
+  - every multi label receives a distinct validated TTS voice
+  - durable receipt shows source filename multi lane speaker/voice counts and price components
+  - default/manual/subtitle pricing settlement mux and delivery remain unchanged
+  - owner live fixture produces one MP4 one SRT one green receipt and zero Xu
+external_actions_allowed_now: false_until_product_video_release
+provider_calls_allowed_now: one_test_nhieu_giong_mp4_job_after_reacquire
+wallet_mutations_allowed: false
+verification:
+  proof_red: 5 failed in 9.72s for missing 3-speaker cast receipt and terminal proof
+  proof_green: 23 passed in 6.27s for full multi-speaker blackbox file
+  protected_branch: 7 passed and 4 baseline failures in 9.72s
+  protected_baseline: same 4 failures at a6d54a6 in 528.69s
+  proof_py_compile: exit 0 for bot.py and auto_multi_speaker.py
+  post_rebase_proof_green: 23 passed in 459.44s on 8f2d129 plus patch
+  post_rebase_py_compile: exit 0 for bot.py and auto_multi_speaker.py
+  red: 9 failed and 2 passed in 132.83s for missing multi seams
+  focused_green: 12 passed in 133.96s
+  protected_old_route: 3 passed in 156.90s
+  protected_manual_zero_charge: 7 passed in 163.23s
+  classifier_comparators: 16 passed and 1 baseline failure in 145.50s
+  rollback_anchor_comparator: same baseline failure at 2.0 versus 1.5 in 145.92s
+  post_rebase_focused: 17 passed in 175.95s on VPS clone
+  post_rebase_multilingual: vi ja en ko zh all passed inside focused suite
+  post_rebase_old_lane: 3 passed in 8.92s
+  post_rebase_broad_diff: branch 34 passed 10 baseline failures; baseline 33 passed 11 failures
+  post_rebase_manual_diff: branch 5 passed 2 baseline failures; baseline 4 passed 3 failures
+  post_rebase_classifier_diff: branch 16 passed 1 baseline failure at 2.0; baseline 16 passed 1 failure at 2.5
+  py_compile: exit 0 for four runtime files on VPS production venv
+issues:
+  - id: MULTI-01
+    status: done
+    summary: marker dispatch and distinct job lease
+  - id: MULTI-02
+    status: done
+    summary: multi-only filtered PCM and single-frame classifier profile
+  - id: MULTI-03
+    status: done
+    summary: cross-profile sidecar and exact-receipt cache isolation
+  - id: PROTECTED-01
+    status: done
+    summary: old Auto default PCM classifier route and manual lanes protected
+  - id: BASELINE-01
+    status: known_nonblocking
+    summary: voiced-with-pauses comparator expects 1.5 seconds but returns 2.0 identically at rollback SHA
+  - id: SHIP-01
+    status: done
+    summary: rebased afbe4acf and passed focused protected differential and compile gates
+  - id: LIVE-01
+    status: invalid_fixture
+    summary: E576D4ACE9 delivered Download.mp4 not the Owner-selected test nhiều giọng.mp4
+  - id: MULTI-04
+    status: source_green
+    summary: require 3+ distinct speaker/voice evidence and render the multi receipt fields
+next_action: commit push PR merge deploy exact SHA then run only test nhiều giọng.mp4

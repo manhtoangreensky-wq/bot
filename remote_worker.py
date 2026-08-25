@@ -26,19 +26,44 @@ from services import product_video_public_seam
 
 WORKER_PARSER_VERSION = "r8d_product_video_canonical_parser"
 PRODUCT_VIDEO_CANONICAL_CAPABILITY = "canonical_multiscene_b13_r18c_v1"
+PRODUCT_VIDEO_PROVIDER_READY_CAPABILITY_PREFIX = "product_video_provider_ready:"
 WORKER_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 ACTIVE_WORKER_SERVICE_MODE = "general"
 ACTIVE_WORKER_CAPABILITIES: list[str] = ["ffmpeg", "video_postprocess"]
 
 
 def product_video_worker_capabilities() -> list[str]:
-    return [
+    capabilities = [
         "product_video",
         "owner_product_video",
         "ffmpeg",
         "video_postprocess",
         PRODUCT_VIDEO_CANONICAL_CAPABILITY,
     ]
+    try:
+        from services import video_provider_router
+
+        status = video_provider_router.provider_status_payload(os.environ)
+        ready_providers = [
+            str(item.get("provider") or "")
+            for item in status.get("providers") or []
+            if isinstance(item, dict)
+            and item.get("enabled") is True
+            and item.get("configured") is True
+            and item.get("credit_ok") is True
+        ]
+        for raw_provider in ready_providers:
+            provider = re.sub(
+                r"[^a-z0-9_]+",
+                "",
+                str(raw_provider or "").strip().lower(),
+            )[:48]
+            capability = f"{PRODUCT_VIDEO_PROVIDER_READY_CAPABILITY_PREFIX}{provider}"
+            if provider and capability not in capabilities:
+                capabilities.append(capability)
+    except Exception:
+        pass
+    return capabilities
 
 
 def load_dotenv(path: str) -> None:

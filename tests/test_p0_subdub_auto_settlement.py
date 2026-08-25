@@ -1,5 +1,7 @@
+import asyncio
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import threading
@@ -20,7 +22,9 @@ def _load_bot_functions(*names: str) -> dict:
     source = (Path(__file__).parents[1] / "bot.py").read_text(encoding="utf-8")
     namespace = {
         "hashlib": hashlib,
+        "os": os,
         "time": time,
+        "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
     }
     chunks = []
     for name in names:
@@ -534,6 +538,19 @@ def test_auto_pipeline_source_defers_charge_until_durable_delivery():
     assert "spend_fixed_credit_info(" in core
 
 
+def test_auto_postdelivery_settlement_does_not_repass_positional_job_key():
+    source = (Path(__file__).parents[1] / "bot.py").read_text(encoding="utf-8")
+    start = source.index("async def _execute_video_dubbing_pipeline_core(")
+    end = source.index("\nasync def execute_video_dubbing_pipeline(", start)
+    core = source[start:end]
+    settlement_start = core.index("auto_settlement_fields: dict = {}")
+    settlement_end = core.index("\n    except Exception:\n", settlement_start)
+    postdelivery = core[settlement_start:settlement_end]
+
+    assert postdelivery.count("update_subtitle_dub_pipeline_job(") == 3
+    assert '"job_key": delivery_job_key' not in postdelivery
+
+
 def test_bot_auto_branch_settles_only_after_durable_delivery_mark_source_contract():
     bot_path = Path(__file__).resolve().parents[1] / "bot.py"
     source = bot_path.read_text(encoding="utf-8")
@@ -595,7 +612,7 @@ def test_exact_known_auto_quote_claims_and_persists_receipt_before_continue():
         'if not decision.get("exact_confirmation_required"):', build_at
     )
     claim_at = gate.index('"claim_state": "resuming"', exact_known_at)
-    persist_at = gate.index('reason="auto_exact_known_receipt_claimed"', claim_at)
+    persist_at = gate.index('"auto_exact_known_receipt_claimed"', claim_at)
     continue_at = gate.index('return {"continue": True}', persist_at)
 
     assert build_at < exact_known_at < claim_at < persist_at < continue_at
@@ -796,7 +813,7 @@ def test_persisted_auto_job_can_recover_one_interrupted_delivery_attempt(tmp_pat
     ) == ""
 
 
-def test_auto_pricing_receipt_and_settlement_share_the_activation_gate():
+def test_auto_pricing_uses_readiness_before_receipt_and_durable_identity_after_confirmation():
     source = (Path(__file__).parents[1] / "bot.py").read_text(encoding="utf-8")
 
     def function_source(name: str) -> str:
@@ -816,8 +833,133 @@ def test_auto_pricing_receipt_and_settlement_share_the_activation_gate():
     assert "auto_pricing = subdub_auto_speaker_route_enabled(state)" in confirm
     assert "if not subdub_auto_speaker_route_enabled(state):" in exact_gate
     assert core.count("if subdub_auto_speaker_route_enabled(state):") >= 2
-    assert "auto_pricing_active = subdub_auto_speaker_route_enabled(state)" in core
+    assert "auto_pricing_active = auto_speaker.is_auto_speaker_state(state)" in core
     assert "if subdub_auto_speaker_route_enabled(state):" in execute
+
+
+def test_auto_exact_success_finalizes_green_panel_then_sends_one_receipt():
+    namespace = _load_bot_functions("handle_subdub_auto_exact_callback")
+    calls = []
+    job = {
+        "job_key": "auto-exact-terminal-panel-receipt",
+        "job_id": "auto-exact-job",
+        "internal_job_id": "auto-exact-job",
+        "public_code": "AUTOEXACT1",
+        "mode": "subtitle_plus_dub",
+        "status": "resuming_auto_exact_confirmation",
+        "auto_exact_resume_state": {
+            "mode": "subtitle_plus_dub",
+            "origin": "translation",
+        },
+    }
+
+    async def transition(**_kwargs):
+        return True, dict(job)
+
+    async def execute_engine(_feature, _payload, _context):
+        return {
+            "runner_result": {
+                "ok": True,
+                "mode": "subtitle_plus_dub",
+                "terminal_state": "delivered",
+                "final_mp4_delivered": True,
+                "video_delivery_message_id": "8188",
+                "job_id": "auto-exact-job",
+                "charged": 0,
+                "charge_status": "admin_free",
+                "state": {"origin": "translation"},
+            }
+        }
+
+    async def finalize_panel(_query, _context, key, job_id, _lang, _result):
+        calls.append(("panel", key, job_id))
+        return "panel-green"
+
+    async def send_receipt(_message, key, text, **kwargs):
+        calls.append(("receipt", key, text, kwargs.get("reply_markup")))
+        return "receipt-sent"
+
+    pending = {}
+
+    def set_pending(_uid, step, **fields):
+        pending.update({"step": step, **fields})
+        return dict(pending)
+
+    def mark_delivered(key, result):
+        calls.append(("mark", key, result.get("video_delivery_message_id")))
+        return dict(job)
+
+    namespace.update(
+        {
+            "_subdub_auto_exact_decode_token": lambda _value: ("AUTOEXACT1", "nonce"),
+            "subdub_progress_job_for_user": lambda _code, _uid: dict(job),
+            "normalize_user_language": lambda value: str(value or "vi"),
+            "public_subdub_deep_copy": lambda _lang: {},
+            "_subdub_auto_exact_transition": transition,
+            "normalize_video_translate_mode": lambda value: str(value or ""),
+            "video_dubbing_product_area_for_mode": lambda _mode: "translation",
+            "execute_engine": execute_engine,
+            "ENGINE_ENTRY_SOURCE_PRODUCT": "product",
+            "set_video_dubbing_pending": set_pending,
+            "subdub_mark_delivered_terminal": mark_delivered,
+            "subdub_finalize_delivered_panel": finalize_panel,
+            "video_dubbing_receipt_text": lambda *_args: "receipt",
+            "video_dubbing_receipt_keyboard": lambda *_args: "buttons",
+            "subdub_send_success_receipt_once": send_receipt,
+            "SUBTITLE_DUB_PIPELINE_JOBS": {job["job_key"]: dict(job)},
+        }
+    )
+
+    query = SimpleNamespace(
+        from_user=SimpleNamespace(id=42),
+        message=SimpleNamespace(chat_id=42),
+    )
+    result = asyncio.run(
+        namespace["handle_subdub_auto_exact_callback"](
+            query,
+            SimpleNamespace(),
+            action="auto_exact_confirm",
+            value="token",
+            lang="vi",
+        )
+    )
+
+    assert result == "receipt-sent"
+    assert calls == [
+        ("mark", "auto-exact-terminal-panel-receipt", "8188"),
+        ("panel", "auto-exact-terminal-panel-receipt", "auto-exact-job"),
+        ("receipt", "auto-exact-terminal-panel-receipt", "receipt", "buttons"),
+    ]
+    assert pending == {
+        "step": "completed",
+        "processing": "0",
+        "terminal_state": "delivered",
+    }
+
+
+def test_subdub_cjk_filter_passes_resolved_font_directory_to_libass():
+    namespace = _load_bot_functions(
+        "subdub_ffmpeg_filter_path",
+        "subdub_subtitle_filter_for_file",
+    )
+    namespace["ffmpeg_text"] = SimpleNamespace(
+        escape_filter_path=lambda value, resolve=False: str(value)
+    )
+
+    actual = namespace["subdub_subtitle_filter_for_file"](
+        "/tmp/subtitle.ass",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    )
+
+    assert namespace["subdub_subtitle_filter_for_file"]("/tmp/subtitle.srt") == (
+        "subtitles=filename='/tmp/subtitle.srt'"
+    )
+    assert actual == (
+        "subtitles=filename='/tmp/subtitle.ass':"
+        "fontsdir='/usr/share/fonts/opentype/noto'"
+    )
+    render_source = (Path(__file__).parents[1] / "bot.py").read_text(encoding="utf-8")
+    assert render_source.count('str(style.get("subtitle_font_path") or "")') >= 2
 
 
 def test_expired_exact_receipt_never_emits_a_confirm_callback_token():

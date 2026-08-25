@@ -2233,6 +2233,44 @@ def test_video_ai_real_prompt_review_shows_detailed_scene_prompt_and_exact_paren
     assert "vid3|view|prompt_scenes" in _callbacks(detail_markup)
 
 
+def test_video_ai_real_prompt_scene_back_survives_telegram_ack_network_failure():
+    user_id = 981073
+    context = SimpleNamespace(user_data={})
+    state = _ready_prompt_summary_state()
+    state["navigation"]["current_step"] = "prompts"
+    state = bot.video_uiflow3_open_view(
+        state,
+        "prompt_scene_detail",
+        active_scene_id="scene_01",
+    )
+    _save_owned(context, state, user_id)
+
+    _text, markup = bot.video_uiflow3_screen_payload(state)
+    wire_callback = next(
+        str(button.callback_data or "")
+        for row in markup.inline_keyboard
+        for button in row
+        if _logical_callback(str(button.callback_data or "")) == "vid3|view|prompt_scenes"
+    )
+    query = _PilotQuery(user_id, wire_callback, "prompt-scene-ack-502")
+
+    async def fail_acknowledgement(*_args, **_kwargs):
+        raise RuntimeError("Telegram callback ACK returned 502")
+
+    query.answer = fail_acknowledgement
+    asyncio.run(
+        bot.handle_video_uiflow3_callback(
+            SimpleNamespace(callback_query=query),
+            context,
+        )
+    )
+
+    saved = bot.video_uiflow3_state(context)
+    assert saved.get("ui_view") == "prompt_scenes"
+    assert query.edits
+    assert "Câu lệnh từng cảnh" in query.edits[-1]["text"]
+
+
 def test_video_ai_real_prompt_review_pages_preserve_every_character_without_truncation():
     state = _ready_prompt_summary_state()
     state["navigation"]["current_step"] = "prompts"
@@ -3076,6 +3114,89 @@ def test_video_ai_real_quick_build_is_deterministic_and_reaches_quality_without_
     summary_text, summary_markup = bot.video_uiflow3_screen_payload(quick)
     assert "Rà soát cuối" in summary_text
     assert {"Logo và watermark", "Hoàn tất rà soát và chọn chất lượng"}.issubset(set(_plain_labels(summary_markup)))
+
+
+def test_video_ai_real_quick_build_prefers_explicit_character_identity_from_brief():
+    state = video_uiflow3.new_state(
+        "video_ai_real",
+        draft_id="pilot-explicit-character-identity",
+    )
+    state = video_uiflow3.set_entry_mode(state, "prompt_video")
+    state = video_uiflow3.set_scene_count_preference(state, 2)
+    state = video_uiflow3.set_format(
+        state,
+        ratio="9:16",
+        target_duration_seconds=16,
+    )
+    state = video_uiflow3.set_content_candidate(
+        state,
+        source="manual",
+        original_intent=(
+            "Nhân vật Linh, nữ nghệ nhân gốm Việt Nam, tạo bình gốm xanh "
+            "trong xưởng ấm."
+        ),
+        approved_brief={
+            "title": "Nữ nghệ nhân Linh làm bình gốm xanh",
+            "needs_characters": True,
+            "needs_locations": True,
+            "needs_dialogue": False,
+            "needs_voice": False,
+            "needs_music": False,
+        },
+    )
+    state = video_uiflow3.lock_content(state)
+
+    quick = bot.video_ai_real_build_quick_plan(state, bible_only=True)
+
+    assert len(quick["bible"]["characters"]) == 1
+    character = quick["bible"]["characters"][0]
+    assert character["display_name"] == "Linh"
+    assert character["gender"] == "female"
+
+
+def test_video_ai_real_quick_build_prefers_explicit_location_from_brief():
+    state = video_uiflow3.new_state(
+        "video_ai_real",
+        draft_id="pilot-explicit-location",
+    )
+    state = video_uiflow3.set_entry_mode(state, "prompt_video")
+    state = video_uiflow3.set_scene_count_preference(state, 2)
+    state = video_uiflow3.set_format(
+        state,
+        ratio="9:16",
+        target_duration_seconds=16,
+    )
+    state = video_uiflow3.set_content_candidate(
+        state,
+        source="manual",
+        original_intent=(
+            "Nhân vật Linh, nữ nghệ nhân gốm Việt Nam, mặc tạp dề xanh "
+            "trên áo trắng trong xưởng gốm ánh sáng ấm. Cảnh 1 Linh dùng "
+            "hai tay tạo hình đất sét. Cảnh 2 Linh nâng bình gốm xanh."
+        ),
+        approved_brief={
+            "title": "Linh làm bình gốm xanh trong xưởng gốm",
+            "needs_characters": True,
+            "needs_locations": True,
+            "needs_dialogue": False,
+            "needs_voice": False,
+            "needs_music": False,
+        },
+    )
+    state = video_uiflow3.lock_content(state)
+
+    quick = bot.video_ai_real_build_quick_plan(state, bible_only=True)
+
+    assert len(quick["bible"]["locations"]) == 1
+    location = quick["bible"]["locations"][0]
+    assert location["name"] == "Xưởng gốm"
+    assert "xưởng gốm ánh sáng ấm" in location["description"].lower()
+
+
+def test_explicit_character_identity_does_not_treat_product_gender_as_character_gender():
+    assert video_uiflow3.infer_explicit_character_identity(
+        "Giới thiệu nước hoa nam hương gỗ trong studio tối giản."
+    ) == {}
 
 
 def test_video_ai_real_compile_hook_is_a_noop_for_other_products():

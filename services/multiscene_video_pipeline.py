@@ -710,7 +710,7 @@ def normalize_scene_duration(
             "format=yuv420p",
         ]
     )
-    cmd = [ffmpeg, "-y", "-autorotate", "-i", source]
+    cmd = [ffmpeg, "-y", "-i", source]
     if preserve_audio:
         audio_filters: list[str] = []
         if abs(audio_tempo - 1.0) > 0.0001:

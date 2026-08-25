@@ -6,6 +6,9 @@ import asyncio
 import hashlib
 import inspect
 import math
+import os
+import shutil
+import subprocess
 import threading
 import time
 import unicodedata
@@ -19,6 +22,16 @@ from services import subtitle_dub_product_pipeline
 
 AUTO_SPEAKER_PREFLIGHT_READY = "AUTO_SPEAKER_PREFLIGHT_READY"
 
+_SUBTITLE_SCRIPT_CHARSET = {
+    "japanese": "3042",
+    "chinese": "4e2d",
+    "korean": "ac00",
+    "thai": "0e01",
+    "arabic": "0627",
+    "devanagari": "0915",
+    "cyrillic": "0416",
+}
+
 
 def is_auto_speaker_state(state: Mapping[str, object] | None) -> bool:
     """Return true only for the repository-wide exact Auto state pair."""
@@ -28,6 +41,53 @@ def is_auto_speaker_state(state: Mapping[str, object] | None) -> bool:
         current.get("voice_kind") == "auto_speaker_gender"
         and current.get("voice_selection_mode") == "auto_speaker"
     )
+
+
+def _font_path_supports_script(path: str, script: str) -> bool:
+    font_path = os.path.abspath(os.path.expandvars(os.path.expanduser(str(path or ""))))
+    if not font_path or not os.path.isfile(font_path):
+        return False
+    charset = str(_SUBTITLE_SCRIPT_CHARSET.get(str(script or "").strip().lower()) or "")
+    if not charset:
+        return True
+    fc_list = shutil.which("fc-list")
+    if not fc_list:
+        return False
+    try:
+        proc = subprocess.run(
+            [fc_list, "-f", "%{file}\\n", f":charset={charset}"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except Exception:
+        return False
+    supported = {
+        os.path.normcase(os.path.realpath(item.strip()))
+        for item in str(proc.stdout or "").splitlines()
+        if item.strip()
+    }
+    return proc.returncode == 0 and os.path.normcase(os.path.realpath(font_path)) in supported
+
+
+def guard_subtitle_font(style: Mapping[str, object] | None, *, script: str) -> dict:
+    current = dict(style or {})
+    normalized_script = str(script or "latin").strip().lower()
+    if normalized_script == "latin" or _font_path_supports_script(
+        str(current.get("subtitle_font_path") or ""),
+        normalized_script,
+    ):
+        return current
+    current.update(
+        {
+            "subtitle_font_resolution_ok": False,
+            "subtitle_font_blocker": f"subtitle_font_missing:{normalized_script}",
+            "subtitle_font_script": normalized_script,
+            "subtitle_font_fallback_reason": "resolved_font_missing_required_script",
+        }
+    )
+    return current
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -219,7 +279,11 @@ async def _drain_worker(worker: asyncio.Task) -> None:
 async def _classify_off_event_loop(
     pcm_path: Path,
     ranges_by_speaker: dict[str, list[tuple[float, float]]],
+    classify_speakers: Callable[..., dict[str, dict]] | None = None,
 ) -> dict[str, dict]:
+    classifier = classify_speakers or speaker_cast.classify_speaker_registers
+    if not callable(classifier):
+        raise speaker_cast.AutoCastUnavailable()
     classifier_started = time.monotonic()
     classifier_deadline = (
         classifier_started + speaker_cast.CLASSIFIER_WALL_TIMEOUT_SECONDS
@@ -227,7 +291,7 @@ async def _classify_off_event_loop(
     stop_event = threading.Event()
     worker = asyncio.create_task(
         asyncio.to_thread(
-            speaker_cast.classify_speaker_registers,
+            classifier,
             str(pcm_path),
             ranges_by_speaker,
             deadline_monotonic=classifier_deadline,
@@ -495,6 +559,7 @@ async def run_auto_speaker_preflight(
     prepare_subtitles: Callable[..., Any],
     post_prepare_gate: Callable[[dict, Mapping[str, object]], Any],
     extract_pcm: Callable[..., Any],
+    classify_speakers: Callable[..., dict[str, dict]] | None = None,
 ) -> dict[str, Any]:
     """Prepare, gate, stream-classify, clean up, and stop before Task 5 work."""
 
@@ -524,6 +589,7 @@ async def run_auto_speaker_preflight(
         classifications = await _classify_off_event_loop(
             pcm_path,
             ranges_by_speaker,
+            classify_speakers,
         )
         result = {
             "ok": True,
@@ -559,6 +625,7 @@ async def run_auto_speaker_blackbox(
     extract_pcm: Callable[..., Any],
     validated_pools: Mapping[str, object],
     required_pool_capacity: int = 1,
+    classify_speakers: Callable[..., dict[str, dict]] | None = None,
     **payload: Any,
 ) -> dict[str, Any]:
     """Run the Auto-only wrappers, then delegate once to the protected lane."""
@@ -596,6 +663,7 @@ async def run_auto_speaker_blackbox(
             prepare_subtitles=prepare_subtitles,
             post_prepare_gate=post_prepare_gate,
             extract_pcm=extract_pcm,
+            classify_speakers=classify_speakers,
         )
         if not isinstance(preflight, Mapping):
             raise speaker_cast.AutoCastUnavailable()

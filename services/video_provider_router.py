@@ -3789,6 +3789,8 @@ def run_provider_generation(
     submit_enabled = bool(
         submit_switch_enabled and runtime_freeze_truth.get("public_live_allowed")
     )
+    existing_provider, existing_task_id, existing_video_id = _metadata_existing_provider_task(metadata)
+    poll_existing_provider = bool(existing_provider and (existing_task_id or existing_video_id))
     persisted_eligibility_snapshot = (
         metadata.get("provider_eligibility_snapshot")
         if isinstance(metadata.get("provider_eligibility_snapshot"), dict)
@@ -3837,7 +3839,14 @@ def run_provider_generation(
         runtime_eligibility_snapshot["product_video_freeze_truth"] = runtime_freeze_truth
         runtime_eligibility_snapshot["freeze_blocker_code"] = str(runtime_freeze_truth.get("blocker_code") or "")
         runtime_eligibility_snapshot["freeze_blocker_source"] = str(runtime_freeze_truth.get("blocker_source") or "")
-        candidate_adapters = [item for item in candidate_adapters if item.provider_name in runtime_candidates]
+        if poll_existing_provider:
+            candidate_adapters = [
+                item for item in candidate_adapters if item.provider_name == existing_provider
+            ][:1]
+        else:
+            candidate_adapters = [
+                item for item in candidate_adapters if item.provider_name in runtime_candidates
+            ]
         adapter = candidate_adapters[0] if candidate_adapters else None
         provider_candidates = [item.provider_name for item in candidate_adapters]
         initial_primary_provider = adapter.provider_name if adapter else ""
@@ -3858,7 +3867,6 @@ def run_provider_generation(
         # contract filtering. This lets the persisted job quote authorize one
         # in-budget fallback without asking the customer to confirm twice.
         metadata.setdefault("fallback_candidate_prevalidated", True)
-    existing_provider, existing_task_id, existing_video_id = _metadata_existing_provider_task(metadata)
     pending_provider = str(metadata.get("provider_pending_provider") or existing_provider or "").strip()
     pending_task_id = str(metadata.get("provider_pending_task_id") or existing_task_id or "").strip()
     pending_video_id = str(metadata.get("provider_pending_video_id") or existing_video_id or "").strip()

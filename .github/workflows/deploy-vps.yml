@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -25,36 +27,135 @@ jobs:
         run: |
           python -m py_compile bot.py services/*.py
 
-      - name: Deploy to VPS via SSH
+      - name: Package Release Artifacts
+        run: |
+          set -euo pipefail
+          RELEASE_DIR="/tmp/bot-release-${GITHUB_SHA}"
+          mkdir -p "${RELEASE_DIR}"
+
+          git archive --format=tar --output="${RELEASE_DIR}/release.tar" "${GITHUB_SHA}"
+
+          git update-ref refs/deployments/bot-release "${GITHUB_SHA}"
+          git bundle create "${RELEASE_DIR}/release.bundle" refs/deployments/bot-release
+          git bundle verify "${RELEASE_DIR}/release.bundle"
+
+          ADVERTISED_SHA="$(git bundle list-heads "${RELEASE_DIR}/release.bundle" | awk '{print $1}')"
+          if [[ "$ADVERTISED_SHA" != "$GITHUB_SHA" ]]; then
+            echo "ERROR: Bundle advertised SHA ($ADVERTISED_SHA) != GITHUB_SHA ($GITHUB_SHA)" >&2
+            exit 1
+          fi
+
+          cd "${RELEASE_DIR}"
+          sha256sum release.tar release.bundle > checksums.sha256
+          sha256sum -c checksums.sha256
+
+      - name: Deploy Bot to VPS via SSH
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_KEY_B64: ${{ secrets.VPS_SSH_KEY_B64 }}
+          TARGET_SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
           echo "$VPS_SSH_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+
+          RELEASE_DIR="/tmp/bot-release-${TARGET_SHA}"
+          REMOTE_STAGING="/tmp/deploy-bot-${TARGET_SHA}"
+
+          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$VPS_USER@$VPS_HOST" "mkdir -p '${REMOTE_STAGING}'"
+          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no "${RELEASE_DIR}/release.tar" "${RELEASE_DIR}/release.bundle" "${RELEASE_DIR}/checksums.sha256" "$VPS_USER@$VPS_HOST:${REMOTE_STAGING}/"
+
           ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=10 "$VPS_USER@$VPS_HOST" "
             set -euo pipefail
-            echo '=== Pulling Bot Repo on VPS ==='
-            cd /opt/toanaas/bot
-            git fetch origin --prune
-            git checkout main
-            git pull origin main
 
-            echo '=== Pulling Worker Repo on VPS ==='
-            cd /opt/toanaas-worker
-            git fetch origin --prune
-            git checkout main
-            git pull origin main
+            TARGET_SHA='${TARGET_SHA}'
+            if [[ ! \"\$TARGET_SHA\" =~ ^[0-9a-fA-F]{40}\$ ]]; then
+              echo 'ERROR: TARGET_SHA is not a valid 40-character hex string' >&2
+              exit 1
+            fi
 
-            echo '=== Restarting Bot and Worker Services ==='
-            systemctl restart toanaas-bot.service toanaas-worker-owner-product-video.service toanaas-video-edit-worker.service
+            STAGING_DIR=\"/tmp/deploy-bot-\$TARGET_SHA\"
+            cd \"\$STAGING_DIR\"
+            sha256sum -c checksums.sha256
+
+            WEBAPP_DIR='/opt/toanaas/bot'
+            cd \"\$WEBAPP_DIR\"
+
+            PREV_HEAD=\"\$(git rev-parse refs/heads/main)\"
+            UTC_TIMESTAMP=\"\$(date -u +%Y%m%d%H%M%S)\"
+            BACKUP_DIR=\"\$WEBAPP_DIR/delete/deploy-\$TARGET_SHA-\$UTC_TIMESTAMP\"
+            mkdir -p \"\$BACKUP_DIR\"
+
+            echo '=== Creating Tracked Source Backup ==='
+            git ls-files > \"\$BACKUP_DIR/tracked-files.txt\"
+            git ls-files -z | tar -c --null -T - | tar -x -C \"\$BACKUP_DIR\"
+
+            TRACKED_COUNT=\"\$(wc -l < \"\$BACKUP_DIR/tracked-files.txt\")\"
+            printf 'previous_head: %s\ntarget_sha: %s\nbackup_timestamp_utc: %s\ntracked_file_count: %s\n' \"\$PREV_HEAD\" \"\$TARGET_SHA\" \"\$UTC_TIMESTAMP\" \"\$TRACKED_COUNT\" > \"\$BACKUP_DIR/manifest.txt\"
+
+            echo '=== Fetching Bundle Objects and Verifying Target ==='
+            git fetch \"\$STAGING_DIR/release.bundle\" refs/deployments/bot-release:refs/deployments/bot-release
+            FETCHED_SHA=\"\$(git rev-parse refs/deployments/bot-release)\"
+            if [[ \"\$FETCHED_SHA\" != \"\$TARGET_SHA\" ]]; then
+              echo \"ERROR: FETCHED_SHA (\$FETCHED_SHA) != TARGET_SHA (\$TARGET_SHA)\" >&2
+              exit 1
+            fi
+            git cat-file -e \"\$TARGET_SHA^{commit}\"
+
+            echo '=== Quarantining Removed Tracked Files ==='
+            git ls-tree -r --name-only \"\$TARGET_SHA\" > \"\$STAGING_DIR/target-files.txt\"
+            git ls-files > \"\$STAGING_DIR/current-files.txt\"
+            comm -23 <(sort \"\$STAGING_DIR/current-files.txt\") <(sort \"\$STAGING_DIR/target-files.txt\") > \"\$STAGING_DIR/removed-files.txt\"
+            while IFS= read -r rel_path; do
+              if [[ -n \"\$rel_path\" && -f \"\$WEBAPP_DIR/\$rel_path\" ]]; then
+                mkdir -p \"\$BACKUP_DIR/removed/\$(dirname \"\$rel_path\")\"
+                mv -- \"\$WEBAPP_DIR/\$rel_path\" \"\$BACKUP_DIR/removed/\$rel_path\"
+              fi
+            done < \"\$STAGING_DIR/removed-files.txt\"
+
+            echo '=== Applying Release Source ==='
+            tar -xf \"\$STAGING_DIR/release.tar\" -C \"\$WEBAPP_DIR\"
+
+            git update-ref refs/heads/main \"\$TARGET_SHA\" \"\$PREV_HEAD\"
+            git update-ref refs/remotes/origin/main \"\$TARGET_SHA\"
+            git symbolic-ref HEAD refs/heads/main
+            git read-tree \"\$TARGET_SHA\"
+
+            CURRENT_SHA=\"\$(git rev-parse HEAD)\"
+            if [[ \"\$CURRENT_SHA\" != \"\$TARGET_SHA\" ]]; then
+              echo \"ERROR: CURRENT_SHA (\$CURRENT_SHA) != TARGET_SHA (\$TARGET_SHA)\" >&2
+              exit 1
+            fi
+
+            git diff --exit-code -- . ':(exclude)delete/**'
+
+            echo '=== Restarting Bot Service ==='
+            systemctl restart toanaas-bot.service
 
             echo '=== Verifying Active Services ==='
             systemctl is-active toanaas-bot.service
-            systemctl is-active toanaas-worker-owner-product-video.service
-            systemctl is-active toanaas-video-edit-worker.service
+            systemctl is-active nginx.service
+
+            echo '=== Verifying Health Endpoint ==='
+            HEALTH_JSON=''
+            for attempt in {1..120}; do
+              if HEALTH_JSON=\$(curl -s -f http://127.0.0.1:8080/health); then
+                break
+              fi
+              sleep 2
+            done
+
+            if [[ -z \"\$HEALTH_JSON\" ]]; then
+              echo 'ERROR: Health endpoint did not respond' >&2
+              exit 1
+            fi
+
+            printf '%s' \"\$HEALTH_JSON\" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get(\"status\") == \"ok\"; print(\"HEALTH_PAYLOAD_VALIDATED:\", data.get(\"status\"))'
 
             echo '=== BOT DEPLOY SUCCESS ==='
+            echo \"PREVIOUS_HEAD=\$PREV_HEAD\"
+            echo \"DEPLOYED_SHA=\$TARGET_SHA\"
+            echo \"BACKUP_DIR=\$BACKUP_DIR\"
           "

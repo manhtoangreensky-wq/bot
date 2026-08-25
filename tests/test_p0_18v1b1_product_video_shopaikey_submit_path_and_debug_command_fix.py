@@ -159,6 +159,69 @@ def test_shopaikey_submit_success_saves_task_id_and_allows_poll(monkeypatch, tmp
     assert result["provider_poll_called"] is True
 
 
+def test_existing_task_poll_survives_new_submit_eligibility_recheck(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_open(self, url, payload=None, *, method="POST", timeout=90):
+        calls.append((self.provider_name, method))
+        assert method == "GET"
+        return _poll_pending(self.provider_name)
+
+    monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open)
+    monkeypatch.setattr(
+        video_provider_router,
+        "product_video_provider_eligibility_snapshot",
+        lambda **_kwargs: {
+            "provider_eligibility_snapshot_id": "runtime-no-new-submit-candidates",
+            "eligible_provider_keys": [],
+            "preconfirm_candidate_keys": ["shopaikey_video"],
+            "runtime_candidate_keys": [],
+            "candidate_set_consistent": False,
+            "final_eligible_provider_count": 0,
+            "candidate_rejection_reason_by_provider": {
+                "shopaikey_video": ["provider_fresh_validated_success_required"]
+            },
+        },
+    )
+    request = _request()
+    request.metadata.update(
+        {
+            "submit_source": "worker_poll_existing_task",
+            "provider_submit_source": "worker_poll_existing_task",
+            "original_submit_source": "public_user_final_confirm",
+            "public_user_confirmed": True,
+            "invoice_confirmed": True,
+            "recovery_existing_tasks_only": True,
+            "provider_submit_allowed": False,
+            "provider_pending_provider": "shopaikey_video",
+            "provider_pending_task_id": "shopaikey_video-task-66",
+            "provider_pending_request_job_id": "job-66",
+            "worker_compatible": True,
+            "admission_enforced": True,
+            "provider_eligibility_snapshot": {
+                "provider_eligibility_snapshot_id": "existing-task-snapshot",
+                "configured_provider_keys": ["shopaikey_video"],
+                "contract_valid_provider_chain": ["shopaikey_video"],
+                "eligible_provider_keys": ["shopaikey_video"],
+            },
+        }
+    )
+
+    result = video_provider_router.run_provider_generation(
+        request,
+        output_dir=str(tmp_path),
+        environ={**_env(), "VIDEO_PROVIDER_CHAIN": "shopaikey_video"},
+        sleep_func=lambda _seconds: None,
+    )
+
+    assert calls == [("shopaikey_video", "GET")]
+    assert result["provider_submit_called"] is False
+    assert result["provider_poll_called"] is True
+    assert result["poll_existing_task"] is True
+    assert result["no_new_submit"] is True
+    assert result["continue_polling"] is True
+
+
 def test_shopaikey_submit_5xx_falls_back_to_key4u(monkeypatch, tmp_path):
     calls = []
 

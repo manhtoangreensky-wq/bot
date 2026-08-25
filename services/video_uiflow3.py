@@ -10,8 +10,15 @@ from copy import deepcopy
 from hashlib import sha256
 import json
 from math import ceil
+import re
 from typing import Any, Iterable, Mapping
+import unicodedata
 from uuid import uuid4
+
+from services import video_profile_context_engine
+from services import video_profile_catalog
+from services import video_product_profiles as video_profiles
+from services import video_script_product
 
 
 FLOW_SCHEMA_VERSION = 3
@@ -33,6 +40,9 @@ DEFAULT_CONTINUITY = {
     "location": True,
 }
 VIDEO_AI_REAL_PRODUCT_FIRST_MODES = frozenset({"prompt_video", "image_video"})
+_SCENE_PLAN_MARKER_RE = re.compile(
+    r"(?i)\b(?:cảnh|scene)\s*(\d{1,2})\s*[:.\-)–—]?\s*"
+)
 
 
 ENTRY_ADAPTERS: dict[str, dict[str, Any]] = {
@@ -229,6 +239,117 @@ def _allocate_id(state: dict[str, Any], prefix: str, values: Iterable[Any]) -> s
 
 def _dedupe(values: Iterable[Any]) -> list[str]:
     return list(dict.fromkeys(_text(value, 120) for value in values if _text(value, 120)))
+
+
+def infer_explicit_character_identity(value: Any) -> dict[str, str]:
+    """Extract only character identity that is explicit in a Vietnamese brief."""
+
+    text = _text(value, 4000)
+    if not text:
+        return {}
+    name_token = r"[A-ZÀ-ỴĐ][A-Za-zÀ-ỹĐđ'-]*"
+    full_name = rf"{name_token}(?:\s+{name_token}){{0,3}}"
+    person_roles = (
+        r"nghệ\s+nhân|diễn\s+viên|người\s+mẫu|bác\s+sĩ|đầu\s+bếp|"
+        r"giáo\s+viên|chuyên\s+gia|người\s+dẫn|kiến\s+trúc\s+sư|"
+        r"kỹ\s+sư|doanh\s+nhân"
+    )
+    name_match = None
+    for pattern in (
+        rf"(?i:\bnhân\s+vật)\s+(?P<name>{full_name})(?=\s*(?:[,;:.]|(?i:\blà\b)|$))",
+        rf"(?P<name>{full_name})\s*,\s*(?i:(?:một\s+)?(?:nữ|nam)\b)",
+        rf"(?i:\b(?:nữ|nam)\s+(?:{person_roles}))\s+(?P<name>{full_name})"
+        rf"(?=\s*(?:[,;:.]|(?i:\b(?:là|làm|đang|tạo|giới\s+thiệu)\b)|$))",
+    ):
+        name_match = re.search(pattern, text)
+        if name_match:
+            break
+
+    folded = "".join(
+        character
+        for character in unicodedata.normalize("NFD", text.lower().replace("đ", "d"))
+        if unicodedata.category(character) != "Mn"
+    )
+    role_pattern = (
+        r"nghe\s+nhan|dien\s+vien|nguoi\s+mau|bac\s+si|dau\s+bep|"
+        r"giao\s+vien|chuyen\s+gia|nguoi\s+dan|kien\s+truc\s+su|"
+        r"ky\s+su|doanh\s+nhan"
+    )
+    female = bool(re.search(
+        rf"\b(?:nhan\s+vat\s+nu|nu\s+(?:{role_pattern})|nguoi\s+phu\s+nu|co\s+gai|be\s+gai|nu\s+chinh)\b",
+        folded,
+    ))
+    male = bool(re.search(
+        rf"\b(?:nhan\s+vat\s+nam|nam\s+(?:{role_pattern})|nguoi\s+dan\s+ong|chang\s+trai|be\s+trai|nam\s+chinh)\b",
+        folded,
+    ))
+    if name_match and female == male:
+        tail = text[name_match.end() : name_match.end() + 80]
+        folded_tail = "".join(
+            character
+            for character in unicodedata.normalize("NFD", tail.lower().replace("đ", "d"))
+            if unicodedata.category(character) != "Mn"
+        )
+        direct_gender = re.match(r"\s*,?\s*(?:la\s+|mot\s+)?(nu|nam)\b", folded_tail)
+        if direct_gender:
+            female = direct_gender.group(1) == "nu"
+            male = direct_gender.group(1) == "nam"
+
+    result = {}
+    if name_match:
+        result["display_name"] = name_match.group("name").strip()
+    if female != male:
+        result["gender"] = "female" if female else "male"
+    return result
+
+
+def infer_explicit_location(value: Any) -> dict[str, str]:
+    """Extract a location that is stated explicitly in a Vietnamese brief."""
+
+    text = _text(value, 4000)
+    if not text:
+        return {}
+    location_types = (
+        r"xưởng|studio|phòng|nhà|quán|cửa\s+hàng|showroom|văn\s+phòng|"
+        r"bảo\s+tàng|thư\s+viện|trường|bệnh\s+viện|phòng\s+khám|nhà\s+hàng|"
+        r"bếp|đường\s+phố|công\s+viên|bãi\s+biển|khu\s+rừng|rừng|núi|"
+        r"cánh\s+đồng|sân|ga|sân\s+bay|khách\s+sạn|nhà\s+máy"
+    )
+    match = re.search(
+        rf"\b(?:trong|tại|ở)\s+(?P<phrase>(?:{location_types})\b.{{0,160}}?)"
+        rf"(?=\s*(?:[.;!?|]|\bCảnh\s+\d+\b|$))",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return {}
+    phrase = re.sub(r"\s+", " ", match.group("phrase")).strip(" ,:-")
+    name = re.split(
+        r"\s+(?:ánh\s+sáng|vào\s+buổi|buổi|ban\s+(?:ngày|đêm)|lúc|với|có)\b",
+        phrase,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip(" ,:-")
+    if not name:
+        return {}
+    name = name[:1].upper() + name[1:]
+    folded = "".join(
+        character
+        for character in unicodedata.normalize("NFD", phrase.lower().replace("đ", "d"))
+        if unicodedata.category(character) != "Mn"
+    )
+    outdoor = bool(re.match(
+        r"(?:duong\s+pho|cong\s+vien|bai\s+bien|khu\s+rung|rung|nui|canh\s+dong|san\b)",
+        folded,
+    ))
+    warm = bool(re.search(r"\b(?:anh\s+sang\s+am|am\s+ap)\b", folded))
+    return {
+        "name": name,
+        "description": f"Bối cảnh được nêu rõ trong nội dung: {phrase}.",
+        "indoor_outdoor": "outdoor" if outdoor else "indoor",
+        "lighting": "warm_soft" if warm else "natural_daylight" if outdoor else "natural_soft",
+        "mood": "warm_realistic" if warm else "fresh_calm" if outdoor else "realistic",
+    }
 
 
 def _character(ordinal: int) -> dict[str, Any]:
@@ -1665,6 +1786,209 @@ def scene_plan_complete(state: Mapping[str, Any]) -> bool:
     )
 
 
+def _scene_plan_intent(state: Mapping[str, Any]) -> str:
+    content = dict(state.get("content") or {})
+    brief = dict(content.get("approved_brief") or {})
+    episode = dict((state.get("episode") or {}).get("content") or {})
+    candidates = []
+    if str(state.get("parent_product") or "") == "multi_scene_film":
+        candidates.extend((episode.get("original_intent"), (state.get("series") or {}).get("goal")))
+    candidates.extend((
+        content.get("original_intent"),
+        brief.get("prompt"),
+        brief.get("visual_prompt"),
+        brief.get("title"),
+    ))
+    return _text(next((item for item in candidates if _text(item, 1200)), "Nội dung đã khóa"), 1200)
+
+
+def _scene_plan_selected_fields(state: Mapping[str, Any], group: str) -> dict[str, str]:
+    selected: dict[str, str] = {}
+    for key, raw in dict(state.get(group) or {}).items():
+        item = dict(raw) if isinstance(raw, Mapping) else {"enabled": True, "value": raw}
+        value = _text(item.get("value"), 240)
+        if bool(item.get("enabled")) and value:
+            selected[_text(key, 80)] = value
+    return selected
+
+
+def _scene_plan_profile_context(state: Mapping[str, Any], scene_count: int):
+    intent = _scene_plan_intent(state)
+    requested = _text((state.get("content") or {}).get("profile_id"), 120)
+    try:
+        profile = (
+            video_profiles.get_video_profile(requested)
+            if requested
+            else video_profiles.resolve_profile_for_menu_product(
+                str(state.get("parent_product") or ""),
+                user_text=intent,
+            )
+        )
+    except KeyError:
+        profile = video_profiles.resolve_profile_for_menu_product(
+            str(state.get("parent_product") or ""),
+            user_text=intent,
+        )
+    context = video_profile_context_engine.select_prompt_context(
+        profile.profile_id,
+        user_idea=intent,
+        creative_controls=_scene_plan_selected_fields(state, "creative_controls"),
+        scene_count=max(1, scene_count),
+        language="vi",
+    )
+    return profile, context
+
+
+def _scene_plan_reference_context(state: Mapping[str, Any]) -> tuple[int, str]:
+    rows = [
+        dict(item)
+        for item in list((state.get("source") or {}).get("assets") or [])
+        + list(state.get("references") or [])
+        if isinstance(item, Mapping)
+    ]
+    image_types = {"image", "frame", "photo", "storyboard", "storyboard_frame", "raw_image"}
+    images = [item for item in rows if str(item.get("asset_type") or "").lower() in image_types]
+    notes = []
+    for item in images[:5]:
+        metadata = dict(item.get("metadata") or {})
+        note = _text(
+            metadata.get("caption")
+            or metadata.get("description")
+            or item.get("role"),
+            120,
+        )
+        if note and note not in notes:
+            notes.append(note)
+    return len(images), "; ".join(notes)
+
+
+def build_scene_plan_ai_prompt(state: Mapping[str, Any], scenes: Iterable[Mapping[str, Any]]) -> str:
+    """Build a compact, product-aware Gemini instruction from existing planning state."""
+
+    current = normalize_state(state)
+    scene_rows = [dict(item) for item in scenes if isinstance(item, Mapping)]
+    product = str(current.get("parent_product") or "")
+    scene_count = max(1, len(scene_rows))
+    seconds = max(
+        1,
+        _integer(
+            (current.get("format") or {}).get("seconds_per_scene"),
+            _integer((scene_rows[0] if scene_rows else {}).get("duration_target"), 8),
+        ),
+    )
+    profile, context = _scene_plan_profile_context(current, scene_count)
+    intent = _scene_plan_intent(current)
+    brief = dict((current.get("content") or {}).get("approved_brief") or {})
+
+    if product == "video_ai_real":
+        product_rule = (
+            f"Video AI chân thật ngắn. Mỗi cảnh dài đúng {seconds} giây; mỗi cảnh chỉ một hành động cụ thể "
+            "có thể hoàn tất trong thời lượng đó; không viết thành kịch bản dài và không nhồi nhiều diễn biến."
+        )
+    elif product == "video_trend":
+        product_rule = "Bám dữ liệu trend đã phân tích và nội dung đầu vào đã khóa; không tự thêm một tuyến truyện khác."
+    elif product == "script_image_video":
+        product_rule = "Bám sát kịch bản đã khóa, chia đúng ý kịch bản vào từng cảnh và không tự đổi cốt truyện."
+    elif product == "multi_scene_film":
+        product_rule = "Giữ mạch liên tục của series và tập; bám nhân vật, bối cảnh, tình tiết và trạng thái nối tiếp."
+    elif product == "storyboard_prompt":
+        product_rule = "Bám đúng thứ tự và nội dung các khung storyboard đã có; không đảo hoặc phát minh khung mới."
+    elif product == "frame_video_local":
+        product_rule = "Bám thứ tự ảnh nguồn; mỗi cảnh chỉ mô tả chuyển động phù hợp với đúng ảnh của cảnh đó."
+    elif product == "self_shot_scene_change":
+        product_rule = "Bám chủ thể và chuyển động của video tự quay; chỉ thay đổi theo lựa chọn đã khóa."
+    else:
+        product_rule = f"Video ngắn; mỗi cảnh hoàn tất một hành động rõ ràng trong khoảng {seconds} giây."
+
+    characters = []
+    voice_cast = dict((current.get("audio") or {}).get("voice_cast") or {})
+    for item in list((current.get("bible") or {}).get("characters") or [])[:5]:
+        character_id = str(item.get("character_id") or "")
+        details = [
+            _text(item.get("display_name") or item.get("name") or "Nhân vật", 80),
+            _text(item.get("wardrobe") or item.get("appearance") or item.get("body"), 120),
+        ]
+        has_voice = bool(item.get("voice_id") or (voice_cast.get(character_id) or {}).get("voice_id"))
+        if has_voice:
+            details.append("giọng đã gán")
+        characters.append(" (".join([details[0], ", ".join(value for value in details[1:] if value)]) + ")" if any(details[1:]) else details[0])
+
+    locations = [
+        _text(item.get("name") or item.get("description"), 140)
+        for item in list((current.get("bible") or {}).get("locations") or [])[:5]
+        if _text(item.get("name") or item.get("description"), 140)
+    ]
+    image_count, image_notes = _scene_plan_reference_context(current)
+    audio = dict(current.get("audio") or {})
+    dialogue = [
+        _text(item.get("text"), 160)
+        for item in list(audio.get("dialogue_segments") or [])[:4]
+        if _text(item.get("text"), 160)
+    ]
+    music_plan = dict(audio.get("music_plan") or {})
+    music_detail = _text(
+        music_plan.get("track_id") or music_plan.get("prompt") or music_plan.get("title"),
+        120,
+    )
+    source_metadata = dict((current.get("source") or {}).get("metadata") or {})
+    source_analysis = _text(
+        source_metadata.get("trend_analysis")
+        or source_metadata.get("video_analysis")
+        or source_metadata.get("analysis")
+        or source_metadata.get("transcript"),
+        500,
+    )
+    selected_context = _text(
+        brief.get("selected_context_prompt")
+        or brief.get("prompt")
+        or brief.get("visual_prompt")
+        or brief.get("context_guidance"),
+        700,
+    )
+    creative = _scene_plan_selected_fields(current, "creative_controls")
+    requirements = _scene_plan_selected_fields(current, "preservation_requirements")
+
+    lines = [
+        "Bạn là đạo diễn lập kế hoạch cảnh video AI.",
+        f"Sản phẩm: {product}. {product_rule}",
+        f"Nội dung: {intent}",
+        f"Kho nội bộ: {profile.profile_id}; phong cách={context.selected_visual_style}; máy quay={context.selected_camera_language}; chuyển động={context.selected_motion_language}.",
+        f"Ảnh tham chiếu: {image_count}" + (f"; {image_notes}" if image_notes else "") + ". Giữ nhận dạng và bối cảnh theo ảnh đã gắn.",
+    ]
+    if product != "video_ai_real" and context.selected_script_formula:
+        lines.append(f"Cấu trúc phù hợp: {context.selected_script_formula}.")
+    if source_analysis:
+        lines.append(f"Phân tích nguồn: {source_analysis}")
+    if selected_context:
+        lines.append(f"Ngữ cảnh triển khai đã chọn: {selected_context}")
+    if creative:
+        lines.append("Phong cách đã chọn: " + "; ".join(f"{key}={value}" for key, value in creative.items()))
+    if requirements:
+        lines.append("Yêu cầu giữ nguyên: " + "; ".join(f"{key}={value}" for key, value in requirements.items()))
+    if characters:
+        lines.append("Nhân vật: " + "; ".join(characters))
+    if locations:
+        lines.append("Bối cảnh: " + "; ".join(locations))
+    if dialogue or str(audio.get("subtitle_mode") or ""):
+        lines.append(
+            "Lời thoại/phụ đề: "
+            + (" | ".join(dialogue) if dialogue else "theo nội dung đã chọn")
+            + f"; chế độ={str(audio.get('subtitle_mode') or 'theo dữ liệu hiện có')}. Mọi câu phải nói xong trong thời lượng cảnh."
+        )
+    if str(audio.get("music_scope") or "none") != "none":
+        lines.append(
+            f"Nhạc: {str(audio.get('music_scope') or 'none')}"
+            + (f"; {music_detail}" if music_detail else "")
+            + ". Giữ nhịp cảnh khớp nhạc đã chọn."
+        )
+    lines.extend([
+        f"Trả về JSON array đúng {scene_count} object, theo thứ tự cảnh.",
+        "Mỗi object chỉ có semantic_beat, main_action, completion_state; viết tiếng Việt có dấu, ngắn, cụ thể và khả thi.",
+        "Chỉ trả JSON thuần, không codeblock.",
+    ])
+    return "\n".join(lines)
+
+
 def suggest_scene_plan(state: Mapping[str, Any]) -> dict[str, Any]:
     """Fill only missing scene semantics with a provider-free content outline."""
 
@@ -1747,6 +2071,170 @@ def suggest_scene_plan(state: Mapping[str, Any]) -> dict[str, Any]:
         list(current["navigation"].get("dirty_sections") or [])
         + ["scene_plan", "scene_assignment", "dialogue", "prompts", "summary"]
     )
+    return normalize_state(current)
+
+
+def _scene_plan_marked_actions(value: Any, scene_count: int) -> list[str]:
+    text = str(value or "").strip()
+    matches = list(_SCENE_PLAN_MARKER_RE.finditer(text))
+    expected = list(range(1, max(1, int(scene_count or 1)) + 1))
+    if [int(match.group(1)) for match in matches] != expected:
+        return []
+    actions = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        action = _text(text[match.end():end].strip(" \t\r\n:;|,-–—"), 800)
+        if not action:
+            return []
+        actions.append(action)
+    return actions
+
+
+def _scene_plan_profile_beats(state: Mapping[str, Any], scene_count: int) -> list[dict[str, Any]]:
+    requested = _text((state.get("content") or {}).get("profile_id"), 120)
+    profile_key = video_profile_catalog.canonical_profile_key(requested)
+    if not profile_key:
+        profile, _context = _scene_plan_profile_context(state, scene_count)
+        profile_key = video_profile_catalog.canonical_profile_key(profile.profile_id)
+    return video_profile_catalog.semantic_beats_for_bundle(
+        profile_key or "storytelling_life",
+        (),
+        scene_count,
+    )
+
+
+def _scene_plan_vault_actions(state: Mapping[str, Any], scene_count: int) -> list[str]:
+    count = max(1, int(scene_count or 1))
+    scene_intents = [
+        _text(item.get("original_scene_intent"), 800)
+        for item in list(state.get("scenes") or [])
+        if str(item.get("planning_source") or "") != "local_prompt_vault"
+    ]
+    if len(scene_intents) == count and all(scene_intents) and len(set(scene_intents)) == count:
+        return scene_intents
+
+    content = dict(state.get("content") or {})
+    brief = dict(content.get("approved_brief") or {})
+    source_metadata = dict((state.get("source") or {}).get("metadata") or {})
+    if str(state.get("parent_product") or "") == "script_image_video":
+        source_text = _text(source_metadata.get("source_text") or content.get("original_intent"), 12000)
+        parsed = video_script_product.semantic_beats(source_text, count) if source_text else {}
+        actions = [
+            _text(item.get("action"), 800)
+            for item in list(parsed.get("semantic_beats") or [])
+            if isinstance(item, Mapping)
+        ]
+        if len(actions) == count and all(actions):
+            return actions
+
+    candidates = [
+        _scene_plan_intent(state),
+        source_metadata.get("source_text"),
+        source_metadata.get("trend_analysis"),
+        source_metadata.get("video_analysis"),
+        source_metadata.get("analysis"),
+        source_metadata.get("transcript"),
+    ]
+    for candidate in candidates:
+        actions = _scene_plan_marked_actions(candidate, count)
+        if actions:
+            return actions
+
+    sequence = str((brief.get("prompt_blueprint") or {}).get("sequence") or "")
+    for candidate in [sequence, *candidates]:
+        parts = [
+            _text(item, 800)
+            for item in re.split(r"\s*(?:→|->|;|\r?\n)\s*", str(candidate or ""))
+            if _text(item, 800)
+        ]
+        if len(parts) == count:
+            return parts
+    return []
+
+
+def suggest_scene_plan_from_vault(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Apply the existing local prompt vault when Gemini is unavailable."""
+
+    current = suggest_scene_plan(state)
+    scenes = list(current.get("scenes") or [])
+    _profile, context = _scene_plan_profile_context(current, len(scenes))
+    templates = list(context.selected_scene_role_templates or [])
+    intent = _scene_plan_intent(current)
+    product = str(current.get("parent_product") or "")
+    total = len(scenes)
+    scene_actions = _scene_plan_vault_actions(current, total)
+    profile_beats = _scene_plan_profile_beats(current, total)
+    subject = _text(intent.split("|", 1)[0], 180) or "Nội dung đã khóa"
+    for index, scene in enumerate(scenes, 1):
+        if bool(scene.get("locked_by_user")) or str(scene.get("planning_source") or "") == "user":
+            continue
+        template: dict[str, Any] = {}
+        if templates:
+            template_index = 0 if total <= 1 else round((index - 1) * (len(templates) - 1) / (total - 1))
+            template = dict(templates[template_index])
+            scene["scene_role"] = _text(template.get("role"), 80) or str(scene.get("scene_role") or "complete")
+            scene["original_scene_intent"] = _text(
+                f"{template.get('purpose') or template.get('title') or scene['scene_role']}: {intent}",
+                1600,
+            )
+        action = scene_actions[index - 1] if index <= len(scene_actions) else ""
+        profile_beat = (
+            dict(profile_beats[index - 1])
+            if not action and index <= len(profile_beats)
+            else {}
+        )
+        beat_idea = _text(profile_beat.get("main_idea"), 300)
+        beat_action = _text(profile_beat.get("action"), 500)
+        beat_completion = _text(profile_beat.get("completion"), 500)
+        if profile_beat.get("role"):
+            scene["scene_role"] = _text(profile_beat.get("role"), 80)
+        scene["original_scene_intent"] = _text(action or beat_idea or scene.get("original_scene_intent"), 1600)
+        if product == "video_ai_real":
+            duration = max(1, _integer(scene.get("duration_target"), _integer(current["format"].get("seconds_per_scene"), 8)))
+            scene["semantic_beat"] = _text(action or (f"{beat_idea}: {subject}" if beat_idea else f"{subject} · Cảnh {index}"), 800)
+            scene["main_action"] = _text(
+                (
+                    f"{action}. Hoàn tất trọn hành động trong {duration} giây."
+                    if action
+                    else (
+                        f"{beat_action} cho {subject}; hoàn tất trong {duration} giây."
+                        if beat_action
+                        else f"Thực hiện một hành động duy nhất cho Cảnh {index} và hoàn tất trong {duration} giây."
+                    )
+                ),
+                800,
+            )
+            scene["completion_state"] = _text(
+                (
+                    f"{beat_completion} Hành động Cảnh {index} hoàn tất rõ ràng trong {duration} giây."
+                    if beat_completion
+                    else f"Hành động Cảnh {index} đã hoàn tất rõ ràng trong {duration} giây."
+                ),
+                800,
+            )
+        else:
+            purpose = _text(template.get("purpose") or template.get("title"), 240) or f"Phát triển nội dung Cảnh {index}"
+            scene["semantic_beat"] = _text(action or (f"{beat_idea}: {subject}" if beat_idea else f"{purpose}: {subject}"), 800)
+            scene["main_action"] = _text(
+                (
+                    f"Thể hiện trọn vẹn: {action}."
+                    if action
+                    else (
+                        f"{beat_action}; bám trực tiếp nội dung {subject}."
+                        if beat_action
+                        else f"Thể hiện {purpose.lower()} bằng một hành động rõ ràng, bám nội dung đã khóa."
+                    )
+                ),
+                800,
+            )
+            scene["completion_state"] = _text(
+                beat_completion or f"Ý {purpose.lower()} đã hoàn tất và tạo trạng thái nối sang cảnh kế tiếp.",
+                800,
+            )
+        scene["planning_source"] = "local_prompt_vault"
+        scene["planning_confidence"] = 0.7
+    _link_scene_states(scenes)
+    current["scenes"] = scenes
     return normalize_state(current)
 
 

@@ -37,7 +37,7 @@ def is_combo_state(state: dict | None) -> bool:
 
 
 def normalize_combo_state(state: dict | None) -> dict:
-    """Collapse every legacy combo branch into the single translated-video lane."""
+    """Repair only stale combo mode keys before the existing combo MP4 callback."""
     current = state if isinstance(state, dict) else {}
     if not is_combo_state(current):
         return current
@@ -50,13 +50,6 @@ def normalize_combo_state(state: dict | None) -> dict:
             "requested_mode": COMBO_MODE,
             "active_flow": COMBO_FLOW,
             "product_type": "subtitle_dub",
-            "translate_requested": "1",
-            "dub_text_source": "translated",
-            "dub_source": "translated_subtitle",
-            "output_type": "video_subtitle",
-            "output_format": "video_subtitle",
-            "flow_type": "no_subtitle",
-            "combo_subpath": "",
             "_subdub_combo_blackbox_active": True,
         }
     )
