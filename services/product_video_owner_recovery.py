@@ -101,7 +101,11 @@ def _post_poll_finalizer_block_reason(
         return "post_poll_existing_task_mode_required"
     if not result.get("provider_poll_called"):
         return "post_poll_evidence_missing"
-    if _integer(result.get("provider_poll_http_status")) != 200:
+    provider_poll_http_status = result.get("provider_poll_http_status")
+    if provider_poll_http_status in (None, ""):
+        if not allow_stale_running:
+            return "post_poll_http_success_required"
+    elif _integer(provider_poll_http_status) != 200:
         return "post_poll_http_success_required"
     if not result.get("no_new_submit") or not result.get("no_new_paid_submit"):
         return "post_poll_no_new_submit_guard_missing"
