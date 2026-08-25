@@ -1,6 +1,7 @@
 """Safe public video-link downloader adapter for Video Studio."""
 
 from __future__ import annotations
+import json
 
 import ipaddress
 import os
@@ -163,6 +164,30 @@ class VideoDownloaderProvider:
             size_bytes=size_bytes,
         )
 
+    def _tikwm_metadata(self, detection: dict) -> VideoDownloaderMetadata:
+        url = detection.get("url") or ""
+        api_url = "https://www.tikwm.com/api/?url=" + urllib.parse.quote(url)
+        req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as res:
+                data = json.loads(res.read())
+                if data.get("code") == 0 and data.get("data"):
+                    info = data["data"]
+                    duration = int(info.get("duration") or 0)
+                    size_bytes = int(info.get("size") or 0)
+                    return VideoDownloaderMetadata(
+                        True,
+                        url,
+                        platform="TikTok",
+                        title=str(info.get("title") or ""),
+                        duration_seconds=duration,
+                        size_bytes=size_bytes,
+                        thumbnail_url=str(info.get("cover") or ""),
+                    )
+        except Exception:
+            pass
+        return None
+
     def metadata(self, url: str) -> dict:
         detection = self.detect_link(url)
         if not detection.get("ok"):
@@ -174,6 +199,16 @@ class VideoDownloaderProvider:
             ).to_dict()
         if detection.get("direct_video"):
             return self._direct_metadata(detection).to_dict()
+        if detection.get("platform") == "TikTok":
+            tk_meta = self._tikwm_metadata(detection)
+            if tk_meta:
+                if tk_meta.duration_seconds > self.max_duration_seconds:
+                    tk_meta.ok = False
+                    tk_meta.reason = "duration_too_long"
+                elif tk_meta.size_bytes > self.max_bytes:
+                    tk_meta.ok = False
+                    tk_meta.reason = "too_large"
+                return tk_meta.to_dict()
         try:
             import yt_dlp
         except Exception:
@@ -297,6 +332,28 @@ class VideoDownloaderProvider:
                 suffix = Path(urlparse(detection["url"]).path).suffix or ".mp4"
                 file_path = self._download_url_to_temp(detection["url"], suffix, output_path)
                 return {"ok": True, "kind": "video", "file_path": file_path, "metadata": metadata, "detection": detection}
+            
+            if detection.get("platform") == "TikTok":
+                # Try tikwm first
+                tk_meta = self._tikwm_metadata(detection)
+                if tk_meta and tk_meta.ok:
+                    api_url = "https://www.tikwm.com/api/?url=" + urllib.parse.quote(detection["url"])
+                    req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+                    try:
+                        with urllib.request.urlopen(req, timeout=15) as res:
+                            data = json.loads(res.read())
+                            if data.get("code") == 0 and data.get("data"):
+                                info = data["data"]
+                                dl_url = info.get("play")
+                                suffix = ".mp4"
+                                if kind == "audio":
+                                    dl_url = info.get("music")
+                                    suffix = ".mp3"
+                                if dl_url:
+                                    file_path = self._download_url_to_temp(dl_url, suffix, output_path)
+                                    return {"ok": True, "kind": kind, "file_path": file_path, "metadata": metadata, "detection": detection}
+                    except Exception as e:
+                        pass # fallback to yt-dlp if it fails
             try:
                 import yt_dlp
             except Exception:
