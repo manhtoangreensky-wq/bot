@@ -81572,7 +81572,7 @@ def video_uiflow3_expected_source_media_kinds(state: dict) -> set[str]:
 async def video_uiflow3_reply(message, context, state: dict):
     current = save_video_uiflow3_state(context, video_uiflow3_canonical_screen_state(state))
     text, keyboard = video_uiflow3_screen_payload(current)
-    return await message.reply_text(text, reply_markup=keyboard)
+    return await safe_reply_long_html(message, text, reply_markup=keyboard)
 
 
 def video_uiflow3_compact_pair(value: str) -> tuple[str, str]:
