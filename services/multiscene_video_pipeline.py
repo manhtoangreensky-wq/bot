@@ -1325,9 +1325,12 @@ def mux_final_multiscene_video(
     else:
         cmd += ["-map", video_map]
     if audio_map:
+        output_duration = probe_duration(master)
         cmd += [
             "-map",
             audio_map,
+            "-t",
+            f"{output_duration:.6f}",
             "-shortest",
             "-c:a",
             "aac",
