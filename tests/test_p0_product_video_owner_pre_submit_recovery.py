@@ -684,6 +684,214 @@ def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure
     )
 
 
+def test_owner_recovery_requeues_same_job_once_after_fixed_runtime_deploy(
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "product-video-20-post-deploy-finalizer"
+    workspace.mkdir()
+    scene_paths = {
+        "1": str(workspace / "provider_scene_001.mp4"),
+        "2": str(workspace / "provider_scene_002.mp4"),
+    }
+    for index, path in scene_paths.items():
+        (workspace / f"provider_scene_{int(index):03d}.mp4").write_bytes(
+            f"validated-scene-{index}".encode("ascii")
+        )
+    task_ids_by_scene = {
+        "1": ["task_existing_scene_1"],
+        "2": ["task_existing_scene_2"],
+    }
+    manifest = {
+        "job_id": "1",
+        "user_id": str(USER_ID),
+        "workspace_dir": str(workspace),
+        "required_scene_indexes": [1, 2],
+        "task_ids_by_scene": task_ids_by_scene,
+        "winner_task_by_scene": {
+            "1": "task_existing_scene_1",
+            "2": "task_existing_scene_2",
+        },
+        "provider_status_by_scene": {
+            "1": "scene_clip_validated",
+            "2": "scene_clip_validated",
+        },
+        "raw_clip_paths_by_scene": scene_paths,
+        "normalized_clip_paths_by_scene": {},
+        "scene_order": [1, 2],
+        "scene_specs": [{"scene_id": 1}, {"scene_id": 2}],
+        "expected_duration_sec": 16.0,
+        "concat_state": "running",
+        "delivery_state": "pending",
+        "charge_state": "pending",
+        "final_video_path": None,
+        "status": "concatenating",
+    }
+    manifest_path = workspace / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    failed_runtime_sha = "e" * 40
+    fixed_runtime_sha = "f" * 40
+    conn, job_id, worker_payload = _failed_pre_submit_job(
+        tmp_path,
+        error="RuntimeError:provider_render_failed:TimeoutExpired",
+        attempts=3,
+        outbox_attempts=3,
+        result_updates={
+            "recovery_existing_tasks_only": True,
+            "existing_task_recovery_recovered": True,
+            "owner_post_poll_finalizer_recovery_used": True,
+            "owner_post_poll_finalizer_recovery_count": 1,
+            "submit_source": "worker_poll_existing_task",
+            "provider_submit_source": "worker_poll_existing_task",
+            "provider_poll_called": True,
+            "provider_submit_called": True,
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "existing_task_recovery_read_only",
+            "submit_count": 0,
+            "no_new_submit": True,
+            "no_new_paid_submit": True,
+            "provider_task_ids": ["task_existing_scene_2"],
+            "scene_task_map": task_ids_by_scene,
+            "manifest_path": str(manifest_path),
+            "canonical_multiscene_manifest_path": str(manifest_path),
+            "canonical_multiscene_workspace": str(workspace),
+            "scene_clip_coverage_complete": True,
+            "scene_clip_validation_by_index": {
+                "1": {"ok": True, "path_present": True, "bytes": 17},
+                "2": {"ok": True, "path_present": True, "bytes": 17},
+            },
+            "valid_scene_clip_count": 2,
+            "completed_scene_count": 2,
+            "final_mp4_valid": False,
+            "final_delivered": False,
+            "delivery_succeeded": False,
+            "worker_git_sha": failed_runtime_sha,
+        },
+        worker_compatibility={
+            **_compatible_worker(),
+            "runtime_sha": fixed_runtime_sha,
+            "runtime_target_sha": fixed_runtime_sha,
+            "worker_sha": fixed_runtime_sha,
+            "git_sha": fixed_runtime_sha,
+        },
+    )
+    expected_manifest_fingerprint = (
+        product_video_owner_recovery.post_poll_manifest_fingerprint(manifest)
+    )
+    worker_payload["post_deploy_expected_task_ids_by_scene"] = task_ids_by_scene
+
+    wrong_fingerprint = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=worker_payload,
+        owner_authorized=True,
+        allow_post_deploy_finalizer_recovery=True,
+        expected_manifest_fingerprint="0" * 64,
+    )
+    assert wrong_fingerprint["owner_pre_submit_recovered"] is False
+    assert (
+        wrong_fingerprint["owner_pre_submit_recovery_block_reason"]
+        == "post_deploy_manifest_fingerprint_mismatch"
+    )
+
+    wrong_tasks_payload = dict(worker_payload)
+    wrong_tasks_payload["post_deploy_expected_task_ids_by_scene"] = {
+        "1": ["task_existing_scene_1"],
+        "2": ["task_replacement_forbidden"],
+    }
+    wrong_tasks = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=wrong_tasks_payload,
+        owner_authorized=True,
+        allow_post_deploy_finalizer_recovery=True,
+        expected_manifest_fingerprint=expected_manifest_fingerprint,
+    )
+    assert wrong_tasks["owner_pre_submit_recovered"] is False
+    assert (
+        wrong_tasks["owner_pre_submit_recovery_block_reason"]
+        == "post_deploy_task_map_mismatch"
+    )
+
+    stale_runtime_payload = dict(worker_payload)
+    stale_runtime_payload["worker_compatibility"] = {
+        **_compatible_worker(),
+        "runtime_sha": failed_runtime_sha,
+        "runtime_target_sha": failed_runtime_sha,
+        "worker_sha": failed_runtime_sha,
+        "git_sha": failed_runtime_sha,
+    }
+    stale_runtime = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=stale_runtime_payload,
+        owner_authorized=True,
+        allow_post_deploy_finalizer_recovery=True,
+        expected_manifest_fingerprint=expected_manifest_fingerprint,
+    )
+    assert stale_runtime["owner_pre_submit_recovered"] is False
+    assert (
+        stale_runtime["owner_pre_submit_recovery_block_reason"]
+        == "post_deploy_fixed_runtime_required"
+    )
+
+    recovered = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=worker_payload,
+        owner_authorized=True,
+        allow_post_deploy_finalizer_recovery=True,
+        expected_manifest_fingerprint=expected_manifest_fingerprint,
+    )
+
+    assert recovered["owner_pre_submit_recovered"] is True
+    assert recovered["recovery_kind"] == "post_deploy_finalizer"
+    job = dict(conn.execute("SELECT * FROM video_jobs WHERE id=?", (job_id,)).fetchone())
+    result = json.loads(job["result_json"])
+    assert job["status"] == "queued"
+    assert int(job["attempts"]) == 2
+    assert result["owner_post_poll_finalizer_recovery_used"] is True
+    assert result["owner_post_deploy_finalizer_recovery_used"] is True
+    assert result["owner_post_deploy_finalizer_recovery_count"] == 1
+    assert result["owner_post_deploy_finalizer_failed_runtime_sha"] == failed_runtime_sha
+    assert result["owner_post_deploy_finalizer_runtime_sha"] == fixed_runtime_sha
+    assert (
+        result["owner_post_deploy_finalizer_manifest_fingerprint"]
+        == expected_manifest_fingerprint
+    )
+    assert result["provider_submit_allowed"] is False
+    assert result["provider_submit_block_reason"] == "post_deploy_finalizer_recovery_read_only"
+    assert result["scene_task_map"] == task_ids_by_scene
+    assert int(result["submit_count"]) == 0
+    assert int(result["charged_xu"]) == 0
+    assert recovered["jobs_created"] == 0
+    assert recovered["outboxes_created"] == 0
+    assert recovered["provider_calls"] == 0
+    assert recovered["wallet_mutations"] == 0
+
+    conn.execute(
+        "UPDATE video_jobs SET status='failed',last_error=? WHERE id=?",
+        ("RuntimeError:provider_render_failed:TimeoutExpired", job_id),
+    )
+    conn.execute(
+        "UPDATE video_projects SET status='failed' WHERE project_id=?",
+        (int(job["project_id"]),),
+    )
+    conn.commit()
+    repeated = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
+        conn,
+        job_id=job_id,
+        worker_payload=worker_payload,
+        owner_authorized=True,
+        allow_post_deploy_finalizer_recovery=True,
+        expected_manifest_fingerprint=expected_manifest_fingerprint,
+    )
+    assert repeated["owner_pre_submit_recovered"] is False
+    assert (
+        repeated["owner_pre_submit_recovery_block_reason"]
+        == "post_deploy_finalizer_recovery_already_used"
+    )
+
+
 def test_owner_recovery_requeues_same_job_once_after_completion_coverage_409(
     tmp_path,
 ) -> None:
