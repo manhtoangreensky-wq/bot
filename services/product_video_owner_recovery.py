@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 import json
 import os
+import re
 import sqlite3
 from typing import Any, Mapping
 
@@ -37,6 +39,20 @@ TASK_ID_KEYS = (
     "active_task_id",
     "winning_task_id",
     "primary_task_id",
+)
+POST_DEPLOY_MANIFEST_FINGERPRINT_KEYS = (
+    "job_id",
+    "user_id",
+    "workspace_dir",
+    "required_scene_indexes",
+    "task_ids_by_scene",
+    "winner_task_by_scene",
+    "provider_status_by_scene",
+    "raw_clip_paths_by_scene",
+    "scene_order",
+    "scene_specs",
+    "expected_duration_sec",
+    "composition_signature",
 )
 
 
@@ -88,6 +104,109 @@ def _has_provider_task(result: Mapping[str, Any]) -> bool:
             ):
                 return True
     return False
+
+
+def _normalized_task_map(value: Any) -> dict[str, list[str]]:
+    source = _json_mapping(value)
+    normalized: dict[str, list[str]] = {}
+    for raw_index, raw_tasks in source.items():
+        index = _integer(raw_index)
+        if index <= 0:
+            return {}
+        values = raw_tasks if isinstance(raw_tasks, (list, tuple)) else [raw_tasks]
+        tasks = [str(item or "").strip() for item in values]
+        if not tasks or any(not item for item in tasks):
+            return {}
+        normalized[str(index)] = tasks
+    return dict(sorted(normalized.items(), key=lambda item: int(item[0])))
+
+
+def post_poll_manifest_fingerprint(manifest: Mapping[str, Any] | None) -> str:
+    source = dict(manifest or {})
+    material = {
+        key: source.get(key)
+        for key in POST_DEPLOY_MANIFEST_FINGERPRINT_KEYS
+    }
+    material["task_ids_by_scene"] = _normalized_task_map(
+        source.get("task_ids_by_scene")
+    )
+    encoded = json.dumps(
+        material,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _sha_matches(left: Any, right: Any) -> bool:
+    left_value = str(left or "").strip().lower()
+    right_value = str(right or "").strip().lower()
+    return bool(
+        re.fullmatch(r"[0-9a-f]{7,40}", left_value)
+        and re.fullmatch(r"[0-9a-f]{7,40}", right_value)
+        and (left_value.startswith(right_value) or right_value.startswith(left_value))
+    )
+
+
+def _post_deploy_finalizer_block_reason(
+    result: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    worker_compatibility: Mapping[str, Any],
+    *,
+    expected_manifest_fingerprint: str,
+) -> str:
+    expected_fingerprint = str(expected_manifest_fingerprint or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_fingerprint):
+        return "post_deploy_manifest_fingerprint_required"
+    manifest_path = str(
+        result.get("canonical_multiscene_manifest_path")
+        or result.get("manifest_path")
+        or ""
+    ).strip()
+    try:
+        with open(manifest_path, encoding="utf-8") as handle:
+            manifest = json.load(handle)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return "post_deploy_manifest_unreadable"
+    if (
+        not isinstance(manifest, Mapping)
+        or post_poll_manifest_fingerprint(manifest) != expected_fingerprint
+    ):
+        return "post_deploy_manifest_fingerprint_mismatch"
+
+    result_tasks = _normalized_task_map(result.get("scene_task_map"))
+    manifest_tasks = _normalized_task_map(manifest.get("task_ids_by_scene"))
+    expected_tasks = _normalized_task_map(
+        payload.get("post_deploy_expected_task_ids_by_scene")
+    )
+    if not result_tasks or result_tasks != manifest_tasks or result_tasks != expected_tasks:
+        return "post_deploy_task_map_mismatch"
+
+    failed_runtime_sha = str(
+        result.get("worker_git_sha")
+        or result.get("runtime_sha")
+        or result.get("admission_worker_runtime_sha")
+        or ""
+    ).strip()
+    runtime_sha = str(
+        worker_compatibility.get("runtime_sha")
+        or worker_compatibility.get("runtime_target_sha")
+        or ""
+    ).strip()
+    worker_sha = str(
+        worker_compatibility.get("worker_sha")
+        or worker_compatibility.get("git_sha")
+        or ""
+    ).strip()
+    if not _sha_matches(runtime_sha, worker_sha):
+        return "post_deploy_runtime_sha_mismatch"
+    if not re.fullmatch(r"[0-9A-Fa-f]{7,40}", failed_runtime_sha):
+        return "post_deploy_failed_runtime_sha_missing"
+    if _sha_matches(failed_runtime_sha, runtime_sha):
+        return "post_deploy_fixed_runtime_required"
+    return ""
 
 
 def _post_poll_finalizer_block_reason(
@@ -291,6 +410,8 @@ def recover_product_video_owner_pre_submit_failure(
     job_id: int,
     worker_payload: Mapping[str, Any] | None,
     owner_authorized: bool = False,
+    allow_post_deploy_finalizer_recovery: bool = False,
+    expected_manifest_fingerprint: str = "",
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Requeue one failed job after a verified internal render defect.
@@ -340,6 +461,9 @@ def recover_product_video_owner_pre_submit_failure(
     )
     max_attempts = max(1, _integer(job.get("max_attempts")))
     post_poll_finalizer_recovery = error in POST_POLL_FINALIZER_ERRORS
+    post_deploy_finalizer_recovery = bool(
+        post_poll_finalizer_recovery and allow_post_deploy_finalizer_recovery
+    )
     completion_409_recovery = error == COMPLETION_409_ERROR
     addon_subtitle_poll_only_repair = bool(
         job_status in {"queued", "processing"}
@@ -377,6 +501,8 @@ def recover_product_video_owner_pre_submit_failure(
     recovery_kind = (
         "completion_409"
         if completion_409_recovery
+        else "post_deploy_finalizer"
+        if post_deploy_finalizer_recovery
         else "post_poll_finalizer"
         if post_poll_finalizer_recovery
         else "addon_subtitle_poll_only_repair"
@@ -388,6 +514,11 @@ def recover_product_video_owner_pre_submit_failure(
     if completion_409_recovery:
         if result.get("owner_completion_409_recovery_used"):
             return _blocked("completion_409_recovery_already_used")
+    elif post_deploy_finalizer_recovery:
+        if not result.get("owner_post_poll_finalizer_recovery_used"):
+            return _blocked("post_deploy_prior_finalizer_recovery_required")
+        if result.get("owner_post_deploy_finalizer_recovery_used"):
+            return _blocked("post_deploy_finalizer_recovery_already_used")
     elif post_poll_finalizer_recovery:
         if result.get("owner_post_poll_finalizer_recovery_used"):
             return _blocked("post_poll_finalizer_recovery_already_used")
@@ -455,6 +586,15 @@ def recover_product_video_owner_pre_submit_failure(
         )
         if post_poll_blocker:
             return _blocked(post_poll_blocker)
+    if post_deploy_finalizer_recovery:
+        post_deploy_blocker = _post_deploy_finalizer_block_reason(
+            result,
+            payload,
+            worker_compatibility,
+            expected_manifest_fingerprint=expected_manifest_fingerprint,
+        )
+        if post_deploy_blocker:
+            return _blocked(post_deploy_blocker)
     if completion_409_recovery:
         completion_blocker = _completion_409_block_reason(result)
         if completion_blocker:
@@ -495,6 +635,33 @@ def recover_product_video_owner_pre_submit_failure(
 
     current = (now or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
     recovery_metadata = (
+        {
+            "owner_post_deploy_finalizer_recovery_used": True,
+            "owner_post_deploy_finalizer_recovery_count": 1,
+            "owner_post_deploy_finalizer_recovered_at": current,
+            "owner_post_deploy_finalizer_recovered_reason": error,
+            "owner_post_deploy_finalizer_recovery_source": "explicit_owner_authorization_after_fixed_runtime",
+            "owner_post_deploy_finalizer_recovery_worker_compatible": True,
+            "owner_post_deploy_finalizer_failed_runtime_sha": str(
+                result.get("worker_git_sha")
+                or result.get("runtime_sha")
+                or result.get("admission_worker_runtime_sha")
+                or ""
+            ).strip(),
+            "owner_post_deploy_finalizer_runtime_sha": str(
+                worker_compatibility.get("runtime_sha")
+                or worker_compatibility.get("runtime_target_sha")
+                or ""
+            ).strip(),
+            "owner_post_deploy_finalizer_manifest_fingerprint": str(
+                expected_manifest_fingerprint or ""
+            ).strip().lower(),
+            "owner_post_deploy_finalizer_task_ids_by_scene": _normalized_task_map(
+                payload.get("post_deploy_expected_task_ids_by_scene")
+            ),
+        }
+        if post_deploy_finalizer_recovery
+        else
         {
             "owner_completion_409_recovery_used": True,
             "owner_completion_409_recovery_count": 1,
@@ -558,6 +725,8 @@ def recover_product_video_owner_pre_submit_failure(
             "worker_claim_result": (
                 "owner_completion_409_recovery_queued"
                 if completion_409_recovery
+                else "owner_post_deploy_finalizer_recovery_queued"
+                if post_deploy_finalizer_recovery
                 else "owner_post_poll_finalizer_recovery_queued"
                 if post_poll_finalizer_recovery
                 else "owner_addon_subtitle_poll_only_repair_queued"
@@ -586,6 +755,8 @@ def recover_product_video_owner_pre_submit_failure(
                 "provider_submit_block_reason": (
                     "completion_409_recovery_read_only"
                     if completion_409_recovery
+                    else "post_deploy_finalizer_recovery_read_only"
+                    if post_deploy_finalizer_recovery
                     else "post_poll_finalizer_recovery_read_only"
                 ),
                 "no_new_submit": True,
