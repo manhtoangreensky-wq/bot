@@ -4,6 +4,8 @@ import hashlib
 import json
 import sqlite3
 
+import pytest
+
 from services import product_video_owner_recovery
 from services import video_uiflow3_execution_contract
 
@@ -11,6 +13,7 @@ from services import video_uiflow3_execution_contract
 USER_ID = 3901
 PRE_SUBMIT_ERROR = "RuntimeError:uiflow3_approved_snapshot_hash_mismatch"
 ADDON_SUBTITLE_ERROR = "RuntimeError:addon_material_missing:subtitle"
+ADDON_DUBBING_ERROR = "RuntimeError:addon_material_missing:dubbing"
 POST_POLL_FINALIZER_ERROR = "RuntimeError:provider_render_failed:RuntimeError"
 COMPLETION_409_ERROR = "HTTPError:HTTP Error 409: Conflict"
 
@@ -273,12 +276,14 @@ def test_owner_recovery_requeues_the_same_pre_submit_job_once(tmp_path) -> None:
     assert repeated["owner_pre_submit_recovery_block_reason"] == "job_not_failed"
 
 
-def test_owner_recovery_requeues_same_job_after_fixed_subtitle_materialization_once(
+@pytest.mark.parametrize("addon_error", [ADDON_SUBTITLE_ERROR, ADDON_DUBBING_ERROR])
+def test_owner_recovery_requeues_same_job_after_fixed_addon_materialization_once(
     tmp_path,
+    addon_error,
 ) -> None:
     conn, job_id, worker_payload = _failed_pre_submit_job(
         tmp_path,
-        error=ADDON_SUBTITLE_ERROR,
+        error=addon_error,
         attempts=2,
         outbox_attempts=2,
         result_updates={
@@ -321,7 +326,7 @@ def test_owner_recovery_requeues_same_job_after_fixed_subtitle_materialization_o
     assert result["owner_pre_submit_recovered_reason"] == PRE_SUBMIT_ERROR
     assert result["owner_addon_subtitle_recovery_used"] is True
     assert result["owner_addon_subtitle_recovery_count"] == 1
-    assert result["owner_addon_subtitle_recovered_reason"] == ADDON_SUBTITLE_ERROR
+    assert result["owner_addon_subtitle_recovered_reason"] == addon_error
     assert result["provider_submit_called"] is False
     assert int(result["submit_count"]) == 0
     assert int(result["charge_count"]) == 0
@@ -331,7 +336,7 @@ def test_owner_recovery_requeues_same_job_after_fixed_subtitle_materialization_o
 
     conn.execute(
         "UPDATE video_jobs SET status='failed',last_error=? WHERE id=?",
-        (ADDON_SUBTITLE_ERROR, job_id),
+        (addon_error, job_id),
     )
     conn.execute(
         "UPDATE video_projects SET status='failed' WHERE project_id=?",

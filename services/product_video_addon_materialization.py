@@ -589,6 +589,11 @@ def materialize_product_video_addons(
         result["subtitle_qc"] = dict(subtitle.get("qc") or {})
     if "dubbing" in requested:
         dubbing = dict(plan.get("dubbing") or {})
+        if not any(
+            str(dubbing.get(key) or "").strip()
+            for key in ("script_text", "artifact_path", "audio_path")
+        ):
+            dubbing["script_text"] = _persisted_scene_subtitle_script(job)
         result["voice_audio_path"] = _materialize_dubbing(
             dubbing,
             workspace=workspace,
