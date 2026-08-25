@@ -478,17 +478,18 @@ def test_owner_repair_requeues_same_job_after_stale_poll_only_claim_loop(
 
 
 @pytest.mark.parametrize(
-    ("post_poll_error", "concat_state"),
+    ("post_poll_error", "concat_state", "provider_poll_http_status"),
     [
-        (POST_POLL_FINALIZER_ERROR, "normalizing"),
-        ("RuntimeError:provider_render_failed:TimeoutExpired", "normalizing"),
-        ("RuntimeError:provider_render_failed:TimeoutExpired", "running"),
+        (POST_POLL_FINALIZER_ERROR, "normalizing", 200),
+        ("RuntimeError:provider_render_failed:TimeoutExpired", "normalizing", 200),
+        ("RuntimeError:provider_render_failed:TimeoutExpired", "running", None),
     ],
 )
 def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure(
     tmp_path,
     post_poll_error,
     concat_state,
+    provider_poll_http_status,
 ) -> None:
     workspace = tmp_path / "product-video-19-existing-clips"
     workspace.mkdir()
@@ -541,7 +542,7 @@ def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure
             "provider_submit_source": "worker_poll_existing_task",
             "original_submit_source": "public_user_final_confirm",
             "provider_poll_called": True,
-            "provider_poll_http_status": 200,
+            "provider_poll_http_status": provider_poll_http_status,
             "provider_submit_called": True,
             "provider_submit_allowed": False,
             "provider_submit_block_reason": "existing_task_recovery_read_only",
@@ -579,6 +580,18 @@ def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure
             (job_id,),
         ).fetchone()[0]
     )
+    if provider_poll_http_status is None:
+        explicit_http_failure = dict(before)
+        explicit_http_failure["provider_poll_http_status"] = 500
+        assert (
+            product_video_owner_recovery._post_poll_finalizer_block_reason(
+                explicit_http_failure,
+                job_id=job_id,
+                user_id=USER_ID,
+                allow_stale_running=True,
+            )
+            == "post_poll_http_success_required"
+        )
 
     recovered = product_video_owner_recovery.recover_product_video_owner_pre_submit_failure(
         conn,
