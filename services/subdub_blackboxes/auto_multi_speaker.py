@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from bisect import bisect_right
 from collections.abc import Callable, Mapping
 import hashlib
 import json
 import math
+from pathlib import Path
+import threading
+import time
 from typing import Any
 
 from services import subdub_speaker_cast as speaker_cast
@@ -15,9 +19,13 @@ from . import auto_speaker
 
 
 AUTO_MULTI_SPEAKER_LANE = "multi"
-MULTI_PCM_AUDIO_FILTER = "highpass=f=70,lowpass=f=320,afftdn=nr=6:nf=-50"
+MULTI_PCM_AUDIO_FILTER = auto_speaker.AUTO_SPEAKER_PCM_AUDIO_FILTER
 _MULTI_WINDOW_HOP_SECONDS = 0.02
 _MULTI_MAX_ACCEPTED_WINDOWS = 12
+_UNDERCLUSTER_PROVIDER_LABEL_COUNT = 2
+_UNDERCLUSTER_WINDOWS_PER_CUE = 2
+_UNDERCLUSTER_MIN_CUES_PER_REGISTER = 2
+_UNDERCLUSTER_MIN_REGISTER_GAP_HZ = 30.0
 
 
 def _dense_window_offsets(
@@ -83,13 +91,51 @@ def _dense_window_offsets(
     if total_candidates < 1:
         return []
     selected_count = min(total_candidates, max_windows)
-    if selected_count == 1:
-        selected_indexes = [total_candidates // 2]
+    run_quotas = [0] * len(runs)
+    if selected_count <= len(runs):
+        if selected_count == 1:
+            selected_runs = [len(runs) // 2]
+        else:
+            selected_runs = [
+                round(index * (len(runs) - 1) / (selected_count - 1))
+                for index in range(selected_count)
+            ]
+        for run_index in selected_runs:
+            run_quotas[run_index] = 1
     else:
-        selected_indexes = [
-            round(index * (total_candidates - 1) / (selected_count - 1))
-            for index in range(selected_count)
-        ]
+        run_quotas = [1] * len(runs)
+        remaining = selected_count - len(runs)
+        while remaining:
+            progressed = False
+            for run_index, run in enumerate(runs):
+                if run_quotas[run_index] >= run[3]:
+                    continue
+                run_quotas[run_index] += 1
+                remaining -= 1
+                progressed = True
+                if not remaining:
+                    break
+            if not progressed:
+                raise speaker_cast.AutoCastManualRequired()
+
+    selected_indexes: list[int] = []
+    previous_count = 0
+    for run_index, run in enumerate(runs):
+        run_count = run[3]
+        quota = run_quotas[run_index]
+        if quota == 1:
+            local_indexes = [run_count // 2]
+        elif quota > 1:
+            local_indexes = [
+                round(index * (run_count - 1) / (quota - 1))
+                for index in range(quota)
+            ]
+        else:
+            local_indexes = []
+        selected_indexes.extend(
+            previous_count + local_index for local_index in local_indexes
+        )
+        previous_count = cumulative_counts[run_index]
 
     offsets: list[int] = []
     seen_offsets: set[int] = set()
@@ -232,6 +278,286 @@ def _classify_dense_multi_speaker_registers(
     return results
 
 
+def _cue_register_evidence(
+    handle,
+    start: float,
+    end: float,
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+) -> tuple[tuple[str, float] | None, int]:
+    offsets = _dense_window_offsets(
+        [(start, end)],
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+        max_windows=_UNDERCLUSTER_WINDOWS_PER_CUE,
+    )
+    frequencies: list[float] = []
+    confidences: list[float] = []
+    for offset in offsets:
+        speaker_cast._ensure_classifier_active(
+            deadline_monotonic,
+            stop_requested,
+        )
+        handle.seek(offset)
+        raw = handle.read(speaker_cast.PCM_WINDOW_BYTES)
+        if len(raw) != speaker_cast.PCM_WINDOW_BYTES:
+            raise speaker_cast.AutoCastManualRequired()
+        estimate = speaker_cast._estimate_window_pitch(
+            raw,
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+            allow_single_pitch_frame=True,
+        )
+        if estimate is not None:
+            frequencies.append(float(estimate[0]))
+            confidences.append(float(estimate[1]))
+    try:
+        register, median_hz, _confidence, _inlier_count = (
+            speaker_cast._stable_register_evidence(
+                frequencies,
+                confidences,
+            )
+        )
+    except speaker_cast.AutoCastManualRequired:
+        return None, len(offsets)
+    return (register, float(median_hz)), len(offsets)
+
+
+def _refine_underclustered_prepared(
+    pcm_path: str,
+    prepared: dict,
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+) -> dict:
+    source_segments = prepared.get("source_segments")
+    output_segments = prepared.get("output_segments")
+    if (
+        not isinstance(source_segments, list)
+        or not source_segments
+        or not isinstance(output_segments, list)
+        or not output_segments
+    ):
+        raise speaker_cast.AutoCastManualRequired()
+    labels = speaker_cast.ordered_auto_speaker_labels(source_segments)
+    if len(labels) != _UNDERCLUSTER_PROVIDER_LABEL_COUNT:
+        return prepared
+
+    label_identities = {
+        label: speaker_cast.validated_speaker_identity(
+            {"speaker_id": label}
+        )
+        for label in labels
+    }
+    used_by_chunk: dict[int, set[int]] = {}
+    for chunk_index, speaker_index, _speaker_id in label_identities.values():
+        used_by_chunk.setdefault(chunk_index, set()).add(speaker_index)
+
+    evidence_by_cue: dict[tuple[str, float, float], tuple[str, float] | None] = {}
+    sampled_windows = 0
+    maximum_job_windows = int(
+        speaker_cast.MAX_JOB_SAMPLE_SECONDS
+        / (speaker_cast.PCM_WINDOW_SAMPLES / speaker_cast.PCM_SAMPLE_RATE)
+    )
+    try:
+        with open(str(pcm_path or ""), "rb") as handle:
+            for raw_segment in source_segments:
+                identity = auto_speaker._exact_cue_identity(raw_segment)
+                if identity in evidence_by_cue:
+                    raise speaker_cast.AutoCastManualRequired()
+                speaker_id = raw_segment.get("speaker_id")
+                if speaker_id not in label_identities:
+                    raise speaker_cast.AutoCastManualRequired()
+                evidence, consumed_windows = _cue_register_evidence(
+                    handle,
+                    identity[1],
+                    identity[2],
+                    deadline_monotonic=deadline_monotonic,
+                    stop_requested=stop_requested,
+                )
+                sampled_windows += consumed_windows
+                if sampled_windows > maximum_job_windows:
+                    raise speaker_cast.AutoCastManualRequired()
+                evidence_by_cue[identity] = evidence
+    except speaker_cast.AutoCastManualRequired:
+        raise
+    except (OSError, TypeError, ValueError, OverflowError, MemoryError) as exc:
+        raise speaker_cast.AutoCastManualRequired() from exc
+
+    split_targets: dict[str, tuple[str, str, int, int]] = {}
+    for label in labels:
+        grouped: dict[str, list[tuple[tuple[str, float, float], float]]] = {
+            "low": [],
+            "high": [],
+        }
+        first_register = ""
+        for raw_segment in source_segments:
+            if raw_segment.get("speaker_id") != label:
+                continue
+            identity = auto_speaker._exact_cue_identity(raw_segment)
+            evidence = evidence_by_cue.get(identity)
+            if evidence is None:
+                continue
+            register, median_hz = evidence
+            grouped[register].append((identity, median_hz))
+            if not first_register:
+                first_register = register
+        if any(
+            len(grouped[register]) < _UNDERCLUSTER_MIN_CUES_PER_REGISTER
+            for register in ("low", "high")
+        ):
+            continue
+        low_median = speaker_cast._bounded_median(
+            [item[1] for item in grouped["low"]]
+        )
+        high_median = speaker_cast._bounded_median(
+            [item[1] for item in grouped["high"]]
+        )
+        if high_median - low_median < _UNDERCLUSTER_MIN_REGISTER_GAP_HZ:
+            continue
+        chunk_index = label_identities[label][0]
+        available_index = next(
+            (
+                index
+                for index in range(speaker_cast.MAX_SPEAKER_LABELS)
+                if index not in used_by_chunk.setdefault(chunk_index, set())
+            ),
+            None,
+        )
+        if available_index is None:
+            raise speaker_cast.AutoCastManualRequired()
+        used_by_chunk[chunk_index].add(available_index)
+        split_register = "high" if first_register == "low" else "low"
+        split_targets[label] = (
+            split_register,
+            speaker_cast.normalized_speaker_key(
+                chunk_index,
+                available_index,
+            ),
+            chunk_index,
+            available_index,
+        )
+
+    if not split_targets:
+        return prepared
+
+    relabeled_source: list[dict[str, Any]] = []
+    assignments: dict[tuple[str, float, float], dict[str, object]] = {}
+    for raw_segment in source_segments:
+        identity = auto_speaker._exact_cue_identity(raw_segment)
+        segment = dict(raw_segment)
+        target = split_targets.get(str(segment.get("speaker_id") or ""))
+        evidence = evidence_by_cue.get(identity)
+        if target is not None and evidence is not None and evidence[0] == target[0]:
+            segment.update(
+                {
+                    "speaker_id": target[1],
+                    "chunk_index": target[2],
+                    "speaker": target[3],
+                }
+            )
+        assignments[identity] = {
+            key: segment[key]
+            for key in (
+                "speaker",
+                "speaker_confidence",
+                "speaker_id",
+                "chunk_index",
+            )
+            if key in segment
+        }
+        relabeled_source.append(segment)
+
+    if not 3 <= len(
+        speaker_cast.ordered_auto_speaker_labels(relabeled_source)
+    ) <= speaker_cast.MAX_AUTO_SPEAKER_LABELS:
+        raise speaker_cast.AutoCastManualRequired()
+
+    relabeled_output: list[dict[str, Any]] = []
+    output_identities: set[tuple[str, float, float]] = set()
+    for raw_segment in output_segments:
+        identity = auto_speaker._exact_cue_identity(raw_segment)
+        if identity in output_identities or identity not in assignments:
+            raise speaker_cast.AutoCastManualRequired()
+        output_identities.add(identity)
+        relabeled_output.append(
+            {**dict(raw_segment), **assignments[identity]}
+        )
+    if output_identities != set(assignments):
+        raise speaker_cast.AutoCastManualRequired()
+
+    media_sha256 = auto_speaker._prepared_media_sha256(prepared)
+    subtitle_sha256 = auto_speaker._prepared_subtitle_sha256(prepared)
+    workspace = auto_speaker._nested_receipt_value(
+        prepared,
+        "_pipeline_workspace",
+    ) or auto_speaker._nested_receipt_value(prepared, "workspace")
+    speaker_cast._ensure_classifier_active(
+        deadline_monotonic,
+        stop_requested,
+    )
+    sidecar = speaker_cast.build_sidecar(
+        relabeled_source,
+        media_sha256=media_sha256,
+        subtitle_sha256=subtitle_sha256,
+    )
+    receipt = speaker_cast.persist_sidecar(
+        sidecar,
+        workspace=workspace,
+    )
+    prepared_state = dict(auto_speaker._prepared_state(prepared))
+    prepared_state.update(
+        {
+            "speaker_sidecar_path": receipt["path"],
+            "speaker_sidecar_sha256": receipt["sha256"],
+        }
+    )
+    return {
+        **prepared,
+        "state": prepared_state,
+        "source_segments": relabeled_source,
+        "output_segments": relabeled_output,
+        "speaker_sidecar_path": receipt["path"],
+        "speaker_sidecar_sha256": receipt["sha256"],
+    }
+
+
+async def _refine_underclustered_off_event_loop(
+    pcm_path: Path,
+    prepared: dict,
+) -> dict:
+    started = time.monotonic()
+    deadline = started + speaker_cast.CLASSIFIER_WALL_TIMEOUT_SECONDS
+    stop_event = threading.Event()
+    worker = asyncio.create_task(
+        asyncio.to_thread(
+            _refine_underclustered_prepared,
+            str(pcm_path),
+            prepared,
+            deadline_monotonic=deadline,
+            stop_requested=stop_event.is_set,
+        )
+    )
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(worker),
+            max(0.0, deadline - time.monotonic()),
+        )
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        stop_event.set()
+        await auto_speaker._drain_worker(worker)
+        raise speaker_cast.AutoCastManualRequired() from exc
+    except asyncio.CancelledError:
+        stop_event.set()
+        await auto_speaker._drain_worker(worker)
+        raise
+    finally:
+        if not worker.done():
+            stop_event.set()
+            await auto_speaker._drain_worker(worker)
+
+
 def is_auto_multi_speaker_state(
     state: Mapping[str, object] | None,
 ) -> bool:
@@ -287,7 +613,9 @@ async def run_auto_multi_speaker_blackbox(
             "public_copy_key": "voice_auto_manual_required",
         }
 
-    async def extract_multi_pcm(
+    cached_pcm_path: Path | None = None
+
+    async def extract_filtered_pcm(
         prepared: dict,
         prepared_state: dict,
         **extract_kwargs: Any,
@@ -301,9 +629,76 @@ async def run_auto_multi_speaker_blackbox(
             )
         )
 
+    async def extract_multi_pcm(
+        prepared: dict,
+        prepared_state: dict,
+        **extract_kwargs: Any,
+    ) -> Any:
+        nonlocal cached_pcm_path
+        if cached_pcm_path is not None and cached_pcm_path.is_file():
+            target = cached_pcm_path
+            cached_pcm_path = None
+            return str(target)
+        return await extract_filtered_pcm(
+            prepared,
+            prepared_state,
+            **extract_kwargs,
+        )
+
+    base_prepare = payload.get("prepare_subtitles")
+
+    async def prepare_multi_subtitles(*args: Any, **kwargs: Any) -> Any:
+        nonlocal cached_pcm_path
+        prepared = await auto_speaker._maybe_await(
+            base_prepare(*args, **kwargs)
+        )
+        if not isinstance(prepared, dict):
+            return prepared
+        labels, _ranges = auto_speaker._validated_classifier_inputs(
+            prepared
+        )
+        prepared_state = auto_speaker._prepared_state(prepared)
+        if (
+            len(labels) != _UNDERCLUSTER_PROVIDER_LABEL_COUNT
+            or prepared_state.get("auto_exact_receipt")
+            or prepared_state.get("auto_exact_receipt_confirmed") is True
+            or prepared_state.get("auto_exact_resume")
+        ):
+            return prepared
+        extracted = await extract_filtered_pcm(
+            prepared,
+            dict(prepared_state),
+            channels=1,
+            sample_rate=speaker_cast.PCM_SAMPLE_RATE,
+            sample_format="s16le",
+        )
+        cached_pcm_path = auto_speaker._validated_pcm_path(
+            prepared,
+            extracted,
+        )
+        refined = await _refine_underclustered_off_event_loop(
+            cached_pcm_path,
+            prepared,
+        )
+        if refined is not prepared and isinstance(current, dict):
+            refined_state = auto_speaker._prepared_state(refined)
+            current.update(
+                {
+                    "speaker_sidecar_path": refined_state.get(
+                        "speaker_sidecar_path"
+                    ),
+                    "speaker_sidecar_sha256": refined_state.get(
+                        "speaker_sidecar_sha256"
+                    ),
+                }
+            )
+        return refined
+
     observed_casts: dict[str, str] = {}
     base_synthesize = payload.get("synthesize_segments")
     lane_payload = dict(payload)
+    if callable(base_prepare):
+        lane_payload["prepare_subtitles"] = prepare_multi_subtitles
     if callable(base_synthesize):
         async def synthesize_multi_segments(
             segments: list[dict],
@@ -348,6 +743,9 @@ async def run_auto_multi_speaker_blackbox(
         )
     except (speaker_cast.AutoCastUnavailable, speaker_cast.AutoCastManualRequired) as exc:
         return auto_speaker._manual_required_result(current, exc)
+    finally:
+        if cached_pcm_path is not None:
+            auto_speaker._cleanup_pcm_path(cached_pcm_path)
     result_state = result.get("state") if isinstance(result, dict) else None
     if (
         isinstance(result, dict)

@@ -1,14 +1,13 @@
 task_id: p0-subdub-multi-blackbox
 phase: SHIP_READY
-branch: fix/p0-subdub-multi-proof-receipt
-base_sha: 8f2d1290cd7f38039f6feca71fa50e28563a42ea
-verified_source_sha: pending_pr_head
+branch: fix/p0-subdub-multi-undercluster
+base_sha: d43343a0157ba6e6916e92b97ee2dccb1ddfb168
+verified_source_sha: pending_pr_head_on_d43343a
 design_commit: 1028e79
-live_boundary: subdub_auto_acquired
-cpu_boundary: subdub_auto_owned
+live_boundary: product_video_owned
+cpu_boundary: released_by_subdub_auto
 allowed_source_files:
   - bot.py
-  - services/subdub_speaker_cast.py
   - services/subdub_blackboxes/auto_speaker.py
   - services/subdub_blackboxes/auto_multi_speaker.py
   - tests/test_p0_subdub_multi_speaker_blackbox.py
@@ -43,6 +42,15 @@ external_actions_allowed_now: false_until_product_video_release
 provider_calls_allowed_now: one_test_nhieu_giong_mp4_job_after_reacquire
 wallet_mutations_allowed: false
 verification:
+  historical_two_voice_green_pr: 853
+  historical_two_voice_green_sha: 7b4053acd9a2bd44c29a15ebc5e0e86152fab24f
+  historical_two_voice_contract: filtered_pcm_and_single_pitch_frame
+  pre_final_batch: 10 passed and 2 test-assertion failures in 1344.28s
+  pre_final_batch_failures: expected wrong Giọng prefix; runtime labels were correct
+  final_batch: 29 passed and 1 dependency deprecation warning in 924.54s
+  final_py_compile: exit 0 for bot.py auto_speaker.py auto_multi_speaker.py
+  final_diff_check: exit 0
+  post_rebase_vps_gate: 29 passed in 89.73s; py_compile exit 0; diff-check exit 0
   proof_red: 5 failed in 9.72s for missing 3-speaker cast receipt and terminal proof
   proof_green: 23 passed in 6.27s for full multi-speaker blackbox file
   protected_branch: 7 passed and 4 baseline failures in 9.72s
@@ -80,12 +88,12 @@ issues:
     status: known_nonblocking
     summary: voiced-with-pauses comparator expects 1.5 seconds but returns 2.0 identically at rollback SHA
   - id: SHIP-01
-    status: done
-    summary: rebased afbe4acf and passed focused protected differential and compile gates
+    status: ready_waiting_product_video_release
+    summary: rebased d43343a and final focused gate passed; Product Video released LIVE CHROME VPS DEPLOY
   - id: LIVE-01
     status: invalid_fixture
     summary: E576D4ACE9 delivered Download.mp4 not the Owner-selected test nhiều giọng.mp4
   - id: MULTI-04
     status: source_green
     summary: require 3+ distinct speaker/voice evidence and render the multi receipt fields
-next_action: commit push PR merge deploy exact SHA then run only test nhiều giọng.mp4
+next_action: local commit allowed; push PR squash merge deploy only after Product Video releases LIVE CHROME VPS DEPLOY
