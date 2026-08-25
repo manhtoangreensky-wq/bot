@@ -477,8 +477,16 @@ def test_owner_repair_requeues_same_job_after_stale_poll_only_claim_loop(
     assert repaired["wallet_mutations"] == 0
 
 
+@pytest.mark.parametrize(
+    "post_poll_error",
+    [
+        POST_POLL_FINALIZER_ERROR,
+        "RuntimeError:provider_render_failed:TimeoutExpired",
+    ],
+)
 def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure(
     tmp_path,
+    post_poll_error,
 ) -> None:
     workspace = tmp_path / "product-video-19-existing-clips"
     workspace.mkdir()
@@ -521,7 +529,7 @@ def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure
     )
     conn, job_id, worker_payload = _failed_pre_submit_job(
         tmp_path,
-        error=POST_POLL_FINALIZER_ERROR,
+        error=post_poll_error,
         attempts=3107,
         outbox_attempts=3,
         result_updates={
@@ -624,7 +632,7 @@ def test_owner_recovery_requeues_same_job_once_after_post_poll_finalizer_failure
 
     conn.execute(
         "UPDATE video_jobs SET status='failed',last_error=? WHERE id=?",
-        (POST_POLL_FINALIZER_ERROR, job_id),
+        (post_poll_error, job_id),
     )
     conn.execute(
         "UPDATE video_projects SET status='failed' WHERE project_id=?",

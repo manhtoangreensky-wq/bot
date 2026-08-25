@@ -14,6 +14,10 @@ from services import video_uiflow3_execution_contract
 ADDON_SUBTITLE_ERROR = "RuntimeError:addon_material_missing:subtitle"
 ADDON_DUBBING_ERROR = "RuntimeError:addon_material_missing:dubbing"
 POST_POLL_FINALIZER_ERROR = "RuntimeError:provider_render_failed:RuntimeError"
+POST_POLL_FINALIZER_TIMEOUT_ERROR = "RuntimeError:provider_render_failed:TimeoutExpired"
+POST_POLL_FINALIZER_ERRORS = frozenset(
+    {POST_POLL_FINALIZER_ERROR, POST_POLL_FINALIZER_TIMEOUT_ERROR}
+)
 COMPLETION_409_ERROR = "HTTPError:HTTP Error 409: Conflict"
 RECOVERABLE_ERRORS = frozenset(
     {
@@ -21,6 +25,7 @@ RECOVERABLE_ERRORS = frozenset(
         ADDON_SUBTITLE_ERROR,
         ADDON_DUBBING_ERROR,
         POST_POLL_FINALIZER_ERROR,
+        POST_POLL_FINALIZER_TIMEOUT_ERROR,
         COMPLETION_409_ERROR,
     }
 )
@@ -315,7 +320,7 @@ def recover_product_video_owner_pre_submit_failure(
         == worker_poll_source
     )
     max_attempts = max(1, _integer(job.get("max_attempts")))
-    post_poll_finalizer_recovery = error == POST_POLL_FINALIZER_ERROR
+    post_poll_finalizer_recovery = error in POST_POLL_FINALIZER_ERRORS
     completion_409_recovery = error == COMPLETION_409_ERROR
     addon_subtitle_poll_only_repair = bool(
         job_status in {"queued", "processing"}
