@@ -1339,7 +1339,7 @@ def mux_final_multiscene_video(
     else:
         cmd += (["-shortest"] if logo_input_index is not None else []) + ["-an"]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output]
-    result = safe_run_ffmpeg(cmd, timeout=300)
+    result = safe_run_ffmpeg(cmd, timeout=900)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg_mux_failed:{(result.stderr or result.stdout or '')[-500:]}")
     return ensure_video_output(output)
