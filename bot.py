@@ -231504,6 +231504,63 @@ def subdub_auto_multi_speaker_route_enabled(
     )
 
 
+def subdub_auto_multi_terminal_proof_fields(
+    state: dict | None = None,
+) -> dict:
+    current = dict(state or {})
+    if (
+        not auto_multi_speaker.is_auto_multi_speaker_state(current)
+        or current.get("auto_multi_voice_verified") is not True
+    ):
+        return {}
+    speaker_count = _safe_int(
+        current.get("auto_detected_speaker_count"),
+        0,
+    )
+    distinct_voice_count = _safe_int(
+        current.get("auto_distinct_voice_count"),
+        0,
+    )
+    cast_sha256 = str(
+        current.get("auto_multi_cast_sha256") or ""
+    ).strip().lower()
+    source_file_name = os.path.basename(
+        str(current.get("source_file_name") or "").strip()
+    )[:180]
+    dubbing_xu = max(
+        0,
+        _safe_int(current.get("auto_exact_actual_auto_xu"), 0),
+    )
+    subtitle_xu = max(
+        0,
+        _safe_int(current.get("auto_exact_actual_subtitle_xu"), 0),
+    )
+    total_xu = max(
+        0,
+        _safe_int(current.get("auto_exact_actual_total_xu"), 0),
+    )
+    if (
+        not source_file_name
+        or not 3 <= speaker_count <= subdub_speaker_cast.MAX_AUTO_SPEAKER_LABELS
+        or distinct_voice_count != speaker_count
+        or len(cast_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in cast_sha256)
+        or total_xu != dubbing_xu + subtitle_xu
+    ):
+        return {}
+    return {
+        "auto_speaker_lane": auto_multi_speaker.AUTO_MULTI_SPEAKER_LANE,
+        "source_file_name": source_file_name,
+        "auto_detected_speaker_count": speaker_count,
+        "auto_distinct_voice_count": distinct_voice_count,
+        "auto_multi_voice_verified": True,
+        "auto_multi_cast_sha256": cast_sha256,
+        "auto_exact_actual_auto_xu": dubbing_xu,
+        "auto_exact_actual_subtitle_xu": subtitle_xu,
+        "auto_exact_actual_total_xu": total_xu,
+    }
+
+
 def subdub_auto_blackbox_runner(state: dict | None = None):
     if subdub_auto_multi_speaker_route_enabled(state):
         return auto_multi_speaker.run_auto_multi_speaker_blackbox
@@ -235376,6 +235433,44 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
         )
         balance_present = "account_balance_xu" in receipt_context
         account_balance_xu = max(0, _safe_int(receipt_context.get("account_balance_xu"), 0))
+        multi_proof = subdub_auto_multi_terminal_proof_fields(
+            receipt_context
+        )
+        multi_detail_lines = ""
+        if multi_proof:
+            source_name = html.escape(
+                str(multi_proof["source_file_name"])
+            )
+            speaker_count = int(
+                multi_proof["auto_detected_speaker_count"]
+            )
+            voice_count = int(
+                multi_proof["auto_distinct_voice_count"]
+            )
+            subtitle_xu = int(
+                multi_proof["auto_exact_actual_subtitle_xu"]
+            )
+            dubbing_xu = int(
+                multi_proof["auto_exact_actual_auto_xu"]
+            )
+            if is_vi:
+                multi_detail_lines = (
+                    f"• Tệp nguồn: <b>{source_name}</b>\n"
+                    "• Loại lồng tiếng: <b>Tự nhận nhiều giọng</b>\n"
+                    f"• Số người nói nhận diện: <b>{speaker_count}</b>\n"
+                    f"• Số giọng lồng tiếng đã dùng: <b>{voice_count}</b>\n"
+                    f"• Giá phụ đề: <b>{subtitle_xu} Xu</b>\n"
+                    f"• Giá lồng tiếng: <b>{dubbing_xu} Xu</b>\n"
+                )
+            else:
+                multi_detail_lines = (
+                    f"• Source file: <b>{source_name}</b>\n"
+                    "• Dubbing type: <b>Auto-detected multi-speaker</b>\n"
+                    f"• Detected speakers: <b>{speaker_count}</b>\n"
+                    f"• Dubbing voices used: <b>{voice_count}</b>\n"
+                    f"• Subtitle price: <b>{subtitle_xu} Xu</b>\n"
+                    f"• Dubbing price: <b>{dubbing_xu} Xu</b>\n"
+                )
         if normalize_user_language(lang) != "vi":
             return (
                 "✅ <b>Completed</b>\n\n"
@@ -235383,6 +235478,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
                 f"• Result: <b>{html.escape(product_label)}</b>\n"
                 f"• Translation language: <b>{html.escape(target_language)}</b>\n"
                 f"• Service type: <b>{html.escape(type_label)}</b>\n"
+                f"{multi_detail_lines}"
                 f"• Duration: <b>{html.escape(duration)}</b>\n"
                 f"• Price: <b>{final_price_xu} Xu</b>\n"
                 f"• Charged: <b>{int(charged_xu or 0)} Xu</b>\n"
@@ -235395,6 +235491,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
             f"• Kết quả: <b>{html.escape(product_label)}</b>\n"
             f"• Ngôn ngữ dịch: <b>{html.escape(target_language)}</b>\n"
             f"• Loại dịch vụ: <b>{html.escape(type_label)}</b>\n"
+            f"{multi_detail_lines}"
             f"• Thời lượng: <b>{html.escape(duration)}</b>\n"
             f"• Giá: <b>{final_price_xu} Xu</b>\n"
             f"• Đã trừ: <b>{int(charged_xu or 0)} Xu</b>\n"
@@ -248950,6 +249047,7 @@ async def _execute_video_dubbing_pipeline_core(
             "provider": ",".join(item for item in (asr_provider, tts_provider) if item) or "subtitle_pipeline",
             "provider_task_id": "",
             **auto_settlement_fields,
+            **subdub_auto_multi_terminal_proof_fields(state),
             "status": "partial" if (partial_result or delivery_partial_result) else "completed",
             "terminal_state": result_terminal_state,
             "lifecycle_state": "delivered" if result_terminal_state == "delivered" else result_terminal_state,
