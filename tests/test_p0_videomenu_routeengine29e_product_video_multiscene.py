@@ -497,6 +497,7 @@ def test_29e_final_mux_keeps_selected_source_voice_and_music_tracks(
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(pipeline, "_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(pipeline, "probe_duration", lambda _path: 16.0)
     monkeypatch.setattr(pipeline, "safe_run_ffmpeg", fake_run)
     result = pipeline.mux_final_multiscene_video(
         master_video_path=str(master),
@@ -510,10 +511,11 @@ def test_29e_final_mux_keeps_selected_source_voice_and_music_tracks(
     command = " ".join(captured)
     assert result == str(output)
     assert "[0:a:0]volume=1.0[amaster]" in command
-    assert "[1:a:0]volume=1.0[avoice]" in command
-    assert "[2:a:0]volume=0.10[abgm]" in command
+    assert "[1:a:0]volume=1.0000[avoice]" in command
+    assert "[2:a:0]volume=0.2000[abgm]" in command
     assert "[amaster][avoice][abgm]amix=inputs=3" in command
     assert "apad[aout]" in command
+    assert "-t 16.000000 -shortest" in command
     assert "-ar 48000" in command
     assert "-ac 2" in command
 
@@ -536,6 +538,7 @@ def test_29e_final_mux_pads_a_single_selected_audio_track(
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(pipeline, "_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(pipeline, "probe_duration", lambda _path: 16.0)
     monkeypatch.setattr(pipeline, "safe_run_ffmpeg", fake_run)
     result = pipeline.mux_final_multiscene_video(
         master_video_path=str(master),
@@ -546,9 +549,9 @@ def test_29e_final_mux_pads_a_single_selected_audio_track(
     )
     command = " ".join(captured)
     assert result == str(output)
-    assert "[1:a:0]volume=1.0[avoice]" in command
+    assert "[1:a:0]volume=1.0000[avoice]" in command
     assert "[avoice]aresample=48000:async=1:first_pts=0,apad[aout]" in command
-    assert "-map [aout] -shortest" in command
+    assert "-map [aout] -t 16.000000 -shortest" in command
 
 
 def test_29e_finalizer_applies_scene_transition_plan_after_normalization(
