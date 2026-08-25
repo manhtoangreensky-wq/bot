@@ -19,7 +19,7 @@ from . import auto_speaker
 
 
 AUTO_MULTI_SPEAKER_LANE = "multi"
-MULTI_PCM_AUDIO_FILTER = auto_speaker.AUTO_SPEAKER_PCM_AUDIO_FILTER
+MULTI_PCM_AUDIO_FILTER = "highpass=f=70,lowpass=f=320,afftdn=nr=6:nf=-50"
 _MULTI_WINDOW_HOP_SECONDS = 0.02
 _MULTI_MAX_ACCEPTED_WINDOWS = 12
 _UNDERCLUSTER_PROVIDER_LABEL_COUNT = 2
@@ -232,7 +232,6 @@ def _classify_dense_multi_speaker_registers(
                         raw,
                         deadline_monotonic=absolute_deadline,
                         stop_requested=stop_requested,
-                        allow_single_pitch_frame=True,
                     )
                     if estimate is None:
                         continue
@@ -307,7 +306,6 @@ def _cue_register_evidence(
             raw,
             deadline_monotonic=deadline_monotonic,
             stop_requested=stop_requested,
-            allow_single_pitch_frame=True,
         )
         if estimate is not None:
             frequencies.append(float(estimate[0]))
@@ -586,7 +584,6 @@ def classify_multi_speaker_registers(
             ranges_by_speaker,
             deadline_monotonic=deadline_monotonic,
             stop_requested=stop_requested,
-            allow_single_pitch_frame=True,
         )
     except speaker_cast.AutoCastManualRequired:
         return _classify_dense_multi_speaker_registers(
@@ -595,6 +592,335 @@ def classify_multi_speaker_registers(
             deadline_monotonic=deadline_monotonic,
             stop_requested=stop_requested,
         )
+
+
+async def _classify_multi_off_event_loop(
+    pcm_path: Path,
+    ranges_by_speaker: dict[str, list[tuple[float, float]]],
+    classify_speakers: Callable[..., dict[str, dict]],
+) -> dict[str, dict]:
+    if not callable(classify_speakers):
+        raise speaker_cast.AutoCastUnavailable()
+    classifier_started = time.monotonic()
+    classifier_deadline = (
+        classifier_started + speaker_cast.CLASSIFIER_WALL_TIMEOUT_SECONDS
+    )
+    stop_event = threading.Event()
+    worker = asyncio.create_task(
+        asyncio.to_thread(
+            classify_speakers,
+            str(pcm_path),
+            ranges_by_speaker,
+            deadline_monotonic=classifier_deadline,
+            stop_requested=stop_event.is_set,
+        )
+    )
+    remaining_seconds = max(0.0, classifier_deadline - time.monotonic())
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(worker),
+            remaining_seconds,
+        )
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        stop_event.set()
+        await auto_speaker._drain_worker(worker)
+        raise speaker_cast.AutoCastManualRequired() from exc
+    except asyncio.CancelledError:
+        stop_event.set()
+        await auto_speaker._drain_worker(worker)
+        raise
+    finally:
+        if not worker.done():
+            stop_event.set()
+            await auto_speaker._drain_worker(worker)
+
+
+async def _run_multi_speaker_preflight(
+    state: Mapping[str, object],
+    *,
+    prepare_subtitles: Callable[..., Any],
+    post_prepare_gate: Callable[[dict, Mapping[str, object]], Any],
+    extract_pcm: Callable[..., Any],
+    classify_speakers: Callable[..., dict[str, dict]],
+) -> dict[str, Any]:
+    current = state if isinstance(state, Mapping) else {}
+    pcm_path: Path | None = None
+    try:
+        if not is_auto_multi_speaker_state(current):
+            raise speaker_cast.AutoCastUnavailable()
+        prepared = await auto_speaker._maybe_await(
+            prepare_subtitles(current, require_auto_cast=True)
+        )
+        gate_result = await auto_speaker._maybe_await(
+            post_prepare_gate(prepared, current)
+        )
+        if not auto_speaker._gate_continues(gate_result):
+            return gate_result
+
+        labels, ranges_by_speaker = auto_speaker._validated_classifier_inputs(
+            prepared
+        )
+        extracted = await auto_speaker._maybe_await(
+            extract_pcm(
+                prepared,
+                current,
+                channels=1,
+                sample_rate=speaker_cast.PCM_SAMPLE_RATE,
+                sample_format="s16le",
+            )
+        )
+        pcm_path = auto_speaker._validated_pcm_path(prepared, extracted)
+        classifications = await _classify_multi_off_event_loop(
+            pcm_path,
+            ranges_by_speaker,
+            classify_speakers,
+        )
+        result = {
+            "ok": True,
+            "status": auto_speaker.AUTO_SPEAKER_PREFLIGHT_READY,
+            "prepared": prepared,
+            "speaker_labels": labels,
+            "classifications": classifications,
+        }
+    except asyncio.CancelledError:
+        auto_speaker._cleanup_pcm_path(pcm_path)
+        raise
+    except (
+        speaker_cast.AutoCastUnavailable,
+        speaker_cast.AutoCastManualRequired,
+    ) as exc:
+        auto_speaker._cleanup_pcm_path(pcm_path)
+        return auto_speaker._manual_required_result(current, exc)
+    except Exception:
+        auto_speaker._cleanup_pcm_path(pcm_path)
+        raise
+
+    if not auto_speaker._cleanup_pcm_path(pcm_path):
+        return auto_speaker._manual_required_result(
+            current,
+            speaker_cast.AutoCastManualRequired(),
+        )
+    return result
+
+
+async def _run_isolated_multi_speaker_blackbox(
+    *,
+    lane_mode: str,
+    run_lane_blackbox: Callable[..., Any],
+    runner: Callable[..., Any],
+    prepare_subtitles: Callable[..., Any],
+    resolve_voice_id: Callable[..., Any],
+    synthesize_segments: Callable[..., Any],
+    post_prepare_gate: Callable[[dict, Mapping[str, object]], Any],
+    extract_pcm: Callable[..., Any],
+    validated_pools: Mapping[str, object],
+    classify_speakers: Callable[..., dict[str, dict]],
+    required_pool_capacity: int = 1,
+    **payload: Any,
+) -> dict[str, Any]:
+    """Run the multi-speaker lane without invoking the protected Auto runner."""
+
+    current = payload.get("state")
+    if not isinstance(current, Mapping):
+        current = {}
+    failure_slot: list[Exception] = []
+
+    def record_owned_failure(error: Exception) -> None:
+        if not failure_slot:
+            failure_slot.append(error)
+
+    try:
+        if not callable(run_lane_blackbox) or not callable(runner):
+            raise speaker_cast.AutoCastUnavailable()
+        if not callable(prepare_subtitles) or not callable(resolve_voice_id):
+            raise speaker_cast.AutoCastUnavailable()
+        if not callable(synthesize_segments) or not callable(classify_speakers):
+            raise speaker_cast.AutoCastUnavailable()
+        if (
+            type(required_pool_capacity) is not int
+            or not 1 <= required_pool_capacity <= speaker_cast.MAX_AUTO_SPEAKER_LABELS
+        ):
+            raise speaker_cast.AutoCastUnavailable()
+        validated_pools = speaker_cast._validated_voice_pools(validated_pools)
+        if any(
+            len(validated_pools[register]) < required_pool_capacity
+            for register in ("low", "high")
+        ):
+            raise speaker_cast.AutoCastManualRequired()
+
+        preflight = await _run_multi_speaker_preflight(
+            current,
+            prepare_subtitles=prepare_subtitles,
+            post_prepare_gate=post_prepare_gate,
+            extract_pcm=extract_pcm,
+            classify_speakers=classify_speakers,
+        )
+        if not isinstance(preflight, Mapping):
+            raise speaker_cast.AutoCastUnavailable()
+        if not (
+            preflight.get("ok") is True
+            and preflight.get("status")
+            == auto_speaker.AUTO_SPEAKER_PREFLIGHT_READY
+        ):
+            return dict(preflight)
+
+        prepared = preflight.get("prepared")
+        speaker_labels = preflight.get("speaker_labels")
+        classifications = preflight.get("classifications")
+        if (
+            not isinstance(prepared, dict)
+            or not isinstance(speaker_labels, list)
+            or not isinstance(classifications, dict)
+        ):
+            raise speaker_cast.AutoCastUnavailable()
+        source_segments = prepared.get("source_segments")
+        if not isinstance(source_segments, list):
+            raise speaker_cast.AutoCastUnavailable()
+        source_speaker_order = speaker_cast.ordered_auto_speaker_labels(
+            source_segments
+        )
+        if source_speaker_order != speaker_labels:
+            raise speaker_cast.AutoCastUnavailable()
+        assignment_seed = auto_speaker._nested_receipt_value(
+            prepared,
+            "speaker_sidecar_sha256",
+        )
+        casts = speaker_cast.assign_stable_voices(
+            classifications,
+            speaker_order=speaker_labels,
+            validated_pools=validated_pools,
+            assignment_seed=assignment_seed,
+        )
+        annotated_prepared, assignments = (
+            auto_speaker._annotate_prepared_assignments(prepared, casts)
+        )
+    except asyncio.CancelledError:
+        raise
+    except (
+        speaker_cast.AutoCastUnavailable,
+        speaker_cast.AutoCastManualRequired,
+    ) as exc:
+        return auto_speaker._manual_required_result(current, exc)
+
+    expected_selected_signature: tuple[
+        tuple[str, float, float, str], ...
+    ] | None = None
+
+    async def already_prepared(_state: dict) -> dict[str, Any]:
+        return annotated_prepared
+
+    def multi_resolve_voice_id(
+        _user_id: int | str,
+        pipeline_state: dict,
+    ) -> str:
+        nonlocal expected_selected_signature
+        try:
+            selected = auto_speaker._validated_policy_segments(
+                pipeline_state,
+                annotated_prepared,
+                assignments,
+            )
+            expected_selected_signature = auto_speaker._selected_voice_signature(
+                selected
+            )
+            return expected_selected_signature[0][3]
+        except (
+            speaker_cast.AutoCastUnavailable,
+            speaker_cast.AutoCastManualRequired,
+        ) as exc:
+            record_owned_failure(exc)
+            raise
+
+    async def multi_synthesize_segments(
+        segments: list[dict],
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        try:
+            if expected_selected_signature is None:
+                raise speaker_cast.AutoCastUnavailable()
+            selected = auto_speaker._validated_assigned_segments(
+                segments,
+                assignments,
+            )
+            actual_signature = auto_speaker._selected_voice_signature(selected)
+            if actual_signature != expected_selected_signature:
+                raise speaker_cast.AutoCastUnavailable()
+            compatibility_voice = kwargs.get("voice_id")
+            if compatibility_voice != expected_selected_signature[0][3]:
+                raise speaker_cast.AutoCastManualRequired()
+
+            chunks: list[dict[str, Any]] = []
+            provider_labels: list[str] = []
+            scalar_result_count = 0
+            for cue in selected:
+                scalar_kwargs = dict(kwargs)
+                scalar_kwargs["voice_id"] = cue["tts_voice_id"]
+                scalar_result = await auto_speaker._maybe_await(
+                    synthesize_segments([cue], *args, **scalar_kwargs)
+                )
+                scalar_chunks, provider_label = (
+                    auto_speaker._validated_scalar_result(scalar_result, cue)
+                )
+                chunks.extend(scalar_chunks)
+                provider_labels.append(provider_label)
+                scalar_result_count += 1
+            if scalar_result_count != len(selected):
+                raise speaker_cast.AutoCastUnavailable()
+            return {
+                "chunks": chunks,
+                "provider": auto_speaker._aggregate_provider_labels(
+                    provider_labels
+                ),
+            }
+        except (
+            speaker_cast.AutoCastUnavailable,
+            speaker_cast.AutoCastManualRequired,
+        ) as exc:
+            record_owned_failure(exc)
+            raise
+
+    lane_payload = dict(payload)
+    lane_payload.update(
+        {
+            "prepare_subtitles": already_prepared,
+            "resolve_voice_id": multi_resolve_voice_id,
+            "synthesize_segments": multi_synthesize_segments,
+        }
+    )
+    try:
+        result = await auto_speaker._maybe_await(
+            run_lane_blackbox(
+                lane_mode=lane_mode,
+                runner=runner,
+                **lane_payload,
+            )
+        )
+    except asyncio.CancelledError:
+        raise
+    except (
+        speaker_cast.AutoCastUnavailable,
+        speaker_cast.AutoCastManualRequired,
+    ) as exc:
+        return auto_speaker._manual_required_result(
+            current,
+            failure_slot[0] if failure_slot else exc,
+        )
+    except Exception:
+        if failure_slot:
+            return auto_speaker._manual_required_result(
+                current,
+                failure_slot[0],
+            )
+        raise
+    if failure_slot:
+        return auto_speaker._manual_required_result(current, failure_slot[0])
+    if not isinstance(result, dict):
+        return auto_speaker._manual_required_result(
+            current,
+            speaker_cast.AutoCastUnavailable(),
+        )
+    return result
 
 
 async def run_auto_multi_speaker_blackbox(
@@ -625,7 +951,6 @@ async def run_auto_multi_speaker_blackbox(
                 prepared,
                 prepared_state,
                 **extract_kwargs,
-                audio_filter=MULTI_PCM_AUDIO_FILTER,
             )
         )
 
@@ -735,7 +1060,7 @@ async def run_auto_multi_speaker_blackbox(
         lane_payload["synthesize_segments"] = synthesize_multi_segments
 
     try:
-        result = await auto_speaker.run_auto_speaker_blackbox(
+        result = await _run_isolated_multi_speaker_blackbox(
             extract_pcm=extract_multi_pcm,
             classify_speakers=classify_multi_speaker_registers,
             state=current,

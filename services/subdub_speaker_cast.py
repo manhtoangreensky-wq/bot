@@ -59,7 +59,7 @@ _PITCH_DIFFERENCE_STRIDE = 1
 _PITCH_YIN_THRESHOLD = 0.24
 _PITCH_YIN_MAXIMUM = 0.32
 _MIN_PITCH_FRAME_CONFIDENCE = 0.68
-_MIN_PITCH_FRAMES = 2
+_MIN_PITCH_FRAMES = 1
 _MAX_FRAME_RELATIVE_PITCH_DEVIATION = 0.22
 _MAX_HARMONIC_PURITY_COMPONENTS = 4
 _MAX_HARMONIC_PURITY_HZ = 900.0
@@ -1261,11 +1261,8 @@ def _estimate_window_pitch(
     *,
     deadline_monotonic: float,
     stop_requested: Callable[[], bool],
-    allow_single_pitch_frame: bool = False,
 ) -> tuple[float, float] | None:
     _ensure_classifier_active(deadline_monotonic, stop_requested)
-    if type(allow_single_pitch_frame) is not bool:
-        raise AutoCastManualRequired()
     if not isinstance(raw, bytes) or len(raw) != PCM_WINDOW_BYTES:
         return None
 
@@ -1326,8 +1323,7 @@ def _estimate_window_pitch(
             estimates.append(
                 (estimate[0], estimate[1], competing_ratio, competing_hz)
             )
-    minimum_pitch_frames = 1 if allow_single_pitch_frame else _MIN_PITCH_FRAMES
-    if len(estimates) < minimum_pitch_frames:
+    if len(estimates) < _MIN_PITCH_FRAMES:
         return None
 
     median_hz = _bounded_median([item[0] for item in estimates])
@@ -1339,10 +1335,7 @@ def _estimate_window_pitch(
         if abs(item[0] - median_hz) / median_hz
         <= _MAX_FRAME_RELATIVE_PITCH_DEVIATION
     ]
-    minimum_inliers = max(
-        minimum_pitch_frames,
-        math.ceil(len(estimates) * 0.60),
-    )
+    minimum_inliers = max(_MIN_PITCH_FRAMES, math.ceil(len(estimates) * 0.60))
     if len(inliers) < minimum_inliers:
         return None
     competing_frames = [
@@ -1370,11 +1363,7 @@ def _estimate_window_pitch(
         [abs(item[0] - refined_hz) / refined_hz for item in inliers]
     )
     stability = max(0.0, 1.0 - (relative_spread / 0.32))
-    support = (
-        0.5
-        if allow_single_pitch_frame and len(inliers) == 1
-        else min(1.0, len(inliers) / 4.0)
-    )
+    support = 0.5 if len(inliers) == 1 else min(1.0, len(inliers) / 4.0)
     periodicity = _bounded_median([item[1] for item in inliers])
     confidence = max(
         0.0,
@@ -1401,15 +1390,12 @@ def classify_speaker_registers(
     *,
     deadline_monotonic: float,
     stop_requested: Callable[[], bool],
-    allow_single_pitch_frame: bool = False,
 ) -> dict[str, dict]:
     """Classify bounded speaker ranges from streaming mono 16 kHz s16le PCM."""
 
     if not isinstance(ranges_by_speaker, dict) or not ranges_by_speaker:
         raise AutoCastManualRequired()
     if not callable(stop_requested):
-        raise AutoCastManualRequired()
-    if type(allow_single_pitch_frame) is not bool:
         raise AutoCastManualRequired()
     try:
         absolute_deadline = float(deadline_monotonic)
@@ -1464,7 +1450,6 @@ def classify_speaker_registers(
                         raw,
                         deadline_monotonic=absolute_deadline,
                         stop_requested=stop_requested,
-                        allow_single_pitch_frame=allow_single_pitch_frame,
                     )
                     if estimate is None:
                         continue
