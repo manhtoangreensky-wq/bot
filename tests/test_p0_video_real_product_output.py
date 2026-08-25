@@ -1238,6 +1238,58 @@ def _write_subtitle_fixture(path: Path, scene_count: int) -> Path:
     return path
 
 
+def test_default_ai_dubbing_materializes_from_persisted_scene_dialogue(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    expected_script = (
+        "Tung vong dat nho luu giu hoi am tu ban tay nguoi tho.\n"
+        "Chiec binh xanh hoan thien la ket tinh cua su kien nhan."
+    )
+    voice_path = tmp_path / "product_video_dubbing.mp3"
+    voice_path.write_bytes(b"fixture-audio")
+    observed: dict = {}
+
+    def fake_materialize_dubbing(material, **_kwargs):
+        observed.update(material)
+        return str(voice_path) if material.get("script_text") == expected_script else ""
+
+    monkeypatch.setattr(
+        product_video_addon_materialization,
+        "_materialize_dubbing",
+        fake_materialize_dubbing,
+    )
+    addon_plan = {
+        "contract_version": "product-video-addons-v1",
+        "requested_addons": ["dubbing"],
+        "dubbing": {
+            "dubbing_mode": "default_ai",
+            "enabled": True,
+            "script_text": "",
+            "voice_source": "default_ai",
+            "volume_percent": 100,
+        },
+        "silent_drop_allowed": False,
+    }
+
+    result = product_video_addon_materialization.materialize_product_video_addons(
+        {
+            "addon_plan": addon_plan,
+            "scenes": [
+                {"scene_index": 1, "script_text": expected_script.splitlines()[0]},
+                {"scene_index": 2, "script_text": expected_script.splitlines()[1]},
+            ],
+        },
+        workspace=str(tmp_path),
+        scene_count=2,
+        scene_duration=8.0,
+    )
+
+    assert result["ok"] is True
+    assert result["voice_audio_path"] == str(voice_path)
+    assert observed["script_text"] == expected_script
+
+
 def test_worker_blocks_missing_requested_material_before_provider_renderer(
     tmp_path: Path,
     monkeypatch,
