@@ -231809,6 +231809,28 @@ def get_video_dubbing_pending(user_id) -> dict | None:
         return None
     return state
 
+def normalize_video_dubbing_combo_pending_state(user_id, state: dict | None) -> dict:
+    """Persist the canonical combo contract before any legacy callback can route."""
+    current = dict(state or {})
+    normalized = subdub_combo_blackbox.normalize_combo_state(current)
+    if normalized == current:
+        return current
+    canonical_fields = {
+        key: normalized.get(key)
+        for key in (
+            "mode", "process_type", "video_processing_mode", "requested_mode",
+            "active_flow", "product_type", "translate_requested",
+            "dub_text_source", "dub_source", "output_type", "output_format",
+            "flow_type", "combo_subpath",
+        )
+        if normalized.get(key) is not None
+    }
+    return set_video_dubbing_pending(
+        user_id,
+        str(normalized.get("step") or current.get("step") or "source"),
+        **canonical_fields,
+    )
+
 def clear_video_dubbing_pending(user_id) -> bool:
     changed = USER_PENDING.pop(video_dubbing_pending_key(user_id), None) is not None
     prefix = f"video_dubbing_artifact:{user_id}:"
@@ -265368,7 +265390,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     # Personal Affiliate Vault Text Link Intake
-    if context.user_data.get("awaiting_affiliate_import") or (("http://" in text or "https://" in text) and any(d in text for d in ["shorten.asia", "trackecom.asia", "attracking.asia", "trackfin.asia", "goecom.asia", "goeco.mobi", "trackmobi.asia", "trackec.asia", "shopee.vn", "lazada.vn", "tiktok.com"])):
+    # Guard: skip if video_downloader is pending (user is downloading video, not importing affiliate)
+    _vdl_pending = get_video_downloader_pending(uid)
+    _affiliate_auto_domains = ["shorten.asia", "trackecom.asia", "attracking.asia", "trackfin.asia", "goecom.asia", "goeco.mobi", "trackmobi.asia", "trackec.asia", "shopee.vn", "lazada.vn"]
+    if not _vdl_pending and (context.user_data.get("awaiting_affiliate_import") or (("http://" in text or "https://" in text) and any(d in text for d in _affiliate_auto_domains))):
         try:
             res = import_affiliate_links_for_user(uid, text)
             if res.get("added_count", 0) > 0:
