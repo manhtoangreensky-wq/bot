@@ -105,6 +105,21 @@ def test_video_status_panel_compact_public_copy():
     assert "Thời gian chờ dự kiến:" not in text
 
 
+def test_video_status_progress_steps_are_real_vertical_lines():
+    text = bot.video_b14_status_steps_text("failed", 20)
+
+    assert r"\n" not in text
+    assert text.splitlines() == [
+        "<b>Tiến trình:</b>",
+        "✅ Nhận yêu cầu",
+        "⚠️ Tạo tác vụ",
+        "⬜ Kiểm tra cấu hình",
+        "⬜ Dựng video",
+        "⬜ Kiểm tra file",
+        "⬜ Gửi kết quả",
+    ]
+
+
 def test_video_status_panel_no_debug_terms():
     text = _sample_status_text().lower()
     forbidden = (

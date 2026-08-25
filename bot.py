@@ -101337,7 +101337,7 @@ def video_b14_status_steps_text(
     )
     lines = ["<b>Tiến trình:</b>"]
     lines.extend(f"{icon} {label}" for icon, label in rows)
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def video_b14_blocker_label(blocker_code: str) -> str:
