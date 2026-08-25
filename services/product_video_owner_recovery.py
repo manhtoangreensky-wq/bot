@@ -12,12 +12,14 @@ from services import video_uiflow3_execution_contract
 
 
 ADDON_SUBTITLE_ERROR = "RuntimeError:addon_material_missing:subtitle"
+ADDON_DUBBING_ERROR = "RuntimeError:addon_material_missing:dubbing"
 POST_POLL_FINALIZER_ERROR = "RuntimeError:provider_render_failed:RuntimeError"
 COMPLETION_409_ERROR = "HTTPError:HTTP Error 409: Conflict"
 RECOVERABLE_ERRORS = frozenset(
     {
         "RuntimeError:uiflow3_approved_snapshot_hash_mismatch",
         ADDON_SUBTITLE_ERROR,
+        ADDON_DUBBING_ERROR,
         POST_POLL_FINALIZER_ERROR,
         COMPLETION_409_ERROR,
     }
@@ -345,7 +347,8 @@ def recover_product_video_owner_pre_submit_failure(
     if error not in RECOVERABLE_ERRORS and not addon_subtitle_poll_only_repair:
         return _blocked("failure_reason_not_recoverable")
     addon_subtitle_recovery = bool(
-        error == ADDON_SUBTITLE_ERROR or addon_subtitle_poll_only_repair
+        error in {ADDON_SUBTITLE_ERROR, ADDON_DUBBING_ERROR}
+        or addon_subtitle_poll_only_repair
     )
     recovery_kind = (
         "completion_409"
