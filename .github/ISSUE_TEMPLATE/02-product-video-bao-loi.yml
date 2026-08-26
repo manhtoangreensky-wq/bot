@@ -1,0 +1,39 @@
+name: Product Video báo lỗi
+description: Báo lỗi từ một case live Product Video
+title: "[Product Video Bug] "
+labels: ["lỗi", "chờ-sửa"]
+body:
+  - type: input
+    id: case_id
+    attributes:
+      label: Case ID
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Mong đợi
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Thực tế
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Bằng chứng
+      description: Runtime SHA, screen/callback, job id, artifact/receipt hoặc terminal output.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety
+      options:
+        - label: Không tạo thêm job/provider call khi tái hiện
+          required: true
+        - label: Đã ghi charge/Xu/transaction delta
+          required: true

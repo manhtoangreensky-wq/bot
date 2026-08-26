@@ -1,0 +1,42 @@
+name: Product Video case test
+description: Ghi bằng chứng cho một case trong KIEM-THU/DANH-SACH-CASE.md
+title: "[Product Video Test] "
+labels: ["case-test", "chờ-test"]
+body:
+  - type: markdown
+    attributes:
+      value: "Sửa case thì sửa KIEM-THU/DANH-SACH-CASE.md trước."
+  - type: input
+    id: case_id
+    attributes:
+      label: Case ID
+      placeholder: PV-L01 hoặc PV-Q200
+    validations:
+      required: true
+  - type: input
+    id: runtime_sha
+    attributes:
+      label: Runtime SHA
+    validations:
+      required: true
+  - type: textarea
+    id: flow
+    attributes:
+      label: Flow và callback
+      description: Ghi đủ Add-on, Review, Quality, Invoice, Confirm, Status.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Job, artifact và delivery evidence
+      description: Ghi request/project/job/outbox, MP4 hash/metrics, add-on, message id và 0 Xu.
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Kết quả
+      options: [PASS, FAIL, BLOCKED]
+    validations:
+      required: true

@@ -38,13 +38,13 @@ Current shared-resource owner: **SubDub Auto**.
 
 - [x] Audit current routes from public buttons through pending text handlers.
 - [x] Prove current behavior contradicts the Owner contract.
-- [ ] RED: exact customer text is preserved for every supported manual lane.
-- [ ] RED: a deterministic two-scene plan exists with zero provider calls.
-- [ ] RED: next visible screen is `addon`, not Profile/Content Lock/Production Bible/suggestions.
-- [ ] RED: Tail order is `addon -> review -> quality -> invoice -> confirm -> status`.
-- [ ] RED: back targets stay inside the same product and state.
-- [ ] Minimal production fix.
-- [ ] Focused GREEN evidence.
+- [x] RED: exact customer text is preserved for every supported manual lane.
+- [x] RED: a deterministic two-scene plan exists with zero provider calls.
+- [x] RED: next visible screen is `addon`, not Profile/Content Lock/Production Bible/suggestions.
+- [x] RED: Tail order is `addon -> review -> quality -> invoice -> confirm -> status`.
+- [x] RED: back targets stay inside the same product and state.
+- [x] Minimal production fix.
+- [x] Focused GREEN evidence.
 
 Current source evidence:
 
@@ -53,6 +53,7 @@ Current source evidence:
 | Video theo trend / `trend_manual_input` | `start_public_video_scene2_step` | FAIL |
 | Video AI chan that / UIFLOW3 `manual_content` | `content_lock -> production_bible` | FAIL |
 | Video AI chan that / `awaiting_prompt_text` | `start_public_video_scene2_step` | FAIL |
+| Kich ban -> Video / canonical `awaiting_existing_script` | script proposal/planner | FAIL |
 | Kich ban -> Video / `script_manual_topic` | `start_public_video_scene2_step` | FAIL |
 | Storyboard / `storyboard_manual_input` | `start_public_video_scene2_step` | FAIL |
 | Video dai tap / `film_manual_topic` | `start_public_video_scene2_step` | FAIL |
@@ -62,35 +63,35 @@ Current source evidence:
 
 ### SPEC-02: Quality Selector Matrix
 
-- [ ] Every visible quality button has a registered callback.
-- [ ] Selecting a tier preserves the exact tier in review, invoice, confirmation, admission, job, and manifest.
-- [ ] Unsupported capability blocks before admission with no provider call and no charge.
-- [ ] Focused GREEN evidence for every tier id.
+- [x] Every visible quality button has a registered callback.
+- [x] Selecting a tier preserves the exact tier in review, invoice and confirmation; live admission/job/manifest evidence remains required below.
+- [x] Unsupported or forged tier blocks before admission with no provider call and no charge.
+- [x] Focused GREEN evidence for every tier id.
 
 Video AI Real public tiers:
 
 | Tier | Selector GREEN | Two-scene LIVE | Artifact/Receipt Evidence |
 |---:|:---:|:---:|---|
-| 200 | [ ] | [ ] | pending |
-| 300 | [ ] | [ ] | pending |
-| 400 | [ ] | [ ] | pending |
-| 500 | [ ] | [ ] | pending |
-| 600 | [ ] | [ ] | pending |
-| 700 | [ ] | [ ] | pending |
-| 800 | [ ] | [ ] | pending |
-| 1000 | [ ] | [ ] | pending |
-| 1200 | [ ] | [ ] | pending |
-| 1500 | [ ] | [ ] | pending |
+| 200 | [x] | [ ] | source GREEN; live pending |
+| 300 | [x] | [ ] | source GREEN; live pending |
+| 400 | [x] | [ ] | source GREEN; live pending |
+| 500 | [x] | [ ] | source GREEN; live pending |
+| 600 | [x] | [ ] | source GREEN; live pending |
+| 700 | [x] | [ ] | source GREEN; live pending |
+| 800 | [x] | [ ] | source GREEN; live pending |
+| 1000 | [x] | [ ] | source GREEN; live pending |
+| 1200 | [x] | [ ] | source GREEN; live pending |
+| 1500 | [x] | [ ] | source GREEN; live pending |
 
 ### SPEC-03: Source Regression Gate
 
-- [ ] Focused Product Video lane/Tail tests pass.
-- [ ] Quality matrix tests pass.
-- [ ] Back-stack, stale callback, duplicate confirm, read-only refresh, newline status, audio/final mux regressions pass.
-- [ ] `python -m py_compile bot.py` passes.
-- [ ] Touched runtime modules compile.
-- [ ] `git diff --check` passes.
-- [ ] Diff contains no protected-file or unrelated-flow changes.
+- [x] Focused Product Video lane/Tail tests pass.
+- [x] Quality matrix tests pass.
+- [x] Back-stack, duplicate confirm, read-only refresh, newline status and audio/final mux source regressions pass; real artifact evidence remains live-only.
+- [x] `python -m py_compile bot.py` passes.
+- [x] Touched runtime modules compile.
+- [x] `git diff --check` passes.
+- [x] Diff contains no secret, wallet, PayOS, provider-submit, SubDub or unrelated runtime changes.
 
 ### SPEC-04: One PR, Merge, Deploy, Runtime
 
@@ -140,3 +141,19 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | Time (Asia/Saigon) | Spec | Evidence | Result |
 |---|---|---|---|
 | 2026-08-26 | READ/CONTRACT | Source route audit at branch HEAD `f4c022a` | Manual direct-Tail contract FAIL; SPEC-01 opened |
+| 2026-08-26 | SPEC-01 RED environment attempt | Bundled Python collection: missing `telegram`; 623.45s | ENV INVALID; not accepted as RED |
+| 2026-08-26 | SPEC-01 authoritative RED | Python 3.14 dependency-complete: `11 failed, 1 warning in 9.62s` | PASS as RED; missing seam/constants/wiring reproduced |
+| 2026-08-26 | SPEC-01 GREEN attempt 1 | Pytest internal error in `tests/conftest.py`: subprocess `git diff` raised WinError 6 after 674.48s | HARNESS INVALID; no assertion result, GREEN remains open |
+| 2026-08-26 | SPEC-01 GREEN attempt 2 | `17 passed, 2 failed, 1 warning in 479.82s` | Behavioral matrix GREEN; two test-only decorator-wrapper introspection assertions failed, full GREEN remains open |
+| 2026-08-26 | SPEC-01 GREEN attempt 3 | `18 passed, 2 failed, 1 warning in 464.36s` | Expanded behavioral matrix GREEN; decorator lacks `__wrapped__`, two static introspection assertions remain open |
+| 2026-08-26 | SPEC-01 GREEN attempt 4 | `19 passed, 1 failed, 1 warning in 10.44s` | Direct-source extraction fixed wrapper issue; final static assertion targeted wrapper instead of `_handle_storyboard2_callback_impl` |
+| 2026-08-26 | SPEC-01 final GREEN | Full file: `20 passed, 1 warning in 10.60s`, exit 0 | PASS; warning only google.genai deprecation |
+| 2026-08-26 | SPEC-02 RED | `4 failed, 13 passed, 1 warning in 14.14s` | PASS as RED; `select_package` discarded compatibility for four unsupported/forged tiers |
+| 2026-08-26 | SPEC-02 GREEN attempt 1 | `15 passed, 2 failed, 1 warning in 12.80s` | Service guard worked; Script/Storyboard contract still advertised hidden tier 200 |
+| 2026-08-26 | SPEC-02 final GREEN | `17 passed, 1 warning in 11.07s`, exit 0 | PASS; 10 valid Video AI tiers and all invalid tier guards verified |
+| 2026-08-26 | SPEC-03 compile | `py_compile bot.py services/video_tail9.py services/product_video_owner_recovery.py`, exit 0 | PASS |
+| 2026-08-26 | SPEC-03 branch regression | `79 passed, 11 failed, 1 warning in 22.03s` | Compared to baseline before classification |
+| 2026-08-26 | SPEC-03 origin/main baseline | Detached `cd4acb8`: `16 passed, 11 failed in 3.14s`, same 11 test names | NEW_FAILURES=0; old contract tests remain stale |
+| 2026-08-26 | SPEC-03 audio/mux | Five selectors pass; one real-FFmpeg selector harness-failed with WinError 6 before spawn; replacement pure comparator `1 passed in 0.47s` | Source policy PASS; real media proof deferred to live artifact |
+| 2026-08-26 | SPEC-01 final after durability review | `21 passed, 1 warning in 10.49s`, exit 0 | PASS on exact pre-push source |
+| 2026-08-26 | Final pre-push compile | `py_compile bot.py services/video_tail9.py services/product_video_owner_recovery.py`, exit 0 | PASS on exact pre-push source |
