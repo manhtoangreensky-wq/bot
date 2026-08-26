@@ -111190,6 +111190,11 @@ def save_video_tail9_state(user_id: int, context, tail: dict, owner: str, host: 
         current["branding"] = branding
         save_video_uiflow3_state(context, current)
     elif owner == "scene3":
+        postproduction = deepcopy(dict(current.get("postproduction_addons") or {}))
+        postproduction.update(deepcopy(dict(
+            (clean.get("addon_config") or {}).get("postprocessing") or {}
+        )))
+        current["postproduction_addons"] = postproduction
         save_video_profile_studio_state(context, current)
     elif clean.get("video_product_type") == video_selfshot2.PRODUCT_ID:
         plan = dict(current.get("audio_plan") or video_selfshot2.initial_draft()["audio_plan"])

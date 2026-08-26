@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from pathlib import Path
 
 
@@ -10,7 +11,12 @@ BOT_SOURCE = (Path(__file__).resolve().parents[1] / "bot.py").read_text(
 
 
 def _function_source(name: str) -> str:
-    start = BOT_SOURCE.index(f"async def {name}(")
+    starts = [
+        position
+        for marker in (f"def {name}(", f"async def {name}(")
+        if (position := BOT_SOURCE.find(marker)) >= 0
+    ]
+    start = min(starts)
     candidates = [
         position
         for marker in ("\ndef ", "\nasync def ")
@@ -103,3 +109,59 @@ def test_long_html_renderer_keeps_callback_query_edit_path() -> None:
 
     assert result == "edited"
     assert calls == [("edit", "<b>Add-on video</b>")]
+
+
+def test_scene3_tail_save_persists_selected_postproduction_addons() -> None:
+    saved_hosts: list[dict] = []
+
+    class Tail9:
+        @staticmethod
+        def normalize_state(state):
+            return dict(state)
+
+    namespace = {
+        "deepcopy": deepcopy,
+        "video_tail9": Tail9,
+        "VIDEO_TAIL9_STATE_KEY": "video_tail9",
+        "save_video_profile_studio_state": (
+            lambda _context, host: saved_hosts.append(dict(host)) or dict(host)
+        ),
+    }
+    exec(
+        compile(
+            "from __future__ import annotations\n"
+            + _function_source("save_video_tail9_state"),
+            "<product-video-scene3-addon-save>",
+            "exec",
+        ),
+        namespace,
+    )
+    subtitles = {
+        "enabled": True,
+        "value": {
+            "source": "auto",
+            "translation": False,
+            "target_language": "",
+        },
+    }
+    tail = {
+        "audio_config": {
+            "subtitles": True,
+            "volumes": {},
+        },
+        "addon_config": {
+            "postprocessing": {
+                "subtitles": subtitles,
+            }
+        },
+    }
+
+    namespace["save_video_tail9_state"](
+        7126457028,
+        object(),
+        tail,
+        "scene3",
+        {"postproduction_addons": {}},
+    )
+
+    assert saved_hosts[-1]["postproduction_addons"]["subtitles"] == subtitles
