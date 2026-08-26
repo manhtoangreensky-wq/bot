@@ -219,3 +219,26 @@ def test_long_html_renderer_converts_oversize_html_before_chunking() -> None:
             "quality-keyboard",
         )
     ]
+
+
+def test_tail_callback_ack_timeout_is_best_effort() -> None:
+    class TimedOutQuery:
+        async def answer(self, *_args, **_kwargs):
+            raise TimeoutError("telegram callback acknowledgement timed out")
+
+    namespace: dict = {}
+    exec(
+        compile(
+            "from __future__ import annotations\n"
+            + _function_source("video_tail9_answer_best_effort"),
+            "<product-video-callback-ack-timeout>",
+            "exec",
+        ),
+        namespace,
+    )
+
+    result = asyncio.run(
+        namespace["video_tail9_answer_best_effort"](TimedOutQuery())
+    )
+
+    assert result is None

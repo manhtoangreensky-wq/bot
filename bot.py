@@ -113992,6 +113992,13 @@ async def video_edit_legacy_tail_compatibility(query, uid: int, tail: dict, host
 
 
 @video_tail9_callback_guard
+async def video_tail9_answer_best_effort(query, text: str = "") -> None:
+    try:
+        await query.answer(text or None)
+    except Exception:
+        return None
+
+
 async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
@@ -115585,7 +115592,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     or execution_preflight.get("blocker")
                     or (execution_blockers[0] if execution_blockers else "render_service_not_ready")
                 )
-                await query.answer()
+                await video_tail9_answer_best_effort(query)
                 tail = video_tail9_prepare_submit_status(
                     uid,
                     context,
