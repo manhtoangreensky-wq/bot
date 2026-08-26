@@ -113991,7 +113991,6 @@ async def video_edit_legacy_tail_compatibility(query, uid: int, tail: dict, host
     )
 
 
-@video_tail9_callback_guard
 async def video_tail9_answer_best_effort(query, text: str = "") -> None:
     try:
         await query.answer(text or None)
@@ -113999,6 +113998,7 @@ async def video_tail9_answer_best_effort(query, text: str = "") -> None:
         return None
 
 
+@video_tail9_callback_guard
 async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
