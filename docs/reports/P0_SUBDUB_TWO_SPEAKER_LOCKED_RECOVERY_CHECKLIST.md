@@ -16,15 +16,16 @@
 
 ### Current pointer
 
-- Current SPEC: `SPEC-07`.
-- Current SUBSPEC: `SPEC-07.3`.
-- Current phase: `SHIP LIVE-FOUND LABEL CORRECTION / pre-confirm`.
-- Production action active: `focused source correction only`.
-- Telegram/provider job active: `NO; flow paused before final confirmation`.
+- Current SPEC: `SPEC-08`.
+- Current SUBSPEC: `SPEC-08.2`.
+- Current phase: `FAILURE LOOP / pre-push review and latest-main rebase`.
+- Production action active: `one-line scoped Deepgram model correction verified locally`.
+- Telegram/provider job active: `NO; job #EE4E7E69CD terminal before cast/TTS/mux`.
 - Wallet mutation: `0`.
-- Next allowed action: push the two-line truthful audio label correction, deploy,
-  resume the existing combo flow before final confirmation.
-- Next forbidden action: final confirm/provider call on misleading old keyboard.
+- Next allowed action: rebase onto latest Product Video main, rerun focused
+  post-rebase gate, then one PR/deploy/same-fixture retry.
+- Next forbidden action: edit classifier/cast/audio/pricing/multi module, start a
+  second live job, or move to standalone/multi before this failure loop ships.
 
 ### Luật bất biến
 
@@ -80,6 +81,9 @@
 - `services/subdub_blackboxes/auto_speaker.py`: exact 2-speaker engine rollback.
 - `bot.py`: only exact lane-2 dispatch/compatibility and audio-mix UI/state symbols
   listed in `SPEC-02`.
+- `bot.py`: live-failure exception for the scoped
+  `subdub_deepgram_request_params(require_diarization=True)` model only; default
+  non-diarized ASR remains unchanged.
 - A new regression test file dedicated to this recovery.
 - This checklist and final evidence report.
 
@@ -435,21 +439,56 @@ REJECT_REASON: empty
 
 ## SPEC-08 — Live combo: Phụ đề + Lồng tiếng
 
+### SPEC-08.0 — Live failure loop: multilingual diarized ASR
+
+- [x] RED proves the diarized request still selects `nova-2` instead of the
+  current Deepgram multi-speaker/multilingual model `nova-3-general`.
+- [x] Exact fixture is Mandarin Chinese with two visible speakers and Chinese
+  hard subtitles; six-frame contact sheet inspected.
+- [x] Source audio is AAC stereo `48.344s`; decoded mono signal mean `-12.2 dB`,
+  max `0.0 dB`, with no `>-0.5s` silence below `-35 dB`.
+- [x] Job `#EE4E7E69CD` saved exact source SHA `85C8793D...` and normalized MP4,
+  then terminalized `empty_transcript` before sidecar/cast/TTS/mux.
+- [x] Official Deepgram docs checked: Nova-3 is recommended for multi-speaker,
+  multilingual, noisy/far-field batch audio and supports Chinese `zh`.
+- [x] Minimal GREEN changes only the diarized model to `nova-3-general`.
+- [x] Default/non-diarized request remains `nova-2`.
+- [ ] PR/deploy/runtime sync then same-fixture live retry reaches past ASR.
+
+Measured source evidence:
+
+```text
+RED: 1 failed, 1 warning in 460.89s
+RED assertion: expected nova-3-general; actual nova-2
+INVALID first GREEN: collection SyntaxError after apply-patch mechanically lost
+2,004 unrelated Product Video lines; no assertion ran; restored exact origin/main
+GREEN source-only AST: 1 passed in 534.54s
+PROTECTED: 9 passed, 1 warning in 1002.61s
+PY_COMPILE: bot.py exit 0
+DIFF_CHECK: exit 0; CRLF warnings only
+PROTECTED_HASHES: auto_multi_speaker=55AAB894...;
+subdub_speaker_cast=DE93620F...
+PRODUCTION_DIFF: bot.py +1 line in scoped diarized request helper
+```
+
 ### SPEC-08.1 — Pre-admission
 
-- [ ] Runtime SHA verified in Telegram/VPS.
-- [ ] Correct fixture hash rechecked immediately before upload.
-- [ ] Baseline wallet transactions/count/balance captured.
-- [ ] Exactly one upload.
-- [ ] Select English.
-- [ ] Select `Tự động 2 giọng`.
-- [ ] Set and record non-default original/dub volume percentages.
-- [ ] Confirm exactly once.
+- [x] Runtime SHA `085a1aaa...` verified in Telegram/VPS.
+- [x] Correct fixture hash rechecked immediately before upload.
+- [x] Baseline wallet captured: credits `200`, total_spent `0`, transactions `0`,
+  credit_events `1`.
+- [x] Exactly one valid fresh-flow upload; prior stale-state upload was rejected
+  before SubDub admission with `InvalidToken` and zero provider/wallet action.
+- [x] Select English.
+- [x] Select `Tự động 2 giọng`.
+- [x] Set and record original `40%` / dub `150%`.
+- [x] Confirm exactly once; public job `#EE4E7E69CD`.
 
 ### SPEC-08.2 — Observe stages
 
-- [ ] Status panel visible.
-- [ ] Source saved with correct SHA.
+- [x] Status panel visible through `35%`.
+- [x] Source saved with correct SHA in workspace
+  `/tmp/toan_aas_pipeline/ee4e7e69cdaf4b4e459d`.
 - [ ] ASR/diarization sidecar exists.
 - [ ] Exactly 2 speaker labels.
 - [ ] Cast evidence records one low/male and one high/female for fixture.

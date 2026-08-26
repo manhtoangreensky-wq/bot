@@ -69,3 +69,30 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Hai lượt render, mỗi lượt `6` trường hợp: CLS `0`, long task trên `200ms` bằng `0`, overflow/pending/replay/lỗi runtime bằng `0`.
 - Đợt này có `0` provider call, `0` wallet mutation, `0` production-data mutation, `0` ENV mutation và `0` Telegram mutation.
 - Local đã verify; merge, deploy và live test vẫn là các cổng riêng.
+
+## Bổ sung vận hành SubDub tự động 2 giọng — 27/08/2026
+
+- Thứ tự khóa: combo `Phụ đề + Lồng tiếng` phải giao MP4 + SRT + receipt trước;
+  sau đó lane `Lồng tiếng video` phải giao MP4 + receipt; chỉ khi cả hai PASS mới
+  được chạy `Tự động nhiều giọng`.
+- Fixture acceptance hai giọng: `2 giọng nam nữ.mp4`, `4,284,017` bytes,
+  SHA-256 `85C8793D197CF2782BB554D46282E82A83BCB062A0483E412A0CA1DA668F9F51`.
+- Engine hai giọng là exact Git blob PR #842
+  `6634191cb2c0d463b86d7d9b58ded94e493a7b07`; multi engine giữ hash
+  `55AAB8949EFAECAD8DD987AC6DFE056AB0E4BC4EF81A23977EA5EDD1CDF64911`.
+- Job live `#EE4E7E69CD` trên runtime `085a1aaa` đã lưu đúng source hash nhưng
+  dừng `empty_transcript` trước sidecar/cast/TTS/mux; wallet trước/sau vẫn
+  `credits=200`, `total_spent=0`, `transactions=0`, `credit_events=1`.
+- File có AAC stereo `48.344s`; decode mono đo `mean=-12.2 dB`, `max=0.0 dB`,
+  vì vậy không được phân loại lỗi này thành file im lặng.
+- Default/manual Deepgram request vẫn dùng `nova-2`. Chỉ request đã xác nhận
+  cần diarization đổi sang `nova-3-general` + `diarize_model=latest`; không đổi
+  ENV/key, classifier, cast, TTS, pricing hoặc wallet.
+- Bằng chứng source: RED `1 failed in 460.89s`; GREEN AST `1 passed in
+  534.54s`; protected `9 passed in 1002.61s`; `py_compile bot.py` và
+  `git diff --check` exit `0`.
+- Bẫy: một apply-patch từng làm rơi `2,004` dòng Product Video; scope audit đã
+  bắt được trước ship, toàn bộ `bot.py` được restore exact `origin/main`, rồi
+  áp lại đúng `1` dòng. Luôn kiểm `git diff --numstat` trước test/commit.
+- Merge/deploy và same-fixture LIVE PASS vẫn là cổng riêng; chưa có MP4 cuối thì
+  không được ghi lane là hoàn tất.

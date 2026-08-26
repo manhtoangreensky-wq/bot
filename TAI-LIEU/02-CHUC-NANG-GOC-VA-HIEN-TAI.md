@@ -52,3 +52,25 @@ Nguồn ban đầu đã tìm thấy: `index.html` tại base `5a4f942bc0b2e8820a
 | Landing tĩnh không có parallax | Thêm parallax riêng `.workflow-preview`, desktop-only, tối đa `10px` | ⚠️ Mở rộng presentation |
 
 Chỗ tài liệu cũ không còn đúng: dòng nói GitHub CLI hết hiệu lực đã lỗi thời; ngày 26/08/2026 `gh auth status` xác nhận tài khoản đăng nhập, issue Tester Landing là `#884`. Tài khoản hiện thiếu scope `read:project`, nên chưa gắn issue vào GitHub Projects; tracker issue vẫn là phiên Tester có ID/link.
+
+## Đối chiếu SubDub tự động 2 giọng — 27/08/2026
+
+Nguồn thiết kế trước: `docs/superpowers/plans/2026-08-14-subdub-per-speaker-auto-gender-cast.md`.
+
+| Chức năng gốc | Hiện tại | Trạng thái |
+|---|---|---|
+| ASR Deepgram tạo cue và speaker label | Auto lane bắt buộc request diarization có speaker fields; fail-closed trước TTS nếu thiếu | ✅ Còn dùng |
+| Deepgram model dùng chung từ `AgentDeepgram.REQUEST_PARAMS` | Default/manual giữ `nova-2`; auto diarized override call-scoped thành `nova-3-general` | ⚠️ Tách theo năng lực |
+| Auto 2 giọng và multi dùng chung cast contract | Engine hai giọng rollback exact PR #842; multi module byte-locked riêng | ✅ Cô lập |
+| Admin không trừ Xu | Receipt vẫn phải hiển thị đủ giá niêm yết; settlement admin `charged_xu=0` | ✅ Còn dùng |
+
+Chỗ tài liệu/code cũ không còn đúng: request diarization trước live job
+`#EE4E7E69CD` kế thừa `model=nova-2`. Fixture Mandarin hai người có audio đo
+được nhưng provider trả empty transcript. Source hiện override duy nhất
+`bot.py:subdub_deepgram_request_params(require_diarization=True)` sang
+`nova-3-general`; default route không đổi. LIVE output vẫn pending cho tới khi
+có MP4 Telegram thật.
+
+GitHub tester cloud chưa được thay đổi trong đợt này: lệnh `gh label/issue`
+trả HTTP `401` ngày 27/08/2026. Case local dưới `KIEM-THU/` là nguồn chuẩn để
+push; không tuyên bố label/issue/project đã tạo khi chưa có readback.
