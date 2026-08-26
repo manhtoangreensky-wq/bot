@@ -3,8 +3,8 @@ product: SubDub
 owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
-branch: fix/p0-subdub-pr842-exact-rollback
-phase: SPEC_03_SHIP_ACTIVE
+branch: fix/p0-subdub-two-speaker-exact-price-delivery
+phase: SPEC_04_FAILURE_LOOP_BUILD
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -29,7 +29,7 @@ resource_boundary:
   live: owned_by_subdub_auto
   chrome: owned_by_subdub_auto
   vps_deploy: owned_by_subdub_auto
-  product_video: static
+  product_video: cpu_local_only; no live/browser/provider/VPS/deploy action
 
 fixtures:
   two_speaker:
@@ -84,25 +84,70 @@ ordered_specs:
 
   - id: SPEC-03
     title: Ship the two-speaker correction and prove deployed runtime identity
-    status: in_progress
+    status: completed
     acceptance:
       - one focused commit and one PR
       - squash merge to main
       - GitHub Actions deploy success
       - bot and owner worker use the merged SHA and accepted generation
       - bot, worker, web, and nginx are active
+    evidence:
+      - PR 883 squash-merged as b9b0cc3f1fdb89dab4939ab1c5bd0cdef349dc6f
+      - GitHub deploy run 32929180418 succeeded in 11m42s
+      - bot runtime build b9b0cc3; SUBDUB_RUNTIME_READY and health HTTP 200
+      - worker generation c5a9caf281cd448c9d4eafe1e14a283f persisted=yes with empty reject reason
+      - bot and worker caller/runtime SHA both b9b0cc3f1fdb89dab4939ab1c5bd0cdef349dc6f
 
   - id: SPEC-04
     title: Live-test and lock the two-speaker lane
-    status: pending
+    status: failure_loop_build
     acceptance:
       - upload only test 2 giọng.mp4
-      - select Tự động 2 giọng and English
+      - Tự động 2 giọng works in both Lồng tiếng video and Phụ đề + Lồng tiếng
+      - combo live selects Tự động 2 giọng and English
+      - standalone Lồng tiếng video live selects Tự động 2 giọng and delivers an MP4 receipt
       - automatic cast resolves exactly two speaker labels to distinct male/female voices
       - one final playable MP4 is delivered
       - one valid SRT is produced and matches the final media
       - receipt shows subtitle price, dubbing price, dubbing type, cast details, and total
+      - invoice never renders unknown dubbing price as 0 Xu
+      - exact dubbing price is computed from 0.5 Xu per billable word before delivery
       - charged_xu equals 0 and no wallet transaction is created
+    live_attempt_1:
+      public_job: 5DB01427C6
+      internal_job: 5db01427c65753cdc4c7
+      source_sha256: a89b16b896d4efa8157f7de5cea47695b5edf7d5595c4fc03ad62346cdfa0292
+      mode: subtitle_plus_dub
+      target_language: English
+      lane: Tự động 2 giọng
+      provider_labels: 2
+      cue_counts: speaker_0=9; speaker_1=16; total=25
+      final_mp4_sha256: 1f4aab98c008541be1b7a7b27e584a8f975218b60fd60fdc0a4ce0bb1d5def7d
+      final_mp4: H.264 1288x720 plus AAC mono; 119.3 seconds; 10484285 bytes
+      srt_sha256: 825d008a684302b38d262ebcdbb9daeb4e22625ae22a5882c161450b5fec70fb
+      srt_qc: 25 blocks and 25 timelines
+      terminal: failed_no_charge
+      blocker: AUTO_EXACT_PRICE_MISSING / auto_exact_price_missing
+      delivery_attempted: false
+      charged_xu: 0
+      wallet_rows_after: transactions=0; credit_events=10
+    failure_root_cause:
+      - post-prepare gate updated the outer state but copied the prepared mapping
+      - shared core preferred stale prepared[state] and dropped exact receipt fields before pricing
+      - unknown Auto word count was coerced to voice_xu=0 in both dub and subtitle_plus_dub invoices
+    red_evidence:
+      - corrected RED terminal: 4 failed, 1 warning in 11.63s
+      - both modes lost exact fields from prepared[state]
+      - both modes rendered unknown voice_xu as 0
+    green_evidence:
+      - focused GREEN terminal: 6 passed, 1 warning in 666.99s
+      - final protected VPS test-tree batch: 13 passed in 116.09s
+      - VPS clone py_compile bot.py: exit 0
+      - VPS clone git diff-check: exit 0
+      - both dub and subtitle_plus_dub preserve exact receipt fields into the shared core
+      - both modes render pending word pricing without a false 0 Xu dubbing amount
+      - both modes render the exact dubbing/subtitle/total prices after recognition
+      - both delivery receipts name Tự động 2 giọng and show component prices while charged_xu remains 0 for admin
     on_failure: stay on SPEC-04 and repeat RED/GREEN/ship/live until all acceptance evidence passes
 
   - id: SPEC-05
@@ -128,4 +173,4 @@ ordered_specs:
       - audit every acceptance line as proven or unresolved
       - mark the goal complete only when no required line remains unresolved
 
-current_next_action: review the exact four-file diff, create one commit and PR, squash merge, deploy, and verify runtime
+current_next_action: wait for CPU release; run one protected batch and compile; ship one correction PR; live combo and standalone two-speaker; continue failure loop until both pass

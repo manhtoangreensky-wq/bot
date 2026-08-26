@@ -234479,12 +234479,17 @@ def video_dubbing_invoice_breakdown(state: dict | None = None) -> dict:
     manual = _video_dubbing_manual_invoice_breakdown(state)
     if not subdub_auto_speaker_route_enabled(state):
         return manual
-    raw_words = state.get("auto_quote_billable_words")
+    exact_confirmed = _workspace_truthy(state.get("auto_exact_receipt_confirmed"))
+    raw_words = (
+        state.get("auto_exact_actual_billable_words")
+        if exact_confirmed
+        else state.get("auto_quote_billable_words")
+    )
     words = None if raw_words is None else max(0, _safe_int(raw_words, 0))
     auto_xu = (
         subdub_auto_word_pricing.auto_voice_component_xu(words)
         if words is not None
-        else 0
+        else None
     )
     mode = normalize_video_translate_mode(
         state.get("mode")
@@ -234492,14 +234497,21 @@ def video_dubbing_invoice_breakdown(state: dict | None = None) -> dict:
         or state.get("process_type")
     )
     subtitle_xu = (
-        int(manual.get("translation_xu") or 0)
+        int(
+            state.get("auto_exact_actual_subtitle_xu") or 0
+            if exact_confirmed
+            else manual.get("translation_xu") or 0
+        )
         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
         else 0
     )
     return {
         **manual,
         "auto_pricing": True,
-        "auto_quote_exact_known": _workspace_truthy(state.get("auto_quote_exact_known")),
+        "auto_quote_exact_known": bool(
+            exact_confirmed
+            or _workspace_truthy(state.get("auto_quote_exact_known"))
+        ),
         "auto_billable_words": words,
         "auto_rate_xu_per_word": str(subdub_auto_word_pricing.AUTO_XU_PER_WORD),
         "auto_discount_percent": (
@@ -234509,7 +234521,7 @@ def video_dubbing_invoice_breakdown(state: dict | None = None) -> dict:
         ),
         "voice_xu": auto_xu,
         "translation_xu": subtitle_xu,
-        "total_xu": subtitle_xu + auto_xu,
+        "total_xu": None if auto_xu is None else subtitle_xu + auto_xu,
     }
 
 def video_dubbing_estimated_price_xu(state: dict | None = None) -> int:
@@ -234633,10 +234645,15 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
                     words = invoice.get("auto_billable_words")
                     if words is not None:
                         lines.append(f"• {copy['voice_auto_billable_words']}: <b>{int(words)}</b>")
-                    lines.extend([
-                        f"• {copy['voice_auto_price_rule']}",
-                        f"• {copy['voice_auto_total']}: <b>{int(invoice.get('voice_xu') or 0)} Xu</b>",
-                    ])
+                    lines.append(f"• {copy['voice_auto_price_rule']}")
+                    if invoice.get("voice_xu") is None:
+                        lines.append(
+                            f"• {copy['voice_auto_total']}: <b>{html.escape(copy['voice_auto_price_rule'])}</b>"
+                        )
+                    else:
+                        lines.append(
+                            f"• {copy['voice_auto_total']}: <b>{int(invoice['voice_xu'])} Xu</b>"
+                        )
                 else:
                     lines.extend([
                         f"• {voice_rate:g} Xu / character",
@@ -234648,12 +234665,20 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
                     words = invoice.get("auto_billable_words")
                     if words is not None:
                         lines.append(f"• {copy['voice_auto_billable_words']}: <b>{int(words)}</b>")
-                    lines.extend([
-                        f"• {copy['translate']}: <b>{int(invoice.get('translation_xu') or 0)} Xu</b>",
-                        f"• {copy['dub']}: <b>{int(invoice.get('voice_xu') or 0)} Xu</b>",
-                        f"• {copy['voice_auto_price_rule']}",
-                        f"• {copy['voice_auto_total']}: <b>{int(invoice.get('total_xu') or 0)} Xu</b>",
-                    ])
+                    lines.append(
+                        f"• {copy['translate']}: <b>{int(invoice.get('translation_xu') or 0)} Xu</b>"
+                    )
+                    if invoice.get("voice_xu") is None:
+                        lines.extend([
+                            f"• {copy['dub']}: {copy['voice_auto_price_rule']}",
+                            f"• {copy['voice_auto_total']}: <b>{int(invoice.get('translation_xu') or 0)} Xu + {html.escape(copy['voice_auto_price_rule'])}</b>",
+                        ])
+                    else:
+                        lines.extend([
+                            f"• {copy['dub']}: <b>{int(invoice['voice_xu'])} Xu</b>",
+                            f"• {copy['voice_auto_price_rule']}",
+                            f"• {copy['voice_auto_total']}: <b>{int(invoice['total_xu'])} Xu</b>",
+                        ])
                 else:
                     lines.extend([
                         f"• {copy['translate']}: <b>{int(invoice.get('translation_xu') or 0)} Xu</b>",
@@ -235512,6 +235537,44 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
                     f"• Dubbing voices used: <b>{voice_count}</b>\n"
                     f"• Subtitle price: <b>{subtitle_xu} Xu</b>\n"
                     f"• Dubbing price: <b>{dubbing_xu} Xu</b>\n"
+                )
+        elif (
+            auto_speaker.is_auto_speaker_state(receipt_context)
+            and not auto_multi_speaker.is_auto_multi_speaker_state(receipt_context)
+        ):
+            subtitle_xu = max(
+                0,
+                _safe_int(
+                    receipt_context.get("auto_exact_actual_subtitle_xu"),
+                    0,
+                ),
+            )
+            dubbing_xu = max(
+                0,
+                _safe_int(
+                    receipt_context.get("auto_exact_actual_auto_xu"),
+                    0,
+                ),
+            )
+            if is_vi:
+                multi_detail_lines = (
+                    "• Loại lồng tiếng: <b>Tự động 2 giọng</b>\n"
+                    + (
+                        f"• Giá phụ đề: <b>{subtitle_xu} Xu</b>\n"
+                        if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+                        else ""
+                    )
+                    + f"• Giá lồng tiếng: <b>{dubbing_xu} Xu</b>\n"
+                )
+            else:
+                multi_detail_lines = (
+                    "• Dubbing type: <b>Auto-detected two-speaker</b>\n"
+                    + (
+                        f"• Subtitle price: <b>{subtitle_xu} Xu</b>\n"
+                        if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+                        else ""
+                    )
+                    + f"• Dubbing price: <b>{dubbing_xu} Xu</b>\n"
                 )
         if normalize_user_language(lang) != "vi":
             return (
@@ -246310,7 +246373,7 @@ async def _subdub_auto_post_prepare_gate(prepared: dict, state: dict) -> dict:
 
     if not subdub_auto_speaker_route_enabled(state):
         return {"ok": False, "status": "AUTO_CAST_MANUAL_REQUIRED"}
-    prepared = dict(prepared or {})
+    prepared = prepared if isinstance(prepared, dict) else dict(prepared or {})
     prepared_state = dict(prepared.get("state") or state or {})
     policy = subtitle_dub_product_pipeline.resolve_subdub_dub_audio_policy(
         prepared_state,
