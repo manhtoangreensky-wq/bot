@@ -2367,7 +2367,7 @@ def test_register_classifier_reads_synthetic_pcm_tones(tmp_path, frequency, expe
     assert result["chunk_00:speaker_0"]["confidence"] >= 0.75
 
 
-def test_short_speaker_window_accepts_one_confident_pitch_frame(monkeypatch):
+def test_short_speaker_window_rejects_one_pitch_frame_as_insufficient_evidence(monkeypatch):
     speaker_cast = _speaker_cast_module()
     frame_estimates = iter(((220.0, 0.74), None, None, None))
 
@@ -2398,9 +2398,7 @@ def test_short_speaker_window_accepts_one_confident_pitch_frame(monkeypatch):
         stop_requested=lambda: False,
     )
 
-    assert result is not None
-    assert result[0] >= speaker_cast.HIGH_MIN_HZ
-    assert result[1] >= speaker_cast.MIN_REGISTER_CONFIDENCE
+    assert result is None
 
 
 def test_protected_two_speaker_code_has_no_multi_lane_seams():
@@ -2409,7 +2407,7 @@ def test_protected_two_speaker_code_has_no_multi_lane_seams():
     )
     speaker_cast = _speaker_cast_module()
 
-    assert speaker_cast._MIN_PITCH_FRAMES == 1
+    assert speaker_cast._MIN_PITCH_FRAMES == 2
     assert "allow_single_pitch_frame" not in inspect.signature(
         speaker_cast._estimate_window_pitch
     ).parameters
@@ -4172,7 +4170,7 @@ def test_dispatch_matrix_calls_one_blackbox_and_prepares_once(
     assert all(all(check[1:]) for check in dependency_checks)
 
 
-def test_protected_two_speaker_pcm_extractor_restores_working_filter(
+def test_protected_two_speaker_pcm_extractor_matches_delivered_pr842_contract(
     tmp_path,
     monkeypatch,
 ):
@@ -4216,7 +4214,6 @@ def test_protected_two_speaker_pcm_extractor_restores_working_filter(
     assert calls == [
         ([
             "ffmpeg", "-y", "-i", str(source_path), "-t", "12", "-vn", "-ac", "1",
-            "-af", "highpass=f=70,lowpass=f=320,afftdn=nr=6:nf=-50",
             "-ar", "16000", "-f", "s16le",
             str(tmp_path / "auto_speaker_16000_mono_s16le.pcm"),
         ], 77.0)

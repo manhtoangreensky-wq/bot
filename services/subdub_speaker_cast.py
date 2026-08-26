@@ -59,7 +59,7 @@ _PITCH_DIFFERENCE_STRIDE = 1
 _PITCH_YIN_THRESHOLD = 0.24
 _PITCH_YIN_MAXIMUM = 0.32
 _MIN_PITCH_FRAME_CONFIDENCE = 0.68
-_MIN_PITCH_FRAMES = 1
+_MIN_PITCH_FRAMES = 2
 _MAX_FRAME_RELATIVE_PITCH_DEVIATION = 0.22
 _MAX_HARMONIC_PURITY_COMPONENTS = 4
 _MAX_HARMONIC_PURITY_HZ = 900.0
@@ -1363,7 +1363,7 @@ def _estimate_window_pitch(
         [abs(item[0] - refined_hz) / refined_hz for item in inliers]
     )
     stability = max(0.0, 1.0 - (relative_spread / 0.32))
-    support = 0.5 if len(inliers) == 1 else min(1.0, len(inliers) / 4.0)
+    support = min(1.0, len(inliers) / 4.0)
     periodicity = _bounded_median([item[1] for item in inliers])
     confidence = max(
         0.0,
