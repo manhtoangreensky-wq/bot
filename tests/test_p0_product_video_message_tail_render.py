@@ -19,7 +19,7 @@ def _function_source(name: str) -> str:
     start = min(starts)
     candidates = [
         position
-        for marker in ("\ndef ", "\nasync def ")
+        for marker in ("\ndef ", "\nasync def ", "\n@")
         if (position := BOT_SOURCE.find(marker, start + 1)) >= 0
     ]
     end = min(candidates) if candidates else len(BOT_SOURCE)
@@ -242,3 +242,17 @@ def test_tail_callback_ack_timeout_is_best_effort() -> None:
     )
 
     assert result is None
+
+
+def test_tail_callback_guard_wraps_handler_not_ack_helper() -> None:
+    helper_marker = "async def video_tail9_answer_best_effort("
+    handler_marker = "async def handle_video_tail_callback("
+    helper_at = BOT_SOURCE.index(helper_marker)
+    handler_at = BOT_SOURCE.index(handler_marker)
+
+    assert "@video_tail9_callback_guard" not in BOT_SOURCE[
+        BOT_SOURCE.rfind("\n", 0, helper_at - 1):helper_at
+    ]
+    assert "@video_tail9_callback_guard" in BOT_SOURCE[
+        BOT_SOURCE.rfind("\n", 0, handler_at - 1):handler_at
+    ]
