@@ -40354,6 +40354,7 @@ class AgentDeepgram:
 def subdub_deepgram_request_params(*, require_diarization: bool = False) -> dict[str, str]:
     params = {str(key): str(value) for key, value in AgentDeepgram.REQUEST_PARAMS.items()}
     if require_diarization:
+        params["model"] = "nova-3-general"
         params.pop("diarize", None)
         params["diarize_model"] = "latest"
         params["utterances"] = "true"

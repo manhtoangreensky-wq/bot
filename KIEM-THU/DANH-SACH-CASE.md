@@ -53,3 +53,18 @@ Nguồn gốc duy nhất cho acceptance live. Sửa case tại file này trướ
 | ML-06 | `390×667`, reduced | Animation/parallax `0`; nội dung hiện; pending/error `0` |
 
 Evidence nguồn: `D:/TOANAAS/TOAN_AAS_WEB_APP/evidence/motion-landing-toanaas-001/r1/candidate-io-green-run-1/` và `candidate-io-green-run-2/`. GitHub Tester tracker: `manhtoangreensky-wq/bot#884`.
+
+## SubDub — thứ tự acceptance khóa
+
+Fixture hai giọng cho cả hai case đầu: `C:/Users/toann/Downloads/test sub/2 giọng nam nữ.mp4`,
+`4,284,017` bytes, SHA-256 `85C8793D197CF2782BB554D46282E82A83BCB062A0483E412A0CA1DA668F9F51`.
+
+| ID | Lane | Thiết lập khóa | PASS bắt buộc | Canh lỗi cũ |
+|---|---|---|---|---|
+| SD-2S-01 | Phụ đề + Lồng tiếng | English; Tự động 2 giọng; gốc 40%; lồng 150% | MP4 + SRT + receipt; đúng 2 labels/cast; giá phụ đề + lồng tiếng + total; admin 0 Xu; wallet delta 0 | `empty_transcript` trước sidecar/cast/TTS/mux |
+| SD-2S-02 | Lồng tiếng video | Cùng fixture; Tự động 2 giọng; gốc 40%; lồng 150% | MP4 + receipt; đúng 2 labels/cast; dubbing list price >0; admin 0 Xu; wallet delta 0 | Lane combo PASS nhưng standalone hồi quy |
+| SD-MS-01 | Tự động nhiều giọng | Chỉ dùng `test nhiều giọng.mp4`; chạy sau SD-2S-01 và SD-2S-02 | MP4 thật; mọi label/cast/voice; multi-language; receipt và wallet evidence | FAIL nếu chạm source/hash của lane 2 đã khóa |
+
+Mỗi MP4 phải đo SHA-256/bytes/duration/dimensions/codec và AAC loudness; job id
+hoặc HTTP 200 không được tính PASS. Sửa case tại file này trước khi tạo/sửa
+GitHub Issue.
