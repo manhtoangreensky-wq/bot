@@ -433,11 +433,15 @@
       html.motion-prepaint .hero-copy > p:not(.hero-note),
       html.motion-prepaint .hero-actions,
       html.motion-prepaint .hero-note,
-      html.motion-prepaint .workflow-preview { opacity: 0; transform: translateY(20px); }
+      html.motion-prepaint .workflow-preview { opacity: 1; transform: translateY(8px); }
     }
     .motion-pending { opacity: 0 !important; transform: translateY(20px) !important; }
     .motion-reveal { animation: fade-up 480ms cubic-bezier(.22, 1, .36, 1) both !important; }
-    .motion-reveal-hero { animation: fade-up 520ms cubic-bezier(.22, 1, .36, 1) both !important; }
+    .motion-reveal-hero { animation: hero-settle 360ms cubic-bezier(.22, 1, .36, 1) both !important; }
+    @keyframes hero-settle {
+      from { opacity: 1; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
     @keyframes fade-up {
       from { opacity: 0; transform: translateY(20px); }
       to { opacity: 1; transform: translateY(0); }
@@ -1059,7 +1063,7 @@
           ".hero-note",
           ".workflow-preview"
         ]);
-        const heroDelays = Object.freeze([0, 80, 160, 240, 240]);
+        const heroDelays = Object.freeze([0, 50, 100, 150, 150]);
         const heroItems = heroSelectors.map((selector) => document.querySelector(selector));
         heroItems.forEach((element, index) => {
           if (!element) return;

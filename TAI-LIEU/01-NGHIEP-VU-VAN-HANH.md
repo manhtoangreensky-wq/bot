@@ -62,7 +62,7 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 ## Bổ sung vận hành Public Landing — Motion 26/08/2026
 
 - Phạm vi production của đợt này là đúng `1` file: `index.html`; thêm `1` file contract test. Không đổi `bot.py`, `/lead`, nội dung, locale, CTA, ENV, dữ liệu, Telegram, PayOS hoặc ví.
-- Hero có đúng `5` phần tử, fade-up `20px`, `520ms`, delay `0/80/160/240/240ms`; tổng dài nhất `760ms`.
+- Hero có đúng `5` phần tử, luôn hiện với opacity `1`, chỉ settle `8px` trong `360ms`, delay `0/50/100/150/150ms`; tổng dài nhất `510ms`.
 - Section fade-up `20px`, `480ms`, reveal một lần. Dữ liệu vị trí lấy từ `IntersectionObserverEntry`; không gọi đồng bộ `getBoundingClientRect()` lúc khởi tạo.
 - Parallax chỉ chạy desktop có chuột chính xác, giới hạn `10px` mỗi trục và gộp sự kiện bằng `requestAnimationFrame`.
 - Tablet, mobile và `prefers-reduced-motion: reduce` không chạy presentation motion; nội dung vẫn hiện nếu JavaScript hoặc observer lỗi.

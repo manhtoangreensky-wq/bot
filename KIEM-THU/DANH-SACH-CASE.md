@@ -45,7 +45,7 @@ Nguồn gốc duy nhất cho acceptance live. Sửa case tại file này trướ
 
 | ID | Viewport/chế độ | PASS bắt buộc |
 |---|---|---|
-| ML-01 | `1440×900`, normal | Hero cleanup; reveal once; parallax ≤`10px`; CLS/long task/overflow/error `0` |
+| ML-01 | `1440×900`, normal | Hero semantic opacity `1` từ 10ms; settle ≤`8px/360ms`; reveal once; parallax ≤`10px`; CLS/long task/overflow/error `0` |
 | ML-02 | `768×900`, normal | Presentation motion `0`; nội dung/CTA/form đủ; overflow/error `0` |
 | ML-03 | `390×667`, normal | Presentation motion `0`; nội dung/CTA/form đủ; overflow/error `0` |
 | ML-04 | `360×640`, normal | Presentation motion `0`; nội dung/CTA/form đủ; overflow/error `0` |
