@@ -6,9 +6,6 @@ import asyncio
 import hashlib
 import inspect
 import math
-import os
-import shutil
-import subprocess
 import threading
 import time
 import unicodedata
@@ -22,18 +19,6 @@ from services import subtitle_dub_product_pipeline
 
 AUTO_SPEAKER_PREFLIGHT_READY = "AUTO_SPEAKER_PREFLIGHT_READY"
 
-_INDEPENDENT_REGISTER_MIN_WEIGHT_RATIO = 0.60
-
-_SUBTITLE_SCRIPT_CHARSET = {
-    "japanese": "3042",
-    "chinese": "4e2d",
-    "korean": "ac00",
-    "thai": "0e01",
-    "arabic": "0627",
-    "devanagari": "0915",
-    "cyrillic": "0416",
-}
-
 
 def is_auto_speaker_state(state: Mapping[str, object] | None) -> bool:
     """Return true only for the repository-wide exact Auto state pair."""
@@ -43,53 +28,6 @@ def is_auto_speaker_state(state: Mapping[str, object] | None) -> bool:
         current.get("voice_kind") == "auto_speaker_gender"
         and current.get("voice_selection_mode") == "auto_speaker"
     )
-
-
-def _font_path_supports_script(path: str, script: str) -> bool:
-    font_path = os.path.abspath(os.path.expandvars(os.path.expanduser(str(path or ""))))
-    if not font_path or not os.path.isfile(font_path):
-        return False
-    charset = str(_SUBTITLE_SCRIPT_CHARSET.get(str(script or "").strip().lower()) or "")
-    if not charset:
-        return True
-    fc_list = shutil.which("fc-list")
-    if not fc_list:
-        return False
-    try:
-        proc = subprocess.run(
-            [fc_list, "-f", "%{file}\\n", f":charset={charset}"],
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
-        )
-    except Exception:
-        return False
-    supported = {
-        os.path.normcase(os.path.realpath(item.strip()))
-        for item in str(proc.stdout or "").splitlines()
-        if item.strip()
-    }
-    return proc.returncode == 0 and os.path.normcase(os.path.realpath(font_path)) in supported
-
-
-def guard_subtitle_font(style: Mapping[str, object] | None, *, script: str) -> dict:
-    current = dict(style or {})
-    normalized_script = str(script or "latin").strip().lower()
-    if normalized_script == "latin" or _font_path_supports_script(
-        str(current.get("subtitle_font_path") or ""),
-        normalized_script,
-    ):
-        return current
-    current.update(
-        {
-            "subtitle_font_resolution_ok": False,
-            "subtitle_font_blocker": f"subtitle_font_missing:{normalized_script}",
-            "subtitle_font_script": normalized_script,
-            "subtitle_font_fallback_reason": "resolved_font_missing_required_script",
-        }
-    )
-    return current
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -278,199 +216,6 @@ async def _drain_worker(worker: asyncio.Task) -> None:
             pass
 
 
-def _independent_two_speaker_classifications(
-    evidence_by_speaker: Mapping[str, object],
-) -> dict[str, dict]:
-    """Classify each of exactly two speakers without forcing opposite genders."""
-
-    if not isinstance(evidence_by_speaker, Mapping) or len(evidence_by_speaker) != 2:
-        raise speaker_cast.AutoCastManualRequired()
-    results: dict[str, dict] = {}
-    for speaker_id, raw_evidence in evidence_by_speaker.items():
-        if type(speaker_id) is not str or not speaker_id.strip():
-            raise speaker_cast.AutoCastManualRequired()
-        if not isinstance(raw_evidence, (list, tuple)):
-            raise speaker_cast.AutoCastManualRequired()
-        evidence: list[tuple[float, float]] = []
-        for raw_item in raw_evidence:
-            if not isinstance(raw_item, (list, tuple)) or len(raw_item) != 2:
-                raise speaker_cast.AutoCastManualRequired()
-            try:
-                frequency = float(raw_item[0])
-                confidence = float(raw_item[1])
-            except (TypeError, ValueError, OverflowError) as exc:
-                raise speaker_cast.AutoCastManualRequired() from exc
-            if (
-                not math.isfinite(frequency)
-                or frequency <= 0.0
-                or not math.isfinite(confidence)
-                or confidence < speaker_cast.MIN_REGISTER_CONFIDENCE
-                or confidence > 1.0
-                or speaker_cast.pitch_register(frequency, confidence=confidence)
-                not in {"low", "high"}
-            ):
-                raise speaker_cast.AutoCastManualRequired()
-            evidence.append((frequency, confidence))
-        if len(evidence) < 2:
-            raise speaker_cast.AutoCastManualRequired()
-        by_register: dict[str, list[tuple[float, float]]] = {
-            "low": [],
-            "high": [],
-        }
-        for item in evidence:
-            register = speaker_cast.pitch_register(
-                item[0],
-                confidence=item[1],
-            )
-            if register in by_register:
-                by_register[register].append(item)
-        ranked = sorted(
-            by_register.items(),
-            key=lambda item: sum(value[1] for value in item[1]),
-            reverse=True,
-        )
-        register, selected = ranked[0]
-        selected_weight = sum(item[1] for item in selected)
-        total_weight = sum(item[1] for item in evidence)
-        if (
-            len(selected) < 2
-            or total_weight <= 0.0
-            or selected_weight / total_weight
-            < _INDEPENDENT_REGISTER_MIN_WEIGHT_RATIO
-        ):
-            raise speaker_cast.AutoCastManualRequired()
-        median_hz = speaker_cast._bounded_median(
-            [item[0] for item in selected]
-        )
-        median_confidence = speaker_cast._bounded_median(
-            [item[1] for item in selected]
-        )
-        if (
-            speaker_cast.pitch_register(
-                median_hz,
-                confidence=median_confidence,
-            )
-            != register
-        ):
-            raise speaker_cast.AutoCastManualRequired()
-        sample_windows = len(selected)
-        voiced_seconds = min(
-            speaker_cast.MAX_SPEAKER_VOICED_SECONDS,
-            sample_windows * speaker_cast._PCM_WINDOW_SECONDS,
-        )
-        results[speaker_id] = {
-            "speaker_id": speaker_id,
-            "voice_register": register,
-            "confidence": round(float(median_confidence), 6),
-            "voiced_seconds": round(float(voiced_seconds), 3),
-            "sample_count": int(sample_windows * speaker_cast.PCM_WINDOW_SAMPLES),
-            "reason": "classified_independent_two_speaker",
-        }
-    return results
-
-
-def _collect_two_speaker_pitch_evidence(
-    pcm_path: str,
-    ranges_by_speaker: dict[str, list[tuple[float, float]]],
-    *,
-    deadline_monotonic: float,
-    stop_requested: Callable[[], bool],
-) -> dict[str, list[tuple[float, float]]]:
-    labels = speaker_cast.ordered_auto_speaker_labels(
-        {"speaker_id": speaker_id} for speaker_id in ranges_by_speaker
-    )
-    if len(labels) != 2 or len(labels) != len(ranges_by_speaker):
-        raise speaker_cast.AutoCastManualRequired()
-    maximum_accepted_windows = int(
-        speaker_cast.MAX_SPEAKER_VOICED_SECONDS
-        / speaker_cast._PCM_WINDOW_SECONDS
-    )
-    maximum_job_windows = int(
-        speaker_cast.MAX_JOB_SAMPLE_SECONDS
-        / speaker_cast._PCM_WINDOW_SECONDS
-    )
-    candidate_windows_per_speaker = max(
-        maximum_accepted_windows,
-        maximum_job_windows // len(labels),
-    )
-    sampled_job_seconds = 0.0
-    collected: dict[str, list[tuple[float, float]]] = {}
-    try:
-        with open(str(pcm_path or ""), "rb") as handle:
-            for speaker_id in labels:
-                speaker_cast._ensure_classifier_active(
-                    deadline_monotonic,
-                    stop_requested,
-                )
-                offsets = speaker_cast._speaker_window_offsets(
-                    ranges_by_speaker.get(speaker_id),
-                    deadline_monotonic=deadline_monotonic,
-                    stop_requested=stop_requested,
-                    max_windows=candidate_windows_per_speaker,
-                )
-                evidence: list[tuple[float, float]] = []
-                for offset in offsets:
-                    sampled_job_seconds += speaker_cast._PCM_WINDOW_SECONDS
-                    if (
-                        sampled_job_seconds
-                        > speaker_cast.MAX_JOB_SAMPLE_SECONDS + 1e-12
-                    ):
-                        raise speaker_cast.AutoCastManualRequired()
-                    speaker_cast._ensure_classifier_active(
-                        deadline_monotonic,
-                        stop_requested,
-                    )
-                    handle.seek(offset)
-                    raw = handle.read(speaker_cast.PCM_WINDOW_BYTES)
-                    if len(raw) != speaker_cast.PCM_WINDOW_BYTES:
-                        raise speaker_cast.AutoCastManualRequired()
-                    estimate = speaker_cast._estimate_window_pitch(
-                        raw,
-                        deadline_monotonic=deadline_monotonic,
-                        stop_requested=stop_requested,
-                    )
-                    if estimate is None:
-                        continue
-                    evidence.append((float(estimate[0]), float(estimate[1])))
-                    if len(evidence) >= maximum_accepted_windows:
-                        break
-                collected[speaker_id] = evidence
-    except speaker_cast.AutoCastManualRequired:
-        raise
-    except (OSError, ValueError, TypeError, OverflowError, MemoryError) as exc:
-        raise speaker_cast.AutoCastManualRequired() from exc
-    return collected
-
-
-def _classify_two_speaker_registers(
-    pcm_path: str,
-    ranges_by_speaker: dict[str, list[tuple[float, float]]],
-    *,
-    deadline_monotonic: float,
-    stop_requested: Callable[[], bool],
-) -> dict[str, dict]:
-    try:
-        return speaker_cast.classify_speaker_registers(
-            pcm_path,
-            ranges_by_speaker,
-            deadline_monotonic=deadline_monotonic,
-            stop_requested=stop_requested,
-        )
-    except speaker_cast.AutoCastManualRequired as absolute_failure:
-        if len(ranges_by_speaker) != 2:
-            raise
-        try:
-            evidence = _collect_two_speaker_pitch_evidence(
-                pcm_path,
-                ranges_by_speaker,
-                deadline_monotonic=deadline_monotonic,
-                stop_requested=stop_requested,
-            )
-            return _independent_two_speaker_classifications(evidence)
-        except speaker_cast.AutoCastManualRequired:
-            raise absolute_failure
-
-
 async def _classify_off_event_loop(
     pcm_path: Path,
     ranges_by_speaker: dict[str, list[tuple[float, float]]],
@@ -482,7 +227,7 @@ async def _classify_off_event_loop(
     stop_event = threading.Event()
     worker = asyncio.create_task(
         asyncio.to_thread(
-            _classify_two_speaker_registers,
+            speaker_cast.classify_speaker_registers,
             str(pcm_path),
             ranges_by_speaker,
             deadline_monotonic=classifier_deadline,
