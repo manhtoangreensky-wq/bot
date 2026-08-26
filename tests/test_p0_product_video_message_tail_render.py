@@ -165,3 +165,57 @@ def test_scene3_tail_save_persists_selected_postproduction_addons() -> None:
     )
 
     assert saved_hosts[-1]["postproduction_addons"]["subtitles"] == subtitles
+
+
+def test_long_html_renderer_converts_oversize_html_before_chunking() -> None:
+    calls: list[tuple[str, str, object]] = []
+
+    class CallbackQuery:
+        async def edit_message_text(self, *_args, **_kwargs):
+            raise AssertionError("oversize HTML reached direct edit path")
+
+    async def long_plain(_query, text, reply_markup=None):
+        calls.append(("plain", str(text), reply_markup))
+        return "plain-rendered"
+
+    async def edit_oversize(*_args, **_kwargs):
+        raise AssertionError("oversize HTML reached direct edit path")
+
+    namespace = {
+        "html_message_to_plain_text": (
+            lambda text: str(text).replace("<code>", "").replace("</code>", "")
+        ),
+        "safe_edit_or_send_long_plain": long_plain,
+        "safe_reply_long_plain": long_plain,
+        "safe_reply_long_html": lambda *_args, **_kwargs: None,
+        "split_telegram_html_text": lambda text: [str(text)],
+        "safe_edit_query_message": edit_oversize,
+        "safe_reply_text": lambda *_args, **_kwargs: None,
+    }
+    exec(
+        compile(
+            "from __future__ import annotations\n"
+            + _function_source("safe_edit_or_send_long_html"),
+            "<product-video-long-html-safe>",
+            "exec",
+        ),
+        namespace,
+    )
+    oversized = "<code>" + ("Cảnh và chất lượng " * 250) + "</code>"
+
+    result = asyncio.run(
+        namespace["safe_edit_or_send_long_html"](
+            CallbackQuery(),
+            oversized,
+            reply_markup="quality-keyboard",
+        )
+    )
+
+    assert result == "plain-rendered"
+    assert calls == [
+        (
+            "plain",
+            oversized.replace("<code>", "").replace("</code>", ""),
+            "quality-keyboard",
+        )
+    ]

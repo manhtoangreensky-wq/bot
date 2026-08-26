@@ -137008,6 +137008,19 @@ async def safe_reply_long_html(message, text: str, reply_markup=None):
     return sent
 
 async def safe_edit_or_send_long_html(query, text: str, reply_markup=None):
+    if len(str(text or "")) > 3600:
+        plain_text = html_message_to_plain_text(text)
+        if not hasattr(query, "edit_message_text") and hasattr(query, "reply_text"):
+            return await safe_reply_long_plain(
+                query,
+                plain_text,
+                reply_markup=reply_markup,
+            )
+        return await safe_edit_or_send_long_plain(
+            query,
+            plain_text,
+            reply_markup=reply_markup,
+        )
     if not hasattr(query, "edit_message_text") and hasattr(query, "reply_text"):
         return await safe_reply_long_html(
             query,
