@@ -1,136 +1,131 @@
 task_id: p0-subdub-multi-blackbox
-phase: SHIP_READY
-branch: fix/p0-subdub-two-rollback-multi-isolation
-base_sha: e079d14ad8618c542bcee02851adc09867d80428
-verified_source_sha: final_one_pr_head_recorded_after_state_amend
-design_commit: 1028e79
-live_boundary: product_video_owned
-cpu_boundary: released_by_subdub_auto
-allowed_source_files:
-  - bot.py
-  - services/subdub_speaker_cast.py
-  - services/subdub_blackboxes/auto_speaker.py
-  - services/subdub_blackboxes/auto_multi_speaker.py
-  - tests/test_p0_subdub_multi_speaker_blackbox.py
-  - tests/test_p0_subdub_per_speaker_auto_gender_cast.py
-  - tests/test_p0_subdub_subtitle_position7_vertical_ratio.py
+product: SubDub
+owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
+coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
+worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
+branch: fix/p0-subdub-pr842-exact-rollback
+phase: SPEC_03_SHIP_ACTIVE
+goal: >-
+  Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
+  verified multi-speaker SubDub video with multilingual translation and dubbing.
+
+workflow_contract:
+  startup: read skills, inspect current product/chat/session data, then read this checklist
+  order: READ -> CONTRACT -> BUILD -> REVIEW -> VERIFY -> REPORT -> LEARN
+  execution: finish one spec and capture evidence before starting the next spec
+  failure_loop: READ -> RED -> minimal fix -> GREEN -> review -> ship -> live again
+  shipping: exactly one focused commit and PR per completed correction loop
+  completion: push code and evidence to GitHub; do not close the goal on indirect evidence
+  forbidden:
+    - use Download.mp4 as a SubDub live fixture
+    - start the multi-speaker live job before the two-speaker live job passes
+    - change the current two-button UI while restoring the two-speaker engine
+    - mix Product Video state, evidence, jobs, or sessions into this checklist
+    - make provider calls or wallet mutations outside the two Owner-authorized live jobs
+    - refactor unrelated stable flows
+
+resource_boundary:
+  cpu: released_by_subdub_auto
+  live: owned_by_subdub_auto
+  chrome: owned_by_subdub_auto
+  vps_deploy: owned_by_subdub_auto
+  product_video: static
+
+fixtures:
+  two_speaker:
+    path: C:\Users\toann\Downloads\test sub\test 2 giọng.mp4
+    sha256: a89b16b896d4efa8157f7de5cea47695b5edf7d5595c4fc03ad62346cdfa0292
+    required_lane: Tự động 2 giọng
+  multi_speaker:
+    path: C:\Users\toann\Downloads\test sub\test nhiều giọng.mp4
+    sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
+    required_lane: Tự động nhiều giọng
+
+rollback_anchor:
+  proven_pr: 842
+  proven_sha: 71c7e881f2af24d59c4873f8ca3999f59618daec
+  proven_live_job: 7BC3037DF8
+  video_message: 26895
+  receipt_message: 26896
+  charged_xu: 0
+  same_fixture_sha256: a89b16b896d4efa8157f7de5cea47695b5edf7d5595c4fc03ad62346cdfa0292
+  disproven_anchor: PR 853 introduced the pitch/filter drift and is not the video-producing rollback point
+
 ordered_specs:
   - id: SPEC-01
-    status: verified_source
-    acceptance: protected two-speaker files and PCM extractor match PR 853 exactly
-    evidence: protected file diff is empty and PCM_EXTRACTOR_EXACT_PR853=True
+    title: Prove the exact two-speaker rollback anchor and create RED regressions
+    status: completed
+    acceptance:
+      - historical delivered job uses the exact Owner fixture hash
+      - A/B replay proves PR 842 classifier passes while current drift fails
+      - RED covers two-frame minimum, single-frame rejection, and unfiltered PCM extraction
+    evidence:
+      - job 7BC3037DF8 delivered video and receipt with zero Xu on SHA 71c7e881
+      - failed live job 4AD329F372 ended AUTO_CAST_MANUAL_REQUIRED with zero Xu
+      - current implementation plus artifact failed; original PR 842 implementation passed both labels
+      - RED terminal: 3 failed, 1 warning in 10.56s
+
   - id: SPEC-02
-    status: verified_source
-    acceptance: multi owns its classifier and orchestration without invoking protected runner
-    evidence: isolated three-voice runner regression is GREEN inside final focused batch
+    title: Restore the two-speaker engine exactly while preserving the current UI
+    status: completed
+    allowed_production_diff:
+      - services/subdub_speaker_cast.py restores _MIN_PITCH_FRAMES from 1 to 2
+      - services/subdub_speaker_cast.py restores support to len(inliers) divided by 4
+      - bot.py removes the PR 853 highpass/lowpass/afftdn filter from protected PCM extraction
+    locked:
+      - current two-button UI
+      - multi-speaker runner and classifier
+      - pricing, wallet, manual, subtitle, mux, and delivery paths
+    evidence:
+      - focused GREEN terminal: 4 passed, 1 warning in 453.33s
+      - git diff-check: clean before compile gate
+      - py_compile bot.py and services/subdub_speaker_cast.py: exit 0
+      - final git diff-check: exit 0
+
   - id: SPEC-03
-    status: verified_source
-    acceptance: confirm and subtitle position controls share the first keyboard row
-    evidence: compact keyboard regression is GREEN inside final focused batch
+    title: Ship the two-speaker correction and prove deployed runtime identity
+    status: in_progress
+    acceptance:
+      - one focused commit and one PR
+      - squash merge to main
+      - GitHub Actions deploy success
+      - bot and owner worker use the merged SHA and accepted generation
+      - bot, worker, web, and nginx are active
+
   - id: SPEC-04
-    status: verified_fixture
-    acceptance: inspect test nhiều giọng.mp4 and confirm it is suitable for automatic multi-speaker recognition
-    evidence: SHA-256 pinned; ffprobe and full decode exit 0; contact sheet and waveform show multiple alternating speakers
+    title: Live-test and lock the two-speaker lane
+    status: pending
+    acceptance:
+      - upload only test 2 giọng.mp4
+      - select Tự động 2 giọng and English
+      - automatic cast resolves exactly two speaker labels to distinct male/female voices
+      - one final playable MP4 is delivered
+      - one valid SRT is produced and matches the final media
+      - receipt shows subtitle price, dubbing price, dubbing type, cast details, and total
+      - charged_xu equals 0 and no wallet transaction is created
+    on_failure: stay on SPEC-04 and repeat RED/GREEN/ship/live until all acceptance evidence passes
+
   - id: SPEC-05
-    status: pending_resource_order
-    acceptance: one PR then live two-speaker fixture before multi-speaker fixture
-    evidence: requires Product Video resource release and Owner-authorized live gates
-protected_paths:
-  - services/subdub_blackboxes/__init__.py
-  - services/subdub_blackboxes/base.py
-  - services/subdub_blackboxes/dub_only.py
-  - services/subdub_blackboxes/subtitle_dub.py
-  - services/subtitle_dub_product_pipeline.py
-  - services/subdub_auto_word_pricing.py
-  - services/subdub_auto_settlement.py
-rollback:
-  protected_two_voice_pr: 842
-  protected_two_voice_sha: 71c7e881f2af24d59c4873f8ca3999f59618daec
-  protected_two_voice_live_job: 7BC3037DF8
-  protected_two_voice_fixture_path: C:\Users\toann\Downloads\test sub\test 2 giọng.mp4
-  protected_two_voice_fixture_sha256: a89b16b896d4efa8157f7de5cea47695b5edf7d5595c4fc03ad62346cdfa0292
-live_fixture:
-  path: C:\Users\toann\Downloads\test sub\test nhiều giọng.mp4
-  size_bytes: 9869032
-  sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
-acceptance:
-  - no marker dispatches only the proven auto_speaker blackbox
-  - marker auto_speaker_lane=multi dispatches only auto_multi_speaker
-  - no-marker Auto remains the protected one/two-speaker lane
-  - multi requires 3 through 16 provider-returned speaker labels without invention
-  - every multi label receives a distinct validated TTS voice
-  - durable receipt shows source filename multi lane speaker/voice counts and price components
-  - default/manual/subtitle pricing settlement mux and delivery remain unchanged
-  - owner live fixture produces one MP4 one SRT one green receipt and zero Xu
-external_actions_allowed_now: false_until_product_video_release
-provider_calls_allowed_now: one_test_nhieu_giong_mp4_job_after_reacquire
-wallet_mutations_allowed: false
-verification:
-  post_rebase_focused_current: 34 passed and 4 protected anchor failures in 1150.57s
-  post_rebase_focused_pass_scope: full multi file plus short-window no-multi-seam protected PCM and compact UI selectors
-  post_rebase_anchor_failures: synthetic 165 170 185 and 220 Hz tone comparator; production classifier and test are exact PR 853
-  post_rebase_anchor_comparator: auto_speaker.py and subdub_speaker_cast.py diff exit 0 versus 7b4053a; tone test unchanged at anchor
-  post_rebase_py_compile_current: exit 0 for bot.py auto_speaker.py auto_multi_speaker.py and subdub_speaker_cast.py
-  final_focused_batch: 34 passed and 1 warning in 729.99s
-  final_focused_warning: google.genai deprecation only
-  final_py_compile_current: exit 0 for bot.py auto_speaker.py auto_multi_speaker.py and subdub_speaker_cast.py
-  final_diff_check_current: exit 0
-  protected_pr853_files: auto_speaker.py and subdub_speaker_cast.py have empty diff versus 7b4053a
-  protected_pcm_extractor: PCM_EXTRACTOR_EXACT_PR853=True with 3831 normalized characters
-  fixture_full_decode: exit 0 for test nhiều giọng.mp4; duration 133.375420 seconds
-  skill_quick_validate: Skill is valid; exit 0
-  historical_two_voice_green_pr: 853
-  historical_two_voice_green_sha: 7b4053acd9a2bd44c29a15ebc5e0e86152fab24f
-  historical_two_voice_contract: filtered_pcm_and_single_pitch_frame
-  pre_final_batch: 10 passed and 2 test-assertion failures in 1344.28s
-  pre_final_batch_failures: expected wrong Giọng prefix; runtime labels were correct
-  final_batch: 29 passed and 1 dependency deprecation warning in 924.54s
-  final_py_compile: exit 0 for bot.py auto_speaker.py auto_multi_speaker.py
-  final_diff_check: exit 0
-  post_rebase_vps_gate: 29 passed in 89.73s; py_compile exit 0; diff-check exit 0
-  proof_red: 5 failed in 9.72s for missing 3-speaker cast receipt and terminal proof
-  proof_green: 23 passed in 6.27s for full multi-speaker blackbox file
-  protected_branch: 7 passed and 4 baseline failures in 9.72s
-  protected_baseline: same 4 failures at a6d54a6 in 528.69s
-  proof_py_compile: exit 0 for bot.py and auto_multi_speaker.py
-  post_rebase_proof_green: 23 passed in 459.44s on 8f2d129 plus patch
-  post_rebase_py_compile: exit 0 for bot.py and auto_multi_speaker.py
-  red: 9 failed and 2 passed in 132.83s for missing multi seams
-  focused_green: 12 passed in 133.96s
-  protected_old_route: 3 passed in 156.90s
-  protected_manual_zero_charge: 7 passed in 163.23s
-  classifier_comparators: 16 passed and 1 baseline failure in 145.50s
-  rollback_anchor_comparator: same baseline failure at 2.0 versus 1.5 in 145.92s
-  post_rebase_focused: 17 passed in 175.95s on VPS clone
-  post_rebase_multilingual: vi ja en ko zh all passed inside focused suite
-  post_rebase_old_lane: 3 passed in 8.92s
-  post_rebase_broad_diff: branch 34 passed 10 baseline failures; baseline 33 passed 11 failures
-  post_rebase_manual_diff: branch 5 passed 2 baseline failures; baseline 4 passed 3 failures
-  post_rebase_classifier_diff: branch 16 passed 1 baseline failure at 2.0; baseline 16 passed 1 failure at 2.5
-  py_compile: exit 0 for four runtime files on VPS production venv
-issues:
-  - id: MULTI-01
-    status: done
-    summary: marker dispatch and distinct job lease
-  - id: MULTI-02
-    status: done
-    summary: multi owns isolated classifier and runner while two-speaker code matches PR 853
-  - id: MULTI-03
-    status: done
-    summary: cross-profile sidecar and exact-receipt cache isolation
-  - id: PROTECTED-01
-    status: done
-    summary: old Auto default PCM classifier route and manual lanes protected
-  - id: BASELINE-01
-    status: known_nonblocking
-    summary: voiced-with-pauses comparator expects 1.5 seconds but returns 2.0 identically at rollback SHA
-  - id: SHIP-01
-    status: ready_waiting_product_video_release
-    summary: source gate passed on cd4acb8; Product Video currently owns LIVE CHROME VPS DEPLOY
-  - id: LIVE-01
-    status: invalid_fixture
-    summary: E576D4ACE9 delivered Download.mp4 not the Owner-selected test nhiều giọng.mp4
-  - id: MULTI-04
-    status: source_green
-    summary: require 3+ distinct speaker/voice evidence and render the multi receipt fields
-next_action: amend one commit with terminal evidence then push one PR squash merge deploy and run ordered two-speaker then multi-speaker live jobs
+    title: Continue the isolated multi-speaker lane only after SPEC-04 passes
+    status: blocked_by_order
+    acceptance:
+      - upload only test nhiều giọng.mp4
+      - select Tự động nhiều giọng
+      - detect at least three real speaker labels without inventing labels
+      - assign a distinct validated TTS voice to every detected label
+      - multilingual translation and dubbing preserve speaker-to-voice mapping
+      - one final playable MP4 and one valid SRT are delivered
+      - receipt shows subtitle price, dubbing price, dubbing type, speaker/voice counts, casts, and total
+      - charged_xu equals 0 and no wallet transaction is created
+    on_failure: stay on SPEC-05 and repeat RED/GREEN/ship/live until all acceptance evidence passes
+
+  - id: SPEC-06
+    title: Publish evidence and audit the full Owner goal
+    status: pending
+    acceptance:
+      - commit the current checklist and an evidence report to GitHub
+      - include RED/GREEN/compile/diff, PR/merge/deploy/runtime, job IDs, artifact hashes, SRT, receipt, and zero-Xu proof
+      - audit every acceptance line as proven or unresolved
+      - mark the goal complete only when no required line remains unresolved
+
+current_next_action: review the exact four-file diff, create one commit and PR, squash merge, deploy, and verify runtime
