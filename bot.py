@@ -242462,6 +242462,15 @@ async def send_public_subtitle_dub_final_outputs(
         active_flow not in {VIDEO_DUBBING_FLOW_TRANSCRIPT, VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE}
         and mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
     )
+    delivery_job = dict(
+        SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {}
+    )
+    auto_srt_companion_required = bool(
+        is_combined
+        and include_subtitle_outputs
+        and auto_speaker.is_auto_speaker_state(delivery_job)
+        and (subtitle_items or str(srt_text or "").strip())
+    )
     sent = {
         "documents": 0,
         "audio": 0,
@@ -242500,6 +242509,7 @@ async def send_public_subtitle_dub_final_outputs(
         "srt_suppress_reason": "",
         "partial_copy_suppressed": False,
         "explicit_srt_download_available": False,
+        "auto_srt_companion_required": auto_srt_companion_required,
         "source_duration": expected_duration_seconds,
         "expected_duration": expected_duration_seconds,
         "duration_coverage_ok": False,
@@ -242599,7 +242609,11 @@ async def send_public_subtitle_dub_final_outputs(
                     sent["final_mp4_delivered"] = True
                     if source == "compressed":
                         sent["delivery_method"] = "compressed_document"
-                if sent.get("final_mp4_delivered") and video_product_subtitle_mode:
+                if (
+                    sent.get("final_mp4_delivered")
+                    and video_product_subtitle_mode
+                    and not auto_srt_companion_required
+                ):
                     sent["srt_fallback_suppressed"] = True
                     sent["auto_srt_after_video_prevented"] = True
                     sent["srt_auto_send_suppressed"] = True
@@ -242631,9 +242645,19 @@ async def send_public_subtitle_dub_final_outputs(
 
         if validation.get("ok"):
             if await _deliver_video_payload(video_bytes, "original"):
-                if sent.get("final_mp4_delivered") and video_product_subtitle_mode:
+                if (
+                    sent.get("final_mp4_delivered")
+                    and video_product_subtitle_mode
+                    and not auto_srt_companion_required
+                ):
                     return sent
-                if mode != VIDEO_SUBTITLE_MODE_CREATE or not include_subtitle_outputs:
+                if (
+                    not auto_srt_companion_required
+                    and (
+                        mode != VIDEO_SUBTITLE_MODE_CREATE
+                        or not include_subtitle_outputs
+                    )
+                ):
                     return sent
             compressed = b""
             if not sent.get("video_delivery_message_id") and (len(video_bytes) > doc_limit or len(video_bytes) >= compress_threshold):
@@ -242643,9 +242667,19 @@ async def send_public_subtitle_dub_final_outputs(
                     expected_duration=expected_duration_seconds,
                 )
                 if compressed and await _deliver_video_payload(compressed, "compressed"):
-                    if sent.get("final_mp4_delivered") and video_product_subtitle_mode:
+                    if (
+                        sent.get("final_mp4_delivered")
+                        and video_product_subtitle_mode
+                        and not auto_srt_companion_required
+                    ):
                         return sent
-                    if mode != VIDEO_SUBTITLE_MODE_CREATE or not include_subtitle_outputs:
+                    if (
+                        not auto_srt_companion_required
+                        and (
+                            mode != VIDEO_SUBTITLE_MODE_CREATE
+                            or not include_subtitle_outputs
+                        )
+                    ):
                         return sent
     if requires_final_mp4 and not sent.get("final_mp4_delivered") and not SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED:
         sent["audio_fallback_suppressed"] = bool(audio_bytes)
@@ -242698,7 +242732,15 @@ async def send_public_subtitle_dub_final_outputs(
         return sent
     existing_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
     existing_job.setdefault("mode", mode)
-    if subdub_should_skip_public_subtitle_fallback(existing_job, sent):
+    if auto_srt_companion_required and sent.get("final_mp4_delivered"):
+        sent["srt_fallback_suppressed"] = False
+        sent["auto_srt_after_video_prevented"] = False
+        sent["srt_auto_send_suppressed"] = False
+        sent["srt_suppress_reason"] = ""
+        sent["partial_copy_suppressed"] = True
+        sent["explicit_srt_download_available"] = True
+        wanted_types = ("srt",)
+    elif subdub_should_skip_public_subtitle_fallback(existing_job, sent):
         sent["srt_fallback_suppressed"] = True
         sent["auto_srt_after_video_prevented"] = True
         sent["srt_auto_send_suppressed"] = True

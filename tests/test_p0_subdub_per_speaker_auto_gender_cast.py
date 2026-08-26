@@ -5517,6 +5517,77 @@ def test_task7_two_speaker_delivery_receipt_names_type_and_component_prices(
     assert "Đã trừ: <b>0 Xu</b>" in text
 
 
+def test_task7_auto_two_speaker_combo_delivers_srt_companion_after_mp4(
+    monkeypatch,
+):
+    job_key = "auto-two-speaker-srt-companion"
+    state = {
+        "job_key": job_key,
+        "mode": "subtitle_plus_dub",
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "status": "running",
+    }
+    documents = []
+
+    class Message:
+        async def reply_document(self, **kwargs):
+            documents.append(kwargs)
+            return SimpleNamespace(message_id=902)
+
+    async def deliver_video(*_args, **_kwargs):
+        return {
+            "sent": True,
+            "delivery_method": "video",
+            "telegram_message_id": "901",
+            "file_id": "video-file-901",
+            "file_size_mb": 1.0,
+            "size_limit_used": 500.0,
+        }
+
+    monkeypatch.setattr(
+        bot,
+        "SUBTITLE_DUB_PIPELINE_JOBS",
+        {job_key: state},
+    )
+    monkeypatch.setattr(
+        bot,
+        "send_generated_video_bytes_for_delivery",
+        deliver_video,
+    )
+    monkeypatch.setattr(
+        bot,
+        "update_subtitle_dub_pipeline_job",
+        lambda *_args, **_kwargs: {},
+    )
+
+    result = asyncio.run(
+        bot.send_public_subtitle_dub_final_outputs(
+            Message(),
+            mode="subtitle_plus_dub",
+            active_flow="subtitle_plus_dub",
+            requested_mode="subtitle_plus_dub",
+            subtitle_items=[{
+                "output_type": "srt",
+                "filename": "toan_aas_subtitle_plus_dub.srt",
+                "bytes": b"1\n00:00:00,000 --> 00:00:01,000\nHello\n",
+            }],
+            srt_text="1\n00:00:00,000 --> 00:00:01,000\nHello\n",
+            audio_bytes=b"dub-audio",
+            video_bytes=b"mp4-bytes",
+            include_subtitle_outputs=True,
+            job_key=job_key,
+        )
+    )
+
+    assert result["final_mp4_delivered"] is True
+    assert result["video_delivery_message_id"] == "901"
+    assert result["documents"] == 1
+    assert result["srt_delivery_message_id"] == "902"
+    assert result["srt_auto_send_suppressed"] is False
+    assert len(documents) == 1
+
+
 @pytest.mark.parametrize(
     "source_cue_id",
     ("", "cue-0001-sidecar-stable"),
