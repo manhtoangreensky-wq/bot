@@ -22,8 +22,7 @@ from services import subtitle_dub_product_pipeline
 
 AUTO_SPEAKER_PREFLIGHT_READY = "AUTO_SPEAKER_PREFLIGHT_READY"
 
-_RELATIVE_TWO_SPEAKER_MIN_HZ_GAP = 20.0
-_RELATIVE_TWO_SPEAKER_MIN_RATIO = 1.18
+_INDEPENDENT_REGISTER_MIN_WEIGHT_RATIO = 0.60
 
 _SUBTITLE_SCRIPT_CHARSET = {
     "japanese": "3042",
@@ -279,14 +278,14 @@ async def _drain_worker(worker: asyncio.Task) -> None:
             pass
 
 
-def _relative_two_speaker_classifications(
+def _independent_two_speaker_classifications(
     evidence_by_speaker: Mapping[str, object],
 ) -> dict[str, dict]:
-    """Resolve a clearly separated two-speaker pair by relative pitch only."""
+    """Classify each of exactly two speakers without forcing opposite genders."""
 
     if not isinstance(evidence_by_speaker, Mapping) or len(evidence_by_speaker) != 2:
         raise speaker_cast.AutoCastManualRequired()
-    summaries: list[tuple[str, float, float, int]] = []
+    results: dict[str, dict] = {}
     for speaker_id, raw_evidence in evidence_by_speaker.items():
         if type(speaker_id) is not str or not speaker_id.strip():
             raise speaker_cast.AutoCastManualRequired()
@@ -314,29 +313,47 @@ def _relative_two_speaker_classifications(
             evidence.append((frequency, confidence))
         if len(evidence) < 2:
             raise speaker_cast.AutoCastManualRequired()
+        by_register: dict[str, list[tuple[float, float]]] = {
+            "low": [],
+            "high": [],
+        }
+        for item in evidence:
+            register = speaker_cast.pitch_register(
+                item[0],
+                confidence=item[1],
+            )
+            if register in by_register:
+                by_register[register].append(item)
+        ranked = sorted(
+            by_register.items(),
+            key=lambda item: sum(value[1] for value in item[1]),
+            reverse=True,
+        )
+        register, selected = ranked[0]
+        selected_weight = sum(item[1] for item in selected)
+        total_weight = sum(item[1] for item in evidence)
+        if (
+            len(selected) < 2
+            or total_weight <= 0.0
+            or selected_weight / total_weight
+            < _INDEPENDENT_REGISTER_MIN_WEIGHT_RATIO
+        ):
+            raise speaker_cast.AutoCastManualRequired()
         median_hz = speaker_cast._bounded_median(
-            [item[0] for item in evidence]
+            [item[0] for item in selected]
         )
         median_confidence = speaker_cast._bounded_median(
-            [item[1] for item in evidence]
+            [item[1] for item in selected]
         )
-        summaries.append(
-            (speaker_id, median_hz, median_confidence, len(evidence))
-        )
-
-    summaries.sort(key=lambda item: item[1])
-    lower, higher = summaries
-    hz_gap = higher[1] - lower[1]
-    pitch_ratio = higher[1] / lower[1] if lower[1] > 0.0 else 0.0
-    if (
-        hz_gap < _RELATIVE_TWO_SPEAKER_MIN_HZ_GAP
-        or pitch_ratio < _RELATIVE_TWO_SPEAKER_MIN_RATIO
-    ):
-        raise speaker_cast.AutoCastManualRequired()
-
-    results: dict[str, dict] = {}
-    for register, summary in (("low", lower), ("high", higher)):
-        speaker_id, median_hz, confidence, sample_windows = summary
+        if (
+            speaker_cast.pitch_register(
+                median_hz,
+                confidence=median_confidence,
+            )
+            != register
+        ):
+            raise speaker_cast.AutoCastManualRequired()
+        sample_windows = len(selected)
         voiced_seconds = min(
             speaker_cast.MAX_SPEAKER_VOICED_SECONDS,
             sample_windows * speaker_cast._PCM_WINDOW_SECONDS,
@@ -344,10 +361,10 @@ def _relative_two_speaker_classifications(
         results[speaker_id] = {
             "speaker_id": speaker_id,
             "voice_register": register,
-            "confidence": round(float(confidence), 6),
+            "confidence": round(float(median_confidence), 6),
             "voiced_seconds": round(float(voiced_seconds), 3),
             "sample_count": int(sample_windows * speaker_cast.PCM_WINDOW_SAMPLES),
-            "reason": "classified_relative_two_speaker",
+            "reason": "classified_independent_two_speaker",
         }
     return results
 
@@ -449,7 +466,7 @@ def _classify_two_speaker_registers(
                 deadline_monotonic=deadline_monotonic,
                 stop_requested=stop_requested,
             )
-            return _relative_two_speaker_classifications(evidence)
+            return _independent_two_speaker_classifications(evidence)
         except speaker_cast.AutoCastManualRequired:
             raise absolute_failure
 

@@ -2430,68 +2430,88 @@ def test_protected_two_speaker_code_has_no_multi_lane_seams():
     assert "classify_speakers" not in inspect.getsource(auto_speaker)
 
 
-def test_two_speaker_relative_fallback_resolves_live_mixed_register_evidence():
+@pytest.mark.parametrize(
+    ("evidence", "expected"),
+    (
+        (
+            {
+                "speaker_0": [(112.0, 0.90), (118.0, 0.88), (121.0, 0.86)],
+                "speaker_1": [(132.0, 0.91), (138.0, 0.89), (142.0, 0.87)],
+            },
+            {"speaker_0": "low", "speaker_1": "low"},
+        ),
+        (
+            {
+                "speaker_0": [(112.0, 0.90), (118.0, 0.88), (121.0, 0.86)],
+                "speaker_1": [(185.0, 0.91), (194.0, 0.89), (205.0, 0.87)],
+            },
+            {"speaker_0": "low", "speaker_1": "high"},
+        ),
+        (
+            {
+                "speaker_0": [(175.0, 0.90), (182.0, 0.88), (188.0, 0.86)],
+                "speaker_1": [(210.0, 0.91), (224.0, 0.89), (236.0, 0.87)],
+            },
+            {"speaker_0": "high", "speaker_1": "high"},
+        ),
+    ),
+    ids=("male-male", "male-female", "female-female"),
+)
+def test_two_speaker_independent_fallback_supports_all_gender_pairs(
+    evidence,
+    expected,
+):
     auto_speaker = importlib.import_module(
         "services.subdub_blackboxes.auto_speaker"
     )
-    evidence = {
-        "chunk_00:speaker_0": [
-            (166.66666666666666, 0.7934473687016768),
-            (141.28344670185172, 0.8178179596994262),
-            (182.18875830572054, 0.7830916622434327),
-            (141.85651597782393, 0.7608544018093344),
-        ],
-        "chunk_00:speaker_1": [
-            (117.6470588235294, 0.8757500155629517),
-            (128.0, 0.804505474379515),
-            (118.8011279075644, 0.8862676029756282),
-            (125.34961289786226, 0.9164122226424631),
-            (117.10750049343316, 0.9736642065716726),
-            (132.23140495867767, 0.7744597920031885),
-        ],
-    }
+    result = auto_speaker._independent_two_speaker_classifications(evidence)
 
-    result = auto_speaker._relative_two_speaker_classifications(evidence)
-
-    assert result["chunk_00:speaker_0"]["voice_register"] == "high"
-    assert result["chunk_00:speaker_1"]["voice_register"] == "low"
+    assert {
+        speaker_id: item["voice_register"]
+        for speaker_id, item in result.items()
+    } == expected
     assert all(
         item["confidence"] >= 0.75
-        and item["reason"] == "classified_relative_two_speaker"
+        and item["reason"] == "classified_independent_two_speaker"
         for item in result.values()
     )
 
 
-def test_two_speaker_relative_fallback_rejects_close_or_non_pair_evidence():
+def test_two_speaker_independent_fallback_rejects_ambiguous_or_non_pair_evidence():
     auto_speaker = importlib.import_module(
         "services.subdub_blackboxes.auto_speaker"
     )
     speaker_cast = _speaker_cast_module()
-    close = {
-        "speaker_0": [(120.0, 0.90), (122.0, 0.88)],
-        "speaker_1": [(130.0, 0.91), (132.0, 0.89)],
+    ambiguous = {
+        "speaker_0": [
+            (141.283, 0.818),
+            (141.857, 0.761),
+            (166.667, 0.793),
+            (182.189, 0.783),
+        ],
+        "speaker_1": [(118.0, 0.90), (122.0, 0.88)],
     }
     three = {
-        **close,
+        **ambiguous,
         "speaker_2": [(180.0, 0.92), (182.0, 0.90)],
     }
 
-    for evidence in (close, three):
+    for evidence in (ambiguous, three):
         with pytest.raises(
             speaker_cast.AutoCastManualRequired,
             match="^AUTO_CAST_MANUAL_REQUIRED$",
         ):
-            auto_speaker._relative_two_speaker_classifications(evidence)
+            auto_speaker._independent_two_speaker_classifications(evidence)
 
 
-def test_protected_two_speaker_classifier_uses_relative_fallback_only_after_absolute_failure(
+def test_protected_two_speaker_classifier_uses_independent_fallback_only_after_absolute_failure(
     monkeypatch,
 ):
     auto_speaker = importlib.import_module(
         "services.subdub_blackboxes.auto_speaker"
     )
     speaker_cast = _speaker_cast_module()
-    calls = {"absolute": 0, "relative": 0}
+    calls = {"absolute": 0, "independent": 0}
     ranges = {
         "speaker_0": [(0.0, 2.0)],
         "speaker_1": [(2.0, 4.0)],
@@ -2505,8 +2525,8 @@ def test_protected_two_speaker_classifier_uses_relative_fallback_only_after_abso
         calls["absolute"] += 1
         raise speaker_cast.AutoCastManualRequired()
 
-    def collect_relative(*_args, **_kwargs):
-        calls["relative"] += 1
+    def collect_independent(*_args, **_kwargs):
+        calls["independent"] += 1
         return evidence
 
     monkeypatch.setattr(
@@ -2517,7 +2537,7 @@ def test_protected_two_speaker_classifier_uses_relative_fallback_only_after_abso
     monkeypatch.setattr(
         auto_speaker,
         "_collect_two_speaker_pitch_evidence",
-        collect_relative,
+        collect_independent,
     )
 
     result = auto_speaker._classify_two_speaker_registers(
@@ -2527,7 +2547,7 @@ def test_protected_two_speaker_classifier_uses_relative_fallback_only_after_abso
         stop_requested=lambda: False,
     )
 
-    assert calls == {"absolute": 1, "relative": 1}
+    assert calls == {"absolute": 1, "independent": 1}
     assert result["speaker_0"]["voice_register"] == "high"
     assert result["speaker_1"]["voice_register"] == "low"
 
