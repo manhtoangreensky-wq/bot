@@ -497,6 +497,7 @@ def preflight(
         if (
             not (source.get("source_url") and source.get("observed_at"))
             and not source.get("sample_preset")
+            and source.get("source_type") != "user_topic"
             and not uploaded_source_ready
         ):
             blockers.append("trend_source_or_sample_missing")
