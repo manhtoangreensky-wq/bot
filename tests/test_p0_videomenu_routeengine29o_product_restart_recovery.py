@@ -601,6 +601,111 @@ def test_existing_task_recovery_retries_poll_only_after_transient_worker_failure
     conn.close()
 
 
+def test_terminal_provider_failures_finalize_before_worker_reclaim(tmp_path: Path):
+    conn = sqlite3.connect(tmp_path / "terminal-provider-failure-claim.db")
+    conn.row_factory = sqlite3.Row
+    queue.ensure_video_project_queue_schema(conn)
+    project = queue.create_video_project(
+        conn,
+        user_id=919_013,
+        profile_id="video_trend",
+        topic="two provider scenes failed terminally",
+        asset_pack={
+            "source": "product_video",
+            "product_type": "video_trend",
+            "render_mode": "real",
+            "public_user": True,
+        },
+    )
+    project_id = int(project["project_id"])
+    queue.update_video_project(
+        conn,
+        project_id,
+        status="processing",
+        is_confirmed=1,
+        scene_count=2,
+        invoice_json={"scene_count": 2, "duration_seconds": 16},
+    )
+    job = queue.enqueue_video_render_job(
+        conn,
+        project_id=project_id,
+        user_id=919_013,
+        max_attempts=3,
+    )
+    job_id = int(job["id"])
+    queue.update_video_project(conn, project_id, status="processing", job_id=job_id)
+    result = {
+        **_live_job13_result(),
+        "job_id": job_id,
+        "project_id": project_id,
+        "scene_count": 2,
+        "charged_xu": 0,
+        "charge": 0,
+        "scene_status_by_index": {"1": "failed", "2": "failed"},
+        "scene_provider_progress_by_index": {"1": 100, "2": 100},
+        "scene_tasks": [
+            {
+                "scene_index": 1,
+                "provider_task_id": TASK_SCENE_1,
+                "active_task_id": TASK_SCENE_1,
+                "status": "failed",
+                "dispatch_state": "task_submitted",
+                "provider_status_raw": "FAILURE",
+                "failure_reason": "provider_failed_result_url_invalid",
+                "clip_valid": False,
+            },
+            {
+                "scene_index": 2,
+                "provider_task_id": TASK_SCENE_2,
+                "active_task_id": TASK_SCENE_2,
+                "status": "failed",
+                "dispatch_state": "task_submitted",
+                "provider_status_raw": "FAILURE",
+                "failure_reason": "provider_failed_result_url_invalid",
+                "clip_valid": False,
+            },
+        ],
+    }
+    conn.execute(
+        "UPDATE video_jobs SET status='processing',attempts=79,max_attempts=3,result_json=? WHERE id=?",
+        (json.dumps(result), job_id),
+    )
+    outbox = queue.ensure_product_video_dispatch_outbox(
+        conn,
+        job_id=job_id,
+        project_id=project_id,
+        scene_indexes=[1, 2],
+    )
+    conn.execute(
+        "UPDATE video_dispatch_outbox SET dispatch_status='acknowledged',acknowledged_at=CURRENT_TIMESTAMP WHERE outbox_id=?",
+        (int(outbox["outbox_id"]),),
+    )
+    conn.commit()
+
+    assert queue.product_video_scene_ledger_state({}, job, result)["aggregate_job_status"] == "failed_no_charge"
+    claimed = remote_worker_api._claim_video_render_candidate(
+        conn,
+        worker_id="terminal-provider-failure-worker",
+        product_video_only=True,
+        public_enabled=True,
+    )
+
+    assert claimed == {}
+    stored_job = queue.get_video_render_job(conn, job_id)
+    stored_project = queue.get_video_project(conn, project_id)
+    stored_outbox = queue.get_product_video_dispatch_outbox(conn, job_id=job_id)
+    stored_result = json.loads(stored_job["result_json"])
+    assert stored_job["attempts"] == 79
+    assert stored_job["status"] == "failed"
+    assert stored_result["terminal_state"] == "failed_no_charge"
+    assert stored_result["continue_polling"] is False
+    assert stored_result["charged_xu"] == 0
+    assert stored_project["status"] == "failed"
+    assert stored_project["video_terminal_state"] == "failed_no_charge"
+    assert stored_outbox["dispatch_status"] == "terminal_failed"
+    conn.close()
+
+
 def test_existing_task_recovery_retry_is_bounded_and_cancellation_still_wins(
     tmp_path: Path,
 ):

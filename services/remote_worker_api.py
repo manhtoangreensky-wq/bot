@@ -2958,6 +2958,62 @@ def _claim_video_render_candidate(
                 result_payload = video_project_queue._json_loads(job.get("result_json"), {})
                 if not isinstance(result_payload, dict):
                     result_payload = {}
+                terminal_ledger = video_project_queue.product_video_scene_ledger_state(
+                    {}, job, result_payload, now=current_dt
+                )
+                if terminal_ledger.get("aggregate_job_status") == "failed_no_charge":
+                    terminal_reason = next(
+                        (
+                            str(item.get("failure_reason") or "").strip()
+                            for item in result_payload.get("scene_tasks") or []
+                            if isinstance(item, dict)
+                            and str(item.get("failure_reason") or "").strip()
+                        ),
+                        str(terminal_ledger.get("aggregate_reason") or "required_scene_exhausted_no_charge"),
+                    )
+                    result_payload.update(
+                        {
+                            **terminal_ledger,
+                            "terminal_state": "failed_no_charge",
+                            "final_decision": "failed_no_charge",
+                            "provider_error": terminal_reason,
+                            "blocker": terminal_reason,
+                            "continue_polling": False,
+                            "next_poll_scheduled": False,
+                            "no_charge": True,
+                            "charge": 0,
+                            "charged_xu": 0,
+                            "wallet_charge_recorded": False,
+                        }
+                    )
+                    conn.execute(
+                        "UPDATE video_jobs SET status='failed',result_json=?,last_error=?,progress_percent=?,progress_message=?,locked_by='',locked_at=NULL,lease_expires_at=NULL,completed_at=?,updated_at=? WHERE id=?",
+                        (
+                            video_project_queue._json_dumps(result_payload),
+                            terminal_reason,
+                            int(terminal_ledger.get("public_effective_progress") or 55),
+                            terminal_reason,
+                            current,
+                            current,
+                            int(job["id"]),
+                        ),
+                    )
+                    conn.execute(
+                        "UPDATE video_projects SET status='failed',video_terminal_state='failed_no_charge',error_log=?,completed_at=COALESCE(completed_at,?),updated_at=? WHERE project_id=?",
+                        (terminal_reason, current, current, int(job["project_id"])),
+                    )
+                    if dispatch_outbox.get("outbox_id"):
+                        conn.execute(
+                            "UPDATE video_dispatch_outbox SET dispatch_status='terminal_failed',terminal_reason=?,last_error=?,lease_owner='',lease_expires_at=NULL,completed_at=COALESCE(completed_at,?),updated_at=? WHERE outbox_id=?",
+                            (
+                                terminal_reason,
+                                terminal_reason,
+                                current,
+                                current,
+                                int(dispatch_outbox["outbox_id"]),
+                            ),
+                        )
+                    continue
                 public_confirmed_dispatch_recovery = bool(
                     dispatch_outbox_claim
                     and owner_product_video_only
