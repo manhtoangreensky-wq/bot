@@ -36,16 +36,22 @@ def test_head_prepaint_marker_is_progressive_and_has_a_fail_safe():
         r"@media \(min-width:\s*981px\) and "
         r"\(prefers-reduced-motion:\s*no-preference\)\s*\{\s*"
         + prepaint_selectors
-        + r"\s*\{\s*opacity:\s*0;\s*transform:\s*translateY\(20px\);\s*\}",
+        + r"\s*\{\s*opacity:\s*1;\s*transform:\s*translateY\(8px\);\s*\}",
         LANDING,
         re.DOTALL,
     )
 
 
-def test_motion_css_locks_exact_timings_fill_and_transform_only():
+def test_motion_css_keeps_hero_visible_and_sections_transform_only():
     assert re.search(
-        r"\.motion-reveal-hero\s*\{\s*animation:\s*fade-up 520ms "
+        r"\.motion-reveal-hero\s*\{\s*animation:\s*hero-settle 360ms "
         r"cubic-bezier\(\.22,\s*1,\s*\.36,\s*1\) both !important;\s*\}",
+        LANDING,
+    )
+    assert re.search(
+        r"@keyframes hero-settle\s*\{\s*"
+        r"from\s*\{\s*opacity:\s*1;\s*transform:\s*translateY\(8px\);\s*\}\s*"
+        r"to\s*\{\s*opacity:\s*1;\s*transform:\s*translateY\(0\);\s*\}\s*\}",
         LANDING,
     )
     assert re.search(
@@ -63,7 +69,7 @@ def test_motion_css_locks_exact_timings_fill_and_transform_only():
     assert not re.search(r"\b(?:width|height|top|left|padding|margin)\s*:", keyframes)
 
 
-def test_hero_has_exact_five_non_nested_items_and_an_800ms_budget():
+def test_hero_has_exact_five_non_nested_items_and_a_510ms_budget():
     selector_match = re.search(
         r"const heroSelectors = Object\.freeze\(\[(.*?)\]\);", LANDING, re.DOTALL
     )
@@ -75,10 +81,10 @@ def test_hero_has_exact_five_non_nested_items_and_an_800ms_budget():
     assert delay_match is not None
     assert re.findall(r'"([^"]+)"', selector_match.group(1)) == HERO_SELECTORS
     delays = [int(value) for value in re.findall(r"\d+", delay_match.group(1))]
-    assert delays == [0, 80, 160, 240, 240]
+    assert delays == [0, 50, 100, 150, 150]
     assert len(delays) == len(HERO_SELECTORS) == 5
-    assert max(delays) <= 280
-    assert max(delays) + 520 <= 800
+    assert max(delays) <= 150
+    assert max(delays) + 360 <= 510
     assert "document.querySelector('.hero-copy')" not in LANDING
     assert 'document.querySelector(".hero-copy")' not in LANDING
     assert "index * 80" not in LANDING

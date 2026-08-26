@@ -45,7 +45,7 @@ Nguồn ban đầu đã tìm thấy: `index.html` tại base `5a4f942bc0b2e8820a
 
 | Chức năng ban đầu | Hiện tại | Trạng thái |
 |---|---|---|
-| Hero giới thiệu và CTA Workspace/Telegram | Giữ nguyên URL/copy; thêm entrance một lần | ✅ Còn dùng |
+| Hero giới thiệu và CTA Workspace/Telegram | Giữ nguyên URL/copy; semantic content luôn opacity `1`, chỉ settle `8px/360ms` một lần | ✅ Còn dùng |
 | Các section nội dung hiện mặc định | Vẫn fail-open; chỉ section dưới fold nhận pending | ✅ Còn dùng |
 | Form gửi JSON tới `/lead` | Không đổi endpoint, payload hoặc source authority | ✅ Còn dùng |
 | Tablet/mobile/reduced-motion | Nội dung hiện ngay, không presentation motion | ✅ Đã khóa bằng test |
