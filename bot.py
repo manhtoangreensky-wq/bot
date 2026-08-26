@@ -113302,7 +113302,7 @@ def video_tail9_quality_keyboard(
 
 def video_tail9_invoice_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("✅ Xác nhận tạo video", "video_tail|confirm|submit"), ("⭐ Đổi gói", "video_tail|quality|change")],
+        [("✅ Xác nhận tạo video", "video_tail|confirm|open"), ("⭐ Đổi gói", "video_tail|quality|change")],
         [("🧰 Sửa Add-on", "video_tail|addon|open"), ("👁️ Rà soát video", "video_tail|review|open")],
         [("⬅️ Quay lại", "video_tail|quality|open"), ("🎬 Menu Video", "menu|main_video")],
     ])
@@ -115376,7 +115376,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if action in {"open", "change"}:
             return await video_tail9_render(query, uid, context, "quality")
         if action == "back":
-            back_dest = "addon" if str(tail.get("video_product_type") or "") in {"multi_scene_film", "video_long"} else "review"
+            back_dest = "review"
             return await video_tail9_render(query, uid, context, back_dest)
         if action == "select":
             tail["status_stage"] = "quality"
@@ -115431,15 +115431,11 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 return await video_tail9_render(query, uid, context, "invoice")
             return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
         if action == "open":
-            product_type = str(tail.get("video_product_type") or "")
-            if product_type in {"multi_scene_film", "video_long"}:
-                action = "submit"
-            else:
-                await query.answer()
-                allowed, _reason = video_tail9.invoice_allowed(tail)
-                if not allowed:
-                    return await video_tail9_render(query, uid, context, "invoice")
-                return await video_tail9_render(query, uid, context, "confirm")
+            await query.answer()
+            allowed, _reason = video_tail9.invoice_allowed(tail)
+            if not allowed:
+                return await video_tail9_render(query, uid, context, "invoice")
+            return await video_tail9_render(query, uid, context, "confirm")
         if action == "back":
             await query.answer()
             return await video_tail9_render(query, uid, context, "invoice")
@@ -176573,7 +176569,7 @@ def frame_video_job_status_text(job: dict) -> str:
         lines.append(f"• Đã ghi Xu: {int(job.get('wallet_charge_amount_xu') or 0)}")
     elif status == "delivered_charge_pending":
         lines.append("• Video đã gửi; hệ thống đang đối soát phần ghi Xu, không gửi lại video.")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 def frame_video_job_status_keyboard(job_id: str) -> InlineKeyboardMarkup:
     job_id = str(job_id or "")
@@ -176750,7 +176746,7 @@ def frame_video_images_text(state: dict) -> str:
     for index, item in enumerate(clean.get("photos") or [], start=1):
         marker = "👉 " if item.get("image_id") == selected else ""
         rows.append(f"{marker}{index}. Ảnh {index}" + (" · ảnh bìa" if item.get("is_cover") else ""))
-    listing = "\\n".join(rows) if rows else "Chưa có ảnh."
+    listing = "\n".join(rows) if rows else "Chưa có ảnh."
     return (
         "🗂️ <b>Quản lý và sắp xếp ảnh</b>\n\n"
         f"{listing}\n\n"
@@ -177165,7 +177161,7 @@ def frame_video_text_list_text(state: dict) -> str:
             f"{index}. {html.escape(str(item.get('content') or ''))} · {scope} · "
             f"{_safe_float(item.get('start_seconds'), 0):g}–{_safe_float(item.get('end_seconds'), 0):g}s"
         )
-    return "👁️ <b>Chữ đã thêm</b>\n\n" + ("\\n".join(rows) if rows else "Chưa có chữ trên video.")
+    return "👁️ <b>Chữ đã thêm</b>\n\n" + ("\n".join(rows) if rows else "Chưa có chữ trên video.")
 
 
 def frame_video_text_list_keyboard(state: dict) -> InlineKeyboardMarkup:
@@ -177308,7 +177304,7 @@ def frame_video_quality_text(state: dict) -> str:
             "",
             "Giá đầy đủ sẽ được hiển thị ở bước báo giá trước khi xác nhận dựng video.",
         ])
-        return "\\n".join(lines)
+        return "\n".join(lines)
     preflight = frame_video_commercial_preflight(clean)
     route = str(preflight.get("execution_owner") or "")
     route_label = {
@@ -177350,7 +177346,7 @@ def frame_video_quality_text(state: dict) -> str:
         "Dịch vụ tạo thêm nếu có được ghi riêng ở hóa đơn. Preflight chạy lại "
         "ngay trước hóa đơn và không tạo job khi chưa đạt.",
     ])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def frame_video_review_text(state: dict, user_id=0, invoice: bool = False) -> str:
@@ -177402,7 +177398,7 @@ def frame_video_review_text(state: dict, user_id=0, invoice: bool = False) -> st
         )
     else:
         lines.extend(["", "Màn này chỉ xem kế hoạch, chưa tạo file và chưa trừ Xu."])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def frame_video_review_keyboard(invoice: bool = False, state: dict | None = None) -> InlineKeyboardMarkup:
@@ -177441,11 +177437,11 @@ def frame_video_planning_text(state: dict | None = None, lang: str = "vi") -> st
     count = len(state.get("photos") or [])
     suggestions = frame_video_planning_suggestions(state, lang)
     is_vi = normalize_user_language(lang) == "vi"
-    style_lines = "\\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("styles") or [], start=1))
-    motion_lines = "\\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("motions") or [], start=1))
-    transition_lines = "\\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("transitions") or [], start=1))
-    music_lines = "\\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("music") or [], start=1))
-    cta_lines = "\\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("ctas") or [], start=1))
+    style_lines = "\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("styles") or [], start=1))
+    motion_lines = "\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("motions") or [], start=1))
+    transition_lines = "\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("transitions") or [], start=1))
+    music_lines = "\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("music") or [], start=1))
+    cta_lines = "\n".join(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions.get("ctas") or [], start=1))
     if not is_vi:
         return (
             "🎞 <b>Image slideshow video plan</b>\n\n"
@@ -177766,7 +177762,7 @@ def storyboard_scripts_text(idea: str, scripts: list[dict]) -> str:
             f"• Phong cách hình ảnh: {html.escape(item['style'])}",
             "",
         ])
-    return "\\n".join(lines).strip()
+    return "\n".join(lines).strip()
 
 def storyboard_scripts_keyboard() -> InlineKeyboardMarkup:
     return video_v6_keyboard(
@@ -177838,7 +177834,7 @@ def storyboard_text(scenes: list[dict], project_id: int = 0) -> str:
             f"• Caption/voice: {html.escape(scene.get('caption') or '')}",
             "",
         ])
-    return "\\n".join(lines).strip()
+    return "\n".join(lines).strip()
 
 def storyboard_ready_keyboard() -> InlineKeyboardMarkup:
     return video_v6_keyboard(

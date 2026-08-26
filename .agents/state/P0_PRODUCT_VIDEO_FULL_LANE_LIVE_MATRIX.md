@@ -42,6 +42,8 @@ Current shared-resource owner: **SubDub Auto**.
 - [x] RED: a deterministic two-scene plan exists with zero provider calls.
 - [x] RED: next visible screen is `addon`, not Profile/Content Lock/Production Bible/suggestions.
 - [x] RED: Tail order is `addon -> review -> quality -> invoice -> confirm -> status`.
+- [x] Quality Back returns to Review for every manual lane, including `multi_scene_film`.
+- [x] Invoice opens the distinct Confirm screen; only Confirm may submit.
 - [x] RED: back targets stay inside the same product and state.
 - [x] Minimal production fix.
 - [x] Focused GREEN evidence.
@@ -85,6 +87,7 @@ Video AI Real public tiers:
 
 ### SPEC-03: Source Regression Gate
 
+- [x] Frame/Storyboard live renderers use real line breaks and never expose literal backslash-n.
 - [x] Focused Product Video lane/Tail tests pass.
 - [x] Quality matrix tests pass.
 - [x] Back-stack, duplicate confirm, read-only refresh, newline status and audio/final mux source regressions pass; real artifact evidence remains live-only.
@@ -160,3 +163,9 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | 2026-08-26 | Post-rebase focused gate | Rebased cleanly onto `origin/main 371a422`; manual + quality files `38 passed, 1 warning in 483.56s` | PASS; warning only google.genai deprecation |
 | 2026-08-26 | Post-rebase compile/diff | Three runtime files compile exit 0; `git diff --check origin/main...HEAD` exit 0 | PASS; branch is exactly two commits ahead before this evidence update |
 | 2026-08-26 | Rebase after SubDub PR #889 | Rebased cleanly onto `origin/main f16fb75`; combined gate `38 passed, 1 warning in 758.99s`; compile 3 runtime files exit 0 | PASS; warning only google.genai deprecation |
+| 2026-08-26 | SPEC-03 Frame/Storyboard newline RED | Focused source selector: `1 failed, 2 warnings in 0.88s`; all 8 locked renderers reported as offenders | VALID RED; literal backslash-n reproduced |
+| 2026-08-26 | SPEC-03 Frame/Storyboard newline GREEN | Same focused selector: `1 passed, 1 warning in 0.81s`; measured escaped separator count is 0 in all 8 renderers | PASS; only separators changed |
+| 2026-08-26 | SPEC-01 Tail order RED | Dependency-complete selectors: `2 failed, 3 warnings in 760.76s`; invoice callback was `confirm|submit` and skipped the Confirm screen | VALID RED; source remained unchanged during RED |
+| 2026-08-26 | SPEC-01 Tail order GREEN | Lightweight source contract: `1 passed, 1 warning in 0.74s`; invoice now opens Confirm, Quality Back returns Review, and long-form Confirm no longer auto-submits | PASS; three callback edges changed |
+| 2026-08-26 | Final focused source gate after recovery | Manual Tail + 10-tier quality + newline/order + rendered Confirm: `42 passed, 2 warnings in 519.56s` | PASS; warnings are dependency/cache only |
+| 2026-08-26 | Final compile after recovery | `py_compile bot.py services/video_tail9.py services/product_video_owner_recovery.py`, exit 0 | PASS on final source |
