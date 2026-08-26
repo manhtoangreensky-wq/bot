@@ -181,3 +181,4 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | 2026-08-26 | PV-L01 long HTML RED/GREEN | RED `oversize HTML reached direct edit path`; final helper + long-reply gate `8 passed, 1 warning in 1044.46s` | PASS; oversize HTML converts to plain before exact chunking |
 | 2026-08-26 | PV-L01 submit callback live failure | Confirm screen was correct, but `confirm|submit` stopped at execution-preflight `query.answer()` with Telegram `ConnectTimeout`; DB remained project/job/outbox 24/20/19 | FAIL REOPENED; no admission/provider/wallet action |
 | 2026-08-26 | PV-L01 submit ack RED/GREEN | RED: best-effort ack helper absent; final Message/Tail/ack gate `8 passed, 1 warning in 2.20s` | PASS; exact execution-preflight acknowledgement is non-blocking |
+| 2026-08-26 | PV-L01 submit ack ship | PR #894 merged as `6157707`; GitHub recorded zero check-runs for that merge push | MERGED, NOT DEPLOYED; evidence-only follow-up push required |
