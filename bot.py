@@ -253593,12 +253593,42 @@ async def handle_video_dubbing_callback(
                 reply_markup=video_dubbing_asr_missing_guard_keyboard(lang),
             )
         set_video_dubbing_pending(uid, "processing", processing="1", pending_video_action=action)
-        await safe_edit_or_send(
-            query,
-            subdub_progress_text("received_file", "", lang),
-            parse_mode="HTML",
-            reply_markup=subdub_progress_keyboard("", lang),
-        )
+        try:
+            await safe_edit_or_send(
+                query,
+                subdub_progress_text("received_file", "", lang),
+                parse_mode="HTML",
+                reply_markup=subdub_progress_keyboard("", lang),
+            )
+        except Exception as exc:
+            if not _subdub_background:
+                raise
+            logger.warning(
+                "SubDub initial background progress update failed; continuing | mode=%s | error=%s",
+                mode,
+                type(exc).__name__,
+            )
+            replacement = await safe_reply_text(
+                getattr(query, "message", None),
+                subdub_progress_text("received_file", "", lang),
+                parse_mode="HTML",
+                reply_markup=subdub_progress_keyboard("", lang),
+            )
+            replacement_message_id = str(getattr(replacement, "message_id", "") or "")
+            if replacement_message_id:
+                state = set_video_dubbing_pending(
+                    uid,
+                    "processing",
+                    processing="1",
+                    pending_video_action=action,
+                    status_panel_message_id=replacement_message_id,
+                    status_panel_chat_id=str(
+                        getattr(replacement, "chat_id", "")
+                        or getattr(getattr(query, "message", None), "chat_id", "")
+                        or ""
+                    ),
+                    status_panel_replacement_sent=True,
+                )
         pipeline_job_key = subtitle_dub_pipeline_job_key(uid, getattr(query.message, "chat_id", uid), state)
         try:
             async def _run_video_dubbing_pipeline():
