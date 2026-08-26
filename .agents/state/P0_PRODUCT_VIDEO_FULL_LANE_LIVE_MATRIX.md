@@ -6,7 +6,7 @@
 - Codex task: `019efe1e-ee54-78e1-87c4-10db6e1e19e4`
 - Repository: `manhtoangreensky-wq/bot`
 - Branch: `fix/product-video-tailflow16-test-harness`
-- Current branch base: `8ccfe8f` (PR #901 changed only landing/docs/tester case files; no Product Video runtime overlap)
+- Current branch base: `085a1aaa3545911ab8cd3ac1a69ab05c18b68b66`
 - SubDub task `019fbbfe-59b7-7ee2-b298-dea276813ce4` is **out of scope**. CPU is independent; only Telegram/Chrome/provider/VPS/deploy ownership is coordinated.
 
 ## Execution Rule
@@ -193,3 +193,8 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | 2026-08-27 | PV-L01 manual-trend source RED/GREEN | RED `1 failed in 12.17s` with `trend_source={}`; minimal source fix persisted `source_type=user_topic` and aligned Flow7 with existing Flow6 rule; GREEN `1 passed in 631.07s` | PASS; no provider/wallet/runtime side effect in tests |
 | 2026-08-27 | PV-L01 protected source gate | Manual/Tail/render/quality/add-on/idempotency/owner-no-charge plus old Flow6/Flow7 source contracts: `60 passed, 2 warnings in 15.59s`; compile four runtime files `PY_COMPILE_EXIT=0`; diff-check exit 0 | SHIP READY for same-case rerun; warnings only dependency deprecations/line endings |
 | 2026-08-27 | Rebase after unrelated PR #901 | Rebased two Product Video commits cleanly onto `origin/main 8ccfe8f`; protected scope rerun with authoritative output `60 passed, 2 warnings in 14.54s`; diff-check remains 0 | PASS; PR #901 touched landing/docs/tester case files only, no Product Video runtime overlap |
+| 2026-08-27 | PR #900 deploy/runtime | PR #900 squash merge `085a1aaa3545911ab8cd3ac1a69ab05c18b68b66`; deploy run `33006092441` SUCCESS in `9m23s`; bot+owner worker same SHA; generation `d7dc8fa031f5445eb2dcf008944ba5f5`, heartbeat persisted yes/reject empty | DEPLOYED and runtime-ready |
+| 2026-08-27 | PV-L01 provider admission | Same Tail on `085a1aaa` created exactly project/job/outbox `25/21/20`, request `VID-20260826-5F299E`, and exactly two ShopAIKey task ids; charged Xu 0 | Manual source blocker fixed; provider admission PASS, artifact still pending |
+| 2026-08-27 | PV-L01 terminal provider failure loop | Both scene tasks returned `FAILURE` with `provider_failed_result_url_invalid`; no clip/result URL; job remained processing/queued and owner worker raised `real_video_renderer_unavailable`; attempts reached `79` despite max `3`; owner worker stopped separately, bot remained active, charged Xu 0 | VALID LIVE RED; no new submit/job and no wallet mutation |
+| 2026-08-27 | Terminal claim-loop RED/GREEN | Exact DB integration RED: ledger terminalized only after current failed summary, but claim left DB `processing`; minimal claim transaction now persists job/project `failed_no_charge`, outbox `terminal_failed`, clears leases and preserves charged Xu 0; focused GREEN `1 passed in 8.78s` | PASS; no fallback/resubmit/provider code added |
+| 2026-08-27 | Terminal claim-loop protected gate | Existing-task poll-only recovery, active/pending scene truth, all-scenes-exhausted terminal, outbox watchdog, lease, cancellation and no-resubmit coverage: `10 passed, 1 warning in 11.39s`; compile `services/remote_worker_api.py services/video_project_queue.py remote_worker.py bot.py` exit 0; diff-check exit 0 | SHIP READY; owner worker remains intentionally stopped until deploy |
