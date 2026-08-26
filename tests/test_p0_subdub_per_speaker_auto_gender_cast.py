@@ -5219,6 +5219,203 @@ def test_task7_exact_known_quote_still_persists_consumed_auto_receipt(
 
 
 @pytest.mark.parametrize(
+    ("mode", "active_flow", "target_language", "translate_requested"),
+    (
+        ("dub", "dub_audio", "original", False),
+        ("subtitle_plus_dub", "subtitle_plus_dub", "English", True),
+    ),
+)
+def test_task7_admin_exact_price_reaches_shared_two_speaker_core_in_both_dub_lanes(
+    monkeypatch,
+    tmp_path,
+    mode,
+    active_flow,
+    target_language,
+    translate_requested,
+):
+    workspace = tmp_path / mode
+    state, prepared = _task7_pause_fixture(
+        workspace,
+        job_id=f"task7-{mode}-shared-price",
+        job_key=f"task7-{mode}-shared-price-key",
+    )
+    lane_fields = {
+        "mode": mode,
+        "process_type": mode,
+        "video_processing_mode": mode,
+        "requested_mode": mode,
+        "active_flow": active_flow,
+        "target_language": target_language,
+        "translate_requested": translate_requested,
+        "dub_text_source": "translated" if translate_requested else "source",
+        "subdub_final_confirmed": True,
+        "subdub_confirmation_source": "videodub|final",
+    }
+    state.update(lane_fields)
+    prepared["state"].update(lane_fields)
+    actual_words, actual_auto_xu, actual_subtitle_xu = (
+        bot._subdub_auto_actual_components(
+            prepared,
+            state,
+            "hello world",
+        )
+    )
+    state.update({
+        "auto_quote_exact_known": False,
+        "auto_quote_billable_words": None,
+        "auto_quote_total_xu": None,
+    })
+    prepared["state"].update(state)
+    persisted = []
+    monkeypatch.setattr(bot, "SUBDUB_AUTO_SPEAKER_ACTIVATION_ENABLED", True)
+    monkeypatch.setattr(bot, "subdub_auto_provider_capacity_ready", lambda: True)
+    monkeypatch.setattr(
+        bot,
+        "subtitle_dub_workspace_path_safety",
+        lambda _workspace: {"allowed": True},
+    )
+
+    def capture_update(job_key, **fields):
+        return {
+            "feature": "subtitle_dub",
+            "job_key": job_key,
+            "internal_job_id": state["_pipeline_job_id"],
+            "job_id": state["_pipeline_job_id"],
+            "user_id": state["_pipeline_owner_user_id"],
+            "chat_id": state["_pipeline_chat_id"],
+            **fields,
+        }
+
+    def capture_persist(job_key, snapshot=None, *, reason=""):
+        persisted.append((job_key, copy.deepcopy(snapshot or {}), reason))
+        return True
+
+    monkeypatch.setattr(bot, "update_subtitle_dub_pipeline_job", capture_update)
+    monkeypatch.setattr(
+        bot,
+        "persist_subtitle_dub_pipeline_job_snapshot",
+        capture_persist,
+    )
+
+    result = asyncio.run(bot._subdub_auto_post_prepare_gate(prepared, state))
+
+    assert result == {"continue": True}
+    assert actual_words == 2
+    assert actual_auto_xu == 1
+    assert actual_subtitle_xu >= 0
+    expected = {
+        "auto_exact_actual_billable_words": actual_words,
+        "auto_exact_actual_auto_xu": actual_auto_xu,
+        "auto_exact_actual_subtitle_xu": actual_subtitle_xu,
+        "auto_exact_actual_total_xu": actual_auto_xu + actual_subtitle_xu,
+        "auto_exact_receipt_confirmed": True,
+    }
+    assert {key: state.get(key) for key in expected} == expected
+    assert {key: prepared["state"].get(key) for key in expected} == expected
+    assert prepared["state"]["auto_exact_receipt"]["mode"] == mode
+    assert prepared["state"]["auto_exact_receipt"]["actual_auto_xu"] > 0
+    exact_invoice = bot.video_dubbing_invoice_breakdown(prepared["state"])
+    assert exact_invoice["voice_xu"] == actual_auto_xu
+    assert exact_invoice["translation_xu"] == actual_subtitle_xu
+    assert exact_invoice["total_xu"] == actual_auto_xu + actual_subtitle_xu
+    exact_text = bot.video_dubbing_confirm_text(prepared["state"], "vi")
+    assert f"<b>{actual_auto_xu} Xu</b>" in exact_text
+    assert f"<b>{actual_auto_xu + actual_subtitle_xu} Xu</b>" in exact_text
+    assert persisted[-1][2] == "auto_exact_initial_confirmation_claimed"
+
+
+@pytest.mark.parametrize(
+    ("mode", "active_flow"),
+    (
+        ("dub", "dub_audio"),
+        ("subtitle_plus_dub", "subtitle_plus_dub"),
+    ),
+)
+def test_task7_unknown_auto_word_count_never_renders_dubbing_as_zero_xu(
+    monkeypatch,
+    mode,
+    active_flow,
+):
+    state = {
+        "mode": mode,
+        "process_type": mode,
+        "video_processing_mode": mode,
+        "active_flow": active_flow,
+        "source_file_id": "source",
+        "source_mime_type": "video/mp4",
+        "target_language": "English",
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "auto_quote_exact_known": False,
+        "auto_quote_billable_words": None,
+        "auto_quote_auto_xu": None,
+        "auto_quote_total_xu": None,
+        "billing_chars": 1_627,
+    }
+    monkeypatch.setattr(bot, "SUBDUB_AUTO_SPEAKER_ACTIVATION_ENABLED", True)
+    monkeypatch.setattr(bot, "subdub_auto_provider_capacity_ready", lambda: True)
+
+    invoice = bot.video_dubbing_invoice_breakdown(state)
+    text = bot.video_dubbing_confirm_text(state, "vi")
+
+    assert invoice["auto_billable_words"] is None
+    assert invoice["voice_xu"] is None
+    assert "0.5 Xu mỗi từ tính phí" in text
+    assert "Tổng:" in text
+    assert "<b>0 Xu</b>" not in text
+
+
+@pytest.mark.parametrize(
+    ("mode", "subtitle_xu", "total_xu"),
+    (
+        ("dub", 0, 205),
+        ("subtitle_plus_dub", 161, 366),
+    ),
+)
+def test_task7_two_speaker_delivery_receipt_names_type_and_component_prices(
+    mode,
+    subtitle_xu,
+    total_xu,
+):
+    state = {
+        "mode": mode,
+        "requested_mode": mode,
+        "terminal_state": "delivered",
+        "target_language": "English",
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "source_file_name": "test 2 giọng.mp4",
+        "auto_exact_actual_auto_xu": 205,
+        "auto_exact_actual_subtitle_xu": subtitle_xu,
+        "auto_exact_actual_total_xu": total_xu,
+    }
+    result = {
+        **state,
+        "terminal_public_outcome_type": "success",
+        "final_mp4_delivered": True,
+        "video_delivered": True,
+        "video_delivery_message_id": f"two-speaker-{mode}",
+        "canonical_final_artifact_duration": 119.3,
+        "duration_coverage_ok": True,
+        "public_job_id": f"TWO-{mode}",
+        "final_price_xu": total_xu,
+        "charged_xu": 0,
+        "account_balance_xu": 200,
+    }
+
+    text = bot.video_dubbing_receipt_text(state, result, "vi")
+
+    assert "Loại lồng tiếng: <b>Tự động 2 giọng</b>" in text
+    assert "Giá lồng tiếng: <b>205 Xu</b>" in text
+    if mode == "subtitle_plus_dub":
+        assert "Giá phụ đề: <b>161 Xu</b>" in text
+    else:
+        assert "Giá phụ đề:" not in text
+    assert f"Giá: <b>{total_xu} Xu</b>" in text
+    assert "Đã trừ: <b>0 Xu</b>" in text
+
+
+@pytest.mark.parametrize(
     "source_cue_id",
     ("", "cue-0001-sidecar-stable"),
     ids=("native-id", "serialized-id-drift"),
