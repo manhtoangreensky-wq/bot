@@ -42,14 +42,20 @@ def test_audio_mix_keep_original_persists_percentages():
     assert "150%" in lines
 
 
-def test_audio_mix_keyboard_uses_split_numeric_layers_without_fixed_grid():
+def test_audio_mix_keyboard_restores_presets_and_keeps_numeric_layers():
     keyboard = bot.subdub_audio_mix_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB})
     labels = [button.text for row in keyboard.inline_keyboard for button in row]
+    callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
     public = " ".join(labels).lower()
 
-    assert labels == ["🔊 Âm thanh gốc", "🎙 Giọng lồng tiếng", "⬅️ Quay lại"]
-    assert "Gốc 20%" not in labels
-    assert "Lồng 80%" not in labels
+    assert [button.text for button in keyboard.inline_keyboard[0]] == [
+        "🔊 Âm thanh gốc",
+        "🎙 Giọng lồng tiếng",
+    ]
+    for value in (20, 40, 60, 80, 100):
+        assert f"videodub|audio_original_volume|{value}" in callbacks
+    for value in (80, 100, 120, 150, 200):
+        assert f"videodub|audio_dub_volume|{value}" in callbacks
     assert all(len(label) <= 32 for label in labels)
     assert not any(term in public for term in ("provider", "api", "handler", "callback", "debug", "asr", "tts", "mux", "ffmpeg"))
 
@@ -115,8 +121,10 @@ def test_render_video_applies_volume_mix_when_enabled(monkeypatch):
 
     assert output == b"mp4"
     assert "ffmpeg_video_render_basic" in detail
-    assert "[0:a]volume=0.300[original]" in rendered
-    assert "[1:a]volume=1.500[dub]" in rendered
+    assert "[0:a]volume=0.300" in rendered
+    assert "[1:a]volume=1.500" in rendered
+    assert "[original]" in rendered
+    assert "[dub]" in rendered
     assert "[original][dub]amix" in rendered
     assert "-map 0:v:0 -map 1:a:0" not in rendered
 
@@ -145,6 +153,6 @@ def test_dynamic_volume_ui_spec_is_enabled_and_numeric():
 
     assert spec["task"] == "P0.19N SubDub Original/Dub Volume Input UI"
     assert spec["enabled"] is True
-    assert spec["public_fixed_percentage_grid"] is False
+    assert spec["public_fixed_percentage_grid"] is True
     assert spec["original_audio"]["numeric_input_max"] == 100
     assert spec["dub_voice"]["numeric_input_max"] == 200

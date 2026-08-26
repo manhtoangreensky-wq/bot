@@ -2457,27 +2457,36 @@ def test_protected_two_speaker_code_has_no_multi_lane_seams():
     ),
     ids=("male-male", "male-female", "female-female"),
 )
-def test_two_speaker_independent_fallback_supports_all_gender_pairs(
+def test_two_speaker_anchor_classifies_each_label_without_forced_pair(
     evidence,
     expected,
 ):
-    auto_speaker = importlib.import_module(
-        "services.subdub_blackboxes.auto_speaker"
-    )
-    result = auto_speaker._independent_two_speaker_classifications(evidence)
+    speaker_cast = _speaker_cast_module()
+    result = {}
+    for speaker_id, items in evidence.items():
+        register, _median, confidence, sample_count = (
+            speaker_cast._stable_register_evidence(
+                [item[0] for item in items],
+                [item[1] for item in items],
+            )
+        )
+        result[speaker_id] = {
+            "voice_register": register,
+            "confidence": confidence,
+            "sample_count": sample_count,
+        }
 
     assert {
         speaker_id: item["voice_register"]
         for speaker_id, item in result.items()
     } == expected
     assert all(
-        item["confidence"] >= 0.75
-        and item["reason"] == "classified_independent_two_speaker"
+        item["confidence"] >= 0.75 and item["sample_count"] >= 2
         for item in result.values()
     )
 
 
-def test_two_speaker_independent_fallback_rejects_ambiguous_or_non_pair_evidence():
+def test_two_speaker_anchor_has_no_relative_or_forced_pair_fallback():
     auto_speaker = importlib.import_module(
         "services.subdub_blackboxes.auto_speaker"
     )
@@ -2491,63 +2500,57 @@ def test_two_speaker_independent_fallback_rejects_ambiguous_or_non_pair_evidence
         ],
         "speaker_1": [(118.0, 0.90), (122.0, 0.88)],
     }
-    three = {
-        **ambiguous,
-        "speaker_2": [(180.0, 0.92), (182.0, 0.90)],
-    }
+    source = inspect.getsource(auto_speaker)
 
-    for evidence in (ambiguous, three):
-        with pytest.raises(
-            speaker_cast.AutoCastManualRequired,
-            match="^AUTO_CAST_MANUAL_REQUIRED$",
-        ):
-            auto_speaker._independent_two_speaker_classifications(evidence)
+    assert "_independent_two_speaker_classifications" not in source
+    assert "_collect_two_speaker_pitch_evidence" not in source
+    assert "_classify_two_speaker_registers" not in source
+    with pytest.raises(
+        speaker_cast.AutoCastManualRequired,
+        match="^AUTO_CAST_MANUAL_REQUIRED$",
+    ):
+        speaker_cast._stable_register_evidence(
+            [item[0] for item in ambiguous["speaker_0"]],
+            [item[1] for item in ambiguous["speaker_0"]],
+        )
 
 
-def test_protected_two_speaker_classifier_uses_independent_fallback_only_after_absolute_failure(
+def test_protected_two_speaker_anchor_delegates_once_to_central_classifier(
     monkeypatch,
 ):
     auto_speaker = importlib.import_module(
         "services.subdub_blackboxes.auto_speaker"
     )
     speaker_cast = _speaker_cast_module()
-    calls = {"absolute": 0, "independent": 0}
+    calls = []
     ranges = {
         "speaker_0": [(0.0, 2.0)],
         "speaker_1": [(2.0, 4.0)],
     }
-    evidence = {
-        "speaker_0": [(170.0, 0.82), (180.0, 0.80)],
-        "speaker_1": [(118.0, 0.90), (122.0, 0.88)],
-    }
 
-    def fail_absolute(*_args, **_kwargs):
-        calls["absolute"] += 1
-        raise speaker_cast.AutoCastManualRequired()
-
-    def collect_independent(*_args, **_kwargs):
-        calls["independent"] += 1
-        return evidence
+    def classify(path, received_ranges, **kwargs):
+        calls.append((path, received_ranges, kwargs))
+        return {
+            "speaker_0": {"voice_register": "high"},
+            "speaker_1": {"voice_register": "low"},
+        }
 
     monkeypatch.setattr(
         speaker_cast,
         "classify_speaker_registers",
-        fail_absolute,
-    )
-    monkeypatch.setattr(
-        auto_speaker,
-        "_collect_two_speaker_pitch_evidence",
-        collect_independent,
+        classify,
     )
 
-    result = auto_speaker._classify_two_speaker_registers(
-        "fixture.pcm",
-        ranges,
-        deadline_monotonic=time.monotonic() + 10.0,
-        stop_requested=lambda: False,
+    result = asyncio.run(
+        auto_speaker._classify_off_event_loop(
+            Path("fixture.pcm"),
+            ranges,
+        )
     )
 
-    assert calls == {"absolute": 1, "independent": 1}
+    assert len(calls) == 1
+    assert calls[0][0] == "fixture.pcm"
+    assert calls[0][1] == ranges
     assert result["speaker_0"]["voice_register"] == "high"
     assert result["speaker_1"]["voice_register"] == "low"
 
