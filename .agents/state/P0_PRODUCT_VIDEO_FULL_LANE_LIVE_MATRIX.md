@@ -26,11 +26,11 @@ If a live row fails, reopen only that spec, add a RED reproducer from the real f
 
 - [x] Source READ and contract work allowed.
 - [x] Local Python/FFmpeg available to Product Video.
-- [x] LIVE/CHROME available to Product Video.
-- [x] VPS/DEPLOY available to Product Video.
+- [ ] LIVE/CHROME available to Product Video; currently owned by SubDub for its ordered correction/live loop.
+- [ ] VPS/DEPLOY available to Product Video; currently owned by SubDub for the same loop.
 - [x] No wallet, PayOS, ENV, secret, destructive DB, onboarding, PWA, or SubDub changes allowed.
 
-Current shared-resource owner: **Product Video**.
+Current shared-resource owner: **SubDub**. Product Video continues one CPU-local source batch at a time and does not use Telegram/browser/provider/VPS/deploy until exact release.
 
 ## Ordered Specs
 
@@ -184,3 +184,8 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | 2026-08-26 | PV-L01 submit ack ship | PR #894 merged as `6157707`; GitHub recorded zero check-runs for that merge push | MERGED, NOT DEPLOYED; evidence-only follow-up push required |
 | 2026-08-26 | PV-L01 submit ack live traceback on `fd26e30` | Best-effort helper was accidentally decorated with handler guard; submit raised missing `context`, DB remained project/job/outbox 24/20/19 | FAIL REOPENED; no admission/provider/wallet action |
 | 2026-08-26 | PV-L01 ack decorator RED/GREEN | Source RED proved guard wrapped helper instead of handler; final helper/Tail gate `9 passed, 1 warning in 1.92s` | PASS; decorator restored to `handle_video_tail_callback` only |
+| 2026-08-27 | Post-SubDub-main Product Video gate attempt | Bundled Python stopped at collection after `1577.39s`: `ModuleNotFoundError: telegram` | ENV INVALID; zero test assertions accepted, source unchanged |
+| 2026-08-27 | Protected submit baseline classification | Exact selector failed on both Product Video SHA `21a8672` and shared main `3fc190c` with missing `get_user_language` in the AST-extracted test namespace | TEST HARNESS BASELINE; production callback path was not the failure |
+| 2026-08-27 | Test-harness correction GREEN | Exact selector `1 passed in 0.71s`; full PV-L01/source-proof scope `57 passed, 2 warnings in 14.09s` | PASS; only test namespace dependencies added, no production byte changed |
+| 2026-08-27 | Post-main compile/diff | `py_compile bot.py services/video_tail9.py services/product_video_owner_recovery.py`: `PY_COMPILE_EXIT=0`; `git diff --check`: exit 0 (LF/CRLF warning only) | PASS on shared main base `3fc190c` |
+| 2026-08-27 | Rebase after SubDub PR #899 | Rebased test-only evidence commit cleanly onto shared main `397ca576`; same focused scope `57 passed, 2 warnings in 15.63s` | PASS; PR #900 remains draft and does not merge/deploy during SubDub live ownership |
