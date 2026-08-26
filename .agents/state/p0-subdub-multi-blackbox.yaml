@@ -3,7 +3,7 @@ product: SubDub
 owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
-branch: fix/p0-subdub-two-speaker-exact-price-delivery
+branch: fix/p0-subdub-two-speaker-relative-cast
 phase: SPEC_04_FAILURE_LOOP_BUILD
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
@@ -131,6 +131,42 @@ ordered_specs:
       delivery_attempted: false
       charged_xu: 0
       wallet_rows_after: transactions=0; credit_events=10
+    live_attempt_2:
+      public_job: 7AF36C9AC2
+      internal_job: 7af36c9ac27a1da6d248
+      runtime_sha: 176f3c29af057b4ada53aacb90e50b1b0b4a117c
+      source_sha256: a89b16b896d4efa8157f7de5cea47695b5edf7d5595c4fc03ad62346cdfa0292
+      processing_source_sha256: 40d47d2de737114e547e7b19ac347f4e21418d4ad400aafc0ca8b7ca91b9176b
+      mode: subtitle_plus_dub
+      target_language: English
+      lane: Tự động 2 giọng
+      provider_labels: 2
+      cue_counts: speaker_0=9; speaker_1=16; total=25
+      exact_billable_words: 328
+      exact_dubbing_xu: 164
+      exact_subtitle_xu: 147
+      exact_total_xu: 311
+      charged_xu: 0
+      terminal: failed_no_charge
+      blocker: AUTO_CAST_MANUAL_REQUIRED after exact pricing succeeded
+    live_attempt_2_root_cause:
+      - absolute speaker_0 evidence tied between low and high pitch registers
+      - speaker_0 frequencies were 166.667, 141.283, 182.189, and 141.857 Hz
+      - speaker_1 had stable low evidence with median 119.850 Hz
+      - shared fail-closed classifier correctly rejected the tie but left the exact two-speaker product unusable
+      - historical delivered job had a different ASR sidecar and processing-source hash despite the same original fixture hash
+    relative_two_speaker_fix:
+      - absolute classifier remains first and unchanged
+      - fallback is owned only by auto_speaker, never by the multi-speaker adapter
+      - fallback requires exactly two labels, at least two confident samples per label, at least 20 Hz median gap, and at least 1.18 median ratio
+      - close evidence or three-plus labels still returns AUTO_CAST_MANUAL_REQUIRED
+    relative_two_speaker_evidence:
+      - RED terminal: 3 failed in 101.02s
+      - focused GREEN terminal: 3 passed in 6.16s
+      - exact failed-job PCM plus sidecar now yields speaker_0 high at confidence 0.788270 and speaker_1 low at confidence 0.881009
+      - protected batch: 17 passed in 6.89s
+      - py_compile bot.py and auto_speaker.py: exit 0
+      - git diff-check: exit 0
     failure_root_cause:
       - post-prepare gate updated the outer state but copied the prepared mapping
       - shared core preferred stale prepared[state] and dropped exact receipt fields before pricing
@@ -173,4 +209,4 @@ ordered_specs:
       - audit every acceptance line as proven or unresolved
       - mark the goal complete only when no required line remains unresolved
 
-current_next_action: wait for CPU release; run one protected batch and compile; ship one correction PR; live combo and standalone two-speaker; continue failure loop until both pass
+current_next_action: ship isolated relative two-speaker correction PR; live combo and standalone two-speaker; continue failure loop until both pass

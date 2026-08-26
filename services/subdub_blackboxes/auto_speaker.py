@@ -22,6 +22,9 @@ from services import subtitle_dub_product_pipeline
 
 AUTO_SPEAKER_PREFLIGHT_READY = "AUTO_SPEAKER_PREFLIGHT_READY"
 
+_RELATIVE_TWO_SPEAKER_MIN_HZ_GAP = 20.0
+_RELATIVE_TWO_SPEAKER_MIN_RATIO = 1.18
+
 _SUBTITLE_SCRIPT_CHARSET = {
     "japanese": "3042",
     "chinese": "4e2d",
@@ -276,6 +279,181 @@ async def _drain_worker(worker: asyncio.Task) -> None:
             pass
 
 
+def _relative_two_speaker_classifications(
+    evidence_by_speaker: Mapping[str, object],
+) -> dict[str, dict]:
+    """Resolve a clearly separated two-speaker pair by relative pitch only."""
+
+    if not isinstance(evidence_by_speaker, Mapping) or len(evidence_by_speaker) != 2:
+        raise speaker_cast.AutoCastManualRequired()
+    summaries: list[tuple[str, float, float, int]] = []
+    for speaker_id, raw_evidence in evidence_by_speaker.items():
+        if type(speaker_id) is not str or not speaker_id.strip():
+            raise speaker_cast.AutoCastManualRequired()
+        if not isinstance(raw_evidence, (list, tuple)):
+            raise speaker_cast.AutoCastManualRequired()
+        evidence: list[tuple[float, float]] = []
+        for raw_item in raw_evidence:
+            if not isinstance(raw_item, (list, tuple)) or len(raw_item) != 2:
+                raise speaker_cast.AutoCastManualRequired()
+            try:
+                frequency = float(raw_item[0])
+                confidence = float(raw_item[1])
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise speaker_cast.AutoCastManualRequired() from exc
+            if (
+                not math.isfinite(frequency)
+                or frequency <= 0.0
+                or not math.isfinite(confidence)
+                or confidence < speaker_cast.MIN_REGISTER_CONFIDENCE
+                or confidence > 1.0
+                or speaker_cast.pitch_register(frequency, confidence=confidence)
+                not in {"low", "high"}
+            ):
+                raise speaker_cast.AutoCastManualRequired()
+            evidence.append((frequency, confidence))
+        if len(evidence) < 2:
+            raise speaker_cast.AutoCastManualRequired()
+        median_hz = speaker_cast._bounded_median(
+            [item[0] for item in evidence]
+        )
+        median_confidence = speaker_cast._bounded_median(
+            [item[1] for item in evidence]
+        )
+        summaries.append(
+            (speaker_id, median_hz, median_confidence, len(evidence))
+        )
+
+    summaries.sort(key=lambda item: item[1])
+    lower, higher = summaries
+    hz_gap = higher[1] - lower[1]
+    pitch_ratio = higher[1] / lower[1] if lower[1] > 0.0 else 0.0
+    if (
+        hz_gap < _RELATIVE_TWO_SPEAKER_MIN_HZ_GAP
+        or pitch_ratio < _RELATIVE_TWO_SPEAKER_MIN_RATIO
+    ):
+        raise speaker_cast.AutoCastManualRequired()
+
+    results: dict[str, dict] = {}
+    for register, summary in (("low", lower), ("high", higher)):
+        speaker_id, median_hz, confidence, sample_windows = summary
+        voiced_seconds = min(
+            speaker_cast.MAX_SPEAKER_VOICED_SECONDS,
+            sample_windows * speaker_cast._PCM_WINDOW_SECONDS,
+        )
+        results[speaker_id] = {
+            "speaker_id": speaker_id,
+            "voice_register": register,
+            "confidence": round(float(confidence), 6),
+            "voiced_seconds": round(float(voiced_seconds), 3),
+            "sample_count": int(sample_windows * speaker_cast.PCM_WINDOW_SAMPLES),
+            "reason": "classified_relative_two_speaker",
+        }
+    return results
+
+
+def _collect_two_speaker_pitch_evidence(
+    pcm_path: str,
+    ranges_by_speaker: dict[str, list[tuple[float, float]]],
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+) -> dict[str, list[tuple[float, float]]]:
+    labels = speaker_cast.ordered_auto_speaker_labels(
+        {"speaker_id": speaker_id} for speaker_id in ranges_by_speaker
+    )
+    if len(labels) != 2 or len(labels) != len(ranges_by_speaker):
+        raise speaker_cast.AutoCastManualRequired()
+    maximum_accepted_windows = int(
+        speaker_cast.MAX_SPEAKER_VOICED_SECONDS
+        / speaker_cast._PCM_WINDOW_SECONDS
+    )
+    maximum_job_windows = int(
+        speaker_cast.MAX_JOB_SAMPLE_SECONDS
+        / speaker_cast._PCM_WINDOW_SECONDS
+    )
+    candidate_windows_per_speaker = max(
+        maximum_accepted_windows,
+        maximum_job_windows // len(labels),
+    )
+    sampled_job_seconds = 0.0
+    collected: dict[str, list[tuple[float, float]]] = {}
+    try:
+        with open(str(pcm_path or ""), "rb") as handle:
+            for speaker_id in labels:
+                speaker_cast._ensure_classifier_active(
+                    deadline_monotonic,
+                    stop_requested,
+                )
+                offsets = speaker_cast._speaker_window_offsets(
+                    ranges_by_speaker.get(speaker_id),
+                    deadline_monotonic=deadline_monotonic,
+                    stop_requested=stop_requested,
+                    max_windows=candidate_windows_per_speaker,
+                )
+                evidence: list[tuple[float, float]] = []
+                for offset in offsets:
+                    sampled_job_seconds += speaker_cast._PCM_WINDOW_SECONDS
+                    if (
+                        sampled_job_seconds
+                        > speaker_cast.MAX_JOB_SAMPLE_SECONDS + 1e-12
+                    ):
+                        raise speaker_cast.AutoCastManualRequired()
+                    speaker_cast._ensure_classifier_active(
+                        deadline_monotonic,
+                        stop_requested,
+                    )
+                    handle.seek(offset)
+                    raw = handle.read(speaker_cast.PCM_WINDOW_BYTES)
+                    if len(raw) != speaker_cast.PCM_WINDOW_BYTES:
+                        raise speaker_cast.AutoCastManualRequired()
+                    estimate = speaker_cast._estimate_window_pitch(
+                        raw,
+                        deadline_monotonic=deadline_monotonic,
+                        stop_requested=stop_requested,
+                    )
+                    if estimate is None:
+                        continue
+                    evidence.append((float(estimate[0]), float(estimate[1])))
+                    if len(evidence) >= maximum_accepted_windows:
+                        break
+                collected[speaker_id] = evidence
+    except speaker_cast.AutoCastManualRequired:
+        raise
+    except (OSError, ValueError, TypeError, OverflowError, MemoryError) as exc:
+        raise speaker_cast.AutoCastManualRequired() from exc
+    return collected
+
+
+def _classify_two_speaker_registers(
+    pcm_path: str,
+    ranges_by_speaker: dict[str, list[tuple[float, float]]],
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+) -> dict[str, dict]:
+    try:
+        return speaker_cast.classify_speaker_registers(
+            pcm_path,
+            ranges_by_speaker,
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+        )
+    except speaker_cast.AutoCastManualRequired as absolute_failure:
+        if len(ranges_by_speaker) != 2:
+            raise
+        try:
+            evidence = _collect_two_speaker_pitch_evidence(
+                pcm_path,
+                ranges_by_speaker,
+                deadline_monotonic=deadline_monotonic,
+                stop_requested=stop_requested,
+            )
+            return _relative_two_speaker_classifications(evidence)
+        except speaker_cast.AutoCastManualRequired:
+            raise absolute_failure
+
+
 async def _classify_off_event_loop(
     pcm_path: Path,
     ranges_by_speaker: dict[str, list[tuple[float, float]]],
@@ -287,7 +465,7 @@ async def _classify_off_event_loop(
     stop_event = threading.Event()
     worker = asyncio.create_task(
         asyncio.to_thread(
-            speaker_cast.classify_speaker_registers,
+            _classify_two_speaker_registers,
             str(pcm_path),
             ranges_by_speaker,
             deadline_monotonic=classifier_deadline,
