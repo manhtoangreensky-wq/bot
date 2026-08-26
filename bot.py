@@ -96734,11 +96734,17 @@ def video_manual_lane_shared_tail_contract(
         "concept": text,
         "source": "manual",
     }
+    manual_trend_source = (
+        {"source_type": "user_topic", "title": text, "summary": text}
+        if product == "video_trend"
+        else {}
+    )
     source_fields = {
         "content_source": "manual",
         "manual_content": text,
         "input_collected": True,
         "ai_input_type": mode,
+        "trend_source": deepcopy(manual_trend_source),
         "source_media_ref": refs[0] if refs else "",
         "source_media_refs": refs,
         "source_asset_items": items,
@@ -96768,6 +96774,7 @@ def video_manual_lane_shared_tail_contract(
         "context": text,
         "content_choice": deepcopy(choice),
         "selected_suggestion": deepcopy(choice),
+        "trend_source": deepcopy(manual_trend_source),
         "scene_count": scene_count,
         "selected_scene_count": scene_count,
         "scene_count_confirmed": True,
@@ -96869,6 +96876,12 @@ def video_manual_lane_shared_tail_contract(
         "plan_approved": True,
     })
     state = video_flow6.sync_scene_state(content_contract)
+    if manual_trend_source:
+        state["trend_source"] = deepcopy(manual_trend_source)
+        state["source_fields"] = {
+            **dict(state.get("source_fields") or {}),
+            "trend_source": deepcopy(manual_trend_source),
+        }
 
     tail = video_tail9.new_state(
         product_type=product,

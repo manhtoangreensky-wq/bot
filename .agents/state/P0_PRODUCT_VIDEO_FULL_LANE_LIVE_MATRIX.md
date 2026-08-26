@@ -5,10 +5,9 @@
 - Product: **Product Video** only
 - Codex task: `019efe1e-ee54-78e1-87c4-10db6e1e19e4`
 - Repository: `manhtoangreensky-wq/bot`
-- Branch: `fix/product-video-post-deploy-finalizer-recovery`
-- Contract HEAD: `f4c022a0ee72b67bf28ea0766fed880bd8419b36`
-- Contract main: `cd4acb8c10ad3b82f50f13a6faa114c30791fe51`
-- SubDub task `019fbbfe-59b7-7ee2-b298-dea276813ce4` is **out of scope**. It only owns shared CPU/LIVE/CHROME/VPS resources until exact release markers.
+- Branch: `fix/product-video-tailflow16-test-harness`
+- Current branch base: `8ccfe8f` (PR #901 changed only landing/docs/tester case files; no Product Video runtime overlap)
+- SubDub task `019fbbfe-59b7-7ee2-b298-dea276813ce4` is **out of scope**. CPU is independent; only Telegram/Chrome/provider/VPS/deploy ownership is coordinated.
 
 ## Execution Rule
 
@@ -26,11 +25,11 @@ If a live row fails, reopen only that spec, add a RED reproducer from the real f
 
 - [x] Source READ and contract work allowed.
 - [x] Local Python/FFmpeg available to Product Video.
-- [x] LIVE/CHROME available to Product Video.
-- [x] VPS/DEPLOY available to Product Video.
+- [x] LIVE/CHROME available to Product Video for the current PV-L01 failure loop.
+- [x] VPS/DEPLOY available to Product Video for the current PV-L01 failure loop.
 - [x] No wallet, PayOS, ENV, secret, destructive DB, onboarding, PWA, or SubDub changes allowed.
 
-Current shared-resource owner: **Product Video**.
+Current shared-resource owner: **Product Video**. SubDub is static until exact Product Video release markers.
 
 ## Ordered Specs
 
@@ -184,3 +183,13 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | 2026-08-26 | PV-L01 submit ack ship | PR #894 merged as `6157707`; GitHub recorded zero check-runs for that merge push | MERGED, NOT DEPLOYED; evidence-only follow-up push required |
 | 2026-08-26 | PV-L01 submit ack live traceback on `fd26e30` | Best-effort helper was accidentally decorated with handler guard; submit raised missing `context`, DB remained project/job/outbox 24/20/19 | FAIL REOPENED; no admission/provider/wallet action |
 | 2026-08-26 | PV-L01 ack decorator RED/GREEN | Source RED proved guard wrapped helper instead of handler; final helper/Tail gate `9 passed, 1 warning in 1.92s` | PASS; decorator restored to `handle_video_tail_callback` only |
+| 2026-08-27 | Post-SubDub-main Product Video gate attempt | Bundled Python stopped at collection after `1577.39s`: `ModuleNotFoundError: telegram` | ENV INVALID; zero test assertions accepted, source unchanged |
+| 2026-08-27 | Protected submit baseline classification | Exact selector failed on both Product Video SHA `21a8672` and shared main `3fc190c` with missing `get_user_language` in the AST-extracted test namespace | TEST HARNESS BASELINE; production callback path was not the failure |
+| 2026-08-27 | Test-harness correction GREEN | Exact selector `1 passed in 0.71s`; full PV-L01/source-proof scope `57 passed, 2 warnings in 14.09s` | PASS; only test namespace dependencies added, no production byte changed |
+| 2026-08-27 | Post-main compile/diff | `py_compile bot.py services/video_tail9.py services/product_video_owner_recovery.py`: `PY_COMPILE_EXIT=0`; `git diff --check`: exit 0 (LF/CRLF warning only) | PASS on shared main base `3fc190c` |
+| 2026-08-27 | Rebase after SubDub PR #899 | Rebased test-only evidence commit cleanly onto shared main `397ca576`; same focused scope `57 passed, 2 warnings in 15.63s` | PASS; PR #900 remains draft and does not merge/deploy during SubDub live ownership |
+| 2026-08-27 | PV-L01 fresh Tail on runtime `397ca576` | Manual text entered Add-on directly; subtitle auto/source-language persisted; transition coverage `1/1`; Review showed 2 scenes/16s; Quality selected `Nhanh gọn 80 Xu/scene`; Invoice/Confirm showed Owner no-charge | Tail flow PASS through the one-and-only final submit click |
+| 2026-08-27 | PV-L01 live submit RED | Status terminal-before-admission: `trend_source_or_sample_missing`, job code `Chưa tạo`, progress 0%, scenes 0/2, no provider action | VALID LIVE RED; DB remained project/job/outbox `24/20/19`, owner transactions `0`, credit events `1`, balance/spent `200/0` |
+| 2026-08-27 | PV-L01 manual-trend source RED/GREEN | RED `1 failed in 12.17s` with `trend_source={}`; minimal source fix persisted `source_type=user_topic` and aligned Flow7 with existing Flow6 rule; GREEN `1 passed in 631.07s` | PASS; no provider/wallet/runtime side effect in tests |
+| 2026-08-27 | PV-L01 protected source gate | Manual/Tail/render/quality/add-on/idempotency/owner-no-charge plus old Flow6/Flow7 source contracts: `60 passed, 2 warnings in 15.59s`; compile four runtime files `PY_COMPILE_EXIT=0`; diff-check exit 0 | SHIP READY for same-case rerun; warnings only dependency deprecations/line endings |
+| 2026-08-27 | Rebase after unrelated PR #901 | Rebased two Product Video commits cleanly onto `origin/main 8ccfe8f`; protected scope rerun with authoritative output `60 passed, 2 warnings in 14.54s`; diff-check remains 0 | PASS; PR #901 touched landing/docs/tester case files only, no Product Video runtime overlap |

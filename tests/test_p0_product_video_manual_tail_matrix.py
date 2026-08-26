@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 import bot
-from services import video_tail9
+from services import video_flow6, video_flow7, video_tail9
 
 
 BOT_SOURCE = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
@@ -279,3 +279,45 @@ def test_manual_tail_restart_hydrates_exact_parent_snapshot_for_back() -> None:
     assert hydrated["manual_direct_tail"] is True
     assert hydrated["manual_origin_step"] == "trend2_manual_content"
     assert hydrated["manual_owner_snapshot"] == snapshot
+
+
+def test_trend_manual_tail_persists_user_topic_for_both_execution_preflights() -> None:
+    manual_text = (
+        "Cảnh 1: quầy cà phê xe điện mở buổi sáng. "
+        "Cảnh 2: sinh viên nhận ly tái sử dụng."
+    )
+    result = bot.video_manual_lane_shared_tail_contract(
+        "video_trend",
+        manual_text,
+        origin_step="trend_manual_input",
+    )
+
+    flow6_context = video_flow6.context_from_scene_state(result["state"])
+    assert flow6_context["trend_source"] == {
+        "source_type": "user_topic",
+        "title": manual_text,
+        "summary": manual_text,
+    }
+    assert video_flow6.preflight(
+        flow6_context,
+        package_available=True,
+        engine_ready=True,
+        worker_ready=True,
+        capability_ready=True,
+    )["ok"] is True
+
+    assert video_flow7.preflight(
+        "video_trend",
+        {
+            "scene_count": 2,
+            "aspect_ratio": "9:16",
+            "trend_source": flow6_context["trend_source"],
+        },
+        owner_ready=True,
+        worker_ready=True,
+        capability_ready=True,
+        package_available=True,
+        provider_healthy=True,
+        storage_ready=True,
+        delivery_ready=True,
+    )["ok"] is True
