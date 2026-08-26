@@ -40,6 +40,7 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - SPEC-03 regression branch: `79 passed, 11 failed`; baseline `origin/main cd4acb8`: `16 passed, 11 failed` cùng 11 test names, nên `NEW_FAILURES=0`.
 - Audio/mux pure gates: 5 selectors pass + 1 replacement comparator pass; selector FFmpeg thật bị Windows `WinError 6` trước spawn và không được tính PASS.
 - `py_compile bot.py services/video_tail9.py services/product_video_owner_recovery.py`: exit `0`.
+- Post-rebase trên `origin/main 371a422`: 2 focused files `38 passed, 1 warning in 483.56s`; compile 3 runtime files và diff-check đều exit `0`.
 - Job/artifact/receipt live của matrix mới: **pending**.
 
 ## Bẫy vận hành
