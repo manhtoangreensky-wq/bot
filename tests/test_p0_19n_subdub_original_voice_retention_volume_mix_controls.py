@@ -76,6 +76,31 @@ def test_confirm_keyboard_shows_audio_mix_for_dub_modes_only():
     assert "videodub|audio_mix" not in subtitle_callbacks
 
 
+def test_confirm_keyboard_names_audio_mix_truthfully_in_both_dub_lanes():
+    for mode, active_flow in (
+        (bot.VIDEO_SUBTITLE_MODE_DUB, "dub_audio"),
+        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "subtitle_plus_dub"),
+    ):
+        keyboard = bot.video_dubbing_confirm_keyboard(
+            "vi",
+            {
+                "mode": mode,
+                "process_type": mode,
+                "video_processing_mode": mode,
+                "active_flow": active_flow,
+            },
+        )
+        audio_buttons = [
+            button
+            for row in keyboard.inline_keyboard
+            for button in row
+            if button.callback_data == "videodub|audio_mix"
+        ]
+
+        assert len(audio_buttons) == 1
+        assert audio_buttons[0].text == "🎚 Âm thanh"
+
+
 def test_render_video_accepts_volume_mix_parameters():
     signature = inspect.signature(bot.video_dubbing_render_video)
 

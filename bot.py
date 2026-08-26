@@ -235436,7 +235436,7 @@ def video_dubbing_confirm_keyboard(lang: str = "vi", state: dict | None = None) 
         if mode == VIDEO_SUBTITLE_MODE_DUB:
             voice_row = [InlineKeyboardButton(copy["voice"], callback_data="videodub|back_voice")]
             if subdub_audio_mix_available(state):
-                voice_row.append(InlineKeyboardButton(copy["edit"], callback_data="videodub|audio_mix"))
+                voice_row.append(InlineKeyboardButton("🎚 Âm thanh" if normalize_user_language(lang) == "vi" else "🎚 Audio", callback_data="videodub|audio_mix"))
             return InlineKeyboardMarkup([
                 [InlineKeyboardButton(copy["confirm"], callback_data="videodub|final")],
                 voice_row,
@@ -235448,7 +235448,7 @@ def video_dubbing_confirm_keyboard(lang: str = "vi", state: dict | None = None) 
         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
             voice_row = [InlineKeyboardButton(copy["voice"], callback_data="videodub|back_voice")]
             if subdub_audio_mix_available(state):
-                voice_row.append(InlineKeyboardButton(copy["edit"], callback_data="videodub|audio_mix"))
+                voice_row.append(InlineKeyboardButton("🎚 Âm thanh" if normalize_user_language(lang) == "vi" else "🎚 Audio", callback_data="videodub|audio_mix"))
             confirm_row = [InlineKeyboardButton(copy["confirm"], callback_data="videodub|final")]
             if video_dubbing_subtitle_position_available(state):
                 confirm_row.append(video_dubbing_subtitle_position_button(lang, state))
