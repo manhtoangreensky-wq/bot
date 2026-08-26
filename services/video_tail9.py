@@ -97,7 +97,9 @@ CANONICAL_QUALITY_TIERS = tuple(
 LEGACY_LOCKED_QUALITY_TIERS = tuple(
     tier_id for tier_id in CANONICAL_QUALITY_TIERS if tier_id != 700
 )
-MULTI_SCENE_QUALITY_TIERS = CANONICAL_QUALITY_TIERS
+MULTI_SCENE_QUALITY_TIERS = tuple(
+    tier_id for tier_id in CANONICAL_QUALITY_TIERS if tier_id not in {200, 700}
+)
 UIFLOW3_EXTENDED_QUALITY_TIERS = CANONICAL_QUALITY_TIERS
 
 
@@ -156,7 +158,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "worker_owner": "product_video",
         "minimum_scene_count": 5,
         "supports_single_scene": False,
-        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
+        "supported_quality_tiers": MULTI_SCENE_QUALITY_TIERS,
     },
     "storyboard_prompt": {
         "flow_owner": "storyboard",
@@ -1070,8 +1072,7 @@ def next_required_screen(state: dict[str, Any]) -> str:
     """Return the first missing screen in the canonical shared video tail."""
 
     current = normalize_state(state)
-    product_type = str(current.get("video_product_type") or "")
-    if product_type in {"multi_scene_film", "video_long"}:
+    if str(current.get("video_product_type") or "") == "video_long":
         return ""
     if not addon_complete(current):
         return "addon"
@@ -1174,6 +1175,10 @@ def select_package(
         ratio=str(current.get("ratio") or "9:16"),
         quality_tier_id=int(quality_tier_id or 0),
     )
+    if not compatibility.get("ok"):
+        raise ValueError(
+            str(compatibility.get("reason") or "quality_package_not_supported")
+        )
     capability = dict(capability_snapshot or {})
     pricing = deepcopy(dict(pricing_snapshot or {}))
     current["quality_tier_id"] = str(quality_tier_id or "")

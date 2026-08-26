@@ -1,0 +1,42 @@
+# Danh sách case Product Video
+
+Nguồn gốc duy nhất cho acceptance live. Sửa case tại file này trước khi tạo/sửa Issue.
+
+## Lane sản phẩm
+
+| ID | Case | Kịch bản khóa | Add-on khóa | PASS bắt buộc |
+|---|---|---|---|---|
+| PV-L01 | Video theo trend / manual | C1 quầy cà phê xe điện mở buổi sáng; C2 sinh viên nhận ly tái sử dụng và giơ ngón tay cái | phụ đề + transitions | Tail đủ 6 màn, MP4 2 cảnh, receipt 0 Xu |
+| PV-L02 | Video AI chân thật / prompt manual | C1 Linh tạo hình bình gốm xanh; C2 Linh nâng thành phẩm trong xưởng ấm | dubbing + phụ đề | Add-on thật, MP4 2 cảnh có audio, receipt 0 Xu |
+| PV-L03 | Kịch bản -> Video / manual | 5 cảnh trà sen Tây Hồ: hái sen, tách gạo, ướp trà, pha trà, mời khách | voice + phụ đề + nhạc | Giữ nguyên script, min 5 cảnh, MP4/receipt |
+| PV-L04 | Ghép ảnh thành video / custom | 2 ảnh đồng hồ thủ công: bàn lắp ráp và hero shot thành phẩm | chữ + transition | 2 ảnh thật, 3 quality Frame chọn được, MP4/receipt |
+| PV-L05 | Video tự quay / custom | Giữ đầu bếp thật; đổi từ chợ Hội An sang bếp rooftop nhưng giữ hành động thái rau | source audio + watermark | Video nguồn thật, min 2 cảnh, MP4 có audio/receipt |
+| PV-L06 | Storyboard / manual | C1 robot nhỏ gieo hạt trên mái nhà; C2 mầm cây phát sáng khi bình minh lên | transitions + phụ đề | 2 ảnh start mapped, MP4 2 cảnh/receipt |
+| PV-L07 | Video dài tập / manual | C1 thợ lặn tìm cửa thư viện dưới biển; C2 mở phòng sách phát sáng và đọc bản đồ | narration + nhạc | Tail đủ, output thật/receipt theo runtime hỗ trợ |
+| PV-L08 | Ý tưởng video / manual handoff | C1 xe cà phê điện tới cổng trường; C2 barista phục vụ nhóm sinh viên | phụ đề | Ý tưởng riêng đi Tail, MP4 2 cảnh/receipt |
+| PV-L09 | Chỉnh sửa Video / input 2 cảnh | Cắt gọn và đổi tỉ lệ một video 2 cảnh chợ đêm, giữ nguyên tiếng môi trường | preserve audio + watermark | Operation thật, output MP4 dùng được, receipt 0 Xu |
+
+## Video AI Chân thật theo tier
+
+| ID | Tier | Kịch bản 2 cảnh khóa | Add-on | PASS bắt buộc |
+|---|---:|---|---|---|
+| PV-Q200 | 200 | gấp diều giấy -> thả diều trên đê | transitions | exact tier, MP4/receipt 0 Xu |
+| PV-Q300 | 300 | xếp bộ trà gốm -> rót trà cạnh cửa sổ | phụ đề | exact tier, MP4/receipt 0 Xu |
+| PV-Q400 | 400 | sửa phanh xe đạp -> chạy thử trong công viên | SFX | exact tier, MP4/receipt 0 Xu |
+| PV-Q500 | 500 | nghệ nhân nhuộm khăn lụa -> người mẫu choàng khăn | nhạc | exact tier, MP4/receipt 0 Xu |
+| PV-Q600 | 600 | lắp đèn năng lượng mặt trời -> đèn sáng ở sân vườn | dubbing | exact tier, MP4 có audio/receipt 0 Xu |
+| PV-Q700 | 700 | phi hành gia chăm vườn kính -> thu hoạch quả đỏ ngoài sao Hỏa | phụ đề | exact tier, MP4/receipt 0 Xu |
+| PV-Q800 | 800 | pha nước hoa trong phòng lab -> hero shot chai trên đá đen | nhạc + SFX | exact tier, MP4/receipt 0 Xu |
+| PV-Q1000 | 1000 | vũ công khởi động trước gương -> biểu diễn xoay người trên sân khấu | source dialogue | exact tier, MP4 có audio/receipt 0 Xu |
+| PV-Q1200 | 1200 | máy pha cà phê góc rộng -> macro dòng espresso chảy | transitions | exact tier, MP4/receipt 0 Xu |
+| PV-Q1500 | 1500 | ga tàu mưa đêm toàn cảnh -> nhân vật gặp nhau dưới đồng hồ lớn | dubbing + phụ đề | exact tier, MP4 có audio/receipt 0 Xu |
+
+## Bằng chứng mỗi case
+
+- Scenario/fixture hash riêng.
+- REQUEST_ID, project, job, outbox.
+- Hai scene output và final MP4 hash/bytes/codec/dimensions/duration.
+- Audio stream + mức nghe được nếu yêu cầu audio.
+- Add-on requested/materialized/applied.
+- Telegram delivery message id.
+- `charged_xu=0`, transaction delta 0, không duplicate.
