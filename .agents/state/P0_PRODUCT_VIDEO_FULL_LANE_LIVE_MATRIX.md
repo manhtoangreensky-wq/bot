@@ -25,12 +25,12 @@ If a live row fails, reopen only that spec, add a RED reproducer from the real f
 ## Resource Boundary
 
 - [x] Source READ and contract work allowed.
-- [ ] Local Python/FFmpeg available to Product Video.
-- [ ] LIVE/CHROME available to Product Video.
-- [ ] VPS/DEPLOY available to Product Video.
+- [x] Local Python/FFmpeg available to Product Video.
+- [x] LIVE/CHROME available to Product Video.
+- [x] VPS/DEPLOY available to Product Video.
 - [x] No wallet, PayOS, ENV, secret, destructive DB, onboarding, PWA, or SubDub changes allowed.
 
-Current shared-resource owner: **SubDub Auto**.
+Current shared-resource owner: **Product Video**.
 
 ## Ordered Specs
 
@@ -72,24 +72,25 @@ Current source evidence:
 
 Video AI Real public tiers:
 
-| Tier | Selector GREEN | Two-scene LIVE | Artifact/Receipt Evidence |
-|---:|:---:|:---:|---|
-| 200 | [x] | [ ] | source GREEN; live pending |
-| 300 | [x] | [ ] | source GREEN; live pending |
-| 400 | [x] | [ ] | source GREEN; live pending |
-| 500 | [x] | [ ] | source GREEN; live pending |
-| 600 | [x] | [ ] | source GREEN; live pending |
-| 700 | [x] | [ ] | source GREEN; live pending |
-| 800 | [x] | [ ] | source GREEN; live pending |
-| 1000 | [x] | [ ] | source GREEN; live pending |
-| 1200 | [x] | [ ] | source GREEN; live pending |
-| 1500 | [x] | [ ] | source GREEN; live pending |
+| Tier | Locked two-scene scenario | Selector GREEN | Two-scene LIVE | Artifact/Receipt Evidence |
+|---:|---|:---:|:---:|---|
+| 200 | PV-Q200: gấp diều giấy -> thả diều trên đê | [x] | [ ] | source GREEN; live pending |
+| 300 | PV-Q300: xếp bộ trà gốm -> rót trà cạnh cửa sổ | [x] | [ ] | source GREEN; live pending |
+| 400 | PV-Q400: sửa phanh xe đạp -> chạy thử trong công viên | [x] | [ ] | source GREEN; live pending |
+| 500 | PV-Q500: nhuộm khăn lụa -> người mẫu choàng khăn | [x] | [ ] | source GREEN; live pending |
+| 600 | PV-Q600: lắp đèn mặt trời -> đèn sáng sân vườn | [x] | [ ] | source GREEN; live pending |
+| 700 | PV-Q700: chăm vườn kính -> thu hoạch quả đỏ trên sao Hỏa | [x] | [ ] | source GREEN; live pending |
+| 800 | PV-Q800: pha nước hoa -> hero shot chai trên đá đen | [x] | [ ] | source GREEN; live pending |
+| 1000 | PV-Q1000: vũ công khởi động -> xoay người trên sân khấu | [x] | [ ] | source GREEN; live pending |
+| 1200 | PV-Q1200: máy pha cà phê góc rộng -> macro espresso | [x] | [ ] | source GREEN; live pending |
+| 1500 | PV-Q1500: ga tàu mưa đêm -> gặp nhau dưới đồng hồ lớn | [x] | [ ] | source GREEN; live pending |
 
 ### SPEC-03: Source Regression Gate
 
 - [x] Frame/Storyboard live renderers use real line breaks and never expose literal backslash-n.
 - [x] Focused Product Video lane/Tail tests pass.
 - [x] Quality matrix tests pass.
+- [x] Add-on Tail-to-worker materialization and missing-material fail-closed gate passes.
 - [x] Back-stack, duplicate confirm, read-only refresh, newline status and audio/final mux source regressions pass; real artifact evidence remains live-only.
 - [x] `python -m py_compile bot.py` passes.
 - [x] Touched runtime modules compile.
@@ -114,15 +115,15 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 
 | Product/lane | Distinct scenario | Flow + Add-on | Two-scene artifact | Delivery/0 Xu |
 |---|---|:---:|:---:|:---:|
-| Video theo trend / manual | pending | [ ] | [ ] | [ ] |
-| Video AI chan that / prompt manual | pending | [ ] | [ ] | [ ] |
-| Kich ban -> Video / manual | pending | [ ] | [ ] | [ ] |
-| Ghep anh thanh video / custom | pending | [ ] | [ ] | [ ] |
-| Video tu quay / custom direction | pending | [ ] | [ ] | [ ] |
-| Storyboard / manual | pending | [ ] | [ ] | [ ] |
-| Video dai tap / manual | pending | [ ] | [ ] | [ ] |
-| Y tuong video / manual handoff | pending | [ ] | [ ] | [ ] |
-| Chinh sua Video / two-scene input | pending | [ ] | [ ] | [ ] |
+| Video theo trend / manual | PV-L01: quầy cà phê xe điện -> sinh viên nhận ly tái sử dụng | [ ] | [ ] | [ ] |
+| Video AI chan that / prompt manual | PV-L02: Linh tạo bình gốm xanh -> nâng thành phẩm | [ ] | [ ] | [ ] |
+| Kich ban -> Video / manual | PV-L03: 5 cảnh trà sen Tây Hồ | [ ] | [ ] | [ ] |
+| Ghep anh thanh video / custom | PV-L04: 2 ảnh đồng hồ thủ công | [ ] | [ ] | [ ] |
+| Video tu quay / custom direction | PV-L05: đầu bếp chợ Hội An -> bếp rooftop, giữ thái rau | [ ] | [ ] | [ ] |
+| Storyboard / manual | PV-L06: robot gieo hạt -> mầm cây phát sáng | [ ] | [ ] | [ ] |
+| Video dai tap / manual | PV-L07: thợ lặn tìm thư viện -> mở phòng sách phát sáng | [ ] | [ ] | [ ] |
+| Y tuong video / manual handoff | PV-L08: xe cà phê điện -> barista phục vụ sinh viên | [ ] | [ ] | [ ] |
+| Chinh sua Video / two-scene input | PV-L09: cắt gọn chợ đêm, giữ tiếng môi trường | [ ] | [ ] | [ ] |
 
 ### SPEC-06: Video AI Real All-Quality LIVE Matrix
 
@@ -169,3 +170,5 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | 2026-08-26 | SPEC-01 Tail order GREEN | Lightweight source contract: `1 passed, 1 warning in 0.74s`; invoice now opens Confirm, Quality Back returns Review, and long-form Confirm no longer auto-submits | PASS; three callback edges changed |
 | 2026-08-26 | Final focused source gate after recovery | Manual Tail + 10-tier quality + newline/order + rendered Confirm: `42 passed, 2 warnings in 519.56s` | PASS; warnings are dependency/cache only |
 | 2026-08-26 | Final compile after recovery | `py_compile bot.py services/video_tail9.py services/product_video_owner_recovery.py`, exit 0 | PASS on final source |
+| 2026-08-26 | Post-rebase add-on materialization gate | Nine source-only selectors: `9 passed, 1 warning in 2.94s` | PASS; Tail -> handoff -> worker contract and fail-closed-before-provider covered |
+| 2026-08-26 | Rebase after SubDub PR #890 | Rebased cleanly onto `origin/main edf4320`; focused gate `42 passed, 2 warnings in 567.32s`; post-rebase compile 3 runtime files exit 0; diff-check exit 0 | PASS; ready to force-with-lease PR #888 |
