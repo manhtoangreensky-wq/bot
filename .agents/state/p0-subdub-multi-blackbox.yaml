@@ -3,8 +3,8 @@ product: SubDub
 owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
-branch: fix/p0-subdub-two-speaker-relative-cast
-phase: SPEC_04_FAILURE_LOOP_BUILD
+branch: fix/p0-subdub-status-timeout
+phase: SPEC_04_FAILURE_LOOP_SHIP
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -25,7 +25,7 @@ workflow_contract:
     - refactor unrelated stable flows
 
 resource_boundary:
-  cpu: released_by_subdub_auto
+  cpu: dedicated_subdub_gate_released_after_final_compile
   live: owned_by_subdub_auto
   chrome: owned_by_subdub_auto
   vps_deploy: owned_by_subdub_auto
@@ -33,9 +33,15 @@ resource_boundary:
 
 fixtures:
   two_speaker:
+    path: C:\Users\toann\Downloads\test sub\2 giọng nam nữ.mp4
+    sha256: 85c8793d197cf2782bb554d46282e82a83bcb062a0483e412a0ca1da668f9f51
+    bytes: 4284017
+    owner_expected_cast: one independently classified male speaker and one independently classified female speaker
+    required_lane: Tự động 2 giọng
+  superseded_two_speaker:
     path: C:\Users\toann\Downloads\test sub\test 2 giọng.mp4
     sha256: a89b16b896d4efa8157f7de5cea47695b5edf7d5595c4fc03ad62346cdfa0292
-    required_lane: Tự động 2 giọng
+    reason: historical rollback evidence only; forbidden for the remaining live acceptance
   multi_speaker:
     path: C:\Users\toann\Downloads\test sub\test nhiều giọng.mp4
     sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
@@ -102,11 +108,14 @@ ordered_specs:
     title: Live-test and lock the two-speaker lane
     status: failure_loop_build
     acceptance:
-      - upload only test 2 giọng.mp4
+      - upload only 2 giọng nam nữ.mp4 with SHA-256 85c8793d197cf2782bb554d46282e82a83bcb062a0483e412a0ca1da668f9f51
       - Tự động 2 giọng works in both Lồng tiếng video and Phụ đề + Lồng tiếng
       - combo live selects Tự động 2 giọng and English
       - standalone Lồng tiếng video live selects Tự động 2 giọng and delivers an MP4 receipt
-      - automatic cast resolves exactly two speaker labels to distinct male/female voices
+      - each speaker is classified independently from its own acoustic evidence
+      - nam-nam, nam-nữ, and nữ-nữ are supported without forced pairing
+      - ambiguous evidence fails to manual selection instead of guessing
+      - the Owner fixture resolves exactly one male and one female voice pool from measured evidence
       - one final playable MP4 is delivered
       - one valid SRT is produced and matches the final media
       - receipt shows subtitle price, dubbing price, dubbing type, cast details, and total
@@ -184,6 +193,47 @@ ordered_specs:
       - both modes render pending word pricing without a false 0 Xu dubbing amount
       - both modes render the exact dubbing/subtitle/total prices after recognition
       - both delivery receipts name Tự động 2 giọng and show component prices while charged_xu remains 0 for admin
+    shipped_corrections:
+      - PR 883 / b9b0cc3 restores the proven PR 842 classifier and PCM extraction baseline
+      - PR 885 / 176f3c2 preserves exact subtitle and dubbing component pricing and admin zero-charge receipts
+      - PR 887 / 371a422 sends the automatic combo SRT companion
+      - PR 889 / f16fb75 supersedes PR 886 forced pairing with independent per-speaker classification
+    independent_gender_evidence:
+      - exactly two labels are required
+      - each label needs at least two confident samples and weighted register support at or above 0.60
+      - focused RED 4 failed and 1 passed in 112.58s
+      - focused GREEN 5 passed in 7.59s
+      - protected comparison introduced zero new failures
+      - deployed runtime f16fb75fc3093683bfe707b17e6c8b2bf3bd67d7 has bot and worker on the same SHA
+    correct_fixture_attempt_1:
+      public_job: 4A3A5BAAF5
+      internal_job: 4a3a5baaf598caada12c
+      runtime_sha: 371a422bdc2a28172124efb17b99ab946e0ff92e
+      source_sha256: 85c8793d197cf2782bb554d46282e82a83bcb062a0483e412a0ca1da668f9f51
+      terminal: failed_no_charge
+      blocker: pipeline_failed:RuntimeError before ASR, sidecar, or cast evidence
+      charged_xu: 0
+    correct_fixture_attempt_2:
+      runtime_sha: f16fb75fc3093683bfe707b17e6c8b2bf3bd67d7
+      task_key: 7126457028|7126457028|AgADByMAAlkxcFQ|subtitle_plus_dub|auto_speaker
+      source_sha256: 85c8793d197cf2782bb554d46282e82a83bcb062a0483e412a0ca1da668f9f51
+      terminal: failed_no_charge before ASR, sidecar, or cast evidence
+      exact_stack: _run_subdub_public_final_background -> handle_video_dubbing_callback -> safe_edit_or_send -> query.edit_message_text -> telegram.error.TimedOut
+      root_cause: the initial background progress-panel edit was unguarded, unlike later best-effort progress updates, so a Telegram WriteTimeout terminalized the product pipeline
+      charged_xu: 0
+    active_correction:
+      hypothesis: only the initial background progress render must tolerate Telegram edit timeout; pipeline and delivery exceptions remain terminal
+      red: 1 failed, 1 warning in 711.25s; pipeline call count was 0 and stack ended at bot.py:253596 telegram.error.TimedOut
+      first_green: 1 passed, 1 warning in 718.63s after one background-only catch; warning only google.genai deprecation
+      review_red: 2 failed, 1 warning in 12.97s because no replacement status message or persisted replacement id existed
+      final_green: 2 passed, 1 warning in 10.24s; replacement success persists panel id before pipeline, replacement timeout still continues pipeline once
+      protected_batch: 17 passed, 1 warning in 12.37s; warning only google.genai deprecation
+      compile: python -m py_compile bot.py exit 0
+      diff_check: exit 0; CRLF warnings only
+      provider_calls: 0
+      wallet_mutations: 0
+      allowed_production_diff: bot.py initial background received_file status update only
+      forbidden_diff: classifier, pricing, wallet, SRT, mux, provider, foreground, and UI behavior
     on_failure: stay on SPEC-04 and repeat RED/GREEN/ship/live until all acceptance evidence passes
 
   - id: SPEC-05
@@ -209,4 +259,4 @@ ordered_specs:
       - audit every acceptance line as proven or unresolved
       - mark the goal complete only when no required line remains unresolved
 
-current_next_action: ship isolated relative two-speaker correction PR; live combo and standalone two-speaker; continue failure loop until both pass
+current_next_action: commit and push the verified status-timeout correction, create one PR, squash merge, deploy/sync bot+worker, then live the exact 85c8793d fixture again
