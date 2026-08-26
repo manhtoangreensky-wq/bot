@@ -17,13 +17,14 @@
 ### Current pointer
 
 - Current SPEC: `SPEC-07`.
-- Current SUBSPEC: `SPEC-07.1`.
-- Current phase: `SHIP / commit and one PR`.
-- Production action active: `NO`.
-- Telegram/provider job active: `NO`.
+- Current SUBSPEC: `SPEC-07.3`.
+- Current phase: `SHIP LIVE-FOUND LABEL CORRECTION / pre-confirm`.
+- Production action active: `focused source correction only`.
+- Telegram/provider job active: `NO; flow paused before final confirmation`.
 - Wallet mutation: `0`.
-- Next allowed action: stage exact 7-file scope, one commit/push/PR.
-- Next forbidden action: Telegram/provider live before merged runtime deploys.
+- Next allowed action: push the two-line truthful audio label correction, deploy,
+  resume the existing combo flow before final confirmation.
+- Next forbidden action: final confirm/provider call on misleading old keyboard.
 
 ### Luật bất biến
 
@@ -319,7 +320,10 @@ Both `dub` and `subtitle_plus_dub`:
 ### SPEC-05 acceptance
 
 - [x] Focused audio-control behavior GREEN for both modes.
-- [ ] Deployed UI screenshot/DOM must show two buttons in one row at `SPEC-08`.
+- [x] Deployed UI screenshot/DOM shows `Âm thanh gốc` and `Giọng lồng tiếng`
+  in one row, with all original/dub presets visible.
+- [!] Live confirm keyboard exposed the correct `audio_mix` callback with the
+  misleading label `✏️ Sửa theo số dòng`; focused RED reproduced it.
 
 ## SPEC-06 — Focused verification only
 
@@ -381,34 +385,52 @@ WALLET_MUTATIONS=0
 
 ### SPEC-07.1 — GitHub
 
-- [ ] Update this checklist with test evidence.
-- [ ] One focused commit.
-- [ ] Push one branch.
-- [ ] Create one PR.
-- [ ] Checks PASS.
-- [ ] Squash merge.
-- [ ] Record PR URL and merge SHA.
+- [x] Update this checklist with test evidence.
+- [x] One focused commit.
+- [x] Push one branch.
+- [x] Create PR `#896`.
+- [x] Exact main source compile run `32988259783` PASS; PR check attempt was
+  cancelled before any step due the repository-wide GitHub runner queue.
+- [x] Squash merge.
+- [x] PR `https://github.com/manhtoangreensky-wq/bot/pull/896`; merge SHA
+  `3fc190c8997e834845550410cd7753cc7c4ec4e1`.
 
 ### SPEC-07.2 — Deploy
 
-- [ ] GitHub Actions deploy terminal SUCCESS.
-- [ ] Bot checkout equals merge SHA.
-- [ ] Owner worker checkout equals merge SHA.
-- [ ] New worker generation persisted.
-- [ ] Reject reason empty.
-- [ ] Services active.
+- [x] GitHub Actions deploy `32988259955` SUCCESS in `4m15s`.
+- [x] Bot checkout equals `3fc190c8`.
+- [x] Owner worker checkout equals `3fc190c8` after safe fast-forward.
+- [x] Worker generation `efc4539da339484c9baece07b89a0147` persisted.
+- [x] Reject reason empty.
+- [x] Bot/worker/web/nginx active; `/health` OK.
+
+### SPEC-07.3 — Live-found truthful audio label correction
+
+- [x] Fresh combo uploaded the exact Owner fixture once.
+- [x] Selected English and `Tự động 2 giọng`.
+- [x] Confirm text showed original `Off` and dub `100%`.
+- [x] Clicking the misleading `✏️ Sửa theo số dòng` proved its callback was
+  actually `videodub|audio_mix` and opened the restored controls.
+- [x] RED: expected `🎚 Âm thanh`, got `✏️ Sửa theo số dòng`.
+- [x] Minimal production diff: replace two `audio_mix` button labels only;
+  callbacks/state/engine unchanged.
+- [x] GREEN: `1 passed, 1 warning in 588.26s`.
+- [x] Final `py_compile bot.py` exit `0`; diff-check clean.
+- [x] Latest main `bc11296` changes landing/docs only; no overlap with the
+  three-file live-label correction.
+- [-] One focused correction PR/deploy.
 
 ### SPEC-07 evidence
 
 ```text
-PR:
-MERGE_SHA:
-DEPLOY_RUN:
-DEPLOY_DURATION:
-BOT_SHA:
-WORKER_SHA:
-GENERATION:
-REJECT_REASON:
+PR: #896 https://github.com/manhtoangreensky-wq/bot/pull/896
+MERGE_SHA: 3fc190c8997e834845550410cd7753cc7c4ec4e1
+DEPLOY_RUN: 32988259955
+DEPLOY_DURATION: 4m15s
+BOT_SHA: 3fc190c8997e834845550410cd7753cc7c4ec4e1
+WORKER_SHA: 3fc190c8997e834845550410cd7753cc7c4ec4e1
+GENERATION: efc4539da339484c9baece07b89a0147
+REJECT_REASON: empty
 ```
 
 ## SPEC-08 — Live combo: Phụ đề + Lồng tiếng
