@@ -58,3 +58,14 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - 9 dòng live sản phẩm/lane, mỗi dòng kịch bản riêng và MP4 tối thiểu 2 cảnh.
 - 10 live job Video AI Chân thật, mỗi tier một kịch bản 2 cảnh riêng.
 - Mọi dòng cần artifact hash/bytes/codec/duration/audio, delivery message id và Owner `0 Xu`.
+
+## Bổ sung vận hành Public Landing — Motion 26/08/2026
+
+- Phạm vi production của đợt này là đúng `1` file: `index.html`; thêm `1` file contract test. Không đổi `bot.py`, `/lead`, nội dung, locale, CTA, ENV, dữ liệu, Telegram, PayOS hoặc ví.
+- Hero có đúng `5` phần tử, fade-up `20px`, `520ms`, delay `0/80/160/240/240ms`; tổng dài nhất `760ms`.
+- Section fade-up `20px`, `480ms`, reveal một lần. Dữ liệu vị trí lấy từ `IntersectionObserverEntry`; không gọi đồng bộ `getBoundingClientRect()` lúc khởi tạo.
+- Parallax chỉ chạy desktop có chuột chính xác, giới hạn `10px` mỗi trục và gộp sự kiện bằng `requestAnimationFrame`.
+- Tablet, mobile và `prefers-reduced-motion: reduce` không chạy presentation motion; nội dung vẫn hiện nếu JavaScript hoặc observer lỗi.
+- Hai lượt render, mỗi lượt `6` trường hợp: CLS `0`, long task trên `200ms` bằng `0`, overflow/pending/replay/lỗi runtime bằng `0`.
+- Đợt này có `0` provider call, `0` wallet mutation, `0` production-data mutation, `0` ENV mutation và `0` Telegram mutation.
+- Local đã verify; merge, deploy và live test vẫn là các cổng riêng.

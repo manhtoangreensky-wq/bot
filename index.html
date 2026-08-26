@@ -16,6 +16,17 @@
   <link rel="icon" type="image/png" href="/logo.png?v=20260727">
   <link rel="apple-touch-icon" href="/logo.png?v=20260727">
   <title>TOAN AAS — Không gian làm việc AI có kiểm soát</title>
+  <script>
+    (function () {
+      const root = document.documentElement;
+      const presentationMotion = window.matchMedia("(min-width: 981px) and (prefers-reduced-motion: no-preference)");
+      if (!presentationMotion.matches) return;
+      root.classList.add("motion-prepaint");
+      window.setTimeout(function () {
+        root.classList.remove("motion-prepaint");
+      }, 1200);
+    }());
+  </script>
   <style>
     :root {
       --teal-action: #0f766e;
@@ -414,6 +425,28 @@
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
       *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; scroll-behavior: auto !important; }
+    }
+
+    /* Motion System */
+    @media (min-width: 981px) and (prefers-reduced-motion: no-preference) {
+      html.motion-prepaint .hero-copy > h1,
+      html.motion-prepaint .hero-copy > p:not(.hero-note),
+      html.motion-prepaint .hero-actions,
+      html.motion-prepaint .hero-note,
+      html.motion-prepaint .workflow-preview { opacity: 0; transform: translateY(20px); }
+    }
+    .motion-pending { opacity: 0 !important; transform: translateY(20px) !important; }
+    .motion-reveal { animation: fade-up 480ms cubic-bezier(.22, 1, .36, 1) both !important; }
+    .motion-reveal-hero { animation: fade-up 520ms cubic-bezier(.22, 1, .36, 1) both !important; }
+    @keyframes fade-up {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @media (max-width: 980px) {
+      html.motion-prepaint .hero-copy > h1, html.motion-prepaint .hero-copy > p:not(.hero-note), html.motion-prepaint .hero-actions, html.motion-prepaint .hero-note, html.motion-prepaint .workflow-preview, .motion-pending, .motion-reveal, .motion-reveal-hero { animation: none !important; opacity: 1 !important; transform: none !important; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html.motion-prepaint .hero-copy > h1, html.motion-prepaint .hero-copy > p:not(.hero-note), html.motion-prepaint .hero-actions, html.motion-prepaint .hero-note, html.motion-prepaint .workflow-preview, .motion-pending, .motion-reveal, .motion-reveal-hero { animation: none !important; opacity: 1 !important; transform: none !important; }
     }
   </style>
 </head>
@@ -1004,6 +1037,128 @@
           submit.textContent = copy["lead.submit"];
         }
       });
+
+      // --- Motion System ---
+      const initMotion = () => {
+        const releasePrepaint = () => document.documentElement.classList.remove('motion-prepaint');
+        const presentationDisabled = window.matchMedia('(max-width: 980px), (prefers-reduced-motion: reduce)');
+        if (presentationDisabled.matches) {
+          releasePrepaint();
+          return;
+        }
+        const clearMotionState = (element, className) => {
+          element.classList.remove(className);
+          element.style.animationDelay = '';
+        };
+
+        // 1. Hero
+        const heroSelectors = Object.freeze([
+          ".hero-copy > h1",
+          ".hero-copy > p:not(.hero-note)",
+          ".hero-actions",
+          ".hero-note",
+          ".workflow-preview"
+        ]);
+        const heroDelays = Object.freeze([0, 80, 160, 240, 240]);
+        const heroItems = heroSelectors.map((selector) => document.querySelector(selector));
+        heroItems.forEach((element, index) => {
+          if (!element) return;
+          element.style.animationDelay = `${heroDelays[index]}ms`;
+          element.classList.add('motion-reveal-hero');
+          element.addEventListener('animationend', () => {
+            clearMotionState(element, 'motion-reveal-hero');
+          }, { once: true });
+        });
+        releasePrepaint();
+
+        // 2. Sections
+        const initializedSections = new WeakSet();
+        let sectionObserver = null;
+        try {
+          sectionObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+              const element = entry.target;
+              if (!initializedSections.has(element)) {
+                initializedSections.add(element);
+                if (entry.isIntersecting) {
+                  sectionObserver.unobserve(element);
+                  return;
+                }
+                const viewportBottom = entry.rootBounds ? entry.rootBounds.bottom : window.innerHeight;
+                if (entry.boundingClientRect.top > viewportBottom) {
+                  const siblings = Array.from(element.parentElement.children);
+                  const staggerIndex = Math.min(siblings.indexOf(element), 5);
+                  element.style.animationDelay = `${Math.max(staggerIndex, 0) * 70}ms`;
+                  element.classList.add('motion-pending');
+                  return;
+                }
+                sectionObserver.unobserve(element);
+                return;
+              }
+              if (!entry.isIntersecting) return;
+              element.classList.remove('motion-pending');
+              element.classList.add('motion-reveal');
+              sectionObserver.unobserve(element);
+              element.addEventListener('animationend', () => {
+                clearMotionState(element, 'motion-reveal');
+              }, { once: true });
+            });
+          }, { rootMargin: "0px 0px -50px 0px" });
+        } catch (error) {
+          sectionObserver = null;
+        }
+        if (sectionObserver) {
+          document.querySelectorAll('.section-heading, .process-step, .companion-card, .capability, .trust-list article, .lead-form, .final-cta').forEach((element) => {
+            try {
+              sectionObserver.observe(element);
+            } catch (error) {
+              clearMotionState(element, 'motion-pending');
+            }
+          });
+        }
+
+        // 3. Parallax
+        const preview = document.querySelector('.workflow-preview');
+        if (preview) {
+          const parallaxMedia = window.matchMedia('(min-width: 981px) and (pointer: fine) and (prefers-reduced-motion: no-preference)');
+          let parallaxFrame = 0;
+          let parallaxActive = false;
+          let pointerX = 0;
+          let pointerY = 0;
+          const onPointerMove = (event) => {
+            pointerX = event.clientX;
+            pointerY = event.clientY;
+            if (parallaxFrame) return;
+            parallaxFrame = window.requestAnimationFrame(() => {
+              parallaxFrame = 0;
+              if (!parallaxActive) return;
+              const centerX = window.innerWidth / 2;
+              const centerY = window.innerHeight / 2;
+              const clampX = Math.max(-10, Math.min(10, ((pointerX - centerX) / centerX) * 10));
+              const clampY = Math.max(-10, Math.min(10, ((pointerY - centerY) / centerY) * 10));
+              preview.style.transform = `translate(${clampX.toFixed(2)}px, ${clampY.toFixed(2)}px)`;
+            });
+          };
+          const setParallaxActive = () => {
+            if (parallaxMedia.matches && !parallaxActive) {
+              parallaxActive = true;
+              window.addEventListener('pointermove', onPointerMove, { passive: true });
+            } else if (!parallaxMedia.matches && parallaxActive) {
+              parallaxActive = false;
+              window.removeEventListener('pointermove', onPointerMove);
+              if (parallaxFrame) window.cancelAnimationFrame(parallaxFrame);
+              parallaxFrame = 0;
+              preview.style.transform = 'translate(0px, 0px)';
+            }
+          };
+          setParallaxActive();
+          if (typeof parallaxMedia.addEventListener === 'function') {
+            parallaxMedia.addEventListener('change', setParallaxActive);
+          }
+          window.addEventListener('resize', setParallaxActive, { passive: true });
+        }
+      };
+      initMotion();
     }());
   </script>
 </body>

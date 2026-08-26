@@ -1,0 +1,84 @@
+task_id: MOTION-LANDING-TOANAAS-001
+phase: REPORT
+base_sha: 5a4f942bc0b2e8820a96c5772ddb6372f1648604
+promotion_base_sha: 3fc190c8997e834845550410cd7753cc7c4ec4e1
+branch: fix/motion-landing-toanaas-001
+status: ACCEPTED_LOCAL_TESTER_PASS
+handoff_round: 2
+round_1_result: FAILED_REVIEW
+round_1_fresh_targeted: 8_passed_in_0_67s
+round_1_fresh_comparator: 14_passed_6_baseline_failed_in_1_28s
+round_1_new_failures: 0
+round_1_findings:
+  - nested_hero_parent_and_child_animation
+  - delayed_animation_missing_backwards_fill_flash_risk
+  - forwards_transform_blocks_preview_parallax
+  - static_contract_assertions_too_weak
+round_2_result: FAILED_REVIEW
+round_2_fresh_targeted: pending_codex_rerun_after_takeover
+round_2_self_report_targeted: 10_passed
+round_2_self_report_comparator: 14_passed_6_baseline_failed
+round_2_new_failures: 0
+round_2_findings:
+  - no_prepaint_head_marker_or_fail_safe
+  - hero_max_delay_320_plus_520_equals_840ms_over_800ms_budget
+  - tests_do_not_enforce_prepaint_marker_timing_budget_or_full_authority
+escalation: CODEX_SOL_XHIGH_REQUIRED_AFTER_TWO_ANTIGRAVITY_FAILURES
+rendered_qa_result: FAILED_LONG_TASK_DESKTOP
+rendered_candidate_runs:
+  - run: 1
+    cls: 0
+    lcp_ms: 1972
+    long_tasks_over_200ms: 1
+    long_task_max_ms: 462
+  - run: 2
+    cls: 0
+    lcp_ms: 1372
+    long_tasks_over_200ms: 1
+    long_task_max_ms: 359
+rendered_production_baseline_runs:
+  - run: 1
+    cls: 0
+    lcp_ms: 4256
+    long_tasks_over_200ms: 1
+    long_task_max_ms: 345
+  - run: 2
+    cls: 0
+    lcp_ms: 2080
+    long_tasks_over_200ms: 0
+    long_task_max_ms: 0
+rendered_corrective_root_cause: synchronous_section_getBoundingClientRect_forces_full_page_layout_even_when_reads_are_batched
+rendered_batch_reads_attempt_result: FAILED_LONG_TASK_DESKTOP_BOTH_RUNS
+rendered_async_io_result: VERIFIED_TWO_RUNS
+rendered_async_io_runs:
+  - run: candidate-io-green-run-1
+    cases: 6
+    failures: 0
+    desktop_cls: 0
+    desktop_long_tasks_over_200ms: 0
+tester_status: PASS
+tester_targeted: 11_passed
+tester_comparator: 14_passed_6_baseline_failed
+tester_new_failures: 0
+tester_rendered_cases: 12_of_12_two_runs
+  - run: candidate-io-green-run-2
+    cases: 6
+    failures: 0
+    desktop_cls: 0
+    desktop_long_tasks_over_200ms: 0
+local_head_baseline_runs:
+  - run: 1
+    long_tasks_over_200ms: 0
+    cls: 0
+  - run: 2
+    long_tasks_over_200ms: 0
+    cls: 0
+dependency: MOTION-WEBAPP_SURFACES_DASHBOARD_MOBILE_CTA_ACCEPTED_LOCAL
+provider_calls: 0
+wallet_mutations: 0
+env_mutations: 0
+telegram_mutations: 0
+production_data_mutations: 0
+deploy: NO
+live_pass: NOT_TESTED_LOCAL_ONLY
+checklist: D:/TOANAAS/TOAN_AAS_WEB_APP/CHECKLIST-MOTION-TOANAAS-001.md

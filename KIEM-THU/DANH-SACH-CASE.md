@@ -1,4 +1,4 @@
-# Danh sách case Product Video
+# Danh sách case Product Video và Public Landing
 
 Nguồn gốc duy nhất cho acceptance live. Sửa case tại file này trước khi tạo/sửa Issue.
 
@@ -40,3 +40,16 @@ Nguồn gốc duy nhất cho acceptance live. Sửa case tại file này trướ
 - Add-on requested/materialized/applied.
 - Telegram delivery message id.
 - `charged_xu=0`, transaction delta 0, không duplicate.
+
+## Public Landing Motion
+
+| ID | Viewport/chế độ | PASS bắt buộc |
+|---|---|---|
+| ML-01 | `1440×900`, normal | Hero cleanup; reveal once; parallax ≤`10px`; CLS/long task/overflow/error `0` |
+| ML-02 | `768×900`, normal | Presentation motion `0`; nội dung/CTA/form đủ; overflow/error `0` |
+| ML-03 | `390×667`, normal | Presentation motion `0`; nội dung/CTA/form đủ; overflow/error `0` |
+| ML-04 | `360×640`, normal | Presentation motion `0`; nội dung/CTA/form đủ; overflow/error `0` |
+| ML-05 | `1440×900`, reduced | Animation/parallax `0`; nội dung hiện; pending/error `0` |
+| ML-06 | `390×667`, reduced | Animation/parallax `0`; nội dung hiện; pending/error `0` |
+
+Evidence nguồn: `D:/TOANAAS/TOAN_AAS_WEB_APP/evidence/motion-landing-toanaas-001/r1/candidate-io-green-run-1/` và `candidate-io-green-run-2/`. GitHub Tester tracker: `manhtoangreensky-wq/bot#884`.
