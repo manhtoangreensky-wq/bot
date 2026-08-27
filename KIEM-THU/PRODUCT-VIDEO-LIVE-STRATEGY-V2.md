@@ -7,7 +7,8 @@ nhung khong duoc dung de mo them job ngoai bang assignment ben duoi.
 
 ## 1. Pointer hien tai
 
-`CURRENT_POINTER=V2-02F` - publish the verified checklist to GitHub; no runtime action.
+`CURRENT_POINTER=V2-02G` - merge the docs/test checklist PR after shared release;
+no Product Video runtime action before this pointer is complete.
 
 - [x] `V2-00` Trend4 Facebook failure loop: PR #914 merged as
   `d92a98ddbc10ea4c626f75a65c2ddb58403a2fc6`; deploy run `33107893686`
@@ -50,9 +51,16 @@ terminal/pause-safe boundary before moving to another product/spec.
 - [x] `V2-02E` Locked 17 unique case/scenario IDs, fixture hashes, Add-on sets and
   source-generation prompts. Strategy verifier `8 passed in 6.89s`; calculated
   caps are 19 representative scenes + 9 quality scenes + 4 source-image tasks.
-- [-] `V2-02F` Commit/push this checklist, assignment JSON, committed script fixture
-  and machine verifier to GitHub. Pre-push gate `54 passed in 8.10s`; runtime
-  source remains untouched.
+- [x] `V2-02F` Checklist, assignment JSON, script fixture and machine verifier
+  committed as `2d490e3` and pushed to branch
+  `docs/product-video-live-strategy-v2`. Pre-push gate `54 passed in 8.10s`;
+  runtime source changed `0` files.
+- [-] `V2-02G` Create/squash-merge the docs/test PR after the latest SubDub
+  LIVE/CHROME/VPS release; verify main readback. Do not overlap its remote/live
+  action.
+- [x] `V2-02H` First representative runbook persisted at
+  `KIEM-THU/runbooks/PV2-R01-trend-video-upload.md`; Trend upload + strategy gate
+  `27 passed in 7.81s`. The runbook may not execute until `V2-02G` is complete.
 
 ## 2. Rules that must not change
 
