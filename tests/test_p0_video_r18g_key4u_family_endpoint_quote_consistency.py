@@ -92,7 +92,7 @@ def test_job_108_key4u_kling_without_exclusive_endpoint_blocks_before_http(monke
 
 def test_key4u_kling_with_exclusive_endpoint_uses_kling_endpoint(monkeypatch):
     captured = {}
-    env = _key4u_env(KEY4U_KLING_VIDEO_ENDPOINT="https://api.key4u.shop/kling/v1/videos/text2video")
+    env = _key4u_env(KEY4U_KLING_VIDEO_ENDPOINT="https://api.key4u.vn/kling/v1/videos/text2video")
     provider = _key4u_provider(env)
 
     def fake_open(url, payload=None, **kwargs):
@@ -104,9 +104,12 @@ def test_key4u_kling_with_exclusive_endpoint_uses_kling_endpoint(monkeypatch):
     result = provider.submit_video_job(_request())
 
     assert result.ok is True
-    assert captured["url"] == "https://api.key4u.shop/kling/v1/videos/text2video"
+    assert captured["url"] == "https://api.key4u.vn/kling/v1/videos/text2video"
     assert "/kling/" in captured["url"]
-    assert captured["payload"]["model"] == "kling-video"
+    assert captured["payload"]["model_name"] == "kling-v3"
+    assert captured["payload"]["cfg_scale"] == 0.5
+    assert captured["payload"]["callback_url"] == ""
+    assert "model" not in captured["payload"]
     assert "scenes" not in captured["payload"]
     assert "storyboard" not in captured["payload"]
     assert "image_paths" not in captured["payload"]
@@ -138,7 +141,7 @@ def test_low_and_basic_route_shopaikey_primary_key4u_fallback_only():
     assert any(item["provider"] == "key4u_video" for item in low["candidate_list_compact"])
     assert basic["ok"] is True
     assert basic["selected_provider"] == "shopaikey_video"
-    assert basic["selected_model"] == "veo3.1-fast"
+    assert basic["selected_model"] == "grok-video-3"
     key4u_basic = [item for item in basic["candidate_list_compact"] if item["provider"] == "key4u_video"]
     assert key4u_basic and key4u_basic[0]["role"] == "fallback"
 
@@ -147,7 +150,7 @@ def test_key4u_primary_override_on_basic_warns_and_blocks_without_contract():
     result = resolve_product_video_model(tier=300, provider_chain=["key4u_video"], env={"VIDEO_PROVIDER_CHAIN": "key4u_video"})
 
     assert result["ok"] is False
-    assert result["blocker"] == KEY4U_EXCLUSIVE_ENDPOINT_MISSING
+    assert result["blocker"] == KEY4U_MODEL_CONTRACT_MISSING
     assert result["cost_routing_warning"] == "COST_ROUTING_OVERRIDE_KEY4U_PRIMARY"
     assert result["public_low_tier_primary_provider_warning"] == "PUBLIC_LOW_TIER_PRIMARY_PROVIDER_NOT_COST_OPTIMAL"
 

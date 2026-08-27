@@ -478,13 +478,13 @@ class Key4UConfig:
     usage_auth_header_name: str = "Authorization"
     usage_auth_header_value: str = ""
     usage_auth_mode: str = ""
-    base_url: str = "https://api.key4u.shop"
-    openai_base_url: str = "https://api.key4u.shop/v1"
+    base_url: str = "https://api.key4u.vn"
+    openai_base_url: str = "https://api.key4u.vn/v1"
     public_chat_base_url: str = "https://api.key4u.vn"
-    minimax_base_url: str = "https://api.key4u.shop/minimax"
+    minimax_base_url: str = "https://api.key4u.vn/minimax"
     minimax_tts_base_url: str = ""
-    voice_base_url: str = "https://voice.key4u.shop/api/v1"
-    suno_base_url: str = "https://api.key4u.shop/suno"
+    voice_base_url: str = "https://voice.key4u.vn/api/v1"
+    suno_base_url: str = "https://api.key4u.vn/suno"
     smart_routing: bool = True
     public_enabled: bool = False
     admin_smoke_enabled: bool = True
@@ -529,7 +529,7 @@ class Key4UConfig:
 
 
 def config_from_env() -> Key4UConfig:
-    api_base = _env("KEY4U_API_BASE", _env("KEY4U_BASE_URL", "https://api.key4u.shop"))
+    api_base = _env("KEY4U_API_BASE", _env("KEY4U_BASE_URL", "https://api.key4u.vn"))
     usage_url = _env("KEY4U_USAGE_ENDPOINT", _env("KEY4U_USAGE_URL", _env("KEY4U_USAGE_CHECK_URL", "")))
     balance_url = _env("KEY4U_BALANCE_URL", "")
     wallet_balance_url = _env("KEY4U_WALLET_BALANCE_URL", "")
@@ -547,7 +547,7 @@ def config_from_env() -> Key4UConfig:
         public_chat_base_url=_env("KEY4U_PUBLIC_CHAT_BASE_URL", "https://api.key4u.vn"),
         minimax_base_url=_env("KEY4U_MINIMAX_BASE", safe_join_url(api_base, "/minimax")),
         minimax_tts_base_url=_env("KEY4U_MINIMAX_TTS_BASE", "https://api.key4u.vn/minimax"),
-        voice_base_url=_env("KEY4U_VOICE_BASE", "https://voice.key4u.shop/api/v1"),
+        voice_base_url=_env("KEY4U_VOICE_BASE", "https://voice.key4u.vn/api/v1"),
         suno_base_url=_env("KEY4U_SUNO_BASE", safe_join_url(api_base, "/suno")),
         smart_routing=_flag("KEY4U_SMART_ROUTING", "true"),
         public_enabled=_flag("KEY4U_PUBLIC_ENABLED", "false"),

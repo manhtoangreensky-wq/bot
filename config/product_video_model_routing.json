@@ -77,18 +77,18 @@
       "clip_seconds": 8,
       "preferred": [
         {
-          "provider": "key4u_video",
-          "model": "veo_3_1-fast",
-          "cost_tier": "common",
-          "role": "primary",
-          "request_defaults": {"duration": 8, "resolution": "1080p"}
-        },
-        {
           "provider": "shopaikey_video",
           "model": "veo3.1-fast",
           "cost_tier": "low",
+          "role": "primary",
+          "request_defaults": {"duration": 8, "resolution": "720p", "sound": true}
+        },
+        {
+          "provider": "key4u_video",
+          "model": "veo_3_1-fast",
+          "cost_tier": "common",
           "role": "fallback",
-          "request_defaults": {"duration": 8, "resolution": "720p"}
+          "request_defaults": {"duration": 8, "resolution": "1080p"}
         }
       ]
     },
@@ -155,13 +155,6 @@
           "cost_tier": "common",
           "role": "primary",
           "request_defaults": {"model_name": "kling-v3", "mode": "pro", "duration": 10, "sound": true}
-        },
-        {
-          "provider": "shopaikey_video",
-          "model": "grok-video-3-10s",
-          "cost_tier": "high",
-          "role": "fallback",
-          "request_defaults": {"duration": 10, "resolution": "1080p", "sound": true}
         }
       ]
     },

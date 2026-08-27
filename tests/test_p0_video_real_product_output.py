@@ -380,28 +380,33 @@ def test_unit_economics_reports_first_route_and_conservative_fallback_costs() ->
 
     assert fast["quality_name"] == "Nhanh gọn"
     assert fast["unit_xu"] == 80
-    assert fast["first_route_cost_vnd_per_scene"] == 2016
-    assert fast["conservative_fallback_cost_vnd_per_scene"] == 2450
-    assert fast["conservative_margin_percent"] == 69.4
-    assert fast["profitable_after_discount"] is True
+    assert fast["first_route_cost_vnd_per_scene"] == 2275
+    assert fast["conservative_fallback_cost_vnd_per_scene"] == 10575
+    assert fast["conservative_margin_percent"] == -32.2
+    assert fast["profitable_after_discount"] is False
+    assert fast["cost_source"] == "config/product_video_price_route_map_20260827.json"
 
     assert balanced["quality_name"] == "Cân bằng rõ nét"
     assert balanced["unit_xu"] == 200
     assert balanced["first_route_cost_vnd_per_scene"] == 1300
-    assert balanced["conservative_fallback_cost_vnd_per_scene"] == 6457
-    assert balanced["conservative_margin_percent"] == 67.7
+    assert balanced["conservative_fallback_cost_vnd_per_scene"] == 7386
+    assert balanced["conservative_margin_percent"] == 63.1
     assert balanced["profitable_after_discount"] is True
+    assert balanced["cost_source"] == "config/product_video_price_route_map_20260827.json"
 
 
-def test_80_and_200_xu_packages_stay_profitable_at_maximum_scene_discount() -> None:
-    for tier_id in (400, 200):
-        report = video_ai_real_pricing.video_quality_unit_economics(
-            tier_id,
-            scene_count=20,
-        )
-        assert report["discount_percent"] == 20
-        assert report["conservative_gross_profit_vnd"] > 0
-        assert report["profitable_after_discount"] is True
+def test_current_map_exposes_loss_risk_instead_of_using_stale_provider_costs() -> None:
+    fast = video_ai_real_pricing.video_quality_unit_economics(400, scene_count=20)
+    balanced = video_ai_real_pricing.video_quality_unit_economics(200, scene_count=20)
+
+    assert fast["discount_percent"] == 20
+    assert fast["first_route_gross_profit_vnd"] > 0
+    assert fast["conservative_gross_profit_vnd"] == -83500
+    assert fast["profitable_after_discount"] is False
+
+    assert balanced["discount_percent"] == 20
+    assert balanced["conservative_gross_profit_vnd"] == 172280
+    assert balanced["profitable_after_discount"] is True
 
 
 def _product_video_project(conn: sqlite3.Connection, *, user_id: int) -> dict:

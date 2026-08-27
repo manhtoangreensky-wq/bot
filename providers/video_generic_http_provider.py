@@ -117,11 +117,13 @@ VIDEO_RESULT_URL_KEYS = {
 }
 VIDEO_RESULT_CONTAINER_KEYS = {
     "data",
+    "file",
     "result",
     "output",
     "outputs",
     "files",
     "artifacts",
+    "task_result",
     "videos",
     "task",
 }
@@ -306,6 +308,60 @@ def _safe_provider_error_message(payload: Any, limit: int = 180) -> str:
                 text = "; ".join([*context_parts[:3], f"message={text}"])
             return text[:limit]
     return "; ".join(context_parts[:3])[:limit] if context_parts else ""
+
+
+def _provider_terminal_error_debug(payload: Any) -> dict[str, Any]:
+    """Extract a terminal upstream error without retaining the raw response."""
+
+    values: list[tuple[str, str]] = []
+
+    def visit(value: Any, path: str = "$", depth: int = 0) -> None:
+        if depth > 8:
+            return
+        if isinstance(value, dict):
+            for key, child in value.items():
+                child_path = f"{path}.{key}"
+                if str(key).lower() in {"code", "status", "reason", "message", "error", "detail", "type"}:
+                    if not isinstance(child, (dict, list)):
+                        values.append((str(key).lower(), str(child)))
+                visit(child, child_path, depth + 1)
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, f"{path}[{index}]", depth + 1)
+        elif isinstance(value, str):
+            text = value.strip()
+            if text.startswith(("{", "[")):
+                try:
+                    visit(json.loads(text), path, depth + 1)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    pass
+
+    visit(payload)
+    haystack = " ".join(text for _, text in values).upper()
+    codes = {
+        int(text)
+        for key, text in values
+        if key == "code" and str(text).strip().isdigit()
+    }
+    quota_reached = bool(
+        429 in codes
+        or "RESOURCE_EXHAUSTED" in haystack
+        or "PUBLIC_ERROR_USER_QUOTA_REACHED" in haystack
+        or "QUOTA EXCEEDED" in haystack
+    )
+    if not quota_reached:
+        return {}
+    reason = (
+        "PUBLIC_ERROR_USER_QUOTA_REACHED"
+        if "PUBLIC_ERROR_USER_QUOTA_REACHED" in haystack
+        else "RESOURCE_EXHAUSTED"
+    )
+    return {
+        "provider_terminal_blocker": "quota_exhausted",
+        "provider_terminal_reason": reason,
+        "provider_terminal_http_code": 429,
+        "provider_error_message_safe": "Quota exceeded",
+    }
 
 
 def _submit_error_classification(status_code: int, error: Any = "") -> tuple[str, bool, bool]:
@@ -628,6 +684,57 @@ def build_key4u_video_payload(request: VideoGenerationRequest, env: dict[str, st
     return data
 
 
+def _key4u_wire_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    data = dict(payload or {})
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    family = str(metadata.get("selected_family") or "").strip().lower()
+    defaults = metadata.get("selected_request_defaults")
+    defaults = defaults if isinstance(defaults, dict) else {}
+    if family in {"kling", "keling"}:
+        raw_sound = data.get("sound") if data.get("sound") is not None else defaults.get("sound")
+        sound_enabled = str(raw_sound or "").strip().lower() not in {
+            "",
+            "0",
+            "false",
+            "off",
+            "no",
+            "none",
+        }
+        return {
+            "model_name": str(data.get("model_name") or defaults.get("model_name") or "kling-v3"),
+            "prompt": str(data.get("prompt") or "")[:500],
+            "negative_prompt": str(data.get("negative_prompt") or "")[:200],
+            "cfg_scale": 0.5,
+            "mode": str(data.get("mode") or defaults.get("mode") or "std"),
+            "aspect_ratio": str(data.get("aspect_ratio") or data.get("ratio") or "9:16"),
+            "duration": int(data.get("duration") or data.get("duration_seconds") or 5),
+            "callback_url": "",
+            "sound": "on" if sound_enabled else "off",
+        }
+    if family == "minimax_hailuo":
+        wire = {
+            "model": str(data.get("model") or ""),
+            "prompt": str(data.get("prompt") or "")[:2000],
+            "duration": int(data.get("duration") or data.get("duration_seconds") or 6),
+        }
+        resolution = str(data.get("resolution") or defaults.get("resolution") or "").strip()
+        if resolution:
+            wire["resolution"] = resolution
+        return wire
+    return data
+
+
+def _key4u_openai_video_fields(payload: dict[str, Any]) -> dict[str, str]:
+    ratio = str(payload.get("aspect_ratio") or payload.get("ratio") or "9:16").strip()
+    return {
+        "model": str(payload.get("model") or ""),
+        "prompt": str(payload.get("prompt") or "")[:4000],
+        "seconds": str(int(payload.get("duration") or payload.get("duration_seconds") or 8)),
+        "size": ratio.replace(":", "x"),
+        "watermark": "false",
+    }
+
+
 def build_shopaikey_video_payload(request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str] | None = None) -> dict[str, Any]:
     data = _base_video_payload(request, env)
     model = str(
@@ -914,6 +1021,70 @@ class GenericHttpVideoProvider:
                 "response_shape": _response_shape({}),
             }
 
+    def _open_multipart_form(self, url: str, fields: dict[str, Any], *, timeout: int = 90) -> dict[str, Any]:
+        boundary = f"toanaas-{time.time_ns():x}"
+        chunks: list[bytes] = []
+        for name, value in fields.items():
+            chunks.extend(
+                [
+                    f"--{boundary}\r\n".encode("ascii"),
+                    f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("ascii"),
+                    str(value).encode("utf-8"),
+                    b"\r\n",
+                ]
+            )
+        chunks.append(f"--{boundary}--\r\n".encode("ascii"))
+        headers = self._headers()
+        headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+        request = urllib.request.Request(
+            url,
+            data=b"".join(chunks),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                body = response.read()
+                try:
+                    parsed = json.loads(body.decode("utf-8", errors="replace"))
+                except Exception:
+                    parsed = {}
+                    return {
+                        "ok": False,
+                        "status_code": int(getattr(response, "status", 200)),
+                        "body": parsed,
+                        "error": "invalid_json",
+                        "response_shape": _response_shape(parsed),
+                    }
+                return {
+                    "ok": int(getattr(response, "status", 200)) < 400,
+                    "status_code": int(getattr(response, "status", 200)),
+                    "body": parsed,
+                    "response_shape": _response_shape(parsed),
+                }
+        except urllib.error.HTTPError as exc:
+            try:
+                parsed = json.loads(exc.read().decode("utf-8", errors="replace"))
+            except Exception:
+                parsed = {}
+            return {
+                "ok": False,
+                "status_code": int(exc.code),
+                "body": parsed,
+                "error": "http_error",
+                "response_shape": _response_shape(parsed),
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "status_code": 0,
+                "body": {},
+                "error": type(exc).__name__,
+                "exception_class": type(exc).__name__,
+                "exception_message_safe": _safe_exception_message(exc),
+                "response_shape": _response_shape({}),
+            }
+
     def submit_video_job(self, request: VideoGenerationRequest) -> VideoSubmitResult:
         caps = self.capabilities()
         if not caps.get("configured"):
@@ -997,7 +1168,23 @@ class GenericHttpVideoProvider:
             clean_metadata.pop("provider_poll_url_override", None)
             payload["metadata"] = clean_metadata
         auth_name, auth_value = self._auth_header()
-        result = self._open_json(submit_url, payload, timeout=int(self.env.get("VIDEO_PROVIDER_SUBMIT_TIMEOUT_SECONDS") or 90))
+        wire_payload = _key4u_wire_payload(payload) if self.provider_name == "key4u_video" else payload
+        if (
+            self.provider_name == "key4u_video"
+            and str(payload_metadata.get("provider_interface") or "") == "key4u_google_veo_exclusive"
+            and urllib.parse.urlparse(submit_url).path.rstrip("/").endswith("/v1/videos")
+        ):
+            result = self._open_multipart_form(
+                submit_url,
+                _key4u_openai_video_fields(payload),
+                timeout=int(self.env.get("VIDEO_PROVIDER_SUBMIT_TIMEOUT_SECONDS") or 90),
+            )
+        else:
+            result = self._open_json(
+                submit_url,
+                wire_payload,
+                timeout=int(self.env.get("VIDEO_PROVIDER_SUBMIT_TIMEOUT_SECONDS") or 90),
+            )
         body = result.get("body") or {}
         task_id, task_path, video_id, video_path = parse_submit_task_ids(body)
         result_url, result_url_path = parse_result_url(body, str(self.env.get(self.result_field_env) or "result_url"))
@@ -1020,6 +1207,8 @@ class GenericHttpVideoProvider:
             "provider_interface": str(payload_metadata.get("provider_interface") or ""),
             "provider_endpoint_source": str(payload_metadata.get("provider_endpoint_source") or ""),
             "provider_submit_url_override_used": bool(payload_metadata.get("provider_submit_url_override")),
+            "provider_poll_url_override": str(payload_metadata.get("provider_poll_url_override") or ""),
+            "provider_poll_url_override_used": bool(payload_metadata.get("provider_poll_url_override")),
             "poll_url_configured": bool(caps.get("poll_url_configured")),
             "auth_configured": bool(caps.get("auth_configured")),
             "auth_present": bool(str(auth_value or "").strip()),
@@ -1097,11 +1286,11 @@ class GenericHttpVideoProvider:
         raw_debug["provider_submit_blocker"] = "provider_submit_response_invalid_shape"
         return VideoSubmitResult(ok=False, provider_name=self.provider_name, provider_status=status, error_code="provider_submit_response_invalid_shape", raw=raw_debug)
 
-    def poll_video_job(self, provider_task_id: str) -> VideoPollResult:
+    def poll_video_job(self, provider_task_id: str, *, poll_url_override: str = "") -> VideoPollResult:
         caps = self.capabilities()
         if not caps.get("configured"):
             return VideoPollResult(ok=False, provider_name=self.provider_name, provider_task_id=provider_task_id, status="failed", error_code="provider_not_configured")
-        poll_url = self._poll_url()
+        poll_url = str(poll_url_override or self._poll_url()).strip()
         encoded = urllib.parse.quote(str(provider_task_id or ""))
         if "{task_id}" in poll_url:
             url = poll_url.replace("{task_id}", encoded)
@@ -1125,6 +1314,7 @@ class GenericHttpVideoProvider:
         progress = _first_value(body, ("data.progress", "data.progress_percent", "progress", "progress_percent"))
         progress_value = _parse_progress_value(progress)
         fail_reason = _first_value(body, ("data.fail_reason", "data.error", "data.message", "fail_reason", "error", "message"))
+        terminal_error = _provider_terminal_error_debug(body)
         is_shopaikey_status = self.provider_name == "shopaikey_video"
         raw_debug = {
             "smoke_stage": "poll_response_parse",
@@ -1147,6 +1337,7 @@ class GenericHttpVideoProvider:
             "provider_progress_source": "data.progress" if progress not in (None, "") else "none",
             "http_200_not_used_as_progress": True,
             "shopaikey_fail_reason": fail_reason if fail_reason not in (None, "") else "",
+            **terminal_error,
         }
         if is_shopaikey_status:
             raw_debug.update(
@@ -1190,6 +1381,9 @@ class GenericHttpVideoProvider:
             ok = False
             status = "failed"
             error_code = "provider_status_unknown"
+            raw_debug["provider_poll_blocker"] = error_code
+        elif status in {"failed", "cancelled"} and terminal_error.get("provider_terminal_blocker"):
+            error_code = str(terminal_error["provider_terminal_blocker"])
             raw_debug["provider_poll_blocker"] = error_code
         return VideoPollResult(
             ok=ok,

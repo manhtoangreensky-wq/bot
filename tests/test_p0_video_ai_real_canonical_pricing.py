@@ -24,7 +24,7 @@ def _source_between(start: str, end: str) -> str:
     return BOT_SOURCE.split(start, 1)[1].split(end, 1)[0]
 
 
-def test_provider_exchange_rates_are_provider_specific_with_owner_default():
+def test_legacy_provider_exchange_rates_are_marked_non_routing_history():
     rows = {
         row["provider_key"]: row
         for row in pricing.provider_exchange_rate_catalog()
@@ -42,9 +42,11 @@ def test_provider_exchange_rates_are_provider_specific_with_owner_default():
     )
     assert all(row["approval_status"] == "canonical_approved" for row in rows.values())
     assert all(row["catalog_version"] == "2026-08-11.fx.1" for row in rows.values())
+    assert all(row["runtime_routing_authority"] is False for row in rows.values())
+    assert all(row["scope"] == "legacy_customer_price_history" for row in rows.values())
 
 
-def test_video_public_prices_use_owner_default_rate_for_both_providers():
+def test_video_public_prices_and_runtime_routes_use_the_saved_current_map():
     video_prices = {
         row["key"]: row["unit_xu"]
         for row in pricing.model_catalog()
@@ -62,14 +64,29 @@ def test_video_public_prices_use_owner_default_rate_for_both_providers():
         "cinematic_multishot_10": 2360,
     }
 
+    saved_rows = {
+        int(row["tier_id"]): row
+        for row in pricing.product_video_price_route_map()["tiers_sorted_by_customer_price"]
+    }
     for row in pricing.model_catalog():
-        highest_usd = max(
-            Decimal(str(cost["usd_per_scene"]))
-            for cost in row["provider_costs"]
+        tier_id = next(
+            tier
+            for tier, model_key in pricing.QUALITY_TIER_MODEL_KEYS.items()
+            if model_key == row["key"]
         )
-        expected_vnd = int(highest_usd * Decimal("3500"))
-        assert row["public_pricing_usd_to_vnd"] == 3500
-        assert row["pricing_cost_vnd"] == expected_vnd
+        saved = saved_rows[tier_id]
+        assert row["unit_xu"] == saved["customer_unit_xu"]
+        assert row["customer_price_source"] == (
+            "config/product_video_price_route_map_20260827.json"
+        )
+        assert row["customer_price_derivation"] == (
+            "fixed_owner_price_not_recomputed_from_provider_cost"
+        )
+        assert row["legacy_provider_costs_are_runtime_authority"] is False
+        assert [
+            f'{cost["adapter_key"]}:{cost["model"]}'
+            for cost in row["provider_costs"]
+        ] == saved["runtime_order"]
 
 
 def test_video_catalog_has_ten_stable_tier_ids_in_owner_order():
@@ -126,7 +143,7 @@ def test_each_video_tier_resolves_to_its_exact_catalog_model_and_duration():
     expected = {
         200: ("low", "shopaikey_video", "grok-video-3", 5),
         300: ("basic", "shopaikey_video", "grok-video-3", 5),
-        400: ("common", "key4u_video", "veo_3_1-fast", 8),
+        400: ("common", "shopaikey_video", "veo3.1-fast", 8),
         500: ("advanced", "shopaikey_video", "veo3.1-fast", 5),
         600: ("standard", "shopaikey_video", "veo3.1-fast", 5),
         700: ("long", "key4u_video", "kling-video", 15),
