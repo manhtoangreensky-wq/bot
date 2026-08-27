@@ -253536,7 +253536,13 @@ async def handle_video_dubbing_callback(
                     output_format="video_subtitle",
                     processing="1",
                 )
-            await safe_edit_or_send(query, "TOAN AAS đang tạo video phụ đề + lồng tiếng hoàn chỉnh...")
+            try:
+                await safe_edit_or_send(query, "TOAN AAS đang tạo video phụ đề + lồng tiếng hoàn chỉnh...")
+            except Exception as exc:
+                logger.warning(
+                    "SubDub combo progress update failed; continuing | error=%s",
+                    type(exc).__name__,
+                )
             result = await execute_subtitle_plus_dub_full_from_callback(query, context, state, lang)
             if str(result.get("status") or "") == "AUTO_EXACT_CONFIRMATION_REQUIRED":
                 return await render_subdub_auto_exact_confirmation(

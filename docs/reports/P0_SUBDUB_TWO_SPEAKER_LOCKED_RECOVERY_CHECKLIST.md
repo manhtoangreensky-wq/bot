@@ -18,11 +18,11 @@
 
 - Current SPEC: `SPEC-08`.
 - Current SUBSPEC: `SPEC-08.2`.
-- Current phase: `FAILURE LOOP / pre-push review and latest-main rebase`.
-- Production action active: `one-line scoped Deepgram model correction verified locally`.
-- Telegram/provider job active: `NO; job #EE4E7E69CD terminal before cast/TTS/mux`.
+- Current phase: `FAILURE LOOP / combo progress edit 502 source-only GREEN`.
+- Production action active: `best-effort progress render only; pipeline executor unchanged`.
+- Telegram/provider job active: `NO; latest callback terminal before pipeline/job creation`.
 - Wallet mutation: `0`.
-- Next allowed action: rebase onto latest Product Video main, rerun focused
+- Next allowed action: wait Product Video release, rebase latest main, run focused
   post-rebase gate, then one PR/deploy/same-fixture retry.
 - Next forbidden action: edit classifier/cast/audio/pricing/multi module, start a
   second live job, or move to standalone/multi before this failure loop ships.
@@ -42,16 +42,23 @@
 
 ## 1. Source truth và phạm vi khóa
 
-### Mốc rollback bắt buộc
+### Mốc rollback composite bắt buộc
 
-| Trường | Giá trị |
-| --- | --- |
-| PR | `#842` |
-| SHA | `71c7e881f2af24d59c4873f8ca3999f59618daec` |
-| Job đã giao video | `#7BC3037DF8` |
-| Telegram video message | `26895` |
-| Telegram receipt message | `26896` |
-| charged_xu | `0` |
+| Phần | Mốc | Giá trị/bằng chứng |
+| --- | --- | --- |
+| Engine/PCM đã giao MP4 | PR `#842` | SHA `71c7e881...`; job `#7BC3037DF8`; video `26895`; receipt `26896`; charged `0` |
+| Bảng/receipt hoàn thiện Owner nhớ | PR `#846` | SHA `2ccba0e...`; giữ snapshot receipt sau delivery, không đổi classifier |
+| Full lane gần nhất trước pitch drift | PR `#852` | SHA `ebe77bc...`; gồm #846 và callback ACK best-effort |
+| Mốc bị loại | PR `#853` | SHA `7b4053a...`; thêm band-pass/denoise và hạ pitch-frame `2 → 1` |
+
+Không có một SHA duy nhất đại diện cả engine đã giao MP4 và bảng receipt mới
+nhất. Rollback đúng là **composite**: engine/PCM pre-#853 của #842, receipt #846,
+callback resilience #852, rồi giữ các correction pricing/SRT/UI đã có test.
+PR #847 là Product Video, không thuộc SubDub.
+
+Historical job `#7BC3037DF8` dùng fixture SHA `a89b16b8...`, không phải fixture
+Owner acceptance hiện tại `85c8793d...`. Vì vậy mốc lịch sử chỉ chứng minh
+engine baseline; fixture hiện tại vẫn bắt buộc giao MP4 live mới.
 
 ### Fixture acceptance cuối
 
@@ -91,8 +98,9 @@
 
 - `services/subdub_blackboxes/auto_multi_speaker.py`: byte-locked; no edit.
 - Multi callback marker/state (`auto_speaker_lane="multi"`): no semantic edit.
-- `services/subdub_speaker_cast.py`: already equal to PR #842; no edit unless
-  byte comparison later disproves this statement.
+- `services/subdub_speaker_cast.py`: Git blob `9f763b38...`, equal at PR #842,
+  #846 and #852; no edit.
+- `bot.py`: hunk receipt #846 and callback ACK #852 must remain present.
 - Current two-button voice UI labels/order: preserve; both buttons remain one row.
 - Exact pricing and receipt improvements from PR #885: preserve.
 - Auto combo SRT companion from PR #887: preserve.
@@ -108,6 +116,12 @@
 - [x] Confirm historical delivered job `#7BC3037DF8`.
 - [x] Confirm Telegram video/receipt `26895` / `26896`.
 - [x] Confirm admin charged `0 Xu`.
+- [x] Confirm PR #846 is the post-delivery receipt/table anchor, not a
+  classifier change.
+- [x] Confirm PR #852 is the last SubDub full-lane merge before #853.
+- [x] Confirm PR #847 belongs to Product Video and is not a SubDub anchor.
+- [x] Confirm historical delivered fixture SHA `a89b16...` differs from current
+  acceptance fixture SHA `85c879...`.
 
 Evidence:
 
@@ -453,7 +467,10 @@ REJECT_REASON: empty
   multilingual, noisy/far-field batch audio and supports Chinese `zh`.
 - [x] Minimal GREEN changes only the diarized model to `nova-3-general`.
 - [x] Default/non-diarized request remains `nova-2`.
-- [ ] PR/deploy/runtime sync then same-fixture live retry reaches past ASR.
+- [x] PR `#903` merged as `43d8664...`; deploy run `33015967128` SUCCESS;
+  bot/worker same SHA and owner generation heartbeat accepted.
+- [!] Same-fixture retry did not reach ASR because Telegram progress edit 502
+  terminalized the callback first; continued in `SPEC-08.0B`.
 
 Measured source evidence:
 
@@ -470,6 +487,30 @@ PROTECTED_HASHES: auto_multi_speaker=55AAB894...;
 subdub_speaker_cast=DE93620F...
 PRODUCTION_DIFF: bot.py +1 line in scoped diarized request helper
 ```
+
+### SPEC-08.0B — Live failure loop: combo progress edit 502
+
+- [x] Same-flow final confirm reached callback `videodub|combo_full_dub`.
+- [x] Telegram Bot API returned `502 Bad Gateway` at `bot.py:253539` while
+  rendering the initial combo progress text.
+- [x] No pipeline workspace/job/provider/wallet mutation occurred.
+- [x] RED reached the exact line with pipeline call count `0`:
+  `1 failed, 1 warning in 523.88s`.
+- [x] Minimal patch catches only the progress render exception; state remains
+  final-confirmed and executor runs once.
+- [x] GREEN: `1 passed, 1 warning in 662.31s`.
+- [x] Protected batch: new 502 selector + background status `2` cases + exact
+  #842 engine blob passed; `4 passed`. Two adjacent legacy callback tests failed
+  before their target because their test fixtures omit `created_at_ts`; same
+  failure reproduced on exact `origin/main 43d8664`: `2 failed, 1 warning in
+  521.11s`, same two test names. `NEW_FAILURES=0`.
+- [x] `py_compile bot.py` and regression test exit `0`; diff-check clean.
+- [x] Production diff is `7` added / `1` removed line, only around the combo
+  progress edit. Engine/cast/multi hashes unchanged.
+- [x] Rebased onto exact `origin/main 43d8664`; post-rebase GREEN
+  `1 passed, 1 warning in 464.66s`; compile/diff/hash gates pass.
+- [ ] Push draft PR/checks while shared live belongs to Product Video; merge,
+  deploy and same live retry only after exact Product Video releases.
 
 ### SPEC-08.1 — Pre-admission
 
