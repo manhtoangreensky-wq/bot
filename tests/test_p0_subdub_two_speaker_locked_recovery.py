@@ -59,19 +59,20 @@ def test_audio_mix_main_screen_keeps_both_layers_in_one_row():
     assert same_row is not None
 
 
-def test_audio_layers_restore_existing_preset_and_numeric_controls():
+def test_audio_layers_keep_compact_numeric_controls_without_presets():
     mix_keyboard = _function_source(BOT_SOURCE, "subdub_audio_mix_keyboard")
     layer_keyboard = _function_source(BOT_SOURCE, "subdub_audio_layer_keyboard")
     callback = _function_source(BOT_SOURCE, "handle_video_dubbing_callback")
 
-    for value in (20, 40, 60, 80, 100):
-        assert f"videodub|audio_original_volume|{value}" in mix_keyboard
-    for value in (80, 100, 120, 150, 200):
-        assert f"videodub|audio_dub_volume|{value}" in mix_keyboard
+    assert "videodub|audio_original" in mix_keyboard
+    assert "videodub|audio_dub" in mix_keyboard
+    assert "audio_original_volume" not in mix_keyboard
+    assert "audio_dub_volume" not in mix_keyboard
     assert "videodub|audio_original_input" in layer_keyboard
     assert "videodub|audio_dub_input" in layer_keyboard
-    assert '"audio_original_volume"' in callback
-    assert '"audio_dub_volume"' in callback
+    assert '"audio_original_input", "audio_dub_input"' in callback
+    assert '"audio_original_volume"' not in callback
+    assert '"audio_dub_volume"' not in callback
 
 
 def test_multi_lane_file_is_not_part_of_two_speaker_rollback():
@@ -135,7 +136,7 @@ def test_pr842_classifier_classifies_each_speaker_independently(
         ("subtitle_plus_dub", "subtitle_plus_dub"),
     ),
 )
-def test_audio_preset_callbacks_persist_in_both_dub_lanes(
+def test_numeric_audio_inputs_persist_in_both_dub_lanes(
     monkeypatch,
     mode,
     active_flow,
@@ -176,18 +177,37 @@ def test_audio_preset_callbacks_persist_in_both_dub_lanes(
         async def answer(self):
             return None
 
+    class InputMessage:
+        def __init__(self, text):
+            self.text = text
+            self.replies = []
+
+        async def reply_text(self, text, **kwargs):
+            self.replies.append({"text": text, **kwargs})
+            return self.replies[-1]
+
     update = SimpleNamespace(callback_query=Query())
-    for callback in (
-        "videodub|audio_original_volume|40",
-        "videodub|audio_dub_volume|150",
+    for callback, expected_step, numeric_value in (
+        ("videodub|audio_original_input", "subdub_original_volume_input", "40"),
+        ("videodub|audio_dub_input", "subdub_dub_volume_input", "150"),
     ):
         update.callback_query.data = callback
         asyncio.run(bot.handle_video_dubbing_callback(update, SimpleNamespace()))
+        assert state["step"] == expected_step
+        message = InputMessage(numeric_value)
+        numeric_update = SimpleNamespace(
+            message=message,
+            effective_user=SimpleNamespace(id=user_id),
+        )
+        assert asyncio.run(
+            bot.handle_video_dubbing_pending_text(numeric_update, SimpleNamespace())
+        ) is True
+        assert len(message.replies) == 1
 
-    assert state["step"] == "audio_mix"
+    assert state["step"] == "audio_dub"
     assert state["keep_original_audio"] == "1"
     assert state["original_audio_volume_percent"] == 40
     assert state["dubbed_voice_volume_percent"] == 150
     assert state["audio_mix_mode"] == "keep_original"
-    assert state["volume_config_source"] == "user_audio_mix_controls"
+    assert state["volume_config_source"] == "user_numeric_audio_mix"
     assert len(rendered) == 2

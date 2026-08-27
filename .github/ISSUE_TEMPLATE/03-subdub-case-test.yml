@@ -23,7 +23,7 @@ body:
     id: flow
     attributes:
       label: Flow và stage
-      description: Ghi upload fixture hash, lane, ngôn ngữ, audio mix, confirm và từng stage ASR/cast/TTS/mux/delivery.
+      description: Ghi upload fixture hash, lane, ngôn ngữ, ảnh menu numeric-only (2 layer cùng hàng, không preset), giá trị gốc/lồng, confirm và từng stage ASR/cast/TTS/mux/delivery.
     validations:
       required: true
   - type: textarea

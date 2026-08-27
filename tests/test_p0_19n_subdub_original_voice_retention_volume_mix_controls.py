@@ -2,6 +2,7 @@ import asyncio
 import inspect
 
 import bot
+import pytest
 
 
 def test_audio_mix_controls_enabled_for_dub_modes():
@@ -42,7 +43,7 @@ def test_audio_mix_keep_original_persists_percentages():
     assert "150%" in lines
 
 
-def test_audio_mix_keyboard_restores_presets_and_keeps_numeric_layers():
+def test_audio_mix_keyboard_is_compact_and_keeps_numeric_layers():
     keyboard = bot.subdub_audio_mix_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB})
     labels = [button.text for row in keyboard.inline_keyboard for button in row]
     callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
@@ -52,12 +53,101 @@ def test_audio_mix_keyboard_restores_presets_and_keeps_numeric_layers():
         "🔊 Âm thanh gốc",
         "🎙 Giọng lồng tiếng",
     ]
-    for value in (20, 40, 60, 80, 100):
-        assert f"videodub|audio_original_volume|{value}" in callbacks
-    for value in (80, 100, 120, 150, 200):
-        assert f"videodub|audio_dub_volume|{value}" in callbacks
+    assert labels == ["🔊 Âm thanh gốc", "🎙 Giọng lồng tiếng", "⬅️ Quay lại"]
+    assert callbacks == [
+        "videodub|audio_original",
+        "videodub|audio_dub",
+        "videodub|back_audio_mix",
+    ]
+    original_callbacks = [
+        button.callback_data
+        for row in bot.subdub_audio_layer_keyboard({}, "original", "vi").inline_keyboard
+        for button in row
+    ]
+    dub_callbacks = [
+        button.callback_data
+        for row in bot.subdub_audio_layer_keyboard({}, "dub", "vi").inline_keyboard
+        for button in row
+    ]
+    assert "videodub|audio_original_input" in original_callbacks
+    assert "videodub|audio_dub_input" in dub_callbacks
+    assert not any("audio_original_volume" in callback for callback in callbacks)
+    assert not any("audio_dub_volume" in callback for callback in callbacks)
     assert all(len(label) <= 32 for label in labels)
     assert not any(term in public for term in ("provider", "api", "handler", "callback", "debug", "asr", "tts", "mux", "ffmpeg"))
+
+
+@pytest.mark.parametrize(
+    ("mode", "active_flow", "confirm_keyboard"),
+    (
+        (bot.VIDEO_SUBTITLE_MODE_DUB, "dub_audio", bot.video_dubbing_confirm_keyboard),
+        (
+            bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+            bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+            bot.subtitle_plus_dub_confirm_keyboard,
+        ),
+    ),
+    ids=("standalone-dub", "subtitle-plus-dub"),
+)
+@pytest.mark.parametrize(
+    "voice_fields",
+    (
+        {"voice_kind": "default_female", "selected_voice": "default_female"},
+        {"voice_kind": "default_male", "selected_voice": "default_male"},
+        {"voice_kind": "saved_voice", "voice_profile_id": 42},
+        {"voice_kind": "custom_voice", "provider_voice_id": "custom-voice"},
+        {"voice_kind": "auto_speaker_gender", "voice_selection_mode": "auto_speaker"},
+        {
+            "voice_kind": "auto_speaker_gender",
+            "voice_selection_mode": "auto_speaker",
+            "auto_speaker_lane": "multi",
+        },
+    ),
+    ids=(
+        "default-female",
+        "default-male",
+        "voice-vault",
+        "custom-voice",
+        "auto-two-speaker",
+        "auto-multi-speaker",
+    ),
+)
+def test_compact_numeric_audio_ui_is_shared_by_both_lanes_and_every_voice_mode(
+    mode,
+    active_flow,
+    confirm_keyboard,
+    voice_fields,
+):
+    state = {
+        "mode": mode,
+        "process_type": mode,
+        "video_processing_mode": mode,
+        "active_flow": active_flow,
+        **voice_fields,
+    }
+
+    assert bot.subdub_audio_mix_available(state) is True
+    confirm_callbacks = [
+        button.callback_data
+        for row in confirm_keyboard("vi", state).inline_keyboard
+        for button in row
+    ]
+    mix_keyboard = bot.subdub_audio_mix_keyboard("vi", state)
+    mix_callbacks = [
+        button.callback_data
+        for row in mix_keyboard.inline_keyboard
+        for button in row
+    ]
+    mix = bot.subdub_audio_mix_state_fields(state)
+
+    assert "videodub|audio_mix" in confirm_callbacks
+    assert mix_callbacks == [
+        "videodub|audio_original",
+        "videodub|audio_dub",
+        "videodub|back_audio_mix",
+    ]
+    assert mix["original_audio_volume_percent"] == 0
+    assert mix["dubbed_voice_volume_percent"] == 100
 
 
 def test_confirm_keyboard_shows_audio_mix_for_dub_modes_only():
@@ -178,6 +268,6 @@ def test_dynamic_volume_ui_spec_is_enabled_and_numeric():
 
     assert spec["task"] == "P0.19N SubDub Original/Dub Volume Input UI"
     assert spec["enabled"] is True
-    assert spec["public_fixed_percentage_grid"] is True
+    assert spec["public_fixed_percentage_grid"] is False
     assert spec["original_audio"]["numeric_input_max"] == 100
     assert spec["dub_voice"]["numeric_input_max"] == 200

@@ -63,6 +63,8 @@ Nguồn thiết kế trước: `docs/superpowers/plans/2026-08-14-subdub-per-spe
 | Deepgram model dùng chung từ `AgentDeepgram.REQUEST_PARAMS` | Default/manual giữ `nova-2`; auto diarized override call-scoped thành `nova-3-general` | ⚠️ Tách theo năng lực |
 | Auto 2 giọng và multi dùng chung cast contract | Engine hai giọng rollback exact PR #842; multi module byte-locked riêng | ✅ Cô lập |
 | Admin không trừ Xu | Receipt vẫn phải hiển thị đủ giá niêm yết; settlement admin `charged_xu=0` | ✅ Còn dùng |
+| Âm lượng chọn bằng các nút phần trăm cố định | PR #896 thêm `10` preset là regression; hiện dùng hai layer cùng một hàng và nhập số gốc `0–100`, lồng `0–200` | ❌ Bỏ preset, giữ numeric |
+| Mỗi kiểu giọng có bảng âm thanh riêng | Cả `2` lane và `6` kiểu giọng dùng chung một audio owner; test ma trận `12` case | ⚠️ Tài liệu cũ không còn đúng |
 
 Chỗ tài liệu/code cũ không còn đúng: request diarization trước live job
 `#EE4E7E69CD` kế thừa `model=nova-2`. Fixture Mandarin hai người có audio đo
@@ -70,6 +72,12 @@ Chỗ tài liệu/code cũ không còn đúng: request diarization trước live
 `bot.py:subdub_deepgram_request_params(require_diarization=True)` sang
 `nova-3-general`; default route không đổi. LIVE output vẫn pending cho tới khi
 có MP4 Telegram thật.
+
+Chỗ UI cũ không còn đúng: ảnh/bảng preset `Gốc 20–100%` và `Lồng 80–200%` là
+code thêm tại PR #896, không phải baseline được Owner khóa. Bằng chứng Git cho
+thấy pre-#896 đã có callback nhập số; production rollback hiện chỉ xóa `32`
+dòng preset/action và đổi `public_fixed_percentage_grid=True → False`. Các
+numeric callback, pending state, mux, pricing, wallet và engine không đổi.
 
 GitHub tester cloud chưa được thay đổi trong đợt này: lệnh `gh label/issue`
 trả HTTP `401` ngày 27/08/2026. Case local dưới `KIEM-THU/` là nguồn chuẩn để

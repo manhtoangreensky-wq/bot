@@ -16,17 +16,18 @@
 
 ### Current pointer
 
-- Current SPEC: `SPEC-08`.
-- Current SUBSPEC: `SPEC-08.0C`.
-- Current phase: `REVIEW / verified Key4U cue + Gemini diarization fallback`.
+- Current SPEC: `SPEC-07`.
+- Current SUBSPEC: `SPEC-07.4B`.
+- Current phase: `VERIFY / rollback shared compact numeric audio UI`.
 - Production action active: `NO; Product Video owns shared LIVE/CHROME/VPS`.
 - Telegram/provider job active: `NO; job #19A16753A4 terminal empty_transcript`.
 - Wallet mutation: `0`.
-- Next allowed action: finish code review and pre-push documents; after Product
-  Video releases, rebase latest main, rerun one focused post-rebase gate, ship one
-  PR/deploy, then retry the exact fixture combo.
-- Next forbidden action: edit classifier/cast/audio/pricing/multi module, start a
-  second live job, or move to standalone/multi before this failure loop ships.
+- Next allowed action: finish the shared numeric-audio UI gate and compile/diff;
+  after Product Video releases, rebase latest main, rerun one focused post-rebase
+  gate, ship one PR/deploy, then restart the exact-fixture combo from a fresh flow.
+- Next forbidden action: edit classifier/cast/pricing/mux/multi engine, re-add any
+  fixed-percentage preset, start a second live job, or move to standalone/multi
+  before the combo failure loop delivers a real MP4.
 
 ### Luật bất biến
 
@@ -35,6 +36,11 @@
 - Không `git reset --hard`, không checkout đè working tree, không xóa `artifacts/`.
 - Không sửa Product Video, PayOS, wallet, ENV/secrets, onboarding, PWA.
 - Không sửa/chạy live lane nhiều giọng trước khi `SPEC-10` hoàn tất.
+- Shared audio UI must remain numeric-only for both `Lồng tiếng video` and
+  `Phụ đề + Lồng tiếng`, independent of default, saved, custom, Auto 2-speaker,
+  or Auto multi-speaker voice selection.
+- Không được tái tạo grid `Gốc xx%` / `Lồng xx%` hoặc callback preset
+  `audio_original_volume` / `audio_dub_volume`.
 - Không dùng `Download.mp4`.
 - Không dùng fixture lịch sử `test 2 giọng.mp4` cho acceptance cuối.
 - Không công nhận PASS từ mock, metadata, HTTP 200 hoặc job id.
@@ -92,6 +98,9 @@ engine baseline; fixture hiện tại vẫn bắt buộc giao MP4 live mới.
 - `bot.py`: live-failure exception for the scoped
   `subdub_deepgram_request_params(require_diarization=True)` model only; default
   non-diarized ASR remains unchanged.
+- `bot.py`: UI follow-up may only remove PR #896 fixed-percentage rows/actions
+  from `subdub_audio_mix_keyboard`, `subdub_dynamic_volume_ui_future_spec`, and
+  the audio-action branch in `handle_video_dubbing_callback`.
 - A new regression test file dedicated to this recovery.
 - This checklist and final evidence report.
 
@@ -103,6 +112,9 @@ engine baseline; fixture hiện tại vẫn bắt buộc giao MP4 live mới.
   #846 and #852; no edit.
 - `bot.py`: hunk receipt #846 and callback ACK #852 must remain present.
 - Current two-button voice UI labels/order: preserve; both buttons remain one row.
+- Shared numeric input owners `subdub_audio_layer_keyboard` and
+  `handle_video_dubbing_pending_text` remain intact: original `0–100`, dub
+  `0–200`, with state/mux propagation unchanged.
 - Exact pricing and receipt improvements from PR #885: preserve.
 - Auto combo SRT companion from PR #887: preserve.
 - Admin list price remains nonzero; only settlement is `charged_xu=0`.
@@ -185,12 +197,12 @@ Required owners to compare PR #842 → current:
 - [x] `video_dubbing_confirm_keyboard` — edit only audio layout.
 - [x] `subdub_audio_mix_available` — anchor-compatible; preserve.
 - [x] `subdub_audio_mix_state_fields` — anchor-compatible; preserve.
-- [x] `subdub_audio_mix_keyboard` — restore controls from `6309f03`, category
-  buttons one row per Owner.
-- [x] `subdub_audio_layer_keyboard` — restore preset controls from `6309f03`
-  while preserving numeric input.
-- [x] `handle_video_dubbing_callback` audio actions — restore preset callbacks
-  from `6309f03`; preserve numeric callbacks.
+- [x] `subdub_audio_mix_keyboard` — preserve the two category buttons on one row
+  while removing the fixed-percentage grid added by PR #896.
+- [x] `subdub_audio_layer_keyboard` — preserve the compact toggle/numeric input
+  submenu; no preset controls.
+- [x] `handle_video_dubbing_callback` audio actions — remove only PR #896 preset
+  actions; preserve numeric input callbacks.
 - [x] `handle_video_dubbing_pending_text` numeric audio input — PROTECTED.
 - [x] auto exact pause/resume state retention — PROTECTED PR #885/current.
 - [x] final mux arguments for original/dub volume — anchor-compatible/current;
@@ -205,7 +217,7 @@ For every owner, record:
 | `subdub_auto_blackbox_runner` | direct runner | lane selector | CURRENT-ADAPTER | two/multi isolation |
 | `_execute_video_dubbing_pipeline_core` | no module font guard | module font guard | ROLLBACK guard only | anchor route + CJK protected |
 | audio mix state/mux | present | present | PROTECTED | state + render tests |
-| audio controls | preset grid at `6309f03`; numeric at #842 | numeric submenu only | RESTORE + one-row layout | UI/callback tests |
+| audio controls | numeric submenu before PR #896 | PR #896 added preset grid | REMOVE PRESET + preserve one-row category layout | UI/callback tests |
 | pricing/receipt/SRT | older | PR #885/#887 | PROTECTED | component price/admin0/SRT |
 
 ### SPEC-02.3 — Protected byte hashes before edit
@@ -242,7 +254,8 @@ Expected RED evidence:
 selector: tests/test_p0_subdub_two_speaker_locked_recovery.py
 exit: 1
 failures: 4
-reason: current blob, post-anchor font guard, two-row audio layout, missing presets
+reason: historical engine/font/layout assertions; preset expectations are now
+  explicitly superseded by `SPEC-07.4`
 ```
 
 ### SPEC-03.2 — Audio controls RED
@@ -251,16 +264,17 @@ Both `dub` and `subtitle_plus_dub`:
 
 - [x] Confirm screen exposes `videodub|audio_mix`.
 - [x] Audio screen exposes `audio_original` and `audio_dub` **same row**.
-- [x] Original layer supports off/on, preset increase/decrease, numeric input.
-- [x] Dub layer supports preset increase/decrease, numeric input.
+- [x] Original layer supports off/on and numeric input `0–100` only.
+- [x] Dub layer supports numeric input `0–200` only.
 - [x] Original percent range is bounded and persists.
 - [x] Dub percent range is bounded and persists.
 - [x] Back returns to same lane confirm.
 - [x] Confirm text shows both values.
 - [x] Exact-price pause/resume preserves both values.
 - [x] Final mux receives both values.
-- [x] RED included missing one-row/preset assertions; final narrowed GREEN proves
-  behavior in both `dub` and `subtitle_plus_dub`.
+- [x] Original PR #896 RED/rollback history is retained as evidence only.
+- [x] Current compact-UI RED failed all `3` assertions before rollback; current
+  source removes the preset rows/actions while preserving numeric owners.
 
 ### SPEC-03.3 — Failure-boundary RED
 
@@ -319,6 +333,11 @@ Both `dub` and `subtitle_plus_dub`:
 - [x] Both modes show Audio from confirmation.
 - [x] Back edges remain in the same product/lane.
 - [x] No unrelated button moves.
+- [x] Main audio screen contains only the two layer buttons plus Back.
+- [x] Original submenu contains only toggle, numeric input and Back.
+- [x] Dub submenu contains only numeric input and Back.
+- [x] The same owner is used for default female, default male, voice vault,
+  custom voice, Auto 2-speaker and Auto multi-speaker selections.
 
 ### SPEC-05.2 — State persistence
 
@@ -338,11 +357,12 @@ Both `dub` and `subtitle_plus_dub`:
 
 ### SPEC-05 acceptance
 
-- [x] Focused audio-control behavior GREEN for both modes.
-- [x] Deployed UI screenshot/DOM shows `Âm thanh gốc` and `Giọng lồng tiếng`
-  in one row, with all original/dub presets visible.
-- [!] Live confirm keyboard exposed the correct `audio_mix` callback with the
-  misleading label `✏️ Sửa theo số dòng`; focused RED reproduced it.
+- [x] Current source-focused batch exercised both modes, 12 lane/voice matrix
+  cases, numeric `40/150` persistence, state and mux propagation.
+- [!] PR #896 deployed fixed-percentage rows; Owner rejected this as a UI
+  regression. It is evidence of the defect, never an accepted baseline.
+- [ ] Follow-up runtime must show `Âm thanh gốc | Giọng lồng tiếng` on one row,
+  no `Gốc xx%` / `Lồng xx%`, and both numeric submenus.
 
 ## SPEC-06 — Focused verification only
 
@@ -437,7 +457,53 @@ WALLET_MUTATIONS=0
 - [x] Final `py_compile bot.py` exit `0`; diff-check clean.
 - [x] Latest main `bc11296` changes landing/docs only; no overlap with the
   three-file live-label correction.
-- [-] One focused correction PR/deploy.
+- [x] One focused correction PR/deploy: PR `#899`, merge SHA `397ca576...`.
+
+### SPEC-07.4 — Remove PR #896 preset-grid regression everywhere
+
+#### SPEC-07.4A — Root cause and RED
+
+- [x] Git diff proves PR #896 / `3fc190c...` added every fixed-percentage row,
+  the two preset callback actions and `public_fixed_percentage_grid=True`.
+- [x] Pre-#896 source proves compact numeric submenus already existed.
+- [x] Dedicated RED `tests/test_p0_subdub_compact_numeric_audio_ui.py` terminal:
+  `3 failed in 3.84s` before the production rollback.
+
+#### SPEC-07.4B — Minimal BUILD and focused verification
+
+- [x] Production diff is exactly `bot.py`: `1` insertion / `32` deletions;
+  the insertion is only `public_fixed_percentage_grid=False` replacing `True`.
+- [x] No production function outside the shared audio UI/action owner changed.
+- [x] Two stale tests no longer demand preset callbacks.
+- [x] Matrix covers `dub` + `subtitle_plus_dub` across default female, default
+  male, voice vault, custom voice, Auto 2-speaker and Auto multi-speaker.
+- [x] Numeric callbacks persist original `40%` and dub `150%` in both lanes.
+- [x] Combined terminal: `58 passed, 1 skipped, 1 baseline failure in 548.67s`.
+- [x] Sole failure is unrelated stale copy: test expects `Chi phí:` while exact
+  `HEAD` receipt owner emits `Giá:`; receipt test file and receipt owner have no
+  branch diff, so `NEW_FAILURES=0`.
+- [x] Final branch-focused GREEN terminal: `35 passed, 3 warnings in 12.44s`,
+  exit `0`; warnings are Google GenAI and existing `re.split` deprecations only.
+- [x] Locked engines remain unedited; expected SHA-256 values:
+  `auto_speaker=49E905C0...`, `auto_multi=55AAB894...`,
+  `subdub_speaker_cast=DE93620F...`.
+- [x] Final `py_compile bot.py` and current test files exit `0`.
+- [x] YAML parser check for durable state + `2` SubDub issue templates:
+  `YAML_OK 3`, exit `0`; no dependency install.
+- [x] `git diff --check` exits `0` (line-ending warnings only).
+
+#### SPEC-07.4C — One follow-up PR/deploy/runtime proof
+
+- [x] Reacquired shared Git/LIVE/VPS after exact Product Video releases.
+- [x] Fetched/rebased onto `origin/main 82ffb117...`; Git skipped upstream
+  `ac7cb76` from PR #908 and retained exactly one follow-up commit.
+- [x] Branch after rebase is `0 behind / 1 ahead`; production diff remains
+  `bot.py` only, `1` insertion / `32` deletions.
+- [x] Post-rebase focused GREEN: `35 passed, 3 warnings in 489.20s`, exit `0`.
+- [x] Post-rebase compile of `bot.py` + three audio contract files and range
+  `git diff --check origin/main...HEAD`: exit `0`.
+- [ ] Push one focused commit, one PR, squash merge and one VPS deploy.
+- [B] Prove bot/worker runtime SHA and fresh compact UI from Telegram.
 
 ### SPEC-07 evidence
 
@@ -546,7 +612,7 @@ PRODUCTION_DIFF: bot.py +1 line in scoped diarized request helper
   diarization: official Gemini `gemini-3.5-transcribe` supports speaker labels
   and word timestamps (up to eight speakers). The installed Google GenAI SDK has
   Interactions and audio input types; no dependency install is required.
-- [-] Next single diagnostic: call Gemini Transcribe once on the exact normalized
+- [x] Next single diagnostic: call Gemini Transcribe once on the exact normalized
   fixture with `zh-CN`, verbatim mode, `diarization_mode=speaker`, and word
   timestamps. Accept only exactly two returned speakers, each with at least two
   timed annotations; otherwise remain fail-closed. Key4U Whisper remains the
@@ -586,8 +652,11 @@ PRODUCTION_DIFF: bot.py +1 line in scoped diarized request helper
 - [x] Pre-push operating docs, original-vs-current comparison, tester guide and
   issue templates updated because Owner explicitly requires the ordered
   checklist/evidence handoff on GitHub in this same focused recovery PR.
-- [-] Await exact Product Video shared-resource releases, then fetch/rebase latest
-  main and run one focused post-rebase verification before staging/push.
+- [x] PR `#908` merged as `71434bd6254ac12e747bf6f6e144583ba3435f08`.
+- [x] Deploy run `33070712713` SUCCESS in `8m29s`; bot/worker runtime identity
+  verified before the UI regression follow-up.
+- [B] Restart the same exact-fixture combo only after `SPEC-07.4C` deploy proves
+  compact numeric UI on the new runtime.
 
 ### SPEC-08.1 — Pre-admission
 
