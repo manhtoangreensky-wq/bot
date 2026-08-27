@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -46,6 +47,17 @@ def test_default_registry_covers_exact_four_public_source_groups() -> None:
         video_trend_catalog.TREND_SOURCE_GROUPS
     )
     assert all(source["adapter"] != "reference_only" for source in registry.values())
+
+
+def test_default_facebook_feed_uses_the_live_nonempty_public_query() -> None:
+    source = video_trend_catalog.source_registry_from_json(None)[
+        "facebook_reels_public_vn"
+    ]
+    query = urllib.parse.parse_qs(
+        urllib.parse.urlparse(source["feed_url"]).query
+    )["q"][0]
+
+    assert query == "Facebook Reels Vietnam"
 
 
 def test_weekly_refresh_reports_and_preserves_each_source_group() -> None:

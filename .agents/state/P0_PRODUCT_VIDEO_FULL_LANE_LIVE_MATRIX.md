@@ -22,6 +22,8 @@ After all source specs are GREEN:
 
 If a live row fails, reopen only that spec, add a RED reproducer from the real failure, apply the smallest fix, rerun GREEN, ship, and repeat that same live row. Never mark a row complete from intent, HTTP 200, a queued state, or a provider task id.
 
+Before building any product-specific flow, compare it with the completed Product Video lanes and reuse compatible Tail screens, state contracts, Add-on materialization, quality/invoice/confirm/status edges, artifact validators and delivery/receipt logic. Add only the missing product adapter, alias or material boundary; never rebuild a completed shared flow from the beginning.
+
 ## Resource Boundary
 
 - [x] Source READ and contract work allowed.
@@ -31,7 +33,7 @@ If a live row fails, reopen only that spec, add a RED reproducer from the real f
 - [x] Owner approved only the Key4U `.vn` endpoint configuration needed for Product Video; no secret values are committed.
 - [x] No wallet, PayOS, destructive DB, onboarding, PWA, or SubDub changes allowed.
 
-Current shared-resource owner: **SubDub Auto**. Product Video is source-local only until exact SubDub LIVE/CHROME/VPS/DEPLOY releases.
+Current shared-resource owner: **Product Video** for the ordered Trend4 Facebook correction and PV-L01 live rerun. SubDub remains source-local until exact Product Video releases.
 
 ## Ordered Specs
 
@@ -143,7 +145,11 @@ Video AI Real public tiers:
 - [x] RED: refresh is idempotent, due every 7 days, preserves old cache on per-source failure and never calls a paid provider or wallet.
 - [x] Minimal backend source/status implementation; `source_group` is encoded in existing keywords, so no DB migration is required.
 - [x] Focused GREEN `4 passed`; protected Trend2/Trend3 flow batch `67 passed` before final UI-lock adjustment.
-- [ ] One scoped PR, deploy/runtime verify and one real VPS refresh with per-source evidence.
+- [x] PR #913 merged as `ccf9523613418dfd37535f14901173624d5cbc3e`; deploy run `33105339710` SUCCESS; bot and owner worker exact SHA; generation `91016743...` accepted/persisted with empty reject reason.
+- [x] First real VPS refresh: `paid_provider_calls=0`, next run `+7 days`; media `4`, YouTube `100`, TikTok `99`, but Facebook `0` because the site-only query returned an empty feed.
+- [x] SPEC-04D.1 live RED: exact Facebook query contract `1 failed in 8.42s`; bounded public diagnostic proved `Facebook Reels Vietnam` returns `57` attributable items.
+- [x] Minimal one-line Facebook `feed_url` correction; Trend4 + protected Trend2/Trend3 GREEN `37 passed in 9.95s`; module compile exit `0`.
+- [ ] Ship/deploy SPEC-04D.1 and rerun one real VPS refresh proving all four source groups non-zero, next run `+7 days`, `paid_provider_calls=0`, transaction/provider-usage deltas `0`.
 
 ### SPEC-04E: PV-L01 Vertical Fill and Strict Add-on Recovery
 
@@ -309,3 +315,6 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | 2026-08-28 | Fresh clean acceptance and protected comparators | Same five-file acceptance with the four measured baseline-stale IDs deselected: `72 passed, 4 deselected in 25.22s`; quality/manual `39 passed in 8.17s`; Trend/scene expanded `56 passed in 12.13s`; full Product Video output `24 passed in 16.20s` | SOURCE PASS on pre-rebase bytes |
 | 2026-08-28 | Fresh compile/scope gate | `py_compile` five runtime files exit 0; `git diff --check HEAD^..HEAD` exit 0; forbidden-path hits 0; secret-pattern hits 0; 14 completed UI functions remained byte-locked in the acceptance batch | SOURCE PASS; post-SubDub fetch/rebase, ship, deploy and live matrix remain open |
 | 2026-08-28 | Post-rebase gate on exact `origin/main a9471b6` | Commit rebased cleanly with prior `bc422d5` skipped as already upstream; unified 11-file gate `163 passed, 4 measured-baseline deselected in 596.32s`; `py_compile` five runtime files exit 0 | POST-REBASE SOURCE PASS; push/PR/deploy/runtime/live remain open |
+| 2026-08-28 | PR #913 ship/runtime | PR #913 squash merged `ccf9523613418dfd37535f14901173624d5cbc3e`; compile run `33105132268` SUCCESS; deploy run `33105339710` SUCCESS in `4m17s`; bot+owner worker exact SHA; generation `91016743...` accepted/persisted/reject empty | DEPLOYED; PV-L01 and Trend4 live output gates remain distinct |
+| 2026-08-28 | Trend4 first VPS refresh + Facebook RED | Refresh inserted `203`, media `4`, Facebook `0`, YouTube `100`, TikTok `99`, next run `+7 days`, paid provider `0`; public diagnostic returned `57` items for `Facebook Reels Vietnam`; RED `1 failed in 8.42s` on old site-only query | VALID LIVE RED limited to Facebook source query |
+| 2026-08-28 | Trend4 Facebook minimal GREEN | One registry line changed; Trend4 + protected Trend2/Trend3 `37 passed in 9.95s`; `py_compile services/video_trend_catalog.py` exit 0 | SOURCE PASS; ship/deploy and four-group live refresh remain open |

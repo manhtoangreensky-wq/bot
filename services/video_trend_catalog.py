@@ -61,7 +61,7 @@ SOURCE_REGISTRY = {
     "facebook_reels_public_vn": {
         "name": "Khám phá công khai - Facebook Reels",
         "url": "https://www.facebook.com/reel/",
-        "feed_url": _public_discovery_feed('site:facebook.com/reel OR site:fb.watch "video trend"'),
+        "feed_url": _public_discovery_feed("Facebook Reels Vietnam"),
         "adapter": "public_media_rss",
         "source_group": "facebook",
     },
