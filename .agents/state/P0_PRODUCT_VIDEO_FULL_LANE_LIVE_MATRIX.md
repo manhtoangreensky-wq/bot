@@ -5,8 +5,8 @@
 - Product: **Product Video** only
 - Codex task: `019efe1e-ee54-78e1-87c4-10db6e1e19e4`
 - Repository: `manhtoangreensky-wq/bot`
-- Branch: `fix/product-video-live24-claim-gate-fallback`
-- Current deployed Product Video base: `124468aaf73ab002c9fa6c8e003485573b2f4ede`
+- Branch: `fix/product-video-live25-final-coverage`
+- Current deployed Product Video base: `f16d74a1b23188625810113ceb24ee2028d857c9`
 - Local branch must rebase onto shared `origin/main` after SubDub releases Git/VPS ownership.
 - SubDub task `019fbbfe-59b7-7ee2-b298-dea276813ce4` is **out of scope**. CPU is independent; only Telegram/Chrome/provider/VPS/deploy ownership is coordinated.
 
@@ -122,6 +122,26 @@ Video AI Real public tiers:
 - [x] Focused/protected tests and compile/diff gates terminal.
 - [x] PR #905 merged as `21022ed724aa605f1b90dbb35e140a8dbba9e09b`; deploy run `33051106470` SUCCESS; bot and owner worker verified at the same SHA.
 - [ ] Same PV-L01 flow delivers the required two-scene MP4 with audio/add-ons/receipt.
+
+### SPEC-04C: Reused Final Manifest Delivery Recovery for PV-L01
+
+- [x] Live request `VID-20260827-2803A3`, project `29`, job `25`, outbox `24` created exactly once.
+- [x] Both ShopAIKey scene tasks reached authoritative `SUCCESS 100%` and produced two distinct scene clips.
+- [x] Canonical concat produced a real 16-second H.264/AAC MP4 with the requested subtitle/transition plan.
+- [x] RED: a canonical final reused from manifest was incorrectly downgraded because `concat_attempted=false` prevents duplicate concat.
+- [x] Minimal ledger fix accepts `final_reused_from_manifest` only when full scene coverage, valid concat output and explicit final validity are also present.
+- [x] Focused GREEN and protected scene-ledger/recovery comparators pass.
+- [ ] PR merged, deploy verified and job `25` resumed to one Telegram delivery with Owner `0 Xu`.
+
+### SPEC-04D: Weekly Four-Source Trend Catalog
+
+- [x] Owner approved exact design with `DUYỆT KHO TREND 4 NGUỒN`.
+- [ ] RED: source registry and normalization cover `media`, `facebook`, `youtube`, `tiktok` with attributable public metadata.
+- [ ] RED: public catalog filter buttons cover all four sources through one callback owner.
+- [ ] RED: refresh is idempotent, due every 7 days, preserves old cache on per-source failure and never calls a paid provider or wallet.
+- [ ] Minimal source/filter/status implementation.
+- [ ] Focused GREEN, compile and protected Trend Video flow comparators.
+- [ ] One scoped PR, deploy/runtime verify and one real VPS refresh with per-source evidence.
 
 ### SPEC-05: Distinct Two-Scene Product/Lane LIVE Matrix
 
@@ -243,3 +263,7 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | 2026-08-27 | PV-L01 live rerun job #24 | Exact Tail via Codex Browser created request `VID-20260827-1DA4A5`, project `28`, job `24`, outbox `23`; summary elapsed reached `61s/60s`, but last scene authority was only `53s`; server claim gate terminalized before connector could run controlled Key4U fallback | VALID LIVE RED; terminal failed_no_charge, charged Xu 0 |
 | 2026-08-27 | Job #24 claim-gate RED/GREEN | Corrected RED reproduced `_claim_video_render_candidate` returning no job after ledger `failed_no_charge`; thin pre-claim adapter selects only the summary-authoritative `fallback_scene_index`, calls canonical stall policy, persists its Key4U/idempotency decision, then re-evaluates ledger | Focused GREEN `8 passed in 13.62s` |
 | 2026-08-27 | Job #24 protected gate | Pending/NOT_START, claim terminalization, one-scene controlled fallback, durable primary no-resubmit, bounded recovery and spend safety | `54 passed, 2 baseline deselected in 47.56s`; NEW_FAILURES=0 |
+| 2026-08-27 | Job #24 correction ship/runtime | PR #909 squash merged as `f16d74a1b23188625810113ceb24ee2028d857c9`; deploy run `33073326136` SUCCESS; bot/owner worker same SHA; generation `16424e56bf634c0d8d3134d6e50bde73`, heartbeat accepted/reject empty | DEPLOYED and runtime-ready |
+| 2026-08-27 | PV-L01 live rerun job #25 | Exact Tail via Codex Browser: manual trend -> source subtitle -> transition `1/1` -> Review `2 scenes/16s/9:16` -> `Nhanh gọn 80 Xu/cảnh`; invoice `144 Xu`; one submit created request `VID-20260827-2803A3`, project `29`, job `25`, outbox `24` | FLOW/ADD-ON/ADMISSION PASS; no duplicate submit; Owner no-charge |
+| 2026-08-27 | PV-L01 job #25 real artifact | Both primary scene tasks reached `SUCCESS 100%`; final `/tmp/toanaas_multiscene_blackbox/product-video-25-c7eb882db394/final_output.mp4` is 1,660,101 bytes, H.264 540x960 + AAC stereo 48kHz, duration 16.000s | ARTIFACT VALID; delivery still blocked by reused-manifest ledger regression |
+| 2026-08-27 | Job #25 manifest-reuse RED/GREEN | RED `1 failed in 0.85s`: `scene_coverage_valid_bool=False`; one-condition production fix; GREEN `1 passed in 0.73s`; protected scene-ledger/recovery batch `21 passed in 3.65s` | SOURCE PASS; PR/deploy/live delivery still required |
