@@ -1,0 +1,49 @@
+name: SubDub case test
+description: Ghi bằng chứng cho một case SD-* trong KIEM-THU/DANH-SACH-CASE.md
+title: "[SubDub Test] "
+labels: ["case-test", "chờ-test"]
+body:
+  - type: markdown
+    attributes:
+      value: "Sửa case thì sửa KIEM-THU/DANH-SACH-CASE.md trước. Chạy đúng thứ tự SD-2S-01 -> SD-2S-02 -> SD-MS-01."
+  - type: input
+    id: case_id
+    attributes:
+      label: Case ID
+      placeholder: SD-2S-01
+    validations:
+      required: true
+  - type: input
+    id: runtime_sha
+    attributes:
+      label: Runtime SHA
+    validations:
+      required: true
+  - type: textarea
+    id: flow
+    attributes:
+      label: Flow và stage
+      description: Ghi upload fixture hash, lane, ngôn ngữ, audio mix, confirm và từng stage ASR/cast/TTS/mux/delivery.
+    validations:
+      required: true
+  - type: textarea
+    id: artifact
+    attributes:
+      label: Artifact và receipt
+      description: Ghi job id, MP4/SRT message id, hash/bytes/codecs/duration/audio, speaker/cast và từng thành phần giá.
+    validations:
+      required: true
+  - type: textarea
+    id: wallet
+    attributes:
+      label: Xu và wallet evidence
+      description: Ghi list price, charged_xu, credits/total_spent/transaction delta trước và sau.
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Kết quả
+      options: [PASS, FAIL, BLOCKED]
+    validations:
+      required: true

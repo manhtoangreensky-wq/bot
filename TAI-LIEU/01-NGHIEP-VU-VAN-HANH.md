@@ -118,3 +118,32 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Đây mới là source PASS. PV-L01 vẫn chưa LIVE PASS cho tới khi cùng case giao MP4 2 cảnh có audio/phụ đề/chuyển cảnh và receipt Telegram `0 Xu`.
 - Live rerun job `23` chứng minh elapsed đã đúng `66s/60s`, nhưng job-level `provider_order=[shopaikey_video]` ghi đè readiness cục bộ có cả ShopAIKey + Key4U; marker/decision durable cũng bị rơi nhưng cờ persisted `automatic_fallback_allowed=false` còn nguyên. Policy hiện vẫn tôn trọng chốt fail-closed đó và chỉ phục hồi `key4u_video` từ worker readiness khi toàn bộ final-confirm/exact-quote/task/no-delivery/no-charge/idempotency gates đã đạt; không phục hồi provider khác.
 - Bằng chứng bổ sung: job `23` bounded recovery `3/3`, terminal `failed_no_charge`, focused candidate recovery `7 passed`, protected `52 passed`, `NEW_FAILURES=0`. Same-case LIVE rerun sau deploy tiếp theo vẫn bắt buộc.
+
+## Bổ sung SubDub failure loop ASR — 27/08/2026
+
+- PR `#904` đã merge/deploy runtime `8d23bbf1...`; job mới `#19A16753A4`
+  vượt lỗi bảng trạng thái, hiện thật `35% / Nhận diện lời thoại`, rồi dừng
+  `empty_transcript` trước sidecar/cast/TTS/mux/delivery. Admin vẫn `0 Xu`, ví
+  không đổi.
+- Deepgram `nova-3` nhận file `48.421s` với HTTP `200` nhưng trả `0` transcript,
+  `0` word và `0` speaker; detect nhầm `id` ở confidence `0.31629473`. Ghim lại
+  đúng mã đó vẫn rỗng, nên không tiếp tục thay model Deepgram mò mẫm.
+- ShopAIKey không giao transcript cho fixture. Key4U canonical
+  `https://api.key4u.vn/v1` giao `18` cue Whisper có timestamp và nhận đúng
+  ngôn ngữ Chinese; hostname `.shop` cũ lỗi chứng thư và không bao giờ được tắt
+  TLS verify để ép chạy.
+- Gemini `gemini-3.5-transcribe` giao `125/125` word annotations có timestamp,
+  đúng `2` speaker (`58` và `67` word). Đối chiếu thời gian map đủ `18/18` cue
+  Key4U, split `8/10`, minimum dominance `1.0`.
+- Fallback mới chỉ mở khi đồng thời: confirmed product + `require_diarization`
+  + exact lane `Tự động 2 giọng` + Deepgram empty. Multi/default/manual không
+  nhận cờ fallback. Thiếu đúng hai speaker, mỗi speaker dưới hai cue hoặc cue có
+  dominance dưới `0.70` đều fail-closed, không ép cặp nam/nữ.
+- Bằng chứng source cuối: initial RED `3 failed, 2 passed in 8.43s`; initial
+  GREEN `5 passed in 1523.09s`; review RED service `1 failed/4 passed` và bot
+  `3 failed`; review-fix GREEN service `5 passed`, bot `7 passed`; protected
+  `19 passed in 543.25s`; compile và diff-check exit `0`.
+  Hash locked: two-speaker engine `49E905C0...`, multi `55AAB894...`, cast
+  `DE93620F...`.
+- Đây mới là `CODE/PROVIDER_DIAGNOSTIC PASS`; combo và standalone vẫn phải giao
+  MP4 thật qua Telegram sau deploy mới được ghi `LIVE PASS`.

@@ -107,3 +107,24 @@ Giá khách hiện hành vẫn là `80`, `110`, `160`, `200`, `220`, `220`, `370
 Bằng chứng là PV-L01 job `22`: hai ShopAIKey task thật, `0/2` clip, terminal `provider_not_start`, `charged_xu=0`. Source correction có focused `6 passed`, protected `51 passed`, `NEW_FAILURES=0`; LIVE output vẫn pending.
 
 Live job `23` bổ sung một bất nhất mới: route snapshot ghi provider chain đầy đủ, worker readiness cũng có ShopAIKey + Key4U, nhưng trường job-level `provider_order` chỉ còn ShopAIKey nên fallback list rỗng. Hiện tại policy phục hồi duy nhất Key4U từ readiness/capability cục bộ sau khi primary task đã stall và mọi gate xác nhận/quote/idempotency đạt; missing confirm hoặc quote lệch vẫn bị test chặn.
+
+## Đối chiếu SubDub failure loop sau PR #904
+
+| Chức năng gốc | Hiện tại | Trạng thái |
+|---|---|---|
+| Deepgram là nguồn duy nhất cho transcript + diarization Auto | Deepgram vẫn chạy trước; exact 2-speaker mới có fallback Key4U Whisper cue + Gemini Transcribe diarization khi Deepgram trả empty | ⚠️ Mở rộng có điều kiện |
+| Key4U ASR dùng `api.key4u.shop/v1` | Runtime canonical dùng `api.key4u.vn/v1`; `.shop` lỗi TLS certificate và không được bypass verify | ⚠️ Tài liệu hostname cũ sai |
+| Auto multi và Auto 2 giọng dùng cùng request diarization | Multi vẫn Deepgram-only và byte-locked; fallback mới không được forward khi `auto_speaker_lane=multi` | ✅ Cô lập theo Owner |
+| Speaker labels đến từ provider, classifier chỉ đọc acoustic evidence theo label | Key4U cung cấp `18` cue timestamp; Gemini cung cấp `125` timed speaker words; mapping thời gian tạo đúng `2` labels trước classifier | ✅ Giữ nguyên trách nhiệm |
+
+Chỗ tài liệu cũ không còn đúng: dòng khẳng định Deepgram là provider duy nhất
+không còn đủ cho lane 2. Bằng chứng fixture hiện tại cho thấy Deepgram HTTP `200`
+nhưng transcript/word/speaker đều `0`, trong khi Gemini Transcribe trả đúng `2`
+speaker và `125` timed annotations. Đây không mở fallback cho multi/default/manual
+và không thay classifier/cast/audio/pricing/wallet.
+
+Bẫy đã khóa sau review: chỉ chấp nhận Key4U segments có `provider_timestamps=true`
+và đầy đủ timestamp thật; fallback luôn ghim riêng `https://api.key4u.vn/v1`;
+parser Gemini chỉ đọc `steps[].content[].annotations[]` có `type=word_info`;
+video dài phải chunk (>5 phút ở Auto) dừng `AUTO_CAST_UNAVAILABLE` trước mọi
+Key4U/Gemini fallback call.

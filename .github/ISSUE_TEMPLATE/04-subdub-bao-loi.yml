@@ -1,0 +1,49 @@
+name: SubDub báo lỗi
+description: Báo lỗi từ một case live SubDub SD-*
+title: "[SubDub Bug] "
+labels: ["lỗi", "chờ-sửa"]
+body:
+  - type: input
+    id: case_id
+    attributes:
+      label: Case ID
+      placeholder: SD-2S-01
+    validations:
+      required: true
+  - type: input
+    id: runtime_sha
+    attributes:
+      label: Runtime SHA
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Mong đợi
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Thực tế
+      description: Ghi exact stage/failure, không chỉ ghi HTTP hoặc job id.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Bằng chứng
+      description: Ghi fixture hash, job/workspace, provider safe status, artifact/receipt và wallet delta.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety
+      options:
+        - label: Không tạo thêm job/provider call ngoài đúng failure loop được Owner cho phép
+          required: true
+        - label: Đã ghi charged_xu và wallet/transaction delta
+          required: true
+        - label: Không chuyển sang case kế tiếp khi case này chưa PASS
+          required: true
