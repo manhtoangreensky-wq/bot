@@ -150,6 +150,12 @@ Chỗ tài liệu cũ không còn đúng: one-shot Key4U không đủ trước t
 `whisper-1 verbose_json` trả `18` timed segments; do đó bounded retry nằm
 trong fallback boundary, không phải thay classifier hoặc ép speaker.
 
+Chỗ transport cũ cũng không còn đúng: multipart `data=list[tuple]` tạo sync
+request stream và bị `httpx.AsyncClient` từ chối trước HTTP. Hiện form dùng
+`dict`, giữ nguyên các field `model/response_format/
+timestamp_granularities[]/language`; regression test dùng real MockTransport,
+không giả adapter.
+
 Live job `24` cho thấy connector policy đúng vẫn chưa đủ nếu server claim gate terminal hóa trước worker. Hiện claim transaction tính controlled-fallback eligibility trước ledger terminal decision và chỉ miễn đúng fallback Key4U đã xác nhận; `automatic_resubmit_allowed=false` vẫn chặn submit lại primary. Job/artifact/receipt LIVE vẫn pending.
 
 ## Đối chiếu Product Video flow/artifact sau job 25 — 28/08/2026

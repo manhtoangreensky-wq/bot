@@ -64542,13 +64542,13 @@ async def openai_compatible_asr_transcribe(
     final_url = join_shopaikey_url(base_url, endpoint)
     media_type = str(content_type or "audio/mpeg").split(";", 1)[0].strip() or "audio/mpeg"
     files = {"file": (openai_audio_filename(media_type), audio_bytes, media_type)}
-    data = [
-        ("model", str(model or "whisper-1")),
-        ("response_format", "verbose_json"),
-        ("timestamp_granularities[]", "segment"),
-    ]
+    data = {
+        "model": str(model or "whisper-1"),
+        "response_format": "verbose_json",
+        "timestamp_granularities[]": "segment",
+    }
     if str(language or "auto").strip().lower() not in {"", "auto"}:
-        data.append(("language", str(language).strip()))
+        data["language"] = str(language).strip()
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             res = await client.post(final_url, headers={"Authorization": f"Bearer {api_key}"}, data=data, files=files)

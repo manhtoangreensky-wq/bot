@@ -40,6 +40,61 @@ async def _empty_deepgram(*_args, **_kwargs):
     }
 
 
+def test_openai_compatible_asr_multipart_is_async_client_compatible(monkeypatch):
+    captured = {}
+    original_async_client = bot.httpx.AsyncClient
+
+    async def handler(request):
+        captured["request"] = request
+        captured["body"] = await request.aread()
+        return bot.httpx.Response(
+            200,
+            json={
+                "text": "你好世界",
+                "language": "chinese",
+                "duration": 2.0,
+                "segments": [
+                    {"start": 0.0, "end": 1.0, "text": "你好"},
+                    {"start": 1.0, "end": 2.0, "text": "世界"},
+                ],
+            },
+        )
+
+    transport = bot.httpx.MockTransport(handler)
+
+    def async_client(**kwargs):
+        return original_async_client(
+            timeout=kwargs.get("timeout"),
+            transport=transport,
+        )
+
+    monkeypatch.setattr(bot.httpx, "AsyncClient", async_client)
+
+    result = asyncio.run(
+        bot.openai_compatible_asr_transcribe(
+            b"fixture-audio",
+            "audio/mpeg",
+            base_url="https://api.key4u.vn/v1",
+            api_key="key4u-fixture",
+            endpoint="/audio/transcriptions",
+            model="whisper-1",
+            language="zh",
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "PASS"
+    assert result["http_status"] == 200
+    assert result["provider_timestamps"] is True
+    assert len(result["segments"]) == 2
+    assert captured["request"].url == "https://api.key4u.vn/v1/audio/transcriptions"
+    body = captured["body"]
+    assert b'name="response_format"' in body
+    assert b"verbose_json" in body
+    assert b'name="timestamp_granularities[]"' in body
+    assert b"segment" in body
+
+
 def test_confirmed_two_speaker_empty_deepgram_uses_key4u_cues_and_gemini_speakers(monkeypatch):
     _configure(monkeypatch)
     monkeypatch.setattr(bot, "deepgram_asr_adapter", _empty_deepgram)
