@@ -195,3 +195,120 @@ def test_gemini_non_200_is_fail_closed_without_raw_body(monkeypatch):
     assert result["ok"] is False
     assert result["status"] == fallback.AUTO_CAST_UNAVAILABLE
     assert "private body" not in result["detail"]
+
+
+def test_retryable_empty_key4u_transcript_retries_once_then_continues_to_gemini(
+    monkeypatch,
+):
+    key4u_calls = []
+    monkeypatch.setattr(
+        fallback,
+        "KEY4U_TRANSCRIPT_RETRY_DELAY_SECONDS",
+        0.0,
+        raising=False,
+    )
+
+    async def key4u_transcribe(_audio, _content_type, **kwargs):
+        key4u_calls.append(dict(kwargs))
+        if len(key4u_calls) == 1:
+            return {
+                "ok": False,
+                "status": "FAIL_PROVIDER_ERROR",
+                "http_status": 503,
+                "text": "",
+                "segments": [],
+                "detail": "temporary upstream failure",
+            }
+        return {
+            "ok": True,
+            "status": "PASS",
+            "http_status": 200,
+            "text": "one two three four",
+            "segments": [
+                {"start": 0.0, "end": 1.0, "text": "one"},
+                {"start": 1.0, "end": 2.0, "text": "two"},
+                {"start": 2.0, "end": 3.0, "text": "three"},
+                {"start": 3.0, "end": 4.0, "text": "four"},
+            ],
+            "provider_timestamps": True,
+        }
+
+    async def gemini_words(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "status": "PASS",
+            "words": [
+                {"word": "one", "start": 0.1, "end": 0.8, "speaker": "spk:0"},
+                {"word": "two", "start": 1.1, "end": 1.8, "speaker": "spk:0"},
+                {"word": "three", "start": 2.1, "end": 2.8, "speaker": "spk:1"},
+                {"word": "four", "start": 3.1, "end": 3.8, "speaker": "spk:1"},
+            ],
+            "speaker_ids": ["spk:0", "spk:1"],
+        }
+
+    monkeypatch.setattr(fallback, "gemini_transcribe_diarized_words", gemini_words)
+
+    result = asyncio.run(
+        fallback.run_two_speaker_fallback(
+            b"audio",
+            "audio/mpeg",
+            key4u_transcribe=key4u_transcribe,
+            key4u_api_key="key4u-fixture",
+            key4u_endpoint="/audio/transcriptions",
+            gemini_api_key="gemini-fixture",
+            language="zh",
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "PASS"
+    assert result["key4u_attempt_count"] == 2
+    assert result["key4u_retry_used"] is True
+    assert len(key4u_calls) == 2
+    assert all(call["base_url"] == "https://api.key4u.vn/v1" for call in key4u_calls)
+    assert all(call["model"] == "whisper-1" for call in key4u_calls)
+
+
+def test_permanent_key4u_401_fails_closed_without_retry_or_gemini(monkeypatch):
+    key4u_calls = []
+    gemini_calls = []
+
+    async def key4u_transcribe(_audio, _content_type, **kwargs):
+        key4u_calls.append(dict(kwargs))
+        return {
+            "ok": False,
+            "status": "FAIL_AUTH",
+            "http_status": 401,
+            "text": "",
+            "segments": [],
+            "detail": "private upstream body",
+        }
+
+    async def forbidden_gemini(*_args, **_kwargs):
+        gemini_calls.append("called")
+        raise AssertionError("permanent Key4U failure must stop before Gemini")
+
+    monkeypatch.setattr(
+        fallback,
+        "gemini_transcribe_diarized_words",
+        forbidden_gemini,
+    )
+
+    result = asyncio.run(
+        fallback.run_two_speaker_fallback(
+            b"audio",
+            "audio/mpeg",
+            key4u_transcribe=key4u_transcribe,
+            key4u_api_key="key4u-fixture",
+            key4u_endpoint="/audio/transcriptions",
+            gemini_api_key="gemini-fixture",
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == fallback.AUTO_CAST_UNAVAILABLE
+    assert result["key4u_attempt_count"] == 1
+    assert result["key4u_retry_used"] is False
+    assert len(key4u_calls) == 1
+    assert gemini_calls == []
+    assert "private upstream body" not in result["detail"]

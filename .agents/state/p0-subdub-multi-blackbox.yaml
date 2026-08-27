@@ -4,7 +4,7 @@ owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
 branch: fix/p0-subdub-audio-label-live
-phase: SPEC_07_4_POST_REBASE_READY_TO_PUSH
+phase: SPEC_08_0D_5_SHIP_BOUNDED_KEY4U_TRANSCRIPT_RETRY
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -26,10 +26,10 @@ workflow_contract:
 
 resource_boundary:
   cpu: independent_local_subdub_source_only
-  live: owned_by_product_video
-  chrome: owned_by_product_video
-  vps_deploy: owned_by_product_video
-  product_video: shared LIVE/CHROME/VPS remains released by SubDub until an exact Product Video release is received
+  live: owned_by_subdub
+  chrome: owned_by_subdub_but_browser_security_currently_denies_telegram
+  vps_deploy: owned_by_subdub
+  product_video: source-local only until exact SubDub releases
 
 audio_ui_rollback:
   root_cause: PR 896 / 3fc190c added a fixed-percentage preset grid and two preset callback actions to the shared audio owner
@@ -81,26 +81,61 @@ fixtures:
     required_lane: Tự động nhiều giọng
 
 latest_combo_failure:
-  public_job: 19A16753A4
-  internal_job: 19a16753a4491d975921
-  workspace: /tmp/toan_aas_pipeline/19a16753a4491d975921
+  public_job: 00911B6FF0
+  internal_job: 00911b6ff01590de3834
+  workspace: /tmp/toan_aas_pipeline/00911b6ff01590de3834
   source_sha256: 85c8793d197cf2782bb554d46282e82a83bcb062a0483e412a0ca1da668f9f51
-  terminal: empty_transcript
-  last_public_stage: 35_percent_recognizing_speech
-  provider: deepgram
+  terminal: failed_no_charge
+  last_public_stage: auto_cast_manual_required
+  provider: key4u_audio+gemini_diarization
   charged_xu: 0
   wallet_mutations: 0
   root_cause:
-    - Deepgram nova-3 HTTP 200 returned zero transcript, words, and speaker ids
-    - detected language was id at confidence 0.31629473; pinned retry stayed empty
-    - ShopAIKey transcription routes were unavailable for this fixture
-    - Key4U canonical .vn Whisper returned 18 timestamped Chinese cues but no speakers
-    - acoustic, visual-only, and stereo heuristics were empirically rejected
+    - Deepgram empty correctly entered the exact two-speaker fallback
+    - persisted provider attempt at 22:54:49 is AUTO_CAST_UNAVAILABLE
+    - exact detail is key4u_two_speaker_transcript_unavailable
+    - manifest has source and normalized media only; no SRT, sidecar, TTS, mux, or delivery
+    - runtime host endpoint model and key-presence contract are correct
   active_hypothesis:
-    - confirmed by provider diagnostic: Key4U Whisper remains timestamp truth
-    - Gemini gemini-3.5-transcribe supplies exactly two timed speaker labels
-    - 125 timed word annotations map all 18 Key4U cues, split 8 and 10
-    - reject unless every cue maps at confidence >=0.70 and both labels own >=2 cues
+    - one bounded diagnostic passed with HTTP 200, 145 chars and 18 timed segments
+    - the live failure is a transient unusable first Key4U response
+    - current fallback is one-shot and must retry at most once only for retryable/empty transcript results
+    - permanent 4xx and invalid provider timestamps remain fail-closed without retry
+  diagnostic:
+    provider_calls: 1
+    audio_bytes: 582540
+    http_status: 200
+    model: whisper-1
+    response_format: verbose_json
+    transcript_chars: 145
+    timed_segments: 18
+    duration_seconds: 48.4000015
+  red:
+    selectors: 2
+    result: 2 failed in 0.88s
+    transient_failure: result remained ok false after first retryable response
+    permanent_failure: key4u attempt evidence missing
+  green:
+    retry_selectors: 2 passed in 0.48s
+    fallback_service_file: 7 passed in 0.43s
+    bot_wiring_and_isolation: 7 passed, 1 warning in 11.73s
+    locked_hash_selectors: 2 passed, 1 warning in 7.95s
+    compile: exit 0
+    diff_check: exit 0
+    new_failures: 0
+  retry_contract:
+    max_key4u_attempts: 2
+    delay_seconds: 1.0
+    retry_http: 0, 2xx, 408, 425, 429, 5xx
+    permanent_401_retry: false
+    invalid_provider_timestamps_retry: false
+  post_rebase:
+    base_sha: 4458d4c29ea7f63022ec7746ebff785a36f7974e
+    head_before_evidence_amend: c9112b0
+    divergence: 0 behind, 1 ahead
+    focused_protected_gate: 16 passed, 1 warning in 11.87s
+    compile: exit 0
+    diff_check: exit 0
   verification:
     red: 3 failed, 2 passed, 1 warning in 8.43s
     focused_green: 5 passed, 1 warning in 1523.09s
@@ -327,4 +362,4 @@ ordered_specs:
       - audit every acceptance line as proven or unresolved
       - mark the goal complete only when no required line remains unresolved
 
-current_next_action: push force-with-lease, create one PR, squash merge and deploy; verify runtime compact numeric UI; then restart the exact-fixture combo
+current_next_action: amend post-rebase evidence, push force-with-lease, create one PR, squash/deploy/runtime verify, then exact combo retry
