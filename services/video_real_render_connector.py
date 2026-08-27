@@ -4711,6 +4711,7 @@ def _product_video_addon_render_kwargs(
     materials = dict(addon_materials or {})
     if not materials.get("strict"):
         return {
+            "frame_fit_mode": "cover",
             "bgm_audio_path": bgm_audio_path,
             "enable_voice": False,
             "enable_subtitle": bool(
@@ -4722,6 +4723,7 @@ def _product_video_addon_render_kwargs(
             "logo_position": str(addon_plan.get("logo_position") or "bottom_right"),
         }
     return {
+        "frame_fit_mode": "cover",
         "voice_audio_path": materials.get("voice_audio_path") or None,
         "voice_volume_percent": int(materials.get("voice_volume_percent") or 100),
         "enable_voice": bool(materials.get("voice_audio_path")),

@@ -181,3 +181,22 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 
 - Live job `24` cho thấy server claim gate chạy trước connector: summary đã `61s/60s` nhưng scene evidence cuối chỉ `53s`, nên ledger terminal `failed_no_charge` trước lượt worker có thể submit Key4U. Claim gate hiện enrich pure state trước terminal decision: chỉ scene có primary task thật, stalled, final-confirm, exact quote, chưa giao/chưa trừ/chưa fallback và Key4U capability-ready mới nhận candidate + idempotency; primary resubmit vẫn cấm.
 - Bằng chứng source job `24`: focused `8 passed`; protected `54 passed, 2 baseline deselected`. Patch chỉ mở một fallback tick cho đúng `fallback_scene_index`, không submit đồng thời hai cảnh; compile/diff vẫn phải chạy trước local commit. LIVE rerun vẫn là gate riêng sau SubDub release và deploy Product Video tiếp theo.
+
+## Bổ sung Product Video job 25 và khóa UI — 28/08/2026
+
+- PR `#910` merge SHA `82ffb117e6c2e84bd76a3aee6e5e747465958c66`; deploy run `33078757523` SUCCESS. Bot và owner worker cùng exact SHA.
+- Request `VID-20260827-2803A3`, project `29`, job `25`, outbox `24`; hai scene ShopAIKey đều `SUCCESS 100%`. Telegram giao đúng một lần ở message `27576`, `charged_xu=0`, transaction count vẫn `0`.
+- MP4 giao có `1.660.101` bytes, H.264 `540x960`, AAC stereo `48kHz`, duration `16.000s`, SHA-256 `FD48B933BE3552F8F0AE38CBD7FA6BA81FAD54855AA4898A9E177F1D916ECFBB`; audio `mean=-24.4 dB`, `max=-3.1 dB`.
+- Artifact này **không PASS PV-L01**: clip provider ngang bị `scale=decrease + pad=black`, khiến hình thật co nhỏ giữa canvas dọc; subtitle được chọn và có SRT `84` bytes nhưng manifest ghi `subtitle_path=null`, `addon_application.requested=[]`.
+- Product Video mới dùng `frame_fit_mode=cover`: `scale=increase + crop` phủ kín khung; default shared normalizer vẫn `contain`. Composition signature chứa fit mode để không tái sử dụng artifact letterbox cũ.
+- Mọi Tail owner hiện compile strict `product-video-addons-v1`; materializer vẫn fail-closed, không đoán schema cũ. ACK Telegram trong Tail là best-effort để `502/timeout` không giữ khách ở màn Chất lượng hoặc Hóa đơn.
+- UI được khóa byte-for-byte: `14/14` function Menu/Add-on/Review/Chất lượng/Hóa đơn/Xác nhận/Trạng thái khớp `origin/main`; cấm đổi chữ, hàng nút, callback hoặc back-stack trong failure loop này.
+- Final source evidence: focused acceptance `45 passed`; quality/manual `39 passed`; Trend/scene `52 passed`; full Product Video output `24 passed`; 5 runtime files compile exit `0`. Old Tail suite có `41 passed, 15 failed` y hệt clean baseline, `NEW_FAILURES=0`.
+- Source vẫn chưa là LIVE PASS. Phải deploy exact post-rebase SHA rồi rerun PV-L01; chỉ PASS khi video dọc phủ kín, subtitle materialized/applied, đủ 2 cảnh, audio, delivery và receipt `0 Xu`.
+
+## Bổ sung kho trend bốn nguồn — 28/08/2026
+
+- Scheduler hiện hữu vẫn kiểm tra mỗi giờ và chỉ refresh khi `next_run_at` đến hạn; khoảng refresh mặc định giữ đúng `7` ngày.
+- Backend đọc bốn nhóm metadata công khai: `media`, `facebook`, `youtube`, `tiktok`; không dùng API trả phí, không cần key, `paid_provider_calls=0`.
+- `source_group` được lưu trong trường `keywords` hiện có để không migration SQLite. Một nguồn lỗi chỉ giữ cache của nguồn đó; nguồn còn lại vẫn cập nhật, dữ liệu cũ không bị làm rỗng.
+- UI trend không đổi: vẫn `Xem 5 trend media`, `Tự nhập trend`, `Tìm kiếm trend`, `Gửi video trend`; không thêm bộ lọc/nút/callback mới.

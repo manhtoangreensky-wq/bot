@@ -111468,6 +111468,16 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
         "logo_text": str(clean.get("watermark_config", {}).get("text") or ""),
         "logo_position": str(clean.get("watermark_config", {}).get("position") or ""),
     })
+    strict_addon_plan = video_uiflow3_routeengine.product_video_addon_worker_contract(
+        clean,
+        production_bible=(
+            dict(draft.get("production_bible") or {})
+            if isinstance(draft.get("production_bible"), dict)
+            else {}
+        ),
+    )
+    if strict_addon_plan.get("contract_version") == "product-video-addons-v1":
+        addon_plan = deepcopy(strict_addon_plan)
     if owner == "uiflow3":
         routeengine_addon_plan = dict(
             video_uiflow3_handoff_from_session(session).get("addon_plan") or {}
@@ -114039,9 +114049,9 @@ async def video_edit_legacy_tail_compatibility(query, uid: int, tail: dict, host
     )
 
 
-async def video_tail9_answer_best_effort(query, text: str = "") -> None:
+async def video_tail9_answer_best_effort(query, text: str = "", **kwargs) -> None:
     try:
-        await query.answer(text or None)
+        await query.answer(text or None, **kwargs)
     except Exception:
         return None
 
@@ -114060,7 +114070,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
     tail, owner, host = video_tail9_context(uid, context)
     if owner == "missing":
         lang = get_user_language(uid) or "vi"
-        await query.answer(
+        await video_tail9_answer_best_effort(
+            query,
             "Phiên video cũ đã hết hạn. Vui lòng chọn lại sản phẩm.",
             show_alert=True,
         )
@@ -114105,7 +114116,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 # recovery failure continue into the commercial Product Video tail.
                 if not _VIDEO_EDIT_CALLBACK_ANSWERED.get():
                     try:
-                        await query.answer(
+                        await video_tail9_answer_best_effort(
+                            query,
                             "Không thể cập nhật màn chỉnh sửa lúc này. Kế hoạch cũ vẫn được giữ.",
                             show_alert=True,
                         )
@@ -114120,7 +114132,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
     if isinstance(getattr(context, "user_data", None), dict):
         context.user_data.pop(VIDEO_TAIL9_TEXT_INPUT_KEY, None)
     if section != "confirm":
-        await query.answer()
+        await video_tail9_answer_best_effort(query)
     if tail.get("final_confirmed") and section != "confirm":
         return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
     if section == "addon":
@@ -115486,34 +115498,34 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         product_type = str(tail.get("video_product_type") or "")
         lang = get_user_language(uid) or "vi"
         if tail.get("final_confirmed") or str(tail.get("job_id") or "").strip():
-            await query.answer("Yêu cầu này đã được xác nhận.")
+            await video_tail9_answer_best_effort(query, "Yêu cầu này đã được xác nhận.")
             if action == "back":
                 return await video_tail9_render(query, uid, context, "invoice")
             return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
         if action == "open":
-            await query.answer()
+            await video_tail9_answer_best_effort(query)
             allowed, _reason = video_tail9.invoice_allowed(tail)
             if not allowed:
                 return await video_tail9_render(query, uid, context, "invoice")
             return await video_tail9_render(query, uid, context, "confirm")
         if action == "back":
-            await query.answer()
+            await video_tail9_answer_best_effort(query)
             return await video_tail9_render(query, uid, context, "invoice")
         if action == "submit":
             pass
         else:
-            await query.answer()
+            await video_tail9_answer_best_effort(query)
             return await video_tail9_render(query, uid, context, "invoice")
         allowed, reason = video_tail9.invoice_allowed(tail)
         if not allowed:
-            await query.answer()
+            await video_tail9_answer_best_effort(query)
             return await video_tail9_render(query, uid, context, "invoice")
         product_type = str(tail.get("video_product_type") or "")
         deferred_runtime_product = product_type in VIDEO_TAIL9_DEFERRED_RUNTIME_PRODUCTS
         contract = video_tail9.commercial_contract(product_type)
         if not contract.get("execution_enabled"):
             if product_type in {"multi_scene_film", "video_long"}:
-                await query.answer("Video dài tập đang được nâng cấp.")
+                await video_tail9_answer_best_effort(query, "Video dài tập đang được nâng cấp.")
                 tail = video_tail9_prepare_submit_status(
                     uid,
                     context,
@@ -115533,7 +115545,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     query, context, uid, tail, owner, host
                 )
             if owner != "video_edit" and deferred_runtime_product:
-                await query.answer()
+                await video_tail9_answer_best_effort(query)
                 tail = video_tail9_prepare_submit_status(
                     uid,
                     context,
@@ -115555,7 +115567,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 return await video_tail9_render_confirmed_status(
                     query, context, uid, tail, owner, host
                 )
-            await query.answer()
+            await video_tail9_answer_best_effort(query)
             return await safe_edit_or_send(
                 query,
                 video_tail9_submit_blocker_text(),
@@ -115583,7 +115595,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if not balance_preflight.get("allowed"):
             tail["submit_preflight_snapshot"] = dict(balance_preflight)
             save_video_tail9_state(uid, context, tail, owner, host)
-            await query.answer()
+            await video_tail9_answer_best_effort(query)
             return await safe_edit_or_send(
                 query,
                 str(balance_preflight.get("public_message") or video_tail9_submit_blocker_text()),
@@ -115602,7 +115614,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 else []
             )
             if uiflow3_execution_blockers:
-                await query.answer()
+                await video_tail9_answer_best_effort(query)
                 tail = video_tail9_prepare_submit_status(
                     uid,
                     context,
@@ -115685,14 +115697,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             tail["submit_preflight_snapshot"] = dict(submit_preflight)
             save_video_tail9_state(uid, context, tail, owner, host)
             if not submit_preflight.get("allowed"):
-                try:
-                    await query.answer()
-                except Exception as exc:
-                    logger.warning(
-                        "video_tail_submit_callback_ack_failed | user_id=%s | error=%s",
-                        uid,
-                        type(exc).__name__,
-                    )
+                await video_tail9_answer_best_effort(query)
                 tail = video_tail9_prepare_submit_status(
                     uid, context, tail, owner, host, snapshot=submit_preflight
                 )

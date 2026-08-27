@@ -31,7 +31,7 @@ If a live row fails, reopen only that spec, add a RED reproducer from the real f
 - [x] Owner approved only the Key4U `.vn` endpoint configuration needed for Product Video; no secret values are committed.
 - [x] No wallet, PayOS, destructive DB, onboarding, PWA, or SubDub changes allowed.
 
-Current shared-resource owner: **Product Video**. SubDub is static until exact Product Video release markers.
+Current shared-resource owner: **SubDub Auto**. Product Video is source-local only until exact SubDub LIVE/CHROME/VPS/DEPLOY releases.
 
 ## Ordered Specs
 
@@ -131,17 +131,46 @@ Video AI Real public tiers:
 - [x] RED: a canonical final reused from manifest was incorrectly downgraded because `concat_attempted=false` prevents duplicate concat.
 - [x] Minimal ledger fix accepts `final_reused_from_manifest` only when full scene coverage, valid concat output and explicit final validity are also present.
 - [x] Focused GREEN and protected scene-ledger/recovery comparators pass.
-- [ ] PR merged, deploy verified and job `25` resumed to one Telegram delivery with Owner `0 Xu`.
+- [x] PR #910 merged as `82ffb117e6c2e84bd76a3aee6e5e747465958c66`; deploy run `33078757523` SUCCESS; bot and worker exact SHA.
+- [x] Job `25` resumed to one Telegram delivery message `27576` with `charged_xu=0`, transaction delta `0`.
+- [ ] PV-L01 remains FAIL: delivered artifact letterboxed the landscape scene inside 9:16 and degraded the requested subtitle.
 
 ### SPEC-04D: Weekly Four-Source Trend Catalog
 
 - [x] Owner approved exact design with `DUYỆT KHO TREND 4 NGUỒN`.
-- [ ] RED: source registry and normalization cover `media`, `facebook`, `youtube`, `tiktok` with attributable public metadata.
-- [ ] RED: public catalog filter buttons cover all four sources through one callback owner.
-- [ ] RED: refresh is idempotent, due every 7 days, preserves old cache on per-source failure and never calls a paid provider or wallet.
-- [ ] Minimal source/filter/status implementation.
-- [ ] Focused GREEN, compile and protected Trend Video flow comparators.
+- [x] RED: source registry and normalization cover `media`, `facebook`, `youtube`, `tiktok` with attributable public metadata.
+- [x] UI LOCK: no new source-filter button/callback and no text/layout/back-stack change; existing `Xem 5 trend media` screen remains the only public catalog UI.
+- [x] RED: refresh is idempotent, due every 7 days, preserves old cache on per-source failure and never calls a paid provider or wallet.
+- [x] Minimal backend source/status implementation; `source_group` is encoded in existing keywords, so no DB migration is required.
+- [x] Focused GREEN `4 passed`; protected Trend2/Trend3 flow batch `67 passed` before final UI-lock adjustment.
 - [ ] One scoped PR, deploy/runtime verify and one real VPS refresh with per-source evidence.
+
+### SPEC-04E: PV-L01 Vertical Fill and Strict Add-on Recovery
+
+- [x] Owner screenshot proves a landscape scene was scaled down and padded black inside a 9:16 canvas.
+- [x] RED `2 failed, 1 passed`: Product Video had no `cover` mode; shared non-Product default was already locked to `contain`.
+- [x] Minimal Product Video-only `scale=increase + center crop`; composition signature includes fit mode so the letterboxed manifest cannot be reused.
+- [x] GREEN `3 passed`; shared default still uses `scale=decrease + pad` for protected non-Product lanes.
+- [x] Job `25` forensic: UI/project requested subtitle and SRT existed, but persisted manifest had `subtitle_path=null`, `addon_application.requested=[]`.
+- [x] RED `1 failed`: scene3/manual Tail persisted legacy flat Add-on data without `contract_version`.
+- [x] Minimal handoff fix compiles `product-video-addons-v1` for every Product Video Tail owner; uiflow3's richer canonical handoff remains authoritative.
+- [ ] Post-rebase protected gate, ship/deploy and same-case live rerun proving full-frame 9:16 + subtitle applied.
+
+### SPEC-04F: Video UI Lock and Tail-to-Status Matrix
+
+- [x] Owner rule locked: do not change completed Video UI text, keyboard rows, callbacks or back-stack; only repair content/contract/runtime behavior.
+- [x] RED ACK timeout: `11 failed in 5.03s`; all 10 quality callbacks and Confirm stopped before their next screen.
+- [x] Minimal Tail callback ACK best-effort; no text/keyboard function changed.
+- [x] GREEN `11 passed in 4.51s`: all 10 tiers open Invoice and Confirm opens Confirmation under Telegram ACK timeout.
+- [x] Final Submit runtime-not-ready path persists attempt and renders Status: `1 passed in 0.76s`.
+- [x] Full menu RED: PV-L08 `video_idea_to_product` had no adapter owner (`1 failed, 9 passed`).
+- [x] One alias fix; full nine-lane Invoice/Confirm/Status contract GREEN `10 passed in 0.68s`.
+- [x] UI byte-lock: 14/14 completed Menu/Add-on/Review/Quality/Invoice/Confirm/Status function blocks match `origin/main` byte-for-byte.
+- [x] Final source focused acceptance `45 passed in 5.88s`; dependency-complete quality/manual files `39 passed in 8.85s`.
+- [x] Protected old Tail suite branch `41 passed, 15 failed in 9.04s`; clean `origin/main` reproduces exact same 15 IDs with `41 passed, 15 failed in 9.02s`; `NEW_FAILURES=0`.
+- [x] Trend/scene ledger protected `52 passed in 5.56s`; full Product Video output contract `24 passed in 12.54s`.
+- [x] `py_compile` five touched runtime files exit 0.
+- [ ] Post-SubDub rebase gate and live traversal for every acceptance row.
 
 ### SPEC-05: Distinct Two-Scene Product/Lane LIVE Matrix
 
@@ -267,3 +296,16 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | 2026-08-27 | PV-L01 live rerun job #25 | Exact Tail via Codex Browser: manual trend -> source subtitle -> transition `1/1` -> Review `2 scenes/16s/9:16` -> `Nhanh gọn 80 Xu/cảnh`; invoice `144 Xu`; one submit created request `VID-20260827-2803A3`, project `29`, job `25`, outbox `24` | FLOW/ADD-ON/ADMISSION PASS; no duplicate submit; Owner no-charge |
 | 2026-08-27 | PV-L01 job #25 real artifact | Both primary scene tasks reached `SUCCESS 100%`; final `/tmp/toanaas_multiscene_blackbox/product-video-25-c7eb882db394/final_output.mp4` is 1,660,101 bytes, H.264 540x960 + AAC stereo 48kHz, duration 16.000s | ARTIFACT VALID; delivery still blocked by reused-manifest ledger regression |
 | 2026-08-27 | Job #25 manifest-reuse RED/GREEN | RED `1 failed in 0.85s`: `scene_coverage_valid_bool=False`; one-condition production fix; GREEN `1 passed in 0.73s`; protected scene-ledger/recovery batch `21 passed in 3.65s` | SOURCE PASS; PR/deploy/live delivery still required |
+| 2026-08-27 | Job #25 delivery after PR #910 | Deploy `33078757523` SUCCESS; bot/worker `82ffb117...`; job `25` completed 100%, delivery message `27576`, one delivery attempt, charged Xu 0, transactions 0 | DELIVERY PASS, but case still FAIL on visual/add-on acceptance |
+| 2026-08-27 | Job #25 delivered artifact probe | `1,660,101` bytes; SHA256 `fd48b933...`; H.264 540x960 + AAC stereo 48kHz; duration 16.000s; mean/max audio `-24.4/-3.1 dB` | MEDIA VALID; Owner screenshot proves black letterbox bars |
+| 2026-08-27 | Product Video vertical cover RED/GREEN | RED `2 failed, 1 passed in 0.83s`; Product-only cover fix; GREEN `3 passed in 1.01s` | Source PASS; same-fixture live required |
+| 2026-08-27 | Strict Add-on owner RED | Scene3/manual Trend Tail produced no strict contract: `1 failed in 1.34s` at missing `contract_version` | VALID RED matching job #25 subtitle degrade |
+| 2026-08-27 | Quality/Confirm ACK timeout RED/GREEN | RED `11 failed in 5.03s`; Tail ACK best-effort; GREEN `11 passed in 4.51s`; Submit-to-Status blocked path `1 passed in 0.76s` | Flow source PASS; UI bytes unchanged |
+| 2026-08-27 | Full menu Tail-to-Status matrix | RED PV-L08 missing executor owner: `1 failed, 9 passed`; alias fix; GREEN `10 passed in 0.68s` | All nine acceptance lanes have Invoice/Confirm/Status contracts; live rows remain pending |
+| 2026-08-28 | Final source acceptance | ACK/10-tier/Confirm/Status + 9 lane + UI byte-lock + cover + strict Add-on + Trend4: `45 passed in 5.88s`; full Product Video output `24 passed in 12.54s` | PASS on current local bytes |
+| 2026-08-28 | Protected baseline comparison | Branch old Tail suite `41 passed, 15 failed in 9.04s`; clean `origin/main` same 15 IDs `41 passed, 15 failed in 9.02s` | `NEW_FAILURES=0`; stale tests request superseded UI and remain untouched |
+| 2026-08-28 | Protected focused regressions | Quality/manual `39 passed in 8.85s`; Trend/scene ledger `52 passed in 5.56s`; compile 5 runtime files exit 0 | SOURCE REVIEW READY; post-rebase/live pending |
+| 2026-08-28 | Fresh resumed source gate on local `98de28d` | Five-file branch run `72 passed, 4 failed in 30.68s`; isolated parent `bc422d5` with the same tests `54 passed, 22 failed in 811.91s`; all four branch failures are the same stale UI/tier IDs present on the parent, so `NEW_FAILURES=0` | BASELINE CLASSIFIED; no UI/test assertion was changed |
+| 2026-08-28 | Fresh clean acceptance and protected comparators | Same five-file acceptance with the four measured baseline-stale IDs deselected: `72 passed, 4 deselected in 25.22s`; quality/manual `39 passed in 8.17s`; Trend/scene expanded `56 passed in 12.13s`; full Product Video output `24 passed in 16.20s` | SOURCE PASS on pre-rebase bytes |
+| 2026-08-28 | Fresh compile/scope gate | `py_compile` five runtime files exit 0; `git diff --check HEAD^..HEAD` exit 0; forbidden-path hits 0; secret-pattern hits 0; 14 completed UI functions remained byte-locked in the acceptance batch | SOURCE PASS; post-SubDub fetch/rebase, ship, deploy and live matrix remain open |
+| 2026-08-28 | Post-rebase gate on exact `origin/main a9471b6` | Commit rebased cleanly with prior `bc422d5` skipped as already upstream; unified 11-file gate `163 passed, 4 measured-baseline deselected in 596.32s`; `py_compile` five runtime files exit 0 | POST-REBASE SOURCE PASS; push/PR/deploy/runtime/live remain open |

@@ -1007,6 +1007,7 @@ def test_uiflow3_tail_session_keeps_strict_addon_plan_for_job_persistence() -> N
                 deepcopy(prepared_session),
             ),
             "save_video_uiflow3_state": lambda _context, state: state,
+            "video_uiflow3_routeengine": video_uiflow3_routeengine,
             "video_uiflow3_handoff_from_session": lambda session: deepcopy(
                 (session.get("draft") or {}).get("uiflow3_routeengine_handoff") or {}
             ),
@@ -1042,6 +1043,90 @@ def test_uiflow3_tail_session_keeps_strict_addon_plan_for_job_persistence() -> N
         "text",
         "transitions",
     ]
+
+
+def test_scene3_tail_session_compiles_strict_subtitle_and_transition_contract() -> None:
+    tail = video_tail9.new_state(
+        product_type="video_trend",
+        execution_product_type="video_trend",
+        session_id="trend-strict-addon-contract",
+        plan_revision=1,
+        scene_count=2,
+        ratio="9:16",
+        estimated_duration=16,
+    )
+    tail["scene_content"] = [
+        {
+            "scene_index": 1,
+            "subtitle_line": "Barista chuẩn bị cà phê.",
+            "transition_out": "cut",
+        },
+        {
+            "scene_index": 2,
+            "subtitle_line": "Sinh viên nhận ly tái sử dụng.",
+        },
+    ]
+    tail["audio_config"]["subtitles"] = True
+    tail["addon_config"] = {
+        "postprocessing": {
+            "subtitles": {
+                "enabled": True,
+                "value": {
+                    "source": "auto",
+                    "script_text": "Barista chuẩn bị cà phê.\nSinh viên nhận ly tái sử dụng.",
+                },
+            }
+        }
+    }
+    tail = video_tail9.normalize_state(tail)
+    stored: dict = {}
+
+    def save_session(_user_id: int, session: dict) -> dict:
+        stored.clear()
+        stored.update(deepcopy(session))
+        return deepcopy(stored)
+
+    runtime = _load_bot_functions(
+        "video_tail9_apply_to_session",
+        extra_globals={
+            "video_profile_scene1_handoff": lambda *_args, **_kwargs: {
+                "draft": {"b14_profile_id": "food"},
+                "product_id": "video_trend",
+            },
+            "video_uiflow3_routeengine": video_uiflow3_routeengine,
+            "video_uiflow3_handoff_from_session": lambda _session: {},
+            "video_tail9_addon_script_info": lambda _tail, name: {
+                "text": (
+                    "Barista chuẩn bị cà phê.\nSinh viên nhận ly tái sử dụng."
+                    if name == "subtitles"
+                    else ""
+                )
+            },
+            "video_tail9_language_label": lambda value: str(value or ""),
+            "video_b14_default_addon_plan": lambda _profile: {},
+            "video_tail9_addon_quote": lambda _tail: {"items": [], "total_xu": 0},
+            "product_video_logo_material_config": lambda **kwargs: dict(kwargs),
+            "save_video_session": save_session,
+            "get_video_session": lambda _user_id: deepcopy(stored),
+        },
+    )
+
+    result = runtime.video_tail9_apply_to_session(
+        880062,
+        SimpleNamespace(user_data={}),
+        tail,
+        "scene3",
+        {"owner_chat_id": 99},
+    )
+
+    persisted_plan = result["draft"]["b14_addon_plan"]
+    assert persisted_plan["contract_version"] == "product-video-addons-v1"
+    assert persisted_plan["requested_addons"] == ["subtitle", "transitions"]
+    assert persisted_plan["subtitle"]["script_text"] == (
+        "Barista chuẩn bị cà phê.\nSinh viên nhận ly tái sử dụng."
+    )
+    assert persisted_plan["transition_plan"] == ["cut"]
+    assert persisted_plan["silent_drop_allowed"] is False
 
 
 def test_one_scene_contract_supports_every_selected_product_video_addon() -> None:

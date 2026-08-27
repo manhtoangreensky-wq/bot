@@ -12,6 +12,10 @@
 
 Lỗi cũ cần canh: literal `\\n`, status nằm ngang, video mất audio, back nhảy sản phẩm, tier bị đổi, thiếu scene, add-on bị drop, duplicate job/delivery.
 
+10. Với output `9:16`, không chỉ kiểm tra stream width/height. Mở video và xác nhận hình thật phủ kín canvas, không có hai dải đen trên/dưới hoặc trái/phải do `pad`; cảnh ngang phải được crop-to-fill, không co nhỏ giữa khung.
+11. Ở mọi nút Chất lượng, bấm một lần phải chuyển sang Hóa đơn; `Xác nhận tạo video` phải chuyển sang Xác nhận; `Bắt đầu tạo video` phải luôn chuyển sang Trạng thái kể cả provider/worker chưa sẵn sàng. Đứng nguyên màn là FAIL callback.
+12. Add-on PASS cần đồng thời: project plan ghi requested, worker materialization có artifact, manifest `addon_application.requested/applied` có đúng tên và video thật thể hiện add-on. Có SRT bên cạnh nhưng `subtitle_path=null` vẫn là FAIL.
+
 ## Cách test Public Landing Motion
 
 1. Dùng đúng sáu case `ML-01..ML-06`; tải mới trang trước mỗi case.
