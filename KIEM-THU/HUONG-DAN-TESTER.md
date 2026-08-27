@@ -28,7 +28,10 @@ Lỗi cũ cần canh: literal `\\n`, status nằm ngang, video mất audio, back
 2. Hai case đầu chỉ upload file `2 giọng nam nữ.mp4` có SHA-256
    `85C8793D197CF2782BB554D46282E82A83BCB062A0483E412A0CA1DA668F9F51`;
    không dùng `Download.mp4` hoặc fixture lịch sử.
-3. Chọn `Tự động 2 giọng`, gốc `40%`, lồng `150%`, rồi confirm đúng một lần.
+3. Chọn `Tự động 2 giọng`, mở `🎚 Âm thanh`. Màn chính phải chỉ có hai nút
+   `Âm thanh gốc | Giọng lồng tiếng` cùng một hàng và Quay lại; không được có
+   `Gốc xx%` hoặc `Lồng xx%`. Vào từng màn con để nhập gốc `40%`, lồng `150%`,
+   quay lại kiểm tra hai giá trị còn nguyên, rồi confirm đúng một lần.
 4. Status phải hiện từ saved input qua ASR/diarization, cast, TTS, mux và delivery;
    lỗi ở stage nào ghi đúng stage đó, không suy ra từ HTTP `200`.
 5. Sidecar phải có đúng `2` speaker labels. Cast của từng label phải đến từ
@@ -43,3 +46,6 @@ Lỗi cũ cần canh: literal `\\n`, status nằm ngang, video mất audio, back
    cue dưới ngưỡng đều là FAIL-closed. Không sửa test để ép thành hai label.
 10. Chỉ sau hai case 2-speaker PASS và lock manifest đã ghi hash mới dùng
     `test nhiều giọng.mp4` cho `SD-MS-01`.
+11. Lặp lại contract audio UI trên giọng nữ mặc định, giọng nam mặc định, Kho
+    voice, voice riêng, Auto 2 và Auto multi khi chạy case tương ứng; không chấp
+    nhận một kiểu giọng mở bảng preset hoặc làm mất giá trị numeric.

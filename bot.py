@@ -234998,24 +234998,6 @@ def subdub_audio_mix_keyboard(lang: str = "vi", state: dict | None = None) -> In
             InlineKeyboardButton("🔊 Âm thanh gốc" if is_vi else "🔊 Original audio", callback_data="videodub|audio_original"),
             InlineKeyboardButton("🎙 Giọng lồng tiếng" if is_vi else "🎙 Dub voice", callback_data="videodub|audio_dub"),
         ],
-        [
-            InlineKeyboardButton("Gốc 20%" if is_vi else "Orig 20%", callback_data="videodub|audio_original_volume|20"),
-            InlineKeyboardButton("Gốc 40%" if is_vi else "Orig 40%", callback_data="videodub|audio_original_volume|40"),
-            InlineKeyboardButton("Gốc 60%" if is_vi else "Orig 60%", callback_data="videodub|audio_original_volume|60"),
-        ],
-        [
-            InlineKeyboardButton("Gốc 80%" if is_vi else "Orig 80%", callback_data="videodub|audio_original_volume|80"),
-            InlineKeyboardButton("Gốc 100%" if is_vi else "Orig 100%", callback_data="videodub|audio_original_volume|100"),
-        ],
-        [
-            InlineKeyboardButton("Lồng 80%" if is_vi else "Dub 80%", callback_data="videodub|audio_dub_volume|80"),
-            InlineKeyboardButton("Lồng 100%" if is_vi else "Dub 100%", callback_data="videodub|audio_dub_volume|100"),
-            InlineKeyboardButton("Lồng 120%" if is_vi else "Dub 120%", callback_data="videodub|audio_dub_volume|120"),
-        ],
-        [
-            InlineKeyboardButton("Lồng 150%" if is_vi else "Dub 150%", callback_data="videodub|audio_dub_volume|150"),
-            InlineKeyboardButton("Lồng 200%" if is_vi else "Dub 200%", callback_data="videodub|audio_dub_volume|200"),
-        ],
         [InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_audio_mix")],
     ])
 
@@ -235023,7 +235005,7 @@ def subdub_dynamic_volume_ui_future_spec() -> dict:
     return {
         "task": "P0.19N SubDub Original/Dub Volume Input UI",
         "enabled": bool(SUBDUB_VOLUME_MIX_UI_ENABLED),
-        "public_fixed_percentage_grid": True,
+        "public_fixed_percentage_grid": False,
         "original_audio": {
             "separate_screen": True,
             "toggle": True,
@@ -252992,7 +252974,6 @@ async def handle_video_dubbing_callback(
         return await safe_edit_or_send(query, video_dubbing_voice_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_keyboard(lang, state))
     if action in {
         "audio_mix", "audio_original", "audio_dub", "audio_keep",
-        "audio_original_volume", "audio_dub_volume",
         "audio_original_input", "audio_dub_input", "back_audio_mix",
     }:
         if not subdub_audio_mix_available(state):
@@ -253029,18 +253010,6 @@ async def handle_video_dubbing_callback(
                 parse_mode="HTML",
                 reply_markup=subdub_audio_layer_keyboard(state, layer, lang),
             )
-        elif action == "audio_original_volume":
-            percent = subdub_percent_value(value, SUBDUB_ORIGINAL_AUDIO_DEFAULT_VOLUME_PERCENT, 0, 100)
-            fields.update({
-                "keep_original_audio": "1" if percent > 0 else "0",
-                "original_audio_volume_percent": percent,
-                "audio_mix_mode": "keep_original" if percent > 0 else "dub_only",
-            })
-            state = set_video_dubbing_pending(uid, "audio_mix", **fields)
-        elif action == "audio_dub_volume":
-            percent = subdub_percent_value(value, SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT, 80, 200)
-            fields["dubbed_voice_volume_percent"] = percent
-            state = set_video_dubbing_pending(uid, "audio_mix", **fields)
         elif action == "audio_keep":
             keep = str(value or "") == "1"
             fields.update({

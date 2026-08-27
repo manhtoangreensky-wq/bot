@@ -4,7 +4,7 @@ owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
 branch: fix/p0-subdub-audio-label-live
-phase: SPEC_08_WAIT_SHARED_RELEASE_FOR_REBASE
+phase: SPEC_07_4_POST_REBASE_READY_TO_PUSH
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -29,7 +29,40 @@ resource_boundary:
   live: owned_by_product_video
   chrome: owned_by_product_video
   vps_deploy: owned_by_product_video
-  product_video: PR_905 merge/deploy/live active; SubDub has released shared resources
+  product_video: shared LIVE/CHROME/VPS remains released by SubDub until an exact Product Video release is received
+
+audio_ui_rollback:
+  root_cause: PR 896 / 3fc190c added a fixed-percentage preset grid and two preset callback actions to the shared audio owner
+  required_ui: two layer buttons on one row; original toggle plus numeric 0-100; dub numeric 0-200; no public percentage grid
+  shared_lanes:
+    - Lồng tiếng video
+    - Phụ đề + Lồng tiếng
+  shared_voice_modes:
+    - default female
+    - default male
+    - voice vault
+    - custom voice
+    - Auto 2-speaker
+    - Auto multi-speaker
+  allowed_production_diff:
+    - bot.py subdub_audio_mix_keyboard removes only percentage rows
+    - bot.py subdub_dynamic_volume_ui_future_spec sets public_fixed_percentage_grid false
+    - bot.py handle_video_dubbing_callback removes only preset action names and branches
+  protected:
+    - numeric input callbacks and pending-text owners
+    - state persistence and mux propagation
+    - two-speaker, multi-speaker and cast engines
+    - pricing, receipt, wallet and provider behavior
+  red: 3 failed in 3.84s before rollback
+  broad_gate: 58 passed, 1 skipped, 1 unrelated baseline receipt-copy failure in 548.67s; new failures 0
+  focused_green: 35 passed, 3 warnings in 12.44s; exit 0
+  compile: bot.py and 3 changed audio contract tests; exit 0
+  yaml_check: durable state and 2 SubDub issue templates parsed; YAML_OK 3; exit 0
+  production_diff: bot.py 1 insertion and 32 deletions; insertion is only the True-to-False contract replacement; no other production file
+  rebase_base: 82ffb117e6c2e84bd76a3aee6e5e747465958c66
+  rebase_result: upstream ac7cb76 skipped; branch 0 behind and 1 ahead
+  post_rebase_green: 35 passed, 3 warnings in 489.20s; exit 0
+  post_rebase_compile_diff: bot.py plus 3 audio tests compile exit 0; origin/main range diff-check exit 0
 
 fixtures:
   two_speaker:
@@ -294,4 +327,4 @@ ordered_specs:
       - audit every acceptance line as proven or unresolved
       - mark the goal complete only when no required line remains unresolved
 
-current_next_action: after Product Video exact releases fetch/rebase latest main, rerun focused post-rebase gate, stage only intended code/tests/checklist/state/operating-doc/tester files, create one PR/merge/deploy, then live exact fixture combo
+current_next_action: push force-with-lease, create one PR, squash merge and deploy; verify runtime compact numeric UI; then restart the exact-fixture combo

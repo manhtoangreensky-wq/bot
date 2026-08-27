@@ -94,6 +94,17 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Bẫy: một apply-patch từng làm rơi `2,004` dòng Product Video; scope audit đã
   bắt được trước ship, toàn bộ `bot.py` được restore exact `origin/main`, rồi
   áp lại đúng `1` dòng. Luôn kiểm `git diff --numstat` trước test/commit.
+- Điều khiển âm thanh là một owner dùng chung cho cả `Lồng tiếng video` và
+  `Phụ đề + Lồng tiếng`, không phụ thuộc giọng nữ/nam mặc định, Kho voice,
+  voice riêng, `Tự động 2 giọng` hay `Tự động nhiều giọng`. Màn chính chỉ có
+  `Âm thanh gốc | Giọng lồng tiếng` cùng một hàng và nút Quay lại; màn con cho
+  nhập số gốc `0–100`, lồng `0–200`. PR #896 đã thêm nhầm `10` nút preset và
+  `2` callback preset; bản rollback xóa đúng các phần đó, không đổi state/mux.
+- Bằng chứng UI source hiện tại: RED `3 failed in 3.84s`; GREEN trọng tâm
+  `35 passed, 3 warnings in 12.44s`, exit `0`; compile `bot.py` + `3` test files
+  exit `0`. Matrix đo đủ `2 × 6 = 12` tổ hợp lane/voice và nhập thật
+  `40% / 150%` ở cả hai lane. Batch rộng hơn có `58 passed`, `1 skipped` và
+  đúng `1` failure copy baseline không thuộc diff.
 - Merge/deploy và same-fixture LIVE PASS vẫn là cổng riêng; chưa có MP4 cuối thì
   không được ghi lane là hoàn tất.
 
