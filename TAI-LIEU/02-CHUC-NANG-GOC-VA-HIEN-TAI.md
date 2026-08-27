@@ -105,3 +105,5 @@ Giá khách hiện hành vẫn là `80`, `110`, `160`, `200`, `220`, `220`, `370
 | Worker claim/recovery có thể dùng generic retry count | Existing provider task chỉ poll; controlled fallback có khóa riêng; không resubmit primary và không chạm wallet | Đã khóa bằng test |
 
 Bằng chứng là PV-L01 job `22`: hai ShopAIKey task thật, `0/2` clip, terminal `provider_not_start`, `charged_xu=0`. Source correction có focused `6 passed`, protected `51 passed`, `NEW_FAILURES=0`; LIVE output vẫn pending.
+
+Live job `23` bổ sung một bất nhất mới: route snapshot ghi provider chain đầy đủ, worker readiness cũng có ShopAIKey + Key4U, nhưng trường job-level `provider_order` chỉ còn ShopAIKey nên fallback list rỗng. Hiện tại policy phục hồi duy nhất Key4U từ readiness/capability cục bộ sau khi primary task đã stall và mọi gate xác nhận/quote/idempotency đạt; missing confirm hoặc quote lệch vẫn bị test chặn.
