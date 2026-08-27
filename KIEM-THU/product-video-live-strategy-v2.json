@@ -1,0 +1,322 @@
+{
+  "schema_version": 1,
+  "strategy_id": "PRODUCT-VIDEO-LIVE-V2",
+  "source_merge_sha": "d92a98ddbc10ea4c626f75a65c2ddb58403a2fc6",
+  "representative_tier_id": 400,
+  "representative_unit_xu": 80,
+  "manual_lanes": "source_contract_only",
+  "live_window": {
+    "destination": "@toanaasbot",
+    "account_scope": "owner_admin_test_account",
+    "product_video_final_job_cap": 17,
+    "assigned_scene_render_upper_bound": 28,
+    "source_image_provider_task_cap": 4,
+    "total_provider_task_cap": 32,
+    "max_concurrent_heavy_tasks": 1,
+    "browser_action_time_confirmation": true,
+    "charged_xu_required": 0,
+    "transaction_row_delta_required": 0,
+    "credit_event_row_delta_required": 0,
+    "excluded_actions": [
+      "payos",
+      "topup",
+      "env_or_key_change",
+      "destructive_db",
+      "subdub",
+      "video_local_edit",
+      "videoedit|ai",
+      "multi_scene_film",
+      "video_long"
+    ]
+  },
+  "excluded_products": [
+    "multi_scene_film",
+    "video_long",
+    "video_local_edit"
+  ],
+  "deferred_lanes": [
+    "videoedit|ai"
+  ],
+  "protected_products": {
+    "video_local_edit": {
+      "locked_at_sha": "d92a98ddbc10ea4c626f75a65c2ddb58403a2fc6",
+      "function_sha256": {
+        "video_edit_hub_text": "90583dd0f0f7bd5c0ed7dd3fbaa6118dc8246bbcdd5776de3d00788d288d1e3f",
+        "video_edit_hub_keyboard": "42caedf370b91fecaf6b44729c894878236607a009485e028e7b77bbeb45da33",
+        "video_local_confirmation_text": "69d962393106f1e58d07e0fe351cecd77b5754c9ed16b264bdf23a5f6301e31d",
+        "video_local_review_keyboard": "aa5b8986d0ab3243d146f753b35babf4364bc82ee46203ebe8d5db3e37a089fa",
+        "video_local_confirmation_keyboard": "4fa1d81f8b5cb27af61c2abd31ec16293cc5641b50ae7262b41fdc5345b4a468",
+        "video_editor_menu_text": "5d95d8513781dce3c69d94d87d48795f4f381a54342832a7fc04fdd7bb6c02d8",
+        "video_editor_menu_keyboard": "729657e3b5251239f6ca56fd3e6a798e125253e865857e9e00799aa6673e896c",
+        "handle_video_editor_callback": "49d3d961fa08637abeb60d4a44de58d30bec24afaf9acfae6f6236f9bb10a6a5"
+      },
+      "protected_test_files": [
+        "tests/test_p0_videoedit_canonical_navigation.py",
+        "tests/test_p0_videoedit_local_free_job.py"
+      ]
+    }
+  },
+  "representatives": [
+    {
+      "case_id": "PV2-R01",
+      "product_id": "video_trend",
+      "flow_owner": "trend",
+      "engine_route": "trend_video",
+      "lane_callback": "vtrend|video_upload",
+      "scene_count": 2,
+      "scenario_id": "PV2-R01-TREND-REMOTE-WORK",
+      "scenario": "Analyze the uploaded remote-work clip as a reuse-cup trend; scene 1 opens an electric coffee cart, scene 2 serves reusable cups to students.",
+      "fixture_refs": [
+        "PV-L05-self-shot-typing-source.mp4#784FBE5BBD7B8D59A40A16AD103DB2B14B5DC7FCE71BE2ADA3E24A3BC04E2732"
+      ],
+      "addons": [
+        "subtitle_source_language",
+        "transition_default"
+      ]
+    },
+    {
+      "case_id": "PV2-R02",
+      "product_id": "video_ai_real",
+      "adapter_product_id": "video_ai_image",
+      "flow_owner": "scene3",
+      "engine_route": "video_ai_canonical",
+      "lane_callback": "vid3|mode|image_video",
+      "scene_count": 2,
+      "scenario_id": "PV2-R02-WATCH-IMAGE-VIDEO",
+      "scenario": "Keep one handmade emerald-dial watch consistent from workbench assembly to a dark-slate hero shot.",
+      "fixture_refs": [
+        "PV-L04-watch-scene-1-workbench.png#BA9B9EDE2F81B119345C073DDA3735C546771E5A2FEC789D14C96AE35CF3E3FE",
+        "PV-L04-watch-scene-2-hero.png#8412BB7105F161265406FC64EAC6F9DD50AE791CE4461A0D647C8E662A7DE0D4"
+      ],
+      "addons": [
+        "dubbing_default",
+        "subtitle_source_language"
+      ]
+    },
+    {
+      "case_id": "PV2-R03",
+      "product_id": "script_image_video",
+      "flow_owner": "scene3",
+      "engine_route": "script_to_video",
+      "lane_callback": "vproduct|script_upload",
+      "scene_count": 5,
+      "scenario_id": "PV2-R03-LOTUS-TEA-SCRIPT",
+      "scenario": "Five-scene West Lake lotus-tea journey: harvest, separate lotus rice, scent tea, brew, serve.",
+      "fixture_refs": [
+        "KIEM-THU/fixtures/PV2-R03-tea-lotus-5-scenes.txt#39047AABFEE7D88B17109FCC90683C64080B5BB0AC3D531AC062B3060F836FCE"
+      ],
+      "addons": [
+        "voice_default",
+        "subtitle_source_language",
+        "background_music"
+      ]
+    },
+    {
+      "case_id": "PV2-R04",
+      "product_id": "frame_video_local",
+      "flow_owner": "frame_video",
+      "engine_route": "frame_video_render",
+      "lane_callback": "framevideo|source|ai",
+      "scene_count": 2,
+      "scenario_id": "PV2-R04-LEATHER-WALLET-FRAME-AI",
+      "scenario": "Generate two consistent source images for a handmade leather wallet: stitching at a workbench, then the finished wallet in a clean product shot.",
+      "source_generation_prompts": [
+        "Handmade brown leather wallet being stitched at an artisan workbench, no text or logo.",
+        "The exact same brown leather wallet finished and displayed in a clean product hero shot, no text or logo."
+      ],
+      "addons": [
+        "text_overlay",
+        "transition_default"
+      ]
+    },
+    {
+      "case_id": "PV2-R05A",
+      "product_id": "self_shot_scene_change",
+      "flow_owner": "selfshot2",
+      "engine_route": "self_shot_scene_change",
+      "lane_callback": "vproduct|selfshot_product|scene_change",
+      "scene_count": 2,
+      "scenario_id": "PV2-R05A-SELF-SHOT-SCENE-CHANGE",
+      "scenario": "Preserve the real person and typing action; change the workspace into a rooftop cafe across two coherent scenes.",
+      "fixture_refs": [
+        "PV-L05-self-shot-typing-source.mp4#784FBE5BBD7B8D59A40A16AD103DB2B14B5DC7FCE71BE2ADA3E24A3BC04E2732"
+      ],
+      "addons": [
+        "preserve_source_audio",
+        "watermark_text"
+      ]
+    },
+    {
+      "case_id": "PV2-R05B",
+      "product_id": "self_shot_cinematic_transform",
+      "flow_owner": "selfshot3",
+      "engine_route": "self_shot_cinematic_transform",
+      "lane_callback": "vproduct|selfshot_product|cinematic",
+      "scene_count": 2,
+      "scenario_id": "PV2-R05B-SELF-SHOT-CINEMATIC",
+      "scenario": "Preserve the review performance while wardrobe, lighting and environment transform continuously from studio daylight to a neon cinema world.",
+      "fixture_refs": [
+        "PV-L09-edit-review-source.mp4#3A53DA94446EE4FBDB6129BD8998B09AA766B21BA7EA84AC24E578EF2AD97F8F"
+      ],
+      "addons": [
+        "preserve_source_audio",
+        "cinematic_effects"
+      ]
+    },
+    {
+      "case_id": "PV2-R06",
+      "product_id": "storyboard_prompt",
+      "flow_owner": "storyboard",
+      "engine_route": "storyboard_to_video",
+      "lane_callback": "vstory|ai",
+      "scene_count": 2,
+      "scenario_id": "PV2-R06-ROBOT-STORYBOARD-AI",
+      "scenario": "Create and map two consistent storyboard images: a small white-teal robot plants one rooftop seed, then stands beside a glowing sprout at sunrise.",
+      "source_generation_prompts": [
+        "Small white-and-teal robot planting one seed on a rooftop before sunrise, no text or logo.",
+        "The exact same robot and rooftop at sunrise beside one softly glowing sprout, no text or logo."
+      ],
+      "addons": [
+        "subtitle_source_language",
+        "transition_default"
+      ]
+    },
+    {
+      "case_id": "PV2-R08",
+      "product_id": "video_idea",
+      "flow_owner": "scene3",
+      "engine_route": "video_idea_to_product",
+      "lane_callback": "videoidea|explore",
+      "scene_count": 2,
+      "scenario_id": "PV2-R08-ELECTRIC-COFFEE-IDEA",
+      "scenario": "Explore a prepared electric coffee-cart idea, develop it into arrival at a school gate and barista service to students.",
+      "addons": [
+        "subtitle_source_language"
+      ]
+    }
+  ],
+  "quality_coverage": [
+    {
+      "tier_id": 400,
+      "coverage": "representatives",
+      "scene_count": 2
+    },
+    {
+      "tier_id": 500,
+      "product_id": "video_trend",
+      "adapter_product_id": "video_trend",
+      "lane_callback": "vtrend|search",
+      "scene_count": 1,
+      "case_id": "PV2-Q500",
+      "scenario_id": "PV2-Q500-PAPER-KITE",
+      "scenario": "Fold one bright paper kite and reveal it flying above a riverside dike.",
+      "addons": [
+        "transition_default"
+      ]
+    },
+    {
+      "tier_id": 600,
+      "product_id": "video_idea",
+      "adapter_product_id": "video_idea",
+      "lane_callback": "videoidea|explore",
+      "scene_count": 1,
+      "case_id": "PV2-Q600",
+      "scenario_id": "PV2-Q600-CERAMIC-TEA",
+      "scenario": "Arrange a ceramic tea set and pour hot tea beside a rain-lit window with synchronized pouring sound.",
+      "artifact_requirements": [
+        "audio_stream"
+      ]
+    },
+    {
+      "tier_id": 200,
+      "product_id": "frame_video_local",
+      "adapter_product_id": "frame_video_local",
+      "lane_callback": "framevideo|source|uploaded",
+      "scene_count": 1,
+      "case_id": "PV2-Q200",
+      "scenario_id": "PV2-Q200-WATCH-HERO-FRAME",
+      "scenario": "Animate one uploaded emerald-dial watch hero image with a restrained camera move.",
+      "fixture_refs": [
+        "PV-L04-watch-scene-2-hero.png#8412BB7105F161265406FC64EAC6F9DD50AE791CE4461A0D647C8E662A7DE0D4"
+      ]
+    },
+    {
+      "tier_id": 300,
+      "product_id": "video_trend",
+      "adapter_product_id": "video_trend",
+      "lane_callback": "vtrend|catalog|latest",
+      "scene_count": 1,
+      "case_id": "PV2-Q300",
+      "scenario_id": "PV2-Q300-SOLAR-GARDEN",
+      "scenario": "Use a public solar-garden trend item to show one complete action ending with the garden lights turning on.",
+      "artifact_requirements": [
+        "audio_stream"
+      ]
+    },
+    {
+      "tier_id": 700,
+      "product_id": "self_shot_scene_change",
+      "adapter_product_id": "self_shot_scene_change",
+      "lane_callback": "vproduct|selfshot_product|scene_change",
+      "scene_count": 1,
+      "case_id": "PV2-Q700",
+      "scenario_id": "PV2-Q700-LONG-SELF-SHOT",
+      "scenario": "Preserve the real typist through one long continuous transition from an office into a sunset rooftop cafe.",
+      "fixture_refs": [
+        "PV-L05-self-shot-typing-source.mp4#784FBE5BBD7B8D59A40A16AD103DB2B14B5DC7FCE71BE2ADA3E24A3BC04E2732"
+      ],
+      "artifact_requirements": [
+        "audio_stream"
+      ]
+    },
+    {
+      "tier_id": 800,
+      "product_id": "self_shot_cinematic_transform",
+      "adapter_product_id": "self_shot_cinematic_transform",
+      "lane_callback": "vproduct|selfshot_product|cinematic",
+      "scene_count": 1,
+      "case_id": "PV2-Q800",
+      "scenario_id": "PV2-Q800-PERFUME-TRANSFORM",
+      "scenario": "Transform one continuous review shot into a premium perfume-lab world with controlled lighting and sound.",
+      "fixture_refs": [
+        "PV-L09-edit-review-source.mp4#3A53DA94446EE4FBDB6129BD8998B09AA766B21BA7EA84AC24E578EF2AD97F8F"
+      ],
+      "artifact_requirements": [
+        "audio_stream"
+      ]
+    },
+    {
+      "tier_id": 1000,
+      "product_id": "video_ai_real",
+      "adapter_product_id": "video_ai_prompt",
+      "lane_callback": "vid3|mode|prompt_video",
+      "scene_count": 1,
+      "case_id": "PV2-Q1000",
+      "scenario_id": "PV2-Q1000-DANCER",
+      "scenario": "A dancer warms up before a mirror and performs one realistic turn under stage lighting."
+    },
+    {
+      "tier_id": 1200,
+      "product_id": "video_ai_real",
+      "adapter_product_id": "video_ai_image",
+      "lane_callback": "vid3|mode|image_video",
+      "scene_count": 1,
+      "case_id": "PV2-Q1200",
+      "scenario_id": "PV2-Q1200-WATCH-MULTI-ANGLE",
+      "scenario": "Use the uploaded watch reference to produce one consistent multi-angle premium product move.",
+      "fixture_refs": [
+        "PV-L04-watch-scene-1-workbench.png#BA9B9EDE2F81B119345C073DDA3735C546771E5A2FEC789D14C96AE35CF3E3FE"
+      ]
+    },
+    {
+      "tier_id": 1500,
+      "product_id": "video_ai_real",
+      "adapter_product_id": "video_ai_prompt",
+      "lane_callback": "vid3|mode|prompt_video",
+      "scene_count": 1,
+      "case_id": "PV2-Q1500",
+      "scenario_id": "PV2-Q1500-RAIN-STATION",
+      "scenario": "A rain-soaked night train station reveals two people meeting beneath one large clock through a continuous cinematic camera move."
+    }
+  ]
+}

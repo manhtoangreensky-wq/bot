@@ -1,0 +1,258 @@
+# Product Video Live Strategy V2
+
+File nay la checklist tong authoritative cho dot live Product Video tiep theo.
+No thay the chien luoc cu "moi lane va moi tier deu tao video 2 canh". Lich su
+job cu van duoc giu trong `.agents/state/P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md`
+nhung khong duoc dung de mo them job ngoai bang assignment ben duoi.
+
+## 1. Pointer hien tai
+
+`CURRENT_POINTER=V2-02F` - publish the verified checklist to GitHub; no runtime action.
+
+- [x] `V2-00` Trend4 Facebook failure loop: PR #914 merged as
+  `d92a98ddbc10ea4c626f75a65c2ddb58403a2fc6`; deploy run `33107893686`
+  SUCCESS; refresh live media/Facebook/YouTube/TikTok = `3/57/100/99`, next run
+  +7 days, `paid_provider_calls=0`, transaction/credit/provider-usage deltas 0.
+- [x] `V2-01` Registry audit: visible Product Video menu and Tail adapter contracts
+  measured on merge SHA `d92a98d`.
+- [x] `V2-02` Resolve active source-contract seams before any representative
+  provider job.
+- [ ] `V2-03` Execute one representative complex non-manual lane per product.
+- [ ] `V2-04` Execute remaining quality coverage assignments once each.
+- [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
+
+Only one checkbox may be `in progress` in the durable tracker. Finish or stop at a
+terminal/pause-safe boundary before moving to another product/spec.
+
+### V2-02 source-only subspecs
+
+- [x] `V2-02.0` Persist Owner scope in Markdown + machine-readable JSON.
+- [x] `V2-02.1` Final strategy/manual/Tail verifier: `54 passed in 8.10s`; no
+  runtime source changed.
+- [x] `V2-02A` Audited `videoref|start`: it uses legacy `vfinal`, not the shared
+  Tail9. Reuse-first decision: do not modify Video Reference merely for quality
+  coverage. Tier 300 was reassigned to the compatible Trend catalog lane; runtime
+  source stayed unchanged.
+- [x] `V2-02B` Source-audited every representative callback in the assignment
+  JSON: each callback is the entry or declared child of its exact public route,
+  route Invoice/Job reachability is true, and Tail owner/engine/tier compatibility
+  matches. Strategy gate `4 passed in 6.99s`; no runtime byte changed.
+  it is visible/reachable, non-manual, preserves the exact product owner, and
+  reaches the shared Tail without pre-confirm side effects.
+- [x] `V2-02C` Product Video Edit protected lock persisted at `d92a98d`: eight
+  UI/handler function hashes plus navigation/local-free protected files. Branch
+  gate `34 passed, 1 failed`; clean-main exact selector reproduced the same
+  `test_local_free_delivery_keeps_charge_zero_and_cannot_claim_charge` failure in
+  `640.98s`; `NEW_FAILURES=0`. No Edit source/test byte was changed.
+- [x] `V2-02D` Bounded Owner live window recorded below: dedicated Owner test
+  account, Product Video only, exact job/provider caps, one active heavy job at a
+  time, Browser action-time confirmation, and zero wallet mutation.
+- [x] `V2-02E` Locked 17 unique case/scenario IDs, fixture hashes, Add-on sets and
+  source-generation prompts. Strategy verifier `8 passed in 6.89s`; calculated
+  caps are 19 representative scenes + 9 quality scenes + 4 source-image tasks.
+- [-] `V2-02F` Commit/push this checklist, assignment JSON, committed script fixture
+  and machine verifier to GitHub. Pre-push gate `54 passed in 8.10s`; runtime
+  source remains untouched.
+
+## 2. Rules that must not change
+
+1. Work product-by-product. Do not open unrelated UI, provider, wallet, SubDub,
+   PayOS, ENV or deployment work while one Product Video spec is active.
+2. Manual/direct-input lanes are source-contract coverage only. Valid prompt or
+   content must go directly to the completed shared Tail at Add-on. They are not
+   representative live lanes because they skip too many product-specific nodes.
+3. For every normal product, live the most complex non-manual lane once at the
+   public `Nhanh gon` offer (`tier_id=400`, `80 Xu/scene`) with two real scenes.
+   `Kich ban -> Video` keeps its existing product minimum of five scenes and is
+   the only current scene-count exception.
+4. `Video tu quay` is the only product-menu exception: it contains two different
+   products and both must be lived independently:
+   `self_shot_scene_change` (`selfshot2`) and
+   `self_shot_cinematic_transform` (`selfshot3`).
+5. Quality coverage is global, not confined to Video AI chan that. `tier_id=400`
+   is already covered by every representative product run. Each remaining visible
+   quality is one additional one-scene job assigned to a compatible product/route.
+6. Never create a duplicate provider job merely to cover a lane or quality already
+   proven by an assigned row. One run may satisfy both a product and a quality row
+   only when its scene count and acceptance contract match both rows.
+7. Every case uses a unique `case_id` in the prompt/content and idempotency key.
+   Only an explicit replay case may reuse the full key.
+8. `Video dai tap / multi_scene_film` is completely excluded from this cycle by
+   Owner direction. Do not repair, test, submit, deploy for, or spend provider
+   calls on it. Reopen only after every current product is complete and the Owner
+   explicitly requests the long-video test.
+9. `video_local_edit` is a protected completed product. Do not edit or live it in
+   this cycle. Its unfinished `videoedit|ai` lane is deferred to the same future
+   cycle as long video. Do not repair, route quality coverage through, submit,
+   deploy for, or infer PASS for that AI-edit lane now.
+
+## 2A. Owner scope decisions - authoritative checklist
+
+- [x] Do not run every lane. One most-complex non-manual representative per active
+  product is enough; sibling lanes inherit only after source contract comparison.
+- [x] Do not use a manual/direct-input lane as the representative live lane.
+- [x] Direct input remains mandatory on every applicable product and must enter the
+  shared Tail directly at Add-on after valid prompt/content.
+- [x] Normal representatives use public `Nhanh gon`, `80 Xu/scene`, two scenes.
+- [x] `Kich ban -> Video` keeps its existing five-scene minimum for its one live.
+- [x] `Video tu quay` contains two different products, so both
+  `self_shot_scene_change` and `self_shot_cinematic_transform` live separately.
+- [x] `Video dai tap / multi_scene_film` is fully excluded until all active products
+  finish and the Owner explicitly opens a future long-video cycle.
+- [x] `video_local_edit` is frozen/protected and excluded. Its unfinished AI Edit
+  lane is deferred with long video; no code, test, UI, route, worker or live action.
+- [x] Quality coverage is distributed across compatible products. Each remaining
+  visible quality needs one one-scene artifact; it is not all assigned to AI Real.
+- [x] Reuse an existing LIVE PASS blackbox/shared engine through a new product
+  adapter. Never change the passed product to make the new one work.
+- [x] Keep exactly one active spec pointer; stop at terminal/pause-safe before moving.
+- [x] Record every RED/GREEN/PR/deploy/runtime/job/artifact/delivery/zero-wallet
+  proof in this checklist and the durable tracker; never work from memory alone.
+
+## 3. Reuse-first and protected-live rule
+
+Once a product has terminal LIVE PASS, it becomes a protected baseline.
+
+- Freeze its merge SHA, runtime SHA, route/engine owner, UI function hashes,
+  protected test IDs, request/project/job/outbox IDs, scene records, final artifact
+  SHA/bytes/probe, Telegram receipt identity and zero-wallet snapshots.
+- Do not edit its route, UI, state schema, blackbox, shared engine or tests to make a
+  later product pass.
+- Attach a later product to a proven blackbox/shared engine using the smallest
+  adapter, alias, input normalizer or material handoff.
+- A later product failure must first produce a RED at that later product boundary.
+  Fix only that boundary while the protected product comparators stay byte/behavior
+  identical.
+- Do not call a paid provider again for a protected product merely to "check again"
+  when none of its locked bytes/contracts changed.
+- If a shared change is truly unavoidable, stop first: run impact search, name every
+  protected product, prove adapter-only is impossible, obtain Owner direction, add
+  a RED for the shared defect, then run every affected protected comparator. Never
+  silently weaken or rewrite a passed baseline.
+
+Execution loop:
+
+`READ LOCK -> REUSE KNOWN-GOOD ENGINE -> RED NEW BOUNDARY -> MINIMAL ADAPTER FIX -> GREEN -> PROTECTED COMPARATORS -> SHIP -> LIVE NEW PRODUCT -> FREEZE NEW LOCK`
+
+## 4. Representative product matrix
+
+All active rows use `tier_id=400` (`Nhanh gon`, `80 Xu/scene`) and two real scenes,
+except `Kich ban -> Video`, which uses its locked minimum of five scenes.
+
+| ID | Product / exact owner | Most complex non-manual lane | Why selected | Status |
+|---|---|---|---|---|
+| `PV2-R01` | `video_trend` / `trend_video` | Upload one public trend reference through `vtrend|video_upload`, then select content profile and full Tail | Media intake + trend source + content/profile + Add-on + renderer | PENDING |
+| `PV2-R02` | `video_ai_real` / `video_ai_canonical` | `vid3|mode|image_video` with mapped scene images, character/style/requirements and full Tail | More material gates than prompt-only/manual | PENDING |
+| `PV2-R03` | `script_image_video` / `script_to_video` | Upload/parse existing script through `vproduct|script_upload`, review a five-scene plan and full Tail | File parsing + long script + scene planning; Owner approved existing 5-scene minimum | PENDING, 5 scenes |
+| `PV2-R04` | `frame_video_local` / `frame_video_render` | Use `framevideo|source|ai`, create/map/order two images, movement/transition/Add-on/full Tail | Most complex Frame source path; exercises image preparation plus mapping and local FFmpeg route | PENDING |
+| `PV2-R05A` | `self_shot_scene_change` / `selfshot2` | Source video -> segment -> subject -> multi-scene plan -> prompts -> Add-on/full Tail | Distinct video-to-video product: preserves subject and creates changed scenes | PENDING |
+| `PV2-R05B` | `self_shot_cinematic_transform` / `selfshot3` | Source video -> segment -> subject -> preset -> staged timeline -> wardrobe/world/effects -> prompt bundle -> Add-on/full Tail | Distinct one-take transform product with different owner and engine | PENDING |
+| `PV2-R06` | `storyboard_prompt` / `storyboard_to_video` | `vstory|ai`, content/profile -> generate/map two storyboard frames -> transition/Add-on/full Tail | Exercises storyboard generation, asset mapping and scene boundaries | PENDING |
+| `PV2-R07` | `multi_scene_film` / `multi_scene_film` | Not run in this cycle | Owner deferred the entire long-video product until all current products are complete and explicitly requests it | EXCLUDED - no source/provider/live action |
+| `PV2-R08` | `video_idea` / `video_idea_to_product` | `videoidea|explore`, category -> dynamic preset -> develop/handoff -> full Tail | Longest idea route and proves handoff into executable product owner | PENDING |
+| `PV2-R09` | `video_local_edit` / `local_worker_ffmpeg` | Not run in this cycle | Completed Product Video Edit is protected; unfinished AI Edit is deferred with long video by Owner | PROTECTED / EXCLUDED - no code, test or live action |
+
+The video downloader, prompt library, guide and planning-only helpers are not paid
+Product Video products and do not create representative provider jobs.
+
+## 5. Quality coverage assignment
+
+The catalog is measured from `services.video_ai_real_pricing.public_quality_catalog()`.
+Every assigned product below supports single-scene execution and the assigned tier.
+`tier_id=400 / 80 Xu` needs no extra quality-only job because all representative
+product rows already cover it.
+
+| Quality ID | Public offer | Assigned product/lane | Scenes | Status |
+|---:|---|---|---:|---|
+| `400` | Nhanh gon - `80 Xu` | Covered by every representative product row | 2 | PENDING representative rows |
+| `500` | Chuyen dong on dinh - `110 Xu` | `video_trend`, search/catalog sibling lane | 1 | PENDING |
+| `600` | Chuyen dong co am thanh - `160 Xu` | `video_idea`, explored preset handoff | 1 | PENDING |
+| `200` | Can bang ro net - `200 Xu` | `frame_video_local`, uploaded image route | 1 | PENDING |
+| `300` | Tieu chuan co am thanh - `220 Xu` | `video_trend`, public catalog lane | 1 | PENDING |
+| `700` | Canh dai co am thanh - `220 Xu` | `self_shot_scene_change` (`selfshot2`) | 1 | PENDING |
+| `800` | Cao cap linh hoat - `370 Xu` | `self_shot_cinematic_transform` (`selfshot3`) | 1 | PENDING |
+| `1000` | Dien xuat chan that - `370 Xu` | `video_ai_real`, prompt-video sibling lane | 1 | PENDING |
+| `1200` | Da goc may - `1260 Xu` | `video_ai_real`, image-video lane | 1 | PENDING |
+| `1500` | Dien anh nhieu canh - `2360 Xu` | `video_ai_real`, image-video lane | 1 | PENDING |
+
+Before each quality job, assert the exact button is visible and its selected tier is
+persisted through Invoice, Confirm, job payload and manifest. Distinct non-replay
+cases must never share final SHA or Telegram `file_unique_id`.
+
+## 6. Source-only manual Tail lock
+
+No paid live job is needed for these direct-input seams. Current fresh evidence:
+
+- `tests/test_p0_product_video_manual_tail_matrix.py`: `22 passed in 6.77s`.
+- `tests/test_p0_product_video_full_menu_tail_to_status_matrix.py`:
+  `24 passed in 8.36s`.
+- Ten input owners preserve exact customer text, create zero provider/job/outbox/
+  wallet side effect before Confirm, and enter the same Tail at Add-on.
+
+Any regression here is fixed at the product-specific pending-text adapter. The
+completed Add-on/Review/Quality/Invoice/Confirm/Status UI is protected and must not
+be redesigned.
+
+## 7. Required evidence for every live row
+
+1. Exact case/product/lane/tier/Add-on/scenario or fixture SHA.
+2. Baseline and after snapshots: project/job/outbox counts, transaction count and
+   max ID, credit-event count and max ID, provider-usage count and max ID, balance
+   and total spent.
+3. Admission occurs before provider spend; exactly one project, job and outbox for
+   the idempotency key; Invoice/job/outbox are not orphaned.
+4. Poll timeline records initial, material progress and terminal state. Poll/retry
+   may refresh an existing task but must never recreate provider work.
+5. Independent scene records plus media evidence at scene boundaries. A two-scene
+   database claim with one duplicated clip is FAIL.
+6. MP4 `ftyp`/`moov`, container, streams, duration, dimensions, decode first/last
+   frames, expected audio, size floor, SHA-256 and visual inspection.
+7. Add-on requested/materialized/applied in persisted plan and final manifest; the
+   artifact must visibly/audibly contain it.
+8. Telegram delivery response and persisted receipt: message ID, file ID and
+   `file_unique_id`; exactly one delivery per job; Status becomes delivered only
+   after receipt persistence.
+9. Owner `charged_xu=0`; transaction row-count and max-ID deltas both zero. A
+   `+X/-X` pair with net zero is still FAIL.
+10. Run-level audit: one job/invoice/delivery per key; distinct artifact SHA and
+    Telegram file identity for all non-replay cases.
+
+## 8. Stop conditions
+
+- Stop at the exact failed component; do not move to the next product.
+- Do not mark PASS from merge, deploy, HTTP 200, provider task ID or stream geometry
+  alone.
+- Do not start a second heavy provider job while the current assigned job is active.
+- Do not edit a protected LIVE PASS product to repair another product.
+- Do not touch Product Video Edit or its AI Edit lane in this cycle, including using
+  it as a quality probe. Reopen only with the future long-video Owner instruction.
+- Do not close the current Product Video work until every active assigned row is
+  terminal PASS and every active source contract is resolved. The explicitly
+  excluded long-video row is not touched or inferred as PASS.
+
+## 9. Bounded Owner live window
+
+- Destination: current signed-in Owner admin test account at `@toanaasbot` only.
+- Scope: only rows assigned in `product-video-live-strategy-v2.json`.
+- Final Product Video job cap: `17` (`8` representative + `9` quality-only).
+- Assigned scene-render upper bound: `28` (`19` representative scenes + `9`
+  quality-only scenes). Local-only routes may make the real paid-call count lower.
+- Source-image provider task cap: `4`, only where the selected complex Frame AI
+  source and Storyboard AI lanes require two source images.
+- Total external create-call cap: `32` (`28` scene-render upper bound + `4`
+  source-image tasks). Exceeding this cap requires a new Owner instruction and a
+  checklist update before the next call.
+- Concurrency: one heavy provider job/task at a time. A new row starts only after
+  the previous row is terminal or explicitly pause-safe before provider submit.
+- Telegram uploads/messages and final Confirm require the Browser's action-time
+  confirmation. Never reuse an old confirmation for a materially different file,
+  destination or job.
+- Provider submit is permitted only after the assigned UI Confirm and admission
+  gates. Unit/source tests keep provider calls at zero.
+- Wallet contract: Owner `charged_xu=0`; transaction row count/max ID and credit
+  event count/max ID must not change. Any `+X/-X` pair, nonzero charge, balance or
+  total-spent change immediately stops the window.
+- No PayOS, top-up, ENV/key, destructive DB, SubDub, Video Edit, AI Edit or Long
+  Video action is included.
+- The Owner can revoke or narrow this window at any time; newer direct instruction
+  is written here before the next external action.
