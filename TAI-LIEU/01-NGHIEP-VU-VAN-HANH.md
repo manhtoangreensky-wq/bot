@@ -118,7 +118,6 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Đây mới là source PASS. PV-L01 vẫn chưa LIVE PASS cho tới khi cùng case giao MP4 2 cảnh có audio/phụ đề/chuyển cảnh và receipt Telegram `0 Xu`.
 - Live rerun job `23` chứng minh elapsed đã đúng `66s/60s`, nhưng job-level `provider_order=[shopaikey_video]` ghi đè readiness cục bộ có cả ShopAIKey + Key4U; marker/decision durable cũng bị rơi nhưng cờ persisted `automatic_fallback_allowed=false` còn nguyên. Policy hiện vẫn tôn trọng chốt fail-closed đó và chỉ phục hồi `key4u_video` từ worker readiness khi toàn bộ final-confirm/exact-quote/task/no-delivery/no-charge/idempotency gates đã đạt; không phục hồi provider khác.
 - Bằng chứng bổ sung: job `23` bounded recovery `3/3`, terminal `failed_no_charge`, focused candidate recovery `7 passed`, protected `52 passed`, `NEW_FAILURES=0`. Same-case LIVE rerun sau deploy tiếp theo vẫn bắt buộc.
-
 ## Bổ sung SubDub failure loop ASR — 27/08/2026
 
 - PR `#904` đã merge/deploy runtime `8d23bbf1...`; job mới `#19A16753A4`
@@ -147,3 +146,6 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   `DE93620F...`.
 - Đây mới là `CODE/PROVIDER_DIAGNOSTIC PASS`; combo và standalone vẫn phải giao
   MP4 thật qua Telegram sau deploy mới được ghi `LIVE PASS`.
+
+- Live job `24` cho thấy server claim gate chạy trước connector: summary đã `61s/60s` nhưng scene evidence cuối chỉ `53s`, nên ledger terminal `failed_no_charge` trước lượt worker có thể submit Key4U. Claim gate hiện enrich pure state trước terminal decision: chỉ scene có primary task thật, stalled, final-confirm, exact quote, chưa giao/chưa trừ/chưa fallback và Key4U capability-ready mới nhận candidate + idempotency; primary resubmit vẫn cấm.
+- Bằng chứng source job `24`: focused `8 passed`; protected `54 passed, 2 baseline deselected`. Patch chỉ mở một fallback tick cho đúng `fallback_scene_index`, không submit đồng thời hai cảnh; compile/diff vẫn phải chạy trước local commit. LIVE rerun vẫn là gate riêng sau SubDub release và deploy Product Video tiếp theo.

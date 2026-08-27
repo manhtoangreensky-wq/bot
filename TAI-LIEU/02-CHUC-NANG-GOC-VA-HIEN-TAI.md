@@ -128,3 +128,5 @@ và đầy đủ timestamp thật; fallback luôn ghim riêng `https://api.key4u
 parser Gemini chỉ đọc `steps[].content[].annotations[]` có `type=word_info`;
 video dài phải chunk (>5 phút ở Auto) dừng `AUTO_CAST_UNAVAILABLE` trước mọi
 Key4U/Gemini fallback call.
+
+Live job `24` cho thấy connector policy đúng vẫn chưa đủ nếu server claim gate terminal hóa trước worker. Hiện claim transaction tính controlled-fallback eligibility trước ledger terminal decision và chỉ miễn đúng fallback Key4U đã xác nhận; `automatic_resubmit_allowed=false` vẫn chặn submit lại primary. Job/artifact/receipt LIVE vẫn pending.
