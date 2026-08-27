@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import unicodedata
 
 import pytest
+from telegram.error import NetworkError
 
 import bot
 
@@ -4870,6 +4871,77 @@ def test_combo_full_dub_confirms_auto_before_pipeline_and_recovers_to_manual(mon
         rendered[-1]["reply_markup"]
     )
     assert "音声を手動で選択してください" in rendered[-1]["text"]
+    bot.USER_PENDING.pop(bot.video_dubbing_pending_key(user_id), None)
+
+
+def test_combo_progress_edit_network_error_does_not_stop_pipeline(monkeypatch):
+    user_id = 97_202
+    monkeypatch.setattr(bot, "SUBDUB_AUTO_SPEAKER_ACTIVATION_ENABLED", True)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(bot, "subdub_auto_speaker_route_enabled", lambda _state: True)
+    bot.set_video_dubbing_pending(
+        user_id,
+        "dub_confirmation",
+        mode="subtitle_plus_dub",
+        process_type="subtitle_plus_dub",
+        video_processing_mode="subtitle_plus_dub",
+        requested_mode="subtitle_plus_dub",
+        active_flow="subtitle_plus_dub",
+        source_file_id="source",
+        target_language="en",
+        voice_kind="auto_speaker_gender",
+        voice_selection_mode="auto_speaker",
+        voice_speed="1.0",
+        processing="0",
+    )
+    pipeline_states = []
+    render_attempts = []
+
+    async def fake_full(_query, _context, state, _lang):
+        pipeline_states.append(dict(state))
+        return {
+            "ok": False,
+            "status": "AUTO_CAST_MANUAL_REQUIRED",
+            "state": dict(state),
+        }
+
+    async def safe_edit(_query, text, **kwargs):
+        render_attempts.append({"text": text, **kwargs})
+        if len(render_attempts) == 1:
+            raise NetworkError("telegram progress edit 502")
+        return render_attempts[-1]
+
+    monkeypatch.setattr(bot, "execute_subtitle_plus_dub_full_from_callback", fake_full)
+    monkeypatch.setattr(bot, "safe_edit_or_send", safe_edit)
+
+    class Message:
+        chat_id = user_id
+
+        async def reply_text(self, text, **kwargs):
+            render_attempts.append({"text": text, **kwargs})
+            return render_attempts[-1]
+
+    class Query:
+        data = "videodub|combo_full_dub"
+        from_user = SimpleNamespace(id=user_id)
+        message = Message()
+
+        async def answer(self):
+            return None
+
+    asyncio.run(
+        bot.handle_video_dubbing_callback(
+            SimpleNamespace(callback_query=Query()),
+            SimpleNamespace(),
+        )
+    )
+
+    assert len(pipeline_states) == 1
+    assert bot.subdub_final_confirmed_state(pipeline_states[0]) is True
+    assert pipeline_states[0]["subdub_confirmation_source"] == "videodub|combo_full_dub"
+    recovered = bot.get_video_dubbing_pending(user_id)
+    assert recovered["step"] == "choosing_voice"
+    assert len(render_attempts) == 2
     bot.USER_PENDING.pop(bot.video_dubbing_pending_key(user_id), None)
 
 
