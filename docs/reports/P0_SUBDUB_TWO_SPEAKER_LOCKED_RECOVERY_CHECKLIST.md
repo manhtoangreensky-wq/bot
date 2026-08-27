@@ -17,14 +17,13 @@
 ### Current pointer
 
 - Current SPEC: `SPEC-08`.
-- Current SUBSPEC: `SPEC-08.0D.5`.
-- Current phase: `SHIP / one PR deploy and exact combo retry`.
-- Production action active: `NO; SubDub owns LIVE/CHROME/VPS, latest job terminal`.
-- Telegram/provider job active: `NO; job #00911B6FF0 terminal failed_no_charge`.
+- Current SUBSPEC: `SPEC-08.0E.3`.
+- Current phase: `SHIP / async multipart transport correction`.
+- Production action active: `NO; SubDub reacquired LIVE/CHROME/VPS after exact releases`.
+- Telegram/provider job active: `NO; job #A86321F62B terminal failed_no_charge`.
 - Wallet mutation: `0`.
-- Next allowed action: update measured operating/tester evidence, commit only the
-  scoped service/test/checklist/docs, fetch/rebase latest main, run one
-  post-rebase focused gate, then one PR/squash/deploy/runtime retry.
+- Next allowed action: wait exact Product Video releases; then fetch/rebase
+  latest main, run one post-rebase gate, push/PR/deploy/exact combo retry.
 - Next forbidden action: edit classifier/cast/audio UI/pricing/mux/multi engine,
   start another Telegram job, or move to standalone/multi before this failure
   loop ships and the combo delivers a real MP4.
@@ -754,9 +753,93 @@ GREEN evidence:
 - [x] Post-rebase combined fallback/wiring/isolation/hash gate:
   `16 passed, 1 warning in 11.87s`.
 - [x] Post-rebase `py_compile` service + test and range diff-check: exit `0`.
-- [-] One focused commit/PR/squash/deploy/runtime readback.
-- [B] One fresh exact-fixture combo retry through MP4 + SRT + receipt.
+- [x] One focused PR `#912`, squash merge
+  `a9471b65b558128a8c5e28a18c887acf73d8e60c`, deploy run `33097609372`
+  SUCCESS in `6m27s`; bot/web/nginx active, health OK, runtime constants exact.
+- [!] Fresh exact-fixture combo retry job `#A86321F62B` /
+  `a86321f62b714edbc342` terminalized before artifacts:
+  `key4u_two_speaker_transcript_unavailable:attempts=2;http=0;
+  status=FAIL_PROVIDER_ERROR`.
 - [B] Remain in SPEC-08 until real artifact acceptance; do not start SPEC-09/11.
+
+### SPEC-08.0E — Live failure loop: production HTTP transport
+
+#### SPEC-08.0E.1 — Exact transport diagnostic
+
+- [x] Raw bounded Key4U multipart request on the same `582,540`-byte audio
+  succeeds HTTP `200` with `18` timed segments.
+- [x] Production fallback made exactly `2` attempts and both returned
+  `http=0 / FAIL_PROVIDER_ERROR`.
+- [x] Make exactly one request through the actual production
+  `openai_compatible_asr_transcribe/httpx` adapter with the same audio/config.
+- [x] Record sanitized exception/detail only; never print key/raw body.
+
+Measured result:
+
+- Production-equivalent audio: `582,540` bytes.
+- Provider calls: exactly `1`.
+- Result: `FAIL_PROVIDER_ERROR`, HTTP `0`, chars/segments `0`.
+- Sanitized exception:
+  `Attempted to send an sync request with an AsyncClient instance.`
+- Root cause: multipart form `data` is a sync `list[tuple]` stream submitted
+  through `httpx.AsyncClient`; request fails before reaching Key4U.
+
+#### SPEC-08.0E.2 — RED and minimal transport fix
+
+- [x] Write RED from the exact sanitized exception and the working repository
+  transport pattern.
+- [x] Change only the production Key4U/OpenAI-compatible HTTP transport boundary.
+- [x] Do not change retry count, provider order, Gemini, classifier/cast, multi,
+  UI, pricing, wallet, TTS, or mux.
+
+GREEN evidence:
+
+- Exact real-httpx MockTransport selector:
+  `1 passed, 1 warning in 607.69s`.
+- Full Key4U/Gemini + fallback service + locked hash batch:
+  `17 passed, 1 warning in 9.72s`.
+- `py_compile bot.py`, fallback service and two focused tests: exit `0`.
+- `git diff --check`: exit `0`.
+- Production diff is one function in `bot.py`: multipart form fields changed
+  from sync `list[tuple]` to async-compatible `dict`; field names/values
+  unchanged.
+
+RED evidence:
+
+- Real `httpx.AsyncClient + MockTransport`, no network.
+- Terminal: `1 failed, 2 warnings in 14.26s`.
+- Failure: expected `result["ok"] is True`, actual `False`; request never
+  reached the async MockTransport handler.
+
+#### SPEC-08.0E.3 — GREEN, ship, retry
+
+- [x] Focused/protected GREEN, hashes, compile/diff.
+- [x] Scoped local commit `710c7df`; no push/PR/deploy while Product Video
+  owns shared resources.
+- [x] Rebased onto `origin/main
+  a9471b65b558128a8c5e28a18c887acf73d8e60c`; retry commit #912 skipped
+  naturally; branch `0 behind / 1 ahead`, head `bc33e2d` before evidence
+  amend.
+- [x] Post-rebase protected batch: `17 passed, 1 warning in 546.00s`.
+- [x] Post-rebase `py_compile bot.py` + transport test and range diff-check:
+  exit `0`.
+- [x] Rebased again onto latest Product Video main
+  `ccf9523613418dfd37535f14901173624d5cbc3e`; branch stayed
+  `0 behind / 1 ahead`, head `e4ff883` before evidence amend.
+- [x] Latest-main protected batch: `17 passed, 1 warning in 541.67s`.
+- [x] Independent Claude technical review: list-tuples sync stream is a
+  plausible and evidence-matched httpx root cause; dict preserves all unique
+  multipart fields; fix is the smallest valid change; no Critical/Important
+  blocker before deploy. Optional extra field-shape test is not required.
+- [x] Final rebase onto Trend4 main
+  `d92a98ddbc10ea4c626f75a65c2ddb58403a2fc6`; branch
+  `0 behind / 1 ahead`, head `93bfca7` before evidence amend.
+- [x] Exact latest-main transport selector:
+  `1 passed, 1 warning in 542.49s`.
+- [x] Latest-main `py_compile bot.py` + transport test and range diff-check:
+  exit `0`.
+- [-] One PR/squash/deploy/runtime readback after exact shared releases.
+- [B] One exact combo retry to MP4 + SRT + receipt or stay in SPEC-08.
 
 ### SPEC-08.1 — Pre-admission
 

@@ -4,7 +4,7 @@ owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
 branch: fix/p0-subdub-audio-label-live
-phase: SPEC_08_0D_5_SHIP_BOUNDED_KEY4U_TRANSCRIPT_RETRY
+phase: SPEC_08_0E_3_READY_TO_PUSH_ASYNC_MULTIPART_TRANSPORT
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -27,7 +27,7 @@ workflow_contract:
 resource_boundary:
   cpu: independent_local_subdub_source_only
   live: owned_by_subdub
-  chrome: owned_by_subdub_but_browser_security_currently_denies_telegram
+  chrome: owned_by_subdub
   vps_deploy: owned_by_subdub
   product_video: source-local only until exact SubDub releases
 
@@ -81,9 +81,9 @@ fixtures:
     required_lane: Tự động nhiều giọng
 
 latest_combo_failure:
-  public_job: 00911B6FF0
-  internal_job: 00911b6ff01590de3834
-  workspace: /tmp/toan_aas_pipeline/00911b6ff01590de3834
+  public_job: A86321F62B
+  internal_job: a86321f62b714edbc342
+  workspace: /tmp/toan_aas_pipeline/a86321f62b714edbc342
   source_sha256: 85c8793d197cf2782bb554d46282e82a83bcb062a0483e412a0ca1da668f9f51
   terminal: failed_no_charge
   last_public_stage: auto_cast_manual_required
@@ -92,15 +92,48 @@ latest_combo_failure:
   wallet_mutations: 0
   root_cause:
     - Deepgram empty correctly entered the exact two-speaker fallback
-    - persisted provider attempt at 22:54:49 is AUTO_CAST_UNAVAILABLE
-    - exact detail is key4u_two_speaker_transcript_unavailable
+    - bounded retry deployed and made exactly two Key4U attempts
+    - both production httpx attempts returned http 0 FAIL_PROVIDER_ERROR
+    - raw production-equivalent urllib request succeeds HTTP 200 with 18 timed segments
     - manifest has source and normalized media only; no SRT, sidecar, TTS, mux, or delivery
     - runtime host endpoint model and key-presence contract are correct
   active_hypothesis:
-    - one bounded diagnostic passed with HTTP 200, 145 chars and 18 timed segments
-    - the live failure is a transient unusable first Key4U response
-    - current fallback is one-shot and must retry at most once only for retryable/empty transcript results
-    - permanent 4xx and invalid provider timestamps remain fail-closed without retry
+    - root cause is confirmed sync multipart data stream submitted through httpx AsyncClient
+    - exact exception is Attempted to send an sync request with an AsyncClient instance
+    - changing multipart data from list tuples to a dict is the minimal transport fix
+  production_adapter_diagnostic:
+    provider_calls: 1
+    audio_bytes: 582540
+    status: FAIL_PROVIDER_ERROR
+    http_status: 0
+    transcript_chars: 0
+    segments: 0
+    exception_safe: Attempted to send an sync request with an AsyncClient instance.
+  transport_red:
+    selector: real httpx AsyncClient plus MockTransport
+    result: 1 failed, 2 warnings in 14.26s
+    assertion: expected ok true, actual false before async transport handler
+  transport_green:
+    exact_selector: 1 passed, 1 warning in 607.69s
+    protected_batch: 17 passed, 1 warning in 9.72s
+    compile: exit 0
+    diff_check: exit 0
+    production_change: multipart form data list tuples replaced by dict
+  transport_post_rebase:
+    base_sha: d92a98ddbc10ea4c626f75a65c2ddb58403a2fc6
+    head_before_evidence_amend: 93bfca7
+    divergence: 0 behind, 1 ahead
+    protected_gate: 17 passed, 1 warning in 541.67s
+    exact_latest_main_selector: 1 passed, 1 warning in 542.49s
+    compile: exit 0
+    diff_check: exit 0
+  independent_review:
+    reviewer: Claude
+    critical_or_important_blocker: none
+    root_cause_match: sync multipart stream submitted through httpx AsyncClient
+    minimal_fix_approved: list tuples to dict with unique field semantics preserved
+    extra_test_required: false
+  local_commit: 710c7df
   diagnostic:
     provider_calls: 1
     audio_bytes: 582540
@@ -362,4 +395,4 @@ ordered_specs:
       - audit every acceptance line as proven or unresolved
       - mark the goal complete only when no required line remains unresolved
 
-current_next_action: amend post-rebase evidence, push force-with-lease, create one PR, squash/deploy/runtime verify, then exact combo retry
+current_next_action: amend Trend4 base evidence, push force-with-lease, create one PR, squash/deploy/runtime verify, exact combo retry

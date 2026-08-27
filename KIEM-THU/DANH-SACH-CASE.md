@@ -61,7 +61,7 @@ Fixture hai giọng cho cả hai case đầu: `C:/Users/toann/Downloads/test sub
 
 | ID | Lane | Thiết lập khóa | PASS bắt buộc | Canh lỗi cũ |
 |---|---|---|---|---|
-| SD-2S-01 | Phụ đề + Lồng tiếng | English; Tự động 2 giọng; numeric UI chỉ 2 layer cùng hàng; nhập gốc 40%, lồng 150%; không preset | MP4 + SRT + receipt; đúng 2 labels/cast; giá phụ đề + lồng tiếng + total; admin 0 Xu; wallet delta 0 | `empty_transcript`; Key4U first response unavailable; FAIL nếu >2 Key4U attempts; preset grid quay lại |
+| SD-2S-01 | Phụ đề + Lồng tiếng | English; Tự động 2 giọng; numeric UI chỉ 2 layer cùng hàng; nhập gốc 40%, lồng 150%; không preset | MP4 + SRT + receipt; đúng 2 labels/cast; giá phụ đề + lồng tiếng + total; admin 0 Xu; wallet delta 0 | `empty_transcript`; Key4U first response unavailable; httpx sync-stream/AsyncClient; FAIL nếu >2 Key4U attempts; preset grid quay lại |
 | SD-2S-02 | Lồng tiếng video | Cùng fixture; Tự động 2 giọng; cùng numeric UI; gốc 40%, lồng 150%; không preset | MP4 + receipt; đúng 2 labels/cast; dubbing list price >0; admin 0 Xu; wallet delta 0 | Lane combo PASS nhưng standalone hồi quy; audio UI khác combo |
 | SD-MS-01 | Tự động nhiều giọng | Chỉ dùng `test nhiều giọng.mp4`; chạy sau SD-2S-01 và SD-2S-02 | MP4 thật; mọi label/cast/voice; multi-language; receipt và wallet evidence | FAIL nếu chạm source/hash của lane 2 đã khóa |
 
