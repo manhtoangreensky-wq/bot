@@ -54,6 +54,7 @@ PROVIDER_NONTERMINAL_STATUSES = {"not_start", "queued", "running", "processing",
 PROVIDER_PENDING_BLOCKERS = {"provider_in_progress", "provider_pending", "provider_status_unknown"}
 DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS = 20 * 60
 PRODUCT_VIDEO_CONTROLLED_FALLBACK_BLOCKERS = {
+    "quota_exhausted",
     "provider_submit_failed",
     "provider_submit_http_error",
     "provider_submit_http_5xx",
@@ -1709,23 +1710,20 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
         )
     if name == "key4u_video":
         namespace_cfg = video_provider_namespace_config("key4u_video", env)
-        base_url = str(env.get("KEY4U_BASE_URL") or env.get("KEY4U_API_BASE") or "https://api.key4u.shop").rstrip("/")
+        base_url = str(env.get("KEY4U_BASE_URL") or env.get("KEY4U_API_BASE") or "https://api.key4u.vn").rstrip("/")
         submit_url = _endpoint_alias(env, "KEY4U_VIDEO_SUBMIT_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_ENDPOINT", "VIDEO_KEY4U_SUBMIT_URL")
         submit_url = submit_url or str(namespace_cfg.get("submit_url") or "")
         if submit_url and submit_url.rstrip("/").endswith(("/video/generate", "/generate")):
             submit_url = ""
         if not submit_url and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
-            submit_url = f"{base_url}/v1/video/generations"
+            submit_url = f"{base_url}/v1/video/create"
 
         poll_url = _endpoint_alias(env, "KEY4U_VIDEO_POLL_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_POLL_ENDPOINT", "VIDEO_KEY4U_POLL_URL")
         poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
         if poll_url and poll_url.rstrip("/").endswith(("/video/generate", "/generate")):
             poll_url = ""
         if not poll_url and submit_url:
-            if "{task_id}" in submit_url or "{id}" in submit_url:
-                poll_url = submit_url
-            else:
-                poll_url = f"{submit_url.rstrip('/')}/{{task_id}}"
+            poll_url = f"{base_url}/v1/video/query?id={{task_id}}"
 
         model_name = str(env.get("KEY4U_VIDEO_MODEL") or namespace_cfg.get("model") or "")
         if not model_name and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
@@ -4848,7 +4846,19 @@ def run_provider_generation(
                     sleep_func(interval)
                 try:
                     _mark_trace("poll", poll_called=True)
-                    poll_result = current_adapter.poll_video_job(submit.provider_task_id or submit.provider_video_id)
+                    provider_task_key = submit.provider_task_id or submit.provider_video_id
+                    poll_url_override = str(
+                        (submit.raw or {}).get("provider_poll_url_override")
+                        or metadata.get("provider_poll_url_override")
+                        or ""
+                    ).strip()
+                    if isinstance(current_adapter, GenericHttpVideoProvider):
+                        poll_result = current_adapter.poll_video_job(
+                            provider_task_key,
+                            poll_url_override=poll_url_override,
+                        )
+                    else:
+                        poll_result = current_adapter.poll_video_job(provider_task_key)
                 except Exception as exc:
                     exc_payload = {
                         **_attempt_base(),

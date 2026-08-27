@@ -295,8 +295,8 @@ def test_env_example_key4u_public_off_and_woku_parked():
 
 def test_video_200_beta_daily_limit_unchanged():
     assert bot.VIDEO_LOW_COST_XU == 200
-    assert bot.VIDEO_BASIC_COST_XU == 300
-    assert bot.VIDEO_COMMON_COST_XU == 400
+    assert bot.VIDEO_BASIC_COST_XU == 220
+    assert bot.VIDEO_COMMON_COST_XU == 80
     assert bot.VIDEO_BETA_200_MAX_USER_DAY == 3
 
 

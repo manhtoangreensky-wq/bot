@@ -810,11 +810,11 @@ KEY4U_SYSTEM_API_KEY = _env("KEY4U_SYSTEM_API_KEY", "")
 KEY4U_USAGE_AUTH_HEADER_NAME = _env("KEY4U_USAGE_AUTH_HEADER_NAME", "Authorization")
 KEY4U_USAGE_AUTH_HEADER_VALUE = _env("KEY4U_USAGE_AUTH_HEADER_VALUE", "")
 KEY4U_USAGE_AUTH_MODE = _env("KEY4U_USAGE_AUTH_MODE", "")
-KEY4U_BASE_URL = _env("KEY4U_API_BASE", _env("KEY4U_BASE_URL", "https://api.key4u.shop"))
+KEY4U_BASE_URL = _env("KEY4U_API_BASE", _env("KEY4U_BASE_URL", "https://api.key4u.vn"))
 KEY4U_OPENAI_BASE_URL = _env("KEY4U_OPENAI_BASE_URL", join_shopaikey_url(KEY4U_BASE_URL, "/v1"))
 KEY4U_MINIMAX_BASE_URL = _env("KEY4U_MINIMAX_BASE", join_provider_url(KEY4U_BASE_URL, "/minimax"))
 KEY4U_MINIMAX_TTS_BASE_URL = _env("KEY4U_MINIMAX_TTS_BASE", "https://api.key4u.vn/minimax")
-KEY4U_VOICE_BASE_URL = _env("KEY4U_VOICE_BASE", "https://voice.key4u.shop/api/v1")
+KEY4U_VOICE_BASE_URL = _env("KEY4U_VOICE_BASE", "https://voice.key4u.vn/api/v1")
 KEY4U_SUNO_BASE_URL = _env("KEY4U_SUNO_BASE", join_provider_url(KEY4U_BASE_URL, "/suno"))
 KEY4U_SMART_ROUTING = env_flag("KEY4U_SMART_ROUTING", "true")
 KEY4U_USAGE_URL = _env("KEY4U_USAGE_URL", "")
@@ -145955,20 +145955,20 @@ async def cmd_translation_provider_status(update: Update, context: ContextTypes.
 def translation_provider_curl_appendix_chunks() -> list[str]:
     chunks = [
         """KEY4U base
-KEY4U_API_BASE=https://api.key4u.shop
+KEY4U_API_BASE=https://api.key4u.vn
 KEY4U_TOKEN=<KEY4U_TOKEN>
 Authorization: Bearer <KEY4U_TOKEN>
 Never hardcode token.
 
 Key4U ASR
-curl --location 'https://api.key4u.shop/v1/audio/transcriptions' \\
+curl --location 'https://api.key4u.vn/v1/audio/transcriptions' \\
 --header 'Authorization: Bearer <KEY4U_TOKEN>' \\
 --form 'file=@"C:\\path\\to\\audio.m4a"' \\
 --form 'model="whisper-1"' \\
 --form 'response_format="json"'
 
 Key4U ASR alternative
-curl --location 'https://api.key4u.shop/v1/audio/transcriptions' \\
+curl --location 'https://api.key4u.vn/v1/audio/transcriptions' \\
 --header 'Authorization: Bearer <KEY4U_TOKEN>' \\
 --form 'file=@"C:\\path\\to\\audio.m4a"' \\
 --form 'model="gpt-4o-transcribe"' \\
@@ -145976,7 +145976,7 @@ curl --location 'https://api.key4u.shop/v1/audio/transcriptions' \\
 
 Expected: {"text":"..."}""",
         """Key4U translation qwen-mt-turbo
-curl --location 'https://api.key4u.shop/v1/chat/completions' \\
+curl --location 'https://api.key4u.vn/v1/chat/completions' \\
 --header 'Accept: application/json' \\
 --header 'Authorization: Bearer <KEY4U_TOKEN>' \\
 --header 'Content-Type: application/json' \\
@@ -145994,7 +145994,7 @@ curl --location 'https://api.key4u.shop/v1/chat/completions' \\
 Expected: choices[0].message.content
 Subtitle prompt: Translate subtitle text only. Keep line numbers and timestamps unchanged. Do not add explanations.""",
         """Key4U MiniMax TTS sync
-curl --location 'https://api.key4u.shop/minimax/v1/t2a_v2' \\
+curl --location 'https://api.key4u.vn/minimax/v1/t2a_v2' \\
 --header 'Authorization: Bearer <KEY4U_TOKEN>' \\
 --header 'Content-Type: application/json' \\
 --data '{
@@ -146015,7 +146015,7 @@ curl --location 'https://api.key4u.shop/minimax/v1/t2a_v2' \\
 }'
 
 Key4U MiniMax TTS async
-curl --location 'https://api.key4u.shop/minimax/v1/t2a_async_v2' \\
+curl --location 'https://api.key4u.vn/minimax/v1/t2a_async_v2' \\
 --header 'Authorization: Bearer <KEY4U_TOKEN>' \\
 --header 'Content-Type: application/json' \\
 --data '{
@@ -146030,11 +146030,11 @@ curl --location 'https://api.key4u.shop/minimax/v1/t2a_async_v2' \\
 }'
 
 Query:
-curl --location 'https://api.key4u.shop/minimax/v1/query/t2a_async_query_v2?task_id=<TASK_ID>' \\
+curl --location 'https://api.key4u.vn/minimax/v1/query/t2a_async_query_v2?task_id=<TASK_ID>' \\
 --header 'Authorization: Bearer <KEY4U_TOKEN>'
 
 Retrieve:
-curl --location 'https://api.key4u.shop/minimax/v1/files/retrieve?file_id=<FILE_ID>' \\
+curl --location 'https://api.key4u.vn/minimax/v1/files/retrieve?file_id=<FILE_ID>' \\
 --header 'Authorization: Bearer <KEY4U_TOKEN>'""",
         """ShopAIKey base
 SHOPAIKEY_API_KEY=<secret>
@@ -146309,7 +146309,7 @@ def audio_provider_curl_text() -> str:
     minimax_tts_url = key4u_minimax_final_url(KEY4U_TTS_ENDPOINT)
     minimax_upload_url = key4u_minimax_final_url(KEY4U_MINIMAX_UPLOAD_ENDPOINT)
     minimax_clone_url = key4u_minimax_final_url(KEY4U_MINIMAX_CLONE_ENDPOINT)
-    suno_submit_url = key4u_suno_final_url(KEY4U_SUNO_CREATE_ENDPOINT) or "https://api.key4u.shop/suno/submit/music"
+    suno_submit_url = key4u_suno_final_url(KEY4U_SUNO_CREATE_ENDPOINT) or "https://api.key4u.vn/suno/submit/music"
     suno_fetch_url = key4u_suno_fetch_final_url("<TASK_ID>")
     suno_lyrics_url = key4u_suno_final_url(KEY4U_SUNO_LYRICS_ENDPOINT)
     shopaikey_tts_url = shopaikey_tts_final_url(SHOPAIKEY_TTS_ENDPOINT)
@@ -163858,7 +163858,7 @@ async def music_provider_proxy_download_audio(
         **headers,
         "Accept": "audio/wav,audio/mpeg,audio/*,application/json,*/*",
         "User-Agent": "TOAN-AAS/1.0",
-        "Referer": "https://api.key4u.shop/",
+        "Referer": "https://api.key4u.vn/",
     }
 
     def debug_detail(selected: dict | None = None) -> str:

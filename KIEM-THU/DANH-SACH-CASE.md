@@ -10,11 +10,11 @@ Nguồn gốc duy nhất cho acceptance live. Sửa case tại file này trướ
 | PV-L02 | Video AI chân thật / prompt manual | C1 Linh tạo hình bình gốm xanh; C2 Linh nâng thành phẩm trong xưởng ấm | dubbing + phụ đề | Add-on thật, MP4 2 cảnh có audio, receipt 0 Xu |
 | PV-L03 | Kịch bản -> Video / manual | 5 cảnh trà sen Tây Hồ: hái sen, tách gạo, ướp trà, pha trà, mời khách | voice + phụ đề + nhạc | Giữ nguyên script, min 5 cảnh, MP4/receipt |
 | PV-L04 | Ghép ảnh thành video / custom | 2 ảnh đồng hồ thủ công: bàn lắp ráp và hero shot thành phẩm | chữ + transition | 2 ảnh thật, 3 quality Frame chọn được, MP4/receipt |
-| PV-L05 | Video tự quay / custom | Giữ đầu bếp thật; đổi từ chợ Hội An sang bếp rooftop nhưng giữ hành động thái rau | source audio + watermark | Video nguồn thật, min 2 cảnh, MP4 có audio/receipt |
+| PV-L05 | Video tự quay / custom | Source `PV-L05-self-shot-typing-source.mp4`: giữ người thật và động tác gõ máy; đổi phòng làm việc thành quán cà phê rooftop | source audio + watermark | Source SHA `784FBE5B...`; min 2 cảnh, MP4 có audio/receipt |
 | PV-L06 | Storyboard / manual | C1 robot nhỏ gieo hạt trên mái nhà; C2 mầm cây phát sáng khi bình minh lên | transitions + phụ đề | 2 ảnh start mapped, MP4 2 cảnh/receipt |
 | PV-L07 | Video dài tập / manual | C1 thợ lặn tìm cửa thư viện dưới biển; C2 mở phòng sách phát sáng và đọc bản đồ | narration + nhạc | Tail đủ, output thật/receipt theo runtime hỗ trợ |
 | PV-L08 | Ý tưởng video / manual handoff | C1 xe cà phê điện tới cổng trường; C2 barista phục vụ nhóm sinh viên | phụ đề | Ý tưởng riêng đi Tail, MP4 2 cảnh/receipt |
-| PV-L09 | Chỉnh sửa Video / input 2 cảnh | Cắt gọn và đổi tỉ lệ một video 2 cảnh chợ đêm, giữ nguyên tiếng môi trường | preserve audio + watermark | Operation thật, output MP4 dùng được, receipt 0 Xu |
+| PV-L09 | Chỉnh sửa Video / input 2 cảnh | Source `PV-L09-edit-review-source.mp4`: cắt review 29,54s thành 2 nhịp, đổi 9:16 và giữ lời nói gốc | preserve audio + watermark | Source SHA `3A53DA94...`; operation thật, MP4 dùng được, receipt 0 Xu |
 
 ## Video AI Chân thật theo tier
 

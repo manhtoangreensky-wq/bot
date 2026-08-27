@@ -5,8 +5,8 @@
 - Product: **Product Video** only
 - Codex task: `019efe1e-ee54-78e1-87c4-10db6e1e19e4`
 - Repository: `manhtoangreensky-wq/bot`
-- Branch: `fix/product-video-tailflow16-test-harness`
-- Current branch base: `085a1aaa3545911ab8cd3ac1a69ab05c18b68b66`
+- Branch: `fix/product-video-terminal-provider-claim-loop`
+- Current branch base: `8d23bbf1a09dee8d43896bad963a800d3dd25cda`
 - SubDub task `019fbbfe-59b7-7ee2-b298-dea276813ce4` is **out of scope**. CPU is independent; only Telegram/Chrome/provider/VPS/deploy ownership is coordinated.
 
 ## Execution Rule
@@ -27,7 +27,8 @@ If a live row fails, reopen only that spec, add a RED reproducer from the real f
 - [x] Local Python/FFmpeg available to Product Video.
 - [x] LIVE/CHROME available to Product Video for the current PV-L01 failure loop.
 - [x] VPS/DEPLOY available to Product Video for the current PV-L01 failure loop.
-- [x] No wallet, PayOS, ENV, secret, destructive DB, onboarding, PWA, or SubDub changes allowed.
+- [x] Owner approved only the Key4U `.vn` endpoint configuration needed for Product Video; no secret values are committed.
+- [x] No wallet, PayOS, destructive DB, onboarding, PWA, or SubDub changes allowed.
 
 Current shared-resource owner: **Product Video**. SubDub is static until exact Product Video release markers.
 
@@ -98,7 +99,7 @@ Video AI Real public tiers:
 
 ### SPEC-04: One PR, Merge, Deploy, Runtime
 
-- [ ] Measured report updated in this tracker.
+- [x] Measured report updated in this tracker.
 - [ ] One scoped Product Video commit series pushed on this branch.
 - [ ] One Product Video PR created and linked to this tracker.
 - [ ] PR checks terminal GREEN.
@@ -107,6 +108,19 @@ Video AI Real public tiers:
 - [ ] Bot and Product Video worker run the exact merge SHA.
 - [ ] Worker generation heartbeat is accepted with no reject reason.
 - [ ] Bot `getMe`/ONLINE and services active evidence recorded.
+
+### SPEC-04B: Provider Price/Domain/Quota Recovery for PV-L01
+
+- [x] Read ShopAIKey live balance and both existing scene task payloads without submit.
+- [x] Prove 59.29 USD remains; failure is VEO `429 RESOURCE_EXHAUSTED`, not zero balance.
+- [x] Read live provider prices from ShopAIKey `/pricing` and Key4U `/api/pricing_v3`.
+- [x] Persist one current price/route JSON plus a human-readable map and the D-drive knowledge copy.
+- [x] Correct Kling v3 unit from per-scene to per-second and record two-scene costs/margins.
+- [x] RED/GREEN Key4U `.vn` domain plus VEO/Kling/Hailuo family payload/poll contracts.
+- [x] RED/GREEN preserve ShopAIKey quota blocker and exact-price controlled fallback policy.
+- [x] Focused/protected tests and compile/diff gates terminal.
+- [ ] PR merged and deployed at exact runtime SHA.
+- [ ] Same PV-L01 flow delivers the required two-scene MP4 with audio/add-ons/receipt.
 
 ### SPEC-05: Distinct Two-Scene Product/Lane LIVE Matrix
 
@@ -118,11 +132,11 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | Video AI chan that / prompt manual | PV-L02: Linh tạo bình gốm xanh -> nâng thành phẩm | [ ] | [ ] | [ ] |
 | Kich ban -> Video / manual | PV-L03: 5 cảnh trà sen Tây Hồ | [ ] | [ ] | [ ] |
 | Ghep anh thanh video / custom | PV-L04: 2 ảnh đồng hồ thủ công | [ ] | [ ] | [ ] |
-| Video tu quay / custom direction | PV-L05: đầu bếp chợ Hội An -> bếp rooftop, giữ thái rau | [ ] | [ ] | [ ] |
+| Video tu quay / custom direction | PV-L05: giữ người thật gõ máy -> quán cà phê rooftop, giữ source audio | [ ] | [ ] | [ ] |
 | Storyboard / manual | PV-L06: robot gieo hạt -> mầm cây phát sáng | [ ] | [ ] | [ ] |
 | Video dai tap / manual | PV-L07: thợ lặn tìm thư viện -> mở phòng sách phát sáng | [ ] | [ ] | [ ] |
 | Y tuong video / manual handoff | PV-L08: xe cà phê điện -> barista phục vụ sinh viên | [ ] | [ ] | [ ] |
-| Chinh sua Video / two-scene input | PV-L09: cắt gọn chợ đêm, giữ tiếng môi trường | [ ] | [ ] | [ ] |
+| Chinh sua Video / two-scene input | PV-L09: cắt review 29,54s thành 2 nhịp 9:16, giữ lời nói gốc | [ ] | [ ] | [ ] |
 
 ### SPEC-06: Video AI Real All-Quality LIVE Matrix
 
@@ -198,3 +212,18 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | 2026-08-27 | PV-L01 terminal provider failure loop | Both scene tasks returned `FAILURE` with `provider_failed_result_url_invalid`; no clip/result URL; job remained processing/queued and owner worker raised `real_video_renderer_unavailable`; attempts reached `79` despite max `3`; owner worker stopped separately, bot remained active, charged Xu 0 | VALID LIVE RED; no new submit/job and no wallet mutation |
 | 2026-08-27 | Terminal claim-loop RED/GREEN | Exact DB integration RED: ledger terminalized only after current failed summary, but claim left DB `processing`; minimal claim transaction now persists job/project `failed_no_charge`, outbox `terminal_failed`, clears leases and preserves charged Xu 0; focused GREEN `1 passed in 8.78s` | PASS; no fallback/resubmit/provider code added |
 | 2026-08-27 | Terminal claim-loop protected gate | Existing-task poll-only recovery, active/pending scene truth, all-scenes-exhausted terminal, outbox watchdog, lease, cancellation and no-resubmit coverage: `10 passed, 1 warning in 11.39s`; compile `services/remote_worker_api.py services/video_project_queue.py remote_worker.py bot.py` exit 0; diff-check exit 0 | SHIP READY; owner worker remains intentionally stopped until deploy |
+| 2026-08-27 | ShopAIKey balance/quota forensic | Usage HTTP 200: total 351.00 USD, used 291.71 USD, remaining 59.29 USD. Both PV-L01 tasks poll HTTP 200 but payload `FAILURE`, progress 100%, inner `429 RESOURCE_EXHAUSTED / PUBLIC_ERROR_USER_QUOTA_REACHED`, no result URL | ROOT CAUSE LOCKED; balance is not exhausted; provider calls 0 during forensic |
+| 2026-08-27 | Key4U domain and live price audit | `.shop` TLS verify failed on VPS; `.vn` verify code 0. Read-only live sources: ShopAIKey `/pricing`, Key4U `/api/pricing_v3` and `/v1/models` | DOMAIN/PRICE SOURCE LOCKED; no paid submit |
+| 2026-08-27 | Price-route map durability | Repo map + `D:\\TOANAAS\\kiến thức\\PRODUCT_VIDEO_PRICE_ROUTE_MAP_20260827.md` SHA256 `69A4EBC43A2FC9B0C3B5612765F6B2574571228C5F079B982B865A9E223990CA`; JSON covers 10 tiers, customer prices 80..2360 Xu, exact 2-scene totals, six family contract URLs and three live endpoint ids | PASS; Kling per-second unit and negative margins recorded |
+| 2026-08-27 | Domain/price/quota and family contract RED/GREEN | Initial RED `4 failed`; family wire RED `4 failed`; final Product Video/provider gate `49 passed, 1 deselected`; Key4U domain gate `31 passed, 36 deselected` | PASS; deselected case is pre-existing tier-700 product-scope assertion outside this correction |
+| 2026-08-27 | Baseline comparison | Clean `origin/main 43d8664` full music/provider file: 10 failed/35 passed. Branch: same 9 baseline failures/36 passed after `.vn` correction | NEW_FAILURES=0; one baseline URL failure fixed |
+| 2026-08-27 | Compile/diff gate | `py_compile` on 8 runtime files exit 0; `git diff --check` exit 0 | SOURCE SHIP READY; deploy/live still pending |
+| 2026-08-27 | Documentation scope recovery | Restored both existing `TAI-LIEU` files byte-for-byte through their previous final sections, then appended only the measured Product Video provider/pricing addenda | PASS; Landing/SubDub/history content preserved, no wholesale replacement remains |
+| 2026-08-27 | Current-map runtime authority | `services/video_ai_real_pricing.py` exports runtime `provider_priority/provider_costs` from `config/product_video_price_route_map_20260827.json`; the 11/08 rows remain only under explicit `legacy_provider_*` fields | PASS; fixed customer prices are not recomputed from provider costs |
+| 2026-08-27 | Primary contract readback | Key4U docs verified VEO `/v1/videos`, Kling `/kling/v1/videos/text2video`, Hailuo submit/query, plus `.vn` DNS/TLS; pricing endpoint ids `gygkmi`, `m0kp1x`, `1au654` map to those exact POST paths; all evidence persisted in the JSON map | PASS; zero paid submit and zero secret mutation |
+| 2026-08-27 | Kling v3 audio wire RED/GREEN | Official-compatible contract requires `sound` enum `on`/`off`; RED `1 failed` because runtime emitted boolean; minimal wire normalization GREEN `3 passed`, then provider/pricing gate `77 passed, 1 deselected in 21.52s` | PASS; internal catalog bool remains unchanged, only outbound Key4U Kling payload normalized |
+| 2026-08-27 | Final provider/pricing gate | Current branch `77 passed, 1 deselected in 21.52s`; deselected tier-700 scope selector fails identically on clean `43d8664`. Shared voice/music branch `9 failed/36 passed` vs clean baseline `10 failed/35 passed`; changed-domain selectors `12 passed` | NEW_FAILURES=0; one `.shop` URL baseline failure fixed |
+| 2026-08-27 | Final static/scope gate | `py_compile` 8 runtime/dependency files exit 0; JSON contract PASS; `git diff --check` exit 0; secret scan PASS; forbidden wallet/PayOS/SubDub/onboarding/PWA paths 0 | SOURCE SHIP READY on pre-rebase bytes; post-rebase gate still required |
+| 2026-08-27 | Post-SubDub-#904 rebase gate | Rebased cleanly onto exact `origin/main 8d23bbf`; provider/pricing `77 passed, 1 baseline deselected`; current Tail v18/manual/10-tier source acceptance `66 passed`; compile 8 runtime/dependency files and diff-check exit 0 | PASS; branch remains exactly one Product Video commit, no conflict or shared-runtime drift |
+| 2026-08-27 | PV-L01 exact-price fallback safety | Spend-safety + quota parser + exact-price fallback selectors `11 passed in 11.18s`: in-progress primary suppresses fallback; paid fallback requires explicit confirmation; confirmed retry permits exactly one Key4U submit; quote remains 144 Xu and charged Xu 0 | PASS; same-flow live still required after deploy |
+| 2026-08-27 | Media fixture readiness | Generated and hashed four 1672x941 PNG fixtures for PV-L04/PV-L06; selected two measured source MP4s for PV-L05/PV-L09 with H.264 + AAC and durable SHA256 manifest under workspace `artifacts/product-video-live-fixtures/` | PASS; files are evidence inputs and are not committed into production Git |

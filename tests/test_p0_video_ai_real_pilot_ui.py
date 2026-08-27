@@ -1804,14 +1804,14 @@ def test_video_ai_real_prompt_model_catalog_uses_verified_seconds_and_triple_fal
     expected = {
         "social_fast_5": (5, 200, ["shopaikey", "key4u"], "key4u"),
         "grok3_5": (5, 220, ["shopaikey", "key4u"], "key4u"),
-        "veo31_fast_8": (8, 80, ["key4u", "shopaikey"], "shopaikey"),
+        "veo31_fast_8": (8, 80, ["shopaikey", "key4u"], "key4u"),
         "motion_standard_5": (5, 110, ["shopaikey", "key4u"], "key4u"),
         "motion_audio_5": (5, 160, ["shopaikey", "key4u"], "key4u"),
         "kling_long_audio_15": (15, 220, ["key4u"], "key4u"),
-        "motion_pro_audio_10": (10, 370, ["key4u", "shopaikey"], "shopaikey"),
-        "human_performance_6": (6, 370, ["key4u", "shopaikey"], "shopaikey"),
+        "motion_pro_audio_10": (10, 370, ["key4u"], "key4u"),
+        "human_performance_6": (6, 370, ["key4u"], "key4u"),
         "multi_angle_reference_8": (8, 1260, ["shopaikey", "key4u"], "key4u"),
-        "cinematic_multishot_10": (10, 2360, ["shopaikey", "key4u"], "key4u"),
+        "cinematic_multishot_10": (10, 2360, ["key4u"], "key4u"),
     }
     assert list(by_key) == list(expected)
     for key, (seconds, unit_xu, priority, pricing_provider) in expected.items():
@@ -1830,18 +1830,17 @@ def test_video_ai_real_prompt_model_catalog_uses_verified_seconds_and_triple_fal
             for provider in item["provider_priority"]
         ]
         assert priority_costs == sorted(priority_costs)
-        assert item["pricing_cost_vnd"] == int(
-            max(Decimal(str(cost["usd_per_scene"])) for cost in item["provider_costs"])
-            * Decimal("3500")
+        assert item["pricing_cost_vnd"] == max(
+            int(cost["cost_vnd"]) for cost in item["provider_costs"]
         )
     provider_costs = {
         item["key"]: {cost["provider"]: cost for cost in item["provider_costs"]}
         for item in catalog
     }
-    assert provider_costs["social_fast_5"]["key4u"]["usd_per_scene"] == 1.845
+    assert provider_costs["social_fast_5"]["key4u"]["usd_per_scene"] == 2.461889136
     assert provider_costs["grok3_5"]["key4u"]["usd_per_scene"] == 2.1
     assert provider_costs["human_performance_6"]["key4u"]["request_metadata"]["resolution"] == "768P"
-    assert provider_costs["multi_angle_reference_8"]["key4u"]["usd_per_scene"] == 12.0
+    assert provider_costs["multi_angle_reference_8"]["key4u"]["usd_per_scene"] == 12.000096
     assert by_key["kling_long_audio_15"]["fallback_eligible"] is False
     assert all(item["unit_xu"] % 10 == 0 for item in catalog)
     assert all("trial" not in item["key"] for item in catalog)

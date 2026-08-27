@@ -1,14 +1,19 @@
 """Verified image and per-scene video pricing for the Video AI Real pilot.
 
 This module is deliberately side-effect free. It stores reviewed public price
-evidence and calculates a conservative UI quote; it never selects a runtime
-provider, calls an API, creates a job, or mutates a wallet.
+evidence and calculates a conservative UI quote; it never calls an API, creates
+a job, or mutates a wallet. The 2026-08-11 video cost rows are retained only as
+customer-price history. Runtime provider order comes from the persisted
+2026-08-27 Product Video price/route map.
 """
 
 from __future__ import annotations
 
 from copy import deepcopy
 from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
+from functools import lru_cache
+import json
+from pathlib import Path
 from typing import Any
 
 
@@ -74,6 +79,12 @@ VIDEO_PROVIDER_ADAPTER_KEYS = {
     "shopaikey": "shopaikey_video",
     "key4u": "key4u_video",
 }
+PRODUCT_VIDEO_PRICE_ROUTE_MAP_RELATIVE_PATH = "config/product_video_price_route_map_20260827.json"
+PRODUCT_VIDEO_PRICE_ROUTE_MAP_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "config"
+    / "product_video_price_route_map_20260827.json"
+)
 
 # Image and Music have separate owners. Preserve their pre-existing conversion
 # inputs in this branch; their canonical task will replace them independently.
@@ -84,7 +95,11 @@ PROVIDER_USD_TO_VND = {
 
 
 def provider_exchange_rate_catalog() -> list[dict[str, Any]]:
-    return deepcopy(list(PROVIDER_EXCHANGE_RATE_ROWS))
+    rows = deepcopy(list(PROVIDER_EXCHANGE_RATE_ROWS))
+    for row in rows:
+        row["runtime_routing_authority"] = False
+        row["scope"] = "legacy_customer_price_history"
+    return rows
 
 
 def provider_usd_to_vnd(provider: str = "") -> Decimal:
@@ -401,9 +416,149 @@ VIDEO_RUNTIME_FALLBACK_MODEL_KEYS = frozenset({
     "veo31_fast_8",
     "motion_standard_5",
     "motion_audio_5",
-    "motion_pro_audio_10",
     "multi_angle_reference_8",
 })
+
+
+@lru_cache(maxsize=1)
+def _load_product_video_price_route_map() -> dict[str, Any]:
+    payload = json.loads(PRODUCT_VIDEO_PRICE_ROUTE_MAP_PATH.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != "p0.product-video.price-route.v1":
+        raise ValueError("product_video_price_route_map_schema_invalid")
+    rows = payload.get("tiers_sorted_by_customer_price")
+    if not isinstance(rows, list) or len(rows) != len(QUALITY_TIER_MODEL_KEYS):
+        raise ValueError("product_video_price_route_map_tiers_invalid")
+    if {int(row.get("tier_id") or 0) for row in rows} != set(QUALITY_TIER_MODEL_KEYS):
+        raise ValueError("product_video_price_route_map_tier_identity_invalid")
+    return payload
+
+
+def product_video_price_route_map() -> dict[str, Any]:
+    """Return the persisted current routing source without exposing cached state."""
+
+    return deepcopy(_load_product_video_price_route_map())
+
+
+def product_video_route_by_tier(tier_id: int) -> dict[str, Any]:
+    selected = int(tier_id or 0)
+    row = next(
+        (
+            item
+            for item in _load_product_video_price_route_map()["tiers_sorted_by_customer_price"]
+            if int(item.get("tier_id") or 0) == selected
+        ),
+        None,
+    )
+    if not row:
+        raise ValueError("video_quality_invalid")
+    return deepcopy(row)
+
+
+def _runtime_route_fields(row: dict[str, Any]) -> dict[str, Any]:
+    model_key = str(row.get("key") or "")
+    tier_id = next(
+        (tier for tier, key in QUALITY_TIER_MODEL_KEYS.items() if key == model_key),
+        0,
+    )
+    if not tier_id:
+        return {}
+    saved = product_video_route_by_tier(tier_id)
+    runtime_order = [str(item or "").strip() for item in saved.get("runtime_order") or []]
+    if not runtime_order:
+        raise ValueError("product_video_runtime_order_missing")
+    candidates = [
+        dict(item)
+        for item in saved.get("candidates") or []
+        if isinstance(item, dict)
+    ]
+    adapter_to_provider = {
+        adapter: provider
+        for provider, adapter in VIDEO_PROVIDER_ADAPTER_KEYS.items()
+    }
+    exchange_rows = dict(
+        _load_product_video_price_route_map().get("exchange_rates_vnd_per_usd") or {}
+    )
+    provider_sources = dict(
+        _load_product_video_price_route_map().get("provider_sources") or {}
+    )
+    runtime_costs: list[dict[str, Any]] = []
+    for index, route_token in enumerate(runtime_order):
+        adapter, separator, model = route_token.partition(":")
+        provider = adapter_to_provider.get(adapter)
+        if not separator or not provider or not model:
+            raise ValueError("product_video_runtime_order_entry_invalid")
+        candidate = next(
+            (
+                item
+                for item in candidates
+                if str(item.get("provider") or "") == provider
+                and str(item.get("model") or "") == model
+                and bool(item.get("eligible"))
+            ),
+            None,
+        )
+        if not candidate:
+            raise ValueError("product_video_runtime_candidate_missing")
+        seconds = max(1, int(saved.get("seconds_per_scene") or row.get("seconds") or 1))
+        usd_per_scene = _decimal(candidate.get("usd_per_scene"))
+        if usd_per_scene <= 0:
+            usd_per_scene = _decimal(candidate.get("usd_per_second")) * Decimal(seconds)
+        exchange = _decimal((exchange_rows.get(provider) or {}).get("value"))
+        if usd_per_scene <= 0 or exchange <= 0:
+            raise ValueError("product_video_runtime_cost_missing")
+        vnd_per_scene = _decimal(candidate.get("vnd_per_scene"))
+        if vnd_per_scene <= 0:
+            vnd_per_scene = usd_per_scene * exchange
+        legacy = dict((row.get("providers") or {}).get(provider) or {})
+        source = dict(provider_sources.get(provider) or {})
+        runtime_costs.append({
+            "provider_key": provider,
+            "provider": provider,
+            "adapter_key": adapter,
+            "capability_key": str(row.get("capability_key") or "text_to_video"),
+            "model_key": model,
+            "model": model,
+            "catalog_model": model,
+            "request_metadata": deepcopy(dict(legacy.get("request_metadata") or {})),
+            "currency": "USD",
+            "billable_unit": "scene",
+            "cost_minor": int((usd_per_scene * Decimal("1000000")).to_integral_value(rounding=ROUND_HALF_UP)),
+            "cost_minor_scale": 1000000,
+            "exact_cost": str(usd_per_scene),
+            "usd_per_scene": float(usd_per_scene),
+            "usd_to_vnd": int(exchange),
+            "cost_vnd": int(vnd_per_scene.to_integral_value(rounding=ROUND_HALF_UP)),
+            "pricing_basis": str(candidate.get("cost_basis") or ""),
+            "source_reference": str(source.get("pricing") or ""),
+            "source_url": str(source.get("pricing") or ""),
+            "checked_on": str(source.get("checked_at") or ""),
+            "verified_at": str(source.get("checked_at") or ""),
+            "verified_by": "product_video_price_route_map",
+            "approval_status": str(
+                _load_product_video_price_route_map().get("status")
+                or "owner_requested_current_source_of_truth"
+            ),
+            "fallback_eligible": len(runtime_order) > 1,
+            "runtime_role": "primary" if index == 0 else "fallback",
+            "catalog_version": str(
+                _load_product_video_price_route_map().get("schema_version") or ""
+            ),
+        })
+    return {
+        "runtime_provider_priority": [item["provider"] for item in runtime_costs],
+        "runtime_provider_costs": runtime_costs,
+        "runtime_provider_model_map": {
+            item["adapter_key"]: item["model"] for item in runtime_costs
+        },
+        "runtime_route_source": PRODUCT_VIDEO_PRICE_ROUTE_MAP_RELATIVE_PATH,
+        "runtime_route_schema_version": str(
+            _load_product_video_price_route_map().get("schema_version") or ""
+        ),
+        "runtime_route_checked_at": str(
+            _load_product_video_price_route_map().get("captured_at") or ""
+        ),
+        "current_customer_unit_xu": int(saved.get("customer_unit_xu") or 0),
+    }
 
 
 _IMAGE_MODEL_ROWS: tuple[dict[str, Any], ...] = (
@@ -735,6 +890,7 @@ def model_catalog() -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for source in _MODEL_ROWS:
         row = deepcopy(source)
+        runtime_route = _runtime_route_fields(row)
         costs = [
             _provider_cost(row, provider)
             for provider in PROVIDER_PRIORITY
@@ -767,7 +923,42 @@ def model_catalog() -> list[dict[str, Any]]:
             "catalog_version": CATALOG_VERSION,
             "approval_status": "canonical_approved",
             "fallback_eligible": str(row.get("key") or "") in VIDEO_RUNTIME_FALLBACK_MODEL_KEYS,
+            "legacy_provider_cost_snapshot": True,
+            "legacy_provider_cost_snapshot_checked_on": SOURCE_CHECKED_ON,
+            "legacy_provider_costs_are_runtime_authority": False,
         })
+        legacy_provider_priority = list(row["provider_priority"])
+        legacy_provider_costs = deepcopy(row["provider_costs"])
+        row.update(runtime_route)
+        current_unit_xu = int(row.get("current_customer_unit_xu") or 0)
+        if current_unit_xu <= 0:
+            raise ValueError("product_video_current_customer_price_missing")
+        runtime_costs = [
+            dict(item)
+            for item in row.get("runtime_provider_costs") or []
+            if isinstance(item, dict)
+        ]
+        runtime_priority = [
+            str(item) for item in row.get("runtime_provider_priority") or []
+        ]
+        if not runtime_costs or not runtime_priority:
+            raise ValueError("product_video_runtime_route_missing")
+        conservative_runtime_cost = max(
+            runtime_costs,
+            key=lambda item: int(item.get("cost_vnd") or 0),
+        )
+        row["legacy_provider_priority"] = legacy_provider_priority
+        row["legacy_provider_costs"] = legacy_provider_costs
+        row["provider_priority"] = runtime_priority
+        row["provider_costs"] = runtime_costs
+        row["pricing_provider"] = str(conservative_runtime_cost.get("provider") or "")
+        row["pricing_cost_usd"] = str(conservative_runtime_cost.get("exact_cost") or "0")
+        row["pricing_cost_vnd"] = int(conservative_runtime_cost.get("cost_vnd") or 0)
+        row["public_pricing_usd_to_vnd"] = int(conservative_runtime_cost.get("usd_to_vnd") or 0)
+        row["unit_xu"] = current_unit_xu
+        row["customer_price_source"] = PRODUCT_VIDEO_PRICE_ROUTE_MAP_RELATIVE_PATH
+        row["customer_price_derivation"] = "fixed_owner_price_not_recomputed_from_provider_cost"
+        row["fallback_eligible"] = len(runtime_priority) > 1
         result.append(row)
     return result
 
@@ -835,12 +1026,12 @@ def video_quality_unit_economics(
     quality = public_quality_by_tier(selected_tier)
     costs = [
         dict(item)
-        for item in model.get("provider_costs") or []
+        for item in model.get("runtime_provider_costs") or []
         if isinstance(item, dict)
     ]
     if not costs:
-        raise ValueError("video_ai_real_provider_price_missing")
-    priority = [str(item) for item in model.get("provider_priority") or []]
+        raise ValueError("product_video_runtime_provider_price_missing")
+    priority = [str(item) for item in model.get("runtime_provider_priority") or []]
     first_provider = priority[0] if priority else str(costs[0].get("provider") or "")
     first_cost = next(
         (item for item in costs if str(item.get("provider") or "") == first_provider),
@@ -854,10 +1045,7 @@ def video_quality_unit_economics(
         ),
     )
     first_cost_vnd = max(0, int(first_cost.get("cost_vnd") or 0))
-    conservative_cost_vnd = max(
-        0,
-        int(_decimal(conservative_cost.get("exact_cost")) * DEFAULT_PROVIDER_USD_TO_VND),
-    )
+    conservative_cost_vnd = max(0, int(conservative_cost.get("cost_vnd") or 0))
     price = video_multiscene_price(quality["unit_xu"], scene_count)
     count = int(price["scene_count"])
     revenue_vnd = int(price["total_xu"] * XU_TO_VND)
@@ -888,8 +1076,9 @@ def video_quality_unit_economics(
             conservative_margin.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
         ),
         "profitable_after_discount": conservative_profit_vnd > 0,
-        "cost_catalog_version": str(model.get("catalog_version") or CATALOG_VERSION),
-        "source_checked_on": str(model.get("source_checked_on") or SOURCE_CHECKED_ON),
+        "cost_catalog_version": str(model.get("runtime_route_schema_version") or ""),
+        "source_checked_on": str(model.get("runtime_route_checked_at") or ""),
+        "cost_source": str(model.get("runtime_route_source") or ""),
     }
 
 

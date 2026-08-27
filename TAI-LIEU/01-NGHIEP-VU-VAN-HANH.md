@@ -96,3 +96,14 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   áp lại đúng `1` dòng. Luôn kiểm `git diff --numstat` trước test/commit.
 - Merge/deploy và same-fixture LIVE PASS vẫn là cổng riêng; chưa có MP4 cuối thì
   không được ghi lane là hoàn tất.
+
+## Bổ sung Product Video provider/giá — 27/08/2026
+
+- Nguồn vận hành mới là `config/product_video_price_route_map_20260827.json`; bản đọc cho người nằm tại `docs/knowledge/PRODUCT_VIDEO_PRICE_ROUTE_MAP_20260827.md` và bản dự phòng đồng nhất tại `D:\TOANAAS\kiến thức`.
+- Giá khách được khóa ở 10 mức: `80`, `110`, `160`, `200`, `220`, `220`, `370`, `370`, `1.260`, `2.360` Xu/cảnh; đơn 2 cảnh giảm 10% phần giá Video.
+- Chỉ so provider khi cùng thời lượng và đủ capability; route đủ điều kiện có tổng chi phí bảo thủ thấp hơn đứng trước.
+- Snapshot live: ShopAIKey `3.250 VND/USD`; Key4U `3.000 VND/USD`. Kling v3 tính theo giây, không phải theo lần tạo.
+- Key4U hiện dùng `api.key4u.vn`. VEO, Kling và Hailuo có endpoint, payload và poll contract riêng.
+- Bảng/provider snapshot ngày 11/08 trong `services/video_ai_real_pricing.py` chỉ là lịch sử dựng giá khách; không được dùng để quyết định runtime route ngày 27/08.
+- ShopAIKey còn `59,29 USD` nhưng VEO trả `429 RESOURCE_EXHAUSTED`; đây là quota/capacity upstream, không phải số dư bằng 0.
+- Mọi live PASS vẫn cần MP4 tối thiểu 2 cảnh, audio nghe được, add-on đã materialize, receipt Telegram và `charged_xu=0`.

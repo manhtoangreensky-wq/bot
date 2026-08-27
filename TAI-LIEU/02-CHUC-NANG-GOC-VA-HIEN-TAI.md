@@ -74,3 +74,24 @@ có MP4 Telegram thật.
 GitHub tester cloud chưa được thay đổi trong đợt này: lệnh `gh label/issue`
 trả HTTP `401` ngày 27/08/2026. Case local dưới `KIEM-THU/` là nguồn chuẩn để
 push; không tuyên bố label/issue/project đã tạo khi chưa có readback.
+
+## Đối chiếu Product Video provider/giá — 27/08/2026
+
+Nguồn mới đã đối chiếu:
+
+1. `config/product_video_price_route_map_20260827.json`
+2. `docs/knowledge/PRODUCT_VIDEO_PRICE_ROUTE_MAP_20260827.md`
+3. `https://api.shopaikey.com/pricing`
+4. `https://key4u.vn/api/pricing_v3`
+5. `https://api.key4u.vn/v1/models`
+
+| Chức năng/tài liệu cũ | Hiện tại | Trạng thái |
+|---|---|---|
+| Key4U base `api.key4u.shop` | Dùng `api.key4u.vn`; `.shop` không còn là endpoint vận hành | Không còn đúng |
+| Một generic JSON contract cho mọi video family | VEO dùng multipart; Kling và Hailuo dùng JSON/poll family riêng | Không còn đúng |
+| Kling v3 đọc như giá mỗi lần tạo | Giá live tính theo giây; chi phí phải nhân đúng thời lượng cảnh | Không còn đúng |
+| Tier 400 ưu tiên Key4U VEO | ShopAIKey VEO Fast `4.550 VND/2 cảnh` đứng trước Key4U `21.151 VND/2 cảnh` | Đã đổi route |
+| Tier 800 có ShopAIKey Grok fallback | Chưa đủ artifact audio/pro-motion 10 giây nên không đủ điều kiện route | Bị loại khỏi route |
+| Snapshot provider 11/08 quyết định runtime | Chỉ giữ làm lịch sử dựng giá khách; file map 27/08 quyết định runtime | Không còn đúng |
+
+Giá khách hiện hành vẫn là `80`, `110`, `160`, `200`, `220`, `220`, `370`, `370`, `1.260`, `2.360` Xu/cảnh. Không được suy lại giá khách từ chi phí provider mới; mọi đổi giá hoặc thứ tự route phải sửa file map trước, có URL/timestamp bằng chứng rồi chạy comparator. LIVE vẫn pending cho tới khi từng lane/tier giao MP4 thật 2 cảnh có audio, add-on, receipt và `0 Xu`.

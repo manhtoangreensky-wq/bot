@@ -1,0 +1,191 @@
+{
+  "schema_version": "p0.product-video.price-route.v1",
+  "status": "owner_requested_current_source_of_truth",
+  "captured_at": "2026-08-27T11:45:00+07:00",
+  "rules": {
+    "customer_price_order": "ascending_unit_xu",
+    "provider_order": "eligible_capability_then_lowest_conservative_live_cost",
+    "scene_count_example": 2,
+    "two_scene_discount_percent": 10,
+    "audio_gate": "Every live acceptance MP4 must contain an audible audio stream. A provider without proved audio needs an approved audio add-on/final mux before PASS.",
+    "unknown_or_incomparable_cost": "not_eligible_for_price_order",
+    "price_change_policy": "Update this file and its evidence sources before changing runtime routing."
+  },
+  "exchange_rates_vnd_per_usd": {
+    "shopaikey": {"value": 3250, "source": "https://api.shopaikey.com/pricing"},
+    "key4u": {"value": 3000, "source": "https://key4u.vn/api/pricing_v3"}
+  },
+  "provider_sources": {
+    "shopaikey": {"pricing": "https://api.shopaikey.com/pricing", "contract": "https://shopaikey.com/docs/veo-video", "checked_at": "2026-08-27"},
+    "key4u": {
+      "pricing": "https://key4u.vn/api/pricing_v3",
+      "models": "https://api.key4u.vn/v1/models",
+      "contract": "https://docs.key4u.vn",
+      "family_contracts": {
+        "veo_submit": "https://docs.key4u.vn/api-41690843",
+        "veo_poll": "https://docs.key4u.vn/api-41690898",
+        "kling_submit": "https://docs.key4u.vn/api-41690856",
+        "kling_poll": "https://docs.key4u.vn/api-41690863",
+        "hailuo_submit": "https://docs.key4u.vn/api-41690868",
+        "hailuo_poll": "https://docs.key4u.vn/api-41690869"
+      },
+      "family_endpoint_types": {
+        "veo": {"id": "gygkmi", "method": "POST", "path": "/v1/videos"},
+        "kling_text": {"id": "m0kp1x", "method": "POST", "path": "/kling/v1/videos/text2video"},
+        "hailuo": {"id": "1au654", "method": "POST", "path": "/minimax/v1/video_generation"}
+      },
+      "checked_at": "2026-08-27"
+    }
+  },
+  "tiers_sorted_by_customer_price": [
+    {
+      "tier_id": 400,
+      "quality_key": "veo31_fast_8",
+      "label": "Nhanh gon",
+      "seconds_per_scene": 8,
+      "customer_unit_xu": 80,
+      "two_scene_quote": {"subtotal_xu": 160, "discount_xu": 16, "total_xu": 144, "total_vnd": 14400},
+      "required_capability": "8s, balanced clear motion, audible audio",
+      "runtime_order": ["shopaikey_video:veo3.1-fast", "key4u_video:veo_3_1-fast"],
+      "candidates": [
+        {"provider": "shopaikey", "model": "veo3.1-fast", "eligible": true, "role": "primary", "usd_per_scene": 0.7, "vnd_per_scene": 2275, "vnd_for_two_scenes": 4550, "cost_basis": "pay per generation"},
+        {"provider": "key4u", "model": "veo_3_1-fast", "eligible": true, "role": "fallback", "usd_per_scene": 3.52512, "vnd_per_scene": 10575.36, "vnd_for_two_scenes": 21150.72, "cost_basis": "pay per generation"},
+        {"provider": "key4u", "model": "kling-video", "variant": "kling-v3 std audio; conservative Kling-2", "eligible": true, "role": "more_expensive_not_routed", "usd_per_second": 1.53001224, "usd_per_scene": 12.24009792, "vnd_per_scene": 36720.29376, "vnd_for_two_scenes": 73440.58752, "cost_basis": "1.53001224 USD/s x 8s"}
+      ],
+      "primary_two_scene_margin_vnd": 9850,
+      "fallback_two_scene_margin_vnd": -6750.72
+    },
+    {
+      "tier_id": 500,
+      "quality_key": "motion_standard_5",
+      "label": "Chuyen dong on dinh",
+      "seconds_per_scene": 5,
+      "customer_unit_xu": 110,
+      "two_scene_quote": {"subtotal_xu": 220, "discount_xu": 22, "total_xu": 198, "total_vnd": 19800},
+      "required_capability": "5s controlled motion; final MP4 audio required",
+      "runtime_order": ["shopaikey_video:veo3.1-fast", "key4u_video:kling-video"],
+      "candidates": [
+        {"provider": "shopaikey", "model": "veo3.1-fast", "eligible": true, "role": "primary", "usd_per_scene": 0.7, "vnd_per_scene": 2275, "vnd_for_two_scenes": 4550},
+        {"provider": "key4u", "model": "kling-video", "variant": "kling-v3 std audio; conservative Kling-2", "eligible": true, "role": "fallback", "usd_per_second": 1.53001224, "usd_per_scene": 7.6500612, "vnd_per_scene": 22950.1836, "vnd_for_two_scenes": 45900.3672, "cost_basis": "1.53001224 USD/s x 5s"}
+      ],
+      "primary_two_scene_margin_vnd": 15250,
+      "fallback_two_scene_margin_vnd": -26100.3672
+    },
+    {
+      "tier_id": 600,
+      "quality_key": "motion_audio_5",
+      "label": "Chuyen dong co am thanh",
+      "seconds_per_scene": 5,
+      "customer_unit_xu": 160,
+      "two_scene_quote": {"subtotal_xu": 320, "discount_xu": 32, "total_xu": 288, "total_vnd": 28800},
+      "required_capability": "5s controlled motion with audio",
+      "runtime_order": ["shopaikey_video:veo3.1-fast", "key4u_video:kling-video"],
+      "candidates": [
+        {"provider": "shopaikey", "model": "veo3.1-fast", "eligible": true, "role": "primary", "usd_per_scene": 0.7, "vnd_per_scene": 2275, "vnd_for_two_scenes": 4550},
+        {"provider": "key4u", "model": "kling-video", "variant": "kling-v3 std audio; conservative Kling-2", "eligible": true, "role": "fallback", "usd_per_second": 1.53001224, "usd_per_scene": 7.6500612, "vnd_per_scene": 22950.1836, "vnd_for_two_scenes": 45900.3672, "cost_basis": "1.53001224 USD/s x 5s"}
+      ],
+      "primary_two_scene_margin_vnd": 24250,
+      "fallback_two_scene_margin_vnd": -17100.3672
+    },
+    {
+      "tier_id": 200,
+      "quality_key": "social_fast_5",
+      "label": "Can bang ro net",
+      "seconds_per_scene": 5,
+      "customer_unit_xu": 200,
+      "two_scene_quote": {"subtotal_xu": 400, "discount_xu": 40, "total_xu": 360, "total_vnd": 36000},
+      "required_capability": "5s fast video; final MP4 audio required",
+      "runtime_order": ["shopaikey_video:grok-video-3", "key4u_video:pixverse-video"],
+      "candidates": [
+        {"provider": "shopaikey", "model": "grok-video-3", "eligible": true, "role": "primary_conditional_audio_live_gate", "usd_per_scene": 0.4, "vnd_per_scene": 1300, "vnd_for_two_scenes": 2600},
+        {"provider": "key4u", "model": "pixverse-video", "variant": "V6 720p with audio", "eligible": true, "role": "fallback", "usd_per_scene": 2.461889136, "vnd_per_scene": 7385.667408, "vnd_for_two_scenes": 14771.334816, "cost_basis": "0.4923778272 USD/s x 5s"}
+      ]
+    },
+    {
+      "tier_id": 300,
+      "quality_key": "grok3_5",
+      "label": "Tieu chuan co am thanh",
+      "seconds_per_scene": 5,
+      "customer_unit_xu": 220,
+      "two_scene_quote": {"subtotal_xu": 440, "discount_xu": 44, "total_xu": 396, "total_vnd": 39600},
+      "required_capability": "5s video with audio",
+      "runtime_order": ["shopaikey_video:grok-video-3", "key4u_video:grok-imagine-video"],
+      "candidates": [
+        {"provider": "shopaikey", "model": "grok-video-3", "eligible": true, "role": "primary_conditional_audio_live_gate", "usd_per_scene": 0.4, "vnd_per_scene": 1300, "vnd_for_two_scenes": 2600},
+        {"provider": "key4u", "model": "grok-imagine-video", "variant": "720p output video", "eligible": true, "role": "fallback", "usd_per_scene": 2.1, "vnd_per_scene": 6300, "vnd_for_two_scenes": 12600, "cost_basis": "0.42 USD/s x 5s"}
+      ]
+    },
+    {
+      "tier_id": 700,
+      "quality_key": "kling_long_audio_15",
+      "label": "Canh dai co am thanh",
+      "seconds_per_scene": 15,
+      "customer_unit_xu": 220,
+      "two_scene_quote": {"subtotal_xu": 440, "discount_xu": 44, "total_xu": 396, "total_vnd": 39600},
+      "required_capability": "15s continuous motion with audio",
+      "runtime_order": ["key4u_video:kling-video"],
+      "candidates": [
+        {"provider": "key4u", "model": "kling-video", "variant": "kling-v3 pro audio; conservative Kling-2", "eligible": true, "role": "primary", "usd_per_second": 2.04001632, "usd_per_scene": 30.6002448, "vnd_per_scene": 91800.7344, "vnd_for_two_scenes": 183601.4688, "cost_basis": "2.04001632 USD/s x 15s"},
+        {"provider": "shopaikey", "model": "grok-video-3-10s / veo3.1", "eligible": false, "role": "not_routed", "ineligible_reason": "No verified exact 15s route in the current ShopAIKey contract."}
+      ],
+      "primary_two_scene_margin_vnd": -144001.4688
+    },
+    {
+      "tier_id": 800,
+      "quality_key": "motion_pro_audio_10",
+      "label": "Cao cap linh hoat",
+      "seconds_per_scene": 10,
+      "customer_unit_xu": 370,
+      "two_scene_quote": {"subtotal_xu": 740, "discount_xu": 74, "total_xu": 666, "total_vnd": 66600},
+      "required_capability": "10s pro motion with audio",
+      "runtime_order": ["key4u_video:kling-video"],
+      "candidates": [
+        {"provider": "key4u", "model": "kling-video", "variant": "kling-v3 pro audio; conservative Kling-2", "eligible": true, "role": "primary", "usd_per_second": 2.04001632, "usd_per_scene": 20.4001632, "vnd_per_scene": 61200.4896, "vnd_for_two_scenes": 122400.9792, "cost_basis": "2.04001632 USD/s x 10s"},
+        {"provider": "shopaikey", "model": "grok-video-3-10s", "eligible": false, "role": "conditional_not_routed", "usd_per_scene": 0.4, "vnd_per_scene": 1300, "vnd_for_two_scenes": 2600, "ineligible_reason": "10s is documented by model name, but audible audio/pro-motion acceptance is not yet proved by a live artifact."}
+      ],
+      "primary_two_scene_margin_vnd": -55800.9792
+    },
+    {
+      "tier_id": 1000,
+      "quality_key": "human_performance_6",
+      "label": "Dien xuat chan that",
+      "seconds_per_scene": 6,
+      "customer_unit_xu": 370,
+      "two_scene_quote": {"subtotal_xu": 740, "discount_xu": 74, "total_xu": 666, "total_vnd": 66600},
+      "required_capability": "6s realistic face/body performance; final MP4 audio required",
+      "runtime_order": ["key4u_video:MiniMax-Hailuo-2.3"],
+      "candidates": [
+        {"provider": "key4u", "model": "MiniMax-Hailuo-2.3", "variant": "768p 6s", "eligible": true, "role": "primary_video; audio_addon_or_mux_gate_required", "usd_per_scene": 3.2000256, "vnd_per_scene": 9600.0768, "vnd_for_two_scenes": 19200.1536},
+        {"provider": "shopaikey", "model": "veo3.1-pro", "eligible": false, "role": "not_routed", "usd_per_scene": 3.5, "vnd_per_scene": 11375, "vnd_for_two_scenes": 22750, "ineligible_reason": "Current contract produces an 8s variant, not the exact 6s quality contract."}
+      ]
+    },
+    {
+      "tier_id": 1200,
+      "quality_key": "multi_angle_reference_8",
+      "label": "Da goc may",
+      "seconds_per_scene": 8,
+      "customer_unit_xu": 1260,
+      "two_scene_quote": {"subtotal_xu": 2520, "discount_xu": 252, "total_xu": 2268, "total_vnd": 226800},
+      "required_capability": "8s 1080p multi-angle/reference consistency; final MP4 audio required",
+      "runtime_order": ["shopaikey_video:veo3.1-pro-components", "key4u_video:viduq3-mix"],
+      "candidates": [
+        {"provider": "shopaikey", "model": "veo3.1-pro-components", "eligible": true, "role": "primary", "usd_per_scene": 3.5, "vnd_per_scene": 11375, "vnd_for_two_scenes": 22750},
+        {"provider": "key4u", "model": "viduq3-mix", "variant": "1080p reference video", "eligible": true, "role": "fallback", "usd_per_scene": 12.000096, "vnd_per_scene": 36000.288, "vnd_for_two_scenes": 72000.576, "cost_basis": "1.500012 USD/s x 8s"}
+      ]
+    },
+    {
+      "tier_id": 1500,
+      "quality_key": "cinematic_multishot_10",
+      "label": "Dien anh nhieu canh",
+      "seconds_per_scene": 10,
+      "customer_unit_xu": 2360,
+      "two_scene_quote": {"subtotal_xu": 4720, "discount_xu": 472, "total_xu": 4248, "total_vnd": 424800},
+      "required_capability": "10s 1080p cinematic multi-shot; final MP4 audio required",
+      "runtime_order": ["key4u_video:doubao-seedance-1-0-pro-250528"],
+      "candidates": [
+        {"provider": "key4u", "model": "doubao-seedance-1-0-pro-250528", "variant": "Doubao-2 group", "eligible": true, "role": "primary_video; audio_addon_or_mux_gate_required", "usd_per_scene": 22.95, "vnd_per_scene": 68850, "vnd_for_two_scenes": 137700},
+        {"provider": "shopaikey", "model": "veo3.1-pro", "eligible": false, "role": "not_routed", "usd_per_scene": 3.5, "vnd_per_scene": 11375, "vnd_for_two_scenes": 22750, "ineligible_reason": "Current route is 8s and does not prove the required 10s multi-shot contract."}
+      ]
+    }
+  ]
+}
