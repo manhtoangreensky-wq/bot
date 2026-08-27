@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import math
 from collections.abc import Awaitable, Callable
@@ -18,6 +19,8 @@ GEMINI_INTERACTIONS_URL = (
 KEY4U_FALLBACK_BASE_URL = "https://api.key4u.vn/v1"
 MIN_SEGMENT_SPEAKER_CONFIDENCE = 0.70
 MIN_SEGMENTS_PER_SPEAKER = 2
+KEY4U_TRANSCRIPT_MAX_ATTEMPTS = 2
+KEY4U_TRANSCRIPT_RETRY_DELAY_SECONDS = 1.0
 
 
 def _offset_seconds(value: object) -> float:
@@ -116,6 +119,57 @@ def provider_timestamp_segments_valid(payload: object) -> bool:
             return False
         previous_start = start
     return True
+
+
+def _key4u_transcript_retryable(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        return True
+    transcript = str(payload.get("text") or "").strip()
+    segments = payload.get("segments")
+    if (
+        transcript
+        and isinstance(segments, list)
+        and segments
+        and payload.get("provider_timestamps") is not True
+    ):
+        return False
+    try:
+        http_status = int(payload.get("http_status") or 0)
+    except (TypeError, ValueError, OverflowError):
+        http_status = 0
+    if http_status:
+        return bool(
+            200 <= http_status < 300
+            or http_status in {408, 425, 429}
+            or 500 <= http_status < 600
+        )
+    status = str(payload.get("status") or "").strip().upper()
+    return status in {
+        "",
+        "EMPTY_TRANSCRIPT",
+        "FAIL",
+        "FAIL_PROVIDER_ERROR",
+        "FAIL_RETRYABLE",
+        "FAIL_TIMEOUT",
+        "SEGMENT_GENERATION_FAILED",
+    }
+
+
+def _key4u_attempt_detail(payload: object, attempt_count: int) -> str:
+    current = payload if isinstance(payload, dict) else {}
+    try:
+        http_status = int(current.get("http_status") or 0)
+    except (TypeError, ValueError, OverflowError):
+        http_status = 0
+    status = "".join(
+        character
+        for character in str(current.get("status") or "UNKNOWN").upper()
+        if character.isalnum() or character in {"_", "-"}
+    )[:60] or "UNKNOWN"
+    return (
+        "key4u_two_speaker_transcript_unavailable:"
+        f"attempts={int(attempt_count)};http={http_status};status={status}"
+    )
 
 
 def apply_diarized_words_to_segments(
@@ -341,15 +395,29 @@ async def run_two_speaker_fallback(
             "segments": [],
             "detail": "two_speaker_fallback_not_configured",
         }
-    key4u = await key4u_transcribe(
-        audio_bytes,
-        content_type,
-        base_url=KEY4U_FALLBACK_BASE_URL,
-        api_key=key4u_api_key,
-        endpoint=key4u_endpoint,
-        model="whisper-1",
-        language=language,
-    )
+    key4u: dict = {}
+    key4u_attempt_count = 0
+    for attempt_index in range(KEY4U_TRANSCRIPT_MAX_ATTEMPTS):
+        key4u_attempt_count += 1
+        key4u = await key4u_transcribe(
+            audio_bytes,
+            content_type,
+            base_url=KEY4U_FALLBACK_BASE_URL,
+            api_key=key4u_api_key,
+            endpoint=key4u_endpoint,
+            model="whisper-1",
+            language=language,
+        )
+        transcript = str(key4u.get("text") or "").strip()
+        key4u_segments = list(key4u.get("segments") or [])
+        if key4u.get("ok") and transcript and key4u_segments:
+            break
+        if (
+            attempt_index + 1 >= KEY4U_TRANSCRIPT_MAX_ATTEMPTS
+            or not _key4u_transcript_retryable(key4u)
+        ):
+            break
+        await asyncio.sleep(max(0.0, KEY4U_TRANSCRIPT_RETRY_DELAY_SECONDS))
     transcript = str(key4u.get("text") or "").strip()
     key4u_segments = list(key4u.get("segments") or [])
     if (
@@ -365,10 +433,12 @@ async def run_two_speaker_fallback(
             "provider": "key4u_audio",
             "text": "",
             "segments": [],
+            "key4u_attempt_count": key4u_attempt_count,
+            "key4u_retry_used": key4u_attempt_count > 1,
             "detail": (
                 "key4u_provider_timestamps_required"
                 if transcript and key4u_segments
-                else "key4u_two_speaker_transcript_unavailable"
+                else _key4u_attempt_detail(key4u, key4u_attempt_count)
             ),
         }
     diarization = await gemini_transcribe_diarized_words(
@@ -386,6 +456,8 @@ async def run_two_speaker_fallback(
             "provider": "key4u_audio+gemini_diarization",
             "text": "",
             "segments": [],
+            "key4u_attempt_count": key4u_attempt_count,
+            "key4u_retry_used": key4u_attempt_count > 1,
             "detail": "two_speaker_diarization_unavailable",
         }
     return {
@@ -395,6 +467,8 @@ async def run_two_speaker_fallback(
         "provider": "key4u_audio+gemini_diarization",
         "text": transcript,
         "segments": mapped_segments,
+        "key4u_attempt_count": key4u_attempt_count,
+        "key4u_retry_used": key4u_attempt_count > 1,
         "detail": (
             f"key4u_segments={len(key4u_segments)}; "
             f"gemini_words={len(words)}; speakers=2"

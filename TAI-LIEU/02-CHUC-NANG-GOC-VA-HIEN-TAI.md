@@ -137,4 +137,17 @@ parser Gemini chỉ đọc `steps[].content[].annotations[]` có `type=word_info
 video dài phải chunk (>5 phút ở Auto) dừng `AUTO_CAST_UNAVAILABLE` trước mọi
 Key4U/Gemini fallback call.
 
+### Đối chiếu retry Key4U transcript — 28/08/2026
+
+| Chức năng cũ | Hiện tại | Trạng thái |
+|---|---|---|
+| Key4U fallback gọi đúng một lần rồi fail manual | Exact 2-speaker confirmed job được tối đa 2 attempts khi lần đầu empty/retryable | ⚠️ Sửa theo live evidence |
+| Mọi lỗi Key4U đều có thể retry | HTTP 401 và response có segment nhưng thiếu timestamp provider dừng ngay | ✅ Fail-closed |
+| Retry có thể áp cho multi/default/manual | Chỉ cờ exact two-speaker fallback mới vào owner này; multi/default/manual giữ zero fallback | ✅ Cô lập |
+
+Chỗ tài liệu cũ không còn đúng: one-shot Key4U không đủ trước transient response
+đã đo trên job `#00911B6FF0`. Diagnostic ngay sau đó chứng minh cùng
+`whisper-1 verbose_json` trả `18` timed segments; do đó bounded retry nằm
+trong fallback boundary, không phải thay classifier hoặc ép speaker.
+
 Live job `24` cho thấy connector policy đúng vẫn chưa đủ nếu server claim gate terminal hóa trước worker. Hiện claim transaction tính controlled-fallback eligibility trước ledger terminal decision và chỉ miễn đúng fallback Key4U đã xác nhận; `automatic_resubmit_allowed=false` vẫn chặn submit lại primary. Job/artifact/receipt LIVE vẫn pending.

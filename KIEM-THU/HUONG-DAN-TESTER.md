@@ -49,3 +49,6 @@ Lỗi cũ cần canh: literal `\\n`, status nằm ngang, video mất audio, back
 11. Lặp lại contract audio UI trên giọng nữ mặc định, giọng nam mặc định, Kho
     voice, voice riêng, Auto 2 và Auto multi khi chạy case tương ứng; không chấp
     nhận một kiểu giọng mở bảng preset hoặc làm mất giá trị numeric.
+12. Nếu Deepgram empty và Key4U lần đầu unusable, exact Auto 2 được gọi Key4U
+    tối đa `2` lần. HTTP `401` hoặc segment không có timestamp provider phải
+    dừng ngay; tuyệt đối không ép speaker hoặc mở fallback này cho Auto multi.

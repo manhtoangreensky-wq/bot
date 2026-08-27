@@ -158,5 +158,26 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Đây mới là `CODE/PROVIDER_DIAGNOSTIC PASS`; combo và standalone vẫn phải giao
   MP4 thật qua Telegram sau deploy mới được ghi `LIVE PASS`.
 
+## Bổ sung SubDub Key4U transcript retry — 28/08/2026
+
+- Combo job `#00911B6FF0`, internal `00911b6ff01590de3834`, runtime
+  `4458d4c` dùng đúng fixture SHA `85C8793D...` rồi dừng
+  `failed_no_charge` trước SRT/sidecar/TTS/mux/delivery.
+- Provider attempt thật: Deepgram empty đã vào đúng
+  `key4u_audio+gemini_diarization`, nhưng Key4U lần đầu trả transcript không
+  dùng được: `key4u_two_speaker_transcript_unavailable`.
+- Một diagnostic production-equivalent duy nhất trên mono MP3 `582,540` bytes
+  ngay sau lỗi trả HTTP `200`, `145` ký tự và `18/18` segment timestamp
+  phủ `0..48s`. Vì vậy model/fixture/endpoint dùng được; lỗi thuộc phản hồi
+  tạm thời, không thuộc classifier/cast.
+- Runtime fallback chỉ được retry tối đa `1` lần sau attempt đầu: tổng tối đa
+  `2` Key4U calls, delay `1s`; permanent `401` hoặc timestamp giả/thiếu
+  vẫn dừng ngay trước Gemini. Deepgram-first, multi, UI, giá, ví, TTS và mux
+  không đổi.
+- Evidence source: RED `2 failed in 0.88s`; GREEN service `7 passed in
+  0.43s`; bot isolation `7 passed in 11.73s`; locked hashes `2 passed in
+  7.95s`; compile/diff exit `0`. Admin wallet vẫn `200/0`, transactions
+  `0`.
+
 - Live job `24` cho thấy server claim gate chạy trước connector: summary đã `61s/60s` nhưng scene evidence cuối chỉ `53s`, nên ledger terminal `failed_no_charge` trước lượt worker có thể submit Key4U. Claim gate hiện enrich pure state trước terminal decision: chỉ scene có primary task thật, stalled, final-confirm, exact quote, chưa giao/chưa trừ/chưa fallback và Key4U capability-ready mới nhận candidate + idempotency; primary resubmit vẫn cấm.
 - Bằng chứng source job `24`: focused `8 passed`; protected `54 passed, 2 baseline deselected`. Patch chỉ mở một fallback tick cho đúng `fallback_scene_index`, không submit đồng thời hai cảnh; compile/diff vẫn phải chạy trước local commit. LIVE rerun vẫn là gate riêng sau SubDub release và deploy Product Video tiếp theo.

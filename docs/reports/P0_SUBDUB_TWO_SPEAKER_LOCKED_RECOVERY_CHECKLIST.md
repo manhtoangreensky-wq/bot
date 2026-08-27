@@ -16,18 +16,18 @@
 
 ### Current pointer
 
-- Current SPEC: `SPEC-07`.
-- Current SUBSPEC: `SPEC-07.4B`.
-- Current phase: `VERIFY / rollback shared compact numeric audio UI`.
-- Production action active: `NO; Product Video owns shared LIVE/CHROME/VPS`.
-- Telegram/provider job active: `NO; job #19A16753A4 terminal empty_transcript`.
+- Current SPEC: `SPEC-08`.
+- Current SUBSPEC: `SPEC-08.0D.5`.
+- Current phase: `SHIP / one PR deploy and exact combo retry`.
+- Production action active: `NO; SubDub owns LIVE/CHROME/VPS, latest job terminal`.
+- Telegram/provider job active: `NO; job #00911B6FF0 terminal failed_no_charge`.
 - Wallet mutation: `0`.
-- Next allowed action: finish the shared numeric-audio UI gate and compile/diff;
-  after Product Video releases, rebase latest main, rerun one focused post-rebase
-  gate, ship one PR/deploy, then restart the exact-fixture combo from a fresh flow.
-- Next forbidden action: edit classifier/cast/pricing/mux/multi engine, re-add any
-  fixed-percentage preset, start a second live job, or move to standalone/multi
-  before the combo failure loop delivers a real MP4.
+- Next allowed action: update measured operating/tester evidence, commit only the
+  scoped service/test/checklist/docs, fetch/rebase latest main, run one
+  post-rebase focused gate, then one PR/squash/deploy/runtime retry.
+- Next forbidden action: edit classifier/cast/audio UI/pricing/mux/multi engine,
+  start another Telegram job, or move to standalone/multi before this failure
+  loop ships and the combo delivers a real MP4.
 
 ### Luật bất biến
 
@@ -502,8 +502,12 @@ WALLET_MUTATIONS=0
 - [x] Post-rebase focused GREEN: `35 passed, 3 warnings in 489.20s`, exit `0`.
 - [x] Post-rebase compile of `bot.py` + three audio contract files and range
   `git diff --check origin/main...HEAD`: exit `0`.
-- [ ] Push one focused commit, one PR, squash merge and one VPS deploy.
-- [B] Prove bot/worker runtime SHA and fresh compact UI from Telegram.
+- [x] Push one focused commit, PR `#911`, squash merge
+  `4458d4c29ea7f63022ec7746ebff785a36f7974e`.
+- [x] Deploy run `33082986178` SUCCESS in `4m04s`; VPS and Telegram runtime
+  exact `4458d4c`, bot/web/nginx active, health OK.
+- [x] Runtime UI proves only `Âm thanh gốc | Giọng lồng tiếng` on one row,
+  numeric `0–100 / 0–200`, and no fixed-percentage preset callbacks.
 
 ### SPEC-07 evidence
 
@@ -657,6 +661,102 @@ PRODUCTION_DIFF: bot.py +1 line in scoped diarized request helper
   verified before the UI regression follow-up.
 - [B] Restart the same exact-fixture combo only after `SPEC-07.4C` deploy proves
   compact numeric UI on the new runtime.
+
+### SPEC-08.0D — Live failure loop: Key4U two-speaker transcript unavailable
+
+#### SPEC-08.0D.1 — Exact live evidence
+
+- [x] Runtime `4458d4c`; fresh flow selected combo, English, `Tự động 2 giọng`,
+  original `40%`, dub `150%`, then confirmed exactly once.
+- [x] Public/internal job `#00911B6FF0` /
+  `00911b6ff01590de3834`; workspace
+  `/tmp/toan_aas_pipeline/00911b6ff01590de3834`.
+- [x] Original fixture persisted at exactly `4,284,017` bytes and SHA-256
+  `85c8793d197cf2782bb554d46282e82a83bcb062a0483e412a0ca1da668f9f51`.
+- [x] Media preflight PASS: duration `48.4s`, H.264 `576×884`, AAC stereo
+  `44.1kHz`; normalized processing SHA `a9572c8f...`.
+- [x] Terminal `failed_no_charge`; MP4/SRT/delivery all absent; Owner
+  `credits=200`, `total_spent=0`, transactions `0`, credit events `1`.
+- [x] Persisted provider attempt at `22:54:49`:
+  `key4u_audio+gemini_diarization / two_speaker_fallback /
+  AUTO_CAST_UNAVAILABLE / key4u_two_speaker_transcript_unavailable`.
+- [x] Runtime config is correct and non-secret readback confirms:
+  TTS provider `key4u_minimax`, Key4U host `api.key4u.vn`, endpoint
+  `/audio/transcriptions`, model `whisper-1`, and Key4U/Gemini/Deepgram
+  keys all PRESENT.
+- [x] Classifier/cast/TTS/mux did not run; do not edit their locked source.
+
+#### SPEC-08.0D.2 — One bounded production-contract diagnostic
+
+- [x] Extract mono MP3 exactly like production: `-vn -ac 1 -ar 16000
+  -c:a libmp3lame -b:a 96k`.
+- [x] Make exactly one Key4U canonical `.vn` `whisper-1 verbose_json`
+  transcription request on the same fixture.
+- [x] Record only sanitized HTTP/status/chars/segment/timestamp evidence; never
+  persist or print API key/raw provider body.
+
+Measured evidence:
+
+- Production-equivalent mono MP3: `582,540` bytes.
+- Key4U call count: exactly `1`.
+- HTTP `200`, model `whisper-1`, format `verbose_json`, language
+  `chinese`, transcript `145` chars.
+- `18/18` provider-timed segments cover `0.0..48.0s`; duration
+  `48.4000015s`; no raw text/body/key persisted.
+- This proves the contract/fixture/model are usable and the live failure is a
+  transient unusable first response; the current one-shot boundary has no
+  bounded retry.
+
+#### SPEC-08.0D.3 — RED from exact diagnostic
+
+- [x] If upstream returns a usable timed transcript, RED proves the live adapter
+  loses/normalizes the successful payload incorrectly.
+- [x] If upstream returns a transient/retryable failure, RED proves the confirmed
+  exact two-speaker fallback has no bounded retry/evidence preservation.
+- [x] If upstream returns a permanent contract failure, stop and report the exact
+  blocker; do not patch around it or force speaker labels.
+
+RED evidence:
+
+- Selector: two service-only retry/permanent-failure cases, no network.
+- Terminal: `2 failed in 0.88s`.
+- Transient case failed because result stayed `ok=False` after attempt 1.
+- Permanent case failed because attempt-count evidence did not exist.
+
+#### SPEC-08.0D.4 — Minimal fix and protected GREEN
+
+- [x] Change only the exact Key4U fallback request/result boundary proven by RED.
+- [x] Preserve Deepgram-first policy, Gemini schema parser, classifier/cast,
+  multi lane, UI, pricing, wallet, TTS and mux.
+- [x] Run focused GREEN, protected two/multi isolation, locked hashes,
+  `py_compile` and `git diff --check`.
+
+GREEN evidence:
+
+- Exact two retry/permanent selectors: `2 passed in 0.48s`.
+- Full fallback service file: `7 passed in 0.43s`.
+- Bot exact-two wiring + default/multi isolation: `7 passed, 1 warning in
+  11.73s`; warning only Google GenAI deprecation.
+- Locked engine/multi hash selectors: `2 passed, 1 warning in 7.95s`.
+- `py_compile` service + changed test: exit `0`.
+- `git diff --check`: exit `0`.
+- Production diff: only `services/subdub_two_speaker_asr_fallback.py`.
+- Retry policy: maximum `2` Key4U attempts; `1s` delay; retry only
+  unusable results with HTTP `0/2xx/408/425/429/5xx` or bounded
+  timeout/provider/empty statuses. Permanent `401` and provider-timestamp
+  invalid responses stop before Gemini.
+
+#### SPEC-08.0D.5 — Ship and retry
+
+- [x] Rebased onto `origin/main
+  4458d4c29ea7f63022ec7746ebff785a36f7974e`; upstream UI commit skipped
+  naturally; branch `0 behind / 1 ahead`, head `c9112b0`.
+- [x] Post-rebase combined fallback/wiring/isolation/hash gate:
+  `16 passed, 1 warning in 11.87s`.
+- [x] Post-rebase `py_compile` service + test and range diff-check: exit `0`.
+- [-] One focused commit/PR/squash/deploy/runtime readback.
+- [B] One fresh exact-fixture combo retry through MP4 + SRT + receipt.
+- [B] Remain in SPEC-08 until real artifact acceptance; do not start SPEC-09/11.
 
 ### SPEC-08.1 — Pre-admission
 
