@@ -2758,6 +2758,150 @@ def _product_video_runtime_eligibility(
     }
 
 
+def product_video_controlled_fallback_claim_payload(
+    job: dict[str, Any] | None,
+    result: dict[str, Any] | None,
+    project: dict[str, Any] | None,
+    runtime_eligibility: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Keep an eligible stalled job claimable for one per-scene fallback tick."""
+    job = dict(job or {})
+    payload = dict(result or {})
+    eligibility = dict(runtime_eligibility or {})
+    ready = {
+        str(item or "").strip()
+        for item in (eligibility.get("worker_local_ready_provider_keys") or [])
+        if str(item or "").strip()
+    }
+    contract = {
+        str(item or "").strip()
+        for item in (
+            eligibility.get("contract_valid_provider_chain")
+            or eligibility.get("contract_valid_chain_at_runtime")
+            or payload.get("configured_provider_chain")
+            or []
+        )
+        if str(item or "").strip()
+    }
+    fallback_scene_index = _safe_int(payload.get("fallback_scene_index"), 0)
+    if (
+        fallback_scene_index <= 0
+        or "key4u_video" not in ready
+        or "key4u_video" not in contract
+        or not payload.get("provider_stalled_not_start")
+    ):
+        return {"applied": False, "result": payload, "eligible_scene_indexes": []}
+
+    scene_tasks = [
+        dict(item)
+        for item in (payload.get("scene_tasks") or [])
+        if isinstance(item, dict)
+    ]
+    target = next(
+        (
+            dict(item)
+            for item in scene_tasks
+            if _safe_int(item.get("scene_index") or item.get("scene_id"), 0)
+            == fallback_scene_index
+        ),
+        {},
+    )
+    if not target:
+        return {"applied": False, "result": payload, "eligible_scene_indexes": []}
+
+    target.update(
+        {
+            "provider_stalled_not_start": True,
+            "scene_not_start_elapsed": max(
+                _safe_int(target.get("scene_not_start_elapsed"), 0),
+                _safe_int(payload.get("scene_not_start_elapsed"), 0),
+            ),
+            "provider_wait_elapsed_seconds": max(
+                _safe_int(target.get("provider_wait_elapsed_seconds"), 0),
+                _safe_int(payload.get("scene_not_start_elapsed"), 0),
+            ),
+        }
+    )
+    provider_order = [
+        str(item or "").strip()
+        for item in (payload.get("provider_order") or [])
+        if str(item or "").strip()
+    ]
+    if "key4u_video" not in provider_order:
+        provider_order.append("key4u_video")
+    from services import video_real_render_connector
+
+    policy = video_real_render_connector.product_video_scene_stall_policy(
+        {**job, **payload, "provider_order": provider_order},
+        target,
+        fallback_scene_index,
+    )
+    if not (
+        policy.get("fallback_allowed")
+        and policy.get("controlled_fallback_allowed")
+        and str(policy.get("fallback_provider_candidate") or "")
+        == "key4u_video"
+    ):
+        return {
+            "applied": False,
+            "result": payload,
+            "eligible_scene_indexes": [fallback_scene_index],
+        }
+
+    patched_scenes: list[dict[str, Any]] = []
+    for item in scene_tasks:
+        current = dict(item)
+        scene_index = max(1, _safe_int(current.get("scene_index") or current.get("scene_id"), 1))
+        if scene_index == fallback_scene_index:
+            current.update(
+                {
+                    "fallback_allowed": True,
+                    "fallback_provider_order": ["key4u_video"],
+                    "fallback_provider_candidate": "key4u_video",
+                    "fallback_scene_index": scene_index,
+                    "fallback_idempotency_key": str(
+                        policy.get("fallback_idempotency_key") or ""
+                    ),
+                    "controlled_fallback_allowed": True,
+                    "runtime_fallback_candidate_recovered": True,
+                    "fallback_authorization_source": "persisted_exact_quote_final_confirm",
+                    "fallback_block_reason": "",
+                    "fallback_eligibility_reason": "eligible",
+                    "exhausted": False,
+                }
+            )
+        patched_scenes.append(current)
+    payload.update(
+        {
+            "scene_tasks": patched_scenes,
+            "provider_scene_tasks": patched_scenes,
+            "fallback_allowed": True,
+            "fallback_provider": "key4u_video",
+            "fallback_provider_candidate": "key4u_video",
+            "next_provider_or_model_candidate": "key4u_video",
+            "fallback_scene_index": fallback_scene_index,
+            "controlled_fallback_allowed": True,
+            "runtime_fallback_candidate_recovered": True,
+            "fallback_authorization_source": "persisted_exact_quote_final_confirm",
+            "fallback_block_reason": "",
+            "fallback_eligibility_reason": "eligible",
+            "claim_terminal_suppressed_for_controlled_fallback": True,
+            "continue_polling": True,
+            "terminal_state": "final_rendering",
+            "final_decision": "continue_polling",
+            "no_charge": True,
+            "charge": 0,
+            "charged_xu": 0,
+            "wallet_charge_recorded": False,
+        }
+    )
+    return {
+        "applied": True,
+        "result": payload,
+        "eligible_scene_indexes": [fallback_scene_index],
+    }
+
+
 def claim_remote_worker_canary_job(
     conn: sqlite3.Connection,
     *,
@@ -2958,6 +3102,34 @@ def _claim_video_render_candidate(
                 result_payload = video_project_queue._json_loads(job.get("result_json"), {})
                 if not isinstance(result_payload, dict):
                     result_payload = {}
+                preclaim_runtime_eligibility = _product_video_runtime_eligibility(
+                    job,
+                    result_payload,
+                    project,
+                    now=current_dt,
+                    conn=conn,
+                )
+                controlled_fallback_claim = product_video_controlled_fallback_claim_payload(
+                    job,
+                    result_payload,
+                    project,
+                    preclaim_runtime_eligibility,
+                )
+                if controlled_fallback_claim.get("applied"):
+                    result_payload = dict(
+                        controlled_fallback_claim.get("result") or result_payload
+                    )
+                    job["result_json"] = video_project_queue._json_dumps(
+                        result_payload
+                    )
+                    conn.execute(
+                        "UPDATE video_jobs SET result_json=?,updated_at=? WHERE id=?",
+                        (
+                            job["result_json"],
+                            current,
+                            int(job["id"]),
+                        ),
+                    )
                 terminal_ledger = video_project_queue.product_video_scene_ledger_state(
                     {}, job, result_payload, now=current_dt
                 )
@@ -3053,13 +3225,7 @@ def _claim_video_render_candidate(
                         for item in scene_task_rows
                     )
                     if result_payload.get("admission_enforced"):
-                        runtime_eligibility = _product_video_runtime_eligibility(
-                            job,
-                            result_payload,
-                            project,
-                            now=current_dt,
-                            conn=conn,
-                        )
+                        runtime_eligibility = preclaim_runtime_eligibility
                         runtime_candidates = [
                             str(item or "").strip()
                             for item in (

@@ -4247,9 +4247,13 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             for item in _existing_scene_tasks(job)
         )
     )
-    if missing_scene_dispatch_recovered and _durable_product_video_route_forbids(
-        job,
-        "automatic_resubmit_allowed",
+    if (
+        missing_scene_dispatch_recovered
+        and not scene_fallback_allowed
+        and _durable_product_video_route_forbids(
+            job,
+            "automatic_resubmit_allowed",
+        )
     ):
         raise RealVideoRenderError(
             "product_video_automatic_resubmit_forbidden",

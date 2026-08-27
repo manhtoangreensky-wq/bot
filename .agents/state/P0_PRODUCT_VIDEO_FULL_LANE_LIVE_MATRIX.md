@@ -5,8 +5,9 @@
 - Product: **Product Video** only
 - Codex task: `019efe1e-ee54-78e1-87c4-10db6e1e19e4`
 - Repository: `manhtoangreensky-wq/bot`
-- Branch: `fix/product-video-live23-recover-fallback-candidate`
-- Current branch base: `74655192cf6f78574f7a41c085820dcbff107b00`
+- Branch: `fix/product-video-live24-claim-gate-fallback`
+- Current deployed Product Video base: `124468aaf73ab002c9fa6c8e003485573b2f4ede`
+- Local branch must rebase onto shared `origin/main` after SubDub releases Git/VPS ownership.
 - SubDub task `019fbbfe-59b7-7ee2-b298-dea276813ce4` is **out of scope**. CPU is independent; only Telegram/Chrome/provider/VPS/deploy ownership is coordinated.
 
 ## Execution Rule
@@ -238,3 +239,7 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | 2026-08-27 | PV-L01 live rerun job #23 | Exact Tail via Codex Browser created request `VID-20260827-C26899`, project `27`, job `23`, outbox `22`; elapsed reached `66s` and stall threshold `60s`, but persisted `provider_order=[shopaikey_video]` hid locally-ready Key4U and returned `no_fallback_provider` | VALID LIVE RED; bounded recovery `3/3`, terminal failed_no_charge, charged Xu 0 |
 | 2026-08-27 | Job #23 candidate recovery RED/GREEN | Corrected RED used live payload shape: job-level provider chain collapsed, durable marker/decision null, persisted `automatic_fallback_allowed=false`; policy now honors that fail-closed flag and recovers only capability-ready `key4u_video` when final confirm/exact quote/task/no-delivery/no-charge/count=0 gates all pass | Focused GREEN `7 passed in 9.87s` |
 | 2026-08-27 | Job #23 protected gate | Pending worker, NOT_START/stall, durable no-resubmit, restart recovery and spend safety | `52 passed, 2 baseline deselected in 15.36s`; NEW_FAILURES=0 |
+| 2026-08-27 | Job #23 correction ship/runtime | PR #907 squash merged as `124468aaf73ab002c9fa6c8e003485573b2f4ede`; deploy run `33066231410` SUCCESS in `9m51s`; bot/worker same SHA; worker PID `271183`, generation `4e6e1b5a18c941e48d32dc4da4b3d0d4`, authenticated/persisted, reject empty | DEPLOYED and runtime-ready |
+| 2026-08-27 | PV-L01 live rerun job #24 | Exact Tail via Codex Browser created request `VID-20260827-1DA4A5`, project `28`, job `24`, outbox `23`; summary elapsed reached `61s/60s`, but last scene authority was only `53s`; server claim gate terminalized before connector could run controlled Key4U fallback | VALID LIVE RED; terminal failed_no_charge, charged Xu 0 |
+| 2026-08-27 | Job #24 claim-gate RED/GREEN | Corrected RED reproduced `_claim_video_render_candidate` returning no job after ledger `failed_no_charge`; thin pre-claim adapter selects only the summary-authoritative `fallback_scene_index`, calls canonical stall policy, persists its Key4U/idempotency decision, then re-evaluates ledger | Focused GREEN `8 passed in 13.62s` |
+| 2026-08-27 | Job #24 protected gate | Pending/NOT_START, claim terminalization, one-scene controlled fallback, durable primary no-resubmit, bounded recovery and spend safety | `54 passed, 2 baseline deselected in 47.56s`; NEW_FAILURES=0 |
