@@ -98,6 +98,39 @@ def test_job117_one_clip_does_not_satisfy_multiscene_coverage(tmp_path):
     assert coverage["missing_scene_indexes"] == [1, 2]
 
 
+def test_reused_valid_multiscene_manifest_is_ready_for_delivery(tmp_path):
+    final = tmp_path / "final_output.mp4"
+    final.write_bytes(b"reused-valid-two-scene-final")
+    result = {
+        "scene_count": 2,
+        "orchestration_mode": "per_scene_8s",
+        "final_video_path": str(final),
+        "final_mp4_valid": True,
+        "final_reused_from_manifest": True,
+        "concat_attempted": False,
+        "concat_output_valid": True,
+        "concat_status": "completed",
+        "scene_tasks": [
+            {"scene_index": 1, "status": "scene_clip_validated", "clip_valid": True, "clip_bytes": 123},
+            {"scene_index": 2, "status": "scene_clip_validated", "clip_valid": True, "clip_bytes": 456},
+        ],
+    }
+
+    coverage = queue.product_video_scene_coverage_state(
+        {"scene_count": 2},
+        {"id": 25, "status": "processing"},
+        result,
+    )
+
+    assert coverage["concat_attempted"] is False
+    assert coverage["concat_output_valid"] is True
+    assert coverage["scene_coverage_valid_bool"] is True
+    assert coverage["final_mp4_valid"] is True
+    assert coverage["delivery_blocked_by_scene_coverage"] is False
+    assert coverage["aggregate_job_status"] == "ready_for_delivery"
+    assert coverage["final_duration_coverage_reason"] == ""
+
+
 def test_complete_job_blocks_delivery_when_multiscene_coverage_missing(tmp_path):
     conn = _memory_conn()
     mp4 = tmp_path / "scene1.mp4"

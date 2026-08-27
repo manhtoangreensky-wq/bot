@@ -7851,7 +7851,7 @@ def product_video_scene_ledger_state(
             and coverage_complete
             and concat_output_valid
             and explicit_final_valid
-            and (concat_attempted or final_delivered_raw)
+            and (concat_attempted or final_delivered_raw or result.get("final_reused_from_manifest"))
         )
     )
     final_delivered = bool(final_assembly_valid and final_delivered_raw)
