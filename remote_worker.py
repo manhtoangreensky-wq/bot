@@ -844,6 +844,10 @@ def render_real_video(job: dict, work_dir: str) -> str:
     except RealVideoRenderError as exc:
         LAST_REAL_VIDEO_RENDER_RESULT = {**trace, **dict(getattr(exc, "diagnostics", {}) or LAST_RENDER_DIAGNOSTICS or {})}
         raise RuntimeError(str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE) from exc
+    if not result.get("ok") and result.get("continue_polling"):
+        raise RuntimeError(
+            str(result.get("provider_error") or result.get("blocker") or "provider_in_progress")
+        )
     final_path = str(result.get("final_video_path") or "")
     if not final_path or not os.path.exists(final_path) or os.path.getsize(final_path) <= 0:
         raise RuntimeError(REAL_VIDEO_RENDER_UNAVAILABLE)
