@@ -190,3 +190,35 @@ def test_live22_controlled_scene_fallback_uses_key4u_once(monkeypatch, tmp_path)
     assert captured["submit_source"] == "public_confirmed_scene_fallback_once"
     assert result["fallback_count"] == 1
     assert result["fallback_idempotency_key"]
+
+
+def test_live23_collapsed_primary_chain_recovers_ready_key4u_candidate(monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER_NOT_START_STALL_SECONDS", "60")
+    monkeypatch.setattr(
+        connector,
+        "real_video_provider_readiness",
+        lambda *_args, **_kwargs: {
+            "ok": True,
+            "ready_provider_order": ["shopaikey_video", "key4u_video"],
+            "providers": [],
+        },
+    )
+
+    policy = connector.product_video_scene_stall_policy(
+        _confirmed_exact_quote_job(
+            provider_order=["shopaikey_video"],
+            configured_provider_chain=["shopaikey_video", "key4u_video"],
+            required_capability="text_to_video_or_scene_video",
+            product_video_durable_public_seam=None,
+            product_video_route_decision=None,
+        ),
+        _stalled_primary_scene(),
+        1,
+    )
+
+    assert policy["runtime_fallback_candidate_recovered"] is True
+    assert policy["automatic_fallback_forbidden"] is True
+    assert policy["fallback_provider_order"] == ["key4u_video"]
+    assert policy["controlled_fallback_allowed"] is True
+    assert policy["fallback_allowed"] is True
+    assert policy["fallback_authorization_source"] == "persisted_exact_quote_final_confirm"

@@ -5,8 +5,8 @@
 - Product: **Product Video** only
 - Codex task: `019efe1e-ee54-78e1-87c4-10db6e1e19e4`
 - Repository: `manhtoangreensky-wq/bot`
-- Branch: `fix/product-video-live22-pending-fallback`
-- Current branch base: `21022ed724aa605f1b90dbb35e140a8dbba9e09b`
+- Branch: `fix/product-video-live23-recover-fallback-candidate`
+- Current branch base: `74655192cf6f78574f7a41c085820dcbff107b00`
 - SubDub task `019fbbfe-59b7-7ee2-b298-dea276813ce4` is **out of scope**. CPU is independent; only Telegram/Chrome/provider/VPS/deploy ownership is coordinated.
 
 ## Execution Rule
@@ -234,3 +234,7 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | 2026-08-27 | Job #22 pending/controlled-fallback GREEN | Focused selector `6 passed in 11.02s`; worker preserves `provider_not_start`; text `started_at` yields measured elapsed; final-confirmed exact quote can use exactly one idempotent Key4U fallback per scene; missing confirm or mismatched quote stays blocked | PASS |
 | 2026-08-27 | Job #22 protected gate | Pending worker, NOT_START/stall, spend safety, durable no-resubmit, restart recovery: `51 passed, 2 deselected in 18.78s`; the two deselected comparator failures reproduce identically on clean `origin/main 21022ed` | NEW_FAILURES=0 |
 | 2026-08-27 | Job #22 compile/diff | `py_compile bot.py remote_worker.py services/video_real_render_connector.py` exit 0; `git diff --check` exit 0 (line-ending warnings only) | SOURCE SHIP READY; same-case live rerun still mandatory |
+| 2026-08-27 | Job #22 correction ship/runtime | PR #906 squash merged as `74655192cf6f78574f7a41c085820dcbff107b00`; deploy run `33063575033` SUCCESS in `7m17s`; bot PID `266942`, worker PID `267762`; generation `1df006444c88481880190c66f302b869`, authenticated/persisted, reject empty | DEPLOYED and runtime-ready |
+| 2026-08-27 | PV-L01 live rerun job #23 | Exact Tail via Codex Browser created request `VID-20260827-C26899`, project `27`, job `23`, outbox `22`; elapsed reached `66s` and stall threshold `60s`, but persisted `provider_order=[shopaikey_video]` hid locally-ready Key4U and returned `no_fallback_provider` | VALID LIVE RED; bounded recovery `3/3`, terminal failed_no_charge, charged Xu 0 |
+| 2026-08-27 | Job #23 candidate recovery RED/GREEN | Corrected RED used live payload shape: job-level provider chain collapsed, durable marker/decision null, persisted `automatic_fallback_allowed=false`; policy now honors that fail-closed flag and recovers only capability-ready `key4u_video` when final confirm/exact quote/task/no-delivery/no-charge/count=0 gates all pass | Focused GREEN `7 passed in 9.87s` |
+| 2026-08-27 | Job #23 protected gate | Pending worker, NOT_START/stall, durable no-resubmit, restart recovery and spend safety | `52 passed, 2 baseline deselected in 15.36s`; NEW_FAILURES=0 |

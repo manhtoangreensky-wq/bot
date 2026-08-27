@@ -1651,9 +1651,15 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         ):
             continue
         fallback_chain.append(item)
-    automatic_fallback_forbidden = _durable_product_video_route_forbids(
-        job,
-        "automatic_fallback_allowed",
+    automatic_fallback_forbidden = bool(
+        _durable_product_video_route_forbids(
+            job,
+            "automatic_fallback_allowed",
+        )
+        or (
+            str(job.get("source") or "").strip() == "product_video"
+            and job.get("automatic_fallback_allowed") is False
+        )
     )
     quote_values = [
         _safe_int(job.get("user_visible_price_xu"), 0),
@@ -1666,6 +1672,25 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         and len(set(quote_values)) == 1
         and job.get("quote_consistent") is not False
     )
+    runtime_fallback_candidate_recovered = False
+    if (
+        automatic_fallback_forbidden
+        and not fallback_chain
+        and exact_quote_preserved
+        and public_confirmed
+        and invoice_confirmed
+        and _scene_task_has_provider_id(scene_task)
+        and fallback_count <= 0
+        and not delivered
+        and not charged
+    ):
+        runtime_candidates = _provider_candidates_for_capability(
+            real_video_provider_readiness(job),
+            product_video_required_capability(job),
+        )
+        if "key4u_video" in runtime_candidates and current_provider != "key4u_video":
+            fallback_chain.append("key4u_video")
+            runtime_fallback_candidate_recovered = True
     controlled_fallback_allowed = bool(
         automatic_fallback_forbidden
         and exact_quote_preserved
@@ -1760,6 +1785,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         "fallback_allowed": fallback_allowed,
         "automatic_fallback_forbidden": automatic_fallback_forbidden,
         "controlled_fallback_allowed": controlled_fallback_allowed,
+        "runtime_fallback_candidate_recovered": runtime_fallback_candidate_recovered,
         "fallback_authorization_source": (
             "persisted_exact_quote_final_confirm"
             if controlled_fallback_allowed
