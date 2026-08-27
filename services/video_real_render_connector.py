@@ -1487,6 +1487,24 @@ def _scene_task_elapsed_seconds(item: dict | None = None, job: dict | None = Non
                 values.append(max(0, int(now - epoch)))
         except Exception:
             pass
+    for source in (item, job):
+        for key in (
+            "scene_submitted_at",
+            "submitted_at",
+            "scene_first_not_start_seen_at",
+            "provider_started_at",
+            "provider_wait_started_at",
+            "started_at",
+        ):
+            text = str(source.get(key) or "").strip().replace("T", " ")[:19]
+            if not text:
+                continue
+            try:
+                epoch = time.mktime(time.strptime(text, "%Y-%m-%d %H:%M:%S"))
+            except (OSError, OverflowError, ValueError):
+                continue
+            if 0 < epoch <= now:
+                values.append(max(0, int(now - epoch)))
     return max(values) if values else 0
 
 
@@ -1637,6 +1655,29 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         job,
         "automatic_fallback_allowed",
     )
+    quote_values = [
+        _safe_int(job.get("user_visible_price_xu"), 0),
+        _safe_int(job.get("persisted_quoted_price_xu"), 0),
+        _safe_int(job.get("customer_charge_planned_xu"), 0),
+        _safe_int(job.get("provider_budget_xu") or job.get("provider_cost_cap_xu"), 0),
+    ]
+    exact_quote_preserved = bool(
+        quote_values[0] > 0
+        and len(set(quote_values)) == 1
+        and job.get("quote_consistent") is not False
+    )
+    controlled_fallback_allowed = bool(
+        automatic_fallback_forbidden
+        and exact_quote_preserved
+        and public_confirmed
+        and invoice_confirmed
+        and _scene_task_has_provider_id(scene_task)
+        and fallback_count <= 0
+        and fallback_chain
+        and fallback_chain[0] == "key4u_video"
+        and not delivered
+        and not charged
+    )
     fallback_allowed = bool(
         stalled
         and public_confirmed
@@ -1645,11 +1686,11 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         and fallback_chain
         and not delivered
         and not charged
-        and not automatic_fallback_forbidden
+        and (not automatic_fallback_forbidden or controlled_fallback_allowed)
     )
     if result_url_valid:
         fallback_block_reason = "scene_already_has_valid_clip"
-    elif automatic_fallback_forbidden:
+    elif automatic_fallback_forbidden and not controlled_fallback_allowed:
         fallback_block_reason = "automatic_fallback_forbidden"
     elif not stalled:
         if is_not_start:
@@ -1717,6 +1758,14 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         "scene_total_timeout": bool(timed_out),
         "fallback_scene_index": max(1, _safe_int(scene_index, 1)) if stalled else 0,
         "fallback_allowed": fallback_allowed,
+        "automatic_fallback_forbidden": automatic_fallback_forbidden,
+        "controlled_fallback_allowed": controlled_fallback_allowed,
+        "fallback_authorization_source": (
+            "persisted_exact_quote_final_confirm"
+            if controlled_fallback_allowed
+            else ""
+        ),
+        "exact_quote_preserved": exact_quote_preserved,
         "fallback_block_reason": fallback_block_reason,
         "fallbackable_blocker": fallbackable_blocker,
         "fallback_eligibility_reason": fallback_eligibility_reason,
@@ -3924,10 +3973,13 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         job,
         "automatic_fallback_allowed",
     )
-    if automatic_fallback_forbidden:
+    controlled_fallback_allowed = bool(
+        pending_policy.get("controlled_fallback_allowed")
+    )
+    if automatic_fallback_forbidden and not controlled_fallback_allowed:
         scene_fallback_order = []
         scene_fallback_allowed = False
-    if recovery_existing_tasks_only:
+    if recovery_existing_tasks_only and not controlled_fallback_allowed:
         automatic_fallback_forbidden = True
         scene_fallback_order = []
         scene_fallback_allowed = False
@@ -4092,7 +4144,11 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             requires_concat=orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
         )
         model_context.update(model_metadata_from_resolution(model_resolution))
-    if recovery_existing_tasks_only and not pending_matches_request:
+    if (
+        recovery_existing_tasks_only
+        and not pending_matches_request
+        and not scene_fallback_allowed
+    ):
         raise RealVideoRenderError(
             "scene_provider_task_id_missing",
             diagnostics={
@@ -4252,7 +4308,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             ),
             "recovery_existing_tasks_only": recovery_existing_tasks_only,
             "provider_submit_allowed": False
-            if recovery_existing_tasks_only
+            if recovery_existing_tasks_only and not scene_fallback_allowed
             else (job or {}).get("provider_submit_allowed"),
             "paid_fallback_confirmed": bool(scene_fallback_allowed or invoice_confirmed),
             "fallback_count": 1 if scene_fallback_allowed else _safe_int(pending_scene_task.get("fallback_count"), 0),

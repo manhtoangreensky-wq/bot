@@ -95,3 +95,13 @@ Nguồn mới đã đối chiếu:
 | Snapshot provider 11/08 quyết định runtime | Chỉ giữ làm lịch sử dựng giá khách; file map 27/08 quyết định runtime | Không còn đúng |
 
 Giá khách hiện hành vẫn là `80`, `110`, `160`, `200`, `220`, `220`, `370`, `370`, `1.260`, `2.360` Xu/cảnh. Không được suy lại giá khách từ chi phí provider mới; mọi đổi giá hoặc thứ tự route phải sửa file map trước, có URL/timestamp bằng chứng rồi chạy comparator. LIVE vẫn pending cho tới khi từng lane/tier giao MP4 thật 2 cảnh có audio, add-on, receipt và `0 Xu`.
+
+## Đối chiếu `NOT_START` và durable fallback — 27/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại | Trạng thái |
+|---|---|---|
+| Không có final path thì báo renderer unavailable | Provider task còn `NOT_START` phải giữ pending/poll với nguyên nhân thật | Không còn đúng |
+| `automatic_fallback_allowed=false` chặn mọi đường fallback | Vẫn chặn fallback ngầm; final confirm + exact quote + primary task thật được một Key4U fallback idempotent cho mỗi scene | Đã làm rõ |
+| Worker claim/recovery có thể dùng generic retry count | Existing provider task chỉ poll; controlled fallback có khóa riêng; không resubmit primary và không chạm wallet | Đã khóa bằng test |
+
+Bằng chứng là PV-L01 job `22`: hai ShopAIKey task thật, `0/2` clip, terminal `provider_not_start`, `charged_xu=0`. Source correction có focused `6 passed`, protected `51 passed`, `NEW_FAILURES=0`; LIVE output vẫn pending.

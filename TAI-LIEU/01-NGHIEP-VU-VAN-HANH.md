@@ -107,3 +107,12 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Bảng/provider snapshot ngày 11/08 trong `services/video_ai_real_pricing.py` chỉ là lịch sử dựng giá khách; không được dùng để quyết định runtime route ngày 27/08.
 - ShopAIKey còn `59,29 USD` nhưng VEO trả `429 RESOURCE_EXHAUSTED`; đây là quota/capacity upstream, không phải số dư bằng 0.
 - Mọi live PASS vẫn cần MP4 tối thiểu 2 cảnh, audio nghe được, add-on đã materialize, receipt Telegram và `charged_xu=0`.
+
+## Bổ sung Product Video `NOT_START` và fallback có kiểm soát — 27/08/2026
+
+- PV-L01 tạo đúng request `VID-20260827-87B9C2`, project `26`, job `22`, outbox `21`; hai scene task ShopAIKey được nhận nhưng cùng trả `NOT_START`, chưa có clip và `charged_xu=0`.
+- `NOT_START` còn task id và chưa terminal phải giữ `continue_polling`; worker không được đổi nó thành `real_video_renderer_unavailable` chỉ vì chưa có `final_video_path`.
+- Cờ durable `automatic_fallback_allowed=false` vẫn cấm retry/fallback ngầm. Ngoại lệ duy nhất trong đợt này là fallback Key4U có kiểm soát: final confirm + invoice đã xác nhận, bốn trường quote/budget cùng `144 Xu`, primary task có thật, chưa giao, chưa trừ Xu và `fallback_count=0`.
+- Fallback dùng khóa idempotency theo `job + scene + provider`; quote lệch, thiếu xác nhận, đã giao, đã trừ hoặc đã fallback một lần đều fail-closed. Owner job vẫn có receipt `0 Xu`; khách thật vẫn giữ nguyên quote và chỉ charge sau giao file hợp lệ.
+- RED đo được `4 failed`, elapsed RED riêng expected `90`/actual `0`; focused GREEN cuối `6 passed`; protected gate `51 passed, 2 baseline deselected`; hai baseline fail tái hiện y hệt trên sạch `origin/main 21022ed`; compile ba runtime file và diff-check exit `0`.
+- Đây mới là source PASS. PV-L01 vẫn chưa LIVE PASS cho tới khi cùng case giao MP4 2 cảnh có audio/phụ đề/chuyển cảnh và receipt Telegram `0 Xu`.

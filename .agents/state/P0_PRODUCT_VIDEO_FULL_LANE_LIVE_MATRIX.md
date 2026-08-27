@@ -5,8 +5,8 @@
 - Product: **Product Video** only
 - Codex task: `019efe1e-ee54-78e1-87c4-10db6e1e19e4`
 - Repository: `manhtoangreensky-wq/bot`
-- Branch: `fix/product-video-terminal-provider-claim-loop`
-- Current branch base: `8d23bbf1a09dee8d43896bad963a800d3dd25cda`
+- Branch: `fix/product-video-live22-pending-fallback`
+- Current branch base: `21022ed724aa605f1b90dbb35e140a8dbba9e09b`
 - SubDub task `019fbbfe-59b7-7ee2-b298-dea276813ce4` is **out of scope**. CPU is independent; only Telegram/Chrome/provider/VPS/deploy ownership is coordinated.
 
 ## Execution Rule
@@ -119,7 +119,7 @@ Video AI Real public tiers:
 - [x] RED/GREEN Key4U `.vn` domain plus VEO/Kling/Hailuo family payload/poll contracts.
 - [x] RED/GREEN preserve ShopAIKey quota blocker and exact-price controlled fallback policy.
 - [x] Focused/protected tests and compile/diff gates terminal.
-- [ ] PR merged and deployed at exact runtime SHA.
+- [x] PR #905 merged as `21022ed724aa605f1b90dbb35e140a8dbba9e09b`; deploy run `33051106470` SUCCESS; bot and owner worker verified at the same SHA.
 - [ ] Same PV-L01 flow delivers the required two-scene MP4 with audio/add-ons/receipt.
 
 ### SPEC-05: Distinct Two-Scene Product/Lane LIVE Matrix
@@ -128,7 +128,7 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 
 | Product/lane | Distinct scenario | Flow + Add-on | Two-scene artifact | Delivery/0 Xu |
 |---|---|:---:|:---:|:---:|
-| Video theo trend / manual | PV-L01: quầy cà phê xe điện -> sinh viên nhận ly tái sử dụng | [ ] | [ ] | [ ] |
+| Video theo trend / manual | PV-L01: quầy cà phê xe điện -> sinh viên nhận ly tái sử dụng | [x] | [ ] | [ ] |
 | Video AI chan that / prompt manual | PV-L02: Linh tạo bình gốm xanh -> nâng thành phẩm | [ ] | [ ] | [ ] |
 | Kich ban -> Video / manual | PV-L03: 5 cảnh trà sen Tây Hồ | [ ] | [ ] | [ ] |
 | Ghep anh thanh video / custom | PV-L04: 2 ảnh đồng hồ thủ công | [ ] | [ ] | [ ] |
@@ -227,3 +227,10 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 | 2026-08-27 | Post-SubDub-#904 rebase gate | Rebased cleanly onto exact `origin/main 8d23bbf`; provider/pricing `77 passed, 1 baseline deselected`; current Tail v18/manual/10-tier source acceptance `66 passed`; compile 8 runtime/dependency files and diff-check exit 0 | PASS; branch remains exactly one Product Video commit, no conflict or shared-runtime drift |
 | 2026-08-27 | PV-L01 exact-price fallback safety | Spend-safety + quota parser + exact-price fallback selectors `11 passed in 11.18s`: in-progress primary suppresses fallback; paid fallback requires explicit confirmation; confirmed retry permits exactly one Key4U submit; quote remains 144 Xu and charged Xu 0 | PASS; same-flow live still required after deploy |
 | 2026-08-27 | Media fixture readiness | Generated and hashed four 1672x941 PNG fixtures for PV-L04/PV-L06; selected two measured source MP4s for PV-L05/PV-L09 with H.264 + AAC and durable SHA256 manifest under workspace `artifacts/product-video-live-fixtures/` | PASS; files are evidence inputs and are not committed into production Git |
+| 2026-08-27 | PR #905 deploy/runtime | PR #905 squash merged as `21022ed724aa605f1b90dbb35e140a8dbba9e09b`; deploy run `33051106470` SUCCESS; bot PID `256171`, owner worker PID `253437`, generation `d3e9f65983b3497697f562c0d72b6350`, health 200 | DEPLOYED; LIVE artifact still required |
+| 2026-08-27 | PV-L01 Tail/admission rerun on `21022ed` | Codex Browser only; exact manual scenario -> Add-on subtitle + transition -> Review -> `Nhanh gon 80 Xu/canh`; invoice 144 Xu; one final submit created request `VID-20260827-87B9C2`, project `26`, job `22`, outbox `21` | FLOW + ADD-ON + ADMISSION PASS; no duplicate submit; Owner no-charge |
+| 2026-08-27 | PV-L01 job #22 terminal | Two ShopAIKey `veo3.1-fast` scene tasks were accepted, both remained authoritative `NOT_START`; worker converted the pending state to `real_video_renderer_unavailable`, reclaimed eight times, then job terminal `provider_not_start`; 0/2 clips, charged Xu 0 | VALID LIVE RED; artifact/delivery remain open |
+| 2026-08-27 | Job #22 pending/controlled-fallback RED | Exact new selector `4 failed, 280 warnings in 12.39s`: pending reason collapsed to renderer unavailable; durable seam suppressed the Owner no-charge exact-quote Key4U fallback | VALID RED; no production provider or wallet action |
+| 2026-08-27 | Job #22 pending/controlled-fallback GREEN | Focused selector `6 passed in 11.02s`; worker preserves `provider_not_start`; text `started_at` yields measured elapsed; final-confirmed exact quote can use exactly one idempotent Key4U fallback per scene; missing confirm or mismatched quote stays blocked | PASS |
+| 2026-08-27 | Job #22 protected gate | Pending worker, NOT_START/stall, spend safety, durable no-resubmit, restart recovery: `51 passed, 2 deselected in 18.78s`; the two deselected comparator failures reproduce identically on clean `origin/main 21022ed` | NEW_FAILURES=0 |
+| 2026-08-27 | Job #22 compile/diff | `py_compile bot.py remote_worker.py services/video_real_render_connector.py` exit 0; `git diff --check` exit 0 (line-ending warnings only) | SOURCE SHIP READY; same-case live rerun still mandatory |
