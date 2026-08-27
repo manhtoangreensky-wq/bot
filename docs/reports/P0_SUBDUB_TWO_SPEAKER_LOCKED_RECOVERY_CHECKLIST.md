@@ -17,13 +17,14 @@
 ### Current pointer
 
 - Current SPEC: `SPEC-08`.
-- Current SUBSPEC: `SPEC-08.2`.
-- Current phase: `FAILURE LOOP / combo progress edit 502 source-only GREEN`.
-- Production action active: `best-effort progress render only; pipeline executor unchanged`.
-- Telegram/provider job active: `NO; latest callback terminal before pipeline/job creation`.
+- Current SUBSPEC: `SPEC-08.0C`.
+- Current phase: `REVIEW / verified Key4U cue + Gemini diarization fallback`.
+- Production action active: `NO; Product Video owns shared LIVE/CHROME/VPS`.
+- Telegram/provider job active: `NO; job #19A16753A4 terminal empty_transcript`.
 - Wallet mutation: `0`.
-- Next allowed action: wait Product Video release, rebase latest main, run focused
-  post-rebase gate, then one PR/deploy/same-fixture retry.
+- Next allowed action: finish code review and pre-push documents; after Product
+  Video releases, rebase latest main, rerun one focused post-rebase gate, ship one
+  PR/deploy, then retry the exact fixture combo.
 - Next forbidden action: edit classifier/cast/audio/pricing/multi module, start a
   second live job, or move to standalone/multi before this failure loop ships.
 
@@ -509,8 +510,84 @@ PRODUCTION_DIFF: bot.py +1 line in scoped diarized request helper
   progress edit. Engine/cast/multi hashes unchanged.
 - [x] Rebased onto exact `origin/main 43d8664`; post-rebase GREEN
   `1 passed, 1 warning in 464.66s`; compile/diff/hash gates pass.
-- [ ] Push draft PR/checks while shared live belongs to Product Video; merge,
-  deploy and same live retry only after exact Product Video releases.
+- [x] PR `#904` merged as `8d23bbf1a09dee8d43896bad963a800d3dd25cda`.
+- [x] Deploy run `33045092186` SUCCESS in `10m40s`; bot runtime matches merge SHA.
+- [x] Same-fixture retry reached real pipeline stage `35% / Nhận diện lời thoại`,
+  proving the initial progress edit can no longer abort the executor.
+
+### SPEC-08.0C — Live failure loop: exact fixture ASR/provider root cause
+
+- [x] Fresh combo job `#19A16753A4` used exact fixture SHA `85C8793D...`,
+  workspace `/tmp/toan_aas_pipeline/19a16753a4491d975921`, then terminalized
+  `empty_transcript` before sidecar/cast/TTS/mux/delivery.
+- [x] Persisted provider attempt is `DEEPGRAM_EMPTY_TRANSCRIPT`; charged Xu and
+  wallet mutations remain `0`.
+- [x] Bounded Deepgram replay on extracted mono MP3 (`582,540` bytes) returned
+  HTTP `200`, detected `id` at confidence `0.31629473`, but transcript/words/
+  speaker IDs all `0`; retry pinned to `id` remained empty.
+- [x] ShopAIKey is not a usable fallback for this fixture: diarized/GPT models
+  return `model_not_found`; `whisper-1` returned `429 do_request_failed`.
+- [x] Key4U legacy `.shop` OpenAI base has a TLS certificate verification failure;
+  TLS verification was never disabled. Canonical documented `.vn/v1` is healthy.
+- [x] Key4U canonical `gpt-4o-transcribe` returns HTTP `200` and `142` chars.
+- [x] Key4U canonical `whisper-1 verbose_json` returns HTTP `200`, language
+  `chinese`, `145` chars and `18/18` timestamped segments covering `0..48s`.
+- [x] Neither ShopAIKey nor Key4U exposes `gpt-4o-transcribe-diarize`; exact
+  diarized requests fail and no speaker labels are returned.
+- [x] Rejected acoustic heuristic: spectral clustering produced an outlier split
+  `2/16`; pitch evidence existed for only `1/18` cue and did not match visible
+  speaker turns on the contact sheet.
+- [x] Rejected visual-only heuristic: two Key4U vision models agreed on only
+  `11/18` cues (`61.1111%`), with one model collapsing `16/18` cues to one person.
+- [x] Rejected stereo heuristic: channel balance spans only `1.3457 dB`, maximum
+  absolute balance `1.052 dB`, and correlation is `0.695482..0.931335`; microphones
+  are not cleanly isolated by channel.
+- [x] Provider research found the first dedicated replacement contract with real
+  diarization: official Gemini `gemini-3.5-transcribe` supports speaker labels
+  and word timestamps (up to eight speakers). The installed Google GenAI SDK has
+  Interactions and audio input types; no dependency install is required.
+- [-] Next single diagnostic: call Gemini Transcribe once on the exact normalized
+  fixture with `zh-CN`, verbatim mode, `diarization_mode=speaker`, and word
+  timestamps. Accept only exactly two returned speakers, each with at least two
+  timed annotations; otherwise remain fail-closed. Key4U Whisper remains the
+  already-proven transcript/timestamp fallback if Gemini transcript text needs
+  cue reconciliation.
+- [x] Gemini Transcribe diagnostic PASS: HTTP `200`, exactly `2` speaker labels,
+  `125/125` timed word annotations (`58` vs `67` words), schema fields
+  `text/speaker/start_offset/end_offset` with second offsets.
+- [x] Key4U-to-Gemini reconciliation maps all `18/18` Key4U Whisper cue windows,
+  minimum per-cue dominance `1.0`, split `8/10`; no forced label exists.
+- [x] Final RED for Key4U cues + Gemini speaker labels and live route wiring:
+  `3 failed, 2 passed, 1 warning in 8.43s`. Two product failures are the
+  missing `allow_two_speaker_key4u_fallback` gate; one proves the exact
+  two-speaker preparation path does not forward it. The protected multi/default
+  route stops after Deepgram and makes exactly `0` fallback calls.
+- [x] Focused GREEN: `5 passed, 1 warning in 1523.09s (0:25:23)`; warning only
+  Google GenAI deprecation. Includes exact two-speaker wiring, protected
+  multi/default zero-fallback behavior, and single-speaker fail-closed behavior.
+- [x] Independent review RED reopened four gaps: permissive Gemini annotation
+  parsing; synthetic Key4U timestamps; legacy `.shop` endpoint; unbounded
+  chunked fallback. Service RED `1 failed, 4 passed in 0.97s`; bot RED
+  `3 failed in 610.67s`.
+- [x] Review-fix GREEN: service parser/request `5 passed in 0.51s`; full focused
+  bot route/provenance/long guard `7 passed, 1 warning in 540.56s`.
+- [x] Final protected comparator batch: `19 passed, 1 warning in 543.25s`;
+  warning only Google GenAI deprecation.
+- [x] `py_compile bot.py services/subdub_two_speaker_asr_fallback.py` plus focused
+  test exits `0`; `git diff --check` exits `0`.
+- [x] Locked source hashes remain exact:
+  `auto_speaker=49E905C0...`, `auto_multi=55AAB894...`,
+  `subdub_speaker_cast=DE93620F...`.
+- [x] Diagnostic provider requests made in this root-cause round: `22`; wallet,
+  Telegram job admission and Xu mutations during diagnostics: `0`.
+- [x] Independent re-review: no Critical/Important code blocker; verdict
+  `Ready to merge: Yes`. Synthetic timestamps, legacy hostname, long-media
+  provider budget and permissive parser findings are all closed by tests above.
+- [x] Pre-push operating docs, original-vs-current comparison, tester guide and
+  issue templates updated because Owner explicitly requires the ordered
+  checklist/evidence handoff on GitHub in this same focused recovery PR.
+- [-] Await exact Product Video shared-resource releases, then fetch/rebase latest
+  main and run one focused post-rebase verification before staging/push.
 
 ### SPEC-08.1 — Pre-admission
 

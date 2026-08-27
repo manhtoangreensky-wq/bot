@@ -3,8 +3,8 @@ product: SubDub
 owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
-branch: fix/p0-subdub-status-timeout
-phase: SPEC_04_FAILURE_LOOP_SHIP
+branch: fix/p0-subdub-audio-label-live
+phase: SPEC_08_WAIT_SHARED_RELEASE_FOR_REBASE
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -25,11 +25,11 @@ workflow_contract:
     - refactor unrelated stable flows
 
 resource_boundary:
-  cpu: dedicated_subdub_gate_released_after_final_compile
-  live: owned_by_subdub_auto
-  chrome: owned_by_subdub_auto
-  vps_deploy: owned_by_subdub_auto
-  product_video: cpu_local_only; no live/browser/provider/VPS/deploy action
+  cpu: independent_local_subdub_source_only
+  live: owned_by_product_video
+  chrome: owned_by_product_video
+  vps_deploy: owned_by_product_video
+  product_video: PR_905 merge/deploy/live active; SubDub has released shared resources
 
 fixtures:
   two_speaker:
@@ -46,6 +46,41 @@ fixtures:
     path: C:\Users\toann\Downloads\test sub\test nhiều giọng.mp4
     sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
     required_lane: Tự động nhiều giọng
+
+latest_combo_failure:
+  public_job: 19A16753A4
+  internal_job: 19a16753a4491d975921
+  workspace: /tmp/toan_aas_pipeline/19a16753a4491d975921
+  source_sha256: 85c8793d197cf2782bb554d46282e82a83bcb062a0483e412a0ca1da668f9f51
+  terminal: empty_transcript
+  last_public_stage: 35_percent_recognizing_speech
+  provider: deepgram
+  charged_xu: 0
+  wallet_mutations: 0
+  root_cause:
+    - Deepgram nova-3 HTTP 200 returned zero transcript, words, and speaker ids
+    - detected language was id at confidence 0.31629473; pinned retry stayed empty
+    - ShopAIKey transcription routes were unavailable for this fixture
+    - Key4U canonical .vn Whisper returned 18 timestamped Chinese cues but no speakers
+    - acoustic, visual-only, and stereo heuristics were empirically rejected
+  active_hypothesis:
+    - confirmed by provider diagnostic: Key4U Whisper remains timestamp truth
+    - Gemini gemini-3.5-transcribe supplies exactly two timed speaker labels
+    - 125 timed word annotations map all 18 Key4U cues, split 8 and 10
+    - reject unless every cue maps at confidence >=0.70 and both labels own >=2 cues
+  verification:
+    red: 3 failed, 2 passed, 1 warning in 8.43s
+    focused_green: 5 passed, 1 warning in 1523.09s
+    review_service_red: 1 failed, 4 passed in 0.97s
+    review_bot_red: 3 failed in 610.67s
+    review_service_green: 5 passed in 0.51s
+    review_bot_green: 7 passed, 1 warning in 540.56s
+    protected_green: 19 passed, 1 warning in 543.25s
+    py_compile: exit 0
+    diff_check: exit 0
+    diagnostic_provider_calls: 22
+    wallet_mutations: 0
+    independent_rereview: ready_to_merge_yes; no critical_or_important_code_blocker
 
 rollback_anchor:
   proven_pr: 842
@@ -259,4 +294,4 @@ ordered_specs:
       - audit every acceptance line as proven or unresolved
       - mark the goal complete only when no required line remains unresolved
 
-current_next_action: commit and push the verified status-timeout correction, create one PR, squash merge, deploy/sync bot+worker, then live the exact 85c8793d fixture again
+current_next_action: after Product Video exact releases fetch/rebase latest main, rerun focused post-rebase gate, stage only intended code/tests/checklist/state/operating-doc/tester files, create one PR/merge/deploy, then live exact fixture combo

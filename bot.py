@@ -144,7 +144,7 @@ from video_product_system import (
 import video_image_to_video_flow as ivf
 from services import ai_chatbot_copilot, telegram_business_support, telegram_transport
 from services import multiscene_video_pipeline as multiscene_blackbox
-from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_ass_layout, subdub_auto_settlement, subdub_auto_word_pricing, subdub_blackboxes, subdub_canonical_cues, subdub_combo_blackbox, subdub_long_media, subdub_media_preflight, subdub_provider_contract, subdub_speaker_cast, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
+from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_ass_layout, subdub_auto_settlement, subdub_auto_word_pricing, subdub_blackboxes, subdub_canonical_cues, subdub_combo_blackbox, subdub_long_media, subdub_media_preflight, subdub_provider_contract, subdub_speaker_cast, subdub_two_speaker_asr_fallback, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services.subdub_blackboxes import auto_multi_speaker, auto_speaker
 from services import ai_chatbot_copilot, cskh_session_memory, telegram_business_support, telegram_transport
 from services import public_chat_media, public_chat_runtime, public_chat_store
@@ -64558,12 +64558,14 @@ async def openai_compatible_asr_transcribe(
             payload = {"text": str(getattr(res, "text", "") or "").strip()}
         text = str((payload or {}).get("text") or (payload or {}).get("transcript") or "").strip()
         if res.status_code < 400 and text:
+            provider_timestamps = subdub_two_speaker_asr_fallback.provider_timestamp_segments_valid(payload)
             segments = normalize_asr_segments(payload, text, float((payload or {}).get("duration") or 0))
             return {
                 "ok": bool(segments),
                 "status": "PASS" if segments else "segment_generation_failed",
                 "text": text,
                 "segments": segments,
+                "provider_timestamps": provider_timestamps,
                 "language": str((payload or {}).get("language") or ""),
                 "duration_seconds": float((payload or {}).get("duration") or (segments[-1]["end"] if segments else 0)),
                 "http_status": int(res.status_code),
@@ -64936,10 +64938,14 @@ async def asr_transcribe_audio(
     updated_by="",
     context: ContextTypes.DEFAULT_TYPE | None = None,
     require_diarization: bool = False,
+    allow_two_speaker_key4u_fallback: bool = False,
     timeout_seconds: float = 60.0,
 ) -> dict:
     del response_format, context
     require_diarization = bool(require_diarization)
+    allow_two_speaker_key4u_fallback = bool(
+        require_diarization and allow_two_speaker_key4u_fallback
+    )
     if require_diarization and not allow_confirmed_product:
         return {
             "ok": False,
@@ -65117,6 +65123,34 @@ async def asr_transcribe_audio(
                     "detail": str(result.get("detail") or "deepgram_timeout"),
                 }
             if subdub_long_media.is_no_speech_result(result, transcript):
+                if allow_two_speaker_key4u_fallback:
+                    fallback = await subdub_two_speaker_asr_fallback.run_two_speaker_fallback(
+                        audio_bytes,
+                        content_type,
+                        key4u_transcribe=openai_compatible_asr_transcribe,
+                        key4u_api_key=KEY4U_API_KEY,
+                        key4u_endpoint=KEY4U_STT_ENDPOINT,
+                        gemini_api_key=GEMINI_API_KEY,
+                        language=language,
+                    )
+                    save_provider_attempt(
+                        "translation_asr",
+                        {
+                            "called": True,
+                            "provider": "key4u_audio+gemini_diarization",
+                            "route": "two_speaker_fallback",
+                            "status": str(
+                                fallback.get("status") or AUTO_CAST_UNAVAILABLE
+                            ),
+                            "error": (
+                                ""
+                                if fallback.get("ok")
+                                else str(fallback.get("detail") or "")[:180]
+                            ),
+                        },
+                        updated_by,
+                    )
+                    return fallback
                 return {
                     **result,
                     "ok": False,
@@ -244480,6 +244514,7 @@ async def transcribe_media_to_segments(
     allow_confirmed_product: bool = False,
     progress_callback=None,
     require_diarization: bool = False,
+    allow_two_speaker_key4u_fallback: bool = False,
 ) -> dict:
     require_diarization = bool(require_diarization)
     source_bytes = b""
@@ -244605,6 +244640,25 @@ async def transcribe_media_to_segments(
         )
     else:
         long_plan = subdub_long_video_chunk_plan(duration_seconds)
+    if (
+        allow_two_speaker_key4u_fallback
+        and int(max_seconds or 0) <= 0
+        and long_plan.get("chunking_enabled")
+    ):
+        return {
+            "output_valid": False,
+            "status": AUTO_CAST_UNAVAILABLE,
+            "detail": "two_speaker_fallback_long_media_unsupported",
+            "transcript_text": "",
+            "segments": [],
+            "detected_language": "",
+            "duration_seconds": int(duration_seconds or 0),
+            "confidence": 0.0,
+            "provider": "",
+            "chunk_count": int(long_plan.get("chunk_count") or 0),
+            "chunk_strategy": "two_speaker_fallback_long_media_guard",
+            "global_timing_preserved": False,
+        }
     asr_progress_emitted = False
 
     async def _emit_asr_progress_once() -> None:
@@ -244802,6 +244856,7 @@ async def transcribe_media_to_segments(
                 **(
                     {
                         "require_diarization": True,
+                        "allow_two_speaker_key4u_fallback": allow_two_speaker_key4u_fallback,
                         "timeout_seconds": auto_asr_timeout_seconds,
                     }
                     if require_diarization
@@ -244910,6 +244965,7 @@ async def video_dubbing_resolve_source_script(
     source_hash: str = "",
     asr_checkpoint_path: str = "",
     require_diarization: bool = False,
+    allow_two_speaker_key4u_fallback: bool = False,
 ) -> dict:
     embedded_subtitle, subtitle_detail = await video_dubbing_extract_embedded_subtitle(source_bytes, content_type)
     if embedded_subtitle:
@@ -244983,6 +245039,7 @@ async def video_dubbing_resolve_source_script(
         allow_confirmed_product=allow_confirmed_product,
         updated_by=updated_by,
         progress_callback=progress_callback,
+        allow_two_speaker_key4u_fallback=allow_two_speaker_key4u_fallback,
         **({"require_diarization": True} if require_diarization else {}),
     )
     if not result.get("output_valid"):
@@ -246339,6 +246396,11 @@ async def _subdub_auto_bootstrap_cached_media_source(
         "prefer_visual_subtitles": False,
         "require_diarization": True,
     }
+    if "allow_two_speaker_key4u_fallback" in resolve_parameters:
+        resolve_kwargs["allow_two_speaker_key4u_fallback"] = bool(
+            auto_speaker.is_auto_speaker_state(state)
+            and not auto_multi_speaker.is_auto_multi_speaker_state(state)
+        )
     if "progress_callback" in resolve_parameters:
         resolve_kwargs["progress_callback"] = progress_callback
     if "source_hash" in resolve_parameters:
@@ -246512,6 +246574,14 @@ async def video_dubbing_prepare_subtitles(
                     )
                 if require_auto_cast and "require_diarization" in resolve_parameters:
                     resolve_kwargs["require_diarization"] = True
+                if (
+                    require_auto_cast
+                    and "allow_two_speaker_key4u_fallback" in resolve_parameters
+                ):
+                    resolve_kwargs["allow_two_speaker_key4u_fallback"] = bool(
+                        auto_speaker.is_auto_speaker_state(state)
+                        and not auto_multi_speaker.is_auto_multi_speaker_state(state)
+                    )
             except Exception:
                 pass
             source_info = await video_dubbing_resolve_source_script(
