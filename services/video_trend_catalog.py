@@ -10,6 +10,7 @@ import hashlib
 import html as html_lib
 import json
 import re
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -20,13 +21,14 @@ from typing import Any, Callable, Iterable, Mapping
 SCHEMA_VERSION = 1
 DEFAULT_MAX_AGE_DAYS = 14
 DEFAULT_REFRESH_DAYS = 7
+TREND_SOURCE_GROUPS = ("media", "facebook", "youtube", "tiktok")
 MEDIA_TREND_TERMS = (
     "tiktok", "reels", "shorts", "youtube short", "facebook reel", "instagram reel",
     "meme", "challenge", "thử thách", "âm thanh", "audio", "sound", "remix",
     "transition", "chuyển cảnh", "hiệu ứng", "effect", "hook", "mở đầu",
     "pov", "ugc", "unboxing", "đập hộp", "review", "livestream", "viral",
     "dance", "nhảy", "biến hình", "storytime", "duet", "stitch", "capcut",
-    "template", "filter", "video format", "format video", "phong cách quay",
+    "template", "filter", "video format", "media format", "format video", "phong cách quay",
     "cách quay", "quảng cáo ngắn", "video quảng cáo",
 )
 MEDIA_PLATFORM_TERMS = (
@@ -34,18 +36,48 @@ MEDIA_PLATFORM_TERMS = (
     "reels", "mạng xã hội", "social video",
 )
 GENERIC_SEARCH_ONLY_TITLES = {"nghệ", "fpt", "vtv5"}
+
+
+def _public_discovery_feed(query: str) -> str:
+    encoded = urllib.parse.quote_plus(str(query or "").strip())
+    return f"https://news.google.com/rss/search?q={encoded}&hl=vi&gl=VN&ceid=VN:vi"
+
+
 SOURCE_REGISTRY = {
-    "google_trends_vn": {
+    "media_google_trends_vn": {
         "name": "Google Trends - Việt Nam",
         "url": "https://trends.google.com/trending?geo=VN",
         "feed_url": "https://trends.google.com/trending/rss?geo=VN",
         "adapter": "google_trends_rss",
+        "source_group": "media",
     },
-    "tiktok_creative_center_vn": {
-        "name": "TikTok Creative Center - Việt Nam",
+    "media_video_public_vn": {
+        "name": "Khám phá công khai - Media video",
+        "url": "https://news.google.com/",
+        "feed_url": _public_discovery_feed('"video trend" OR "short video trend" Vietnam'),
+        "adapter": "public_media_rss",
+        "source_group": "media",
+    },
+    "facebook_reels_public_vn": {
+        "name": "Khám phá công khai - Facebook Reels",
+        "url": "https://www.facebook.com/reel/",
+        "feed_url": _public_discovery_feed('site:facebook.com/reel OR site:fb.watch "video trend"'),
+        "adapter": "public_media_rss",
+        "source_group": "facebook",
+    },
+    "youtube_shorts_public_vn": {
+        "name": "Khám phá công khai - YouTube Shorts",
+        "url": "https://www.youtube.com/shorts/",
+        "feed_url": _public_discovery_feed('site:youtube.com/shorts "video trend"'),
+        "adapter": "public_media_rss",
+        "source_group": "youtube",
+    },
+    "tiktok_public_vn": {
+        "name": "Khám phá công khai - TikTok",
         "url": "https://ads.tiktok.com/business/creativecenter/trends/home/pc/vi",
-        "feed_url": "",
-        "adapter": "reference_only",
+        "feed_url": _public_discovery_feed('site:tiktok.com "video trend"'),
+        "adapter": "public_media_rss",
+        "source_group": "tiktok",
     },
 }
 
@@ -89,6 +121,7 @@ def fallback_media_items(*, now: datetime | None = None) -> list[dict[str, Any]]
             "short_title": title,
             "summary": summary,
             "platform": "TikTok / Reels / Shorts",
+            "source_group": "media",
             "region": "VN",
             "language": "vi",
             "category": category,
@@ -151,6 +184,7 @@ def source_registry_from_json(raw_value: str | None) -> dict[str, dict[str, Any]
             "url": url,
             "feed_url": feed_url,
             "adapter": adapter,
+            "source_group": _source_group(source, fallback=key),
         }
     return registry
 
@@ -244,6 +278,40 @@ def _clean(value: Any, limit: int = 1000) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
 
 
+def _source_group(raw: Mapping[str, Any], *, fallback: str = "") -> str:
+    explicit = _clean(raw.get("source_group"), 40).casefold()
+    if explicit in TREND_SOURCE_GROUPS:
+        return explicit
+    if _clean(raw.get("content_safety"), 120) == "approved_fallback_media_format":
+        return "media"
+    keywords = raw.get("keywords") or []
+    if isinstance(keywords, str):
+        keywords = [keywords]
+    for keyword in keywords:
+        text = _clean(keyword, 80).casefold()
+        if text.startswith("source_group:"):
+            candidate = text.split(":", 1)[1].strip()
+            if candidate in TREND_SOURCE_GROUPS:
+                return candidate
+    searchable = " ".join(
+        _clean(value, 1000).casefold()
+        for value in (
+            fallback,
+            raw.get("platform"),
+            raw.get("source_name"),
+            raw.get("source_url"),
+        )
+        if _clean(value, 1000)
+    )
+    if "facebook" in searchable or "fb.watch" in searchable:
+        return "facebook"
+    if "youtube" in searchable or "youtu.be" in searchable or "shorts" in searchable:
+        return "youtube"
+    if "tiktok" in searchable:
+        return "tiktok"
+    return "media"
+
+
 def _trend_id(source_name: str, source_url: str, title: str) -> str:
     identity = "|".join((source_name.casefold(), source_url.casefold(), title.casefold()))
     return "tr_" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
@@ -283,7 +351,7 @@ def _deduplicate_media_items(items: Iterable[Mapping[str, Any]]) -> list[dict[st
         if not isinstance(raw, Mapping) or not is_media_trend(raw):
             continue
         title = re.sub(r"[^a-z0-9\u00c0-\u024f\u1e00-\u1eff]+", " ", _clean(raw.get("title"), 240).casefold()).strip()
-        key = title or _clean(raw.get("source_url"), 1000).casefold()
+        key = f"{_source_group(raw)}|{title or _clean(raw.get('source_url'), 1000).casefold()}"
         if key and key not in unique:
             unique[key] = dict(raw)
     return list(unique.values())
@@ -308,12 +376,15 @@ def normalize_item(
     keywords = raw.get("keywords") or []
     if isinstance(keywords, str):
         keywords = [part.strip() for part in keywords.split(",") if part.strip()]
+    source_group = _source_group(raw)
+    keywords = [*keywords, f"source_group:{source_group}"]
     return {
         "trend_id": _clean(raw.get("trend_id"), 80) or _trend_id(source_name, source_url, title),
         "title": title,
         "short_title": _clean(raw.get("short_title") or title, 64),
         "summary": _clean(raw.get("summary"), 500),
         "platform": _clean(raw.get("platform") or "Web / mạng xã hội", 120),
+        "source_group": source_group,
         "region": _clean(raw.get("region") or "VN", 40),
         "language": _clean(raw.get("language") or "vi", 16),
         "category": _clean(raw.get("category") or "Đang thịnh hành", 120),
@@ -423,15 +494,40 @@ def upsert_items(conn, items: Iterable[Mapping[str, Any]], *, now: datetime | No
     return {"inserted": inserted, "updated": updated}
 
 
-def expire_items(conn, *, now: datetime | None = None) -> int:
+def expire_items(
+    conn,
+    *,
+    now: datetime | None = None,
+    preserve_source_groups: Iterable[str] = (),
+) -> int:
     ensure_schema(conn)
     cutoff = iso_text(now or utc_now())
-    cursor = conn.execute(
-        "UPDATE trend_items SET is_active=0 WHERE is_active=1 AND expires_at<>'' AND expires_at<?",
+    protected = {
+        str(group or "").strip().casefold()
+        for group in preserve_source_groups
+        if str(group or "").strip().casefold() in TREND_SOURCE_GROUPS
+    }
+    rows = conn.execute(
+        f"SELECT {','.join(_ITEM_COLUMNS)} FROM trend_items "
+        "WHERE is_active=1 AND expires_at<>'' AND expires_at<?",
         (cutoff,),
-    )
+    ).fetchall()
+    expired_ids = [
+        str(item["trend_id"])
+        for item in (_row_dict(row) for row in rows)
+        if item.get("source_group") not in protected
+    ]
+    if expired_ids:
+        placeholders = ",".join("?" for _ in expired_ids)
+        cursor = conn.execute(
+            f"UPDATE trend_items SET is_active=0 WHERE trend_id IN ({placeholders})",
+            tuple(expired_ids),
+        )
+        changed = max(0, int(cursor.rowcount or 0))
+    else:
+        changed = 0
     conn.commit()
-    return max(0, int(cursor.rowcount or 0))
+    return changed
 
 
 def _row_dict(row) -> dict[str, Any]:
@@ -440,6 +536,7 @@ def _row_dict(row) -> dict[str, Any]:
         values["keywords"] = json.loads(values.get("keywords") or "[]")
     except (TypeError, ValueError):
         values["keywords"] = []
+    values["source_group"] = _source_group(values)
     return values
 
 
@@ -475,6 +572,7 @@ def list_media_items(
     limit: int = 5,
     offset: int = 0,
     category: str = "",
+    source_group: str = "",
     historical: bool = False,
     now: datetime | None = None,
 ) -> list[dict[str, Any]]:
@@ -496,6 +594,8 @@ def list_media_items(
     for row in rows:
         item = _row_dict(row)
         if not is_media_trend(item):
+            continue
+        if source_group and source_group != "all" and item.get("source_group") != source_group:
             continue
         expires = parse_time(item.get("expires_at"))
         item["stale"] = bool(historical or (expires and expires < current))
@@ -564,8 +664,82 @@ def fetch_google_trends_rss(source: Mapping[str, Any], *, timeout: int = 15) -> 
     return items
 
 
+def fetch_public_media_rss(source: Mapping[str, Any], *, timeout: int = 15) -> list[dict[str, Any]]:
+    """Read attributable public RSS metadata without platform credentials."""
+
+    request = urllib.request.Request(
+        str(source.get("feed_url") or ""),
+        headers={"User-Agent": "TOAN-AAS-TrendCatalog/1.0"},
+    )
+    with urllib.request.urlopen(request, timeout=max(3, timeout)) as response:
+        payload = response.read()
+    root = ET.fromstring(payload)
+    now = utc_now()
+    source_group = _source_group(source)
+    platform_by_group = {
+        "media": "Media video",
+        "facebook": "Facebook Reels",
+        "youtube": "YouTube Shorts",
+        "tiktok": "TikTok",
+    }
+    platform = platform_by_group[source_group]
+    nodes = list(root.findall("./channel/item"))
+    if not nodes:
+        nodes = list(root.findall("{*}entry"))
+    items: list[dict[str, Any]] = []
+    for node in nodes:
+        title = _clean(node.findtext("title") or node.findtext("{*}title"), 240)
+        link = _clean(node.findtext("link"), 1000)
+        if not link:
+            link_node = node.find("{*}link")
+            link = _clean(link_node.get("href") if link_node is not None else "", 1000)
+        published = _clean(
+            node.findtext("pubDate")
+            or node.findtext("published")
+            or node.findtext("{*}published")
+            or node.findtext("updated")
+            or node.findtext("{*}updated"),
+            120,
+        )
+        description = _clean(
+            html_lib.unescape(
+                re.sub(
+                    r"<[^>]+>",
+                    " ",
+                    str(node.findtext("description") or node.findtext("summary") or node.findtext("{*}summary") or ""),
+                )
+            ),
+            500,
+        )
+        if not title or not link.startswith(("https://", "http://")):
+            continue
+        items.append(
+            {
+                "title": title,
+                "short_title": title,
+                "summary": description or f"Metadata công khai về định dạng video trên {platform}.",
+                "platform": platform,
+                "source_group": source_group,
+                "region": "VN",
+                "language": "vi",
+                "category": f"Trend {platform}",
+                "keywords": [source_group, platform, "video trend", "short video"],
+                "source_name": str(source.get("name") or f"Nguồn công khai {platform}"),
+                "source_url": link,
+                "source_published_at": published,
+                "collected_at": now,
+                "last_verified_at": now,
+                "evidence": "Chủ đề xuất hiện trong feed khám phá công khai; cần rà nội dung trước khi dựng.",
+                "popularity_signal": "",
+                "content_safety": "requires_content_planning_review",
+            }
+        )
+    return items
+
+
 DEFAULT_FETCHERS: dict[str, Callable[[Mapping[str, Any]], list[dict[str, Any]]]] = {
     "google_trends_rss": fetch_google_trends_rss,
+    "public_media_rss": fetch_public_media_rss,
 }
 
 
@@ -585,24 +759,61 @@ def refresh_catalog(
     all_items: list[dict[str, Any]] = []
     checked: list[str] = []
     blockers: list[str] = []
+    source_group_status = {
+        group: {
+            "ok": False,
+            "item_count": 0,
+            "sources_checked": [],
+            "errors": [],
+            "cache_preserved": True,
+        }
+        for group in TREND_SOURCE_GROUPS
+    }
     for key, source in registry.items():
         adapter = str(source.get("adapter") or "")
+        source_group = _source_group(source, fallback=key)
+        group_status = source_group_status[source_group]
         fetcher = adapters.get(adapter)
         if not fetcher:
             blockers.append(f"{key}:reference_only")
+            group_status["errors"].append(f"{key}:adapter_unavailable")
             continue
         checked.append(key)
+        group_status["sources_checked"].append(key)
         try:
-            all_items.extend(fetcher(source) or [])
+            fetched = fetcher(source) or []
+            all_items.extend(
+                {
+                    **dict(raw),
+                    "source_group": _source_group(raw, fallback=source_group),
+                }
+                for raw in fetched
+                if isinstance(raw, Mapping)
+            )
         except Exception as exc:  # Cache is intentionally kept on source failure.
             blockers.append(f"{key}:{type(exc).__name__}")
+            group_status["errors"].append(f"{key}:{type(exc).__name__}")
     media_items = _deduplicate_media_items(all_items)
+    source_group_counts = {group: 0 for group in TREND_SOURCE_GROUPS}
+    for item in media_items:
+        source_group_counts[_source_group(item)] += 1
+    for group, count in source_group_counts.items():
+        source_group_status[group]["item_count"] = count
+        source_group_status[group]["ok"] = count > 0
+        source_group_status[group]["cache_preserved"] = count == 0
     rejected_count = max(0, len(all_items) - len(media_items))
     counts = upsert_items(conn, media_items, now=now, max_age_days=max_age_days) if media_items else {"inserted": 0, "updated": 0}
     success = bool(media_items)
     # A source outage must not empty the public menu. Expiration resumes only
     # after at least one source returned a fresh, attributable item.
-    expired = expire_items(conn, now=now) if success else 0
+    preserved_groups = {
+        group for group, status in source_group_status.items() if not status["ok"]
+    }
+    expired = (
+        expire_items(conn, now=now, preserve_source_groups=preserved_groups)
+        if success
+        else 0
+    )
     previous = refresh_status(conn)
     result = {
         "last_run_at": iso_text(now),
@@ -613,6 +824,9 @@ def refresh_catalog(
         "updated_count": counts["updated"],
         "expired_count": expired,
         "rejected_count": rejected_count,
+        "source_group_counts": source_group_counts,
+        "source_group_status": source_group_status,
+        "cache_preserved_groups": sorted(preserved_groups),
         "blocker": ";".join(blockers),
         "cache_preserved": not success,
         "paid_provider_calls": 0,
@@ -647,6 +861,9 @@ def refresh_status(conn) -> dict[str, Any]:
             "last_run_at": "", "last_success_at": "", "next_run_at": "",
             "sources_checked": [], "inserted_count": 0, "updated_count": 0,
             "expired_count": 0, "rejected_count": 0,
+            "source_group_counts": {group: 0 for group in TREND_SOURCE_GROUPS},
+            "source_group_status": {},
+            "cache_preserved_groups": list(TREND_SOURCE_GROUPS),
             "blocker": "not_refreshed_yet",
         }
     try:
@@ -666,6 +883,9 @@ def refresh_status(conn) -> dict[str, Any]:
         "updated_count": int(row[5] or 0),
         "expired_count": int(row[6] or 0),
         "rejected_count": int(detail.get("rejected_count") or 0),
+        "source_group_counts": dict(detail.get("source_group_counts") or {}),
+        "source_group_status": dict(detail.get("source_group_status") or {}),
+        "cache_preserved_groups": list(detail.get("cache_preserved_groups") or []),
         "blocker": row[7] or "",
     }
 

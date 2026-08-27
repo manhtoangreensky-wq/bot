@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from services import ui_navigation, video_scene3_flow, video_tail9, video_uifreeze1
 
 
@@ -177,7 +179,11 @@ def test_tail_pending_text_has_a_defined_subdub_guard_and_precedes_stale_studio(
     assert tail_owner < stale_studio
 
 
-def test_selecting_tier_300_opens_exactly_one_invoice() -> None:
+@pytest.mark.parametrize(
+    "tier_id",
+    (200, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500),
+)
+def test_each_video_ai_real_tier_opens_exactly_one_invoice(tier_id: int) -> None:
     tail = video_tail9.new_state(
         product_type="video_ai_real",
         session_id="tailflow14-invoice",
@@ -203,7 +209,8 @@ def test_selecting_tier_300_opens_exactly_one_invoice() -> None:
     tail = video_tail9.mark_audio_complete(tail, skipped=True)
     tail = video_tail9.prepare_summary(tail)
     tail["status_stage"] = "quality"
-    invoices: list[dict] = []
+    rendered: list[dict] = []
+    saved = {"tail": dict(tail)}
     invoice_keyboard = _load_function(
         "video_tail9_invoice_keyboard",
         {"video_scene3_keyboard": _validated_keyboard},
@@ -213,17 +220,29 @@ def test_selecting_tier_300_opens_exactly_one_invoice() -> None:
         {"video_scene3_keyboard": _validated_keyboard},
     )
 
-    async def render_invoice(_target, text, **kwargs):
-        invoices.append({"text": text, **kwargs})
+    def save_tail(_uid, _context, value, _owner, _host):
+        saved["tail"] = dict(value)
+
+    async def render_tail(_query, _uid, _context, screen):
+        rendered.append({"screen": screen})
         return True
+
+    async def answer_best_effort(query, text="", **kwargs):
+        try:
+            await query.answer(text or None, **kwargs)
+        except Exception:
+            return None
 
     handler = _load_function(
         "handle_video_tail_callback",
         {
-            "video_tail9_context": lambda _uid, _context: (dict(tail), "scene3", dict(host)),
+            "video_tail9_context": lambda _uid, _context: (dict(saved["tail"]), "scene3", dict(host)),
             "video_tail9": video_tail9,
-            "save_video_tail9_state": lambda *_args, **_kwargs: None,
+            "video_tail9_answer_best_effort": answer_best_effort,
+            "save_video_tail9_state": save_tail,
             "safe_int": lambda value, default=0: int(value) if str(value).isdigit() else default,
+            "video_selfshot3_scene_count_for_quality": lambda current, _quality: int(current.get("scene_count") or 1),
+            "video_selfshot3": SimpleNamespace(PRODUCT_ID="self_shot_cinematic_transform"),
             "video_tail9_commercial_preflight": lambda *_args, **_kwargs: {
                 "ok": True,
                 "engine_route": "video_ai_canonical",
@@ -241,30 +260,208 @@ def test_selecting_tier_300_opens_exactly_one_invoice() -> None:
                 "total_xu": 300,
                 "package_label": "Gói Tiêu chuẩn",
             },
-            "video_tail9_invoice_text": lambda *_args, **_kwargs: "🧾 Hóa đơn video",
-            "video_tail9_invoice_keyboard": invoice_keyboard,
+            "video_tail9_render": render_tail,
             "video_tail9_public_blocker_text": lambda: "blocker",
             "video_tail9_public_blocker_keyboard": blocker_keyboard,
             "get_user_language": lambda _uid: "vi",
-            "safe_edit_or_send": render_invoice,
             "logger": SimpleNamespace(exception=lambda *_args, **_kwargs: None),
         },
     )
 
     class Query:
-        id = "tailflow14-select-300"
-        data = "video_tail|quality|select|300"
+        id = f"tailflow14-select-{tier_id}"
+        data = f"video_tail|quality|select|{tier_id}"
         from_user = SimpleNamespace(id=914002)
 
         async def answer(self, *_args, **_kwargs):
-            return None
+            raise TimeoutError("telegram callback ack timed out")
 
     update = SimpleNamespace(callback_query=Query())
 
     assert asyncio.run(handler(update, SimpleNamespace())) is True
-    assert len(invoices) == 1
-    assert "Hóa đơn" in invoices[0]["text"]
-    assert _callbacks(invoices[0]["reply_markup"]).count("video_tail|confirm|open") == 1
+    assert rendered == [{"screen": "invoice"}]
+    assert saved["tail"]["quality_tier_id"] == str(tier_id)
+    assert saved["tail"]["status_stage"] == "invoice"
+    assert video_tail9.invoice_allowed(saved["tail"]) == (True, "ok")
+    assert _callbacks(invoice_keyboard()).count("video_tail|confirm|open") == 1
+
+
+def test_invoice_confirm_opens_confirmation_when_callback_ack_times_out() -> None:
+    tail = video_tail9.new_state(
+        product_type="video_ai_real",
+        execution_product_type="video_ai_prompt",
+        session_id="tailflow14-confirm-timeout",
+        scene_count=2,
+        ratio="9:16",
+    )
+    tail = video_tail9.apply_content_contract(
+        tail,
+        {
+            "content_source": "manual",
+            "canonical_content_mode": "manual",
+            "selected_prompt_text": "Prompt hai cảnh đã duyệt.",
+            "per_scene_content": [{"scene": 1}, {"scene": 2}],
+            "plan_status": "ready",
+        },
+    )
+    tail = video_tail9.select_package(
+        tail,
+        quality_tier_id="400",
+        package_id="product_video_400",
+        pricing_snapshot={"quality_xu": 400, "total_xu": 720},
+        capability_snapshot={"ok": True},
+    )
+    rendered: list[str] = []
+
+    async def render_tail(_query, _uid, _context, screen):
+        rendered.append(screen)
+        return True
+
+    async def answer_best_effort(query, text="", **kwargs):
+        try:
+            await query.answer(text or None, **kwargs)
+        except Exception:
+            return None
+
+    handler = _load_function(
+        "handle_video_tail_callback",
+        {
+            "video_tail9_context": lambda _uid, _context: (dict(tail), "scene3", {}),
+            "video_tail9": video_tail9,
+            "video_tail9_answer_best_effort": answer_best_effort,
+            "save_video_tail9_state": lambda *_args, **_kwargs: None,
+            "video_tail9_render": render_tail,
+            "get_user_language": lambda _uid: "vi",
+            "logger": SimpleNamespace(exception=lambda *_args, **_kwargs: None),
+        },
+    )
+
+    class Query:
+        id = "tailflow14-confirm-timeout"
+        data = "video_tail|confirm|open"
+        from_user = SimpleNamespace(id=914003)
+
+        async def answer(self, *_args, **_kwargs):
+            raise TimeoutError("telegram callback ack timed out")
+
+    update = SimpleNamespace(callback_query=Query())
+
+    assert asyncio.run(handler(update, SimpleNamespace())) is True
+    assert rendered == ["confirm"]
+
+
+def test_final_submit_renders_status_when_runtime_preflight_is_not_ready() -> None:
+    tail = video_tail9.new_state(
+        product_type="video_ai_real",
+        execution_product_type="video_ai_prompt",
+        session_id="tailflow14-submit-status",
+        scene_count=2,
+        ratio="9:16",
+    )
+    tail = video_tail9.apply_content_contract(
+        tail,
+        {
+            "content_source": "manual",
+            "canonical_content_mode": "manual",
+            "selected_prompt_text": "Prompt hai cảnh đã duyệt.",
+            "per_scene_content": [{"scene": 1}, {"scene": 2}],
+            "plan_status": "ready",
+        },
+    )
+    tail = video_tail9.select_package(
+        tail,
+        quality_tier_id="400",
+        package_id="product_video_400",
+        pricing_snapshot={"quality_xu": 400, "total_xu": 720},
+        capability_snapshot={"ok": True},
+    )
+    saved = {"tail": dict(tail)}
+    rendered: list[dict] = []
+
+    def save_tail(_uid, _context, value, _owner, _host):
+        saved["tail"] = dict(value)
+
+    async def answer_best_effort(query, text="", **kwargs):
+        try:
+            await query.answer(text or None, **kwargs)
+        except Exception:
+            return None
+
+    def submit_preflight(current, *, provider_ready, **_kwargs):
+        if provider_ready:
+            return {"allowed": True, "blocker_code": ""}
+        return {
+            "allowed": False,
+            "blocker_code": "provider_unavailable",
+            "public_message": "TOAN AAS chưa thể bắt đầu xử lý video lúc này.",
+        }
+
+    def prepare_status(_uid, _context, current, _owner, _host, snapshot=None):
+        prepared = dict(current)
+        prepared.update({
+            "submit_attempted": True,
+            "status_stage": "confirmed",
+            "submit_preflight_snapshot": dict(snapshot or {}),
+        })
+        saved["tail"] = prepared
+        return prepared
+
+    async def render_status(_query, _context, _uid, current, _owner, _host):
+        rendered.append({
+            "screen": "status",
+            "blocker": (current.get("submit_preflight_snapshot") or {}).get("blocker_code"),
+        })
+        return True
+
+    handler = _load_function(
+        "handle_video_tail_callback",
+        {
+            "video_tail9_context": lambda _uid, _context: (dict(saved["tail"]), "scene3", {}),
+            "video_tail9": video_tail9,
+            "video_tail9_answer_best_effort": answer_best_effort,
+            "save_video_tail9_state": save_tail,
+            "safe_int": lambda value, default=0: int(value) if str(value).isdigit() else default,
+            "VIDEO_TAIL9_DEFERRED_RUNTIME_PRODUCTS": {"video_ai_real"},
+            "video_b14_is_admin_or_owner": lambda _uid: True,
+            "get_user": lambda _uid: (200, 0, False),
+            "video_tail9_preflight": lambda *_args, **_kwargs: {"ok": True},
+            "video_tail9_prepare_submit_status": prepare_status,
+            "video_tail9_render_confirmed_status": render_status,
+            "product_video_public_preflight_evaluation": lambda *_args, **_kwargs: {
+                "ready": False,
+                "blocker_code": "provider_unavailable",
+            },
+            "product_video_worker_admission_status": lambda: {
+                "worker_version_compatible": False,
+                "worker_admission_block_reason": "worker_unavailable",
+            },
+            "get_user_language": lambda _uid: "vi",
+            "logger": SimpleNamespace(
+                warning=lambda *_args, **_kwargs: None,
+                exception=lambda *_args, **_kwargs: None,
+            ),
+        },
+    )
+    original_evaluator = video_tail9.evaluate_submit_preflight
+    video_tail9.evaluate_submit_preflight = submit_preflight
+
+    class Query:
+        id = "tailflow14-submit-status"
+        data = "video_tail|confirm|submit"
+        from_user = SimpleNamespace(id=914004)
+
+        async def answer(self, *_args, **_kwargs):
+            raise TimeoutError("telegram callback ack timed out")
+
+    try:
+        assert asyncio.run(
+            handler(SimpleNamespace(callback_query=Query()), SimpleNamespace())
+        ) is True
+    finally:
+        video_tail9.evaluate_submit_preflight = original_evaluator
+
+    assert saved["tail"]["submit_attempted"] is True
+    assert rendered == [{"screen": "status", "blocker": "provider_unavailable"}]
 
 
 def test_quality_back_is_owned_by_quality_and_returns_to_unified_summary() -> None:

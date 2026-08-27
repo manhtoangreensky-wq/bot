@@ -151,3 +151,15 @@ Chỗ tài liệu cũ không còn đúng: one-shot Key4U không đủ trước t
 trong fallback boundary, không phải thay classifier hoặc ép speaker.
 
 Live job `24` cho thấy connector policy đúng vẫn chưa đủ nếu server claim gate terminal hóa trước worker. Hiện claim transaction tính controlled-fallback eligibility trước ledger terminal decision và chỉ miễn đúng fallback Key4U đã xác nhận; `automatic_resubmit_allowed=false` vẫn chặn submit lại primary. Job/artifact/receipt LIVE vẫn pending.
+
+## Đối chiếu Product Video flow/artifact sau job 25 — 28/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại | Trạng thái |
+|---|---|---|
+| Canvas `9:16` đồng nghĩa hình thật phủ kín dọc | Job `25` có stream `540x960` nhưng nội dung ngang bị pad đen, hình co nhỏ | Không còn đủ để PASS |
+| Add-on bật trong UI sẽ tự tới renderer | Job `25` có `subtitle_requested=1` và SRT nhưng legacy plan làm manifest rơi subtitle | Không còn đúng |
+| Callback ACK là bước bắt buộc trước logic | Telegram timeout/502 làm 10 tier và Confirm đứng nguyên màn | Đã sửa thành best-effort |
+| Ý tưởng video có executor `video_idea_to_product` độc lập | Executor phải alias về owner `video_idea` để tạo Invoice/Confirm/Status Tail | Đã khóa contract |
+| Kho trend chỉ có Google Trends và TikTok reference | Backend có bốn nhóm public metadata Media/Facebook/YouTube/TikTok, refresh 7 ngày | Đã mở rộng không đổi UI |
+
+Bằng chứng hiện tại: job `25` đã delivery message `27576` và `0 Xu`, nhưng PV-L01 vẫn FAIL do letterbox + subtitle drop. Source correction có focused `45 passed`, quality/manual `39 passed`, Trend/scene `52 passed`, full output `24 passed`, compile `0`; UI lock `14/14` function bytes. Phải rerun live exact case sau deploy mới được đổi trạng thái thành PASS.

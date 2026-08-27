@@ -661,6 +661,7 @@ def normalize_scene_duration(
     target_width: int | None = None,
     target_height: int | None = None,
     target_fps: int = DEFAULT_NORMALIZED_FPS,
+    frame_fit_mode: str = "contain",
     preserve_audio: bool = False,
     audio_sample_rate: int = DEFAULT_AUDIO_SAMPLE_RATE,
     audio_channels: int = DEFAULT_AUDIO_CHANNELS,
@@ -689,6 +690,9 @@ def normalize_scene_duration(
         raise ValueError("normalized_geometry_invalid")
     if preserve_audio and not _has_audio_stream(source):
         raise RuntimeError("scene_audio_missing")
+    fit_mode = str(frame_fit_mode or "contain").strip().lower()
+    if fit_mode not in {"contain", "cover"}:
+        raise ValueError("normalized_frame_fit_mode_invalid")
     pad = max(0.0, target - duration)
     video_filters: list[str] = []
     slowdown_ratio = duration / target if target > 0 else 1.0
@@ -699,10 +703,20 @@ def normalize_scene_duration(
         audio_tempo = slowdown_ratio
     elif pad > 0.05:
         video_filters.append(f"tpad=stop_mode=clone:stop_duration={pad:.3f}")
-    video_filters.extend(
+    geometry_filters = (
         [
+            f"scale={width}:{height}:force_original_aspect_ratio=increase",
+            f"crop={width}:{height}:(iw-ow)/2:(ih-oh)/2",
+        ]
+        if fit_mode == "cover"
+        else [
             f"scale={width}:{height}:force_original_aspect_ratio=decrease",
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black",
+        ]
+    )
+    video_filters.extend(
+        [
+            *geometry_filters,
             "setsar=1",
             f"fps={fps}",
             f"settb=1/{DEFAULT_VIDEO_TRACK_TIMESCALE}",
@@ -1390,6 +1404,7 @@ def finalize_multiscene_scene_clips(
     output_width: int | None = None,
     output_height: int | None = None,
     output_fps: int = DEFAULT_NORMALIZED_FPS,
+    frame_fit_mode: str = "contain",
     transition_duration_sec: float = 0.35,
     preserve_scene_audio: bool = False,
     audio_sample_rate: int = DEFAULT_AUDIO_SAMPLE_RATE,
@@ -1593,6 +1608,7 @@ def finalize_multiscene_scene_clips(
             for index in required_indexes
         ],
         "normalization_profile": normalization_profile,
+        "frame_fit_mode": str(frame_fit_mode or "contain").strip().lower(),
         "transition_plan": requested_transition_plan,
         "transition_implementation_plan": implementation_transition_plan,
         "transition_duration_sec": selected_transition_duration,
@@ -1716,6 +1732,7 @@ def finalize_multiscene_scene_clips(
             target_width=requested_width,
             target_height=requested_height,
             target_fps=selected_fps,
+            frame_fit_mode=frame_fit_mode,
             preserve_audio=preserve_scene_audio,
             audio_sample_rate=audio_sample_rate,
             audio_channels=audio_channels,
@@ -1938,6 +1955,7 @@ def process_multiscene_video_pipeline(
     requested_addons: list[str] | tuple[str, ...] | None = None,
     output_width: int | None = None,
     output_height: int | None = None,
+    frame_fit_mode: str = "contain",
 ) -> dict[str, Any]:
     workspace = os.path.abspath(workspace_dir)
     os.makedirs(workspace, exist_ok=True)
@@ -2021,6 +2039,7 @@ def process_multiscene_video_pipeline(
             requested_addons=requested_addons,
             output_width=output_width,
             output_height=output_height,
+            frame_fit_mode=frame_fit_mode,
         )
         created_files.extend(
             str(path)
