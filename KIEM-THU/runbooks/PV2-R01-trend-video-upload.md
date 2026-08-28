@@ -25,6 +25,17 @@ This is the first representative live row after the checklist PR is merged.
 Current source evidence: `tests/test_p0_video_trend_four_lanes.py` =
 `19 passed in 7.80s`; manual/Tail/strategy aggregate = `54 passed in 8.10s`.
 
+Live checkpoint on runtime `02c1c4aa...` (29/08/2026): exact fixture local
+analysis returned `79.4667s`, `1280x720`, source audio yes and 3 scene-change
+beats. The flow reached Social creator profile, two approved version-2 scene
+prompts, Add-on subtitle + transition `1/1`, total Add-on `0 Xu`, then stopped
+before Quality because Review displayed source files `0` while the entity screen
+still retained assigned source `1`. No project/job/outbox/provider/wallet action
+started. Root cause is isolated to Trend entity-to-Scene3/Tail source handoff.
+TDD: `2 failed in 8.15s` -> `2 passed in 707.43s`; protected Trend/Strategy
+batch `61 passed in 16.37s`; compile/diff exit `0`. Resume this same session only
+after deploy; Review must show source files `1` before tier `400` is selected.
+
 Admission/idempotency evidence: focused transaction/single-use/outbox gate =
 `11 passed in 8.06s`. Dedupe does not rely on a wallet ledger row: project UUID,
 active render project, scene index and outbox job identity are database-unique;

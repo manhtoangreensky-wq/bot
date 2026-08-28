@@ -1,9 +1,10 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_PREFLIGHT_READY
+phase: PV2_R01_TREND_SOURCE_HANDOFF_SHIP_READY
 pointer: V2-03/PV2-R01
 base_sha: 3e28d3d9ac63baf26b939db4c55111bea3b97610
 goal: Live the most complex Video Trend upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
 allowed_files:
+  - bot.py
   - KIEM-THU/PRODUCT-VIDEO-LIVE-STRATEGY-V2.md
   - KIEM-THU/runbooks/PV2-R01-trend-video-upload.md
   - KIEM-THU/product-video-live-strategy-v2.json
@@ -12,6 +13,7 @@ allowed_files:
   - TAI-LIEU/01-NGHIEP-VU-VAN-HANH.md
   - tests/test_p0_product_video_live_strategy_v2.py
   - tests/test_p0_video_trend_four_lanes.py
+  - tests/test_p0_product_video_trend_source_tail_handoff.py
   - .agents/state/P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md
   - .agents/state/p0-product-video-v2.yaml
 protected_domains:
@@ -119,4 +121,27 @@ current_case:
   fixture_bytes: 32391742
   fixture_sha256: 784FBE5BBD7B8D59A40A16AD103DB2B14B5DC7FCE71BE2ADA3E24A3BC04E2732
   provider_action_started: false
-next_action: Merge this measured closeout, then execute only the PV2-R01 Trend upload runbook from baseline through one final Confirm; on FAIL write a RED only at the Trend adapter/material boundary, and on PASS freeze its route, artifact, receipt, report and zero-wallet evidence.
+pv2_r01_live_red:
+  runtime_sha: 02c1c4aa0533788816d740245ba9812bf4f63ea0
+  baseline_projects_jobs_outbox: [31, 27, 26]
+  baseline_transactions_credit_events_provider_usage: [0, 10, 0]
+  baseline_owner_credits_total_spent: [200, 0]
+  active_video_jobs: 0
+  source_analysis: 79.4667s 1280x720 audio yes 3 scene-change beats
+  flow_reached: upload_analysis_entity_creative_requirements_scene_prompts_addon_review
+  profile: social_creator_trend
+  prompt_versions: [2, 2]
+  approved_prompts: 2
+  selected_addons: [subtitle_source_language, transition_default]
+  transition_coverage: 1/1
+  addon_total_xu: 0
+  red: Tail Review displayed 0 source files while entity UI retained assigned source 1
+  provider_action_started: false
+  project_job_outbox_delta: [0, 0, 0]
+  root_cause: trend entity finish omitted uploaded UIFLOW3 source from Scene3 reference assets and embedded Tail refresh
+  tdd_red: 2 failed in 8.15s
+  exact_green: 2 passed in 707.43s
+  protected_green: 61 passed in 16.37s
+  py_compile: exit 0
+  diff_check: exit 0
+next_action: Ship only the Trend entity-to-Tail source handoff correction, deploy exact SHA, then reuse the current pre-quality live session through entity refresh; Review must show 1 source file before tier 400, Invoice and one final Confirm.
