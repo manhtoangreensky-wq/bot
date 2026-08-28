@@ -395,3 +395,16 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Trước khi nhả shared slot, chỉ owner worker bị dừng; job #27 giữ queued/unlocked,
   hai task ID không đổi, provider usage `0`, transaction `0`, credit-event giữ
   `10`, charged Xu `0`. Đây vẫn là failure-loop, không phải product LIVE PASS.
+- F2 PR #924 đã squash-merge SHA
+  `f3f79fd50d4b2ad7ce345c7edc5c463ebaea44b5`; deploy run `33206104844`
+  SUCCESS trong `10m23s`. Bot và owner worker cùng đọc đúng SHA.
+- Một bounded worker claim đổi job #27 từ queued sang DB `failed` với durable
+  `terminal_state/final_decision=failed_no_charge`, `continue_polling=0` và
+  unprocessed result rỗng. Attempts chỉ tăng `950 -> 951`; scene/task map vẫn
+  giữ đúng hai task gốc, một task mỗi scene, cả hai `failed/exhausted`.
+- Sau terminal: active Product Video jobs `0`, provider usage `0`, transactions
+  `0`, credit events giữ `10`, `provider_submit_called=0`, charged Xu `0`; owner
+  worker được dừng và xác minh `inactive`.
+- Job #27 chỉ PASS failure-loop, không PASS sản phẩm. Không tạo thêm manual job
+  trùng. Bằng chứng MP4/Add-on/report còn lại phải được lấy trên representative
+  thật `PV2-R01` để một provider job đồng thời kiểm Video Trend và shared Tail.
