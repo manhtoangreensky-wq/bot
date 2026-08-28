@@ -17,16 +17,62 @@
 ### Current pointer
 
 - Current SPEC: `SPEC-08`.
-- Current SUBSPEC: `SPEC-08.0E.3`.
-- Current phase: `SHIP / async multipart transport correction`.
-- Production action active: `NO; SubDub reacquired LIVE/CHROME/VPS after exact releases`.
-- Telegram/provider job active: `NO; job #A86321F62B terminal failed_no_charge`.
+- Current SUBSPEC: `SPEC-08.0F.4`.
+- Current phase: `BLOCKED_BY_SHARED_RESOURCE / source READY_TO_SHIP`.
+- Production action active: `NO; Product Video currently owns LIVE/CHROME/VPS`.
+- Telegram/provider job active: `NO; job #6DC569C0A6 terminal failed_no_charge`.
 - Wallet mutation: `0`.
-- Next allowed action: wait exact Product Video releases; then fetch/rebase
-  latest main, run one post-rebase gate, push/PR/deploy/exact combo retry.
-- Next forbidden action: edit classifier/cast/audio UI/pricing/mux/multi engine,
-  start another Telegram job, or move to standalone/multi before this failure
-  loop ships and the combo delivers a real MP4.
+- Next allowed action: wait for exact Product Video LIVE/CHROME/VPS/DEPLOY
+  releases, then fetch/rebase latest main, run one post-rebase focused gate,
+  create one commit/PR, squash merge, deploy/runtime readback and combo live.
+- Next forbidden action: ship the raw-frame/YIN fallback; edit shared
+  classifier/cast thresholds, audio UI, pricing, wallet, TTS/mux, multi engine;
+  start Telegram/provider/VPS action while Product Video owns the shared slot;
+  or move to standalone/multi before the combo artifact passes.
+
+### Task contract — active SPEC-08 correction
+
+- `GOAL`: exact fixture SHA `85C8793D...` produces a real combo MP4 + SRT +
+  receipt with independently detected male/female speaker groups; then the same
+  fixture produces a standalone dubbed MP4; only then lock lane 2 and open
+  multi-speaker work.
+- `SCOPE`: replace only the failed exact-two singing-gender authority after the
+  already-passing Key4U ASR + Gemini diarization boundary.
+- `BASE_SHA`: local task HEAD
+  `8965cbc0863a9546d625d80a67bebc76bc33e9dd`; remote rebase is deferred until
+  Product Video releases shared Git/LIVE/VPS and source GREEN is terminal.
+- `ALLOWED_FILES`:
+  - new `services/subdub_two_speaker_gender_onnx.py`;
+  - `services/subdub_blackboxes/auto_speaker.py`, exact-two integration only;
+  - `bot.py`, only `_extract_subdub_auto_pcm` exact stereo contract;
+  - `assets/models/subdub_auto_gender/*`, the two hash-locked ONNX models and
+    their MIT/CC-BY notices;
+  - `requirements.txt` / `requirements.lock`, only to pin NumPy/ONNX Runtime
+    for the production Linux/Python 3.11 runtime;
+  - `.github/workflows/deploy-vps.yml` and its existing contract test, only to
+    sync the target hash-locked dependencies before bot restart;
+  - dedicated exact-two ONNX tests, the two existing lane-lock tests, this
+    checklist, tester docs and durable state.
+- `PROTECTED_FILES`: `services/subdub_blackboxes/auto_multi_speaker.py` SHA-256
+  `55AAB894...`; `services/subdub_speaker_cast.py` SHA-256 `DE93620F...`;
+  `services/subdub_two_speaker_asr_fallback.py` SHA-256 `94748DEF...`; audio
+  UI/state, Key4U transport/retry, Gemini parser, pricing/wallet, TTS/mux and
+  Product Video remain semantically unchanged.
+- `ACCEPTANCE`: independent `male-male`, `male-female`, `female-female` are
+  legal; tie/weak/missing/hash/deadline/cancel is fail-closed; exact fixture
+  groups are `speaker_0=male/low` and `speaker_1=female/high`; evidence is at
+  most 48 unique seconds; provider calls and wallet mutations are zero.
+- `TARGETED_TESTS`: dedicated service contract + exact-two preflight stereo
+  integration + cleanup + extractor validation, first observed RED and then
+  fresh GREEN.
+- `REGRESSION_TESTS`: two/multi isolation, protected hashes, timeout/cancel,
+  audio numeric UI, pricing/receipt and no-provider/no-wallet comparators.
+- `PROHIBITED_ACTIONS`: no forced opposite-gender pairing, threshold loosening,
+  generative gender authority, paid provider test, ENV/secret or wallet change,
+  UI redesign, refactor of shared modules, premature Telegram live.
+- `STOP_CONDITIONS`: any protected hash changes, aggregate evidence exceeds
+  48 seconds, model/license/hash cannot be verified, a new applicable failure
+  appears, or LIVE produces no real final MP4/SRT/receipt.
 
 ### Luật bất biến
 
@@ -80,20 +126,27 @@ engine baseline; fixture hiện tại vẫn bắt buộc giao MP4 live mới.
 
 | Trường | Giá trị |
 | --- | --- |
-| Public job | `#FD14FC02D6` |
-| Internal job | `fd14fc02d60727ff0e44` |
+| Public job | `#6DC569C0A6` |
+| Internal job | `6dc569c0a6200b6355e9` |
 | Mode | `subtitle_plus_dub` |
 | Terminal | `failed_no_charge` |
-| Blocker | `pipeline_failed:RuntimeError` |
+| Runtime | `77fee7ce472ffa65c32d91e248b87fee38fcb69b` |
+| ASR/diarization | `PASS`; Key4U transcript + Gemini labels; `18` cues, speakers `8/10` |
+| Failure boundary | after sidecar/cast input persistence; before TTS, dub audio, mux and delivery |
 | charged_xu | `0` |
-| Status panel message | `27383` |
-| Telegram incident | Bot API returned repeated `502 Bad Gateway` during the same flow |
+| Wallet | credits `200`, total_spent `0`, transactions `0`, credit_events `1` |
 
 ### Allowed production scope
 
-- `services/subdub_blackboxes/auto_speaker.py`: exact 2-speaker engine rollback.
+- `services/subdub_two_speaker_gender_onnx.py`: bounded exact-two UVR-small +
+  PANNs ONNX authority; no network/provider path.
+- `services/subdub_blackboxes/auto_speaker.py`: exact-two service integration
+  and guaranteed transient-PCM cleanup only.
+- `assets/models/subdub_auto_gender/*`: only hash-locked model/license assets.
 - `bot.py`: only exact lane-2 dispatch/compatibility and audio-mix UI/state symbols
   listed in `SPEC-02`.
+- `bot.py`: `_extract_subdub_auto_pcm` may add only stereo `44,100 Hz` `s16le`
+  beside the protected mono `16,000 Hz` contract; no filter or UI change.
 - `bot.py`: live-failure exception for the scoped
   `subdub_deepgram_request_params(require_diarization=True)` model only; default
   non-diarized ASR remains unchanged.
@@ -838,8 +891,291 @@ RED evidence:
   `1 passed, 1 warning in 542.49s`.
 - [x] Latest-main `py_compile bot.py` + transport test and range diff-check:
   exit `0`.
-- [-] One PR/squash/deploy/runtime readback after exact shared releases.
-- [B] One exact combo retry to MP4 + SRT + receipt or stay in SPEC-08.
+- [x] One PR `#915`, squash/deploy/runtime readback at
+  `77fee7ce472ffa65c32d91e248b87fee38fcb69b`; deploy run `33111291104`
+  SUCCESS in `5m45s`; bot/web/nginx active and tracked VPS diff clean.
+- [!] Exact combo retry `#6DC569C0A6` passed transport/ASR/diarization and
+  persisted `18` cues with exactly two labels (`speaker_0=8`, `speaker_1=10`),
+  then stopped before TTS/mux/delivery. Continue at `SPEC-08.0F`; do not reopen
+  transport or start standalone/multi.
+
+### SPEC-08.0F — Live failure loop: exact acoustic cast boundary
+
+#### SPEC-08.0F.1 — Exact production classifier diagnostic
+
+- [x] Update this checklist and durable state to job `#6DC569C0A6` before any
+  source diagnostic.
+- [x] Use only fixture `2 giọng nam nữ.mp4` SHA-256 `85C8793D...`, its
+  production-normalized PCM (`mono`, `16 kHz`, `s16le`) and the exact persisted
+  18-cue speaker ranges; no provider/network/Telegram call.
+- [x] Call the production owner
+  `subdub_speaker_cast.classify_speaker_registers(...)` with a bounded 30-second
+  deadline and a non-cancelling stop callback.
+- [x] Record per-speaker register, confidence and returned acoustic evidence, or
+  the exact `AUTO_CAST_MANUAL_REQUIRED` / `AUTO_CAST_UNAVAILABLE` exception.
+- [x] State one falsifiable root-cause hypothesis from this output. Do not edit
+  production source in this SUBSPEC.
+
+Measured evidence:
+
+- Exact fixture: `4,284,017` bytes, SHA-256 `85C8793D...`; extracted PCM:
+  `1,547,794` bytes, mono `16 kHz` `s16le`, SHA-256 `82F1FFB6...`.
+- Exact production call returned `AUTO_CAST_MANUAL_REQUIRED` in `0.265s` after
+  trying all `18` selected windows for `speaker_0`; all `18` yielded no accepted
+  pitch, so `speaker_1` was never evaluated.
+- Signal is not silent: production-selected RMS spans `0.154301..0.269327`,
+  peak spans `0.652008..0.923553`.
+- Dense `0.25s` scan measured `81` windows for `speaker_0` and `105` for
+  `speaker_1`: `156` lacked two pitch frames; `14` had a stable competing
+  pitch; the remainder mostly failed purity/confidence/stability gates.
+- Only four windows survived: speaker 0 `72.398 Hz`; speaker 1
+  `260.135 / 131.148 / 130.753 Hz`. The speaker-1 evidence conflicts across
+  registers, so relaxing a threshold or forcing opposite genders would guess.
+- Falsifiable root-cause hypothesis: karaoke backing audio is present inside
+  diarized cue windows and the raw full-mix PCM does not provide stable,
+  speaker-specific F0 evidence. Inspect whether the existing diarization
+  response already carries independent acoustic/gender evidence before RED;
+  otherwise the failing boundary is classifier input, not its thresholds.
+
+Verify:
+
+```text
+python .agents/tools/subdub_exact_cast_diagnostic.py
+expected: exact fixture/sidecar hashes, two speaker labels, then either two
+measured register results or one exact fail-closed exception; provider_calls=0
+```
+
+#### SPEC-08.0F.2 — Historical raw-frame RED (rejected after review)
+
+- [x] Inspect the exact diarization parser/result contract for speaker-specific
+  acoustic or gender evidence before choosing the RED seam; no provider call.
+- [x] Exact Gemini annotations contain only `text`, `speaker`, `start_offset`
+  and `end_offset`; no gender/acoustic field is discarded by the parser.
+- [x] Reject the old #853 / protected-multi audio filter comparator: it returns
+  `high/high` on this male/female fixture and therefore cannot be restored.
+- [x] Exact raw-PCM sparse-offset frame evidence resolves independently:
+  speaker 0 `3 low / 0 high`, median `87.073 Hz`, weight ratio `1.0`;
+  speaker 1 `9 high / 5 low`, median high `198.813 Hz`, weight ratio
+  `0.661405`. No opposite-gender constraint is used.
+- [x] Source history proves PR `#889` already contained the fail-closed
+  `_independent_two_speaker_classifications` contract for low/low, low/high and
+  high/high, but rollback PR `#896` removed it with the whole-file #842 restore.
+- [x] Write one no-network RED that restores the PR #889 independent helper and
+  feeds it bounded known pitch-frame evidence from the same raw PCM/sparse
+  offsets after the anchor whole-window classifier fails.
+- [B] If the production classifier returns both casts, RED the wrapper/preflight
+  propagation that discards them before TTS.
+- [B] If it fails on input/ranges, RED the exact normalization/merge boundary;
+  do not change thresholds first.
+- [B] If acoustic evidence itself is insufficient, RED only the smallest
+  fail-closed classifier contract needed for this fixture while preserving
+  nam–nam, nam–nữ, nữ–nữ and ambiguous/manual-required behavior.
+
+Historical RED seam below is evidence only and **must not ship**:
+
+- `services/subdub_blackboxes/auto_speaker.py` only.
+- Preserve the PR #842 whole-window classifier as the first attempt.
+- On `AutoCastManualRequired` and exactly two labels only, restore the already
+  shipped PR #889 independent weighted-vote helper.
+- The collector keeps the same raw PCM and `_speaker_window_offsets`; it reads
+  known `low/high` evidence from bounded pitch frames inside those windows.
+- At least two winning observations and weighted support `>=0.60` remain
+  required independently for each speaker; ties/unknowns remain manual.
+- `subdub_speaker_cast.py`, `auto_multi_speaker.py`, PCM extraction/filter,
+  parser/provider/UI/pricing/wallet/TTS/mux remain byte/behavior locked.
+
+RED evidence:
+
+- First invocation was invalid for one case because the OS pytest temp root
+  denied access; the other five product assertions failed because the helper
+  symbols did not exist. No product conclusion was taken from that invocation.
+- Corrected no-cache workspace-basetemp RED: `6 failed in 0.48s`; every failure
+  was the missing independent/helper boundary, with no setup, import or
+  collection error.
+- Focused metric RED: `1 failed in 0.44s`; three accepted 200 ms pitch frames
+  were incorrectly reported as `1.5s` instead of `0.6s` before the correction.
+
+#### SPEC-08.0F.3 — Reject raw-frame fallback and replace exact-two authority
+
+##### SPEC-08.0F.3A — Review the rejected fallback
+
+- [x] Verify all four reviewer findings against the actual working diff.
+- [x] Mark the fallback `Ready to merge: NO`; no commit/push/PR/deploy/live.
+- [x] Preserve the measured exact-fixture result as historical diagnostic only.
+- [x] Choose no threshold relaxation and no forced gender pair.
+
+- [x] Change only the production boundary proven by `08.0F.2` RED.
+- [x] Keep Key4U transport/retry, Gemini parser, audio UI, pricing, wallet,
+  TTS/mux and the multi-speaker engine unchanged.
+- [!] Run the exact GREEN, two/multi isolation, locked hashes, `py_compile` and
+  `git diff --check`; stop editing when they pass.
+
+BUILD/REVIEW evidence so far:
+
+- Production diff is only `services/subdub_blackboxes/auto_speaker.py`: anchor
+  whole-window classifier remains first; exact-two only fallback collects
+  bounded known pitch frames from the same raw PCM offsets, then applies the
+  already-shipped independent `>=2` winning observations / `>=0.60` weighted
+  support contract without forcing opposite genders.
+- Exact focused GREEN: `6 passed in 0.38s`; metric GREEN + hash selector:
+  `8 passed in 4.97s`; final focused/timeout/cancel/central-first batch:
+  `26 passed in 5.95s`.
+- Exact fixture production helper: `speaker_0=low`, confidence `0.778687`,
+  `0.6s / 9,600 samples`; `speaker_1=high`, confidence `0.904186`,
+  `1.8s / 28,800 samples`; provider calls `0`, wallet mutations `0`.
+- Protected historical comparator before test alignment: `13 passed, 3 failed
+  in 527.07s`; all three failures were source-lock assertions that demanded
+  byte-for-byte #842/no fallback. UI, multi isolation, central-first,
+  same-gender and ambiguous fail-closed assertions passed.
+- Focused regression: `55 passed, 3 baseline-stale failures in 8.42s`.
+  The three owners are unchanged by this branch: direct shared-classifier
+  voiced-seconds expectation, one-frame acceptance expectation, and the old
+  #853 filter expectation in `bot.py`; `NEW_FAILURES=0` by unchanged source.
+- Aligned lock now requires the scoped exact-two fallback and forbids any
+  protected-multi filter seam. Current post-correction engine Git blob is
+  `b6001cdc26bed4c463075596cfa3ba3b9bf1901a`.
+
+Independent review reopened four Important gaps; `Ready to merge: NO`:
+
+- Raw frame YIN ignores the competing-pitch/purity/stability reasons that made
+  the whole-window classifier fail. A mixed `120+220 Hz` probe can be cast as
+  low/low; exact karaoke success alone does not prove voice ownership.
+- 200 ms frames overlap at a 100 ms hop; summing frame lengths can report more
+  `voiced_seconds/sample_count` than unique input audio and supplies correlated
+  votes to the `>=2` gate.
+- Output confidence reports only median winning-frame confidence; it must also
+  reflect weighted vote support (fixture support was `0.661405`, not `0.904186`).
+- Whole-window and fallback each reset a 48-second counter, so aggregate sample
+  work can reach 96 seconds despite the advertised job cap.
+- `08.0F.3` remains FAIL/REOPENED until all four have RED, minimal GREEN and a
+  new independent review. No commit/push/PR/deploy/live is allowed meanwhile.
+
+##### SPEC-08.0F.3B — ONNX service and integration RED
+
+- [x] Replace the raw-frame test contract with one dedicated behavioral file:
+  `tests/subdub_service_only/test_p0_subdub_two_speaker_onnx_gender.py`.
+- [x] RED independent vote grouping for `male-male`, `male-female` and
+  `female-female`; no rule may make the two outputs opposite by construction.
+- [x] RED tie, dominance `<0.75`, fewer than four classified cues, NaN/invalid
+  score and wrong label count to exact `AUTO_CAST_MANUAL_REQUIRED`.
+- [x] RED confidence equals literal group vote dominance, not a winning-logit
+  confidence; selected seconds/sample count are the union of cue ranges.
+- [x] RED one aggregate exact-two evidence budget `<=48.0s` and bounded cue
+  count; no second/reset budget after a failed classifier.
+- [x] RED model missing/hash mismatch/license path/deadline/stop callback to
+  fail-closed with no partial authority.
+- [x] RED exact-two preflight requests stereo `44,100 Hz` `s16le`, invokes the
+  ONNX service once and deletes PCM on success, manual result, timeout, cancel
+  and unexpected exception.
+- [x] RED mono `16 kHz` and stereo `44.1 kHz` as the only extractor contracts;
+  every other channel/rate/format tuple rejects before FFmpeg.
+- [x] RED default/manual/multi paths never call the exact-two ONNX service.
+- [x] Run the whole dedicated file with workspace `--basetemp`; accept RED only
+  when assertions fail for the missing service/stereo/integration contracts,
+  not import/setup/collection errors.
+
+RED terminal evidence:
+
+- Command: Python 3.14 `pytest -q --noconftest -p no:cacheprovider
+  --basetemp artifacts/pytest-08f-onnx-red-1` on the dedicated file.
+- Result: `20 failed, 5 passed, 1 warning in 466.65s`, exit `1`.
+- All 19 service/integration cases failed because
+  `services.subdub_two_speaker_gender_onnx` did not exist; the stereo extractor
+  case failed with exact `AUTO_CAST_UNAVAILABLE` at its old mono-only guard.
+- Protected mono `16 kHz` extractor and four invalid tuple guards passed. No
+  collection/setup/harness error, provider call, ffmpeg process or wallet action.
+
+##### SPEC-08.0F.3C — Minimal ONNX GREEN
+
+- [x] Remove every rejected raw-frame helper and import from
+  `auto_speaker.py`; do not retain it as a fallback.
+- [x] Add one local service with public owner
+  `classify_two_speaker_genders(stereo_pcm_path, ranges_by_speaker,
+  deadline_monotonic, stop_requested)`.
+- [x] Verify and ship only UVR `UVR_MDXNET_3_9662.onnx` SHA-256
+  `E02220E8...` and PANNs MobileNetV1 SHA-256 `0DA2C433...`, plus licenses and
+  third-party notices; no Torch/checkpoint/Cnn14/audio-separator assets.
+- [x] Pure local flow: stereo PCM → UVR vocal separation → per-cue PANNs
+  `max(male speech, male singing)` vs `max(female speech, female singing)` →
+  per-speaker vote dominance → `male=low`, `female=high`.
+- [x] Exact-two preflight uses the service; multi/default/manual remain on
+  their existing owners; all transient PCM is cleaned.
+- [x] Turn the full `08.0F.3B` file GREEN and stop production edits.
+
+GREEN/BUILD evidence:
+
+- Dedicated ONNX file: `33 passed, 1 warning in 9.39s`, exit `0` on a fresh
+  basetemp; warning only google.genai deprecation.
+- Exact fixture on shipped `onnxruntime 1.29.0`: `42.938s`, provider calls `0`,
+  wallet mutations `0`; speaker 0 `male/low`, votes `7/8`, dominance `0.875`,
+  evidence `21s`; speaker 1 `female/high`, votes `8/10`, dominance `0.800`,
+  evidence `27s`; aggregate unique evidence `48s`.
+- Post-rebase wall-time RED: the same fixture hit the former `120s` deadline at
+  a PANN cue while local CPU was contended. This was a real fail-closed result,
+  so shipping stopped. Exact-two wall budget alone is now bounded at `300s`;
+  evidence remains `48s`, concurrency remains `1`, and timeout/cancel/drain
+  contracts remain fail-closed. Regressions: `5 passed`; exact ORT `1.29.0`
+  fixture rerun PASS in `106.031s` with the same two casts and provider/wallet
+  `0`.
+- UVR asset: `29,704,436` bytes, SHA-256 `E02220E8...`, official UVR model MIT
+  declaration/copyright preserved. PANNs asset: `23,570,561` bytes, SHA-256
+  `0DA2C433...`; code MIT and Zenodo pretrained-model record CC BY 4.0.
+- Review RED/GREEN corrections: non-cooperative timeout + concurrency lock
+  `2 failed → 5 passed`; ONNX IndexError/OverflowError `2 failed → 6 passed`;
+  `>64`/later-valid cue selection `2 failed → GREEN`; multi marker isolation
+  `1 failed → 1 passed`; deploy dependency/incremental NUL-safe backup contract
+  and real space/Unicode temp-repo integration `10 passed`.
+- Fractional-tail extractor RED was valid: reported duration `1s`, final cue end
+  `1.75s`, expected `-t 1.75`, actual `-t 1`. Minimal extractor now uses
+  `max(reported duration, max cue end)` under the existing `1800s` cap; GREEN
+  `7 passed in 619.81s`, including real `_read_montage` read of the final cue.
+- Actual PANNs ONNX minimum-input probe disproved a speculative `0.31s` floor:
+  tracked ORT/model fails only at `1` sample and returns `(1,527)` from `2`
+  samples; production resampler already requires at least `2` samples. No
+  arbitrary duration threshold was added.
+- One prior combined focused invocation was `INVALID_HARNESS`: `34 passed,
+  18 setup errors` from WinError 5 while pytest removed a reused basetemp. No
+  product conclusion was taken; fresh basetemp runs above are authoritative.
+
+##### SPEC-08.0F.3D — Protected verification and review
+
+- [x] Re-run dedicated GREEN, timeout/cancel, two/multi isolation, UI/audio,
+  price/receipt and locked-hash comparators.
+- [x] Run `py_compile` on every changed Python file and `git diff --check`.
+- [x] Measure exact fixture locally with provider calls `0`: require
+  `speaker_0=male/low`, `speaker_1=female/high`, dominance `>=0.75` each.
+- [x] Confirm protected SHA-256 values are unchanged and the diff contains no
+  UI, pricing/wallet, provider transport, TTS/mux or multi-engine change.
+- [x] Independent review must return Critical `0`, Important `0`, ready to
+  merge `YES`; otherwise remain at `SPEC-08.0F.3`.
+
+Final review/verify evidence:
+
+- `py_compile bot.py` terminal exit `0`; all other changed Python files compile
+  exit `0`; `git diff --check` exit `0`, only LF→CRLF warnings.
+- Lock/cleanup/extractor selectors: `24 passed, 1 warning in 8.64s`.
+- Current-snapshot protected comparator: `278 passed, 28 failed, 1 skipped,
+  1 warning in 30.59s`; exact `28` failure IDs match BASE_SHA, so
+  `NEW_FAILURES=0`. The skipped fractional montage case was separately GREEN
+  with Python 3.12 + NumPy/ORT `1.29.0` (`7 passed`).
+- Deploy dependency + NUL-safe incremental backup contract and real temp-repo
+  round trip for `admin ID.txt` / `thư mục/giọng nữ.txt`: `10 passed`.
+- Linux/Python 3.11 requirements dry-run: `78` packages resolvable with hashes,
+  including NumPy `2.4.6` and ONNX Runtime `1.29.0`.
+- Protected hashes unchanged: multi engine `55AAB894...`, shared cast
+  `DE93620F...`, exact-two ASR fallback `94748DEF...`.
+- Independent final verdict: Critical `0`, Important `0`,
+  `READY_TO_MERGE=YES`.
+
+#### SPEC-08.0F.4 — One ship/deploy/combo retry
+
+- [B] Waiting only for Product Video to release the shared Git/LIVE/VPS slot;
+  no source blocker remains.
+- [B] One focused commit and PR, squash merge, one deploy/runtime identity
+  check, then one exact combo retry.
+- [B] PASS only with real MP4 + SRT + receipt, correct two independent casts,
+  original `40%`, dub `150%`, nonzero list prices, admin `charged_xu=0`, and
+  unchanged wallet/transactions; otherwise stay in `SPEC-08`.
 
 ### SPEC-08.1 — Pre-admission
 

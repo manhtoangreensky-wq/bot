@@ -56,3 +56,10 @@ Lỗi cũ cần canh: literal `\\n`, status nằm ngang, video mất audio, back
 12. Nếu Deepgram empty và Key4U lần đầu unusable, exact Auto 2 được gọi Key4U
     tối đa `2` lần. HTTP `401` hoặc segment không có timestamp provider phải
     dừng ngay; tuyệt đối không ép speaker hoặc mở fallback này cho Auto multi.
+13. Fixture karaoke có nhạc nền: kiểm evidence cast, không chỉ nhìn hai label.
+    Kết quả khóa local là speaker 0 `male/low`, vote `7/8`, dominance `0.875`,
+    evidence `21s`; speaker 1 `female/high`, vote `8/10`, dominance `0.800`,
+    evidence `27s`. Tổng unique evidence `48s`, classifier provider calls `0`.
+    Filter cũ từng trả sai `high/high`; raw-frame fallback đã bị cấm. Nếu log
+    chỉ có label mà không có gender/register/dominance/evidence time, hoặc dùng
+    “một nam + một nữ” không qua vote độc lập, FAIL.

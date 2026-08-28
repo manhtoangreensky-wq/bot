@@ -14,10 +14,12 @@ from pathlib import Path
 from typing import Any
 
 from services import subdub_speaker_cast as speaker_cast
+from services import subdub_two_speaker_gender_onnx
 from services import subtitle_dub_product_pipeline
 
 
 AUTO_SPEAKER_PREFLIGHT_READY = "AUTO_SPEAKER_PREFLIGHT_READY"
+_CLASSIFIER_DRAIN_GRACE_SECONDS = 2.0
 
 
 def is_auto_speaker_state(state: Mapping[str, object] | None) -> bool:
@@ -216,18 +218,45 @@ async def _drain_worker(worker: asyncio.Task) -> None:
             pass
 
 
+def _consume_detached_worker(worker: asyncio.Task) -> None:
+    try:
+        worker.result()
+    except BaseException:
+        pass
+
+
+async def _drain_worker_bounded(worker: asyncio.Task) -> bool:
+    deadline = asyncio.get_running_loop().time() + _CLASSIFIER_DRAIN_GRACE_SECONDS
+    while not worker.done():
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0.0:
+            break
+        try:
+            done, _pending = await asyncio.wait({worker}, timeout=remaining)
+        except asyncio.CancelledError:
+            continue
+        if done:
+            break
+    if worker.done():
+        _consume_detached_worker(worker)
+        return True
+    worker.add_done_callback(_consume_detached_worker)
+    return False
+
+
 async def _classify_off_event_loop(
     pcm_path: Path,
     ranges_by_speaker: dict[str, list[tuple[float, float]]],
 ) -> dict[str, dict]:
     classifier_started = time.monotonic()
     classifier_deadline = (
-        classifier_started + speaker_cast.CLASSIFIER_WALL_TIMEOUT_SECONDS
+        classifier_started
+        + subdub_two_speaker_gender_onnx.CLASSIFIER_WALL_TIMEOUT_SECONDS
     )
     stop_event = threading.Event()
     worker = asyncio.create_task(
         asyncio.to_thread(
-            speaker_cast.classify_speaker_registers,
+            subdub_two_speaker_gender_onnx.classify_two_speaker_genders,
             str(pcm_path),
             ranges_by_speaker,
             deadline_monotonic=classifier_deadline,
@@ -235,6 +264,7 @@ async def _classify_off_event_loop(
         )
     )
     remaining_seconds = max(0.0, classifier_deadline - time.monotonic())
+    drain_attempted = False
     try:
         return await asyncio.wait_for(
             asyncio.shield(worker),
@@ -242,16 +272,18 @@ async def _classify_off_event_loop(
         )
     except (asyncio.TimeoutError, TimeoutError) as exc:
         stop_event.set()
-        await _drain_worker(worker)
+        await _drain_worker_bounded(worker)
+        drain_attempted = True
         raise speaker_cast.AutoCastManualRequired() from exc
     except asyncio.CancelledError:
         stop_event.set()
-        await _drain_worker(worker)
+        await _drain_worker_bounded(worker)
+        drain_attempted = True
         raise
     finally:
-        if not worker.done():
+        if not worker.done() and not drain_attempted:
             stop_event.set()
-            await _drain_worker(worker)
+            await _drain_worker_bounded(worker)
 
 
 def _cleanup_pcm_path(pcm_path: Path | None) -> bool:
@@ -501,7 +533,10 @@ async def run_auto_speaker_preflight(
     current = state if isinstance(state, Mapping) else {}
     pcm_path: Path | None = None
     try:
-        if not is_auto_speaker_state(current):
+        if (
+            not is_auto_speaker_state(current)
+            or str(current.get("auto_speaker_lane") or "").strip()
+        ):
             raise speaker_cast.AutoCastUnavailable()
         prepared = await _maybe_await(
             prepare_subtitles(current, require_auto_cast=True)
@@ -515,8 +550,8 @@ async def run_auto_speaker_preflight(
             extract_pcm(
                 prepared,
                 current,
-                channels=1,
-                sample_rate=speaker_cast.PCM_SAMPLE_RATE,
+                channels=subdub_two_speaker_gender_onnx.PCM_CHANNELS,
+                sample_rate=subdub_two_speaker_gender_onnx.PCM_SAMPLE_RATE,
                 sample_format="s16le",
             )
         )

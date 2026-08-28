@@ -4,7 +4,7 @@ owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
 branch: fix/p0-subdub-audio-label-live
-phase: SPEC_08_0E_3_READY_TO_PUSH_ASYNC_MULTIPART_TRANSPORT
+phase: SPEC_08_0F_4_BLOCKED_BY_SHARED_RESOURCE_SOURCE_READY
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -26,10 +26,10 @@ workflow_contract:
 
 resource_boundary:
   cpu: independent_local_subdub_source_only
-  live: owned_by_subdub
-  chrome: owned_by_subdub
-  vps_deploy: owned_by_subdub
-  product_video: source-local only until exact SubDub releases
+  live: owned_by_product_video
+  chrome: owned_by_product_video
+  vps_deploy: owned_by_product_video
+  product_video: shipping V2-02G docs/test PR before SubDub reacquires shared resources
 
 audio_ui_rollback:
   root_cause: PR 896 / 3fc190c added a fixed-percentage preset grid and two preset callback actions to the shared audio owner
@@ -81,6 +81,168 @@ fixtures:
     required_lane: Tự động nhiều giọng
 
 latest_combo_failure:
+  public_job: 6DC569C0A6
+  internal_job: 6dc569c0a6200b6355e9
+  workspace: /tmp/toan_aas_pipeline/6dc569c0a6200b6355e9
+  runtime_sha: 77fee7ce472ffa65c32d91e248b87fee38fcb69b
+  source_sha256: 85c8793d197cf2782bb554d46282e82a83bcb062a0483e412a0ca1da668f9f51
+  terminal: failed_no_charge
+  provider: key4u_audio+gemini_diarization
+  provider_status: PASS
+  charged_xu: 0
+  wallet:
+    credits: 200
+    total_spent: 0
+    transactions: 0
+    credit_events: 1
+  persisted_artifacts:
+    auto_exact_cache_json_bytes: 412
+    auto_exact_source_srt_bytes: 1001
+    auto_exact_translated_srt_bytes: 1291
+    speaker_cast_sidecar_json_bytes: 3046
+    manifest_json_bytes: 4649
+    normalized_source_mp4_bytes: 11591049
+  missing_artifacts:
+    - tts_audio
+    - dub_audio
+    - final_mp4
+    - telegram_delivery
+  speaker_evidence:
+    cue_count: 18
+    speaker_0_cues: 8
+    speaker_1_cues: 10
+    minimum_speaker_confidence: 0.944444
+    media_sha256: a9572c8f678451fdf752ea9d1b03f4dfce9b406480cafd96eb9fa157ab2fbcf0
+    subtitle_sha256: 0ce255574d69156b0e4f6f8d9bcd8c581d6b4fd4cce764e0ef560b03cfb308d2
+    timeline_signature: 92d9bdaa319681451f1efe0f0f3cc28419c99aaa286c575a03ca420a333a6bf4
+  exact_boundary: ASR and diarization passed; failure is after sidecar persistence and before TTS/mux
+  next_subspec: SPEC-08.0F.1 exact production classifier diagnostic with zero provider calls
+  classifier_diagnostic:
+    fixture_bytes: 4284017
+    fixture_sha256: 85c8793d197cf2782bb554d46282e82a83bcb062a0483e412a0ca1da668f9f51
+    pcm_bytes: 1547794
+    pcm_sha256: 82f1ffb6621588fc0b906c074b8e3e5c64ce8d6e2e9ca954444ad689668db952
+    pcm_contract: mono 16000 Hz s16le
+    exact_result: AUTO_CAST_MANUAL_REQUIRED
+    exact_elapsed_seconds: 0.265
+    production_windows_speaker_0: 18
+    production_accepted_speaker_0: 0
+    dense_windows_speaker_0: 81
+    dense_windows_speaker_1: 105
+    dense_reason_totals:
+      insufficient_pitch_frames: 156
+      stable_competing_pitch: 14
+    dense_accepted:
+      speaker_0: 72.398190 Hz low
+      speaker_1: 260.135322 Hz high; 131.147541 Hz low; 130.752514 Hz low
+    signal_rms_selected_range: 0.154301 to 0.269327
+    signal_peak_selected_range: 0.652008 to 0.923553
+    hypothesis: karaoke backing audio contaminates diarized full-mix windows; inspect persisted diarization contract before RED and do not relax thresholds or force opposite genders
+    parser_contract: Gemini annotations have text, speaker, start_offset and end_offset only; no gender field is discarded
+    rejected_filter_comparator: protected multi filter produced high/high on the male/female fixture
+    raw_sparse_frame_candidate:
+      speaker_0: 3 low, 0 high; median 87.073360 Hz; selected weight ratio 1.0
+      speaker_1: 9 high, 5 low; high median 198.812627 Hz; selected weight ratio 0.661405
+      result: low/high independently, with no forced opposite pair
+      status: rejected_do_not_ship
+    historical_rejected_red_boundary: restore PR 889 independent weighted classifications only in auto_speaker and collect bounded known frame evidence from the same raw PCM/sparse offsets after PR 842 whole-window failure
+    red:
+      corrected: 6 failed in 0.48s; all missing exact helper contracts
+      metric: 1 failed in 0.44s; three 200 ms frames reported as 1.5 seconds instead of 0.6
+    green:
+      exact: 6 passed in 0.38s
+      metric_and_hash: 8 passed in 4.97s
+      focused_timeout_cancel_central_first: 26 passed in 5.95s
+    exact_fixture_result:
+      speaker_0: low confidence 0.778687, voiced 0.6 seconds, 9600 samples
+      speaker_1: high confidence 0.904186, voiced 1.8 seconds, 28800 samples
+      provider_calls: 0
+      wallet_mutations: 0
+    protected_comparator:
+      before_lock_alignment: 13 passed, 3 historical source-lock failures in 527.07s
+      regression: 55 passed, 3 unchanged baseline-stale failures in 8.42s
+      new_failures: 0
+    rejected_raw_frame_engine_git_blob: b6001cdc26bed4c463075596cfa3ba3b9bf1901a
+    independent_review:
+      verdict: ready_to_merge_no
+      critical: 0
+      important: 4
+      gaps:
+        - fallback can accept mixed backing music because frame YIN omits competing pitch, purity and stability guards
+        - overlapping 200 ms frames at 100 ms hop overstate unique voiced seconds and sample count and create correlated votes
+        - reported confidence omits weighted support and can overstate a 0.60 decision as 1.0
+        - shared classifier plus fallback can consume 48 plus 48 seconds because sample budget resets
+      next: remove the rejected raw-frame fallback and replace exact-two authority with the proven local ONNX design
+    onnx_replacement:
+      active_subspec: SPEC-08.0F.4
+      service: services/subdub_two_speaker_gender_onnx.py
+      public_owner: classify_two_speaker_genders
+      input_contract: stereo PCM, 44100 Hz, s16le, exactly two speaker labels
+      aggregate_unique_evidence_seconds_max: 48.0
+      minimum_classified_cues_per_speaker: 4
+      minimum_vote_dominance: 0.75
+      allow_same_gender_pairs: true
+      force_opposite_gender_pair: false
+      uvr_model:
+        file: UVR_MDXNET_3_9662.onnx
+        sha256: e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc
+        license: MIT
+      gender_model:
+        file: panns-mobilenetv1-audioset.onnx
+        sha256: 0da2c433751fd5aac39593476e9a4b7a92b41d8492eb8ddb28d7eae8d7bd7bcd
+        license: MIT source code; Zenodo pretrained model CC-BY-4.0; AudioSet attribution CC-BY-4.0
+      exact_fixture_group_truth:
+        speaker_0: 7 male votes, 1 female vote, dominance 0.875
+        speaker_1: 2 male votes, 8 female votes, dominance 0.800
+      provider_calls: 0
+      wallet_mutations: 0
+      uvr_local_parity: 12 chunks; correlation 0.999983623; scaled RMSE 0.001055384; provider calls 0
+      panns_local_group_truth: speaker_0 7 male/1 female dominance 0.875; speaker_1 2 male/8 female dominance 0.800; provider calls 0
+      red: 20 failed, 5 passed, 1 warning in 466.65s; failures only missing service/integration and stereo extractor contract
+      red_baseline_passes: protected mono extractor and four invalid PCM contract tuples
+      green: 33 passed, 1 warning in 9.39s on fresh basetemp
+      exact_fixture_ort_1_29:
+        elapsed_seconds: 42.938
+        speaker_0: male low; 7/8 votes; dominance 0.875; 21 seconds
+        speaker_1: female high; 8/10 votes; dominance 0.800; 27 seconds
+        provider_calls: 0
+        wallet_mutations: 0
+      post_rebase_timeout_correction:
+        red: exact fixture reached former 120-second wall deadline at a PANN cue and failed closed
+        fix: exact-two wall timeout only increased to 300 seconds; evidence remains 48 seconds and concurrency remains one
+        regression: 5 passed, 1 warning in 16.75s
+        exact_green: ORT 1.29.0 fixture PASS in 106.031 seconds with unchanged casts; provider and wallet zero
+      review_corrections:
+        - bounded non-cooperative worker drain with one fail-closed concurrency lock
+        - invalid ONNX IndexError and OverflowError map to AUTO_CAST_MANUAL_REQUIRED
+        - aggregate sidecar cue validation and later-valid non-overlap selection under 48 seconds
+        - exact-two preflight rejects the multi lane marker before prepare/extract/classify
+        - Linux Python 3.11 requirements lock includes NumPy and ONNX Runtime 1.29.0
+        - deploy syncs hash-locked dependencies before restart
+        - deploy backup is incremental and NUL-safe for spaces and Unicode paths
+        - UVR and PANNs model license/provenance notices preserve authoritative upstream evidence
+        - fractional source duration is extended to the maximum canonical cue end under the existing 1800-second cap
+      protected_hashes:
+        auto_multi_speaker_sha256: 55aab8949efaecad8dd987ac6dfe056ab0e4bc4ef81a23977ea5edd1cdf64911
+        shared_speaker_cast_sha256: de93620f3f038b5759a53e696c5c85d3553fcee758686df56c70e6b11bac145b
+        two_speaker_asr_fallback_sha256: 94748def11c38d76952192a996fa42231d75b39d4d9ecd3407ff671d92e1177e
+      comparator:
+        baseline: 235 passed, 28 failed, 1 warning in 522.01s
+        branch: 278 passed, 28 failed, 1 skipped, 1 warning in 30.59s
+        new_failures: 0; exact 28 failure IDs baseline-equivalent
+      invalid_harness: 34 passed and 18 setup errors from WinError 5 while removing a reused basetemp; no product conclusion
+      fractional_tail:
+        red: expected ffmpeg -t 1.75, actual -t 1; 1 failed in 710.23s
+        green: 7 passed in 619.81s; final fractional cue readable through real montage owner
+      panns_minimum_probe: one sample fails reflect padding; two samples pass with output shape 1x527; production resampler requires at least two
+      final_compile: bot.py and every other changed Python file exit 0
+      final_diff_check: exit 0; LF-to-CRLF warnings only
+      final_lock_batch: 24 passed, 1 warning in 8.64s
+      deploy_contract: 10 passed including real space and Unicode pre-image round trip
+      independent_review: critical 0; important 0; ready_to_merge yes
+      next: wait exact Product Video releases, then rebase/post-rebase gate/one PR/deploy/exact combo live
+
+previous_combo_failure_a86321f62b:
   public_job: A86321F62B
   internal_job: a86321f62b714edbc342
   workspace: /tmp/toan_aas_pipeline/a86321f62b714edbc342
@@ -395,4 +557,4 @@ ordered_specs:
       - audit every acceptance line as proven or unresolved
       - mark the goal complete only when no required line remains unresolved
 
-current_next_action: amend Trend4 base evidence, push force-with-lease, create one PR, squash/deploy/runtime verify, exact combo retry
+current_next_action: source READY_TO_SHIP; wait exact Product Video LIVE/CHROME/VPS/DEPLOY releases, then rebase/post-rebase gate/one PR/deploy/exact combo live

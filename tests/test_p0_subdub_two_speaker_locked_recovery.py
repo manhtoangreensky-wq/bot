@@ -16,7 +16,9 @@ BOT_SOURCE = (ROOT / "bot.py").read_text(encoding="utf-8")
 AUTO_SPEAKER_PATH = ROOT / "services" / "subdub_blackboxes" / "auto_speaker.py"
 AUTO_SPEAKER_SOURCE = AUTO_SPEAKER_PATH.read_text(encoding="utf-8")
 
-PR842_AUTO_SPEAKER_GIT_BLOB = "6634191cb2c0d463b86d7d9b58ded94e493a7b07"
+POST_ONNX_AUTO_SPEAKER_GIT_BLOB = (
+    "1d1326bcdc2c3d9fb4adb892475999599308ec5a"
+)
 
 
 def _git_blob_sha1(path: Path) -> str:
@@ -34,17 +36,23 @@ def _function_source(source: str, name: str) -> str:
     return source[start:end]
 
 
-def test_two_speaker_engine_is_exact_pr842_git_blob():
-    assert _git_blob_sha1(AUTO_SPEAKER_PATH) == PR842_AUTO_SPEAKER_GIT_BLOB
+def test_two_speaker_engine_is_locked_after_exact_onnx_authority():
+    assert (
+        _git_blob_sha1(AUTO_SPEAKER_PATH)
+        == POST_ONNX_AUTO_SPEAKER_GIT_BLOB
+    )
 
 
-def test_two_speaker_wrapper_has_no_post_anchor_font_guard():
+def test_two_speaker_wrapper_has_only_the_scoped_onnx_authority():
     core = _function_source(BOT_SOURCE, "_execute_video_dubbing_pipeline_core")
 
     assert "auto_speaker.guard_subtitle_font(" not in core
     assert "def guard_subtitle_font(" not in AUTO_SPEAKER_SOURCE
+    assert "subdub_two_speaker_gender_onnx.classify_two_speaker_genders" in AUTO_SPEAKER_SOURCE
     assert "def _independent_two_speaker_classifications(" not in AUTO_SPEAKER_SOURCE
+    assert "def _collect_two_speaker_pitch_evidence(" not in AUTO_SPEAKER_SOURCE
     assert "def _classify_two_speaker_registers(" not in AUTO_SPEAKER_SOURCE
+    assert "MULTI_PCM_AUDIO_FILTER" not in AUTO_SPEAKER_SOURCE
 
 
 def test_audio_mix_main_screen_keeps_both_layers_in_one_row():
