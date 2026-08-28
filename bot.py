@@ -73178,8 +73178,13 @@ def video_uiflow3_compile_routeengine_handoff(
     owner_user_id: int,
     owner_chat_id: int,
     tail_state: dict | None = None,
+    snapshot_override: dict | None = None,
 ) -> dict:
-    snapshot = video_uiflow3.approved_snapshot(state)
+    snapshot = (
+        deepcopy(dict(snapshot_override))
+        if isinstance(snapshot_override, dict) and snapshot_override
+        else video_uiflow3.approved_snapshot(state)
+    )
     return video_uiflow3_routeengine.compile_routeengine_handoff(
         snapshot,
         owner_user_id=int(owner_user_id),
@@ -73260,7 +73265,14 @@ def video_uiflow3_commercial_tail_guard(
     if str(state.get("draft_id") or "") != str(handoff.get("draft_id") or ""):
         return {"ok": False, "uiflow3": True, "reason": "uiflow3_draft_mismatch"}
     try:
-        current_snapshot = video_uiflow3.approved_snapshot(state)
+        session_tail = dict(draft.get(VIDEO_TAIL9_STATE_KEY) or {})
+        if session_tail:
+            _state, _tail, current_snapshot = video_uiflow3_apply_tail_quality_contract(
+                state,
+                session_tail,
+            )
+        else:
+            current_snapshot = video_uiflow3.approved_snapshot(state)
     except ValueError:
         return {"ok": False, "uiflow3": True, "reason": "uiflow3_snapshot_not_ready"}
     if not hmac.compare_digest(
@@ -74282,6 +74294,18 @@ def video_ai_real_prompt_model_catalog() -> list[dict]:
 
 
 VIDEO_AI_REAL_QUALITY_MODEL_KEYS = dict(video_ai_real_pricing.QUALITY_TIER_MODEL_KEYS)
+
+
+def video_tail9_parse_quality_tier(value: object) -> int:
+    raw = str(value or "").strip()
+    tier_id = safe_int(raw, 0)
+    if not raw or raw != str(tier_id):
+        raise ValueError("quality_tier_not_supported")
+    try:
+        video_ai_real_pricing.public_quality_by_tier(tier_id)
+    except (TypeError, ValueError):
+        raise ValueError("quality_tier_not_supported") from None
+    return tier_id
 
 
 def video_public_quality_product(tier_id: int) -> dict:
@@ -75392,11 +75416,19 @@ def video_uiflow3_build_selfshot2_handoff(raw_state: dict) -> dict:
     return {"ok": True, "blocker": "", "draft": draft}
 
 
-def video_uiflow3_b14_storyboard_payload(raw_state: dict) -> dict:
+def video_uiflow3_b14_storyboard_payload(
+    raw_state: dict,
+    *,
+    snapshot_override: dict | None = None,
+) -> dict:
     """Translate the approved UI plan into the existing real Product Video seam."""
 
     state = video_uiflow3.normalize_state(raw_state)
-    snapshot = video_uiflow3.approved_snapshot(state)
+    snapshot = (
+        deepcopy(dict(snapshot_override))
+        if isinstance(snapshot_override, dict) and snapshot_override
+        else video_uiflow3.approved_snapshot(state)
+    )
     content = dict(snapshot.get("content") or {})
     brief = dict(content.get("approved_brief") or {})
     bible = dict(snapshot.get("production_bible") or {})
@@ -75892,6 +75924,86 @@ def video_uiflow3_prepare_existing_job_precheck_status(
     return save_video_session(user_id, current)
 
 
+def video_uiflow3_apply_tail_quality_contract(
+    raw_state: dict,
+    raw_tail: dict,
+) -> tuple[dict, dict, dict]:
+    state = video_uiflow3.normalize_state(raw_state)
+    tail = video_tail9.normalize_state(raw_tail)
+    product_id = str(state.get("parent_product") or "").strip()
+    tail_product_id = str(tail.get("video_product_type") or "").strip()
+    if product_id != tail_product_id:
+        raise ValueError("video_tail_product_owner_mismatch")
+    if str(tail.get("video_session_id") or "") != str(state.get("draft_id") or ""):
+        raise ValueError("video_tail_session_owner_mismatch")
+
+    tier_id = video_tail9_parse_quality_tier(tail.get("quality_tier_id"))
+    compatibility = video_tail9.package_compatibility(
+        tail_product_id,
+        scene_count=safe_int(tail.get("scene_count"), 1),
+        ratio=str(tail.get("ratio") or "9:16"),
+        quality_tier_id=tier_id,
+    )
+    if not compatibility.get("ok"):
+        raise ValueError(
+            str(compatibility.get("reason") or "quality_tier_not_supported")
+        )
+
+    scenes = [dict(item or {}) for item in state.get("scenes") or []]
+    scene_count = len(scenes)
+    if scene_count <= 0 or scene_count != safe_int(tail.get("scene_count"), 0):
+        raise ValueError("video_tail_scene_count_mismatch")
+    if str((state.get("format") or {}).get("ratio") or "9:16") != str(
+        tail.get("ratio") or "9:16"
+    ):
+        raise ValueError("video_tail_ratio_mismatch")
+
+    if product_id == "multi_scene_film":
+        snapshot = video_uiflow3.approved_snapshot(state)
+    else:
+        quality = video_ai_real_pricing.public_quality_by_tier(tier_id)
+        seconds = max(1, safe_int(quality.get("seconds"), 1))
+        if product_id == "video_ai_real":
+            state = video_ai_real_apply_quality_product(state, tier_id)
+            snapshot = video_uiflow3.approved_snapshot(state)
+        else:
+            snapshot = video_uiflow3.approved_snapshot(state)
+            snapshot["format"]["seconds_per_scene"] = seconds
+            snapshot["format"]["target_duration_seconds"] = scene_count * seconds
+            for scene in snapshot.get("scenes") or []:
+                scene["duration_target"] = seconds
+            hash_material = deepcopy(snapshot)
+            hash_material.pop("config_hash", None)
+            snapshot["config_hash"] = hashlib.sha256(
+                json.dumps(
+                    hash_material,
+                    ensure_ascii=True,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+
+        scene_content = [dict(item or {}) for item in tail.get("scene_content") or []]
+        for scene in scene_content:
+            scene["duration_target"] = seconds
+        tail.update({
+            "scene_content": scene_content,
+            "estimated_duration": scene_count * seconds,
+        })
+        if product_id == "video_ai_real":
+            tail["plan_revision"] = video_uiflow3_snapshot_revision(snapshot)
+
+    tail = video_tail9.normalize_state(tail)
+    legacy_compat = dict(state.get("legacy_compat") or {})
+    legacy_compat["approved_snapshot"] = deepcopy(snapshot)
+    state["legacy_compat"] = legacy_compat
+    state[VIDEO_TAIL9_STATE_KEY] = deepcopy(tail)
+    state = video_uiflow3.normalize_state(state)
+    if isinstance(raw_tail, dict):
+        raw_tail.clear()
+        raw_tail.update(deepcopy(tail))
+    return state, tail, snapshot
+
 def video_uiflow3_prepare_b14_session(
     user_id: int,
     raw_state: dict,
@@ -75904,6 +76016,13 @@ def video_uiflow3_prepare_b14_session(
     """Persist a real B14 invoice handoff without submitting or charging yet."""
 
     state = video_ai_real_maybe_compile_state(raw_state)
+    tail = video_tail9.normalize_state(tail_state) if tail_state else {}
+    execution_snapshot = {}
+    if tail:
+        state, tail, execution_snapshot = video_uiflow3_apply_tail_quality_contract(
+            state,
+            tail,
+        )
     state["navigation"]["current_step"] = "invoice"
     product_id = str(state.get("parent_product") or "").strip()
     product_route = video_uiflow3_execution_adapter(state)
@@ -75913,7 +76032,11 @@ def video_uiflow3_prepare_b14_session(
         blockers = video_uiflow3_b14_execution_blockers(state)
         if blockers:
             raise ValueError("video_uiflow3_render_capability_unavailable:" + ",".join(blockers))
-    approved_snapshot = video_uiflow3.approved_snapshot(state)
+    approved_snapshot = (
+        deepcopy(execution_snapshot)
+        if execution_snapshot
+        else video_uiflow3.approved_snapshot(state)
+    )
     existing_session = get_video_session(user_id)
     existing_draft = dict(existing_session.get("draft") or {})
     existing_snapshot = dict(existing_draft.get("uiflow3_approved_snapshot") or {})
@@ -75942,8 +76065,11 @@ def video_uiflow3_prepare_b14_session(
         )
         if same_durable_scope and key in existing_draft
     }
-    storyboard = video_uiflow3_b14_storyboard_payload(state)
-    content = dict(state.get("content") or {})
+    storyboard = video_uiflow3_b14_storyboard_payload(
+        state,
+        snapshot_override=approved_snapshot,
+    )
+    content = dict(approved_snapshot.get("content") or {})
     brief = dict(content.get("approved_brief") or {})
     selected_prompt = str(
         brief.get("prompt")
@@ -75951,11 +76077,10 @@ def video_uiflow3_prepare_b14_session(
         or content.get("original_intent")
         or ""
     ).strip()
-    fmt = dict(state.get("format") or {})
-    audio = dict(state.get("audio") or {})
-    branding = dict(state.get("branding") or {})
+    fmt = dict(approved_snapshot.get("format") or {})
+    audio = dict(approved_snapshot.get("audio") or {})
+    branding = dict(approved_snapshot.get("branding") or {})
     commercial = dict((state.get("legacy_compat") or {}).get("pilot_commercial") or {})
-    tail = video_tail9.normalize_state(tail_state) if tail_state else {}
     routeengine_handoff = dict(
         (state.get("legacy_compat") or {}).get("routeengine_handoff") or {}
     )
@@ -75968,6 +76093,7 @@ def video_uiflow3_prepare_b14_session(
                 or safe_int(state.get("owner_chat_id"), 0)
             ),
             tail_state=tail,
+            snapshot_override=approved_snapshot,
         )
         if not video_uiflow3_routeengine_handoff_is_ready(routeengine_handoff):
             raise ValueError(
@@ -75996,7 +76122,11 @@ def video_uiflow3_prepare_b14_session(
         model = dict(commercial.get("model") or {})
     if not quality or not safe_int(quality.get("tier_id"), 0) or (not model and not tail):
         raise ValueError("video_ai_real_model_required")
-    scene_count = max(1, len(state.get("scenes") or []), safe_int(fmt.get("scene_count"), 0))
+    scene_count = max(
+        1,
+        len(approved_snapshot.get("scenes") or []),
+        safe_int(fmt.get("scene_count"), 0),
+    )
     profile_id = str((storyboard.get("profile") or {}).get("profile_id") or "storytelling")
     addon_plan = video_b14_default_addon_plan(profile_id)
     dialogue_rows = [
@@ -111325,6 +111455,7 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
             "scene_count": 1,
         }
     if owner == "uiflow3":
+        original_host = host
         prepared, session = video_uiflow3_prepare_b14_session(
             uid,
             host,
@@ -111332,7 +111463,17 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
             tail_state=clean,
             require_attestation=False,
         )
+        clean = video_tail9.normalize_state(
+            ((session.get("draft") or {}).get(VIDEO_TAIL9_STATE_KEY) or clean)
+        )
+        prepared[VIDEO_TAIL9_STATE_KEY] = deepcopy(clean)
         host = save_video_uiflow3_state(context, prepared)
+        if isinstance(original_host, dict):
+            original_host.clear()
+            original_host.update(deepcopy(host))
+        if isinstance(tail, dict):
+            tail.clear()
+            tail.update(deepcopy(clean))
     elif owner == "scene3":
         try:
             session = video_profile_scene1_handoff(uid, host)
@@ -111342,12 +111483,31 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
         session = get_video_session(uid)
     session = dict(session or {})
     draft = dict(session.get("draft") or {})
+    clean_product = str(clean.get("video_product_type") or "").strip()
+    selected_scene_seconds = safe_int(draft.get("b14_scene_seconds"), 0)
+    if (
+        clean_product not in {"multi_scene_film", "video_long"}
+        and str(clean.get("quality_tier_id") or "").strip()
+    ):
+        selected_tier = video_tail9_parse_quality_tier(clean.get("quality_tier_id"))
+        selected_scene_seconds = max(
+            1,
+            safe_int(video_public_quality_product(selected_tier).get("seconds"), 1),
+        )
     audio = dict(clean.get("audio_config") or {})
     volumes = dict(audio.get("volumes") or {})
     draft.update({
         VIDEO_TAIL9_STATE_KEY: clean,
         "b14_scene_count": int(clean.get("scene_count") or 1),
         "b14_scene_count_selected": True,
+        "b14_scene_seconds": max(
+            1,
+            selected_scene_seconds
+            or safe_int(
+                video_tail9.adapter_for(clean_product).get("scene_duration_seconds"),
+                8,
+            ),
+        ),
         "b14_aspect_ratio": str(clean.get("ratio") or "9:16"),
         "b14_quality_xu": safe_int(clean.get("quality_tier_id"), 0),
         "video_tail_engine_route": str(clean.get("engine_route") or ""),
@@ -115452,14 +115612,21 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             return await video_tail9_render(query, uid, context, back_dest)
         if action == "select":
             tail["status_stage"] = "quality"
-            quality = max(200, min(1500, safe_int(argument, 300)))
+            quality = video_tail9_parse_quality_tier(argument)
             calculated_scene_count = video_selfshot3_scene_count_for_quality(tail, quality)
             selection_tail = dict(tail)
-            if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
-                scene_seconds = max(1, safe_int(video_public_quality_product(quality).get("seconds"), 1))
+            selected_product = str(tail.get("video_product_type") or "")
+            scene_seconds = max(
+                1,
+                safe_int(video_public_quality_product(quality).get("seconds"), 1),
+            )
+            if selected_product not in {"multi_scene_film", "video_long"}:
+                selection_tail["estimated_duration"] = (
+                    calculated_scene_count * scene_seconds
+                )
+            if selected_product == video_selfshot3.PRODUCT_ID:
                 selection_tail.update({
                     "scene_count": calculated_scene_count,
-                    "estimated_duration": calculated_scene_count * scene_seconds,
                     "scene_count_deferred_to_quality": False,
                 })
             capability = video_tail9_commercial_preflight(
@@ -115471,10 +115638,14 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 quality,
             )
             catalog = video_tail9_catalog_report(selection_tail, capability)
-            tail = video_tail9.set_capability(tail, capability)
+            available_tiers = {
+                safe_int(item.get("tier_id"), 0)
+                for item in catalog.get("offers") or []
+            }
+            if quality not in available_tiers:
+                raise ValueError("quality_tier_not_supported")
+            tail = video_tail9.set_capability(selection_tail, capability)
             save_video_tail9_state(uid, context, tail, owner, host)
-            if str(tail.get("video_product_type") or "") == video_selfshot3.PRODUCT_ID:
-                tail = selection_tail
             tail["quality_tier_id"] = str(quality)
             tail["package_id"] = f"product_video_{quality}"
             session = video_tail9_apply_to_session(uid, context, tail, owner, host)

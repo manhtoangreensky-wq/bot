@@ -7,8 +7,8 @@ nhung khong duoc dung de mo them job ngoai bang assignment ben duoi.
 
 ## 1. Pointer hien tai
 
-`CURRENT_POINTER=V2-02G` - merge the docs/test checklist PR after shared release;
-no Product Video runtime action before this pointer is complete.
+`CURRENT_POINTER=V2-02I` - repair the shared Tail quality/state boundary without
+changing the completed UI, then ship/deploy and re-run the same tier-400 live seam.
 
 - [x] `V2-00` Trend4 Facebook failure loop: PR #914 merged as
   `d92a98ddbc10ea4c626f75a65c2ddb58403a2fc6`; deploy run `33107893686`
@@ -55,12 +55,25 @@ terminal/pause-safe boundary before moving to another product/spec.
   committed as `2d490e3` and pushed to branch
   `docs/product-video-live-strategy-v2`. Pre-push gate `54 passed in 8.10s`;
   runtime source changed `0` files.
-- [-] `V2-02G` Create/squash-merge the docs/test PR after the latest SubDub
-  LIVE/CHROME/VPS release; verify main readback. Do not overlap its remote/live
-  action.
+- [x] `V2-02G` Checklist PR #916 squash-merged as
+  `79d9b345807d93edda0375b5df7a6fdbabe8758e`; deploy run `33138591557`
+  completed SUCCESS.
 - [x] `V2-02H` First representative runbook persisted at
   `KIEM-THU/runbooks/PV2-R01-trend-video-upload.md`; Trend upload + strategy gate
   `27 passed in 7.81s`. The runbook may not execute until `V2-02G` is complete.
+- [-] `V2-02I` Shared Tail quality integrity hotfix. Live RED at
+  `2026-08-28 10:14:18` proved callback `video_tail|quality|select|400` reached
+  `video_uiflow3_routeengine_not_ready:uiflow3_product_duration_contract_mismatch`
+  before Invoice. Scope is limited to exact tier parsing, selected-tier duration
+  synchronization and current-catalog validation. Protected UI text, keyboard
+  rows, callbacks, back-stack, `video_local_edit`, `videoedit|ai`,
+  `multi_scene_film`, wallet and provider-submit behavior must remain unchanged.
+  Acceptance: tier `400` preserves public `80 Xu`, synchronizes every scene to
+  8 seconds, reaches Invoice -> Confirm -> Status, and forged/stale tier values
+  fail closed before session/job/provider/wallet mutation. Source GREEN is locked:
+  final post-review acceptance `130 passed`, public seam `6 passed`, full
+  RouteEngine `25 passed`, compile/diff/scope exit `0`, `NEW_FAILURES=0`. PR,
+  deploy, runtime SHA and same-screen live evidence are still pending.
 
 ## 2. Rules that must not change
 

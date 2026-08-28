@@ -46,6 +46,7 @@ PRODUCT_TYPE_BY_PARENT = {
     "self_shot_scene_change": "self_shot_scene_change",
     "video_trend": "video_trend",
     "video_storyboard": "storyboard_prompt",
+    "storyboard_prompt": "storyboard_prompt",
     "multi_scene_film": "multi_scene_film",
     "video_idea": "video_idea_to_product",
 }

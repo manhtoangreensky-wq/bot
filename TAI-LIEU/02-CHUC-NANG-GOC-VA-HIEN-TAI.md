@@ -169,3 +169,17 @@ Live job `24` cho thấy connector policy đúng vẫn chưa đủ nếu server 
 | Kho trend chỉ có Google Trends và TikTok reference | Backend có bốn nhóm public metadata Media/Facebook/YouTube/TikTok, refresh 7 ngày | Đã mở rộng không đổi UI |
 
 Bằng chứng hiện tại: job `25` đã delivery message `27576` và `0 Xu`, nhưng PV-L01 vẫn FAIL do letterbox + subtitle drop. Source correction có focused `45 passed`, quality/manual `39 passed`, Trend/scene `52 passed`, full output `24 passed`, compile `0`; UI lock `14/14` function bytes. Phải rerun live exact case sau deploy mới được đổi trạng thái thành PASS.
+
+## Đối chiếu Tail chọn chất lượng — 28/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại | Trạng thái |
+|---|---|---|
+| Callback chất lượng có thể clamp số bất kỳ về `200..1500` | Chỉ nhận exact tier có trong catalog hiện hành của đúng product; callback giả/stale fail-closed | Không còn đúng |
+| Snapshot kế hoạch trước Tail luôn đủ cho RouteEngine | Chọn tier có thời lượng khác cần execution snapshot mới, hash mới và cùng một authority cho RouteEngine/storyboard/invoice/guard | Đã sửa |
+| Product ngoài AI Real luôn dùng duration mặc định planning | Planning UI vẫn giữ mặc định; execution snapshot và session dùng duration của tier đã chọn | Đã làm rõ |
+| Canonical Storyboard owner là `video_storyboard` | Public/UI/Tail dùng `storyboard_prompt`; RouteEngine giữ alias cũ và nhận thêm canonical alias | Tài liệu tên cũ không còn đủ |
+| Hiện lại danh mục sau exception nghĩa là tier rẻ nhảy sang tier đắt | Live log chứng minh callback vẫn là `select|400`; catalog chỉ là recovery screen, chưa có Invoice/job/provider/wallet mutation | Cách đọc cũ sai |
+
+Bằng chứng source: `130 passed` acceptance, `25 passed` RouteEngine, `17 passed`
+quality matrix, `14/14` UI hashes, `NEW_FAILURES=0`, compile/diff exit `0`.
+Merge/deploy/runtime và live traversal vẫn là các cổng riêng.

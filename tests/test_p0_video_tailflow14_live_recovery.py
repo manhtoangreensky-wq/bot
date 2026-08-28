@@ -7,7 +7,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from services import ui_navigation, video_scene3_flow, video_tail9, video_uifreeze1
+from services import (
+    ui_navigation,
+    video_ai_real_pricing,
+    video_scene3_flow,
+    video_tail9,
+    video_uifreeze1,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -184,6 +190,14 @@ def test_tail_pending_text_has_a_defined_subdub_guard_and_precedes_stale_studio(
     (200, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500),
 )
 def test_each_video_ai_real_tier_opens_exactly_one_invoice(tier_id: int) -> None:
+    tier_ids = (200, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500)
+    parse_quality = _load_function(
+        "video_tail9_parse_quality_tier",
+        {
+            "safe_int": lambda value, default=0: int(value) if str(value).isdigit() else default,
+            "video_ai_real_pricing": video_ai_real_pricing,
+        },
+    )
     tail = video_tail9.new_state(
         product_type="video_ai_real",
         session_id="tailflow14-invoice",
@@ -238,6 +252,7 @@ def test_each_video_ai_real_tier_opens_exactly_one_invoice(tier_id: int) -> None
         {
             "video_tail9_context": lambda _uid, _context: (dict(saved["tail"]), "scene3", dict(host)),
             "video_tail9": video_tail9,
+            "video_tail9_parse_quality_tier": parse_quality,
             "video_tail9_answer_best_effort": answer_best_effort,
             "save_video_tail9_state": save_tail,
             "safe_int": lambda value, default=0: int(value) if str(value).isdigit() else default,
@@ -250,8 +265,8 @@ def test_each_video_ai_real_tier_opens_exactly_one_invoice(tier_id: int) -> None
             },
             "video_tail9_catalog_report": lambda *_args, **_kwargs: {
                 "ok": True,
-                "tier_ids": [200, 300],
-                "offers": [{"tier_id": 200}, {"tier_id": 300}],
+                "tier_ids": list(tier_ids),
+                "offers": [{"tier_id": value} for value in tier_ids],
             },
             "video_tail9_apply_to_session": lambda *_args, **_kwargs: {"draft": {}, "scene_count": 1},
             "video_b14_invoice_for_session": lambda *_args, **_kwargs: {

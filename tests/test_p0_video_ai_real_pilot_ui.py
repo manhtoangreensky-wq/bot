@@ -2463,6 +2463,198 @@ def test_video_ai_real_real_invoice_preserves_selected_scene_duration():
     assert (session.get("draft") or {})["b14_scene_seconds"] == 5
 
 
+@pytest.mark.parametrize(
+    "product",
+    ["video_ai_real", "video_trend", "storyboard_prompt"],
+)
+def test_shared_tail_quality_controls_uiflow3_duration_before_secure_handoff(
+    monkeypatch,
+    product: str,
+):
+    user_id = 981042
+    state = (
+        _ready_prompt_summary_state()
+        if product == "video_ai_real"
+        else _ready_product_summary_state(product)
+    )
+    state["owner_user_id"] = user_id
+    state["owner_chat_id"] = user_id
+    tail = bot.video_uiflow3_build_tail_state(state)
+    tail["quality_tier_id"] = "300"
+    tail["package_id"] = "product_video_300"
+    tail["capability_snapshot"] = {"ok": True, "verified": True}
+    stored_session: dict = {}
+
+    def save_session(_user_id: int, session: dict) -> dict:
+        stored_session.clear()
+        stored_session.update(session)
+        return session
+
+    monkeypatch.setattr(bot, "get_video_session", lambda _user_id: stored_session)
+    monkeypatch.setattr(bot, "save_video_session", save_session)
+    context = SimpleNamespace(user_data={})
+
+    session = bot.video_tail9_apply_to_session(
+        user_id,
+        context,
+        tail,
+        "uiflow3",
+        state,
+    )
+    prepared = bot.video_uiflow3_state(context)
+    draft = dict(session.get("draft") or {})
+    execution_snapshot = dict(
+        (prepared.get("legacy_compat") or {}).get("approved_snapshot") or {}
+    )
+
+    assert prepared["parent_product"] == product
+    assert execution_snapshot["format"]["seconds_per_scene"] == 5
+    assert execution_snapshot["format"]["target_duration_seconds"] == 10
+    assert [scene["duration_target"] for scene in execution_snapshot["scenes"]] == [5, 5]
+    if product != "video_ai_real":
+        assert prepared["format"]["seconds_per_scene"] == 8
+    assert draft["b14_quality_xu"] == 300
+    assert draft["b14_scene_seconds"] == 5
+    invoice = bot.video_b14_invoice_for_session(session, user_id)
+    assert invoice["routing_quality_tier"] == 300
+    assert invoice["quality_xu"] == 220
+    assert draft["provider_called"] is False
+    assert draft["job_created"] is False
+    assert draft["outbox_created"] is False
+    assert draft["xu_charged"] == 0
+
+
+def test_tail_tier_400_repairs_live_duration_drift_before_routeengine_gate(monkeypatch):
+    user_id = 981043
+    state = _ready_prompt_summary_state()
+    state["owner_user_id"] = user_id
+    state["owner_chat_id"] = user_id
+    state["format"]["seconds_per_scene"] = 5
+    state["format"]["target_duration_seconds"] = 16
+    for scene in state["scenes"]:
+        scene["duration_target"] = 5
+    state = video_uiflow3.normalize_state(state)
+    tail = bot.video_uiflow3_build_tail_state(state)
+    tail["quality_tier_id"] = "400"
+    tail["package_id"] = "product_video_400"
+    tail["capability_snapshot"] = {"ok": True, "verified": True}
+    stored_session: dict = {}
+
+    monkeypatch.setattr(bot, "get_video_session", lambda _user_id: stored_session)
+    monkeypatch.setattr(
+        bot,
+        "save_video_session",
+        lambda _user_id, session: stored_session.update(session) or session,
+    )
+    context = SimpleNamespace(user_data={})
+
+    session = bot.video_tail9_apply_to_session(
+        user_id,
+        context,
+        tail,
+        "uiflow3",
+        state,
+    )
+    prepared = bot.video_uiflow3_state(context)
+    draft = dict(session.get("draft") or {})
+    execution_snapshot = dict(
+        (prepared.get("legacy_compat") or {}).get("approved_snapshot") or {}
+    )
+
+    assert execution_snapshot["format"]["seconds_per_scene"] == 8
+    assert execution_snapshot["format"]["target_duration_seconds"] == 16
+    assert [scene["duration_target"] for scene in execution_snapshot["scenes"]] == [8, 8]
+    assert draft["b14_quality_xu"] == 400
+    assert draft["b14_scene_seconds"] == 8
+    invoice = bot.video_b14_invoice_for_session(session, user_id)
+    assert invoice["routing_quality_tier"] == 400
+    assert invoice["quality_xu"] == 80
+    assert "2360" not in str(invoice)
+
+
+def test_forged_tail_quality_cannot_create_or_replace_a_uiflow3_session(monkeypatch):
+    user_id = 981044
+    state = _ready_prompt_summary_state()
+    tail = bot.video_uiflow3_build_tail_state(state)
+    tail["quality_tier_id"] = "2360"
+    tail["package_id"] = "product_video_2360"
+    tail["capability_snapshot"] = {"ok": True, "verified": True}
+    stored_session: dict = {}
+
+    monkeypatch.setattr(bot, "get_video_session", lambda _user_id: stored_session)
+    monkeypatch.setattr(
+        bot,
+        "save_video_session",
+        lambda _user_id, session: stored_session.update(session) or session,
+    )
+
+    with pytest.raises(ValueError, match="quality_tier_not_supported"):
+        bot.video_tail9_apply_to_session(
+            user_id,
+            SimpleNamespace(user_data={}),
+            tail,
+            "uiflow3",
+            state,
+        )
+
+    assert stored_session == {}
+
+
+def test_quality_callback_never_clamps_a_forged_tier_into_an_expensive_package(
+    monkeypatch,
+):
+    user_id = 981045
+    state = _ready_prompt_summary_state()
+    tail = bot.video_uiflow3_build_tail_state(state)
+    tail["status_stage"] = "quality"
+    apply_calls: list[str] = []
+
+    monkeypatch.setattr(
+        bot,
+        "video_tail9_context",
+        lambda _user_id, _context: (tail, "uiflow3", state),
+    )
+    monkeypatch.setattr(bot, "save_video_tail9_state", lambda *_args, **_kwargs: tail)
+    monkeypatch.setattr(
+        bot,
+        "video_tail9_commercial_preflight",
+        lambda *_args, **_kwargs: {"ok": True, "required_capability": "text_to_video"},
+    )
+    monkeypatch.setattr(
+        bot,
+        "video_tail9_catalog_report",
+        lambda *_args, **_kwargs: {"ok": True, "offers": [{"tier_id": 400}], "tier_ids": [400]},
+    )
+    monkeypatch.setattr(
+        bot,
+        "video_tail9_apply_to_session",
+        lambda _uid, _context, selected, _owner, _host: (
+            apply_calls.append(str(selected.get("quality_tier_id") or ""))
+            or {"draft": {}}
+        ),
+    )
+    monkeypatch.setattr(bot, "video_b14_invoice_for_session", lambda *_args: {})
+
+    async def render(*_args, **_kwargs):
+        return True
+
+    monkeypatch.setattr(bot, "video_tail9_render", render)
+    query = _PilotQuery(
+        user_id,
+        "video_tail|quality|select|2360",
+        "forged-tail-quality-2360",
+    )
+
+    asyncio.run(
+        bot.handle_video_tail_callback(
+            SimpleNamespace(callback_query=query),
+            SimpleNamespace(user_data={}),
+        )
+    )
+
+    assert apply_calls == []
+
+
 def test_video_ai_real_b14_handoff_keeps_logo_image_and_watermark_text():
     user_id = 981038
     state = _ready_prompt_summary_state()
