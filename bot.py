@@ -99625,6 +99625,14 @@ def video_b14_addon_plan_from_session(session: dict | None = None) -> dict:
     return defaults
 
 
+def video_b14_worker_addon_plan_from_session(session: dict | None = None) -> dict:
+    draft = dict((session or {}).get("draft") or {})
+    plan = dict(draft.get("b14_addon_plan") or {})
+    if plan.get("contract_version") == "product-video-addons-v1":
+        return deepcopy(plan)
+    return deepcopy(video_b14_addon_plan_from_session(session))
+
+
 def video_b14_set_addon_plan(user_id, session: dict, **fields) -> dict:
     draft = dict((session or {}).get("draft") or {})
     plan = video_b14_addon_plan_from_session(session)
@@ -105438,7 +105446,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         project_id = safe_int(project.get("project_id"), 0)
     save_video_project_storyboard(project_id, plan)
     creative_controls = video_b14_creative_controls_to_storyboard(session)
-    addon_plan = video_b14_addon_plan_from_session(session)
+    addon_plan = video_b14_worker_addon_plan_from_session(session)
     if invoice["addons_disabled_by_package"]:
         addon_plan = video_b14_sanitize_trial_addons(addon_plan, quality_xu=invoice["quality_xu"])
     update = update_video_project(
@@ -270129,6 +270137,423 @@ async def api_worker_heartbeat(request: Request):
         conn.close()
 
 
+def product_video_delivery_report_product_type(
+    project: dict | None,
+    job: dict | None,
+) -> str:
+    project = dict(project or {})
+    result = video_b14_job_result_payload(job)
+    invoice = _video_debug_json(project.get("invoice_json"), {})
+    asset_pack = _video_debug_json(project.get("asset_pack_json"), {})
+    invoice = invoice if isinstance(invoice, dict) else {}
+    asset_pack = asset_pack if isinstance(asset_pack, dict) else {}
+    return str(
+        result.get("public_product_type")
+        or result.get("product_type")
+        or invoice.get("public_product_type")
+        or invoice.get("product_type")
+        or asset_pack.get("public_product_type")
+        or asset_pack.get("product_type")
+        or project.get("product_type")
+        or project.get("profile_id")
+        or "video_ai_real"
+    ).strip()
+
+
+def product_video_delivery_report_data(
+    project: dict | None,
+    job: dict | None,
+    settlement: dict | None = None,
+) -> dict:
+    project = dict(project or {})
+    job = dict(job or {})
+    result = video_b14_job_result_payload(job)
+    invoice = _video_debug_json(project.get("invoice_json"), {})
+    addon_plan = _video_debug_json(project.get("addon_plan_json"), {})
+    asset_pack = _video_debug_json(project.get("asset_pack_json"), {})
+    invoice = invoice if isinstance(invoice, dict) else {}
+    addon_plan = addon_plan if isinstance(addon_plan, dict) else {}
+    asset_pack = asset_pack if isinstance(asset_pack, dict) else {}
+
+    product_type = product_video_delivery_report_product_type(project, job)
+    report_product_labels = {
+        "video_ai_prompt": "Video AI chân thật",
+        "video_ai_image": "Video AI chân thật",
+        "video_ai_video_reference": "Video AI chân thật",
+        "video_ai_realistic": "Video AI chân thật",
+        "trend_video": "Video theo trend",
+        "script_to_video": "Kịch bản → Video",
+        "storyboard_to_video": "Storyboard",
+        "image_to_video": "Ghép ảnh thành video",
+        "frame_video_render": "Ghép ảnh thành video",
+        "video_idea": "Ý tưởng video",
+        "video_idea_to_product": "Ý tưởng video",
+    }
+    product_label = str(
+        report_product_labels.get(product_type)
+        or VIDEO_TAIL9_PRODUCT_LABELS.get(product_type)
+        or "Video AI"
+    )
+    tier_id = safe_int(
+        invoice.get("routing_quality_tier") or project.get("quality_tier"), 0
+    )
+    quality_label = str(
+        invoice.get("package_label") or invoice.get("package_name") or ""
+    ).strip()
+    if not quality_label and tier_id:
+        try:
+            quality = video_ai_real_pricing.public_quality_by_tier(tier_id)
+            quality_label = (
+                f"{quality.get('name') or 'Chất lượng video'} · "
+                f"{safe_int(quality.get('seconds'), 0)} giây/cảnh"
+            )
+        except (TypeError, ValueError):
+            quality_label = "Chất lượng video"
+    quality_label = quality_label or "Chất lượng video"
+
+    scene_count = max(
+        1, safe_int(invoice.get("scene_count") or project.get("scene_count"), 1)
+    )
+    scene_seconds = max(
+        0,
+        safe_int(
+            invoice.get("scene_duration_seconds") or invoice.get("scene_seconds"), 0
+        ),
+    )
+    duration_seconds = max(
+        0, safe_int(invoice.get("duration_seconds"), scene_count * scene_seconds)
+    )
+    ratio = str(invoice.get("ratio") or project.get("ratio") or "9:16").strip()
+
+    addon_items = [
+        dict(item)
+        for item in (invoice.get("addon_items") or invoice.get("addons") or [])
+        if isinstance(item, dict)
+    ]
+    requested_addons = list(
+        dict.fromkeys(
+            str(item or "").strip()
+            for item in (addon_plan.get("requested_addons") or [])
+            if str(item or "").strip()
+        )
+    )
+    if not requested_addons:
+        requested_addons = list(
+            dict.fromkeys(
+                str(item.get("key") or item.get("name") or "").strip()
+                for item in addon_items
+                if str(item.get("key") or item.get("name") or "").strip()
+            )
+        )
+    paid_addon_keys = {
+        str(item.get("key") or item.get("name") or index)
+        for index, item in enumerate(addon_items, 1)
+        if safe_int(item.get("price_xu"), 0) > 0
+    }
+    selected_addon_count = len(requested_addons)
+    paid_addon_count = min(selected_addon_count, len(paid_addon_keys))
+    free_addon_count = max(0, selected_addon_count - paid_addon_count)
+    addon_total_xu = max(
+        0,
+        safe_int(
+            invoice.get("addons_xu"),
+            sum(max(0, safe_int(item.get("price_xu"), 0)) for item in addon_items),
+        ),
+    )
+    invoice_total_xu = max(
+        0,
+        safe_int(
+            invoice.get("total_xu") or project.get("total_xu_estimated"),
+            addon_total_xu,
+        ),
+    )
+    subtotal_xu = max(0, safe_int(invoice.get("subtotal_xu"), 0))
+    discount_xu = max(0, safe_int(invoice.get("discount_xu"), 0))
+    video_price_xu = max(
+        0,
+        safe_int(
+            invoice.get("base_xu"),
+            max(0, subtotal_xu - discount_xu)
+            if subtotal_xu
+            else max(0, invoice_total_xu - addon_total_xu),
+        ),
+    )
+    application = (
+        dict(result.get("addon_application") or {})
+        if isinstance(result.get("addon_application"), dict)
+        else {}
+    )
+    materialization = (
+        dict(result.get("addon_materialization") or {})
+        if isinstance(result.get("addon_materialization"), dict)
+        else {}
+    )
+    applied_addons = list(
+        application.get("applied")
+        or materialization.get("materialized_addons")
+        or []
+    )
+    applied_addon_count = len(
+        dict.fromkeys(
+            str(item or "").strip()
+            for item in applied_addons
+            if str(item or "").strip()
+        )
+    )
+    settlement = dict(settlement or {})
+    if "charged_xu" in settlement:
+        charged_xu = max(0, safe_int(settlement.get("charged_xu"), 0))
+    elif "charged_amount_xu" in settlement:
+        charged_xu = max(0, safe_int(settlement.get("charged_amount_xu"), 0))
+    elif "charged_xu" in result:
+        charged_xu = max(0, safe_int(result.get("charged_xu"), 0))
+    else:
+        charged_xu = max(0, safe_int(result.get("charged_amount_xu"), 0))
+
+    return {
+        "product_label": product_label,
+        "quality_label": quality_label,
+        "scene_count": scene_count,
+        "duration_seconds": duration_seconds,
+        "ratio": ratio,
+        "video_price_xu": video_price_xu,
+        "selected_addon_count": selected_addon_count,
+        "free_addon_count": free_addon_count,
+        "paid_addon_count": paid_addon_count,
+        "applied_addon_count": applied_addon_count,
+        "addon_total_xu": addon_total_xu,
+        "invoice_total_xu": invoice_total_xu,
+        "charged_xu": charged_xu,
+        "delivery_status": "Đã gửi video thành công",
+    }
+
+
+def product_video_delivery_report_text(data: dict | None = None) -> str:
+    data = dict(data or {})
+    selected_count = max(0, safe_int(data.get("selected_addon_count"), 0))
+    return "\n".join(
+        [
+            "✅ Video đã hoàn tất",
+            "",
+            f"• Sản phẩm: {data.get('product_label') or 'Video AI'}",
+            f"• Chất lượng: {data.get('quality_label') or 'Chất lượng video'}",
+            f"• Video: {max(1, safe_int(data.get('scene_count'), 1))} cảnh · "
+            f"{max(0, safe_int(data.get('duration_seconds'), 0))} giây · "
+            f"{data.get('ratio') or '9:16'}",
+            f"• Giá video: {xu_number(safe_int(data.get('video_price_xu'), 0))} Xu",
+            f"• Add-on đã chọn: {selected_count} mục",
+            f"• Miễn phí: {max(0, safe_int(data.get('free_addon_count'), 0))} · "
+            f"Có phí: {max(0, safe_int(data.get('paid_addon_count'), 0))}",
+            f"• Add-on đã áp dụng: "
+            f"{max(0, safe_int(data.get('applied_addon_count'), 0))}/{selected_count}",
+            f"• Phí Add-on: {xu_number(safe_int(data.get('addon_total_xu'), 0))} Xu",
+            f"• Tổng hóa đơn: {xu_number(safe_int(data.get('invoice_total_xu'), 0))} Xu",
+            f"• Xu thực trả: {xu_number(safe_int(data.get('charged_xu'), 0))} Xu",
+            f"• Trạng thái: {data.get('delivery_status') or 'Đã gửi video thành công'}",
+        ]
+    )
+
+
+def _product_video_delivery_settlement_known(
+    job_result: dict,
+    settlement: dict | None = None,
+) -> bool:
+    settlement = dict(settlement or {})
+    if settlement and (
+        settlement.get("charge_after_delivery_attempted")
+        or settlement.get("already_charged")
+        or "charged_xu" in settlement
+        or "charged_amount_xu" in settlement
+    ):
+        return True
+    return bool(
+        job_result.get("charge_after_delivery_attempted")
+        or job_result.get("already_charged")
+        or job_result.get("charge_tx_id")
+        or (
+            job_result.get("charge_skip_reason")
+            and (
+                "charged_xu" in job_result
+                or "charged_amount_xu" in job_result
+                or job_result.get("wallet_charge_recorded") is False
+            )
+        )
+    )
+
+
+def _product_video_claim_delivery_report(
+    job_id: int,
+    settlement: dict | None = None,
+) -> dict:
+    jid = safe_int(job_id, 0)
+    if jid <= 0:
+        return {"claimed": False, "reason": "job_id_required"}
+    conn = db_connect()
+    try:
+        for _attempt in range(3):
+            job = video_project_queue.get_video_render_job(conn, jid)
+            project = (
+                video_project_queue.get_video_project(
+                    conn, safe_int((job or {}).get("project_id"), 0)
+                )
+                if job
+                else {}
+            )
+            if not job or not project:
+                return {"claimed": False, "reason": "job_or_project_missing"}
+            original_result_json = str(job.get("result_json") or "")
+            job_result = video_b14_job_result_payload(job)
+            report_message_id = str(
+                job_result.get("delivery_report_message_id") or ""
+            ).strip()
+            if job_result.get("delivery_report_sent") or report_message_id:
+                return {
+                    "claimed": False,
+                    "reason": "already_reported",
+                    "duplicate_prevented": True,
+                    "telegram_message_id": report_message_id,
+                }
+            if str(job_result.get("delivery_report_state") or "") == "sending":
+                return {
+                    "claimed": False,
+                    "reason": "report_in_progress",
+                    "duplicate_prevented": True,
+                }
+            if not (
+                project.get("video_delivered_at")
+                or project.get("video_delivery_message_id")
+            ):
+                return {"claimed": False, "reason": "delivery_receipt_required"}
+            if not _product_video_delivery_settlement_known(job_result, settlement):
+                return {"claimed": False, "reason": "delivery_settlement_required"}
+            job_result.update(
+                {
+                    "delivery_report_state": "sending",
+                    "delivery_report_started_at": now_text_safe(),
+                    "delivery_report_attempt_count": max(
+                        0,
+                        safe_int(job_result.get("delivery_report_attempt_count"), 0),
+                    )
+                    + 1,
+                }
+            )
+            cursor = conn.execute(
+                """UPDATE video_jobs
+                      SET result_json=?, updated_at=?
+                    WHERE id=? AND COALESCE(result_json,'')=?""",
+                (
+                    json.dumps(job_result, ensure_ascii=False),
+                    now_text_safe(),
+                    jid,
+                    original_result_json,
+                ),
+            )
+            if cursor.rowcount == 1:
+                conn.commit()
+                claimed_job = dict(job)
+                claimed_job["result_json"] = json.dumps(
+                    job_result, ensure_ascii=False
+                )
+                return {
+                    "claimed": True,
+                    "job": claimed_job,
+                    "project": project,
+                }
+            conn.rollback()
+        return {"claimed": False, "reason": "report_claim_conflict"}
+    finally:
+        conn.close()
+
+
+def _product_video_persist_delivery_report(job_id: int, updates: dict) -> bool:
+    conn = db_connect()
+    try:
+        persisted = _video_provider_update_job_result(
+            conn, safe_int(job_id, 0), updates
+        )
+        return bool(persisted and not persisted.get("metadata_cas_exhausted"))
+    finally:
+        conn.close()
+
+
+async def maybe_send_product_video_delivery_report(
+    result: dict,
+    delivery_receipt: dict | None = None,
+    delivery_settlement: dict | None = None,
+) -> dict:
+    if not result.get("ok") or not tg_app or not getattr(tg_app, "bot", None):
+        return {"sent": False, "reason": "report_not_ready"}
+    job = dict(result.get("job") or {})
+    product_type = product_video_delivery_report_product_type(
+        result.get("project") or {}, job
+    )
+    if product_type in {
+        "video_local_edit",
+        "multi_scene_film",
+        "video_long",
+        "long_video",
+    }:
+        return {"sent": False, "reason": "report_not_applicable"}
+    job_id = safe_int(job.get("id") or job.get("job_id"), 0)
+    claim = _product_video_claim_delivery_report(job_id, delivery_settlement)
+    if not claim.get("claimed"):
+        response = {
+            "sent": False,
+            "reason": str(claim.get("reason") or "report_not_ready"),
+        }
+        if claim.get("duplicate_prevented"):
+            response["duplicate_prevented"] = True
+        if claim.get("telegram_message_id"):
+            response["telegram_message_id"] = str(
+                claim.get("telegram_message_id") or ""
+            )
+        return response
+
+    claimed_job = dict(claim.get("job") or {})
+    claimed_project = dict(claim.get("project") or {})
+    report_data = product_video_delivery_report_data(
+        claimed_project, claimed_job, delivery_settlement
+    )
+    text = product_video_delivery_report_text(report_data)
+    try:
+        sent_message = await tg_app.bot.send_message(
+            chat_id=safe_int(claimed_project.get("user_id"), 0),
+            text=text,
+        )
+        message_id = telegram_delivery_message_id(sent_message)
+        if not message_id:
+            raise RuntimeError("telegram_message_id_missing")
+    except Exception as exc:
+        _product_video_persist_delivery_report(
+            job_id,
+            {
+                "delivery_report_state": "failed",
+                "delivery_report_sent": False,
+                "delivery_report_error": type(exc).__name__,
+            },
+        )
+        logger.warning(
+            f"product video delivery report send failed: {type(exc).__name__}"
+        )
+        return {"sent": False, "reason": type(exc).__name__}
+
+    persisted = _product_video_persist_delivery_report(
+        job_id,
+        {
+            "delivery_report_state": "sent",
+            "delivery_report_sent": True,
+            "delivery_report_message_id": message_id,
+            "delivery_report_sent_at": now_text_safe(),
+            "delivery_report_error": "",
+        },
+    )
+    return {
+        "sent": True,
+        "telegram_message_id": message_id,
+        "persisted": persisted,
+    }
+
+
 async def maybe_send_remote_worker_final_video(result: dict) -> dict:
     if not result.get("ok") or not tg_app:
         return {"sent": False, "reason": "not_ready_or_duplicate"}
@@ -270272,6 +270697,7 @@ async def api_worker_complete(request: Request):
     is_admin_prod_canary = remote_worker_api.is_remote_worker_admin_canary_job(job, project)
     delivery_receipt = {}
     delivery_settlement = {}
+    delivery_report = {}
     if is_safe_worker_canary or is_admin_prod_canary:
         conn = db_connect()
         try:
@@ -270313,12 +270739,35 @@ async def api_worker_complete(request: Request):
                 )
         finally:
             conn.close()
+        if delivery_receipt.get("sent") and delivery_settlement:
+            try:
+                delivery_report = await maybe_send_product_video_delivery_report(
+                    result,
+                    delivery_receipt,
+                    delivery_settlement,
+                )
+            except Exception as exc:
+                logger.warning(f"product video delivery report skipped: {type(exc).__name__}")
+                delivery_report = {"sent": False, "reason": type(exc).__name__}
+    elif result.get("ok") and result.get("duplicate") and delivery.get(
+        "duplicate_prevented"
+    ):
+        try:
+            delivery_report = await maybe_send_product_video_delivery_report(
+                result,
+                {"ok": True, "sent": True, "duplicate_prevented": True},
+                {},
+            )
+        except Exception as exc:
+            logger.warning(f"product video delivery report retry skipped: {type(exc).__name__}")
+            delivery_report = {"sent": False, "reason": type(exc).__name__}
     return {
         "ok": True,
         "result": result,
         "delivery": delivery,
         "delivery_receipt": delivery_receipt,
         "delivery_settlement": delivery_settlement,
+        "delivery_report": delivery_report,
         "artifact_storage": artifact_storage.public_metadata(artifact_meta),
         "local_cleanup": local_cleanup,
         **heartbeat,

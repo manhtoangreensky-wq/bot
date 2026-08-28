@@ -1,20 +1,38 @@
 # Hướng dẫn tester Product Video
 
-1. Chọn đúng case trong `DANH-SACH-CASE.md`; không tự đổi scenario giữa chừng.
-2. Ghi baseline project/job/outbox/transaction trước khi bấm Xác nhận cuối.
-3. Đi qua đúng Add-on -> Review -> Chất lượng -> Hóa đơn -> Xác nhận -> Trạng thái.
-4. Chỉ bấm Xác nhận cuối một lần; thử callback lặp chỉ khi case yêu cầu idempotency.
-5. Chờ job terminal. Queued/processing/HTTP 200 không phải PASS.
-6. Tải MP4, đo hash, bytes, codec, kích thước, duration, scene coverage và audio.
-7. Đối chiếu add-on trong job/manifest với video thật.
-8. Ghi delivery message id, `charged_xu` và transaction delta.
-9. FAIL ở bước nào thì mở lại đúng spec/case đó; không chuyển sang case tiếp theo.
+Strategy V2 có đúng 8 representative rows và 9 quality-only rows. Tier `400`
+được representative rows bao phủ; không tạo quality-only job thứ mười.
 
-Lỗi cũ cần canh: literal `\\n`, status nằm ngang, video mất audio, back nhảy sản phẩm, tier bị đổi, thiếu scene, add-on bị drop, duplicate job/delivery.
+1. Chọn đúng case `PV2-*` trong `DANH-SACH-CASE.md`; không tự đổi scenario giữa chừng.
+2. Representative phải dùng lane phức tạp không-manual. Manual/direct-input chỉ
+   kiểm tra source contract đi thẳng Add-on, không dùng làm paid representative.
+3. Ghi baseline project/job/outbox/provider-usage/transaction/credit-event trước
+   khi bấm Xác nhận cuối.
+4. Đi qua đúng Add-on -> Review -> Chất lượng -> Hóa đơn -> Xác nhận -> Trạng thái.
+5. Chỉ bấm Xác nhận cuối một lần; thử callback lặp chỉ khi case yêu cầu idempotency.
+6. Chờ job terminal. Queued/processing/HTTP 200 không phải PASS.
+7. Tải MP4, đo hash, bytes, codec, kích thước, duration, scene coverage và audio.
+8. Đối chiếu Add-on requested/materialized/applied với video thật; `missing` phải rỗng.
+9. Ghi video delivery message ID, file ID, file_unique_id, `charged_xu`, transaction
+   delta và credit-event delta.
+10. Sau MP4, kiểm tra đúng một báo cáo kinh doanh được gửi sau receipt + settlement;
+    ghi `delivery_report_message_id` và `delivery_report_sent=true`.
+11. Callback completion trùng không được gửi lại MP4, settlement hoặc report.
+12. FAIL ở bước nào thì mở lại đúng spec/case đó; không chuyển sang case tiếp theo.
 
-10. Với output `9:16`, không chỉ kiểm tra stream width/height. Mở video và xác nhận hình thật phủ kín canvas, không có hai dải đen trên/dưới hoặc trái/phải do `pad`; cảnh ngang phải được crop-to-fill, không co nhỏ giữa khung.
-11. Ở mọi nút Chất lượng, bấm một lần phải chuyển sang Hóa đơn; `Xác nhận tạo video` phải chuyển sang Xác nhận; `Bắt đầu tạo video` phải luôn chuyển sang Trạng thái kể cả provider/worker chưa sẵn sàng. Đứng nguyên màn là FAIL callback.
-12. Add-on PASS cần đồng thời: project plan ghi requested, worker materialization có artifact, manifest `addon_application.requested/applied` có đúng tên và video thật thể hiện add-on. Có SRT bên cạnh nhưng `subtitle_path=null` vẫn là FAIL.
+Lỗi cũ cần canh: literal `\\n`, status nằm ngang, video mất audio, back nhảy sản
+phẩm, tier bị đổi, thiếu scene, Add-on bị drop/tự bật từ profile, duplicate
+job/delivery/report, report gửi trước settlement hoặc lộ thông tin kỹ thuật.
+
+13. Với output `9:16`, không chỉ kiểm tra stream width/height. Mở video và xác nhận hình thật phủ kín canvas, không có hai dải đen trên/dưới hoặc trái/phải do `pad`; cảnh ngang phải được crop-to-fill, không co nhỏ giữa khung.
+14. Ở mọi nút Chất lượng, bấm một lần phải chuyển sang Hóa đơn; `Xác nhận tạo video` phải chuyển sang Xác nhận; `Bắt đầu tạo video` phải luôn chuyển sang Trạng thái kể cả provider/worker chưa sẵn sàng. Đứng nguyên màn là FAIL callback.
+15. Add-on PASS cần đồng thời: project plan ghi requested, worker materialization có artifact, manifest `addon_application.requested/applied` có đúng tên và video thật thể hiện add-on. Có SRT bên cạnh nhưng `subtitle_path=null` vẫn là FAIL.
+16. Customer report chỉ được chứa thông tin kinh doanh: sản phẩm, chất lượng,
+    cảnh/thời lượng/tỉ lệ, giá video, Add-on miễn phí/có phí/đã áp dụng, phí Add-on,
+    tổng hóa đơn, Xu thực trả và trạng thái giao. Có provider, worker, job/task ID,
+    SHA, manifest, JSON, engine route hoặc mã lỗi nội bộ là FAIL.
+17. Không test `multi_scene_film`, `video_long`, `video_local_edit` hoặc
+    `videoedit|ai` trong chu kỳ V2 hiện tại. Local Edit là baseline đã khóa.
 
 ## Cách test Public Landing Motion
 

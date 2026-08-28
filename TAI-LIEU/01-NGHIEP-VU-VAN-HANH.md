@@ -1,10 +1,16 @@
 # Nghiệp vụ vận hành Product Video
 
-Đo tại branch `fix/product-video-post-deploy-finalizer-recovery`, ngày 2026-08-26.
+Đo từ `KIEM-THU/product-video-live-strategy-v2.json` và source Product Video tại
+local commit `d7f296d2a00eba050d437ca51962d33acc5b4ffa`, ngày 2026-08-28.
 
 ## Phạm vi
 
-- 9 dòng acceptance theo sản phẩm/lane trong tracker Product Video.
+- 8 representative rows theo sản phẩm/lane: 19 cảnh; trong đó Kịch bản -> Video
+  dùng 5 cảnh, 7 row còn lại dùng 2 cảnh.
+- 9 quality-only rows, mỗi row 1 cảnh; tier `400` đã được 8 representative rows
+  bao phủ nên không tạo quality-only job thứ mười.
+- Trần live: 17 final jobs, 28 assigned scene renders, 4 source-image tasks và
+  tối đa 32 external create calls.
 - 10 mức chất lượng công khai của Video AI Chân thật: `200`, `300`, `400`, `500`, `600`, `700`, `800`, `1000`, `1200`, `1500`.
 - 3 mức chất lượng riêng của Ghép ảnh thành video: `fast`, `balanced`, `beautiful`.
 - 1 Tail thương mại dùng chung, đúng 6 màn: `Add-on -> Review -> Quality -> Invoice -> Confirm -> Status`.
@@ -13,12 +19,17 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 
 ## Đường đi hiện tại
 
-1. Khách mở đúng sản phẩm/lane và tự nhập nội dung.
-2. Bot giữ nguyên nội dung, nguồn ảnh/video và dựng kế hoạch tối thiểu 2 cảnh mà chưa gọi provider.
-3. Lane cần media phải vượt asset gate; thiếu media dừng trước Tail.
-4. Bot mở Add-on, sau đó Review, Chất lượng, Hóa đơn, Xác nhận và Trạng thái.
-5. Chỉ Xác nhận cuối mới được admission; callback lặp không được tạo job thứ hai.
-6. MP4 cuối phải hợp lệ và giao Telegram thành công trước khi ghi Xu.
+1. Khách mở đúng sản phẩm và lane phức tạp không-manual được giao trong Strategy V2.
+2. Lane tự nhập vẫn bắt buộc nhận nội dung khách rồi đi thẳng vào Tail, nhưng chỉ
+   dùng source-contract test; không tạo paid representative job trùng lặp.
+3. Bot giữ nguyên nội dung, nguồn ảnh/video và dựng số cảnh khóa mà chưa gọi provider.
+4. Lane cần media phải vượt asset gate; thiếu media dừng trước Tail.
+5. Bot mở Add-on, sau đó Review, Chất lượng, Hóa đơn, Xác nhận và Trạng thái.
+6. Chỉ Xác nhận cuối mới được admission; callback lặp không được tạo job thứ hai.
+7. MP4 cuối phải hợp lệ và giao Telegram thành công trước khi ghi Xu.
+8. Sau khi receipt đã bền vững và settlement đã biết, bot gửi đúng 1 báo cáo kinh
+   doanh: sản phẩm, chất lượng, cảnh/thời lượng/tỉ lệ, giá video, Add-on miễn phí/
+   có phí/đã áp dụng, tổng hóa đơn, Xu thực trả và trạng thái giao thành công.
 
 ## Chất lượng
 
@@ -55,9 +66,14 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 ## Việc còn treo
 
 - Push/PR/merge/deploy runtime mới.
-- 9 dòng live sản phẩm/lane, mỗi dòng kịch bản riêng và MP4 tối thiểu 2 cảnh.
-- 10 live job Video AI Chân thật, mỗi tier một kịch bản 2 cảnh riêng.
+- 8 representative rows V2, mỗi row kịch bản riêng; 7 row cần MP4 tối thiểu 2
+  cảnh, Kịch bản -> Video cần đúng 5 cảnh.
+- 9 quality-only rows được phân cho các sản phẩm tương thích, mỗi row 1 cảnh;
+  không dồn toàn bộ quality coverage vào Video AI Chân thật.
 - Mọi dòng cần artifact hash/bytes/codec/duration/audio, delivery message id và Owner `0 Xu`.
+- `multi_scene_film` / Video dài tập bị loại khỏi chu kỳ hiện tại. `video_local_edit`
+  là sản phẩm đã khóa; `videoedit|ai` hoãn cùng Long Video. Không sửa hoặc live-test
+  ba boundary này cho tới lệnh Owner mới.
 
 ## Bổ sung vận hành Public Landing — Motion 26/08/2026
 
@@ -282,3 +298,44 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Đây là SOURCE PASS. Chỉ được ghi LIVE PASS sau deploy exact SHA và click thật
   `Nhanh gọn - 80 Xu` đi qua Hóa đơn -> Xác nhận -> Trạng thái mà không hiện lại
   catalog `2.360 Xu`.
+
+## Bổ sung Strategy V2 và báo cáo sau giao video — 28/08/2026
+
+- `KIEM-THU/product-video-live-strategy-v2.json` là assignment machine-readable:
+  đúng 8 representative rows + 9 quality-only rows = 17 final jobs. Số cảnh khóa
+  là 19 + 9 = 28 assigned scene renders; 4 source-image tasks đưa trần create call
+  lên 32. Mọi số này có regression verifier, không phải ước lượng.
+- Representative luôn dùng tier `400` / `80 Xu/cảnh`. Kịch bản -> Video dùng 5
+  cảnh; 7 representative rows còn lại dùng 2 cảnh. Quality-only dùng 1 cảnh và
+  chỉ chạy trên product/adapter đã được catalog xác nhận tương thích.
+- Video tự quay có 2 sản phẩm độc lập, nên có 2 representative rows:
+  `self_shot_scene_change` và `self_shot_cinematic_transform`.
+- Lane manual/direct-input chỉ chứng minh nội dung khách đi thẳng
+  `Add-on -> Review -> Quality -> Invoice -> Confirm -> Status`; không dùng làm
+  representative paid job vì bỏ qua phần product-specific phức tạp.
+- `multi_scene_film`, `video_long` và `video_local_edit` bị loại khỏi paid matrix;
+  `videoedit|ai` hoãn. Local Edit giữ 8 function hashes và 2 protected test files,
+  không được sửa để làm sản phẩm khác PASS.
+- Job #26 chứng minh tier `400`, Invoice `144 Xu`, 2 cảnh, 16 giây, 9:16 và MP4
+  thật đã giao; nhưng legacy project persistence làm rơi strict Add-on contract và
+  tạo `partial_addons=1`, nên chưa được ghi representative PASS.
+- Source correction giữ nguyên `product-video-addons-v1` từ Tail tới worker, không
+  tự bật voice/music/subtitle. Final focused gate `24 passed`; protected Tail/
+  RouteEngine `103 passed`; local artifact/UI lock `21 passed`; broad clean base và
+  branch cùng `38 passed + 7 historical failures`, `NEW_FAILURES=0`; compile/diff
+  exit `0`.
+- Báo cáo sau giao video là best-effort và at-most-once: chỉ gửi sau receipt +
+  settlement, lưu `delivery_report_message_id` và `delivery_report_sent=true`;
+  callback trùng không giao MP4, settle hoặc gửi report lần hai. Report failure
+  không đảo ngược delivery và không charge lại.
+- Tin khách hàng cấm provider, worker, job/task ID, SHA, manifest, JSON, engine
+  route và mã lỗi nội bộ. `video_local_edit` và Long Video dừng trước DB claim của
+  report helper.
+- Exact correction live được khóa tại
+  `KIEM-THU/runbooks/PV2-SPEC04G1-addon-report-rerun.md`. SOURCE PASS khác DEPLOY
+  và LIVE PASS; phải có exact runtime SHA, MP4/receipt/report/zero-wallet readback
+  rồi mới tick hoàn thành.
+- Tester workspace readback ngày 28/08: 21 GitHub labels, 2 issues được trả về và
+  4 issue templates local. Projects board là `UNKNOWN` vì token thiếu
+  `read:project`; Owner cần tự cấp scope bằng `gh auth refresh -s read:project`
+  trước khi task được phép đọc/tạo board. Không tự mở browser hoặc nâng scope.

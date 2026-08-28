@@ -1,0 +1,53 @@
+task_id: P0_PRODUCT_VIDEO_V2_SPEC_04G_1
+phase: SHIP_READY_WAITING_SUBDUB_RELEASE
+pointer: V2-02I/SPEC-04G.1
+base_sha: 3e28d3d9ac63baf26b939db4c55111bea3b97610
+goal: Preserve strict Tail Add-on truth through project persistence and send one friendly customer report after durable delivery and settlement.
+allowed_files:
+  - bot.py
+  - tests/test_p0_product_video_addon_truth_delivery_report.py
+  - KIEM-THU/PRODUCT-VIDEO-LIVE-STRATEGY-V2.md
+  - KIEM-THU/runbooks/PV2-SPEC04G1-addon-report-rerun.md
+  - KIEM-THU/DANH-SACH-CASE.md
+  - KIEM-THU/HUONG-DAN-TESTER.md
+  - TAI-LIEU/01-NGHIEP-VU-VAN-HANH.md
+  - TAI-LIEU/02-CHUC-NANG-GOC-VA-HIEN-TAI.md
+  - .github/ISSUE_TEMPLATE/01-product-video-case-test.yml
+  - .github/ISSUE_TEMPLATE/02-product-video-bao-loi.yml
+  - tests/test_p0_product_video_live_strategy_v2.py
+  - .agents/state/P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md
+  - .agents/state/p0-product-video-v2.yaml
+protected_domains:
+  - completed Product Video Tail UI text/keyboards/callbacks/layout/back-stack
+  - video_local_edit and videoedit|ai
+  - multi_scene_film and Video dai tap
+  - wallet/PayOS/top-up/ENV/provider configuration
+acceptance:
+  - strict product-video-addons-v1 plan persists unchanged for the worker
+  - legacy sessions keep existing legacy Add-on behavior
+  - customer report contains business fields and no internal technical terms
+  - report is sent after durable receipt and settlement, at most once per job
+  - report failure never invalidates delivered MP4 or triggers another charge
+prohibited_actions:
+  - Telegram/browser/provider/VPS/fetch/push/PR/merge/deploy while SubDub owns shared resources
+  - paid provider calls
+  - wallet mutations
+  - UI redesign or protected-lane edits
+source_evidence:
+  primary_red: 6 failed in 12.60s
+  focused_green: 24 passed in 9.03s
+  protected_green: 103 passed in 45.45s
+  artifact_ui_lock_green: 21 passed in 54.08s
+  broad_branch: 38 passed and 7 historical failures
+  broad_clean_base: 38 passed and the same 7 historical failures
+  new_failures: 0
+  py_compile_bot: exit 0
+  diff_check: exit 0
+  tester_docs_green: 9 passed in 6.49s
+  tester_case_rows: 17 unique paid rows
+  tester_yaml_parse: 3 files
+  github_labels_readback: 21
+  github_issues_readback: 2
+  github_issue_templates_local: 4
+  github_projects_readback: UNKNOWN_missing_read_project_scope
+next_action: Wait for exact SubDub shared-resource releases, then fetch/rebase, rerun the focused post-rebase gate, ship one PR/deploy, and live-rerun the same manual Tail case.

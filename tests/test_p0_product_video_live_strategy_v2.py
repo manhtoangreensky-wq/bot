@@ -12,6 +12,11 @@ from services import video_ai_real_pricing, video_tail9
 
 ROOT = Path(__file__).resolve().parents[1]
 STRATEGY_PATH = ROOT / "KIEM-THU" / "product-video-live-strategy-v2.json"
+CASE_SOURCE_PATH = ROOT / "KIEM-THU" / "DANH-SACH-CASE.md"
+TESTER_GUIDE_PATH = ROOT / "KIEM-THU" / "HUONG-DAN-TESTER.md"
+OPERATIONS_DOC_PATH = ROOT / "TAI-LIEU" / "01-NGHIEP-VU-VAN-HANH.md"
+ORIGINAL_DOC_PATH = ROOT / "TAI-LIEU" / "02-CHUC-NANG-GOC-VA-HIEN-TAI.md"
+CASE_TEMPLATE_PATH = ROOT / ".github" / "ISSUE_TEMPLATE" / "01-product-video-case-test.yml"
 
 
 def _strategy() -> dict:
@@ -209,3 +214,38 @@ def test_v2_committed_script_fixture_is_exact_and_five_scene() -> None:
         "KIEM-THU/fixtures/PV2-R03-tea-lotus-5-scenes.txt#"
         "39047AABFEE7D88B17109FCC90683C64080B5BB0AC3D531AC062B3060F836FCE"
     ]
+
+
+def test_v2_tester_docs_match_paid_assignments_exclusions_and_report_gate() -> None:
+    strategy = _strategy()
+    representatives = list(strategy["representatives"])
+    quality_only = [
+        row
+        for row in strategy["quality_coverage"]
+        if int(row["tier_id"]) != int(strategy["representative_tier_id"])
+    ]
+    expected_case_ids = [
+        str(row["case_id"]) for row in [*representatives, *quality_only]
+    ]
+    case_source = CASE_SOURCE_PATH.read_text(encoding="utf-8")
+    tester_guide = TESTER_GUIDE_PATH.read_text(encoding="utf-8")
+    operations_doc = OPERATIONS_DOC_PATH.read_text(encoding="utf-8")
+    original_doc = ORIGINAL_DOC_PATH.read_text(encoding="utf-8")
+    case_template = CASE_TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert len(expected_case_ids) == 17
+    for case_id in expected_case_ids:
+        assert case_source.count(f"| `{case_id}` |") == 1, case_id
+    assert "| PV-L07 |" not in case_source
+    assert "| PV-L09 |" not in case_source
+    assert "Video dài tập / manual" not in case_source
+    assert "Chỉnh sửa Video / input 2 cảnh" not in case_source
+    assert "8 representative" in tester_guide
+    assert "9 quality-only" in tester_guide
+    assert "delivery_report_message_id" in tester_guide
+    assert "8 representative" in operations_doc
+    assert "9 quality-only" in operations_doc
+    assert "17 final jobs" in operations_doc
+    assert "28 assigned scene renders" in operations_doc
+    assert "Strategy V2" in original_doc
+    assert "delivery_report_message_id" in case_template

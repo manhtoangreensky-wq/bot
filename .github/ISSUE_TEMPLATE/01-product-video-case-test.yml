@@ -30,7 +30,14 @@ body:
     id: evidence
     attributes:
       label: Job, artifact và delivery evidence
-      description: Ghi request/project/job/outbox, MP4 hash/metrics, add-on, message id và 0 Xu.
+      description: Ghi request/project/job/outbox, MP4 hash/metrics, add-on, video message id, delivery_report_message_id và 0 Xu.
+    validations:
+      required: true
+  - type: textarea
+    id: customer_report
+    attributes:
+      label: Báo cáo khách hàng sau giao video
+      description: Ghi report message ID, loại sản phẩm, chất lượng, cảnh/thời lượng, Add-on miễn phí/có phí/đã áp dụng, tổng hóa đơn và Xu thực trả; xác nhận không lộ kỹ thuật.
     validations:
       required: true
   - type: dropdown
