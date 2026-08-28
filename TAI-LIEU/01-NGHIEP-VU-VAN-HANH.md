@@ -72,8 +72,9 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 
 ## Bổ sung vận hành SubDub tự động 2 giọng — 27/08/2026
 
-- Thứ tự khóa: combo `Phụ đề + Lồng tiếng` phải giao MP4 + SRT + receipt trước;
-  sau đó lane `Lồng tiếng video` phải giao MP4 + receipt; chỉ khi cả hai PASS mới
+- Thứ tự khóa: combo `Phụ đề + Lồng tiếng` chỉ tự giao MP4 rồi receipt trước;
+  sau đó lane `Lồng tiếng video` cũng chỉ tự giao MP4 rồi receipt; SRT/audio/
+  sidecar là artifact nội bộ hoặc tải chủ động. Chỉ khi cả hai PASS mới
   được chạy `Tự động nhiều giọng`.
 - Fixture acceptance hai giọng: `2 giọng nam nữ.mp4`, `4,284,017` bytes,
   SHA-256 `85C8793D197CF2782BB554D46282E82A83BCB062A0483E412A0CA1DA668F9F51`.
@@ -235,8 +236,8 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   case đã GREEN riêng trên Python 3.12 + NumPy/ORT `1.29.0` (`7 passed`).
   Compile/hash/diff và post-rebase gate vẫn là cổng bắt buộc trước push.
 - Trap vận hành: một sidecar có đúng hai label không chứng minh cast đúng;
-  provider HTTP `200`, SRT hay sidecar cũng không phải MP4 PASS. Combo vẫn phải
-  giao MP4 + SRT + receipt trước standalone và multi-speaker.
+  provider HTTP `200`, SRT hay sidecar cũng không phải MP4 PASS. Combo phải giao
+  MP4 rồi receipt, không file tự động dư, trước standalone và multi-speaker.
 
 ## Bổ sung Product Video job 25 và khóa UI — 28/08/2026
 

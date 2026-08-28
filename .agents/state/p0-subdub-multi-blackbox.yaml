@@ -3,8 +3,8 @@ product: SubDub
 owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
-branch: fix/p0-subdub-audio-label-live
-phase: SPEC_08_0F_4_BLOCKED_BY_SHARED_RESOURCE_SOURCE_READY
+branch: fix/p0-subdub-cue-sync-video-only
+phase: SPEC_08_0G_4_SOURCE_READY_TO_SHIP
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -26,10 +26,52 @@ workflow_contract:
 
 resource_boundary:
   cpu: independent_local_subdub_source_only
-  live: owned_by_product_video
-  chrome: owned_by_product_video
-  vps_deploy: owned_by_product_video
-  product_video: shipping V2-02G docs/test PR before SubDub reacquires shared resources
+  live: owned_by_subdub
+  chrome: owned_by_subdub
+  vps_deploy: owned_by_subdub
+  product_video: source-local only until the SubDub correction is terminal
+
+active_correction_08_0g:
+  owner_requirements:
+    - measure source and translated speech rate for every cue
+    - fit generated TTS inside the exact original cue window
+    - never shift a later cue because an earlier translated sentence is long
+    - keep the final dubbed video duration equal to the source timeline
+    - automatically send only one MP4 followed by one final receipt
+    - keep SRT, dub audio, and sidecars internal unless the user explicitly requests a download
+  observed_live_job:
+    public_job: 9542CF588E
+    terminal: delivered
+    runtime_sha: 6476f20bdd9f8728a5db0b1d62a245b0d612aea8
+    symptom: translated dubbed speech lags the original cue timeline and an SRT was sent automatically after the MP4
+    charged_xu: 0
+  root_cause:
+    - the current timeline planner advances each cue from max(original_start, previous_audio_end)
+    - the current planner globally limits tempo correction to 1.15 and extends the video when speech still does not fit
+    - the PR 887 auto_srt_companion_required branch intentionally sends the internal SRT after a successful combo MP4
+  evidence:
+    focused_red: exact source/rate/timeline/delivery contracts failed before the production change
+    reviewer_red: early_to_late_rms_ratio=0.499995 and auto-multi companion missing
+    reviewer_green: 2 passed, 1 warning in 1023.58s
+    protected_green: 122 passed, 3 warnings in 54.61s
+    final_receipt_gate: 12 passed, 1 warning in 16.64s
+    broad_branch: 158 passed, 17 failed
+    exact_baseline_failure_selectors: 17 failed on clean 6476f20; NEW_FAILURES=0
+    independent_rereview: critical 0; important 0; ready_to_merge yes
+    final_compile: bot.py, subtitle_dub_product_pipeline.py and 3 changed tests exit 0
+    final_diff_check: exit 0
+  ordered_subspecs:
+    - SPEC-08.0G.1 READ and focused RED for cue drift and delivery count/order
+    - SPEC-08.0G.2 minimal per-cue measurement and duration-fit GREEN
+    - SPEC-08.0G.3 video-only delivery GREEN for combo and standalone
+    - SPEC-08.0G.4 review, protected verification, one PR/deploy and exact combo live retry
+  downstream_order_after_two_speaker_lock:
+    - finish combo Auto 2-speaker live
+    - finish standalone Auto 2-speaker live
+    - record immutable two-speaker code and evidence hashes
+    - map reusable cue timing, mux, delivery and receipt owners into a separate multi lane
+    - retain multi-specific diarization, classifier and speaker-to-voice mapping owners
+    - RED, minimal GREEN, one PR/deploy and real multi-speaker live fixture
 
 audio_ui_rollback:
   root_cause: PR 896 / 3fc190c added a fixed-percentage preset grid and two preset callback actions to the shared audio owner
@@ -494,7 +536,7 @@ ordered_specs:
     shipped_corrections:
       - PR 883 / b9b0cc3 restores the proven PR 842 classifier and PCM extraction baseline
       - PR 885 / 176f3c2 preserves exact subtitle and dubbing component pricing and admin zero-charge receipts
-      - PR 887 / 371a422 sends the automatic combo SRT companion
+      - PR 887 / 371a422 historically sent an automatic combo SRT companion; SPEC-08.0G supersedes that delivery behavior
       - PR 889 / f16fb75 supersedes PR 886 forced pairing with independent per-speaker classification
     independent_gender_evidence:
       - exactly two labels are required
@@ -543,7 +585,7 @@ ordered_specs:
       - detect at least three real speaker labels without inventing labels
       - assign a distinct validated TTS voice to every detected label
       - multilingual translation and dubbing preserve speaker-to-voice mapping
-      - one final playable MP4 and one valid SRT are delivered
+      - one final playable MP4 is automatically delivered; one valid SRT remains internal for burn-in/QC or explicit download
       - receipt shows subtitle price, dubbing price, dubbing type, speaker/voice counts, casts, and total
       - charged_xu equals 0 and no wallet transaction is created
     on_failure: stay on SPEC-05 and repeat RED/GREEN/ship/live until all acceptance evidence passes

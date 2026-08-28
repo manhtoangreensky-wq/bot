@@ -65,6 +65,8 @@ Nguồn thiết kế trước: `docs/superpowers/plans/2026-08-14-subdub-per-spe
 | Admin không trừ Xu | Receipt vẫn phải hiển thị đủ giá niêm yết; settlement admin `charged_xu=0` | ✅ Còn dùng |
 | Âm lượng chọn bằng các nút phần trăm cố định | PR #896 thêm `10` preset là regression; hiện dùng hai layer cùng một hàng và nhập số gốc `0–100`, lồng `0–200` | ❌ Bỏ preset, giữ numeric |
 | Mỗi kiểu giọng có bảng âm thanh riêng | Cả `2` lane và `6` kiểu giọng dùng chung một audio owner; test ma trận `12` case | ⚠️ Tài liệu cũ không còn đúng |
+| TTS nối tiếp có thể đẩy cue sau và kéo dài video để giữ hết câu dịch | Exact 2-speaker đo đơn vị nói của câu gốc/câu dịch trên timestamp ASR, yêu cầu provider speed tối đa `1.8x`, đo duration TTS thật rồi `atempo`/pad riêng từng cue; start/end cue và duration nguồn bất biến | ❌ Bỏ drift tích lũy |
+| Combo Auto tự gửi thêm SRT sau MP4 | SRT vẫn là artifact gắn phụ đề/QC và tải chủ động; success path chỉ tự gửi MP4 rồi receipt | ❌ Bỏ file delivery dư |
 
 Chỗ tài liệu/code cũ không còn đúng: request diarization trước live job
 `#EE4E7E69CD` kế thừa `model=nova-2`. Fixture Mandarin hai người có audio đo
