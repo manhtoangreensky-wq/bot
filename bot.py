@@ -2326,6 +2326,7 @@ SUBDUB_DUB_LOUDNESS_NORMALIZE = env_flag("SUBDUB_DUB_LOUDNESS_NORMALIZE", "true"
 SUBDUB_DUB_MAX_PEAK_DB = max(-6.0, min(-0.1, env_float("SUBDUB_DUB_MAX_PEAK_DB", -1.0)))
 SUBDUB_DUB_DEFAULT_SPEECH_RATE = max(0.7, min(1.0, env_float("SUBDUB_DUB_DEFAULT_SPEECH_RATE", 0.95)))
 SUBDUB_DUB_MAX_SPEECH_RATE = max(SUBDUB_DUB_DEFAULT_SPEECH_RATE, min(1.0, env_float("SUBDUB_DUB_MAX_SPEECH_RATE", 1.0)))
+SUBDUB_DUB_CUE_MAX_PROVIDER_SPEED = 1.8
 SUBDUB_DUB_MAX_START_EARLY_MS = max(0, env_int("SUBDUB_DUB_MAX_START_EARLY_MS", 0))
 ORIGINAL_AUDIO_MIX_VOLUME = max(0.0, min(1.0, env_float("ORIGINAL_AUDIO_MIX_VOLUME", 0.15)))
 SUBDUB_VOLUME_MIX_UI_ENABLED = env_flag("SUBDUB_VOLUME_MIX_UI_ENABLED", "true")
@@ -241342,6 +241343,11 @@ def subtitle_dub_debug_job_payload(
         "tts_timeline_duration": float(state.get("tts_timeline_duration") or 0.0),
         "tts_timeline_detail": str(state.get("tts_timeline_detail") or ""),
         "tts_sequential": bool(state.get("tts_sequential")),
+        "cue_locked_timing": bool(state.get("cue_locked_timing")),
+        "speech_rate_measurements": list(state.get("speech_rate_measurements") or []),
+        "speech_rate_cue_count": int(state.get("speech_rate_cue_count") or 0),
+        "speech_rate_max_fit_ratio": float(state.get("speech_rate_max_fit_ratio") or 1.0),
+        "speech_rate_max_drift_seconds": float(state.get("speech_rate_max_drift_seconds") or 0.0),
         "mux_render_called": bool(attempts.get("mux") or final_path),
         "final_mp4_path": final_path,
         "final_mp4_exists": bool(final_path and os.path.exists(final_path)),
@@ -243220,6 +243226,8 @@ def subdub_final_expected_duration_seconds(
         return source_duration
     if not result.get("video_output"):
         return source_duration
+    if result.get("cue_locked_timing"):
+        return source_duration
     return max(
         source_duration,
         float(result.get("final_video_expected_duration") or 0.0),
@@ -243376,7 +243384,7 @@ async def send_public_subtitle_dub_final_outputs(
     auto_srt_companion_required = bool(
         is_combined
         and include_subtitle_outputs
-        and auto_speaker.is_auto_speaker_state(delivery_job)
+        and auto_multi_speaker.is_auto_multi_speaker_state(delivery_job)
         and (subtitle_items or str(srt_text or "").strip())
     )
     sent = {
@@ -243519,7 +243527,7 @@ async def send_public_subtitle_dub_final_outputs(
                         sent["delivery_method"] = "compressed_document"
                 if (
                     sent.get("final_mp4_delivered")
-                    and video_product_subtitle_mode
+                    and (video_product_subtitle_mode or requires_final_mp4)
                     and not auto_srt_companion_required
                 ):
                     sent["srt_fallback_suppressed"] = True
@@ -246046,6 +246054,16 @@ async def subdub_validate_tts_timeline_audio_bytes(audio_bytes: bytes, suffix: s
         minimum_active_seconds=0.06,
     )
 
+
+def subdub_speech_unit_count(text: str) -> int:
+    normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not normalized:
+        return 0
+    wide_chars = re.findall(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]", normalized)
+    non_wide = re.sub(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]", " ", normalized)
+    return len(wide_chars) + len(re.findall(r"[^\W_]+", non_wide, flags=re.UNICODE))
+
+
 async def synthesize_dub_segment_chunks(
     segments: list[dict],
     *,
@@ -246059,10 +246077,12 @@ async def synthesize_dub_segment_chunks(
     tts_language_boost: str = "auto",
     edge_voice_id: str = "",
     require_speech_qc: bool = False,
+    cue_locked_timing: bool = False,
 ) -> dict:
     chunks = []
     providers = []
-    safe_max_speed = max(0.7, min(1.0, float(max_speed or 1.0)))
+    speed_ceiling = SUBDUB_DUB_CUE_MAX_PROVIDER_SPEED if cue_locked_timing else 1.0
+    safe_max_speed = max(0.7, min(speed_ceiling, float(max_speed or 1.0)))
     safe_base_speed = max(0.7, min(safe_max_speed, float(base_speed or 1.0)))
     for index, segment in enumerate(segments or [], start=1):
         text = str((segment or {}).get("text") or "").strip()
@@ -246073,7 +246093,16 @@ async def synthesize_dub_segment_chunks(
         if end <= start:
             end = start + 1
         slot_seconds = max(0.4, end - start)
-        speed = safe_base_speed
+        source_text = str((segment or {}).get("source_text") or text).strip()
+        source_text_units = max(1, subdub_speech_unit_count(source_text))
+        translated_text_units = max(1, subdub_speech_unit_count(text))
+        source_speech_rate = source_text_units / slot_seconds
+        required_target_speech_rate = translated_text_units / slot_seconds
+        required_provider_speed = safe_base_speed * max(
+            1.0,
+            required_target_speech_rate / max(0.001, source_speech_rate),
+        )
+        speed = min(safe_max_speed, required_provider_speed)
         try:
             provider, audio_bytes, detail = await video_dubbing_tts_bytes(
                 text,
@@ -246122,11 +246151,21 @@ async def synthesize_dub_segment_chunks(
             "start": start,
             "end": end,
             "text": text,
+            "source_text": source_text,
             "audio_bytes": bytes(audio_bytes),
             "raw_audio_duration": raw_duration,
             "trim_start": trim_start,
             "trim_end": trim_end,
             "audio_duration": duration,
+            "cue_window_seconds": slot_seconds,
+            "source_speech_window_seconds": slot_seconds,
+            "speech_rate_basis": "asr_cue_timestamps",
+            "source_text_units": source_text_units,
+            "translated_text_units": translated_text_units,
+            "source_speech_rate": source_speech_rate,
+            "required_target_speech_rate": required_target_speech_rate,
+            "generated_audio_seconds": duration,
+            "cue_locked_timing": bool(cue_locked_timing),
             "speed": round(speed, 3),
             "provider": provider,
             "detail": sanitize_log_text(str(detail or ""))[:180],
@@ -246183,6 +246222,46 @@ def subdub_plan_dub_timeline(
             "end": end,
             "audio_duration": audio_duration,
         })
+
+    cue_locked_timing = any(bool(item.get("cue_locked_timing")) for item in normalized)
+    if cue_locked_timing:
+        scheduled = []
+        source_overlap_count = 0
+        previous_end = 0.0
+        for item in normalized:
+            cue_window = float(item["end"]) - float(item["start"])
+            fit_ratio = max(1.0, float(item["audio_duration"]) / cue_window)
+            post_fit_audio = float(item["audio_duration"]) / fit_ratio
+            if float(item["start"]) < previous_end - 0.001:
+                source_overlap_count += 1
+            scheduled.append({
+                **item,
+                "scheduled_start": float(item["start"]),
+                "scheduled_end": float(item["end"]),
+                "scheduled_duration": cue_window,
+                "tempo_ratio": fit_ratio,
+                "cue_window_seconds": cue_window,
+                "generated_audio_seconds": float(item["audio_duration"]),
+                "fit_ratio": fit_ratio,
+                "post_fit_audio_seconds": post_fit_audio,
+                "drift_seconds": 0.0,
+            })
+            previous_end = max(previous_end, float(item["end"]))
+        return {
+            "ok": True,
+            "blocker": "",
+            "scheduled": scheduled,
+            "timeline_duration": source_timeline_end,
+            "source_duration": source_timeline_end,
+            "final_audio_end": source_timeline_end,
+            "tempo_ratio": max(float(item["tempo_ratio"]) for item in scheduled),
+            "shifted_cue_count": 0,
+            "overlap_count": 0,
+            "source_overlap_count": source_overlap_count,
+            "timeline_extended": False,
+            "extension_seconds": 0.0,
+            "cue_locked_timing": True,
+        }
 
     def _schedule(tempo_ratio: float) -> tuple[list[dict], float, int]:
         cursor = 0.0
@@ -246287,6 +246366,76 @@ async def build_dub_timeline_audio(chunks: list[dict], total_duration: float = 0
             with open(chunk_path, "wb") as handle:
                 handle.write(audio_bytes)
             command.extend(["-i", chunk_path])
+
+        if plan.get("cue_locked_timing"):
+            filters = []
+            cue_labels = []
+            for index, item in enumerate(scheduled_chunks):
+                scheduled_start = max(0.0, float(item.get("scheduled_start") or 0.0))
+                cue_window = max(0.06, float(item.get("scheduled_duration") or 0.0))
+                post_fit_audio = max(
+                    0.06,
+                    min(cue_window, float(item.get("post_fit_audio_seconds") or cue_window)),
+                )
+                tempo_ratio = max(1.0, float(item.get("tempo_ratio") or 1.0))
+                fade_duration = min(0.008, post_fit_audio / 4.0)
+                fade_out_start = max(0.0, post_fit_audio - fade_duration)
+                chain = []
+                raw_audio_duration = max(0.0, float(item.get("raw_audio_duration") or 0.0))
+                trim_start = max(0.0, float(item.get("trim_start") or 0.0))
+                trim_end = max(trim_start, float(item.get("trim_end") or raw_audio_duration or 0.0))
+                if raw_audio_duration > 0 and trim_end > trim_start:
+                    trim_end = min(raw_audio_duration, trim_end)
+                    chain.extend([
+                        f"atrim=start={trim_start:.6f}:end={trim_end:.6f}",
+                        "asetpts=PTS-STARTPTS",
+                    ])
+                chain.extend([
+                    "aformat=sample_fmts=fltp:sample_rates=32000:channel_layouts=mono",
+                    *subdub_atempo_filters(tempo_ratio),
+                    f"afade=t=in:st=0:d={fade_duration:.6f}",
+                    f"afade=t=out:st={fade_out_start:.6f}:d={fade_duration:.6f}",
+                    f"apad=whole_dur={cue_window:.6f}",
+                    f"atrim=duration={cue_window:.6f}",
+                    f"adelay={int(round(scheduled_start * 1000))}|{int(round(scheduled_start * 1000))}",
+                    "asetpts=PTS-STARTPTS",
+                ])
+                cue_label = f"cue_{index}"
+                filters.append(f"[{index}:a]{','.join(chain)}[{cue_label}]")
+                cue_labels.append(f"[{cue_label}]")
+            if len(cue_labels) == 1:
+                filters.append(f"{cue_labels[0]}anull[mixed_cues]")
+            else:
+                filters.append(
+                    f"{''.join(cue_labels)}amix=inputs={len(cue_labels)}:duration=longest:"
+                    "dropout_transition=0:normalize=0,alimiter=limit=0.95[mixed_cues]"
+                )
+            filters.append(
+                f"[mixed_cues]apad=whole_dur={timeline_end:.3f},"
+                f"atrim=duration={timeline_end:.3f}[mix]"
+            )
+            output_path = os.path.join(tmpdir, "dub_timeline.mp3")
+            command.extend([
+                "-filter_complex", ";".join(filters),
+                "-map", "[mix]",
+                "-t", f"{timeline_end:.3f}",
+                "-c:a", "libmp3lame",
+                "-b:a", "160k",
+                output_path,
+            ])
+            ok, detail = await run_subdub_ffmpeg_command(
+                command,
+                timeout=max(180, len(scheduled_chunks) * 30),
+            )
+            if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+                return b"", str(detail or "cue_locked_timeline_audio_failed")
+            with open(output_path, "rb") as handle:
+                return handle.read(), (
+                    f"ffmpeg_cue_locked_timeline_audio:cues={len(scheduled_chunks)};"
+                    f"duration={timeline_end:.3f};source_duration={float(plan.get('source_duration') or timeline_end):.3f};"
+                    f"max_fit_ratio={float(plan.get('tempo_ratio') or 1.0):.6f};"
+                    "timeline_extended=no;shifted_cues=0;overlap_count=0;cue_locked=yes"
+                )
 
         filters = []
         sequence_labels = []
@@ -249034,7 +249183,11 @@ async def _execute_video_dubbing_pipeline_core(
             return {"provider": "", "chunks": []}
         speech_config = subdub_dub_speech_config(state, kwargs.get("base_speed") or state.get("voice_speed") or "1.0")
         kwargs["base_speed"] = float(speech_config.get("dub_speech_rate") or SUBDUB_DUB_DEFAULT_SPEECH_RATE)
-        kwargs["max_speed"] = float(speech_config.get("dub_max_speech_rate") or SUBDUB_DUB_MAX_SPEECH_RATE)
+        kwargs["max_speed"] = (
+            float(SUBDUB_DUB_CUE_MAX_PROVIDER_SPEED)
+            if kwargs.get("cue_locked_timing")
+            else float(speech_config.get("dub_max_speech_rate") or SUBDUB_DUB_MAX_SPEECH_RATE)
+        )
         kwargs["require_speech_qc"] = True
         result = await synthesize_dub_segment_chunks(
             *args,
@@ -249568,6 +249721,11 @@ async def _execute_video_dubbing_pipeline_core(
         "tts_overlap_resolutions": int(product_result.get("tts_overlap_resolutions") or 0),
         "tts_timeline_duration": float(product_result.get("tts_timeline_duration") or 0.0),
         "audio_padding_seconds": float(product_result.get("audio_padding_seconds") or 0.0),
+        "cue_locked_timing": bool(product_result.get("cue_locked_timing")),
+        "speech_rate_measurements": list(product_result.get("speech_rate_measurements") or []),
+        "speech_rate_cue_count": int(product_result.get("speech_rate_cue_count") or 0),
+        "speech_rate_max_fit_ratio": float(product_result.get("speech_rate_max_fit_ratio") or 1.0),
+        "speech_rate_max_drift_seconds": float(product_result.get("speech_rate_max_drift_seconds") or 0.0),
         "original_audio_mode": str(
             state.get("original_audio_mode")
             or state.get("source_audio_mode")
@@ -250827,6 +250985,11 @@ async def execute_video_dubbing_pipeline(
             "tts_overlap_resolutions": int(result.get("tts_overlap_resolutions") or result_state.get("tts_overlap_resolutions") or 0),
             "tts_timeline_duration": float(result.get("tts_timeline_duration") or result_state.get("tts_timeline_duration") or 0.0),
             "audio_padding_seconds": float(result.get("audio_padding_seconds") or result_state.get("audio_padding_seconds") or 0.0),
+            "cue_locked_timing": bool(result.get("cue_locked_timing") or result_state.get("cue_locked_timing")),
+            "speech_rate_measurements": list(result.get("speech_rate_measurements") or result_state.get("speech_rate_measurements") or []),
+            "speech_rate_cue_count": int(result.get("speech_rate_cue_count") or result_state.get("speech_rate_cue_count") or 0),
+            "speech_rate_max_fit_ratio": float(result.get("speech_rate_max_fit_ratio") or result_state.get("speech_rate_max_fit_ratio") or 1.0),
+            "speech_rate_max_drift_seconds": float(result.get("speech_rate_max_drift_seconds") or result_state.get("speech_rate_max_drift_seconds") or 0.0),
             "input_duration": int(result_state.get("input_duration") or input_save.get("input_duration") or input_save.get("duration") or debug_job.get("input_duration") or 0),
             "duration_seconds": int(result_state.get("input_duration") or input_save.get("duration") or debug_job.get("duration_seconds") or 0),
             "detected_duration_source": str(result_state.get("detected_duration_source") or input_save.get("detected_duration_source") or debug_job.get("detected_duration_source") or ""),

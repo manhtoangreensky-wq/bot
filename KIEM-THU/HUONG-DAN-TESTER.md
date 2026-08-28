@@ -40,8 +40,14 @@ Lỗi cũ cần canh: literal `\\n`, status nằm ngang, video mất audio, back
    lỗi ở stage nào ghi đúng stage đó, không suy ra từ HTTP `200`.
 5. Sidecar phải có đúng `2` speaker labels. Cast của từng label phải đến từ
    acoustic evidence độc lập; không chấp nhận forced male/female pairing.
-6. Combo PASS cần MP4 + SRT + receipt đủ giá phụ đề, giá lồng tiếng, total và
-   loại `Tự động 2 giọng`. Standalone PASS cần MP4 + receipt đủ dubbing list price.
+6. Combo và standalone chỉ được tự gửi MP4 rồi receipt cuối. Không được tự gửi
+   SRT, audio, sidecar hoặc document phụ; SRT chỉ dùng nội bộ để gắn phụ đề/QC
+   hoặc khi người dùng chủ động bấm tải. Receipt phải đủ giá phụ đề, giá lồng
+   tiếng, total và loại `Tự động 2 giọng`.
+7. Nghe từng cue: giọng dịch phải bắt đầu/kết thúc trong đúng timestamp phụ đề
+   gốc; cue sau không bị trễ vì cue trước dài. Evidence job phải có số cue đo,
+   `speech_rate_max_drift_seconds=0` và duration MP4 bằng duration nguồn trong
+   tolerance validator.
 7. Mỗi MP4 đo hash/bytes/duration/dimensions/codecs và AAC loudness; nghe lại để
    xác nhận có tiếng và mức gốc/lồng đúng lựa chọn.
 8. Admin phải `charged_xu=0`; credits, total_spent, transaction count và wallet

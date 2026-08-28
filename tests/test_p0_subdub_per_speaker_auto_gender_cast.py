@@ -5664,7 +5664,7 @@ def test_task7_two_speaker_delivery_receipt_names_type_and_component_prices(
     assert "Đã trừ: <b>0 Xu</b>" in text
 
 
-def test_task7_auto_two_speaker_combo_delivers_srt_companion_after_mp4(
+def test_task7_auto_two_speaker_combo_keeps_srt_internal_after_mp4(
     monkeypatch,
 ):
     job_key = "auto-two-speaker-srt-companion"
@@ -5729,10 +5729,11 @@ def test_task7_auto_two_speaker_combo_delivers_srt_companion_after_mp4(
 
     assert result["final_mp4_delivered"] is True
     assert result["video_delivery_message_id"] == "901"
-    assert result["documents"] == 1
-    assert result["srt_delivery_message_id"] == "902"
-    assert result["srt_auto_send_suppressed"] is False
-    assert len(documents) == 1
+    assert result["documents"] == 0
+    assert result["srt_delivery_message_id"] == ""
+    assert result["srt_auto_send_suppressed"] is True
+    assert result["explicit_srt_download_available"] is True
+    assert documents == []
 
 
 @pytest.mark.parametrize(

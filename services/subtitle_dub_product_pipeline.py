@@ -50,6 +50,22 @@ def _mode_needs_subtitle(mode: str) -> bool:
     }
 
 
+def _cue_locked_timing_requested(state: dict) -> bool:
+    current = dict(state or {})
+    if str(current.get("auto_speaker_lane") or "").strip().lower() == "multi":
+        return False
+    voice_mode = str(
+        current.get("voice_selection_mode")
+        or current.get("voice_kind")
+        or current.get("auto_speaker_lane")
+        or ""
+    ).strip().lower()
+    return voice_mode in {
+        "auto_speaker",
+        "auto_speaker_gender",
+    }
+
+
 def subdub_mode_uses_shared_core(mode: str) -> bool:
     return str(mode or "").strip() in SUBDUB_SHARED_CORE_MODES
 
@@ -124,12 +140,20 @@ def resolve_subdub_dub_audio_policy(state: dict, prepared: dict) -> dict[str, An
         tts_segments = source_segments or output_segments
     else:
         dub_text_source = "translated"
-        tts_segments = [
-            dict(item or {})
-            for item in output_segments
-            if str((item or {}).get("text") or "").strip()
-            and not _truthy((item or {}).get("translate_missing"))
-        ]
+        source_by_index = {
+            int((item or {}).get("index") or position): dict(item or {})
+            for position, item in enumerate(source_segments, start=1)
+        }
+        tts_segments = []
+        for position, item in enumerate(output_segments, start=1):
+            current_item = dict(item or {})
+            if not str(current_item.get("text") or "").strip() or _truthy(current_item.get("translate_missing")):
+                continue
+            source_item = source_by_index.get(int(current_item.get("index") or position), {})
+            current_item["source_text"] = str(
+                source_item.get("source_text") or source_item.get("text") or ""
+            ).strip()
+            tts_segments.append(current_item)
 
     keep_original_audio = _truthy(current.get("keep_original_audio"))
     policy_fields = {
@@ -275,6 +299,7 @@ async def process_subtitle_dub_job(
     generated_audio_duration = 0.0
     selected_tts_voice_id = ""
     dub_audio_policy: dict[str, Any] = {}
+    cue_locked_timing = False
     if _mode_needs_dub(mode):
         dub_audio_policy = resolve_subdub_dub_audio_policy(pipeline_state, prepared)
         tts_segments = list(dub_audio_policy.pop("tts_segments", []) or [])
@@ -324,6 +349,7 @@ async def process_subtitle_dub_job(
             or "selected_subdub_voice"
         )[:120]
         speed = float(parse_voice_speed(str(pipeline_state.get("voice_speed") or "1.0")))
+        cue_locked_timing = _cue_locked_timing_requested(pipeline_state)
         route_attempts["tts"] = True
         segment_tts = await _maybe_await(
             synthesize_segments(
@@ -331,7 +357,8 @@ async def process_subtitle_dub_job(
                 voice_style=pipeline_state.get("voice_style") or "",
                 voice_id=selected_tts_voice_id,
                 base_speed=speed,
-                max_speed=min(1.0, max(0.7, speed)),
+                max_speed=1.8 if cue_locked_timing else min(1.0, max(0.7, speed)),
+                cue_locked_timing=cue_locked_timing,
                 tts_language_code=pipeline_state.get("resolved_tts_language_code") or "auto",
                 tts_language_boost=pipeline_state.get("tts_language_boost") or "auto",
                 edge_voice_id=pipeline_state.get("resolved_edge_voice_id") or "",
@@ -358,6 +385,21 @@ async def process_subtitle_dub_job(
                 "tts_dropped_segments": tts_dropped_segments,
             }
         tts_provider = str(segment_tts.get("provider") or "")
+        if cue_locked_timing:
+            for item in tts_chunks:
+                cue_window = max(
+                    0.001,
+                    float(item.get("end") or 0.0) - float(item.get("start") or 0.0),
+                )
+                generated_seconds = max(0.0, float(item.get("audio_duration") or 0.0))
+                fit_ratio = max(1.0, generated_seconds / cue_window)
+                item.update({
+                    "cue_window_seconds": cue_window,
+                    "generated_audio_seconds": generated_seconds,
+                    "fit_ratio": fit_ratio,
+                    "post_fit_audio_seconds": generated_seconds / fit_ratio,
+                    "drift_seconds": 0.0,
+                })
         timeline_duration = max(
             float(
                 pipeline_state.get("input_duration_seconds")
@@ -445,7 +487,8 @@ async def process_subtitle_dub_job(
             }
         tts_mixed_segments = tts_generated_segments
         generated_audio_duration = max(0.0, float(tts_audio_qc.get("duration") or 0.0))
-        tts_timeline_duration = max(tts_timeline_duration, generated_audio_duration)
+        if not cue_locked_timing:
+            tts_timeline_duration = max(tts_timeline_duration, generated_audio_duration)
 
     wants_subtitle_video = output_type in {"burn", "both", "video_subtitle"}
     wants_final_video = _video_output_requested(mode, output_type, content_type)
@@ -461,10 +504,10 @@ async def process_subtitle_dub_job(
     )
     final_video_expected_duration = source_video_duration
     if _mode_needs_dub(mode):
-        final_video_expected_duration = max(
-            source_video_duration,
-            tts_timeline_duration,
-            generated_audio_duration,
+        final_video_expected_duration = (
+            source_video_duration or tts_timeline_duration
+            if cue_locked_timing
+            else max(source_video_duration, tts_timeline_duration, generated_audio_duration)
         )
     video_output = b""
     partial_result = False
@@ -540,6 +583,38 @@ async def process_subtitle_dub_job(
         "tts_mixed_segments": tts_mixed_segments,
         "tts_dropped_segments": tts_dropped_segments,
         "tts_overlap_resolutions": max(0, sum(1 for item in tts_chunks if float(item.get("audio_duration") or 0.0) > max(0.1, float(item.get("end") or 0.0) - float(item.get("start") or 0.0)))),
+        "cue_locked_timing": bool(cue_locked_timing),
+        "speech_rate_measurements": [
+            {
+                key: item.get(key)
+                for key in (
+                    "cue_id",
+                    "start",
+                    "end",
+                    "cue_window_seconds",
+                    "source_speech_window_seconds",
+                    "speech_rate_basis",
+                    "source_text_units",
+                    "translated_text_units",
+                    "source_speech_rate",
+                    "required_target_speech_rate",
+                    "generated_audio_seconds",
+                    "fit_ratio",
+                    "post_fit_audio_seconds",
+                    "drift_seconds",
+                )
+            }
+            for item in tts_chunks
+        ],
+        "speech_rate_cue_count": len(tts_chunks) if cue_locked_timing else 0,
+        "speech_rate_max_fit_ratio": max(
+            (float(item.get("fit_ratio") or 1.0) for item in tts_chunks),
+            default=1.0,
+        ) if cue_locked_timing else 1.0,
+        "speech_rate_max_drift_seconds": max(
+            (abs(float(item.get("drift_seconds") or 0.0)) for item in tts_chunks),
+            default=0.0,
+        ),
         "tts_timeline_duration": tts_timeline_duration,
         "audio_padding_seconds": audio_padding_seconds,
         "timeline_detail": str(timeline_detail or ""),

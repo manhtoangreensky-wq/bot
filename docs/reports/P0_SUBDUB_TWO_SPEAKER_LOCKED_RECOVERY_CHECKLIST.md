@@ -17,62 +17,59 @@
 ### Current pointer
 
 - Current SPEC: `SPEC-08`.
-- Current SUBSPEC: `SPEC-08.0F.4`.
-- Current phase: `BLOCKED_BY_SHARED_RESOURCE / source READY_TO_SHIP`.
-- Production action active: `NO; Product Video currently owns LIVE/CHROME/VPS`.
-- Telegram/provider job active: `NO; job #6DC569C0A6 terminal failed_no_charge`.
+- Current SUBSPEC: `SPEC-08.0G.4`.
+- Current phase: `SOURCE_READY_TO_SHIP / one commit-PR-deploy-live`.
+- Production action active: `NO; source correction is local until GREEN`.
+- Telegram/provider job active: `NO; job #9542CF588E is terminal delivered`.
 - Wallet mutation: `0`.
-- Next allowed action: wait for exact Product Video LIVE/CHROME/VPS/DEPLOY
-  releases, then fetch/rebase latest main, run one post-rebase focused gate,
-  create one commit/PR, squash merge, deploy/runtime readback and combo live.
-- Next forbidden action: ship the raw-frame/YIN fallback; edit shared
-  classifier/cast thresholds, audio UI, pricing, wallet, TTS/mux, multi engine;
-  start Telegram/provider/VPS action while Product Video owns the shared slot;
-  or move to standalone/multi before the combo artifact passes.
+- Next allowed action: write and observe focused RED proving that every dubbed
+  cue keeps its original start/end and that successful dub video delivery sends
+  only MP4 before the final receipt; then make the smallest timing/delivery fix.
+- Next forbidden action: edit classifier/cast thresholds, audio UI, pricing,
+  wallet, provider/model/endpoint, multi engine, or move to standalone/multi
+  before the corrected combo artifact passes.
 
 ### Task contract — active SPEC-08 correction
 
-- `GOAL`: exact fixture SHA `85C8793D...` produces a real combo MP4 + SRT +
-  receipt with independently detected male/female speaker groups; then the same
-  fixture produces a standalone dubbed MP4; only then lock lane 2 and open
-  multi-speaker work.
-- `SCOPE`: replace only the failed exact-two singing-gender authority after the
-  already-passing Key4U ASR + Gemini diarization boundary.
-- `BASE_SHA`: local task HEAD
-  `8965cbc0863a9546d625d80a67bebc76bc33e9dd`; remote rebase is deferred until
-  Product Video releases shared Git/LIVE/VPS and source GREEN is terminal.
+- `GOAL`: exact fixture SHA `85C8793D...` produces one real combo MP4 followed
+  by one final receipt, with independently detected male/female speaker groups;
+  translated subtitle cues and dubbed speech stay locked to the original cue
+  timeline. The SRT remains an internal render/QC artifact and is not sent
+  automatically. Then the same fixture produces a standalone dubbed MP4; only
+  then lock lane 2 and open multi-speaker work.
+- `SCOPE`: repair only the measured per-cue speech timing and successful video
+  delivery policy after the already-passing exact-two cast authority.
+- `BASE_SHA`: `6476f20bdd9f8728a5db0b1d62a245b0d612aea8` (PR `#918`, the
+  exact deployed cast build that produced live job `#9542CF588E`).
 - `ALLOWED_FILES`:
-  - new `services/subdub_two_speaker_gender_onnx.py`;
-  - `services/subdub_blackboxes/auto_speaker.py`, exact-two integration only;
-  - `bot.py`, only `_extract_subdub_auto_pcm` exact stereo contract;
-  - `assets/models/subdub_auto_gender/*`, the two hash-locked ONNX models and
-    their MIT/CC-BY notices;
-  - `requirements.txt` / `requirements.lock`, only to pin NumPy/ONNX Runtime
-    for the production Linux/Python 3.11 runtime;
-  - `.github/workflows/deploy-vps.yml` and its existing contract test, only to
-    sync the target hash-locked dependencies before bot restart;
-  - dedicated exact-two ONNX tests, the two existing lane-lock tests, this
-    checklist, tester docs and durable state.
+  - `bot.py`: speech-unit meter, exact cue-locked plan/FFmpeg graph, timing
+    telemetry and successful delivery policy only;
+  - `services/subtitle_dub_product_pipeline.py`: attach source text to the
+    translated exact-two cue, activate exact cue timing and return metrics;
+  - dedicated timing/delivery tests plus the superseded SRT companion contract;
+  - this checklist, tester case/guide, current operations docs and durable state.
 - `PROTECTED_FILES`: `services/subdub_blackboxes/auto_multi_speaker.py` SHA-256
   `55AAB894...`; `services/subdub_speaker_cast.py` SHA-256 `DE93620F...`;
   `services/subdub_two_speaker_asr_fallback.py` SHA-256 `94748DEF...`; audio
-  UI/state, Key4U transport/retry, Gemini parser, pricing/wallet, TTS/mux and
-  Product Video remain semantically unchanged.
+  UI/state, classifier/cast, Key4U transport/retry, Gemini parser,
+  pricing/wallet, provider/model/endpoint and Product Video remain unchanged.
+  Manual/default and Auto multi timing/delivery behavior remain unchanged.
 - `ACCEPTANCE`: independent `male-male`, `male-female`, `female-female` are
-  legal; tie/weak/missing/hash/deadline/cancel is fail-closed; exact fixture
-  groups are `speaker_0=male/low` and `speaker_1=female/high`; evidence is at
-  most 48 unique seconds; provider calls and wallet mutations are zero.
-- `TARGETED_TESTS`: dedicated service contract + exact-two preflight stereo
-  integration + cleanup + extractor validation, first observed RED and then
-  fresh GREEN.
+  still legal; exact fixture groups stay `speaker_0=male/low` and
+  `speaker_1=female/high`. Every translated/TTS cue records source/target rate,
+  generated/fitted duration and zero drift; final duration equals source.
+  Automatic output order is MP4 then receipt with zero auxiliary file.
+- `TARGETED_TESTS`: source-text/rate meter, per-cue planner, real FFmpeg
+  duration+RMS, product integration, combo/standalone delivery and multi
+  isolation, first observed RED and then fresh GREEN.
 - `REGRESSION_TESTS`: two/multi isolation, protected hashes, timeout/cancel,
   audio numeric UI, pricing/receipt and no-provider/no-wallet comparators.
-- `PROHIBITED_ACTIONS`: no forced opposite-gender pairing, threshold loosening,
-  generative gender authority, paid provider test, ENV/secret or wallet change,
-  UI redesign, refactor of shared modules, premature Telegram live.
+- `PROHIBITED_ACTIONS`: no classifier/cast edit, forced pairing, multi timing or
+  delivery edit, paid provider test before deployed live, ENV/secret or wallet
+  change, UI redesign, unrelated refactor or premature Telegram live.
 - `STOP_CONDITIONS`: any protected hash changes, aggregate evidence exceeds
   48 seconds, model/license/hash cannot be verified, a new applicable failure
-  appears, or LIVE produces no real final MP4/SRT/receipt.
+  appears, or LIVE produces no real final MP4 followed by one final receipt.
 
 ### Luật bất biến
 
@@ -168,7 +165,9 @@ engine baseline; fixture hiện tại vẫn bắt buộc giao MP4 live mới.
   `handle_video_dubbing_pending_text` remain intact: original `0–100`, dub
   `0–200`, with state/mux propagation unchanged.
 - Exact pricing and receipt improvements from PR #885: preserve.
-- Auto combo SRT companion from PR #887: preserve.
+- Auto combo SRT companion from PR #887: superseded by the Owner's current
+  video-only delivery requirement; keep SRT internally for burn-in/QC and keep
+  explicit user-requested subtitle download separate from automatic delivery.
 - Admin list price remains nonzero; only settlement is `charged_xu=0`.
 - Wallet/transactions/schema: no edit.
 
@@ -427,7 +426,8 @@ Both `dub` and `subtitle_plus_dub`:
 - [x] Nữ–nữ labels classified independently from own evidence.
 - [x] Ambiguous evidence fail-closed in canonical protected tests.
 - [x] Audio controls and mux propagation.
-- [x] Combo SRT companion.
+- [x] Historical combo SRT companion (later superseded by Owner video-only
+  automatic delivery contract in `SPEC-08.0G`).
 - [x] Exact pricing and receipt.
 - [x] Admin list price nonzero / charged zero.
 - [x] Telegram status/callback failure boundary from PR #890 unchanged.
@@ -1173,9 +1173,75 @@ Final review/verify evidence:
   no source blocker remains.
 - [B] One focused commit and PR, squash merge, one deploy/runtime identity
   check, then one exact combo retry.
-- [B] PASS only with real MP4 + SRT + receipt, correct two independent casts,
+- [B] Historical gate superseded: PASS now requires a real MP4 followed only by
+  the receipt, correct two independent casts,
   original `40%`, dub `150%`, nonzero list prices, admin `charged_xu=0`, and
   unchanged wallet/transactions; otherwise stay in `SPEC-08`.
+
+### SPEC-08.0G — Live correction: cue-locked speech rate and video-only delivery
+
+The combo job `#9542CF588E` delivered an MP4, but live playback proved that
+translated speech accumulated delay and Telegram automatically sent an SRT.
+That delivery is evidence of the two faults, not acceptance.
+
+#### SPEC-08.0G.1 — READ and focused RED
+
+- [x] Record for every cue: source start/end/window, source and translated
+  speech units/rates, generated TTS duration, required fit ratio, fitted
+  duration and drift.
+- [x] RED proves cue `N+1` starts at its original timestamp even when cue `N`
+  generates audio longer than its own window.
+- [x] RED proves the final TTS timeline remains the original source duration;
+  it may not freeze/extend the video to hide slow translated speech.
+- [x] RED proves successful combo and standalone video delivery emit zero SRT,
+  audio, sidecar or other public documents.
+
+#### SPEC-08.0G.2 — Minimal timing GREEN
+
+- [x] Keep every cue's original start/end immutable.
+- [x] Generate at a measured provider speech rate where supported, then use a
+  per-cue FFmpeg `atempo` chain to fit measured audio inside that cue only.
+- [x] Pad a short cue with silence inside the same window; never move the next
+  cue and never extend the source video.
+- [x] Verify with a real synthetic FFmpeg audio fixture, not source-text mocks
+  alone; output duration and per-cue activity must match literal expectations.
+
+#### SPEC-08.0G.3 — Video-only delivery GREEN
+
+- [x] Successful `Lồng tiếng video` and `Phụ đề + Lồng tiếng` each send one
+  validated MP4 and then one final receipt.
+- [x] Internal SRT remains available for burn-in/QC and explicit download, but
+  automatic delivery sends no SRT/audio/sidecar/document after the MP4.
+- [x] Preserve delivery idempotency, terminal panel and zero-charge admin
+  settlement; do not alter UI, pricing or wallet logic.
+
+#### SPEC-08.0G.4 — Review, ship and exact live retry
+
+- [x] Protected hashes, numeric audio UI, exact-two cast, provider transport,
+  price/receipt and wallet comparators remain unchanged.
+- [B] One focused commit/PR, squash merge, one deploy, runtime SHA/worker
+  readback, then exactly one combo retry with fixture SHA `85C8793D...`.
+- [B] PASS requires a playable MP4 whose dubbed speech/cues are empirically
+  synchronized, followed only by one final receipt; `charged_xu=0` and wallet
+  rows unchanged. Otherwise stay in `SPEC-08.0G` and repeat RED/GREEN.
+
+Source evidence before ship:
+
+- Initial focused RED: source text unavailable, rate metrics absent, cue `N+1`
+  shifted, final timeline extended, and Auto 2 combo SRT sent automatically.
+- Reviewer RED: real FFmpeg early/late cue RMS ratio `0.499995`; Auto multi
+  delivery isolation lost its historical companion.
+- Reviewer GREEN: `2 passed, 1 warning in 1023.58s`; RMS balanced, timing
+  source-bounded, exact 2 video-only and Auto multi unchanged.
+- Fresh protected GREEN: `122 passed, 3 warnings in 54.61s`.
+- Final timing/delivery/receipt order gate: `12 passed, 1 warning in 16.64s`.
+- Broad current branch: `158 passed, 17 failed`; clean BASE_SHA run of the
+  exact 17 failure selectors: `17 failed`; therefore `NEW_FAILURES=0`.
+- Protected hashes unchanged: multi `55AAB894...`, cast `DE93620F...`,
+  two-speaker ASR fallback `94748DEF...`.
+- Final `py_compile` for both runtime files and all three changed test files:
+  exit `0`; final `git diff --check`: exit `0`.
+- Independent re-review: Critical `0`, Important `0`, `READY_TO_MERGE=YES`.
 
 ### SPEC-08.1 — Pre-admission
 
@@ -1206,7 +1272,8 @@ Final review/verify evidence:
 ### SPEC-08.3 — Artifact/receipt evidence
 
 - [ ] MP4 message id.
-- [ ] SRT message id.
+- [ ] Confirm no automatic SRT/audio/document message exists between MP4 and
+  the final receipt.
 - [ ] MP4 SHA-256/bytes/duration/dimensions/codecs.
 - [ ] AAC audible measurement.
 - [ ] SRT cue count/timeline QC.
@@ -1219,7 +1286,8 @@ Final review/verify evidence:
 
 ### SPEC-08 acceptance
 
-- [ ] Real MP4 + SRT + receipt delivered and independently verified.
+- [ ] Real MP4 followed only by one receipt delivered and independently
+  verified; internal SRT QC passes without automatic SRT delivery.
 
 ## SPEC-09 — Live standalone: Lồng tiếng video
 
@@ -1263,9 +1331,30 @@ Final review/verify evidence:
 - [ ] Checklist pushed to GitHub.
 - [ ] Lane status changed to `LOCKED_LIVE_PASS`.
 
-## SPEC-11 — Multi-speaker only after lane 2 lock
+## SPEC-11 — Build the separate Auto multi-speaker lane from the locked lane-2 core
 
-- [B] Evaluate `test nhiều giọng.mp4` after `SPEC-10`.
+### SPEC-11.1 — Reuse map after lane-2 lock
+
+- [B] Start only after combo and standalone Auto 2-speaker live MP4s PASS and
+  `SPEC-10` records the immutable code/evidence hashes.
+- [B] Reuse only the proven common owners: per-cue speech-rate measurement,
+  cue-locked FFmpeg timing, source-duration mux validation, volume propagation,
+  terminal video delivery and receipt idempotency.
+- [B] Keep multi-specific diarization, label-count validation, acoustic cast,
+  stable speaker-to-voice mapping and 3–8 speaker bounds in the separate
+  `auto_multi_speaker` owner; do not copy exact-two assumptions or force pairs.
+- [B] Create an explicit shared-vs-multi symbol map and RED tests before moving
+  any common behavior into the multi lane.
+
+### SPEC-11.2 — Multi-speaker RED/GREEN and live
+
+- [B] RED covers at least 3 real speaker labels, unique stable voices, source
+  cue timestamps, multilingual translation, per-cue duration fit, no invented
+  label, no duplicate TTS/mux/delivery and exact pricing/zero-Xu admin receipt.
+- [B] GREEN proves a final playable MP4 with audible ordered speakers and the
+  required multi delivery policy; no regression to the locked 2-speaker lane.
+- [B] One focused PR/deploy, then live only with `test nhiều giọng.mp4` SHA
+  `83DE97B7...`; on any mismatch remain in `SPEC-11` and repeat RED/GREEN.
 - [B] Run multi live only after `LOCKED_LIVE_PASS`.
 - [B] Never modify a locked lane-2 symbol during multi work.
 
@@ -1290,7 +1379,7 @@ DEPLOY_RUN=
 RUNTIME_SHA=
 COMBO_JOB=
 COMBO_MP4=
-COMBO_SRT=
+COMBO_INTERNAL_SRT_QC=
 STANDALONE_JOB=
 STANDALONE_MP4=
 LIVE_PASS=

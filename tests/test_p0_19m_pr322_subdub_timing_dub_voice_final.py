@@ -1,14 +1,8 @@
 import asyncio
-from pathlib import Path
 from types import SimpleNamespace
 
 import bot
-
-
-ROOT = Path(__file__).resolve().parents[1]
-BOT_SOURCE = (ROOT / "bot.py").read_text(encoding="utf-8")
-PIPELINE_SOURCE = (ROOT / "services" / "subtitle_dub_product_pipeline.py").read_text(encoding="utf-8")
-
+from services import subtitle_dub_product_pipeline
 
 class CaptureMessage:
     def __init__(self):
@@ -66,9 +60,10 @@ def test_subdub_dub_speech_rate_never_exceeds_normal_speed():
     assert config["dub_max_speech_rate"] <= 1.0
 
 
-def test_subdub_service_does_not_reintroduce_135_max_speed():
-    assert "max_speed=max(1.35, speed)" not in PIPELINE_SOURCE
-    assert "max_speed=min(1.0, max(0.7, speed))" in PIPELINE_SOURCE
+def test_subdub_service_keeps_manual_cap_and_scopes_auto_cue_fit():
+    assert subtitle_dub_product_pipeline._cue_locked_timing_requested({"voice_kind": "default_female"}) is False
+    assert subtitle_dub_product_pipeline._cue_locked_timing_requested({"voice_kind": "auto_speaker_gender"}) is True
+    assert subtitle_dub_product_pipeline._cue_locked_timing_requested({"auto_speaker_lane": "multi"}) is False
 
 
 def test_synthesize_dub_segment_chunks_does_not_retry_above_1x(monkeypatch):
