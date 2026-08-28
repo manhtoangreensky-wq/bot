@@ -88,13 +88,6 @@ jobs:
             BACKUP_DIR=\"\$WEBAPP_DIR/delete/deploy-\$TARGET_SHA-\$UTC_TIMESTAMP\"
             mkdir -p \"\$BACKUP_DIR\"
 
-            echo '=== Creating Tracked Source Backup ==='
-            git ls-files > \"\$BACKUP_DIR/tracked-files.txt\"
-            git ls-files -z | tar -c --null -T - | tar -x -C \"\$BACKUP_DIR\"
-
-            TRACKED_COUNT=\"\$(wc -l < \"\$BACKUP_DIR/tracked-files.txt\")\"
-            printf 'previous_head: %s\ntarget_sha: %s\nbackup_timestamp_utc: %s\ntracked_file_count: %s\n' \"\$PREV_HEAD\" \"\$TARGET_SHA\" \"\$UTC_TIMESTAMP\" \"\$TRACKED_COUNT\" > \"\$BACKUP_DIR/manifest.txt\"
-
             echo '=== Fetching Bundle Objects and Verifying Target ==='
             git fetch \"\$STAGING_DIR/release.bundle\" refs/deployments/bot-release:refs/deployments/bot-release
             FETCHED_SHA=\"\$(git rev-parse refs/deployments/bot-release)\"
@@ -103,6 +96,14 @@ jobs:
               exit 1
             fi
             git cat-file -e \"\$TARGET_SHA^{commit}\"
+
+            echo '=== Creating Incremental Tracked Source Backup ==='
+            git diff --name-only -z --diff-filter=MTUXB \"\$PREV_HEAD\" \"\$TARGET_SHA\" > \"\$BACKUP_DIR/changed-files.z\"
+            BACKED_UP_COUNT=\"\$(tr -cd '\\000' < \"\$BACKUP_DIR/changed-files.z\" | wc -c)\"
+            if [[ \"\$BACKED_UP_COUNT\" -gt 0 ]]; then
+              tar -c --null -T \"\$BACKUP_DIR/changed-files.z\" | tar -x -C \"\$BACKUP_DIR\"
+            fi
+            printf 'previous_head: %s\ntarget_sha: %s\nbackup_timestamp_utc: %s\nbacked_up_file_count: %s\n' \"\$PREV_HEAD\" \"\$TARGET_SHA\" \"\$UTC_TIMESTAMP\" \"\$BACKED_UP_COUNT\" > \"\$BACKUP_DIR/manifest.txt\"
 
             echo '=== Quarantining Removed Tracked Files ==='
             git ls-tree -r --name-only \"\$TARGET_SHA\" > \"\$STAGING_DIR/target-files.txt\"
@@ -130,6 +131,15 @@ jobs:
             fi
 
             git diff --exit-code -- . ':(exclude)delete/**'
+
+            echo '=== Syncing Hash-Locked Runtime Dependencies ==='
+            if [[ ! -x "\$WEBAPP_DIR/.venv/bin/python" ]]; then
+              echo 'ERROR: Bot virtualenv Python is missing or not executable' >&2
+              exit 1
+            fi
+            "\$WEBAPP_DIR/.venv/bin/python" -m pip install --require-hashes -r "\$WEBAPP_DIR/requirements.lock"
+            "\$WEBAPP_DIR/.venv/bin/python" -m pip check
+            "\$WEBAPP_DIR/.venv/bin/python" -c 'import numpy, onnxruntime; print(onnxruntime.__version__)'
 
             echo '=== Restarting Bot Service ==='
             systemctl restart toanaas-bot.service

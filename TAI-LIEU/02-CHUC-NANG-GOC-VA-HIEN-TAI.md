@@ -61,7 +61,7 @@ Nguồn thiết kế trước: `docs/superpowers/plans/2026-08-14-subdub-per-spe
 |---|---|---|
 | ASR Deepgram tạo cue và speaker label | Auto lane bắt buộc request diarization có speaker fields; fail-closed trước TTS nếu thiếu | ✅ Còn dùng |
 | Deepgram model dùng chung từ `AgentDeepgram.REQUEST_PARAMS` | Default/manual giữ `nova-2`; auto diarized override call-scoped thành `nova-3-general` | ⚠️ Tách theo năng lực |
-| Auto 2 giọng và multi dùng chung cast contract | Engine hai giọng rollback exact PR #842; multi module byte-locked riêng | ✅ Cô lập |
+| Auto 2 giọng và multi dùng chung cast contract | Exact-two dùng local UVR + PANNs ONNX trên stereo PCM và tự vote từng speaker; raw-frame fallback bị loại; multi module vẫn byte-locked trên owner riêng | ⚠️ Cô lập exact-two, multi chưa LIVE PASS |
 | Admin không trừ Xu | Receipt vẫn phải hiển thị đủ giá niêm yết; settlement admin `charged_xu=0` | ✅ Còn dùng |
 | Âm lượng chọn bằng các nút phần trăm cố định | PR #896 thêm `10` preset là regression; hiện dùng hai layer cùng một hàng và nhập số gốc `0–100`, lồng `0–200` | ❌ Bỏ preset, giữ numeric |
 | Mỗi kiểu giọng có bảng âm thanh riêng | Cả `2` lane và `6` kiểu giọng dùng chung một audio owner; test ma trận `12` case | ⚠️ Tài liệu cũ không còn đúng |
@@ -79,9 +79,11 @@ thấy pre-#896 đã có callback nhập số; production rollback hiện chỉ 
 dòng preset/action và đổi `public_fixed_percentage_grid=True → False`. Các
 numeric callback, pending state, mux, pricing, wallet và engine không đổi.
 
-GitHub tester cloud chưa được thay đổi trong đợt này: lệnh `gh label/issue`
-trả HTTP `401` ngày 27/08/2026. Case local dưới `KIEM-THU/` là nguồn chuẩn để
-push; không tuyên bố label/issue/project đã tạo khi chưa có readback.
+GitHub tester cloud readback ngày 28/08/2026 có `21` labels: `5` trạng thái,
+`4` mức độ, `3` loại và `9` mặc định. Issue list hiện có tracker `#884` và
+`#81`; chưa tạo SubDub issue mới trong correction này. Hai template SubDub và
+case local dưới `KIEM-THU/` là nguồn chuẩn. GitHub Projects chưa đọc được vì
+token thiếu scope `read:project`; không tự chạy `gh auth refresh`.
 
 ## Đối chiếu Product Video provider/giá — 27/08/2026
 
@@ -157,6 +159,21 @@ timestamp_granularities[]/language`; regression test dùng real MockTransport,
 không giả adapter.
 
 Live job `24` cho thấy connector policy đúng vẫn chưa đủ nếu server claim gate terminal hóa trước worker. Hiện claim transaction tính controlled-fallback eligibility trước ledger terminal decision và chỉ miễn đúng fallback Key4U đã xác nhận; `automatic_resubmit_allowed=false` vẫn chặn submit lại primary. Job/artifact/receipt LIVE vẫn pending.
+
+### Đối chiếu acoustic cast karaoke sau job `#6DC569C0A6`
+
+| Chức năng/tài liệu cũ | Hiện tại | Trạng thái |
+|---|---|---|
+| Hai speaker labels đồng nghĩa classifier đủ evidence | Job có `18` cue, đúng `2` labels nhưng raw full-mix whole-window pitch vẫn manual-required do backing music | ❌ Không còn đủ để PASS |
+| Engine hai giọng phải byte-for-byte PR #842 mãi mãi | Raw-frame fallback đã bị review bác và xóa; exact-two dùng local UVR + PANNs ONNX trên stereo PCM, còn shared pitch/multi owner giữ nguyên | ⚠️ Authority exact-two được thay bằng evidence thật |
+| Filter giọng #853 giúp nhận diện nam/nữ | Comparator trên fixture thật trả `high/high`; filter bị cấm ở lane 2 và chỉ còn là owner riêng của multi | ❌ Sai trên fixture acceptance |
+| Nam/nữ được suy ra bằng cách ép hai label thành hai giới | Mỗi label tự vote male/female rồi map `male=low`, `female=high`; male/male, male/female, female/female đều được test; tie/weak fail-closed | ✅ Không forced pairing |
+
+Chỗ tài liệu gốc không còn đúng: câu “exact Git blob PR #842 là toàn bộ engine
+hiện tại” không còn đúng cho authority exact-two. Source correction gọi service
+UVR + PANNs ONNX chỉ khi đúng lane hai speaker; không đổi
+`subdub_speaker_cast.py`, `auto_multi_speaker.py`, PCM filter, provider, UI,
+pricing hay wallet. Chưa deploy/chưa có MP4 thật thì vẫn ghi `LIVE pending`.
 
 ## Đối chiếu Product Video flow/artifact sau job 25 — 28/08/2026
 

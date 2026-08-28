@@ -193,6 +193,51 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Live job `24` cho thấy server claim gate chạy trước connector: summary đã `61s/60s` nhưng scene evidence cuối chỉ `53s`, nên ledger terminal `failed_no_charge` trước lượt worker có thể submit Key4U. Claim gate hiện enrich pure state trước terminal decision: chỉ scene có primary task thật, stalled, final-confirm, exact quote, chưa giao/chưa trừ/chưa fallback và Key4U capability-ready mới nhận candidate + idempotency; primary resubmit vẫn cấm.
 - Bằng chứng source job `24`: focused `8 passed`; protected `54 passed, 2 baseline deselected`. Patch chỉ mở một fallback tick cho đúng `fallback_scene_index`, không submit đồng thời hai cảnh; compile/diff vẫn phải chạy trước local commit. LIVE rerun vẫn là gate riêng sau SubDub release và deploy Product Video tiếp theo.
 
+## Bổ sung SubDub acoustic cast trên video karaoke — 28/08/2026
+
+- PR `#915` đã sửa transport và deploy runtime `77fee7ce...`. Combo job
+  `#6DC569C0A6` đi qua Key4U + Gemini thật, tạo `18` cue (`8/10` theo hai
+  speaker) và sidecar, nhưng dừng trước TTS/mux/delivery vì acoustic cast trả
+  `AUTO_CAST_MANUAL_REQUIRED`. Admin vẫn `charged_xu=0`; credits `200`,
+  total_spent `0`, transactions `0`, credit_events `1`.
+- Exact source PCM là mono `16 kHz` `s16le`, `1,547,794` bytes, SHA-256
+  `82F1FFB6621588FC0B906C074B8E3E5C64CE8D6E2E9CA954444AD689668DB952`.
+  Signal không im lặng: RMS cửa sổ được chọn `0.154301..0.269327`, peak
+  `0.652008..0.923553`.
+- Whole-window classifier thử `18` cửa sổ speaker 0 nhưng nhận `0` pitch; quét
+  dày `186` cửa sổ cho thấy `156` thiếu hai frame F0 và `14` có competing pitch
+  ổn định. Nguyên nhân là lời hát nằm trong backing music; không được hạ
+  threshold hoặc ép một cặp nam/nữ.
+- Comparator filter cũ #853 / filter multi trả sai `high/high` trên fixture
+  nam/nữ nên bị loại. PCM extractor vẫn không filter; shared classifier và
+  multi engine giữ nguyên.
+- Nhánh raw-frame fallback từng thử đã bị review bác và **không được ship**:
+  frame chồng lặp, confidence không phản ánh vote dominance, có thể bắt backing
+  music và reset thành hai budget `48s`. Không còn helper raw-frame nào trong
+  production exact-two.
+- Authority exact-two mới chạy local, deterministic: stereo PCM `44.1 kHz`
+  `s16le` → UVR MDX-Net tách vocal → PANNs AudioSet MobileNetV1 chấm từng cue
+  → vote độc lập theo từng speaker. Không có luật ép hai speaker thành hai giới
+  đối nhau; male–male, male–female và female–female đều hợp lệ nếu mỗi group có
+  ít nhất `4` cue và dominance `>=0.75`.
+- Model được khóa hash và license: UVR SHA-256 `E02220E8...` MIT; PANNs ONNX
+  SHA-256 `0DA2C433...`, source code MIT, pretrained model record CC BY 4.0.
+  Inference không gọi provider; tổng evidence unique tối đa `48s`.
+- Exact fixture source result thật: speaker 0 `male/low`, vote `7/8`, confidence
+  `0.875`, evidence `21s`; speaker 1 `female/high`, vote `8/10`, confidence
+  `0.800`, evidence `27s`; post-rebase elapsed `106.031s` trên ONNX Runtime
+  `1.29.0` với wall budget bounded `300s`,
+  provider/wallet `0`. Đây vẫn là source-local evidence, chưa phải LIVE PASS.
+- ONNX contract RED `20 failed, 5 passed`; dedicated final GREEN `33 passed`;
+  isolation marker multi RED→GREEN `1 failed → 1 passed`. Protected branch
+  `278 passed, 28 failed, 1 skipped`; BASE_SHA có cùng đúng `28` failure IDs
+  nên `NEW_FAILURES=0`. Skip là test montage cần NumPy trên Python 3.14; cùng
+  case đã GREEN riêng trên Python 3.12 + NumPy/ORT `1.29.0` (`7 passed`).
+  Compile/hash/diff và post-rebase gate vẫn là cổng bắt buộc trước push.
+- Trap vận hành: một sidecar có đúng hai label không chứng minh cast đúng;
+  provider HTTP `200`, SRT hay sidecar cũng không phải MP4 PASS. Combo vẫn phải
+  giao MP4 + SRT + receipt trước standalone và multi-speaker.
+
 ## Bổ sung Product Video job 25 và khóa UI — 28/08/2026
 
 - PR `#910` merge SHA `82ffb117e6c2e84bd76a3aee6e5e747465958c66`; deploy run `33078757523` SUCCESS. Bot và owner worker cùng exact SHA.

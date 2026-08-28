@@ -61,7 +61,7 @@ Fixture hai giọng cho cả hai case đầu: `C:/Users/toann/Downloads/test sub
 
 | ID | Lane | Thiết lập khóa | PASS bắt buộc | Canh lỗi cũ |
 |---|---|---|---|---|
-| SD-2S-01 | Phụ đề + Lồng tiếng | English; Tự động 2 giọng; numeric UI chỉ 2 layer cùng hàng; nhập gốc 40%, lồng 150%; không preset | MP4 + SRT + receipt; đúng 2 labels/cast; giá phụ đề + lồng tiếng + total; admin 0 Xu; wallet delta 0 | `empty_transcript`; Key4U first response unavailable; httpx sync-stream/AsyncClient; FAIL nếu >2 Key4U attempts; preset grid quay lại |
+| SD-2S-01 | Phụ đề + Lồng tiếng | English; Tự động 2 giọng; numeric UI chỉ 2 layer cùng hàng; nhập gốc 40%, lồng 150%; không preset | MP4 + SRT + receipt; đúng 2 labels; speaker 0 male/low, speaker 1 female/high từ UVR+PANNs vote độc lập; giá phụ đề + lồng tiếng + total; admin 0 Xu; wallet delta 0 | `empty_transcript`; Key4U first response unavailable; httpx sync-stream/AsyncClient; backing music làm whole-window cast manual; filter cũ trả sai high/high; raw-frame fallback bị cấm; model/hash/license/onnxruntime thiếu; FAIL nếu >2 Key4U attempts; preset grid quay lại |
 | SD-2S-02 | Lồng tiếng video | Cùng fixture; Tự động 2 giọng; cùng numeric UI; gốc 40%, lồng 150%; không preset | MP4 + receipt; đúng 2 labels/cast; dubbing list price >0; admin 0 Xu; wallet delta 0 | Lane combo PASS nhưng standalone hồi quy; audio UI khác combo |
 | SD-MS-01 | Tự động nhiều giọng | Chỉ dùng `test nhiều giọng.mp4`; chạy sau SD-2S-01 và SD-2S-02 | MP4 thật; mọi label/cast/voice; multi-language; receipt và wallet evidence | FAIL nếu chạm source/hash của lane 2 đã khóa |
 
@@ -72,3 +72,9 @@ GitHub Issue.
 Comparator UI bổ sung: `2` lane × `6` kiểu giọng (nữ mặc định, nam mặc định,
 Kho voice, voice riêng, Auto 2, Auto multi) phải cùng callback
 `videodub|audio_mix`, cùng ba callback màn chính và cùng numeric range.
+
+Comparator cast bổ sung: exact fixture phải ghi `speaker_0=male/low`, vote
+`7/8`, dominance `0.875`, evidence `21s`; `speaker_1=female/high`, vote `8/10`,
+dominance `0.800`, evidence `27s`. Tổng evidence unique không vượt `48s` và
+provider calls cho classifier bằng `0`. Một code path chỉ PASS nam/nữ nhưng
+fail male/male hoặc female/female là forced pairing và phải FAIL case.

@@ -2487,42 +2487,70 @@ def test_two_speaker_anchor_classifies_each_label_without_forced_pair(
     )
 
 
-def test_two_speaker_anchor_has_no_relative_or_forced_pair_fallback():
-    auto_speaker = importlib.import_module(
-        "services.subdub_blackboxes.auto_speaker"
+def test_two_speaker_onnx_authority_has_no_relative_or_forced_pairing():
+    gender_onnx = importlib.import_module(
+        "services.subdub_two_speaker_gender_onnx"
     )
     speaker_cast = _speaker_cast_module()
     ambiguous = {
         "speaker_0": [
-            (141.283, 0.818),
-            (141.857, 0.761),
-            (166.667, 0.793),
-            (182.189, 0.783),
+            {"start": 0.0, "end": 1.0, "male_score": 0.9, "female_score": 0.1},
+            {"start": 1.0, "end": 2.0, "male_score": 0.9, "female_score": 0.1},
+            {"start": 2.0, "end": 3.0, "male_score": 0.1, "female_score": 0.9},
+            {"start": 3.0, "end": 4.0, "male_score": 0.1, "female_score": 0.9},
         ],
-        "speaker_1": [(118.0, 0.90), (122.0, 0.88)],
+        "speaker_1": [
+            {"start": 4.0, "end": 5.0, "male_score": 0.9, "female_score": 0.1},
+            {"start": 5.0, "end": 6.0, "male_score": 0.9, "female_score": 0.1},
+            {"start": 6.0, "end": 7.0, "male_score": 0.9, "female_score": 0.1},
+            {"start": 7.0, "end": 8.0, "male_score": 0.9, "female_score": 0.1},
+        ],
     }
-    source = inspect.getsource(auto_speaker)
-
-    assert "_independent_two_speaker_classifications" not in source
-    assert "_collect_two_speaker_pitch_evidence" not in source
-    assert "_classify_two_speaker_registers" not in source
     with pytest.raises(
         speaker_cast.AutoCastManualRequired,
         match="^AUTO_CAST_MANUAL_REQUIRED$",
     ):
-        speaker_cast._stable_register_evidence(
-            [item[0] for item in ambiguous["speaker_0"]],
-            [item[1] for item in ambiguous["speaker_0"]],
-        )
+        gender_onnx._aggregate_gender_results(ambiguous)
 
 
-def test_protected_two_speaker_anchor_delegates_once_to_central_classifier(
+_TASK4_EXACT_TWO_LABELS = (
+    "chunk_00:speaker_0",
+    "chunk_00:speaker_1",
+    "chunk_00:speaker_0",
+    "chunk_00:speaker_1",
+    "chunk_00:speaker_0",
+    "chunk_00:speaker_1",
+    "chunk_00:speaker_0",
+    "chunk_00:speaker_1",
+)
+
+
+def _task4_exact_two_ranges():
+    return {
+        "chunk_00:speaker_0": [
+            (0.0, 0.1),
+            (0.2, 0.3),
+            (0.4, 0.5),
+            (0.6, 0.7),
+        ],
+        "chunk_00:speaker_1": [
+            (0.1, 0.2),
+            (0.3, 0.4),
+            (0.5, 0.6),
+            (0.7, 0.8),
+        ],
+    }
+
+
+def test_protected_two_speaker_anchor_delegates_once_to_onnx_authority(
     monkeypatch,
 ):
     auto_speaker = importlib.import_module(
         "services.subdub_blackboxes.auto_speaker"
     )
-    speaker_cast = _speaker_cast_module()
+    gender_onnx = importlib.import_module(
+        "services.subdub_two_speaker_gender_onnx"
+    )
     calls = []
     ranges = {
         "speaker_0": [(0.0, 2.0)],
@@ -2536,11 +2564,7 @@ def test_protected_two_speaker_anchor_delegates_once_to_central_classifier(
             "speaker_1": {"voice_register": "low"},
         }
 
-    monkeypatch.setattr(
-        speaker_cast,
-        "classify_speaker_registers",
-        classify,
-    )
+    monkeypatch.setattr(gender_onnx, "classify_two_speaker_genders", classify)
 
     result = asyncio.run(
         auto_speaker._classify_off_event_loop(
@@ -2781,8 +2805,8 @@ def test_speaker_limit_preflight_gate_fails_before_extraction(tmp_path, monkeypa
 
 def test_preflight_gate_consumes_canonical_prepare_receipt_shape(tmp_path, monkeypatch):
     auto_speaker = importlib.import_module("services.subdub_blackboxes.auto_speaker")
-    speaker_cast = _speaker_cast_module()
-    prepared = _task4_prepared(tmp_path)
+    gender_onnx = importlib.import_module("services.subdub_two_speaker_gender_onnx")
+    prepared = _task4_prepared(tmp_path, labels=_TASK4_EXACT_TWO_LABELS)
     pcm_path = tmp_path / "canonical-shape.pcm"
     pcm_path.write_bytes(_task4_pcm_bytes(120.0, seconds=0.5))
     state = {
@@ -2812,7 +2836,7 @@ def test_preflight_gate_consumes_canonical_prepare_receipt_shape(tmp_path, monke
         calls["classify"] += 1
         assert deadline_monotonic > time.monotonic()
         assert stop_requested() is False
-        assert ranges == {"chunk_00:speaker_0": [(0.0, 3.0)]}
+        assert ranges == _task4_exact_two_ranges()
         return {
             "chunk_00:speaker_0": {
                 "speaker_id": "chunk_00:speaker_0",
@@ -2821,10 +2845,18 @@ def test_preflight_gate_consumes_canonical_prepare_receipt_shape(tmp_path, monke
                 "voiced_seconds": 3.0,
                 "sample_count": 48_000,
                 "reason": "classified",
-            }
+            },
+            "chunk_00:speaker_1": {
+                "speaker_id": "chunk_00:speaker_1",
+                "voice_register": "high",
+                "confidence": 0.99,
+                "voiced_seconds": 0.4,
+                "sample_count": 17_640,
+                "reason": "classified",
+            },
         }
 
-    monkeypatch.setattr(speaker_cast, "classify_speaker_registers", classify)
+    monkeypatch.setattr(gender_onnx, "classify_two_speaker_genders", classify)
     result = asyncio.run(
         auto_speaker.run_auto_speaker_preflight(
             state,
@@ -2898,8 +2930,8 @@ def test_preflight_gate_canonical_prepare_receipt_mismatch_fails_closed(
 
 def test_pcm_cleanup_oserror_after_success_fails_closed(tmp_path, monkeypatch):
     auto_speaker = importlib.import_module("services.subdub_blackboxes.auto_speaker")
-    speaker_cast = _speaker_cast_module()
-    prepared = _task4_prepared(tmp_path)
+    gender_onnx = importlib.import_module("services.subdub_two_speaker_gender_onnx")
+    prepared = _task4_prepared(tmp_path, labels=_TASK4_EXACT_TWO_LABELS)
     pcm_path = tmp_path / "cleanup-failure.pcm"
     pcm_path.write_bytes(_task4_pcm_bytes(120.0, seconds=0.5))
     state = {
@@ -2928,7 +2960,15 @@ def test_pcm_cleanup_oserror_after_success_fails_closed(tmp_path, monkeypatch):
                 "voiced_seconds": 3.0,
                 "sample_count": 48_000,
                 "reason": "classified",
-            }
+            },
+            "chunk_00:speaker_1": {
+                "speaker_id": "chunk_00:speaker_1",
+                "voice_register": "high",
+                "confidence": 0.99,
+                "voiced_seconds": 0.4,
+                "sample_count": 17_640,
+                "reason": "classified",
+            },
         }
 
     def unlink(self, *args, **kwargs):
@@ -2937,7 +2977,7 @@ def test_pcm_cleanup_oserror_after_success_fails_closed(tmp_path, monkeypatch):
             raise OSError("fixture_pcm_cleanup_failed")
         return original_unlink(self, *args, **kwargs)
 
-    monkeypatch.setattr(speaker_cast, "classify_speaker_registers", classify)
+    monkeypatch.setattr(gender_onnx, "classify_two_speaker_genders", classify)
     monkeypatch.setattr(Path, "unlink", unlink)
     result = asyncio.run(
         auto_speaker.run_auto_speaker_preflight(
@@ -2962,7 +3002,8 @@ def test_pcm_cleanup_oserror_after_success_fails_closed(tmp_path, monkeypatch):
 def test_cancellation_pcm_cleanup_oserror_preserves_cancelled_error(tmp_path, monkeypatch):
     auto_speaker = importlib.import_module("services.subdub_blackboxes.auto_speaker")
     speaker_cast = _speaker_cast_module()
-    prepared = _task4_prepared(tmp_path)
+    gender_onnx = importlib.import_module("services.subdub_two_speaker_gender_onnx")
+    prepared = _task4_prepared(tmp_path, labels=_TASK4_EXACT_TWO_LABELS)
     pcm_path = tmp_path / "cancel-cleanup-failure.pcm"
     pcm_path.write_bytes(_task4_pcm_bytes(120.0, seconds=0.5))
     state = {
@@ -2998,7 +3039,7 @@ def test_cancellation_pcm_cleanup_oserror_preserves_cancelled_error(tmp_path, mo
             raise OSError("fixture_pcm_cleanup_failed")
         return original_unlink(self, *args, **kwargs)
 
-    monkeypatch.setattr(speaker_cast, "classify_speaker_registers", classify)
+    monkeypatch.setattr(gender_onnx, "classify_two_speaker_genders", classify)
     monkeypatch.setattr(Path, "unlink", unlink)
 
     async def scenario():
@@ -3025,8 +3066,8 @@ def test_cancellation_pcm_cleanup_oserror_preserves_cancelled_error(tmp_path, mo
 
 def test_event_loop_preflight_uses_exact_deadline_and_stops_at_classification(tmp_path, monkeypatch):
     auto_speaker = importlib.import_module("services.subdub_blackboxes.auto_speaker")
-    speaker_cast = _speaker_cast_module()
-    prepared = _task4_prepared(tmp_path)
+    gender_onnx = importlib.import_module("services.subdub_two_speaker_gender_onnx")
+    prepared = _task4_prepared(tmp_path, labels=_TASK4_EXACT_TWO_LABELS)
     pcm_path = tmp_path / "worker.pcm"
     pcm_path.write_bytes(_task4_pcm_bytes(120.0, seconds=0.5))
     state = {
@@ -3050,7 +3091,7 @@ def test_event_loop_preflight_uses_exact_deadline_and_stops_at_classification(tm
         return {"continue": True}
 
     async def extract_pcm(_prepared, _state, *, channels, sample_rate, sample_format):
-        assert (channels, sample_rate, sample_format) == (1, 16_000, "s16le")
+        assert (channels, sample_rate, sample_format) == (2, 44_100, "s16le")
         return str(pcm_path)
 
     def classify(_path, ranges, *, deadline_monotonic, stop_requested):
@@ -3058,6 +3099,7 @@ def test_event_loop_preflight_uses_exact_deadline_and_stops_at_classification(tm
         captured["deadline"] = deadline_monotonic
         captured["ranges"] = ranges
         captured["stop_requested"] = stop_requested
+        assert ranges == _task4_exact_two_ranges()
         worker_started.set()
         time.sleep(0.06)
         return {
@@ -3068,11 +3110,19 @@ def test_event_loop_preflight_uses_exact_deadline_and_stops_at_classification(tm
                 "voiced_seconds": 3.0,
                 "sample_count": 48_000,
                 "reason": "classified",
-            }
+            },
+            "chunk_00:speaker_1": {
+                "speaker_id": "chunk_00:speaker_1",
+                "voice_register": "high",
+                "confidence": 0.99,
+                "voiced_seconds": 0.4,
+                "sample_count": 17_640,
+                "reason": "classified",
+            },
         }
 
     monkeypatch.setattr(auto_speaker, "time", FixedTime)
-    monkeypatch.setattr(speaker_cast, "classify_speaker_registers", classify)
+    monkeypatch.setattr(gender_onnx, "classify_two_speaker_genders", classify)
 
     async def scenario():
         loop_thread_id = threading.get_ident()
@@ -3102,7 +3152,7 @@ def test_event_loop_preflight_uses_exact_deadline_and_stops_at_classification(tm
 
     assert worker_started.is_set()
     assert captured["thread_id"] != loop_thread_id
-    assert captured["deadline"] - 100.0 == pytest.approx(30.0)
+    assert captured["deadline"] - 100.0 == pytest.approx(300.0)
     assert heartbeat > 2
     assert not pcm_path.exists()
     assert result["ok"] is True
@@ -3122,7 +3172,8 @@ def test_event_loop_preflight_uses_exact_deadline_and_stops_at_classification(tm
 def test_cancellation_signals_worker_before_pcm_cleanup(tmp_path, monkeypatch):
     auto_speaker = importlib.import_module("services.subdub_blackboxes.auto_speaker")
     speaker_cast = _speaker_cast_module()
-    prepared = _task4_prepared(tmp_path)
+    gender_onnx = importlib.import_module("services.subdub_two_speaker_gender_onnx")
+    prepared = _task4_prepared(tmp_path, labels=_TASK4_EXACT_TWO_LABELS)
     pcm_path = tmp_path / "cancel.pcm"
     pcm_path.write_bytes(_task4_pcm_bytes(120.0, seconds=0.5))
     state = {
@@ -3152,7 +3203,7 @@ def test_cancellation_signals_worker_before_pcm_cleanup(tmp_path, monkeypatch):
         worker_exited.set()
         raise speaker_cast.AutoCastManualRequired()
 
-    monkeypatch.setattr(speaker_cast, "classify_speaker_registers", classify)
+    monkeypatch.setattr(gender_onnx, "classify_two_speaker_genders", classify)
 
     async def scenario():
         task = asyncio.create_task(
@@ -3179,7 +3230,8 @@ def test_cancellation_signals_worker_before_pcm_cleanup(tmp_path, monkeypatch):
 def test_manual_required_timeout_waits_for_worker_before_pcm_cleanup(tmp_path, monkeypatch):
     auto_speaker = importlib.import_module("services.subdub_blackboxes.auto_speaker")
     speaker_cast = _speaker_cast_module()
-    prepared = _task4_prepared(tmp_path)
+    gender_onnx = importlib.import_module("services.subdub_two_speaker_gender_onnx")
+    prepared = _task4_prepared(tmp_path, labels=_TASK4_EXACT_TWO_LABELS)
     pcm_path = tmp_path / "timeout.pcm"
     pcm_path.write_bytes(_task4_pcm_bytes(120.0, seconds=0.5))
     state = {
@@ -3206,8 +3258,8 @@ def test_manual_required_timeout_waits_for_worker_before_pcm_cleanup(tmp_path, m
         worker_exited.set()
         raise speaker_cast.AutoCastManualRequired()
 
-    monkeypatch.setattr(speaker_cast, "CLASSIFIER_WALL_TIMEOUT_SECONDS", 0.02)
-    monkeypatch.setattr(speaker_cast, "classify_speaker_registers", classify)
+    monkeypatch.setattr(gender_onnx, "CLASSIFIER_WALL_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(gender_onnx, "classify_two_speaker_genders", classify)
 
     result = asyncio.run(
         auto_speaker.run_auto_speaker_preflight(

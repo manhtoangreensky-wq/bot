@@ -248338,11 +248338,16 @@ async def _extract_subdub_auto_pcm(
 ) -> str:
     """Create one bounded transient PCM artifact inside the current workspace."""
 
-    if (
-        int(channels) != 1
-        or int(sample_rate) != int(subdub_speaker_cast.PCM_SAMPLE_RATE)
-        or str(sample_format) != "s16le"
-    ):
+    try:
+        pcm_contract = (int(channels), int(sample_rate), str(sample_format))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise subdub_speaker_cast.AutoCastUnavailable() from exc
+    allowed_contracts = {
+        (1, int(subdub_speaker_cast.PCM_SAMPLE_RATE), "s16le"): "mono",
+        (2, 44_100, "s16le"): "stereo",
+    }
+    channel_label = allowed_contracts.get(pcm_contract)
+    if channel_label is None:
         raise subdub_speaker_cast.AutoCastUnavailable()
     prepared_state = dict((prepared or {}).get("state") or {})
     workspace = str(
@@ -248382,7 +248387,7 @@ async def _extract_subdub_auto_pcm(
         raise subdub_speaker_cast.AutoCastUnavailable()
     pcm_path = os.path.join(
         workspace,
-        f"auto_speaker_{int(sample_rate)}_mono_{sample_format}.pcm",
+        f"auto_speaker_{int(sample_rate)}_{channel_label}_{sample_format}.pcm",
     )
     try:
         raw_duration = float(
@@ -248394,9 +248399,25 @@ async def _extract_subdub_auto_pcm(
         )
     except (TypeError, ValueError, OverflowError):
         raw_duration = 0.0
+    source_segments = (prepared or {}).get("source_segments")
+    cue_end_seconds = 0.0
+    if source_segments is not None:
+        if not isinstance(source_segments, list):
+            raise subdub_speaker_cast.AutoCastUnavailable()
+        for segment in source_segments:
+            if not isinstance(segment, dict):
+                raise subdub_speaker_cast.AutoCastUnavailable()
+            try:
+                segment_end = float(segment.get("end"))
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise subdub_speaker_cast.AutoCastUnavailable() from exc
+            if not math.isfinite(segment_end) or segment_end <= 0.0:
+                raise subdub_speaker_cast.AutoCastUnavailable()
+            cue_end_seconds = max(cue_end_seconds, segment_end)
+    requested_seconds = max(raw_duration, cue_end_seconds)
     bounded_seconds = (
-        min(float(SUBDUB_AUTO_PCM_MAX_SECONDS), max(1.0, raw_duration))
-        if math.isfinite(raw_duration) and raw_duration > 0.0
+        min(float(SUBDUB_AUTO_PCM_MAX_SECONDS), max(1.0, requested_seconds))
+        if math.isfinite(requested_seconds) and requested_seconds > 0.0
         else float(SUBDUB_AUTO_PCM_MAX_SECONDS)
     )
     max_pcm_bytes = int(math.ceil(
