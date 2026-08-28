@@ -234827,7 +234827,7 @@ def video_dubbing_voice_keyboard(
         (f"👩 {copy['voice']}", "videodub|voice|default_female"),
         (f"👨 {copy['voice']}", "videodub|voice|default_male"),
         (copy["saved_voice"], "videodub|voice_saved"),
-        (copy["another"], "videodub|voice_create"),
+        ("🎙 Tạo voice riêng" if normalize_user_language(lang) == "vi" else "🎙 Create custom voice", "videodub|voice_create"),
     ]
     markup = video_v6_keyboard(
         items,
@@ -238310,7 +238310,7 @@ def subdub_progress_keyboard(job_id: str = "", lang: str = "vi") -> InlineKeyboa
             InlineKeyboardButton(copy["another"], callback_data="videodub|source_upload"),
         ],
         [
-            InlineKeyboardButton(f"⬅️ {copy['combo']}", callback_data="videodub|status_back_type"),
+            InlineKeyboardButton(f"⬅️ {copy['menu']}", callback_data="videodub|status_back_type"),
             InlineKeyboardButton(copy["main"], callback_data="menu|main"),
         ],
     ])

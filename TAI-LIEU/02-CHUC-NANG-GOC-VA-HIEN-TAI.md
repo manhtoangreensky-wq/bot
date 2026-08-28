@@ -176,8 +176,23 @@ Live job `24` cho thấy connector policy đúng vẫn chưa đủ nếu server 
 Chỗ tài liệu gốc không còn đúng: câu “exact Git blob PR #842 là toàn bộ engine
 hiện tại” không còn đúng cho authority exact-two. Source correction gọi service
 UVR + PANNs ONNX chỉ khi đúng lane hai speaker; không đổi
-`subdub_speaker_cast.py`, `auto_multi_speaker.py`, PCM filter, provider, UI,
-pricing hay wallet. Chưa deploy/chưa có MP4 thật thì vẫn ghi `LIVE pending`.
+`subdub_speaker_cast.py`, `auto_multi_speaker.py`, PCM filter, provider,
+pricing hay wallet.
+
+### Đối chiếu sau Auto 2-speaker LIVE PASS — 28/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| MP4 đã giao một lần nghĩa là lane hai giọng đã xong | Chỉ khóa sau combo job `#3A3BEA618D` và standalone `#282347E26C` cùng giao MP4 thật + receipt, không file phụ, trên runtime `e819c1cd...` | ✅ Hai lane LIVE PASS |
+| Ghép TTS nối tiếp để không mất chữ dịch | Mỗi cue đo source/target speech rate, provider speed tối đa `1.8x`, fit bằng `atempo`/pad trong chính cue; boundary và final duration nguồn bất biến | ❌ Cơ chế nối tiếp cũ bị bỏ |
+| Combo Auto phải gửi thêm SRT | SRT `18` cue là artifact nội bộ/QC hoặc tải chủ động; automatic delivery là MP4 → receipt | ❌ File tự động dư bị bỏ |
+| Có hai speaker thì buộc một nam, một nữ | Mỗi speaker vote độc lập; fixture live ra male/low `7/8` và female/high `8/10`, nhưng male–male/female–female vẫn hợp lệ nếu evidence đạt | ❌ Không forced pairing |
+| Admin `0 Xu` nên dubbing price có thể bằng `0` | Combo vẫn niêm yết subtitle `61`, dubbing `75`, total `136`; standalone dubbing/total `77`; chỉ settlement là `charged_xu=0` | ❌ Không còn giá lồng tiếng giả 0 |
+| Back/status và create-voice có thể tái dùng copy generic | Hai callback đúng nhưng nhãn live sai; correction chỉ đổi `2` dòng presentation và khóa bằng `5` UI/audio tests | ⚠️ Local PASS, chờ deploy/readback |
+
+GitHub tester surface đo ngày 28/08/2026 vẫn có `21` labels, issue `#884` và
+`#81`, `2` template SubDub, `3` case `SD-2S-01/SD-2S-02/SD-MS-01`; Projects
+chưa đọc được vì token thiếu `read:project`. Không tự chạy `gh auth refresh`.
 
 ## Đối chiếu Product Video flow/artifact sau job 25 — 28/08/2026
 

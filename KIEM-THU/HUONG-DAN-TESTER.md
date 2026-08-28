@@ -73,7 +73,10 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
 9. `empty_transcript`, thiếu một speaker, speaker evidence không chắc hoặc mapping
    cue dưới ngưỡng đều là FAIL-closed. Không sửa test để ép thành hai label.
 10. Chỉ sau hai case 2-speaker PASS và lock manifest đã ghi hash mới dùng
-    `test nhiều giọng.mp4` cho `SD-MS-01`.
+    `test nhiều giọng.mp4` SHA-256
+    `83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E`
+    cho `SD-MS-01`. Chạy combo trước rồi standalone; mỗi flow chọn English,
+    Auto multi, gốc `40%`, lồng `150%` và confirm đúng một lần.
 11. Lặp lại contract audio UI trên giọng nữ mặc định, giọng nam mặc định, Kho
     voice, voice riêng, Auto 2 và Auto multi khi chạy case tương ứng; không chấp
     nhận một kiểu giọng mở bảng preset hoặc làm mất giá trị numeric.
@@ -87,3 +90,12 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     Filter cũ từng trả sai `high/high`; raw-frame fallback đã bị cấm. Nếu log
     chỉ có label mà không có gender/register/dominance/evidence time, hoặc dùng
     “một nam + một nữ” không qua vote độc lập, FAIL.
+14. Với Auto multi, sidecar phải có `3–16` label thật và terminal proof phải ghi
+    `auto_detected_speaker_count == auto_distinct_voice_count`; mỗi label giữ
+    một voice ID ổn định trong toàn video. Không chấp nhận bịa/gộp label, ép
+    giới tính hoặc dùng lại một voice cho hai label.
+15. Auto multi dùng cùng cue-lock đã chứng minh: từng start/end nguồn bất biến,
+    cue sau không đợi cue trước, final duration bằng nguồn. Cả combo và
+    standalone chỉ tự giao MP4 rồi receipt; SRT/audio/document tự động phải là
+    `0`. Receipt có loại Auto multi, speaker/voice count, giá niêm yết và total;
+    admin `charged_xu=0`, wallet/event delta `0`.
