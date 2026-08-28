@@ -316,9 +316,27 @@ Live failure-loop job #27 on runtime `89192bab94c871214476a9c1feb7b3d2f94dcc7a`:
   reproduced exact `14 passed, 24 failed` with the same IDs, so
   `NEW_FAILURES=0`. Progress tree remains; it would be removed if route hashes or
   a new regression changed.
-- [ ] Ship terminal/progress correction, deploy/readback, let existing job #27
-  transition to terminal failed-no-charge without a new provider task, then run
-  the next assigned unfinished product lane. Do not re-test a frozen PASS product.
+- [x] Terminal/progress correction shipped in PR #921, squash SHA `4fa07a01...`;
+  compile run `33198389817` SUCCESS and deploy run `33198542741` SUCCESS in
+  `12m8s`. Bot + owner worker read back exact SHA; generation
+  `0ad4cac82ec54d2c9d45fa84379dcf09` accepted with empty reject reason.
+- [x] Post-deploy live readback exposed a second exact RED: job #27 stayed
+  queued at `60%`, attempts `906 -> 950`, while both durable ShopAIKey task IDs
+  stayed unchanged, `provider_submit_called=0`, charged Xu `0`, provider usage
+  rows `0`, transaction rows `0`, credit-event rows unchanged at `10`.
+- [x] Root cause measured from the durable scene ledger: both scenes are
+  authoritative `FAILURE`, fallback count `0`, forensic terminal reason
+  `all_scene_providers_exhausted_no_charge`; however an empty
+  `provider_result_url_present=true` marker created false
+  `unprocessed_result_indexes=[1,2]` and suppressed terminal state.
+- [x] F2 RED reproduced the false result marker (`1 failed in 13.96s`);
+  minimal ledger GREEN ignores presence-only markers on failed scenes while
+  retaining concrete/validated results. Exact selector `1 passed in 14.92s`;
+  all 7 direct-impact modules `85 passed in 26.69s`.
+- [ ] After SubDub releases shared resources, rebase/ship only F2, deploy and
+  restart only the owner Product Video worker. Existing job #27 must become
+  `failed_no_charge` with the same two tasks and zero provider/wallet delta.
+  Only then continue the next unfinished product; never re-test a frozen PASS.
 
 Current source evidence:
 

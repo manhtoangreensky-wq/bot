@@ -7276,8 +7276,13 @@ def product_video_scene_ledger_state(
         result_present_raw = bool(
             result_url
             or merged.get("result_url_valid")
-            or merged.get("download_url_present")
-            or merged.get("provider_result_url_present")
+            or (
+                _status_class(status_raw) != "failed"
+                and (
+                    merged.get("download_url_present")
+                    or merged.get("provider_result_url_present")
+                )
+            )
         )
         explicit_result_task_id = _text_value(
             merged,

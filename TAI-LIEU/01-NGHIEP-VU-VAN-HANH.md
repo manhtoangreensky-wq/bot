@@ -375,3 +375,23 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   4 issue templates local. Projects board là `UNKNOWN` vì token thiếu
   `read:project`; Owner cần tự cấp scope bằng `gh auth refresh -s read:project`
   trước khi task được phép đọc/tạo board. Không tự mở browser hoặc nâng scope.
+
+## Bổ sung Product Video job #27 terminal truth — 29/08/2026
+
+- PR #921 đã squash-merge SHA `4fa07a017dd5db9212b213dfd8c272564f4cb443`;
+  deploy run `33198542741` SUCCESS trong `12m8s`. Bot và owner worker đọc lại
+  đúng SHA; generation `0ad4cac82ec54d2c9d45fa84379dcf09` được chấp nhận.
+- Live readback vẫn RED: hai scene đều có provider status thật `FAILURE`, không
+  có clip/URL, fallback `0` và forensic terminal
+  `all_scene_providers_exhausted_no_charge`; job vẫn queued vì presence-only
+  marker rỗng tạo sai `unprocessed_result_indexes=[1,2]`.
+- Presence-only marker không phải artifact. Scene authoritative `failed` chỉ
+  được giữ ở bước tải/validate khi có URL cụ thể hoặc `result_url_valid`; cờ
+  `provider_result_url_present=true` nhưng URL rỗng phải bị bỏ qua.
+- Source F2: RED `1 failed in 13.96s`; exact GREEN `1 passed in 14.92s`; toàn bộ
+  7 module gọi trực tiếp scene-ledger `85 passed in 26.69s`; compile, YAML và
+  diff-check exit `0`. Năm engine route, Tail UI, provider order/task IDs và ví
+  không đổi.
+- Trước khi nhả shared slot, chỉ owner worker bị dừng; job #27 giữ queued/unlocked,
+  hai task ID không đổi, provider usage `0`, transaction `0`, credit-event giữ
+  `10`, charged Xu `0`. Đây vẫn là failure-loop, không phải product LIVE PASS.
