@@ -282,8 +282,10 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Hai lỗi presentation phát hiện sau live chỉ là nhãn callback: `voice_create`
   bị ghi nhầm “Gửi video khác” và back trạng thái ghi nhầm “Phụ đề + Lồng
   tiếng”. Local correction đổi đúng `2` dòng nhãn; UI + compact numeric audio
-  `5 passed`, `py_compile bot.py` và diff-check exit `0`; chưa được gọi deployed
-  cho tới khi PR UI kế tiếp có runtime readback.
+  `5 passed`, `py_compile bot.py` và diff-check exit `0`. PR `#922` đã merge
+  SHA `2fd989e23ab298b7a1c8f415ac1ecda085e07476`; deploy `33202076833`
+  SUCCESS `15m7s`; VPS readback cùng SHA, bot/web/nginx active và cả hai nhãn
+  runtime đúng. Lane Auto 2-speaker từ đây là `LOCKED_LIVE_PASS`.
 - Từ mốc này classifier/cast/timing/mux/delivery/audio numeric của Auto
   2-speaker là vùng khóa. Multi chỉ được sửa owner `auto_multi_speaker` hoặc
   nhánh điều kiện `auto_speaker_lane=multi`, đồng thời phải giữ toàn bộ

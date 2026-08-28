@@ -16,15 +16,15 @@
 
 ### Current pointer
 
-- Current SPEC: `SPEC-10`.
-- Current SUBSPEC: `SPEC-10.2`.
-- Current phase: `POST_REBASE_GREEN / PUSH_PR_DEPLOY_NEXT`.
-- Production action active: `NO; Product Video released shared resources`.
+- Current SPEC: `SPEC-11`.
+- Current SUBSPEC: `SPEC-11.2`.
+- Current phase: `RED_READY / WAITING_PRODUCT_VIDEO_ALTERNATION`.
+- Production action active: `NO; SPEC-10 runtime readback terminal`.
 - Telegram/provider job active: `NO; combo #3A3BEA618D and standalone #282347E26C terminal delivered`.
 - Wallet mutation: `0`.
-- Next allowed action: push exact post-rebase HEAD `92b92af9...`, create/squash
-  one PR, deploy/readback and set `LOCKED_LIVE_PASS` before any multi
-  production edit.
+- Next allowed action: merge this docs-only closeout, release shared resources
+  to Product Video, then write the first local SPEC-11 multi timing/delivery
+  RED while Product Video ships its isolated F2 correction.
 - Next forbidden action: edit classifier/cast thresholds, audio UI, pricing,
   wallet, provider/model/endpoint, multi engine, or move to standalone/multi
   before the corrected combo artifact passes.
@@ -1399,9 +1399,13 @@ Regression selectors:
 - [x] Post-rebase gates: UI/audio `5 passed, 1 cache warning in 1.92s`;
   protected hashes `3/3 HASH_OK`; `py_compile bot.py`, YAML, diff/scope/secret
   checks exit `0`.
-- [ ] Checklist pushed to GitHub.
-- [-] Lane status changes to `LOCKED_LIVE_PASS` only after the two-label UI
-  correction is shipped/deployed/read back on the current main SHA.
+- [x] Checklist pushed to GitHub in PR `#922`.
+- [x] PR `#922` squash merge
+  `2fd989e23ab298b7a1c8f415ac1ecda085e07476`; compile run `33202076824`
+  SUCCESS; deploy run `33202076833` SUCCESS in `15m7s`.
+- [x] VPS readback exact merge SHA; bot/web/nginx `active`; Product Video owner
+  worker remains `inactive`; both corrected labels exist in runtime source.
+- [x] Lane status changed to `LOCKED_LIVE_PASS`.
 
 ## SPEC-11 — Build the separate Auto multi-speaker lane from the locked lane-2 core
 
@@ -1412,16 +1416,17 @@ Regression selectors:
   speaker 1 `17` cues / `32.919s`, speaker 2 `3` cues / `9.705s`. The older
   underclustered sidecar had only `2` labels; acceptance must use the refined
   3-label sidecar and must not invent a fourth label.
-- [B] `SPEC-10` must be `LOCKED_LIVE_PASS` on the deployed runtime before the
-  first multi production edit. Until then only this plan and read-only mapping
-  are allowed.
-- [B] Recheck fixture
+- [x] `SPEC-10` is `LOCKED_LIVE_PASS` on deployed runtime
+  `2fd989e23ab298b7a1c8f415ac1ecda085e07476`. Before this gate, only the plan
+  and read-only mapping were allowed; the first multi production edit is now
+  authorized under SPEC-11.
+- [x] Rechecked fixture
   `C:\Users\toann\Downloads\test sub\test nhiều giọng.mp4` with
-  `Get-FileHash -Algorithm SHA256`; expected
+  `Get-FileHash -Algorithm SHA256`: `9,869,032` bytes, exact
   `83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E`.
-- [B] Recheck immutable exact-two hashes with `Get-FileHash`: cast
-  `DE93620F...` and fallback `94748DEF...`; expected: both exact hashes match
-  SPEC-10 before and after every multi GREEN.
+- [x] Rechecked immutable exact-two hashes with `Get-FileHash`: cast
+  `DE93620F...`, fallback `94748DEF...`, multi-owner baseline `55AAB894...`;
+  all `3/3 HASH_OK`. Repeat after every multi GREEN.
 
 Task contract:
 
