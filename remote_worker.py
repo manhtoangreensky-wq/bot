@@ -30,6 +30,10 @@ PRODUCT_VIDEO_PROVIDER_READY_CAPABILITY_PREFIX = "product_video_provider_ready:"
 WORKER_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 ACTIVE_WORKER_SERVICE_MODE = "general"
 ACTIVE_WORKER_CAPABILITIES: list[str] = ["ffmpeg", "video_postprocess"]
+PRODUCT_VIDEO_TERMINAL_NO_CHARGE_REASONS = frozenset({
+    "all_scene_providers_exhausted_no_charge",
+    "scene_submit_missing_no_charge",
+})
 
 
 def product_video_worker_capabilities() -> list[str]:
@@ -531,6 +535,26 @@ def first_line(text: str) -> str:
         clean = line.strip()
         if clean:
             return clean[:300]
+    return ""
+
+
+def product_video_terminal_no_charge_reason(
+    message: str,
+    diagnostics: dict | None = None,
+) -> str:
+    current = dict(diagnostics or {})
+    candidates = [
+        first_line(message),
+        first_line(current.get("provider_error") or ""),
+        first_line(current.get("blocker") or ""),
+    ]
+    for candidate in candidates:
+        if candidate in PRODUCT_VIDEO_TERMINAL_NO_CHARGE_REASONS:
+            return candidate
+    if str(current.get("terminal_state") or "").strip() == "failed_no_charge":
+        return candidates[0] or candidates[1] or candidates[2] or "failed_no_charge"
+    if str(current.get("final_decision") or "").strip() == "failed_no_charge":
+        return candidates[0] or candidates[1] or candidates[2] or "failed_no_charge"
     return ""
 
 
@@ -1597,7 +1621,27 @@ def run_once(
                 f"exception_class={type(exc).__name__} "
                 f"exception_message_safe={first_line(message)}"
             )
-            continue_polling = bool(diagnostics.get("continue_polling")) or "provider_in_progress" in message
+            terminal_no_charge_reason = product_video_terminal_no_charge_reason(
+                message,
+                diagnostics,
+            )
+            if terminal_no_charge_reason:
+                diagnostics.update(
+                    {
+                        "continue_polling": False,
+                        "terminal_state": "failed_no_charge",
+                        "final_decision": "failed_no_charge",
+                        "provider_error": terminal_no_charge_reason,
+                        "blocker": terminal_no_charge_reason,
+                        "no_charge": True,
+                        "wallet_charge": 0,
+                    }
+                )
+                LAST_REAL_VIDEO_RENDER_RESULT.clear()
+                LAST_REAL_VIDEO_RENDER_RESULT.update(diagnostics)
+                continue_polling = False
+            else:
+                continue_polling = bool(diagnostics.get("continue_polling")) or "provider_in_progress" in message
             fail_result = fail_job(
                 job_id,
                 f"{type(exc).__name__}:{message}",

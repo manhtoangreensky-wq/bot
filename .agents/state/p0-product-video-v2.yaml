@@ -1,10 +1,12 @@
 task_id: P0_PRODUCT_VIDEO_V2_SPEC_04G_1
-phase: SHIP_READY_WAITING_SUBDUB_RELEASE
+phase: JOB27_FAILURE_LOOP_SHIP_READY
 pointer: V2-02I/SPEC-04G.1
 base_sha: 3e28d3d9ac63baf26b939db4c55111bea3b97610
 goal: Preserve strict Tail Add-on truth through project persistence and send one friendly customer report after durable delivery and settlement.
 allowed_files:
   - bot.py
+  - remote_worker.py
+  - tests/test_p0_product_video_job27_terminal_progress.py
   - tests/test_p0_product_video_addon_truth_delivery_report.py
   - KIEM-THU/PRODUCT-VIDEO-LIVE-STRATEGY-V2.md
   - KIEM-THU/runbooks/PV2-SPEC04G1-addon-report-rerun.md
@@ -50,4 +52,20 @@ source_evidence:
   github_issues_readback: 2
   github_issue_templates_local: 4
   github_projects_readback: UNKNOWN_missing_read_project_scope
-next_action: Wait for exact SubDub shared-resource releases, then fetch/rebase, rerun the focused post-rebase gate, ship one PR/deploy, and live-rerun the same manual Tail case.
+job27_live_red:
+  runtime_sha: 89192bab94c871214476a9c1feb7b3d2f94dcc7a
+  request_id: VID-20260828-F71C71
+  project_id: 31
+  job_id: 27
+  outbox_id: 26
+  strict_requested_addons: [transitions]
+  invoice_xu: 144
+  owner_charged_xu: 0
+  blocker: stale_continue_polling_after_all_scene_providers_exhausted
+  focused_red: 1 failed in 26.21s
+  focused_green: 3 passed in 890.94s
+  broad_branch: 14 passed and 24 historical failures
+  broad_clean_base: 14 passed and the same 24 historical failures
+  new_failures: 0
+  progress_tree_policy: presentation_only_remove_if_route_hash_or_lane_regresses
+next_action: Ship the job27 terminal/progress correction, deploy exact SHA, verify existing job 27 terminates failed-no-charge with no new provider task, then continue the next unfinished Strategy V2 row.
