@@ -1,5 +1,12 @@
 # P0 Product Video Full-Lane Live Matrix
 
+> **AUTHORITATIVE SCOPE OVERRIDE (28/08/2026):** Current execution follows
+> `KIEM-THU/PRODUCT-VIDEO-LIVE-STRATEGY-V2.md`. The older exhaustive lane/tier
+> tables below are retained as history and prior evidence only. Do not create jobs
+> from them. V2 uses one complex non-manual representative per product at tier 400
+> (80 Xu/scene, two scenes), lives both distinct Self-shot products, and distributes
+> the remaining single-scene quality probes across compatible products.
+
 ## Scope Stamp
 
 - Product: **Product Video** only
@@ -33,7 +40,8 @@ Before building any product-specific flow, compare it with the completed Product
 - [x] Owner approved only the Key4U `.vn` endpoint configuration needed for Product Video; no secret values are committed.
 - [x] No wallet, PayOS, destructive DB, onboarding, PWA, or SubDub changes allowed.
 
-Current shared-resource owner: **Product Video** for the ordered Trend4 Facebook correction and PV-L01 live rerun. SubDub remains source-local until exact Product Video releases.
+Shared-resource ownership is determined only by the latest exact inter-task
+LIVE/CHROME/VPS markers. This history file does not claim a current owner.
 
 ## Ordered Specs
 

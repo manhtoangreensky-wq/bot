@@ -1,0 +1,20 @@
+CASE_ID: PV2-R03
+TITLE: Tra sen Tay Ho - hanh trinh tu dam sen den ban tra
+
+SCENE 1
+Buoi som tren dam sen Tay Ho, nguoi tho cheo thuyen nhe va hai nhung bong sen vua no.
+
+SCENE 2
+Trong gian nha go, nghe nhan tach gao sen tuoi bang tay va dat tung hat vao khay tre.
+
+SCENE 3
+Tra xanh va gao sen duoc uop thanh nhieu lop trong chum gom, giu mui huong tu nhien.
+
+SCENE 4
+Nghe nhan mo chum, lay tra da uop va pha trong am gom voi dong nuoc nong trong veo.
+
+SCENE 5
+Chu nha moi khach thuong tra ben cua so nhin ra ho, ket bang can can ly tra va hoa sen.
+
+ADDONS: voice_default, source_language_subtitle, background_music
+QUALITY: tier_id=400, public_unit_price=80 Xu/scene
