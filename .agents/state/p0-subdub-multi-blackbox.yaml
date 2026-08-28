@@ -3,8 +3,8 @@ product: SubDub
 owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
-branch: fix/p0-subdub-cue-sync-video-only
-phase: SPEC_10_2_POST_REBASE_GREEN_PUSH_PR_DEPLOY_NEXT
+branch: docs/p0-subdub-two-speaker-lock-closeout
+phase: SPEC_11_2_RED_READY_AFTER_SPEC_10_LOCK
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -26,10 +26,10 @@ workflow_contract:
 
 resource_boundary:
   cpu: independent_local_subdub_source_only
-  live: acquired_by_subdub_after_exact_product_video_release
-  chrome: acquired_by_subdub_after_exact_product_video_release
-  vps_deploy: acquired_by_subdub_after_exact_product_video_release
-  product_video: released after PR 921 runtime 4fa07a0; owner worker stopped; job 27 unlocked queued
+  live: release_to_product_video_immediately_after_this_closeout_merges
+  chrome: release_to_product_video_immediately_after_this_closeout_merges
+  vps_deploy: release_to_product_video_immediately_after_this_closeout_merges
+  product_video: source-local clean HEAD 0a70db2; owner worker inactive; job 27 unlocked queued
 
 two_speaker_live_pass_20260828:
   runtime_sha: e819c1cd00d66273e00c667355325549dbea8d44
@@ -90,12 +90,20 @@ two_speaker_live_pass_20260828:
       yaml_diff_scope_secret: exit 0
 
 two_speaker_lock_manifest:
-  status: LOCK_PENDING_UI_SHIP
+  status: LOCKED_LIVE_PASS
   immutable_live_runtime: e819c1cd00d66273e00c667355325549dbea8d44
+  deployed_lock_runtime: 2fd989e23ab298b7a1c8f415ac1ecda085e07476
   ship_evidence:
-    pr: 919
-    deploy_run: 33176635110
-    deploy_status: SUCCESS
+    engine_pr: 919
+    engine_deploy_run: 33176635110
+    ui_lock_pr: 922
+    ui_lock_merge_sha: 2fd989e23ab298b7a1c8f415ac1ecda085e07476
+    ui_lock_deploy_run: 33202076833
+    deploy_status: SUCCESS in 15m7s
+    main_compile_run: 33202076824 SUCCESS
+    runtime_services: bot active; web active; nginx active
+    product_video_worker: inactive and not restarted
+    runtime_labels: custom voice label and generic SubDub status-back label present
   immutable_exact_two_files:
     services/subdub_speaker_cast.py: de93620f3f038b5759a53e696c5c85d3553fcee758686df56c70e6b11bac145b
     services/subdub_two_speaker_asr_fallback.py: 94748def11c38d76952192a996fa42231d75b39d4d9ecd3407ff671d92e1177e
@@ -122,10 +130,12 @@ two_speaker_lock_manifest:
     subdub_terminal_state_allows_transition: 918a64167f56c11b4508f28e024970f9c491722a7683f2616ad67d441d8020ae
   spec11_rule: multi work may edit the isolated multi owner or add a multi-only branch at a shared seam, but every exact-two contract comparator must remain GREEN
   reopen_rule: outside SPEC-11, only an Owner instruction naming lane 2 plus a new failing live artifact may authorize edits to exact-two files or branches
-  next_status: LOCKED_LIVE_PASS only after UI PR merge, deploy and runtime readback
+  next_status: SPEC_11_MULTI_RED
 
 multi_fixture_read_only_evidence:
   source_fixture_sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
+  source_fixture_bytes: 9869032
+  source_fixture_hash_rechecked_after_lock: true
   refined_sidecar:
     cue_count: 36
     label_count: 3

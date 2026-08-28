@@ -188,7 +188,7 @@ pricing hay wallet.
 | Combo Auto phải gửi thêm SRT | SRT `18` cue là artifact nội bộ/QC hoặc tải chủ động; automatic delivery là MP4 → receipt | ❌ File tự động dư bị bỏ |
 | Có hai speaker thì buộc một nam, một nữ | Mỗi speaker vote độc lập; fixture live ra male/low `7/8` và female/high `8/10`, nhưng male–male/female–female vẫn hợp lệ nếu evidence đạt | ❌ Không forced pairing |
 | Admin `0 Xu` nên dubbing price có thể bằng `0` | Combo vẫn niêm yết subtitle `61`, dubbing `75`, total `136`; standalone dubbing/total `77`; chỉ settlement là `charged_xu=0` | ❌ Không còn giá lồng tiếng giả 0 |
-| Back/status và create-voice có thể tái dùng copy generic | Hai callback đúng nhưng nhãn live sai; correction chỉ đổi `2` dòng presentation và khóa bằng `5` UI/audio tests | ⚠️ Local PASS, chờ deploy/readback |
+| Back/status và create-voice có thể tái dùng copy generic | Hai callback đúng nhưng nhãn live sai; PR `#922` đổi đúng `2` dòng, `5` UI/audio tests; deploy/runtime `2fd989e...` đã readback | ✅ Đã khóa runtime |
 
 GitHub tester surface đo ngày 28/08/2026 vẫn có `21` labels, issue `#884` và
 `#81`, `2` template SubDub, `3` case `SD-2S-01/SD-2S-02/SD-MS-01`; Projects
