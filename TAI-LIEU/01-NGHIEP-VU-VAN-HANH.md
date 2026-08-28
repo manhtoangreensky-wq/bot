@@ -255,6 +255,40 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   provider HTTP `200`, SRT hay sidecar cũng không phải MP4 PASS. Combo phải giao
   MP4 rồi receipt, không file tự động dư, trước standalone và multi-speaker.
 
+## SubDub Auto 2-speaker LIVE PASS và khóa lane — 28/08/2026
+
+- PR `#919` merge/deploy/runtime
+  `e819c1cd00d66273e00c667355325549dbea8d44`; GitHub Actions run
+  `33176635110` SUCCESS. Đây là build đầu tiên được công nhận sau khi cả artifact
+  và nhịp cue đều được đo, không chỉ dựa trên HTTP/job id.
+- Combo public job `#3A3BEA618D` giao video message `33764`, rồi receipt
+  `33765`; giữa hai message có `0` SRT/audio/document tự động. MP4
+  `9,673,714` bytes, SHA-256
+  `4FFEFD25F7FE3860460C50845E20E6C1508CDE69327A71345E730466B0EF79D9`,
+  H.264 `576x884` `30fps` + AAC stereo `48kHz`, `49.000s`, `-18.4 LUFS`,
+  true peak `-3.6 dBFS`. SRT nội bộ `18` cue, `1,269` bytes, không gửi.
+- Standalone public job `#282347E26C` giao video message `33771`, rồi receipt
+  `33772`; file tự động phụ `0`. MP4 `9,978,464` bytes, SHA-256
+  `449FFE9D592E14679A9F511442B48010AE8AC946AD324F5A26EABB8CD77F1B1B`,
+  cùng H.264/AAC, `49.000s`, `-18.3 LUFS`, true peak `-4.1 dBFS`.
+- Cả hai job dùng fixture SHA-256 `85C8793D...`, English, Auto 2-speaker,
+  original `40%`, dub `150%`, confirm đúng `1` lần. Cast thật giữ
+  `speaker_0=male/low` (`7/8` vote) và `speaker_1=female/high` (`8/10` vote).
+  Các boundary cue là `0,4,9,11,13,15,17,19,21,23,25,27,29,31,33,35,38,43,48`;
+  không cumulative drift và final duration bằng nguồn.
+- Receipt combo: subtitle `61 Xu`, dubbing `75 Xu`, total `136 Xu`; standalone:
+  dubbing/total `77 Xu`. Admin `charged_xu=0`; wallet sau cả hai vẫn credits
+  `200`, total_spent `0`, transactions `0`, credit_events `1`.
+- Hai lỗi presentation phát hiện sau live chỉ là nhãn callback: `voice_create`
+  bị ghi nhầm “Gửi video khác” và back trạng thái ghi nhầm “Phụ đề + Lồng
+  tiếng”. Local correction đổi đúng `2` dòng nhãn; UI + compact numeric audio
+  `5 passed`, `py_compile bot.py` và diff-check exit `0`; chưa được gọi deployed
+  cho tới khi PR UI kế tiếp có runtime readback.
+- Từ mốc này classifier/cast/timing/mux/delivery/audio numeric của Auto
+  2-speaker là vùng khóa. Multi chỉ được sửa owner `auto_multi_speaker` hoặc
+  nhánh điều kiện `auto_speaker_lane=multi`, đồng thời phải giữ toàn bộ
+  comparator Auto 2-speaker GREEN.
+
 ## Bổ sung Product Video job 25 và khóa UI — 28/08/2026
 
 - PR `#910` merge SHA `82ffb117e6c2e84bd76a3aee6e5e747465958c66`; deploy run `33078757523` SUCCESS. Bot và owner worker cùng exact SHA.

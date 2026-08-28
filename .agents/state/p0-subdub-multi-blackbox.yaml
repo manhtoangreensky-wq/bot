@@ -4,7 +4,7 @@ owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
 branch: fix/p0-subdub-cue-sync-video-only
-phase: SPEC_08_0G_4_SOURCE_READY_TO_SHIP
+phase: SPEC_10_2_POST_REBASE_GREEN_PUSH_PR_DEPLOY_NEXT
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -26,10 +26,117 @@ workflow_contract:
 
 resource_boundary:
   cpu: independent_local_subdub_source_only
-  live: owned_by_subdub
-  chrome: owned_by_subdub
-  vps_deploy: owned_by_subdub
-  product_video: source-local only until the SubDub correction is terminal
+  live: acquired_by_subdub_after_exact_product_video_release
+  chrome: acquired_by_subdub_after_exact_product_video_release
+  vps_deploy: acquired_by_subdub_after_exact_product_video_release
+  product_video: released after PR 921 runtime 4fa07a0; owner worker stopped; job 27 unlocked queued
+
+two_speaker_live_pass_20260828:
+  runtime_sha: e819c1cd00d66273e00c667355325549dbea8d44
+  combo:
+    public_job: 3A3BEA618D
+    telegram_video_mid: 33764
+    telegram_receipt_mid: 33765
+    delivery_sequence: video then receipt only
+    mp4_path: /data/dub_assets/da_eb6360dcc4561f9a7b.mp4
+    mp4_bytes: 9673714
+    mp4_sha256: 4ffefd25f7fe3860460c50845e20e6c1508cde69327a71345e730466b0ef79d9
+    media: H.264 576x884 30fps plus AAC stereo 48kHz; 49.000s
+    loudness: -18.4 LUFS; true peak -3.6 dBFS
+    internal_srt: 18 cues; sha256 934561991a81f6fe5547086ccaf9ce11643ad2bd857dc9daed34501f712772e0; not delivered
+    prices_xu: subtitle 61; dubbing 75; total 136; charged 0
+  standalone:
+    public_job: 282347E26C
+    telegram_video_mid: 33771
+    telegram_receipt_mid: 33772
+    delivery_sequence: video then receipt only
+    source_sha256: 85c8793d197cf2782bb554d46282e82a83bcb062a0483e412a0ca1da668f9f51
+    mp4_path: /data/dub_assets/da_fb655dad4b734fb2dc.mp4
+    mp4_bytes: 9978464
+    mp4_sha256: 449ffe9d592e14679a9f511442b48010ae8ac946ad324f5a26eabb8cd77f1b1b
+    media: H.264 576x884 30fps plus AAC stereo 48kHz; 49.000s
+    loudness: -18.3 LUFS; true peak -4.1 dBFS
+    price_xu: dubbing 77; charged 0
+  wallet_after_both:
+    credits: 200
+    total_spent: 0
+    transactions: 0
+    credit_events: 1
+  timing_evidence:
+    cue_boundaries_seconds: [0, 4, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 38, 43, 48]
+    no_cumulative_drift: true
+  live_ui_reds:
+    - standalone voice-create callback is labeled Gửi video khác
+    - progress back callback is generically routed but labeled Phụ đề + Lồng tiếng
+  live_ui_correction:
+    production_diff: exactly two presentation labels in bot.py
+    red: 2 failed, 1 warning in 11.71s
+    green: 2 passed, 1 warning in 3.59s
+    final_ui_audio_green: 5 passed, 1 cache warning in 1.35s
+    compile: python -m py_compile bot.py exit 0
+    diff_check: exit 0
+    protected_hashes: 3 of 3 HASH_OK
+    durable_state: YAML_OK
+    harness_note: full bot import and full-file AST parse were interrupted after runaway CPU; direct-source extraction proves the two isolated functions without provider/runtime imports
+    shared_action: waiting for Product Video exact releases before fetch/rebase/push/PR/deploy
+    post_rebase:
+      base_sha: 4fa07a017dd5db9212b213dfd8c272564f4cb443
+      head_before_evidence_amend: 92b92af98fc2bb06051355af05f0808f3b63add8
+      authoritative_head_command: git rev-parse HEAD
+      divergence: 0 behind, 1 ahead
+      ui_audio_green: 5 passed, 1 cache warning in 1.92s
+      protected_hashes: 3 of 3 HASH_OK
+      compile: python -m py_compile bot.py exit 0
+      yaml_diff_scope_secret: exit 0
+
+two_speaker_lock_manifest:
+  status: LOCK_PENDING_UI_SHIP
+  immutable_live_runtime: e819c1cd00d66273e00c667355325549dbea8d44
+  ship_evidence:
+    pr: 919
+    deploy_run: 33176635110
+    deploy_status: SUCCESS
+  immutable_exact_two_files:
+    services/subdub_speaker_cast.py: de93620f3f038b5759a53e696c5c85d3553fcee758686df56c70e6b11bac145b
+    services/subdub_two_speaker_asr_fallback.py: 94748def11c38d76952192a996fa42231d75b39d4d9ecd3407ff671d92e1177e
+  multi_owner_baseline:
+    services/subdub_blackboxes/auto_multi_speaker.py: 55aab8949efaecad8dd987ac6dfe056ab0e4bc4ef81a23977ea5edd1cdf64911
+  shared_owner_baseline:
+    services/subtitle_dub_product_pipeline.py: a5060d7cd17b2db66f8dc7997f2e307ef8d7fd6ac31f2b3426ec974c61dcdc07
+  protected_bot_contracts:
+    subdub_auto_blackbox_runner: 7cc6780ceb49a0065e772ccd24b38807d9de40f210c47895a42e94335a5e6a14
+    video_dubbing_voice_keyboard: 0fce42bc9bd94963bf54eb6bc4989fdd05acc2af0d6ece1ec605d19dc80fc232
+    subdub_progress_keyboard: cb336cd906f8af84012bbcd52c8f78bc978b8ff5a44ebfd0eb23be5b32539bbd
+    _extract_subdub_auto_pcm: 4ce0737122334843b15132456018124849b5b2800865487a23ae72982bdff0f3
+    _subdub_auto_post_prepare_gate: a669249e3113f2ec82ee395c12f8ffe2fa3935ee9e8a42e5b4c9290887b1b291
+    subdub_validate_cue_locked_timing: 999c690862fffb386780f89437f399fcd269e94abda2d6391645648f11fbaf46
+    subdub_speech_unit_count: d0fbd75be81519761562664e04285a427e6eca20e2c12ed95cee0d38c17cddfc
+    subdub_atempo_filters: 4810bdb633044faa8be5e0890bffc671537b7f4625a125634f68ff6f90360620
+    subdub_plan_dub_timeline: 242e6ca6bf9b745ab0f853a57371f8cc25652a8d569079046f1017874c693fa4
+    build_dub_timeline_audio: e1dcc8f1e3538054d1c2f83ddcbdcaadb92babc7b56e6b946a16ebddcf62628b
+    subdub_audio_mix_keyboard: 516ee1527b56af08e4c49586fd16333b6dcd4f1acfc7e91694ba5e624a85f7f6
+    subdub_audio_layer_keyboard: f6598a18324ee92d2d82f39f46db78ce8b61083da16546ef800339cc767f3686
+    handle_video_dubbing_pending_text: 759d1c977754eca48a31331c04bba2603a89b6b23088c7988e5f30bd120b860f
+    send_public_subtitle_dub_final_outputs: b452b443d9985e2a38718738e01beaafe07d1beab97a81ac4e68eda9eaebcd75
+    mark_subtitle_dub_pipeline_output_sent: 46b0c2ff2a68d291d041a96fde1cd156781d93362da25c1ca2bc0730bf913ecd
+    subdub_terminal_state_allows_transition: 918a64167f56c11b4508f28e024970f9c491722a7683f2616ad67d441d8020ae
+  spec11_rule: multi work may edit the isolated multi owner or add a multi-only branch at a shared seam, but every exact-two contract comparator must remain GREEN
+  reopen_rule: outside SPEC-11, only an Owner instruction naming lane 2 plus a new failing live artifact may authorize edits to exact-two files or branches
+  next_status: LOCKED_LIVE_PASS only after UI PR merge, deploy and runtime readback
+
+multi_fixture_read_only_evidence:
+  source_fixture_sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
+  refined_sidecar:
+    cue_count: 36
+    label_count: 3
+    final_end_seconds: 126.505
+    labels:
+      chunk_00:speaker_0: {cues: 16, speech_seconds: 15.280, average_confidence: 0.451933}
+      chunk_00:speaker_1: {cues: 17, speech_seconds: 32.919, average_confidence: 0.688887}
+      chunk_00:speaker_2: {cues: 3, speech_seconds: 9.705, average_confidence: 0.431216}
+  rejected_underclustered_sidecar:
+    label_count: 2
+  production_edit_authorized: false until LOCKED_LIVE_PASS
 
 active_correction_08_0g:
   owner_requirements:

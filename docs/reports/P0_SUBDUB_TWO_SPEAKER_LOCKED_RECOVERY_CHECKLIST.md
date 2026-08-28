@@ -16,15 +16,15 @@
 
 ### Current pointer
 
-- Current SPEC: `SPEC-08`.
-- Current SUBSPEC: `SPEC-08.0G.4`.
-- Current phase: `SOURCE_READY_TO_SHIP / one commit-PR-deploy-live`.
-- Production action active: `NO; source correction is local until GREEN`.
-- Telegram/provider job active: `NO; job #9542CF588E is terminal delivered`.
+- Current SPEC: `SPEC-10`.
+- Current SUBSPEC: `SPEC-10.2`.
+- Current phase: `POST_REBASE_GREEN / PUSH_PR_DEPLOY_NEXT`.
+- Production action active: `NO; Product Video released shared resources`.
+- Telegram/provider job active: `NO; combo #3A3BEA618D and standalone #282347E26C terminal delivered`.
 - Wallet mutation: `0`.
-- Next allowed action: write and observe focused RED proving that every dubbed
-  cue keeps its original start/end and that successful dub video delivery sends
-  only MP4 before the final receipt; then make the smallest timing/delivery fix.
+- Next allowed action: push exact post-rebase HEAD `92b92af9...`, create/squash
+  one PR, deploy/readback and set `LOCKED_LIVE_PASS` before any multi
+  production edit.
 - Next forbidden action: edit classifier/cast thresholds, audio UI, pricing,
   wallet, provider/model/endpoint, multi engine, or move to standalone/multi
   before the corrected combo artifact passes.
@@ -1219,9 +1219,10 @@ That delivery is evidence of the two faults, not acceptance.
 
 - [x] Protected hashes, numeric audio UI, exact-two cast, provider transport,
   price/receipt and wallet comparators remain unchanged.
-- [B] One focused commit/PR, squash merge, one deploy, runtime SHA/worker
-  readback, then exactly one combo retry with fixture SHA `85C8793D...`.
-- [B] PASS requires a playable MP4 whose dubbed speech/cues are empirically
+- [x] One focused commit/PR `#919`, squash merge `e819c1cd...`, deploy run
+  `33176635110` SUCCESS, runtime `e819c1cd...`, then exact combo retry with
+  fixture SHA `85C8793D...`.
+- [x] PASS requires a playable MP4 whose dubbed speech/cues are empirically
   synchronized, followed only by one final receipt; `charged_xu=0` and wallet
   rows unchanged. Otherwise stay in `SPEC-08.0G` and repeat RED/GREEN.
 
@@ -1254,109 +1255,290 @@ Source evidence before ship:
 - [x] Select English.
 - [x] Select `Tự động 2 giọng`.
 - [x] Set and record original `40%` / dub `150%`.
-- [x] Confirm exactly once; public job `#EE4E7E69CD`.
+- [x] Confirm exactly once; terminal accepted public job `#3A3BEA618D`.
 
 ### SPEC-08.2 — Observe stages
 
 - [x] Status panel visible through `35%`.
 - [x] Source saved with correct SHA in workspace
   `/tmp/toan_aas_pipeline/ee4e7e69cdaf4b4e459d`.
-- [ ] ASR/diarization sidecar exists.
-- [ ] Exactly 2 speaker labels.
-- [ ] Cast evidence records one low/male and one high/female for fixture.
-- [ ] TTS voice IDs come from matching gender pools.
-- [ ] User volume values reach mux.
-- [ ] Mux produces validated final MP4.
-- [ ] Telegram delivery terminal.
+- [x] ASR/diarization sidecar exists and internal SRT has `18` cues.
+- [x] Exactly 2 speaker labels.
+- [x] Cast evidence records `speaker_0=male/low` and
+  `speaker_1=female/high` from independent acoustic votes.
+- [x] TTS voice IDs come from matching independently measured pools.
+- [x] User volume values `40%` original / `150%` dub reach mux.
+- [x] Mux produces validated final MP4.
+- [x] Telegram delivery terminal.
 
 ### SPEC-08.3 — Artifact/receipt evidence
 
-- [ ] MP4 message id.
-- [ ] Confirm no automatic SRT/audio/document message exists between MP4 and
+- [x] MP4 message id `33764`; receipt message id `33765`.
+- [x] Confirm no automatic SRT/audio/document message exists between MP4 and
   the final receipt.
-- [ ] MP4 SHA-256/bytes/duration/dimensions/codecs.
-- [ ] AAC audible measurement.
-- [ ] SRT cue count/timeline QC.
-- [ ] Receipt says `Tự động 2 giọng`.
-- [ ] Receipt shows subtitle price.
-- [ ] Receipt shows dubbing price.
-- [ ] Receipt shows total.
-- [ ] `charged_xu=0` for admin.
-- [ ] Wallet transactions unchanged.
+- [x] MP4 SHA-256 `4ffefd25f7fe3860460c50845e20e6c1508cde69327a71345e730466b0ef79d9`,
+  `9,673,714` bytes, H.264 `576x884` + AAC stereo `48kHz`, `49.000s`.
+- [x] AAC audible: `-18.4 LUFS`, true peak `-3.6 dBFS`.
+- [x] Internal SRT SHA-256 `934561991a81f6fe5547086ccaf9ce11643ad2bd857dc9daed34501f712772e0`,
+  `18` cues; not delivered automatically.
+- [x] Receipt says `Tự động 2 giọng`.
+- [x] Receipt shows subtitle price `61 Xu`.
+- [x] Receipt shows dubbing price `75 Xu`.
+- [x] Receipt shows total `136 Xu`.
+- [x] `charged_xu=0` for admin.
+- [x] Wallet unchanged: credits `200`, total_spent `0`, transactions `0`.
 
 ### SPEC-08 acceptance
 
-- [ ] Real MP4 followed only by one receipt delivered and independently
+- [x] Real MP4 followed only by one receipt delivered and independently
   verified; internal SRT QC passes without automatic SRT delivery.
 
 ## SPEC-09 — Live standalone: Lồng tiếng video
 
 ### SPEC-09.1 — Flow
 
-- [ ] Fresh `/subdub` flow.
-- [ ] Select `Lồng tiếng video`.
-- [ ] Upload same exact fixture once.
-- [ ] Select `Tự động 2 giọng`.
-- [ ] Set and record non-default original/dub volume percentages.
-- [ ] Confirm exactly once.
+- [x] Fresh `/subdub` flow.
+- [x] Select `Lồng tiếng video`.
+- [x] Upload same exact fixture once.
+- [x] Select `Tự động 2 giọng`.
+- [x] Set and record original `40%` / dub `150%`.
+- [x] Confirm exactly once; public job `#282347E26C`.
 
 ### SPEC-09.2 — Evidence
 
-- [ ] Two labels and correct male/female pools.
-- [ ] MP4 delivered and validated.
-- [ ] Receipt shows type, dubbing price, total.
-- [ ] Admin charged zero while list price remains nonzero.
-- [ ] Wallet unchanged.
+- [x] Two labels and correct independent male/female pools.
+- [x] MP4 message `33771`, receipt `33772`; no automatic SRT/audio/document.
+- [x] MP4 SHA-256 `449ffe9d592e14679a9f511442b48010ae8ac946ad324f5a26eabb8cd77f1b1b`,
+  `9,978,464` bytes, H.264 `576x884` + AAC stereo `48kHz`, `49.000s`.
+- [x] AAC audible: `-18.3 LUFS`, true peak `-4.1 dBFS`.
+- [x] Receipt shows `Tự động 2 giọng`, dubbing `77 Xu`, total `77 Xu`.
+- [x] Admin charged zero while list price remains nonzero.
+- [x] Wallet unchanged: credits `200`, total_spent `0`, transactions `0`.
 
 ### SPEC-09 acceptance
 
-- [ ] Real standalone MP4 + receipt delivered and independently verified.
+- [x] Real standalone MP4 + receipt delivered and independently verified.
 
 ## SPEC-10 — Lock lane 2 and prohibit future edits
 
 ### SPEC-10.1 — Lock manifest
 
-- [ ] List every locked file/symbol.
-- [ ] Record source hashes after PASS.
-- [ ] Record regression selectors.
-- [ ] Record PR/merge/deploy/runtime evidence.
-- [ ] Record both live jobs and artifact hashes.
-- [ ] Add explicit rule: future tasks must not edit these symbols without a new
+- [x] List every locked file/symbol below.
+- [x] Record source hashes after PASS below.
+- [x] Record regression selectors below.
+- [x] Record PR/merge/deploy/runtime evidence: PR `#919`, merge/runtime
+  `e819c1cd00d66273e00c667355325549dbea8d44`, deploy `33176635110` SUCCESS.
+- [x] Record both live jobs and artifact hashes in SPEC-08/09 above.
+- [x] Add explicit rule: future tasks must not edit these symbols without a new
   Owner instruction naming lane 2 and a failing live artifact.
+
+Locked files and baseline hashes at the proven live build/source correction:
+
+- `services/subdub_blackboxes/auto_multi_speaker.py`:
+  `55aab8949efaecad8dd987ac6dfe056ab0e4bc4ef81a23977ea5edd1cdf64911`
+  (this is the isolated multi-owner baseline, not an exact-two owner; SPEC-11
+  may edit it while every lane-2 comparator remains GREEN).
+- `services/subdub_speaker_cast.py`:
+  `de93620f3f038b5759a53e696c5c85d3553fcee758686df56c70e6b11bac145b`.
+- `services/subdub_two_speaker_asr_fallback.py`:
+  `94748def11c38d76952192a996fa42231d75b39d4d9ecd3407ff671d92e1177e`.
+- `services/subtitle_dub_product_pipeline.py`:
+  `a5060d7cd17b2db66f8dc7997f2e307ef8d7fd6ac31f2b3426ec974c61dcdc07`
+  (shared-owner reference; only a condition isolated to `auto_speaker_lane=multi`
+  is allowed under SPEC-11).
+
+Protected `bot.py` contract baselines (normalized direct-source SHA-256):
+
+- `subdub_auto_blackbox_runner` `7cc6780c...`;
+  `_extract_subdub_auto_pcm` `4ce07371...`;
+  `_subdub_auto_post_prepare_gate` `a669249e...`.
+- `video_dubbing_voice_keyboard` `0fce42bc...`;
+  `subdub_progress_keyboard` `cb336cd9...`.
+- `subdub_validate_cue_locked_timing` `999c6908...`;
+  `subdub_speech_unit_count` `d0fbd75b...`;
+  `subdub_atempo_filters` `4810bdb6...`;
+  `subdub_plan_dub_timeline` `242e6ca6...`;
+  `build_dub_timeline_audio` `e1dcc8f1...`.
+- `subdub_audio_mix_keyboard` `516ee152...`;
+  `subdub_audio_layer_keyboard` `f6598a18...`;
+  `handle_video_dubbing_pending_text` `759d1c97...`.
+- `send_public_subtitle_dub_final_outputs` `b452b443...`;
+  `mark_subtitle_dub_pipeline_output_sent` `46b0c2ff...`;
+  `subdub_terminal_state_allows_transition` `918a6416...`.
+
+The hashes above lock exact-two semantics, not future multi implementation
+bytes. During SPEC-11, a shared owner may receive only a multi-only condition;
+the exact-two branches, callbacks, audio controls, prices, wallet behavior,
+cue timing and MP4→receipt contract must remain behaviorally identical and
+GREEN. Outside SPEC-11, reopening an exact-two owner additionally requires a
+new Owner instruction naming lane 2 and a failing live artifact.
+
+Regression selectors:
+
+- `tests/test_p0_subdub_cue_locked_speech_rate_video_only.py`.
+- `tests/test_p0_subdub_single_confirmation_state_retention.py`.
+- `tests/test_p0_subdub_compact_numeric_audio_ui.py`.
+- `tests/test_p0_subdub_two_speaker_locked_recovery.py`.
+- `tests/test_p0_subdub_two_speaker_live_ui_lock.py`.
+- Protected multi isolation: `tests/test_p0_subdub_multi_speaker_blackbox.py`.
 
 ### SPEC-10.2 — Completion audit
 
-- [ ] Every SPEC-01…SPEC-09 item has evidence or explicit N/A with reason.
-- [ ] No unresolved blocker remains in either 2-speaker lane.
+- [x] Every required SPEC-01…SPEC-09 acceptance item has final evidence above;
+  superseded failed-attempt observation rows remain historical failure evidence.
+- [x] No unresolved engine/artifact blocker remains in either 2-speaker lane.
+- [x] Two-label UI RED `2 failed`; focused UI + compact numeric audio GREEN
+  `5 passed, 1 cache warning in 1.35s`; full `python -m py_compile bot.py`
+  exit `0`; protected hashes `3/3 HASH_OK`; durable state `YAML_OK`;
+  `git diff --check` exit `0`.
+- [x] Rebased exactly one UI/evidence commit onto Product Video main
+  `4fa07a017dd5db9212b213dfd8c272564f4cb443`; post-rebase HEAD
+  before evidence amend `92b92af98fc2bb06051355af05f0808f3b63add8`,
+  `0 behind / 1 ahead`. Authoritative final HEAD is always the value returned
+  by `git rev-parse HEAD`, not a self-referential hash stored in this commit.
+- [x] Post-rebase gates: UI/audio `5 passed, 1 cache warning in 1.92s`;
+  protected hashes `3/3 HASH_OK`; `py_compile bot.py`, YAML, diff/scope/secret
+  checks exit `0`.
 - [ ] Checklist pushed to GitHub.
-- [ ] Lane status changed to `LOCKED_LIVE_PASS`.
+- [-] Lane status changes to `LOCKED_LIVE_PASS` only after the two-label UI
+  correction is shipped/deployed/read back on the current main SHA.
 
 ## SPEC-11 — Build the separate Auto multi-speaker lane from the locked lane-2 core
 
-### SPEC-11.1 — Reuse map after lane-2 lock
+### SPEC-11.0 — Entry gate and task contract
 
-- [B] Start only after combo and standalone Auto 2-speaker live MP4s PASS and
-  `SPEC-10` records the immutable code/evidence hashes.
-- [B] Reuse only the proven common owners: per-cue speech-rate measurement,
-  cue-locked FFmpeg timing, source-duration mux validation, volume propagation,
-  terminal video delivery and receipt idempotency.
-- [B] Keep multi-specific diarization, label-count validation, acoustic cast,
-  stable speaker-to-voice mapping and 3–8 speaker bounds in the separate
-  `auto_multi_speaker` owner; do not copy exact-two assumptions or force pairs.
-- [B] Create an explicit shared-vs-multi symbol map and RED tests before moving
-  any common behavior into the multi lane.
+- [x] Read-only local fixture audit already measures `36` diarized cues ending
+  at `126.505s` and exactly `3` labels: speaker 0 `16` cues / `15.280s`,
+  speaker 1 `17` cues / `32.919s`, speaker 2 `3` cues / `9.705s`. The older
+  underclustered sidecar had only `2` labels; acceptance must use the refined
+  3-label sidecar and must not invent a fourth label.
+- [B] `SPEC-10` must be `LOCKED_LIVE_PASS` on the deployed runtime before the
+  first multi production edit. Until then only this plan and read-only mapping
+  are allowed.
+- [B] Recheck fixture
+  `C:\Users\toann\Downloads\test sub\test nhiều giọng.mp4` with
+  `Get-FileHash -Algorithm SHA256`; expected
+  `83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E`.
+- [B] Recheck immutable exact-two hashes with `Get-FileHash`: cast
+  `DE93620F...` and fallback `94748DEF...`; expected: both exact hashes match
+  SPEC-10 before and after every multi GREEN.
 
-### SPEC-11.2 — Multi-speaker RED/GREEN and live
+Task contract:
 
-- [B] RED covers at least 3 real speaker labels, unique stable voices, source
-  cue timestamps, multilingual translation, per-cue duration fit, no invented
-  label, no duplicate TTS/mux/delivery and exact pricing/zero-Xu admin receipt.
-- [B] GREEN proves a final playable MP4 with audible ordered speakers and the
-  required multi delivery policy; no regression to the locked 2-speaker lane.
-- [B] One focused PR/deploy, then live only with `test nhiều giọng.mp4` SHA
-  `83DE97B7...`; on any mismatch remain in `SPEC-11` and repeat RED/GREEN.
-- [B] Run multi live only after `LOCKED_LIVE_PASS`.
-- [B] Never modify a locked lane-2 symbol during multi work.
+- `GOAL`: both `Phụ đề + Lồng tiếng` and `Lồng tiếng video` select
+  `Tự động nhiều giọng`, preserve at least three real speaker labels and one
+  stable distinct voice per label, fit translated speech to original cues, and
+  deliver exactly one playable MP4 followed by one final receipt.
+- `ALLOWED_FILES`: `services/subdub_blackboxes/auto_multi_speaker.py`; a
+  multi-only condition in `services/subtitle_dub_product_pipeline.py`; a
+  multi-only condition at the delivery seam in `bot.py`; one new focused multi
+  contract test; this checklist and durable state.
+- `PROTECTED_FILES`: `services/subdub_speaker_cast.py`,
+  `services/subdub_two_speaker_asr_fallback.py`, two-speaker classifier/cast,
+  shared numeric audio UI, provider/model/endpoint, pricing, wallet, PayOS,
+  ENV/secrets, Product Video and unrelated menus.
+- `ACCEPTANCE`: 3–16 labels only; no invented/merged label, no forced gender
+  pairing, no reused voice ID, no cumulative cue drift, final duration equals
+  source, original/dub volume values reach mux, MP4→receipt only, nonzero list
+  price, admin `charged_xu=0`, wallet rows unchanged.
+- `STOP`: any exact-two comparator changes, fixture has fewer than three real
+  labels, voice pool cannot provide one distinct validated voice per label,
+  output is not a real valid MP4, or a paid/provider call would occur before
+  the deployed live step.
+
+### SPEC-11.1 — Shared-versus-multi owner map
+
+| Capability | Proven shared owner | Multi action | Exact-two lock |
+| --- | --- | --- | --- |
+| Measure source/target speech rate | `subtitle_dub_product_pipeline.py::_cue_locked_timing_requested` + `bot.py::subdub_speech_unit_count` | enable only when `auto_speaker_lane=multi` | exact-two result remains true |
+| Per-cue fit/no drift | `bot.py::subdub_plan_dub_timeline`, `subdub_atempo_filters`, `build_dub_timeline_audio` | reuse unchanged | function behavior comparator GREEN |
+| Source duration/mux/audio levels | existing render + `subdub_audio_mix_*` state | reuse unchanged | numeric `0–100` / `0–200` UI untouched |
+| MP4-only terminal delivery | `send_public_subtitle_dub_final_outputs` | suppress the historical multi SRT companion only | exact-two MP4→receipt unchanged |
+| Price/receipt/idempotency | exact receipt + delivery ledger owners | reuse unchanged | pricing/wallet code untouched |
+| Diarization/label bounds | `auto_multi_speaker.py` preflight/refinement | multi owner only | no exact-two fallback change |
+| Acoustic cast | `classify_multi_speaker_registers` | multi owner only | no forced male/female pair |
+| Stable voice mapping | `assign_stable_voices` via isolated multi runner | require distinct voice per label | exact-two casts unchanged |
+| Terminal proof | `subdub_auto_multi_terminal_proof_fields` | require speaker count = distinct voice count | default/exact-two receipt unchanged |
+
+### SPEC-11.2 — Focused RED, one assertion group at a time
+
+- [B] File:
+  `tests/test_p0_subdub_multi_cue_locked_video_only.py`; first RED asserts the
+  multi marker requests cue-locked timing while manual/default remains false
+  and exact-two remains true. Verify that file alone; expected before GREEN:
+  exactly this assertion fails.
+- [B] Add literal three-speaker cues with uneven translated lengths. RED
+  asserts every `start/end` is unchanged, cue N+1 never waits for cue N and the
+  plan ends at source duration. Verify the same file; expected: timing-policy
+  assertions fail, no import/fixture error.
+- [B] Add delivery RED for multi combo and standalone: `video=1`,
+  `documents=0`, `audio=0`, then one receipt. Expected before GREEN: only the
+  historical multi SRT-companion assertion fails.
+- [B] Reuse `tests/test_p0_subdub_multi_speaker_blackbox.py` to prove three
+  provider labels, three distinct validated voices, translation target
+  preservation, no label invention and fail-closed duplicate voice mapping.
+- [B] Every RED command uses local fakes/fixtures: `PROVIDER_CALLS=0`,
+  `WALLET_MUTATIONS=0`.
+
+### SPEC-11.3 — Minimal GREEN
+
+- [B] Change only the failing multi condition. Do not copy the two-speaker
+  classifier or create a second timing/mux engine.
+- [B] If timing requires a shared seam, add one branch keyed exactly by
+  `auto_speaker_lane=multi`; do not change manual/default/exact-two branches.
+- [B] If delivery requires a shared seam, remove only the multi automatic SRT
+  companion. Internal SRT and explicit download stay available.
+- [B] Run:
+  `pytest -q --noconftest tests/test_p0_subdub_multi_cue_locked_video_only.py tests/test_p0_subdub_multi_speaker_blackbox.py`;
+  expected: zero failures.
+- [B] Run exact-two timing/delivery/audio/cast selectors from SPEC-10;
+  expected: zero new failures and immutable file hashes unchanged.
+- [B] Run `python -m py_compile bot.py services/subtitle_dub_product_pipeline.py services/subdub_blackboxes/auto_multi_speaker.py`
+  and `git diff --check`; expected: exit `0`.
+- [B] Stop editing immediately when GREEN and protected comparators pass.
+
+### SPEC-11.4 — Review, ship and deployed identity
+
+- [B] Complete diff review: every production hunk must map to timing enable or
+  video-only multi delivery; `git diff` must show no UI/pricing/wallet/provider
+  change.
+- [B] Run baseline-versus-branch comparison for any broad historical failures;
+  expected `NEW_FAILURES=0`.
+- [B] One focused commit, one PR, squash merge, one deploy. Verify GitHub deploy
+  SUCCESS, bot/worker exact merge SHA, accepted generation and active
+  bot/web/nginx before live.
+
+### SPEC-11.5 — Ordered live matrix on the exact multi fixture
+
+- [B] Combo first: fresh flow → exact fixture SHA `83DE97B7...` → English →
+  `Tự động nhiều giọng` → numeric original `40%` / dub `150%` → confirm once.
+- [B] Require at least three persisted real labels and the same number of
+  distinct voice IDs; record label/cue counts, cast map hash and no invented
+  label before accepting the artifact.
+- [B] Validate actual combo MP4: bytes, SHA-256, H.264/AAC streams, dimensions,
+  duration, decoded audio and cue activity; Telegram sequence must be video →
+  receipt with zero automatic SRT/audio/document.
+- [B] Standalone second with the same fixture/options and exactly one confirm;
+  validate the same MP4/audio/delivery facts.
+- [B] Both receipts show `Tự động nhiều giọng`, nonzero component prices,
+  speaker/voice counts and total; admin charged `0 Xu`; wallet transaction and
+  credit-event deltas remain zero.
+- [B] Any failure stays inside SPEC-11 RED→minimal GREEN→ship→same live case.
+  Never reopen an exact-two branch to fix a multi failure.
+
+### SPEC-11 acceptance
+
+- [B] Combo and standalone each delivered one empirically validated
+  multi-speaker MP4 followed only by one receipt, with ≥3 stable distinct
+  voices, cue-locked timing, correct volume propagation and zero wallet delta.
+
+## SPEC-12 — Publish final evidence and close the goal
+
+- [B] Push the completed checklist/state plus exact RED/GREEN/compile/diff,
+  PR/merge/deploy/runtime, both multi jobs, artifact hashes, receipt and wallet
+  evidence to GitHub.
+- [B] Mark multi `LOCKED_LIVE_PASS`; report remaining blockers as `NONE`; only
+  then complete the Owner goal.
 
 ## Canonical final report schema
 
