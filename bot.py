@@ -107815,10 +107815,48 @@ async def video_trend_finish_entity_bridge(
     profile_state = video_profile_studio_state(context)
     if video_flow6_product_id(profile_state) != "video_trend":
         raise ValueError("trend_entity_parent_missing")
+    reference_assets = deepcopy(dict(snapshot["script_reference_assets"]))
+    reference_items = [
+        deepcopy(dict(item))
+        for item in reference_assets.get("items") or []
+        if isinstance(item, dict)
+    ]
+    seen_file_ids = {
+        str(item.get("file_id") or "")
+        for item in reference_items
+        if str(item.get("file_id") or "")
+    }
+    for raw_asset in video_uiflow3_snapshot_assets(bridge_state):
+        asset = deepcopy(dict(raw_asset or {}))
+        file_id = str(asset.get("file_id") or "").strip()
+        if not file_id or file_id in seen_file_ids:
+            continue
+        seen_file_ids.add(file_id)
+        reference_items.append({
+            "file_id": file_id,
+            "media_kind": str(asset.get("asset_type") or "trend_reference_video"),
+            "type": "trend_reference_video",
+            "owner_type": str(asset.get("owner_type") or "raw_source"),
+            "owner_id": str(asset.get("owner_id") or ""),
+            "role": str(asset.get("role") or "source"),
+            "fingerprint": str(asset.get("fingerprint") or ""),
+            "caption": str((asset.get("metadata") or {}).get("caption") or ""),
+        })
+    source_media_refs = [
+        str(item.get("file_id") or "")
+        for item in reference_items
+        if str(item.get("file_id") or "")
+    ]
+    reference_assets.update({
+        "items": reference_items,
+        "source_media_refs": source_media_refs,
+    })
     profile_state.update({
         "character_config": deepcopy(snapshot["script_character_config"]),
-        "reference_assets": deepcopy(snapshot["script_reference_assets"]),
-        "assets": deepcopy(snapshot["script_reference_assets"]),
+        "reference_assets": deepcopy(reference_assets),
+        "assets": deepcopy(reference_assets),
+        "source_media_refs": source_media_refs,
+        "source_asset_items": deepcopy(reference_items),
         "trend_entity_bible": deepcopy(snapshot["script_entity_bible"]),
         "trend_entity_references": deepcopy(snapshot["script_entity_references"]),
         "trend_entity_needs": deepcopy(snapshot["script_entity_needs"]),
@@ -107836,6 +107874,7 @@ async def video_trend_finish_entity_bridge(
         if embedded_tail:
             embedded_tail = video_tail9.normalize_state(embedded_tail)
             embedded_tail.update({
+                "source_asset_ids": source_media_refs,
                 "review_status": "not_ready",
                 "summary_status": "not_ready",
                 "quality_tier_id": "",

@@ -349,6 +349,26 @@ Live failure-loop job #27 on runtime `89192bab94c871214476a9c1feb7b3d2f94dcc7a`:
   acceptance moves into the first real representative `PV2-R01`; do not rerun
   the completed failure-loop or edit any frozen route.
 
+PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
+
+- [x] Baseline projects/jobs/outbox `31/27/26`; transactions/credit-events/
+  provider-usage `0/10/0`; Owner credits/total-spent `200/0`; active jobs `0`.
+- [x] Exact fixture SHA `784FBE5B...E2732`, `32,391,742` bytes uploaded once.
+  Local analysis: `79.4667s`, `1280x720`, source audio yes, 3 scene-change beats.
+- [x] Long non-manual lane reached Social creator profile, entity + creative +
+  requirements, two version-2 approved prompts carrying `PV2-R01`, Add-on source
+  subtitle + transition `1/1`, total Add-on `0 Xu`, then Review.
+- [x] Live RED before Quality: Review showed `Tư liệu nguồn: 0 tệp`; entity UI
+  still showed assigned source `1`, proving upload bytes/hash were retained but
+  omitted at Trend entity-to-Scene3/Tail handoff. Project/job/outbox/provider/
+  wallet deltas remained zero.
+- [x] TDD RED `2 failed in 8.15s`; minimal Trend-only GREEN copies the uploaded
+  source into Scene3 reference assets and refreshes embedded Tail source IDs.
+  Exact `2 passed in 707.43s`; protected Trend/Strategy `61 passed in 16.37s`;
+  compile and diff-check exit `0`. Shared Tail/engine/provider/worker unchanged.
+- [ ] Ship/deploy exact correction, resume the same live session, require Review
+  source files `1`, then proceed tier `400` -> Invoice -> one Confirm -> artifact.
+
 Current source evidence:
 
 - Primary RED: `6 failed in 12.60s`, exactly strict-plan loss, missing report

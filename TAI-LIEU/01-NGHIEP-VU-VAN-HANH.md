@@ -408,3 +408,18 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Job #27 chỉ PASS failure-loop, không PASS sản phẩm. Không tạo thêm manual job
   trùng. Bằng chứng MP4/Add-on/report còn lại phải được lấy trên representative
   thật `PV2-R01` để một provider job đồng thời kiểm Video Trend và shared Tail.
+
+## Bổ sung PV2-R01 Trend source handoff - 29/08/2026
+
+- Runtime `02c1c4aa...` nhận đúng fixture `32,391,742` bytes, SHA
+  `784FBE5B...E2732`; local analysis đo `79.4667s`, `1280x720`, có audio và 3
+  nhịp đổi cảnh. Chưa có project/job/outbox/provider/wallet action.
+- Flow non-manual đã đi qua entity, creative, requirements, scene plan, hai
+  prompt riêng bản 2, subtitle nguồn, transition `1/1` và Review. Review báo sai
+  `0 tệp` trong khi entity UI vẫn có source được gán `1`.
+- Nguyên nhân: lần kết thúc Trend entity bridge chỉ chuyển các reference đã gán,
+  bỏ source upload của UIFLOW3 khỏi Scene3 `reference_assets`; khi quay lại Review
+  embedded Tail cũng không refresh `source_asset_ids`.
+- Fix chỉ ở Trend handoff, không đổi shared Tail, UI, route engine, provider,
+  worker hoặc wallet. RED `2 failed in 8.15s`; exact GREEN `2 passed in 707.43s`;
+  protected Trend/Strategy `61 passed in 16.37s`; compile/diff exit `0`.
