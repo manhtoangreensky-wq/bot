@@ -186,6 +186,61 @@ Video AI Real public tiers:
 - [x] `py_compile` five touched runtime files exit 0.
 - [ ] Post-SubDub rebase gate and live traversal for every acceptance row.
 
+### SPEC-04G: Shared Tail Quality-State Integrity
+
+- [-] Active pointer: repair the Tail -> UIFLOW3 quality boundary before any new
+  representative or quality provider job.
+- [x] Live RED: callback `video_tail|quality|select|400` failed before Invoice with
+  `uiflow3_product_duration_contract_mismatch`; the button still carried exact
+  internal tier `400` / public `80 Xu` and was not mapped to tier `1500`.
+- [x] UI lock: no completed Tail text, keyboard, callback label, row layout or
+  back-stack function may change.
+- [x] Security RED: a non-catalog tier must not be clamped into tier `1500`, replace
+  a session, create a job/outbox, call a provider or mutate wallet state.
+- [x] Cross-product RED: canonical `storyboard_prompt` Tail reached the route-engine
+  alias table as unsupported because only the retired `video_storyboard` spelling
+  was registered; add only the canonical alias and keep the existing spelling.
+- [x] Minimal source patch: parse exact tier, validate it against the current
+  product catalog, synchronize `seconds_per_scene`, total duration and every scene
+  duration before compiling the immutable route-engine handoff, and persist the
+  synchronized host/Tail scope.
+- [x] Focused GREEN for tier `400`, cross-product duration mapping and forged tier.
+- [x] Protected quality/Tail matrix, UI byte locks, duration fail-closed comparator,
+  compile/diff/secret/scope gates.
+- [ ] One PR, squash merge, deploy and bot/owner-worker exact runtime SHA.
+- [ ] Same live screen: click `Nhanh gon - 80 Xu` once and prove
+  Invoice -> Confirm -> Status with tier `400`, 8 seconds/scene and no `2360` jump.
+- [ ] Audit every active product Tail through the same six-stage sequence before
+  resuming representative provider jobs.
+
+Current source evidence:
+
+- Execution snapshot / forged-tier GREEN: `11 passed in 6.70s`.
+- UI lock + nine product Tail + route-security focused GREEN:
+  `40 passed in 8.04s`.
+- Full UIFLOW3 RouteEngine GREEN: `25 passed in 9.10s`.
+- Ten-tier quality matrix GREEN: `17 passed in 6.35s`.
+- Full public Tail/session seam GREEN: `6 passed in 8.35s`.
+- Scene3/session selected-duration + strict Add-on comparator:
+  `2 passed in 7.55s`.
+- Final consolidated execution/quality/UI/route gate:
+  `78 passed in 746.49s`.
+- Broad artifact/Add-on review RED: `23 passed, 1 failed in 645.64s` exposed
+  execution-snapshot synchronization running before canonical revision comparison.
+  Minimal review fix keeps rebuild invalidation on the planning snapshot and moves
+  selected-quality execution snapshot work back behind handoff/guard only.
+- Focused resume/invoice + Add-on correction rerun: `3 passed in 706.30s`.
+- Final post-review acceptance across execution snapshot, all 10 qualities, nine
+  Tail products, UI byte locks, RouteEngine, manual Tail, Add-on/artifact and
+  public session seam: `130 passed in 22.07s`.
+- Legacy Tail comparator on branch after harness dependency correction:
+  `44 passed, 10 failed in 14.95s`.
+- Exact clean base `79d9b345807d93edda0375b5df7a6fdbabe8758e` reproduced the
+  same ten historical UI/tier assertion IDs with `44 passed, 10 failed in
+  714.64s`; `NEW_FAILURES=0`. No historical UI assertion was changed.
+- Final `py_compile bot.py services/video_uiflow3_routeengine.py` exit `0`;
+  `git diff --check` exit `0`; forbidden-path hits `0`; secret-value hits `0`.
+
 ### SPEC-05: Distinct Two-Scene Product/Lane LIVE Matrix
 
 Each row needs a different scenario or fixture, exact request/project/job/outbox identity, two scene outputs, final MP4 SHA256/bytes/codec/dimensions/duration, audio evidence when requested, add-on requested/materialized/applied proof, Telegram delivery message id, `charged_xu=0`, zero wallet transaction delta, and no duplicate submit/delivery.

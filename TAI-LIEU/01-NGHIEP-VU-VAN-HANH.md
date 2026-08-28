@@ -211,3 +211,28 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Backend đọc bốn nhóm metadata công khai: `media`, `facebook`, `youtube`, `tiktok`; không dùng API trả phí, không cần key, `paid_provider_calls=0`.
 - `source_group` được lưu trong trường `keywords` hiện có để không migration SQLite. Một nguồn lỗi chỉ giữ cache của nguồn đó; nguồn còn lại vẫn cập nhật, dữ liệu cũ không bị làm rỗng.
 - UI trend không đổi: vẫn `Xem 5 trend media`, `Tự nhập trend`, `Tìm kiếm trend`, `Gửi video trend`; không thêm bộ lọc/nút/callback mới.
+
+## Bổ sung Tail chọn chất lượng — 28/08/2026
+
+- Callback live `video_tail|quality|select|400` từng dừng trước Hóa đơn tại
+  `uiflow3_product_duration_contract_mismatch`. Nút vẫn gửi đúng tier nội bộ
+  `400`; phần `2.360 Xu` khách nhìn thấy là đoạn cuối màn danh mục cũ được render
+  lại sau exception, không phải nút `80 Xu` bị đổi thành tier `1500`.
+- Tier callback hiện phải parse exact và còn nằm trong catalog của đúng product;
+  giá trị rỗng, chữ, có zero đầu, tier ngoài catalog hoặc `2360` đều fail-closed
+  trước khi thay session, tạo job/outbox, gọi provider hoặc chạm ví.
+- Với UIFLOW3, planning state/UI giữ nguyên. Khi chọn gói, bot tạo một execution
+  snapshot đã hash lại, đồng bộ `seconds_per_scene`, tổng thời lượng và mọi scene;
+  RouteEngine, storyboard, Hóa đơn và guard xác thực đều dùng cùng snapshot đó.
+- Với Tail scene3/session, draft lưu `b14_scene_seconds` từ đúng tier công khai;
+  tier `300` được đo là `5 giây/cảnh`, tier `400` là `8 giây/cảnh`.
+- UI vẫn khóa byte-for-byte `14/14` hàm Menu/Add-on/Review/Chất lượng/Hóa đơn/
+  Xác nhận/Trạng thái. `video_local_edit`, `videoedit|ai`, Video dài tập, wallet,
+  PayOS và provider-submit không thuộc diff.
+- Bằng chứng cuối: acceptance `130 passed in 22.07s`; full RouteEngine `25 passed`;
+  public seam `6 passed`; resume/invoice/Add-on `3 passed`; clean base và branch
+  cùng `44 passed, 10` historical failures nên `NEW_FAILURES=0`; compile và
+  diff-check exit `0`.
+- Đây là SOURCE PASS. Chỉ được ghi LIVE PASS sau deploy exact SHA và click thật
+  `Nhanh gọn - 80 Xu` đi qua Hóa đơn -> Xác nhận -> Trạng thái mà không hiện lại
+  catalog `2.360 Xu`.

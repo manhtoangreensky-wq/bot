@@ -1078,6 +1078,8 @@ def test_scene3_tail_session_compiles_strict_subtitle_and_transition_contract() 
             }
         }
     }
+    tail["quality_tier_id"] = "300"
+    tail["package_id"] = "product_video_300"
     tail = video_tail9.normalize_state(tail)
     stored: dict = {}
 
@@ -1104,6 +1106,10 @@ def test_scene3_tail_session_compiles_strict_subtitle_and_transition_contract() 
             },
             "video_tail9_language_label": lambda value: str(value or ""),
             "video_b14_default_addon_plan": lambda _profile: {},
+            "video_tail9_parse_quality_tier": lambda value: int(value),
+            "video_public_quality_product": (
+                lambda value: video_ai_real_pricing.public_quality_by_tier(int(value))
+            ),
             "video_tail9_addon_quote": lambda _tail: {"items": [], "total_xu": 0},
             "product_video_logo_material_config": lambda **kwargs: dict(kwargs),
             "save_video_session": save_session,
@@ -1127,6 +1133,8 @@ def test_scene3_tail_session_compiles_strict_subtitle_and_transition_contract() 
     )
     assert persisted_plan["transition_plan"] == ["cut"]
     assert persisted_plan["silent_drop_allowed"] is False
+    assert result["draft"]["b14_quality_xu"] == 300
+    assert result["draft"]["b14_scene_seconds"] == 5
 
 
 def test_one_scene_contract_supports_every_selected_product_video_addon() -> None:
