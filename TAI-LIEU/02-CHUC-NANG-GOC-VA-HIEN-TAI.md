@@ -81,11 +81,13 @@ thấy pre-#896 đã có callback nhập số; production rollback hiện chỉ 
 dòng preset/action và đổi `public_fixed_percentage_grid=True → False`. Các
 numeric callback, pending state, mux, pricing, wallet và engine không đổi.
 
-GitHub tester cloud readback ngày 28/08/2026 có `21` labels: `5` trạng thái,
-`4` mức độ, `3` loại và `9` mặc định. Issue list hiện có tracker `#884` và
-`#81`; chưa tạo SubDub issue mới trong correction này. Hai template SubDub và
-case local dưới `KIEM-THU/` là nguồn chuẩn. GitHub Projects chưa đọc được vì
-token thiếu scope `read:project`; không tự chạy `gh auth refresh`.
+GitHub tester cloud readback ngày 28/08/2026: `gh label list --limit 60` trả đúng
+`21` labels: `5` trạng thái, `4` mức độ, `3` loại và `9` mặc định; `gh issue
+list --limit 10 --state all` trả 2 issues (`#884`, `#81`). Repo có 4 issue
+templates tách Product Video/SubDub; chưa tạo SubDub issue mới trong correction
+này. Case local dưới `KIEM-THU/` là nguồn chuẩn. `gh project list` chưa đọc được
+vì token thiếu `read:project`; không tự chạy `gh auth refresh` và chưa tuyên bố có
+Projects board khi chưa có readback.
 
 ## Đối chiếu Product Video provider/giá — 27/08/2026
 
@@ -202,3 +204,25 @@ Bằng chứng hiện tại: job `25` đã delivery message `27576` và `0 Xu`, 
 Bằng chứng source: `130 passed` acceptance, `25 passed` RouteEngine, `17 passed`
 quality matrix, `14/14` UI hashes, `NEW_FAILURES=0`, compile/diff exit `0`.
 Merge/deploy/runtime và live traversal vẫn là các cổng riêng.
+
+## Đối chiếu Strategy V2 và báo cáo sau delivery — 28/08/2026
+
+| Tài liệu/cách làm cũ | Strategy V2 hiện tại | Trạng thái |
+|---|---|---|
+| Live mọi lane, lấy manual lane ngắn làm mẫu | Chỉ live 1 lane phức tạp nhất mỗi product; manual/direct-input là source-contract coverage | Không còn đúng |
+| Video AI Chân thật chạy riêng đủ 10 tier, mỗi tier 2 cảnh | Tier `400` được 8 representative rows bao phủ; 9 tier còn lại phân cho product tương thích và dùng 1 cảnh | Không còn đúng |
+| Video tự quay là 1 product | Có 2 product/engine độc lập: đổi cảnh và biến đổi điện ảnh; cả hai có representative row | Không còn đúng |
+| Video dài tập và Chỉnh sửa Video nằm trong matrix hiện tại | Long Video bị loại; Local Edit đã khóa; AI Edit hoãn cùng Long Video | Không còn đúng |
+| MP4 Telegram là terminal customer outcome duy nhất | Sau MP4 receipt + settlement còn đúng 1 business report, có message-id durable và dedupe | Đã mở rộng |
+| Add-on state có thể rebuild từ profile defaults | Strict `product-video-addons-v1` từ Tail phải giữ nguyên tới worker; profile không được tự bật voice/music/subtitle | Không còn đúng |
+
+Số đo hiện tại: 8 representative rows, 9 quality-only rows, 17 final jobs,
+28 scene renders, 4 source-image tasks và tối đa 32 external create calls. Nguồn
+đối chiếu là `KIEM-THU/product-video-live-strategy-v2.json`; case tester phải lấy
+từ `KIEM-THU/DANH-SACH-CASE.md`, không lấy từ ma trận PV-L01..PV-L09 lịch sử.
+
+Chỗ tài liệu gốc không còn đúng quan trọng nhất: một lane đã LIVE PASS phải khóa
+route/test/artifact; sản phẩm sau chỉ nối adapter vào engine đã chứng minh. Không
+được sửa product đã PASS để làm product mới chạy. `merged != deployed != LIVE`, và
+MP4 hợp lệ vẫn chưa đủ nếu Add-on truth, report receipt hoặc zero-wallet evidence
+còn thiếu.

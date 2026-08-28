@@ -207,10 +207,13 @@ Video AI Real public tiers:
 - [x] Focused GREEN for tier `400`, cross-product duration mapping and forged tier.
 - [x] Protected quality/Tail matrix, UI byte locks, duration fail-closed comparator,
   compile/diff/secret/scope gates.
-- [ ] One PR, squash merge, deploy and bot/owner-worker exact runtime SHA.
-- [ ] Same live screen: click `Nhanh gon - 80 Xu` once and prove
+- [x] One PR, squash merge, deploy and bot/owner-worker exact runtime SHA: PR #917
+  merged as `d5dc3000986601a11764866bed2fcdc0ea5b03bb`; compile run
+  `33151948480` SUCCESS; deploy run `33151948497` SUCCESS; bot and Owner worker
+  both ran exact `d5dc300...` with generation `19022d4550bd4a6180cc21025ed67789`.
+- [x] Same live screen: clicked `Nhanh gon - 80 Xu` once and proved
   Invoice -> Confirm -> Status with tier `400`, 8 seconds/scene and no `2360` jump.
-- [ ] Audit every active product Tail through the same six-stage sequence before
+- [x] Audit every active product Tail through the same six-stage sequence before
   resuming representative provider jobs.
 
 Current source evidence:
@@ -240,6 +243,77 @@ Current source evidence:
   714.64s`; `NEW_FAILURES=0`. No historical UI assertion was changed.
 - Final `py_compile bot.py services/video_uiflow3_routeengine.py` exit `0`;
   `git diff --check` exit `0`; forbidden-path hits `0`; secret-value hits `0`.
+
+### SPEC-04G.1: Strict Add-on Truth and Customer Delivery Report
+
+- [-] Active pointer: fix the exact Add-on persistence boundary exposed by fresh
+  job #26, then add one idempotent customer report after durable delivery and
+  settlement. Do not change completed Tail UI text, keyboards, callbacks, layout,
+  back-stack or quality flow.
+- [x] Fresh live route: manual `video_ai_real` input went directly to Add-on ->
+  Review -> Quality -> Invoice -> Confirm -> Status as required.
+- [x] Fresh live artifact: job #26 delivered `/opt/toanaas/bot/files/worker_results/
+  worker_job_26_final_output.mp4`, `3,943,967` bytes, SHA-256
+  `e554198469c3e2ed37cae2c78fe7d4d0ba968f24f983fbf03ff53cb2c6b062f7`,
+  H.264 `540x960` SAR 1:1 + AAC stereo 48 kHz, duration `16.000s`, no black
+  interval; Telegram delivery message `27652`; Owner charged `0 Xu`, transaction
+  delta `0`.
+- [x] Live RED: invoice `pv:manual-7126457028-27648:1:400` was `144 Xu` for two
+  scenes at tier `400`; Tail UI said voice/music/subtitle `Khong them`, but durable
+  result reported `partial_addons=1`, implicit default music, unavailable voice and
+  missing subtitle.
+- [x] Root cause traced: `video_tail9_apply_to_session()` persisted strict
+  `product-video-addons-v1`; `video_b14_prepare_project_for_invoice()` then called
+  legacy `video_b14_addon_plan_from_session()`, which retained only legacy default
+  keys and discarded strict `requested_addons`, component payloads, transition and
+  materialization requirements.
+- [x] RED/GREEN: strict Tail contract survives session -> project byte-for-byte; no
+  implicit voice/music/subtitle or partial Add-on result when Tail leaves them off.
+- [x] RED/GREEN: customer report contains every required business field, excludes all
+  internal technical terms, sends only after receipt/settlement and sends once on
+  duplicate completion.
+- [x] Minimal GREEN: a narrow worker-persistence helper preserves strict contracts
+  unchanged and falls back to the existing legacy plan for legacy sessions.
+- [x] Minimal GREEN: pure report data/text helpers plus best-effort send/persist;
+  report failure never reverses delivery and never repeats settlement.
+- [x] Protected Tail/UI/RouteEngine/delivery gates, compile, diff, scope and
+  baseline comparison with `NEW_FAILURES=0`.
+- [ ] Rebase after SubDub releases shared Git, then one PR/squash/deploy/runtime
+  exact-SHA verification.
+- [x] Exact live rerun path, case ID, Add-on contract, artifact gate, customer
+  report text and duplicate-completion gate persisted at
+  `KIEM-THU/runbooks/PV2-SPEC04G1-addon-report-rerun.md`.
+- [ ] Same-fixture live rerun: strict Add-on plan, `partial_addons=0`, valid MP4,
+  one friendly report after MP4, `charged_xu=0`, transaction delta `0`.
+- [ ] Only after that live PASS, lock artifact/report/test evidence and continue
+  checklist order at `V2-03`; job #26 alone is not representative-product PASS.
+
+Current source evidence:
+
+- Primary RED: `6 failed in 12.60s`, exactly strict-plan loss, missing report
+  helpers/integration and duplicate/report-failure gaps.
+- Final focused GREEN plus delivery retry: `24 passed in 9.03s`.
+- Tail/quality/manual/full-menu/message/RouteEngine protected batch:
+  `103 passed in 45.45s`.
+- Broad Tail/long-history comparator on branch: `38 passed, 7 failed in 11.49s`;
+  clean detached base `3e28d3d9ac63baf26b939db4c55111bea3b97610`
+  reproduced exact same seven test IDs with `38 passed, 7 failed in 784.38s`;
+  `NEW_FAILURES=0`. Those assertions cover historical copy/long-video behavior
+  outside this spec and were not edited.
+- Review RED/GREEN for public product aliases and missing-report duplicate retry:
+  `2 failed` -> `2 passed in 1148.99s`.
+- Report exception RED/GREEN: `1 failed in 698.03s` ->
+  `1 passed in 892.21s`; receipt/settlement remain terminal on report failure.
+- Owner protected/excluded report boundary RED/GREEN: `7 failed, 1 passed in
+  4227.60s` -> `8 passed in 1253.15s`; Product Video Edit and Long Video stop
+  before DB claim, and all Video AI runtime aliases render the public product name.
+- Protected project-profile fallback RED/GREEN: `2 failed in 38.79s` ->
+  `2 passed in 886.85s`; a protected job remains excluded even when its product
+  identity exists only in the persisted project profile.
+- Strict material/local-artifact/UI-lock comparator: `21 passed in 54.08s`,
+  including a decodable two-scene MP4 and 14 completed UI function byte locks.
+- Final `py_compile bot.py` exit `0`; `git diff --check` exit `0`; forbidden-path,
+  secret-value and completed UI hunk hits `0`.
 
 ### SPEC-05: Distinct Two-Scene Product/Lane LIVE Matrix
 
@@ -276,6 +350,11 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 
 | Time (Asia/Saigon) | Spec | Evidence | Result |
 |---|---|---|---|
+| 2026-08-28 | SPEC-04G ship/runtime | PR #917 -> `d5dc300...`; compile/deploy SUCCESS; bot+worker exact SHA | PASS |
+| 2026-08-28 | SPEC-04G live | Job #26 tier 400, Invoice/Confirm/Status, valid 2-scene 9:16 MP4, delivery 27652, 0 Xu/0 tx | QUALITY/ARTIFACT PASS |
+| 2026-08-28 | SPEC-04G.1 live RED | UI no voice/music/subtitle but durable `partial_addons=1`; strict plan lost at generic project persistence | RED; lane remains open |
+| 2026-08-28 | SPEC-04G.1 source RED/GREEN | Primary 6 failed -> final focused 24 passed; report exception and protected-product RED/GREEN terminal | SOURCE PASS |
+| 2026-08-28 | SPEC-04G.1 protected verify | 103 passed; artifact/UI lock 21 passed; broad branch/base exact 38 passed + same 7 historical failures | NEW_FAILURES=0 |
 | 2026-08-26 | READ/CONTRACT | Source route audit at branch HEAD `f4c022a` | Manual direct-Tail contract FAIL; SPEC-01 opened |
 | 2026-08-26 | SPEC-01 RED environment attempt | Bundled Python collection: missing `telegram`; 623.45s | ENV INVALID; not accepted as RED |
 | 2026-08-26 | SPEC-01 authoritative RED | Python 3.14 dependency-complete: `11 failed, 1 warning in 9.62s` | PASS as RED; missing seam/constants/wiring reproduced |

@@ -7,8 +7,9 @@ nhung khong duoc dung de mo them job ngoai bang assignment ben duoi.
 
 ## 1. Pointer hien tai
 
-`CURRENT_POINTER=V2-02I` - repair the shared Tail quality/state boundary without
-changing the completed UI, then ship/deploy and re-run the same tier-400 live seam.
+`CURRENT_POINTER=V2-02I/SPEC-04G.1` - preserve the strict Tail Add-on contract
+through project persistence and send one customer-friendly business report only
+after durable video delivery and settlement. The completed UI remains byte-locked.
 
 - [x] `V2-00` Trend4 Facebook failure loop: PR #914 merged as
   `d92a98ddbc10ea4c626f75a65c2ddb58403a2fc6`; deploy run `33107893686`
@@ -72,8 +73,34 @@ terminal/pause-safe boundary before moving to another product/spec.
   8 seconds, reaches Invoice -> Confirm -> Status, and forged/stale tier values
   fail closed before session/job/provider/wallet mutation. Source GREEN is locked:
   final post-review acceptance `130 passed`, public seam `6 passed`, full
-  RouteEngine `25 passed`, compile/diff/scope exit `0`, `NEW_FAILURES=0`. PR,
-  deploy, runtime SHA and same-screen live evidence are still pending.
+  RouteEngine `25 passed`, compile/diff/scope exit `0`, `NEW_FAILURES=0`. PR #917
+  squash-merged as `d5dc3000986601a11764866bed2fcdc0ea5b03bb`; compile run
+  `33151948480` and deploy run `33151948497` completed SUCCESS; bot and Owner
+  worker ran exact `d5dc300...`. Fresh job #26 selected tier `400` / public
+  `80 Xu`, reached Invoice -> Confirm -> Status and delivered a real two-scene
+  9:16 MP4, but its Add-on truth failed and opened `SPEC-04G.1` below.
+- [-] `SPEC-04G.1` Add-on truth and post-delivery customer report. Live job #26
+  proved the session held a strict `product-video-addons-v1` Tail plan, while the
+  generic project persistence rebuilt it from legacy profile defaults and dropped
+  strict requested/materialization fields. Result: UI selected no voice/music/
+  subtitle, but the worker implicitly requested defaults and returned
+  `partial_addons=1`. Fix only this persistence boundary, then send one friendly
+  report after the MP4 receipt is durable and settlement is known. The report must
+  show product, quality, scenes/duration/ratio, video price, selected/free/paid
+  Add-on counts, Add-on total, invoice total, actual Xu charged and delivered
+  status; it must never show provider, worker, job/task ID, SHA, manifest, JSON,
+  engine route or internal diagnostics. Duplicate completion must not resend the
+  report, and report failure must not invalidate delivery or charge again.
+  Source is now verified and pause-safe: final focused acceptance `24 passed`,
+  protected Tail/quality/menu/RouteEngine batch `103 passed`, strict material/
+  local-artifact/UI-lock comparator `21 passed`, broad branch/base comparator
+  reproduced exact `38 passed + 7 historical failures` with `NEW_FAILURES=0`,
+  `py_compile bot.py` and diff/scope/secret/UI gates exit `0`. Rebase, PR, deploy,
+  runtime and same-fixture live rerun remain open and cannot start while SubDub
+  owns shared Git/LIVE/VPS resources.
+  Exact correction-live execution is locked in
+  `KIEM-THU/runbooks/PV2-SPEC04G1-addon-report-rerun.md`; do not reconstruct the
+  case from chat or start a different product while this pointer is open.
 
 ## 2. Rules that must not change
 
