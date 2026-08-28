@@ -5,7 +5,7 @@ import inspect
 
 import bot
 import remote_worker
-from services import video_final_output, video_real_render_connector
+from services import video_final_output, video_project_queue, video_real_render_connector
 
 
 LOCKED_ENGINE_ROUTE_HASHES = {
@@ -152,3 +152,51 @@ def test_product_video_progress_tree_keeps_engine_routes_byte_locked() -> None:
         source = inspect.getsource(function).rstrip()
         actual_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
         assert actual_hash == expected_hash, name
+
+
+def test_job27_failed_scenes_ignore_result_presence_flag_without_a_url() -> None:
+    scene_tasks = [
+        {
+            "scene_index": scene_index,
+            "provider_task_id": task_id,
+            "actual_provider_payload_status": "FAILURE",
+            "status": "failed",
+            "provider_result_url_present": True,
+            "result_url": "",
+            "clip_valid": False,
+            "exhausted": True,
+            "fallback_allowed": False,
+            "provider_error": "provider_failed_result_url_invalid",
+        }
+        for scene_index, task_id in (
+            (1, "existing-task-1"),
+            (2, "existing-task-2"),
+        )
+    ]
+    result = {
+        "scene_count": 2,
+        "scene_tasks": scene_tasks,
+        "terminal_state": "failed_no_charge",
+        "final_decision": "failed_no_charge",
+        "continue_polling": False,
+        "scene_forensic_terminal_reason": (
+            "all_scene_providers_exhausted_no_charge"
+        ),
+        "no_charge": True,
+        "wallet_charge": 0,
+    }
+
+    ledger = video_project_queue.product_video_scene_ledger_state(
+        {},
+        {"id": 27, "status": "processing", "progress_percent": 60},
+        result,
+    )
+
+    assert ledger["scene_status_by_index"] == {"1": "failed", "2": "failed"}
+    assert ledger["scene_result_available_by_index"] == {"1": False, "2": False}
+    assert ledger["unprocessed_result_indexes"] == []
+    assert ledger["terminal_blocked_by_unprocessed_result"] is False
+    assert ledger["aggregate_job_status"] == "failed_no_charge"
+    assert ledger["terminal_eligibility"] is True
+    assert ledger["continue_polling"] is False
+    assert ledger["artifact_valid_for_charge_after_coverage"] is False
