@@ -333,10 +333,21 @@ Live failure-loop job #27 on runtime `89192bab94c871214476a9c1feb7b3d2f94dcc7a`:
   minimal ledger GREEN ignores presence-only markers on failed scenes while
   retaining concrete/validated results. Exact selector `1 passed in 14.92s`;
   all 7 direct-impact modules `85 passed in 26.69s`.
-- [ ] After SubDub releases shared resources, rebase/ship only F2, deploy and
-  restart only the owner Product Video worker. Existing job #27 must become
-  `failed_no_charge` with the same two tasks and zero provider/wallet delta.
-  Only then continue the next unfinished product; never re-test a frozen PASS.
+- [x] F2 shipped in PR #924, squash SHA `f3f79fd50d4b2ad7ce345c7edc5c463ebaea44b5`;
+  deploy run `33206104844` SUCCESS in `10m23s`. Bot and owner worker both read
+  back exact SHA before the bounded worker start.
+- [x] Existing job #27 terminalized after exactly one more claim (`950 -> 951`):
+  DB status `failed`, durable `terminal_state/final_decision=failed_no_charge`,
+  `continue_polling=0`, unprocessed result indexes empty, active jobs `0`.
+  Authoritative scene/task maps retained exactly two original tasks, one per
+  scene; both scenes are `failed/exhausted` with no URL, clip or fallback.
+- [x] Final ledger proof: provider-usage rows `0`, transaction rows `0`,
+  credit-event rows unchanged at `10`, `provider_submit_called=0`, charged Xu
+  `0`. Owner worker was stopped after terminal and read back `inactive`.
+- [x] Job #27 is a terminal failure-loop proof, not a representative product
+  PASS. To avoid a duplicate manual paid job, strict Add-on/report live
+  acceptance moves into the first real representative `PV2-R01`; do not rerun
+  the completed failure-loop or edit any frozen route.
 
 Current source evidence:
 

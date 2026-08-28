@@ -7,9 +7,10 @@ nhung khong duoc dung de mo them job ngoai bang assignment ben duoi.
 
 ## 1. Pointer hien tai
 
-`CURRENT_POINTER=V2-02I/SPEC-04G.1` - preserve the strict Tail Add-on contract
-through project persistence and send one customer-friendly business report only
-after durable video delivery and settlement. The completed UI remains byte-locked.
+`CURRENT_POINTER=V2-03/PV2-R01` - execute the first complex non-manual
+representative: Video Trend upload, tier `400`, two 9:16 scenes, strict subtitle
+and transition Add-ons, durable MP4/receipt/report and Owner zero-wallet proof.
+The completed Tail UI and terminal engine seams remain byte-locked.
 
 - [x] `V2-00` Trend4 Facebook failure loop: PR #914 merged as
   `d92a98ddbc10ea4c626f75a65c2ddb58403a2fc6`; deploy run `33107893686`
@@ -19,7 +20,8 @@ after durable video delivery and settlement. The completed UI remains byte-locke
   measured on merge SHA `d92a98d`.
 - [x] `V2-02` Resolve active source-contract seams before any representative
   provider job.
-- [ ] `V2-03` Execute one representative complex non-manual lane per product.
+- [-] `V2-03` Execute one representative complex non-manual lane per product;
+  current row is `PV2-R01` only.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 
@@ -62,7 +64,7 @@ terminal/pause-safe boundary before moving to another product/spec.
 - [x] `V2-02H` First representative runbook persisted at
   `KIEM-THU/runbooks/PV2-R01-trend-video-upload.md`; Trend upload + strategy gate
   `27 passed in 7.81s`. The runbook may not execute until `V2-02G` is complete.
-- [-] `V2-02I` Shared Tail quality integrity hotfix. Live RED at
+- [x] `V2-02I` Shared Tail quality integrity hotfix. Live RED at
   `2026-08-28 10:14:18` proved callback `video_tail|quality|select|400` reached
   `video_uiflow3_routeengine_not_ready:uiflow3_product_duration_contract_mismatch`
   before Invoice. Scope is limited to exact tier parsing, selected-tier duration
@@ -79,7 +81,7 @@ terminal/pause-safe boundary before moving to another product/spec.
   worker ran exact `d5dc300...`. Fresh job #26 selected tier `400` / public
   `80 Xu`, reached Invoice -> Confirm -> Status and delivered a real two-scene
   9:16 MP4, but its Add-on truth failed and opened `SPEC-04G.1` below.
-- [-] `SPEC-04G.1` Add-on truth and post-delivery customer report. Live job #26
+- [x] `SPEC-04G.1` Add-on truth/report source and terminal failure-loop. Live job #26
   proved the session held a strict `product-video-addons-v1` Tail plan, while the
   generic project persistence rebuilt it from legacy profile defaults and dropped
   strict requested/materialization fields. Result: UI selected no voice/music/
@@ -91,16 +93,19 @@ terminal/pause-safe boundary before moving to another product/spec.
   status; it must never show provider, worker, job/task ID, SHA, manifest, JSON,
   engine route or internal diagnostics. Duplicate completion must not resend the
   report, and report failure must not invalidate delivery or charge again.
-  Source is now verified and pause-safe: final focused acceptance `24 passed`,
+  Source is verified: final focused acceptance `24 passed`,
   protected Tail/quality/menu/RouteEngine batch `103 passed`, strict material/
   local-artifact/UI-lock comparator `21 passed`, broad branch/base comparator
   reproduced exact `38 passed + 7 historical failures` with `NEW_FAILURES=0`,
-  `py_compile bot.py` and diff/scope/secret/UI gates exit `0`. Rebase, PR, deploy,
-  runtime and same-fixture live rerun remain open and cannot start while SubDub
-  owns shared Git/LIVE/VPS resources.
-  Exact correction-live execution is locked in
-  `KIEM-THU/runbooks/PV2-SPEC04G1-addon-report-rerun.md`; do not reconstruct the
-  case from chat or start a different product while this pointer is open.
+  `py_compile bot.py` and diff/scope/secret/UI gates exit `0`. Terminal correction
+  PR #921 deployed as `4fa07a01...`; live exposed an empty result-marker seam.
+  F2 PR #924 deployed as `f3f79fd5...`; existing job #27 then terminalized
+  `failed_no_charge` with exactly two durable failed scene tasks, no new submit,
+  provider usage `0`, transactions `0`, credit events unchanged and charged Xu
+  `0`. This closes the failure-loop but is not product LIVE PASS. Per Owner's
+  one-job/reuse-first rule, do not create another manual provider rerun: verify
+  strict Add-on materialization and the customer report on `PV2-R01`, the first
+  actual representative, then freeze that product if its real artifact passes.
 
 ## 2. Rules that must not change
 

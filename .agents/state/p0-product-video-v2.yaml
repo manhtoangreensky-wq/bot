@@ -1,23 +1,17 @@
-task_id: P0_PRODUCT_VIDEO_V2_SPEC_04G_1
-phase: JOB27_EMPTY_RESULT_MARKER_GREEN_WAITING_SHARED_RELEASE
-pointer: V2-02I/SPEC-04G.1
+task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
+phase: PV2_R01_PREFLIGHT_READY
+pointer: V2-03/PV2-R01
 base_sha: 3e28d3d9ac63baf26b939db4c55111bea3b97610
-goal: Preserve strict Tail Add-on truth through project persistence and send one friendly customer report after durable delivery and settlement.
+goal: Live the most complex Video Trend upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
 allowed_files:
-  - bot.py
-  - remote_worker.py
-  - services/video_project_queue.py
-  - tests/test_p0_product_video_job27_terminal_progress.py
-  - tests/test_p0_product_video_addon_truth_delivery_report.py
   - KIEM-THU/PRODUCT-VIDEO-LIVE-STRATEGY-V2.md
-  - KIEM-THU/runbooks/PV2-SPEC04G1-addon-report-rerun.md
+  - KIEM-THU/runbooks/PV2-R01-trend-video-upload.md
+  - KIEM-THU/product-video-live-strategy-v2.json
   - KIEM-THU/DANH-SACH-CASE.md
   - KIEM-THU/HUONG-DAN-TESTER.md
   - TAI-LIEU/01-NGHIEP-VU-VAN-HANH.md
-  - TAI-LIEU/02-CHUC-NANG-GOC-VA-HIEN-TAI.md
-  - .github/ISSUE_TEMPLATE/01-product-video-case-test.yml
-  - .github/ISSUE_TEMPLATE/02-product-video-bao-loi.yml
   - tests/test_p0_product_video_live_strategy_v2.py
+  - tests/test_p0_video_trend_four_lanes.py
   - .agents/state/P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md
   - .agents/state/p0-product-video-v2.yaml
 protected_domains:
@@ -26,11 +20,11 @@ protected_domains:
   - multi_scene_film and Video dai tap
   - wallet/PayOS/top-up/ENV/provider configuration
 acceptance:
-  - strict product-video-addons-v1 plan persists unchanged for the worker
-  - legacy sessions keep existing legacy Add-on behavior
-  - customer report contains business fields and no internal technical terms
-  - report is sent after durable receipt and settlement, at most once per job
-  - report failure never invalidates delivered MP4 or triggers another charge
+  - exact non-manual vtrend|video_upload lane reaches the shared Tail without owner drift
+  - tier 400 persists as public 80 Xu per scene for exactly two 9:16 scenes
+  - strict product-video-addons-v1 requests source-language subtitle and one transition
+  - two independent scene tasks produce one valid cover-fit MP4 with visible subtitle and transition
+  - Telegram receipt and one customer report persist after delivery; charged Xu and wallet deltas remain zero
 prohibited_actions:
   - Telegram/browser/provider/VPS/fetch/push/PR/merge/deploy while SubDub owns shared resources
   - paid provider calls
@@ -92,4 +86,37 @@ job27_second_red:
   exact_green: 1 passed in 14.92s
   direct_impact_green: 85 passed in 26.69s
   owner_worker_pause_state: inactive_job27_queued_unlocked
-next_action: Wait for exact SubDub shared-resource releases, rebase and ship only the F2 empty-result-marker correction, deploy exact SHA, restart only the owner Product Video worker, and verify existing job 27 terminates failed-no-charge with unchanged task IDs and zero provider/wallet delta.
+job27_terminal_closeout:
+  pr: 924
+  merge_sha: f3f79fd50d4b2ad7ce345c7edc5c463ebaea44b5
+  deploy_run: 33206104844
+  deploy_result: SUCCESS in 10m23s
+  db_status: failed
+  terminal_state: failed_no_charge
+  continue_polling: 0
+  attempts_observed: 950 to 951
+  durable_task_map_count: 2
+  durable_failed_scene_count: 2
+  active_video_jobs: 0
+  provider_submit_called: 0
+  provider_usage_rows: 0
+  transaction_rows: 0
+  credit_event_rows: 10 unchanged
+  charged_xu: 0
+  owner_worker_pause_state: inactive
+  representative_live_pass: false
+current_case:
+  case_id: PV2-R01
+  scenario_id: PV2-R01-TREND-REMOTE-WORK
+  product_id: video_trend
+  lane_callback: vtrend|video_upload
+  tier_id: 400
+  unit_xu: 80
+  scene_count: 2
+  ratio: 9:16
+  addons: [subtitle_source_language, transition_default]
+  fixture: PV-L05-self-shot-typing-source.mp4
+  fixture_bytes: 32391742
+  fixture_sha256: 784FBE5BBD7B8D59A40A16AD103DB2B14B5DC7FCE71BE2ADA3E24A3BC04E2732
+  provider_action_started: false
+next_action: Merge this measured closeout, then execute only the PV2-R01 Trend upload runbook from baseline through one final Confirm; on FAIL write a RED only at the Trend adapter/material boundary, and on PASS freeze its route, artifact, receipt, report and zero-wallet evidence.
