@@ -102345,6 +102345,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         progress_line = "Tiến độ: <b>Theo từng cảnh</b>"
     else:
         progress_line = f"Tiến độ: <b>{max(0, min(100, progress))}%</b>"
+    progress_tree = subdub_progress_bar(max(0, min(100, progress)))
     if not request_id or request_id in {"Không có", "-"}:
         request_id = ""
 
@@ -102403,6 +102404,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         f"Gói: <b>{html.escape(package_label)}</b>",
         f"Bước hiện tại: <b>{html.escape(current_stage_label)}</b>",
         progress_line,
+        progress_tree,
         f"Trạng thái: <b>{html.escape(status_label)}</b>",
         "",
         "<b>Thông tin video:</b>",

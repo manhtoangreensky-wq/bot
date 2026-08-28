@@ -288,6 +288,38 @@ Current source evidence:
 - [ ] Only after that live PASS, lock artifact/report/test evidence and continue
   checklist order at `V2-03`; job #26 alone is not representative-product PASS.
 
+Live failure-loop job #27 on runtime `89192bab94c871214476a9c1feb7b3d2f94dcc7a`:
+
+- [x] PR #920 squash-merged as `89192bab...`; deploy run `33185502717` SUCCESS
+  in `4m6s`; bot and owner worker run exact SHA. Worker generation
+  `94a97d28abab4efb8b3cfcd76b28c263`, request/auth/persist yes/yes/yes, reject
+  empty, ShopAIKey + Key4U capability ready.
+- [x] Exact action-time confirm; one request `VID-20260828-F71C71`, project `31`,
+  job `27`, outbox `26`, scenes `126/127`, no duplicate. Invoice
+  `pv:manual-7126457028-27689:1:400`: tier `400`, 2 scenes, 16 seconds, 9:16,
+  `160 - 16 + 0 = 144 Xu`, Owner no-charge.
+- [x] Direct input went straight to Add-on. Persisted strict contract is
+  `product-video-addons-v1`, requested exactly `[transitions]`; music/dubbing/
+  subtitle `0`, silent drop `0`.
+- [x] Upstream terminal RED: both existing ShopAIKey tasks returned FAILURE with
+  Veo Fast concurrency capacity `0`; worker emitted
+  `all_scene_providers_exhausted_no_charge`, but stale diagnostics kept the job
+  queued/processing at 55% with `continue_polling=1` for more than 5 minutes.
+  No new task/provider/charge was created.
+- [x] Terminal-decision RED `1 failed in 26.21s`; minimal worker-only GREEN
+  `1 passed in 8.08s`. Only orchestrator terminal no-charge reasons may override
+  stale polling; provider route/order/tasks and wallet stay unchanged.
+- [x] Owner-requested percent tree added presentation-only below the existing
+  progress percentage by reusing `subdub_progress_bar`; 5 engine-route SHA-256
+  locks unchanged. Focused terminal/progress/route gate `3 passed in 890.94s`.
+- [x] Broad branch comparator `14 passed, 24 failed`; clean pre-patch HEAD
+  reproduced exact `14 passed, 24 failed` with the same IDs, so
+  `NEW_FAILURES=0`. Progress tree remains; it would be removed if route hashes or
+  a new regression changed.
+- [ ] Ship terminal/progress correction, deploy/readback, let existing job #27
+  transition to terminal failed-no-charge without a new provider task, then run
+  the next assigned unfinished product lane. Do not re-test a frozen PASS product.
+
 Current source evidence:
 
 - Primary RED: `6 failed in 12.60s`, exactly strict-plan loss, missing report
