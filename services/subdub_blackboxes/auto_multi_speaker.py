@@ -13,7 +13,10 @@ import threading
 import time
 from typing import Any
 
+from services import subdub_multi_speaker_asr_fallback
+from services import subdub_multi_speaker_gender_onnx
 from services import subdub_speaker_cast as speaker_cast
+from services import subdub_two_speaker_gender_onnx
 
 from . import auto_speaker
 
@@ -521,6 +524,105 @@ def _refine_underclustered_prepared(
     }
 
 
+def _apply_provider_rediarization(prepared: dict, result: Mapping[str, object]) -> dict:
+    """Persist provider-proven multi identities without pitch-based splitting."""
+
+    source_segments = prepared.get("source_segments")
+    output_segments = prepared.get("output_segments")
+    mapped_segments = result.get("segments")
+    if (
+        not isinstance(source_segments, list)
+        or not source_segments
+        or not isinstance(output_segments, list)
+        or not output_segments
+        or not isinstance(mapped_segments, list)
+        or len(mapped_segments) != len(source_segments)
+    ):
+        raise speaker_cast.AutoCastManualRequired()
+    assignments: dict[tuple[str, float, float], dict[str, object]] = {}
+    rediarized_source: list[dict[str, Any]] = []
+    for original, mapped in zip(source_segments, mapped_segments, strict=True):
+        if (
+            not isinstance(original, Mapping)
+            or not isinstance(mapped, Mapping)
+            or auto_speaker._exact_cue_identity(original)
+            != auto_speaker._exact_cue_identity(mapped)
+        ):
+            raise speaker_cast.AutoCastManualRequired()
+        segment = dict(original)
+        for key in (
+            "speaker",
+            "speaker_confidence",
+            "speaker_id",
+            "chunk_index",
+        ):
+            if key in mapped:
+                segment[key] = mapped[key]
+        speaker_cast.validated_speaker_identity(segment)
+        identity = auto_speaker._exact_cue_identity(segment)
+        if identity in assignments:
+            raise speaker_cast.AutoCastManualRequired()
+        assignments[identity] = {
+            key: segment[key]
+            for key in (
+                "speaker",
+                "speaker_confidence",
+                "speaker_id",
+                "chunk_index",
+            )
+            if key in segment
+        }
+        rediarized_source.append(segment)
+    labels = speaker_cast.ordered_auto_speaker_labels(rediarized_source)
+    if not 3 <= len(labels) <= speaker_cast.MAX_AUTO_SPEAKER_LABELS:
+        raise speaker_cast.AutoCastManualRequired()
+
+    rediarized_output: list[dict[str, Any]] = []
+    output_identities: set[tuple[str, float, float]] = set()
+    for raw_segment in output_segments:
+        identity = auto_speaker._exact_cue_identity(raw_segment)
+        if identity in output_identities or identity not in assignments:
+            raise speaker_cast.AutoCastManualRequired()
+        output_identities.add(identity)
+        rediarized_output.append(
+            {**dict(raw_segment), **assignments[identity]}
+        )
+    if output_identities != set(assignments):
+        raise speaker_cast.AutoCastManualRequired()
+
+    media_sha256 = auto_speaker._prepared_media_sha256(prepared)
+    subtitle_sha256 = auto_speaker._prepared_subtitle_sha256(prepared)
+    workspace = auto_speaker._nested_receipt_value(
+        prepared,
+        "_pipeline_workspace",
+    ) or auto_speaker._nested_receipt_value(prepared, "workspace")
+    sidecar = speaker_cast.build_sidecar(
+        rediarized_source,
+        media_sha256=media_sha256,
+        subtitle_sha256=subtitle_sha256,
+    )
+    receipt = speaker_cast.persist_sidecar(sidecar, workspace=workspace)
+    prepared_state = dict(auto_speaker._prepared_state(prepared))
+    prepared_state.update(
+        {
+            "speaker_sidecar_path": receipt["path"],
+            "speaker_sidecar_sha256": receipt["sha256"],
+            "multi_diarization_attempted": True,
+            "multi_diarization_provider": str(result.get("provider") or "")[:80],
+            "multi_diarization_status": str(result.get("status") or "")[:80],
+            "multi_diarization_speaker_count": len(labels),
+        }
+    )
+    return {
+        **prepared,
+        "state": prepared_state,
+        "source_segments": rediarized_source,
+        "output_segments": rediarized_output,
+        "speaker_sidecar_path": receipt["path"],
+        "speaker_sidecar_sha256": receipt["sha256"],
+    }
+
+
 async def _refine_underclustered_off_event_loop(
     pcm_path: Path,
     prepared: dict,
@@ -578,20 +680,12 @@ def classify_multi_speaker_registers(
         or not 3 <= len(ranges_by_speaker) <= speaker_cast.MAX_AUTO_SPEAKER_LABELS
     ):
         raise speaker_cast.AutoCastManualRequired()
-    try:
-        return speaker_cast.classify_speaker_registers(
-            pcm_path,
-            ranges_by_speaker,
-            deadline_monotonic=deadline_monotonic,
-            stop_requested=stop_requested,
-        )
-    except speaker_cast.AutoCastManualRequired:
-        return _classify_dense_multi_speaker_registers(
-            pcm_path,
-            ranges_by_speaker,
-            deadline_monotonic=deadline_monotonic,
-            stop_requested=stop_requested,
-        )
+    return subdub_multi_speaker_gender_onnx.classify_multi_speaker_genders(
+        pcm_path,
+        ranges_by_speaker,
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+    )
 
 
 async def _classify_multi_off_event_loop(
@@ -603,7 +697,8 @@ async def _classify_multi_off_event_loop(
         raise speaker_cast.AutoCastUnavailable()
     classifier_started = time.monotonic()
     classifier_deadline = (
-        classifier_started + speaker_cast.CLASSIFIER_WALL_TIMEOUT_SECONDS
+        classifier_started
+        + subdub_multi_speaker_gender_onnx.CLASSIFIER_WALL_TIMEOUT_SECONDS
     )
     stop_event = threading.Event()
     worker = asyncio.create_task(
@@ -616,6 +711,7 @@ async def _classify_multi_off_event_loop(
         )
     )
     remaining_seconds = max(0.0, classifier_deadline - time.monotonic())
+    drain_attempted = False
     try:
         return await asyncio.wait_for(
             asyncio.shield(worker),
@@ -623,16 +719,18 @@ async def _classify_multi_off_event_loop(
         )
     except (asyncio.TimeoutError, TimeoutError) as exc:
         stop_event.set()
-        await auto_speaker._drain_worker(worker)
+        await auto_speaker._drain_worker_bounded(worker)
+        drain_attempted = True
         raise speaker_cast.AutoCastManualRequired() from exc
     except asyncio.CancelledError:
         stop_event.set()
-        await auto_speaker._drain_worker(worker)
+        await auto_speaker._drain_worker_bounded(worker)
+        drain_attempted = True
         raise
     finally:
-        if not worker.done():
+        if not worker.done() and not drain_attempted:
             stop_event.set()
-            await auto_speaker._drain_worker(worker)
+            await auto_speaker._drain_worker_bounded(worker)
 
 
 async def _run_multi_speaker_preflight(
@@ -664,8 +762,8 @@ async def _run_multi_speaker_preflight(
             extract_pcm(
                 prepared,
                 current,
-                channels=1,
-                sample_rate=speaker_cast.PCM_SAMPLE_RATE,
+                channels=subdub_two_speaker_gender_onnx.PCM_CHANNELS,
+                sample_rate=subdub_two_speaker_gender_onnx.PCM_SAMPLE_RATE,
                 sample_format="s16le",
             )
         )
@@ -970,7 +1068,12 @@ async def run_auto_multi_speaker_blackbox(
             **extract_kwargs,
         )
 
-    base_prepare = payload.get("prepare_subtitles")
+    lane_payload = dict(payload)
+    rediarize_underclustered = lane_payload.pop(
+        "rediarize_underclustered",
+        subdub_multi_speaker_asr_fallback.rediarize_underclustered_segments,
+    )
+    base_prepare = lane_payload.get("prepare_subtitles")
 
     async def prepare_multi_subtitles(*args: Any, **kwargs: Any) -> Any:
         nonlocal cached_pcm_path
@@ -984,27 +1087,64 @@ async def run_auto_multi_speaker_blackbox(
         )
         prepared_state = auto_speaker._prepared_state(prepared)
         if (
-            len(labels) != _UNDERCLUSTER_PROVIDER_LABEL_COUNT
+            not 1 <= len(labels) < 3
             or prepared_state.get("auto_exact_receipt")
             or prepared_state.get("auto_exact_receipt_confirmed") is True
             or prepared_state.get("auto_exact_resume")
         ):
             return prepared
+        if not callable(rediarize_underclustered):
+            raise speaker_cast.AutoCastManualRequired()
         extracted = await extract_filtered_pcm(
             prepared,
             dict(prepared_state),
-            channels=1,
-            sample_rate=speaker_cast.PCM_SAMPLE_RATE,
+            channels=subdub_two_speaker_gender_onnx.PCM_CHANNELS,
+            sample_rate=subdub_two_speaker_gender_onnx.PCM_SAMPLE_RATE,
             sample_format="s16le",
         )
         cached_pcm_path = auto_speaker._validated_pcm_path(
             prepared,
             extracted,
         )
-        refined = await _refine_underclustered_off_event_loop(
-            cached_pcm_path,
-            prepared,
+        rediarized = await auto_speaker._maybe_await(
+            rediarize_underclustered(
+                list(prepared.get("source_segments") or []),
+                pcm_path=str(cached_pcm_path),
+                sample_rate=subdub_two_speaker_gender_onnx.PCM_SAMPLE_RATE,
+                channels=subdub_two_speaker_gender_onnx.PCM_CHANNELS,
+                language=str(
+                    prepared_state.get("source_language") or "auto"
+                ),
+                provider_call_allowed=str(
+                    current.get("subdub_final_confirmed") or ""
+                ).strip().lower()
+                in {"1", "true", "yes", "on"},
+            )
         )
+        if isinstance(current, dict):
+            current.update(
+                {
+                    "multi_diarization_attempted": True,
+                    "multi_diarization_provider": str(
+                        rediarized.get("provider")
+                        if isinstance(rediarized, Mapping)
+                        else ""
+                    )[:80],
+                    "multi_diarization_status": str(
+                        rediarized.get("status")
+                        if isinstance(rediarized, Mapping)
+                        else speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+                    )[:80],
+                    "multi_diarization_speaker_count": int(
+                        rediarized.get("detected_speaker_count") or 0
+                    )
+                    if isinstance(rediarized, Mapping)
+                    else 0,
+                }
+            )
+        if not isinstance(rediarized, Mapping) or rediarized.get("ok") is not True:
+            raise speaker_cast.AutoCastManualRequired()
+        refined = _apply_provider_rediarization(prepared, rediarized)
         if refined is not prepared and isinstance(current, dict):
             refined_state = auto_speaker._prepared_state(refined)
             current.update(
@@ -1020,8 +1160,7 @@ async def run_auto_multi_speaker_blackbox(
         return refined
 
     observed_casts: dict[str, str] = {}
-    base_synthesize = payload.get("synthesize_segments")
-    lane_payload = dict(payload)
+    base_synthesize = lane_payload.get("synthesize_segments")
     if callable(base_prepare):
         lane_payload["prepare_subtitles"] = prepare_multi_subtitles
     if callable(base_synthesize):

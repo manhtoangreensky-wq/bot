@@ -314,6 +314,41 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   deploy/runtime SHA thật, combo MP4 thật PASS trước, rồi standalone MP4 thật
   PASS; mỗi flow phải video → receipt, ≥3 distinct voices và wallet delta `0`.
 
+### Failure loop live `#7C4BE502C0` và re-diarization nhiều giọng
+
+- Combo trên runtime `da817b65...` terminal `failed_no_charge` tại
+  `AUTO_CAST_MANUAL_REQUIRED`; `charged_xu=0`, TTS/mux/artifact/MP4/delivery đều
+  `0`. Read-only provider attempt lúc `12:30:08+07` đo được
+  `Deepgram / listen / PASS`, nhưng sidecar chỉ có `32` cue, `2` label
+  (`16/16` cue), `5,422` bytes, SHA-256 `BC05D9AF...`.
+- Hai label không được xem là đủ cho Auto multi. Cách tách label bằng pitch bị
+  loại: một người đổi cao độ có thể bị bịa thành hai người, một pitch frame có
+  thể là nhạc nền và refinement/classifier cũ reset budget. Runtime mới chỉ
+  chuyển tiếp khi provider word diarization chứng minh `3–8` label thật; không
+  truyền `expected_speakers` hoặc số người dự kiến.
+- Provider word evidence dùng identity `(text chuẩn hóa, start, end)`. Duplicate
+  cùng speaker bị bỏ; cùng word/timestamp nhưng khác speaker làm cả kết quả
+  fail-closed. Mỗi label cần ít nhất `2` word riêng, mọi label phải map lại ít
+  nhất một cue, mỗi cue cần dominance overlap `>=0.70`.
+- Provider call chỉ mở sau exact product final-confirm. Missing key, busy lock,
+  input quá `5 phút`, PCM sai shape, kết quả `1–2`/`>8` label, cue thiếu coverage
+  hoặc label bị mất đều dừng trước TTS/mux và không charge.
+- PCM được downmix/resample theo chunk `1 MiB` trong worker thread; một lock
+  nonblocking bao trùm conversion + request. Base64/JSON cũng chạy ngoài event
+  loop. Job đồng thời thứ hai fail trước cấp phát/call, tránh nhân RAM và block
+  Telegram.
+- Sau re-diarization, adapter multi tái dùng đúng UVR+PANNs model/inference và
+  lock của engine hai giọng nhưng không sửa file khóa. `3–16` speaker được vote
+  độc lập; male–male, male–female và female–female đều hợp lệ nếu evidence đạt;
+  tổng evidence tối đa `48s`.
+- Source evidence cuối: `135 passed, 241 deselected, 14 subtests in 20.05s`;
+  baseline exact provider comparator `49 passed in 658.98s`, branch cùng selector
+  `49 passed in 11.65s`, `NEW_FAILURES=0`; compile `6` changed Python files và
+  diff-check exit `0`. Independent review: Critical `0`, Important `0`,
+  `READY_TO_COMMIT=YES`.
+- Đây vẫn là **SOURCE READY**, không phải deployed/LIVE PASS. Combo cùng fixture
+  phải tạo MP4 thật trước; chỉ sau combo PASS mới chạy standalone và khóa multi.
+
 ## Bổ sung Product Video job 25 và khóa UI — 28/08/2026
 
 - PR `#910` merge SHA `82ffb117e6c2e84bd76a3aee6e5e747465958c66`; deploy run `33078757523` SUCCESS. Bot và owner worker cùng exact SHA.

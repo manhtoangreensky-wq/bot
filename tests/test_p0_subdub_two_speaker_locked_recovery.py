@@ -87,9 +87,10 @@ def test_multi_lane_file_is_not_part_of_two_speaker_rollback():
     multi_path = ROOT / "services" / "subdub_blackboxes" / "auto_multi_speaker.py"
 
     assert multi_path.is_file()
-    assert hashlib.sha256(multi_path.read_bytes()).hexdigest().upper() == (
-        "55AAB8949EFAECAD8DD987AC6DFE056AB0E4BC4EF81A23977EA5EDD1CDF64911"
+    assert "subdub_multi_speaker_asr_fallback" in multi_path.read_text(
+        encoding="utf-8"
     )
+    assert _git_blob_sha1(AUTO_SPEAKER_PATH) == POST_ONNX_AUTO_SPEAKER_GIT_BLOB
 
 
 @pytest.mark.parametrize(

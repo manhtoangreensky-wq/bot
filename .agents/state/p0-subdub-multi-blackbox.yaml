@@ -4,7 +4,7 @@ owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
 branch: fix/p0-subdub-multi-cue-lock-video-only
-phase: SPEC_11_4_POST_REBASE_GREEN_PUSH_PR_DEPLOY_NEXT
+phase: SPEC_11_5_DEEPGRAM_UNDERCLUSTER_MULTI_FALLBACK_READY_TO_PUSH
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -26,10 +26,10 @@ workflow_contract:
 
 resource_boundary:
   cpu: independent_local_subdub_source_only
-  live: acquired_by_subdub_after_exact_product_video_release
-  chrome: acquired_by_subdub_after_exact_product_video_release
-  vps_deploy: acquired_by_subdub_after_exact_product_video_release
-  product_video: source-local only until exact SubDub release
+  live: acquired_by_product_video_after_exact_subdub_release
+  chrome: acquired_by_product_video_after_exact_subdub_release
+  vps_deploy: acquired_by_product_video_after_exact_subdub_release
+  product_video: shared owner; SubDub source-local only until exact releases
 
 two_speaker_live_pass_20260828:
   runtime_sha: e819c1cd00d66273e00c667355325549dbea8d44
@@ -200,6 +200,100 @@ active_multi_correction:
     compile: bot.py plus changed service and tests exit 0
     yaml_diff_scope_secret: exit 0
   next: push one PR, squash/deploy/runtime, then run combo and standalone multi live in order
+
+multi_live_failure_7c4be502c0:
+  public_job: 7C4BE502C0
+  internal_job: 7c4be502c04ce24f57c5
+  runtime_sha: da817b656da10b405a2878664a690d3a66d2b313
+  source_fixture_sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
+  terminal: failed_no_charge
+  last_error_stage: AUTO_CAST_MANUAL_REQUIRED
+  charged_xu: 0
+  output:
+    tts_started: 0
+    mux_started: 0
+    artifact_started: 0
+    final_mp4_exists: 0
+    output_sent: 0
+  provider_authority:
+    provider: deepgram
+    route: listen
+    status: PASS
+    observed_at: 2026-08-29 12:30:08 +07
+  sidecar:
+    bytes: 5422
+    sha256: bc05d9af7c76394b0fd18212d29fbcd3e3a7c85f27912bf09e69ec61d775a6fc
+    cue_count: 32
+    label_count: 2
+    per_label_cues: [16, 16]
+    min_speaker_confidence: 0.21999334
+    max_speaker_confidence: 0.9266884
+  root_cause: >-
+    Deepgram diarization returned an underclustered 2-label sidecar for a
+    confirmed Auto multi job; the isolated multi blackbox then correctly
+    failed closed before TTS. The old pitch/register splitter is not valid
+    speaker-identity evidence and was rejected by independent review.
+  rejected_approaches:
+    - pitch-only split can invent a speaker when one voice changes pitch
+    - one-frame pitch fallback can accept transient or mixed backing audio
+    - full-mix speaker embeddings clustered by scene/background, not only voice
+  active_source_correction:
+    provider_rediarization: >-
+      only primary 1-2 label multi results; final-confirm required; Gemini 3.5
+      Transcribe automatic diarization without speaker-count hint; accept only
+      3-8 unique word identities and map every label to existing cue windows
+    cast: >-
+      reuse hash-locked UVR and PANNs inference through a multi-only adapter;
+      3-16 labels, independent same-gender classifications, one shared
+      nonblocking ONNX lock, 48 seconds aggregate evidence
+    resource_guards:
+      - streaming 1 MiB PCM downmix/resample in asyncio worker
+      - one nonblocking re-diarization lock across conversion and provider call
+      - duplicate word annotations deduplicated; conflicting identity rejected
+      - bounded conversion cancellation drain and bounded ONNX worker drain
+    red:
+      collection: missing multi fallback module
+      botless_multi_owner: provider re-diarization and multi ONNX adapter absent
+    green:
+      multi_provider_and_owner: 45 passed in 8.63s before final resource delta
+      latest_fallback: 19 passed in 0.89s
+      protected_matrix: 133 passed, 241 deselected, 14 subtests in 16.75s
+      exact_provider_protected: 49 passed in 11.65s
+      exact_provider_baseline: 49 passed in 658.98s
+      exact_provider_new_failures: 0
+      exact_two_selectors: 12 passed, 241 deselected in 9.02s
+      latest_full_green: 135 passed, 241 deselected, 14 subtests in 20.05s
+      compile_changed_files: exit 0
+      diff_check: exit 0
+    provider_calls_during_source_tests: 0
+    wallet_mutations: 0
+    independent_review:
+      critical: 0
+      important: 0
+      verdict: READY_TO_COMMIT YES
+      reviewed_runtime_files_sha256:
+        auto_multi_speaker: 234b7b1e5f7afac8e8aa6aa43ef2508215110ac0112f9ca5bed37d0a2686a40b
+        multi_asr_fallback: 79c56e33d2bd7dbde7fe7308127ca3ac3d3b50261757837c924d9a071e130529
+        multi_gender_onnx: 618905cd28be9236602f0f4a17dd684b63f8cf834ca11baedce962dadca9fa8f
+    post_rebase:
+      base_sha: fe25cc056df59af3c7f063f0ea5f3866ff160130
+      head_before_evidence_amend: a5023db9e8d0223243a2ebc5b4bceb6e9677db06
+      divergence: 0 behind, 1 ahead
+      protected_matrix: 135 passed, 241 deselected, 14 subtests in 43.93s
+      compile_changed_files: exit 0
+      diff_check: exit 0
+      yaml_check: exit 0
+    final_ship_rebase:
+      base_sha: 42cbf929b8f89b9154e7f343079ac6655c2ef512
+      head_before_evidence_amend: a8fd08e8bc5d4148ec92dc7f3b238a2498dadefd
+      divergence: 0 behind, 1 ahead
+      patch_equivalent_to_d195cec: true
+      collected_tests: 57 in 1175.44s
+      focused_protected_gate: 57 passed in 12.38s
+      compile_bot_local_worker_changed_files: exit 0
+      diff_check: exit 0
+      exact_two_hashes_unchanged: true
+    next: amend measured final rebase evidence, then push one PR/deploy/runtime and rerun the combo fixture
 
 active_correction_08_0g:
   owner_requirements:
@@ -769,4 +863,4 @@ ordered_specs:
       - audit every acceptance line as proven or unresolved
       - mark the goal complete only when no required line remains unresolved
 
-current_next_action: source READY_TO_SHIP; wait exact Product Video LIVE/CHROME/VPS/DEPLOY releases, then rebase/post-rebase gate/one PR/deploy/exact combo live
+current_next_action: source READY_TO_PUSH after final rebase gate; push one PR/deploy/runtime, then exact combo live before standalone

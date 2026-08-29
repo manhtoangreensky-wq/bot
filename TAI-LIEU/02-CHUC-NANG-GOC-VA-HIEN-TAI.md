@@ -208,6 +208,22 @@ Source evidence: final focused `23 passed`; protected effective `82 passed` +
 đúng `3` baseline failures, `NEW_FAILURES=0`; provider/wallet mutation `0`.
 Chưa có deployed multi MP4 thì không được ghi `LIVE PASS`.
 
+#### Đối chiếu failure live `#7C4BE502C0`
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Deepgram PASS nghĩa là diarization đủ cho Auto multi | Deepgram `listen/PASS` tạo sidecar `32` cue nhưng chỉ `2` label; multi terminal `AUTO_CAST_MANUAL_REQUIRED`, `0 Xu`, chưa TTS/mux/artifact | ❌ HTTP/provider PASS không phải multi PASS |
+| Có thể tách label thiếu bằng cao độ | Pitch/register chỉ là thuộc tính giọng, không phải identity; cách này có thể bịa người khi một người đổi pitch hoặc có nhạc nền | ❌ Bị loại sau independent review |
+| Fallback Key4U+Gemini chỉ tồn tại cho exact 2-speaker | Exact fallback vẫn khóa nguyên byte; multi có adapter re-diarization riêng sau final-confirm, không truyền speaker count và chỉ nhận `3–8` label | ⚠️ Mở rộng cô lập |
+| Provider lặp word annotation không ảnh hưởng | Mọi word identity được canonicalize/dedup; conflict speaker trên cùng word/timestamp làm fail-closed trước overlap mapping | ✅ Cổng identity mới |
+| Multi cast cần classifier pitch riêng | Multi tái dùng UVR+PANNs authority đã ship qua adapter `3–16` label, chung lock/budget nhưng không sửa exact-two files | ✅ Tái sử dụng engine khóa |
+| Audio provider preprocessing có thể làm đồng bộ trên event loop | PCM streaming chunk `1 MiB`, conversion + JSON worker thread, một admission lock; concurrent job fail trước allocation/call | ❌ Cơ chế cũ không an toàn tải |
+
+Bằng chứng hiện tại: protected matrix `135 passed + 14 subtests`; exact provider
+baseline/branch cùng `49 passed`, `NEW_FAILURES=0`; changed-file compile/diff exit
+`0`; review độc lập Critical `0`, Important `0`. Merge/deploy/runtime/combo MP4/
+standalone MP4 vẫn là các cổng riêng.
+
 ## Đối chiếu Product Video flow/artifact sau job 25 — 28/08/2026
 
 | Chức năng/tài liệu cũ | Hiện tại | Trạng thái |

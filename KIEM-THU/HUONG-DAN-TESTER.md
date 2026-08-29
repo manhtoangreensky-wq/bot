@@ -82,7 +82,9 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     nhận một kiểu giọng mở bảng preset hoặc làm mất giá trị numeric.
 12. Nếu Deepgram empty và Key4U lần đầu unusable, exact Auto 2 được gọi Key4U
     tối đa `2` lần. HTTP `401` hoặc segment không có timestamp provider phải
-    dừng ngay; tuyệt đối không ép speaker hoặc mở fallback này cho Auto multi.
+    dừng ngay; fallback exact này không được dùng cho Auto multi. Với Auto
+    multi, Deepgram trả `1–2` label mới được vào re-diarization riêng sau
+    final-confirm; request không truyền số speaker và chỉ chấp nhận `3–8` label.
 13. Fixture karaoke có nhạc nền: kiểm evidence cast, không chỉ nhìn hai label.
     Kết quả khóa local là speaker 0 `male/low`, vote `7/8`, dominance `0.875`,
     evidence `21s`; speaker 1 `female/high`, vote `8/10`, dominance `0.800`,
@@ -99,3 +101,8 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     standalone chỉ tự giao MP4 rồi receipt; SRT/audio/document tự động phải là
     `0`. Receipt có loại Auto multi, speaker/voice count, giá niêm yết và total;
     admin `charged_xu=0`, wallet/event delta `0`.
+16. Canh regression re-diarization multi: duplicate word annotation không được
+    tăng count/overlap; cùng word/timestamp nhưng khác speaker phải FAIL; mỗi
+    provider label cần ít nhất `2` word riêng và phải xuất hiện trong cue
+    mapping. Busy admission lock, input quá `5 phút` hoặc PCM sai shape phải
+    dừng trước provider call/TTS/mux và giữ `charged_xu=0`.
