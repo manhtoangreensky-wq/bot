@@ -217,8 +217,18 @@ Chưa có deployed multi MP4 thì không được ghi `LIVE PASS`.
 | Callback ACK là bước bắt buộc trước logic | Telegram timeout/502 làm 10 tier và Confirm đứng nguyên màn | Đã sửa thành best-effort |
 | Ý tưởng video có executor `video_idea_to_product` độc lập | Executor phải alias về owner `video_idea` để tạo Invoice/Confirm/Status Tail | Đã khóa contract |
 | Kho trend chỉ có Google Trends và TikTok reference | Backend có bốn nhóm public metadata Media/Facebook/YouTube/TikTok, refresh 7 ngày | Đã mở rộng không đổi UI |
+| Trend chọn tỉ lệ rồi đi thẳng sang nhân vật | Cả `4` lane Trend phải qua content source, profile/preset, content choice và Preview trước entity flow | Flow cũ đã phục hồi |
 
 Bằng chứng hiện tại: job `25` đã delivery message `27576` và `0 Xu`, nhưng PV-L01 vẫn FAIL do letterbox + subtitle drop. Source correction có focused `45 passed`, quality/manual `39 passed`, Trend/scene `52 passed`, full output `24 passed`, compile `0`; UI lock `14/14` function bytes. Phải rerun live exact case sau deploy mới được đổi trạng thái thành PASS.
+
+Bằng chứng phục hồi Trend ngày 29/08/2026: exact RED `4 failed, 1 passed` ->
+GREEN `5 passed`; `5` selector hợp đồng lịch sử và `3` transition runtime đưa
+file restore lên `8 passed`. So sánh bảy file là
+branch `119 passed + 2` failure Script baseline và clean main `117 passed + 3`;
+`NEW_FAILURES=0`. Tail/quality/UI protected `59 passed`; chưa deploy và chưa có
+artifact mới nên Trend vẫn chưa được đánh dấu LIVE PASS.
+Post-rebase exact main `da817b65...`: `186 passed + 2` failure Script baseline;
+compile exit `0`. Merge, deploy và artifact thật vẫn là ba cổng riêng.
 
 ## Đối chiếu Tail chọn chất lượng — 28/08/2026
 

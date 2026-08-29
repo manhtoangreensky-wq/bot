@@ -377,8 +377,34 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
 - [x] Flow6 parity RED `1 failed in 9.29s`; minimal Trend-only GREEN
   `1 passed in 12.30s`. Protected branch `96 passed + 2` failures; clean main
   reproduced the same two Script-only failures in `593.52s`, `NEW_FAILURES=0`.
-- [ ] Ship/deploy Flow6 parity, reuse the preserved Invoice/config, final Confirm
-  once, then lock admission IDs and follow the two-scene artifact to terminal.
+- [x] Owner restored the complete historical content flow for all four current
+  Trend lanes: catalog/media, manual Trend, public search and uploaded Trend
+  video. All must converge on `scene_count -> aspect_ratio -> content_source ->
+  profile/preset -> suggestion/content -> preview -> character/reference ->
+  style -> requirements/context -> scene plan -> prompts -> shared Tail`.
+- [x] History comparison found the existing dormant implementation from
+  `6a92f47`; no new wizard was built. RED was exactly `4 failed, 1 passed in
+  6.63s`. Minimal restoration removed only the stale redirect/reset seams and
+  added the three missing Flow7 sequence steps. Exact GREEN is `5 passed in
+  574.87s`; updated historical-contract selectors are `5 passed in 9.64s`.
+  Three real state-transition tests then call the ratio/manual handlers directly;
+  the complete restore file is `8 passed in 7.36s`.
+- [x] Complete branch Trend gate: `124 passed, 2 failed in 21.49s`; exact
+  seven-file comparison is branch `119 passed, 2 failed in 17.42s` versus clean
+  `3b585527...` `117 passed, 3 failed in 18.18s`. Both remaining failures are
+  the same Script-only IDs; the clean fixture-hash failure is absent on branch,
+  therefore `NEW_FAILURES=0`.
+- [x] Protected completed UI/Tail/quality/state gate `59 passed in 8.57s`;
+  changed runtime/tests compile exit `0`; state YAML `STATE_OK`; diff-check exit
+  `0`. No shared Tail UI, engine, provider, worker or wallet production file was
+  changed.
+- [x] Rebased without conflict onto SubDub runtime/main
+  `da817b656da10b405a2878664a690d3a66d2b313`; exact remaining Product Video
+  chain is two commits. Post-rebase Trend + protected gate is `186 passed, 2`
+  exact Script-only baseline failures in `670.77s`; runtime/test compile exit `0`.
+- [ ] Ship Flow6 parity plus the four-lane restoration in one PR/deploy, then
+  start one fresh uploaded-Trend representative. The preserved old Invoice
+  belongs to the bypassed flow and must not be used as full-flow LIVE evidence.
 
 Current source evidence:
 

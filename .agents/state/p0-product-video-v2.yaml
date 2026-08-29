@@ -1,20 +1,26 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_FLOW6_UPLOAD_PARITY_SHIP_READY
+phase: PV2_R01_TREND_FOUR_LANE_POST_REBASE_GREEN
 pointer: V2-03/PV2-R01
-base_sha: 3e28d3d9ac63baf26b939db4c55111bea3b97610
-goal: Live the most complex Video Trend upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
+base_sha: da817b656da10b405a2878664a690d3a66d2b313
+goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
 allowed_files:
   - bot.py
   - services/video_flow6.py
+  - services/video_flow7.py
   - KIEM-THU/PRODUCT-VIDEO-LIVE-STRATEGY-V2.md
   - KIEM-THU/runbooks/PV2-R01-trend-video-upload.md
   - KIEM-THU/product-video-live-strategy-v2.json
   - KIEM-THU/DANH-SACH-CASE.md
   - KIEM-THU/HUONG-DAN-TESTER.md
   - TAI-LIEU/01-NGHIEP-VU-VAN-HANH.md
+  - TAI-LIEU/02-CHUC-NANG-GOC-VA-HIEN-TAI.md
   - tests/test_p0_product_video_live_strategy_v2.py
   - tests/test_p0_video_trend_four_lanes.py
+  - tests/test_p0_video_trend2_weekly_catalog_full_flow_callback_recovery.py
+  - tests/test_p0_video_trend3_media_catalog_exact_flow_route_recovery.py
+  - tests/test_p0_product_video_manual_tail_matrix.py
   - tests/test_p0_product_video_trend_source_tail_handoff.py
+  - tests/test_p0_product_video_trend_standard_flow_restore.py
   - .agents/state/P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md
   - .agents/state/p0-product-video-v2.yaml
 protected_domains:
@@ -23,6 +29,8 @@ protected_domains:
   - multi_scene_film and Video dai tap
   - wallet/PayOS/top-up/ENV/provider configuration
 acceptance:
+  - all four current Trend lanes converge on scene count, ratio, content source, profile or preset, content choice and preview before the canonical entity flow
+  - manual Trend and manual content remain inside the restored Trend flow instead of jumping directly to Tail
   - exact non-manual vtrend|video_upload lane reaches the shared Tail without owner drift
   - tier 400 persists as public 80 Xu per scene for exactly two 9:16 scenes
   - strict product-video-addons-v1 requests source-language subtitle and one transition
@@ -170,4 +178,21 @@ pv2_r01_pre_admission_red:
   protected_branch: 96 passed and 2 historical failures
   protected_clean_main: same 2 historical failures in 593.52s
   new_failures: 0
-next_action: Ship only Flow6 uploaded-Trend parity, deploy exact SHA, then use the preserved invoice/config to confirm once; admission must create exactly one project/job/outbox and keep wallet deltas zero.
+pv2_r01_flow_restore:
+  trend_flow_restore_red: 4 failed and 1 passed in 6.63s
+  trend_flow_restore_green: 5 passed in 574.87s
+  trend_flow_updated_contract_green: 5 passed in 9.64s
+  trend_flow_runtime_transition_green: 8 passed in 7.36s
+  trend_branch_gate: 124 passed and 2 baseline failures in 21.49s
+  comparable_branch_gate: 119 passed and 2 baseline failures in 17.42s
+  comparable_clean_main_gate: 117 passed and 3 baseline failures in 18.18s
+  comparable_clean_only_failure: test_v2_committed_script_fixture_is_exact_and_five_scene
+  protected_tail_quality_ui_green: 59 passed in 8.57s
+  changed_runtime_tests_compile: exit 0
+  state_yaml_parse: STATE_OK
+  restore_diff_check: exit 0
+  post_rebase_head: 0b9c6e7
+  post_rebase_base: da817b656da10b405a2878664a690d3a66d2b313
+  post_rebase_gate: 186 passed and 2 exact baseline Script failures in 670.77s
+  post_rebase_compile: exit 0
+next_action: Push the exact two-commit branch, create one PR, squash merge, deploy/read back exact runtime, then start one fresh uploaded-Trend representative through content/profile/suggestion/preview before final Confirm; admission must create exactly one project/job/outbox and keep wallet deltas zero.

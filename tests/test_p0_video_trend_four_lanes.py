@@ -102,23 +102,17 @@ def test_search_callbacks_and_pending_text_join_scene_count_continuation() -> No
     assert 'screen == "search_results"' in render
 
 
-def test_legacy_content_callbacks_cannot_reopen_the_removed_trend_flow() -> None:
+def test_all_trend_content_callbacks_reopen_the_restored_full_flow() -> None:
     parent_map = BOT_SOURCE.split("VIDEO_TREND2_PARENT = {", 1)[1].split("}\n\n", 1)[0]
-    for removed_screen in ("content_source", "profiles", "suggestions", "preview"):
-        assert f'"{removed_screen}"' not in parent_map
+    for restored_screen in ("content_source", "profiles", "suggestions", "preview"):
+        assert f'"{restored_screen}"' in parent_map
 
     state = _function_source("video_trend2_state")
     assert "VIDEO_TREND2_PUBLIC_SCREENS" in state
 
     callback = _function_source("_handle_video_trend2_callback_impl")
-    guard_start = callback.index("if action in VIDEO_TREND2_LEGACY_CONTENT_ACTIONS:")
-    entry_start = callback.index('if action == "entry":')
-    assert guard_start < entry_start
-    guard = callback[guard_start:entry_start]
-    assert 'action = "entry"' in guard
-
-    action_guard = BOT_SOURCE.split("VIDEO_TREND2_LEGACY_CONTENT_ACTIONS = frozenset({", 1)[1].split("})", 1)[0]
-    for removed_action in (
+    assert "VIDEO_TREND2_LEGACY_CONTENT_ACTIONS" not in callback
+    for restored_action in (
         "manual_content",
         "edit_content",
         "idea_catalog",
@@ -130,9 +124,8 @@ def test_legacy_content_callbacks_cannot_reopen_the_removed_trend_flow() -> None
         "restore_content",
         "continue",
     ):
-        assert f'"{removed_action}"' in action_guard
+        assert f'action == "{restored_action}"' in callback or f'"{restored_action}"' in callback
 
-    guarded_actions = set(re.findall(r'"([a-z_]+)"', action_guard))
     emitted_actions = set()
     for keyboard_name in (
         "video_trend2_content_source_keyboard",
@@ -143,16 +136,16 @@ def test_legacy_content_callbacks_cannot_reopen_the_removed_trend_flow() -> None
         emitted_actions.update(
             re.findall(r'callback_data=f?"vtrend\|([a-z_]+)', _function_source(keyboard_name))
         )
-    assert emitted_actions - {"back", "catalog"} <= guarded_actions
+    for emitted_action in emitted_actions - {"back", "catalog"}:
+        assert f'action == "{emitted_action}"' in callback or f'"{emitted_action}"' in callback
 
     pending = _function_source("handle_video_trend2_pending_text")
-    pending_guard_start = pending.index("if pending in VIDEO_TREND2_LEGACY_PENDING_INPUTS:")
-    search_start = pending.index('if pending == "trend_search":')
-    assert pending_guard_start < search_start
-    pending_guard = pending[pending_guard_start:search_start]
-    assert '"screen": "entry"' in pending_guard
-    assert "video_trend2_entry_keyboard" in pending_guard
-    assert "return True" in pending_guard
+    assert "VIDEO_TREND2_LEGACY_PENDING_INPUTS" not in pending
+    assert 'elif pending == "manual_trend":' in pending
+    assert 'video_trend2_open_screen(state, "scene_count"' in pending
+    assert 'elif pending in {"manual_content", "edit_content"}:' in pending
+    assert 'video_trend2_open_screen(state, "preview"' in pending
+    assert "video_manual_lane_open_shared_tail" not in pending
 
 
 def test_public_trend_ui_has_no_internal_side_effect_copy() -> None:

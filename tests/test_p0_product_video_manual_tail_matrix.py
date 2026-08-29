@@ -127,7 +127,7 @@ def test_manual_lane_builds_provider_free_two_scene_shared_tail_contract(
     assert tuple(tail.get("source_asset_ids") or ()) == source_media_refs
 
 
-def test_manual_lane_matrix_is_wired_to_both_real_pending_text_owners() -> None:
+def test_manual_lane_matrix_keeps_direct_tail_owners_and_restored_trend_flow() -> None:
     product_pending = _function_source("handle_video_product_pending_text")
     uiflow3_pending = _function_source("handle_video_uiflow3_pending_text")
     trend_pending = _function_source("handle_video_trend2_pending_text")
@@ -138,8 +138,11 @@ def test_manual_lane_matrix_is_wired_to_both_real_pending_text_owners() -> None:
     assert "video_manual_lane_open_shared_tail" in product_pending
     assert 'kind == "manual_content"' in uiflow3_pending
     assert "video_manual_lane_open_shared_tail" in uiflow3_pending
-    assert 'pending in {"manual_trend", "manual_content", "edit_content"}' in trend_pending
-    assert "video_manual_lane_open_shared_tail" in trend_pending
+    assert 'elif pending == "manual_trend":' in trend_pending
+    assert 'video_trend2_open_screen(state, "scene_count"' in trend_pending
+    assert 'elif pending in {"manual_content", "edit_content"}:' in trend_pending
+    assert 'video_trend2_open_screen(state, "preview"' in trend_pending
+    assert "video_manual_lane_open_shared_tail" not in trend_pending
     assert 'step == "await_suggestion"' in profile_pending
     assert "VIDEO_PROFILE_MANUAL_DIRECT_TAIL_PRODUCTS" in profile_pending
     assert "video_manual_lane_open_shared_tail" in profile_pending
