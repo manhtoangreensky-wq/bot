@@ -66,6 +66,15 @@ Post-rebase onto exact main `da817b656da10b405a2878664a690d3a66d2b313`
 was conflict-free. The combined Trend/protected gate is `186 passed` plus the
 same `2` Script-only baseline failures in `670.77s`; compile exit is `0`.
 
+PR #928 squash-merged exact SHA
+`fe25cc056df59af3c7f063f0ea5f3866ff160130`; deploy run `33237168072`
+is SUCCESS. Bot and owner Product Video worker both run that SHA. Generation
+`35eb01aad2c84da7acc0e60bdf98b826` is authenticated and persisted with empty
+reject reason. Pre-live baseline is projects/jobs/outbox `31/27/26`,
+transactions/credit-events/provider-usage `0/10/0`, active jobs `0`, Owner
+wallet `200/0`. This proves deployment readiness only; no fresh full-flow Trend
+artifact exists yet.
+
 Admission/idempotency evidence: focused transaction/single-use/outbox gate =
 `11 passed in 8.06s`. Dedupe does not rely on a wallet ledger row: project UUID,
 active render project, scene index and outbox job identity are database-unique;
