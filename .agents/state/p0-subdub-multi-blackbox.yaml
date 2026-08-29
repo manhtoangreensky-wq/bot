@@ -4,7 +4,7 @@ owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
 branch: fix/p0-subdub-multi-cue-lock-video-only
-phase: SPEC_11_5_DEEPGRAM_UNDERCLUSTER_MULTI_FALLBACK_READY_TO_PUSH
+phase: SPEC_11_6_C6BD_DEEPGRAM_NETWORK_MULTI_FALLBACK_READY_TO_PUSH
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -294,6 +294,41 @@ multi_live_failure_7c4be502c0:
       diff_check: exit 0
       exact_two_hashes_unchanged: true
     next: amend measured final rebase evidence, then push one PR/deploy/runtime and rerun the combo fixture
+  c6bd_live_failure_loop:
+    runtime_sha: a8df3cab8fe578d2c0d2523d834fad0d01491f0f
+    public_job: C6BD5D1CD8
+    internal_job: c6bd5d1cd8e252bb9265
+    source_sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
+    source_bytes: 9869032
+    source_duration_seconds: 133.375420
+    selected_options: English; Auto multi; original 40 percent; dub 150 percent
+    terminal: failed_no_charge before translation, TTS, mux or artifact
+    charged_xu: 0
+    provider_authority: Deepgram DEEPGRAM_EMPTY_TRANSCRIPT; All connection attempts failed
+    red: 1 failed in 1293.19s; missing allow_multi_speaker_key4u_fallback
+    first_green: 1 passed in 932.90s
+    independent_review_initial: 1 Critical + 3 Important; READY_TO_COMMIT NO
+    review_corrections:
+      - production imports the multi fallback instead of a test-only injected namespace
+      - Gemini request preserves the actual audio MIME type
+      - permanent Key4U 4xx and timestamp-invalid responses are not retried
+      - attempt count and retry-used evidence are returned
+      - one shared nonblocking lock covers Key4U and Gemini calls
+      - unknown, over-300-second and oversized direct media fail before providers
+      - cancellation always releases the lock
+    review_green: 6 passed in 1142.01s
+    protected_final: 69 passed plus 7 subtests in 9.68s
+    compile_changed_files: exit 0
+    exact_two_hashes_unchanged: true
+    independent_rereview: Critical 0; Important 0; READY_TO_COMMIT YES
+    post_rebase:
+      base_sha: a8df3cab8fe578d2c0d2523d834fad0d01491f0f
+      head_before_evidence_amend: 32f98c89e7698b41b620f6e33844dc7c999f4d20
+      divergence: 0 behind, 1 ahead
+      protected_final: 69 passed plus 7 subtests in 680.71s
+      compile_changed_files: exit 0
+      diff_check: exit 0
+    next: amend evidence; one PR/deploy; same combo live; standalone only after combo PASS
 
 active_correction_08_0g:
   owner_requirements:

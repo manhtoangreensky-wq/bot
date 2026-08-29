@@ -25,6 +25,7 @@ GEMINI_TRANSCRIBE_MODEL = "gemini-3.5-transcribe"
 GEMINI_INTERACTIONS_URL = (
     "https://generativelanguage.googleapis.com/v1beta/interactions"
 )
+KEY4U_FALLBACK_BASE_URL = "https://api.key4u.vn/v1"
 MIN_MULTI_SPEAKERS = 3
 MAX_GEMINI_DIARIZATION_SPEAKERS = 8
 MIN_WORDS_PER_SPEAKER = 2
@@ -32,6 +33,9 @@ MIN_SEGMENT_SPEAKER_CONFIDENCE = 0.70
 MAX_REDIARIZATION_SECONDS = 5 * 60
 TARGET_SAMPLE_RATE = 16_000
 PCM_STREAM_CHUNK_BYTES = 1024 * 1024
+KEY4U_TRANSCRIPT_MAX_ATTEMPTS = 2
+KEY4U_TRANSCRIPT_RETRY_DELAY_SECONDS = 1.0
+MAX_DIRECT_AUDIO_BYTES = MAX_REDIARIZATION_SECONDS * 44_100 * 2 * 2
 _REDIARIZATION_LOCK = threading.Lock()
 
 
@@ -277,6 +281,206 @@ def apply_multi_diarized_words_to_segments(
     return mapped
 
 
+def _provider_timestamp_segments_valid(payload: object) -> bool:
+    segments = payload.get("segments") if isinstance(payload, dict) else None
+    if not isinstance(segments, list) or not segments:
+        return False
+    previous_start = -1.0
+    for segment in segments:
+        if not isinstance(segment, dict):
+            return False
+        try:
+            start = float(segment.get("start"))
+            end = float(segment.get("end"))
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if (
+            not str(segment.get("text") or "").strip()
+            or not math.isfinite(start)
+            or not math.isfinite(end)
+            or start < 0.0
+            or end <= start
+            or start < previous_start
+        ):
+            return False
+        previous_start = start
+    return True
+
+
+def _key4u_transcript_retryable(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        return True
+    transcript = str(payload.get("text") or "").strip()
+    segments = payload.get("segments")
+    if transcript and isinstance(segments, list) and segments:
+        return payload.get("provider_timestamps") is True
+    try:
+        http_status = int(payload.get("http_status") or 0)
+    except (TypeError, ValueError, OverflowError):
+        http_status = 0
+    if http_status:
+        return bool(
+            200 <= http_status < 300
+            or http_status in {408, 425, 429}
+            or 500 <= http_status < 600
+        )
+    return str(payload.get("status") or "").strip().upper() in {
+        "",
+        "EMPTY_TRANSCRIPT",
+        "FAIL",
+        "FAIL_PROVIDER_ERROR",
+        "FAIL_RETRYABLE",
+        "FAIL_TIMEOUT",
+        "SEGMENT_GENERATION_FAILED",
+    }
+
+
+async def run_multi_speaker_fallback(
+    audio_bytes: bytes,
+    content_type: str,
+    *,
+    key4u_transcribe: Callable[..., Awaitable[dict]],
+    key4u_api_key: str,
+    key4u_endpoint: str,
+    gemini_api_key: str,
+    language: str = "auto",
+    duration_seconds: float = 0.0,
+) -> dict:
+    """Recover one confirmed multi job from timed Key4U + Gemini identities."""
+
+    try:
+        duration_value = float(duration_seconds or 0.0)
+    except (TypeError, ValueError, OverflowError):
+        duration_value = 0.0
+    if (
+        not math.isfinite(duration_value)
+        or not 0.0 < duration_value <= MAX_REDIARIZATION_SECONDS
+        or len(audio_bytes or b"") > MAX_DIRECT_AUDIO_BYTES
+    ):
+        return {
+            "ok": False,
+            "status": AUTO_CAST_UNAVAILABLE,
+            "provider": "",
+            "text": "",
+            "segments": [],
+            "key4u_attempt_count": 0,
+            "key4u_retry_used": False,
+            "detail": "multi_speaker_fallback_media_out_of_bounds",
+        }
+    if not (
+        audio_bytes
+        and callable(key4u_transcribe)
+        and key4u_api_key
+        and key4u_endpoint
+        and gemini_api_key
+    ):
+        return {
+            "ok": False,
+            "status": AUTO_CAST_UNAVAILABLE,
+            "provider": "",
+            "text": "",
+            "segments": [],
+            "key4u_attempt_count": 0,
+            "key4u_retry_used": False,
+            "detail": "multi_speaker_fallback_not_configured",
+        }
+    if not _REDIARIZATION_LOCK.acquire(blocking=False):
+        return {
+            "ok": False,
+            "status": AUTO_CAST_UNAVAILABLE,
+            "provider": "",
+            "text": "",
+            "segments": [],
+            "key4u_attempt_count": 0,
+            "key4u_retry_used": False,
+            "detail": "multi_speaker_fallback_busy",
+        }
+    key4u: dict = {}
+    key4u_attempt_count = 0
+    try:
+        for attempt_index in range(KEY4U_TRANSCRIPT_MAX_ATTEMPTS):
+            key4u_attempt_count += 1
+            key4u = await key4u_transcribe(
+                audio_bytes,
+                content_type,
+                base_url=KEY4U_FALLBACK_BASE_URL,
+                api_key=key4u_api_key,
+                endpoint=key4u_endpoint,
+                model="whisper-1",
+                language=language,
+            )
+            if (
+                key4u.get("ok")
+                and str(key4u.get("text") or "").strip()
+                and key4u.get("provider_timestamps") is True
+                and _provider_timestamp_segments_valid(key4u)
+            ):
+                break
+            if (
+                attempt_index + 1 >= KEY4U_TRANSCRIPT_MAX_ATTEMPTS
+                or not _key4u_transcript_retryable(key4u)
+            ):
+                break
+            await asyncio.sleep(KEY4U_TRANSCRIPT_RETRY_DELAY_SECONDS)
+        transcript = str(key4u.get("text") or "").strip()
+        key4u_segments = list(key4u.get("segments") or [])
+        if (
+            not key4u.get("ok")
+            or not transcript
+            or key4u.get("provider_timestamps") is not True
+            or not _provider_timestamp_segments_valid(key4u)
+        ):
+            return {
+                "ok": False,
+                "status": AUTO_CAST_UNAVAILABLE,
+                "provider": "key4u_audio",
+                "text": "",
+                "segments": [],
+                "key4u_attempt_count": key4u_attempt_count,
+                "key4u_retry_used": key4u_attempt_count > 1,
+                "detail": "multi_key4u_provider_timestamps_required",
+            }
+        diarization = await gemini_transcribe_multi_diarized_words(
+            audio_bytes,
+            content_type,
+            api_key=gemini_api_key,
+            language=language,
+        )
+        mapped = apply_multi_diarized_words_to_segments(
+            key4u_segments,
+            list(diarization.get("words") or []),
+        )
+        if not diarization.get("ok") or not mapped:
+            return {
+                "ok": False,
+                "status": AUTO_CAST_UNAVAILABLE,
+                "provider": "key4u_audio+gemini_multi_diarization",
+                "text": "",
+                "segments": [],
+                "key4u_attempt_count": key4u_attempt_count,
+                "key4u_retry_used": key4u_attempt_count > 1,
+                "detail": "multi_speaker_diarization_unavailable",
+            }
+        return {
+            **key4u,
+            "ok": True,
+            "status": "PASS",
+            "provider": "key4u_audio+gemini_multi_diarization",
+            "text": transcript,
+            "segments": mapped,
+            "key4u_attempt_count": key4u_attempt_count,
+            "key4u_retry_used": key4u_attempt_count > 1,
+            "detected_speaker_count": detected_speaker_count(mapped),
+            "detail": (
+                f"key4u_segments={len(key4u_segments)}; "
+                f"gemini_words={len(diarization.get('words') or [])}; "
+                f"speakers={detected_speaker_count(mapped)}"
+            ),
+        }
+    finally:
+        _REDIARIZATION_LOCK.release()
+
+
 def _pcm_as_mono_wav(
     pcm_path: str,
     *,
@@ -365,8 +569,27 @@ async def _drain_conversion(worker: asyncio.Task) -> None:
             pass
 
 
+def _gemini_audio_media_type(content_type: str) -> str:
+    media_type = str(content_type or "").split(";", 1)[0].strip().lower()
+    return media_type if media_type in {
+        "audio/wav",
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/aiff",
+        "audio/aac",
+        "audio/ogg",
+        "audio/flac",
+        "audio/m4a",
+        "audio/l16",
+        "audio/opus",
+        "audio/alaw",
+        "audio/mulaw",
+    } else "audio/mpeg"
+
+
 def _gemini_request_body(
     audio_bytes: bytes,
+    content_type: str,
     transcription_config: dict[str, Any],
 ) -> bytes:
     request_payload = {
@@ -375,7 +598,7 @@ def _gemini_request_body(
             {
                 "type": "audio",
                 "data": base64.b64encode(audio_bytes).decode("ascii"),
-                "mime_type": "audio/wav",
+                "mime_type": _gemini_audio_media_type(content_type),
             }
         ],
         "generation_config": {"transcription_config": transcription_config},
@@ -422,6 +645,7 @@ async def gemini_transcribe_multi_diarized_words(
         asyncio.to_thread(
             _gemini_request_body,
             audio_bytes,
+            content_type,
             transcription_config,
         )
     )

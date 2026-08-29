@@ -16,6 +16,31 @@ from services import subdub_two_speaker_gender_onnx as exact_gender
 from services.subdub_blackboxes import auto_multi_speaker
 
 
+def _load_asr_transcribe_audio_surface(namespace: dict):
+    source = (Path(__file__).resolve().parents[1] / "bot.py").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+    start = source.index("async def asr_transcribe_audio(")
+    end = source.index(
+        "\ndef shopaikey_provider_error_from_payload(",
+        start,
+    )
+    import_lines = [
+        line
+        for line in source[:start].splitlines()
+        if line.startswith("from services import ")
+        and "subdub_multi_speaker_asr_fallback" in line
+    ]
+    assert len(import_lines) == 1
+    exec(
+        "from services import subdub_multi_speaker_asr_fallback",
+        namespace,
+    )
+    exec(compile(source[start:end], "bot.py", "exec"), namespace)
+    return namespace["asr_transcribe_audio"]
+
+
 def _gemini_payload(labels=("spk_1", "spk_2", "spk_3")) -> dict:
     annotations = []
     cursor = 0.0
@@ -118,7 +143,7 @@ def test_multi_gemini_request_does_not_hint_or_force_speaker_count(monkeypatch):
     result = asyncio.run(
         fallback.gemini_transcribe_multi_diarized_words(
             b"wav",
-            "audio/wav",
+            "audio/mpeg",
             api_key="configured",
         )
     )
@@ -133,6 +158,7 @@ def test_multi_gemini_request_does_not_hint_or_force_speaker_count(monkeypatch):
     }
     assert "expected_speaker" not in serialized
     assert "speaker_count" not in serialized
+    assert captured["json"]["input"][0]["mime_type"] == "audio/mpeg"
     assert not fallback.extract_gemini_multi_diarized_words(
         _gemini_payload(tuple(f"spk_{index}" for index in range(1, 10)))
     )
@@ -195,6 +221,197 @@ def test_multi_word_evidence_maps_three_labels_to_existing_cues():
         "chunk_00:speaker_2",
     ]
     assert all(item["speaker_confidence"] == 1.0 for item in mapped)
+
+
+def test_deepgram_empty_multi_uses_key4u_gemini_fallback_once(monkeypatch):
+    provider_attempts = []
+    key4u_calls = []
+    gemini_calls = []
+    timed_segments = [
+        {"index": 1, "start": 0.0, "end": 1.0, "text": "speaker one"},
+        {"index": 2, "start": 1.0, "end": 2.0, "text": "speaker two"},
+        {"index": 3, "start": 2.0, "end": 3.0, "text": "speaker three"},
+    ]
+
+    async def deepgram(*_args, **_kwargs):
+        return {
+            "ok": False,
+            "status": "DEEPGRAM_EMPTY_TRANSCRIPT",
+            "detail": "All connection attempts failed",
+            "transcript": "",
+            "transcript_json": {},
+        }
+
+    async def key4u(*_args, **_kwargs):
+        key4u_calls.append(True)
+        return {
+            "ok": True,
+            "status": "PASS",
+            "text": "speaker one speaker two speaker three",
+            "segments": timed_segments,
+            "provider_timestamps": True,
+            "http_status": 200,
+        }
+
+    async def gemini(*_args, **_kwargs):
+        gemini_calls.append(True)
+        return {
+            "ok": True,
+            "status": "PASS",
+            "words": fallback.extract_gemini_multi_diarized_words(
+                _gemini_payload()
+            ),
+            "speaker_ids": ["spk_1", "spk_2", "spk_3"],
+        }
+
+    monkeypatch.setattr(
+        fallback,
+        "gemini_transcribe_multi_diarized_words",
+        gemini,
+    )
+    namespace = {
+        "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
+        "AUTO_CAST_UNAVAILABLE": "AUTO_CAST_UNAVAILABLE",
+        "ASR_PROVIDER": "auto",
+        "DEEPGRAM_API_KEY": "configured",
+        "KEY4U_API_KEY": "key4u-configured",
+        "KEY4U_STT_ENDPOINT": "/audio/transcriptions",
+        "GEMINI_API_KEY": "gemini-configured",
+        "SHOPAIKEY_API_KEY": "",
+        "SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT": "",
+        "deepgram_asr_adapter": deepgram,
+        "deepgram_segments_from_response": lambda _payload: [],
+        "save_provider_attempt": lambda key, value, _updated_by: (
+            provider_attempts.append((key, dict(value)))
+        ),
+        "subdub_long_media": SimpleNamespace(
+            is_no_speech_result=lambda _result, _transcript: True
+        ),
+        "subdub_two_speaker_asr_fallback": SimpleNamespace(
+            run_two_speaker_fallback=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("exact-two fallback must stay isolated")
+            )
+        ),
+        "openai_compatible_asr_transcribe": key4u,
+    }
+    asr = _load_asr_transcribe_audio_surface(namespace)
+
+    result = asyncio.run(
+        asr(
+            b"audio",
+            "audio/wav",
+            require_diarization=True,
+            allow_multi_speaker_key4u_fallback=True,
+            allow_confirmed_product=True,
+            media_duration_seconds=3,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["provider"] == "key4u_audio+gemini_multi_diarization"
+    assert [item["speaker"] for item in result["segments"]] == [0, 1, 2]
+    assert key4u_calls == [True]
+    assert gemini_calls == [True]
+    assert provider_attempts[-1][1]["route"] == "multi_speaker_fallback"
+
+
+def test_multi_key4u_permanent_401_is_not_retried():
+    calls = []
+
+    async def key4u(*_args, **_kwargs):
+        calls.append(True)
+        return {
+            "ok": False,
+            "status": "FAIL_PROVIDER_ERROR",
+            "http_status": 401,
+            "text": "",
+            "segments": [],
+        }
+
+    result = asyncio.run(
+        fallback.run_multi_speaker_fallback(
+            b"audio",
+            "audio/mpeg",
+            key4u_transcribe=key4u,
+            key4u_api_key="configured",
+            key4u_endpoint="/audio/transcriptions",
+            gemini_api_key="configured",
+            duration_seconds=10,
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["key4u_attempt_count"] == 1
+    assert result["key4u_retry_used"] is False
+    assert calls == [True]
+
+
+@pytest.mark.parametrize("duration_seconds", (0, 301))
+def test_multi_fallback_rejects_unbounded_media_before_provider(
+    duration_seconds,
+):
+    calls = []
+
+    async def key4u(*_args, **_kwargs):
+        calls.append(True)
+        return {}
+
+    result = asyncio.run(
+        fallback.run_multi_speaker_fallback(
+            b"audio",
+            "audio/mpeg",
+            key4u_transcribe=key4u,
+            key4u_api_key="configured",
+            key4u_endpoint="/audio/transcriptions",
+            gemini_api_key="configured",
+            duration_seconds=duration_seconds,
+        )
+    )
+
+    assert result["detail"] == "multi_speaker_fallback_media_out_of_bounds"
+    assert result["key4u_attempt_count"] == 0
+    assert calls == []
+
+
+def test_multi_fallback_busy_and_cancel_release_global_lock():
+    calls = []
+
+    async def key4u(*_args, **_kwargs):
+        calls.append(True)
+        raise asyncio.CancelledError()
+
+    assert fallback._REDIARIZATION_LOCK.acquire(blocking=False)
+    try:
+        busy = asyncio.run(
+            fallback.run_multi_speaker_fallback(
+                b"audio",
+                "audio/mpeg",
+                key4u_transcribe=key4u,
+                key4u_api_key="configured",
+                key4u_endpoint="/audio/transcriptions",
+                gemini_api_key="configured",
+                duration_seconds=10,
+            )
+        )
+    finally:
+        fallback._REDIARIZATION_LOCK.release()
+    assert busy["detail"] == "multi_speaker_fallback_busy"
+    assert calls == []
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            fallback.run_multi_speaker_fallback(
+                b"audio",
+                "audio/mpeg",
+                key4u_transcribe=key4u,
+                key4u_api_key="configured",
+                key4u_endpoint="/audio/transcriptions",
+                gemini_api_key="configured",
+                duration_seconds=10,
+            )
+        )
+    assert fallback._REDIARIZATION_LOCK.acquire(blocking=False)
+    fallback._REDIARIZATION_LOCK.release()
 
 
 def test_multi_rediarization_missing_key_makes_zero_provider_calls(tmp_path):
