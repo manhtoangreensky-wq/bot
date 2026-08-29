@@ -481,3 +481,9 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Rebase lên exact main `da817b65...` sạch; post-rebase Trend + protected gate
   `186 passed + 2` Script-only baseline failures trong `670.77s`; compile exit
   `0`. Đây là source evidence, chưa phải deploy hay LIVE PASS.
+- PR #928 merge/runtime `fe25cc056df59af3c7f063f0ea5f3866ff160130`;
+  deploy `33237168072` SUCCESS. Bot + owner worker cùng SHA; generation
+  `35eb01aa...` authenticated/persisted, reject rỗng, cả 4 service active.
+  Baseline live `31/27/26`, transactions/provider usage `0/0`, credit events
+  `10`, active jobs `0`, Owner `200 Xu / spent 0`. Chưa có MP4 full-flow mới nên
+  Trend vẫn không phải LIVE PASS.

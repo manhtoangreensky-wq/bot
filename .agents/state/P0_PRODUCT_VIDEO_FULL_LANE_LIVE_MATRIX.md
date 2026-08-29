@@ -402,9 +402,18 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
   `da817b656da10b405a2878664a690d3a66d2b313`; exact remaining Product Video
   chain is two commits. Post-rebase Trend + protected gate is `186 passed, 2`
   exact Script-only baseline failures in `670.77s`; runtime/test compile exit `0`.
-- [ ] Ship Flow6 parity plus the four-lane restoration in one PR/deploy, then
-  start one fresh uploaded-Trend representative. The preserved old Invoice
-  belongs to the bypassed flow and must not be used as full-flow LIVE evidence.
+- [x] PR #928 merged exact SHA
+  `fe25cc056df59af3c7f063f0ea5f3866ff160130`; deploy run `33237168072`
+  SUCCESS. Bot and owner Product Video worker both read back exact SHA; worker
+  generation `35eb01aad2c84da7acc0e60bdf98b826` is authenticated/persisted,
+  reject reason empty, PID `553332`, service active.
+- [x] Fresh live baseline: projects/jobs/outbox `31/27/26`; transactions `0`;
+  credit events `10`; provider usage `0`; active video jobs `0`; Owner wallet
+  `200 Xu`, total spent `0`. Fixture still exactly `32,391,742` bytes, SHA
+  `784FBE5B...E2732`.
+- [ ] Start one fresh uploaded-Trend representative after Browser action-time
+  confirmation. The preserved old Invoice belongs to the bypassed flow and must
+  not be used as full-flow LIVE evidence.
 
 Current source evidence:
 
