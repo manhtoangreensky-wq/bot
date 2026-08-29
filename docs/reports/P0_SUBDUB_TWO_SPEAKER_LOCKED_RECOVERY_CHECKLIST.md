@@ -17,8 +17,8 @@
 ### Current pointer
 
 - Current SPEC: `SPEC-11`.
-- Current SUBSPEC: `SPEC-11.4`.
-- Current phase: `POST_REBASE_GREEN / PUSH_PR_DEPLOY_NEXT`.
+- Current SUBSPEC: `SPEC-11.5A`.
+- Current phase: `POST_REBASE_READY / evidence amend then shared release`.
 - Production action active: `NO; Product Video released shared resources`.
 - Telegram/provider job active: `NO; combo #3A3BEA618D and standalone #282347E26C terminal delivered`.
 - Wallet mutation: `0`.
@@ -1433,10 +1433,10 @@ Task contract:
   `Tự động nhiều giọng`, preserve at least three real speaker labels and one
   stable distinct voice per label, fit translated speech to original cues, and
   deliver exactly one playable MP4 followed by one final receipt.
-- `ALLOWED_FILES`: `services/subdub_blackboxes/auto_multi_speaker.py`; a
-  multi-only condition in `services/subtitle_dub_product_pipeline.py`; a
-  multi-only condition at the delivery seam in `bot.py`; one new focused multi
-  contract test; this checklist and durable state.
+- `ALLOWED_FILES`: `services/subdub_blackboxes/auto_multi_speaker.py`; isolated
+  multi provider-diarization and ONNX adapter modules; focused multi tests;
+  this checklist and durable state. The shipped timing and delivery owners are
+  already locked and need no new edit in this correction loop.
 - `PROTECTED_FILES`: `services/subdub_speaker_cast.py`,
   `services/subdub_two_speaker_asr_fallback.py`, two-speaker classifier/cast,
   shared numeric audio UI, provider/model/endpoint, pricing, wallet, PayOS,
@@ -1537,6 +1537,67 @@ Task contract:
   bot/web/nginx before live.
 
 ### SPEC-11.5 — Ordered live matrix on the exact multi fixture
+
+#### SPEC-11.5A — Live combo failure and isolated source correction
+
+- [x] Fresh combo job `#7C4BE502C0` / internal
+  `7c4be502c04ce24f57c5` used exact fixture `83DE97B7...` on deployed runtime
+  `da817b65...` and terminalized `failed_no_charge` at
+  `AUTO_CAST_MANUAL_REQUIRED`; `charged_xu=0`, no TTS, mux, artifact, MP4 or
+  Telegram output.
+- [x] Exact read-only provider attempt at `12:30:08+07` proves authority was
+  `Deepgram / listen / PASS`, not the exact-two Key4U+Gemini fallback. Its
+  sidecar was `5,422` bytes, `32` cues, only `2` labels (`16/16` cues), SHA-256
+  `BC05D9AF...`.
+- [x] Rejected pitch-based repair: independent review proved register changes
+  can split one real person into invented identities, a one-frame path can
+  accept transient/background pitch, and refinement/classification reset
+  resource budgets. The candidate was completely reverted before replacement.
+- [x] Replacement is multi-only and fail-closed: primary `1–2` labels trigger
+  one provider re-diarization only after the existing final-confirm edge;
+  Gemini receives no expected-speaker count and must return `3–8` unique
+  word-level speaker labels. Duplicate word rows are deduplicated; conflicting
+  speaker claims for one word/timestamp reject the result; every label must map
+  back to an existing cue.
+- [x] Cast reuses the already shipped UVR+PANNs model paths and inference owner
+  through a separate multi adapter. It requires `3–16` labels, supports
+  male/male, male/female and female/female sets, caps aggregate unique evidence
+  at `48s`, and shares the exact nonblocking ONNX admission lock without
+  changing exact-two files.
+- [x] Resource gates: PCM conversion streams aligned `1 MiB` chunks in an
+  `asyncio.to_thread` worker; one nonblocking lock covers conversion and the
+  outbound provider request; oversized input is rejected before reading;
+  conversion and JSON/base64 workers are drained on cancellation; concurrent
+  re-diarization fails before allocation/provider call.
+- [x] Fresh source evidence before final review: multi/provider files
+  `45 passed`; direct impact `18 passed + 14 subtests`; exact/timing
+  `19 passed`; exact provider adapters `49 passed`; exact-two lock selectors
+  `12 passed`; broad protected selection `133 passed + 14 subtests`;
+  changed-file `py_compile` and `git diff --check` exit `0`. Final resource
+  delta final rerun: `135 passed, 241 deselected, 14 subtests in 20.05s`.
+- [x] Protected SHA-256 remains exact: shared cast `DE93620F...`, exact-two ASR
+  fallback `94748DEF...`; `auto_speaker.py` and `bot.py` are byte-unchanged.
+- [x] Independent reviewer final verdict: Critical `0`, Important `0`,
+  `READY_TO_COMMIT=YES`. Exact-provider baseline `49 passed in 658.98s` and
+  branch same selectors `49 passed in 11.65s`, `NEW_FAILURES=0`. Latest
+  protected matrix `135 passed, 241 deselected, 14 subtests in 20.05s`.
+- [x] Rebase onto `origin/main fe25cc056df59af3c7f063f0ea5f3866ff160130`
+  dropped already-merged commit `1f01681` and retained exactly one correction
+  commit. Pre-evidence-amend HEAD `a5023db9e8d0223243a2ebc5b4bceb6e9677db06`,
+  `0 behind / 1 ahead`; post-rebase protected matrix
+  `135 passed, 241 deselected, 14 subtests in 43.93s`; changed-file compile,
+  range diff-check and YAML exit `0`.
+- [x] Final ship rebase onto
+  `origin/main 42cbf929b8f89b9154e7f343079ac6655c2ef512` was clean and
+  retained exactly one correction at pre-evidence-amend HEAD
+  `a8fd08e8bc5d4148ec92dc7f3b238a2498dadefd`, `0 behind / 1 ahead`.
+  The rebased commit has the same stable patch ID as `d195cec`; collection
+  measured `57 tests in 1175.44s`, the exact post-rebase gate measured
+  `57 passed in 12.38s`, `py_compile` for `bot.py`, `local_worker.py` and all
+  changed Python files exited `0`, range diff-check exited `0`, and both
+  exact-two protected SHA-256 values remained unchanged.
+- [B] Amend this measured evidence only, then push one PR, deploy/read back the
+  exact runtime SHA and run the combo live before standalone.
 
 - [B] Combo first: fresh flow → exact fixture SHA `83DE97B7...` → English →
   `Tự động nhiều giọng` → numeric original `40%` / dub `150%` → confirm once.

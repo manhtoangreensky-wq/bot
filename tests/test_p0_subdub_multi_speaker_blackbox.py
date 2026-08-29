@@ -331,7 +331,7 @@ def test_multi_marker_does_not_change_auto_pricing(monkeypatch):
     )
 
 
-def test_restored_classifier_accepts_one_frame_without_lane_flag(monkeypatch):
+def test_shared_classifier_rejects_one_frame_without_multi_relaxation(monkeypatch):
     raw = b"\0" * speaker_cast.PCM_WINDOW_BYTES
     _patch_one_frame_evidence(monkeypatch)
     result = speaker_cast._estimate_window_pitch(
@@ -340,15 +340,14 @@ def test_restored_classifier_accepts_one_frame_without_lane_flag(monkeypatch):
         stop_requested=lambda: False,
     )
 
-    assert result is not None
-    assert result[0] >= speaker_cast.HIGH_MIN_HZ
-    assert result[1] >= speaker_cast.MIN_REGISTER_CONFIDENCE
+    assert result is None
+    assert speaker_cast._MIN_PITCH_FRAMES == 2
     assert "allow_single_pitch_frame" not in inspect.signature(
         speaker_cast._estimate_window_pitch
     ).parameters
 
 
-def test_multi_adapter_refines_one_mixed_provider_label_before_exact_gate(
+def test_multi_adapter_rediarizes_one_underclustered_provider_label_before_gate(
     tmp_path,
     monkeypatch,
 ):
@@ -393,27 +392,7 @@ def test_multi_adapter_refines_one_mixed_provider_label_before_exact_gate(
     }
 
     pcm_path = tmp_path / "underclustered.pcm"
-    markers = [100, 200, 100, 200, 120, 120]
-    samples = array("h")
-    for marker in markers:
-        samples.extend([marker] * speaker_cast.PCM_SAMPLE_RATE)
-    if sys.byteorder != "little":
-        samples.byteswap()
-    pcm_path.write_bytes(samples.tobytes())
-
-    def fake_estimate(raw, **_kwargs):
-        marker = int.from_bytes(raw[:2], "little", signed=True)
-        if marker == 200:
-            return 220.0, 0.95
-        if marker in {100, 120}:
-            return 120.0, 0.95
-        return None
-
-    monkeypatch.setattr(
-        speaker_cast,
-        "_estimate_window_pitch",
-        fake_estimate,
-    )
+    pcm_path.write_bytes(b"\0" * 64)
     captured = {"extract_calls": 0}
 
     async def base_prepare(_state, *, require_auto_cast):
@@ -424,6 +403,27 @@ def test_multi_adapter_refines_one_mixed_provider_label_before_exact_gate(
         captured["extract_calls"] += 1
         captured["extract_kwargs"] = kwargs
         return str(pcm_path)
+
+    async def provider_rediarize(segments, **kwargs):
+        captured["rediarize_calls"] = captured.get("rediarize_calls", 0) + 1
+        captured["rediarize_pcm"] = kwargs.get("pcm_path")
+        captured["provider_call_allowed"] = kwargs.get("provider_call_allowed")
+        speaker_ids = [0, 1, 0, 1, 2, 2]
+        return {
+            "ok": True,
+            "status": "PASS",
+            "provider": "gemini_transcribe_multi_diarization",
+            "detected_speaker_count": 3,
+            "segments": [
+                {
+                    **segment,
+                    "speaker": speaker,
+                    "speaker_id": f"chunk_00:speaker_{speaker}",
+                    "speaker_confidence": 0.95,
+                }
+                for segment, speaker in zip(segments, speaker_ids, strict=True)
+            ],
+        }
 
     async def fake_old_blackbox(**kwargs):
         refined = await kwargs["prepare_subtitles"](
@@ -442,9 +442,11 @@ def test_multi_adapter_refines_one_mixed_provider_label_before_exact_gate(
             lane_mode="subtitle_plus_dub",
             extract_pcm=base_extract,
             prepare_subtitles=base_prepare,
+            rediarize_underclustered=provider_rediarize,
             state={
                 **EXACT_AUTO_STATE,
                 "auto_speaker_lane": "multi",
+                "subdub_final_confirmed": "1",
             },
         )
     )
@@ -462,6 +464,12 @@ def test_multi_adapter_refines_one_mixed_provider_label_before_exact_gate(
         item["speaker_id"] for item in refined["source_segments"]
     ]
     refined_state = refined["state"]
+    assert refined_state["multi_diarization_attempted"] is True
+    assert refined_state["multi_diarization_provider"] == (
+        "gemini_transcribe_multi_diarization"
+    )
+    assert refined_state["multi_diarization_status"] == "PASS"
+    assert refined_state["multi_diarization_speaker_count"] == 3
     refined_sidecar = speaker_cast.load_sidecar(
         refined_state["speaker_sidecar_path"],
         expected_sha256=refined_state["speaker_sidecar_sha256"],
@@ -477,10 +485,13 @@ def test_multi_adapter_refines_one_mixed_provider_label_before_exact_gate(
     assert captured == {
         "extract_calls": 1,
         "extract_kwargs": {
-            "channels": 1,
-            "sample_rate": speaker_cast.PCM_SAMPLE_RATE,
+            "channels": 2,
+            "sample_rate": 44_100,
             "sample_format": "s16le",
         },
+        "rediarize_calls": 1,
+        "rediarize_pcm": str(pcm_path),
+        "provider_call_allowed": True,
     }
 
 
@@ -520,14 +531,14 @@ def test_multi_classifier_preserves_three_provider_labels_without_invention(
         }
 
     monkeypatch.setattr(
-        speaker_cast,
-        "classify_speaker_registers",
+        multi_module.subdub_multi_speaker_gender_onnx,
+        "classify_multi_speaker_genders",
         fake_classifier,
     )
     result = multi_module.classify_multi_speaker_registers(
         "fixture.pcm",
         ranges,
-        deadline_monotonic=123.0,
+        deadline_monotonic=10**12,
         stop_requested=lambda: False,
     )
 
@@ -535,21 +546,21 @@ def test_multi_classifier_preserves_three_provider_labels_without_invention(
     assert captured == {
         "pcm_path": "fixture.pcm",
         "labels": labels,
-        "deadline": 123.0,
+        "deadline": 10**12,
         "stopped": False,
     }
     with pytest.raises(speaker_cast.AutoCastManualRequired):
         multi_module.classify_multi_speaker_registers(
             "fixture.pcm",
             {labels[0]: ranges[labels[0]]},
-            deadline_monotonic=123.0,
+            deadline_monotonic=10**12,
             stop_requested=lambda: False,
         )
     with pytest.raises(speaker_cast.AutoCastManualRequired):
         multi_module.classify_multi_speaker_registers(
             "fixture.pcm",
             {label: ranges[label] for label in labels[:2]},
-            deadline_monotonic=123.0,
+            deadline_monotonic=10**12,
             stop_requested=lambda: False,
         )
     with pytest.raises(speaker_cast.AutoCastManualRequired):
@@ -559,143 +570,60 @@ def test_multi_classifier_preserves_three_provider_labels_without_invention(
                 f"chunk_00:speaker_{index}": [(0.0, 1.0)]
                 for index in range(17)
             },
-            deadline_monotonic=123.0,
+            deadline_monotonic=10**12,
             stop_requested=lambda: False,
         )
 
 
-def test_multi_classifier_recovers_dense_evidence_after_sparse_vote_failure(
+def test_multi_gender_classifier_rejects_single_cue_labels_before_inference(
     tmp_path,
     monkeypatch,
 ):
     multi_module = _multi_module()
-    pcm_path = tmp_path / "multi-dense-evidence.pcm"
-    samples = array(
-        "h",
-        (
-            sample_index // int(speaker_cast.PCM_SAMPLE_RATE * 0.02)
-            for sample_index in range(speaker_cast.PCM_SAMPLE_RATE * 9)
-        ),
-    )
-    if sys.byteorder != "little":
-        samples.byteswap()
-    pcm_path.write_bytes(samples.tobytes())
-
-    speaker_0_ranges = [
-        (index * 0.6, (index * 0.6) + 0.5)
-        for index in range(12)
-    ]
-    speaker_1_ranges = [(8.0, 8.74)]
-    sparse_tie_then_low = {
-        0: (130.0, 0.90),
-        30: (220.0, 0.90),
-        60: (135.0, 0.90),
-        90: (225.0, 0.90),
-        120: (140.0, 0.90),
-        150: (230.0, 0.90),
-        180: (132.0, 0.90),
-        210: (134.0, 0.90),
-        240: (136.0, 0.90),
-        270: (138.0, 0.90),
-        300: (140.0, 0.90),
-        330: (142.0, 0.90),
-        408: (131.0, 0.90),
-    }
-
-    def fake_estimate(raw, **_kwargs):
-        marker = int.from_bytes(raw[:2], "little", signed=True)
-        return sparse_tie_then_low.get(marker)
-
+    pcm_path = tmp_path / "multi-stereo.pcm"
+    pcm_path.write_bytes(b"\0" * 64)
+    called = []
     monkeypatch.setattr(
-        speaker_cast,
-        "_estimate_window_pitch",
-        fake_estimate,
-    )
-    result = multi_module.classify_multi_speaker_registers(
-        str(pcm_path),
-        {
-            "chunk_00:speaker_0": speaker_0_ranges,
-            "chunk_00:speaker_1": speaker_1_ranges,
-            "chunk_00:speaker_2": speaker_1_ranges,
-        },
-        deadline_monotonic=time.monotonic() + 10.0,
-        stop_requested=lambda: False,
+        multi_module.subdub_multi_speaker_gender_onnx.exact_gender,
+        "_infer_selected_cues",
+        lambda *_args, **_kwargs: called.append(True),
     )
 
-    assert list(result) == [
-        "chunk_00:speaker_0",
-        "chunk_00:speaker_1",
-        "chunk_00:speaker_2",
-    ]
-    assert result["chunk_00:speaker_0"]["voice_register"] == "low"
-    assert result["chunk_00:speaker_1"]["voice_register"] == "low"
-    assert result["chunk_00:speaker_2"]["voice_register"] == "low"
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        multi_module.classify_multi_speaker_registers(
+            str(pcm_path),
+            {
+                "chunk_00:speaker_0": [(0.0, 0.5), (0.6, 1.1)],
+                "chunk_00:speaker_1": [(2.0, 2.5)],
+                "chunk_00:speaker_2": [(3.0, 3.5)],
+            },
+            deadline_monotonic=10**12,
+            stop_requested=lambda: False,
+        )
+    assert called == []
 
 
-def test_dense_multi_classifier_keeps_short_refined_cues_beside_a_long_cue(
-    tmp_path,
-    monkeypatch,
-):
+def test_multi_gender_selection_keeps_short_cues_beside_a_long_cue():
     multi_module = _multi_module()
-    pcm_path = tmp_path / "multi-balanced-refined-cues.pcm"
-    samples = array("h", [0]) * (speaker_cast.PCM_SAMPLE_RATE * 16)
-    markers = {
-        0.0: 100,
-        0.6: 200,
-        2.26: 300,
-        13.0: 400,
-        14.0: 500,
-    }
-    for seconds, marker in markers.items():
-        samples[int(round(seconds * speaker_cast.PCM_SAMPLE_RATE))] = marker
-    if sys.byteorder != "little":
-        samples.byteswap()
-    pcm_path.write_bytes(samples.tobytes())
-
-    estimates = {
-        100: (220.0, 0.90),
-        200: (225.0, 0.90),
-        300: (130.0, 0.90),
-        400: (135.0, 0.90),
-        500: (230.0, 0.90),
-    }
-
-    def fake_estimate(raw, **_kwargs):
-        marker = int.from_bytes(raw[:2], "little", signed=True)
-        return estimates.get(marker)
-
-    def force_dense_fallback(*_args, **_kwargs):
-        raise speaker_cast.AutoCastManualRequired()
-
-    monkeypatch.setattr(
-        speaker_cast,
-        "_estimate_window_pitch",
-        fake_estimate,
-    )
-    monkeypatch.setattr(
-        speaker_cast,
-        "classify_speaker_registers",
-        force_dense_fallback,
-    )
-
-    result = multi_module.classify_multi_speaker_registers(
-        str(pcm_path),
+    selected = multi_module.subdub_multi_speaker_gender_onnx._select_bounded_cues(
         {
             "chunk_00:speaker_0": [
                 (0.0, 0.5),
                 (0.6, 1.1),
                 (2.0, 12.0),
             ],
-            "chunk_00:speaker_1": [(13.0, 13.5)],
-            "chunk_00:speaker_2": [(14.0, 14.5)],
-        },
-        deadline_monotonic=time.monotonic() + 10.0,
-        stop_requested=lambda: False,
+            "chunk_00:speaker_1": [(13.0, 13.5), (13.6, 14.1)],
+            "chunk_00:speaker_2": [(14.2, 14.7), (14.8, 15.3)],
+        }
     )
 
-    assert result["chunk_00:speaker_0"]["voice_register"] == "high"
-    assert result["chunk_00:speaker_1"]["voice_register"] == "low"
-    assert result["chunk_00:speaker_2"]["voice_register"] == "high"
+    assert selected["chunk_00:speaker_0"] == [
+        {"start": 0.0, "end": 0.5},
+        {"start": 0.6, "end": 1.1},
+        {"start": 2.0, "end": 12.0},
+    ]
+    assert len(selected["chunk_00:speaker_1"]) == 2
+    assert len(selected["chunk_00:speaker_2"]) == 2
 
 
 def test_three_provider_labels_keep_distinct_validated_voices():
@@ -1118,14 +1046,13 @@ def test_multi_adapter_preserves_translation_target_language(
     assert captured["state"]["auto_speaker_lane"] == "multi"
 
 
-def test_multi_filter_is_owned_without_modifying_protected_two_speaker_code(
+def test_multi_pcm_contract_reuses_stereo_onnx_source_without_filter_grid(
     tmp_path,
     monkeypatch,
 ):
     multi_module = _multi_module()
-    assert multi_module.MULTI_PCM_AUDIO_FILTER == (
-        "highpass=f=70,lowpass=f=320,afftdn=nr=6:nf=-50"
-    )
+    assert multi_module.subdub_two_speaker_gender_onnx.PCM_CHANNELS == 2
+    assert multi_module.subdub_two_speaker_gender_onnx.PCM_SAMPLE_RATE == 44_100
     assert "AUTO_SPEAKER_PCM_AUDIO_FILTER" not in vars(auto_speaker)
     source_path = tmp_path / "source.mp4"
     source_path.write_bytes(b"source")
@@ -1159,13 +1086,13 @@ def test_multi_filter_is_owned_without_modifying_protected_two_speaker_code(
                 "duration_seconds": 12,
             },
             {},
-            channels=1,
-            sample_rate=16_000,
+            channels=2,
+            sample_rate=44_100,
             sample_format="s16le",
         )
     )
 
-    assert result == str(tmp_path / "auto_speaker_16000_mono_s16le.pcm")
+    assert result == str(tmp_path / "auto_speaker_44100_stereo_s16le.pcm")
     assert calls == [
         (
             [
@@ -1177,14 +1104,12 @@ def test_multi_filter_is_owned_without_modifying_protected_two_speaker_code(
                 "12",
                 "-vn",
                 "-ac",
-                "1",
-                "-af",
-                multi_module.MULTI_PCM_AUDIO_FILTER,
+                "2",
                 "-ar",
-                "16000",
+                "44100",
                 "-f",
                 "s16le",
-                str(tmp_path / "auto_speaker_16000_mono_s16le.pcm"),
+                str(tmp_path / "auto_speaker_44100_stereo_s16le.pcm"),
             ],
             77.0,
         )
