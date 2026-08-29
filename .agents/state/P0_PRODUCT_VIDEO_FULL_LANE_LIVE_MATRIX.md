@@ -411,9 +411,14 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
   credit events `10`; provider usage `0`; active video jobs `0`; Owner wallet
   `200 Xu`, total spent `0`. Fixture still exactly `32,391,742` bytes, SHA
   `784FBE5B...E2732`.
-- [ ] Start one fresh uploaded-Trend representative after Browser action-time
-  confirmation. The preserved old Invoice belongs to the bypassed flow and must
-  not be used as full-flow LIVE evidence.
+- [x] Owner action-time confirmation received exactly:
+  `XÁC NHẬN GỬI PV2-R01 SHA 784FBE5B VÀ CHẠY TREND LIVE`. It authorizes one
+  fresh upload of the measured fixture to `@toanaasbot` and one final Confirm;
+  it does not authorize duplicate upload/job retries.
+- [ ] Wait for exact SubDub LIVE/CHROME/VPS releases, then start one fresh
+  uploaded-Trend representative without asking Owner again. The preserved old
+  Invoice belongs to the bypassed flow and must not be used as full-flow LIVE
+  evidence.
 
 Current source evidence:
 

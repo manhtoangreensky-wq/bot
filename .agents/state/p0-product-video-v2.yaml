@@ -1,5 +1,5 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_DEPLOYED_AWAITING_LIVE_CONFIRM
+phase: PV2_R01_LIVE_CONFIRMED_WAITING_SUBDUB_RELEASE
 pointer: V2-03/PV2-R01
 base_sha: da817b656da10b405a2878664a690d3a66d2b313
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
@@ -216,4 +216,13 @@ live_baseline:
   owner_credits_total_spent: [200, 0]
   fixture_bytes: 32391742
   fixture_sha256: 784FBE5BBD7B8D59A40A16AD103DB2B14B5DC7FCE71BE2ADA3E24A3BC04E2732
-next_action: After exact Browser action-time confirmation, start one fresh uploaded-Trend representative through content/profile/suggestion/preview, select subtitle plus transition and tier 400, confirm exactly once, then prove one project/job/outbox, two real scene outputs, final MP4, receipt/report and zero wallet delta.
+live_authorization:
+  received: true
+  exact_text: XÁC NHẬN GỬI PV2-R01 SHA 784FBE5B VÀ CHẠY TREND LIVE
+  fixture_sha_prefix: 784FBE5B
+  destination: "@toanaasbot"
+  permits_uploads: 1
+  permits_final_confirms: 1
+  duplicate_retry_authorized: false
+  current_shared_owner: SubDub
+next_action: Wait only for exact SubDub LIVE/CHROME/VPS releases, then start one fresh uploaded-Trend representative through content/profile/suggestion/preview, select subtitle plus transition and tier 400, confirm exactly once, and prove one project/job/outbox, two real scene outputs, final MP4, receipt/report and zero wallet delta; do not ask Owner again.

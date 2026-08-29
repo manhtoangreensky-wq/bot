@@ -75,6 +75,13 @@ transactions/credit-events/provider-usage `0/10/0`, active jobs `0`, Owner
 wallet `200/0`. This proves deployment readiness only; no fresh full-flow Trend
 artifact exists yet.
 
+Owner action-time confirmation is now durable and exact:
+`XÁC NHẬN GỬI PV2-R01 SHA 784FBE5B VÀ CHẠY TREND LIVE`. It covers one upload
+of the measured fixture to `@toanaasbot` and one final Confirm in this case.
+Do not ask again after shared resources are released, and do not reuse it for a
+duplicate upload/job retry. Current wait is only the SubDub shared-resource
+boundary, not a Product Video source/runtime blocker.
+
 Admission/idempotency evidence: focused transaction/single-use/outbox gate =
 `11 passed in 8.06s`. Dedupe does not rely on a wallet ledger row: project UUID,
 active render project, scene index and outbox job identity are database-unique;
