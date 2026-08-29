@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from types import SimpleNamespace
 
 import bot
@@ -137,3 +138,54 @@ def test_flow6_accepts_the_same_uploaded_trend_source_as_flow7() -> None:
 
     assert result["ok"] is True
     assert "trend_source_or_sample_missing" not in result["blockers"]
+
+
+def test_trend_document_probe_reuses_local_bot_api_byte_downloader(monkeypatch) -> None:
+    payload = b"pv2-r01-local-bot-api-source"
+    downloader_calls: list[tuple[str, int, float]] = []
+
+    class DirectDownloadMustNotRun:
+        async def get_file(self, _file_id: str):
+            raise RuntimeError("InvalidToken")
+
+    async def stable_download(_context, source: dict, maximum_bytes: int, *, read_timeout: float):
+        downloader_calls.append((str(source.get("file_id") or ""), maximum_bytes, read_timeout))
+        return payload
+
+    def probe(path: str) -> dict:
+        with open(path, "rb") as handle:
+            assert handle.read() == payload
+        return {
+            "duration": 79.4667,
+            "width": 1280,
+            "height": 720,
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "video_codec": "h264",
+            "audio_stream_count": 1,
+        }
+
+    def validate(probe_result: dict, *, file_size: int, **_kwargs) -> dict:
+        return {"ok": True, "bytes": file_size, **probe_result}
+
+    monkeypatch.setattr(bot, "download_video_editor_asset_bytes", stable_download)
+    monkeypatch.setattr(bot.video_local_validation, "probe_video_file", probe)
+    monkeypatch.setattr(bot.video_local_validation, "validate_source_metadata", validate)
+
+    result = asyncio.run(
+        bot.inspect_bounded_telegram_video_source(
+            SimpleNamespace(bot=DirectDownloadMustNotRun()),
+            {
+                "source_file_id": "trend-document-file-id",
+                "source_file_name": "PV-L05-self-shot-typing-source.mp4",
+                "source_file_size": 32_391_742,
+                "source_duration": 79,
+            },
+        )
+    )
+
+    assert downloader_calls == [
+        ("trend-document-file-id", bot.video_local_validation.MAX_UPLOAD_BYTES, 120.0)
+    ]
+    assert result["ok"] is True
+    assert result["bytes"] == len(payload)
+    assert result["source_sha256"] == hashlib.sha256(payload).hexdigest()
