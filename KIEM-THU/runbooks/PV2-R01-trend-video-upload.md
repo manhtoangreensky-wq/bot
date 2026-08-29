@@ -36,6 +36,18 @@ TDD: `2 failed in 8.15s` -> `2 passed in 707.43s`; protected Trend/Strategy
 batch `61 passed in 16.37s`; compile/diff exit `0`. Resume this same session only
 after deploy; Review must show source files `1` before tier `400` is selected.
 
+PR #926 deployed runtime `3b585527...` in run `33213099898` SUCCESS `5m26s`;
+Review then showed source files `1`. Tier `400` opened the exact `144 Xu` invoice
+with subtitle `0 Xu` and Owner no-charge. Final Confirm correctly stopped before
+DB admission with `trend_source_or_sample_missing`; projects/jobs/outbox stayed
+`31/27/26`, active jobs `0`, provider/wallet deltas `0`. Root cause is Flow6
+lagging Flow7: Flow7 already accepts `video_upload + source_video_id +
+source_analysis`, while Flow6 accepted only URL/sample/user-topic. Parity TDD:
+`1 failed in 9.29s` -> `1 passed in 12.30s`; protected branch `96 passed + 2`
+historical failures, and clean main reproduced the same two failures in
+`593.52s`, therefore `NEW_FAILURES=0`. Resume the preserved invoice only after
+the Flow6 parity deploy; do not upload or create another configuration.
+
 Admission/idempotency evidence: focused transaction/single-use/outbox gate =
 `11 passed in 8.06s`. Dedupe does not rely on a wallet ledger row: project UUID,
 active render project, scene index and outbox job identity are database-unique;

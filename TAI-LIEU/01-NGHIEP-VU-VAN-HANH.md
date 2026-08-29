@@ -446,3 +446,13 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Fix chỉ ở Trend handoff, không đổi shared Tail, UI, route engine, provider,
   worker hoặc wallet. RED `2 failed in 8.15s`; exact GREEN `2 passed in 707.43s`;
   protected Trend/Strategy `61 passed in 16.37s`; compile/diff exit `0`.
+- PR #926 merge `3b585527...`, deploy `33213099898` SUCCESS `5m26s`; Review
+  xác nhận source `1 tệp`. Hóa đơn tier `400` giữ đúng `144 Xu`, subtitle miễn
+  phí, Owner không trừ.
+- Final Confirm dừng trước DB với `trend_source_or_sample_missing`; không project,
+  job, outbox hay provider call mới. Nguyên nhân là Flow7 đã công nhận upload
+  Trend thực, còn Flow6 chỉ nhận URL/sample/user-topic.
+- Flow6 dùng lại đúng predicate upload đã kiểm chứng ở Flow7; không đổi route hay
+  engine. RED `1 failed in 9.29s`, GREEN `1 passed in 12.30s`; branch có
+  `96 passed + 2` historical failures và clean main tái hiện đúng hai failure đó
+  trong `593.52s`, nên `NEW_FAILURES=0`.

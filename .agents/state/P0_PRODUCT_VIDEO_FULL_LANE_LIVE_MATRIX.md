@@ -366,8 +366,19 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
   source into Scene3 reference assets and refreshes embedded Tail source IDs.
   Exact `2 passed in 707.43s`; protected Trend/Strategy `61 passed in 16.37s`;
   compile and diff-check exit `0`. Shared Tail/engine/provider/worker unchanged.
-- [ ] Ship/deploy exact correction, resume the same live session, require Review
-  source files `1`, then proceed tier `400` -> Invoice -> one Confirm -> artifact.
+- [x] PR #926 merged `3b585527...`; deploy `33213099898` SUCCESS `5m26s`;
+  Review live changed to source files `1`. Worker generation
+  `30a883a4823948d7807bf982e064501e` accepted, reject empty.
+- [x] Tier `400` Invoice remained exact: 2 scenes, 16s, 9:16, `80 Xu/scene`,
+  subtitle `0`, Add-on total `0`, invoice total `144`, Owner no-charge.
+- [x] Final Confirm RED before admission: `trend_source_or_sample_missing`;
+  project/job/outbox counts remained `31/27/26`, active jobs `0`, provider and
+  wallet deltas `0`. Flow7 accepted the uploaded source but Flow6 did not.
+- [x] Flow6 parity RED `1 failed in 9.29s`; minimal Trend-only GREEN
+  `1 passed in 12.30s`. Protected branch `96 passed + 2` failures; clean main
+  reproduced the same two Script-only failures in `593.52s`, `NEW_FAILURES=0`.
+- [ ] Ship/deploy Flow6 parity, reuse the preserved Invoice/config, final Confirm
+  once, then lock admission IDs and follow the two-scene artifact to terminal.
 
 Current source evidence:
 

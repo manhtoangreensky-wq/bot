@@ -1,10 +1,11 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_TREND_SOURCE_HANDOFF_SHIP_READY
+phase: PV2_R01_FLOW6_UPLOAD_PARITY_SHIP_READY
 pointer: V2-03/PV2-R01
 base_sha: 3e28d3d9ac63baf26b939db4c55111bea3b97610
 goal: Live the most complex Video Trend upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
 allowed_files:
   - bot.py
+  - services/video_flow6.py
   - KIEM-THU/PRODUCT-VIDEO-LIVE-STRATEGY-V2.md
   - KIEM-THU/runbooks/PV2-R01-trend-video-upload.md
   - KIEM-THU/product-video-live-strategy-v2.json
@@ -144,4 +145,29 @@ pv2_r01_live_red:
   protected_green: 61 passed in 16.37s
   py_compile: exit 0
   diff_check: exit 0
-next_action: Ship only the Trend entity-to-Tail source handoff correction, deploy exact SHA, then reuse the current pre-quality live session through entity refresh; Review must show 1 source file before tier 400, Invoice and one final Confirm.
+pv2_r01_source_handoff_deploy:
+  pr: 926
+  merge_sha: 3b585527b596e45b985d59b713051531f824583c
+  deploy_run: 33213099898
+  deploy_result: SUCCESS in 5m26s
+  live_review_source_files: 1
+  runtime_worker_generation: 30a883a4823948d7807bf982e064501e
+pv2_r01_pre_admission_red:
+  invoice_id: pv:7126457028:video_trend:1:400
+  invoice_scene_count: 2
+  invoice_total_xu: 144
+  invoice_addon_xu: 0
+  owner_charged_xu: 0
+  blocker: trend_source_or_sample_missing
+  db_project_job_outbox_delta: [0, 0, 0]
+  active_video_jobs: 0
+  provider_usage_delta: 0
+  transaction_delta: 0
+  credit_event_delta: 0
+  root_cause: Flow7 accepted uploaded Trend source but Flow6 only accepted URL/sample/user-topic
+  tdd_red: 1 failed in 9.29s
+  exact_green: 1 passed in 12.30s
+  protected_branch: 96 passed and 2 historical failures
+  protected_clean_main: same 2 historical failures in 593.52s
+  new_failures: 0
+next_action: Ship only Flow6 uploaded-Trend parity, deploy exact SHA, then use the preserved invoice/config to confirm once; admission must create exactly one project/job/outbox and keep wallet deltas zero.
