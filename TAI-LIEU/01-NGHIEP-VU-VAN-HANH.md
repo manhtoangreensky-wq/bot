@@ -538,3 +538,48 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Owner cho phép dùng `D:\TOANAAS\video AI tham khảo` làm kho fixture cho các
   row sau; mỗi file phải đo SHA/metadata trước live. Không đổi fixture PV2-R01
   giữa failure-loop.
+
+## Bổ sung PV2-R01 job #28 và authority provider theo cảnh - 29/08/2026
+
+- PR #930 đã squash-merge SHA
+  `42cbf929b8f89b9154e7f343079ac6655c2ef512`; deploy run `33252027086`
+  SUCCESS trong `10m22s`. Bot và Owner Product Video worker cùng SHA; generation
+  `aae18624871f4008bdd46dc7e23437a3` authenticated/persisted, reject rỗng.
+- Flow upload Trend đầy đủ đã đi qua analysis, 2 cảnh, 9:16, nguồn nội dung,
+  Social creator Trend, Preview, entity/style/requirements/plan/prompts, Add-on,
+  Review, tier `400`, Invoice `144 Xu`, một Confirm và Status. Admission tạo đúng
+  request `VID-20260829-D78AA3`, project `32`, job `28`, outbox `27`.
+- Forensic SQLite `-readonly` đo job `28` có `attempts=5/max_attempts=3`. Hai scene
+  có hai task ShopAIKey `veo3.1-fast` khác nhau, đều `submit_accepted=1`,
+  `task_pollable=1`, trạng thái authority `IN_PROGRESS` từ
+  `shopaikey.data.status`; map task -> scene phủ đủ `1/2`. Root lại rỗng authority
+  và chỉ đếm `1` task, nên marker cũ `failed_no_charge` thắng; outbox chuyển
+  `terminal_failed` với reason `provider_in_progress`. Scene `130/131` chưa có
+  video/audio path; delivery attempts `0`; charged Xu `0`, transactions `0`,
+  credit events giữ `10`, Owner wallet giữ `200/0`.
+- Nguyên nhân gốc: connector đã lưu authority thật trong từng `scene_tasks`, nhưng
+  queue/worker chỉ dùng authority root khi quyết định task còn sống. Đây là bẫy
+  dữ liệu phân cấp: root summary có thể stale hoặc collapsed, không được ghi đè
+  hai task-scene rows đang chạy.
+- Correction chỉ đổi `remote_worker.py` và `services/video_project_queue.py`.
+  Scene task có ID thật + authority running chỉ được sửa marker terminal cũ khi
+  root vẫn yêu cầu provider polling. Cancellation, delivery và explicit terminal
+  reason như `all_scene_providers_exhausted_no_charge` vẫn fail-closed.
+- Bằng chứng local khóa cuối: focused/recovery `7 passed`; protected effective
+  `68 passed, 5` exact baseline deselected; raw protected `68 passed + đúng 5`
+  baseline failures; broad impact `196 passed + đúng 34` baseline failures so với clean
+  main `189 passed + cùng 34`, `NEW_FAILURES=0`. `bot.py` và changed runtime/test
+  compile exit `0`; docs/state/diff/secret gates sạch; provider calls `0`, wallet
+  mutations `0` trong source gate.
+- Vận hành recovery không dùng SQL tay: `/api/v1/worker/claim` có owner hiện hữu
+  tự CAS-requeue job failed đủ điều kiện và ghi `recovery_existing_tasks_only`.
+  Claim/build/complete sau đó ép `provider_submit_allowed=false`,
+  `automatic_resubmit/fallback=false`, charge `0`. Claim-scan preflight RED
+  `1 failed, 1 passed` chứng minh job #27 explicit exhaustion từng có thể bị hồi
+  sinh; shared terminal-reason guard chặn #27 nhưng vẫn cho #28, và `4` selector
+  recovery hiện hữu PASS.
+  Sau deploy chỉ poll/materialize hai task cũ của job `28`, cấm upload/Confirm/job
+  hoặc provider submit mới.
+- `PV2-R01` vẫn là LIVE RED, chưa được khóa. Chỉ đổi thành `LOCKED_LIVE_PASS` khi
+  hai task cũ tạo MP4 2 cảnh thật, cover-fit 9:16, subtitle + transition + audio,
+  Telegram receipt + báo cáo khách và zero-wallet đều có bằng chứng terminal.

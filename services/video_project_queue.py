@@ -677,12 +677,37 @@ def _provider_status_value_is_running(*values: Any) -> bool:
 
 
 def _actual_provider_payload_status(payload: dict[str, Any]) -> tuple[str, str, bool]:
-    source = str(payload.get("provider_status_payload_source") or "").strip()
+    source = str(
+        payload.get("provider_status_payload_source")
+        or payload.get("state_authority_source")
+        or ""
+    ).strip()
     status = ""
     if source.startswith("shopaikey.data."):
-        status = str(payload.get("shopaikey_data_status") or payload.get("shopaikey_raw_status") or "").strip()
+        status = str(
+            payload.get("shopaikey_data_status")
+            or payload.get("actual_provider_payload_status")
+            or payload.get("shopaikey_raw_status")
+            or ""
+        ).strip()
     authoritative = bool(source.startswith("shopaikey.data.") and status)
     return status, source, authoritative
+
+
+def _product_video_explicit_terminal_reason(payload: dict[str, Any]) -> str:
+    for key in (
+        "scene_forensic_terminal_reason",
+        "zero_task_terminal_reason",
+        "dispatch_outbox_terminal_reason",
+    ):
+        reason = str(payload.get(key) or "").strip()
+        if reason and reason not in {
+            "provider_in_progress",
+            "provider_pending",
+            "provider_not_start",
+        }:
+            return reason
+    return ""
 
 
 def _provider_status_for_progress(payload: dict[str, Any], alive: bool) -> str:
@@ -822,7 +847,58 @@ def provider_task_alive(payload: dict[str, Any] | None = None) -> bool:
     payload = dict(payload or {})
     if payload.get("zero_task_progress_guard") or _as_int(payload.get("valid_provider_task_count"), 1) == 0:
         return False
-    terminal = str(payload.get("terminal_state") or payload.get("final_decision") or "").strip().lower()
+    terminal = str(
+        payload.get("terminal_state") or payload.get("final_decision") or ""
+    ).strip().lower()
+    if terminal in {
+        "cancelled",
+        "canceled",
+        "completed",
+        "delivered",
+        "final_delivered",
+        "failed_refunded",
+        "needs_admin_review",
+    }:
+        return False
+    if _product_video_explicit_terminal_reason(payload):
+        return False
+    scene_pending_requested = bool(
+        payload.get("continue_polling")
+        or payload.get("provider_pending_deferred")
+        or str(payload.get("provider_error") or "").strip()
+        in {"provider_in_progress", "provider_pending", "provider_not_start"}
+        or str(payload.get("blocker") or "").strip()
+        in {"provider_in_progress", "provider_pending", "provider_not_start"}
+    )
+    scene_task_alive = False
+    for key in (
+        "scene_tasks",
+        "provider_scene_tasks",
+        "product_video_scene_tasks",
+        "scene_ledger",
+    ):
+        raw_rows = payload.get(key) or []
+        if isinstance(raw_rows, dict):
+            rows = raw_rows.values()
+        elif isinstance(raw_rows, (list, tuple)):
+            rows = raw_rows
+        else:
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            actual_status, _source, authoritative = _actual_provider_payload_status(row)
+            if (
+                _product_video_scene_task_identity(row)
+                and authoritative
+                and _provider_status_value_is_running(actual_status)
+                and not _provider_status_value_is_not_start(actual_status)
+                and not _product_video_scene_task_is_valid_clip(row)
+            ):
+                scene_task_alive = True
+                break
+        if scene_task_alive:
+            break
     task_present = bool(
         payload.get("provider_task_id_saved")
         or payload.get("primary_provider_task_id_present")
@@ -838,7 +914,10 @@ def provider_task_alive(payload: dict[str, Any] | None = None) -> bool:
         and not _provider_status_value_is_not_start(actual_status)
     )
     final_ready = _provider_final_output_ready(payload) or _provider_result_url_present(payload)
-    if actual_running and task_present and not final_ready:
+    if (
+        (actual_running and task_present)
+        or (scene_task_alive and scene_pending_requested)
+    ) and not final_ready:
         return True
     not_start_under_threshold = bool(
         _provider_status_value_is_not_start(
@@ -6660,6 +6739,7 @@ def product_video_existing_task_recovery_state(
     mapped = list(ownership.get("mapped_scene_indexes") or [])
     outbox_present = _as_int(outbox.get("outbox_id"), 0) > 0
     cancellation = product_video_recovery_cancellation_state(project, outbox)
+    explicit_terminal_reason = _product_video_explicit_terminal_reason(result)
     outbox_status = str(cancellation.get("outbox_status") or "")
     job_status = str(job.get("status") or "").strip().lower()
     project_status = str(cancellation.get("project_status") or "")
@@ -6740,6 +6820,7 @@ def product_video_existing_task_recovery_state(
         and outbox_present
         and terminal_outbox
         and mapping_verified
+        and not explicit_terminal_reason
         and not charge_recorded
         and not delivered
         and not recovery_attempts_exhausted
@@ -6763,6 +6844,8 @@ def product_video_existing_task_recovery_state(
         blocker = "dispatch_outbox_not_terminal"
     elif not mapping_verified:
         blocker = "existing_task_scene_coverage_incomplete"
+    elif explicit_terminal_reason:
+        blocker = "existing_provider_tasks_explicitly_terminal"
     elif charge_recorded:
         blocker = "wallet_charge_already_recorded"
     elif delivered:
@@ -6792,6 +6875,7 @@ def product_video_existing_task_recovery_state(
         "existing_task_recovery_product_video": product_video,
         "existing_task_recovery_public_confirmed": confirmed,
         "existing_task_recovery_outbox_terminal": terminal_outbox,
+        "existing_task_recovery_explicit_terminal_reason": explicit_terminal_reason,
         "existing_task_recovery_project_cancelled": project_cancelled,
         "existing_task_recovery_outbox_cancelled": outbox_cancelled,
         "existing_task_recovery_delivered": delivered,

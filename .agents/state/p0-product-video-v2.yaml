@@ -1,10 +1,12 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_DOCUMENT_INTAKE_SHIP_READY
+phase: PV2_R01_JOB28_SCENE_AUTHORITY_LOCAL_READY
 pointer: V2-03/PV2-R01
-base_sha: da817b656da10b405a2878664a690d3a66d2b313
+base_sha: 42cbf929b8f89b9154e7f343079ac6655c2ef512
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
 allowed_files:
   - bot.py
+  - remote_worker.py
+  - services/video_project_queue.py
   - services/video_flow6.py
   - services/video_flow7.py
   - KIEM-THU/PRODUCT-VIDEO-LIVE-STRATEGY-V2.md
@@ -21,6 +23,7 @@ allowed_files:
   - tests/test_p0_product_video_manual_tail_matrix.py
   - tests/test_p0_product_video_trend_source_tail_handoff.py
   - tests/test_p0_product_video_trend_standard_flow_restore.py
+  - tests/test_p0_product_video_job28_authoritative_pending_guard.py
   - .agents/state/P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md
   - .agents/state/p0-product-video-v2.yaml
 protected_domains:
@@ -129,7 +132,7 @@ current_case:
   fixture: PV-L05-self-shot-typing-source.mp4
   fixture_bytes: 32391742
   fixture_sha256: 784FBE5BBD7B8D59A40A16AD103DB2B14B5DC7FCE71BE2ADA3E24A3BC04E2732
-  provider_action_started: false
+  provider_action_started: true
 pv2_r01_live_red:
   runtime_sha: 02c1c4aa0533788816d740245ba9812bf4f63ea0
   baseline_projects_jobs_outbox: [31, 27, 26]
@@ -223,11 +226,12 @@ live_authorization:
   destination: "@toanaasbot"
   permits_uploads: 1
   permits_final_confirms: 1
-  uploads_consumed: 1
+  uploads_consumed: 2
+  final_confirms_consumed: 1
   duplicate_retry_authorized: false
   bounded_same_fixture_retry_after_zero_side_effect_red: true
-  bounded_retry_uploads_remaining: 1
-  current_shared_owner: Product Video
+  bounded_retry_uploads_remaining: 0
+  current_shared_owner: SubDub
 fixture_library:
   owner_approved_path: 'D:\TOANAAS\video AI tham khảo'
   use_for_future_rows: true
@@ -251,4 +255,100 @@ pv2_r01_document_intake_red:
   new_failures: 0
   compile: exit 0
   diff_scope_secret: exit 0
-next_action: Push one scoped Trend document-intake PR, squash merge, deploy and verify bot plus owner worker exact SHA, then use the one bounded same-fixture retry to continue the already authorized full Trend flow through content/profile/preview/middle/Tail/tier 400/Confirm and prove one project/job/outbox, two real scenes, final MP4, receipt/report and zero wallet delta.
+pv2_r01_document_intake_ship:
+  pr: 930
+  merge_sha: 42cbf929b8f89b9154e7f343079ac6655c2ef512
+  deploy_run: 33252027086
+  deploy_result: SUCCESS in 10m22s
+  bot_sha: 42cbf929b8f89b9154e7f343079ac6655c2ef512
+  owner_worker_sha: 42cbf929b8f89b9154e7f343079ac6655c2ef512
+  owner_worker_generation: aae18624871f4008bdd46dc7e23437a3
+  heartbeat_authenticated: true
+  heartbeat_persisted: true
+  heartbeat_reject_reason: ""
+pv2_r01_job28_live_red:
+  runtime_sha: 42cbf929b8f89b9154e7f343079ac6655c2ef512
+  request_id: VID-20260829-D78AA3
+  project_id: 32
+  project_uuid: vprj_bebc9aa4c6044760a52ed1f70c5bd4b7
+  job_id: 28
+  outbox_id: 27
+  scene_ids: [130, 131]
+  exact_admission_delta: [1, 1, 1]
+  product_profile: ugc_affiliate
+  product_id: video_trend
+  tier_id: 400
+  scene_count: 2
+  ratio: 9:16
+  invoice_total_xu: 144
+  selected_addons: [subtitle_source_language, transition_default]
+  ui_path: upload_analysis_content_profile_preview_entity_style_requirements_plan_prompts_addon_review_quality_invoice_confirm_status
+  job_status: failed
+  project_terminal_state: failed_no_charge
+  outbox_status: terminal_failed
+  attempts_observed: 5
+  max_attempts: 3
+  root_continue_polling: 0
+  root_provider_error: provider_in_progress
+  root_authority_empty: true
+  root_provider_task_id_count: 1
+  durable_scene_task_count: 2
+  scene_tasks_submitted_count: 2
+  durable_task_scene_map_count: 2
+  scene_statuses: [provider_running, provider_running]
+  scene_actual_provider_statuses: [IN_PROGRESS, IN_PROGRESS]
+  scene_authority_sources: [shopaikey.data.status, shopaikey.data.status]
+  scene_task_pollable: [true, true]
+  scene_submit_accepted: [true, true]
+  task_ids_masked: [task...QJ95(len37), task...qIcI(len37)]
+  selected_provider: shopaikey_video
+  selected_model: veo3.1-fast
+  scene_output_paths_present: [false, false]
+  delivery_attempt_count: 0
+  provider_usage_rows: 0
+  transaction_rows: 0
+  credit_event_rows: 10 unchanged
+  owner_credits_total_spent: [200, 0]
+  charged_xu: 0
+  representative_live_pass: false
+pv2_r01_job28_source_correction:
+  root_cause: root-only provider alive detection ignored two authoritative IN_PROGRESS scene tasks, so stale failed_no_charge markers won after five claims
+  production_scope: [remote_worker.py, services/video_project_queue.py]
+  provider_submit_route_changed: false
+  provider_poll_route_changed: false
+  ui_tail_quality_wallet_changed: false
+  exact_live_shape_red: 1 failed and 2 passed in 23.22s
+  cancellation_safety_red: 1 failed in 19.40s
+  explicit_scene_exhaustion_red: 1 failed in 11.06s
+  recovery_claim_scan_red: 1 failed and 1 passed in 10.63s
+  focused_green: 7 passed in 12.03s
+  existing_recovery_green: 4 passed in 20.18s
+  protected_green: 68 passed and 5 exact baseline deselected in 19.21s
+  protected_branch_before_deselect: 68 passed and 5 failed in 19.08s
+  protected_clean_main: 61 passed and same 5 failed in 1442.84s
+  impact_branch: 196 passed and 34 failed in 42.55s
+  impact_clean_main: 189 passed and same 34 failed in 69.07s
+  new_failures: 0
+  py_compile_bot: exit 0
+  py_compile_remote_worker_queue_test_local_worker: exit 0
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  shared_resources_released_to_subdub: true
+  local_ready_only: true
+  live_pass: false
+pv2_r01_job28_post_rebase_gate:
+  base_sha: 50c16cfed8ee150e8259c32687eda4b313f163e9
+  pre_evidence_amend_head_sha: 2b3824a9c0b54d05fe3e49e950976530847094e6
+  behind_ahead: [0, 1]
+  rebase_result: clean
+  focused_recovery: 11 passed in 17.20s
+  protected_effective: 68 passed and 5 exact baseline deselected in 14.52s
+  docs_verifier: 9 passed in 14.12s
+  state_yaml: POST_REBASE_STATE_OK
+  py_compile_bot_and_changed: exit 0
+  diff_check: exit 0
+  secret_scan: 0 matches
+  provider_calls: 0
+  wallet_mutations: 0
+  live_pass: false
+next_action: Force-with-lease remote branch from stale 5b5e7a8 to the current clean rebased branch HEAD, then create one PR after Owner action-time confirmation, squash merge, deploy and verify bot plus Owner worker exact runtime SHA. Then let the built-in owner worker claim boundary recover only existing job 28 and its two durable provider task IDs; do not upload, confirm, create a new project/job/outbox or submit another paid provider task. Poll/materialize the existing tasks to a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/audio, persist receipt and customer report, prove zero wallet delta, and only then mark PV2-R01 LOCKED_LIVE_PASS.

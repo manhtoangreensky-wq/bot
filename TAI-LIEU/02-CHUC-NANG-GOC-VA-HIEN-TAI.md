@@ -284,3 +284,29 @@ route/test/artifact; sản phẩm sau chỉ nối adapter vào engine đã chứ
 được sửa product đã PASS để làm product mới chạy. `merged != deployed != LIVE`, và
 MP4 hợp lệ vẫn chưa đủ nếu Add-on truth, report receipt hoặc zero-wallet evidence
 còn thiếu.
+
+## Đối chiếu PV2-R01 job #28 và provider authority theo cảnh - 29/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Root `provider_task_ids/provider_status` đủ đại diện job nhiều cảnh | Job `28` root chỉ đếm `1` task và mất authority, nhưng `scene_tasks` + hai map durable giữ đúng `2` task, một cho mỗi cảnh, cùng authority `IN_PROGRESS` | Không còn đúng |
+| `failed_no_charge` luôn thắng mọi provider snapshot | Chỉ explicit exhaustion/cancellation/delivery thắng; marker failed stale được scene task đang chạy sửa về polling khi root vẫn yêu cầu pending | Đã làm rõ fail-closed |
+| Worker hết generic retry thì cần submit job mới | Claim boundary CAS-requeue chính job cũ với `recovery_existing_tasks_only`; submit/resubmit/fallback đều bị ép false | Không còn đúng |
+| Provider nhận task hoặc HTTP 200 là video PASS | Hai task job `28` được nhận và pollable nhưng chưa có scene artifact/final MP4/receipt, nên vẫn LIVE RED | Không còn đủ để PASS |
+
+Bằng chứng production: runtime `42cbf929...`, request `VID-20260829-D78AA3`,
+project/job/outbox `32/28/27`, `attempts=5/max=3`, hai scene authority
+`IN_PROGRESS`, outbox `terminal_failed`, delivery attempts `0`, charged Xu `0`.
+Source correction có focused/recovery `7 passed`, protected `68 passed + 5` exact baseline
+deselected, broad impact branch/clean cùng đúng `34` historical failures,
+`NEW_FAILURES=0`; compile/diff/docs/state/secret sạch. Recovery preflight RED
+chứng minh claim scan từng có thể hồi sinh job #27 explicit exhaustion; shared
+terminal-reason guard hiện giữ #27 terminal, giữ #28 poll-only, và `4` selector
+recovery hiện hữu PASS mà không thêm provider submit route.
+
+Chỗ tài liệu cũ không còn đúng cần nhớ: một summary root có thể là dữ liệu trình
+bày đã collapsed, không phải authority cho multiscene. Trước khi terminal hóa phải
+đọc task identity, actual status source và clip validity của từng scene; ngược lại,
+không được dùng scene status cũ để hồi sinh job đã cancelled, delivered hoặc có
+terminal reason explicit. `PV2-R01` chưa LIVE PASS cho tới khi chính hai task cũ
+được materialize thành MP4/receipt/report đạt đủ acceptance.
