@@ -1088,8 +1088,6 @@ async def run_auto_multi_speaker_blackbox(
         prepared_state = auto_speaker._prepared_state(prepared)
         if (
             not 1 <= len(labels) < 3
-            or prepared_state.get("auto_exact_receipt")
-            or prepared_state.get("auto_exact_receipt_confirmed") is True
             or prepared_state.get("auto_exact_resume")
         ):
             return prepared
