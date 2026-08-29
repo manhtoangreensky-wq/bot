@@ -243406,7 +243406,6 @@ async def send_public_subtitle_dub_final_outputs(
 ) -> dict:
     mode = normalize_video_translate_mode(mode)
     requested_mode = normalize_video_translate_mode(requested_mode)
-    is_combined = mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     requires_final_mp4 = subdub_video_requires_final_mp4(mode)
     expected_duration_seconds = max(0.0, float(expected_duration_seconds or 0.0))
     canonical_video_path = str(canonical_video_path or "").strip()
@@ -243427,15 +243426,7 @@ async def send_public_subtitle_dub_final_outputs(
         active_flow not in {VIDEO_DUBBING_FLOW_TRANSCRIPT, VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE}
         and mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
     )
-    delivery_job = dict(
-        SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {}
-    )
-    auto_srt_companion_required = bool(
-        is_combined
-        and include_subtitle_outputs
-        and auto_multi_speaker.is_auto_multi_speaker_state(delivery_job)
-        and (subtitle_items or str(srt_text or "").strip())
-    )
+    auto_srt_companion_required = False
     sent = {
         "documents": 0,
         "audio": 0,

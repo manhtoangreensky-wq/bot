@@ -63,7 +63,7 @@ def test_subdub_dub_speech_rate_never_exceeds_normal_speed():
 def test_subdub_service_keeps_manual_cap_and_scopes_auto_cue_fit():
     assert subtitle_dub_product_pipeline._cue_locked_timing_requested({"voice_kind": "default_female"}) is False
     assert subtitle_dub_product_pipeline._cue_locked_timing_requested({"voice_kind": "auto_speaker_gender"}) is True
-    assert subtitle_dub_product_pipeline._cue_locked_timing_requested({"auto_speaker_lane": "multi"}) is False
+    assert subtitle_dub_product_pipeline._cue_locked_timing_requested({"auto_speaker_lane": "multi"}) is True
 
 
 def test_synthesize_dub_segment_chunks_does_not_retry_above_1x(monkeypatch):

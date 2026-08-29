@@ -3,8 +3,8 @@ product: SubDub
 owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
-branch: docs/p0-subdub-two-speaker-lock-closeout
-phase: SPEC_11_2_RED_READY_AFTER_SPEC_10_LOCK
+branch: fix/p0-subdub-multi-cue-lock-video-only
+phase: SPEC_11_4_POST_REBASE_GREEN_PUSH_PR_DEPLOY_NEXT
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -26,10 +26,10 @@ workflow_contract:
 
 resource_boundary:
   cpu: independent_local_subdub_source_only
-  live: release_to_product_video_immediately_after_this_closeout_merges
-  chrome: release_to_product_video_immediately_after_this_closeout_merges
-  vps_deploy: release_to_product_video_immediately_after_this_closeout_merges
-  product_video: source-local clean HEAD 0a70db2; owner worker inactive; job 27 unlocked queued
+  live: acquired_by_subdub_after_exact_product_video_release
+  chrome: acquired_by_subdub_after_exact_product_video_release
+  vps_deploy: acquired_by_subdub_after_exact_product_video_release
+  product_video: source-local only until exact SubDub release
 
 two_speaker_live_pass_20260828:
   runtime_sha: e819c1cd00d66273e00c667355325549dbea8d44
@@ -146,7 +146,60 @@ multi_fixture_read_only_evidence:
       chunk_00:speaker_2: {cues: 3, speech_seconds: 9.705, average_confidence: 0.431216}
   rejected_underclustered_sidecar:
     label_count: 2
-  production_edit_authorized: false until LOCKED_LIVE_PASS
+  production_edit_authorized: true after LOCKED_LIVE_PASS runtime 2fd989e
+
+active_multi_correction:
+  scope:
+    - reuse exact-two cue-locked speech-rate/timeline/source-duration engine for Auto multi
+    - suppress only the historical automatic multi SRT companion after a valid MP4
+    - keep internal SRT and explicit download available
+    - preserve 3-to-16-label diarization, classifier, stable distinct voices, pricing and wallet
+  red:
+    timing: 1 failed in 1.32s; multi cue_locked_timing actual false
+    delivery: 1 failed in 854.23s; trace reached reply_document multi.srt after video
+    marker_edge: old contract expected multi false; new literal exposed marker-only false before allowlist correction
+  green:
+    timing_minimal: 1 passed in 0.76s
+    marker_and_pipeline: 2 passed in 7.89s
+    focused_multi_exact_receipt_translation: 14 passed, 1 cache warning in 763.81s
+    multilingual_targets_preserved: [vi, ja, en, ko, zh]
+    three_cue_three_speaker_final: 1 passed, 1 cache warning in 0.53s
+    multi_both_lane_delivery: 2 passed, 1 cache warning in 5.65s
+    final_focused: 23 passed, 1 cache warning in 7.99s
+  protected_comparison:
+    broad_branch_initial: 72 passed, 2 failed, 11 setup errors in 4323.09s
+    setup_error_root: pytest default temp root permission WinError 5 before assertions
+    setup_rerun: 10 passed, 1 baseline-stale failure in 11.00s using isolated basetemp
+    baseline_exact_failures:
+      - one-frame classifier selector failed identically on clean 2fd989e
+      - stale AST namespace selector failed identically on clean 2fd989e
+      - multi filter selector failed identically on clean 2fd989e
+    baseline_run: first two 2 failed in 1386.11s; filter 1 failed in 8.00s
+    branch_effective: 82 passed and the exact same 3 baseline failures
+    new_failures: 0
+  immutable_hashes:
+    auto_multi_speaker: 55aab8949efaecad8dd987ac6dfe056ab0e4bc4ef81a23977ea5edd1cdf64911
+    speaker_cast: de93620f3f038b5759a53e696c5c85d3553fcee758686df56c70e6b11bac145b
+    two_speaker_asr_fallback: 94748def11c38d76952192a996fa42231d75b39d4d9ecd3407ff671d92e1177e
+  provider_calls: 0
+  wallet_mutations: 0
+  compile:
+    bot.py: exit 0
+    changed_service_and_tests: exit 0
+  independent_review:
+    critical: 0
+    important: 0
+    minor: 0
+    verdict: READY_TO_COMMIT YES
+  post_rebase:
+    base_sha: 3b585527b596e45b985d59b713051531f824583c
+    head_before_evidence_amend: d47086e65f2f9c424c28652ff8f1d2a3e9958d88
+    divergence: 0 behind, 1 ahead
+    focused: 23 passed, 1 cache warning in 546.19s
+    protected_hashes: 3 of 3 HASH_OK
+    compile: bot.py plus changed service and tests exit 0
+    yaml_diff_scope_secret: exit 0
+  next: push one PR, squash/deploy/runtime, then run combo and standalone multi live in order
 
 active_correction_08_0g:
   owner_requirements:
