@@ -225,10 +225,12 @@ Bằng chứng phục hồi Trend ngày 29/08/2026: exact RED `4 failed, 1 passe
 GREEN `5 passed`; `5` selector hợp đồng lịch sử và `3` transition runtime đưa
 file restore lên `8 passed`. So sánh bảy file là
 branch `119 passed + 2` failure Script baseline và clean main `117 passed + 3`;
-`NEW_FAILURES=0`. Tail/quality/UI protected `59 passed`; chưa deploy và chưa có
-artifact mới nên Trend vẫn chưa được đánh dấu LIVE PASS.
+`NEW_FAILURES=0`. Tail/quality/UI protected `59 passed`. PR #928 đã deploy exact
+runtime `fe25cc05...` qua run `33237168072`; bot + owner worker cùng SHA và
+heartbeat generation mới hợp lệ. Chưa có artifact full-flow mới nên Trend vẫn
+chưa được đánh dấu LIVE PASS.
 Post-rebase exact main `da817b65...`: `186 passed + 2` failure Script baseline;
-compile exit `0`. Merge, deploy và artifact thật vẫn là ba cổng riêng.
+compile exit `0`. Artifact thật vẫn là cổng riêng.
 
 ## Đối chiếu Tail chọn chất lượng — 28/08/2026
 
