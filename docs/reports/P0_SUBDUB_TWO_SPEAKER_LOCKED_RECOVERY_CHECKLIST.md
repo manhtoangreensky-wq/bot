@@ -1629,6 +1629,23 @@ Task contract:
   release. Review GREEN measured `6 passed in 1142.01s`; final protected gate
   measured `69 passed + 7 subtests in 9.68s`; changed-file compile exited `0`;
   both exact-two hashes remain unchanged.
+- [x] Same combo after PR #932/runtime `f955e3bb...` created job
+  `#CF3073CCD0` on the same exact fixture/options. Deepgram PASS produced 32
+  cues, but the sidecar remained exactly 2 labels / 16 cues each and the job
+  stopped `AUTO_CAST_MANUAL_REQUIRED` before TTS/mux/artifact with `0 Xu`.
+  Forensic state proved a stale nested `auto_exact_receipt`/confirmed marker
+  from an earlier job suppressed undercluster recovery even though the fresh
+  job was not a genuine `auto_exact_resume`.
+- [x] CF307 multi-only RED measured `1 failed in 9.79s`; the minimal condition
+  now skips re-diarization only for `auto_exact_resume=True`. GREEN measured
+  `1 passed in 9.80s`; stale receipt invokes exactly one re-diarization and
+  yields 3 labels. A genuine-resume comparator plus the stale test measured
+  `2 passed in 6.67s` with zero re-diarization provider calls on resume; the
+  full downstream classifier may still load cached/prepared PCM as designed. Protected final
+  measured `70 passed + 7 subtests in 8.59s`; compile/diff clean; exact-two
+  hashes unchanged and exact-two diff empty. Untracked tools/artifacts remain
+  excluded from staging. Shared resources were released for Product Video
+  while this correction remains source-local.
 
 ### SPEC-11 acceptance
 

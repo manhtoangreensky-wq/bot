@@ -593,11 +593,16 @@ def test_multi_pcm_stream_rejects_oversized_sparse_file_before_read(tmp_path):
     ) == b""
 
 
-def test_underclustered_multi_adapter_uses_provider_rediarization_once(
+def test_underclustered_multi_adapter_ignores_stale_receipt_and_rediarizes_once(
     tmp_path,
     monkeypatch,
 ):
     prepared = _prepared(tmp_path)
+    prepared["state"].update({
+        "auto_exact_receipt": {"session_nonce": "stale-session"},
+        "auto_exact_receipt_confirmed": True,
+        "auto_exact_session_nonce": "stale-session",
+    })
     stereo_pcm = tmp_path / "multi-stereo.pcm"
     stereo_pcm.write_bytes(b"\0" * 64)
     calls = {"extract": 0, "rediarize": 0}
@@ -660,6 +665,7 @@ def test_underclustered_multi_adapter_uses_provider_rediarization_once(
                 "voice_selection_mode": "auto_speaker",
                 "auto_speaker_lane": "multi",
                 "subdub_final_confirmed": "1",
+                "auto_exact_session_nonce": "fresh-session",
             },
         )
     )
@@ -679,6 +685,62 @@ def test_underclustered_multi_adapter_uses_provider_rediarization_once(
         "gemini_transcribe_multi_diarization"
     )
     assert calls == {"extract": 1, "rediarize": 1}
+
+
+def test_underclustered_multi_genuine_resume_skips_rediarization(
+    tmp_path,
+    monkeypatch,
+):
+    prepared = _prepared(tmp_path)
+    prepared["state"].update({
+        "auto_exact_receipt": {"session_nonce": "active-session"},
+        "auto_exact_receipt_confirmed": True,
+        "auto_exact_session_nonce": "active-session",
+        "auto_exact_resume": True,
+    })
+    calls = []
+
+    async def base_prepare(_state, *, require_auto_cast):
+        assert require_auto_cast is True
+        return prepared
+
+    async def rediarize(*_args, **_kwargs):
+        calls.append(True)
+        return {"ok": False}
+
+    async def isolated(**kwargs):
+        current = await kwargs["prepare_subtitles"](
+            kwargs["state"],
+            require_auto_cast=True,
+        )
+        return {"ok": True, "status": "fixture", "prepared": current}
+
+    monkeypatch.setattr(
+        auto_multi_speaker,
+        "_run_isolated_multi_speaker_blackbox",
+        isolated,
+    )
+    result = asyncio.run(
+        auto_multi_speaker.run_auto_multi_speaker_blackbox(
+            lane_mode="subtitle_plus_dub",
+            extract_pcm=lambda *_args, **_kwargs: "unused-by-this-wrapper-test.pcm",
+            prepare_subtitles=base_prepare,
+            rediarize_underclustered=rediarize,
+            state={
+                "voice_kind": "auto_speaker_gender",
+                "voice_selection_mode": "auto_speaker",
+                "auto_speaker_lane": "multi",
+                "subdub_final_confirmed": "1",
+                "auto_exact_resume": True,
+            },
+        )
+    )
+
+    assert result["prepared"] is prepared
+    # This focused wrapper test certifies only that a genuine resume does not
+    # submit a new re-diarization provider call. The downstream classifier may
+    # still load its cached/prepared PCM through the full preflight path.
+    assert calls == []
 
 
 def test_multi_gender_classifier_supports_same_gender_and_mixed_groups(

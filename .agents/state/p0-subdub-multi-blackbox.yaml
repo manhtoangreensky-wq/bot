@@ -4,7 +4,7 @@ owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
 branch: fix/p0-subdub-multi-cue-lock-video-only
-phase: SPEC_11_6_C6BD_DEEPGRAM_NETWORK_MULTI_FALLBACK_READY_TO_PUSH
+phase: SPEC_11_7_CF307_STALE_RECEIPT_MULTI_REDIARIZATION_LOCAL_READY
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -329,6 +329,43 @@ multi_live_failure_7c4be502c0:
       compile_changed_files: exit 0
       diff_check: exit 0
     next: amend evidence; one PR/deploy; same combo live; standalone only after combo PASS
+  cf307_live_failure_loop:
+    runtime_sha: f955e3bbfae21fc9be91388ea50b8824563c44bf
+    public_job: CF3073CCD0
+    internal_job: cf3073ccd038fe10288c
+    source_sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
+    selected_options: English; Auto multi; original 40 percent; dub 150 percent
+    terminal: AUTO_CAST_MANUAL_REQUIRED before TTS, mux or artifact
+    charged_xu: 0
+    provider_authority: Deepgram PASS with 32 cues
+    sidecar_authority: 32 cues; 2 labels; 16 cues each
+    root_cause: >-
+      A fresh job retained a stale nested auto_exact_receipt and confirmed
+      marker from a previous job. The multi wrapper treated receipt existence
+      as a genuine resume and skipped underclustered re-diarization. Genuine
+      receipt resume authority is the separate auto_exact_resume flag.
+    production_delta: >-
+      Multi-only preflight skips re-diarization only when auto_exact_resume is
+      true; stale receipt metadata alone cannot suppress the 1-2 label recovery.
+    red: 1 failed in 9.79s; stale receipt preserved only 2 labels
+    green: 1 passed in 9.80s; stale receipt re-diarized to 3 labels once
+    genuine_resume_comparator: 2 focused tests passed in 6.67s; re-diarization provider calls remain zero on resume
+    protected_final: 70 passed plus 7 subtests in 8.59s
+    compile_changed_files: exit 0
+    diff_check: exit 0
+    exact_two_hashes_unchanged: true
+    shared_resources: released to Product Video; source-local only
+    review_scope_note: exact-two diff is empty and hashes unchanged; untracked tools/artifacts remain excluded from staging
+    independent_review: Critical 0; Important 0; READY_TO_COMMIT YES
+    post_rebase:
+      base_sha: f955e3bbfae21fc9be91388ea50b8824563c44bf
+      head_before_evidence_amend: c9c30104f9790e9ea2af1cc6cc4871c689a7e55e
+      divergence: 0 behind, 1 ahead
+      protected_final: 70 passed plus 7 subtests in 10.13s
+      compile_changed_files: exit 0
+      diff_check: exit 0
+      exact_two_hashes_unchanged: true
+    next: amend evidence; push one PR/deploy/runtime; same combo live
 
 active_correction_08_0g:
   owner_requirements:
