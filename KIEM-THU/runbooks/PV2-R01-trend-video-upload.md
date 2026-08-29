@@ -66,6 +66,39 @@ Post-rebase onto exact main `da817b656da10b405a2878664a690d3a66d2b313`
 was conflict-free. The combined Trend/protected gate is `186 passed` plus the
 same `2` Script-only baseline failures in `670.77s`; compile exit is `0`.
 
+PR #928 squash-merged exact SHA
+`fe25cc056df59af3c7f063f0ea5f3866ff160130`; deploy run `33237168072`
+is SUCCESS. Bot and owner Product Video worker both run that SHA. Generation
+`35eb01aad2c84da7acc0e60bdf98b826` is authenticated and persisted with empty
+reject reason. Pre-live baseline is projects/jobs/outbox `31/27/26`,
+transactions/credit-events/provider-usage `0/10/0`, active jobs `0`, Owner
+wallet `200/0`. This proves deployment readiness only; no fresh full-flow Trend
+artifact exists yet.
+
+Owner action-time confirmation is now durable and exact:
+`XÁC NHẬN GỬI PV2-R01 SHA 784FBE5B VÀ CHẠY TREND LIVE`. It covers one upload
+of the measured fixture to `@toanaasbot` and one final Confirm in this case.
+Do not ask again after shared resources are released, and do not reuse it for a
+duplicate upload/job retry. Current wait is only the SubDub shared-resource
+boundary, not a Product Video source/runtime blocker.
+
+Fresh upload intake RED (29/08/2026): Telegram accepted the exact fixture as a
+`30.9MB` File, but the bot returned invalid request before analysis. Journal
+truth is `video_trend_probe_failed | exception=InvalidToken`. DB/wallet/provider
+remained exactly at baseline. Root cause is the Trend bounded probe's direct
+`get_file/download_to_drive`; the stable shared byte downloader already handles
+the Local Bot API transport. Exact TDD is `1 failed in 1553.92s` -> `1 passed in
+1148.40s`; protected effective `9 passed`; the only broad AST harness failure
+reproduces identically on clean `fe25cc0`, therefore `NEW_FAILURES=0`; compile
+and diff/scope/secret are `0`. After exact deploy, retry this same fixture once
+inside the same authorized flow because the first transfer created no job,
+provider or wallet side effect. Never loop retries.
+
+For later Product Video rows, Owner approved the fixture library
+`D:\TOANAAS\video AI tham khảo`. Select a suitable complete video, then measure
+its SHA/bytes/streams/duration before live. PV2-R01 remains locked to SHA
+`784FBE5B...E2732`; do not substitute a library file mid-failure-loop.
+
 Admission/idempotency evidence: focused transaction/single-use/outbox gate =
 `11 passed in 8.06s`. Dedupe does not rely on a wallet ledger row: project UUID,
 active render project, scene index and outbox job identity are database-unique;

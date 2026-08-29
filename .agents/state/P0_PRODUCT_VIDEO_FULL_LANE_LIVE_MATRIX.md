@@ -402,9 +402,40 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
   `da817b656da10b405a2878664a690d3a66d2b313`; exact remaining Product Video
   chain is two commits. Post-rebase Trend + protected gate is `186 passed, 2`
   exact Script-only baseline failures in `670.77s`; runtime/test compile exit `0`.
-- [ ] Ship Flow6 parity plus the four-lane restoration in one PR/deploy, then
-  start one fresh uploaded-Trend representative. The preserved old Invoice
-  belongs to the bypassed flow and must not be used as full-flow LIVE evidence.
+- [x] PR #928 merged exact SHA
+  `fe25cc056df59af3c7f063f0ea5f3866ff160130`; deploy run `33237168072`
+  SUCCESS. Bot and owner Product Video worker both read back exact SHA; worker
+  generation `35eb01aad2c84da7acc0e60bdf98b826` is authenticated/persisted,
+  reject reason empty, PID `553332`, service active.
+- [x] Fresh live baseline: projects/jobs/outbox `31/27/26`; transactions `0`;
+  credit events `10`; provider usage `0`; active video jobs `0`; Owner wallet
+  `200 Xu`, total spent `0`. Fixture still exactly `32,391,742` bytes, SHA
+  `784FBE5B...E2732`.
+- [x] Owner action-time confirmation received exactly:
+  `XÁC NHẬN GỬI PV2-R01 SHA 784FBE5B VÀ CHẠY TREND LIVE`. It authorizes one
+  fresh upload of the measured fixture to `@toanaasbot` and one final Confirm;
+  it does not authorize duplicate upload/job retries.
+- [x] Exact SubDub releases received; fresh upload sent once as Telegram File.
+  Live intake RED before admission: journal
+  `video_trend_probe_failed | exception=InvalidToken`; bot returned the safe
+  invalid-request panel. Projects/jobs/outbox stayed `31/27/26`, provider usage
+  and transactions stayed `0`, credit events `10`, active jobs `0`, wallet
+  `200/0`.
+- [x] Root cause: bounded Trend probe directly used Telegram
+  `get_file/download_to_drive`, while stable Video lanes already use
+  `download_video_editor_asset_bytes`, which supports the Local Bot API path and
+  avoids decrypting the incompatible file token.
+- [x] TDD exact `1 failed in 1553.92s` -> `1 passed in 1148.40s`. Protected
+  effective `9 passed`; one broad AST harness failure reproduced identically on
+  clean `fe25cc0` in `2107.51s`, so `NEW_FAILURES=0`. Compile and diff/scope/
+  secret gates exit `0`.
+- [ ] Ship one intake correction PR/deploy/runtime, then rerun the same fixture
+  once inside the same Owner-confirmed flow. The first transfer created no
+  project/job/provider/wallet side effect, so this is a bounded correction retry,
+  not permission for repeated uploads.
+- [x] Owner approved `D:\TOANAAS\video AI tham khảo` as the fixture library for
+  later Product Video rows. Measure hash/metadata per selected file; do not swap
+  the active PV2-R01 fixture during its failure loop.
 
 Current source evidence:
 

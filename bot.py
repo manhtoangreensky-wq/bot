@@ -255932,15 +255932,14 @@ async def inspect_bounded_telegram_video_source(context: ContextTypes.DEFAULT_TY
         return {"ok": False, "reason": "video_too_large"}
     with tempfile.TemporaryDirectory(prefix="toanaas_video_local_inspect_") as tmpdir:
         path = os.path.join(tmpdir, file_name)
-        telegram_file = await context.bot.get_file(str(source.get("source_file_id") or ""))
-        if callable(getattr(telegram_file, "download_to_drive", None)):
-            await telegram_file.download_to_drive(custom_path=path)
-        else:
-            data = bytes(await telegram_file.download_as_bytearray())
-            if len(data) > video_local_validation.MAX_UPLOAD_BYTES:
-                return {"ok": False, "reason": "video_too_large"}
-            with open(path, "wb") as handle:
-                handle.write(data)
+        data = await download_video_editor_asset_bytes(
+            context,
+            {"file_id": str(source.get("source_file_id") or "")},
+            video_local_validation.MAX_UPLOAD_BYTES,
+            read_timeout=120.0,
+        )
+        with open(path, "wb") as handle:
+            handle.write(data)
         actual_size = os.path.getsize(path) if os.path.exists(path) else 0
         if actual_size > video_local_validation.MAX_UPLOAD_BYTES:
             return {"ok": False, "reason": "video_too_large"}
