@@ -155,10 +155,10 @@ def test_content_source_profiles_idea_catalog_and_flow_order_are_canonical() -> 
         assert label in content
     assert len([row for row in video_profile_catalog.PROFILE_SEEDS if row.get("is_active")]) == 32
     sequence = video_flow7.product_sequence("video_trend")
-    assert sequence[:4] == ("trend_source", "scene_count", "aspect_ratio", "character")
-    assert "content_source" not in sequence
-    assert "content_profile_or_preset" not in sequence
-    assert "content_choice" not in sequence
+    assert sequence[:7] == (
+        "trend_source", "scene_count", "aspect_ratio", "content_source",
+        "content_profile_or_preset", "content_choice", "character",
+    )
     assert sequence[-6:] == ("addons", "review", "quality", "invoice", "confirm", "status")
 
 

@@ -106904,23 +106904,10 @@ VIDEO_TREND2_PUBLIC_SCREENS = frozenset({
     "help",
     "scene_count",
     "aspect_ratio",
-})
-VIDEO_TREND2_LEGACY_CONTENT_ACTIONS = frozenset({
-    "manual_content",
-    "edit_content",
-    "idea_catalog",
-    "idea_return",
+    "content_source",
     "profiles",
-    "profile",
-    "suggestions_more",
-    "suggestion",
-    "restore_content",
-    "continue",
-})
-VIDEO_TREND2_LEGACY_PENDING_INPUTS = frozenset({
-    "aspect_ratio",
-    "manual_content",
-    "edit_content",
+    "suggestions",
+    "preview",
 })
 VIDEO_TREND2_PARENT = {
     "catalog": "entry",
@@ -106931,6 +106918,10 @@ VIDEO_TREND2_PARENT = {
     "help": "entry",
     "scene_count": "catalog",
     "aspect_ratio": "scene_count",
+    "content_source": "aspect_ratio",
+    "profiles": "content_source",
+    "suggestions": "profiles",
+    "preview": "suggestions",
 }
 
 
@@ -107999,12 +107990,6 @@ def video_trend2_canonical_state(context, state: dict) -> dict:
 
 async def video_trend2_render(target, context, state: dict, lang: str = "vi"):
     screen = str(state.get("screen") or "entry")
-    if screen in {"content_source", "profiles", "suggestions", "preview"}:
-        state = save_video_trend2_state(
-            context,
-            {**state, "screen": "aspect_ratio", "pending_input": ""},
-        )
-        screen = "aspect_ratio"
     if screen == "entry":
         return await safe_edit_or_send(
             target,
@@ -108128,9 +108113,6 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
     if callback_query_id:
         state["last_callback_query_id"] = callback_query_id
         state = save_video_trend2_state(context, state)
-
-    if action in VIDEO_TREND2_LEGACY_CONTENT_ACTIONS:
-        action = "entry"
 
     if action == "entry":
         video_trend2_close_video_source_session(uid)
@@ -108428,26 +108410,14 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
     if action == "ratio":
         if value not in {"9:16", "16:9", "1:1", "4:5"}:
             return await video_trend2_render(query, context, state, lang)
-        state.update({"aspect_ratio": value, "pending_input": "", "screen": "aspect_ratio"})
+        state = video_trend2_open_screen(state, "content_source", parent="aspect_ratio")
+        state.update({"aspect_ratio": value, "pending_input": ""})
         state = save_video_trend2_state(context, state)
-        canonical = video_trend2_canonical_state(context, state)
-        bridge = video_trend_prepare_entity_bridge(
-            query,
-            uid,
-            context,
-            canonical,
-        )
-        return await video_uiflow3_render(query, context, bridge)
+        return await video_trend2_render(query, context, state, lang)
     if action == "ratio_custom":
         state["screen"] = "aspect_ratio"
         state["pending_input"] = ""
         state = save_video_trend2_state(context, state)
-        return await video_trend2_render(query, context, state, lang)
-    if action in {"manual_content", "edit_content", "idea_catalog"}:
-        state = save_video_trend2_state(
-            context,
-            {**state, "screen": "aspect_ratio", "pending_input": ""},
-        )
         return await video_trend2_render(query, context, state, lang)
     if action == "profiles":
         state = video_trend2_open_screen(state, "profiles")
@@ -120433,47 +120403,6 @@ async def handle_video_trend2_pending_text(update: Update, context: ContextTypes
     if not text:
         return True
     lang = get_user_language(update.effective_user.id) or "vi"
-    if pending in {"manual_trend", "manual_content", "edit_content"}:
-        state["pending_input"] = ""
-        save_video_trend2_state(context, state)
-        await video_manual_lane_open_shared_tail(
-            update.message,
-            context,
-            update.effective_user.id,
-            "video_trend",
-            str(update.message.text or "").strip()[:12000],
-            origin_step=f"trend2_{pending}",
-            message_id=safe_int(getattr(update.message, "message_id", 0), 0),
-            requested_scene_count=max(2, safe_int(state.get("scene_count"), 0)),
-            owner_snapshot=state,
-        )
-        return True
-    if pending in VIDEO_TREND2_LEGACY_PENDING_INPUTS:
-        video_trend2_close_video_source_session(update.effective_user.id)
-        state.update({
-            "screen": "entry",
-            "screen_parents": {},
-            "pending_input": "",
-            "input_return_screen": "",
-            "selected_trend": {},
-            "scene_count": 0,
-            "aspect_ratio": "",
-            "search_owner": "",
-            "search_session_id": "",
-            "active_search_message_id": 0,
-            "upload_owner": "",
-            "upload_session_id": "",
-            "active_video_message_id": 0,
-            "source_video": {},
-            "source_analysis": {},
-        })
-        save_video_trend2_state(context, state)
-        await update.message.reply_text(
-            "🔥 <b>Video theo trend</b>\n\nHãy chọn lại nguồn trend để tiếp tục.",
-            parse_mode="HTML",
-            reply_markup=video_trend2_entry_keyboard(),
-        )
-        return True
     if pending == "trend_search":
         message_id = safe_int(getattr(update.message, "message_id", 0), 0)
         active_message_id = safe_int(state.get("active_search_message_id"), 0)

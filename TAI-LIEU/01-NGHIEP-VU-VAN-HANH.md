@@ -446,3 +446,38 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Fix chỉ ở Trend handoff, không đổi shared Tail, UI, route engine, provider,
   worker hoặc wallet. RED `2 failed in 8.15s`; exact GREEN `2 passed in 707.43s`;
   protected Trend/Strategy `61 passed in 16.37s`; compile/diff exit `0`.
+- PR #926 merge `3b585527...`, deploy `33213099898` SUCCESS `5m26s`; Review
+  xác nhận source `1 tệp`. Hóa đơn tier `400` giữ đúng `144 Xu`, subtitle miễn
+  phí, Owner không trừ.
+- Final Confirm dừng trước DB với `trend_source_or_sample_missing`; không project,
+  job, outbox hay provider call mới. Nguyên nhân là Flow7 đã công nhận upload
+  Trend thực, còn Flow6 chỉ nhận URL/sample/user-topic.
+- Flow6 dùng lại đúng predicate upload đã kiểm chứng ở Flow7; không đổi route hay
+  engine. RED `1 failed in 9.29s`, GREEN `1 passed in 12.30s`; branch có
+  `96 passed + 2` historical failures và clean main tái hiện đúng hai failure đó
+  trong `593.52s`, nên `NEW_FAILURES=0`.
+
+## Bổ sung PV2-R01 phục hồi flow đầy đủ của 4 lane Trend - 29/08/2026
+
+- Bốn nguồn vào hiện hành là kho Trend media, tự nhập Trend, tìm kiếm Trend và
+  gửi video Trend. Cả bốn dùng chung flow cũ đã có sẵn; không dựng wizard mới.
+- Sau nguồn Trend, thứ tự bắt buộc là số cảnh, tỉ lệ, nguồn nội dung, loại nội
+  dung/preset, gợi ý hoặc nội dung tự nhập, Preview, nhân vật/tham chiếu, phong
+  cách, yêu cầu/bối cảnh, kế hoạch cảnh, prompt rồi Tail dùng chung.
+- Các chốt cũ đã làm bốn màn hình nội dung không còn public, ép ratio đi thẳng
+  sang nhân vật và ép nội dung nhập tay đi thẳng Tail. Minimal fix chỉ gỡ các
+  chốt đó và thêm ba bước nội dung vào contract Flow7; canonical entity bridge,
+  Tail, chất lượng, giá, provider, worker và wallet không đổi.
+- TDD exact: `4 failed, 1 passed in 6.63s` -> `5 passed in 574.87s`; năm selector
+  hợp đồng lịch sử đã cập nhật cùng GREEN `5 passed in 9.64s`; ba transition
+  ratio/manual gọi thật handler đưa file restore lên `8 passed in 7.36s`.
+- Branch Trend gate `124 passed + 2` Script-only baseline failures; phép so sánh
+  cùng bảy file là branch `119 passed + 2` và clean main `117 passed + 3`.
+  Hai failure còn lại trùng ID baseline, failure hash fixture chỉ có ở clean,
+  nên `NEW_FAILURES=0`. Protected Tail/quality/UI `59 passed`; compile, YAML và
+  diff-check đều exit `0`.
+- Hóa đơn cũ được tạo từ flow rút gọn không phải bằng chứng LIVE cho flow mới.
+  Sau deploy phải chạy fresh một lane upload phức tạp đến artifact/receipt/report.
+- Rebase lên exact main `da817b65...` sạch; post-rebase Trend + protected gate
+  `186 passed + 2` Script-only baseline failures trong `670.77s`; compile exit
+  `0`. Đây là source evidence, chưa phải deploy hay LIVE PASS.

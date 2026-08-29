@@ -36,6 +36,36 @@ TDD: `2 failed in 8.15s` -> `2 passed in 707.43s`; protected Trend/Strategy
 batch `61 passed in 16.37s`; compile/diff exit `0`. Resume this same session only
 after deploy; Review must show source files `1` before tier `400` is selected.
 
+PR #926 deployed runtime `3b585527...` in run `33213099898` SUCCESS `5m26s`;
+Review then showed source files `1`. Tier `400` opened the exact `144 Xu` invoice
+with subtitle `0 Xu` and Owner no-charge. Final Confirm correctly stopped before
+DB admission with `trend_source_or_sample_missing`; projects/jobs/outbox stayed
+`31/27/26`, active jobs `0`, provider/wallet deltas `0`. Root cause is Flow6
+lagging Flow7: Flow7 already accepts `video_upload + source_video_id +
+source_analysis`, while Flow6 accepted only URL/sample/user-topic. Parity TDD:
+`1 failed in 9.29s` -> `1 passed in 12.30s`; protected branch `96 passed + 2`
+historical failures, and clean main reproduced the same two failures in
+`593.52s`, therefore `NEW_FAILURES=0`.
+
+Owner then restored the complete old content flow for all four current Trend
+lanes. The common route is now source -> scene count -> ratio -> content source
+-> profile/preset -> suggestion/content -> preview -> canonical character,
+reference, style, requirements, scene plan and shared Tail. Exact restoration
+RED was `4 failed, 1 passed in 6.63s`; GREEN was `5 passed in 574.87s`, followed
+by `5 passed in 9.64s` for the updated historical contracts. Direct runtime
+state transitions for ratio, manual Trend and manual content make the complete
+restore file `8 passed in 7.36s`. The preserved old
+Invoice was produced by the bypassed flow and is not valid full-flow evidence.
+After deploy, start one fresh upload-lane representative from the entry screen.
+Complete Trend branch gate is `124 passed + 2` known Script-only failures. The
+exact seven-file comparator is branch `119 passed + 2` versus clean main
+`117 passed + 3`; the two branch failures are identical baseline IDs and the
+third clean-only fixture hash failure is absent, so `NEW_FAILURES=0`. Protected
+Tail/quality/UI state is `59 passed`; compile, YAML and diff-check all exit `0`.
+Post-rebase onto exact main `da817b656da10b405a2878664a690d3a66d2b313`
+was conflict-free. The combined Trend/protected gate is `186 passed` plus the
+same `2` Script-only baseline failures in `670.77s`; compile exit is `0`.
+
 Admission/idempotency evidence: focused transaction/single-use/outbox gate =
 `11 passed in 8.06s`. Dedupe does not rely on a wallet ledger row: project UUID,
 active render project, scene index and outbox job identity are database-unique;
@@ -58,7 +88,7 @@ project/job/scenes/outbox together on failure.
 
 ## Exact UI path before final Confirm
 
-1. Open `Menu Video -> Video theo trend -> Gui video trend`.
+1. Start a fresh flow at `Menu Video -> Video theo trend -> Gui video trend`.
 2. Upload the exact fixture once. Verify the active owner is
    `video_trend_upload` and state becomes `awaiting_trend_video`.
 3. Wait for the local analysis screen. It must show source duration/geometry,
@@ -67,7 +97,8 @@ project/job/scenes/outbox together on failure.
 5. Select `2 canh`, then `Doc 9:16`.
 6. Select `Chon loai noi dung`, profile `social_creator_trend`, then suggestion 1.
 7. Read Preview and verify the source fingerprint, two-scene count, ratio, selected
-   trend/profile and exact suggestion are preserved.
+   trend/profile and exact suggestion are preserved. This Preview is mandatory;
+   reaching characters directly from the ratio screen is FAIL.
 8. Continue into the canonical entity bridge. It must reach shared Tail Add-on;
    any manual-content, legacy `vfinal`, Self-shot, Video Edit or main-menu jump is
    FAIL before provider.

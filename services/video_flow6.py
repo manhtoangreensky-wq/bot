@@ -726,10 +726,16 @@ def preflight(
             blockers.append("source_video_probe_missing")
     elif flow_kind == "trend_video":
         trend_source = dict(context.get("trend_source") or {})
+        uploaded_source_ready = bool(
+            str(trend_source.get("intake_lane") or "") == "video_upload"
+            and str(trend_source.get("source_video_id") or "")
+            and dict(trend_source.get("source_analysis") or {})
+        )
         if not (
             (trend_source.get("source_url") and trend_source.get("observed_at"))
             or trend_source.get("sample_preset")
             or trend_source.get("source_type") == "user_topic"
+            or uploaded_source_ready
         ):
             blockers.append("trend_source_or_sample_missing")
     elif flow_kind == "long_series":

@@ -181,10 +181,10 @@ def test_trend_entry_and_sequence_are_canonical() -> None:
     ]
     assert all("idea" not in callback for callback in callbacks)
     sequence = video_flow7.PRODUCT_SPECS["trend_video"]["sequence"]
-    assert sequence[:4] == ("trend_source", "scene_count", "aspect_ratio", "character")
-    assert "content_source" not in sequence
-    assert "content_profile_or_preset" not in sequence
-    assert "content_choice" not in sequence
+    assert sequence[:7] == (
+        "trend_source", "scene_count", "aspect_ratio", "content_source",
+        "content_profile_or_preset", "content_choice", "character",
+    )
     assert sequence[-6:] == ("addons", "review", "quality", "invoice", "confirm", "status")
     assert video_flow7.PRODUCT_SPECS["trend_video"]["execution_owner"] == "owner_product_video"
 
@@ -285,20 +285,20 @@ def test_public_layout_catalog_ratio_content_and_back_contracts_are_present() ->
     assert 'InlineKeyboardButton("🎬 Menu Video"' in source
 
 
-def test_legacy_trend_idea_callback_is_read_only_and_not_public() -> None:
+def test_trend_idea_callback_is_reachable_from_restored_content_source() -> None:
     entry = _between("def video_trend2_entry_keyboard", "def video_trend2_catalog_rows")
+    content = _between("def video_trend2_content_source_keyboard", "def video_trend2_profile_rows")
     trend_handler = _between(
         "async def _handle_video_trend2_callback_impl",
         "async def handle_video_trend2_callback",
     )
-    redirect = trend_handler.split(
-        'if action in {"manual_content", "edit_content", "idea_catalog"}:',
-        1,
-    )[1].split('if action == "profiles":', 1)[0]
     assert "idea_catalog" not in entry
-    assert '"screen": "aspect_ratio"' in redirect
-    assert "video_trend2_render" in redirect
-    assert "video_flow7_open_idea_catalog_from_state" not in redirect
+    assert 'callback_data="vtrend|idea_catalog"' in content
+    idea_branch = trend_handler.split('if action == "idea_catalog":', 1)[1].split(
+        'if action == "idea_return":', 1
+    )[0]
+    assert "video_flow7_open_idea_catalog_from_state" in idea_branch
+    assert 'back_callback="vtrend|idea_return"' in idea_branch
 
 
 def test_stale_trend_idea_back_is_read_only_and_does_not_clear_session() -> None:

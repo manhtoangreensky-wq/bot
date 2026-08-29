@@ -4,7 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 import bot
-from services import video_tail9
+from services import video_flow6, video_tail9
 
 
 def _trend_state() -> dict:
@@ -112,3 +112,28 @@ def test_trend_review_refreshes_embedded_tail_source_ids(monkeypatch) -> None:
     )
 
     assert tail["source_asset_ids"] == ["trend-video-file-id"]
+
+
+def test_flow6_accepts_the_same_uploaded_trend_source_as_flow7() -> None:
+    context = video_flow6.context_from_scene_state(
+        {
+            "source_product_id": "video_trend",
+            "content_mode": "suggestions",
+            "scene_count": 2,
+            "aspect_ratio": "9:16",
+            "primary_profile_key": "social_creator_trend",
+            "content_choice": {"id": "pv2-r01", "title": "Coffee cart"},
+            "trend_source": _trend_state()["selected_trend"],
+        }
+    )
+
+    result = video_flow6.preflight(
+        context,
+        package_available=True,
+        engine_ready=True,
+        worker_ready=True,
+        capability_ready=True,
+    )
+
+    assert result["ok"] is True
+    assert "trend_source_or_sample_missing" not in result["blockers"]

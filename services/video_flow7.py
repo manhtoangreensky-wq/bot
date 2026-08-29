@@ -155,7 +155,8 @@ PRODUCT_SPECS = {
     },
     "trend_video": {
         "sequence": (
-            "trend_source", "scene_count", "aspect_ratio", "character",
+            "trend_source", "scene_count", "aspect_ratio", "content_source",
+            "content_profile_or_preset", "content_choice", "character",
             "reference_assets", "style", "preservation", "scene_plan",
             "image_prompts_if_needed", "video_prompts", "addons", "review",
             "quality", "invoice", "confirm", "status",
