@@ -487,3 +487,19 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   Baseline live `31/27/26`, transactions/provider usage `0/0`, credit events
   `10`, active jobs `0`, Owner `200 Xu / spent 0`. Chưa có MP4 full-flow mới nên
   Trend vẫn không phải LIVE PASS.
+
+## Bổ sung PV2-R01 Telegram document intake - 29/08/2026
+
+- Fresh fixture SHA `784FBE5B...` đã tới Telegram dạng File `30.9MB`, nhưng bot
+  dừng trước analysis với `video_trend_probe_failed / InvalidToken`; DB/provider/
+  wallet không đổi (`31/27/26`, provider `0`, transactions `0`, credit events
+  `10`, active jobs `0`, Owner `200/0`).
+- Nguyên nhân: Trend probe dùng direct Telegram `get_file/download_to_drive`,
+  không dùng shared bounded byte downloader đã hỗ trợ Local Bot API. Minimal fix
+  chỉ thay transport trong helper probe, giữ size/hash/ffprobe/metadata y nguyên.
+- TDD exact `1 failed in 1553.92s` -> `1 passed in 1148.40s`; protected effective
+  `9 passed`; một AST harness failure tái hiện trên clean `fe25cc0` trong
+  `2107.51s`, `NEW_FAILURES=0`; compile/diff/scope/secret exit `0`.
+- Owner cho phép dùng `D:\TOANAAS\video AI tham khảo` làm kho fixture cho các
+  row sau; mỗi file phải đo SHA/metadata trước live. Không đổi fixture PV2-R01
+  giữa failure-loop.

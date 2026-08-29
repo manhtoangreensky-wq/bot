@@ -218,6 +218,7 @@ Chưa có deployed multi MP4 thì không được ghi `LIVE PASS`.
 | Ý tưởng video có executor `video_idea_to_product` độc lập | Executor phải alias về owner `video_idea` để tạo Invoice/Confirm/Status Tail | Đã khóa contract |
 | Kho trend chỉ có Google Trends và TikTok reference | Backend có bốn nhóm public metadata Media/Facebook/YouTube/TikTok, refresh 7 ngày | Đã mở rộng không đổi UI |
 | Trend chọn tỉ lệ rồi đi thẳng sang nhân vật | Cả `4` lane Trend phải qua content source, profile/preset, content choice và Preview trước entity flow | Flow cũ đã phục hồi |
+| Telegram document có thể luôn dùng `get_file/download_to_drive` | Local Bot API có file path/transport riêng; Trend phải dùng shared bounded byte downloader như các Video lane ổn định | Direct path gây `InvalidToken`, đã sửa source |
 
 Bằng chứng hiện tại: job `25` đã delivery message `27576` và `0 Xu`, nhưng PV-L01 vẫn FAIL do letterbox + subtitle drop. Source correction có focused `45 passed`, quality/manual `39 passed`, Trend/scene `52 passed`, full output `24 passed`, compile `0`; UI lock `14/14` function bytes. Phải rerun live exact case sau deploy mới được đổi trạng thái thành PASS.
 

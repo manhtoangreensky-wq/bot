@@ -1,5 +1,5 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_LIVE_CONFIRMED_WAITING_SUBDUB_RELEASE
+phase: PV2_R01_DOCUMENT_INTAKE_SHIP_READY
 pointer: V2-03/PV2-R01
 base_sha: da817b656da10b405a2878664a690d3a66d2b313
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
@@ -223,6 +223,32 @@ live_authorization:
   destination: "@toanaasbot"
   permits_uploads: 1
   permits_final_confirms: 1
+  uploads_consumed: 1
   duplicate_retry_authorized: false
-  current_shared_owner: SubDub
-next_action: Wait only for exact SubDub LIVE/CHROME/VPS releases, then start one fresh uploaded-Trend representative through content/profile/suggestion/preview, select subtitle plus transition and tier 400, confirm exactly once, and prove one project/job/outbox, two real scene outputs, final MP4, receipt/report and zero wallet delta; do not ask Owner again.
+  bounded_same_fixture_retry_after_zero_side_effect_red: true
+  bounded_retry_uploads_remaining: 1
+  current_shared_owner: Product Video
+fixture_library:
+  owner_approved_path: 'D:\TOANAAS\video AI tham khảo'
+  use_for_future_rows: true
+  measure_sha_and_metadata_before_each_live: true
+  current_pv2_r01_fixture_locked: true
+pv2_r01_document_intake_red:
+  telegram_transfer: delivered_file_message
+  public_result: invalid_request_no_charge
+  journal_boundary: video_trend_probe_failed
+  exception: InvalidToken
+  projects_jobs_outbox_after: [31, 27, 26]
+  transactions_credit_events_provider_usage_after: [0, 10, 0]
+  active_video_jobs_after: 0
+  owner_credits_total_spent_after: [200, 0]
+  root_cause: direct Telegram get_file/download_to_drive bypassed Local Bot API-aware shared byte downloader
+  exact_red: 1 failed in 1553.92s
+  exact_green: 1 passed in 1148.40s
+  protected_effective_green: 9 passed
+  protected_harness_failure: test_edit3_large_media_inspector_is_exclusive_to_video_edit_routes
+  clean_baseline_same_failure: 1 failed in 2107.51s
+  new_failures: 0
+  compile: exit 0
+  diff_scope_secret: exit 0
+next_action: Push one scoped Trend document-intake PR, squash merge, deploy and verify bot plus owner worker exact SHA, then use the one bounded same-fixture retry to continue the already authorized full Trend flow through content/profile/preview/middle/Tail/tier 400/Confirm and prove one project/job/outbox, two real scenes, final MP4, receipt/report and zero wallet delta.

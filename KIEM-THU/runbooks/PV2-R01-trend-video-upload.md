@@ -82,6 +82,23 @@ Do not ask again after shared resources are released, and do not reuse it for a
 duplicate upload/job retry. Current wait is only the SubDub shared-resource
 boundary, not a Product Video source/runtime blocker.
 
+Fresh upload intake RED (29/08/2026): Telegram accepted the exact fixture as a
+`30.9MB` File, but the bot returned invalid request before analysis. Journal
+truth is `video_trend_probe_failed | exception=InvalidToken`. DB/wallet/provider
+remained exactly at baseline. Root cause is the Trend bounded probe's direct
+`get_file/download_to_drive`; the stable shared byte downloader already handles
+the Local Bot API transport. Exact TDD is `1 failed in 1553.92s` -> `1 passed in
+1148.40s`; protected effective `9 passed`; the only broad AST harness failure
+reproduces identically on clean `fe25cc0`, therefore `NEW_FAILURES=0`; compile
+and diff/scope/secret are `0`. After exact deploy, retry this same fixture once
+inside the same authorized flow because the first transfer created no job,
+provider or wallet side effect. Never loop retries.
+
+For later Product Video rows, Owner approved the fixture library
+`D:\TOANAAS\video AI tham khảo`. Select a suitable complete video, then measure
+its SHA/bytes/streams/duration before live. PV2-R01 remains locked to SHA
+`784FBE5B...E2732`; do not substitute a library file mid-failure-loop.
+
 Admission/idempotency evidence: focused transaction/single-use/outbox gate =
 `11 passed in 8.06s`. Dedupe does not rely on a wallet ledger row: project UUID,
 active render project, scene index and outbox job identity are database-unique;
