@@ -291,6 +291,29 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   nhánh điều kiện `auto_speaker_lane=multi`, đồng thời phải giữ toàn bộ
   comparator Auto 2-speaker GREEN.
 
+## SubDub Auto multi-speaker source correction — 29/08/2026
+
+- Lane Auto 2-speaker vẫn `LOCKED_LIVE_PASS`. SPEC multi chỉ đổi hai seam dùng
+  chung: marker `auto_speaker_lane=multi` bật lại chính cue-lock đã chứng minh;
+  successful multi MP4 không còn tự gửi SRT companion. Internal SRT/burn-in/QC
+  và explicit download vẫn còn.
+- Fixture multi thật được khóa trước live: `9,869,032` bytes, SHA-256
+  `83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E`.
+  Refined sidecar local có `36` cue, đúng `3` label, end `126.505s`; sidecar cũ
+  chỉ `2` label bị loại là underclustered.
+- RED timing: `1 failed in 1.32s`, actual cue-lock `False`. RED delivery:
+  `1 failed in 854.23s`, trace tới `reply_document(multi.srt)` sau MP4.
+  Final focused: `23 passed`; cả `dub` + `subtitle_plus_dub` multi video-only
+  `2 passed`; literal `3` cue/`3` speaker giữ nguyên start/end, drift `0`, final
+  duration nguồn. Target language được giữ cho `vi/ja/en/ko/zh`.
+- Protected comparison hiệu lực: `82 passed` và đúng `3` baseline-stale failures
+  tái hiện trên clean source, `NEW_FAILURES=0`. Multi owner/cast/exact-two
+  fallback hashes giữ đúng `3/3`; compile/diff/YAML/secret exit `0`;
+  provider calls `0`, wallet mutations `0`.
+- Đây là **SOURCE PASS**, chưa phải LIVE PASS multi. Chỉ đổi trạng thái sau một
+  deploy/runtime SHA thật, combo MP4 thật PASS trước, rồi standalone MP4 thật
+  PASS; mỗi flow phải video → receipt, ≥3 distinct voices và wallet delta `0`.
+
 ## Bổ sung Product Video job 25 và khóa UI — 28/08/2026
 
 - PR `#910` merge SHA `82ffb117e6c2e84bd76a3aee6e5e747465958c66`; deploy run `33078757523` SUCCESS. Bot và owner worker cùng exact SHA.

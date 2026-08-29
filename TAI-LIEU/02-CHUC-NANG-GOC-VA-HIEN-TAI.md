@@ -194,6 +194,20 @@ GitHub tester surface đo ngày 28/08/2026 vẫn có `21` labels, issue `#884` v
 `#81`, `2` template SubDub, `3` case `SD-2S-01/SD-2S-02/SD-MS-01`; Projects
 chưa đọc được vì token thiếu `read:project`. Không tự chạy `gh auth refresh`.
 
+### Đối chiếu Auto multi-speaker source — 29/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Auto multi không dùng cue-lock của Auto 2 | Marker multi dùng cùng speech-rate/per-cue fit/source-duration owner; manual/default vẫn không bật | ⚠️ Source PASS, chờ live |
+| Combo multi tự gửi MP4 rồi SRT | Cả combo và standalone multi success chỉ tự gửi MP4 rồi receipt; SRT internal/explicit download | ⚠️ Source PASS, chờ live |
+| Hai provider label đủ đại diện nhiều người nói | Acceptance fixture refined có `36` cue, đúng `3` label; sidecar `2` label bị loại underclustered | ❌ Tài liệu cũ không đủ |
+| Một test English đủ chứng minh nhiều ngôn ngữ | Adapter giữ target/translate marker cho `vi`, `ja`, `en`, `ko`, `zh`; live representative vẫn chạy English | ⚠️ Mở rộng source contract |
+| Multi có thể sửa classifier/cast lane 2 để dùng chung | Exact-two files/hashes giữ nguyên; multi chỉ dùng shared timing/delivery seam | ✅ Lane 2 vẫn khóa |
+
+Source evidence: final focused `23 passed`; protected effective `82 passed` +
+đúng `3` baseline failures, `NEW_FAILURES=0`; provider/wallet mutation `0`.
+Chưa có deployed multi MP4 thì không được ghi `LIVE PASS`.
+
 ## Đối chiếu Product Video flow/artifact sau job 25 — 28/08/2026
 
 | Chức năng/tài liệu cũ | Hiện tại | Trạng thái |

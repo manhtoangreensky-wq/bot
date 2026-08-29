@@ -386,14 +386,15 @@ def test_successful_dub_video_auto_delivery_sends_only_mp4(monkeypatch, mode):
     assert result["explicit_srt_download_available"] is True
 
 
-def test_multi_speaker_delivery_policy_remains_unchanged(monkeypatch):
-    job_key = "multi-companion-isolation"
+@pytest.mark.parametrize("mode", ["dub", "subtitle_plus_dub"])
+def test_multi_speaker_delivery_sends_only_mp4(monkeypatch, mode):
+    job_key = f"multi-video-only-{mode}"
     events = []
 
     class Message:
         async def reply_document(self, **_kwargs):
             events.append("srt")
-            return SimpleNamespace(message_id=902)
+            raise AssertionError("successful multi video must not auto-send SRT")
 
     async def deliver_video(*_args, **_kwargs):
         events.append("video")
@@ -412,7 +413,7 @@ def test_multi_speaker_delivery_policy_remains_unchanged(monkeypatch):
         {
             job_key: {
                 "job_key": job_key,
-                "mode": "subtitle_plus_dub",
+                "mode": mode,
                 "voice_kind": "auto_speaker_gender",
                 "voice_selection_mode": "auto_speaker",
                 "auto_speaker_lane": "multi",
@@ -426,9 +427,9 @@ def test_multi_speaker_delivery_policy_remains_unchanged(monkeypatch):
     result = asyncio.run(
         bot.send_public_subtitle_dub_final_outputs(
             Message(),
-            mode="subtitle_plus_dub",
-            active_flow="subtitle_plus_dub",
-            requested_mode="subtitle_plus_dub",
+            mode=mode,
+            active_flow=mode,
+            requested_mode=mode,
             subtitle_items=[
                 {
                     "output_type": "srt",
@@ -444,6 +445,9 @@ def test_multi_speaker_delivery_policy_remains_unchanged(monkeypatch):
         )
     )
 
-    assert events == ["video", "srt"]
-    assert result["documents"] == 1
-    assert result["srt_delivery_message_id"] == "902"
+    assert events == ["video"]
+    assert result["documents"] == 0
+    assert result["audio"] == 0
+    assert result["srt_delivery_message_id"] == ""
+    assert result["srt_auto_send_suppressed"] is True
+    assert result["explicit_srt_download_available"] is True

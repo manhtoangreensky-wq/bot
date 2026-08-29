@@ -17,14 +17,13 @@
 ### Current pointer
 
 - Current SPEC: `SPEC-11`.
-- Current SUBSPEC: `SPEC-11.2`.
-- Current phase: `RED_READY / WAITING_PRODUCT_VIDEO_ALTERNATION`.
-- Production action active: `NO; SPEC-10 runtime readback terminal`.
+- Current SUBSPEC: `SPEC-11.4`.
+- Current phase: `POST_REBASE_GREEN / PUSH_PR_DEPLOY_NEXT`.
+- Production action active: `NO; Product Video released shared resources`.
 - Telegram/provider job active: `NO; combo #3A3BEA618D and standalone #282347E26C terminal delivered`.
 - Wallet mutation: `0`.
-- Next allowed action: merge this docs-only closeout, release shared resources
-  to Product Video, then write the first local SPEC-11 multi timing/delivery
-  RED while Product Video ships its isolated F2 correction.
+- Next allowed action: push one focused PR, squash/deploy/runtime readback, then
+  run the ordered multi live matrix.
 - Next forbidden action: edit classifier/cast thresholds, audio UI, pricing,
   wallet, provider/model/endpoint, multi engine, or move to standalone/multi
   before the corrected combo artifact passes.
@@ -1467,49 +1466,73 @@ Task contract:
 
 ### SPEC-11.2 — Focused RED, one assertion group at a time
 
-- [B] File:
+- [x] File:
   `tests/test_p0_subdub_multi_cue_locked_video_only.py`; first RED asserts the
   multi marker requests cue-locked timing while manual/default remains false
   and exact-two remains true. Verify that file alone; expected before GREEN:
-  exactly this assertion fails.
-- [B] Add literal three-speaker cues with uneven translated lengths. RED
+  exactly this assertion failed: `1 failed in 1.32s`, actual multi
+  `cue_locked_timing=False`.
+- [x] Add a literal translated multi cue longer than its source window. RED
   asserts every `start/end` is unchanged, cue N+1 never waits for cue N and the
   plan ends at source duration. Verify the same file; expected: timing-policy
-  assertions fail, no import/fixture error.
-- [B] Add delivery RED for multi combo and standalone: `video=1`,
+  proved the multi pipeline did not request provider speed/fit or source-bounded
+  duration; no import/fixture error.
+- [x] Add delivery RED for multi combo: `video=1`,
   `documents=0`, `audio=0`, then one receipt. Expected before GREEN: only the
-  historical multi SRT-companion assertion fails.
-- [B] Reuse `tests/test_p0_subdub_multi_speaker_blackbox.py` to prove three
+  historical multi SRT-companion assertion failed at `reply_document` after
+  MP4: `1 failed in 854.23s`.
+- [x] Reuse `tests/test_p0_subdub_multi_speaker_blackbox.py` to prove three
   provider labels, three distinct validated voices, translation target
   preservation, no label invention and fail-closed duplicate voice mapping.
-- [B] Every RED command uses local fakes/fixtures: `PROVIDER_CALLS=0`,
+- [x] Every RED command uses local fakes/fixtures: `PROVIDER_CALLS=0`,
   `WALLET_MUTATIONS=0`.
 
 ### SPEC-11.3 — Minimal GREEN
 
-- [B] Change only the failing multi condition. Do not copy the two-speaker
+- [x] Change only the failing multi condition. Did not copy the two-speaker
   classifier or create a second timing/mux engine.
-- [B] If timing requires a shared seam, add one branch keyed exactly by
-  `auto_speaker_lane=multi`; do not change manual/default/exact-two branches.
-- [B] If delivery requires a shared seam, remove only the multi automatic SRT
+- [x] Timing reuses the existing Auto cue-lock allowlist; manual/default remains
+  false, exact-two and multi are true. No planner/FFmpeg/cast duplication.
+- [x] Delivery removes only the multi automatic SRT
   companion. Internal SRT and explicit download stay available.
-- [B] Run:
+- [x] Focused multi/exact/receipt/translation GREEN: `14 passed, 1 cache
+  warning in 763.81s`; final focused GREEN `23 passed, 1 cache warning in
+  7.99s`. Both multi delivery lanes `dub` + `subtitle_plus_dub`:
+  `2 passed, 1 cache warning in 5.65s`. Strengthened literal
+  `3`-cue/`3`-speaker source-window comparator:
+  `1 passed, 1 cache warning in 0.53s`.
+- [x] Multi-language state preservation is parameterized and GREEN for
+  `vi`, `ja`, `en`, `ko`, `zh`: target language, translation request and multi
+  marker remain intact through the isolated adapter.
+- [x] Run:
   `pytest -q --noconftest tests/test_p0_subdub_multi_cue_locked_video_only.py tests/test_p0_subdub_multi_speaker_blackbox.py`;
-  expected: zero failures.
-- [B] Run exact-two timing/delivery/audio/cast selectors from SPEC-10;
-  expected: zero new failures and immutable file hashes unchanged.
-- [B] Run `python -m py_compile bot.py services/subtitle_dub_product_pipeline.py services/subdub_blackboxes/auto_multi_speaker.py`
-  and `git diff --check`; expected: exit `0`.
-- [B] Stop editing immediately when GREEN and protected comparators pass.
+  result: all applicable focused selectors zero failures.
+- [x] Protected branch effective result: `82 passed` plus exactly `3`
+  baseline-stale failures reproduced on clean `2fd989e`; `NEW_FAILURES=0`.
+  Eleven initial setup errors were WinError 5 at Pytest's default temp root;
+  rerun with isolated basetemp executed the assertions (`10 passed`, one of the
+  same baseline failures).
+- [x] Immutable hashes remain multi `55AAB894...`, cast `DE93620F...`, fallback
+  `94748DEF...`; provider calls `0`, wallet mutations `0`.
+- [x] Final compile: `bot.py`, changed service and tests exit `0`.
+- [x] Final diff/scope/secret/YAML checks exit `0`; protected hashes `3/3`.
+- [x] Independent review: Critical `0`, Important `0`, Minor `0`,
+  `READY_TO_COMMIT=YES`.
+- [x] Stop editing production after GREEN/review; create one local commit and
+  wait Product Video exact releases before remote Git/deploy/live.
 
 ### SPEC-11.4 — Review, ship and deployed identity
 
-- [B] Complete diff review: every production hunk must map to timing enable or
+- [x] Complete diff review: every production hunk maps to timing enable or
   video-only multi delivery; `git diff` must show no UI/pricing/wallet/provider
   change.
-- [B] Run baseline-versus-branch comparison for any broad historical failures;
-  expected `NEW_FAILURES=0`.
-- [B] One focused commit, one PR, squash merge, one deploy. Verify GitHub deploy
+- [x] Baseline-versus-branch comparison complete: `NEW_FAILURES=0`.
+- [x] Rebased exactly one commit onto main
+  `3b585527b596e45b985d59b713051531f824583c`; pre-evidence-amend HEAD
+  `d47086e65f2f9c424c28652ff8f1d2a3e9958d88`, `0 behind / 1 ahead`.
+- [x] Post-rebase: focused `23 passed, 1 cache warning in 546.19s`; protected
+  hashes `3/3`; compile bot/service/tests, YAML/diff/scope/secret exit `0`.
+- [-] One focused PR, squash merge, one deploy. Verify GitHub deploy
   SUCCESS, bot/worker exact merge SHA, accepted generation and active
   bot/web/nginx before live.
 
