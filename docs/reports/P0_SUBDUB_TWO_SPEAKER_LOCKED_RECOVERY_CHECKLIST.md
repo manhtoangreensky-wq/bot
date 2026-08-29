@@ -1615,6 +1615,21 @@ Task contract:
 - [B] Any failure stays inside SPEC-11 RED→minimal GREEN→ship→same live case.
   Never reopen an exact-two branch to fix a multi failure.
 
+- [x] First post-PR-931 combo live on runtime `a8df3cab...` used exact fixture
+  SHA `83DE97B7...`, English, Auto multi, original `40%`, dub `150%`, and one
+  confirm. Job `#C6BD5D1CD8` failed-no-charge before translation/TTS/mux because
+  Deepgram returned `DEEPGRAM_EMPTY_TRANSCRIPT / All connection attempts
+  failed`; workspace source hash was exact and charged Xu was `0`.
+- [x] C6BD RED measured `1 failed in 1293.19s`; focused GREEN measured
+  `1 passed in 932.90s`. Independent review initially blocked commit with one
+  Critical and three Important findings: missing production import, wrong
+  Gemini MIME, unconditional Key4U retry, and missing lock/resource guards.
+  Corrections are multi-only: real import, actual MIME, retryability + attempt
+  receipt, shared nonblocking lock, duration/byte admission and cancellation
+  release. Review GREEN measured `6 passed in 1142.01s`; final protected gate
+  measured `69 passed + 7 subtests in 9.68s`; changed-file compile exited `0`;
+  both exact-two hashes remain unchanged.
+
 ### SPEC-11 acceptance
 
 - [B] Combo and standalone each delivered one empirically validated
