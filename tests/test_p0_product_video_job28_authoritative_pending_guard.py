@@ -407,6 +407,8 @@ def test_exhausted_legacy_recovery_gets_one_running_authority_repair() -> None:
                 "terminal_override_reason": (
                     "provider_running_overrides_failed_no_charge"
                 ),
+                "scene_status_by_index": {"1": "failed", "2": "failed"},
+                "scene_status_by_scene": {"1": "failed", "2": "failed"},
             }
         )
         conn.execute(
@@ -437,6 +439,25 @@ def test_exhausted_legacy_recovery_gets_one_running_authority_repair() -> None:
         assert second_result["provider_submit_allowed"] is False
         assert second_result["automatic_resubmit_allowed"] is False
         assert second_result["automatic_fallback_allowed"] is False
+
+        claimed = remote_worker_api._claim_video_render_candidate(
+            conn,
+            worker_id="job28-classifier-repair-worker",
+            product_video_only=True,
+            owner_product_video_only=True,
+            public_enabled=False,
+            now=repaired_at + timedelta(seconds=62),
+        )
+
+        assert int(claimed["id"]) == job_id
+        claimed_result = json.loads(claimed["result_json"])
+        assert claimed_result["scene_status_by_index"] == {
+            "1": "provider_running",
+            "2": "provider_running",
+        }
+        assert claimed_result["provider_submit_allowed"] is False
+        assert claimed_result["automatic_resubmit_allowed"] is False
+        assert claimed_result["automatic_fallback_allowed"] is False
 
         conn.execute(
             "UPDATE video_jobs SET status='failed',locked_by='',locked_at=NULL WHERE id=?",

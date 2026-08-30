@@ -41,10 +41,14 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     Generation `b264fd4f...` used the authority marker once with all paid routes
     blocked, but stale root `continue_polling=false` terminalized the two live scene
     tasks one second later before their authority was consulted.
-  - [ ] Ship the bounded stale-root classifier repair, then recover only the two
-    existing job #28 provider task IDs. A new upload, Confirm or provider submit is
-    forbidden. `PV2-R01` stays open until real MP4/receipt/report/zero-wallet
-    acceptance passes.
+  - [x] PR #936/deploy #152 and bot/worker SHA `eba42c15...` are proven. The final
+    marker executed with all paid routes blocked, but claim-scan merged stale
+    `scene_status_by_index=failed` before actual per-task `IN_PROGRESS`, so job #28
+    never reached worker CAS.
+  - [ ] Ship the claim-ledger authority correction, then continue only the two
+    existing job #28 provider task IDs. A new upload, Confirm, recovery marker or
+    provider submit is forbidden. `PV2-R01` stays open until real
+    MP4/receipt/report/zero-wallet acceptance passes.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

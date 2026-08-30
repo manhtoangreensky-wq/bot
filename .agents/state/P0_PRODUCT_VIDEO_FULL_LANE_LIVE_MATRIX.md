@@ -502,11 +502,26 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
   1 dependency warning in 45.50s`. The classifier now always consults scene authority
   after explicit terminal reasons; a second durable marker permits only the repair
   consumed by this exact live bug, then blocks every later recovery.
-- [ ] Ship one terminal-classifier PR/deploy/runtime, then recover **job #28 and its
-  two existing task IDs only**. No new upload, Confirm, project/job/outbox or provider
-  submit is authorized. Poll/materialize those tasks to the final MP4; verify cover-fit
-  9:16, subtitle, transition, audio, receipt, report and zero-wallet proof before
-  marking `PV2-R01 LOCKED_LIVE_PASS`.
+- [x] Terminal classifier shipped as PR #936, squash SHA
+  `eba42c15b1b58f8a8b08dd019584b1c8dde67bb3`; deploy run `33294851362`
+  SUCCESS in `9m23s`. Bot/worker exact SHA; worker generation
+  `766c231c71e448949aaafe81d2cb918d`, PID `706350`, heartbeat accepted/persisted.
+- [x] Claim-scan live RED after the final marker: classifier repair stored once at
+  `12:40:47`, recovery count `5`; at `12:40:48` the job returned to
+  `failed_no_charge` before CAS claim. `attempts` stayed `5`, `locked_by` stayed
+  empty and both scene tasks stayed authoritative `IN_PROGRESS/provider_running`.
+  Provider submit/resubmit/fallback/charge/artifact/delivery all remained `0`.
+- [x] Root cause: durable summary `scene_status_by_index=failed` was merged first
+  with rank `4`; later actual provider `IN_PROGRESS` had rank `3` and was rejected,
+  then the summary overwrote the scene again. Exact claim integration RED
+  `1 failed in 5.92s`; minimal authority merge GREEN `1 passed in 5.14s`; focused
+  authority/terminal/cancel/claim `25 passed, 106 deselected in 10.47s`; protected
+  `252 passed, 1 dependency warning in 43.96s`.
+- [ ] Ship one claim-ledger authority PR/deploy/runtime, then continue **job #28 and
+  its two existing task IDs only**. No new upload, Confirm, project/job/outbox,
+  provider submit or recovery marker is authorized. Poll/materialize those tasks to
+  the final MP4; verify cover-fit 9:16, subtitle, transition, audio, receipt, report
+  and zero-wallet proof before marking `PV2-R01 LOCKED_LIVE_PASS`.
 - [x] Owner approved `D:\TOANAAS\video AI tham khảo` as the fixture library for
   later Product Video rows. Measure hash/metadata per selected file; do not swap
   the active PV2-R01 fixture during its failure loop.

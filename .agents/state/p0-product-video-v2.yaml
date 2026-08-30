@@ -1,7 +1,7 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_JOB28_STALE_ROOT_CLASSIFIER_LOCAL_READY
+phase: PV2_R01_JOB28_CLAIM_LEDGER_AUTHORITY_LOCAL_READY
 pointer: V2-03/PV2-R01
-base_sha: 06f38df793beabd14e3446dadd473d4e8737a0e6
+base_sha: eba42c15b1b58f8a8b08dd019584b1c8dde67bb3
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
 allowed_files:
   - bot.py
@@ -413,4 +413,37 @@ pv2_r01_job28_stale_root_classifier:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
-next_action: Ship one stale-root terminal-classifier PR/deploy/runtime from base 06f38df, verify a fresh matching Owner worker generation, and let the built-in claim boundary use the one bounded classifier-repair marker to recover only existing job 28 and its two durable provider task IDs. Do not upload, confirm, create a new project/job/outbox or submit/fallback to another paid provider task. Poll/materialize the old tasks to a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/audio, persist receipt and customer report, prove zero wallet delta, and only then mark PV2-R01 LOCKED_LIVE_PASS.
+pv2_r01_job28_claim_ledger_authority:
+  prior_pr: 936
+  prior_merge_sha: eba42c15b1b58f8a8b08dd019584b1c8dde67bb3
+  prior_deploy_run: 33294851362
+  prior_deploy_result: SUCCESS in 9m23s
+  bot_worker_sha: eba42c15b1b58f8a8b08dd019584b1c8dde67bb3
+  owner_worker_generation: 766c231c71e448949aaafe81d2cb918d
+  owner_worker_pid: 706350
+  heartbeat_authenticated: true
+  heartbeat_persisted: true
+  heartbeat_reject_reason: ""
+  classifier_repair_used_at: 2026-08-30 12:40:47
+  recovery_count: 5
+  terminalized_at: 2026-08-30 12:40:48
+  job_attempts_before_after: [5, 5]
+  locked_by_before_after: ["", ""]
+  scene_actual_provider_statuses: [IN_PROGRESS, IN_PROGRESS]
+  scene_canonical_statuses: [provider_running, provider_running]
+  stale_summary_statuses: [failed, failed]
+  provider_submit_called: false
+  provider_submit_allowed: false
+  automatic_resubmit_allowed: false
+  automatic_fallback_allowed: false
+  charged_xu: 0
+  artifact_delivery_counts: [0, 0]
+  root_cause: stale durable summary rank 4 overrode current provider authority rank 3 before CAS claim
+  claim_integration_red: 1 failed in 5.92s
+  minimal_green: 1 passed in 5.14s
+  focused_green: 25 passed and 106 deselected in 10.47s
+  protected_green: 252 passed and 1 dependency warning in 43.96s
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
+next_action: After exact SubDub releases, rebase the local claim-ledger authority commit onto latest main, run one post-rebase gate, ship one PR/deploy/runtime, and continue only existing job 28 with its two durable provider task IDs. Do not upload, confirm, create a new project/job/outbox, add another recovery marker or submit/fallback to a new provider task. Poll/materialize the old tasks to a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/audio, persist receipt and customer report, prove zero wallet delta, and only then mark PV2-R01 LOCKED_LIVE_PASS.

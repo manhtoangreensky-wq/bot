@@ -7537,7 +7537,12 @@ def product_video_scene_ledger_state(
             existing = next((entry for entry in record["task_candidates"] if entry.get("task_id") == task_id), None)
             if existing:
                 for key, value in candidate.items():
-                    if key == "status" and _status_authority_rank(value) < _status_authority_rank(existing.get("status")):
+                    if (
+                        key == "status"
+                        and not current_status_raw
+                        and _status_authority_rank(value)
+                        < _status_authority_rank(existing.get("status"))
+                    ):
                         continue
                     if value not in (None, "", False, 0, [], {}):
                         existing[key] = value
@@ -7556,7 +7561,11 @@ def product_video_scene_ledger_state(
         if provider:
             record["provider_key"] = provider
         status_applied = False
-        if status_raw and _status_authority_rank(candidate_status) >= _status_authority_rank(record.get("status")):
+        if status_raw and (
+            current_status_raw
+            or _status_authority_rank(candidate_status)
+            >= _status_authority_rank(record.get("status"))
+        ):
             record["status"] = candidate_status
             status_applied = True
         if task_ids:
@@ -7772,7 +7781,11 @@ def product_video_scene_ledger_state(
             if not record["result_url_present"]:
                 record["phantom_result_prevented"] = True
                 phantom_result_prevented = True
-        if statuses.get(str(index)) not in (None, "") and not record["clip_valid"]:
+        if (
+            statuses.get(str(index)) not in (None, "")
+            and not record["clip_valid"]
+            and not record["task_candidates"]
+        ):
             record["status"] = _status_class(statuses.get(str(index)))
         valid_candidates = [entry for entry in record["task_candidates"] if entry.get("clip_valid")]
         persisted_winner = record["winning_task_id"]
