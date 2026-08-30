@@ -389,3 +389,13 @@ không thêm provider call, recovery marker, job hay wallet mutation.
 RED `1 failed in 5.84s` -> GREEN `5 passed in 5.63s`; protected fallback/Key4U/
 price/claim `88 passed in 9.34s`. Debug/recover/background source, quote mismatch,
 missing confirm, delivered/charged và fallback count >=1 vẫn fail-closed.
+
+## Đối chiếu truyền cost vào fallback router - 30/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Có budget `212` là router tự biết cost Key4U | Router không suy đoán cost; request phải truyền riêng `fallback_provider_cost_xu=212` | Đã bổ sung boundary |
+| Thiếu cost có thể bỏ qua vì candidate đã prevalidated | Live tier 400 phải chứng minh cả budget và cost; prevalidated không thay thế số đo đã khóa | Không được bỏ qua |
+
+RED `1 failed in 8.29s` -> GREEN `1 passed in 5.56s`; protected fallback/Key4U
+`19 passed in 6.76s`; compile/diff `0`. Production chỉ thêm một metadata field.

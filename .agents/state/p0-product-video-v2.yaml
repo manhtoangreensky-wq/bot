@@ -1,5 +1,5 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_JOB28_TIER400_FALLBACK_BUDGET_POST_REBASE_READY_TO_SHIP
+phase: PV2_R01_JOB28_FALLBACK_COST_METADATA_LOCAL_READY
 pointer: V2-03/PV2-R01
 base_sha: 3d16cf60511318d2c5eb7c799ecbee8c07631c1b
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
@@ -522,7 +522,32 @@ pv2_r01_job28_tier400_fallback_budget:
   final_post_subdub_focused_green: 9 passed in 8.49s
   final_post_subdub_compile_yaml_diff: exit 0
   final_post_subdub_scope: 8 files; production diff 0 added and 1 removed
+  fallback_budget_pr: 940
+  fallback_budget_merge_sha: aaf3a9c6e6ebd4d18b6b5a584a39168ed0abe42c
+  fallback_budget_deploy_run: 33302353405
+  fallback_budget_deploy_result: SUCCESS in about 3m27s
+  runtime_bot_sha: aaf3a9c6e6ebd4d18b6b5a584a39168ed0abe42c
+  runtime_worker_sha: aaf3a9c6e6ebd4d18b6b5a584a39168ed0abe42c
+  runtime_worker_pid: 723568
+  runtime_worker_generation: 284c6fe3ab704dea8237d1bfeebdad92
+  runtime_worker_heartbeat: authenticated and persisted; reject empty
+  cost_metadata_red: 1 failed in 8.29s
+  cost_metadata_green: 1 passed in 5.56s
+  cost_metadata_protected_green: 19 passed in 6.76s
+  cost_metadata_compile_diff: exit 0
+  cost_metadata_production_delta: one request metadata field
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
-next_action: Push the single rebased tier-400 fallback-budget commit, create one PR, squash merge, deploy and sync the Owner Product Video worker to the exact merge SHA. Then use the existing public-confirmed controlled fallback on job 28 only. Poll the old ShopAIKey tasks and submit Key4U VEO at most once per failed scene using existing idempotency keys. Do not upload, confirm, create a new project/job/outbox, resubmit primary or change the customer quote. Materialize a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/audio, persist receipt and customer report, prove zero wallet delta, and only then mark PV2-R01 LOCKED_LIVE_PASS.
+next_action: >-
+  After exact SubDub releases, rebase and ship the one-field fallback-cost metadata
+  propagation, deploy and sync the Owner Product Video worker to the exact merge SHA.
+  Then create a backed-up compare-and-swap recovery on existing job 28/project
+  32/outbox 27 only: preserve both ShopAIKey task identities without primary resubmit,
+  persist customer quote 144/144/144 and internal Key4U budget/cost 212/212, set one
+  summary-authoritative fallback scene at a time, and let the canonical preclaim
+  helper attach the existing per-scene idempotency key. Do not upload, confirm, create
+  a new project/job/outbox, resubmit primary or change the customer quote. Materialize
+  a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/audio,
+  persist receipt and customer report, prove zero wallet delta, and only then mark
+  PV2-R01 LOCKED_LIVE_PASS.

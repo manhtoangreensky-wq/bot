@@ -61,7 +61,15 @@ The completed Tail UI and terminal engine seams remain byte-locked.
   - [x] After SubDub PR #939, rebased cleanly onto `301d5b81...`; final focused
     fallback `9 passed in 8.49s`; compile/YAML/diff remained `0`, with the same
     8-file scope and production diff `0 added / 1 removed`.
-  - [ ] Ship the customer-price/internal-budget separation, then invoke existing
+  - [x] Customer-price/internal-budget separation shipped as PR #940, squash
+    `aaf3a9c6...`, deploy #156 run `33302353405` SUCCESS. Bot and Owner worker
+    run exact SHA; worker generation `284c6fe3...` is authenticated/persisted
+    with empty reject reason.
+  - [x] Final source review found the existing router cost guard was not receiving
+    `fallback_provider_cost_xu` from the scene request. One-field propagation
+    RED `1 failed in 8.29s` -> GREEN `1 passed in 5.56s`; fallback/Key4U
+    protected `19 passed in 6.76s`; compile/diff `0`. No provider/wallet action.
+  - [ ] Ship that one-field cost metadata seam, then invoke existing
     one-per-scene Key4U controlled fallback on job #28 only. New upload, Confirm,
     project/job/outbox, primary submit or price change is forbidden. `PV2-R01` stays
     open until real MP4/receipt/report/zero-wallet acceptance passes.
