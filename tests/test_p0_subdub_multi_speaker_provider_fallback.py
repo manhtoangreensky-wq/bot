@@ -164,6 +164,118 @@ def test_multi_gemini_request_does_not_hint_or_force_speaker_count(monkeypatch):
     )
 
 
+def test_multi_gemini_polls_same_in_progress_interaction_without_second_post(
+    monkeypatch,
+):
+    post_calls = []
+    get_calls = []
+    sleep_calls = []
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            post_calls.append(url)
+            return SimpleNamespace(
+                status_code=200,
+                json=lambda: {
+                    "id": "v1_in_progress_fixture",
+                    "status": "in_progress",
+                },
+            )
+
+        async def get(self, url, **_kwargs):
+            get_calls.append(url)
+            return SimpleNamespace(
+                status_code=200,
+                json=lambda: {
+                    **_gemini_payload(),
+                    "id": "v1_in_progress_fixture",
+                    "status": "completed",
+                },
+            )
+
+    async def no_wait(seconds):
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(fallback.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(fallback.asyncio, "sleep", no_wait)
+
+    result = asyncio.run(
+        fallback.gemini_transcribe_multi_diarized_words(
+            b"wav",
+            "audio/wav",
+            api_key="configured",
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "PASS"
+    assert len(post_calls) == 1
+    assert get_calls == [
+        f"{fallback.GEMINI_INTERACTIONS_URL}/v1_in_progress_fixture"
+    ]
+    assert sleep_calls == [fallback.GEMINI_INTERACTION_POLL_SECONDS]
+
+
+def test_multi_gemini_retries_one_terminal_http_200_empty_response(monkeypatch):
+    post_calls = []
+    get_calls = []
+    sleep_calls = []
+    responses = [
+        {
+            "id": "v1_empty_fixture",
+            "status": "completed",
+            "steps": [],
+        },
+        {
+            **_gemini_payload(),
+            "id": "v1_valid_fixture",
+            "status": "completed",
+        },
+    ]
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            post_calls.append(url)
+            payload = responses[len(post_calls) - 1]
+            return SimpleNamespace(status_code=200, json=lambda: payload)
+
+        async def get(self, url, **_kwargs):
+            get_calls.append(url)
+            raise AssertionError("completed interactions must not be polled")
+
+    async def no_wait(seconds):
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(fallback.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(fallback.asyncio, "sleep", no_wait)
+
+    result = asyncio.run(
+        fallback.gemini_transcribe_multi_diarized_words(
+            b"wav",
+            "audio/wav",
+            api_key="configured",
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "PASS"
+    assert len(post_calls) == 2
+    assert get_calls == []
+    assert sleep_calls == [fallback.GEMINI_EMPTY_RESULT_RETRY_DELAY_SECONDS]
+
+
 def test_multi_parser_deduplicates_exact_rows_before_minimum_word_gate():
     payload = _gemini_payload()
     annotations = payload["steps"][0]["content"][0]["annotations"]

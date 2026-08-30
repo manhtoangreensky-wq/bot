@@ -35,6 +35,10 @@ TARGET_SAMPLE_RATE = 16_000
 PCM_STREAM_CHUNK_BYTES = 1024 * 1024
 KEY4U_TRANSCRIPT_MAX_ATTEMPTS = 2
 KEY4U_TRANSCRIPT_RETRY_DELAY_SECONDS = 1.0
+GEMINI_INTERACTION_MAX_POLLS = 40
+GEMINI_INTERACTION_POLL_SECONDS = 3.0
+GEMINI_EMPTY_RESULT_MAX_ATTEMPTS = 2
+GEMINI_EMPTY_RESULT_RETRY_DELAY_SECONDS = 1.0
 MAX_DIRECT_AUDIO_BYTES = MAX_REDIARIZATION_SECONDS * 44_100 * 2 * 2
 _REDIARIZATION_LOCK = threading.Lock()
 
@@ -656,39 +660,87 @@ async def gemini_transcribe_multi_diarized_words(
             await _drain_conversion(serialization)
             raise
         async with httpx.AsyncClient(timeout=180.0) as client:
-            response = await client.post(
-                GEMINI_INTERACTIONS_URL,
-                headers={
-                    "x-goog-api-key": api_key,
-                    "Content-Type": "application/json",
-                },
-                content=request_body,
-            )
-        try:
-            response_payload = response.json()
-        except Exception:
-            response_payload = {}
-        words = extract_gemini_multi_diarized_words(response_payload)
-        labels = _ordered_speaker_labels(words)
-        if response.status_code < 400 and words:
-            return {
-                "ok": True,
-                "status": "PASS",
-                "provider": "gemini_transcribe_multi_diarization",
-                "words": words,
-                "speaker_ids": labels,
-                "http_status": int(response.status_code),
-                "detail": f"words={len(words)}; speakers={len(labels)}",
-            }
-        return {
-            "ok": False,
-            "status": AUTO_CAST_UNAVAILABLE,
-            "provider": "gemini_transcribe_multi_diarization",
-            "words": [],
-            "speaker_ids": [],
-            "http_status": int(response.status_code),
-            "detail": f"gemini_multi_diarization_invalid:http={response.status_code}",
-        }
+            for attempt in range(GEMINI_EMPTY_RESULT_MAX_ATTEMPTS):
+                response = await client.post(
+                    GEMINI_INTERACTIONS_URL,
+                    headers={
+                        "x-goog-api-key": api_key,
+                        "Content-Type": "application/json",
+                    },
+                    content=request_body,
+                )
+                response_http_status = int(response.status_code)
+                try:
+                    response_payload = response.json()
+                except Exception:
+                    response_payload = {}
+                interaction_status = str(
+                    response_payload.get("status")
+                    if isinstance(response_payload, dict)
+                    else ""
+                ).strip().lower()
+                interaction_id = str(
+                    response_payload.get("id")
+                    if isinstance(response_payload, dict)
+                    else ""
+                ).strip()
+                interaction_name = interaction_id.rsplit("/", 1)[-1]
+                if not re.fullmatch(r"[A-Za-z0-9._~-]{1,512}", interaction_name):
+                    interaction_name = ""
+                poll_count = 0
+                while (
+                    interaction_status in {"created", "in_progress", "queued"}
+                    and interaction_name
+                    and poll_count < GEMINI_INTERACTION_MAX_POLLS
+                ):
+                    await asyncio.sleep(GEMINI_INTERACTION_POLL_SECONDS)
+                    response = await client.get(
+                        f"{GEMINI_INTERACTIONS_URL}/{interaction_name}",
+                        headers={"x-goog-api-key": api_key},
+                    )
+                    poll_count += 1
+                    response_http_status = int(response.status_code)
+                    try:
+                        response_payload = response.json()
+                    except Exception:
+                        response_payload = {}
+                    interaction_status = str(
+                        response_payload.get("status")
+                        if isinstance(response_payload, dict)
+                        else ""
+                    ).strip().lower()
+
+                words = extract_gemini_multi_diarized_words(response_payload)
+                labels = _ordered_speaker_labels(words)
+                if response_http_status < 400 and words:
+                    return {
+                        "ok": True,
+                        "status": "PASS",
+                        "provider": "gemini_transcribe_multi_diarization",
+                        "words": words,
+                        "speaker_ids": labels,
+                        "http_status": response_http_status,
+                        "detail": f"words={len(words)}; speakers={len(labels)}",
+                    }
+                if (
+                    response_http_status < 400
+                    and interaction_status in {"completed", "incomplete"}
+                    and attempt + 1 < GEMINI_EMPTY_RESULT_MAX_ATTEMPTS
+                ):
+                    await asyncio.sleep(GEMINI_EMPTY_RESULT_RETRY_DELAY_SECONDS)
+                    continue
+                return {
+                    "ok": False,
+                    "status": AUTO_CAST_UNAVAILABLE,
+                    "provider": "gemini_transcribe_multi_diarization",
+                    "words": [],
+                    "speaker_ids": [],
+                    "http_status": response_http_status,
+                    "detail": (
+                        "gemini_multi_diarization_invalid:"
+                        f"http={response_http_status};status={interaction_status or 'missing'}"
+                    ),
+                }
     except httpx.TimeoutException:
         return {
             "ok": False,
