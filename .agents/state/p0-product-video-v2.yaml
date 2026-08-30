@@ -1,7 +1,7 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_JOB28_SCENE_AUTHORITY_LOCAL_READY
+phase: PV2_R01_JOB28_AUTHORITY_REPAIR_LOCAL_READY
 pointer: V2-03/PV2-R01
-base_sha: 42cbf929b8f89b9154e7f343079ac6655c2ef512
+base_sha: ef81f6a03f5384f6dbc02ebd6f9bf96edfbc6618
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
 allowed_files:
   - bot.py
@@ -351,4 +351,37 @@ pv2_r01_job28_post_rebase_gate:
   provider_calls: 0
   wallet_mutations: 0
   live_pass: false
-next_action: Force-with-lease remote branch from stale 5b5e7a8 to the current clean rebased branch HEAD, then create one PR after Owner action-time confirmation, squash merge, deploy and verify bot plus Owner worker exact runtime SHA. Then let the built-in owner worker claim boundary recover only existing job 28 and its two durable provider task IDs; do not upload, confirm, create a new project/job/outbox or submit another paid provider task. Poll/materialize the existing tasks to a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/audio, persist receipt and customer report, prove zero wallet delta, and only then mark PV2-R01 LOCKED_LIVE_PASS.
+pv2_r01_job28_authority_repair:
+  prior_pr: 934
+  prior_merge_sha: ef81f6a03f5384f6dbc02ebd6f9bf96edfbc6618
+  prior_deploy_run: 33290296142
+  prior_deploy_result: SUCCESS in 15m15s
+  bot_worker_sha: ef81f6a03f5384f6dbc02ebd6f9bf96edfbc6618
+  owner_worker_generation: 4ab7fd93482744a2bc06b81178ebb155
+  owner_worker_pid: 695925
+  heartbeat_authenticated: true
+  heartbeat_persisted: true
+  heartbeat_reject_reason: ""
+  live_claim_red_blocker: existing_task_recovery_attempts_exhausted
+  historical_recovery_count_max: [3, 3]
+  mapping_verified: true
+  scene_task_coverage: [2, 2]
+  provider_task_alive: true
+  explicit_terminal_reason: ""
+  charged_xu: 0
+  repair_policy: exactly one durable authority repair; ordinary max remains 3
+  repair_provider_submit_allowed: false
+  repair_resubmit_allowed: false
+  repair_fallback_allowed: false
+  red: 1 failed in 8.41s
+  minimal_green: 1 passed in 5.74s
+  focused_green: 15 passed in 9.38s
+  restart_claim_green: 56 passed in 15.57s
+  protected_green: 242 passed and 1 dependency warning in 48.09s
+  final_strategy_inclusive_green: 251 passed and 1 dependency warning in 47.40s
+  py_compile: exit 0
+  diff_check: exit 0
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
+next_action: Ship one authority-repair PR/deploy/runtime from base ef81f6a, verify a fresh matching Owner worker generation, and let the built-in claim boundary recover only existing job 28 and its two durable provider task IDs. Do not upload, confirm, create a new project/job/outbox or submit/fallback to another paid provider task. Poll/materialize the old tasks to a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/audio, persist receipt and customer report, prove zero wallet delta, and only then mark PV2-R01 LOCKED_LIVE_PASS.

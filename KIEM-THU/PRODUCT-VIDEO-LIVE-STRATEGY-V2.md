@@ -33,7 +33,11 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     failures and `NEW_FAILURES=0`. No UI/Tail/quality/route/submit/wallet change.
     Claim-scan guard prevents explicit-exhausted job #27 from being recovered while
     preserving poll-only recovery for job #28.
-  - [ ] After SubDub releases, rebase/ship/deploy and recover only the two existing
+  - [x] PR #934/deploy/runtime and exact bot/worker SHA `ef81f6a...` are proven.
+    Fresh generation `4ab7fd...` exposed one bounded claim RED: three recovery slots
+    were consumed before scene authority was corrected, while both tasks remained
+    authoritative `IN_PROGRESS` and zero-charge.
+  - [ ] Ship the one-shot authority-repair marker, then recover only the two existing
     job #28 provider task IDs. A new upload, Confirm or provider submit is forbidden.
     `PV2-R01` stays open until real MP4/receipt/report/zero-wallet acceptance passes.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
@@ -208,7 +212,7 @@ except `Kich ban -> Video`, which uses its locked minimum of five scenes.
 
 | ID | Product / exact owner | Most complex non-manual lane | Why selected | Status |
 |---|---|---|---|---|
-| `PV2-R01` | `video_trend` / `trend_video` | Upload one public trend reference through `vtrend|video_upload`, then select content profile and full Tail | Media intake + trend source + content/profile + Add-on + renderer | IN PROGRESS - source handoff GREEN, ship/live resume pending |
+| `PV2-R01` | `video_trend` / `trend_video` | Upload one public trend reference through `vtrend|video_upload`, then select content profile and full Tail | Media intake + trend source + content/profile + Add-on + renderer | IN PROGRESS - full flow/admission GREEN; one-shot job28 authority repair ship/live pending |
 | `PV2-R02` | `video_ai_real` / `video_ai_canonical` | `vid3|mode|image_video` with mapped scene images, character/style/requirements and full Tail | More material gates than prompt-only/manual | PENDING |
 | `PV2-R03` | `script_image_video` / `script_to_video` | Upload/parse existing script through `vproduct|script_upload`, review a five-scene plan and full Tail | File parsing + long script + scene planning; Owner approved existing 5-scene minimum | PENDING, 5 scenes |
 | `PV2-R04` | `frame_video_local` / `frame_video_render` | Use `framevideo|source|ai`, create/map/order two images, movement/transition/Add-on/full Tail | Most complex Frame source path; exercises image preparation plus mapping and local FFmpeg route | PENDING |

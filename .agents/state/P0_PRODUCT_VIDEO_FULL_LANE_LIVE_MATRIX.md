@@ -469,12 +469,29 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
   Focused/recovery `11 passed in 17.20s`; protected effective
   `68 passed, 5 exact baseline deselected in 14.52s`; docs `9 passed in 14.12s`;
   full bot/worker/queue/test compile, YAML, diff and secret gates exit `0`.
-- [ ] Force-with-lease remote branch from stale `5b5e7a8` to this exact head,
-  then after Owner PR confirmation ship one PR/deploy/runtime and recover **job #28 and
-  its two existing task IDs only**. No new upload, Confirm, project/job/outbox or
-  provider submit is authorized. Poll/materialize those tasks to the final MP4;
-  verify cover-fit 9:16, subtitle, transition, audio, receipt, report and zero-wallet
-  proof before marking `PV2-R01 LOCKED_LIVE_PASS`.
+- [x] Branch `2f997326...` shipped once as PR #934; squash merge
+  `ef81f6a03f5384f6dbc02ebd6f9bf96edfbc6618`; deploy run `33290296142`
+  SUCCESS in `15m15s`. VPS bot/web/nginx are active at that SHA. Owner worker was
+  fast-forwarded without touching untracked runtime data; generation
+  `4ab7fd93482744a2bc06b81178ebb155`, PID `695925`, heartbeat authenticated and
+  persisted, reject empty.
+- [x] Worker-claim live RED after the authority fix: job #28 stayed
+  `failed_no_charge` although both scene maps and both authoritative `IN_PROGRESS`
+  tasks were valid. The production classifier measured the sole blocker as historical
+  `existing_task_recovery_count=3/max=3`; those three recoveries were consumed before
+  the scene-authority correction. Provider task hashes and wallet remained unchanged.
+- [x] One-shot authority-repair source RED `1 failed in 8.41s`; minimal GREEN
+  `1 passed in 5.74s`; focused `15 passed`; restart/claim `56 passed`; protected
+  polling/CAS/multiscene/delivery/fallback `242 passed, 1 dependency warning in
+  48.09s`; final strategy-inclusive gate `251 passed, 1 dependency warning in
+  47.40s`; compile and diff-check exit `0`. Ordinary recovery stays capped at `3`;
+  the repair marker is durable and permits no second repair, submit, resubmit or
+  fallback.
+- [ ] Ship one authority-repair PR/deploy/runtime, then recover **job #28 and its two
+  existing task IDs only**. No new upload, Confirm, project/job/outbox or provider
+  submit is authorized. Poll/materialize those tasks to the final MP4; verify cover-fit
+  9:16, subtitle, transition, audio, receipt, report and zero-wallet proof before
+  marking `PV2-R01 LOCKED_LIVE_PASS`.
 - [x] Owner approved `D:\TOANAAS\video AI tham khảo` as the fixture library for
   later Product Video rows. Measure hash/metadata per selected file; do not swap
   the active PV2-R01 fixture during its failure loop.
@@ -541,6 +558,7 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 
 | Time (Asia/Saigon) | Spec | Evidence | Result |
 |---|---|---|---|
+| 2026-08-30 | PV2-R01 job28 authority-repair RED/GREEN | PR #934 -> `ef81f6a...`; deploy `33290296142` SUCCESS; worker generation `4ab7fd...`; live blocker recovery `3/3`; RED 1 failed -> GREEN 1 passed; protected 242 and final 251 passed | SOURCE PASS; one repair ship/live still open |
 | 2026-08-28 | SPEC-04G ship/runtime | PR #917 -> `d5dc300...`; compile/deploy SUCCESS; bot+worker exact SHA | PASS |
 | 2026-08-28 | SPEC-04G live | Job #26 tier 400, Invoice/Confirm/Status, valid 2-scene 9:16 MP4, delivery 27652, 0 Xu/0 tx | QUALITY/ARTIFACT PASS |
 | 2026-08-28 | SPEC-04G.1 live RED | UI no voice/music/subtitle but durable `partial_addons=1`; strict plan lost at generic project persistence | RED; lane remains open |
