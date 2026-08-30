@@ -80,7 +80,22 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     minimal pre-submit guard GREEN; persisted count-before-submit `0` allows the
     current attempt while `1` blocks retry. Spend safety `12 passed`, affected
     total `49 passed`, compile/diff `0`.
-  - [ ] Ship the single-candidate budget guard, then invoke existing
+  - [x] Single-candidate budget guard shipped as PR #942, squash
+    `db5f6a81bfb505c23eca61d68db419b984822a22`; deploy #158 run
+    `33307435330` SUCCESS `4m4s`; bot/worker exact SHA before live recovery.
+  - [x] Query-only dry-run, snapshot rehearsal and production CAS passed.
+    Backup `/opt/toanaas/bot/delete/pv2-r01-job28-fallback-cas-20260830T181523.json`,
+    SHA `cbef07f...`, mode `0600`; quote/budget/cost and wallet/provider exact.
+  - [x] Live RED after CAS: attempts `6->8`, terminal failed_no_charge before
+    provider HTTP; usage/transaction/wallet deltas `0`. Preclaim applied, but
+    worker payload rebuilt quote `400/0/0`, budget `0`, fallback scene `0`
+    and dropped Key4U candidate/idempotency.
+  - [x] Root is `build_worker_job_payload`: minimal conditional allowlist overlay
+    preserves controlled authority only when existing-task recovery + terminal
+    suppression + Key4U candidate are all true. Claim/hydrate integration `2 passed`;
+    worker-to-scene render `1 passed`; expanded branch/main share exact 4 failures,
+    focused branch/main share exact 2 failures, `NEW_FAILURES=0`.
+  - [ ] Ship the worker-context overlay, then invoke existing
     one-per-scene Key4U controlled fallback on job #28 only. New upload, Confirm,
     project/job/outbox, primary submit or price change is forbidden. `PV2-R01` stays
     open until real MP4/receipt/report/zero-wallet acceptance passes.

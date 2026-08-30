@@ -726,3 +726,12 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   public fallback source; `212==212` vẫn gọi đúng một lần. Spend safety
   `12 passed`, affected total `49 passed`, compile/diff `0`. Count trước
   submit `0` cho phép attempt hiện tại; `1` chặn retry.
+- PR #942 squash-merge `db5f6a81bfb505c23eca61d68db419b984822a22`;
+  deploy #158 run `33307435330` SUCCESS `4m4s`. Production CAS có backup
+  `0600`, nhưng live job #28 terminal lại trước provider, attempts `6->8`;
+  wallet/provider usage vẫn `0`.
+- Claim preflight đã lưu one-scene Key4U candidate, nhưng worker payload chỉ mang
+  route defaults và làm rơi quote/budget/cost/scene authority. Conditional
+  worker-context overlay chỉ chạy cho controlled existing-task recovery đã suppress
+  terminal; normal Product Video không đổi. Claim/hydrate `2 passed`,
+  worker-to-scene `1 passed`; branch/base comparators có `NEW_FAILURES=0`.

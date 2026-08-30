@@ -580,7 +580,21 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
   persisted count-before-submit `0` allows the current attempt, while `1`
   blocks retry. Spend safety `12 passed`, affected total `49 passed`,
   compile/diff `0`; cost `212==212` still submits exactly once.
-- [ ] Ship that guard, then use existing controlled
+- [x] Guard shipped as PR #942, squash `db5f6a81...`; deploy #158 run
+  `33307435330` SUCCESS `4m4s`, bot/worker exact SHA.
+- [x] Query-only dry-run + snapshot rehearsal + production CAS PASS. Backup
+  `/opt/toanaas/bot/delete/pv2-r01-job28-fallback-cas-20260830T181523.json`,
+  SHA `cbef07f...`, mode `0600`; exact rows `28/32/27`, two primary tasks,
+  quote `144/144/144`, budget/cost `212/212`, wallet/provider side effects `0`.
+- [x] Live RED: attempts `6->8`, failed_no_charge before provider HTTP. Preclaim
+  stored controlled fallback and terminal suppression, but hydrated worker payload
+  dropped scene authority/quote/budget/cost and collapsed provider order to
+  ShopAIKey; Key4U submit `0`, wallet/provider usage `0`.
+- [x] Worker-context hydration RED/GREEN: conditional allowlist overlay runs only
+  for suppressed controlled existing-task recovery. Worker-to-scene `1 passed`,
+  claim/hydrate `2 passed`; expanded branch `97 passed + 4 failures` vs clean
+  same 4, focused branch `61 passed + 2` vs clean same 2, `NEW_FAILURES=0`.
+- [ ] Ship that overlay, then use existing controlled
   fallback on **job #28 only**: poll old ShopAIKey tasks, submit Key4U VEO at most once
   per failed scene using existing idempotency keys. No new upload, Confirm,
   project/job/outbox, primary submit or price change. Verify MP4, cover-fit 9:16,

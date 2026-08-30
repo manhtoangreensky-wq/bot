@@ -1,5 +1,5 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_JOB28_SINGLE_FALLBACK_BUDGET_GUARD_LOCAL_READY
+phase: PV2_R01_JOB28_WORKER_CONTEXT_LOCAL_READY
 pointer: V2-03/PV2-R01
 base_sha: 3d16cf60511318d2c5eb7c799ecbee8c07631c1b
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
@@ -7,6 +7,7 @@ allowed_files:
   - bot.py
   - remote_worker.py
   - services/video_project_queue.py
+  - services/remote_worker_api.py
   - services/video_real_render_connector.py
   - services/video_provider_router.py
   - services/video_flow6.py
@@ -556,18 +557,52 @@ pv2_r01_job28_tier400_fallback_budget:
   single_fallback_budget_guard_affected_green: 49 passed in 9.37s
   single_fallback_budget_guard_attempt_semantics: persisted count 0 permits current attempt; persisted count 1 blocks retry
   single_fallback_budget_guard_compile_diff: exit 0
+  single_fallback_budget_guard_pr: 942
+  single_fallback_budget_guard_merge_sha: db5f6a81bfb505c23eca61d68db419b984822a22
+  single_fallback_budget_guard_deploy_run: 33307435330
+  single_fallback_budget_guard_deploy_result: SUCCESS in 4m4s
+  single_fallback_budget_guard_runtime_bot_sha: db5f6a81bfb505c23eca61d68db419b984822a22
+  single_fallback_budget_guard_runtime_worker_sha: db5f6a81bfb505c23eca61d68db419b984822a22
+  job28_dry_run_script_sha: 0ed507e0144b6598da9b306af9a4d5b3673e4caf72bee15220b3ea52878f8c86
+  job28_cas_script_sha: c35adfa54570edb45b15c3f2f0268d1714b42694c12754061228a3e4958ec25c
+  job28_cas_rehearsal: PASS on snapshot; backup mode 0600
+  job28_cas_backup: /opt/toanaas/bot/delete/pv2-r01-job28-fallback-cas-20260830T181523.json
+  job28_cas_backup_sha: cbef07f99f80a3744cb9744d6478ffbf8d097f54adc4df4ab0b5ad46ab0df3cf
+  job28_cas_result: queued job 28; queued_for_worker project 32; acknowledged outbox 27
+  job28_cas_wallet_provider_side_effects: wallet 200/0; tx 0; credit events 1; provider usage 0
+  job28_post_cas_dry_run: PASS; ledger processing_scenes; owner worker claimable
+  job28_live_red_attempts: 6 to 8
+  job28_live_red_terminal: failed_no_charge before provider submit
+  job28_live_red_provider_wallet: provider HTTP 0; provider usage 0; wallet 200/0
+  job28_live_red_preclaim: applied; controlled fallback true; terminal suppressed true
+  job28_live_red_worker_payload: fallback scene 0; quote 400/0/0; budget 0; Key4U candidate missing
+  worker_context_root_cause: build_worker_job_payload reconstructed project defaults and omitted persisted controlled fallback authority
+  worker_context_red: missing user_visible_price_xu at worker payload boundary
+  worker_context_green: direct worker payload and scene render 1 passed in 6.89s
+  worker_context_claim_integration_green: 2 passed in 8.28s
+  worker_context_expanded_branch: 97 passed and 4 exact baseline failures
+  worker_context_expanded_clean_main: same 4 test IDs and assertions
+  worker_context_focused_branch: 61 passed and 2 exact baseline failures
+  worker_context_focused_clean_main: same 2 test IDs and assertions
+  worker_context_new_failures: 0
+  worker_context_final_affected: 52 passed in 8.58s
+  worker_context_final_branch_comparator: 43 passed and 7 failed in 11.09s
+  worker_context_final_clean_comparator: 42 passed and the same 7 test IDs and assertions in 579.68s
+  worker_context_final_compile: bot.py plus changed production and test files exit 0
+  worker_context_final_yaml_diff_scope_secret: exit 0; exactly 8 scoped files; secret hits 0
+  worker_service_state: inactive after live RED
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
 next_action: >-
-  Ship the single-candidate fallback pre-submit budget guard, deploy and sync the
-  Owner Product Video worker to the exact merge SHA. Then rerun the query-only
-  production dry-run and create a backed-up compare-and-swap recovery on existing job 28/project
-  32/outbox 27 only: preserve both ShopAIKey task identities without primary resubmit,
-  persist customer quote 144/144/144 and internal Key4U budget/cost 212/212, set one
-  summary-authoritative fallback scene at a time, and let the canonical preclaim
-  helper attach the existing per-scene idempotency key. Do not upload, confirm, create
-  a new project/job/outbox, resubmit primary or change the customer quote. Materialize
-  a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/audio,
-  persist receipt and customer report, prove zero wallet delta, and only then mark
-  PV2-R01 LOCKED_LIVE_PASS.
+  Finish compile/YAML/diff/scope review, commit and ship the controlled-fallback
+  worker-context hydration overlay, deploy and sync the stopped Owner Product Video
+  worker to the exact merge SHA. Rerun query-only production dry-run, then prepare
+  a new backed-up CAS from the current failed attempts=8 state for existing job
+  28/project 32/outbox 27 only. Do not upload, confirm, create a new project/job/outbox,
+  resubmit ShopAIKey primary or change the customer quote. Start the worker only
+  after post-CAS dry-run proves quote 144/144/144, budget/cost 212/212, one-scene
+  Key4U candidate, idempotency match, no delivery/no charge and side effects 0.
+  Materialize a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/
+  audio, persist receipt and customer report, prove zero wallet delta, and only
+  then mark PV2-R01 LOCKED_LIVE_PASS.

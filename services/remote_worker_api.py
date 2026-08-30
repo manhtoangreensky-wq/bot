@@ -2086,6 +2086,94 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                     "continue_polling": True,
                 }
             )
+        controlled_fallback_recovery = bool(
+            existing_task_recovery
+            and persisted_result.get(
+                "claim_terminal_suppressed_for_controlled_fallback"
+            )
+            and persisted_result.get("controlled_fallback_allowed")
+            and str(
+                persisted_result.get("fallback_provider_candidate") or ""
+            ).strip()
+            == "key4u_video"
+        )
+        if controlled_fallback_recovery:
+            controlled_scene_tasks = [
+                dict(item)
+                for item in (
+                    persisted_result.get("scene_tasks")
+                    or persisted_result.get("provider_scene_tasks")
+                    or []
+                )
+                if isinstance(item, dict)
+            ]
+            controlled_scene_tasks = _full_scene_tasks(controlled_scene_tasks)
+            primary_providers = [
+                str(item.get("provider") or "").strip()
+                for item in controlled_scene_tasks
+                if str(item.get("provider") or "").strip()
+                and str(item.get("provider") or "").strip() != "key4u_video"
+            ]
+            controlled_chain = list(dict.fromkeys(primary_providers))
+            controlled_chain.append("key4u_video")
+            controlled_keys = (
+                "original_submit_source",
+                "submit_source",
+                "provider_submit_source",
+                "public_user_confirmed",
+                "invoice_confirmed",
+                "provider_submit_accepted_before",
+                "user_visible_price_xu",
+                "persisted_quoted_price_xu",
+                "customer_charge_planned_xu",
+                "provider_budget_xu",
+                "provider_cost_cap_xu",
+                "fallback_provider_cost_xu",
+                "fallback_candidate_prevalidated",
+                "quote_consistent",
+                "paid_fallback_confirmed",
+                "explicit_paid_retry_confirmed",
+                "owner_provider_gate_approved",
+                "fallback_count",
+                "fallback_count_before_submit",
+                "fallback_count_by_scene",
+                "fallback_scene_index",
+                "fallback_allowed",
+                "controlled_fallback_allowed",
+                "fallback_provider_candidate",
+                "fallback_provider_order",
+                "fallback_authorization_source",
+                "claim_terminal_suppressed_for_controlled_fallback",
+                "fallback_block_reason",
+                "fallback_eligibility_reason",
+                "provider_stalled_not_start",
+                "charged_xu",
+                "charge",
+                "wallet_charge_recorded",
+                "delivered",
+                "final_delivered",
+                "delivery_succeeded",
+            )
+            payload.update(
+                {
+                    key: persisted_result[key]
+                    for key in controlled_keys
+                    if key in persisted_result
+                }
+            )
+            payload.update(
+                {
+                    "configured_provider_chain": controlled_chain,
+                    "effective_provider_chain": controlled_chain,
+                    "provider_chain": controlled_chain,
+                    "provider_order": controlled_chain,
+                    "runtime_candidate_keys": controlled_chain,
+                    "scene_tasks": controlled_scene_tasks,
+                    "provider_scene_tasks": controlled_scene_tasks,
+                    "scene_tasks_total": len(controlled_scene_tasks),
+                    "controlled_fallback_worker_context": True,
+                }
+            )
     if is_remote_worker_admin_video_job(hydrated_job, project) or _is_admin_fake_video_job(project):
         safety = _admin_video_safety_flags(project)
         admin_render_mode = RENDER_MODE_ADMIN_TEST_PATTERN if (_is_admin_fake_video_job(project) or safety["test_pattern"]) else (safety["render_mode"] or RENDER_MODE_REAL)

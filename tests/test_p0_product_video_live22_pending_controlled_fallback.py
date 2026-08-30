@@ -339,6 +339,8 @@ def test_live24_claim_gate_preserves_stalled_scenes_for_controlled_fallback(
             job_id=job_id,
             project_id=project_id,
             provider_order=["shopaikey_video"],
+            provider_budget_xu=212,
+            fallback_provider_cost_xu=212,
             configured_provider_chain=["shopaikey_video", "key4u_video"],
             product_video_durable_public_seam=None,
             product_video_route_decision=None,
@@ -420,7 +422,261 @@ def test_live24_claim_gate_preserves_stalled_scenes_for_controlled_fallback(
     ] == [1]
     assert stored_payload["controlled_fallback_allowed"] is True
     assert stored_payload["charged_xu"] == 0
+    worker_payload = remote_worker_api.build_worker_job_payload(
+        queue.hydrate_video_job_payload(conn, claimed)
+    )
+    assert worker_payload["controlled_fallback_worker_context"] is True
+    assert worker_payload["user_visible_price_xu"] == 144
+    assert worker_payload["persisted_quoted_price_xu"] == 144
+    assert worker_payload["customer_charge_planned_xu"] == 144
+    assert worker_payload["provider_budget_xu"] == 212
+    assert worker_payload["fallback_provider_cost_xu"] == 212
+    assert worker_payload["provider_order"] == [
+        "shopaikey_video",
+        "key4u_video",
+    ]
+    assert worker_payload["fallback_scene_index"] == 1
+    assert worker_payload["scene_tasks"][0]["fallback_idempotency_key"]
     assert queue.get_product_video_dispatch_outbox(
         conn, job_id=job_id
     )["dispatch_status"] == "acknowledged"
     conn.close()
+
+
+def test_live28_worker_payload_preserves_controlled_fallback_context(
+    monkeypatch,
+    tmp_path,
+):
+    fallback_key = connector.product_video_scene_fallback_idempotency_key(
+        28,
+        1,
+        "key4u_video",
+    )
+    scene_tasks = [
+        {
+            "scene_index": index,
+            "scene_id": index,
+            "request_job_id": f"28-{index}",
+            "provider": "shopaikey_video",
+            "provider_task_id": f"primary-task-{index}",
+            "active_task_id": f"primary-task-{index}",
+            "status": "provider_running",
+            "actual_provider_payload_status": "IN_PROGRESS",
+            "provider_status_payload_source": "shopaikey.data.status",
+            "provider_started_at_epoch": 1,
+            "fallback_count": 0,
+            "fallback_allowed": index == 1,
+            "controlled_fallback_allowed": index == 1,
+            "fallback_provider_order": ["key4u_video"] if index == 1 else [],
+            "fallback_provider_candidate": "key4u_video" if index == 1 else "",
+            "fallback_scene_index": 1 if index == 1 else 0,
+            "fallback_idempotency_key": fallback_key if index == 1 else "",
+            "fallback_authorization_source": (
+                "persisted_exact_quote_final_confirm" if index == 1 else ""
+            ),
+            "result_url_valid": False,
+            "clip_valid": False,
+        }
+        for index in (1, 2)
+    ]
+    persisted = {
+        "source": "product_video",
+        "product_video": True,
+        "product_type": "video_trend",
+        "scene_count": 2,
+        "orchestration_mode": "per_scene_8s",
+        "recovery_existing_tasks_only": True,
+        "original_submit_source": "public_user_final_confirm",
+        "submit_source": "worker_poll_existing_task",
+        "provider_submit_source": "worker_poll_existing_task",
+        "public_user_confirmed": True,
+        "invoice_confirmed": True,
+        "provider_submit_accepted_before": True,
+        "configured_provider_chain": ["shopaikey_video", "key4u_video"],
+        "contract_valid_provider_chain": ["shopaikey_video", "key4u_video"],
+        "runtime_candidate_keys": ["shopaikey_video"],
+        "preconfirm_candidate_keys": ["shopaikey_video"],
+        "user_visible_price_xu": 144,
+        "persisted_quoted_price_xu": 144,
+        "customer_charge_planned_xu": 144,
+        "provider_budget_xu": 212,
+        "provider_cost_cap_xu": 212,
+        "fallback_provider_cost_xu": 212,
+        "quote_consistent": True,
+        "paid_fallback_confirmed": True,
+        "explicit_paid_retry_confirmed": True,
+        "owner_provider_gate_approved": True,
+        "automatic_retry_allowed": False,
+        "automatic_resubmit_allowed": False,
+        "automatic_fallback_allowed": False,
+        "provider_submit_allowed": False,
+        "fallback_count": 0,
+        "fallback_count_before_submit": 0,
+        "fallback_count_by_scene": {"1": 0, "2": 0},
+        "fallback_scene_index": 1,
+        "fallback_allowed": True,
+        "controlled_fallback_allowed": True,
+        "fallback_provider_candidate": "key4u_video",
+        "fallback_provider_order": ["key4u_video"],
+        "fallback_authorization_source": "persisted_exact_quote_final_confirm",
+        "claim_terminal_suppressed_for_controlled_fallback": True,
+        "scene_tasks": scene_tasks,
+        "provider_scene_tasks": scene_tasks,
+        "charged_xu": 0,
+        "no_charge": True,
+    }
+    project = {
+        "project_id": 32,
+        "user_id": 7126457028,
+        "profile_id": "video_trend",
+        "topic": "PV2-R01",
+        "ratio": "9:16",
+        "quality_tier": 400,
+        "scene_count": 2,
+        "total_xu_estimated": 144,
+        "is_confirmed": 1,
+        "asset_pack_json": json.dumps(
+            {
+                "source": "product_video",
+                "product_type": "video_trend",
+                "admin_only": True,
+                "no_charge": True,
+                "provider_call": True,
+                "public_user": False,
+            }
+        ),
+        "invoice_json": json.dumps(
+            {
+                "source": "product_video",
+                "product_type": "video_trend",
+                "scene_count": 2,
+                "quality_tier": 400,
+                "quality_xu": 80,
+                "total_xu": 144,
+                "admin_only": True,
+                "no_charge": True,
+                "public_user_confirmed": True,
+            }
+        ),
+        "addon_plan_json": "{}",
+        "scene_cards_json": json.dumps(
+            [
+                {"scene_index": 1, "video_prompt": "scene one"},
+                {"scene_index": 2, "video_prompt": "scene two"},
+            ]
+        ),
+    }
+    hydrated = {
+        "id": 28,
+        "job_id": 28,
+        "project_id": 32,
+        "user_id": 7126457028,
+        "job_type": queue.VIDEO_RENDER_JOB_TYPE,
+        "status": "processing",
+        "attempts": 7,
+        "max_attempts": 3,
+        "result_json": json.dumps(persisted),
+        "project": project,
+        "scenes": [
+            {"scene_id": 130, "project_id": 32, "scene_index": 1},
+            {"scene_id": 131, "project_id": 32, "scene_index": 2},
+        ],
+    }
+
+    payload = remote_worker_api.build_worker_job_payload(hydrated)
+
+    assert payload["user_visible_price_xu"] == 144
+    assert payload["persisted_quoted_price_xu"] == 144
+    assert payload["customer_charge_planned_xu"] == 144
+    assert payload["provider_budget_xu"] == 212
+    assert payload["fallback_provider_cost_xu"] == 212
+    assert payload["provider_order"] == ["shopaikey_video", "key4u_video"]
+    assert payload["fallback_scene_index"] == 1
+    assert payload["controlled_fallback_allowed"] is True
+    assert payload["fallback_provider_candidate"] == "key4u_video"
+    assert payload["fallback_count_before_submit"] == 0
+    assert payload["claim_terminal_suppressed_for_controlled_fallback"] is True
+    assert [
+        item["scene_index"]
+        for item in payload["scene_tasks"]
+        if item.get("controlled_fallback_allowed")
+    ] == [1]
+    assert payload["scene_tasks"][0]["fallback_idempotency_key"] == fallback_key
+    assert payload["automatic_resubmit_allowed"] is False
+    assert payload["charged_xu"] == 0
+
+    captured = {}
+
+    def fake_provider_generation(request, *, output_dir, environ, **_kwargs):
+        captured["provider_chain"] = environ.get("VIDEO_PROVIDER_CHAIN")
+        captured["submit_source"] = request.metadata.get("submit_source")
+        captured["customer_quote"] = [
+            request.metadata.get("user_visible_price_xu"),
+            request.metadata.get("persisted_quoted_price_xu"),
+            request.metadata.get("customer_charge_planned_xu"),
+        ]
+        captured["provider_budget_xu"] = request.metadata.get(
+            "provider_budget_xu"
+        )
+        captured["fallback_provider_cost_xu"] = request.metadata.get(
+            "fallback_provider_cost_xu"
+        )
+        captured["fallback_count_before_submit"] = request.metadata.get(
+            "fallback_count_before_submit"
+        )
+        captured["fallback_idempotency_key"] = request.metadata.get(
+            "fallback_idempotency_key"
+        )
+        output = tmp_path / "key4u-live28-scene-1.mp4"
+        output.write_bytes(b"key4u-live28-scene")
+        return {
+            "ok": True,
+            "output_path": str(output),
+            "provider": "key4u_video",
+            "provider_task_ids": ["key4u-task-live28"],
+            "provider_video_ids": ["key4u-task-live28"],
+        }
+
+    monkeypatch.setattr(
+        connector,
+        "run_provider_generation",
+        fake_provider_generation,
+    )
+    scene = SimpleNamespace(
+        scene_id=1,
+        video_prompt="approved scene one",
+        visual_prompt="approved scene one",
+        aspect_ratio="9:16",
+        target_duration_sec=8,
+        _toan_aas_job=payload,
+    )
+
+    rendered = asyncio.run(
+        connector._render_scene_async(
+            scene,
+            str(tmp_path / "provider-scene-1.mp4"),
+            list(payload["provider_order"]),
+        )
+    )
+
+    assert rendered["ok"] is True
+    assert captured["provider_chain"] == "key4u_video"
+    assert captured["submit_source"] == "public_confirmed_scene_fallback_once"
+    assert captured["customer_quote"] == [144, 144, 144]
+    assert captured["provider_budget_xu"] == 212
+    assert captured["fallback_provider_cost_xu"] == 212
+    assert captured["fallback_count_before_submit"] == 0
+    assert captured["fallback_idempotency_key"] == fallback_key
+
+    normal_persisted = {
+        **persisted,
+        "claim_terminal_suppressed_for_controlled_fallback": False,
+        "controlled_fallback_allowed": False,
+    }
+    normal_payload = remote_worker_api.build_worker_job_payload(
+        {
+            **hydrated,
+            "result_json": json.dumps(normal_persisted),
+        }
+    )
+    assert "controlled_fallback_worker_context" not in normal_payload
