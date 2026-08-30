@@ -4082,6 +4082,62 @@ def run_provider_generation(
             "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
             "provider_readiness": status,
         }
+    fallback_submit_sources = {
+        PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
+        PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE,
+    }
+    if (
+        is_product_video
+        and str(submit_source_policy.get("submit_source") or "")
+        in fallback_submit_sources
+        and not (pending_task_id or pending_video_id)
+    ):
+        fallback_policy_metadata = metadata
+        if (
+            str(submit_source_policy.get("submit_source") or "")
+            == PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE
+            and metadata.get("fallback_submit_attempted")
+            and str(metadata.get("fallback_idempotency_key") or "").strip()
+            and "fallback_count_before_submit" in metadata
+        ):
+            fallback_policy_metadata = {
+                **metadata,
+                "fallback_count": max(
+                    0,
+                    _int_metadata(metadata.get("fallback_count_before_submit"), 0),
+                ),
+            }
+        fallback_policy = product_video_controlled_fallback_policy(
+            "provider_timeout",
+            fallback_policy_metadata,
+        )
+        if not fallback_policy.get("fallback_submit_allowed"):
+            policy_reason = str(
+                fallback_policy.get("fallback_block_reason")
+                or "paid_fallback_requires_confirmation"
+            )
+            return {
+                "ok": False,
+                **base_debug,
+                **fallback_policy,
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "provider_submit_allowed": False,
+                "provider_submit_block_reason": policy_reason,
+                "external_provider_spend_prevented": True,
+                "paid_submit_allowed": False,
+                "paid_submit_blocked_reason": policy_reason,
+                "provider_error": policy_reason,
+                "blocker": policy_reason,
+                "provider_status": "blocked_no_charge",
+                "terminal_state": "blocked_no_charge",
+                "status": "failed_no_charge",
+                "charge": 0,
+                "charged_xu": 0,
+                "no_charge": True,
+                "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
+                "provider_readiness": status,
+            }
     if adapter is None:
         config_blocker = _config_validation_blocker_from_status(status, request.required_capability)
         if config_blocker:

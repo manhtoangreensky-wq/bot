@@ -210,6 +210,122 @@ def test_explicit_paid_retry_confirmation_allows_fallback(monkeypatch, tmp_path)
     assert result["paid_retry_confirmed"] is True
 
 
+def test_single_scene_fallback_over_budget_blocks_before_key4u_submit(
+    monkeypatch,
+    tmp_path,
+):
+    key4u = _Provider("key4u_video")
+    result = _run(
+        monkeypatch,
+        tmp_path,
+        [key4u],
+        env=_env(VIDEO_PROVIDER_CHAIN="key4u_video"),
+        metadata={
+            "submit_source": "public_confirmed_scene_fallback_once",
+            "original_submit_source": "public_user_final_confirm",
+            "public_user_confirmed": True,
+            "invoice_confirmed": True,
+            "provider_submit_accepted_before": True,
+            "paid_fallback_confirmed": True,
+            "user_visible_price_xu": 144,
+            "persisted_quoted_price_xu": 144,
+            "customer_charge_planned_xu": 144,
+            "provider_budget_xu": 212,
+            "fallback_provider_cost_xu": 213,
+            "quote_consistent": True,
+            "fallback_count": 1,
+            "fallback_count_before_submit": 0,
+            "fallback_submit_attempted": True,
+            "fallback_idempotency_key": "job28-scene1-key4u-once",
+            "charged_xu": 0,
+        },
+    )
+
+    assert key4u.submit_calls == 0
+    assert result["blocker"] == "fallback_exceeds_persisted_budget"
+    assert result["fallback_submit_allowed"] is False
+    assert result["fallback_budget_block_reason"] == "fallback_exceeds_persisted_budget"
+    assert result["external_provider_spend_prevented"] is True
+    assert int(result.get("charged_xu") or 0) == 0
+    assert result["no_charge"] is True
+
+
+def test_single_scene_fallback_within_budget_reaches_key4u_once(
+    monkeypatch,
+    tmp_path,
+):
+    key4u = _Provider("key4u_video")
+    result = _run(
+        monkeypatch,
+        tmp_path,
+        [key4u],
+        env=_env(VIDEO_PROVIDER_CHAIN="key4u_video"),
+        metadata={
+            "submit_source": "public_confirmed_scene_fallback_once",
+            "original_submit_source": "public_user_final_confirm",
+            "public_user_confirmed": True,
+            "invoice_confirmed": True,
+            "provider_submit_accepted_before": True,
+            "paid_fallback_confirmed": True,
+            "user_visible_price_xu": 144,
+            "persisted_quoted_price_xu": 144,
+            "customer_charge_planned_xu": 144,
+            "provider_budget_xu": 212,
+            "fallback_provider_cost_xu": 212,
+            "quote_consistent": True,
+            "fallback_count": 1,
+            "fallback_count_before_submit": 0,
+            "fallback_submit_attempted": True,
+            "fallback_idempotency_key": "job28-scene1-key4u-once",
+            "charged_xu": 0,
+        },
+    )
+
+    assert key4u.submit_calls == 1
+    assert result["continue_polling"] is True
+    assert result["fallback_requires_new_price"] is False
+    assert result["fallback_within_persisted_budget"] is True
+    assert int(result.get("charged_xu") or 0) == 0
+    assert result["no_charge"] is True
+
+
+def test_single_scene_fallback_used_before_stays_blocked(
+    monkeypatch,
+    tmp_path,
+):
+    key4u = _Provider("key4u_video")
+    result = _run(
+        monkeypatch,
+        tmp_path,
+        [key4u],
+        env=_env(VIDEO_PROVIDER_CHAIN="key4u_video"),
+        metadata={
+            "submit_source": "public_confirmed_scene_fallback_once",
+            "original_submit_source": "public_user_final_confirm",
+            "public_user_confirmed": True,
+            "invoice_confirmed": True,
+            "provider_submit_accepted_before": True,
+            "paid_fallback_confirmed": True,
+            "user_visible_price_xu": 144,
+            "persisted_quoted_price_xu": 144,
+            "customer_charge_planned_xu": 144,
+            "provider_budget_xu": 212,
+            "fallback_provider_cost_xu": 212,
+            "quote_consistent": True,
+            "fallback_count": 2,
+            "fallback_count_before_submit": 1,
+            "fallback_submit_attempted": True,
+            "fallback_idempotency_key": "job28-scene1-key4u-once",
+            "charged_xu": 0,
+        },
+    )
+
+    assert key4u.submit_calls == 0
+    assert result["blocker"] == "fallback_limit_reached"
+    assert result["external_provider_spend_prevented"] is True
+    assert result["no_charge"] is True
+
+
 def test_download_failure_does_not_auto_submit_paid_fallback(monkeypatch, tmp_path):
     shop = _Provider(
         "shopaikey_video",

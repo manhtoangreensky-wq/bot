@@ -188,6 +188,9 @@ def test_live22_controlled_scene_fallback_uses_key4u_once(monkeypatch, tmp_path)
         captured["fallback_provider_cost_xu"] = request.metadata.get(
             "fallback_provider_cost_xu"
         )
+        captured["fallback_count_before_submit"] = request.metadata.get(
+            "fallback_count_before_submit"
+        )
         output = tmp_path / "key4u-scene-1.mp4"
         output.write_bytes(b"key4u-live22-scene")
         return {
@@ -221,6 +224,7 @@ def test_live22_controlled_scene_fallback_uses_key4u_once(monkeypatch, tmp_path)
     assert captured["submit_source"] == "public_confirmed_scene_fallback_once"
     assert captured["provider_budget_xu"] == 212
     assert captured["fallback_provider_cost_xu"] == 212
+    assert captured["fallback_count_before_submit"] == 0
     assert result["fallback_count"] == 1
     assert result["fallback_idempotency_key"]
 

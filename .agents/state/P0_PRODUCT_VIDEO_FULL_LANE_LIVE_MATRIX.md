@@ -569,7 +569,18 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
   provider budget, but scene request omitted `fallback_provider_cost_xu`. Minimal
   one-field propagation: RED `1 failed in 8.29s`, GREEN `1 passed in 5.56s`,
   protected fallback/Key4U `19 passed in 6.76s`, compile/diff `0`.
-- [ ] Ship the cost metadata seam, then use existing controlled
+- [x] Cost metadata shipped in PR #941, squash `8134c28b...`, deploy #157
+  run `33304170789` SUCCESS `3m18s`; bot/worker exact SHA, PID `728701`,
+  generation `b8421a3a...`, heartbeat persisted/reject empty.
+- [x] Query-only job #28 production dry-run: scene 1 stalled `73625s/300s`,
+  Key4U ready/contract-valid, preclaim one scene, idempotency match, quote
+  `144/144/144`, budget/cost `212/212`, DB/provider/wallet side effects `0`.
+- [x] Single-candidate budget guard RED/GREEN: cost `213>212` incorrectly called
+  Key4U once; minimal pre-submit fail-closed guard blocks before adapter. Exact
+  persisted count-before-submit `0` allows the current attempt, while `1`
+  blocks retry. Spend safety `12 passed`, affected total `49 passed`,
+  compile/diff `0`; cost `212==212` still submits exactly once.
+- [ ] Ship that guard, then use existing controlled
   fallback on **job #28 only**: poll old ShopAIKey tasks, submit Key4U VEO at most once
   per failed scene using existing idempotency keys. No new upload, Confirm,
   project/job/outbox, primary submit or price change. Verify MP4, cover-fit 9:16,

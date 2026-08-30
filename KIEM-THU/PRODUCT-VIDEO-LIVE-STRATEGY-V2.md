@@ -69,7 +69,18 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     `fallback_provider_cost_xu` from the scene request. One-field propagation
     RED `1 failed in 8.29s` -> GREEN `1 passed in 5.56s`; fallback/Key4U
     protected `19 passed in 6.76s`; compile/diff `0`. No provider/wallet action.
-  - [ ] Ship that one-field cost metadata seam, then invoke existing
+  - [x] Cost metadata shipped as PR #941, squash `8134c28b...`, deploy #157
+    run `33304170789` SUCCESS `3m18s`; bot/worker exact SHA, worker PID
+    `728701`, generation `b8421a3a...`, heartbeat persisted/reject empty.
+  - [x] Query-only production dry-run on job #28 passed with quote `144/144/144`,
+    budget/cost `212/212`, scene 1 stalled, Key4U ready/contract-valid, preclaim
+    applied to one scene and DB/provider/wallet side effects `0`.
+  - [x] Dry-run review found single-candidate fallback did not enforce the cost
+    guard before submit. RED proved Key4U `submit_calls=1` for cost `213>212`;
+    minimal pre-submit guard GREEN; persisted count-before-submit `0` allows the
+    current attempt while `1` blocks retry. Spend safety `12 passed`, affected
+    total `49 passed`, compile/diff `0`.
+  - [ ] Ship the single-candidate budget guard, then invoke existing
     one-per-scene Key4U controlled fallback on job #28 only. New upload, Confirm,
     project/job/outbox, primary submit or price change is forbidden. `PV2-R01` stays
     open until real MP4/receipt/report/zero-wallet acceptance passes.

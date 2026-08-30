@@ -399,3 +399,13 @@ missing confirm, delivered/charged và fallback count >=1 vẫn fail-closed.
 
 RED `1 failed in 8.29s` -> GREEN `1 passed in 5.56s`; protected fallback/Key4U
 `19 passed in 6.76s`; compile/diff `0`. Production chỉ thêm một metadata field.
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Tính đúng cost context đồng nghĩa submit path tự enforce | Single-candidate Key4U trước guard vẫn submit khi cost `213>212` | Không còn đúng |
+| Cost guard chỉ cần ở bước chuyển provider | Public fallback source phải chạy controlled policy trước mọi adapter submit, kể cả chain chỉ có Key4U | Đã bổ sung fail-closed |
+
+Over-budget RED: Key4U `submit_calls=1`; GREEN chặn trước call. Within-budget
+`212==212` vẫn gọi đúng một lần. Count-before-submit `0` cho phép attempt
+hiện tại, `1` chặn retry. Spend safety `12 passed`, affected total
+`49 passed`, compile/diff `0`.

@@ -717,3 +717,12 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Minimal fix chỉ thêm một metadata field; RED `1 failed in 8.29s`, exact GREEN
   `1 passed in 5.56s`, fallback/Key4U `19 passed in 6.76s`, compile/diff
   exit `0`. Giá khách, route, engine, provider order, ví và idempotency không đổi.
+- PR #941 squash-merge `8134c28b80c1587a36cc782c0cdb98c4ebc9a74b`;
+  deploy #157 SUCCESS `3m18s`; bot/worker exact SHA. Query-only job #28 dry-run
+  đạt quote `144/144/144`, budget/cost `212/212`, one-scene preclaim,
+  idempotency match và side effect `0`.
+- Submit-path RED sau đó chứng minh single Key4U candidate chưa enforce cost guard:
+  `213>212` vẫn gọi adapter một lần. Guard tối thiểu chặn trước submit chỉ cho
+  public fallback source; `212==212` vẫn gọi đúng một lần. Spend safety
+  `12 passed`, affected total `49 passed`, compile/diff `0`. Count trước
+  submit `0` cho phép attempt hiện tại; `1` chặn retry.
