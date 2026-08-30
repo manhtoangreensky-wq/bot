@@ -377,6 +377,49 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   `8411ae7` fail cùng test ID và cùng SHA actual/expected, nên đây là baseline,
   không sửa fixture Product Video trong correction SubDub.
 
+### Failure loop live `#DB4FFFD7F6` và durable re-diarization evidence
+
+- Fresh combo trên runtime `aaf3a9c6e6ebd4d18b6b5a584a39168ed0abe42c`
+  dùng đúng fixture `9,869,032` bytes, SHA-256 `83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E`,
+  English, Auto multi, âm gốc `40%`, giọng lồng `150%` và Confirm đúng `1`
+  lần. Public job là `#DB4FFFD7F6`, internal job
+  `db4fffd7f6b63d1884f1`; duplicate count `0`.
+- Job terminal `failed_no_charge` tại `AUTO_CAST_MANUAL_REQUIRED` trước TTS,
+  mux, artifact và delivery; bốn stage này đều `0`. Engine jobs tăng đúng
+  `319 -> 320`; transactions `0`, provider-usage ledger `0`, credit events giữ
+  `11`, wallet giữ `200/0` và `charged_xu=0`.
+- Workspace giữ source SHA đúng, normalized SHA
+  `B3D735427011F71E81CE6C20077B3155F6C56A40C64C25D9B1DC643D888221C8`
+  và sidecar `5,425` bytes, SHA-256
+  `08D5CC607D68E995599486CCB716F91AF7969C9E41318F91617043FDDE200825`.
+  Sidecar có `32` cue nhưng vẫn chỉ `2` label (`16/16`), nên chưa đạt acceptance
+  tối thiểu `3` speaker.
+- Manifest/terminal cũ không giữ các field direct re-diarization. Vì vậy kết quả
+  provider trực tiếp của job này là **UNKNOWN**: thiếu field không chứng minh
+  provider chưa được gọi, cũng không chứng minh timeout, HTTP/quota, response
+  malformed hay mapping cue là root cause. Dòng Telegram progress `502/timeout`
+  là best-effort UI warning, không phải authority của terminal cast.
+- Correction hiện tại chỉ bảo toàn đúng `8` field bounded khi direct attempt có
+  thật: attempted, provider, provider status, detail, HTTP status, provider word
+  count, provider speaker count và mapped speaker count. `api_key`, raw response,
+  credentials và provider payload không được ghi. Request, retry, model,
+  provider call, mapping, TTS, mux, pricing và wallet không đổi; đây là
+  **diagnostics correction**, chưa phải output fix.
+- TDD đo được: RED `2 failed in 7.43s`; GREEN ban đầu `2 passed in 664.07s`;
+  production-shape + functional durable wrapper `2 passed in 9.46s`; direct
+  adapter contract `3 passed in 7.10s`; review RED exact detail `1 failed in
+  7.19s` rồi GREEN `2 passed in 5.85s`; conditional-manifest RED `1 passed + 1
+  failed in 6.55s` rồi GREEN `2 passed in 562.59s`; hai file focused cuối `58
+  passed in 6.87s`; exact-two/audio protected `86 passed in 8.92s`. Task7 comparator
+  branch `6 passed + 7 failed` và clean `a77b77f` cùng đúng `6/7` cùng failure
+  IDs/giá trị, nên `NEW_FAILURES=0`. Full changed-file compile và final changed
+  test compile đều exit `0`. Source tests tạo `0` provider call và `0` wallet
+  mutation. Authorization đã được dùng cho chính job này; mọi combo mới cần
+  Owner xác nhận mới sau deploy diagnostics.
+- Standalone `Lồng tiếng video` vẫn bị chặn theo thứ tự. Không được ghi
+  `LOCKED_LIVE_PASS` cho multi cho tới khi combo giao MP4 thật rồi receipt và
+  sau đó standalone cũng giao MP4 thật rồi receipt, cùng zero-wallet evidence.
+
 ## Bổ sung Product Video job 25 và khóa UI — 28/08/2026
 
 - PR `#910` merge SHA `82ffb117e6c2e84bd76a3aee6e5e747465958c66`; deploy run `33078757523` SUCCESS. Bot và owner worker cùng exact SHA.

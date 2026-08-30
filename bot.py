@@ -232480,6 +232480,28 @@ def subdub_auto_blackbox_runner(state: dict | None = None):
     return auto_speaker.run_auto_speaker_blackbox
 
 
+def subdub_multi_diarization_debug_fields(payload: dict | None = None) -> dict:
+    """Keep bounded multi-provider evidence without persisting raw payloads."""
+
+    current = dict(payload or {})
+    if "multi_diarization_attempted" not in current:
+        return {}
+
+    def bounded_int(field: str) -> int:
+        return max(0, _safe_int(current.get(field), 0))
+
+    return {
+        "multi_diarization_attempted": bool(current.get("multi_diarization_attempted")),
+        "multi_diarization_provider": str(current.get("multi_diarization_provider") or "")[:80],
+        "multi_diarization_status": str(current.get("multi_diarization_status") or "")[:80],
+        "multi_diarization_detail": str(current.get("multi_diarization_detail") or "")[:180],
+        "multi_diarization_http_status": bounded_int("multi_diarization_http_status"),
+        "multi_diarization_provider_word_count": bounded_int("multi_diarization_provider_word_count"),
+        "multi_diarization_provider_speaker_count": bounded_int("multi_diarization_provider_speaker_count"),
+        "multi_diarization_mapped_speaker_count": bounded_int("multi_diarization_mapped_speaker_count"),
+    }
+
+
 SUBDUB_MANUAL_VOICE_FIELDS = frozenset({
     "voice_style", "voice_id", "voice_profile_id", "selected_voice_label",
     "selected_voice", "selected_voice_gender", "selected_voice_id", "requested_gender",
@@ -249490,6 +249512,10 @@ async def _execute_video_dubbing_pipeline_core(
         }
 
     if str(product_result.get("status") or "") == "AUTO_CAST_MANUAL_REQUIRED":
+        multi_diarization = subdub_multi_diarization_debug_fields({
+            **dict(product_result.get("state") or {}),
+            **dict(product_result or {}),
+        })
         recovery = subdub_auto_manual_required_recovery(
             uid,
             state,
@@ -249499,6 +249525,11 @@ async def _execute_video_dubbing_pipeline_core(
         return {
             **dict(product_result or {}),
             **recovery,
+            **multi_diarization,
+            "state": {
+                **dict(recovery.get("state") or {}),
+                **multi_diarization,
+            },
             "workspace_artifacts": workspace_artifacts,
             "input_save": {
                 key: value
@@ -250918,6 +250949,10 @@ async def execute_video_dubbing_pipeline(
         runtime_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {})
         debug_job = dict(result.get("debug_job") or {})
         gate_matrix = dict(result.get("gate_matrix") or debug_job.get("gate_matrix") or {})
+        multi_diarization = subdub_multi_diarization_debug_fields({
+            **result_state,
+            **result,
+        })
         manifest = {
             "job_id": job.get("job_id"),
             "user_id": uid,
@@ -250943,6 +250978,7 @@ async def execute_video_dubbing_pipeline(
             "dub_audio": artifacts.get("dub_audio") or "",
             "final_mp4": artifacts.get("final_mp4") or "",
             "provider_route": dict(result.get("provider_route") or {}),
+            **({"multi_diarization": multi_diarization} if multi_diarization else {}),
             "input_save": input_save,
             "gate_matrix": gate_matrix,
             "debug_job": debug_job,
@@ -250959,6 +250995,7 @@ async def execute_video_dubbing_pipeline(
         update_fields = {
             **debug_job,
             **input_save_fields,
+            **multi_diarization,
             "job_id": job.get("job_id"),
             "workspace": workspace,
             "manifest": os.path.join(workspace, "manifest.json"),

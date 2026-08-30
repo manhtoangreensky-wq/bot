@@ -808,7 +808,15 @@ async def rediarize_underclustered_segments(
                 "status": AUTO_CAST_UNAVAILABLE,
                 "provider": "gemini_transcribe_multi_diarization",
                 "segments": [],
-                "detail": "multi_speaker_diarization_unavailable",
+                "provider_status": str(diarization.get("status") or AUTO_CAST_UNAVAILABLE),
+                "provider_http_status": int(diarization.get("http_status") or 0),
+                "provider_word_count": len(words),
+                "provider_speaker_count": len(diarization.get("speaker_ids") or []),
+                "mapped_speaker_count": speaker_count,
+                "detail": str(
+                    diarization.get("detail")
+                    or "multi_speaker_diarization_unavailable"
+                )[:180],
             }
         return {
             "ok": True,
@@ -816,6 +824,11 @@ async def rediarize_underclustered_segments(
             "provider": "gemini_transcribe_multi_diarization",
             "segments": mapped,
             "detected_speaker_count": speaker_count,
+            "provider_status": str(diarization.get("status") or "PASS"),
+            "provider_http_status": int(diarization.get("http_status") or 0),
+            "provider_word_count": len(words),
+            "provider_speaker_count": len(diarization.get("speaker_ids") or []),
+            "mapped_speaker_count": speaker_count,
             "detail": f"segments={len(mapped)}; speakers={speaker_count}",
         }
     finally:
