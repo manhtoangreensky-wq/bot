@@ -1,7 +1,7 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_JOB28_AUTHORITY_REPAIR_LOCAL_READY
+phase: PV2_R01_JOB28_STALE_ROOT_CLASSIFIER_LOCAL_READY
 pointer: V2-03/PV2-R01
-base_sha: ef81f6a03f5384f6dbc02ebd6f9bf96edfbc6618
+base_sha: 06f38df793beabd14e3446dadd473d4e8737a0e6
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
 allowed_files:
   - bot.py
@@ -384,4 +384,33 @@ pv2_r01_job28_authority_repair:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
-next_action: Ship one authority-repair PR/deploy/runtime from base ef81f6a, verify a fresh matching Owner worker generation, and let the built-in claim boundary recover only existing job 28 and its two durable provider task IDs. Do not upload, confirm, create a new project/job/outbox or submit/fallback to another paid provider task. Poll/materialize the old tasks to a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/audio, persist receipt and customer report, prove zero wallet delta, and only then mark PV2-R01 LOCKED_LIVE_PASS.
+pv2_r01_job28_stale_root_classifier:
+  prior_pr: 935
+  prior_merge_sha: 06f38df793beabd14e3446dadd473d4e8737a0e6
+  prior_deploy_run: 33293196471
+  prior_deploy_result: SUCCESS in 11m25s
+  bot_worker_sha: 06f38df793beabd14e3446dadd473d4e8737a0e6
+  owner_worker_generation: b264fd4f04994a3288f686ae09a51413
+  owner_worker_pid: 703262
+  heartbeat_authenticated: true
+  heartbeat_persisted: true
+  heartbeat_reject_reason: ""
+  authority_repair_used_at: 2026-08-30 11:59:17
+  authority_recovery_count: 4
+  terminalized_at: 2026-08-30 11:59:18
+  root_continue_polling: false
+  provider_task_alive: true
+  terminal_classifier_result: provider_in_progress
+  scene_actual_provider_statuses: [IN_PROGRESS, IN_PROGRESS]
+  provider_submit_called: false
+  provider_submit_allowed: false
+  automatic_resubmit_allowed: false
+  automatic_fallback_allowed: false
+  charged_xu: 0
+  classifier_red: 1 failed in 6.27s
+  classifier_and_bounded_repair_green: 4 passed in 4.65s
+  protected_green: 252 passed and 1 dependency warning in 45.50s
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
+next_action: Ship one stale-root terminal-classifier PR/deploy/runtime from base 06f38df, verify a fresh matching Owner worker generation, and let the built-in claim boundary use the one bounded classifier-repair marker to recover only existing job 28 and its two durable provider task IDs. Do not upload, confirm, create a new project/job/outbox or submit/fallback to another paid provider task. Poll/materialize the old tasks to a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/audio, persist receipt and customer report, prove zero wallet delta, and only then mark PV2-R01 LOCKED_LIVE_PASS.

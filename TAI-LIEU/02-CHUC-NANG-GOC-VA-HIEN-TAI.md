@@ -323,3 +323,15 @@ Bằng chứng source hiện tại: one-shot RED `1 failed in 8.41s` -> GREEN `1
 in 5.74s`; protected `242 passed` và final strategy-inclusive `251 passed`, cùng
 một warning dependency; compile/diff-check exit `0`. PR/deploy/live của correction vẫn là cổng riêng, nên `PV2-R01` còn
 `IN PROGRESS` và không được ghi `LOCKED_LIVE_PASS` sớm.
+
+## Đối chiếu root status và scene authority trong terminal classifier - 30/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Chỉ hỏi scene authority khi root `continue_polling=true` | Job #28 có root false nhưng hai scene authority `IN_PROGRESS` và `provider_task_alive=true`; root là summary stale | Không còn đúng |
+| Authority repair đã dùng thì không thể phân biệt lỗi classifier kế tiếp | Có đúng một classifier-repair marker cho payload authority-repair-used + worker-failed + pending; marker thứ hai bị chặn | Đã khóa bounded |
+| `provider_in_progress` trên root failed luôn là terminal | Explicit exhaustion vẫn terminal trước; pending chỉ được giữ khi helper scene authority chứng minh task thật còn sống | Đã sửa theo authority |
+
+Source evidence: RED `1 failed in 6.27s`, focused GREEN `4 passed in 4.65s`,
+protected `252 passed` và một warning dependency. Không có provider submit, job mới
+hay wallet mutation; live artifact/receipt/report vẫn chưa đạt.

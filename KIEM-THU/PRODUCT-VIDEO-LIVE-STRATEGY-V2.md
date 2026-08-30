@@ -37,9 +37,14 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     Fresh generation `4ab7fd...` exposed one bounded claim RED: three recovery slots
     were consumed before scene authority was corrected, while both tasks remained
     authoritative `IN_PROGRESS` and zero-charge.
-  - [ ] Ship the one-shot authority-repair marker, then recover only the two existing
-    job #28 provider task IDs. A new upload, Confirm or provider submit is forbidden.
-    `PV2-R01` stays open until real MP4/receipt/report/zero-wallet acceptance passes.
+  - [x] PR #935/deploy #151 and exact bot/worker SHA `06f38df...` are proven.
+    Generation `b264fd4f...` used the authority marker once with all paid routes
+    blocked, but stale root `continue_polling=false` terminalized the two live scene
+    tasks one second later before their authority was consulted.
+  - [ ] Ship the bounded stale-root classifier repair, then recover only the two
+    existing job #28 provider task IDs. A new upload, Confirm or provider submit is
+    forbidden. `PV2-R01` stays open until real MP4/receipt/report/zero-wallet
+    acceptance passes.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

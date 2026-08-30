@@ -485,10 +485,25 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
   polling/CAS/multiscene/delivery/fallback `242 passed, 1 dependency warning in
   48.09s`; final strategy-inclusive gate `251 passed, 1 dependency warning in
   47.40s`; compile and diff-check exit `0`. Ordinary recovery stays capped at `3`;
-  the repair marker is durable and permits no second repair, submit, resubmit or
+  the repair marker is durable and permits no second authority repair, submit, resubmit or
   fallback.
-- [ ] Ship one authority-repair PR/deploy/runtime, then recover **job #28 and its two
-  existing task IDs only**. No new upload, Confirm, project/job/outbox or provider
+- [x] Authority repair shipped as PR #935, squash SHA
+  `06f38df793beabd14e3446dadd473d4e8737a0e6`; deploy run `33293196471`
+  SUCCESS in `11m25s`. Bot/web/nginx and Owner worker read back that SHA; worker
+  generation `b264fd4f04994a3288f686ae09a51413`, PID `703262`, heartbeat
+  authenticated/persisted with empty reject.
+- [x] Post-claim live RED: the durable authority repair executed once at
+  `11:59:17`, stored recovery count `4` and kept submit/resubmit/fallback/charge `0`.
+  One second later `product_video_terminal_no_charge_reason()` read stale root
+  `continue_polling=false` before consulting `provider_task_alive=true`, so it
+  terminalized the still-running two-scene job again as `provider_in_progress`.
+- [x] Stale-root terminal-classifier RED `1 failed in 6.27s`; classifier and bounded
+  classifier-repair GREEN `4 passed in 4.65s`; final protected suite `252 passed,
+  1 dependency warning in 45.50s`. The classifier now always consults scene authority
+  after explicit terminal reasons; a second durable marker permits only the repair
+  consumed by this exact live bug, then blocks every later recovery.
+- [ ] Ship one terminal-classifier PR/deploy/runtime, then recover **job #28 and its
+  two existing task IDs only**. No new upload, Confirm, project/job/outbox or provider
   submit is authorized. Poll/materialize those tasks to the final MP4; verify cover-fit
   9:16, subtitle, transition, audio, receipt, report and zero-wallet proof before
   marking `PV2-R01 LOCKED_LIVE_PASS`.

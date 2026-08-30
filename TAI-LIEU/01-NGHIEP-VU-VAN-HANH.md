@@ -600,10 +600,28 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   authority lỗi thành cấm vĩnh viễn một task vẫn đang chạy. Correction không tăng
   max chung. Nó cho đúng một repair khi marker
   `provider_running_overrides_failed_no_charge` và task authority vẫn sống; marker
-  repair được lưu bền để lần sau fail-closed. Submit/resubmit/fallback và charge vẫn
+  repair được lưu bền để không có authority repair thứ hai. Submit/resubmit/fallback và charge vẫn
   false.
 - TDD đo được: RED `1 failed in 8.41s`; GREEN `1 passed in 5.74s`; focused `15
   passed`; restart/claim `56 passed`; protected polling/CAS/multiscene/delivery/
   fallback `242 passed, 1 dependency warning in 48.09s`; final strategy-inclusive
   `251 passed, 1 dependency warning in 47.40s`; compile và diff-check exit `0`.
   Đây chưa phải LIVE PASS; còn phải ship và materialize đúng hai task cũ.
+
+## Bổ sung PV2-R01 stale-root terminal classifier - 30/08/2026
+
+- PR #935 squash-merge `06f38df793beabd14e3446dadd473d4e8737a0e6`;
+  deploy `33293196471` SUCCESS trong `11m25s`; bot/worker cùng SHA, worker PID
+  `703262`, generation `b264fd4f04994a3288f686ae09a51413`, heartbeat accepted và
+  persisted.
+- Authority repair được dùng đúng một lần lúc `11:59:17`, recovery count `4`, mọi
+  submit/resubmit/fallback/charge vẫn `0`. Một giây sau job terminal lại dù hai scene
+  còn `IN_PROGRESS`.
+- Root cause: terminal classifier chỉ gọi `provider_task_alive()` khi root
+  `continue_polling=true`. Payload production có root stale false nhưng scene authority
+  true, nên reason pending bị hiểu nhầm thành terminal. Correction luôn hỏi authority
+  sau khi explicit terminal reason đã được ưu tiên.
+- Một marker classifier-repair riêng chỉ cho đúng payload đã dùng authority repair,
+  `worker_failed`, pending reason và task authority còn sống. Sau marker này mọi recovery
+  sau bị khóa. RED `1 failed in 6.27s`; GREEN `4 passed in 4.65s`; protected `252
+  passed, 1 dependency warning in 45.50s`. Chưa phải LIVE PASS.

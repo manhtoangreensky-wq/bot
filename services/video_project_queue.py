@@ -6814,10 +6814,11 @@ def product_video_existing_task_recovery_state(
     authority_repair_used = bool(
         result.get("existing_task_authority_repair_recovery_used")
     )
-    authority_repair_eligible = bool(
-        recovery_attempts_exhausted
-        and not authority_repair_used
-        and str(result.get("terminal_override_reason") or "").strip()
+    terminal_classifier_repair_used = bool(
+        result.get("existing_task_terminal_classifier_repair_used")
+    )
+    authority_repair_safe = bool(
+        str(result.get("terminal_override_reason") or "").strip()
         == "provider_running_overrides_failed_no_charge"
         and provider_task_alive(result)
         and mapping_verified
@@ -6826,6 +6827,20 @@ def product_video_existing_task_recovery_state(
         and not outbox_cancelled
         and not charge_recorded
         and not delivered
+    )
+    authority_repair_eligible = bool(
+        recovery_attempts_exhausted
+        and not authority_repair_used
+        and authority_repair_safe
+    )
+    terminal_classifier_repair_eligible = bool(
+        recovery_attempts_exhausted
+        and authority_repair_used
+        and not terminal_classifier_repair_used
+        and result.get("worker_failed")
+        and str(result.get("provider_error") or result.get("blocker") or "").strip()
+        == "provider_in_progress"
+        and authority_repair_safe
     )
     recoverable = bool(
         job_status == "failed"
@@ -6839,7 +6854,11 @@ def product_video_existing_task_recovery_state(
         and not explicit_terminal_reason
         and not charge_recorded
         and not delivered
-        and (not recovery_attempts_exhausted or authority_repair_eligible)
+        and (
+            not recovery_attempts_exhausted
+            or authority_repair_eligible
+            or terminal_classifier_repair_eligible
+        )
         and not recovery_cooldown_active
     )
     if recoverable:
@@ -6866,7 +6885,11 @@ def product_video_existing_task_recovery_state(
         blocker = "wallet_charge_already_recorded"
     elif delivered:
         blocker = "video_already_delivered"
-    elif recovery_attempts_exhausted and not authority_repair_eligible:
+    elif (
+        recovery_attempts_exhausted
+        and not authority_repair_eligible
+        and not terminal_classifier_repair_eligible
+    ):
         blocker = "existing_task_recovery_attempts_exhausted"
     elif recovery_cooldown_active:
         blocker = "existing_task_recovery_cooldown_active"
@@ -6883,6 +6906,8 @@ def product_video_existing_task_recovery_state(
         "existing_task_recovery_attempts_exhausted": recovery_attempts_exhausted,
         "existing_task_authority_repair_recovery_eligible": authority_repair_eligible,
         "existing_task_authority_repair_recovery_used": authority_repair_used,
+        "existing_task_terminal_classifier_repair_eligible": terminal_classifier_repair_eligible,
+        "existing_task_terminal_classifier_repair_used": terminal_classifier_repair_used,
         "existing_task_recovery_cooldown_seconds": PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_COOLDOWN_SECONDS,
         "existing_task_recovery_cooldown_active": recovery_cooldown_active,
         "existing_task_recovery_retry_after": _format_epoch(retry_after_epoch),
@@ -6988,6 +7013,9 @@ def recover_product_video_existing_tasks(
         authority_repair = bool(
             state.get("existing_task_authority_repair_recovery_eligible")
         )
+        terminal_classifier_repair = bool(
+            state.get("existing_task_terminal_classifier_repair_eligible")
+        )
         result.update(
             {
                 "status": "queued",
@@ -7012,6 +7040,20 @@ def recover_product_video_existing_tasks(
                     else str(
                         result.get(
                             "existing_task_authority_repair_recovery_used_at"
+                        )
+                        or ""
+                    )
+                ),
+                "existing_task_terminal_classifier_repair_used": bool(
+                    result.get("existing_task_terminal_classifier_repair_used")
+                    or terminal_classifier_repair
+                ),
+                "existing_task_terminal_classifier_repair_used_at": (
+                    current
+                    if terminal_classifier_repair
+                    else str(
+                        result.get(
+                            "existing_task_terminal_classifier_repair_used_at"
                         )
                         or ""
                     )
