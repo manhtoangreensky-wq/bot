@@ -4,7 +4,7 @@ owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
 branch: fix/p0-subdub-multi-cue-lock-video-only
-phase: SPEC_11_7_CF307_STALE_RECEIPT_MULTI_REDIARIZATION_LOCAL_READY
+phase: SPEC_11_8_22B_FRESH_SOURCE_RESUME_CLEAR_LOCAL_READY
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -30,6 +30,44 @@ resource_boundary:
   chrome: acquired_by_product_video_after_exact_subdub_release
   vps_deploy: acquired_by_product_video_after_exact_subdub_release
   product_video: shared owner; SubDub source-local only until exact releases
+
+newest_multi_live_failure_22b138532b:
+  public_job: 22B138532B
+  internal_job: 22b138532bd4df5cd2e6
+  source_fixture_sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
+  source_bytes: 9869032
+  source_duration_seconds: 133.375420
+  selected_options: English; Auto multi; original 40 percent; dub 150 percent
+  terminal: failed_no_charge before TTS, mux, artifact or delivery
+  blocker: AUTO_CAST_MANUAL_REQUIRED
+  charged_xu: 0
+  provider_authority: Deepgram PASS with 32 cues; DeepL PASS
+  sidecar_authority: 32 cues; exactly 2 labels; 16 cues each
+  root_cause: >-
+    Fresh accepted media replaced the Telegram source identity but retained the
+    previous source's five private auto-exact resume fields. In particular,
+    auto_exact_resume=true made the multi wrapper treat the fresh 2-label
+    sidecar as a genuine resume and skip the required undercluster recovery.
+  correction:
+    production: >-
+      After a valid combo video passes readiness, step and media-type guards,
+      clear only SUBDUB_AUTO_PROFILE_PRIVATE_FIELDS before accepting the new
+      source. Preserve the Auto multi lane and 40/150 audio settings. Genuine
+      resume without a new upload remains unchanged.
+    red: 1 failed in 5.60s; new source identity persisted while all five stale private fields survived
+    focused_green: 1 passed in 520.48s
+    behavior_comparators: 3 passed in 5.26s; fresh source, genuine resume and profile-switch contracts
+    multi_protected: 53 passed in 5.42s
+    exact_two_lock_and_volume: 82 passed across two batches; immutable hashes unchanged
+    baseline: same three stale UI/readiness assertions failed on clean HEAD 8411ae7 in 508.63s
+    branch: 16 passed plus the same three baseline failures in 7.79s
+    docs_tester: 4 issue templates; 3 SubDub cases; 8 passed plus 1 exact baseline fixture-hash failure
+    new_failures: 0
+    compile: bot.py and changed test exit 0
+    diff_scope_secret: exit 0; exactly 6 scoped source/test/state/operations/tester-source files tracked
+    provider_calls: 0
+    wallet_mutations: 0
+    next: wait exact Product Video releases; fetch/rebase latest main; post-rebase gate; one PR/deploy; same combo live before standalone
 
 two_speaker_live_pass_20260828:
   runtime_sha: e819c1cd00d66273e00c667355325549dbea8d44
@@ -935,4 +973,4 @@ ordered_specs:
       - audit every acceptance line as proven or unresolved
       - mark the goal complete only when no required line remains unresolved
 
-current_next_action: source READY_TO_PUSH after final rebase gate; push one PR/deploy/runtime, then exact combo live before standalone
+current_next_action: wait exact Product Video releases; fetch/rebase latest main; run one post-rebase gate; push one PR/deploy/runtime; rerun exact combo before standalone
