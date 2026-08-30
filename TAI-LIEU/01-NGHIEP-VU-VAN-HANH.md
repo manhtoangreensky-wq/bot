@@ -643,3 +643,19 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   summary chỉ áp dụng khi scene chưa có task candidate. RED `1 failed in 5.92s`;
   GREEN `1 passed in 5.14s`; focused `25 passed`; protected `252 passed, 1 warning
   in 43.96s`. Không thêm recovery marker mới; `PV2-R01` vẫn chưa LIVE PASS.
+
+## Bổ sung PV2-R01 trusted task authority - 30/08/2026
+
+- PR #937 squash-merge `6e0e42daae50859159c7781531e6c3228890dff5`;
+  deploy `33296036307` SUCCESS `13m44s`; bot/worker cùng SHA, worker PID `710711`,
+  generation `91ea20ee8faf4fe8b75343127b814f27`, heartbeat persisted/reject rỗng.
+- CAS requeue vận hành có backup riêng, chỉ đổi job #28/project #32 failed -> queued;
+  attempts/outbox/task identity giữ nguyên, new job/provider/wallet đều `0`. Job vẫn
+  terminal trước CAS lock lúc `13:22:46`.
+- Root refined: provider events historical và root canonical summary đều mang task
+  identity nhưng status `FAILURE`, được merge sau per-scene current `IN_PROGRESS`.
+  Vì thế điều kiện đúng không phải chỉ là “có task ID”, mà là authority source.
+- Per-scene current payload hoặc completion có result thật được gắn trusted sticky;
+  historical event/root summary không thể hạ status, nhưng current per-scene FAILURE
+  vẫn terminal được. RED `1 failed in 5.31s`; GREEN `1 passed in 5.67s`; focused
+  `27 passed`; protected `252 passed, 1 warning in 52.17s`. Chưa LIVE PASS.

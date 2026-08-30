@@ -45,8 +45,12 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     marker executed with all paid routes blocked, but claim-scan merged stale
     `scene_status_by_index=failed` before actual per-task `IN_PROGRESS`, so job #28
     never reached worker CAS.
-  - [ ] Ship the claim-ledger authority correction, then continue only the two
-    existing job #28 provider task IDs. A new upload, Confirm, recovery marker or
+  - [x] PR #937/deploy #153 and bot/worker SHA `6e0e42d...` are proven. A backed-up
+    CAS requeue of job #28 created no job/task/provider/wallet side effect, but
+    task-bearing historical provider events and root canonical FAILURE still replaced
+    per-scene current `IN_PROGRESS` before CAS claim.
+  - [ ] Ship sticky trusted-task authority, requeue only job #28 once with backup,
+    then continue its two existing task IDs. New upload, Confirm, recovery marker or
     provider submit is forbidden. `PV2-R01` stays open until real
     MP4/receipt/report/zero-wallet acceptance passes.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.

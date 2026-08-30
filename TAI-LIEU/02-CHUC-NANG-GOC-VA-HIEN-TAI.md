@@ -347,3 +347,15 @@ hay wallet mutation; live artifact/receipt/report vẫn chưa đạt.
 Bằng chứng source: claim integration RED `1 failed in 5.92s` -> GREEN `1 passed
 in 5.14s`; focused `25 passed`; protected `252 passed` và một warning dependency.
 Không có recovery marker, provider submit, job mới hay wallet mutation được thêm.
+
+## Đối chiếu task identity và status authority source - 30/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Cùng task ID thì status có rank số lớn hơn luôn thắng | Job #28 có historical event/root `FAILURE` cùng task ID nhưng per-scene current là `IN_PROGRESS`; identity bằng nhau, authority source khác nhau | Không còn đúng |
+| Root canonical summary là current authority | Root summary có thể collapsed/stale; chỉ per-scene provider payload hiện tại hoặc completion có result thật là trusted sticky | Không còn đúng |
+| Sticky running làm current FAILURE không terminal được | Current per-scene FAILURE cũng là trusted và vẫn thay running; chỉ historical event/root bị chặn | Đã khóa comparator |
+
+Full production-shape RED `1 failed in 5.31s` -> GREEN `1 passed in 5.67s`;
+focused `27 passed`; protected `252 passed` và một warning dependency. Correction
+không thêm provider call, recovery marker, job hay wallet mutation.
