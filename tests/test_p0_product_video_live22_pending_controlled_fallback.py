@@ -106,6 +106,22 @@ def test_live22_controlled_fallback_stays_blocked_without_exact_quote(monkeypatc
     assert policy["fallback_block_reason"] == "automatic_fallback_forbidden"
 
 
+def test_live22_exact_customer_price_allows_larger_internal_provider_budget(
+    monkeypatch,
+):
+    monkeypatch.setenv("VIDEO_PROVIDER_NOT_START_STALL_SECONDS", "60")
+    policy = connector.product_video_scene_stall_policy(
+        _confirmed_exact_quote_job(provider_budget_xu=212),
+        _stalled_primary_scene(),
+        1,
+    )
+
+    assert policy["exact_quote_preserved"] is True
+    assert policy["controlled_fallback_allowed"] is True
+    assert policy["fallback_allowed"] is True
+    assert policy["fallback_provider_order"] == ["key4u_video"]
+
+
 def test_live22_controlled_fallback_stays_blocked_without_final_confirm(monkeypatch):
     monkeypatch.setenv("VIDEO_PROVIDER_NOT_START_STALL_SECONDS", "60")
 

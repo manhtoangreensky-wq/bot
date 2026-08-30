@@ -1665,7 +1665,6 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         _safe_int(job.get("user_visible_price_xu"), 0),
         _safe_int(job.get("persisted_quoted_price_xu"), 0),
         _safe_int(job.get("customer_charge_planned_xu"), 0),
-        _safe_int(job.get("provider_budget_xu") or job.get("provider_cost_cap_xu"), 0),
     ]
     exact_quote_preserved = bool(
         quote_values[0] > 0

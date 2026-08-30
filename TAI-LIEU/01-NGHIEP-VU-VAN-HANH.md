@@ -687,3 +687,20 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   historical event/root summary không thể hạ status, nhưng current per-scene FAILURE
   vẫn terminal được. RED `1 failed in 5.31s`; GREEN `1 passed in 5.67s`; focused
   `27 passed`; protected `252 passed, 1 warning in 52.17s`. Chưa LIVE PASS.
+
+## Bổ sung PV2-R01 tier-400 controlled fallback budget - 30/08/2026
+
+- PR #938 squash-merge `3d16cf60511318d2c5eb7c799ecbee8c07631c1b`;
+  deploy `33297745599` SUCCESS `11m31s`; worker PID `714298`, generation
+  `8a63c9f4e4e949fe878e276c9d036511`.
+- Final CAS có backup, worker thật sự claim job #28 (`attempts 5->6`) rồi kết luận
+  primary `all_scene_providers_exhausted_no_charge`; artifact/delivery/submit mới/
+  wallet đều `0`. Primary không được requeue lần nữa.
+- Bảng giá/route giữ nguyên: khách `144 Xu`; ShopAIKey primary `4.550 VND/2 cảnh`;
+  Key4U VEO fallback `21.150,72 VND/2 cảnh`, internal budget `212 Xu`; Owner chịu
+  âm biên `6.750,72 VND`. Không tăng giá khách.
+- Root source: scene stall policy trộn internal budget vào phép bằng nhau của ba
+  trường giá khách. Router đã có budget-vs-cost guard riêng. Minimal fix chỉ tách
+  hai khái niệm; fallback vẫn một lần/cảnh, dùng idempotency, cấm debug/recover source
+  và cấm primary resubmit. RED `1 failed in 5.84s`; GREEN `5 passed in 5.63s`;
+  protected `88 passed in 9.34s`. Chưa LIVE PASS.

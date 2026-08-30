@@ -49,10 +49,22 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     CAS requeue of job #28 created no job/task/provider/wallet side effect, but
     task-bearing historical provider events and root canonical FAILURE still replaced
     per-scene current `IN_PROGRESS` before CAS claim.
-  - [ ] Ship sticky trusted-task authority, requeue only job #28 once with backup,
-    then continue its two existing task IDs. New upload, Confirm, recovery marker or
-    provider submit is forbidden. `PV2-R01` stays open until real
-    MP4/receipt/report/zero-wallet acceptance passes.
+  - [x] PR #938/deploy #154 and bot/worker SHA `3d16cf6...` are proven. Final CAS
+    reached the worker (`attempts 5->6`) and established the two ShopAIKey tasks are
+    truly exhausted, zero-charge and without artifact.
+  - [x] Tier-400 map remains exact: quote `144 Xu`; ShopAIKey primary `4.550 VND/2`;
+    Key4U VEO fallback `21.150,72 VND/2` with internal budget `212 Xu`. Customer price
+    is unchanged; Owner accepts the negative fallback margin.
+  - [x] Rebased onto `3d16cf6...`; focused fallback `9 passed`; branch matrix
+    `88 passed + 3 exact baseline failures`; clean main reproduced the same three
+    test IDs, so `NEW_FAILURES=0`. Compile/YAML/diff/secret gates are `0`.
+  - [x] After SubDub PR #939, rebased cleanly onto `301d5b81...`; final focused
+    fallback `9 passed in 8.49s`; compile/YAML/diff remained `0`, with the same
+    8-file scope and production diff `0 added / 1 removed`.
+  - [ ] Ship the customer-price/internal-budget separation, then invoke existing
+    one-per-scene Key4U controlled fallback on job #28 only. New upload, Confirm,
+    project/job/outbox, primary submit or price change is forbidden. `PV2-R01` stays
+    open until real MP4/receipt/report/zero-wallet acceptance passes.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 
