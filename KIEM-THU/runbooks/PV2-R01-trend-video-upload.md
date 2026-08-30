@@ -228,6 +228,32 @@ focused current-failure/exhaustion/cancel/claim `27 passed, 74 deselected in 10.
 protected `252 passed, 1 dependency warning in 52.17s`. No route, marker, provider or
 wallet behavior changed.
 
+PR #938 squash-merged `3d16cf60511318d2c5eb7c799ecbee8c07631c1b`;
+deploy run `33297745599` was SUCCESS in `11m31s`. Bot and Owner worker run that
+SHA; generation `8a63c9f4e4e949fe878e276c9d036511`, PID `714298`, is persisted.
+Final CAS backup is
+`/opt/toanaas/bot/delete/pv2-r01-job28-trusted-cas-20260830T140614.json`.
+The worker claimed job #28 (`attempts 5 -> 6`, lock `vps-toanaas-01`) and then
+terminalized both old primary tasks as `all_scene_providers_exhausted_no_charge`
+at `14:06:25`. Submit/resubmit/fallback/charged Xu remained `0`; artifact and
+delivery remained empty; Owner wallet stayed `200/0`, transactions `0`, credit
+events `1`, provider usage `0`. Do not requeue the primary route again.
+
+The stored price map already approves the next route: tier `400`, exact customer
+quote `144 Xu`, ShopAIKey VEO Fast primary `4.550 VND/2 scenes`, Key4U VEO fallback
+`21.150,72 VND/2 scenes`. Use conservative internal provider budget/cost `212 Xu`;
+the Owner absorbs the `6.750,72 VND` negative fallback margin. Do not change the
+customer quote.
+
+The scene stall policy incorrectly included internal provider budget in equality of
+the three customer fields, so `144/144/144 + budget 212` failed exact quote. The
+router already has the correct separate budget-vs-cost guard. Minimal correction
+keeps exact quote to the three customer fields only. RED `1 failed in 5.84s`; focused
+GREEN including missing-confirm, quote-mismatch, debug-source and one-fallback limit
+`5 passed in 5.63s`; fallback/Key4U/price/claim matrix `88 passed in 9.34s`. After
+ship, existing controlled fallback may submit Key4U once per failed scene with the
+existing idempotency key; it must never resubmit the ShopAIKey primary.
+
 For later Product Video rows, Owner approved the fixture library
 `D:\TOANAAS\video AI tham khảo`. Select a suitable complete video, then measure
 its SHA/bytes/streams/duration before live. PV2-R01 remains locked to SHA

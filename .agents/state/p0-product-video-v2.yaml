@@ -1,12 +1,13 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_JOB28_TRUSTED_TASK_AUTHORITY_LOCAL_READY
+phase: PV2_R01_JOB28_TIER400_FALLBACK_BUDGET_POST_REBASE_READY_TO_SHIP
 pointer: V2-03/PV2-R01
-base_sha: 6e0e42daae50859159c7781531e6c3228890dff5
+base_sha: 3d16cf60511318d2c5eb7c799ecbee8c07631c1b
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
 allowed_files:
   - bot.py
   - remote_worker.py
   - services/video_project_queue.py
+  - services/video_real_render_connector.py
   - services/video_flow6.py
   - services/video_flow7.py
   - KIEM-THU/PRODUCT-VIDEO-LIVE-STRATEGY-V2.md
@@ -24,6 +25,7 @@ allowed_files:
   - tests/test_p0_product_video_trend_source_tail_handoff.py
   - tests/test_p0_product_video_trend_standard_flow_restore.py
   - tests/test_p0_product_video_job28_authoritative_pending_guard.py
+  - tests/test_p0_product_video_live22_pending_controlled_fallback.py
   - .agents/state/P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md
   - .agents/state/p0-product-video-v2.yaml
 protected_domains:
@@ -475,4 +477,52 @@ pv2_r01_job28_trusted_task_authority:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
-next_action: After exact SubDub releases, rebase the local trusted-task-authority commit onto latest main, run one post-rebase gate, ship one PR/deploy/runtime, then perform one backed-up CAS requeue of existing job 28 only. Do not upload, confirm, create a new project/job/outbox, add another recovery marker or submit/fallback to a new provider task. Poll/materialize the two old task IDs to a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/audio, persist receipt and customer report, prove zero wallet delta, and only then mark PV2-R01 LOCKED_LIVE_PASS.
+pv2_r01_job28_tier400_fallback_budget:
+  prior_pr: 938
+  prior_merge_sha: 3d16cf60511318d2c5eb7c799ecbee8c07631c1b
+  prior_deploy_run: 33297745599
+  prior_deploy_result: SUCCESS in 11m31s
+  bot_worker_sha: 3d16cf60511318d2c5eb7c799ecbee8c07631c1b
+  owner_worker_generation: 8a63c9f4e4e949fe878e276c9d036511
+  owner_worker_pid: 714298
+  heartbeat_persisted: true
+  heartbeat_reject_reason: ""
+  final_cas_backup: /opt/toanaas/bot/delete/pv2-r01-job28-trusted-cas-20260830T140614.json
+  claim_attempts_before_after: [5, 6]
+  worker_lock_observed: vps-toanaas-01
+  primary_terminal_at: 2026-08-30 14:06:25
+  primary_terminal_reason: all_scene_providers_exhausted_no_charge
+  provider_submit_called: false
+  charged_xu: 0
+  artifact_delivery_counts: [0, 0]
+  wallet: [200, 0]
+  transaction_rows: 0
+  credit_event_rows: 1
+  provider_usage_rows: 0
+  tier_id: 400
+  customer_quote_xu: [144, 144, 144]
+  primary_provider: shopaikey_video:veo3.1-fast
+  primary_two_scene_cost_vnd: 4550
+  fallback_provider: key4u_video:veo_3_1-fast
+  fallback_two_scene_cost_vnd: 21150.72
+  fallback_internal_budget_xu: 212
+  fallback_negative_margin_vnd: 6750.72
+  exact_price_changed: false
+  fallback_limit_per_scene: 1
+  red: 1 failed in 5.84s
+  focused_green: 5 passed in 5.63s
+  protected_green: 88 passed in 9.34s
+  post_rebase_base_sha: 3d16cf60511318d2c5eb7c799ecbee8c07631c1b
+  post_rebase_focused_green: 9 passed in 5.08s
+  post_rebase_branch_matrix: 88 passed and 3 exact baseline failures in 14.92s
+  post_rebase_clean_main: the same 3 test IDs failed in 5.52s
+  post_rebase_new_failures: 0
+  post_rebase_compile_yaml_diff_secret: exit 0
+  final_post_subdub_base_sha: 301d5b81b388208bbde566e1088bd55b5b986496
+  final_post_subdub_focused_green: 9 passed in 8.49s
+  final_post_subdub_compile_yaml_diff: exit 0
+  final_post_subdub_scope: 8 files; production diff 0 added and 1 removed
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
+next_action: Push the single rebased tier-400 fallback-budget commit, create one PR, squash merge, deploy and sync the Owner Product Video worker to the exact merge SHA. Then use the existing public-confirmed controlled fallback on job 28 only. Poll the old ShopAIKey tasks and submit Key4U VEO at most once per failed scene using existing idempotency keys. Do not upload, confirm, create a new project/job/outbox, resubmit primary or change the customer quote. Materialize a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/audio, persist receipt and customer report, prove zero wallet delta, and only then mark PV2-R01 LOCKED_LIVE_PASS.

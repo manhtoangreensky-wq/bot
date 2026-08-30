@@ -535,11 +535,39 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
 - [x] Exact full-shape RED `1 failed in 5.31s`; sticky authority GREEN `1 passed in
   5.67s`; current FAILURE/exhaustion/cancel/claim comparators `27 passed, 74 deselected
   in 10.34s`; protected `252 passed, 1 dependency warning in 52.17s`.
-- [ ] Ship one trusted-task-authority PR/deploy/runtime, perform one backed-up CAS
-  requeue of **job #28 only**, then poll/materialize its two existing task IDs. No new
-  upload, Confirm, project/job/outbox, recovery marker, provider submit or fallback is
-  authorized. Verify final MP4, cover-fit 9:16, subtitle, transition, audio, receipt,
-  report and zero-wallet before `PV2-R01 LOCKED_LIVE_PASS`.
+- [x] Trusted authority shipped as PR #938, squash SHA
+  `3d16cf60511318d2c5eb7c799ecbee8c07631c1b`; deploy run `33297745599`
+  SUCCESS in `11m31s`. Bot/worker exact SHA; generation
+  `8a63c9f4e4e949fe878e276c9d036511`, PID `714298`, heartbeat accepted/persisted.
+- [x] Final backed-up CAS at
+  `/opt/toanaas/bot/delete/pv2-r01-job28-trusted-cas-20260830T140614.json`
+  requeued job #28 only. Claim authority PASS: attempts increased `5->6` and worker
+  lock `vps-toanaas-01` appeared. Poll of the two old ShopAIKey tasks then terminalized
+  at `14:06:25` as `all_scene_providers_exhausted_no_charge`; no artifact/delivery,
+  submit/resubmit/fallback/charged Xu remained `0`, wallet `200/0`, tx `0`, credit
+  events `1`, provider usage `0`. No further primary requeue is allowed.
+- [x] Existing price map remains authoritative: tier `400`, customer quote `144 Xu`;
+  ShopAIKey VEO Fast primary cost `4.550 VND/2 scenes`; approved Key4U VEO fallback
+  cost `21.150,72 VND/2 scenes`, rounded internal budget/cost `212 Xu`; Owner absorbs
+  negative margin `6.750,72 VND`. Exact customer price must not change.
+- [x] Scene fallback RED: internal provider budget `212` was incorrectly included in
+  equality of the three customer quote fields `144/144/144`, so controlled fallback
+  stayed blocked. RED `1 failed in 5.84s`; minimal GREEN plus missing-confirm,
+  quote-mismatch, debug-source and one-fallback limit `5 passed in 5.63s`; complete
+  fallback/Key4U/price/claim matrix `88 passed in 9.34s`.
+- [x] Post-rebase source gate on main `3d16cf6...`: focused fallback `9 passed in
+  5.08s`; branch matrix `88 passed + 3 failures in 14.92s`; clean main reproduced
+  the exact same three test IDs in `5.52s`, so `NEW_FAILURES=0`. Compile, YAML,
+  diff-check and secret scan exit `0`; production diff remains `0 added / 1 removed`.
+- [x] Final interleaving rebase after SubDub PR #939 onto `301d5b81...` is clean:
+  focused fallback `9 passed in 8.49s`; compile/YAML/diff exit `0`; same 8-file
+  scope and production diff `0 added / 1 removed`.
+- [ ] Ship one tier-400 fallback-budget PR/deploy/runtime, then use existing controlled
+  fallback on **job #28 only**: poll old ShopAIKey tasks, submit Key4U VEO at most once
+  per failed scene using existing idempotency keys. No new upload, Confirm,
+  project/job/outbox, primary submit or price change. Verify MP4, cover-fit 9:16,
+  subtitle, transition, audio, receipt, report and zero-wallet before
+  `PV2-R01 LOCKED_LIVE_PASS`.
 - [x] Owner approved `D:\TOANAAS\video AI tham khảo` as the fixture library for
   later Product Video rows. Measure hash/metadata per selected file; do not swap
   the active PV2-R01 fixture during its failure loop.

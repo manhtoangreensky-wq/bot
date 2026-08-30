@@ -377,3 +377,15 @@ Không có recovery marker, provider submit, job mới hay wallet mutation đư�
 Full production-shape RED `1 failed in 5.31s` -> GREEN `1 passed in 5.67s`;
 focused `27 passed`; protected `252 passed` và một warning dependency. Correction
 không thêm provider call, recovery marker, job hay wallet mutation.
+
+## Đối chiếu giá khách và provider budget fallback - 30/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Exact quote yêu cầu cả provider budget bằng giá khách | Chỉ ba trường customer quote phải bằng `144`; internal budget tier 400 là `212 Xu` để bao phủ Key4U `21.150,72 VND` | Không còn đúng |
+| Fallback đắt hơn phải tăng giá khách | Owner giữ exact price và hấp thụ âm biên `6.750,72 VND`; customer charge không đổi | Không được tăng giá |
+| Primary terminal cần tạo job mới | Dùng cùng job #28, fallback một lần/cảnh, idempotency riêng; primary không resubmit | Đã có blackbox/shared route |
+
+RED `1 failed in 5.84s` -> GREEN `5 passed in 5.63s`; protected fallback/Key4U/
+price/claim `88 passed in 9.34s`. Debug/recover/background source, quote mismatch,
+missing confirm, delivered/charged và fallback count >=1 vẫn fail-closed.
