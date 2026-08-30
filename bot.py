@@ -232513,6 +232513,17 @@ SUBDUB_AUTO_PROFILE_PRIVATE_FIELDS = frozenset({
     "auto_exact_resume",
 })
 
+def _clear_subdub_auto_private_fields_for_new_source(user_id, state: dict) -> dict:
+    """Drop prior-source resume authority after a fresh media upload is accepted."""
+
+    cleaned = dict(state or {})
+    for field in SUBDUB_AUTO_PROFILE_PRIVATE_FIELDS:
+        cleaned.pop(field, None)
+    if cleaned.get("pending_action") == "video_dubbing":
+        USER_PENDING[video_dubbing_pending_key(user_id)] = cleaned
+    return cleaned
+
+
 SUBDUB_VOICE_CONFIRMATION_FIELDS = frozenset({
     "subdub_final_confirmed",
     "subdub_confirmation_source",
@@ -252004,6 +252015,7 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
                 reply_markup=video_dubbing_video_only_upload_guard_keyboard(lang, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB),
             )
             return True
+        state = _clear_subdub_auto_private_fields_for_new_source(uid, state)
         cache_recent_media_state(update)
         remember_last_media(update)
         upload_fields = video_dubbing_source_fields_from_upload(media_info, subtitle_file=False)

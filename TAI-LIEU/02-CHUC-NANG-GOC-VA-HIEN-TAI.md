@@ -224,6 +224,24 @@ baseline/branch cùng `49 passed`, `NEW_FAILURES=0`; changed-file compile/diff e
 `0`; review độc lập Critical `0`, Important `0`. Merge/deploy/runtime/combo MP4/
 standalone MP4 vẫn là các cổng riêng.
 
+#### Đối chiếu failure live `#22B138532B` — 30/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| File ID mới tự động tạo toàn bộ phiên Auto mới | Fresh file identity đã đổi nhưng `5` field private `auto_exact_*` vẫn sống trong pending dict | ❌ Tài liệu cũ sai |
+| Có `auto_exact_resume=true` luôn nghĩa là genuine resume | Chỉ đúng khi tiếp tục cùng nguồn; upload nguồn mới phải xóa resume authority trước khi merge fields | ⚠️ Đã sửa source boundary |
+| Receipt cũ hoặc provider PASS đủ để bỏ qua re-diarization | Job mới Deepgram PASS/`32` cue nhưng chỉ `2` label; vẫn phải chứng minh `3–8` label cho multi | ❌ Không phải multi PASS |
+| Có thể xóa toàn bộ voice state khi đổi nguồn | Correction chỉ xóa `5` private fields; giữ `auto_speaker_lane=multi`, voice mode và âm gốc/lồng `40/150` | ✅ Phạm vi tối thiểu |
+| Fix boundary có thể thay đổi resume thật | Comparator genuine resume vẫn không gọi re-diarization; `3` focused tests PASS | ✅ Resume thật được bảo vệ |
+
+Bằng chứng correction: RED `1 failed in 5.60s`; focused GREEN `1 passed in
+520.48s`; multi protected `53 passed`; exact-two/audio `82 passed`; exact-two
+hashes `2/2` nguyên vẹn; branch/baseline cùng đúng `3` failure ID nên
+`NEW_FAILURES=0`; compile/YAML/diff/scope/secret exit `0`; provider/wallet `0`.
+Tester surface local có `4` templates và `3` SubDub cases. Docs/Strategy V2 có
+`8 passed` + đúng `1` baseline fixture-hash failure tái hiện trên clean HEAD.
+Chưa deploy và chưa có MP4 mới nên trạng thái vẫn là source-local ready.
+
 ## Đối chiếu Product Video flow/artifact sau job 25 — 28/08/2026
 
 | Chức năng/tài liệu cũ | Hiện tại | Trạng thái |

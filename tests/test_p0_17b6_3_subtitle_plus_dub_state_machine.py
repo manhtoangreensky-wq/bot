@@ -136,6 +136,60 @@ def test_subtitle_plus_dub_waiting_media_consumes_video(monkeypatch):
     assert "Bạn muốn xử lý video này theo hướng nào" not in joined
 
 
+def test_fresh_combo_upload_clears_stale_auto_exact_resume_metadata(monkeypatch):
+    uid = 630117
+    bot.clear_video_dubbing_pending(uid)
+    state = bot.set_video_dubbing_pending(
+        uid,
+        "waiting_media",
+        mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        active_flow=bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+        source_file_id="old-source",
+        source_file_unique_id="old-source-unique",
+        voice_kind="auto_speaker_gender",
+        voice_selection_mode="auto_speaker",
+        original_audio_volume_percent="40",
+        dubbed_voice_volume_percent="150",
+    )
+    state.update(
+        {
+            "auto_speaker_lane": "multi",
+            "auto_exact_receipt": {"claim_state": "resuming"},
+            "auto_exact_cache": {"prepared": "old-source"},
+            "auto_exact_resume_state": {"source_file_unique_id": "old-source-unique"},
+            "auto_exact_claim_token": "old-source-claim",
+            "auto_exact_resume": True,
+        }
+    )
+    monkeypatch.setattr(bot, "subdub_auto_speaker_route_enabled", lambda _state: True)
+    monkeypatch.setattr(
+        bot,
+        "get_subdub_lane_readiness",
+        lambda *_args, **_kwargs: {"effective_ready": True},
+    )
+    monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
+    monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
+
+    message = CaptureMessage("new-source")
+    assert asyncio.run(
+        bot.handle_video_dubbing_pending_upload(
+            _update(uid, message),
+            SimpleNamespace(),
+        )
+    ) is True
+
+    accepted = bot.get_video_dubbing_pending(uid)
+    assert accepted["source_file_id"] == "new-source"
+    assert accepted["source_file_unique_id"] == "new-source-unique"
+    assert accepted["video_file_unique_id"] == "new-source-unique"
+    assert accepted["voice_kind"] == "auto_speaker_gender"
+    assert accepted["voice_selection_mode"] == "auto_speaker"
+    assert accepted["auto_speaker_lane"] == "multi"
+    assert accepted["original_audio_volume_percent"] == "40"
+    assert accepted["dubbed_voice_volume_percent"] == "150"
+    assert not (bot.SUBDUB_AUTO_PROFILE_PRIVATE_FIELDS & set(accepted))
+
+
 def test_subtitle_plus_dub_no_generic_video_fallthrough(monkeypatch):
     uid = 630102
     bot.clear_video_dubbing_pending(uid)

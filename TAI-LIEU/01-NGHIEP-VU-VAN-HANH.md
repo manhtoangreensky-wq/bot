@@ -349,6 +349,34 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Đây vẫn là **SOURCE READY**, không phải deployed/LIVE PASS. Combo cùng fixture
   phải tạo MP4 thật trước; chỉ sau combo PASS mới chạy standalone và khóa multi.
 
+### Failure loop live `#22B138532B` và metadata resume của nguồn cũ
+
+- Fresh combo dùng đúng fixture `9,869,032` bytes, SHA-256 `83DE97B...`, duration
+  `133.375420s`; Deepgram PASS tạo `32` cue và DeepL PASS, nhưng sidecar vẫn chỉ
+  có `2` label (`16/16`). Job terminal `failed_no_charge` tại
+  `AUTO_CAST_MANUAL_REQUIRED`; TTS/mux/artifact/delivery đều chưa chạy và
+  `charged_xu=0`.
+- Root cause nằm ở boundary nhận video: Telegram file ID/unique ID đã đổi sang
+  nguồn mới nhưng `5` field private `auto_exact_*` của nguồn trước vẫn còn.
+  Riêng `auto_exact_resume=true` làm wrapper coi sidecar mới là genuine resume
+  và bỏ qua re-diarization undercluster. Receipt/provider PASS không phải bằng
+  chứng nguồn hiện tại được phép resume.
+- Correction chỉ xóa `SUBDUB_AUTO_PROFILE_PRIVATE_FIELDS` sau khi combo video
+  mới đã qua readiness, step và media-type guard. Lane Auto multi cùng mức âm
+  gốc `40%`/lồng `150%` vẫn giữ; callback resume thật không có upload mới vẫn
+  giữ cache và không gọi lại provider.
+- Bằng chứng local: RED `1 failed in 5.60s`; focused GREEN `1 passed in 520.48s`;
+  `3` behavior comparators, `53` multi protected và `82` exact-two/audio tests
+  PASS. Branch có `16 passed` cùng đúng `3` baseline failures; clean HEAD
+  `8411ae7` cũng fail đúng ba ID/giá trị, nên `NEW_FAILURES=0`.
+- Compile `bot.py` + test exit `0`; YAML/diff/scope/secret exit `0`; exact-two
+  hashes giữ `2/2`; provider calls `0`, wallet mutations `0`. Đây là **LOCAL
+  SOURCE READY**, chưa phải deployed hoặc LIVE PASS.
+- Tester surface local có đúng `4` issue templates và `3` SubDub cases. Suite
+  Strategy V2/docs có `8 passed` + `1` fixture-hash failure; clean HEAD
+  `8411ae7` fail cùng test ID và cùng SHA actual/expected, nên đây là baseline,
+  không sửa fixture Product Video trong correction SubDub.
+
 ## Bổ sung Product Video job 25 và khóa UI — 28/08/2026
 
 - PR `#910` merge SHA `82ffb117e6c2e84bd76a3aee6e5e747465958c66`; deploy run `33078757523` SUCCESS. Bot và owner worker cùng exact SHA.
