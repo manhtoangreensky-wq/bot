@@ -188,6 +188,26 @@ later recovery remains blocked. RED is `1 failed in 6.27s`; focused GREEN is `4 
 in 4.65s`; protected is `252 passed, 1 dependency warning in 45.50s`. No provider
 submit, new job or wallet action occurred.
 
+PR #936 then squash-merged
+`eba42c15b1b58f8a8b08dd019584b1c8dde67bb3`; deploy run `33294851362`
+was SUCCESS in `9m23s`. Bot and Owner worker read back that SHA. Generation
+`766c231c71e448949aaafe81d2cb918d`, PID `706350`, was authenticated/persisted.
+The classifier marker executed at `12:40:47`, recovery count became `5`, but the
+job returned to `failed_no_charge` at `12:40:48` without reaching CAS claim:
+attempts stayed `5` and `locked_by` stayed empty. Both scenes still carried actual
+provider status `IN_PROGRESS` and canonical `provider_running`; no clip, artifact,
+delivery, submit, fallback or wallet mutation appeared.
+
+The claim ledger merged durable `scene_status_by_index=failed` first. Its numeric
+rank `4` then blocked the later task-bearing actual provider status rank `3`; a final
+summary merge overwrote the scene again. The correction treats
+`actual_provider_payload_status` as current authority for the same task and permits
+summary status only when no task candidate exists. Exact integration RED was
+`1 failed in 5.92s`; GREEN `1 passed in 5.14s`; focused authority/terminal/cancel/
+claim gate `25 passed, 106 deselected in 10.47s`; protected `252 passed, 1 dependency
+warning in 43.96s`. No additional recovery marker is allowed. This source must be
+rebased and shipped only after SubDub releases shared resources.
+
 For later Product Video rows, Owner approved the fixture library
 `D:\TOANAAS\video AI tham khảo`. Select a suitable complete video, then measure
 its SHA/bytes/streams/duration before live. PV2-R01 remains locked to SHA

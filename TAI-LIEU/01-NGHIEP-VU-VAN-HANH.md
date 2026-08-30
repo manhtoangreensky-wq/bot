@@ -625,3 +625,21 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   `worker_failed`, pending reason và task authority còn sống. Sau marker này mọi recovery
   sau bị khóa. RED `1 failed in 6.27s`; GREEN `4 passed in 4.65s`; protected `252
   passed, 1 dependency warning in 45.50s`. Chưa phải LIVE PASS.
+
+## Bổ sung PV2-R01 claim-ledger authority - 30/08/2026
+
+- PR #936 squash-merge `eba42c15b1b58f8a8b08dd019584b1c8dde67bb3`;
+  deploy `33294851362` SUCCESS trong `9m23s`; worker PID `706350`, generation
+  `766c231c71e448949aaafe81d2cb918d`, heartbeat accepted/persisted.
+- Marker classifier cuối được lưu lúc `12:40:47`, recovery count `5`, nhưng job
+  terminal lại lúc `12:40:48` trước CAS claim: attempts giữ `5`, lock rỗng. Hai
+  scene vẫn actual `IN_PROGRESS`, canonical `provider_running`; paid routes, artifact,
+  delivery và wallet đều `0`.
+- Root cause nằm trong ledger merge: summary `scene_status_by_index=failed` vào trước
+  với rank `4`, chặn actual provider `IN_PROGRESS` rank `3`, rồi summary ghi đè lần
+  nữa. Summary là dữ liệu trình bày stale, không phải authority cao hơn task-bearing
+  current provider payload.
+- Minimal fix cho actual provider status thắng historical summary của cùng task;
+  summary chỉ áp dụng khi scene chưa có task candidate. RED `1 failed in 5.92s`;
+  GREEN `1 passed in 5.14s`; focused `25 passed`; protected `252 passed, 1 warning
+  in 43.96s`. Không thêm recovery marker mới; `PV2-R01` vẫn chưa LIVE PASS.

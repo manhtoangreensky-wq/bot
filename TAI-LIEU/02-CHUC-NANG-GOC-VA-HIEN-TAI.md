@@ -335,3 +335,15 @@ một warning dependency; compile/diff-check exit `0`. PR/deploy/live của corr
 Source evidence: RED `1 failed in 6.27s`, focused GREEN `4 passed in 4.65s`,
 protected `252 passed` và một warning dependency. Không có provider submit, job mới
 hay wallet mutation; live artifact/receipt/report vẫn chưa đạt.
+
+## Đối chiếu summary rank và current task authority - 30/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Rank `failed=4` luôn mạnh hơn `running=3` | Chỉ đúng trong cùng cấp authority; job #28 summary failed là historical, còn task-bearing `actual_provider_payload_status=IN_PROGRESS` là current authority | Không còn đúng |
+| `scene_status_by_index` có thể ghi đè scene task đã map | Summary chỉ bổ sung scene chưa có task candidate; task đã map phải theo current provider payload | Đã sửa |
+| Requeue thành công nghĩa là worker đã nhận job | Job #28 recovery count tăng lên `5`, nhưng attempts vẫn `5` và lock rỗng, chứng minh claim-scan terminal hóa trước CAS | Không còn đủ |
+
+Bằng chứng source: claim integration RED `1 failed in 5.92s` -> GREEN `1 passed
+in 5.14s`; focused `25 passed`; protected `252 passed` và một warning dependency.
+Không có recovery marker, provider submit, job mới hay wallet mutation được thêm.
