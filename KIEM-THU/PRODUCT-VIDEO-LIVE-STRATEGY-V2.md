@@ -22,6 +22,20 @@ The completed Tail UI and terminal engine seams remain byte-locked.
   provider job.
 - [-] `V2-03` Execute one representative complex non-manual lane per product;
   current row is `PV2-R01` only.
+  - [x] Full Trend upload flow, shared Tail, tier `400`, Invoice `144 Xu`, one
+    Confirm and exact admission `VID-20260829-D78AA3 / project 32 / job 28 /
+    outbox 27` are proven. Two provider tasks were accepted, one per scene.
+  - [x] LIVE RED forensic: both tasks remain durable and authoritative
+    `IN_PROGRESS`, but root-only alive detection let stale `failed_no_charge`
+    close job/outbox after `5` claims. Charged Xu and wallet deltas are `0`.
+  - [x] Local source correction: focused/recovery `7 passed`; protected `68 passed + 5`
+    exact baseline deselected; broad impact branch/main has the same 34 historical
+    failures and `NEW_FAILURES=0`. No UI/Tail/quality/route/submit/wallet change.
+    Claim-scan guard prevents explicit-exhausted job #27 from being recovered while
+    preserving poll-only recovery for job #28.
+  - [ ] After SubDub releases, rebase/ship/deploy and recover only the two existing
+    job #28 provider task IDs. A new upload, Confirm or provider submit is forbidden.
+    `PV2-R01` stays open until real MP4/receipt/report/zero-wallet acceptance passes.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

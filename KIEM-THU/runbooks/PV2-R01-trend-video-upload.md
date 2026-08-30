@@ -75,12 +75,11 @@ transactions/credit-events/provider-usage `0/10/0`, active jobs `0`, Owner
 wallet `200/0`. This proves deployment readiness only; no fresh full-flow Trend
 artifact exists yet.
 
-Owner action-time confirmation is now durable and exact:
+Owner action-time confirmation was durable and exact:
 `XÁC NHẬN GỬI PV2-R01 SHA 784FBE5B VÀ CHẠY TREND LIVE`. It covers one upload
-of the measured fixture to `@toanaasbot` and one final Confirm in this case.
-Do not ask again after shared resources are released, and do not reuse it for a
-duplicate upload/job retry. Current wait is only the SubDub shared-resource
-boundary, not a Product Video source/runtime blocker.
+of the measured fixture to `@toanaasbot`, the bounded zero-side-effect intake
+retry, and one final Confirm in this case. Those actions are now consumed. Do not
+upload, Confirm or create a replacement job under this authorization.
 
 Fresh upload intake RED (29/08/2026): Telegram accepted the exact fixture as a
 `30.9MB` File, but the bot returned invalid request before analysis. Journal
@@ -93,6 +92,57 @@ reproduces identically on clean `fe25cc0`, therefore `NEW_FAILURES=0`; compile
 and diff/scope/secret are `0`. After exact deploy, retry this same fixture once
 inside the same authorized flow because the first transfer created no job,
 provider or wallet side effect. Never loop retries.
+
+PR #930 squash-merged exact SHA
+`42cbf929b8f89b9154e7f343079ac6655c2ef512`; deploy run `33252027086` was
+SUCCESS in `10m22s`. Bot and Owner worker ran that SHA; generation
+`aae18624871f4008bdd46dc7e23437a3` authenticated/persisted with empty reject.
+The one bounded retry then completed the full restored UI path through content,
+profile, Preview, entity, style, requirements, plan, two approved prompts,
+source subtitle, transition `1/1`, Review, tier `400`, Invoice `144 Xu`, one
+Confirm and Status. Admission created exactly request `VID-20260829-D78AA3`,
+project `32`, job `28` and outbox `27`.
+
+Job #28 is the current LIVE RED, not a product PASS. Read-only SQLite forensic on
+`/data/toandaas_system.db` measured `attempts=5/max_attempts=3`. Its two scene
+rows each contain a different accepted/pollable ShopAIKey `veo3.1-fast` task;
+both actual provider statuses are authoritative `IN_PROGRESS` from
+`shopaikey.data.status`, and both task-to-scene maps cover indexes `1/2`.
+However, root authority was empty and root task count collapsed to `1`, so a
+stale `failed_no_charge` marker won. Outbox `27` became `terminal_failed` with
+reason `provider_in_progress`; scene rows `130/131` remain pending with no video
+or audio path. No delivery occurred. Owner wallet remains `200 Xu`, total spent
+`0`, transactions `0`, credit events `10`, charged Xu `0`.
+
+The source correction is local-only until shared Git/VPS ownership returns.
+Production scope is restricted to `remote_worker.py` and
+`services/video_project_queue.py`: scene-level authoritative running state may
+override only a stale provider-pending terminal marker; explicit scene exhaustion
+and non-pending cancellation still win. Exact live-shape RED was
+`1 failed, 2 passed in 23.22s`; exact cancellation RED was `1 failed in 19.40s`;
+explicit-exhaustion RED was `1 failed in 11.06s`; focused final GREEN is
+`7 passed in 12.03s` after recovery isolation. Claim-scan preflight RED
+`1 failed, 1 passed in 10.63s` proved it could also revive explicit-exhausted
+job #27; the shared terminal-reason guard now blocks #27 while keeping #28
+recoverable, and four existing recovery selectors pass in `20.18s`. Protected
+gate is `68 passed, 5 exact baseline deselected in 19.21s`. Broad impact branch is
+`196 passed + 34 historical failures in 42.55s`; clean main is `189 passed + the same 34`,
+therefore `NEW_FAILURES=0`. Runtime/test compile and diff-check are `0`.
+
+Exact latest SubDub release was followed by a clean rebase onto main
+`50c16cfed8ee150e8259c32687eda4b313f163e9`; Product Video HEAD is
+`2b3824a9c0b54d05fe3e49e950976530847094e6` before the evidence amend,
+`0 behind / 1 ahead`. Read the final branch SHA from Git after amend; it cannot be
+self-recorded inside the commit without changing itself.
+Post-rebase focused/recovery is `11 passed in 17.20s`; protected effective is
+`68 passed, 5 exact baseline deselected in 14.52s`; docs `9 passed`; full compile,
+YAML, diff and secret gates are clean. Next action is ship one PR/deploy/runtime,
+then recover **job #28 with its two
+existing task IDs only**. Recovery may poll and materialize those task IDs; it
+must not upload, Confirm, create a new request/project/job/outbox, use fallback,
+or submit another paid provider task. `PV2-R01` remains open until the existing
+tasks yield a valid two-scene MP4 and all artifact/Add-on/delivery/wallet gates
+below pass.
 
 For later Product Video rows, Owner approved the fixture library
 `D:\TOANAAS\video AI tham khảo`. Select a suitable complete video, then measure

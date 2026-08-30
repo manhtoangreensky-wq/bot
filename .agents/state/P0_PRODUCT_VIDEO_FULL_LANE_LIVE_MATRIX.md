@@ -429,10 +429,52 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
   effective `9 passed`; one broad AST harness failure reproduced identically on
   clean `fe25cc0` in `2107.51s`, so `NEW_FAILURES=0`. Compile and diff/scope/
   secret gates exit `0`.
-- [ ] Ship one intake correction PR/deploy/runtime, then rerun the same fixture
-  once inside the same Owner-confirmed flow. The first transfer created no
-  project/job/provider/wallet side effect, so this is a bounded correction retry,
-  not permission for repeated uploads.
+- [x] Intake correction shipped in PR #930, squash SHA
+  `42cbf929b8f89b9154e7f343079ac6655c2ef512`; deploy run `33252027086`
+  SUCCESS in `10m22s`. Bot and Owner worker read back the same SHA; generation
+  `aae18624871f4008bdd46dc7e23437a3` authenticated/persisted with empty reject.
+- [x] The single bounded same-fixture retry completed the restored long path:
+  upload analysis -> 2 scenes -> 9:16 -> content source -> Social creator Trend ->
+  suggestion/Preview -> entity/style/requirements/scene plan/prompts -> Add-on ->
+  Review -> tier `400` -> Invoice `144 Xu` -> one final Confirm -> Status. Exactly
+  request `VID-20260829-D78AA3`, project `32`, job `28`, outbox `27` were admitted;
+  no duplicate project/job/outbox and charged Xu remained `0`.
+- [x] Read-only production forensic proved job #28 contains two distinct accepted,
+  pollable ShopAIKey `veo3.1-fast` tasks, one for each scene. Both scene rows are
+  authoritative `IN_PROGRESS` from `shopaikey.data.status`; both durable task-to-
+  scene maps cover indexes `1/2`. Root task count incorrectly collapsed to `1`
+  and root authority was empty. After `5` claims against `max_attempts=3`, stale
+  `failed_no_charge` won and outbox `27` became `terminal_failed` with reason
+  `provider_in_progress`. Scene rows `130/131` have no artifact yet; wallet stays
+  `200/0`, transactions `0`, credit events `10`, charged Xu `0`.
+- [x] Exact production-shape RED `1 failed, 2 passed in 23.22s`; exact cancellation
+  guard RED `1 failed in 19.40s`. Minimal GREEN recognizes only task-bearing scene rows
+  with authoritative running status while the root still requests provider polling;
+  explicit exhaustion RED `1 failed in 11.06s` and GREEN now remain terminal.
+  Focused final plus recovery isolation `7 passed in 12.03s`; protected
+  `68 passed, 5 exact baseline deselected in 19.21s`.
+- [x] Claim-scan preflight RED proved explicit exhausted job #27 was recoverable
+  (`1 failed, 1 passed in 10.63s`). Shared terminal-reason guard GREEN keeps job
+  #28 recoverable but blocks job #27; four existing restart/CAS/cooldown/terminal
+  selectors pass in `20.18s`.
+- [x] Baseline classification: protected branch `68 passed + 5 failed in 19.08s` versus clean
+  `42cbf929` `61 passed + the same 5 failed in 1442.84s`; broad impact branch
+  `196 passed + 34 failed in 42.55s` versus clean `189 passed + the same 34 failed`.
+  `NEW_FAILURES=0`. `bot.py`, worker/queue/test/local-worker compile exit `0`.
+- [x] Rebased one local commit cleanly again onto exact latest SubDub main
+  `50c16cfed8ee150e8259c32687eda4b313f163e9`; post-rebase HEAD
+  before evidence amend was `2b3824a9c0b54d05fe3e49e950976530847094e6`,
+  `0 behind / 1 ahead`. Final commit SHA is read from Git after amend, not stored
+  inside the commit itself.
+  Focused/recovery `11 passed in 17.20s`; protected effective
+  `68 passed, 5 exact baseline deselected in 14.52s`; docs `9 passed in 14.12s`;
+  full bot/worker/queue/test compile, YAML, diff and secret gates exit `0`.
+- [ ] Force-with-lease remote branch from stale `5b5e7a8` to this exact head,
+  then after Owner PR confirmation ship one PR/deploy/runtime and recover **job #28 and
+  its two existing task IDs only**. No new upload, Confirm, project/job/outbox or
+  provider submit is authorized. Poll/materialize those tasks to the final MP4;
+  verify cover-fit 9:16, subtitle, transition, audio, receipt, report and zero-wallet
+  proof before marking `PV2-R01 LOCKED_LIVE_PASS`.
 - [x] Owner approved `D:\TOANAAS\video AI tham khảo` as the fixture library for
   later Product Video rows. Measure hash/metadata per selected file; do not swap
   the active PV2-R01 fixture during its failure loop.
