@@ -562,7 +562,14 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
 - [x] Final interleaving rebase after SubDub PR #939 onto `301d5b81...` is clean:
   focused fallback `9 passed in 8.49s`; compile/YAML/diff exit `0`; same 8-file
   scope and production diff `0 added / 1 removed`.
-- [ ] Ship one tier-400 fallback-budget PR/deploy/runtime, then use existing controlled
+- [x] Tier-400 separation shipped in PR #940, squash `aaf3a9c6...`, deploy #156
+  run `33302353405` SUCCESS. VPS bot and Owner worker exact SHA; worker PID
+  `723568`, generation `284c6fe3...`, heartbeat persisted and reject empty.
+- [x] Cost metadata seam RED/GREEN: router already checks fallback cost against
+  provider budget, but scene request omitted `fallback_provider_cost_xu`. Minimal
+  one-field propagation: RED `1 failed in 8.29s`, GREEN `1 passed in 5.56s`,
+  protected fallback/Key4U `19 passed in 6.76s`, compile/diff `0`.
+- [ ] Ship the cost metadata seam, then use existing controlled
   fallback on **job #28 only**: poll old ShopAIKey tasks, submit Key4U VEO at most once
   per failed scene using existing idempotency keys. No new upload, Confirm,
   project/job/outbox, primary submit or price change. Verify MP4, cover-fit 9:16,

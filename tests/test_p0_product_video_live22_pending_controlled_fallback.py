@@ -172,6 +172,8 @@ def test_live22_controlled_scene_fallback_uses_key4u_once(monkeypatch, tmp_path)
         scene_count=2,
         scenes=[{"scene_index": 1}, {"scene_index": 2}],
         scene_tasks=[stalled_scene],
+        provider_budget_xu=212,
+        fallback_provider_cost_xu=212,
         recovery_existing_tasks_only=True,
         provider_submit_allowed=False,
         automatic_retry_allowed=False,
@@ -182,6 +184,10 @@ def test_live22_controlled_scene_fallback_uses_key4u_once(monkeypatch, tmp_path)
     def fake_provider_generation(request, *, output_dir, environ, **_kwargs):
         captured["provider_chain"] = environ.get("VIDEO_PROVIDER_CHAIN")
         captured["submit_source"] = request.metadata.get("submit_source")
+        captured["provider_budget_xu"] = request.metadata.get("provider_budget_xu")
+        captured["fallback_provider_cost_xu"] = request.metadata.get(
+            "fallback_provider_cost_xu"
+        )
         output = tmp_path / "key4u-scene-1.mp4"
         output.write_bytes(b"key4u-live22-scene")
         return {
@@ -213,6 +219,8 @@ def test_live22_controlled_scene_fallback_uses_key4u_once(monkeypatch, tmp_path)
     assert result["ok"] is True
     assert captured["provider_chain"].split(",")[0] == "key4u_video"
     assert captured["submit_source"] == "public_confirmed_scene_fallback_once"
+    assert captured["provider_budget_xu"] == 212
+    assert captured["fallback_provider_cost_xu"] == 212
     assert result["fallback_count"] == 1
     assert result["fallback_idempotency_key"]
 

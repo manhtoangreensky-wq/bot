@@ -254,6 +254,18 @@ GREEN including missing-confirm, quote-mismatch, debug-source and one-fallback l
 ship, existing controlled fallback may submit Key4U once per failed scene with the
 existing idempotency key; it must never resubmit the ShopAIKey primary.
 
+PR #940 squash-merged `aaf3a9c6e6ebd4d18b6b5a584a39168ed0abe42c`;
+deploy #156 run `33302353405` was SUCCESS. Bot and Owner worker run that exact
+SHA; worker PID `723568`, generation `284c6fe3ab704dea8237d1bfeebdad92`,
+heartbeat authenticated/persisted with empty reject reason.
+
+The final request-boundary review found one remaining cost-proof seam: the router
+checks `fallback_provider_cost_xu <= provider_budget_xu`, but the scene request
+only carried the budget. Add only the cost metadata alias at that boundary.
+RED `1 failed in 8.29s`; exact GREEN `1 passed in 5.56s`; fallback/Key4U
+matrix `19 passed in 6.76s`; compile/diff exit `0`. Ship this seam before
+the job #28 CAS; do not weaken the router guard or call Key4U first.
+
 For later Product Video rows, Owner approved the fixture library
 `D:\TOANAAS\video AI tham khảo`. Select a suitable complete video, then measure
 its SHA/bytes/streams/duration before live. PV2-R01 remains locked to SHA

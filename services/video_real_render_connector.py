@@ -4367,6 +4367,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "persisted_quoted_price_xu": _meta_value("persisted_quoted_price_xu", "quoted_price_xu", "quoted_price"),
             "customer_charge_planned_xu": _meta_value("customer_charge_planned_xu", "wallet_charge_amount_xu", "charge_amount_planned_xu"),
             "provider_budget_xu": _meta_value("provider_budget_xu", "provider_cost_cap_xu"),
+            "fallback_provider_cost_xu": _meta_value("fallback_provider_cost_xu", "fallback_cost_xu", "selected_fallback_cost_xu"),
             "quote_consistent": _meta_value("quote_consistent") or True,
             "allow_provider_pending": True,
             "claim_payload_provider_key": str((job or {}).get("selected_provider") or (job or {}).get("submit_provider_key") or ""),

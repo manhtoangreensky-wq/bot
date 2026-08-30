@@ -704,3 +704,16 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   hai khái niệm; fallback vẫn một lần/cảnh, dùng idempotency, cấm debug/recover source
   và cấm primary resubmit. RED `1 failed in 5.84s`; GREEN `5 passed in 5.63s`;
   protected `88 passed in 9.34s`. Chưa LIVE PASS.
+
+## Bổ sung PV2-R01 fallback cost metadata - 30/08/2026
+
+- PR #940 squash-merge `aaf3a9c6e6ebd4d18b6b5a584a39168ed0abe42c`;
+  deploy #156 run `33302353405` SUCCESS. Bot và Owner worker cùng SHA; worker
+  PID `723568`, generation `284c6fe3ab704dea8237d1bfeebdad92`, heartbeat
+  authenticated/persisted và reject rỗng.
+- Router đã có cổng `fallback_provider_cost_xu <= provider_budget_xu`, nhưng
+  request metadata của scene chỉ truyền budget. Vì vậy live CAS phải dừng trước
+  Key4U cho tới khi cost `212` cũng đi qua cùng boundary.
+- Minimal fix chỉ thêm một metadata field; RED `1 failed in 8.29s`, exact GREEN
+  `1 passed in 5.56s`, fallback/Key4U `19 passed in 6.76s`, compile/diff
+  exit `0`. Giá khách, route, engine, provider order, ví và idempotency không đổi.
