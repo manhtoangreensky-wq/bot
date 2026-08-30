@@ -1,5 +1,5 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_JOB28_FALLBACK_COST_METADATA_LOCAL_READY
+phase: PV2_R01_JOB28_SINGLE_FALLBACK_BUDGET_GUARD_LOCAL_READY
 pointer: V2-03/PV2-R01
 base_sha: 3d16cf60511318d2c5eb7c799ecbee8c07631c1b
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
@@ -8,6 +8,7 @@ allowed_files:
   - remote_worker.py
   - services/video_project_queue.py
   - services/video_real_render_connector.py
+  - services/video_provider_router.py
   - services/video_flow6.py
   - services/video_flow7.py
   - KIEM-THU/PRODUCT-VIDEO-LIVE-STRATEGY-V2.md
@@ -26,6 +27,7 @@ allowed_files:
   - tests/test_p0_product_video_trend_standard_flow_restore.py
   - tests/test_p0_product_video_job28_authoritative_pending_guard.py
   - tests/test_p0_product_video_live22_pending_controlled_fallback.py
+  - tests/test_p0_18vroot_r7_product_video_provider_spend_safety.py
   - .agents/state/P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md
   - .agents/state/p0-product-video-v2.yaml
 protected_domains:
@@ -536,13 +538,31 @@ pv2_r01_job28_tier400_fallback_budget:
   cost_metadata_protected_green: 19 passed in 6.76s
   cost_metadata_compile_diff: exit 0
   cost_metadata_production_delta: one request metadata field
+  cost_metadata_pr: 941
+  cost_metadata_merge_sha: 8134c28b80c1587a36cc782c0cdb98c4ebc9a74b
+  cost_metadata_deploy_run: 33304170789
+  cost_metadata_deploy_result: SUCCESS in 3m18s
+  cost_metadata_runtime_bot_sha: 8134c28b80c1587a36cc782c0cdb98c4ebc9a74b
+  cost_metadata_runtime_worker_sha: 8134c28b80c1587a36cc782c0cdb98c4ebc9a74b
+  cost_metadata_worker_pid: 728701
+  cost_metadata_worker_generation: b8421a3a168a451cbffa23e2abf53c85
+  cost_metadata_worker_heartbeat: persisted yes; reject empty
+  job28_query_only_dry_run: PASS
+  job28_dry_run_side_effects: DB changes 0; provider calls 0; wallet mutations 0
+  single_fallback_budget_guard_red: 1 failed in 7.81s; Key4U submit_calls was 1
+  single_fallback_budget_guard_green: 1 passed in 6.56s
+  single_fallback_budget_guard_spend_green: 12 passed in 5.46s
+  single_fallback_budget_guard_related_green: 28 passed in 7.99s
+  single_fallback_budget_guard_affected_green: 49 passed in 9.37s
+  single_fallback_budget_guard_attempt_semantics: persisted count 0 permits current attempt; persisted count 1 blocks retry
+  single_fallback_budget_guard_compile_diff: exit 0
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
 next_action: >-
-  After exact SubDub releases, rebase and ship the one-field fallback-cost metadata
-  propagation, deploy and sync the Owner Product Video worker to the exact merge SHA.
-  Then create a backed-up compare-and-swap recovery on existing job 28/project
+  Ship the single-candidate fallback pre-submit budget guard, deploy and sync the
+  Owner Product Video worker to the exact merge SHA. Then rerun the query-only
+  production dry-run and create a backed-up compare-and-swap recovery on existing job 28/project
   32/outbox 27 only: preserve both ShopAIKey task identities without primary resubmit,
   persist customer quote 144/144/144 and internal Key4U budget/cost 212/212, set one
   summary-authoritative fallback scene at a time, and let the canonical preclaim

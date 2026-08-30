@@ -266,6 +266,21 @@ RED `1 failed in 8.29s`; exact GREEN `1 passed in 5.56s`; fallback/Key4U
 matrix `19 passed in 6.76s`; compile/diff exit `0`. Ship this seam before
 the job #28 CAS; do not weaken the router guard or call Key4U first.
 
+PR #941 shipped that metadata as squash `8134c28b80c1587a36cc782c0cdb98c4ebc9a74b`;
+deploy #157 run `33304170789` was SUCCESS in `3m18s`. Bot and Owner worker
+run exact SHA; worker PID `728701`, generation `b8421a3a168a451cbffa23e2abf53c85`,
+heartbeat persisted with empty reject reason.
+
+The first query-only dry-run on real job #28 passed the scene policy, runtime,
+preclaim and router policy with DB/provider/wallet side effects `0`. A deeper
+submit-path RED then proved the single Key4U candidate bypassed that cost policy:
+cost `213 > budget 212` still made one adapter call. The minimal guard runs the
+existing controlled-fallback policy before a public fallback-source submit.
+Over-budget is blocked before adapter; `212 == 212` still reaches Key4U exactly
+once. Connector persists `fallback_count_before_submit`: `0` authorizes the
+current attempt, `1` blocks a retry after it was already used. Ship this guard
+and rerun the same dry-run before CAS.
+
 For later Product Video rows, Owner approved the fixture library
 `D:\TOANAAS\video AI tham khảo`. Select a suitable complete video, then measure
 its SHA/bytes/streams/duration before live. PV2-R01 remains locked to SHA

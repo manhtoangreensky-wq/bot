@@ -4341,6 +4341,11 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             else (job or {}).get("provider_submit_allowed"),
             "paid_fallback_confirmed": bool(scene_fallback_allowed or invoice_confirmed),
             "fallback_count": 1 if scene_fallback_allowed else _safe_int(pending_scene_task.get("fallback_count"), 0),
+            "fallback_count_before_submit": _safe_int(
+                pending_scene_task.get("fallback_count")
+                or pending_scene_task.get("provider_fallback_count"),
+                0,
+            ),
             "provider_fallback_count": 1 if scene_fallback_allowed else _safe_int(pending_scene_task.get("provider_fallback_count") or pending_scene_task.get("fallback_count"), 0),
             "fallback_scene_index": scene_index if scene_fallback_allowed else 0,
             "provider_stalled_not_start": scene_stalled_not_start,
