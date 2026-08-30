@@ -159,13 +159,34 @@ It permits exactly one durable authority-repair recovery only when
 `terminal_override_reason=provider_running_overrides_failed_no_charge`, the existing
 task authority is still live, mapping is complete and every cancellation, explicit
 terminal, delivery and wallet gate remains clear. The persisted repair marker blocks
-a second repair. Submit, resubmit and fallback remain false. Exact RED is `1 failed
+a second authority repair. Submit, resubmit and fallback remain false. Exact RED is `1 failed
 in 8.41s`; focused GREEN is `1 passed in 5.74s`; focused/restart gates are `15` and
 `56` passed; protected polling/CAS/multiscene/delivery/fallback is `242 passed` with
 one dependency warning in `48.09s`; the final strategy-inclusive gate is `251 passed`
 with the same dependency warning in `47.40s`; compile and diff-check exit `0`. This is source
 evidence only. Job #28 remains open until the repair is shipped and the two old tasks
 produce the required artifact and receipts.
+
+PR #935 squash-merged `06f38df793beabd14e3446dadd473d4e8737a0e6`;
+deploy run `33293196471` was SUCCESS in `11m25s`. Bot and Owner worker read back
+that SHA. Generation `b264fd4f04994a3288f686ae09a51413`, PID `703262`, was
+authenticated/persisted with empty reject. The authority marker executed once at
+`11:59:17`, recovery count became `4`, and all submit/resubmit/fallback/charge fields
+remained false/zero. At `11:59:18`, the job returned to `failed_no_charge` while both
+scene tasks still reported authoritative `IN_PROGRESS`.
+
+Exact production classifier evidence was: root `continue_polling=false`,
+`provider_task_alive=true`, but `product_video_terminal_no_charge_reason()` returned
+`provider_in_progress`. The function consulted scene authority only inside the stale
+root-continue branch. The minimal correction moves the existing authority helper
+outside that root-only condition; explicit exhaustion is still checked first and the
+helper remains fail-closed for cancellation and terminal tasks. Because the first
+authority marker was consumed by this classifier defect, exactly one separate
+terminal-classifier repair marker is allowed for the measured `worker_failed +
+provider_in_progress + authority-repair-used` shape. The marker is durable and every
+later recovery remains blocked. RED is `1 failed in 6.27s`; focused GREEN is `4 passed
+in 4.65s`; protected is `252 passed, 1 dependency warning in 45.50s`. No provider
+submit, new job or wallet action occurred.
 
 For later Product Video rows, Owner approved the fixture library
 `D:\TOANAAS\video AI tham khảo`. Select a suitable complete video, then measure

@@ -227,6 +227,20 @@ def test_scene_running_authority_does_not_revive_non_pending_terminal() -> None:
     assert video_project_queue.provider_task_alive(payload) is False
 
 
+def test_terminal_classifier_uses_running_scene_authority_when_root_is_stale() -> None:
+    payload = _job28_pending_diagnostics()
+    payload["continue_polling"] = False
+
+    assert video_project_queue.provider_task_alive(payload) is True
+    assert (
+        remote_worker.product_video_terminal_no_charge_reason(
+            "provider_in_progress",
+            payload,
+        )
+        == ""
+    )
+
+
 def test_explicit_scene_exhaustion_reason_wins_over_stale_running_snapshot() -> None:
     payload = _job28_pending_diagnostics()
     payload["scene_forensic_terminal_reason"] = (
@@ -382,9 +396,24 @@ def test_exhausted_legacy_recovery_gets_one_running_authority_repair() -> None:
         assert stored_result["automatic_resubmit_allowed"] is False
         assert stored_result["automatic_fallback_allowed"] is False
 
+        stored_result.update(
+            {
+                "terminal_state": "failed_no_charge",
+                "final_decision": "failed_no_charge",
+                "continue_polling": False,
+                "worker_failed": True,
+                "provider_error": "provider_in_progress",
+                "blocker": "provider_in_progress",
+                "terminal_override_reason": (
+                    "provider_running_overrides_failed_no_charge"
+                ),
+            }
+        )
         conn.execute(
-            "UPDATE video_jobs SET status='failed',locked_by='',locked_at=NULL WHERE id=?",
-            (job_id,),
+            """UPDATE video_jobs
+                  SET status='failed',result_json=?,locked_by='',locked_at=NULL
+                WHERE id=?""",
+            (json.dumps(stored_result), job_id),
         )
         conn.execute(
             "UPDATE video_projects SET status='failed' WHERE project_id=?",
@@ -397,8 +426,35 @@ def test_exhausted_legacy_recovery_gets_one_running_authority_repair() -> None:
             now=repaired_at + timedelta(seconds=61),
         )
 
-        assert second["existing_task_recovery_recovered"] is False
-        assert second["existing_task_recovery_block_reason"] == (
+        assert second["existing_task_recovery_recovered"] is True
+        assert second["existing_task_terminal_classifier_repair_eligible"] is True
+        second_job = video_project_queue.get_video_render_job(conn, job_id)
+        second_result = json.loads(second_job["result_json"])
+        assert second_result["existing_task_recovery_count"] == 5
+        assert (
+            second_result["existing_task_terminal_classifier_repair_used"] is True
+        )
+        assert second_result["provider_submit_allowed"] is False
+        assert second_result["automatic_resubmit_allowed"] is False
+        assert second_result["automatic_fallback_allowed"] is False
+
+        conn.execute(
+            "UPDATE video_jobs SET status='failed',locked_by='',locked_at=NULL WHERE id=?",
+            (job_id,),
+        )
+        conn.execute(
+            "UPDATE video_projects SET status='failed' WHERE project_id=?",
+            (project_id,),
+        )
+        conn.commit()
+        third = video_project_queue.recover_product_video_existing_tasks(
+            conn,
+            job_id=job_id,
+            now=repaired_at + timedelta(seconds=122),
+        )
+
+        assert third["existing_task_recovery_recovered"] is False
+        assert third["existing_task_recovery_block_reason"] == (
             "existing_task_recovery_attempts_exhausted"
         )
     finally:

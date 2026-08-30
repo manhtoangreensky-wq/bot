@@ -551,14 +551,13 @@ def product_video_terminal_no_charge_reason(
     for candidate in candidates:
         if candidate in PRODUCT_VIDEO_TERMINAL_NO_CHARGE_REASONS:
             return candidate
-    if current.get("continue_polling"):
-        try:
-            from services.video_project_queue import provider_task_alive
+    try:
+        from services.video_project_queue import provider_task_alive
 
-            if provider_task_alive(current):
-                return ""
-        except Exception:
-            pass
+        if provider_task_alive(current):
+            return ""
+    except Exception:
+        pass
     if str(current.get("terminal_state") or "").strip() == "failed_no_charge":
         return candidates[0] or candidates[1] or candidates[2] or "failed_no_charge"
     if str(current.get("final_decision") or "").strip() == "failed_no_charge":
