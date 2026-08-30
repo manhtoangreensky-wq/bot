@@ -146028,6 +146028,110 @@ async def cmd_subdub_job_debug(update: Update, context: ContextTypes.DEFAULT_TYP
         text = subdub_debug_command_safe_error_text("/subdub_job_debug", type(exc).__name__)
     return await update.message.reply_text(text[:3600], parse_mode="HTML")
 
+
+async def cmd_subdub_recover_failed_auto_multi(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    user_id = update.effective_user.id
+    if not is_admin_user(user_id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = [str(value or "").strip() for value in (getattr(context, "args", []) or [])]
+    usage = (
+        "Cách dùng: /subdub_recover_failed_auto_multi "
+        "<internal_job_id> <source_sha256> English 40 150 --confirm-paid"
+    )
+    if len(args) != 6 or args[-1] != SUBDUB_FAILED_AUTO_MULTI_RECOVERY_LITERAL:
+        return await update.message.reply_text(usage)
+    internal_job_id, source_sha256, target_language, original_raw, dub_raw, _literal = args
+    if not original_raw.isdigit() or not dub_raw.isdigit():
+        return await update.message.reply_text(usage)
+    chat_id = getattr(update.message, "chat_id", user_id)
+    claim = claim_subdub_failed_auto_multi_recovery(
+        internal_job_id,
+        owner_user_id=user_id,
+        chat_id=chat_id,
+        source_sha256=source_sha256,
+        target_language=target_language,
+        original_volume_percent=int(original_raw),
+        dub_volume_percent=int(dub_raw),
+        confirm_paid=True,
+    )
+    if not claim.get("ok") or not claim.get("claimed"):
+        reason = sanitize_log_text(str(claim.get("reason") or "recovery_not_claimed"))[:120]
+        return await update.message.reply_text(
+            f"SubDub recovery không được phép: <code>{html.escape(reason)}</code>",
+            parse_mode="HTML",
+        )
+    job = dict(claim.get("job") or {})
+    recovery_query = SimpleNamespace(
+        from_user=update.effective_user,
+        message=update.message,
+        bot=getattr(context, "bot", None),
+        reply_text=update.message.reply_text,
+        get_bot=lambda: getattr(context, "bot", None),
+    )
+    lang = get_user_language(user_id) or "vi"
+    result = await execute_subdub_failed_auto_multi_recovery(
+        recovery_query,
+        context,
+        job,
+        lang,
+    )
+    status = str(result.get("status") or "")
+    if status == "AUTO_EXACT_CONFIRMATION_REQUIRED":
+        return await update.message.reply_text(
+            "SubDub recovery đã dừng an toàn tại xác nhận giá chính xác; chưa tạo output và chưa trừ Xu."
+        )
+    job_key = str(job.get("job_key") or "")
+    if not result.get("ok"):
+        latest = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {})
+        if str(latest.get("terminal_state") or "") not in SUBDUB_TERMINAL_STATES:
+            update_subtitle_dub_pipeline_job(
+                job_key,
+                status="failed_no_charge",
+                terminal_state="failed_no_charge",
+                lifecycle_state="failed_no_charge",
+                current_stage="failed_no_charge",
+                progress_stage="failed_no_charge",
+                charge_status="not_charged",
+                charged_xu=0,
+                auto_multi_recovery_failed=True,
+                auto_multi_recovery_error=status or "pipeline_failed",
+            )
+        return await update.message.reply_text(
+            f"SubDub recovery chưa tạo được MP4: <code>{html.escape(status or 'pipeline_failed')}</code>",
+            parse_mode="HTML",
+        )
+    if not subdub_result_has_delivered_video(result):
+        return await update.message.reply_text(
+            "SubDub recovery không có bằng chứng MP4 đã giao; hệ thống chưa ghi PASS."
+        )
+    subdub_mark_delivered_terminal(job_key, result)
+    finalized_panel = await subdub_finalize_delivered_panel(
+        recovery_query,
+        context,
+        job_key,
+        internal_job_id,
+        lang,
+        result,
+    )
+    if finalized_panel is None:
+        update_subtitle_dub_pipeline_job(
+            job_key,
+            receipt_send_state="blocked_until_terminal_panel",
+            receipt_blocked_reason="terminal_panel_not_confirmed",
+        )
+        return None
+    latest = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {})
+    receipt_text = video_dubbing_receipt_text(latest, result, lang)
+    return await subdub_send_success_receipt_once(
+        update.message,
+        job_key,
+        receipt_text,
+        reply_markup=video_dubbing_receipt_keyboard(lang, "translation", {**latest, **result}),
+    )
+
 async def cmd_subdub_render_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_subtitle_dub_debug(update, context)
 
@@ -248022,6 +248126,318 @@ def _subdub_auto_engine_job_cas(
             conn.close()
 
 
+SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS = "recovering_auto_multi"
+SUBDUB_FAILED_AUTO_MULTI_RECOVERY_LITERAL = "--confirm-paid"
+
+
+def _subdub_sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        while True:
+            block = handle.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def subdub_failed_auto_multi_recovery_state(job: dict | None = None) -> dict:
+    current = dict(job or {})
+    recovery = dict(current.get("auto_multi_recovery") or {})
+    if not recovery.get("owner_confirmed_paid"):
+        return {}
+    workspace = str(current.get("workspace") or "").strip()
+    workspace_safety = subtitle_dub_workspace_path_safety(workspace)
+    if not workspace_safety.get("allowed"):
+        return {}
+    workspace_resolved = str(
+        workspace_safety.get("resolved_path") or os.path.abspath(workspace)
+    )
+    source_path = str(recovery.get("source_path") or "").strip()
+    try:
+        source_resolved = str(Path(source_path).resolve(strict=True))
+    except (OSError, RuntimeError):
+        return {}
+    if (
+        not os.path.isfile(source_resolved)
+        or os.path.getsize(source_resolved) <= 0
+        or not _workspace_path_is_descendant(source_resolved, workspace_resolved)
+    ):
+        return {}
+    expected_sha256 = str(recovery.get("source_sha256") or "").strip().lower()
+    if (
+        not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
+        or not hmac.compare_digest(_subdub_sha256_file(source_resolved), expected_sha256)
+    ):
+        return {}
+    target_language = str(recovery.get("target_language") or "").strip()
+    original_volume = _safe_int(recovery.get("original_volume_percent"), -1)
+    dub_volume = _safe_int(recovery.get("dub_volume_percent"), -1)
+    if target_language != "English" or original_volume != 40 or dub_volume != 150:
+        return {}
+    job_key = str(current.get("job_key") or "").strip()
+    internal_job_id = str(
+        current.get("internal_job_id") or current.get("job_id") or ""
+    ).strip()
+    parts = job_key.split("|")
+    source_file_id = parts[2] if len(parts) >= 4 else ""
+    owner_id = str(current.get("user_id") or "").strip()
+    chat_id = str(current.get("chat_id") or owner_id).strip()
+    session_nonce = str(current.get("auto_exact_session_nonce") or "").strip()
+    if not all((job_key, internal_job_id, source_file_id, owner_id, chat_id, session_nonce)):
+        return {}
+    return {
+        "mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "process_type": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "video_processing_mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "requested_mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "active_flow": VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+        "flow_type": VIDEO_DUBBING_FLOW_HAS_SUBTITLE,
+        "source_media_type": "video",
+        "media_kind": "video",
+        "source_mime_type": "video/mp4",
+        "source_content_type": "video/mp4",
+        "source_file_id": source_file_id,
+        "video_file_id": source_file_id,
+        "source_file_unique_id": source_file_id,
+        "video_file_unique_id": source_file_id,
+        "source_file_name": os.path.basename(source_resolved),
+        "source_file_size": int(os.path.getsize(source_resolved)),
+        "video_file_size": int(os.path.getsize(source_resolved)),
+        "source_sha256": expected_sha256,
+        "source_language": "auto",
+        "target_language": target_language,
+        "translate_requested": "1",
+        "dub_source": "translated_subtitle",
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "auto_speaker_lane": "multi",
+        "voice_speed": "1.0",
+        "keep_original_audio": "1",
+        "original_audio_volume_percent": original_volume,
+        "dubbed_voice_volume_percent": dub_volume,
+        "audio_mix_mode": "keep_original",
+        "volume_config_source": "owner_confirmed_failed_job_recovery",
+        "output_type": "video_subtitle",
+        "output_format": "video_subtitle",
+        "processing": "1",
+        "subdub_final_confirmed": True,
+        "subdub_confirmation_source": "subdub_failed_auto_multi_recovery",
+        "subdub_confirmed_at_ts": int(time.time()),
+        "pending_video_action": "combo_full_dub",
+        "auto_exact_session_nonce": session_nonce,
+        "auto_exact_resume": False,
+        "auto_quote_version": SUBDUB_AUTO_EXACT_QUOTE_VERSION,
+        "auto_quote_exact_known": False,
+        "auto_quote_billable_words": None,
+        "auto_quote_auto_xu": None,
+        "auto_quote_subtitle_xu": 0,
+        "auto_quote_total_xu": None,
+        "auto_quote_text_source": "",
+        "origin": "admin_failed_auto_multi_recovery",
+        "entry_route": "admin_failed_auto_multi_recovery",
+        "admin_interactive_confirm": True,
+        "_pipeline_source_path_override": source_resolved,
+        "_pipeline_source_content_type_override": "video/mp4",
+        "_pipeline_workspace": workspace_resolved,
+        "_pipeline_job_id": internal_job_id,
+        "_pipeline_job_key": job_key,
+        "_pipeline_owner_user_id": owner_id,
+        "_pipeline_chat_id": chat_id,
+        "_pipeline_is_admin": True,
+    }
+
+
+def claim_subdub_failed_auto_multi_recovery(
+    internal_job_id: str,
+    *,
+    owner_user_id,
+    chat_id,
+    source_sha256: str,
+    target_language: str,
+    original_volume_percent: int,
+    dub_volume_percent: int,
+    confirm_paid: bool,
+) -> dict:
+    safe_id = str(internal_job_id or "").strip()
+    if not confirm_paid:
+        return {"ok": False, "claimed": False, "reason": "literal_confirm_required"}
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", safe_id):
+        return {"ok": False, "claimed": False, "reason": "invalid_job_id"}
+    setting_key = _engine_async_job_key(safe_id)
+    conn = None
+    try:
+        conn = db_connect()
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT value FROM system_settings WHERE key=? LIMIT 1",
+            (setting_key,),
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "job_not_found"}
+        old_value = str(row[0] or "")
+        current = json.loads(old_value)
+        if not isinstance(current, dict):
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "job_payload_invalid"}
+        if not (
+            str(current.get("status") or "") == "failed_no_charge"
+            and str(current.get("terminal_state") or "") == "failed_no_charge"
+        ):
+            conn.rollback()
+            return {
+                "ok": False,
+                "claimed": False,
+                "reason": "job_not_terminal_failed_no_charge",
+            }
+        if (
+            str(current.get("internal_job_id") or current.get("job_id") or "")
+            != safe_id
+        ):
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "job_identity_mismatch"}
+        if (
+            str(current.get("user_id") or "") != str(owner_user_id)
+            or str(current.get("chat_id") or current.get("user_id") or "")
+            != str(chat_id)
+        ):
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "owner_chat_mismatch"}
+        job_key = str(current.get("job_key") or "")
+        if not job_key.endswith("|subtitle_plus_dub|auto_multi_speaker"):
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "not_auto_multi_combo"}
+        if not (
+            current.get("multi_diarization_attempted") is True
+            and str(current.get("multi_diarization_provider") or "")
+            == "gemini_transcribe_multi_diarization"
+        ):
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "live_failure_evidence_missing"}
+        if (
+            int(current.get("charged_xu") or 0) != 0
+            or str(current.get("charge_status") or "") not in {"", "not_charged"}
+            or current.get("output_sent")
+            or current.get("delivery_attempted")
+            or current.get("final_mp4_exists")
+        ):
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "job_not_safe_to_recover"}
+        if int(current.get("auto_multi_recovery_attempt_count") or 0) != 0:
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "recovery_already_used"}
+        workspace = str(current.get("workspace") or "")
+        workspace_safety = subtitle_dub_workspace_path_safety(workspace)
+        if not workspace_safety.get("allowed"):
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "workspace_unsafe"}
+        workspace_resolved = str(
+            workspace_safety.get("resolved_path") or os.path.abspath(workspace)
+        )
+        source_path = str((current.get("input_save") or {}).get("path") or "")
+        try:
+            source_resolved = str(Path(source_path).resolve(strict=True))
+        except (OSError, RuntimeError):
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "source_missing"}
+        if not _workspace_path_is_descendant(source_resolved, workspace_resolved):
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "source_outside_workspace"}
+        actual_sha256 = _subdub_sha256_file(source_resolved)
+        expected_sha256 = str(source_sha256 or "").strip().lower()
+        if (
+            not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
+            or not hmac.compare_digest(actual_sha256, expected_sha256)
+        ):
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "source_sha256_mismatch"}
+        if (
+            str(target_language or "").strip() != "English"
+            or int(original_volume_percent) != 40
+            or int(dub_volume_percent) != 150
+        ):
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "selection_mismatch"}
+        recovery = {
+            "source_sha256": actual_sha256,
+            "source_path": source_resolved,
+            "target_language": "English",
+            "original_volume_percent": 40,
+            "dub_volume_percent": 150,
+            "owner_confirmed_paid": True,
+            "claimed_at": time.time(),
+        }
+        current.update(
+            {
+                "status": SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS,
+                "terminal_state": "",
+                "lifecycle_state": SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS,
+                "current_stage": SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS,
+                "progress_stage": SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS,
+                "progress_percent": 5,
+                "charge_status": "not_charged",
+                "charged_xu": 0,
+                "last_error_stage": "",
+                "last_error_safe": "",
+                "auto_multi_recovery": recovery,
+                "auto_multi_recovery_attempt_count": 1,
+                "updated_at": time.time(),
+            }
+        )
+        new_value = json.dumps(current, ensure_ascii=False, separators=(",", ":"))
+        cursor = conn.execute(
+            """UPDATE system_settings
+               SET value=?,note=?,updated_at=?,updated_by=?
+               WHERE key=? AND value=?""",
+            (
+                new_value,
+                "SubDub same-job Auto multi recovery",
+                now_text(),
+                str(owner_user_id),
+                setting_key,
+                old_value,
+            ),
+        )
+        if int(cursor.rowcount or 0) != 1:
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "recovery_cas_lost"}
+        conn.commit()
+        ENGINE_ASYNC_MEMORY_JOBS[safe_id] = dict(current)
+        SUBTITLE_DUB_PIPELINE_JOBS[job_key] = dict(current)
+        return {"ok": True, "claimed": True, "job": dict(current)}
+    except (sqlite3.Error, TypeError, ValueError, json.JSONDecodeError, OSError):
+        if conn is not None:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+        return {"ok": False, "claimed": False, "reason": "recovery_cas_error"}
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+async def execute_subdub_failed_auto_multi_recovery(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    job: dict,
+    lang: str = "vi",
+) -> dict:
+    state = subdub_failed_auto_multi_recovery_state(job)
+    if not state:
+        return {"ok": False, "status": "RECOVERY_STATE_INVALID"}
+    state.update(subdub_auto_quote_fields(query.from_user.id, state))
+    return await execute_video_dubbing_pipeline(
+        query,
+        context,
+        state,
+        lang,
+        admin_interactive_confirm=True,
+        recovery_job=job,
+    )
+
+
 def _expire_subdub_auto_exact_job_if_due(
     job: dict | None,
     *,
@@ -250699,12 +251115,25 @@ async def execute_video_dubbing_pipeline(
     *,
     admin_interactive_confirm: bool = False,
     resume_job: dict | None = None,
+    recovery_job: dict | None = None,
 ) -> dict:
     uid = query.from_user.id
     chat_id = getattr(query.message, "chat_id", uid)
     state = subdub_blackboxes.normalize_standalone_video_lane_entry_state(state)
     durable_resume_job = dict(resume_job or {})
-    if durable_resume_job:
+    durable_recovery_job = dict(recovery_job or {})
+    if durable_recovery_job:
+        job_key = str(durable_recovery_job.get("job_key") or "")
+        job = dict(durable_recovery_job)
+        acquired = bool(
+            job_key
+            and str(job.get("status") or "")
+            == SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS
+            and not str(job.get("terminal_state") or "")
+            and str(job.get("internal_job_id") or job.get("job_id") or "")
+            == str(state.get("_pipeline_job_id") or "")
+        )
+    elif durable_resume_job:
         job_key = str(durable_resume_job.get("job_key") or "")
         job = dict(durable_resume_job)
         acquired = bool(
@@ -250757,7 +251186,32 @@ async def execute_video_dubbing_pipeline(
             "text": "TOAN AAS đang xử lý, anh/chị kiểm tra lại sau.",
             "state": state,
         }
-    if durable_resume_job:
+    if durable_recovery_job:
+        workspace = str(job.get("workspace") or state.get("_pipeline_workspace") or "")
+        recovered_state = subdub_failed_auto_multi_recovery_state(job)
+        if not recovered_state:
+            failed_state = update_subtitle_dub_pipeline_job(
+                job_key,
+                status="failed_no_charge",
+                terminal_state="failed_no_charge",
+                lifecycle_state="failed_no_charge",
+                current_stage="failed_no_charge",
+                progress_stage="failed_no_charge",
+                charge_status="not_charged",
+                charged_xu=0,
+                no_charge_reason="auto_multi_recovery_state_invalid",
+                last_error_safe="auto_multi_recovery_state_invalid",
+            )
+            return {
+                "ok": False,
+                "status": "RECOVERY_STATE_INVALID",
+                "state": failed_state,
+                "terminal_state": "failed_no_charge",
+                "charge_status": "not_charged",
+                "charged_xu": 0,
+            }
+        state = {**state, **recovered_state}
+    elif durable_resume_job:
         workspace = str(job.get("workspace") or "")
         exact_receipt = dict(job.get("auto_exact_receipt") or {})
         exact_receipt_claimed = bool(
@@ -250848,7 +251302,7 @@ async def execute_video_dubbing_pipeline(
                 cached_prepared.get("content_type") or "video/mp4"
             ),
         }
-    else:
+    elif not durable_recovery_job:
         workspace = create_subtitle_dub_pipeline_workspace(job.get("job_id") or "")
         update_subtitle_dub_pipeline_job(job_key, workspace=workspace)
         await subdub_send_progress_update(query, job_key, str(job.get("job_id") or ""), "received_file", lang)
@@ -267677,6 +268131,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("subdub_public_open_force", cmd_subdub_public_open_force))
     tg_app.add_handler(CommandHandler("subdub_public_close", cmd_subdub_public_close))
     tg_app.add_handler(CommandHandler("subdub_job_debug", cmd_subdub_job_debug))
+    tg_app.add_handler(CommandHandler("subdub_recover_failed_auto_multi", cmd_subdub_recover_failed_auto_multi))
     tg_app.add_handler(CommandHandler("subdub_render_debug", cmd_subdub_render_debug))
     tg_app.add_handler(CommandHandler("subdub_delivery_debug", cmd_subdub_delivery_debug))
     tg_app.add_handler(CommandHandler("subdub_voice_debug", cmd_subdub_voice_debug))
