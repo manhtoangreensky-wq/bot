@@ -281,6 +281,23 @@ once. Connector persists `fallback_count_before_submit`: `0` authorizes the
 current attempt, `1` blocks a retry after it was already used. Ship this guard
 and rerun the same dry-run before CAS.
 
+PR #942 shipped the single-candidate guard as squash
+`db5f6a81bfb505c23eca61d68db419b984822a22`; deploy #158 run
+`33307435330` was SUCCESS in `4m4s`. Query-only dry-run, snapshot rehearsal,
+and production CAS passed. The production backup is
+`/opt/toanaas/bot/delete/pv2-r01-job28-fallback-cas-20260830T181523.json`,
+SHA `cbef07f99f80a3744cb9744d6478ffbf8d097f54adc4df4ab0b5ad46ab0df3cf`,
+mode `0600`.
+
+The live claim reached preclaim and stored one controlled Key4U scene, but then
+terminalized with attempts `6 -> 8` before provider HTTP. The worker payload
+reconstructed project defaults and did not copy persisted controlled
+quote/budget/cost/scene authority. A conditional allowlist now preserves those
+fields only when existing-task recovery, terminal suppression and a controlled
+Key4U candidate are all present. Normal Product Video claims do not receive the
+overlay. Worker stays stopped until this source seam is shipped and a new
+query-only dry-run/CAS passes.
+
 For later Product Video rows, Owner approved the fixture library
 `D:\TOANAAS\video AI tham khảo`. Select a suitable complete video, then measure
 its SHA/bytes/streams/duration before live. PV2-R01 remains locked to SHA

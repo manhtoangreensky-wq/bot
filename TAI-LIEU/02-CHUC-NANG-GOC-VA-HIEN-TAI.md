@@ -409,3 +409,16 @@ Over-budget RED: Key4U `submit_calls=1`; GREEN chặn trước call. Within-budg
 `212==212` vẫn gọi đúng một lần. Count-before-submit `0` cho phép attempt
 hiện tại, `1` chặn retry. Spend safety `12 passed`, affected total
 `49 passed`, compile/diff `0`.
+
+## Đối chiếu claim state và worker payload - 30/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Preclaim ghi result_json là worker tự nhận đủ | Worker payload builder chỉ copy route/default fields; job #28 mất quote `144`, budget/cost `212`, fallback scene và idempotency | Không còn đúng |
+| Project Invoice đủ để dựng lại controlled fallback | Invoice lưu giá khách nhưng không mang live controlled authority; dựng lại thành `400/0/0` và chặn fallback | Không được tái dựng |
+| Có thể truyền toàn bộ result_json sang worker | Chỉ allowlist controlled context khi recovery + terminal suppression + Key4U candidate cùng đúng | Đã cô lập |
+
+Live RED attempts `6->8`, provider HTTP/usage `0`, wallet `200/0`.
+Direct claim/hydrate `2 passed`, worker-to-scene `1 passed`; expanded branch
+`97 passed + 4 failures` và clean cùng 4, focused branch `61 passed + 2` và
+clean cùng 2, `NEW_FAILURES=0`.
