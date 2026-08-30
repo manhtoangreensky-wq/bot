@@ -144,6 +144,29 @@ or submit another paid provider task. `PV2-R01` remains open until the existing
 tasks yield a valid two-scene MP4 and all artifact/Add-on/delivery/wallet gates
 below pass.
 
+PR #934 then squash-merged exact SHA
+`ef81f6a03f5384f6dbc02ebd6f9bf96edfbc6618`; deploy run `33290296142`
+was SUCCESS in `15m15s`. Bot/web/nginx and the Owner Product Video worker run that
+SHA. Fresh worker generation `4ab7fd93482744a2bc06b81178ebb155`, PID `695925`,
+was authenticated and persisted with empty reject. The first compatible claim did
+not recover job #28: the production classifier measured complete task/scene mapping,
+two authoritative running tasks, no explicit terminal/cancel/delivery/charge, but
+`existing_task_recovery_count=3/max=3`. Those three attempts were consumed on the
+old root-only authority behavior.
+
+The bounded correction preserves the ordinary max of `3` and adds no generic retry.
+It permits exactly one durable authority-repair recovery only when
+`terminal_override_reason=provider_running_overrides_failed_no_charge`, the existing
+task authority is still live, mapping is complete and every cancellation, explicit
+terminal, delivery and wallet gate remains clear. The persisted repair marker blocks
+a second repair. Submit, resubmit and fallback remain false. Exact RED is `1 failed
+in 8.41s`; focused GREEN is `1 passed in 5.74s`; focused/restart gates are `15` and
+`56` passed; protected polling/CAS/multiscene/delivery/fallback is `242 passed` with
+one dependency warning in `48.09s`; the final strategy-inclusive gate is `251 passed`
+with the same dependency warning in `47.40s`; compile and diff-check exit `0`. This is source
+evidence only. Job #28 remains open until the repair is shipped and the two old tasks
+produce the required artifact and receipts.
+
 For later Product Video rows, Owner approved the fixture library
 `D:\TOANAAS\video AI tham khảo`. Select a suitable complete video, then measure
 its SHA/bytes/streams/duration before live. PV2-R01 remains locked to SHA

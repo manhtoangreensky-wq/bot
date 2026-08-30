@@ -583,3 +583,27 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - `PV2-R01` vẫn là LIVE RED, chưa được khóa. Chỉ đổi thành `LOCKED_LIVE_PASS` khi
   hai task cũ tạo MP4 2 cảnh thật, cover-fit 9:16, subtitle + transition + audio,
   Telegram receipt + báo cáo khách và zero-wallet đều có bằng chứng terminal.
+
+## Bổ sung PV2-R01 one-shot authority repair - 30/08/2026
+
+- PR #934 squash-merge `ef81f6a03f5384f6dbc02ebd6f9bf96edfbc6618`;
+  deploy `33290296142` SUCCESS trong `15m15s`. VPS bot/web/nginx active; Owner
+  Product Video worker cùng SHA, PID `695925`, generation
+  `4ab7fd93482744a2bc06b81178ebb155`, heartbeat authenticated/persisted và reject
+  rỗng.
+- Claim runtime mới vẫn không lấy job #28. Classifier production read-only đo mọi
+  cổng authority đều đạt: mapping `2/2`, hai task `IN_PROGRESS`, không explicit
+  terminal/cancel/delivery/charge. Blocker duy nhất là
+  `existing_task_recovery_count=3/max=3`, đã dùng trên runtime cũ trước khi sửa
+  authority theo cảnh.
+- Bẫy vận hành: giới hạn retry đúng nhưng không được biến ba lượt chạy trên logic
+  authority lỗi thành cấm vĩnh viễn một task vẫn đang chạy. Correction không tăng
+  max chung. Nó cho đúng một repair khi marker
+  `provider_running_overrides_failed_no_charge` và task authority vẫn sống; marker
+  repair được lưu bền để lần sau fail-closed. Submit/resubmit/fallback và charge vẫn
+  false.
+- TDD đo được: RED `1 failed in 8.41s`; GREEN `1 passed in 5.74s`; focused `15
+  passed`; restart/claim `56 passed`; protected polling/CAS/multiscene/delivery/
+  fallback `242 passed, 1 dependency warning in 48.09s`; final strategy-inclusive
+  `251 passed, 1 dependency warning in 47.40s`; compile và diff-check exit `0`.
+  Đây chưa phải LIVE PASS; còn phải ship và materialize đúng hai task cũ.

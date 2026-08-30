@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timedelta
 
 import remote_worker
 from services import remote_worker_api, video_project_queue
@@ -284,6 +285,124 @@ def test_job28_existing_running_tasks_are_recoverable_without_new_submit() -> No
     assert state["provider_submit_allowed"] is False
     assert state["automatic_resubmit_allowed"] is False
     assert state["automatic_fallback_allowed"] is False
+
+
+def test_exhausted_legacy_recovery_gets_one_running_authority_repair() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    try:
+        project = video_project_queue.create_video_project(
+            conn,
+            user_id=28,
+            profile_id="video_trend",
+            topic="job 28 authority repair",
+            asset_pack={
+                "source": "product_video",
+                "render_mode": "real",
+                "provider_call": True,
+                "product_type": "video_trend",
+                "public_user": True,
+            },
+        )
+        project_id = int(project["project_id"])
+        video_project_queue.update_video_project(
+            conn,
+            project_id,
+            status="failed",
+            total_xu_estimated=144,
+            is_confirmed=1,
+            scene_count=2,
+            invoice_json={"scene_count": 2},
+            video_terminal_state="failed_no_charge",
+        )
+        job = video_project_queue.enqueue_video_render_job(
+            conn,
+            project_id=project_id,
+            user_id=28,
+        )
+        job_id = int(job["id"])
+        result = _recovery_result()
+        result.update(
+            {
+                "continue_polling": False,
+                "terminal_state": "failed_no_charge",
+                "final_decision": "failed_no_charge",
+                "canonical_status": "queued_existing_task_recovery",
+                "terminal_override_reason": (
+                    "provider_running_overrides_failed_no_charge"
+                ),
+                "recovery_existing_tasks_only": True,
+                "existing_task_recovery_recovered": True,
+                "existing_task_recovery_count": 3,
+                "existing_task_recovery_recovered_at": "2026-08-29 20:20:49",
+                "existing_task_recovery_retry_after": "2026-08-29 20:21:49",
+                "provider_submit_allowed": False,
+                "automatic_retry_allowed": False,
+                "automatic_resubmit_allowed": False,
+                "automatic_fallback_allowed": False,
+            }
+        )
+        conn.execute(
+            """UPDATE video_jobs
+                  SET status='failed',attempts=5,max_attempts=3,result_json=?,
+                      last_error='provider_in_progress',completed_at='2026-08-29 20:20:49'
+                WHERE id=?""",
+            (json.dumps(result), job_id),
+        )
+        outbox = video_project_queue.ensure_product_video_dispatch_outbox(
+            conn,
+            job_id=job_id,
+            project_id=project_id,
+            scene_indexes=[1, 2],
+        )
+        conn.execute(
+            """UPDATE video_dispatch_outbox
+                  SET dispatch_status='terminal_failed',
+                      terminal_reason='provider_in_progress',
+                      last_error='provider_in_progress'
+                WHERE outbox_id=?""",
+            (int(outbox["outbox_id"]),),
+        )
+        conn.commit()
+
+        repaired_at = datetime(2026, 8, 30, 11, 0, 0)
+        recovered = video_project_queue.recover_product_video_existing_tasks(
+            conn,
+            job_id=job_id,
+            now=repaired_at,
+        )
+
+        assert recovered["existing_task_recovery_recovered"] is True
+        assert recovered["existing_task_authority_repair_recovery_eligible"] is True
+        stored = video_project_queue.get_video_render_job(conn, job_id)
+        stored_result = json.loads(stored["result_json"])
+        assert stored_result["existing_task_recovery_count"] == 4
+        assert stored_result["existing_task_authority_repair_recovery_used"] is True
+        assert stored_result["provider_submit_allowed"] is False
+        assert stored_result["automatic_resubmit_allowed"] is False
+        assert stored_result["automatic_fallback_allowed"] is False
+
+        conn.execute(
+            "UPDATE video_jobs SET status='failed',locked_by='',locked_at=NULL WHERE id=?",
+            (job_id,),
+        )
+        conn.execute(
+            "UPDATE video_projects SET status='failed' WHERE project_id=?",
+            (project_id,),
+        )
+        conn.commit()
+        second = video_project_queue.recover_product_video_existing_tasks(
+            conn,
+            job_id=job_id,
+            now=repaired_at + timedelta(seconds=61),
+        )
+
+        assert second["existing_task_recovery_recovered"] is False
+        assert second["existing_task_recovery_block_reason"] == (
+            "existing_task_recovery_attempts_exhausted"
+        )
+    finally:
+        conn.close()
 
 
 def test_job27_explicit_scene_exhaustion_is_never_recovered() -> None:

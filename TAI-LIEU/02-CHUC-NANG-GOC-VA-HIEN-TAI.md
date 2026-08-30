@@ -310,3 +310,16 @@ bày đã collapsed, không phải authority cho multiscene. Trước khi termin
 không được dùng scene status cũ để hồi sinh job đã cancelled, delivered hoặc có
 terminal reason explicit. `PV2-R01` chưa LIVE PASS cho tới khi chính hai task cũ
 được materialize thành MP4/receipt/report đạt đủ acceptance.
+
+## Đối chiếu recovery budget và authority repair - 30/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Hết `3` recovery luôn đồng nghĩa provider task đã hết hiệu lực | Job #28 dùng đủ `3/3` trên logic root-only cũ nhưng hai task-scene vẫn authority `IN_PROGRESS`, map đủ `2/2` và `provider_task_alive=true` | Không còn đúng |
+| Sửa lỗi bằng cách tăng max recovery chung | Max thường vẫn là `3`; chỉ một authority-repair có marker durable, đủ scene authority và toàn bộ cancel/terminal/delivery/wallet guard | Không được làm theo cách cũ |
+| Authority repair có thể mở fallback/provider submit | Repair chỉ poll hai task cũ; `provider_submit_allowed`, `automatic_resubmit_allowed`, `automatic_fallback_allowed` đều false | Đã khóa fail-closed |
+
+Bằng chứng source hiện tại: one-shot RED `1 failed in 8.41s` -> GREEN `1 passed
+in 5.74s`; protected `242 passed` và final strategy-inclusive `251 passed`, cùng
+một warning dependency; compile/diff-check exit `0`. PR/deploy/live của correction vẫn là cổng riêng, nên `PV2-R01` còn
+`IN PROGRESS` và không được ghi `LOCKED_LIVE_PASS` sớm.

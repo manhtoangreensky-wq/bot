@@ -6811,6 +6811,22 @@ def product_video_existing_task_recovery_state(
         and retry_after_epoch > 0
         and current_epoch < retry_after_epoch
     )
+    authority_repair_used = bool(
+        result.get("existing_task_authority_repair_recovery_used")
+    )
+    authority_repair_eligible = bool(
+        recovery_attempts_exhausted
+        and not authority_repair_used
+        and str(result.get("terminal_override_reason") or "").strip()
+        == "provider_running_overrides_failed_no_charge"
+        and provider_task_alive(result)
+        and mapping_verified
+        and not explicit_terminal_reason
+        and not project_cancelled
+        and not outbox_cancelled
+        and not charge_recorded
+        and not delivered
+    )
     recoverable = bool(
         job_status == "failed"
         and product_video
@@ -6823,7 +6839,7 @@ def product_video_existing_task_recovery_state(
         and not explicit_terminal_reason
         and not charge_recorded
         and not delivered
-        and not recovery_attempts_exhausted
+        and (not recovery_attempts_exhausted or authority_repair_eligible)
         and not recovery_cooldown_active
     )
     if recoverable:
@@ -6850,7 +6866,7 @@ def product_video_existing_task_recovery_state(
         blocker = "wallet_charge_already_recorded"
     elif delivered:
         blocker = "video_already_delivered"
-    elif recovery_attempts_exhausted:
+    elif recovery_attempts_exhausted and not authority_repair_eligible:
         blocker = "existing_task_recovery_attempts_exhausted"
     elif recovery_cooldown_active:
         blocker = "existing_task_recovery_cooldown_active"
@@ -6865,6 +6881,8 @@ def product_video_existing_task_recovery_state(
         "existing_task_recovery_max_attempts": recovery_max_attempts,
         "existing_task_recovery_attempts_remaining": recovery_attempts_remaining,
         "existing_task_recovery_attempts_exhausted": recovery_attempts_exhausted,
+        "existing_task_authority_repair_recovery_eligible": authority_repair_eligible,
+        "existing_task_authority_repair_recovery_used": authority_repair_used,
         "existing_task_recovery_cooldown_seconds": PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_COOLDOWN_SECONDS,
         "existing_task_recovery_cooldown_active": recovery_cooldown_active,
         "existing_task_recovery_retry_after": _format_epoch(retry_after_epoch),
@@ -6967,6 +6985,9 @@ def recover_product_video_existing_tasks(
             _as_int(result.get("existing_task_recovery_count"), 0),
             1 if result.get("recovery_existing_tasks_only") else 0,
         )
+        authority_repair = bool(
+            state.get("existing_task_authority_repair_recovery_eligible")
+        )
         result.update(
             {
                 "status": "queued",
@@ -6981,6 +7002,20 @@ def recover_product_video_existing_tasks(
                 "existing_task_recovery_recovered_at": current,
                 "existing_task_recovery_count": prior_recovery_count + 1,
                 "existing_task_recovery_max_attempts": PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_MAX_ATTEMPTS,
+                "existing_task_authority_repair_recovery_used": bool(
+                    result.get("existing_task_authority_repair_recovery_used")
+                    or authority_repair
+                ),
+                "existing_task_authority_repair_recovery_used_at": (
+                    current
+                    if authority_repair
+                    else str(
+                        result.get(
+                            "existing_task_authority_repair_recovery_used_at"
+                        )
+                        or ""
+                    )
+                ),
                 "existing_task_recovery_cooldown_seconds": PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_COOLDOWN_SECONDS,
                 "existing_task_recovery_retry_after": now_text(
                     recovery_moment
