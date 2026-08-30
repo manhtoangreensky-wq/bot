@@ -4,7 +4,7 @@ owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
 branch: fix/p0-subdub-multi-cue-lock-video-only
-phase: SPEC_11_8_22B_FRESH_SOURCE_RESUME_CLEAR_LOCAL_READY
+phase: SPEC_11_9_DB4_MULTI_FAILURE_EVIDENCE_LOCAL_READY
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -30,6 +30,41 @@ resource_boundary:
   chrome: acquired_by_product_video_after_exact_subdub_release
   vps_deploy: acquired_by_product_video_after_exact_subdub_release
   product_video: shared owner; SubDub source-local only until exact releases
+
+latest_multi_live_failure_db4fffd7f6:
+  public_job: DB4FFFD7F6
+  internal_job: db4fffd7f6b63d1884f1
+  runtime_sha: aaf3a9c6e6ebd4d18b6b5a584a39168ed0abe42c
+  fixture_sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
+  selected_options: English; Auto multi; original 40 percent; dub 150 percent
+  confirmation_count: 1
+  terminal: failed_no_charge at AUTO_CAST_MANUAL_REQUIRED
+  output: TTS 0; mux 0; artifact 0; delivery 0
+  finance: transactions 0; provider_usage 0; wallet 200/0; credit_events 11 unchanged
+  sidecar: 32 cues; 2 labels; sha256 08d5cc607d68e995599486ccb716f91af7969c9e41318f91617043fdde200825
+  measured_gap: >-
+    The terminal payload and manifest lost whether direct multi re-diarization
+    was attempted and its provider status/http/detail/evidence counts. Missing
+    fields therefore cannot prove either no call or a particular provider root.
+  local_correction:
+    scope: preserve bounded multi-only provider evidence across manual-required and durable terminal boundaries
+    red: 2 failed in 7.43s; wrapper and bot durable-safe helper missing
+    focused_green: 2 passed in 664.07s
+    production_shape_and_durable_green: 2 passed in 9.46s
+    direct_adapter_contract: 3 passed in 7.10s
+    provider_detail_review_red: 1 failed in 7.19s; exact bounded provider detail was replaced by generic wrapper detail
+    provider_detail_review_green: 2 passed in 5.85s
+    conditional_manifest_red: 1 passed and 1 failed in 6.55s; non-attempted job still received empty multi_diarization manifest key
+    conditional_manifest_green: 2 passed in 562.59s
+    final_focused: 58 passed in 6.87s
+    exact_two_and_audio_protected: 86 passed in 8.92s
+    task7_comparator: branch 6 passed and 7 failed in 8.33s; clean a77b77f same 6 passed and same 7 failure IDs in 602.34s; NEW_FAILURES=0
+    compile: bot.py, local_worker.py, 2 changed runtime modules and 2 changed tests exit 0; final changed test compile exit 0
+    exact_two_hashes_unchanged: true
+    provider_calls: 0
+    wallet_mutations: 0
+    output_fix_claimed: false
+    next: ship diagnostics only after latest-main rebase; rerun same combo only with a new Owner authorization
 
 newest_multi_live_failure_22b138532b:
   public_job: 22B138532B
@@ -973,4 +1008,4 @@ ordered_specs:
       - audit every acceptance line as proven or unresolved
       - mark the goal complete only when no required line remains unresolved
 
-current_next_action: wait exact Product Video releases; fetch/rebase latest main; run one post-rebase gate; push one PR/deploy/runtime; rerun exact combo before standalone
+current_next_action: wait shared releases; rebase diagnostics commit onto latest main; post-rebase gate; one PR/deploy; request fresh Owner authorization before any new combo; standalone remains blocked

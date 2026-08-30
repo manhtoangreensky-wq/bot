@@ -242,6 +242,28 @@ Tester surface local có `4` templates và `3` SubDub cases. Docs/Strategy V2 c�
 `8 passed` + đúng `1` baseline fixture-hash failure tái hiện trên clean HEAD.
 Chưa deploy và chưa có MP4 mới nên trạng thái vẫn là source-local ready.
 
+#### Đối chiếu failure live `#DB4FFFD7F6` — 30/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| `AUTO_CAST_MANUAL_REQUIRED` nghĩa là direct multi provider chưa được gọi | Durable job/manifest cũ làm rơi attempted/provider/status/http/detail/counts; direct outcome của job `#DB4FFFD7F6` vì thế là `UNKNOWN` | ❌ Không được suy từ field thiếu |
+| Telegram progress timeout là root failure | Journal chỉ có best-effort progress warning; terminal authority là cast manual-required sau sidecar `32` cue/`2` label | ❌ UI warning không phải root |
+| Terminal generic đủ để điều tra provider | Correction giữ đúng `8` field bounded ở manifest + durable terminal và loại `api_key`, raw response, credentials/provider payload | ⚠️ Source diagnostics ready |
+| Có diagnostics mới nghĩa là output đã được sửa | Provider request/retry/mapping/TTS/mux không đổi; combo vẫn chưa có MP4 và standalone chưa được chạy | ❌ Chỉ là evidence seam |
+| Có thể dùng lại lệnh live cũ để rerun | Authorization tạo job `#DB4FFFD7F6` đã được dùng; job mới cần Owner action-time confirmation mới sau deploy | ✅ Chốt side effect |
+
+Evidence live: runtime `aaf3a9c6...`, fixture `9,869,032` bytes/SHA
+`83DE97B...`, Confirm `1`, engine jobs `319 -> 320`, duplicate `0`, TTS/mux/
+artifact/delivery `0`, transactions/provider-usage `0/0`, credit events `11`,
+wallet `200/0`. Sidecar `5,425` bytes/SHA `08D5CC60...` có `32` cue và `2`
+label. Evidence source hiện tại: RED `2 failed in 7.43s`; functional durable
+GREEN `2 passed in 9.46s`; direct adapter `3 passed in 7.10s`; exact provider
+detail RED `1 failed in 7.19s` -> GREEN `2 passed in 5.85s`; hai file focused
+conditional manifest RED `1 passed + 1 failed in 6.55s` -> GREEN `2 passed in
+562.59s`; cuối `58 passed in 6.87s`; exact-two/audio `86 passed in 8.92s`; Task7
+branch/clean cùng đúng `6 passed + 7` failure IDs, `NEW_FAILURES=0`; compile
+exit `0`; source provider calls/wallet mutations `0/0`. Multi vẫn chưa LIVE PASS.
+
 ## Đối chiếu Product Video flow/artifact sau job 25 — 28/08/2026
 
 | Chức năng/tài liệu cũ | Hiện tại | Trạng thái |

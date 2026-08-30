@@ -538,6 +538,11 @@ def test_multi_rediarization_uses_threaded_conversion_and_one_gemini_call(
 
     assert result["ok"] is True
     assert result["detected_speaker_count"] == 3
+    assert result["provider_status"] == "PASS"
+    assert result["provider_http_status"] == 0
+    assert result["provider_word_count"] == 6
+    assert result["provider_speaker_count"] == 3
+    assert result["mapped_speaker_count"] == 3
     assert [item["speaker_id"] for item in result["segments"]] == [
         "chunk_00:speaker_0",
         "chunk_00:speaker_1",
@@ -546,6 +551,44 @@ def test_multi_rediarization_uses_threaded_conversion_and_one_gemini_call(
     assert len(calls) == 1
     assert calls[0] == (96_044, b"RIFF", "audio/wav")
     assert threaded == ["_pcm_as_mono_wav"]
+
+
+def test_multi_rediarization_failure_preserves_exact_provider_status_and_counts(
+    tmp_path,
+):
+    pcm_path = tmp_path / "source.pcm"
+    pcm_path.write_bytes(b"\0" * (16_000 * 2 * 6))
+
+    async def gemini(*_args, **_kwargs):
+        return {
+            "ok": False,
+            "status": "FAIL_TIMEOUT",
+            "words": [],
+            "speaker_ids": [],
+            "http_status": 504,
+            "detail": "bounded-provider-detail",
+        }
+
+    result = asyncio.run(
+        fallback.rediarize_underclustered_segments(
+            _segments(2),
+            pcm_path=str(pcm_path),
+            sample_rate=16_000,
+            channels=1,
+            api_key="configured-test-key",
+            provider_call_allowed=True,
+            gemini_diarize=gemini,
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == fallback.AUTO_CAST_UNAVAILABLE
+    assert result["provider_status"] == "FAIL_TIMEOUT"
+    assert result["provider_http_status"] == 504
+    assert result["provider_word_count"] == 0
+    assert result["provider_speaker_count"] == 0
+    assert result["mapped_speaker_count"] == 0
+    assert result["detail"] == "bounded-provider-detail"
 
 
 def test_multi_rediarization_busy_fails_before_conversion_or_provider(tmp_path):
@@ -741,6 +784,75 @@ def test_underclustered_multi_genuine_resume_skips_rediarization(
     # submit a new re-diarization provider call. The downstream classifier may
     # still load its cached/prepared PCM through the full preflight path.
     assert calls == []
+
+
+def test_underclustered_multi_failure_preserves_provider_diagnostics(
+    tmp_path,
+    monkeypatch,
+):
+    prepared = _prepared(tmp_path)
+    stereo_pcm = tmp_path / "multi-failure-stereo.pcm"
+    stereo_pcm.write_bytes(b"\0" * 64)
+
+    async def base_prepare(_state, *, require_auto_cast):
+        assert require_auto_cast is True
+        return prepared
+
+    async def base_extract(_prepared, _state, **_kwargs):
+        return str(stereo_pcm)
+
+    async def rediarize(*_args, **_kwargs):
+        return {
+            "ok": False,
+            "status": speaker_cast.AUTO_CAST_UNAVAILABLE,
+            "provider": "gemini_transcribe_multi_diarization",
+            "provider_status": "FAIL_TIMEOUT",
+            "detail": "gemini_multi_transcribe_timeout",
+            "provider_http_status": 0,
+            "provider_word_count": 0,
+            "provider_speaker_count": 0,
+            "mapped_speaker_count": 0,
+        }
+
+    state = {
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "auto_speaker_lane": "multi",
+        "subdub_final_confirmed": "1",
+    }
+    result = asyncio.run(
+        auto_multi_speaker.run_auto_multi_speaker_blackbox(
+            lane_mode="subtitle_plus_dub",
+            run_lane_blackbox=lambda **_kwargs: {},
+            runner=lambda **_kwargs: {},
+            extract_pcm=base_extract,
+            prepare_subtitles=base_prepare,
+            rediarize_underclustered=rediarize,
+            resolve_voice_id=lambda *_args, **_kwargs: "unused",
+            synthesize_segments=lambda *_args, **_kwargs: {},
+            post_prepare_gate=lambda *_args, **_kwargs: {"continue": True},
+            validated_pools={
+                "low": [f"low-{index}" for index in range(16)],
+                "high": [f"high-{index}" for index in range(16)],
+            },
+            required_pool_capacity=16,
+            state=state,
+        )
+    )
+
+    expected = {
+        "multi_diarization_attempted": True,
+        "multi_diarization_provider": "gemini_transcribe_multi_diarization",
+        "multi_diarization_status": "FAIL_TIMEOUT",
+        "multi_diarization_detail": "gemini_multi_transcribe_timeout",
+        "multi_diarization_http_status": 0,
+        "multi_diarization_provider_word_count": 0,
+        "multi_diarization_provider_speaker_count": 0,
+        "multi_diarization_mapped_speaker_count": 0,
+    }
+    assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    assert {key: result[key] for key in expected} == expected
+    assert {key: result["state"][key] for key in expected} == expected
 
 
 def test_multi_gender_classifier_supports_same_gender_and_mixed_groups(

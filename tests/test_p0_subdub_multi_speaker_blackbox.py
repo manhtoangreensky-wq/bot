@@ -130,6 +130,166 @@ def test_switching_auto_profiles_clears_the_previous_profile_cache():
     assert not (set(stale_fields) & set(old))
 
 
+def test_multi_diarization_debug_fields_are_bounded_and_durable_safe():
+    evidence = bot.subdub_multi_diarization_debug_fields(
+        {
+            "multi_diarization_attempted": True,
+            "multi_diarization_provider": "gemini_transcribe_multi_diarization",
+            "multi_diarization_status": "FAIL_TIMEOUT",
+            "multi_diarization_detail": "gemini_multi_transcribe_timeout",
+            "multi_diarization_http_status": 0,
+            "multi_diarization_provider_word_count": 0,
+            "multi_diarization_provider_speaker_count": 0,
+            "multi_diarization_mapped_speaker_count": 0,
+            "api_key": "must-not-leak",
+            "raw_response": {"must": "not persist"},
+        }
+    )
+
+    assert evidence == {
+        "multi_diarization_attempted": True,
+        "multi_diarization_provider": "gemini_transcribe_multi_diarization",
+        "multi_diarization_status": "FAIL_TIMEOUT",
+        "multi_diarization_detail": "gemini_multi_transcribe_timeout",
+        "multi_diarization_http_status": 0,
+        "multi_diarization_provider_word_count": 0,
+        "multi_diarization_provider_speaker_count": 0,
+        "multi_diarization_mapped_speaker_count": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    "include_diagnostics",
+    (True, False),
+    ids=("attempted", "not-attempted"),
+)
+def test_pipeline_persists_only_attempted_multi_diagnostics(
+    tmp_path,
+    monkeypatch,
+    include_diagnostics,
+):
+    job_key = "multi-diagnostics-job-key"
+    job = {
+        "job_id": "multi-diagnostics-job",
+        "internal_job_id": "multi-diagnostics-job",
+        "job_key": job_key,
+        "terminal_state": "",
+    }
+    manifests = []
+    updates = []
+    expected = {
+        "multi_diarization_attempted": True,
+        "multi_diarization_provider": "gemini_transcribe_multi_diarization",
+        "multi_diarization_status": "FAIL_TIMEOUT",
+        "multi_diarization_detail": "gemini_multi_transcribe_timeout",
+        "multi_diarization_http_status": 0,
+        "multi_diarization_provider_word_count": 0,
+        "multi_diarization_provider_speaker_count": 0,
+        "multi_diarization_mapped_speaker_count": 0,
+    } if include_diagnostics else {}
+
+    async def no_progress(*_args, **_kwargs):
+        return None
+
+    async def manual_required_core(
+        _query,
+        _context,
+        pipeline_state,
+        _lang,
+        **_kwargs,
+    ):
+        return {
+            "ok": False,
+            "status": speaker_cast.AUTO_CAST_MANUAL_REQUIRED,
+            "terminal_state": "failed_no_charge",
+            "charge_status": "not_charged",
+            "pipeline_attempted": True,
+            "workspace_artifacts": {},
+            "input_save": {},
+            "state": {**dict(pipeline_state), **expected},
+            **expected,
+            "api_key": "must-not-persist",
+            "raw_response": {"must": "not persist"},
+        }
+
+    def capture_update(_key, **fields):
+        updates.append(dict(fields))
+        return {**job, **fields}
+
+    monkeypatch.setattr(
+        bot.subdub_blackboxes,
+        "normalize_standalone_video_lane_entry_state",
+        lambda value: dict(value),
+    )
+    monkeypatch.setattr(
+        bot,
+        "subtitle_dub_pipeline_job_key",
+        lambda *_args, **_kwargs: job_key,
+    )
+    monkeypatch.setattr(
+        bot,
+        "acquire_subtitle_dub_pipeline_job",
+        lambda *_args, **_kwargs: (True, dict(job)),
+    )
+    monkeypatch.setattr(
+        bot,
+        "create_subtitle_dub_pipeline_workspace",
+        lambda *_args, **_kwargs: str(tmp_path),
+    )
+    monkeypatch.setattr(bot, "subdub_send_progress_update", no_progress)
+    monkeypatch.setattr(bot, "_execute_video_dubbing_pipeline_core", manual_required_core)
+    monkeypatch.setattr(bot, "update_subtitle_dub_pipeline_job", capture_update)
+    monkeypatch.setattr(
+        bot,
+        "write_subtitle_dub_pipeline_manifest",
+        lambda _workspace, manifest: manifests.append(dict(manifest)),
+    )
+
+    query = type(
+        "Query",
+        (),
+        {
+            "from_user": type("User", (), {"id": 97_100})(),
+            "message": type("Message", (), {"chat_id": 97_100})(),
+        },
+    )()
+    result = asyncio.run(
+        bot.execute_video_dubbing_pipeline(
+            query,
+            object(),
+            {
+                "mode": "subtitle_plus_dub",
+                "voice_kind": "auto_speaker_gender",
+                "voice_selection_mode": "auto_speaker",
+                "auto_speaker_lane": "multi",
+            },
+            "vi",
+            admin_interactive_confirm=True,
+        )
+    )
+
+    terminal_update = next(
+        update
+        for update in reversed(updates)
+        if update.get("terminal_state") == "failed_no_charge"
+    )
+    if include_diagnostics:
+        assert expected == manifests[-1]["multi_diarization"]
+        assert {key: terminal_update[key] for key in expected} == expected
+    else:
+        assert "multi_diarization" not in manifests[-1]
+        assert not any(
+            key.startswith("multi_diarization_")
+            for key in terminal_update
+        )
+    assert "api_key" not in manifests[-1]
+    assert "raw_response" not in manifests[-1]
+    assert "api_key" not in terminal_update
+    assert "raw_response" not in terminal_update
+    assert "must-not-persist" not in repr(manifests[-1])
+    assert "must-not-persist" not in repr(terminal_update)
+
+
 @pytest.mark.parametrize(
     "state",
     (

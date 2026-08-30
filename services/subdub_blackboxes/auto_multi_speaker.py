@@ -31,6 +31,44 @@ _UNDERCLUSTER_MIN_CUES_PER_REGISTER = 2
 _UNDERCLUSTER_MIN_REGISTER_GAP_HZ = 30.0
 
 
+def _multi_diarization_debug_fields(source: Mapping[str, object]) -> dict[str, object]:
+    current = source if isinstance(source, Mapping) else {}
+    if "multi_diarization_attempted" not in current:
+        return {}
+
+    def bounded_int(field: str) -> int:
+        try:
+            return max(0, int(current.get(field) or 0))
+        except (TypeError, ValueError, OverflowError):
+            return 0
+
+    return {
+        "multi_diarization_attempted": bool(current.get("multi_diarization_attempted")),
+        "multi_diarization_provider": str(current.get("multi_diarization_provider") or "")[:80],
+        "multi_diarization_status": str(current.get("multi_diarization_status") or "")[:80],
+        "multi_diarization_detail": str(current.get("multi_diarization_detail") or "")[:180],
+        "multi_diarization_http_status": bounded_int("multi_diarization_http_status"),
+        "multi_diarization_provider_word_count": bounded_int("multi_diarization_provider_word_count"),
+        "multi_diarization_provider_speaker_count": bounded_int("multi_diarization_provider_speaker_count"),
+        "multi_diarization_mapped_speaker_count": bounded_int("multi_diarization_mapped_speaker_count"),
+    }
+
+
+def _multi_manual_required_result(
+    state: Mapping[str, object],
+    error: Exception,
+) -> dict[str, Any]:
+    evidence = _multi_diarization_debug_fields(state)
+    result = auto_speaker._manual_required_result(state, error)
+    if not evidence:
+        return result
+    return {
+        **result,
+        **evidence,
+        "state": {**dict(state), **evidence},
+    }
+
+
 def _dense_window_offsets(
     ranges: object,
     *,
@@ -788,13 +826,13 @@ async def _run_multi_speaker_preflight(
         speaker_cast.AutoCastManualRequired,
     ) as exc:
         auto_speaker._cleanup_pcm_path(pcm_path)
-        return auto_speaker._manual_required_result(current, exc)
+        return _multi_manual_required_result(current, exc)
     except Exception:
         auto_speaker._cleanup_pcm_path(pcm_path)
         raise
 
     if not auto_speaker._cleanup_pcm_path(pcm_path):
-        return auto_speaker._manual_required_result(
+        return _multi_manual_required_result(
             current,
             speaker_cast.AutoCastManualRequired(),
         )
@@ -898,7 +936,7 @@ async def _run_isolated_multi_speaker_blackbox(
         speaker_cast.AutoCastUnavailable,
         speaker_cast.AutoCastManualRequired,
     ) as exc:
-        return auto_speaker._manual_required_result(current, exc)
+        return _multi_manual_required_result(current, exc)
 
     expected_selected_signature: tuple[
         tuple[str, float, float, str], ...
@@ -1000,21 +1038,21 @@ async def _run_isolated_multi_speaker_blackbox(
         speaker_cast.AutoCastUnavailable,
         speaker_cast.AutoCastManualRequired,
     ) as exc:
-        return auto_speaker._manual_required_result(
+        return _multi_manual_required_result(
             current,
             failure_slot[0] if failure_slot else exc,
         )
     except Exception:
         if failure_slot:
-            return auto_speaker._manual_required_result(
+            return _multi_manual_required_result(
                 current,
                 failure_slot[0],
             )
         raise
     if failure_slot:
-        return auto_speaker._manual_required_result(current, failure_slot[0])
+        return _multi_manual_required_result(current, failure_slot[0])
     if not isinstance(result, dict):
-        return auto_speaker._manual_required_result(
+        return _multi_manual_required_result(
             current,
             speaker_cast.AutoCastUnavailable(),
         )
@@ -1129,12 +1167,48 @@ async def run_auto_multi_speaker_blackbox(
                         else ""
                     )[:80],
                     "multi_diarization_status": str(
-                        rediarized.get("status")
+                        rediarized.get("provider_status")
+                        or rediarized.get("status")
                         if isinstance(rediarized, Mapping)
                         else speaker_cast.AUTO_CAST_MANUAL_REQUIRED
                     )[:80],
                     "multi_diarization_speaker_count": int(
                         rediarized.get("detected_speaker_count") or 0
+                    )
+                    if isinstance(rediarized, Mapping)
+                    else 0,
+                    "multi_diarization_detail": str(
+                        rediarized.get("detail")
+                        if isinstance(rediarized, Mapping)
+                        else ""
+                    )[:180],
+                    "multi_diarization_http_status": int(
+                        rediarized.get("provider_http_status")
+                        or rediarized.get("http_status")
+                        or 0
+                    )
+                    if isinstance(rediarized, Mapping)
+                    else 0,
+                    "multi_diarization_provider_word_count": int(
+                        rediarized.get("provider_word_count")
+                        or len(rediarized.get("words") or [])
+                        or 0
+                    )
+                    if isinstance(rediarized, Mapping)
+                    else 0,
+                    "multi_diarization_provider_speaker_count": int(
+                        rediarized.get("provider_speaker_count")
+                        or len(rediarized.get("speaker_ids") or [])
+                        or 0
+                    )
+                    if isinstance(rediarized, Mapping)
+                    else 0,
+                    "multi_diarization_mapped_speaker_count": int(
+                        rediarized.get("mapped_speaker_count")
+                        or subdub_multi_speaker_asr_fallback.detected_speaker_count(
+                            rediarized.get("segments") or []
+                        )
+                        or 0
                     )
                     if isinstance(rediarized, Mapping)
                     else 0,
@@ -1204,7 +1278,7 @@ async def run_auto_multi_speaker_blackbox(
             **lane_payload,
         )
     except (speaker_cast.AutoCastUnavailable, speaker_cast.AutoCastManualRequired) as exc:
-        return auto_speaker._manual_required_result(current, exc)
+        return _multi_manual_required_result(current, exc)
     finally:
         if cached_pcm_path is not None:
             auto_speaker._cleanup_pcm_path(cached_pcm_path)
@@ -1222,7 +1296,7 @@ async def run_auto_multi_speaker_blackbox(
                 not 3 <= speaker_count <= speaker_cast.MAX_AUTO_SPEAKER_LABELS
                 or distinct_voice_count != speaker_count
             ):
-                return auto_speaker._manual_required_result(
+                return _multi_manual_required_result(
                     current,
                     speaker_cast.AutoCastManualRequired(),
                 )
