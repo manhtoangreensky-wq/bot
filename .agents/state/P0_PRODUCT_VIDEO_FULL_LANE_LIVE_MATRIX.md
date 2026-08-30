@@ -517,11 +517,29 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
   `1 failed in 5.92s`; minimal authority merge GREEN `1 passed in 5.14s`; focused
   authority/terminal/cancel/claim `25 passed, 106 deselected in 10.47s`; protected
   `252 passed, 1 dependency warning in 43.96s`.
-- [ ] Ship one claim-ledger authority PR/deploy/runtime, then continue **job #28 and
-  its two existing task IDs only**. No new upload, Confirm, project/job/outbox,
-  provider submit or recovery marker is authorized. Poll/materialize those tasks to
-  the final MP4; verify cover-fit 9:16, subtitle, transition, audio, receipt, report
-  and zero-wallet proof before marking `PV2-R01 LOCKED_LIVE_PASS`.
+- [x] Claim-ledger correction shipped as PR #937, squash SHA
+  `6e0e42daae50859159c7781531e6c3228890dff5`; deploy run `33296036307`
+  SUCCESS in `13m44s`. Bot/worker exact SHA; worker generation
+  `91ea20ee8faf4fe8b75343127b814f27`, PID `710711`, heartbeat persisted/reject empty.
+- [x] Bounded operational CAS requeue backed up the exact old rows at
+  `/opt/toanaas/bot/delete/pv2-r01-job28-cas-requeue-20260830T132240.json`, then
+  changed only job #28/project #32 from failed to queued. Attempts stayed `5`, outbox
+  and task IDs were preserved, and new-job/provider/wallet actions were `0`. Claim
+  still terminalized at `13:22:46` before CAS lock.
+- [x] Refined production root: `provider_events` carried the same `task_id` with
+  historical `FAILURE`, and root canonical summary carried a task identity plus stale
+  root `FAILURE`. They were merged after task-scoped current `IN_PROGRESS`, so mere
+  task identity was insufficient. Per-scene current status must become sticky trusted
+  authority; only another per-scene current status or result-bearing completion may
+  replace it.
+- [x] Exact full-shape RED `1 failed in 5.31s`; sticky authority GREEN `1 passed in
+  5.67s`; current FAILURE/exhaustion/cancel/claim comparators `27 passed, 74 deselected
+  in 10.34s`; protected `252 passed, 1 dependency warning in 52.17s`.
+- [ ] Ship one trusted-task-authority PR/deploy/runtime, perform one backed-up CAS
+  requeue of **job #28 only**, then poll/materialize its two existing task IDs. No new
+  upload, Confirm, project/job/outbox, recovery marker, provider submit or fallback is
+  authorized. Verify final MP4, cover-fit 9:16, subtitle, transition, audio, receipt,
+  report and zero-wallet before `PV2-R01 LOCKED_LIVE_PASS`.
 - [x] Owner approved `D:\TOANAAS\video AI tham khảo` as the fixture library for
   later Product Video rows. Measure hash/metadata per selected file; do not swap
   the active PV2-R01 fixture during its failure loop.

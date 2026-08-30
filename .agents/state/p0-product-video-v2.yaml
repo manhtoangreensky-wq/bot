@@ -1,7 +1,7 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_JOB28_CLAIM_LEDGER_AUTHORITY_LOCAL_READY
+phase: PV2_R01_JOB28_TRUSTED_TASK_AUTHORITY_LOCAL_READY
 pointer: V2-03/PV2-R01
-base_sha: eba42c15b1b58f8a8b08dd019584b1c8dde67bb3
+base_sha: 6e0e42daae50859159c7781531e6c3228890dff5
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
 allowed_files:
   - bot.py
@@ -446,4 +446,33 @@ pv2_r01_job28_claim_ledger_authority:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
-next_action: After exact SubDub releases, rebase the local claim-ledger authority commit onto latest main, run one post-rebase gate, ship one PR/deploy/runtime, and continue only existing job 28 with its two durable provider task IDs. Do not upload, confirm, create a new project/job/outbox, add another recovery marker or submit/fallback to a new provider task. Poll/materialize the old tasks to a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/audio, persist receipt and customer report, prove zero wallet delta, and only then mark PV2-R01 LOCKED_LIVE_PASS.
+pv2_r01_job28_trusted_task_authority:
+  prior_pr: 937
+  prior_merge_sha: 6e0e42daae50859159c7781531e6c3228890dff5
+  prior_deploy_run: 33296036307
+  prior_deploy_result: SUCCESS in 13m44s
+  bot_worker_sha: 6e0e42daae50859159c7781531e6c3228890dff5
+  owner_worker_generation: 91ea20ee8faf4fe8b75343127b814f27
+  owner_worker_pid: 710711
+  heartbeat_persisted: true
+  heartbeat_reject_reason: ""
+  operational_backup: /opt/toanaas/bot/delete/pv2-r01-job28-cas-requeue-20260830T132240.json
+  operational_requeue_new_job: false
+  operational_requeue_provider_call: false
+  operational_requeue_wallet_mutation: false
+  terminalized_at: 2026-08-30 13:22:46
+  job_attempts_before_after: [5, 5]
+  locked_by_before_after: ["", ""]
+  current_scene_statuses: [IN_PROGRESS, IN_PROGRESS]
+  historical_event_statuses: [FAILURE, FAILURE]
+  root_canonical_status: FAILURE
+  root_cause: task-bearing historical events and root canonical summary overwrote per-scene current status after merge
+  trusted_policy: per-scene current payload or result-bearing completion is sticky authority
+  full_shape_red: 1 failed in 5.31s
+  minimal_green: 1 passed in 5.67s
+  focused_green: 27 passed and 74 deselected in 10.34s
+  protected_green: 252 passed and 1 dependency warning in 52.17s
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
+next_action: After exact SubDub releases, rebase the local trusted-task-authority commit onto latest main, run one post-rebase gate, ship one PR/deploy/runtime, then perform one backed-up CAS requeue of existing job 28 only. Do not upload, confirm, create a new project/job/outbox, add another recovery marker or submit/fallback to a new provider task. Poll/materialize the two old task IDs to a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/audio, persist receipt and customer report, prove zero wallet delta, and only then mark PV2-R01 LOCKED_LIVE_PASS.

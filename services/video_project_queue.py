@@ -7207,6 +7207,7 @@ def product_video_scene_ledger_state(
             "task_scene_mapping_verified": False,
             "phantom_result_prevented": False,
             "authoritative_status_source": "estimated_internal_state",
+            "trusted_status_authority": False,
             "historical_status_ignored": False,
             "success_result_overrode_stale_not_start": False,
             "provider_status_conflict": False,
@@ -7505,6 +7506,21 @@ def product_video_scene_ledger_state(
         historical_status_class = _status_class(historical_status_raw)
         success_with_result = bool(current_status_class == "succeeded" and result_present)
         provider_status_conflict = bool(success_with_result and historical_status_class == "not_start")
+        trusted_status_authority = bool(
+            clip_valid
+            or success_with_result
+            or (
+                current_status_raw
+                and task_ids
+                and source_name.endswith(
+                    (
+                        ".scene_tasks",
+                        ".provider_scene_tasks",
+                        ".product_video_scene_tasks",
+                    )
+                )
+            )
+        )
         if clip_valid:
             candidate_status = "succeeded"
             authoritative_status_source = "validated_scene_clip"
@@ -7533,17 +7549,20 @@ def product_video_scene_ledger_state(
                 "completed_at": completed_at,
                 "progress": max(0, min(100, progress)),
                 "source": source_name,
+                "trusted_status_authority": trusted_status_authority,
             }
             existing = next((entry for entry in record["task_candidates"] if entry.get("task_id") == task_id), None)
             if existing:
                 for key, value in candidate.items():
-                    if (
-                        key == "status"
-                        and not current_status_raw
-                        and _status_authority_rank(value)
-                        < _status_authority_rank(existing.get("status"))
-                    ):
-                        continue
+                    if key == "status":
+                        if existing.get("trusted_status_authority") and not trusted_status_authority:
+                            continue
+                        if (
+                            not trusted_status_authority
+                            and _status_authority_rank(value)
+                            < _status_authority_rank(existing.get("status"))
+                        ):
+                            continue
                     if value not in (None, "", False, 0, [], {}):
                         existing[key] = value
             else:
@@ -7562,12 +7581,17 @@ def product_video_scene_ledger_state(
             record["provider_key"] = provider
         status_applied = False
         if status_raw and (
-            current_status_raw
-            or _status_authority_rank(candidate_status)
-            >= _status_authority_rank(record.get("status"))
+            trusted_status_authority
+            or (
+                not record.get("trusted_status_authority")
+                and _status_authority_rank(candidate_status)
+                >= _status_authority_rank(record.get("status"))
+            )
         ):
             record["status"] = candidate_status
             status_applied = True
+        if trusted_status_authority:
+            record["trusted_status_authority"] = True
         if task_ids:
             record["dispatch_state"] = "task_submitted"
             record["dispatchable"] = False

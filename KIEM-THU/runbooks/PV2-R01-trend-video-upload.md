@@ -208,6 +208,26 @@ claim gate `25 passed, 106 deselected in 10.47s`; protected `252 passed, 1 depen
 warning in 43.96s`. No additional recovery marker is allowed. This source must be
 rebased and shipped only after SubDub releases shared resources.
 
+PR #937 squash-merged `6e0e42daae50859159c7781531e6c3228890dff5`;
+deploy run `33296036307` was SUCCESS in `13m44s`. Bot and Owner worker run that
+SHA; generation `91ea20ee8faf4fe8b75343127b814f27`, PID `710711`, is persisted
+with empty reject. A CAS requeue backed up the exact old rows to
+`/opt/toanaas/bot/delete/pv2-r01-job28-cas-requeue-20260830T132240.json` and changed
+only job #28/project #32 from failed to queued. Attempts remained `5`; outbox/task
+identity stayed unchanged; new job, provider call and wallet mutation were all false.
+Claim still returned the job to failed at `13:22:46` before CAS lock.
+
+The final source order showed that both historical provider events carried the same
+task identity with `FAILURE`, while root canonical summary carried a task identity and
+stale root `FAILURE`. Those task-bearing historical rows were merged after per-scene
+current `IN_PROGRESS`. The durable policy now marks only per-scene current payload or
+result-bearing completion as trusted status authority. Historical event/root summary
+cannot replace trusted status, while a later current per-scene `FAILURE` remains able
+to terminalize. Full-shape RED was `1 failed in 5.31s`; GREEN `1 passed in 5.67s`;
+focused current-failure/exhaustion/cancel/claim `27 passed, 74 deselected in 10.34s`;
+protected `252 passed, 1 dependency warning in 52.17s`. No route, marker, provider or
+wallet behavior changed.
+
 For later Product Video rows, Owner approved the fixture library
 `D:\TOANAAS\video AI tham khảo`. Select a suitable complete video, then measure
 its SHA/bytes/streams/duration before live. PV2-R01 remains locked to SHA

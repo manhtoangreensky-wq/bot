@@ -409,6 +409,25 @@ def test_exhausted_legacy_recovery_gets_one_running_authority_repair() -> None:
                 ),
                 "scene_status_by_index": {"1": "failed", "2": "failed"},
                 "scene_status_by_scene": {"1": "failed", "2": "failed"},
+                "provider_events": [
+                    {
+                        "scene_index": 1,
+                        "task_id": "existing-scene-task-1",
+                        "status": "failed",
+                        "provider_status_raw": "FAILURE",
+                    },
+                    {
+                        "scene_index": 2,
+                        "task_id": "existing-scene-task-2",
+                        "status": "failed",
+                        "provider_status_raw": "FAILURE",
+                    },
+                ],
+                "canonical_scene_index": 1,
+                "canonical_task_selected": "existing-scene-task-1",
+                "shopaikey_data_status": "FAILURE",
+                "shopaikey_raw_status": "FAILURE",
+                "provider_status_raw": "FAILURE",
             }
         )
         conn.execute(
