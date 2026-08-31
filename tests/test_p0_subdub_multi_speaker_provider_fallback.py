@@ -1008,6 +1008,172 @@ def test_multi_mapper_rejects_ambiguous_tie_and_far_nearest_word():
     ) == []
 
 
+def test_multi_mapper_crosswalks_one_uncovered_cue_from_primary_cluster():
+    words = [
+        {"word": "a1", "start": 1.0, "end": 1.2, "speaker": "spk_1"},
+        {"word": "a2", "start": 2.0, "end": 2.2, "speaker": "spk_1"},
+        {"word": "a3", "start": 3.0, "end": 3.2, "speaker": "spk_1"},
+        {"word": "b1", "start": 4.0, "end": 4.2, "speaker": "spk_2"},
+        {"word": "b2", "start": 5.0, "end": 5.2, "speaker": "spk_2"},
+        {"word": "c1", "start": 6.0, "end": 6.2, "speaker": "spk_3"},
+        {"word": "c2", "start": 7.0, "end": 7.2, "speaker": "spk_3"},
+    ]
+    segments = [
+        {
+            "start": 0.0,
+            "end": 0.2,
+            "text": "uncovered intro",
+            "speaker": 0,
+            "speaker_id": "chunk_00:speaker_0",
+            "chunk_index": 0,
+        },
+        {
+            "start": 1.0,
+            "end": 1.2,
+            "text": "a1",
+            "speaker": 0,
+            "speaker_id": "chunk_00:speaker_0",
+            "chunk_index": 0,
+        },
+        {
+            "start": 2.0,
+            "end": 2.2,
+            "text": "a2",
+            "speaker": 0,
+            "speaker_id": "chunk_00:speaker_0",
+            "chunk_index": 0,
+        },
+        {
+            "start": 3.0,
+            "end": 3.2,
+            "text": "a3",
+            "speaker": 0,
+            "speaker_id": "chunk_00:speaker_0",
+            "chunk_index": 0,
+        },
+        {
+            "start": 4.0,
+            "end": 4.2,
+            "text": "b1",
+            "speaker": 0,
+            "speaker_id": "chunk_00:speaker_0",
+            "chunk_index": 0,
+        },
+        {
+            "start": 5.0,
+            "end": 5.2,
+            "text": "b2",
+            "speaker": 1,
+            "speaker_id": "chunk_00:speaker_1",
+            "chunk_index": 0,
+        },
+        {
+            "start": 6.0,
+            "end": 6.2,
+            "text": "c1",
+            "speaker": 1,
+            "speaker_id": "chunk_00:speaker_1",
+            "chunk_index": 0,
+        },
+        {
+            "start": 7.0,
+            "end": 7.2,
+            "text": "c2",
+            "speaker": 1,
+            "speaker_id": "chunk_00:speaker_1",
+            "chunk_index": 0,
+        },
+    ]
+
+    mapped = fallback.apply_multi_diarized_words_to_segments(segments, words)
+
+    assert len(mapped) == len(segments)
+    assert fallback.detected_speaker_count(mapped) == 3
+    assert mapped[0]["speaker_id"] == "chunk_00:speaker_0"
+    assert mapped[0]["speaker_confidence"] == 0.75
+
+
+def test_multi_mapper_rejects_uncovered_cue_when_primary_crosswalk_is_ambiguous():
+    words = [
+        {"word": "a1", "start": 1.0, "end": 1.2, "speaker": "spk_1"},
+        {"word": "a2", "start": 2.0, "end": 2.2, "speaker": "spk_1"},
+        {"word": "b1", "start": 3.0, "end": 3.2, "speaker": "spk_2"},
+        {"word": "b2", "start": 4.0, "end": 4.2, "speaker": "spk_2"},
+        {"word": "c1", "start": 5.0, "end": 5.2, "speaker": "spk_3"},
+        {"word": "c2", "start": 6.0, "end": 6.2, "speaker": "spk_3"},
+    ]
+    segments = [
+        {
+            "start": 0.0,
+            "end": 0.2,
+            "text": "uncovered intro",
+            "speaker": 0,
+            "speaker_id": "chunk_00:speaker_0",
+            "chunk_index": 0,
+        },
+        *[
+            {
+                "start": float(index),
+                "end": float(index) + 0.2,
+                "text": f"cue-{index}",
+                "speaker": 0 if index <= 4 else 1,
+                "speaker_id": (
+                    "chunk_00:speaker_0" if index <= 4 else "chunk_00:speaker_1"
+                ),
+                "chunk_index": 0,
+            }
+            for index in range(1, 7)
+        ],
+    ]
+
+    assert fallback.apply_multi_diarized_words_to_segments(segments, words) == []
+
+
+def test_multi_mapper_rejects_more_than_one_uncovered_crosswalk_cue():
+    words = [
+        {"word": "a1", "start": 1.0, "end": 1.2, "speaker": "spk_1"},
+        {"word": "a2", "start": 2.0, "end": 2.2, "speaker": "spk_1"},
+        {"word": "a3", "start": 3.0, "end": 3.2, "speaker": "spk_1"},
+        {"word": "b1", "start": 4.0, "end": 4.2, "speaker": "spk_2"},
+        {"word": "b2", "start": 5.0, "end": 5.2, "speaker": "spk_2"},
+        {"word": "c1", "start": 6.0, "end": 6.2, "speaker": "spk_3"},
+        {"word": "c2", "start": 7.0, "end": 7.2, "speaker": "spk_3"},
+    ]
+    segments = [
+        {
+            "start": 0.0,
+            "end": 0.1,
+            "text": "uncovered one",
+            "speaker": 0,
+            "speaker_id": "chunk_00:speaker_0",
+            "chunk_index": 0,
+        },
+        {
+            "start": 0.2,
+            "end": 0.3,
+            "text": "uncovered two",
+            "speaker": 0,
+            "speaker_id": "chunk_00:speaker_0",
+            "chunk_index": 0,
+        },
+        *[
+            {
+                "start": float(index),
+                "end": float(index) + 0.2,
+                "text": f"cue-{index}",
+                "speaker": 0 if index <= 4 else 1,
+                "speaker_id": (
+                    "chunk_00:speaker_0" if index <= 4 else "chunk_00:speaker_1"
+                ),
+                "chunk_index": 0,
+            }
+            for index in range(1, 8)
+        ],
+    ]
+
+    assert fallback.apply_multi_diarized_words_to_segments(segments, words) == []
+
+
 def test_multi_parser_rejects_conflicting_speaker_for_same_word_identity():
     payload = _gemini_payload()
     annotations = payload["steps"][0]["content"][0]["annotations"]

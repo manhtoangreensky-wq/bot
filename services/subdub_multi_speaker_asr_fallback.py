@@ -36,6 +36,7 @@ MAX_DROPPED_ZERO_DURATION_WORD_FRACTION = 0.02
 MIN_SEGMENT_SPEAKER_CONFIDENCE = 0.70
 MIN_SEGMENT_SPEAKER_PLURALITY_MARGIN = 0.10
 MAX_NEAREST_WORD_GAP_SECONDS = 0.50
+MAX_PRIMARY_CROSSWALK_UNCOVERED_CUES = 1
 MAX_REDIARIZATION_SECONDS = 5 * 60
 TARGET_SAMPLE_RATE = 16_000
 PCM_STREAM_CHUNK_BYTES = 1024 * 1024
@@ -409,7 +410,9 @@ def apply_multi_diarized_words_to_segments(
     ):
         return []
     label_numbers = {label: index for index, label in enumerate(labels)}
-    mapped: list[dict] = []
+    mapped_slots: list[dict | None] = []
+    direct_labels: list[str] = []
+    primary_identities: list[str] = []
     previous_start = -1.0
     for raw_segment in segments:
         if not isinstance(raw_segment, dict):
@@ -428,6 +431,8 @@ def apply_multi_diarized_words_to_segments(
         ):
             return []
         previous_start = start
+        primary_identity = str(raw_segment.get("speaker_id") or "").strip()
+        primary_identities.append(primary_identity)
         evidence = {label: 0.0 for label in labels}
         word_counts = {label: 0 for label in labels}
         for item in words:
@@ -461,7 +466,7 @@ def apply_multi_diarized_words_to_segments(
                     < MIN_SEGMENT_SPEAKER_PLURALITY_MARGIN
                 )
             ):
-                return []
+                selected = ""
         else:
             nearest: list[tuple[float, str]] = []
             for item in words:
@@ -480,19 +485,25 @@ def apply_multi_diarized_words_to_segments(
                 if 0.0 <= gap <= MAX_NEAREST_WORD_GAP_SECONDS:
                     nearest.append((gap, label))
             if not nearest:
-                return []
-            minimum_gap = min(gap for gap, _label in nearest)
-            nearest_labels = {
-                label
-                for gap, label in nearest
-                if math.isclose(gap, minimum_gap, abs_tol=0.001)
-            }
-            if len(nearest_labels) != 1:
-                return []
-            selected = next(iter(nearest_labels))
-            confidence = 1.0
+                selected = ""
+            else:
+                minimum_gap = min(gap for gap, _label in nearest)
+                nearest_labels = {
+                    label
+                    for gap, label in nearest
+                    if math.isclose(gap, minimum_gap, abs_tol=0.001)
+                }
+                if len(nearest_labels) == 1:
+                    selected = next(iter(nearest_labels))
+                    confidence = 1.0
+                else:
+                    selected = ""
+        if not selected:
+            mapped_slots.append(None)
+            direct_labels.append("")
+            continue
         speaker_number = label_numbers[selected]
-        mapped.append(
+        mapped_slots.append(
             {
                 **raw_segment,
                 "speaker": speaker_number,
@@ -504,6 +515,65 @@ def apply_multi_diarized_words_to_segments(
                 "chunk_index": 0,
             }
         )
+        direct_labels.append(selected)
+
+    if sum(mapped is None for mapped in mapped_slots) > MAX_PRIMARY_CROSSWALK_UNCOVERED_CUES:
+        return []
+    for index, mapped in enumerate(mapped_slots):
+        if mapped is not None:
+            continue
+        primary_identity = primary_identities[index]
+        if not primary_identity:
+            return []
+        votes = {
+            label: sum(
+                direct_label == label and other_identity == primary_identity
+                for direct_label, other_identity in zip(
+                    direct_labels,
+                    primary_identities,
+                    strict=True,
+                )
+            )
+            for label in labels
+        }
+        ranked = sorted(labels, key=votes.get, reverse=True)
+        top = ranked[0]
+        total_votes = sum(votes.values())
+        runner_up_votes = votes[ranked[1]] if len(ranked) > 1 else 0
+        if (
+            total_votes < 4
+            or votes[top] < 3
+            or (votes[top] - runner_up_votes) / total_votes < 0.20
+        ):
+            return []
+        neighbors = [
+            (abs(other_index - index), direct_label)
+            for other_index, (direct_label, other_identity) in enumerate(
+                zip(direct_labels, primary_identities, strict=True)
+            )
+            if direct_label and other_identity == primary_identity
+        ]
+        if not neighbors:
+            return []
+        nearest_distance = min(distance for distance, _label in neighbors)
+        nearest_labels = {
+            label for distance, label in neighbors if distance == nearest_distance
+        }
+        if nearest_distance > 3 or nearest_labels != {top}:
+            return []
+        speaker_number = label_numbers[top]
+        mapped_slots[index] = {
+            **segments[index],
+            "speaker": speaker_number,
+            "speaker_confidence": round(votes[top] / total_votes, 6),
+            "speaker_id": speaker_cast.normalized_speaker_key(
+                0,
+                speaker_number,
+            ),
+            "chunk_index": 0,
+        }
+
+    mapped = [item for item in mapped_slots if item is not None]
     if (
         len(mapped) != len(segments)
         or detected_speaker_count(mapped) != len(labels)

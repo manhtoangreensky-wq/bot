@@ -509,23 +509,75 @@ def test_failed_auto_multi_allows_one_mapper_alignment_correction_only(
     assert correction["job"]["auto_multi_recovery_attempt_count"] == 2
     assert correction["job"]["auto_multi_recovery_correction_attempt_count"] == 1
 
-    failed_again = dict(failed)
-    failed_again["auto_multi_recovery_attempt_count"] = 2
-    failed_again["auto_multi_recovery_correction_attempt_count"] = 1
-    _persist_recovery_job(db_path, failed_again)
-    duplicate = bot.claim_subdub_failed_auto_multi_recovery(
-        JOB_ID,
-        owner_user_id=OWNER_ID,
-        chat_id=OWNER_ID,
-        source_sha256=source_sha256,
-        target_language="English",
-        original_volume_percent=40,
-        dub_volume_percent=150,
-        confirm_paid=True,
-    )
 
-    assert duplicate["ok"] is False
-    assert duplicate["reason"] == "recovery_already_used"
+def test_failed_auto_multi_allows_one_crosswalk_correction_after_mapper_alignment(
+    tmp_path,
+    monkeypatch,
+):
+    db_path, _job, _source, source_sha256 = _seed_job(tmp_path, monkeypatch)
+
+    def claim():
+        return bot.claim_subdub_failed_auto_multi_recovery(
+            JOB_ID,
+            owner_user_id=OWNER_ID,
+            chat_id=OWNER_ID,
+            source_sha256=source_sha256,
+            target_language="English",
+            original_volume_percent=40,
+            dub_volume_percent=150,
+            confirm_paid=True,
+        )
+
+    def mapper_failure(job):
+        failed = dict(job)
+        failed.update(
+            {
+                "status": "failed_no_charge",
+                "terminal_state": "failed_no_charge",
+                "charge_status": "not_charged",
+                "charged_xu": 0,
+                "output_sent": False,
+                "delivery_attempted": False,
+                "artifact_started": False,
+                "final_mp4_exists": False,
+                "output_validated": False,
+                "multi_diarization_attempted": True,
+                "multi_diarization_provider": "gemini_transcribe_multi_diarization",
+                "multi_diarization_status": "PASS",
+                "multi_diarization_detail": "words=147; speakers=4",
+                "multi_diarization_http_status": 200,
+                "multi_diarization_provider_word_count": 147,
+                "multi_diarization_provider_speaker_count": 4,
+                "multi_diarization_mapped_speaker_count": 0,
+                "multi_diarization_raw_annotation_count": 151,
+                "multi_diarization_terminal_empty": False,
+                "multi_diarization_parse_rejection": "",
+                "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+            }
+        )
+        return failed
+
+    first = claim()
+    _persist_recovery_job(db_path, mapper_failure(first["job"]))
+    second = claim()
+    assert second["claimed"] is True
+    assert second["job"]["auto_multi_recovery_attempt_count"] == 2
+    assert second["job"]["auto_multi_recovery_correction_attempt_count"] == 1
+
+    _persist_recovery_job(db_path, mapper_failure(second["job"]))
+    third = claim()
+
+    assert third["ok"] is True
+    assert third["claimed"] is True
+    assert third["job"]["internal_job_id"] == JOB_ID
+    assert third["job"]["auto_multi_recovery_attempt_count"] == 3
+    assert third["job"]["auto_multi_recovery_correction_attempt_count"] == 2
+    assert third["job"]["auto_multi_recovery_crosswalk_correction_used"] is True
+
+    _persist_recovery_job(db_path, mapper_failure(third["job"]))
+    fourth = claim()
+    assert fourth["ok"] is False
+    assert fourth["reason"] == "recovery_already_used"
 
 
 def test_failed_auto_multi_legacy_observability_gap_needs_literal_and_wins_once(
